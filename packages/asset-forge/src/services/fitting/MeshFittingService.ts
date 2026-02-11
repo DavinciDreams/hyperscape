@@ -5,6 +5,7 @@ import {
   Vector3,
   Mesh,
   Box3,
+  Ray,
   Raycaster,
   BoxGeometry,
   Triangle,
@@ -13,6 +14,8 @@ import {
   Bone,
   SkinnedMesh,
 } from "three";
+import { MeshBVH } from "three-mesh-bvh";
+import type { HitPointInfo } from "three-mesh-bvh";
 
 export interface MeshFittingParameters {
   iterations: number;
@@ -22,11 +25,20 @@ export interface MeshFittingParameters {
   targetOffset: number; // Distance to maintain from target surface
   sampleRate?: number; // What percentage of vertices to process per iteration (0-1)
   targetBounds?: Box3; // Optional bounding box to constrain fitting region
+  constraintCenter?: Vector3; // Center of constraint region (e.g. torso center) for normal orientation
   preserveFeatures?: boolean; // Whether to preserve sharp features during smoothing
   featureAngleThreshold?: number; // Angle threshold in degrees for feature detection (default: 30)
   useImprovedShrinkwrap?: boolean; // Use improved algorithm that prevents bunching
   preserveOpenings?: boolean; // Whether to preserve openings during edge detection
   pushInteriorVertices?: boolean; // Whether to push interior vertices out
+
+  // BVH-based fitting parameters
+  useBVH?: boolean; // Enable BVH nearest-point projection (default: true for complex meshes)
+  relativeOffset?: boolean; // Scale offsets by body dimensions (default: true)
+  relativeOffsetPercent?: number; // Offset as % of body width (default: 0.02 = 2%)
+  laplacianSmoothing?: boolean; // Topology-aware smoothing (default: false)
+  laplacianStrength?: number; // 0-1 (default: 0.3)
+  laplacianIterations?: number; // (default: 2)
 
   // Progress callback
   onProgress?: (progress: number, message?: string) => void;
@@ -47,6 +59,8 @@ export class MeshFittingService {
     vertices: Float32Array;
     sidedness: string[];
   } | null = null;
+  private targetBVH: MeshBVH | null = null;
+  private targetBVHGeometry: BufferGeometry | null = null;
 
   /**
    * Set the debug arrow group for visualization
@@ -179,6 +193,150 @@ export class MeshFittingService {
     }
 
     console.log(`Created ${this.debugArrowGroup.children.length} debug arrows`);
+  }
+
+  /**
+   * Build or retrieve a cached BVH for the target mesh geometry.
+   * Ensures the geometry has an index and computed normals.
+   */
+  private buildTargetBVH(targetMesh: Mesh): MeshBVH {
+    const geometry = targetMesh.geometry as BufferGeometry;
+
+    // Return cached BVH if geometry hasn't changed
+    if (this.targetBVH && this.targetBVHGeometry === geometry) {
+      return this.targetBVH;
+    }
+
+    // Ensure geometry has an index buffer (required for BVH)
+    if (!geometry.index) {
+      const posAttr = geometry.attributes.position as BufferAttribute;
+      const indices = [];
+      for (let i = 0; i < posAttr.count; i++) {
+        indices.push(i);
+      }
+      geometry.setIndex(indices);
+    }
+
+    // Ensure geometry has computed normals
+    if (!geometry.attributes.normal) {
+      geometry.computeVertexNormals();
+    }
+
+    console.log(
+      `Building BVH for target mesh (${geometry.attributes.position.count} vertices, ${geometry.index!.count / 3} triangles)`,
+    );
+
+    this.targetBVH = new MeshBVH(geometry);
+    this.targetBVHGeometry = geometry;
+
+    return this.targetBVH;
+  }
+
+  /**
+   * Compute smooth barycentric-interpolated vertex normal at a point on a triangle.
+   * Uses Triangle.getBarycoord() and vertex normal interpolation to produce
+   * smooth normals instead of flat face normals.
+   */
+  private getInterpolatedNormalAtPoint(
+    geometry: BufferGeometry,
+    faceIndex: number,
+    hitPoint: Vector3,
+  ): Vector3 {
+    const index = geometry.index;
+    const normalAttr = geometry.attributes.normal as BufferAttribute;
+
+    if (!index || !normalAttr) {
+      // Fallback to face normal if no index or normals available
+      const posAttr = geometry.attributes.position as BufferAttribute;
+      const i0 = faceIndex * 3;
+      const a = new Vector3().fromBufferAttribute(posAttr, i0);
+      const b = new Vector3().fromBufferAttribute(posAttr, i0 + 1);
+      const c = new Vector3().fromBufferAttribute(posAttr, i0 + 2);
+      const edge1 = b.clone().sub(a);
+      const edge2 = c.clone().sub(a);
+      return edge1.cross(edge2).normalize();
+    }
+
+    const i0 = index.getX(faceIndex * 3);
+    const i1 = index.getX(faceIndex * 3 + 1);
+    const i2 = index.getX(faceIndex * 3 + 2);
+
+    const posAttr = geometry.attributes.position as BufferAttribute;
+    const a = new Vector3().fromBufferAttribute(posAttr, i0);
+    const b = new Vector3().fromBufferAttribute(posAttr, i1);
+    const c = new Vector3().fromBufferAttribute(posAttr, i2);
+
+    // Compute barycentric coordinates
+    const barycoord = new Vector3();
+    new Triangle(a, b, c).getBarycoord(hitPoint, barycoord);
+
+    // Interpolate vertex normals
+    const n0 = new Vector3().fromBufferAttribute(normalAttr, i0);
+    const n1 = new Vector3().fromBufferAttribute(normalAttr, i1);
+    const n2 = new Vector3().fromBufferAttribute(normalAttr, i2);
+
+    const interpolated = new Vector3()
+      .addScaledVector(n0, barycoord.x)
+      .addScaledVector(n1, barycoord.y)
+      .addScaledVector(n2, barycoord.z);
+
+    return interpolated.normalize();
+  }
+
+  /**
+   * Apply Laplacian regularization to displacements.
+   * Blends each vertex's displacement toward the average of its mesh-connected neighbors.
+   * Prevents vertex bunching and triangle inversion.
+   */
+  private applyLaplacianRegularization(
+    displacements: Float32Array,
+    hasDisplacement: boolean[],
+    vertexCount: number,
+    neighborMap: Map<number, Set<number>>,
+    strength: number,
+    iterations: number,
+    lockedVertices: Set<number>,
+  ): void {
+    for (let iter = 0; iter < iterations; iter++) {
+      const smoothed = new Float32Array(displacements);
+
+      for (let i = 0; i < vertexCount; i++) {
+        if (!hasDisplacement[i] || lockedVertices.has(i)) continue;
+
+        const neighbors = neighborMap.get(i);
+        if (!neighbors || neighbors.size === 0) continue;
+
+        // Compute average of neighbor displacements
+        let avgX = 0;
+        let avgY = 0;
+        let avgZ = 0;
+        let count = 0;
+
+        for (const ni of neighbors) {
+          if (!hasDisplacement[ni]) continue;
+          avgX += displacements[ni * 3];
+          avgY += displacements[ni * 3 + 1];
+          avgZ += displacements[ni * 3 + 2];
+          count++;
+        }
+
+        if (count === 0) continue;
+
+        avgX /= count;
+        avgY /= count;
+        avgZ /= count;
+
+        // Blend toward neighbor average
+        smoothed[i * 3] =
+          displacements[i * 3] * (1 - strength) + avgX * strength;
+        smoothed[i * 3 + 1] =
+          displacements[i * 3 + 1] * (1 - strength) + avgY * strength;
+        smoothed[i * 3 + 2] =
+          displacements[i * 3 + 2] * (1 - strength) + avgZ * strength;
+      }
+
+      displacements.set(smoothed);
+    }
   }
 
   /**
@@ -477,15 +635,18 @@ export class MeshFittingService {
   /**
    * Perform iterative fitting of source mesh to target mesh
    */
-  fitMeshToTarget(
+  async fitMeshToTarget(
     sourceMesh: Mesh,
     targetMesh: Mesh,
     parameters: MeshFittingParameters,
-  ): void {
+  ): Promise<void> {
     console.log("🎯 GenericMeshFittingService: Starting iterative fitting");
     console.log("Source mesh:", sourceMesh);
     console.log("Target mesh:", targetMesh);
     console.log("Parameters:", parameters);
+
+    // Phase-aware progress: 0-10% prep, 10-85% iterations, 85-95% post-iteration, 95-100% finalization
+    parameters.onProgress?.(1, "Analyzing meshes...");
 
     // Warn about performance with SkinnedMesh targets
     if (targetMesh instanceof THREE.SkinnedMesh) {
@@ -553,6 +714,8 @@ export class MeshFittingService {
         );
       }
     }
+
+    parameters.onProgress?.(3, "Computing bounds...");
 
     // Get target bounds and center
     const targetBounds = new Box3().setFromObject(targetMesh);
@@ -696,10 +859,22 @@ export class MeshFittingService {
       vertexSidedness = this.classifyVertices(sourceMesh);
     }
 
+    parameters.onProgress?.(5, "Detecting arm holes...");
+
     // Detect arm holes for armor fitting
     let armHoleVertices = new Set<number>();
     if (isArmorFitting) {
       armHoleVertices = this.detectArmHoles(sourceMesh);
+    }
+
+    // Pre-compute arm filter bounds once (used in inner loop for armor fitting)
+    let armFilterBounds: Box3 | null = null;
+    if (constraintBounds && isArmorFitting) {
+      armFilterBounds = constraintBounds.clone();
+      const cSize = constraintBounds.getSize(new Vector3());
+      armFilterBounds.expandByVector(
+        new Vector3(cSize.x * 0.15, cSize.y * 0.3, cSize.z * 0.3),
+      );
     }
 
     // Calculate max deformation limit
@@ -712,18 +887,76 @@ export class MeshFittingService {
     // Get source mesh bounds for shoulder detection
     const sourceBounds = new Box3().setFromObject(sourceMesh);
 
-    // Process ALL vertices each iteration for consistent results
-    for (let iter = 0; iter < parameters.iterations; iter++) {
-      console.log(`\n🎯 Iteration ${iter + 1}/${parameters.iterations}`);
+    // BVH-based fitting setup
+    const useBVH = parameters.useBVH !== false; // Default true
+    const useRelativeOffset = parameters.relativeOffset !== false; // Default true
+    const relativeOffsetPercent = parameters.relativeOffsetPercent ?? 0.02; // 2% of body width
+    let targetBVH: MeshBVH | null = null;
 
-      // Report progress
-      if (parameters.onProgress) {
-        const progress = (iter / parameters.iterations) * 100;
-        parameters.onProgress(
-          progress,
-          `Fitting iteration ${iter + 1} of ${parameters.iterations}`,
+    if (useBVH && !isSphere && !isBox) {
+      try {
+        targetBVH = this.buildTargetBVH(targetMesh);
+        console.log("BVH built successfully for target mesh");
+      } catch (e) {
+        console.warn("Failed to build BVH, falling back to raycasting:", e);
+      }
+    }
+
+    parameters.onProgress?.(8, "Building acceleration structures...");
+
+    // Compute body-relative offset reference dimension
+    const bodySize = targetBounds.getSize(new Vector3());
+    const bodyRefDimension = Math.min(bodySize.x, bodySize.z); // smallest horizontal axis
+    const effectiveOffset = useRelativeOffset
+      ? bodyRefDimension * relativeOffsetPercent
+      : parameters.targetOffset;
+
+    if (useRelativeOffset) {
+      console.log(
+        `Using relative offset: ${(relativeOffsetPercent * 100).toFixed(1)}% of body width (${bodyRefDimension.toFixed(3)}m) = ${effectiveOffset.toFixed(4)}m`,
+      );
+    }
+
+    // Hoist matrix inversions outside the iteration loop (were per-vertex before)
+    const inverseTargetMatrix = targetMesh.matrixWorld.clone().invert();
+    const inverseSourceRotation = sourceMesh.matrixWorld.clone();
+    inverseSourceRotation.setPosition(0, 0, 0);
+    inverseSourceRotation.invert();
+
+    // Store original armor normals in world space BEFORE fitting modifies geometry.
+    // These are the projection directions for vertex-normal projection.
+    let armorWorldNormals: Float32Array | null = null;
+    if (isArmorFitting) {
+      const normals = sourceGeometry.attributes.normal as BufferAttribute;
+      if (normals) {
+        armorWorldNormals = new Float32Array(vertexCount * 3);
+        const n = new Vector3();
+        for (let i = 0; i < vertexCount; i++) {
+          n.set(normals.getX(i), normals.getY(i), normals.getZ(i));
+          n.transformDirection(sourceMesh.matrixWorld).normalize();
+          armorWorldNormals[i * 3] = n.x;
+          armorWorldNormals[i * 3 + 1] = n.y;
+          armorWorldNormals[i * 3 + 2] = n.z;
+        }
+        console.log(
+          "Stored original armor world normals for projection fitting",
         );
       }
+    }
+
+    parameters.onProgress?.(10, "Starting fitting iterations...");
+
+    // Process ALL vertices each iteration for consistent results
+    for (let iter = 0; iter < parameters.iterations; iter++) {
+      console.log(`Fitting iteration ${iter + 1}/${parameters.iterations}`);
+
+      // Report progress with phase-aware budgeting: iterations span 10-85%
+      const iterBase = 10 + (iter / parameters.iterations) * 75;
+      parameters.onProgress?.(
+        iterBase,
+        `Iteration ${iter + 1}/${parameters.iterations}`,
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
       let movedVertices = 0;
       let maxMovement = 0;
@@ -733,7 +966,21 @@ export class MeshFittingService {
       const hasDisplacement = new Array(vertexCount).fill(false);
 
       // First pass: Calculate desired displacements for all vertices
+      const iterProgressRange = 75 / parameters.iterations; // per-iteration share of 10-85%
       for (let vertexIndex = 0; vertexIndex < vertexCount; vertexIndex++) {
+        // Yield to browser every 500 vertices to prevent "page unresponsive"
+        if (vertexIndex % 500 === 0 && vertexIndex > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          // Report per-vertex progress every 1000 vertices
+          if (vertexIndex % 1000 === 0) {
+            const vertexProgress =
+              iterBase + (vertexIndex / vertexCount) * iterProgressRange;
+            parameters.onProgress?.(
+              vertexProgress,
+              `Iteration ${iter + 1}/${parameters.iterations}: vertex ${vertexIndex}/${vertexCount}`,
+            );
+          }
+        }
         const vertex = new Vector3(
           position.getX(vertexIndex),
           position.getY(vertexIndex),
@@ -763,14 +1010,13 @@ export class MeshFittingService {
           // Only skip if vertex is WAY outside the bounds (more than 5x the bounds size for armor)
           const boundsSize = constraintBounds.getSize(new Vector3());
           const expandedBounds = constraintBounds.clone();
-          expandedBounds.expandByVector(boundsSize.clone().multiplyScalar(4)); // 5x the original size
+          expandedBounds.expandByVector(boundsSize.clone().multiplyScalar(0.5)); // 2x the original size
 
           if (!expandedBounds.containsPoint(vertex)) {
             // Vertex is way outside target region - skip it
-            if (vertexIndex % 100 === 0) {
-              // Only log every 100th vertex to reduce spam
+            if (vertexIndex % 2000 === 0) {
               console.log(
-                `Skipping vertex far outside bounds: ${vertex.x}, ${vertex.y}, ${vertex.z}`,
+                `Skipping vertex far outside bounds: ${vertex.x.toFixed(2)}, ${vertex.y.toFixed(2)}, ${vertex.z.toFixed(2)}`,
               );
             }
             continue;
@@ -882,121 +1128,219 @@ export class MeshFittingService {
             }
           }
 
-          // Original approach for non-box meshes
+          // BVH-accelerated projection (primary path)
+          if (!found && targetBVH) {
+            const targetGeometry = targetMesh.geometry as BufferGeometry;
+
+            // PRIMARY: Vertex-normal projection for armor fitting
+            // Each armor vertex casts a ray along its original normal toward the body.
+            // This naturally avoids arm wrapping since shoulder vertices miss arms entirely.
+            if (isArmorFitting && armorWorldNormals) {
+              const armorNormal = new Vector3(
+                armorWorldNormals[vertexIndex * 3],
+                armorWorldNormals[vertexIndex * 3 + 1],
+                armorWorldNormals[vertexIndex * 3 + 2],
+              );
+
+              const localOrigin = vertex
+                .clone()
+                .applyMatrix4(inverseTargetMatrix);
+
+              // Try inverted normal first (inward toward body — works when armor is outside body)
+              const localDirInward = armorNormal
+                .clone()
+                .negate()
+                .transformDirection(inverseTargetMatrix)
+                .normalize();
+
+              let ray = new Ray(localOrigin, localDirInward);
+              let hit = targetBVH.raycastFirst(ray, THREE.DoubleSide);
+
+              // If inward ray missed, try outward (vertex may be inside the body)
+              if (!hit || hit.faceIndex == null) {
+                const localDirOutward = armorNormal
+                  .clone()
+                  .transformDirection(inverseTargetMatrix)
+                  .normalize();
+                ray = new Ray(localOrigin, localDirOutward);
+                hit = targetBVH.raycastFirst(ray, THREE.DoubleSide);
+              }
+
+              if (hit && hit.faceIndex != null) {
+                const localNormal = this.getInterpolatedNormalAtPoint(
+                  targetGeometry,
+                  hit.faceIndex,
+                  hit.point,
+                );
+
+                targetPoint = hit.point
+                  .clone()
+                  .applyMatrix4(targetMesh.matrixWorld);
+                const bodyNormal = localNormal
+                  .clone()
+                  .transformDirection(targetMesh.matrixWorld)
+                  .normalize();
+
+                // Ensure body normal points outward
+                const refCenter = parameters.constraintCenter || targetCenter;
+                if (
+                  bodyNormal.dot(
+                    refCenter.clone().sub(targetPoint).normalize(),
+                  ) > 0
+                ) {
+                  bodyNormal.negate();
+                }
+
+                // Blend: 60% armor shape preservation, 40% body conformance
+                targetNormal = bodyNormal
+                  .clone()
+                  .lerp(armorNormal, 0.6)
+                  .normalize();
+                found = true;
+
+                // Debug logging for first few vertices
+                if (vertexIndex < 10 && iter === 0) {
+                  console.log(
+                    `Projection vertex ${vertexIndex}: dist=${hit.distance.toFixed(4)}, face=${hit.faceIndex}`,
+                  );
+                }
+              }
+            }
+
+            // FALLBACK: BVH nearest-surface-point (for non-armor or when ray misses)
+            if (!found) {
+              const localVertex = vertex
+                .clone()
+                .applyMatrix4(inverseTargetMatrix);
+              const bvhResult: HitPointInfo = {
+                point: new Vector3(),
+                distance: 0,
+                faceIndex: 0,
+              };
+              const hit = targetBVH.closestPointToPoint(localVertex, bvhResult);
+
+              if (hit) {
+                const localNormal = this.getInterpolatedNormalAtPoint(
+                  targetGeometry,
+                  hit.faceIndex,
+                  hit.point,
+                );
+                targetPoint = hit.point
+                  .clone()
+                  .applyMatrix4(targetMesh.matrixWorld);
+                targetNormal = localNormal
+                  .clone()
+                  .transformDirection(targetMesh.matrixWorld)
+                  .normalize();
+
+                const refCenter = parameters.constraintCenter || targetCenter;
+                if (
+                  targetNormal.dot(
+                    refCenter.clone().sub(targetPoint).normalize(),
+                  ) > 0
+                ) {
+                  targetNormal.negate();
+                }
+
+                // Arm filter: clamp nearest-point results into torso bounds (fallback only)
+                if (armFilterBounds && targetPoint) {
+                  if (!armFilterBounds.containsPoint(targetPoint)) {
+                    targetPoint.clamp(armFilterBounds.min, armFilterBounds.max);
+                  }
+                }
+
+                found = true;
+
+                // Debug logging for first few vertices
+                if (vertexIndex < 10 && iter === 0) {
+                  console.log(
+                    `BVH fallback vertex ${vertexIndex}: dist=${hit.distance.toFixed(4)}, face=${hit.faceIndex}`,
+                  );
+                }
+              }
+            }
+          }
+
+          // Fallback: original raycast-based approach for non-BVH path
+          if (!found && isArmorFitting) {
+            // For armor fitting, normal-projection + BVH closestPoint both missed.
+            // The vertex is far from the body surface — skip it rather than
+            // spending time on expensive non-BVH raycasts.
+            continue;
+          }
           if (!found) {
             // First, determine if we're inside or outside the target mesh
             const isInside = this.isPointInsideMesh(vertex, targetMesh);
 
-            // NEW: For armor fitting, use directional awareness
-            const isArmorFitting =
+            // For armor fitting, use directional awareness
+            const isArmorFittingLocal =
               sourceMesh.userData.originalGeometry &&
               targetMesh instanceof THREE.SkinnedMesh &&
               vertexCount > 1000;
 
-            if (isArmorFitting && vertexSidedness.length > 0) {
-              // Get the vertex sidedness
+            if (isArmorFittingLocal && vertexSidedness.length > 0) {
               const sidedness = vertexSidedness[vertexIndex] || "unknown";
-
-              // Calculate relative height for various adjustments
               const relativeY =
                 (vertex.y - sourceBounds.min.y) /
                 (sourceBounds.max.y - sourceBounds.min.y);
 
-              // Determine ray direction based on vertex classification
               let rayDirection = new Vector3();
 
-              // Define directions in LOCAL space (assuming Z+ is forward)
               if (sidedness === "back") {
-                // Back vertices should ray cast backward in local space
                 rayDirection.set(0, 0, -1);
-
-                // For lower back vertices, angle the ray slightly downward
                 if (relativeY < 0.4) {
-                  // Lower 40% of armor
-                  // Angle 15-30 degrees downward based on how low the vertex is
-                  const downAngle = (0.4 - relativeY) * 0.5; // 0 to 0.2 radians
+                  const downAngle = (0.4 - relativeY) * 0.5;
                   rayDirection.y = -Math.sin(downAngle);
                   rayDirection.z = -Math.cos(downAngle);
                   rayDirection.normalize();
                 }
               } else if (sidedness === "front") {
-                // Front vertices should ray cast forward in local space
                 rayDirection.set(0, 0, 1);
               } else if (sidedness === "left") {
-                // Left vertices should ray cast left in local space
                 rayDirection.set(-1, 0, 0);
               } else if (sidedness === "right") {
-                // Right vertices should ray cast right in local space
                 rayDirection.set(1, 0, 0);
               } else {
-                // Fallback to center-based approach
                 rayDirection = targetCenter.clone().sub(vertex).normalize();
               }
 
-              // Transform the local direction to world space
-              // Only transform the direction vector, not the position
               const worldMatrix = sourceMesh.matrixWorld.clone();
-              worldMatrix.setPosition(0, 0, 0); // Remove translation component
+              worldMatrix.setPosition(0, 0, 0);
               rayDirection.transformDirection(worldMatrix);
               rayDirection.normalize();
 
-              // Blend with center direction for smoother results
               const toCenterDir = targetCenter.clone().sub(vertex).normalize();
-
-              // Use different blend factors based on vertex type
-              let blendFactor = 0.3; // Default 30% center direction
+              let blendFactor = 0.3;
 
               if (sidedness === "back") {
-                // Back vertices need stronger directional movement, but graduated by height
-                if (relativeY < 0.3) {
-                  // Lower back needs strong backward movement
-                  if (relativeY < 0.2) {
-                    // Very low (buttocks area) needs almost pure directional movement
-                    blendFactor = 0.05; // Only 5% center, 95% backward
-                  } else {
-                    blendFactor = 0.1; // Only 10% center, 90% backward
-                  }
+                if (relativeY < 0.2) {
+                  blendFactor = 0.05;
+                } else if (relativeY < 0.3) {
+                  blendFactor = 0.1;
                 } else if (relativeY < 0.5) {
-                  // Mid back
-                  blendFactor = 0.2; // 20% center, 80% backward
-                } else {
-                  // Upper back - more conservative
-                  blendFactor = 0.3; // 30% center, 70% backward
+                  blendFactor = 0.2;
                 }
-              } else if (sidedness === "left" || sidedness === "right") {
-                // Side vertices should have minimal sideways movement
-                // Check if this is a shoulder region (upper part of armor)
-                if (relativeY > 0.6) {
-                  // Upper 40% of armor
-                  // Shoulder region - use mostly center direction to prevent stretching
-                  blendFactor = 0.7; // 70% center to prevent sideways stretch
-                }
+              } else if (
+                (sidedness === "left" || sidedness === "right") &&
+                relativeY > 0.6
+              ) {
+                blendFactor = 0.7;
               }
 
               rayDirection.lerp(toCenterDir, blendFactor);
               rayDirection.normalize();
 
-              // Debug logging for first few vertices
-              if (vertexIndex < 20 && iter === 0) {
-                console.log(
-                  `Vertex ${vertexIndex} (${sidedness}): blended ray direction`,
-                  rayDirection,
-                );
-              }
-
-              // Cast ray in the appropriate direction
               this.raycaster.set(vertex, rayDirection);
               let intersections = this.raycaster.intersectObject(
                 targetMesh,
                 false,
               );
 
-              // If no hit, try a cone of directions around the primary direction
               if (intersections.length === 0) {
                 const attempts = [
                   rayDirection
                     .clone()
-                    .applyAxisAngle(new Vector3(0, 1, 0), 0.2), // Slight rotation
+                    .applyAxisAngle(new Vector3(0, 1, 0), 0.2),
                   rayDirection
                     .clone()
                     .applyAxisAngle(new Vector3(0, 1, 0), -0.2),
@@ -1006,15 +1350,14 @@ export class MeshFittingService {
                   rayDirection
                     .clone()
                     .applyAxisAngle(new Vector3(1, 0, 0), -0.2),
-                  toCenterDir, // Fallback to pure center direction
+                  toCenterDir,
                 ];
 
-                // For lower back vertices, add more aggressive downward angles
                 if (sidedness === "back" && relativeY < 0.3) {
                   attempts.unshift(
                     rayDirection
                       .clone()
-                      .applyAxisAngle(new Vector3(1, 0, 0), 0.4), // More downward
+                      .applyAxisAngle(new Vector3(1, 0, 0), 0.4),
                     rayDirection
                       .clone()
                       .applyAxisAngle(new Vector3(1, 0, 0), -0.4),
@@ -1032,12 +1375,10 @@ export class MeshFittingService {
               }
 
               if (intersections.length > 0) {
-                // Filter by constraint bounds if provided
                 if (constraintBounds) {
                   const validIntersections = intersections.filter((hit) =>
                     constraintBounds.containsPoint(hit.point),
                   );
-
                   if (validIntersections.length > 0) {
                     targetPoint = validIntersections[0].point;
                     targetNormal = validIntersections[0].face!.normal.clone();
@@ -1053,29 +1394,24 @@ export class MeshFittingService {
               }
             }
 
-            // Approach 1: Cast ray toward center (only if we're outside)
+            // Cast ray toward center (only if we're outside)
             if (!found && !isInside) {
-              // If we have constraint bounds, use the constraint center instead
               const rayTarget = constraintBounds
-                ? new Vector3().lerpVectors(vertex, targetCenter, 0.5) // Blend between vertex and center
+                ? new Vector3().lerpVectors(vertex, targetCenter, 0.5)
                 : targetCenter;
               const toTarget = rayTarget.clone().sub(vertex).normalize();
               this.raycaster.set(vertex, toTarget);
-              let intersections = this.raycaster.intersectObject(
+              const intersections = this.raycaster.intersectObject(
                 targetMesh,
                 false,
               );
 
               if (intersections.length > 0) {
-                // If constraint bounds provided, ONLY consider intersections within bounds
                 if (constraintBounds) {
-                  // Filter to only intersections within the constraint bounds
                   const validIntersections = intersections.filter((hit) =>
                     constraintBounds.containsPoint(hit.point),
                   );
-
                   if (validIntersections.length > 0) {
-                    // Use the closest valid intersection
                     targetPoint = validIntersections[0].point;
                     targetNormal = validIntersections[0].face!.normal.clone();
                     targetNormal.transformDirection(targetMesh.matrixWorld);
@@ -1090,16 +1426,15 @@ export class MeshFittingService {
               }
             }
 
-            // Approach 2: If inside, cast ray outward from center through vertex
+            // If inside, cast ray outward from center through vertex
             if (!found && isInside) {
               const fromCenter = vertex.clone().sub(targetCenter).normalize();
               this.raycaster.set(targetCenter, fromCenter);
-              let intersections = this.raycaster.intersectObject(
+              const intersections = this.raycaster.intersectObject(
                 targetMesh,
                 false,
               );
 
-              // Find intersection closest to our vertex
               let closestDist = Infinity;
               for (const hit of intersections) {
                 const dist = hit.point.distanceTo(vertex);
@@ -1109,8 +1444,6 @@ export class MeshFittingService {
                   targetNormal = hit.face!.normal.clone();
                   targetNormal.transformDirection(targetMesh.matrixWorld);
 
-                  // If we're inside, we want the normal pointing outward
-                  // Check if normal points toward center (it should point away)
                   const toCenter = targetCenter
                     .clone()
                     .sub(hit.point)
@@ -1123,26 +1456,23 @@ export class MeshFittingService {
               }
             }
 
-            // Approach 3: Cast ray from far outside inward
+            // Cast ray from far outside inward
             if (!found) {
               const toCenter = targetCenter.clone().sub(vertex).normalize();
               const farPoint = vertex
                 .clone()
                 .sub(toCenter.clone().multiplyScalar(targetSize.length() * 2));
               this.raycaster.set(farPoint, toCenter);
-              let intersections = this.raycaster.intersectObject(
+              const intersections = this.raycaster.intersectObject(
                 targetMesh,
                 false,
               );
 
               if (intersections.length > 0) {
-                // For a cube or convex shape, we want the FIRST intersection from outside
-                // This ensures we get the outer surface
                 targetPoint = intersections[0].point;
                 targetNormal = intersections[0].face!.normal.clone();
                 targetNormal.transformDirection(targetMesh.matrixWorld);
 
-                // Ensure normal points outward
                 const toCenter = targetCenter
                   .clone()
                   .sub(targetPoint)
@@ -1155,21 +1485,20 @@ export class MeshFittingService {
             }
           }
 
-          // Fallback approaches remain the same...
+          // Perpendicular direction fallback
           if (!found) {
-            // Approach 4: Try perpendicular directions
             const directions = [
-              new Vector3(0, -1, 0), // Down
-              new Vector3(0, 1, 0), // Up
-              new Vector3(1, 0, 0), // Right
-              new Vector3(-1, 0, 0), // Left
-              new Vector3(0, 0, 1), // Forward
-              new Vector3(0, 0, -1), // Back
+              new Vector3(0, -1, 0),
+              new Vector3(0, 1, 0),
+              new Vector3(1, 0, 0),
+              new Vector3(-1, 0, 0),
+              new Vector3(0, 0, 1),
+              new Vector3(0, 0, -1),
             ];
 
             for (const dir of directions) {
               this.raycaster.set(vertex, dir);
-              let intersections = this.raycaster.intersectObject(
+              const intersections = this.raycaster.intersectObject(
                 targetMesh,
                 false,
               );
@@ -1183,14 +1512,13 @@ export class MeshFittingService {
             }
           }
 
-          // Final fallback: use nearest point algorithm if available
+          // Final fallback: use nearest point algorithm
           if (!found) {
             const nearest = this.findNearestSurfacePoint(vertex, targetMesh);
             if (nearest) {
               targetPoint = nearest.point;
               targetNormal = nearest.normal;
             } else {
-              // Last resort: project to bounding box
               targetPoint = new Vector3();
               targetPoint.copy(vertex);
               targetPoint.clamp(targetBounds.min, targetBounds.max);
@@ -1206,15 +1534,26 @@ export class MeshFittingService {
           continue; // Skip this vertex if we couldn't find a target
         }
 
-        // Calculate desired position with offset
-        // For box targets, check if we're inside and adjust accordingly
+        // Calculate desired position with offset along the surface normal.
+        // With normal projection, offset direction already comes from the blended
+        // armor+body normal. Use uniform offset with mild regional variation.
+        let vertexOffset = effectiveOffset * 2.0; // Base: ~2x effective offset for visible standoff
+
+        if (!isBox && isArmorFitting && vertexSidedness.length > 0) {
+          const sidedness = vertexSidedness[vertexIndex] || "unknown";
+          if (sidedness === "back") {
+            vertexOffset = effectiveOffset * 2.5; // Slightly thicker back plate
+          } else if (sidedness === "front") {
+            vertexOffset = effectiveOffset * 1.5; // Snugger front
+          }
+          // sides: keep 2.0x base
+        }
+
         let offsetDirection = targetNormal.clone();
         if (isBox) {
-          // For boxes, ALWAYS apply positive offset to stay outside
-          // The normal should already be pointing outward
           offsetDirection.multiplyScalar(parameters.targetOffset);
         } else {
-          offsetDirection.multiplyScalar(parameters.targetOffset);
+          offsetDirection.multiplyScalar(vertexOffset);
         }
 
         const desiredPoint = targetPoint.clone().add(offsetDirection);
@@ -1255,47 +1594,12 @@ export class MeshFittingService {
         const displacement = desiredPoint.clone().sub(vertex);
         const moveDistance = displacement.length();
 
-        // Apply special constraints for armor fitting
-        if (isArmorFitting && vertexSidedness.length > 0) {
-          const sidedness = vertexSidedness[vertexIndex] || "unknown";
-          const relativeY =
-            (vertex.y - sourceBounds.min.y) /
-            (sourceBounds.max.y - sourceBounds.min.y);
-
-          // Shoulder region constraints
-          if (
-            relativeY > 0.6 &&
-            (sidedness === "left" || sidedness === "right")
-          ) {
-            // Limit sideways movement for shoulders
-            const maxShoulderMove = 0.015; // 1.5cm max per iteration
-            if (moveDistance > maxShoulderMove) {
-              displacement.normalize().multiplyScalar(maxShoulderMove);
-            }
-          }
-          // Back vertices - ensure stronger movement
-          else if (sidedness === "back") {
-            // Graduated minimum movement - more for lower back
-            let minBackMove = 0.02; // Default 2cm minimum
-
-            if (relativeY < 0.4) {
-              // Lower back needs more movement (buttocks area)
-              minBackMove = 0.04 + (0.4 - relativeY) * 0.05; // 4-6cm based on height
-            } else if (relativeY < 0.6) {
-              // Mid back
-              minBackMove = 0.03; // 3cm
-            }
-
-            if (moveDistance < minBackMove) {
-              // Ensure minimum backward movement
-              displacement.normalize().multiplyScalar(minBackMove);
-              if (vertexIndex % 50 === 0 && relativeY < 0.4) {
-                console.log(
-                  `Enforcing min movement for lower back vertex ${vertexIndex}: ${moveDistance.toFixed(3)}m -> ${minBackMove.toFixed(3)}m`,
-                );
-              }
-            }
-          }
+        // Safety: cap maximum displacement to prevent extreme deformation.
+        // With normal projection, shoulder/back constraints are no longer needed —
+        // vertices project along their own normals so arms can't wrap and back
+        // vertices naturally find the correct surface.
+        if (isArmorFitting && moveDistance > bodySize.y * 0.3) {
+          displacement.normalize().multiplyScalar(bodySize.y * 0.3);
         }
 
         // If we have constraint bounds, ensure the target point is within them
@@ -1334,49 +1638,12 @@ export class MeshFittingService {
             }
           }
 
-          // Recalculate displacement to clamped point
+          // Recalculate displacement to clamped point with mild offset
           finalDesiredPoint = targetPoint.clone();
           if (targetNormal) {
-            // Variable offset based on vertex type and position
-            let variableOffset = parameters.targetOffset;
-
-            if (isArmorFitting && vertexSidedness.length > 0) {
-              const sidedness = vertexSidedness[vertexIndex] || "unknown";
-              const relativeY =
-                (vertex.y - sourceBounds.min.y) /
-                (sourceBounds.max.y - sourceBounds.min.y);
-
-              if (sidedness === "back") {
-                // Larger offset for back vertices, especially lower back
-                if (relativeY < 0.3) {
-                  // Lower back needs significant offset for buttocks
-                  variableOffset = 0.06 + (0.3 - relativeY) * 0.04; // 6-10cm
-
-                  // Extra offset for very bottom vertices
-                  if (relativeY < 0.15) {
-                    variableOffset = 0.12; // 12cm for buttocks area
-                  }
-
-                  if (vertexIndex % 50 === 0) {
-                    console.log(
-                      `Lower back vertex ${vertexIndex}: Y=${relativeY.toFixed(2)}, offset=${variableOffset.toFixed(3)}m`,
-                    );
-                  }
-                } else if (relativeY < 0.5) {
-                  // Mid back
-                  variableOffset = 0.04; // 4cm
-                } else {
-                  // Upper back
-                  variableOffset = 0.03; // 3cm
-                }
-              } else if (sidedness === "front") {
-                // Smaller offset for front to prevent over-extension
-                variableOffset = 0.02; // 2cm only
-              }
-            }
-
+            // Use the same simplified offset as the main path
             finalDesiredPoint.add(
-              targetNormal.clone().multiplyScalar(variableOffset),
+              targetNormal.clone().multiplyScalar(vertexOffset),
             );
           }
           displacement.copy(finalDesiredPoint.clone().sub(vertex));
@@ -1403,7 +1670,7 @@ export class MeshFittingService {
             // Reduce movement for vertices near edges
             actualMoveDistance *= edgeInfluence;
 
-            if (vertexIndex % 100 === 0 && edgeInfluence < 1.0) {
+            if (vertexIndex % 2000 === 0 && edgeInfluence < 1.0) {
               console.log(
                 `Vertex ${vertexIndex}: Edge influence = ${edgeInfluence.toFixed(3)}`,
               );
@@ -1421,20 +1688,17 @@ export class MeshFittingService {
           // Apply deformation limit to prevent excessive mesh distortion
           if (displacement.length() > maxDeformation) {
             displacement.normalize().multiplyScalar(maxDeformation);
-            if (vertexIndex % 100 === 0) {
+            if (vertexIndex % 2000 === 0) {
               console.log(
                 `Vertex ${vertexIndex}: Limited deformation from ${actualMoveDistance.toFixed(3)} to ${maxDeformation.toFixed(3)}`,
               );
             }
           }
 
-          // Transform displacement to local space
-          const worldDisplacement = displacement.clone();
-          const inverseRotation = sourceMesh.matrixWorld.clone();
-          inverseRotation.setPosition(0, 0, 0); // Remove translation
-          const localDisplacement = worldDisplacement
+          // Transform displacement to local space (using pre-hoisted inverse rotation)
+          const localDisplacement = displacement
             .clone()
-            .applyMatrix4(inverseRotation.invert());
+            .applyMatrix4(inverseSourceRotation);
 
           // Store displacement
           displacements[vertexIndex * 3] = localDisplacement.x;
@@ -1503,6 +1767,21 @@ export class MeshFittingService {
         );
       }
 
+      // Optional Laplacian regularization for topology-aware smoothing
+      if (parameters.laplacianSmoothing && movedVertices > 0) {
+        console.log("   Applying Laplacian regularization...");
+        const neighborMap = this.buildNeighborMap(sourceGeometry);
+        this.applyLaplacianRegularization(
+          displacements,
+          hasDisplacement,
+          vertexCount,
+          neighborMap,
+          parameters.laplacianStrength ?? 0.3,
+          parameters.laplacianIterations ?? 2,
+          lockedVertices,
+        );
+      }
+
       // Apply smoothed displacements to update positions
       for (let i = 0; i < vertexCount; i++) {
         if (hasDisplacement[i]) {
@@ -1531,90 +1810,12 @@ export class MeshFittingService {
       );
     }
 
-    // Final correction pass for armor lower back vertices
-    if (isArmorFitting && vertexSidedness.length > 0) {
-      console.log("🎯 Applying final lower back correction pass...");
+    parameters.onProgress?.(86, "Post-processing...");
 
-      let correctedCount = 0;
-      const correctionDisplacements = new Float32Array(vertexCount * 3);
-
-      for (let i = 0; i < vertexCount; i++) {
-        const sidedness = vertexSidedness[i];
-        if (sidedness !== "back") continue;
-
-        // Get current vertex position
-        const vertex = new Vector3(
-          position.getX(i),
-          position.getY(i),
-          position.getZ(i),
-        );
-        vertex.applyMatrix4(sourceMesh.matrixWorld);
-
-        const relativeY =
-          (vertex.y - sourceBounds.min.y) /
-          (sourceBounds.max.y - sourceBounds.min.y);
-
-        // Only apply to very low back vertices (bottom 20%)
-        if (relativeY < 0.2) {
-          // Simple check: cast ray backward and see if we're too close
-          const backwardDir = new Vector3(0, 0, -1);
-          const worldMatrix = sourceMesh.matrixWorld.clone();
-          worldMatrix.setPosition(0, 0, 0);
-          backwardDir.transformDirection(worldMatrix);
-
-          this.raycaster.set(vertex, backwardDir);
-          const intersections = this.raycaster.intersectObject(
-            targetMesh,
-            false,
-          );
-
-          if (intersections.length > 0) {
-            const distance = intersections[0].distance;
-            // If we're less than 5cm from the body, push out
-            if (distance < 0.05) {
-              const pushDistance = 0.08 - distance; // Push to 8cm away
-              const displacement = backwardDir
-                .clone()
-                .negate()
-                .multiplyScalar(pushDistance);
-
-              // Transform to local space
-              const inverseRotation = sourceMesh.matrixWorld.clone();
-              inverseRotation.setPosition(0, 0, 0);
-              const localDisplacement = displacement
-                .clone()
-                .applyMatrix4(inverseRotation.invert());
-
-              correctionDisplacements[i * 3] = localDisplacement.x;
-              correctionDisplacements[i * 3 + 1] = localDisplacement.y;
-              correctionDisplacements[i * 3 + 2] = localDisplacement.z;
-
-              correctedCount++;
-            }
-          }
-        }
-      }
-
-      // Apply correction displacements
-      if (correctedCount > 0) {
-        console.log(`   Correcting ${correctedCount} lower back vertices`);
-
-        for (let i = 0; i < vertexCount; i++) {
-          const dispX = correctionDisplacements[i * 3];
-          const dispY = correctionDisplacements[i * 3 + 1];
-          const dispZ = correctionDisplacements[i * 3 + 2];
-
-          if (dispX !== 0 || dispY !== 0 || dispZ !== 0) {
-            position.setX(i, position.getX(i) + dispX);
-            position.setY(i, position.getY(i) + dispY);
-            position.setZ(i, position.getZ(i) + dispZ);
-          }
-        }
-
-        position.needsUpdate = true;
-        sourceGeometry.computeVertexNormals();
-      }
-    }
+    // Lower back correction pass removed — with vertex-normal projection,
+    // back vertices project forward along their own normals and receive proper
+    // offset. The correction pass was compensating for nearest-point pulling
+    // back vertices to wrong surfaces.
 
     // After main iterations, apply surface relaxation for box targets
     if (isBox && parameters.useImprovedShrinkwrap) {
@@ -1634,8 +1835,11 @@ export class MeshFittingService {
 
     // Push out any vertices that ended up inside the target mesh
     // This prevents armor from collapsing through the body
+    // Skip for armor fitting: vertex-normal projection doesn't push vertices inside,
+    // and the per-vertex inside-mesh check is extremely expensive (10 raycasts × O(n) per vertex).
     if (
       parameters.pushInteriorVertices &&
+      !isArmorFitting &&
       (targetMesh instanceof THREE.SkinnedMesh || vertexCount > 1000)
     ) {
       if (preIterationPositions) {
@@ -1671,44 +1875,46 @@ export class MeshFittingService {
       }
     }
 
+    parameters.onProgress?.(92, "Clamping to bounds...");
+
     // Final step: If we have constraint bounds, clamp all vertices to stay within
     if (parameters.targetBounds) {
       console.log(
         "🎯 GenericMeshFittingService: Final clamping to constraint bounds",
       );
       const positions = position.array as Float32Array;
+      const inverseMatrix = sourceMesh.matrixWorld.clone().invert();
+      const vertex = new Vector3();
+      const clamped = new Vector3();
 
       for (let i = 0; i < vertexCount; i++) {
-        const vertex = new Vector3(
+        if (i % 500 === 0 && i > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+
+        vertex.set(
           positions[i * 3],
           positions[i * 3 + 1],
           positions[i * 3 + 2],
         );
-
-        // Transform to world space
         vertex.applyMatrix4(sourceMesh.matrixWorld);
 
-        // Clamp to bounds
-        const clampedVertex = vertex.clone();
-        clampedVertex.clamp(
-          parameters.targetBounds.min,
-          parameters.targetBounds.max,
-        );
+        clamped
+          .copy(vertex)
+          .clamp(parameters.targetBounds.min, parameters.targetBounds.max);
 
-        // If vertex was outside bounds, move it back
-        if (!vertex.equals(clampedVertex)) {
-          // Transform back to local space
-          const inverseMatrix = sourceMesh.matrixWorld.clone().invert();
-          clampedVertex.applyMatrix4(inverseMatrix);
-
-          positions[i * 3] = clampedVertex.x;
-          positions[i * 3 + 1] = clampedVertex.y;
-          positions[i * 3 + 2] = clampedVertex.z;
+        if (!vertex.equals(clamped)) {
+          clamped.applyMatrix4(inverseMatrix);
+          positions[i * 3] = clamped.x;
+          positions[i * 3 + 1] = clamped.y;
+          positions[i * 3 + 2] = clamped.z;
         }
       }
 
       position.needsUpdate = true;
     }
+
+    parameters.onProgress?.(98, "Finalizing...");
 
     // Final validation
     const finalBounds = new Box3().setFromBufferAttribute(position);
@@ -1730,75 +1936,45 @@ export class MeshFittingService {
       // Get world bounds of the target box
       const worldBox = new Box3().setFromObject(targetMesh);
 
+      const boxInverseMatrix = sourceMesh.matrixWorld.clone().invert();
+      const boxVertex = new Vector3();
+
       for (let i = 0; i < vertexCount; i++) {
-        const vertex = new Vector3(
-          position.getX(i),
-          position.getY(i),
-          position.getZ(i),
-        );
+        if (i % 500 === 0 && i > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
 
-        // Transform to world space
-        vertex.applyMatrix4(sourceMesh.matrixWorld);
+        boxVertex.set(position.getX(i), position.getY(i), position.getZ(i));
+        boxVertex.applyMatrix4(sourceMesh.matrixWorld);
 
-        if (worldBox.containsPoint(vertex)) {
+        if (worldBox.containsPoint(boxVertex)) {
           insideCount++;
 
-          // Fix it by pushing it to the nearest face
-          const distances = [
-            {
-              axis: "x",
-              dist: Math.abs(vertex.x - worldBox.min.x),
-              value: worldBox.min.x - parameters.targetOffset,
-              dir: -1,
-            },
-            {
-              axis: "x",
-              dist: Math.abs(vertex.x - worldBox.max.x),
-              value: worldBox.max.x + parameters.targetOffset,
-              dir: 1,
-            },
-            {
-              axis: "y",
-              dist: Math.abs(vertex.y - worldBox.min.y),
-              value: worldBox.min.y - parameters.targetOffset,
-              dir: -1,
-            },
-            {
-              axis: "y",
-              dist: Math.abs(vertex.y - worldBox.max.y),
-              value: worldBox.max.y + parameters.targetOffset,
-              dir: 1,
-            },
-            {
-              axis: "z",
-              dist: Math.abs(vertex.z - worldBox.min.z),
-              value: worldBox.min.z - parameters.targetOffset,
-              dir: -1,
-            },
-            {
-              axis: "z",
-              dist: Math.abs(vertex.z - worldBox.max.z),
-              value: worldBox.max.z + parameters.targetOffset,
-              dir: 1,
-            },
-          ];
+          // Find closest face and push vertex to it
+          const dxMin = Math.abs(boxVertex.x - worldBox.min.x);
+          const dxMax = Math.abs(boxVertex.x - worldBox.max.x);
+          const dyMin = Math.abs(boxVertex.y - worldBox.min.y);
+          const dyMax = Math.abs(boxVertex.y - worldBox.max.y);
+          const dzMin = Math.abs(boxVertex.z - worldBox.min.z);
+          const dzMax = Math.abs(boxVertex.z - worldBox.max.z);
 
-          // Find closest face
-          distances.sort((a, b) => a.dist - b.dist);
-          const closest = distances[0];
+          const minDist = Math.min(dxMin, dxMax, dyMin, dyMax, dzMin, dzMax);
+          if (minDist === dxMin)
+            boxVertex.x = worldBox.min.x - parameters.targetOffset;
+          else if (minDist === dxMax)
+            boxVertex.x = worldBox.max.x + parameters.targetOffset;
+          else if (minDist === dyMin)
+            boxVertex.y = worldBox.min.y - parameters.targetOffset;
+          else if (minDist === dyMax)
+            boxVertex.y = worldBox.max.y + parameters.targetOffset;
+          else if (minDist === dzMin)
+            boxVertex.z = worldBox.min.z - parameters.targetOffset;
+          else boxVertex.z = worldBox.max.z + parameters.targetOffset;
 
-          // Push vertex to that face
-          if (closest.axis === "x") vertex.x = closest.value;
-          else if (closest.axis === "y") vertex.y = closest.value;
-          else if (closest.axis === "z") vertex.z = closest.value;
-
-          // Transform back to local space
-          const inverseMatrix = sourceMesh.matrixWorld.clone().invert();
-          vertex.applyMatrix4(inverseMatrix);
-
-          position.setX(i, vertex.x);
-          position.setY(i, vertex.y);
-          position.setZ(i, vertex.z);
+          boxVertex.applyMatrix4(boxInverseMatrix);
+          position.setX(i, boxVertex.x);
+          position.setY(i, boxVertex.y);
+          position.setZ(i, boxVertex.z);
         }
       }
 
@@ -2437,16 +2613,44 @@ export class MeshFittingService {
     const position = geometry.attributes.position as BufferAttribute;
     const index = geometry.index;
 
-    let nearestPoint = new Vector3();
-    let nearestNormal = new Vector3();
-    let nearestDistance = Infinity;
-
     // Transform point to mesh local space
     const localPoint = point.clone();
     const inverseMatrix = targetMesh.matrixWorld.clone().invert();
     localPoint.applyMatrix4(inverseMatrix);
 
-    // Check each triangle
+    // Try BVH-accelerated path first (O(log n))
+    if (this.targetBVH && this.targetBVHGeometry === geometry) {
+      const bvhResult: HitPointInfo = {
+        point: new Vector3(),
+        distance: 0,
+        faceIndex: 0,
+      };
+      const hit = this.targetBVH.closestPointToPoint(localPoint, bvhResult);
+
+      if (hit) {
+        const localNormal = this.getInterpolatedNormalAtPoint(
+          geometry,
+          hit.faceIndex,
+          hit.point,
+        );
+
+        const worldPoint = hit.point
+          .clone()
+          .applyMatrix4(targetMesh.matrixWorld);
+        const worldNormal = localNormal
+          .clone()
+          .transformDirection(targetMesh.matrixWorld)
+          .normalize();
+
+        return { point: worldPoint, normal: worldNormal };
+      }
+    }
+
+    // Brute-force fallback for non-indexed or non-BVH geometry (O(n))
+    let nearestPoint = new Vector3();
+    let nearestNormal = new Vector3();
+    let nearestDistance = Infinity;
+
     if (index) {
       for (let i = 0; i < index.count; i += 3) {
         const a = new Vector3().fromBufferAttribute(position, index.array[i]);
@@ -2459,7 +2663,6 @@ export class MeshFittingService {
           index.array[i + 2],
         );
 
-        // Find closest point on triangle
         const closestPoint = new Vector3();
         this.closestPointOnTriangle(localPoint, a, b, c, closestPoint);
 
@@ -2468,7 +2671,6 @@ export class MeshFittingService {
           nearestDistance = distance;
           nearestPoint = closestPoint;
 
-          // Calculate normal
           const edge1 = b.clone().sub(a);
           const edge2 = c.clone().sub(a);
           nearestNormal = edge1.cross(edge2).normalize();
@@ -2477,7 +2679,6 @@ export class MeshFittingService {
     }
 
     if (nearestDistance < Infinity) {
-      // Transform back to world space
       nearestPoint.applyMatrix4(targetMesh.matrixWorld);
       nearestNormal.transformDirection(targetMesh.matrixWorld);
       return { point: nearestPoint, normal: nearestNormal };

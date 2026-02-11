@@ -23,7 +23,7 @@ export function useBasicDemoFitting({
   isProcessing,
   fittingParameters,
 }: BasicDemoFittingProps) {
-  const performBasicDemoFitting = (
+  const performBasicDemoFitting = async (
     direction: "cubeToSphere" | "sphereToCube",
   ) => {
     if (!sceneRef.current) return;
@@ -119,7 +119,7 @@ export function useBasicDemoFitting({
       }
 
       // Perform the fitting
-      fittingService.current.fitMeshToTarget(
+      await fittingService.current.fitMeshToTarget(
         sourceMesh,
         targetMesh,
         fittingParams,

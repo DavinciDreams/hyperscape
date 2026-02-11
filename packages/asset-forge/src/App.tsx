@@ -11,6 +11,9 @@ import { EquipmentPage } from "./pages/EquipmentPage";
 import { GenerationPage } from "./pages/GenerationPage";
 import { HandRiggingPage } from "./pages/HandRiggingPage";
 import { RetargetAnimatePage } from "./pages/RetargetAnimatePage";
+import { SmartFittingPage } from "./pages/SmartFittingPage";
+import { WasmFittingPage } from "./pages/WasmFittingPage";
+import { EquipmentProcessingPage } from "./pages/EquipmentProcessingPage";
 import { BatchSpritesPage } from "./pages/BatchSpritesPage";
 
 function AppContent() {
@@ -50,6 +53,13 @@ function AppContent() {
           {currentView === NAVIGATION_VIEWS.HAND_RIGGING && <HandRiggingPage />}
           {currentView === NAVIGATION_VIEWS.ARMOR_FITTING && (
             <ArmorFittingPage />
+          )}
+          {currentView === NAVIGATION_VIEWS.SMART_FITTING && (
+            <SmartFittingPage />
+          )}
+          {currentView === NAVIGATION_VIEWS.WASM_FITTING && <WasmFittingPage />}
+          {currentView === NAVIGATION_VIEWS.EQUIPMENT_PROCESSING && (
+            <EquipmentProcessingPage />
           )}
           {currentView === NAVIGATION_VIEWS.RETARGET_ANIMATE && (
             <RetargetAnimatePage />

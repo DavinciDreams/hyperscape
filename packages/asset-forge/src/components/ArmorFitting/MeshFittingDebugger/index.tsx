@@ -33,6 +33,96 @@ import { useFittingHandlers } from "./hooks/useFittingHandlers";
 import { MeshFittingDebuggerProps } from "./types";
 import { selectClassName } from "./utils";
 
+// Preset configurations for common fitting scenarios
+const FITTING_PRESETS: {
+  label: string;
+  description: string;
+  params: Record<string, unknown>;
+}[] = [
+  {
+    label: "Default",
+    description: "Balanced starting point",
+    params: {
+      iterations: 8,
+      stepSize: 0.15,
+      smoothingRadius: 0.2,
+      smoothingStrength: 0.3,
+      targetOffset: 0.05,
+      sampleRate: 1.0,
+      preserveFeatures: true,
+      featureAngleThreshold: 45,
+      useImprovedShrinkwrap: false,
+      preserveOpenings: true,
+      pushInteriorVertices: true,
+    },
+  },
+  {
+    label: "Tight",
+    description: "Snug fit, close to body",
+    params: {
+      iterations: 10,
+      stepSize: 0.1,
+      smoothingRadius: 0.15,
+      smoothingStrength: 0.2,
+      targetOffset: 0.02,
+      sampleRate: 1.0,
+      preserveFeatures: true,
+      useImprovedShrinkwrap: false,
+      preserveOpenings: true,
+      pushInteriorVertices: true,
+    },
+  },
+  {
+    label: "Loose",
+    description: "Padded / baggy armor",
+    params: {
+      iterations: 6,
+      stepSize: 0.2,
+      smoothingRadius: 0.3,
+      smoothingStrength: 0.15,
+      targetOffset: 0.08,
+      sampleRate: 1.0,
+      preserveFeatures: true,
+      useImprovedShrinkwrap: false,
+      preserveOpenings: true,
+      pushInteriorVertices: false,
+    },
+  },
+  {
+    label: "Quick",
+    description: "Fast preview, lower quality",
+    params: {
+      iterations: 3,
+      stepSize: 0.3,
+      smoothingRadius: 0.2,
+      smoothingStrength: 0.1,
+      targetOffset: 0.05,
+      sampleRate: 0.5,
+      preserveFeatures: false,
+      useImprovedShrinkwrap: false,
+      preserveOpenings: true,
+      pushInteriorVertices: false,
+    },
+  },
+  {
+    label: "HQ",
+    description: "Slow but best results",
+    params: {
+      iterations: 15,
+      stepSize: 0.08,
+      smoothingRadius: 0.25,
+      smoothingStrength: 0.35,
+      targetOffset: 0.04,
+      sampleRate: 1.0,
+      preserveFeatures: true,
+      featureAngleThreshold: 30,
+      useImprovedShrinkwrap: true,
+      preserveOpenings: true,
+      pushInteriorVertices: true,
+    },
+  },
+];
+
 export function MeshFittingDebugger({ onClose }: MeshFittingDebuggerProps) {
   // Get assets from the API
   const { assets, loading: _loading } = useAssets();
@@ -781,6 +871,27 @@ export function MeshFittingDebugger({ onClose }: MeshFittingDebuggerProps) {
                     </button>
                   </div>
                 </div>
+
+                {/* Preset buttons */}
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {FITTING_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      onClick={() =>
+                        updateFittingParameters(
+                          preset.params as Parameters<
+                            typeof updateFittingParameters
+                          >[0],
+                        )
+                      }
+                      title={preset.description}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-bg-tertiary text-text-secondary hover:bg-primary/20 hover:text-primary border border-white/5 hover:border-primary/30 transition-all duration-150"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="space-y-3">
                   <div>
                     <div className="flex items-center justify-between mb-1">
@@ -1573,9 +1684,7 @@ export function MeshFittingDebugger({ onClose }: MeshFittingDebuggerProps) {
                                       if (!boundArmorMesh) return;
                                       try {
                                         const { BoneDiagnostics } =
-                                          await import(
-                                            "../../../services/fitting/BoneDiagnostics"
-                                          );
+                                          await import("../../../services/fitting/BoneDiagnostics");
                                         console.clear();
                                         BoneDiagnostics.analyzeSkeletonForExport(
                                           boundArmorMesh.skeleton,

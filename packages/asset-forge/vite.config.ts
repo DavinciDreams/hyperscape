@@ -51,6 +51,14 @@ export default defineConfig(({ mode }) => {
           target: `http://localhost:${apiPort}`,
           changeOrigin: true,
         },
+        "/gdd-assets": {
+          target: `http://localhost:${apiPort}`,
+          changeOrigin: true,
+        },
+        "/emotes": {
+          target: `http://localhost:${apiPort}`,
+          changeOrigin: true,
+        },
       },
     },
   };

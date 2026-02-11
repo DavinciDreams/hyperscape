@@ -51,6 +51,8 @@ interface ArmorFittingState {
   collisions: CollisionPoint[] | null;
   isFitting: boolean;
   fittingProgress: number;
+  fittingMessage: string;
+  fittingStartTime: number | null;
   isArmorFitted: boolean;
   isArmorBound: boolean;
   isHelmetFitted: boolean;
@@ -117,6 +119,7 @@ interface ArmorFittingActions {
   setCollisions: (collisions: CollisionPoint[] | null) => void;
   setIsFitting: (fitting: boolean) => void;
   setFittingProgress: (progress: number) => void;
+  setFittingMessage: (message: string) => void;
   setIsHelmetFitted: (fitted: boolean) => void;
   setIsHelmetAttached: (attached: boolean) => void;
 
@@ -228,6 +231,8 @@ const initialState: ArmorFittingState = {
   collisions: null,
   isFitting: false,
   fittingProgress: 0,
+  fittingMessage: "",
+  fittingStartTime: null,
   isArmorFitted: false,
   isArmorBound: false,
   isHelmetFitted: false,
@@ -458,6 +463,10 @@ export const useArmorFittingStore = create<ArmorFittingStore>()(
             set((state) => {
               state.fittingProgress = progress;
             }),
+          setFittingMessage: (message) =>
+            set((state) => {
+              state.fittingMessage = message;
+            }),
           setIsHelmetFitted: (fitted) =>
             set((state) => {
               state.isHelmetFitted = fitted;
@@ -550,14 +559,12 @@ export const useArmorFittingStore = create<ArmorFittingStore>()(
             set((state) => {
               state.isFitting = true;
               state.fittingProgress = 0;
+              state.fittingMessage = "Preparing...";
+              state.fittingStartTime = Date.now();
               state.lastError = null;
             });
 
             try {
-              // Using shrinkwrap fitting from MeshFittingDebugger
-              set((state) => {
-                state.fittingProgress = 25;
-              });
               console.log(
                 "🎯 ArmorFittingLab: Performing shrinkwrap-based armor fitting",
               );
@@ -579,26 +586,26 @@ export const useArmorFittingStore = create<ArmorFittingStore>()(
                 preserveOpenings: fittingConfig.preserveOpenings || false,
                 pushInteriorVertices:
                   fittingConfig.pushInteriorVertices || false,
+                onProgress: (progress: number, message?: string) => {
+                  set((state) => {
+                    state.fittingProgress = progress;
+                    if (message) {
+                      state.fittingMessage = message;
+                    }
+                  });
+                },
               };
 
               console.log("Shrinkwrap parameters:", shrinkwrapParams);
 
-              // Perform the fitting
-              set((state) => {
-                state.fittingProgress = 50;
-              });
-              viewerRef.current.performFitting?.(shrinkwrapParams);
-
-              // Update progress
-              await new Promise((resolve) => setTimeout(resolve, 1000));
-              set((state) => {
-                state.fittingProgress = 80;
-              });
+              // Perform the fitting (async - yields between iterations)
+              await viewerRef.current.performFitting?.(shrinkwrapParams);
 
               // Weight transfer if enabled
               if (enableWeightTransfer) {
                 set((state) => {
-                  state.fittingProgress = 90;
+                  state.fittingProgress = 95;
+                  state.fittingMessage = "Transferring weights...";
                 });
                 console.log(
                   "🎯 ArmorFittingLab: Transferring vertex weights from avatar to armor",
@@ -609,6 +616,7 @@ export const useArmorFittingStore = create<ArmorFittingStore>()(
 
               set((state) => {
                 state.fittingProgress = 100;
+                state.fittingMessage = "Complete";
                 // Mark armor as fitted if we're in armor mode
                 if (state.equipmentSlot === "Spine2") {
                   state.isArmorFitted = true;
@@ -623,11 +631,11 @@ export const useArmorFittingStore = create<ArmorFittingStore>()(
                 state.lastError = `Fitting failed: ${(error as Error).message}`;
               });
             } finally {
-              setTimeout(() => {
-                set((state) => {
-                  state.isFitting = false;
-                });
-              }, 100);
+              set((state) => {
+                state.isFitting = false;
+                state.fittingMessage = "";
+                state.fittingStartTime = null;
+              });
             }
           },
 
@@ -686,6 +694,8 @@ export const useArmorFittingStore = create<ArmorFittingStore>()(
           resetFitting: () => {
             set((state) => {
               state.fittingProgress = 0;
+              state.fittingMessage = "";
+              state.fittingStartTime = null;
               state.isFitting = false;
               state.bodyRegions = null;
               state.collisions = null;
@@ -865,6 +875,8 @@ export const useArmorFittingStore = create<ArmorFittingStore>()(
             set((state) => {
               // Reset common states
               state.fittingProgress = 0;
+              state.fittingMessage = "";
+              state.fittingStartTime = null;
               state.isFitting = false;
               state.lastError = null;
               state.showWireframe = false;
@@ -1013,12 +1025,11 @@ export const useArmorFittingStore = create<ArmorFittingStore>()(
           fittingMethod: () => get().fittingConfig.method,
 
           currentProgress: () => {
-            const progress = get().fittingProgress;
-            if (progress === 0) return "Ready";
-            if (progress === 100) return "Complete";
-            if (progress < 50) return "Positioning...";
-            if (progress < 75) return "Fitting...";
-            return "Finalizing...";
+            const { fittingProgress, fittingMessage } = get();
+            if (fittingMessage) return fittingMessage;
+            if (fittingProgress === 0) return "Ready";
+            if (fittingProgress === 100) return "Complete";
+            return "Fitting...";
           },
         })),
         {

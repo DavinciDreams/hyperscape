@@ -4,6 +4,9 @@ export type NavigationView =
   | "equipment"
   | "handRigging"
   | "armorFitting"
+  | "smartFitting"
+  | "wasmFitting"
+  | "equipmentProcessing"
   | "retargetAnimate"
   | "batchSprites";
 

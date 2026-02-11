@@ -4,8 +4,11 @@ import {
   Wrench,
   Hand,
   Shield,
+  Sparkles,
+  Box,
   Shuffle,
   Image,
+  Cog,
 } from "lucide-react";
 import React from "react";
 
@@ -89,6 +92,42 @@ const Navigation: React.FC<NavigationProps> = ({
           >
             <Shield size={18} />
             <span>Armor Fitting</span>
+          </button>
+
+          <button
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all duration-base ${
+              currentView === NAVIGATION_VIEWS.SMART_FITTING
+                ? "bg-primary bg-opacity-10 text-primary"
+                : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+            }`}
+            onClick={() => onViewChange(NAVIGATION_VIEWS.SMART_FITTING)}
+          >
+            <Sparkles size={18} />
+            <span>Smart Fitting</span>
+          </button>
+
+          <button
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all duration-base ${
+              currentView === NAVIGATION_VIEWS.WASM_FITTING
+                ? "bg-primary bg-opacity-10 text-primary"
+                : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+            }`}
+            onClick={() => onViewChange(NAVIGATION_VIEWS.WASM_FITTING)}
+          >
+            <Box size={18} />
+            <span>SDF Fitting</span>
+          </button>
+
+          <button
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all duration-base ${
+              currentView === NAVIGATION_VIEWS.EQUIPMENT_PROCESSING
+                ? "bg-primary bg-opacity-10 text-primary"
+                : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+            }`}
+            onClick={() => onViewChange(NAVIGATION_VIEWS.EQUIPMENT_PROCESSING)}
+          >
+            <Cog size={18} />
+            <span>Blender Rigging</span>
           </button>
 
           <button

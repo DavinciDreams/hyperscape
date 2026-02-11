@@ -11,6 +11,8 @@ import React, {
 import * as THREE from "three";
 // import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter'
 import { GLTF, GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
+import type { VRM } from "@pixiv/three-vrm";
 
 // @ts-ignore - Three.js examples modules don't have proper type declarations
 import {
@@ -19,10 +21,212 @@ import {
   CollisionPoint,
 } from "../../services/fitting/ArmorFittingService";
 import { MeshFittingService } from "../../services/fitting/MeshFittingService";
+import { SinglePassFittingService } from "../../services/fitting/SinglePassFittingService";
+import type { SmartFittingParameters } from "../../services/fitting/SinglePassFittingService";
+import { WasmFittingService } from "../../services/fitting/WasmFittingService";
+import type { WasmFittingParameters } from "../../services/fitting/WasmFittingService";
 // import { WeightTransferService } from '../../services/fitting/WeightTransferService'
+import { retargetAnimation } from "../../services/retargeting/AnimationRetargeting";
 import { notify } from "../../utils/notify";
 
 import { useArmorExport } from "@/hooks";
+
+// All VRM humanoid bone names (used for animation baking)
+const VRM_HUMANOID_BONES = [
+  "hips",
+  "spine",
+  "chest",
+  "upperChest",
+  "neck",
+  "head",
+  "leftShoulder",
+  "leftUpperArm",
+  "leftLowerArm",
+  "leftHand",
+  "rightShoulder",
+  "rightUpperArm",
+  "rightLowerArm",
+  "rightHand",
+  "leftUpperLeg",
+  "leftLowerLeg",
+  "leftFoot",
+  "leftToes",
+  "rightUpperLeg",
+  "rightLowerLeg",
+  "rightFoot",
+  "rightToes",
+  "leftThumbMetacarpal",
+  "leftThumbProximal",
+  "leftThumbDistal",
+  "leftIndexProximal",
+  "leftIndexIntermediate",
+  "leftIndexDistal",
+  "leftMiddleProximal",
+  "leftMiddleIntermediate",
+  "leftMiddleDistal",
+  "leftRingProximal",
+  "leftRingIntermediate",
+  "leftRingDistal",
+  "leftLittleProximal",
+  "leftLittleIntermediate",
+  "leftLittleDistal",
+  "rightThumbMetacarpal",
+  "rightThumbProximal",
+  "rightThumbDistal",
+  "rightIndexProximal",
+  "rightIndexIntermediate",
+  "rightIndexDistal",
+  "rightMiddleProximal",
+  "rightMiddleIntermediate",
+  "rightMiddleDistal",
+  "rightRingProximal",
+  "rightRingIntermediate",
+  "rightRingDistal",
+  "rightLittleProximal",
+  "rightLittleIntermediate",
+  "rightLittleDistal",
+] as const;
+
+/**
+ * Bake a VRM-retargeted animation clip into a clip that directly drives GLB bone names.
+ *
+ * The retargeted clip targets VRM normalized bone names and is designed to play
+ * on vrm.scene. This function samples the VRM pipeline (mixer + vrm.update) to
+ * capture the raw bone transforms, then builds a new clip that can play on the
+ * GLB avatar's AnimationMixer — no per-frame bone copying needed.
+ */
+function bakeAnimationForGLB(
+  vrm: VRM,
+  retargetedClip: THREE.AnimationClip,
+  glbRoot: THREE.Object3D,
+): THREE.AnimationClip | null {
+  const fps = 30;
+  const duration = retargetedClip.duration;
+  const numFrames = Math.ceil(duration * fps) + 1;
+
+  // Build mapping: VRM raw bone node → GLB bone name
+  // Use VRM humanoid API to get raw bone nodes (guaranteed correct)
+  const glbBoneMap = new Map<string, THREE.Bone>();
+  glbRoot.traverse((child) => {
+    if (child instanceof THREE.Bone) {
+      glbBoneMap.set(child.name, child);
+    }
+  });
+
+  const boneMapping: Array<{
+    rawNode: THREE.Object3D;
+    glbBoneName: string;
+    isHips: boolean;
+  }> = [];
+  for (const boneName of VRM_HUMANOID_BONES) {
+    // getRawBoneNode uses VRMHumanBoneName which is typed strictly
+    const rawNode = vrm.humanoid.getRawBoneNode(boneName as never);
+    if (rawNode && glbBoneMap.has(rawNode.name)) {
+      boneMapping.push({
+        rawNode,
+        glbBoneName: rawNode.name,
+        isHips: boneName === "hips",
+      });
+    }
+  }
+
+  if (boneMapping.length === 0) {
+    console.error("[BakeAnimation] No bone mapping found between VRM and GLB");
+    // Debug: log what bones exist
+    const vrmBoneNames: string[] = [];
+    for (const boneName of VRM_HUMANOID_BONES) {
+      const rawNode = vrm.humanoid.getRawBoneNode(boneName as never);
+      if (rawNode) vrmBoneNames.push(`${boneName}→${rawNode.name}`);
+    }
+    const glbBoneNames = Array.from(glbBoneMap.keys());
+    console.error("[BakeAnimation] VRM raw bones:", vrmBoneNames);
+    console.error("[BakeAnimation] GLB bones:", glbBoneNames);
+    return null;
+  }
+
+  console.log(
+    `[BakeAnimation] Mapping ${boneMapping.length} bones, sampling ${numFrames} frames at ${fps}fps`,
+  );
+
+  // Create temporary mixer to sample the retargeted clip on VRM scene
+  const tempMixer = new THREE.AnimationMixer(vrm.scene);
+  const tempAction = tempMixer.clipAction(retargetedClip);
+  tempAction.play();
+
+  // Storage for sampled keyframes
+  const times: number[] = [];
+  const quatData = new Map<string, number[]>();
+  const posData = new Map<string, number[]>();
+
+  // Sample each frame
+  for (let i = 0; i < numFrames; i++) {
+    const t = Math.min(i / fps, duration);
+    times.push(t);
+
+    // Set mixer to this time (resets to 0 internally, then advances to t)
+    tempMixer.setTime(t);
+    // Sync normalized → raw bones (delta=0 just syncs without advancing spring bones)
+    vrm.update(0);
+
+    // Capture raw bone transforms
+    for (const { rawNode, glbBoneName, isHips } of boneMapping) {
+      if (!quatData.has(glbBoneName)) {
+        quatData.set(glbBoneName, []);
+        posData.set(glbBoneName, []);
+      }
+      quatData
+        .get(glbBoneName)!
+        .push(
+          rawNode.quaternion.x,
+          rawNode.quaternion.y,
+          rawNode.quaternion.z,
+          rawNode.quaternion.w,
+        );
+      // Only sample position for hips (other bones don't translate)
+      if (isHips) {
+        posData
+          .get(glbBoneName)!
+          .push(rawNode.position.x, rawNode.position.y, rawNode.position.z);
+      }
+    }
+  }
+
+  // Clean up temporary mixer
+  tempMixer.stopAllAction();
+  tempMixer.uncacheClip(retargetedClip);
+
+  // Build tracks
+  const tracks: THREE.KeyframeTrack[] = [];
+  for (const [boneName, values] of quatData) {
+    tracks.push(
+      new THREE.QuaternionKeyframeTrack(
+        `${boneName}.quaternion`,
+        new Float32Array(times),
+        new Float32Array(values),
+      ),
+    );
+  }
+  for (const [boneName, values] of posData) {
+    if (values.length > 0) {
+      tracks.push(
+        new THREE.VectorKeyframeTrack(
+          `${boneName}.position`,
+          new Float32Array(times),
+          new Float32Array(values),
+        ),
+      );
+    }
+  }
+
+  console.log(
+    `[BakeAnimation] Baked ${tracks.length} tracks (${times.length} keyframes each)`,
+  );
+  return new THREE.AnimationClip(
+    "baked-" + retargetedClip.name,
+    duration,
+    tracks,
+  );
+}
 
 // Type declarations
 interface AnimatedGLTF extends GLTF {
@@ -62,6 +266,299 @@ interface HelmetFittingParams {
   showCollisionDebug?: boolean;
 }
 
+// ── Torso bounds detection (shared between auto-position and fitting) ──
+
+type BoneInfo = { y: number; pos: THREE.Vector3 };
+
+/**
+ * Matches a bone name to a semantic role across all common skeleton formats:
+ * VRM (hips, spine, chest, upperChest, neck), VRoid (J_Bip_C_*),
+ * Mixamo (mixamorig:*), Meshy (Hips, Spine01, Spine02),
+ * Blender (spine.001), DEF- prefix, generic names.
+ */
+function matchesBoneRole(
+  boneName: string,
+  role:
+    | "hips"
+    | "spine"
+    | "chest"
+    | "upperChest"
+    | "neck"
+    | "head"
+    | "shoulder",
+): boolean {
+  const lower = boneName.toLowerCase();
+  const stripped = lower
+    .replace(/^mixamorig[_:]?/i, "")
+    .replace(/^j_bip_[clr]_/i, "")
+    .replace(/^def[_-]/i, "");
+
+  switch (role) {
+    case "hips":
+      return (
+        stripped === "hips" ||
+        stripped === "hip" ||
+        stripped === "pelvis" ||
+        lower === "hips" ||
+        lower === "pelvis"
+      );
+    case "spine":
+      return (
+        stripped === "spine" ||
+        stripped === "spine001" ||
+        stripped === "spine.001"
+      );
+    case "chest":
+      return (
+        stripped === "chest" ||
+        stripped === "spine1" ||
+        stripped === "spine01" ||
+        stripped === "spine002" ||
+        stripped === "spine.002"
+      );
+    case "upperChest":
+      return (
+        stripped === "upperchest" ||
+        stripped === "upper_chest" ||
+        stripped === "spine2" ||
+        stripped === "spine02" ||
+        stripped === "spine003" ||
+        stripped === "spine.003"
+      );
+    case "neck":
+      return stripped === "neck";
+    case "head":
+      return (
+        (stripped === "head" || stripped.startsWith("head")) &&
+        !stripped.includes("end") &&
+        !stripped.includes("_end")
+      );
+    case "shoulder":
+      return stripped.includes("shoulder") || stripped.includes("clavicle");
+  }
+}
+
+/**
+ * Calculate torso bounds from skeleton bones.
+ * Returns center, size, and bounding box of the torso region.
+ */
+function calculateTorsoBounds(avatarMesh: THREE.SkinnedMesh): {
+  torsoCenter: THREE.Vector3;
+  torsoSize: THREE.Vector3;
+  torsoBounds: THREE.Box3;
+} | null {
+  const avatarBounds = new THREE.Box3().setFromObject(avatarMesh);
+  const avatarSize = avatarBounds.getSize(new THREE.Vector3());
+  const avatarCenter = avatarBounds.getCenter(new THREE.Vector3());
+
+  const skeleton = avatarMesh.skeleton;
+  if (!skeleton) {
+    console.error("Avatar has no skeleton!");
+    return null;
+  }
+
+  // Update transforms
+  avatarMesh.updateMatrix();
+  avatarMesh.updateMatrixWorld(true);
+  skeleton.bones.forEach((bone) => {
+    bone.updateMatrixWorld(true);
+  });
+
+  // Find bone positions by role
+  let hips: BoneInfo | null = null;
+  let spine: BoneInfo | null = null;
+  let chest: BoneInfo | null = null;
+  let upperChest: BoneInfo | null = null;
+  let neck: BoneInfo | null = null;
+  let head: BoneInfo | null = null;
+  let leftShoulder: BoneInfo | null = null;
+  let rightShoulder: BoneInfo | null = null;
+
+  skeleton.bones.forEach((bone) => {
+    const bonePos = new THREE.Vector3();
+    bone.getWorldPosition(bonePos);
+    const info: BoneInfo = { y: bonePos.y, pos: bonePos.clone() };
+
+    if (matchesBoneRole(bone.name, "hips") && !hips) hips = info;
+    if (matchesBoneRole(bone.name, "spine") && !spine) spine = info;
+    if (matchesBoneRole(bone.name, "chest") && !chest) chest = info;
+    if (matchesBoneRole(bone.name, "upperChest") && !upperChest)
+      upperChest = info;
+    if (matchesBoneRole(bone.name, "neck") && !neck) neck = info;
+    if (matchesBoneRole(bone.name, "head") && !head) head = info;
+    if (matchesBoneRole(bone.name, "shoulder")) {
+      const lower = bone.name.toLowerCase();
+      const isLeft =
+        lower.includes("left") ||
+        lower.includes("_l_") ||
+        lower.endsWith(".l") ||
+        lower.endsWith("_l");
+      const isRight =
+        lower.includes("right") ||
+        lower.includes("_r_") ||
+        lower.endsWith(".r") ||
+        lower.endsWith("_r");
+      if (isLeft && !leftShoulder) leftShoulder = info;
+      if (isRight && !rightShoulder) rightShoulder = info;
+    }
+  });
+
+  console.log("Bone detection results:", {
+    hips: hips ? `y=${(hips as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    spine: spine ? `y=${(spine as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    chest: chest ? `y=${(chest as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    upperChest: upperChest
+      ? `y=${(upperChest as BoneInfo).y.toFixed(3)}`
+      : "NOT FOUND",
+    neck: neck ? `y=${(neck as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    head: head ? `y=${(head as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    leftShoulder: leftShoulder
+      ? `y=${(leftShoulder as BoneInfo).y.toFixed(3)}`
+      : "NOT FOUND",
+    rightShoulder: rightShoulder
+      ? `y=${(rightShoulder as BoneInfo).y.toFixed(3)}`
+      : "NOT FOUND",
+  });
+
+  // Calculate torso bottom: hips bone or proportional fallback
+  let torsoBottom: number;
+  if (hips) {
+    torsoBottom = (hips as BoneInfo).y;
+  } else if (spine) {
+    torsoBottom = (spine as BoneInfo).y - avatarSize.y * 0.05;
+  } else {
+    torsoBottom = avatarBounds.min.y + avatarSize.y * 0.47;
+  }
+
+  // Calculate torso top: neck > shoulder > upperChest > chest > fallback
+  let torsoTop: number;
+  if (neck) {
+    torsoTop = (neck as BoneInfo).y;
+  } else if (leftShoulder || rightShoulder) {
+    const lsy = leftShoulder ? (leftShoulder as BoneInfo).y : -Infinity;
+    const rsy = rightShoulder ? (rightShoulder as BoneInfo).y : -Infinity;
+    torsoTop = Math.max(lsy, rsy);
+  } else if (upperChest) {
+    torsoTop = (upperChest as BoneInfo).y + avatarSize.y * 0.04;
+  } else if (chest) {
+    torsoTop = (chest as BoneInfo).y + avatarSize.y * 0.08;
+  } else {
+    torsoTop = avatarBounds.min.y + avatarSize.y * 0.72;
+  }
+
+  // Ensure minimum torso height
+  if (torsoTop - torsoBottom < avatarSize.y * 0.1) {
+    const mid = (torsoTop + torsoBottom) / 2;
+    torsoBottom = mid - avatarSize.y * 0.12;
+    torsoTop = mid + avatarSize.y * 0.12;
+  }
+
+  // Width: shoulder distance or T-pose-aware proportional
+  let torsoWidth: number;
+  if (leftShoulder && rightShoulder) {
+    const shoulderDistance = Math.abs(
+      (leftShoulder as BoneInfo).pos.x - (rightShoulder as BoneInfo).pos.x,
+    );
+    torsoWidth = shoulderDistance * 1.1;
+  } else {
+    torsoWidth = avatarSize.x * 0.28;
+  }
+
+  const torsoDepth = avatarSize.z * 0.5;
+
+  const torsoCenter = new THREE.Vector3(
+    avatarCenter.x,
+    (torsoBottom + torsoTop) / 2,
+    avatarCenter.z,
+  );
+  const torsoSize = new THREE.Vector3(
+    torsoWidth,
+    torsoTop - torsoBottom,
+    torsoDepth,
+  );
+  const torsoBounds = new THREE.Box3();
+  torsoBounds.setFromCenterAndSize(torsoCenter, torsoSize);
+
+  console.log(
+    "Torso Y range:",
+    torsoBounds.min.y.toFixed(3),
+    "to",
+    torsoBounds.max.y.toFixed(3),
+  );
+  console.log("Torso center:", torsoCenter);
+  console.log("Torso size:", torsoSize);
+
+  return { torsoCenter, torsoSize, torsoBounds };
+}
+
+/**
+ * Auto-position and scale armor to the avatar's torso region.
+ * Called when both models are loaded so the armor appears at the chest,
+ * giving instant visual feedback before the user clicks "Perform Fitting".
+ */
+function autoPositionArmorOnTorso(
+  avatarMesh: THREE.SkinnedMesh,
+  armorMesh: THREE.Mesh,
+): void {
+  console.log("=== AUTO-POSITIONING ARMOR ON TORSO ===");
+
+  // Ensure entire parent chain has up-to-date matrices.
+  // updateWorldMatrix(true, true) walks UP ancestors first, then DOWN children —
+  // unlike updateMatrixWorld(true) which only propagates downward.
+  avatarMesh.updateWorldMatrix(true, true);
+  armorMesh.updateWorldMatrix(true, true);
+
+  const torsoInfo = calculateTorsoBounds(avatarMesh);
+  if (!torsoInfo) {
+    console.warn("Could not calculate torso bounds for auto-positioning");
+    return;
+  }
+
+  const { torsoCenter, torsoSize } = torsoInfo;
+
+  // Group scale already makes armor roughly the right world-space size (Step 1).
+  // Fine-tune mesh-level scale so armor roughly matches the body surface.
+  // Torso bounds are from bones (inside the flesh), so add ~15% to approximate
+  // the actual body surface. With normal projection we don't need the armor to
+  // start oversized — keeping it close preserves arm hole alignment.
+  const armorBounds = new THREE.Box3().setFromObject(armorMesh);
+  const armorWorldSize = armorBounds.getSize(new THREE.Vector3());
+
+  if (armorWorldSize.y > 0) {
+    const margin = 1.15; // Just above body surface; arm holes stay aligned
+    const scaleX =
+      armorWorldSize.x > 0 ? (torsoSize.x * margin) / armorWorldSize.x : 1;
+    const scaleY = (torsoSize.y * margin) / armorWorldSize.y;
+    const scaleZ =
+      armorWorldSize.z > 0 ? (torsoSize.z * margin) / armorWorldSize.z : 1;
+    const scaleFactor = Math.max(scaleX, scaleY, scaleZ);
+    armorMesh.scale.multiplyScalar(scaleFactor);
+    armorMesh.updateWorldMatrix(false, true);
+  }
+
+  // Position armor center at torso center.
+  // CRITICAL: armorMesh.position is in parent-local space, but torsoCenter is
+  // in world space. Use parent.worldToLocal for correct coordinate conversion.
+  const scaledBounds = new THREE.Box3().setFromObject(armorMesh);
+  const scaledWorldCenter = scaledBounds.getCenter(new THREE.Vector3());
+
+  if (armorMesh.parent) {
+    const targetInParent = armorMesh.parent.worldToLocal(torsoCenter.clone());
+    const currentInParent = armorMesh.parent.worldToLocal(scaledWorldCenter);
+    armorMesh.position.add(targetInParent.sub(currentInParent));
+  } else {
+    armorMesh.position.add(torsoCenter.clone().sub(scaledWorldCenter));
+  }
+  armorMesh.updateWorldMatrix(false, true);
+
+  console.log(
+    "Auto-positioned armor: meshScale=",
+    armorMesh.scale.x.toFixed(3),
+    "position=",
+    armorMesh.position,
+  );
+}
+
 // Simplified demo component that handles model loading
 interface ModelDemoProps {
   avatarUrl?: string;
@@ -69,8 +566,11 @@ interface ModelDemoProps {
   helmetUrl?: string;
   showWireframe: boolean;
   equipmentSlot: "Head" | "Spine2" | "Pelvis";
+  armorIsRigged?: boolean;
   currentAnimation: "tpose" | "walking" | "running";
   isAnimationPlaying: boolean;
+  vrmAnimation?: string | null;
+  vrmUrl?: string;
   onModelsReady: (meshes: {
     avatar: THREE.SkinnedMesh | null;
     armor: THREE.Mesh | null;
@@ -85,20 +585,42 @@ const ModelDemo: React.FC<ModelDemoProps> = ({
   helmetUrl,
   showWireframe,
   equipmentSlot,
+  armorIsRigged,
   currentAnimation,
   isAnimationPlaying,
+  vrmAnimation,
+  vrmUrl,
   onModelsReady,
 }) => {
   const avatarRef = useRef<THREE.Group>(null);
   const armorRef = useRef<THREE.Group>(null);
   const helmetRef = useRef<THREE.Group>(null);
 
+  // VRM animation state
+  const vrmRef = useRef<VRM | null>(null);
+  const vrmMixerRef = useRef<THREE.AnimationMixer | null>(null);
+  const vrmActionRef = useRef<THREE.AnimationAction | null>(null);
+  const rootToHipsRef = useRef<number>(1);
+  const vrmLoadedUrlRef = useRef<string>("");
+  // Triggers animation effect re-run after async VRM load completes
+  const [vrmReady, setVrmReady] = useState(false);
+  // Store the rigged armor SkinnedMesh when in animation mode
+  const riggedArmorMeshRef = useRef<THREE.SkinnedMesh | null>(null);
+
   // Track loaded URLs to prevent unnecessary reloads
   const loadedUrlsRef = useRef({
     avatar: "",
     armor: "",
+    armorVrmMode: false, // whether armor was loaded in VRM animation mode
     helmet: "",
   });
+
+  // Cache the original (raw) armor material — Blender's GLTF roundtrip
+  // degrades materials (color space, PBR params), so we reuse the original
+  // material from the raw GLB when displaying the rigged version.
+  const rawArmorMaterialRef = useRef<THREE.Material | THREE.Material[] | null>(
+    null,
+  );
 
   // Animation state
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
@@ -176,8 +698,9 @@ const ModelDemo: React.FC<ModelDemoProps> = ({
 
     const loadModels = async () => {
       const loader = new GLTFLoader();
+      const isVrmMode = !!vrmAnimation;
 
-      // Load avatar only if URL changed
+      // Load avatar only if URL changed (always as GLB — VRM loaded hidden for animation)
       if (
         avatarUrl &&
         avatarRef.current &&
@@ -186,8 +709,9 @@ const ModelDemo: React.FC<ModelDemoProps> = ({
         try {
           const gltf = await loader.loadAsync(avatarUrl);
           avatarRef.current.clear();
-          avatarRef.current.add(gltf.scene);
           loadedUrlsRef.current.avatar = avatarUrl;
+
+          avatarRef.current.add(gltf.scene);
 
           // Store gltf data on the scene for animation access
           gltf.scene.userData.gltf = gltf;
@@ -215,6 +739,21 @@ const ModelDemo: React.FC<ModelDemoProps> = ({
             const height = bounds.getSize(new THREE.Vector3()).y;
             const scale = 2 / height; // Normalize to 2 units tall
             avatarRef.current.scale.setScalar(scale);
+
+            // Debug: log avatar hierarchy transforms
+            console.log(
+              `Avatar normalize: rawHeight=${height.toFixed(3)}, scale=${scale.toFixed(4)}`,
+            );
+            avatarRef.current.updateMatrixWorld(true);
+            const worldBounds = new THREE.Box3().setFromObject(
+              avatarRef.current,
+            );
+            const worldSize = worldBounds.getSize(new THREE.Vector3());
+            console.log(
+              `Avatar world bounds: min=(${worldBounds.min.x.toFixed(3)}, ${worldBounds.min.y.toFixed(3)}, ${worldBounds.min.z.toFixed(3)}) ` +
+                `max=(${worldBounds.max.x.toFixed(3)}, ${worldBounds.max.y.toFixed(3)}, ${worldBounds.max.z.toFixed(3)}) ` +
+                `size=(${worldSize.x.toFixed(3)}, ${worldSize.y.toFixed(3)}, ${worldSize.z.toFixed(3)})`,
+            );
           }
         } catch (error) {
           console.error("Failed to load avatar:", error);
@@ -237,18 +776,29 @@ const ModelDemo: React.FC<ModelDemoProps> = ({
           armorRef.current.userData.transformCaptured = false;
         }
       }
-      // Load armor only if URL changed
+      // Load armor only if URL changed OR VRM mode changed (need to reload
+      // as SkinnedMesh for animation or plain Mesh for static display)
       else if (
         armorUrl &&
         equipmentSlot === "Spine2" &&
         armorRef.current &&
-        armorUrl !== loadedUrlsRef.current.armor
+        (armorUrl !== loadedUrlsRef.current.armor ||
+          isVrmMode !== loadedUrlsRef.current.armorVrmMode)
       ) {
         try {
+          // Clear Three.js in-memory cache to ensure fresh load.
+          // THREE.Cache (used by FileLoader inside GLTFLoader) is keyed by URL
+          // and persists for the lifetime of the page — even HTTP no-cache
+          // headers won't bypass it.
+          THREE.Cache.remove(armorUrl);
+          console.log(
+            `[ArmorViewer] Loading armor: ${armorUrl} (rigged=${armorIsRigged}, vrmMode=${isVrmMode})`,
+          );
           const gltf = await loader.loadAsync(armorUrl);
           armorRef.current.clear();
           armorRef.current.add(gltf.scene);
           loadedUrlsRef.current.armor = armorUrl;
+          loadedUrlsRef.current.armorVrmMode = isVrmMode;
 
           // Find mesh
           gltf.scene.traverse((child: THREE.Object3D) => {
@@ -260,9 +810,327 @@ const ModelDemo: React.FC<ModelDemoProps> = ({
             }
           });
 
-          // Match avatar scale
-          if (avatarRef.current) {
-            armorRef.current.scale.copy(avatarRef.current.scale);
+          // Scale armor to fit the avatar
+          if (avatarRef.current && armorMesh) {
+            // Cache raw armor material for later use with rigged geometry
+            if (!armorIsRigged) {
+              rawArmorMaterialRef.current = armorMesh.material;
+            }
+
+            if (armorIsRigged) {
+              const fixMaterial = (mat: THREE.Material): THREE.Material => {
+                const cloned = mat.clone();
+                cloned.side = THREE.DoubleSide;
+                cloned.polygonOffset = true;
+                cloned.polygonOffsetFactor = -1;
+                cloned.polygonOffsetUnits = -1;
+                cloned.depthWrite = true;
+                // Force vertex colors OFF — Meshy bakes AO into vertex colors,
+                // and we strip the color attribute from geometry. Without this,
+                // the shader reads missing/garbage data → red/colored spots.
+                cloned.vertexColors = false;
+                cloned.needsUpdate = true;
+                return cloned;
+              };
+
+              gltf.scene.updateMatrixWorld(true);
+
+              if (isVrmMode && avatarMesh) {
+                // ANIMATION MODE: Keep SkinnedMesh and bind to GLB avatar skeleton
+                // so the armor deforms when VRM bone transforms are copied over.
+                let foundSkinnedMesh: THREE.SkinnedMesh | null = null;
+                gltf.scene.traverse((child: THREE.Object3D) => {
+                  if (child instanceof THREE.SkinnedMesh && !foundSkinnedMesh) {
+                    foundSkinnedMesh = child;
+                  }
+                });
+
+                if (foundSkinnedMesh) {
+                  const riggedMesh = foundSkinnedMesh as THREE.SkinnedMesh;
+
+                  // Fix material
+                  if (Array.isArray(riggedMesh.material)) {
+                    riggedMesh.material = riggedMesh.material.map(fixMaterial);
+                  } else {
+                    riggedMesh.material = fixMaterial(riggedMesh.material);
+                  }
+
+                  // Strip non-essential attributes (keep skinning attrs for animation)
+                  const keepAttrs = new Set([
+                    "position",
+                    "normal",
+                    "uv",
+                    "uv2",
+                    "tangent",
+                    "skinIndex",
+                    "skinWeight",
+                  ]);
+                  const strippedAttrs: string[] = [];
+                  for (const name of Object.keys(
+                    riggedMesh.geometry.attributes,
+                  )) {
+                    if (!keepAttrs.has(name)) {
+                      riggedMesh.geometry.deleteAttribute(name);
+                      strippedAttrs.push(name);
+                    }
+                  }
+                  if (strippedAttrs.length > 0) {
+                    console.log(
+                      `[ArmorViewer] Stripped attributes from ${riggedMesh.name} (anim mode): ${strippedAttrs.join(", ")}`,
+                    );
+                  }
+
+                  // Remap bone indices from rigged GLB skeleton → avatar skeleton
+                  // (same logic as performEquipmentPreview)
+                  const avatarSkeleton = avatarMesh.skeleton;
+                  if (avatarSkeleton) {
+                    const avatarBoneNames = avatarSkeleton.bones.map(
+                      (b: THREE.Bone) => b.name,
+                    );
+                    const riggedBoneNames = riggedMesh.skeleton.bones.map(
+                      (b: THREE.Bone) => b.name,
+                    );
+
+                    const indexMap = new Map<number, number>();
+                    for (let i = 0; i < riggedBoneNames.length; i++) {
+                      const avatarIdx = avatarBoneNames.indexOf(
+                        riggedBoneNames[i],
+                      );
+                      if (avatarIdx !== -1) {
+                        indexMap.set(i, avatarIdx);
+                      }
+                    }
+
+                    const skinIndex =
+                      riggedMesh.geometry.getAttribute("skinIndex");
+                    if (skinIndex) {
+                      for (let i = 0; i < skinIndex.count; i++) {
+                        for (let j = 0; j < skinIndex.itemSize; j++) {
+                          const oldIdx = skinIndex.getComponent(i, j);
+                          const newIdx = indexMap.get(oldIdx);
+                          if (newIdx !== undefined) {
+                            skinIndex.setComponent(i, j, newIdx);
+                          }
+                        }
+                      }
+                      skinIndex.needsUpdate = true;
+                    }
+
+                    // Bind to avatar's skeleton.
+                    // CRITICAL: pass bindMatrix to prevent calculateInverses().
+                    // bind() without bindMatrix calls skeleton.calculateInverses()
+                    // which DESTROYS the avatar skeleton's GLTF boneInverses
+                    // (they get recalculated from scaled bone world positions),
+                    // causing massive deformation of both avatar and armor.
+                    riggedMesh.bind(avatarSkeleton, riggedMesh.bindMatrix);
+
+                    console.log(
+                      `[ArmorViewer] Bound rigged armor to avatar skeleton: ${indexMap.size}/${riggedBoneNames.length} bones mapped`,
+                    );
+                  }
+
+                  riggedMesh.userData.isArmor = true;
+                  riggedMesh.userData.isEquipment = true;
+                  riggedMesh.userData.equipmentSlot = "Spine2";
+                  riggedMesh.renderOrder = 1;
+                  riggedArmorMeshRef.current = riggedMesh;
+                  armorMesh = riggedMesh;
+
+                  console.log(
+                    `[ArmorViewer] Kept SkinnedMesh for animation: ${riggedMesh.name}, ` +
+                      `verts=${riggedMesh.geometry.attributes.position.count}`,
+                  );
+                }
+              } else {
+                // STATIC MODE: Replace SkinnedMeshes with plain Meshes
+                // Rigged GLB contains a SkinnedMesh with bone weights. The GPU
+                // skinning shader distorts the mesh even in bind pose, causing
+                // dark spots and artifacts.
+                //
+                // APPROACH: Keep the GLTF scene hierarchy intact and replace
+                // SkinnedMeshes with plain Meshes in-place.
+                riggedArmorMeshRef.current = null;
+
+                const replacements: {
+                  old: THREE.Object3D;
+                  parent: THREE.Object3D;
+                  geo: THREE.BufferGeometry;
+                  mat: THREE.Material | THREE.Material[];
+                  name: string;
+                }[] = [];
+
+                let finalMesh: THREE.Mesh | null = null;
+                gltf.scene.traverse((child: THREE.Object3D) => {
+                  if (
+                    child instanceof THREE.SkinnedMesh ||
+                    child instanceof THREE.Mesh
+                  ) {
+                    if (!child.parent) return;
+                    const geo = child.geometry.clone();
+
+                    // Strip non-essential attributes. Keep position, normal, uv,
+                    // and TANGENT. Tangent is critical — the normal map needs it
+                    // for correct tangent-space lighting. Without tangent, Three.js
+                    // falls back to screen-space derivatives (dFdx/dFdy) which
+                    // produce garbage values at UV seams → red/colored spots on
+                    // shoulders and sides.
+                    const keepAttrs = new Set([
+                      "position",
+                      "normal",
+                      "uv",
+                      "uv2",
+                      "tangent",
+                    ]);
+                    const strippedAttrs: string[] = [];
+                    for (const name of Object.keys(geo.attributes)) {
+                      if (!keepAttrs.has(name)) {
+                        geo.deleteAttribute(name);
+                        strippedAttrs.push(name);
+                      }
+                    }
+                    if (strippedAttrs.length > 0) {
+                      console.log(
+                        `[ArmorViewer] Stripped attributes from ${child.name}: ${strippedAttrs.join(", ")}`,
+                      );
+                    }
+
+                    replacements.push({
+                      old: child,
+                      parent: child.parent,
+                      geo,
+                      mat: child.material,
+                      name: child.name,
+                    });
+                  }
+                });
+
+                // Replace SkinnedMeshes with plain Meshes in the hierarchy
+                for (const rep of replacements) {
+                  const plainMesh = new THREE.Mesh(rep.geo);
+                  plainMesh.name = rep.name;
+
+                  // Copy local transform so the mesh occupies the same
+                  // position within the hierarchy
+                  plainMesh.position.copy(rep.old.position);
+                  plainMesh.quaternion.copy(rep.old.quaternion);
+                  plainMesh.scale.copy(rep.old.scale);
+
+                  plainMesh.userData = {
+                    ...rep.old.userData,
+                    isArmor: true,
+                    isEquipment: true,
+                    equipmentSlot: "Spine2",
+                  };
+                  plainMesh.renderOrder = 1;
+
+                  // Use the material from the processed GLB (not the raw
+                  // original). Blender's GLTF roundtrip can subtly change
+                  // UV layout — using the raw material on processed geometry
+                  // causes texture mismatch (dark spots).
+                  if (Array.isArray(rep.mat)) {
+                    plainMesh.material = rep.mat.map(fixMaterial);
+                  } else {
+                    plainMesh.material = fixMaterial(rep.mat);
+                  }
+
+                  rep.parent.add(plainMesh);
+                  rep.parent.remove(rep.old);
+
+                  if (!finalMesh) {
+                    finalMesh = plainMesh;
+
+                    console.log(
+                      `[ArmorViewer] Converted SkinnedMesh→Mesh (in-hierarchy): ${rep.name}, ` +
+                        `verts=${rep.geo.attributes.position.count}, ` +
+                        `tris=${rep.geo.index ? rep.geo.index.count / 3 : "non-indexed"}, ` +
+                        `material=processed (Blender), skinAttrs stripped, normals=exported`,
+                    );
+                  }
+                }
+              }
+
+              // In static mode, find the final plain Mesh that was created
+              if (!isVrmMode && !armorMesh) {
+                armorRef.current?.traverse((child) => {
+                  if (
+                    child instanceof THREE.Mesh &&
+                    !armorMesh &&
+                    child.userData.isArmor
+                  ) {
+                    armorMesh = child;
+                  }
+                });
+              }
+
+              if (armorMesh) {
+                // Scale to match avatar normalization
+                const avatarScale = avatarRef.current.scale.x;
+                armorRef.current.scale.setScalar(avatarScale);
+                armorRef.current.updateMatrixWorld(true);
+
+                // Diagnostic: compare armor and body bounds
+                const armorBounds = new THREE.Box3().setFromObject(
+                  armorRef.current,
+                );
+                const armorCenter = armorBounds.getCenter(new THREE.Vector3());
+                const armorSize = armorBounds.getSize(new THREE.Vector3());
+                const bodyBounds = new THREE.Box3().setFromObject(
+                  avatarRef.current,
+                );
+                const bodyCenter = bodyBounds.getCenter(new THREE.Vector3());
+                const bodySize = bodyBounds.getSize(new THREE.Vector3());
+                const offset = armorCenter.clone().sub(bodyCenter);
+                console.log(
+                  `[ArmorViewer] Rigged armor bounds: center=(${armorCenter.x.toFixed(3)}, ${armorCenter.y.toFixed(3)}, ${armorCenter.z.toFixed(3)}) ` +
+                    `size=(${armorSize.x.toFixed(3)}, ${armorSize.y.toFixed(3)}, ${armorSize.z.toFixed(3)})`,
+                );
+                console.log(
+                  `[ArmorViewer] Avatar body bounds:  center=(${bodyCenter.x.toFixed(3)}, ${bodyCenter.y.toFixed(3)}, ${bodyCenter.z.toFixed(3)}) ` +
+                    `size=(${bodySize.x.toFixed(3)}, ${bodySize.y.toFixed(3)}, ${bodySize.z.toFixed(3)})`,
+                );
+                console.log(
+                  `[ArmorViewer] Armor-body offset: (${offset.x.toFixed(4)}, ${offset.y.toFixed(4)}, ${offset.z.toFixed(4)}) ` +
+                    `magnitude=${offset.length().toFixed(4)}`,
+                );
+
+                // Set body mesh render order
+                avatarRef.current.traverse((child: THREE.Object3D) => {
+                  if (
+                    child instanceof THREE.SkinnedMesh ||
+                    child instanceof THREE.Mesh
+                  ) {
+                    child.renderOrder = 0;
+                  }
+                });
+              }
+            } else {
+              // Raw (unrigged) armor — scale to ~40% of avatar height
+              const avatarWorldBounds = new THREE.Box3().setFromObject(
+                avatarRef.current,
+              );
+              const avatarWorldHeight = avatarWorldBounds.getSize(
+                new THREE.Vector3(),
+              ).y;
+
+              const rawArmorBounds = new THREE.Box3().setFromObject(armorMesh);
+              const rawArmorHeight = rawArmorBounds.getSize(
+                new THREE.Vector3(),
+              ).y;
+
+              if (rawArmorHeight > 0) {
+                const armorGroupScale =
+                  (avatarWorldHeight * 0.4) / rawArmorHeight;
+                armorRef.current.scale.setScalar(armorGroupScale);
+                armorRef.current.updateMatrixWorld(true);
+                console.log(
+                  `Armor group scale: ${armorGroupScale.toFixed(4)} ` +
+                    `(avatarH=${avatarWorldHeight.toFixed(3)}, armorRawH=${rawArmorHeight.toFixed(3)})`,
+                );
+              } else {
+                armorRef.current.scale.setScalar(1);
+                armorRef.current.updateMatrixWorld(true);
+              }
+            }
           }
         } catch (error) {
           console.error("Failed to load armor:", error);
@@ -395,7 +1263,14 @@ const ModelDemo: React.FC<ModelDemoProps> = ({
     };
 
     loadModels();
-  }, [avatarUrl, armorUrl, helmetUrl, equipmentSlot, onModelsReady]);
+  }, [
+    avatarUrl,
+    armorUrl,
+    helmetUrl,
+    equipmentSlot,
+    vrmAnimation,
+    onModelsReady,
+  ]);
 
   // Apply wireframe
   useEffect(() => {
@@ -539,14 +1414,217 @@ const ModelDemo: React.FC<ModelDemoProps> = ({
     };
   }, [currentAnimation, isAnimationPlaying, animationGltf, avatarUrl]);
 
+  // Hidden VRM loading — load VRM (not displayed) for animation baking.
+  // The VRM provides the humanoid bone mapping and normalized bone system
+  // needed to retarget Mixamo animations. After baking, the VRM is only
+  // kept alive for re-baking when the user switches animations.
+  useEffect(() => {
+    if (!vrmAnimation || !vrmUrl) {
+      // Clean up hidden VRM and any playing baked animation
+      vrmRef.current = null;
+      vrmLoadedUrlRef.current = "";
+      setVrmReady(false);
+
+      // Stop baked animation mixer
+      if (vrmActionRef.current) {
+        vrmActionRef.current.fadeOut(0.2);
+        vrmActionRef.current = null;
+      }
+      if (vrmMixerRef.current) {
+        vrmMixerRef.current.stopAllAction();
+        vrmMixerRef.current = null;
+      }
+
+      // Reset GLB skeleton to bind pose when stopping animation
+      avatarRef.current?.traverse((child) => {
+        if (child instanceof THREE.SkinnedMesh) {
+          child.skeleton.pose();
+        }
+      });
+      return;
+    }
+
+    // Don't reload if same VRM URL is already loaded
+    if (vrmLoadedUrlRef.current === vrmUrl && vrmRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    const loadHiddenVrm = async () => {
+      try {
+        console.log("[ArmorViewer] Loading hidden VRM for baking:", vrmUrl);
+        const vrmLoader = new GLTFLoader();
+        vrmLoader.register((parser) => new VRMLoaderPlugin(parser));
+
+        const gltf = await vrmLoader.loadAsync(vrmUrl);
+        if (cancelled) return;
+
+        const vrm = gltf.userData.vrm as VRM;
+        if (!vrm) {
+          console.error("[ArmorViewer] No VRM data found in file");
+          return;
+        }
+
+        // Detect VRM version and rotate if needed
+        const meta = vrm.meta as unknown as Record<string, unknown>;
+        const vrmVersion =
+          (meta?.metaVersion as string) ||
+          ((meta?.specVersion as string)?.startsWith("0.") ? "0" : "1");
+        if (vrmVersion === "0") {
+          VRMUtils.rotateVRM0(vrm);
+        }
+
+        // Calculate rootToHips (once, stored for retargeting)
+        const humanoid = vrm.humanoid;
+        const normalizedRestPose = (
+          humanoid as unknown as Record<string, unknown>
+        )?.normalizedRestPose as
+          | Record<string, { position: number[] }>
+          | undefined;
+        if (normalizedRestPose?.hips) {
+          rootToHipsRef.current = normalizedRestPose.hips.position[1];
+        } else {
+          const hipsNode = humanoid?.getRawBoneNode("hips");
+          if (hipsNode) {
+            const v = new THREE.Vector3();
+            hipsNode.getWorldPosition(v);
+            rootToHipsRef.current = v.y;
+          }
+        }
+        console.log(
+          "[ArmorViewer] Hidden VRM rootToHips:",
+          rootToHipsRef.current,
+        );
+
+        // Store VRM (no mixer needed here — baking creates its own temp mixer)
+        vrmRef.current = vrm;
+        vrmLoadedUrlRef.current = vrmUrl;
+        setVrmReady(true);
+        console.log("[ArmorViewer] Hidden VRM loaded, ready for baking");
+      } catch (err) {
+        console.error("[ArmorViewer] Failed to load hidden VRM:", err);
+      }
+    };
+
+    loadHiddenVrm();
+    return () => {
+      cancelled = true;
+    };
+  }, [vrmUrl, vrmAnimation]);
+
+  // Load emote, bake animation for GLB, and play on GLB mixer.
+  // Baking samples the VRM pipeline (retarget → normalized bones → raw bones)
+  // and creates a new clip that directly drives GLB bone names.
+  useEffect(() => {
+    if (!vrmAnimation || !vrmRef.current) {
+      // Stop any playing baked animation
+      if (vrmActionRef.current) {
+        vrmActionRef.current.fadeOut(0.2);
+        vrmActionRef.current = null;
+      }
+      if (vrmMixerRef.current) {
+        vrmMixerRef.current.stopAllAction();
+        vrmMixerRef.current = null;
+      }
+      return;
+    }
+
+    if (!avatarRef.current) return;
+
+    const vrm = vrmRef.current;
+    const glbRoot = avatarRef.current;
+
+    let cancelled = false;
+
+    const loadAndBakeEmote = async () => {
+      try {
+        const animUrl = `/emotes/emote-${vrmAnimation}.glb`;
+        console.log(`[ArmorViewer] Loading emote for baking: ${animUrl}`);
+
+        const animLoader = new GLTFLoader();
+        const gltf = await animLoader.loadAsync(animUrl);
+
+        if (cancelled) return;
+
+        if (!gltf.animations || gltf.animations.length === 0) {
+          console.error("[ArmorViewer] No animations found in emote GLB");
+          return;
+        }
+
+        // Step 1: Retarget Mixamo → VRM normalized bone clip
+        const retargetedClip = retargetAnimation(
+          gltf,
+          vrm,
+          rootToHipsRef.current,
+        );
+        if (!retargetedClip) {
+          console.error("[ArmorViewer] Animation retargeting failed");
+          return;
+        }
+
+        // Step 2: Bake — sample VRM pipeline to produce GLB-compatible clip
+        const bakedClip = bakeAnimationForGLB(vrm, retargetedClip, glbRoot);
+        if (!bakedClip) {
+          console.error("[ArmorViewer] Animation baking failed");
+          return;
+        }
+
+        if (cancelled) return;
+
+        // Step 3: Play baked clip on GLB avatar's mixer
+        if (vrmActionRef.current) {
+          vrmActionRef.current.fadeOut(0.2);
+        }
+        if (vrmMixerRef.current) {
+          vrmMixerRef.current.stopAllAction();
+        }
+
+        const glbMixer = new THREE.AnimationMixer(glbRoot);
+        const action = glbMixer.clipAction(bakedClip);
+        action.reset().fadeIn(0.2).setLoop(THREE.LoopRepeat, Infinity).play();
+
+        vrmMixerRef.current = glbMixer;
+        vrmActionRef.current = action;
+
+        console.log(
+          `[ArmorViewer] Playing baked animation: ${vrmAnimation} (${bakedClip.duration}s, ${bakedClip.tracks.length} tracks)`,
+        );
+      } catch (err) {
+        console.error("[ArmorViewer] Failed to load/bake emote:", err);
+      }
+    };
+
+    loadAndBakeEmote();
+
+    return () => {
+      cancelled = true;
+      if (vrmActionRef.current) {
+        vrmActionRef.current.fadeOut(0.2);
+        vrmActionRef.current = null;
+      }
+      if (vrmMixerRef.current) {
+        vrmMixerRef.current.stopAllAction();
+        vrmMixerRef.current = null;
+      }
+    };
+  }, [vrmAnimation, vrmReady]);
+
   // Animation update loop
-  useFrame((state, delta) => {
+  useFrame((_state, delta) => {
+    // Standard animation mixer (non-VRM mode)
     if (
       mixerRef.current &&
       isAnimationPlaying &&
       currentAnimation !== "tpose"
     ) {
       mixerRef.current.update(delta);
+    }
+
+    // VRM baked animation: just advance the GLB mixer
+    // The baked clip directly drives GLB bone transforms — no per-frame
+    // bone copying needed. Armor shares the same skeleton, so it deforms too.
+    if (vrmAnimation && vrmMixerRef.current) {
+      vrmMixerRef.current.update(delta);
     }
   });
 
@@ -566,8 +1644,11 @@ interface SceneProps {
   helmetUrl?: string;
   showWireframe: boolean;
   equipmentSlot: "Head" | "Spine2" | "Pelvis";
+  armorIsRigged?: boolean;
   currentAnimation: "tpose" | "walking" | "running";
   isAnimationPlaying: boolean;
+  vrmAnimation?: string | null;
+  vrmUrl?: string;
   visualizationGroup?: THREE.Group;
   onModelsLoaded: (meshes: {
     avatar: THREE.SkinnedMesh | null;
@@ -584,8 +1665,11 @@ const Scene: React.FC<SceneProps> = ({
   helmetUrl,
   showWireframe,
   equipmentSlot,
+  armorIsRigged,
   currentAnimation,
   isAnimationPlaying,
+  vrmAnimation,
+  vrmUrl,
   visualizationGroup,
   onModelsLoaded,
 }) => {
@@ -627,8 +1711,11 @@ const Scene: React.FC<SceneProps> = ({
         helmetUrl={helmetUrl}
         showWireframe={showWireframe}
         equipmentSlot={equipmentSlot}
+        armorIsRigged={armorIsRigged}
         currentAnimation={currentAnimation}
         isAnimationPlaying={isAnimationPlaying}
+        vrmAnimation={vrmAnimation}
+        vrmUrl={vrmUrl}
         onModelsReady={handleModelsReady}
       />
 
@@ -651,7 +1738,11 @@ export interface ArmorFittingViewerRef {
   };
 
   // Fitting operations
-  performFitting: (params: ArmorFittingParams) => void;
+  performFitting: (params: ArmorFittingParams) => Promise<void>;
+  performSmartFitting: (
+    params: Partial<SmartFittingParameters>,
+  ) => Promise<void>;
+  performWasmFitting: (params: Partial<WasmFittingParameters>) => Promise<void>;
   performHelmetFitting: (params: HelmetFittingParams) => Promise<void>;
   attachHelmetToHead: () => void;
   detachHelmetFromHead: () => void;
@@ -662,6 +1753,9 @@ export interface ArmorFittingViewerRef {
 
   // Transform operations
   resetTransform: () => void;
+
+  // Equipment processing preview
+  performEquipmentPreview: (riggedGlbUrl: string) => Promise<void>;
 
   // Clear specific meshes
   clearHelmet: () => void;
@@ -674,10 +1768,13 @@ interface ArmorFittingViewerProps {
   helmetUrl?: string;
   showWireframe: boolean;
   equipmentSlot: "Head" | "Spine2" | "Pelvis";
+  armorIsRigged?: boolean;
   selectedAvatar?: { name: string } | null;
   onModelsLoaded?: () => void;
   currentAnimation?: "tpose" | "walking" | "running";
   isAnimationPlaying?: boolean;
+  vrmAnimation?: string | null;
+  vrmUrl?: string;
   visualizationMode?: "none" | "regions" | "collisions" | "weights";
   selectedBone?: number;
   onBodyRegionsDetected?: (regions: Map<string, any>) => void;
@@ -694,7 +1791,7 @@ export const ArmorFittingViewer = forwardRef<
     helmetUrl,
     showWireframe,
     equipmentSlot,
-    selectedAvatar,
+    armorIsRigged,
   } = props;
 
   // Mesh references
@@ -705,6 +1802,8 @@ export const ArmorFittingViewer = forwardRef<
 
   // Services
   const genericFittingService = useRef(new MeshFittingService());
+  const singlePassFittingService = useRef(new SinglePassFittingService());
+  const wasmFittingService = useRef(new WasmFittingService());
   const armorFittingService = useRef(new ArmorFittingService());
   // const weightTransferService = useRef(new WeightTransferService())
 
@@ -829,6 +1928,19 @@ export const ArmorFittingViewer = forwardRef<
       originalArmorGeometryRef.current = meshes.armor.geometry.clone();
     }
 
+    // Auto-position armor at the torso so it appears in the right place immediately.
+    // Skip for rigged armor — its built-in skeleton already positions vertices
+    // correctly. Calling autoPositionArmorOnTorso on rigged armor would
+    // double-transform it (skeleton + auto-position), pushing it inside the torso.
+    if (
+      meshes.avatar &&
+      meshes.armor &&
+      meshes.avatar.skeleton &&
+      !armorIsRigged
+    ) {
+      autoPositionArmorOnTorso(meshes.avatar, meshes.armor);
+    }
+
     // Use the original transform that was captured when helmet was loaded
     if (meshes.helmet) {
       if (meshes.helmet.userData.originalTransform) {
@@ -890,23 +2002,8 @@ export const ArmorFittingViewer = forwardRef<
       lastComputedAvatar.current = props.avatarUrl || null;
     }
 
-    // Compute collisions if either mesh changed
-    if (
-      meshes.avatar &&
-      meshes.armor &&
-      (props.avatarUrl !== lastComputedAvatar.current ||
-        props.armorUrl !== lastComputedArmor.current)
-    ) {
-      console.log("Detecting collisions for current meshes...");
-      const detectedCollisions = armorFittingService.current.detectCollisions(
-        meshes.avatar,
-        meshes.armor,
-      );
-      setCollisions(detectedCollisions);
-      props.onCollisionsDetected?.(detectedCollisions);
-      lastComputedArmor.current = props.armorUrl || null;
-      console.log(`Detected ${detectedCollisions.length} collisions`);
-    }
+    // Collision detection deferred — computed after fitting or when visualization mode is "collisions"
+    lastComputedArmor.current = props.armorUrl || null;
 
     props.onModelsLoaded?.();
   };
@@ -1109,6 +2206,16 @@ export const ArmorFittingViewer = forwardRef<
         visualizeBodyRegions();
         break;
       case "collisions":
+        // Lazy collision detection: compute on first visualization request
+        if (!collisions && avatarMeshRef.current && armorMeshRef.current) {
+          const detectedCollisions =
+            armorFittingService.current.detectCollisions(
+              avatarMeshRef.current,
+              armorMeshRef.current,
+            );
+          setCollisions(detectedCollisions);
+          props.onCollisionsDetected?.(detectedCollisions);
+        }
         visualizeCollisions();
         break;
       case "weights":
@@ -1132,7 +2239,7 @@ export const ArmorFittingViewer = forwardRef<
       scene: sceneRef.current,
     }),
 
-    performFitting: (params: ArmorFittingParams) => {
+    performFitting: async (params: ArmorFittingParams) => {
       if (
         !avatarMeshRef.current ||
         !armorMeshRef.current ||
@@ -1181,285 +2288,110 @@ export const ArmorFittingViewer = forwardRef<
       const avatarParent = avatarMesh.parent;
       const armorParent = armorMesh.parent;
 
-      // Log current state
-      console.log("=== PRE-FITTING STATE CHECK ===");
-      console.log("Armor scale:", armorMesh.scale.clone());
-      console.log("Armor position:", armorMesh.position.clone());
-      console.log("Armor parent scale:", armorMesh.parent?.scale.clone());
-      console.log("Has been fitted before:", armorMesh.userData.hasBeenFitted);
-
-      // Ensure armor starts at scale 1,1,1
-      if (
-        armorMesh.scale.x !== 1 ||
-        armorMesh.scale.y !== 1 ||
-        armorMesh.scale.z !== 1
-      ) {
-        console.warn(
-          "⚠️ Armor scale is not 1,1,1! Resetting scale before fitting.",
-        );
-        armorMesh.scale.set(1, 1, 1);
-        armorMesh.updateMatrixWorld(true);
-      }
-
-      // Calculate scale ratio between avatar and armor
-      const calculateScaleRatio = (
-        avatar: THREE.SkinnedMesh,
-        armor: THREE.Mesh,
-      ): number => {
-        const avatarBounds = new THREE.Box3().setFromObject(avatar);
-        const armorBounds = new THREE.Box3().setFromObject(armor);
-        const avatarSize = avatarBounds.getSize(new THREE.Vector3());
-        const armorSize = armorBounds.getSize(new THREE.Vector3());
-        const avgAvatarDim = (avatarSize.x + avatarSize.y + avatarSize.z) / 3;
-        const avgArmorDim = (armorSize.x + armorSize.y + armorSize.z) / 3;
-        return avgArmorDim / avgAvatarDim;
-      };
-
-      // Check and normalize scales
-      console.log("=== SCALE ANALYSIS ===");
-      const scaleRatio = calculateScaleRatio(avatarMesh, armorMesh);
-      console.log("Scale ratio (armor/avatar):", scaleRatio);
-
-      // Normalize armor scale if needed
-      if (Math.abs(scaleRatio - 1.0) > 0.1) {
-        console.warn(
-          `SCALE MISMATCH DETECTED: Armor is ${scaleRatio.toFixed(1)}x the size of avatar`,
-        );
-        const normalizationFactor = 1 / scaleRatio;
-        armorMesh.scale.multiplyScalar(normalizationFactor);
-        armorMesh.updateMatrixWorld(true);
-        console.log("Applied normalization factor:", normalizationFactor);
-      }
-
-      // Calculate torso bounds - matching debugger implementation
-      const calculateTorsoBounds = (avatarMesh: THREE.SkinnedMesh) => {
-        const avatarBounds = new THREE.Box3().setFromObject(avatarMesh);
-        const avatarSize = avatarBounds.getSize(new THREE.Vector3());
-        const avatarCenter = avatarBounds.getCenter(new THREE.Vector3());
-
-        console.log("Avatar bounds:", avatarBounds);
-        console.log("Avatar height:", avatarSize.y);
-
-        const skeleton = avatarMesh.skeleton;
-        if (!skeleton) {
-          console.error("Avatar has no skeleton!");
-          return null;
-        }
-
-        // Update transforms
-        avatarMesh.updateMatrix();
-        avatarMesh.updateMatrixWorld(true);
-        skeleton.bones.forEach((bone) => {
-          bone.updateMatrixWorld(true);
-        });
-
-        // Use simple proportional calculation
-        let torsoTop = 0;
-        let torsoBottom = 0;
-        let headY: number | null = null;
-        let shoulderY: number | null = null;
-        let chestY: number | null = null;
-
-        skeleton.bones.forEach((bone) => {
-          const boneName = bone.name.toLowerCase();
-          const bonePos = new THREE.Vector3();
-          bone.getWorldPosition(bonePos);
-
-          if (boneName.includes("head") && !boneName.includes("end")) {
-            if (headY === null || bonePos.y > headY) {
-              headY = bonePos.y;
-            }
-          }
-          if (boneName.includes("shoulder") || boneName.includes("clavicle")) {
-            if (shoulderY === null || bonePos.y > shoulderY) {
-              shoulderY = bonePos.y;
-            }
-          }
-          if (boneName.includes("spine02") || boneName.includes("chest")) {
-            chestY = bonePos.y;
-          }
-        });
-
-        // Detect character anatomy type
-        let isHunchedCharacter = false;
-        if (headY !== null && shoulderY !== null) {
-          const headShoulderDiff = Math.abs(headY - shoulderY);
-          isHunchedCharacter = headShoulderDiff < 0.1;
-          console.log(
-            `Head Y: ${(headY as number).toFixed(3)}, Shoulder Y: ${(shoulderY as number).toFixed(3)}, Difference: ${headShoulderDiff.toFixed(3)}`,
-          );
-          if (isHunchedCharacter) {
-            console.log("⚠️ Detected hunched character anatomy");
-          }
-        }
-
-        if (isHunchedCharacter && chestY !== null) {
-          torsoTop = chestY + 0.05;
-          torsoBottom = avatarBounds.min.y + avatarSize.y * 0.15;
-        } else if (shoulderY !== null && !isHunchedCharacter) {
-          torsoTop = shoulderY;
-          torsoBottom = avatarBounds.min.y + avatarSize.y * 0.15;
-        } else {
-          torsoBottom = avatarBounds.min.y + avatarSize.y * 0.15;
-          torsoTop = avatarBounds.min.y + avatarSize.y * 0.6;
-        }
-
-        const torsoCenter = new THREE.Vector3(
-          avatarCenter.x,
-          (torsoBottom + torsoTop) / 2,
-          avatarCenter.z,
-        );
-        const torsoSize = new THREE.Vector3(
-          avatarSize.x * 0.6,
-          torsoTop - torsoBottom,
-          avatarSize.z * 0.5,
-        );
-        const torsoBounds = new THREE.Box3();
-        torsoBounds.setFromCenterAndSize(torsoCenter, torsoSize);
-
-        console.log(
-          "Torso Y range:",
-          torsoBounds.min.y.toFixed(3),
-          "to",
-          torsoBounds.max.y.toFixed(3),
-        );
-        console.log("Torso center:", torsoCenter);
-        console.log("Torso size:", torsoSize);
-
-        return { torsoCenter, torsoSize, torsoBounds };
-      };
-
-      const torsoInfo = calculateTorsoBounds(avatarMesh);
-      if (!torsoInfo) {
-        console.error("Could not calculate torso bounds");
-        return;
-      }
-
-      const { torsoCenter, torsoSize } = torsoInfo;
-
-      // Scale and position armor
-      console.log("=== SCALING AND POSITIONING ARMOR ===");
-
-      // Get armor bounds
-      const armorBounds = new THREE.Box3().setFromObject(armorMesh);
-      const armorSize = armorBounds.getSize(new THREE.Vector3());
-      const armorCenter = armorBounds.getCenter(new THREE.Vector3());
-
-      console.log("Initial armor center:", armorCenter);
-      console.log("Initial armor size:", armorSize);
-      console.log("Target torso center:", torsoCenter);
-      console.log("Target torso size:", torsoSize);
-
-      // Calculate volume-based scale
-      const calculateVolumeBasedScale = (
-        sourceSize: THREE.Vector3,
-        targetSize: THREE.Vector3,
-        characterProfile: { scaleBoost: number } = { scaleBoost: 1.0 },
-      ): number => {
-        const sourceVolume = sourceSize.x * sourceSize.y * sourceSize.z;
-        const targetVolume = targetSize.x * targetSize.y * targetSize.z;
-        const volumeRatio = Math.pow(targetVolume / sourceVolume, 1 / 3);
-        const heightRatio = targetSize.y / sourceSize.y;
-
-        // Blend volume and height ratios
-        return (
-          (volumeRatio * 0.7 + heightRatio * 0.3) * characterProfile.scaleBoost
-        );
-      };
-
-      // Get character-specific adjustments
-      const characterProfile = selectedAvatar?.name
-        ?.toLowerCase()
-        .includes("goblin")
-        ? { scaleBoost: 0.7 }
-        : { scaleBoost: 1.0 };
-
-      // Volume-based scaling
-      const improvedFinalScale = Math.max(
-        calculateVolumeBasedScale(armorSize, torsoSize, characterProfile),
-        0.5, // Minimum scale
-      );
-
-      console.log("Volume-based scale:", improvedFinalScale.toFixed(3));
-
       // Restore original geometry if previously fitted
       if (
         originalArmorGeometryRef.current &&
         armorMesh.userData.hasBeenFitted
       ) {
-        console.log("Restoring original geometry before scaling");
+        console.log("Restoring original geometry before re-fitting");
         armorMesh.geometry.dispose();
         armorMesh.geometry = originalArmorGeometryRef.current.clone();
         armorMesh.geometry.computeVertexNormals();
       }
 
-      // Apply scale
-      armorMesh.scale.multiplyScalar(improvedFinalScale);
-      armorMesh.updateMatrixWorld(true);
+      // Reset mesh-level scale/position (group scale from Step 1 stays)
+      armorMesh.scale.set(1, 1, 1);
+      armorMesh.position.set(0, 0, 0);
+      // Use updateWorldMatrix(true, true) to ensure ancestors are updated first,
+      // then propagate down — this is critical for correct Box3.setFromObject results.
+      armorMesh.updateWorldMatrix(true, true);
 
-      // Get new bounds after scaling
-      const scaledBounds = new THREE.Box3().setFromObject(armorMesh);
-      const scaledCenter = scaledBounds.getCenter(new THREE.Vector3());
+      // Calculate torso bounds
+      const torsoInfo = calculateTorsoBounds(avatarMesh);
+      if (!torsoInfo) {
+        console.error("Could not calculate torso bounds");
+        return;
+      }
+      const { torsoCenter, torsoSize, torsoBounds } = torsoInfo;
 
-      // Calculate position offset
-      const currentMeshPos = armorMesh.position.clone();
-      const geometryOffset = scaledCenter.clone().sub(currentMeshPos);
-      const targetMeshPosition = torsoCenter.clone().sub(geometryOffset);
-      const centerOffset = targetMeshPosition.clone().sub(currentMeshPos);
+      // Scale armor to roughly match the body surface.
+      // Torso bounds come from bone positions (inside the flesh), so add ~15%
+      // to approximate the actual surface. With normal projection we don't need
+      // oversizing — keeping it close preserves arm hole alignment.
+      const armorBounds = new THREE.Box3().setFromObject(armorMesh);
+      const armorSize = armorBounds.getSize(new THREE.Vector3());
 
-      // Smart vertical adjustments
-      const scaledArmorHeight = scaledBounds.max.y - scaledBounds.min.y;
-      const armorCenterY = scaledCenter.y + centerOffset.y;
-      const armorTopY = armorCenterY + scaledArmorHeight / 2;
-      const armorBottomY = armorCenterY - scaledArmorHeight / 2;
+      console.log("=== SCALING AND POSITIONING ARMOR ===");
+      console.log("Armor world size:", armorSize);
+      console.log("Target torso size:", torsoSize);
 
-      let verticalAdjustment = 0;
-      const torsoTop = torsoCenter.y + torsoSize.y / 2;
-      const torsoBottom = torsoCenter.y - torsoSize.y / 2;
-
-      if (armorTopY > torsoTop + 0.1) {
-        const overhang = armorTopY - (torsoTop + 0.1);
-        verticalAdjustment = -overhang;
-        console.log(
-          "Armor would extend above torso by",
-          overhang.toFixed(3),
-          "- adjusting down",
-        );
-      } else if (armorBottomY < torsoBottom - 0.05) {
-        const underhang = torsoBottom - 0.05 - armorBottomY;
-        verticalAdjustment = underhang;
-        console.log(
-          "Armor would extend below torso by",
-          underhang.toFixed(3),
-          "- adjusting up",
-        );
+      if (armorSize.y > 0) {
+        const margin = 1.15; // Just above body surface; arm holes stay aligned
+        const scaleX =
+          armorSize.x > 0 ? (torsoSize.x * margin) / armorSize.x : 1;
+        const scaleY = (torsoSize.y * margin) / armorSize.y;
+        const scaleZ =
+          armorSize.z > 0 ? (torsoSize.z * margin) / armorSize.z : 1;
+        const scaleFactor = Math.max(scaleX, scaleY, scaleZ);
+        armorMesh.scale.setScalar(scaleFactor);
+        armorMesh.updateWorldMatrix(false, true);
+        console.log("Applied enclosing scale:", scaleFactor.toFixed(3));
       }
 
-      centerOffset.y += verticalAdjustment;
+      // Center armor on torso.
+      // CRITICAL: armorMesh.position is in parent-local space, but torsoCenter
+      // is in world space. Use parent.worldToLocal for correct conversion.
+      const scaledBounds = new THREE.Box3().setFromObject(armorMesh);
+      const scaledWorldCenter = scaledBounds.getCenter(new THREE.Vector3());
 
-      // Apply position offset
-      armorMesh.position.add(centerOffset);
-      armorMesh.updateMatrixWorld(true);
+      if (armorMesh.parent) {
+        const targetInParent = armorMesh.parent.worldToLocal(
+          torsoCenter.clone(),
+        );
+        const currentInParent =
+          armorMesh.parent.worldToLocal(scaledWorldCenter);
+        armorMesh.position.add(targetInParent.sub(currentInParent));
+      } else {
+        armorMesh.position.add(torsoCenter.clone().sub(scaledWorldCenter));
+      }
+      armorMesh.updateWorldMatrix(false, true);
 
       console.log("Positioned armor at:", armorMesh.position);
 
-      console.log("Applied scale:", improvedFinalScale);
+      // Compute a meaningful targetOffset based on body dimensions.
+      // The fitting service uses targetOffset for the final surface standoff.
+      // For visible armor, offset should be ~5-8% of torso depth.
+      const armorStandoff = Math.max(
+        torsoSize.z * 0.06, // 6% of torso depth
+        0.02, // absolute minimum for a 2-unit avatar
+      );
+      console.log("Armor standoff offset:", armorStandoff.toFixed(4));
 
       // Apply the fitting using the service
       try {
         const shrinkwrapParams = {
           ...params,
-          iterations: Math.min(params.iterations, 10),
-          stepSize: params.stepSize || 0.1,
-          targetOffset: params.targetOffset || 0.01,
+          iterations: Math.min(params.iterations, 5), // Fewer iterations with normal projection
+          stepSize: params.stepSize || 0.5, // Larger steps — projection is more accurate per-iteration
+          targetOffset: armorStandoff,
           sampleRate: params.sampleRate || 1.0,
-          smoothingStrength: params.smoothingStrength || 0.2,
+          smoothingStrength: params.smoothingStrength || 0.3,
+          relativeOffset: true,
+          relativeOffsetPercent: 0.08, // 8% of body width — visible armor thickness
+          laplacianSmoothing: true, // Topology-aware smoothing after each iteration
+          pushInteriorVertices: true,
+          // Pass torso bounds so fitting service constrains to torso region
+          targetBounds: torsoBounds,
+          constraintCenter: torsoCenter,
         };
 
         console.log("Shrinkwrap parameters:", shrinkwrapParams);
 
+        // Enable armor-specific intelligence (directional raycasting, arm hole detection)
+        armorMesh.userData.originalGeometry = originalArmorGeometryRef.current;
+
         // Perform the fitting
-        genericFittingService.current.fitMeshToTarget(
+        await genericFittingService.current.fitMeshToTarget(
           armorMesh,
           avatarMesh,
           shrinkwrapParams,
@@ -1497,6 +2429,241 @@ export const ArmorFittingViewer = forwardRef<
         if (armorParent && !armorMesh.parent) {
           armorParent.add(armorMesh);
         }
+      }
+    },
+
+    performSmartFitting: async (params: Partial<SmartFittingParameters>) => {
+      if (
+        !avatarMeshRef.current ||
+        !armorMeshRef.current ||
+        !sceneRef.current
+      ) {
+        console.error(
+          "Avatar, armor, or scene not available for smart fitting",
+        );
+        return;
+      }
+
+      const armorMesh = armorMeshRef.current;
+      const avatarMesh = avatarMeshRef.current;
+      const scene = sceneRef.current;
+
+      console.log("=== SMART ARMOR FITTING (Single-Pass BVH Projection) ===");
+
+      // Update scene matrices
+      scene.updateMatrixWorld(true);
+      scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.SkinnedMesh) {
+          obj.updateMatrix();
+          obj.updateMatrixWorld(true);
+        }
+      });
+
+      // Restore original geometry if previously fitted
+      if (
+        originalArmorGeometryRef.current &&
+        armorMesh.userData.hasBeenFitted
+      ) {
+        console.log("Restoring original geometry before re-fitting");
+        armorMesh.geometry.dispose();
+        armorMesh.geometry = originalArmorGeometryRef.current.clone();
+        armorMesh.geometry.computeVertexNormals();
+      }
+
+      // Reset mesh transform (group scale from loading stays)
+      armorMesh.scale.set(1, 1, 1);
+      armorMesh.position.set(0, 0, 0);
+      armorMesh.updateWorldMatrix(true, true);
+
+      // Calculate torso bounds for scaling/positioning
+      const torsoInfo = calculateTorsoBounds(avatarMesh);
+      if (!torsoInfo) {
+        console.error("Could not calculate torso bounds");
+        return;
+      }
+      const { torsoCenter, torsoSize, torsoBounds: _torsoBounds } = torsoInfo;
+
+      // Scale armor to be clearly OUTSIDE the body for shrink-wrap
+      const armorBounds = new THREE.Box3().setFromObject(armorMesh);
+      const armorSize = armorBounds.getSize(new THREE.Vector3());
+
+      if (armorSize.y > 0) {
+        const margin = 1.5;
+        const scaleX =
+          armorSize.x > 0 ? (torsoSize.x * margin) / armorSize.x : 1;
+        const scaleY = (torsoSize.y * margin) / armorSize.y;
+        const scaleZ =
+          armorSize.z > 0 ? (torsoSize.z * margin) / armorSize.z : 1;
+        const scaleFactor = Math.max(scaleX, scaleY, scaleZ, 1.0);
+        armorMesh.scale.setScalar(scaleFactor);
+        armorMesh.updateWorldMatrix(false, true);
+        console.log("Smart fit scale factor:", scaleFactor.toFixed(3));
+      }
+
+      // Center armor on torso
+      const scaledBounds = new THREE.Box3().setFromObject(armorMesh);
+      const scaledWorldCenter = scaledBounds.getCenter(new THREE.Vector3());
+
+      if (armorMesh.parent) {
+        const targetInParent = armorMesh.parent.worldToLocal(
+          torsoCenter.clone(),
+        );
+        const currentInParent =
+          armorMesh.parent.worldToLocal(scaledWorldCenter);
+        armorMesh.position.add(targetInParent.sub(currentInParent));
+      } else {
+        armorMesh.position.add(torsoCenter.clone().sub(scaledWorldCenter));
+      }
+      armorMesh.updateWorldMatrix(false, true);
+
+      // Run single-pass fitting
+      try {
+        await singlePassFittingService.current.fitArmor(
+          armorMesh,
+          avatarMesh,
+          params,
+        );
+
+        console.log("Smart fitting complete!");
+        armorMesh.userData.hasBeenFitted = true;
+        armorMesh.visible = true;
+
+        // Fix materials: fitting can invert some triangle winding,
+        // causing black spots with FrontSide culling. DoubleSide prevents this.
+        armorMesh.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            const mats = Array.isArray(child.material)
+              ? child.material
+              : [child.material];
+            mats.forEach((m) => {
+              if (m instanceof THREE.MeshStandardMaterial) {
+                m.side = THREE.DoubleSide;
+              }
+            });
+          }
+        });
+        armorMesh.updateMatrix();
+        armorMesh.updateMatrixWorld(true);
+        scene.updateMatrixWorld(true);
+      } catch (error) {
+        console.error("Smart fitting failed:", error);
+        throw error;
+      }
+    },
+
+    performWasmFitting: async (params: Partial<WasmFittingParameters>) => {
+      if (
+        !avatarMeshRef.current ||
+        !armorMeshRef.current ||
+        !sceneRef.current
+      ) {
+        console.error("Avatar, armor, or scene not available for SDF fitting");
+        return;
+      }
+
+      const armorMesh = armorMeshRef.current;
+      const avatarMesh = avatarMeshRef.current;
+      const scene = sceneRef.current;
+
+      console.log("=== SDF ARMOR FITTING (Signed Distance Field) ===");
+
+      // Update scene matrices
+      scene.updateMatrixWorld(true);
+      scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.SkinnedMesh) {
+          obj.updateMatrix();
+          obj.updateMatrixWorld(true);
+        }
+      });
+
+      // Restore original geometry if previously fitted
+      if (
+        originalArmorGeometryRef.current &&
+        armorMesh.userData.hasBeenFitted
+      ) {
+        console.log("Restoring original geometry before re-fitting");
+        armorMesh.geometry.dispose();
+        armorMesh.geometry = originalArmorGeometryRef.current.clone();
+        armorMesh.geometry.computeVertexNormals();
+      }
+
+      // Reset mesh transform
+      armorMesh.scale.set(1, 1, 1);
+      armorMesh.position.set(0, 0, 0);
+      armorMesh.updateWorldMatrix(true, true);
+
+      // Calculate torso bounds for scaling/positioning
+      const torsoInfo = calculateTorsoBounds(avatarMesh);
+      if (!torsoInfo) {
+        console.error("Could not calculate torso bounds");
+        return;
+      }
+      const { torsoCenter, torsoSize, torsoBounds: _torsoBounds } = torsoInfo;
+
+      // Scale armor to be clearly OUTSIDE the body for shrink-wrap
+      const armorBounds = new THREE.Box3().setFromObject(armorMesh);
+      const armorSize = armorBounds.getSize(new THREE.Vector3());
+
+      if (armorSize.y > 0) {
+        const margin = 1.5;
+        const scaleX =
+          armorSize.x > 0 ? (torsoSize.x * margin) / armorSize.x : 1;
+        const scaleY = (torsoSize.y * margin) / armorSize.y;
+        const scaleZ =
+          armorSize.z > 0 ? (torsoSize.z * margin) / armorSize.z : 1;
+        const scaleFactor = Math.max(scaleX, scaleY, scaleZ, 1.0);
+        armorMesh.scale.setScalar(scaleFactor);
+        armorMesh.updateWorldMatrix(false, true);
+        console.log("SDF fit scale factor:", scaleFactor.toFixed(3));
+      }
+
+      // Center armor on torso
+      const scaledBounds = new THREE.Box3().setFromObject(armorMesh);
+      const scaledWorldCenter = scaledBounds.getCenter(new THREE.Vector3());
+
+      if (armorMesh.parent) {
+        const targetInParent = armorMesh.parent.worldToLocal(
+          torsoCenter.clone(),
+        );
+        const currentInParent =
+          armorMesh.parent.worldToLocal(scaledWorldCenter);
+        armorMesh.position.add(targetInParent.sub(currentInParent));
+      } else {
+        armorMesh.position.add(torsoCenter.clone().sub(scaledWorldCenter));
+      }
+      armorMesh.updateWorldMatrix(false, true);
+
+      // Run SDF fitting
+      try {
+        await wasmFittingService.current.fitArmor(
+          armorMesh,
+          avatarMesh,
+          params,
+        );
+
+        console.log("SDF fitting complete!");
+        armorMesh.userData.hasBeenFitted = true;
+        armorMesh.visible = true;
+
+        // Fix materials
+        armorMesh.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            const mats = Array.isArray(child.material)
+              ? child.material
+              : [child.material];
+            mats.forEach((m) => {
+              if (m instanceof THREE.MeshStandardMaterial) {
+                m.side = THREE.DoubleSide;
+              }
+            });
+          }
+        });
+        armorMesh.updateMatrix();
+        armorMesh.updateMatrixWorld(true);
+        scene.updateMatrixWorld(true);
+      } catch (error) {
+        console.error("SDF fitting failed:", error);
+        throw error;
       }
     },
 
@@ -2013,6 +3180,91 @@ export const ArmorFittingViewer = forwardRef<
       // Note: loadedUrlsRef is in ModelDemo scope, will be cleared on next render
     },
 
+    performEquipmentPreview: async (riggedGlbUrl: string) => {
+      if (!avatarMeshRef.current || !sceneRef.current) {
+        console.error("Avatar or scene not available for equipment preview");
+        return;
+      }
+
+      const loader = new GLTFLoader();
+      const gltf = await new Promise<GLTF>((resolve, reject) => {
+        loader.load(riggedGlbUrl, resolve, undefined, reject);
+      });
+
+      // Find the SkinnedMesh in the rigged GLB
+      let foundSkinnedMesh: THREE.SkinnedMesh | null = null;
+      gltf.scene.traverse((child) => {
+        if (child instanceof THREE.SkinnedMesh && !foundSkinnedMesh) {
+          foundSkinnedMesh = child;
+        }
+      });
+
+      if (!foundSkinnedMesh) {
+        // Fall back to regular mesh if no skinned mesh
+        let regularMesh: THREE.Mesh | null = null;
+        gltf.scene.traverse((child) => {
+          if (child instanceof THREE.Mesh && !regularMesh) {
+            regularMesh = child;
+          }
+        });
+
+        if (regularMesh) {
+          // Display as regular mesh overlay
+          sceneRef.current.add(gltf.scene);
+          console.log("Equipment preview loaded as regular mesh");
+          return;
+        }
+
+        throw new Error("No mesh found in rigged GLB");
+      }
+
+      const riggedMesh = foundSkinnedMesh as THREE.SkinnedMesh;
+
+      // If avatar has a skeleton, remap the rigged mesh's bone indices
+      const avatarMesh = avatarMeshRef.current;
+      if (avatarMesh.skeleton) {
+        const avatarBoneNames = avatarMesh.skeleton.bones.map(
+          (b: THREE.Bone) => b.name,
+        );
+        const riggedBoneNames = riggedMesh.skeleton.bones.map(
+          (b: THREE.Bone) => b.name,
+        );
+
+        // Build index mapping: rigged bone index → avatar bone index
+        const indexMap = new Map<number, number>();
+        for (let i = 0; i < riggedBoneNames.length; i++) {
+          const avatarIdx = avatarBoneNames.indexOf(riggedBoneNames[i]);
+          if (avatarIdx !== -1) {
+            indexMap.set(i, avatarIdx);
+          }
+        }
+
+        // Remap skin indices in the geometry
+        const skinIndex = riggedMesh.geometry.getAttribute("skinIndex");
+        if (skinIndex) {
+          for (let i = 0; i < skinIndex.count; i++) {
+            for (let j = 0; j < skinIndex.itemSize; j++) {
+              const oldIdx = skinIndex.getComponent(i, j);
+              const newIdx = indexMap.get(oldIdx);
+              if (newIdx !== undefined) {
+                skinIndex.setComponent(i, j, newIdx);
+              }
+            }
+          }
+          skinIndex.needsUpdate = true;
+        }
+
+        // Bind to avatar's skeleton (pass bindMatrix to prevent calculateInverses)
+        riggedMesh.bind(avatarMesh.skeleton, riggedMesh.bindMatrix);
+      }
+
+      // Add to scene
+      sceneRef.current.add(riggedMesh);
+      console.log("Equipment preview loaded with skeleton binding");
+
+      notify.success("Rigged equipment preview loaded");
+    },
+
     clearArmor: () => {
       if (armorMeshRef.current) {
         // Remove from scene
@@ -2053,8 +3305,11 @@ export const ArmorFittingViewer = forwardRef<
           helmetUrl={helmetUrl}
           showWireframe={showWireframe}
           equipmentSlot={equipmentSlot}
+          armorIsRigged={armorIsRigged}
           currentAnimation={props.currentAnimation || "tpose"}
           isAnimationPlaying={props.isAnimationPlaying || false}
+          vrmAnimation={props.vrmAnimation}
+          vrmUrl={props.vrmUrl}
           visualizationGroup={visualizationGroupRef.current}
           onModelsLoaded={handleModelsLoaded}
         />

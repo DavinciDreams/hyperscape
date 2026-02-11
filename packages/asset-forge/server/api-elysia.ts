@@ -43,6 +43,8 @@ import { voiceGenerationRoutes } from "./routes/voice-generation";
 import { musicRoutes } from "./routes/music";
 import { soundEffectsRoutes } from "./routes/sound-effects";
 import { contentGenerationRoutes } from "./routes/content-generation";
+import { createEquipmentProcessingRoutes } from "./routes/equipment-processing";
+import { EquipmentProcessingService } from "./services/EquipmentProcessingService";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +65,13 @@ const retextureService = new RetextureService({
     process.env.IMAGE_SERVER_URL || `http://localhost:${API_PORT}`,
 });
 const generationService = new GenerationService();
+const equipmentProcessingService = new EquipmentProcessingService(
+  path.join(ROOT_DIR, "gdd-assets"),
+  path.join(ROOT_DIR, "reference"),
+);
+
+// Initialize equipment processing (checks Docker, builds image if needed — non-blocking)
+equipmentProcessingService.initialize();
 
 // Create Elysia app
 const app = new Elysia()
@@ -235,6 +244,14 @@ const app = new Elysia()
     }),
   )
 
+  // Static file serving - emote animations (for equipment animation preview)
+  .use(
+    staticPlugin({
+      assets: path.resolve(ROOT_DIR, "../server/world/assets/emotes"),
+      prefix: "/emotes",
+    }),
+  )
+
   // Static file serving - public assets (emotes, rigs, etc.)
   .use(
     staticPlugin({
@@ -257,6 +274,7 @@ const app = new Elysia()
   .use(musicRoutes)
   .use(soundEffectsRoutes)
   .use(contentGenerationRoutes)
+  .use(createEquipmentProcessingRoutes(equipmentProcessingService))
 
   // Start server
   .listen(API_PORT);

@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  blender-processor:
+    build:
+      context: ./docker/blender
+      dockerfile: Dockerfile
+    image: hyperscape-blender-processor:latest
+    volumes:
+      - ./reference:/data/reference:ro
+      - ./gdd-assets:/data/gdd-assets
+    # Default entrypoint expects CLI args after --
+    # Override command per-invocation via docker run
+    command: ["--help"]

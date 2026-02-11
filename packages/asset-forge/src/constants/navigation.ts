@@ -7,6 +7,9 @@ export const NAVIGATION_VIEWS = {
   EQUIPMENT: "equipment",
   HAND_RIGGING: "handRigging",
   ARMOR_FITTING: "armorFitting",
+  SMART_FITTING: "smartFitting",
+  WASM_FITTING: "wasmFitting",
+  EQUIPMENT_PROCESSING: "equipmentProcessing",
   RETARGET_ANIMATE: "retargetAnimate",
   BATCH_SPRITES: "batchSprites",
 } as const satisfies Record<string, NavigationView>;

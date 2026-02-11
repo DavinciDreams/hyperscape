@@ -58,7 +58,7 @@ export function useArmorFitting({
   fittingParameters,
   selectedAvatar,
 }: ArmorFittingProps) {
-  const performArmorFitting = () => {
+  const performArmorFitting = async () => {
     if (!sceneRef.current || !armorMeshRef.current || !avatarMeshRef.current) {
       console.error("Scene, armor, or avatar not available");
       return;
@@ -166,7 +166,7 @@ export function useArmorFitting({
       }
 
       // Perform the fitting
-      fittingService.current.fitMeshToTarget(
+      await fittingService.current.fitMeshToTarget(
         armorMesh,
         avatarMesh,
         shrinkwrapParams,
@@ -381,56 +381,198 @@ function calculateTorsoBounds(avatarMesh: THREE.SkinnedMesh): {
     bone.updateMatrixWorld(true);
   });
 
-  // Use simple proportional calculation
-  let torsoTop = 0;
-  let torsoBottom = 0;
-  let headY: number | null = null;
-  let shoulderY: number | null = null;
-  let chestY: number | null = null;
+  // Bone role matching supporting: VRM (hips, spine, chest, upperChest, neck),
+  // VRoid (J_Bip_C_Hips), Mixamo (mixamorig:Hips), Meshy (Hips, Spine01, Spine02),
+  // Blender (spine.001), DEF- prefix, generic (Hips, Spine, Chest)
+  const matchesBoneRole = (
+    boneName: string,
+    role:
+      | "hips"
+      | "spine"
+      | "chest"
+      | "upperChest"
+      | "neck"
+      | "head"
+      | "shoulder",
+  ): boolean => {
+    const lower = boneName.toLowerCase();
+    const stripped = lower
+      .replace(/^mixamorig[_:]?/i, "")
+      .replace(/^j_bip_[clr]_/i, "")
+      .replace(/^def[_-]/i, "");
+
+    switch (role) {
+      case "hips":
+        return (
+          stripped === "hips" ||
+          stripped === "hip" ||
+          stripped === "pelvis" ||
+          lower === "hips" ||
+          lower === "pelvis"
+        );
+      case "spine":
+        return (
+          stripped === "spine" ||
+          stripped === "spine001" ||
+          stripped === "spine.001"
+        );
+      case "chest":
+        return (
+          stripped === "chest" ||
+          stripped === "spine1" ||
+          stripped === "spine01" ||
+          stripped === "spine002" ||
+          stripped === "spine.002"
+        );
+      case "upperChest":
+        return (
+          stripped === "upperchest" ||
+          stripped === "upper_chest" ||
+          stripped === "spine2" ||
+          stripped === "spine02" ||
+          stripped === "spine003" ||
+          stripped === "spine.003"
+        );
+      case "neck":
+        return stripped === "neck";
+      case "head":
+        return (
+          (stripped === "head" || stripped.startsWith("head")) &&
+          !stripped.includes("end") &&
+          !stripped.includes("_end")
+        );
+      case "shoulder":
+        return stripped.includes("shoulder") || stripped.includes("clavicle");
+    }
+  };
+
+  // Find bone positions by role
+  type BoneInfo = { y: number; pos: THREE.Vector3 };
+  let hips: BoneInfo | null = null;
+  let spine: BoneInfo | null = null;
+  let chest: BoneInfo | null = null;
+  let upperChest: BoneInfo | null = null;
+  let neck: BoneInfo | null = null;
+  let head: BoneInfo | null = null;
+  let leftShoulder: BoneInfo | null = null;
+  let rightShoulder: BoneInfo | null = null;
 
   skeleton.bones.forEach((bone) => {
-    const boneName = bone.name.toLowerCase();
     const bonePos = new THREE.Vector3();
     bone.getWorldPosition(bonePos);
+    const info: BoneInfo = { y: bonePos.y, pos: bonePos.clone() };
 
-    if (boneName.includes("head") && !boneName.includes("end")) {
-      if (headY === null || bonePos.y > headY) {
-        headY = bonePos.y;
-      }
-    }
-    if (boneName.includes("shoulder") || boneName.includes("clavicle")) {
-      if (shoulderY === null || bonePos.y > shoulderY) {
-        shoulderY = bonePos.y;
-      }
-    }
-    if (boneName.includes("spine02") || boneName.includes("chest")) {
-      chestY = bonePos.y;
+    if (matchesBoneRole(bone.name, "hips") && !hips) hips = info;
+    if (matchesBoneRole(bone.name, "spine") && !spine) spine = info;
+    if (matchesBoneRole(bone.name, "chest") && !chest) chest = info;
+    if (matchesBoneRole(bone.name, "upperChest") && !upperChest)
+      upperChest = info;
+    if (matchesBoneRole(bone.name, "neck") && !neck) neck = info;
+    if (matchesBoneRole(bone.name, "head") && !head) head = info;
+    if (matchesBoneRole(bone.name, "shoulder")) {
+      const lower = bone.name.toLowerCase();
+      const isLeft =
+        lower.includes("left") ||
+        lower.includes("_l_") ||
+        lower.endsWith(".l") ||
+        lower.endsWith("_l");
+      const isRight =
+        lower.includes("right") ||
+        lower.includes("_r_") ||
+        lower.endsWith(".r") ||
+        lower.endsWith("_r");
+      if (isLeft && !leftShoulder) leftShoulder = info;
+      if (isRight && !rightShoulder) rightShoulder = info;
     }
   });
 
-  // Detect character anatomy type
-  let isHunchedCharacter = false;
-  if (headY !== null && shoulderY !== null) {
-    const headShoulderDiff = Math.abs(headY - shoulderY);
-    isHunchedCharacter = headShoulderDiff < 0.1;
+  console.log("Bone detection results:", {
+    hips: hips ? `y=${(hips as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    spine: spine ? `y=${(spine as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    chest: chest ? `y=${(chest as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    upperChest: upperChest
+      ? `y=${(upperChest as BoneInfo).y.toFixed(3)}`
+      : "NOT FOUND",
+    neck: neck ? `y=${(neck as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    head: head ? `y=${(head as BoneInfo).y.toFixed(3)}` : "NOT FOUND",
+    leftShoulder: leftShoulder
+      ? `y=${(leftShoulder as BoneInfo).y.toFixed(3)}`
+      : "NOT FOUND",
+    rightShoulder: rightShoulder
+      ? `y=${(rightShoulder as BoneInfo).y.toFixed(3)}`
+      : "NOT FOUND",
+  });
+
+  // Calculate torso bottom: hips bone or proportional fallback
+  let torsoBottom: number;
+  if (hips) {
+    // Hips bone marks the bottom of the torso
+    torsoBottom = (hips as BoneInfo).y;
+    console.log(`Torso bottom from hips bone: ${torsoBottom.toFixed(3)}`);
+  } else if (spine) {
+    // Spine is slightly above hips, offset down
+    torsoBottom = (spine as BoneInfo).y - avatarSize.y * 0.05;
     console.log(
-      `Head Y: ${(headY as number).toFixed(3)}, Shoulder Y: ${(shoulderY as number).toFixed(3)}, Difference: ${headShoulderDiff.toFixed(3)}`,
+      `Torso bottom from spine bone (offset): ${torsoBottom.toFixed(3)}`,
     );
-    if (isHunchedCharacter) {
-      console.log("⚠️ Detected hunched character anatomy");
-    }
+  } else {
+    // Fallback: 47% of height (approximate hip level for humanoids)
+    torsoBottom = avatarBounds.min.y + avatarSize.y * 0.47;
+    console.log(`Torso bottom from fallback (47%): ${torsoBottom.toFixed(3)}`);
   }
 
-  if (isHunchedCharacter && chestY !== null) {
-    torsoTop = chestY + 0.05;
-    torsoBottom = avatarBounds.min.y + avatarSize.y * 0.15;
-  } else if (shoulderY !== null && !isHunchedCharacter) {
-    torsoTop = shoulderY;
-    torsoBottom = avatarBounds.min.y + avatarSize.y * 0.15;
+  // Calculate torso top: neck > shoulder > upperChest > chest > fallback
+  let torsoTop: number;
+  if (neck) {
+    torsoTop = (neck as BoneInfo).y;
+    console.log(`Torso top from neck bone: ${torsoTop.toFixed(3)}`);
+  } else if (leftShoulder || rightShoulder) {
+    const lsy = leftShoulder ? (leftShoulder as BoneInfo).y : -Infinity;
+    const rsy = rightShoulder ? (rightShoulder as BoneInfo).y : -Infinity;
+    torsoTop = Math.max(lsy, rsy);
+    console.log(`Torso top from shoulder bones: ${torsoTop.toFixed(3)}`);
+  } else if (upperChest) {
+    torsoTop = (upperChest as BoneInfo).y + avatarSize.y * 0.04;
+    console.log(`Torso top from upperChest bone: ${torsoTop.toFixed(3)}`);
+  } else if (chest) {
+    torsoTop = (chest as BoneInfo).y + avatarSize.y * 0.08;
+    console.log(`Torso top from chest bone: ${torsoTop.toFixed(3)}`);
   } else {
-    torsoBottom = avatarBounds.min.y + avatarSize.y * 0.15;
-    torsoTop = avatarBounds.min.y + avatarSize.y * 0.6;
+    // Fallback: 72% of height (approximate neck level)
+    torsoTop = avatarBounds.min.y + avatarSize.y * 0.72;
+    console.log(`Torso top from fallback (72%): ${torsoTop.toFixed(3)}`);
   }
+
+  // Ensure minimum torso height (at least 10% of avatar height)
+  if (torsoTop - torsoBottom < avatarSize.y * 0.1) {
+    console.warn("Torso height too small, adjusting bounds");
+    const mid = (torsoTop + torsoBottom) / 2;
+    torsoBottom = mid - avatarSize.y * 0.12;
+    torsoTop = mid + avatarSize.y * 0.12;
+  }
+
+  // Calculate torso width: use shoulder distance if available, otherwise proportional
+  let torsoWidth: number;
+  if (leftShoulder && rightShoulder) {
+    const shoulderDistance = Math.abs(
+      (leftShoulder as BoneInfo).pos.x - (rightShoulder as BoneInfo).pos.x,
+    );
+    // Shoulders define the outer edge; torso is slightly wider for armor
+    torsoWidth = shoulderDistance * 1.1;
+    console.log(
+      `Torso width from shoulder distance: ${torsoWidth.toFixed(3)} (distance: ${shoulderDistance.toFixed(3)})`,
+    );
+  } else {
+    // In T-pose, avatarSize.x includes outstretched arms
+    // Actual torso is roughly 25-30% of full T-pose width
+    torsoWidth = avatarSize.x * 0.28;
+    console.log(
+      `Torso width from proportional (28% of bbox): ${torsoWidth.toFixed(3)}`,
+    );
+  }
+
+  // Torso depth
+  const torsoDepth = avatarSize.z * 0.5;
 
   const torsoCenter = new THREE.Vector3(
     avatarCenter.x,
@@ -438,9 +580,9 @@ function calculateTorsoBounds(avatarMesh: THREE.SkinnedMesh): {
     avatarCenter.z,
   );
   const torsoSize = new THREE.Vector3(
-    avatarSize.x * 0.6,
+    torsoWidth,
     torsoTop - torsoBottom,
-    avatarSize.z * 0.5,
+    torsoDepth,
   );
   const torsoBounds = new THREE.Box3();
   torsoBounds.setFromCenterAndSize(torsoCenter, torsoSize);

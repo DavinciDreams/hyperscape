@@ -38,6 +38,8 @@ export const ArmorFittingPage: React.FC = () => {
     showWireframe,
     isFitting,
     fittingProgress,
+    fittingMessage,
+    fittingStartTime,
     showDebugger,
     lastError,
     isExporting,
@@ -230,6 +232,7 @@ export const ArmorFittingPage: React.FC = () => {
                 <FittingProgress
                   progress={fittingProgress}
                   message={currentProgress()}
+                  startTime={fittingStartTime}
                 />
               )}
             </>
@@ -274,6 +277,7 @@ export const ArmorFittingPage: React.FC = () => {
               onSaveConfiguration={saveConfiguration}
               isFitting={isFitting}
               fittingProgress={fittingProgress}
+              fittingMessage={fittingMessage}
               canFit={isReadyToFit()}
               isArmorFitted={isArmorFitted}
               isArmorBound={isArmorBound}
