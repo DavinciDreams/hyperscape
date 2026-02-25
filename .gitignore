@@ -38,6 +38,8 @@ test-*.png
 # Track .env.example and named-cluster env templates, but block any that
 # accumulate real secrets (wallets.generated.json already blocked below).
 packages/market-maker-bot/wallets.generated.json
+packages/market-maker-bot/.kill-switch
+packages/market-maker-bot/.risk-status.json
 .runtime-locks/
 
 # IDE
