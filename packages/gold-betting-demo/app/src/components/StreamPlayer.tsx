@@ -74,11 +74,43 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
     const probeManifest = async () => {
       try {
         const response = await fetch(sourceUrl(), { cache: "no-store" });
-        if (!response.ok) return false;
+        if (!response.ok) {
+          console.error(
+            `[StreamPlayer] Manifest fetch failed: HTTP ${response.status} at ${streamUrl}`
+          );
+          if (response.status === 404) {
+            console.error(
+              "[StreamPlayer] 404 suggests stream manifest not found - check HLS output path and server routing"
+            );
+          } else if (response.status >= 500) {
+            console.error(
+              "[StreamPlayer] Server error - RTMP bridge may not be running or HLS writer crashed"
+            );
+          }
+          return false;
+        }
         const text = await response.text();
         // A valid live playlist should include media segments.
-        return /#EXTINF/i.test(text) && /\.(ts|m4s|mp4)\b/i.test(text);
-      } catch {
+        const hasHeader = /#EXTM3U/i.test(text);
+        const hasSegments = /#EXTINF/i.test(text) && /\.(ts|m4s|mp4)\b/i.test(text);
+        
+        if (!hasHeader) {
+          console.error(
+            "[StreamPlayer] Manifest missing #EXTM3U header - file may be corrupted or incomplete"
+          );
+          return false;
+        }
+        if (!hasSegments) {
+          console.warn(
+            "[StreamPlayer] Manifest has no segments yet - stream may still be starting"
+          );
+          return false;
+        }
+        return true;
+      } catch (error) {
+        console.error(
+          `[StreamPlayer] Manifest probe error: ${error instanceof Error ? error.message : String(error)}`
+        );
         return false;
       }
     };
@@ -172,9 +204,14 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
       const manifestReady = await probeManifest();
       if (!manifestReady) {
+        console.warn(
+          `[StreamPlayer] Stream initialization delayed - manifest not ready at ${streamUrl}`
+        );
         scheduleRebuild("manifest not ready", 1000);
         return;
       }
+      
+      console.log(`[StreamPlayer] Initializing playback for ${streamUrl}`);
 
       // Check if browser supports HLS natively (Safari)
       if (video.canPlayType("application/vnd.apple.mpegurl")) {

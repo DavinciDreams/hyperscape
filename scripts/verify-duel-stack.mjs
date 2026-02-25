@@ -18,6 +18,7 @@ const values = parseArgs({
     "server-url": { type: "string", default: "http://localhost:5555" },
     "client-url": { type: "string", default: "http://localhost:3333" },
     "betting-url": { type: "string", default: "http://localhost:4179" },
+    "hls-url": { type: "string" },
     "skip-betting": { type: "boolean" },
     "timeout-ms": { type: "string", default: "240000" },
     "fight-timeout-ms": { type: "string", default: "120000" },
@@ -41,6 +42,7 @@ Options:
   --server-url <url>         Game server URL (default: http://localhost:5555)
   --client-url <url>         Game client URL (default: http://localhost:3333)
   --betting-url <url>        Betting app URL (default: http://localhost:4179)
+  --hls-url <url>            HLS stream manifest URL (optional)
   --skip-betting             Skip betting app HTTP readiness check
   --timeout-ms <ms>          General timeout (default: 240000)
   --fight-timeout-ms <ms>    Combat proof timeout (default: 120000)
@@ -57,6 +59,7 @@ Options:
 const serverUrl = values["server-url"].replace(/\/$/, "");
 const clientUrl = values["client-url"].replace(/\/$/, "");
 const bettingUrl = values["betting-url"].replace(/\/$/, "");
+const hlsUrl = values["hls-url"]?.trim() || "";
 const skipBetting = values["skip-betting"] === true;
 const timeoutMs = Number.parseInt(values["timeout-ms"], 10) || 240_000;
 const fightTimeoutMs =
@@ -180,6 +183,26 @@ async function verify() {
     await assertHttpOk("betting app", `${bettingUrl}/`, timeoutMs);
   } else {
     log("skipping betting app readiness check (--skip-betting)");
+  }
+
+  if (hlsUrl) {
+    await waitFor(
+      "HLS stream manifest",
+      async () => {
+        try {
+          const response = await fetchWithTimeout(hlsUrl);
+          if (!response.ok) return null;
+          const text = await response.text();
+          // Valid HLS manifest should have header and segments
+          const hasHeader = /#EXTM3U/i.test(text);
+          const hasSegments = /#EXTINF:/i.test(text);
+          return hasHeader && hasSegments ? true : null;
+        } catch {
+          return null;
+        }
+      },
+      timeoutMs,
+    );
   }
 
   const duelContextUrl = `${serverUrl}/api/streaming/duel-context`;

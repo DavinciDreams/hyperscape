@@ -1516,6 +1516,97 @@ async function main() {
 
   await startMarketMakers();
 
+  // Preflight checks - validate critical endpoints before declaring stack ready
+  log("running startup preflight checks...");
+  const preflightChecks = [];
+  
+  // Check stream manifest accessibility
+  if (!options["skip-stream"]) {
+    preflightChecks.push(
+      (async () => {
+        try {
+          const response = await fetch(hlsUrl, { 
+            cache: "no-store",
+            signal: AbortSignal.timeout(5000)
+          });
+          if (!response.ok) {
+            log(`warning: stream manifest not accessible at ${hlsUrl} (HTTP ${response.status})`);
+            return false;
+          }
+          const text = await response.text();
+          if (!/#EXTM3U/i.test(text)) {
+            log(`warning: stream manifest at ${hlsUrl} appears invalid (missing #EXTM3U header)`);
+            return false;
+          }
+          log(`✓ stream manifest reachable at ${hlsUrl}`);
+          return true;
+        } catch (error) {
+          log(`warning: stream manifest check failed at ${hlsUrl}: ${error instanceof Error ? error.message : String(error)}`);
+          return false;
+        }
+      })()
+    );
+  }
+
+  // Check duel state endpoint
+  preflightChecks.push(
+    (async () => {
+      try {
+        const response = await fetch(gameStreamingStateUrl, { 
+          cache: "no-store",
+          signal: AbortSignal.timeout(5000)
+        });
+        if (!response.ok) {
+          log(`warning: duel state endpoint not healthy at ${gameStreamingStateUrl} (HTTP ${response.status})`);
+          return false;
+        }
+        const data = await response.json();
+        if (!data || typeof data !== 'object') {
+          log(`warning: duel state endpoint returned invalid data`);
+          return false;
+        }
+        log(`✓ duel state endpoint healthy at ${gameStreamingStateUrl}`);
+        return true;
+      } catch (error) {
+        log(`warning: duel state endpoint check failed: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    })()
+  );
+
+  // Check market state endpoint (if betting enabled)
+  if (!skipBettingApp) {
+    preflightChecks.push(
+      (async () => {
+        try {
+          const marketStateUrl = `${serverHttpUrl}/api/betting/market/state`;
+          const response = await fetch(marketStateUrl, { 
+            cache: "no-store",
+            signal: AbortSignal.timeout(5000)
+          });
+          if (!response.ok) {
+            log(`warning: market state endpoint not healthy at ${marketStateUrl} (HTTP ${response.status})`);
+            return false;
+          }
+          log(`✓ market state endpoint healthy at ${marketStateUrl}`);
+          return true;
+        } catch (error) {
+          log(`warning: market state endpoint check failed: ${error instanceof Error ? error.message : String(error)}`);
+          return false;
+        }
+      })()
+    );
+  }
+
+  const preflightResults = await Promise.all(preflightChecks);
+  const preflightFailures = preflightResults.filter(result => !result).length;
+  
+  if (preflightFailures > 0) {
+    log(`preflight checks completed with ${preflightFailures} warning(s) - stack may have degraded functionality`);
+  } else {
+    log("✓ all preflight checks passed");
+  }
+
   if (verifyEnabled) {
     log("running startup verification checks...");
     const verifyArgs = [

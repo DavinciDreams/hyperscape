@@ -50,10 +50,12 @@ export function useStreamingState(options: { disabled?: boolean } = {}) {
   const { disabled = false } = options;
   const [state, setState] = useState<StreamingStateUpdate | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const eventSourceRef = useRef<SseSource | null>(null);
   const lastEventIdRef = useRef<number>(0);
   const closedRef = useRef(false);
+  const consecutiveFailuresRef = useRef<number>(0);
 
   const clearPollTimer = () => {
     if (pollTimer.current) {
@@ -82,15 +84,35 @@ export function useStreamingState(options: { disabled?: boolean } = {}) {
   const poll = useCallback(async () => {
     try {
       const res = await fetch(POLL_URL, { cache: "no-store" });
-      if (!res.ok) throw new Error("Failed to fetch");
+      if (!res.ok) {
+        consecutiveFailuresRef.current += 1;
+        if (consecutiveFailuresRef.current >= 5) {
+          setError(`Duel state endpoint unhealthy (HTTP ${res.status})`);
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
       const data = normalizeState(await res.json());
       if (data) {
+        consecutiveFailuresRef.current = 0;
+        setError(null);
         applyState(data);
+      } else {
+        consecutiveFailuresRef.current += 1;
+        if (consecutiveFailuresRef.current >= 5) {
+          setError("Duel state endpoint returned invalid data");
+        }
       }
-    } catch {
+    } catch (err) {
       setIsConnected(false);
+      if (consecutiveFailuresRef.current === 0) {
+        consecutiveFailuresRef.current = 1;
+      }
+      if (consecutiveFailuresRef.current >= 5 && !error) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(`Failed to fetch duel state: ${message}`);
+      }
     }
-  }, [applyState]);
+  }, [applyState, error]);
 
   const startFallbackPolling = useCallback(() => {
     if (pollTimer.current) return;
@@ -121,6 +143,8 @@ export function useStreamingState(options: { disabled?: boolean } = {}) {
 
     source.onopen = () => {
       setIsConnected(true);
+      setError(null);
+      consecutiveFailuresRef.current = 0;
       clearPollTimer();
     };
 
@@ -128,6 +152,8 @@ export function useStreamingState(options: { disabled?: boolean } = {}) {
       try {
         const parsed = normalizeState(JSON.parse(event.data));
         if (parsed) {
+          consecutiveFailuresRef.current = 0;
+          setError(null);
           applyState(parsed);
         }
         const eventId = Number.parseInt(event.lastEventId || "", 10);
@@ -157,11 +183,16 @@ export function useStreamingState(options: { disabled?: boolean } = {}) {
 
     source.addEventListener("unavailable", () => {
       setIsConnected(false);
+      setError("Streaming state SSE unavailable - falling back to polling");
       startFallbackPolling();
     });
 
     source.onerror = () => {
       setIsConnected(false);
+      consecutiveFailuresRef.current += 1;
+      if (consecutiveFailuresRef.current >= 3) {
+        setError("Streaming state SSE connection failed");
+      }
       if (!closedRef.current) {
         startFallbackPolling();
       }
@@ -190,5 +221,5 @@ export function useStreamingState(options: { disabled?: boolean } = {}) {
     };
   }, [connectSse, disabled]);
 
-  return { state, isConnected };
+  return { state, isConnected, error };
 }

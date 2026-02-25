@@ -1,9 +1,33 @@
 import { ethers } from "ethers";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
+import fs from "node:fs";
+import path from "node:path";
 import dotenv from "dotenv";
+import {
+  type RiskLimits,
+  type RiskState,
+  loadRiskLimits,
+  createRiskState,
+  preOrderCheck,
+  recordFill,
+  triggerKillSwitch,
+  getRiskStatus,
+  validateSolanaRpc,
+  validateSolanaProgramId,
+  validateEvmChainId,
+} from "./risk-controls.ts";
 
 dotenv.config();
+
+const KILL_SWITCH_FILE = path.resolve(
+  import.meta.dirname ?? ".",
+  "../.kill-switch",
+);
+const RISK_STATUS_FILE = path.resolve(
+  import.meta.dirname ?? ".",
+  "../.risk-status.json",
+);
 
 const readEnvBoolean = (name: string, fallback: boolean): boolean => {
   const raw = process.env[name]?.trim().toLowerCase();

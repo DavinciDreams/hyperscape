@@ -10,7 +10,13 @@
     "wallets:ui-env": "tsx src/export-ui-wallets.ts",
     "test": "vitest run",
     "verify:chains": "tsx src/verify-chains.ts",
-    "verify:chains:env": "SOLANA_VERIFY_RPC_URL=$SOLANA_RPC_URL SOLANA_VERIFY_PROGRAM_ID=$SOLANA_ARENA_MARKET_PROGRAM_ID tsx src/verify-chains.ts"
+    "verify:chains:env": "SOLANA_VERIFY_RPC_URL=$SOLANA_RPC_URL SOLANA_VERIFY_PROGRAM_ID=$SOLANA_ARENA_MARKET_PROGRAM_ID tsx src/verify-chains.ts",
+    "kill-switch": "tsx src/kill-switch.ts",
+    "kill-switch:withdraw": "tsx src/kill-switch.ts --withdraw",
+    "kill-switch:reset": "tsx src/kill-switch.ts --reset",
+    "kill-switch:status": "tsx src/kill-switch.ts --status",
+    "reconcile": "tsx src/reconcile.ts",
+    "reconcile:loop": "tsx src/reconcile.ts --interval 60"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
