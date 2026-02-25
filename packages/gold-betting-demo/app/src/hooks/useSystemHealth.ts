@@ -110,14 +110,16 @@ export function useSystemHealth(): UseSystemHealthResult {
 
       if (!mountedRef.current) return;
 
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
+      // Parse JSON even on non-2xx responses (endpoint returns 503 with valid degraded state)
+      let data: SystemHealthResponse;
+      try {
+        data = (await response.json()) as SystemHealthResponse;
+      } catch (parseErr) {
         throw new Error(
-          `HTTP ${response.status}${text ? `: ${text.slice(0, 100)}` : ""}`,
+          `HTTP ${response.status}, failed to parse JSON: ${parseErr instanceof Error ? parseErr.message : "unknown"}`,
         );
       }
 
-      const data = (await response.json()) as SystemHealthResponse;
       setHealth(data);
       setError(null);
       setLastFetchAt(Date.now());
