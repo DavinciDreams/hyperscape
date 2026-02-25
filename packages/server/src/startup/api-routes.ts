@@ -54,6 +54,7 @@ import { registerDataRoutes } from "./routes/data-routes.js";
 import { registerProxyRoutes } from "../routes/proxy-routes.js";
 import { registerArenaRoutes } from "./routes/arena-routes.js";
 import { registerStreamingRoutes } from "../routes/streaming.js";
+import { registerSystemHealthRoutes } from "./routes/system-health-routes.js";
 
 /**
  * Register all API routes
@@ -126,6 +127,9 @@ export function registerApiRoutes(
 
   // Streaming mode state and leaderboard
   registerStreamingRoutes(fastify, world);
+
+  // Unified system health endpoint for arena services
+  registerSystemHealthRoutes(fastify, world);
 
   console.log("[API] ✅ API routes registered");
 }
