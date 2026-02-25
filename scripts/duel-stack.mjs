@@ -210,6 +210,20 @@ const skipChainSetup =
   remoteBettingMode ||
   /^(1|true|yes|on)$/i.test(process.env.DUEL_SKIP_CHAIN_SETUP || "");
 const skipBettingApp = options["skip-betting"] === true || remoteBettingMode;
+const allowInheritedServerCaptureEnv = /^(1|true|yes|on)$/i.test(
+  process.env.DUEL_ALLOW_INHERITED_STREAM_CAPTURE || "",
+);
+const explicitServerCaptureEnv = (
+  process.env.DUEL_SERVER_CAPTURE_ENABLED || ""
+).trim();
+const inheritedServerCaptureEnv = (
+  process.env.STREAMING_CAPTURE_ENABLED || ""
+).trim();
+const resolvedServerCaptureEnabled = explicitServerCaptureEnv
+  ? !/^(0|false|no|off)$/i.test(explicitServerCaptureEnv)
+  : allowInheritedServerCaptureEnv && inheritedServerCaptureEnv
+    ? !/^(0|false|no|off)$/i.test(inheritedServerCaptureEnv)
+    : false;
 const verifyTimeoutMs =
   Number.parseInt(options["verify-timeout-ms"], 10) || 240_000;
 const startupTimeoutMs =
@@ -656,8 +670,10 @@ function spawnManaged(name, command, args, opts = {}) {
       entry.proc = null;
       if (shuttingDown) return;
 
+      const exitedCleanly = signal == null && code === 0;
       const canRestart =
         entry.restart &&
+        !exitedCleanly &&
         (entry.restarts < entry.maxRestarts ||
           entry.maxRestarts === Number.POSITIVE_INFINITY);
 
@@ -838,6 +854,15 @@ function getListeningPids(port) {
   }
 }
 
+function forceKillByPattern(pattern) {
+  if (!pattern || typeof pattern !== "string") return;
+  try {
+    execFileSync("pkill", ["-f", pattern], { stdio: "ignore" });
+  } catch {
+    // no matching process / pkill unavailable
+  }
+}
+
 async function clearUnhealthyListener(label, rawUrl, force = false) {
   const port = getPortFromUrl(rawUrl);
   if (!port) return;
@@ -907,6 +932,32 @@ async function shutdown(exitCode = 0) {
       signalProcessTree(proc, "SIGKILL");
     }
   }
+
+  const cleanupPorts = [
+    getPortFromUrl(serverHttpUrl),
+    getPortFromUrl(clientUrl),
+    bettingPort,
+    rtmpPort,
+  ]
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .map((value) => Number(value));
+
+  for (const port of cleanupPorts) {
+    for (const pid of getListeningPids(port)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // ignore dead/unowned pid
+      }
+    }
+  }
+
+  forceKillByPattern("bun --preload ./src/shared/polyfills.ts ./dist/index.js");
+  forceKillByPattern("scripts/dev-duel.mjs");
+  forceKillByPattern("scripts/stream-to-rtmp.ts");
+  forceKillByPattern("vite --host --port 3333 --strictPort");
+  forceKillByPattern(`vite --mode devnet --host --port ${bettingPort}`);
+
   releaseRunLock();
   process.exit(exitCode);
 }
@@ -1036,6 +1087,13 @@ async function main() {
     // Prevent aggressive local auto-restarts while tuning duel/MM workflows.
     MEMORY_RESTART_THRESHOLD_MB:
       process.env.MEMORY_RESTART_THRESHOLD_MB || "12288",
+    // Bun heap can grow aggressively under duel workload on macOS/Linux.
+    // Force periodic GC in server mode to reduce long-running RSS growth.
+    MEMORY_FORCE_GC: process.env.MEMORY_FORCE_GC || "true",
+    MEMORY_FORCE_GC_AGGRESSIVE:
+      process.env.MEMORY_FORCE_GC_AGGRESSIVE || "true",
+    // Keep a safety fuse below machine-killing RSS while preserving uptime.
+    MEMORY_LIMIT_GB: process.env.MEMORY_LIMIT_GB || "8",
     // Keep stream servers stable by default: let StreamingDuelScheduler own
     // combat flow without background questing/pathing churn.
     EMBEDDED_AGENT_AUTONOMY_ENABLED:
@@ -1055,11 +1113,14 @@ async function main() {
       process.env.STREAMING_END_WARNING_MS || "10000",
     STREAMING_RESOLUTION_MS:
       process.env.STREAMING_RESOLUTION_MS || "5000",
-    // Prevent duplicate RTMP publishers when duel-stack runs external
-    // stream-to-rtmp capture.
-    STREAMING_CAPTURE_ENABLED:
-      process.env.STREAMING_CAPTURE_ENABLED ||
-      (options["skip-stream"] ? "true" : "false"),
+    // Keep in-process capture disabled by default.
+    // Duel stack uses the external stream-to-rtmp process for live capture.
+    // Re-enable only when explicitly requested via DUEL_SERVER_CAPTURE_ENABLED=true
+    // (or allow inherited STREAMING_CAPTURE_ENABLED with
+    // DUEL_ALLOW_INHERITED_STREAM_CAPTURE=true).
+    STREAMING_CAPTURE_ENABLED: resolvedServerCaptureEnabled
+      ? "true"
+      : "false",
     RTMP_STATUS_FILE: rtmpStatusFile,
     // Keep the server DB pool conservative in local duel workflows to avoid
     // exceeding low local Postgres max_connections limits.
@@ -1086,6 +1147,11 @@ async function main() {
     : `/${configuredServerHealthPath}`;
   const gameServerHealthUrl = `${serverHttpUrl}${normalizedServerHealthPath}`;
   const gameStreamingStateUrl = `${serverHttpUrl}/api/streaming/state`;
+  if (options.verbose) {
+    log(
+      `server STREAMING_CAPTURE_ENABLED=${gameEnv.STREAMING_CAPTURE_ENABLED} (DUEL_SERVER_CAPTURE_ENABLED=${explicitServerCaptureEnv || "unset"})`,
+    );
+  }
   const serverHealthReady = await isHttpReady(gameServerHealthUrl);
   const serverStreamingReady = await isHttpReady(gameStreamingStateUrl);
   let serverWasReady = serverHealthReady && serverStreamingReady;
@@ -1574,24 +1640,29 @@ async function main() {
     })()
   );
 
-  // Check market state endpoint (if betting enabled)
+  // Check arena market API endpoint (if betting enabled)
   if (!skipBettingApp) {
     preflightChecks.push(
       (async () => {
         try {
-          const marketStateUrl = `${serverHttpUrl}/api/betting/market/state`;
+          const marketStateUrl = `${serverHttpUrl}/api/arena/rounds?limit=1`;
           const response = await fetch(marketStateUrl, { 
             cache: "no-store",
             signal: AbortSignal.timeout(5000)
           });
           if (!response.ok) {
-            log(`warning: market state endpoint not healthy at ${marketStateUrl} (HTTP ${response.status})`);
+            log(`warning: arena market endpoint not healthy at ${marketStateUrl} (HTTP ${response.status})`);
             return false;
           }
-          log(`✓ market state endpoint healthy at ${marketStateUrl}`);
+          const payload = await response.json();
+          if (!payload || !Array.isArray(payload.rounds)) {
+            log(`warning: arena market endpoint returned invalid payload`);
+            return false;
+          }
+          log(`✓ arena market endpoint healthy at ${marketStateUrl}`);
           return true;
         } catch (error) {
-          log(`warning: market state endpoint check failed: ${error instanceof Error ? error.message : String(error)}`);
+          log(`warning: arena market endpoint check failed: ${error instanceof Error ? error.message : String(error)}`);
           return false;
         }
       })()

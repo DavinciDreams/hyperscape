@@ -466,6 +466,13 @@ function startMemoryMonitor(world: unknown): void {
   const forceGcInPlaywright =
     isPlaywrightTest &&
     (process.env.PLAYWRIGHT_FORCE_GC || "true").toLowerCase() !== "false";
+  const forceGcFromEnv = !["0", "false", "no", "off"].includes(
+    (process.env.MEMORY_FORCE_GC || "false").toLowerCase(),
+  );
+  const forceGc = forceGcInPlaywright || forceGcFromEnv;
+  const forceGcAggressive = !["0", "false", "no", "off"].includes(
+    (process.env.MEMORY_FORCE_GC_AGGRESSIVE || "true").toLowerCase(),
+  );
   const collectionDebugEnabled = process.env.MEMORY_COLLECTION_DEBUG === "true";
   const collectionLimit = Math.max(
     8,
@@ -473,13 +480,17 @@ function startMemoryMonitor(world: unknown): void {
   );
 
   const timer = setInterval(() => {
-    if (forceGcInPlaywright) {
+    if (forceGc) {
       try {
-        (
-          globalThis as typeof globalThis & {
-            Bun?: { gc?: (force?: boolean) => void };
-          }
-        ).Bun?.gc?.(true);
+        const runtime = globalThis as typeof globalThis & {
+          Bun?: { gc?: (force?: boolean) => void };
+          gc?: () => void;
+        };
+        if (typeof runtime.Bun?.gc === "function") {
+          runtime.Bun.gc(forceGcAggressive);
+        } else if (typeof runtime.gc === "function") {
+          runtime.gc();
+        }
       } catch {
         // Best-effort GC hint only.
       }
