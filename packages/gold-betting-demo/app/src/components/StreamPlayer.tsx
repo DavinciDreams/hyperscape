@@ -33,6 +33,9 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
   );
   const unavailableNotifiedRef = useRef(false);
   const [streamDiagnostic, setStreamDiagnostic] = useState<string | null>(null);
+  const [streamStatus, setStreamStatus] = useState<
+    "connecting" | "live" | "error" | "recovering"
+  >("connecting");
   const diagnosticTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -87,12 +90,17 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         if (!response.ok) {
           const msg =
             response.status === 404
-              ? `Stream manifest not found (404) at ${streamUrl} — check HLS output path and server routing`
-              : response.status >= 500
-                ? `Server error (${response.status}) — RTMP bridge may not be running`
-                : `Manifest fetch failed: HTTP ${response.status}`;
+              ? `Stream not found (404) — RTMP source may be offline or HLS path misconfigured`
+              : response.status === 502 || response.status === 503
+                ? `Stream server unavailable (${response.status}) — RTMP bridge or origin server may be down`
+                : response.status >= 500
+                  ? `Server error (${response.status}) — backend service issue, check server logs`
+                  : response.status === 403
+                    ? `Access denied (403) — check CORS policy or authentication`
+                    : `Stream fetch failed: HTTP ${response.status}`;
           console.error(`[StreamPlayer] ${msg}`);
           setStreamDiagnostic(msg);
+          setStreamStatus("error");
           return false;
         }
         const text = await response.text();
@@ -105,12 +113,14 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
             "Manifest missing #EXTM3U header — file may be corrupted or incomplete";
           console.error(`[StreamPlayer] ${msg}`);
           setStreamDiagnostic(msg);
+          setStreamStatus("error");
           return false;
         }
         if (!hasSegments) {
           const msg = "Stream starting — waiting for live segments…";
           console.warn(`[StreamPlayer] ${msg}`);
           setStreamDiagnostic(msg);
+          setStreamStatus("connecting");
           return false;
         }
         // Clear diagnostic on successful probe
@@ -120,6 +130,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         const msg = `Manifest probe error: ${error instanceof Error ? error.message : String(error)}`;
         console.error(`[StreamPlayer] ${msg}`);
         setStreamDiagnostic(msg);
+        setStreamStatus("error");
         return false;
       }
     };
@@ -144,6 +155,8 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
     const scheduleRebuild = (reason: string, delayMs = 1500) => {
       console.warn(`[StreamPlayer] Rebuilding stream: ${reason}`);
+      setStreamStatus("recovering");
+      setStreamDiagnostic(`Reconnecting: ${reason}`);
       if (retryTimeout) clearTimeout(retryTimeout);
       retryTimeout = setTimeout(() => {
         void initPlayer();
@@ -225,6 +238,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       // Check if browser supports HLS natively (Safari)
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = sourceUrl();
+        setStreamStatus("live");
         void video.play().catch(() => {});
         startHealthWatchdog();
       } else if (Hls.isSupported()) {
@@ -265,6 +279,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           console.log("[StreamPlayer] Manifest parsed, starting playback");
           setStreamDiagnostic(null);
+          setStreamStatus("live");
           void video.play().catch(() => {});
         });
 
@@ -364,26 +379,125 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
             backgroundColor: "#000",
           }}
         />
-        {streamDiagnostic && (
+        {/* Stream Status Indicator */}
+        <div
+          style={{
+            position: "absolute",
+            top: 8,
+            left: 8,
+            right: 8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            pointerEvents: "none",
+            zIndex: 10,
+          }}
+        >
+          {/* Status Badge */}
           <div
             style={{
-              position: "absolute",
-              top: 8,
-              left: 8,
-              right: 8,
-              padding: "6px 10px",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 8px",
               borderRadius: 4,
               background: "rgba(0, 0, 0, 0.75)",
-              color: "#fbbf24",
-              fontSize: 11,
-              fontFamily: "monospace",
-              pointerEvents: "none",
-              zIndex: 10,
+              width: "fit-content",
             }}
           >
-            ⚠ {streamDiagnostic}
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background:
+                  streamStatus === "live"
+                    ? "#22c55e"
+                    : streamStatus === "connecting"
+                      ? "#eab308"
+                      : streamStatus === "recovering"
+                        ? "#f97316"
+                        : "#ef4444",
+                boxShadow:
+                  streamStatus === "live"
+                    ? "0 0 6px #22c55e"
+                    : streamStatus === "connecting"
+                      ? "0 0 6px #eab308"
+                      : "none",
+                animation:
+                  streamStatus === "connecting" || streamStatus === "recovering"
+                    ? "pulse 1.5s ease-in-out infinite"
+                    : "none",
+              }}
+            />
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color:
+                  streamStatus === "live"
+                    ? "#22c55e"
+                    : streamStatus === "connecting"
+                      ? "#eab308"
+                      : streamStatus === "recovering"
+                        ? "#f97316"
+                        : "#ef4444",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+              }}
+            >
+              {streamStatus === "live"
+                ? "LIVE"
+                : streamStatus === "connecting"
+                  ? "CONNECTING"
+                  : streamStatus === "recovering"
+                    ? "RECONNECTING"
+                    : "ERROR"}
+            </span>
+            {/* Stream source URL (truncated) */}
+            <span
+              style={{
+                fontSize: 9,
+                color: "rgba(255,255,255,0.4)",
+                fontFamily: "monospace",
+                maxWidth: 200,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={streamUrl}
+            >
+              {streamUrl.length > 40 ? `…${streamUrl.slice(-35)}` : streamUrl}
+            </span>
           </div>
-        )}
+
+          {/* Diagnostic Message */}
+          {streamDiagnostic && (
+            <div
+              style={{
+                padding: "6px 10px",
+                borderRadius: 4,
+                background: "rgba(0, 0, 0, 0.75)",
+                color:
+                  streamStatus === "error"
+                    ? "#ef4444"
+                    : streamStatus === "recovering"
+                      ? "#f97316"
+                      : "#fbbf24",
+                fontSize: 11,
+                fontFamily: "monospace",
+              }}
+            >
+              {streamStatus === "error" ? "✕" : "⚠"} {streamDiagnostic}
+            </div>
+          )}
+        </div>
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+          }
+        `}</style>
         <div
           style={{
             position: "absolute",
