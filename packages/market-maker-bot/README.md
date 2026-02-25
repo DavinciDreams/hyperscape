@@ -28,7 +28,7 @@ Optional:
 bun run start:multi -- --config wallets.generated.json --dry-run
 ```
 
-Use `/Users/sasankchunduri/hyperscape/packages/market-maker-bot/wallets.example.json` as the schema reference.
+Use `wallets.example.json` in this directory as the schema reference.
 
 ## Export generated Solana wallets to UI env
 
