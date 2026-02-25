@@ -43,6 +43,7 @@ import { PointsLeaderboard } from "./components/PointsLeaderboard";
 import { PointsHistory } from "./components/PointsHistory";
 import { ReferralPanel } from "./components/ReferralPanel";
 import { AgentStats } from "./components/AgentStats";
+import { SystemHealthPanel } from "./components/SystemHealthPanel";
 import { useChain } from "./lib/ChainContext";
 import {
   FIGHT_ORACLE_PROGRAM_ID,
@@ -2347,6 +2348,9 @@ export function App() {
           ) : null}
         </div>
       ) : null}
+
+      {/* System Health Status Bar */}
+      {!isStreamUIMode && <SystemHealthPanel />}
 
       <div className="top-bar">
         <div className="top-bar-left">

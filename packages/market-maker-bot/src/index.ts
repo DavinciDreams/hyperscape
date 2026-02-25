@@ -12,6 +12,8 @@ import {
   type DuelStatePayload,
   type AggressivenessTier,
   type AggressivenessParams,
+  type CycleTelemetry,
+  type MMHealthStatus,
   resolveRunMode,
   readEnvBoolean,
   readEnvNumber,
@@ -23,6 +25,7 @@ import {
   computeInventorySkew,
   parseDuelSignal,
   enforceMinOrderSize,
+  validateOrderSize,
   GOLD_CLOB_ABI,
   ERC20_ABI,
   normalizeAddress,
@@ -100,6 +103,14 @@ const KILL_SWITCH_FILE = path.resolve(
   "../.kill-switch",
 );
 
+// Heartbeat configuration
+const MM_HEARTBEAT_CYCLES = readEnvNumber("MM_HEARTBEAT_CYCLES", 5, 1, 100);
+const MM_HEARTBEAT_FILE = path.resolve(
+  process.cwd(),
+  process.env.MM_HEARTBEAT_FILE || ".runtime-locks/mm-health.json",
+);
+const MM_TELEMETRY_ENABLED = readEnvBoolean("MM_TELEMETRY_ENABLED", true);
+
 // ─── Solana key decoding ──────────────────────────────────────────────────────
 const decodeSolanaSecretKey = (raw: string): Uint8Array => {
   const trimmed = raw.trim();
@@ -174,6 +185,14 @@ class CrossChainMarketMaker {
   private lastDuelSignal: DuelSignal | null = null;
   private lastDuelSignalAt = 0;
   private killSwitchLatched = false;
+
+  // Telemetry & Health
+  private startedAt = Date.now();
+  private ordersPlaced = 0;
+  private ordersSkipped = 0;
+  private lastHealthWriteAt = 0;
+  private recentErrors: string[] = [];
+  private lastCycleTelemetry: CycleTelemetry | null = null;
 
   constructor() {
     this.instanceId = (process.env.MM_INSTANCE_ID || "mm-1").trim() || "mm-1";
@@ -459,6 +478,16 @@ class CrossChainMarketMaker {
 
     // Participation throttle based on aggressiveness
     if (Math.random() > this.aggressivenessParams.participationRate) {
+      this.emitTelemetry(
+        "throttle",
+        null,
+        null,
+        0,
+        0,
+        0,
+        0,
+        "participation_throttle",
+      );
       return;
     }
 
@@ -475,14 +504,116 @@ class CrossChainMarketMaker {
     // 3. Solana market making (ACTIVE, not health-check-only)
     if (this.solanaEnabled) await this.solanaMarketMake();
 
-    // 4. Log state periodically
+    // 4. Write heartbeat JSON every N cycles
+    if (this.cycleCount % MM_HEARTBEAT_CYCLES === 0) {
+      await this.writeHealthStatus();
+    }
+
+    // 5. Log state periodically
     if (this.cycleCount % 10 === 0) {
       const duelInfo = this.lastDuelSignal
         ? ` | Duel: ${this.lastDuelSignal.phase} mid=${this.lastDuelSignal.midPrice} conf=${this.lastDuelSignal.confidence.toFixed(2)}`
         : "";
       console.log(
-        `[${new Date().toISOString()}] Cycle #${this.cycleCount} | Mode: ${this.runMode} | Tier: ${this.aggressivenessTier} | Inv YES:${this.inventoryYes} NO:${this.inventoryNo} | Orders: ${this.activeOrders.length}${duelInfo}`,
+        `[${new Date().toISOString()}] Cycle #${this.cycleCount} | Mode: ${this.runMode} | Tier: ${this.aggressivenessTier} | Inv YES:${this.inventoryYes} NO:${this.inventoryNo} | Orders: ${this.activeOrders.length} | Placed: ${this.ordersPlaced} | Skipped: ${this.ordersSkipped}${duelInfo}`,
       );
+    }
+  }
+
+  // ─── Telemetry Emitter ──────────────────────────────────────────────────────
+  private emitTelemetry(
+    chain: string,
+    midBook: number | null,
+    midDuel: number | null,
+    midFinal: number,
+    spreadBps: number,
+    bidPrice: number,
+    askPrice: number,
+    reasonSkipped: string | null,
+    size: number = 0,
+    fills: number = 0,
+  ) {
+    if (!MM_TELEMETRY_ENABLED) return;
+
+    const telemetry: CycleTelemetry = {
+      cycle: this.cycleCount,
+      timestamp: new Date().toISOString(),
+      chain,
+      mid_book: midBook,
+      mid_duel: midDuel,
+      mid_final: midFinal,
+      spread_bps: spreadBps,
+      bid_price: bidPrice,
+      ask_price: askPrice,
+      size,
+      fills,
+      reason_skipped: reasonSkipped,
+      duel_phase: this.lastDuelSignal?.phase ?? null,
+      duel_confidence: this.lastDuelSignal?.confidence ?? null,
+      inventory_yes: this.inventoryYes,
+      inventory_no: this.inventoryNo,
+    };
+
+    this.lastCycleTelemetry = telemetry;
+
+    // Log telemetry at debug level (every 5 cycles or on skip)
+    if (this.cycleCount % 5 === 0 || reasonSkipped) {
+      console.log(
+        `[TELEMETRY:${chain}] mid_book=${midBook ?? "N/A"} mid_duel=${midDuel ?? "N/A"} mid_final=${midFinal} spread=${spreadBps}bps size=${size}${reasonSkipped ? ` SKIP:${reasonSkipped}` : ""}`,
+      );
+    }
+  }
+
+  // ─── Health Status Writer ───────────────────────────────────────────────────
+  private async writeHealthStatus() {
+    const now = Date.now();
+
+    // Rate limit: no more than once per second
+    if (now - this.lastHealthWriteAt < 1000) return;
+    this.lastHealthWriteAt = now;
+
+    const activeChains: string[] = [];
+    if (this.bscEnabled) activeChains.push("bsc");
+    if (this.baseEnabled) activeChains.push("base");
+    if (this.solanaEnabled) activeChains.push("solana");
+
+    const status: MMHealthStatus = {
+      instanceId: this.instanceId,
+      status: this.recentErrors.length > 3 ? "degraded" : "healthy",
+      lastCycle: this.cycleCount,
+      lastCycleAt: new Date().toISOString(),
+      uptimeMs: now - this.startedAt,
+      cyclesTotal: this.cycleCount,
+      ordersPlaced: this.ordersPlaced,
+      ordersSkipped: this.ordersSkipped,
+      activeChains,
+      duelSignalActive: MM_ENABLE_DUEL_SIGNAL && this.lastDuelSignal !== null,
+      lastDuelPhase: this.lastDuelSignal?.phase ?? null,
+      lastMidFinal: this.lastCycleTelemetry?.mid_final ?? 500,
+      inventoryYes: this.inventoryYes,
+      inventoryNo: this.inventoryNo,
+      errors: this.recentErrors.slice(-5),
+    };
+
+    try {
+      // Ensure directory exists
+      const dir = path.dirname(MM_HEARTBEAT_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      fs.writeFileSync(MM_HEARTBEAT_FILE, JSON.stringify(status, null, 2));
+    } catch (e: any) {
+      console.warn(
+        `[HEALTH] Failed to write ${MM_HEARTBEAT_FILE}: ${e.message}`,
+      );
+    }
+  }
+
+  private recordError(message: string) {
+    this.recentErrors.push(`[${new Date().toISOString()}] ${message}`);
+    if (this.recentErrors.length > 20) {
+      this.recentErrors = this.recentErrors.slice(-10);
     }
   }
 
@@ -520,13 +651,26 @@ class CrossChainMarketMaker {
 
   // ─── EVM Market Making ──────────────────────────────────────────────────────
   async evmMarketMake(chain: "bsc" | "base", clob: ethers.Contract) {
+    let midBook: number | null = null;
+    let midDuel: number | null = null;
+    let midFinal = 500;
+    let spreadBps = 0;
+    let bidPrice = 0;
+    let askPrice = 0;
+
     try {
       const nextMatchId = await clob.nextMatchId();
-      if (nextMatchId <= 1n) return;
+      if (nextMatchId <= 1n) {
+        this.emitTelemetry(chain, null, null, 500, 0, 0, 0, "no_active_match");
+        return;
+      }
       const activeMatchId = nextMatchId - 1n;
 
       const matchInfo = await clob.matches(activeMatchId);
-      if (matchInfo.status !== 1n) return;
+      if (matchInfo.status !== 1n) {
+        this.emitTelemetry(chain, null, null, 500, 0, 0, 0, "match_not_active");
+        return;
+      }
 
       const bestBid = Number(await clob.bestBids(activeMatchId));
       const bestAsk = Number(await clob.bestAsks(activeMatchId));
@@ -539,29 +683,56 @@ class CrossChainMarketMaker {
         bestAsk >= bestBid &&
         bestAsk < 1000;
       const bookMid = hasBookMid ? (bestBid + bestAsk) / 2 : NaN;
+      midBook = hasBookMid ? Math.round(bookMid) : null;
       const spread = hasBookMid ? bestAsk - bestBid : 0;
-      const spreadBps =
+      spreadBps =
         hasBookMid && bookMid > 0 ? (spread * 10000) / bookMid : 10000;
 
-      // Duel-state-informed fair value (replaces static 0.5)
+      // ─── DUEL-STATE-WEIGHTED FAIR VALUE (Critical Fix) ─────────────────────
+      // Instead of defaulting to static 500 (0.5), we compute fair value from:
+      // 1. Book mid (if available)
+      // 2. Duel signal mid (HP-weighted probability)
+      // The final mid is a weighted blend that MOVES with HP changes.
       const duelSignal = await this.getDuelSignal();
-      let mid = Number.isFinite(bookMid) ? bookMid : 500;
+      midDuel = duelSignal?.midPrice ?? null;
 
+      // Base mid from book or duel signal (not static 500)
+      let mid: number;
+      if (Number.isFinite(bookMid)) {
+        mid = bookMid;
+      } else if (duelSignal && duelSignal.midPrice !== 500) {
+        // If no book but duel signal has moved from neutral, use it directly
+        mid = duelSignal.midPrice;
+      } else {
+        // Fallback to 500 only when we have no information
+        mid = 500;
+      }
+
+      // Blend with duel signal based on confidence
       if (duelSignal && duelSignal.weight > 0) {
-        const signalWeight = Number.isFinite(bookMid) ? duelSignal.weight : 1;
+        // Weight increases when book is absent or duel confidence is high
+        const bookAbsent = !Number.isFinite(bookMid);
+        const effectiveWeight = bookAbsent
+          ? Math.min(1, duelSignal.weight + 0.2) // Higher weight when no book
+          : duelSignal.weight * duelSignal.confidence; // Scale by confidence
+
+        // Blend towards duel signal
         mid = clamp(
           Math.round(
-            mid * (1 - signalWeight) + duelSignal.midPrice * signalWeight,
+            mid * (1 - effectiveWeight) + duelSignal.midPrice * effectiveWeight,
           ),
           1,
           999,
         );
+
         if (this.cycleCount % 12 === 0) {
           console.log(
-            `[${chain.toUpperCase()}] duel signal phase=${duelSignal.phase} fairValue=${duelSignal.midPrice} conf=${duelSignal.confidence.toFixed(2)} weight=${signalWeight.toFixed(2)} → quoteMid=${mid}`,
+            `[${chain.toUpperCase()}] duel signal phase=${duelSignal.phase} fairValue=${duelSignal.midPrice} conf=${duelSignal.confidence.toFixed(2)} weight=${effectiveWeight.toFixed(2)} → quoteMid=${mid}`,
           );
         }
       }
+
+      midFinal = Math.round(mid);
 
       // Dynamic spread from aggressiveness + duel confidence
       const duelConfidence = duelSignal?.confidence ?? 0;
@@ -592,15 +763,53 @@ class CrossChainMarketMaker {
       );
       const skewedMid = clamp(Math.round(mid + skewOffset), 1, 999);
 
-      const bidPrice = Math.max(1, Math.floor(skewedMid - quoteWidth / 2));
-      const askPrice = Math.min(999, Math.ceil(skewedMid + quoteWidth / 2));
+      bidPrice = Math.max(1, Math.floor(skewedMid - quoteWidth / 2));
+      askPrice = Math.min(999, Math.ceil(skewedMid + quoteWidth / 2));
 
-      // Enforce minimum order size
+      // ─── NON-ZERO ORDER SIZING (Critical Guard) ────────────────────────────
+      // Note: Inventory validation is per-side at order placement time.
+      // This upfront check only validates min/max bounds.
       const rawOrderSize = this.computeOrderSize();
-      const orderSize = enforceMinOrderSize(rawOrderSize, ORDER_SIZE_MIN);
-      if (orderSize === 0) {
+      const sizeValidation = validateOrderSize(
+        rawOrderSize,
+        ORDER_SIZE_MIN,
+        ORDER_SIZE_MAX,
+        MAX_INVENTORY_CAP, // Use full cap - per-side checks happen at placement
+      );
+
+      if (!sizeValidation.valid) {
+        this.ordersSkipped++;
+        this.emitTelemetry(
+          chain,
+          midBook,
+          midDuel,
+          midFinal,
+          spreadBps,
+          bidPrice,
+          askPrice,
+          `size_invalid:${sizeValidation.reason}`,
+        );
         console.warn(
-          `[${chain.toUpperCase()}] Skipping: order size ${rawOrderSize} below min ${ORDER_SIZE_MIN}`,
+          `[${chain.toUpperCase()}] Skipping: ${sizeValidation.reason}`,
+        );
+        return;
+      }
+
+      const orderSize = sizeValidation.size;
+
+      // Double-check: NEVER submit zero or negative size
+      if (orderSize <= 0) {
+        this.ordersSkipped++;
+        this.recordError(`Zero size after validation: raw=${rawOrderSize}`);
+        this.emitTelemetry(
+          chain,
+          midBook,
+          midDuel,
+          midFinal,
+          spreadBps,
+          bidPrice,
+          askPrice,
+          `zero_size_guard:${rawOrderSize}`,
         );
         return;
       }
@@ -613,8 +822,10 @@ class CrossChainMarketMaker {
         (o) => o.chain === `evm-${chain}` && !o.isBuy,
       ).length;
 
+      let placedCount = 0;
+
       if (this.inventoryYes < MAX_INVENTORY_CAP && existingBuys < maxPerSide) {
-        await this.placeEvmOrder(
+        const placed = await this.placeEvmOrder(
           chain,
           clob,
           Number(activeMatchId),
@@ -622,10 +833,11 @@ class CrossChainMarketMaker {
           bidPrice,
           orderSize,
         );
+        if (placed) placedCount++;
       }
 
       if (this.inventoryNo < MAX_INVENTORY_CAP && existingSells < maxPerSide) {
-        await this.placeEvmOrder(
+        const placed = await this.placeEvmOrder(
           chain,
           clob,
           Number(activeMatchId),
@@ -633,7 +845,22 @@ class CrossChainMarketMaker {
           askPrice,
           orderSize,
         );
+        if (placed) placedCount++;
       }
+
+      // Emit success telemetry
+      this.emitTelemetry(
+        chain,
+        midBook,
+        midDuel,
+        midFinal,
+        spreadBps,
+        bidPrice,
+        askPrice,
+        null,
+        orderSize,
+        placedCount,
+      );
 
       if (
         MM_ENABLE_TAKER_FLOW &&
@@ -648,6 +875,17 @@ class CrossChainMarketMaker {
         );
       }
     } catch (e: any) {
+      this.recordError(`${chain}: ${e.message}`);
+      this.emitTelemetry(
+        chain,
+        midBook,
+        midDuel,
+        midFinal,
+        spreadBps,
+        bidPrice,
+        askPrice,
+        `error:${e.message.slice(0, 50)}`,
+      );
       console.error(`[${chain.toUpperCase()}] Market make error:`, e.message);
     }
   }
@@ -679,12 +917,43 @@ class CrossChainMarketMaker {
 
     const takeBuy = canBuy && (!canSell || Math.random() >= 0.5);
     const takerPrice = takeBuy ? bestAsk : bestBid;
+    const remainingCapacity = takeBuy
+      ? MAX_INVENTORY_CAP - this.inventoryYes
+      : MAX_INVENTORY_CAP - this.inventoryNo;
+
+    // ─── CRITICAL: Non-zero taker size validation ────────────────────────────
     const rawTakerSize = Math.floor(this.computeOrderSize() / 2);
-    const takerSize = enforceMinOrderSize(
-      Math.max(MM_TAKER_SIZE_MIN, Math.min(MM_TAKER_SIZE_MAX, rawTakerSize)),
+    const clampedRaw = Math.max(
       MM_TAKER_SIZE_MIN,
+      Math.min(MM_TAKER_SIZE_MAX, rawTakerSize),
     );
-    if (takerSize === 0) return;
+
+    const sizeValidation = validateOrderSize(
+      clampedRaw,
+      MM_TAKER_SIZE_MIN,
+      MM_TAKER_SIZE_MAX,
+      remainingCapacity,
+    );
+
+    if (!sizeValidation.valid) {
+      console.warn(
+        `[${chain.toUpperCase()}] Taker order skipped: ${sizeValidation.reason}`,
+      );
+      this.ordersSkipped++;
+      return;
+    }
+
+    const takerSize = sizeValidation.size;
+
+    // FINAL GUARD
+    if (takerSize <= 0) {
+      console.error(
+        `[${chain.toUpperCase()}] CRITICAL: Zero taker size! raw=${rawTakerSize}`,
+      );
+      this.recordError(`Zero taker size: ${rawTakerSize}`);
+      this.ordersSkipped++;
+      return;
+    }
 
     await this.placeEvmOrder(
       chain,
@@ -705,29 +974,58 @@ class CrossChainMarketMaker {
     price: number,
     amount: number,
     intent: "maker" | "taker" = "maker",
-  ) {
+  ): Promise<boolean> {
     try {
       const remainingCapacity = isBuy
         ? MAX_INVENTORY_CAP - this.inventoryYes
         : MAX_INVENTORY_CAP - this.inventoryNo;
 
-      // Enforce minimum order size floor > 0
-      const cappedAmount = enforceMinOrderSize(
-        Math.min(Math.floor(amount), remainingCapacity),
+      // ─── CRITICAL: Non-zero order size validation ──────────────────────────
+      const sizeValidation = validateOrderSize(
+        amount,
         ORDER_SIZE_MIN,
+        ORDER_SIZE_MAX,
+        remainingCapacity,
       );
-      if (cappedAmount === 0) return;
+
+      if (!sizeValidation.valid) {
+        console.warn(
+          `[${chain.toUpperCase()}] ${intent} order rejected: ${sizeValidation.reason}`,
+        );
+        this.ordersSkipped++;
+        return false;
+      }
+
+      const cappedAmount = sizeValidation.size;
+
+      // FINAL GUARD: Absolutely refuse to place zero or negative orders
+      if (cappedAmount <= 0) {
+        console.error(
+          `[${chain.toUpperCase()}] CRITICAL: Zero size slipped through! raw=${amount} capped=${cappedAmount}`,
+        );
+        this.recordError(
+          `Zero size order prevented: ${amount} → ${cappedAmount}`,
+        );
+        this.ordersSkipped++;
+        return false;
+      }
 
       const tokenDecimals =
         chain === "bsc"
           ? this.bscGoldTokenDecimals
           : this.baseGoldTokenDecimals;
       const onChainAmount = toTokenUnits(cappedAmount, tokenDecimals);
+
+      // FINAL GUARD: Also check on-chain representation
       if (onChainAmount <= 0n) {
-        console.warn(
-          `[${chain.toUpperCase()}] Skipping: non-positive on-chain size from amount=${cappedAmount}`,
+        console.error(
+          `[${chain.toUpperCase()}] CRITICAL: On-chain size is zero! amount=${cappedAmount} decimals=${tokenDecimals}`,
         );
-        return;
+        this.recordError(
+          `On-chain zero: ${cappedAmount} @ ${tokenDecimals} decimals`,
+        );
+        this.ordersSkipped++;
+        return false;
       }
 
       // Run mode gating
@@ -735,7 +1033,8 @@ class CrossChainMarketMaker {
         console.log(
           `[${chain.toUpperCase()}] DRY-RUN: Would ${isBuy ? "BID" : "ASK"} @ ${price} x${cappedAmount} (${intent})`,
         );
-        return;
+        this.ordersPlaced++;
+        return true;
       }
 
       if (this.runMode === "paper") {
@@ -753,10 +1052,11 @@ class CrossChainMarketMaker {
         }
         if (isBuy) this.inventoryYes += cappedAmount;
         else this.inventoryNo += cappedAmount;
+        this.ordersPlaced++;
         console.log(
           `[${chain.toUpperCase()}] PAPER: ${intent === "taker" ? (isBuy ? "TAKER-BUY" : "TAKER-SELL") : isBuy ? "BID" : "ASK"} @ ${price} x${cappedAmount} (orderId: ${fakeOrderId})`,
         );
-        return;
+        return true;
       }
 
       // LIVE mode
@@ -795,18 +1095,22 @@ class CrossChainMarketMaker {
 
       if (isBuy) this.inventoryYes += cappedAmount;
       else this.inventoryNo += cappedAmount;
+      this.ordersPlaced++;
 
       console.log(
         `[${chain.toUpperCase()}] ✓ ${intent === "taker" ? (isBuy ? "TAKER-BUY" : "TAKER-SELL") : isBuy ? "BID" : "ASK"} @ ${price} x${cappedAmount} (${onChainAmount.toString()} raw) (orderId: ${orderId})`,
       );
+      return true;
     } catch (e: any) {
       if (this.isRetryableNonceError(e)) {
         console.warn(
           `[${chain.toUpperCase()}] Nonce race; will retry next cycle.`,
         );
-        return;
+        return false;
       }
+      this.recordError(`${chain} order: ${e.message}`);
       console.error(`[${chain.toUpperCase()}] Order failed:`, e.message);
+      return false;
     }
   }
 
@@ -925,13 +1229,22 @@ class CrossChainMarketMaker {
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
   private computeOrderSize(): number {
-    const base =
-      ORDER_SIZE_MIN +
-      Math.floor(Math.random() * (ORDER_SIZE_MAX - ORDER_SIZE_MIN));
+    // Base size from min-max range, scaled by aggressiveness
+    const range = ORDER_SIZE_MAX - ORDER_SIZE_MIN;
+    const base = ORDER_SIZE_MIN + Math.floor(Math.random() * range);
+    const scaledBase = Math.floor(
+      base * this.aggressivenessParams.sizeMultiplier,
+    );
+
+    // Reduce size when inventory is imbalanced
     const imbalance = this.inventoryYes - this.inventoryNo;
-    const skewFactor =
-      Math.abs(imbalance) > MAX_INVENTORY_CAP * 0.5 ? 0.5 : 1.0;
-    return Math.max(ORDER_SIZE_MIN, Math.floor(base * skewFactor));
+    const imbalanceRatio = Math.abs(imbalance) / MAX_INVENTORY_CAP;
+    const skewFactor = imbalanceRatio > 0.5 ? 0.5 : 1.0 - imbalanceRatio * 0.3;
+
+    const finalSize = Math.floor(scaledBase * skewFactor);
+
+    // CRITICAL: Always return at least ORDER_SIZE_MIN (never zero)
+    return Math.max(ORDER_SIZE_MIN, finalSize);
   }
 
   private async getDuelSignal(): Promise<DuelSignal | null> {

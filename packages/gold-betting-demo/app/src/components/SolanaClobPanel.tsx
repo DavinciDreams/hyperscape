@@ -219,33 +219,44 @@ export function SolanaClobPanel({
         });
       }
 
+      // Only add trades with positive amounts (filter zero-size due to rounding)
       if (yesDelta > 0n) {
-        setRecentTrades((prevTrades) =>
-          [
-            {
-              id: `sol-clob-yes-${now}`,
-              side: "YES" as const,
-              amount: fmtSol(yesDelta),
-              price: pct / 100,
-              time: now,
-            },
-            ...prevTrades,
-          ].slice(0, 50),
-        );
+        const tradeAmount = fmtSol(yesDelta);
+        if (tradeAmount > 0) {
+          setRecentTrades((prevTrades) =>
+            [
+              {
+                id: `sol-clob-yes-${now}`,
+                side: "YES" as const,
+                amount: tradeAmount,
+                price: pct / 100,
+                time: now,
+              },
+              ...prevTrades,
+            ]
+              .filter((t) => t.amount > 0) // Ensure no zero-size trades in history
+              .slice(0, 50),
+          );
+        }
       }
       if (noDelta > 0n) {
-        setRecentTrades((prevTrades) =>
-          [
-            {
-              id: `sol-clob-no-${now}`,
-              side: "NO" as const,
-              amount: fmtSol(noDelta),
-              price: pct / 100,
-              time: now + 1,
-            },
-            ...prevTrades,
-          ].slice(0, 50),
-        );
+        const tradeAmount = fmtSol(noDelta);
+        if (tradeAmount > 0) {
+          setRecentTrades((prevTrades) =>
+            [
+              {
+                id: `sol-clob-no-${now}`,
+                side: "NO" as const,
+                amount: tradeAmount,
+                price: pct / 100,
+                time: now + 1,
+              },
+              ...prevTrades,
+            ]
+              .filter((t) => t.amount > 0) // Ensure no zero-size trades in history
+              .slice(0, 50),
+          );
+        }
       }
 
       lastSnapshotRef.current = { yes: nextYes, no: nextNo };

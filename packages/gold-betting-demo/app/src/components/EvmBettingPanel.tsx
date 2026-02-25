@@ -218,13 +218,16 @@ export function EvmBettingPanel({
         getRecentOrders(publicClient, contractAddr, currentMatchId),
       ]);
 
-      const tradesForUi = fetchedTrades.map((t) => ({
-        id: t.id,
-        side: t.side,
-        amount: Number(formatUnits(t.amount, nativeDecimals)),
-        time: t.time,
-        price: t.price,
-      }));
+      const tradesForUi = fetchedTrades
+        .map((t) => ({
+          id: t.id,
+          side: t.side,
+          amount: Number(formatUnits(t.amount, nativeDecimals)),
+          time: t.time,
+          price: t.price,
+        }))
+        // Filter out zero-size trades (can happen due to rounding or cancelled fills)
+        .filter((t) => t.amount > 0);
       setRecentTrades(tradesForUi.slice(0, 50));
 
       const newChartData = fetchedTrades
