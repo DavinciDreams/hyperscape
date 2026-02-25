@@ -7,9 +7,10 @@
  * - Rotation cadence (cycle wallets to distribute activity)
  * - Funding checks (skip wallets below minimum balance)
  * - All run modes: dry-run, paper, live
+ * - Structured worker lifecycle events
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { ethers } from "ethers";
@@ -17,6 +18,31 @@ import { Connection, PublicKey } from "@solana/web3.js";
 
 import type { MultiWalletConfig, WalletConfig, RunMode } from "./common.js";
 import { resolveRunMode, resolveSolanaProgramId, sleep } from "./common.js";
+
+// ─── Worker Lifecycle Events ──────────────────────────────────────────────────
+type WorkerEventType =
+  | "worker_starting"
+  | "worker_started"
+  | "worker_exited"
+  | "worker_error"
+  | "worker_skipped"
+  | "orchestrator_ready"
+  | "orchestrator_shutdown";
+
+interface WorkerEvent {
+  type: WorkerEventType;
+  timestamp: string;
+  worker?: string;
+  message?: string;
+  code?: number | null;
+  signal?: string | null;
+  reason?: string;
+}
+
+const emitWorkerEvent = (event: WorkerEvent) => {
+  const line = JSON.stringify(event);
+  console.log(`[LIFECYCLE] ${line}`);
+};
 
 // ─── Args ─────────────────────────────────────────────────────────────────────
 const parseArgs = () => {
@@ -196,6 +222,11 @@ async function main() {
   const shutdownAll = (signal: NodeJS.Signals = "SIGTERM") => {
     if (shuttingDown) return;
     shuttingDown = true;
+    emitWorkerEvent({
+      type: "orchestrator_shutdown",
+      timestamp: new Date().toISOString(),
+      message: `Shutting down all workers (${signal})`,
+    });
     for (const [name, child] of children.entries()) {
       console.log(`[mm:runner] stopping ${name} (${signal})`);
       child.kill(signal);
@@ -212,6 +243,12 @@ async function main() {
       throw new Error("Each wallet entry must have a non-empty name");
     }
     if (wallet.enabled === false) {
+      emitWorkerEvent({
+        type: "worker_skipped",
+        timestamp: new Date().toISOString(),
+        worker: wallet.name,
+        reason: "disabled_in_config",
+      });
       console.log(`[mm:runner] ${wallet.name} disabled, skipping`);
       continue;
     }
@@ -234,6 +271,12 @@ async function main() {
             minFundingWei,
           );
           if (!ok) {
+            emitWorkerEvent({
+              type: "worker_skipped",
+              timestamp: new Date().toISOString(),
+              worker: wallet.name,
+              reason: `underfunded_bsc:${balance}ETH`,
+            });
             console.warn(
               `[mm:runner] ${wallet.name} underfunded on BSC (${balance} ETH), skipping`,
             );
@@ -247,6 +290,11 @@ async function main() {
   }
 
   if (eligibleWallets.length === 0) {
+    emitWorkerEvent({
+      type: "orchestrator_shutdown",
+      timestamp: new Date().toISOString(),
+      reason: "no_eligible_wallets",
+    });
     if (failOnNoEligible) {
       throw new Error("No eligible wallets after funding checks");
     }
@@ -289,11 +337,23 @@ async function main() {
     }
 
     if (runMode === "dry-run") {
+      emitWorkerEvent({
+        type: "worker_starting",
+        timestamp: new Date().toISOString(),
+        worker: wallet.name,
+        message: `DRY-RUN: evm=${maskSecret(walletEnv.EVM_PRIVATE_KEY)} sol=${maskSecret(walletEnv.SOLANA_PRIVATE_KEY)} cap=${walletEnv.MAX_INVENTORY_CAP || "default"}`,
+      });
       console.log(
         `[mm:runner] ${wallet.name} | evm=${maskSecret(walletEnv.EVM_PRIVATE_KEY)} | sol=${maskSecret(walletEnv.SOLANA_PRIVATE_KEY)} | cap=${walletEnv.MAX_INVENTORY_CAP || "default"}`,
       );
       continue;
     }
+
+    emitWorkerEvent({
+      type: "worker_starting",
+      timestamp: new Date().toISOString(),
+      worker: wallet.name,
+    });
 
     const child = spawn("tsx", ["src/index.ts"], {
       cwd: process.cwd(),
@@ -305,8 +365,34 @@ async function main() {
     bindPrefixedOutput(child, wallet.name, "stdout");
     bindPrefixedOutput(child, wallet.name, "stderr");
 
+    child.on("spawn", () => {
+      emitWorkerEvent({
+        type: "worker_started",
+        timestamp: new Date().toISOString(),
+        worker: wallet.name,
+      });
+    });
+
+    child.on("error", (err) => {
+      emitWorkerEvent({
+        type: "worker_error",
+        timestamp: new Date().toISOString(),
+        worker: wallet.name,
+        message: err.message,
+      });
+    });
+
     child.on("exit", (code, signal) => {
       children.delete(wallet.name);
+
+      emitWorkerEvent({
+        type: "worker_exited",
+        timestamp: new Date().toISOString(),
+        worker: wallet.name,
+        code,
+        signal,
+      });
+
       if (shuttingDown) return;
       if (code === 0) {
         console.log(`[mm:runner] ${wallet.name} exited cleanly`);
@@ -327,6 +413,12 @@ async function main() {
     console.log("[mm:runner] dry run complete");
     return;
   }
+
+  emitWorkerEvent({
+    type: "orchestrator_ready",
+    timestamp: new Date().toISOString(),
+    message: `${children.size} workers active`,
+  });
 
   console.log(`[mm:runner] active instances: ${children.size}`);
   await new Promise<void>(() => {

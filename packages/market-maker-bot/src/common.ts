@@ -70,7 +70,7 @@ export interface TrackedOrder {
 }
 
 // ─── Aggressiveness Tiers ─────────────────────────────────────────────────────
-export type AggressivenessTier = "passive" | "normal" | "aggressive" | "hyper";
+export type AggressivenessTier = "low" | "medium" | "high";
 
 export interface AggressivenessParams {
   /** Spread multiplier (1.0 = base spread, 0.5 = tighter, 2.0 = wider) */
@@ -81,40 +81,48 @@ export interface AggressivenessParams {
   participationRate: number;
   /** Max orders per side override */
   maxOrdersPerSide: number;
+  /** Size multiplier for order sizing */
+  sizeMultiplier: number;
 }
 
 const AGGRESSIVENESS_PRESETS: Record<AggressivenessTier, AggressivenessParams> =
   {
-    passive: {
-      spreadMultiplier: 2.0,
-      inventorySkewFactor: 0.2,
-      participationRate: 0.3,
+    low: {
+      spreadMultiplier: 1.8,
+      inventorySkewFactor: 0.3,
+      participationRate: 0.5,
       maxOrdersPerSide: 2,
+      sizeMultiplier: 0.6,
     },
-    normal: {
+    medium: {
       spreadMultiplier: 1.0,
       inventorySkewFactor: 0.5,
-      participationRate: 0.7,
-      maxOrdersPerSide: 3,
+      participationRate: 0.8,
+      maxOrdersPerSide: 4,
+      sizeMultiplier: 1.0,
     },
-    aggressive: {
-      spreadMultiplier: 0.6,
-      inventorySkewFactor: 0.8,
-      participationRate: 0.9,
-      maxOrdersPerSide: 5,
-    },
-    hyper: {
-      spreadMultiplier: 0.35,
-      inventorySkewFactor: 1.0,
-      participationRate: 1.0,
-      maxOrdersPerSide: 8,
+    high: {
+      spreadMultiplier: 0.55,
+      inventorySkewFactor: 0.85,
+      participationRate: 0.95,
+      maxOrdersPerSide: 6,
+      sizeMultiplier: 1.4,
     },
   };
 
+// Legacy tier aliases for backward compatibility
+const TIER_ALIASES: Record<string, AggressivenessTier> = {
+  passive: "low",
+  normal: "medium",
+  aggressive: "high",
+  hyper: "high",
+};
+
 export function resolveAggressivenessTier(): AggressivenessTier {
-  const raw = (process.env.MM_AGGRESSIVENESS || "normal").trim().toLowerCase();
+  const raw = (process.env.MM_AGGRESSIVENESS || "medium").trim().toLowerCase();
   if (raw in AGGRESSIVENESS_PRESETS) return raw as AggressivenessTier;
-  return "normal";
+  if (raw in TIER_ALIASES) return TIER_ALIASES[raw];
+  return "medium";
 }
 
 export function getAggressivenessParams(
@@ -261,41 +269,24 @@ export function parseDuelSignal(
       confidence = 0.9;
     }
   } else if (phase === "FIGHTING") {
-    const hp1 = readFiniteNumber(
-      agent1?.hp,
-      agent1?.currentHp,
-      agent1?.health,
-    );
+    const hp1 = readFiniteNumber(agent1?.hp, agent1?.currentHp, agent1?.health);
     const max1 = readFiniteNumber(
       agent1?.maxHp,
       agent1?.maxHealth,
       agent1?.startingHp,
     );
-    const hp2 = readFiniteNumber(
-      agent2?.hp,
-      agent2?.currentHp,
-      agent2?.health,
-    );
+    const hp2 = readFiniteNumber(agent2?.hp, agent2?.currentHp, agent2?.health);
     const max2 = readFiniteNumber(
       agent2?.maxHp,
       agent2?.maxHealth,
       agent2?.startingHp,
     );
 
-    if (
-      max1 > 0 &&
-      max2 > 0 &&
-      Number.isFinite(hp1) &&
-      Number.isFinite(hp2)
-    ) {
+    if (max1 > 0 && max2 > 0 && Number.isFinite(hp1) && Number.isFinite(hp2)) {
       const hpRatio1 = hp1 / max1;
       const hpRatio2 = hp2 / max2;
       const edge = clamp(hpRatio1 - hpRatio2, -1, 1);
-      const probYes = clamp(
-        0.5 + edge * hpEdgeMultiplier,
-        0.02,
-        0.98,
-      );
+      const probYes = clamp(0.5 + edge * hpEdgeMultiplier, 0.02, 0.98);
       implied = Math.round(probYes * 1000);
       // Confidence scales with how different the HP ratios are
       confidence = clamp(Math.abs(edge) * 0.8 + 0.2, 0.2, 0.85);
@@ -318,15 +309,81 @@ export function parseDuelSignal(
 /**
  * Enforce a minimum order size floor.
  * Returns the capped size or 0 if the order should be skipped.
+ * CRITICAL: This is the final guard against zero-size orders.
  */
-export function enforceMinOrderSize(
-  rawSize: number,
-  minSize: number,
-): number {
+export function enforceMinOrderSize(rawSize: number, minSize: number): number {
   const floor = Math.max(1, minSize);
   const rounded = Math.max(0, Math.floor(rawSize));
   if (rounded < floor) return 0; // skip, don't place a tiny order
   return rounded;
+}
+
+/**
+ * Validate that an order size is safe to submit.
+ * Returns { valid: true, size } or { valid: false, reason }.
+ */
+export function validateOrderSize(
+  rawSize: number,
+  minSize: number,
+  maxSize: number,
+  inventoryRemaining: number,
+): { valid: true; size: number } | { valid: false; reason: string } {
+  if (!Number.isFinite(rawSize) || rawSize <= 0) {
+    return { valid: false, reason: `invalid_raw_size:${rawSize}` };
+  }
+
+  const floor = Math.max(1, minSize);
+  const ceiling = Math.max(floor, maxSize);
+  const cappedByMax = Math.min(rawSize, ceiling);
+  const cappedByInventory = Math.min(cappedByMax, inventoryRemaining);
+  const final = Math.floor(cappedByInventory);
+
+  if (final < floor) {
+    return {
+      valid: false,
+      reason: `below_min:${final}<${floor}${cappedByInventory < cappedByMax ? " (inv_limited)" : ""}`,
+    };
+  }
+
+  return { valid: true, size: final };
+}
+
+// ─── Cycle Telemetry ──────────────────────────────────────────────────────────
+export interface CycleTelemetry {
+  cycle: number;
+  timestamp: string;
+  chain: string;
+  mid_book: number | null;
+  mid_duel: number | null;
+  mid_final: number;
+  spread_bps: number;
+  bid_price: number;
+  ask_price: number;
+  size: number;
+  fills: number;
+  reason_skipped: string | null;
+  duel_phase: string | null;
+  duel_confidence: number | null;
+  inventory_yes: number;
+  inventory_no: number;
+}
+
+export interface MMHealthStatus {
+  instanceId: string;
+  status: "healthy" | "degraded" | "error";
+  lastCycle: number;
+  lastCycleAt: string;
+  uptimeMs: number;
+  cyclesTotal: number;
+  ordersPlaced: number;
+  ordersSkipped: number;
+  activeChains: string[];
+  duelSignalActive: boolean;
+  lastDuelPhase: string | null;
+  lastMidFinal: number;
+  inventoryYes: number;
+  inventoryNo: number;
+  errors: string[];
 }
 
 // ─── Multi-wallet types ───────────────────────────────────────────────────────
