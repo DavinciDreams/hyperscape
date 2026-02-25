@@ -180,7 +180,7 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     cluster: "devnet",
     rpcUrl: "https://api.devnet.solana.com",
     wsUrl: "wss://api.devnet.solana.com/",
-    fightOracleProgramId: "A6utqr1N4KP3Tst2tMCqfJR4mhCRNw4M2uN3Nb6nPBcS",
+    fightOracleProgramId: "4fvVdiZkMQQGjYWHyKubjkdhh1DfJaYNvaRvRWPeKcMN",
     goldBinaryMarketProgramId: "7pxwReoFYABrSN7rnqusAxniKvrdv3zWDLoVamX5NN3W",
     goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
     uiSyncDelayMs: 0,

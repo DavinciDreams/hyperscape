@@ -144,11 +144,11 @@ function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
 
 export const FIGHT_ORACLE_PROGRAM_ID = resolveProgramId(
   fightOracleIdl,
-  "A6utqr1N4KP3Tst2tMCqfJR4mhCRNw4M2uN3Nb6nPBcS",
+  "4fvVdiZkMQQGjYWHyKubjkdhh1DfJaYNvaRvRWPeKcMN",
 );
 export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveProgramId(
   goldClobMarketIdl,
-  "4phSkAVkbtGbQbrT3p2xjNPLAyw1DWz99wT7g4dQMyiX",
+  "AqRu5b1fd67VyR4MgjKPN9EMgQ8wxauDUxyY5pUsGdAW",
 );
 export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveProgramId(
   goldPerpsMarketIdl,
