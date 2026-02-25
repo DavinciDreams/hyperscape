@@ -732,7 +732,7 @@
     "@elizaos/prompts": "2.0.0-alpha.1",
     "@hpke/core": ">=1.7.5",
     "@pixiv/three-vrm": "3.4.3",
-    "@trpc/server": ">=10.45.3",
+    "@trpc/server": "10.45.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/three": "0.182.0",
@@ -3047,7 +3047,7 @@
 
     "@trpc/client": ["@trpc/client@10.34.0", "", { "peerDependencies": { "@trpc/server": "10.34.0" } }, "sha512-nqtDTIqSY/9syo2EjSy4WWWXPU9GsamEh9Tsg698gLAh1nhgFc5+/YYeb+Ne1pbvWGZ5/3t9Dcz3h4wMyyJ9gQ=="],
 
-    "@trpc/server": ["@trpc/server@11.10.0", "", { "peerDependencies": { "typescript": ">=5.7.2" } }, "sha512-zZjTrR6He61e5TiT7e/bQqab/jRcXBZM8Fg78Yoo8uh5pz60dzzbYuONNUCOkafv5ppXVMms4NHYfNZgzw50vg=="],
+    "@trpc/server": ["@trpc/server@10.45.3", "", {}, "sha512-CVZM42FdGwqYQxV7vSRwb//AF8REfV60S/fUnwx7xqCnnSDus0FW/UuAOW4eQJ30RQlOPy4MYU8B3dbTAx85Ew=="],
 
     "@trysound/sax": ["@trysound/sax@0.2.0", "", {}, "sha512-L7z9BgrNEcYyUYtF+HaEfiS5ebkh9jXqbszz7pC0hRBPaatV0XjSD3+eHrpqFemQfgwiFF0QPIarnIihIDn7OA=="],
 
