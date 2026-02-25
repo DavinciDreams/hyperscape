@@ -132,12 +132,12 @@ export function useStreamingState(options: { disabled?: boolean } = {}) {
       if (consecutiveFailuresRef.current === 0) {
         consecutiveFailuresRef.current = 1;
       }
-      if (consecutiveFailuresRef.current >= 5 && !error) {
+      if (consecutiveFailuresRef.current >= 5) {
         const message = err instanceof Error ? err.message : String(err);
         setError(`Failed to fetch duel state: ${message}`);
       }
     }
-  }, [applyState, error]);
+  }, [applyState]);
 
   const startFallbackPolling = useCallback(() => {
     if (pollTimer.current) return;

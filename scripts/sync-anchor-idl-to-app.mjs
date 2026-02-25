@@ -11,9 +11,10 @@
  */
 
 import { readFileSync, copyFileSync, existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(import.meta.dirname, "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ANCHOR_IDL_DIR = join(
   ROOT,
   "packages/gold-betting-demo/anchor/target/idl",
@@ -44,8 +45,14 @@ for (const program of PROGRAMS) {
     [anchorTs, appTs, tsFile],
   ]) {
     if (!existsSync(src)) {
-      console.warn(`⚠  Source missing: ${src} — skipping ${label}`);
-      continue;
+      if (isCheck) {
+        console.error(`✗  Source artifact missing: ${src} — cannot validate ${label}`);
+        driftFound = true;
+        continue;
+      } else {
+        console.warn(`⚠  Source missing: ${src} — skipping ${label}`);
+        continue;
+      }
     }
 
     if (isCheck) {

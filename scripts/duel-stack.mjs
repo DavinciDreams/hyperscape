@@ -1629,6 +1629,9 @@ async function main() {
     } else {
       verifyArgs.push("--skip-betting");
     }
+    if (skipStream) {
+      verifyArgs.push("--skip-stream");
+    }
     if (verifyRequiredDestinations.length > 0) {
       verifyArgs.push(
         "--require-destinations",

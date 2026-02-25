@@ -20,6 +20,7 @@ const values = parseArgs({
     "betting-url": { type: "string", default: "http://localhost:4179" },
     "hls-url": { type: "string" },
     "skip-betting": { type: "boolean" },
+    "skip-stream": { type: "boolean" },
     "timeout-ms": { type: "string", default: "240000" },
     "fight-timeout-ms": { type: "string", default: "120000" },
     "rtmp-timeout-ms": { type: "string", default: "120000" },
@@ -44,6 +45,7 @@ Options:
   --betting-url <url>        Betting app URL (default: http://localhost:4179)
   --hls-url <url>            HLS stream manifest URL (optional)
   --skip-betting             Skip betting app HTTP readiness check
+  --skip-stream              Skip HLS stream manifest verification
   --timeout-ms <ms>          General timeout (default: 240000)
   --fight-timeout-ms <ms>    Combat proof timeout (default: 120000)
   --rtmp-timeout-ms <ms>     Optional RTMP status timeout (default: 120000)
@@ -61,6 +63,7 @@ const clientUrl = values["client-url"].replace(/\/$/, "");
 const bettingUrl = values["betting-url"].replace(/\/$/, "");
 const hlsUrl = values["hls-url"]?.trim() || "";
 const skipBetting = values["skip-betting"] === true;
+const skipStream = values["skip-stream"] === true;
 const timeoutMs = Number.parseInt(values["timeout-ms"], 10) || 240_000;
 const fightTimeoutMs =
   Number.parseInt(values["fight-timeout-ms"], 10) || 120_000;
@@ -185,7 +188,7 @@ async function verify() {
     log("skipping betting app readiness check (--skip-betting)");
   }
 
-  if (hlsUrl) {
+  if (hlsUrl && !skipStream) {
     await waitFor(
       "HLS stream manifest",
       async () => {
@@ -203,6 +206,8 @@ async function verify() {
       },
       timeoutMs,
     );
+  } else if (skipStream) {
+    log("skipping HLS stream verification (--skip-stream)");
   }
 
   const duelContextUrl = `${serverUrl}/api/streaming/duel-context`;

@@ -28,6 +28,17 @@ import {
   toTokenUnits,
 } from "./common.js";
 
+import {
+  type RiskLimits,
+  type RiskState,
+  loadRiskLimits,
+  createRiskState,
+  preOrderCheck,
+  recordFill,
+  triggerKillSwitch,
+  getRiskStatus,
+} from "./risk-controls.js";
+
 dotenv.config();
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -454,6 +465,9 @@ class CrossChainMarketMaker {
     if (Math.random() > this.aggressivenessParams.participationRate) {
       return;
     }
+
+    // 0. Check kill-switch sentinel file
+    this.checkKillSwitchFile();
 
     // 1. Cancel stale orders (anti-snipe)
     await this.cancelStaleOrders();
