@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Hls from "hls.js";
 
 interface StreamPlayerProps {
@@ -26,6 +32,10 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
     [autoPlay, muted, streamUrl],
   );
   const unavailableNotifiedRef = useRef(false);
+  const [streamDiagnostic, setStreamDiagnostic] = useState<string | null>(null);
+  const diagnosticTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const markUnavailable = useCallback(() => {
     if (unavailableNotifiedRef.current) return;
@@ -75,42 +85,41 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       try {
         const response = await fetch(sourceUrl(), { cache: "no-store" });
         if (!response.ok) {
-          console.error(
-            `[StreamPlayer] Manifest fetch failed: HTTP ${response.status} at ${streamUrl}`
-          );
-          if (response.status === 404) {
-            console.error(
-              "[StreamPlayer] 404 suggests stream manifest not found - check HLS output path and server routing"
-            );
-          } else if (response.status >= 500) {
-            console.error(
-              "[StreamPlayer] Server error - RTMP bridge may not be running or HLS writer crashed"
-            );
-          }
+          const msg =
+            response.status === 404
+              ? `Stream manifest not found (404) at ${streamUrl} — check HLS output path and server routing`
+              : response.status >= 500
+                ? `Server error (${response.status}) — RTMP bridge may not be running`
+                : `Manifest fetch failed: HTTP ${response.status}`;
+          console.error(`[StreamPlayer] ${msg}`);
+          setStreamDiagnostic(msg);
           return false;
         }
         const text = await response.text();
-        // A valid live playlist should include media segments.
         const hasHeader = /#EXTM3U/i.test(text);
-        const hasSegments = /#EXTINF/i.test(text) && /\.(ts|m4s|mp4)\b/i.test(text);
-        
+        const hasSegments =
+          /#EXTINF/i.test(text) && /\.(ts|m4s|mp4)\b/i.test(text);
+
         if (!hasHeader) {
-          console.error(
-            "[StreamPlayer] Manifest missing #EXTM3U header - file may be corrupted or incomplete"
-          );
+          const msg =
+            "Manifest missing #EXTM3U header — file may be corrupted or incomplete";
+          console.error(`[StreamPlayer] ${msg}`);
+          setStreamDiagnostic(msg);
           return false;
         }
         if (!hasSegments) {
-          console.warn(
-            "[StreamPlayer] Manifest has no segments yet - stream may still be starting"
-          );
+          const msg = "Stream starting — waiting for live segments…";
+          console.warn(`[StreamPlayer] ${msg}`);
+          setStreamDiagnostic(msg);
           return false;
         }
+        // Clear diagnostic on successful probe
+        setStreamDiagnostic(null);
         return true;
       } catch (error) {
-        console.error(
-          `[StreamPlayer] Manifest probe error: ${error instanceof Error ? error.message : String(error)}`
-        );
+        const msg = `Manifest probe error: ${error instanceof Error ? error.message : String(error)}`;
+        console.error(`[StreamPlayer] ${msg}`);
+        setStreamDiagnostic(msg);
         return false;
       }
     };
@@ -205,12 +214,12 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       const manifestReady = await probeManifest();
       if (!manifestReady) {
         console.warn(
-          `[StreamPlayer] Stream initialization delayed - manifest not ready at ${streamUrl}`
+          `[StreamPlayer] Stream initialization delayed - manifest not ready at ${streamUrl}`,
         );
         scheduleRebuild("manifest not ready", 1000);
         return;
       }
-      
+
       console.log(`[StreamPlayer] Initializing playback for ${streamUrl}`);
 
       // Check if browser supports HLS natively (Safari)
@@ -255,6 +264,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           console.log("[StreamPlayer] Manifest parsed, starting playback");
+          setStreamDiagnostic(null);
           void video.play().catch(() => {});
         });
 
@@ -354,6 +364,26 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
             backgroundColor: "#000",
           }}
         />
+        {streamDiagnostic && (
+          <div
+            style={{
+              position: "absolute",
+              top: 8,
+              left: 8,
+              right: 8,
+              padding: "6px 10px",
+              borderRadius: 4,
+              background: "rgba(0, 0, 0, 0.75)",
+              color: "#fbbf24",
+              fontSize: 11,
+              fontFamily: "monospace",
+              pointerEvents: "none",
+              zIndex: 10,
+            }}
+          >
+            ⚠ {streamDiagnostic}
+          </div>
+        )}
         <div
           style={{
             position: "absolute",

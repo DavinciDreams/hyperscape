@@ -272,11 +272,11 @@ const serverHlsPublicPath = toPublicPath(serverPublicDir);
 const bettingHlsPublicPath = toPublicPath(bettingPublicDir);
 const localBettingHlsPath =
   serverHlsPublicPath || bettingHlsPublicPath || "/live/stream.m3u8";
-const hlsUrl = serverHlsPublicPath
-  ? `${serverHttpUrl}${serverHlsPublicPath}`
-  : bettingHlsPublicPath
-    ? `http://localhost:${bettingPort}${bettingHlsPublicPath}`
-    : `${serverHttpUrl}/live/stream.m3u8`;
+// The HLS manifest is written to packages/server/public/live/ and served by
+// the betting app's Vite dev server middleware (hls-live-serve plugin) which
+// reads from that same directory.  Point hlsUrl at the betting app so that
+// preflight checks and the verifier probe the actually-reachable endpoint.
+const hlsUrl = `http://localhost:${bettingPort}/live/stream.m3u8`;
 const streamPageUrl = `${clientUrl}/?page=stream`;
 const embeddedSpectatorUrl = `${clientUrl}/?embedded=true&mode=spectator`;
 const forceWebglFallback = /^(1|true|yes|on)$/i.test(
@@ -1626,6 +1626,8 @@ async function main() {
     ];
     if (!skipBettingApp) {
       verifyArgs.push("--betting-url", `http://localhost:${bettingPort}`);
+    } else {
+      verifyArgs.push("--skip-betting");
     }
     if (verifyRequiredDestinations.length > 0) {
       verifyArgs.push(

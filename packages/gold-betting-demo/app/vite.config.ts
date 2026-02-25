@@ -118,9 +118,18 @@ export default defineConfig(async () => {
 
         const filePath = resolveFromRoots();
         if (!filePath) {
+          // Return 503 with diagnostic info so StreamPlayer can surface
+          // a meaningful message instead of a generic network error.
           res.statusCode = 503;
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          res.end("HLS stream unavailable");
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.end(
+            JSON.stringify({
+              error: "HLS stream unavailable",
+              detail: `Manifest file not found in any HLS root directory. Checked: ${hlsRoots.join(", ")}`,
+              requestedPath: relativePath,
+            }),
+          );
           return;
         }
         const ext = path.extname(filePath);

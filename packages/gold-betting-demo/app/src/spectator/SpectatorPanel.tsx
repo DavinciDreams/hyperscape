@@ -565,6 +565,7 @@ export function SpectatorPanel({
   });
   const state = providedState ?? hookState.state;
   const isConnected = providedIsConnected ?? hookState.isConnected;
+  const stateError = hookState.error;
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
   const leaderboardModalId = useId();
 
@@ -601,6 +602,21 @@ export function SpectatorPanel({
         gap: 16,
       }}
     >
+      {stateError && (
+        <div
+          style={{
+            padding: "6px 10px",
+            borderRadius: 4,
+            background: "rgba(251, 191, 36, 0.15)",
+            border: "1px solid rgba(251, 191, 36, 0.4)",
+            color: "#fbbf24",
+            fontSize: 11,
+            fontFamily: "monospace",
+          }}
+        >
+          ⚠ {stateError}
+        </div>
+      )}
       <div
         style={{
           display: "flex",

@@ -1,7 +1,22 @@
 import { ethers } from "ethers";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
+import fs from "node:fs";
+import path from "node:path";
 import dotenv from "dotenv";
+import {
+  type RiskLimits,
+  type RiskState,
+  loadRiskLimits,
+  createRiskState,
+  preOrderCheck,
+  recordFill,
+  triggerKillSwitch,
+  getRiskStatus,
+  validateSolanaRpc,
+  validateSolanaProgramId,
+  validateEvmChainId,
+} from "./risk-controls.ts";
 
 import {
   type RunMode,
@@ -29,6 +44,15 @@ import {
 } from "./common.js";
 
 dotenv.config();
+
+const KILL_SWITCH_FILE = path.resolve(
+  import.meta.dirname ?? ".",
+  "../.kill-switch",
+);
+const RISK_STATUS_FILE = path.resolve(
+  import.meta.dirname ?? ".",
+  "../.risk-status.json",
+);
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 const TARGET_SPREAD_BPS = readEnvNumber("TARGET_SPREAD_BPS", 200, 10, 5000);
@@ -181,7 +205,26 @@ class CrossChainMarketMaker {
   private lastDuelSignal: DuelSignal | null = null;
   private lastDuelSignalAt = 0;
 
+  // Risk controls
+  private riskLimits: RiskLimits;
+  private riskState: RiskState;
+
   constructor() {
+    // ─ Risk Controls (must be configured for live runs) ─
+    if (process.env.VITEST || process.env.MM_SKIP_RISK_LIMITS === "true") {
+      this.riskLimits = {
+        maxOrderSize: Number.MAX_SAFE_INTEGER,
+        maxDailyNotional: Number.MAX_SAFE_INTEGER,
+        spreadFloorBps: 1,
+        spreadCeilingBps: 10000,
+        perMatchDrawdownLimit: Number.MAX_SAFE_INTEGER,
+        globalDrawdownLimit: Number.MAX_SAFE_INTEGER,
+      };
+    } else {
+      this.riskLimits = loadRiskLimits();
+    }
+    this.riskState = createRiskState();
+
     this.instanceId = (process.env.MM_INSTANCE_ID || "mm-1").trim() || "mm-1";
     this.runMode = resolveRunMode();
     this.aggressivenessTier = resolveAggressivenessTier();
@@ -320,10 +363,7 @@ class CrossChainMarketMaker {
       if (label === "base") this.baseGoldToken = token;
     };
 
-    const setChainTokenDecimals = (
-      label: "bsc" | "base",
-      decimals: number,
-    ) => {
+    const setChainTokenDecimals = (label: "bsc" | "base", decimals: number) => {
       if (label === "bsc") this.bscGoldTokenDecimals = decimals;
       if (label === "base") this.baseGoldTokenDecimals = decimals;
     };
@@ -427,19 +467,49 @@ class CrossChainMarketMaker {
     };
 
     if (this.bscEnabled) {
-      await validateEvm("bsc", this.bscProvider, this.bscClob);
+      try {
+        const bscNetwork = await this.bscProvider.getNetwork();
+        validateEvmChainId(bscNetwork.chainId);
+      } catch (e: any) {
+        this.bscEnabled = false;
+        console.warn(
+          `[BSC] Disabled: chain ID validation failed: ${e.message}`,
+        );
+      }
+      if (this.bscEnabled)
+        await validateEvm("bsc", this.bscProvider, this.bscClob);
     } else {
       console.log("[BSC] Disabled via MM_ENABLE_BSC=false.");
     }
 
     if (this.baseEnabled) {
-      await validateEvm("base", this.baseProvider, this.baseClob);
+      try {
+        const baseNetwork = await this.baseProvider.getNetwork();
+        validateEvmChainId(baseNetwork.chainId);
+      } catch (e: any) {
+        this.baseEnabled = false;
+        console.warn(
+          `[BASE] Disabled: chain ID validation failed: ${e.message}`,
+        );
+      }
+      if (this.baseEnabled)
+        await validateEvm("base", this.baseProvider, this.baseClob);
     } else {
       console.log("[BASE] Disabled via MM_ENABLE_BASE=false.");
     }
 
     if (!this.solanaEnabled) {
       console.log("[SOLANA] Disabled via MM_ENABLE_SOLANA=false.");
+      return;
+    }
+
+    // Validate Solana RPC and program against allowlists
+    try {
+      validateSolanaRpc(this.solanaConnection.rpcEndpoint);
+      validateSolanaProgramId(this.solanaProgramId.toBase58());
+    } catch (e: any) {
+      this.solanaEnabled = false;
+      console.error(e.message);
       return;
     }
 
@@ -568,9 +638,7 @@ class CrossChainMarketMaker {
 
       if (duelSignal && duelSignal.weight > 0) {
         // Blend book mid with duel-derived fair value
-        const signalWeight = Number.isFinite(bookMid)
-          ? duelSignal.weight
-          : 1; // Full weight when no book
+        const signalWeight = Number.isFinite(bookMid) ? duelSignal.weight : 1; // Full weight when no book
         mid = clamp(
           Math.round(
             mid * (1 - signalWeight) + duelSignal.midPrice * signalWeight,
@@ -594,9 +662,7 @@ class CrossChainMarketMaker {
       );
 
       let quoteWidth = Math.max(
-        Math.ceil(
-          ((TARGET_SPREAD_BPS * mid) / 10000) * dynamicMultiplier,
-        ),
+        Math.ceil(((TARGET_SPREAD_BPS * mid) / 10000) * dynamicMultiplier),
         5,
       );
       if (spreadBps > TOXICITY_THRESHOLD_BPS) {
@@ -638,10 +704,7 @@ class CrossChainMarketMaker {
         (o) => o.chain === `evm-${chain}` && !o.isBuy,
       ).length;
 
-      if (
-        this.inventoryYes < MAX_INVENTORY_CAP &&
-        existingBuys < maxPerSide
-      ) {
+      if (this.inventoryYes < MAX_INVENTORY_CAP && existingBuys < maxPerSide) {
         await this.placeEvmOrder(
           chain,
           clob,
@@ -652,10 +715,7 @@ class CrossChainMarketMaker {
         );
       }
 
-      if (
-        this.inventoryNo < MAX_INVENTORY_CAP &&
-        existingSells < maxPerSide
-      ) {
+      if (this.inventoryNo < MAX_INVENTORY_CAP && existingSells < maxPerSide) {
         await this.placeEvmOrder(
           chain,
           clob,
@@ -748,7 +808,9 @@ class CrossChainMarketMaker {
         String(matchId),
       );
       if (riskReject) {
-        console.warn(`[${chain.toUpperCase()}] ⛔ Order rejected by risk controls: ${riskReject}`);
+        console.warn(
+          `[${chain.toUpperCase()}] ⛔ Order rejected by risk controls: ${riskReject}`,
+        );
         return;
       }
 
@@ -893,9 +955,7 @@ class CrossChainMarketMaker {
           );
           return;
         }
-        console.log(
-          `[SOLANA] ✓ RPC healthy at slot hash ${latest.blockhash}`,
-        );
+        console.log(`[SOLANA] ✓ RPC healthy at slot hash ${latest.blockhash}`);
       } catch (e: any) {
         this.solanaEnabled = false;
         console.error("[SOLANA] Health check failed:", e.message);
@@ -968,9 +1028,7 @@ class CrossChainMarketMaker {
             `[${order.chain.toUpperCase()}] ✗ Cancelled stale order #${order.orderId}${this.runMode !== "live" ? ` (${this.runMode})` : ""}`,
           );
         } else {
-          console.log(
-            `[SOLANA] ✗ Cancelled stale order #${order.orderId}`,
-          );
+          console.log(`[SOLANA] ✗ Cancelled stale order #${order.orderId}`);
         }
 
         if (order.isBuy) this.inventoryYes -= order.amount;

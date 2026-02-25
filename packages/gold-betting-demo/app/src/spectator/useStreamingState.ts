@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import type { StreamingStateUpdate } from "./types";
+import type { StreamingStateUpdate, StreamingPhase } from "./types";
 import { UI_SYNC_DELAY_MS, CONFIG } from "../lib/config";
 
 const API_URL = CONFIG.gameApiUrl.replace(/\/$/, "");
@@ -7,6 +7,15 @@ const API_URL = CONFIG.gameApiUrl.replace(/\/$/, "");
 const SSE_URL = `${API_URL}/api/streaming/state/events`;
 const POLL_URL = `${API_URL}/api/streaming/state`;
 const FALLBACK_POLL_INTERVAL_MS = 5000;
+
+/** Known valid phases — anything else is treated as a data quality issue. */
+const VALID_PHASES = new Set<StreamingPhase>([
+  "IDLE",
+  "ANNOUNCEMENT",
+  "COUNTDOWN",
+  "FIGHTING",
+  "RESOLUTION",
+]);
 
 type SseSource = {
   onopen: (() => void) | null;
@@ -25,9 +34,25 @@ function normalizeState(payload: unknown): StreamingStateUpdate | null {
     leaderboard?: unknown;
   };
   if (!candidate.cycle || !Array.isArray(candidate.leaderboard)) return null;
+
+  // Validate the phase field to prevent "unknown" state regressions.
+  // If the server returns a phase we don't recognise, coerce to IDLE so the
+  // UI never renders an undefined/unknown state string.
+  const cycle = candidate.cycle as StreamingStateUpdate["cycle"];
+  if (
+    cycle &&
+    typeof cycle.phase === "string" &&
+    !VALID_PHASES.has(cycle.phase)
+  ) {
+    console.warn(
+      `[useStreamingState] Unexpected phase "${cycle.phase}" received from server — coercing to IDLE`,
+    );
+    cycle.phase = "IDLE";
+  }
+
   return {
     type: "STREAMING_STATE_UPDATE",
-    cycle: candidate.cycle as StreamingStateUpdate["cycle"],
+    cycle,
     leaderboard: candidate.leaderboard as StreamingStateUpdate["leaderboard"],
     cameraTarget:
       typeof candidate.cameraTarget === "string" ||
@@ -221,5 +246,5 @@ export function useStreamingState(options: { disabled?: boolean } = {}) {
     };
   }, [connectSse, disabled]);
 
-  return { state, isConnected, error };
+  return { state, isConnected, error, pollUrl: POLL_URL, sseUrl: SSE_URL };
 }
