@@ -1,21 +1,24 @@
+/**
+ * run-multi.ts – Multi-wallet orchestration for the MM bot.
+ *
+ * Features:
+ * - Maker wallet pool with configurable count
+ * - Per-wallet inventory caps
+ * - Rotation cadence (cycle wallets to distribute activity)
+ * - Funding checks (skip wallets below minimum balance)
+ * - All run modes: dry-run, paper, live
+ */
+
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { ethers } from "ethers";
+import { Connection, PublicKey } from "@solana/web3.js";
 
-type WalletInstance = {
-  name: string;
-  evmPrivateKey?: string;
-  evmPrivateKeyBsc?: string;
-  evmPrivateKeyBase?: string;
-  solanaPrivateKey?: string;
-  env?: Record<string, string>;
-};
+import type { MultiWalletConfig, WalletConfig, RunMode } from "./common.js";
+import { resolveRunMode, resolveSolanaProgramId, sleep } from "./common.js";
 
-type MultiWalletConfig = {
-  defaults?: Record<string, string>;
-  wallets: WalletInstance[];
-};
-
+// ─── Args ─────────────────────────────────────────────────────────────────────
 const parseArgs = () => {
   const args = process.argv.slice(2);
   const getValue = (flag: string, fallback: string) => {
@@ -33,10 +36,14 @@ const parseArgs = () => {
       Number.parseInt(getValue("--stagger-ms", "1200"), 10) || 1200,
     ),
     dryRun: args.includes("--dry-run"),
+    paper: args.includes("--paper"),
+    rotationCadence: Math.max(
+      0,
+      Number.parseInt(getValue("--rotation-cadence", "0"), 10) || 0,
+    ),
+    fundingCheck: !args.includes("--skip-funding-check"),
   };
 };
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const maskSecret = (value: string | undefined) => {
   if (!value) return "(unset)";
@@ -78,12 +85,110 @@ function bindPrefixedOutput(
   });
 }
 
+// ─── Funding Check ────────────────────────────────────────────────────────────
+async function checkEvmFunding(
+  walletKey: string,
+  rpcUrl: string,
+  chain: string,
+  minWei: string,
+): Promise<{ ok: boolean; balance: string }> {
+  try {
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const wallet = new ethers.Wallet(walletKey, provider);
+    const balance = await provider.getBalance(wallet.address);
+    const ok = balance >= BigInt(minWei);
+    return { ok, balance: ethers.formatEther(balance) };
+  } catch (e: any) {
+    console.warn(`[funding:${chain}] Check failed: ${e.message}`);
+    return { ok: false, balance: "0" };
+  }
+}
+
+async function checkSolanaFunding(
+  rpcUrl: string,
+  pubkey: string,
+  minLamports: number,
+): Promise<{ ok: boolean; balance: number }> {
+  try {
+    const conn = new Connection(rpcUrl);
+    const pk = new PublicKey(pubkey);
+    const balance = await conn.getBalance(pk);
+    return { ok: balance >= minLamports, balance };
+  } catch (e: any) {
+    console.warn(`[funding:solana] Check failed: ${e.message}`);
+    return { ok: false, balance: 0 };
+  }
+}
+
+// ─── Wallet Rotation ──────────────────────────────────────────────────────────
+class WalletRotation {
+  private wallets: WalletConfig[];
+  private activeIndex = 0;
+  private cyclesSinceRotation = 0;
+  private cadence: number;
+
+  constructor(wallets: WalletConfig[], cadence: number) {
+    this.wallets = wallets.filter((w) => w.enabled !== false);
+    this.cadence = cadence;
+  }
+
+  getActiveWallets(): WalletConfig[] {
+    if (this.cadence <= 0 || this.wallets.length <= 1) {
+      return this.wallets;
+    }
+
+    // Return a sliding window of wallets
+    const windowSize = Math.min(
+      Math.ceil(this.wallets.length / 2),
+      this.wallets.length,
+    );
+    const result: WalletConfig[] = [];
+    for (let i = 0; i < windowSize; i++) {
+      result.push(this.wallets[(this.activeIndex + i) % this.wallets.length]);
+    }
+    return result;
+  }
+
+  tick() {
+    if (this.cadence <= 0) return;
+    this.cyclesSinceRotation++;
+    if (this.cyclesSinceRotation >= this.cadence) {
+      this.cyclesSinceRotation = 0;
+      this.activeIndex = (this.activeIndex + 1) % this.wallets.length;
+      console.log(
+        `[mm:runner] Rotated to wallet pool starting at index ${this.activeIndex}`,
+      );
+    }
+  }
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
-  const { configPath, staggerMs, dryRun } = parseArgs();
+  const {
+    configPath,
+    staggerMs,
+    dryRun,
+    paper,
+    rotationCadence,
+    fundingCheck,
+  } = parseArgs();
   const config = await loadConfig(configPath);
   const defaults = config.defaults ?? {};
   const children = new Map<string, ChildProcessWithoutNullStreams>();
   let shuttingDown = false;
+
+  // Determine run mode from args or env
+  let runMode: RunMode = resolveRunMode();
+  if (dryRun) runMode = "dry-run";
+  if (paper) runMode = "paper";
+
+  const cadence = rotationCadence || config.rotationCadence || 0;
+  const minFundingLamports = config.minFundingLamports ?? 50_000_000; // 0.05 SOL
+  const minFundingWei = config.minFundingWei ?? "10000000000000000"; // 0.01 ETH
+
+  console.log(
+    `[mm:runner] Mode: ${runMode} | Wallets: ${config.wallets.length} | Rotation cadence: ${cadence || "disabled"} | Funding check: ${fundingCheck}`,
+  );
 
   const shutdownAll = (signal: NodeJS.Signals = "SIGTERM") => {
     if (shuttingDown) return;
@@ -97,16 +202,62 @@ async function main() {
   process.on("SIGINT", () => shutdownAll("SIGINT"));
   process.on("SIGTERM", () => shutdownAll("SIGTERM"));
 
+  // Filter wallets by funding if enabled
+  const eligibleWallets: WalletConfig[] = [];
   for (const wallet of config.wallets) {
     if (!wallet.name || !wallet.name.trim()) {
       throw new Error("Each wallet entry must have a non-empty name");
     }
+    if (wallet.enabled === false) {
+      console.log(`[mm:runner] ${wallet.name} disabled, skipping`);
+      continue;
+    }
 
-    const env: NodeJS.ProcessEnv = {
+    if (fundingCheck && runMode === "live") {
+      const evmKey =
+        wallet.evmPrivateKey ||
+        wallet.evmPrivateKeyBsc ||
+        process.env.EVM_PRIVATE_KEY;
+      if (evmKey) {
+        const bscRpc =
+          wallet.env?.EVM_BSC_RPC_URL ||
+          defaults.EVM_BSC_RPC_URL ||
+          process.env.EVM_BSC_RPC_URL;
+        if (bscRpc) {
+          const { ok, balance } = await checkEvmFunding(
+            evmKey,
+            bscRpc,
+            "bsc",
+            minFundingWei,
+          );
+          if (!ok) {
+            console.warn(
+              `[mm:runner] ${wallet.name} underfunded on BSC (${balance} ETH), skipping`,
+            );
+            continue;
+          }
+        }
+      }
+    }
+
+    eligibleWallets.push(wallet);
+  }
+
+  if (eligibleWallets.length === 0) {
+    throw new Error("No eligible wallets after funding checks");
+  }
+
+  console.log(
+    `[mm:runner] ${eligibleWallets.length}/${config.wallets.length} wallets eligible`,
+  );
+
+  for (const wallet of eligibleWallets) {
+    const walletEnv: NodeJS.ProcessEnv = {
       ...defaults,
       ...process.env,
       ...(wallet.env ?? {}),
       MM_INSTANCE_ID: wallet.name,
+      MM_RUN_MODE: runMode,
       EVM_PRIVATE_KEY: wallet.evmPrivateKey || process.env.EVM_PRIVATE_KEY,
       EVM_PRIVATE_KEY_BSC:
         wallet.evmPrivateKeyBsc ||
@@ -120,16 +271,24 @@ async function main() {
         wallet.solanaPrivateKey || process.env.SOLANA_PRIVATE_KEY,
     };
 
-    if (dryRun) {
+    // Per-wallet caps
+    if (wallet.maxInventoryCap !== undefined) {
+      walletEnv.MAX_INVENTORY_CAP = String(wallet.maxInventoryCap);
+    }
+    if (wallet.maxOrderSize !== undefined) {
+      walletEnv.ORDER_SIZE_MAX = String(wallet.maxOrderSize);
+    }
+
+    if (runMode === "dry-run") {
       console.log(
-        `[mm:runner] ${wallet.name} | evm=${maskSecret(env.EVM_PRIVATE_KEY)} | sol=${maskSecret(env.SOLANA_PRIVATE_KEY)}`,
+        `[mm:runner] ${wallet.name} | evm=${maskSecret(walletEnv.EVM_PRIVATE_KEY)} | sol=${maskSecret(walletEnv.SOLANA_PRIVATE_KEY)} | cap=${walletEnv.MAX_INVENTORY_CAP || "default"}`,
       );
       continue;
     }
 
     const child = spawn("tsx", ["src/index.ts"], {
       cwd: process.cwd(),
-      env,
+      env: walletEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -155,7 +314,7 @@ async function main() {
     await sleep(staggerMs);
   }
 
-  if (dryRun) {
+  if (runMode === "dry-run") {
     console.log("[mm:runner] dry run complete");
     return;
   }

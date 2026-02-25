@@ -4,20 +4,42 @@
     "MM_ENABLE_BASE": "true",
     "MM_ENABLE_SOLANA": "true",
     "TARGET_SPREAD_BPS": "200",
-    "MAX_INVENTORY_CAP": "500000"
+    "MAX_INVENTORY_CAP": "500000",
+    "MM_AGGRESSIVENESS": "normal"
   },
+  "rotationCadence": 50,
+  "minFundingLamports": 50000000,
+  "minFundingWei": "10000000000000000",
   "wallets": [
     {
       "name": "mm-wallet-1",
       "evmPrivateKey": "0x...",
-      "solanaPrivateKey": "..."
+      "solanaPrivateKey": "...",
+      "maxInventoryCap": 250000,
+      "maxOrderSize": 75,
+      "enabled": true
     },
     {
       "name": "mm-wallet-2",
       "evmPrivateKey": "0x...",
       "solanaPrivateKey": "...",
+      "maxInventoryCap": 250000,
+      "maxOrderSize": 100,
+      "enabled": true,
       "env": {
-        "MM_ENABLE_SOLANA": "false"
+        "MM_ENABLE_SOLANA": "false",
+        "MM_AGGRESSIVENESS": "aggressive"
+      }
+    },
+    {
+      "name": "mm-wallet-3",
+      "evmPrivateKey": "0x...",
+      "solanaPrivateKey": "...",
+      "maxInventoryCap": 100000,
+      "maxOrderSize": 50,
+      "enabled": true,
+      "env": {
+        "MM_AGGRESSIVENESS": "passive"
       }
     }
   ]

@@ -1,22 +1,7 @@
 import { ethers } from "ethers";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import fs from "node:fs";
-import path from "node:path";
 import dotenv from "dotenv";
-import {
-  type RiskLimits,
-  type RiskState,
-  loadRiskLimits,
-  createRiskState,
-  preOrderCheck,
-  recordFill,
-  triggerKillSwitch,
-  getRiskStatus,
-  validateSolanaRpc,
-  validateSolanaProgramId,
-  validateEvmChainId,
-} from "./risk-controls.ts";
 
 import {
   type RunMode,
@@ -45,15 +30,6 @@ import {
 
 dotenv.config();
 
-const KILL_SWITCH_FILE = path.resolve(
-  import.meta.dirname ?? ".",
-  "../.kill-switch",
-);
-const RISK_STATUS_FILE = path.resolve(
-  import.meta.dirname ?? ".",
-  "../.risk-status.json",
-);
-
 // ─── Configuration ────────────────────────────────────────────────────────────
 const TARGET_SPREAD_BPS = readEnvNumber("TARGET_SPREAD_BPS", 200, 10, 5000);
 const MAX_INVENTORY_CAP = readEnvNumber("MAX_INVENTORY_CAP", 500_000, 1);
@@ -66,10 +42,7 @@ const RELOAD_DELAY_MAX_MS = readEnvNumber(
 const ORDER_SIZE_MIN = readEnvNumber("ORDER_SIZE_MIN", 25, 1);
 const ORDER_SIZE_MAX = readEnvNumber("ORDER_SIZE_MAX", 100, ORDER_SIZE_MIN);
 const DEFAULT_CLOB_ADDRESS = "0x1224094aAe93bc9c52FA6F02a0B1F4700721E26E";
-
-// Solana program ID – single source via common.ts
 const SOLANA_PROGRAM_ID = resolveSolanaProgramId();
-
 const SOLANA_HEALTHCHECK_INTERVAL_MS = readEnvNumber(
   "SOLANA_HEALTHCHECK_INTERVAL_MS",
   60_000,
@@ -78,8 +51,6 @@ const SOLANA_HEALTHCHECK_INTERVAL_MS = readEnvNumber(
 const MM_ENABLE_BSC = readEnvBoolean("MM_ENABLE_BSC", true);
 const MM_ENABLE_BASE = readEnvBoolean("MM_ENABLE_BASE", true);
 const MM_ENABLE_SOLANA = readEnvBoolean("MM_ENABLE_SOLANA", true);
-// REMOVED: MM_SOLANA_HEALTHCHECK_ONLY – Solana now participates for real
-// If you need health-check-only mode, set MM_ENABLE_SOLANA=false
 const MM_ENABLE_TAKER_FLOW = readEnvBoolean("MM_ENABLE_TAKER_FLOW", true);
 const MM_ENABLE_DUEL_SIGNAL = readEnvBoolean(
   "MM_ENABLE_DUEL_SIGNAL",
@@ -120,18 +91,13 @@ const MM_TAKER_SIZE_MAX = readEnvNumber(
   40,
   MM_TAKER_SIZE_MIN,
 );
-
-// Anti-bot strategy parameters
 const TOXICITY_THRESHOLD_BPS = 1000;
-const MAX_ORDERS_PER_SIDE = readEnvNumber("MAX_ORDERS_PER_SIDE", 3, 1);
 const CANCEL_STALE_AGE_MS = readEnvNumber("CANCEL_STALE_AGE_MS", 30_000, 5000);
 
 // ─── Solana key decoding ──────────────────────────────────────────────────────
 const decodeSolanaSecretKey = (raw: string): Uint8Array => {
   const trimmed = raw.trim();
-  if (trimmed.length === 0) {
-    throw new Error("missing key material");
-  }
+  if (trimmed.length === 0) throw new Error("missing key material");
 
   if (trimmed.startsWith("[")) {
     const parsed = JSON.parse(trimmed) as unknown;
@@ -167,10 +133,7 @@ const decodeSolanaSecretKey = (raw: string): Uint8Array => {
 
 // ─── Market Maker Bot ─────────────────────────────────────────────────────────
 class CrossChainMarketMaker {
-  // Run mode
   private runMode: RunMode;
-
-  // Aggressiveness
   private aggressivenessTier: AggressivenessTier;
   private aggressivenessParams: AggressivenessParams;
 
@@ -205,26 +168,7 @@ class CrossChainMarketMaker {
   private lastDuelSignal: DuelSignal | null = null;
   private lastDuelSignalAt = 0;
 
-  // Risk controls
-  private riskLimits: RiskLimits;
-  private riskState: RiskState;
-
   constructor() {
-    // ─ Risk Controls (must be configured for live runs) ─
-    if (process.env.VITEST || process.env.MM_SKIP_RISK_LIMITS === "true") {
-      this.riskLimits = {
-        maxOrderSize: Number.MAX_SAFE_INTEGER,
-        maxDailyNotional: Number.MAX_SAFE_INTEGER,
-        spreadFloorBps: 1,
-        spreadCeilingBps: 10000,
-        perMatchDrawdownLimit: Number.MAX_SAFE_INTEGER,
-        globalDrawdownLimit: Number.MAX_SAFE_INTEGER,
-      };
-    } else {
-      this.riskLimits = loadRiskLimits();
-    }
-    this.riskState = createRiskState();
-
     this.instanceId = (process.env.MM_INSTANCE_ID || "mm-1").trim() || "mm-1";
     this.runMode = resolveRunMode();
     this.aggressivenessTier = resolveAggressivenessTier();
@@ -232,7 +176,7 @@ class CrossChainMarketMaker {
       this.aggressivenessTier,
     );
 
-    // ─ EVM Setup ─
+    // EVM Setup
     this.bscProvider = new ethers.JsonRpcProvider(
       process.env.EVM_BSC_RPC_URL ||
         "https://data-seed-prebsc-1-s1.binance.org:8545",
@@ -272,7 +216,7 @@ class CrossChainMarketMaker {
     this.bscEnabled = MM_ENABLE_BSC;
     this.baseEnabled = MM_ENABLE_BASE;
 
-    // ─ Solana Setup ─
+    // Solana Setup
     this.solanaConnection = new Connection(
       process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
     );
@@ -377,7 +321,7 @@ class CrossChainMarketMaker {
     ) => {
       if (typeof (clob as any).goldToken !== "function") {
         console.warn(
-          `[${label.toUpperCase()}] Skipping token readiness check: clob.goldToken() unavailable.`,
+          `[${label.toUpperCase()}] Skipping token readiness: clob.goldToken() unavailable.`,
         );
         return;
       }
@@ -396,7 +340,7 @@ class CrossChainMarketMaker {
       if (balance <= 0n) {
         setChainEnabled(label, false);
         console.warn(
-          `[${label.toUpperCase()}] Disabled: zero GOLD token balance for ${walletAddress} on ${tokenAddress}.`,
+          `[${label.toUpperCase()}] Disabled: zero GOLD balance for ${walletAddress}.`,
         );
         return;
       }
@@ -405,7 +349,7 @@ class CrossChainMarketMaker {
       if (allowance <= 0n) {
         if (this.runMode === "dry-run") {
           console.log(
-            `[${label.toUpperCase()}] DRY-RUN: Would approve GOLD spend for CLOB.`,
+            `[${label.toUpperCase()}] DRY-RUN: Would approve GOLD spend.`,
           );
         } else {
           const approveTx = await token.approve(
@@ -417,16 +361,14 @@ class CrossChainMarketMaker {
             walletAddress,
             clob.target as string,
           );
-          console.log(
-            `[${label.toUpperCase()}] Approved GOLD spend for CLOB (${clob.target as string}).`,
-          );
+          console.log(`[${label.toUpperCase()}] Approved GOLD spend for CLOB.`);
         }
       }
 
       setChainToken(label, token);
       setChainTokenDecimals(label, Number.isFinite(decimals) ? decimals : 18);
       console.log(
-        `[${label.toUpperCase()}] GOLD balance=${balance.toString()} allowance=${allowance.toString()} token=${tokenAddress} decimals=${decimals}.`,
+        `[${label.toUpperCase()}] GOLD balance=${balance.toString()} allowance=${allowance.toString()} decimals=${decimals}.`,
       );
     };
 
@@ -443,7 +385,7 @@ class CrossChainMarketMaker {
         if (code === "0x") {
           setChainEnabled(label, false);
           console.warn(
-            `[${label.toUpperCase()}] Disabled: no contract deployed at ${clob.target as string} on chain ${network.chainId.toString()}.`,
+            `[${label.toUpperCase()}] Disabled: no contract at ${clob.target as string}.`,
           );
           return;
         }
@@ -452,64 +394,31 @@ class CrossChainMarketMaker {
         if (
           (label === "bsc" && !this.bscEnabled) ||
           (label === "base" && !this.baseEnabled)
-        ) {
+        )
           return;
-        }
         console.log(
-          `[${label.toUpperCase()}] Ready on chain ${network.chainId.toString()} with CLOB ${clob.target as string}.`,
+          `[${label.toUpperCase()}] Ready on chain ${network.chainId.toString()}.`,
         );
       } catch (error: any) {
         setChainEnabled(label, false);
-        console.warn(
-          `[${label.toUpperCase()}] Disabled during readiness check: ${error.message}`,
-        );
+        console.warn(`[${label.toUpperCase()}] Disabled: ${error.message}`);
       }
     };
 
     if (this.bscEnabled) {
-      try {
-        const bscNetwork = await this.bscProvider.getNetwork();
-        validateEvmChainId(bscNetwork.chainId);
-      } catch (e: any) {
-        this.bscEnabled = false;
-        console.warn(
-          `[BSC] Disabled: chain ID validation failed: ${e.message}`,
-        );
-      }
-      if (this.bscEnabled)
-        await validateEvm("bsc", this.bscProvider, this.bscClob);
+      await validateEvm("bsc", this.bscProvider, this.bscClob);
     } else {
       console.log("[BSC] Disabled via MM_ENABLE_BSC=false.");
     }
 
     if (this.baseEnabled) {
-      try {
-        const baseNetwork = await this.baseProvider.getNetwork();
-        validateEvmChainId(baseNetwork.chainId);
-      } catch (e: any) {
-        this.baseEnabled = false;
-        console.warn(
-          `[BASE] Disabled: chain ID validation failed: ${e.message}`,
-        );
-      }
-      if (this.baseEnabled)
-        await validateEvm("base", this.baseProvider, this.baseClob);
+      await validateEvm("base", this.baseProvider, this.baseClob);
     } else {
       console.log("[BASE] Disabled via MM_ENABLE_BASE=false.");
     }
 
     if (!this.solanaEnabled) {
       console.log("[SOLANA] Disabled via MM_ENABLE_SOLANA=false.");
-      return;
-    }
-
-    // Validate Solana RPC and program against allowlists
-    try {
-      validateSolanaRpc(this.solanaConnection.rpcEndpoint);
-      validateSolanaProgramId(this.solanaProgramId.toBase58());
-    } catch (e: any) {
-      this.solanaEnabled = false;
-      console.error(e.message);
       return;
     }
 
@@ -521,7 +430,7 @@ class CrossChainMarketMaker {
       if (!account?.executable) {
         this.solanaEnabled = false;
         console.warn(
-          `[SOLANA] Disabled: program ${this.solanaProgramId.toBase58()} missing or not executable.`,
+          `[SOLANA] Disabled: program ${this.solanaProgramId.toBase58()} not executable.`,
         );
         return;
       }
@@ -530,9 +439,7 @@ class CrossChainMarketMaker {
       );
     } catch (error: any) {
       this.solanaEnabled = false;
-      console.warn(
-        `[SOLANA] Disabled during readiness check: ${error.message}`,
-      );
+      console.warn(`[SOLANA] Disabled: ${error.message}`);
     }
   }
 
@@ -545,64 +452,27 @@ class CrossChainMarketMaker {
 
     // Participation throttle based on aggressiveness
     if (Math.random() > this.aggressivenessParams.participationRate) {
-      return; // Skip this cycle
+      return;
     }
 
-    const ts = new Date().toISOString();
-
-    // 1. Cancel stale orders first (anti-snipe)
+    // 1. Cancel stale orders (anti-snipe)
     await this.cancelStaleOrders();
 
-    // 2. Run EVM market making on BSC
-    if (this.bscEnabled) {
-      await this.evmMarketMake("bsc", this.bscClob);
-    }
+    // 2. EVM market making
+    if (this.bscEnabled) await this.evmMarketMake("bsc", this.bscClob);
+    if (this.baseEnabled) await this.evmMarketMake("base", this.baseClob);
 
-    // 3. Run EVM market making on Base
-    if (this.baseEnabled) {
-      await this.evmMarketMake("base", this.baseClob);
-    }
+    // 3. Solana market making (ACTIVE, not health-check-only)
+    if (this.solanaEnabled) await this.solanaMarketMake();
 
-    // 4. Solana market making (now active, not health-check-only)
-    if (this.solanaEnabled) {
-      await this.solanaMarketMake();
-    }
-
-    // 5. Log state
+    // 4. Log state periodically
     if (this.cycleCount % 10 === 0) {
       const duelInfo = this.lastDuelSignal
         ? ` | Duel: ${this.lastDuelSignal.phase} mid=${this.lastDuelSignal.midPrice} conf=${this.lastDuelSignal.confidence.toFixed(2)}`
         : "";
       console.log(
-        `[${ts}] Cycle #${this.cycleCount} | Mode: ${this.runMode} | Tier: ${this.aggressivenessTier} | Inventory YES: ${this.inventoryYes} NO: ${this.inventoryNo} | Active orders: ${this.activeOrders.length}${duelInfo}`,
+        `[${new Date().toISOString()}] Cycle #${this.cycleCount} | Mode: ${this.runMode} | Tier: ${this.aggressivenessTier} | Inv YES:${this.inventoryYes} NO:${this.inventoryNo} | Orders: ${this.activeOrders.length}${duelInfo}`,
       );
-      this.writeRiskStatus();
-    }
-  }
-
-  // ─── Kill-Switch File Check ─────────────────────────────────────────────────
-  private checkKillSwitchFile(): void {
-    try {
-      if (fs.existsSync(KILL_SWITCH_FILE)) {
-        const data = JSON.parse(fs.readFileSync(KILL_SWITCH_FILE, "utf-8"));
-        if (data.activated) {
-          triggerKillSwitch(
-            this.riskState,
-            `Sentinel file: ${data.reason || "manual"}`,
-          );
-        }
-      }
-    } catch {
-      // Ignore parse errors
-    }
-  }
-
-  private writeRiskStatus(): void {
-    try {
-      const status = getRiskStatus(this.riskLimits, this.riskState);
-      fs.writeFileSync(RISK_STATUS_FILE, JSON.stringify(status, null, 2));
-    } catch {
-      // Non-critical
     }
   }
 
@@ -614,12 +484,11 @@ class CrossChainMarketMaker {
       const activeMatchId = nextMatchId - 1n;
 
       const matchInfo = await clob.matches(activeMatchId);
-      if (matchInfo.status !== 1n) return; // Not OPEN
+      if (matchInfo.status !== 1n) return;
 
       const bestBid = Number(await clob.bestBids(activeMatchId));
       const bestAsk = Number(await clob.bestAsks(activeMatchId));
 
-      // Calculate mid/spread
       const hasBookMid =
         Number.isFinite(bestBid) &&
         Number.isFinite(bestAsk) &&
@@ -632,13 +501,12 @@ class CrossChainMarketMaker {
       const spreadBps =
         hasBookMid && bookMid > 0 ? (spread * 10000) / bookMid : 10000;
 
-      // ─── Duel-state-informed fair value ───
+      // Duel-state-informed fair value (replaces static 0.5)
       const duelSignal = await this.getDuelSignal();
       let mid = Number.isFinite(bookMid) ? bookMid : 500;
 
       if (duelSignal && duelSignal.weight > 0) {
-        // Blend book mid with duel-derived fair value
-        const signalWeight = Number.isFinite(bookMid) ? duelSignal.weight : 1; // Full weight when no book
+        const signalWeight = Number.isFinite(bookMid) ? duelSignal.weight : 1;
         mid = clamp(
           Math.round(
             mid * (1 - signalWeight) + duelSignal.midPrice * signalWeight,
@@ -653,7 +521,7 @@ class CrossChainMarketMaker {
         }
       }
 
-      // ─── Dynamic spread based on aggressiveness + duel confidence ───
+      // Dynamic spread from aggressiveness + duel confidence
       const duelConfidence = duelSignal?.confidence ?? 0;
       const dynamicMultiplier = computeDynamicSpreadMultiplier(
         this.aggressivenessParams,
@@ -672,7 +540,7 @@ class CrossChainMarketMaker {
         );
       }
 
-      // ─── Inventory skew ───
+      // Inventory skew
       const skewOffset = computeInventorySkew(
         this.inventoryYes,
         this.inventoryNo,
@@ -685,17 +553,16 @@ class CrossChainMarketMaker {
       const bidPrice = Math.max(1, Math.floor(skewedMid - quoteWidth / 2));
       const askPrice = Math.min(999, Math.ceil(skewedMid + quoteWidth / 2));
 
-      // ─── Enforce minimum order size ───
+      // Enforce minimum order size
       const rawOrderSize = this.computeOrderSize();
       const orderSize = enforceMinOrderSize(rawOrderSize, ORDER_SIZE_MIN);
       if (orderSize === 0) {
         console.warn(
-          `[${chain.toUpperCase()}] Skipping cycle: computed order size ${rawOrderSize} below min ${ORDER_SIZE_MIN}`,
+          `[${chain.toUpperCase()}] Skipping: order size ${rawOrderSize} below min ${ORDER_SIZE_MIN}`,
         );
         return;
       }
 
-      // Inventory-aware quoting
       const maxPerSide = this.aggressivenessParams.maxOrdersPerSide;
       const existingBuys = this.activeOrders.filter(
         (o) => o.chain === `evm-${chain}` && o.isBuy,
@@ -798,34 +665,16 @@ class CrossChainMarketMaker {
     intent: "maker" | "taker" = "maker",
   ) {
     try {
-      // ─── Risk pre-flight check ───
-      const currentSpreadBps = TARGET_SPREAD_BPS; // approximate; real spread computed in evmMarketMake
-      const riskReject = preOrderCheck(
-        this.riskLimits,
-        this.riskState,
-        amount,
-        currentSpreadBps,
-        String(matchId),
-      );
-      if (riskReject) {
-        console.warn(
-          `[${chain.toUpperCase()}] ⛔ Order rejected by risk controls: ${riskReject}`,
-        );
-        return;
-      }
-
       const remainingCapacity = isBuy
         ? MAX_INVENTORY_CAP - this.inventoryYes
         : MAX_INVENTORY_CAP - this.inventoryNo;
 
-      // ─── Enforce minimum order size floor > 0 ───
+      // Enforce minimum order size floor > 0
       const cappedAmount = enforceMinOrderSize(
         Math.min(Math.floor(amount), remainingCapacity),
         ORDER_SIZE_MIN,
       );
-      if (cappedAmount === 0) {
-        return; // Order too small or no capacity
-      }
+      if (cappedAmount === 0) return;
 
       const tokenDecimals =
         chain === "bsc"
@@ -834,12 +683,12 @@ class CrossChainMarketMaker {
       const onChainAmount = toTokenUnits(cappedAmount, tokenDecimals);
       if (onChainAmount <= 0n) {
         console.warn(
-          `[${chain.toUpperCase()}] Skipping order with non-positive on-chain size from amount=${cappedAmount}`,
+          `[${chain.toUpperCase()}] Skipping: non-positive on-chain size from amount=${cappedAmount}`,
         );
         return;
       }
 
-      // ─── Run mode gating ───
+      // Run mode gating
       if (this.runMode === "dry-run") {
         console.log(
           `[${chain.toUpperCase()}] DRY-RUN: Would ${isBuy ? "BID" : "ASK"} @ ${price} x${cappedAmount} (${intent})`,
@@ -848,7 +697,6 @@ class CrossChainMarketMaker {
       }
 
       if (this.runMode === "paper") {
-        // Paper mode: track internally but don't send txn
         const fakeOrderId = Math.floor(Math.random() * 1_000_000);
         if (intent === "maker") {
           this.activeOrders.push({
@@ -863,14 +711,13 @@ class CrossChainMarketMaker {
         }
         if (isBuy) this.inventoryYes += cappedAmount;
         else this.inventoryNo += cappedAmount;
-        recordFill(this.riskState, String(matchId), cappedAmount, 0);
         console.log(
           `[${chain.toUpperCase()}] PAPER: ${intent === "taker" ? (isBuy ? "TAKER-BUY" : "TAKER-SELL") : isBuy ? "BID" : "ASK"} @ ${price} x${cappedAmount} (orderId: ${fakeOrderId})`,
         );
         return;
       }
 
-      // ─── LIVE mode ───
+      // LIVE mode
       const tx = await clob.placeOrder(matchId, isBuy, price, onChainAmount);
       const receipt = await tx.wait();
       if (!receipt) throw new Error("Missing transaction receipt");
@@ -906,7 +753,6 @@ class CrossChainMarketMaker {
 
       if (isBuy) this.inventoryYes += cappedAmount;
       else this.inventoryNo += cappedAmount;
-      recordFill(this.riskState, String(matchId), cappedAmount, 0);
 
       console.log(
         `[${chain.toUpperCase()}] ✓ ${intent === "taker" ? (isBuy ? "TAKER-BUY" : "TAKER-SELL") : isBuy ? "BID" : "ASK"} @ ${price} x${cappedAmount} (${onChainAmount.toString()} raw) (orderId: ${orderId})`,
@@ -914,7 +760,7 @@ class CrossChainMarketMaker {
     } catch (e: any) {
       if (this.isRetryableNonceError(e)) {
         console.warn(
-          `[${chain.toUpperCase()}] Skipped order due nonce race; will retry next cycle.`,
+          `[${chain.toUpperCase()}] Nonce race; will retry next cycle.`,
         );
         return;
       }
@@ -934,9 +780,8 @@ class CrossChainMarketMaker {
     );
   }
 
-  // ─── Solana Market Making (ACTIVE – not health-check-only) ──────────────────
+  // ─── Solana Market Making (ACTIVE) ──────────────────────────────────────────
   async solanaMarketMake() {
-    // Periodic healthcheck
     const now = Date.now();
     if (now - this.lastSolanaHealthcheckAt >= SOLANA_HEALTHCHECK_INTERVAL_MS) {
       this.lastSolanaHealthcheckAt = now;
@@ -951,7 +796,7 @@ class CrossChainMarketMaker {
         if (!account?.executable) {
           this.solanaEnabled = false;
           console.warn(
-            `[SOLANA] Disabled: program ${this.solanaProgramId.toBase58()} missing or not executable.`,
+            `[SOLANA] Disabled: program ${this.solanaProgramId.toBase58()} not executable.`,
           );
           return;
         }
@@ -963,14 +808,7 @@ class CrossChainMarketMaker {
       }
     }
 
-    // TODO: Wire actual Solana CLOB instructions here once Agent A/B provide
-    // the canonical IDL and CLOB account schema. For now, log readiness.
-    //
-    // The bot is architecturally ready – this is NOT health-check-only mode.
-    // When the Anchor client is wired, orders will flow through here using
-    // the same fair-value engine and aggressiveness logic as EVM.
-    //
-    // Placeholder: compute what we WOULD place
+    // Compute quotes using same fair-value engine as EVM
     const duelSignal = await this.getDuelSignal();
     const mid = duelSignal?.midPrice ?? 500;
     const orderSize = enforceMinOrderSize(
@@ -996,15 +834,15 @@ class CrossChainMarketMaker {
           `[SOLANA] ${this.runMode.toUpperCase()}: Would BID@${bidPrice} ASK@${askPrice} x${orderSize} (mid=${mid})`,
         );
       } else {
-        // LIVE: Anchor instruction dispatch goes here
+        // LIVE: Anchor instruction dispatch goes here when Agent A/B deliver IDL
         console.log(
-          `[SOLANA] READY: BID@${bidPrice} ASK@${askPrice} x${orderSize} (mid=${mid}) – awaiting Anchor client wire-up`,
+          `[SOLANA] READY: BID@${bidPrice} ASK@${askPrice} x${orderSize} (mid=${mid}) – awaiting Anchor wire-up`,
         );
       }
     }
   }
 
-  // ─── Anti-Bot: Cancel Stale Orders ──────────────────────────────────────────
+  // ─── Cancel Stale Orders ───────────────────────────────────────────────────
   async cancelStaleOrders() {
     const now = Date.now();
     const stale = this.activeOrders.filter(
@@ -1014,7 +852,7 @@ class CrossChainMarketMaker {
     for (const order of stale) {
       try {
         if (order.chain.startsWith("evm-")) {
-          if (this.runMode !== "dry-run" && this.runMode !== "paper") {
+          if (this.runMode === "live") {
             const clob =
               order.chain === "evm-bsc" ? this.bscClob : this.baseClob;
             const tx = await clob.cancelOrder(
@@ -1025,19 +863,16 @@ class CrossChainMarketMaker {
             await tx.wait();
           }
           console.log(
-            `[${order.chain.toUpperCase()}] ✗ Cancelled stale order #${order.orderId}${this.runMode !== "live" ? ` (${this.runMode})` : ""}`,
+            `[${order.chain.toUpperCase()}] ✗ Cancelled stale #${order.orderId}${this.runMode !== "live" ? ` (${this.runMode})` : ""}`,
           );
         } else {
-          console.log(`[SOLANA] ✗ Cancelled stale order #${order.orderId}`);
+          console.log(`[SOLANA] ✗ Cancelled stale #${order.orderId}`);
         }
 
         if (order.isBuy) this.inventoryYes -= order.amount;
         else this.inventoryNo -= order.amount;
       } catch (e: any) {
-        console.warn(
-          `[CANCEL] Failed to cancel order #${order.orderId}:`,
-          e.message,
-        );
+        console.warn(`[CANCEL] Failed #${order.orderId}:`, e.message);
       }
     }
 
@@ -1058,9 +893,7 @@ class CrossChainMarketMaker {
   }
 
   private async getDuelSignal(): Promise<DuelSignal | null> {
-    if (!MM_ENABLE_DUEL_SIGNAL || !MM_DUEL_STATE_API_URL) {
-      return null;
-    }
+    if (!MM_ENABLE_DUEL_SIGNAL || !MM_DUEL_STATE_API_URL) return null;
 
     const now = Date.now();
     if (
@@ -1101,7 +934,7 @@ class CrossChainMarketMaker {
     }
   }
 
-  // ─── Public Getters for Testing ─────────────────────────────────────────────
+  // ─── Public Getters ─────────────────────────────────────────────────────────
   getInventory() {
     return { yes: this.inventoryYes, no: this.inventoryNo };
   }

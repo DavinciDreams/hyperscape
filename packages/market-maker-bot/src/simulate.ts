@@ -1,4 +1,5 @@
 import { CrossChainMarketMaker } from "./index.ts";
+import { sleep } from "./common.ts";
 
 const DEFAULT_DEV_PRIVATE_KEY =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -6,10 +7,6 @@ const DEFAULT_DEV_PRIVATE_KEY =
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function bootstrapDefaults() {
@@ -25,6 +22,10 @@ function bootstrapDefaults() {
   if (!process.env.SOLANA_RPC_URL) {
     process.env.SOLANA_RPC_URL = "http://127.0.0.1:8899";
   }
+  // Default to paper mode for simulation
+  if (!process.env.MM_RUN_MODE) {
+    process.env.MM_RUN_MODE = "paper";
+  }
 }
 
 async function main() {
@@ -36,7 +37,7 @@ async function main() {
   const mm = new CrossChainMarketMaker();
 
   console.log(
-    `[simulate] Starting bounded MM simulation: cycles=${cycles}, delayMs=${delayMs}`,
+    `[simulate] Starting bounded MM simulation: cycles=${cycles}, delayMs=${delayMs}, mode=${mm.getRunMode()}`,
   );
 
   for (let i = 0; i < cycles; i += 1) {
@@ -53,6 +54,8 @@ async function main() {
     JSON.stringify(
       {
         cycles,
+        runMode: config.runMode,
+        aggressiveness: config.aggressivenessTier,
         chainStatus: {
           bsc: config.bscEnabled,
           base: config.baseEnabled,
@@ -60,6 +63,7 @@ async function main() {
         },
         inventory,
         activeOrderCount: activeOrders.length,
+        allOrdersNonZero: activeOrders.every((o) => o.amount > 0),
       },
       null,
       2,
