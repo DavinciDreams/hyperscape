@@ -181,7 +181,7 @@ const healthGates = {
   },
 
   async hlsStream() {
-    if (skipStream) {
+    if (skipStream || skipBetting) {
       return { passed: true, detail: "skipped" };
     }
     const hlsUrl = `http://localhost:${bettingPort}/live/stream.m3u8`;
@@ -482,13 +482,18 @@ async function main() {
 
   duelStackProc.on("exit", (code, signal) => {
     stackExited = true;
-    if (code !== 0 && code !== null) {
-      log(`duel-stack exited with code ${code}`);
-      process.exit(code);
-    }
     if (signal) {
       log(`duel-stack killed by signal ${signal}`);
       process.exit(1);
+    }
+    if (code !== null && code !== 0) {
+      log(`duel-stack exited with code ${code}`);
+      process.exit(code);
+    }
+    // Clean exit (code 0 or null) - exit gracefully
+    if (code === 0) {
+      log("duel-stack exited cleanly");
+      process.exit(0);
     }
   });
 

@@ -767,12 +767,14 @@ class CrossChainMarketMaker {
       askPrice = Math.min(999, Math.ceil(skewedMid + quoteWidth / 2));
 
       // ─── NON-ZERO ORDER SIZING (Critical Guard) ────────────────────────────
+      // Note: Inventory validation is per-side at order placement time.
+      // This upfront check only validates min/max bounds.
       const rawOrderSize = this.computeOrderSize();
       const sizeValidation = validateOrderSize(
         rawOrderSize,
         ORDER_SIZE_MIN,
         ORDER_SIZE_MAX,
-        MAX_INVENTORY_CAP - Math.max(this.inventoryYes, this.inventoryNo),
+        MAX_INVENTORY_CAP, // Use full cap - per-side checks happen at placement
       );
 
       if (!sizeValidation.valid) {
