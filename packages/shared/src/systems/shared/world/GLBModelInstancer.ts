@@ -1,7 +1,7 @@
 /**
- * GLBTreeInstancer - InstancedMesh-based rendering for GLB-loaded trees.
+ * GLBModelInstancer — InstancedMesh-based rendering for any GLB model.
  *
- * Instead of cloning the full GLB scene per tree (which deep-copies all
+ * Instead of cloning the full GLB scene per entity (which deep-copies all
  * geometry buffers and causes FPS drops), this module loads each model
  * once, extracts its geometry by reference, and renders all instances
  * of that model via a single THREE.InstancedMesh per LOD level.
@@ -10,11 +10,9 @@
  * performs distance-based LOD switching per-instance every frame by
  * moving instances between pools (matrix swaps + count adjustment).
  *
- * ResourceEntity calls addInstance/removeInstance/setDepleted. It does
- * NOT need to track whether it's instanced — those calls are safe no-ops
- * when the entity isn't registered.
+ * Used by TreeGLBVisualStrategy and InstancedModelVisualStrategy.
  *
- * @module GLBTreeInstancer
+ * @module GLBModelInstancer
  */
 
 import THREE from "../../../extras/three/three";
@@ -35,7 +33,7 @@ const _quaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 const _swapMatrix = new THREE.Matrix4();
 
-interface TreeSlot {
+interface InstanceSlot {
   entityId: string;
   position: THREE.Vector3;
   rotation: number;
@@ -59,7 +57,7 @@ interface ModelPool {
   lod0: LODPool | null;
   lod1: LODPool | null;
   lod2: LODPool | null;
-  instances: Map<string, TreeSlot>;
+  instances: Map<string, InstanceSlot>;
   yOffset: number;
 }
 
@@ -286,12 +284,12 @@ function removeFromPool(pool: LODPool, entityId: string): void {
 
 // ---- Public API ----
 
-export function initGLBTreeInstancer(s: THREE.Scene, w: World): void {
+export function initGLBModelInstancer(s: THREE.Scene, w: World): void {
   scene = s;
   world = w;
 }
 
-export function destroyGLBTreeInstancer(): void {
+export function destroyGLBModelInstancer(): void {
   for (const pool of pools.values()) {
     for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
       if (!lodPool) continue;
@@ -321,12 +319,12 @@ export async function addInstance(
 
     if (pool.lod0 && pool.lod0.activeCount >= MAX_INSTANCES) {
       console.warn(
-        `[GLBTreeInstancer] LOD0 pool full for ${modelPath}, cannot add ${entityId}`,
+        `[GLBModelInstancer] LOD0 pool full for ${modelPath}, cannot add ${entityId}`,
       );
       return false;
     }
 
-    const slot: TreeSlot = {
+    const slot: InstanceSlot = {
       entityId,
       position: position.clone(),
       rotation,
@@ -345,7 +343,7 @@ export async function addInstance(
     return true;
   } catch (error) {
     console.warn(
-      `[GLBTreeInstancer] Failed to add instance ${entityId}:`,
+      `[GLBModelInstancer] Failed to add instance ${entityId}:`,
       error,
     );
     return false;
@@ -415,9 +413,13 @@ export function hasInstance(entityId: string): boolean {
   return entityToModel.has(entityId);
 }
 
+export function getModelYOffset(modelPath: string): number {
+  return pools.get(modelPath)?.yOffset ?? 0;
+}
+
 let lastUpdateFrame = -1;
 
-export function updateGLBTreeInstancer(): void {
+export function updateGLBModelInstancer(): void {
   if (!world) return;
   if (world.frame === lastUpdateFrame) return;
   lastUpdateFrame = world.frame;

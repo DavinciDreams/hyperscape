@@ -6,7 +6,7 @@
  * This module batches all placeholders of the same resource type into a single
  * InstancedMesh draw call.
  *
- * API mirrors GLBTreeInstancer: addInstance / removeInstance / setVisible.
+ * API mirrors GLBModelInstancer: addInstance / removeInstance / setVisible.
  * PlaceholderVisualStrategy delegates all rendering to this module.
  *
  * @module PlaceholderInstancer

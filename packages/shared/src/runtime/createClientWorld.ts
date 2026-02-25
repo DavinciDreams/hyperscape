@@ -85,9 +85,9 @@ import {
   TREE_PRESETS,
 } from "../systems/shared/world/ProcgenTreeCache";
 import {
-  initGLBTreeInstancer,
-  destroyGLBTreeInstancer,
-} from "../systems/shared/world/GLBTreeInstancer";
+  initGLBModelInstancer,
+  destroyGLBModelInstancer,
+} from "../systems/shared/world/GLBModelInstancer";
 import {
   initPlaceholderInstancer,
   destroyPlaceholderInstancer,
@@ -183,7 +183,7 @@ export function createClientWorld() {
   modelCache.resetAndVerify();
 
   // Clean up any previous instancer state from prior world
-  destroyGLBTreeInstancer();
+  destroyGLBModelInstancer();
   destroyPlaceholderInstancer();
 
   // ============================================================================
@@ -279,7 +279,7 @@ export function createClientWorld() {
   // ============================================================================
   // Procedural building mesh rendering for towns
   // Must be registered after towns system as it depends on town data
-  world.register("building-rendering", BuildingRenderingSystem);
+  // world.register("building-rendering", BuildingRenderingSystem);
 
   // ============================================================================
   // TOWN LANDMARKS SYSTEM
@@ -340,7 +340,7 @@ export function createClientWorld() {
     const stageSystem = world.stage as unknown as StageSystem;
     if (stageSystem && stageSystem.scene) {
       stageSystem.THREE = THREE as unknown as StageSystem["THREE"];
-      initGLBTreeInstancer(stageSystem.scene as unknown as THREE.Scene, world);
+      initGLBModelInstancer(stageSystem.scene as unknown as THREE.Scene, world);
       initPlaceholderInstancer(stageSystem.scene as unknown as THREE.Scene);
     }
   };

@@ -1,17 +1,19 @@
 /**
- * TreeGLBVisualStrategy — GLBModelInstancer integration for woodcutting trees.
+ * InstancedModelVisualStrategy — GLBModelInstancer integration for any
+ * non-tree, non-fishing-spot resource that has a GLB model (rocks, herbs, etc.).
  *
- * Thin wrapper: the instancer owns InstancedMeshes and LOD switching.
- * This strategy just calls addInstance / removeInstance / setDepleted.
+ * Works identically to TreeGLBVisualStrategy but uses a generic box collision
+ * proxy sized from the model's bounding box instead of a hardcoded tree cylinder.
  */
 
 import THREE from "../../../extras/three/three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
-  addInstance as addGLBTreeInstance,
-  removeInstance as removeGLBTreeInstance,
-  setDepleted as setGLBTreeDepleted,
+  addInstance,
+  removeInstance,
+  setDepleted,
   updateGLBModelInstancer,
+  getModelYOffset,
 } from "../../../systems/shared/world/GLBModelInstancer";
 import type {
   ResourceVisualContext,
@@ -19,15 +21,15 @@ import type {
 } from "./ResourceVisualStrategy";
 
 function createCollisionProxy(ctx: ResourceVisualContext, scale: number): void {
-  const height = 8 * scale;
-  const radius = 1 * scale;
-  const geometry = new THREE.CylinderGeometry(radius, radius, height, 6);
+  const halfW = 0.6 * scale;
+  const height = 1.5 * scale;
+  const geometry = new THREE.BoxGeometry(halfW * 2, height, halfW * 2);
   const material = new MeshBasicNodeMaterial();
   material.visible = false;
 
   const proxy = new THREE.Mesh(geometry, material);
   proxy.position.y = height / 2;
-  proxy.name = `TreeProxy_${ctx.id}`;
+  proxy.name = `InstancedProxy_${ctx.id}`;
   proxy.userData = {
     type: "resource",
     entityId: ctx.id,
@@ -41,12 +43,12 @@ function createCollisionProxy(ctx: ResourceVisualContext, scale: number): void {
   ctx.setMesh(proxy);
 }
 
-export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
+export class InstancedModelVisualStrategy implements ResourceVisualStrategy {
   async createVisual(ctx: ResourceVisualContext): Promise<void> {
     const { config, id, position } = ctx;
     if (!config.model) return;
 
-    const baseScale = config.modelScale ?? 3.0;
+    const baseScale = config.modelScale ?? 1.0;
     const worldPos = new THREE.Vector3();
     ctx.node.getWorldPosition(worldPos);
 
@@ -55,7 +57,7 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     );
     const rotation = ((rotHash % 1000) / 1000) * Math.PI * 2;
 
-    const success = await addGLBTreeInstance(
+    const success = await addInstance(
       config.model,
       id,
       worldPos,
@@ -66,22 +68,20 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     if (success) {
       createCollisionProxy(ctx, baseScale);
     }
-    // If instancing fails ResourceEntity factory falls back to StandardModelVisualStrategy
   }
 
   async onDepleted(ctx: ResourceVisualContext): Promise<void> {
-    setGLBTreeDepleted(ctx.id, true);
+    setDepleted(ctx.id, true);
   }
 
   async onRespawn(ctx: ResourceVisualContext): Promise<void> {
-    setGLBTreeDepleted(ctx.id, false);
-    // Remove stump mesh, recreate proxy
+    setDepleted(ctx.id, false);
     const mesh = ctx.getMesh();
     if (mesh) {
       ctx.node.remove(mesh);
       ctx.setMesh(null);
     }
-    const baseScale = ctx.config.modelScale ?? 3.0;
+    const baseScale = ctx.config.modelScale ?? 1.0;
     createCollisionProxy(ctx, baseScale);
   }
 
@@ -90,6 +90,6 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
   }
 
   destroy(ctx: ResourceVisualContext): void {
-    removeGLBTreeInstance(ctx.id);
+    removeInstance(ctx.id);
   }
 }
