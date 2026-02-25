@@ -2,16 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BN } from "@coral-xyz/anchor";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
-  ACCOUNT_SIZE,
-  TOKEN_PROGRAM_ID,
-  createInitializeAccountInstruction,
-  getMinimumBalanceForRentExemptAccount,
-} from "@solana/spl-token";
-import {
   Keypair,
+  LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
-  Transaction,
 } from "@solana/web3.js";
 
 import {
@@ -19,16 +13,19 @@ import {
   createPrograms,
   createReadonlyPrograms,
 } from "../lib/programs";
-import { findAnyGoldAccount } from "../lib/token";
 import {
   GAME_API_URL,
-  GOLD_DECIMALS,
   CONFIG,
   buildArenaWriteHeaders,
   ENABLE_MANUAL_MARKET_ADMIN_CONTROLS,
 } from "../lib/config";
 import { getStoredInviteCode } from "../lib/invite";
-import { findClobConfigPda, findClobVaultAuthorityPda } from "../lib/clobPdas";
+import {
+  findClobConfigPda,
+  findClobVaultPda,
+  findClobUserBalancePda,
+  findClobOrderPda,
+} from "../lib/clobPdas";
 import {
   PredictionMarketPanel,
   type ChartDataPoint,
@@ -37,22 +34,25 @@ import { type Trade } from "./RecentTrades";
 import { type OrderLevel } from "./OrderBook";
 import { PointsDisplay } from "./PointsDisplay";
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 type BetSide = "YES" | "NO";
 
 type ActiveMatch = {
   matchState: PublicKey;
   orderBook: PublicKey;
-  vaultAuthority: PublicKey;
   vault: PublicKey;
   isOpen: boolean;
-  winner: number;
+  winner: number; // 0=None, 1=Yes, 2=No
   nextOrderId: bigint;
   authority: PublicKey;
 };
 
 type ClobConfigAccount = {
-  treasuryTokenAccount: PublicKey;
-  marketMakerTokenAccount: PublicKey;
+  treasury: PublicKey;
+  marketMaker: PublicKey;
   tradeTreasuryFeeBps: number;
   tradeMarketMakerFeeBps: number;
   winningsMarketMakerFeeBps: number;
@@ -63,10 +63,14 @@ type UserPosition = {
   noShares: bigint;
 };
 
-const DEFAULT_EXTERNAL_TRACKING_FEE_BPS = 200;
-const DEFAULT_TREASURY_FEE_OWNER =
-  "JC4LUSsT3DZYGHrukS3WP5wwBGmA5w5jVGNbjDSgexFH";
-const DEFAULT_MARKET_MAKER_FEE_OWNER =
+// ---------------------------------------------------------------------------
+// Constants / helpers
+// ---------------------------------------------------------------------------
+
+const SOL_DECIMALS = 9;
+
+const DEFAULT_TREASURY_WALLET = "JC4LUSsT3DZYGHrukS3WP5wwBGmA5w5jVGNbjDSgexFH";
+const DEFAULT_MARKET_MAKER_WALLET =
   "BpG23aqgtPoNYGhGqn3wZHhzcULZ2Fd7Y8Bm8XNL2JdC";
 
 function parseConfiguredPubkey(value: string | undefined): PublicKey | null {
@@ -78,18 +82,19 @@ function parseConfiguredPubkey(value: string | undefined): PublicKey | null {
   }
 }
 
-const TREASURY_FEE_OWNER =
+const TREASURY_WALLET =
   parseConfiguredPubkey(CONFIG.binaryTradeTreasuryWallet) ||
-  new PublicKey(DEFAULT_TREASURY_FEE_OWNER);
-const MARKET_MAKER_FEE_OWNER =
+  new PublicKey(DEFAULT_TREASURY_WALLET);
+const MARKET_MAKER_WALLET =
   parseConfiguredPubkey(CONFIG.binaryTradeMarketMakerWallet) ||
   parseConfiguredPubkey(CONFIG.binaryMarketMakerWallet) ||
-  new PublicKey(DEFAULT_MARKET_MAKER_FEE_OWNER);
+  new PublicKey(DEFAULT_MARKET_MAKER_WALLET);
 
-function toBaseUnits(amountInput: string): bigint {
-  const value = Number(amountInput.trim());
+/** Convert a human-readable SOL string to lamports (bigint). */
+function toLamports(solInput: string): bigint {
+  const value = Number(solInput.trim());
   if (!Number.isFinite(value) || value <= 0) return 0n;
-  return BigInt(Math.floor(value * 10 ** GOLD_DECIMALS));
+  return BigInt(Math.floor(value * LAMPORTS_PER_SOL));
 }
 
 function asBigInt(value: unknown): bigint {
@@ -107,8 +112,9 @@ function clampPrice(value: string): number {
   return Math.min(999, Math.max(1, Math.floor(parsed)));
 }
 
-function fmtAmount(value: bigint): number {
-  return Number(value) / 10 ** GOLD_DECIMALS;
+/** Format lamports to SOL display value. */
+function fmtSol(lamports: bigint): number {
+  return Number(lamports) / LAMPORTS_PER_SOL;
 }
 
 function walletReady(wallet: ReturnType<typeof useWallet>): boolean {
@@ -116,6 +122,10 @@ function walletReady(wallet: ReturnType<typeof useWallet>): boolean {
     wallet.publicKey && wallet.signTransaction && wallet.signAllTransactions,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 interface SolanaClobPanelProps {
   agent1Name: string;
@@ -131,7 +141,7 @@ export function SolanaClobPanel({
 
   const [status, setStatus] = useState("Connect Solana wallet to trade");
   const [side, setSide] = useState<BetSide>("YES");
-  const [amountInput, setAmountInput] = useState("1");
+  const [amountInput, setAmountInput] = useState("0.01");
   const [priceInput, setPriceInput] = useState("500");
   const [activeMatch, setActiveMatch] = useState<ActiveMatch | null>(null);
   const [configAccount, setConfigAccount] = useState<ClobConfigAccount | null>(
@@ -167,6 +177,10 @@ export function SolanaClobPanel({
     no: 0n,
   });
 
+  // -----------------------------------------------------------------------
+  // Programs
+  // -----------------------------------------------------------------------
+
   const writablePrograms = useMemo(
     () => (walletReady(wallet) ? createPrograms(connection, wallet) : null),
     [connection, wallet],
@@ -181,48 +195,10 @@ export function SolanaClobPanel({
     () => findClobConfigPda(GOLD_CLOB_MARKET_PROGRAM_ID),
     [],
   );
-  const goldMint = useMemo(() => new PublicKey(CONFIG.goldMint), []);
 
-  const createTokenAccountForOwner = useCallback(
-    async (owner: PublicKey): Promise<PublicKey> => {
-      if (!wallet.publicKey || !wallet.sendTransaction) {
-        throw new Error("Connect wallet first");
-      }
-
-      const tokenAccount = Keypair.generate();
-      const lamports = await getMinimumBalanceForRentExemptAccount(
-        connection,
-        "confirmed",
-      );
-
-      const tx = new Transaction().add(
-        SystemProgram.createAccount({
-          fromPubkey: wallet.publicKey,
-          newAccountPubkey: tokenAccount.publicKey,
-          lamports,
-          space: ACCOUNT_SIZE,
-          programId: TOKEN_PROGRAM_ID,
-        }),
-        createInitializeAccountInstruction(
-          tokenAccount.publicKey,
-          goldMint,
-          owner,
-          TOKEN_PROGRAM_ID,
-        ),
-      );
-      tx.feePayer = wallet.publicKey;
-      tx.recentBlockhash = (
-        await connection.getLatestBlockhash("confirmed")
-      ).blockhash;
-      tx.partialSign(tokenAccount);
-
-      const signature = await wallet.sendTransaction(tx, connection);
-      await connection.confirmTransaction(signature, "confirmed");
-
-      return tokenAccount.publicKey;
-    },
-    [connection, goldMint, wallet.publicKey, wallet.sendTransaction],
-  );
+  // -----------------------------------------------------------------------
+  // Chart / trades helper
+  // -----------------------------------------------------------------------
 
   const updateChartAndTrades = useCallback(
     (nextYes: bigint, nextNo: bigint) => {
@@ -249,7 +225,7 @@ export function SolanaClobPanel({
             {
               id: `sol-clob-yes-${now}`,
               side: "YES" as const,
-              amount: fmtAmount(yesDelta),
+              amount: fmtSol(yesDelta),
               price: pct / 100,
               time: now,
             },
@@ -263,7 +239,7 @@ export function SolanaClobPanel({
             {
               id: `sol-clob-no-${now}`,
               side: "NO" as const,
-              amount: fmtAmount(noDelta),
+              amount: fmtSol(noDelta),
               price: pct / 100,
               time: now + 1,
             },
@@ -277,107 +253,75 @@ export function SolanaClobPanel({
     [chartData.length],
   );
 
+  // -----------------------------------------------------------------------
+  // refreshData – reads all on-chain state
+  // -----------------------------------------------------------------------
+
   const refreshData = useCallback(async () => {
     const clobProgram: any = readonlyPrograms.goldClobMarket;
     setIsRefreshing(true);
 
     try {
+      // --- Config ---
       const cfg = (await clobProgram.account.marketConfig.fetchNullable(
         configPda,
       )) as any;
       if (cfg) {
         setConfigAccount({
-          treasuryTokenAccount: cfg.treasuryTokenAccount as PublicKey,
-          marketMakerTokenAccount: cfg.marketMakerTokenAccount as PublicKey,
-          tradeTreasuryFeeBps: Number(
-            cfg.tradeTreasuryFeeBps ?? cfg.tradingFeeBps ?? 0,
-          ),
+          treasury: cfg.treasury as PublicKey,
+          marketMaker: cfg.marketMaker as PublicKey,
+          tradeTreasuryFeeBps: Number(cfg.tradeTreasuryFeeBps ?? 0),
           tradeMarketMakerFeeBps: Number(cfg.tradeMarketMakerFeeBps ?? 0),
-          winningsMarketMakerFeeBps: Number(
-            cfg.winningsMarketMakerFeeBps ?? cfg.winningsFeeBps ?? 0,
-          ),
+          winningsMarketMakerFeeBps: Number(cfg.winningsMarketMakerFeeBps ?? 0),
         });
       } else {
         setConfigAccount(null);
       }
 
-      const activeMatches = await connection.getProgramAccounts(
-        GOLD_CLOB_MARKET_PROGRAM_ID,
-        {
-          filters: [
-            { dataSize: 84 }, // Size of MatchState account (8 discriminator + space)
-            { memcmp: { offset: 8, bytes: "2" } }, // isOpen == true (1 byte boolean encoded as true -> 1, false -> 0, Wait, in Borsh bool true is 1. base58 of [1] is '2')
-          ],
-        },
-      );
+      // --- Discover match states ---
+      const allMatches = (await clobProgram.account.matchState.all()) as Array<{
+        publicKey: PublicKey;
+        account: any;
+      }>;
 
-      // And we need the preferred match if one is active but maybe closed recently
-      let preferredMatchAccount: any = null;
+      // Preferred match (may be closed)
+      let preferredEntry: { publicKey: PublicKey; account: any } | null = null;
       if (preferredMatchRef.current) {
-        try {
-          preferredMatchAccount = await clobProgram.account.matchState.fetch(
-            new PublicKey(preferredMatchRef.current),
-          );
-        } catch {
-          // ignore
-        }
+        const prefPk = new PublicKey(preferredMatchRef.current);
+        preferredEntry =
+          allMatches.find((m) => m.publicKey.equals(prefPk)) ?? null;
       }
 
-      const matchEntries = activeMatches
-        .map((m) => ({
-          publicKey: m.pubkey,
-          account: clobProgram.coder.accounts.decode(
-            "matchState",
-            m.account.data,
-          ),
-        }))
+      const openMatches = allMatches
+        .filter((m) => Boolean(m.account.isOpen))
         .sort((a, b) =>
           a.publicKey.toBase58().localeCompare(b.publicKey.toBase58()),
         );
 
-      if (matchEntries.length === 0 && !preferredMatchAccount) {
+      const selected =
+        preferredEntry ??
+        openMatches[openMatches.length - 1] ??
+        allMatches[allMatches.length - 1] ??
+        null;
+
+      if (!selected) {
         setActiveMatch(null);
         setYesPool(0n);
         setNoPool(0n);
         setPosition({ yesShares: 0n, noShares: 0n });
+        setBids([]);
+        setAsks([]);
         return;
       }
 
-      const preferred =
-        preferredMatchRef.current && preferredMatchAccount
-          ? {
-              publicKey: new PublicKey(preferredMatchRef.current),
-              account: preferredMatchAccount,
-            }
-          : null;
-
-      const open = matchEntries.filter((entry) =>
-        Boolean(entry.account.isOpen),
-      );
-      const selected =
-        preferred ??
-        open[open.length - 1] ??
-        matchEntries[matchEntries.length - 1];
-
       const matchStatePk = selected.publicKey;
-      const vaultAuthority = findClobVaultAuthorityPda(
+      const matchAccount = selected.account;
+      const [vaultPda] = findClobVaultPda(
         GOLD_CLOB_MARKET_PROGRAM_ID,
         matchStatePk,
       );
 
-      const vaultAccounts = await connection.getTokenAccountsByOwner(
-        vaultAuthority,
-        { mint: goldMint },
-        "confirmed",
-      );
-      const vault = vaultAccounts.value[0]?.pubkey ?? PublicKey.default;
-
-      // Find active orderbook PDAs for 'selected' match
-      const orderBookPda = PublicKey.findProgramAddressSync(
-        [Buffer.from("order_book"), matchStatePk.toBuffer()], // TODO: The orderbook isn't a PDA right now actually! We need to either read `all()` for the orderbook, or refactor orderbook to a PDA. Let's just keep using `.all()` for orderbooks but filtered manually below.
-        GOLD_CLOB_MARKET_PROGRAM_ID,
-      )[0];
-
+      // --- Find orderbook account for this match ---
       const allOrderBooks =
         (await clobProgram.account.orderBook.all()) as Array<{
           publicKey: PublicKey;
@@ -386,60 +330,70 @@ export function SolanaClobPanel({
       const orderBookEntry = allOrderBooks.find((entry) =>
         (entry.account.matchState as PublicKey).equals(matchStatePk),
       );
-      if (!orderBookEntry) {
-        setActiveMatch({
-          matchState: matchStatePk,
-          orderBook: PublicKey.default,
-          vaultAuthority,
-          vault,
-          isOpen: Boolean(selected.account.isOpen),
-          winner: Number(selected.account.winner),
-          nextOrderId: asBigInt(selected.account.nextOrderId),
-          authority: selected.account.authority as PublicKey,
-        });
-        setYesPool(0n);
-        setNoPool(0n);
-        setBids([]);
-        setAsks([]);
-        setPosition({ yesShares: 0n, noShares: 0n });
-        return;
-      }
 
-      const orderBook = orderBookEntry.account;
-      const balances = (orderBook.balances as any[]) ?? [];
+      // --- Fetch orders (PDA accounts) for this match ---
+      // Order layout: 8 disc + 8 id + 32 matchState (offset 16)
+      const orderAccounts = (await clobProgram.account.order.all([
+        {
+          memcmp: {
+            offset: 16, // 8 (discriminator) + 8 (id)
+            bytes: matchStatePk.toBase58(),
+          },
+        },
+      ])) as Array<{ publicKey: PublicKey; account: any }>;
+
+      // --- Fetch balances (PDA accounts) for this match ---
+      // UserBalance layout: 8 disc + 32 user + 32 matchState (offset 40)
+      const balanceAccounts = (await clobProgram.account.userBalance.all([
+        {
+          memcmp: {
+            offset: 40, // 8 (discriminator) + 32 (user)
+            bytes: matchStatePk.toBase58(),
+          },
+        },
+      ])) as Array<{ publicKey: PublicKey; account: any }>;
+
+      // --- Aggregate pools & user position ---
       let yes = 0n;
       let no = 0n;
       let userPos: UserPosition = { yesShares: 0n, noShares: 0n };
-      for (const bal of balances) {
-        const yesShares = asBigInt(bal.yesShares);
-        const noShares = asBigInt(bal.noShares);
+      for (const bal of balanceAccounts) {
+        const yesShares = asBigInt(bal.account.yesShares);
+        const noShares = asBigInt(bal.account.noShares);
         yes += yesShares;
         no += noShares;
         if (
           wallet.publicKey &&
-          (bal.user as PublicKey).equals(wallet.publicKey)
+          (bal.account.user as PublicKey).equals(wallet.publicKey)
         ) {
           userPos = { yesShares, noShares };
         }
       }
 
-      const openOrders = ((orderBook.orders as any[]) ?? []).filter(
-        (order) => asBigInt(order.amount) > asBigInt(order.filled),
+      // --- Build orderbook levels ---
+      const openOrders = orderAccounts.filter(
+        (o) => asBigInt(o.account.amount) > asBigInt(o.account.filled),
       );
+
       const bidRows = openOrders
-        .filter((order) => order.isBuy)
-        .sort((a, b) => Number(b.price) - Number(a.price))
-        .map((order) => ({
-          price: Number(order.price) / 1000,
-          amount: fmtAmount(asBigInt(order.amount) - asBigInt(order.filled)),
+        .filter((o) => o.account.isBuy)
+        .sort((a, b) => Number(b.account.price) - Number(a.account.price))
+        .map((o) => ({
+          price: Number(o.account.price) / 1000,
+          amount: fmtSol(
+            asBigInt(o.account.amount) - asBigInt(o.account.filled),
+          ),
           total: 0,
         }));
+
       const askRows = openOrders
-        .filter((order) => !order.isBuy)
-        .sort((a, b) => Number(a.price) - Number(b.price))
-        .map((order) => ({
-          price: Number(order.price) / 1000,
-          amount: fmtAmount(asBigInt(order.amount) - asBigInt(order.filled)),
+        .filter((o) => !o.account.isBuy)
+        .sort((a, b) => Number(a.account.price) - Number(b.account.price))
+        .map((o) => ({
+          price: Number(o.account.price) / 1000,
+          amount: fmtSol(
+            asBigInt(o.account.amount) - asBigInt(o.account.filled),
+          ),
           total: 0,
         }));
 
@@ -454,15 +408,23 @@ export function SolanaClobPanel({
         return { ...row, total: askTotal };
       });
 
+      // --- Commit state ---
       setActiveMatch({
         matchState: matchStatePk,
-        orderBook: orderBookEntry.publicKey,
-        vaultAuthority,
-        vault,
-        isOpen: Boolean(selected.account.isOpen),
-        winner: Number(selected.account.winner),
-        nextOrderId: asBigInt(selected.account.nextOrderId),
-        authority: selected.account.authority as PublicKey,
+        orderBook: orderBookEntry?.publicKey ?? PublicKey.default,
+        vault: vaultPda,
+        isOpen: Boolean(matchAccount.isOpen),
+        winner: Number(
+          (() => {
+            const w = matchAccount.winner;
+            if (!w || typeof w !== "object") return 0;
+            if ("yes" in w) return 1;
+            if ("no" in w) return 2;
+            return 0;
+          })(),
+        ),
+        nextOrderId: asBigInt(matchAccount.nextOrderId),
+        authority: matchAccount.authority as PublicKey,
       });
       setYesPool(yes);
       setNoPool(no);
@@ -473,9 +435,15 @@ export function SolanaClobPanel({
 
       if (!wallet.publicKey) {
         setStatus("Connect Solana wallet to trade");
-      } else if (!selected.account.isOpen) {
-        const winnerLabel =
-          Number(selected.account.winner) === 1 ? "YES" : "NO";
+      } else if (!matchAccount.isOpen) {
+        const winnerLabel = (() => {
+          const w = matchAccount.winner;
+          if (w && typeof w === "object") {
+            if ("yes" in w) return "YES";
+            if ("no" in w) return "NO";
+          }
+          return "NONE";
+        })();
         setStatus(`Resolved (${winnerLabel})`);
       } else {
         setStatus("Market open");
@@ -488,7 +456,6 @@ export function SolanaClobPanel({
   }, [
     connection,
     configPda,
-    goldMint,
     readonlyPrograms,
     updateChartAndTrades,
     wallet.publicKey,
@@ -499,6 +466,10 @@ export function SolanaClobPanel({
     const id = window.setInterval(() => void refreshData(), 5000);
     return () => window.clearInterval(id);
   }, [refreshData]);
+
+  // -----------------------------------------------------------------------
+  // ensureConfig
+  // -----------------------------------------------------------------------
 
   const ensureConfig = useCallback(async (): Promise<ClobConfigAccount> => {
     const clobProgram: any = writablePrograms?.goldClobMarket;
@@ -511,45 +482,21 @@ export function SolanaClobPanel({
     )) as any;
     if (existing) {
       const cfg: ClobConfigAccount = {
-        treasuryTokenAccount: existing.treasuryTokenAccount as PublicKey,
-        marketMakerTokenAccount: existing.marketMakerTokenAccount as PublicKey,
-        tradeTreasuryFeeBps: Number(
-          existing.tradeTreasuryFeeBps ?? existing.tradingFeeBps ?? 0,
-        ),
+        treasury: existing.treasury as PublicKey,
+        marketMaker: existing.marketMaker as PublicKey,
+        tradeTreasuryFeeBps: Number(existing.tradeTreasuryFeeBps ?? 0),
         tradeMarketMakerFeeBps: Number(existing.tradeMarketMakerFeeBps ?? 0),
         winningsMarketMakerFeeBps: Number(
-          existing.winningsMarketMakerFeeBps ?? existing.winningsFeeBps ?? 0,
+          existing.winningsMarketMakerFeeBps ?? 0,
         ),
       };
       setConfigAccount(cfg);
       return cfg;
     }
 
-    const ensureFeeTokenAccount = async (
-      owner: PublicKey,
-    ): Promise<PublicKey> => {
-      const existing = await connection.getTokenAccountsByOwner(
-        owner,
-        { mint: goldMint },
-        "confirmed",
-      );
-      if (existing.value[0]?.pubkey) return existing.value[0].pubkey;
-      return createTokenAccountForOwner(owner);
-    };
-    const treasuryTokenAccount =
-      await ensureFeeTokenAccount(TREASURY_FEE_OWNER);
-    const marketMakerTokenAccount = await ensureFeeTokenAccount(
-      MARKET_MAKER_FEE_OWNER,
-    );
-
+    // Initialize config with wallet pubkeys (not token accounts)
     const initConfigTx = (await clobProgram.methods
-      .initializeConfig(
-        treasuryTokenAccount,
-        marketMakerTokenAccount,
-        100,
-        100,
-        200,
-      )
+      .initializeConfig(TREASURY_WALLET, MARKET_MAKER_WALLET, 100, 100, 200)
       .accounts({
         authority: wallet.publicKey,
         config: configPda,
@@ -563,8 +510,8 @@ export function SolanaClobPanel({
       configPda,
     )) as any;
     const cfg: ClobConfigAccount = {
-      treasuryTokenAccount: created.treasuryTokenAccount as PublicKey,
-      marketMakerTokenAccount: created.marketMakerTokenAccount as PublicKey,
+      treasury: created.treasury as PublicKey,
+      marketMaker: created.marketMaker as PublicKey,
       tradeTreasuryFeeBps: Number(created.tradeTreasuryFeeBps),
       tradeMarketMakerFeeBps: Number(created.tradeMarketMakerFeeBps),
       winningsMarketMakerFeeBps: Number(created.winningsMarketMakerFeeBps),
@@ -574,12 +521,14 @@ export function SolanaClobPanel({
   }, [
     configPda,
     connection,
-    createTokenAccountForOwner,
-    goldMint,
     wallet.publicKey,
     wallet.sendTransaction,
     writablePrograms,
   ]);
+
+  // -----------------------------------------------------------------------
+  // Create match
+  // -----------------------------------------------------------------------
 
   const handleCreateMatch = async () => {
     try {
@@ -593,18 +542,10 @@ export function SolanaClobPanel({
 
       const matchState = Keypair.generate();
       const orderBook = Keypair.generate();
-      const vaultAuthority = findClobVaultAuthorityPda(
+      const [vaultPda] = findClobVaultPda(
         GOLD_CLOB_MARKET_PROGRAM_ID,
         matchState.publicKey,
       );
-      const vaultAccounts = await connection.getTokenAccountsByOwner(
-        vaultAuthority,
-        { mint: goldMint },
-        "confirmed",
-      );
-      if (!vaultAccounts.value[0]?.pubkey) {
-        await createTokenAccountForOwner(vaultAuthority);
-      }
 
       const matchTx = (await clobProgram.methods
         .initializeMatch(500)
@@ -612,7 +553,7 @@ export function SolanaClobPanel({
           matchState: matchState.publicKey,
           user: wallet.publicKey,
           config: configPda,
-          vaultAuthority,
+          vault: vaultPda,
           systemProgram: SystemProgram.programId,
         })
         .signers([matchState])
@@ -639,6 +580,10 @@ export function SolanaClobPanel({
     }
   };
 
+  // -----------------------------------------------------------------------
+  // Place order
+  // -----------------------------------------------------------------------
+
   const handlePlaceOrder = async () => {
     try {
       if (!wallet.publicKey) throw new Error("Connect wallet first");
@@ -651,53 +596,65 @@ export function SolanaClobPanel({
       ) {
         throw new Error("Create a match first");
       }
-      if (activeMatch.vault.equals(PublicKey.default)) {
-        throw new Error("Vault account missing for selected match");
-      }
 
       const cfg = configAccount ?? (await ensureConfig());
-      const userGold = await findAnyGoldAccount(
-        connection,
-        wallet.publicKey,
-        goldMint,
-      );
-      if (!userGold) throw new Error("No GOLD token account in wallet");
 
-      const amount = toBaseUnits(amountInput);
+      const amount = toLamports(amountInput);
       if (amount <= 0n) throw new Error("Amount must be > 0");
       const isBuy = side === "YES";
       const price = clampPrice(priceInput);
 
-      const before = (await clobProgram.account.matchState.fetch(
+      // Read next order ID from match state
+      const matchData = (await clobProgram.account.matchState.fetch(
         activeMatch.matchState,
       )) as any;
-      const beforeOrderId = asBigInt(before.nextOrderId);
+      const orderId = asBigInt(matchData.nextOrderId);
+
+      // Derive PDAs
+      const userBalancePda = findClobUserBalancePda(
+        GOLD_CLOB_MARKET_PROGRAM_ID,
+        activeMatch.matchState,
+        wallet.publicKey,
+      );
+      const newOrderPda = findClobOrderPda(
+        GOLD_CLOB_MARKET_PROGRAM_ID,
+        activeMatch.matchState,
+        wallet.publicKey,
+        orderId,
+      );
 
       const txSignature = (await clobProgram.methods
-        .placeOrder(isBuy, price, new BN(amount.toString()))
+        .placeOrder(
+          new BN(orderId.toString()),
+          isBuy,
+          price,
+          new BN(amount.toString()),
+        )
         .accounts({
           matchState: activeMatch.matchState,
           orderBook: activeMatch.orderBook,
+          userBalance: userBalancePda,
+          newOrder: newOrderPda,
           config: configPda,
-          userTokenAccount: userGold,
-          treasuryTokenAccount: cfg.treasuryTokenAccount,
-          marketMakerTokenAccount: cfg.marketMakerTokenAccount,
+          treasury: cfg.treasury,
+          marketMaker: cfg.marketMaker,
           vault: activeMatch.vault,
-          vaultAuthority: activeMatch.vaultAuthority,
           user: wallet.publicKey,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
         .rpc()) as string;
       setTxs((prev) => ({ ...prev, placeOrder: txSignature }));
 
-      const after = (await clobProgram.account.matchState.fetch(
+      // Check if the order rested (next_order_id incremented)
+      const afterMatch = (await clobProgram.account.matchState.fetch(
         activeMatch.matchState,
       )) as any;
-      const afterOrderId = asBigInt(after.nextOrderId);
-      if (afterOrderId > beforeOrderId) {
-        setLastOrderId(beforeOrderId);
+      const afterOrderId = asBigInt(afterMatch.nextOrderId);
+      if (afterOrderId > orderId) {
+        setLastOrderId(orderId);
       }
 
+      // Track with backend (best-effort)
       const referralTrackingFeeBps = Math.max(
         0,
         Number(cfg.tradeTreasuryFeeBps) + Number(cfg.tradeMarketMakerFeeBps),
@@ -713,11 +670,10 @@ export function SolanaClobPanel({
             body: JSON.stringify({
               bettorWallet: wallet.publicKey.toBase58(),
               chain: "SOLANA",
-              sourceAsset: "GOLD",
+              sourceAsset: "SOL",
               sourceAmount: amountInput,
               goldAmount: amountInput,
-              feeBps:
-                referralTrackingFeeBps || DEFAULT_EXTERNAL_TRACKING_FEE_BPS,
+              feeBps: referralTrackingFeeBps,
               txSignature,
               marketPda: activeMatch.matchState.toBase58(),
               inviteCode: getStoredInviteCode(),
@@ -746,6 +702,10 @@ export function SolanaClobPanel({
     }
   };
 
+  // -----------------------------------------------------------------------
+  // Cancel order
+  // -----------------------------------------------------------------------
+
   const handleCancelOrder = async () => {
     try {
       if (!wallet.publicKey) throw new Error("Connect wallet first");
@@ -754,25 +714,25 @@ export function SolanaClobPanel({
       if (!activeMatch || activeMatch.orderBook.equals(PublicKey.default)) {
         throw new Error("No active order book");
       }
-      if (!lastOrderId) throw new Error("No local open order to cancel");
+      if (lastOrderId === null)
+        throw new Error("No local open order to cancel");
 
-      const userGold = await findAnyGoldAccount(
-        connection,
+      const orderPda = findClobOrderPda(
+        GOLD_CLOB_MARKET_PROGRAM_ID,
+        activeMatch.matchState,
         wallet.publicKey,
-        goldMint,
+        lastOrderId,
       );
-      if (!userGold) throw new Error("No GOLD token account in wallet");
 
       const txSignature = (await clobProgram.methods
         .cancelOrder(new BN(lastOrderId.toString()))
         .accounts({
           matchState: activeMatch.matchState,
           orderBook: activeMatch.orderBook,
-          userTokenAccount: userGold,
+          order: orderPda,
           vault: activeMatch.vault,
-          vaultAuthority: activeMatch.vaultAuthority,
           user: wallet.publicKey,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
         .rpc()) as string;
 
@@ -784,6 +744,10 @@ export function SolanaClobPanel({
     }
   };
 
+  // -----------------------------------------------------------------------
+  // Resolve match
+  // -----------------------------------------------------------------------
+
   const handleResolve = async () => {
     try {
       if (!wallet.publicKey) throw new Error("Connect wallet first");
@@ -791,9 +755,9 @@ export function SolanaClobPanel({
       if (!clobProgram) throw new Error("Program unavailable");
       if (!activeMatch) throw new Error("Create/select a match first");
 
-      const winner = side === "YES" ? 1 : 2;
+      const winnerEnum = side === "YES" ? { yes: {} } : { no: {} };
       const txSignature = (await clobProgram.methods
-        .resolveMatch(winner)
+        .resolveMatch(winnerEnum)
         .accounts({
           matchState: activeMatch.matchState,
           authority: wallet.publicKey,
@@ -808,6 +772,10 @@ export function SolanaClobPanel({
     }
   };
 
+  // -----------------------------------------------------------------------
+  // Claim
+  // -----------------------------------------------------------------------
+
   const handleClaim = useCallback(
     async (source: "manual" | "auto" = "manual") => {
       try {
@@ -817,12 +785,11 @@ export function SolanaClobPanel({
         if (!activeMatch || !configAccount)
           throw new Error("Missing market/config state");
 
-        const userGold = await findAnyGoldAccount(
-          connection,
+        const userBalancePda = findClobUserBalancePda(
+          GOLD_CLOB_MARKET_PROGRAM_ID,
+          activeMatch.matchState,
           wallet.publicKey,
-          goldMint,
         );
-        if (!userGold) throw new Error("No GOLD token account in wallet");
 
         if (source === "auto") {
           setStatus("Auto-claiming payout...");
@@ -833,14 +800,12 @@ export function SolanaClobPanel({
           .accounts({
             matchState: activeMatch.matchState,
             orderBook: activeMatch.orderBook,
+            userBalance: userBalancePda,
             config: configPda,
-            userTokenAccount: userGold,
-            treasuryTokenAccount: configAccount.treasuryTokenAccount,
-            marketMakerTokenAccount: configAccount.marketMakerTokenAccount,
+            marketMaker: configAccount.marketMaker,
             vault: activeMatch.vault,
-            vaultAuthority: activeMatch.vaultAuthority,
             user: wallet.publicKey,
-            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
           })
           .rpc()) as string;
 
@@ -858,13 +823,16 @@ export function SolanaClobPanel({
     [
       activeMatch,
       configAccount,
-      connection,
       configPda,
       refreshData,
       wallet.publicKey,
       writablePrograms,
     ],
   );
+
+  // -----------------------------------------------------------------------
+  // Auto-claim on resolution
+  // -----------------------------------------------------------------------
 
   useEffect(() => {
     if (
@@ -902,6 +870,10 @@ export function SolanaClobPanel({
     wallet.publicKey,
   ]);
 
+  // -----------------------------------------------------------------------
+  // Derived display values
+  // -----------------------------------------------------------------------
+
   const totalPool = yesPool + noPool;
   const yesPercent = totalPool > 0n ? Number((yesPool * 100n) / totalPool) : 50;
   const noPercent = 100 - yesPercent;
@@ -909,8 +881,12 @@ export function SolanaClobPanel({
   const matchLabel = activeMatch?.matchState.toBase58() ?? "-";
   const walletConnected = walletReady(wallet);
   const marketFeeSummary = configAccount
-    ? `${configAccount.tradeTreasuryFeeBps / 100}% trade -> treasury, ${configAccount.tradeMarketMakerFeeBps / 100}% trade -> MM, ${configAccount.winningsMarketMakerFeeBps / 100}% winnings -> MM`
+    ? `${configAccount.tradeTreasuryFeeBps / 100}% trade → treasury, ${configAccount.tradeMarketMakerFeeBps / 100}% trade → MM, ${configAccount.winningsMarketMakerFeeBps / 100}% winnings → MM`
     : "Config not initialized";
+
+  // -----------------------------------------------------------------------
+  // Render
+  // -----------------------------------------------------------------------
 
   return (
     <div
@@ -1040,6 +1016,7 @@ export function SolanaClobPanel({
           <div data-testid="solana-clob-claim-tx">Claim Tx: {txs.claim}</div>
         </div>
       </div>
+
       <div
         style={{
           display: "flex",
@@ -1068,8 +1045,8 @@ export function SolanaClobPanel({
       >
         <span>{marketFeeSummary}</span>
         <span>
-          Position YES {fmtAmount(position.yesShares).toFixed(4)} | NO{" "}
-          {fmtAmount(position.noShares).toFixed(4)}
+          Position YES {fmtSol(position.yesShares).toFixed(4)} | NO{" "}
+          {fmtSol(position.noShares).toFixed(4)}
         </span>
       </div>
 
@@ -1101,8 +1078,8 @@ export function SolanaClobPanel({
       <PredictionMarketPanel
         yesPercent={yesPercent}
         noPercent={noPercent}
-        yesPool={fmtAmount(yesPool)}
-        noPool={fmtAmount(noPool)}
+        yesPool={fmtSol(yesPool)}
+        noPool={fmtSol(noPool)}
         side={side}
         setSide={setSide}
         amountInput={amountInput}

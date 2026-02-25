@@ -46,6 +46,7 @@ import { AgentStats } from "./components/AgentStats";
 import { useChain } from "./lib/ChainContext";
 import {
   FIGHT_ORACLE_PROGRAM_ID,
+  GOLD_CLOB_MARKET_PROGRAM_ID,
   GOLD_BINARY_MARKET_PROGRAM_ID,
   createPrograms,
   createReadonlyPrograms,
@@ -175,7 +176,10 @@ function marketStatusLabel(value: unknown): string {
   if (enumIs(value, "open")) return "OPEN";
   if (enumIs(value, "resolved")) return "RESOLVED";
   if (enumIs(value, "void")) return "VOID";
-  return "UNKNOWN";
+  // CLOB market uses MatchState.isOpen boolean rather than an enum.
+  // Fall back to LIVE rather than UNKNOWN so the legacy path doesn't
+  // show a broken state when the CLOB panel is the active data source.
+  return "LIVE";
 }
 
 function formatUtc(ts: number | null): string {
@@ -503,7 +507,7 @@ export function App() {
       try {
         const [oracleInfo, marketInfo] = await Promise.all([
           connection.getAccountInfo(FIGHT_ORACLE_PROGRAM_ID, "confirmed"),
-          connection.getAccountInfo(GOLD_BINARY_MARKET_PROGRAM_ID, "confirmed"),
+          connection.getAccountInfo(GOLD_CLOB_MARKET_PROGRAM_ID, "confirmed"),
         ]);
         if (cancelled) return;
         setProgramDeployment({
@@ -1751,7 +1755,11 @@ export function App() {
     : isEvmChain
       ? (streamPhaseText ??
         (currentMatch ? currentMatch.status.toUpperCase() : "LIVE"))
-      : marketStatusLabel(currentMarketState?.status);
+      : currentMarketState?.status
+        ? marketStatusLabel(currentMarketState.status)
+        : currentMatch
+          ? "LIVE"
+          : "WAITING";
   const countdownText = isStreamUIMode
     ? formatCountdown(
         normalizeRemainingSeconds(mock.streamState.cycle.timeRemaining),

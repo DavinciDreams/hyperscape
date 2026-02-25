@@ -5,18 +5,18 @@ import { fileURLToPath } from "node:url";
 import * as anchor from "@coral-xyz/anchor";
 import BN from "bn.js";
 import {
-  TOKEN_PROGRAM_ID,
-  createAccount,
-  createMint,
-  getAccount,
-  mintTo,
-} from "@solana/spl-token";
-import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
 } from "@solana/web3.js";
+
+/**
+ * Localnet simulation for gold_clob_market (native-SOL / PDA model).
+ *
+ * Creates 40 wallets, runs 3 rounds with various betting strategies,
+ * then collects PnL stats.
+ */
 
 type Strategy =
   | "cabal_against_house"
@@ -30,7 +30,6 @@ type Winner = "YES" | "NO";
 type Bettor = {
   wallet: Keypair;
   strategy: Strategy;
-  tokenAccount: PublicKey;
   initialBalance: bigint;
 };
 
@@ -52,9 +51,62 @@ const STRATEGIES: Strategy[] = [
 
 const WALLET_COUNT = 40;
 const ROUNDS = 3;
-const INITIAL_GOLD = 1_000_000_000n;
-const BASE_ORDER_AMOUNT = 3_000_000n;
-const HOUSE_LIQUIDITY = 90_000_000n;
+const INITIAL_SOL = 2; // SOL per bettor
+const BASE_ORDER_AMOUNT = 3_000_000n; // lamports
+const HOUSE_LIQUIDITY = 90_000_000n; // lamports
+
+// ---------------------------------------------------------------------------
+// PDA helpers
+// ---------------------------------------------------------------------------
+
+function configPda(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("config")],
+    programId,
+  )[0];
+}
+
+function vaultPda(
+  programId: PublicKey,
+  matchState: PublicKey,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), matchState.toBuffer()],
+    programId,
+  );
+}
+
+function balancePda(
+  programId: PublicKey,
+  matchState: PublicKey,
+  user: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("balance"), matchState.toBuffer(), user.toBuffer()],
+    programId,
+  )[0];
+}
+
+function orderPda(
+  programId: PublicKey,
+  matchState: PublicKey,
+  user: PublicKey,
+  orderId: BN,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("order"),
+      matchState.toBuffer(),
+      user.toBuffer(),
+      orderId.toArrayLike(Buffer, "le", 8),
+    ],
+    programId,
+  )[0];
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function createRng(seed: bigint): () => number {
   let state = seed;
@@ -177,22 +229,12 @@ async function main() {
     signatures.push(sig);
   }
 
-  const [configPda] = PublicKey.findProgramAddressSync(
+  const [cfgPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("config")],
     programId,
   );
 
-  const goldMint = await createMint(
-    connection,
-    authority,
-    authority.publicKey,
-    null,
-    6,
-    undefined,
-    undefined,
-    TOKEN_PROGRAM_ID,
-  );
-
+  // Fee wallets (plain SOL wallets, not token accounts)
   const treasuryOwner = Keypair.generate();
   const marketMakerOwner = Keypair.generate();
   await Promise.all([
@@ -200,175 +242,77 @@ async function main() {
     sendSol(marketMakerOwner.publicKey, Math.floor(0.2 * LAMPORTS_PER_SOL)),
   ]);
 
-  const treasuryToken = await createAccount(
-    connection,
-    authority,
-    goldMint,
-    treasuryOwner.publicKey,
-    undefined,
-    undefined,
-    TOKEN_PROGRAM_ID,
-  );
-
-  const marketMakerToken = await createAccount(
-    connection,
-    authority,
-    goldMint,
-    marketMakerOwner.publicKey,
-    undefined,
-    undefined,
-    TOKEN_PROGRAM_ID,
-  );
-
   await record(
     program.methods
-      .initializeConfig(treasuryToken, marketMakerToken, 100, 100, 200)
+      .initializeConfig(
+        treasuryOwner.publicKey,
+        marketMakerOwner.publicKey,
+        100,
+        100,
+        200,
+      )
       .accountsStrict({
         authority: authority.publicKey,
-        config: configPda,
+        config: cfgPda,
         systemProgram: SystemProgram.programId,
       })
       .rpc(),
   ).catch(async () => {
     await record(
       program.methods
-        .updateConfig(treasuryToken, marketMakerToken, 100, 100, 200)
+        .updateConfig(
+          treasuryOwner.publicKey,
+          marketMakerOwner.publicKey,
+          100,
+          100,
+          200,
+        )
         .accountsStrict({
           authority: authority.publicKey,
-          config: configPda,
+          config: cfgPda,
         })
         .rpc(),
     );
   });
 
-  const treasuryStartBalance = (
-    await getAccount(connection, treasuryToken, "confirmed", TOKEN_PROGRAM_ID)
-  ).amount;
-  const mmStartBalance = (
-    await getAccount(
-      connection,
-      marketMakerToken,
-      "confirmed",
-      TOKEN_PROGRAM_ID,
-    )
-  ).amount;
+  const treasuryStartBalance = await connection.getBalance(
+    treasuryOwner.publicKey,
+    "confirmed",
+  );
+  const mmStartBalance = await connection.getBalance(
+    marketMakerOwner.publicKey,
+    "confirmed",
+  );
 
+  // House wallets (bid = YES, ask = NO)
   const houseBid = Keypair.generate();
   const houseAsk = Keypair.generate();
   await Promise.all([
-    sendSol(houseBid.publicKey, Math.floor(0.2 * LAMPORTS_PER_SOL)),
-    sendSol(houseAsk.publicKey, Math.floor(0.2 * LAMPORTS_PER_SOL)),
+    sendSol(houseBid.publicKey, 5 * LAMPORTS_PER_SOL),
+    sendSol(houseAsk.publicKey, 5 * LAMPORTS_PER_SOL),
   ]);
 
-  const houseBidToken = await createAccount(
-    connection,
-    authority,
-    goldMint,
-    houseBid.publicKey,
-    undefined,
-    undefined,
-    TOKEN_PROGRAM_ID,
-  );
-  const houseAskToken = await createAccount(
-    connection,
-    authority,
-    goldMint,
-    houseAsk.publicKey,
-    undefined,
-    undefined,
-    TOKEN_PROGRAM_ID,
-  );
-
-  signatures.push(
-    await mintTo(
-      connection,
-      authority,
-      goldMint,
-      houseBidToken,
-      authority,
-      INITIAL_GOLD * 30n,
-      [],
-      undefined,
-      TOKEN_PROGRAM_ID,
-    ),
-  );
-  signatures.push(
-    await mintTo(
-      connection,
-      authority,
-      goldMint,
-      houseAskToken,
-      authority,
-      INITIAL_GOLD * 30n,
-      [],
-      undefined,
-      TOKEN_PROGRAM_ID,
-    ),
-  );
-
+  // Create bettors
   const bettors: Bettor[] = [];
   for (let i = 0; i < WALLET_COUNT; i += 1) {
     const walletKeypair = Keypair.generate();
-    await sendSol(walletKeypair.publicKey, Math.floor(0.2 * LAMPORTS_PER_SOL));
+    await sendSol(walletKeypair.publicKey, INITIAL_SOL * LAMPORTS_PER_SOL);
 
-    const tokenAccount = await createAccount(
-      connection,
-      authority,
-      goldMint,
-      walletKeypair.publicKey,
-      undefined,
-      undefined,
-      TOKEN_PROGRAM_ID,
-    );
-
-    signatures.push(
-      await mintTo(
-        connection,
-        authority,
-        goldMint,
-        tokenAccount,
-        authority,
-        INITIAL_GOLD,
-        [],
-        undefined,
-        TOKEN_PROGRAM_ID,
-      ),
+    const initialBalance = BigInt(
+      await connection.getBalance(walletKeypair.publicKey, "confirmed"),
     );
 
     bettors.push({
       wallet: walletKeypair,
       strategy: STRATEGIES[i % STRATEGIES.length],
-      tokenAccount,
-      initialBalance: (
-        await getAccount(
-          connection,
-          tokenAccount,
-          "confirmed",
-          TOKEN_PROGRAM_ID,
-        )
-      ).amount,
+      initialBalance,
     });
   }
 
   for (let round = 1; round <= ROUNDS; round += 1) {
     const matchState = Keypair.generate();
     const orderBook = Keypair.generate();
-
-    const [vaultAuthority] = PublicKey.findProgramAddressSync(
-      [Buffer.from("vault_auth"), matchState.publicKey.toBuffer()],
-      programId,
-    );
-
-    const vault = await createAccount(
-      connection,
-      authority,
-      goldMint,
-      vaultAuthority,
-      Keypair.generate(),
-      undefined,
-      undefined,
-      TOKEN_PROGRAM_ID,
-    );
+    const [vault] = vaultPda(programId, matchState.publicKey);
 
     await record(
       program.methods
@@ -376,8 +320,8 @@ async function main() {
         .accountsStrict({
           matchState: matchState.publicKey,
           user: authority.publicKey,
-          config: configPda,
-          vaultAuthority,
+          config: cfgPda,
+          vault,
           systemProgram: SystemProgram.programId,
         })
         .signers([matchState])
@@ -400,63 +344,114 @@ async function main() {
     const winner = pickWinner(rng);
     const houseBias: Winner = round % 2 === 0 ? "YES" : "NO";
 
+    // Track next order ID
+    let nextOrderId = 1;
+
+    // House BUY order
+    const houseBuyOrderPda = orderPda(
+      programId,
+      matchState.publicKey,
+      houseBid.publicKey,
+      new BN(nextOrderId),
+    );
+    const houseBuyBalPda = balancePda(
+      programId,
+      matchState.publicKey,
+      houseBid.publicKey,
+    );
     await record(
       program.methods
-        .placeOrder(true, 450, toU64Bn(HOUSE_LIQUIDITY))
+        .placeOrder(new BN(nextOrderId), true, 450, toU64Bn(HOUSE_LIQUIDITY))
         .accountsStrict({
           matchState: matchState.publicKey,
           orderBook: orderBook.publicKey,
-          config: configPda,
-          userTokenAccount: houseBidToken,
-          treasuryTokenAccount: treasuryToken,
-          marketMakerTokenAccount: marketMakerToken,
+          userBalance: houseBuyBalPda,
+          newOrder: houseBuyOrderPda,
+          config: cfgPda,
+          treasury: treasuryOwner.publicKey,
+          marketMaker: marketMakerOwner.publicKey,
           vault,
-          vaultAuthority,
           user: houseBid.publicKey,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
         .signers([houseBid])
         .rpc(),
     );
+    nextOrderId += 1;
 
+    // House SELL order
+    const houseSellOrderPda = orderPda(
+      programId,
+      matchState.publicKey,
+      houseAsk.publicKey,
+      new BN(nextOrderId),
+    );
+    const houseSellBalPda = balancePda(
+      programId,
+      matchState.publicKey,
+      houseAsk.publicKey,
+    );
     await record(
       program.methods
-        .placeOrder(false, 550, toU64Bn(HOUSE_LIQUIDITY))
+        .placeOrder(new BN(nextOrderId), false, 550, toU64Bn(HOUSE_LIQUIDITY))
         .accountsStrict({
           matchState: matchState.publicKey,
           orderBook: orderBook.publicKey,
-          config: configPda,
-          userTokenAccount: houseAskToken,
-          treasuryTokenAccount: treasuryToken,
-          marketMakerTokenAccount: marketMakerToken,
+          userBalance: houseSellBalPda,
+          newOrder: houseSellOrderPda,
+          config: cfgPda,
+          treasury: treasuryOwner.publicKey,
+          marketMaker: marketMakerOwner.publicKey,
           vault,
-          vaultAuthority,
           user: houseAsk.publicKey,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
         .signers([houseAsk])
         .rpc(),
     );
+    nextOrderId += 1;
 
     let betsPlaced = 0;
     for (const bettor of bettors) {
       const order = orderFromStrategy(bettor.strategy, winner, houseBias, rng);
       executionStats.betAttempts += 1;
+
+      // Read current next_order_id from chain
+      const ms = await program.account.matchState.fetch(matchState.publicKey);
+      const orderId = (ms.nextOrderId as BN).toNumber();
+
+      const userBalPda = balancePda(
+        programId,
+        matchState.publicKey,
+        bettor.wallet.publicKey,
+      );
+      const newOrderPda = orderPda(
+        programId,
+        matchState.publicKey,
+        bettor.wallet.publicKey,
+        new BN(orderId),
+      );
+
       try {
         await record(
           program.methods
-            .placeOrder(order.isBuy, order.price, toU64Bn(order.amount))
+            .placeOrder(
+              new BN(orderId),
+              order.isBuy,
+              order.price,
+              toU64Bn(order.amount),
+            )
             .accountsStrict({
               matchState: matchState.publicKey,
               orderBook: orderBook.publicKey,
-              config: configPda,
-              userTokenAccount: bettor.tokenAccount,
-              treasuryTokenAccount: treasuryToken,
-              marketMakerTokenAccount: marketMakerToken,
+              userBalance: userBalPda,
+              newOrder: newOrderPda,
+              config: cfgPda,
+              treasury: treasuryOwner.publicKey,
+              marketMaker: marketMakerOwner.publicKey,
               vault,
-              vaultAuthority,
               user: bettor.wallet.publicKey,
-              tokenProgram: TOKEN_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
             })
             .signers([bettor.wallet])
             .rpc(),
@@ -470,7 +465,7 @@ async function main() {
 
     await record(
       program.methods
-        .resolveMatch(winner === "YES" ? 1 : 2)
+        .resolveMatch(winner === "YES" ? { yes: {} } : { no: {} })
         .accountsStrict({
           matchState: matchState.publicKey,
           authority: authority.publicKey,
@@ -479,8 +474,14 @@ async function main() {
     );
 
     let winningClaims = 0;
-    for (const bettor of bettors) {
-      executionStats.claimAttempts += 1;
+
+    // Claim for house wallets
+    for (const houseWallet of [houseBid, houseAsk]) {
+      const houseBalPda = balancePda(
+        programId,
+        matchState.publicKey,
+        houseWallet.publicKey,
+      );
       try {
         await record(
           program.methods
@@ -488,13 +489,43 @@ async function main() {
             .accountsStrict({
               matchState: matchState.publicKey,
               orderBook: orderBook.publicKey,
-              config: configPda,
-              userTokenAccount: bettor.tokenAccount,
-              marketMakerTokenAccount: marketMakerToken,
+              userBalance: houseBalPda,
+              config: cfgPda,
+              marketMaker: marketMakerOwner.publicKey,
               vault,
-              vaultAuthority,
+              user: houseWallet.publicKey,
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([houseWallet])
+            .rpc(),
+        );
+        winningClaims += 1;
+      } catch {
+        // no winning shares
+      }
+    }
+
+    // Claim for bettors
+    for (const bettor of bettors) {
+      executionStats.claimAttempts += 1;
+      const userBalPda = balancePda(
+        programId,
+        matchState.publicKey,
+        bettor.wallet.publicKey,
+      );
+      try {
+        await record(
+          program.methods
+            .claim()
+            .accountsStrict({
+              matchState: matchState.publicKey,
+              orderBook: orderBook.publicKey,
+              userBalance: userBalPda,
+              config: cfgPda,
+              marketMaker: marketMakerOwner.publicKey,
+              vault,
               user: bettor.wallet.publicKey,
-              tokenProgram: TOKEN_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
             })
             .signers([bettor.wallet])
             .rpc(),
@@ -517,14 +548,9 @@ async function main() {
 
   const walletPnl = [];
   for (const bettor of bettors) {
-    const finalBalance = (
-      await getAccount(
-        connection,
-        bettor.tokenAccount,
-        "confirmed",
-        TOKEN_PROGRAM_ID,
-      )
-    ).amount;
+    const finalBalance = BigInt(
+      await connection.getBalance(bettor.wallet.publicKey, "confirmed"),
+    );
     walletPnl.push({
       address: bettor.wallet.publicKey.toBase58(),
       strategy: bettor.strategy,
@@ -574,23 +600,19 @@ async function main() {
     }
   }
 
-  const treasuryEndBalance = (
-    await getAccount(connection, treasuryToken, "confirmed", TOKEN_PROGRAM_ID)
-  ).amount;
-  const mmEndBalance = (
-    await getAccount(
-      connection,
-      marketMakerToken,
-      "confirmed",
-      TOKEN_PROGRAM_ID,
-    )
-  ).amount;
+  const treasuryEndBalance = await connection.getBalance(
+    treasuryOwner.publicKey,
+    "confirmed",
+  );
+  const mmEndBalance = await connection.getBalance(
+    marketMakerOwner.publicKey,
+    "confirmed",
+  );
 
   const report = {
     generatedAt: new Date().toISOString(),
     rpcUrl,
     programId: programId.toBase58(),
-    mint: goldMint.toBase58(),
     wallets: WALLET_COUNT,
     rounds: ROUNDS,
     feeFlows: {
