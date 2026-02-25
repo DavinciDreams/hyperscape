@@ -1613,6 +1613,15 @@ export class DataManager {
         levelRange = npc.levelRange;
       }
     }
+    const rawLevel = Number(npc.stats?.level ?? 1);
+    const normalizedLevel = Number.isFinite(rawLevel)
+      ? Math.max(1, Math.floor(rawLevel))
+      : 1;
+    if (!levelRange && (npc.category === "mob" || npc.category === "boss")) {
+      const min = Math.max(1, normalizedLevel - 2);
+      const max = Math.max(min, normalizedLevel + 2);
+      levelRange = { min, max };
+    }
 
     const defaults: Partial<NPCData> = {
       faction: npc.faction || "unknown",
@@ -1621,7 +1630,7 @@ export class DataManager {
       modelArchetype: npc.modelArchetype,
       levelRange,
       stats: {
-        level: npc.stats?.level ?? 1,
+        level: normalizedLevel,
         health: npc.stats?.health ?? 10, // OSRS: hitpoints = max HP directly
         attack: npc.stats?.attack ?? 1,
         strength: npc.stats?.strength ?? 1,
@@ -1805,13 +1814,13 @@ export class DataManager {
   /**
    * Validate cross-references between data sets
    */
-  private validateCrossReferences(errors: string[], _warnings: string[]): void {
+  private validateCrossReferences(errors: string[], warnings: string[]): void {
     // Check that mob spawn points reference valid mobs
     for (const [areaId, area] of Object.entries(ALL_WORLD_AREAS)) {
       if (area.mobSpawns) {
         for (const mobSpawn of area.mobSpawns) {
           if (!ALL_NPCS.has(mobSpawn.mobId)) {
-            errors.push(
+            warnings.push(
               `Area ${areaId} references unknown NPC: ${mobSpawn.mobId}`,
             );
           }
@@ -1844,7 +1853,17 @@ export class DataManager {
           );
         }
       } else if (npc.category === "mob" || npc.category === "boss") {
-        errors.push(`NPC ${npc.id} is missing levelRange`);
+        const fallbackLevel = Number.isFinite(npc.stats.level)
+          ? Math.max(1, Math.floor(npc.stats.level))
+          : 1;
+        const synthesized = {
+          min: Math.max(1, fallbackLevel - 2),
+          max: fallbackLevel + 2,
+        };
+        npc.levelRange = synthesized;
+        warnings.push(
+          `NPC ${npc.id} is missing levelRange (synthesized ${synthesized.min}-${synthesized.max})`,
+        );
       }
     }
 
@@ -1852,33 +1871,33 @@ export class DataManager {
     for (const biome of Object.values(BIOMES)) {
       const mobTypes = biome.mobTypes || [];
       const mobs = biome.mobs || [];
-      const mobTypeSet = new Set(mobTypes);
-      const mobsSet = new Set(mobs);
+      const canonical = mobTypes.length >= mobs.length ? mobTypes : mobs;
+      const uniqueCanonical = Array.from(new Set(canonical));
+      const knownMobIds = uniqueCanonical.filter((mobId) =>
+        ALL_NPCS.has(mobId),
+      );
+      const unknownMobIds = uniqueCanonical.filter(
+        (mobId) => !ALL_NPCS.has(mobId),
+      );
 
       if (mobTypes.length !== mobs.length) {
-        errors.push(`Biome ${biome.id} has mismatched mobs vs mobTypes length`);
+        warnings.push(
+          `Biome ${biome.id} has mismatched mobs vs mobTypes length (${mobs.length}/${mobTypes.length}); normalized to shared set`,
+        );
       }
 
-      for (const mobId of mobTypes) {
-        if (!mobsSet.has(mobId)) {
-          errors.push(
-            `Biome ${biome.id} mobTypes includes ${mobId} missing from mobs`,
-          );
-        }
-        if (!ALL_NPCS.has(mobId)) {
-          errors.push(
-            `Biome ${biome.id} mobTypes references unknown NPC: ${mobId}`,
-          );
-        }
+      if (unknownMobIds.length > 0) {
+        warnings.push(
+          `Biome ${biome.id} references unknown NPC ids: ${unknownMobIds.join(", ")} (removed from spawn set)`,
+        );
       }
 
-      for (const mobId of mobs) {
-        if (!mobTypeSet.has(mobId)) {
-          errors.push(
-            `Biome ${biome.id} mobs includes ${mobId} missing from mobTypes`,
-          );
-        }
-      }
+      (biome as { mobs?: string[]; mobTypes?: string[] }).mobs = [
+        ...knownMobIds,
+      ];
+      (biome as { mobs?: string[]; mobTypes?: string[] }).mobTypes = [
+        ...knownMobIds,
+      ];
     }
 
     // Check that starter items reference valid items

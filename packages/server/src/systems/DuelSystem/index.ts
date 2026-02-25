@@ -209,24 +209,32 @@ export class DuelSystem {
     });
 
     // Verify critical event listeners are registered after all systems initialize.
-    // If ServerNetwork hasn't registered its duel:stakes:settle listener,
-    // stake transfers will silently fire into the void.
-    setTimeout(() => {
+    // ServerNetwork may register its handlers shortly after DuelSystem; wait briefly
+    // before declaring stake settlement as missing.
+    const verifyStakeSettlementListener = (attempt = 0): void => {
       const listenerCount =
         (
           this.world as { listenerCount?: (event: string) => number }
         ).listenerCount?.("duel:stakes:settle") ?? -1;
-      if (listenerCount === 0) {
-        Logger.error(
-          "DuelSystem",
-          "CRITICAL: No listener for duel:stakes:settle — stake transfers will fail!",
-        );
-      } else {
+
+      if (listenerCount > 0) {
         Logger.debug("DuelSystem", "Listener verification passed", {
           "duel:stakes:settle": listenerCount,
         });
+        return;
       }
-    }, 0);
+
+      if (attempt < 40) {
+        setTimeout(() => verifyStakeSettlementListener(attempt + 1), 125);
+        return;
+      }
+
+      Logger.warn(
+        "DuelSystem",
+        "No listener for duel:stakes:settle after startup grace period; stake transfers may fail.",
+      );
+    };
+    setTimeout(() => verifyStakeSettlementListener(), 0);
 
     Logger.info("DuelSystem", "Initialized");
   }

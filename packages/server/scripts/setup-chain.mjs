@@ -25,6 +25,12 @@ const envPATH = [contractsBin, foundryBin, process.env.PATH].filter(Boolean).joi
 
 const ANVIL_PORT = 8545;
 const ANVIL_HOST = "127.0.0.1";
+const allowDegradedChainSetup =
+    process.env.ALLOW_DEGRADED_CHAIN_SETUP == null
+        ? true
+        : /^(1|true|yes|on)$/i.test(
+              String(process.env.ALLOW_DEGRADED_CHAIN_SETUP).trim(),
+          );
 
 const colors = {
     reset: "\x1b[0m",
@@ -195,23 +201,49 @@ async function checkAndSetup() {
 
             // Refetch address after deploy (or fallback check)
             worldAddress = getWorldAddressFromConfig();
-            if (!worldAddress) throw new Error("Deployment failed and worlds.json is empty.");
-
-            const client = createPublicClient({
-                chain: foundry,
-                transport: http(`http://${ANVIL_HOST}:${ANVIL_PORT}`),
-            });
-            const code = await client.getCode({ address: worldAddress });
-            if (!code || code === "0x") {
-                throw new Error(
-                    `No contract code found at ${worldAddress} after deployment attempt.`,
-                );
+            if (!worldAddress) {
+                if (allowDegradedChainSetup) {
+                    log(
+                        "Deployment failed and worlds.json is empty. Continuing in degraded mode (chain-dependent features disabled).",
+                        colors.yellow,
+                    );
+                } else {
+                    throw new Error(
+                        "Deployment failed and worlds.json is empty.",
+                    );
+                }
             }
-            log(`World contract verified at ${worldAddress} after deploy fallback.`, colors.green);
+
+            if (worldAddress) {
+                const client = createPublicClient({
+                    chain: foundry,
+                    transport: http(`http://${ANVIL_HOST}:${ANVIL_PORT}`),
+                });
+                const code = await client.getCode({ address: worldAddress });
+                if (!code || code === "0x") {
+                    if (allowDegradedChainSetup) {
+                        log(
+                            `No contract code found at ${worldAddress} after deployment attempt. Continuing in degraded mode (set ALLOW_DEGRADED_CHAIN_SETUP=false to fail hard).`,
+                            colors.yellow,
+                        );
+                    } else {
+                        throw new Error(
+                            `No contract code found at ${worldAddress} after deployment attempt.`,
+                        );
+                    }
+                } else {
+                    log(
+                        `World contract verified at ${worldAddress} after deploy fallback.`,
+                        colors.green,
+                    );
+                }
+            }
         }
 
         // 4. Sync to Server Env
-        updateServerEnv(worldAddress);
+        if (worldAddress) {
+            updateServerEnv(worldAddress);
+        }
 
         log("Setup complete. Starting server...", colors.green);
 

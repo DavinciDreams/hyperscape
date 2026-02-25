@@ -2,6 +2,8 @@ import { ethers } from "ethers";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import dotenv from "dotenv";
+import fs from "node:fs";
+import path from "node:path";
 
 import {
   type RunMode,
@@ -27,17 +29,6 @@ import {
   sleep,
   toTokenUnits,
 } from "./common.js";
-
-import {
-  type RiskLimits,
-  type RiskState,
-  loadRiskLimits,
-  createRiskState,
-  preOrderCheck,
-  recordFill,
-  triggerKillSwitch,
-  getRiskStatus,
-} from "./risk-controls.js";
 
 dotenv.config();
 
@@ -104,6 +95,10 @@ const MM_TAKER_SIZE_MAX = readEnvNumber(
 );
 const TOXICITY_THRESHOLD_BPS = 1000;
 const CANCEL_STALE_AGE_MS = readEnvNumber("CANCEL_STALE_AGE_MS", 30_000, 5000);
+const KILL_SWITCH_FILE = path.resolve(
+  import.meta.dirname ?? ".",
+  "../.kill-switch",
+);
 
 // ─── Solana key decoding ──────────────────────────────────────────────────────
 const decodeSolanaSecretKey = (raw: string): Uint8Array => {
@@ -178,6 +173,7 @@ class CrossChainMarketMaker {
   private cycleCount = 0;
   private lastDuelSignal: DuelSignal | null = null;
   private lastDuelSignalAt = 0;
+  private killSwitchLatched = false;
 
   constructor() {
     this.instanceId = (process.env.MM_INSTANCE_ID || "mm-1").trim() || "mm-1";
@@ -488,6 +484,38 @@ class CrossChainMarketMaker {
         `[${new Date().toISOString()}] Cycle #${this.cycleCount} | Mode: ${this.runMode} | Tier: ${this.aggressivenessTier} | Inv YES:${this.inventoryYes} NO:${this.inventoryNo} | Orders: ${this.activeOrders.length}${duelInfo}`,
       );
     }
+  }
+
+  private checkKillSwitchFile() {
+    if (!fs.existsSync(KILL_SWITCH_FILE)) {
+      this.killSwitchLatched = false;
+      return;
+    }
+
+    if (!this.killSwitchLatched) {
+      let reason = "manual sentinel trigger";
+      try {
+        const raw = fs.readFileSync(KILL_SWITCH_FILE, "utf-8").trim();
+        if (raw) {
+          const parsed = JSON.parse(raw) as { reason?: string };
+          if (typeof parsed.reason === "string" && parsed.reason.trim()) {
+            reason = parsed.reason.trim();
+          }
+        }
+      } catch {
+        // keep default reason for malformed payloads
+      }
+
+      console.error(
+        `[RISK] Kill-switch active via ${KILL_SWITCH_FILE} (${reason}).`,
+      );
+      this.killSwitchLatched = true;
+    }
+
+    this.bscEnabled = false;
+    this.baseEnabled = false;
+    this.solanaEnabled = false;
+    throw new Error("Kill-switch active");
   }
 
   // ─── EVM Market Making ──────────────────────────────────────────────────────

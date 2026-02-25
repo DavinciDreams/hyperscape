@@ -185,6 +185,9 @@ async function main() {
   const cadence = rotationCadence || config.rotationCadence || 0;
   const minFundingLamports = config.minFundingLamports ?? 50_000_000; // 0.05 SOL
   const minFundingWei = config.minFundingWei ?? "10000000000000000"; // 0.01 ETH
+  const failOnNoEligible = /^(1|true|yes|on)$/i.test(
+    process.env.MM_FAIL_ON_NO_ELIGIBLE ?? "",
+  );
 
   console.log(
     `[mm:runner] Mode: ${runMode} | Wallets: ${config.wallets.length} | Rotation cadence: ${cadence || "disabled"} | Funding check: ${fundingCheck}`,
@@ -244,7 +247,13 @@ async function main() {
   }
 
   if (eligibleWallets.length === 0) {
-    throw new Error("No eligible wallets after funding checks");
+    if (failOnNoEligible) {
+      throw new Error("No eligible wallets after funding checks");
+    }
+    console.warn(
+      "[mm:runner] No eligible wallets after funding checks; exiting without launching workers",
+    );
+    return;
   }
 
   console.log(
