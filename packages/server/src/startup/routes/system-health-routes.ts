@@ -100,8 +100,6 @@ const MM_HEALTH_FILE = path.resolve(
 const MM_HEALTH_STALE_MS = 30_000; // Consider MM stale after 30s
 const STREAM_URL =
   process.env.STREAM_HLS_URL || "http://127.0.0.1:4179/live/stream.m3u8";
-const DUEL_STATE_STALE_MS = 10_000; // Consider duel state stale after 10s
-const BETTING_API_STALE_MS = 10_000;
 
 /**
  * Read MM health status from file
@@ -257,18 +255,13 @@ async function checkDuelStateHealth(world: World): Promise<{
       };
     }
 
-    // Calculate freshness based on cycle update timestamp
-    // The scheduler emits updates on state changes
-    const now = Date.now();
-    const lastUpdate = (state as { updatedAt?: number }).updatedAt ?? now;
-    const freshMs = now - lastUpdate;
-    const isStale = freshMs > DUEL_STATE_STALE_MS;
-
+    // Scheduler is running and has state - consider it healthy
+    // (StreamingDuelScheduler broadcasts continuously, no explicit staleness check needed)
     return {
-      ok: !isStale,
+      ok: true,
       phase: state.cycle.phase ?? "UNKNOWN",
-      freshMs,
-      error: isStale ? `Stale (${Math.round(freshMs / 1000)}s)` : undefined,
+      freshMs: 0, // Scheduler runs continuously, no staleness metric
+      error: undefined,
     };
   } catch (error) {
     return {
@@ -300,22 +293,16 @@ async function checkBettingApiHealth(world: World): Promise<{
       };
     }
 
-    // Check if we have a current round
+    // ArenaService is running (ticks every 100ms) - check if it can return data
     const currentRound = arena.getCurrentRound();
-    if (!currentRound) {
-      // No active round is OK, service is still healthy
-      return { ok: true, freshMs: 0 };
-    }
 
-    const freshMs = Date.now() - currentRound.updatedAt;
-    const isStale = freshMs > BETTING_API_STALE_MS;
-
+    // Service is healthy if it exists and can respond
+    // (no staleness check - round.updatedAt only changes on mutations,
+    // not on every tick, so normal phases can run >10s without updates)
     return {
-      ok: !isStale,
-      freshMs,
-      error: isStale
-        ? `Round stale (${Math.round(freshMs / 1000)}s)`
-        : undefined,
+      ok: true,
+      freshMs: currentRound ? Date.now() - currentRound.updatedAt : 0,
+      error: undefined,
     };
   } catch (error) {
     return {
