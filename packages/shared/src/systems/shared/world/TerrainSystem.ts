@@ -118,6 +118,8 @@ import {
   isTerrainComputeAvailable,
   type GPURoadSegment,
 } from "../../../utils/compute";
+import { TerrainVisualManager } from "./TerrainVisualManager";
+import type { ChunkTerrainProvider } from "./TerrainQuadChunkGenerator";
 
 // Road influence blending - used for shader's roadInfluence attribute
 const ROAD_BLEND_WIDTH = 0.5; // Extra blend distance beyond road width (meters)
@@ -248,6 +250,9 @@ export class TerrainSystem extends System {
   // GPU compute context for accelerated terrain operations
   private terrainComputeContext: TerrainComputeContext | null = null;
   private gpuComputeAvailable = false;
+
+  // Quad-tree LOD visual manager (client-only, when CONFIG.USE_QUADTREE_LOD is true)
+  private quadTreeVisualManager: TerrainVisualManager | null = null;
 
   // Unified terrain generator from @hyperscape/procgen
   // Provides deterministic height/biome calculation independent of rendering
@@ -1066,8 +1071,8 @@ export class TerrainSystem extends System {
       tile.collider = physics.addActor(actor, handle);
     }
 
-    // Add to scene
-    if (this.terrainContainer) {
+    // Add to scene (skip when quad-tree LOD handles visual rendering)
+    if (this.terrainContainer && !this.CONFIG.USE_QUADTREE_LOD) {
       this.terrainContainer.add(mesh);
     }
 
@@ -1426,6 +1431,18 @@ export class TerrainSystem extends System {
     // Web Worker settings for parallel terrain generation
     USE_WORKERS: true, // Enable web workers for heightmap generation (client-side only)
     WORKER_POOL_SIZE: 0, // Number of workers (0 = auto, based on CPU cores)
+
+    // Quad-tree LOD system (client-only visual terrain)
+    // When enabled, terrain rendering uses a quad-tree with variable resolution
+    // chunks instead of the flat 100m grid. Gameplay logic (resources, physics,
+    // biomes, server sync) still uses the flat grid. getHeightAt() is unaffected.
+    USE_QUADTREE_LOD: false,
+    QUADTREE_DEBUG_WIREFRAME: false,
+    QUADTREE_MIN_SIZE: 50,
+    QUADTREE_MAX_DEPTH: 4,
+    QUADTREE_SPLIT_RATIO: 1.5,
+    QUADTREE_SKIRT_DROP: 15,
+    QUADTREE_RESOLUTIONS: [16, 24, 32, 48, 64],
   };
 
   // Pre-computed terrain data from workers (awaiting geometry creation)
@@ -1719,10 +1736,107 @@ export class TerrainSystem extends System {
     this.instancedMeshManager = new InstancedMeshManager(scene, this.world);
     this.registerInstancedMeshes();
 
+    // Initialize quad-tree LOD visual manager if enabled
+    if (this.CONFIG.USE_QUADTREE_LOD) {
+      this.initQuadTreeVisualManager();
+    }
+
     // Setup initial camera only if no client camera system controls it
     // Leave control to ClientCameraSystem for third-person follow
 
     // Initial tiles will be loaded in start() method
+  }
+
+  /**
+   * Build the ChunkTerrainProvider adapter that exposes TerrainSystem's
+   * height/biome/road queries to the quad-tree chunk generator.
+   */
+  private buildChunkTerrainProvider(): ChunkTerrainProvider {
+    const biomeColorCache = new Map<
+      string,
+      { r: number; g: number; b: number }
+    >();
+
+    return {
+      getHeightAtComputed: (worldX: number, worldZ: number) =>
+        this.getHeightAtComputed(worldX, worldZ),
+
+      computeBiomeWeightsAtPosition: (worldX: number, worldZ: number) =>
+        this.computeBiomeWeightsAtPosition(worldX, worldZ),
+
+      calculateRoadInfluenceAtVertex: (
+        worldX: number,
+        worldZ: number,
+        tileX: number,
+        tileZ: number,
+      ) => this.calculateRoadInfluenceAtVertex(worldX, worldZ, tileX, tileZ),
+
+      getBiomeId: (biomeName: string) => this.getBiomeId(biomeName),
+
+      getBiomeColor: (biomeName: string) => {
+        let cached = biomeColorCache.get(biomeName);
+        if (!cached) {
+          const biomeData = BIOMES[biomeName];
+          if (biomeData) {
+            const c = new THREE.Color(biomeData.color);
+            cached = { r: c.r, g: c.g, b: c.b };
+          } else {
+            cached = { r: 0.3, g: 0.55, b: 0.15 };
+          }
+          biomeColorCache.set(biomeName, cached);
+        }
+        return cached;
+      },
+
+      getFlatZoneAt: (worldX: number, worldZ: number) =>
+        this.getFlatZoneAt(worldX, worldZ),
+
+      WATER_LEVEL_NORMALIZED: this.CONFIG.WATER_LEVEL_NORMALIZED,
+      SHORELINE_THRESHOLD: this.CONFIG.SHORELINE_THRESHOLD,
+      SHORELINE_STRENGTH: this.CONFIG.SHORELINE_STRENGTH,
+      MAX_HEIGHT: this.CONFIG.MAX_HEIGHT,
+      TILE_SIZE: this.CONFIG.TILE_SIZE,
+    };
+  }
+
+  /**
+   * Initialize the quad-tree LOD visual manager.
+   * Creates a separate THREE.Group for quad-tree terrain meshes.
+   */
+  private initQuadTreeVisualManager(): void {
+    if (!this.terrainMaterial) {
+      console.warn(
+        "[TerrainSystem] Cannot init quad-tree: terrain material not ready",
+      );
+      return;
+    }
+
+    // Create a separate container for quad-tree terrain
+    const qtContainer = new THREE.Group();
+    qtContainer.name = "QuadTreeTerrainContainer";
+    this.terrainContainer.parent!.add(qtContainer);
+
+    const provider = this.buildChunkTerrainProvider();
+
+    this.quadTreeVisualManager = new TerrainVisualManager(
+      {
+        minSize: this.CONFIG.QUADTREE_MIN_SIZE,
+        maxDepth: this.CONFIG.QUADTREE_MAX_DEPTH,
+        splitRatio: this.CONFIG.QUADTREE_SPLIT_RATIO,
+        resolutionByDepth: this.CONFIG.QUADTREE_RESOLUTIONS,
+        skirtDrop: this.CONFIG.QUADTREE_SKIRT_DROP,
+      },
+      provider,
+      qtContainer,
+      this.terrainMaterial,
+      this.CONFIG.QUADTREE_DEBUG_WIREFRAME,
+    );
+
+    console.log(
+      "[TerrainSystem] Quad-tree LOD visual manager initialized " +
+        `(minSize=${this.CONFIG.QUADTREE_MIN_SIZE}, maxDepth=${this.CONFIG.QUADTREE_MAX_DEPTH}, ` +
+        `splitRatio=${this.CONFIG.QUADTREE_SPLIT_RATIO})`,
+    );
   }
 
   private registerInstancedMeshes(): void {
@@ -2212,8 +2326,8 @@ export class TerrainSystem extends System {
       tile.collider = physics.addActor(actor, handle);
     }
 
-    // Add to scene if client-side
-    if (this.terrainContainer) {
+    // Add to scene if client-side (skip when quad-tree LOD handles visual rendering)
+    if (this.terrainContainer && !this.CONFIG.USE_QUADTREE_LOD) {
       this.terrainContainer.add(mesh);
     }
 
@@ -5030,6 +5144,15 @@ export class TerrainSystem extends System {
       this.processResourceInstanceQueue();
     }
 
+    // Update quad-tree LOD visual manager (client only)
+    if (this.runtimeIsClient && this.quadTreeVisualManager) {
+      const centers = this.getTerrainCenters();
+      if (centers.length > 0) {
+        const pos = centers[0].position;
+        this.quadTreeVisualManager.update(pos.x, pos.z);
+      }
+    }
+
     // Update instance visibility on client based on player position
     if (this.runtimeIsClient && this.instancedMeshManager) {
       this.instancedMeshManager.updateAllInstanceVisibility();
@@ -5584,7 +5707,16 @@ export class TerrainSystem extends System {
 
     // waterMesh is null if no underwater areas exist
     if (waterMesh && tile.mesh) {
-      tile.mesh.add(waterMesh);
+      if (this.CONFIG.USE_QUADTREE_LOD && this.terrainContainer) {
+        // Quad-tree LOD doesn't add tile.mesh to the scene, so parent the
+        // water mesh directly to terrainContainer with the tile's world pos.
+        // Preserve Y (water level) already set by WaterSystem.generateWaterMesh.
+        waterMesh.position.x = tile.x * this.CONFIG.TILE_SIZE;
+        waterMesh.position.z = tile.z * this.CONFIG.TILE_SIZE;
+        this.terrainContainer.add(waterMesh);
+      } else {
+        tile.mesh.add(waterMesh);
+      }
       tile.waterMeshes.push(waterMesh);
     }
   }
@@ -6213,6 +6345,12 @@ export class TerrainSystem extends System {
   }
 
   destroy(): void {
+    // Dispose quad-tree visual manager
+    if (this.quadTreeVisualManager) {
+      this.quadTreeVisualManager.dispose();
+      this.quadTreeVisualManager = null;
+    }
+
     // Terminate terrain worker pool to free resources
     terminateTerrainWorkerPool();
 
@@ -6815,6 +6953,11 @@ export class TerrainSystem extends System {
     lastSerializationTime: number;
     nextSerializationIn: number;
     worldStateVersion: number;
+    quadTreeLOD?: {
+      totalNodes: number;
+      visualChunks: number;
+      pendingQueue: number;
+    };
   } {
     return {
       totalChunks: this.terrainTiles.size,
@@ -6825,6 +6968,7 @@ export class TerrainSystem extends System {
       nextSerializationIn:
         this.serializationInterval - (Date.now() - this.lastSerializationTime),
       worldStateVersion: this.worldStateVersion,
+      quadTreeLOD: this.quadTreeVisualManager?.getStats(),
     };
   }
 
