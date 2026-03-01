@@ -157,7 +157,7 @@ export function populateKnownLocationsFromWorldMap(
   if (fishingPos) setKnownLocationPosition("fishing", fishingPos);
 
   const minePos =
-    firstResourcePos(["mine", "rock"]) ??
+    firstResourcePos(["ore", "mining_rock", "mine", "rock"]) ??
     findCandidate(["mine", "mining", "ore", "quarry"]);
   if (minePos) setKnownLocationPosition("mine", minePos);
 

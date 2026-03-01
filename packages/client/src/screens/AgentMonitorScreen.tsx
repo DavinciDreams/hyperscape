@@ -32,6 +32,15 @@ import {
   ClipboardList,
   MessageCircle,
   Gauge,
+  TreePine,
+  Pickaxe,
+  Fish,
+  Hammer,
+  Navigation,
+  Landmark,
+  Flame,
+  ScrollText,
+  type LucideIcon,
 } from "lucide-react";
 import "./AgentMonitorScreen.css";
 
@@ -1543,6 +1552,74 @@ const DECISION_PATH_ORDER: DecisionPath[] = [
 const RF_PRO_OPTIONS = { hideAttribution: true };
 const RF_FIT_VIEW_OPTIONS = { padding: 0.15 };
 
+// ─── Action Category Visuals ──────────────────────────────────────────────
+// Maps action names → visual category (color, icon, short label)
+
+type ActionCategory = {
+  color: string;
+  icon: LucideIcon;
+  label: string;
+};
+
+const ACTION_CATEGORIES: Record<string, ActionCategory> = {
+  // Navigation
+  EXPLORE: { color: "#38bdf8", icon: Compass, label: "Exploring" },
+  NAVIGATE_TO: { color: "#38bdf8", icon: Navigation, label: "Navigating" },
+  MOVE_TO: { color: "#38bdf8", icon: Navigation, label: "Moving" },
+  APPROACH_ENTITY: { color: "#38bdf8", icon: Navigation, label: "Approaching" },
+  FOLLOW_ENTITY: { color: "#38bdf8", icon: Navigation, label: "Following" },
+  HOME_TELEPORT: { color: "#38bdf8", icon: Navigation, label: "Teleporting" },
+  // Combat
+  ATTACK_ENTITY: { color: "#ef4444", icon: Swords, label: "Fighting" },
+  ATTACK_TARGET: { color: "#ef4444", icon: Swords, label: "Fighting" },
+  FLEE: { color: "#ef4444", icon: Swords, label: "Fleeing" },
+  // Gathering
+  MINE_ROCK: { color: "#a78bfa", icon: Pickaxe, label: "Mining" },
+  CHOP_TREE: { color: "#4ade80", icon: TreePine, label: "Woodcutting" },
+  CATCH_FISH: { color: "#22d3ee", icon: Fish, label: "Fishing" },
+  // Crafting
+  COOK_FOOD: { color: "#fb923c", icon: Flame, label: "Cooking" },
+  LIGHT_FIRE: { color: "#fb923c", icon: Flame, label: "Firemaking" },
+  SMELT_ORE: { color: "#fb923c", icon: Hammer, label: "Smelting" },
+  SMITH_ITEM: { color: "#fb923c", icon: Hammer, label: "Smithing" },
+  FLETCH_ITEM: { color: "#fb923c", icon: Hammer, label: "Fletching" },
+  RUNECRAFT: { color: "#c084fc", icon: Sparkles, label: "Runecrafting" },
+  // Banking
+  BANK_DEPOSIT: { color: "#fbbf24", icon: Landmark, label: "Banking" },
+  BANK_WITHDRAW: { color: "#fbbf24", icon: Landmark, label: "Banking" },
+  BANK_DEPOSIT_ALL: { color: "#fbbf24", icon: Landmark, label: "Banking" },
+  // Commerce
+  BUY_ITEM: { color: "#34d399", icon: Package, label: "Shopping" },
+  SELL_ITEM: { color: "#34d399", icon: Package, label: "Selling" },
+  // Quest / NPC
+  TALK_TO_NPC: { color: "#818cf8", icon: ScrollText, label: "Talking" },
+  ACCEPT_QUEST: { color: "#818cf8", icon: ScrollText, label: "Quest" },
+  COMPLETE_QUEST: { color: "#818cf8", icon: Trophy, label: "Quest Done" },
+  // Social
+  GREET_PLAYER: { color: "#f472b6", icon: MessageCircle, label: "Social" },
+  CHAT_MESSAGE: { color: "#f472b6", icon: MessageCircle, label: "Chatting" },
+  // Items
+  EQUIP_ITEM: { color: "#94a3b8", icon: Shield, label: "Equipping" },
+  USE_ITEM: { color: "#94a3b8", icon: Package, label: "Using Item" },
+  PICKUP_ITEM: { color: "#94a3b8", icon: Package, label: "Looting" },
+};
+
+const DEFAULT_ACTION_CATEGORY: ActionCategory = {
+  color: "#6b7280",
+  icon: Play,
+  label: "Acting",
+};
+
+/** Extract the action name (e.g. "MINE_ROCK") from a thought content string */
+function extractActionName(content: string): string {
+  // Thought content formats: "MINE_ROCK", "MINE_ROCK: mining copper...", "Executing MINE_ROCK"
+  const upper = content.toUpperCase();
+  for (const key of Object.keys(ACTION_CATEGORIES)) {
+    if (upper.includes(key)) return key;
+  }
+  return "";
+}
+
 // ─── Pipeline Node ─────────────────────────────────────────────────────────
 
 type PipelineNodeData = {
@@ -1568,6 +1645,9 @@ type PipelineNodeData = {
   goalType: string;
   goalProgress: number;
   goalTarget: number;
+  // Action executor specific — current action category visuals
+  actionName: string;
+  actionColor: string;
 };
 
 type PipelineNodeType = Node<PipelineNodeData, "pipeline">;
@@ -1608,14 +1688,20 @@ function PipelineNode({ data }: NodeProps<PipelineNodeType>) {
     data;
   const activeClass = active ? `active active-${cssSuffix}` : "";
 
+  // For the action node, use the action category color when available
+  const effectiveColor =
+    active && nodeType === "action" && data.actionColor
+      ? data.actionColor
+      : pathColor;
+
   const accentStyle: React.CSSProperties = {};
   if (active) {
     if (role === "entry") {
-      accentStyle.borderLeftColor = pathColor;
+      accentStyle.borderLeftColor = effectiveColor;
     } else {
-      accentStyle.borderTopColor = pathColor;
+      accentStyle.borderTopColor = effectiveColor;
     }
-    accentStyle.boxShadow = `0 0 20px ${pathColor}40, 0 0 40px ${pathColor}15`;
+    accentStyle.boxShadow = `0 0 20px ${effectiveColor}40, 0 0 40px ${effectiveColor}15`;
   }
 
   return (
@@ -1650,14 +1736,16 @@ function PipelineNode({ data }: NodeProps<PipelineNodeType>) {
 
       <div
         className="pn-divider"
-        style={active ? { background: `${pathColor}30` } : undefined}
+        style={active ? { background: `${effectiveColor}30` } : undefined}
       />
 
       <div className="pn-body">
         <PipelineNodeBody data={data} />
       </div>
 
-      {active && <div className="pn-pulse" style={{ background: pathColor }} />}
+      {active && (
+        <div className="pn-pulse" style={{ background: effectiveColor }} />
+      )}
 
       {/* Source handles */}
       {nodeType === "survival" && (
@@ -1735,7 +1823,6 @@ function PipelineNodeBody({ data }: { data: PipelineNodeData }) {
       );
     }
     case "short-circuit":
-    case "action":
     case "llm":
       return (
         <div className={`pn-thought ${active ? "active" : ""}`}>
@@ -1746,6 +1833,35 @@ function PipelineNodeBody({ data }: { data: PipelineNodeData }) {
           )}
         </div>
       );
+    case "action": {
+      const cat = ACTION_CATEGORIES[data.actionName] ?? DEFAULT_ACTION_CATEGORY;
+      const ActionIcon = cat.icon;
+      const hasAction = !!data.actionName;
+      return (
+        <div className="pn-action-body">
+          {hasAction && (
+            <div
+              className={`pn-action-badge ${active ? "active" : ""}`}
+              style={{
+                borderColor: `${cat.color}60`,
+                background: `${cat.color}18`,
+                color: cat.color,
+              }}
+            >
+              <ActionIcon size={12} strokeWidth={2} />
+              <span>{cat.label}</span>
+            </div>
+          )}
+          <div className={`pn-thought ${active ? "active" : ""}`}>
+            {data.thoughtText ? (
+              `"${data.thoughtText}"`
+            ) : (
+              <span className="pn-idle">Waiting...</span>
+            )}
+          </div>
+        </div>
+      );
+    }
     case "providers":
       return (
         <div className="pn-pills">
@@ -2021,6 +2137,8 @@ function PipelineTab({ agent }: { agent: AgentData }) {
     goalType: "",
     goalProgress: 0,
     goalTarget: 0,
+    actionName: "",
+    actionColor: "",
   };
 
   const nodeContent: Record<
@@ -2049,7 +2167,17 @@ function PipelineTab({ agent }: { agent: AgentData }) {
       ...empty,
       thoughtText: latestSC?.content.slice(0, 38) ?? "",
     },
-    action: { ...empty, thoughtText: latestAction?.content.slice(0, 45) ?? "" },
+    action: (() => {
+      const actionContent = latestAction?.content ?? "";
+      const actionName = extractActionName(actionContent);
+      const cat = ACTION_CATEGORIES[actionName] ?? DEFAULT_ACTION_CATEGORY;
+      return {
+        ...empty,
+        thoughtText: actionContent.slice(0, 45),
+        actionName,
+        actionColor: actionName ? cat.color : "",
+      };
+    })(),
     providers: {
       ...empty,
       providers: (latestLLM?.providers ?? []).slice(0, 5),

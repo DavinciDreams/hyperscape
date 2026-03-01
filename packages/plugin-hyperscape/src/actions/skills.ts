@@ -493,8 +493,12 @@ function isRock(e: Entity): boolean {
     return false;
   }
 
-  // Check for explicit rock/ore types
-  if (e.resourceType === "rock" || e.resourceType === "ore") {
+  // Check for explicit rock/ore types (server sends "mining_rock" for ore entities)
+  if (
+    e.resourceType === "rock" ||
+    e.resourceType === "ore" ||
+    e.resourceType === "mining_rock"
+  ) {
     return true;
   }
 

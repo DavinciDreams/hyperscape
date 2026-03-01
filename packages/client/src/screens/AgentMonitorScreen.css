@@ -1848,6 +1848,42 @@
   font-size: 10px;
 }
 
+/* ─── Content: Action Executor ─────────────────────────────────────────── */
+
+.pn-action-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pn-action-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid #333;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  width: fit-content;
+  transition: all 300ms;
+}
+
+.pn-action-badge.active {
+  animation: action-pulse 2s ease-in-out infinite;
+}
+
+@keyframes action-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
 /* ─── Content: Survival HP ──────────────────────────────────────────────── */
 
 .pn-survival {
