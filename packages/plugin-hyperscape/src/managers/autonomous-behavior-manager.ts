@@ -2992,7 +2992,9 @@ export class AutonomousBehaviorManager {
     const cooked = stageProgress?.[target] ?? 0;
     const needed = goal.questStageCount || 1;
 
-    // Step 2a: Check bank cache for raw materials
+    // Step 2a: Check bank cache for raw materials.
+    // No cooldown when bank cache CONFIRMS the item exists — the agent just
+    // deposited it, so we should always go withdraw.
     const bankItems = this.service?.getBankItems?.() || [];
     const bankItem = bankItems.find((b) => {
       const name = (b.name || b.itemId || "")
@@ -3001,16 +3003,18 @@ export class AutonomousBehaviorManager {
       return name.includes(requiredItemPattern!);
     });
 
-    if (bankItem && Date.now() - this.lastBankWithdrawalAttempt >= 60_000) {
-      // Bank cache confirms raw materials exist in bank — go withdraw them
+    if (bankItem) {
+      // Bank cache confirms raw materials exist — always go withdraw
       logger.info(
-        `[AutonomousBehavior] ${requiredItemPattern} found in bank cache — redirecting to withdraw`,
+        `[AutonomousBehavior] ${requiredItemPattern} found in bank cache (qty=${bankItem.quantity}) — redirecting to withdraw`,
       );
       const bankItemId =
         bankItem.itemId || bankItem.name || requiredItemPattern;
 
       this.lastBankWithdrawalAttempt = Date.now();
-      this.savedGoal = { ...goal };
+      if (!this.savedGoal) {
+        this.savedGoal = { ...goal };
+      }
       this.currentGoal = {
         type: "banking",
         description: `Withdraw ${requiredItemPattern} from bank for quest`,
@@ -3040,7 +3044,9 @@ export class AutonomousBehaviorManager {
       );
 
       this.lastBankWithdrawalAttempt = Date.now();
-      this.savedGoal = { ...goal };
+      if (!this.savedGoal) {
+        this.savedGoal = { ...goal };
+      }
       this.currentGoal = {
         type: "banking",
         description: `Withdraw ${requiredItemPattern} from bank for quest`,
@@ -3057,14 +3063,15 @@ export class AutonomousBehaviorManager {
       );
     }
 
-    // Step 2c: No raw materials in inventory, not in bank (or bank already checked).
-    // If cooking progress < needed, the agent burned too many — gather more.
+    // Step 2c: No raw materials in inventory, bank cache checked and doesn't
+    // have them either. If cooking progress < needed, the agent burned too
+    // many — gather more.  Save quest goal so it chains back after gathering.
     if (cooked < needed) {
       const stillNeeded = needed - cooked;
       const gatherType = this.questStageTargetToGoalType(target);
       if (gatherType) {
         logger.info(
-          `[AutonomousBehavior] Out of ${requiredItemPattern} (cooked ${cooked}/${needed}, burned some) — need to gather ${stillNeeded} more`,
+          `[AutonomousBehavior] Out of ${requiredItemPattern} (cooked ${cooked}/${needed}, burned some, not in bank) — need to gather ${stillNeeded} more`,
         );
 
         // Resolve actual resource position from worldMap to avoid stale KNOWN_LOCATIONS
@@ -3093,8 +3100,10 @@ export class AutonomousBehaviorManager {
           }
         }
 
-        // Don't save goal — planner will naturally chain back to the cooking
-        // quest when the agent has raw materials and the quest is still active.
+        // Save quest goal so the planner restores it after gathering completes
+        if (!this.savedGoal) {
+          this.savedGoal = { ...goal };
+        }
         this.currentGoal = {
           type: gatherType as CurrentGoal["type"],
           description: `Gather more ${requiredItemPattern} — burned too many (${cooked}/${needed} cooked)`,
