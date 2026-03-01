@@ -147,6 +147,36 @@ const TOOL_QUESTS: ToolQuest[] = [
   },
 ];
 
+/**
+ * Reorder tool quests based on personality traits.
+ * Aggressive agents prioritize weapons; adventurous agents get shuffled order.
+ */
+function sortToolQuestsForPersonality(
+  quests: ToolQuest[],
+  personality: PersonalityTraits,
+): ToolQuest[] {
+  const sorted = [...quests];
+  if (personality.aggression > 0.6) {
+    // Aggressive: weapon quest first
+    const weaponIdx = sorted.findIndex((tq) => tq.questId === "goblin_slayer");
+    if (weaponIdx > 0) {
+      const [weapon] = sorted.splice(weaponIdx, 1);
+      sorted.unshift(weapon);
+    }
+  } else if (personality.adventurousness > 0.7) {
+    // Adventurous: shuffle (seeded by traits for consistency)
+    const seed = Math.floor(
+      (personality.aggression + personality.patience) * 10000,
+    );
+    for (let i = sorted.length - 1; i > 0; i--) {
+      const x = Math.sin(seed + i) * 10000;
+      const j = Math.floor((x - Math.floor(x)) * (i + 1));
+      [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
+    }
+  }
+  return sorted;
+}
+
 /** Gathering skills used in desire building */
 const GATHERING_SKILLS: Array<{
   goalType: CurrentGoal["type"];
@@ -568,6 +598,12 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
   const personality = ctx.personality || DEFAULT_PERSONALITY;
   const goalHistory = ctx.goalHistory || [];
 
+  // Personality-driven quest ordering (aggressive → weapon first, adventurous → shuffled)
+  const orderedToolQuests = sortToolQuestsForPersonality(
+    TOOL_QUESTS,
+    personality,
+  );
+
   // ------------------------------------------------------------------
   // Guard: Don't make decisions if quest data hasn't loaded yet.
   // When the agent is missing tools and quests array is empty, the server
@@ -590,7 +626,7 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
   // ------------------------------------------------------------------
   // Phase 1 — Bootstrap: accept tool-granting quests
   // ------------------------------------------------------------------
-  for (const tq of TOOL_QUESTS) {
+  for (const tq of orderedToolQuests) {
     if (tq.hasIt(player)) continue; // already have this tool
 
     const quest = findQuest(quests, tq.questId);
@@ -642,7 +678,7 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
   // ------------------------------------------------------------------
   const bankNames = ctx.bankItemNames || [];
   if (bankNames.length > 0) {
-    for (const tq of TOOL_QUESTS) {
+    for (const tq of orderedToolQuests) {
       if (tq.hasIt(player)) continue;
 
       const toolInBank = TOOL_BANK_KEYWORDS[tq.questId]?.some((kw) =>
@@ -686,7 +722,7 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
   // ------------------------------------------------------------------
   // Phase 2.6 — Lost tools recovery (tool quest done but tool missing)
   // ------------------------------------------------------------------
-  for (const tq of TOOL_QUESTS) {
+  for (const tq of orderedToolQuests) {
     if (tq.hasIt(player)) continue;
 
     const quest = findQuest(quests, tq.questId);
@@ -697,14 +733,15 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
       if (coins >= 10) {
         return {
           goal: {
-            type: "questing",
-            description: `Buy replacement tool (lost ${tq.questId} reward) from shop`,
+            type: "shopping",
+            description: `Buy replacement tool at general store`,
             target: 1,
             progress: 0,
             startedAt: Date.now(),
             location: "spawn",
+            targetSkill: tq.questId,
           },
-          reason: `Tool lost after completing ${tq.questId} — has ${coins} coins, try shop`,
+          reason: `Tool lost after completing ${tq.questId} — has ${coins} coins, navigate to shop`,
         };
       }
       logger.info(
@@ -812,19 +849,26 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
     if (resources.length === 0) continue;
 
     candidates.push(
-      buildDesire(g.skillName, personality, goalHistory, player, () => ({
-        goal: {
-          type: g.goalType,
-          description: `Train ${g.skillName} (level ${level})`,
-          target: 1,
-          progress: 0,
-          startedAt: Date.now(),
-          location: g.location,
-          targetSkill: g.skillName,
-          targetSkillLevel: level + 1,
-        },
-        reason: `Desire-scored gathering → ${g.skillName} (level ${level})`,
-      })),
+      buildDesire(
+        g.skillName,
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: g.goalType,
+            description: `Train ${g.skillName} (level ${level})`,
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            location: g.location,
+            targetSkill: g.skillName,
+            targetSkillLevel: level + 1,
+          },
+          reason: `Desire-scored gathering → ${g.skillName} (level ${level})`,
+        }),
+        ctx.recentGoalCounts,
+      ),
     );
   }
 
@@ -841,38 +885,52 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
     const skill = pickCombatStyle(player);
 
     candidates.push(
-      buildDesire("combat_training", personality, goalHistory, player, () => ({
-        goal: {
-          type: "combat_training",
-          description: `Train ${skill} on ${monster.name}s`,
-          target: 1,
-          progress: 0,
-          startedAt: Date.now(),
-          location: monster.location,
-          targetSkill: skill,
-          targetSkillLevel: getSkillLevel(player, skill) + 1,
-          targetEntity: monster.id,
-        },
-        reason: `Combat level ${combatLevel} → ${monster.name} (lvl ${monster.level}), training ${skill}`,
-      })),
+      buildDesire(
+        "combat_training",
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: "combat_training",
+            description: `Train ${skill} on ${monster.name}s`,
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            location: monster.location,
+            targetSkill: skill,
+            targetSkillLevel: getSkillLevel(player, skill) + 1,
+            targetEntity: monster.id,
+          },
+          reason: `Combat level ${combatLevel} → ${monster.name} (lvl ${monster.level}), training ${skill}`,
+        }),
+        ctx.recentGoalCounts,
+      ),
     );
   }
 
   // --- Cooking desire ---
   if (hasRawFood(player) && hasTinderbox(player)) {
     candidates.push(
-      buildDesire("cooking", personality, goalHistory, player, () => ({
-        goal: {
-          type: "cooking",
-          description: "Cook raw food",
-          target: 1,
-          progress: 0,
-          startedAt: Date.now(),
-          targetSkill: "cooking",
-          targetSkillLevel: getSkillLevel(player, "cooking") + 1,
-        },
-        reason: "Has raw food → cook",
-      })),
+      buildDesire(
+        "cooking",
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: "cooking",
+            description: "Cook raw food",
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            targetSkill: "cooking",
+            targetSkillLevel: getSkillLevel(player, "cooking") + 1,
+          },
+          reason: "Has raw food → cook",
+        }),
+        ctx.recentGoalCounts,
+      ),
     );
   }
 
@@ -881,23 +939,30 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
     const smithLevel = getSkillLevel(player, "smithing");
     const playerHasBars = hasBars(player);
     candidates.push(
-      buildDesire("smithing", personality, goalHistory, player, () => ({
-        goal: {
-          type: "smithing",
-          description: playerHasBars
-            ? "Smith bars into items"
-            : "Smelt ore into bars",
-          target: 1,
-          progress: 0,
-          startedAt: Date.now(),
-          location: playerHasBars ? "anvil" : "furnace",
-          targetSkill: "smithing",
-          targetSkillLevel: smithLevel + 1,
-        },
-        reason: playerHasBars
-          ? "Has bars + inventory > 20 → smith"
-          : "Has ore + inventory > 20 → smelt",
-      })),
+      buildDesire(
+        "smithing",
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: "smithing",
+            description: playerHasBars
+              ? "Smith bars into items"
+              : "Smelt ore into bars",
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            location: playerHasBars ? "anvil" : "furnace",
+            targetSkill: "smithing",
+            targetSkillLevel: smithLevel + 1,
+          },
+          reason: playerHasBars
+            ? "Has bars + inventory > 20 → smith"
+            : "Has ore + inventory > 20 → smelt",
+        }),
+        ctx.recentGoalCounts,
+      ),
     );
   }
 
@@ -915,21 +980,28 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
     ) {
       const playerHasBars = hasBars(player);
       candidates.push(
-        buildDesire("gear_upgrade", personality, goalHistory, player, () => ({
-          goal: {
-            type: "smithing",
-            description: playerHasBars
-              ? `Smith ${bestTier.tierName} equipment`
-              : `Smelt ore for ${bestTier.tierName} gear`,
-            target: 1,
-            progress: 0,
-            startedAt: Date.now(),
-            location: playerHasBars ? "anvil" : "furnace",
-            targetSkill: "smithing",
-            targetSkillLevel: smithLevel + 1,
-          },
-          reason: `Gear upgrade → ${bestTier.tierName} (attack ${attackLevel}, smithing ${smithLevel})`,
-        })),
+        buildDesire(
+          "gear_upgrade",
+          personality,
+          goalHistory,
+          player,
+          () => ({
+            goal: {
+              type: "smithing",
+              description: playerHasBars
+                ? `Smith ${bestTier.tierName} equipment`
+                : `Smelt ore for ${bestTier.tierName} gear`,
+              target: 1,
+              progress: 0,
+              startedAt: Date.now(),
+              location: playerHasBars ? "anvil" : "furnace",
+              targetSkill: "smithing",
+              targetSkillLevel: smithLevel + 1,
+            },
+            reason: `Gear upgrade → ${bestTier.tierName} (attack ${attackLevel}, smithing ${smithLevel})`,
+          }),
+          ctx.recentGoalCounts,
+        ),
       );
     }
   }
@@ -941,34 +1013,48 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
     hasFishingEquipment(player)
   ) {
     candidates.push(
-      buildDesire("combat_food_prep", personality, goalHistory, player, () => ({
-        goal: {
-          type: "fishing",
-          description: "Fish for food before combat",
-          target: 1,
-          progress: 0,
-          startedAt: Date.now(),
-          location: "fishing",
-          targetSkill: "fishing",
-          targetSkillLevel: getSkillLevel(player, "fishing") + 1,
-        },
-        reason: `Food count ${countFood(player)} < ${COMBAT_FOOD_THRESHOLD} → fish for food`,
-      })),
+      buildDesire(
+        "combat_food_prep",
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: "fishing",
+            description: "Fish for food before combat",
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            location: "fishing",
+            targetSkill: "fishing",
+            targetSkillLevel: getSkillLevel(player, "fishing") + 1,
+          },
+          reason: `Food count ${countFood(player)} < ${COMBAT_FOOD_THRESHOLD} → fish for food`,
+        }),
+        ctx.recentGoalCounts,
+      ),
     );
   }
 
   // --- Exploration desire (always available as fallback) ---
   candidates.push(
-    buildDesire("exploration", personality, goalHistory, player, () => ({
-      goal: {
-        type: "exploration",
-        description: "Explore the world",
-        target: 3,
-        progress: 0,
-        startedAt: Date.now(),
-      },
-      reason: "Exploration desire",
-    })),
+    buildDesire(
+      "exploration",
+      personality,
+      goalHistory,
+      player,
+      () => ({
+        goal: {
+          type: "exploration",
+          description: "Explore the world",
+          target: 3,
+          progress: 0,
+          startedAt: Date.now(),
+        },
+        reason: "Exploration desire",
+      }),
+      ctx.recentGoalCounts,
+    ),
   );
 
   // --- Score and sort candidates ---
@@ -1001,16 +1087,35 @@ function buildDesire(
   goalHistory: Array<{ type: string; skill?: string; completedAt: number }>,
   player: PlayerEntity,
   buildGoal: () => GoalPlan,
+  recentGoalCounts?: Record<string, number>,
 ): DesireCandidate {
   const baseWeight = DESIRE_BASE_WEIGHTS[id] ?? 20;
   const personalityMul = computePersonalityMul(id, personality);
   const satiation = computeSatiation(id, goalHistory, personality.patience);
   const opportunityBonus = computeOpportunityBonus(id, player);
   const duelPrepBonus = computeDuelPrepBonus(id, player);
-  // Duel-prep bonus is additive to base weight, then scaled by personality/satiation/opportunity
+
+  // Activity variety multiplier — penalize over-represented goal types
+  let varietyMul = 1.0;
+  if (recentGoalCounts) {
+    const myCount = recentGoalCounts[id] ?? 0;
+    const totalGoals = Object.values(recentGoalCounts).reduce(
+      (sum, v) => sum + v,
+      0,
+    );
+    if (totalGoals > 0) {
+      varietyMul = Math.max(0.7, 1.3 - (myCount / totalGoals) * 0.6);
+    }
+  }
+
+  // Duel-prep bonus is additive to base weight, then scaled by personality/satiation/opportunity/variety
   const effectiveBase = baseWeight + duelPrepBonus;
   const score =
-    effectiveBase * personalityMul * (1 - satiation) * opportunityBonus;
+    effectiveBase *
+    personalityMul *
+    (1 - satiation) *
+    opportunityBonus *
+    varietyMul;
 
   return {
     id,

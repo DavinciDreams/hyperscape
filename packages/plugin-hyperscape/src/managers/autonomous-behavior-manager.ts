@@ -104,6 +104,7 @@ import {
 } from "./goal-progression-planner.js";
 import { getPersonalityTraits } from "../providers/personalityProvider.js";
 import { getTimeSinceLastSocial } from "../providers/socialMemory.js";
+import { assessSurvival } from "../evaluators/index.js";
 
 // Food item keywords for detecting cooking targets in quest stages
 const COOKABLE_TARGETS = [
@@ -129,6 +130,8 @@ function isCookableTarget(target: string): boolean {
 const DEFAULT_TICK_INTERVAL = 5000; // 5 seconds between decisions
 const MIN_TICK_INTERVAL = 2000; // Minimum 2 seconds (fast-tick mode)
 const MAX_TICK_INTERVAL = 15000; // Maximum 15 seconds
+const LLM_TIMEOUT_MS = 2000; // Abort LLM call if no response within 2s
+const COMBAT_TICK_INTERVAL = 1000; // 1s ticks during active combat
 
 type AutonomyMode = "llm" | "scripted";
 type ScriptedRole =
@@ -164,7 +167,8 @@ export interface CurrentGoal {
     | "idle"
     | "user_command"
     | "questing"
-    | "banking";
+    | "banking"
+    | "shopping";
   description: string;
   target: number;
   progress: number;
@@ -231,6 +235,10 @@ export class AutonomousBehaviorManager {
   private lastFailedAction: string | null = null;
   private readonly MAX_CONSECUTIVE_FAILURES = 5;
 
+  /** Cooldown for goal types that hit MAX_CONSECUTIVE_FAILURES — prevents immediate retry loops */
+  private failedGoalCooldowns: Map<string, number> = new Map();
+  private readonly FAILED_GOAL_COOLDOWN_MS = 60_000;
+
   /**
    * Target locking for combat - prevents switching targets mid-fight
    * Agent should finish killing current target before switching to another
@@ -254,8 +262,9 @@ export class AutonomousBehaviorManager {
   private reactiveCombatStartTime: number = 0;
   private readonly REACTIVE_COMBAT_MAX_MS = 15000; // 15s max reactive fight
 
-  /** Saved goal before duel interruption — restored after duel completion */
-  private savedGoal: CurrentGoal | null = null;
+  /** Goal stack — nested interruptions (banking, combat, duel) push here, pop on completion */
+  private goalStack: CurrentGoal[] = [];
+  private readonly MAX_GOAL_STACK_DEPTH = 3;
   /** Cooldown to prevent infinite bank withdrawal loops */
   private lastBankWithdrawalAttempt = 0;
   /** Prevents duplicate async bank withdrawal calls */
@@ -310,10 +319,32 @@ export class AutonomousBehaviorManager {
   } | null = null;
   private readonly ACTION_LOCK_MAX_MS = 20000; // Safety: max 20s lock
 
-  /** Last executed action — used in prompt for continuity */
-  private lastActionName: string | null = null;
-  private lastActionResult: "success" | "failure" | null = null;
-  private lastActionTime: number = 0;
+  /** Ring buffer of last 3 actions — used in LLM prompt for continuity and retry detection */
+  private actionRing: Array<{
+    action: string;
+    result: "success" | "failure";
+    timestamp: number;
+  }> = [];
+  private readonly ACTION_RING_MAX = 3;
+
+  /** Backward-compatible getter: most recent action name */
+  private get lastActionName(): string | null {
+    return this.actionRing.length > 0
+      ? this.actionRing[this.actionRing.length - 1].action
+      : null;
+  }
+  /** Backward-compatible getter: most recent action result */
+  private get lastActionResult(): "success" | "failure" | null {
+    return this.actionRing.length > 0
+      ? this.actionRing[this.actionRing.length - 1].result
+      : null;
+  }
+  /** Backward-compatible getter: most recent action timestamp */
+  private get lastActionTime(): number {
+    return this.actionRing.length > 0
+      ? this.actionRing[this.actionRing.length - 1].timestamp
+      : 0;
+  }
 
   /** Request a fast follow-up tick (2s instead of normal interval) */
   private nextTickFast = false;
@@ -500,6 +531,29 @@ export class AutonomousBehaviorManager {
     this.isRunning = false;
   }
 
+  /** Push current goal onto the stack (for later restoration). Drops oldest if over max depth. */
+  private pushGoal(goal: CurrentGoal): void {
+    if (this.goalStack.length >= this.MAX_GOAL_STACK_DEPTH) {
+      const dropped = this.goalStack.shift();
+      logger.warn(
+        `[AutonomousBehavior] Goal stack overflow — dropped oldest: ${dropped?.type}`,
+      );
+    }
+    this.goalStack.push({ ...goal });
+  }
+
+  /** Pop the most recent saved goal (LIFO). Returns null if stack is empty. */
+  private popGoal(): CurrentGoal | null {
+    return this.goalStack.pop() ?? null;
+  }
+
+  /** Peek at the top of the goal stack without removing it. */
+  private peekGoal(): CurrentGoal | null {
+    return this.goalStack.length > 0
+      ? this.goalStack[this.goalStack.length - 1]
+      : null;
+  }
+
   /**
    * Handle combat damage events for chat reactions
    */
@@ -600,10 +654,64 @@ export class AutonomousBehaviorManager {
     }
   }
 
+  /** Canned combat chat responses — used as fallback when LLM is unavailable */
+  private static readonly CANNED_COMBAT_CHAT: Record<string, string[]> = {
+    critical_hit_dealt: [
+      "That's gonna leave a mark!",
+      "Feel the power!",
+      "You're going down!",
+      "How'd you like that one?",
+      "Boom! Direct hit!",
+    ],
+    critical_hit_taken: [
+      "Ouch! Lucky shot!",
+      "Is that all you got?",
+      "This isn't over!",
+      "You'll pay for that!",
+      "Okay, now I'm mad!",
+    ],
+    near_death: [
+      "I'm not done yet!",
+      "Come on, one more hit...",
+      "Getting dangerous...",
+      "This is intense!",
+      "Need to focus...",
+    ],
+    victory_imminent: [
+      "Time to finish this!",
+      "Any last words?",
+      "GG!",
+      "Victory is mine!",
+      "Almost there!",
+    ],
+  };
+
   /**
-   * Get scripted chat response for combat reaction
+   * Build a short prompt for personality-driven combat chat.
    */
-  private getCombatChatResponse(reaction: {
+  private buildCombatChatPrompt(
+    reactionType: string,
+    opponentName: string,
+  ): string {
+    const traits = getPersonalityTraits(this.runtime);
+    const situation: Record<string, string> = {
+      critical_hit_dealt: `You just landed a massive hit on ${opponentName}!`,
+      critical_hit_taken: `${opponentName} just hit you really hard!`,
+      near_death: `You're almost dead fighting ${opponentName}!`,
+      victory_imminent: `${opponentName} is almost defeated!`,
+    };
+    return [
+      "You are an RPG character in combat.",
+      `Personality: ${traits.aggression > 0.6 ? "aggressive" : traits.patience > 0.6 ? "calm" : "balanced"}, ${traits.chattiness > 0.6 ? "talkative" : "reserved"}.`,
+      situation[reactionType] || `Fighting ${opponentName}.`,
+      "Say ONE short combat line (under 60 characters, no quotes, no emojis). Stay in character.",
+    ].join(" ");
+  }
+
+  /**
+   * Get combat chat response — tries LLM with 1s timeout, falls back to canned phrases.
+   */
+  private async getCombatChatResponse(reaction: {
     type:
       | "critical_hit_dealt"
       | "critical_hit_taken"
@@ -611,39 +719,36 @@ export class AutonomousBehaviorManager {
       | "victory_imminent";
     opponentName: string;
     timestamp: number;
-  }): string {
-    const responses: Record<typeof reaction.type, string[]> = {
-      critical_hit_dealt: [
-        "That's gonna leave a mark!",
-        "Feel the power!",
-        "You're going down!",
-        "How'd you like that one?",
-        "Boom! Direct hit!",
-      ],
-      critical_hit_taken: [
-        "Ouch! Lucky shot!",
-        "Is that all you got?",
-        "This isn't over!",
-        "You'll pay for that!",
-        "Okay, now I'm mad!",
-      ],
-      near_death: [
-        "I'm not done yet!",
-        "Come on, one more hit...",
-        "Getting dangerous...",
-        "This is intense!",
-        "Need to focus...",
-      ],
-      victory_imminent: [
-        "Time to finish this!",
-        "Any last words?",
-        "GG!",
-        "Victory is mine!",
-        "Almost there!",
-      ],
-    };
+  }): Promise<string> {
+    // Try LLM for personality-driven response
+    try {
+      const prompt = this.buildCombatChatPrompt(
+        reaction.type,
+        reaction.opponentName,
+      );
+      const response = await Promise.race([
+        this.runtime.useModel(ModelType.TEXT_SMALL, { prompt }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Combat chat LLM timeout")), 1000),
+        ),
+      ]);
 
-    const options = responses[reaction.type];
+      const text = (
+        typeof response === "string" ? response : String(response)
+      ).trim();
+      // Validate: non-empty, <100 chars, no newlines
+      if (text.length > 0 && text.length < 100 && !text.includes("\n")) {
+        // Strip surrounding quotes if present
+        return text.replace(/^["']|["']$/g, "");
+      }
+    } catch {
+      // Timeout or error — fall through to canned
+    }
+
+    // Fallback: canned random selection
+    const options = AutonomousBehaviorManager.CANNED_COMBAT_CHAT[
+      reaction.type
+    ] || ["..."];
     return options[Math.floor(Math.random() * options.length)];
   }
 
@@ -659,7 +764,7 @@ export class AutonomousBehaviorManager {
     this.pendingChatReaction = null;
 
     try {
-      const message = this.getCombatChatResponse(reaction);
+      const message = await this.getCombatChatResponse(reaction);
       if (message) {
         await this.service.executeChatMessage({ message });
         this.lastCombatChatAt = Date.now();
@@ -695,9 +800,12 @@ export class AutonomousBehaviorManager {
 
       // Calculate how long to wait until next tick
       const tickDuration = Date.now() - tickStart;
+      const inCombat = this.service?.getPlayerEntity()?.inCombat === true;
       const baseInterval = this.nextTickFast
         ? MIN_TICK_INTERVAL
-        : this.tickInterval;
+        : inCombat
+          ? COMBAT_TICK_INTERVAL
+          : this.tickInterval;
       this.nextTickFast = false; // Reset after use
       const sleepTime = Math.max(0, baseInterval - tickDuration);
 
@@ -728,9 +836,9 @@ export class AutonomousBehaviorManager {
         );
         this.duelPhase = null;
         this.duelModeEnteredAt = 0;
-        if (this.savedGoal) {
-          this.currentGoal = this.savedGoal;
-          this.savedGoal = null;
+        const restoredDuelTimeout = this.popGoal();
+        if (restoredDuelTimeout) {
+          this.currentGoal = restoredDuelTimeout;
         }
       }
     }
@@ -810,9 +918,9 @@ export class AutonomousBehaviorManager {
       inventoryCountForSave >= 25 &&
       this.currentGoal &&
       this.currentGoal.type !== "banking" &&
-      !this.savedGoal
+      this.goalStack.length === 0
     ) {
-      this.savedGoal = { ...this.currentGoal };
+      this.pushGoal(this.currentGoal);
     }
 
     // Process pending combat chat reaction (non-blocking)
@@ -839,6 +947,35 @@ export class AutonomousBehaviorManager {
           );
           await this.executeAction(socialAction, tickMessage, socialState);
           return;
+        }
+      }
+    }
+
+    // CURIOSITY INTERRUPTS — notice novel nearby entities
+    // 3-8% chance per tick (scaled by adventurousness). Injects context for LLM path.
+    if (this.currentGoal && !this.currentGoal.locked && this.service) {
+      const curiosityTraits = getPersonalityTraits(this.runtime);
+      const curiosityChance = 0.03 + curiosityTraits.adventurousness * 0.05;
+      if (Math.random() < curiosityChance) {
+        const nearbyEntities = this.service.getNearbyEntities() || [];
+        const currentTarget = this.currentGoal.targetEntity?.toLowerCase();
+        const novelEntity = nearbyEntities.find((e) => {
+          const eName = (e.name || "").toLowerCase();
+          const eType = (e.type || "").toLowerCase();
+          // Skip current target, banks, and generic resources
+          if (currentTarget && eName.includes(currentTarget)) return false;
+          if (eType === "bank" || eName.includes("bank")) return false;
+          // Interesting: NPCs not related to quest, other players
+          return eType === "npc" || eType === "player";
+        });
+        if (novelEntity) {
+          const novelName = novelEntity.name || novelEntity.type || "something";
+          logger.info(
+            `[AutonomousBehavior] Curiosity: noticed ${novelName} nearby`,
+          );
+          this.lastThinking = `Hmm, I notice ${novelName} nearby... interesting.`;
+          this.syncThinkingToDashboard(this.lastThinking);
+          // Don't override tick — just inject context for the LLM to consider
         }
       }
     }
@@ -927,28 +1064,12 @@ export class AutonomousBehaviorManager {
     // Step 2: Create internal "tick" message
     const tickMessage = this.createTickMessage();
 
-    // Step 3: Compose state (gathers context from all providers)
-    if (this.debug) logger.debug("[AutonomousBehavior] Composing state...");
-    const state = await this.runtime.composeState(tickMessage);
-
-    // Step 4: Run evaluators (assess the situation)
-    if (this.debug) logger.debug("[AutonomousBehavior] Running evaluators...");
-    const evaluatorResults = await this.runtime.evaluate(
-      tickMessage,
-      state,
-      false, // didRespond
-    );
-
-    if (this.debug && evaluatorResults && evaluatorResults.length > 0) {
-      logger.debug(
-        `[AutonomousBehavior] ${evaluatorResults.length} evaluators ran: ${evaluatorResults.map((e) => e.name).join(", ")}`,
-      );
-    }
-
-    // Step 5: Select and execute an action using the LLM
+    // Step 3-5: Select action — composeState is deferred to the LLM path inside selectAction
     if (this.debug) logger.debug("[AutonomousBehavior] Selecting action...");
 
-    let selectedAction = await this.selectAction(tickMessage, state);
+    const selectionResult = await this.selectAction(tickMessage);
+    let selectedAction = selectionResult?.action ?? null;
+    const state = selectionResult?.state ?? ({} as State);
 
     if (!selectedAction) {
       logger.info("[AutonomousBehavior] No action selected this tick");
@@ -1004,8 +1125,16 @@ export class AutonomousBehaviorManager {
       }
 
       if (this.consecutiveValidationFailures >= this.MAX_CONSECUTIVE_FAILURES) {
+        const cooldownKey =
+          this.currentGoal?.targetSkill ||
+          this.currentGoal?.type ||
+          selectedAction.name;
         logger.warn(
-          `[AutonomousBehavior] Action ${selectedAction.name} failed validation ${this.consecutiveValidationFailures} times — clearing goal to replan`,
+          `[AutonomousBehavior] Action ${selectedAction.name} failed validation ${this.consecutiveValidationFailures} times — cooling down "${cooldownKey}" for ${this.FAILED_GOAL_COOLDOWN_MS / 1000}s`,
+        );
+        this.failedGoalCooldowns.set(
+          cooldownKey,
+          Date.now() + this.FAILED_GOAL_COOLDOWN_MS,
         );
         this.consecutiveValidationFailures = 0;
         this.lastFailedAction = null;
@@ -1032,15 +1161,17 @@ export class AutonomousBehaviorManager {
   private lastThinking: string = "";
 
   /**
-   * Select an action using the LLM based on current state
-   * Now parses THINKING + ACTION format for genuine LLM reasoning
+   * Select an action using the LLM based on current state.
+   * composeState is deferred: only runs when the LLM path is taken (~10% of ticks).
+   * Returns both the selected action and the composed state (for validate/execute).
    */
   private async selectAction(
     message: Memory,
-    state: State,
-  ): Promise<Action | null> {
+  ): Promise<{ action: Action; state: State } | null> {
     if (this.autonomyMode === "scripted") {
-      return this.selectActionScripted(state);
+      const state = await this.runtime.composeState(message);
+      const action = this.selectActionScripted(state);
+      return action ? { action, state } : null;
     }
 
     // --- SHORT-CIRCUIT: Skip LLM for obvious decisions ---
@@ -1057,20 +1188,152 @@ export class AutonomousBehaviorManager {
       this.lastThinking = thought;
       this.syncThinkingToDashboard(thought);
 
-      return shortCircuit;
+      // Short-circuit path: compose state with minimal providers
+      // Most short-circuit actions only need game state + nearby entities
+      const state = await this.runtime.composeState(
+        message,
+        ["gameState", "nearbyEntities"],
+        true, // onlyInclude
+      );
+      return { action: shortCircuit, state };
+    }
+
+    // --- LLM PATH: compose state with providers scoped by situation ---
+    // Eliminates heavy providers (possibilitiesProvider ~24KB, goalTemplatesProvider ~30KB,
+    // socialMemory, localChat, duelProvider, availableActions) when a goal is already set.
+    const player = this.service?.getPlayerEntity();
+    const inCombat = player?.inCombat === true;
+    const goalType = this.currentGoal?.type;
+
+    let providerFilter: string[] | null = null; // null = all providers (LLM needs full context to pick a goal)
+    if (inCombat) {
+      providerFilter = [
+        "gameState",
+        "nearbyEntities",
+        "equipment",
+        "inventory",
+        "guardrails",
+      ];
+    } else if (goalType === "banking") {
+      providerFilter = ["gameState", "inventory", "nearbyEntities"];
+    } else if (
+      goalType === "woodcutting" ||
+      goalType === "mining" ||
+      goalType === "fishing"
+    ) {
+      providerFilter = [
+        "gameState",
+        "nearbyEntities",
+        "inventory",
+        "skills",
+        "quest",
+      ];
+    } else if (goalType === "questing") {
+      providerFilter = [
+        "gameState",
+        "nearbyEntities",
+        "quest",
+        "inventory",
+        "map",
+        "goal",
+      ];
+    } else if (goalType === "exploration") {
+      providerFilter = ["gameState", "nearbyEntities", "map", "quest"];
+    } else if (goalType) {
+      // Generic goal set — reasonable subset without heavy providers
+      providerFilter = [
+        "gameState",
+        "nearbyEntities",
+        "inventory",
+        "skills",
+        "equipment",
+        "quest",
+        "goal",
+        "guardrails",
+      ];
+    }
+
+    if (this.debug)
+      logger.debug("[AutonomousBehavior] Composing state (LLM path)...");
+    const state = providerFilter
+      ? await this.runtime.composeState(message, providerFilter, true)
+      : await this.runtime.composeState(message);
+
+    // Run evaluators on the LLM path only
+    if (this.debug) logger.debug("[AutonomousBehavior] Running evaluators...");
+    const evaluatorResults = await this.runtime.evaluate(
+      message,
+      state,
+      false, // didRespond
+    );
+
+    if (this.debug && evaluatorResults && evaluatorResults.length > 0) {
+      logger.debug(
+        `[AutonomousBehavior] ${evaluatorResults.length} evaluators ran: ${evaluatorResults.map((e) => e.name).join(", ")}`,
+      );
     }
 
     // Get available actions for autonomous behavior
     const availableActions = this.getAvailableActions();
 
+    // Fetch memories for LLM context — recent + situation-relevant
+    let recentMemorySummaries: string[] | undefined;
+    try {
+      // Build situation string from current goal for relevance scoring
+      const goal = this.currentGoal;
+      const situation = goal
+        ? `${goal.type} ${goal.description || ""} ${goal.targetSkill || ""}`
+        : "idle exploration";
+
+      // Fetch recent (last 5) and relevant (top 3 by keyword match) in parallel
+      const [recentMems, relevantMems] = await Promise.all([
+        this.runtime.getMemories({
+          roomId: message.roomId,
+          count: 5,
+          tableName: "messages",
+        }),
+        this.queryRelevantMemories(message.roomId, situation),
+      ]);
+
+      const recentTexts = recentMems
+        .map((m) => {
+          const text = m.content?.text || "";
+          const action = m.content?.action || "";
+          return action ? `${action}: ${text}` : text;
+        })
+        .filter((s) => s.length > 0);
+
+      // Deduplicate: relevant first, then recent, max 8
+      const seen = new Set<string>();
+      const combined: string[] = [];
+      for (const mem of [...relevantMems, ...recentTexts]) {
+        if (!seen.has(mem) && combined.length < 8) {
+          seen.add(mem);
+          combined.push(mem);
+        }
+      }
+      if (combined.length > 0) {
+        recentMemorySummaries = combined;
+      }
+    } catch {
+      // Memory retrieval is optional — don't block action selection
+    }
+
     // Build the action selection prompt (now asks for THINKING + ACTION)
-    const prompt = this.buildActionSelectionPrompt(state, availableActions);
+    const prompt = this.buildActionSelectionPrompt(
+      state,
+      availableActions,
+      recentMemorySummaries,
+    );
 
     try {
-      // Use the LLM to select an action - allow longer response for reasoning
-      const response = await this.runtime.useModel(ModelType.TEXT_SMALL, {
-        prompt,
-      });
+      // Use the LLM to select an action — abort if it takes longer than LLM_TIMEOUT_MS
+      const response = await Promise.race([
+        this.runtime.useModel(ModelType.TEXT_SMALL, { prompt }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("LLM timeout")), LLM_TIMEOUT_MS),
+        ),
+      ]);
 
       const responseText =
         typeof response === "string" ? response : String(response);
@@ -1115,7 +1378,7 @@ export class AutonomousBehaviorManager {
         this.lastThinking =
           "Could not determine action - exploring to find opportunities";
         this.syncThinkingToDashboard(this.lastThinking);
-        return exploreAction;
+        return { action: exploreAction, state };
       }
 
       // If goals are paused by user, block SET_GOAL and force IDLE
@@ -1133,10 +1396,10 @@ export class AutonomousBehaviorManager {
       );
 
       // Find the action object
-      const action = availableActions.find(
+      const foundAction = availableActions.find(
         (a) => a.name === selectedActionName,
       );
-      return action || exploreAction;
+      return { action: foundAction || exploreAction, state };
     } catch (error) {
       logger.error(
         "[AutonomousBehavior] Error selecting action:",
@@ -1155,7 +1418,7 @@ export class AutonomousBehaviorManager {
 
       this.lastThinking = "Error occurred - exploring as fallback";
       this.syncThinkingToDashboard(this.lastThinking);
-      return exploreAction;
+      return { action: exploreAction, state };
     }
   }
 
@@ -1624,6 +1887,38 @@ export class AutonomousBehaviorManager {
 
     const goal = this.currentGoal;
 
+    // 0-pre. Survival intelligence — assess threats before goal-based decisions
+    if (!player.inCombat && player.alive !== false) {
+      const nearbyEntities = this.service?.getNearbyEntities() || [];
+      const survival = assessSurvival(
+        { ...player, position: player.position as [number, number, number] },
+        nearbyEntities,
+      );
+
+      // Out-of-combat critical: flee from threats
+      if (survival.urgency === "critical" && survival.threatCount > 0) {
+        logger.warn(
+          `[AutonomousBehavior] Survival critical (${survival.healthPercent.toFixed(0)}% HP, ${survival.threatCount} threats) — fleeing`,
+        );
+        return (
+          this.getAvailableActions().find((a) => a.name === "FLEE") ||
+          fleeAction
+        );
+      }
+
+      // Out-of-combat warning: eat food proactively
+      if (survival.urgency === "warning" && hasAnyFood(player)) {
+        const foodItem = this.findFirstFoodItem(player);
+        if (foodItem && this.service) {
+          logger.info(
+            `[AutonomousBehavior] Survival warning (${survival.healthPercent.toFixed(0)}% HP) — eating ${foodItem.name}`,
+          );
+          this.service.executeUseItem({ itemId: foodItem.id }).catch(() => {});
+          this.nextTickFast = true;
+        }
+      }
+    }
+
     // 0a. HIGHEST PRIORITY: Gravestone recovery — if we died and see our gravestone, go loot it
     const gravestone = this.findOwnGravestone();
     if (gravestone) {
@@ -1809,7 +2104,7 @@ export class AutonomousBehaviorManager {
         logger.info(
           `[AutonomousBehavior] Goal "${goal.type}" tool is in bank — switching to banking to withdraw`,
         );
-        this.savedGoal = { ...goal };
+        this.pushGoal(goal);
         this.currentGoal = {
           type: "banking",
           description: `Withdraw ${goal.type} tool from bank`,
@@ -1907,9 +2202,7 @@ export class AutonomousBehaviorManager {
       if (this.reactiveCombatStartTime === 0) {
         // Just got attacked — start reactive timer, save goal
         this.reactiveCombatStartTime = now;
-        if (!this.savedGoal) {
-          this.savedGoal = { ...goal };
-        }
+        this.pushGoal(goal);
         logger.info(
           `[AutonomousBehavior] Reactive combat started — fighting back (max ${this.REACTIVE_COMBAT_MAX_MS / 1000}s)`,
         );
@@ -1930,9 +2223,9 @@ export class AutonomousBehaviorManager {
       // Exceeded reactive window — flee and restore goal
       logger.info("[AutonomousBehavior] Reactive combat timeout — fleeing");
       this.reactiveCombatStartTime = 0;
-      if (this.savedGoal) {
-        this.currentGoal = this.savedGoal;
-        this.savedGoal = null;
+      const restoredAfterFlee = this.popGoal();
+      if (restoredAfterFlee) {
+        this.currentGoal = restoredAfterFlee;
       }
       return this.getAvailableActions().find((a) => a.name === "FLEE") || null;
     }
@@ -1941,12 +2234,12 @@ export class AutonomousBehaviorManager {
     if (this.reactiveCombatStartTime !== 0) {
       this.reactiveCombatStartTime = 0;
       // Combat ended naturally — restore saved goal if we have one
-      if (this.savedGoal && goal.type !== this.savedGoal.type) {
+      const peekedGoal = this.peekGoal();
+      if (peekedGoal && goal.type !== peekedGoal.type) {
         logger.info(
           "[AutonomousBehavior] Reactive combat ended — restoring saved goal",
         );
-        this.currentGoal = this.savedGoal;
-        this.savedGoal = null;
+        this.currentGoal = this.popGoal()!;
         this.nextTickFast = true;
         return null;
       }
@@ -1956,9 +2249,7 @@ export class AutonomousBehaviorManager {
     const inventoryItems = Array.isArray(player.items) ? player.items : [];
     if (inventoryItems.length >= 28 && goal.type !== "banking") {
       // Save current goal and switch to banking
-      if (!this.savedGoal) {
-        this.savedGoal = { ...goal };
-      }
+      this.pushGoal(goal);
       this.currentGoal = {
         type: "banking",
         description: "Bank items — inventory is full",
@@ -2091,15 +2382,32 @@ export class AutonomousBehaviorManager {
         mining: "MINE_ROCK",
       };
       const expectedAction = repeatMap[goal.type];
-      if (expectedAction && this.lastActionName === expectedAction) {
-        // Boredom check — impatient agents switch activities
+      if (
+        expectedAction &&
+        this.actionRing.length > 0 &&
+        this.actionRing[this.actionRing.length - 1].action === expectedAction
+      ) {
+        // Boredom escalation — all agents switch eventually, impatient ones sooner
         const boredomTraits = getPersonalityTraits(this.runtime);
-        if (boredomTraits.patience < 0.5) {
-          const consecutive = this.countConsecutiveSameGoalType(goal.type);
-          const threshold = Math.floor(2 + boredomTraits.patience * 4); // 2-4 goals
-          if (consecutive >= threshold) {
+        const consecutive = this.countConsecutiveSameGoalType(goal.type);
+        const softThreshold = Math.floor(2 + boredomTraits.patience * 8); // impatient=2, patient=10
+        const HARD_THRESHOLD = 15; // ALL agents forced to switch
+        if (consecutive >= HARD_THRESHOLD) {
+          logger.info(
+            `[AutonomousBehavior] Boredom (hard): ${goal.type} ×${consecutive} — forced replan`,
+          );
+          this.clearGoal();
+          this.nextTickFast = true;
+          return null;
+        }
+        if (consecutive >= softThreshold) {
+          const switchChance = Math.min(
+            0.8,
+            (consecutive - softThreshold) * 0.15,
+          );
+          if (Math.random() < switchChance) {
             logger.info(
-              `[AutonomousBehavior] Boredom: ${goal.type} ×${consecutive} (threshold=${threshold}) — replanning`,
+              `[AutonomousBehavior] Boredom (soft): ${goal.type} ×${consecutive} (threshold=${softThreshold}, p=${(switchChance * 100).toFixed(0)}%) — replanning`,
             );
             this.clearGoal();
             this.nextTickFast = true;
@@ -2273,6 +2581,14 @@ export class AutonomousBehaviorManager {
           if (mine) return mine;
           break;
         }
+        case "shopping": {
+          // At shop → buy item. Not at shop → navigate there.
+          const arrivalAction = this.getGoalActionOnArrival(goal, player);
+          if (arrivalAction) return arrivalAction;
+          const navShop = find("NAVIGATE_TO");
+          if (navShop) return navShop;
+          break;
+        }
         default:
           break; // exploration, idle → let LLM decide
       }
@@ -2308,6 +2624,21 @@ export class AutonomousBehaviorManager {
     const plan = planNextGoal(ctx);
 
     if (plan) {
+      // Check if this goal type is on cooldown from repeated failures
+      const cooldownKey = plan.goal.targetSkill || plan.goal.type;
+      const cooldownExpiry = this.failedGoalCooldowns.get(cooldownKey);
+      if (cooldownExpiry && Date.now() < cooldownExpiry) {
+        const remainingSec = Math.round((cooldownExpiry - Date.now()) / 1000);
+        logger.info(
+          `[AutonomousBehavior] Planner goal "${cooldownKey}" on cooldown (${remainingSec}s left) — skipping`,
+        );
+        return false;
+      }
+      // Clear expired cooldown entry
+      if (cooldownExpiry) {
+        this.failedGoalCooldowns.delete(cooldownKey);
+      }
+
       logPlannerDecision(plan);
       this.setGoal(plan.goal);
       logger.info(
@@ -2379,12 +2710,12 @@ export class AutonomousBehaviorManager {
         logger.info("[AutonomousBehavior] Targeted withdrawal complete");
 
         // Restore saved quest goal
-        if (this.savedGoal) {
+        const restoredWithdraw = this.popGoal();
+        if (restoredWithdraw) {
           logger.info(
-            `[AutonomousBehavior] Restoring quest goal: ${this.savedGoal.type} — ${this.savedGoal.description}`,
+            `[AutonomousBehavior] Restoring quest goal: ${restoredWithdraw.type} — ${restoredWithdraw.description}`,
           );
-          this.currentGoal = this.savedGoal;
-          this.savedGoal = null;
+          this.currentGoal = restoredWithdraw;
         } else {
           this.clearGoal();
         }
@@ -2394,9 +2725,9 @@ export class AutonomousBehaviorManager {
           `[AutonomousBehavior] Targeted withdrawal failed: ${err instanceof Error ? err.message : String(err)}`,
         );
         // Restore goal anyway — let the system re-plan
-        if (this.savedGoal) {
-          this.currentGoal = this.savedGoal;
-          this.savedGoal = null;
+        const restoredWithdrawErr = this.popGoal();
+        if (restoredWithdrawErr) {
+          this.currentGoal = restoredWithdrawErr;
         }
         this.nextTickFast = true;
       } finally {
@@ -2702,6 +3033,8 @@ export class AutonomousBehaviorManager {
         return find("ATTACK_ENTITY");
       case "banking":
         return find("BANK_DEPOSIT_ALL");
+      case "shopping":
+        return find("BUY_ITEM");
       case "smithing":
         if (hasOre({ items: player.items } as PlayerEntity))
           return find("SMELT_ORE");
@@ -3012,9 +3345,7 @@ export class AutonomousBehaviorManager {
         bankItem.itemId || bankItem.name || requiredItemPattern;
 
       this.lastBankWithdrawalAttempt = Date.now();
-      if (!this.savedGoal) {
-        this.savedGoal = { ...goal };
-      }
+      this.pushGoal(goal);
       this.currentGoal = {
         type: "banking",
         description: `Withdraw ${requiredItemPattern} from bank for quest`,
@@ -3044,9 +3375,7 @@ export class AutonomousBehaviorManager {
       );
 
       this.lastBankWithdrawalAttempt = Date.now();
-      if (!this.savedGoal) {
-        this.savedGoal = { ...goal };
-      }
+      this.pushGoal(goal);
       this.currentGoal = {
         type: "banking",
         description: `Withdraw ${requiredItemPattern} from bank for quest`,
@@ -3101,9 +3430,7 @@ export class AutonomousBehaviorManager {
         }
 
         // Save quest goal so the planner restores it after gathering completes
-        if (!this.savedGoal) {
-          this.savedGoal = { ...goal };
-        }
+        this.pushGoal(goal);
         this.currentGoal = {
           type: gatherType as CurrentGoal["type"],
           description: `Gather more ${requiredItemPattern} — burned too many (${cooked}/${needed} cooked)`,
@@ -3356,7 +3683,11 @@ export class AutonomousBehaviorManager {
    * Build prompt for action selection with OSRS common sense knowledge
    * This prompt gives the LLM context AND common sense rules so it can make intelligent decisions
    */
-  private buildActionSelectionPrompt(state: State, actions: Action[]): string {
+  private buildActionSelectionPrompt(
+    state: State,
+    actions: Action[],
+    recentMemories?: string[],
+  ): string {
     const goal = this.currentGoal;
     const player = this.service?.getPlayerEntity();
     const nearbyEntities = this.service?.getNearbyEntities() || [];
@@ -3908,12 +4239,26 @@ export class AutonomousBehaviorManager {
     if (playerHasBars) lines.push(`Has Bars: Yes (can smith at anvil)`);
     lines.push("");
 
-    // === LAST ACTION CONTEXT ===
-    if (this.lastActionName) {
-      const elapsed = Math.round((Date.now() - this.lastActionTime) / 1000);
-      lines.push(
-        `LAST ACTION (${elapsed}s ago): ${this.lastActionName} — ${this.lastActionResult || "unknown"}`,
-      );
+    // === RECENT ACTIONS (ring buffer) ===
+    if (this.actionRing.length > 0) {
+      lines.push("=== RECENT ACTIONS ===");
+      const now = Date.now();
+      for (const entry of this.actionRing) {
+        const elapsed = Math.round((now - entry.timestamp) / 1000);
+        lines.push(`- ${entry.action} — ${entry.result} (${elapsed}s ago)`);
+      }
+      // Detect retry loops: all entries are the same failed action
+      if (
+        this.actionRing.length >= this.ACTION_RING_MAX &&
+        this.actionRing.every(
+          (e) =>
+            e.action === this.actionRing[0].action && e.result === "failure",
+        )
+      ) {
+        lines.push(
+          `*** WARNING: "${this.actionRing[0].action}" has failed ${this.ACTION_RING_MAX} times in a row. Try a DIFFERENT action or SET_GOAL to replan. ***`,
+        );
+      }
       lines.push("");
     }
 
@@ -4460,6 +4805,15 @@ export class AutonomousBehaviorManager {
 
     lines.push("");
 
+    // === RECENT EVENTS (from memory) ===
+    if (recentMemories && recentMemories.length > 0) {
+      lines.push("=== PAST EXPERIENCE ===");
+      for (const mem of recentMemories) {
+        lines.push(`- ${mem}`);
+      }
+      lines.push("");
+    }
+
     // === DECISION GUIDANCE ===
     lines.push("=== MAKE YOUR DECISION ===");
     lines.push("Think about:");
@@ -4572,13 +4926,29 @@ export class AutonomousBehaviorManager {
         },
       );
 
-      // Track last action for prompt context
-      this.lastActionName = action.name;
-      this.lastActionTime = Date.now();
+      // Track action in ring buffer for prompt context and retry detection
+      if (result && typeof result === "object" && "success" in result) {
+        this.actionRing.push({
+          action: action.name,
+          result: result.success ? "success" : "failure",
+          timestamp: Date.now(),
+        });
+        if (this.actionRing.length > this.ACTION_RING_MAX) {
+          this.actionRing.shift();
+        }
+      } else {
+        // No structured result — record as failure
+        this.actionRing.push({
+          action: action.name,
+          result: "failure",
+          timestamp: Date.now(),
+        });
+        if (this.actionRing.length > this.ACTION_RING_MAX) {
+          this.actionRing.shift();
+        }
+      }
 
       if (result && typeof result === "object" && "success" in result) {
-        this.lastActionResult = result.success ? "success" : "failure";
-
         // Sync action to server dashboard
         try {
           const err = result.error;
@@ -4694,14 +5064,16 @@ export class AutonomousBehaviorManager {
           if (
             action.name === "BANK_DEPOSIT_ALL" &&
             !result.data?.moving &&
-            this.savedGoal &&
+            this.goalStack.length > 0 &&
             this.currentGoal?.type === "banking"
           ) {
-            logger.info(
-              `[AutonomousBehavior] Banking complete, restoring saved goal: ${this.savedGoal.type}`,
-            );
-            this.currentGoal = this.savedGoal;
-            this.savedGoal = null;
+            const restoredBanking = this.popGoal();
+            if (restoredBanking) {
+              logger.info(
+                `[AutonomousBehavior] Banking complete, restoring saved goal: ${restoredBanking.type}`,
+              );
+              this.currentGoal = restoredBanking;
+            }
             this.nextTickFast = true;
           }
         } else {
@@ -4755,6 +5127,60 @@ export class AutonomousBehaviorManager {
     }
 
     return true;
+  }
+
+  /**
+   * Query memories relevant to the current situation.
+   * Scores each memory by keyword overlap with the situation string,
+   * returns top 3 most relevant as formatted strings.
+   */
+  private async queryRelevantMemories(
+    roomId: UUID,
+    situation: string,
+  ): Promise<string[]> {
+    try {
+      const memories = await this.runtime.getMemories({
+        roomId,
+        count: 20,
+        tableName: "messages",
+      });
+      if (memories.length === 0) return [];
+
+      // Extract keywords from situation (3+ char words, lowercased)
+      const keywords = situation
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((w) => w.length >= 3);
+      if (keywords.length === 0)
+        return memories
+          .slice(0, 3)
+          .map((m) => m.content?.text || "")
+          .filter(Boolean);
+
+      // Score each memory by keyword overlap
+      const scored = memories
+        .map((m) => {
+          const text = (m.content?.text || "").toLowerCase();
+          const action = (m.content?.action || "") as string;
+          let score = 0;
+          for (const kw of keywords) {
+            if (text.includes(kw)) score++;
+          }
+          return {
+            text: action
+              ? `${action}: ${m.content?.text || ""}`
+              : m.content?.text || "",
+            score,
+          };
+        })
+        .filter((s) => s.text.length > 0);
+
+      // Sort by score descending, take top 3
+      scored.sort((a, b) => b.score - a.score);
+      return scored.slice(0, 3).map((s) => s.text);
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -5225,7 +5651,7 @@ export class AutonomousBehaviorManager {
 
     // Save current goal for restoration after duel
     if (this.currentGoal) {
-      this.savedGoal = { ...this.currentGoal };
+      this.pushGoal(this.currentGoal);
       logger.info(
         `[AutonomousBehavior] Saved goal: ${this.currentGoal.type} - ${this.currentGoal.description}`,
       );
@@ -5250,8 +5676,8 @@ export class AutonomousBehaviorManager {
     this.duelPhase = "fighting";
 
     // If we somehow missed the session start (race condition), save goal now
-    if (!this.savedGoal && this.currentGoal) {
-      this.savedGoal = { ...this.currentGoal };
+    if (this.goalStack.length === 0 && this.currentGoal) {
+      this.pushGoal(this.currentGoal);
     }
 
     // Set duelModeEnteredAt if not already set (missed session start)
@@ -5306,19 +5732,20 @@ export class AutonomousBehaviorManager {
     );
 
     // Restore saved goal, potentially modified by assessment
-    if (this.savedGoal) {
+    const restoredDuel = this.popGoal();
+    if (restoredDuel) {
       if (assessment.overrideGoal) {
         this.currentGoal = assessment.overrideGoal;
+        // Discard the stacked goal — assessment takes priority
         logger.info(
           `[AutonomousBehavior] Duel assessment overriding goal → ${assessment.overrideGoal.type}: ${assessment.overrideGoal.description}`,
         );
       } else {
-        this.currentGoal = this.savedGoal;
+        this.currentGoal = restoredDuel;
         logger.info(
-          `[AutonomousBehavior] Restored goal: ${this.savedGoal.type} - ${this.savedGoal.description}`,
+          `[AutonomousBehavior] Restored goal: ${restoredDuel.type} - ${restoredDuel.description}`,
         );
       }
-      this.savedGoal = null;
     } else {
       logger.info("[AutonomousBehavior] No saved goal — replanning");
     }

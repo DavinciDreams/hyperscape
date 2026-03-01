@@ -133,7 +133,13 @@ const FALLBACK_PACKET_IDS: Record<string, number> = {
   bankDepositAll: 117,
   bankWithdraw: 118,
   bankClose: 121,
+  storeOpen: 134,
+  storeState: 135,
+  storeBuy: 136,
+  storeSell: 137,
+  storeClose: 138,
   requestBankState: 267,
+  combatEnded: 268,
 };
 
 const FALLBACK_PACKET_NAMES: Record<number, string> = Object.fromEntries(
@@ -253,6 +259,19 @@ export class HyperscapeService
   /** Movement completion tracking — resolved when tileMovementEnd fires for our character */
   private _movementResolve: (() => void) | null = null;
   private _isMoving = false;
+
+  /** Cached store state from last storeOpen (cleared on storeClose) */
+  private _cachedStoreState: {
+    storeId: string;
+    storeName: string;
+    items: Array<{
+      itemId?: string;
+      id?: string;
+      name?: string;
+      price: number;
+      stockQuantity?: number;
+    }>;
+  } | null = null;
 
   /** Local chat message buffer - stores recent messages from nearby entities */
   private localChatBuffer: Array<{
@@ -2703,6 +2722,51 @@ Respond with ONLY the action name, nothing else.`;
         break;
       }
 
+      case "combatEnded": {
+        // PvE combat ended — clear inCombat flag (duels clear via duelCompleted)
+        const endData = data as {
+          attackerId?: string;
+          targetId?: string;
+        };
+        if (
+          endData.attackerId === this.characterId &&
+          this.gameState.playerEntity
+        ) {
+          this.gameState.playerEntity.inCombat = false;
+          this.gameState.playerEntity.combatTarget = null;
+          logger.info(
+            `[HyperscapeService] ⚔️ Combat ended with ${endData.targetId} — inCombat cleared`,
+          );
+          this.broadcastEvent("COMBAT_ENDED" as EventType, endData);
+        }
+        break;
+      }
+
+      // ============================================================================
+      // CRAFTING COMPLETION PACKETS
+      // ============================================================================
+
+      case "smeltingComplete":
+      case "smithingComplete":
+      case "craftingComplete":
+      case "fletchingComplete":
+      case "cookingComplete":
+      case "tanningComplete": {
+        const completionData = data as {
+          totalXp?: number;
+          xpGained?: number;
+          [key: string]: unknown;
+        };
+        const xp = completionData.totalXp ?? completionData.xpGained ?? 0;
+        const skill = packetName.replace("Complete", "");
+        logger.info(`[HyperscapeService] ${packetName} received — xp: ${xp}`);
+        this.broadcastEvent("CRAFTING_COMPLETE" as EventType, {
+          ...completionData,
+          skill,
+        });
+        break;
+      }
+
       // ============================================================================
       // QUEST SYSTEM PACKETS
       // ============================================================================
@@ -2858,6 +2922,33 @@ Respond with ONLY the action name, nothing else.`;
           this.gameState.bankItemsUpdatedAt = Date.now();
           logger.info(
             `[HyperscapeService] 🏦 Bank state cached: ${this.gameState.bankItems.length} items`,
+          );
+        }
+        break;
+      }
+
+      case "storeState": {
+        // Store opened — cache store data for storeBuy/storeSell
+        const storeData = data as {
+          storeId?: string;
+          storeName?: string;
+          items?: Array<{
+            itemId?: string;
+            id?: string;
+            name?: string;
+            price: number;
+            stockQuantity?: number;
+          }>;
+          isOpen?: boolean;
+        };
+        if (storeData.storeId && storeData.items) {
+          this._cachedStoreState = {
+            storeId: storeData.storeId,
+            storeName: storeData.storeName || "Store",
+            items: storeData.items,
+          };
+          logger.info(
+            `[HyperscapeService] 🏪 Store state cached: ${storeData.storeName} (${storeData.items.length} items)`,
           );
         }
         break;
@@ -3470,6 +3561,20 @@ Respond with ONLY the action name, nothing else.`;
   }
 
   /**
+   * Wait for an inventory update to arrive (inventoryUpdated packet).
+   * Returns true if an update was received, false on timeout.
+   */
+  async waitForInventoryUpdate(timeoutMs = 3000): Promise<boolean> {
+    const startTs = this.gameState.inventoryUpdatedAt || 0;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if ((this.gameState.inventoryUpdatedAt || 0) > startTs) return true;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+  }
+
+  /**
    * Execute toggle prayer command
    */
   async executeTogglePrayer(prayerId: string): Promise<void> {
@@ -3817,10 +3922,68 @@ Respond with ONLY the action name, nothing else.`;
   }
 
   // ============================================================================
+  // STORE SYSTEM COMMANDS
+  // ============================================================================
+
+  /**
+   * Open a store by NPC ID (server resolves storeId from NPC)
+   */
+  storeOpen(npcId: string, npcEntityId?: string): void {
+    logger.info(`[HyperscapeService] Opening store for NPC: ${npcId}`);
+    this.sendCommand("storeOpen", { npcId, npcEntityId });
+  }
+
+  /**
+   * Buy an item from an open store
+   */
+  storeBuy(storeId: string, itemId: string, quantity: number): void {
+    logger.info(
+      `[HyperscapeService] Buying ${quantity}x ${itemId} from store ${storeId}`,
+    );
+    this.sendCommand("storeBuy", { storeId, itemId, quantity });
+  }
+
+  /**
+   * Sell an item to an open store
+   */
+  storeSell(storeId: string, itemId: string, quantity: number): void {
+    logger.info(
+      `[HyperscapeService] Selling ${quantity}x ${itemId} to store ${storeId}`,
+    );
+    this.sendCommand("storeSell", { storeId, itemId, quantity });
+  }
+
+  /**
+   * Close the current store session
+   */
+  storeClose(): void {
+    const storeId = this._cachedStoreState?.storeId || "";
+    logger.info("[HyperscapeService] Closing store");
+    this.sendCommand("storeClose", { storeId });
+    this._cachedStoreState = null;
+  }
+
+  /**
+   * Get cached store state (populated after storeOpen)
+   */
+  getCachedStoreState(): {
+    storeId: string;
+    storeName: string;
+    items: Array<{
+      itemId?: string;
+      id?: string;
+      name?: string;
+      price: number;
+      stockQuantity?: number;
+    }>;
+  } | null {
+    return this._cachedStoreState;
+  }
+
+  // ============================================================================
   // DUEL SYSTEM COMMANDS
   // ============================================================================
 
-  /** Pending duel challenge from another player */
   /** Pending duel challenge from another player */
   private pendingDuelChallenge: PendingDuelChallenge | null = null;
 

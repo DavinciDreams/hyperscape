@@ -16,7 +16,7 @@ import type { HyperscapeService } from "../services/HyperscapeService.js";
 /**
  * Helper to calculate distance between two positions
  */
-function calculateDistance(
+export function calculateDistance(
   pos1: [number, number, number],
   pos2: [number, number, number],
 ): number {
@@ -25,7 +25,7 @@ function calculateDistance(
   return Math.sqrt(dx * dx + dz * dz);
 }
 
-function getEntityPositionArray(entity: {
+export function getEntityPositionArray(entity: {
   position?: unknown;
 }): [number, number, number] | null {
   const pos = entity.position;
@@ -39,7 +39,7 @@ function getEntityPositionArray(entity: {
   return null;
 }
 
-function isMobLikeEntity(entity: {
+export function isMobLikeEntity(entity: {
   mobType?: unknown;
   type?: unknown;
   entityType?: unknown;
@@ -51,6 +51,60 @@ function isMobLikeEntity(entity: {
   return /goblin|bandit|skeleton|zombie|rat|spider|wolf|cow|chicken|imp/.test(
     name,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Pure survival assessment — used by both evaluators and short-circuit
+// ---------------------------------------------------------------------------
+
+export interface SurvivalSnapshot {
+  healthPercent: number;
+  urgency: "critical" | "warning" | "safe";
+  threatCount: number;
+}
+
+/**
+ * Lightweight survival assessment for use in the short-circuit path.
+ * Pure function: no side effects, no service calls.
+ */
+export function assessSurvival(
+  player: {
+    health?: { current?: number; max?: number };
+    inCombat?: boolean;
+    alive?: boolean;
+    position: [number, number, number];
+  },
+  nearbyEntities: Array<{
+    position?: unknown;
+    mobType?: unknown;
+    type?: unknown;
+    entityType?: unknown;
+    name?: unknown;
+  }>,
+): SurvivalSnapshot {
+  const current = player.health?.current ?? 100;
+  const max = player.health?.max ?? 100;
+  const healthPercent = max > 0 ? (current / max) * 100 : 100;
+
+  // Count threats within 15 units
+  let threatCount = 0;
+  for (const entity of nearbyEntities) {
+    if (!isMobLikeEntity(entity)) continue;
+    const entityPos = getEntityPositionArray(entity);
+    if (!entityPos) continue;
+    if (calculateDistance(player.position, entityPos) < 15) {
+      threatCount++;
+    }
+  }
+
+  let urgency: "critical" | "warning" | "safe" = "safe";
+  if (player.alive === false || healthPercent < 30) {
+    urgency = "critical";
+  } else if (healthPercent < 50) {
+    urgency = "warning";
+  }
+
+  return { healthPercent, urgency, threatCount };
 }
 
 /**

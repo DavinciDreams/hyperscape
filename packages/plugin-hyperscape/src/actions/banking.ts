@@ -22,21 +22,11 @@ import {
   hasFishingEquipment,
   getItemName,
 } from "../utils/item-detection.js";
+import { getToolIds } from "../utils/world-data.js";
 
-/** Items we never want to deposit — essential tools the agent needs to keep.
- * Uses specific patterns to avoid false positives (e.g. "swordfish").
- * Validated against packages/server/world/assets/manifests/ item data. */
-const ESSENTIAL_ITEM_PATTERNS = [
-  // Gathering tools
-  "hatchet",
-  "pickaxe",
-  "tinderbox",
-  "fishing net",
-  "fishing_net",
-  "fishing rod",
-  "fishing_rod",
-  "hammer",
-  // Melee weapons (specific enough to not match food like "swordfish")
+/** Weapon patterns that are always essential (not derivable from tools manifest).
+ * Uses specific patterns to avoid false positives (e.g. "swordfish"). */
+const WEAPON_PATTERNS = [
   "shortsword",
   "longsword",
   "2h sword",
@@ -45,9 +35,38 @@ const ESSENTIAL_ITEM_PATTERNS = [
   "dagger",
 ];
 
+/** Cached essential item patterns — derived from tools manifest + weapon patterns */
+let cachedEssentialPatterns: string[] | null = null;
+
+function getEssentialPatterns(): string[] {
+  if (cachedEssentialPatterns) return cachedEssentialPatterns;
+
+  // Derive tool keywords from manifest (e.g. "bronze_hatchet" → "hatchet")
+  const toolIds = getToolIds();
+  const toolKeywords = new Set<string>();
+  for (const id of toolIds) {
+    // Extract the base tool name: remove tier prefix (bronze_, iron_, etc.)
+    const parts = id.split("_");
+    if (parts.length > 1) {
+      // e.g. "bronze_hatchet" → "hatchet", "small_fishing_net" → "fishing_net"
+      toolKeywords.add(parts.slice(1).join("_"));
+      // Also add space variant
+      toolKeywords.add(parts.slice(1).join(" "));
+    }
+    toolKeywords.add(id); // full name too
+  }
+
+  // Always include tinderbox and hammer (not in tools manifest but essential)
+  toolKeywords.add("tinderbox");
+  toolKeywords.add("hammer");
+
+  cachedEssentialPatterns = [...toolKeywords, ...WEAPON_PATTERNS];
+  return cachedEssentialPatterns;
+}
+
 function isEssentialItem(item: InventoryItem): boolean {
   const name = getItemName(item);
-  return ESSENTIAL_ITEM_PATTERNS.some((p) => name.includes(p));
+  return getEssentialPatterns().some((p) => name.includes(p));
 }
 
 function getPlayerPosition(player: {
@@ -263,7 +282,10 @@ export const bankDepositAction: Action = {
         }
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      const verified = await service.waitForInventoryUpdate(2000);
+      if (!verified) {
+        logger.warn("[BANK_DEPOSIT] Deposit not verified by inventory update");
+      }
       await service.closeBank();
 
       const responseText = "Deposited items into the bank.";
@@ -391,7 +413,10 @@ export const bankWithdrawAction: Action = {
       await service.openBank(bank.id);
       await new Promise((resolve) => setTimeout(resolve, 300));
       await service.bankWithdraw(itemName, quantity);
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      const verified = await service.waitForInventoryUpdate(2000);
+      if (!verified) {
+        logger.warn(`[BANK_WITHDRAW] Withdraw not verified for ${itemName}`);
+      }
       await service.closeBank();
 
       const amountLabel = quantity > 1 ? `${quantity}x ` : "";
@@ -512,67 +537,51 @@ export const bankDepositAllAction: Action = {
       await service.openBank(bank.id);
       await new Promise((resolve) => setTimeout(resolve, 300));
 
-      // Deposit all items
-      await service.bankDepositAll();
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Deposit only non-essential items individually (keeps tools safe in inventory)
+      let depositedCount = 0;
+      const failedItems: typeof bankableItems = [];
+      for (const item of bankableItems) {
+        const itemId = item.itemId || item.name || "";
+        if (itemId) {
+          await service.bankDeposit(itemId, item.quantity ?? 1);
+          const verified = await service.waitForInventoryUpdate(2000);
+          if (verified) {
+            depositedCount++;
+          } else {
+            failedItems.push(item);
+          }
+        }
+      }
 
-      // Withdraw back essential tools that we want to keep.
-      // Validated against packages/server/world/assets/manifests/items/.
-      const toolsToKeep = [
-        // Gathering tools
-        "bronze_hatchet",
-        "iron_hatchet",
-        "steel_hatchet",
-        "mithril_hatchet",
-        "adamant_hatchet",
-        "rune_hatchet",
-        "bronze_pickaxe",
-        "iron_pickaxe",
-        "steel_pickaxe",
-        "mithril_pickaxe",
-        "adamant_pickaxe",
-        "rune_pickaxe",
-        "tinderbox",
-        "hammer",
-        "small_fishing_net",
-        "fishing_rod",
-        "fly_fishing_rod",
-        "harpoon",
-        "lobster_pot",
-        // Melee weapons
-        "bronze_shortsword",
-        "iron_shortsword",
-        "steel_shortsword",
-        "mithril_shortsword",
-        "adamant_shortsword",
-        "rune_shortsword",
-        "bronze_longsword",
-        "iron_longsword",
-        "steel_longsword",
-        "bronze_scimitar",
-        "iron_scimitar",
-        "steel_scimitar",
-        "bronze_dagger",
-        "iron_dagger",
-        "steel_dagger",
-      ];
-
-      // Only withdraw tools we actually had before depositing
-      const essentialNames = essentialItems.map((i) =>
-        (i.itemId || i.name || "").toLowerCase(),
-      );
-      for (const toolId of toolsToKeep) {
-        if (
-          essentialNames.some((n) => n.includes(toolId) || toolId.includes(n))
-        ) {
-          await service.bankWithdraw(toolId, 1);
-          await new Promise((resolve) => setTimeout(resolve, 100));
+      // Retry pass: one more attempt for items that failed
+      for (const item of failedItems) {
+        const itemId = item.itemId || item.name || "";
+        if (itemId) {
+          await service.bankDeposit(itemId, item.quantity ?? 1);
+          const verified = await service.waitForInventoryUpdate(3000);
+          if (verified) {
+            depositedCount++;
+          } else {
+            logger.warn(
+              `[BANK_DEPOSIT_ALL] Deposit failed after retry: ${itemId}`,
+            );
+          }
         }
       }
 
       await service.closeBank();
 
-      const responseText = `Banked ${bankableItems.length} items. Kept essential tools.`;
+      // Verify actual success rate — if most items remain, report failure
+      const successRate =
+        bankableItems.length > 0 ? depositedCount / bankableItems.length : 1;
+      if (successRate < 0.5) {
+        const failText = `Only deposited ${depositedCount}/${bankableItems.length} items — banking unreliable`;
+        logger.warn(`[BANK_DEPOSIT_ALL] ${failText}`);
+        await callback?.({ text: failText, action: "BANK_DEPOSIT_ALL" });
+        return { success: false, error: new Error(failText) };
+      }
+
+      const responseText = `Banked ${depositedCount}/${bankableItems.length} items. Kept ${essentialItems.length} essential tools.`;
       await callback?.({ text: responseText, action: "BANK_DEPOSIT_ALL" });
       logger.info(`[BANK_DEPOSIT_ALL] ${responseText}`);
 
@@ -581,7 +590,7 @@ export const bankDepositAllAction: Action = {
         text: responseText,
         data: {
           action: "BANK_DEPOSIT_ALL",
-          deposited: bankableItems.length,
+          deposited: depositedCount,
           keptEssentials: essentialItems.length,
         },
       };
