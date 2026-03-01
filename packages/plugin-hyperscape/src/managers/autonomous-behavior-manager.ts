@@ -1721,8 +1721,13 @@ export class AutonomousBehaviorManager {
 
       // Detect quest stage transitions — when the server advances from
       // e.g. "gather logs" to "light fires", re-plan so the agent switches
-      // to the new objective instead of continuing the old one
+      // to the new objective instead of continuing the old one.
+      // Skip for turn-in goals — they don't target a specific stage; the
+      // server's stageType still reflects the last active stage (e.g. "gather")
+      // which differs from the planner's "dialogue" tag, causing an infinite
+      // clear→re-plan→clear loop.
       if (
+        !isTurnInGoal &&
         quest?.stageType &&
         goal.questStageType &&
         quest.stageType !== goal.questStageType
