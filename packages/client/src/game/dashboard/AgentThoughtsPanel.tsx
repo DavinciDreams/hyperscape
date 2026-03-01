@@ -5,7 +5,7 @@ import { ChevronDown, ChevronUp, Scroll, Clock, RefreshCw } from "lucide-react";
 
 // Configuration constants
 const THOUGHTS_POLL_INTERVAL_MS = 3000;
-const MAX_THOUGHTS_DISPLAYED = 20;
+const MAX_THOUGHTS_DISPLAYED = 100;
 const FLASH_DURATION_MS = 1500; // How long the "new thought" flash lasts
 
 interface AgentThought {
@@ -151,9 +151,7 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
   // Get latest thought (most recent "thinking" type, or any recent thought)
   const latestThinking =
     thoughts.find((t) => t.type === "thinking") || thoughts[0];
-  const olderThoughts = thoughts
-    .filter((t) => t.id !== latestThinking?.id)
-    .slice(0, 5);
+  const olderThoughts = thoughts.filter((t) => t.id !== latestThinking?.id);
 
   return (
     <div className="border-t border-[#8b4513]/40">
@@ -267,7 +265,7 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
 
                 {showHistory && (
                   <div
-                    className="mt-2 space-y-2 max-h-40 overflow-y-auto pr-1"
+                    className="mt-2 space-y-2 max-h-96 overflow-y-auto pr-1"
                     style={{ scrollbarWidth: "thin" }}
                   >
                     {olderThoughts.map((thought) => (
@@ -283,9 +281,8 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
                             {formatTimeAgo(thought.timestamp)}
                           </span>
                         </div>
-                        <p className="text-[10px] text-[#c9b896]/70 line-clamp-2">
-                          {cleanThoughtContent(thought.content).slice(0, 150)}
-                          {thought.content.length > 150 ? "..." : ""}
+                        <p className="text-[10px] text-[#c9b896]/70">
+                          {cleanThoughtContent(thought.content)}
                         </p>
                       </div>
                     ))}

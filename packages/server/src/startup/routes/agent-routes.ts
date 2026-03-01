@@ -2397,7 +2397,7 @@ export function registerAgentRoutes(
       if (activityData) {
         return reply.send({
           success: true,
-          recentActions: activityData.recentActions.slice(0, 15),
+          recentActions: activityData.recentActions.slice(0, 100),
           sessionStats: activityData.sessionStats,
         });
       }
@@ -2429,13 +2429,173 @@ export function registerAgentRoutes(
   });
 
   /**
+   * GET /api/agents/:agentId/quests
+   *
+   * Get all quests with per-agent status for the dashboard quest panel.
+   * Returns every quest definition with its status (not_started, in_progress,
+   * ready_to_complete, completed) so the dashboard can show them all.
+   *
+   * Response:
+   * {
+   *   success: true,
+   *   quests: [{ id, name, status, difficulty, questPoints, startNpc, stageType?, stageTarget?, stageCount?, stageProgress? }],
+   *   questPoints: number
+   * }
+   */
+  fastify.get("/api/agents/:agentId/quests", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      // Get database system
+      const databaseSystem = world.getSystem("database") as
+        | {
+            db: {
+              select: (fields?: unknown) => {
+                from: (table: unknown) => {
+                  where: (condition: unknown) => Promise<unknown[]>;
+                };
+              };
+            };
+          }
+        | undefined;
+
+      if (!databaseSystem || !databaseSystem.db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      // Import schema and eq operator
+      const { agentMappings } = await import("../../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      // Get agent's character ID (= playerId in the world)
+      const mappings = (await databaseSystem.db
+        .select()
+        .from(agentMappings)
+        .where(eq(agentMappings.agentId, agentId))) as Array<{
+        characterId: string;
+      }>;
+
+      let characterId = mappings[0]?.characterId;
+      if (!characterId) {
+        const { getAgentManager } = await import("../../eliza/index.js");
+        const agentManager = getAgentManager();
+        const embeddedAgent = agentManager?.getAgentInfo(agentId);
+        if (embeddedAgent?.characterId) {
+          characterId = embeddedAgent.characterId;
+        }
+      }
+
+      if (!characterId) {
+        return reply.send({
+          success: true,
+          quests: [],
+          questPoints: 0,
+          message: "Agent not registered in game yet",
+        });
+      }
+
+      // Get QuestSystem from world
+      const questSystem = world.getSystem("quest") as
+        | {
+            getAllQuestDefinitions: () => Array<{
+              id: string;
+              name: string;
+              difficulty: string;
+              questPoints: number;
+              startNpc: string;
+              stages: Array<{
+                id: string;
+                type: string;
+                target: string;
+                count: number;
+              }>;
+            }>;
+            getQuestStatus: (playerId: string, questId: string) => string;
+            getActiveQuests: (playerId: string) => Array<{
+              questId: string;
+              currentStage: string;
+              stageProgress: Record<string, number>;
+            }>;
+            getQuestPoints: (playerId: string) => number;
+          }
+        | undefined;
+
+      if (!questSystem) {
+        return reply.send({
+          success: true,
+          quests: [],
+          questPoints: 0,
+          message: "Quest system not available",
+        });
+      }
+
+      const allDefinitions = questSystem.getAllQuestDefinitions();
+      const activeQuests = questSystem.getActiveQuests(characterId);
+
+      const quests = allDefinitions.map((def) => {
+        const status = questSystem.getQuestStatus(characterId, def.id);
+        const active = activeQuests.find((aq) => aq.questId === def.id);
+        const currentStage = active
+          ? def.stages.find((s) => s.id === active.currentStage)
+          : undefined;
+
+        return {
+          id: def.id,
+          name: def.name,
+          status,
+          difficulty: def.difficulty,
+          questPoints: def.questPoints,
+          startNpc: def.startNpc,
+          ...(active && currentStage
+            ? {
+                stageType: currentStage.type,
+                stageTarget: currentStage.target,
+                stageCount: currentStage.count,
+                stageProgress: active.stageProgress,
+              }
+            : {}),
+        };
+      });
+
+      const questPoints = questSystem.getQuestPoints(characterId);
+
+      return reply.send({
+        success: true,
+        quests,
+        questPoints,
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to fetch agent quests:", error);
+
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch agent quests",
+      });
+    }
+  });
+
+  /**
    * GET /api/agents/:agentId/thoughts
    *
    * Get recent thought process for an agent.
    * Used by the dashboard to display agent's decision-making process.
    *
    * Query params:
-   * - limit: number (default: 20, max: 50) - Number of thoughts to return
+   * - limit: number (default: 100, max: 200) - Number of thoughts to return
    * - since: number (timestamp) - Only return thoughts after this timestamp
    *
    * Response:
@@ -2459,7 +2619,7 @@ export function registerAgentRoutes(
       }
 
       // Parse query params
-      const limit = Math.min(parseInt(query.limit || "20", 10), 50);
+      const limit = Math.min(parseInt(query.limit || "100", 10), 200);
       const since = query.since ? parseInt(query.since, 10) : 0;
 
       // Get database system

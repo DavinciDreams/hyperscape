@@ -83,6 +83,7 @@ import { moveToAction } from "../actions/movement.js";
 import {
   KNOWN_LOCATIONS,
   updateKnownLocationsFromNearbyEntities,
+  populateKnownLocationsFromWorldMap,
 } from "../providers/goalProvider.js";
 import { SCRIPTED_AUTONOMY_CONFIG } from "../config/constants.js";
 import {
@@ -103,6 +104,26 @@ import {
 } from "./goal-progression-planner.js";
 import { getPersonalityTraits } from "../providers/personalityProvider.js";
 import { getTimeSinceLastSocial } from "../providers/socialMemory.js";
+
+// Food item keywords for detecting cooking targets in quest stages
+const COOKABLE_TARGETS = [
+  "shrimp",
+  "anchovies",
+  "sardine",
+  "herring",
+  "trout",
+  "salmon",
+  "tuna",
+  "lobster",
+  "swordfish",
+  "shark",
+  "meat",
+  "chicken",
+  "bread",
+];
+function isCookableTarget(target: string): boolean {
+  return COOKABLE_TARGETS.some((f) => target.includes(f));
+}
 
 // Configuration
 const DEFAULT_TICK_INTERVAL = 5000; // 5 seconds between decisions
@@ -174,6 +195,8 @@ export interface CurrentGoal {
   questStageCount?: number;
   /** For questing goals: NPC that starts/ends the quest */
   questStartNpc?: string;
+  /** For banking goals: specific item patterns to withdraw (instead of BANK_DEPOSIT_ALL) */
+  bankWithdrawItems?: string[];
 }
 
 export class AutonomousBehaviorManager {
@@ -200,8 +223,13 @@ export class AutonomousBehaviorManager {
    * Used by goal templates provider to penalize repetitive goal selection
    */
   private goalHistory: Array<{ goal: CurrentGoal; completedAt: number }> = [];
-  private readonly GOAL_HISTORY_RETENTION = 5 * 60 * 1000; // Keep history for 5 minutes
-  private readonly MAX_GOAL_HISTORY = 10; // Max goals to track
+  private readonly GOAL_HISTORY_RETENTION = 15 * 60 * 1000; // Keep history for 15 minutes
+  private readonly MAX_GOAL_HISTORY = 30; // Max goals to track
+
+  /** Consecutive validation failures for the same action — prevents infinite retry loops */
+  private consecutiveValidationFailures = 0;
+  private lastFailedAction: string | null = null;
+  private readonly MAX_CONSECUTIVE_FAILURES = 5;
 
   /**
    * Target locking for combat - prevents switching targets mid-fight
@@ -211,8 +239,16 @@ export class AutonomousBehaviorManager {
   private lockedTargetStartTime: number = 0;
   private readonly TARGET_LOCK_TIMEOUT = 30000; // 30s max lock duration
 
-  /** Whether agent is currently in a streaming duel (suppresses autonomous actions) */
-  private inActiveDuel = false;
+  /** Current duel phase — null when not in any duel */
+  private duelPhase: "session" | "fighting" | null = null;
+
+  /** Timestamp when agent entered duel mode — for timeout safety */
+  private duelModeEnteredAt: number = 0;
+
+  /** Whether agent is in ANY phase of a duel (session, fighting, etc.) */
+  private get inActiveDuel(): boolean {
+    return this.duelPhase !== null;
+  }
 
   /** When the agent entered reactive combat (attacked while on a non-combat goal) */
   private reactiveCombatStartTime: number = 0;
@@ -220,6 +256,13 @@ export class AutonomousBehaviorManager {
 
   /** Saved goal before duel interruption — restored after duel completion */
   private savedGoal: CurrentGoal | null = null;
+  /** Cooldown to prevent infinite bank withdrawal loops */
+  private lastBankWithdrawalAttempt = 0;
+  /** Prevents duplicate async bank withdrawal calls */
+  private bankWithdrawalInProgress = false;
+
+  /** Whether KNOWN_LOCATIONS has been populated from world map data */
+  private knownLocationsPopulated = false;
 
   /** Duel outcome history for strategy analysis */
   private duelHistory: Array<{
@@ -400,8 +443,11 @@ export class AutonomousBehaviorManager {
 
     // Subscribe to duel events for goal save/restore and duel awareness
     if (!this.duelEventHandlerRegistered) {
+      this.service.onGameEvent("DUEL_SESSION_STARTED", () => {
+        this.onDuelSessionStarted();
+      });
       this.service.onGameEvent("DUEL_FIGHT_START", () => {
-        this.onDuelStart();
+        this.onDuelFightStart();
       });
       this.service.onGameEvent("DUEL_COMPLETED", (data: unknown) => {
         this.onDuelCompleted(data);
@@ -669,12 +715,48 @@ export class AutonomousBehaviorManager {
     this.tickCount++;
     this.lastTickTime = Date.now();
 
+    // Safety: if we've been in duel phase for > 5 minutes without completion, force exit
+    if (this.duelPhase !== null && this.duelModeEnteredAt > 0) {
+      if (Date.now() - this.duelModeEnteredAt > 5 * 60 * 1000) {
+        logger.warn(
+          "[AutonomousBehavior] Duel timeout — force exiting duel mode after 5 minutes",
+        );
+        this.duelPhase = null;
+        this.duelModeEnteredAt = 0;
+        if (this.savedGoal) {
+          this.currentGoal = this.savedGoal;
+          this.savedGoal = null;
+        }
+      }
+    }
+
     // Step 1: Validate we can act
     if (!this.canAct()) {
       if (this.debug) {
         logger.debug("[AutonomousBehavior] Cannot act, skipping tick");
       }
       return;
+    }
+
+    // Ensure KNOWN_LOCATIONS is populated from world map (once)
+    // This must happen before the short-circuit tries to resolve NPC positions.
+    // mapProvider populates lazily on LLM path, but short-circuit runs first.
+    if (!this.knownLocationsPopulated && this.service) {
+      const worldMap = this.service.getWorldMap?.();
+      if (worldMap) {
+        logger.info(
+          `[AutonomousBehavior] WorldMap data: towns=${worldMap.towns?.length ?? 0}, pois=${worldMap.pois?.length ?? 0}, npcs=${worldMap.npcs?.length ?? 0}, resources=${worldMap.resources?.length ?? 0}, stations=${worldMap.stations?.length ?? 0}`,
+        );
+        populateKnownLocationsFromWorldMap(worldMap);
+        this.knownLocationsPopulated = true;
+        logger.info(
+          `[AutonomousBehavior] Populated KNOWN_LOCATIONS from world map`,
+        );
+      } else {
+        logger.warn(
+          `[AutonomousBehavior] getWorldMap() returned ${worldMap === undefined ? "undefined" : "null"} — worldMap not available yet`,
+        );
+      }
     }
 
     // Check action lock — skip LLM if still executing previous action
@@ -898,11 +980,34 @@ export class AutonomousBehaviorManager {
         }
       }
 
+      // Track consecutive validation failures to detect stuck loops
+      if (this.lastFailedAction === selectedAction.name) {
+        this.consecutiveValidationFailures++;
+      } else {
+        this.consecutiveValidationFailures = 1;
+        this.lastFailedAction = selectedAction.name;
+      }
+
+      if (this.consecutiveValidationFailures >= this.MAX_CONSECUTIVE_FAILURES) {
+        logger.warn(
+          `[AutonomousBehavior] Action ${selectedAction.name} failed validation ${this.consecutiveValidationFailures} times — clearing goal to replan`,
+        );
+        this.consecutiveValidationFailures = 0;
+        this.lastFailedAction = null;
+        this.clearGoal();
+        this.nextTickFast = true;
+        return;
+      }
+
       // No fallback worked — fast-tick to retry quickly (2s, not 5s idle)
       logger.info("[AutonomousBehavior] No valid fallback — fast-tick retry");
       this.nextTickFast = true;
       return;
     }
+
+    // Reset validation failure counter on successful validation
+    this.consecutiveValidationFailures = 0;
+    this.lastFailedAction = null;
 
     // Step 7: Execute the selected action
     await this.executeAction(selectedAction, tickMessage, state);
@@ -1598,6 +1703,45 @@ export class AutonomousBehaviorManager {
         this.clearGoal();
         return null;
       }
+
+      // Detect quest stage transitions — when the server advances from
+      // e.g. "gather logs" to "light fires", re-plan so the agent switches
+      // to the new objective instead of continuing the old one
+      if (
+        quest?.stageType &&
+        goal.questStageType &&
+        quest.stageType !== goal.questStageType
+      ) {
+        logger.info(
+          `[AutonomousBehavior] Quest ${goal.questId} stage changed: ${goal.questStageType} → ${quest.stageType} — re-planning`,
+        );
+        this.clearGoal();
+        return null;
+      }
+
+      // Refresh goal progress from live quest stageProgress so the
+      // description and progress fields stay up-to-date in the activity log.
+      // Use the CURRENT stage's target key (e.g. "logs" or "fire"), not max
+      // across all keys which would show stale progress from prior stages.
+      if (quest?.stageProgress && typeof quest.stageProgress === "object") {
+        const stageTarget = quest.stageTarget || goal.questStageTarget;
+        const stageCount =
+          quest.stageCount || goal.questStageCount || goal.target || 1;
+        let liveProgress: number;
+        if (stageTarget && quest.stageProgress[stageTarget] !== undefined) {
+          liveProgress = quest.stageProgress[stageTarget];
+        } else {
+          // Fallback: max across all keys
+          const vals = Object.values(quest.stageProgress);
+          liveProgress = vals.length > 0 ? Math.max(...vals) : 0;
+        }
+        if (liveProgress !== goal.progress || stageCount !== goal.target) {
+          goal.progress = liveProgress;
+          goal.target = stageCount;
+          const questName = quest.name || goal.questId;
+          goal.description = `Complete quest: ${questName} (${liveProgress}/${stageCount})`;
+        }
+      }
     }
 
     // 2.5. Stale exploration invalidation — if the planner set exploration because
@@ -1699,7 +1843,46 @@ export class AutonomousBehaviorManager {
         );
       }
 
-      // Goal is NOT combat (e.g., fishing) — reactive combat
+      // Goal is NOT combat — decide: fight back or flee immediately?
+      // Questing/banking/navigation goals should disengage immediately to avoid
+      // getting stuck in fight-flee-fight loops near aggressive mobs.
+      const shouldFleeImmediately =
+        goal.type === "questing" ||
+        goal.type === "banking" ||
+        goal.type === "exploration";
+
+      if (shouldFleeImmediately && this.service) {
+        logger.info(
+          `[AutonomousBehavior] Attacked during ${goal.type} goal — disengaging (not fighting)`,
+        );
+        this.reactiveCombatStartTime = 0;
+
+        // Run away from combat toward the goal target (or a random direction if no target)
+        const goalTarget = this.resolveCurrentGoalTarget(goal);
+        if (goalTarget && player.position) {
+          // Run toward goal destination to get away from mobs AND progress the goal
+          this.service.executeMove({ target: goalTarget, runMode: true });
+          logger.info(
+            `[AutonomousBehavior] Running toward goal target [${goalTarget[0].toFixed(0)}, ${goalTarget[2].toFixed(0)}]`,
+          );
+        } else {
+          // No goal target resolved — run in a random direction away from here
+          const playerPos = this.getPositionArray(player.position);
+          if (playerPos) {
+            const angle = Math.random() * Math.PI * 2;
+            const fleeTarget: [number, number, number] = [
+              playerPos[0] + Math.cos(angle) * 40,
+              playerPos[1],
+              playerPos[2] + Math.sin(angle) * 40,
+            ];
+            this.service.executeMove({ target: fleeTarget, runMode: true });
+          }
+        }
+        this.nextTickFast = true;
+        return null; // Don't select an action — just move and retry goal next tick
+      }
+
+      // Gathering/crafting goals — reactive combat with timeout
       const now = Date.now();
       if (this.reactiveCombatStartTime === 0) {
         // Just got attacked — start reactive timer, save goal
@@ -1782,10 +1965,17 @@ export class AutonomousBehaviorManager {
       );
     }
 
-    // 5. Banking goal + bank nearby → BANK_DEPOSIT_ALL
+    // 5. Banking goal + bank nearby → BANK_DEPOSIT_ALL (or targeted withdrawal)
     if (goal.type === "banking") {
       const bank = this.findNearestBankEntity();
       if (bank) {
+        // Targeted withdrawal: withdraw specific items instead of deposit-all
+        if (goal.bankWithdrawItems && goal.bankWithdrawItems.length > 0) {
+          if (!this.bankWithdrawalInProgress) {
+            this.executeTargetedBankWithdrawal(bank.id, goal.bankWithdrawItems);
+          }
+          return null; // Withdrawal is async, wait for it to complete
+        }
         return (
           this.getAvailableActions().find(
             (a) => a.name === "BANK_DEPOSIT_ALL",
@@ -1794,7 +1984,18 @@ export class AutonomousBehaviorManager {
       }
     }
 
-    // 5.5. Goal requires travel to a known destination → NAVIGATE_TO directly
+    // 5.5. Before navigating for a quest, check if the agent has the materials
+    // it needs. No point traveling to the range without raw food to cook.
+    if (
+      goal.type === "questing" &&
+      goal.questStageType === "interact" &&
+      goal.questStageTarget
+    ) {
+      const bankRedirect = this.checkQuestMaterialsInBank(goal, player);
+      if (bankRedirect) return bankRedirect;
+    }
+
+    // 5.6. Goal requires travel to a known destination → NAVIGATE_TO directly
     // Prevents wasting LLM ticks on EXPLORE when the agent already knows where to go
     if (
       this.lastActionName !== "NAVIGATE_TO" &&
@@ -1817,6 +2018,21 @@ export class AutonomousBehaviorManager {
       this.lastActionName === "NAVIGATE_TO" &&
       this.lastActionResult === "success"
     ) {
+      // Before acting on arrival, check if quest needs materials from bank
+      if (
+        goal.type === "questing" &&
+        goal.questStageType === "interact" &&
+        goal.questStageTarget
+      ) {
+        const bankRedirect = this.checkQuestMaterialsInBank(goal, player);
+        if (bankRedirect) {
+          logger.info(
+            `[AutonomousBehavior] Arrived but need quest materials from bank — redirecting`,
+          );
+          return bankRedirect;
+        }
+      }
+
       const goalAction = this.getGoalActionOnArrival(goal, player);
       if (goalAction) {
         logger.info(
@@ -1847,6 +2063,7 @@ export class AutonomousBehaviorManager {
     }
 
     // 7. Last action was same resource action and goal type matches → repeat
+    //    Boredom check: impatient agents switch activities after repeated same goals
     if (this.lastActionName && this.lastActionResult === "success") {
       const repeatMap: Record<string, string> = {
         woodcutting: "CHOP_TREE",
@@ -1855,6 +2072,21 @@ export class AutonomousBehaviorManager {
       };
       const expectedAction = repeatMap[goal.type];
       if (expectedAction && this.lastActionName === expectedAction) {
+        // Boredom check — impatient agents switch activities
+        const boredomTraits = getPersonalityTraits(this.runtime);
+        if (boredomTraits.patience < 0.5) {
+          const consecutive = this.countConsecutiveSameGoalType(goal.type);
+          const threshold = Math.floor(2 + boredomTraits.patience * 4); // 2-4 goals
+          if (consecutive >= threshold) {
+            logger.info(
+              `[AutonomousBehavior] Boredom: ${goal.type} ×${consecutive} (threshold=${threshold}) — replanning`,
+            );
+            this.clearGoal();
+            this.nextTickFast = true;
+            return null;
+          }
+        }
+
         // Same goal, same action succeeded — check if resources still nearby
         const entities = this.service?.getNearbyEntities() || [];
         const hasResources = this.hasNearbyResourcesForGoal(
@@ -1897,13 +2129,90 @@ export class AutonomousBehaviorManager {
           break;
         }
         case "questing": {
+          // Self-heal: if questStartNpc is missing, try to populate it from quest data
+          if (!goal.questStartNpc && this.service) {
+            const questState = this.service.getQuestState?.() || [];
+            const bestQuest =
+              questState.find(
+                (q) => q.questId === goal.questId && q.startNpc,
+              ) ||
+              questState.find(
+                (q) =>
+                  (q.status === "in_progress" || q.status === "not_started") &&
+                  q.startNpc,
+              );
+            if (bestQuest?.startNpc) {
+              goal.questStartNpc = bestQuest.startNpc;
+              goal.questStageType =
+                goal.questStageType ||
+                (bestQuest.stageType as typeof goal.questStageType) ||
+                undefined;
+              goal.questStageTarget =
+                goal.questStageTarget || bestQuest.stageTarget || undefined;
+              goal.questId = goal.questId || bestQuest.questId || undefined;
+              logger.info(
+                `[AutonomousBehavior] Self-healed questing goal: questStartNpc=${goal.questStartNpc}, questId=${goal.questId}`,
+              );
+            }
+          }
+
+          // Turn-in goals: quest is ready_to_complete — navigate to NPC and complete.
+          // Also detect if the quest BECAME ready_to_complete while working on it.
+          const isTurnIn = goal.description?.startsWith("Turn in quest:");
+          const questState = this.service?.getQuestState?.() || [];
+          const questForGoal = questState.find(
+            (q: { questId?: string }) => q.questId === goal.questId,
+          );
+          const isReady =
+            isTurnIn || questForGoal?.status === "ready_to_complete";
+          if (isReady) {
+            // Ensure we have the NPC position for navigation — resolve it now
+            // if not yet set, since NAVIGATE_TO's validate requires a target.
+            if (!goal.targetPosition && goal.questStartNpc) {
+              const npcPos = this.resolveNpcPosition(goal.questStartNpc);
+              if (npcPos) {
+                goal.targetPosition = npcPos;
+                logger.info(
+                  `[AutonomousBehavior] Turn-in: resolved ${goal.questStartNpc} to [${npcPos[0].toFixed(0)}, ${npcPos[2].toFixed(0)}]`,
+                );
+              }
+            }
+
+            const arrivalAction = this.getGoalActionOnArrival(goal, player);
+            if (arrivalAction) {
+              logger.info(
+                `[AutonomousBehavior] Turn-in: near NPC — ${arrivalAction.name}`,
+              );
+              return arrivalAction;
+            }
+            // Not near NPC — navigate there
+            logger.info(
+              `[AutonomousBehavior] Turn-in: navigating to ${goal.questStartNpc || "quest NPC"}`,
+            );
+            const nav = find("NAVIGATE_TO");
+            if (nav) return nav;
+            // Ultimate fallback — use COMPLETE_QUEST which handles its own navigation
+            return find("COMPLETE_QUEST");
+          }
+
+          // Check if the quest stage requires materials the agent banked.
+          // If so, switch to a banking goal to withdraw them before proceeding.
+          if (goal.questStageType === "interact" && goal.questStageTarget) {
+            const bankRedirect = this.checkQuestMaterialsInBank(goal, player);
+            if (bankRedirect) return bankRedirect;
+          }
+
           // Determine quest-appropriate action based on stage type
           if (goal.questStageType === "kill") {
             const attack = find("ATTACK_ENTITY");
             if (attack) return attack;
           } else {
             // For non-kill quests (dialogue, gather, interact, accept),
-            // navigate to the quest location — never attack random mobs
+            // check if we're already at the NPC — if so, interact directly
+            const arrivalAction = this.getGoalActionOnArrival(goal, player);
+            if (arrivalAction) return arrivalAction;
+
+            // Not at target yet — navigate there
             const nav = find("NAVIGATE_TO");
             if (nav) return nav;
           }
@@ -1966,11 +2275,15 @@ export class AutonomousBehaviorManager {
     const bankItemNames = bankItems.map((b) =>
       (b.name || b.itemId || "").toLowerCase(),
     );
+    const personality = getPersonalityTraits(this.runtime);
+    const goalHistoryForPlanner = this.getGoalHistory();
     const ctx = buildPlannerContext(
       player,
       quests,
       recentGoalCounts,
       bankItemNames,
+      personality,
+      goalHistoryForPlanner,
     );
     const plan = planNextGoal(ctx);
 
@@ -2012,6 +2325,64 @@ export class AutonomousBehaviorManager {
         return type === "bank" || name.includes("bank");
       }) as { id: string; name?: string } | undefined) || null
     );
+  }
+
+  /**
+   * Perform a targeted bank withdrawal: open bank, withdraw specific items, close, restore goal.
+   * Used when the agent needs quest materials from the bank (e.g., raw shrimp for cooking).
+   */
+  private executeTargetedBankWithdrawal(
+    bankId: string,
+    itemPatterns: string[],
+  ): void {
+    if (!this.service) return;
+
+    const service = this.service;
+    this.bankWithdrawalInProgress = true;
+    // Run async withdrawal sequence
+    (async () => {
+      try {
+        logger.info(
+          `[AutonomousBehavior] Targeted bank withdrawal: ${itemPatterns.join(", ")}`,
+        );
+        await service.openBank(bankId);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        for (const itemId of itemPatterns) {
+          // Withdraw up to 28 (full inventory) of the item
+          await service.bankWithdraw(itemId, 28);
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await service.closeBank();
+        logger.info("[AutonomousBehavior] Targeted withdrawal complete");
+
+        // Restore saved quest goal
+        if (this.savedGoal) {
+          logger.info(
+            `[AutonomousBehavior] Restoring quest goal: ${this.savedGoal.type} — ${this.savedGoal.description}`,
+          );
+          this.currentGoal = this.savedGoal;
+          this.savedGoal = null;
+        } else {
+          this.clearGoal();
+        }
+        this.nextTickFast = true;
+      } catch (err) {
+        logger.warn(
+          `[AutonomousBehavior] Targeted withdrawal failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        // Restore goal anyway — let the system re-plan
+        if (this.savedGoal) {
+          this.currentGoal = this.savedGoal;
+          this.savedGoal = null;
+        }
+        this.nextTickFast = true;
+      } finally {
+        this.bankWithdrawalInProgress = false;
+      }
+    })();
   }
 
   /**
@@ -2208,8 +2579,63 @@ export class AutonomousBehaviorManager {
         if (goal?.location) return find("NAVIGATE_TO");
         return find("EXPLORE");
       }
-      case "NAVIGATE_TO":
+      case "NAVIGATE_TO": {
+        // NAVIGATE_TO failed — most likely we're already at the destination.
+        // For questing goals, try the arrival action (TALK_TO_NPC, ACCEPT_QUEST, etc.)
+        if (goal) {
+          const player = this.service?.getPlayerEntity();
+          if (player) {
+            const arrivalAction = this.getGoalActionOnArrival(goal, player);
+            if (arrivalAction) {
+              logger.info(
+                `[AutonomousBehavior] NAVIGATE_TO fallback: already at destination — switching to ${arrivalAction.name}`,
+              );
+              return arrivalAction;
+            }
+          }
+        }
+
+        // Not at destination — for questing goals, resolve proper target
+        if (goal?.type === "questing" && this.service) {
+          // For non-dialogue stages, navigate to the resource/mob area
+          if (goal.questStageType && goal.questStageType !== "dialogue") {
+            const stagePos = this.resolveQuestStageLocation(
+              goal.questStageType,
+              goal.questStageTarget,
+            );
+            if (stagePos) {
+              goal.targetPosition = stagePos;
+              logger.info(
+                `[AutonomousBehavior] NAVIGATE_TO fallback: resolved ${goal.questStageType}/${goal.questStageTarget} to [${stagePos[0].toFixed(0)}, ${stagePos[2].toFixed(0)}] — retrying`,
+              );
+              return find("NAVIGATE_TO");
+            }
+          }
+
+          // Dialogue/accept/complete → navigate to quest NPC
+          if (goal.questStartNpc) {
+            const worldMap = this.service.getWorldMap?.();
+            if (worldMap?.npcs) {
+              const npcId = goal.questStartNpc.toLowerCase();
+              const npc = worldMap.npcs.find(
+                (n: { id: string }) => n.id.toLowerCase() === npcId,
+              );
+              if (npc) {
+                goal.targetPosition = [
+                  npc.position.x,
+                  npc.position.y,
+                  npc.position.z,
+                ];
+                logger.info(
+                  `[AutonomousBehavior] NAVIGATE_TO fallback: resolved ${goal.questStartNpc} to [${npc.position.x.toFixed(0)}, ${npc.position.z.toFixed(0)}] — retrying`,
+                );
+                return find("NAVIGATE_TO");
+              }
+            }
+          }
+        }
         return find("EXPLORE");
+      }
       case "ATTACK_ENTITY":
         // No valid target → navigate to combat area or explore
         if (goal?.location) return find("NAVIGATE_TO");
@@ -2274,7 +2700,35 @@ export class AutonomousBehaviorManager {
 
         if (activeQuest?.status === "ready_to_complete")
           return find("COMPLETE_QUEST");
-        if (!goal.questStageType) return find("ACCEPT_QUEST");
+        if (!goal.questStageType) {
+          // Quest already in_progress (accepted via sendQuestAccept) → talk to NPC
+          // to progress dialogue stages, not try to re-accept
+          if (activeQuest?.status === "in_progress") {
+            return find("TALK_TO_NPC");
+          }
+
+          // Quest list is empty — we can't determine quest state.
+          // Request a refresh and return null so the system doesn't loop
+          // on TALK_TO_NPC forever. When quest data arrives, planner will
+          // re-create the goal with questId/questStageType.
+          if (questState.length === 0) {
+            this.service?.requestQuestList?.();
+            logger.info(
+              "[AutonomousBehavior] Quest list empty at NPC — requesting refresh",
+            );
+            return null;
+          }
+
+          // Check if ANY not_started quest exists — if not, quest was already accepted
+          const hasNotStarted = questState.some(
+            (q) => q.status === "not_started",
+          );
+          if (!hasNotStarted) {
+            // All quests started — talk to NPC to progress, or clear goal
+            return find("TALK_TO_NPC");
+          }
+          return find("ACCEPT_QUEST");
+        }
 
         switch (goal.questStageType) {
           case "kill":
@@ -2296,9 +2750,31 @@ export class AutonomousBehaviorManager {
               return find("SMELT_ORE");
             if (iTarget.includes("smith") || iTarget.includes("anvil"))
               return find("SMITH_ITEM");
-            if (iTarget.includes("cook") || iTarget.includes("range"))
-              return find("COOK_FOOD");
             if (iTarget.includes("fire")) return find("LIGHT_FIRE");
+            // Cooking: need a fire/range nearby — if none, light a fire first
+            if (
+              iTarget.includes("cook") ||
+              iTarget.includes("range") ||
+              isCookableTarget(iTarget)
+            ) {
+              const nearbyEnts = this.service?.getNearbyEntities() || [];
+              const hasFireNearby = nearbyEnts.some((e) => {
+                const n = (e.name || "").toLowerCase();
+                const t = (e.type || "").toLowerCase();
+                return (
+                  n.includes("fire") ||
+                  n.includes("range") ||
+                  t.includes("fire") ||
+                  t.includes("range")
+                );
+              });
+              if (hasFireNearby) return find("COOK_FOOD");
+              // No fire — light one first (agent needs logs + tinderbox)
+              logger.info(
+                "[AutonomousBehavior] Cooking target but no fire nearby — trying LIGHT_FIRE first",
+              );
+              return find("LIGHT_FIRE");
+            }
             return find("TALK_TO_NPC");
           }
           default:
@@ -2330,17 +2806,37 @@ export class AutonomousBehaviorManager {
       if (loc?.position) return loc.position;
     }
 
-    // Questing fallback: resolve via questStartNpc or quest stage location
+    // Questing: resolve to the ACTION LOCATION, not the quest NPC.
+    // For gather/kill/interact stages, the agent needs to be at the resource/mob area.
+    // Only navigate to the NPC for dialogue stages or to accept/complete quests.
     if (goal.type === "questing") {
+      // First: if the quest stage requires going to a specific area (forest, mine, etc.),
+      // resolve to that area — NOT to the quest NPC
+      if (goal.questStageType && goal.questStageType !== "dialogue") {
+        const stagePos = this.resolveQuestStageLocation(
+          goal.questStageType,
+          goal.questStageTarget,
+        );
+        if (stagePos) return stagePos;
+      }
+
+      // Dialogue stages or accept/complete → navigate to the quest NPC
       if (goal.questStartNpc) {
         const npcLoc = KNOWN_LOCATIONS[goal.questStartNpc];
         if (npcLoc?.position) return npcLoc.position;
+
+        // Fallback: search worldMap.npcs directly (in case KNOWN_LOCATIONS wasn't populated yet)
+        const worldMap = this.service?.getWorldMap?.();
+        if (worldMap?.npcs) {
+          const npcId = goal.questStartNpc.toLowerCase();
+          const npc = worldMap.npcs.find(
+            (n: { id: string }) => n.id.toLowerCase() === npcId,
+          );
+          if (npc) {
+            return [npc.position.x, npc.position.y, npc.position.z];
+          }
+        }
       }
-      const stagePos = this.resolveQuestStageLocation(
-        goal.questStageType,
-        goal.questStageTarget,
-      );
-      if (stagePos) return stagePos;
     }
 
     return null;
@@ -2369,12 +2865,241 @@ export class AutonomousBehaviorManager {
         areaKey = "furnace";
       else if (target.includes("smith") || target.includes("anvil"))
         areaKey = "anvil";
+      else if (
+        target.includes("cook") ||
+        target.includes("range") ||
+        isCookableTarget(target)
+      )
+        areaKey = "range";
     }
 
     if (areaKey) {
       const loc = KNOWN_LOCATIONS[areaKey];
       if (loc?.position) return loc.position;
     }
+    return null;
+  }
+
+  /**
+   * Check if a quest interact stage requires materials that are in the bank, not inventory.
+   * If so, saves the current quest goal and switches to banking to withdraw them.
+   * Returns an action (NAVIGATE_TO bank) or null if no bank redirect needed.
+   */
+  private checkQuestMaterialsInBank(
+    goal: CurrentGoal,
+    _player: PlayerEntity,
+  ): Action | null {
+    const target = (goal.questStageTarget || "").toLowerCase();
+
+    // Determine what raw material the stage needs in inventory
+    let requiredItemPattern: string | null = null;
+    if (isCookableTarget(target)) {
+      // Cooking stage: needs "raw_<target>" (e.g., "raw_shrimp")
+      requiredItemPattern = `raw_${target}`;
+    } else if (target.includes("fire")) {
+      // Firemaking stage: needs "logs" — handled by existing logic
+      return null;
+    } else {
+      // Other interact stages (smelt, smith) — handled by existing logic
+      return null;
+    }
+
+    if (!requiredItemPattern) return null;
+
+    // Step 1: Check if the agent has the required materials in inventory
+    const player = this.service?.getPlayerEntity();
+    const items = player?.items || [];
+    const rawFoodCount = items.filter((i) => {
+      const name = ((i.name || "") as string).toLowerCase();
+      return name.includes("raw") && name.includes(target);
+    }).length;
+
+    if (rawFoodCount > 0) {
+      // Has materials in inventory — proceed to cook
+      return null;
+    }
+
+    // Step 2: No raw materials in inventory. Figure out where they are.
+    // Check quest progress to understand the situation:
+    //   - stageProgress[raw_key] = how many raw were gathered (e.g., raw_shrimp: 8)
+    //   - stageProgress[target]  = how many were successfully processed (e.g., shrimp: 3)
+    const questState = this.service?.getQuestState?.() || [];
+    const quest = questState.find(
+      (q: { questId?: string }) => q.questId === goal.questId,
+    );
+    const stageProgress = (quest as Record<string, unknown>)?.stageProgress as
+      | Record<string, number>
+      | undefined;
+
+    const rawKey = requiredItemPattern.replace(/\s+/g, "_");
+    const gathered = stageProgress?.[rawKey] ?? 0;
+    const cooked = stageProgress?.[target] ?? 0;
+    const needed = goal.questStageCount || 1;
+
+    // Step 2a: Check bank cache for raw materials
+    const bankItems = this.service?.getBankItems?.() || [];
+    const bankItem = bankItems.find((b) => {
+      const name = (b.name || b.itemId || "")
+        .toLowerCase()
+        .replace(/\s+/g, "_");
+      return name.includes(requiredItemPattern!);
+    });
+
+    if (bankItem && Date.now() - this.lastBankWithdrawalAttempt >= 60_000) {
+      // Bank cache confirms raw materials exist in bank — go withdraw them
+      logger.info(
+        `[AutonomousBehavior] ${requiredItemPattern} found in bank cache — redirecting to withdraw`,
+      );
+      const bankItemId =
+        bankItem.itemId || bankItem.name || requiredItemPattern;
+
+      this.lastBankWithdrawalAttempt = Date.now();
+      this.savedGoal = { ...goal };
+      this.currentGoal = {
+        type: "banking",
+        description: `Withdraw ${requiredItemPattern} from bank for quest`,
+        target: 1,
+        progress: 0,
+        location: "bank",
+        startedAt: Date.now(),
+        bankWithdrawItems: [bankItemId],
+      };
+      this.nextTickFast = true;
+
+      return (
+        this.getAvailableActions().find((a) => a.name === "NAVIGATE_TO") || null
+      );
+    }
+
+    // Step 2b: Bank cache doesn't have materials (or is empty).
+    // If bank was never opened (cache empty) and we haven't checked recently,
+    // try one bank visit to be sure.
+    if (
+      bankItems.length === 0 &&
+      Date.now() - this.lastBankWithdrawalAttempt >= 60_000 &&
+      gathered > cooked
+    ) {
+      logger.info(
+        `[AutonomousBehavior] Bank cache empty, ${requiredItemPattern} might be in bank (gathered ${gathered}, cooked ${cooked}) — checking bank`,
+      );
+
+      this.lastBankWithdrawalAttempt = Date.now();
+      this.savedGoal = { ...goal };
+      this.currentGoal = {
+        type: "banking",
+        description: `Withdraw ${requiredItemPattern} from bank for quest`,
+        target: 1,
+        progress: 0,
+        location: "bank",
+        startedAt: Date.now(),
+        bankWithdrawItems: [requiredItemPattern],
+      };
+      this.nextTickFast = true;
+
+      return (
+        this.getAvailableActions().find((a) => a.name === "NAVIGATE_TO") || null
+      );
+    }
+
+    // Step 2c: No raw materials in inventory, not in bank (or bank already checked).
+    // If cooking progress < needed, the agent burned too many — gather more.
+    if (cooked < needed) {
+      const stillNeeded = needed - cooked;
+      const gatherType = this.questStageTargetToGoalType(target);
+      if (gatherType) {
+        logger.info(
+          `[AutonomousBehavior] Out of ${requiredItemPattern} (cooked ${cooked}/${needed}, burned some) — need to gather ${stillNeeded} more`,
+        );
+
+        // Resolve actual resource position from worldMap to avoid stale KNOWN_LOCATIONS
+        const locationKey =
+          gatherType === "fishing"
+            ? "fishing"
+            : gatherType === "woodcutting"
+              ? "trees"
+              : "mine";
+        let resourcePos: [number, number, number] | undefined;
+        const worldMap = this.service?.getWorldMap?.();
+        if (worldMap?.resources) {
+          const resourceMatch = worldMap.resources.find(
+            (r: { type: string; resourceId: string }) =>
+              r.type.includes(gatherType) || r.resourceId.includes(gatherType),
+          );
+          if (resourceMatch) {
+            resourcePos = [
+              resourceMatch.position.x,
+              resourceMatch.position.y,
+              resourceMatch.position.z,
+            ];
+            logger.info(
+              `[AutonomousBehavior] Resolved ${gatherType} position from worldMap: (${resourcePos[0].toFixed(0)}, ${resourcePos[2].toFixed(0)})`,
+            );
+          }
+        }
+
+        // Don't save goal — planner will naturally chain back to the cooking
+        // quest when the agent has raw materials and the quest is still active.
+        this.currentGoal = {
+          type: gatherType as CurrentGoal["type"],
+          description: `Gather more ${requiredItemPattern} — burned too many (${cooked}/${needed} cooked)`,
+          progress: 0,
+          target: stillNeeded,
+          location: locationKey,
+          targetPosition: resourcePos,
+          targetEntity: gatherType === "fishing" ? "fishing_spot" : undefined,
+          targetSkill: gatherType,
+          startedAt: Date.now(),
+        };
+        this.nextTickFast = true;
+
+        return (
+          this.getAvailableActions().find((a) => a.name === "NAVIGATE_TO") ||
+          null
+        );
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolve an NPC's position from KNOWN_LOCATIONS, worldMap, or nearby entities.
+   */
+  private resolveNpcPosition(npcName: string): [number, number, number] | null {
+    const npcKey = npcName.toLowerCase().replace(/\s+/g, "_");
+
+    // Check KNOWN_LOCATIONS
+    const knownLoc = KNOWN_LOCATIONS[npcKey];
+    if (knownLoc?.position) return knownLoc.position;
+
+    // Check worldMap.npcs
+    const worldMap = this.service?.getWorldMap?.();
+    if (worldMap?.npcs) {
+      const npc = worldMap.npcs.find(
+        (n: { id: string }) => n.id.toLowerCase() === npcKey,
+      );
+      if (npc) return [npc.position.x, npc.position.y, npc.position.z];
+    }
+
+    // Check nearby entities (NPC might be visible)
+    const nearby = this.service?.getNearbyEntities() || [];
+    const displayName = npcName.replace(/_/g, " ").toLowerCase();
+    const npcEntity = nearby.find((e) => {
+      const name = (e.name || "").toLowerCase();
+      return name.includes(displayName) || name.includes(npcKey);
+    });
+    if (npcEntity?.position) {
+      const pos = npcEntity.position;
+      if (Array.isArray(pos)) return pos as [number, number, number];
+      if (typeof pos === "object" && "x" in pos) {
+        return [
+          (pos as { x: number; y: number; z: number }).x,
+          (pos as { x: number; y: number; z: number }).y,
+          (pos as { x: number; y: number; z: number }).z,
+        ];
+      }
+    }
+
     return null;
   }
 
@@ -2394,23 +3119,35 @@ export class AutonomousBehaviorManager {
     const dist = this.getDistance2D(player.position, targetPos);
     if (dist === null || dist <= 15) return false;
 
-    // If the goal is a resource-gathering type, check if matching resources are already nearby
+    // If the goal is a resource-gathering type, check if matching resources are already nearby.
+    // But if the goal has an explicit targetPosition far away, trust it — the agent was
+    // specifically directed there (e.g., worldMap fishing spot vs a nearby non-functional entity).
     const entities = this.service?.getNearbyEntities() || [];
     const resourceGoalTypes = ["woodcutting", "fishing", "mining"];
-    if (resourceGoalTypes.includes(goal.type)) {
+    if (resourceGoalTypes.includes(goal.type) && !goal.targetPosition) {
       if (this.hasNearbyResourcesForGoal(goal.type, entities)) return false;
     }
 
-    // For questing kill goals, check if combat targets are already nearby
-    if (goal.type === "questing" && goal.questStageType === "kill") {
-      if (this.hasNearbyResourcesForGoal("combat_training", entities))
-        return false;
-      // Also check for any attackable entities nearby
-      const hasTarget = entities.some((e) => {
-        const type = (e.type || "").toLowerCase();
-        return type === "mob" || type === "npc" || type === "monster";
-      });
-      if (hasTarget) return false;
+    // For questing goals, check if the stage's resources are already nearby
+    if (goal.type === "questing" && goal.questStageType) {
+      if (goal.questStageType === "kill") {
+        if (this.hasNearbyResourcesForGoal("combat_training", entities))
+          return false;
+        const hasTarget = entities.some((e) => {
+          const type = (e.type || "").toLowerCase();
+          return type === "mob" || type === "npc" || type === "monster";
+        });
+        if (hasTarget) return false;
+      } else if (goal.questStageType === "gather") {
+        const effectiveType = this.questStageTargetToGoalType(
+          goal.questStageTarget,
+        );
+        if (
+          effectiveType &&
+          this.hasNearbyResourcesForGoal(effectiveType, entities)
+        )
+          return false;
+      }
     }
 
     return true;
@@ -2727,10 +3464,10 @@ export class AutonomousBehaviorManager {
     // === SYSTEM INSTRUCTION ===
     const traits = getPersonalityTraits(this.runtime);
     lines.push(
-      "You are a character living in an OSRS-style RPG. You have your own personality and preferences.",
+      "You are a character living in an OSRS-style RPG. You are preparing for duels against other agents.",
     );
     lines.push(
-      "Think through your decision step by step, keeping your personality in mind.",
+      "Every action you take should make you stronger for combat. Think step by step, keeping your personality and duel preparation in mind.",
     );
     lines.push("");
     lines.push("RESPONSE FORMAT:");
@@ -2756,6 +3493,192 @@ export class AutonomousBehaviorManager {
       lines.push(`- Favorite activities: ${traits.preferredSkills.join(", ")}`);
     if (traits.quirks.length > 0) lines.push(`- Quirk: ${traits.quirks[0]}`);
     lines.push("");
+
+    // === CURRENT MOTIVATION (derived from personality + duel awareness) ===
+    lines.push("=== YOUR CURRENT MOTIVATION ===");
+    lines.push(
+      "- Your PRIMARY PURPOSE is preparing for duels against other agents",
+    );
+    lines.push(
+      "- Everything you do — skilling, questing, gathering — makes you stronger for duels",
+    );
+    if (traits.adventurousness > 0.6)
+      lines.push("- You're itching for a new quest or unexplored area");
+    if (traits.aggression > 0.5)
+      lines.push("- You want to test yourself in combat");
+    if (traits.preferredSkills.length > 0)
+      lines.push(`- Your favorite thing to do is ${traits.preferredSkills[0]}`);
+    if (traits.patience < 0.3)
+      lines.push("- You get bored easily and like switching activities");
+    if (traits.patience > 0.7)
+      lines.push("- You're patient and like to master one thing at a time");
+    lines.push("");
+
+    // === DUEL PREPARATION ===
+    {
+      lines.push("=== DUEL PREPARATION ===");
+      lines.push(
+        "You are preparing for duels against other agents. Every action you take should make you stronger.",
+      );
+      lines.push("");
+
+      // Duel readiness assessment
+      const atkLvl = skills?.attack?.level ?? 1;
+      const strLvl = skills?.strength?.level ?? 1;
+      const defLvl = skills?.defense?.level ?? 1;
+      const conLvl = skills?.constitution?.level ?? 1;
+      const smithLvl = skills?.smithing?.level ?? 1;
+      const fishLvl = skills?.fishing?.level ?? 1;
+      const cookLvl = skills?.cooking?.level ?? 1;
+      const combatLvl = skillsData?.combatLevel ?? 1;
+
+      lines.push("Combat Readiness:");
+      lines.push(
+        `  Combat Level: ${combatLvl} | Attack: ${atkLvl} | Strength: ${strLvl} | Defense: ${defLvl} | Constitution: ${conLvl}`,
+      );
+
+      // Gear assessment
+      const weaponEquipped = hasWeaponEquipped;
+      const gearTiers = [
+        "bronze",
+        "iron",
+        "steel",
+        "mithril",
+        "adamant",
+        "rune",
+      ];
+      let equippedTier = "none";
+      const weaponInfo = player?.equipment?.weapon;
+      if (weaponInfo) {
+        const wName = (
+          typeof weaponInfo === "string"
+            ? weaponInfo
+            : String(
+                (weaponInfo as Record<string, unknown>).itemId ||
+                  (weaponInfo as Record<string, unknown>).name ||
+                  "",
+              )
+        ).toLowerCase();
+        for (const t of gearTiers) {
+          if (wName.includes(t)) {
+            equippedTier = t;
+            break;
+          }
+        }
+      }
+      lines.push(
+        `  Weapon: ${weaponEquipped ? `Yes (${equippedTier})` : "NONE — get a weapon!"}`,
+      );
+
+      // Food status
+      const duelInvItems = Array.isArray(player?.items) ? player.items : [];
+      const foodItems = duelInvItems.filter(
+        (item: { name?: string; itemId?: string }) => {
+          const n = (item.name || item.itemId || "").toLowerCase();
+          return (
+            n.includes("shrimp") ||
+            n.includes("trout") ||
+            n.includes("salmon") ||
+            n.includes("tuna") ||
+            n.includes("lobster") ||
+            n.includes("swordfish") ||
+            n.includes("shark") ||
+            n.includes("cooked")
+          );
+        },
+      );
+      lines.push(`  Food: ${foodItems.length} items`);
+
+      // Supply chain priorities
+      lines.push("");
+      lines.push("Duel Prep Priority Chain:");
+      if (!weaponEquipped)
+        lines.push("  1. GET A WEAPON — you can't duel without one");
+      else if (equippedTier === "bronze" || equippedTier === "none")
+        lines.push(
+          `  1. UPGRADE GEAR — ${equippedTier} is weak. Mine ore → smelt → smith better equipment`,
+        );
+      else
+        lines.push(
+          `  1. Gear OK (${equippedTier}) — focus on combat skills and food`,
+        );
+
+      if (foodItems.length < 5)
+        lines.push(
+          "  2. GET FOOD — fish and cook. You need food to survive duels",
+        );
+      else if (foodItems.length < 10)
+        lines.push("  2. More food would help — fish when convenient");
+      else lines.push("  2. Food supply OK");
+
+      if (combatLvl < 5)
+        lines.push(
+          "  3. TRAIN COMBAT — your combat level is very low. Fight monsters to level up",
+        );
+      else
+        lines.push(
+          `  3. Keep training combat (level ${combatLvl}) — higher stats = more damage and defense in duels`,
+        );
+
+      lines.push("");
+      lines.push(
+        "Supply chain: Mining → Smelting → Smithing → Better Gear → Stronger in Duels",
+      );
+      lines.push(
+        "Supply chain: Fishing → Cooking → Food → Healing in Duels → Longer Survival",
+      );
+
+      // Duel history
+      const duelHist = this.duelHistory;
+      if (duelHist.length > 0) {
+        const wins = duelHist.filter((d) => d.won).length;
+        const losses = duelHist.length - wins;
+        lines.push("");
+        lines.push(`Duel Record: ${wins}W / ${losses}L`);
+        const recent = duelHist.slice(-3);
+        for (const d of recent) {
+          const result = d.won ? "Won" : "Lost";
+          lines.push(
+            `  - ${result} vs ${d.opponentName} (ended at ${d.myHealth}HP)`,
+          );
+        }
+        if (losses > wins) {
+          lines.push(
+            "  Strategy: You're losing more than winning. Prioritize gear upgrades and food.",
+          );
+        }
+
+        // Post-duel strategic insights from recent performance
+        if (duelHist.length >= 3) {
+          const recentLosses = duelHist.slice(-5).filter((d) => !d.won);
+          const avgHealthOnLoss =
+            recentLosses.length > 0
+              ? Math.round(
+                  recentLosses.reduce((sum, d) => sum + d.myHealth, 0) /
+                    recentLosses.length,
+                )
+              : 0;
+
+          if (recentLosses.length >= 3) {
+            lines.push("  ⚠ LOSING STREAK — you need to change your approach:");
+            if (avgHealthOnLoss === 0 && foodItems.length < 10) {
+              lines.push(
+                "    → You're running out of food in duels. Prioritize fishing + cooking.",
+              );
+            }
+            if (equippedTier === "bronze" || equippedTier === "none") {
+              lines.push(
+                "    → Your gear is too weak. Mine + smith better equipment.",
+              );
+            }
+            lines.push(
+              "    → Consider training combat on monsters to raise your stats.",
+            );
+          }
+        }
+      }
+      lines.push("");
+    }
 
     // === OSRS COMMON SENSE RULES ===
     lines.push("=== GAME KNOWLEDGE (Important!) ===");
@@ -2925,6 +3848,24 @@ export class AutonomousBehaviorManager {
       const elapsed = Math.round((Date.now() - this.lastActionTime) / 1000);
       lines.push(
         `LAST ACTION (${elapsed}s ago): ${this.lastActionName} — ${this.lastActionResult || "unknown"}`,
+      );
+      lines.push("");
+    }
+
+    // === RECENT ACTIVITY (from goal history) ===
+    const recentGoals = this.getGoalHistory();
+    if (recentGoals.length > 0) {
+      lines.push("=== YOUR RECENT ACTIVITY ===");
+      const now = Date.now();
+      for (const entry of recentGoals.slice(-8).reverse()) {
+        const ageMin = Math.round((now - entry.completedAt) / 60000);
+        const desc = entry.skill
+          ? `${entry.type} (${entry.skill})`
+          : entry.type;
+        lines.push(`- [${ageMin}m ago] ${desc}`);
+      }
+      lines.push(
+        "Consider your recent activity — a human player would eventually want variety.",
       );
       lines.push("");
     }
@@ -3739,11 +4680,11 @@ export class AutonomousBehaviorManager {
       return false;
     }
 
-    // Don't try autonomous actions during an active duel
+    // Don't try autonomous actions during any phase of a duel
     if (this.inActiveDuel) {
       if (this.debug)
         logger.debug(
-          "[AutonomousBehavior] In active duel, skipping autonomous actions",
+          `[AutonomousBehavior] In duel (phase=${this.duelPhase}), skipping autonomous actions`,
         );
       return false;
     }
@@ -4084,6 +5025,22 @@ export class AutonomousBehaviorManager {
   }
 
   /**
+   * Count consecutive same-type goals from most recent backwards.
+   * Used by boredom check to trigger replanning for impatient agents.
+   */
+  private countConsecutiveSameGoalType(goalType: string): number {
+    const sorted = [...this.goalHistory].sort(
+      (a, b) => b.completedAt - a.completedAt,
+    );
+    let count = 0;
+    for (const entry of sorted) {
+      if (entry.goal.type === goalType) count++;
+      else break;
+    }
+    return count;
+  }
+
+  /**
    * Pause goal selection (user explicitly stopped the goal via dashboard)
    * This prevents the agent from auto-setting a new goal until resumed
    */
@@ -4185,13 +5142,21 @@ export class AutonomousBehaviorManager {
   // ============================================================================
 
   /**
-   * Called when a duel fight starts — save current goal and enter duel mode
+   * Called when a duel session starts (challenge accepted, entering rules/stakes screen)
+   * This is BEFORE the fight — agent should pause all open-world behavior immediately
    */
-  private onDuelStart(): void {
+  private onDuelSessionStarted(): void {
+    if (this.duelPhase !== null) {
+      logger.warn(
+        "[AutonomousBehavior] Already in duel phase, ignoring duplicate session start",
+      );
+      return;
+    }
     logger.info(
-      "[AutonomousBehavior] ⚔️ Duel starting — saving goal and entering duel mode",
+      "[AutonomousBehavior] ⚔️ Duel session started — pausing open-world behavior",
     );
-    this.inActiveDuel = true;
+    this.duelPhase = "session";
+    this.duelModeEnteredAt = Date.now();
 
     // Save current goal for restoration after duel
     if (this.currentGoal) {
@@ -4200,10 +5165,38 @@ export class AutonomousBehaviorManager {
         `[AutonomousBehavior] Saved goal: ${this.currentGoal.type} - ${this.currentGoal.description}`,
       );
     }
+
+    // Cancel any active movement to prevent walking away from arena
+    this.service
+      ?.executeMove({ target: [0, 0, 0], cancel: true })
+      .catch(() => {});
+
+    // Clear action lock so we don't hold stale state into the duel
+    this.actionLock = null;
   }
 
   /**
-   * Called when a duel completes — restore goal and record outcome
+   * Called when duel countdown finishes and fight begins
+   */
+  private onDuelFightStart(): void {
+    logger.info(
+      "[AutonomousBehavior] ⚔️ Duel fight starting — entering combat mode",
+    );
+    this.duelPhase = "fighting";
+
+    // If we somehow missed the session start (race condition), save goal now
+    if (!this.savedGoal && this.currentGoal) {
+      this.savedGoal = { ...this.currentGoal };
+    }
+
+    // Set duelModeEnteredAt if not already set (missed session start)
+    if (this.duelModeEnteredAt === 0) {
+      this.duelModeEnteredAt = Date.now();
+    }
+  }
+
+  /**
+   * Called when a duel completes — assess outcome, restore/override goal
    */
   private onDuelCompleted(data: unknown): void {
     const duelData = data as {
@@ -4230,7 +5223,7 @@ export class AutonomousBehaviorManager {
       opponentName,
       won,
       myHealth: player?.health?.current ?? 0,
-      foodUsed: 0, // TODO: track food consumption during duel
+      foodUsed: 0,
       timestamp: Date.now(),
     });
     if (this.duelHistory.length > this.MAX_DUEL_HISTORY) {
@@ -4238,20 +5231,147 @@ export class AutonomousBehaviorManager {
     }
 
     // Exit duel mode
-    this.inActiveDuel = false;
+    this.duelPhase = null;
+    this.duelModeEnteredAt = 0;
 
-    // Restore saved goal
+    // Generate post-duel assessment and adjust strategy
+    const assessment = this.assessDuelOutcome(won, opponentName, player);
+    logger.info(
+      `[AutonomousBehavior] Post-duel assessment: ${assessment.summary}`,
+    );
+
+    // Restore saved goal, potentially modified by assessment
     if (this.savedGoal) {
-      this.currentGoal = this.savedGoal;
+      if (assessment.overrideGoal) {
+        this.currentGoal = assessment.overrideGoal;
+        logger.info(
+          `[AutonomousBehavior] Duel assessment overriding goal → ${assessment.overrideGoal.type}: ${assessment.overrideGoal.description}`,
+        );
+      } else {
+        this.currentGoal = this.savedGoal;
+        logger.info(
+          `[AutonomousBehavior] Restored goal: ${this.savedGoal.type} - ${this.savedGoal.description}`,
+        );
+      }
       this.savedGoal = null;
-      logger.info(
-        `[AutonomousBehavior] Restored goal: ${this.currentGoal.type} - ${this.currentGoal.description}`,
-      );
     } else {
-      logger.info(
-        "[AutonomousBehavior] No saved goal to restore — agent will pick a new one",
-      );
+      logger.info("[AutonomousBehavior] No saved goal — replanning");
     }
+
+    // Trigger fast tick to resume immediately
+    this.nextTickFast = true;
+  }
+
+  /**
+   * Evaluate duel performance and recommend strategic shifts after a loss
+   */
+  private assessDuelOutcome(
+    won: boolean,
+    opponentName: string,
+    player: PlayerEntity | null | undefined,
+  ): { summary: string; overrideGoal: CurrentGoal | null } {
+    const foodCount = this.countPlayerFood(player);
+    const healthPct = player?.health
+      ? Math.round((player.health.current / player.health.max) * 100)
+      : 0;
+
+    // Count recent losses
+    const recentDuels = this.duelHistory.slice(-5);
+    const recentLosses = recentDuels.filter((d) => !d.won).length;
+
+    if (won) {
+      return {
+        summary: `Won vs ${opponentName} (${healthPct}% HP remaining, ${foodCount} food left)`,
+        overrideGoal: null,
+      };
+    }
+
+    // Lost — assess what went wrong
+    const weaponName =
+      typeof player?.equipment?.weapon === "string"
+        ? player.equipment.weapon
+        : "";
+    const hasEquippedWeapon = weaponName.length > 0;
+    const isBronze = weaponName.toLowerCase().includes("bronze");
+
+    // Critical: no weapon or bronze weapon → gear upgrade
+    if (!hasEquippedWeapon || isBronze) {
+      return {
+        summary: `Lost vs ${opponentName} — weak gear (${hasEquippedWeapon ? "bronze" : "no weapon"}). Prioritizing gear upgrade.`,
+        overrideGoal: {
+          type: "mining",
+          description:
+            "Mine ore for better gear — lost duel due to weak equipment",
+          progress: 0,
+          target: 1,
+          location: "mine",
+          targetSkill: "mining",
+          startedAt: Date.now(),
+        },
+      };
+    }
+
+    // No food → fishing/cooking
+    if (foodCount < 5) {
+      return {
+        summary: `Lost vs ${opponentName} — ran out of food (${foodCount} left). Prioritizing food supply.`,
+        overrideGoal: {
+          type: "fishing",
+          description: "Fish for food — lost duel with insufficient healing",
+          progress: 0,
+          target: 1,
+          location: "fishing",
+          targetSkill: "fishing",
+          startedAt: Date.now(),
+        },
+      };
+    }
+
+    // Repeated losses → combat training
+    if (recentLosses >= 3) {
+      return {
+        summary: `Lost vs ${opponentName} — ${recentLosses}/5 recent losses. Prioritizing combat training.`,
+        overrideGoal: {
+          type: "combat_training",
+          description: "Train combat skills — losing too many duels",
+          progress: 0,
+          target: 1,
+          location: "spawn",
+          startedAt: Date.now(),
+        },
+      };
+    }
+
+    // Normal loss — resume previous goal
+    return {
+      summary: `Lost vs ${opponentName} (${healthPct}% HP, ${foodCount} food). Resuming previous activity.`,
+      overrideGoal: null,
+    };
+  }
+
+  /**
+   * Count food items in player inventory (local helper to avoid import dependency)
+   */
+  private countPlayerFood(player: PlayerEntity | null | undefined): number {
+    if (!player?.items) return 0;
+    const foodNames = [
+      "shrimp",
+      "sardine",
+      "herring",
+      "trout",
+      "salmon",
+      "tuna",
+      "lobster",
+      "swordfish",
+      "shark",
+      "cooked",
+    ];
+    return player.items
+      .filter((item) => {
+        const n = (item.name || item.itemId || "").toLowerCase();
+        return foodNames.some((f) => n.includes(f));
+      })
+      .reduce((sum, item) => sum + (item.quantity || 1), 0);
   }
 
   // ============================================================================

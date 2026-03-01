@@ -69,6 +69,10 @@ export const KNOWN_LOCATIONS: Record<
     description: "Anvil for smithing bars into weapons and armor",
     entities: ["anvil"],
   },
+  range: {
+    description: "Cooking range for cooking raw food",
+    entities: ["range", "cooking_range"],
+  },
 };
 
 function getEntityPosition(entity: Entity): [number, number, number] | null {
@@ -174,6 +178,11 @@ export function populateKnownLocationsFromWorldMap(
   const anvilPos =
     firstStationPos(["anvil"]) ?? findCandidate(["anvil", "smith"]);
   if (anvilPos) setKnownLocationPosition("anvil", anvilPos);
+
+  const rangePos =
+    firstStationPos(["range", "cooking"]) ??
+    findCandidate(["kitchen", "cooking", "range"]);
+  if (rangePos) setKnownLocationPosition("range", rangePos);
 
   // Add towns
   for (const town of worldMap.towns) {

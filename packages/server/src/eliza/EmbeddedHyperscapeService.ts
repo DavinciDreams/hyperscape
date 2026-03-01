@@ -12,6 +12,7 @@ import {
   EventType,
   getDuelArenaConfig,
   getItem,
+  ALL_WORLD_AREAS,
   type World,
 } from "@hyperscape/shared";
 import { errMsg } from "../shared/errMsg.js";
@@ -22,6 +23,44 @@ import type {
   AgentQuestProgress,
   AgentQuestInfo,
 } from "./types.js";
+
+/** World map data shape matching plugin-hyperscape WorldMapData */
+interface EmbeddedWorldMapData {
+  towns: Array<{
+    id: string;
+    name: string;
+    position: { x: number; y: number; z: number };
+    size: string;
+    biome: string;
+    buildings: Array<{ type: string }>;
+  }>;
+  pois: Array<{
+    id: string;
+    name: string;
+    category: string;
+    position: { x: number; y: number; z: number };
+    biome: string;
+  }>;
+  resources: Array<{
+    type: string;
+    resourceId: string;
+    position: { x: number; y: number; z: number };
+    areaId: string;
+  }>;
+  stations: Array<{
+    id: string;
+    type: string;
+    position: { x: number; y: number; z: number };
+    areaId: string;
+  }>;
+  npcs: Array<{
+    id: string;
+    type: string;
+    name?: string;
+    position: { x: number; y: number; z: number };
+    areaId: string;
+  }>;
+}
 
 // Distance threshold for "nearby" entities (in world units)
 const NEARBY_DISTANCE = 50;
@@ -1801,6 +1840,134 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     }
 
     return npcs;
+  }
+
+  // =========================================================================
+  // World Map Data (for agent navigation)
+  // =========================================================================
+
+  /** Cached world map — built once since map data doesn't change at runtime */
+  private _worldMapCache: EmbeddedWorldMapData | null = null;
+
+  /**
+   * Get world map data including towns, POIs, resources, stations, and NPCs.
+   * Built from ALL_WORLD_AREAS manifest + world systems (TownSystem, POISystem).
+   * Matches the shape returned by HyperscapeService.getWorldMap() on the client.
+   */
+  getWorldMap(): EmbeddedWorldMapData | undefined {
+    if (this._worldMapCache) return this._worldMapCache;
+
+    const result: EmbeddedWorldMapData = {
+      towns: [],
+      pois: [],
+      resources: [],
+      stations: [],
+      npcs: [],
+    };
+
+    try {
+      // Get towns from TownSystem
+      const townSystem = this.world.getSystem("towns") as
+        | {
+            getTowns?: () => Array<{
+              id: string;
+              name: string;
+              position: { x: number; y: number; z: number };
+              size: string;
+              biome: string;
+              buildings: Array<{ type: string }>;
+            }>;
+          }
+        | undefined;
+
+      if (townSystem?.getTowns) {
+        for (const t of townSystem.getTowns()) {
+          result.towns.push({
+            id: t.id,
+            name: t.name,
+            position: { x: t.position.x, y: t.position.y, z: t.position.z },
+            size: t.size,
+            biome: t.biome,
+            buildings: t.buildings.map((b) => ({ type: b.type })),
+          });
+        }
+      }
+
+      // Get POIs from POISystem
+      const poiSystem = this.world.getSystem("pois") as
+        | {
+            getPOIs?: () => Array<{
+              id: string;
+              name: string;
+              category: string;
+              position: { x: number; y: number; z: number };
+              biome: string;
+            }>;
+          }
+        | undefined;
+
+      if (poiSystem?.getPOIs) {
+        for (const p of poiSystem.getPOIs()) {
+          result.pois.push({
+            id: p.id,
+            name: p.name,
+            category: p.category,
+            position: { x: p.position.x, y: p.position.y, z: p.position.z },
+            biome: p.biome,
+          });
+        }
+      }
+
+      // Get resources, stations, and NPCs from ALL_WORLD_AREAS manifest
+      for (const area of Object.values(ALL_WORLD_AREAS)) {
+        for (const resource of area.resources) {
+          result.resources.push({
+            type: resource.type,
+            resourceId: resource.resourceId,
+            position: {
+              x: resource.position.x,
+              y: resource.position.y,
+              z: resource.position.z,
+            },
+            areaId: area.id,
+          });
+        }
+
+        if (area.stations) {
+          for (const station of area.stations) {
+            result.stations.push({
+              id: station.id,
+              type: station.type,
+              position: {
+                x: station.position.x,
+                y: station.position.y,
+                z: station.position.z,
+              },
+              areaId: area.id,
+            });
+          }
+        }
+
+        for (const npc of area.npcs) {
+          result.npcs.push({
+            id: npc.id,
+            type: npc.type,
+            name: npc.name,
+            position: {
+              x: npc.position.x,
+              y: npc.position.y,
+              z: npc.position.z,
+            },
+            areaId: area.id,
+          });
+        }
+      }
+    } catch {
+      // Graceful fallback — map data is optional
+    }
+
+    this._worldMapCache = result;
+    return result;
   }
 
   // =========================================================================

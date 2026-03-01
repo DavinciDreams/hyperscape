@@ -113,6 +113,19 @@ const FALLBACK_PACKET_IDS: Record<string, number> = {
   streamingState: 259,
   prayerToggle: 278,
   prayerToggled: 282,
+  getQuestList: 159,
+  getQuestDetail: 160,
+  questList: 161,
+  questDetail: 162,
+  questStartConfirm: 163,
+  questAccept: 164,
+  questAbandon: 165,
+  questComplete: 168,
+  questStarted: 169,
+  questProgressed: 170,
+  questCompleted: 171,
+  firemakingRequest: 37,
+  cookingRequest: 38,
 };
 
 const FALLBACK_PACKET_NAMES: Record<number, string> = Object.fromEntries(
@@ -1629,7 +1642,9 @@ Respond with ONLY the action name, nothing else.`;
         this.hasReceivedSnapshot = true;
         logger.info("[HyperscapeService] 📸 Snapshot received");
         this.handleSnapshot(packetData);
-        this.requestQuestList();
+        // NOTE: requestQuestList() is NOT called here — the player hasn't entered
+        // the world yet (handleSnapshot is async: auth → characterSelected → enterWorld).
+        // Quest list is requested in entityAdded when the player entity spawns.
       }
 
       // Update game state based on packet
@@ -2061,6 +2076,14 @@ Respond with ONLY the action name, nothing else.`;
               `[HyperscapeService] Waiting for position before starting autonomous exploration (raw position: ${JSON.stringify(data.position)})`,
             );
           }
+
+          // Request quest list now that the player has spawned in the world.
+          // Server needs socket.player to be set (which happens during enterWorld)
+          // so this is the earliest safe point to request quests.
+          this.requestQuestList();
+          logger.info(
+            `[HyperscapeService] 📜 Requested quest list after player spawn`,
+          );
         } else if (data && data.id) {
           // Debug: Log mob entity additions with position info
           const entityData = data as Record<string, unknown>;
@@ -2241,8 +2264,36 @@ Respond with ONLY the action name, nothing else.`;
 
       case "inventoryUpdated":
         if (this.gameState.playerEntity && data) {
-          Object.assign(this.gameState.playerEntity, data);
-          const invData = data as { items?: unknown[] };
+          // Normalize items to match InventoryItem interface before assigning.
+          // Server sends {slot, itemId, quantity, item: {id, name, ...}} but
+          // the InventoryItem interface (and all code) expects {id, name, ...}
+          // at the top level. Without normalization, i.name is undefined after
+          // inventory updates, breaking all item lookups.
+          const invData = data as {
+            items?: Array<{
+              slot?: number;
+              itemId?: string;
+              quantity?: number;
+              item?: {
+                id?: string;
+                name?: string;
+                type?: string;
+                stackable?: boolean;
+                weight?: number;
+              };
+            }>;
+          };
+          if (invData.items && Array.isArray(invData.items)) {
+            invData.items = invData.items.map((i) => ({
+              id: i.item?.id || i.itemId || "",
+              name: i.item?.name || i.itemId || "",
+              itemId: i.itemId || i.item?.id || "",
+              quantity: i.quantity ?? 1,
+              slot: i.slot,
+              item: i.item,
+            }));
+          }
+          Object.assign(this.gameState.playerEntity, invData);
           logger.info(
             `[HyperscapeService] 📦 Inventory updated: ${invData.items?.length || 0} items`,
           );
@@ -2655,6 +2706,11 @@ Respond with ONLY the action name, nothing else.`;
             status: string;
             difficulty: string;
             questPoints: number;
+            startNpc?: string;
+            stageType?: string;
+            stageTarget?: string;
+            stageCount?: number;
+            stageProgress?: Record<string, number>;
           }>;
           questPoints?: number;
         };
@@ -2664,6 +2720,11 @@ Respond with ONLY the action name, nothing else.`;
             name: q.name,
             status: q.status,
             description: "",
+            startNpc: q.startNpc || "",
+            stageType: q.stageType,
+            stageTarget: q.stageTarget,
+            stageCount: q.stageCount,
+            stageProgress: q.stageProgress,
           }));
           logger.info(
             `[HyperscapeService] 📜 Quest list received: ${questListData.quests.length} quests`,
@@ -2721,8 +2782,11 @@ Respond with ONLY the action name, nothing else.`;
               progressData.description || existing.description;
           }
           logger.info(
-            `[HyperscapeService] 📜 Quest progressed: ${progressData.questId} - ${progressData.description || ""}`,
+            `[HyperscapeService] 📜 Quest progressed: ${progressData.questId} stage=${progressData.stage || "?"} - ${progressData.description || ""}`,
           );
+          // Re-fetch full quest list to pick up stage type/target/count changes
+          // (the questProgressed packet only has the stage ID, not the full stage info)
+          this.requestQuestList();
         }
         break;
       }
@@ -2819,6 +2883,11 @@ Respond with ONLY the action name, nothing else.`;
           `[HyperscapeService] ⚔️ Duel session started - entering duel interface`,
         );
         this.clearPendingDuelChallenge();
+        // Broadcast event so ABM can enter duel mode immediately
+        this.broadcastEvent(
+          "DUEL_SESSION_STARTED",
+          data as Record<string, unknown>,
+        );
         break;
       }
 
@@ -3516,6 +3585,150 @@ Respond with ONLY the action name, nothing else.`;
     this.sendCommand("resourceGather", {
       resourceId: command.resourceEntityId,
       playerPosition,
+    });
+  }
+
+  /**
+   * Execute firemaking — find tinderbox and logs in inventory and send
+   * the proper firemakingRequest packet so the server's ProcessingSystem
+   * creates a fire and emits FIRE_CREATED for quest tracking.
+   */
+  async executeFiremaking(): Promise<void> {
+    const player = this.getPlayerEntity();
+    if (!player?.items) {
+      throw new Error("No player or inventory data");
+    }
+
+    const items = player.items as Array<{
+      id?: string;
+      itemId?: string;
+      name?: string;
+      slot?: number;
+      item?: { name?: string };
+    }>;
+
+    // Find tinderbox slot
+    let tinderboxSlot = -1;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const name = (
+        item.name ||
+        item.itemId ||
+        item.item?.name ||
+        ""
+      ).toLowerCase();
+      if (name.includes("tinderbox")) {
+        tinderboxSlot = item.slot ?? i;
+        break;
+      }
+    }
+
+    // Find logs slot and id
+    let logsSlot = -1;
+    let logsId = "";
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const name = (
+        item.name ||
+        item.itemId ||
+        item.item?.name ||
+        ""
+      ).toLowerCase();
+      if (name.includes("log")) {
+        logsSlot = item.slot ?? i;
+        logsId = item.id || item.itemId || "logs";
+        break;
+      }
+    }
+
+    if (tinderboxSlot < 0 || logsSlot < 0) {
+      throw new Error(
+        `Missing items for firemaking: tinderbox=${tinderboxSlot >= 0}, logs=${logsSlot >= 0}`,
+      );
+    }
+
+    logger.info(
+      `[HyperscapeService] Sending firemakingRequest: logsId=${logsId}, logsSlot=${logsSlot}, tinderboxSlot=${tinderboxSlot}`,
+    );
+    this.sendCommand("firemakingRequest", {
+      logsId,
+      logsSlot,
+      tinderboxSlot,
+    });
+  }
+
+  /**
+   * Cook raw food on a nearby fire or cooking range.
+   * Sends the proper cookingRequest packet instead of resourceGather.
+   */
+  async executeCooking(): Promise<void> {
+    const player = this.getPlayerEntity();
+    if (!player?.items) {
+      throw new Error("No player or inventory data");
+    }
+
+    const items = player.items as Array<{
+      id?: string;
+      itemId?: string;
+      name?: string;
+      slot?: number;
+      item?: { name?: string };
+    }>;
+
+    // Find raw food slot and id
+    let rawFoodSlot = -1;
+    let rawFoodId = "";
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const name = (
+        item.name ||
+        item.itemId ||
+        item.item?.name ||
+        ""
+      ).toLowerCase();
+      if (name.includes("raw")) {
+        rawFoodSlot = item.slot ?? i;
+        rawFoodId = item.id || item.itemId || "raw_food";
+        break;
+      }
+    }
+
+    if (rawFoodSlot < 0) {
+      throw new Error("No raw food found in inventory");
+    }
+
+    // Find a fire or cooking range nearby
+    const nearby = this.getNearbyEntities();
+    let fireId = "";
+    for (const entity of nearby) {
+      const name = (entity.name || "").toLowerCase();
+      const type = (entity.type || "").toLowerCase();
+      if (
+        name.includes("fire") ||
+        name.includes("range") ||
+        name.includes("cooking") ||
+        type.includes("fire") ||
+        type.includes("range")
+      ) {
+        fireId =
+          entity.id ||
+          ((entity as unknown as Record<string, unknown>).entityId as string) ||
+          "";
+        if (fireId) break;
+      }
+    }
+
+    if (!fireId) {
+      throw new Error("No fire or cooking range found nearby");
+    }
+
+    logger.info(
+      `[HyperscapeService] Sending cookingRequest: rawFoodId=${rawFoodId}, rawFoodSlot=${rawFoodSlot}, fireId=${fireId}`,
+    );
+    this.sendCommand("cookingRequest", {
+      rawFoodId,
+      rawFoodSlot,
+      fireId,
     });
   }
 

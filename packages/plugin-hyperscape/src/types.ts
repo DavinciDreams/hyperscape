@@ -40,6 +40,7 @@ export type EventType =
   | "PLAYER_EQUIPMENT_CHANGED"
   | "CHAT_MESSAGE"
   | "DUEL_FIGHT_START"
+  | "DUEL_SESSION_STARTED"
   | "DUEL_COMPLETED";
 
 // Goal types used by the autonomous behavior system
@@ -196,6 +197,10 @@ export interface QuestData {
   status?: string;
   description?: string;
   stageProgress?: Record<string, number>;
+  startNpc?: string;
+  stageType?: string;
+  stageTarget?: string;
+  stageCount?: number;
 }
 
 /**

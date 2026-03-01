@@ -13,7 +13,7 @@ import {
 
 // Configuration constants
 const THOUGHTS_POLL_INTERVAL_MS = 3000;
-const MAX_THOUGHTS_DISPLAYED = 20;
+const MAX_THOUGHTS_DISPLAYED = 100;
 const FLASH_DURATION_MS = 1500; // How long the "new thought" flash lasts
 
 interface AgentThought {
@@ -157,9 +157,7 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
   // Get latest thinking thought
   const latestThinking =
     thoughts.find((t) => t.type === "thinking") || thoughts[0];
-  const olderThoughts = thoughts
-    .filter((t) => t.id !== latestThinking?.id)
-    .slice(0, 5);
+  const olderThoughts = thoughts.filter((t) => t.id !== latestThinking?.id);
 
   // Minimized state - compact pill button
   if (minimized) {
@@ -313,7 +311,7 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
 
                 {showHistory && (
                   <div
-                    className="mt-2 space-y-2 max-h-40 overflow-y-auto pr-1"
+                    className="mt-2 space-y-2 max-h-96 overflow-y-auto pr-1"
                     style={{ scrollbarWidth: "thin" }}
                   >
                     {olderThoughts.map((thought) => (
@@ -329,9 +327,8 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
                             {formatTimeAgo(thought.timestamp)}
                           </span>
                         </div>
-                        <p className="text-[10px] text-[#c9b896]/70 line-clamp-2">
-                          {cleanThoughtContent(thought.content).slice(0, 150)}
-                          {thought.content.length > 150 ? "..." : ""}
+                        <p className="text-[10px] text-[#c9b896]/70">
+                          {cleanThoughtContent(thought.content)}
                         </p>
                       </div>
                     ))}

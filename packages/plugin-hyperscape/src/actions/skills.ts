@@ -1487,11 +1487,7 @@ export const lightFireAction: Action = {
           error: new Error("Hyperscape service not available"),
         };
       }
-      const command: GatherResourceCommand = {
-        resourceEntityId: "",
-        skill: "firemaking",
-      };
-      await service.executeGatherResource(command);
+      await service.executeFiremaking();
 
       await callback?.({ text: "Lighting a fire...", action: "LIGHT_FIRE" });
 
@@ -1536,8 +1532,28 @@ export const cookFoodAction: Action = {
     const hasRawFood = inventoryItems.some((i) =>
       i.name?.toLowerCase().includes("raw"),
     );
+    if (!hasRawFood) return false;
 
-    return hasRawFood;
+    // Must have a fire or cooking range nearby
+    const nearby = service.getNearbyEntities();
+    const hasFireNearby = nearby.some((e) => {
+      const name = (e.name || "").toLowerCase();
+      const type = (e.type || "").toLowerCase();
+      return (
+        name.includes("fire") ||
+        name.includes("range") ||
+        name.includes("cooking") ||
+        type.includes("fire") ||
+        type.includes("range")
+      );
+    });
+
+    if (!hasFireNearby) {
+      logger.info(
+        "[COOK_FOOD] Validation failed: no fire or cooking range nearby",
+      );
+    }
+    return hasFireNearby;
   },
 
   handler: async (
@@ -1557,12 +1573,9 @@ export const cookFoodAction: Action = {
         };
       }
       const playerEntity = service.getPlayerEntity();
-      const content = message.content.text || "";
 
-      const rawFood = playerEntity?.items.find(
-        (i) =>
-          i.name?.toLowerCase().includes("raw") &&
-          i.name?.toLowerCase().includes(content.toLowerCase()),
+      const rawFood = playerEntity?.items.find((i) =>
+        i.name?.toLowerCase().includes("raw"),
       );
 
       if (!rawFood) {
@@ -1573,11 +1586,7 @@ export const cookFoodAction: Action = {
         return { success: false };
       }
 
-      const command: GatherResourceCommand = {
-        resourceEntityId: rawFood.id,
-        skill: "cooking",
-      };
-      await service.executeGatherResource(command);
+      await service.executeCooking();
 
       await callback?.({
         text: `Cooking ${rawFood.name}...`,

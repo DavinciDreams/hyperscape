@@ -1123,7 +1123,7 @@ export function registerAdminRoutes(
           // Get thoughts from ServerNetwork
           const rawThoughts =
             ServerNetwork.agentThoughts.get(characterId) ?? [];
-          const recentThoughts = rawThoughts.slice(0, 10).map((t) => ({
+          const recentThoughts = rawThoughts.slice(0, 100).map((t) => ({
             id: t.id,
             type: t.type,
             content: t.content,

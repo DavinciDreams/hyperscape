@@ -56,6 +56,26 @@ function normalizeLocationKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, "_");
 }
 
+// Food item keywords for detecting cooking targets in quest stages
+const COOKABLE_TARGETS = [
+  "shrimp",
+  "anchovies",
+  "sardine",
+  "herring",
+  "trout",
+  "salmon",
+  "tuna",
+  "lobster",
+  "swordfish",
+  "shark",
+  "meat",
+  "chicken",
+  "bread",
+];
+function isCookableTarget(target: string): boolean {
+  return COOKABLE_TARGETS.some((f) => target.includes(f));
+}
+
 function getPositionXZ(
   pos: PositionLike | null | undefined,
 ): { x: number; z: number } | null {
@@ -123,14 +143,80 @@ function resolveGoalTargetPosition(
   } | null,
 ): { targetPos: Position3; targetName: string } | null {
   if (!goal) return null;
+
+  updateKnownLocationsFromNearbyEntities(service);
+
+  // For questing goals: resolve to action-appropriate location.
+  // Dialogue stages (accept/turn-in) → navigate to the quest NPC.
+  // Gather/kill/interact stages → navigate to the resource/mob area (handled below at stage resolution).
+  const isDialogueStage =
+    !goal.questStageType || goal.questStageType === "dialogue";
+  if (goal.type === "questing" && goal.questStartNpc && isDialogueStage) {
+    const npcKey = normalizeLocationKey(goal.questStartNpc);
+    const npcLoc = KNOWN_LOCATIONS[npcKey];
+    if (npcLoc?.position) {
+      return { targetPos: npcLoc.position, targetName: goal.questStartNpc };
+    }
+    const worldMap = service.getWorldMap?.();
+    if (worldMap?.npcs) {
+      const npc = worldMap.npcs.find(
+        (n: { id: string }) => normalizeLocationKey(n.id) === npcKey,
+      );
+      if (npc) {
+        const pos: Position3 = [npc.position.x, npc.position.y, npc.position.z];
+        return { targetPos: pos, targetName: goal.questStartNpc };
+      }
+    }
+    // NPC not in KNOWN_LOCATIONS yet — fall through to other resolution methods
+  }
+
+  // For non-dialogue quest stages, resolve to the action area FIRST (before targetPosition/location)
+  if (
+    goal.type === "questing" &&
+    goal.questStageType &&
+    !isDialogueStage &&
+    goal.questStageTarget
+  ) {
+    const stageTarget = goal.questStageTarget.toLowerCase();
+    const stageType = goal.questStageType;
+    let areaKey: string | null = null;
+
+    if (stageType === "kill") {
+      areaKey = "spawn";
+    } else if (stageType === "gather") {
+      if (stageTarget.includes("log") || stageTarget.includes("wood"))
+        areaKey = "forest";
+      else if (stageTarget.includes("ore")) areaKey = "mine";
+      else if (stageTarget.includes("fish") || stageTarget.includes("shrimp"))
+        areaKey = "fishing";
+    } else if (stageType === "interact") {
+      if (stageTarget.includes("smelt") || stageTarget.includes("furnace"))
+        areaKey = "furnace";
+      else if (stageTarget.includes("smith") || stageTarget.includes("anvil"))
+        areaKey = "anvil";
+      else if (
+        stageTarget.includes("cook") ||
+        stageTarget.includes("range") ||
+        isCookableTarget(stageTarget)
+      )
+        areaKey = "range";
+    }
+
+    if (areaKey) {
+      const areaLoc = KNOWN_LOCATIONS[areaKey];
+      if (areaLoc?.position) {
+        return { targetPos: areaLoc.position, targetName: areaKey };
+      }
+    }
+    // Area not found — fall through to other resolution methods
+  }
+
   if (goal.targetPosition) {
     return {
       targetPos: goal.targetPosition,
       targetName: goal.location || goal.targetEntity || "dynamic target",
     };
   }
-
-  updateKnownLocationsFromNearbyEntities(service);
 
   const playerPos = getPositionArray(
     service.getPlayerEntity()?.position as PositionLike | null,
@@ -161,14 +247,14 @@ function resolveGoalTargetPosition(
     }
   }
 
-  // Quest NPC resolution: look up questStartNpc in KNOWN_LOCATIONS (populated by populateKnownLocationsFromWorldMap)
-  if (goal.questStartNpc) {
+  // Quest NPC resolution fallback — only for dialogue stages (non-dialogue stages
+  // should navigate to resource/mob area, not the NPC)
+  if (goal.questStartNpc && isDialogueStage) {
     const npcKey = normalizeLocationKey(goal.questStartNpc);
     const npcLoc = KNOWN_LOCATIONS[npcKey];
     if (npcLoc?.position) {
       return { targetPos: npcLoc.position, targetName: goal.questStartNpc };
     }
-    // Fallback: search worldMap.npcs directly
     const worldMap = service.getWorldMap?.();
     if (worldMap?.npcs) {
       const npc = worldMap.npcs.find(
@@ -181,32 +267,42 @@ function resolveGoalTargetPosition(
     }
   }
 
-  // Quest stage location resolution: map stage type + target to a known area
-  if (goal.questStageType && goal.questStageTarget) {
-    const stageTarget = goal.questStageTarget.toLowerCase();
-    const stageType = goal.questStageType;
-    let areaKey: string | null = null;
-
-    if (stageType === "kill") {
-      areaKey = "spawn"; // combat mobs near spawn
-    } else if (stageType === "gather") {
-      if (stageTarget.includes("log") || stageTarget.includes("wood"))
-        areaKey = "forest";
-      else if (stageTarget.includes("ore")) areaKey = "mine";
-      else if (stageTarget.includes("fish") || stageTarget.includes("shrimp"))
-        areaKey = "fishing";
-    } else if (stageType === "interact") {
-      if (stageTarget.includes("smelt") || stageTarget.includes("furnace"))
-        areaKey = "furnace";
-      else if (stageTarget.includes("smith") || stageTarget.includes("anvil"))
-        areaKey = "anvil";
+  // Last resort for questing goals
+  if (goal.type === "questing") {
+    // For dialogue stages: try to derive NPC from quest data if questStartNpc was missing
+    if (isDialogueStage) {
+      const questState = service.getQuestState?.() || [];
+      const bestQuest =
+        questState.find((q) => q.status === "in_progress") ||
+        questState.find((q) => q.status === "not_started");
+      if (bestQuest?.startNpc) {
+        const npcKey = normalizeLocationKey(bestQuest.startNpc);
+        const npcLoc = KNOWN_LOCATIONS[npcKey];
+        if (npcLoc?.position) {
+          return { targetPos: npcLoc.position, targetName: bestQuest.startNpc };
+        }
+        const worldMap = service.getWorldMap?.();
+        if (worldMap?.npcs) {
+          const npc = worldMap.npcs.find(
+            (n: { id: string }) => normalizeLocationKey(n.id) === npcKey,
+          );
+          if (npc) {
+            const pos: Position3 = [
+              npc.position.x,
+              npc.position.y,
+              npc.position.z,
+            ];
+            return { targetPos: pos, targetName: bestQuest.startNpc };
+          }
+        }
+      }
     }
 
-    if (areaKey) {
-      const areaLoc = KNOWN_LOCATIONS[areaKey];
-      if (areaLoc?.position) {
-        return { targetPos: areaLoc.position, targetName: areaKey };
-      }
+    // Absolute fallback: navigate to spawn/town
+    const spawnLoc =
+      KNOWN_LOCATIONS["spawn"] || KNOWN_LOCATIONS["central_haven"];
+    if (spawnLoc?.position) {
+      return { targetPos: spawnLoc.position, targetName: "town (quest NPCs)" };
     }
   }
 
@@ -810,11 +906,72 @@ Choose the goal ID that makes the most sense. Respond with ONLY the goal ID (e.g
         progress = 0;
         target = 3; // 3 exploration steps
         location = "spawn";
+      } else if (selectedGoal.type === "questing") {
+        // Questing goal from LLM — find the best quest NPC to navigate to.
+        // Quest discovery above may have been skipped (empty quest list at startup).
+        const questState = service.getQuestState?.() || [];
+        const bestQuest =
+          questState.find((q) => q.status === "in_progress") ||
+          questState.find((q) => q.status === "not_started");
+        if (bestQuest?.startNpc) {
+          targetEntity = bestQuest.startNpc;
+        }
+        location = "spawn"; // Quest NPCs are in/near town
+        progress = 0;
+        target = 1;
+      }
+
+      // Resolve questStartNpc for questing goals created via LLM path
+      let questStartNpc: string | undefined;
+      let questId: string | undefined;
+      if (goalType === "questing") {
+        const questState = service.getQuestState?.() || [];
+        const bestQuest =
+          questState.find((q) => q.status === "in_progress") ||
+          questState.find((q) => q.status === "not_started");
+        if (bestQuest) {
+          questStartNpc = bestQuest.startNpc || "";
+          questId = bestQuest.questId || "";
+        }
+        // Fallback: use TOOL_QUESTS hardcoded NPC if no quest data yet
+        if (!questStartNpc) {
+          const player = service.getPlayerEntity();
+          const toolQuests = [
+            {
+              questId: "goblin_slayer",
+              npc: "captain_rowan",
+              check: () => hasWeapon(player) || hasCombatCapableItem(player),
+            },
+            {
+              questId: "lumberjacks_first_lesson",
+              npc: "forester_wilma",
+              check: () => detectHasAxe(player),
+            },
+            {
+              questId: "torvins_tools",
+              npc: "torvin",
+              check: () => detectHasPickaxe(player),
+            },
+            {
+              questId: "fresh_catch",
+              npc: "fisherman_pete",
+              check: () => hasFishingEquipment(player),
+            },
+          ];
+          for (const tq of toolQuests) {
+            if (!tq.check()) {
+              questStartNpc = tq.npc;
+              questId = tq.questId;
+              break;
+            }
+          }
+        }
       }
 
       const initialTarget = resolveGoalTargetPosition(service, {
         location,
         targetEntity,
+        questStartNpc,
       });
 
       // Set the goal in the behavior manager
@@ -829,6 +986,7 @@ Choose the goal ID that makes the most sense. Respond with ONLY the goal ID (e.g
         targetSkill,
         targetSkillLevel,
         startedAt: Date.now(),
+        ...(goalType === "questing" ? { questStartNpc, questId } : {}),
       });
 
       // Build decision message with reasoning
@@ -948,7 +1106,7 @@ export const navigateToAction: Action = {
     const goal = behaviorManager?.getGoal();
 
     logger.info(
-      `[NAVIGATE_TO] Checking goal - type: ${goal?.type}, location: ${goal?.location}, targetPosition: ${goal?.targetPosition ? `(${goal.targetPosition[0]}, ${goal.targetPosition[2]})` : "none"}`,
+      `[NAVIGATE_TO] Checking goal - type: ${goal?.type}, location: ${goal?.location}, questStartNpc: ${goal?.questStartNpc}, targetPosition: ${goal?.targetPosition ? `(${goal.targetPosition[0]}, ${goal.targetPosition[2]})` : "none"}`,
     );
 
     const resolvedTarget = resolveGoalTargetPosition(service, goal || null);
