@@ -21,6 +21,8 @@ interface AgentThought {
   type: "situation" | "evaluation" | "thinking" | "decision";
   content: string;
   timestamp: number;
+  decisionPath?: "short-circuit" | "llm" | "scripted" | "planner" | "curiosity";
+  providers?: string[];
 }
 
 interface AgentThoughtsOverlayProps {
@@ -59,6 +61,72 @@ const renderThoughtContent = (content: string): React.ReactNode => {
           </p>
         );
       })}
+    </div>
+  );
+};
+
+const DECISION_PATH_STYLES: Record<
+  string,
+  { label: string; bg: string; text: string }
+> = {
+  "short-circuit": {
+    label: "SC",
+    bg: "bg-blue-500/20 border-blue-500/40",
+    text: "text-blue-300",
+  },
+  llm: {
+    label: "LLM",
+    bg: "bg-purple-500/20 border-purple-500/40",
+    text: "text-purple-300",
+  },
+  scripted: {
+    label: "SCRIPT",
+    bg: "bg-gray-500/20 border-gray-500/40",
+    text: "text-gray-300",
+  },
+  planner: {
+    label: "PLAN",
+    bg: "bg-green-500/20 border-green-500/40",
+    text: "text-green-300",
+  },
+  curiosity: {
+    label: "CURIOUS",
+    bg: "bg-orange-500/20 border-orange-500/40",
+    text: "text-orange-300",
+  },
+};
+
+const DecisionPathBadge: React.FC<{
+  path?: string;
+}> = ({ path }) => {
+  if (!path) return null;
+  const style = DECISION_PATH_STYLES[path];
+  if (!style) return null;
+  return (
+    <span
+      className={`text-[8px] px-1 py-0.5 rounded border ${style.bg} ${style.text} font-medium`}
+    >
+      {style.label}
+    </span>
+  );
+};
+
+const ProviderChips: React.FC<{
+  providers?: string[];
+  decisionPath?: string;
+}> = ({ providers, decisionPath }) => {
+  if (!providers || providers.length === 0 || decisionPath !== "llm")
+    return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {providers.map((p) => (
+        <span
+          key={p}
+          className="text-[7px] px-1 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-300/70"
+        >
+          {p}
+        </span>
+      ))}
     </div>
   );
 };
@@ -266,6 +334,7 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
                 <span className="text-[10px] font-medium text-[#c9a227] uppercase tracking-wider">
                   Current Thought
                 </span>
+                <DecisionPathBadge path={latestThinking.decisionPath} />
                 <span className="text-[9px] text-[#8b7355] ml-auto">
                   {formatTimeAgo(latestThinking.timestamp)}
                 </span>
@@ -289,6 +358,10 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
                 {/* Content */}
                 <div className="px-1">
                   {renderThoughtContent(latestThinking.content)}
+                  <ProviderChips
+                    providers={latestThinking.providers}
+                    decisionPath={latestThinking.decisionPath}
+                  />
                 </div>
               </div>
             </div>
@@ -320,9 +393,12 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
                         className="bg-[#151208] border border-[#8b4513]/20 rounded p-2"
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-[9px] text-[#8b7355] uppercase">
-                            {thought.type}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] text-[#8b7355] uppercase">
+                              {thought.type}
+                            </span>
+                            <DecisionPathBadge path={thought.decisionPath} />
+                          </div>
                           <span className="text-[8px] text-[#8b7355]/60">
                             {formatTimeAgo(thought.timestamp)}
                           </span>
@@ -330,6 +406,10 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
                         <p className="text-[10px] text-[#c9b896]/70">
                           {cleanThoughtContent(thought.content)}
                         </p>
+                        <ProviderChips
+                          providers={thought.providers}
+                          decisionPath={thought.decisionPath}
+                        />
                       </div>
                     ))}
                   </div>

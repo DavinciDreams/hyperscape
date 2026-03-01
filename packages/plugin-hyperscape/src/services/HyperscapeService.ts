@@ -42,6 +42,8 @@ import type {
 import { AutonomousBehaviorManager } from "../managers/autonomous-behavior-manager.js";
 import { registerEventHandlers } from "../events/handlers.js";
 import { getAvailableGoals } from "../providers/goalProvider.js";
+import { getPersonalityTraits } from "../providers/personalityProvider.js";
+import { getLastDesireCandidates } from "../managers/goal-progression-planner.js";
 import { SCRIPTED_AUTONOMY_CONFIG } from "../config/constants.js";
 import {
   resolveLocation,
@@ -4276,6 +4278,20 @@ Respond with ONLY the action name, nothing else.`;
     const goal = this.autonomousBehaviorManager?.getGoal();
     const availableGoals = getAvailableGoals(this);
 
+    // Include personality traits (computed once per session, cached)
+    const traits = getPersonalityTraits(this.runtime);
+    const personality = {
+      sociability: traits.sociability,
+      helpfulness: traits.helpfulness,
+      adventurousness: traits.adventurousness,
+      chattiness: traits.chattiness,
+      aggression: traits.aggression,
+      patience: traits.patience,
+    };
+
+    // Include last desire scores from planner Stage B
+    const desireScores = getLastDesireCandidates();
+
     this.sendCommand("syncGoal", {
       characterId: this.characterId,
       goal: goal
@@ -4303,6 +4319,8 @@ Respond with ONLY the action name, nothing else.`;
         targetSkillLevel: g.targetSkillLevel,
         location: g.location,
       })),
+      personality,
+      desireScores: desireScores.length > 0 ? desireScores : undefined,
     });
   }
 
@@ -4316,18 +4334,37 @@ Respond with ONLY the action name, nothing else.`;
   syncAgentThought(
     type: "situation" | "evaluation" | "thinking" | "decision" | "action",
     content: string,
+    meta?: {
+      health?: {
+        current: number;
+        max: number;
+        percent: number;
+        urgency: "critical" | "warning" | "safe";
+      };
+      decisionPath?:
+        | "short-circuit"
+        | "llm"
+        | "scripted"
+        | "planner"
+        | "curiosity";
+      providers?: string[];
+    },
   ): void {
     if (!this.characterId) {
       logger.debug("[HyperscapeService] Cannot sync thought: no characterId");
       return;
     }
 
-    const thought = {
+    const thought: Record<string, unknown> = {
       id: `thought-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       type,
       content,
       timestamp: Date.now(),
     };
+
+    if (meta?.health) thought.health = meta.health;
+    if (meta?.decisionPath) thought.decisionPath = meta.decisionPath;
+    if (meta?.providers) thought.providers = meta.providers;
 
     this.sendCommand("syncAgentThought", {
       characterId: this.characterId,
@@ -4343,9 +4380,26 @@ Respond with ONLY the action name, nothing else.`;
    *
    * @param thinking - The LLM's reasoning/thought process
    */
-  syncThoughtsToServer(thinking: string): void {
+  syncThoughtsToServer(
+    thinking: string,
+    meta?: {
+      health?: {
+        current: number;
+        max: number;
+        percent: number;
+        urgency: "critical" | "warning" | "safe";
+      };
+      decisionPath?:
+        | "short-circuit"
+        | "llm"
+        | "scripted"
+        | "planner"
+        | "curiosity";
+      providers?: string[];
+    },
+  ): void {
     if (!thinking || !thinking.trim()) return;
-    this.syncAgentThought("thinking", thinking);
+    this.syncAgentThought("thinking", thinking, meta);
   }
 
   // ============================================

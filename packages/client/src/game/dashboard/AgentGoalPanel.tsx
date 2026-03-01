@@ -55,6 +55,12 @@ interface AvailableGoal {
   location?: string;
 }
 
+interface DesireScore {
+  goalType: string;
+  score: number;
+  breakdown: string;
+}
+
 interface RecentGoal {
   type: string;
   description: string;
@@ -82,6 +88,7 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
   const [recentGoals, setRecentGoals] = useState<RecentGoal[]>([]);
   const [lastGoalType, setLastGoalType] = useState<string | null>(null);
   const [goalsPaused, setGoalsPaused] = useState(false);
+  const [desireScores, setDesireScores] = useState<DesireScore[]>([]);
 
   // Poll for goal updates when viewport is active
   useEffect(() => {
@@ -106,6 +113,7 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
         goal?: Goal;
         availableGoals?: AvailableGoal[];
         goalsPaused?: boolean;
+        desireScores?: DesireScore[];
       }>(`/api/agents/${agent.id}/goal`);
 
       if (!result.ok) {
@@ -139,6 +147,7 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
       setGoal(data?.goal || null);
       setAvailableGoals(data?.availableGoals || []);
       setGoalsPaused(data?.goalsPaused || false);
+      setDesireScores(data?.desireScores || []);
       setError(null);
     } catch (err) {
       console.error("[AgentGoalPanel] Error fetching goal:", err);
@@ -622,6 +631,26 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
                                 Recommended
                               </span>
                             )}
+                            {(() => {
+                              const ds = desireScores.find(
+                                (d) => d.goalType === g.type,
+                              );
+                              if (!ds) return null;
+                              const color =
+                                ds.score >= 30
+                                  ? "bg-green-500/20 text-green-400 border-green-500/30"
+                                  : ds.score >= 10
+                                    ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
+                                    : "bg-gray-500/20 text-gray-400 border-gray-500/30";
+                              return (
+                                <span
+                                  className={`text-[8px] px-1 py-0.5 rounded border ${color}`}
+                                  title={ds.breakdown}
+                                >
+                                  {ds.score}
+                                </span>
+                              );
+                            })()}
                           </div>
                           <div className="text-[8px] text-[#e8ebf4]/60 mt-0.5">
                             {g.description}

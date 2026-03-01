@@ -1542,3 +1542,562 @@
     display: none;
   }
 }
+
+/* ─── Decision Path Badges ────────────────────────────────────────────────── */
+
+.decision-path-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+.dp-short-circuit { background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); }
+.dp-llm           { background: rgba(168, 85, 247, 0.2); color: #c4b5fd; border: 1px solid rgba(168, 85, 247, 0.35); }
+.dp-scripted      { background: rgba(107, 114, 128, 0.2); color: #9ca3af; border: 1px solid rgba(107, 114, 128, 0.35); }
+.dp-planner       { background: rgba(34, 197, 94, 0.2);  color: #86efac; border: 1px solid rgba(34, 197, 94, 0.35); }
+.dp-curiosity     { background: rgba(249, 115, 22, 0.2); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.35); }
+
+/* ─── Provider Chips ──────────────────────────────────────────────────────── */
+
+.provider-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+  padding-left: 80px;
+}
+.provider-chip {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: rgba(168, 85, 247, 0.1);
+  color: rgba(196, 181, 253, 0.7);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+}
+
+/* ─── Personality Traits ──────────────────────────────────────────────────── */
+
+.personality-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+.personality-trait {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.trait-label {
+  font-size: 10px;
+  color: #8b8b9a;
+  width: 90px;
+  flex-shrink: 0;
+}
+.trait-bar-track {
+  flex: 1;
+  height: 4px;
+  background: #1c1c28;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.trait-bar-fill {
+  height: 100%;
+  background: #d4a84b;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.trait-value {
+  font-size: 9px;
+  color: #55556a;
+  width: 22px;
+  text-align: right;
+}
+
+/* ─── Desire Scores ───────────────────────────────────────────────────────── */
+
+.desire-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.desire-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.desire-type {
+  font-size: 10px;
+  color: #8b8b9a;
+  width: 100px;
+  flex-shrink: 0;
+  text-transform: capitalize;
+}
+.desire-bar-track {
+  flex: 1;
+  height: 4px;
+  background: #1c1c28;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.desire-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.desire-value {
+  font-size: 9px;
+  color: #55556a;
+  width: 28px;
+  text-align: right;
+  cursor: help;
+}
+
+/* ─── Pipeline Tab (React Flow) ──────────────────────────────────────────── */
+
+.pipeline-tab {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pipeline-flow-container {
+  height: 600px;
+  width: 100%;
+}
+
+/* React Flow overrides — match app background */
+.pipeline-flow-container .react-flow {
+  background: transparent !important;
+}
+/* Invisible handles */
+.pn-handle {
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 1px !important;
+  min-height: 1px !important;
+  background: transparent !important;
+  border: none !important;
+  opacity: 0 !important;
+}
+
+/* ─── Pipeline Node ─────────────────────────────────────────────────────── */
+
+.pn {
+  background: #111118;
+  border: 1px solid #1e1e2a;
+  border-top: 3px solid #1e1e2a;
+  border-radius: 8px;
+  width: 190px;
+  cursor: default;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  transition: border-color 300ms ease, box-shadow 300ms ease, transform 300ms ease;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Entry node (Survival) — left-side accent, slightly different shape */
+.pn.pn-entry {
+  border-left: 3px solid #2a2a38;
+  border-top: 1px solid #1e1e2a;
+}
+.pn.pn-entry.active { border-left-style: solid; }
+
+/* Output node (Action) — wider, bolder */
+.pn.pn-output {
+  width: 210px;
+  background: #0f0f1a;
+  border: 1px solid #22223a;
+  border-top: 3px solid #22223a;
+}
+
+.pn.active {
+  border-color: #2a2a38;
+  transform: translateY(-1px);
+  background: #131320;
+}
+
+.pn.pn-output.active {
+  background: #141428;
+}
+
+/* ─── Node Header ───────────────────────────────────────────────────────── */
+
+.pn-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 6px;
+}
+
+.pn-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: #4a4a5e;
+  opacity: 0.6;
+  transition: color 300ms, opacity 300ms;
+}
+
+.pn.active .pn-icon {
+  opacity: 1;
+}
+
+.pn.active-sc .pn-icon       { color: #93c5fd; }
+.pn.active-llm .pn-icon      { color: #c4b5fd; }
+.pn.active-planner .pn-icon  { color: #86efac; }
+.pn.active-curiosity .pn-icon { color: #fdba74; }
+
+.pn-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b6b80;
+  letter-spacing: 0.01em;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 300ms;
+}
+
+.pn.active .pn-label {
+  color: #e0e0ee;
+}
+
+.pn.active-sc .pn-label  { color: #93c5fd; }
+.pn.active-llm .pn-label  { color: #c4b5fd; }
+.pn.active-planner .pn-label { color: #86efac; }
+.pn.active-curiosity .pn-label { color: #fdba74; }
+
+.pn-freq {
+  font-size: 9px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  color: #3a3a4a;
+  background: #0d0d14;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 300ms;
+}
+
+.pn.active .pn-freq {
+  color: #6b6b80;
+}
+
+/* ─── Divider ───────────────────────────────────────────────────────────── */
+
+.pn-divider {
+  height: 1px;
+  background: #1a1a24;
+  margin: 0 10px;
+  transition: background 300ms;
+}
+
+/* ─── Node Body ─────────────────────────────────────────────────────────── */
+
+.pn-body {
+  padding: 8px 10px 10px;
+  min-height: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* ─── Active Pulse Indicator ────────────────────────────────────────────── */
+
+.pn-pulse {
+  position: absolute;
+  bottom: 6px;
+  right: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  animation: pnPulse 2s ease-in-out infinite;
+}
+
+@keyframes pnPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* ─── Content: Thought Text ─────────────────────────────────────────────── */
+
+.pn-thought {
+  font-size: 10px;
+  color: #4a4a5e;
+  font-style: italic;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  transition: color 300ms;
+}
+
+.pn-thought.active {
+  color: #9090a8;
+}
+
+.pn-idle {
+  color: #2e2e3e;
+  font-style: normal;
+  font-size: 10px;
+}
+
+/* ─── Content: Survival HP ──────────────────────────────────────────────── */
+
+.pn-survival {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pn-hp-track {
+  height: 6px;
+  background: #0d0d14;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pn-hp-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 500ms ease;
+}
+
+.pn-hp-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #4a4a5e;
+}
+
+.pn-hp-sep { color: #2e2e3e; }
+
+/* ─── Content: Provider Pills ───────────────────────────────────────────── */
+
+.pn-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.pn-pill {
+  font-size: 9px;
+  font-weight: 500;
+  padding: 2px 6px;
+  background: #15151f;
+  border: 1px solid #1e1e2a;
+  border-radius: 4px;
+  color: #8080a0;
+  transition: all 300ms;
+}
+
+/* ─── Content: Status Badge (Curiosity) ─────────────────────────────────── */
+
+.pn-status-badge-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.pn-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 10px;
+  color: #4a4a5e;
+  background: #0d0d14;
+  border: 1px solid #1e1e2a;
+}
+
+.pn-status-badge.on {
+  color: #fdba74;
+  background: rgba(249, 115, 22, 0.08);
+  border-color: rgba(249, 115, 22, 0.25);
+}
+
+.pn-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2e2e3e;
+}
+
+.pn-status-dot.on {
+  background: #f97316;
+  box-shadow: 0 0 6px rgba(249, 115, 22, 0.5);
+  animation: pnPulse 2s ease-in-out infinite;
+}
+
+/* ─── Content: Personality Traits ───────────────────────────────────────── */
+
+.pn-traits {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pn-trait-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pn-trait-name {
+  font-size: 8px;
+  color: #4a4a5e;
+  width: 26px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.pn-trait-track {
+  flex: 1;
+  height: 3px;
+  background: #0d0d14;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pn-trait-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #d4a84b, #e8c06a);
+  border-radius: 2px;
+  transition: width 500ms ease;
+}
+
+/* ─── Content: Desire Score ─────────────────────────────────────────────── */
+
+.pn-desire {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pn-desire-type {
+  font-size: 11px;
+  color: #8080a0;
+  text-transform: capitalize;
+  font-weight: 500;
+}
+
+.pn-desire-score {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #d4a84b;
+}
+
+/* ─── Content: Goal Selection ───────────────────────────────────────────── */
+
+.pn-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pn-goal-type {
+  font-size: 11px;
+  color: #8080a0;
+  text-transform: capitalize;
+  font-weight: 500;
+}
+
+.pn-goal-track {
+  height: 4px;
+  background: #0d0d14;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pn-goal-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+  border-radius: 2px;
+  transition: width 500ms ease;
+}
+
+.pn-goal-nums {
+  font-size: 9px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #4a4a5e;
+  text-align: right;
+}
+
+/* ─── Legend Bar ─────────────────────────────────────────────────────────── */
+
+.pipeline-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  border-top: 1px solid #141420;
+  background: #0a0a10;
+  flex-wrap: wrap;
+}
+
+.pipeline-legend-title {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #3a3a4a;
+  margin-right: 2px;
+}
+
+.pipeline-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  opacity: 0.5;
+  transition: opacity 300ms;
+}
+
+.pipeline-legend-item.live {
+  opacity: 1;
+}
+
+.pipeline-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: box-shadow 300ms;
+}
+
+.pipeline-legend-label {
+  font-size: 10px;
+  color: #6b6b80;
+  text-transform: capitalize;
+}
+
+.pipeline-legend-pct {
+  font-size: 9px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #3a3a4a;
+}
+
+.pipeline-legend-active {
+  margin-left: auto;
+  font-size: 10px;
+  color: #4a4a5e;
+}
+
+.pipeline-legend-active strong {
+  color: #8b8b9a;
+  font-weight: 600;
+}
+

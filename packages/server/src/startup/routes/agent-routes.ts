@@ -1300,6 +1300,10 @@ export function registerAgentRoutes(
         ServerNetwork.agentAvailableGoals.get(characterId) || [];
       const goalsPaused =
         ServerNetwork.agentGoalsPaused.get(characterId) || false;
+      const personality =
+        ServerNetwork.agentPersonality.get(characterId) || null;
+      const desireScores =
+        ServerNetwork.agentDesireScores.get(characterId) || [];
 
       if (!goal) {
         return reply.send({
@@ -1307,6 +1311,8 @@ export function registerAgentRoutes(
           goal: null,
           availableGoals,
           goalsPaused,
+          personality,
+          desireScores,
           message: goalsPaused ? "Goals paused by user" : "No active goal",
         });
       }
@@ -1333,6 +1339,8 @@ export function registerAgentRoutes(
         },
         availableGoals,
         goalsPaused,
+        personality,
+        desireScores,
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to fetch agent goal:", error);

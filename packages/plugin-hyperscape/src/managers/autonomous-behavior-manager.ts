@@ -974,7 +974,9 @@ export class AutonomousBehaviorManager {
             `[AutonomousBehavior] Curiosity: noticed ${novelName} nearby`,
           );
           this.lastThinking = `Hmm, I notice ${novelName} nearby... interesting.`;
-          this.syncThinkingToDashboard(this.lastThinking);
+          this.syncThinkingToDashboard(this.lastThinking, {
+            decisionPath: "curiosity",
+          });
           // Don't override tick — just inject context for the LLM to consider
         }
       }
@@ -1186,7 +1188,9 @@ export class AutonomousBehaviorManager {
         ? `[${goal.type}] ${goal.description} → ${shortCircuit.name}`
         : `→ ${shortCircuit.name}`;
       this.lastThinking = thought;
-      this.syncThinkingToDashboard(thought);
+      this.syncThinkingToDashboard(thought, {
+        decisionPath: "short-circuit",
+      });
 
       // Short-circuit path: compose state with minimal providers
       // Most short-circuit actions only need game state + nearby entities
@@ -1350,7 +1354,10 @@ export class AutonomousBehaviorManager {
         logger.info(`[AutonomousBehavior] LLM Thinking: ${thinking}`);
 
         // Sync to dashboard via service
-        this.syncThinkingToDashboard(thinking);
+        this.syncThinkingToDashboard(thinking, {
+          decisionPath: "llm",
+          providers: providerFilter || undefined,
+        });
       }
 
       if (this.debug) {
@@ -1368,7 +1375,10 @@ export class AutonomousBehaviorManager {
             "[AutonomousBehavior] Could not parse LLM action — retrying goal next tick",
           );
           this.lastThinking = `LLM unclear — retrying goal: ${this.currentGoal.description}`;
-          this.syncThinkingToDashboard(this.lastThinking);
+          this.syncThinkingToDashboard(this.lastThinking, {
+            decisionPath: "llm",
+            providers: providerFilter || undefined,
+          });
           this.nextTickFast = true;
           return null;
         }
@@ -1377,7 +1387,10 @@ export class AutonomousBehaviorManager {
         );
         this.lastThinking =
           "Could not determine action - exploring to find opportunities";
-        this.syncThinkingToDashboard(this.lastThinking);
+        this.syncThinkingToDashboard(this.lastThinking, {
+          decisionPath: "llm",
+          providers: providerFilter || undefined,
+        });
         return { action: exploreAction, state };
       }
 
@@ -1387,7 +1400,9 @@ export class AutonomousBehaviorManager {
           "[AutonomousBehavior] Blocked SET_GOAL because goals are paused by user - forcing IDLE",
         );
         this.lastThinking = "Goals are paused - waiting for direction";
-        this.syncThinkingToDashboard(this.lastThinking);
+        this.syncThinkingToDashboard(this.lastThinking, {
+          decisionPath: "scripted",
+        });
         selectedActionName = "IDLE";
       }
 
@@ -1411,13 +1426,17 @@ export class AutonomousBehaviorManager {
       // This prevents LLM errors (e.g. rate limits) from derailing goal progress.
       if (this.currentGoal) {
         this.lastThinking = `LLM error — retrying goal: ${this.currentGoal.description}`;
-        this.syncThinkingToDashboard(this.lastThinking);
+        this.syncThinkingToDashboard(this.lastThinking, {
+          decisionPath: "llm",
+        });
         this.nextTickFast = true;
         return null;
       }
 
       this.lastThinking = "Error occurred - exploring as fallback";
-      this.syncThinkingToDashboard(this.lastThinking);
+      this.syncThinkingToDashboard(this.lastThinking, {
+        decisionPath: "llm",
+      });
       return { action: exploreAction, state };
     }
   }
@@ -1850,13 +1869,47 @@ export class AutonomousBehaviorManager {
   /**
    * Sync the LLM's thinking to the dashboard for display
    */
-  private syncThinkingToDashboard(thinking: string): void {
+  private syncThinkingToDashboard(
+    thinking: string,
+    meta?: {
+      decisionPath?:
+        | "short-circuit"
+        | "llm"
+        | "scripted"
+        | "planner"
+        | "curiosity";
+      providers?: string[];
+    },
+  ): void {
     if (!this.service) return;
 
     try {
+      // Build health snapshot from current player state
+      const player = this.service.getPlayerEntity();
+      const healthMeta = player?.health
+        ? {
+            current: player.health.current ?? 0,
+            max: player.health.max ?? 100,
+            percent: Math.round(
+              ((player.health.current ?? 0) / (player.health.max || 100)) * 100,
+            ),
+            urgency:
+              (player.health.current ?? 100) / (player.health.max || 100) < 0.3
+                ? ("critical" as const)
+                : (player.health.current ?? 100) / (player.health.max || 100) <
+                    0.5
+                  ? ("warning" as const)
+                  : ("safe" as const),
+          }
+        : undefined;
+
       // Use the service to sync thoughts to the server
       // This will be displayed in the agent dashboard
-      this.service.syncThoughtsToServer(thinking);
+      this.service.syncThoughtsToServer(thinking, {
+        health: healthMeta,
+        decisionPath: meta?.decisionPath,
+        providers: meta?.providers,
+      });
     } catch (error) {
       // Non-critical but worth logging so we can see which agents can't
       // reach the server (typically "Not connected to Hyperscape server").
@@ -2648,7 +2701,9 @@ export class AutonomousBehaviorManager {
       // Sync planner reasoning as thinking to the dashboard so agents
       // show activity even when LLM calls fail on subsequent ticks
       this.lastThinking = `Goal: ${plan.goal.description} (${plan.reason})`;
-      this.syncThinkingToDashboard(this.lastThinking);
+      this.syncThinkingToDashboard(this.lastThinking, {
+        decisionPath: "planner",
+      });
 
       // If it's a quest accept, send the accept packet
       if (

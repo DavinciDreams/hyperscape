@@ -231,6 +231,22 @@ const COMBAT_FOOD_THRESHOLD = 10;
 /** Satiation window in milliseconds (15 minutes) */
 const SATIATION_WINDOW_MS = 15 * 60 * 1000;
 
+/** Last desire candidates from Stage B scoring (for dashboard display) */
+let lastDesireCandidates: Array<{
+  goalType: string;
+  score: number;
+  breakdown: string;
+}> = [];
+
+/** Get the last desire score candidates from the planner's Stage B evaluation */
+export function getLastDesireCandidates(): Array<{
+  goalType: string;
+  score: number;
+  breakdown: string;
+}> {
+  return lastDesireCandidates;
+}
+
 function getSkillLevel(player: PlayerEntity, skill: string): number {
   return player.skills?.[skill]?.level ?? 1;
 }
@@ -1059,6 +1075,13 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
 
   // --- Score and sort candidates ---
   candidates.sort((a, b) => b.score - a.score);
+
+  // Store desire candidates for dashboard display
+  lastDesireCandidates = candidates.map((c) => ({
+    goalType: c.id,
+    score: Math.round(c.score * 10) / 10,
+    breakdown: `base=${c.baseWeight}+duel${c.duelPrepBonus} pers=${c.personalityMul.toFixed(2)} sat=${c.satiation.toFixed(2)} opp=${c.opportunityBonus.toFixed(1)}`,
+  }));
 
   // Log all desire scores
   const scoreLog = candidates
