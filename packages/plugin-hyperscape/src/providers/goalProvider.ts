@@ -300,51 +300,67 @@ export function updateKnownLocationsFromNearbyEntities(
     return best;
   };
 
-  const spawnCandidate = nearestMatch((entity) => {
-    const name = entity.name?.toLowerCase() || "";
-    return (
-      name.includes("starter chest") ||
-      name.includes("goblin") ||
-      entity.mobType === "goblin"
+  // Only fill in positions that are MISSING — never overwrite worldMap-sourced positions.
+  // WorldMap data is authoritative (from server manifest). Nearby entity positions are
+  // transient and context-dependent (nearest tree != the forest area).
+
+  if (!KNOWN_LOCATIONS["spawn"]?.position) {
+    const spawnCandidate = nearestMatch((entity) => {
+      const name = entity.name?.toLowerCase() || "";
+      return (
+        name.includes("starter chest") ||
+        name.includes("goblin") ||
+        entity.mobType === "goblin"
+      );
+    });
+    if (spawnCandidate) setKnownLocationPosition("spawn", spawnCandidate);
+  }
+
+  if (!KNOWN_LOCATIONS["forest"]?.position) {
+    const forestCandidate = nearestMatch((entity) => {
+      const name = entity.name?.toLowerCase() || "";
+      const resourceType = entity.resourceType?.toLowerCase() || "";
+      return resourceType === "tree" || name.includes("tree");
+    });
+    if (forestCandidate) setKnownLocationPosition("forest", forestCandidate);
+  }
+
+  if (!KNOWN_LOCATIONS["fishing"]?.position) {
+    const fishingCandidate = nearestMatch((entity) => {
+      const name = entity.name?.toLowerCase() || "";
+      const resourceType = entity.resourceType?.toLowerCase() || "";
+      return resourceType === "fishing_spot" || name.includes("fishing spot");
+    });
+    if (fishingCandidate) setKnownLocationPosition("fishing", fishingCandidate);
+  }
+
+  if (!KNOWN_LOCATIONS["mine"]?.position) {
+    const mineCandidate = nearestMatch((entity) => {
+      const name = entity.name?.toLowerCase() || "";
+      const resourceType = entity.resourceType?.toLowerCase() || "";
+      return (
+        resourceType === "mining_rock" ||
+        resourceType === "ore" ||
+        name.includes("rock") ||
+        name.includes("ore")
+      );
+    });
+    if (mineCandidate) setKnownLocationPosition("mine", mineCandidate);
+  }
+
+  if (!KNOWN_LOCATIONS["furnace"]?.position) {
+    const furnaceCandidate = nearestMatch((entity) =>
+      (entity.name?.toLowerCase() || "").includes("furnace"),
     );
-  });
-  if (spawnCandidate) setKnownLocationPosition("spawn", spawnCandidate);
+    if (furnaceCandidate) setKnownLocationPosition("furnace", furnaceCandidate);
+  }
 
-  const forestCandidate = nearestMatch((entity) => {
-    const name = entity.name?.toLowerCase() || "";
-    const resourceType = entity.resourceType?.toLowerCase() || "";
-    return resourceType === "tree" || name.includes("tree");
-  });
-  if (forestCandidate) setKnownLocationPosition("forest", forestCandidate);
-
-  const fishingCandidate = nearestMatch((entity) => {
-    const name = entity.name?.toLowerCase() || "";
-    const resourceType = entity.resourceType?.toLowerCase() || "";
-    return resourceType === "fishing_spot" || name.includes("fishing spot");
-  });
-  if (fishingCandidate) setKnownLocationPosition("fishing", fishingCandidate);
-
-  const mineCandidate = nearestMatch((entity) => {
-    const name = entity.name?.toLowerCase() || "";
-    const resourceType = entity.resourceType?.toLowerCase() || "";
-    return (
-      resourceType === "mining_rock" ||
-      resourceType === "ore" ||
-      name.includes("rock") ||
-      name.includes("ore")
+  if (!KNOWN_LOCATIONS["anvil"]?.position) {
+    const anvilCandidate = nearestMatch((entity) =>
+      (entity.name?.toLowerCase() || "").includes("anvil"),
     );
-  });
-  if (mineCandidate) setKnownLocationPosition("mine", mineCandidate);
-
-  const furnaceCandidate = nearestMatch((entity) =>
-    (entity.name?.toLowerCase() || "").includes("furnace"),
-  );
-  if (furnaceCandidate) setKnownLocationPosition("furnace", furnaceCandidate);
-
-  const anvilCandidate = nearestMatch((entity) =>
-    (entity.name?.toLowerCase() || "").includes("anvil"),
-  );
-  if (anvilCandidate) setKnownLocationPosition("anvil", anvilCandidate);
+    if (anvilCandidate) setKnownLocationPosition("anvil", anvilCandidate);
+  }
 }
 
 /**

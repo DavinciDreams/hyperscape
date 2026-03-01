@@ -218,6 +218,75 @@ function resolveGoalTargetPosition(
     };
   }
 
+  // For resource-gathering goals, use resource-specific resolution BEFORE the
+  // broad nearby entity search. The alias-based search (e.g., "fish" matches
+  // "Fisherman Pete" NPC) returns the NEAREST name match, which is often a
+  // non-resource entity near the agent rather than the actual resource 150+ units away.
+  const resourceGoalLocationMap: Record<string, string> = {
+    fishing: "fishing",
+    woodcutting: "forest",
+    mining: "mine",
+  };
+  const resourceGoalResourceTypes: Record<string, string[]> = {
+    fishing: ["fishing_spot"],
+    woodcutting: ["tree"],
+    mining: ["mining_rock", "ore"],
+  };
+  const resourceLocationKey = goal.type
+    ? resourceGoalLocationMap[goal.type]
+    : undefined;
+  if (resourceLocationKey) {
+    // 1. Authoritative KNOWN_LOCATIONS (populated from worldMap manifest)
+    const resourceLoc = KNOWN_LOCATIONS[resourceLocationKey];
+    if (resourceLoc?.position) {
+      return {
+        targetPos: resourceLoc.position,
+        targetName: resourceLocationKey,
+      };
+    }
+    // 2. WorldMap lookup (resources, stations, towns/POIs)
+    const mapMatch = resolveWorldMapPosition(service, resourceLocationKey);
+    if (mapMatch) {
+      return { targetPos: mapMatch, targetName: resourceLocationKey };
+    }
+    // 3. Search nearby entities by ACTUAL resourceType (not alias-based name matching).
+    //    Fishing spots are dynamically spawned and not in the worldMap, so we must
+    //    search nearby entities — but only match entities with the correct resourceType.
+    const validResourceTypes = goal.type
+      ? resourceGoalResourceTypes[goal.type]
+      : undefined;
+    if (validResourceTypes) {
+      const entities = service.getNearbyEntities();
+      const playerPos3 = getPositionArray(
+        service.getPlayerEntity()?.position as PositionLike | null,
+      );
+      let nearestPos: Position3 | null = null;
+      let nearestDist = Infinity;
+      for (const entity of entities) {
+        const rt = (entity.resourceType || "").toLowerCase();
+        if (!validResourceTypes.some((vrt) => rt === vrt)) continue;
+        if (entity.depleted) continue;
+        const ePos = getPositionArray(entity.position as PositionLike | null);
+        if (!ePos) continue;
+        if (playerPos3) {
+          const dx = ePos[0] - playerPos3[0];
+          const dz = ePos[2] - playerPos3[2];
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestPos = ePos;
+          }
+        } else {
+          nearestPos = ePos;
+          break;
+        }
+      }
+      if (nearestPos) {
+        return { targetPos: nearestPos, targetName: resourceLocationKey };
+      }
+    }
+  }
+
   const playerPos = getPositionArray(
     service.getPlayerEntity()?.position as PositionLike | null,
   );

@@ -404,6 +404,8 @@ const names = [
   'streamingLeaderboard',  // Server -> Client: leaderboard update
   // Server-authoritative movement correction packet (keep last to avoid ID churn)
   'positionReconcile',
+  // Agent state query packets (appended to avoid shifting existing IDs)
+  'requestBankState',   // Client -> Server: request bank state without opening bank UI
 ]
 
 const byName: Record<string, PacketInfo> = {};

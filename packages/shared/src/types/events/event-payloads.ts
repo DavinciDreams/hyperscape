@@ -1526,6 +1526,12 @@ export interface QuestProgressedPayload {
   stage: string;
   progress: Record<string, number>;
   description: string;
+  /** Stage objective type (kill, gather, interact, dialogue, travel) */
+  stageType?: string;
+  /** Target for the current stage (mob type, item ID, etc.) */
+  stageTarget?: string;
+  /** Required count for the current stage */
+  stageCount?: number;
 }
 
 /**

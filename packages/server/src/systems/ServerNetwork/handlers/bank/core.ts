@@ -975,3 +975,24 @@ export function handleBankClose(
     bankId: bankEntityId,
   });
 }
+
+/**
+ * Handle request for bank state without opening the bank UI.
+ *
+ * This allows agents to query their bank contents at any time without
+ * needing to be near a bank NPC. Reuses sendBankStateWithTabs to send
+ * the same bankState packet the client already handles.
+ */
+export async function handleRequestBankState(
+  socket: ServerSocket,
+  _data: unknown,
+  world: World,
+): Promise<void> {
+  const playerId = getPlayerId(socket);
+  if (!playerId) return;
+
+  const db = getDatabase(world);
+  if (!db) return;
+
+  await sendBankStateWithTabs(socket, playerId, db);
+}

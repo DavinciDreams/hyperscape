@@ -1252,6 +1252,9 @@ export class EventBridge {
             stage: data.stage,
             progress: data.progress,
             description: data.description,
+            stageType: data.stageType,
+            stageTarget: data.stageTarget,
+            stageCount: data.stageCount,
           });
         }
       });

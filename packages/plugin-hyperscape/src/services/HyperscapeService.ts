@@ -79,6 +79,7 @@ const FALLBACK_PACKET_IDS: Record<string, number> = {
   playerState: 20,
   resourceDepleted: 27,
   resourceRespawned: 28,
+  resourceInteract: 30,
   resourceGather: 31,
   attackMob: 64,
   changeAttackStyle: 67,
@@ -126,6 +127,13 @@ const FALLBACK_PACKET_IDS: Record<string, number> = {
   questCompleted: 171,
   firemakingRequest: 37,
   cookingRequest: 38,
+  bankOpen: 114,
+  bankState: 115,
+  bankDeposit: 116,
+  bankDepositAll: 117,
+  bankWithdraw: 118,
+  bankClose: 121,
+  requestBankState: 267,
 };
 
 const FALLBACK_PACKET_NAMES: Record<number, string> = Object.fromEntries(
@@ -2294,6 +2302,7 @@ Respond with ONLY the action name, nothing else.`;
             }));
           }
           Object.assign(this.gameState.playerEntity, invData);
+          this.gameState.inventoryUpdatedAt = Date.now();
           logger.info(
             `[HyperscapeService] 📦 Inventory updated: ${invData.items?.length || 0} items`,
           );
@@ -2726,6 +2735,7 @@ Respond with ONLY the action name, nothing else.`;
             stageCount: q.stageCount,
             stageProgress: q.stageProgress,
           }));
+          this.gameState.questsUpdatedAt = Date.now();
           logger.info(
             `[HyperscapeService] 📜 Quest list received: ${questListData.quests.length} quests`,
           );
@@ -2771,21 +2781,31 @@ Respond with ONLY the action name, nothing else.`;
           stage?: string;
           progress?: Record<string, number>;
           description?: string;
+          stageType?: string;
+          stageTarget?: string;
+          stageCount?: number;
         };
         if (progressData.questId) {
           const existing = this.gameState.quests.find(
             (q) => q.questId === progressData.questId,
           );
           if (existing) {
-            existing.stageProgress = progressData.progress;
-            existing.description =
-              progressData.description || existing.description;
+            if (progressData.progress)
+              existing.stageProgress = progressData.progress;
+            if (progressData.description)
+              existing.description = progressData.description;
+            if (progressData.stage) existing.currentStage = progressData.stage;
+            if (progressData.stageType)
+              existing.stageType = progressData.stageType;
+            if (progressData.stageTarget)
+              existing.stageTarget = progressData.stageTarget;
+            if (progressData.stageCount !== undefined)
+              existing.stageCount = progressData.stageCount;
           }
           logger.info(
-            `[HyperscapeService] 📜 Quest progressed: ${progressData.questId} stage=${progressData.stage || "?"} - ${progressData.description || ""}`,
+            `[HyperscapeService] 📜 Quest progressed: ${progressData.questId} stage=${progressData.stage || "?"} type=${progressData.stageType || "?"} - ${progressData.description || ""}`,
           );
-          // Re-fetch full quest list to pick up stage type/target/count changes
-          // (the questProgressed packet only has the stage ID, not the full stage info)
+          // Keep requestQuestList() as safety net for edge cases
           this.requestQuestList();
         }
         break;
@@ -2835,6 +2855,7 @@ Respond with ONLY the action name, nothing else.`;
             slot: item.slot,
             tabIndex: item.tab_index ?? item.tabIndex,
           }));
+          this.gameState.bankItemsUpdatedAt = Date.now();
           logger.info(
             `[HyperscapeService] 🏦 Bank state cached: ${this.gameState.bankItems.length} items`,
           );
@@ -3589,6 +3610,29 @@ Respond with ONLY the action name, nothing else.`;
   }
 
   /**
+   * Server-authoritative resource interaction.
+   *
+   * Sends the `resourceInteract` packet which triggers PendingGatherManager
+   * on the server.  The server looks up the resource position, calculates the
+   * best approach tile (cardinal tile for trees/rocks, shore tile for fishing),
+   * walks the player there, and automatically starts gathering on arrival.
+   *
+   * This replaces the old manual walk→resourceGather two-step approach.
+   */
+  async executeResourceInteract(
+    resourceEntityId: string,
+    runMode = false,
+  ): Promise<void> {
+    logger.info(
+      `[HyperscapeService] Sending resourceInteract: resourceId=${resourceEntityId}, runMode=${runMode}`,
+    );
+    this.sendCommand("resourceInteract", {
+      resourceId: resourceEntityId,
+      runMode,
+    });
+  }
+
+  /**
    * Execute firemaking — find tinderbox and logs in inventory and send
    * the proper firemakingRequest packet so the server's ProcessingSystem
    * creates a fire and emits FIRE_CREATED for quest tracking.
@@ -4238,6 +4282,15 @@ Respond with ONLY the action name, nothing else.`;
    */
   public sendQuestComplete(questId: string): void {
     this.sendCommand("questComplete", { questId });
+  }
+
+  /**
+   * Request the server to send us the current bank state.
+   * Unlike bankOpen, this does NOT require being near a bank NPC.
+   * Response arrives via "bankState" packet which populates gameState.bankItems.
+   */
+  public requestBankState(): void {
+    this.sendCommand("requestBankState", {});
   }
 
   /**

@@ -13,7 +13,7 @@ import type {
 } from "@elizaos/core";
 import { logger } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
-import type { GatherResourceCommand, Entity, InventoryItem } from "../types.js";
+import type { Entity, InventoryItem } from "../types.js";
 import {
   hasAxe as detectHasAxe,
   hasPickaxe as detectHasPickaxe,
@@ -22,8 +22,6 @@ import {
   getItemName,
 } from "../utils/item-detection.js";
 
-// Max distance to attempt gathering (server update loop requires <= 4m)
-const MAX_GATHER_DISTANCE = 4;
 type HandlerOptionsParam =
   | HandlerOptions
   | Record<string, JsonValue | undefined>;
@@ -41,17 +39,6 @@ function getPositionXZ(pos: PositionLike | null | undefined): {
   }
   const obj = pos as { x: number; z: number };
   return { x: obj.x, z: obj.z };
-}
-
-function getPositionArray(
-  pos: PositionLike | null | undefined,
-): Position3 | null {
-  if (!pos) return null;
-  if (Array.isArray(pos) && pos.length >= 3) {
-    return [pos[0], pos[1], pos[2]];
-  }
-  const obj = pos as { x: number; y?: number; z: number };
-  return [obj.x, obj.y ?? 0, obj.z];
 }
 
 /**
@@ -387,18 +374,12 @@ export const chopTreeAction: Action = {
         };
       }
       const entities = service.getNearbyEntities();
-
-      // Find trees and sort by distance
       const player = service.getPlayerEntity();
       const playerPos = player?.position;
       const allTrees = entities.filter(isTree);
       const depletedTrees = entities.filter(isDepletedTree);
+      const woodcuttingLevel = player?.skills?.woodcutting?.level ?? 1;
 
-      // Get player's woodcutting level for level requirement filtering
-      const skills = player?.skills;
-      const woodcuttingLevel = skills?.woodcutting?.level ?? 1;
-
-      // Log depleted trees if any found (helps debug why agent might be waiting)
       if (depletedTrees.length > 0) {
         logger.info(
           `[CHOP_TREE] Handler: ${depletedTrees.length} depleted tree(s) nearby (waiting to respawn): ` +
@@ -408,20 +389,6 @@ export const chopTreeAction: Action = {
               .join(", "),
         );
       }
-
-      // Get all trees with distance, sorted by nearest
-      // CRITICAL: Filter by level requirement first so we don't walk to trees we can't chop
-      const treesWithDistance = allTrees
-        .filter((tree) => canChopTree(tree, woodcuttingLevel)) // Only trees we can chop
-        .map((e) => {
-          const entityPos = e.position;
-          const dist = entityPos
-            ? getEntityDistance(playerPos, entityPos)
-            : null;
-          return { entity: e, distance: dist, position: entityPos };
-        })
-        .filter((t) => t.distance !== null)
-        .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
 
       // Log trees that are too high level
       const tooHighLevelTrees = allTrees.filter(
@@ -437,112 +404,32 @@ export const chopTreeAction: Action = {
         );
       }
 
-      // Trees within gathering range (4m)
-      const nearbyTrees = treesWithDistance.filter(
-        (t) => t.distance !== null && t.distance <= MAX_GATHER_DISTANCE,
-      );
+      // Find choppable trees within approach range, sorted by distance
+      const treesWithDistance = allTrees
+        .filter((tree) => canChopTree(tree, woodcuttingLevel))
+        .map((e) => ({
+          entity: e,
+          distance: getEntityDistance(playerPos, e.position),
+        }))
+        .filter((t) => t.distance !== null && t.distance <= 40)
+        .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
 
-      // Trees within approach range (40m) - close enough to walk to
-      const approachableTrees = treesWithDistance.filter(
-        (t) => t.distance !== null && t.distance <= 40,
-      );
-
-      logger.info(
-        `[CHOP_TREE] Handler: Found ${nearbyTrees.length} choppable trees within ${MAX_GATHER_DISTANCE}m, ` +
-          `${approachableTrees.length} within 40m (woodcutting level: ${woodcuttingLevel})`,
-      );
-
-      // If no trees within gathering range but some within approach range, walk to nearest first
-      if (nearbyTrees.length === 0 && approachableTrees.length > 0) {
-        const nearest = approachableTrees[0];
-        const treePos = getPositionArray(
-          nearest.position as PositionLike | null,
-        );
-        if (!treePos) {
-          logger.info("[CHOP_TREE] Handler: Could not get tree position");
-          await callback?.({ text: "Could not locate tree.", error: true });
-          return { success: false };
-        }
-        const [treeX, treeY, treeZ] = treePos;
-
-        // Get player position to find nearest cardinal adjacent tile
-        const playerXZ = getPositionXZ(playerPos as PositionLike | null);
-        if (!playerXZ) {
-          logger.info("[CHOP_TREE] Handler: Could not get player position");
-          await callback?.({ text: "Could not locate player.", error: true });
-          return { success: false };
-        }
-        const { x: px, z: pz } = playerXZ;
-
-        // Server requires player to be on a CARDINAL adjacent tile (N/S/E/W, not diagonal)
-        // Calculate the 4 cardinal adjacent positions and pick the nearest one to player
-        const treeTileX = Math.floor(treeX);
-        const treeTileZ = Math.floor(treeZ);
-        const cardinalPositions = [
-          { x: treeTileX, z: treeTileZ - 1, dir: "South" }, // South (Z-)
-          { x: treeTileX, z: treeTileZ + 1, dir: "North" }, // North (Z+)
-          { x: treeTileX - 1, z: treeTileZ, dir: "West" }, // West (X-)
-          { x: treeTileX + 1, z: treeTileZ, dir: "East" }, // East (X+)
-        ];
-
-        // Find the cardinal position nearest to player
-        let nearestCardinal = cardinalPositions[0];
-        let minDist = Infinity;
-        for (const pos of cardinalPositions) {
-          const dist = Math.sqrt(
-            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
-          );
-          if (dist < minDist) {
-            minDist = dist;
-            nearestCardinal = pos;
-          }
-        }
-
-        // Target the center of the cardinal adjacent tile
-        const targetPos: [number, number, number] = [
-          nearestCardinal.x + 0.5,
-          treeY,
-          nearestCardinal.z + 0.5,
-        ];
-
-        logger.info(
-          `[CHOP_TREE] Handler: Walking to tree ${nearest.entity.name} - ` +
-            `stopping at cardinal tile [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir}) ` +
-            `(tree at tile [${treeTileX}, ${treeTileZ}], ${nearest.distance?.toFixed(1)}m away)`,
-        );
-
-        // Walk to cardinal adjacent position
-        await service.executeMove({ target: targetPos, runMode: false });
-        await callback?.({
-          text: `Walking to ${nearest.entity.name}...`,
-          action: "CHOP_TREE",
-        });
-        return {
-          success: true,
-          text: `Walking to ${nearest.entity.name}`,
-          data: { moving: true },
-        };
-      }
-
-      const tree = nearbyTrees[0]?.entity; // Pick nearest tree within range
+      const tree = treesWithDistance[0]?.entity;
 
       if (!tree) {
         // Check if there are trees but all too high level
         const allNearbyTrees = allTrees.filter((t) => {
-          const entityPos = t.position;
-          if (!entityPos) return false;
-          const dist = getEntityDistance(playerPos, entityPos);
+          const dist = getEntityDistance(playerPos, t.position);
           return dist !== null && dist <= 40;
         });
 
         if (allNearbyTrees.length > 0) {
-          const example = allNearbyTrees[0];
-          const requiredLvl = getTreeRequiredLevel(example);
+          const requiredLvl = getTreeRequiredLevel(allNearbyTrees[0]);
           logger.info(
             `[CHOP_TREE] Handler: All nearby trees require higher level (need ${requiredLvl}, have ${woodcuttingLevel})`,
           );
           await callback?.({
-            text: `All nearby trees require higher Woodcutting level (need ${requiredLvl}, have ${woodcuttingLevel}). Look for regular trees for lower levels.`,
+            text: `All nearby trees require higher Woodcutting level (need ${requiredLvl}, have ${woodcuttingLevel}).`,
             error: true,
           });
         } else {
@@ -554,93 +441,13 @@ export const chopTreeAction: Action = {
         return { success: false };
       }
 
-      // Log positions for debugging
-      const treePos = tree.position;
-      const treeDist = nearbyTrees[0]?.distance;
-
-      // Get tree position for cardinal check
-      const treePosArray = getPositionArray(treePos as PositionLike | null);
-      if (!treePosArray) {
-        logger.info("[CHOP_TREE] Handler: Could not get tree position");
-        await callback?.({ text: "Could not locate tree.", error: true });
-        return { success: false };
-      }
-      const [treeX, treeY, treeZ] = treePosArray;
-
-      // Get player position
-      const playerXZ = getPositionXZ(playerPos as PositionLike | null);
-      if (!playerXZ) {
-        logger.info("[CHOP_TREE] Handler: Could not get player position");
-        await callback?.({ text: "Could not locate player.", error: true });
-        return { success: false };
-      }
-      const { x: px, z: pz } = playerXZ;
-
-      // Check if player is on a cardinal adjacent tile
-      const treeTileX = Math.floor(treeX);
-      const treeTileZ = Math.floor(treeZ);
-      const playerTileX = Math.floor(px);
-      const playerTileZ = Math.floor(pz);
-
-      const isCardinalAdjacent =
-        (playerTileX === treeTileX &&
-          Math.abs(playerTileZ - treeTileZ) === 1) ||
-        (playerTileZ === treeTileZ && Math.abs(playerTileX - treeTileX) === 1);
-
+      // Server-authoritative: PendingGatherManager handles walking to the
+      // correct cardinal tile and starting the gather on arrival.
       logger.info(
-        `[CHOP_TREE] Handler: Tree ${tree.id} (${tree.name}) ` +
-          `at tile [${treeTileX}, ${treeTileZ}], player at tile [${playerTileX}, ${playerTileZ}], ` +
-          `dist=${treeDist?.toFixed(1)}m, cardinalAdjacent=${isCardinalAdjacent}`,
+        `[CHOP_TREE] Sending resourceInteract for ${tree.name} (${tree.id}), ` +
+          `dist=${treesWithDistance[0].distance?.toFixed(1)}`,
       );
-
-      // If not on cardinal adjacent tile, walk to one
-      if (!isCardinalAdjacent) {
-        const cardinalPositions = [
-          { x: treeTileX, z: treeTileZ - 1, dir: "South" },
-          { x: treeTileX, z: treeTileZ + 1, dir: "North" },
-          { x: treeTileX - 1, z: treeTileZ, dir: "West" },
-          { x: treeTileX + 1, z: treeTileZ, dir: "East" },
-        ];
-
-        let nearestCardinal = cardinalPositions[0];
-        let minDist = Infinity;
-        for (const pos of cardinalPositions) {
-          const dist = Math.sqrt(
-            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
-          );
-          if (dist < minDist) {
-            minDist = dist;
-            nearestCardinal = pos;
-          }
-        }
-
-        const targetPos: [number, number, number] = [
-          nearestCardinal.x + 0.5,
-          treeY,
-          nearestCardinal.z + 0.5,
-        ];
-
-        logger.info(
-          `[CHOP_TREE] Handler: Not on cardinal tile, moving to [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir})`,
-        );
-
-        await service.executeMove({ target: targetPos, runMode: false });
-        await callback?.({
-          text: `Positioning to chop ${tree.name}...`,
-          action: "CHOP_TREE",
-        });
-        return {
-          success: true,
-          text: `Positioning to chop ${tree.name}`,
-          data: { moving: true },
-        };
-      }
-
-      const command: GatherResourceCommand = {
-        resourceEntityId: tree.id,
-        skill: "woodcutting",
-      };
-      await service.executeGatherResource(command);
+      await service.executeResourceInteract(tree.id);
 
       await callback?.({ text: `Chopping ${tree.name}`, action: "CHOP_TREE" });
 
@@ -836,18 +643,12 @@ export const mineRockAction: Action = {
         };
       }
       const entities = service.getNearbyEntities();
-
-      // Find rocks and sort by distance
       const player = service.getPlayerEntity();
       const playerPos = player?.position;
       const allRocks = entities.filter(isRock);
       const depletedRocks = entities.filter(isDepletedRock);
+      const miningLevel = player?.skills?.mining?.level ?? 1;
 
-      // Get player's mining level for level requirement filtering
-      const skills = player?.skills;
-      const miningLevel = skills?.mining?.level ?? 1;
-
-      // Log depleted rocks if any found
       if (depletedRocks.length > 0) {
         logger.info(
           `[MINE_ROCK] Handler: ${depletedRocks.length} depleted rock(s) nearby (waiting to respawn): ` +
@@ -857,20 +658,6 @@ export const mineRockAction: Action = {
               .join(", "),
         );
       }
-
-      // Get all rocks with distance, sorted by nearest
-      // CRITICAL: Filter by level requirement first so we don't walk to rocks we can't mine
-      const rocksWithDistance = allRocks
-        .filter((rock) => canMineRock(rock, miningLevel)) // Only rocks we can mine
-        .map((e) => {
-          const entityPos = e.position;
-          const dist = entityPos
-            ? getEntityDistance(playerPos, entityPos)
-            : null;
-          return { entity: e, distance: dist, position: entityPos };
-        })
-        .filter((r) => r.distance !== null)
-        .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
 
       // Log rocks that are too high level
       const tooHighLevelRocks = allRocks.filter(
@@ -886,120 +673,28 @@ export const mineRockAction: Action = {
         );
       }
 
-      // Rocks within gathering range (4m)
-      const nearbyRocks = rocksWithDistance.filter(
-        (r) => r.distance !== null && r.distance <= MAX_GATHER_DISTANCE,
-      );
+      // Find mineable rocks within approach range, sorted by distance
+      const rocksWithDistance = allRocks
+        .filter((rock) => canMineRock(rock, miningLevel))
+        .map((e) => ({
+          entity: e,
+          distance: getEntityDistance(playerPos, e.position),
+        }))
+        .filter((r) => r.distance !== null && r.distance <= 40)
+        .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
 
-      // Rocks within approach range (40m)
-      const approachableRocks = rocksWithDistance.filter(
-        (r) => r.distance !== null && r.distance <= 40,
-      );
+      const rock = rocksWithDistance[0]?.entity;
 
-      logger.info(
-        `[MINE_ROCK] Handler: Found ${nearbyRocks.length} mineable rocks within ${MAX_GATHER_DISTANCE}m, ` +
-          `${approachableRocks.length} within 40m (mining level: ${miningLevel})`,
-      );
-
-      // If no rocks within gathering range but some within approach range, walk to nearest
-      if (nearbyRocks.length === 0 && approachableRocks.length > 0) {
-        const nearest = approachableRocks[0];
-        const rockPos = nearest.position as
-          | [number, number, number]
-          | { x: number; y: number; z: number };
-
-        let rockX: number, rockY: number, rockZ: number;
-        if (Array.isArray(rockPos)) {
-          [rockX, rockY, rockZ] = rockPos;
-        } else if (rockPos && typeof rockPos === "object" && "x" in rockPos) {
-          rockX = rockPos.x;
-          rockY = rockPos.y;
-          rockZ = rockPos.z;
-        } else {
-          logger.info("[MINE_ROCK] Handler: Could not get rock position");
-          await callback?.({ text: "Could not locate rock.", error: true });
-          return { success: false };
-        }
-
-        // Get player position to find nearest cardinal adjacent tile
-        let px = 0,
-          pz = 0;
-        if (Array.isArray(playerPos)) {
-          px = playerPos[0];
-          pz = playerPos[2];
-        } else if (
-          playerPos &&
-          typeof playerPos === "object" &&
-          "x" in playerPos
-        ) {
-          const pos = playerPos as { x: number; z: number };
-          px = pos.x;
-          pz = pos.z;
-        }
-
-        // Calculate cardinal adjacent positions
-        const rockTileX = Math.floor(rockX);
-        const rockTileZ = Math.floor(rockZ);
-        const cardinalPositions = [
-          { x: rockTileX, z: rockTileZ - 1, dir: "South" },
-          { x: rockTileX, z: rockTileZ + 1, dir: "North" },
-          { x: rockTileX - 1, z: rockTileZ, dir: "West" },
-          { x: rockTileX + 1, z: rockTileZ, dir: "East" },
-        ];
-
-        // Find the cardinal position nearest to player
-        let nearestCardinal = cardinalPositions[0];
-        let minDist = Infinity;
-        for (const pos of cardinalPositions) {
-          const dist = Math.sqrt(
-            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
-          );
-          if (dist < minDist) {
-            minDist = dist;
-            nearestCardinal = pos;
-          }
-        }
-
-        const targetPos: [number, number, number] = [
-          nearestCardinal.x + 0.5,
-          rockY,
-          nearestCardinal.z + 0.5,
-        ];
-
-        logger.info(
-          `[MINE_ROCK] Handler: Walking to rock ${nearest.entity.name} - ` +
-            `stopping at cardinal tile [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir}) ` +
-            `(rock at tile [${rockTileX}, ${rockTileZ}], ${nearest.distance?.toFixed(1)}m away)`,
-        );
-
-        await service.executeMove({ target: targetPos, runMode: false });
-        await callback?.({
-          text: `Walking to ${nearest.entity.name}...`,
-          action: "MINE_ROCK",
-        });
-        return {
-          success: true,
-          text: `Walking to ${nearest.entity.name}`,
-          data: { moving: true },
-        };
-      }
-
-      // Find the nearest rock we can mine
-      const rock = nearbyRocks[0]?.entity || approachableRocks[0]?.entity;
       if (!rock) {
-        // Check if there are rocks but all too high level
         const allNearbyRocks = allRocks.filter((r) => {
-          const entityPos = r.position;
-          if (!entityPos) return false;
-          const dist = getEntityDistance(playerPos, entityPos);
+          const dist = getEntityDistance(playerPos, r.position);
           return dist !== null && dist <= 40;
         });
 
         if (allNearbyRocks.length > 0) {
-          const example = allNearbyRocks[0];
-          const requiredLvl = getRockRequiredLevel(example);
+          const requiredLvl = getRockRequiredLevel(allNearbyRocks[0]);
           await callback?.({
-            text: `All nearby rocks require higher Mining level (need ${requiredLvl}, have ${miningLevel}). Look for copper/tin rocks for lower levels.`,
+            text: `All nearby rocks require higher Mining level (need ${requiredLvl}, have ${miningLevel}).`,
             error: true,
           });
         } else {
@@ -1011,109 +706,13 @@ export const mineRockAction: Action = {
         return { success: false };
       }
 
-      // Check if we're on a cardinal adjacent tile
-      const rockPosition = rock.position as
-        | [number, number, number]
-        | { x: number; y: number; z: number };
-
-      let rockX: number, rockY: number, rockZ: number;
-      if (Array.isArray(rockPosition)) {
-        [rockX, rockY, rockZ] = rockPosition;
-      } else if (
-        rockPosition &&
-        typeof rockPosition === "object" &&
-        "x" in rockPosition
-      ) {
-        rockX = rockPosition.x;
-        rockY = rockPosition.y;
-        rockZ = rockPosition.z;
-      } else {
-        await callback?.({
-          text: "Could not determine rock position.",
-          error: true,
-        });
-        return { success: false };
-      }
-
-      // Get player tile position
-      let px = 0,
-        pz = 0;
-      if (Array.isArray(playerPos)) {
-        px = playerPos[0];
-        pz = playerPos[2];
-      } else if (
-        playerPos &&
-        typeof playerPos === "object" &&
-        "x" in playerPos
-      ) {
-        px = (playerPos as { x: number; z: number }).x;
-        pz = (playerPos as { x: number; z: number }).z;
-      }
-
-      const rockTileX = Math.floor(rockX);
-      const rockTileZ = Math.floor(rockZ);
-      const playerTileX = Math.floor(px);
-      const playerTileZ = Math.floor(pz);
-
-      const isCardinalAdjacent =
-        (playerTileX === rockTileX &&
-          Math.abs(playerTileZ - rockTileZ) === 1) ||
-        (playerTileZ === rockTileZ && Math.abs(playerTileX - rockTileX) === 1);
-
+      // Server-authoritative: PendingGatherManager handles walking to the
+      // correct cardinal tile and starting the gather on arrival.
       logger.info(
-        `[MINE_ROCK] Handler: Rock ${rock.id} (${rock.name}) ` +
-          `at tile [${rockTileX}, ${rockTileZ}], player at tile [${playerTileX}, ${playerTileZ}], ` +
-          `cardinalAdjacent=${isCardinalAdjacent}`,
+        `[MINE_ROCK] Sending resourceInteract for ${rock.name} (${rock.id}), ` +
+          `dist=${rocksWithDistance[0].distance?.toFixed(1)}`,
       );
-
-      // If not on cardinal adjacent tile, walk to one
-      if (!isCardinalAdjacent) {
-        const cardinalPositions = [
-          { x: rockTileX, z: rockTileZ - 1, dir: "South" },
-          { x: rockTileX, z: rockTileZ + 1, dir: "North" },
-          { x: rockTileX - 1, z: rockTileZ, dir: "West" },
-          { x: rockTileX + 1, z: rockTileZ, dir: "East" },
-        ];
-
-        let nearestCardinal = cardinalPositions[0];
-        let minDist = Infinity;
-        for (const pos of cardinalPositions) {
-          const dist = Math.sqrt(
-            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
-          );
-          if (dist < minDist) {
-            minDist = dist;
-            nearestCardinal = pos;
-          }
-        }
-
-        const targetPos: [number, number, number] = [
-          nearestCardinal.x + 0.5,
-          rockY,
-          nearestCardinal.z + 0.5,
-        ];
-
-        logger.info(
-          `[MINE_ROCK] Handler: Not on cardinal tile, moving to [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir})`,
-        );
-
-        await service.executeMove({ target: targetPos, runMode: false });
-        await callback?.({
-          text: `Positioning to mine ${rock.name}...`,
-          action: "MINE_ROCK",
-        });
-        return {
-          success: true,
-          text: `Positioning to mine ${rock.name}`,
-          data: { moving: true },
-        };
-      }
-
-      const command: GatherResourceCommand = {
-        resourceEntityId: rock.id,
-        skill: "mining",
-      };
-      await service.executeGatherResource(command);
+      await service.executeResourceInteract(rock.id);
 
       await callback?.({ text: `Mining ${rock.name}`, action: "MINE_ROCK" });
 
@@ -1239,7 +838,6 @@ export const catchFishAction: Action = {
         if (spot.depleted) return false;
         const requiredLevel = spot.requiredLevel ?? 1;
         if (requiredLevel > fishingLevel) return false;
-        // Only go to spots that match a tool we have
         const spotResId = (spot.resourceId || "").toLowerCase();
         if (
           matchingSpotIds.length > 0 &&
@@ -1258,91 +856,14 @@ export const catchFishAction: Action = {
       }
 
       const spotsWithDistance = allSpots
-        .map((e) => {
-          const dist = getEntityDistance(playerPos, e.position);
-          return { entity: e, distance: dist, position: e.position };
-        })
-        .filter((t) => t.distance !== null)
+        .map((e) => ({
+          entity: e,
+          distance: getEntityDistance(playerPos, e.position),
+        }))
+        .filter((t) => t.distance !== null && t.distance <= 40)
         .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
 
-      const nearbySpots = spotsWithDistance.filter(
-        (t) => t.distance !== null && t.distance <= MAX_GATHER_DISTANCE,
-      );
-      const approachableSpots = spotsWithDistance.filter(
-        (t) => t.distance !== null && t.distance <= 40,
-      );
-
-      if (nearbySpots.length === 0 && approachableSpots.length > 0) {
-        const nearest = approachableSpots[0];
-        const spotPos = nearest.position as
-          | [number, number, number]
-          | { x: number; y?: number; z: number };
-
-        let spotX: number, spotY: number, spotZ: number;
-        if (Array.isArray(spotPos)) {
-          [spotX, spotY, spotZ] = spotPos;
-        } else {
-          spotX = spotPos.x;
-          spotY = spotPos.y ?? 0;
-          spotZ = spotPos.z;
-        }
-
-        let px = 0,
-          pz = 0;
-        if (Array.isArray(playerPos)) {
-          px = playerPos[0];
-          pz = playerPos[2];
-        } else if (playerPos && typeof playerPos === "object") {
-          const pos = playerPos as { x?: number; z?: number };
-          px = pos.x ?? 0;
-          pz = pos.z ?? 0;
-        }
-
-        const spotTileX = Math.floor(spotX);
-        const spotTileZ = Math.floor(spotZ);
-        const cardinalPositions = [
-          { x: spotTileX, z: spotTileZ - 1, dir: "South" },
-          { x: spotTileX, z: spotTileZ + 1, dir: "North" },
-          { x: spotTileX - 1, z: spotTileZ, dir: "West" },
-          { x: spotTileX + 1, z: spotTileZ, dir: "East" },
-        ];
-
-        let nearestCardinal = cardinalPositions[0];
-        let minDist = Infinity;
-        for (const pos of cardinalPositions) {
-          const dist = Math.sqrt(
-            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
-          );
-          if (dist < minDist) {
-            minDist = dist;
-            nearestCardinal = pos;
-          }
-        }
-
-        const targetPos: [number, number, number] = [
-          nearestCardinal.x + 0.5,
-          spotY,
-          nearestCardinal.z + 0.5,
-        ];
-
-        logger.info(
-          `[CATCH_FISH] Walking to fishing spot ${nearest.entity.name} - ` +
-            `stopping at cardinal tile [${nearestCardinal.x}, ${nearestCardinal.z}] (${nearestCardinal.dir})`,
-        );
-
-        await service.executeMove({ target: targetPos, runMode: false });
-        await callback?.({
-          text: `Walking to ${nearest.entity.name}...`,
-          action: "CATCH_FISH",
-        });
-        return {
-          success: true,
-          text: `Walking to ${nearest.entity.name}`,
-          data: { moving: true },
-        };
-      }
-
-      const spot = nearbySpots[0]?.entity;
+      const spot = spotsWithDistance[0]?.entity;
       if (!spot) {
         await callback?.({
           text: "No fishing spot found nearby.",
@@ -1351,88 +872,20 @@ export const catchFishAction: Action = {
         return { success: false };
       }
 
-      const spotPos = spot.position as
-        | [number, number, number]
-        | { x: number; y?: number; z: number };
+      // Server-authoritative: PendingGatherManager handles walking to the
+      // correct shore tile and starting the gather on arrival.
+      logger.info(
+        `[CATCH_FISH] Sending resourceInteract for ${spot.name} (${spot.id}), ` +
+          `dist=${spotsWithDistance[0].distance?.toFixed(1)}`,
+      );
+      await service.executeResourceInteract(spot.id);
 
-      let spotX = 0,
-        spotZ = 0;
-      if (Array.isArray(spotPos)) {
-        spotX = spotPos[0];
-        spotZ = spotPos[2];
-      } else {
-        spotX = spotPos.x;
-        spotZ = spotPos.z;
-      }
+      await callback?.({
+        text: `Fishing at ${spot.name}...`,
+        action: "CATCH_FISH",
+      });
 
-      let px = 0,
-        pz = 0;
-      if (Array.isArray(playerPos)) {
-        px = playerPos[0];
-        pz = playerPos[2];
-      } else if (playerPos && typeof playerPos === "object") {
-        const pos = playerPos as { x?: number; z?: number };
-        px = pos.x ?? 0;
-        pz = pos.z ?? 0;
-      }
-
-      const spotTileX = Math.floor(spotX);
-      const spotTileZ = Math.floor(spotZ);
-      const playerTileX = Math.floor(px);
-      const playerTileZ = Math.floor(pz);
-
-      const isCardinalAdjacent =
-        (playerTileX === spotTileX &&
-          Math.abs(playerTileZ - spotTileZ) === 1) ||
-        (playerTileZ === spotTileZ && Math.abs(playerTileX - spotTileX) === 1);
-
-      if (!isCardinalAdjacent) {
-        const cardinalPositions = [
-          { x: spotTileX, z: spotTileZ - 1, dir: "South" },
-          { x: spotTileX, z: spotTileZ + 1, dir: "North" },
-          { x: spotTileX - 1, z: spotTileZ, dir: "West" },
-          { x: spotTileX + 1, z: spotTileZ, dir: "East" },
-        ];
-
-        let nearestCardinal = cardinalPositions[0];
-        let minDist = Infinity;
-        for (const pos of cardinalPositions) {
-          const dist = Math.sqrt(
-            Math.pow(px - pos.x, 2) + Math.pow(pz - pos.z, 2),
-          );
-          if (dist < minDist) {
-            minDist = dist;
-            nearestCardinal = pos;
-          }
-        }
-
-        const targetPos: [number, number, number] = [
-          nearestCardinal.x + 0.5,
-          Array.isArray(spotPos) ? spotPos[1] : (spotPos.y ?? 0),
-          nearestCardinal.z + 0.5,
-        ];
-
-        await service.executeMove({ target: targetPos, runMode: false });
-        await callback?.({
-          text: `Positioning to fish at ${spot.name}...`,
-          action: "CATCH_FISH",
-        });
-        return {
-          success: true,
-          text: `Positioning to fish at ${spot.name}`,
-          data: { moving: true },
-        };
-      }
-
-      const command: GatherResourceCommand = {
-        resourceEntityId: spot.id,
-        skill: "fishing",
-      };
-      await service.executeGatherResource(command);
-
-      await callback?.({ text: "Fishing...", action: "CATCH_FISH" });
-
-      return { success: true, text: "Started fishing" };
+      return { success: true, text: `Fishing at ${spot.name}` };
     } catch (error) {
       await callback?.({
         text: `Failed to fish: ${error instanceof Error ? error.message : ""}`,

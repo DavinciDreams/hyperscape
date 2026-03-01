@@ -165,6 +165,7 @@ import {
   handleBankWithdrawToEquipment,
   handleBankDepositEquipment,
   handleBankDepositAllEquipment,
+  handleRequestBankState,
 } from "./handlers/bank";
 import {
   handleEntityModified,
@@ -2283,6 +2284,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.handlers["onBankDepositEquipment"];
     this.handlers["bankDepositAllEquipment"] =
       this.handlers["onBankDepositAllEquipment"];
+
+    // Bank state query (no bank NPC required)
+    this.handlers["onRequestBankState"] = (socket, data) =>
+      handleRequestBankState(socket, data, this.world);
+    this.handlers["requestBankState"] = this.handlers["onRequestBankState"];
 
     // NPC interaction handler - client clicked on NPC
     this.handlers["onNpcInteract"] = (socket, data) => {

@@ -196,6 +196,7 @@ export interface QuestData {
   questId?: string;
   status?: string;
   description?: string;
+  currentStage?: string;
   stageProgress?: Record<string, number>;
   startNpc?: string;
   stageType?: string;
@@ -287,6 +288,12 @@ export interface GameStateCache {
   quests: QuestData[];
   /** Cached bank contents (populated when bank is opened or on spawn) */
   bankItems: BankItem[];
+  /** Timestamp when bank items were last updated from server */
+  bankItemsUpdatedAt?: number;
+  /** Timestamp when quest list was last updated from server */
+  questsUpdatedAt?: number;
+  /** Timestamp when inventory was last updated from server */
+  inventoryUpdatedAt?: number;
 }
 
 /**

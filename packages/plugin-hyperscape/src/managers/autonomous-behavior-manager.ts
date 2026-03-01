@@ -264,6 +264,11 @@ export class AutonomousBehaviorManager {
   /** Whether KNOWN_LOCATIONS has been populated from world map data */
   private knownLocationsPopulated = false;
 
+  /** Last time we triggered a periodic state refresh */
+  private lastStateRefreshTime = 0;
+  /** How often to refresh quest/bank state to catch missed push events (ms) */
+  private static readonly STATE_REFRESH_INTERVAL_MS = 30_000;
+
   /** Duel outcome history for strategy analysis */
   private duelHistory: Array<{
     opponentName: string;
@@ -728,6 +733,16 @@ export class AutonomousBehaviorManager {
           this.savedGoal = null;
         }
       }
+    }
+
+    // Periodic state refresh — catch any missed push events (dropped packet, race condition)
+    if (
+      Date.now() - this.lastStateRefreshTime >
+      AutonomousBehaviorManager.STATE_REFRESH_INTERVAL_MS
+    ) {
+      this.lastStateRefreshTime = Date.now();
+      this.service?.requestQuestList?.();
+      this.service?.requestBankState?.();
     }
 
     // Step 1: Validate we can act
@@ -2804,6 +2819,42 @@ export class AutonomousBehaviorManager {
     if (goal.location) {
       const loc = KNOWN_LOCATIONS[goal.location];
       if (loc?.position) return loc.position;
+    }
+
+    // For resource goals where KNOWN_LOCATIONS has no position (e.g., fishing spots
+    // are dynamically spawned and not in the worldMap), find the nearest actual
+    // resource entity by resourceType instead of relying on alias-based name matching.
+    const resourceTypeMap: Record<string, string[]> = {
+      fishing: ["fishing_spot"],
+      woodcutting: ["tree"],
+      mining: ["mining_rock", "ore"],
+    };
+    const validTypes = resourceTypeMap[goal.type];
+    if (validTypes && this.service) {
+      const entities = this.service.getNearbyEntities();
+      const playerPos = this.service.getPlayerEntity()?.position;
+      let nearestPos: [number, number, number] | null = null;
+      let nearestDist = Infinity;
+      for (const entity of entities) {
+        const rt = (entity.resourceType || "").toLowerCase();
+        if (!validTypes.some((vt) => rt === vt)) continue;
+        if (entity.depleted) continue;
+        const ePos = entity.position;
+        if (!ePos || !Array.isArray(ePos) || ePos.length < 3) continue;
+        if (playerPos && Array.isArray(playerPos)) {
+          const dx = ePos[0] - playerPos[0];
+          const dz = ePos[2] - playerPos[2];
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestPos = [ePos[0], ePos[1], ePos[2]];
+          }
+        } else {
+          nearestPos = [ePos[0], ePos[1], ePos[2]];
+          break;
+        }
+      }
+      if (nearestPos) return nearestPos;
     }
 
     // Questing: resolve to the ACTION LOCATION, not the quest NPC.
