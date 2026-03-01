@@ -105,11 +105,30 @@ const FALLBACK_PACKET_IDS: Record<string, number> = {
   entityTileUpdate: 146,
   tileMovementStart: 147,
   tileMovementEnd: 148,
-  duelChallengeSent: 192,
-  duelChallengeIncoming: 193,
-  duelSessionStarted: 194,
-  duelChallengeDeclined: 195,
-  duelError: 196,
+  "duel:challenge": 198,
+  "duel:challenge:respond": 199,
+  duelChallengeSent: 200,
+  duelChallengeIncoming: 201,
+  duelSessionStarted: 202,
+  duelChallengeDeclined: 203,
+  duelError: 204,
+  "duel:accept:rules": 207,
+  "duel:accept:stakes": 210,
+  "duel:accept:final": 211,
+  "duel:cancel": 212,
+  duelStateUpdated: 213,
+  duelCancelled: 217,
+  duelAcceptanceUpdated: 220,
+  duelStateChanged: 221,
+  duelStakesUpdated: 222,
+  duelCountdownStart: 223,
+  duelCountdownTick: 224,
+  duelFightBegin: 225,
+  duelFightStart: 226,
+  duelEnded: 227,
+  duelCompleted: 228,
+  duelOpponentDisconnected: 229,
+  duelOpponentReconnected: 230,
   authenticate: 255,
   authResult: 256,
   reconnected: 258,
@@ -2992,16 +3011,55 @@ Respond with ONLY the action name, nothing else.`;
 
       case "duelSessionStarted": {
         // Duel session started - both players accepted, entering rules screen
-        // Agent should now be in a duel session
+        const sessionData = data as {
+          duelId?: string;
+          opponentId?: string;
+          opponentName?: string;
+        };
+        this.activeDuelId = (sessionData.duelId as string) ?? null;
         logger.info(
-          `[HyperscapeService] ⚔️ Duel session started - entering duel interface`,
+          `[HyperscapeService] ⚔️ Duel session started - duelId=${this.activeDuelId}`,
         );
         this.clearPendingDuelChallenge();
+        // Auto-accept rules (agent doesn't need to configure rules)
+        if (this.activeDuelId) {
+          this.sendCommand("duel:accept:rules", {
+            duelId: this.activeDuelId,
+          });
+        }
         // Broadcast event so ABM can enter duel mode immediately
         this.broadcastEvent(
           "DUEL_SESSION_STARTED",
           data as Record<string, unknown>,
         );
+        break;
+      }
+
+      case "duelStateChanged": {
+        // Duel state machine progressed — auto-accept each phase
+        const stateData = data as {
+          duelId?: string;
+          state?: string;
+        };
+        const duelId = (stateData.duelId as string) ?? this.activeDuelId;
+        if (!duelId) break;
+
+        switch (stateData.state) {
+          case "STAKES":
+            // Both accepted rules → auto-accept stakes (no stakes for agents)
+            logger.info(
+              `[HyperscapeService] ⚔️ Duel state → STAKES, auto-accepting`,
+            );
+            this.sendCommand("duel:accept:stakes", { duelId });
+            break;
+          case "CONFIRMING":
+            // Both accepted stakes → auto-accept final confirmation
+            logger.info(
+              `[HyperscapeService] ⚔️ Duel state → CONFIRMING, auto-accepting`,
+            );
+            this.sendCommand("duel:accept:final", { duelId });
+            break;
+        }
         break;
       }
 
@@ -3030,8 +3088,25 @@ Respond with ONLY the action name, nothing else.`;
           this.gameState.playerEntity.inCombat = false;
           this.gameState.playerEntity.combatTarget = null;
         }
+        this.activeDuelId = null;
         this.broadcastEvent("DUEL_COMPLETED", duelData);
         // Clear pending challenge state just in case
+        this.clearPendingDuelChallenge();
+        break;
+      }
+
+      case "duelCancelled": {
+        // Duel was cancelled (by opponent, disconnect, etc.)
+        const cancelData = data as Record<string, unknown>;
+        logger.info(
+          `[HyperscapeService] ⚔️ Duel cancelled: ${cancelData.duelId}`,
+        );
+        if (this.gameState.playerEntity) {
+          this.gameState.playerEntity.inCombat = false;
+          this.gameState.playerEntity.combatTarget = null;
+        }
+        this.activeDuelId = null;
+        this.broadcastEvent("DUEL_CANCELLED", cancelData);
         this.clearPendingDuelChallenge();
         break;
       }
@@ -3989,6 +4064,9 @@ Respond with ONLY the action name, nothing else.`;
   /** Pending duel challenge from another player */
   private pendingDuelChallenge: PendingDuelChallenge | null = null;
 
+  /** Active duel session ID — set on session start, cleared on completion */
+  private activeDuelId: string | null = null;
+
   /**
    * Challenge another player to a duel
    * @param command - Contains targetPlayerId of player to challenge
@@ -4346,7 +4424,8 @@ Respond with ONLY the action name, nothing else.`;
         | "llm"
         | "scripted"
         | "planner"
-        | "curiosity";
+        | "curiosity"
+        | "duel-combat";
       providers?: string[];
     },
   ): void {
@@ -4394,7 +4473,8 @@ Respond with ONLY the action name, nothing else.`;
         | "llm"
         | "scripted"
         | "planner"
-        | "curiosity";
+        | "curiosity"
+        | "duel-combat";
       providers?: string[];
     },
   ): void {

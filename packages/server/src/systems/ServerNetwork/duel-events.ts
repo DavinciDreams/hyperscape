@@ -40,6 +40,32 @@ export interface DuelEventDeps {
 export function registerDuelEventListeners(deps: DuelEventDeps): void {
   const { world, getSocketByPlayerId, processedDuelSettlements } = deps;
 
+  // -- session created (also used by StreamingDuelScheduler to notify agents) --
+  world.on("duel:session:created", (event) => {
+    const { duelId, challengerId, challengerName, targetId, targetName } =
+      event as EventMap[typeof EventType.DUEL_SESSION_CREATED];
+
+    const challengerSocket = getSocketByPlayerId(challengerId);
+    if (challengerSocket) {
+      challengerSocket.send("duelSessionStarted", {
+        duelId,
+        opponentId: targetId,
+        opponentName: targetName,
+        isChallenger: true,
+      });
+    }
+
+    const targetSocket = getSocketByPlayerId(targetId);
+    if (targetSocket) {
+      targetSocket.send("duelSessionStarted", {
+        duelId,
+        opponentId: challengerId,
+        opponentName: challengerName,
+        isChallenger: false,
+      });
+    }
+  });
+
   // -- countdown start --
   world.on("duel:countdown:start", (event) => {
     const { duelId, arenaId, challengerId, targetId } =

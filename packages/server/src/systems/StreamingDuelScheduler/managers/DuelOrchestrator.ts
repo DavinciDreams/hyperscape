@@ -1231,7 +1231,7 @@ export class DuelOrchestrator {
     if (agent1) this.restoreHealth(agent1.characterId, true);
     if (agent2) this.restoreHealth(agent2.characterId, true);
 
-    // Emit fight start
+    // Emit fight start (streaming-specific event for spectator UI)
     this.world.emit("streaming:fight:start", {
       cycleId: cycle.cycleId,
       agent1Id: agent1?.characterId,
@@ -1240,6 +1240,18 @@ export class DuelOrchestrator {
         STREAMING_TIMING.FIGHTING_DURATION +
         STREAMING_TIMING.END_WARNING_DURATION,
     });
+
+    // Emit standard duel fight start so agent plugins enter combat mode.
+    // The duel-events listener sends duelFightStart to both agent sockets.
+    if (agent1 && agent2) {
+      const duelId = cycle.duelId ?? `streaming-${cycle.cycleId}`;
+      this.world.emit(EventType.DUEL_FIGHT_START, {
+        duelId,
+        challengerId: agent1.characterId,
+        targetId: agent2.characterId,
+        arenaId: cycle.arenaId ?? 0,
+      });
+    }
 
     // Make agents attack each other
     this.initiateAgentCombat();

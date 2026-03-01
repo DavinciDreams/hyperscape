@@ -14,7 +14,7 @@
  */
 
 import type { World } from "@hyperscape/shared";
-import { EventType } from "@hyperscape/shared";
+import { EventType, DEFAULT_DUEL_RULES } from "@hyperscape/shared";
 
 /** Type for network with send method */
 interface NetworkWithSend {
@@ -880,6 +880,17 @@ export class StreamingDuelScheduler {
         playerId: this.currentCycle.agent2.characterId,
       });
 
+      // Notify agent plugins that a duel session is starting so they enter duel mode
+      // (pause autonomous behavior, save goals, stop movement).
+      const streamingDuelId = `streaming-${this.currentCycle.cycleId}`;
+      this.world.emit(EventType.DUEL_SESSION_CREATED, {
+        duelId: streamingDuelId,
+        challengerId: this.currentCycle.agent1.characterId,
+        challengerName: this.currentCycle.agent1.name,
+        targetId: this.currentCycle.agent2.characterId,
+        targetName: this.currentCycle.agent2.name,
+      });
+
       // Transition to COUNTDOWN.
       const now = Date.now();
       const fightStartTime = now + STREAMING_TIMING.COUNTDOWN_DURATION;
@@ -1077,13 +1088,36 @@ export class StreamingDuelScheduler {
       `Fight ended: ${winnerName} wins by ${winReason}`,
     );
 
-    // Emit resolution event
+    // Emit resolution event (spectator UI)
     this.world.emit("streaming:resolution:start", {
       cycleId: this.currentCycle.cycleId,
       winnerId,
       loserId,
       winnerName,
       winReason,
+    });
+
+    // Emit standard duel completed so agent plugins exit duel mode.
+    // The duel-events listener sends duelCompleted to both agent sockets.
+    this.world.emit(EventType.DUEL_COMPLETED, {
+      duelId:
+        this.currentCycle.duelId ?? `streaming-${this.currentCycle.cycleId}`,
+      winnerId,
+      winnerName,
+      loserId,
+      loserName,
+      reason: winReason === "kill" ? "death" : "death",
+      forfeit: false,
+      winnerReceives: [],
+      winnerReceivesValue: 0,
+      challengerStakes: [],
+      targetStakes: [],
+      summary: {
+        duration: now - (this.currentCycle.cycleStartTime ?? now),
+        rules: DEFAULT_DUEL_RULES,
+        challengerStakeValue: 0,
+        targetStakeValue: 0,
+      },
     });
 
     // Set camera to winner

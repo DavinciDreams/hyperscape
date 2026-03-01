@@ -258,6 +258,11 @@ export class AutonomousBehaviorManager {
     return this.duelPhase !== null;
   }
 
+  /** Duel opponent tracking */
+  private duelOpponentId: string | null = null;
+  private duelOpponentName: string | null = null;
+  private duelId: string | null = null;
+
   /** When the agent entered reactive combat (attacked while on a non-combat goal) */
   private reactiveCombatStartTime: number = 0;
   private readonly REACTIVE_COMBAT_MAX_MS = 15000; // 15s max reactive fight
@@ -479,14 +484,17 @@ export class AutonomousBehaviorManager {
 
     // Subscribe to duel events for goal save/restore and duel awareness
     if (!this.duelEventHandlerRegistered) {
-      this.service.onGameEvent("DUEL_SESSION_STARTED", () => {
-        this.onDuelSessionStarted();
+      this.service.onGameEvent("DUEL_SESSION_STARTED", (data: unknown) => {
+        this.onDuelSessionStarted(data);
       });
-      this.service.onGameEvent("DUEL_FIGHT_START", () => {
-        this.onDuelFightStart();
+      this.service.onGameEvent("DUEL_FIGHT_START", (data: unknown) => {
+        this.onDuelFightStart(data);
       });
       this.service.onGameEvent("DUEL_COMPLETED", (data: unknown) => {
         this.onDuelCompleted(data);
+      });
+      this.service.onGameEvent("DUEL_CANCELLED", () => {
+        this.onDuelCancelled();
       });
       this.duelEventHandlerRegistered = true;
       logger.info("[AutonomousBehavior] Registered duel event handlers");
@@ -836,6 +844,9 @@ export class AutonomousBehaviorManager {
         );
         this.duelPhase = null;
         this.duelModeEnteredAt = 0;
+        this.duelOpponentId = null;
+        this.duelOpponentName = null;
+        this.duelId = null;
         const restoredDuelTimeout = this.popGoal();
         if (restoredDuelTimeout) {
           this.currentGoal = restoredDuelTimeout;
@@ -851,6 +862,13 @@ export class AutonomousBehaviorManager {
       this.lastStateRefreshTime = Date.now();
       this.service?.requestQuestList?.();
       this.service?.requestBankState?.();
+    }
+
+    // Duel combat loop — runs independently of canAct() guard
+    // (canAct() returns false during duels to block open-world behavior)
+    if (this.duelPhase === "fighting") {
+      await this.duelCombatTick();
+      return;
     }
 
     // Step 1: Validate we can act
@@ -1877,7 +1895,8 @@ export class AutonomousBehaviorManager {
         | "llm"
         | "scripted"
         | "planner"
-        | "curiosity";
+        | "curiosity"
+        | "duel-combat";
       providers?: string[];
     },
   ): void {
@@ -5688,18 +5707,112 @@ export class AutonomousBehaviorManager {
   // ============================================================================
 
   /**
+   * Duel combat tick — handles attacking opponent and eating food during a duel fight.
+   * Runs instead of the normal tick pipeline when duelPhase === "fighting".
+   */
+  private async duelCombatTick(): Promise<void> {
+    const player = this.service?.getPlayerEntity();
+    if (!player || player.alive === false || !this.service) return;
+
+    // Respect action lock — don't spam commands
+    if (this.actionLock) {
+      const elapsed = Date.now() - this.actionLock.startedAt;
+      if (elapsed < this.actionLock.minDurationMs) return;
+      this.actionLock = null;
+    }
+
+    // 1. Survival: eat food if health is low
+    const healthPercent = this.getHealthPercent(player);
+    if (healthPercent < 50 && hasAnyFood(player)) {
+      const foodItem = this.findFirstFoodItem(player);
+      if (foodItem) {
+        logger.info(
+          `[AutonomousBehavior] ⚔️ Duel: Eating ${foodItem.name} (${Math.round(healthPercent)}% HP)`,
+        );
+        this.service.executeUseItem({ itemId: foodItem.id }).catch(() => {});
+        this.actionLock = {
+          actionName: "DUEL_EAT",
+          startedAt: Date.now(),
+          timeoutMs: 3000,
+          minDurationMs: 1800,
+        };
+        this.syncThinkingToDashboard(`⚔️ Duel: Eating ${foodItem.name}`, {
+          decisionPath: "duel-combat",
+        });
+        return;
+      }
+    }
+
+    // 2. Attack opponent
+    if (!this.duelOpponentId) {
+      // Fallback: find nearest player entity that isn't us
+      const nearby = this.service.getNearbyEntities();
+      const opponent = nearby.find(
+        (e) =>
+          e.type === "player" &&
+          e.id !== this.runtime.agentId &&
+          e.id !== player.id,
+      );
+      if (opponent) {
+        this.duelOpponentId = opponent.id;
+        this.duelOpponentName = (opponent as { name?: string }).name ?? null;
+      } else {
+        logger.warn("[AutonomousBehavior] ⚔️ Duel: No opponent found");
+        return;
+      }
+    }
+
+    logger.info(
+      `[AutonomousBehavior] ⚔️ Duel: Attacking ${this.duelOpponentName ?? this.duelOpponentId}`,
+    );
+    this.service
+      .executeAttack({
+        targetEntityId: this.duelOpponentId,
+        combatStyle: "attack",
+      })
+      .catch((err) => {
+        logger.warn(
+          `[AutonomousBehavior] Duel attack failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+
+    this.actionLock = {
+      actionName: "DUEL_ATTACK",
+      startedAt: Date.now(),
+      timeoutMs: 5000,
+      minDurationMs: 2400,
+    };
+
+    this.syncThinkingToDashboard(
+      `⚔️ Duel: Attacking ${this.duelOpponentName ?? "opponent"}`,
+      { decisionPath: "duel-combat" },
+    );
+  }
+
+  /**
    * Called when a duel session starts (challenge accepted, entering rules/stakes screen)
    * This is BEFORE the fight — agent should pause all open-world behavior immediately
    */
-  private onDuelSessionStarted(): void {
+  private onDuelSessionStarted(data: unknown): void {
     if (this.duelPhase !== null) {
       logger.warn(
         "[AutonomousBehavior] Already in duel phase, ignoring duplicate session start",
       );
       return;
     }
+
+    // Capture duel and opponent info from event data
+    const duelData = data as {
+      duelId?: string;
+      opponentId?: string;
+      opponentName?: string;
+    };
+    this.duelId = duelData.duelId ?? null;
+    this.duelOpponentId = duelData.opponentId ?? null;
+    this.duelOpponentName = duelData.opponentName ?? null;
+
     logger.info(
-      "[AutonomousBehavior] ⚔️ Duel session started — pausing open-world behavior",
+      `[AutonomousBehavior] ⚔️ Duel session started — opponent: ${this.duelOpponentName ?? this.duelOpponentId ?? "unknown"}`,
     );
     this.duelPhase = "session";
     this.duelModeEnteredAt = Date.now();
@@ -5724,7 +5837,19 @@ export class AutonomousBehaviorManager {
   /**
    * Called when duel countdown finishes and fight begins
    */
-  private onDuelFightStart(): void {
+  private onDuelFightStart(data: unknown): void {
+    const duelData = data as {
+      opponentId?: string;
+      duelId?: string;
+    };
+    // Capture opponent ID if not already set (backup from session)
+    if (duelData.opponentId && !this.duelOpponentId) {
+      this.duelOpponentId = duelData.opponentId;
+    }
+    if (duelData.duelId && !this.duelId) {
+      this.duelId = duelData.duelId;
+    }
+
     logger.info(
       "[AutonomousBehavior] ⚔️ Duel fight starting — entering combat mode",
     );
@@ -5776,9 +5901,12 @@ export class AutonomousBehaviorManager {
       this.duelHistory.shift();
     }
 
-    // Exit duel mode
+    // Exit duel mode and clear opponent tracking
     this.duelPhase = null;
     this.duelModeEnteredAt = 0;
+    this.duelOpponentId = null;
+    this.duelOpponentName = null;
+    this.duelId = null;
 
     // Generate post-duel assessment and adjust strategy
     const assessment = this.assessDuelOutcome(won, opponentName, player);
@@ -5806,6 +5934,38 @@ export class AutonomousBehaviorManager {
     }
 
     // Trigger fast tick to resume immediately
+    this.nextTickFast = true;
+  }
+
+  /**
+   * Called when a duel is cancelled (opponent disconnect, manual cancel, etc.)
+   */
+  private onDuelCancelled(): void {
+    logger.info(
+      "[AutonomousBehavior] ⚔️ Duel cancelled — resuming normal behavior",
+    );
+
+    // Exit duel mode and clear all tracking
+    this.duelPhase = null;
+    this.duelModeEnteredAt = 0;
+    this.duelOpponentId = null;
+    this.duelOpponentName = null;
+    this.duelId = null;
+
+    const player = this.service?.getPlayerEntity();
+    if (player) {
+      player.inCombat = false;
+    }
+
+    // Restore saved goal
+    const restored = this.popGoal();
+    if (restored) {
+      this.currentGoal = restored;
+      logger.info(
+        `[AutonomousBehavior] Restored goal: ${restored.type} - ${restored.description}`,
+      );
+    }
+
     this.nextTickFast = true;
   }
 

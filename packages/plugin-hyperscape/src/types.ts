@@ -41,7 +41,8 @@ export type EventType =
   | "CHAT_MESSAGE"
   | "DUEL_FIGHT_START"
   | "DUEL_SESSION_STARTED"
-  | "DUEL_COMPLETED";
+  | "DUEL_COMPLETED"
+  | "DUEL_CANCELLED";
 
 // Goal types used by the autonomous behavior system
 export type AvailableGoalType =
