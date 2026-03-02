@@ -134,6 +134,18 @@ export class ResourceEntity extends InteractableEntity {
     return null;
   }
 
+  /**
+   * Shader-based highlight toggle. Returns true if the strategy handled it,
+   * false if EntityHighlightService should fall back to the outline pass.
+   */
+  public setShaderHighlight(on: boolean): boolean {
+    if (typeof this.visual.setShaderHighlight === "function") {
+      this.visual.setShaderHighlight(this.getVisualCtx(), on);
+      return true;
+    }
+    return false;
+  }
+
   // ===========================================================================
   // Collision
   // ===========================================================================
@@ -357,6 +369,7 @@ export class ResourceEntity extends InteractableEntity {
       depletedModelScale: this.config.depletedModelScale,
       depletedModelPath: this.config.depletedModelPath,
       procgenPreset: this.config.procgenPreset,
+      modelVariants: this.config.modelVariants,
     } as EntityData;
   }
 
@@ -377,6 +390,7 @@ export class ResourceEntity extends InteractableEntity {
       depletedModelScale: this.config.depletedModelScale,
       depletedModelPath: this.config.depletedModelPath,
       procgenPreset: this.config.procgenPreset,
+      modelVariants: this.config.modelVariants,
     };
   }
 

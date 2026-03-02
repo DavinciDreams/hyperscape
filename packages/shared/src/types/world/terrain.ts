@@ -9,21 +9,14 @@ import * as THREE from "../../extras/three/three";
 import type { Position3D } from "../core/core";
 import type { PMeshHandle } from "../../extras/three/geometryToPxMesh";
 import type { ActorHandle } from "../systems/physics";
+import type { TreeSubType as _TreeSubType } from "../../constants/TreeTypes";
 
 // Terrain resource interfaces
 /**
  * Tree subtypes that can spawn in the world.
- * These map to tree_<subtype> in woodcutting.json manifest.
+ * Derived from the single source of truth in constants/TreeTypes.ts.
  */
-export type TreeSubType =
-  | "normal"
-  | "oak"
-  | "willow"
-  | "teak"
-  | "maple"
-  | "mahogany"
-  | "yew"
-  | "magic";
+export type TreeSubType = _TreeSubType;
 
 /**
  * Ore subtypes that can spawn in the world.

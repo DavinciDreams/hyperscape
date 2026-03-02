@@ -54,6 +54,11 @@ import {
   floor,
   abs,
   viewportCoordinate,
+  normalView,
+  normalize,
+  pow,
+  attribute,
+  positionView,
 } from "../../../extras/three/three";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
@@ -581,6 +586,8 @@ export type DissolveMaterialOptions = {
   enableWaterCulling?: boolean;
   /** Enable camera-to-player occlusion dissolve (default: true) */
   enableOcclusionDissolve?: boolean;
+  /** Enable per-instance rim highlight driven by an instanced attribute */
+  enableRimHighlight?: boolean;
 };
 
 /**
@@ -595,6 +602,8 @@ export type DissolveMaterial = THREE.MeshStandardNodeMaterial & {
     nearFadeStart: { value: number };
     nearFadeEnd: { value: number };
   };
+  /** Present when enableRimHighlight was true at creation */
+  highlightColor?: { value: THREE.Color };
 };
 
 // ============================================================================
@@ -1143,6 +1152,41 @@ export function createDissolveMaterial(
     nearFadeStart: uNearFadeStart,
     nearFadeEnd: uNearFadeEnd,
   };
+
+  // Per-instance flat glow highlight (driven by instanceHighlight attribute)
+  // When highlighted, replaces PBR shading with a flat unlit emissive color
+  // plus a subtle fresnel rim brightening at silhouette edges.
+  if (options.enableRimHighlight) {
+    const uHighlightColor = uniform(new THREE.Color(0x00ffff));
+    dissolveMat.highlightColor = uHighlightColor;
+
+    const BASE_BRIGHTNESS = 0.35;
+    const RIM_POWER = 2.5;
+    const RIM_BOOST = 0.5;
+
+    material.outputNode = Fn(() => {
+      const litColor = output;
+      const hlIntensity = attribute("instanceHighlight", "float");
+
+      const N = normalize(normalView);
+      const V = normalize(sub(vec3(0, 0, 0), positionView.xyz));
+      const NdotV = clamp(dot(N, V), float(0.0), float(1.0));
+
+      // Fresnel rim — brighter at silhouette edges
+      const rim = pow(sub(float(1.0), NdotV), float(RIM_POWER));
+
+      // Flat unlit glow: base brightness + rim boost, tinted by highlight color
+      const brightness = add(
+        float(BASE_BRIGHTNESS),
+        mul(rim, float(RIM_BOOST)),
+      );
+      const flatGlow = mul(vec3(uHighlightColor), brightness);
+
+      // When highlighted, fully replace the lit result with the flat glow
+      const finalRgb = mix(litColor.rgb, flatGlow, hlIntensity);
+      return vec4(finalRgb, litColor.a);
+    })();
+  }
 
   material.needsUpdate = true;
   return dissolveMat;

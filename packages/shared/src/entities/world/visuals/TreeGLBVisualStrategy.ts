@@ -12,7 +12,8 @@ import {
   removeInstance as removeGLBTreeInstance,
   setDepleted as setGLBTreeDepleted,
   hasDepleted as hasGLBTreeDepleted,
-  getHighlightMesh as getGLBTreeHighlightMesh,
+  setHighlight as setGLBTreeHighlight,
+  getModelDimensions as getGLBModelDimensions,
   updateGLBTreeInstancer,
 } from "../../../systems/shared/world/GLBTreeInstancer";
 import type {
@@ -21,8 +22,9 @@ import type {
 } from "./ResourceVisualStrategy";
 
 function createCollisionProxy(ctx: ResourceVisualContext, scale: number): void {
-  const height = 8 * scale;
-  const radius = 1 * scale;
+  const dims = getGLBModelDimensions(ctx.id);
+  const height = (dims?.height ?? 8) * scale;
+  const radius = (dims?.radius ?? 1) * scale;
   const geometry = new THREE.CylinderGeometry(radius, radius, height, 6);
   const material = new MeshBasicNodeMaterial();
   material.visible = false;
@@ -46,7 +48,14 @@ function createCollisionProxy(ctx: ResourceVisualContext, scale: number): void {
 export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
   async createVisual(ctx: ResourceVisualContext): Promise<void> {
     const { config, id, position } = ctx;
-    if (!config.model) return;
+
+    // Pick model: hash-select from variants or fall back to direct modelPath
+    let modelPath = config.model;
+    if (config.modelVariants?.length) {
+      const hash = ctx.hashString(id) >>> 0;
+      modelPath = config.modelVariants[hash % config.modelVariants.length];
+    }
+    if (!modelPath) return;
 
     const baseScale = config.modelScale ?? 3.0;
     const worldPos = new THREE.Vector3();
@@ -58,7 +67,7 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     const rotation = ((rotHash % 1000) / 1000) * Math.PI * 2;
 
     const success = await addGLBTreeInstance(
-      config.model,
+      modelPath,
       id,
       worldPos,
       rotation,
@@ -82,8 +91,8 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     return hasGLBTreeDepleted(ctx.id);
   }
 
-  getHighlightMesh(ctx: ResourceVisualContext): THREE.Object3D | null {
-    return getGLBTreeHighlightMesh(ctx.id);
+  setShaderHighlight(ctx: ResourceVisualContext, on: boolean): void {
+    setGLBTreeHighlight(ctx.id, on);
   }
 
   async onRespawn(ctx: ResourceVisualContext): Promise<void> {

@@ -22,6 +22,7 @@ import type {
   ResourceSubType,
 } from "../../../types/world/terrain";
 import type { VegetationInstance } from "../../../types/world/world-types";
+import { getTreeLevelRequired } from "../../../constants/TreeTypes";
 
 /**
  * Context provided by TerrainSystem for resource generation.
@@ -46,19 +47,13 @@ export interface ResourceGenerationContext {
 }
 
 /**
- * Level requirements for tree types (OSRS woodcutting levels).
- * Single source of truth - used by both generation and tests.
+ * @deprecated Use getTreeLevelRequired() from TreeTypes.ts instead.
+ * Kept for backward compatibility — delegates to the single source of truth.
  */
-export const TREE_LEVEL_REQUIREMENTS: Record<string, number> = {
-  normal: 1,
-  oak: 15,
-  willow: 30,
-  teak: 35,
-  maple: 45,
-  mahogany: 50,
-  yew: 60,
-  magic: 75,
-};
+export const TREE_LEVEL_REQUIREMENTS: Record<string, number> = new Proxy(
+  {} as Record<string, number>,
+  { get: (_target, prop: string) => getTreeLevelRequired(prop) },
+);
 
 /**
  * Mapping from game tree subtypes to @hyperscape/procgen presets.
@@ -109,9 +104,10 @@ export const ORE_LEVEL_REQUIREMENTS: Record<string, number> = {
 
 /**
  * Get the level requirement for a tree type.
+ * @deprecated Use getTreeLevelRequired() from TreeTypes.ts directly.
  */
 export function getTreeLevelRequirement(subType: string): number {
-  return TREE_LEVEL_REQUIREMENTS[subType] ?? 1;
+  return getTreeLevelRequired(subType);
 }
 
 /**

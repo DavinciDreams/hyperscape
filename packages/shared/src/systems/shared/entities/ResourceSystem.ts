@@ -970,6 +970,11 @@ export class ResourceSystem extends SystemBase {
           resource.type,
           spawnPoint.subType,
         ),
+        // Model variants for visual variation (hash-picked per instance)
+        modelVariants: this.getModelVariantsForResource(
+          resource.type,
+          spawnPoint.subType,
+        ),
         // OSRS-ACCURACY: Tile-based positioning for face direction and interaction
         footprint,
         anchorTile,
@@ -1112,6 +1117,20 @@ export class ResourceSystem extends SystemBase {
     }
 
     return manifestData.procgenPreset;
+  }
+
+  /**
+   * Get model variants for resource type from manifest.
+   * Returns undefined if not specified (single model or procgen).
+   */
+  private getModelVariantsForResource(
+    type: string,
+    subType?: string,
+  ): string[] | undefined {
+    const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
+    const manifestData = getExternalResource(variantKey);
+    if (!manifestData?.modelVariants?.length) return undefined;
+    return manifestData.modelVariants;
   }
 
   /**

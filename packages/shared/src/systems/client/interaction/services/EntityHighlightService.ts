@@ -56,6 +56,8 @@ export class EntityHighlightService {
   private composer: PostProcessingComposer | null = null;
   /** Temporary highlight mesh added to the scene for instanced entities */
   private activeHighlightMesh: THREE.Object3D | null = null;
+  /** Entity using shader-based rim highlight (needs clearing on un-hover) */
+  private shaderHighlightEntity: Record<string, unknown> | null = null;
 
   constructor(private world: World) {}
 
@@ -81,18 +83,31 @@ export class EntityHighlightService {
     const newId = target?.entityId ?? null;
     if (newId === this.currentTargetId) return;
 
+    this.clearShaderHighlight();
     this.removeActiveHighlightMesh();
     this.currentTargetId = newId;
 
-    if (!this.composer) return;
-
     if (!target || !target.entity) {
-      this.composer.setOutlineObjects([]);
+      if (this.composer) this.composer.setOutlineObjects([]);
       return;
     }
 
-    // Try instanced highlight path first
+    // Try shader-based rim highlight first (no extra meshes / draw calls)
     const entity = target.entity as unknown as Record<string, unknown>;
+    if (typeof entity.setShaderHighlight === "function") {
+      const handled = (entity.setShaderHighlight as (on: boolean) => boolean)(
+        true,
+      );
+      if (handled) {
+        this.shaderHighlightEntity = entity;
+        if (this.composer) this.composer.setOutlineObjects([]);
+        return;
+      }
+    }
+
+    if (!this.composer) return;
+
+    // Try instanced highlight path (legacy)
     if (typeof entity.getHighlightRoot === "function") {
       const hlRoot = (entity.getHighlightRoot as () => THREE.Object3D | null)();
       if (hlRoot) {
@@ -134,6 +149,7 @@ export class EntityHighlightService {
   clearHover(): void {
     if (this.currentTargetId === null) return;
     this.currentTargetId = null;
+    this.clearShaderHighlight();
     this.removeActiveHighlightMesh();
     if (this.composer) {
       this.composer.setOutlineObjects([]);
@@ -144,6 +160,16 @@ export class EntityHighlightService {
     if (this.activeHighlightMesh) {
       this.world.stage?.scene?.remove?.(this.activeHighlightMesh);
       this.activeHighlightMesh = null;
+    }
+  }
+
+  private clearShaderHighlight(): void {
+    if (this.shaderHighlightEntity) {
+      const entity = this.shaderHighlightEntity as {
+        setShaderHighlight?: (on: boolean) => boolean;
+      };
+      entity.setShaderHighlight?.(false);
+      this.shaderHighlightEntity = null;
     }
   }
 

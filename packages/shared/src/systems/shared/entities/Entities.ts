@@ -724,6 +724,7 @@ export class Entities extends SystemBase implements IEntities {
         depletedModelPath: (data as { depletedModelPath?: string })
           .depletedModelPath,
         procgenPreset: (data as { procgenPreset?: string }).procgenPreset,
+        modelVariants: (data as { modelVariants?: string[] }).modelVariants,
       };
 
       const ResourceEntityClass = getEntityType("resource")!;

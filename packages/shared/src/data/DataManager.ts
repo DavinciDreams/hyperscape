@@ -169,6 +169,8 @@ export interface ExternalResourceData {
    * If specified, runtime procedural generation will be used instead of GLB model.
    */
   procgenPreset?: string;
+  /** Multiple GLB model paths for visual variation (hash-picked per instance) */
+  modelVariants?: string[];
   scale: number;
   depletedScale: number;
   harvestSkill: string;
@@ -1521,16 +1523,42 @@ export class DataManager {
 
     const gatheringDir = path.join(manifestsDir, "gathering");
 
-    // Load woodcutting (trees)
+    // Local manifests directory (in main codebase, takes priority over git repo)
+    const localManifestsDir = path.join(
+      manifestsDir,
+      "..",
+      "..",
+      "..",
+      "manifests",
+      "gathering",
+    );
+
+    // Load woodcutting (trees) — check local manifest first, then fall back to git repo
     try {
-      const woodcuttingPath = path.join(gatheringDir, "woodcutting.json");
-      const woodcuttingData = await fs.readFile(woodcuttingPath, "utf-8");
+      let woodcuttingData: string | null = null;
+      let source = "";
+
+      // Try local manifest first (packages/server/manifests/gathering/woodcutting.json)
+      try {
+        const localPath = path.join(localManifestsDir, "woodcutting.json");
+        woodcuttingData = await fs.readFile(localPath, "utf-8");
+        source = localPath;
+      } catch {
+        // Local not found, fall back to git repo manifest
+        const repoPath = path.join(gatheringDir, "woodcutting.json");
+        woodcuttingData = await fs.readFile(repoPath, "utf-8");
+        source = repoPath;
+      }
+
       const woodcuttingManifest = JSON.parse(
         woodcuttingData,
       ) as WoodcuttingManifest;
       for (const tree of woodcuttingManifest.trees) {
         resourcesMap.set(tree.id, tree);
       }
+      console.log(
+        `[DataManager] ✅ Loaded woodcutting manifest (${woodcuttingManifest.trees.length} trees) from: ${source}`,
+      );
     } catch {
       console.warn(
         "[DataManager] gathering/woodcutting.json not found, trying legacy resources.json",

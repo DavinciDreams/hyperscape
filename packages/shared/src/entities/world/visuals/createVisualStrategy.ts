@@ -25,7 +25,10 @@ export function createVisualStrategy(
   if (config.resourceType === "tree" && config.procgenPreset)
     return new TreeProcgenVisualStrategy();
 
-  if (config.resourceType === "tree" && hasModel(config))
+  if (
+    config.resourceType === "tree" &&
+    (config.modelVariants?.length || hasModel(config))
+  )
     return new TreeGLBVisualStrategy();
 
   // if (hasModel(config)) return new StandardModelVisualStrategy();

@@ -85,6 +85,7 @@ import {
   // generatePlants, // DISABLED - plants not working/looking good yet
   type ResourceGenerationContext,
 } from "./BiomeResourceGenerator";
+import { getDefaultTreeDistribution } from "../../../constants/TreeTypes";
 import {
   setProcgenRockWorld,
   addRockInstance,
@@ -4677,13 +4678,7 @@ export class TerrainSystem extends System {
    */
   private static readonly DEFAULT_TREE_CONFIG: BiomeTreeConfig = {
     enabled: true,
-    distribution: {
-      tree_normal: 40, // Quaking Aspen
-      tree_oak: 30, // Black Oak
-      tree_maple: 15, // Acer (Japanese Maple)
-      tree_willow: 10, // Weeping Willow
-      tree_yew: 5, // European Larch
-    },
+    distribution: getDefaultTreeDistribution(),
     density: 20, // ~8 trees per 64m tile
     minSpacing: 18, // Minimum 18m between trees for natural spacing
     clustering: true,
