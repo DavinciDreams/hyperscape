@@ -34,7 +34,7 @@ import THREE, {
   dot,
 } from "../../extras/three/three";
 import { DISTANCE_CONSTANTS } from "../../constants/GameConstants";
-import { GPU_VEG_CONFIG } from "../../systems/shared/world/GPUVegetation";
+import { GPU_VEG_CONFIG } from "../../systems/shared/world/GPUMaterials";
 
 export interface DistanceFadeConfig {
   fadeStart: number;

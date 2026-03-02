@@ -16,7 +16,7 @@ import {
   removeInstance as removeResourceInstance,
   setDepleted as setResourceDepleted,
   hasDepleted as hasResourceDepleted,
-  getHighlightMesh as getResourceHighlightMesh,
+  setHighlight as setResourceHighlight,
   updateGLBResourceInstancer,
 } from "../../../systems/shared/world/GLBResourceInstancer";
 import type {
@@ -109,9 +109,9 @@ export class InstancedModelVisualStrategy implements ResourceVisualStrategy {
     return hasResourceDepleted(ctx.id);
   }
 
-  getHighlightMesh(ctx: ResourceVisualContext): THREE.Object3D | null {
-    if (this.fallback) return null;
-    return getResourceHighlightMesh(ctx.id);
+  setShaderHighlight(ctx: ResourceVisualContext, on: boolean): void {
+    if (this.fallback) return;
+    setResourceHighlight(ctx.id, on);
   }
 
   async onRespawn(ctx: ResourceVisualContext): Promise<void> {

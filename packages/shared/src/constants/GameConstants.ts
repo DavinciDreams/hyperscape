@@ -79,7 +79,7 @@ export const TERRAIN_CONSTANTS = {
   /**
    * Water threshold in world Y units.
    * Terrain below this height is underwater and impassable.
-   * Used by: TerrainSystem, VegetationSystem, GPUVegetation, RoadNetworkSystem, ResourceSystem
+   * Used by: TerrainSystem, VegetationSystem, DissolveMaterial, RoadNetworkSystem, ResourceSystem
    */
   WATER_THRESHOLD: 9.0,
 

@@ -42,7 +42,7 @@
  * - Depends on TownSystem for building placement data
  * - Depends on TerrainSystem for height queries
  * - Uses BuildingGenerator from @hyperscape/procgen for mesh generation
- * - Uses unified LOD configuration from GPUVegetation
+ * - Uses unified LOD configuration from LODConfig
  * - Uses ImpostorManager for octahedral impostor baking
  *
  * **Runs on:** Client only (buildings are purely visual on client)
@@ -322,7 +322,7 @@ import {
   snapToBuildingGrid,
   computeTangentsForNonIndexed,
 } from "@hyperscape/procgen/building";
-import { getLODDistances, type LODDistancesWithSq } from "./GPUVegetation";
+import { getLODDistances, type LODDistancesWithSq } from "./LODConfig";
 import {
   ImpostorManager,
   BakePriority,

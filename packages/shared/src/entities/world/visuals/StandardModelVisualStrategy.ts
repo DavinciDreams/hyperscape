@@ -11,10 +11,10 @@ import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
   createDissolveMaterial,
   isDissolveMaterial,
-  getLODDistances,
   GPU_VEG_CONFIG,
   type DissolveMaterial,
-} from "../../../systems/shared/world/GPUVegetation";
+} from "../../../systems/shared/world/GPUMaterials";
+import { getLODDistances } from "../../../systems/shared/world/LODConfig";
 import { getCameraPosition } from "../../../utils/rendering/AnimationLOD";
 import type {
   ResourceVisualContext,

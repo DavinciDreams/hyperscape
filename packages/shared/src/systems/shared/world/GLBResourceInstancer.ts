@@ -19,10 +19,10 @@ import type { World } from "../../../core/World";
 import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
   createDissolveMaterial,
-  getLODDistances,
   GPU_VEG_CONFIG,
   type DissolveMaterial,
-} from "./GPUVegetation";
+} from "./GPUMaterials";
+import { getLODDistances } from "./LODConfig";
 
 const MAX_INSTANCES = 512;
 
@@ -49,6 +49,7 @@ interface LODPool {
   slots: Map<string, number>;
   activeCount: number;
   dirty: boolean;
+  highlightData: Float32Array;
 }
 
 interface ModelPool {
@@ -60,8 +61,6 @@ interface ModelPool {
   instances: Map<string, ResourceSlot>;
   yOffset: number;
   depletedYOffset: number;
-  highlightMesh: THREE.Mesh | null;
-  depletedHighlightMesh: THREE.Mesh | null;
 }
 
 const resourceLOD = getLODDistances("resource");
@@ -134,6 +133,11 @@ function createLODPool(
   material: DissolveMaterial,
 ): LODPool {
   const geo = createSharedGeometry(geometry);
+  const hlData = new Float32Array(MAX_INSTANCES);
+  const hlAttr = new THREE.InstancedBufferAttribute(hlData, 1);
+  hlAttr.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute("instanceHighlight", hlAttr);
+
   const mesh = new THREE.InstancedMesh(geo, material, MAX_INSTANCES);
   mesh.count = 0;
   mesh.frustumCulled = false;
@@ -142,7 +146,14 @@ function createLODPool(
   mesh.layers.set(1);
   scene!.add(mesh);
 
-  return { mesh, material, slots: new Map(), activeCount: 0, dirty: false };
+  return {
+    mesh,
+    material,
+    slots: new Map(),
+    activeCount: 0,
+    dirty: false,
+    highlightData: hlData,
+  };
 }
 
 async function loadLODModel(path: string): Promise<{
@@ -162,20 +173,6 @@ async function loadLODModel(path: string): Promise<{
 // ---------------------------------------------------------------------------
 
 const pendingEnsure = new Map<string, Promise<ModelPool>>();
-
-function createHighlightMesh(
-  geometry: THREE.BufferGeometry,
-  material: THREE.Material,
-): THREE.Mesh {
-  const geo = createSharedGeometry(geometry);
-  const mesh = new THREE.Mesh(geo, material);
-  mesh.frustumCulled = false;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  mesh.layers.set(1);
-  mesh.visible = true;
-  return mesh;
-}
 
 async function ensureModelPool(
   modelPath: string,
@@ -199,31 +196,29 @@ async function ensureModelPool(
 
     const yOffset = computeYOffset(lod0Scene, 1);
 
-    const lod0Material = createDissolveMaterial(lod0Data.material, {
+    const dissolveOpts = {
       fadeStart: GPU_VEG_CONFIG.FADE_START,
       fadeEnd: GPU_VEG_CONFIG.FADE_END,
       enableNearFade: false,
       enableWaterCulling: false,
       enableOcclusionDissolve: false,
-    });
+      enableRimHighlight: true,
+    };
+
+    const lod0Material = createDissolveMaterial(
+      lod0Data.material,
+      dissolveOpts,
+    );
     world!.setupMaterial(lod0Material);
     const lod0Pool = createLODPool(lod0Data.geometry, lod0Material);
-
-    const highlightMesh = createHighlightMesh(
-      lod0Data.geometry,
-      lod0Data.material,
-    );
 
     let lod1Pool: LODPool | null = null;
     const lod1Data = await loadLODModel(inferLOD1Path(modelPath));
     if (lod1Data) {
-      const lod1Material = createDissolveMaterial(lod1Data.material, {
-        fadeStart: GPU_VEG_CONFIG.FADE_START,
-        fadeEnd: GPU_VEG_CONFIG.FADE_END,
-        enableNearFade: false,
-        enableWaterCulling: false,
-        enableOcclusionDissolve: false,
-      });
+      const lod1Material = createDissolveMaterial(
+        lod1Data.material,
+        dissolveOpts,
+      );
       world!.setupMaterial(lod1Material);
       lod1Pool = createLODPool(lod1Data.geometry, lod1Material);
     }
@@ -231,13 +226,10 @@ async function ensureModelPool(
     let lod2Pool: LODPool | null = null;
     const lod2Data = await loadLODModel(inferLOD2Path(modelPath));
     if (lod2Data) {
-      const lod2Material = createDissolveMaterial(lod2Data.material, {
-        fadeStart: GPU_VEG_CONFIG.FADE_START,
-        fadeEnd: GPU_VEG_CONFIG.FADE_END,
-        enableNearFade: false,
-        enableWaterCulling: false,
-        enableOcclusionDissolve: false,
-      });
+      const lod2Material = createDissolveMaterial(
+        lod2Data.material,
+        dissolveOpts,
+      );
       world!.setupMaterial(lod2Material);
       lod2Pool = createLODPool(lod2Data.geometry, lod2Material);
     }
@@ -251,8 +243,6 @@ async function ensureModelPool(
       instances: new Map(),
       yOffset,
       depletedYOffset: 0,
-      highlightMesh,
-      depletedHighlightMesh: null,
     };
     pools.set(modelPath, pool);
 
@@ -296,14 +286,11 @@ async function loadDepletedPool(
     enableNearFade: false,
     enableWaterCulling: false,
     enableOcclusionDissolve: false,
+    enableRimHighlight: true,
   });
   world!.setupMaterial(depletedMaterial);
   pool.depleted = createLODPool(depletedData.geometry, depletedMaterial);
   pool.depletedYOffset = depletedYOffset;
-  pool.depletedHighlightMesh = createHighlightMesh(
-    depletedData.geometry,
-    depletedData.material,
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +326,7 @@ function removeFromPool(pool: LODPool, entityId: string): void {
   if (idx !== lastIdx) {
     pool.mesh.getMatrixAt(lastIdx, _swapMatrix);
     pool.mesh.setMatrixAt(idx, _swapMatrix);
+    pool.highlightData[idx] = pool.highlightData[lastIdx];
 
     for (const [eid, eidIdx] of pool.slots) {
       if (eidIdx === lastIdx) {
@@ -347,6 +335,7 @@ function removeFromPool(pool: LODPool, entityId: string): void {
       }
     }
   }
+  pool.highlightData[lastIdx] = 0;
 
   pool.slots.delete(entityId);
   pool.activeCount--;
@@ -371,9 +360,6 @@ export function destroyGLBResourceInstancer(): void {
       lodPool.mesh.geometry.dispose();
       lodPool.material.dispose();
     }
-    if (pool.highlightMesh) pool.highlightMesh.geometry.dispose();
-    if (pool.depletedHighlightMesh)
-      pool.depletedHighlightMesh.geometry.dispose();
   }
   pools.clear();
   entityToModel.clear();
@@ -462,13 +448,6 @@ export function setDepleted(entityId: string, depleted: boolean): void {
   const slot = pool.instances.get(entityId);
   if (!slot || slot.depleted === depleted) return;
 
-  const oldHlMesh = slot.depleted
-    ? pool.depletedHighlightMesh
-    : pool.highlightMesh;
-  if (oldHlMesh?.parent) {
-    oldHlMesh.parent.remove(oldHlMesh);
-  }
-
   slot.depleted = depleted;
 
   if (depleted) {
@@ -521,31 +500,45 @@ export function hasDepleted(entityId: string): boolean {
   return !!pool?.depleted;
 }
 
-export function getHighlightMesh(entityId: string): THREE.Object3D | null {
+let highlightedEntityId: string | null = null;
+
+export function setHighlight(entityId: string, on: boolean): void {
+  if (on && highlightedEntityId && highlightedEntityId !== entityId) {
+    setHighlight(highlightedEntityId, false);
+  }
+
   const modelPath = entityToModel.get(entityId);
-  if (!modelPath) return null;
+  if (!modelPath) return;
 
   const pool = pools.get(modelPath);
-  if (!pool) return null;
+  if (!pool) return;
 
   const slot = pool.instances.get(entityId);
-  if (!slot) return null;
+  if (!slot) return;
 
-  const mesh = slot.depleted ? pool.depletedHighlightMesh : pool.highlightMesh;
-  if (!mesh) return null;
+  const lodPool = slot.depleted
+    ? pool.depleted
+    : slot.currentLOD === 0
+      ? pool.lod0
+      : slot.currentLOD === 1
+        ? pool.lod1
+        : pool.lod2;
+  if (!lodPool) return;
 
-  const s = slot.depleted ? slot.depletedScale : slot.scale;
-  const yOff = slot.depleted ? pool.depletedYOffset : pool.yOffset;
-  mesh.position.set(
-    slot.position.x,
-    slot.position.y + yOff * s,
-    slot.position.z,
-  );
-  mesh.rotation.set(0, slot.rotation, 0);
-  mesh.scale.set(s, s, s);
-  mesh.updateMatrixWorld(true);
+  const idx = lodPool.slots.get(entityId);
+  if (idx === undefined) return;
 
-  return mesh;
+  lodPool.highlightData[idx] = on ? 1.0 : 0.0;
+  const attr = lodPool.mesh.geometry.getAttribute("instanceHighlight");
+  if (attr) (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
+
+  highlightedEntityId = on ? entityId : null;
+}
+
+export function clearHighlight(): void {
+  if (highlightedEntityId) {
+    setHighlight(highlightedEntityId, false);
+  }
 }
 
 let lastUpdateFrame = -1;
@@ -599,6 +592,10 @@ export function updateGLBResourceInstancer(): void {
       const newPool =
         targetLOD === 0 ? pool.lod0 : targetLOD === 1 ? pool.lod1 : pool.lod2;
 
+      const wasHighlighted =
+        oldPool && oldPool.slots.has(slot.entityId)
+          ? oldPool.highlightData[oldPool.slots.get(slot.entityId)!]
+          : 0;
       if (oldPool) removeFromPool(oldPool, slot.entityId);
       if (newPool) {
         const mat = composeInstanceMatrix(
@@ -608,6 +605,16 @@ export function updateGLBResourceInstancer(): void {
           slot.yOffset,
         );
         addToPool(newPool, slot.entityId, mat);
+        if (wasHighlighted > 0) {
+          const newIdx = newPool.slots.get(slot.entityId);
+          if (newIdx !== undefined) {
+            newPool.highlightData[newIdx] = wasHighlighted;
+            const attr =
+              newPool.mesh.geometry.getAttribute("instanceHighlight");
+            if (attr)
+              (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
+          }
+        }
       }
       slot.currentLOD = targetLOD;
     }

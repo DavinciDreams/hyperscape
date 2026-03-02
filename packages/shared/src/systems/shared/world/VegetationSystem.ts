@@ -48,12 +48,14 @@ import {
 } from "../../../utils/workers/VegetationWorker";
 import {
   createGPUVegetationMaterial,
+  type GPUVegetationMaterial,
+} from "./GPUMaterials";
+import {
   getLODDistances,
   getLODDistancesScaled,
   applyLODSettings,
-  type GPUVegetationMaterial,
   type LODDistancesWithSq,
-} from "./GPUVegetation";
+} from "./LODConfig";
 import { csmLevels } from "./Environment";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 import { updateTreeInstances } from "./ProcgenTreeCache";
@@ -120,7 +122,7 @@ let FADE_START = 180; // Shader fade begins (fully opaque inside)
 let FADE_END = 200; // Shader fully culls (invisible beyond)
 let CHUNK_RENDER_DISTANCE = 300; // CPU hides chunks (buffer zone for loading)
 
-// NOTE: Per-category LOD distances are defined in GPUVegetation.ts LOD_DISTANCES
+// NOTE: Per-category LOD distances are defined in LODConfig.ts LOD_DISTANCES
 // Access via getLODDistances(category) for actual LOD decisions.
 // The module-level FADE_START/FADE_END above are used for shared material creation.
 
@@ -236,7 +238,7 @@ const DEFAULT_CONFIG: VegetationConfig = {
 };
 
 /**
- * LOD CONFIGURATION - Now uses unified system from GPUVegetation.ts
+ * LOD CONFIGURATION - Now uses unified system from LODConfig.ts
  *
  * The 3-tier LOD system:
  * - LOD0 (full detail): 0 to lod1Distance
@@ -244,7 +246,7 @@ const DEFAULT_CONFIG: VegetationConfig = {
  * - Imposter (billboard): imposterDistance to fadeDistance
  * - Culled: beyond fadeDistance
  *
- * Configuration is defined in GPUVegetation.ts LOD_DISTANCES and accessed via getLODDistances()
+ * Configuration is defined in LODConfig.ts LOD_DISTANCES and accessed via getLODDistances()
  */
 
 /**
@@ -772,7 +774,7 @@ export class VegetationSystem extends System {
 
     // Imposter distances - switch to billboard before dissolve zone
     // LOD transition: 3D mesh -> Billboard imposter -> Dissolve -> Cull
-    // Per-category LOD distances are defined in GPUVegetation.ts LOD_DISTANCES
+    // Per-category LOD distances are defined in LODConfig.ts LOD_DISTANCES
     // The shared material uses FADE_START/FADE_END for dissolve shader
     console.log(
       `[VegetationSystem] Synced with shadows "${shadowsLevel}": fade ${FADE_START.toFixed(0)}-${FADE_END.toFixed(0)}m, chunks ${CHUNK_RENDER_DISTANCE.toFixed(0)}m (per-category LOD via getLODDistances)`,
@@ -2529,9 +2531,9 @@ export class VegetationSystem extends System {
         radius,
       );
       if (!indexed) {
-        console.warn(
-          `[VegetationSystem] Chunk ${chunkKey} at (${centerX.toFixed(0)}, ${centerZ.toFixed(0)}) outside quadtree bounds - using fallback linear iteration`,
-        );
+        // console.warn(
+        //   `[VegetationSystem] Chunk ${chunkKey} at (${centerX.toFixed(0)}, ${centerZ.toFixed(0)}) outside quadtree bounds - using fallback linear iteration`,
+        // );
       }
     }
   }

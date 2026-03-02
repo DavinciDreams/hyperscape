@@ -135,7 +135,7 @@ import {
 import {
   getLODConfig,
   type LODDistancesWithSq,
-} from "../systems/shared/world/GPUVegetation";
+} from "../systems/shared/world/LODConfig";
 // Re-export types for external use
 export type { EntityConfig };
 

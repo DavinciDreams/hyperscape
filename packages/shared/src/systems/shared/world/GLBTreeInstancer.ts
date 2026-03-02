@@ -22,10 +22,10 @@ import type { World } from "../../../core/World";
 import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
   createDissolveMaterial,
-  getLODDistances,
   GPU_VEG_CONFIG,
   type DissolveMaterial,
-} from "./GPUVegetation";
+} from "./GPUMaterials";
+import { getLODDistances } from "./LODConfig";
 
 const MAX_INSTANCES = 512;
 

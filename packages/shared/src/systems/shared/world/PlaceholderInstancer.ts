@@ -18,7 +18,7 @@ import {
   createDissolveMaterial,
   GPU_VEG_CONFIG,
   type DissolveMaterial,
-} from "./GPUVegetation";
+} from "./GPUMaterials";
 
 const INITIAL_CAPACITY = 64;
 
@@ -38,6 +38,7 @@ interface Pool {
   instances: InstanceSlot[];
   activeCount: number;
   capacity: number;
+  highlightData: Float32Array;
 }
 
 // ---- Module state ----
@@ -61,6 +62,15 @@ function createBaseMaterial(resourceType: string): MeshStandardNodeMaterial {
 
 // ---- Pool lifecycle ----
 
+function attachHighlightAttr(
+  geo: THREE.BufferGeometry,
+  hlData: Float32Array,
+): void {
+  const attr = new THREE.InstancedBufferAttribute(hlData, 1);
+  attr.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute("instanceHighlight", attr);
+}
+
 function createPool(resourceType: string): Pool {
   const geometry = createGeometry(resourceType);
   const baseMat = createBaseMaterial(resourceType);
@@ -70,7 +80,11 @@ function createPool(resourceType: string): Pool {
     enableNearFade: true,
     enableWaterCulling: true,
     enableOcclusionDissolve: true,
+    enableRimHighlight: true,
   });
+
+  const hlData = new Float32Array(INITIAL_CAPACITY);
+  attachHighlightAttr(geometry, hlData);
 
   const mesh = new THREE.InstancedMesh(geometry, material, INITIAL_CAPACITY);
   mesh.count = 0;
@@ -88,6 +102,7 @@ function createPool(resourceType: string): Pool {
     instances: [],
     activeCount: 0,
     capacity: INITIAL_CAPACITY,
+    highlightData: hlData,
   };
 }
 
@@ -95,11 +110,14 @@ function growPool(pool: Pool): void {
   const newCapacity = pool.capacity * 2;
   const { mesh } = pool;
 
-  const newMesh = new THREE.InstancedMesh(
-    mesh.geometry,
-    mesh.material,
-    newCapacity,
-  );
+  const newHlData = new Float32Array(newCapacity);
+  newHlData.set(pool.highlightData);
+  pool.highlightData = newHlData;
+
+  const newGeo = mesh.geometry.clone();
+  attachHighlightAttr(newGeo, newHlData);
+
+  const newMesh = new THREE.InstancedMesh(newGeo, mesh.material, newCapacity);
   for (let i = 0; i < pool.activeCount; i++) {
     newMesh.setMatrixAt(
       i,
@@ -202,9 +220,11 @@ export function removePlaceholderInstance(entityId: string): void {
       index,
       lastSlot.visible ? lastSlot.matrix : _zeroScale,
     );
+    pool.highlightData[index] = pool.highlightData[lastIndex];
     pool.instances[index] = lastSlot;
     pool.slots.set(lastSlot.entityId, index);
   }
+  pool.highlightData[lastIndex] = 0;
 
   pool.activeCount--;
   pool.mesh.count = pool.activeCount;
@@ -233,4 +253,35 @@ export function setPlaceholderVisible(
   slot.visible = visible;
   pool.mesh.setMatrixAt(index, visible ? slot.matrix : _zeroScale);
   pool.mesh.instanceMatrix.needsUpdate = true;
+}
+
+// ---- Shader-based highlight ----
+
+let _highlightedEntityId: string | null = null;
+
+export function setPlaceholderHighlight(entityId: string, on: boolean): void {
+  if (on && _highlightedEntityId && _highlightedEntityId !== entityId) {
+    setPlaceholderHighlight(_highlightedEntityId, false);
+  }
+
+  const resourceType = _entityToType.get(entityId);
+  if (!resourceType) return;
+
+  const pool = _pools.get(resourceType);
+  if (!pool) return;
+
+  const index = pool.slots.get(entityId);
+  if (index === undefined) return;
+
+  pool.highlightData[index] = on ? 1.0 : 0.0;
+  const attr = pool.mesh.geometry.getAttribute("instanceHighlight");
+  if (attr) (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
+
+  _highlightedEntityId = on ? entityId : null;
+}
+
+export function clearPlaceholderHighlight(): void {
+  if (_highlightedEntityId) {
+    setPlaceholderHighlight(_highlightedEntityId, false);
+  }
 }
