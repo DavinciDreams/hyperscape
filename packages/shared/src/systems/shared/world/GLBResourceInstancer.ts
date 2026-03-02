@@ -138,7 +138,7 @@ function createLODPool(
   mesh.count = 0;
   mesh.frustumCulled = false;
   mesh.castShadow = true;
-  mesh.receiveShadow = true;
+  mesh.receiveShadow = false;
   mesh.layers.set(1);
   scene!.add(mesh);
 

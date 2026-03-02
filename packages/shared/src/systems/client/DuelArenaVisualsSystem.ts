@@ -711,7 +711,7 @@ export class DuelArenaVisualsSystem extends System {
       TOTAL_FENCE_POSTS,
     );
     postsIM.castShadow = true;
-    postsIM.receiveShadow = true;
+    postsIM.receiveShadow = false;
     postsIM.layers.set(1);
     postsIM.userData = { type: "arena-fence", walkable: false };
 
@@ -784,7 +784,7 @@ export class DuelArenaVisualsSystem extends System {
       TOTAL_X_RAILS,
     );
     railsXIM.castShadow = true;
-    railsXIM.receiveShadow = true;
+    railsXIM.receiveShadow = false;
     railsXIM.layers.set(1);
 
     let railXIdx = 0;
@@ -823,7 +823,7 @@ export class DuelArenaVisualsSystem extends System {
       TOTAL_Z_RAILS,
     );
     railsZIM.castShadow = true;
-    railsZIM.receiveShadow = true;
+    railsZIM.receiveShadow = false;
     railsZIM.layers.set(1);
 
     let railZIdx = 0;
@@ -889,7 +889,7 @@ export class DuelArenaVisualsSystem extends System {
 
     for (const im of [basesIM, shaftsIM, capitalsIM]) {
       im.castShadow = true;
-      im.receiveShadow = true;
+      im.receiveShadow = false;
       im.layers.set(1);
     }
 
@@ -1253,7 +1253,7 @@ export class DuelArenaVisualsSystem extends System {
         const pillar = new THREE.Mesh(geom, this.forfeitPillarMat!);
         pillar.position.set(x, terrainY + FORFEIT_PILLAR_HEIGHT / 2, z);
         pillar.castShadow = true;
-        pillar.receiveShadow = true;
+        pillar.receiveShadow = false;
         pillar.name = entityId;
         pillar.userData = {
           entityId,

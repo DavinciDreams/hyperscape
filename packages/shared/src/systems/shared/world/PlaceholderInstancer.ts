@@ -76,7 +76,7 @@ function createPool(resourceType: string): Pool {
   mesh.count = 0;
   mesh.frustumCulled = false;
   mesh.castShadow = true;
-  mesh.receiveShadow = true;
+  mesh.receiveShadow = false;
   mesh.layers.set(1);
   mesh.name = `PlaceholderPool_${resourceType}`;
   _scene!.add(mesh);
@@ -110,7 +110,7 @@ function growPool(pool: Pool): void {
   newMesh.instanceMatrix.needsUpdate = true;
   newMesh.frustumCulled = false;
   newMesh.castShadow = true;
-  newMesh.receiveShadow = true;
+  newMesh.receiveShadow = false;
   newMesh.layers.set(1);
   newMesh.name = mesh.name;
 
