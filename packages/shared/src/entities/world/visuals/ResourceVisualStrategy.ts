@@ -55,9 +55,6 @@ export interface ResourceVisualStrategy {
   update(ctx: ResourceVisualContext, deltaTime: number): void;
   destroy(ctx: ResourceVisualContext): void;
 
-  /** Return a temporary mesh positioned at this instance for the outline pass. */
-  getHighlightMesh?(ctx: ResourceVisualContext): THREE.Object3D | null;
-
   /** Shader-based rim highlight: set on/off per instance (no extra meshes). */
   setShaderHighlight?(ctx: ResourceVisualContext, on: boolean): void;
 }

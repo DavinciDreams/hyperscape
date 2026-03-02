@@ -199,7 +199,7 @@ export class RunecraftingAltarEntity extends InteractableEntity {
           child.layers.set(1);
           if (child instanceof THREE.Mesh) {
             child.castShadow = true;
-            child.receiveShadow = true;
+            child.receiveShadow = false;
           }
         });
 
@@ -242,7 +242,7 @@ export class RunecraftingAltarEntity extends InteractableEntity {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `RunecraftingAltar_${this.id}`;
     mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     mesh.position.y = boxHeight / 2;
     mesh.layers.set(1);
     this.mesh = mesh;

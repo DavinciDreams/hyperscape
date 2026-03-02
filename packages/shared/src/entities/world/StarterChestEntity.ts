@@ -224,7 +224,7 @@ export class StarterChestEntity extends InteractableEntity {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `StarterChest_${this.id}`;
     mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     mesh.position.y = boxHeight / 2;
 
     // Add golden trim on top (lid edge)

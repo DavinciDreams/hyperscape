@@ -123,18 +123,6 @@ export class ResourceEntity extends InteractableEntity {
   }
 
   /**
-   * Returns a temporary highlight mesh positioned at this entity's instanced
-   * location. Used by EntityHighlightService for outline rendering when the
-   * entity is instanced (no individual scene-graph mesh to outline).
-   */
-  public getHighlightRoot(): THREE.Object3D | null {
-    if (typeof this.visual.getHighlightMesh === "function") {
-      return this.visual.getHighlightMesh(this.getVisualCtx());
-    }
-    return null;
-  }
-
-  /**
    * Shader-based highlight toggle. Returns true if the strategy handled it,
    * false if EntityHighlightService should fall back to the outline pass.
    */
@@ -143,7 +131,7 @@ export class ResourceEntity extends InteractableEntity {
       this.visual.setShaderHighlight(this.getVisualCtx(), on);
       return true;
     }
-    return false;
+    return super.setShaderHighlight(on);
   }
 
   // ===========================================================================

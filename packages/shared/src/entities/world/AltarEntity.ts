@@ -200,7 +200,7 @@ export class AltarEntity extends InteractableEntity {
           child.layers.set(1);
           if (child instanceof THREE.Mesh) {
             child.castShadow = true;
-            child.receiveShadow = true;
+            child.receiveShadow = false;
           }
         });
 
@@ -250,7 +250,7 @@ export class AltarEntity extends InteractableEntity {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `Altar_${this.id}`;
     mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     // Offset mesh up so it sits on the ground (BoxGeometry is centered at origin)
     mesh.position.y = boxHeight / 2;
     // Set layer for raycasting (required for interaction detection)

@@ -846,3 +846,59 @@ export function isImposterMaterial(
 ): material is ImposterMaterial {
   return material != null && "imposterUniforms" in material;
 }
+
+// ============================================================================
+// UNIFORM-BASED RIM HIGHLIGHT (FOR NON-INSTANCED ENTITIES)
+// ============================================================================
+
+/**
+ * Apply a Fresnel rim highlight to an individual (non-instanced) node material.
+ * Uses a uniform toggle instead of an instanced attribute.
+ *
+ * Call this once per material; returns the uniform whose `.value` you set to
+ * `1.0` (highlighted) or `0.0` (normal) at runtime.
+ *
+ * @param material - A MeshStandardNodeMaterial (duck-typed via `outputNode` check)
+ * @param color - Highlight rim color (default: cyan 0x00ffff)
+ * @returns The highlight uniform, or null if the material is incompatible
+ */
+export function applyRimHighlight(
+  material: THREE.Material,
+  color: THREE.Color = new THREE.Color(0x00ffff),
+): { value: number } | null {
+  const mat = material as THREE.MeshStandardNodeMaterial;
+  if (!mat || !("outputNode" in mat)) return null;
+
+  const uHighlight = uniform(0.0);
+  const uHighlightColor = uniform(color);
+
+  const BRIGHTEN = 0.08;
+  const RIM_POWER = 2.5;
+  const RIM_STRENGTH = 0.4;
+
+  const prevOutput = mat.outputNode;
+
+  mat.outputNode = Fn(() => {
+    const litColor = prevOutput ? prevOutput : output;
+    const hlIntensity = uHighlight;
+
+    const N = normalize(normalView);
+    const V = normalize(sub(vec3(0, 0, 0), positionView.xyz));
+    const NdotV = clamp(dot(N, V), float(0.0), float(1.0));
+
+    const rim = mul(
+      pow(sub(float(1.0), NdotV), float(RIM_POWER)),
+      float(RIM_STRENGTH),
+    );
+
+    const brightened = add(litColor.rgb, float(BRIGHTEN));
+    const rimGlow = mul(vec3(uHighlightColor), rim);
+    const highlighted = add(brightened, rimGlow);
+
+    const finalRgb = mix(litColor.rgb, highlighted, hlIntensity);
+    return vec4(finalRgb, litColor.a);
+  })();
+
+  mat.needsUpdate = true;
+  return uHighlight as unknown as { value: number };
+}

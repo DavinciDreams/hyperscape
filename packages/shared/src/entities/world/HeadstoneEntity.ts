@@ -119,7 +119,7 @@ export class HeadstoneEntity extends InteractableEntity {
           child.layers.set(1);
           if (child instanceof THREE.Mesh) {
             child.castShadow = true;
-            child.receiveShadow = true;
+            child.receiveShadow = false;
           }
         });
       } catch (error) {
@@ -167,7 +167,7 @@ export class HeadstoneEntity extends InteractableEntity {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `Corpse_${this.id}`;
     mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     mesh.layers.set(1);
     this.mesh = mesh;
   }

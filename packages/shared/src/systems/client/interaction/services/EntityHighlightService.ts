@@ -54,8 +54,6 @@ const _meshBuffer: THREE.Object3D[] = [];
 export class EntityHighlightService {
   private currentTargetId: string | null = null;
   private composer: PostProcessingComposer | null = null;
-  /** Temporary highlight mesh added to the scene for instanced entities */
-  private activeHighlightMesh: THREE.Object3D | null = null;
   /** Entity using shader-based rim highlight (needs clearing on un-hover) */
   private shaderHighlightEntity: Record<string, unknown> | null = null;
 
@@ -84,7 +82,6 @@ export class EntityHighlightService {
     if (newId === this.currentTargetId) return;
 
     this.clearShaderHighlight();
-    this.removeActiveHighlightMesh();
     this.currentTargetId = newId;
 
     if (!target || !target.entity) {
@@ -107,23 +104,7 @@ export class EntityHighlightService {
 
     if (!this.composer) return;
 
-    // Try instanced highlight path (legacy)
-    if (typeof entity.getHighlightRoot === "function") {
-      const hlRoot = (entity.getHighlightRoot as () => THREE.Object3D | null)();
-      if (hlRoot) {
-        this.world.stage?.scene?.add?.(hlRoot);
-        this.activeHighlightMesh = hlRoot;
-        const meshes = this.collectMeshes(hlRoot);
-        if (meshes.length > 0) {
-          const color = this.getHighlightColor(target.entityType);
-          this.composer.setOutlineColor(color);
-          this.composer.setOutlineObjects(meshes);
-          return;
-        }
-      }
-    }
-
-    // Fallback: use entity's own scene-graph mesh
+    // Fallback: use entity's own scene-graph mesh (non-instanced entities)
     const mesh = target.entity.mesh;
     const node = target.entity.node;
     const root = mesh ?? node;
@@ -150,16 +131,8 @@ export class EntityHighlightService {
     if (this.currentTargetId === null) return;
     this.currentTargetId = null;
     this.clearShaderHighlight();
-    this.removeActiveHighlightMesh();
     if (this.composer) {
       this.composer.setOutlineObjects([]);
-    }
-  }
-
-  private removeActiveHighlightMesh(): void {
-    if (this.activeHighlightMesh) {
-      this.world.stage?.scene?.remove?.(this.activeHighlightMesh);
-      this.activeHighlightMesh = null;
     }
   }
 
