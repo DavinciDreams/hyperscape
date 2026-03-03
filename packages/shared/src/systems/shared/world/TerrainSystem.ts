@@ -956,7 +956,7 @@ export class TerrainSystem extends System {
       tileZ * this.CONFIG.TILE_SIZE,
     );
     mesh.name = `Terrain_${key}`;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     mesh.castShadow = false;
     mesh.frustumCulled = true;
     mesh.userData = {
@@ -2069,7 +2069,7 @@ export class TerrainSystem extends System {
     mesh.name = `Terrain_${key}`;
 
     // Enable shadow receiving for CSM
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     mesh.castShadow = false; // Terrain doesn't cast shadows on itself
 
     // Enable frustum culling (Three.js built-in)
@@ -4560,12 +4560,12 @@ export class TerrainSystem extends System {
     this.generateTreesForTile(tile, biomeData);
 
     // Re-enabled for ore LOD testing
-    this.generateOtherResourcesForTile(tile, biomeData);
+    // this.generateOtherResourcesForTile(tile, biomeData);
 
     // Generate decorative rocks (client only)
     const isClient = this.runtimeIsClient;
     if (isClient) {
-      this.generateDecorativeRocksForTile(tile, biomeData);
+      // this.generateDecorativeRocksForTile(tile, biomeData);
       // NOTE: Plants disabled - not working/looking good yet
       // this.generateDecorativePlantsForTile(tile, biomeData);
     }
@@ -4731,11 +4731,8 @@ export class TerrainSystem extends System {
     // Generate other resources (herbs, fishing spots) from legacy config
     const otherResources = biomeData.resources.filter(
       (r) =>
-        r !== "tree" &&
-        r !== "trees" &&
-        r !== "ore" &&
-        r !== "ores" &&
-        r !== "rock",
+        // r !== "tree" &&
+        r !== "trees" && r !== "ore" && r !== "ores" && r !== "rock",
     );
 
     for (const resourceType of otherResources) {
@@ -5059,6 +5056,28 @@ export class TerrainSystem extends System {
       const materialWithUniforms = this.getTerrainMaterialWithUniforms();
       if (materialWithUniforms) {
         materialWithUniforms.terrainUniforms.time.value = this.terrainTime;
+
+        // Sync sun direction and shade color from Environment system
+        const env = this.world.getSystem("environment") as {
+          lightDirection?: THREE.Vector3;
+          hemisphereLight?: { color: THREE.Color };
+        } | null;
+        if (env?.lightDirection) {
+          materialWithUniforms.terrainUniforms.sunDirection.value
+            .copy(env.lightDirection)
+            .negate();
+        }
+        if (env?.hemisphereLight) {
+          const c = env.hemisphereLight.color;
+          const avg = (c.r + c.g + c.b) / 3;
+          if (avg > 0.01) {
+            (materialWithUniforms.terrainUniforms.shadeColor.value as any).set(
+              c.r / avg,
+              c.g / avg,
+              c.b / avg,
+            );
+          }
+        }
 
         // Fog texture is the shared fogRenderTarget from FogConfig — no sync needed
 

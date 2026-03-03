@@ -21,9 +21,10 @@ import THREE from "../../../extras/three/three";
 import type { World } from "../../../core/World";
 import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
-  createDissolveMaterial,
+  createTreeDissolveMaterial,
   GPU_VEG_CONFIG,
   type DissolveMaterial,
+  type TreeDissolveMaterial,
 } from "./GPUMaterials";
 import { getLODDistances } from "./LODConfig";
 
@@ -162,6 +163,7 @@ function createLODPool(
   const hlData = new Float32Array(MAX_INSTANCES);
   for (const part of parts) {
     const geo = createSharedGeometry(part.geometry);
+
     const hlAttr = new THREE.InstancedBufferAttribute(hlData, 1);
     hlAttr.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute("instanceHighlight", hlAttr);
@@ -247,11 +249,11 @@ async function ensureModelPool(
       enableRimHighlight: true,
     };
 
-    function buildDissolveParts(
+    function buildTreeParts(
       parts: MeshPart[],
     ): { geometry: THREE.BufferGeometry; material: DissolveMaterial }[] {
       return parts.map((p) => {
-        const dm = createDissolveMaterial(p.material, dissolveOpts);
+        const dm = createTreeDissolveMaterial(p.material, dissolveOpts);
         dm.side = THREE.DoubleSide;
         enableTextureRepeat(dm);
         world!.setupMaterial(dm);
@@ -267,20 +269,20 @@ async function ensureModelPool(
 
     const bounds = computeModelBounds(lod0Scene, 1);
 
-    const lod0Pool = createLODPool(buildDissolveParts(lod0Parts));
+    const lod0Pool = createLODPool(buildTreeParts(lod0Parts));
 
     // LOD1
     let lod1Pool: LODPool | null = null;
     const lod1Parts = await loadLODParts(inferLOD1Path(modelPath));
     if (lod1Parts) {
-      lod1Pool = createLODPool(buildDissolveParts(lod1Parts));
+      lod1Pool = createLODPool(buildTreeParts(lod1Parts));
     }
 
     // LOD2
     let lod2Pool: LODPool | null = null;
     const lod2Parts = await loadLODParts(inferLOD2Path(modelPath));
     if (lod2Parts) {
-      lod2Pool = createLODPool(buildDissolveParts(lod2Parts));
+      lod2Pool = createLODPool(buildTreeParts(lod2Parts));
     }
 
     const pool: ModelPool = {
@@ -340,7 +342,7 @@ async function loadDepletedPool(
     enableRimHighlight: true,
   };
   const depletedDissolveParts = depletedParts.map((p) => {
-    const dm = createDissolveMaterial(p.material, dissolveOpts);
+    const dm = createTreeDissolveMaterial(p.material, dissolveOpts);
     dm.side = THREE.DoubleSide;
     enableTextureRepeat(dm);
     world!.setupMaterial(dm);
@@ -724,6 +726,13 @@ export function updateGLBTreeInstancer(): void {
   const localPlayer = players && players.length > 0 ? players[0] : null;
   const playerPos = localPlayer?.node?.position ?? camPos;
 
+  // Get sun direction from Environment system
+  const env = world.getSystem("environment") as {
+    sunLight?: { intensity: number };
+    lightDirection?: THREE.Vector3;
+    hemisphereLight?: { color: THREE.Color };
+  } | null;
+
   for (const pool of pools.values()) {
     for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
       if (!lodPool) continue;
@@ -742,6 +751,33 @@ export function updateGLBTreeInstancer(): void {
           playerPos.y,
           playerPos.z,
         );
+
+        // Sync tree-specific uniforms (sun direction, intensity, shade color)
+        const treeMat = mat as TreeDissolveMaterial;
+        if (treeMat.treeUniforms) {
+          if (env?.lightDirection) {
+            treeMat.treeUniforms.sunDirection.value
+              .copy(env.lightDirection)
+              .negate();
+          }
+          if (env?.sunLight) {
+            treeMat.treeUniforms.sunIntensity.value = Math.min(
+              env.sunLight.intensity,
+              2.0,
+            );
+          }
+          if (env?.hemisphereLight) {
+            const c = env.hemisphereLight.color;
+            const avg = (c.r + c.g + c.b) / 3;
+            if (avg > 0.01) {
+              treeMat.treeUniforms.shadeColor.value.setRGB(
+                c.r / avg,
+                c.g / avg,
+                c.b / avg,
+              );
+            }
+          }
+        }
       }
     }
   }

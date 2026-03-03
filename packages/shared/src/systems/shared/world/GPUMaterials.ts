@@ -48,6 +48,7 @@ import {
   abs,
   viewportCoordinate,
   normalView,
+  normalWorld,
   normalize,
   pow,
   attribute,
@@ -120,6 +121,37 @@ export const GPU_VEG_CONFIG = {
   /** Distance from camera where geometry is fully dissolved (meters) - at near clip */
   NEAR_CAMERA_FADE_END: 0.05,
 } as const;
+
+// ============================================================================
+// SHARED TERRAIN LIGHTING (used by both TerrainShader and tree terrain blend)
+// ============================================================================
+
+/** Sun shade strength — identical in terrain shader and tree shader */
+export const SHADE_STRENGTH = 0.3;
+
+/**
+ * Compute sun shade (shadow-side sky tint) on a pre-lit color.
+ * Used by both the terrain shader's outputNode and the tree shader's
+ * terrain color blend so both produce the exact same result.
+ *
+ * @param color - Already-lit color (e.g. PBR output or manually-lit albedo)
+ * @param normal - Surface normal (world space)
+ * @param sunDir - Sun direction uniform (normalised inside)
+ * @param shadeColor - Normalised hemisphere sky color for shadow tint
+ */
+export function applyTerrainSunShade(
+  color: any,
+  normal: any,
+  sunDir: any,
+  shadeColor: any,
+) {
+  const L = normalize(sunDir);
+  const N = normalize(normal);
+  const NdotL = dot(N, L);
+  const shade = sub(float(0.5), mul(NdotL, float(0.5)));
+  const tinted = mul(color, shadeColor);
+  return mix(color, tinted, mul(shade, float(SHADE_STRENGTH)));
+}
 
 // ============================================================================
 // TYPES
@@ -901,4 +933,129 @@ export function applyRimHighlight(
 
   mat.needsUpdate = true;
   return uHighlight as unknown as { value: number };
+}
+
+// ============================================================================
+// TREE DISSOLVE MATERIAL (FORTNITE-STYLE FOLIAGE SHADING)
+// ============================================================================
+
+/**
+ * Tree-specific dissolve material with stylized foliage shading.
+ * Extends DissolveMaterial with:
+ * - Vertex-color AO (G channel darkens crevices)
+ * - Back-SSS translucency (warm glow when backlit by sun)
+ * - Subtle saturation boost for rich foliage colors
+ * - Per-instance rim highlight
+ */
+export type TreeDissolveMaterial = DissolveMaterial & {
+  treeUniforms: {
+    sunDirection: { value: THREE.Vector3 };
+    sunIntensity: { value: number };
+    shadeColor: { value: THREE.Color };
+  };
+};
+
+/**
+ * Creates a tree dissolve material from an existing source material.
+ * Builds on the standard dissolve material (dithered fade, water culling, etc.)
+ * and layers Fortnite-inspired foliage shading on top:
+ *
+ * 1. **AO** — Reads the vertex color G channel as ambient occlusion,
+ *    darkening crevices and inner branches for depth.
+ * 2. **Sun shade** — Shadow-side surfaces get tinted by the sky's ambient
+ *    color (from the hemisphere light), shifting cool during day and
+ *    dark-blue at night.
+ * 3. **Saturation** — Subtle boost keeps colors rich without being cartoonish.
+ * 4. **Rim highlight** — Per-instance Fresnel glow for hover feedback.
+ *
+ * @param source - Source material to clone PBR properties from
+ * @param options - Dissolve configuration (fade distances, etc.)
+ */
+export function createTreeDissolveMaterial(
+  source: THREE.MeshStandardMaterial | THREE.Material,
+  options: DissolveMaterialOptions = {},
+): TreeDissolveMaterial {
+  const baseDm = createDissolveMaterial(source, {
+    ...options,
+    enableRimHighlight: false,
+  });
+
+  const material = baseDm as unknown as THREE.MeshStandardNodeMaterial;
+
+  // Prevent the standard pipeline from multiplying vertex colors into diffuse.
+  // We read vertex color manually in the shader for AO only (G channel).
+  material.vertexColors = false;
+
+  // Boost normal map effect when present for more realistic surface detail
+  const srcStd = source as THREE.MeshStandardMaterial;
+  if (srcStd.normalMap) {
+    material.normalScale = new THREE.Vector2(2, 2);
+  }
+
+  // --- Tree-specific uniforms ---
+  const uSunDir = uniform(new THREE.Vector3(0.5, 0.8, 0.3));
+  const uSunIntensity = uniform(1.0);
+  const uShadeColor = uniform(new THREE.Color(0.7, 1.08, 1.22));
+  const uHighlightColor = uniform(new THREE.Color(0x00ffff));
+
+  // --- Tuning constants ---
+  const AO_POWER = 1.8;
+  const AO_DARK = 0.35;
+  const SAT_BOOST = 1.1;
+  const HL_BRIGHTEN = 0.08;
+  const HL_RIM_POWER = 2.5;
+  const HL_RIM_STRENGTH = 0.4;
+
+  material.outputNode = Fn(() => {
+    const litColor = output;
+
+    // ---- Vertex-color AO ----
+    const aoRaw = attribute("color", "vec3").y;
+    const aoFactor = pow(aoRaw, float(AO_POWER));
+    const aoMul = mix(float(AO_DARK), float(1.0), aoFactor);
+    const aoResult = mul(litColor.rgb, aoMul);
+
+    // ---- Sun shade ----
+    const shadeResult = applyTerrainSunShade(
+      aoResult,
+      normalWorld,
+      vec3(uSunDir),
+      vec3(uShadeColor),
+    );
+
+    // ---- Saturation boost ----
+    const luma = dot(shadeResult, vec3(0.299, 0.587, 0.114));
+    const boosted = add(
+      mul(sub(shadeResult, vec3(luma, luma, luma)), float(SAT_BOOST)),
+      vec3(luma, luma, luma),
+    );
+
+    // ---- Instance rim highlight (hover) ----
+    const hlIntensity = attribute("instanceHighlight", "float");
+    const NV = normalize(normalView);
+    const Vv = normalize(sub(vec3(0, 0, 0), positionView.xyz));
+    const NdotV = clamp(dot(NV, Vv), float(0.0), float(1.0));
+    const rim = mul(
+      pow(sub(float(1.0), NdotV), float(HL_RIM_POWER)),
+      float(HL_RIM_STRENGTH),
+    );
+    const brightened = add(boosted, float(HL_BRIGHTEN));
+    const rimGlow = mul(vec3(uHighlightColor), rim);
+    const highlighted = add(brightened, rimGlow);
+    const finalRgb = mix(boosted, highlighted, hlIntensity);
+
+    return vec4(finalRgb, litColor.a);
+  })();
+
+  material.needsUpdate = true;
+
+  const treeMat = baseDm as TreeDissolveMaterial;
+  treeMat.highlightColor = uHighlightColor;
+  treeMat.treeUniforms = {
+    sunDirection: uSunDir as unknown as { value: THREE.Vector3 },
+    sunIntensity: uSunIntensity as unknown as { value: number },
+    shadeColor: uShadeColor as unknown as { value: THREE.Color },
+  };
+
+  return treeMat;
 }

@@ -43,6 +43,7 @@ import {
 import { getRoadInfluenceTextureState } from "./RoadInfluenceMask";
 import { getLamppostLightTextureState } from "./LamppostLightMask";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
+import { applyTerrainSunShade } from "./GPUMaterials";
 
 export const TERRAIN_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
@@ -53,6 +54,99 @@ export const TERRAIN_CONSTANTS = {
   LOD_MEDIUM_DETAIL: 200.0,
   WATER_LEVEL: 5.0,
 };
+
+// ============================================================================
+// SHARED TERRAIN BASE COLOR (used by terrain shader AND tree ground-blend)
+// ============================================================================
+
+// OSRS palette — duplicated as module-level so the shared function and the
+// terrain shader itself both reference the same values.
+const GRASS_GREEN = vec3(0.3, 0.55, 0.15);
+const GRASS_DARK = vec3(0.22, 0.42, 0.1);
+const DIRT_BROWN = vec3(0.45, 0.32, 0.18);
+const DIRT_DARK = vec3(0.32, 0.22, 0.12);
+const ROCK_GRAY = vec3(0.45, 0.42, 0.38);
+const ROCK_DARK = vec3(0.3, 0.28, 0.25);
+const SAND_YELLOW = vec3(0.7, 0.6, 0.38);
+const SNOW_WHITE = vec3(0.92, 0.94, 0.96);
+const MUD_BROWN = vec3(0.18, 0.12, 0.08);
+const WATER_EDGE = vec3(0.08, 0.06, 0.04);
+
+/**
+ * Compute the procedural terrain base color at a world position.
+ * This is the exact same logic the terrain shader uses (height + slope + noise),
+ * extracted so the tree shader can call it for ground-blending.
+ *
+ * @param height - positionWorld.y
+ * @param slope  - 1 - abs(normalWorld.y)  (0 = flat, 1 = vertical)
+ * @param noiseVal - primary Perlin noise sample (noiseTex @ worldXZ * NOISE_SCALE)
+ * @param noiseVal2 - derived noise: sin(noiseVal * 6.28) * 0.3 + 0.5
+ */
+export function computeTerrainBaseColor(
+  height: any,
+  slope: any,
+  noiseVal: any,
+  noiseVal2: any,
+) {
+  const grassVariation = smoothstep(float(0.4), float(0.6), noiseVal2);
+  let c = mix(GRASS_GREEN, GRASS_DARK, grassVariation);
+
+  // Dirt patches (noise-based, flat ground)
+  const dirtPatchFactor = smoothstep(
+    float(TERRAIN_CONSTANTS.DIRT_THRESHOLD - 0.05),
+    float(TERRAIN_CONSTANTS.DIRT_THRESHOLD + 0.15),
+    noiseVal,
+  );
+  const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
+  const dirtVariation = smoothstep(float(0.3), float(0.7), noiseVal2);
+  const dirtColor = mix(DIRT_BROWN, DIRT_DARK, dirtVariation);
+  c = mix(c, dirtColor, mul(dirtPatchFactor, flatnessFactor));
+
+  // Slope-based dirt
+  c = mix(
+    c,
+    dirtColor,
+    mul(smoothstep(float(0.15), float(0.5), slope), float(0.6)),
+  );
+
+  // Rock on steep slopes
+  const rockVariation = smoothstep(float(0.3), float(0.7), noiseVal);
+  const rockColor = mix(ROCK_GRAY, ROCK_DARK, rockVariation);
+  c = mix(c, rockColor, smoothstep(float(0.45), float(0.75), slope));
+
+  // Snow at high elevation
+  c = mix(
+    c,
+    SNOW_WHITE,
+    smoothstep(float(TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0), float(60.0), height),
+  );
+
+  // Sand near water (flat areas)
+  const sandBlend = mul(
+    smoothstep(float(10.0), float(6.0), height),
+    smoothstep(float(0.25), float(0.0), slope),
+  );
+  c = mix(c, SAND_YELLOW, mul(sandBlend, float(0.6)));
+
+  // Shoreline transitions
+  c = mix(
+    c,
+    DIRT_DARK,
+    mul(smoothstep(float(14.0), float(8.0), height), float(0.4)),
+  );
+  c = mix(
+    c,
+    MUD_BROWN,
+    mul(smoothstep(float(9.0), float(6.0), height), float(0.7)),
+  );
+  c = mix(
+    c,
+    WATER_EDGE,
+    mul(smoothstep(float(6.5), float(5.0), height), float(0.9)),
+  );
+
+  return c;
+}
 
 // ============================================================================
 // PERLIN NOISE TEXTURE GENERATION
@@ -399,6 +493,8 @@ export const MAX_VERTEX_LIGHTS = 8;
 
 export type TerrainUniforms = {
   sunPosition: { value: THREE.Vector3 };
+  sunDirection: { value: THREE.Vector3 };
+  shadeColor: { value: THREE.Color };
   time: { value: number };
   fogEnabled: { value: number }; // 1.0 = fog enabled, 0.0 = fog disabled (for minimap)
   // Vertex lighting uniforms (lampposts, etc.)
@@ -455,6 +551,8 @@ export function createTerrainMaterial(): THREE.Material & {
   const noiseTex = generateNoiseTexture();
 
   const sunPositionUniform = uniform(vec3(100, 100, 100));
+  const sunDirectionUniform = uniform(vec3(0.5, 0.8, 0.3));
+  const shadeColorUniform = uniform(vec3(0.7, 1.08, 1.22));
   const timeUniform = uniform(float(0));
   const noiseScale = uniform(float(TERRAIN_CONSTANTS.NOISE_SCALE));
 
@@ -482,122 +580,41 @@ export function createTerrainMaterial(): THREE.Material & {
   const slope = sub(float(1.0), abs(worldNormal.y));
 
   // ============================================================================
-  // OSRS-STYLE VERTEX COLORS
-  // Flat, distinct colors - no gradients, no textures
+  // TERRAIN BASE COLOR (shared function + anti-dithering noise)
   // ============================================================================
 
-  // Core terrain colors (OSRS palette)
-  const grassGreen = vec3(0.3, 0.55, 0.15); // Rich green grass
-  const grassDark = vec3(0.22, 0.42, 0.1); // Darker grass variation
-  const dirtBrown = vec3(0.45, 0.32, 0.18); // Light brown dirt
-  const dirtDark = vec3(0.32, 0.22, 0.12); // Dark brown dirt
-  const rockGray = vec3(0.45, 0.42, 0.38); // Gray rock
-  const rockDark = vec3(0.3, 0.28, 0.25); // Dark rock
-  const sandYellow = vec3(0.7, 0.6, 0.38); // Sandy beach
-  const snowWhite = vec3(0.92, 0.94, 0.96); // Snow caps
-  const mudBrown = vec3(0.18, 0.12, 0.08); // Wet mud near water
-  const waterEdge = vec3(0.08, 0.06, 0.04); // Dark water's edge
-
-  // ============================================================================
-  // DISTANCE-BASED LOD FOR NOISE SAMPLING
-  // PERFORMANCE: Reduced from 4 to 2 texture samples (compute derived values instead)
-  // ============================================================================
   const toCamera = sub(worldPos, cameraPosition);
   const distSq = dot(toCamera, toCamera);
-  // LOD threshold: 100m^2 = 10000 - closer threshold for faster falloff
-  const _lodDetailFactor = smoothstep(float(15000.0), float(8000.0), distSq);
 
-  // Sample Perlin noise - ONLY 1 base sample always needed
+  // Sample Perlin noise
   const noiseUV = mul(vec2(worldPos.x, worldPos.z), noiseScale);
   const noiseValue = texture(noiseTex, noiseUV).r;
-
-  // PERFORMANCE: Derive secondary noise mathematically instead of texture sample
-  // Uses sin transform of base noise for variation (no extra texture fetch)
   const noiseValue2 = add(
     mul(sin(mul(noiseValue, float(6.28))), float(0.3)),
     float(0.5),
   );
 
-  // CONDITIONAL fine detail sample - only when close
-  // Uses step function to completely skip sample at distance (cheaper than smoothstep mix)
+  // Fine detail noise (LOD-gated)
   const closeEnough = smoothstep(float(12000.0), float(8000.0), distSq);
   const noiseUV3 = mul(vec2(worldPos.x, worldPos.z), float(0.12));
   const fineNoiseSample = texture(noiseTex, noiseUV3).r;
   const fineNoise = mix(float(0.5), fineNoiseSample, closeEnough);
-
-  // PERFORMANCE: Derive micro noise from base noise (no 4th texture sample)
   const microNoise = add(
     mul(cos(mul(noiseValue, float(12.56))), float(0.2)),
     float(0.5),
   );
 
-  // === BASE: GRASS with light/dark variation ===
-  const grassVariation = smoothstep(float(0.4), float(0.6), noiseValue2);
-  let baseColor = mix(grassGreen, grassDark, grassVariation);
-
-  // === DIRT PATCHES (noise-based, flat ground only) ===
-  // Wider transition for smoother blending
-  const dirtPatchFactor = smoothstep(
-    float(TERRAIN_CONSTANTS.DIRT_THRESHOLD - 0.05),
-    float(TERRAIN_CONSTANTS.DIRT_THRESHOLD + 0.15),
+  // Base color from shared procedural palette
+  const baseColor = computeTerrainBaseColor(
+    height,
+    slope,
     noiseValue,
-  );
-  const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
-  const dirtVariation = smoothstep(float(0.3), float(0.7), noiseValue2);
-  const dirtColor = mix(dirtBrown, dirtDark, dirtVariation);
-  baseColor = mix(baseColor, dirtColor, mul(dirtPatchFactor, flatnessFactor));
-
-  // === SLOPE-BASED DIRT (steeper = more dirt) ===
-  // Gradual transition
-  baseColor = mix(
-    baseColor,
-    dirtColor,
-    mul(smoothstep(float(0.15), float(0.5), slope), float(0.6)),
+    noiseValue2,
   );
 
-  // === ROCK ON STEEP SLOPES ===
-  const rockVariation = smoothstep(float(0.3), float(0.7), noiseValue);
-  const rockColorFinal = mix(rockGray, rockDark, rockVariation);
-  baseColor = mix(
-    baseColor,
-    rockColorFinal,
-    smoothstep(float(0.45), float(0.75), slope),
-  );
-
-  // === SNOW AT HIGH ELEVATION ===
-  // Very gradual snow transition
-  baseColor = mix(
-    baseColor,
-    snowWhite,
-    smoothstep(float(TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0), float(60.0), height),
-  );
-
-  // === SAND NEAR WATER (flat areas only) ===
-  const sandBlend = mul(
-    smoothstep(float(10.0), float(6.0), height),
-    smoothstep(float(0.25), float(0.0), slope),
-  );
-  baseColor = mix(baseColor, sandYellow, mul(sandBlend, float(0.6)));
-
-  // === SHORELINE TRANSITIONS (gradual) ===
-  // Zone 1: Wet dirt (8-14m) - wider zone
-  const wetDirtZone = smoothstep(float(14.0), float(8.0), height);
-  baseColor = mix(baseColor, dirtDark, mul(wetDirtZone, float(0.4)));
-
-  // Zone 2: Mud (6-9m)
-  const mudZone = smoothstep(float(9.0), float(6.0), height);
-  baseColor = mix(baseColor, mudBrown, mul(mudZone, float(0.7)));
-
-  // Zone 3: Water's edge (5-6.5m)
-  const edgeZone = smoothstep(float(6.5), float(5.0), height);
-  baseColor = mix(baseColor, waterEdge, mul(edgeZone, float(0.9)));
-
-  // === ANTI-DITHERING: Add fine noise variation to break up banding ===
-  // Subtle brightness variation based on high-frequency noise
-  const brightnessVar = mul(sub(fineNoise, float(0.5)), float(0.08)); // ±4% brightness
-  const colorVar = mul(sub(microNoise, float(0.5)), float(0.04)); // ±2% color shift
-
-  // Apply variations to break up vertex interpolation artifacts
+  // Anti-dithering noise variation (±4% brightness, ±2% color shift)
+  const brightnessVar = mul(sub(fineNoise, float(0.5)), float(0.08));
+  const colorVar = mul(sub(microNoise, float(0.5)), float(0.04));
   const variedColor = add(
     baseColor,
     vec3(
@@ -636,12 +653,12 @@ export function createTerrainMaterial(): THREE.Material & {
 
   // Reuse existing dirt colors with natural noise variation
   const roadNoiseVar = mul(noiseValue2, float(0.5)); // Natural dirt variation
-  const roadBaseColor = mix(dirtBrown, dirtDark, roadNoiseVar);
+  const roadBaseColor = mix(DIRT_BROWN, DIRT_DARK, roadNoiseVar);
 
   // Gravel/Cobblestone effect: High frequency noise for texture
   // Use fineNoise (highest freq) to create small stones
   const stoneNoise = smoothstep(float(0.4), float(0.7), fineNoise);
-  const stoneColor = mix(rockGray, rockDark, float(0.5));
+  const stoneColor = mix(ROCK_GRAY, ROCK_DARK, float(0.5));
 
   // Mix stones into dirt base - more stones in center of road
   const roadDetailColor = mix(
@@ -812,14 +829,25 @@ export function createTerrainMaterial(): THREE.Material & {
   material.side = THREE.FrontSide;
   material.fog = false;
 
-  // Apply fog AFTER PBR lighting via outputNode so fog color isn't darkened
+  // Apply sun shade + fog AFTER PBR lighting via outputNode
   material.outputNode = Fn(() => {
     const litColor = output;
-    return vec4(mix(litColor.rgb, fogColor, fogFactor), litColor.a);
+
+    // Sun shade: shared function (identical to tree shader terrain blend)
+    const shaded = applyTerrainSunShade(
+      litColor.rgb,
+      normalWorld,
+      vec3(sunDirectionUniform),
+      vec3(shadeColorUniform),
+    );
+
+    return vec4(mix(shaded, fogColor, fogFactor), litColor.a);
   })();
 
   const terrainUniforms: TerrainUniforms = {
     sunPosition: sunPositionUniform,
+    sunDirection: sunDirectionUniform as unknown as { value: THREE.Vector3 },
+    shadeColor: shadeColorUniform as unknown as { value: THREE.Color },
     time: timeUniform,
     fogEnabled: fogEnabledUniform,
     // Vertex lighting arrays
