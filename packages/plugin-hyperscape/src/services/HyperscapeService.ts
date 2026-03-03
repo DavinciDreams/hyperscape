@@ -3021,8 +3021,12 @@ Respond with ONLY the action name, nothing else.`;
           `[HyperscapeService] ⚔️ Duel session started - duelId=${this.activeDuelId}`,
         );
         this.clearPendingDuelChallenge();
-        // Auto-accept rules (agent doesn't need to configure rules)
-        if (this.activeDuelId) {
+        // Auto-accept rules for player-initiated duels (not streaming duels).
+        // Streaming duels (duelId starting with "streaming-") manage their own
+        // state machine and don't use the DuelSystem's RULES → STAKES flow.
+        const isStreamingDuel =
+          this.activeDuelId?.startsWith("streaming-") ?? false;
+        if (this.activeDuelId && !isStreamingDuel) {
           this.sendCommand("duel:accept:rules", {
             duelId: this.activeDuelId,
           });
@@ -3037,12 +3041,16 @@ Respond with ONLY the action name, nothing else.`;
 
       case "duelStateChanged": {
         // Duel state machine progressed — auto-accept each phase
+        // Only relevant for player-initiated duels (not streaming duels)
         const stateData = data as {
           duelId?: string;
           state?: string;
         };
         const duelId = (stateData.duelId as string) ?? this.activeDuelId;
         if (!duelId) break;
+
+        // Streaming duels manage transitions server-side; skip auto-accept
+        if (duelId.startsWith("streaming-")) break;
 
         switch (stateData.state) {
           case "STAKES":
@@ -3677,6 +3685,18 @@ Respond with ONLY the action name, nothing else.`;
     this.sendCommand("attackMob", {
       mobId: command.targetEntityId,
       attackType,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Execute attack player command (PvP).
+   * Sends the attackPlayer packet which routes through the server's PvP
+   * handler with duel validation, zone checks, etc.
+   */
+  async executeAttackPlayer(targetPlayerId: string): Promise<void> {
+    this.sendCommand("attackPlayer", {
+      targetPlayerId,
       timestamp: Date.now(),
     });
   }

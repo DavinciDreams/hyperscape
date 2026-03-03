@@ -133,6 +133,96 @@ const MAX_TICK_INTERVAL = 15000; // Maximum 15 seconds
 const LLM_TIMEOUT_MS = 2000; // Abort LLM call if no response within 2s
 const COMBAT_TICK_INTERVAL = 1000; // 1s ticks during active combat
 
+/** Combat phase for duel fights — mirrors server DuelCombatAI phases */
+type DuelCombatPhase = "opening" | "trading" | "finishing" | "desperate";
+
+/**
+ * LLM-generated fight plan — created once at duel start.
+ * Includes movement strategy for ranged/mage kiting and melee chasing.
+ */
+interface DuelCombatPlan {
+  combatRole: "melee" | "ranged" | "mage";
+  approach: "aggressive" | "defensive" | "balanced" | "outlast";
+  attackStyle: string;
+  prayer: string | null;
+  foodThreshold: number;
+  switchDefensiveAt: number;
+  movementStrategy: "chase" | "kite" | "hold" | "circle";
+  reasoning: string;
+}
+
+const DEFAULT_DUEL_PLAN: Readonly<DuelCombatPlan> = {
+  combatRole: "melee",
+  approach: "balanced",
+  attackStyle: "strength",
+  prayer: "ultimate_strength",
+  foodThreshold: 40,
+  switchDefensiveAt: 30,
+  movementStrategy: "chase",
+  reasoning: "Default melee plan",
+};
+
+/** Maximum time to wait for LLM fight plan */
+const DUEL_LLM_TIMEOUT_MS = 3000;
+
+/** Trash talk cooldown — minimum ms between taunt messages */
+const DUEL_TRASH_TALK_COOLDOWN_MS = 5000;
+/** Ambient trash talk fires randomly every N ticks */
+const DUEL_AMBIENT_TAUNT_MIN_TICKS = 8;
+const DUEL_AMBIENT_TAUNT_MAX_TICKS = 15;
+/** Health thresholds that trigger milestone trash talk */
+const DUEL_TRASH_TALK_THRESHOLDS = [80, 60, 40, 20] as const;
+
+/** Scripted fallback taunts when LLM is unavailable or times out */
+const DUEL_TAUNTS_OPENING = [
+  "You're going down",
+  "Let's dance",
+  "Ready to lose?",
+  "This won't take long",
+  "Easy fight",
+  "No mercy",
+];
+const DUEL_TAUNTS_OWN_LOW = [
+  "Not even close!",
+  "Is that all?",
+  "Still standing",
+  "Try harder",
+  "Barely a scratch",
+];
+const DUEL_TAUNTS_OPPONENT_LOW = [
+  "GG soon",
+  "You're done!",
+  "Sit down",
+  "One more hit...",
+  "Easy money",
+];
+const DUEL_TAUNTS_AMBIENT = [
+  "Let's go!",
+  "Too slow",
+  "Nice try lol",
+  "*yawns*",
+  "Catch these hands",
+];
+
+/**
+ * Food heal values sorted by heal amount (descending) for best-first selection.
+ * Mirrors server's FOOD_DATA from DuelCombatAI.
+ */
+const DUEL_FOOD_HEAL: ReadonlyArray<readonly [string, number]> = [
+  ["shark", 20],
+  ["swordfish", 14],
+  ["lobster", 12],
+  ["cake", 12],
+  ["tuna", 10],
+  ["salmon", 9],
+  ["trout", 7],
+  ["pie", 6],
+  ["bread", 5],
+  ["cooked", 5],
+  ["meat", 3],
+  ["shrimp", 3],
+];
+
 type AutonomyMode = "llm" | "scripted";
 type ScriptedRole =
   | "combat"
@@ -262,6 +352,39 @@ export class AutonomousBehaviorManager {
   private duelOpponentId: string | null = null;
   private duelOpponentName: string | null = null;
   private duelId: string | null = null;
+
+  /** Duel combat state — independent of shared actionLock for responsive fighting */
+  private duelTickCount = 0;
+  private duelLastAttackTime = 0;
+  private duelLastEatTime = 0;
+  private duelLastStyleChangeTime = 0;
+  private duelLastPrayerChangeTime = 0;
+  private duelLastMoveTime = 0;
+  private duelActivePrayers: Set<string> = new Set();
+  private duelCurrentStyle = "attack";
+
+  /** LLM-generated fight plan — created once at duel start, executed every tick */
+  private duelPlan: DuelCombatPlan = { ...DEFAULT_DUEL_PLAN };
+  private duelPlanReady = false;
+  private duelTotalDamageDealt = 0;
+  private duelTotalDamageReceived = 0;
+  private duelLastHealthPct = 100;
+  private duelLastOpponentHealthPct = 100;
+
+  /** Arena bounds from fight start event — used for kiting/movement clamping */
+  private duelArenaBounds: {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  } | null = null;
+
+  /** Trash talk state */
+  private duelFiredOwnThresholds: Set<number> = new Set();
+  private duelFiredOpponentThresholds: Set<number> = new Set();
+  private duelLastTrashTalkTime = 0;
+  private duelTrashTalkInFlight = false;
+  private duelNextAmbientTauntTick = 0;
 
   /** When the agent entered reactive combat (attacked while on a non-combat goal) */
   private reactiveCombatStartTime: number = 0;
@@ -809,9 +932,10 @@ export class AutonomousBehaviorManager {
       // Calculate how long to wait until next tick
       const tickDuration = Date.now() - tickStart;
       const inCombat = this.service?.getPlayerEntity()?.inCombat === true;
+      const inDuelFight = this.duelPhase === "fighting";
       const baseInterval = this.nextTickFast
         ? MIN_TICK_INTERVAL
-        : inCombat
+        : inCombat || inDuelFight
           ? COMBAT_TICK_INTERVAL
           : this.tickInterval;
       this.nextTickFast = false; // Reset after use
@@ -847,6 +971,7 @@ export class AutonomousBehaviorManager {
         this.duelOpponentId = null;
         this.duelOpponentName = null;
         this.duelId = null;
+        this.resetDuelCombatState();
         const restoredDuelTimeout = this.popGoal();
         if (restoredDuelTimeout) {
           this.currentGoal = restoredDuelTimeout;
@@ -2184,6 +2309,7 @@ export class AutonomousBehaviorManager {
           progress: 0,
           location: "bank",
           startedAt: Date.now(),
+          bankWithdrawItems: toolInfo.bankKeywords,
         };
         this.nextTickFast = true;
         return null;
@@ -5707,86 +5833,786 @@ export class AutonomousBehaviorManager {
   // ============================================================================
 
   /**
-   * Duel combat tick — handles attacking opponent and eating food during a duel fight.
-   * Runs instead of the normal tick pipeline when duelPhase === "fighting".
+   * Duel combat tick — strategic combat loop during duel fights.
+   *
+   * Priority order (like a real RS player):
+   *   1. Heal if health below threshold
+   *   2. Movement — kite/chase/circle based on fight plan
+   *   3. Adjust combat style & prayers based on phase
+   *   4. Attack / re-engage opponent
+   *   5. Trash talk at health milestones
+   *
+   * Fight plan is set once at duel start via LLM (or equipment-based default).
+   * Each agent's character personality drives genuinely different combat behavior.
    */
   private async duelCombatTick(): Promise<void> {
     const player = this.service?.getPlayerEntity();
     if (!player || player.alive === false || !this.service) return;
 
-    // Respect action lock — don't spam commands
-    if (this.actionLock) {
-      const elapsed = Date.now() - this.actionLock.startedAt;
-      if (elapsed < this.actionLock.minDurationMs) return;
-      this.actionLock = null;
-    }
+    this.duelTickCount++;
+    const now = Date.now();
+    const healthPct = this.getHealthPercent(player);
 
-    // 1. Survival: eat food if health is low
-    const healthPercent = this.getHealthPercent(player);
-    if (healthPercent < 50 && hasAnyFood(player)) {
-      const foodItem = this.findFirstFoodItem(player);
-      if (foodItem) {
-        logger.info(
-          `[AutonomousBehavior] ⚔️ Duel: Eating ${foodItem.name} (${Math.round(healthPercent)}% HP)`,
-        );
-        this.service.executeUseItem({ itemId: foodItem.id }).catch(() => {});
-        this.actionLock = {
-          actionName: "DUEL_EAT",
-          startedAt: Date.now(),
-          timeoutMs: 3000,
-          minDurationMs: 1800,
-        };
-        this.syncThinkingToDashboard(`⚔️ Duel: Eating ${foodItem.name}`, {
-          decisionPath: "duel-combat",
-        });
-        return;
-      }
-    }
-
-    // 2. Attack opponent
+    // Resolve opponent if not yet known
     if (!this.duelOpponentId) {
-      // Fallback: find nearest player entity that isn't us
       const nearby = this.service.getNearbyEntities();
       const opponent = nearby.find(
         (e) =>
-          e.type === "player" &&
+          (e.type === "player" || e.entityType === "player") &&
           e.id !== this.runtime.agentId &&
-          e.id !== player.id,
+          e.id !== player.id &&
+          e.id !== player.playerId,
       );
       if (opponent) {
         this.duelOpponentId = opponent.id;
-        this.duelOpponentName = (opponent as { name?: string }).name ?? null;
+        this.duelOpponentName = opponent.name ?? null;
+        logger.info(
+          `[AutonomousBehavior] ⚔️ Duel: Resolved opponent → ${this.duelOpponentName ?? this.duelOpponentId}`,
+        );
       } else {
-        logger.warn("[AutonomousBehavior] ⚔️ Duel: No opponent found");
+        logger.warn("[AutonomousBehavior] ⚔️ Duel: No opponent found nearby");
         return;
       }
     }
 
-    logger.info(
-      `[AutonomousBehavior] ⚔️ Duel: Attacking ${this.duelOpponentName ?? this.duelOpponentId}`,
-    );
-    this.service
-      .executeAttack({
-        targetEntityId: this.duelOpponentId,
-        combatStyle: "attack",
-      })
-      .catch((err) => {
-        logger.warn(
-          `[AutonomousBehavior] Duel attack failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    // Get opponent entity and health
+    const opponentHealthPct = this.getDuelOpponentHealthPct();
+    const opponentEntity = this.getDuelOpponentEntity();
 
-    this.actionLock = {
-      actionName: "DUEL_ATTACK",
-      startedAt: Date.now(),
-      timeoutMs: 5000,
-      minDurationMs: 2400,
-    };
+    // Track damage for stats
+    const dmgReceived = this.duelLastHealthPct - healthPct;
+    if (dmgReceived > 0)
+      this.duelTotalDamageReceived += Math.round(dmgReceived);
+    const dmgDealt = this.duelLastOpponentHealthPct - opponentHealthPct;
+    if (dmgDealt > 0) this.duelTotalDamageDealt += Math.round(dmgDealt);
+    this.duelLastHealthPct = healthPct;
+    this.duelLastOpponentHealthPct = opponentHealthPct;
 
+    // Determine combat phase
+    const phase = this.determineDuelPhase(healthPct, opponentHealthPct);
+
+    // Priority 1: Heal if needed (exclusive — skip other actions on eat tick)
+    if (this.duelTryHeal(player, healthPct, phase, now)) return;
+
+    // Priority 2: Movement — kite, chase, circle based on plan
+    if (opponentEntity) {
+      this.duelMovementTick(player, opponentEntity, phase, now);
+    }
+
+    // Priority 3: Style & prayer adjustments
+    this.duelAdjustStyle(healthPct, phase, now);
+    this.duelAdjustPrayers(phase, now);
+
+    // Priority 4: Attack / re-engage opponent
+    this.duelTryAttack(player, now);
+
+    // Priority 5: Trash talk (fire-and-forget, never blocks)
+    this.duelTrashTalkTick(healthPct, opponentHealthPct);
+
+    // Dashboard sync
+    const prayerStr =
+      this.duelActivePrayers.size > 0
+        ? ` | ${[...this.duelActivePrayers].join(", ")}`
+        : "";
+    const planLabel = this.duelPlanReady
+      ? ` [${this.duelPlan.approach}/${this.duelPlan.movementStrategy}]`
+      : "";
     this.syncThinkingToDashboard(
-      `⚔️ Duel: Attacking ${this.duelOpponentName ?? "opponent"}`,
+      `⚔️ Duel [${phase}]${planLabel}: ${this.duelCurrentStyle}${prayerStr} | ${Math.round(healthPct)}% vs ${Math.round(opponentHealthPct)}%`,
       { decisionPath: "duel-combat" },
     );
+  }
+
+  /** Reset duel combat state for a fresh fight */
+  private resetDuelCombatState(): void {
+    this.duelTickCount = 0;
+    this.duelLastAttackTime = 0;
+    this.duelLastEatTime = 0;
+    this.duelLastStyleChangeTime = 0;
+    this.duelLastPrayerChangeTime = 0;
+    this.duelLastMoveTime = 0;
+    this.duelActivePrayers.clear();
+    this.duelCurrentStyle = "attack";
+    this.duelPlan = { ...DEFAULT_DUEL_PLAN };
+    this.duelPlanReady = false;
+    this.duelTotalDamageDealt = 0;
+    this.duelTotalDamageReceived = 0;
+    this.duelLastHealthPct = 100;
+    this.duelLastOpponentHealthPct = 100;
+    this.duelArenaBounds = null;
+    this.duelFiredOwnThresholds.clear();
+    this.duelFiredOpponentThresholds.clear();
+    this.duelLastTrashTalkTime = 0;
+    this.duelTrashTalkInFlight = false;
+    this.duelNextAmbientTauntTick =
+      DUEL_AMBIENT_TAUNT_MIN_TICKS +
+      Math.floor(
+        Math.random() *
+          (DUEL_AMBIENT_TAUNT_MAX_TICKS - DUEL_AMBIENT_TAUNT_MIN_TICKS),
+      );
+  }
+
+  /** Determine combat phase based on health percentages */
+  private determineDuelPhase(
+    healthPct: number,
+    opponentHealthPct: number,
+  ): DuelCombatPhase {
+    if (healthPct < 30) return "desperate";
+    if (opponentHealthPct < 25) return "finishing";
+    if (this.duelTickCount < 5) return "opening";
+    return "trading";
+  }
+
+  /** Get opponent health percentage from nearby entities */
+  private getDuelOpponentHealthPct(): number {
+    if (!this.service || !this.duelOpponentId) return 100;
+    const nearby = this.service.getNearbyEntities();
+    const opponent = nearby.find((e) => e.id === this.duelOpponentId);
+    if (!opponent?.health) return 100;
+    return opponent.health.max > 0
+      ? (opponent.health.current / opponent.health.max) * 100
+      : 100;
+  }
+
+  /**
+   * Try to eat food if health is below dynamic threshold.
+   * Returns true if food was eaten (caller should skip attack this tick).
+   */
+  private duelTryHeal(
+    player: PlayerEntity,
+    healthPct: number,
+    phase: DuelCombatPhase,
+    now: number,
+  ): boolean {
+    // Use fight plan's foodThreshold when available, else phase-based defaults
+    const baseThreshold = this.duelPlanReady ? this.duelPlan.foodThreshold : 40;
+    const threshold =
+      phase === "desperate" ? baseThreshold + 15 : baseThreshold;
+    if (healthPct >= threshold) return false;
+
+    // 1800ms eat cooldown (matches server's 3-tick cooldown)
+    if (now - this.duelLastEatTime < 1800) return false;
+
+    // Find best food (highest heal value first)
+    const foodItem = this.findBestDuelFood(player);
+    if (!foodItem) return false;
+
+    logger.info(
+      `[AutonomousBehavior] ⚔️ Duel [${phase}]: Eating ${foodItem.name} (${Math.round(healthPct)}% HP)`,
+    );
+    this.service!.executeUseItem({ itemId: foodItem.id }).catch(() => {});
+    this.duelLastEatTime = now;
+
+    this.syncThinkingToDashboard(
+      `⚔️ Duel [${phase}]: Eating ${foodItem.name} (${Math.round(healthPct)}% HP)`,
+      { decisionPath: "duel-combat" },
+    );
+    return true;
+  }
+
+  /**
+   * Find the best food item in inventory (highest heal value first).
+   * Uses DUEL_FOOD_HEAL table sorted by heal amount descending.
+   */
+  private findBestDuelFood(
+    player: PlayerEntity,
+  ): { id: string; name: string } | null {
+    const items = Array.isArray(player.items) ? player.items : [];
+    let bestItem: { id: string; name: string } | null = null;
+    let bestHeal = -1;
+
+    for (const item of items) {
+      const name = (
+        item.name ||
+        (item as { item?: { name?: string } }).item?.name ||
+        item.itemId ||
+        ""
+      )
+        .toString()
+        .toLowerCase();
+
+      for (const [foodKey, healVal] of DUEL_FOOD_HEAL) {
+        if (name.includes(foodKey) && healVal > bestHeal) {
+          bestHeal = healVal;
+          bestItem = { id: item.id || item.itemId || "", name };
+          break; // found best match for this item, move to next
+        }
+      }
+    }
+
+    return bestItem;
+  }
+
+  /**
+   * Adjust combat style based on LLM strategy, phase, and health.
+   * LLM strategy overrides when available; falls back to phase-based defaults.
+   */
+  private duelAdjustStyle(
+    healthPct: number,
+    phase: DuelCombatPhase,
+    now: number,
+  ): void {
+    // 3s cooldown between style changes to avoid spam
+    if (now - this.duelLastStyleChangeTime < 3000) return;
+
+    let desiredStyle: string;
+
+    // Override: desperate or below plan's switchDefensiveAt → go defensive
+    if (phase === "desperate" || healthPct < this.duelPlan.switchDefensiveAt) {
+      desiredStyle = "defense";
+    } else if (this.duelPlanReady) {
+      // Use fight plan style
+      desiredStyle = this.duelPlan.attackStyle;
+    } else if (phase === "finishing") {
+      desiredStyle = "strength";
+    } else if (healthPct > 70) {
+      desiredStyle = "strength";
+    } else {
+      desiredStyle = "attack";
+    }
+
+    if (desiredStyle === this.duelCurrentStyle) return;
+
+    logger.info(
+      `[AutonomousBehavior] ⚔️ Duel [${phase}]: Style → ${desiredStyle}`,
+    );
+    this.service
+      ?.executeChangeAttackStyle(desiredStyle)
+      .catch((err: unknown) => {
+        logger.debug(
+          `[AutonomousBehavior] Style switch failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    this.duelCurrentStyle = desiredStyle;
+    this.duelLastStyleChangeTime = now;
+  }
+
+  /**
+   * Toggle prayers based on LLM strategy and combat phase.
+   * Strategy prayer is used when planned; desperate overrides to defensive.
+   */
+  private duelAdjustPrayers(phase: DuelCombatPhase, now: number): void {
+    // 2s cooldown between prayer changes
+    if (now - this.duelLastPrayerChangeTime < 2000) return;
+
+    const wantDefensive =
+      phase === "desperate" ||
+      this.getHealthPercent(this.service?.getPlayerEntity()!) <
+        this.duelPlan.switchDefensiveAt;
+
+    if (wantDefensive) {
+      // Switch to defensive prayer
+      if (!this.duelActivePrayers.has("steel_skin")) {
+        this.service?.executeTogglePrayer("steel_skin").catch(() => {});
+        this.duelActivePrayers.add("steel_skin");
+      }
+      if (this.duelActivePrayers.has("ultimate_strength")) {
+        this.service?.executeTogglePrayer("ultimate_strength").catch(() => {});
+        this.duelActivePrayers.delete("ultimate_strength");
+      }
+    } else {
+      // Use fight plan prayer (or default offensive)
+      const wantedPrayer = this.duelPlan.prayer ?? "ultimate_strength";
+      if (!this.duelActivePrayers.has(wantedPrayer)) {
+        this.service?.executeTogglePrayer(wantedPrayer).catch(() => {});
+        this.duelActivePrayers.add(wantedPrayer);
+      }
+      // Deactivate the opposite if active
+      const opposite =
+        wantedPrayer === "ultimate_strength"
+          ? "steel_skin"
+          : "ultimate_strength";
+      if (this.duelActivePrayers.has(opposite)) {
+        this.service?.executeTogglePrayer(opposite).catch(() => {});
+        this.duelActivePrayers.delete(opposite);
+      }
+    }
+    this.duelLastPrayerChangeTime = now;
+  }
+
+  /**
+   * Attack or re-engage opponent.
+   *
+   * For streaming duels the server's DuelOrchestrator runs its own combat loop
+   * (tryMutualCombat + startCombatLoop) that handles engagement every 600ms and
+   * re-engagement every ~3s.  The ABM must NOT send attackMob packets here
+   * because the server's onAttackMob handler emits COMBAT_STOP_ATTACK *before*
+   * checking the target type — so sending attackMob with a player ID cancels the
+   * server-side combat and then drops the request (type !== "mob"), creating a
+   * cancel/re-engage/cancel loop that makes agents stand idle.
+   *
+   * For regular (non-streaming) duels we send attackPlayer which routes through
+   * the proper PvP handler with duel validation.
+   */
+  private duelTryAttack(player: PlayerEntity, now: number): void {
+    if (!this.duelOpponentId || !this.service) return;
+
+    // Check if we need to engage or re-engage
+    const needsEngage =
+      !player.inCombat || player.combatTarget !== this.duelOpponentId;
+    const needsKeepAlive =
+      !needsEngage && now - this.duelLastAttackTime >= 3000;
+
+    if (!needsEngage && !needsKeepAlive) return;
+
+    // Streaming duels: server combat loop handles engagement — do NOT send
+    // attack packets that would cancel server-side combat.
+    const isStreamingDuel = this.duelId?.startsWith("streaming-") ?? false;
+    if (isStreamingDuel) {
+      logger.info(
+        `[AutonomousBehavior] ⚔️ Duel: Server-managed combat ${needsEngage ? "(awaiting engagement)" : "(active)"} vs ${this.duelOpponentName ?? this.duelOpponentId}`,
+      );
+      this.duelLastAttackTime = now;
+      return;
+    }
+
+    // Regular duels: send attackPlayer for proper PvP validation
+    logger.info(
+      `[AutonomousBehavior] ⚔️ Duel: ${needsEngage ? "Engaging" : "Re-engaging"} ${this.duelOpponentName ?? this.duelOpponentId}`,
+    );
+    this.service.executeAttackPlayer(this.duelOpponentId).catch((err) => {
+      logger.warn(
+        `[AutonomousBehavior] Duel attack failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+    this.duelLastAttackTime = now;
+  }
+
+  /**
+   * One-shot LLM fight plan — called once at duel start.
+   * Agent sees their skills, equipment, food, opponent, and character personality.
+   * Outputs a DuelCombatPlan including movement strategy.
+   *
+   * Fires in background — fight uses equipment-based defaults until plan arrives.
+   */
+  private planDuelCombatOnce(player: PlayerEntity): void {
+    // Detect combat role from equipment as immediate default
+    const detectedRole = this.detectCombatRole(player);
+    this.duelPlan = {
+      ...DEFAULT_DUEL_PLAN,
+      combatRole: detectedRole,
+      movementStrategy: detectedRole === "melee" ? "chase" : "kite",
+      attackStyle: detectedRole === "ranged" ? "attack" : "strength",
+    };
+
+    // Count food
+    const items = Array.isArray(player.items) ? player.items : [];
+    let foodCount = 0;
+    for (const item of items) {
+      const name = (
+        item.name ||
+        (item as { item?: { name?: string } }).item?.name ||
+        item.itemId ||
+        ""
+      )
+        .toString()
+        .toLowerCase();
+      for (const [foodKey] of DUEL_FOOD_HEAL) {
+        if (name.includes(foodKey)) {
+          foodCount++;
+          break;
+        }
+      }
+    }
+
+    // Summarize equipment
+    const eq = player.equipment;
+    const weapon = eq?.weapon || "fists";
+    const armor =
+      [eq?.helmet, eq?.body, eq?.legs, eq?.shield].filter(Boolean).join(", ") ||
+      "none";
+
+    // Summarize skills
+    const skills = player.skills;
+    const skillSummary = skills
+      ? `atk:${skills.attack?.level ?? 1} str:${skills.strength?.level ?? 1} def:${skills.defense?.level ?? 1} rng:${skills.ranged?.level ?? 1}`
+      : "unknown";
+
+    // Agent personality
+    const agentName =
+      (this.runtime as unknown as { character?: { name?: string } }).character
+        ?.name || "agent";
+    const character = (
+      this.runtime as unknown as {
+        character?: { bio?: string | string[]; style?: { all?: string[] } };
+      }
+    ).character;
+    const bioText = character?.bio
+      ? Array.isArray(character.bio)
+        ? character.bio.slice(0, 3).join(" ")
+        : String(character.bio).slice(0, 200)
+      : "";
+    const styleHints = character?.style?.all?.slice(0, 3).join(", ") || "";
+
+    const prompt = [
+      `You are ${agentName} about to fight ${this.duelOpponentName ?? "an opponent"} in a PvP duel arena. Plan your ENTIRE fight strategy.`,
+      bioText ? `Your personality: ${bioText}` : "",
+      styleHints ? `Your style: ${styleHints}` : "",
+      ``,
+      `YOUR LOADOUT:`,
+      `  Weapon: ${weapon}`,
+      `  Armor: ${armor}`,
+      `  Skills: ${skillSummary}`,
+      `  Food: ${foodCount} pieces`,
+      `  Detected role: ${detectedRole}`,
+      ``,
+      `COMBAT MECHANICS:`,
+      `  Styles: strength (max damage), attack (balanced/accurate), defense (tanky)`,
+      `  Prayers: ultimate_strength (+15% str dmg), steel_skin (+15% def)`,
+      `  Movement: chase (close distance, melee), kite (keep distance, ranged/mage), circle (strafe around), hold (stand ground)`,
+      ``,
+      `This plan runs the ENTIRE fight. Choose based on your personality and loadout.`,
+      `An aggressive character should eat late and hit hard. A cautious one eats early and kites.`,
+      `Ranged/mage should kite. Melee should chase. Consider circling to be unpredictable.`,
+      ``,
+      `Respond with ONLY a JSON object:`,
+      `{`,
+      `  "combatRole": "melee" | "ranged" | "mage",`,
+      `  "approach": "aggressive" | "defensive" | "balanced" | "outlast",`,
+      `  "attackStyle": "strength" | "attack" | "defense",`,
+      `  "prayer": "ultimate_strength" | "steel_skin" | null,`,
+      `  "foodThreshold": 15-60,`,
+      `  "switchDefensiveAt": 15-45,`,
+      `  "movementStrategy": "chase" | "kite" | "circle" | "hold",`,
+      `  "reasoning": "brief in-character explanation"`,
+      `}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    // Fire in background — equipment-based defaults handle combat until this resolves
+    const llmPromise = this.runtime.useModel(ModelType.TEXT_SMALL, {
+      prompt,
+      maxTokens: 250,
+      temperature: 0.6,
+    });
+
+    let timerId: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timerId = setTimeout(
+        () => reject(new Error("Duel plan LLM timeout")),
+        DUEL_LLM_TIMEOUT_MS,
+      );
+    });
+
+    Promise.race([llmPromise, timeoutPromise])
+      .then((response) => {
+        clearTimeout(timerId);
+        const text = typeof response === "string" ? response : "";
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const p = JSON.parse(jsonMatch[0]) as Partial<DuelCombatPlan>;
+          this.duelPlan = {
+            combatRole: p.combatRole || this.duelPlan.combatRole,
+            approach: p.approach || this.duelPlan.approach,
+            attackStyle: p.attackStyle || this.duelPlan.attackStyle,
+            prayer: p.prayer !== undefined ? p.prayer : this.duelPlan.prayer,
+            foodThreshold:
+              typeof p.foodThreshold === "number"
+                ? Math.max(15, Math.min(65, p.foodThreshold))
+                : this.duelPlan.foodThreshold,
+            switchDefensiveAt:
+              typeof p.switchDefensiveAt === "number"
+                ? Math.max(15, Math.min(45, p.switchDefensiveAt))
+                : this.duelPlan.switchDefensiveAt,
+            movementStrategy:
+              p.movementStrategy || this.duelPlan.movementStrategy,
+            reasoning: p.reasoning || "",
+          };
+          this.duelPlanReady = true;
+          logger.info(
+            `[AutonomousBehavior] ⚔️ Fight plan: ${this.duelPlan.combatRole} ${this.duelPlan.approach}, style=${this.duelPlan.attackStyle}, move=${this.duelPlan.movementStrategy}, prayer=${this.duelPlan.prayer}, eat@${this.duelPlan.foodThreshold}% — "${this.duelPlan.reasoning}"`,
+          );
+        }
+      })
+      .catch((err) => {
+        clearTimeout(timerId!);
+        // Defaults already set from equipment detection — fight continues fine
+        this.duelPlanReady = true;
+        logger.debug(
+          `[AutonomousBehavior] Fight plan LLM failed, using equipment defaults: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+  }
+
+  /** Detect combat role from player's equipped weapon */
+  private detectCombatRole(player: PlayerEntity): "melee" | "ranged" | "mage" {
+    const weapon = (player.equipment?.weapon || "").toLowerCase();
+    const arrows = player.equipment?.arrows;
+
+    if (
+      arrows ||
+      weapon.includes("bow") ||
+      weapon.includes("crossbow") ||
+      weapon.includes("dart") ||
+      weapon.includes("knife") ||
+      weapon.includes("javelin")
+    ) {
+      return "ranged";
+    }
+    if (weapon.includes("staff") || weapon.includes("wand")) {
+      return "mage";
+    }
+    return "melee";
+  }
+
+  /** Get opponent entity from nearby entities */
+  private getDuelOpponentEntity(): Entity | null {
+    if (!this.service || !this.duelOpponentId) return null;
+    const nearby = this.service.getNearbyEntities();
+    return nearby.find((e) => e.id === this.duelOpponentId) ?? null;
+  }
+
+  /**
+   * Movement tick — execute movement strategy from fight plan.
+   *
+   * - chase: close distance (melee)
+   * - kite: maintain distance, back away when too close (ranged/mage)
+   * - circle: strafe around opponent (unpredictable)
+   * - hold: stay put (defensive tank)
+   */
+  private duelMovementTick(
+    player: PlayerEntity,
+    opponent: Entity,
+    phase: DuelCombatPhase,
+    now: number,
+  ): void {
+    // 800ms movement cooldown to avoid path spam
+    if (now - this.duelLastMoveTime < 800) return;
+
+    const myPos = player.position;
+    const oppPos = opponent.position;
+    if (!myPos || !oppPos) return;
+
+    const dx = oppPos[0] - myPos[0];
+    const dz = oppPos[2] - myPos[2];
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    // Override: desperate → always chase (stay close, can't afford to kite with low HP)
+    const strategy =
+      phase === "desperate" ? "chase" : this.duelPlan.movementStrategy;
+
+    switch (strategy) {
+      case "chase": {
+        // Close distance if too far for melee (>3 units)
+        if (dist > 3) {
+          this.service
+            ?.executeMove({ target: oppPos, runMode: true })
+            .catch(() => {});
+          this.duelLastMoveTime = now;
+        }
+        break;
+      }
+      case "kite": {
+        if (dist < 4) {
+          // Too close — move away from opponent
+          const len = Math.max(dist, 0.1);
+          const awayX = myPos[0] - (dx / len) * 6;
+          const awayZ = myPos[2] - (dz / len) * 6;
+          const target = this.clampToArenaBounds([awayX, myPos[1], awayZ]);
+          this.service?.executeMove({ target, runMode: true }).catch(() => {});
+          this.duelLastMoveTime = now;
+        } else if (dist > 12) {
+          // Too far — move closer to attack range
+          this.service
+            ?.executeMove({ target: oppPos, runMode: true })
+            .catch(() => {});
+          this.duelLastMoveTime = now;
+        }
+        break;
+      }
+      case "circle": {
+        // Strafe around opponent at current distance
+        const angle = Math.atan2(dz, dx) + Math.PI; // angle FROM opponent to us
+        const newAngle = angle + 0.5; // ~30 degrees clockwise
+        const targetDist = Math.max(dist, 3);
+        const circleTarget: [number, number, number] = [
+          oppPos[0] + Math.cos(newAngle) * targetDist,
+          myPos[1],
+          oppPos[2] + Math.sin(newAngle) * targetDist,
+        ];
+        this.service
+          ?.executeMove({
+            target: this.clampToArenaBounds(circleTarget),
+            runMode: true,
+          })
+          .catch(() => {});
+        this.duelLastMoveTime = now;
+        break;
+      }
+      case "hold":
+        // Stay put — no movement command
+        break;
+    }
+  }
+
+  /** Clamp a position to the duel arena bounds (if known) */
+  private clampToArenaBounds(
+    pos: [number, number, number],
+  ): [number, number, number] {
+    if (!this.duelArenaBounds) return pos;
+    const b = this.duelArenaBounds;
+    return [
+      Math.max(b.minX + 1, Math.min(b.maxX - 1, pos[0])),
+      pos[1],
+      Math.max(b.minZ + 1, Math.min(b.maxZ - 1, pos[2])),
+    ];
+  }
+
+  // ── Duel Trash Talk ────────────────────────────────────────────────────
+
+  /**
+   * Check health milestones and fire trash talk.
+   * Fire-and-forget — never blocks the combat tick.
+   */
+  private duelTrashTalkTick(
+    healthPct: number,
+    opponentHealthPct: number,
+  ): void {
+    if (!this.service) return;
+    const now = Date.now();
+    if (now - this.duelLastTrashTalkTime < DUEL_TRASH_TALK_COOLDOWN_MS) return;
+    if (this.duelTrashTalkInFlight) return;
+
+    // Opening taunt (tick 1)
+    if (this.duelTickCount === 1) {
+      this.duelFireTrashTalk("opening", healthPct, opponentHealthPct);
+      return;
+    }
+
+    // Own health milestone crossed
+    for (const threshold of DUEL_TRASH_TALK_THRESHOLDS) {
+      if (
+        healthPct <= threshold &&
+        !this.duelFiredOwnThresholds.has(threshold)
+      ) {
+        // Mark all crossed thresholds
+        for (const t of DUEL_TRASH_TALK_THRESHOLDS) {
+          if (healthPct <= t) this.duelFiredOwnThresholds.add(t);
+        }
+        this.duelFireTrashTalk("own_low", healthPct, opponentHealthPct);
+        return;
+      }
+    }
+
+    // Opponent health milestone crossed
+    for (const threshold of DUEL_TRASH_TALK_THRESHOLDS) {
+      if (
+        opponentHealthPct <= threshold &&
+        !this.duelFiredOpponentThresholds.has(threshold)
+      ) {
+        for (const t of DUEL_TRASH_TALK_THRESHOLDS) {
+          if (opponentHealthPct <= t) this.duelFiredOpponentThresholds.add(t);
+        }
+        this.duelFireTrashTalk("opponent_low", healthPct, opponentHealthPct);
+        return;
+      }
+    }
+
+    // Ambient periodic taunt
+    if (this.duelTickCount >= this.duelNextAmbientTauntTick) {
+      this.duelNextAmbientTauntTick =
+        this.duelTickCount +
+        DUEL_AMBIENT_TAUNT_MIN_TICKS +
+        Math.floor(
+          Math.random() *
+            (DUEL_AMBIENT_TAUNT_MAX_TICKS - DUEL_AMBIENT_TAUNT_MIN_TICKS),
+        );
+      this.duelFireTrashTalk("ambient", healthPct, opponentHealthPct);
+    }
+  }
+
+  /**
+   * Fire a trash talk message — LLM with character personality, scripted fallback.
+   */
+  private duelFireTrashTalk(
+    kind: "opening" | "own_low" | "opponent_low" | "ambient",
+    healthPct: number,
+    opponentHealthPct: number,
+  ): void {
+    if (!this.service) return;
+
+    const pool =
+      kind === "opening"
+        ? DUEL_TAUNTS_OPENING
+        : kind === "own_low"
+          ? DUEL_TAUNTS_OWN_LOW
+          : kind === "opponent_low"
+            ? DUEL_TAUNTS_OPPONENT_LOW
+            : DUEL_TAUNTS_AMBIENT;
+
+    // Agent personality
+    const agentName =
+      (this.runtime as unknown as { character?: { name?: string } }).character
+        ?.name || "warrior";
+    const character = (
+      this.runtime as unknown as {
+        character?: { bio?: string | string[]; style?: { all?: string[] } };
+      }
+    ).character;
+    const bioSnippet = character?.bio
+      ? Array.isArray(character.bio)
+        ? character.bio[0] || ""
+        : String(character.bio).slice(0, 100)
+      : "";
+    const styleHint = character?.style?.all?.[0] || "";
+
+    const situation =
+      kind === "opening"
+        ? "The duel just started!"
+        : kind === "own_low"
+          ? `Your HP dropped to ${Math.round(healthPct)}%!`
+          : kind === "opponent_low"
+            ? `Opponent HP is down to ${Math.round(opponentHealthPct)}%!`
+            : "Mid-fight taunt.";
+
+    const prompt = [
+      `You are ${agentName} in a PvP duel${this.duelOpponentName ? ` against ${this.duelOpponentName}` : ""}.`,
+      bioSnippet ? `Personality: ${bioSnippet}` : "",
+      styleHint ? `Style: ${styleHint}` : "",
+      `HP: ${Math.round(healthPct)}% vs ${Math.round(opponentHealthPct)}%. ${situation}`,
+      `Generate ONE short trash talk message (under 40 chars) for the overhead chat bubble.`,
+      `Stay in character. Be creative and competitive. No quotes. Just the message.`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    this.duelTrashTalkInFlight = true;
+    this.duelLastTrashTalkTime = Date.now();
+
+    const llmPromise = this.runtime.useModel(ModelType.TEXT_SMALL, {
+      prompt,
+      maxTokens: 30,
+      temperature: 0.9,
+    });
+
+    let timerId: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timerId = setTimeout(
+        () => reject(new Error("Trash talk LLM timeout")),
+        DUEL_LLM_TIMEOUT_MS,
+      );
+    });
+
+    Promise.race([llmPromise, timeoutPromise])
+      .then((response) => {
+        clearTimeout(timerId);
+        const text = (typeof response === "string" ? response : "")
+          .trim()
+          .replace(/^["']|["']$/g, "");
+        if (text && text.length <= 60) {
+          this.service?.executeChatMessage({ message: text }).catch(() => {});
+        }
+      })
+      .catch(() => {
+        clearTimeout(timerId!);
+        // Scripted fallback
+        const msg = pool[Math.floor(Math.random() * pool.length)];
+        this.service?.executeChatMessage({ message: msg }).catch(() => {});
+      })
+      .finally(() => {
+        this.duelTrashTalkInFlight = false;
+      });
   }
 
   /**
@@ -5841,6 +6667,7 @@ export class AutonomousBehaviorManager {
     const duelData = data as {
       opponentId?: string;
       duelId?: string;
+      bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
     };
     // Capture opponent ID if not already set (backup from session)
     if (duelData.opponentId && !this.duelOpponentId) {
@@ -5854,6 +6681,18 @@ export class AutonomousBehaviorManager {
       "[AutonomousBehavior] ⚔️ Duel fight starting — entering combat mode",
     );
     this.duelPhase = "fighting";
+    this.resetDuelCombatState();
+
+    // Capture arena bounds for movement clamping
+    if (duelData.bounds) {
+      this.duelArenaBounds = duelData.bounds;
+    }
+
+    // Fire one-shot LLM fight plan (background — defaults handle combat until it resolves)
+    const player = this.service?.getPlayerEntity();
+    if (player) {
+      this.planDuelCombatOnce(player);
+    }
 
     // If we somehow missed the session start (race condition), save goal now
     if (this.goalStack.length === 0 && this.currentGoal) {
@@ -5907,6 +6746,7 @@ export class AutonomousBehaviorManager {
     this.duelOpponentId = null;
     this.duelOpponentName = null;
     this.duelId = null;
+    this.resetDuelCombatState();
 
     // Generate post-duel assessment and adjust strategy
     const assessment = this.assessDuelOutcome(won, opponentName, player);
@@ -5951,6 +6791,7 @@ export class AutonomousBehaviorManager {
     this.duelOpponentId = null;
     this.duelOpponentName = null;
     this.duelId = null;
+    this.resetDuelCombatState();
 
     const player = this.service?.getPlayerEntity();
     if (player) {

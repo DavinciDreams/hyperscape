@@ -53,6 +53,10 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
         opponentName: targetName,
         isChallenger: true,
       });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for challenger ${challengerId} — duelSessionStarted not sent`,
+      );
     }
 
     const targetSocket = getSocketByPlayerId(targetId);
@@ -63,6 +67,10 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
         opponentName: challengerName,
         isChallenger: false,
       });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for target ${targetId} — duelSessionStarted not sent`,
+      );
     }
   });
 
@@ -115,6 +123,10 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
         opponentId: targetId,
         bounds,
       });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for challenger ${challengerId} — duelFightStart not sent`,
+      );
     }
 
     const targetSocket = getSocketByPlayerId(targetId);
@@ -125,6 +137,10 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
         opponentId: challengerId,
         bounds,
       });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for target ${targetId} — duelFightStart not sent`,
+      );
     }
   });
 
