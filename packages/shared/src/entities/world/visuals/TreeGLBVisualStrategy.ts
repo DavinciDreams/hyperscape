@@ -1,7 +1,7 @@
 /**
  * TreeGLBVisualStrategy — GLBTreeInstancer integration for woodcutting trees.
  *
- * Thin wrapper: the instancer owns InstancedMeshes and LOD switching.
+ * Thin wrapper: the instancer owns BatchedMeshes and LOD switching.
  * This strategy just calls addInstance / removeInstance / setDepleted.
  */
 
@@ -49,13 +49,13 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
   async createVisual(ctx: ResourceVisualContext): Promise<void> {
     const { config, id, position } = ctx;
 
-    // Pick model: hash-select from variants or fall back to direct modelPath
-    let modelPath = config.model;
-    if (config.modelVariants?.length) {
-      const hash = ctx.hashString(id) >>> 0;
-      modelPath = config.modelVariants[hash % config.modelVariants.length];
-    }
-    if (!modelPath) return;
+    const treeType = config.resourceId.replace(/^tree_/, "");
+    const variants =
+      config.modelVariants ?? (config.model ? [config.model] : []);
+    if (variants.length === 0) return;
+
+    const hash = ctx.hashString(id) >>> 0;
+    const variantIndex = hash % variants.length;
 
     const baseScale = config.modelScale ?? 3.0;
     const worldPos = new THREE.Vector3();
@@ -67,7 +67,9 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     const rotation = ((rotHash % 1000) / 1000) * Math.PI * 2;
 
     const success = await addGLBTreeInstance(
-      modelPath,
+      treeType,
+      variants,
+      variantIndex,
       id,
       worldPos,
       rotation,
