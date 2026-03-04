@@ -155,7 +155,7 @@ const DEFAULT_DUEL_PLAN: Readonly<DuelCombatPlan> = {
   combatRole: "melee",
   approach: "balanced",
   attackStyle: "strength",
-  prayer: "ultimate_strength",
+  prayer: "superhuman_strength",
   foodThreshold: 40,
   switchDefensiveAt: 30,
   movementStrategy: "chase",
@@ -6102,26 +6102,28 @@ export class AutonomousBehaviorManager {
 
     if (wantDefensive) {
       // Switch to defensive prayer
-      if (!this.duelActivePrayers.has("steel_skin")) {
-        this.service?.executeTogglePrayer("steel_skin").catch(() => {});
-        this.duelActivePrayers.add("steel_skin");
+      if (!this.duelActivePrayers.has("rock_skin")) {
+        this.service?.executeTogglePrayer("rock_skin").catch(() => {});
+        this.duelActivePrayers.add("rock_skin");
       }
-      if (this.duelActivePrayers.has("ultimate_strength")) {
-        this.service?.executeTogglePrayer("ultimate_strength").catch(() => {});
-        this.duelActivePrayers.delete("ultimate_strength");
+      if (this.duelActivePrayers.has("superhuman_strength")) {
+        this.service
+          ?.executeTogglePrayer("superhuman_strength")
+          .catch(() => {});
+        this.duelActivePrayers.delete("superhuman_strength");
       }
     } else {
       // Use fight plan prayer (or default offensive)
-      const wantedPrayer = this.duelPlan.prayer ?? "ultimate_strength";
+      const wantedPrayer = this.duelPlan.prayer ?? "superhuman_strength";
       if (!this.duelActivePrayers.has(wantedPrayer)) {
         this.service?.executeTogglePrayer(wantedPrayer).catch(() => {});
         this.duelActivePrayers.add(wantedPrayer);
       }
       // Deactivate the opposite if active
       const opposite =
-        wantedPrayer === "ultimate_strength"
-          ? "steel_skin"
-          : "ultimate_strength";
+        wantedPrayer === "superhuman_strength"
+          ? "rock_skin"
+          : "superhuman_strength";
       if (this.duelActivePrayers.has(opposite)) {
         this.service?.executeTogglePrayer(opposite).catch(() => {});
         this.duelActivePrayers.delete(opposite);
@@ -6258,7 +6260,7 @@ export class AutonomousBehaviorManager {
       ``,
       `COMBAT MECHANICS:`,
       `  Styles: strength (max damage), attack (balanced/accurate), defense (tanky)`,
-      `  Prayers: ultimate_strength (+15% str dmg), steel_skin (+15% def)`,
+      `  Prayers: superhuman_strength (+10% str), rock_skin (+10% def), hawk_eye (+10% ranged), mystic_lore (+10% magic)`,
       `  Movement: chase (close distance, melee), kite (keep distance, ranged/mage), circle (strafe around), hold (stand ground)`,
       ``,
       `This plan runs the ENTIRE fight. Choose based on your personality and loadout.`,
@@ -6270,7 +6272,7 @@ export class AutonomousBehaviorManager {
       `  "combatRole": "melee" | "ranged" | "mage",`,
       `  "approach": "aggressive" | "defensive" | "balanced" | "outlast",`,
       `  "attackStyle": "strength" | "attack" | "defense",`,
-      `  "prayer": "ultimate_strength" | "steel_skin" | null,`,
+      `  "prayer": "superhuman_strength" | "rock_skin" | "hawk_eye" | "mystic_lore" | null,`,
       `  "foodThreshold": 15-60,`,
       `  "switchDefensiveAt": 15-45,`,
       `  "movementStrategy": "chase" | "kite" | "circle" | "hold",`,

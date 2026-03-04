@@ -203,6 +203,8 @@ export const STREAMING_TIMING = {
   COUNTDOWN_DURATION: (COUNTDOWN_TICKS + 1) * 1000,
   STATE_BROADCAST_INTERVAL: 1000, // Broadcast every 1 second
   FIGHT_BROADCAST_INTERVAL: 200, // Faster updates during fight
+  /** Minimum announcement time before early-exit is allowed (#21) */
+  MIN_ANNOUNCEMENT_DURATION: 10_000,
   /** Delay between end of one cycle's cleanup and start of the next cycle.
    * Gives spectators a visual reset and prevents stale avatar artifacts. */
   INTER_CYCLE_DELAY_MS: 2000,

@@ -125,6 +125,10 @@ const STREAMING_COMBAT_STALL_NUDGE_MS = Math.max(
   5_000,
   Number.parseInt(process.env.STREAMING_COMBAT_STALL_NUDGE_MS || "15000", 10),
 );
+/** Interval between escalating stall nudges after the first (#20) */
+const STALL_NUDGE_ESCALATION_INTERVAL_MS = 10_000;
+/** Maximum damage per escalating nudge (#20) */
+const STALL_NUDGE_MAX_DAMAGE = 5;
 
 /** Combat role types for duel arena agents. */
 type DuelCombatRole = "melee" | "ranged" | "mage";
@@ -150,7 +154,9 @@ export class DuelOrchestrator {
   private duelFoodSlotsByAgent: Map<string, DuelFoodProvisionedSlot[]> =
     new Map();
   private combatRolesByAgent: Map<string, DuelCombatRole> = new Map();
-  private lastCombatStallNudgeCycleId: string | null = null;
+  /** Escalating stall nudge state (#20) */
+  private combatStallNudgeCount = 0;
+  private lastCombatStallNudgeTime = 0;
 
   constructor(
     private readonly world: World,
@@ -1194,6 +1200,59 @@ export class DuelOrchestrator {
       }
     }
 
+    // (#19) Validate spell element matches staff element after any fallback.
+    // If mismatched, find the best spell matching the staff's infinite runes.
+    const actualStaffId = staffAlreadyEquipped
+      ? staffId
+      : (this.getEquippedWeaponId(playerId) ?? staffId);
+    const staffInfinite = ELEMENTAL_STAVES[actualStaffId] ?? [];
+    const currentSpell = COMBAT_SPELLS[spellId];
+    if (currentSpell) {
+      const spellElement = currentSpell.element ?? "air";
+      const staffProvidesSpellElement = staffInfinite.includes(
+        `${spellElement}_rune`,
+      );
+      if (!staffProvidesSpellElement && staffInfinite.length > 0) {
+        // Staff doesn't match spell element — find best spell that matches
+        const staffElements = staffInfinite
+          .filter((r: string) => r.endsWith("_rune"))
+          .map((r: string) => r.replace("_rune", ""));
+        const skills = this.getAgentSkillLevels(playerId);
+        const magicLevel = skills.magic ?? 1;
+        let bestMatchSpellId = spellId; // keep current as fallback
+        for (const sid of SPELL_ORDER) {
+          const sp = COMBAT_SPELLS[sid];
+          if (
+            sp &&
+            magicLevel >= sp.level &&
+            staffElements.includes(sp.element ?? "")
+          ) {
+            bestMatchSpellId = sid;
+          }
+        }
+        if (bestMatchSpellId !== spellId) {
+          spellId = bestMatchSpellId;
+          // Recalculate runes for the new spell
+          const newSpell = COMBAT_SPELLS[spellId];
+          if (newSpell?.runes) {
+            runes = [];
+            for (const req of newSpell.runes) {
+              if (!staffInfinite.includes(req.runeId)) {
+                runes.push({
+                  runeId: req.runeId,
+                  quantity: RUNE_PROVISION_QTY,
+                });
+              }
+            }
+          }
+          Logger.info(
+            "StreamingDuelScheduler",
+            `Spell validation: switched ${playerId} to ${spellId} (matches staff ${actualStaffId})`,
+          );
+        }
+      }
+    }
+
     // Set autocast spell.
     // Belt-and-suspenders: set selectedSpell directly on entity data AND via
     // world.getPlayer() (which the CombatSystem reads), then emit the event.
@@ -1753,6 +1812,10 @@ export class DuelOrchestrator {
 
     // Phase guard — only transition from COUNTDOWN (Fix B).
     if (cycle.phase !== "COUNTDOWN") return;
+
+    // Reset escalating stall nudge state for new fight (#20)
+    this.combatStallNudgeCount = 0;
+    this.lastCombatStallNudgeTime = 0;
 
     const { agent1, agent2 } = cycle;
 
@@ -2438,31 +2501,58 @@ export class DuelOrchestrator {
     }
   }
 
+  /**
+   * Escalating combat stall nudge (#20).
+   * First nudge at STREAMING_COMBAT_STALL_NUDGE_MS, subsequent every 10s.
+   * Damage escalates: min(count+1, 5). Alternates targets. Resets on combat evidence.
+   * Floors HP at 1 to avoid accidental kills.
+   */
   applyCombatStallNudge(now: number): void {
     const cycle = this.getCurrentCycle();
     if (!cycle || cycle.phase !== "FIGHTING") return;
-    if (this.lastCombatStallNudgeCycleId === cycle.cycleId) return;
 
     const { agent1, agent2 } = cycle;
     if (!agent1 || !agent2) return;
 
+    // Reset nudge state if there's combat evidence
     const hasCombatEvidence =
       agent1.currentHp < agent1.maxHp ||
       agent2.currentHp < agent2.maxHp ||
       agent1.damageDealtThisFight > 0 ||
       agent2.damageDealtThisFight > 0;
-    if (hasCombatEvidence) return;
+    if (hasCombatEvidence) {
+      this.combatStallNudgeCount = 0;
+      this.lastCombatStallNudgeTime = 0;
+      return;
+    }
 
-    const attackerId = agent1.characterId;
-    const targetId = agent2.characterId;
+    // Check cooldown: first nudge uses the initial stall threshold,
+    // subsequent nudges use the escalation interval
+    if (this.combatStallNudgeCount > 0) {
+      if (
+        now - this.lastCombatStallNudgeTime <
+        STALL_NUDGE_ESCALATION_INTERVAL_MS
+      )
+        return;
+    }
+
+    // Alternate targets based on nudge count
+    const isEven = this.combatStallNudgeCount % 2 === 0;
+    const attackerId = isEven ? agent1.characterId : agent2.characterId;
+    const targetId = isEven ? agent2.characterId : agent1.characterId;
+    const targetAgent = isEven ? agent2 : agent1;
     const targetEntity = this.world.entities.get(targetId);
     if (!targetEntity) return;
 
     const currentHp = Number((targetEntity.data as { health?: number }).health);
     const safeCurrentHp = Number.isFinite(currentHp)
       ? currentHp
-      : agent2.currentHp;
-    const nextHp = Math.max(1, safeCurrentHp - 1);
+      : targetAgent.currentHp;
+    const nudgeDamage = Math.min(
+      this.combatStallNudgeCount + 1,
+      STALL_NUDGE_MAX_DAMAGE,
+    );
+    const nextHp = Math.max(1, safeCurrentHp - nudgeDamage);
     const damage = safeCurrentHp - nextHp;
     if (damage <= 0) return;
 
@@ -2482,10 +2572,11 @@ export class DuelOrchestrator {
       damage,
     });
 
-    this.lastCombatStallNudgeCycleId = cycle.cycleId;
+    this.combatStallNudgeCount++;
+    this.lastCombatStallNudgeTime = now;
     Logger.warn(
       "StreamingDuelScheduler",
-      `Applied fallback combat nudge (${attackerId} -> ${targetId}, damage=${damage})`,
+      `Applied escalating combat nudge #${this.combatStallNudgeCount} (${attackerId} -> ${targetId}, damage=${damage})`,
     );
   }
 
@@ -2529,14 +2620,10 @@ export class DuelOrchestrator {
         loserId = agent1.characterId;
         winReason = "damage_advantage";
       } else {
-        // True draw - agent1 wins by coin flip
-        winnerId =
-          Math.random() > 0.5 ? agent1.characterId : agent2.characterId;
-        loserId =
-          winnerId === agent1.characterId
-            ? agent2.characterId
-            : agent1.characterId;
-        winReason = "draw";
+        // True draw — both HP and damage equal (#24)
+        // Resolve as a proper draw: no winner/loser, just record it
+        this.onResolution(agent1.characterId, agent2.characterId, "draw");
+        return;
       }
     }
 
@@ -2854,7 +2941,8 @@ export class DuelOrchestrator {
     this.stopCombatAIs();
     this.duelFoodSlotsByAgent.clear();
     this.combatRolesByAgent.clear();
-    this.lastCombatStallNudgeCycleId = null;
+    this.combatStallNudgeCount = 0;
+    this.lastCombatStallNudgeTime = 0;
     this.combatLoopTickCount = 0;
   }
 }

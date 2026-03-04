@@ -165,7 +165,7 @@ describe("EmbeddedHyperscapeService new methods", () => {
         "agent-1";
       (service as unknown as { isActive: boolean }).isActive = true;
 
-      const result = await service.executePrayerToggle("ultimate_strength");
+      const result = await service.executePrayerToggle("superhuman_strength");
       expect(result).toBe(false);
     });
 
@@ -184,9 +184,9 @@ describe("EmbeddedHyperscapeService new methods", () => {
         "agent-1";
       (service as unknown as { isActive: boolean }).isActive = true;
 
-      const result = await service.executePrayerToggle("ultimate_strength");
+      const result = await service.executePrayerToggle("superhuman_strength");
       expect(result).toBe(true);
-      expect(mockToggle).toHaveBeenCalledWith("agent-1", "ultimate_strength");
+      expect(mockToggle).toHaveBeenCalledWith("agent-1", "superhuman_strength");
     });
   });
 });

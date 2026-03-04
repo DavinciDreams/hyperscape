@@ -96,6 +96,14 @@ const FALLBACK_TAUNTS_OPENING = [
 
 type CombatPhase = "opening" | "trading" | "finishing" | "desperate";
 
+/** Role-based offensive prayers that actually exist in the prayer manifest. */
+const OFFENSIVE_PRAYER: Record<string, string> = {
+  melee: "superhuman_strength",
+  ranged: "hawk_eye",
+  mage: "mystic_lore",
+};
+const DEFENSIVE_PRAYER = "rock_skin";
+
 export interface CombatStrategy {
   approach: "aggressive" | "defensive" | "balanced" | "outlast";
   attackStyle: string;
@@ -109,14 +117,14 @@ export interface CombatStrategy {
 const DEFAULT_STRATEGY: CombatStrategy = {
   approach: "balanced",
   attackStyle: "aggressive",
-  prayer: "ultimate_strength",
+  prayer: "superhuman_strength",
   protectionPrayer: null,
   foodThreshold: 40,
   switchDefensiveAt: 30,
   reasoning: "Default balanced strategy",
 };
 
-const MIN_REPLAN_INTERVAL_MS = 8000;
+const MIN_REPLAN_INTERVAL_MS = 4000;
 
 /** Maximum time to wait for an LLM response before giving up */
 const LLM_TIMEOUT_MS = 3000;
@@ -211,6 +219,23 @@ export class DuelCombatAI {
   /** How often (in ticks) to force re-engagement as a keep-alive. */
   private static readonly RE_ENGAGE_INTERVAL = 5;
 
+  /** Movement AI: last time a move action was issued */
+  private lastMoveTime = 0;
+  /** Movement AI cooldown (ms) */
+  private static readonly MOVE_COOLDOWN_MS = 1200;
+  /** Ideal engagement ranges per combat role */
+  private static readonly IDEAL_RANGE: Record<
+    string,
+    { min: number; max: number }
+  > = {
+    melee: { min: 1, max: 2 },
+    ranged: { min: 5, max: 8 },
+    mage: { min: 5, max: 8 },
+  };
+
+  /** Track last phase for change detection (#7) */
+  private lastPhase: CombatPhase = "opening";
+
   constructor(
     service: EmbeddedHyperscapeService,
     opponentId: string,
@@ -247,7 +272,13 @@ export class DuelCombatAI {
     this.lastReplanTime = 0;
     this.lastReplanHealthPct = 100;
     this.lastFoodUseTime = 0;
-    this.strategy = { ...DEFAULT_STRATEGY };
+    this.lastMoveTime = 0;
+    this.lastPhase = "opening";
+    // Set default strategy prayer based on combat role
+    this.strategy = {
+      ...DEFAULT_STRATEGY,
+      prayer: OFFENSIVE_PRAYER[this.config.combatRole] ?? "superhuman_strength",
+    };
 
     // Reset trash talk state for new fight
     this.firedOwnThresholds.clear();
@@ -319,6 +350,7 @@ export class DuelCombatAI {
     if (!this.isRunning) return;
     this.tickCount++;
 
+    // 1. Get state, check alive
     const state = this.service.getGameState();
     if (!state) return;
     if (!state.alive) {
@@ -326,10 +358,16 @@ export class DuelCombatAI {
       return;
     }
 
+    // 2. Sync prayers from entity state (#2 prayer reconciliation)
+    this.activePrayers.clear();
+    if (state.activePrayers) {
+      for (const p of state.activePrayers) this.activePrayers.add(p);
+    }
+
+    // 3. HP tracking, damage deltas
     const healthPct =
       state.maxHealth > 0 ? (state.health / state.maxHealth) * 100 : 100;
 
-    // Save previous values for trash talk threshold detection
     const prevHealthPct = this.lastHealthPct;
     const prevOpponentHealthPct = this.opponentLastHealthPct;
 
@@ -341,6 +379,7 @@ export class DuelCombatAI {
     }
     this.lastHealthPct = healthPct;
 
+    // 4. Get opponent data (+ position for movement AI)
     const opponentData = this.getOpponentData(state);
     if (opponentData) {
       const oppHealthPct =
@@ -356,10 +395,12 @@ export class DuelCombatAI {
       this.opponentLastHealthPct = oppHealthPct;
     }
 
+    // 5. Determine phase + detect phase change (#7)
     const phase = this.determineCombatPhase(healthPct, opponentData);
+    const phaseChanged = phase !== this.lastPhase;
+    this.lastPhase = phase;
 
-    // Check health milestones for trash talk (fire-and-forget, never blocks tick)
-    // Pass previous health values since this.lastHealthPct is already updated
+    // 6. Trash talk (fire-and-forget, never blocks tick)
     this.checkHealthMilestones(
       healthPct,
       prevHealthPct,
@@ -368,26 +409,36 @@ export class DuelCombatAI {
     );
     this.maybeAmbientTrashTalk(healthPct, opponentData);
 
-    if (await this.tryHeal(state, healthPct, phase)) {
+    // 7. tryHeal (context-aware #4, finishing adjustment #10)
+    if (await this.tryHeal(state, healthPct, phase, opponentData)) {
       this.healsUsed++;
       return;
     }
 
+    // 8. tryBuff (+ prayer activation at fight start #16)
     if (await this.tryBuff(state, phase)) {
       return;
     }
 
+    // 9. Movement AI - kite/chase by role (#1, #5, #17)
+    this.movementTick(state, opponentData, Date.now());
+
+    // 10. Strategy/prayer/style (correct IDs, faster switching, faster replan)
     if (this.config.useLlmTactics && this.runtime) {
-      // LLM path: fire-and-forget strategy replanning in background (never blocks tick),
-      // then execute the latest strategy object every tick
-      this.maybeReplanStrategyBackground(state, healthPct, opponentData, phase);
-      await this.executeStrategy(healthPct, phase);
+      this.maybeReplanStrategyBackground(
+        state,
+        healthPct,
+        opponentData,
+        phase,
+        phaseChanged,
+      );
+      await this.executeStrategy(healthPct, phase, phaseChanged);
     } else {
-      // Scripted path: phase-based prayer and style switching
-      await this.tryPrayerSwitch(phase);
-      await this.tryStyleSwitch(healthPct, phase);
+      await this.tryPrayerSwitch(phase, phaseChanged);
+      await this.tryStyleSwitch(healthPct, phase, phaseChanged);
     }
 
+    // 11. tryAttack
     await this.tryAttack(state, phase);
   }
 
@@ -410,19 +461,35 @@ export class DuelCombatAI {
 
   /**
    * Attempt to heal. Returns true if a heal action was taken.
+   * Context-aware: skips healing when dominating (#4).
+   * Finishing phase: lower threshold for aggression (#10).
    */
   private async tryHeal(
     state: EmbeddedGameState,
     healthPct: number,
     phase: CombatPhase,
+    opponentData?: OpponentData | null,
   ): Promise<boolean> {
     const baseThreshold = this.config.useLlmTactics
       ? this.strategy.foodThreshold
       : this.config.healThresholdPct;
     const threshold =
-      phase === "desperate" ? baseThreshold + 15 : baseThreshold;
+      phase === "desperate"
+        ? baseThreshold + 15
+        : phase === "finishing"
+          ? Math.max(15, baseThreshold - 10)
+          : baseThreshold;
 
     if (healthPct >= threshold) return false;
+
+    // Context-aware: skip healing when dominating opponent (#4)
+    if (phase !== "desperate" && healthPct > 25 && opponentData) {
+      const oppPct =
+        opponentData.maxHealth > 0
+          ? (opponentData.health / Math.max(1, opponentData.maxHealth)) * 100
+          : 50;
+      if (healthPct - oppPct >= 30) return false;
+    }
 
     // 1800ms cooldown (3 ticks) to prevent spamming food
     const now = Date.now();
@@ -445,13 +512,20 @@ export class DuelCombatAI {
   }
 
   /**
-   * Attempt to use a buff potion. Returns true if used.
+   * Attempt to use a buff potion and activate offensive prayer. Returns true if used.
+   * (#16) Activates role-appropriate offensive prayer at fight start.
    */
   private async tryBuff(
     state: EmbeddedGameState,
     phase: CombatPhase,
   ): Promise<boolean> {
     if (phase !== "opening" || this.tickCount > 2) return false;
+
+    // Activate offensive prayer at fight start (#16)
+    const offPrayer = OFFENSIVE_PRAYER[this.config.combatRole];
+    if (offPrayer) {
+      await this.activatePrayer(offPrayer);
+    }
 
     const potion = this.findPotion(state.inventory);
     if (!potion) return false;
@@ -471,24 +545,28 @@ export class DuelCombatAI {
   /**
    * Check if conditions warrant replanning the combat strategy.
    * Fires planning in the background — NEVER blocks the tick loop.
+   * (#8) Faster replanning: 4s interval, force replan on phase transitions.
    */
   private maybeReplanStrategyBackground(
     state: EmbeddedGameState,
     healthPct: number,
     opponentData: OpponentData | null,
     phase: CombatPhase,
+    forceReplan = false,
   ): void {
     // Don't queue another LLM call while one is in flight
     if (this._llmPlanningInFlight) return;
 
     const now = Date.now();
     if (
+      !forceReplan &&
       now - this.lastReplanTime < MIN_REPLAN_INTERVAL_MS &&
       this.strategyPlanned
     )
       return;
 
     const needsReplan =
+      forceReplan ||
       !this.strategyPlanned ||
       Math.abs(healthPct - this.lastReplanHealthPct) > 20 ||
       (opponentData &&
@@ -548,14 +626,14 @@ export class DuelCombatAI {
       `OPPONENT: HP ${oppHpPct}%, combat level ${this.opponentCombatLevel || "unknown"}`,
       `DAMAGE SO FAR: dealt ${this.totalDamageDealt}, received ${this.totalDamageReceived}`,
       ``,
-      `Available prayers: ultimate_strength (+15% str), steel_skin (+15% def), rock_skin (+10% def)`,
+      `Available prayers: superhuman_strength (+10% str), rock_skin (+10% def), hawk_eye (+10% ranged), mystic_lore (+10% magic)`,
       `Available styles: aggressive (max damage), defensive (less damage taken), controlled (balanced), accurate (hit more often)`,
       ``,
       `Respond with a JSON object:`,
       `{`,
       `  "approach": "aggressive" | "defensive" | "balanced" | "outlast",`,
       `  "attackStyle": "aggressive" | "defensive" | "controlled" | "accurate",`,
-      `  "prayer": "ultimate_strength" | "steel_skin" | null,`,
+      `  "prayer": "superhuman_strength" | "rock_skin" | "hawk_eye" | "mystic_lore" | null,`,
       `  "foodThreshold": 20-60 (HP% to eat at, lower = riskier),`,
       `  "switchDefensiveAt": 20-40 (HP% to go defensive),`,
       `  "reasoning": "brief explanation"`,
@@ -618,20 +696,27 @@ export class DuelCombatAI {
   /**
    * Execute the current strategy -- set prayer and style as directed.
    * Called every tick. Only changes state if it differs from current.
+   * (#3) All roles switch to defensive when desperate (not just melee).
+   * (#7) Faster switching on phase change.
    */
   private async executeStrategy(
     healthPct: number,
     phase: CombatPhase,
+    phaseChanged = false,
   ): Promise<void> {
-    // Override strategy for desperate situations (melee only — ranged/mage
-    // keep their style since they fight at range or via spells)
-    if (
-      this.config.combatRole === "melee" &&
-      (phase === "desperate" || healthPct < this.strategy.switchDefensiveAt)
-    ) {
-      await this.activatePrayer(this.strategy.protectionPrayer || "steel_skin");
-      await this.deactivatePrayer("ultimate_strength");
-      if (this.currentStyle !== "defensive") {
+    const offPrayer =
+      OFFENSIVE_PRAYER[this.config.combatRole] ?? "superhuman_strength";
+
+    // Override strategy for desperate situations — all roles (#3)
+    if (phase === "desperate" || healthPct < this.strategy.switchDefensiveAt) {
+      await this.activatePrayer(
+        this.strategy.protectionPrayer || DEFENSIVE_PRAYER,
+      );
+      await this.deactivatePrayer(offPrayer);
+      if (
+        this.currentStyle !== "defensive" &&
+        this.config.combatRole !== "mage"
+      ) {
         try {
           await this.service.executeChangeStyle("defensive");
           this.currentStyle = "defensive";
@@ -650,12 +735,15 @@ export class DuelCombatAI {
     // Mage agents skip style switching — magic auto-casts via selectedSpell
     if (this.config.combatRole === "mage") return;
 
-    // Apply strategy style
+    // Apply strategy style — faster switching (#7): modulo 2, immediate on phase change
     const desiredStyle =
       this.config.combatRole === "ranged"
         ? "rapid"
         : this.strategy.attackStyle || "aggressive";
-    if (desiredStyle !== this.currentStyle && this.tickCount % 5 === 0) {
+    if (
+      desiredStyle !== this.currentStyle &&
+      (phaseChanged || this.tickCount % 2 === 0)
+    ) {
       try {
         await this.service.executeChangeStyle(desiredStyle);
         this.currentStyle = desiredStyle;
@@ -681,18 +769,25 @@ export class DuelCombatAI {
     if (success) this.activePrayers.delete(prayerId);
   }
 
-  private async tryPrayerSwitch(phase: CombatPhase): Promise<void> {
-    if (this.tickCount % 3 !== 0) return;
+  private async tryPrayerSwitch(
+    phase: CombatPhase,
+    phaseChanged = false,
+  ): Promise<void> {
+    // Faster switching (#7): every 2 ticks, immediate on phase change
+    if (!phaseChanged && this.tickCount % 2 !== 0) return;
+
+    const offPrayer =
+      OFFENSIVE_PRAYER[this.config.combatRole] ?? "superhuman_strength";
 
     try {
       if (phase === "opening" || phase === "finishing") {
-        await this.activatePrayer("ultimate_strength");
-        await this.deactivatePrayer("steel_skin");
+        await this.activatePrayer(offPrayer);
+        await this.deactivatePrayer(DEFENSIVE_PRAYER);
       } else if (phase === "desperate") {
-        await this.activatePrayer("steel_skin");
-        await this.deactivatePrayer("ultimate_strength");
+        await this.activatePrayer(DEFENSIVE_PRAYER);
+        await this.deactivatePrayer(offPrayer);
       } else {
-        await this.activatePrayer("ultimate_strength");
+        await this.activatePrayer(offPrayer);
       }
     } catch (err) {
       console.debug(`[DuelCombatAI] Prayer switch failed:`, errMsg(err));
@@ -702,24 +797,28 @@ export class DuelCombatAI {
   private async tryStyleSwitch(
     healthPct: number,
     phase: CombatPhase,
+    phaseChanged = false,
   ): Promise<void> {
     // Mage agents don't switch styles — magic auto-casts via selectedSpell
     if (this.config.combatRole === "mage") return;
 
-    if (this.tickCount % 5 !== 0) return;
+    // Faster switching (#7): every 2 ticks, immediate on phase change
+    if (!phaseChanged && this.tickCount % 2 !== 0) return;
 
     let desiredStyle: string;
     if (this.config.combatRole === "ranged") {
       // Ranged agents use "rapid" for faster attack speed (-1 tick)
       desiredStyle = "rapid";
     } else {
-      // Melee: existing phase-based behavior
+      // Melee: phase-based with accurate mid-range (#15)
       if (phase === "finishing") {
         desiredStyle = "aggressive";
       } else if (phase === "desperate") {
         desiredStyle = "defensive";
       } else if (healthPct > this.config.aggressiveThresholdPct) {
         desiredStyle = "aggressive";
+      } else if (healthPct > 50) {
+        desiredStyle = "accurate";
       } else {
         desiredStyle = "controlled";
       }
@@ -965,6 +1064,69 @@ export class DuelCombatAI {
     })();
   }
 
+  /**
+   * Movement AI: position agent at ideal range for their combat role (#1, #5, #17).
+   * Ranged/mage kite away when too close, melee chases when too far.
+   */
+  private movementTick(
+    state: EmbeddedGameState,
+    opponentData: OpponentData | null,
+    now: number,
+  ): void {
+    if (now - this.lastMoveTime < DuelCombatAI.MOVE_COOLDOWN_MS) return;
+    if (!opponentData) return;
+
+    const distance = opponentData.distance;
+    const idealRange =
+      DuelCombatAI.IDEAL_RANGE[this.config.combatRole] ??
+      DuelCombatAI.IDEAL_RANGE.melee;
+
+    // Check if we need to reposition
+    const tooClose = distance < idealRange.min;
+    const tooFar = distance > idealRange.max;
+    if (!tooClose && !tooFar) return;
+
+    // Need own position and opponent position to compute direction
+    const ownPos = state.position;
+    const oppPos = opponentData.position;
+    if (!ownPos || !oppPos) return;
+
+    const dx = oppPos[0] - ownPos[0];
+    const dz = oppPos[2] - ownPos[2];
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist < 0.01) return; // overlapping, skip
+
+    const nx = dx / dist;
+    const nz = dz / dist;
+
+    let targetX: number;
+    let targetZ: number;
+    let run = false;
+
+    if (tooClose && this.config.combatRole !== "melee") {
+      // Kite away for ranged/mage
+      const targetDist = idealRange.max;
+      targetX = oppPos[0] - nx * targetDist;
+      targetZ = oppPos[2] - nz * targetDist;
+      run = true;
+    } else if (tooFar && this.config.combatRole === "melee") {
+      // Chase for melee
+      const targetDist = idealRange.min;
+      targetX = oppPos[0] - nx * targetDist;
+      targetZ = oppPos[2] - nz * targetDist;
+      run = true;
+    } else {
+      return;
+    }
+
+    try {
+      void this.service.executeMove([targetX, ownPos[1], targetZ], run);
+      this.lastMoveTime = now;
+    } catch (err) {
+      console.debug(`[DuelCombatAI] Move failed:`, errMsg(err));
+    }
+  }
+
   private async tryAttack(
     state: EmbeddedGameState,
     _phase: CombatPhase,
@@ -1004,10 +1166,13 @@ export class DuelCombatAI {
     for (let i = 0; i < state.nearbyEntities.length; i++) {
       const e = state.nearbyEntities[i];
       if (e.id === this.opponentId) {
+        const pos =
+          (e as { position?: [number, number, number] }).position ?? null;
         return {
           health: e.health ?? 0,
           maxHealth: e.maxHealth ?? 0,
           distance: e.distance,
+          position: pos,
         };
       }
     }
@@ -1067,6 +1232,7 @@ interface OpponentData {
   health: number;
   maxHealth: number;
   distance: number;
+  position: [number, number, number] | null;
 }
 
 type InventorySlot = EmbeddedGameState["inventory"][number];

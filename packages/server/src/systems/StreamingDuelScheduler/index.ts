@@ -134,6 +134,9 @@ export class StreamingDuelScheduler {
     fn: (...args: unknown[]) => void;
   }> = [];
 
+  /** Fast fight broadcast interval (200ms during FIGHTING) (#11) */
+  private fightBroadcastInterval: ReturnType<typeof setInterval> | null = null;
+
   /** Guard against concurrent startCountdown() invocations */
   private _startCountdownInProgress = false;
 
@@ -345,6 +348,8 @@ export class StreamingDuelScheduler {
       clearInterval(this.broadcastInterval);
       this.broadcastInterval = null;
     }
+
+    this.stopFightBroadcast();
 
     if (this.countdownTimeout) {
       clearTimeout(this.countdownTimeout);
@@ -763,6 +768,23 @@ export class StreamingDuelScheduler {
     // Check if announcement phase is over
     if (elapsed >= STREAMING_TIMING.ANNOUNCEMENT_DURATION) {
       void this.startCountdown();
+      return;
+    }
+
+    // Early-exit: after min time, if both agents are ready, skip to countdown (#21)
+    if (elapsed >= STREAMING_TIMING.MIN_ANNOUNCEMENT_DURATION) {
+      const { agent1, agent2 } = this.currentCycle;
+      if (agent1 && agent2) {
+        const entity1 = this.world.entities.get(agent1.characterId);
+        const entity2 = this.world.entities.get(agent2.characterId);
+        const alive1 =
+          entity1 && ((entity1.data as { health?: number }).health ?? 0) > 0;
+        const alive2 =
+          entity2 && ((entity2.data as { health?: number }).health ?? 0) > 0;
+        if (alive1 && alive2) {
+          void this.startCountdown();
+        }
+      }
     }
   }
 
@@ -952,7 +974,7 @@ export class StreamingDuelScheduler {
     // health restore, emit, combat initiation, combat AIs).
     this.orchestrator.startFight();
 
-    // If the orchestrator transitioned to FIGHTING, set camera target.
+    // If the orchestrator transitioned to FIGHTING, set camera target and start fast broadcast.
     // Re-read cycle since startFight() mutates phase via setCurrentCycleFields.
     const cycleAfterFight = this.currentCycle;
     if (
@@ -963,6 +985,8 @@ export class StreamingDuelScheduler {
         cycleAfterFight.agent1?.characterId ?? null,
         now,
       );
+      // Start fast 200ms broadcast for fight phase (#11)
+      this.startFightBroadcast();
     }
   }
 
@@ -1038,6 +1062,9 @@ export class StreamingDuelScheduler {
       return;
     }
 
+    // Stop fast fight broadcast (#11)
+    this.stopFightBroadcast();
+
     // Clear countdown timeout if still pending (e.g. forfeit during countdown).
     if (this.countdownTimeout) {
       clearTimeout(this.countdownTimeout);
@@ -1052,8 +1079,12 @@ export class StreamingDuelScheduler {
     this.currentCycle.loserId = loserId;
     this.currentCycle.winReason = winReason;
 
-    // Update stats
-    this.matchmaking.updateStats(winnerId, loserId);
+    // Update stats — draws don't affect win/loss/streaks (#24)
+    if (winReason === "draw") {
+      this.matchmaking.updateDrawStats(winnerId, loserId);
+    } else {
+      this.matchmaking.updateStats(winnerId, loserId);
+    }
 
     // Get winner/loser names
     const winnerName =
@@ -1236,6 +1267,7 @@ export class StreamingDuelScheduler {
     this.orchestrator.stopCombatLoop();
     this.orchestrator.clearCombatRetryTimeout();
     this.orchestrator.stopCombatAIs();
+    this.stopFightBroadcast();
 
     if (this.countdownTimeout) {
       clearTimeout(this.countdownTimeout);
@@ -1377,7 +1409,48 @@ export class StreamingDuelScheduler {
           : this.currentCycle.agent1?.characterId;
 
       if (winnerId) {
-        this.orchestrator.startResolution(winnerId, loserId, "kill");
+        // Check for simultaneous death (#13): if the "winner" is also dead,
+        // resolve by damage comparison or coin flip instead of declaring a kill.
+        const winnerEntity = this.world.entities.get(winnerId);
+        const winnerHp = winnerEntity
+          ? ((winnerEntity.data as { health?: number }).health ?? 0)
+          : 0;
+
+        if (winnerHp <= 0) {
+          // Both dead — resolve by damage advantage
+          const { agent1, agent2 } = this.currentCycle;
+          const dmg1 = agent1?.damageDealtThisFight ?? 0;
+          const dmg2 = agent2?.damageDealtThisFight ?? 0;
+
+          if (dmg1 !== dmg2) {
+            const actualWinner =
+              dmg1 > dmg2 ? agent1?.characterId : agent2?.characterId;
+            const actualLoser =
+              actualWinner === agent1?.characterId
+                ? agent2?.characterId
+                : agent1?.characterId;
+            if (actualWinner && actualLoser) {
+              this.orchestrator.startResolution(
+                actualWinner,
+                actualLoser,
+                "damage_advantage",
+              );
+            }
+          } else {
+            // True draw — coin flip
+            const coinWinner =
+              Math.random() > 0.5 ? agent1?.characterId : agent2?.characterId;
+            const coinLoser =
+              coinWinner === agent1?.characterId
+                ? agent2?.characterId
+                : agent1?.characterId;
+            if (coinWinner && coinLoser) {
+              this.orchestrator.startResolution(coinWinner, coinLoser, "draw");
+            }
+          }
+        } else {
+          this.orchestrator.startResolution(winnerId, loserId, "kill");
+        }
       }
     }
   }
@@ -1391,13 +1464,36 @@ export class StreamingDuelScheduler {
     // waiting for the first interval tick.
     this.broadcastState();
 
-    // Broadcast state every second
+    // Broadcast state every second (skip during FIGHTING when fast broadcast is active)
     this.broadcastInterval = setInterval(() => {
+      // Skip if fast fight broadcast is handling updates at 200ms (#11)
+      if (
+        this.fightBroadcastInterval &&
+        this.currentCycle?.phase === "FIGHTING"
+      )
+        return;
       // Ensure HP is fresh before broadcasting (catches food/regen changes
       // that don't fire damage events).
       this.orchestrator.updateContestantHp();
       this.broadcastState();
     }, STREAMING_TIMING.STATE_BROADCAST_INTERVAL);
+  }
+
+  /** Start fast 200ms broadcast during FIGHTING phase (#11) */
+  private startFightBroadcast(): void {
+    this.stopFightBroadcast();
+    this.fightBroadcastInterval = setInterval(() => {
+      this.orchestrator.updateContestantHp();
+      this.broadcastState();
+    }, STREAMING_TIMING.FIGHT_BROADCAST_INTERVAL);
+  }
+
+  /** Stop fast fight broadcast */
+  private stopFightBroadcast(): void {
+    if (this.fightBroadcastInterval) {
+      clearInterval(this.fightBroadcastInterval);
+      this.fightBroadcastInterval = null;
+    }
   }
 
   private broadcastState(): void {
