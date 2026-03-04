@@ -209,6 +209,8 @@ export type DissolveMaterialOptions = {
   enableOcclusionDissolve?: boolean;
   /** Enable per-instance rim highlight driven by an instanced attribute */
   enableRimHighlight?: boolean;
+  /** Use BatchedMesh highlight (vBatchColor varying) instead of InstancedMesh attribute */
+  batched?: boolean;
 };
 
 /**
@@ -982,7 +984,6 @@ export function createTreeDissolveMaterial(
   });
 
   const material = baseDm as unknown as THREE.MeshStandardNodeMaterial;
-  material.alphaTest = 0.95;
 
   // Prevent the standard pipeline from multiplying vertex colors into diffuse.
   // We read vertex color manually in the shader for AO only (G channel).
@@ -1033,12 +1034,16 @@ export function createTreeDissolveMaterial(
     );
 
     // ---- Instance rim highlight (hover) ----
-    // BatchedMesh encodes highlight in batch color: (1.15,1.15,1.15) = on, (1,1,1) = off
-    const batchColor = varyingProperty("vec3", "vBatchColor");
-    const hlIntensity = step(
-      float(1.01),
-      max(batchColor.x, max(batchColor.y, batchColor.z)),
-    );
+    let hlIntensity;
+    if (options.batched) {
+      const batchColor = varyingProperty("vec3", "vBatchColor");
+      hlIntensity = step(
+        float(1.01),
+        max(batchColor.x, max(batchColor.y, batchColor.z)),
+      );
+    } else {
+      hlIntensity = attribute("instanceHighlight", "float");
+    }
     const NV = normalize(normalView);
     const Vv = normalize(sub(vec3(0, 0, 0), positionView.xyz));
     const NdotV = clamp(dot(NV, Vv), float(0.0), float(1.0));

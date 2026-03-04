@@ -89,6 +89,10 @@ import {
   destroyGLBTreeInstancer,
 } from "../systems/shared/world/GLBTreeInstancer";
 import {
+  initGLBTreeBatchedInstancer,
+  destroyGLBTreeBatchedInstancer,
+} from "../systems/shared/world/GLBTreeBatchedInstancer";
+import {
   initPlaceholderInstancer,
   destroyPlaceholderInstancer,
 } from "../systems/shared/world/PlaceholderInstancer";
@@ -188,6 +192,7 @@ export function createClientWorld() {
 
   // Clean up any previous instancer state from prior world
   destroyGLBTreeInstancer();
+  destroyGLBTreeBatchedInstancer();
   destroyPlaceholderInstancer();
   destroyGLBResourceInstancer();
 
@@ -284,7 +289,7 @@ export function createClientWorld() {
   // ============================================================================
   // Procedural building mesh rendering for towns
   // Must be registered after towns system as it depends on town data
-  world.register("building-rendering", BuildingRenderingSystem);
+  // world.register("building-rendering", BuildingRenderingSystem);
 
   // ============================================================================
   // TOWN LANDMARKS SYSTEM
@@ -346,6 +351,10 @@ export function createClientWorld() {
     if (stageSystem && stageSystem.scene) {
       stageSystem.THREE = THREE as unknown as StageSystem["THREE"];
       initGLBTreeInstancer(stageSystem.scene as unknown as THREE.Scene, world);
+      initGLBTreeBatchedInstancer(
+        stageSystem.scene as unknown as THREE.Scene,
+        world,
+      );
       initPlaceholderInstancer(stageSystem.scene as unknown as THREE.Scene);
       initGLBResourceInstancer(
         stageSystem.scene as unknown as THREE.Scene,

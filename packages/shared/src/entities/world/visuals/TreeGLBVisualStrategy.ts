@@ -1,28 +1,50 @@
 /**
- * TreeGLBVisualStrategy — GLBTreeInstancer integration for woodcutting trees.
+ * TreeGLBVisualStrategy — Unified tree visual strategy.
  *
- * Thin wrapper: the instancer owns BatchedMeshes and LOD switching.
- * This strategy just calls addInstance / removeInstance / setDepleted.
+ * Delegates to one of two instancers based on the manifest config:
+ * - **BatchedMesh** (GLBTreeBatchedInstancer) for trees with `modelVariants`
+ *   — fewer draw calls when many variants share the same material.
+ * - **InstancedMesh** (GLBTreeInstancer) for trees with a single `model` path.
+ *
+ * All other lifecycle methods (depleted, highlight, respawn, destroy)
+ * dispatch to whichever instancer owns the entity.
  */
 
 import THREE from "../../../extras/three/three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
-  addInstance as addGLBTreeInstance,
-  removeInstance as removeGLBTreeInstance,
-  setDepleted as setGLBTreeDepleted,
-  hasDepleted as hasGLBTreeDepleted,
-  setHighlight as setGLBTreeHighlight,
-  getModelDimensions as getGLBModelDimensions,
+  addInstance as addInstancedTree,
+  removeInstance as removeInstancedTree,
+  setDepleted as setInstancedDepleted,
+  hasDepleted as hasInstancedDepleted,
+  setHighlight as setInstancedHighlight,
+  getModelDimensions as getInstancedDimensions,
+  hasInstance as isInInstancedPool,
   updateGLBTreeInstancer,
 } from "../../../systems/shared/world/GLBTreeInstancer";
+import {
+  addInstance as addBatchedTree,
+  removeInstance as removeBatchedTree,
+  setDepleted as setBatchedDepleted,
+  hasDepleted as hasBatchedDepleted,
+  setHighlight as setBatchedHighlight,
+  getModelDimensions as getBatchedDimensions,
+  hasInstance as isInBatchedPool,
+  updateGLBTreeBatchedInstancer,
+} from "../../../systems/shared/world/GLBTreeBatchedInstancer";
 import type {
   ResourceVisualContext,
   ResourceVisualStrategy,
 } from "./ResourceVisualStrategy";
 
-function createCollisionProxy(ctx: ResourceVisualContext, scale: number): void {
-  const dims = getGLBModelDimensions(ctx.id);
+function createCollisionProxy(
+  ctx: ResourceVisualContext,
+  scale: number,
+  batched: boolean,
+): void {
+  const dims = batched
+    ? getBatchedDimensions(ctx.id)
+    : getInstancedDimensions(ctx.id);
   const height = (dims?.height ?? 8) * scale;
   const radius = (dims?.radius ?? 1) * scale;
   const geometry = new THREE.CylinderGeometry(radius, radius, height, 6);
@@ -45,17 +67,13 @@ function createCollisionProxy(ctx: ResourceVisualContext, scale: number): void {
   ctx.setMesh(proxy);
 }
 
+function isBatched(entityId: string): boolean {
+  return isInBatchedPool(entityId);
+}
+
 export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
   async createVisual(ctx: ResourceVisualContext): Promise<void> {
     const { config, id, position } = ctx;
-
-    const treeType = config.resourceId.replace(/^tree_/, "");
-    const variants =
-      config.modelVariants ?? (config.model ? [config.model] : []);
-    if (variants.length === 0) return;
-
-    const hash = ctx.hashString(id) >>> 0;
-    const variantIndex = hash % variants.length;
 
     const baseScale = config.modelScale ?? 3.0;
     const worldPos = new THREE.Vector3();
@@ -66,39 +84,73 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     );
     const rotation = ((rotHash % 1000) / 1000) * Math.PI * 2;
 
-    const success = await addGLBTreeInstance(
-      treeType,
-      variants,
-      variantIndex,
-      id,
-      worldPos,
-      rotation,
-      baseScale,
-      config.depletedModelPath ?? null,
-      config.depletedModelScale ?? 0.3,
-    );
+    let success = false;
+
+    if (config.modelVariants?.length) {
+      const treeType = config.resourceId.replace(/^tree_/, "");
+      const hash = ctx.hashString(id) >>> 0;
+      const variantIndex = hash % config.modelVariants.length;
+
+      success = await addBatchedTree(
+        treeType,
+        config.modelVariants,
+        variantIndex,
+        id,
+        worldPos,
+        rotation,
+        baseScale,
+        config.depletedModelPath ?? null,
+        config.depletedModelScale ?? 0.3,
+      );
+    } else {
+      let modelPath = config.model;
+      if (!modelPath) return;
+
+      success = await addInstancedTree(
+        modelPath,
+        id,
+        worldPos,
+        rotation,
+        baseScale,
+        config.depletedModelPath ?? null,
+        config.depletedModelScale ?? 0.3,
+      );
+    }
 
     if (success) {
-      createCollisionProxy(ctx, baseScale);
+      createCollisionProxy(ctx, baseScale, !!config.modelVariants?.length);
     }
   }
 
   async onDepleted(ctx: ResourceVisualContext): Promise<boolean> {
-    setGLBTreeDepleted(ctx.id, true);
+    const b = isBatched(ctx.id);
+    if (b) {
+      setBatchedDepleted(ctx.id, true);
+    } else {
+      setInstancedDepleted(ctx.id, true);
+    }
     const proxy = ctx.getMesh();
     if (proxy) {
       proxy.userData.depleted = true;
       proxy.userData.interactable = false;
     }
-    return hasGLBTreeDepleted(ctx.id);
+    return b ? hasBatchedDepleted(ctx.id) : hasInstancedDepleted(ctx.id);
   }
 
   setShaderHighlight(ctx: ResourceVisualContext, on: boolean): void {
-    setGLBTreeHighlight(ctx.id, on);
+    if (isBatched(ctx.id)) {
+      setBatchedHighlight(ctx.id, on);
+    } else {
+      setInstancedHighlight(ctx.id, on);
+    }
   }
 
   async onRespawn(ctx: ResourceVisualContext): Promise<void> {
-    setGLBTreeDepleted(ctx.id, false);
+    if (isBatched(ctx.id)) {
+      setBatchedDepleted(ctx.id, false);
+    } else {
+      setInstancedDepleted(ctx.id, false);
+    }
     const proxy = ctx.getMesh();
     if (proxy) {
       proxy.userData.depleted = false;
@@ -108,9 +160,14 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
 
   update(): void {
     updateGLBTreeInstancer();
+    updateGLBTreeBatchedInstancer();
   }
 
   destroy(ctx: ResourceVisualContext): void {
-    removeGLBTreeInstance(ctx.id);
+    if (isBatched(ctx.id)) {
+      removeBatchedTree(ctx.id);
+    } else {
+      removeInstancedTree(ctx.id);
+    }
   }
 }
