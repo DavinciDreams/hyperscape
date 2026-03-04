@@ -985,8 +985,9 @@ export function createTreeDissolveMaterial(
 
   const material = baseDm as unknown as THREE.MeshStandardNodeMaterial;
 
-  // Prevent the standard pipeline from multiplying vertex colors into diffuse.
+  // Check if source has vertex colors before disabling them.
   // We read vertex color manually in the shader for AO only (G channel).
+  const hasVertexColors = !!(source as any).vertexColors;
   material.vertexColors = false;
 
   // Boost normal map effect when present for more realistic surface detail
@@ -1012,11 +1013,15 @@ export function createTreeDissolveMaterial(
   material.outputNode = Fn(() => {
     const litColor = output;
 
-    // ---- Vertex-color AO ----
-    const aoRaw = attribute("color", "vec3").y;
-    const aoFactor = pow(aoRaw, float(AO_POWER));
-    const aoMul = mix(float(AO_DARK), float(1.0), aoFactor);
-    const aoResult = mul(litColor.rgb, aoMul);
+    // ---- Vertex-color AO (skip if model has no vertex colors) ----
+    const aoResult = hasVertexColors
+      ? (() => {
+          const aoRaw = attribute("color", "vec3").y;
+          const aoFactor = pow(aoRaw, float(AO_POWER));
+          const aoMul = mix(float(AO_DARK), float(1.0), aoFactor);
+          return mul(litColor.rgb, aoMul);
+        })()
+      : litColor.rgb;
 
     // ---- Sun shade ----
     const shadeResult = applyTerrainSunShade(
