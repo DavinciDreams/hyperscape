@@ -17,8 +17,8 @@ import {
 } from "./TerrainQuadTree";
 import {
   assembleQuadChunkGeometry,
-  generateQuadChunkGeometrySync,
-  type ChunkTerrainProvider,
+  generateQuadChunkDataSync,
+  type FullTerrainProvider,
 } from "./TerrainQuadChunkGenerator";
 import {
   generateQuadChunkAsync,
@@ -28,25 +28,13 @@ import {
   type QuadChunkWorkerOutput,
 } from "../../../utils/workers/QuadChunkWorker";
 
+export type VisualManagerTerrainProvider = FullTerrainProvider;
+
 export interface TerrainVisualChunk {
   key: string;
   node: TerrainQuadNode;
   mesh: THREE.Mesh;
   heightData: Float32Array;
-}
-
-/** Extended provider that includes sync fallback methods + worker config builder */
-export interface VisualManagerTerrainProvider extends ChunkTerrainProvider {
-  computeBiomeWeightsAtPosition(
-    worldX: number,
-    worldZ: number,
-  ): { biomeWeightMap: Map<string, number>; totalWeight: number };
-  getBiomeId(biomeName: string): number;
-  getBiomeColor(biomeName: string): { r: number; g: number; b: number };
-  readonly WATER_LEVEL_NORMALIZED: number;
-  readonly SHORELINE_THRESHOLD: number;
-  readonly SHORELINE_STRENGTH: number;
-  readonly MAX_HEIGHT: number;
 }
 
 interface SettledWorkerResult {
@@ -84,9 +72,13 @@ export class TerrainVisualManager implements QuadTreeListener {
   private syncQueue: TerrainQuadNode[] = [];
   /** Destroyed node IDs that should be ignored when results come back */
   private cancelledNodeIds = new Set<number>();
+  /** Tracks generation failure count per node ID for bounded retry */
+  private failedAttempts = new Map<number, number>();
 
-  private maxSyncChunksPerFrame = 4;
-  private maxAssembliesPerFrame = 6;
+  private maxSyncChunksPerFrame: number;
+  private maxAssembliesPerFrame: number;
+
+  private static MAX_GENERATION_RETRIES = 3;
 
   constructor(
     config: Partial<QuadTreeConfig>,
@@ -100,6 +92,8 @@ export class TerrainVisualManager implements QuadTreeListener {
     debugWireframe = false,
     receiveShadow = false,
     castShadow = false,
+    maxSyncChunksPerFrame = 4,
+    maxAssembliesPerFrame = 6,
   ) {
     this.provider = provider;
     this.container = container;
@@ -107,6 +101,8 @@ export class TerrainVisualManager implements QuadTreeListener {
     this.debugWireframe = debugWireframe;
     this.receiveShadow = receiveShadow;
     this.castShadow = castShadow;
+    this.maxSyncChunksPerFrame = maxSyncChunksPerFrame;
+    this.maxAssembliesPerFrame = maxAssembliesPerFrame;
     this.workerConfig = workerConfig;
     this.workerSeed = workerSeed;
     this.workerBiomeCenters = workerBiomeCenters;
@@ -135,6 +131,11 @@ export class TerrainVisualManager implements QuadTreeListener {
     this.settledResults = [];
     this.syncQueue = [];
     this.cancelledNodeIds.clear();
+    this.failedAttempts.clear();
+
+    if (this.container.parent) {
+      this.container.parent.remove(this.container);
+    }
   }
 
   getQuadTree(): TerrainQuadTree {
@@ -201,6 +202,7 @@ export class TerrainVisualManager implements QuadTreeListener {
     }
     const sqIdx = this.syncQueue.indexOf(node);
     if (sqIdx !== -1) this.syncQueue.splice(sqIdx, 1);
+    this.failedAttempts.delete(node.id);
   }
 
   // =========================================================================
@@ -294,6 +296,7 @@ export class TerrainVisualManager implements QuadTreeListener {
       );
     } catch (err) {
       console.error(`[TerrainVisualManager] Assembly failed for ${key}:`, err);
+      this.handleGenerationFailure(node);
       return;
     }
 
@@ -303,25 +306,38 @@ export class TerrainVisualManager implements QuadTreeListener {
   private generateChunkSync(node: TerrainQuadNode): void {
     const key = this.makeChunkKey(node);
 
-    let result;
+    let workerData: QuadChunkWorkerOutput;
     try {
-      result = generateQuadChunkGeometrySync(
+      workerData = generateQuadChunkDataSync(
         node.centerX,
         node.centerZ,
         node.size,
         node.resolution,
         this.provider,
-        this.quadTree.config.skirtDrop,
       );
     } catch (err) {
       console.error(
-        `[TerrainVisualManager] Sync generation failed for ${key}:`,
+        `[TerrainVisualManager] Sync data generation failed for ${key}:`,
         err,
       );
+      this.handleGenerationFailure(node);
       return;
     }
 
-    this.addMeshToScene(node, key, result);
+    this.assembleAndAddChunk(node, workerData);
+  }
+
+  private handleGenerationFailure(node: TerrainQuadNode): void {
+    const attempts = (this.failedAttempts.get(node.id) ?? 0) + 1;
+    if (attempts < TerrainVisualManager.MAX_GENERATION_RETRIES) {
+      this.failedAttempts.set(node.id, attempts);
+      node.terrainNeedsUpdate = true;
+    } else {
+      console.error(
+        `[TerrainVisualManager] Giving up on node ${node.id} after ${attempts} attempts`,
+      );
+      this.failedAttempts.delete(node.id);
+    }
   }
 
   private makeChunkKey(node: TerrainQuadNode): string {
@@ -382,6 +398,7 @@ export class TerrainVisualManager implements QuadTreeListener {
 
     this.chunks.set(key, chunk);
     node.visualChunkKey = key;
+    this.failedAttempts.delete(node.id);
     node.testReady();
   }
 

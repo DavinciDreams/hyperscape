@@ -55,13 +55,7 @@ export interface QuadChunkWorkerInput {
     type: string;
     influence: number;
   }>;
-  biomes: Record<
-    string,
-    {
-      heightModifier: number;
-      color: { r: number; g: number; b: number };
-    }
-  >;
+  biomes: Record<string, { color: { r: number; g: number; b: number } }>;
 }
 
 export interface QuadChunkWorkerOutput {

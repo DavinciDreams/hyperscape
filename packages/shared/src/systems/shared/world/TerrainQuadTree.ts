@@ -19,6 +19,8 @@ export interface QuadTreeConfig {
   maxDepth: number;
   /** Split when distance < size * splitRatio */
   splitRatio: number;
+  /** Multiplier on splitRatio for unsplit threshold (prevents thrashing at boundary). Must be > 1. */
+  unsplitMultiplier: number;
   /** Uniform vertex resolution (segments per axis) for ALL depth levels */
   resolution: number;
   /** Skirt drop distance in meters to hide LOD seams */
@@ -29,6 +31,7 @@ export const DEFAULT_QUAD_TREE_CONFIG: QuadTreeConfig = {
   minSize: 100,
   maxDepth: 4,
   splitRatio: 1.5,
+  unsplitMultiplier: 1.2,
   resolution: 32,
   skirtDrop: 15,
 };
@@ -137,8 +140,10 @@ export class TerrainQuadNode {
       if (!this.isMaxDepth && !this.splitted) {
         this.split();
       }
-    } else {
-      if (this.splitted) {
+    } else if (this.splitted) {
+      if (
+        this.tree.isOverUnsplitDistance(this.size, this.centerX, this.centerZ)
+      ) {
         this.unsplit();
       }
     }
@@ -404,6 +409,15 @@ export class TerrainQuadTree {
     const dz = this.playerZ - chunkZ;
     const distance = Math.sqrt(dx * dx + dz * dz);
     return distance < size * this.config.splitRatio;
+  }
+
+  isOverUnsplitDistance(size: number, chunkX: number, chunkZ: number): boolean {
+    const dx = this.playerX - chunkX;
+    const dz = this.playerZ - chunkZ;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    return (
+      distance > size * this.config.splitRatio * this.config.unsplitMultiplier
+    );
   }
 
   /**

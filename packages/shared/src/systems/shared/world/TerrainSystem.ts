@@ -1447,7 +1447,10 @@ export class TerrainSystem extends System {
     QUADTREE_MAX_DEPTH: 4,
     QUADTREE_SPLIT_RATIO: 1.5,
     QUADTREE_SKIRT_DROP: 15,
+    QUADTREE_UNSPLIT_MULTIPLIER: 1.2,
     QUADTREE_RESOLUTION: 32,
+    QUADTREE_MAX_SYNC_PER_FRAME: 4,
+    QUADTREE_MAX_ASSEMBLIES_PER_FRAME: 6,
 
     // Shadow settings for terrain meshes (applies to both flat-grid and quad-tree)
     TERRAIN_RECEIVE_SHADOW: false,
@@ -1797,8 +1800,8 @@ export class TerrainSystem extends System {
         return cached;
       },
 
-      getFlatZoneAt: (worldX: number, worldZ: number) =>
-        this.getFlatZoneAt(worldX, worldZ),
+      getFlatZoneHeight: (worldX: number, worldZ: number) =>
+        this.getFlatZoneHeight(worldX, worldZ),
 
       WATER_LEVEL_NORMALIZED: this.CONFIG.WATER_LEVEL_NORMALIZED,
       SHORELINE_THRESHOLD: this.CONFIG.SHORELINE_THRESHOLD,
@@ -1822,7 +1825,14 @@ export class TerrainSystem extends System {
 
     const qtContainer = new THREE.Group();
     qtContainer.name = "QuadTreeTerrainContainer";
-    this.terrainContainer.parent!.add(qtContainer);
+    const containerParent = this.terrainContainer?.parent;
+    if (!containerParent) {
+      console.warn(
+        "[TerrainSystem] Cannot init quad-tree: terrainContainer has no parent",
+      );
+      return;
+    }
+    containerParent.add(qtContainer);
 
     const provider = this.buildChunkTerrainProvider();
 
@@ -1862,7 +1872,7 @@ export class TerrainSystem extends System {
     >();
     const workerBiomes: Record<
       string,
-      { heightModifier: number; color: { r: number; g: number; b: number } }
+      { color: { r: number; g: number; b: number } }
     > = {};
     for (const [name, biomeData] of Object.entries(BIOMES)) {
       let cached = biomeColorCache.get(name);
@@ -1871,10 +1881,7 @@ export class TerrainSystem extends System {
         cached = { r: c.r, g: c.g, b: c.b };
         biomeColorCache.set(name, cached);
       }
-      workerBiomes[name] = {
-        heightModifier: biomeData.terrainMultiplier || 1,
-        color: cached,
-      };
+      workerBiomes[name] = { color: cached };
     }
 
     this.quadTreeVisualManager = new TerrainVisualManager(
@@ -1882,6 +1889,7 @@ export class TerrainSystem extends System {
         minSize: this.CONFIG.QUADTREE_MIN_SIZE,
         maxDepth: this.CONFIG.QUADTREE_MAX_DEPTH,
         splitRatio: this.CONFIG.QUADTREE_SPLIT_RATIO,
+        unsplitMultiplier: this.CONFIG.QUADTREE_UNSPLIT_MULTIPLIER,
         resolution: this.CONFIG.QUADTREE_RESOLUTION,
         skirtDrop: this.CONFIG.QUADTREE_SKIRT_DROP,
       },
@@ -1895,6 +1903,8 @@ export class TerrainSystem extends System {
       this.CONFIG.QUADTREE_DEBUG_WIREFRAME,
       this.CONFIG.TERRAIN_RECEIVE_SHADOW,
       this.CONFIG.TERRAIN_CAST_SHADOW,
+      this.CONFIG.QUADTREE_MAX_SYNC_PER_FRAME,
+      this.CONFIG.QUADTREE_MAX_ASSEMBLIES_PER_FRAME,
     );
 
     console.log(
