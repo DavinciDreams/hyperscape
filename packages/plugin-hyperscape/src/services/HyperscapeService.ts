@@ -129,6 +129,7 @@ const FALLBACK_PACKET_IDS: Record<string, number> = {
   duelCompleted: 228,
   duelOpponentDisconnected: 229,
   duelOpponentReconnected: 230,
+  duelOnDeck: 231,
   authenticate: 255,
   authResult: 256,
   reconnected: 258,
@@ -3100,6 +3101,12 @@ Respond with ONLY the action name, nothing else.`;
         this.broadcastEvent("DUEL_COMPLETED", duelData);
         // Clear pending challenge state just in case
         this.clearPendingDuelChallenge();
+        break;
+      }
+
+      case "duelOnDeck": {
+        // Agent is on-deck for the next duel — should prepare
+        this.broadcastEvent("DUEL_ON_DECK", data as Record<string, unknown>);
         break;
       }
 

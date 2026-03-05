@@ -40,6 +40,32 @@ export interface DuelEventDeps {
 export function registerDuelEventListeners(deps: DuelEventDeps): void {
   const { world, getSocketByPlayerId, processedDuelSettlements } = deps;
 
+  // -- on-deck notification (next duel pair selected, agents should prepare) --
+  world.on("duel:on-deck", (event) => {
+    const { agent1Id, agent1Name, agent2Id, agent2Name } = event as {
+      agent1Id: string;
+      agent1Name: string;
+      agent2Id: string;
+      agent2Name: string;
+    };
+
+    const agent1Socket = getSocketByPlayerId(agent1Id);
+    if (agent1Socket) {
+      agent1Socket.send("duelOnDeck", {
+        opponentId: agent2Id,
+        opponentName: agent2Name,
+      });
+    }
+
+    const agent2Socket = getSocketByPlayerId(agent2Id);
+    if (agent2Socket) {
+      agent2Socket.send("duelOnDeck", {
+        opponentId: agent1Id,
+        opponentName: agent1Name,
+      });
+    }
+  });
+
   // -- session created (also used by StreamingDuelScheduler to notify agents) --
   world.on("duel:session:created", (event) => {
     const { duelId, challengerId, challengerName, targetId, targetName } =

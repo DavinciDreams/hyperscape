@@ -54,6 +54,8 @@ type MatchmakingCallbacks = {
   onAgentRegistered?: (agentId: string, now: number) => void;
   /** Called when an agent unregisters so the scheduler can handle forfeit logic */
   onAgentUnregistered?: (agentId: string) => void;
+  /** Called when the pre-selected next duel pair changes (new pair or cleared) */
+  onNextDuelPairChanged?: (pair: NextDuelPair | null) => void;
 };
 
 // ============================================================================
@@ -359,6 +361,7 @@ export class MatchmakingManager {
     }
 
     this.nextDuelPair = this.chooseRandomPairFromPool(pool, now);
+    this.callbacks?.onNextDuelPairChanged?.(this.nextDuelPair);
   }
 
   // ==========================================================================

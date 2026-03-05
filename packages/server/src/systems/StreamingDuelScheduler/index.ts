@@ -259,6 +259,9 @@ export class StreamingDuelScheduler {
           }
         }
       },
+      onNextDuelPairChanged: (pair) => {
+        if (pair) this.notifyOnDeckAgents();
+      },
     });
   }
 
@@ -720,6 +723,7 @@ export class StreamingDuelScheduler {
       winReason: null,
     };
     this.matchmaking.refreshNextDuelPair(now);
+    this.notifyOnDeckAgents();
 
     // Mark agents as in a streaming duel immediately so their autonomous AI
     // won't make them attack each other or wander into combat during announcement.
@@ -754,6 +758,34 @@ export class StreamingDuelScheduler {
       agent2,
       duration: STREAMING_TIMING.ANNOUNCEMENT_DURATION,
     });
+  }
+
+  /**
+   * Notify on-deck agents that they are next up for a duel so they can prepare
+   * (bank items, withdraw food, move to arena lobby).
+   */
+  private notifyOnDeckAgents(): void {
+    const pair = this.matchmaking.nextDuelPair;
+    if (!pair) return;
+
+    const agent1Entity = this.world.entities.get(pair.agent1Id);
+    const agent2Entity = this.world.entities.get(pair.agent2Id);
+    const agent1Name =
+      (agent1Entity?.data as { name?: string })?.name ?? "Unknown";
+    const agent2Name =
+      (agent2Entity?.data as { name?: string })?.name ?? "Unknown";
+
+    this.world.emit("duel:on-deck", {
+      agent1Id: pair.agent1Id,
+      agent1Name,
+      agent2Id: pair.agent2Id,
+      agent2Name,
+    });
+
+    Logger.info(
+      "StreamingDuelScheduler",
+      `On-deck notification sent: ${agent1Name} vs ${agent2Name}`,
+    );
   }
 
   // ============================================================================

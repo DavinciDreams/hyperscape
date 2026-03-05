@@ -343,6 +343,18 @@ export class AutonomousBehaviorManager {
   /** Timestamp when agent entered duel mode — for timeout safety */
   private duelModeEnteredAt: number = 0;
 
+  /** On-deck duel preparation state */
+  private duelPrepPhase = false;
+  private duelPrepStartedAt = 0;
+  private duelPrepOpponentName: string | null = null;
+  private duelPrepStep:
+    | "idle"
+    | "moving_to_bank"
+    | "banking"
+    | "withdrawing_food"
+    | "moving_to_lobby"
+    | "ready" = "idle";
+
   /** Whether agent is in ANY phase of a duel (session, fighting, etc.) */
   private get inActiveDuel(): boolean {
     return this.duelPhase !== null;
@@ -607,6 +619,11 @@ export class AutonomousBehaviorManager {
 
     // Subscribe to duel events for goal save/restore and duel awareness
     if (!this.duelEventHandlerRegistered) {
+      this.service.onGameEvent("DUEL_ON_DECK", (data: unknown) => {
+        this.onDuelOnDeck(
+          data as { opponentId?: string; opponentName?: string },
+        );
+      });
       this.service.onGameEvent("DUEL_SESSION_STARTED", (data: unknown) => {
         this.onDuelSessionStarted(data);
       });
@@ -987,6 +1004,12 @@ export class AutonomousBehaviorManager {
       this.lastStateRefreshTime = Date.now();
       this.service?.requestQuestList?.();
       this.service?.requestBankState?.();
+    }
+
+    // Duel prep loop — agent is on-deck and preparing (bank, food, move to lobby)
+    if (this.duelPrepPhase) {
+      await this.duelPrepTick();
+      return;
     }
 
     // Duel combat loop — runs independently of canAct() guard
@@ -6617,6 +6640,274 @@ export class AutonomousBehaviorManager {
       });
   }
 
+  // ============================================================================
+  // Duel On-Deck Preparation
+  // ============================================================================
+
+  /**
+   * Called when this agent is selected as on-deck for the next duel.
+   * Begins the preparation state machine: bank → withdraw food → move to lobby.
+   */
+  private onDuelOnDeck(data: {
+    opponentId?: string;
+    opponentName?: string;
+  }): void {
+    // Skip if already in a duel or already prepping
+    if (this.duelPhase !== null) {
+      logger.info(
+        "[AutonomousBehavior] ON-DECK received but already in duel — ignoring",
+      );
+      return;
+    }
+    if (this.duelPrepPhase) {
+      logger.info(
+        "[AutonomousBehavior] ON-DECK received but already prepping — ignoring",
+      );
+      return;
+    }
+
+    const opponentName = data.opponentName ?? "Unknown";
+    logger.info(
+      `[AutonomousBehavior] ⚔️ ON-DECK: Fighting ${opponentName} next — starting prep`,
+    );
+
+    this.duelPrepPhase = true;
+    this.duelPrepStep = "idle";
+    this.duelPrepStartedAt = Date.now();
+    this.duelPrepOpponentName = opponentName;
+
+    // Save current goal for restoration after prep
+    if (this.currentGoal) {
+      this.pushGoal(this.currentGoal);
+    }
+
+    // Set a prep goal
+    this.currentGoal = {
+      type: "banking",
+      description: `Duel prep: banking and withdrawing food before fighting ${opponentName}`,
+      target: 1,
+      progress: 0,
+      startedAt: Date.now(),
+    };
+
+    // Clear any active movement/action lock so prep starts immediately
+    this.actionLock = null;
+    this.nextTickFast = true;
+  }
+
+  /**
+   * Duel prep state machine tick — runs each tick while duelPrepPhase is true.
+   * Steps: idle → moving_to_bank → banking → withdrawing_food → moving_to_lobby → ready
+   */
+  private async duelPrepTick(): Promise<void> {
+    // Safety: if player is dead, cancel prep
+    const player = this.service?.getPlayerEntity();
+    if (player?.health && player.health.current <= 0) {
+      this.cancelDuelPrep("player died during prep");
+      return;
+    }
+
+    // Safety timeout: 4 minutes max for prep
+    if (Date.now() - this.duelPrepStartedAt > 240_000) {
+      logger.warn(
+        "[AutonomousBehavior] Duel prep timeout (4 min) — skipping to lobby",
+      );
+      this.duelPrepStep = "moving_to_lobby";
+    }
+
+    switch (this.duelPrepStep) {
+      case "idle": {
+        // Start moving to duel arena bank
+        logger.info("[AutonomousBehavior] Prep: Moving to duel arena bank");
+        this.service
+          ?.executeMove({ target: [135, 0, 65], runMode: true })
+          .catch(() => {});
+        this.actionLock = {
+          actionName: "duel_prep_move_to_bank",
+          startedAt: Date.now(),
+          timeoutMs: 30_000,
+          minDurationMs: 2000,
+        };
+        this.duelPrepStep = "moving_to_bank";
+        break;
+      }
+
+      case "moving_to_bank": {
+        const isMoving = this.service?.isMoving ?? false;
+
+        // Still moving — respect action lock
+        if (isMoving && this.actionLock) {
+          const elapsed = Date.now() - this.actionLock.startedAt;
+          if (elapsed < this.actionLock.timeoutMs) return;
+        }
+
+        // Arrived or timed out — check if bank is nearby
+        this.actionLock = null;
+        const bank = this.findNearestBankEntity();
+        if (bank) {
+          logger.info(
+            "[AutonomousBehavior] Prep: At bank — depositing all items",
+          );
+          this.duelPrepStep = "banking";
+          this.nextTickFast = true;
+        } else {
+          // Not near bank yet — retry move
+          logger.info(
+            "[AutonomousBehavior] Prep: Not at bank yet — retrying move",
+          );
+          this.service
+            ?.executeMove({ target: [135, 0, 65], runMode: true })
+            .catch(() => {});
+          this.actionLock = {
+            actionName: "duel_prep_move_to_bank_retry",
+            startedAt: Date.now(),
+            timeoutMs: 15_000,
+            minDurationMs: 2000,
+          };
+        }
+        break;
+      }
+
+      case "banking": {
+        // Deposit all inventory items
+        const bank = this.findNearestBankEntity();
+        if (!bank || !this.service) {
+          // No bank found — skip to withdrawal attempt
+          this.duelPrepStep = "withdrawing_food";
+          this.nextTickFast = true;
+          break;
+        }
+
+        if (!this.bankWithdrawalInProgress) {
+          this.bankWithdrawalInProgress = true;
+          const service = this.service;
+          (async () => {
+            try {
+              await service.openBank(bank.id);
+              await new Promise((resolve) => setTimeout(resolve, 500));
+              await service.bankDepositAll();
+              await new Promise((resolve) => setTimeout(resolve, 500));
+              logger.info(
+                "[AutonomousBehavior] Prep: Deposit complete — withdrawing food",
+              );
+            } catch (err) {
+              logger.warn(
+                `[AutonomousBehavior] Prep: Deposit failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            } finally {
+              this.bankWithdrawalInProgress = false;
+              this.duelPrepStep = "withdrawing_food";
+              this.nextTickFast = true;
+            }
+          })();
+        }
+        break;
+      }
+
+      case "withdrawing_food": {
+        // Withdraw best food available
+        if (!this.bankWithdrawalInProgress && this.service) {
+          const service = this.service;
+          const bank = this.findNearestBankEntity();
+
+          this.bankWithdrawalInProgress = true;
+          (async () => {
+            try {
+              // Open bank if not already open (may have been closed)
+              if (bank) {
+                await service.openBank(bank.id);
+                await new Promise((resolve) => setTimeout(resolve, 500));
+              }
+
+              // Withdraw best food types (best-to-worst)
+              for (const [foodKey] of DUEL_FOOD_HEAL) {
+                await service.bankWithdraw(foodKey, 28);
+                await new Promise((resolve) => setTimeout(resolve, 300));
+              }
+
+              await new Promise((resolve) => setTimeout(resolve, 300));
+              await service.closeBank();
+
+              const foodCount = this.countPlayerFood(service.getPlayerEntity());
+              logger.info(
+                `[AutonomousBehavior] Prep: Food withdrawal complete — ${foodCount} food items`,
+              );
+            } catch (err) {
+              logger.warn(
+                `[AutonomousBehavior] Prep: Food withdrawal failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            } finally {
+              this.bankWithdrawalInProgress = false;
+              this.duelPrepStep = "moving_to_lobby";
+              this.nextTickFast = true;
+            }
+          })();
+        }
+        break;
+      }
+
+      case "moving_to_lobby": {
+        const isMoving = this.service?.isMoving ?? false;
+
+        // If we already have an active move action lock, wait for it
+        if (isMoving && this.actionLock) {
+          const elapsed = Date.now() - this.actionLock.startedAt;
+          if (elapsed < this.actionLock.timeoutMs) return;
+        }
+
+        if (!this.actionLock) {
+          // Start moving to arena lobby
+          logger.info("[AutonomousBehavior] Prep: Moving to duel arena lobby");
+          this.service
+            ?.executeMove({ target: [105, 0, 60], runMode: true })
+            .catch(() => {});
+          this.actionLock = {
+            actionName: "duel_prep_move_to_lobby",
+            startedAt: Date.now(),
+            timeoutMs: 30_000,
+            minDurationMs: 2000,
+          };
+        } else {
+          // Movement finished or timed out
+          this.actionLock = null;
+          const foodCount = this.countPlayerFood(
+            this.service?.getPlayerEntity(),
+          );
+          logger.info(
+            `[AutonomousBehavior] Prep complete: ${foodCount} food items — waiting for duel`,
+          );
+          this.duelPrepStep = "ready";
+        }
+        break;
+      }
+
+      case "ready": {
+        // Do nothing — wait for DUEL_SESSION_STARTED to fire
+        break;
+      }
+    }
+  }
+
+  /**
+   * Cancel duel preparation (agent died, duel cancelled externally, etc.)
+   */
+  private cancelDuelPrep(reason: string): void {
+    if (!this.duelPrepPhase) return;
+
+    logger.info(`[AutonomousBehavior] Duel prep cancelled: ${reason}`);
+    this.duelPrepPhase = false;
+    this.duelPrepStep = "idle";
+    this.duelPrepStartedAt = 0;
+    this.duelPrepOpponentName = null;
+    this.actionLock = null;
+
+    const restored = this.popGoal();
+    if (restored) {
+      this.currentGoal = restored;
+    }
+    this.nextTickFast = true;
+  }
+
   /**
    * Called when a duel session starts (challenge accepted, entering rules/stakes screen)
    * This is BEFORE the fight — agent should pause all open-world behavior immediately
@@ -6627,6 +6918,19 @@ export class AutonomousBehaviorManager {
         "[AutonomousBehavior] Already in duel phase, ignoring duplicate session start",
       );
       return;
+    }
+
+    // If we were in duel prep, transition cleanly — the prep goal on the stack
+    // is the original pre-prep goal, which is correct for the duel to save/restore.
+    if (this.duelPrepPhase) {
+      this.duelPrepPhase = false;
+      this.duelPrepStep = "idle";
+      this.duelPrepStartedAt = 0;
+      this.duelPrepOpponentName = null;
+      this.actionLock = null;
+      logger.info(
+        "[AutonomousBehavior] Transitioning from duel prep → duel session",
+      );
     }
 
     // Capture duel and opponent info from event data
@@ -6646,7 +6950,8 @@ export class AutonomousBehaviorManager {
     this.duelModeEnteredAt = Date.now();
 
     // Save current goal for restoration after duel
-    if (this.currentGoal) {
+    // (if coming from prep, the pre-prep goal is already on the stack)
+    if (this.currentGoal && this.goalStack.length === 0) {
       this.pushGoal(this.currentGoal);
       logger.info(
         `[AutonomousBehavior] Saved goal: ${this.currentGoal.type} - ${this.currentGoal.description}`,
@@ -6711,6 +7016,10 @@ export class AutonomousBehaviorManager {
    * Called when a duel completes — assess outcome, restore/override goal
    */
   private onDuelCompleted(data: unknown): void {
+    // Clear any lingering prep state
+    this.duelPrepPhase = false;
+    this.duelPrepStep = "idle";
+
     const duelData = data as {
       winnerId?: string;
       loserId?: string;
@@ -6783,6 +7092,10 @@ export class AutonomousBehaviorManager {
    * Called when a duel is cancelled (opponent disconnect, manual cancel, etc.)
    */
   private onDuelCancelled(): void {
+    // Clear any lingering prep state
+    this.duelPrepPhase = false;
+    this.duelPrepStep = "idle";
+
     logger.info(
       "[AutonomousBehavior] ⚔️ Duel cancelled — resuming normal behavior",
     );
