@@ -75,34 +75,37 @@ export interface BiomeNoiseProfile {
   detailWeight: number;
   powerCurve: number;
   terraceStrength: number;
+  terraceSteps: number;
   terraceCeiling: number;
   terraceFloor: number;
 }
 
-// Tundra: gentle rolling plains, smooth and open with minimal detail
+// Tundra: rugged snowy peaks with ridges and erosion
 export const TUNDRA_PROFILE: BiomeNoiseProfile = {
-  continentWeight: 0.4,
-  ridgeWeight: 0.05,
-  hillWeight: 0.12,
-  erosionWeight: 0.03,
-  detailWeight: 0.02,
-  powerCurve: 0.85,
-  terraceStrength: 0.0,
-  terraceCeiling: 0.8,
-  terraceFloor: -0.1,
-};
-
-// Forest: hilly terrain with moderate ridges and visible terracing
-export const FOREST_PROFILE: BiomeNoiseProfile = {
   continentWeight: 0.28,
   ridgeWeight: 0.2,
   hillWeight: 0.35,
   erosionWeight: 0.12,
   detailWeight: 0.15,
   powerCurve: 1.15,
-  terraceStrength: 0.3,
+  terraceStrength: 0.1,
+  terraceSteps: 6,
   terraceCeiling: 0.75,
-  terraceFloor: 0.05,
+  terraceFloor: 0,
+};
+
+// Forest: gentle rolling hills, smooth and lush
+export const FOREST_PROFILE: BiomeNoiseProfile = {
+  continentWeight: 0.4,
+  ridgeWeight: 0.05,
+  hillWeight: 0.12,
+  erosionWeight: 0.03,
+  detailWeight: 0.02,
+  powerCurve: 0.85,
+  terraceStrength: 0.1,
+  terraceSteps: 6,
+  terraceCeiling: 0.75,
+  terraceFloor: 0,
 };
 
 // Desert: dramatic mesas and canyons with strong terracing and erosion
@@ -114,7 +117,8 @@ export const DESERT_PROFILE: BiomeNoiseProfile = {
   detailWeight: 0.05,
   powerCurve: 1.5,
   terraceStrength: 0.55,
-  terraceCeiling: 0.85,
+  terraceSteps: 6,
+  terraceCeiling: 0.75,
   terraceFloor: 0.0,
 };
 
@@ -130,9 +134,9 @@ export const TERRACE_NOISE_SCALE = 0.005;
 // Island configuration
 // ---------------------------------------------------------------------------
 
-export const ISLAND_RADIUS = 350;
-export const ISLAND_FALLOFF = 200;
-export const ISLAND_DEEP_OCEAN_BUFFER = 50;
+export const ISLAND_RADIUS = 525;
+export const ISLAND_FALLOFF = 300;
+export const ISLAND_DEEP_OCEAN_BUFFER = 75;
 export const BASE_ELEVATION = 0.42;
 export const OCEAN_FLOOR_HEIGHT = 0.05;
 /** height = terrain * HEIGHT_TERRAIN_MIX + BASE_ELEVATION * islandMask */
@@ -143,8 +147,13 @@ export const BEACH_PROFILE_POWER = 3.0;
 // Landscape features — mountains & ponds, independent of biomes
 // ---------------------------------------------------------------------------
 
+export enum LandscapeType {
+  Mountain = "mountain",
+  Pond = "pond",
+}
+
 export interface LandscapeFeatureDef {
-  type: "mountain" | "pond";
+  type: LandscapeType;
   x: number;
   z: number;
   radius: number;
@@ -167,6 +176,37 @@ export const POND_FEATURE_DEFAULTS = {
   maxStrength: 0.6,
   gaussianCoeff: 0.5,
 };
+
+/**
+ * Predefined landscape features — add/remove entries here to control
+ * exactly where mountains and ponds appear on the island.
+ */
+export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
+  {
+    type: LandscapeType.Mountain,
+    x: 28.5,
+    z: -237.5,
+    radius: 260,
+    strength: 2.5,
+    gaussianCoeff: 12.5,
+  },
+  {
+    type: LandscapeType.Mountain,
+    x: 265.5,
+    z: 128.5,
+    radius: 180,
+    strength: 1.2,
+    gaussianCoeff: 5.5,
+  },
+  {
+    type: LandscapeType.Pond,
+    x: -183.5,
+    z: 175.5,
+    radius: 90,
+    strength: 1.8,
+    gaussianCoeff: 3.0,
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Coastline noise — varies the island radius for irregular shoreline
@@ -244,16 +284,14 @@ export function applyLandscapeFeaturesPure(
     if (dist > feat.radius * 3) continue;
     const nd = dist / feat.radius;
     const influence = Math.exp(-nd * nd * feat.gaussianCoeff);
-    if (feat.type === "mountain") {
+    if (feat.type === LandscapeType.Mountain) {
       height += influence * feat.strength;
-    } else if (feat.type === "pond") {
+    } else if (feat.type === LandscapeType.Pond) {
       height -= influence * feat.strength;
     }
   }
   return height;
 }
-
-const TERRACE_STEPS = 6;
 
 /**
  * THE height generation algorithm. Main thread calls this directly.
@@ -308,6 +346,7 @@ export function computeBaseHeight(
     dW = 0,
     pC = 0,
     tS = 0,
+    tSt = 0,
     tC = 0,
     tF = 0;
   for (const key of Object.keys(biomeWeights)) {
@@ -320,6 +359,7 @@ export function computeBaseHeight(
     dW += p.detailWeight * w;
     pC += p.powerCurve * w;
     tS += p.terraceStrength * w;
+    tSt += p.terraceSteps * w;
     tC += p.terraceCeiling * w;
     tF += p.terraceFloor * w;
   }
@@ -330,8 +370,9 @@ export function computeBaseHeight(
   height = Math.max(0, Math.min(1, height));
   height = Math.pow(height, pC);
 
-  // ── 4. Terracing (6-step quantization with noise-varied blend) ──────
-  if (tS > 0.001) {
+  // ── 4. Terracing (per-biome step count, noise-varied blend) ─────────
+  const roundedSteps = Math.round(tSt);
+  if (tS > 0.001 && roundedSteps >= 1) {
     const terraceNoise = noise.simplex2D(
       worldX * TERRACE_NOISE_SCALE,
       worldZ * TERRACE_NOISE_SCALE,
@@ -339,7 +380,7 @@ export function computeBaseHeight(
     const range = Math.max(0.01, tC - tF);
     const normalized = Math.max(0, Math.min(1, (height - tF) / range));
     const quantized =
-      (Math.round(normalized * TERRACE_STEPS) / TERRACE_STEPS) * range + tF;
+      (Math.round(normalized * roundedSteps) / roundedSteps) * range + tF;
     const terraceBlend = tS * (0.7 + 0.3 * (terraceNoise * 0.5 + 0.5));
     height = height + (quantized - height) * terraceBlend;
   }
@@ -501,9 +542,9 @@ export function buildApplyLandscapeFeaturesJS(): string {
       if (dist > feat.radius * 3) continue;
       var normDist = dist / feat.radius;
       var influence = Math.exp(-normDist * normDist * feat.gaussianCoeff);
-      if (feat.type === 'mountain') {
+      if (feat.type === '${LandscapeType.Mountain}') {
         height += influence * feat.strength;
-      } else if (feat.type === 'pond') {
+      } else if (feat.type === '${LandscapeType.Pond}') {
         height -= influence * feat.strength;
       }
     }
@@ -514,11 +555,10 @@ export function buildApplyLandscapeFeaturesJS(): string {
 // Biome profile constants baked into JS for workers
 const PROFILES_JS = `
   var BIOME_PROFILES = {};
-  BIOME_PROFILES[BT_TUNDRA]  = { cW: ${TUNDRA_PROFILE.continentWeight}, rW: ${TUNDRA_PROFILE.ridgeWeight}, hW: ${TUNDRA_PROFILE.hillWeight}, eW: ${TUNDRA_PROFILE.erosionWeight}, dW: ${TUNDRA_PROFILE.detailWeight}, pC: ${TUNDRA_PROFILE.powerCurve}, tS: ${TUNDRA_PROFILE.terraceStrength}, tC: ${TUNDRA_PROFILE.terraceCeiling}, tF: ${TUNDRA_PROFILE.terraceFloor} };
-  BIOME_PROFILES[BT_FOREST]  = { cW: ${FOREST_PROFILE.continentWeight}, rW: ${FOREST_PROFILE.ridgeWeight}, hW: ${FOREST_PROFILE.hillWeight}, eW: ${FOREST_PROFILE.erosionWeight}, dW: ${FOREST_PROFILE.detailWeight}, pC: ${FOREST_PROFILE.powerCurve}, tS: ${FOREST_PROFILE.terraceStrength}, tC: ${FOREST_PROFILE.terraceCeiling}, tF: ${FOREST_PROFILE.terraceFloor} };
-  BIOME_PROFILES[BT_DESERT]  = { cW: ${DESERT_PROFILE.continentWeight}, rW: ${DESERT_PROFILE.ridgeWeight}, hW: ${DESERT_PROFILE.hillWeight}, eW: ${DESERT_PROFILE.erosionWeight}, dW: ${DESERT_PROFILE.detailWeight}, pC: ${DESERT_PROFILE.powerCurve}, tS: ${DESERT_PROFILE.terraceStrength}, tC: ${DESERT_PROFILE.terraceCeiling}, tF: ${DESERT_PROFILE.terraceFloor} };
+  BIOME_PROFILES[BT_TUNDRA]  = { cW: ${TUNDRA_PROFILE.continentWeight}, rW: ${TUNDRA_PROFILE.ridgeWeight}, hW: ${TUNDRA_PROFILE.hillWeight}, eW: ${TUNDRA_PROFILE.erosionWeight}, dW: ${TUNDRA_PROFILE.detailWeight}, pC: ${TUNDRA_PROFILE.powerCurve}, tS: ${TUNDRA_PROFILE.terraceStrength}, tSt: ${TUNDRA_PROFILE.terraceSteps}, tC: ${TUNDRA_PROFILE.terraceCeiling}, tF: ${TUNDRA_PROFILE.terraceFloor} };
+  BIOME_PROFILES[BT_FOREST]  = { cW: ${FOREST_PROFILE.continentWeight}, rW: ${FOREST_PROFILE.ridgeWeight}, hW: ${FOREST_PROFILE.hillWeight}, eW: ${FOREST_PROFILE.erosionWeight}, dW: ${FOREST_PROFILE.detailWeight}, pC: ${FOREST_PROFILE.powerCurve}, tS: ${FOREST_PROFILE.terraceStrength}, tSt: ${FOREST_PROFILE.terraceSteps}, tC: ${FOREST_PROFILE.terraceCeiling}, tF: ${FOREST_PROFILE.terraceFloor} };
+  BIOME_PROFILES[BT_DESERT]  = { cW: ${DESERT_PROFILE.continentWeight}, rW: ${DESERT_PROFILE.ridgeWeight}, hW: ${DESERT_PROFILE.hillWeight}, eW: ${DESERT_PROFILE.erosionWeight}, dW: ${DESERT_PROFILE.detailWeight}, pC: ${DESERT_PROFILE.powerCurve}, tS: ${DESERT_PROFILE.terraceStrength}, tSt: ${DESERT_PROFILE.terraceSteps}, tC: ${DESERT_PROFILE.terraceCeiling}, tF: ${DESERT_PROFILE.terraceFloor} };
   var TERRACE_NOISE_SCALE = ${TERRACE_NOISE_SCALE};
-  var TERRACE_STEPS = ${TERRACE_STEPS};
 `;
 
 /**
@@ -539,12 +579,12 @@ export function buildGetBaseHeightAtJS(): string {
     var eN = noise.erosionNoise2D(worldX * ${EROSION_LAYER.scale}, worldZ * ${EROSION_LAYER.scale}, ${EROSION_LAYER.iterations});
     var dN = noise.fractal2D(worldX * ${DETAIL_LAYER.scale}, worldZ * ${DETAIL_LAYER.scale}, ${DETAIL_LAYER.octaves}, ${DETAIL_LAYER.persistence}, ${DETAIL_LAYER.lacunarity});
 
-    var cW = 0, rW = 0, hW = 0, eW = 0, dW = 0, pC = 0, tS = 0, tC = 0, tF = 0;
+    var cW = 0, rW = 0, hW = 0, eW = 0, dW = 0, pC = 0, tS = 0, tSt = 0, tC = 0, tF = 0;
     for (var key in bw) {
       var w = bw[key];
       var p = BIOME_PROFILES[key] || BIOME_PROFILES[BT_DEFAULT];
       cW += p.cW * w; rW += p.rW * w; hW += p.hW * w; eW += p.eW * w; dW += p.dW * w;
-      pC += p.pC * w; tS += p.tS * w; tC += p.tC * w; tF += p.tF * w;
+      pC += p.pC * w; tS += p.tS * w; tSt += p.tSt * w; tC += p.tC * w; tF += p.tF * w;
     }
 
     var height = cN * cW + rN * rW + hN * hW + eN * eW + dN * dW;
@@ -552,11 +592,12 @@ export function buildGetBaseHeightAtJS(): string {
     height = Math.max(0, Math.min(1, height));
     height = Math.pow(height, pC);
 
-    if (tS > 0.001) {
+    var roundedSteps = Math.round(tSt);
+    if (tS > 0.001 && roundedSteps >= 1) {
       var terraceNoise = noise.simplex2D(worldX * TERRACE_NOISE_SCALE, worldZ * TERRACE_NOISE_SCALE);
       var range = Math.max(0.01, tC - tF);
       var normalized = Math.max(0, Math.min(1, (height - tF) / range));
-      var quantized = Math.round(normalized * TERRACE_STEPS) / TERRACE_STEPS * range + tF;
+      var quantized = Math.round(normalized * roundedSteps) / roundedSteps * range + tF;
       var terraceBlend = tS * (0.7 + 0.3 * (terraceNoise * 0.5 + 0.5));
       height = height + (quantized - height) * terraceBlend;
     }

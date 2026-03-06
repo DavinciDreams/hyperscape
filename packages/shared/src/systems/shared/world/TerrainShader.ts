@@ -152,8 +152,7 @@ export function computeTerrainBaseColor(
   const rockColor = mix(ROCK_GRAY, ROCK_DARK, rockVariation);
   c = mix(c, rockColor, smoothstep(float(0.45), float(0.75), slope));
 
-  // Snow at high elevation (suppressed in desert)
-  const snowMask = sub(float(1.0), dW);
+  // Snow at high elevation — only in tundra biome (tW = tundra weight)
   c = mix(
     c,
     SNOW_WHITE,
@@ -163,7 +162,7 @@ export function computeTerrainBaseColor(
         float(60.0),
         height,
       ),
-      snowMask,
+      tW,
     ),
   );
 

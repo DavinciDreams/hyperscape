@@ -22,8 +22,7 @@ import {
   POND_DEPTH,
   POND_CENTER_X,
   POND_CENTER_Z,
-  MOUNTAIN_FEATURE_DEFAULTS,
-  POND_FEATURE_DEFAULTS,
+  LANDSCAPE_FEATURES,
   ISLAND_RADIUS,
   computeBaseHeight,
   adjustShorelineHeight,
@@ -1248,64 +1247,22 @@ export class TerrainSystem extends System {
   }
 
   private initializeLandscapeFeatures(): void {
-    this.landscapeFeatures = [];
-
-    const baseSeed = this.computeSeedFromWorldId() + 77777;
-    let state = baseSeed;
-    const rand = () => {
-      state = (state * 1664525 + 1013904223) >>> 0;
-      return state / 0xffffffff;
-    };
-
-    const worldSize = this.getActiveWorldSizeMeters();
-    const halfWorld = worldSize / 2;
-
-    const mountainCount = 4;
-    for (let i = 0; i < mountainCount; i++) {
-      const x = (rand() - 0.5) * worldSize * 0.7;
-      const z = (rand() - 0.5) * worldSize * 0.7;
-      const dist = Math.sqrt(x * x + z * z);
-      if (dist > halfWorld * 0.85) continue;
-      this.landscapeFeatures.push({
-        type: "mountain",
-        x,
-        z,
-        radius:
-          MOUNTAIN_FEATURE_DEFAULTS.minRadius +
-          rand() *
-            (MOUNTAIN_FEATURE_DEFAULTS.maxRadius -
-              MOUNTAIN_FEATURE_DEFAULTS.minRadius),
-        strength:
-          MOUNTAIN_FEATURE_DEFAULTS.minStrength +
-          rand() *
-            (MOUNTAIN_FEATURE_DEFAULTS.maxStrength -
-              MOUNTAIN_FEATURE_DEFAULTS.minStrength),
-        gaussianCoeff: MOUNTAIN_FEATURE_DEFAULTS.gaussianCoeff,
-      });
-    }
-
-    const pondCount = 3;
-    for (let i = 0; i < pondCount; i++) {
-      const x = (rand() - 0.5) * worldSize * 0.6;
-      const z = (rand() - 0.5) * worldSize * 0.6;
-      const dist = Math.sqrt(x * x + z * z);
-      if (dist > halfWorld * 0.75) continue;
-      this.landscapeFeatures.push({
-        type: "pond",
-        x,
-        z,
-        radius:
-          POND_FEATURE_DEFAULTS.minRadius +
-          rand() *
-            (POND_FEATURE_DEFAULTS.maxRadius - POND_FEATURE_DEFAULTS.minRadius),
-        strength:
-          POND_FEATURE_DEFAULTS.minStrength +
-          rand() *
-            (POND_FEATURE_DEFAULTS.maxStrength -
-              POND_FEATURE_DEFAULTS.minStrength),
-        gaussianCoeff: POND_FEATURE_DEFAULTS.gaussianCoeff,
-      });
-    }
+    this.landscapeFeatures = [...LANDSCAPE_FEATURES];
+    console.log(
+      "[TerrainSystem] Landscape features:",
+      this.landscapeFeatures.length,
+      JSON.stringify(this.landscapeFeatures),
+    );
+    // Spot-check: test height at feature locations after terrain is ready
+    setTimeout(() => {
+      for (const f of this.landscapeFeatures) {
+        const h = this.getHeightAt(f.x, f.z);
+        const hNearby = this.getHeightAt(f.x + 200, f.z + 200);
+        console.log(
+          `[LandscapeDebug] ${f.type} at (${f.x}, ${f.z}): height=${h.toFixed(2)}, nearby height=${hNearby.toFixed(2)}, diff=${(h - hNearby).toFixed(2)}`,
+        );
+      }
+    }, 5000);
   }
 
   /**
