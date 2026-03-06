@@ -1031,7 +1031,7 @@ async function main() {
     AUTO_START_AGENTS_MAX: process.env.AUTO_START_AGENTS_MAX || "10",
     // Enable model agents (LLM-driven, WebSocket-based) for duels and world behavior.
     SPAWN_MODEL_AGENTS: process.env.SPAWN_MODEL_AGENTS ?? "true",
-    MAX_MODEL_AGENTS: process.env.MAX_MODEL_AGENTS || "10",
+    MAX_MODEL_AGENTS: process.env.MAX_MODEL_AGENTS || "25",
     // Allow model agents even if embedded agents are also running (safety net).
     SPAWN_MODEL_AGENTS_WITH_EMBEDDED:
       process.env.SPAWN_MODEL_AGENTS_WITH_EMBEDDED || "true",

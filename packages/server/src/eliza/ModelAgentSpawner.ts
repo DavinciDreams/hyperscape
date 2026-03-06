@@ -432,7 +432,12 @@ export async function spawnModelAgents(
     `[ModelAgentSpawner] Using HYPERSCAPE_API_URL=${hyperscapeApiUrl} for model-agent runtimes`,
   );
 
+  let agentIndex = 0;
   for (const agentConfig of agentsToSpawn) {
+    agentIndex++;
+    console.log(
+      `[ModelAgentSpawner] [${agentIndex}/${agentsToSpawn.length}] Attempting: ${agentConfig.displayName} (${agentConfig.provider}/${agentConfig.model}) | consecutiveFailures=${consecutiveFailures}`,
+    );
     let spawnedThisIteration = false;
 
     // Check if API key is available
