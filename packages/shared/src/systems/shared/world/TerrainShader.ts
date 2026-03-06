@@ -59,12 +59,29 @@ export const TERRAIN_CONSTANTS = {
 // SHARED TERRAIN BASE COLOR (used by terrain shader AND tree ground-blend)
 // ============================================================================
 
-// OSRS palette — duplicated as module-level so the shared function and the
-// terrain shader itself both reference the same values.
-const GRASS_GREEN = vec3(0.3, 0.55, 0.15);
-const GRASS_DARK = vec3(0.22, 0.42, 0.1);
-const DIRT_BROWN = vec3(0.45, 0.32, 0.18);
-const DIRT_DARK = vec3(0.32, 0.22, 0.12);
+// --- Tundra palette: snowy white-blue with frozen grey stone ---
+const TUNDRA_GRASS = vec3(0.78, 0.82, 0.85);
+const TUNDRA_GRASS_DARK = vec3(0.65, 0.7, 0.75);
+const TUNDRA_DIRT = vec3(0.55, 0.55, 0.58);
+const TUNDRA_DIRT_DARK = vec3(0.42, 0.42, 0.45);
+
+// --- Forest palette: vibrant energetic greens with warm brown earth ---
+const FOREST_GRASS = vec3(0.3, 0.58, 0.15);
+const FOREST_GRASS_DARK = vec3(0.18, 0.42, 0.08);
+const FOREST_DIRT = vec3(0.35, 0.24, 0.12);
+const FOREST_DIRT_DARK = vec3(0.22, 0.15, 0.08);
+
+// --- Desert palette: red-orange sand with deep crimson rock ---
+const DESERT_SAND = vec3(0.82, 0.52, 0.28);
+const DESERT_SAND_DARK = vec3(0.72, 0.42, 0.2);
+const DESERT_ROCK = vec3(0.62, 0.28, 0.15);
+const DESERT_ROCK_DARK = vec3(0.48, 0.2, 0.1);
+
+// Legacy aliases used by road overlay and other shader sections (default = forest)
+const GRASS_GREEN = FOREST_GRASS;
+const GRASS_DARK = FOREST_GRASS_DARK;
+const DIRT_BROWN = FOREST_DIRT;
+const DIRT_DARK = FOREST_DIRT_DARK;
 const ROCK_GRAY = vec3(0.45, 0.42, 0.38);
 const ROCK_DARK = vec3(0.3, 0.28, 0.25);
 const SAND_YELLOW = vec3(0.7, 0.6, 0.38);
@@ -81,17 +98,32 @@ const WATER_EDGE = vec3(0.08, 0.06, 0.04);
  * @param slope  - 1 - abs(normalWorld.y)  (0 = flat, 1 = vertical)
  * @param noiseVal - primary Perlin noise sample (noiseTex @ worldXZ * NOISE_SCALE)
  * @param noiseVal2 - derived noise: sin(noiseVal * 6.28) * 0.3 + 0.5
+ * @param forestWeight - biome weight for forest [0..1]
+ * @param desertWeight - biome weight for desert [0..1]
  */
 export function computeTerrainBaseColor(
   height: any,
   slope: any,
   noiseVal: any,
   noiseVal2: any,
+  forestWeight?: any,
+  desertWeight?: any,
 ) {
-  const grassVariation = smoothstep(float(0.4), float(0.6), noiseVal2);
-  let c = mix(GRASS_GREEN, GRASS_DARK, grassVariation);
+  const fW = forestWeight ?? float(0.0);
+  const dW = desertWeight ?? float(0.0);
+  const tW = sub(float(1.0), add(fW, dW));
 
-  // Dirt patches (noise-based, flat ground)
+  // Biome-blended grass
+  const grassVariation = smoothstep(float(0.4), float(0.6), noiseVal2);
+  const tundraGrass = mix(TUNDRA_GRASS, TUNDRA_GRASS_DARK, grassVariation);
+  const forestGrass = mix(FOREST_GRASS, FOREST_GRASS_DARK, grassVariation);
+  const desertGrass = mix(DESERT_SAND, DESERT_SAND_DARK, grassVariation);
+  let c: any = add(
+    add(mul(tundraGrass, tW), mul(forestGrass, fW)),
+    mul(desertGrass, dW),
+  );
+
+  // Biome-blended dirt
   const dirtPatchFactor = smoothstep(
     float(TERRAIN_CONSTANTS.DIRT_THRESHOLD - 0.05),
     float(TERRAIN_CONSTANTS.DIRT_THRESHOLD + 0.15),
@@ -99,7 +131,13 @@ export function computeTerrainBaseColor(
   );
   const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
   const dirtVariation = smoothstep(float(0.3), float(0.7), noiseVal2);
-  const dirtColor = mix(DIRT_BROWN, DIRT_DARK, dirtVariation);
+  const tundraDirt = mix(TUNDRA_DIRT, TUNDRA_DIRT_DARK, dirtVariation);
+  const forestDirt = mix(FOREST_DIRT, FOREST_DIRT_DARK, dirtVariation);
+  const desertDirt = mix(DESERT_ROCK, DESERT_ROCK_DARK, dirtVariation);
+  const dirtColor = add(
+    add(mul(tundraDirt, tW), mul(forestDirt, fW)),
+    mul(desertDirt, dW),
+  );
   c = mix(c, dirtColor, mul(dirtPatchFactor, flatnessFactor));
 
   // Slope-based dirt
@@ -114,19 +152,28 @@ export function computeTerrainBaseColor(
   const rockColor = mix(ROCK_GRAY, ROCK_DARK, rockVariation);
   c = mix(c, rockColor, smoothstep(float(0.45), float(0.75), slope));
 
-  // Snow at high elevation
+  // Snow at high elevation (suppressed in desert)
+  const snowMask = sub(float(1.0), dW);
   c = mix(
     c,
     SNOW_WHITE,
-    smoothstep(float(TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0), float(60.0), height),
+    mul(
+      smoothstep(
+        float(TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0),
+        float(60.0),
+        height,
+      ),
+      snowMask,
+    ),
   );
 
-  // Sand near water (flat areas)
+  // Sand near water (flat areas, stronger in desert)
   const sandBlend = mul(
     smoothstep(float(10.0), float(6.0), height),
     smoothstep(float(0.25), float(0.0), slope),
   );
-  c = mix(c, SAND_YELLOW, mul(sandBlend, float(0.6)));
+  const sandStrength = mix(float(0.6), float(0.9), dW);
+  c = mix(c, SAND_YELLOW, mul(sandBlend, sandStrength));
 
   // Shoreline transitions
   c = mix(
@@ -604,12 +651,18 @@ export function createTerrainMaterial(): THREE.Material & {
     float(0.5),
   );
 
+  // Biome weight attributes (computed per-vertex by QuadChunkWorker)
+  const biomeForestW = attribute("biomeForestWeight", "float");
+  const biomeDesertW = attribute("biomeDesertWeight", "float");
+
   // Base color from shared procedural palette
   const baseColor = computeTerrainBaseColor(
     height,
     slope,
     noiseValue,
     noiseValue2,
+    biomeForestW,
+    biomeDesertW,
   );
 
   // Anti-dithering noise variation (±4% brightness, ±2% color shift)

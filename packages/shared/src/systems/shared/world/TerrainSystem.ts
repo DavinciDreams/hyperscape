@@ -18,29 +18,23 @@ import {
   type TerrainWorkerOutput,
 } from "../../../utils/workers";
 import {
-  CONTINENT_LAYER,
-  RIDGE_LAYER,
-  HILL_LAYER,
-  EROSION_LAYER,
-  DETAIL_LAYER,
-  HEIGHT_POWER_CURVE,
-  ISLAND_RADIUS,
-  ISLAND_FALLOFF,
-  ISLAND_DEEP_OCEAN_BUFFER,
-  BASE_ELEVATION,
-  OCEAN_FLOOR_HEIGHT,
-  HEIGHT_TERRAIN_MIX,
   POND_RADIUS,
   POND_DEPTH,
   POND_CENTER_X,
   POND_CENTER_Z,
-  COASTLINE_CIRCLE_SAMPLE_RADIUS,
-  COAST_LARGE,
-  COAST_MEDIUM,
-  COAST_SMALL,
-  MOUNTAIN_BOOST_MAX_NORM_DIST,
-  MOUNTAIN_BOOST_GAUSSIAN_COEFF,
+  MOUNTAIN_FEATURE_DEFAULTS,
+  POND_FEATURE_DEFAULTS,
+  ISLAND_RADIUS,
+  computeBaseHeight,
+  adjustShorelineHeight,
+  buildComputeBiomeWeightsJS,
+  buildApplyLandscapeFeaturesJS,
 } from "./TerrainHeightParams";
+import type {
+  LandscapeFeatureDef,
+  ShorelineConfig,
+} from "./TerrainHeightParams";
+import { BiomeType, DEFAULT_BIOME, BIOME_LIST } from "./TerrainBiomeTypes";
 
 // Import terrain generator from procgen package
 import {
@@ -188,7 +182,11 @@ export class TerrainSystem extends System {
   private terrainTime = 0; // For animated caustics
   private noise!: NoiseGenerator;
   private biomeCenters: BiomeCenter[] = [];
+  private landscapeFeatures: LandscapeFeatureDef[] = [];
+  private biomeWeightPositionalScratch = new Map<string, number>();
   private biomeWeightScratch = new Map<string, number>();
+  private _loggedWorkerTileBiome = 0;
+  private _loggedSyncTileBiome = 0;
   private databaseSystem!: {
     saveWorldChunk(chunkData: WorldChunkData): void;
   }; // DatabaseSystem reference
@@ -783,6 +781,14 @@ export class TerrainSystem extends System {
           this.CONFIG.SHORELINE_LAND_MAX_MULTIPLIER,
         SHORELINE_UNDERWATER_BAND: this.CONFIG.SHORELINE_UNDERWATER_BAND,
         UNDERWATER_DEPTH_MULTIPLIER: this.CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
+        landscapeFeatures: this.landscapeFeatures.map((f) => ({
+          type: f.type,
+          x: f.x,
+          z: f.z,
+          radius: f.radius,
+          strength: f.strength,
+          gaussianCoeff: f.gaussianCoeff,
+        })),
       };
 
       // Build simplified biome data for worker
@@ -854,6 +860,8 @@ export class TerrainSystem extends System {
 
     const positions = geometry.attributes.position;
     const roadInfluences = new Float32Array(positions.count);
+    const forestWeights = new Float32Array(positions.count);
+    const desertWeights = new Float32Array(positions.count);
 
     const tileKey = `${tileX}_${tileZ}`;
     const hasFlatZones = (this.flatZonesByTile.get(tileKey)?.length ?? 0) > 0;
@@ -883,7 +891,7 @@ export class TerrainSystem extends System {
       }
     }
 
-    // Road influence per vertex (cheap — no noise, only tile lookups)
+    // Road influence and biome weights per vertex
     for (let i = 0; i < positions.count; i++) {
       const localX = positions.getX(i);
       const localZ = positions.getZ(i);
@@ -895,6 +903,14 @@ export class TerrainSystem extends System {
         tileX,
         tileZ,
       );
+
+      const { biomeWeightMap, totalWeight } =
+        this.computeBiomeWeightsAtPosition(worldX, worldZ);
+      if (totalWeight > 0) {
+        const invW = 1 / totalWeight;
+        forestWeights[i] = (biomeWeightMap.get(BiomeType.Forest) || 0) * invW;
+        desertWeights[i] = (biomeWeightMap.get(BiomeType.Desert) || 0) * invW;
+      }
     }
 
     // Set attributes
@@ -907,6 +923,34 @@ export class TerrainSystem extends System {
       "roadInfluence",
       new THREE.BufferAttribute(roadInfluences, 1),
     );
+    geometry.setAttribute(
+      "biomeForestWeight",
+      new THREE.BufferAttribute(forestWeights, 1),
+    );
+    geometry.setAttribute(
+      "biomeDesertWeight",
+      new THREE.BufferAttribute(desertWeights, 1),
+    );
+
+    // DEBUG: log biome weights for first 5 tiles
+    if (this._loggedWorkerTileBiome < 5) {
+      this._loggedWorkerTileBiome++;
+      let maxF = 0,
+        maxD = 0,
+        sumF = 0,
+        sumD = 0;
+      for (let _d = 0; _d < forestWeights.length; _d++) {
+        sumF += forestWeights[_d];
+        sumD += desertWeights[_d];
+        maxF = Math.max(maxF, forestWeights[_d]);
+        maxD = Math.max(maxD, desertWeights[_d]);
+      }
+      const n = forestWeights.length;
+      const avgP = (1 - sumF / n - sumD / n).toFixed(3);
+      console.log(
+        `[BiomeDebug/WorkerTile] Tile(${tileX},${tileZ}) plains=${avgP} forest=${(sumF / n).toFixed(3)} desert=${(sumD / n).toFixed(3)}`,
+      );
+    }
 
     if (TERRAIN_ROAD_INFLUENCE_DEBUG) {
       let nonZeroCount = 0;
@@ -1177,66 +1221,90 @@ export class TerrainSystem extends System {
   }
 
   private initializeBiomeCenters(): void {
-    const worldSize = this.getActiveWorldSizeMeters();
-    const gridSize = this.CONFIG.BIOME_GRID_SIZE; // 5x5 grid
-    const cellSize = worldSize / gridSize;
+    // Exactly one center per biome type, placed in a triangle within the island
+    const placementRadius = ISLAND_RADIUS * 0.45;
 
-    // Use deterministic PRNG for reproducible biome placement
-    const baseSeed = this.computeSeedFromWorldId();
-    let randomState = baseSeed;
+    this.biomeCenters = [];
+    for (let i = 0; i < BIOME_LIST.length; i++) {
+      const angle = (i / BIOME_LIST.length) * Math.PI * 2 - Math.PI / 2;
+      this.biomeCenters.push({
+        x: Math.cos(angle) * placementRadius,
+        z: Math.sin(angle) * placementRadius,
+        type: BIOME_LIST[i],
+        influence: ISLAND_RADIUS * 0.6,
+      });
+    }
 
-    const nextRandom = () => {
-      // Linear congruential generator for deterministic random
-      randomState = (randomState * 1664525 + 1013904223) >>> 0;
-      return randomState / 0xffffffff;
+    const typeCounts: Record<string, number> = {};
+    for (const c of this.biomeCenters) {
+      typeCounts[c.type] = (typeCounts[c.type] || 0) + 1;
+    }
+    console.log(
+      "[TerrainSystem] Biome centers:",
+      this.biomeCenters.length,
+      "types:",
+      JSON.stringify(typeCounts),
+    );
+  }
+
+  private initializeLandscapeFeatures(): void {
+    this.landscapeFeatures = [];
+
+    const baseSeed = this.computeSeedFromWorldId() + 77777;
+    let state = baseSeed;
+    const rand = () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 0xffffffff;
     };
 
-    // Weighted biome types - plains dominant, with variety
-    const biomeTypes = [
-      "plains",
-      "plains",
-      "plains",
-      "forest",
-      "forest",
-      "valley",
-      "mountains",
-      "mountains",
-      "desert",
-      "swamp",
-      "tundra", // Added back
-    ];
+    const worldSize = this.getActiveWorldSizeMeters();
+    const halfWorld = worldSize / 2;
 
-    // Clear any existing centers
-    this.biomeCenters = [];
+    const mountainCount = 4;
+    for (let i = 0; i < mountainCount; i++) {
+      const x = (rand() - 0.5) * worldSize * 0.7;
+      const z = (rand() - 0.5) * worldSize * 0.7;
+      const dist = Math.sqrt(x * x + z * z);
+      if (dist > halfWorld * 0.85) continue;
+      this.landscapeFeatures.push({
+        type: "mountain",
+        x,
+        z,
+        radius:
+          MOUNTAIN_FEATURE_DEFAULTS.minRadius +
+          rand() *
+            (MOUNTAIN_FEATURE_DEFAULTS.maxRadius -
+              MOUNTAIN_FEATURE_DEFAULTS.minRadius),
+        strength:
+          MOUNTAIN_FEATURE_DEFAULTS.minStrength +
+          rand() *
+            (MOUNTAIN_FEATURE_DEFAULTS.maxStrength -
+              MOUNTAIN_FEATURE_DEFAULTS.minStrength),
+        gaussianCoeff: MOUNTAIN_FEATURE_DEFAULTS.gaussianCoeff,
+      });
+    }
 
-    // Grid-jitter placement for even distribution
-    for (let gx = 0; gx < gridSize; gx++) {
-      for (let gz = 0; gz < gridSize; gz++) {
-        // Base position at grid cell center
-        const baseX = (gx + 0.5) * cellSize - worldSize / 2;
-        const baseZ = (gz + 0.5) * cellSize - worldSize / 2;
-
-        // Jitter within cell (controlled randomness)
-        const jitter = this.CONFIG.BIOME_JITTER;
-        const jitterX = (nextRandom() - 0.5) * 2 * jitter * cellSize;
-        const jitterZ = (nextRandom() - 0.5) * 2 * jitter * cellSize;
-
-        const x = baseX + jitterX;
-        const z = baseZ + jitterZ;
-
-        const typeIndex = Math.floor(nextRandom() * biomeTypes.length);
-        const influenceRange =
-          this.CONFIG.BIOME_MAX_INFLUENCE - this.CONFIG.BIOME_MIN_INFLUENCE;
-        const influence =
-          this.CONFIG.BIOME_MIN_INFLUENCE + nextRandom() * influenceRange;
-
-        this.biomeCenters.push({
-          x,
-          z,
-          type: biomeTypes[typeIndex],
-          influence,
-        });
-      }
+    const pondCount = 3;
+    for (let i = 0; i < pondCount; i++) {
+      const x = (rand() - 0.5) * worldSize * 0.6;
+      const z = (rand() - 0.5) * worldSize * 0.6;
+      const dist = Math.sqrt(x * x + z * z);
+      if (dist > halfWorld * 0.75) continue;
+      this.landscapeFeatures.push({
+        type: "pond",
+        x,
+        z,
+        radius:
+          POND_FEATURE_DEFAULTS.minRadius +
+          rand() *
+            (POND_FEATURE_DEFAULTS.maxRadius - POND_FEATURE_DEFAULTS.minRadius),
+        strength:
+          POND_FEATURE_DEFAULTS.minStrength +
+          rand() *
+            (POND_FEATURE_DEFAULTS.maxStrength -
+              POND_FEATURE_DEFAULTS.minStrength),
+        gaussianCoeff: POND_FEATURE_DEFAULTS.gaussianCoeff,
+      });
     }
   }
 
@@ -1399,11 +1467,11 @@ export class TerrainSystem extends System {
     BOSS_MIN_LEVEL: 800,
 
     // Biome Generation
-    BIOME_GRID_SIZE: 3, // 3x3 grid = 9 very large biomes
+    BIOME_GRID_SIZE: 5, // 5x5 grid = 25 biomes, visible within camera range
     BIOME_JITTER: 0.35, // How much to randomize position within grid cell (0-0.5)
-    BIOME_MIN_INFLUENCE: 2000, // Biome influence radius in meters
-    BIOME_MAX_INFLUENCE: 3500, // Biome influence radius in meters
-    BIOME_GAUSSIAN_COEFF: 0.15, // Gaussian falloff (smooth natural decay)
+    BIOME_MIN_INFLUENCE: 120, // Biome influence radius — roughly 1 grid cell
+    BIOME_MAX_INFLUENCE: 200, // Biome influence radius — ~1.5 grid cells
+    BIOME_GAUSSIAN_COEFF: 12.0, // Gaussian falloff — higher = sharper biome boundaries
     BIOME_RANGE_MULT: 10, // Not used - no hard cutoff
     BIOME_BOUNDARY_NOISE_SCALE: 0.003, // Larger scale noise for organic boundaries
     BIOME_BOUNDARY_NOISE_AMOUNT: 0.15, // Subtle noise
@@ -1481,6 +1549,7 @@ export class TerrainSystem extends System {
 
     // Initialize biome centers using deterministic random placement
     this.initializeBiomeCenters();
+    this.initializeLandscapeFeatures();
 
     // Initialize the unified terrain generator from @hyperscape/procgen
     // This provides a standalone, testable height generation system
@@ -1591,6 +1660,7 @@ export class TerrainSystem extends System {
     if (!this.noise) {
       this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
       this.initializeBiomeCenters();
+      this.initializeLandscapeFeatures();
     }
 
     // CRITICAL: Wait for DataManager to initialize BIOMES data before generating terrain
@@ -1776,6 +1846,9 @@ export class TerrainSystem extends System {
       computeBiomeWeightsAtPosition: (worldX: number, worldZ: number) =>
         this.computeBiomeWeightsAtPosition(worldX, worldZ),
 
+      computeBiomeWeightsByPosition: (worldX: number, worldZ: number) =>
+        this.computeBiomeWeightsByPosition(worldX, worldZ),
+
       calculateRoadInfluenceAtVertex: (
         worldX: number,
         worldZ: number,
@@ -1857,6 +1930,7 @@ export class TerrainSystem extends System {
       SHORELINE_LAND_MAX_MULTIPLIER: this.CONFIG.SHORELINE_LAND_MAX_MULTIPLIER,
       SHORELINE_UNDERWATER_BAND: this.CONFIG.SHORELINE_UNDERWATER_BAND,
       UNDERWATER_DEPTH_MULTIPLIER: this.CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
+      landscapeFeatures: this.landscapeFeatures,
     };
 
     const biomeCenters = this.biomeCenters.map((c) => ({
@@ -1865,6 +1939,23 @@ export class TerrainSystem extends System {
       type: c.type,
       influence: c.influence,
     }));
+
+    // DEBUG: log what we're sending to the worker
+    const workerTypeCounts: Record<string, number> = {};
+    for (const c of biomeCenters) {
+      workerTypeCounts[c.type ?? "UNDEFINED"] =
+        (workerTypeCounts[c.type ?? "UNDEFINED"] || 0) + 1;
+    }
+    console.log(
+      "[TerrainSystem] Worker biomeCenters:",
+      biomeCenters.length,
+      "types:",
+      JSON.stringify(workerTypeCounts),
+    );
+    console.log(
+      "[TerrainSystem] First 5 centers:",
+      JSON.stringify(biomeCenters.slice(0, 5)),
+    );
 
     const biomeColorCache = new Map<
       string,
@@ -2547,6 +2638,8 @@ export class TerrainSystem extends System {
     const heightData: number[] = [];
     const biomeIds = new Float32Array(positions.count);
     const roadInfluences = new Float32Array(positions.count);
+    const forestWeights = new Float32Array(positions.count);
+    const desertWeights = new Float32Array(positions.count);
 
     // Verify biome data is loaded - error if not
     if (Object.keys(BIOMES).length === 0) {
@@ -2554,7 +2647,7 @@ export class TerrainSystem extends System {
         "[TerrainSystem] BIOMES data not loaded! DataManager must initialize before terrain generation.",
       );
     }
-    const defaultBiomeData = BIOMES["plains"];
+    const defaultBiomeData = BIOMES[DEFAULT_BIOME] || BIOMES["plains"];
     if (!defaultBiomeData) {
       throw new Error("[TerrainSystem] Plains biome not found in BIOMES data!");
     }
@@ -2588,7 +2681,7 @@ export class TerrainSystem extends System {
       const normalizedHeight = height / this.CONFIG.MAX_HEIGHT;
 
       // Store dominant biome ID for shader
-      let dominantBiome = "plains";
+      let dominantBiome = DEFAULT_BIOME as string;
       let dominantWeight = -Infinity;
 
       // PERFORMANCE: Reuse _tempColor to avoid GC pressure (no new THREE.Color per vertex)
@@ -2612,28 +2705,31 @@ export class TerrainSystem extends System {
               `[TerrainSystem] Biome "${type}" not found in BIOMES data!`,
             );
           }
-          // Use _tempColor to parse hex once, then extract RGB (no allocation)
           this._tempColor.set(biomeData.color);
 
-          // Accumulate weighted colors directly to numbers
           colorR += this._tempColor.r * weight;
           colorG += this._tempColor.g * weight;
           colorB += this._tempColor.b * weight;
         }
       } else {
-        const biomeData = BIOMES["plains"];
+        const biomeData = BIOMES[DEFAULT_BIOME] || BIOMES["plains"];
         if (!biomeData) {
           throw new Error(
-            `[TerrainSystem] Biome "plains" not found in BIOMES data!`,
+            `[TerrainSystem] Default biome not found in BIOMES data!`,
           );
         }
-        // Use _tempColor to parse hex once, then extract RGB (no allocation)
         this._tempColor.set(biomeData.color);
         colorR = this._tempColor.r;
         colorG = this._tempColor.g;
         colorB = this._tempColor.b;
       }
       biomeIds[i] = this.getBiomeId(dominantBiome);
+
+      if (totalWeight > 0) {
+        const invW = 1 / totalWeight;
+        forestWeights[i] = (biomeWeightMap.get(BiomeType.Forest) || 0) * invW;
+        desertWeights[i] = (biomeWeightMap.get(BiomeType.Desert) || 0) * invW;
+      }
 
       // Apply brownish shoreline tint near water level
       const waterLevel = this.CONFIG.WATER_LEVEL_NORMALIZED;
@@ -2674,6 +2770,30 @@ export class TerrainSystem extends System {
       "roadInfluence",
       new THREE.BufferAttribute(roadInfluences, 1),
     );
+    geometry.setAttribute(
+      "biomeForestWeight",
+      new THREE.BufferAttribute(forestWeights, 1),
+    );
+    geometry.setAttribute(
+      "biomeDesertWeight",
+      new THREE.BufferAttribute(desertWeights, 1),
+    );
+
+    // DEBUG: log biome weights for first 5 sync tiles
+    if (this._loggedSyncTileBiome < 5) {
+      this._loggedSyncTileBiome++;
+      let sumF = 0,
+        sumD = 0;
+      for (let _d = 0; _d < forestWeights.length; _d++) {
+        sumF += forestWeights[_d];
+        sumD += desertWeights[_d];
+      }
+      const n = forestWeights.length;
+      const avgP = (1 - sumF / n - sumD / n).toFixed(3);
+      console.log(
+        `[BiomeDebug/SyncTile] Tile(${tileX},${tileZ}) plains=${avgP} forest=${(sumF / n).toFixed(3)} desert=${(sumD / n).toFixed(3)}`,
+      );
+    }
 
     if (TERRAIN_ROAD_INFLUENCE_DEBUG) {
       let nonZeroCount = 0;
@@ -3153,14 +3273,9 @@ export class TerrainSystem extends System {
     const biomeIds: Record<string, number> = {
       plains: 0,
       forest: 1,
-      valley: 2,
-      mountains: 3,
-      tundra: 4,
-      desert: 5,
-      lakes: 6,
-      swamp: 7,
+      desert: 2,
     };
-    return biomeIds[biomeName] || 0;
+    return biomeIds[biomeName] ?? 0;
   }
 
   private getIslandMask(worldX: number, worldZ: number): number {
@@ -3197,184 +3312,57 @@ export class TerrainSystem extends System {
 
   /**
    * Get base terrain height WITHOUT mountain biome boost.
-   * Used for biome influence calculation to avoid feedback loops.
+   * Delegates to the single source of truth in TerrainHeightParams.
    */
-  private getBaseHeightAt(worldX: number, worldZ: number): number {
+  private getBaseHeightAt(
+    worldX: number,
+    worldZ: number,
+    biomeWeights?: Record<string, number>,
+  ): number {
     if (!this.noise) {
       this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
       if (!this.biomeCenters || this.biomeCenters.length === 0) {
         this.initializeBiomeCenters();
+        this.initializeLandscapeFeatures();
       }
     }
 
-    // Multi-layered noise — constants from TerrainHeightParams (single source of truth)
-    const continentNoise = this.noise.fractal2D(
-      worldX * CONTINENT_LAYER.scale,
-      worldZ * CONTINENT_LAYER.scale,
-      CONTINENT_LAYER.octaves!,
-      CONTINENT_LAYER.persistence!,
-      CONTINENT_LAYER.lacunarity!,
+    const weights =
+      biomeWeights ?? this.computeBiomeWeightsByPosition(worldX, worldZ);
+    return computeBaseHeight(
+      worldX,
+      worldZ,
+      this.noise,
+      weights,
+      this.landscapeFeatures,
+      this.CONFIG.MAX_HEIGHT,
     );
-    const ridgeNoise = this.noise.ridgeNoise2D(
-      worldX * RIDGE_LAYER.scale,
-      worldZ * RIDGE_LAYER.scale,
-    );
-    const hillNoise = this.noise.fractal2D(
-      worldX * HILL_LAYER.scale,
-      worldZ * HILL_LAYER.scale,
-      HILL_LAYER.octaves!,
-      HILL_LAYER.persistence!,
-      HILL_LAYER.lacunarity!,
-    );
-    const erosionNoise = this.noise.erosionNoise2D(
-      worldX * EROSION_LAYER.scale,
-      worldZ * EROSION_LAYER.scale,
-      EROSION_LAYER.iterations!,
-    );
-    const detailNoise = this.noise.fractal2D(
-      worldX * DETAIL_LAYER.scale,
-      worldZ * DETAIL_LAYER.scale,
-      DETAIL_LAYER.octaves!,
-      DETAIL_LAYER.persistence!,
-      DETAIL_LAYER.lacunarity!,
-    );
-
-    let height = 0;
-    height += continentNoise * CONTINENT_LAYER.weight;
-    height += ridgeNoise * RIDGE_LAYER.weight;
-    height += hillNoise * HILL_LAYER.weight;
-    height += erosionNoise * EROSION_LAYER.weight;
-    height += detailNoise * DETAIL_LAYER.weight;
-
-    height = (height + 1) * 0.5;
-    height = Math.max(0, Math.min(1, height));
-    height = Math.pow(height, HEIGHT_POWER_CURVE);
-
-    // Natural coastline — noise varies island radius for irregular shoreline
-    const distFromCenter = Math.sqrt(worldX * worldX + worldZ * worldZ);
-    const angle = Math.atan2(worldZ, worldX);
-    const cnx = Math.cos(angle) * COASTLINE_CIRCLE_SAMPLE_RADIUS;
-    const cnz = Math.sin(angle) * COASTLINE_CIRCLE_SAMPLE_RADIUS;
-
-    const coastNoise1 = this.noise.fractal2D(
-      cnx,
-      cnz,
-      COAST_LARGE.octaves,
-      COAST_LARGE.persistence,
-      COAST_LARGE.lacunarity,
-    );
-    const coastNoise2 = this.noise.fractal2D(
-      cnx * COAST_MEDIUM.freqMultiplier,
-      cnz * COAST_MEDIUM.freqMultiplier,
-      COAST_MEDIUM.octaves,
-      COAST_MEDIUM.persistence,
-      COAST_MEDIUM.lacunarity,
-    );
-    const coastNoise3 = this.noise.simplex2D(
-      cnx * COAST_SMALL.freqMultiplier,
-      cnz * COAST_SMALL.freqMultiplier,
-    );
-
-    const coastlineVariation =
-      coastNoise1 * COAST_LARGE.weight +
-      coastNoise2 * COAST_MEDIUM.weight +
-      coastNoise3 * COAST_SMALL.weight;
-    const effectiveRadius = ISLAND_RADIUS * (1 + coastlineVariation);
-
-    // Island mask — smooth falloff at edges
-    let islandMask = 1.0;
-    if (distFromCenter > effectiveRadius - ISLAND_FALLOFF) {
-      const edgeDist = distFromCenter - (effectiveRadius - ISLAND_FALLOFF);
-      const t = Math.min(1.0, edgeDist / ISLAND_FALLOFF);
-      const smoothstep = t * t * (3 - 2 * t);
-      islandMask = 1.0 - smoothstep;
-    }
-    if (distFromCenter > effectiveRadius + ISLAND_DEEP_OCEAN_BUFFER) {
-      islandMask = 0;
-    }
-
-    // Pond — offset from center near spawn
-    const distFromPond = Math.sqrt(
-      (worldX - POND_CENTER_X) * (worldX - POND_CENTER_X) +
-        (worldZ - POND_CENTER_Z) * (worldZ - POND_CENTER_Z),
-    );
-    let pondDepression = 0;
-    if (distFromPond < POND_RADIUS * 2) {
-      const pondFactor = 1.0 - distFromPond / (POND_RADIUS * 2);
-      pondDepression = pondFactor * pondFactor * POND_DEPTH;
-    }
-
-    height = height * islandMask;
-    height = height * HEIGHT_TERRAIN_MIX + BASE_ELEVATION * islandMask;
-    height -= pondDepression;
-
-    if (islandMask === 0) {
-      height = OCEAN_FLOOR_HEIGHT;
-    }
-
-    return height * this.CONFIG.MAX_HEIGHT;
   }
 
   private getHeightAtWithoutShore(worldX: number, worldZ: number): number {
-    // Ensure biome centers are initialized
     if (!this.biomeCenters || this.biomeCenters.length === 0) {
       if (!this.noise) {
         this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
       }
       this.initializeBiomeCenters();
+      this.initializeLandscapeFeatures();
     }
 
-    // Check flat zones first (for stations, etc.)
     const flatHeight = this.getFlatZoneHeight(worldX, worldZ);
     if (flatHeight !== null) {
       return flatHeight;
     }
 
-    // Get procedural height with mountain boost
-    return this.getProceduralHeightWithBoost(worldX, worldZ);
+    return this.getBaseHeightAt(worldX, worldZ);
   }
 
   /**
-   * Get procedural terrain height with mountain biome boost applied.
+   * Get procedural terrain height.
    * This bypasses flat zones and returns the raw procedural height.
    * Useful for positioning objects that should sit above the terrain mesh.
    */
   getProceduralHeightAt(worldX: number, worldZ: number): number {
-    return this.getProceduralHeightWithBoost(worldX, worldZ);
-  }
-
-  /**
-   * Get procedural terrain height with mountain biome boost applied.
-   * Extracted for reuse in flat zone blending.
-   */
-  private getProceduralHeightWithBoost(worldX: number, worldZ: number): number {
-    // Get base height (without mountain boost)
-    const baseHeight = this.getBaseHeightAt(worldX, worldZ);
-    let height = baseHeight / this.CONFIG.MAX_HEIGHT; // Normalize for boost calc
-
-    // Apply mountain biome height boost
-    let mountainBoost = 0;
-    for (const center of this.biomeCenters) {
-      if (center.type === "mountains") {
-        const dx = worldX - center.x;
-        const dz = worldZ - center.z;
-        const distance = Math.sqrt(dx * dx + dz * dz);
-        const normalizedDist = distance / center.influence;
-
-        if (normalizedDist < MOUNTAIN_BOOST_MAX_NORM_DIST) {
-          const boost = Math.exp(
-            -normalizedDist * normalizedDist * MOUNTAIN_BOOST_GAUSSIAN_COEFF,
-          );
-          mountainBoost = Math.max(mountainBoost, boost);
-        }
-      }
-    }
-
-    // Apply mountain height boost from CONFIG
-    height = height * (1 + mountainBoost * this.CONFIG.MOUNTAIN_HEIGHT_BOOST);
-    height = Math.min(1, height); // Cap at max
-
-    return height * this.CONFIG.MAX_HEIGHT;
+    return this.getBaseHeightAt(worldX, worldZ);
   }
 
   private calculateBaseSlopeAt(
@@ -3410,39 +3398,24 @@ export class TerrainSystem extends System {
     return Math.max(...slopes);
   }
 
+  private _shorelineConfig: ShorelineConfig | null = null;
+
+  private getShorelineConfig(): ShorelineConfig {
+    if (!this._shorelineConfig) {
+      this._shorelineConfig = {
+        waterThreshold: this.CONFIG.WATER_THRESHOLD,
+        shorelineLandBand: this.CONFIG.SHORELINE_LAND_BAND,
+        shorelineUnderwaterBand: this.CONFIG.SHORELINE_UNDERWATER_BAND,
+        shorelineMinSlope: this.CONFIG.SHORELINE_MIN_SLOPE,
+        shorelineLandMaxMultiplier: this.CONFIG.SHORELINE_LAND_MAX_MULTIPLIER,
+        underwaterDepthMultiplier: this.CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
+      };
+    }
+    return this._shorelineConfig;
+  }
+
   private adjustHeightForShoreline(baseHeight: number, slope: number): number {
-    const waterThreshold = this.CONFIG.WATER_THRESHOLD;
-    if (baseHeight === waterThreshold) return baseHeight;
-
-    const isLand = baseHeight > waterThreshold;
-    const band = isLand
-      ? this.CONFIG.SHORELINE_LAND_BAND
-      : this.CONFIG.SHORELINE_UNDERWATER_BAND;
-    if (band <= 0) return baseHeight;
-
-    const delta = Math.abs(baseHeight - waterThreshold);
-    if (delta >= band) return baseHeight;
-
-    const minSlope = this.CONFIG.SHORELINE_MIN_SLOPE;
-    if (minSlope <= 0) return baseHeight;
-
-    const maxMultiplier = isLand
-      ? this.CONFIG.SHORELINE_LAND_MAX_MULTIPLIER
-      : this.CONFIG.UNDERWATER_DEPTH_MULTIPLIER;
-    if (maxMultiplier <= 1) return baseHeight;
-
-    const slopeSafe = Math.max(0.0001, slope);
-    const targetMultiplier = Math.min(
-      maxMultiplier,
-      Math.max(1, minSlope / slopeSafe),
-    );
-    const falloff = 1 - delta / band;
-    const multiplier = 1 + (targetMultiplier - 1) * falloff;
-    const adjustedDelta = delta * multiplier;
-
-    return isLand
-      ? waterThreshold + adjustedDelta
-      : waterThreshold - adjustedDelta;
+    return adjustShorelineHeight(baseHeight, slope, this.getShorelineConfig());
   }
 
   // ============================================================================
@@ -3807,10 +3780,7 @@ export class TerrainSystem extends System {
 
     // If in a blend area, smoothly interpolate
     if (bestBlendZone) {
-      const proceduralHeight = this.getProceduralHeightWithBoost(
-        worldX,
-        worldZ,
-      );
+      const proceduralHeight = this.getProceduralHeightAt(worldX, worldZ);
 
       // Smoothstep: t² × (3 - 2t) for C1 continuous transition
       const t = bestBlendFactor * bestBlendFactor * (3 - 2 * bestBlendFactor);
@@ -4239,7 +4209,7 @@ export class TerrainSystem extends System {
           const depth = size.z * MOVEMENT_TILE_SIZE + padding * 2;
 
           // Get procedural height at station center (what terrain would be without flattening)
-          const flatHeight = this.getProceduralHeightWithBoost(
+          const flatHeight = this.getProceduralHeightAt(
             station.position.x,
             station.position.z,
           );
@@ -4263,7 +4233,7 @@ export class TerrainSystem extends System {
       if (areaConfig.flatZones) {
         for (const zoneConfig of areaConfig.flatZones) {
           // Calculate base height from procedural terrain
-          const proceduralHeight = this.getProceduralHeightWithBoost(
+          const proceduralHeight = this.getProceduralHeightAt(
             zoneConfig.centerX,
             zoneConfig.centerZ,
           );
@@ -4585,7 +4555,7 @@ export class TerrainSystem extends System {
 
     for (const town of towns) {
       const distance = Math.sqrt((tileX - town.x) ** 2 + (tileZ - town.z) ** 2);
-      if (distance < 3) return "plains";
+      if (distance < 3) return DEFAULT_BIOME;
     }
 
     return this.getBiomeAtWorldPosition(worldX, worldZ);
@@ -4608,7 +4578,7 @@ export class TerrainSystem extends System {
       }
     } else {
       // Fallback to plains if no biome centers are nearby
-      biomeInfluences.push({ type: "plains", weight: 1.0 });
+      biomeInfluences.push({ type: DEFAULT_BIOME, weight: 1.0 });
     }
 
     return biomeInfluences;
@@ -4618,61 +4588,33 @@ export class TerrainSystem extends System {
     worldX: number,
     worldZ: number,
   ): { biomeWeightMap: Map<string, number>; totalWeight: number } {
-    // Get BASE height (without mountain boost) to avoid feedback loop
-    const baseHeight = this.getBaseHeightAt(worldX, worldZ);
-    const normalizedHeight = baseHeight / this.CONFIG.MAX_HEIGHT;
-
-    // Add boundary noise for organic edges
+    // Biome weights are purely positional (gaussian distance from centres +
+    // boundary noise).  No height lookup here — getBaseHeightAt depends on
+    // biome weights, so calling it would create infinite recursion.
     const boundaryNoise = this.noise.simplex2D(
       worldX * this.CONFIG.BIOME_BOUNDARY_NOISE_SCALE,
       worldZ * this.CONFIG.BIOME_BOUNDARY_NOISE_SCALE,
     );
 
-    // Map to collect and merge same-type biomes.
-    // Reusing one map avoids per-vertex map allocations during tile generation.
     const biomeWeightMap = this.biomeWeightScratch;
     biomeWeightMap.clear();
 
-    // Calculate influence from ALL biome centers (no hard cutoff!)
     for (const center of this.biomeCenters) {
       const dx = worldX - center.x;
       const dz = worldZ - center.z;
       const distance = Math.sqrt(dx * dx + dz * dz);
 
-      // Add subtle noise to distance for organic boundaries
       const noisyDistance =
         distance *
         (1 + boundaryNoise * this.CONFIG.BIOME_BOUNDARY_NOISE_AMOUNT);
 
-      // Pure gaussian falloff - NO hard distance cutoff
-      // The gaussian naturally approaches 0 at large distances
       const normalizedDistance = noisyDistance / center.influence;
-      let weight = Math.exp(
+      const weight = Math.exp(
         -normalizedDistance *
           normalizedDistance *
           this.CONFIG.BIOME_GAUSSIAN_COEFF,
       );
 
-      // Height-based weight adjustments (using BASE height, not boosted)
-      if (
-        center.type === "mountains" &&
-        normalizedHeight > this.CONFIG.MOUNTAIN_HEIGHT_THRESHOLD
-      ) {
-        const heightFactor =
-          normalizedHeight - this.CONFIG.MOUNTAIN_HEIGHT_THRESHOLD;
-        weight *= 1.0 + heightFactor * this.CONFIG.MOUNTAIN_WEIGHT_BOOST;
-      }
-
-      if (
-        (center.type === "valley" || center.type === "plains") &&
-        normalizedHeight < this.CONFIG.VALLEY_HEIGHT_THRESHOLD
-      ) {
-        const heightFactor =
-          this.CONFIG.VALLEY_HEIGHT_THRESHOLD - normalizedHeight;
-        weight *= 1.0 + heightFactor * this.CONFIG.VALLEY_WEIGHT_BOOST;
-      }
-
-      // Merge same-type biomes (no threshold - let gaussian handle falloff)
       const existing = biomeWeightMap.get(center.type) || 0;
       biomeWeightMap.set(center.type, existing + weight);
     }
@@ -4685,9 +4627,29 @@ export class TerrainSystem extends System {
     return { biomeWeightMap, totalWeight };
   }
 
+  computeBiomeWeightsByPosition(
+    worldX: number,
+    worldZ: number,
+  ): Record<string, number> {
+    const { biomeWeightMap, totalWeight } = this.computeBiomeWeightsAtPosition(
+      worldX,
+      worldZ,
+    );
+    const result: Record<string, number> = {};
+    if (totalWeight > 0) {
+      const inv = 1 / totalWeight;
+      for (const [type, weight] of biomeWeightMap) {
+        result[type] = weight * inv;
+      }
+    } else {
+      result[DEFAULT_BIOME] = 1.0;
+    }
+    return result;
+  }
+
   private getBiomeAtWorldPosition(worldX: number, worldZ: number): string {
     const influences = this.getBiomeInfluencesAtPosition(worldX, worldZ);
-    return influences.length > 0 ? influences[0].type : "plains";
+    return influences.length > 0 ? influences[0].type : DEFAULT_BIOME;
   }
 
   private getBiomeNoise(x: number, z: number): number {
@@ -4699,7 +4661,8 @@ export class TerrainSystem extends System {
     );
   }
 
-  // Map internal biome keys to generic TerrainTileData biome set
+  // Map internal biome keys to generic TerrainTileData biome set.
+  // Only tundra/forest/desert biome centers exist (see initializeBiomeCenters).
   private mapBiomeToGeneric(
     internal: string,
   ):
@@ -4711,24 +4674,13 @@ export class TerrainSystem extends System {
     | "tundra"
     | "jungle" {
     switch (internal) {
-      case "forest":
+      case BiomeType.Forest:
         return "forest";
-      case "plains":
-        return "plains";
-      case "valley":
-        return "plains";
-      case "mountains":
-        return "mountains";
-      case "tundra":
-        return "tundra";
-      case "desert":
+      case BiomeType.Desert:
         return "desert";
-      case "lakes":
-        return "swamp";
-      case "swamp":
-        return "swamp";
+      case BiomeType.Tundra:
       default:
-        return "plains";
+        return "tundra";
     }
   }
 
@@ -6096,6 +6048,7 @@ export class TerrainSystem extends System {
       this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
       if (this.biomeCenters.length === 0) {
         this.initializeBiomeCenters();
+        this.initializeLandscapeFeatures();
       }
     }
 
@@ -6263,6 +6216,7 @@ export class TerrainSystem extends System {
       this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
       if (this.biomeCenters.length === 0) {
         this.initializeBiomeCenters();
+        this.initializeLandscapeFeatures();
       }
     }
 

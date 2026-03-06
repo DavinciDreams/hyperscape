@@ -20,6 +20,7 @@
 
 import THREE from "../../../extras/three/three";
 import type { QuadChunkWorkerOutput } from "../../../utils/workers/QuadChunkWorker";
+import { BiomeType, DEFAULT_BIOME } from "./TerrainBiomeTypes";
 
 /**
  * Main-thread callbacks for game-state queries that can't run in a worker.
@@ -53,6 +54,10 @@ export interface FullTerrainProvider extends ChunkTerrainProvider {
     worldX: number,
     worldZ: number,
   ): { biomeWeightMap: Map<string, number>; totalWeight: number };
+  computeBiomeWeightsByPosition(
+    worldX: number,
+    worldZ: number,
+  ): Record<string, number>;
   getBiomeId(biomeName: string): number;
   getBiomeColor(biomeName: string): { r: number; g: number; b: number };
   readonly WATER_LEVEL_NORMALIZED: number;
@@ -84,6 +89,8 @@ export function assembleQuadChunkGeometry(
     normalData,
     colorData,
     biomeData,
+    biomeForestWeight,
+    biomeDesertWeight,
   } = workerData;
   const segments = resolution;
   const halfSize = size * 0.5;
@@ -95,6 +102,8 @@ export function assembleQuadChunkGeometry(
   const normals = new Float32Array(totalVertices * 3);
   const colors = new Float32Array(totalVertices * 3);
   const biomeIds = new Float32Array(totalVertices);
+  const forestWeights = new Float32Array(totalVertices);
+  const desertWeights = new Float32Array(totalVertices);
   const roadInfluences = new Float32Array(totalVertices);
 
   let flatZoneModified = false;
@@ -130,6 +139,8 @@ export function assembleQuadChunkGeometry(
       colors[i3 + 2] = colorData[i3 + 2];
 
       biomeIds[idx] = biomeData[idx];
+      forestWeights[idx] = biomeForestWeight[idx];
+      desertWeights[idx] = biomeDesertWeight[idx];
 
       const roadTileX = Math.floor(worldX / provider.TILE_SIZE);
       const roadTileZ = Math.floor(worldZ / provider.TILE_SIZE);
@@ -164,6 +175,8 @@ export function assembleQuadChunkGeometry(
     colors[si3 + 1] = colors[mi3 + 1];
     colors[si3 + 2] = colors[mi3 + 2];
     biomeIds[skirtIdx] = biomeIds[mainIdx];
+    forestWeights[skirtIdx] = forestWeights[mainIdx];
+    desertWeights[skirtIdx] = desertWeights[mainIdx];
     roadInfluences[skirtIdx] = roadInfluences[mainIdx];
     skirtIdx++;
   };
@@ -266,6 +279,14 @@ export function assembleQuadChunkGeometry(
   geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute("biomeId", new THREE.BufferAttribute(biomeIds, 1));
+  geometry.setAttribute(
+    "biomeForestWeight",
+    new THREE.BufferAttribute(forestWeights, 1),
+  );
+  geometry.setAttribute(
+    "biomeDesertWeight",
+    new THREE.BufferAttribute(desertWeights, 1),
+  );
   geometry.setAttribute(
     "roadInfluence",
     new THREE.BufferAttribute(roadInfluences, 1),
@@ -388,6 +409,8 @@ export function generateQuadChunkDataSync(
   // Colors and biome IDs
   const colorData = new Float32Array(vertexCount * 3);
   const biomeData = new Uint8Array(vertexCount);
+  const biomeForestWeight = new Float32Array(vertexCount);
+  const biomeDesertWeight = new Float32Array(vertexCount);
 
   for (let iz = 0; iz < segments; iz++) {
     for (let ix = 0; ix < segments; ix++) {
@@ -403,7 +426,7 @@ export function generateQuadChunkDataSync(
       const { biomeWeightMap, totalWeight } =
         provider.computeBiomeWeightsAtPosition(worldX, worldZ);
 
-      let dominantBiome = "plains";
+      let dominantBiome: string = DEFAULT_BIOME;
       let dominantWeight = -Infinity;
       let cr = 0,
         cg = 0,
@@ -423,13 +446,24 @@ export function generateQuadChunkDataSync(
           cb += bc.b * weight;
         }
       } else {
-        const bc = provider.getBiomeColor("plains");
+        const bc = provider.getBiomeColor(DEFAULT_BIOME);
         cr = bc.r;
         cg = bc.g;
         cb = bc.b;
       }
 
       biomeData[idx] = provider.getBiomeId(dominantBiome);
+
+      const fwNorm =
+        totalWeight > 0
+          ? (biomeWeightMap.get(BiomeType.Forest) || 0) / totalWeight
+          : 0;
+      const dwNorm =
+        totalWeight > 0
+          ? (biomeWeightMap.get(BiomeType.Desert) || 0) / totalWeight
+          : 0;
+      biomeForestWeight[idx] = fwNorm;
+      biomeDesertWeight[idx] = dwNorm;
 
       const waterLevel = provider.WATER_LEVEL_NORMALIZED;
       const shoreThreshold = provider.SHORELINE_THRESHOLD;
@@ -459,5 +493,7 @@ export function generateQuadChunkDataSync(
     normalData,
     colorData,
     biomeData,
+    biomeForestWeight,
+    biomeDesertWeight,
   };
 }
