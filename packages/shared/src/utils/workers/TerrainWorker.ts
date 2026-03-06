@@ -56,7 +56,12 @@ export interface TerrainWorkerConfig {
     z: number;
     radius: number;
     strength: number;
-    gaussianCoeff: number;
+    layers: number;
+    shapePower: number;
+    edgeSharpness: number;
+    layerSlope: number;
+    noiseScale: number;
+    noiseAmount: number;
   }>;
 }
 

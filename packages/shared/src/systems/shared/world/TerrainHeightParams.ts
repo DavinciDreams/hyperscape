@@ -134,9 +134,9 @@ export const TERRACE_NOISE_SCALE = 0.005;
 // Island configuration
 // ---------------------------------------------------------------------------
 
-export const ISLAND_RADIUS = 525;
-export const ISLAND_FALLOFF = 300;
-export const ISLAND_DEEP_OCEAN_BUFFER = 75;
+export const ISLAND_RADIUS = 788;
+export const ISLAND_FALLOFF = 450;
+export const ISLAND_DEEP_OCEAN_BUFFER = 113;
 export const BASE_ELEVATION = 0.42;
 export const OCEAN_FLOOR_HEIGHT = 0.05;
 /** height = terrain * HEIGHT_TERRAIN_MIX + BASE_ELEVATION * islandMask */
@@ -158,53 +158,65 @@ export interface LandscapeFeatureDef {
   z: number;
   radius: number;
   strength: number;
-  gaussianCoeff: number;
+  layers: number;
+  shapePower: number;
+  edgeSharpness: number;
+  layerSlope: number;
+  noiseScale: number;
+  noiseAmount: number;
 }
-
-export const MOUNTAIN_FEATURE_DEFAULTS = {
-  minRadius: 80,
-  maxRadius: 200,
-  minStrength: 0.3,
-  maxStrength: 0.6,
-  gaussianCoeff: 0.3,
-};
-
-export const POND_FEATURE_DEFAULTS = {
-  minRadius: 30,
-  maxRadius: 60,
-  minStrength: 0.4,
-  maxStrength: 0.6,
-  gaussianCoeff: 0.5,
-};
 
 /**
  * Predefined landscape features — add/remove entries here to control
- * exactly where mountains and ponds appear on the island.
+ * exactly where mountains, ponds, and plateaus appear on the island.
+ *
+ * Parameter guide:
+ *   layers        - number of terrace levels (1 = single plateau, 4+ = tiered mountain)
+ *   shapePower    - falloff curve (0.3 = dome, 1 = cone, 4+ = flat-topped mesa)
+ *   edgeSharpness - transition between layers (0 = smooth blend, 1 = hard cliff)
+ *   layerSlope    - incline within each layer (0 = perfectly flat shelves, 1 = full natural slope)
+ *   noiseScale    - frequency of edge wobble (higher = more detailed wiggles)
+ *   noiseAmount   - amplitude of edge wobble (0 = perfect circles, 0.3 = organic edges)
  */
 export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
   {
     type: LandscapeType.Mountain,
-    x: 28.5,
-    z: -237.5,
-    radius: 260,
-    strength: 2.5,
-    gaussianCoeff: 12.5,
+    x: -168.5,
+    z: -352.5,
+    radius: 150,
+    strength: 4.0,
+    layers: 5,
+    shapePower: 1.8,
+    edgeSharpness: 0.7,
+    layerSlope: 0.5,
+    noiseScale: 0.015,
+    noiseAmount: 0.2,
   },
   {
     type: LandscapeType.Mountain,
     x: 265.5,
     z: 128.5,
-    radius: 180,
-    strength: 1.2,
-    gaussianCoeff: 5.5,
+    radius: 150,
+    strength: 2.0,
+    layers: 3,
+    shapePower: 1.5,
+    edgeSharpness: 0.6,
+    layerSlope: 0.4,
+    noiseScale: 0.02,
+    noiseAmount: 0.15,
   },
   {
     type: LandscapeType.Pond,
-    x: -183.5,
-    z: 175.5,
+    x: -134.5,
+    z: 127.5,
     radius: 90,
-    strength: 1.8,
-    gaussianCoeff: 3.0,
+    strength: 1.5,
+    layers: 1,
+    shapePower: 3.5,
+    edgeSharpness: 0.1,
+    layerSlope: 0.8,
+    noiseScale: 0.015,
+    noiseAmount: 0.06,
   },
 ];
 
@@ -275,19 +287,43 @@ export function applyLandscapeFeaturesPure(
   worldX: number,
   worldZ: number,
   features: ReadonlyArray<LandscapeFeatureDef>,
+  noise: TerrainNoiseAdapter,
 ): number {
   for (let i = 0; i < features.length; i++) {
     const feat = features[i];
     const dx = worldX - feat.x;
     const dz = worldZ - feat.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist > feat.radius * 3) continue;
-    const nd = dist / feat.radius;
-    const influence = Math.exp(-nd * nd * feat.gaussianCoeff);
-    if (feat.type === LandscapeType.Mountain) {
-      height += influence * feat.strength;
-    } else if (feat.type === LandscapeType.Pond) {
+    if (dist >= feat.radius) continue;
+
+    const nv =
+      feat.noiseAmount > 0
+        ? noise.simplex2D(worldX * feat.noiseScale, worldZ * feat.noiseScale) *
+          feat.noiseAmount
+        : 0;
+
+    const t = Math.max(0, Math.min(1, 1 - dist / feat.radius + nv));
+    const shaped = Math.pow(t, feat.shapePower);
+
+    let influence: number;
+    if (feat.layers >= 1) {
+      const stepped = Math.floor(shaped * feat.layers) / feat.layers;
+      const nextStep = Math.min(1, stepped + 1 / feat.layers);
+      const frac = (shaped - stepped) * feat.layers;
+      const blendStart = 1 - feat.edgeSharpness;
+      const edgeBlend =
+        frac <= blendStart ? 0 : (frac - blendStart) / (1 - blendStart);
+      const flatStep = stepped + edgeBlend * (nextStep - stepped);
+      const slopedStep = stepped + frac * (nextStep - stepped);
+      influence = flatStep + feat.layerSlope * (slopedStep - flatStep);
+    } else {
+      influence = shaped;
+    }
+
+    if (feat.type === LandscapeType.Pond) {
       height -= influence * feat.strength;
+    } else {
+      height += influence * feat.strength;
     }
   }
   return height;
@@ -427,7 +463,7 @@ export function computeBaseHeight(
 
   // ── 6. Island mask + landscape features ─────────────────────────────
   height = height * islandMask;
-  height = applyLandscapeFeaturesPure(height, worldX, worldZ, features);
+  height = applyLandscapeFeaturesPure(height, worldX, worldZ, features, noise);
 
   if (islandMask === 0) {
     height = OCEAN_FLOOR_HEIGHT;
@@ -529,7 +565,7 @@ export function buildComputeBiomeWeightsJS(): string {
 
 /**
  * JS source — worker mirror of applyLandscapeFeaturesPure().
- * Depends on: landscapeFeatures array injected into worker scope.
+ * Depends on: landscapeFeatures array injected into worker scope, noise object.
  */
 export function buildApplyLandscapeFeaturesJS(): string {
   return `
@@ -539,13 +575,33 @@ export function buildApplyLandscapeFeaturesJS(): string {
       var dx = worldX - feat.x;
       var dz = worldZ - feat.z;
       var dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist > feat.radius * 3) continue;
-      var normDist = dist / feat.radius;
-      var influence = Math.exp(-normDist * normDist * feat.gaussianCoeff);
-      if (feat.type === '${LandscapeType.Mountain}') {
-        height += influence * feat.strength;
-      } else if (feat.type === '${LandscapeType.Pond}') {
+      if (dist >= feat.radius) continue;
+
+      var nv = feat.noiseAmount > 0
+        ? noise.simplex2D(worldX * feat.noiseScale, worldZ * feat.noiseScale) * feat.noiseAmount
+        : 0;
+
+      var t = Math.max(0, Math.min(1, 1 - dist / feat.radius + nv));
+      var shaped = Math.pow(t, feat.shapePower);
+
+      var influence;
+      if (feat.layers >= 1) {
+        var stepped = Math.floor(shaped * feat.layers) / feat.layers;
+        var nextStep = Math.min(1, stepped + 1 / feat.layers);
+        var frac = (shaped - stepped) * feat.layers;
+        var blendStart = 1 - feat.edgeSharpness;
+        var edgeBlend = frac <= blendStart ? 0 : (frac - blendStart) / (1 - blendStart);
+        var flatStep = stepped + edgeBlend * (nextStep - stepped);
+        var slopedStep = stepped + frac * (nextStep - stepped);
+        influence = flatStep + feat.layerSlope * (slopedStep - flatStep);
+      } else {
+        influence = shaped;
+      }
+
+      if (feat.type === '${LandscapeType.Pond}') {
         height -= influence * feat.strength;
+      } else {
+        height += influence * feat.strength;
       }
     }
     return height;

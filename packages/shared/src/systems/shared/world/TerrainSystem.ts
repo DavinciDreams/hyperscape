@@ -786,7 +786,12 @@ export class TerrainSystem extends System {
           z: f.z,
           radius: f.radius,
           strength: f.strength,
-          gaussianCoeff: f.gaussianCoeff,
+          layers: f.layers,
+          shapePower: f.shapePower,
+          edgeSharpness: f.edgeSharpness,
+          layerSlope: f.layerSlope,
+          noiseScale: f.noiseScale,
+          noiseAmount: f.noiseAmount,
         })),
       };
 
