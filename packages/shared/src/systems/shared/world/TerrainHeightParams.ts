@@ -26,7 +26,7 @@ export interface NoiseLayerDef {
 }
 
 export const CONTINENT_LAYER: NoiseLayerDef = {
-  scale: 0.0008,
+  scale: 0.0004,
   octaves: 5,
   persistence: 0.7,
   lacunarity: 2.0,
@@ -34,12 +34,12 @@ export const CONTINENT_LAYER: NoiseLayerDef = {
 };
 
 export const RIDGE_LAYER: NoiseLayerDef = {
-  scale: 0.003,
+  scale: 0.0015,
   weight: 0.15,
 };
 
 export const HILL_LAYER: NoiseLayerDef = {
-  scale: 0.02,
+  scale: 0.008,
   octaves: 4,
   persistence: 0.6,
   lacunarity: 2.2,
@@ -47,13 +47,13 @@ export const HILL_LAYER: NoiseLayerDef = {
 };
 
 export const EROSION_LAYER: NoiseLayerDef = {
-  scale: 0.005,
+  scale: 0.0025,
   iterations: 3,
   weight: 0.1,
 };
 
 export const DETAIL_LAYER: NoiseLayerDef = {
-  scale: 0.04,
+  scale: 0.02,
   octaves: 2,
   persistence: 0.3,
   lacunarity: 2.5,
@@ -97,7 +97,7 @@ export const TUNDRA_PROFILE: BiomeNoiseProfile = {
 export const FOREST_PROFILE: BiomeNoiseProfile = {
   continentWeight: 0.15,
   ridgeWeight: 0.08,
-  hillWeight: 0.1,
+  hillWeight: 0.01,
   erosionWeight: 0.05,
   detailWeight: 0.05,
   powerCurve: 1,
@@ -178,7 +178,7 @@ export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
     x: -168.5,
     z: -352.5,
     radius: 150,
-    strength: 4.0,
+    strength: 1.5,
     layers: 5,
     shapePower: 1.8,
     edgeSharpness: 0.7,
@@ -189,9 +189,9 @@ export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
   {
     type: LandscapeType.Mountain,
     x: 265.5,
-    z: 128.5,
+    z: 322.5,
     radius: 150,
-    strength: 2.0,
+    strength: 0.7,
     layers: 3,
     shapePower: 1.5,
     edgeSharpness: 0.6,
@@ -201,8 +201,8 @@ export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
   },
   {
     type: LandscapeType.Pond,
-    x: -238.5,
-    z: 325.5,
+    x: -28.5,
+    z: 327.5,
     radius: 90,
     strength: 1.5,
     layers: 1,

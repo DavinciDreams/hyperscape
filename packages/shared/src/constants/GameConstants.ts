@@ -81,7 +81,7 @@ export const TERRAIN_CONSTANTS = {
    * Terrain below this height is underwater and impassable.
    * Used by: TerrainSystem, VegetationSystem, DissolveMaterial, RoadNetworkSystem, ResourceSystem
    */
-  WATER_THRESHOLD: 9.0,
+  WATER_THRESHOLD: 50.0,
 
   /**
    * Buffer distance above water where vegetation shouldn't spawn.

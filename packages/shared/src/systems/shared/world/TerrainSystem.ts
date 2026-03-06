@@ -1386,7 +1386,7 @@ export class TerrainSystem extends System {
     TILE_SIZE: 100, // 100m x 100m tiles
     WORLD_SIZE: 100, // 100x100 grid = 10km x 10km world
     TILE_RESOLUTION: 64, // 64x64 vertices per tile for smooth terrain
-    MAX_HEIGHT: 50, // 50m max height variation (bumpy terrain to show flat zones)
+    MAX_HEIGHT: 150, // 50m max height variation (bumpy terrain to show flat zones)
     WATER_THRESHOLD: TERRAIN_CONSTANTS.WATER_THRESHOLD, // Water appears below this level
 
     // Performance: Reduced draw distance
