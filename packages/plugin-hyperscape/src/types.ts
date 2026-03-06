@@ -43,7 +43,11 @@ export type EventType =
   | "DUEL_SESSION_STARTED"
   | "DUEL_COMPLETED"
   | "DUEL_CANCELLED"
-  | "DUEL_ON_DECK";
+  | "DUEL_ON_DECK"
+  | "DUEL_COUNTDOWN_START"
+  | "DUEL_COUNTDOWN_TICK"
+  | "DUEL_OPPONENT_DISCONNECTED"
+  | "DUEL_OPPONENT_RECONNECTED";
 
 // Goal types used by the autonomous behavior system
 export type AvailableGoalType =

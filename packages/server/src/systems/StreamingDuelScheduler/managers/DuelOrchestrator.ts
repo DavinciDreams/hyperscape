@@ -1100,16 +1100,33 @@ export class DuelOrchestrator {
         arrowId,
       );
       if (arrowResult.success) {
-        // equipItemDirect doesn't set quantity for stackable items — set directly
+        // equipItemDirect doesn't set quantity for stackable items.
+        // Set quantity on the live equipment reference AND provision via
+        // inventory so the combat system sees the full stack.
         const equipment = equipmentSystem.getPlayerEquipment?.(playerId) as
           | Record<
               string,
               { quantity?: number; itemId?: string | number | null }
             >
           | undefined;
-        if (equipment?.arrows?.itemId) {
+        if (equipment?.arrows) {
           equipment.arrows.quantity = RUNE_PROVISION_QTY;
         }
+
+        // Also add arrows to inventory as a backup — some combat paths
+        // read arrow count from inventory rather than equipment slot.
+        const inventorySystem = this.getInventorySystem();
+        if (inventorySystem?.addItemDirect) {
+          try {
+            await inventorySystem.addItemDirect(playerId, {
+              itemId: arrowId,
+              quantity: RUNE_PROVISION_QTY,
+            });
+          } catch {
+            // Best effort — equipment slot quantity is the primary source
+          }
+        }
+
         Logger.info(
           "StreamingDuelScheduler",
           `Equipped ${arrowId} (qty=${RUNE_PROVISION_QTY}) for ranged agent ${playerId}`,

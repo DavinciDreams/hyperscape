@@ -6796,8 +6796,12 @@ export class AutonomousBehaviorManager {
               );
             } finally {
               this.bankWithdrawalInProgress = false;
-              this.duelPrepStep = "withdrawing_food";
-              this.nextTickFast = true;
+              // Only advance step if prep is still active (may have been
+              // cancelled by DUEL_SESSION_STARTED while this was in-flight)
+              if (this.duelPrepPhase) {
+                this.duelPrepStep = "withdrawing_food";
+                this.nextTickFast = true;
+              }
             }
           })();
         }
@@ -6838,8 +6842,11 @@ export class AutonomousBehaviorManager {
               );
             } finally {
               this.bankWithdrawalInProgress = false;
-              this.duelPrepStep = "moving_to_lobby";
-              this.nextTickFast = true;
+              // Only advance step if prep is still active
+              if (this.duelPrepPhase) {
+                this.duelPrepStep = "moving_to_lobby";
+                this.nextTickFast = true;
+              }
             }
           })();
         }

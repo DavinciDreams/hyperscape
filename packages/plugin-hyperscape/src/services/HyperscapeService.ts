@@ -3072,6 +3072,25 @@ Respond with ONLY the action name, nothing else.`;
         break;
       }
 
+      case "duelCountdownStart": {
+        // Duel countdown is beginning (agents teleported to arena)
+        const countdownData = data as Record<string, unknown>;
+        logger.info(
+          `[HyperscapeService] ⚔️ Duel countdown starting: ${countdownData.duelId}`,
+        );
+        this.broadcastEvent("DUEL_COUNTDOWN_START", countdownData);
+        break;
+      }
+
+      case "duelCountdownTick": {
+        // Countdown tick (3, 2, 1...)
+        this.broadcastEvent(
+          "DUEL_COUNTDOWN_TICK",
+          data as Record<string, unknown>,
+        );
+        break;
+      }
+
       case "duelFightStart": {
         // Duel countdown finished, fight begins
         const duelData = data as Record<string, unknown>;
@@ -3107,6 +3126,26 @@ Respond with ONLY the action name, nothing else.`;
       case "duelOnDeck": {
         // Agent is on-deck for the next duel — should prepare
         this.broadcastEvent("DUEL_ON_DECK", data as Record<string, unknown>);
+        break;
+      }
+
+      case "duelOpponentDisconnected": {
+        // Opponent disconnected during duel — they have a timeout to reconnect
+        const disconnectData = data as Record<string, unknown>;
+        logger.info(
+          `[HyperscapeService] ⚔️ Duel opponent disconnected (timeout: ${disconnectData.timeoutMs}ms)`,
+        );
+        this.broadcastEvent("DUEL_OPPONENT_DISCONNECTED", disconnectData);
+        break;
+      }
+
+      case "duelOpponentReconnected": {
+        // Opponent reconnected during duel
+        logger.info("[HyperscapeService] ⚔️ Duel opponent reconnected");
+        this.broadcastEvent(
+          "DUEL_OPPONENT_RECONNECTED",
+          data as Record<string, unknown>,
+        );
         break;
       }
 
@@ -3621,18 +3660,26 @@ Respond with ONLY the action name, nothing else.`;
           logger.warn(
             `[HyperscapeService] Clamping move target from ${distance2D.toFixed(1)} to ${MAX_MOVE_DISTANCE} units`,
           );
-          this._isMoving = true;
-          this.sendCommand("moveRequest", {
-            ...command,
-            target: clampedTarget,
-          });
+          try {
+            this._isMoving = true;
+            this.sendCommand("moveRequest", {
+              ...command,
+              target: clampedTarget,
+            });
+          } catch {
+            this._isMoving = false;
+          }
           return;
         }
       }
     }
 
-    this._isMoving = true;
-    this.sendCommand("moveRequest", command);
+    try {
+      this._isMoving = true;
+      this.sendCommand("moveRequest", command);
+    } catch {
+      this._isMoving = false;
+    }
   }
 
   /** Wait for current movement to complete. Resolves immediately if not moving. */
