@@ -1516,7 +1516,7 @@ export class TerrainSystem extends System {
     QUADTREE_SPLIT_RATIO: 1.5,
     QUADTREE_SKIRT_DROP: 15,
     QUADTREE_UNSPLIT_MULTIPLIER: 1.2,
-    QUADTREE_RESOLUTION: 32,
+    QUADTREE_RESOLUTION: 64,
     QUADTREE_MAX_SYNC_PER_FRAME: 4,
     QUADTREE_MAX_ASSEMBLIES_PER_FRAME: 6,
 
@@ -3253,16 +3253,67 @@ export class TerrainSystem extends System {
     }
 
     console.log(
-      `[TerrainSystem] Road influence refresh complete: ${tilesUpdated}/${tiles.length} tiles updated, ${totalVerticesWithRoads} vertices with road influence`,
+      `[TerrainSystem] Road influence refresh (tiles): ${tilesUpdated}/${tiles.length} tiles updated, ${totalVerticesWithRoads} vertices with road influence`,
     );
-    // Log which tiles were skipped (no road segments)
-    if (tilesUpdated === 0 && tiles.length > 0) {
-      console.warn(
-        `[TerrainSystem] WARNING: No tiles had road segments! Check if roads are in the visible area.`,
+
+    // Also refresh quad-tree LOD chunks if enabled
+    if (this.quadTreeVisualManager) {
+      let quadChunksUpdated = 0;
+      let quadVerticesWithRoads = 0;
+      const chunks = this.quadTreeVisualManager.getChunks();
+      const chunkEntries = Array.from(chunks.values());
+      const CHUNKS_PER_BATCH = 4;
+
+      for (let ci = 0; ci < chunkEntries.length; ci += CHUNKS_PER_BATCH) {
+        const batchEnd = Math.min(ci + CHUNKS_PER_BATCH, chunkEntries.length);
+
+        for (let c = ci; c < batchEnd; c++) {
+          const chunk = chunkEntries[c];
+          const geometry = chunk.mesh.geometry as THREE.BufferGeometry;
+          if (!geometry) continue;
+
+          const positions = geometry.attributes.position;
+          const roadInfluenceAttr = geometry.getAttribute("roadInfluence");
+          if (
+            !positions ||
+            !(roadInfluenceAttr instanceof THREE.BufferAttribute)
+          )
+            continue;
+
+          const posArray = positions.array as Float32Array;
+          const roadArray = roadInfluenceAttr.array as Float32Array;
+          const cx = chunk.mesh.position.x;
+          const cz = chunk.mesh.position.z;
+          let vertsWithRoad = 0;
+
+          for (let i = 0; i < positions.count; i++) {
+            const worldX = posArray[i * 3] + cx;
+            const worldZ = posArray[i * 3 + 2] + cz;
+            const roadTileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
+            const roadTileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
+            const influence = this.calculateRoadInfluenceAtVertex(
+              worldX,
+              worldZ,
+              roadTileX,
+              roadTileZ,
+            );
+            roadArray[i] = influence;
+            if (influence > 0) vertsWithRoad++;
+          }
+
+          roadInfluenceAttr.needsUpdate = true;
+          quadChunksUpdated++;
+          quadVerticesWithRoads += vertsWithRoad;
+        }
+
+        if (batchEnd < chunkEntries.length) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+      }
+
+      console.log(
+        `[TerrainSystem] Road influence refresh (quadtree): ${quadChunksUpdated}/${chunkEntries.length} chunks updated, ${quadVerticesWithRoads} vertices with road influence`,
       );
-      // Log tile keys for debugging
-      const tileKeys = Array.from(this.terrainTiles.keys()).join(", ");
-      console.log(`[TerrainSystem] Existing tile keys: ${tileKeys}`);
     }
   }
 
