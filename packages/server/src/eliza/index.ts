@@ -157,7 +157,7 @@ export async function initializeAgents(
       console.log("[Eliza] Spawning ElizaOS model agents for dueling...");
       const maxAgents =
         config?.maxModelAgents ??
-        parseInt(process.env.MAX_MODEL_AGENTS || "10", 10);
+        parseInt(process.env.MAX_MODEL_AGENTS || "25", 10);
 
       const spawnedCount = await spawnModelAgents(world, {
         maxAgents,
