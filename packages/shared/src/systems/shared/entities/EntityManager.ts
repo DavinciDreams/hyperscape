@@ -79,8 +79,6 @@ import { DISTANCE_CONSTANTS } from "../../../constants/GameConstants";
 import {
   NetworkingComputeContext,
   isNetworkingComputeAvailable,
-  type GPUEntityInterest,
-  type GPUPlayerPosition,
 } from "../../../utils/compute";
 
 export class EntityManager extends SystemBase {
@@ -133,6 +131,28 @@ export class EntityManager extends SystemBase {
   private _activeEntityIdsCache = new Set<string>();
   /** Frame when active entities were last cached */
   private _activeEntitiesCacheFrame = -1;
+
+  // OPTIMIZATION: Pre-allocated buffers for getEntitiesByType (avoids array allocation per call)
+  /** Cached arrays for each entity type - reused across calls */
+  private readonly _entitiesByTypeBuffers = new Map<string, Entity[]>();
+  /** Pre-allocated buffer for getInterestedPlayers (avoids allocation per call) */
+  private readonly _interestedPlayersBuffer: string[] = [];
+
+  // OPTIMIZATION: Pre-allocated packet buffers for sendNetworkUpdates (avoids per-entity allocations)
+  // These buffers are reused each iteration - data is serialized immediately before reuse
+  /** Reusable position array [x, y, z] */
+  private readonly _packetPositionBuffer: [number, number, number] = [0, 0, 0];
+  /** Reusable quaternion array [x, y, z, w] */
+  private readonly _packetQuaternionBuffer: [number, number, number, number] = [
+    0, 0, 0, 1,
+  ];
+  /** Reusable update packet object */
+  private readonly _updatePacketBuffer: {
+    id: string;
+    changes: Record<string, unknown>;
+  } = { id: "", changes: {} };
+  /** Reusable changes object */
+  private readonly _changesBuffer: Record<string, unknown> = {};
 
   /** Network stats for monitoring interest filtering effectiveness */
   private networkStats = {
@@ -889,6 +909,10 @@ export class EntityManager extends SystemBase {
    * @param entityType - Optional entity type for type-specific distances
    * @returns Array of player IDs who should receive the update
    */
+  /**
+   * Get players who should receive updates about an entity at a given position.
+   * Returns a reusable internal buffer - callers must consume before the next call.
+   */
   getInterestedPlayers(
     entityX: number,
     entityZ: number,
@@ -908,7 +932,10 @@ export class EntityManager extends SystemBase {
 
     // Get all player positions
     const playerPositions = this.spatialRegistry.getPlayerPositions();
-    const interestedPlayers: string[] = [];
+
+    // PERF: Reuse buffer to avoid allocation per call
+    const interestedPlayers = this._interestedPlayersBuffer;
+    interestedPlayers.length = 0;
 
     // Check each player's distance to the entity
     for (const player of playerPositions) {
@@ -928,19 +955,29 @@ export class EntityManager extends SystemBase {
    * Get all entities of a specific type.
    * OPTIMIZATION: Uses type-indexed cache for O(n) where n = entities of that type,
    * instead of O(total entities) linear scan.
+   *
+   * Returns a reusable internal buffer - callers must consume before the next call
+   * with the same type. Do NOT store the returned array reference.
    */
   getEntitiesByType(type: string): Entity[] {
     const typeSet = this.entitiesByType.get(type);
     if (!typeSet || typeSet.size === 0) return [];
 
-    const entities: Entity[] = [];
+    // PERF: Reuse buffer per entity type to avoid allocation per call
+    let buffer = this._entitiesByTypeBuffers.get(type);
+    if (!buffer) {
+      buffer = [];
+      this._entitiesByTypeBuffers.set(type, buffer);
+    }
+    buffer.length = 0;
+
     for (const entityId of typeSet) {
       const entity = this.entities.get(entityId);
       if (entity) {
-        entities.push(entity);
+        buffer.push(entity);
       }
     }
-    return entities;
+    return buffer;
   }
 
   /**
@@ -1312,90 +1349,6 @@ export class EntityManager extends SystemBase {
     });
   }
 
-  /**
-   * Batch compute interested players for multiple entities using GPU.
-   * Falls back to CPU if GPU not available or batch too small.
-   */
-  private async computeInterestedPlayersBatchGPU(
-    entityData: Array<{ entityId: string; x: number; z: number; type: string }>,
-  ): Promise<Map<string, string[]>> {
-    const playerPositions = this.spatialRegistry.getPlayerPositions();
-    const playerCount = playerPositions.length;
-    const entityCount = entityData.length;
-
-    // Check if GPU should be used
-    if (
-      this.gpuComputeAvailable &&
-      this.networkingCompute &&
-      this.networkingCompute.shouldUseGPUForInterestFiltering(
-        entityCount,
-        playerCount,
-      )
-    ) {
-      try {
-        // Prepare GPU data
-        const gpuEntities: GPUEntityInterest[] = entityData.map((e) => {
-          const typeDistances: Record<string, number> = {
-            mob: DISTANCE_CONSTANTS.RENDER_SQ.MOB,
-            npc: DISTANCE_CONSTANTS.RENDER_SQ.NPC,
-            player: DISTANCE_CONSTANTS.RENDER_SQ.PLAYER,
-            item: DISTANCE_CONSTANTS.RENDER_SQ.ITEM,
-          };
-          return {
-            x: e.x,
-            z: e.z,
-            distanceSqThreshold:
-              typeDistances[e.type] ?? this.BROADCAST_DISTANCE_SQ,
-          };
-        });
-
-        const gpuPlayers: GPUPlayerPosition[] = playerPositions.map((p) => ({
-          x: p.x,
-          z: p.z,
-        }));
-
-        // GPU compute
-        const gpuResults =
-          await this.networkingCompute.computeInterestedPlayers(
-            gpuEntities,
-            gpuPlayers,
-          );
-
-        // Convert GPU indices to entity IDs and player IDs
-        const result = new Map<string, string[]>();
-        for (const [entityIdx, playerIndices] of gpuResults) {
-          const entityId = entityData[entityIdx].entityId;
-          const playerIds = playerIndices.map(
-            (pi) => playerPositions[pi].entityId,
-          );
-          result.set(entityId, playerIds);
-        }
-
-        return result;
-      } catch (error) {
-        console.warn(
-          "[EntityManager] GPU interest filtering failed, falling back to CPU:",
-          error,
-        );
-        // Fall through to CPU
-      }
-    }
-
-    // CPU fallback
-    const result = new Map<string, string[]>();
-    for (const entity of entityData) {
-      const players = this.getInterestedPlayers(
-        entity.x,
-        entity.z,
-        entity.type,
-      );
-      if (players.length > 0) {
-        result.set(entity.entityId, players);
-      }
-    }
-    return result;
-  }
-
   private sendNetworkUpdates(): void {
     // Only send network updates on the server
     if (!this.world.isServer) {
@@ -1489,22 +1442,37 @@ export class EntityManager extends SystemBase {
           }
         }
 
-        // Build the update packet
-        const updatePacket = skipPositionBroadcast
-          ? {
-              id: entityId,
-              changes: {
-                ...networkData, // Emote, health, combat state, etc.
-              },
-            }
-          : {
-              id: entityId,
-              changes: {
-                p: [pos.x, pos.y, pos.z],
-                q: rot ? [rot.x, rot.y, rot.z, rot.w] : undefined,
-                ...networkData,
-              },
-            };
+        // PERF: Build update packet using pre-allocated buffers
+        // Clear the changes buffer (reused each iteration)
+        const changes = this._changesBuffer;
+        for (const key in changes) delete changes[key];
+
+        // Copy network data properties into changes buffer
+        for (const key in networkData) {
+          changes[key] = networkData[key];
+        }
+
+        // Add position/quaternion unless skipped (dead player)
+        if (!skipPositionBroadcast) {
+          // Populate position buffer
+          this._packetPositionBuffer[0] = pos.x;
+          this._packetPositionBuffer[1] = pos.y;
+          this._packetPositionBuffer[2] = pos.z;
+          changes.p = this._packetPositionBuffer;
+
+          // Populate quaternion buffer if rotation exists
+          if (rot) {
+            this._packetQuaternionBuffer[0] = rot.x;
+            this._packetQuaternionBuffer[1] = rot.y;
+            this._packetQuaternionBuffer[2] = rot.z;
+            this._packetQuaternionBuffer[3] = rot.w;
+            changes.q = this._packetQuaternionBuffer;
+          }
+        }
+
+        // Populate packet buffer
+        this._updatePacketBuffer.id = entityId;
+        this._updatePacketBuffer.changes = changes;
 
         // INTEREST-BASED FILTERING: Send only to nearby players
         if (
@@ -1513,13 +1481,17 @@ export class EntityManager extends SystemBase {
           network.sendToPlayer
         ) {
           for (const playerId of interestedPlayers) {
-            network.sendToPlayer(playerId, "entityModified", updatePacket);
+            network.sendToPlayer(
+              playerId,
+              "entityModified",
+              this._updatePacketBuffer,
+            );
           }
           this.networkStats.interestFilteredUpdates++;
           this.networkStats.totalPlayersNotified += interestedPlayers.length;
         } else {
           // Fallback: Broadcast to all clients
-          network.send!("entityModified", updatePacket);
+          network.send!("entityModified", this._updatePacketBuffer);
           this.networkStats.broadcastUpdates++;
         }
 
@@ -2147,6 +2119,7 @@ export class EntityManager extends SystemBase {
     this.networkDirtyEntities.clear();
     this._entityArrayDirty = true; // Mark for cache refresh
     this._entityUpdateArray = []; // Clear cached array
+    this._entitiesByTypeBuffers.clear(); // Clear entity type buffers
 
     // Clear spatial registry
     this.spatialRegistry.clear();

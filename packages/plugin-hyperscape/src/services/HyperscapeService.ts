@@ -178,6 +178,17 @@ function getRuntimeSettingString(
   return asString.length > 0 ? asString : null;
 }
 
+function getRuntimeSettingBoolean(
+  runtime: IAgentRuntime,
+  key: string,
+): boolean {
+  const value = runtime.getSetting(key);
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (value === null || value === undefined) return false;
+  return /^(1|true|yes|on)$/i.test(String(value).trim());
+}
+
 function toApiBaseUrl(wsUrl: string): string {
   return wsUrl
     .replace(/^wss:/, "https:")
@@ -329,6 +340,38 @@ export class HyperscapeService
     this.eventHandlers = new Map();
     this.liveKit = new AgentLiveKit();
     this.logBuffer = [];
+  }
+
+  private isDuelBotRuntime(): boolean {
+    if (
+      getRuntimeSettingBoolean(this.runtime, "HYPERSCAPE_AUTO_ACCEPT_DUELS")
+    ) {
+      return true;
+    }
+
+    const trustedIdsRaw =
+      getRuntimeSettingString(
+        this.runtime,
+        "HYPERSCAPE_TRUSTED_DUEL_BOT_ACCOUNT_IDS",
+      ) ||
+      process.env.HYPERSCAPE_TRUSTED_DUEL_BOT_ACCOUNT_IDS ||
+      "eliza-duel-bots-account";
+    const trustedIds = new Set(
+      trustedIdsRaw
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    );
+    const privyId =
+      this.privyUserId ||
+      getRuntimeSettingString(this.runtime, "HYPERSCAPE_PRIVY_USER_ID");
+
+    return (
+      !!this.characterId &&
+      this.characterId.startsWith("agent-") &&
+      !!privyId &&
+      trustedIds.has(privyId)
+    );
   }
 
   private logBuffer: Array<{ timestamp: number; type: string; data: unknown }>;
@@ -1125,11 +1168,13 @@ Respond with ONLY the action name, nothing else.`;
     this.stopAutonomousBehavior();
 
     if (this.reconnectInterval) {
-      clearInterval(this.reconnectInterval);
+      clearTimeout(this.reconnectInterval);
       this.reconnectInterval = null;
     }
 
     await this.disconnect();
+    this.eventHandlers.clear();
+    this.chatProcessingChain = Promise.resolve();
 
     // Clear this runtime's instance from the map
     const runtimeId = this.runtime.agentId;
@@ -1330,10 +1375,7 @@ Respond with ONLY the action name, nothing else.`;
                         await new Promise((r) => setTimeout(r, 500));
 
                         // Re-send enter world — include duelBot flag for duel bots
-                        const isDuelBot2 =
-                          this.runtime.getSetting(
-                            "HYPERSCAPE_AUTO_ACCEPT_DUELS",
-                          ) === "true";
+                        const isDuelBot2 = this.isDuelBotRuntime();
                         this.sendBinaryPacket("enterWorld", {
                           characterId: this.characterId,
                           ...(isDuelBot2
@@ -1442,9 +1484,7 @@ Respond with ONLY the action name, nothing else.`;
             await new Promise((resolve) => setTimeout(resolve, 500));
 
             // Re-send enter world — include duelBot flag for duel bots
-            const isDuelBotRecon =
-              this.runtime.getSetting("HYPERSCAPE_AUTO_ACCEPT_DUELS") ===
-              "true";
+            const isDuelBotRecon = this.isDuelBotRuntime();
             this.sendBinaryPacket("enterWorld", {
               characterId: this.characterId,
               ...(isDuelBotRecon
@@ -1578,8 +1618,18 @@ Respond with ONLY the action name, nothing else.`;
     const wasAutoReconnect = this.autoReconnect;
     this.autoReconnect = false;
 
+    if (this.reconnectInterval) {
+      clearTimeout(this.reconnectInterval);
+      this.reconnectInterval = null;
+    }
+
     if (this.ws) {
-      this.ws.close(); // Code 1000 - normal closure, won't reconnect
+      try {
+        this.ws.removeAllListeners();
+        this.ws.close(); // Code 1000 - normal closure, won't reconnect
+      } catch {
+        // Ignore cleanup errors from stale sockets
+      }
       this.ws = null;
     }
 
@@ -1959,8 +2009,7 @@ Respond with ONLY the action name, nothing else.`;
         );
 
         // Detect if this is a duel bot (auto-accept duels = duel bot behaviour)
-        const isDuelBot =
-          this.runtime.getSetting("HYPERSCAPE_AUTO_ACCEPT_DUELS") === "true";
+        const isDuelBot = this.isDuelBotRuntime();
         const botName = this.runtime.character?.name;
 
         // Wait a moment for server to be ready
@@ -3294,10 +3343,18 @@ Respond with ONLY the action name, nothing else.`;
     eventType: EventType,
     handler: (data: unknown) => void | Promise<void>,
   ): void {
-    if (!this.eventHandlers.has(eventType)) {
-      this.eventHandlers.set(eventType, []);
+    const handlers = this.eventHandlers.get(eventType);
+    if (!handlers) {
+      this.eventHandlers.set(eventType, [handler]);
+      return;
     }
-    this.eventHandlers.get(eventType)!.push(handler);
+
+    // Prevent duplicate registrations for the same handler function.
+    if (handlers.includes(handler)) {
+      return;
+    }
+
+    handlers.push(handler);
   }
 
   /**
@@ -3312,6 +3369,9 @@ Respond with ONLY the action name, nothing else.`;
       const index = handlers.indexOf(handler);
       if (index !== -1) {
         handlers.splice(index, 1);
+      }
+      if (handlers.length === 0) {
+        this.eventHandlers.delete(eventType);
       }
     }
   }

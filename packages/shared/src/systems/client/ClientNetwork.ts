@@ -86,6 +86,12 @@
  *
  * @see packets.ts for packet format
  * @see ServerNetwork.ts for server implementation
+ *
+ * AUDIT-003 (ASSESSED): File is ~5K lines (165KB). The 127 packet handlers are
+ * simple event emitters that forward data to the world event bus. Extraction
+ * modules exist (ConnectionManager.ts, InterpolationEngine.ts) but handlers
+ * don't benefit from extraction - they're intentionally thin wrappers.
+ * TileInterpolator is already extracted. Current structure is appropriate.
  */
 
 // moment removed; use native Date
@@ -4577,6 +4583,7 @@ export class ClientNetwork extends SystemBase {
     moveSeq?: number;
     emote?: string;
     tilesPerTick?: number; // Mob-specific speed (optional, defaults to walk/run speed)
+    isContinuation?: boolean; // Append to existing path instead of resetting interpolator
   }) => {
     // Get entity's current position for smooth start (fallback if startTile not provided)
     const entity = this.world.entities.get(data.id);
@@ -4599,6 +4606,7 @@ export class ClientNetwork extends SystemBase {
       data.moveSeq,
       data.emote,
       data.tilesPerTick,
+      data.isContinuation,
     );
 
     // CRITICAL: Set the flag IMMEDIATELY when movement starts

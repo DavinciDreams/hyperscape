@@ -150,10 +150,12 @@ const args = await yargs(hideBin(process.argv))
     default: Number(process.env.WINNINGS_MARKET_MAKER_FEE_BPS || 200),
     describe: "Winnings fee in basis points routed to market maker wallet",
   })
-  .option("gold-mint", {
+  .option("market-mint", {
     type: "string",
-    default: process.env.GOLD_MINT,
-    describe: "GOLD mint address used for new markets",
+    // Default to native SOL (WSOL) - markets use native token of each chain
+    default:
+      process.env.MARKET_MINT || "So11111111111111111111111111111111111111112",
+    describe: "Token mint for markets (defaults to WSOL/native token)",
   })
   .option("game-url", {
     type: "string",
@@ -215,7 +217,14 @@ function getRating(agentId: string): AgentRating {
   return agentRatings[agentId];
 }
 
+// Perps oracle updates are disabled - the Gold Perps Market program is not deployed on devnet
+// Set ENABLE_PERPS_ORACLE=true to re-enable once deployed
+const PERPS_ORACLE_ENABLED = process.env.ENABLE_PERPS_ORACLE === "true";
+
 async function updatePerpsOracle(agentId: string, rating: AgentRating) {
+  // Skip if perps oracle is disabled (program not deployed)
+  if (!PERPS_ORACLE_ENABLED) return;
+
   try {
     const numericAgentId = parseInt(agentId) || 0;
     if (numericAgentId === 0) return;
@@ -233,14 +242,20 @@ async function updatePerpsOracle(agentId: string, rating: AgentRating) {
       perpsProgram.programId,
     )[0];
 
+    const vaultPda = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault")],
+      perpsProgram.programId,
+    )[0];
+
     await runWithRecovery(
       () =>
         perpsProgram.methods
           .updateOracle(numericAgentId, spotIndexScaled, muScaled, sigmaScaled)
-          // @ts-ignore - Anchor IDL resolves PDA accounts automatically
-          .accounts({
+          .accountsPartial({
             oracle: oraclePda,
+            vault: vaultPda,
             authority: botKeypair.publicKey,
+            systemProgram: SystemProgram.programId,
           })
           .rpc(),
       connection,
@@ -313,9 +328,8 @@ const marketConfigPda = PublicKey.findProgramAddressSync(
   goldClobMarket.programId,
 )[0];
 
-const configuredGoldMint = args["gold-mint"]
-  ? new PublicKey(args["gold-mint"])
-  : null;
+// Market mint defaults to WSOL (native token) - always available
+const marketMint = new PublicKey(args["market-mint"]);
 
 const legacyFeeBps = Number(args["fee-bps"]);
 const tradeTreasuryFeeBps = Number.isFinite(legacyFeeBps)
@@ -419,25 +433,25 @@ const ensureOracleReady = async (): Promise<void> => {
 };
 
 const ensureMarketConfigReady = async (
-  goldMint: PublicKey,
+  tokenMint: PublicKey,
 ): Promise<PublicKey> => {
   const existingConfig =
     await marketProgram.account.marketConfig.fetchNullable(marketConfigPda);
   if (!existingConfig) {
-    const treasuryGold = await findAnyTokenAccountForMint(
+    const treasuryToken = await findAnyTokenAccountForMint(
       connection,
       configuredTradeTreasuryWallet,
-      goldMint,
+      tokenMint,
     );
-    const marketMakerGold = await findAnyTokenAccountForMint(
+    const marketMakerToken = await findAnyTokenAccountForMint(
       connection,
       configuredTradeMarketMakerWallet,
-      goldMint,
+      tokenMint,
     );
     const treasuryTokenAccount =
-      treasuryGold.tokenAccount ?? configuredTradeTreasuryWallet;
+      treasuryToken.tokenAccount ?? configuredTradeTreasuryWallet;
     const marketMakerTokenAccount =
-      marketMakerGold.tokenAccount ?? configuredTradeMarketMakerWallet;
+      marketMakerToken.tokenAccount ?? configuredTradeMarketMakerWallet;
 
     await runWithRecovery(
       () =>
@@ -464,7 +478,7 @@ const ensureMarketConfigReady = async (
     );
   }
 
-  return await detectTokenProgramForMint(connection, goldMint);
+  return await detectTokenProgramForMint(connection, tokenMint);
 };
 
 async function getMatchState(matchPda: PublicKey): Promise<any | null> {
@@ -478,8 +492,8 @@ async function getClobMatchState(
 }
 
 async function createRound(
-  goldMint: PublicKey,
-  tokenProgram: PublicKey,
+  _tokenMint: PublicKey, // Market token mint (WSOL by default)
+  _tokenProgram: PublicKey,
   matchIdInput: number,
   metadata: string,
 ): Promise<{
@@ -680,21 +694,10 @@ gameClient.onDuelStart(async (data: any) => {
       agent2: data.agent2?.name || "Agent B",
     });
 
-    // Check if gold mint is discovered
-    let goldMint = configuredGoldMint;
-    if (!goldMint) {
-      console.error("No GOLD_MINT configured. Cannot create market.");
-      return;
-    }
-
-    if (!goldMint) {
-      console.error("No GOLD mint found. Cannot create market.");
-      return;
-    }
-
-    const tokenProgram = await ensureMarketConfigReady(goldMint);
+    // Markets use native token (WSOL on Solana)
+    const tokenProgram = await ensureMarketConfigReady(marketMint);
     const result = await createRound(
-      goldMint,
+      marketMint,
       tokenProgram,
       numericMatchId,
       metadata,
@@ -841,6 +844,79 @@ async function runMaintenance(): Promise<void> {
   }
 
   // NOTE: We do NOT create new rounds here anymore.
+
+  await runLiquidatorLoop();
+}
+
+async function runLiquidatorLoop(): Promise<void> {
+  if (!keeperProgramApiReady) return;
+  try {
+    const allPositions = await perpsProgram.account.positionState.all();
+    const vaultPda = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault")],
+      perpsProgram.programId,
+    )[0];
+
+    for (const pos of allPositions) {
+      if (pos.account.size.eq(new BN(0))) continue;
+
+      const agentId = pos.account.agentId;
+      const oraclePda = PublicKey.findProgramAddressSync(
+        [Buffer.from("oracle"), new BN(agentId).toArrayLike(Buffer, "le", 4)],
+        perpsProgram.programId,
+      )[0];
+
+      const oracleAcc =
+        await perpsProgram.account.oracleState.fetchNullable(oraclePda);
+      if (!oracleAcc) continue;
+
+      const spotIndex = Number(oracleAcc.spotIndex) / LAMPORTS_PER_SOL;
+      const entryPrice = Number(pos.account.entryPrice) / LAMPORTS_PER_SOL;
+      const size = Number(pos.account.size) / LAMPORTS_PER_SOL;
+      const collateral = Number(pos.account.collateral) / LAMPORTS_PER_SOL;
+      const isLong = pos.account.positionType === 0;
+
+      let pnl = 0;
+      if (isLong) {
+        pnl = (spotIndex - entryPrice) * (size / entryPrice);
+      } else {
+        pnl = (entryPrice - spotIndex) * (size / entryPrice);
+      }
+
+      const marginRatio = (collateral + pnl) / size;
+      // Liquidate if margin ratio falls below maintenance (10%)
+      if (marginRatio < 0.1) {
+        console.log(
+          `[Keeper] Liquidating position ${pos.publicKey.toBase58()} (Margin: ${(marginRatio * 100).toFixed(2)}%)`,
+        );
+        try {
+          await runWithRecovery(
+            () =>
+              perpsProgram.methods
+                .liquidate()
+                .accountsPartial({
+                  position: pos.publicKey,
+                  oracle: oraclePda,
+                  vault: vaultPda,
+                  liquidator: botKeypair.publicKey,
+                })
+                .rpc(),
+            connection,
+          );
+          console.log(
+            `[Keeper] Liquidated position ${pos.publicKey.toBase58()}`,
+          );
+        } catch (e) {
+          console.error(
+            `[Keeper] Failed to liquidate ${pos.publicKey.toBase58()}:`,
+            e,
+          );
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[Keeper] Error in liquidator loop:", e);
+  }
 }
 
 for (;;) {

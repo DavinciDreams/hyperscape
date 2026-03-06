@@ -17,8 +17,8 @@ echo "[deploy] Starting Hyperscape CI/CD update on Vast.ai..."
 # ── Pull latest code ──────────────────────────────────────────
 echo "[deploy] Pulling latest code..."
 git fetch origin
-git reset --hard origin/hackathon
-git pull origin hackathon
+git reset --hard origin/main
+git pull origin main
 
 # ── Install system dependencies (needed for native modules) ───
 echo "[deploy] Installing system build dependencies..."
@@ -45,6 +45,33 @@ echo "[deploy] Installing dependencies..."
 export CI=true
 bun install
 
+# ── Tear down existing processes FIRST (to release DB connections) ──
+echo "[deploy] Tearing down existing processes..."
+
+# Stop pm2-managed processes gracefully first
+bunx pm2 stop all 2>/dev/null || true
+sleep 2
+bunx pm2 delete all 2>/dev/null || true
+sleep 2
+bunx pm2 kill 2>/dev/null || true
+sleep 2
+
+# Kill specific server processes (avoid killing deploy script's bun processes)
+# Target the hyperscape server process specifically, not all bun processes
+pkill -f "hyperscape-duel" || true
+pkill -f "watchdog.sh" || true
+pkill -f "stream-to-rtmp" || true
+pkill -f "turbo.*dev" || true
+pkill -f "chromium" || true
+pkill -f "chrome" || true
+# Kill node processes that might hold DB connections (not bun itself)
+pkill -f "node.*packages/server" || true
+pkill -f "drizzle" || true
+
+# Wait for database connections to be released by Neon pooler
+echo "[deploy] Waiting 30s for database connections to clear..."
+sleep 30
+
 # ── Build core packages ──────────────────────────────────────
 echo "[deploy] Building core dependencies..."
 cd packages/physx-js-webidl && bun run build && cd ../..
@@ -54,25 +81,11 @@ cd packages/procgen && bun run build && cd ../..
 cd packages/asset-forge && bun run build:services && cd ../..
 cd packages/shared && bun run build && cd ../..
 
-# ── Database migration ────────────────────────────────────────
+# ── Database migration (after connections cleared) ────────────
 echo "[deploy] Pushing database schema..."
 cd packages/server
 bunx drizzle-kit push --force
 cd ../..
-
-# ── Tear down existing processes ──────────────────────────────
-echo "[deploy] Tearing down existing processes..."
-# Stop pm2-managed processes first
-bunx pm2 delete ecosystem.config.cjs 2>/dev/null || true
-# Also clean up any legacy processes from the old watchdog
-pkill -f "watchdog.sh" || true
-pkill -f "bun.*build/index" || true
-pkill -f "bun.*dev.mjs" || true
-pkill -f "bun.*dev-final" || true
-pkill -f "stream-to-rtmp" || true
-pkill -f "turbo.*dev" || true
-pkill -f "bun.*duel-stack" || true
-sleep 3
 
 # ── Start socat port proxies ─────────────────────────────────
 echo "[deploy] Starting port proxies..."

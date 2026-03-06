@@ -11,7 +11,7 @@
  * efficiently (single encode, multiple outputs).
  */
 
-import { spawn, exec, type ChildProcess } from "child_process";
+import { spawn, exec, execSync, type ChildProcess } from "child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
@@ -117,6 +117,17 @@ export class RTMPBridge {
   /** Whether client socket reads are paused due to FFmpeg backpressure */
   private clientSocketPaused = false;
 
+  /** Placeholder frame buffer (JPEG) for idle periods */
+  private placeholderFrame: Buffer | null = null;
+  /** Timer for feeding placeholder frames */
+  private placeholderInterval: ReturnType<typeof setInterval> | null = null;
+  /** Whether we're currently in placeholder mode (no live frames) */
+  private inPlaceholderMode = false;
+  /** Timeout before switching to placeholder mode (ms) */
+  private static readonly PLACEHOLDER_TIMEOUT = 5000;
+  /** Whether placeholder mode is enabled */
+  private placeholderEnabled = false;
+
   /** Maximum restart attempts before giving up */
   private static readonly MAX_RESTART_ATTEMPTS = 8;
 
@@ -126,11 +137,11 @@ export class RTMPBridge {
   /** Maximum delay between restart attempts (ms) */
   private static readonly MAX_RESTART_DELAY = 60000;
 
-  /** Health check interval (ms) */
-  private static readonly HEALTH_CHECK_INTERVAL = 10000;
+  /** Health check interval (ms) - check every 5s for faster detection */
+  private static readonly HEALTH_CHECK_INTERVAL = 5000;
 
-  /** Timeout for no data before considering unhealthy (ms) */
-  private static readonly DATA_TIMEOUT = 30000;
+  /** Timeout for no data before considering unhealthy (ms) - reduced to 15s */
+  private static readonly DATA_TIMEOUT = 15000;
   /** Number of FFmpeg log lines to keep in memory */
   private static readonly FFMPEG_LOG_TAIL_LINES = 40;
 
@@ -163,6 +174,11 @@ export class RTMPBridge {
         DEFAULT_STREAMING_CONFIG.audioBitrate,
         32,
       ),
+      gopSize: parseEnvInt(
+        process.env.STREAM_GOP_SIZE,
+        DEFAULT_STREAMING_CONFIG.gopSize,
+        15,
+      ),
     };
 
     this.config = { ...DEFAULT_STREAMING_CONFIG, ...envConfig, ...config };
@@ -177,8 +193,114 @@ export class RTMPBridge {
     this.ffmpegCommand = resolveFfmpegCommand();
     console.log(`[RTMPBridge] Using FFmpeg command: ${this.ffmpegCommand}`);
     console.log(
-      `[RTMPBridge] Stream profile: ${this.config.width}x${this.config.height}@${this.config.fps} ${this.config.videoBitrate}k video / ${this.config.audioBitrate}k audio`,
+      `[RTMPBridge] Stream profile: ${this.config.width}x${this.config.height}@${this.config.fps}fps, GOP=${this.config.gopSize}, ${this.config.videoBitrate}k video / ${this.config.audioBitrate}k audio`,
     );
+
+    // Initialize placeholder mode from environment
+    this.placeholderEnabled = RTMPBridge.parseEnvBool(
+      process.env.STREAM_PLACEHOLDER_ENABLED,
+      false,
+    );
+    if (this.placeholderEnabled) {
+      this.initializePlaceholderFrame();
+      console.log("[RTMPBridge] Placeholder mode enabled for idle periods");
+    }
+  }
+
+  /**
+   * Initialize the placeholder frame buffer.
+   * Creates a simple dark gray JPEG image to send during idle periods.
+   */
+  private initializePlaceholderFrame(): void {
+    // Create a minimal valid JPEG image (dark gray)
+    // This is a hand-crafted minimal JPEG that's ~300 bytes
+    // Using a procedural approach to avoid external dependencies
+    this.placeholderFrame = this.generatePlaceholderJpeg();
+    console.log(
+      `[RTMPBridge] Placeholder frame initialized (${this.placeholderFrame?.length || 0} bytes)`,
+    );
+  }
+
+  /**
+   * Generate a minimal placeholder JPEG image.
+   * Creates a solid dark gray frame to keep the stream alive.
+   */
+  private generatePlaceholderJpeg(): Buffer {
+    // Minimal JPEG header for a 16x16 dark gray image
+    // This is much smaller than generating a full-size frame
+    // FFmpeg will scale it to the output size
+    const minimalJpeg = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+      0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43,
+      0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
+      0x09, 0x08, 0x0a, 0x0c, 0x14, 0x0d, 0x0c, 0x0b, 0x0b, 0x0c, 0x19, 0x12,
+      0x13, 0x0f, 0x14, 0x1d, 0x1a, 0x1f, 0x1e, 0x1d, 0x1a, 0x1c, 0x1c, 0x20,
+      0x24, 0x2e, 0x27, 0x20, 0x22, 0x2c, 0x23, 0x1c, 0x1c, 0x28, 0x37, 0x29,
+      0x2c, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1f, 0x27, 0x39, 0x3d, 0x38, 0x32,
+      0x3c, 0x2e, 0x33, 0x34, 0x32, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x10,
+      0x00, 0x10, 0x01, 0x01, 0x11, 0x00, 0xff, 0xc4, 0x00, 0x1f, 0x00, 0x00,
+      0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+      0x09, 0x0a, 0x0b, 0xff, 0xc4, 0x00, 0xb5, 0x10, 0x00, 0x02, 0x01, 0x03,
+      0x03, 0x02, 0x04, 0x03, 0x05, 0x05, 0x04, 0x04, 0x00, 0x00, 0x01, 0x7d,
+      0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06,
+      0x13, 0x51, 0x61, 0x07, 0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xa1, 0x08,
+      0x23, 0x42, 0xb1, 0xc1, 0x15, 0x52, 0xd1, 0xf0, 0x24, 0x33, 0x62, 0x72,
+      0x82, 0x09, 0x0a, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x25, 0x26, 0x27, 0x28,
+      0x29, 0x2a, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x43, 0x44, 0x45,
+      0x46, 0x47, 0x48, 0x49, 0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
+      0x5a, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x73, 0x74, 0x75,
+      0x76, 0x77, 0x78, 0x79, 0x7a, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+      0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3,
+      0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6,
+      0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9,
+      0xca, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xe1, 0xe2,
+      0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xf1, 0xf2, 0xf3, 0xf4,
+      0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xff, 0xda, 0x00, 0x08, 0x01, 0x01,
+      0x00, 0x00, 0x3f, 0x00, 0xfb, 0xd5, 0xdb, 0x20, 0xa8, 0xaa, 0x1e, 0xc9,
+      0x19, 0x52, 0x47, 0x0c, 0x8a, 0xb8, 0xf4, 0xeb, 0x99, 0x86, 0x00, 0x70,
+      0xcd, 0x9a, 0x00, 0xff, 0xd9,
+    ]);
+    return minimalJpeg;
+  }
+
+  /**
+   * Start the placeholder frame interval.
+   * Sends placeholder frames at the configured FPS when in placeholder mode.
+   */
+  private startPlaceholderMode(): void {
+    if (!this.placeholderEnabled || !this.placeholderFrame) return;
+    if (this.placeholderInterval) return; // Already running
+
+    this.inPlaceholderMode = true;
+    const frameInterval = Math.round(1000 / this.config.fps);
+
+    console.log(
+      `[RTMPBridge] Entering placeholder mode (${this.config.fps}fps)`,
+    );
+
+    this.placeholderInterval = setInterval(() => {
+      if (this.placeholderFrame && this.ffmpeg?.stdin?.writable) {
+        this.writeToFfmpeg(this.placeholderFrame);
+      }
+    }, frameInterval);
+  }
+
+  /**
+   * Stop the placeholder frame interval.
+   * Called when live frames resume.
+   */
+  private stopPlaceholderMode(): void {
+    if (this.placeholderInterval) {
+      clearInterval(this.placeholderInterval);
+      this.placeholderInterval = null;
+    }
+    if (this.inPlaceholderMode) {
+      console.log(
+        "[RTMPBridge] Exiting placeholder mode (live frames resumed)",
+      );
+      this.inPlaceholderMode = false;
+    }
   }
 
   private static parseEnvBool(
@@ -325,9 +447,10 @@ export class RTMPBridge {
       addDestination("YouTube", RTMPBridge.toRtmpUrl(server), youtubeStreamKey);
     }
 
-    // Kick
+    // Kick (uses RTMPS with regional ingest)
     const kickServer =
-      process.env.KICK_RTMP_URL || "rtmp://ingest.kick.com/live";
+      process.env.KICK_RTMP_URL ||
+      "rtmps://fa723fc1b171.global-contribute.live-video.net/app";
     const kickStreamKey = process.env.KICK_STREAM_KEY?.trim() || "";
     const kickUrlHasEmbeddedKey = /\/live\/[^/]+/.test(kickServer);
     if (
@@ -602,23 +725,35 @@ export class RTMPBridge {
       ];
     }
 
+    // Use 'film' tune for better quality and stability (allows B-frames)
+    // Only use 'zerolatency' if STREAM_LOW_LATENCY=true is explicitly set
+    const useLowLatency = /^(1|true|yes)$/i.test(
+      process.env.STREAM_LOW_LATENCY || "",
+    );
+    const tune = useLowLatency ? "zerolatency" : "film";
+    // Buffer multiplier: 2x for both modes (was 4x for film, caused 18MB buffer)
+    // Lower buffer reduces latency accumulation and backpressure buildup
+    const bufferMultiplier = 2;
+
     return [
       "-c:v",
       "libx264",
       "-preset",
       this.config.preset,
       "-tune",
-      "zerolatency",
+      tune,
       "-b:v",
       `${this.config.videoBitrate}k`,
       "-maxrate",
-      `${Math.floor(this.config.videoBitrate * 1.1)}k`,
+      `${Math.floor(this.config.videoBitrate * 1.2)}k`,
       "-bufsize",
-      `${this.config.videoBitrate * 2}k`,
+      `${this.config.videoBitrate * bufferMultiplier}k`,
       "-pix_fmt",
       "yuv420p",
       "-g",
       String(this.config.gopSize),
+      // Add B-frames for better compression (disabled in zerolatency mode)
+      ...(useLowLatency ? [] : ["-bf", "2"]),
     ];
   }
 
@@ -627,6 +762,11 @@ export class RTMPBridge {
    */
   private buildAudioArgs(): string[] {
     return [
+      // Audio filter: async resample to recover from timing drift
+      // async=1000 means resample if audio drifts more than 1000 samples (22ms at 44.1kHz)
+      // This prevents audio dropouts when video/audio streams desync
+      "-af",
+      "aresample=async=1000:first_pts=0",
       "-c:a",
       "aac",
       "-b:a",
@@ -756,26 +896,96 @@ export class RTMPBridge {
     const outputString = this.buildOutputString();
     const isNullOutput = outputString === "-f null -";
 
+    // Check if low latency mode is explicitly requested
+    const useLowLatency = /^(1|true|yes)$/i.test(
+      process.env.STREAM_LOW_LATENCY || "",
+    );
+
     // FFmpeg args for JPEG frame piping (mjpeg → H.264)
-    const args: string[] = [
-      // Low-latency input flags
-      "-fflags",
-      "nobuffer",
-      "-flags",
-      "low_delay",
-      // Input: JPEG frames piped via stdin
+    const args: string[] = useLowLatency
+      ? [
+          // Ultra low-latency input flags (may cause buffering on viewers)
+          "-fflags",
+          "nobuffer",
+          "-flags",
+          "low_delay",
+        ]
+      : [
+          // Balanced input flags with larger buffer for a/v sync stability
+          "-fflags",
+          "+genpts+discardcorrupt",
+          "-thread_queue_size",
+          "1024",
+        ];
+
+    // Input: JPEG frames piped via stdin
+    args.push(
       "-f",
       "mjpeg",
       "-framerate",
       String(this.config.fps),
       "-i",
       "pipe:0",
-    ];
+    );
 
-    // Generate a silent audio source (many RTMP servers require an audio track)
-    args.push("-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-shortest");
+    // Audio input: try PulseAudio first, fallback to silent if not available
+    const audioEnabled = process.env.STREAM_AUDIO_ENABLED !== "false";
+    const pulseDevice =
+      process.env.PULSE_AUDIO_DEVICE || "chrome_audio.monitor";
+    let usePulseAudio = audioEnabled && process.platform === "linux";
 
-    // Map video from pipe and audio from anullsrc
+    // Check if PulseAudio is actually accessible before trying to use it
+    if (usePulseAudio) {
+      try {
+        // Test if we can access PulseAudio - pactl info will fail if not
+        execSync("pactl info", { timeout: 2000, stdio: "pipe" });
+        // Also verify the specific sink exists
+        const sinks = execSync("pactl list short sinks", {
+          timeout: 2000,
+          stdio: "pipe",
+        }).toString();
+        if (!sinks.includes("chrome_audio")) {
+          console.log(
+            "[RTMPBridge] PulseAudio accessible but chrome_audio sink not found, falling back to silent",
+          );
+          usePulseAudio = false;
+        }
+      } catch {
+        console.log(
+          "[RTMPBridge] PulseAudio not accessible, falling back to silent audio",
+        );
+        usePulseAudio = false;
+      }
+    }
+
+    if (usePulseAudio) {
+      // Capture from PulseAudio virtual sink (Chrome outputs here)
+      // Use thread_queue_size to buffer audio and prevent underruns
+      // Use wallclock timestamps to maintain real-time timing
+      args.push(
+        "-thread_queue_size",
+        "1024",
+        "-use_wallclock_as_timestamps",
+        "1",
+        "-f",
+        "pulse",
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-i",
+        pulseDevice,
+      );
+      console.log(`[RTMPBridge] Audio capture from PulseAudio: ${pulseDevice}`);
+    } else {
+      // Fallback: silent audio source (many RTMP servers require an audio track)
+      args.push("-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo");
+      console.log(
+        "[RTMPBridge] Audio: using silent source (PulseAudio not available)",
+      );
+    }
+
+    // Map video from pipe and audio from PulseAudio/anullsrc
     args.push("-map", "0:v:0", "-map", "1:a:0");
 
     // Force output frame rate
@@ -842,6 +1052,11 @@ export class RTMPBridge {
   feedFrame(jpegBuffer: Buffer): boolean {
     if (!this.ffmpeg?.stdin?.writable) return false;
 
+    // Exit placeholder mode when live frames resume
+    if (this.inPlaceholderMode) {
+      this.stopPlaceholderMode();
+    }
+
     this.bytesReceived += jpegBuffer.length;
     this.lastDataReceived = Date.now();
     this.directFrameCount++;
@@ -891,16 +1106,31 @@ export class RTMPBridge {
     }
 
     if (this.wss) {
+      // Remove all listeners before closing to prevent memory leaks
+      this.wss.removeAllListeners("listening");
+      this.wss.removeAllListeners("connection");
+      this.wss.removeAllListeners("error");
       this.wss.close();
       this.wss = null;
     }
 
     if (this.spectatorWss) {
+      // Remove all listeners before closing to prevent memory leaks
+      this.spectatorWss.removeAllListeners("listening");
+      this.spectatorWss.removeAllListeners("connection");
+      this.spectatorWss.removeAllListeners("error");
       this.spectatorWss.close();
       this.spectatorWss = null;
     }
+    // Clean up individual spectator WebSocket listeners
     for (const client of this.spectatorClients) {
-      client.close();
+      client.removeAllListeners("close");
+      client.removeAllListeners("error");
+      try {
+        client.close();
+      } catch {
+        // Ignore errors during cleanup
+      }
     }
     this.spectatorClients.clear();
     this.fmp4InitSegment = null;
@@ -1109,7 +1339,8 @@ export class RTMPBridge {
     const enabledDests = this.destinations.filter((d) => d.enabled);
     const outputs = enabledDests.map((dest) => {
       const fullUrl = dest.key ? `${dest.url}/${dest.key}` : dest.url;
-      return `[f=flv:onfail=ignore]${fullUrl}`;
+      // Add flvflags for better RTMP stability and buffering
+      return `[f=flv:onfail=ignore:flvflags=no_duration_filesize]${fullUrl}`;
     });
 
     const hlsOutputPath = process.env.HLS_OUTPUT_PATH?.trim();
@@ -1336,6 +1567,8 @@ export class RTMPBridge {
     if (!this.ffmpeg) return;
 
     console.log("[RTMPBridge] Stopping FFmpeg");
+    this.stopHealthMonitoring();
+    this.stopPlaceholderMode();
     this.ffmpegBackpressured = false;
     this.setClientBackpressurePaused(false);
 
@@ -1539,15 +1772,23 @@ export class RTMPBridge {
     const now = Date.now();
     const stats = this.getStats();
 
-    // Check for data timeout
+    // Check for data timeout and enter placeholder mode if enabled
     if (
       this.lastDataReceived > 0 &&
-      now - this.lastDataReceived > RTMPBridge.DATA_TIMEOUT
+      now - this.lastDataReceived > RTMPBridge.PLACEHOLDER_TIMEOUT
     ) {
-      console.warn(
-        `[RTMPBridge] No data received for ${Math.round((now - this.lastDataReceived) / 1000)}s. ` +
-          `Stream may be stalled.`,
-      );
+      // Enter placeholder mode to keep stream alive
+      if (this.placeholderEnabled && !this.inPlaceholderMode) {
+        this.startPlaceholderMode();
+      }
+
+      // Only warn if we're past the longer DATA_TIMEOUT
+      if (now - this.lastDataReceived > RTMPBridge.DATA_TIMEOUT) {
+        console.warn(
+          `[RTMPBridge] No data received for ${Math.round((now - this.lastDataReceived) / 1000)}s. ` +
+            `${this.inPlaceholderMode ? "(placeholder mode active)" : "Stream may be stalled."}`,
+        );
+      }
     }
 
     // Check destination health

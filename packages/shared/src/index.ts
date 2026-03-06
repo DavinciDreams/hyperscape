@@ -477,12 +477,12 @@ export {
   isPhysXReady,
 } from "./physics/PhysXManager";
 
-// Export renderer utilities
+// Export renderer utilities (WebGPU only - no WebGL fallback)
 export {
   createRenderer,
   configureRenderer,
   configureShadowMaps,
-  type UniversalRenderer,
+  type WebGPURenderer,
   type RendererOptions,
 } from "./utils/rendering/RendererFactory";
 
@@ -1098,6 +1098,9 @@ export {
   INPUT_LIMITS,
 } from "./constants/interaction";
 
+// Client input constants (click distances, drag thresholds, raycast ranges)
+export { INPUT } from "./systems/client/interaction/constants";
+
 // Combat constants (tick-based timing, ranges, etc.)
 export { COMBAT_CONSTANTS } from "./constants/CombatConstants";
 
@@ -1250,11 +1253,7 @@ export {
   type MinimapWorkerOutput,
 } from "./utils/workers/MinimapWorker";
 
-// Renderer capabilities including OffscreenCanvas support
-export {
-  isOffscreenCanvasAvailable,
-  canTransferCanvas,
-} from "./utils/rendering/RendererFactory";
+// WebGPU is REQUIRED - there is no WebGL fallback
 
 // GPU Compute - WebGPU compute shader infrastructure
 export {

@@ -158,6 +158,14 @@ export class DuelOrchestrator {
   private combatStallNudgeCount = 0;
   private lastCombatStallNudgeTime = 0;
 
+  // ---- Contestant Cache (Memory Optimization) ----
+  /** Cached contestant objects keyed by "agentId:opponentId" */
+  private _contestantCache: Map<string, AgentContestant> = new Map();
+  /** Cache expiry timestamp for contestant cache */
+  private _contestantCacheExpiry = 0;
+  /** Cache duration in ms (invalidate every 250ms to allow HP updates) */
+  private static readonly CONTESTANT_CACHE_TTL_MS = 250;
+
   constructor(
     private readonly world: World,
     private readonly getCurrentCycle: () => StreamingDuelCycle | null,
@@ -199,12 +207,34 @@ export class DuelOrchestrator {
   // Contestant Creation
   // ============================================================================
 
+  /**
+   * Create or update a cached AgentContestant for streaming state.
+   * MEMORY OPTIMIZATION: Caches and updates contestants in place to avoid
+   * creating new objects every 500ms broadcast.
+   */
   createContestant(
     agentId: string,
     opponentId?: string,
   ): AgentContestant | null {
+    const now = Date.now();
+    const cacheKey = `${agentId}:${opponentId ?? ""}`;
+
+    // Check cache expiry
+    if (now > this._contestantCacheExpiry) {
+      this._contestantCache.clear();
+      this._contestantCacheExpiry =
+        now + DuelOrchestrator.CONTESTANT_CACHE_TTL_MS;
+    }
+
+    // Check for cached contestant
+    const cached = this._contestantCache.get(cacheKey);
+
     const entity = this.world.entities.get(agentId);
-    if (!entity) return null;
+    if (!entity) {
+      // Remove from cache if entity no longer exists
+      if (cached) this._contestantCache.delete(cacheKey);
+      return null;
+    }
 
     const data = entity.data as {
       name?: string;
@@ -216,6 +246,23 @@ export class DuelOrchestrator {
       inventory?: unknown;
     };
 
+    // If cached, just update mutable fields (HP, stats) and return
+    if (cached) {
+      const stats = this.getAgentStats().get(agentId);
+      const skills = data.skills || {};
+      const constitution = skills.constitution?.level || 10;
+
+      cached.currentHp = data.health ?? constitution;
+      cached.maxHp = data.maxHealth ?? constitution;
+      cached.wins = stats?.wins || 0;
+      cached.losses = stats?.losses || 0;
+      // Update equipment/inventory snapshots
+      cached.equipment = this.snapshotAgentEquipment(data.equipment);
+      cached.inventory = this.snapshotAgentInventory(data.inventory);
+      return cached;
+    }
+
+    // Create new contestant (first time only)
     const stats = this.getAgentStats().get(agentId);
     const parts = agentId.split("-");
     const provider = parts[1] || "unknown";
@@ -261,7 +308,7 @@ export class DuelOrchestrator {
       }
     }
 
-    return {
+    const contestant: AgentContestant = {
       characterId: agentId,
       name: data.name || agentId,
       provider,
@@ -280,6 +327,16 @@ export class DuelOrchestrator {
       headToHeadWins,
       headToHeadLosses,
     };
+
+    // Cache for future calls
+    this._contestantCache.set(cacheKey, contestant);
+    return contestant;
+  }
+
+  /** Clear the contestant cache (call when cycle ends) */
+  clearContestantCache(): void {
+    this._contestantCache.clear();
+    this._contestantCacheExpiry = 0;
   }
 
   snapshotAgentEquipment(equipment: unknown): Record<string, string> {
@@ -2292,7 +2349,7 @@ export class DuelOrchestrator {
 
       this.setAgentCombatTarget(agent1Id, agent2Id);
       this.setAgentCombatTarget(agent2Id, agent1Id);
-    }, 1500);
+    }, 3000); // 5 ticks at 600ms - aligned with combat loop re-engagement interval
   }
 
   getTileChebyshevDistance(
@@ -2960,6 +3017,8 @@ export class DuelOrchestrator {
     this.combatRolesByAgent.clear();
     this.combatStallNudgeCount = 0;
     this.lastCombatStallNudgeTime = 0;
+    this._contestantCache.clear();
+    this._contestantCacheExpiry = 0;
     this.combatLoopTickCount = 0;
   }
 }

@@ -242,6 +242,9 @@ export class MobEntity extends CombatantEntity {
   /** Shuffle indices for random cardinal selection (avoids array allocation) */
   private readonly _shuffleIndices: number[] = [0, 1, 2, 3];
 
+  /** Tracked PLAYER_SET_DEAD handler for cleanup */
+  private _playerDeadHandler: ((data: unknown) => void) | null = null;
+
   /** Cached NPC size (avoid repeated lookups) */
   private _cachedNPCSize: { width: number; depth: number } | null = null;
 
@@ -532,7 +535,8 @@ export class MobEntity extends CombatantEntity {
 
     // Register for update loop (both client and server)
     // Client: VRM animations via clientUpdate()
-    // Server: AI behavior via serverUpdate()
+    // Server: per-frame housekeeping via serverUpdate()
+    // NPC AI itself is tick-driven by GameTickProcessor via runAITick()
     this.world.setHot(this, true);
 
     // Register with HealthBars system (client-side only)
@@ -656,7 +660,7 @@ export class MobEntity extends CombatantEntity {
     });
 
     // Listen for player deaths - disengage if we were targeting them
-    this.world.on(EventType.PLAYER_SET_DEAD, (data: unknown) => {
+    this._playerDeadHandler = (data: unknown) => {
       const deathData = data as { playerId: string; isDead: boolean };
       if (
         deathData.isDead &&
@@ -664,7 +668,8 @@ export class MobEntity extends CombatantEntity {
       ) {
         this.clearTargetAndExitCombat();
       }
-    });
+    };
+    this.world.on(EventType.PLAYER_SET_DEAD, this._playerDeadHandler);
 
     // CRITICAL: Server uses RespawnManager to generate random spawn position
     // Client uses position from config (which comes from network data - the server's authoritative position)
@@ -1711,6 +1716,21 @@ export class MobEntity extends CombatantEntity {
   }
 
   /**
+   * Tick-driven AI update entry point (called by GameTickProcessor).
+   * Guarded to avoid duplicate AI updates within the same server tick.
+   */
+  public runAITick(deltaTime: number): void {
+    const currentTick = this.world.currentTick;
+    if (currentTick === this._lastAITick) {
+      return;
+    }
+
+    this._lastAITick = currentTick;
+    this.aiStateMachine.update(this.createAIContext(), deltaTime);
+    this.config.aiState = this.aiStateMachine.getCurrentState();
+  }
+
+  /**
    * SERVER-SIDE UPDATE
    * Handles AI logic, pathfinding, combat, and state management
    * Changes are synced to clients via getNetworkData() and markNetworkDirty()
@@ -1765,20 +1785,8 @@ export class MobEntity extends CombatantEntity {
       }
     }
 
-    // AI runs once per server tick (600ms), not every frame
-    const currentTick = this.world.currentTick;
-    if (currentTick === this._lastAITick) {
-      // Same tick as last AI update - skip AI processing
-      // This saves ~59 out of 60 AI updates per second
-      return;
-    }
-    this._lastAITick = currentTick;
-
-    // Update AI state machine (now runs once per tick instead of every frame)
-    this.aiStateMachine.update(this.createAIContext(), deltaTime);
-
-    // Sync config.aiState with AI state machine current state
-    this.config.aiState = this.aiStateMachine.getCurrentState();
+    // AI updates are handled by GameTickProcessor.runAITick()
+    // to preserve deterministic OSRS tick ordering.
   }
 
   /**
@@ -2837,47 +2845,55 @@ export class MobEntity extends CombatantEntity {
     };
   }
 
+  // PERF: Pre-allocated buffer for death position to avoid array allocation
+  private readonly _deathPositionBuffer: [number, number, number] = [0, 0, 0];
+  // PERF: Pre-allocated buffer for position to avoid array allocation
+  private readonly _mobPositionBuffer: [number, number, number] = [0, 0, 0];
+
   // Network data override
+  // PERF: Mutates buffer in-place instead of creating new objects
   getNetworkData(): Record<string, unknown> {
-    const baseData = super.getNetworkData();
+    // Get base data (returns parent's pre-allocated buffer)
+    const buf = super.getNetworkData();
 
     // Handle death state separately
     if (this.deathManager.isCurrentlyDead()) {
-      // Remove ALL position data from baseData
-      delete baseData.x;
-      delete baseData.y;
-      delete baseData.z;
-      delete baseData.p;
-      delete baseData.position;
+      // Remove ALL position data from buffer
+      delete buf.x;
+      delete buf.y;
+      delete buf.z;
+      delete buf.p;
+      delete buf.position;
 
-      const networkData: Record<string, unknown> = {
-        ...baseData,
-        model: this.config.model,
-        mobType: this.config.mobType,
-        level: this.config.level,
-        currentHealth: this.config.currentHealth,
-        maxHealth: this.config.maxHealth,
-        aiState: this.config.aiState,
-        targetPlayerId: this.config.targetPlayerId,
-        deathTime: this.deathManager.getDeathTime(),
-        scale: this.config.scale, // Include scale for client
-      };
+      // Add mob-specific fields directly to buffer (no spread/new object)
+      buf.model = this.config.model;
+      buf.mobType = this.config.mobType;
+      buf.level = this.config.level;
+      buf.currentHealth = this.config.currentHealth;
+      buf.maxHealth = this.config.maxHealth;
+      buf.aiState = this.config.aiState;
+      buf.targetPlayerId = this.config.targetPlayerId;
+      buf.deathTime = this.deathManager.getDeathTime();
+      buf.scale = this.config.scale;
 
       // Send death emote once
       if (this._serverEmote) {
-        networkData.e = this._serverEmote;
+        buf.e = this._serverEmote;
         this._serverEmote = null;
       }
 
       // ALWAYS send death position when dead (handles packet loss, late-joining clients)
-      // Previously only sent once, but clients would miss it and use wrong position
       const deathPos = this.deathManager.getDeathPosition();
       if (deathPos) {
-        networkData.p = [deathPos.x, deathPos.y, deathPos.z];
+        // Use pre-allocated buffer for death position
+        this._deathPositionBuffer[0] = deathPos.x;
+        this._deathPositionBuffer[1] = deathPos.y;
+        this._deathPositionBuffer[2] = deathPos.z;
+        buf.p = this._deathPositionBuffer;
         this.deathManager.markDeathStateSent();
       }
 
-      return networkData;
+      return buf;
     }
 
     // Normal path for living mobs
@@ -2887,29 +2903,30 @@ export class MobEntity extends CombatantEntity {
     } | null;
     const inCombat = combatSystem?.isInCombat?.(this.id) ?? false;
 
-    const networkData: Record<string, unknown> = {
-      ...baseData,
-      model: this.config.model,
-      mobType: this.config.mobType,
-      level: this.config.level,
-      currentHealth: this.config.currentHealth,
-      maxHealth: this.config.maxHealth,
-      aiState: this.config.aiState,
-      targetPlayerId: this.config.targetPlayerId,
-      c: inCombat, // Combat state for health bar visibility (like players)
-      scale: this.config.scale, // Include scale for client model sizing
-    };
+    // Add mob-specific fields directly to buffer (no spread/new object)
+    buf.model = this.config.model;
+    buf.mobType = this.config.mobType;
+    buf.level = this.config.level;
+    buf.currentHealth = this.config.currentHealth;
+    buf.maxHealth = this.config.maxHealth;
+    buf.aiState = this.config.aiState;
+    buf.targetPlayerId = this.config.targetPlayerId;
+    buf.c = inCombat;
+    buf.scale = this.config.scale;
 
     // CRITICAL: Force position to be included if not present
-    // Parent class may omit position to save bandwidth, but we always need it for mobs
-    if (!networkData.p || !Array.isArray(networkData.p)) {
+    if (!buf.p || !Array.isArray(buf.p)) {
       const pos = this.getPosition();
-      networkData.p = [pos.x, pos.y, pos.z];
+      // Use pre-allocated buffer for position
+      this._mobPositionBuffer[0] = pos.x;
+      this._mobPositionBuffer[1] = pos.y;
+      this._mobPositionBuffer[2] = pos.z;
+      buf.p = this._mobPositionBuffer;
     }
 
     // Only broadcast server-forced emotes
     if (this._serverEmote) {
-      networkData.e = this._serverEmote;
+      buf.e = this._serverEmote;
       this._serverEmote = null;
     }
 
@@ -2918,7 +2935,7 @@ export class MobEntity extends CombatantEntity {
       this._justRespawned = false;
     }
 
-    return networkData;
+    return buf;
   }
 
   /**
@@ -3154,6 +3171,12 @@ export class MobEntity extends CombatantEntity {
   override destroy(): void {
     // Unregister entity from hot updates
     this.world.setHot(this, false);
+
+    // Clean up PLAYER_SET_DEAD listener
+    if (this._playerDeadHandler) {
+      this.world.off(EventType.PLAYER_SET_DEAD, this._playerDeadHandler);
+      this._playerDeadHandler = null;
+    }
 
     // Clean up placeholder hitbox (if VRM never loaded)
     this.destroyRaycastProxy();

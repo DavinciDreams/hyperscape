@@ -54,6 +54,11 @@ import {
   generateWebCodecsCaptureScript,
 } from "../src/streaming/index.js";
 import { errMsg } from "../src/shared/errMsg.ts";
+import { getStreamLeakDiagnostics } from "../src/streaming/stream-leak-diagnostics.js";
+
+// Auto-enable leak diagnostics if STREAM_LEAK_DIAGNOSTICS=true.
+// Installed before any timers are allocated so the counts are accurate.
+getStreamLeakDiagnostics();
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
@@ -81,29 +86,8 @@ function withViewerAccessToken(rawUrl: string): string {
   }
 }
 
-function withRendererCaptureHints(rawUrl: string): string {
-  const disableWebGPU = /^(1|true|yes|on)$/i.test(
-    process.env.STREAM_CAPTURE_DISABLE_WEBGPU || "",
-  );
-  if (!disableWebGPU) return rawUrl;
-  try {
-    const url = new URL(rawUrl);
-    // Ensure frontend renderer policy matches capture browser flags.
-    url.searchParams.set("forceWebGL", "1");
-    url.searchParams.set("disableWebGPU", "1");
-    return url.toString();
-  } catch {
-    const separator = rawUrl.includes("?") ? "&" : "?";
-    return `${rawUrl}${separator}forceWebGL=1&disableWebGPU=1`;
-  }
-}
-
 const GAME_URL_CANDIDATES = Array.from(
-  new Set(
-    [GAME_URL, ...GAME_FALLBACK_URLS]
-      .map(withViewerAccessToken)
-      .map(withRendererCaptureHints),
-  ),
+  new Set([GAME_URL, ...GAME_FALLBACK_URLS].map(withViewerAccessToken)),
 );
 
 const BRIDGE_PORT = parseInt(process.env.RTMP_BRIDGE_PORT || "8765", 10);
@@ -125,6 +109,11 @@ const ANGLE_BACKEND =
 const STREAM_CAPTURE_DISABLE_WEBGPU = /^(1|true|yes|on)$/i.test(
   process.env.STREAM_CAPTURE_DISABLE_WEBGPU || "",
 );
+if (STREAM_CAPTURE_DISABLE_WEBGPU) {
+  throw new Error(
+    "STREAM_CAPTURE_DISABLE_WEBGPU is not supported. Hyperscape capture is WebGPU-only.",
+  );
+}
 const CDP_QUALITY = Math.min(
   100,
   Math.max(1, parseInt(process.env.STREAM_CDP_QUALITY || "80", 10)),
@@ -163,9 +152,9 @@ const CAPTURE_RECOVERY_TIMEOUT_MS = Math.max(
 const CAPTURE_RECOVERY_MAX_FAILURES = Math.max(
   1,
   Number.parseInt(
-    process.env.STREAM_CAPTURE_RECOVERY_MAX_FAILURES || "4",
+    process.env.STREAM_CAPTURE_RECOVERY_MAX_FAILURES || "2",
     10,
-  ) || 4,
+  ) || 2,
 );
 
 // ── CDP Frame Rate Tracking ────────────────────────────────────────────────
@@ -315,7 +304,10 @@ async function waitForStreamReadiness(
         const normalizedText = text.toLowerCase();
         const hasStreamingBootUi =
           normalizedText.includes("waiting for duel data") ||
-          normalizedText.includes("initializing world systems");
+          normalizedText.includes("initializing world systems") ||
+          normalizedText.includes("initializing") ||
+          normalizedText.includes("loading assets") ||
+          normalizedText.includes("finalizing");
         return {
           hasCanvas: document.querySelector("canvas") !== null,
           readyFlag: win.__HYPERSCAPE_STREAM_READY__ === true,
@@ -352,9 +344,7 @@ async function waitForStreamReadiness(
 // ── Browser Launch ─────────────────────────────────────────────────────────
 
 async function launchCaptureBrowser() {
-  const featureFlags = STREAM_CAPTURE_DISABLE_WEBGPU
-    ? "--enable-features=UseSkiaRenderer"
-    : "--enable-features=Vulkan,UseSkiaRenderer,WebGPU";
+  const featureFlags = "--enable-features=Vulkan,UseSkiaRenderer,WebGPU";
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,
     args: [
@@ -362,9 +352,7 @@ async function launchCaptureBrowser() {
       "--use-gl=angle",
       `--use-angle=${ANGLE_BACKEND}`,
       "--enable-webgl",
-      ...(STREAM_CAPTURE_DISABLE_WEBGPU
-        ? ["--disable-webgpu"]
-        : ["--enable-unsafe-webgpu"]),
+      "--enable-unsafe-webgpu",
       featureFlags,
       "--ignore-gpu-blocklist",
       "--enable-gpu-rasterization",
@@ -500,7 +488,7 @@ async function setupBrowser() {
       console.log(`[Main] Navigating to ${candidateUrl}...`);
       try {
         await page.goto(candidateUrl, {
-          timeout: 60_000,
+          timeout: 120_000,
           waitUntil: "domcontentloaded",
         });
       } catch (err) {
@@ -521,7 +509,7 @@ async function setupBrowser() {
   } else {
     try {
       await page.goto(selectedGameUrl, {
-        timeout: 60_000,
+        timeout: 120_000,
         waitUntil: "domcontentloaded",
       });
     } catch (err) {
@@ -961,7 +949,7 @@ async function main() {
         cdpStalledIntervals += 1;
       }
 
-      if (cdpStalledIntervals >= 4) {
+      if (cdpStalledIntervals >= 2) {
         if (cdpRecoveryInFlight) {
           console.warn(
             "[Main] CDP recovery already in progress; skipping duplicate stall recovery attempt.",
@@ -971,94 +959,32 @@ async function main() {
         }
 
         console.warn(
-          `[Main] CDP capture stalled (${cdpStalledIntervals} intervals without traffic). Attempting soft recovery...`,
+          `[Main] CDP capture stalled (${cdpStalledIntervals} intervals without traffic). Attempting recovery...`,
         );
         cdpStalledIntervals = 0;
         cdpRecoveryInFlight = true;
 
         let recovered = false;
         try {
-          // Soft recovery: restart CDP screencast without killing browser or FFmpeg
           await withTimeout(
             (async () => {
-              if (cdpSession) {
-                try {
-                  await cdpSession.send("Page.stopScreencast");
-                } catch {
-                  // Session may be stale
-                }
-              }
-              // Re-create CDP session on the existing page
-              if (page && !page.isClosed()) {
-                if (cdpSession) {
-                  try {
-                    await cdpSession.detach();
-                  } catch {
-                    /* ignore */
-                  }
-                  cdpSession = null;
-                }
-                cdpSession = await page.context().newCDPSession(page);
-                await cdpSession.send("Page.startScreencast", {
-                  format: "jpeg",
-                  quality: CDP_QUALITY,
-                  maxWidth: VIEWPORT.width,
-                  maxHeight: VIEWPORT.height,
-                  everyNthFrame: 1,
-                });
-                cdpSession.on("Page.screencastFrame", async (params) => {
-                  const { sessionId, data: base64Data } = params;
-                  try {
-                    await cdpSession?.send("Page.screencastFrameAck", {
-                      sessionId,
-                    });
-                  } catch {
-                    /* ignore */
-                  }
-                  const jpegBuffer = Buffer.from(base64Data, "base64");
-                  const written = bridge.feedFrame(jpegBuffer);
-                  if (written) cdpFrameCount++;
-                  else cdpDroppedFrames++;
-                });
-              } else {
-                throw new Error("Page is closed, need hard recovery");
-              }
+              await stopCdpCapture();
+              await setupBrowser();
+              await startCdpCapture(bridge);
             })(),
             CAPTURE_RECOVERY_TIMEOUT_MS,
-            "CDP soft restart",
+            "CDP restart",
           );
           recovered = true;
           cdpRecoveryFailures = 0;
-          bridge.resetRestartAttempts();
           lastCdpBytesReceived = bridge.getStats().bytesReceived;
-          console.log("[Main] CDP soft recovery successful (no stream gap)");
-        } catch (softErr) {
+          console.log("[Main] CDP capture restarted successfully");
+        } catch (err) {
+          cdpRecoveryFailures += 1;
           console.warn(
-            `[Main] Soft CDP recovery failed: ${errMsg(softErr)}. Trying hard recovery...`,
+            `[Main] CDP restart failed (${cdpRecoveryFailures}/${CAPTURE_RECOVERY_MAX_FAILURES}):`,
+            errMsg(err),
           );
-          // Hard recovery: full browser teardown and restart
-          try {
-            await withTimeout(
-              (async () => {
-                await stopCdpCapture();
-                await setupBrowser();
-                await startCdpCapture(bridge);
-              })(),
-              CAPTURE_RECOVERY_TIMEOUT_MS,
-              "CDP hard restart",
-            );
-            recovered = true;
-            cdpRecoveryFailures = 0;
-            bridge.resetRestartAttempts();
-            lastCdpBytesReceived = bridge.getStats().bytesReceived;
-            console.log("[Main] CDP hard recovery successful");
-          } catch (hardErr) {
-            cdpRecoveryFailures += 1;
-            console.warn(
-              `[Main] CDP hard restart failed (${cdpRecoveryFailures}/${CAPTURE_RECOVERY_MAX_FAILURES}):`,
-              errMsg(hardErr),
-            );
-          }
         } finally {
           cdpRecoveryInFlight = false;
         }
@@ -1071,6 +997,11 @@ async function main() {
             "[Main] Falling back to MediaRecorder capture mode after CDP stall.",
           );
           try {
+            // Clear any existing watchdog before starting a new one.
+            if (captureWatchdog) {
+              clearInterval(captureWatchdog);
+              captureWatchdog = null;
+            }
             await withTimeout(
               stopCdpCapture(),
               5_000,
@@ -1117,23 +1048,34 @@ async function main() {
 
     // Check for periodic restart to clear memory leaks
     if (Date.now() - launchTime > BROWSER_RESTART_INTERVAL_MS) {
-      console.log(
-        "[Main] 🔄 Scheduled browser rotation to prevent WebGL memory leaks.",
-      );
-      try {
-        if (activeCaptureMode === "cdp") {
-          await stopCdpCapture();
-        } else {
-          await stopInPageCaptureControl();
+      // Guard: skip rotation if a CDP recovery is already in flight.
+      if (cdpRecoveryInFlight) {
+        console.warn(
+          "[Main] Skipping scheduled browser rotation — CDP recovery in progress.",
+        );
+      } else {
+        console.log(
+          "[Main] 🔄 Scheduled browser rotation to prevent WebGL memory leaks.",
+        );
+        try {
+          if (activeCaptureMode === "cdp") {
+            await stopCdpCapture();
+          } else {
+            if (captureWatchdog) {
+              clearInterval(captureWatchdog);
+              captureWatchdog = null;
+            }
+            await stopInPageCaptureControl();
+          }
+          await setupBrowser();
+          if (activeCaptureMode === "cdp") {
+            await startCdpCapture(bridge);
+          } else if (activeCaptureMode === "mediarecorder") {
+            captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
+          }
+        } catch (err) {
+          console.error("[Main] Failed to rotate browser!", err);
         }
-        await setupBrowser();
-        if (activeCaptureMode === "cdp") {
-          await startCdpCapture(bridge);
-        } else if (activeCaptureMode === "webcodecs") {
-          // Watchdog will automatically inject script on new page
-        }
-      } catch (err) {
-        console.error("[Main] Failed to rotate browser!", err);
       }
     }
   }, 30000);
@@ -1148,6 +1090,20 @@ async function main() {
     getRTMPBridge().stop();
     clearExternalStatusSnapshot();
     await cleanup();
+
+    // Final leak report: print and validate that no timers were orphaned.
+    const diag = getStreamLeakDiagnostics();
+    if (diag) {
+      diag.printReport();
+      try {
+        diag.assertNoLeaks("after shutdown");
+        console.log("[StreamLeakDiagnostics] ✅ No timer leaks detected.");
+      } catch (leakErr) {
+        console.error(String(leakErr));
+      }
+      diag.uninstall();
+    }
+
     process.exit(0);
   };
 

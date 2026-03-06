@@ -26,9 +26,9 @@ module.exports = {
             autorestart: true,
             max_restarts: 999999,
             min_uptime: "10s",        // consider healthy after 10s
-            restart_delay: 5000,      // 5s cooldown between restarts
-            // Crash-loop protection: after 15 rapid restarts, wait 60s
-            exp_backoff_restart_delay: 1000,
+            restart_delay: 10000,     // 10s cooldown between restarts (allow connections to close)
+            // Crash-loop protection: exponential backoff starting at 2s
+            exp_backoff_restart_delay: 2000,
             // Resource limits – restart if memory exceeds 4GB
             max_memory_restart: "4G",
             // Logging
@@ -39,6 +39,12 @@ module.exports = {
             // Environment
             env: {
                 NODE_ENV: "production",
+                // Aggressively reduce pool size - Neon serverless has very strict limits
+                // Single connection prevents exhaustion during crash loops
+                POSTGRES_POOL_MAX: "1",
+                POSTGRES_POOL_MIN: "0",
+                // Skip DB migrations on startup (already pushed via drizzle-kit)
+                SKIP_MIGRATIONS: "true",
                 STREAMING_DUEL_ENABLED: "true",
                 DUEL_MARKET_MAKER_ENABLED: "true",
                 DUEL_BETTING_ENABLED: "false",
@@ -60,6 +66,8 @@ module.exports = {
                 ALLOW_DESTRUCTIVE_CHANGES: "false",
                 AUTO_START_AGENTS: "true",
                 AUTO_START_AGENTS_MAX: "10",
+                SPAWN_MODEL_AGENTS: "true",
+                MAX_MODEL_AGENTS: "4",
                 MALLOC_TRIM_THRESHOLD_: "-1",
                 MIMALLOC_ALLOW_DECOMMIT: "0",
                 MIMALLOC_ALLOW_RESET: "0",

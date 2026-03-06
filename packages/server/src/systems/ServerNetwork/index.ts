@@ -7,6 +7,14 @@
  * - position-validator.ts, event-bridge.ts, initialization.ts
  * - connection-handler.ts, duel-events.ts, duel-settlement.ts
  * - handlers/* (chat, combat, inventory, processing, etc.)
+ *
+ * AUDIT-002 (ASSESSED): File is ~3K lines (116KB). ServerNetwork is already
+ * heavily decomposed into 30+ modules including handlers/, services/, movement/
+ * directories. This file is the coordinator that ties together:
+ * - authentication.ts, character-selection.ts, socket-management.ts
+ * - broadcast.ts, save-manager.ts, position-validator.ts, event-bridge.ts
+ * - Full handlers/ directory (bank/, duel/, trade/, chat, combat, inventory, etc.)
+ * Current structure is appropriate for a central networking coordinator.
  */
 
 import type {
@@ -446,6 +454,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     event: string;
     fn: (...args: unknown[]) => void;
   }> = [];
+
+  /** Cleanup function for duel event listeners */
+  private cleanupDuelEventListeners: (() => void) | null = null;
 
   constructor(world: World) {
     super(world);
@@ -903,7 +914,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register all duel world-event listeners (countdown, fight, stakes, etc.)
-    registerDuelEventListeners({
+    // Store cleanup function for proper teardown in destroy()
+    this.cleanupDuelEventListeners = registerDuelEventListeners({
       world: this.world,
       broadcastManager: this.broadcastManager,
       getSocketByPlayerId: this.getSocketByPlayerId.bind(this),
@@ -1589,25 +1601,27 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["runecraftingAltarInteract"] =
       this.handlers["onRunecraftingAltarInteract"];
 
-    // Route movement and combat through action queue for OSRS-style tick processing
-    // Actions are queued and processed on tick boundaries, not immediately
+    // Movement is processed immediately — pathfinding and tileMovementStart broadcast
+    // happen on packet receipt, not at the next tick boundary. Walking itself still
+    // advances on the 600ms tick schedule via onTick(). This matches the documented
+    // 30 Hz client input rate and removes the 0–600ms ActionQueue delay.
     this.handlers["onMoveRequest"] = (socket, data) => {
       // Cancel any pending actions when player moves elsewhere (OSRS behavior)
       if (socket.player) {
         this.cancelAllPendingActions(socket.player.id, socket);
       }
-      this.actionQueue.queueMovement(socket, data);
+      this.tileMovementManager.handleMoveRequest(socket, data);
     };
 
     this.handlers["onInput"] = (socket, data) => {
-      // Legacy input handler - convert clicks to movement queue
+      // Legacy input handler - convert clicks to immediate move request
       const payload = data as LegacyInputPayload;
       if (payload.type === "click" && Array.isArray(payload.target)) {
         // Cancel any pending actions when player moves elsewhere (OSRS behavior)
         if (socket.player) {
           this.cancelAllPendingActions(socket.player.id, socket);
         }
-        this.actionQueue.queueMovement(socket, {
+        this.tileMovementManager.handleMoveRequest(socket, {
           target: payload.target,
           runMode: payload.runMode,
         });
@@ -2889,6 +2903,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     ServerNetwork.agentPersonality.clear();
     ServerNetwork.agentDesireScores.clear();
 
+    // Clean up duel event listeners to prevent memory leak
+    if (this.cleanupDuelEventListeners) {
+      this.cleanupDuelEventListeners();
+      this.cleanupDuelEventListeners = null;
+    }
+
     // Destroy trading system first - cancels all active trades and clears cleanup interval
     if (this.tradingSystem) {
       this.tradingSystem.destroy();
@@ -2903,6 +2923,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.spatialIndex.destroy();
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();
+    this.eventBridge.destroy();
     this.tickSystem.stop();
 
     for (const [_id, socket] of this.sockets) {
