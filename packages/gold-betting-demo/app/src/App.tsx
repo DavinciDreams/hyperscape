@@ -381,22 +381,12 @@ export function App() {
     };
   }, [isE2eDebugMode, isEvmChain]);
 
-  const programs = useMemo(() => {
-    if (!isWalletReady(wallet)) return null;
-    return createPrograms(connection, wallet);
-  }, [connection, wallet]);
-
   const readonlyPrograms = useMemo(
     () => createReadonlyPrograms(connection),
     [connection],
   );
 
-  const configuredGoldMint = GOLD_MAINNET_MINT;
   const fixedMatchId = getFixedMatchId();
-  const marketConfigPda = useMemo(
-    () => findMarketConfigPda(GOLD_BINARY_MARKET_PROGRAM_ID),
-    [],
-  );
 
   const programsReady =
     programDeployment.checked &&
@@ -408,32 +398,6 @@ export function App() {
     if (programDeployment.oracle && programDeployment.market) return "";
     return `Betting is temporarily unavailable on ${getCluster()}. Please try again later or switch chain.`;
   }, [programDeployment.oracle, programDeployment.market]);
-
-  useEffect(() => {
-    if (!shouldPollChainData) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const mintAccount = await connection.getAccountInfo(
-          configuredGoldMint,
-          "confirmed",
-        );
-        if (cancelled || !mintAccount) return;
-        if (mintAccount.owner.equals(TOKEN_PROGRAM_ID)) {
-          setConfiguredGoldTokenProgram(TOKEN_PROGRAM_ID);
-          return;
-        }
-        if (mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)) {
-          setConfiguredGoldTokenProgram(TOKEN_2022_PROGRAM_ID);
-        }
-      } catch {
-        if (!cancelled) setConfiguredGoldTokenProgram(TOKEN_2022_PROGRAM_ID);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [connection, configuredGoldMint, shouldPollChainData]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
