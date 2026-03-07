@@ -199,11 +199,23 @@ export class ElizaDuelBot extends EventEmitter {
         // Build plugins (no SQL plugin — InMemoryDatabaseAdapter replaces PGLite WASM)
         const plugins: Plugin[] = [modelPlugin, hyperscapePlugin];
 
+        // Create a memory-safe adapter (cap logs + fix memoriesByRoom leak)
+        const adapter = new InMemoryDatabaseAdapter();
+        const MAX_LOGS = 20;
+        const origLog = adapter.log.bind(adapter);
+        adapter.log = async (params: Record<string, unknown>) => {
+          await origLog(params);
+          const logs = (adapter as unknown as { logs: unknown[] }).logs;
+          if (logs && logs.length > MAX_LOGS) {
+            logs.splice(0, logs.length - MAX_LOGS);
+          }
+        };
+
         // Create runtime with lightweight in-memory adapter (no PGLite WASM overhead)
         this.runtime = new AgentRuntime({
           character,
           plugins,
-          adapter: new InMemoryDatabaseAdapter(),
+          adapter,
         });
 
         // Initialize with timeout to prevent hanging

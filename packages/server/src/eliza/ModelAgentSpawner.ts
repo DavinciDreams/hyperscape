@@ -422,10 +422,72 @@ export async function spawnModelAgents(
       const runtimePlugins: Plugin[] = [modelPlugin, hyperscapePlugin];
 
       const createRuntimeInstance = (): AgentRuntime => {
+        // Create a memory-safe InMemoryDatabaseAdapter that caps internal
+        // data structures. The stock adapter has several unbounded growth paths:
+        //  1. `logs` array — every useModel/action/evaluator call appends here
+        //  2. `memoriesByRoom` — deleteMemory only removes from memoriesById
+        //  3. `cache` Map — no eviction policy
+        const adapter = new InMemoryDatabaseAdapter();
+        const MAX_LOGS = 20;
+        const MAX_MEMORIES = 50;
+        const MAX_CACHE = 100;
+
+        // --- Cap logs (stores full LLM prompts + responses per call) ---
+        const origLog = adapter.log.bind(adapter);
+        adapter.log = async (params: Record<string, unknown>) => {
+          await origLog(params);
+          const logs = (adapter as unknown as { logs: unknown[] }).logs;
+          if (logs && logs.length > MAX_LOGS) {
+            logs.splice(0, logs.length - MAX_LOGS);
+          }
+        };
+
+        // --- Fix deleteMemory to also clean memoriesByRoom ---
+        const origDeleteMemory = adapter.deleteMemory.bind(adapter);
+        adapter.deleteMemory = async (memoryId: UUID) => {
+          // Remove from memoriesByRoom lists (stock impl misses this)
+          const byRoom = (
+            adapter as unknown as {
+              memoriesByRoom: Map<string, Array<{ id: unknown }>>;
+            }
+          ).memoriesByRoom;
+          if (byRoom) {
+            for (const [key, list] of byRoom) {
+              const idx = list.findIndex(
+                (m) => String(m.id) === String(memoryId),
+              );
+              if (idx !== -1) {
+                list.splice(idx, 1);
+                if (list.length === 0) byRoom.delete(key);
+                break;
+              }
+            }
+          }
+          await origDeleteMemory(memoryId);
+        };
+
+        // --- Cap cache Map ---
+        const origCacheSet = adapter.cache?.set?.bind(adapter.cache);
+        if (origCacheSet) {
+          const cacheMap = (
+            adapter as unknown as { cache: Map<string, unknown> }
+          ).cache;
+          const origSet = cacheMap.set.bind(cacheMap);
+          cacheMap.set = (key: string, value: unknown) => {
+            const result = origSet(key, value);
+            if (cacheMap.size > MAX_CACHE) {
+              const iter = cacheMap.keys();
+              const oldest = iter.next();
+              if (!oldest.done) cacheMap.delete(oldest.value);
+            }
+            return result;
+          };
+        }
+
         const runtimeInstance = new AgentRuntime({
           character,
           plugins: runtimePlugins,
-          adapter: new InMemoryDatabaseAdapter(),
+          adapter,
         });
 
         const originalGetModel = runtimeInstance.getModel.bind(runtimeInstance);
@@ -436,10 +498,8 @@ export async function spawnModelAgents(
           );
         }) as AgentRuntime["getModel"];
 
-        // Cap memory accumulation to prevent unbounded heap growth.
-        // InMemoryDatabaseAdapter stores every createMemory() call forever in Maps.
-        // Agents only read the last ~25 memories for LLM context, so cap at 50.
-        const MAX_AGENT_MEMORIES = 50;
+        // Cap memory accumulation via createMemory ring buffer.
+        // Even with the adapter fixes above, cap at runtime level too.
         const trackedMemoryIds: string[] = [];
         const originalCreateMemory =
           runtimeInstance.createMemory.bind(runtimeInstance);
@@ -448,8 +508,7 @@ export async function spawnModelAgents(
           tableName: string,
           unique?: boolean,
         ): Promise<UUID> => {
-          // Evict oldest memories when over cap
-          while (trackedMemoryIds.length >= MAX_AGENT_MEMORIES) {
+          while (trackedMemoryIds.length >= MAX_MEMORIES) {
             const oldId = trackedMemoryIds.shift();
             if (oldId) {
               runtimeInstance.deleteMemory(oldId as UUID).catch(() => {});
@@ -519,7 +578,33 @@ export async function spawnModelAgents(
       const runtimeInstance = createRuntimeInstance();
       runtime = runtimeInstance;
 
+      // Verify adapter BEFORE initialize
+      const adapterBeforeInit = runtimeInstance.adapter;
+      const adapterNameBefore =
+        adapterBeforeInit?.constructor?.name || "unknown";
+
       await initializeRuntimeInstance(runtimeInstance);
+
+      // Verify adapter AFTER initialize (detect if plugin overrode it)
+      const adapterAfterInit = runtimeInstance.adapter;
+      const adapterNameAfter = adapterAfterInit?.constructor?.name || "unknown";
+
+      if (adapterBeforeInit !== adapterAfterInit) {
+        console.warn(
+          `[ModelAgentSpawner] ${tag} ⚠️  Adapter was SWAPPED during initialize! ` +
+            `${adapterNameBefore} → ${adapterNameAfter}. Re-asserting InMemoryDatabaseAdapter.`,
+        );
+        // Re-register our safe adapter (force override)
+        (
+          runtimeInstance as unknown as {
+            adapter: unknown;
+          }
+        ).adapter = adapterBeforeInit;
+      } else {
+        console.log(
+          `[ModelAgentSpawner] ${tag} ✓ Adapter verified: ${adapterNameAfter}`,
+        );
+      }
 
       runningAgents.set(agentKey, {
         config: agentConfig,
@@ -615,8 +700,86 @@ export async function spawnModelAgents(
     `[ModelAgentSpawner] ✅ Spawned ${spawnedCount}/${eligible.length} model agents in ${elapsed}s (${totalFailures} failed)`,
   );
 
+  // Start periodic adapter health monitor + flush + GC (every 60s)
+  if (spawnedCount > 0 && !adapterHealthInterval) {
+    adapterHealthInterval = setInterval(() => {
+      let totalLogs = 0;
+      let totalMemories = 0;
+      let totalCache = 0;
+      let totalEntities = 0;
+      for (const agent of runningAgents.values()) {
+        const a = agent.runtime.adapter as unknown as {
+          logs?: unknown[];
+          memoriesById?: Map<unknown, unknown>;
+          memoriesByRoom?: Map<string, unknown[]>;
+          cache?: Map<unknown, unknown>;
+          entities?: Map<unknown, unknown>;
+          rooms?: Map<unknown, unknown>;
+          worlds?: Map<unknown, unknown>;
+          tasks?: Map<unknown, unknown>;
+        } | null;
+        if (!a) continue;
+
+        totalLogs += a.logs?.length ?? 0;
+        totalMemories += a.memoriesById?.size ?? 0;
+        totalCache += a.cache?.size ?? 0;
+        totalEntities += a.entities?.size ?? 0;
+
+        // Flush stale adapter data to prevent unbounded growth.
+        // Agents don't use persistent data — they use live world state.
+        // Logs: already capped by our log() override, but flush old ones
+        if (a.logs && a.logs.length > 10) {
+          a.logs.splice(0, a.logs.length - 10);
+        }
+        // Entities/rooms/worlds/tasks: agents don't use these, clear if any accumulate
+        if (a.entities && a.entities.size > 50) a.entities.clear();
+        if (a.rooms && a.rooms.size > 50) a.rooms.clear();
+        if (a.worlds && a.worlds.size > 10) a.worlds.clear();
+        if (a.tasks && a.tasks.size > 50) a.tasks.clear();
+        // Cache: evict if over threshold
+        if (a.cache && a.cache.size > 100) {
+          const excess = a.cache.size - 50;
+          const iter = a.cache.keys();
+          for (let i = 0; i < excess; i++) {
+            const k = iter.next();
+            if (k.done) break;
+            a.cache.delete(k.value);
+          }
+        }
+      }
+
+      // Also flush runtime stateCache for each agent
+      for (const agent of runningAgents.values()) {
+        const sc = (
+          agent.runtime as unknown as {
+            stateCache?: Map<unknown, unknown>;
+          }
+        ).stateCache;
+        if (sc && sc.size > 100) {
+          const excess = sc.size - 50;
+          const iter = sc.keys();
+          for (let i = 0; i < excess; i++) {
+            const k = iter.next();
+            if (k.done) break;
+            sc.delete(k.value);
+          }
+        }
+      }
+
+      console.log(
+        `[ModelAgentSpawner] 📊 Adapter health (${runningAgents.size} agents): ` +
+          `logs=${totalLogs}, memories=${totalMemories}, cache=${totalCache}, entities=${totalEntities}`,
+      );
+      // Periodic GC hint
+      if (typeof Bun !== "undefined" && Bun.gc) Bun.gc(false);
+    }, 60_000);
+  }
+
   return spawnedCount;
 }
+
+/** Interval handle for periodic adapter health monitoring */
+let adapterHealthInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Get all running model agents
