@@ -2311,6 +2311,17 @@ export class AutonomousBehaviorManager {
       return false;
     }
 
+    if (
+      (player as PlayerEntity & { inStreamingDuel?: boolean }).inStreamingDuel
+    ) {
+      if (this.debug) {
+        logger.debug(
+          "[AutonomousBehavior] Player is in streaming duel, skipping autonomous tick",
+        );
+      }
+      return false;
+    }
+
     // Only skip if explicitly dead - undefined means alive
     if (player.alive === false) {
       if (this.debug)

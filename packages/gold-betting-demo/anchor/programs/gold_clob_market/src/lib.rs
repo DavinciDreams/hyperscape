@@ -3,8 +3,23 @@
 
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
+use fight_oracle::{
+    self, MarketSide as OracleMarketSide, MatchResult as OracleMatchResult,
+    MatchStatus as OracleMatchStatus,
+};
+use std::str::FromStr;
 
 declare_id!("ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi");
+
+const DEFAULT_BOOTSTRAP_AUTHORITY: &str = "DfEnrzh4cgnHxfuZRxLGX69fnLd9DP41XxGuE4gtyJpn";
+
+fn bootstrap_authority() -> Pubkey {
+    if let Some(value) = option_env!("HYPERSCAPE_BOOTSTRAP_AUTHORITY") {
+        Pubkey::from_str(value).expect("invalid HYPERSCAPE_BOOTSTRAP_AUTHORITY")
+    } else {
+        Pubkey::from_str(DEFAULT_BOOTSTRAP_AUTHORITY).expect("invalid default bootstrap authority")
+    }
+}
 
 #[program]
 pub mod gold_clob_market {
@@ -77,6 +92,7 @@ pub mod gold_clob_market {
         match_state.next_order_id = 1;
         match_state.vault_bump = ctx.bumps.vault;
         match_state.authority = *ctx.accounts.user.key;
+        match_state.oracle_match = ctx.accounts.oracle_match.key();
         Ok(())
     }
 
@@ -91,7 +107,14 @@ pub mod gold_clob_market {
         let _order_book = &mut ctx.accounts.order_book;
 
         require!(match_state.is_open, ErrorCode::MatchClosed);
-        require!(order_id == match_state.next_order_id, ErrorCode::InvalidOrderId);
+        require!(
+            order_id == match_state.next_order_id,
+            ErrorCode::InvalidOrderId
+        );
+        match_state.next_order_id = match_state
+            .next_order_id
+            .checked_add(1)
+            .ok_or(ErrorCode::MathOverflow)?;
         require!(price > 0 && price < 1000, ErrorCode::InvalidPrice);
 
         let price_component = if is_buy {
@@ -104,13 +127,15 @@ pub mod gold_clob_market {
         let cost_full = amount
             .checked_mul(price_component)
             .ok_or(ErrorCode::MathOverflow)?;
-            
+
         require!(cost_full % 1000 == 0, ErrorCode::PrecisionError);
-        
-        let cost = cost_full
-            .checked_div(1000)
-            .ok_or(ErrorCode::MathOverflow)?;
+
+        let cost = cost_full.checked_div(1000).ok_or(ErrorCode::MathOverflow)?;
         require!(cost > 0, ErrorCode::CostTooLow);
+
+        let user_balance = &mut ctx.accounts.user_balance;
+        user_balance.user = *ctx.accounts.user.key;
+        user_balance.match_state = match_state.key();
 
         // Calculate fees
         let trade_treasury_fee = cost
@@ -172,44 +197,80 @@ pub mod gold_clob_market {
         let mut matches_count = 0;
         const MAX_MATCHES_PER_TX: u32 = 50;
 
-        while remaining_amount > 0 && matches_count < MAX_MATCHES_PER_TX && account_idx < ctx.remaining_accounts.len() {
+        while remaining_amount > 0
+            && matches_count < MAX_MATCHES_PER_TX
+            && account_idx + 1 < ctx.remaining_accounts.len()
+        {
             let maker_order_account = &ctx.remaining_accounts[account_idx];
             let maker_balance_account = &ctx.remaining_accounts[account_idx + 1];
             account_idx += 2;
 
-            if maker_order_account.data_is_empty() { continue; }
-            let mut maker_order: Account<Order> = Account::try_from(maker_order_account).map_err(|_| ErrorCode::InvalidRemainingAccount)?;
-            
-            if maker_order.is_buy == is_buy { continue; }
-            if maker_order.filled >= maker_order.amount { continue; }
-            if maker_order.match_state != match_state.key() { continue; }
-            
+            if maker_order_account.data_is_empty() {
+                continue;
+            }
+            let mut maker_order: Account<Order> = Account::try_from(maker_order_account)
+                .map_err(|_| ErrorCode::InvalidRemainingAccount)?;
+
+            if maker_order.is_buy == is_buy {
+                continue;
+            }
+            if maker_order.filled >= maker_order.amount {
+                continue;
+            }
+            if maker_order.match_state != match_state.key() {
+                continue;
+            }
+
             let maker_price = maker_order.price;
             let checks_out = if is_buy {
                 maker_price <= price
             } else {
                 maker_price >= price
             };
-            if !checks_out { continue; }
+            if !checks_out {
+                continue;
+            }
 
-            let mut maker_balance: Account<UserBalance> = Account::try_from(maker_balance_account).map_err(|_| ErrorCode::InvalidRemainingAccount)?;
-            require_keys_eq!(maker_balance.user, maker_order.maker, ErrorCode::InvalidRemainingAccount);
+            let mut maker_balance: Account<UserBalance> = Account::try_from(maker_balance_account)
+                .map_err(|_| ErrorCode::InvalidRemainingAccount)?;
+            require_keys_eq!(
+                maker_balance.user,
+                maker_order.maker,
+                ErrorCode::InvalidRemainingAccount
+            );
+            require_keys_eq!(
+                maker_balance.match_state,
+                match_state.key(),
+                ErrorCode::InvalidRemainingAccount
+            );
 
-            let maker_remaining = maker_order.amount.checked_sub(maker_order.filled).ok_or(ErrorCode::MathOverflow)?;
+            let maker_remaining = maker_order
+                .amount
+                .checked_sub(maker_order.filled)
+                .ok_or(ErrorCode::MathOverflow)?;
             let fill_amount = std::cmp::min(remaining_amount, maker_remaining);
 
-            maker_order.filled = maker_order.filled.checked_add(fill_amount).ok_or(ErrorCode::MathOverflow)?;
-            remaining_amount = remaining_amount.checked_sub(fill_amount).ok_or(ErrorCode::MathOverflow)?;
+            maker_order.filled = maker_order
+                .filled
+                .checked_add(fill_amount)
+                .ok_or(ErrorCode::MathOverflow)?;
+            remaining_amount = remaining_amount
+                .checked_sub(fill_amount)
+                .ok_or(ErrorCode::MathOverflow)?;
 
             if is_buy {
-                maker_balance.no_shares = maker_balance.no_shares.checked_add(fill_amount).ok_or(ErrorCode::MathOverflow)?;
-                let user_balance = &mut ctx.accounts.user_balance;
-                user_balance.user = *ctx.accounts.user.key;
-                user_balance.match_state = match_state.key();
-                user_balance.yes_shares = user_balance.yes_shares.checked_add(fill_amount).ok_or(ErrorCode::MathOverflow)?;
+                maker_balance.no_shares = maker_balance
+                    .no_shares
+                    .checked_add(fill_amount)
+                    .ok_or(ErrorCode::MathOverflow)?;
+                user_balance.yes_shares = user_balance
+                    .yes_shares
+                    .checked_add(fill_amount)
+                    .ok_or(ErrorCode::MathOverflow)?;
 
                 if price > maker_price {
-                    let improvement = fill_amount.checked_mul((price - maker_price) as u64)
+                    let improvement = fill_amount
+                        .checked_mul((price - maker_price) as u64)
                         .ok_or(ErrorCode::MathOverflow)?
                         .checked_div(1000)
                         .ok_or(ErrorCode::MathOverflow)?;
@@ -231,14 +292,18 @@ pub mod gold_clob_market {
                     }
                 }
             } else {
-                maker_balance.yes_shares = maker_balance.yes_shares.checked_add(fill_amount).ok_or(ErrorCode::MathOverflow)?;
-                let user_balance = &mut ctx.accounts.user_balance;
-                user_balance.user = *ctx.accounts.user.key;
-                user_balance.match_state = match_state.key();
-                user_balance.no_shares = user_balance.no_shares.checked_add(fill_amount).ok_or(ErrorCode::MathOverflow)?;
+                maker_balance.yes_shares = maker_balance
+                    .yes_shares
+                    .checked_add(fill_amount)
+                    .ok_or(ErrorCode::MathOverflow)?;
+                user_balance.no_shares = user_balance
+                    .no_shares
+                    .checked_add(fill_amount)
+                    .ok_or(ErrorCode::MathOverflow)?;
 
                 if maker_price > price {
-                    let improvement = fill_amount.checked_mul((maker_price - price) as u64)
+                    let improvement = fill_amount
+                        .checked_mul((maker_price - price) as u64)
                         .ok_or(ErrorCode::MathOverflow)?
                         .checked_div(1000)
                         .ok_or(ErrorCode::MathOverflow)?;
@@ -259,31 +324,30 @@ pub mod gold_clob_market {
                     }
                 }
             }
-            
+
             maker_order.exit(&crate::ID)?;
             maker_balance.exit(&crate::ID)?;
             matches_count += 1;
         }
 
-        if remaining_amount > 0 {
-            let new_order = &mut ctx.accounts.new_order;
-            new_order.id = match_state.next_order_id;
-            new_order.match_state = match_state.key();
-            new_order.maker = *ctx.accounts.user.key;
-            new_order.is_buy = is_buy;
-            new_order.price = price;
-            new_order.amount = amount;
-            new_order.filled = amount - remaining_amount;
-            
-            match_state.next_order_id += 1;
-        }
+        let new_order = &mut ctx.accounts.new_order;
+        new_order.id = order_id;
+        new_order.match_state = match_state.key();
+        new_order.maker = *ctx.accounts.user.key;
+        new_order.is_buy = is_buy;
+        new_order.price = price;
+        new_order.amount = amount;
+        new_order.filled = amount - remaining_amount;
 
         Ok(())
     }
 
     pub fn cancel_order(ctx: Context<CancelOrder>, _order_id: u64) -> Result<()> {
         let order = &mut ctx.accounts.order;
-        require!(order.maker == *ctx.accounts.user.key, ErrorCode::NotOrderMaker);
+        require!(
+            order.maker == *ctx.accounts.user.key,
+            ErrorCode::NotOrderMaker
+        );
         require!(order.filled < order.amount, ErrorCode::AlreadyFilled);
 
         let remaining = order.amount - order.filled;
@@ -299,12 +363,10 @@ pub mod gold_clob_market {
         let cost_full = remaining
             .checked_mul(price_component)
             .ok_or(ErrorCode::MathOverflow)?;
-            
+
         require!(cost_full % 1000 == 0, ErrorCode::PrecisionError);
-            
-        let cost = cost_full
-            .checked_div(1000)
-            .ok_or(ErrorCode::MathOverflow)?;
+
+        let cost = cost_full.checked_div(1000).ok_or(ErrorCode::MathOverflow)?;
 
         let match_state = &ctx.accounts.match_state;
         let match_key = match_state.key();
@@ -331,23 +393,30 @@ pub mod gold_clob_market {
         Ok(())
     }
 
-    pub fn resolve_match(ctx: Context<ResolveMatch>, winner: MarketSide) -> Result<()> {
+    pub fn resolve_match(ctx: Context<ResolveMatch>) -> Result<()> {
         let match_state = &mut ctx.accounts.match_state;
         require!(match_state.is_open, ErrorCode::MatchClosed);
         require!(
-            *ctx.accounts.authority.key == match_state.authority,
-            ErrorCode::UnauthorizedResolver
+            ctx.accounts.oracle_match.status == OracleMatchStatus::Resolved,
+            ErrorCode::OracleMatchNotResolved
         );
-        require!(winner == MarketSide::Yes || winner == MarketSide::No, ErrorCode::InvalidWinner);
+        let winner = ctx
+            .accounts
+            .oracle_match
+            .winner
+            .ok_or(ErrorCode::OracleWinnerUnavailable)?;
         match_state.is_open = false;
-        match_state.winner = winner;
+        match_state.winner = match winner {
+            OracleMarketSide::Yes => MarketSide::Yes,
+            OracleMarketSide::No => MarketSide::No,
+        };
         Ok(())
     }
 
     pub fn claim(ctx: Context<Claim>) -> Result<()> {
         let match_state = &ctx.accounts.match_state;
         let user_balance = &mut ctx.accounts.user_balance;
-        
+
         require!(!match_state.is_open, ErrorCode::MatchStillOpen);
 
         let mut winning_shares: u64 = 0;
@@ -358,7 +427,7 @@ pub mod gold_clob_market {
         } else if match_state.winner == MarketSide::No {
             winning_shares = user_balance.no_shares;
             user_balance.no_shares = 0;
-        } 
+        }
         require!(winning_shares > 0, ErrorCode::NothingToClaim);
 
         let fee = winning_shares
@@ -409,16 +478,20 @@ pub mod gold_clob_market {
     }
 }
 
-
-
 fn validate_fee_config(
     trade_treasury_fee_bps: u16,
     trade_market_maker_fee_bps: u16,
     winnings_market_maker_fee_bps: u16,
 ) -> Result<()> {
     require!(trade_treasury_fee_bps <= 10_000, ErrorCode::InvalidFeeBps);
-    require!(trade_market_maker_fee_bps <= 10_000, ErrorCode::InvalidFeeBps);
-    require!(winnings_market_maker_fee_bps <= 10_000, ErrorCode::InvalidFeeBps);
+    require!(
+        trade_market_maker_fee_bps <= 10_000,
+        ErrorCode::InvalidFeeBps
+    );
+    require!(
+        winnings_market_maker_fee_bps <= 10_000,
+        ErrorCode::InvalidFeeBps
+    );
     require!(
         (trade_treasury_fee_bps as u32 + trade_market_maker_fee_bps as u32) <= 10_000,
         ErrorCode::InvalidFeeBps
@@ -438,6 +511,20 @@ pub struct InitializeConfig<'info> {
         bump,
     )]
     pub config: Account<'info, MarketConfig>,
+
+    #[account(
+        constraint = program.programdata_address()? == Some(program_data.key()) @ ErrorCode::UnauthorizedInitializer
+    )]
+    pub program: Program<'info, crate::program::GoldClobMarket>,
+
+    #[account(
+        constraint = program_data.upgrade_authority_address == Some(authority.key())
+            || ((program_data.upgrade_authority_address.is_none()
+                || program_data.upgrade_authority_address == Some(Pubkey::default()))
+                && authority.key() == bootstrap_authority()) @ ErrorCode::UnauthorizedInitializer
+    )]
+    pub program_data: Account<'info, ProgramData>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -473,6 +560,9 @@ pub struct InitializeMatch<'info> {
         bump,
     )]
     pub config: Account<'info, MarketConfig>,
+
+    #[account(constraint = oracle_match.status == OracleMatchStatus::Open @ ErrorCode::OracleMatchNotOpen)]
+    pub oracle_match: Account<'info, OracleMatchResult>,
 
     /// CHECK: PDA vault that holds native SOL
     #[account(
@@ -549,7 +639,8 @@ pub struct PlaceOrder<'info> {
 pub struct ResolveMatch<'info> {
     #[account(mut)]
     pub match_state: Account<'info, MatchState>,
-    pub authority: Signer<'info>,
+    #[account(address = match_state.oracle_match)]
+    pub oracle_match: Account<'info, OracleMatchResult>,
 }
 
 #[derive(Accounts)]
@@ -639,6 +730,7 @@ pub struct MatchState {
     pub next_order_id: u64,
     pub vault_bump: u8,
     pub authority: Pubkey,
+    pub oracle_match: Pubkey,
 }
 
 #[account]
@@ -679,8 +771,6 @@ pub struct Order {
     pub filled: u64,
 }
 
-
-
 #[error_code]
 pub enum ErrorCode {
     #[msg("Match is closed")]
@@ -709,6 +799,8 @@ pub enum ErrorCode {
     InvalidFeeBps,
     #[msg("Only config authority can update fee config")]
     UnauthorizedConfigAuthority,
+    #[msg("Only the configured bootstrap authority can initialize config")]
+    UnauthorizedInitializer,
     #[msg("Math overflow")]
     MathOverflow,
     #[msg("Math precision error")]
@@ -719,4 +811,10 @@ pub enum ErrorCode {
     InvalidWinner,
     #[msg("Provided order ID does not match next_order_id")]
     InvalidOrderId,
+    #[msg("Linked oracle match is not open")]
+    OracleMatchNotOpen,
+    #[msg("Linked oracle match is not resolved")]
+    OracleMatchNotResolved,
+    #[msg("Linked oracle match does not have a winner")]
+    OracleWinnerUnavailable,
 }

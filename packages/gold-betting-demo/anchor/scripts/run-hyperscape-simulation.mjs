@@ -1,9 +1,17 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { Keypair } from "@solana/web3.js";
 
 function commandExists(command) {
   const result = spawnSync(command, ["--version"], { stdio: "ignore" });
@@ -44,22 +52,39 @@ function runCommand(command, args, cwd, env = process.env) {
 }
 
 async function waitForRpcReady(rpcUrl, timeoutMs = 120_000) {
-  const payload = {
+  const healthPayload = {
     jsonrpc: "2.0",
     id: 1,
     method: "getHealth",
     params: [],
   };
+  const blockhashPayload = {
+    jsonrpc: "2.0",
+    id: 2,
+    method: "getLatestBlockhash",
+    params: [{ commitment: "confirmed" }],
+  };
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(rpcUrl, {
+      const healthResponse = await fetch(rpcUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(healthPayload),
       });
-      if (response.ok) return;
+      const blockhashResponse = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(blockhashPayload),
+      });
+      if (!healthResponse.ok || !blockhashResponse.ok) {
+        throw new Error("RPC not ready");
+      }
+      const blockhashJson = await blockhashResponse.json();
+      if (blockhashJson?.result?.value?.blockhash) {
+        return;
+      }
     } catch {
       // Validator still warming up.
     }
@@ -74,6 +99,30 @@ function assertSuccess(step, result) {
   }
   if ((result.code ?? 1) !== 0) {
     throw new Error(`${step} failed with exit code ${result.code ?? 1}`);
+  }
+}
+
+function writeFailureMarker(workspaceDir, details) {
+  const failurePath = join(
+    workspaceDir,
+    "simulations",
+    "solana-localnet-runner-error.json",
+  );
+  try {
+    writeFileSync(failurePath, JSON.stringify(details, null, 2));
+  } catch {
+    // Ignore secondary reporting failures.
+  }
+}
+
+function clearFailureMarker(workspaceDir) {
+  try {
+    rmSync(
+      join(workspaceDir, "simulations", "solana-localnet-runner-error.json"),
+      { force: true },
+    );
+  } catch {
+    // Ignore cleanup errors.
   }
 }
 
@@ -104,32 +153,107 @@ function parseLocalnetPrograms(anchorTomlPath, deployDir) {
   return programs;
 }
 
+function expandHome(pathValue) {
+  if (!pathValue || !pathValue.startsWith("~/")) {
+    return pathValue;
+  }
+  return join(process.env.HOME ?? "", pathValue.slice(2));
+}
+
+function parseProviderWallet(anchorTomlPath) {
+  const anchorToml = readFileSync(anchorTomlPath, "utf8");
+  const providerBlockMatch = anchorToml.match(
+    /\[provider\]([\s\S]*?)(?:\n\[|$)/,
+  );
+  if (!providerBlockMatch) {
+    return null;
+  }
+
+  for (const line of providerBlockMatch[1].split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = trimmed.match(/^wallet\s*=\s*"([^"]+)"$/);
+    if (match) {
+      return expandHome(match[1]);
+    }
+  }
+
+  return null;
+}
+
+function readKeypairPublicKey(walletPath) {
+  const secret = JSON.parse(readFileSync(walletPath, "utf8"));
+  return Keypair.fromSecretKey(Uint8Array.from(secret)).publicKey.toBase58();
+}
+
+function resolveSimulationConfig(mode) {
+  if (mode === "native") {
+    return {
+      script: "./scripts/simulate-gold-clob-localnet.ts",
+      requiredIdl: "gold_clob_market.json",
+      requiredProgram: "gold_clob_market",
+    };
+  }
+
+  if (mode === "spl") {
+    return {
+      script: "./scripts/simulate-hyperscape-localnet.ts",
+      requiredIdl: "hyperscape_prediction_market.json",
+      requiredProgram: "hyperscape_prediction_market",
+    };
+  }
+
+  throw new Error(
+    `Invalid BETTING_SOLANA_SIM_MODE='${mode}'. Use 'native' or 'spl'.`,
+  );
+}
+
 async function main() {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const workspaceDir = join(scriptDir, "..");
+  const repoRoot = join(workspaceDir, "..", "..", "..");
   const anchorTomlPath = join(workspaceDir, "Anchor.toml");
   const targetDeployDir = join(workspaceDir, "target", "deploy");
+  const targetIdlDir = join(workspaceDir, "target", "idl");
+  const tsxCliPath =
+    [
+      join(workspaceDir, "node_modules", ".bin", "tsx"),
+      join(repoRoot, "node_modules", ".bin", "tsx"),
+    ].find((candidate) => existsSync(candidate)) ?? null;
 
   const simulationMode = (
     process.env.BETTING_SOLANA_SIM_MODE ?? "native"
   ).toLowerCase();
-  const simulationScript =
-    simulationMode === "spl"
-      ? "./scripts/simulate-hyperscape-localnet.ts"
-      : "./scripts/simulate-gold-clob-localnet.ts";
-  if (simulationMode !== "native" && simulationMode !== "spl") {
-    throw new Error(
-      `Invalid BETTING_SOLANA_SIM_MODE='${simulationMode}'. Use 'native' or 'spl'.`,
-    );
-  }
+  const providerWalletPath = parseProviderWallet(anchorTomlPath);
+  const resolvedWalletPath =
+    process.env.ANCHOR_WALLET ??
+    providerWalletPath ??
+    `${process.env.HOME}/.config/solana/id.json`;
+  const mintAuthority =
+    process.env.SOLANA_SIM_MINT_AUTHORITY ??
+    readKeypairPublicKey(resolvedWalletPath);
+  const simulationConfig = resolveSimulationConfig(simulationMode);
+  const simulationScript = simulationConfig.script;
   if (!existsSync(join(workspaceDir, simulationScript))) {
     throw new Error(`Simulation script not found: ${simulationScript}`);
+  }
+  const requiredIdlPath = join(targetIdlDir, simulationConfig.requiredIdl);
+  if (!existsSync(requiredIdlPath)) {
+    throw new Error(
+      `Simulation mode '${simulationMode}' requires IDL '${simulationConfig.requiredIdl}' at ${requiredIdlPath}`,
+    );
   }
   console.log(
     `[simulate] mode=${simulationMode} script=${simulationScript} rpc=dynamic`,
   );
 
-  const required = ["anchor", "solana-test-validator", "bun"].filter(
+  if (!tsxCliPath) {
+    throw new Error(
+      `Missing local tsx binary under ${workspaceDir}/node_modules/.bin/tsx or ${repoRoot}/node_modules/.bin/tsx`,
+    );
+  }
+
+  const required = ["anchor", "solana-test-validator", "node"].filter(
     (cmd) => !commandExists(cmd),
   );
   if (required.length > 0) {
@@ -167,10 +291,21 @@ async function main() {
 
   let exitCode = 0;
   try {
+    clearFailureMarker(workspaceDir);
+
     const localnetPrograms = parseLocalnetPrograms(
       anchorTomlPath,
       targetDeployDir,
     );
+    if (
+      !localnetPrograms.some(
+        (program) => program.name === simulationConfig.requiredProgram,
+      )
+    ) {
+      throw new Error(
+        `Simulation mode '${simulationMode}' requires [programs.localnet].${simulationConfig.requiredProgram} in ${anchorTomlPath}`,
+      );
+    }
     const missingSos = localnetPrograms.filter(
       (program) => !existsSync(program.soPath),
     );
@@ -187,6 +322,8 @@ async function main() {
       String(rpcPort),
       "--faucet-port",
       String(faucetPort),
+      "--mint",
+      mintAuthority,
       "--ledger",
       ledgerDir,
     ];
@@ -203,26 +340,36 @@ async function main() {
     await waitForRpcReady(rpcUrl);
 
     const simulate = await runCommand(
-      "bun",
-      [simulationScript],
+      "node",
+      [tsxCliPath, simulationScript],
       workspaceDir,
       {
         ...process.env,
         ANCHOR_PROVIDER_URL: rpcUrl,
         ANCHOR_WS_URL: wsUrl,
         SOLANA_URL: rpcUrl,
-        ANCHOR_WALLET:
-          process.env.ANCHOR_WALLET ??
-          `${process.env.HOME}/.config/solana/id.json`,
+        ANCHOR_WALLET: resolvedWalletPath,
       },
     );
     assertSuccess("solana simulation", simulate);
   } catch (error) {
     exitCode = 1;
     console.error("[simulate] Failed:", error);
+    writeFailureMarker(workspaceDir, {
+      generatedAt: new Date().toISOString(),
+      rpcUrl,
+      wsUrl,
+      ledgerDir,
+      error: error instanceof Error ? error.message : String(error),
+    });
   } finally {
     await stopValidator();
-    rmSync(ledgerDir, { recursive: true, force: true });
+    if (exitCode === 0) {
+      clearFailureMarker(workspaceDir);
+      rmSync(ledgerDir, { recursive: true, force: true });
+    } else {
+      console.error(`[simulate] Preserving validator ledger at ${ledgerDir}`);
+    }
   }
 
   process.exit(exitCode);

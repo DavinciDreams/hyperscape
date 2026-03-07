@@ -6,6 +6,7 @@
   "scripts": {
     "anchor:build": "bun run --cwd anchor build",
     "anchor:test": "bun run --cwd anchor test",
+    "sync:anchor-artifacts": "node scripts/sync-anchor-artifacts.mjs",
     "dev": "bun run --cwd app dev --mode devnet",
     "dev:local": "bash app/scripts/run-local-demo.sh",
     "dev:devnet": "bun run --cwd app dev --mode devnet",

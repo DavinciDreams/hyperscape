@@ -1734,7 +1734,8 @@ export class StreamingDuelScheduler {
   }
 
   /**
-   * Update just HP fields in place (most common update during fights)
+   * Update hot combat fields in place during active fights without reallocating
+   * the cached streaming state objects.
    */
   private updateAgentHpInPlace(
     cached: StreamingStateUpdate["cycle"]["agent1"],
@@ -1743,6 +1744,7 @@ export class StreamingDuelScheduler {
     if (!cached) return;
     cached.hp = agent.currentHp;
     cached.maxHp = agent.maxHp;
+    cached.damageDealtThisFight = agent.damageDealtThisFight;
     cached.wins = agent.wins;
     cached.losses = agent.losses;
   }

@@ -40,6 +40,39 @@ function runBestEffort(command, args, cwd) {
   });
 }
 
+async function runStepWithRetries(
+  name,
+  command,
+  args,
+  cwd,
+  retries,
+  beforeRetry,
+) {
+  let attempt = 0;
+  while (true) {
+    try {
+      await runStep(
+        attempt === 0 ? name : `${name} (retry ${attempt})`,
+        command,
+        args,
+        cwd,
+      );
+      return;
+    } catch (error) {
+      if (attempt >= retries) {
+        throw error;
+      }
+      attempt += 1;
+      console.warn(
+        `[deep-pass] ${name} failed (${error.message}). Retrying after cleanup...`,
+      );
+      if (beforeRetry) {
+        await beforeRetry();
+      }
+    }
+  }
+}
+
 async function cleanupLocalSolanaValidator() {
   await runBestEffort(
     "bash",
@@ -68,6 +101,8 @@ async function main() {
   const solanaDir = resolve(ROOT, "packages/gold-betting-demo/anchor");
 
   await runStep("EVM tests (includes fuzz)", "bun", ["run", "test"], evmDir);
+  await runStep("EVM Foundry tests", "bun", ["run", "test:foundry"], evmDir);
+  await runStep("EVM Slither analysis", "bun", ["run", "analyze:slither"], evmDir);
   await runStep(
     "EVM 100-wallet simulation",
     "bun",
@@ -76,18 +111,25 @@ async function main() {
   );
 
   await cleanupLocalSolanaValidator();
-  await runStep(
+  await runStep("Solana Clippy", "bun", ["run", "lint:rust"], solanaDir);
+  await runStep("Solana Rust unit tests", "bun", ["run", "test:rust"], solanaDir);
+  await runStep("Solana Rust audit", "bun", ["run", "audit"], solanaDir);
+  await runStepWithRetries(
     "Solana tests (includes randomized invariants)",
     "bun",
     ["run", "test"],
     solanaDir,
+    1,
+    cleanupLocalSolanaValidator,
   );
   await cleanupLocalSolanaValidator();
-  await runStep(
+  await runStepWithRetries(
     "Solana localnet simulation",
     "bun",
     ["run", "simulate:localnet"],
     solanaDir,
+    1,
+    cleanupLocalSolanaValidator,
   );
   await cleanupLocalSolanaValidator();
 

@@ -237,6 +237,8 @@ export class HyperscapeService
   private chatProcessingChain: Promise<void> = Promise.resolve();
   private autonomousBehaviorManager: AutonomousBehaviorManager | null = null;
   private autonomousBehaviorEnabled: boolean = true;
+  private autonomySuspendedForStreamingDuel: boolean = false;
+  private autonomyWasRunningBeforeStreamingDuel: boolean = false;
   /** Temporarily stores the last removed entity for event handlers */
   private _lastRemovedEntity: Entity | null = null;
 
@@ -310,6 +312,58 @@ export class HyperscapeService
       !!privyId &&
       trustedIds.has(privyId)
     );
+  }
+
+  private isPlayerInStreamingDuel(): boolean {
+    return (
+      (
+        this.gameState.playerEntity as
+          | (PlayerEntity & { inStreamingDuel?: boolean })
+          | null
+      )?.inStreamingDuel === true
+    );
+  }
+
+  private suspendAutonomyForStreamingDuel(): void {
+    if (!this.isPlayerInStreamingDuel()) {
+      return;
+    }
+
+    if (this.autonomySuspendedForStreamingDuel) {
+      return;
+    }
+
+    this.autonomyWasRunningBeforeStreamingDuel =
+      this.isAutonomousBehaviorRunning();
+    this.autonomySuspendedForStreamingDuel = true;
+
+    logger.info(
+      "[HyperscapeService] Streaming duel active, suspending autonomous behavior",
+    );
+
+    if (this.autonomyWasRunningBeforeStreamingDuel) {
+      this.stopAutonomousBehavior();
+    }
+  }
+
+  private resumeAutonomyAfterStreamingDuel(): void {
+    if (!this.autonomySuspendedForStreamingDuel) {
+      return;
+    }
+
+    const shouldRestart =
+      this.autonomyWasRunningBeforeStreamingDuel &&
+      this.autonomousBehaviorEnabled;
+    this.autonomySuspendedForStreamingDuel = false;
+    this.autonomyWasRunningBeforeStreamingDuel = false;
+
+    logger.info(
+      "[HyperscapeService] Streaming duel complete, restoring autonomous behavior",
+    );
+
+    if (shouldRestart) {
+      this.startAutonomousBehavior();
+    }
   }
 
   private logBuffer: Array<{ timestamp: number; type: string; data: unknown }>;
@@ -2881,6 +2935,7 @@ Respond with ONLY the action name, nothing else.`;
         if (this.gameState.playerEntity) {
           this.gameState.playerEntity.inCombat = true;
         }
+        this.suspendAutonomyForStreamingDuel();
         this.broadcastEvent("DUEL_FIGHT_START", duelData);
         break;
       }
@@ -2896,6 +2951,7 @@ Respond with ONLY the action name, nothing else.`;
           this.gameState.playerEntity.inCombat = false;
           this.gameState.playerEntity.combatTarget = null;
         }
+        this.resumeAutonomyAfterStreamingDuel();
         this.broadcastEvent("DUEL_COMPLETED", duelData);
         // Clear pending challenge state just in case
         this.clearPendingDuelChallenge();
@@ -3211,6 +3267,13 @@ Respond with ONLY the action name, nothing else.`;
   startAutonomousBehavior(): void {
     if (!this.autonomousBehaviorEnabled) {
       logger.info("[HyperscapeService] Autonomous behavior is disabled");
+      return;
+    }
+
+    if (this.autonomySuspendedForStreamingDuel) {
+      logger.info(
+        "[HyperscapeService] Autonomous behavior suspended during streaming duel",
+      );
       return;
     }
 

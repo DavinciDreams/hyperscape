@@ -352,6 +352,25 @@ if [[ "$RUN_DEEP_PASS" = "true" ]]; then
   free_solana_test_ports
   run_step "solana-contract-tests-anchor" bash -lc "
     set -euo pipefail
+    pkill -f 'solana-test-validator' >/dev/null 2>&1 || true
+    for port in 8899 8900 9900; do
+      for _ in {1..8}; do
+        pids=\"\$(lsof -tiTCP:\${port} -sTCP:LISTEN || true)\"
+        if [[ -z \"\$pids\" ]]; then
+          break
+        fi
+        for pid in \$pids; do
+          kill \"\$pid\" >/dev/null 2>&1 || true
+        done
+        sleep 1
+      done
+      stubborn=\"\$(lsof -tiTCP:\${port} -sTCP:LISTEN || true)\"
+      if [[ -n \"\$stubborn\" ]]; then
+        for pid in \$stubborn; do
+          kill -9 \"\$pid\" >/dev/null 2>&1 || true
+        done
+      fi
+    done
     cd '$PROJECT_DIR/packages/gold-betting-demo/anchor'
     bun run test
   "
@@ -369,6 +388,25 @@ if [[ "$RUN_DEEP_PASS" = "true" ]]; then
   free_solana_test_ports
   run_step "solana-100-wallet-simulation" bash -lc "
     set -euo pipefail
+    pkill -f 'solana-test-validator' >/dev/null 2>&1 || true
+    for port in 8899 8900 9900; do
+      for _ in {1..8}; do
+        pids=\"\$(lsof -tiTCP:\${port} -sTCP:LISTEN || true)\"
+        if [[ -z \"\$pids\" ]]; then
+          break
+        fi
+        for pid in \$pids; do
+          kill \"\$pid\" >/dev/null 2>&1 || true
+        done
+        sleep 1
+      done
+      stubborn=\"\$(lsof -tiTCP:\${port} -sTCP:LISTEN || true)\"
+      if [[ -n \"\$stubborn\" ]]; then
+        for pid in \$stubborn; do
+          kill -9 \"\$pid\" >/dev/null 2>&1 || true
+        done
+      fi
+    done
     rm -f '$SOLANA_SIM_REPORT'
     cd '$PROJECT_DIR/packages/gold-betting-demo/anchor'
     bun run simulate:localnet

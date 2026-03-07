@@ -23,6 +23,7 @@ import { initStreamingDuelScheduler } from "./systems/StreamingDuelScheduler/ind
 
 // Import stream capture pipeline
 import { initStreamCapture } from "./streaming/stream-capture.js";
+import { validateArenaDeployEnv } from "./startup/arena-deploy-config.js";
 
 // Import memory monitoring infrastructure
 import {
@@ -77,9 +78,11 @@ async function startServer() {
     if (!process.env.DATABASE_URL) missing.push("DATABASE_URL");
     if (!process.env.ARENA_EXTERNAL_BET_WRITE_KEY?.trim())
       missing.push("ARENA_EXTERNAL_BET_WRITE_KEY");
+    const arenaDeployValidation = validateArenaDeployEnv(process.env);
+    missing.push(...arenaDeployValidation.missing);
     if (missing.length > 0) {
       console.error(
-        `[Server] FATAL: Missing required production secrets: ${missing.join(", ")}`,
+        `[Server] FATAL: Missing required production config: ${missing.join(", ")}`,
       );
       process.exit(1);
     }
@@ -87,11 +90,10 @@ async function startServer() {
     if (!process.env.PRIVY_APP_ID && !process.env.PUBLIC_PRIVY_APP_ID)
       warnings.push("PRIVY_APP_ID");
     if (!process.env.PRIVY_APP_SECRET) warnings.push("PRIVY_APP_SECRET");
-    if (!process.env.SOLANA_ARENA_AUTHORITY_SECRET)
-      warnings.push("SOLANA_ARENA_AUTHORITY_SECRET");
+    warnings.push(...arenaDeployValidation.warnings);
     if (warnings.length > 0) {
       console.warn(
-        `[Server] WARNING: Missing recommended production secrets: ${warnings.join(", ")}`,
+        `[Server] WARNING: Missing recommended production config: ${warnings.join(", ")}`,
       );
     }
   }

@@ -69,6 +69,21 @@ function isFundingError(error: unknown): boolean {
   );
 }
 
+function isRpcConnectivityError(error: unknown): boolean {
+  const message = ((error as Error)?.message ?? "").toLowerCase();
+  return (
+    message.includes("unable to connect") ||
+    message.includes("fetch failed") ||
+    message.includes("failed to fetch") ||
+    message.includes("econnrefused") ||
+    message.includes("connection refused") ||
+    message.includes("connection reset") ||
+    message.includes("network request failed") ||
+    message.includes("timed out") ||
+    message.includes("socket hang up")
+  );
+}
+
 async function waitForTxBySignature(
   connection: any,
   signature: string,
@@ -173,12 +188,58 @@ import { type GoldClobMarket } from "../../anchor/target/types/gold_clob_market"
 import { type GoldPerpsMarket } from "../../anchor/target/types/gold_perps_market";
 import {
   updateRatings,
-  calculateSpotIndex,
   createInitialRating,
   type AgentRating,
 } from "./trueskill";
+import {
+  calculateSyntheticSpotIndex,
+  conservativeSkill,
+  modelMarketIdFromCharacterId,
+} from "./modelMarkets";
+import {
+  calculateMaintenanceMarginLamports,
+  estimatePositionEquityLamports,
+  resolveOracleMaxAgeSeconds,
+} from "./perpsMath";
 import path from "node:path";
 import fs_node from "node:fs";
+import {
+  loadAgentRatings,
+  saveAgentRating,
+  saveAgentRatings,
+  savePerpsOracleSnapshot,
+} from "./db";
+
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
+
+function deriveProgramDataAddress(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [programId.toBuffer()],
+    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+  )[0];
+}
+
+function encodePerpsMarketId(marketId: number): Buffer {
+  const bytes = Buffer.alloc(4);
+  bytes.writeUInt32LE(marketId, 0);
+  return bytes;
+}
+
+function derivePerpsConfigPda(): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("config")],
+    perpsProgram.programId,
+  )[0];
+}
+
+function derivePerpsMarketPda(marketId: number): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("market"), encodePerpsMarketId(marketId)],
+    perpsProgram.programId,
+  )[0];
+}
 
 const botKeypair = readKeypair(
   process.env.BOT_KEYPAIR ||
@@ -197,22 +258,30 @@ function hasProgramMethod(program: any, method: string): boolean {
 }
 
 const RATINGS_FILE = path.resolve(__dirname, "agent_ratings.json");
-let agentRatings: Record<string, AgentRating> = {};
-if (fs_node.existsSync(RATINGS_FILE)) {
+let agentRatings: Record<string, AgentRating> = loadAgentRatings();
+if (
+  Object.keys(agentRatings).length === 0 &&
+  fs_node.existsSync(RATINGS_FILE)
+) {
   try {
     agentRatings = JSON.parse(fs_node.readFileSync(RATINGS_FILE, "utf8"));
+    saveAgentRatings(agentRatings);
+    console.log(
+      `[Keeper] Migrated ${Object.keys(agentRatings).length} agent ratings from legacy JSON into SQLite`,
+    );
   } catch (e) {
-    console.error("Failed to load ratings", e);
+    console.error("Failed to load legacy ratings", e);
   }
 }
 
 function saveRatings() {
-  fs_node.writeFileSync(RATINGS_FILE, JSON.stringify(agentRatings, null, 2));
+  saveAgentRatings(agentRatings);
 }
 
 function getRating(agentId: string): AgentRating {
   if (!agentRatings[agentId]) {
     agentRatings[agentId] = createInitialRating();
+    saveAgentRating(agentId, agentRatings[agentId]);
   }
   return agentRatings[agentId];
 }
@@ -220,55 +289,144 @@ function getRating(agentId: string): AgentRating {
 // Perps oracle updates are disabled - the Gold Perps Market program is not deployed on devnet
 // Set ENABLE_PERPS_ORACLE=true to re-enable once deployed
 const PERPS_ORACLE_ENABLED = process.env.ENABLE_PERPS_ORACLE === "true";
+const PERPS_LIQUIDATOR_ENABLED = process.env.ENABLE_PERPS_LIQUIDATOR === "true";
+const PERPS_MAX_ORACLE_STALENESS_SECONDS = Math.max(
+  10,
+  Number(process.env.PERPS_MAX_ORACLE_STALENESS_SECONDS || 120),
+);
+
+function asBigInt(value: unknown, fallback = 0n): bigint {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return BigInt(Math.trunc(value));
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    try {
+      return BigInt(value);
+    } catch {
+      return fallback;
+    }
+  }
+  if (value && typeof value === "object" && "toString" in value) {
+    try {
+      return BigInt((value as { toString: () => string }).toString());
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
 
 async function updatePerpsOracle(agentId: string, rating: AgentRating) {
   // Skip if perps oracle is disabled (program not deployed)
   if (!PERPS_ORACLE_ENABLED) return;
 
   try {
-    const numericAgentId = parseInt(agentId) || 0;
-    if (numericAgentId === 0) return;
-
-    const spotIndex = calculateSpotIndex(rating);
-    const spotIndexScaled = new BN(Math.floor(spotIndex * 1_000_000));
+    const marketId = modelMarketIdFromCharacterId(agentId);
+    const population = Object.values(agentRatings);
+    const spotIndex = calculateSyntheticSpotIndex(rating, population);
+    const spotIndexScaled = new BN(Math.floor(spotIndex * LAMPORTS_PER_SOL));
     const muScaled = new BN(Math.floor(rating.mu * 1_000_000));
     const sigmaScaled = new BN(Math.floor(rating.sigma * 1_000_000));
 
-    const oraclePda = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("oracle"),
-        new BN(numericAgentId).toArrayLike(Buffer, "le", 4),
-      ],
-      perpsProgram.programId,
-    )[0];
-
-    const vaultPda = PublicKey.findProgramAddressSync(
-      [Buffer.from("vault")],
-      perpsProgram.programId,
-    )[0];
+    const configPda = derivePerpsConfigPda();
+    const marketPda = derivePerpsMarketPda(marketId);
 
     await runWithRecovery(
       () =>
         perpsProgram.methods
-          .updateOracle(numericAgentId, spotIndexScaled, muScaled, sigmaScaled)
+          .updateMarketOracle(marketId, spotIndexScaled, muScaled, sigmaScaled)
           .accountsPartial({
-            oracle: oraclePda,
-            vault: vaultPda,
+            config: configPda,
+            market: marketPda,
             authority: botKeypair.publicKey,
             systemProgram: SystemProgram.programId,
           })
           .rpc(),
       connection,
     );
+    savePerpsOracleSnapshot({
+      agentId,
+      marketId,
+      spotIndex,
+      conservativeSkill: conservativeSkill(rating),
+      mu: rating.mu,
+      sigma: rating.sigma,
+      recordedAt: Date.now(),
+    });
     console.log(
       "[Keeper] Updated Perps Oracle for agent",
       agentId,
-      "to spot",
+      "(market",
+      marketId,
+      ") to spot",
       spotIndex,
     );
   } catch (e) {
     console.error("Failed to update perps oracle", e);
   }
+}
+
+interface LeaderboardApiEntry {
+  characterId: string;
+}
+
+interface LeaderboardApiResponse {
+  leaderboard?: LeaderboardApiEntry[];
+}
+
+async function fetchTrackedModelIds(): Promise<string[]> {
+  try {
+    const response = await fetch(
+      `${args["game-url"]}/api/streaming/leaderboard/details?historyLimit=1`,
+      {
+        cache: "no-store",
+        headers: {
+          connection: "close",
+        },
+      },
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const payload = (await response.json()) as LeaderboardApiResponse;
+    if (!Array.isArray(payload.leaderboard)) {
+      return [];
+    }
+
+    return payload.leaderboard
+      .map((entry) =>
+        typeof entry?.characterId === "string" ? entry.characterId : "",
+      )
+      .filter((value) => value.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+async function syncPerpsOracles(agentIds: readonly string[]): Promise<void> {
+  if (!PERPS_ORACLE_ENABLED) return;
+
+  const uniqueIds = [...new Set(agentIds)].filter((value) => value.length > 0);
+  if (uniqueIds.length === 0) return;
+
+  for (const agentId of uniqueIds) {
+    getRating(agentId);
+  }
+
+  for (const agentId of uniqueIds) {
+    await updatePerpsOracle(agentId, getRating(agentId));
+  }
+}
+
+async function syncPerpsOraclesFromLeaderboard(): Promise<void> {
+  const trackedModelIds = await fetchTrackedModelIds();
+  if (trackedModelIds.length === 0) return;
+
+  await syncPerpsOracles(trackedModelIds);
+  saveRatings();
 }
 
 const missingKeeperMethods: string[] = [];
@@ -318,9 +476,21 @@ const airdropRateLimitCooldownMs = Math.max(
   fundingBackoffMs,
   Number(process.env.BOT_AIRDROP_RATE_LIMIT_COOLDOWN_MS || 15 * 60 * 1000),
 );
+const rpcBackoffMs = Math.max(
+  fundingBackoffMs,
+  Number(process.env.BOT_RPC_CHECK_COOLDOWN_MS || 60_000),
+);
+const chainCheckCooldownMs = Math.max(
+  rpcBackoffMs,
+  Number(process.env.BOT_CHAIN_CHECK_COOLDOWN_MS || 120_000),
+);
 let fundingBlockedUntil = 0;
 let lastFundingWarningAt = 0;
 let airdropBlockedUntil = 0;
+let rpcBlockedUntil = 0;
+let lastRpcWarningAt = 0;
+let chainCheckBlockedUntil = 0;
+let lastChainWarningAt = 0;
 
 const oracleConfigPda = findOracleConfigPda(fightOracle.programId);
 const marketConfigPda = PublicKey.findProgramAddressSync(
@@ -348,6 +518,25 @@ const configuredTradeMarketMakerWallet = process.env.TRADE_MARKET_MAKER_WALLET
   ? new PublicKey(process.env.TRADE_MARKET_MAKER_WALLET)
   : botKeypair.publicKey;
 
+const requiredPrograms = [
+  {
+    label: "fight oracle",
+    programId: fightProgram.programId,
+  },
+  {
+    label: "gold clob market",
+    programId: marketProgram.programId,
+  },
+  ...(PERPS_ORACLE_ENABLED || PERPS_LIQUIDATOR_ENABLED
+    ? [
+        {
+          label: "gold perps market",
+          programId: perpsProgram.programId,
+        },
+      ]
+    : []),
+];
+
 const canRequestAirdrop =
   botCluster === "testnet" ||
   botCluster === "devnet" ||
@@ -355,11 +544,29 @@ const canRequestAirdrop =
 
 async function ensureBotSignerFunding(): Promise<boolean> {
   const now = Date.now();
-  if (now < fundingBlockedUntil) {
+  if (now < fundingBlockedUntil || now < rpcBlockedUntil) {
     return false;
   }
 
-  let lamports = await connection.getBalance(botKeypair.publicKey, "confirmed");
+  let lamports: number;
+  try {
+    lamports = await connection.getBalance(botKeypair.publicKey, "confirmed");
+  } catch (error) {
+    if (isRpcConnectivityError(error)) {
+      if (Date.now() - lastRpcWarningAt > 10_000) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `[bot] solana rpc unavailable at ${connection.rpcEndpoint}: ${message}. Backing off for ${Math.round(
+            rpcBackoffMs / 1000,
+          )}s.`,
+        );
+        lastRpcWarningAt = Date.now();
+      }
+      rpcBlockedUntil = Date.now() + rpcBackoffMs;
+      return false;
+    }
+    throw error;
+  }
   if (lamports >= minSignerLamports) {
     return true;
   }
@@ -376,8 +583,12 @@ async function ensureBotSignerFunding(): Promise<boolean> {
       const message = error instanceof Error ? error.message : String(error);
       const isRateLimited =
         message.includes("429") || /too many requests/i.test(message);
+      const isRpcError = isRpcConnectivityError(error);
       if (isRateLimited) {
         airdropBlockedUntil = Date.now() + airdropRateLimitCooldownMs;
+      }
+      if (isRpcError) {
+        rpcBlockedUntil = Date.now() + rpcBackoffMs;
       }
       if (Date.now() - lastFundingWarningAt > 10_000) {
         console.warn(`[bot] airdrop attempt failed: ${message}`);
@@ -412,19 +623,77 @@ async function ensureBotSignerFunding(): Promise<boolean> {
   return false;
 }
 
-const ensureOracleReady = async (): Promise<void> => {
-  await runWithRecovery(
-    () =>
-      fightProgram.methods
-        .initializeOracle()
-        .accounts({
-          authority: botKeypair.publicKey,
-        })
-        .rpc(),
-    connection,
-  );
+async function ensureKeeperChainReady(): Promise<boolean> {
+  const now = Date.now();
+  if (now < chainCheckBlockedUntil || now < rpcBlockedUntil) {
+    return false;
+  }
 
-  const config = await fightProgram.account.oracleConfig.fetch(oracleConfigPda);
+  try {
+    await connection.getLatestBlockhash("confirmed");
+    const infos = await connection.getMultipleAccountsInfo(
+      requiredPrograms.map((program) => program.programId),
+      "confirmed",
+    );
+    const missingPrograms = requiredPrograms
+      .filter((program, index) => !infos[index]?.executable)
+      .map((program) => `${program.label}:${program.programId.toBase58()}`);
+
+    if (missingPrograms.length === 0) {
+      return true;
+    }
+
+    if (Date.now() - lastChainWarningAt > 10_000) {
+      console.warn(
+        `[bot] keeper chain not ready on ${connection.rpcEndpoint}: ${missingPrograms.join(
+          ", ",
+        )}. Backing off for ${Math.round(chainCheckCooldownMs / 1000)}s.`,
+      );
+      lastChainWarningAt = Date.now();
+    }
+    chainCheckBlockedUntil = Date.now() + chainCheckCooldownMs;
+    return false;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (Date.now() - lastRpcWarningAt > 10_000) {
+      console.warn(
+        `[bot] failed keeper chain readiness check against ${connection.rpcEndpoint}: ${message}. Backing off for ${Math.round(
+          rpcBackoffMs / 1000,
+        )}s.`,
+      );
+      lastRpcWarningAt = Date.now();
+    }
+    rpcBlockedUntil = Date.now() + rpcBackoffMs;
+    return false;
+  }
+}
+
+const ensureOracleReady = async (): Promise<void> => {
+  let config =
+    await fightProgram.account.oracleConfig.fetchNullable(oracleConfigPda);
+  if (!config) {
+    await runWithRecovery(
+      () =>
+        fightProgram.methods
+          .initializeOracle()
+          .accountsPartial({
+            authority: botKeypair.publicKey,
+            oracleConfig: oracleConfigPda,
+            program: fightProgram.programId,
+            programData: deriveProgramDataAddress(fightProgram.programId),
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc(),
+      connection,
+    );
+    config =
+      await fightProgram.account.oracleConfig.fetchNullable(oracleConfigPda);
+  }
+  if (!config) {
+    throw new Error(
+      `Oracle config ${oracleConfigPda.toBase58()} was not created`,
+    );
+  }
   if (!(config.authority as PublicKey).equals(botKeypair.publicKey)) {
     throw new Error(
       `Bot wallet ${botKeypair.publicKey.toBase58()} is not oracle authority`,
@@ -463,8 +732,12 @@ const ensureMarketConfigReady = async (
             tradeMarketMakerFeeBps,
             winningsMarketMakerFeeBps,
           )
-          .accounts({
+          .accountsPartial({
             authority: botKeypair.publicKey,
+            config: marketConfigPda,
+            program: marketProgram.programId,
+            programData: deriveProgramDataAddress(marketProgram.programId),
+            systemProgram: SystemProgram.programId,
           })
           .rpc(),
       connection,
@@ -514,25 +787,31 @@ async function createRound(
         )
         .accounts({
           authority: botKeypair.publicKey,
+          oracleConfig: oracleConfigPda,
           matchResult: matchPda,
+          systemProgram: SystemProgram.programId,
         })
         .rpc(),
     connection,
   );
 
   const matchStateKeypair = Keypair.generate();
-  const vaultAuthorityPda = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault_auth"), matchStateKeypair.publicKey.toBuffer()],
-    goldClobMarket.programId,
+  const vaultPda = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), matchStateKeypair.publicKey.toBuffer()],
+    marketProgram.programId,
   )[0];
 
   await runWithRecovery(
     () =>
       marketProgram.methods
         .initializeMatch(500)
-        .accounts({
+        .accountsPartial({
           matchState: matchStateKeypair.publicKey,
           user: botKeypair.publicKey,
+          config: marketConfigPda,
+          oracleMatch: matchPda,
+          vault: vaultPda,
+          systemProgram: SystemProgram.programId,
         })
         .signers([matchStateKeypair])
         .rpc(),
@@ -588,6 +867,7 @@ async function maybeResolveMatch(
           )
           .accounts({
             authority: botKeypair.publicKey,
+            oracleConfig: oracleConfigPda,
             matchResult: matchPda,
           })
           .rpc(),
@@ -632,12 +912,10 @@ async function maybeResolveMarket(
     await runWithRecovery(
       () =>
         marketProgram.methods
-          .resolveMatch(
-            winner === 1 ? ({ yes: {} } as any) : ({ no: {} } as any),
-          )
+          .resolveMatch()
           .accounts({
             matchState: matchStatePubkey,
-            authority: botKeypair.publicKey,
+            oracleMatch: matchPda,
           })
           .rpc(),
       connection,
@@ -667,6 +945,13 @@ const gameClient = new GameClient(args["game-url"]);
 gameClient.onDuelStart(async (data: any) => {
   if (!keeperProgramApiReady) {
     warnMissingKeeperMethodsOnce();
+    return;
+  }
+
+  if (!(await ensureKeeperChainReady())) {
+    console.warn(
+      "[bot] Skipping duel-start market creation because keeper chain is not ready.",
+    );
     return;
   }
 
@@ -715,6 +1000,13 @@ gameClient.onDuelEnd(async (data: any) => {
     return;
   }
 
+  if (!(await ensureKeeperChainReady())) {
+    console.warn(
+      "[bot] Skipping duel-end resolution because keeper chain is not ready.",
+    );
+    return;
+  }
+
   if (!(await ensureBotSignerFunding())) {
     console.warn(
       "[bot] Skipping duel-end resolution because bot signer funding is below threshold.",
@@ -754,14 +1046,13 @@ gameClient.onDuelEnd(async (data: any) => {
       agentRatings[data.agent2.id.toString()] = isAgent1 ? loser : winner;
       saveRatings();
 
-      // Push to Solana Perps Oracle
-      await updatePerpsOracle(
+      const trackedModelIds = await fetchTrackedModelIds();
+      const fallbackIds = [
         data.agent1.id.toString(),
-        agentRatings[data.agent1.id.toString()],
-      );
-      await updatePerpsOracle(
         data.agent2.id.toString(),
-        agentRatings[data.agent2.id.toString()],
+      ];
+      await syncPerpsOracles(
+        trackedModelIds.length > 0 ? trackedModelIds : fallbackIds,
       );
     }
 
@@ -792,6 +1083,7 @@ gameClient.onDuelEnd(async (data: any) => {
           )
           .accounts({
             authority: botKeypair.publicKey,
+            oracleConfig: oracleConfigPda,
             matchResult: matchPda,
           })
           .rpc(),
@@ -814,13 +1106,16 @@ async function runMaintenance(): Promise<void> {
     return;
   }
 
+  if (!(await ensureKeeperChainReady())) {
+    return;
+  }
+
   if (!(await ensureBotSignerFunding())) {
     return;
   }
   await ensureOracleReady();
   // ... (simplified loop for seeing liquidity and resolving old markets)
-
-  const now = Math.floor(Date.now() / 1000);
+  await syncPerpsOraclesFromLeaderboard();
 
   // Poll only the actively tracked CLOB matches we created
   for (const [
@@ -845,59 +1140,99 @@ async function runMaintenance(): Promise<void> {
 
   // NOTE: We do NOT create new rounds here anymore.
 
-  await runLiquidatorLoop();
+  if (PERPS_LIQUIDATOR_ENABLED) {
+    await runLiquidatorLoop();
+  }
 }
 
 async function runLiquidatorLoop(): Promise<void> {
-  if (!keeperProgramApiReady) return;
+  if (!keeperProgramApiReady || !PERPS_LIQUIDATOR_ENABLED) return;
   try {
     const allPositions = await perpsProgram.account.positionState.all();
-    const vaultPda = PublicKey.findProgramAddressSync(
-      [Buffer.from("vault")],
-      perpsProgram.programId,
-    )[0];
+    const configPda = derivePerpsConfigPda();
+    const configAcc =
+      await perpsProgram.account.configState.fetchNullable(configPda);
+    if (!configAcc) {
+      return;
+    }
+    const maxOracleAgeSeconds = resolveOracleMaxAgeSeconds(
+      asNum(configAcc.maxOracleStalenessSeconds),
+      PERPS_MAX_ORACLE_STALENESS_SECONDS,
+    );
 
     for (const pos of allPositions) {
-      if (pos.account.size.eq(new BN(0))) continue;
+      if (!pos.account.initialized || pos.account.size.eq(new BN(0))) continue;
 
-      const agentId = pos.account.agentId;
-      const oraclePda = PublicKey.findProgramAddressSync(
-        [Buffer.from("oracle"), new BN(agentId).toArrayLike(Buffer, "le", 4)],
-        perpsProgram.programId,
-      )[0];
+      const marketId = pos.account.marketId;
+      const marketPda = derivePerpsMarketPda(marketId);
+      const marketAcc =
+        await perpsProgram.account.marketState.fetchNullable(marketPda);
+      if (!marketAcc?.initialized) continue;
 
-      const oracleAcc =
-        await perpsProgram.account.oracleState.fetchNullable(oraclePda);
-      if (!oracleAcc) continue;
-
-      const spotIndex = Number(oracleAcc.spotIndex) / LAMPORTS_PER_SOL;
-      const entryPrice = Number(pos.account.entryPrice) / LAMPORTS_PER_SOL;
-      const size = Number(pos.account.size) / LAMPORTS_PER_SOL;
-      const collateral = Number(pos.account.collateral) / LAMPORTS_PER_SOL;
-      const isLong = pos.account.positionType === 0;
-
-      let pnl = 0;
-      if (isLong) {
-        pnl = (spotIndex - entryPrice) * (size / entryPrice);
-      } else {
-        pnl = (entryPrice - spotIndex) * (size / entryPrice);
+      const oracleAgeSeconds =
+        Math.floor(Date.now() / 1000) - asNum(marketAcc.oracleLastUpdated);
+      if (oracleAgeSeconds > maxOracleAgeSeconds) {
+        continue;
       }
 
-      const marginRatio = (collateral + pnl) / size;
-      // Liquidate if margin ratio falls below maintenance (10%)
-      if (marginRatio < 0.1) {
+      const sizeLamports = asBigInt(pos.account.size);
+      if (sizeLamports === 0n) {
+        continue;
+      }
+      const skewScaleLamports = asBigInt(marketAcc.skewScale);
+      if (skewScaleLamports <= 0n) {
+        console.error(
+          `[Keeper] Skipping liquidation precheck for ${pos.publicKey.toBase58()}: invalid market skew scale`,
+        );
+        continue;
+      }
+
+      let equityLamports = 0n;
+      const maintenanceLamports = calculateMaintenanceMarginLamports(
+        sizeLamports,
+        asNum(configAcc.maintenanceMarginBps),
+      );
+      try {
+        equityLamports = estimatePositionEquityLamports(
+          {
+            entryPriceLamports: asBigInt(pos.account.entryPrice),
+            lastFundingRate: asBigInt(pos.account.lastFundingRate),
+            marginLamports: asBigInt(pos.account.margin),
+            sizeLamports,
+          },
+          {
+            currentFundingRate: asBigInt(marketAcc.currentFundingRate),
+            oracleLastUpdatedSeconds: asNum(marketAcc.oracleLastUpdated),
+            spotIndexLamports: asBigInt(marketAcc.spotIndex),
+            totalLongOiLamports: asBigInt(marketAcc.totalLongOi),
+            totalShortOiLamports: asBigInt(marketAcc.totalShortOi),
+          },
+          skewScaleLamports,
+        );
+      } catch (error) {
+        console.error(
+          `[Keeper] Skipping liquidation precheck for ${pos.publicKey.toBase58()}:`,
+          error,
+        );
+        continue;
+      }
+
+      if (equityLamports < maintenanceLamports) {
+        const sizeAbs = sizeLamports < 0n ? -sizeLamports : sizeLamports;
+        const equityRatio = Number(equityLamports) / Number(sizeAbs || 1n);
         console.log(
-          `[Keeper] Liquidating position ${pos.publicKey.toBase58()} (Margin: ${(marginRatio * 100).toFixed(2)}%)`,
+          `[Keeper] Liquidating position ${pos.publicKey.toBase58()} (Equity ratio: ${(equityRatio * 100).toFixed(2)}%)`,
         );
         try {
           await runWithRecovery(
             () =>
               perpsProgram.methods
-                .liquidate()
+                .liquidatePosition(marketId)
                 .accountsPartial({
+                  config: configPda,
+                  market: marketPda,
                   position: pos.publicKey,
-                  oracle: oraclePda,
-                  vault: vaultPda,
+                  owner: pos.account.owner,
                   liquidator: botKeypair.publicKey,
                 })
                 .rpc(),

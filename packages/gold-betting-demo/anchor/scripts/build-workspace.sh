@@ -6,6 +6,7 @@ TOOLS_VERSION="${ANCHOR_SBF_TOOLS_VERSION:-v1.44}"
 PROGRAMS=(
   "fight_oracle"
   "gold_clob_market"
+  "gold_perps_market"
 )
 
 extract_marker_json() {
@@ -74,6 +75,14 @@ generate_idl() {
 
 mkdir -p "${ROOT_DIR}/target/idl"
 
+if command -v anchor >/dev/null 2>&1; then
+  echo "[anchor-build] anchor build"
+  anchor build
+  node "${ROOT_DIR}/../scripts/sync-anchor-artifacts.mjs"
+  echo "[anchor-build] complete"
+  exit 0
+fi
+
 if ! cargo --list | grep -q "build-sbf"; then
   echo "[anchor-build] cargo-build-sbf not found, skipping sbf build"
 else
@@ -86,5 +95,7 @@ fi
 for program in "${PROGRAMS[@]}"; do
   generate_idl "${program}"
 done
+
+node "${ROOT_DIR}/../scripts/sync-anchor-artifacts.mjs"
 
 echo "[anchor-build] complete"

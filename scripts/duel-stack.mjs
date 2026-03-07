@@ -6,12 +6,13 @@
  * - game server + client (streaming duel scheduler)
  * - duel bot matchmaker
  * - RTMP bridge + local HLS fanout
- * - betting app (devnet mode)
- * - keeper bot (devnet automation)
+ * - betting app
+ * - keeper bot automation
  */
 
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { parseArgs } from "node:util";
 
@@ -78,7 +79,7 @@ Options:
   --client-url <url>      Game client URL (default: http://localhost:3333)
   --remote-betting        Do not start local betting app (external platform mode)
   --skip-chain-setup      Start server without setup-chain/anvil bootstrap
-  --skip-keeper           Skip devnet keeper bot
+  --skip-keeper           Skip keeper bot
   --skip-stream           Skip RTMP/HLS bridge process
   --skip-betting          Skip betting app
   --skip-bots             Skip duel matchmaker bots
@@ -231,6 +232,22 @@ const madviseShimOutput = path.join(
   ".runtime-locks",
   "libduel-madvise-shim.so",
 );
+const DUEL_SOLANA_CANONICAL_PROGRAM_ID =
+  "9NdidShnVzy1fc1WHWJTvyuXmH47ynfNGA6QFdyfAuSU";
+const KEEPER_REQUIRED_PROGRAMS = Object.freeze([
+  {
+    name: "fight oracle",
+    programId: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
+  },
+  {
+    name: "gold clob market",
+    programId: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
+  },
+]);
+const KEEPER_PERPS_PROGRAM = {
+  name: "gold perps market",
+  programId: "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik",
+};
 
 const bettingAppDir = path.join(ROOT, "packages/gold-betting-demo/app");
 const bettingPublicDir = path.join(bettingAppDir, "public");
@@ -376,6 +393,231 @@ function readEnvFile(filePath) {
     out[key] = value;
   }
   return out;
+}
+
+function uniqueNonEmpty(values) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function expandHome(filePath) {
+  if (!filePath.startsWith("~/")) return filePath;
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  return home ? path.join(home, filePath.slice(2)) : filePath;
+}
+
+function ixDiscriminator(name) {
+  return createHash("sha256")
+    .update(`global:${name}`)
+    .digest()
+    .subarray(0, 8);
+}
+
+let solanaToolDepsPromise = null;
+
+async function getSolanaToolDeps() {
+  if (!solanaToolDepsPromise) {
+    solanaToolDepsPromise = Promise.all([
+      import("@solana/web3.js"),
+      import("bs58"),
+    ]).then(([web3, bs58Module]) => ({
+      ...web3,
+      bs58: bs58Module.default ?? bs58Module,
+    }));
+  }
+  return solanaToolDepsPromise;
+}
+
+function parseSolanaSecretRef(raw, Keypair, bs58) {
+  if (!raw) return null;
+  let trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  try {
+    if (
+      trimmed.endsWith(".json") ||
+      trimmed.startsWith("~/") ||
+      trimmed.startsWith("./") ||
+      trimmed.startsWith("../")
+    ) {
+      const resolvedPath = path.isAbsolute(trimmed)
+        ? trimmed
+        : path.resolve(expandHome(trimmed));
+      if (fs.existsSync(resolvedPath)) {
+        trimmed = fs.readFileSync(resolvedPath, "utf8").trim();
+      } else {
+        return null;
+      }
+    }
+
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(trimmed)));
+    }
+
+    if (trimmed.includes(",")) {
+      return Keypair.fromSecretKey(
+        Uint8Array.from(
+          trimmed.split(",").map((part) => Number(part.trim())),
+        ),
+      );
+    }
+
+    try {
+      const decoded = bs58.decode(trimmed);
+      if (decoded.length === 64) {
+        return Keypair.fromSecretKey(Uint8Array.from(decoded));
+      }
+    } catch {
+      // fall through to base64
+    }
+
+    const decodedB64 = Buffer.from(trimmed, "base64");
+    if (decodedB64.length === 64) {
+      return Keypair.fromSecretKey(Uint8Array.from(decodedB64));
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function resolveUsableSolanaAuthority({
+  rpcUrl,
+  candidateRefs,
+}) {
+  const { Connection, SystemProgram, bs58, Keypair } =
+    await getSolanaToolDeps();
+  const connection = new Connection(rpcUrl, "confirmed");
+
+  for (const ref of uniqueNonEmpty(candidateRefs)) {
+    const signer = parseSolanaSecretRef(ref, Keypair, bs58);
+    if (!signer) continue;
+
+    try {
+      const accountInfo = await connection.getAccountInfo(signer.publicKey);
+      if (!accountInfo) continue;
+      if (!accountInfo.owner.equals(SystemProgram.programId)) continue;
+      if ((accountInfo.data?.length ?? 0) !== 0) continue;
+      if ((accountInfo.lamports ?? 0) < 500_000) continue;
+
+      return {
+        secretRef: ref,
+        pubkey: signer.publicKey.toBase58(),
+        lamports: accountInfo.lamports,
+      };
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  return null;
+}
+
+async function resolvePredictionMarketProgramId({
+  rpcUrl,
+  authoritySecretRef,
+  candidateProgramIds,
+}) {
+  if (!authoritySecretRef) return null;
+
+  const {
+    Connection,
+    Keypair,
+    PublicKey,
+    SystemProgram,
+    Transaction,
+    TransactionInstruction,
+    bs58,
+  } = await getSolanaToolDeps();
+  const signer = parseSolanaSecretRef(authoritySecretRef, Keypair, bs58);
+  if (!signer) return null;
+
+  const connection = new Connection(rpcUrl, "confirmed");
+  const roundSeed = createHash("sha256")
+    .update(`duel-stack-program-check:${Date.now()}:${Math.random()}`)
+    .digest();
+
+  for (const candidate of uniqueNonEmpty([
+    ...candidateProgramIds,
+    DUEL_SOLANA_CANONICAL_PROGRAM_ID,
+  ])) {
+    try {
+      const programId = new PublicKey(candidate);
+      const programInfo = await connection.getAccountInfo(programId);
+      if (!programInfo?.executable) continue;
+
+      const [configPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("config", "utf8")],
+        programId,
+      );
+      const [oraclePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("oracle", "utf8"), roundSeed],
+        programId,
+      );
+      const ix = new TransactionInstruction({
+        programId,
+        keys: [
+          { pubkey: signer.publicKey, isSigner: true, isWritable: true },
+          { pubkey: configPda, isSigner: false, isWritable: false },
+          { pubkey: oraclePda, isSigner: false, isWritable: true },
+          {
+            pubkey: SystemProgram.programId,
+            isSigner: false,
+            isWritable: false,
+          },
+        ],
+        data: Buffer.concat([ixDiscriminator("init_oracle_round"), roundSeed]),
+      });
+      const tx = new Transaction().add(ix);
+      tx.feePayer = signer.publicKey;
+
+      const simulation = await connection.simulateTransaction(tx, [signer]);
+      if (simulation.value.err) continue;
+
+      return {
+        programId: candidate,
+        signerPubkey: signer.publicKey.toBase58(),
+      };
+    } catch {
+      // Try the next candidate program id.
+    }
+  }
+
+  return null;
+}
+
+async function resolveKeeperProgramReadiness({
+  rpcUrl,
+  includePerps,
+}) {
+  const { Connection, PublicKey } = await getSolanaToolDeps();
+  const connection = new Connection(rpcUrl, "confirmed");
+  const targets = includePerps
+    ? [...KEEPER_REQUIRED_PROGRAMS, KEEPER_PERPS_PROGRAM]
+    : KEEPER_REQUIRED_PROGRAMS;
+  const missing = [];
+
+  for (const target of targets) {
+    try {
+      const info = await connection.getAccountInfo(new PublicKey(target.programId));
+      if (!info?.executable) {
+        missing.push(target.name);
+      }
+    } catch {
+      missing.push(target.name);
+    }
+  }
+
+  return {
+    ready: missing.length === 0,
+    missing,
+  };
 }
 
 function listProcessSnapshot() {
@@ -936,6 +1178,72 @@ async function main() {
   prepareHlsOutput(hlsOutputPath);
 
   const serverEnv = readEnvFile(path.join(ROOT, "packages/server/.env"));
+  const duelSolanaRpcUrl = (
+    process.env.DUEL_SOLANA_RPC_URL ||
+    serverEnv.SOLANA_RPC_URL ||
+    process.env.SOLANA_RPC_URL ||
+    ""
+  ).trim();
+  const duelSolanaWsUrl = (
+    process.env.DUEL_SOLANA_WS_URL ||
+    serverEnv.SOLANA_WS_URL ||
+    process.env.SOLANA_WS_URL ||
+    ""
+  ).trim();
+  let resolvedSolanaAuthority = null;
+  let resolvedSolanaProgram = null;
+
+  if (duelSolanaRpcUrl) {
+    resolvedSolanaAuthority = await resolveUsableSolanaAuthority({
+      rpcUrl: duelSolanaRpcUrl,
+      candidateRefs: [
+        process.env.DUEL_SOLANA_ARENA_AUTHORITY_SECRET,
+        process.env.SOLANA_ARENA_AUTHORITY_SECRET,
+        serverEnv.SOLANA_ARENA_AUTHORITY_SECRET,
+        process.env.DUEL_SOLANA_ARENA_REPORTER_SECRET,
+        process.env.SOLANA_ARENA_REPORTER_SECRET,
+        serverEnv.SOLANA_ARENA_REPORTER_SECRET,
+        process.env.DUEL_SOLANA_ARENA_KEEPER_SECRET,
+        process.env.SOLANA_ARENA_KEEPER_SECRET,
+        serverEnv.SOLANA_ARENA_KEEPER_SECRET,
+        process.env.SOLANA_MM_PRIVATE_KEY,
+        process.env.SOLANA_MARKET_MAKER_PRIVATE_KEY,
+        "~/.config/solana/hyperscape/deployer-mainnet-20260211.json",
+        "~/.config/solana/mainnet-deployer.json",
+        "~/.config/solana/hyperscape-keys/deployer.json",
+        "~/.config/solana/id.json",
+      ],
+    });
+
+    if (resolvedSolanaAuthority) {
+      log(
+        `using Solana duel authority ${resolvedSolanaAuthority.pubkey} (${resolvedSolanaAuthority.lamports} lamports)`,
+      );
+      resolvedSolanaProgram = await resolvePredictionMarketProgramId({
+        rpcUrl: duelSolanaRpcUrl,
+        authoritySecretRef: resolvedSolanaAuthority.secretRef,
+        candidateProgramIds: [
+          process.env.DUEL_SOLANA_ARENA_MARKET_PROGRAM_ID,
+          process.env.SOLANA_ARENA_MARKET_PROGRAM_ID,
+          serverEnv.SOLANA_ARENA_MARKET_PROGRAM_ID,
+        ],
+      });
+      if (resolvedSolanaProgram) {
+        log(
+          `using Solana duel market program ${resolvedSolanaProgram.programId} (validated with ${resolvedSolanaProgram.signerPubkey})`,
+        );
+      } else {
+        log(
+          "warning: unable to validate a Solana prediction-market program; duel server will use configured env values",
+        );
+      }
+    } else {
+      log(
+        "warning: unable to find a fee-payer-safe Solana authority for duel market writes; duel server will use configured env values",
+      );
+    }
+  }
+
   const defaultPublicCdnUrl = `${serverHttpUrl}/game-assets`;
   const explicitDuelPublicCdnUrl = (process.env.DUEL_PUBLIC_CDN_URL || "").trim();
   const inheritedPublicCdnUrl = (
@@ -984,6 +1292,45 @@ async function main() {
   const gameEnv = {
     ...serverEnv,
     ...process.env,
+    SOLANA_CLUSTER:
+      process.env.DUEL_SOLANA_CLUSTER ||
+      serverEnv.SOLANA_CLUSTER ||
+      process.env.SOLANA_CLUSTER ||
+      "",
+    SOLANA_RPC_URL:
+      process.env.DUEL_SOLANA_RPC_URL ||
+      serverEnv.SOLANA_RPC_URL ||
+      process.env.SOLANA_RPC_URL ||
+      "",
+    SOLANA_WS_URL:
+      process.env.DUEL_SOLANA_WS_URL ||
+      serverEnv.SOLANA_WS_URL ||
+      process.env.SOLANA_WS_URL ||
+      "",
+    SOLANA_ARENA_MARKET_PROGRAM_ID:
+      process.env.DUEL_SOLANA_ARENA_MARKET_PROGRAM_ID ||
+      resolvedSolanaProgram?.programId ||
+      process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
+      serverEnv.SOLANA_ARENA_MARKET_PROGRAM_ID ||
+      DUEL_SOLANA_CANONICAL_PROGRAM_ID,
+    SOLANA_ARENA_AUTHORITY_SECRET:
+      process.env.DUEL_SOLANA_ARENA_AUTHORITY_SECRET ||
+      resolvedSolanaAuthority?.secretRef ||
+      process.env.SOLANA_ARENA_AUTHORITY_SECRET ||
+      serverEnv.SOLANA_ARENA_AUTHORITY_SECRET ||
+      "",
+    SOLANA_ARENA_REPORTER_SECRET:
+      process.env.DUEL_SOLANA_ARENA_REPORTER_SECRET ||
+      resolvedSolanaAuthority?.secretRef ||
+      process.env.SOLANA_ARENA_REPORTER_SECRET ||
+      serverEnv.SOLANA_ARENA_REPORTER_SECRET ||
+      "",
+    SOLANA_ARENA_KEEPER_SECRET:
+      process.env.DUEL_SOLANA_ARENA_KEEPER_SECRET ||
+      resolvedSolanaAuthority?.secretRef ||
+      process.env.SOLANA_ARENA_KEEPER_SECRET ||
+      serverEnv.SOLANA_ARENA_KEEPER_SECRET ||
+      "",
     // Duel stack should always target the local game server endpoints unless
     // explicitly overridden by duel-specific env vars.
     PUBLIC_API_URL:
@@ -1038,6 +1385,14 @@ async function main() {
     // Prevent aggressive local auto-restarts while tuning duel/MM workflows.
     MEMORY_RESTART_THRESHOLD_MB:
       process.env.MEMORY_RESTART_THRESHOLD_MB || "12288",
+    // The server watchdog enforces MEMORY_LIMIT_GB, not the legacy MB var above.
+    // Duel workflows commonly sit above 12GB RSS on Bun while remaining stable,
+    // so give the local stack explicit headroom unless the caller overrides it.
+    MEMORY_LIMIT_GB:
+      process.env.DUEL_MEMORY_LIMIT_GB ||
+      process.env.MEMORY_LIMIT_GB ||
+      serverEnv.MEMORY_LIMIT_GB ||
+      "16",
     // Enable autonomous behavior (movement, questing, skilling) outside duels.
     // StreamingDuelScheduler still owns combat flow inside the arena.
     EMBEDDED_AGENT_AUTONOMY_ENABLED:
@@ -1183,26 +1538,49 @@ async function main() {
     }
 
     if (!clientWasReady) {
-      // Check if production build exists and should be used
-      const clientDistPath = path.join(ROOT, "packages/client/dist/index.html");
+      const duelClientMode = (process.env.DUEL_CLIENT_MODE || "").trim().toLowerCase();
+      const forceDevClient =
+        duelClientMode === "dev" || duelClientMode === "development";
+      // Verified duel runs are long-lived and browser-heavy; prefer the built
+      // preview server unless development mode is explicitly requested.
       const useProductionBuild =
-        process.env.NODE_ENV === "production" ||
-        process.env.DUEL_CLIENT_MODE === "production" ||
-        /^(1|true|yes|on)$/i.test(process.env.DUEL_USE_PRODUCTION_CLIENT || "");
+        !forceDevClient &&
+        (process.env.NODE_ENV === "production" ||
+          duelClientMode === "production" ||
+          verifyEnabled ||
+          /^(1|true|yes|on)$/i.test(
+            process.env.DUEL_USE_PRODUCTION_CLIENT || "",
+          ));
+      const clientDistPath = path.join(ROOT, "packages/client/dist/index.html");
       const distExists = fs.existsSync(clientDistPath);
 
-      if (useProductionBuild && distExists) {
+      if (useProductionBuild) {
+        if (options.fresh === true || !distExists) {
+          log("building production game client for stable duel runtime...");
+          await runCommand(
+            "client-build",
+            "bun",
+            ["run", "--cwd", "packages/client", "build:cf"],
+            { env: gameEnv },
+          );
+        }
         log("starting game client in production mode (vite preview)...");
         spawnManaged(
           "game-client",
           "bun",
-          ["run", "--cwd", "packages/client", "preview", "--", "--host", "--port", "3333"],
+          [
+            "run",
+            "--cwd",
+            "packages/client",
+            "preview",
+            "--",
+            "--host",
+            "--port",
+            "3333",
+          ],
           { env: gameEnv },
         );
       } else {
-        if (useProductionBuild && !distExists) {
-          log("warning: production client requested but dist not found, falling back to dev mode");
-        }
         spawnManaged("game-client", "bun", ["run", "--cwd", "packages/client", "dev"], {
           env: gameEnv,
         });
@@ -1311,12 +1689,26 @@ async function main() {
     ).toLowerCase() === "true";
     const preferSoftwareCapture =
       process.platform === "linux" && captureHeadless;
+    const explicitStreamGameUrl = (
+      process.env.DUEL_STREAM_GAME_URL ||
+      process.env.STREAM_GAME_URL ||
+      ""
+    ).trim();
+    const explicitStreamFallbackUrls = (
+      process.env.DUEL_STREAM_FALLBACK_URLS ||
+      process.env.STREAM_GAME_FALLBACK_URLS ||
+      ""
+    ).trim();
     const streamEnv = {
       ...serverEnv,
       ...process.env,
-      GAME_URL: process.env.GAME_URL || streamCaptureUrl,
+      // Prefer duel-stack's capture-safe URLs over any unrelated inherited
+      // GAME_URL from the broader shell environment. Generic GAME_URL values
+      // often omit disableBridgeCapture=1, which causes the page to start its
+      // own MediaRecorder/WebSocket capture loop on top of CDP capture.
+      GAME_URL: explicitStreamGameUrl || streamCaptureUrl,
       GAME_FALLBACK_URLS:
-        process.env.GAME_FALLBACK_URLS ||
+        explicitStreamFallbackUrls ||
         `${embeddedSpectatorCaptureUrl},${homeCaptureUrl}`,
       RTMP_BRIDGE_PORT: String(rtmpPort),
       HLS_OUTPUT_PATH: hlsOutputPath,
@@ -1354,6 +1746,8 @@ async function main() {
         process.env.STREAM_CAPTURE_HEADLESS || defaultCaptureHeadless,
       RTMP_STATUS_FILE: rtmpStatusFile,
     };
+    log(`rtmp bridge game url: ${streamEnv.GAME_URL}`);
+    log(`rtmp bridge fallback urls: ${streamEnv.GAME_FALLBACK_URLS}`);
 
     const hasTwitchDestination = Boolean(
       streamEnv.TWITCH_STREAM_KEY || streamEnv.TWITCH_RTMP_STREAM_KEY,
@@ -1519,7 +1913,6 @@ async function main() {
   }
 
   if (!options["skip-keeper"]) {
-    log("starting keeper bot (devnet automation)...");
     const keeperGameUrl = (
       process.env.DUEL_KEEPER_GAME_URL ||
       process.env.KEEPER_GAME_URL ||
@@ -1531,26 +1924,114 @@ async function main() {
     log(
       "keeper will warn and back off automatically when bot signer funding is low",
     );
-    const keeperEnv = {
-      ...readEnvFile(path.join(ROOT, "packages/gold-betting-demo/.env.devnet")),
-      ...process.env,
-      GAME_URL: keeperGameUrl,
-      GAME_STATE_POLL_TIMEOUT_MS:
-        process.env.GAME_STATE_POLL_TIMEOUT_MS || "5000",
-      GAME_STATE_POLL_INTERVAL_MS:
-        process.env.GAME_STATE_POLL_INTERVAL_MS || "3000",
-    };
-    spawnManaged(
-      "keeper-bot",
-      "bun",
-      ["run", "--cwd", "packages/gold-betting-demo", "keeper:bot:devnet"],
-      {
-        env: keeperEnv,
-        critical: false,
-        restart: true,
-        restartDelayMs: 5000,
-      },
+    const keeperClusterHint = (
+      process.env.DUEL_KEEPER_SOLANA_CLUSTER ||
+      process.env.DUEL_SOLANA_CLUSTER ||
+      serverEnv.SOLANA_CLUSTER ||
+      process.env.SOLANA_CLUSTER ||
+      "devnet"
+    )
+      .trim()
+      .toLowerCase();
+    const keeperDefaultsFile =
+      keeperClusterHint === "mainnet" || keeperClusterHint === "mainnet-beta"
+        ? ".env.mainnet"
+        : ".env.devnet";
+    const keeperDefaults = readEnvFile(
+      path.join(ROOT, "packages/gold-betting-demo", keeperDefaultsFile),
     );
+    const keeperCluster = (
+      process.env.DUEL_KEEPER_SOLANA_CLUSTER ||
+      process.env.DUEL_SOLANA_CLUSTER ||
+      serverEnv.SOLANA_CLUSTER ||
+      process.env.SOLANA_CLUSTER ||
+      keeperDefaults.SOLANA_CLUSTER ||
+      "devnet"
+    )
+      .trim()
+      .toLowerCase();
+    const keeperRpcUrl = (
+      process.env.DUEL_KEEPER_SOLANA_RPC_URL ||
+      process.env.DUEL_SOLANA_RPC_URL ||
+      serverEnv.SOLANA_RPC_URL ||
+      process.env.SOLANA_RPC_URL ||
+      keeperDefaults.SOLANA_RPC_URL ||
+      ""
+    ).trim();
+    const includeKeeperPerps =
+      /^(1|true|yes|on)$/i.test(process.env.ENABLE_PERPS_ORACLE || "") ||
+      /^(1|true|yes|on)$/i.test(
+        process.env.ENABLE_PERPS_LIQUIDATOR || "",
+      );
+    const forceKeeper =
+      process.env.DUEL_KEEPER_FORCE === "true" ||
+      process.env.DUEL_FORCE_KEEPER === "true";
+    let keeperReady = false;
+    let keeperMissingPrograms = [];
+
+    if (keeperRpcUrl) {
+      const readiness = await resolveKeeperProgramReadiness({
+        rpcUrl: keeperRpcUrl,
+        includePerps: includeKeeperPerps,
+      });
+      keeperReady = readiness.ready;
+      keeperMissingPrograms = readiness.missing;
+    }
+
+    if (!forceKeeper && !keeperReady) {
+      log(
+        `skipping keeper bot; required demo programs are unavailable on ${keeperCluster}${keeperRpcUrl ? ` (${keeperRpcUrl})` : ""}${keeperMissingPrograms.length > 0 ? `: ${keeperMissingPrograms.join(", ")}` : ""}`,
+      );
+    } else {
+      log("starting keeper bot automation...");
+      log(`keeper game api url: ${keeperGameUrl}`);
+      log(
+        "keeper will warn and back off automatically when bot signer funding is low",
+      );
+      log(
+        `keeper solana cluster: ${keeperCluster}${keeperRpcUrl ? ` (${keeperRpcUrl})` : ""}`,
+      );
+      const keeperEnv = {
+        ...keeperDefaults,
+        ...process.env,
+        SOLANA_CLUSTER: keeperCluster,
+        SOLANA_RPC_URL: keeperRpcUrl,
+        BOT_KEYPAIR:
+          process.env.DUEL_KEEPER_BOT_KEYPAIR ||
+          process.env.BOT_KEYPAIR ||
+          resolvedSolanaAuthority?.secretRef ||
+          keeperDefaults.BOT_KEYPAIR ||
+          "",
+        ORACLE_AUTHORITY_KEYPAIR:
+          process.env.DUEL_KEEPER_ORACLE_AUTHORITY_KEYPAIR ||
+          process.env.ORACLE_AUTHORITY_KEYPAIR ||
+          resolvedSolanaAuthority?.secretRef ||
+          keeperDefaults.ORACLE_AUTHORITY_KEYPAIR ||
+          "",
+        MARKET_MAKER_KEYPAIR:
+          process.env.DUEL_KEEPER_MARKET_MAKER_KEYPAIR ||
+          process.env.MARKET_MAKER_KEYPAIR ||
+          resolvedSolanaAuthority?.secretRef ||
+          keeperDefaults.MARKET_MAKER_KEYPAIR ||
+          "",
+        GAME_URL: keeperGameUrl,
+        GAME_STATE_POLL_TIMEOUT_MS:
+          process.env.GAME_STATE_POLL_TIMEOUT_MS || "5000",
+        GAME_STATE_POLL_INTERVAL_MS:
+          process.env.GAME_STATE_POLL_INTERVAL_MS || "3000",
+      };
+      spawnManaged(
+        "keeper-bot",
+        "bun",
+        ["run", "--cwd", "packages/gold-betting-demo", "keeper:bot"],
+        {
+          env: keeperEnv,
+          critical: false,
+          restart: true,
+          restartDelayMs: 5000,
+        },
+      );
+    }
   }
 
   await startMarketMakers();

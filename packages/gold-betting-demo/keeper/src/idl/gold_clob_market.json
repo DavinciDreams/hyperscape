@@ -246,6 +246,13 @@
           }
         },
         {
+          "name": "program",
+          "address": "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi"
+        },
+        {
+          "name": "program_data"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -313,6 +320,9 @@
               }
             ]
           }
+        },
+        {
+          "name": "oracle_match"
         },
         {
           "name": "vault",
@@ -558,20 +568,10 @@
           "writable": true
         },
         {
-          "name": "authority",
-          "signer": true
+          "name": "oracle_match"
         }
       ],
-      "args": [
-        {
-          "name": "winner",
-          "type": {
-            "defined": {
-              "name": "MarketSide"
-            }
-          }
-        }
-      ]
+      "args": []
     },
     {
       "name": "update_config",
@@ -646,6 +646,19 @@
         82,
         128,
         24
+      ]
+    },
+    {
+      "name": "MatchResult",
+      "discriminator": [
+        234,
+        166,
+        33,
+        250,
+        153,
+        92,
+        223,
+        196
       ]
     },
     {
@@ -769,28 +782,48 @@
     },
     {
       "code": 6013,
+      "name": "UnauthorizedInitializer",
+      "msg": "Only the configured bootstrap authority can initialize config"
+    },
+    {
+      "code": 6014,
       "name": "MathOverflow",
       "msg": "Math overflow"
     },
     {
-      "code": 6014,
+      "code": 6015,
       "name": "PrecisionError",
       "msg": "Math precision error"
     },
     {
-      "code": 6015,
+      "code": 6016,
       "name": "InvalidRemainingAccount",
       "msg": "Invalid remaining account provided"
     },
     {
-      "code": 6016,
+      "code": 6017,
       "name": "InvalidWinner",
       "msg": "Winner must be YES (1) or NO (2)"
     },
     {
-      "code": 6017,
+      "code": 6018,
       "name": "InvalidOrderId",
       "msg": "Provided order ID does not match next_order_id"
+    },
+    {
+      "code": 6019,
+      "name": "OracleMatchNotOpen",
+      "msg": "Linked oracle match is not open"
+    },
+    {
+      "code": 6020,
+      "name": "OracleMatchNotResolved",
+      "msg": "Linked oracle match is not resolved"
+    },
+    {
+      "code": 6021,
+      "name": "OracleWinnerUnavailable",
+      "msg": "Linked oracle match does not have a winner"
     }
   ],
   "types": [
@@ -827,18 +860,72 @@
       }
     },
     {
-      "name": "MarketSide",
+      "name": "MatchResult",
       "type": {
-        "kind": "enum",
-        "variants": [
+        "kind": "struct",
+        "fields": [
           {
-            "name": "None"
+            "name": "match_id",
+            "type": "u64"
           },
           {
-            "name": "Yes"
+            "name": "oracle_config",
+            "type": "pubkey"
           },
           {
-            "name": "No"
+            "name": "open_ts",
+            "type": "i64"
+          },
+          {
+            "name": "bet_close_ts",
+            "type": "i64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "MatchStatus"
+              }
+            }
+          },
+          {
+            "name": "winner",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "fight_oracle::MarketSide"
+                }
+              }
+            }
+          },
+          {
+            "name": "seed",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "replay_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "resolved_ts",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "metadata_uri",
+            "type": "string"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
@@ -856,7 +943,7 @@
             "name": "winner",
             "type": {
               "defined": {
-                "name": "MarketSide"
+                "name": "gold_clob_market::MarketSide"
               }
             }
           },
@@ -871,6 +958,24 @@
           {
             "name": "authority",
             "type": "pubkey"
+          },
+          {
+            "name": "oracle_match",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MatchStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Resolved"
           }
         ]
       }
@@ -943,6 +1048,37 @@
           {
             "name": "no_shares",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "fight_oracle::MarketSide",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Yes"
+          },
+          {
+            "name": "No"
+          }
+        ]
+      }
+    },
+    {
+      "name": "gold_clob_market::MarketSide",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Yes"
+          },
+          {
+            "name": "No"
           }
         ]
       }

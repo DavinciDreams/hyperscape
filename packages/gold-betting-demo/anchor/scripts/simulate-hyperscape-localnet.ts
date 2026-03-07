@@ -56,11 +56,21 @@ const STRATEGIES: Strategy[] = [
   "highest_spread",
 ];
 
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer (got: ${raw})`);
+  }
+  return parsed;
+}
+
 const SIDE_A = 1;
 const SIDE_B = 2;
 const STATUS_RESOLVED = 3;
-const WALLET_COUNT = 100;
-const ROUNDS = 3;
+const WALLET_COUNT = parsePositiveIntEnv("SOLANA_SPL_SIM_WALLETS", 100);
+const ROUNDS = parsePositiveIntEnv("SOLANA_SPL_SIM_ROUNDS", 3);
 const INITIAL_GOLD = 1_000_000_000n; // base units (decimals=6)
 const BASE_STAKE = 8_000_000n;
 
@@ -143,13 +153,20 @@ async function main() {
   );
 
   const rpcUrl = process.env.ANCHOR_PROVIDER_URL ?? "http://127.0.0.1:8899";
+  const wsUrl = process.env.ANCHOR_WS_URL;
   const walletPath =
     process.env.ANCHOR_WALLET ?? `${process.env.HOME}/.config/solana/id.json`;
 
   const authority = Keypair.fromSecretKey(
     Uint8Array.from(JSON.parse(readFileSync(walletPath, "utf8")) as number[]),
   );
-  const connection = new anchor.web3.Connection(rpcUrl, "confirmed");
+  const connection =
+    wsUrl !== undefined
+      ? new anchor.web3.Connection(rpcUrl, {
+          commitment: "confirmed",
+          wsEndpoint: wsUrl,
+        })
+      : new anchor.web3.Connection(rpcUrl, "confirmed");
   const wallet = new anchor.Wallet(authority);
   const provider = new anchor.AnchorProvider(connection, wallet, {
     commitment: "confirmed",

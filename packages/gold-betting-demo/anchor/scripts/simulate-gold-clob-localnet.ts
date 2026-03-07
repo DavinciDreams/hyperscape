@@ -12,6 +12,10 @@ import {
   Transaction,
 } from "@solana/web3.js";
 
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
+
 type Strategy =
   | "cabal_against_house"
   | "mev"
@@ -56,9 +60,11 @@ function parsePositiveIntEnv(name: string, fallback: number): number {
 const WALLET_COUNT = parsePositiveIntEnv("SOLANA_NATIVE_SIM_WALLETS", 100);
 const ROUNDS = parsePositiveIntEnv("SOLANA_NATIVE_SIM_ROUNDS", 1);
 const BASE_ORDER_AMOUNT = 3_000_000n;
+const MAX_MATCHES_PER_ORDER = 4;
 const BETTOR_FUNDING = Math.floor(2 * LAMPORTS_PER_SOL);
 const TREASURY_FUNDING = Math.floor(0.1 * LAMPORTS_PER_SOL);
 const MARKET_MAKER_FUNDING = Math.floor(0.1 * LAMPORTS_PER_SOL);
+const AUTHORITY_FUNDING_BUFFER = Math.floor(10 * LAMPORTS_PER_SOL);
 
 function createRng(seed: bigint): () => number {
   let state = seed;
@@ -169,10 +175,47 @@ function deriveOrderPda(
   )[0];
 }
 
+function deriveProgramDataAddress(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [programId.toBuffer()],
+    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+  )[0];
+}
+
+function deriveOracleConfigPda(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("oracle_config")],
+    programId,
+  )[0];
+}
+
+function deriveOracleMatchPda(programId: PublicKey, matchId: BN): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("match"), matchId.toArrayLike(Buffer, "le", 8)],
+    programId,
+  )[0];
+}
+
+function asBigInt(value: unknown): bigint {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") return BigInt(value);
+  if (value instanceof BN) return BigInt(value.toString());
+  if (value && typeof value === "object" && "toString" in value) {
+    return BigInt(String(value));
+  }
+  return 0n;
+}
+
 async function main() {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const workspaceDir = join(scriptDir, "..");
-  const idlPath = join(workspaceDir, "target", "idl", "gold_clob_market.json");
+  const clobIdlPath = join(
+    workspaceDir,
+    "target",
+    "idl",
+    "gold_clob_market.json",
+  );
+  const fightIdlPath = join(workspaceDir, "target", "idl", "fight_oracle.json");
 
   const rpcUrl = process.env.ANCHOR_PROVIDER_URL ?? "http://127.0.0.1:8899";
   const wsUrl = process.env.ANCHOR_WS_URL;
@@ -195,11 +238,22 @@ async function main() {
   });
   anchor.setProvider(provider);
 
-  const idl = JSON.parse(readFileSync(idlPath, "utf8")) as anchor.Idl & {
+  const clobIdl = JSON.parse(
+    readFileSync(clobIdlPath, "utf8"),
+  ) as anchor.Idl & {
     address: string;
   };
-  const programId = new PublicKey(idl.address);
-  const program = new anchor.Program(idl, provider) as anchor.Program<any>;
+  const fightIdl = JSON.parse(
+    readFileSync(fightIdlPath, "utf8"),
+  ) as anchor.Idl & {
+    address: string;
+  };
+  const programId = new PublicKey(clobIdl.address);
+  const program = new anchor.Program(clobIdl, provider) as anchor.Program<any>;
+  const fightProgram = new anchor.Program(
+    fightIdl,
+    provider,
+  ) as anchor.Program<any>;
 
   const signatures: string[] = [];
   const roundSummaries: RoundSummary[] = [];
@@ -208,81 +262,237 @@ async function main() {
     betAttempts: 0,
     betSuccess: 0,
     betFailures: 0,
+    cancelAttempts: 0,
+    cancelSuccess: 0,
+    cancelFailures: 0,
     claimAttempts: 0,
     claimSuccess: 0,
     claimFailures: 0,
   };
 
-  async function record(signaturePromise: Promise<string>) {
-    const sig = await signaturePromise;
-    signatures.push(sig);
-    return sig;
-  }
-
-  async function recordWithRetries(
-    label: string,
-    signatureFactory: () => Promise<string>,
-    maxAttempts = 3,
-  ) {
+  async function getLatestBlockhashWithRetries(maxAttempts = 8) {
     let lastError: unknown = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        return await record(signatureFactory());
+        return await connection.getLatestBlockhash("confirmed");
       } catch (error) {
         lastError = error;
         if (attempt < maxAttempts) {
-          await sleep(150);
+          await sleep(200 * attempt);
         }
       }
     }
     const reason =
       lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(
+      `failed to fetch latest blockhash after ${maxAttempts} attempts: ${reason}`,
+    );
+  }
+
+  async function confirmSignatureByPolling(
+    label: string,
+    signature: string,
+    lastValidBlockHeight: number,
+    timeoutMs = 120_000,
+  ) {
+    const deadline = Date.now() + timeoutMs;
+    let lastRpcError: unknown = null;
+    let pollCount = 0;
+
+    while (Date.now() < deadline) {
+      pollCount += 1;
+      try {
+        const statuses = await connection.getSignatureStatuses([signature], {
+          searchTransactionHistory: true,
+        });
+        const status = statuses.value[0];
+        if (status?.err) {
+          throw new Error(
+            `transaction ${signature} failed: ${JSON.stringify(status.err)}`,
+          );
+        }
+        if (
+          status &&
+          (status.confirmationStatus === "confirmed" ||
+            status.confirmationStatus === "finalized")
+        ) {
+          return;
+        }
+
+        if (pollCount % 8 === 0) {
+          const currentBlockHeight =
+            await connection.getBlockHeight("confirmed");
+          if (currentBlockHeight > lastValidBlockHeight) {
+            throw new Error(
+              `transaction ${signature} expired at block height ${lastValidBlockHeight}`,
+            );
+          }
+        }
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.message.includes("transaction ") ||
+            error.message.includes("expired at block height"))
+        ) {
+          throw error;
+        }
+        lastRpcError = error;
+      }
+
+      await sleep(250);
+    }
+
+    const reason =
+      lastRpcError instanceof Error ? ` (${lastRpcError.message})` : "";
+    throw new Error(
+      `${label} timed out waiting for confirmation for ${signature}${reason}`,
+    );
+  }
+
+  async function sendTransactionWithPolling(
+    label: string,
+    transactionFactory: () => Promise<Transaction> | Transaction,
+    signers: Keypair[] = [],
+    maxAttempts = 4,
+  ) {
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const transaction = await transactionFactory();
+        transaction.feePayer = transaction.feePayer ?? authority.publicKey;
+
+        const { blockhash, lastValidBlockHeight } =
+          await getLatestBlockhashWithRetries();
+        transaction.recentBlockhash = blockhash;
+
+        for (const signer of signers) {
+          transaction.partialSign(signer);
+        }
+
+        const signedTx = await wallet.signTransaction(transaction);
+        const signature = await connection.sendRawTransaction(
+          signedTx.serialize(),
+          {
+            preflightCommitment: "confirmed",
+            maxRetries: 8,
+          },
+        );
+        signatures.push(signature);
+        await confirmSignatureByPolling(label, signature, lastValidBlockHeight);
+        return signature;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts) {
+          await sleep(250 * attempt);
+        }
+      }
+    }
+
+    const reason =
+      lastError instanceof Error ? lastError.message : String(lastError);
     throw new Error(`${label} failed after ${maxAttempts} attempts: ${reason}`);
   }
 
-  async function sendAndConfirmWithRetries(
-    label: string,
-    transaction: Transaction,
-    signers: Keypair[] = [],
-  ) {
-    await recordWithRetries(label, () =>
-      provider.sendAndConfirm(transaction, signers, {
-        commitment: "confirmed",
-        preflightCommitment: "confirmed",
-        maxRetries: 8,
-      }),
-    );
-  }
-
   async function sendSol(to: PublicKey, lamports: number) {
-    const tx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: authority.publicKey,
-        toPubkey: to,
-        lamports,
-      }),
+    await sendTransactionWithPolling("fund-wallet", () =>
+      new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: authority.publicKey,
+          toPubkey: to,
+          lamports,
+        }),
+      ),
     );
-    await sendAndConfirmWithRetries("fund-wallet", tx, []);
   }
 
   async function fundWallets(recipients: PublicKey[], lamports: number) {
     for (const group of chunk(recipients, 20)) {
-      const tx = new Transaction();
-      for (const recipient of group) {
-        tx.add(
-          SystemProgram.transfer({
-            fromPubkey: authority.publicKey,
-            toPubkey: recipient,
-            lamports,
-          }),
-        );
-      }
-      await sendAndConfirmWithRetries("fund-wallet-batch", tx, []);
+      await sendTransactionWithPolling("fund-wallet-batch", () => {
+        const tx = new Transaction();
+        for (const recipient of group) {
+          tx.add(
+            SystemProgram.transfer({
+              fromPubkey: authority.publicKey,
+              toPubkey: recipient,
+              lamports,
+            }),
+          );
+        }
+        return tx;
+      });
     }
   }
 
   async function getBalance(pubkey: PublicKey) {
     return BigInt(await connection.getBalance(pubkey, "confirmed"));
+  }
+
+  async function ensureAuthorityBalance(requiredLamports: number) {
+    let currentBalance = await connection.getBalance(
+      authority.publicKey,
+      "confirmed",
+    );
+    if (currentBalance >= requiredLamports) {
+      return;
+    }
+
+    const airdropChunk = Math.floor(50 * LAMPORTS_PER_SOL);
+    let lastError: unknown = null;
+
+    while (currentBalance < requiredLamports) {
+      const lamports = Math.min(
+        requiredLamports - currentBalance,
+        airdropChunk,
+      );
+      const targetBalance = currentBalance + lamports;
+      try {
+        const signature = await connection.requestAirdrop(
+          authority.publicKey,
+          lamports,
+        );
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < 30_000) {
+          currentBalance = await connection.getBalance(
+            authority.publicKey,
+            "confirmed",
+          );
+          if (currentBalance >= targetBalance) {
+            break;
+          }
+
+          const statuses = await connection.getSignatureStatuses([signature], {
+            searchTransactionHistory: true,
+          });
+          const status = statuses.value[0];
+          if (status?.err) {
+            throw new Error(
+              `authority airdrop failed: ${JSON.stringify(status.err)}`,
+            );
+          }
+          await sleep(250);
+        }
+        currentBalance = await connection.getBalance(
+          authority.publicKey,
+          "confirmed",
+        );
+      } catch (error) {
+        lastError = error;
+        await sleep(400);
+      }
+    }
+
+    const finalBalance = await connection.getBalance(
+      authority.publicKey,
+      "confirmed",
+    );
+    if (finalBalance < requiredLamports) {
+      const reason =
+        lastError instanceof Error ? lastError.message : String(lastError);
+      throw new Error(
+        `authority funding incomplete: need ${requiredLamports} lamports, have ${finalBalance} (${reason})`,
+      );
+    }
   }
 
   async function nextOrderId(matchState: PublicKey) {
@@ -292,19 +502,107 @@ async function main() {
     return new BN(state.nextOrderId.toString());
   }
 
+  async function didOrderPlacementSettle(
+    matchState: PublicKey,
+    orderId: BN,
+    orderPda: PublicKey,
+  ) {
+    const existingOrder = await program.account.order.fetchNullable(orderPda);
+    if (existingOrder) {
+      return true;
+    }
+
+    const currentOrderId = await nextOrderId(matchState);
+    return currentOrderId.gt(orderId);
+  }
+
+  async function findMatchingMakerAccounts(
+    matchState: PublicKey,
+    isBuy: boolean,
+    price: number,
+  ) {
+    const allOrders = (await program.account.order.all()) as Array<{
+      publicKey: PublicKey;
+      account: {
+        matchState: PublicKey;
+        maker: PublicKey;
+        isBuy: boolean;
+        price: number;
+        amount: BN | number | bigint;
+        filled: BN | number | bigint;
+      };
+    }>;
+
+    const openMakerOrders = allOrders
+      .filter((order) => order.account.matchState.equals(matchState))
+      .filter((order) => Boolean(order.account.isBuy) !== isBuy)
+      .filter(
+        (order) =>
+          asBigInt(order.account.amount) > asBigInt(order.account.filled),
+      )
+      .filter((order) =>
+        isBuy
+          ? Number(order.account.price) <= price
+          : Number(order.account.price) >= price,
+      )
+      .sort((left, right) =>
+        isBuy
+          ? Number(left.account.price) - Number(right.account.price)
+          : Number(right.account.price) - Number(left.account.price),
+      );
+
+    return openMakerOrders.slice(0, MAX_MATCHES_PER_ORDER).flatMap((order) => [
+      {
+        pubkey: order.publicKey,
+        isWritable: true,
+        isSigner: false,
+      },
+      {
+        pubkey: deriveUserBalancePda(
+          programId,
+          matchState,
+          order.account.maker,
+        ),
+        isWritable: true,
+        isSigner: false,
+      },
+    ]);
+  }
+
   const [configPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("config")],
     programId,
   );
+  const oracleConfig = deriveOracleConfigPda(fightProgram.programId);
 
   const treasuryWallet = Keypair.generate();
   const marketMakerWallet = Keypair.generate();
+  const requiredAuthorityLamports =
+    TREASURY_FUNDING +
+    MARKET_MAKER_FUNDING +
+    BETTOR_FUNDING * WALLET_COUNT +
+    Math.floor(0.05 * LAMPORTS_PER_SOL) * ROUNDS +
+    AUTHORITY_FUNDING_BUFFER;
+  await ensureAuthorityBalance(requiredAuthorityLamports);
   await Promise.all([
     sendSol(treasuryWallet.publicKey, TREASURY_FUNDING),
     sendSol(marketMakerWallet.publicKey, MARKET_MAKER_FUNDING),
   ]);
 
-  await recordWithRetries("initialize-config", () =>
+  await sendTransactionWithPolling("initialize-oracle", () =>
+    fightProgram.methods
+      .initializeOracle()
+      .accountsPartial({
+        authority: authority.publicKey,
+        oracleConfig,
+        program: fightProgram.programId,
+        programData: deriveProgramDataAddress(fightProgram.programId),
+        systemProgram: SystemProgram.programId,
+      })
+      .transaction(),
+  );
+
+  await sendTransactionWithPolling("initialize-config", () =>
     program.methods
       .initializeConfig(
         treasuryWallet.publicKey,
@@ -316,11 +614,13 @@ async function main() {
       .accountsPartial({
         authority: authority.publicKey,
         config: configPda,
+        program: program.programId,
+        programData: deriveProgramDataAddress(program.programId),
         systemProgram: SystemProgram.programId,
       })
-      .rpc(),
+      .transaction(),
   ).catch(async () => {
-    await recordWithRetries("update-config", () =>
+    await sendTransactionWithPolling("update-config", () =>
       program.methods
         .updateConfig(
           treasuryWallet.publicKey,
@@ -333,7 +633,7 @@ async function main() {
           authority: authority.publicKey,
           config: configPda,
         })
-        .rpc(),
+        .transaction(),
     );
   });
 
@@ -351,6 +651,10 @@ async function main() {
   );
 
   for (let round = 1; round <= ROUNDS; round += 1) {
+    const matchId = new BN(
+      (Date.now() + round * 10_000 + Math.floor(rng() * 1_000)).toString(),
+    );
+    const oracleMatch = deriveOracleMatchPda(fightProgram.programId, matchId);
     const matchState = Keypair.generate();
     const orderBook = Keypair.generate();
     const [vault] = PublicKey.findProgramAddressSync(
@@ -358,31 +662,48 @@ async function main() {
       programId,
     );
 
-    await recordWithRetries("initialize-match", () =>
-      program.methods
-        .initializeMatch(500)
+    await sendTransactionWithPolling("create-oracle-match", () =>
+      fightProgram.methods
+        .createMatch(matchId, new BN(2), `sim-round-${round}`)
         .accountsPartial({
-          matchState: matchState.publicKey,
-          user: authority.publicKey,
-          config: configPda,
-          vault,
+          authority: authority.publicKey,
+          oracleConfig,
+          matchResult: oracleMatch,
           systemProgram: SystemProgram.programId,
         })
-        .signers([matchState])
-        .rpc(),
+        .transaction(),
     );
 
-    await recordWithRetries("initialize-order-book", () =>
-      program.methods
-        .initializeOrderBook()
-        .accountsPartial({
-          user: authority.publicKey,
-          matchState: matchState.publicKey,
-          orderBook: orderBook.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .signers([orderBook])
-        .rpc(),
+    await sendTransactionWithPolling(
+      "initialize-match",
+      () =>
+        program.methods
+          .initializeMatch(500)
+          .accountsPartial({
+            matchState: matchState.publicKey,
+            user: authority.publicKey,
+            config: configPda,
+            oracleMatch,
+            vault,
+            systemProgram: SystemProgram.programId,
+          })
+          .transaction(),
+      [matchState],
+    );
+
+    await sendTransactionWithPolling(
+      "initialize-order-book",
+      () =>
+        program.methods
+          .initializeOrderBook()
+          .accountsPartial({
+            user: authority.publicKey,
+            matchState: matchState.publicKey,
+            orderBook: orderBook.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .transaction(),
+      [orderBook],
     );
 
     // Ensure the vault PDA is rent-exempt before receiving small trade flows.
@@ -391,6 +712,12 @@ async function main() {
     const winner = pickWinner(rng);
     const houseBias: Winner = round % 2 === 0 ? "YES" : "NO";
     let betsPlaced = 0;
+    const placedOrders: Array<{
+      wallet: Keypair;
+      orderId: BN;
+      orderPda: PublicKey;
+      userBalancePda: PublicKey;
+    }> = [];
 
     for (const bettor of bettors) {
       const order = orderFromStrategy(bettor.strategy, winner, houseBias, rng);
@@ -409,47 +736,163 @@ async function main() {
         bettor.wallet.publicKey,
         bettorOrderId,
       );
-      await recordWithRetries("bettor-order", () =>
-        program.methods
-          .placeOrder(
-            bettorOrderId,
-            order.isBuy,
-            order.price,
-            toU64Bn(order.amount),
-          )
-          .accountsPartial({
-            matchState: matchState.publicKey,
-            orderBook: orderBook.publicKey,
-            userBalance,
-            newOrder,
-            config: configPda,
-            treasury: treasuryWallet.publicKey,
-            marketMaker: marketMakerWallet.publicKey,
-            vault,
-            user: bettor.wallet.publicKey,
-            systemProgram: SystemProgram.programId,
-          })
-          .signers([bettor.wallet])
-          .rpc(),
+      const remainingAccounts = await findMatchingMakerAccounts(
+        matchState.publicKey,
+        order.isBuy,
+        order.price,
       );
+      try {
+        await sendTransactionWithPolling(
+          "bettor-order",
+          () =>
+            program.methods
+              .placeOrder(
+                bettorOrderId,
+                order.isBuy,
+                order.price,
+                toU64Bn(order.amount),
+              )
+              .accountsPartial({
+                matchState: matchState.publicKey,
+                orderBook: orderBook.publicKey,
+                userBalance,
+                newOrder,
+                config: configPda,
+                treasury: treasuryWallet.publicKey,
+                marketMaker: marketMakerWallet.publicKey,
+                vault,
+                user: bettor.wallet.publicKey,
+                systemProgram: SystemProgram.programId,
+              })
+              .remainingAccounts(remainingAccounts)
+              .transaction(),
+          [bettor.wallet],
+        );
+      } catch (error) {
+        if (
+          !(await didOrderPlacementSettle(
+            matchState.publicKey,
+            bettorOrderId,
+            newOrder,
+          ))
+        ) {
+          executionStats.betFailures += 1;
+          throw error;
+        }
+      }
 
       executionStats.betSuccess += 1;
       betsPlaced += 1;
+      placedOrders.push({
+        wallet: bettor.wallet,
+        orderId: bettorOrderId,
+        orderPda: newOrder,
+        userBalancePda: userBalance,
+      });
     }
 
     const winnerArg =
       winner === "YES" ? ({ yes: {} } as any) : ({ no: {} } as any);
-    await recordWithRetries("resolve-match", () =>
+    await sleep(2_200);
+    await sendTransactionWithPolling("post-result", () =>
+      fightProgram.methods
+        .postResult(
+          winnerArg,
+          new BN(round.toString()),
+          Array.from(Keypair.generate().publicKey.toBytes()),
+        )
+        .accountsPartial({
+          authority: authority.publicKey,
+          oracleConfig,
+          matchResult: oracleMatch,
+        })
+        .transaction(),
+    );
+    await sendTransactionWithPolling("resolve-match", () =>
       program.methods
-        .resolveMatch(winnerArg)
+        .resolveMatch()
         .accountsPartial({
           matchState: matchState.publicKey,
-          authority: authority.publicKey,
+          oracleMatch,
         })
-        .rpc(),
+        .transaction(),
     );
 
-    const winningClaims = 0;
+    let winningClaims = 0;
+    for (const placedOrder of placedOrders) {
+      const orderAccount = await program.account.order.fetchNullable(
+        placedOrder.orderPda,
+      );
+      if (
+        orderAccount &&
+        asBigInt(orderAccount.amount) > asBigInt(orderAccount.filled)
+      ) {
+        executionStats.cancelAttempts += 1;
+        try {
+          await sendTransactionWithPolling(
+            "cancel-order",
+            () =>
+              program.methods
+                .cancelOrder(placedOrder.orderId)
+                .accountsPartial({
+                  matchState: matchState.publicKey,
+                  orderBook: orderBook.publicKey,
+                  order: placedOrder.orderPda,
+                  vault,
+                  user: placedOrder.wallet.publicKey,
+                  systemProgram: SystemProgram.programId,
+                })
+                .transaction(),
+            [placedOrder.wallet],
+          );
+          executionStats.cancelSuccess += 1;
+        } catch (error) {
+          executionStats.cancelFailures += 1;
+          throw error;
+        }
+      }
+
+      const userBalanceAccount =
+        await program.account.userBalance.fetchNullable(
+          placedOrder.userBalancePda,
+        );
+      const winningShares =
+        userBalanceAccount === null
+          ? 0n
+          : winner === "YES"
+            ? asBigInt(userBalanceAccount.yesShares)
+            : asBigInt(userBalanceAccount.noShares);
+      if (winningShares === 0n) {
+        continue;
+      }
+
+      executionStats.claimAttempts += 1;
+      try {
+        await sendTransactionWithPolling(
+          "claim-winnings",
+          () =>
+            program.methods
+              .claim()
+              .accountsPartial({
+                matchState: matchState.publicKey,
+                orderBook: orderBook.publicKey,
+                userBalance: placedOrder.userBalancePda,
+                config: configPda,
+                marketMaker: marketMakerWallet.publicKey,
+                vault,
+                user: placedOrder.wallet.publicKey,
+                systemProgram: SystemProgram.programId,
+              })
+              .transaction(),
+          [placedOrder.wallet],
+        );
+        executionStats.claimSuccess += 1;
+        winningClaims += 1;
+      } catch (error) {
+        executionStats.claimFailures += 1;
+        throw error;
+      }
+    }
 
     roundSummaries.push({
       round,

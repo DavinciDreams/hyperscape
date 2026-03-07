@@ -37,6 +37,15 @@ interface ReportResolveResult {
   resolveSignature: string | null;
 }
 
+interface SignerAccountState {
+  publicKey: string;
+  exists: boolean;
+  lamports: number;
+  owner: string | null;
+  dataLength: number;
+  isPlainSystemAccount: boolean;
+}
+
 const SIDE_TO_U8: Record<"A" | "B", number> = {
   A: 1,
   B: 2,
@@ -117,6 +126,9 @@ function parseSignerSecret(raw: string | null): Keypair | null {
     }
 
     // Base64 format
+    if (trimmed.startsWith("base64:")) {
+      trimmed = trimmed.slice("base64:".length).trim();
+    }
     const b64 = Buffer.from(trimmed, "base64");
     if (b64.length === 64) {
       return Keypair.fromSecretKey(Uint8Array.from(b64));
@@ -157,6 +169,11 @@ export class SolanaArenaOperator {
   private readonly reporter: Keypair | null;
   private readonly keeper: Keypair | null;
   private readonly connection: Connection;
+  private readonly signerAccountStateCache = new Map<
+    string,
+    Promise<SignerAccountState>
+  >();
+  private writeDisabledReason: string | null = null;
 
   public constructor(config: SolanaArenaConfig) {
     this.config = config;
@@ -174,7 +191,71 @@ export class SolanaArenaOperator {
   }
 
   public isEnabled(): boolean {
-    return this.authority !== null;
+    return this.authority !== null && this.writeDisabledReason === null;
+  }
+
+  public async validateRoundInitialization(): Promise<{
+    ready: boolean;
+    reason?: string;
+  }> {
+    if (!this.authority) {
+      return {
+        ready: false,
+        reason:
+          "SOLANA_ARENA_AUTHORITY_SECRET is not configured; on-chain duel market creation is disabled.",
+      };
+    }
+
+    try {
+      await this.assertSignerCanFundWrites(
+        "authority",
+        this.authority,
+        "initialize arena config, oracle rounds, and markets",
+      );
+      return { ready: true };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return { ready: false, reason };
+    }
+  }
+
+  public async validateLiquiditySource(): Promise<{
+    ready: boolean;
+    reason?: string;
+  }> {
+    const payer = this.keeper ?? this.authority;
+    if (!payer) {
+      return {
+        ready: false,
+        reason:
+          "No keeper/authority signer is configured for duel market-maker liquidity seeding.",
+      };
+    }
+
+    try {
+      await this.assertSignerCanPayFees(
+        this.keeper ? "keeper" : "authority",
+        payer,
+        "seed duel market liquidity",
+      );
+    } catch (error) {
+      return {
+        ready: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    const sourceTokenAccount = await this.findOwnedMintTokenAccount(
+      payer.publicKey,
+    );
+    if (!sourceTokenAccount) {
+      return {
+        ready: false,
+        reason: `No ${this.mint.toBase58()} token account exists for ${payer.publicKey.toBase58()}; auto-seeding requires a funded source token account.`,
+      };
+    }
+
+    return { ready: true };
   }
 
   public getCustodyWallet(): string | null {
@@ -262,6 +343,11 @@ export class SolanaArenaOperator {
     bettingClosesAtMs: number,
   ): Promise<InitRoundResult | null> {
     if (!this.authority) return null;
+    await this.assertSignerCanFundWrites(
+      "authority",
+      this.authority,
+      "initialize arena config, oracle rounds, and markets",
+    );
 
     const addresses = this.deriveRoundAddresses(roundSeedHex);
     await this.ensureConfig();
@@ -357,6 +443,11 @@ export class SolanaArenaOperator {
   public async lockMarket(roundSeedHex: string): Promise<string | null> {
     const resolver = this.keeper ?? this.authority;
     if (!resolver) return null;
+    await this.assertSignerCanPayFees(
+      this.keeper ? "keeper" : "authority",
+      resolver,
+      "lock duel markets",
+    );
 
     const addresses = this.deriveRoundAddresses(roundSeedHex);
     const marketInfo = await this.connection.getAccountInfo(
@@ -398,6 +489,16 @@ export class SolanaArenaOperator {
     if (!this.authority || !this.reporter) return null;
     const resolver = this.keeper ?? this.authority;
     if (!resolver) return null;
+    await this.assertSignerCanPayFees(
+      this.reporter === this.authority ? "authority" : "reporter",
+      this.reporter,
+      "report duel outcomes",
+    );
+    await this.assertSignerCanPayFees(
+      this.keeper ? "keeper" : "authority",
+      resolver,
+      "resolve duel markets",
+    );
 
     const addresses = this.deriveRoundAddresses(params.roundSeedHex);
     const winnerSide = SIDE_TO_U8[params.winnerSide];
@@ -461,6 +562,11 @@ export class SolanaArenaOperator {
   }): Promise<string | null> {
     const payer = this.keeper ?? this.authority;
     if (!payer) return null;
+    await this.assertSignerCanPayFees(
+      this.keeper ? "keeper" : "authority",
+      payer,
+      "seed duel market liquidity",
+    );
     if (params.amountGoldBaseUnits <= 0n) {
       throw new Error("amountGoldBaseUnits must be greater than zero");
     }
@@ -475,12 +581,12 @@ export class SolanaArenaOperator {
       ],
       this.programId,
     );
-    const sourceAta = deriveAtaAddress(
-      addresses.mint,
-      payer.publicKey,
-      addresses.tokenProgram,
-      this.ataProgramId,
-    );
+    const sourceAta = await this.findOwnedMintTokenAccount(payer.publicKey);
+    if (!sourceAta) {
+      throw new Error(
+        `No ${addresses.mint.toBase58()} token account exists for ${payer.publicKey.toBase58()}; cannot seed duel market liquidity.`,
+      );
+    }
 
     const data = Buffer.concat([
       ixDiscriminator("place_bet_for"),
@@ -780,6 +886,11 @@ export class SolanaArenaOperator {
   ): Promise<string | null> {
     const resolver = this.keeper ?? this.authority;
     if (!resolver) return null;
+    await this.assertSignerCanPayFees(
+      this.keeper ? "keeper" : "authority",
+      resolver,
+      "claim duel market payouts",
+    );
 
     const addresses = this.deriveRoundAddresses(roundSeedHex);
     const marketInfo = await this.connection.getAccountInfo(
@@ -882,6 +993,113 @@ export class SolanaArenaOperator {
       "confirmed",
     );
     return signature;
+  }
+
+  private disableWrites(reason: string): void {
+    if (this.writeDisabledReason) return;
+    this.writeDisabledReason = reason;
+    console.warn(`[SolanaArenaOperator] ${reason}`);
+  }
+
+  private async inspectSignerAccount(
+    signer: Keypair,
+  ): Promise<SignerAccountState> {
+    const publicKey = signer.publicKey.toBase58();
+    const cached = this.signerAccountStateCache.get(publicKey);
+    if (cached) {
+      return cached;
+    }
+
+    const pending = (async (): Promise<SignerAccountState> => {
+      const [accountInfo, lamports] = await Promise.all([
+        this.connection.getAccountInfo(signer.publicKey, "confirmed"),
+        this.connection.getBalance(signer.publicKey, "confirmed"),
+      ]);
+
+      const owner = accountInfo?.owner?.toBase58() ?? null;
+      const dataLength = accountInfo?.data.length ?? 0;
+      const isPlainSystemAccount =
+        accountInfo !== null &&
+        accountInfo.owner.equals(SystemProgram.programId) &&
+        dataLength === 0;
+
+      return {
+        publicKey,
+        exists: accountInfo !== null,
+        lamports,
+        owner,
+        dataLength,
+        isPlainSystemAccount,
+      };
+    })().catch((error) => {
+      this.signerAccountStateCache.delete(publicKey);
+      throw error;
+    });
+
+    this.signerAccountStateCache.set(publicKey, pending);
+    return pending;
+  }
+
+  private async assertSignerCanPayFees(
+    role: "authority" | "reporter" | "keeper",
+    signer: Keypair,
+    purpose: string,
+  ): Promise<void> {
+    const state = await this.inspectSignerAccount(signer);
+    const reason = this.buildSignerAccountError(role, state, purpose);
+    if (reason) {
+      this.disableWrites(reason);
+      throw new Error(reason);
+    }
+  }
+
+  private async assertSignerCanFundWrites(
+    role: "authority" | "reporter" | "keeper",
+    signer: Keypair,
+    purpose: string,
+  ): Promise<void> {
+    await this.assertSignerCanPayFees(role, signer, purpose);
+  }
+
+  private buildSignerAccountError(
+    role: "authority" | "reporter" | "keeper",
+    state: SignerAccountState,
+    purpose: string,
+  ): string | null {
+    const prefix = `${role} signer ${state.publicKey}`;
+    if (!state.exists) {
+      return `${prefix} does not exist on-chain and cannot ${purpose}. Fund it as a plain system account before enabling live Solana duel betting.`;
+    }
+    if (!state.isPlainSystemAccount) {
+      const owner = state.owner ?? "unknown";
+      return `${prefix} is not a plain system account (owner=${owner}, dataLen=${state.dataLength}) and cannot ${purpose}.`;
+    }
+    if (state.lamports <= 0) {
+      return `${prefix} has 0 lamports and cannot ${purpose}. Fund it before enabling live Solana duel betting.`;
+    }
+    return null;
+  }
+
+  private async findOwnedMintTokenAccount(
+    owner: PublicKey,
+  ): Promise<PublicKey | null> {
+    const response = await this.connection.getTokenAccountsByOwner(owner, {
+      mint: this.mint,
+      programId: this.tokenProgramId,
+    });
+    const first = response.value[0]?.pubkey;
+    if (first) {
+      return first;
+    }
+
+    const ata = deriveAtaAddress(
+      this.mint,
+      owner,
+      this.tokenProgramId,
+      this.ataProgramId,
+    );
+    const ataInfo = await this.connection.getAccountInfo(ata, "confirmed");
+    return ataInfo ? ata : null;
   }
 
   private toFixedBytes32(hashHex: string): Buffer {

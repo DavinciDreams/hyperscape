@@ -8,6 +8,7 @@ import { createPublicClient, http, type Address } from "viem";
 import { createPrograms, findMarketPda, readKeypair } from "./common";
 import {
   loadAll,
+  loadPerpsOracleSnapshots,
   saveBet,
   saveWalletDisplay,
   saveWalletPoints,
@@ -18,6 +19,7 @@ import {
   saveInvitedWallet,
   saveReferralFees,
 } from "./db";
+import { modelMarketIdFromCharacterId } from "./modelMarkets";
 
 type StreamState = {
   type: "STREAMING_STATE_UPDATE";
@@ -485,6 +487,45 @@ function textResponse(
   });
   applyCors(req, headers);
   return new Response(body, { status, headers });
+}
+
+function parseBoundedInteger(
+  rawValue: string | null,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, Math.floor(parsed)));
+}
+
+function handlePerpsOracleHistory(req: Request, url: URL): Response {
+  const characterId = url.searchParams.get("characterId")?.trim() || "";
+  if (!characterId) {
+    return jsonResponse(req, { error: "characterId is required" }, 400);
+  }
+
+  const limit = parseBoundedInteger(url.searchParams.get("limit"), 120, 1, 500);
+  const snapshots = loadPerpsOracleSnapshots(characterId, limit)
+    .slice()
+    .reverse();
+  const marketId =
+    snapshots[0]?.marketId ?? modelMarketIdFromCharacterId(characterId);
+
+  return jsonResponse(
+    req,
+    {
+      characterId,
+      marketId,
+      snapshots,
+      updatedAt: Date.now(),
+    },
+    200,
+    {
+      "cache-control": "no-store",
+    },
+  );
 }
 
 function clientIp(req: Request): string {
@@ -1539,6 +1580,10 @@ const server = Bun.serve({
         limit,
         offset,
       });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/perps/oracle-history") {
+      return handlePerpsOracleHistory(req, url);
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/arena/points/")) {

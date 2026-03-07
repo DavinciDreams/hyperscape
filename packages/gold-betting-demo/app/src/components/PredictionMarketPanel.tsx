@@ -135,6 +135,7 @@ export function PredictionMarketPanel({
                 type="button"
                 aria-pressed={yesSelected}
                 onClick={() => setSide("YES")}
+                data-testid="prediction-select-yes"
                 className="gm-btn gm-btn-agent1"
                 style={{
                   position: "relative",
@@ -236,6 +237,7 @@ export function PredictionMarketPanel({
                 type="button"
                 aria-pressed={noSelected}
                 onClick={() => setSide("NO")}
+                data-testid="prediction-select-no"
                 className="gm-btn gm-btn-agent2"
                 style={{
                   position: "relative",
@@ -366,6 +368,7 @@ export function PredictionMarketPanel({
           >
             <button
               onClick={() => setActiveTab("buy")}
+              data-testid="prediction-tab-buy"
               className="gm-tab-btn"
               style={{
                 flex: 1,
@@ -398,6 +401,7 @@ export function PredictionMarketPanel({
             </button>
             <button
               onClick={() => sellSupported && setActiveTab("sell")}
+              data-testid="prediction-tab-sell"
               className="gm-tab-btn"
               disabled={!sellSupported}
               style={{
@@ -448,6 +452,7 @@ export function PredictionMarketPanel({
                   step="0.000001"
                   inputMode="decimal"
                   aria-label="Bet amount in GOLD"
+                  data-testid="prediction-amount-input"
                   placeholder="0.00"
                   value={amountInput}
                   onChange={(event) => setAmountInput(event.target.value)}
@@ -489,6 +494,7 @@ export function PredictionMarketPanel({
               <button
                 disabled={!canBet}
                 onClick={onPlaceBet}
+                data-testid="prediction-submit"
                 className="gm-btn-submit"
                 style={{
                   width: "100%",

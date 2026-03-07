@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "./SkillOracle.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title AgentPerpEngine
@@ -14,8 +15,11 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 contract AgentPerpEngine is Ownable {
     using SafeERC20 for IERC20;
 
-    SkillOracle public oracle;
-    IERC20 public marginToken; // e.g. USDC or Gold
+    uint256 public constant ONE = 1e18;
+    uint256 public constant MAX_LEVERAGE = 5 * ONE;
+
+    SkillOracle public immutable oracle;
+    IERC20 public immutable marginToken; // e.g. USDC or Gold
 
     struct MarketState {
         uint256 totalLongOI;
@@ -25,7 +29,7 @@ contract AgentPerpEngine is Ownable {
     }
 
     struct Position {
-        int256 size;    // + for Long, - for Short
+        int256 size; // + for Long, - for Short
         uint256 margin;
         uint256 entryPrice;
         int256 lastFundingRate;
@@ -35,16 +39,26 @@ contract AgentPerpEngine is Ownable {
     mapping(bytes32 => mapping(address => Position)) public positions;
 
     // Parameters mapped to Skew limits
-    uint256 public skewScale;        // Controls how fast price impact grows (e.g. 1e6)
-    uint256 public fundingVelocity;  // How fast the funding rate changes based on skew
+    uint256 public immutable skewScale; // Controls how fast price impact grows (e.g. 1e6)
+    uint256 public immutable fundingVelocity; // How fast the funding rate changes based on skew
 
-    uint256 public constant ONE = 1e18;
-    uint256 public maxLeverage = 5 * ONE; // 5x leverage max for safety
+    uint256 public insuranceFund;
 
-    event PositionOpened(bytes32 indexed agentId, address indexed trader, int256 sizeDelta, uint256 executionPrice, int256 newSize, uint256 margin);
+    event PositionOpened(
+        bytes32 indexed agentId,
+        address indexed trader,
+        int256 sizeDelta,
+        uint256 executionPrice,
+        int256 newSize,
+        uint256 margin
+    );
     event PositionLiquidated(bytes32 indexed agentId, address indexed trader, int256 size, uint256 liquidationPrice);
-    
+    event InsuranceFundWithdrawn(address indexed to, uint256 amount);
+
     constructor(SkillOracle _oracle, IERC20 _marginToken, uint256 _skewScale) Ownable(msg.sender) {
+        require(address(_oracle) != address(0), "Invalid oracle");
+        require(address(_marginToken) != address(0), "Invalid margin token");
+        require(_skewScale > 0, "Invalid skew scale");
         oracle = _oracle;
         marginToken = _marginToken;
         skewScale = _skewScale;
@@ -54,25 +68,25 @@ contract AgentPerpEngine is Ownable {
     function _updateFunding(bytes32 agentId) internal {
         MarketState storage market = markets[agentId];
         uint256 timeDelta = block.timestamp - market.lastUpdateTimestamp;
-        if (timeDelta == 0) return;
-
-        int256 skew = int256(market.totalLongOI) - int256(market.totalShortOI);
-        // Funding velocity pushes the premium based on prolonged skew
-        market.currentFundingRate += (skew * int256(fundingVelocity) * int256(timeDelta)) / int256(skewScale);
-        market.lastUpdateTimestamp = block.timestamp;
+        if (timeDelta != 0) {
+            int256 skew = int256(market.totalLongOI) - int256(market.totalShortOI);
+            // Funding velocity pushes the premium based on prolonged skew
+            market.currentFundingRate += (skew * int256(fundingVelocity) * int256(timeDelta)) / int256(skewScale);
+            market.lastUpdateTimestamp = block.timestamp;
+        }
     }
 
     function getExecutionPrice(bytes32 agentId, int256 sizeDelta) public view returns (uint256) {
         uint256 indexPrice = oracle.getIndexPrice(agentId);
         MarketState memory market = markets[agentId];
-        
+
         int256 skew = int256(market.totalLongOI) - int256(market.totalShortOI);
-        
+
         // Simulating price impact: execution price = indexPrice * (1 + (skew + sizeDelta/2) / skewScale)
         // Note: sizeDelta is added to simulate the impact of the caller's trade pushing the skew.
-        int256 premium = ((skew + sizeDelta/2) * int256(ONE)) / int256(skewScale);
+        int256 premium = ((skew + sizeDelta / 2) * int256(ONE)) / int256(skewScale);
         uint256 execPrice;
-        
+
         if (premium >= 0) {
             execPrice = indexPrice + (indexPrice * uint256(premium)) / ONE;
         } else {
@@ -84,6 +98,37 @@ contract AgentPerpEngine is Ownable {
             }
         }
         return execPrice;
+    }
+
+    function _abs(int256 value) internal pure returns (uint256) {
+        return value >= 0 ? uint256(value) : uint256(-value);
+    }
+
+    function _realizePnl(int256 existingSize, uint256 entryPrice, uint256 execPrice, uint256 closeSize)
+        internal
+        pure
+        returns (int256)
+    {
+        if (existingSize == 0 || closeSize == 0) {
+            return 0;
+        }
+
+        if (existingSize > 0) {
+            return (int256(execPrice) - int256(entryPrice)) * int256(closeSize) / int256(ONE);
+        }
+
+        return (int256(entryPrice) - int256(execPrice)) * int256(closeSize) / int256(ONE);
+    }
+
+    function _assertLeverage(bytes32 agentId, int256 size, uint256 margin) internal view {
+        if (size == 0) {
+            return;
+        }
+
+        require(margin > 0, "Position undercollateralized");
+        uint256 absSize = _abs(size);
+        uint256 markPrice = getExecutionPrice(agentId, 0);
+        require(Math.mulDiv(absSize, markPrice, margin) <= MAX_LEVERAGE, "Max leverage exceeded");
     }
 
     /**
@@ -102,25 +147,34 @@ contract AgentPerpEngine is Ownable {
         uint256 execPrice = getExecutionPrice(agentId, sizeDelta);
         Position storage pos = positions[agentId][msg.sender];
         MarketState storage market = markets[agentId];
+        int256 oldSize = pos.size;
+        uint256 oldEntryPrice = pos.entryPrice;
 
         // Realize funding (skipped complex per-position accumulator for simulation simplicity)
-        
-        if (sizeDelta != 0) {
-            if (pos.size > 0) {
-                market.totalLongOI -= uint256(pos.size);
-            } else if (pos.size < 0) {
-                market.totalShortOI -= uint256(-pos.size);
-            }
 
-            // Realize un-realized PnL if closing
-            if (pos.size != 0) {
-                int256 pnl = 0;
-                if (pos.size > 0) {
-                    pnl = (int256(execPrice) - int256(pos.entryPrice)) * pos.size / int256(ONE);
-                } else {
-                    pnl = (int256(pos.entryPrice) - int256(execPrice)) * (-pos.size) / int256(ONE);
-                }
-                // Add PNL to margin
+        if (oldSize > 0) {
+            market.totalLongOI -= uint256(oldSize);
+        } else if (oldSize < 0) {
+            market.totalShortOI -= uint256(-oldSize);
+        }
+
+        if (sizeDelta != 0) {
+            if (oldSize == 0) {
+                pos.size = sizeDelta;
+                pos.entryPrice = execPrice;
+            } else if ((oldSize > 0 && sizeDelta > 0) || (oldSize < 0 && sizeDelta < 0)) {
+                uint256 oldAbs = _abs(oldSize);
+                uint256 addAbs = _abs(sizeDelta);
+                uint256 newAbs = oldAbs + addAbs;
+
+                pos.size = oldSize + sizeDelta;
+                pos.entryPrice = ((oldEntryPrice * oldAbs) + (execPrice * addAbs)) / newAbs;
+            } else {
+                uint256 oldAbs = _abs(oldSize);
+                uint256 deltaAbs = _abs(sizeDelta);
+                uint256 closeSize = oldAbs < deltaAbs ? oldAbs : deltaAbs;
+                int256 pnl = _realizePnl(oldSize, oldEntryPrice, execPrice, closeSize);
+
                 if (pnl > 0) {
                     pos.margin += uint256(pnl);
                 } else {
@@ -128,15 +182,15 @@ contract AgentPerpEngine is Ownable {
                     require(pos.margin >= loss, "Liquidatable due to PNL");
                     pos.margin -= loss;
                 }
-            }
 
-            pos.size += sizeDelta;
-            pos.entryPrice = execPrice;
-
-            if (pos.size > 0) {
-                market.totalLongOI += uint256(pos.size);
-            } else if (pos.size < 0) {
-                market.totalShortOI += uint256(-pos.size);
+                pos.size = oldSize + sizeDelta;
+                if (pos.size == 0) {
+                    pos.entryPrice = 0;
+                } else if ((oldSize > 0 && pos.size > 0) || (oldSize < 0 && pos.size < 0)) {
+                    pos.entryPrice = oldEntryPrice;
+                } else {
+                    pos.entryPrice = execPrice;
+                }
             }
         }
 
@@ -148,14 +202,55 @@ contract AgentPerpEngine is Ownable {
         } else if (marginDelta > 0) {
             pos.margin += uint256(marginDelta);
         }
-        
-        // Leverage check
-        if (pos.size != 0) {
-            uint256 absSize = pos.size > 0 ? uint256(pos.size) : uint256(-pos.size);
-            uint256 notionalValue = (absSize * execPrice) / ONE;
-            require((notionalValue * ONE) / pos.margin <= maxLeverage, "Max leverage exceeded");
+
+        if (pos.size > 0) {
+            market.totalLongOI += uint256(pos.size);
+        } else if (pos.size < 0) {
+            market.totalShortOI += uint256(-pos.size);
         }
 
+        _assertLeverage(agentId, pos.size, pos.margin);
+
         emit PositionOpened(agentId, msg.sender, sizeDelta, execPrice, pos.size, pos.margin);
+    }
+
+    function liquidate(bytes32 agentId, address trader) external {
+        _updateFunding(agentId);
+
+        Position storage pos = positions[agentId][trader];
+        require(pos.size != 0, "No position");
+
+        MarketState storage market = markets[agentId];
+        uint256 execPrice = getExecutionPrice(agentId, pos.size > 0 ? -pos.size : pos.size);
+        int256 pnl = _realizePnl(pos.size, pos.entryPrice, execPrice, _abs(pos.size));
+        int256 equity = int256(pos.margin) + pnl;
+        int256 maintenanceMargin = int256(pos.margin) / 10;
+
+        require(equity < maintenanceMargin, "Not liquidatable");
+
+        if (pos.size > 0) {
+            market.totalLongOI -= uint256(pos.size);
+        } else {
+            market.totalShortOI -= uint256(-pos.size);
+        }
+
+        uint256 seizedMargin = pos.margin;
+        pos.size = 0;
+        pos.margin = 0;
+        pos.entryPrice = 0;
+
+        uint256 liquidatorBonus = seizedMargin / 100;
+        insuranceFund += seizedMargin - liquidatorBonus;
+        marginToken.safeTransfer(msg.sender, liquidatorBonus);
+
+        emit PositionLiquidated(agentId, trader, 0, execPrice);
+    }
+
+    function withdrawInsuranceFund(address to, uint256 amount) external onlyOwner {
+        require(to != address(0), "Invalid recipient");
+        require(insuranceFund >= amount, "Insufficient insurance fund");
+        insuranceFund -= amount;
+        marginToken.safeTransfer(to, amount);
+        emit InsuranceFundWithdrawn(to, amount);
     }
 }

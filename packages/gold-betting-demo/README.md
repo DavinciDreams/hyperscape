@@ -34,14 +34,28 @@ From `/Users/shawwalters/eliza-workspace/hyperscape/packages/gold-betting-demo/a
 
 ```bash
 bun install
-anchor build
-anchor test --skip-build
+bun run build
+bun run test
 ```
+
+`bun run test` now uses a manual `solana-test-validator` harness instead of `anchor test`, because the Anchor CLI wrapper was operationally unstable on this machine. The harness still runs the real programs against a real local validator.
 
 Passing tests currently:
 
 - market-maker auto seed after 10 seconds when market is empty
 - oracle resolve + winner claim payout flow
+
+Rust verification commands:
+
+```bash
+bun run lint:rust
+bun run test:rust
+bun run audit
+bun run audit:strict
+```
+
+`bun run audit` ignores `RUSTSEC-2025-0141` for `bincode` because RustSec marks all `bincode` releases as unmaintained and provides no patched version. The current Anchor/Solana Rust stack still depends on it, so this is an explicit upstream risk acceptance.
+`bun run audit:strict` fails on any audit warning, including that `bincode` advisory.
 
 ## UI E2E tests (headless wallet + mock GOLD localnet)
 

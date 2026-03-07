@@ -263,6 +263,51 @@ describe("StreamingDuelScheduler", () => {
       expect(cycle).not.toBeNull();
       expect(cycle?.phase).toBe("ANNOUNCEMENT");
     });
+
+    it("recovers duel damage from HP deltas when combat damage events are missing", () => {
+      scheduler = new StreamingDuelScheduler(world as unknown as never);
+
+      world.entities.players.set(
+        "agent-1",
+        createMockAgent("agent-1", "Agent 1", 50),
+      );
+      world.entities.players.set(
+        "agent-2",
+        createMockAgent("agent-2", "Agent 2", 55),
+      );
+      scheduler.registerAgent("agent-1");
+      scheduler.registerAgent("agent-2");
+
+      scheduler.start();
+      vi.advanceTimersByTime(1000);
+
+      const cycle = scheduler.getCurrentCycle()!;
+      cycle.phase = "FIGHTING";
+      cycle.agent1!.currentHp = 10;
+      cycle.agent1!.maxHp = 10;
+      cycle.agent1!.damageDealtThisFight = 0;
+      cycle.agent2!.currentHp = 10;
+      cycle.agent2!.maxHp = 10;
+      cycle.agent2!.damageDealtThisFight = 0;
+
+      const entity1 = world.entities.get(cycle.agent1!.characterId)!;
+      const entity2 = world.entities.get(cycle.agent2!.characterId)!;
+      entity1.data.health = 7;
+      entity1.data.maxHealth = 10;
+      entity2.data.health = 9;
+      entity2.data.maxHealth = 10;
+
+      (
+        scheduler as unknown as {
+          orchestrator: { updateContestantHp: () => void };
+        }
+      ).orchestrator.updateContestantHp();
+
+      expect(cycle.agent1!.currentHp).toBe(7);
+      expect(cycle.agent2!.currentHp).toBe(9);
+      expect(cycle.agent1!.damageDealtThisFight).toBe(1);
+      expect(cycle.agent2!.damageDealtThisFight).toBe(3);
+    });
   });
 
   describe("leaderboard", () => {
@@ -417,6 +462,35 @@ describe("StreamingDuelScheduler", () => {
       expect(state.cycle.phase).toBe("ANNOUNCEMENT");
       expect(state.cameraTarget).toBeTruthy();
       expect(internals.cameraTarget).toBeNull();
+    });
+
+    it("refreshes cached duel damage in streaming state without a cycle change", () => {
+      scheduler = new StreamingDuelScheduler(world as unknown as never);
+
+      world.entities.players.set(
+        "agent-1",
+        createMockAgent("agent-1", "Agent 1", 50),
+      );
+      world.entities.players.set(
+        "agent-2",
+        createMockAgent("agent-2", "Agent 2", 55),
+      );
+
+      scheduler.registerAgent("agent-1");
+      scheduler.registerAgent("agent-2");
+      scheduler.start();
+      vi.advanceTimersByTime(1000);
+
+      const initialState = scheduler.getStreamingState();
+      expect(initialState.cycle.agent1?.damageDealtThisFight).toBe(0);
+
+      const cycle = scheduler.getCurrentCycle()!;
+      cycle.agent1!.damageDealtThisFight = 4;
+      cycle.agent2!.damageDealtThisFight = 2;
+
+      const refreshedState = scheduler.getStreamingState();
+      expect(refreshedState.cycle.agent1?.damageDealtThisFight).toBe(4);
+      expect(refreshedState.cycle.agent2?.damageDealtThisFight).toBe(2);
     });
   });
 });

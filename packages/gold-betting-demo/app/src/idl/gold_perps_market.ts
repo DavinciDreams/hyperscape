@@ -13,77 +13,41 @@ export type GoldPerpsMarket = {
     description: "Created with Anchor";
   };
   docs: [
-    "Native-SOL Perpetuals Market.",
+    "Native-SOL isolated perpetual markets for model ranking derivatives.",
     "",
-    "Collateral is deposited as lamports into the VaultState PDA itself",
-    "(no SPL token accounts needed). This mirrors how ETH/BNB are used",
-    "on the EVM chains: the native coin is the margin currency.",
+    "Each model gets its own MarketState PDA which holds:",
+    "- oracle inputs (synthetic spot index, mu, sigma)",
+    "- market risk configuration (skew scale, funding velocity)",
+    "- isolated liquidity/insurance for that model only",
+    "- long/short open interest and funding accumulator",
     "",
-    "Decimal convention: all lamport amounts use 9 decimals (1 SOL = 1_000_000_000 lamports).",
-    "Prices are also stored with 9 implied decimals (same as Solana's native precision).",
+    "Positions are managed with signed size deltas through `modify_position`,",
+    "which supports opening, increasing, reducing, flipping, depositing margin,",
+    "withdrawing margin, and fully closing the account.",
   ];
   instructions: [
     {
-      name: "closePosition";
-      docs: ["Close an existing position, settling PnL back in native SOL."];
-      discriminator: [123, 134, 81, 0, 49, 68, 98, 98];
+      name: "depositInsurance";
+      discriminator: [34, 221, 238, 103, 190, 136, 23, 194];
       accounts: [
         {
-          name: "position";
-          writable: true;
-        },
-        {
-          name: "owner";
-          writable: true;
-          signer: true;
-          relations: ["position"];
-        },
-        {
-          name: "oracle";
-          writable: true;
-        },
-        {
-          name: "vault";
-          docs: ["Vault pays out SOL settlement."];
+          name: "market";
           writable: true;
           pda: {
             seeds: [
               {
                 kind: "const";
-                value: [118, 97, 117, 108, 116];
+                value: [109, 97, 114, 107, 101, 116];
               },
-            ];
-          };
-        },
-        {
-          name: "systemProgram";
-          address: "11111111111111111111111111111111";
-        },
-      ];
-      args: [];
-    },
-    {
-      name: "initializeVault";
-      docs: [
-        "Initialize the global vault.",
-        "skew_scale and funding_velocity control the market's price impact curve.",
-      ];
-      discriminator: [48, 191, 163, 44, 71, 129, 63, 164];
-      accounts: [
-        {
-          name: "vault";
-          writable: true;
-          pda: {
-            seeds: [
               {
-                kind: "const";
-                value: [118, 97, 117, 108, 116];
+                kind: "arg";
+                path: "marketId";
               },
             ];
           };
         },
         {
-          name: "authority";
+          name: "payer";
           writable: true;
           signer: true;
         },
@@ -94,56 +58,166 @@ export type GoldPerpsMarket = {
       ];
       args: [
         {
-          name: "skewScale";
-          type: "u64";
+          name: "marketId";
+          type: "u32";
         },
         {
-          name: "fundingVelocity";
+          name: "amount";
           type: "u64";
         },
       ];
     },
     {
-      name: "liquidate";
-      docs: [
-        "Liquidate an undercollateralized position.",
-        "Anyone can call this; seized collateral goes to the insurance fund.",
-      ];
-      discriminator: [223, 179, 226, 125, 48, 46, 39, 74];
+      name: "initializeConfig";
+      discriminator: [208, 127, 21, 1, 194, 190, 196, 70];
       accounts: [
+        {
+          name: "config";
+          writable: true;
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [99, 111, 110, 102, 105, 103];
+              },
+            ];
+          };
+        },
+        {
+          name: "authority";
+          writable: true;
+          signer: true;
+        },
+        {
+          name: "program";
+          address: "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik";
+        },
+        {
+          name: "programData";
+        },
+        {
+          name: "systemProgram";
+          address: "11111111111111111111111111111111";
+        },
+      ];
+      args: [
+        {
+          name: "keeperAuthority";
+          type: "pubkey";
+        },
+        {
+          name: "defaultSkewScale";
+          type: "u64";
+        },
+        {
+          name: "defaultFundingVelocity";
+          type: "u64";
+        },
+        {
+          name: "maxOracleStalenessSeconds";
+          type: "i64";
+        },
+        {
+          name: "maxLeverage";
+          type: "u64";
+        },
+        {
+          name: "minMarginLamports";
+          type: "u64";
+        },
+        {
+          name: "maintenanceMarginBps";
+          type: "u16";
+        },
+        {
+          name: "liquidationFeeBps";
+          type: "u16";
+        },
+      ];
+    },
+    {
+      name: "liquidatePosition";
+      discriminator: [187, 74, 229, 149, 102, 81, 221, 68];
+      accounts: [
+        {
+          name: "config";
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [99, 111, 110, 102, 105, 103];
+              },
+            ];
+          };
+        },
+        {
+          name: "market";
+          writable: true;
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [109, 97, 114, 107, 101, 116];
+              },
+              {
+                kind: "arg";
+                path: "marketId";
+              },
+            ];
+          };
+        },
         {
           name: "position";
           writable: true;
         },
         {
-          name: "oracle";
+          name: "owner";
           writable: true;
         },
         {
-          name: "vault";
-        },
-        {
           name: "liquidator";
-          docs: [
-            "Liquidator receives the rent from the closed position account.",
-          ];
           writable: true;
           signer: true;
         },
       ];
-      args: [];
+      args: [
+        {
+          name: "marketId";
+          type: "u32";
+        },
+      ];
     },
     {
-      name: "openPosition";
-      docs: [
-        "Open a leveraged long or short position, depositing native SOL as collateral.",
-        "",
-        "position_type: 0 = Long, 1 = Short",
-        "collateral: lamports to deposit (SOL/lamports, 9 decimals)",
-        "leverage: integer multiplier (e.g., 2 = 2x)",
-      ];
-      discriminator: [135, 128, 47, 77, 15, 152, 240, 49];
+      name: "modifyPosition";
+      discriminator: [48, 249, 6, 139, 14, 95, 106, 88];
       accounts: [
+        {
+          name: "config";
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [99, 111, 110, 102, 105, 103];
+              },
+            ];
+          };
+        },
+        {
+          name: "market";
+          writable: true;
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [109, 97, 114, 107, 101, 116];
+              },
+              {
+                kind: "arg";
+                path: "marketId";
+              },
+            ];
+          };
+        },
         {
           name: "position";
           writable: true;
@@ -159,7 +233,7 @@ export type GoldPerpsMarket = {
               },
               {
                 kind: "arg";
-                path: "agentId";
+                path: "marketId";
               },
             ];
           };
@@ -170,75 +244,55 @@ export type GoldPerpsMarket = {
           signer: true;
         },
         {
-          name: "vault";
-          docs: ["The vault PDA receives native SOL lamports as collateral."];
-          writable: true;
-          pda: {
-            seeds: [
-              {
-                kind: "const";
-                value: [118, 97, 117, 108, 116];
-              },
-            ];
-          };
-        },
-        {
-          name: "oracle";
-          writable: true;
-        },
-        {
           name: "systemProgram";
           address: "11111111111111111111111111111111";
         },
       ];
       args: [
         {
-          name: "agentId";
+          name: "marketId";
           type: "u32";
         },
         {
-          name: "positionType";
-          type: "u8";
+          name: "marginDelta";
+          type: "i64";
         },
         {
-          name: "collateral";
-          type: "u64";
-        },
-        {
-          name: "leverage";
-          type: "u64";
+          name: "sizeDelta";
+          type: "i64";
         },
       ];
     },
     {
-      name: "updateOracle";
-      docs: [
-        "Push updated TrueSkill ratings from the Dueling system.",
-        "Called by the keeper bot after each duel resolves.",
-      ];
-      discriminator: [112, 41, 209, 18, 248, 226, 252, 188];
+      name: "updateMarketOracle";
+      discriminator: [195, 200, 114, 92, 227, 5, 15, 119];
       accounts: [
         {
-          name: "oracle";
-          writable: true;
+          name: "config";
           pda: {
             seeds: [
               {
                 kind: "const";
-                value: [111, 114, 97, 99, 108, 101];
-              },
-              {
-                kind: "arg";
-                path: "agentId";
+                value: [99, 111, 110, 102, 105, 103];
               },
             ];
           };
         },
         {
-          name: "vault";
-          docs: [
-            "Vault is needed to read skew_scale / funding_velocity during drift update.",
-          ];
+          name: "market";
+          writable: true;
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [109, 97, 114, 107, 101, 116];
+              },
+              {
+                kind: "arg";
+                path: "marketId";
+              },
+            ];
+          };
         },
         {
           name: "authority";
@@ -252,7 +306,7 @@ export type GoldPerpsMarket = {
       ];
       args: [
         {
-          name: "agentId";
+          name: "marketId";
           type: "u32";
         },
         {
@@ -272,59 +326,169 @@ export type GoldPerpsMarket = {
   ];
   accounts: [
     {
-      name: "oracleState";
-      discriminator: [97, 156, 157, 189, 194, 73, 8, 15];
+      name: "configState";
+      discriminator: [193, 77, 160, 128, 208, 254, 180, 135];
+    },
+    {
+      name: "marketState";
+      discriminator: [0, 125, 123, 215, 95, 96, 164, 194];
     },
     {
       name: "positionState";
       discriminator: [154, 47, 151, 70, 8, 128, 206, 231];
     },
-    {
-      name: "vaultState";
-      discriminator: [228, 196, 82, 165, 98, 210, 235, 152];
-    },
   ];
   errors: [
     {
       code: 6000;
-      name: "invalidOracle";
-      msg: "Oracle does not match the requested agent";
+      name: "invalidAuthority";
+      msg: "Operator is not authorized to manage perps markets";
     },
     {
       code: 6001;
+      name: "unauthorizedInitializer";
+      msg: "Only the configured bootstrap authority can initialize the config";
+    },
+    {
+      code: 6002;
+      name: "invalidRiskConfig";
+      msg: "Risk configuration is invalid";
+    },
+    {
+      code: 6003;
+      name: "invalidMarket";
+      msg: "Market does not exist or does not match the requested id";
+    },
+    {
+      code: 6004;
+      name: "staleOracle";
+      msg: "Oracle price is stale and cannot be used for trading";
+    },
+    {
+      code: 6005;
+      name: "invalidSpotIndex";
+      msg: "Oracle spot index must be greater than zero";
+    },
+    {
+      code: 6006;
+      name: "noopPositionUpdate";
+      msg: "Position update must change margin or size";
+    },
+    {
+      code: 6007;
+      name: "noOpenPosition";
+      msg: "No open position exists for this trader and market";
+    },
+    {
+      code: 6008;
+      name: "invalidPositionOwner";
+      msg: "Position owner does not match the provided signer";
+    },
+    {
+      code: 6009;
+      name: "invalidMargin";
+      msg: "Margin is invalid for the requested trade";
+    },
+    {
+      code: 6010;
+      name: "invalidLeverage";
+      msg: "Requested leverage exceeds the configured maximum";
+    },
+    {
+      code: 6011;
+      name: "insufficientLiquidity";
+      msg: "Market account has insufficient liquidity to settle this payout";
+    },
+    {
+      code: 6012;
       name: "notLiquidatable";
       msg: "Position is not undercollateralized; cannot liquidate";
     },
     {
-      code: 6002;
+      code: 6013;
+      name: "invalidInsuranceDeposit";
+      msg: "Insurance deposit amount must be greater than zero";
+    },
+    {
+      code: 6014;
+      name: "invalidPositionState";
+      msg: "Position state is invalid";
+    },
+    {
+      code: 6015;
       name: "overflow";
-      msg: "Numeric overflow in size calculation";
-    },
-    {
-      code: 6003;
-      name: "invalidAuthority";
-      msg: "Unauthorized keeper authority";
-    },
-    {
-      code: 6004;
-      name: "invalidLeverage";
-      msg: "Leverage must be between 1 and 100";
-    },
-    {
-      code: 6005;
-      name: "insufficientLiquidity";
-      msg: "Vault possesses insufficient liquidity to settle this position";
+      msg: "Numeric overflow in perps calculation";
     },
   ];
   types: [
     {
-      name: "oracleState";
+      name: "configState";
       type: {
         kind: "struct";
         fields: [
           {
-            name: "agentId";
+            name: "authority";
+            type: "pubkey";
+          },
+          {
+            name: "keeperAuthority";
+            type: "pubkey";
+          },
+          {
+            name: "defaultSkewScale";
+            type: "u64";
+          },
+          {
+            name: "defaultFundingVelocity";
+            type: "u64";
+          },
+          {
+            name: "maxOracleStalenessSeconds";
+            type: "i64";
+          },
+          {
+            name: "maxLeverage";
+            type: "u64";
+          },
+          {
+            name: "minMarginLamports";
+            type: "u64";
+          },
+          {
+            name: "maintenanceMarginBps";
+            type: "u16";
+          },
+          {
+            name: "liquidationFeeBps";
+            type: "u16";
+          },
+        ];
+      };
+    },
+    {
+      name: "marketState";
+      type: {
+        kind: "struct";
+        fields: [
+          {
+            name: "initialized";
+            type: "bool";
+          },
+          {
+            name: "marketId";
             type: "u32";
+          },
+          {
+            name: "insuranceFund";
+            type: "u64";
+          },
+          {
+            name: "skewScale";
+            type: "u64";
+          },
+          {
+            name: "fundingVelocity";
+            type: "u64";
           },
           {
             name: "spotIndex";
@@ -339,7 +503,15 @@ export type GoldPerpsMarket = {
             type: "u64";
           },
           {
-            name: "lastUpdated";
+            name: "oracleLastUpdated";
+            type: "i64";
+          },
+          {
+            name: "lastFundingTime";
+            type: "i64";
+          },
+          {
+            name: "currentFundingRate";
             type: "i64";
           },
           {
@@ -350,10 +522,6 @@ export type GoldPerpsMarket = {
             name: "totalShortOi";
             type: "u64";
           },
-          {
-            name: "currentFundingRate";
-            type: "i64";
-          },
         ];
       };
     },
@@ -363,56 +531,32 @@ export type GoldPerpsMarket = {
         kind: "struct";
         fields: [
           {
+            name: "initialized";
+            type: "bool";
+          },
+          {
             name: "owner";
             type: "pubkey";
           },
           {
-            name: "agentId";
+            name: "marketId";
             type: "u32";
           },
           {
-            name: "positionType";
-            type: "u8";
-          },
-          {
-            name: "collateral";
+            name: "margin";
             type: "u64";
           },
           {
             name: "size";
-            type: "u64";
+            type: "i64";
           },
           {
             name: "entryPrice";
             type: "u64";
           },
           {
-            name: "lastFundingTime";
+            name: "lastFundingRate";
             type: "i64";
-          },
-        ];
-      };
-    },
-    {
-      name: "vaultState";
-      type: {
-        kind: "struct";
-        fields: [
-          {
-            name: "authority";
-            type: "pubkey";
-          },
-          {
-            name: "insuranceFund";
-            type: "u64";
-          },
-          {
-            name: "skewScale";
-            type: "u64";
-          },
-          {
-            name: "fundingVelocity";
-            type: "u64";
           },
         ];
       };

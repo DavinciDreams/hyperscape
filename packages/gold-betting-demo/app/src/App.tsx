@@ -33,11 +33,8 @@ import { StreamPlayer } from "./components/StreamPlayer";
 import { ChainSelector } from "./components/ChainSelector";
 import { EvmBettingPanel } from "./components/EvmBettingPanel";
 import { SolanaClobPanel } from "./components/SolanaClobPanel";
-import {
-  PredictionMarketPanel,
-  type ChartDataPoint,
-} from "./components/PredictionMarketPanel";
-import { PerpsMarketPanel } from "./components/PerpsMarketPanel";
+import { type ChartDataPoint } from "./components/PredictionMarketPanel";
+import { ModelsMarketView } from "./components/ModelsMarketView";
 import { PointsDisplay } from "./components/PointsDisplay";
 import { PointsLeaderboard } from "./components/PointsLeaderboard";
 import { PointsHistory } from "./components/PointsHistory";
@@ -46,6 +43,7 @@ import { AgentStats } from "./components/AgentStats";
 import { useChain } from "./lib/ChainContext";
 import {
   FIGHT_ORACLE_PROGRAM_ID,
+  GOLD_CLOB_MARKET_PROGRAM_ID,
   GOLD_BINARY_MARKET_PROGRAM_ID,
   createPrograms,
   createReadonlyPrograms,
@@ -78,6 +76,17 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
+
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
+
+function deriveProgramDataAddress(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [programId.toBuffer()],
+    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+  )[0];
+}
 
 // ── Shared UI utilities ──────────────────────────────────────────────────────
 function formatGold(v: number): string {
@@ -308,7 +317,7 @@ export function App() {
   }, [activeChain, evmWalletAddress, pointsWalletAddress, solanaWalletAddress]);
 
   const [amountInput, setAmountInput] = useState<string>("1");
-  const [appMode, setAppMode] = useState<"DUEL" | "PERPS">("DUEL");
+  const [surfaceMode, setSurfaceMode] = useState<"DUELS" | "MODELS">("DUELS");
   const [side, setSide] = useState<BetSide>("YES");
   const [e2ePayAsset, setE2ePayAsset] = useState<"GOLD" | "SOL" | "USDC">(
     "GOLD",
@@ -519,6 +528,7 @@ export function App() {
     programDeployment.market;
 
   const missingProgramMessage = useMemo(() => {
+    if (getCluster() === "localnet") return "";
     if (programDeployment.oracle && programDeployment.market) return "";
     return `Betting is temporarily unavailable on ${getCluster()}. Please try again later or switch chain.`;
   }, [programDeployment.oracle, programDeployment.market]);
@@ -567,7 +577,7 @@ export function App() {
       try {
         const [oracleInfo, marketInfo] = await Promise.all([
           connection.getAccountInfo(FIGHT_ORACLE_PROGRAM_ID, "confirmed"),
-          connection.getAccountInfo(GOLD_BINARY_MARKET_PROGRAM_ID, "confirmed"),
+          connection.getAccountInfo(GOLD_CLOB_MARKET_PROGRAM_ID, "confirmed"),
         ]);
         if (cancelled) return;
         setProgramDeployment({
@@ -712,7 +722,7 @@ export function App() {
 
         let nextMarketState: any = null;
         let nextMarketConfigState: any = null;
-        if (nextCurrent) {
+        if (nextCurrent && marketProgram) {
           const marketPda = findMarketPda(
             GOLD_BINARY_MARKET_PROGRAM_ID,
             nextCurrent.matchPda,
@@ -725,11 +735,13 @@ export function App() {
           }
         }
 
-        try {
-          nextMarketConfigState =
-            await marketProgram.account.marketConfig.fetch(marketConfigPda);
-        } catch {
-          nextMarketConfigState = null;
+        if (marketProgram) {
+          try {
+            nextMarketConfigState =
+              await marketProgram.account.marketConfig.fetch(marketConfigPda);
+          } catch {
+            nextMarketConfigState = null;
+          }
         }
 
         if (cancelled) return;
@@ -926,6 +938,12 @@ export function App() {
     const matchId = Date.now();
     const fightProgram: any = programs.fightOracle;
     const marketProgram: any = programs.goldBinaryMarket;
+    if (!marketProgram) {
+      setStatus(
+        "Legacy binary market flow is disabled. Use the Solana CLOB panel.",
+      );
+      return null;
+    }
     const oracleConfig = findOracleConfigPda(FIGHT_ORACLE_PROGRAM_ID);
     const matchIdBn = new BN(matchId.toString());
     const matchPda = PublicKey.findProgramAddressSync(
@@ -942,14 +960,20 @@ export function App() {
 
     try {
       setStatus("Initializing oracle + creating new market...");
-      await fightProgram.methods
-        .initializeOracle()
-        .accounts({
-          authority: wallet.publicKey,
-          oracleConfig,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+      const existingOracleConfig =
+        await fightProgram.account.oracleConfig.fetchNullable(oracleConfig);
+      if (!existingOracleConfig) {
+        await fightProgram.methods
+          .initializeOracle()
+          .accounts({
+            authority: wallet.publicKey,
+            oracleConfig,
+            program: fightProgram.programId,
+            programData: deriveProgramDataAddress(fightProgram.programId),
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+      }
 
       const marketConfig = await ensureMarketConfig(marketProgram);
       const configMarketMaker =
@@ -1082,6 +1106,11 @@ export function App() {
 
     try {
       const marketProgram: any = programs.goldBinaryMarket;
+      if (!marketProgram) {
+        throw new Error(
+          "Legacy binary market flow is disabled. Use the Solana CLOB panel.",
+        );
+      }
       const marketMaker = currentMarketState.marketMaker as PublicKey;
       if (!wallet.publicKey.equals(marketMaker)) {
         throw new Error("Only market maker wallet can seed liquidity");
@@ -1163,6 +1192,11 @@ export function App() {
 
     try {
       const marketProgram: any = programs.goldBinaryMarket;
+      if (!marketProgram) {
+        throw new Error(
+          "Legacy binary market flow is disabled. Use the Solana CLOB panel.",
+        );
+      }
       let activeAddresses = addresses;
       let activeMarketState = currentMarketState;
 
@@ -1381,6 +1415,12 @@ export function App() {
 
     const fightProgram: any = programs.fightOracle;
     const marketProgram: any = programs.goldBinaryMarket;
+    if (!marketProgram) {
+      setStatus(
+        "Legacy binary market flow is disabled. Use the Solana CLOB panel.",
+      );
+      return;
+    }
     const oracleConfig = findOracleConfigPda(FIGHT_ORACLE_PROGRAM_ID);
     const seed = BigInt(Date.now());
     const simulatedResult = simulateFight(seed);
@@ -1500,6 +1540,11 @@ export function App() {
 
     try {
       const marketProgram: any = programs.goldBinaryMarket;
+      if (!marketProgram) {
+        throw new Error(
+          "Legacy binary market flow is disabled. Use the Solana CLOB panel.",
+        );
+      }
       const goldAccount = await findAnyGoldAccount(
         connection,
         wallet.publicKey,
@@ -1594,6 +1639,7 @@ export function App() {
     void (async () => {
       try {
         const marketProgram: any = programs.goldBinaryMarket;
+        if (!marketProgram) return;
         const positionPda = findPositionPda(
           GOLD_BINARY_MARKET_PROGRAM_ID,
           addresses.market,
@@ -1933,6 +1979,12 @@ export function App() {
     "positions" | "orders" | "trades" | "topTraders" | "holders" | "news"
   >("trades");
   const [hmMuted, setHmMuted] = useState(true);
+
+  useEffect(() => {
+    if (surfaceMode === "MODELS") {
+      setIsSidebarOpen(false);
+    }
+  }, [surfaceMode]);
 
   const hmSharesVal = parseInt(hmSharesInput || "0", 10);
   const hmPrice = hmSide === "YES" ? effYesPercent / 100 : effNoPercent / 100;
@@ -2438,7 +2490,7 @@ export function App() {
                 <span className="hm-logo-text hm-logo-text--stacked">
                   HYPERSCAPE
                   <br />
-                  MARKET
+                  DUEL ARENA
                 </span>
                 <ChainSelector />
               </div>
@@ -2517,33 +2569,62 @@ export function App() {
             </div>
             {/* Row 2: Match strip — name + agent side-select chips */}
             <div className="hm-header-mob-row2">
-              <span className="hm-market-name">
-                {effA1.name} vs {effA2.name}
-              </span>
-              <div className="hm-header-mob-chips">
+              <div className="hm-view-tabs hm-view-tabs--mobile">
                 <button
-                  className={`hm-side-chip hm-side-chip--yes${hmSide === "YES" ? " hm-side-chip--active" : ""}`}
-                  onClick={() => setHmSide("YES")}
+                  data-testid="surface-mode-duels"
+                  className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
+                  onClick={() => setSurfaceMode("DUELS")}
                   type="button"
-                  aria-pressed={hmSide === "YES"}
                 >
-                  {effA1.name}{" "}
-                  <span className="hm-mob-chip-odds">
-                    {(effYesPercent / 100).toFixed(2)}
-                  </span>
+                  Duels
                 </button>
                 <button
-                  className={`hm-side-chip hm-side-chip--no${hmSide === "NO" ? " hm-side-chip--active" : ""}`}
-                  onClick={() => setHmSide("NO")}
+                  data-testid="surface-mode-models"
+                  className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
+                  onClick={() => setSurfaceMode("MODELS")}
                   type="button"
-                  aria-pressed={hmSide === "NO"}
                 >
-                  {effA2.name}{" "}
-                  <span className="hm-mob-chip-odds">
-                    {(effNoPercent / 100).toFixed(2)}
-                  </span>
+                  Models
                 </button>
               </div>
+              {surfaceMode === "DUELS" ? (
+                <>
+                  <span className="hm-market-name">
+                    {effA1.name} vs {effA2.name}
+                  </span>
+                  <div className="hm-header-mob-chips">
+                    <button
+                      className={`hm-side-chip hm-side-chip--yes${hmSide === "YES" ? " hm-side-chip--active" : ""}`}
+                      onClick={() => setHmSide("YES")}
+                      type="button"
+                      aria-pressed={hmSide === "YES"}
+                    >
+                      {effA1.name}{" "}
+                      <span className="hm-mob-chip-odds">
+                        {(effYesPercent / 100).toFixed(2)}
+                      </span>
+                    </button>
+                    <button
+                      className={`hm-side-chip hm-side-chip--no${hmSide === "NO" ? " hm-side-chip--active" : ""}`}
+                      onClick={() => setHmSide("NO")}
+                      type="button"
+                      aria-pressed={hmSide === "NO"}
+                    >
+                      {effA2.name}{" "}
+                      <span className="hm-mob-chip-odds">
+                        {(effNoPercent / 100).toFixed(2)}
+                      </span>
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="hm-mode-summary hm-mode-summary--mobile">
+                  <span className="hm-market-name">MODEL MARKETS</span>
+                  <span className="hm-mode-summary-copy">
+                    No stream. Long or short any ranked model.
+                  </span>
+                </div>
+              )}
             </div>
           </>
         ) : (
@@ -2551,71 +2632,104 @@ export function App() {
           <>
             <div className="hm-header-left">
               <div className="hm-logo">
-                <span className="hm-logo-text">HYPERSCAPE MARKET</span>
+                <span className="hm-logo-text">HYPERSCAPE DUEL ARENA</span>
                 <ChainSelector />
               </div>
-
-              <div className="hm-market-info">
-                <span className="hm-market-name">
-                  {effA1.name} vs {effA2.name}
-                </span>
-                <span
-                  className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()}`}
-                >
-                  {effPhaseLabel}
-                </span>
+              <div className="hm-view-tabs hm-view-tabs--header">
                 <button
-                  className={`hm-side-chip hm-side-chip--yes ${hmSide === "YES" ? "hm-side-chip--active" : ""}`}
-                  onClick={() => setHmSide("YES")}
+                  data-testid="surface-mode-duels"
+                  className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
+                  onClick={() => setSurfaceMode("DUELS")}
                   type="button"
-                  aria-pressed={hmSide === "YES"}
                 >
-                  {effA1.name} {(effYesPercent / 100).toFixed(2)}
+                  Duels
                 </button>
                 <button
-                  className={`hm-side-chip hm-side-chip--no ${hmSide === "NO" ? "hm-side-chip--active" : ""}`}
-                  onClick={() => setHmSide("NO")}
+                  data-testid="surface-mode-models"
+                  className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
+                  onClick={() => setSurfaceMode("MODELS")}
                   type="button"
-                  aria-pressed={hmSide === "NO"}
                 >
-                  {effA2.name} {(effNoPercent / 100).toFixed(2)}
+                  Models
                 </button>
               </div>
 
-              <div className="hm-market-stats">
-                <div className="hm-stat">
-                  <span className="hm-stat-label">Phase</span>
-                  <span className="hm-stat-value">{effCycle.phase}</span>
-                </div>
-                <div className="hm-stat">
-                  <span className="hm-stat-label">Pool</span>
-                  <span className="hm-stat-value">
-                    {formatGold(effTotalPool)}
+              {surfaceMode === "DUELS" ? (
+                <>
+                  <div className="hm-market-info">
+                    <span className="hm-market-name">
+                      {effA1.name} vs {effA2.name}
+                    </span>
+                    <span
+                      className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()}`}
+                    >
+                      {effPhaseLabel}
+                    </span>
+                    <button
+                      className={`hm-side-chip hm-side-chip--yes ${hmSide === "YES" ? "hm-side-chip--active" : ""}`}
+                      onClick={() => setHmSide("YES")}
+                      type="button"
+                      aria-pressed={hmSide === "YES"}
+                    >
+                      {effA1.name} {(effYesPercent / 100).toFixed(2)}
+                    </button>
+                    <button
+                      className={`hm-side-chip hm-side-chip--no ${hmSide === "NO" ? "hm-side-chip--active" : ""}`}
+                      onClick={() => setHmSide("NO")}
+                      type="button"
+                      aria-pressed={hmSide === "NO"}
+                    >
+                      {effA2.name} {(effNoPercent / 100).toFixed(2)}
+                    </button>
+                  </div>
+
+                  <div className="hm-market-stats">
+                    <div className="hm-stat">
+                      <span className="hm-stat-label">Phase</span>
+                      <span className="hm-stat-value">{effCycle.phase}</span>
+                    </div>
+                    <div className="hm-stat">
+                      <span className="hm-stat-label">Pool</span>
+                      <span className="hm-stat-value">
+                        {formatGold(effTotalPool)}
+                      </span>
+                    </div>
+                    <div className="hm-stat">
+                      <span className="hm-stat-label">{effA1.name} HP</span>
+                      <span
+                        className={`hm-stat-value ${effA1.hp < 30 ? "hm-stat-value--negative" : "hm-stat-value--positive"}`}
+                      >
+                        {effA1.hp}%
+                      </span>
+                    </div>
+                    <div className="hm-stat">
+                      <span className="hm-stat-label">{effA2.name} HP</span>
+                      <span
+                        className={`hm-stat-value ${effA2.hp < 30 ? "hm-stat-value--negative" : "hm-stat-value--positive"}`}
+                      >
+                        {effA2.hp}%
+                      </span>
+                    </div>
+                    <div className="hm-stat">
+                      <span className="hm-stat-label">Trades</span>
+                      <span className="hm-stat-value">
+                        {effRecentTrades.length}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="hm-mode-summary">
+                  <span className="hm-market-name">MODELS MARKET</span>
+                  <span className="hm-mode-summary-copy">
+                    Every ranked model gets its own synthetic perpetual market.
+                  </span>
+                  <span className="hm-mode-summary-meta">
+                    Stream is removed in this mode. Current duel remains{" "}
+                    {effA1.name} vs {effA2.name}.
                   </span>
                 </div>
-                <div className="hm-stat">
-                  <span className="hm-stat-label">{effA1.name} HP</span>
-                  <span
-                    className={`hm-stat-value ${effA1.hp < 30 ? "hm-stat-value--negative" : "hm-stat-value--positive"}`}
-                  >
-                    {effA1.hp}%
-                  </span>
-                </div>
-                <div className="hm-stat">
-                  <span className="hm-stat-label">{effA2.name} HP</span>
-                  <span
-                    className={`hm-stat-value ${effA2.hp < 30 ? "hm-stat-value--negative" : "hm-stat-value--positive"}`}
-                  >
-                    {effA2.hp}%
-                  </span>
-                </div>
-                <div className="hm-stat">
-                  <span className="hm-stat-label">Trades</span>
-                  <span className="hm-stat-value">
-                    {effRecentTrades.length}
-                  </span>
-                </div>
-              </div>
+              )}
             </div>
 
             <div className="hm-header-right">
@@ -2623,7 +2737,9 @@ export function App() {
                 className="hm-status-text"
                 style={{ color: effStatusColor }}
               >
-                {effStatus}
+                {surfaceMode === "DUELS"
+                  ? effStatus
+                  : `${effLeaderboard.length} models live`}
               </span>
               <PointsDisplay walletAddress={pointsWalletAddress} compact />
               <button
@@ -2700,673 +2816,672 @@ export function App() {
         )}
       </header>
 
-      {/* Main Content */}
-      <div className="hm-main">
-        <div className="hm-content">
-          <div className="hm-viewport-row">
-            {/* Phase status strip — only rendered on mobile, sits above the video */}
-            {isMobile && (
-              <div className="hm-mob-phase-strip">
-                <span
-                  className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()}`}
-                >
-                  {effPhaseLabel}
-                </span>
-                <span className="hm-mob-phase-strip-meta">
-                  {effA1.name} vs {effA2.name}
-                </span>
-              </div>
-            )}
-
-            {/* Game Viewport */}
-            <div
-              className="hm-game-viewport"
-              style={isMobile ? undefined : { width: streamWidthPx }}
-            >
-              {activeStreamUrl ? (
-                <>
-                  <StreamPlayer
-                    streamUrl={activeStreamUrl}
-                    muted={hmMuted}
-                    autoPlay={true}
-                    onStreamUnavailable={switchToBackupStream}
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      width: "100%",
-                      height: "100%",
-                    }}
-                  />
-                  <div className="hm-stream-controls">
-                    <button
-                      className="hm-stream-mute-btn"
-                      onClick={() => setHmMuted((m) => !m)}
-                      type="button"
-                      aria-label={hmMuted ? "Unmute stream" : "Mute stream"}
+      {surfaceMode === "MODELS" ? (
+        <div className="hm-main hm-main--models">
+          <div className="hm-models-main">
+            <ModelsMarketView
+              activeMatchup={`${effA1.name} vs ${effA2.name}`}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Main Content */}
+          <div className="hm-main">
+            <div className="hm-content">
+              <div className="hm-viewport-row">
+                {/* Phase status strip — only rendered on mobile, sits above the video */}
+                {isMobile && (
+                  <div className="hm-mob-phase-strip">
+                    <span
+                      className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()}`}
                     >
-                      {hmMuted ? (
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                          <line x1="23" y1="9" x2="17" y2="15" />
-                          <line x1="17" y1="9" x2="23" y2="15" />
-                        </svg>
-                      ) : (
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                          <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                        </svg>
-                      )}
-                    </button>
-                    {streamSources.length > 1 && (
-                      <button
-                        className="hm-stream-source-btn"
-                        onClick={cycleStreamSource}
-                        type="button"
-                      >
-                        Source {streamSourceIndex + 1}/{streamSources.length}
-                      </button>
-                    )}
+                      {effPhaseLabel}
+                    </span>
+                    <span className="hm-mob-phase-strip-meta">
+                      {effA1.name} vs {effA2.name}
+                    </span>
                   </div>
-                </>
-              ) : (
-                <div className="hm-game-placeholder">
-                  <div className="hm-game-bg" />
-                  <span className="hm-game-waiting">
-                    Waiting for stream&hellip;
-                  </span>
+                )}
+
+                {/* Game Viewport */}
+                <div
+                  className="hm-game-viewport"
+                  style={isMobile ? undefined : { width: streamWidthPx }}
+                >
+                  {activeStreamUrl ? (
+                    <>
+                      <StreamPlayer
+                        streamUrl={activeStreamUrl}
+                        muted={hmMuted}
+                        autoPlay={true}
+                        onStreamUnavailable={switchToBackupStream}
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          width: "100%",
+                          height: "100%",
+                        }}
+                      />
+                      <div className="hm-stream-controls">
+                        <button
+                          className="hm-stream-mute-btn"
+                          onClick={() => setHmMuted((m) => !m)}
+                          type="button"
+                          aria-label={hmMuted ? "Unmute stream" : "Mute stream"}
+                        >
+                          {hmMuted ? (
+                            <svg
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                              <line x1="23" y1="9" x2="17" y2="15" />
+                              <line x1="17" y1="9" x2="23" y2="15" />
+                            </svg>
+                          ) : (
+                            <svg
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                            </svg>
+                          )}
+                        </button>
+                        {streamSources.length > 1 && (
+                          <button
+                            className="hm-stream-source-btn"
+                            onClick={cycleStreamSource}
+                            type="button"
+                          >
+                            Source {streamSourceIndex + 1}/
+                            {streamSources.length}
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="hm-game-placeholder">
+                      <div className="hm-game-bg" />
+                      <span className="hm-game-waiting">
+                        Waiting for stream&hellip;
+                      </span>
+                    </div>
+                  )}
                 </div>
-              )}
+
+                <ResizeHandle
+                  direction="h"
+                  onMouseDown={(e) => startStreamDrag(e, "x")}
+                />
+
+                {/* Odds Chart */}
+                <div className="hm-chart-panel">
+                  <div className="hm-chart-toolbar">
+                    <button className="hm-chart-tool-btn" type="button">
+                      +
+                    </button>
+                    <button className="hm-chart-tool-btn" type="button">
+                      &#9881;
+                    </button>
+                    <button className="hm-chart-tool-btn" type="button">
+                      &#9634;
+                    </button>
+                  </div>
+                  <div className="hm-chart-price-label">
+                    <span className="hm-chart-price-current">
+                      {(effYesPercent / 100).toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="hm-chart-container">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={effChartData}>
+                        <XAxis
+                          dataKey="time"
+                          tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
+                          tickLine={false}
+                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                          tickFormatter={(v: number) => {
+                            const d = new Date(v);
+                            return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+                          }}
+                        />
+                        <YAxis
+                          domain={[0, 100]}
+                          tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
+                          tickLine={false}
+                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                          width={40}
+                          tickFormatter={(v: number) => `${v}%`}
+                        />
+                        <Tooltip
+                          content={({ active, payload }) =>
+                            active && payload?.length ? (
+                              <div className="hm-chart-tooltip">
+                                <span>{payload[0].value}%</span>
+                              </div>
+                            ) : null
+                          }
+                        />
+                        <ReferenceLine
+                          y={50}
+                          stroke="rgba(255,255,255,0.06)"
+                          strokeDasharray="4 4"
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="pct"
+                          stroke="#e5b84a"
+                          strokeWidth={2}
+                          dot={false}
+                          isAnimationActive
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              <ResizeHandle
+                direction="v"
+                onMouseDown={(e) => startBottomDrag(e, "y", true)}
+              />
+
+              {/* Bottom Panel */}
+              <div
+                className="hm-bottom-panel"
+                style={isMobile ? undefined : { height: bottomHeightPx }}
+              >
+                <nav className="hm-bottom-tabs" role="tablist">
+                  {(
+                    [
+                      ["trades", "Trades"],
+                      ["orders", "Order Book"],
+                      ["news", "Match Log"],
+                      ["holders", "Agents"],
+                      ["topTraders", "Leaderboard"],
+                      ["positions", "Positions"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      role="tab"
+                      aria-selected={hmBottomTab === key}
+                      className={`hm-bottom-tab ${hmBottomTab === key ? "hm-bottom-tab--active" : ""}`}
+                      onClick={() => setHmBottomTab(key)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </nav>
+
+                {hmBottomTab === "trades" && (
+                  <div className="hm-trades-panel" role="tabpanel">
+                    <div className="hm-trades-summary">
+                      <span>
+                        Pool <strong>{formatGold(effTotalPool)}</strong>
+                      </span>
+                      <span>
+                        {effA1.name} <strong>{effYesPercent}%</strong>
+                      </span>
+                      <span>
+                        {effA2.name} <strong>{effNoPercent}%</strong>
+                      </span>
+                      <span>
+                        Trades <strong>{effRecentTrades.length}</strong>
+                      </span>
+                    </div>
+                    <div className="hm-trades-table-wrap">
+                      <table className="hm-trades-table" role="grid">
+                        <thead>
+                          <tr>
+                            <th>Side</th>
+                            <th>Agent</th>
+                            <th>Price</th>
+                            <th>Amount</th>
+                            <th>Age</th>
+                            <th>Trader</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {effRecentTrades.map((trade, i) => (
+                            <tr key={trade.id ?? i}>
+                              <td>
+                                <span
+                                  className={`hm-type-label ${trade.side === "YES" ? "hm-type-label--buy" : "hm-type-label--sell"}`}
+                                >
+                                  {trade.side === "YES" ? "BUY" : "SELL"}
+                                </span>
+                              </td>
+                              <td>
+                                <span className="hm-outcome-badge">
+                                  {trade.side === "YES"
+                                    ? effA1.name
+                                    : effA2.name}
+                                </span>
+                              </td>
+                              <td className="hm-td-mono">
+                                {(trade.price ?? 0).toFixed(2)}
+                              </td>
+                              <td className="hm-td-mono">
+                                {formatGold(trade.amount ?? 0)}
+                              </td>
+                              <td className="hm-td-dim">
+                                {formatTimeAgo(trade.time ?? Date.now())}
+                              </td>
+                              <td className="hm-td-trader">
+                                <span className="hm-trader-addr">
+                                  {truncateAddr(trade.trader ?? "")}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {hmBottomTab === "orders" && (
+                  <div className="hm-trades-panel" role="tabpanel">
+                    <div className="hm-orderbook">
+                      <div className="hm-ob-side hm-ob-side--bids">
+                        <div className="hm-ob-header">BIDS ({effA1.name})</div>
+                        {effBids.map((level, i) => (
+                          <div
+                            key={`bid-${i}`}
+                            className="hm-ob-row hm-ob-row--bid"
+                          >
+                            <span className="hm-ob-price">
+                              {level.price.toFixed(2)}
+                            </span>
+                            <span className="hm-ob-amount">
+                              {formatGold(level.amount)}
+                            </span>
+                            <div
+                              className="hm-ob-depth"
+                              style={{
+                                width: `${Math.min(100, (level.amount / (effTotalPool || 1)) * 100)}%`,
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div className="hm-ob-spread">
+                        <span>
+                          Spread: {Math.abs(effYesPercent - effNoPercent)}%
+                        </span>
+                      </div>
+                      <div className="hm-ob-side hm-ob-side--asks">
+                        <div className="hm-ob-header">ASKS ({effA2.name})</div>
+                        {effAsks.map((level, i) => (
+                          <div
+                            key={`ask-${i}`}
+                            className="hm-ob-row hm-ob-row--ask"
+                          >
+                            <span className="hm-ob-price">
+                              {level.price.toFixed(2)}
+                            </span>
+                            <span className="hm-ob-amount">
+                              {formatGold(level.amount)}
+                            </span>
+                            <div
+                              className="hm-ob-depth hm-ob-depth--ask"
+                              style={{
+                                width: `${Math.min(100, (level.amount / (effTotalPool || 1)) * 100)}%`,
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {hmBottomTab === "topTraders" && (
+                  <div className="hm-trades-panel" role="tabpanel">
+                    <div className="hm-trades-table-wrap">
+                      <table className="hm-trades-table" role="grid">
+                        <thead>
+                          <tr>
+                            <th>Rank</th>
+                            <th>Agent</th>
+                            <th>Provider</th>
+                            <th>Wins</th>
+                            <th>Losses</th>
+                            <th>Win Rate</th>
+                            <th>Streak</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {effLeaderboard.map((entry) => (
+                            <tr key={entry.name}>
+                              <td className="hm-td-mono">#{entry.rank}</td>
+                              <td>
+                                <strong>{entry.name}</strong>
+                              </td>
+                              <td className="hm-td-dim">{entry.provider}</td>
+                              <td
+                                className="hm-td-mono"
+                                style={{ color: "#22c55e" }}
+                              >
+                                {entry.wins}
+                              </td>
+                              <td
+                                className="hm-td-mono"
+                                style={{ color: "#ef4444" }}
+                              >
+                                {entry.losses}
+                              </td>
+                              <td className="hm-td-mono">
+                                {entry.winRate.toFixed(1)}%
+                              </td>
+                              <td className="hm-td-mono">
+                                {entry.currentStreak > 0
+                                  ? `${entry.currentStreak}W`
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {hmBottomTab === "holders" && (
+                  <div className="hm-trades-panel" role="tabpanel">
+                    <div className="hm-agents-detail">
+                      {[effA1, effA2].map((agent) => {
+                        const hpPct =
+                          agent.maxHp > 0
+                            ? Math.max(
+                                0,
+                                Math.min(100, (agent.hp / agent.maxHp) * 100),
+                              )
+                            : 0;
+                        const hpColor =
+                          agent.hp < 25
+                            ? "#ef4444"
+                            : agent.hp < 60
+                              ? "#f59e0b"
+                              : "#22c55e";
+                        return (
+                          <div key={agent.id} className="hm-agent-card">
+                            <div className="hm-agent-card-header">
+                              <strong>{agent.name}</strong>
+                              <span className="hm-agent-meta">
+                                {agent.provider}
+                                {agent.model ? ` · ${agent.model}` : ""}
+                                {agent.combatLevel
+                                  ? ` · Lv.${agent.combatLevel}`
+                                  : ""}
+                              </span>
+                            </div>
+                            {/* HP bar — always visible, quick health read */}
+                            <div className="hm-agent-hp-bar-wrap">
+                              <div
+                                className="hm-agent-hp-bar"
+                                style={{
+                                  width: `${hpPct}%`,
+                                  background: hpColor,
+                                }}
+                              />
+                            </div>
+                            <div className="hm-agent-stats-grid">
+                              <div className="hm-agent-stat">
+                                <span className="hm-agent-stat-label">HP</span>
+                                <span
+                                  className={`hm-agent-stat-value ${agent.hp < 30 ? "hm-stat-value--negative" : "hm-stat-value--positive"}`}
+                                >
+                                  {agent.hp}/{agent.maxHp}
+                                </span>
+                              </div>
+                              <div className="hm-agent-stat">
+                                <span className="hm-agent-stat-label">W/L</span>
+                                <span className="hm-agent-stat-value">
+                                  {agent.wins}W-{agent.losses}L
+                                </span>
+                              </div>
+                              <div className="hm-agent-stat">
+                                <span className="hm-agent-stat-label">Dmg</span>
+                                <span className="hm-agent-stat-value">
+                                  {agent.damageDealtThisFight}
+                                </span>
+                              </div>
+                            </div>
+                            {agent.monologues &&
+                              agent.monologues.length > 0 && (
+                                <div className="hm-agent-monologues">
+                                  {agent.monologues
+                                    .slice(0, isMobile ? 1 : 3)
+                                    .map((m) => (
+                                      <div
+                                        key={m.id}
+                                        className={`hm-monologue hm-monologue--${m.type}`}
+                                      >
+                                        <span className="hm-monologue-type">
+                                          {m.type === "action" ? "ACT" : "THK"}
+                                        </span>
+                                        <span>{m.content}</span>
+                                      </div>
+                                    ))}
+                                </div>
+                              )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {hmBottomTab === "news" && (
+                  <div className="hm-trades-panel" role="tabpanel">
+                    <div className="hm-match-log">
+                      <div className="hm-log-entry">
+                        <span className="hm-log-phase">{effCycle.phase}</span>
+                        <span
+                          className="hm-log-text"
+                          style={{ color: effStatusColor }}
+                        >
+                          {effStatus}
+                        </span>
+                      </div>
+                      {effCycle.winnerName && (
+                        <div className="hm-log-entry hm-log-entry--winner">
+                          <span className="hm-log-phase">RESULT</span>
+                          <span className="hm-log-text">
+                            {effCycle.winnerName} wins! {effCycle.winReason}
+                          </span>
+                        </div>
+                      )}
+                      {[...effA1.monologues, ...effA2.monologues]
+                        .sort((a, b) => b.timestamp - a.timestamp)
+                        .slice(0, 10)
+                        .map((m) => (
+                          <div key={m.id} className="hm-log-entry">
+                            <span className="hm-log-phase">
+                              {m.type.toUpperCase()}
+                            </span>
+                            <span className="hm-log-text">{m.content}</span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {hmBottomTab === "positions" && (
+                  <div className="hm-empty-tab" role="tabpanel">
+                    <p>No open positions</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             <ResizeHandle
               direction="h"
-              onMouseDown={(e) => startStreamDrag(e, "x")}
+              onMouseDown={(e) => startSidebarDrag(e, "x", true)}
             />
 
-            {/* Odds Chart */}
-            <div className="hm-chart-panel">
-              <div className="hm-chart-toolbar">
-                <button className="hm-chart-tool-btn" type="button">
-                  +
-                </button>
-                <button className="hm-chart-tool-btn" type="button">
-                  &#9881;
-                </button>
-                <button className="hm-chart-tool-btn" type="button">
-                  &#9634;
-                </button>
-              </div>
-              <div className="hm-chart-price-label">
-                <span className="hm-chart-price-current">
-                  {(effYesPercent / 100).toFixed(1)}
-                </span>
-              </div>
-              <div className="hm-chart-container">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={effChartData}>
-                    <XAxis
-                      dataKey="time"
-                      tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                      tickFormatter={(v: number) => {
-                        const d = new Date(v);
-                        return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-                      }}
-                    />
-                    <YAxis
-                      domain={[0, 100]}
-                      tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                      width={40}
-                      tickFormatter={(v: number) => `${v}%`}
-                    />
-                    <Tooltip
-                      content={({ active, payload }) =>
-                        active && payload?.length ? (
-                          <div className="hm-chart-tooltip">
-                            <span>{payload[0].value}%</span>
-                          </div>
-                        ) : null
-                      }
-                    />
-                    <ReferenceLine
-                      y={50}
-                      stroke="rgba(255,255,255,0.06)"
-                      strokeDasharray="4 4"
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="pct"
-                      stroke="#e5b84a"
-                      strokeWidth={2}
-                      dot={false}
-                      isAnimationActive
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-
-          <ResizeHandle
-            direction="v"
-            onMouseDown={(e) => startBottomDrag(e, "y", true)}
-          />
-
-          {/* Bottom Panel */}
-          <div
-            className="hm-bottom-panel"
-            style={isMobile ? undefined : { height: bottomHeightPx }}
-          >
-            <nav className="hm-bottom-tabs" role="tablist">
-              {(
-                [
-                  ["trades", "Trades"],
-                  ["orders", "Order Book"],
-                  ["news", "Match Log"],
-                  ["holders", "Agents"],
-                  ["topTraders", "Leaderboard"],
-                  ["positions", "Positions"],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  role="tab"
-                  aria-selected={hmBottomTab === key}
-                  className={`hm-bottom-tab ${hmBottomTab === key ? "hm-bottom-tab--active" : ""}`}
-                  onClick={() => setHmBottomTab(key)}
-                  type="button"
-                >
-                  {label}
-                </button>
-              ))}
-            </nav>
-
-            {hmBottomTab === "trades" && (
-              <div className="hm-trades-panel" role="tabpanel">
-                <div className="hm-trades-summary">
-                  <span>
-                    Pool <strong>{formatGold(effTotalPool)}</strong>
+            {/* ── RIGHT SIDEBAR: Real betting or mock controls ──────────────── */}
+            <aside
+              className={`hm-sidebar${isSidebarOpen ? " hm-sidebar--open" : ""}`}
+              aria-label="Trading controls"
+              style={
+                isMobile
+                  ? undefined
+                  : { width: sidebarWidthPx, minWidth: sidebarWidthPx }
+              }
+            >
+              {/* Agent matchup header — close button lives here so it never floats over agent names */}
+              <div className="hm-matchup-header">
+                <span className="hm-matchup-label">Current Match</span>
+                <div className="hm-matchup-header-right">
+                  <span
+                    className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
+                  >
+                    {effPhaseLabel}
                   </span>
-                  <span>
-                    {effA1.name} <strong>{effYesPercent}%</strong>
+                  <button
+                    className="hm-sidebar-close"
+                    type="button"
+                    aria-label="Close trading panel"
+                    onClick={() => setIsSidebarOpen(false)}
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div className="hm-matchup">
+                <div className="hm-matchup-agent">
+                  <span className="hm-matchup-name" title={effA1.name}>
+                    {effA1.name}
                   </span>
-                  <span>
-                    {effA2.name} <strong>{effNoPercent}%</strong>
+                  <span className="hm-matchup-record">
+                    {effA1.wins}W-{effA1.losses}L
+                    {effA1.combatLevel ? ` · Lv.${effA1.combatLevel}` : ""}
                   </span>
-                  <span>
-                    Trades <strong>{effRecentTrades.length}</strong>
+                  <span className="hm-matchup-odds hm-matchup-odds--yes">
+                    {effYesPercent}%
                   </span>
                 </div>
-                <div className="hm-trades-table-wrap">
-                  <table className="hm-trades-table" role="grid">
-                    <thead>
-                      <tr>
-                        <th>Side</th>
-                        <th>Agent</th>
-                        <th>Price</th>
-                        <th>Amount</th>
-                        <th>Age</th>
-                        <th>Trader</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {effRecentTrades.map((trade, i) => (
-                        <tr key={trade.id ?? i}>
-                          <td>
-                            <span
-                              className={`hm-type-label ${trade.side === "YES" ? "hm-type-label--buy" : "hm-type-label--sell"}`}
-                            >
-                              {trade.side === "YES" ? "BUY" : "SELL"}
-                            </span>
-                          </td>
-                          <td>
-                            <span className="hm-outcome-badge">
-                              {trade.side === "YES" ? effA1.name : effA2.name}
-                            </span>
-                          </td>
-                          <td className="hm-td-mono">
-                            {(trade.price ?? 0).toFixed(2)}
-                          </td>
-                          <td className="hm-td-mono">
-                            {formatGold(trade.amount ?? 0)}
-                          </td>
-                          <td className="hm-td-dim">
-                            {formatTimeAgo(trade.time ?? Date.now())}
-                          </td>
-                          <td className="hm-td-trader">
-                            <span className="hm-trader-addr">
-                              {truncateAddr(trade.trader ?? "")}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <span className="hm-matchup-vs">VS</span>
+                <div className="hm-matchup-agent hm-matchup-agent--right">
+                  <span className="hm-matchup-name" title={effA2.name}>
+                    {effA2.name}
+                  </span>
+                  <span className="hm-matchup-record">
+                    {effA2.wins}W-{effA2.losses}L
+                    {effA2.combatLevel ? ` · Lv.${effA2.combatLevel}` : ""}
+                  </span>
+                  <span className="hm-matchup-odds hm-matchup-odds--no">
+                    {effNoPercent}%
+                  </span>
                 </div>
               </div>
-            )}
 
-            {hmBottomTab === "orders" && (
-              <div className="hm-trades-panel" role="tabpanel">
-                <div className="hm-orderbook">
-                  <div className="hm-ob-side hm-ob-side--bids">
-                    <div className="hm-ob-header">BIDS ({effA1.name})</div>
-                    {effBids.map((level, i) => (
-                      <div
-                        key={`bid-${i}`}
-                        className="hm-ob-row hm-ob-row--bid"
-                      >
-                        <span className="hm-ob-price">
-                          {level.price.toFixed(2)}
-                        </span>
-                        <span className="hm-ob-amount">
-                          {formatGold(level.amount)}
-                        </span>
-                        <div
-                          className="hm-ob-depth"
-                          style={{
-                            width: `${Math.min(100, (level.amount / (effTotalPool || 1)) * 100)}%`,
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="hm-ob-spread">
-                    <span>
-                      Spread: {Math.abs(effYesPercent - effNoPercent)}%
-                    </span>
-                  </div>
-                  <div className="hm-ob-side hm-ob-side--asks">
-                    <div className="hm-ob-header">ASKS ({effA2.name})</div>
-                    {effAsks.map((level, i) => (
-                      <div
-                        key={`ask-${i}`}
-                        className="hm-ob-row hm-ob-row--ask"
-                      >
-                        <span className="hm-ob-price">
-                          {level.price.toFixed(2)}
-                        </span>
-                        <span className="hm-ob-amount">
-                          {formatGold(level.amount)}
-                        </span>
-                        <div
-                          className="hm-ob-depth hm-ob-depth--ask"
-                          style={{
-                            width: `${Math.min(100, (level.amount / (effTotalPool || 1)) * 100)}%`,
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {hmBottomTab === "topTraders" && (
-              <div className="hm-trades-panel" role="tabpanel">
-                <div className="hm-trades-table-wrap">
-                  <table className="hm-trades-table" role="grid">
-                    <thead>
-                      <tr>
-                        <th>Rank</th>
-                        <th>Agent</th>
-                        <th>Provider</th>
-                        <th>Wins</th>
-                        <th>Losses</th>
-                        <th>Win Rate</th>
-                        <th>Streak</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {effLeaderboard.map((entry) => (
-                        <tr key={entry.name}>
-                          <td className="hm-td-mono">#{entry.rank}</td>
-                          <td>
-                            <strong>{entry.name}</strong>
-                          </td>
-                          <td className="hm-td-dim">{entry.provider}</td>
-                          <td
-                            className="hm-td-mono"
-                            style={{ color: "#22c55e" }}
-                          >
-                            {entry.wins}
-                          </td>
-                          <td
-                            className="hm-td-mono"
-                            style={{ color: "#ef4444" }}
-                          >
-                            {entry.losses}
-                          </td>
-                          <td className="hm-td-mono">
-                            {entry.winRate.toFixed(1)}%
-                          </td>
-                          <td className="hm-td-mono">
-                            {entry.currentStreak > 0
-                              ? `${entry.currentStreak}W`
-                              : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {hmBottomTab === "holders" && (
-              <div className="hm-trades-panel" role="tabpanel">
-                <div className="hm-agents-detail">
-                  {[effA1, effA2].map((agent) => {
-                    const hpPct =
-                      agent.maxHp > 0
-                        ? Math.max(
-                            0,
-                            Math.min(100, (agent.hp / agent.maxHp) * 100),
-                          )
-                        : 0;
-                    const hpColor =
-                      agent.hp < 25
-                        ? "#ef4444"
-                        : agent.hp < 60
-                          ? "#f59e0b"
-                          : "#22c55e";
-                    return (
-                      <div key={agent.id} className="hm-agent-card">
-                        <div className="hm-agent-card-header">
-                          <strong>{agent.name}</strong>
-                          <span className="hm-agent-meta">
-                            {agent.provider}
-                            {agent.model ? ` · ${agent.model}` : ""}
-                            {agent.combatLevel
-                              ? ` · Lv.${agent.combatLevel}`
-                              : ""}
-                          </span>
-                        </div>
-                        {/* HP bar — always visible, quick health read */}
-                        <div className="hm-agent-hp-bar-wrap">
-                          <div
-                            className="hm-agent-hp-bar"
-                            style={{ width: `${hpPct}%`, background: hpColor }}
-                          />
-                        </div>
-                        <div className="hm-agent-stats-grid">
-                          <div className="hm-agent-stat">
-                            <span className="hm-agent-stat-label">HP</span>
-                            <span
-                              className={`hm-agent-stat-value ${agent.hp < 30 ? "hm-stat-value--negative" : "hm-stat-value--positive"}`}
-                            >
-                              {agent.hp}/{agent.maxHp}
-                            </span>
-                          </div>
-                          <div className="hm-agent-stat">
-                            <span className="hm-agent-stat-label">W/L</span>
-                            <span className="hm-agent-stat-value">
-                              {agent.wins}W-{agent.losses}L
-                            </span>
-                          </div>
-                          <div className="hm-agent-stat">
-                            <span className="hm-agent-stat-label">Dmg</span>
-                            <span className="hm-agent-stat-value">
-                              {agent.damageDealtThisFight}
-                            </span>
-                          </div>
-                        </div>
-                        {agent.monologues && agent.monologues.length > 0 && (
-                          <div className="hm-agent-monologues">
-                            {agent.monologues
-                              .slice(0, isMobile ? 1 : 3)
-                              .map((m) => (
-                                <div
-                                  key={m.id}
-                                  className={`hm-monologue hm-monologue--${m.type}`}
-                                >
-                                  <span className="hm-monologue-type">
-                                    {m.type === "action" ? "ACT" : "THK"}
-                                  </span>
-                                  <span>{m.content}</span>
-                                </div>
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {hmBottomTab === "news" && (
-              <div className="hm-trades-panel" role="tabpanel">
-                <div className="hm-match-log">
-                  <div className="hm-log-entry">
-                    <span className="hm-log-phase">{effCycle.phase}</span>
-                    <span
-                      className="hm-log-text"
-                      style={{ color: effStatusColor }}
-                    >
-                      {effStatus}
-                    </span>
-                  </div>
-                  {effCycle.winnerName && (
-                    <div className="hm-log-entry hm-log-entry--winner">
-                      <span className="hm-log-phase">RESULT</span>
-                      <span className="hm-log-text">
-                        {effCycle.winnerName} wins! {effCycle.winReason}
-                      </span>
-                    </div>
+              {/* Market type tabs + betting panels */}
+              <div className="hm-market-panel-wrap">
+                {/* Active market panel */}
+                <div className="hm-market-panel-body">
+                  {isEvmChain ? (
+                    /* EVM — single panel, no tabs */
+                    <EvmBettingPanel
+                      agent1Name={effAgent1Name}
+                      agent2Name={effAgent2Name}
+                      compact
+                    />
+                  ) : (
+                    /* Predictions — Solana CLOB panel */
+                    <SolanaClobPanel
+                      agent1Name={effAgent1Name}
+                      agent2Name={effAgent2Name}
+                      compact={!isE2eMode}
+                    />
                   )}
-                  {[...effA1.monologues, ...effA2.monologues]
-                    .sort((a, b) => b.timestamp - a.timestamp)
-                    .slice(0, 10)
-                    .map((m) => (
-                      <div key={m.id} className="hm-log-entry">
-                        <span className="hm-log-phase">
-                          {m.type.toUpperCase()}
-                        </span>
-                        <span className="hm-log-text">{m.content}</span>
-                      </div>
-                    ))}
                 </div>
               </div>
-            )}
 
-            {hmBottomTab === "positions" && (
-              <div className="hm-empty-tab" role="tabpanel">
-                <p>No open positions</p>
-              </div>
-            )}
+              <p className="hm-legal-text">
+                By trading, you agree to our <a href="#terms">Terms</a> &amp;{" "}
+                <a href="#privacy">Privacy</a>
+              </p>
+            </aside>
           </div>
-        </div>
 
-        <ResizeHandle
-          direction="h"
-          onMouseDown={(e) => startSidebarDrag(e, "x", true)}
-        />
-
-        {/* ── RIGHT SIDEBAR: Real betting or mock controls ──────────────── */}
-        <aside
-          className={`hm-sidebar${isSidebarOpen ? " hm-sidebar--open" : ""}`}
-          aria-label="Trading controls"
-          style={
-            isMobile
-              ? undefined
-              : { width: sidebarWidthPx, minWidth: sidebarWidthPx }
-          }
-        >
-          {/* Agent matchup header — close button lives here so it never floats over agent names */}
-          <div className="hm-matchup-header">
-            <span className="hm-matchup-label">Current Match</span>
-            <div className="hm-matchup-header-right">
-              <span
-                className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
+          {/* Mobile FAB — opens the sidebar sheet */}
+          {!isSidebarOpen && (
+            <button
+              className="hm-bet-fab"
+              type="button"
+              onClick={() => setIsSidebarOpen(true)}
+              aria-label="Open trading panel"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                {effPhaseLabel}
-              </span>
-              <button
-                className="hm-sidebar-close"
-                type="button"
-                aria-label="Close trading panel"
-                onClick={() => setIsSidebarOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-          </div>
-          <div className="hm-matchup">
-            <div className="hm-matchup-agent">
-              <span className="hm-matchup-name" title={effA1.name}>
-                {effA1.name}
-              </span>
-              <span className="hm-matchup-record">
-                {effA1.wins}W-{effA1.losses}L
-                {effA1.combatLevel ? ` · Lv.${effA1.combatLevel}` : ""}
-              </span>
-              <span className="hm-matchup-odds hm-matchup-odds--yes">
-                {effYesPercent}%
-              </span>
-            </div>
-            <span className="hm-matchup-vs">VS</span>
-            <div className="hm-matchup-agent hm-matchup-agent--right">
-              <span className="hm-matchup-name" title={effA2.name}>
-                {effA2.name}
-              </span>
-              <span className="hm-matchup-record">
-                {effA2.wins}W-{effA2.losses}L
-                {effA2.combatLevel ? ` · Lv.${effA2.combatLevel}` : ""}
-              </span>
-              <span className="hm-matchup-odds hm-matchup-odds--no">
-                {effNoPercent}%
-              </span>
-            </div>
-          </div>
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Place Bet
+            </button>
+          )}
 
-          {/* Market type tabs + betting panels */}
-          <div className="hm-market-panel-wrap">
-            {/* Predictions / Perpetuals tab switcher — always visible on Solana */}
-            {!isEvmChain && (
-              <div className="hm-market-tabs">
-                <button
-                  className={`hm-market-tab ${appMode === "DUEL" ? "hm-market-tab--active" : ""}`}
-                  onClick={() => setAppMode("DUEL")}
-                  type="button"
-                >
-                  Predictions
-                </button>
-                <button
-                  className={`hm-market-tab ${appMode === "PERPS" ? "hm-market-tab--active" : ""}`}
-                  onClick={() => setAppMode("PERPS")}
-                  type="button"
-                >
-                  Perpetuals
-                </button>
-              </div>
-            )}
-
-            {/* Active market panel */}
-            <div className="hm-market-panel-body">
-              {isEvmChain ? (
-                /* EVM — single panel, no tabs */
-                <EvmBettingPanel
-                  agent1Name={effAgent1Name}
-                  agent2Name={effAgent2Name}
-                />
-              ) : appMode === "PERPS" ? (
-                /* Perpetuals — same real panel for both stream-ui and live mode */
-                <PerpsMarketPanel
-                  agent1Name={effAgent1Name}
-                  agent2Name={effAgent2Name}
-                  agent1Id={1}
-                  agent2Id={2}
-                />
-              ) : (
-                /* Predictions — Solana CLOB panel */
-                <SolanaClobPanel
-                  agent1Name={effAgent1Name}
-                  agent2Name={effAgent2Name}
-                  compact={!isE2eMode}
-                />
-              )}
-            </div>
-          </div>
-
-          <p className="hm-legal-text">
-            By trading, you agree to our <a href="#terms">Terms</a> &amp;{" "}
-            <a href="#privacy">Privacy</a>
-          </p>
-        </aside>
-      </div>
-
-      {/* Mobile FAB — opens the sidebar sheet */}
-      {!isSidebarOpen && (
-        <button
-          className="hm-bet-fab"
-          type="button"
-          onClick={() => setIsSidebarOpen(true)}
-          aria-label="Open trading panel"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Place Bet
-        </button>
-      )}
-
-      {/* Backdrop — close sidebar when tapping outside */}
-      {isSidebarOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 48,
-            background: "rgba(0,0,0,0.5)",
-            backdropFilter: "blur(2px)",
-          }}
-          onClick={() => setIsSidebarOpen(false)}
-          aria-hidden="true"
-        />
+          {/* Backdrop — close sidebar when tapping outside */}
+          {isSidebarOpen && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 48,
+                background: "rgba(0,0,0,0.5)",
+                backdropFilter: "blur(2px)",
+              }}
+              onClick={() => setIsSidebarOpen(false)}
+              aria-hidden="true"
+            />
+          )}
+        </>
       )}
 
       {/* Status bar */}
       <footer className="hm-statusbar" role="contentinfo">
         <span className="hm-statusbar-link">
-          {effA1.name} vs {effA2.name} · Round #
-          {effCycle.cycleId.split("-").pop()}
+          {surfaceMode === "DUELS"
+            ? `${effA1.name} vs ${effA2.name} · Round #${effCycle.cycleId.split("-").pop()}`
+            : `MODELS MARKET · ${effLeaderboard.length} ranked models`}
         </span>
         <div className="hm-statusbar-right">
           <span className="hm-status-indicator" />
-          <span>{effCycle.phase === "FIGHTING" ? "LIVE" : "STABLE"}</span>
+          <span>
+            {surfaceMode === "DUELS"
+              ? effCycle.phase === "FIGHTING"
+                ? "LIVE"
+                : "STABLE"
+              : "SYNTHETIC"}
+          </span>
         </div>
       </footer>
     </div>

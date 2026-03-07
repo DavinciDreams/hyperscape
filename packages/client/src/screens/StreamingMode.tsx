@@ -428,13 +428,18 @@ export function StreamingMode() {
     const disableBridgeCapture = ["1", "true", "yes", "on"].includes(
       disableBridgeCaptureValue,
     );
+    const hasExternalStreamToken = Boolean(
+      (searchParams.get("streamToken") || "").trim(),
+    );
     const captureDebugValue = (
       searchParams.get("captureDebug") || ""
     ).toLowerCase();
     const captureDebug = ["1", "true", "yes", "on"].includes(captureDebugValue);
-    if (disableBridgeCapture) {
+    if (disableBridgeCapture || hasExternalStreamToken) {
       console.log(
-        "[StreamingMode] Bridge capture disabled by URL param, skipping in-page capture",
+        disableBridgeCapture
+          ? "[StreamingMode] Bridge capture disabled by URL param, skipping in-page capture"
+          : "[StreamingMode] Bridge capture disabled for external stream session, skipping in-page capture",
       );
       return;
     }

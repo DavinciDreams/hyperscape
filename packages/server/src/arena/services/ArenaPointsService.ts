@@ -137,31 +137,8 @@ export class ArenaPointsService {
       position.goldHoldDays,
     );
     const totalPoints = basePoints * multiplier;
-
-    let referrerMultiplier = multiplier;
-    let referralTotalPoints = 0;
-
-    if (params.referral) {
-      try {
-        const referrerPosition =
-          await this.stakingOps.fetchGoldPositionForWallet(
-            params.referral.inviterWallet,
-          );
-        referrerMultiplier = this.stakingOps.computeGoldMultiplier(
-          referrerPosition.goldBalance,
-          referrerPosition.goldHoldDays,
-        );
-      } catch {
-        // Fall back to bettor's multiplier if referrer lookup fails
-      }
-      const diminishingFactor = await this.getReferralDiminishingFactor(
-        params.referral.inviterWallet,
-      );
-      referralTotalPoints = Math.max(
-        1,
-        Math.round(basePoints * referrerMultiplier * diminishingFactor),
-      );
-    }
+    const referralMultiplier = params.referral ? 1 : 0;
+    const referralTotalPoints = params.referral ? basePoints : 0;
 
     try {
       await db.transaction(async (tx) => {
@@ -207,7 +184,7 @@ export class ArenaPointsService {
             inviterWallet: params.referral.inviterWallet,
             invitedWallet: params.wallet,
             basePoints,
-            multiplier: referrerMultiplier,
+            multiplier: referralMultiplier,
             totalPoints: referralTotalPoints,
           });
 
@@ -218,7 +195,7 @@ export class ArenaPointsService {
               wallet: params.referral.inviterWallet,
               eventType: "REFERRAL_BET",
               basePoints,
-              multiplier: referrerMultiplier,
+              multiplier: referralMultiplier,
               totalPoints: referralTotalPoints,
               referenceType: "bet",
               referenceId: params.betId,
@@ -269,17 +246,17 @@ export class ArenaPointsService {
       return null;
     }
 
+    const chain = normalizeFeeChain(params.chain ?? "SOLANA");
+
     let expectedGoldAmount: bigint;
     try {
       expectedGoldAmount = parseDecimalToBaseUnits(
         params.goldAmount,
-        ArenaPointsService.GOLD_DECIMALS,
+        chain === "SOLANA" ? ArenaPointsService.GOLD_DECIMALS : 18,
       );
     } catch {
       return null;
     }
-
-    const chain = normalizeFeeChain(params.chain ?? "SOLANA");
 
     if (chain !== "SOLANA") {
       if (!this.evmInspector.isEnabled(chain)) {
@@ -768,33 +745,6 @@ export class ArenaPointsService {
   }
 
   // ==========================================================================
-  // Referral Diminishing Returns
-  // ==========================================================================
-
-  /**
-   * Compute the referral point multiplier based on diminishing returns.
-   * First 20: 100%, 21-50: 50%, 51+: 25%.
-   */
-  private async getReferralDiminishingFactor(
-    inviterWallet: string,
-  ): Promise<number> {
-    const db = this.ctx.getDb();
-    if (!db) return 1;
-    try {
-      const countRows = await db
-        .select({ count: sql<number>`COUNT(*)`.as("count") })
-        .from(schema.arenaInvitedWallets)
-        .where(eq(schema.arenaInvitedWallets.inviterWallet, inviterWallet));
-      const count = Number(countRows[0]?.count ?? 0);
-      if (count <= 20) return 1;
-      if (count <= 50) return 0.5;
-      return 0.25;
-    } catch {
-      return 1;
-    }
-  }
-
-  // ==========================================================================
   // Expired Pending Bonuses
   // ==========================================================================
 
@@ -1056,7 +1006,7 @@ export class ArenaPointsService {
         .where(invitedWhere);
 
       const selfPoints = Number(selfRows[0]?.totalPoints ?? 0);
-      const referralPoints = Number(referralRows[0]?.totalPoints ?? 0);
+      let referralPoints = Number(referralRows[0]?.totalPoints ?? 0);
       let stakingPoints = 0;
       try {
         const stakingRows = await db
@@ -1095,6 +1045,33 @@ export class ArenaPointsService {
             ),
           );
         winPoints = Number(winRows[0]?.totalPoints ?? 0);
+      } catch (error: unknown) {
+        this.ctx.logTableMissingError(error);
+      }
+
+      try {
+        const ledgerWhere =
+          identityWallets.length === 1
+            ? eq(schema.arenaPointLedger.wallet, identityWallets[0]!)
+            : inArray(schema.arenaPointLedger.wallet, identityWallets);
+        // Referral win bonuses only exist in the ledger, so fold them into the
+        // referral bucket here to keep totals aligned with leaderboard/rank.
+        const referralWinRows = await db
+          .select({
+            totalPoints:
+              sql<number>`COALESCE(SUM(${schema.arenaPointLedger.totalPoints}), 0)`.as(
+                "totalPoints",
+              ),
+          })
+          .from(schema.arenaPointLedger)
+          .where(
+            and(
+              ledgerWhere,
+              eq(schema.arenaPointLedger.eventType, "REFERRAL_WIN"),
+              eq(schema.arenaPointLedger.status, "CONFIRMED"),
+            ),
+          );
+        referralPoints += Number(referralWinRows[0]?.totalPoints ?? 0);
       } catch (error: unknown) {
         this.ctx.logTableMissingError(error);
       }
@@ -1163,6 +1140,7 @@ export class ArenaPointsService {
     const scope = options?.scope === "linked" ? "LINKED" : "WALLET";
     const boundedLimit = Math.max(1, Math.min(limit, 100));
     const boundedOffset = Math.max(0, options?.offset ?? 0);
+    const windowStartMs = this.getLeaderboardWindowStartMs(options?.timeWindow);
     const parsePoints = (value: unknown): number => {
       if (typeof value === "number" && Number.isFinite(value)) return value;
       if (typeof value === "string" && value.trim()) {
@@ -1173,27 +1151,52 @@ export class ArenaPointsService {
       return 0;
     };
 
+    const pointsTimeFilter =
+      windowStartMs === null
+        ? sql``
+        : sql` WHERE "createdAt" >= ${windowStartMs}`;
+    const referralTimeFilter =
+      windowStartMs === null
+        ? sql``
+        : sql` WHERE "createdAt" >= ${windowStartMs}`;
+    const stakingTimeFilter =
+      windowStartMs === null
+        ? sql``
+        : sql` WHERE "createdAt" >= ${windowStartMs}`;
+    const ledgerTimeFilter =
+      windowStartMs === null
+        ? sql``
+        : sql` AND "createdAt" >= ${windowStartMs}`;
+
     const queryLeaderboard = (includeStaking: boolean, applyLimit: boolean) =>
       sql<{
         wallet: string;
         total_points: number | string | bigint;
       }>`
         WITH combined AS (
-          SELECT "wallet" AS wallet, ("totalPoints")::bigint AS points FROM "arena_points"
+          SELECT "wallet" AS wallet, ("totalPoints")::bigint AS points
+          FROM "arena_points"
+          ${pointsTimeFilter}
           UNION ALL
-          SELECT "inviterWallet" AS wallet, ("totalPoints")::bigint AS points FROM "arena_referral_points"
+          SELECT "inviterWallet" AS wallet, ("totalPoints")::bigint AS points
+          FROM "arena_referral_points"
+          ${referralTimeFilter}
           ${
             includeStaking
               ? sql`UNION ALL
                   SELECT "wallet" AS wallet, ("totalPoints")::bigint AS points
-                  FROM "arena_staking_points"`
+                  FROM "arena_staking_points"
+                  ${stakingTimeFilter}`
               : sql``
           }
           UNION ALL
           SELECT "wallet" AS wallet, ("totalPoints")::bigint AS points
           FROM "arena_point_ledger"
           WHERE "status" = 'CONFIRMED'
-          AND "eventType" IN ('BET_WON', 'REFERRAL_WIN', 'SIGNUP_REFERRER', 'SIGNUP_REFEREE')
+          -- Signup bonuses are mirrored into arena_points; only keep the
+          -- ledger-only win events here to avoid double counting.
+          AND "eventType" IN ('BET_WON', 'REFERRAL_WIN')
+          ${ledgerTimeFilter}
         )
         SELECT
           wallet,
@@ -1201,7 +1204,7 @@ export class ArenaPointsService {
         FROM combined
         GROUP BY wallet
         ORDER BY total_points DESC, wallet ASC
-        ${applyLimit ? sql`LIMIT ${boundedLimit}` : sql``}
+        ${applyLimit ? sql`LIMIT ${boundedLimit} OFFSET ${boundedOffset}` : sql``}
       `;
 
     const fetchRows = async (
@@ -1378,7 +1381,7 @@ export class ArenaPointsService {
             SELECT "wallet" AS wallet, ("totalPoints")::bigint AS points
             FROM "arena_point_ledger"
             WHERE "status" = 'CONFIRMED'
-            AND "eventType" IN ('BET_WON', 'REFERRAL_WIN', 'SIGNUP_REFERRER', 'SIGNUP_REFEREE')
+            AND "eventType" IN ('BET_WON', 'REFERRAL_WIN')
           ),
           totals AS (
             SELECT wallet, SUM(points)::bigint AS total_points
@@ -1524,5 +1527,23 @@ export class ArenaPointsService {
       tier,
       nextTierThreshold,
     };
+  }
+
+  private getLeaderboardWindowStartMs(
+    timeWindow?: "daily" | "weekly" | "monthly" | "alltime",
+  ): number | null {
+    if (!timeWindow || timeWindow === "alltime") {
+      return null;
+    }
+
+    const now = nowMs();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    if (timeWindow === "daily") {
+      return now - oneDayMs;
+    }
+    if (timeWindow === "weekly") {
+      return now - 7 * oneDayMs;
+    }
+    return now - 30 * oneDayMs;
   }
 }

@@ -58,7 +58,7 @@ export function StreamUIApp() {
         style={{
           pointerEvents: "none",
           background:
-            "linear-gradient(135deg, #0a0a0a 0%, #1a0a2e 25%, #0a1628 50%, #0a2a1a 75%, #0a0a0a 100%)",
+            "linear-gradient(135deg, #080808 0%, #1d150d 24%, #2a2112 48%, #111920 72%, #080808 100%)",
           backgroundSize: "400% 400%",
           animation: "streamUIBgShift 20s ease infinite",
         }}
@@ -89,7 +89,7 @@ export function StreamUIApp() {
             borderRadius: 6,
           }}
         >
-          STREAM UI DEV
+          DUEL ARENA DEV
         </span>
         <span
           style={{
@@ -99,7 +99,7 @@ export function StreamUIApp() {
             letterSpacing: 0.5,
           }}
         >
-          Mock data &middot; HMR active
+          Mock duel feed &middot; HMR active
         </span>
       </div>
 

@@ -66,11 +66,13 @@ function normalizePrivateKey(value: string): `0x${string}` | null {
 interface EvmBettingPanelProps {
   agent1Name: string;
   agent2Name: string;
+  compact?: boolean;
 }
 
 export function EvmBettingPanel({
   agent1Name,
   agent2Name,
+  compact = false,
 }: EvmBettingPanelProps) {
   const { activeChain } = useChain();
   const { address } = useAccount();
@@ -706,6 +708,7 @@ export function EvmBettingPanel({
       pointsDisplay={
         <PointsDisplay walletAddress={effectiveAddress ?? null} compact />
       }
+      compact={compact}
     />
   );
 }

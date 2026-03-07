@@ -8,6 +8,7 @@ import { Connection } from "@solana/web3.js";
 type E2eState = {
   solanaRpcUrl?: string;
   placeBetAmount?: string;
+  clobMatchState?: string;
 };
 
 async function loadState(): Promise<E2eState> {
@@ -25,6 +26,38 @@ async function readTxSignature(page: Page, testId: string): Promise<string> {
     return text.slice(delimiterIndex + 1).trim();
   }
   return text;
+}
+
+async function waitForMatchValue(
+  page: Page,
+  expectedMatch = "",
+  timeoutMs = 60_000,
+): Promise<string> {
+  let matched = "";
+  try {
+    await expect
+      .poll(
+        async () => {
+          const next = await readTxSignature(page, "solana-clob-match");
+          if (!next || next === "-" || next.endsWith("-")) {
+            return "";
+          }
+          if (expectedMatch && next !== expectedMatch) {
+            return "";
+          }
+          matched = next;
+          return next;
+        },
+        {
+          timeout: timeoutMs,
+          intervals: [500, 1_000, 2_000, 5_000],
+        },
+      )
+      .not.toBe("");
+  } catch {
+    return "";
+  }
+  return matched;
 }
 
 async function waitForNewTxSignature(
@@ -120,6 +153,20 @@ async function ensureWalletConnected(page: Page): Promise<void> {
   }
 
   await expect.poll(hasConnectedSolanaWallet, { timeout: 60_000 }).toBe(true);
+}
+
+async function openSolanaAdminPanel(page: Page): Promise<void> {
+  const adminToggle = page.getByTestId("solana-clob-admin-toggle");
+  if (!(await adminToggle.isVisible().catch(() => false))) return;
+
+  const expanded = await adminToggle.getAttribute("aria-expanded");
+  if (expanded !== "true") {
+    await adminToggle.click();
+  }
+
+  await expect(page.getByTestId("solana-clob-admin-panel")).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 async function switchToSolanaChain(page: Page): Promise<void> {
@@ -246,6 +293,7 @@ test("runs non-debug Solana CLOB UI E2E and validates txs", async ({
   await expect(page.getByTestId("solana-clob-panel")).toBeVisible({
     timeout: 60_000,
   });
+  await openSolanaAdminPanel(page);
   await ensureWalletConnected(page);
 
   const betAmountInput = page.getByLabel("Bet amount in GOLD").first();
@@ -258,9 +306,28 @@ test("runs non-debug Solana CLOB UI E2E and validates txs", async ({
     await priceInput.fill("500");
   }
 
-  const currentMatchText = (
-    (await page.getByTestId("solana-clob-match").textContent()) || ""
-  ).trim();
+  const expectedClobMatch = (state.clobMatchState || "").trim();
+  let currentMatchText = await waitForMatchValue(
+    page,
+    expectedClobMatch,
+    expectedClobMatch ? 90_000 : 20_000,
+  );
+  if (!currentMatchText) {
+    const refreshButton = page.getByTestId("solana-clob-refresh");
+    if (await refreshButton.isVisible().catch(() => false)) {
+      await refreshButton.click();
+      currentMatchText = await waitForMatchValue(
+        page,
+        expectedClobMatch,
+        expectedClobMatch ? 30_000 : 15_000,
+      );
+    }
+  }
+  if (!currentMatchText) {
+    currentMatchText = (
+      (await page.getByTestId("solana-clob-match").textContent()) || ""
+    ).trim();
+  }
   if (currentMatchText.endsWith("-")) {
     const previousInitConfigTx = await readTxSignature(
       page,

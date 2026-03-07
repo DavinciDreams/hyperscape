@@ -21,7 +21,8 @@ type E2eState = Record<string, unknown> & {
   evmGoldTokenAddress?: string;
   evmGoldClobAddress?: string;
   evmMatchId?: number;
-  evmSeedOrderPrice?: number;
+  evmSeedNoPrice?: number;
+  evmSeedYesPrice?: number;
   evmSeedOrderAmount?: string;
 };
 
@@ -79,7 +80,12 @@ async function main(): Promise<void> {
   const chainId = Number(process.env.E2E_EVM_CHAIN_ID || DEFAULT_CHAIN_ID);
   const adminPrivateKey =
     process.env.E2E_EVM_ADMIN_PRIVATE_KEY || DEFAULT_ADMIN_PRIVATE_KEY;
-  const seedOrderPrice = Number(process.env.E2E_EVM_SEED_ORDER_PRICE || 600);
+  const seedNoOrderPrice = Number(
+    process.env.E2E_EVM_SEED_NO_ORDER_PRICE || 600,
+  );
+  const seedYesOrderPrice = Number(
+    process.env.E2E_EVM_SEED_YES_ORDER_PRICE || 400,
+  );
   const seedOrderAmountUi = process.env.E2E_EVM_SEED_ORDER_AMOUNT || "3";
 
   const localChain = {
@@ -166,19 +172,19 @@ async function main(): Promise<void> {
   })) as bigint;
   const currentMatchId = nextMatchId > 1n ? nextMatchId - 1n : 1n;
 
-  const seedOrderTx = await walletClient.writeContract({
+  const seedNoOrderTx = await walletClient.writeContract({
     address: goldClobAddress as Address,
     abi: goldClobArtifact.abi,
     functionName: "placeOrder",
     args: [
       currentMatchId,
       false,
-      seedOrderPrice,
+      seedNoOrderPrice,
       parseUnits(seedOrderAmountUi, 18),
     ],
     value: (() => {
       const amount = parseUnits(seedOrderAmountUi, 18);
-      const priceComp = BigInt(1000 - seedOrderPrice);
+      const priceComp = BigInt(1000 - seedNoOrderPrice);
       const cost = (amount * priceComp) / 1000n;
       const tradeTreasuryFee = cost / 100n;
       const tradeMarketMakerFee = cost / 100n;
@@ -186,13 +192,37 @@ async function main(): Promise<void> {
     })(),
     account: adminAccount,
   });
-  await publicClient.waitForTransactionReceipt({ hash: seedOrderTx });
+  await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
+
+  const seedYesOrderTx = await walletClient.writeContract({
+    address: goldClobAddress as Address,
+    abi: goldClobArtifact.abi,
+    functionName: "placeOrder",
+    args: [
+      currentMatchId,
+      true,
+      seedYesOrderPrice,
+      parseUnits(seedOrderAmountUi, 18),
+    ],
+    value: (() => {
+      const amount = parseUnits(seedOrderAmountUi, 18);
+      const priceComp = BigInt(seedYesOrderPrice);
+      const cost = (amount * priceComp) / 1000n;
+      const tradeTreasuryFee = cost / 100n;
+      const tradeMarketMakerFee = cost / 100n;
+      return cost + tradeTreasuryFee + tradeMarketMakerFee;
+    })(),
+    account: adminAccount,
+  });
+  await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
 
   const env = await readEnv(envPath);
   env.VITE_BSC_RPC_URL = rpcUrl;
   env.VITE_BSC_CHAIN_ID = String(chainId);
   env.VITE_BSC_GOLD_CLOB_ADDRESS = goldClobAddress;
   env.VITE_BSC_GOLD_TOKEN_ADDRESS = goldTokenAddress;
+  env.VITE_EVM_PRIVATE_KEY = adminPrivateKey;
+  env.VITE_HEADLESS_EVM_PRIVATE_KEY = adminPrivateKey;
   env.VITE_E2E_EVM_PRIVATE_KEY = adminPrivateKey;
   await fs.writeFile(envPath, serializeDotEnv(env), "utf8");
 
@@ -205,7 +235,8 @@ async function main(): Promise<void> {
     evmGoldTokenAddress: goldTokenAddress,
     evmGoldClobAddress: goldClobAddress,
     evmMatchId: Number(currentMatchId),
-    evmSeedOrderPrice: seedOrderPrice,
+    evmSeedNoPrice: seedNoOrderPrice,
+    evmSeedYesPrice: seedYesOrderPrice,
     evmSeedOrderAmount: seedOrderAmountUi,
   };
 
@@ -225,7 +256,8 @@ async function main(): Promise<void> {
           clobDeployTx,
           mintTx,
           createMatchTx,
-          seedOrderTx,
+          seedNoOrderTx,
+          seedYesOrderTx,
         },
         envPath,
         statePath,

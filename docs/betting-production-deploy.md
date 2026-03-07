@@ -38,9 +38,17 @@ Contracts / chain wiring (set to your target networks):
 - `SOLANA_WS_URL`
 - `SOLANA_ARENA_MARKET_PROGRAM_ID`
 - `SOLANA_GOLD_MINT`
+- `BSC_RPC_URL`
+- `BSC_CHAIN_ID=56` (or your target testnet id)
+- `BSC_GOLD_CLOB_ADDRESS`
 - `SOLANA_ARENA_AUTHORITY_SECRET` (if on-chain writes/resolve are enabled)
 - `BIRDEYE_API_KEY` (optional)
 - `HELIUS_API_KEY` (recommended for mainnet Solana RPC)
+
+Notes:
+
+- The server now fails closed in production if duel betting is enabled without the required Solana arena env vars above.
+- BSC external bet points verification requires both `BSC_RPC_URL` and `BSC_GOLD_CLOB_ADDRESS` on the backend. Do not rely on frontend-only `VITE_*` vars for server verification.
 
 Optional origin lock (recommended):
 

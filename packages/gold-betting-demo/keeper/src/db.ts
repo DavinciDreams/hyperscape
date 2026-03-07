@@ -9,6 +9,7 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { AgentRating } from "./trueskill";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.KEEPER_DB_PATH?.trim()
@@ -35,6 +36,21 @@ export type DbWalletPoints = {
   winPoints: number;
   referralPoints: number;
   stakingPoints: number;
+};
+
+export type DbAgentRating = AgentRating & {
+  agentId: string;
+  updatedAt: number;
+};
+
+export type DbPerpsOracleSnapshot = {
+  agentId: string;
+  marketId: number;
+  spotIndex: number;
+  conservativeSkill: number;
+  mu: number;
+  sigma: number;
+  recordedAt: number;
 };
 
 // ── DB singleton ──────────────────────────────────────────────────────────────
@@ -108,6 +124,31 @@ db.run(`CREATE TABLE IF NOT EXISTS referral_fees (
   treasury_fees REAL NOT NULL DEFAULT 0
 )`);
 
+db.run(`CREATE TABLE IF NOT EXISTS agent_ratings (
+  agent_id TEXT PRIMARY KEY,
+  mu REAL NOT NULL,
+  sigma REAL NOT NULL,
+  games_played INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+)`);
+
+db.run(`CREATE TABLE IF NOT EXISTS perps_oracle_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id TEXT NOT NULL,
+  market_id INTEGER NOT NULL,
+  spot_index REAL NOT NULL,
+  conservative_skill REAL NOT NULL,
+  mu REAL NOT NULL,
+  sigma REAL NOT NULL,
+  recorded_at INTEGER NOT NULL
+)`);
+
+db.run(`CREATE INDEX IF NOT EXISTS idx_perps_oracle_snapshots_agent_time
+  ON perps_oracle_snapshots (agent_id, recorded_at DESC)`);
+
+db.run(`CREATE INDEX IF NOT EXISTS idx_perps_oracle_snapshots_market_time
+  ON perps_oracle_snapshots (market_id, recorded_at DESC)`);
+
 // ── Prepared statements ───────────────────────────────────────────────────────
 
 const insertBet = db.prepare(`INSERT OR IGNORE INTO bets
@@ -164,6 +205,19 @@ const upsertReferralFees =
   ON CONFLICT(wallet) DO UPDATE SET
     fee_share_gold = excluded.fee_share_gold,
     treasury_fees = excluded.treasury_fees`);
+
+const upsertAgentRating = db.prepare(`INSERT INTO agent_ratings
+  (agent_id, mu, sigma, games_played, updated_at)
+  VALUES ($agentId, $mu, $sigma, $gamesPlayed, $updatedAt)
+  ON CONFLICT(agent_id) DO UPDATE SET
+    mu = excluded.mu,
+    sigma = excluded.sigma,
+    games_played = excluded.games_played,
+    updated_at = excluded.updated_at`);
+
+const insertPerpsOracleSnapshot = db.prepare(`INSERT INTO perps_oracle_snapshots
+  (agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at)
+  VALUES ($agentId, $marketId, $spotIndex, $conservativeSkill, $mu, $sigma, $recordedAt)`);
 
 // ── Load (hydrate in-memory state from DB at startup) ─────────────────────────
 
@@ -387,5 +441,104 @@ export function saveReferralFees(
     $wallet: wallet,
     $feeShareGold: feeShareGold,
     $treasuryFees: treasuryFees,
+  });
+}
+
+export function loadAgentRatings(): Record<string, AgentRating> {
+  const ratings: Record<string, AgentRating> = {};
+  for (const row of db
+    .prepare(
+      "SELECT agent_id, mu, sigma, games_played FROM agent_ratings ORDER BY updated_at DESC",
+    )
+    .all() as Array<Record<string, unknown>>) {
+    ratings[String(row.agent_id)] = {
+      mu: Number(row.mu),
+      sigma: Number(row.sigma),
+      gamesPlayed: Number(row.games_played),
+    };
+  }
+  return ratings;
+}
+
+export function loadPerpsOracleSnapshots(
+  agentId?: string,
+  limit = 100,
+): DbPerpsOracleSnapshot[] {
+  const rows = agentId
+    ? (db
+        .prepare(
+          `SELECT agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at
+           FROM perps_oracle_snapshots
+           WHERE agent_id = ?
+           ORDER BY recorded_at DESC
+           LIMIT ?`,
+        )
+        .all(agentId, limit) as Array<Record<string, unknown>>)
+    : (db
+        .prepare(
+          `SELECT agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at
+           FROM perps_oracle_snapshots
+           ORDER BY recorded_at DESC
+           LIMIT ?`,
+        )
+        .all(limit) as Array<Record<string, unknown>>);
+
+  return rows.map(
+    (row): DbPerpsOracleSnapshot => ({
+      agentId: String(row.agent_id),
+      marketId: Number(row.market_id),
+      spotIndex: Number(row.spot_index),
+      conservativeSkill: Number(row.conservative_skill),
+      mu: Number(row.mu),
+      sigma: Number(row.sigma),
+      recordedAt: Number(row.recorded_at),
+    }),
+  );
+}
+
+export function saveAgentRating(
+  agentId: string,
+  rating: AgentRating,
+  updatedAt = Date.now(),
+): void {
+  upsertAgentRating.run({
+    $agentId: agentId,
+    $mu: rating.mu,
+    $sigma: rating.sigma,
+    $gamesPlayed: rating.gamesPlayed,
+    $updatedAt: updatedAt,
+  });
+}
+
+export function saveAgentRatings(
+  ratings: Record<string, AgentRating>,
+  updatedAt = Date.now(),
+): void {
+  const persistRatings = db.transaction(
+    (entries: Array<[string, AgentRating]>, persistedAt: number) => {
+      for (const [agentId, rating] of entries) {
+        upsertAgentRating.run({
+          $agentId: agentId,
+          $mu: rating.mu,
+          $sigma: rating.sigma,
+          $gamesPlayed: rating.gamesPlayed,
+          $updatedAt: persistedAt,
+        });
+      }
+    },
+  );
+
+  persistRatings(Object.entries(ratings), updatedAt);
+}
+
+export function savePerpsOracleSnapshot(snapshot: DbPerpsOracleSnapshot): void {
+  insertPerpsOracleSnapshot.run({
+    $agentId: snapshot.agentId,
+    $marketId: snapshot.marketId,
+    $spotIndex: snapshot.spotIndex,
+    $conservativeSkill: snapshot.conservativeSkill,
+    $mu: snapshot.mu,
+    $sigma: snapshot.sigma,
+    $recordedAt: snapshot.recordedAt,
   });
 }

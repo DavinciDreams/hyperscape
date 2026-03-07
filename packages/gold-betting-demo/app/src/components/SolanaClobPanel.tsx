@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BN } from "@coral-xyz/anchor";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import {
+  Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+} from "@solana/web3.js";
 
 import { createPrograms, createReadonlyPrograms } from "../lib/programs";
 import {
   GAME_API_URL,
-  GOLD_DECIMALS,
   CONFIG,
+  DEFAULT_NEW_ROUND_BET_WINDOW_SECONDS,
   buildArenaWriteHeaders,
   ENABLE_MANUAL_MARKET_ADMIN_CONTROLS,
 } from "../lib/config";
 import { getStoredInviteCode } from "../lib/invite";
 import { findClobConfigPda } from "../lib/clobPdas";
+import { findMatchPda, findOracleConfigPda } from "../lib/pdas";
 import {
   PredictionMarketPanel,
   type ChartDataPoint,
@@ -25,6 +32,7 @@ type BetSide = "YES" | "NO";
 
 type ActiveMatch = {
   matchState: PublicKey;
+  oracleMatch: PublicKey;
   orderBook: PublicKey;
   vault: PublicKey;
   isOpen: boolean;
@@ -55,6 +63,17 @@ const TEXT_ENCODER = new TextEncoder();
 const SEED_VAULT = TEXT_ENCODER.encode("vault");
 const SEED_ORDER = TEXT_ENCODER.encode("order");
 const SEED_BALANCE = TEXT_ENCODER.encode("balance");
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
+const SOLANA_SETTLEMENT_DECIMALS = 9;
+
+function deriveProgramDataAddress(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [programId.toBuffer()],
+    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+  )[0];
+}
 
 function parseConfiguredPubkey(value: string | undefined): PublicKey | null {
   if (!value || value.trim().length === 0) return null;
@@ -81,7 +100,7 @@ const E2E_CLOB_FIRST_ORDER = parseConfiguredPubkey(
 function toBaseUnits(amountInput: string): bigint {
   const value = Number(amountInput.trim());
   if (!Number.isFinite(value) || value <= 0) return 0n;
-  return BigInt(Math.floor(value * 10 ** GOLD_DECIMALS));
+  return BigInt(Math.floor(value * LAMPORTS_PER_SOL));
 }
 
 function asBigInt(value: unknown): bigint {
@@ -110,8 +129,38 @@ function clampPrice(value: string): number {
   return Math.min(999, Math.max(1, Math.floor(parsed)));
 }
 
+async function ensureVaultRentExempt(
+  connection: ReturnType<typeof useConnection>["connection"],
+  provider: ReturnType<typeof createPrograms>["provider"] | null | undefined,
+  walletPublicKey: PublicKey | null,
+  vault: PublicKey,
+): Promise<void> {
+  if (!provider || !walletPublicKey) {
+    throw new Error("Connect wallet first");
+  }
+
+  const minVaultLamports = await connection.getMinimumBalanceForRentExemption(
+    0,
+    "confirmed",
+  );
+  const currentVaultLamports = await connection.getBalance(vault, "confirmed");
+  if (currentVaultLamports >= minVaultLamports) {
+    return;
+  }
+
+  const topUpLamports = minVaultLamports - currentVaultLamports;
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: walletPublicKey,
+      toPubkey: vault,
+      lamports: topUpLamports,
+    }),
+  );
+  await provider.sendAndConfirm(tx, []);
+}
+
 function fmtAmount(value: bigint): number {
-  return Number(value) / 10 ** GOLD_DECIMALS;
+  return Number(value) / 10 ** SOLANA_SETTLEMENT_DECIMALS;
 }
 
 function walletReady(wallet: ReturnType<typeof useWallet>): boolean {
@@ -135,7 +184,7 @@ export function SolanaClobPanel({
   const { connection } = useConnection();
   const wallet = useWallet();
 
-  const [status, setStatus] = useState("Connect Solana wallet to trade");
+  const [status, setStatus] = useState("Connect Solana wallet to trade SOL");
   const [side, setSide] = useState<BetSide>("YES");
   const [amountInput, setAmountInput] = useState("1");
   const [priceInput, setPriceInput] = useState("500");
@@ -155,6 +204,7 @@ export function SolanaClobPanel({
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastOrderId, setLastOrderId] = useState<bigint | null>(null);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
 
   const [txs, setTxs] = useState({
     initConfig: "-",
@@ -166,7 +216,9 @@ export function SolanaClobPanel({
     claim: "-",
   });
 
-  const preferredMatchRef = useRef<string | null>(null);
+  const preferredMatchRef = useRef<string | null>(
+    E2E_CLOB_MATCH_STATE?.toBase58() ?? null,
+  );
   const autoClaimedMatchesRef = useRef<Set<string>>(new Set());
   const lastSnapshotRef = useRef<{ yes: bigint; no: bigint }>({
     yes: 0n,
@@ -328,6 +380,7 @@ export function SolanaClobPanel({
       if (!orderBookEntry) {
         setActiveMatch({
           matchState: matchStatePk,
+          oracleMatch: selected.account.oracleMatch as PublicKey,
           orderBook: PublicKey.default,
           vault,
           isOpen: Boolean(selected.account.isOpen),
@@ -411,6 +464,7 @@ export function SolanaClobPanel({
 
       setActiveMatch({
         matchState: matchStatePk,
+        oracleMatch: selected.account.oracleMatch as PublicKey,
         orderBook: orderBookEntry.publicKey,
         vault,
         isOpen: Boolean(selected.account.isOpen),
@@ -440,6 +494,45 @@ export function SolanaClobPanel({
       setIsRefreshing(false);
     }
   }, [readonlyPrograms, updateChartAndTrades, wallet.publicKey]);
+
+  const ensureOracle = useCallback(async (): Promise<PublicKey> => {
+    const fightProgram: any = writablePrograms?.fightOracle;
+    if (!fightProgram || !wallet.publicKey) {
+      throw new Error("Connect wallet first");
+    }
+
+    const oracleConfigPda = findOracleConfigPda(fightProgram.programId);
+    let config = (await fightProgram.account.oracleConfig.fetchNullable(
+      oracleConfigPda,
+    )) as any;
+
+    if (!config) {
+      await fightProgram.methods
+        .initializeOracle()
+        .accountsPartial({
+          authority: wallet.publicKey,
+          oracleConfig: oracleConfigPda,
+          program: fightProgram.programId,
+          programData: deriveProgramDataAddress(fightProgram.programId),
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      config = (await fightProgram.account.oracleConfig.fetchNullable(
+        oracleConfigPda,
+      )) as any;
+    }
+
+    if (!config) {
+      throw new Error(
+        `Oracle config ${oracleConfigPda.toBase58()} was not created`,
+      );
+    }
+    if (!(config.authority as PublicKey).equals(wallet.publicKey)) {
+      throw new Error("Connected wallet is not the oracle authority");
+    }
+
+    return oracleConfigPda;
+  }, [wallet.publicKey, writablePrograms]);
 
   useEffect(() => {
     void refreshData();
@@ -473,7 +566,8 @@ export function SolanaClobPanel({
       if (
         CONFIG.cluster === "localnet" &&
         (!cfg.treasury.equals(wallet.publicKey) ||
-          !cfg.marketMaker.equals(wallet.publicKey))
+          !cfg.marketMaker.equals(wallet.publicKey)) &&
+        (existing.authority as PublicKey).equals(wallet.publicKey)
       ) {
         await clobProgram.methods
           .updateConfig(
@@ -513,9 +607,11 @@ export function SolanaClobPanel({
 
     const initConfigTx = (await clobProgram.methods
       .initializeConfig(treasuryFeeOwner, marketMakerFeeOwner, 100, 100, 200)
-      .accounts({
+      .accountsPartial({
         authority: wallet.publicKey,
         config: runtimeConfigPda,
+        program: clobProgram.programId,
+        programData: deriveProgramDataAddress(clobProgram.programId),
         systemProgram: SystemProgram.programId,
       })
       .rpc()) as string;
@@ -541,11 +637,36 @@ export function SolanaClobPanel({
       if (!wallet.publicKey || !wallet.sendTransaction) {
         throw new Error("Connect wallet first");
       }
+      const fightProgram: any = writablePrograms?.fightOracle;
       const clobProgram: any = writablePrograms?.goldClobMarket;
-      if (!clobProgram) throw new Error("Program unavailable");
+      if (!fightProgram || !clobProgram) throw new Error("Program unavailable");
       const runtimeConfigPda = findClobConfigPda(clobProgram.programId);
+      const oracleConfigPda = await ensureOracle();
 
       await ensureConfig();
+
+      const matchId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+      const oracleMatchPda = findMatchPda(
+        fightProgram.programId,
+        new BN(matchId.toString()),
+      );
+      const oracleMetadata = JSON.stringify({
+        agent1: agent1Name,
+        agent2: agent2Name,
+      });
+      await fightProgram.methods
+        .createMatch(
+          new BN(matchId.toString()),
+          new BN(DEFAULT_NEW_ROUND_BET_WINDOW_SECONDS),
+          oracleMetadata,
+        )
+        .accountsPartial({
+          authority: wallet.publicKey,
+          oracleConfig: oracleConfigPda,
+          matchResult: oracleMatchPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
 
       const matchState = Keypair.generate();
       const orderBook = Keypair.generate();
@@ -560,12 +681,20 @@ export function SolanaClobPanel({
           matchState: matchState.publicKey,
           user: wallet.publicKey,
           config: runtimeConfigPda,
+          oracleMatch: oracleMatchPda,
           vault: vaultPda,
           systemProgram: SystemProgram.programId,
         })
         .signers([matchState])
         .rpc()) as string;
       setTxs((prev) => ({ ...prev, createMatch: matchTx }));
+
+      await ensureVaultRentExempt(
+        connection,
+        writablePrograms?.provider,
+        wallet.publicKey,
+        vaultPda,
+      );
 
       const orderBookTx = (await clobProgram.methods
         .initializeOrderBook()
@@ -580,7 +709,7 @@ export function SolanaClobPanel({
       setTxs((prev) => ({ ...prev, initOrderBook: orderBookTx }));
 
       preferredMatchRef.current = matchState.publicKey.toBase58();
-      setStatus("Created new Solana CLOB market");
+      setStatus("Created new Solana CLOB market with linked oracle round");
       await refreshData();
     } catch (error) {
       setStatus(`Create match failed: ${(error as Error).message}`);
@@ -693,6 +822,15 @@ export function SolanaClobPanel({
           ? E2E_CLOB_FIRST_ORDER
           : orderPda;
 
+      if (activeMatch.authority.equals(wallet.publicKey)) {
+        await ensureVaultRentExempt(
+          connection,
+          writablePrograms?.provider,
+          wallet.publicKey,
+          vaultPda,
+        );
+      }
+
       const txSignature = (await clobProgram.methods
         .placeOrder(
           new BN(orderId.toString()),
@@ -739,7 +877,7 @@ export function SolanaClobPanel({
             body: JSON.stringify({
               bettorWallet: wallet.publicKey.toBase58(),
               chain: "SOLANA",
-              sourceAsset: "GOLD",
+              sourceAsset: "SOL",
               sourceAmount: amountInput,
               goldAmount: amountInput,
               feeBps:
@@ -818,16 +956,32 @@ export function SolanaClobPanel({
   const handleResolve = async () => {
     try {
       if (!wallet.publicKey) throw new Error("Connect wallet first");
+      const fightProgram: any = writablePrograms?.fightOracle;
       const clobProgram: any = writablePrograms?.goldClobMarket;
-      if (!clobProgram) throw new Error("Program unavailable");
+      if (!fightProgram || !clobProgram) throw new Error("Program unavailable");
       if (!activeMatch) throw new Error("Create/select a match first");
+      const oracleConfigPda = await ensureOracle();
 
       const winner = side === "YES" ? { yes: {} } : { no: {} };
+      const replayHash = window.crypto.getRandomValues(new Uint8Array(32));
+      await fightProgram.methods
+        .postResult(
+          winner,
+          new BN(Date.now().toString()),
+          Array.from(replayHash),
+        )
+        .accountsPartial({
+          authority: wallet.publicKey,
+          oracleConfig: oracleConfigPda,
+          matchResult: activeMatch.oracleMatch,
+        })
+        .rpc();
+
       const txSignature = (await clobProgram.methods
-        .resolveMatch(winner)
+        .resolveMatch()
         .accounts({
           matchState: activeMatch.matchState,
-          authority: wallet.publicKey,
+          oracleMatch: activeMatch.oracleMatch,
         })
         .rpc()) as string;
 
@@ -948,194 +1102,142 @@ export function SolanaClobPanel({
   return (
     <div
       data-testid="solana-clob-panel"
+      className={!compact ? "sol-clob-shell" : undefined}
       style={{ display: "grid", gap: 10, position: "relative" }}
     >
-      {/* Admin / Debug Panel — hidden in compact sidebar mode */}
-      {!compact && (
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            right: 0,
-            background: "rgba(0, 0, 0, 0.85)",
-            border: "1px solid #333",
-            padding: 12,
-            borderRadius: 8,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            zIndex: 100,
-            maxWidth: 320,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: "bold",
-              textTransform: "uppercase",
-              letterSpacing: "1px",
-            }}
-          >
-            Admin Panel
-          </div>
-
-          {ENABLE_MANUAL_MARKET_ADMIN_CONTROLS ? (
-            <div
-              style={{
-                display: "flex",
-                gap: 6,
-                flexWrap: "wrap",
-                marginBottom: 4,
-              }}
-            >
-              <button
-                data-testid="solana-clob-refresh"
-                type="button"
-                onClick={() => void refreshData()}
-                disabled={isRefreshing}
-                style={{ fontSize: 11, padding: "4px 8px" }}
-              >
-                {isRefreshing ? "Refreshing..." : "Refresh"}
-              </button>
-              <button
-                data-testid="solana-clob-create-match"
-                type="button"
-                onClick={() => void handleCreateMatch()}
-                style={{ fontSize: 11, padding: "4px 8px" }}
-              >
-                Create Match
-              </button>
-              <button
-                data-testid="solana-clob-resolve"
-                type="button"
-                onClick={() => void handleResolve()}
-                disabled={!activeMatch?.isOpen}
-                style={{ fontSize: 11, padding: "4px 8px" }}
-              >
-                Resolve ({side})
-              </button>
-              <button
-                data-testid="solana-clob-claim"
-                type="button"
-                onClick={() => void handleClaim("manual")}
-                style={{ fontSize: 11, padding: "4px 8px" }}
-              >
-                Claim
-              </button>
-              <button
-                data-testid="solana-clob-cancel-order"
-                type="button"
-                onClick={() => void handleCancelOrder()}
-                style={{ fontSize: 11, padding: "4px 8px" }}
-              >
-                Cancel Last Order
-              </button>
-            </div>
-          ) : (
-            <span style={{ fontSize: 11, opacity: 0.85, marginBottom: 4 }}>
-              Market lifecycle is automated by keeper bot.
-            </span>
-          )}
-
-          <div
-            style={{
-              fontSize: 10,
-              opacity: 0.75,
-              wordBreak: "break-all",
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-            }}
-          >
-            <div
-              data-testid="solana-clob-status"
-              style={{ color: "#fff", marginBottom: 4 }}
-            >
-              {status}
-            </div>
-            <div data-testid="solana-clob-init-config-tx">
-              Init Config Tx: {txs.initConfig}
-            </div>
-            <div data-testid="solana-clob-create-match-tx">
-              Create Match Tx: {txs.createMatch}
-            </div>
-            <div data-testid="solana-clob-init-orderbook-tx">
-              Init OrderBook Tx: {txs.initOrderBook}
-            </div>
-            <div data-testid="solana-clob-place-order-tx">
-              Place Order Tx: {txs.placeOrder}
-            </div>
-            <div data-testid="solana-clob-cancel-order-tx">
-              Cancel Tx: {txs.cancelOrder}
-            </div>
-            <div data-testid="solana-clob-resolve-tx">
-              Resolve Tx: {txs.resolveMatch}
-            </div>
-            <div data-testid="solana-clob-claim-tx">Claim Tx: {txs.claim}</div>
-          </div>
-        </div>
-      )}
-
-      {/* Debug metadata rows — hidden in compact sidebar mode */}
       {!compact && (
         <>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <span
-              data-testid="solana-clob-match"
-              style={{ opacity: 0.8, fontSize: 12 }}
+          <div className="sol-clob-toolbar">
+            <div className="sol-clob-toolbar-copy">
+              <span className="sol-clob-toolbar-kicker">
+                Solana Prediction Market
+              </span>
+              <span
+                data-testid="solana-clob-match"
+                className="sol-clob-toolbar-meta"
+              >
+                Match: {matchLabel}
+              </span>
+            </div>
+            <button
+              data-testid="solana-clob-admin-toggle"
+              type="button"
+              className="sol-clob-admin-toggle"
+              aria-expanded={isAdminPanelOpen}
+              onClick={() => setIsAdminPanelOpen((open) => !open)}
             >
-              Match: {matchLabel}
-            </span>
+              {isAdminPanelOpen ? "Hide Admin" : "Admin"}
+            </button>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              alignItems: "center",
-              fontSize: 12,
-              opacity: 0.85,
-            }}
-          >
-            <span>{marketFeeSummary}</span>
-            <span>
-              Position YES {fmtAmount(position.yesShares).toFixed(4)} | NO{" "}
-              {fmtAmount(position.noShares).toFixed(4)}
-            </span>
-          </div>
+          {isAdminPanelOpen && (
+            <section
+              data-testid="solana-clob-admin-panel"
+              className="sol-clob-admin-panel"
+            >
+              <div className="sol-clob-admin-panel-header">
+                <div className="sol-clob-admin-panel-title">Arena Admin</div>
+                <div
+                  data-testid="solana-clob-status"
+                  className="sol-clob-admin-status"
+                >
+                  {status}
+                </div>
+              </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <label style={{ fontSize: 12, opacity: 0.9 }}>
-              Limit Price (1-999)
-              <input
-                data-testid="solana-clob-price-input"
-                type="number"
-                value={priceInput}
-                onChange={(event) => setPriceInput(event.target.value)}
-                min={1}
-                max={999}
-                style={{ marginLeft: 6, width: 90 }}
-              />
-            </label>
-            <span style={{ fontSize: 12, opacity: 0.75 }}>
-              Wallet {walletConnected ? "connected" : "not connected"}
-            </span>
-          </div>
+              {ENABLE_MANUAL_MARKET_ADMIN_CONTROLS ? (
+                <div className="sol-clob-admin-actions">
+                  <button
+                    data-testid="solana-clob-refresh"
+                    type="button"
+                    onClick={() => void refreshData()}
+                    disabled={isRefreshing}
+                  >
+                    {isRefreshing ? "Refreshing..." : "Refresh"}
+                  </button>
+                  <button
+                    data-testid="solana-clob-create-match"
+                    type="button"
+                    onClick={() => void handleCreateMatch()}
+                  >
+                    Create Match
+                  </button>
+                  <button
+                    data-testid="solana-clob-resolve"
+                    type="button"
+                    onClick={() => void handleResolve()}
+                    disabled={!activeMatch?.isOpen}
+                  >
+                    Resolve ({side})
+                  </button>
+                  <button
+                    data-testid="solana-clob-claim"
+                    type="button"
+                    onClick={() => void handleClaim("manual")}
+                  >
+                    Claim
+                  </button>
+                  <button
+                    data-testid="solana-clob-cancel-order"
+                    type="button"
+                    onClick={() => void handleCancelOrder()}
+                  >
+                    Cancel Last Order
+                  </button>
+                </div>
+              ) : (
+                <span className="sol-clob-admin-note">
+                  Market lifecycle is automated by the keeper bot.
+                </span>
+              )}
+
+              <div className="sol-clob-admin-grid">
+                <div>{marketFeeSummary}</div>
+                <div>
+                  Position YES {fmtAmount(position.yesShares).toFixed(4)} | NO{" "}
+                  {fmtAmount(position.noShares).toFixed(4)}
+                </div>
+                <label className="sol-clob-price-input-wrap">
+                  <span>Limit Price (1-999)</span>
+                  <input
+                    data-testid="solana-clob-price-input"
+                    type="number"
+                    value={priceInput}
+                    onChange={(event) => setPriceInput(event.target.value)}
+                    min={1}
+                    max={999}
+                  />
+                </label>
+                <div>
+                  Wallet {walletConnected ? "connected" : "not connected"}
+                </div>
+              </div>
+
+              <div className="sol-clob-admin-tx-list">
+                <div data-testid="solana-clob-init-config-tx">
+                  Init Config Tx: {txs.initConfig}
+                </div>
+                <div data-testid="solana-clob-create-match-tx">
+                  Create Match Tx: {txs.createMatch}
+                </div>
+                <div data-testid="solana-clob-init-orderbook-tx">
+                  Init OrderBook Tx: {txs.initOrderBook}
+                </div>
+                <div data-testid="solana-clob-place-order-tx">
+                  Place Order Tx: {txs.placeOrder}
+                </div>
+                <div data-testid="solana-clob-cancel-order-tx">
+                  Cancel Tx: {txs.cancelOrder}
+                </div>
+                <div data-testid="solana-clob-resolve-tx">
+                  Resolve Tx: {txs.resolveMatch}
+                </div>
+                <div data-testid="solana-clob-claim-tx">
+                  Claim Tx: {txs.claim}
+                </div>
+              </div>
+            </section>
+          )}
         </>
       )}
 

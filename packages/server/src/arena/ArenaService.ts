@@ -87,9 +87,25 @@ export class ArenaService {
   private constructor(world: World) {
     const config = DEFAULT_ARENA_RUNTIME_CONFIG;
     const solanaConfig = getSolanaArenaConfig();
-    let solanaOperator: SolanaArenaOperator | null = null;
+    const worldSolanaOperator =
+      (
+        world as unknown as {
+          solanaArenaOperator?: SolanaArenaOperator;
+        }
+      ).solanaArenaOperator ?? null;
+    let solanaOperator: SolanaArenaOperator | null = worldSolanaOperator;
     try {
-      solanaOperator = new SolanaArenaOperator(solanaConfig);
+      if (!solanaOperator) {
+        solanaOperator = new SolanaArenaOperator(solanaConfig);
+        void solanaOperator.validateRoundInitialization().then((readiness) => {
+          if (!readiness.ready) {
+            console.warn(
+              "[ArenaService] Solana operator write path disabled:",
+              readiness.reason,
+            );
+          }
+        });
+      }
     } catch (error) {
       console.warn(
         "[ArenaService] Solana operator disabled due to invalid config:",

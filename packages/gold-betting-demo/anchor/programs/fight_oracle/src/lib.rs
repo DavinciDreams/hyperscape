@@ -2,11 +2,21 @@
 #![allow(deprecated)]
 
 use anchor_lang::prelude::*;
+use std::str::FromStr;
 
 declare_id!("6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD");
 
 pub const ORACLE_CONFIG_SEED: &[u8] = b"oracle_config";
 pub const MATCH_SEED: &[u8] = b"match";
+const DEFAULT_BOOTSTRAP_AUTHORITY: &str = "DfEnrzh4cgnHxfuZRxLGX69fnLd9DP41XxGuE4gtyJpn";
+
+fn bootstrap_authority() -> Pubkey {
+    if let Some(value) = option_env!("HYPERSCAPE_BOOTSTRAP_AUTHORITY") {
+        Pubkey::from_str(value).expect("invalid HYPERSCAPE_BOOTSTRAP_AUTHORITY")
+    } else {
+        Pubkey::from_str(DEFAULT_BOOTSTRAP_AUTHORITY).expect("invalid default bootstrap authority")
+    }
+}
 
 #[program]
 pub mod fight_oracle {
@@ -114,6 +124,19 @@ pub struct InitializeOracle<'info> {
     )]
     pub oracle_config: Account<'info, OracleConfig>,
 
+    #[account(
+        constraint = program.programdata_address()? == Some(program_data.key()) @ ErrorCode::UnauthorizedInitializer
+    )]
+    pub program: Program<'info, crate::program::FightOracle>,
+
+    #[account(
+        constraint = program_data.upgrade_authority_address == Some(authority.key())
+            || ((program_data.upgrade_authority_address.is_none()
+                || program_data.upgrade_authority_address == Some(Pubkey::default()))
+                && authority.key() == bootstrap_authority()) @ ErrorCode::UnauthorizedInitializer
+    )]
+    pub program_data: Account<'info, ProgramData>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -219,6 +242,8 @@ pub struct MatchResolved {
 pub enum ErrorCode {
     #[msg("Only the oracle authority can call this instruction")]
     Unauthorized,
+    #[msg("Only the configured bootstrap authority can initialize this program")]
+    UnauthorizedInitializer,
     #[msg("The betting window must be positive")]
     InvalidBetWindow,
     #[msg("Math overflow")]

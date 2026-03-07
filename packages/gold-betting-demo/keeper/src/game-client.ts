@@ -121,6 +121,7 @@ export class GameClient {
             duelId: numericMatchId,
             winnerId: cycle.winnerId,
             agent1: cycle.agent1,
+            agent2: cycle.agent2,
           });
         }
       }

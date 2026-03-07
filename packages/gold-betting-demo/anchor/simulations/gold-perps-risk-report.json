@@ -1,0 +1,77 @@
+{
+  "generatedAt": "2026-03-07T09:10:31.099Z",
+  "results": [
+    {
+      "name": "Whale round trip",
+      "category": "attack",
+      "summary": "Large same-direction trades pay a meaningful entry premium and lose on an immediate exit, so the skew curve resists cheap self-pumping.",
+      "weakness": null,
+      "metrics": {
+        "whale_notional_sol": 20,
+        "whale_entry_premium_pct": 20,
+        "follower_entry_premium_pct": 48.8,
+        "whale_instant_roundtrip_pnl_sol": 0
+      }
+    },
+    {
+      "name": "Default funding drift",
+      "category": "stress",
+      "summary": "Funding rises when one side dominates, but the default parameters still need calibration against real duel history before a larger launch.",
+      "weakness": "Funding is directionally correct, but parameter sweeps against production-like activity are still required before scaling liquidity.",
+      "metrics": {
+        "skew_sol": 10,
+        "funding_delta_1h": 18000000000,
+        "funding_delta_24h": 432000000000,
+        "long_funding_cost_1h_sol": -90,
+        "long_funding_cost_24h_sol": -2160
+      }
+    },
+    {
+      "name": "Isolated insurance containment",
+      "category": "ops",
+      "summary": "A profitable close on one model can only use that model's own insurance reserve; other markets remain untouched.",
+      "weakness": null,
+      "metrics": {
+        "market_a_required_settlement_sol": 2,
+        "market_a_total_liquidity_sol": 3,
+        "market_b_reserved_insurance_sol": 8,
+        "can_reach_market_b_reserve": false
+      }
+    },
+    {
+      "name": "Positive-equity liquidation",
+      "category": "stress",
+      "summary": "A position can cross the maintenance threshold before equity reaches zero, allowing orderly liquidation with a bounded liquidator fee.",
+      "weakness": null,
+      "metrics": {
+        "settlement_equity_sol": 0.1,
+        "maintenance_margin_sol": 0.25,
+        "liquidatable": true,
+        "liquidator_fee_sol": 0.05
+      }
+    },
+    {
+      "name": "Local insurance shortfall",
+      "category": "stress",
+      "summary": "Even with isolated markets, each model still needs enough dedicated insurance or opposing flow to settle winning traders smoothly.",
+      "weakness": "Isolation removes cross-market contagion, but it does not remove the need to seed each market with adequate local liquidity.",
+      "metrics": {
+        "settlement_required_sol": 2.6,
+        "local_liquidity_sol": 1.5,
+        "shortfall_sol": 1.1
+      }
+    }
+  ],
+  "findings": [
+    {
+      "name": "Default funding drift",
+      "category": "stress",
+      "weakness": "Funding is directionally correct, but parameter sweeps against production-like activity are still required before scaling liquidity."
+    },
+    {
+      "name": "Local insurance shortfall",
+      "category": "stress",
+      "weakness": "Isolation removes cross-market contagion, but it does not remove the need to seed each market with adequate local liquidity."
+    }
+  ]
+}

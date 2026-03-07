@@ -101,8 +101,8 @@ describe("GoldClob — Round 2 Security Fixes", function () {
         .connect(taker)
         .placeOrder(1, false, 500, 10, { value: takerValue });
 
-      const queue = await clob.orderQueues(1, 500);
-      expect(queue.tail - queue.head).to.equal(6n);
+      const queue = await clob.orderQueues(1, true, 500);
+      expect(queue.tail - queue.head).to.equal(5n);
     });
 
     it("clearGarbage function successfully sweeps dead orders", async function () {
@@ -115,12 +115,12 @@ describe("GoldClob — Round 2 Security Fixes", function () {
         await clob.connect(maker).cancelOrder(1, i + 1, 500);
       }
 
-      let queueBefore = await clob.orderQueues(1, 500);
+      let queueBefore = await clob.orderQueues(1, true, 500);
       expect(queueBefore.tail - queueBefore.head).to.equal(5n);
 
-      await clob.connect(taker).clearGarbage(1, 500, 10);
+      await clob.connect(taker).clearGarbage(1, true, 500, 10);
 
-      let queueAfter = await clob.orderQueues(1, 500);
+      let queueAfter = await clob.orderQueues(1, true, 500);
       expect(queueAfter.tail - queueAfter.head).to.equal(0n);
     });
   });

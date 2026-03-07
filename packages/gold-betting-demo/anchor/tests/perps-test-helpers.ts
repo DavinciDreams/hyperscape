@@ -1,0 +1,196 @@
+import * as anchor from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
+import {
+  Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SystemProgram,
+} from "@solana/web3.js";
+
+import { GoldPerpsMarket } from "../target/types/gold_perps_market";
+
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
+const TEST_RUN_OFFSET = Math.floor(Date.now() % 1_000_000_000);
+
+export const DEFAULT_SKEW_SCALE = SOL(100);
+export const DEFAULT_FUNDING_VELOCITY = 50_000_000;
+export const DEFAULT_MAX_ORACLE_STALENESS_SECONDS = Number(
+  process.env.HYPERSCAPE_MAX_ORACLE_STALENESS_SECONDS || 1,
+);
+export const DEFAULT_MIN_MARGIN = SOL(0.1);
+export const DEFAULT_MAX_LEVERAGE = 5;
+export const DEFAULT_MAINTENANCE_MARGIN_BPS = 500;
+export const DEFAULT_LIQUIDATION_FEE_BPS = 100;
+export const DEFAULT_STALE_WAIT_MS = Number(
+  process.env.GOLD_PERPS_TEST_STALE_WAIT_MS ||
+    String((DEFAULT_MAX_ORACLE_STALENESS_SECONDS + 2) * 1_000),
+);
+
+export function SOL(amount: number): number {
+  return Math.round(amount * LAMPORTS_PER_SOL);
+}
+
+export function PRICE(amount: number): number {
+  return SOL(amount);
+}
+
+export function toBn(value: number): anchor.BN {
+  return new anchor.BN(Math.round(value));
+}
+
+export function num(value: anchor.BN | number | bigint): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "bigint") return Number(value);
+  return value.toNumber();
+}
+
+export function uniqueMarketId(baseMarketId: number): number {
+  return baseMarketId + TEST_RUN_OFFSET;
+}
+
+export function deriveProgramDataAddress(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [programId.toBuffer()],
+    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+  )[0];
+}
+
+export function configPda(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("config")],
+    programId,
+  )[0];
+}
+
+export function marketPda(programId: PublicKey, marketId: number): PublicKey {
+  const marketIdBytes = Buffer.alloc(4);
+  marketIdBytes.writeUInt32LE(marketId, 0);
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("market"), marketIdBytes],
+    programId,
+  )[0];
+}
+
+export function positionPda(
+  programId: PublicKey,
+  trader: PublicKey,
+  marketId: number,
+): PublicKey {
+  const marketIdBytes = Buffer.alloc(4);
+  marketIdBytes.writeUInt32LE(marketId, 0);
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), trader.toBuffer(), marketIdBytes],
+    programId,
+  )[0];
+}
+
+export async function airdrop(
+  connection: anchor.web3.Connection,
+  recipient: PublicKey,
+  sol = 10,
+): Promise<void> {
+  const signature = await connection.requestAirdrop(
+    recipient,
+    sol * LAMPORTS_PER_SOL,
+  );
+  await connection.confirmTransaction(signature, "confirmed");
+}
+
+export async function waitForOracleToExpire(
+  ms = DEFAULT_STALE_WAIT_MS,
+): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function hasProgramError(error: unknown, fragment: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(fragment);
+}
+
+export async function ensurePerpsConfig(
+  program: Program<GoldPerpsMarket>,
+  authority: Keypair,
+  keeperAuthority = authority.publicKey,
+): Promise<PublicKey> {
+  const config = configPda(program.programId);
+  const existingConfig =
+    await program.account.configState.fetchNullable(config);
+  if (existingConfig) {
+    return config;
+  }
+
+  await program.methods
+    .initializeConfig(
+      keeperAuthority,
+      toBn(DEFAULT_SKEW_SCALE),
+      toBn(DEFAULT_FUNDING_VELOCITY),
+      new anchor.BN(DEFAULT_MAX_ORACLE_STALENESS_SECONDS),
+      toBn(DEFAULT_MAX_LEVERAGE),
+      toBn(DEFAULT_MIN_MARGIN),
+      DEFAULT_MAINTENANCE_MARGIN_BPS,
+      DEFAULT_LIQUIDATION_FEE_BPS,
+    )
+    .accountsPartial({
+      config,
+      authority: authority.publicKey,
+      program: program.programId,
+      programData: deriveProgramDataAddress(program.programId),
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([authority])
+    .rpc();
+
+  return config;
+}
+
+export async function seedMarket(
+  program: Program<GoldPerpsMarket>,
+  authority: Keypair,
+  marketId: number,
+  spotIndex = PRICE(100),
+  insuranceLamports = 0,
+): Promise<PublicKey> {
+  const config = await ensurePerpsConfig(program, authority);
+  const market = marketPda(program.programId, marketId);
+
+  await refreshMarketOracle(program, authority, marketId, spotIndex);
+
+  if (insuranceLamports > 0) {
+    await program.methods
+      .depositInsurance(marketId, toBn(insuranceLamports))
+      .accountsPartial({
+        market,
+        payer: authority.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([authority])
+      .rpc();
+  }
+
+  return market;
+}
+
+export async function refreshMarketOracle(
+  program: Program<GoldPerpsMarket>,
+  authority: Keypair,
+  marketId: number,
+  spotIndex = PRICE(100),
+): Promise<void> {
+  await program.methods
+    .updateMarketOracle(
+      marketId,
+      toBn(spotIndex),
+      toBn(spotIndex),
+      toBn(Math.max(1, Math.floor(spotIndex / 10))),
+    )
+    .accountsPartial({
+      config: configPda(program.programId),
+      market: marketPda(program.programId, marketId),
+      authority: authority.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([authority])
+    .rpc();
+}

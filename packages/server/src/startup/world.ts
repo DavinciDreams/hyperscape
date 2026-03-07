@@ -97,6 +97,13 @@ export async function initializeWorld(
 
       const solanaConfig = getSolanaArenaConfig();
       const solanaOperator = new SolanaArenaOperator(solanaConfig);
+      const readiness = await solanaOperator.validateRoundInitialization();
+      if (!readiness.ready) {
+        console.warn(
+          "[World] SolanaArenaOperator write path disabled:",
+          readiness.reason,
+        );
+      }
 
       (
         world as unknown as { solanaArenaOperator: typeof solanaOperator }

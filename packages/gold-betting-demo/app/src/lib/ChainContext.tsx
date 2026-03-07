@@ -48,6 +48,10 @@ const ChainCtx = createContext<ChainContextValue>({
 function getDefaultChain(): ChainId {
   const available = getAvailableChains();
 
+  if (import.meta.env.MODE === "e2e" && available.includes("solana")) {
+    return "solana";
+  }
+
   // Prefer explicit user choice when available.
   try {
     const selected = localStorage.getItem(SELECTED_CHAIN_STORAGE_KEY);

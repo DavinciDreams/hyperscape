@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract GoldClob is ReentrancyGuard {
+    uint8 private constant BUY_SIDE = 1;
+    uint8 private constant SELL_SIDE = 2;
+
     address public immutable treasury;
     address public immutable marketMaker;
     address public immutable admin;
@@ -19,8 +23,16 @@ contract GoldClob is ReentrancyGuard {
         _;
     }
 
-    enum MatchStatus { NULL, OPEN, RESOLVED }
-    enum Side { NONE, YES, NO }
+    enum MatchStatus {
+        NULL,
+        OPEN,
+        RESOLVED
+    }
+    enum Side {
+        NONE,
+        YES,
+        NO
+    }
 
     struct MatchMeta {
         MatchStatus status;
@@ -57,22 +69,24 @@ contract GoldClob is ReentrancyGuard {
     // matchId => user => position
     mapping(uint256 => mapping(address => Position)) public positions;
 
-    // matchId => price => queue of order IDs
-    mapping(uint256 => mapping(uint16 => Queue)) public orderQueues;
+    // matchId => side => price => queue of order IDs
+    mapping(uint256 => mapping(uint8 => mapping(uint16 => Queue))) private priceQueues;
 
     // matchId => best price boundary
     mapping(uint256 => uint16) public bestBids;
     mapping(uint256 => uint16) public bestAsks;
 
-    event OrderPlaced(uint256 indexed matchId, uint64 indexed orderId, address indexed maker, bool isBuy, uint16 price, uint256 amount);
-    event OrderMatched(uint256 indexed matchId, uint64 makerOrderId, uint64 takerOrderId, uint256 matchedAmount, uint16 price);
+    event OrderPlaced(
+        uint256 indexed matchId, uint64 indexed orderId, address indexed maker, bool isBuy, uint16 price, uint256 amount
+    );
+    event OrderMatched(
+        uint256 indexed matchId, uint64 makerOrderId, uint64 takerOrderId, uint256 matchedAmount, uint16 price
+    );
     event OrderCancelled(uint256 indexed matchId, uint64 indexed orderId);
     event MatchCreated(uint256 indexed matchId);
     event MatchResolved(uint256 indexed matchId, Side winner);
     event FeeConfigUpdated(
-        uint256 tradeTreasuryFeeBps,
-        uint256 tradeMarketMakerFeeBps,
-        uint256 winningsMarketMakerFeeBps
+        uint256 tradeTreasuryFeeBps, uint256 tradeMarketMakerFeeBps, uint256 winningsMarketMakerFeeBps
     );
 
     constructor(address _treasury, address _marketMaker) {
@@ -85,62 +99,42 @@ contract GoldClob is ReentrancyGuard {
     }
 
     function _setFeeConfig(
-        uint256 _tradeTreasuryFeeBps,
-        uint256 _tradeMarketMakerFeeBps,
-        uint256 _winningsMarketMakerFeeBps
+        uint256 tradeTreasuryFeeBps_,
+        uint256 tradeMarketMakerFeeBps_,
+        uint256 winningsMarketMakerFeeBps_
     ) internal {
-        require(
-            _tradeTreasuryFeeBps <= MAX_FEE_BPS,
-            "Trade treasury fee too high"
-        );
-        require(
-            _tradeMarketMakerFeeBps <= MAX_FEE_BPS,
-            "Trade MM fee too high"
-        );
-        require(
-            _tradeTreasuryFeeBps + _tradeMarketMakerFeeBps <= MAX_FEE_BPS,
-            "Total trade fee too high"
-        );
-        require(
-            _winningsMarketMakerFeeBps <= MAX_FEE_BPS,
-            "Winnings fee too high"
-        );
+        require(tradeTreasuryFeeBps_ <= MAX_FEE_BPS, "Trade treasury fee too high");
+        require(tradeMarketMakerFeeBps_ <= MAX_FEE_BPS, "Trade MM fee too high");
+        require(tradeTreasuryFeeBps_ + tradeMarketMakerFeeBps_ <= MAX_FEE_BPS, "Total trade fee too high");
+        require(winningsMarketMakerFeeBps_ <= MAX_FEE_BPS, "Winnings fee too high");
 
-        tradeTreasuryFeeBps = _tradeTreasuryFeeBps;
-        tradeMarketMakerFeeBps = _tradeMarketMakerFeeBps;
-        winningsMarketMakerFeeBps = _winningsMarketMakerFeeBps;
+        tradeTreasuryFeeBps = tradeTreasuryFeeBps_;
+        tradeMarketMakerFeeBps = tradeMarketMakerFeeBps_;
+        winningsMarketMakerFeeBps = winningsMarketMakerFeeBps_;
 
-        emit FeeConfigUpdated(
-            _tradeTreasuryFeeBps,
-            _tradeMarketMakerFeeBps,
-            _winningsMarketMakerFeeBps
-        );
+        emit FeeConfigUpdated(tradeTreasuryFeeBps_, tradeMarketMakerFeeBps_, winningsMarketMakerFeeBps_);
     }
 
     function setFeeConfig(
-        uint256 _tradeTreasuryFeeBps,
-        uint256 _tradeMarketMakerFeeBps,
-        uint256 _winningsMarketMakerFeeBps
+        uint256 tradeTreasuryFeeBps_,
+        uint256 tradeMarketMakerFeeBps_,
+        uint256 winningsMarketMakerFeeBps_
     ) external onlyAdmin {
-        _setFeeConfig(
-            _tradeTreasuryFeeBps,
-            _tradeMarketMakerFeeBps,
-            _winningsMarketMakerFeeBps
-        );
+        _setFeeConfig(tradeTreasuryFeeBps_, tradeMarketMakerFeeBps_, winningsMarketMakerFeeBps_);
     }
 
     function feeBps() external view returns (uint256) {
         return tradeTreasuryFeeBps + tradeMarketMakerFeeBps;
     }
 
+    function orderQueues(uint256 matchId, bool isBuy, uint16 price) external view returns (uint64 head, uint64 tail) {
+        Queue storage queue = priceQueues[matchId][_sideKey(isBuy)][price];
+        return (queue.head, queue.tail);
+    }
+
     function createMatch() external onlyAdmin returns (uint256) {
         uint256 matchId = nextMatchId++;
-        matches[matchId] = MatchMeta({
-            status: MatchStatus.OPEN,
-            winner: Side.NONE,
-            yesPool: 0,
-            noPool: 0
-        });
+        matches[matchId] = MatchMeta({status: MatchStatus.OPEN, winner: Side.NONE, yesPool: 0, noPool: 0});
         bestBids[matchId] = 0; // Highest bid
         bestAsks[matchId] = 1000; // Lowest ask
         emit MatchCreated(matchId);
@@ -154,28 +148,16 @@ contract GoldClob is ReentrancyGuard {
         require(amount <= type(uint128).max, "Amount overflow");
 
         uint256 priceComp = isBuy ? price : (1000 - price);
-        require((amount * priceComp) % 1000 == 0, "Amount/Price precision error");
-        uint256 cost = (amount * priceComp) / 1000;
+        uint256 quoteValue = amount * priceComp;
+        require(quoteValue % 1000 == 0, "Amount/Price precision error");
+        uint256 cost = quoteValue / 1000;
         require(cost > 0, "Cost too low");
 
-        uint256 tradeTreasuryFee = (cost * tradeTreasuryFeeBps) / MAX_FEE_BPS;
-        uint256 tradeMarketMakerFee = (cost * tradeMarketMakerFeeBps) / MAX_FEE_BPS;
+        uint256 tradeTreasuryFee = (quoteValue * tradeTreasuryFeeBps) / (1000 * MAX_FEE_BPS);
+        uint256 tradeMarketMakerFee = (quoteValue * tradeMarketMakerFeeBps) / (1000 * MAX_FEE_BPS);
         uint256 totalRequired = cost + tradeTreasuryFee + tradeMarketMakerFee;
         require(msg.value >= totalRequired, "Insufficient native currency sent");
-
-        // Send fees
-        if (tradeTreasuryFee > 0) {
-            _sendNative(treasury, tradeTreasuryFee);
-        }
-        if (tradeMarketMakerFee > 0) {
-            _sendNative(marketMaker, tradeMarketMakerFee);
-        }
-
-        // Refund excess
         uint256 excess = msg.value - totalRequired;
-        if (excess > 0) {
-            _sendNative(msg.sender, excess);
-        }
 
         uint256 remainingAmount = amount;
         uint256 matchesCount = 0;
@@ -185,8 +167,9 @@ contract GoldClob is ReentrancyGuard {
         // Matching engine logic
         if (isBuy) {
             uint16 currentAsk = bestAsks[matchId];
-            while (remainingAmount > 0 && currentAsk <= price && currentAsk < 1000 && matchesCount < MAX_MATCHES_PER_TX) {
-                Queue storage queue = orderQueues[matchId][currentAsk];
+            while (remainingAmount > 0 && currentAsk <= price && currentAsk < 1000 && matchesCount < MAX_MATCHES_PER_TX)
+            {
+                Queue storage queue = priceQueues[matchId][SELL_SIDE][currentAsk];
                 if (queue.head == queue.tail) {
                     currentAsk++;
                     continue;
@@ -194,8 +177,9 @@ contract GoldClob is ReentrancyGuard {
 
                 uint64 orderId = queue.elements[queue.head];
                 Order storage makerOrder = orders[orderId];
+                require(!makerOrder.isBuy, "Queue side corrupted");
                 if (makerOrder.filled >= makerOrder.amount) {
-                    _popQueue(matchId, currentAsk);
+                    _popQueue(matchId, SELL_SIDE, currentAsk);
                     matchesCount++;
                     continue;
                 }
@@ -222,7 +206,7 @@ contract GoldClob is ReentrancyGuard {
                 emit OrderMatched(matchId, orderId, nextOrderId, fillAmount, currentAsk);
 
                 if (makerOrder.filled == makerOrder.amount) {
-                    _popQueue(matchId, currentAsk);
+                    _popQueue(matchId, SELL_SIDE, currentAsk);
                 }
 
                 matchesCount++;
@@ -231,7 +215,7 @@ contract GoldClob is ReentrancyGuard {
         } else {
             uint16 currentBid = bestBids[matchId];
             while (remainingAmount > 0 && currentBid >= price && currentBid > 0 && matchesCount < MAX_MATCHES_PER_TX) {
-                Queue storage queue = orderQueues[matchId][currentBid];
+                Queue storage queue = priceQueues[matchId][BUY_SIDE][currentBid];
                 if (queue.head == queue.tail) {
                     currentBid--;
                     continue;
@@ -239,8 +223,9 @@ contract GoldClob is ReentrancyGuard {
 
                 uint64 orderId = queue.elements[queue.head];
                 Order storage makerOrder = orders[orderId];
+                require(makerOrder.isBuy, "Queue side corrupted");
                 if (makerOrder.filled >= makerOrder.amount) {
-                    _popQueue(matchId, currentBid);
+                    _popQueue(matchId, BUY_SIDE, currentBid);
                     matchesCount++;
                     continue;
                 }
@@ -267,16 +252,12 @@ contract GoldClob is ReentrancyGuard {
                 emit OrderMatched(matchId, orderId, nextOrderId, fillAmount, currentBid);
 
                 if (makerOrder.filled == makerOrder.amount) {
-                    _popQueue(matchId, currentBid);
+                    _popQueue(matchId, BUY_SIDE, currentBid);
                 }
 
                 matchesCount++;
             }
             bestBids[matchId] = currentBid;
-        }
-
-        if (totalImprovement > 0) {
-            _sendNative(msg.sender, totalImprovement);
         }
 
         if (remainingAmount > 0) {
@@ -291,7 +272,7 @@ contract GoldClob is ReentrancyGuard {
                 matchId: matchId
             });
 
-            Queue storage queue = orderQueues[matchId][price];
+            Queue storage queue = priceQueues[matchId][_sideKey(isBuy)][price];
             queue.elements[queue.tail] = newOrderId;
             queue.tail++;
 
@@ -303,15 +284,32 @@ contract GoldClob is ReentrancyGuard {
 
             emit OrderPlaced(matchId, newOrderId, msg.sender, isBuy, price, remainingAmount);
         }
+
+        if (tradeTreasuryFee > 0) {
+            _sendNative(treasury, tradeTreasuryFee);
+        }
+        if (tradeMarketMakerFee > 0) {
+            _sendNative(marketMaker, tradeMarketMakerFee);
+        }
+        if (totalImprovement > 0) {
+            _sendNative(msg.sender, totalImprovement);
+        }
+        if (excess > 0) {
+            _sendNative(msg.sender, excess);
+        }
     }
 
-    function _popQueue(uint256 matchId, uint16 price) internal {
-        Queue storage queue = orderQueues[matchId][price];
+    function _sideKey(bool isBuy) internal pure returns (uint8) {
+        return isBuy ? BUY_SIDE : SELL_SIDE;
+    }
+
+    function _popQueue(uint256 matchId, uint8 sideKey, uint16 price) internal {
+        Queue storage queue = priceQueues[matchId][sideKey][price];
         delete queue.elements[queue.head];
         queue.head++;
     }
 
-    function cancelOrder(uint256 matchId, uint64 orderId, uint16 /*price*/) external nonReentrant {
+    function cancelOrder(uint256 matchId, uint64 orderId, uint16 /*price*/ ) external nonReentrant {
         Order storage orderInfo = orders[orderId];
         require(orderInfo.maker == msg.sender, "Not maker");
         require(orderInfo.matchId == matchId, "Wrong match");
@@ -363,16 +361,16 @@ contract GoldClob is ReentrancyGuard {
     }
 
     // OOG DoS Fix: Allow sweeping of dead/cancelled orders from the queue manually
-    function clearGarbage(uint256 matchId, uint16 price, uint256 maxOrders) external nonReentrant {
+    function clearGarbage(uint256 matchId, bool isBuy, uint16 price, uint256 maxOrders) external nonReentrant {
         require(matches[matchId].status == MatchStatus.OPEN, "Match not open");
-        Queue storage queue = orderQueues[matchId][price];
+        Queue storage queue = priceQueues[matchId][_sideKey(isBuy)][price];
         uint256 cleared = 0;
 
         while (queue.head < queue.tail && cleared < maxOrders) {
             uint64 orderId = queue.elements[queue.head];
             Order storage makerOrder = orders[orderId];
             if (makerOrder.filled >= makerOrder.amount) {
-                _popQueue(matchId, price);
+                _popQueue(matchId, _sideKey(isBuy), price);
                 cleared++;
             } else {
                 break;
@@ -381,8 +379,7 @@ contract GoldClob is ReentrancyGuard {
     }
 
     function _sendNative(address to, uint256 amount) internal {
-        (bool success, ) = payable(to).call{value: amount}("");
-        require(success, "Native transfer failed");
+        Address.sendValue(payable(to), amount);
     }
 
     // Allow contract to receive native currency

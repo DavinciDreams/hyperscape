@@ -18,6 +18,7 @@ const values = parseArgs({
     "server-url": { type: "string", default: "http://localhost:5555" },
     "client-url": { type: "string", default: "http://localhost:3333" },
     "betting-url": { type: "string", default: "http://localhost:4179" },
+    "hls-url": { type: "string", default: "" },
     "skip-betting": { type: "boolean" },
     "timeout-ms": { type: "string", default: "240000" },
     "fight-timeout-ms": { type: "string", default: "120000" },
@@ -41,6 +42,7 @@ Options:
   --server-url <url>         Game server URL (default: http://localhost:5555)
   --client-url <url>         Game client URL (default: http://localhost:3333)
   --betting-url <url>        Betting app URL (default: http://localhost:4179)
+  --hls-url <url>            Optional HLS playlist URL to verify
   --skip-betting             Skip betting app HTTP readiness check
   --timeout-ms <ms>          General timeout (default: 240000)
   --fight-timeout-ms <ms>    Combat proof timeout (default: 120000)
@@ -57,6 +59,7 @@ Options:
 const serverUrl = values["server-url"].replace(/\/$/, "");
 const clientUrl = values["client-url"].replace(/\/$/, "");
 const bettingUrl = values["betting-url"].replace(/\/$/, "");
+const hlsUrl = String(values["hls-url"] || "").trim();
 const skipBetting = values["skip-betting"] === true;
 const timeoutMs = Number.parseInt(values["timeout-ms"], 10) || 240_000;
 const fightTimeoutMs =
@@ -100,6 +103,25 @@ async function fetchJson(url, ms = 4000) {
   return response.json();
 }
 
+async function fetchJsonWithRetry(
+  label,
+  url,
+  {
+    fetchTimeoutMs = 10_000,
+    waitTimeoutMs = 20_000,
+    validate = () => true,
+  } = {},
+) {
+  return waitFor(
+    label,
+    async () => {
+      const payload = await fetchJson(url, fetchTimeoutMs);
+      return validate(payload) ? payload : null;
+    },
+    waitTimeoutMs,
+  );
+}
+
 async function waitFor(label, check, checkTimeoutMs) {
   const deadline = Date.now() + checkTimeoutMs;
   let lastError = null;
@@ -136,6 +158,19 @@ async function assertHttpOk(label, url, checkTimeoutMs) {
     async () => {
       const response = await fetchWithTimeout(url);
       return response.ok ? response.status : null;
+    },
+    checkTimeoutMs,
+  );
+}
+
+async function assertHlsReady(label, url, checkTimeoutMs) {
+  await waitFor(
+    label,
+    async () => {
+      const response = await fetchWithTimeout(url);
+      if (!response.ok) return null;
+      const body = await response.text();
+      return body.includes("#EXTM3U") ? body : null;
     },
     checkTimeoutMs,
   );
@@ -320,25 +355,50 @@ async function verify() {
     };
   }
 
-  const inventoryA = await fetchJson(
-    `${serverUrl}/api/streaming/agent/${agent1Id}/inventory`,
-  );
-  const inventoryB = await fetchJson(
-    `${serverUrl}/api/streaming/agent/${agent2Id}/inventory`,
-  );
-  const thoughtsA = await fetchJson(
-    `${serverUrl}/api/streaming/agent/${agent1Id}/monologues?limit=5`,
-  );
-  const thoughtsB = await fetchJson(
-    `${serverUrl}/api/streaming/agent/${agent2Id}/monologues?limit=5`,
-  );
+  if (hlsUrl) {
+    await assertHlsReady("HLS playlist", hlsUrl, rtmpTimeoutMs);
+  }
 
-  if (!Array.isArray(inventoryA?.inventory) || !Array.isArray(inventoryB?.inventory)) {
-    throw new Error("Inventory endpoint did not return inventory arrays");
-  }
-  if (!Array.isArray(thoughtsA?.thoughts) || !Array.isArray(thoughtsB?.thoughts)) {
-    throw new Error("Monologue endpoint did not return thoughts arrays");
-  }
+  const telemetryTimeoutMs = Math.min(30_000, Math.max(10_000, pollMs * 6));
+  const [
+    inventoryA,
+    inventoryB,
+    thoughtsA,
+    thoughtsB,
+  ] = await Promise.all([
+    fetchJsonWithRetry(
+      `inventory telemetry for ${agent1Id}`,
+      `${serverUrl}/api/streaming/agent/${agent1Id}/inventory`,
+      {
+        waitTimeoutMs: telemetryTimeoutMs,
+        validate: (payload) => Array.isArray(payload?.inventory),
+      },
+    ),
+    fetchJsonWithRetry(
+      `inventory telemetry for ${agent2Id}`,
+      `${serverUrl}/api/streaming/agent/${agent2Id}/inventory`,
+      {
+        waitTimeoutMs: telemetryTimeoutMs,
+        validate: (payload) => Array.isArray(payload?.inventory),
+      },
+    ),
+    fetchJsonWithRetry(
+      `monologue telemetry for ${agent1Id}`,
+      `${serverUrl}/api/streaming/agent/${agent1Id}/monologues?limit=5`,
+      {
+        waitTimeoutMs: telemetryTimeoutMs,
+        validate: (payload) => Array.isArray(payload?.thoughts),
+      },
+    ),
+    fetchJsonWithRetry(
+      `monologue telemetry for ${agent2Id}`,
+      `${serverUrl}/api/streaming/agent/${agent2Id}/monologues?limit=5`,
+      {
+        waitTimeoutMs: telemetryTimeoutMs,
+        validate: (payload) => Array.isArray(payload?.thoughts),
+      },
+    ),
+  ]);
 
   log("verification passed");
   console.log(
@@ -348,6 +408,7 @@ async function verify() {
         serverUrl,
         clientUrl,
         bettingUrl,
+        hlsUrl,
         skipBetting,
         agent1Id,
         agent2Id,

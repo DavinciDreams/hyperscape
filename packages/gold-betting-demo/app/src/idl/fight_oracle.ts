@@ -119,6 +119,13 @@ export type FightOracle = {
           };
         },
         {
+          name: "program";
+          address: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD";
+        },
+        {
+          name: "programData";
+        },
+        {
           name: "systemProgram";
           address: "11111111111111111111111111111111";
         },
@@ -229,21 +236,26 @@ export type FightOracle = {
     },
     {
       code: 6001;
+      name: "unauthorizedInitializer";
+      msg: "Only the configured bootstrap authority can initialize this program";
+    },
+    {
+      code: 6002;
       name: "invalidBetWindow";
       msg: "The betting window must be positive";
     },
     {
-      code: 6002;
+      code: 6003;
       name: "mathOverflow";
       msg: "Math overflow";
     },
     {
-      code: 6003;
+      code: 6004;
       name: "betWindowStillOpen";
       msg: "The betting window is still open";
     },
     {
-      code: 6004;
+      code: 6005;
       name: "matchAlreadyResolved";
       msg: "Match has already been resolved";
     },

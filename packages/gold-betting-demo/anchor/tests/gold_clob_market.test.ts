@@ -1,94 +1,120 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { GoldClobMarket } from "../target/types/gold_clob_market";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, createAccount, createMint } from "@solana/spl-token";
+import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import * as assert from "assert";
+import { configureAnchorTests } from "./test-anchor";
 
-describe("gold_clob_market", () => {
-  anchor.setProvider(anchor.AnchorProvider.env());
+import { FightOracle } from "../target/types/fight_oracle";
+import { GoldClobMarket } from "../target/types/gold_clob_market";
+
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
+
+function deriveProgramDataAddress(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [programId.toBuffer()],
+    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+  )[0];
+}
+
+function deriveOracleConfigPda(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("oracle_config")],
+    programId,
+  )[0];
+}
+
+function deriveOracleMatchPda(
+  programId: PublicKey,
+  matchId: anchor.BN,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("match"), matchId.toArrayLike(Buffer, "le", 8)],
+    programId,
+  )[0];
+}
+
+describe("gold_clob_market (native SOL settlement)", () => {
+  anchor.setProvider(configureAnchorTests());
   const provider = anchor.getProvider() as anchor.AnchorProvider;
   const payer = (
     provider.wallet as anchor.Wallet & { payer: anchor.web3.Keypair }
   ).payer;
 
-  const program = anchor.workspace.GoldClobMarket as Program<GoldClobMarket>;
+  const fightProgram = anchor.workspace.FightOracle as Program<FightOracle>;
+  const clobProgram = anchor.workspace
+    .GoldClobMarket as Program<GoldClobMarket>;
 
-  it("initializes config and match state", async () => {
+  it("initializes config and match state bound to an oracle match", async () => {
     const [configPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("config")],
-      program.programId,
+      clobProgram.programId,
     );
 
     const existingConfig =
-      await program.account.marketConfig.fetchNullable(configPda);
+      await clobProgram.account.marketConfig.fetchNullable(configPda);
     if (!existingConfig) {
-      const mint = await createMint(
-        provider.connection,
-        payer,
-        payer.publicKey,
-        null,
-        6,
-        undefined,
-        undefined,
-        TOKEN_PROGRAM_ID,
-      );
-      const treasuryOwner = anchor.web3.Keypair.generate();
-      const marketMakerOwner = anchor.web3.Keypair.generate();
-      const treasuryTokenAccount = await createAccount(
-        provider.connection,
-        payer,
-        mint,
-        treasuryOwner.publicKey,
-        undefined,
-        undefined,
-        TOKEN_PROGRAM_ID,
-      );
-      const marketMakerTokenAccount = await createAccount(
-        provider.connection,
-        payer,
-        mint,
-        marketMakerOwner.publicKey,
-        undefined,
-        undefined,
-        TOKEN_PROGRAM_ID,
-      );
-      await program.methods
-        .initializeConfig(
-          treasuryTokenAccount,
-          marketMakerTokenAccount,
-          100,
-          100,
-          200,
-        )
-        .accounts({
+      await clobProgram.methods
+        .initializeConfig(payer.publicKey, payer.publicKey, 100, 100, 200)
+        .accountsPartial({
           authority: provider.wallet.publicKey,
           config: configPda,
+          program: clobProgram.programId,
+          programData: deriveProgramDataAddress(clobProgram.programId),
           systemProgram: SystemProgram.programId,
         })
         .rpc();
     }
 
+    const oracleConfig = deriveOracleConfigPda(fightProgram.programId);
+    await fightProgram.methods
+      .initializeOracle()
+      .accountsPartial({
+        authority: payer.publicKey,
+        oracleConfig,
+        program: fightProgram.programId,
+        programData: deriveProgramDataAddress(fightProgram.programId),
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    const matchId = new anchor.BN(Date.now());
+    const oracleMatch = deriveOracleMatchPda(fightProgram.programId, matchId);
+    await fightProgram.methods
+      .createMatch(matchId, new anchor.BN(3600), "clob-init")
+      .accountsPartial({
+        authority: payer.publicKey,
+        oracleConfig,
+        matchResult: oracleMatch,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
     const matchState = anchor.web3.Keypair.generate();
-    const [derivedVaultAuthority] = PublicKey.findProgramAddressSync(
-      [Buffer.from("vault_auth"), matchState.publicKey.toBuffer()],
-      program.programId,
+    const [vault] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), matchState.publicKey.toBuffer()],
+      clobProgram.programId,
     );
 
-    await program.methods
+    await clobProgram.methods
       .initializeMatch(500)
-      .accounts({
+      .accountsPartial({
         matchState: matchState.publicKey,
         user: provider.wallet.publicKey,
         config: configPda,
-        vaultAuthority: derivedVaultAuthority,
+        oracleMatch,
+        vault,
         systemProgram: SystemProgram.programId,
       })
       .signers([matchState])
       .rpc();
 
-    const state = await program.account.matchState.fetch(matchState.publicKey);
+    const state = await clobProgram.account.matchState.fetch(
+      matchState.publicKey,
+    );
     assert.ok(state.isOpen);
     assert.strictEqual(state.nextOrderId.toNumber(), 1);
+    assert.ok((state.oracleMatch as PublicKey).equals(oracleMatch));
   });
 });

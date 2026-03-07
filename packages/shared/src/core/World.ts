@@ -2252,6 +2252,21 @@ export class World extends EventEmitter {
   }
 
   /**
+   * Return the number of listeners registered for an event.
+   *
+   * String events are backed by the typed EventBus and tracked in
+   * `__busListenerMap`, so relying on the base EventEmitter count returns false
+   * negatives for world events.
+   */
+  override listenerCount(event: string | symbol): number {
+    if (typeof event === "string") {
+      const busListeners = this.__busListenerMap.get(event)?.size ?? 0;
+      return busListeners + super.listenerCount(event);
+    }
+    return super.listenerCount(event);
+  }
+
+  /**
    * Emit an event
    *
    * String events are emitted through EventBus for type safety.

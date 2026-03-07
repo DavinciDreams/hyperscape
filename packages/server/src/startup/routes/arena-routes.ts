@@ -328,7 +328,7 @@ export function registerArenaRoutes(
     Body: {
       bettorWallet: string;
       chain: "SOLANA" | "BSC" | "BASE";
-      sourceAsset: "GOLD" | "SOL" | "USDC";
+      sourceAsset: "GOLD" | "SOL" | "USDC" | "BNB" | "ETH" | "AVAX";
       sourceAmount: string;
       goldAmount: string;
       feeBps?: number;
@@ -365,11 +365,14 @@ export function registerArenaRoutes(
         !txSignature ||
         (sourceAsset !== "GOLD" &&
           sourceAsset !== "SOL" &&
-          sourceAsset !== "USDC")
+          sourceAsset !== "USDC" &&
+          sourceAsset !== "BNB" &&
+          sourceAsset !== "ETH" &&
+          sourceAsset !== "AVAX")
       ) {
         return reply.code(400).send({
           error:
-            "Missing required fields: bettorWallet, chain, sourceAsset (GOLD|SOL|USDC), sourceAmount, goldAmount, txSignature",
+            "Missing required fields: bettorWallet, chain, sourceAsset (GOLD|SOL|USDC|BNB|ETH|AVAX), sourceAmount, goldAmount, txSignature",
         });
       }
 

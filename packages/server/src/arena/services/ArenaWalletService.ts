@@ -664,20 +664,17 @@ export class ArenaWalletService {
     }
 
     let awardedPoints = ArenaWalletService.WALLET_LINK_BONUS_POINTS;
-    if (db.query?.arenaPoints?.findFirst) {
-      try {
-        const existingBonus = await db.query.arenaPoints.findFirst({
-          where: and(
-            eq(schema.arenaPoints.wallet, wallet),
-            sql`${schema.arenaPoints.betId} LIKE 'wallet-link:%'`,
-          ),
-        });
-        if (existingBonus) {
-          awardedPoints = 0;
-        }
-      } catch (error: unknown) {
-        this.ctx.logTableMissingError(error);
+    try {
+      const mergedIdentityWallets = await this.listIdentityWallets(wallet);
+      if (
+        await this.hasWalletLinkBonusInIdentity([
+          ...new Set<string>([wallet, linkedWallet, ...mergedIdentityWallets]),
+        ])
+      ) {
+        awardedPoints = 0;
       }
+    } catch (error: unknown) {
+      this.ctx.logTableMissingError(error);
     }
 
     if (awardedPoints > 0) {

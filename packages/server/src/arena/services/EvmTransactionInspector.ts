@@ -117,19 +117,18 @@ export class EvmTransactionInspector {
         return null;
       }
 
-      // The share amount from the decoded args
+      // The order amount from the decoded args is the cross-chain wager size.
       const shareAmount = BigInt(decoded.args[3] as number | bigint | string);
       if (shareAmount <= 0n) return null;
 
-      // Use msg.value (tx.value) as the verified native currency amount.
-      // This is the actual BNB/ETH the user sent, which includes cost + fees.
+      // tx.value must still be positive so we know this was a paid market order.
       const nativeValue = tx.value;
       if (nativeValue <= 0n) return null;
 
       return {
         fromWallet: receipt.from,
-        amountBaseUnits: nativeValue,
-        amountGold: formatBaseUnitsToDecimal(nativeValue, NATIVE_DECIMALS),
+        amountBaseUnits: shareAmount,
+        amountGold: formatBaseUnitsToDecimal(shareAmount, NATIVE_DECIMALS),
       };
     } catch (error) {
       console.warn(

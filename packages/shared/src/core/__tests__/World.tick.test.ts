@@ -21,6 +21,27 @@ function createTestWorld(): World {
 }
 
 describe("World.tick - Dual Delta Architecture", () => {
+  describe("event listener counting", () => {
+    it("counts string-event listeners registered through the typed EventBus bridge", () => {
+      const world = createTestWorld();
+      const handler = () => {};
+
+      world.on("duel:stakes:settle", handler);
+
+      expect(world.listenerCount("duel:stakes:settle")).toBe(1);
+    });
+
+    it("decrements string-event listener counts after removal", () => {
+      const world = createTestWorld();
+      const handler = () => {};
+
+      world.on("duel:stakes:settle", handler);
+      world.off("duel:stakes:settle", handler);
+
+      expect(world.listenerCount("duel:stakes:settle")).toBe(0);
+    });
+  });
+
   // ===== DELTA TIME CONFIGURATION =====
   describe("delta time configuration", () => {
     it("should have default maxPhysicsDeltaTime of 33ms (1/30)", () => {

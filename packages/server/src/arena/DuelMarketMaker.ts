@@ -22,6 +22,10 @@ import { Logger } from "../systems/ServerNetwork/services/Logger.js";
 interface SolanaArenaOperatorInterface {
   isEnabled(): boolean;
   getCustodyWallet?(): string | null;
+  validateLiquiditySource?(): Promise<{
+    ready: boolean;
+    reason?: string;
+  }>;
   initRound(
     roundSeedHex: string,
     bettingClosesAtMs: number,
@@ -432,6 +436,16 @@ export class DuelMarketMaker {
           `Cannot seed liquidity: keeper wallet unavailable`,
         );
         return;
+      }
+      if (this.solanaOperator.validateLiquiditySource) {
+        const readiness = await this.solanaOperator.validateLiquiditySource();
+        if (!readiness.ready) {
+          Logger.warn(
+            "DuelMarketMaker",
+            readiness.reason ?? "Auto-seed liquidity is not configured",
+          );
+          return;
+        }
       }
 
       const amountGoldBaseUnits = this.toGoldBaseUnits(this.seedAmountGold);

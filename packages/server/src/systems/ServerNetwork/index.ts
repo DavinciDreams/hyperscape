@@ -864,7 +864,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Duel system - server-authoritative player-to-player dueling (OSRS-style)
     // Manages duel sessions, rules negotiation, stakes, and combat enforcement
     this.duelSystem = new DuelSystem(this.world);
-    this.duelSystem.init();
 
     // Store duel system on world so handlers can access it
     (this.world as { duelSystem?: DuelSystem }).duelSystem = this.duelSystem;
@@ -878,8 +877,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.duelSystem,
     );
 
-    // Register all duel world-event listeners (countdown, fight, stakes, etc.)
-    // Store cleanup function for proper teardown in destroy()
+    // Register duel world-event listeners before DuelSystem.init() so the duel
+    // stake-settlement safety check sees the listener graph in its ready state.
     this.cleanupDuelEventListeners = registerDuelEventListeners({
       world: this.world,
       broadcastManager: this.broadcastManager,
@@ -897,6 +896,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           duelId,
         ),
     });
+
+    this.duelSystem.init();
 
     // DuelScheduler - automated agent-vs-agent duel pairing for continuous PvP
     // This system pairs available AI agents and schedules continuous duels

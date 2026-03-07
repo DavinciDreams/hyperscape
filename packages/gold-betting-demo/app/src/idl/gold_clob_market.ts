@@ -181,6 +181,13 @@ export type GoldClobMarket = {
           };
         },
         {
+          name: "program";
+          address: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi";
+        },
+        {
+          name: "programData";
+        },
+        {
           name: "systemProgram";
           address: "11111111111111111111111111111111";
         },
@@ -232,6 +239,9 @@ export type GoldClobMarket = {
               },
             ];
           };
+        },
+        {
+          name: "oracleMatch";
         },
         {
           name: "vault";
@@ -415,20 +425,10 @@ export type GoldClobMarket = {
           writable: true;
         },
         {
-          name: "authority";
-          signer: true;
+          name: "oracleMatch";
         },
       ];
-      args: [
-        {
-          name: "winner";
-          type: {
-            defined: {
-              name: "marketSide";
-            };
-          };
-        },
-      ];
+      args: [];
     },
     {
       name: "updateConfig";
@@ -479,6 +479,10 @@ export type GoldClobMarket = {
     {
       name: "marketConfig";
       discriminator: [119, 255, 200, 88, 252, 82, 128, 24];
+    },
+    {
+      name: "matchResult";
+      discriminator: [234, 166, 33, 250, 153, 92, 223, 196];
     },
     {
       name: "matchState";
@@ -565,28 +569,48 @@ export type GoldClobMarket = {
     },
     {
       code: 6013;
+      name: "unauthorizedInitializer";
+      msg: "Only the configured bootstrap authority can initialize config";
+    },
+    {
+      code: 6014;
       name: "mathOverflow";
       msg: "Math overflow";
     },
     {
-      code: 6014;
+      code: 6015;
       name: "precisionError";
       msg: "Math precision error";
     },
     {
-      code: 6015;
+      code: 6016;
       name: "invalidRemainingAccount";
       msg: "Invalid remaining account provided";
     },
     {
-      code: 6016;
+      code: 6017;
       name: "invalidWinner";
       msg: "Winner must be YES (1) or NO (2)";
     },
     {
-      code: 6017;
+      code: 6018;
       name: "invalidOrderId";
       msg: "Provided order ID does not match next_order_id";
+    },
+    {
+      code: 6019;
+      name: "oracleMatchNotOpen";
+      msg: "Linked oracle match is not open";
+    },
+    {
+      code: 6020;
+      name: "oracleMatchNotResolved";
+      msg: "Linked oracle match is not resolved";
+    },
+    {
+      code: 6021;
+      name: "oracleWinnerUnavailable";
+      msg: "Linked oracle match does not have a winner";
     },
   ];
   types: [
@@ -623,18 +647,69 @@ export type GoldClobMarket = {
       };
     },
     {
-      name: "marketSide";
+      name: "matchResult";
       type: {
-        kind: "enum";
-        variants: [
+        kind: "struct";
+        fields: [
           {
-            name: "none";
+            name: "matchId";
+            type: "u64";
           },
           {
-            name: "yes";
+            name: "oracleConfig";
+            type: "pubkey";
           },
           {
-            name: "no";
+            name: "openTs";
+            type: "i64";
+          },
+          {
+            name: "betCloseTs";
+            type: "i64";
+          },
+          {
+            name: "status";
+            type: {
+              defined: {
+                name: "matchStatus";
+              };
+            };
+          },
+          {
+            name: "winner";
+            type: {
+              option: {
+                defined: {
+                  name: "fight_oracle::MarketSide";
+                };
+              };
+            };
+          },
+          {
+            name: "seed";
+            type: {
+              option: "u64";
+            };
+          },
+          {
+            name: "replayHash";
+            type: {
+              array: ["u8", 32];
+            };
+          },
+          {
+            name: "resolvedTs";
+            type: {
+              option: "i64";
+            };
+          },
+          {
+            name: "metadataUri";
+            type: "string";
+          },
+          {
+            name: "bump";
+            type: "u8";
           },
         ];
       };
@@ -652,7 +727,7 @@ export type GoldClobMarket = {
             name: "winner";
             type: {
               defined: {
-                name: "marketSide";
+                name: "gold_clob_market::MarketSide";
               };
             };
           },
@@ -667,6 +742,24 @@ export type GoldClobMarket = {
           {
             name: "authority";
             type: "pubkey";
+          },
+          {
+            name: "oracleMatch";
+            type: "pubkey";
+          },
+        ];
+      };
+    },
+    {
+      name: "matchStatus";
+      type: {
+        kind: "enum";
+        variants: [
+          {
+            name: "open";
+          },
+          {
+            name: "resolved";
           },
         ];
       };
@@ -739,6 +832,37 @@ export type GoldClobMarket = {
           {
             name: "noShares";
             type: "u64";
+          },
+        ];
+      };
+    },
+    {
+      name: "fight_oracle::MarketSide";
+      type: {
+        kind: "enum";
+        variants: [
+          {
+            name: "yes";
+          },
+          {
+            name: "no";
+          },
+        ];
+      };
+    },
+    {
+      name: "gold_clob_market::MarketSide";
+      type: {
+        kind: "enum";
+        variants: [
+          {
+            name: "none";
+          },
+          {
+            name: "yes";
+          },
+          {
+            name: "no";
           },
         ];
       };

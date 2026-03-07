@@ -72,6 +72,9 @@ const DEFAULT_SEED_GOLD = 1;
 const DEFAULT_BET_GOLD = 1;
 const DEFAULT_BET_SOL = 0.01;
 const DEFAULT_BET_FEE_BPS = 200;
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
 
 function parseCluster(): ClusterName {
   const argClusterIndex = process.argv.findIndex(
@@ -250,6 +253,13 @@ function idlWithAddress(idl: Idl, programId: PublicKey): Idl {
   return { ...(idl as any), address: programId.toBase58() } as Idl;
 }
 
+function deriveProgramDataAddress(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [programId.toBuffer()],
+    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+  )[0];
+}
+
 async function assertProgramDeployed(
   connection: Connection,
   programId: PublicKey,
@@ -376,21 +386,16 @@ async function main(): Promise<void> {
       .accountsPartial({
         authority: authority.publicKey,
         oracleConfig: oracleConfigPda,
+        program: fightProgram.programId,
+        programData: deriveProgramDataAddress(fightProgram.programId),
         systemProgram: SystemProgram.programId,
       })
       .rpc();
   };
 
-  await initializeOracle();
-
-  let oracleConfig: any = null;
-  for (let i = 0; i < 10; i += 1) {
-    oracleConfig = await (
-      fightProgram as any
-    ).account.oracleConfig.fetchNullable(oracleConfigPda);
-    if (oracleConfig) break;
-    await sleep(800);
-  }
+  let oracleConfig = await (
+    fightProgram as any
+  ).account.oracleConfig.fetchNullable(oracleConfigPda);
   if (!oracleConfig) {
     await initializeOracle();
     for (let i = 0; i < 10; i += 1) {

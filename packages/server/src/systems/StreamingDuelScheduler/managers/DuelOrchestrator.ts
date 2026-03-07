@@ -1907,17 +1907,42 @@ export class DuelOrchestrator {
 
     const entity1 = this.world.entities.get(cycle.agent1.characterId);
     const entity2 = this.world.entities.get(cycle.agent2.characterId);
+    const previousHp1 = cycle.agent1.currentHp;
+    const previousHp2 = cycle.agent2.currentHp;
+
+    let nextHp1 = previousHp1;
+    let nextHp2 = previousHp2;
 
     if (entity1) {
       const data = entity1.data as { health?: number; maxHealth?: number };
-      cycle.agent1.currentHp = data.health || 0;
+      nextHp1 = data.health || 0;
+      cycle.agent1.currentHp = nextHp1;
       cycle.agent1.maxHp = data.maxHealth || 10;
     }
 
     if (entity2) {
       const data = entity2.data as { health?: number; maxHealth?: number };
-      cycle.agent2.currentHp = data.health || 0;
+      nextHp2 = data.health || 0;
+      cycle.agent2.currentHp = nextHp2;
       cycle.agent2.maxHp = data.maxHealth || 10;
+    }
+
+    if (cycle.phase !== "FIGHTING") {
+      return;
+    }
+
+    // Fallback for combat paths that mutate HP without emitting
+    // COMBAT_DAMAGE_DEALT. If the damage event already fired, currentHp was
+    // synchronized immediately and these deltas stay at zero.
+    const hpLost1 = Math.max(0, previousHp1 - nextHp1);
+    const hpLost2 = Math.max(0, previousHp2 - nextHp2);
+
+    if (hpLost1 > 0) {
+      cycle.agent2.damageDealtThisFight += hpLost1;
+    }
+
+    if (hpLost2 > 0) {
+      cycle.agent1.damageDealtThisFight += hpLost2;
     }
   }
 

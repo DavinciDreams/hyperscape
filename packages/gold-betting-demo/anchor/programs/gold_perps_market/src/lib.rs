@@ -1,412 +1,904 @@
+#![allow(unexpected_cfgs)]
+#![allow(deprecated)]
+#![allow(clippy::too_many_arguments)]
+
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
+use std::cmp;
+use std::str::FromStr;
 
 declare_id!("HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik");
 
-/// Native-SOL Perpetuals Market.
+const FUNDING_RATE_PRECISION: i128 = 1_000_000_000;
+const BPS_DENOMINATOR: u64 = 10_000;
+const DEFAULT_BOOTSTRAP_AUTHORITY: &str = "DfEnrzh4cgnHxfuZRxLGX69fnLd9DP41XxGuE4gtyJpn";
+
+fn bootstrap_authority() -> Pubkey {
+    if let Some(value) = option_env!("HYPERSCAPE_BOOTSTRAP_AUTHORITY") {
+        Pubkey::from_str(value).expect("invalid HYPERSCAPE_BOOTSTRAP_AUTHORITY")
+    } else {
+        Pubkey::from_str(DEFAULT_BOOTSTRAP_AUTHORITY).expect("invalid default bootstrap authority")
+    }
+}
+
+/// Native-SOL isolated perpetual markets for model ranking derivatives.
 ///
-/// Collateral is deposited as lamports into the VaultState PDA itself
-/// (no SPL token accounts needed). This mirrors how ETH/BNB are used
-/// on the EVM chains: the native coin is the margin currency.
+/// Each model gets its own MarketState PDA which holds:
+/// - oracle inputs (synthetic spot index, mu, sigma)
+/// - market risk configuration (skew scale, funding velocity)
+/// - isolated liquidity/insurance for that model only
+/// - long/short open interest and funding accumulator
 ///
-/// Decimal convention: all lamport amounts use 9 decimals (1 SOL = 1_000_000_000 lamports).
-/// Prices are also stored with 9 implied decimals (same as Solana's native precision).
+/// Positions are managed with signed size deltas through `modify_position`,
+/// which supports opening, increasing, reducing, flipping, depositing margin,
+/// withdrawing margin, and fully closing the account.
 #[program]
 pub mod gold_perps_market {
     use super::*;
 
-    /// Initialize the global vault.
-    /// skew_scale and funding_velocity control the market's price impact curve.
-    pub fn initialize_vault(
-        ctx: Context<InitializeVault>,
-        skew_scale: u64,
-        funding_velocity: u64,
+    pub fn initialize_config(
+        ctx: Context<InitializeConfig>,
+        keeper_authority: Pubkey,
+        default_skew_scale: u64,
+        default_funding_velocity: u64,
+        max_oracle_staleness_seconds: i64,
+        max_leverage: u64,
+        min_margin_lamports: u64,
+        maintenance_margin_bps: u16,
+        liquidation_fee_bps: u16,
     ) -> Result<()> {
-        let vault = &mut ctx.accounts.vault;
-        vault.authority = ctx.accounts.authority.key();
-        vault.insurance_fund = 0;
-        vault.skew_scale = skew_scale;
-        vault.funding_velocity = funding_velocity;
+        validate_config_inputs(
+            default_skew_scale,
+            max_oracle_staleness_seconds,
+            max_leverage,
+            min_margin_lamports,
+            maintenance_margin_bps,
+            liquidation_fee_bps,
+        )?;
+
+        let config = &mut ctx.accounts.config;
+        config.authority = ctx.accounts.authority.key();
+        config.keeper_authority = keeper_authority;
+        config.default_skew_scale = default_skew_scale;
+        config.default_funding_velocity = default_funding_velocity;
+        config.max_oracle_staleness_seconds = max_oracle_staleness_seconds;
+        config.max_leverage = max_leverage;
+        config.min_margin_lamports = min_margin_lamports;
+        config.maintenance_margin_bps = maintenance_margin_bps;
+        config.liquidation_fee_bps = liquidation_fee_bps;
         Ok(())
     }
 
-    /// Push updated TrueSkill ratings from the Dueling system.
-    /// Called by the keeper bot after each duel resolves.
-    pub fn update_oracle(
-        ctx: Context<UpdateOracle>,
-        agent_id: u32,
+    pub fn update_market_oracle(
+        ctx: Context<UpdateMarketOracle>,
+        market_id: u32,
         spot_index: u64,
         mu: u64,
         sigma: u64,
     ) -> Result<()> {
-        let oracle = &mut ctx.accounts.oracle;
+        require_operator(&ctx.accounts.config, ctx.accounts.authority.key())?;
+        require!(spot_index > 0, PerpsError::InvalidSpotIndex);
+
+        let market = &mut ctx.accounts.market;
         let now = Clock::get()?.unix_timestamp;
 
-        if oracle.agent_id == 0 {
-            // First-time init
-            oracle.agent_id = agent_id;
-            oracle.total_long_oi = 0;
-            oracle.total_short_oi = 0;
-            oracle.current_funding_rate = 0;
-        } else {
-            // Drift funding based on skew since last update
-            let vault = &ctx.accounts.vault;
-            let time_delta = now - oracle.last_updated;
-            if time_delta > 0 {
-                let skew = oracle.total_long_oi as i64 - oracle.total_short_oi as i64;
-                oracle.current_funding_rate += (skew
-                    * vault.funding_velocity as i64
-                    * time_delta)
-                    / vault.skew_scale as i64;
-            }
+        if !market.initialized {
+            market.initialized = true;
+            market.market_id = market_id;
+            market.insurance_fund = 0;
+            market.skew_scale = ctx.accounts.config.default_skew_scale;
+            market.funding_velocity = ctx.accounts.config.default_funding_velocity;
+            market.spot_index = spot_index;
+            market.mu = mu;
+            market.sigma = sigma;
+            market.oracle_last_updated = now;
+            market.last_funding_time = now;
+            market.current_funding_rate = 0;
+            market.total_long_oi = 0;
+            market.total_short_oi = 0;
+            return Ok(());
         }
 
-        oracle.spot_index = spot_index;
-        oracle.mu = mu;
-        oracle.sigma = sigma;
-        oracle.last_updated = now;
+        require!(market.market_id == market_id, PerpsError::InvalidMarket);
+        drift_funding(market, now)?;
+
+        market.spot_index = spot_index;
+        market.mu = mu;
+        market.sigma = sigma;
+        market.oracle_last_updated = now;
         Ok(())
     }
 
-    /// Open a leveraged long or short position, depositing native SOL as collateral.
-    ///
-    /// position_type: 0 = Long, 1 = Short
-    /// collateral: lamports to deposit (SOL/lamports, 9 decimals)
-    /// leverage: integer multiplier (e.g., 2 = 2x)
-    pub fn open_position(
-        ctx: Context<OpenPosition>,
-        agent_id: u32,
-        position_type: u8,
-        collateral: u64,
-        leverage: u64,
+    pub fn deposit_insurance(
+        ctx: Context<DepositInsurance>,
+        market_id: u32,
+        amount: u64,
     ) -> Result<()> {
-        let position = &mut ctx.accounts.position;
-        let oracle = &mut ctx.accounts.oracle;
-        let vault = &ctx.accounts.vault;
+        require!(amount > 0, PerpsError::InvalidInsuranceDeposit);
+        require!(ctx.accounts.market.initialized, PerpsError::InvalidMarket);
+        require!(
+            ctx.accounts.market.market_id == market_id,
+            PerpsError::InvalidMarket
+        );
 
-        require!(oracle.agent_id == agent_id, PerpsError::InvalidOracle);
-
-        let now = Clock::get()?.unix_timestamp;
-
-        // Funding drift
-        let time_delta = now - oracle.last_updated;
-        if time_delta > 0 {
-            let skew = oracle.total_long_oi as i64 - oracle.total_short_oi as i64;
-            oracle.current_funding_rate +=
-                (skew * vault.funding_velocity as i64 * time_delta) / vault.skew_scale as i64;
-            oracle.last_updated = now;
-        }
-
-        require!(leverage >= 1 && leverage <= 100, PerpsError::InvalidLeverage);
-        let size = collateral.checked_mul(leverage).ok_or(PerpsError::Overflow)?;
-
-        // Skew-adjusted execution price using vAMM curve (x * y = k)
-        let d = vault.skew_scale as i128;
-        let skew128 = oracle.total_long_oi as i128 - oracle.total_short_oi as i128;
-        let size_signed128: i128 = if position_type == 0 {
-            size as i128
-        } else {
-            -(size as i128)
-        };
-        let index_price128 = oracle.spot_index as i128;
-        
-        // Virtual quote reserves before and after trade
-        let y1 = d + skew128;
-        let y2 = y1 + size_signed128;
-        require!(y1 > 0 && y2 > 0, PerpsError::Overflow); // Protect reserve exhaustion
-
-        // Divide midway to prevent i128 overflow: ( (index * y1)/d * y2 ) / d
-        let part1 = (index_price128 * y1) / d;
-        let exec_price128 = (part1 * y2) / d;
-        let exec_price = exec_price128.min(i64::MAX as i128) as i64;
-
-        position.owner = ctx.accounts.trader.key();
-        position.agent_id = agent_id;
-        position.position_type = position_type;
-        position.collateral = collateral;
-        position.size = size;
-        position.entry_price = exec_price as u64;
-        position.last_funding_time = now;
-
-        if position_type == 0 {
-            oracle.total_long_oi += size;
-        } else {
-            oracle.total_short_oi += size;
-        }
-
-        // Transfer native SOL collateral from trader → vault PDA
         let transfer_ctx = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
-                from: ctx.accounts.trader.to_account_info(),
-                to: ctx.accounts.vault.to_account_info(),
+                from: ctx.accounts.payer.to_account_info(),
+                to: ctx.accounts.market.to_account_info(),
             },
         );
-        system_program::transfer(transfer_ctx, collateral)?;
+        system_program::transfer(transfer_ctx, amount)?;
 
+        let market = &mut ctx.accounts.market;
+        market.insurance_fund = market
+            .insurance_fund
+            .checked_add(amount)
+            .ok_or(PerpsError::Overflow)?;
         Ok(())
     }
 
-    /// Close an existing position, settling PnL back in native SOL.
-    pub fn close_position(ctx: Context<ClosePosition>) -> Result<()> {
-        let position = &ctx.accounts.position;
-        let oracle = &mut ctx.accounts.oracle;
-        let vault = &ctx.accounts.vault;
+    pub fn modify_position(
+        ctx: Context<ModifyPosition>,
+        market_id: u32,
+        margin_delta: i64,
+        size_delta: i64,
+    ) -> Result<()> {
+        require!(
+            margin_delta != 0 || size_delta != 0,
+            PerpsError::NoopPositionUpdate
+        );
+
+        let config = &ctx.accounts.config;
         let now = Clock::get()?.unix_timestamp;
+        let position_exists = ctx.accounts.position.initialized;
 
-        // Funding drift
-        let time_delta = now - oracle.last_updated;
-        if time_delta > 0 {
-            let skew_oi = oracle.total_long_oi as i64 - oracle.total_short_oi as i64;
-            oracle.current_funding_rate +=
-                (skew_oi * vault.funding_velocity as i64 * time_delta) / vault.skew_scale as i64;
-            oracle.last_updated = now;
+        {
+            let market = &mut ctx.accounts.market;
+            require!(market.initialized, PerpsError::InvalidMarket);
+            require!(market.market_id == market_id, PerpsError::InvalidMarket);
+            if size_delta != 0 || margin_delta < 0 {
+                require_fresh_market(market, config, now)?;
+            }
+            drift_funding(market, now)?;
         }
 
-        // Close-side skew execution price using vAMM curve (x * y = k)
-        let d = vault.skew_scale as i128;
-        let skew128 = oracle.total_long_oi as i128 - oracle.total_short_oi as i128;
-        let size_delta128: i128 = if position.position_type == 0 {
-            -(position.size as i128)
+        let trader_key = ctx.accounts.trader.key();
+        let old_owner = ctx.accounts.position.owner;
+        let old_market_id = ctx.accounts.position.market_id;
+        let old_margin = ctx.accounts.position.margin as i128;
+        let old_size = ctx.accounts.position.size as i128;
+        let old_entry_price = ctx.accounts.position.entry_price;
+        let old_last_funding_rate = ctx.accounts.position.last_funding_rate as i128;
+
+        if position_exists {
+            require!(old_owner == trader_key, PerpsError::InvalidPositionOwner);
+            require!(old_market_id == market_id, PerpsError::InvalidMarket);
         } else {
-            position.size as i128
+            require!(size_delta != 0, PerpsError::NoOpenPosition);
+        }
+
+        let deposit_amount = if margin_delta > 0 {
+            margin_delta as u64
+        } else {
+            0
         };
-        let index_price128 = oracle.spot_index as i128;
-        
-        let y1 = d + skew128;
-        let y2 = y1 + size_delta128;
-        require!(y1 > 0 && y2 > 0, PerpsError::Overflow);
+        if deposit_amount > 0 {
+            let transfer_ctx = CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.trader.to_account_info(),
+                    to: ctx.accounts.market.to_account_info(),
+                },
+            );
+            system_program::transfer(transfer_ctx, deposit_amount)?;
+        }
 
-        let part1 = (index_price128 * y1) / d;
-        let exec_price128 = (part1 * y2) / d;
-        let exec_price = exec_price128.min(i64::MAX as i128) as i64;
+        let current_funding_rate = ctx.accounts.market.current_funding_rate;
+        let funding_delta = (current_funding_rate as i128)
+            .checked_sub(old_last_funding_rate)
+            .ok_or(PerpsError::Overflow)?;
+        let funding_pnl = calculate_funding_pnl(old_size, funding_delta)?;
 
-        let entry_price = position.entry_price;
-        let size = position.size;
-
-        let pnl: i64 = if position.position_type == 0 {
-            ((exec_price as i128 - entry_price as i128) * size as i128 / entry_price as i128) as i64
+        let execution_price = if size_delta != 0 {
+            execution_price(&ctx.accounts.market, size_delta as i128)?
         } else {
-            ((entry_price as i128 - exec_price as i128) * size as i128 / entry_price as i128) as i64
+            ctx.accounts.market.spot_index
         };
 
-        if position.position_type == 0 {
-            oracle.total_long_oi -= size;
-        } else {
-            oracle.total_short_oi -= size;
+        let realized_trade_pnl = calculate_realized_trade_pnl(
+            old_size,
+            old_entry_price,
+            execution_price,
+            size_delta as i128,
+        )?;
+
+        let new_size = old_size
+            .checked_add(size_delta as i128)
+            .ok_or(PerpsError::Overflow)?;
+        let next_margin = old_margin
+            .checked_add(funding_pnl)
+            .and_then(|value| value.checked_add(realized_trade_pnl))
+            .and_then(|value| value.checked_add(margin_delta as i128))
+            .ok_or(PerpsError::Overflow)?;
+
+        let next_entry_price = calculate_next_entry_price(
+            old_size,
+            old_entry_price,
+            size_delta as i128,
+            new_size,
+            execution_price,
+        )?;
+
+        {
+            let market = &mut ctx.accounts.market;
+            update_market_open_interest(market, old_size, new_size)?;
         }
 
-        let collateral = position.collateral as i64;
-        let settlement = std::cmp::max(0, collateral + pnl) as u64;
-
-        // Transfer SOL settlement from vault PDA → owner
-        if settlement > 0 {
-            // Guard against draining the vault below rent-exempt minimum
-            let vault_info = ctx.accounts.vault.to_account_info();
-            let vault_lamports = vault_info.lamports();
-            let max_payout = vault_lamports.saturating_sub(Rent::get()?.minimum_balance(VaultState::SIZE));
-            
-            require!(max_payout >= settlement, PerpsError::InsufficientLiquidity);
-
-            **vault_info.try_borrow_mut_lamports()? -= settlement;
-            **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? += settlement;
+        if new_size == 0 {
+            let settlement = cmp::max(0, next_margin);
+            let payout = u64::try_from(settlement).map_err(|_| PerpsError::Overflow)?;
+            transfer_from_market(
+                &mut ctx.accounts.market,
+                &ctx.accounts.trader.to_account_info(),
+                payout,
+                true,
+            )?;
+            ctx.accounts
+                .position
+                .close(ctx.accounts.trader.to_account_info())?;
+            return Ok(());
         }
 
-        // Position rent is reclaimed via `close = owner` constraint
+        require!(next_margin > 0, PerpsError::InvalidMargin);
+        let next_margin_u64 = u64::try_from(next_margin).map_err(|_| PerpsError::Overflow)?;
+        require!(
+            next_margin_u64 >= config.min_margin_lamports,
+            PerpsError::InvalidMargin
+        );
+        require_leverage(next_margin_u64, new_size, config.max_leverage)?;
+
+        if margin_delta < 0 {
+            transfer_from_market(
+                &mut ctx.accounts.market,
+                &ctx.accounts.trader.to_account_info(),
+                margin_delta.unsigned_abs(),
+                false,
+            )?;
+        }
+
+        let position = &mut ctx.accounts.position;
+        position.initialized = true;
+        position.owner = trader_key;
+        position.market_id = market_id;
+        position.margin = next_margin_u64;
+        position.size = i64::try_from(new_size).map_err(|_| PerpsError::Overflow)?;
+        position.entry_price = next_entry_price;
+        position.last_funding_rate = current_funding_rate;
         Ok(())
     }
 
-    /// Liquidate an undercollateralized position.
-    /// Anyone can call this; seized collateral goes to the insurance fund.
-    pub fn liquidate(ctx: Context<Liquidate>) -> Result<()> {
+    pub fn liquidate_position(
+        ctx: Context<LiquidatePosition>,
+        market_id: u32,
+    ) -> Result<()> {
+        let config = &ctx.accounts.config;
+        let market = &mut ctx.accounts.market;
+        require!(market.initialized, PerpsError::InvalidMarket);
+        require!(market.market_id == market_id, PerpsError::InvalidMarket);
+
         let position = &ctx.accounts.position;
-        let oracle = &mut ctx.accounts.oracle;
-        let vault = &ctx.accounts.vault;
+        require!(position.initialized, PerpsError::NoOpenPosition);
+        require!(position.market_id == market_id, PerpsError::InvalidMarket);
+        require!(
+            position.owner == ctx.accounts.owner.key(),
+            PerpsError::InvalidPositionOwner
+        );
 
-        let d = vault.skew_scale as i128;
-        let skew128 = oracle.total_long_oi as i128 - oracle.total_short_oi as i128;
-        let size_delta128: i128 = if position.position_type == 0 {
-            -(position.size as i128)
-        } else {
-            position.size as i128
-        };
-        let index_price128 = oracle.spot_index as i128;
-        
-        let y1 = d + skew128;
-        let y2 = y1 + size_delta128;
-        require!(y1 > 0 && y2 > 0, PerpsError::Overflow);
+        let now = Clock::get()?.unix_timestamp;
+        require_fresh_market(market, config, now)?;
+        drift_funding(market, now)?;
 
-        let part1 = (index_price128 * y1) / d;
-        let exec_price128 = (part1 * y2) / d;
-        let exec_price = exec_price128.min(i64::MAX as i128) as i64;
+        let old_size = position.size as i128;
+        require!(old_size != 0, PerpsError::NoOpenPosition);
 
-        let entry_price = position.entry_price;
-        let size = position.size;
-
-        let pnl: i64 = if position.position_type == 0 {
-            ((exec_price as i128 - entry_price as i128) * size as i128 / entry_price as i128) as i64
-        } else {
-            ((entry_price as i128 - exec_price as i128) * size as i128 / entry_price as i128) as i64
-        };
-
-        if position.position_type == 0 {
-            oracle.total_long_oi -= size;
-        } else {
-            oracle.total_short_oi -= size;
-        }
-
-        let collateral = position.collateral as i64;
-        let equity = collateral + pnl;
-        let maintenance_margin = collateral / 10; // 10% maintenance
-
+        let close_size_delta = -old_size;
+        let exit_price = execution_price(market, close_size_delta)?;
+        let equity = calculate_position_equity(
+            position.margin as i128,
+            old_size,
+            position.entry_price,
+            exit_price,
+            (market.current_funding_rate as i128)
+                .checked_sub(position.last_funding_rate as i128)
+                .ok_or(PerpsError::Overflow)?,
+        )?;
+        let maintenance_margin =
+            calculate_maintenance_margin(old_size, config.maintenance_margin_bps)?;
         require!(equity < maintenance_margin, PerpsError::NotLiquidatable);
 
-        msg!(
-            "Liquidated: equity={}, maintenance_margin={}",
-            equity,
-            maintenance_margin
+        update_market_open_interest(market, old_size, 0)?;
+
+        let positive_equity = cmp::max(0, equity);
+        let positive_equity_u64 =
+            u64::try_from(positive_equity).map_err(|_| PerpsError::Overflow)?;
+        let liquidation_fee = cmp::min(
+            positive_equity_u64,
+            calculate_liquidation_fee(old_size, config.liquidation_fee_bps)?,
         );
+        let owner_remainder = positive_equity_u64
+            .checked_sub(liquidation_fee)
+            .ok_or(PerpsError::Overflow)?;
+
+        transfer_from_market(
+            &mut ctx.accounts.market,
+            &ctx.accounts.liquidator.to_account_info(),
+            liquidation_fee,
+            false,
+        )?;
+        transfer_from_market(
+            &mut ctx.accounts.market,
+            &ctx.accounts.owner.to_account_info(),
+            owner_remainder,
+            false,
+        )?;
         Ok(())
     }
 }
 
-// ─────────────────────────────────────────────── Account Structs ──
+fn validate_config_inputs(
+    default_skew_scale: u64,
+    max_oracle_staleness_seconds: i64,
+    max_leverage: u64,
+    min_margin_lamports: u64,
+    maintenance_margin_bps: u16,
+    liquidation_fee_bps: u16,
+) -> Result<()> {
+    require!(default_skew_scale > 0, PerpsError::InvalidRiskConfig);
+    require!(
+        max_oracle_staleness_seconds > 0,
+        PerpsError::InvalidRiskConfig
+    );
+    require!(
+        max_leverage > 0 && max_leverage <= 20,
+        PerpsError::InvalidRiskConfig
+    );
+    require!(min_margin_lamports > 0, PerpsError::InvalidRiskConfig);
+    require!(
+        maintenance_margin_bps > 0
+            && u64::from(maintenance_margin_bps) < BPS_DENOMINATOR,
+        PerpsError::InvalidRiskConfig
+    );
+    require!(
+        u64::from(liquidation_fee_bps) < BPS_DENOMINATOR,
+        PerpsError::InvalidRiskConfig
+    );
+
+    let initial_margin_bps = BPS_DENOMINATOR
+        .checked_div(max_leverage)
+        .ok_or(PerpsError::InvalidRiskConfig)?;
+    require!(
+        u64::from(maintenance_margin_bps) < initial_margin_bps,
+        PerpsError::InvalidRiskConfig
+    );
+    Ok(())
+}
+
+fn require_operator(config: &ConfigState, signer: Pubkey) -> Result<()> {
+    require!(
+        signer == config.authority || signer == config.keeper_authority,
+        PerpsError::InvalidAuthority
+    );
+    Ok(())
+}
+
+fn require_fresh_market(market: &MarketState, config: &ConfigState, now: i64) -> Result<()> {
+    require!(market.spot_index > 0, PerpsError::InvalidSpotIndex);
+    require!(
+        market.oracle_last_updated > 0,
+        PerpsError::StaleOracle
+    );
+    let age = now.saturating_sub(market.oracle_last_updated);
+    require!(
+        age <= config.max_oracle_staleness_seconds,
+        PerpsError::StaleOracle
+    );
+    Ok(())
+}
+
+fn drift_funding(market: &mut MarketState, now: i64) -> Result<()> {
+    require!(market.skew_scale > 0, PerpsError::InvalidRiskConfig);
+    if market.last_funding_time == 0 {
+        market.last_funding_time = now;
+        return Ok(());
+    }
+    if now <= market.last_funding_time {
+        return Ok(());
+    }
+
+    let elapsed = (now - market.last_funding_time) as i128;
+    let skew = market.total_long_oi as i128 - market.total_short_oi as i128;
+    let drift = skew
+        .checked_mul(market.funding_velocity as i128)
+        .ok_or(PerpsError::Overflow)?
+        .checked_mul(elapsed)
+        .ok_or(PerpsError::Overflow)?
+        .checked_div(market.skew_scale as i128)
+        .ok_or(PerpsError::Overflow)?;
+    let next_rate = (market.current_funding_rate as i128)
+        .checked_add(drift)
+        .ok_or(PerpsError::Overflow)?;
+    market.current_funding_rate = i64::try_from(next_rate).map_err(|_| PerpsError::Overflow)?;
+    market.last_funding_time = now;
+    Ok(())
+}
+
+fn execution_price(market: &MarketState, size_delta: i128) -> Result<u64> {
+    require!(market.spot_index > 0, PerpsError::InvalidSpotIndex);
+    require!(market.skew_scale > 0, PerpsError::InvalidRiskConfig);
+
+    let skew = market.total_long_oi as i128 - market.total_short_oi as i128;
+    let d = market.skew_scale as i128;
+    let y1 = d.checked_add(skew).ok_or(PerpsError::Overflow)?;
+    let y2 = y1.checked_add(size_delta).ok_or(PerpsError::Overflow)?;
+    require!(y1 > 0 && y2 > 0, PerpsError::InvalidPositionState);
+
+    let part1 = (market.spot_index as i128)
+        .checked_mul(y1)
+        .ok_or(PerpsError::Overflow)?
+        .checked_div(d)
+        .ok_or(PerpsError::Overflow)?;
+    let exec = part1
+        .checked_mul(y2)
+        .ok_or(PerpsError::Overflow)?
+        .checked_div(d)
+        .ok_or(PerpsError::Overflow)?;
+    u64::try_from(exec).map_err(|_| PerpsError::Overflow.into())
+}
+
+fn calculate_funding_pnl(size: i128, funding_delta: i128) -> Result<i128> {
+    size.checked_mul(funding_delta)
+        .ok_or(PerpsError::Overflow)?
+        .checked_div(FUNDING_RATE_PRECISION)
+        .map(|value| -value)
+        .ok_or(PerpsError::Overflow.into())
+}
+
+fn calculate_realized_trade_pnl(
+    old_size: i128,
+    old_entry_price: u64,
+    execution_price: u64,
+    size_delta: i128,
+) -> Result<i128> {
+    if old_size == 0 || size_delta == 0 || same_sign(old_size, size_delta) {
+        return Ok(0);
+    }
+
+    require!(old_entry_price > 0, PerpsError::InvalidPositionState);
+    let close_size = cmp::min(abs_i128(old_size), abs_i128(size_delta));
+    let pnl = if old_size > 0 {
+        (execution_price as i128 - old_entry_price as i128)
+            .checked_mul(close_size)
+            .ok_or(PerpsError::Overflow)?
+            .checked_div(old_entry_price as i128)
+            .ok_or(PerpsError::Overflow)?
+    } else {
+        (old_entry_price as i128 - execution_price as i128)
+            .checked_mul(close_size)
+            .ok_or(PerpsError::Overflow)?
+            .checked_div(old_entry_price as i128)
+            .ok_or(PerpsError::Overflow)?
+    };
+    Ok(pnl)
+}
+
+fn calculate_next_entry_price(
+    old_size: i128,
+    old_entry_price: u64,
+    size_delta: i128,
+    new_size: i128,
+    execution_price: u64,
+) -> Result<u64> {
+    if new_size == 0 {
+        return Ok(0);
+    }
+    if old_size == 0 {
+        return Ok(execution_price);
+    }
+    if size_delta == 0 {
+        return Ok(old_entry_price);
+    }
+    if !same_sign(old_size, new_size) {
+        return Ok(execution_price);
+    }
+    if !same_sign(old_size, size_delta) {
+        return Ok(old_entry_price);
+    }
+
+    require!(old_entry_price > 0, PerpsError::InvalidPositionState);
+    let old_abs = abs_i128(old_size);
+    let delta_abs = abs_i128(size_delta);
+    let new_abs = abs_i128(new_size);
+    let weighted = (old_entry_price as i128)
+        .checked_mul(old_abs)
+        .and_then(|value| value.checked_add((execution_price as i128) * delta_abs))
+        .ok_or(PerpsError::Overflow)?
+        .checked_div(new_abs)
+        .ok_or(PerpsError::Overflow)?;
+    u64::try_from(weighted).map_err(|_| PerpsError::Overflow.into())
+}
+
+fn calculate_position_equity(
+    margin: i128,
+    size: i128,
+    entry_price: u64,
+    exit_price: u64,
+    funding_delta: i128,
+) -> Result<i128> {
+    let funding_pnl = calculate_funding_pnl(size, funding_delta)?;
+    let trade_pnl = calculate_realized_trade_pnl(size, entry_price, exit_price, -size)?;
+    margin
+        .checked_add(funding_pnl)
+        .and_then(|value| value.checked_add(trade_pnl))
+        .ok_or(PerpsError::Overflow.into())
+}
+
+fn calculate_maintenance_margin(size: i128, maintenance_margin_bps: u16) -> Result<i128> {
+    abs_i128(size)
+        .checked_mul(i128::from(maintenance_margin_bps))
+        .ok_or(PerpsError::Overflow)?
+        .checked_div(BPS_DENOMINATOR as i128)
+        .ok_or(PerpsError::Overflow.into())
+}
+
+fn calculate_liquidation_fee(size: i128, liquidation_fee_bps: u16) -> Result<u64> {
+    let fee = abs_i128(size)
+        .checked_mul(i128::from(liquidation_fee_bps))
+        .ok_or(PerpsError::Overflow)?
+        .checked_div(BPS_DENOMINATOR as i128)
+        .ok_or(PerpsError::Overflow)?;
+    u64::try_from(fee).map_err(|_| PerpsError::Overflow.into())
+}
+
+fn require_leverage(margin: u64, size: i128, max_leverage: u64) -> Result<()> {
+    let margin_i128 = i128::from(margin);
+    let leverage_capacity = margin_i128
+        .checked_mul(max_leverage as i128)
+        .ok_or(PerpsError::Overflow)?;
+    require!(
+        leverage_capacity >= abs_i128(size),
+        PerpsError::InvalidLeverage
+    );
+    Ok(())
+}
+
+fn update_market_open_interest(
+    market: &mut MarketState,
+    old_size: i128,
+    new_size: i128,
+) -> Result<()> {
+    match old_size.cmp(&0) {
+        cmp::Ordering::Greater => {
+            market.total_long_oi = market
+                .total_long_oi
+                .checked_sub(to_u64(abs_i128(old_size))?)
+                .ok_or(PerpsError::Overflow)?;
+        }
+        cmp::Ordering::Less => {
+            market.total_short_oi = market
+                .total_short_oi
+                .checked_sub(to_u64(abs_i128(old_size))?)
+                .ok_or(PerpsError::Overflow)?;
+        }
+        cmp::Ordering::Equal => {}
+    }
+
+    match new_size.cmp(&0) {
+        cmp::Ordering::Greater => {
+            market.total_long_oi = market
+                .total_long_oi
+                .checked_add(to_u64(abs_i128(new_size))?)
+                .ok_or(PerpsError::Overflow)?;
+        }
+        cmp::Ordering::Less => {
+            market.total_short_oi = market
+                .total_short_oi
+                .checked_add(to_u64(abs_i128(new_size))?)
+                .ok_or(PerpsError::Overflow)?;
+        }
+        cmp::Ordering::Equal => {}
+    }
+    Ok(())
+}
+
+fn transfer_from_market<'info>(
+    market: &mut Account<'info, MarketState>,
+    recipient: &AccountInfo<'info>,
+    amount: u64,
+    allow_insurance: bool,
+) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+
+    let market_info = market.to_account_info();
+    let rent_floor = Rent::get()?.minimum_balance(MarketState::SIZE);
+    let available_after_rent = market_info.lamports().saturating_sub(rent_floor);
+
+    let insurance_used = if allow_insurance {
+        calculate_insurance_usage(amount, available_after_rent, market.insurance_fund)?
+    } else {
+        let free_liquidity = available_after_rent.saturating_sub(market.insurance_fund);
+        require!(free_liquidity >= amount, PerpsError::InsufficientLiquidity);
+        0
+    };
+
+    if insurance_used > 0 {
+        market.insurance_fund = market
+            .insurance_fund
+            .checked_sub(insurance_used)
+            .ok_or(PerpsError::Overflow)?;
+    }
+
+    **market_info.try_borrow_mut_lamports()? -= amount;
+    **recipient.try_borrow_mut_lamports()? += amount;
+    Ok(())
+}
+
+fn calculate_insurance_usage(
+    settlement: u64,
+    available_after_rent: u64,
+    insurance_fund: u64,
+) -> Result<u64> {
+    require!(
+        available_after_rent >= settlement,
+        PerpsError::InsufficientLiquidity
+    );
+    let free_liquidity = available_after_rent.saturating_sub(insurance_fund);
+    let insurance_used = settlement.saturating_sub(free_liquidity);
+    require!(
+        insurance_used <= insurance_fund,
+        PerpsError::InsufficientLiquidity
+    );
+    Ok(insurance_used)
+}
+
+fn abs_i128(value: i128) -> i128 {
+    if value < 0 { -value } else { value }
+}
+
+fn same_sign(left: i128, right: i128) -> bool {
+    left.signum() == right.signum()
+}
+
+fn to_u64(value: i128) -> Result<u64> {
+    u64::try_from(value).map_err(|_| PerpsError::Overflow.into())
+}
 
 #[derive(Accounts)]
-pub struct InitializeVault<'info> {
+pub struct InitializeConfig<'info> {
     #[account(
         init,
         payer = authority,
-        // VaultState: discriminator(8) + authority(32) + insurance_fund(8) + skew_scale(8) + funding_velocity(8)
-        space = 8 + 32 + 8 + 8 + 8,
-        seeds = [b"vault"],
+        space = ConfigState::SIZE,
+        seeds = [b"config"],
         bump
     )]
-    pub vault: Account<'info, VaultState>,
+    pub config: Account<'info, ConfigState>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        constraint = program.programdata_address()? == Some(program_data.key()) @ PerpsError::UnauthorizedInitializer
+    )]
+    pub program: Program<'info, crate::program::GoldPerpsMarket>,
+    #[account(
+        constraint = program_data.upgrade_authority_address == Some(authority.key())
+            || ((program_data.upgrade_authority_address.is_none()
+                || program_data.upgrade_authority_address == Some(Pubkey::default()))
+                && authority.key() == bootstrap_authority()) @ PerpsError::UnauthorizedInitializer
+    )]
+    pub program_data: Account<'info, ProgramData>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(market_id: u32)]
+pub struct UpdateMarketOracle<'info> {
+    #[account(seeds = [b"config"], bump)]
+    pub config: Account<'info, ConfigState>,
+    #[account(
+        init_if_needed,
+        payer = authority,
+        space = MarketState::SIZE,
+        seeds = [b"market", market_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub market: Account<'info, MarketState>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-#[instruction(agent_id: u32)]
-pub struct UpdateOracle<'info> {
+#[instruction(market_id: u32)]
+pub struct DepositInsurance<'info> {
     #[account(
-        init_if_needed,
-        payer = authority,
-        // OracleState: discriminator(8) + agent_id(4) + spot_index(8) + mu(8) + sigma(8) + last_updated(8) + total_long_oi(8) + total_short_oi(8) + current_funding_rate(8)
-        space = 8 + 4 + 8 + 8 + 8 + 8 + 8 + 8 + 8,
-        seeds = [b"oracle", agent_id.to_le_bytes().as_ref()],
+        mut,
+        seeds = [b"market", market_id.to_le_bytes().as_ref()],
         bump
     )]
-    pub oracle: Account<'info, OracleState>,
-    /// Vault is needed to read skew_scale / funding_velocity during drift update.
-    pub vault: Account<'info, VaultState>,
-    #[account(mut, address = vault.authority @ PerpsError::InvalidAuthority)]
-    pub authority: Signer<'info>,
+    pub market: Account<'info, MarketState>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-#[instruction(agent_id: u32)]
-pub struct OpenPosition<'info> {
+#[instruction(market_id: u32)]
+pub struct ModifyPosition<'info> {
+    #[account(seeds = [b"config"], bump)]
+    pub config: Account<'info, ConfigState>,
     #[account(
-        init,
+        mut,
+        seeds = [b"market", market_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub market: Account<'info, MarketState>,
+    #[account(
+        init_if_needed,
         payer = trader,
-        // PositionState: discriminator(8) + owner(32) + agent_id(4) + position_type(1) + collateral(8) + size(8) + entry_price(8) + last_funding_time(8)
-        space = 8 + 32 + 4 + 1 + 8 + 8 + 8 + 8,
-        seeds = [b"position", trader.key().as_ref(), agent_id.to_le_bytes().as_ref()],
+        space = PositionState::SIZE,
+        seeds = [b"position", trader.key().as_ref(), market_id.to_le_bytes().as_ref()],
         bump
     )]
     pub position: Account<'info, PositionState>,
     #[account(mut)]
     pub trader: Signer<'info>,
-    /// The vault PDA receives native SOL lamports as collateral.
-    #[account(mut, seeds = [b"vault"], bump)]
-    pub vault: Account<'info, VaultState>,
-    #[account(mut)]
-    pub oracle: Account<'info, OracleState>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct ClosePosition<'info> {
-    #[account(mut, has_one = owner, close = owner)]
+#[instruction(market_id: u32)]
+pub struct LiquidatePosition<'info> {
+    #[account(seeds = [b"config"], bump)]
+    pub config: Account<'info, ConfigState>,
+    #[account(
+        mut,
+        seeds = [b"market", market_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub market: Account<'info, MarketState>,
+    #[account(
+        mut,
+        close = owner,
+        constraint = position.initialized @ PerpsError::NoOpenPosition,
+        constraint = position.market_id == market_id @ PerpsError::InvalidMarket,
+        constraint = position.owner == owner.key() @ PerpsError::InvalidPositionOwner
+    )]
     pub position: Account<'info, PositionState>,
     #[account(mut)]
-    pub owner: Signer<'info>,
-    #[account(mut)]
-    pub oracle: Account<'info, OracleState>,
-    /// Vault pays out SOL settlement.
-    #[account(mut, seeds = [b"vault"], bump)]
-    pub vault: Account<'info, VaultState>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct Liquidate<'info> {
-    #[account(mut, close = liquidator)]
-    pub position: Account<'info, PositionState>,
-    #[account(mut)]
-    pub oracle: Account<'info, OracleState>,
-    pub vault: Account<'info, VaultState>,
-    /// Liquidator receives the rent from the closed position account.
+    pub owner: SystemAccount<'info>,
     #[account(mut)]
     pub liquidator: Signer<'info>,
 }
 
-// ─────────────────────────────────────────────── State Accounts ──
+#[account]
+pub struct ConfigState {
+    pub authority: Pubkey,
+    pub keeper_authority: Pubkey,
+    pub default_skew_scale: u64,
+    pub default_funding_velocity: u64,
+    pub max_oracle_staleness_seconds: i64,
+    pub max_leverage: u64,
+    pub min_margin_lamports: u64,
+    pub maintenance_margin_bps: u16,
+    pub liquidation_fee_bps: u16,
+}
+
+impl ConfigState {
+    pub const SIZE: usize = 8 + 128;
+}
 
 #[account]
-pub struct VaultState {
-    pub authority: Pubkey,
+pub struct MarketState {
+    pub initialized: bool,
+    pub market_id: u32,
     pub insurance_fund: u64,
     pub skew_scale: u64,
     pub funding_velocity: u64,
-}
-
-impl VaultState {
-    /// Byte size of VaultState account data (used for rent calculation).
-    pub const SIZE: usize = 8 + 32 + 8 + 8 + 8; // discriminator + authority + insurance_fund + skew_scale + funding_velocity
-}
-
-#[account]
-pub struct OracleState {
-    pub agent_id: u32,
-    pub spot_index: u64,   // Agent price index (9 decimal lamport scale)
-    pub mu: u64,           // TrueSkill mean (scaled 1e6)
-    pub sigma: u64,        // TrueSkill std dev (scaled 1e6)
-    pub last_updated: i64, // Unix timestamp
+    pub spot_index: u64,
+    pub mu: u64,
+    pub sigma: u64,
+    pub oracle_last_updated: i64,
+    pub last_funding_time: i64,
+    pub current_funding_rate: i64,
     pub total_long_oi: u64,
     pub total_short_oi: u64,
-    pub current_funding_rate: i64,
+}
+
+impl MarketState {
+    pub const SIZE: usize = 8 + 128;
 }
 
 #[account]
 pub struct PositionState {
+    pub initialized: bool,
     pub owner: Pubkey,
-    pub agent_id: u32,
-    pub position_type: u8, // 0 = Long, 1 = Short
-    pub collateral: u64,   // lamports deposited as margin
-    pub size: u64,         // collateral * leverage
-    pub entry_price: u64,  // skew-adjusted execution price at open
-    pub last_funding_time: i64,
+    pub market_id: u32,
+    pub margin: u64,
+    pub size: i64,
+    pub entry_price: u64,
+    pub last_funding_rate: i64,
 }
 
-// ─────────────────────────────────────────────── Error Codes ──
+impl PositionState {
+    pub const SIZE: usize = 8 + 96;
+}
 
 #[error_code]
 pub enum PerpsError {
-    #[msg("Oracle does not match the requested agent")]
-    InvalidOracle,
+    #[msg("Operator is not authorized to manage perps markets")]
+    InvalidAuthority,
+    #[msg("Only the configured bootstrap authority can initialize the config")]
+    UnauthorizedInitializer,
+    #[msg("Risk configuration is invalid")]
+    InvalidRiskConfig,
+    #[msg("Market does not exist or does not match the requested id")]
+    InvalidMarket,
+    #[msg("Oracle price is stale and cannot be used for trading")]
+    StaleOracle,
+    #[msg("Oracle spot index must be greater than zero")]
+    InvalidSpotIndex,
+    #[msg("Position update must change margin or size")]
+    NoopPositionUpdate,
+    #[msg("No open position exists for this trader and market")]
+    NoOpenPosition,
+    #[msg("Position owner does not match the provided signer")]
+    InvalidPositionOwner,
+    #[msg("Margin is invalid for the requested trade")]
+    InvalidMargin,
+    #[msg("Requested leverage exceeds the configured maximum")]
+    InvalidLeverage,
+    #[msg("Market account has insufficient liquidity to settle this payout")]
+    InsufficientLiquidity,
     #[msg("Position is not undercollateralized; cannot liquidate")]
     NotLiquidatable,
-    #[msg("Numeric overflow in size calculation")]
+    #[msg("Insurance deposit amount must be greater than zero")]
+    InvalidInsuranceDeposit,
+    #[msg("Position state is invalid")]
+    InvalidPositionState,
+    #[msg("Numeric overflow in perps calculation")]
     Overflow,
-    #[msg("Unauthorized keeper authority")]
-    InvalidAuthority,
-    #[msg("Leverage must be between 1 and 100")]
-    InvalidLeverage,
-    #[msg("Vault possesses insufficient liquidity to settle this position")]
-    InsufficientLiquidity,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn realized_pnl_on_partial_reduction_matches_direction() {
+        let pnl = calculate_realized_trade_pnl(10_000, 100, 120, -4_000).unwrap();
+        assert_eq!(pnl, 800);
+
+        let short_pnl = calculate_realized_trade_pnl(-10_000, 100, 80, 4_000).unwrap();
+        assert_eq!(short_pnl, 800);
+    }
+
+    #[test]
+    fn insurance_usage_only_consumes_reserved_balance_when_needed() {
+        assert_eq!(calculate_insurance_usage(400, 1_000, 250).unwrap(), 0);
+        assert_eq!(calculate_insurance_usage(900, 1_000, 250).unwrap(), 150);
+    }
+
+    #[test]
+    fn weighted_entry_price_only_changes_when_increasing_same_side() {
+        let same_side = calculate_next_entry_price(2_000, 100, 1_000, 3_000, 130).unwrap();
+        assert_eq!(same_side, 110);
+
+        let reduced = calculate_next_entry_price(2_000, 100, -500, 1_500, 130).unwrap();
+        assert_eq!(reduced, 100);
+
+        let flipped = calculate_next_entry_price(2_000, 100, -3_000, -1_000, 130).unwrap();
+        assert_eq!(flipped, 130);
+    }
 }
