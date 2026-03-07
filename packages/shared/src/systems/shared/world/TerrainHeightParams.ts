@@ -10,6 +10,35 @@
  */
 
 import { BiomeType, DEFAULT_BIOME } from "./TerrainBiomeTypes";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+
+// ---------------------------------------------------------------------------
+// Core terrain generation constants
+// ---------------------------------------------------------------------------
+
+export const MAX_HEIGHT = 50;
+
+/**
+ * Derived from WATER_THRESHOLD / MAX_HEIGHT so there's one source of truth.
+ * Terrain generation works in 0-1 normalized space; this is the cutoff.
+ */
+export const WATER_LEVEL_NORMALIZED =
+  TERRAIN_CONSTANTS.WATER_THRESHOLD / MAX_HEIGHT;
+
+// ---------------------------------------------------------------------------
+// Shoreline constants — shape terrain near the water edge
+// ---------------------------------------------------------------------------
+
+export const SHORELINE_CONFIG = {
+  THRESHOLD: 0.25,
+  STRENGTH: 0.6,
+  MIN_SLOPE: 0.06,
+  SLOPE_SAMPLE_DISTANCE: 1.0,
+  LAND_BAND: 3.0,
+  LAND_MAX_MULTIPLIER: 1.6,
+  UNDERWATER_BAND: 3.0,
+  UNDERWATER_DEPTH_MULTIPLIER: 1.8,
+} as const;
 
 // ---------------------------------------------------------------------------
 // Noise layer definitions — drive getBaseHeightAt()
@@ -67,6 +96,9 @@ export const HEIGHT_POWER_CURVE = 1.1;
 // Biome noise profiles — per-biome noise weight blending (Option A)
 // ---------------------------------------------------------------------------
 
+/** Global terrace step count — shared across all biomes to prevent boundary artifacts. */
+export const TERRACE_STEPS = 10;
+
 export interface BiomeNoiseProfile {
   continentWeight: number;
   ridgeWeight: number;
@@ -74,12 +106,21 @@ export interface BiomeNoiseProfile {
   erosionWeight: number;
   detailWeight: number;
   powerCurve: number;
-  /** Number of terrace steps (0 = no terracing) */
-  terraceSteps: number;
-  /** 0–1 blend from smooth to terraced (higher = more visible) */
+  /** 0–1 blend from smooth to terraced (0 = disabled, higher = more visible) */
   terraceStrength: number;
   /** 0–1 flat zone per step (0.8 = 80% flat shelf, 20% cliff transition) */
   terraceSharpness: number;
+  /**
+   * Stretches shelf positions around the midpoint to make cliffs taller.
+   * 1 = normal (5m cliffs at MAX_HEIGHT=50, TERRACE_STEPS=10)
+   * 3 = 3x taller cliffs (~15m). Vary per biome for visual diversity.
+   */
+  terraceHeightScale: number;
+  /**
+   * 0–1 how much natural terrain slope is preserved on each shelf.
+   * 0 = perfectly flat shelves, 0.3 = 30% of natural slope, 1 = no flattening.
+   */
+  terraceSlope: number;
 }
 
 export const TUNDRA_PROFILE: BiomeNoiseProfile = {
@@ -89,21 +130,23 @@ export const TUNDRA_PROFILE: BiomeNoiseProfile = {
   erosionWeight: 0.1,
   detailWeight: 0.1,
   powerCurve: 1.1,
-  terraceSteps: 10,
   terraceStrength: 0.4,
   terraceSharpness: 0.7,
+  terraceHeightScale: 2.5,
+  terraceSlope: 0.25,
 };
 
 export const FOREST_PROFILE: BiomeNoiseProfile = {
   continentWeight: 0.15,
   ridgeWeight: 0.08,
-  hillWeight: 0.01,
+  hillWeight: 0.1,
   erosionWeight: 0.05,
   detailWeight: 0.05,
   powerCurve: 1,
-  terraceSteps: 10,
   terraceStrength: 0,
-  terraceSharpness: 5.1,
+  terraceSharpness: 0,
+  terraceHeightScale: 1,
+  terraceSlope: 0,
 };
 
 export const DESERT_PROFILE: BiomeNoiseProfile = {
@@ -113,9 +156,10 @@ export const DESERT_PROFILE: BiomeNoiseProfile = {
   erosionWeight: 0.2,
   detailWeight: 0.05,
   powerCurve: 1.45,
-  terraceSteps: 10,
   terraceStrength: 0.6,
   terraceSharpness: 0.8,
+  terraceHeightScale: 7,
+  terraceSlope: 0.35,
 };
 
 export const BIOME_PROFILES: Record<string, BiomeNoiseProfile> = {
@@ -178,7 +222,7 @@ export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
     x: -168.5,
     z: -352.5,
     radius: 150,
-    strength: 1.5,
+    strength: 4.0,
     layers: 5,
     shapePower: 1.8,
     edgeSharpness: 0.7,
@@ -375,9 +419,10 @@ export function computeBaseHeight(
     eW = 0,
     dW = 0,
     pC = 0,
-    tSt = 0,
     tS = 0,
-    tSh = 0;
+    tSh = 0,
+    tHS = 0,
+    tSl = 0;
   for (const key of Object.keys(biomeWeights)) {
     const w = biomeWeights[key];
     const p = BIOME_PROFILES[key] ?? BIOME_PROFILES[DEFAULT_BIOME];
@@ -387,9 +432,10 @@ export function computeBaseHeight(
     eW += p.erosionWeight * w;
     dW += p.detailWeight * w;
     pC += p.powerCurve * w;
-    tSt += p.terraceSteps * w;
     tS += p.terraceStrength * w;
     tSh += p.terraceSharpness * w;
+    tHS += p.terraceHeightScale * w;
+    tSl += p.terraceSlope * w;
   }
 
   // ── 3. Combine, normalize, power curve ──────────────────────────────
@@ -399,14 +445,20 @@ export function computeBaseHeight(
   height = Math.pow(height, pC);
 
   // ── 4. Terracing — floor-quantize into flat shelves with cliff edges ─
-  const steps = Math.round(tSt);
+  // tHS stretches shelf positions around 0.5 so cliffs are taller per biome.
+  // tSl blends natural slope back onto shelves (0 = flat, 1 = full natural slope).
+  const steps = TERRACE_STEPS;
+  const ths = Math.max(1, tHS);
   if (tS > 0.01 && steps >= 2) {
     const stepped = Math.floor(height * steps) / steps;
     const nextStep = Math.min(1, stepped + 1 / steps);
     const frac = (height - stepped) * steps;
     const edgeBlend = frac < tSh ? 0 : (frac - tSh) / (1 - tSh + 0.001);
-    const terraced = stepped + edgeBlend * (nextStep - stepped);
-    height = height + (terraced - height) * tS;
+    const flatStep = stepped + edgeBlend * (nextStep - stepped);
+    const slopedStep = stepped + frac * (nextStep - stepped);
+    const terraced = flatStep + tSl * (slopedStep - flatStep);
+    const scaled = Math.max(0, Math.min(1, 0.5 + (terraced - 0.5) * ths));
+    height = height + (scaled - height) * tS;
   }
 
   // ── 5. Coastline noise → island mask ────────────────────────────────
@@ -599,9 +651,9 @@ export function buildApplyLandscapeFeaturesJS(): string {
 // Biome profile constants baked into JS for workers
 const PROFILES_JS = `
   var BIOME_PROFILES = {};
-  BIOME_PROFILES[BT_TUNDRA]  = { cW: ${TUNDRA_PROFILE.continentWeight}, rW: ${TUNDRA_PROFILE.ridgeWeight}, hW: ${TUNDRA_PROFILE.hillWeight}, eW: ${TUNDRA_PROFILE.erosionWeight}, dW: ${TUNDRA_PROFILE.detailWeight}, pC: ${TUNDRA_PROFILE.powerCurve}, tSt: ${TUNDRA_PROFILE.terraceSteps}, tS: ${TUNDRA_PROFILE.terraceStrength}, tSh: ${TUNDRA_PROFILE.terraceSharpness} };
-  BIOME_PROFILES[BT_FOREST]  = { cW: ${FOREST_PROFILE.continentWeight}, rW: ${FOREST_PROFILE.ridgeWeight}, hW: ${FOREST_PROFILE.hillWeight}, eW: ${FOREST_PROFILE.erosionWeight}, dW: ${FOREST_PROFILE.detailWeight}, pC: ${FOREST_PROFILE.powerCurve}, tSt: ${FOREST_PROFILE.terraceSteps}, tS: ${FOREST_PROFILE.terraceStrength}, tSh: ${FOREST_PROFILE.terraceSharpness} };
-  BIOME_PROFILES[BT_DESERT]  = { cW: ${DESERT_PROFILE.continentWeight}, rW: ${DESERT_PROFILE.ridgeWeight}, hW: ${DESERT_PROFILE.hillWeight}, eW: ${DESERT_PROFILE.erosionWeight}, dW: ${DESERT_PROFILE.detailWeight}, pC: ${DESERT_PROFILE.powerCurve}, tSt: ${DESERT_PROFILE.terraceSteps}, tS: ${DESERT_PROFILE.terraceStrength}, tSh: ${DESERT_PROFILE.terraceSharpness} };
+  BIOME_PROFILES[BT_TUNDRA]  = { cW: ${TUNDRA_PROFILE.continentWeight}, rW: ${TUNDRA_PROFILE.ridgeWeight}, hW: ${TUNDRA_PROFILE.hillWeight}, eW: ${TUNDRA_PROFILE.erosionWeight}, dW: ${TUNDRA_PROFILE.detailWeight}, pC: ${TUNDRA_PROFILE.powerCurve}, tS: ${TUNDRA_PROFILE.terraceStrength}, tSh: ${TUNDRA_PROFILE.terraceSharpness}, tHS: ${TUNDRA_PROFILE.terraceHeightScale}, tSl: ${TUNDRA_PROFILE.terraceSlope} };
+  BIOME_PROFILES[BT_FOREST]  = { cW: ${FOREST_PROFILE.continentWeight}, rW: ${FOREST_PROFILE.ridgeWeight}, hW: ${FOREST_PROFILE.hillWeight}, eW: ${FOREST_PROFILE.erosionWeight}, dW: ${FOREST_PROFILE.detailWeight}, pC: ${FOREST_PROFILE.powerCurve}, tS: ${FOREST_PROFILE.terraceStrength}, tSh: ${FOREST_PROFILE.terraceSharpness}, tHS: ${FOREST_PROFILE.terraceHeightScale}, tSl: ${FOREST_PROFILE.terraceSlope} };
+  BIOME_PROFILES[BT_DESERT]  = { cW: ${DESERT_PROFILE.continentWeight}, rW: ${DESERT_PROFILE.ridgeWeight}, hW: ${DESERT_PROFILE.hillWeight}, eW: ${DESERT_PROFILE.erosionWeight}, dW: ${DESERT_PROFILE.detailWeight}, pC: ${DESERT_PROFILE.powerCurve}, tS: ${DESERT_PROFILE.terraceStrength}, tSh: ${DESERT_PROFILE.terraceSharpness}, tHS: ${DESERT_PROFILE.terraceHeightScale}, tSl: ${DESERT_PROFILE.terraceSlope} };
 `;
 
 /**
@@ -622,12 +674,12 @@ export function buildGetBaseHeightAtJS(): string {
     var eN = noise.erosionNoise2D(worldX * ${EROSION_LAYER.scale}, worldZ * ${EROSION_LAYER.scale}, ${EROSION_LAYER.iterations});
     var dN = noise.fractal2D(worldX * ${DETAIL_LAYER.scale}, worldZ * ${DETAIL_LAYER.scale}, ${DETAIL_LAYER.octaves}, ${DETAIL_LAYER.persistence}, ${DETAIL_LAYER.lacunarity});
 
-    var cW = 0, rW = 0, hW = 0, eW = 0, dW = 0, pC = 0, tSt = 0, tS = 0, tSh = 0;
+    var cW = 0, rW = 0, hW = 0, eW = 0, dW = 0, pC = 0, tS = 0, tSh = 0, tHS = 0, tSl = 0;
     for (var key in bw) {
       var w = bw[key];
       var p = BIOME_PROFILES[key] || BIOME_PROFILES[BT_DEFAULT];
       cW += p.cW * w; rW += p.rW * w; hW += p.hW * w; eW += p.eW * w; dW += p.dW * w;
-      pC += p.pC * w; tSt += p.tSt * w; tS += p.tS * w; tSh += p.tSh * w;
+      pC += p.pC * w; tS += p.tS * w; tSh += p.tSh * w; tHS += p.tHS * w; tSl += p.tSl * w;
     }
 
     var height = cN * cW + rN * rW + hN * hW + eN * eW + dN * dW;
@@ -635,14 +687,18 @@ export function buildGetBaseHeightAtJS(): string {
     height = Math.max(0, Math.min(1, height));
     height = Math.pow(height, pC);
 
-    var gSteps = Math.round(tSt);
+    var gSteps = ${TERRACE_STEPS};
+    var ths = Math.max(1, tHS);
     if (tS > 0.01 && gSteps >= 2) {
       var gStepped = Math.floor(height * gSteps) / gSteps;
       var gNextStep = Math.min(1, gStepped + 1 / gSteps);
       var gFrac = (height - gStepped) * gSteps;
       var gEdgeBlend = gFrac < tSh ? 0 : (gFrac - tSh) / (1 - tSh + 0.001);
-      var gTerraced = gStepped + gEdgeBlend * (gNextStep - gStepped);
-      height = height + (gTerraced - height) * tS;
+      var gFlatStep = gStepped + gEdgeBlend * (gNextStep - gStepped);
+      var gSlopedStep = gStepped + gFrac * (gNextStep - gStepped);
+      var gTerraced = gFlatStep + tSl * (gSlopedStep - gFlatStep);
+      var gScaled = Math.max(0, Math.min(1, 0.5 + (gTerraced - 0.5) * ths));
+      height = height + (gScaled - height) * tS;
     }
 
     var distFromCenter = Math.sqrt(worldX * worldX + worldZ * worldZ);
