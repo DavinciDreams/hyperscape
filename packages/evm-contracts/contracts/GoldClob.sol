@@ -62,6 +62,21 @@ contract GoldClob is ReentrancyGuard {
         mapping(uint64 => uint64) elements;
     }
 
+    struct OrderQuote {
+        uint256 cost;
+        uint256 tradeTreasuryFee;
+        uint256 tradeMarketMakerFee;
+        uint256 totalRequired;
+        uint256 excess;
+    }
+
+    struct MatchProgress {
+        uint256 remainingAmount;
+        uint16 boundaryPrice;
+        uint256 matchesCount;
+        uint256 totalImprovement;
+    }
+
     mapping(uint256 => MatchMeta) public matches;
     uint64 public nextOrderId = 1;
     mapping(uint64 => Order) public orders;
@@ -141,162 +156,209 @@ contract GoldClob is ReentrancyGuard {
         return matchId;
     }
 
+    function _quoteOrder(bool isBuy, uint16 price, uint256 amount, uint256 value)
+        internal
+        view
+        returns (OrderQuote memory quote)
+    {
+        uint256 priceComp = isBuy ? price : (1000 - price);
+        uint256 quoteValue = amount * priceComp;
+        require(quoteValue % 1000 == 0, "Amount/Price precision error");
+
+        quote.cost = quoteValue / 1000;
+        require(quote.cost > 0, "Cost too low");
+
+        quote.tradeTreasuryFee = (quoteValue * tradeTreasuryFeeBps) / (1000 * MAX_FEE_BPS);
+        quote.tradeMarketMakerFee = (quoteValue * tradeMarketMakerFeeBps) / (1000 * MAX_FEE_BPS);
+        quote.totalRequired = quote.cost + quote.tradeTreasuryFee + quote.tradeMarketMakerFee;
+        require(value >= quote.totalRequired, "Insufficient native currency sent");
+        quote.excess = value - quote.totalRequired;
+    }
+
+    function _matchBuyOrder(uint256 matchId, uint16 limitPrice, uint256 amount, uint64 takerOrderId)
+        internal
+        returns (MatchProgress memory progress)
+    {
+        uint256 maxMatchesPerTx = 100;
+        uint16 currentAsk = bestAsks[matchId];
+
+        progress.remainingAmount = amount;
+        progress.boundaryPrice = currentAsk;
+
+        while (
+            progress.remainingAmount > 0
+                && progress.boundaryPrice <= limitPrice
+                && progress.boundaryPrice < 1000
+                && progress.matchesCount < maxMatchesPerTx
+        ) {
+            Queue storage queue = priceQueues[matchId][SELL_SIDE][progress.boundaryPrice];
+            if (queue.head == queue.tail) {
+                progress.boundaryPrice++;
+                continue;
+            }
+
+            uint64 orderId = queue.elements[queue.head];
+            Order storage makerOrder = orders[orderId];
+            require(!makerOrder.isBuy, "Queue side corrupted");
+
+            if (makerOrder.filled >= makerOrder.amount) {
+                _popQueue(matchId, SELL_SIDE, progress.boundaryPrice);
+                progress.matchesCount++;
+                continue;
+            }
+
+            uint256 fillAmount = progress.remainingAmount;
+            uint256 makerRemaining = makerOrder.amount - makerOrder.filled;
+            if (fillAmount > makerRemaining) {
+                fillAmount = makerRemaining;
+            }
+
+            makerOrder.filled += uint128(fillAmount);
+            progress.remainingAmount -= fillAmount;
+
+            positions[matchId][makerOrder.maker].noShares += fillAmount;
+            positions[matchId][msg.sender].yesShares += fillAmount;
+
+            if (limitPrice > progress.boundaryPrice) {
+                uint256 improvement = (fillAmount * (limitPrice - progress.boundaryPrice)) / 1000;
+                if (improvement > 0) {
+                    progress.totalImprovement += improvement;
+                }
+            }
+
+            emit OrderMatched(matchId, orderId, takerOrderId, fillAmount, progress.boundaryPrice);
+
+            if (makerOrder.filled == makerOrder.amount) {
+                _popQueue(matchId, SELL_SIDE, progress.boundaryPrice);
+            }
+
+            progress.matchesCount++;
+        }
+    }
+
+    function _matchSellOrder(uint256 matchId, uint16 limitPrice, uint256 amount, uint64 takerOrderId)
+        internal
+        returns (MatchProgress memory progress)
+    {
+        uint256 maxMatchesPerTx = 100;
+        uint16 currentBid = bestBids[matchId];
+
+        progress.remainingAmount = amount;
+        progress.boundaryPrice = currentBid;
+
+        while (
+            progress.remainingAmount > 0
+                && progress.boundaryPrice >= limitPrice
+                && progress.boundaryPrice > 0
+                && progress.matchesCount < maxMatchesPerTx
+        ) {
+            Queue storage queue = priceQueues[matchId][BUY_SIDE][progress.boundaryPrice];
+            if (queue.head == queue.tail) {
+                progress.boundaryPrice--;
+                continue;
+            }
+
+            uint64 orderId = queue.elements[queue.head];
+            Order storage makerOrder = orders[orderId];
+            require(makerOrder.isBuy, "Queue side corrupted");
+
+            if (makerOrder.filled >= makerOrder.amount) {
+                _popQueue(matchId, BUY_SIDE, progress.boundaryPrice);
+                progress.matchesCount++;
+                continue;
+            }
+
+            uint256 fillAmount = progress.remainingAmount;
+            uint256 makerRemaining = makerOrder.amount - makerOrder.filled;
+            if (fillAmount > makerRemaining) {
+                fillAmount = makerRemaining;
+            }
+
+            makerOrder.filled += uint128(fillAmount);
+            progress.remainingAmount -= fillAmount;
+
+            positions[matchId][makerOrder.maker].yesShares += fillAmount;
+            positions[matchId][msg.sender].noShares += fillAmount;
+
+            if (progress.boundaryPrice > limitPrice) {
+                uint256 improvement = (fillAmount * (progress.boundaryPrice - limitPrice)) / 1000;
+                if (improvement > 0) {
+                    progress.totalImprovement += improvement;
+                }
+            }
+
+            emit OrderMatched(matchId, orderId, takerOrderId, fillAmount, progress.boundaryPrice);
+
+            if (makerOrder.filled == makerOrder.amount) {
+                _popQueue(matchId, BUY_SIDE, progress.boundaryPrice);
+            }
+
+            progress.matchesCount++;
+        }
+    }
+
+    function _restOrder(uint256 matchId, bool isBuy, uint16 price, uint256 amount) internal {
+        uint64 newOrderId = nextOrderId++;
+        orders[newOrderId] = Order({
+            id: newOrderId,
+            price: price,
+            isBuy: isBuy,
+            maker: msg.sender,
+            amount: uint128(amount),
+            filled: 0,
+            matchId: matchId
+        });
+
+        Queue storage queue = priceQueues[matchId][_sideKey(isBuy)][price];
+        queue.elements[queue.tail] = newOrderId;
+        queue.tail++;
+
+        if (isBuy && price > bestBids[matchId]) {
+            bestBids[matchId] = price;
+        } else if (!isBuy && price < bestAsks[matchId]) {
+            bestAsks[matchId] = price;
+        }
+
+        emit OrderPlaced(matchId, newOrderId, msg.sender, isBuy, price, amount);
+    }
+
+    function _settleOrderValue(OrderQuote memory quote, uint256 totalImprovement) internal {
+        if (quote.tradeTreasuryFee > 0) {
+            _sendNative(treasury, quote.tradeTreasuryFee);
+        }
+        if (quote.tradeMarketMakerFee > 0) {
+            _sendNative(marketMaker, quote.tradeMarketMakerFee);
+        }
+        if (totalImprovement > 0) {
+            _sendNative(msg.sender, totalImprovement);
+        }
+        if (quote.excess > 0) {
+            _sendNative(msg.sender, quote.excess);
+        }
+    }
+
     function placeOrder(uint256 matchId, bool isBuy, uint16 price, uint256 amount) external payable nonReentrant {
         require(matches[matchId].status == MatchStatus.OPEN, "Match not open");
         require(price > 0 && price < 1000, "Invalid price");
         require(amount > 0, "Invalid amount");
         require(amount <= type(uint128).max, "Amount overflow");
 
-        uint256 priceComp = isBuy ? price : (1000 - price);
-        uint256 quoteValue = amount * priceComp;
-        require(quoteValue % 1000 == 0, "Amount/Price precision error");
-        uint256 cost = quoteValue / 1000;
-        require(cost > 0, "Cost too low");
+        OrderQuote memory quote = _quoteOrder(isBuy, price, amount, msg.value);
+        uint64 takerOrderId = nextOrderId;
+        MatchProgress memory progress =
+            isBuy ? _matchBuyOrder(matchId, price, amount, takerOrderId) : _matchSellOrder(matchId, price, amount, takerOrderId);
 
-        uint256 tradeTreasuryFee = (quoteValue * tradeTreasuryFeeBps) / (1000 * MAX_FEE_BPS);
-        uint256 tradeMarketMakerFee = (quoteValue * tradeMarketMakerFeeBps) / (1000 * MAX_FEE_BPS);
-        uint256 totalRequired = cost + tradeTreasuryFee + tradeMarketMakerFee;
-        require(msg.value >= totalRequired, "Insufficient native currency sent");
-        uint256 excess = msg.value - totalRequired;
-
-        uint256 remainingAmount = amount;
-        uint256 matchesCount = 0;
-        uint256 MAX_MATCHES_PER_TX = 100;
-        uint256 totalImprovement = 0;
-
-        // Matching engine logic
         if (isBuy) {
-            uint16 currentAsk = bestAsks[matchId];
-            while (remainingAmount > 0 && currentAsk <= price && currentAsk < 1000 && matchesCount < MAX_MATCHES_PER_TX)
-            {
-                Queue storage queue = priceQueues[matchId][SELL_SIDE][currentAsk];
-                if (queue.head == queue.tail) {
-                    currentAsk++;
-                    continue;
-                }
-
-                uint64 orderId = queue.elements[queue.head];
-                Order storage makerOrder = orders[orderId];
-                require(!makerOrder.isBuy, "Queue side corrupted");
-                if (makerOrder.filled >= makerOrder.amount) {
-                    _popQueue(matchId, SELL_SIDE, currentAsk);
-                    matchesCount++;
-                    continue;
-                }
-
-                uint256 fillAmount = remainingAmount;
-                uint256 makerRemaining = makerOrder.amount - makerOrder.filled;
-                if (fillAmount > makerRemaining) {
-                    fillAmount = makerRemaining;
-                }
-
-                makerOrder.filled += uint128(fillAmount);
-                remainingAmount -= fillAmount;
-
-                positions[matchId][makerOrder.maker].noShares += fillAmount;
-                positions[matchId][msg.sender].yesShares += fillAmount;
-
-                if (price > currentAsk) {
-                    uint256 improvement = (fillAmount * (price - currentAsk)) / 1000;
-                    if (improvement > 0) {
-                        totalImprovement += improvement;
-                    }
-                }
-
-                emit OrderMatched(matchId, orderId, nextOrderId, fillAmount, currentAsk);
-
-                if (makerOrder.filled == makerOrder.amount) {
-                    _popQueue(matchId, SELL_SIDE, currentAsk);
-                }
-
-                matchesCount++;
-            }
-            bestAsks[matchId] = currentAsk;
+            bestAsks[matchId] = progress.boundaryPrice;
         } else {
-            uint16 currentBid = bestBids[matchId];
-            while (remainingAmount > 0 && currentBid >= price && currentBid > 0 && matchesCount < MAX_MATCHES_PER_TX) {
-                Queue storage queue = priceQueues[matchId][BUY_SIDE][currentBid];
-                if (queue.head == queue.tail) {
-                    currentBid--;
-                    continue;
-                }
-
-                uint64 orderId = queue.elements[queue.head];
-                Order storage makerOrder = orders[orderId];
-                require(makerOrder.isBuy, "Queue side corrupted");
-                if (makerOrder.filled >= makerOrder.amount) {
-                    _popQueue(matchId, BUY_SIDE, currentBid);
-                    matchesCount++;
-                    continue;
-                }
-
-                uint256 fillAmount = remainingAmount;
-                uint256 makerRemaining = makerOrder.amount - makerOrder.filled;
-                if (fillAmount > makerRemaining) {
-                    fillAmount = makerRemaining;
-                }
-
-                makerOrder.filled += uint128(fillAmount);
-                remainingAmount -= fillAmount;
-
-                positions[matchId][makerOrder.maker].yesShares += fillAmount;
-                positions[matchId][msg.sender].noShares += fillAmount;
-
-                if (currentBid > price) {
-                    uint256 improvement = (fillAmount * (currentBid - price)) / 1000;
-                    if (improvement > 0) {
-                        totalImprovement += improvement;
-                    }
-                }
-
-                emit OrderMatched(matchId, orderId, nextOrderId, fillAmount, currentBid);
-
-                if (makerOrder.filled == makerOrder.amount) {
-                    _popQueue(matchId, BUY_SIDE, currentBid);
-                }
-
-                matchesCount++;
-            }
-            bestBids[matchId] = currentBid;
+            bestBids[matchId] = progress.boundaryPrice;
         }
 
-        if (remainingAmount > 0) {
-            uint64 newOrderId = nextOrderId++;
-            orders[newOrderId] = Order({
-                id: newOrderId,
-                price: price,
-                isBuy: isBuy,
-                maker: msg.sender,
-                amount: uint128(amount),
-                filled: uint128(amount - remainingAmount),
-                matchId: matchId
-            });
-
-            Queue storage queue = priceQueues[matchId][_sideKey(isBuy)][price];
-            queue.elements[queue.tail] = newOrderId;
-            queue.tail++;
-
-            if (isBuy && price > bestBids[matchId]) {
-                bestBids[matchId] = price;
-            } else if (!isBuy && price < bestAsks[matchId]) {
-                bestAsks[matchId] = price;
-            }
-
-            emit OrderPlaced(matchId, newOrderId, msg.sender, isBuy, price, remainingAmount);
+        if (progress.remainingAmount > 0) {
+            _restOrder(matchId, isBuy, price, progress.remainingAmount);
         }
 
-        if (tradeTreasuryFee > 0) {
-            _sendNative(treasury, tradeTreasuryFee);
-        }
-        if (tradeMarketMakerFee > 0) {
-            _sendNative(marketMaker, tradeMarketMakerFee);
-        }
-        if (totalImprovement > 0) {
-            _sendNative(msg.sender, totalImprovement);
-        }
-        if (excess > 0) {
-            _sendNative(msg.sender, excess);
-        }
+        _settleOrderValue(quote, progress.totalImprovement);
     }
 
     function _sideKey(bool isBuy) internal pure returns (uint8) {

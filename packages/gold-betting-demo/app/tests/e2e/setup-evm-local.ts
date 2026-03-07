@@ -120,11 +120,21 @@ async function main(): Promise<void> {
       `Unexpected EVM chain id. expected=${chainId}, got=${onChainId}`,
     );
   }
+  let nextNonce = await publicClient.getTransactionCount({
+    address: adminAccount.address,
+    blockTag: "pending",
+  });
+  const consumeNonce = (): number => {
+    const nonce = nextNonce;
+    nextNonce += 1;
+    return nonce;
+  };
 
   const tokenDeployTx = await walletClient.deployContract({
     abi: mockErc20Artifact.abi,
     bytecode: mockErc20Artifact.bytecode as `0x${string}`,
     args: ["Mock Gold", "GOLD"],
+    nonce: consumeNonce(),
   });
   const tokenDeployReceipt = await publicClient.waitForTransactionReceipt({
     hash: tokenDeployTx,
@@ -138,6 +148,7 @@ async function main(): Promise<void> {
     abi: goldClobArtifact.abi,
     bytecode: goldClobArtifact.bytecode as `0x${string}`,
     args: [adminAccount.address as Address, adminAccount.address as Address],
+    nonce: consumeNonce(),
   });
   const clobDeployReceipt = await publicClient.waitForTransactionReceipt({
     hash: clobDeployTx,
@@ -153,6 +164,7 @@ async function main(): Promise<void> {
     functionName: "mint",
     args: [adminAccount.address, parseUnits("100000", 18)],
     account: adminAccount,
+    nonce: consumeNonce(),
   });
   await publicClient.waitForTransactionReceipt({ hash: mintTx });
 
@@ -162,6 +174,7 @@ async function main(): Promise<void> {
     functionName: "createMatch",
     args: [],
     account: adminAccount,
+    nonce: consumeNonce(),
   });
   await publicClient.waitForTransactionReceipt({ hash: createMatchTx });
 
@@ -191,6 +204,7 @@ async function main(): Promise<void> {
       return cost + tradeTreasuryFee + tradeMarketMakerFee;
     })(),
     account: adminAccount,
+    nonce: consumeNonce(),
   });
   await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
 
@@ -213,6 +227,7 @@ async function main(): Promise<void> {
       return cost + tradeTreasuryFee + tradeMarketMakerFee;
     })(),
     account: adminAccount,
+    nonce: consumeNonce(),
   });
   await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
 
@@ -223,7 +238,9 @@ async function main(): Promise<void> {
   env.VITE_BSC_GOLD_TOKEN_ADDRESS = goldTokenAddress;
   env.VITE_EVM_PRIVATE_KEY = adminPrivateKey;
   env.VITE_HEADLESS_EVM_PRIVATE_KEY = adminPrivateKey;
+  env.VITE_HEADLESS_EVM_ADDRESS = adminAccount.address;
   env.VITE_E2E_EVM_PRIVATE_KEY = adminPrivateKey;
+  env.VITE_E2E_EVM_ADDRESS = adminAccount.address;
   await fs.writeFile(envPath, serializeDotEnv(env), "utf8");
 
   const existingState = (await readJson<E2eState>(statePath)) || {};

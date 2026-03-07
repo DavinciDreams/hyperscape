@@ -8,6 +8,7 @@ import {
 } from "@solana/web3.js";
 
 import { GoldPerpsMarket } from "../target/types/gold_perps_market";
+import { confirmSignatureByPolling } from "./test-anchor";
 
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
   "BPFLoaderUpgradeab1e11111111111111111111111",
@@ -17,7 +18,7 @@ const TEST_RUN_OFFSET = Math.floor(Date.now() % 1_000_000_000);
 export const DEFAULT_SKEW_SCALE = SOL(100);
 export const DEFAULT_FUNDING_VELOCITY = 50_000_000;
 export const DEFAULT_MAX_ORACLE_STALENESS_SECONDS = Number(
-  process.env.HYPERSCAPE_MAX_ORACLE_STALENESS_SECONDS || 1,
+  process.env.HYPERSCAPE_MAX_ORACLE_STALENESS_SECONDS || 5,
 );
 export const DEFAULT_MIN_MARGIN = SOL(0.1);
 export const DEFAULT_MAX_LEVERAGE = 5;
@@ -91,11 +92,34 @@ export async function airdrop(
   recipient: PublicKey,
   sol = 10,
 ): Promise<void> {
-  const signature = await connection.requestAirdrop(
-    recipient,
-    sol * LAMPORTS_PER_SOL,
-  );
-  await connection.confirmTransaction(signature, "confirmed");
+  const requestedLamports = sol * LAMPORTS_PER_SOL;
+  const startingBalance = await connection.getBalance(recipient, "confirmed");
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      const signature = await connection.requestAirdrop(
+        recipient,
+        requestedLamports,
+      );
+      await confirmSignatureByPolling(connection, signature);
+      for (let poll = 0; poll < 20; poll += 1) {
+        const balance = await connection.getBalance(recipient, "confirmed");
+        if (balance >= startingBalance + requestedLamports) {
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      throw new Error("airdrop confirmed but balance did not update");
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 export async function waitForOracleToExpire(
@@ -142,7 +166,16 @@ export async function ensurePerpsConfig(
     .signers([authority])
     .rpc();
 
-  return config;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const createdConfig =
+      await program.account.configState.fetchNullable(config);
+    if (createdConfig) {
+      return config;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(`config ${config.toBase58()} was not readable after init`);
 }
 
 export async function seedMarket(

@@ -79,6 +79,28 @@ wait_for_app() {
   return 1
 }
 
+run_with_retries() {
+  local label="$1"
+  local attempts="$2"
+  shift 2
+
+  local attempt=1
+  while (( attempt <= attempts )); do
+    if "$@"; then
+      return 0
+    fi
+
+    if (( attempt == attempts )); then
+      echo "[e2e] ${label} failed after ${attempts} attempts"
+      return 1
+    fi
+
+    echo "[e2e] ${label} failed, retrying (${attempt}/${attempts})"
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+}
+
 kill_listeners() {
   local port="$1"
   local pids
@@ -137,6 +159,7 @@ if ! wait_for_solana_rpc; then
   tail -n 80 "$VALIDATOR_LOG" || true
   exit 1
 fi
+sleep 2
 
 echo "[e2e] starting local anvil"
 anvil \
@@ -154,17 +177,25 @@ if ! wait_for_anvil_rpc; then
 fi
 
 echo "[e2e] seeding local solana state + writing .env.e2e"
-E2E_SOLANA_RPC_URL="$SOLANA_RPC_URL" \
-E2E_SOLANA_WS_URL="$SOLANA_WS_URL" \
-  bun run "$APP_DIR/tests/e2e/setup-localnet.ts"
+run_with_retries \
+  "solana e2e setup" \
+  3 \
+  env \
+    E2E_SOLANA_RPC_URL="$SOLANA_RPC_URL" \
+    E2E_SOLANA_WS_URL="$SOLANA_WS_URL" \
+    bun run "$APP_DIR/tests/e2e/setup-localnet.ts"
 
 echo "[e2e] seeding local evm state + extending .env.e2e"
-E2E_EVM_RPC_URL="$ANVIL_RPC_URL" \
-E2E_EVM_CHAIN_ID="$EVM_CHAIN_ID" \
-  bun run "$APP_DIR/tests/e2e/setup-evm-local.ts"
+run_with_retries \
+  "evm e2e setup" \
+  3 \
+  env \
+    E2E_EVM_RPC_URL="$ANVIL_RPC_URL" \
+    E2E_EVM_CHAIN_ID="$EVM_CHAIN_ID" \
+    bun run "$APP_DIR/tests/e2e/setup-evm-local.ts"
 
 echo "[e2e] starting app on :$APP_PORT"
-bun run --cwd "$APP_DIR" dev --mode e2e --port "$APP_PORT" >"$APP_LOG" 2>&1 &
+bun run --cwd "$APP_DIR" dev --mode e2e --port "$APP_PORT" --strictPort >"$APP_LOG" 2>&1 &
 APP_PID="$!"
 
 if ! wait_for_app "http://127.0.0.1:$APP_PORT/"; then

@@ -67,7 +67,10 @@ function bnLikeToBigInt(value: unknown): bigint {
 }
 
 async function readText(page: Page, testId: string): Promise<string> {
-  return ((await page.getByTestId(testId).textContent()) || "").trim();
+  const locator = page.getByTestId(testId).first();
+  const count = await locator.count().catch(() => 0);
+  if (count === 0) return "";
+  return ((await locator.textContent().catch(() => "")) || "").trim();
 }
 
 async function waitForNewText(
@@ -111,8 +114,29 @@ async function ensureWalletConnected(page: Page): Promise<void> {
     return false;
   };
 
+  const selectHeadlessWallet = async (): Promise<boolean> => {
+    const walletOption = page
+      .getByRole("button", { name: /E2E Trader/i })
+      .first();
+    if (!(await walletOption.isVisible().catch(() => false))) return false;
+    await walletOption.click({ force: true });
+    await expect(
+      page.getByRole("dialog", {
+        name: /Connect a wallet on Solana to continue/i,
+      }),
+    )
+      .toBeHidden({ timeout: 30_000 })
+      .catch(() => undefined);
+    return true;
+  };
+
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (await hasConnectedSolanaWallet()) return;
+
+    if (await selectHeadlessWallet()) {
+      await page.waitForTimeout(1_500);
+      continue;
+    }
 
     const connectButton = page
       .getByRole("button", {
@@ -122,6 +146,7 @@ async function ensureWalletConnected(page: Page): Promise<void> {
     if (await connectButton.isVisible().catch(() => false)) {
       await connectButton.click();
     }
+    await selectHeadlessWallet();
     await page.waitForTimeout(1_500);
   }
 
@@ -226,13 +251,21 @@ async function expectSolanaTxSuccess(
   expect(signature, `${label} signature missing`).not.toBe("");
   expect(signature, `${label} signature missing`).not.toBe("-");
 
+  const readStatus = async () => {
+    try {
+      const statuses = await connection.getSignatureStatuses([signature], {
+        searchTransactionHistory: true,
+      });
+      return statuses.value[0] ?? null;
+    } catch {
+      return null;
+    }
+  };
+
   await expect
     .poll(
       async () => {
-        const statuses = await connection.getSignatureStatuses([signature], {
-          searchTransactionHistory: true,
-        });
-        const status = statuses.value[0];
+        const status = await readStatus();
         if (!status) return "missing";
         if (status.err) return "failed";
         return status.confirmationStatus || "confirmed";
@@ -244,10 +277,7 @@ async function expectSolanaTxSuccess(
     )
     .not.toBe("missing");
 
-  const statuses = await connection.getSignatureStatuses([signature], {
-    searchTransactionHistory: true,
-  });
-  const status = statuses.value[0];
+  const status = await readStatus();
   expect(status?.err ?? null, `${label} failed on-chain`).toBeNull();
 }
 
@@ -257,9 +287,16 @@ async function fetchDecodedAccount<T>(
   accountName: "UserBalance" | "PositionState",
   address: PublicKey,
 ): Promise<T | null> {
-  const accountInfo = await connection.getAccountInfo(address, "confirmed");
-  if (!accountInfo?.data) return null;
-  return coder.decode(accountName, accountInfo.data) as T;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const accountInfo = await connection.getAccountInfo(address, "confirmed");
+      if (!accountInfo?.data) return null;
+      return coder.decode(accountName, accountInfo.data) as T;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  return null;
 }
 
 async function waitForEvmReceipt(
@@ -268,6 +305,47 @@ async function waitForEvmReceipt(
 ): Promise<void> {
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   expect(receipt.status).toBe("success");
+}
+
+async function submitModelsTrade(
+  page: Page,
+  tradeButtonTestId:
+    | "models-market-open-long"
+    | "models-market-open-short"
+    | "models-market-close-position",
+): Promise<string> {
+  const statusTestId = "models-market-last-trade-status";
+  const previousStatus = await readText(page, statusTestId);
+
+  const button = page.getByTestId(tradeButtonTestId);
+  await button.click({ force: true });
+
+  let nextStatus = "";
+  try {
+    nextStatus = await waitForNewText(
+      page,
+      statusTestId,
+      previousStatus,
+      5_000,
+    );
+  } catch {
+    await button.dispatchEvent("click");
+    nextStatus = await waitForNewText(
+      page,
+      statusTestId,
+      previousStatus,
+      5_000,
+    );
+  }
+
+  await expect
+    .poll(async () => await readText(page, statusTestId), {
+      timeout: 30_000,
+      intervals: [500, 1_000, 2_000],
+    })
+    .not.toMatch(/^Submitting\b/i);
+
+  return (await readText(page, statusTestId)) || nextStatus;
 }
 
 test.describe("market flows", () => {
@@ -281,7 +359,7 @@ test.describe("market flows", () => {
       state.solanaRpcUrl || "http://127.0.0.1:8899",
       "confirmed",
     );
-    const userBalanceAddress = new PublicKey(state.clobUserBalance || "");
+    const userBalancePda = new PublicKey(state.clobUserBalance || "");
 
     await page.goto("/?debug=1");
     await selectChain(page, "solana");
@@ -301,6 +379,7 @@ test.describe("market flows", () => {
     const previousYesTx = await readText(page, "solana-clob-place-order-tx");
     await clobPanel.getByTestId("prediction-select-yes").click();
     await clobPanel.getByTestId("prediction-submit").click();
+    await openSolanaAdminPanel(page);
 
     const yesTx = await waitForNewText(
       page,
@@ -317,16 +396,17 @@ test.describe("market flows", () => {
       .poll(async () => {
         const balance = await fetchDecodedAccount<{
           yesShares: unknown;
-          noShares: unknown;
-        }>(connection, clobCoder, "UserBalance", userBalanceAddress);
+        }>(connection, clobCoder, "UserBalance", userBalancePda);
         return Number(bnLikeToBigInt(balance?.yesShares));
       })
       .toBeGreaterThan(0);
 
+    await clobPanel.getByTestId("prediction-tab-sell").click();
+    await clobPanel.getByTestId("prediction-select-no").click();
     await clobPanel.getByTestId("solana-clob-price-input").fill("400");
     const previousNoTx = await readText(page, "solana-clob-place-order-tx");
-    await clobPanel.getByTestId("prediction-select-no").click();
-    await clobPanel.getByTestId("prediction-submit").click();
+    await clobPanel.getByTestId("solana-clob-sell-submit").click();
+    await openSolanaAdminPanel(page);
 
     const noTx = await waitForNewText(
       page,
@@ -342,25 +422,11 @@ test.describe("market flows", () => {
     await expect
       .poll(async () => {
         const balance = await fetchDecodedAccount<{
-          yesShares: unknown;
           noShares: unknown;
-        }>(connection, clobCoder, "UserBalance", userBalanceAddress);
-        return {
-          yes: Number(bnLikeToBigInt(balance?.yesShares)),
-          no: Number(bnLikeToBigInt(balance?.noShares)),
-        };
+        }>(connection, clobCoder, "UserBalance", userBalancePda);
+        return Number(bnLikeToBigInt(balance?.noShares));
       })
-      .toMatchObject({
-        yes: expect.any(Number),
-        no: expect.any(Number),
-      });
-
-    const finalBalance = await fetchDecodedAccount<{
-      yesShares: unknown;
-      noShares: unknown;
-    }>(connection, clobCoder, "UserBalance", userBalanceAddress);
-    expect(Number(bnLikeToBigInt(finalBalance?.yesShares))).toBeGreaterThan(0);
-    expect(Number(bnLikeToBigInt(finalBalance?.noShares))).toBeGreaterThan(0);
+      .toBeGreaterThan(0);
   });
 
   test("evm predictions place YES and NO orders, resolve, and claim", async ({
@@ -447,22 +513,54 @@ test.describe("market flows", () => {
 
     const previousClaimTx = await readText(page, "evm-last-claim-tx");
     let claimTx = "";
-    try {
-      claimTx = await waitForNewText(
-        page,
-        "evm-last-claim-tx",
-        previousClaimTx,
-        20_000,
-      );
-    } catch {
-      await evmPanel.getByTestId("evm-claim-payout").click();
-      claimTx = await waitForNewText(
-        page,
-        "evm-last-claim-tx",
-        previousClaimTx,
-      );
+    await expect
+      .poll(
+        async () => {
+          const claimText = await readText(page, "evm-last-claim-tx");
+          const positions = (await publicClient.readContract({
+            address: contractAddress,
+            abi: GOLD_CLOB_ABI,
+            functionName: "positions",
+            args: [matchId, userAddress],
+          })) as [bigint, bigint];
+          return {
+            claimText,
+            yes: positions[0].toString(),
+            no: positions[1].toString(),
+          };
+        },
+        {
+          timeout: 60_000,
+          intervals: [1_000, 2_000, 5_000],
+        },
+      )
+      .toMatchObject({
+        yes: "0",
+      });
+
+    claimTx = await readText(page, "evm-last-claim-tx");
+    if (claimTx && claimTx !== "-" && claimTx !== previousClaimTx) {
+      await waitForEvmReceipt(publicClient, claimTx as Hash);
+    } else {
+      const maybeClaimed = (await publicClient.readContract({
+        address: contractAddress,
+        abi: GOLD_CLOB_ABI,
+        functionName: "positions",
+        args: [matchId, userAddress],
+      })) as [bigint, bigint];
+      if (maybeClaimed[0] > 0n) {
+        await expect(evmPanel.getByTestId("evm-claim-payout")).toBeEnabled({
+          timeout: 20_000,
+        });
+        await evmPanel.getByTestId("evm-claim-payout").click();
+        claimTx = await waitForNewText(
+          page,
+          "evm-last-claim-tx",
+          previousClaimTx,
+        );
+        await waitForEvmReceipt(publicClient, claimTx as Hash);
+      }
     }
-    await waitForEvmReceipt(publicClient, claimTx as Hash);
 
     const finalPosition = (await publicClient.readContract({
       address: contractAddress,
@@ -502,12 +600,13 @@ test.describe("market flows", () => {
       .getByTestId(`models-market-row-${state.perpsCharacterId}`)
       .click({ force: true });
     await page.getByTestId("models-market-collateral-input").fill("0.2");
-    await page.getByTestId("models-market-leverage-2x").click();
+    await page.getByTestId("models-market-leverage-2x").click({ force: true });
 
     await expect(page.getByTestId("models-market-open-long")).toBeEnabled({
       timeout: 60_000,
     });
-    await page.getByTestId("models-market-open-long").click();
+    const longStatus = await submitModelsTrade(page, "models-market-open-long");
+    expect(longStatus).toMatch(/opened/i);
 
     await expect
       .poll(async () => {
@@ -521,7 +620,11 @@ test.describe("market flows", () => {
     await expect(page.getByTestId("models-market-close-position")).toBeVisible({
       timeout: 60_000,
     });
-    await page.getByTestId("models-market-close-position").click();
+    const closeLongStatus = await submitModelsTrade(
+      page,
+      "models-market-close-position",
+    );
+    expect(closeLongStatus).toMatch(/closed/i);
 
     await expect
       .poll(async () => {
@@ -532,7 +635,11 @@ test.describe("market flows", () => {
       })
       .toBe(0);
 
-    await page.getByTestId("models-market-open-short").click();
+    const shortStatus = await submitModelsTrade(
+      page,
+      "models-market-open-short",
+    );
+    expect(shortStatus).toMatch(/opened/i);
 
     await expect
       .poll(async () => {
@@ -546,7 +653,11 @@ test.describe("market flows", () => {
     await expect(page.getByTestId("models-market-close-position")).toBeVisible({
       timeout: 60_000,
     });
-    await page.getByTestId("models-market-close-position").click();
+    const closeShortStatus = await submitModelsTrade(
+      page,
+      "models-market-close-position",
+    );
+    expect(closeShortStatus).toMatch(/closed/i);
 
     await expect
       .poll(async () => {

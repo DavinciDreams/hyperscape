@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useChainId, useSwitchChain, useWalletClient } from "wagmi";
 import {
   createWalletClient,
+  hexToBytes,
   http,
   type Address,
   formatUnits,
@@ -59,6 +60,12 @@ function normalizePrivateKey(value: string): `0x${string}` | null {
   return withPrefix as `0x${string}`;
 }
 
+function normalizeAddress(value: string): Address | null {
+  const trimmed = value.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) return null;
+  return trimmed as Address;
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -89,21 +96,51 @@ export function EvmBettingPanel({
     [activeChain],
   );
 
-  const headlessPrivateKey = normalizePrivateKey(
+  const configuredHeadlessPrivateKey = normalizePrivateKey(
     (import.meta.env.VITE_EVM_PRIVATE_KEY as string | undefined) ??
       (import.meta.env.VITE_HEADLESS_EVM_PRIVATE_KEY as string | undefined) ??
       (import.meta.env.VITE_E2E_EVM_PRIVATE_KEY as string | undefined) ??
       "",
   );
+  const headlessPrivateKey = configuredHeadlessPrivateKey;
+  const configuredHeadlessAddress = normalizeAddress(
+    (import.meta.env.VITE_E2E_EVM_ADDRESS as string | undefined) ??
+      (import.meta.env.VITE_HEADLESS_EVM_ADDRESS as string | undefined) ??
+      "",
+  );
 
-  const e2eAccount = useMemo(() => {
-    if (!headlessPrivateKey) return null;
-    try {
-      return privateKeyToAccount(headlessPrivateKey);
-    } catch {
-      return null;
+  const e2eAccountResult = useMemo(() => {
+    if (isE2eMode && configuredHeadlessAddress) {
+      return { account: configuredHeadlessAddress, error: null };
     }
-  }, [headlessPrivateKey]);
+    if (!headlessPrivateKey)
+      return { account: null, error: "missing private key" };
+    try {
+      return {
+        account: privateKeyToAccount(headlessPrivateKey),
+        error: null,
+      };
+    } catch (stringError) {
+      try {
+        return {
+          account: privateKeyToAccount(
+            hexToBytes(headlessPrivateKey) as unknown as `0x${string}`,
+          ),
+          error: null,
+        };
+      } catch (bytesError) {
+        const error =
+          bytesError instanceof Error
+            ? bytesError.message
+            : stringError instanceof Error
+              ? stringError.message
+              : "failed to create e2e account";
+        return { account: null, error };
+      }
+    }
+  }, [configuredHeadlessAddress, headlessPrivateKey, isE2eMode]);
+  const e2eAccount = e2eAccountResult.account;
+  const e2eAccountError = e2eAccountResult.error;
 
   const e2eWalletClient = useMemo(() => {
     if (!chainConfig || !e2eAccount) return null;
@@ -114,11 +151,18 @@ export function EvmBettingPanel({
     });
   }, [chainConfig, e2eAccount]);
 
+  const headlessAccountAddress =
+    typeof e2eAccount === "string" ? e2eAccount : e2eAccount?.address;
+  const hasHeadlessEvmWallet = Boolean(
+    isE2eMode && chainConfig && e2eWalletClient && headlessAccountAddress,
+  );
   const effectiveWalletClient = walletClient ?? e2eWalletClient;
-  const effectiveAddress = (address ?? e2eAccount?.address) as
+  const effectiveAddress = (address ?? headlessAccountAddress) as
     | Address
     | undefined;
-  const walletConnected = Boolean(effectiveWalletClient && effectiveAddress);
+  const walletConnected = Boolean(
+    (effectiveWalletClient && effectiveAddress) || hasHeadlessEvmWallet,
+  );
 
   const [status, setStatus] = useState("Connect wallet to place bet");
   const [matchId, setMatchId] = useState<bigint>(1n);
@@ -402,6 +446,16 @@ export function EvmBettingPanel({
       if (source === "manual") setStatus("Wallet not connected");
       return;
     }
+    const winningShares =
+      matchMeta?.winner === "YES"
+        ? (position?.yesShares ?? 0n)
+        : matchMeta?.winner === "NO"
+          ? (position?.noShares ?? 0n)
+          : 0n;
+    if (winningShares <= 0n) {
+      if (source === "manual") setStatus("Nothing to claim");
+      return;
+    }
 
     try {
       const contractAddr = chainConfig.goldClobAddress as Address;
@@ -588,6 +642,16 @@ export function EvmBettingPanel({
     bestBid > 0 && bestAsk < 1000
       ? ((bestBid + bestAsk) / 2 / 1000).toFixed(3)
       : "—";
+  const claimableShares =
+    matchMeta?.winner === "YES"
+      ? (position?.yesShares ?? 0n)
+      : matchMeta?.winner === "NO"
+        ? (position?.noShares ?? 0n)
+        : 0n;
+  const canClaim =
+    Boolean(walletConnected && !isWrongChain) &&
+    matchMeta?.status === "RESOLVED" &&
+    claimableShares > 0n;
   const executionPrice =
     side === "YES"
       ? bestAsk > 0 && bestAsk < 1000
@@ -614,6 +678,13 @@ export function EvmBettingPanel({
         }}
       >
         <div data-testid="evm-status">{status}</div>
+        <div data-testid="evm-wallet-connected">
+          {walletConnected ? "true" : "false"}
+        </div>
+        <div data-testid="evm-headless-wallet">
+          {hasHeadlessEvmWallet ? "true" : "false"}
+        </div>
+        <div data-testid="evm-effective-address">{effectiveAddress ?? "-"}</div>
         <div data-testid="evm-match-id">Match #{matchId.toString()}</div>
         <div data-testid="evm-last-order-tx">{lastOrderTx}</div>
         <div data-testid="evm-last-create-tx">{lastCreateTx}</div>
@@ -667,7 +738,7 @@ export function EvmBettingPanel({
             type="button"
             data-testid="evm-claim-payout"
             onClick={() => void handleClaim("manual")}
-            disabled={!walletConnected || isWrongChain}
+            disabled={!canClaim}
           >
             Claim Payout
           </button>

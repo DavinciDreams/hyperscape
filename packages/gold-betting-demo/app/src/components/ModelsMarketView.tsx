@@ -353,6 +353,28 @@ const E2E_ORACLE_HISTORY: OracleHistoryPoint[] =
         },
       ]
     : [];
+const E2E_MARKET_SNAPSHOT: MarketSnapshot | null =
+  E2E_MODEL_ENTRY && IS_E2E_MODE
+    ? {
+        marketId: modelMarketIdFromCharacterId(E2E_MODEL_ENTRY.characterId),
+        spotIndex:
+          readE2eNumber(import.meta.env.VITE_E2E_MODEL_SPOT_INDEX, 0) || null,
+        longOi: 0,
+        shortOi: 0,
+        fundingRate: 0,
+        conservativeSkill:
+          readE2eNumber(import.meta.env.VITE_E2E_MODEL_MU, 0) -
+          readE2eNumber(import.meta.env.VITE_E2E_MODEL_SIGMA, 0) * 3,
+        uncertainty: readE2eNumber(import.meta.env.VITE_E2E_MODEL_SIGMA, 0),
+        lastUpdated: E2E_ORACLE_RECORDED_AT,
+        insuranceFund: readE2eNumber(
+          import.meta.env.VITE_E2E_MODEL_INSURANCE,
+          12,
+        ),
+        skewScale: DEFAULT_SKEW_SCALE_SOL * LAMPORTS_PER_SOL,
+        skewScaleSol: DEFAULT_SKEW_SCALE_SOL,
+      }
+    : null;
 
 export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   const { connection } = useConnection();
@@ -379,9 +401,13 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   const [submittingTrade, setSubmittingTrade] = React.useState<string | null>(
     null,
   );
+  const [lastTradeStatus, setLastTradeStatus] = React.useState("-");
+  const [lastTradeTx, setLastTradeTx] = React.useState("-");
   const [skewScaleSol, setSkewScaleSol] = React.useState(
     DEFAULT_SKEW_SCALE_SOL,
   );
+  const [configPresent, setConfigPresent] = React.useState(false);
+  const [configLoaded, setConfigLoaded] = React.useState(false);
   const [configuredMaxLeverage, setConfiguredMaxLeverage] = React.useState(
     DEFAULT_MAX_MODEL_LEVERAGE,
   );
@@ -596,6 +622,8 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
         if (mounted) {
           setMarketSnapshots({});
           setPositions({});
+          setConfigPresent(false);
+          setConfigLoaded(false);
           setSkewScaleSol(DEFAULT_SKEW_SCALE_SOL);
           setConfiguredMaxLeverage(DEFAULT_MAX_MODEL_LEVERAGE);
           setMaintenanceMarginBps(1_000);
@@ -638,28 +666,42 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
           ? fromLamports(bnToNumber(decoded.skewScale))
           : DEFAULT_SKEW_SCALE_SOL;
 
-        nextMarketSnapshots[entries[index].characterId] = {
-          marketId,
-          spotIndex: decoded
-            ? fromLamports(bnToNumber(decoded.spotIndex))
-            : null,
-          longOi: decoded ? fromLamports(bnToNumber(decoded.totalLongOi)) : 0,
-          shortOi: decoded ? fromLamports(bnToNumber(decoded.totalShortOi)) : 0,
-          fundingRate: decoded
-            ? fromLamports(bnToNumber(decoded.currentFundingRate))
-            : 0,
-          conservativeSkill:
-            mu !== null && sigma !== null ? conservativeSkill(mu, sigma) : null,
-          uncertainty: sigma,
-          lastUpdated: decoded
-            ? bnToNumber(decoded.oracleLastUpdated) * 1_000
-            : null,
-          insuranceFund: decoded
-            ? fromLamports(bnToNumber(decoded.insuranceFund))
-            : 0,
-          skewScale: decoded ? bnToNumber(decoded.skewScale) : 0,
-          skewScaleSol: localSkewScaleSol,
-        };
+        const fallbackSnapshot =
+          E2E_MARKET_SNAPSHOT &&
+          entries[index].characterId === E2E_MODEL_ENTRY?.characterId
+            ? E2E_MARKET_SNAPSHOT
+            : null;
+
+        nextMarketSnapshots[entries[index].characterId] = decoded
+          ? {
+              marketId,
+              spotIndex: fromLamports(bnToNumber(decoded.spotIndex)),
+              longOi: fromLamports(bnToNumber(decoded.totalLongOi)),
+              shortOi: fromLamports(bnToNumber(decoded.totalShortOi)),
+              fundingRate: fromLamports(bnToNumber(decoded.currentFundingRate)),
+              conservativeSkill:
+                mu !== null && sigma !== null
+                  ? conservativeSkill(mu, sigma)
+                  : null,
+              uncertainty: sigma,
+              lastUpdated: bnToNumber(decoded.oracleLastUpdated) * 1_000,
+              insuranceFund: fromLamports(bnToNumber(decoded.insuranceFund)),
+              skewScale: bnToNumber(decoded.skewScale),
+              skewScaleSol: localSkewScaleSol,
+            }
+          : (fallbackSnapshot ?? {
+              marketId,
+              spotIndex: null,
+              longOi: 0,
+              shortOi: 0,
+              fundingRate: 0,
+              conservativeSkill: null,
+              uncertainty: null,
+              lastUpdated: null,
+              insuranceFund: 0,
+              skewScale: 0,
+              skewScaleSol: DEFAULT_SKEW_SCALE_SOL,
+            });
       }
 
       const nextPositions: Record<string, PositionSnapshot> = {};
@@ -714,6 +756,8 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
 
       setMarketSnapshots(nextMarketSnapshots);
       setPositions(nextPositions);
+      setConfigPresent(Boolean(configInfo));
+      setConfigLoaded(Boolean(decodedConfig));
       setSkewScaleSol(
         decodedConfig
           ? fromLamports(bnToNumber(decodedConfig.defaultSkewScale))
@@ -810,21 +854,27 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
 
   const ensureTradable = (): boolean => {
     if (activeChain !== "solana") {
+      setLastTradeStatus("Switch the demo to Solana to trade model perps.");
       toast.error("Switch the demo to Solana to trade model perps.");
       return false;
     }
 
     if (!wallet.publicKey || !wallet.connected) {
+      setLastTradeStatus("Connect a Solana wallet to trade model perps.");
       setWalletModalVisible(true);
       return false;
     }
 
     if (!wallet.signTransaction || !wallet.signAllTransactions) {
+      setLastTradeStatus("Wallet cannot sign transactions.");
       toast.error("Wallet cannot sign transactions.");
       return false;
     }
 
     if (!selectedOracleFresh) {
+      setLastTradeStatus(
+        "This model market is waiting on a fresh oracle update.",
+      );
       toast.error("This model market is waiting on a fresh oracle update.");
       return false;
     }
@@ -861,6 +911,10 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
     const marketId = modelMarketIdFromCharacterId(selectedEntry.characterId);
     const txId = `model-market-${selectedEntry.characterId}-${direction.toLowerCase()}`;
     setSubmittingTrade(txId);
+    setLastTradeStatus(
+      `Submitting ${direction.toLowerCase()} ${selectedEntry.name}`,
+    );
+    setLastTradeTx("-");
     toast.loading(
       `Opening ${effectiveLeverage}x ${direction.toLowerCase()} on ${selectedEntry.name}`,
       { id: txId },
@@ -877,7 +931,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
         toLamports(collateralSol * effectiveLeverage) *
         (direction === "LONG" ? 1 : -1);
 
-      await program.methods
+      const signature = await program.methods
         .modifyPosition(
           marketId,
           new anchor.BN(String(marginDeltaLamports)),
@@ -892,6 +946,10 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
         })
         .rpc();
 
+      setLastTradeStatus(
+        `Opened ${direction.toLowerCase()} ${selectedEntry.name}`,
+      );
+      setLastTradeTx(signature);
       toast.success(
         `Opened ${direction.toLowerCase()} on ${selectedEntry.name}`,
         {
@@ -900,7 +958,9 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
       );
       await refreshChainState();
     } catch (tradeError) {
-      toast.error(getTradeErrorMessage(tradeError), { id: txId });
+      const message = getTradeErrorMessage(tradeError);
+      setLastTradeStatus(message);
+      toast.error(message, { id: txId });
     } finally {
       setSubmittingTrade(null);
     }
@@ -912,6 +972,8 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
 
     const txId = `close-model-${selectedEntry.characterId}`;
     setSubmittingTrade(txId);
+    setLastTradeStatus(`Closing ${selectedEntry.name} position`);
+    setLastTradeTx("-");
     toast.loading(`Closing ${selectedEntry.name} position`, { id: txId });
 
     try {
@@ -919,7 +981,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
       const marketId = modelMarketIdFromCharacterId(selectedEntry.characterId);
       const closeSizeLamports = -toLamports(selectedPosition.signedSize);
 
-      await program.methods
+      const signature = await program.methods
         .modifyPosition(
           marketId,
           new anchor.BN(0),
@@ -934,10 +996,14 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
         })
         .rpc();
 
+      setLastTradeStatus(`Closed ${selectedEntry.name} position`);
+      setLastTradeTx(signature);
       toast.success(`Closed ${selectedEntry.name} position`, { id: txId });
       await refreshChainState();
     } catch (tradeError) {
-      toast.error(getTradeErrorMessage(tradeError), { id: txId });
+      const message = getTradeErrorMessage(tradeError);
+      setLastTradeStatus(message);
+      toast.error(message, { id: txId });
     } finally {
       setSubmittingTrade(null);
     }
@@ -1409,6 +1475,31 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                 </div>
 
                 <div className="models-market-actions">
+                  {IS_E2E_MODE && (
+                    <div
+                      className="models-market-empty"
+                      style={{ marginBottom: 12 }}
+                    >
+                      <div data-testid="models-market-rpc-endpoint">
+                        {connection.rpcEndpoint}
+                      </div>
+                      <div data-testid="models-market-config-pda">
+                        {deriveConfigPda().toBase58()}
+                      </div>
+                      <div data-testid="models-market-config-present">
+                        {configPresent ? "true" : "false"}
+                      </div>
+                      <div data-testid="models-market-config-loaded">
+                        {configLoaded ? "true" : "false"}
+                      </div>
+                      <div data-testid="models-market-last-trade-status">
+                        {lastTradeStatus}
+                      </div>
+                      <div data-testid="models-market-last-trade-tx">
+                        {lastTradeTx}
+                      </div>
+                    </div>
+                  )}
                   <button
                     type="button"
                     data-testid="models-market-open-long"

@@ -533,6 +533,7 @@ async function main(): Promise<void> {
     `VITE_E2E_MODEL_SPOT_INDEX=${e2eModelSpotIndex}`,
     `VITE_E2E_MODEL_MU=${e2eModelMu}`,
     `VITE_E2E_MODEL_SIGMA=${e2eModelSigma}`,
+    "VITE_E2E_MODEL_INSURANCE=12",
     `VITE_E2E_MODEL_ORACLE_RECORDED_AT=${oracleRecordedAt}`,
     `VITE_BINARY_MARKET_MAKER_WALLET=${authority.publicKey.toBase58()}`,
     `VITE_BINARY_TRADE_TREASURY_WALLET=${authority.publicKey.toBase58()}`,

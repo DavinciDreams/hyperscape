@@ -8,7 +8,7 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import * as assert from "assert";
-import { configureAnchorTests } from "./test-anchor";
+import { configureAnchorTests, confirmSignatureByPolling } from "./test-anchor";
 
 import { FightOracle } from "../target/types/fight_oracle";
 import { GoldClobMarket } from "../target/types/gold_clob_market";
@@ -78,7 +78,7 @@ async function airdrop(
     recipient,
     sol * LAMPORTS_PER_SOL,
   );
-  await connection.confirmTransaction(sig, "confirmed");
+  await confirmSignatureByPolling(connection, sig);
 }
 
 async function ensureOracleReady(
@@ -86,17 +86,21 @@ async function ensureOracleReady(
   payer: Keypair,
 ): Promise<PublicKey> {
   const oracleConfig = deriveOracleConfigPda(program.programId);
-  await program.methods
-    .initializeOracle()
-    .accountsPartial({
-      authority: payer.publicKey,
-      oracleConfig,
-      program: program.programId,
-      programData: deriveProgramDataAddress(program.programId),
-      systemProgram: SystemProgram.programId,
-    })
-    .signers([payer])
-    .rpc();
+  const existingConfig =
+    await program.account.oracleConfig.fetchNullable(oracleConfig);
+  if (!existingConfig) {
+    await program.methods
+      .initializeOracle()
+      .accountsPartial({
+        authority: payer.publicKey,
+        oracleConfig,
+        program: program.programId,
+        programData: deriveProgramDataAddress(program.programId),
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([payer])
+      .rpc();
+  }
   return oracleConfig;
 }
 
@@ -186,8 +190,7 @@ async function createBoundClobMarket(
     .signers([payer, matchState])
     .rpc();
 
-  await anchor.web3.sendAndConfirmTransaction(
-    clobProgram.provider.connection,
+  await clobProgram.provider.sendAndConfirm(
     new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: payer.publicKey,

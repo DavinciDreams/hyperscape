@@ -65,19 +65,31 @@ describe("gold_clob_market (native SOL settlement)", () => {
           systemProgram: SystemProgram.programId,
         })
         .rpc();
+    } else {
+      await clobProgram.methods
+        .updateConfig(payer.publicKey, payer.publicKey, 100, 100, 200)
+        .accountsPartial({
+          authority: provider.wallet.publicKey,
+          config: configPda,
+        })
+        .rpc();
     }
 
     const oracleConfig = deriveOracleConfigPda(fightProgram.programId);
-    await fightProgram.methods
-      .initializeOracle()
-      .accountsPartial({
-        authority: payer.publicKey,
-        oracleConfig,
-        program: fightProgram.programId,
-        programData: deriveProgramDataAddress(fightProgram.programId),
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
+    const existingOracleConfig =
+      await fightProgram.account.oracleConfig.fetchNullable(oracleConfig);
+    if (!existingOracleConfig) {
+      await fightProgram.methods
+        .initializeOracle()
+        .accountsPartial({
+          authority: payer.publicKey,
+          oracleConfig,
+          program: fightProgram.programId,
+          programData: deriveProgramDataAddress(fightProgram.programId),
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+    }
 
     const matchId = new anchor.BN(Date.now());
     const oracleMatch = deriveOracleMatchPda(fightProgram.programId, matchId);

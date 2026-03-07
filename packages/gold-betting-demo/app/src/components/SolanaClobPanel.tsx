@@ -1274,7 +1274,11 @@ export function SolanaClobPanel({
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
             Sell/NO flow uses the same limit order action with side = NO.
           </div>
-          <button type="button" onClick={() => void handlePlaceOrder()}>
+          <button
+            type="button"
+            data-testid="solana-clob-sell-submit"
+            onClick={() => void handlePlaceOrder()}
+          >
             Place Limit Order
           </button>
         </div>

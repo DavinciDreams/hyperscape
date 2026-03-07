@@ -19,7 +19,10 @@ async function loadState(): Promise<E2eState> {
 }
 
 async function readTxSignature(page: Page, testId: string): Promise<string> {
-  const text = ((await page.getByTestId(testId).textContent()) || "").trim();
+  const locator = page.getByTestId(testId).first();
+  const count = await locator.count().catch(() => 0);
+  if (count === 0) return "";
+  const text = ((await locator.textContent().catch(() => "")) || "").trim();
   if (!text) return "";
   const delimiterIndex = text.indexOf(":");
   if (delimiterIndex >= 0) {
@@ -94,13 +97,21 @@ async function expectSolanaTxSuccess(
   expect(signature, `${label} signature missing`).not.toBe("");
   expect(signature, `${label} signature missing`).not.toBe("-");
 
+  const readStatus = async () => {
+    try {
+      const statuses = await connection.getSignatureStatuses([signature], {
+        searchTransactionHistory: true,
+      });
+      return statuses.value[0] ?? null;
+    } catch {
+      return null;
+    }
+  };
+
   await expect
     .poll(
       async () => {
-        const statuses = await connection.getSignatureStatuses([signature], {
-          searchTransactionHistory: true,
-        });
-        const status = statuses.value[0];
+        const status = await readStatus();
         if (!status) return "missing";
         if (status.err) return "failed";
         return status.confirmationStatus || "confirmed";
@@ -112,10 +123,7 @@ async function expectSolanaTxSuccess(
     )
     .not.toBe("missing");
 
-  const statuses = await connection.getSignatureStatuses([signature], {
-    searchTransactionHistory: true,
-  });
-  const status = statuses.value[0];
+  const status = await readStatus();
   expect(status, `${label} status not found`).toBeTruthy();
   expect(status?.err ?? null, `${label} failed on-chain`).toBeNull();
 }
@@ -138,8 +146,29 @@ async function ensureWalletConnected(page: Page): Promise<void> {
     return false;
   };
 
+  const selectHeadlessWallet = async (): Promise<boolean> => {
+    const walletOption = page
+      .getByRole("button", { name: /E2E Trader/i })
+      .first();
+    if (!(await walletOption.isVisible().catch(() => false))) return false;
+    await walletOption.click({ force: true });
+    await expect(
+      page.getByRole("dialog", {
+        name: /Connect a wallet on Solana to continue/i,
+      }),
+    )
+      .toBeHidden({ timeout: 30_000 })
+      .catch(() => undefined);
+    return true;
+  };
+
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (await hasConnectedSolanaWallet()) return;
+
+    if (await selectHeadlessWallet()) {
+      await page.waitForTimeout(2_000);
+      continue;
+    }
 
     const connectButton = page
       .getByRole("button", {
@@ -149,6 +178,7 @@ async function ensureWalletConnected(page: Page): Promise<void> {
     if (await connectButton.isVisible().catch(() => false)) {
       await connectButton.click();
     }
+    await selectHeadlessWallet();
     await page.waitForTimeout(2_000);
   }
 
@@ -413,6 +443,7 @@ test("runs non-debug Solana CLOB UI E2E and validates txs", async ({
     );
     await buyYesButton.click({ force: true });
   }
+  await openSolanaAdminPanel(page);
 
   const placeBetTx = await waitForNewTxSignature(
     page,

@@ -19,6 +19,7 @@ contract SkillOracle is Ownable {
     }
 
     mapping(bytes32 => AgentSkill) public agentSkills;
+    mapping(bytes32 => bool) public agentExists;
     bytes32[] public activeAgents;
 
     uint256 public globalMeanMu; // The average mu of the population
@@ -35,7 +36,8 @@ contract SkillOracle is Ownable {
      * @notice Updates the underlying skill data for an agent.
      */
     function updateAgentSkill(bytes32 agentId, uint256 mu, uint256 sigma) external onlyOwner {
-        if (agentSkills[agentId].lastUpdate == 0) {
+        if (!agentExists[agentId]) {
+            agentExists[agentId] = true;
             activeAgents.push(agentId);
         }
         agentSkills[agentId] = AgentSkill(mu, sigma, block.timestamp);
@@ -57,8 +59,8 @@ contract SkillOracle is Ownable {
      * @notice Gets the conservative skill estimate (mu - z * sigma).
      */
     function getConservativeSkill(bytes32 agentId) public view returns (int256) {
+        require(agentExists[agentId], "Agent not found");
         AgentSkill memory skill = agentSkills[agentId];
-        require(skill.lastUpdate > 0, "Agent not found");
         int256 cons = int256(skill.mu) - int256(Z_SCORE * skill.sigma);
         return cons;
     }
@@ -67,6 +69,7 @@ contract SkillOracle is Ownable {
      * @notice Calculates the exponentially mapped price: basePrice * exp(((μ - z*σ) - mean)/k)
      * For simulation purposes, we use a simplified approximation or direct scaling.
      */
+    // slither-disable-next-line timestamp
     function getIndexPrice(bytes32 agentId) public view returns (uint256) {
         int256 consSkill = getConservativeSkill(agentId);
         int256 diff = consSkill - int256(globalMeanMu);
