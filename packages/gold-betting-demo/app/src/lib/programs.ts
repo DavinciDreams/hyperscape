@@ -57,14 +57,6 @@ export const GOLD_CLOB_MARKET_PROGRAM_ID = ENV_GOLD_CLOB_MARKET_PROGRAM_ID
       "4phSkAVkbtGbQbrT3p2xjNPLAyw1DWz99wT7g4dQMyiX",
     );
 
-/**
- * @deprecated Binary market is no longer deployed. Retained for backward
- * compatibility with legacy App.tsx code paths that reference it.
- */
-export const GOLD_BINARY_MARKET_PROGRAM_ID = new PublicKey(
-  "7pxwReoFYABrSN7rnqusAxniKvrdv3zWDLoVamX5NN3W",
-);
-
 const FIGHT_ORACLE_IDL = ensureIdlAddress(
   fightOracleIdl,
   FIGHT_ORACLE_PROGRAM_ID,
@@ -78,8 +70,6 @@ export type ProgramsBundle = {
   provider: AnchorProvider;
   fightOracle: Program<any>;
   goldClobMarket: Program<any>;
-  /** @deprecated Binary market removed. Returns null. */
-  goldBinaryMarket: null;
 };
 
 function asAnchorWallet(wallet: WalletContextState): any {
@@ -122,7 +112,7 @@ export function createPrograms(
   const fightOracle = new Program(FIGHT_ORACLE_IDL, provider);
   const goldClobMarket = new Program(GOLD_CLOB_MARKET_IDL, provider);
 
-  return { provider, fightOracle, goldClobMarket, goldBinaryMarket: null };
+  return { provider, fightOracle, goldClobMarket };
 }
 
 export function createReadonlyPrograms(connection: Connection): ProgramsBundle {
@@ -134,7 +124,7 @@ export function createReadonlyPrograms(connection: Connection): ProgramsBundle {
   const fightOracle = new Program(FIGHT_ORACLE_IDL, provider);
   const goldClobMarket = new Program(GOLD_CLOB_MARKET_IDL, provider);
 
-  return { provider, fightOracle, goldClobMarket, goldBinaryMarket: null };
+  return { provider, fightOracle, goldClobMarket };
 }
 
 export function toBnAmount(amount: bigint): BN {

@@ -128,7 +128,6 @@ export interface EnvConfig {
   rpcUrl: string;
   wsUrl?: string;
   fightOracleProgramId: string;
-  goldBinaryMarketProgramId: string;
   goldMint: string;
   usdcMint?: string;
   betWindowSeconds: number;
@@ -218,7 +217,6 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     rpcUrl: "https://api.devnet.solana.com",
     wsUrl: "wss://api.devnet.solana.com/",
     fightOracleProgramId: "A6utqr1N4KP3Tst2tMCqfJR4mhCRNw4M2uN3Nb6nPBcS",
-    goldBinaryMarketProgramId: "7pxwReoFYABrSN7rnqusAxniKvrdv3zWDLoVamX5NN3W",
     goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
     uiSyncDelayMs: 0,
     headlessWalletName: "Headless Test Wallet",
@@ -230,7 +228,6 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     rpcUrl: "https://api.testnet.solana.com",
     wsUrl: "wss://api.testnet.solana.com/",
     fightOracleProgramId: "EW9GwxawnPEHA4eFgqd2oq9t55gSG4ReNqPRyG6Ui6PF",
-    goldBinaryMarketProgramId: "23YJWaC8AhEufH8eYdPMAouyWEgJ5MQWyvz3z8akTtR6",
     goldMint: "", // From .env.testnet
     uiSyncDelayMs: 0,
     headlessWalletName: "Headless Test Wallet",
@@ -242,7 +239,6 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     rpcUrl: "http://127.0.0.1:8899",
     wsUrl: "ws://127.0.0.1:8900",
     fightOracleProgramId: "",
-    goldBinaryMarketProgramId: "",
     goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
     streamUrl: "",
     uiSyncDelayMs: 0,
@@ -255,7 +251,6 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     rpcUrl: "http://127.0.0.1:8899",
     wsUrl: "ws://127.0.0.1:8900",
     fightOracleProgramId: "",
-    goldBinaryMarketProgramId: "",
     goldMint: "XeYyjz6Y351cyYDJAyghh6gJja9NF1ssiAXuem8YDyx",
     streamUrl: "",
     enableAutoSeed: false,
@@ -269,7 +264,6 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     cluster: "devnet",
     rpcUrl: "https://api.devnet.solana.com",
     fightOracleProgramId: "11111111111111111111111111111111",
-    goldBinaryMarketProgramId: "11111111111111111111111111111111",
     goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
     streamUrl: "",
     enableAutoSeed: false,
@@ -286,7 +280,6 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     gameApiUrl: DEFAULT_PRODUCTION_GAME_API_URL,
     gameWsUrl: `${DEFAULT_PRODUCTION_GAME_API_URL.replace(/^http/, "ws")}/ws`,
     fightOracleProgramId: "EW9GwxawnPEHA4eFgqd2oq9t55gSG4ReNqPRyG6Ui6PF",
-    goldBinaryMarketProgramId: "23YJWaC8AhEufH8eYdPMAouyWEgJ5MQWyvz3z8akTtR6",
     goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
     usdcMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     uiSyncDelayMs: 0,
@@ -335,9 +328,6 @@ export const CONFIG: EnvConfig = {
   fightOracleProgramId:
     readEnvString("VITE_FIGHT_ORACLE_PROGRAM_ID") ??
     baseEnvConfig.fightOracleProgramId,
-  goldBinaryMarketProgramId:
-    readEnvString("VITE_GOLD_BINARY_MARKET_PROGRAM_ID") ??
-    baseEnvConfig.goldBinaryMarketProgramId,
   goldMint: readEnvString("VITE_GOLD_MINT") ?? baseEnvConfig.goldMint,
   usdcMint: readEnvString("VITE_USDC_MINT") ?? baseEnvConfig.usdcMint,
   betWindowSeconds: readEnvNumber(
