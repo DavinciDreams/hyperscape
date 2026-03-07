@@ -28,6 +28,9 @@ import {
   adjustShorelineHeight,
   buildComputeBiomeWeightsJS,
   buildApplyLandscapeFeaturesJS,
+  MAX_HEIGHT,
+  WATER_LEVEL_NORMALIZED,
+  SHORELINE_CONFIG,
 } from "./TerrainHeightParams";
 import type {
   LandscapeFeatureDef,
@@ -755,7 +758,7 @@ export class TerrainSystem extends System {
       const workerConfig: TerrainWorkerConfig = {
         TILE_SIZE: this.CONFIG.TILE_SIZE,
         TILE_RESOLUTION: this.CONFIG.TILE_RESOLUTION,
-        MAX_HEIGHT: this.CONFIG.MAX_HEIGHT,
+        MAX_HEIGHT: MAX_HEIGHT,
         // Biome calculation - MUST match getBiomeInfluencesAtPosition()
         BIOME_GAUSSIAN_COEFF: this.CONFIG.BIOME_GAUSSIAN_COEFF,
         BIOME_BOUNDARY_NOISE_SCALE: this.CONFIG.BIOME_BOUNDARY_NOISE_SCALE,
@@ -766,20 +769,17 @@ export class TerrainSystem extends System {
         VALLEY_WEIGHT_BOOST: this.CONFIG.VALLEY_WEIGHT_BOOST,
         // Mountain height boost - MUST match getHeightAtWithoutShore()
         MOUNTAIN_HEIGHT_BOOST: this.CONFIG.MOUNTAIN_HEIGHT_BOOST,
-        // Shoreline config - MUST match getHeightAt() and createTileGeometry()
         WATER_THRESHOLD: this.CONFIG.WATER_THRESHOLD,
-        WATER_LEVEL_NORMALIZED: this.CONFIG.WATER_LEVEL_NORMALIZED,
-        SHORELINE_THRESHOLD: this.CONFIG.SHORELINE_THRESHOLD,
-        SHORELINE_STRENGTH: this.CONFIG.SHORELINE_STRENGTH,
-        // Shoreline slope adjustment - MUST match adjustHeightForShoreline()
-        SHORELINE_MIN_SLOPE: this.CONFIG.SHORELINE_MIN_SLOPE,
-        SHORELINE_SLOPE_SAMPLE_DISTANCE:
-          this.CONFIG.SHORELINE_SLOPE_SAMPLE_DISTANCE,
-        SHORELINE_LAND_BAND: this.CONFIG.SHORELINE_LAND_BAND,
-        SHORELINE_LAND_MAX_MULTIPLIER:
-          this.CONFIG.SHORELINE_LAND_MAX_MULTIPLIER,
-        SHORELINE_UNDERWATER_BAND: this.CONFIG.SHORELINE_UNDERWATER_BAND,
-        UNDERWATER_DEPTH_MULTIPLIER: this.CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
+        WATER_LEVEL_NORMALIZED: WATER_LEVEL_NORMALIZED,
+        SHORELINE_THRESHOLD: SHORELINE_CONFIG.THRESHOLD,
+        SHORELINE_STRENGTH: SHORELINE_CONFIG.STRENGTH,
+        SHORELINE_MIN_SLOPE: SHORELINE_CONFIG.MIN_SLOPE,
+        SHORELINE_SLOPE_SAMPLE_DISTANCE: SHORELINE_CONFIG.SLOPE_SAMPLE_DISTANCE,
+        SHORELINE_LAND_BAND: SHORELINE_CONFIG.LAND_BAND,
+        SHORELINE_LAND_MAX_MULTIPLIER: SHORELINE_CONFIG.LAND_MAX_MULTIPLIER,
+        SHORELINE_UNDERWATER_BAND: SHORELINE_CONFIG.UNDERWATER_BAND,
+        UNDERWATER_DEPTH_MULTIPLIER:
+          SHORELINE_CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
         landscapeFeatures: this.landscapeFeatures.map((f) => ({
           type: f.type,
           x: f.x,
@@ -1299,7 +1299,7 @@ export class TerrainSystem extends System {
       tileSize: this.CONFIG.TILE_SIZE,
       worldSize: this.CONFIG.WORLD_SIZE,
       tileResolution: this.CONFIG.TILE_RESOLUTION,
-      maxHeight: this.CONFIG.MAX_HEIGHT,
+      maxHeight: MAX_HEIGHT,
       waterThreshold: this.CONFIG.WATER_THRESHOLD,
       noise: {
         continent: {
@@ -1348,15 +1348,15 @@ export class TerrainSystem extends System {
         edgeNoiseStrength: this.CONFIG.ISLAND_EDGE_NOISE_STRENGTH,
       },
       shoreline: {
-        waterLevelNormalized: this.CONFIG.WATER_LEVEL_NORMALIZED,
-        threshold: this.CONFIG.SHORELINE_THRESHOLD,
-        colorStrength: this.CONFIG.SHORELINE_STRENGTH,
-        minSlope: this.CONFIG.SHORELINE_MIN_SLOPE,
-        slopeSampleDistance: this.CONFIG.SHORELINE_SLOPE_SAMPLE_DISTANCE,
-        landBand: this.CONFIG.SHORELINE_LAND_BAND,
-        landMaxMultiplier: this.CONFIG.SHORELINE_LAND_MAX_MULTIPLIER,
-        underwaterBand: this.CONFIG.SHORELINE_UNDERWATER_BAND,
-        underwaterDepthMultiplier: this.CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
+        waterLevelNormalized: WATER_LEVEL_NORMALIZED,
+        threshold: SHORELINE_CONFIG.THRESHOLD,
+        colorStrength: SHORELINE_CONFIG.STRENGTH,
+        minSlope: SHORELINE_CONFIG.MIN_SLOPE,
+        slopeSampleDistance: SHORELINE_CONFIG.SLOPE_SAMPLE_DISTANCE,
+        landBand: SHORELINE_CONFIG.LAND_BAND,
+        landMaxMultiplier: SHORELINE_CONFIG.LAND_MAX_MULTIPLIER,
+        underwaterBand: SHORELINE_CONFIG.UNDERWATER_BAND,
+        underwaterDepthMultiplier: SHORELINE_CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
       },
     };
 
@@ -1383,16 +1383,10 @@ export class TerrainSystem extends System {
   // OSRS-STYLE: Rolling terrain with visible hills
   private readonly CONFIG = {
     // Core World Specs
-    TILE_SIZE: 100, // 100m x 100m tiles
+    TILE_SIZE: TERRAIN_CONSTANTS.TERRAIN_TILE_SIZE,
     WORLD_SIZE: 100, // 100x100 grid = 10km x 10km world
     TILE_RESOLUTION: 64, // 64x64 vertices per tile for smooth terrain
-    MAX_HEIGHT: 150, // 50m max height variation (bumpy terrain to show flat zones)
-    WATER_THRESHOLD: TERRAIN_CONSTANTS.WATER_THRESHOLD, // Water appears below this level
-
-    // Performance: Reduced draw distance
-    CAMERA_FAR: 400, // Match fog far + buffer
-    FOG_NEAR: 150,
-    FOG_FAR: 350,
+    WATER_THRESHOLD: TERRAIN_CONSTANTS.WATER_THRESHOLD,
 
     // LOD (Level of Detail) - Resolution tiers based on distance
     LOD_DISTANCES: [100, 200, 350], // Distance thresholds
@@ -1445,16 +1439,7 @@ export class TerrainSystem extends System {
     VALLEY_HEIGHT_THRESHOLD: 0.4, // Height below which valleys/plains get weight boost
     VALLEY_WEIGHT_BOOST: 1.5, // Max weight multiplier for valleys at low elevation
 
-    // Shoreline
-    WATER_LEVEL_NORMALIZED: 0.15, // Normalized height where water starts
-    SHORELINE_THRESHOLD: 0.25, // Normalized height where shoreline effect ends
-    SHORELINE_STRENGTH: 0.6, // How strong the brown tint is (0-1)
-    SHORELINE_MIN_SLOPE: 0.06, // Minimum slope to enforce near shorelines
-    SHORELINE_SLOPE_SAMPLE_DISTANCE: 1.0, // Sample distance for shoreline slope checks
-    SHORELINE_LAND_BAND: 3.0, // Meters above water to shape shoreline
-    SHORELINE_LAND_MAX_MULTIPLIER: 1.6, // Max land steepening multiplier
-    SHORELINE_UNDERWATER_BAND: 3.0, // Meters below water to deepen shoreline
-    UNDERWATER_DEPTH_MULTIPLIER: 1.8, // Max depth multiplier near shoreline
+    // Shoreline — delegated to TerrainHeightParams.SHORELINE_CONFIG (single source of truth)
 
     // Island Mask (default for main world)
     ISLAND_MASK_ENABLED: true,
@@ -1838,10 +1823,10 @@ export class TerrainSystem extends System {
       getFlatZoneHeight: (worldX: number, worldZ: number) =>
         this.getFlatZoneHeight(worldX, worldZ),
 
-      WATER_LEVEL_NORMALIZED: this.CONFIG.WATER_LEVEL_NORMALIZED,
-      SHORELINE_THRESHOLD: this.CONFIG.SHORELINE_THRESHOLD,
-      SHORELINE_STRENGTH: this.CONFIG.SHORELINE_STRENGTH,
-      MAX_HEIGHT: this.CONFIG.MAX_HEIGHT,
+      WATER_LEVEL_NORMALIZED: WATER_LEVEL_NORMALIZED,
+      SHORELINE_THRESHOLD: SHORELINE_CONFIG.THRESHOLD,
+      SHORELINE_STRENGTH: SHORELINE_CONFIG.STRENGTH,
+      MAX_HEIGHT: MAX_HEIGHT,
       TILE_SIZE: this.CONFIG.TILE_SIZE,
     };
   }
@@ -1872,7 +1857,7 @@ export class TerrainSystem extends System {
     const provider = this.buildChunkTerrainProvider();
 
     const workerConfig: QuadChunkWorkerConfig = {
-      MAX_HEIGHT: this.CONFIG.MAX_HEIGHT,
+      MAX_HEIGHT: MAX_HEIGHT,
       BIOME_GAUSSIAN_COEFF: this.CONFIG.BIOME_GAUSSIAN_COEFF,
       BIOME_BOUNDARY_NOISE_SCALE: this.CONFIG.BIOME_BOUNDARY_NOISE_SCALE,
       BIOME_BOUNDARY_NOISE_AMOUNT: this.CONFIG.BIOME_BOUNDARY_NOISE_AMOUNT,
@@ -1882,16 +1867,15 @@ export class TerrainSystem extends System {
       VALLEY_WEIGHT_BOOST: this.CONFIG.VALLEY_WEIGHT_BOOST,
       MOUNTAIN_HEIGHT_BOOST: this.CONFIG.MOUNTAIN_HEIGHT_BOOST,
       WATER_THRESHOLD: this.CONFIG.WATER_THRESHOLD,
-      WATER_LEVEL_NORMALIZED: this.CONFIG.WATER_LEVEL_NORMALIZED,
-      SHORELINE_THRESHOLD: this.CONFIG.SHORELINE_THRESHOLD,
-      SHORELINE_STRENGTH: this.CONFIG.SHORELINE_STRENGTH,
-      SHORELINE_MIN_SLOPE: this.CONFIG.SHORELINE_MIN_SLOPE,
-      SHORELINE_SLOPE_SAMPLE_DISTANCE:
-        this.CONFIG.SHORELINE_SLOPE_SAMPLE_DISTANCE,
-      SHORELINE_LAND_BAND: this.CONFIG.SHORELINE_LAND_BAND,
-      SHORELINE_LAND_MAX_MULTIPLIER: this.CONFIG.SHORELINE_LAND_MAX_MULTIPLIER,
-      SHORELINE_UNDERWATER_BAND: this.CONFIG.SHORELINE_UNDERWATER_BAND,
-      UNDERWATER_DEPTH_MULTIPLIER: this.CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
+      WATER_LEVEL_NORMALIZED: WATER_LEVEL_NORMALIZED,
+      SHORELINE_THRESHOLD: SHORELINE_CONFIG.THRESHOLD,
+      SHORELINE_STRENGTH: SHORELINE_CONFIG.STRENGTH,
+      SHORELINE_MIN_SLOPE: SHORELINE_CONFIG.MIN_SLOPE,
+      SHORELINE_SLOPE_SAMPLE_DISTANCE: SHORELINE_CONFIG.SLOPE_SAMPLE_DISTANCE,
+      SHORELINE_LAND_BAND: SHORELINE_CONFIG.LAND_BAND,
+      SHORELINE_LAND_MAX_MULTIPLIER: SHORELINE_CONFIG.LAND_MAX_MULTIPLIER,
+      SHORELINE_UNDERWATER_BAND: SHORELINE_CONFIG.UNDERWATER_BAND,
+      UNDERWATER_DEPTH_MULTIPLIER: SHORELINE_CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
       landscapeFeatures: this.landscapeFeatures,
     };
 
@@ -2640,7 +2624,7 @@ export class TerrainSystem extends System {
       // Get biome influences for smooth color blending
       const { biomeWeightMap, totalWeight } =
         this.computeBiomeWeightsAtPosition(x, z);
-      const normalizedHeight = height / this.CONFIG.MAX_HEIGHT;
+      const normalizedHeight = height / MAX_HEIGHT;
 
       // Store dominant biome ID for shader
       let dominantBiome = DEFAULT_BIOME as string;
@@ -2694,18 +2678,17 @@ export class TerrainSystem extends System {
       }
 
       // Apply brownish shoreline tint near water level
-      const waterLevel = this.CONFIG.WATER_LEVEL_NORMALIZED;
-      const shorelineThreshold = this.CONFIG.SHORELINE_THRESHOLD;
+      const waterLevel = WATER_LEVEL_NORMALIZED;
+      const shorelineThreshold = SHORELINE_CONFIG.THRESHOLD;
       if (
         normalizedHeight > waterLevel &&
         normalizedHeight < shorelineThreshold
       ) {
-        // Sandy brown (0x8b7355) pre-computed: r=0.545, g=0.451, b=0.333
         const shoreFactor =
           (1.0 -
             (normalizedHeight - waterLevel) /
               (shorelineThreshold - waterLevel)) *
-          this.CONFIG.SHORELINE_STRENGTH;
+          SHORELINE_CONFIG.STRENGTH;
         colorR = colorR + (0.545 - colorR) * shoreFactor;
         colorG = colorG + (0.451 - colorG) * shoreFactor;
         colorB = colorB + (0.333 - colorB) * shoreFactor;
@@ -3348,7 +3331,7 @@ export class TerrainSystem extends System {
       this.noise,
       weights,
       this.landscapeFeatures,
-      this.CONFIG.MAX_HEIGHT,
+      MAX_HEIGHT,
     );
   }
 
@@ -3383,7 +3366,7 @@ export class TerrainSystem extends System {
     worldZ: number,
     centerHeight: number,
   ): number {
-    const checkDistance = this.CONFIG.SHORELINE_SLOPE_SAMPLE_DISTANCE;
+    const checkDistance = SHORELINE_CONFIG.SLOPE_SAMPLE_DISTANCE;
     const northHeight = this.getHeightAtWithoutShore(
       worldX,
       worldZ + checkDistance,
@@ -3417,11 +3400,11 @@ export class TerrainSystem extends System {
     if (!this._shorelineConfig) {
       this._shorelineConfig = {
         waterThreshold: this.CONFIG.WATER_THRESHOLD,
-        shorelineLandBand: this.CONFIG.SHORELINE_LAND_BAND,
-        shorelineUnderwaterBand: this.CONFIG.SHORELINE_UNDERWATER_BAND,
-        shorelineMinSlope: this.CONFIG.SHORELINE_MIN_SLOPE,
-        shorelineLandMaxMultiplier: this.CONFIG.SHORELINE_LAND_MAX_MULTIPLIER,
-        underwaterDepthMultiplier: this.CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
+        shorelineLandBand: SHORELINE_CONFIG.LAND_BAND,
+        shorelineUnderwaterBand: SHORELINE_CONFIG.UNDERWATER_BAND,
+        shorelineMinSlope: SHORELINE_CONFIG.MIN_SLOPE,
+        shorelineLandMaxMultiplier: SHORELINE_CONFIG.LAND_MAX_MULTIPLIER,
+        underwaterDepthMultiplier: SHORELINE_CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
       };
     }
     return this._shorelineConfig;
@@ -3539,8 +3522,8 @@ export class TerrainSystem extends System {
   ): number {
     const baseHeight = this.getHeightAtWithoutShore(worldX, worldZ);
     const waterThreshold = this.CONFIG.WATER_THRESHOLD;
-    const landBand = this.CONFIG.SHORELINE_LAND_BAND;
-    const underwaterBand = this.CONFIG.SHORELINE_UNDERWATER_BAND;
+    const landBand = SHORELINE_CONFIG.LAND_BAND;
+    const underwaterBand = SHORELINE_CONFIG.UNDERWATER_BAND;
 
     if (
       baseHeight >= waterThreshold + landBand ||

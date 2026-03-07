@@ -45,7 +45,7 @@ import { getLamppostLightTextureState } from "./LamppostLightMask";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { applyTerrainSunShade } from "./GPUMaterials";
 
-export const TERRAIN_CONSTANTS = {
+export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
   SNOW_HEIGHT: 50.0,
   NOISE_SCALE: 0.0008,
@@ -125,8 +125,8 @@ export function computeTerrainBaseColor(
 
   // Biome-blended dirt
   const dirtPatchFactor = smoothstep(
-    float(TERRAIN_CONSTANTS.DIRT_THRESHOLD - 0.05),
-    float(TERRAIN_CONSTANTS.DIRT_THRESHOLD + 0.15),
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
     noiseVal,
   );
   const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
@@ -158,7 +158,7 @@ export function computeTerrainBaseColor(
     SNOW_WHITE,
     mul(
       smoothstep(
-        float(TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0),
+        float(TERRAIN_SHADER_CONSTANTS.SNOW_HEIGHT - 5.0),
         float(60.0),
         height,
       ),
@@ -405,8 +405,8 @@ export function sampleNoiseAtPosition(
   }
 
   // Calculate UV the same way the shader does
-  const u = worldX * TERRAIN_CONSTANTS.NOISE_SCALE;
-  const v = worldZ * TERRAIN_CONSTANTS.NOISE_SCALE;
+  const u = worldX * TERRAIN_SHADER_CONSTANTS.NOISE_SCALE;
+  const v = worldZ * TERRAIN_SHADER_CONSTANTS.NOISE_SCALE;
 
   // The texture tiles, so wrap to 0-1
   const wrappedU = u - Math.floor(u);
@@ -469,10 +469,10 @@ export function getGrassiness(
 
   // === SNOW AT HIGH ELEVATION ===
   // Snow line at ~50m, full snow by 55m
-  if (height > TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0) {
+  if (height > TERRAIN_SHADER_CONSTANTS.SNOW_HEIGHT - 5.0) {
     const snowFactor = smoothstepCPU(
-      TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0,
-      TERRAIN_CONSTANTS.SNOW_HEIGHT + 5.0,
+      TERRAIN_SHADER_CONSTANTS.SNOW_HEIGHT - 5.0,
+      TERRAIN_SHADER_CONSTANTS.SNOW_HEIGHT + 5.0,
       height,
     );
     grassiness -= snowFactor;
@@ -600,7 +600,7 @@ export function createTerrainMaterial(): THREE.Material & {
   const sunDirectionUniform = uniform(vec3(0.5, 0.8, 0.3));
   const shadeColorUniform = uniform(vec3(0.7, 1.08, 1.22));
   const timeUniform = uniform(float(0));
-  const noiseScale = uniform(float(TERRAIN_CONSTANTS.NOISE_SCALE));
+  const noiseScale = uniform(float(TERRAIN_SHADER_CONSTANTS.NOISE_SCALE));
 
   // Sky-color fog: uses the shared render target texture (updated in-place by SkySystem)
   const fogTexNode = texture(fogRenderTarget.texture, screenUV);

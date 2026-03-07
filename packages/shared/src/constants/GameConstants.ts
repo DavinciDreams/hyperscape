@@ -56,14 +56,10 @@ export const XP_CONSTANTS = {
   },
 } as const;
 
-// === WORLD AND TERRAIN ===
+// === WORLD AND SPATIAL PARTITIONING ===
 export const WORLD_CONSTANTS = {
+  /** Spatial partition chunk size for entity registry (meters). */
   CHUNK_SIZE: 64,
-  WORLD_SIZE: 512,
-  TERRAIN_HEIGHT_SCALE: 20,
-  SEA_LEVEL: 0,
-  BIOME_TRANSITION_SMOOTHNESS: 0.1,
-  RESOURCE_SPAWN_DENSITY: 0.1,
 } as const;
 
 // === TERRAIN CONSTANTS ===
@@ -81,7 +77,7 @@ export const TERRAIN_CONSTANTS = {
    * Terrain below this height is underwater and impassable.
    * Used by: TerrainSystem, VegetationSystem, DissolveMaterial, RoadNetworkSystem, ResourceSystem
    */
-  WATER_THRESHOLD: 50.0,
+  WATER_THRESHOLD: 8.0,
 
   /**
    * Buffer distance above water where vegetation shouldn't spawn.
