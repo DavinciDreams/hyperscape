@@ -483,10 +483,8 @@ export function App() {
     let cancelled = false;
 
     void (async () => {
-      setIsRefreshing(true);
       try {
         const fightProgram: any = readonlyPrograms.fightOracle;
-        const marketProgram: any = readonlyPrograms.goldBinaryMarket;
 
         const allMatchesRaw = await fightProgram.account.matchResult.all();
         const matches = (allMatchesRaw as any[])
@@ -554,54 +552,17 @@ export function App() {
           nextCurrent = openMatches[0] ?? matches[0] ?? null;
         }
 
-        const resolved = matches.filter((value) => value.status === "resolved");
-        const nextLastResolved =
-          resolved.find((value) => value.matchId !== nextCurrent?.matchId) ??
-          resolved[0] ??
-          null;
-
-        let nextMarketState: any = null;
-        let nextMarketConfigState: any = null;
-        if (nextCurrent && marketProgram) {
-          const marketPda = findMarketPda(
-            GOLD_BINARY_MARKET_PROGRAM_ID,
-            nextCurrent.matchPda,
-          );
-          try {
-            nextMarketState =
-              await marketProgram.account.market.fetch(marketPda);
-          } catch {
-            nextMarketState = null;
-          }
-        }
-
-        if (marketProgram) {
-          try {
-            nextMarketConfigState =
-              await marketProgram.account.marketConfig.fetch(marketConfigPda);
-          } catch {
-            nextMarketConfigState = null;
-          }
-        }
-
-        if (cancelled) return;
-
         if (cancelled) return;
 
         // Delay UI state application to synchronize with public stream latency
         window.setTimeout(() => {
           if (cancelled) return;
           setCurrentMatch(nextCurrent);
-          setLastResolvedMatch(nextLastResolved);
-          setCurrentMarketState(nextMarketState);
-          setMarketConfigState(nextMarketConfigState);
         }, UI_SYNC_DELAY_MS);
       } catch (error) {
         if (!cancelled) {
           setStatus(`Refresh failed: ${(error as Error).message}`);
         }
-      } finally {
-        if (!cancelled) setIsRefreshing(false);
       }
     })();
 
@@ -613,83 +574,8 @@ export function App() {
     readonlyPrograms,
     refreshNonce,
     fixedMatchId,
-    marketConfigPda,
     UI_SYNC_DELAY_MS,
   ]);
-
-  const addresses = useMemo(() => {
-    if (!currentMatch) return null;
-    const market = findMarketPda(
-      GOLD_BINARY_MARKET_PROGRAM_ID,
-      currentMatch.matchPda,
-    );
-    const vaultAuthority = findVaultAuthorityPda(
-      GOLD_BINARY_MARKET_PROGRAM_ID,
-      market,
-    );
-    const yesVault = findYesVaultPda(GOLD_BINARY_MARKET_PROGRAM_ID, market);
-    const noVault = findNoVaultPda(GOLD_BINARY_MARKET_PROGRAM_ID, market);
-    return {
-      match: currentMatch.matchPda,
-      market,
-      vaultAuthority,
-      yesVault,
-      noVault,
-    };
-  }, [currentMatch]);
-
-  const marketGoldMint = useMemo(() => {
-    try {
-      const value = currentMarketState?.goldMint;
-      if (value && typeof value.toBase58 === "function") {
-        return value as PublicKey;
-      }
-      if (typeof value === "string") {
-        return new PublicKey(value);
-      }
-      return configuredGoldMint;
-    } catch {
-      return configuredGoldMint;
-    }
-  }, [currentMarketState, configuredGoldMint]);
-
-  const marketTokenProgram = useMemo(() => {
-    try {
-      const value = currentMarketState?.tokenProgram;
-      if (value && typeof value.toBase58 === "function") {
-        return value as PublicKey;
-      }
-      if (typeof value === "string") {
-        return new PublicKey(value);
-      }
-      return configuredGoldTokenProgram;
-    } catch {
-      return configuredGoldTokenProgram;
-    }
-  }, [currentMarketState, configuredGoldTokenProgram]);
-
-  const canAttemptSeed = useMemo(() => {
-    if (!addresses || !currentMarketState || !wallet.publicKey) return false;
-    if (!enumIs(currentMarketState.status, "open")) return false;
-    const marketMaker = currentMarketState.marketMaker as PublicKey | undefined;
-    if (!marketMaker) return false;
-    if (!wallet.publicKey.equals(marketMaker)) return false;
-
-    const openTs = asNumber(currentMarketState.openTs, 0);
-    const autoDelay = asNumber(
-      currentMarketState.autoSeedDelaySeconds,
-      DEFAULT_AUTO_SEED_DELAY_SECONDS,
-    );
-
-    const hasUserBets =
-      asNumber(currentMarketState.userYesTotal, 0) > 0 ||
-      asNumber(currentMarketState.userNoTotal, 0) > 0;
-    const hasMakerBets =
-      asNumber(currentMarketState.makerYesTotal, 0) > 0 ||
-      asNumber(currentMarketState.makerNoTotal, 0) > 0;
-
-    return nowTs >= openTs + autoDelay && !hasUserBets && !hasMakerBets;
-  }, [addresses, currentMarketState, wallet.publicKey, nowTs]);
 
   const handleRefresh = () => {
     setRefreshNonce((value) => value + 1);
