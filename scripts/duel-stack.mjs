@@ -1313,6 +1313,11 @@ async function main() {
       process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
       serverEnv.SOLANA_ARENA_MARKET_PROGRAM_ID ||
       DUEL_SOLANA_CANONICAL_PROGRAM_ID,
+    SOLANA_GOLD_MINT:
+      process.env.DUEL_SOLANA_GOLD_MINT ||
+      process.env.SOLANA_GOLD_MINT ||
+      serverEnv.SOLANA_GOLD_MINT ||
+      "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
     SOLANA_ARENA_AUTHORITY_SECRET:
       process.env.DUEL_SOLANA_ARENA_AUTHORITY_SECRET ||
       resolvedSolanaAuthority?.secretRef ||
