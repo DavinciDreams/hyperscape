@@ -234,7 +234,7 @@ export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
     type: LandscapeType.Mountain,
     x: 265.5,
     z: 322.5,
-    radius: 150,
+    radius: 100,
     strength: 0.7,
     layers: 3,
     shapePower: 1.5,
