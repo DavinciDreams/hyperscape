@@ -38,6 +38,8 @@ module.exports = {
             log_date_format: "YYYY-MM-DD HH:mm:ss Z",
             // Environment
             env: {
+                // Preserve deploy-time secrets loaded by the Vast bootstrap shell.
+                ...process.env,
                 NODE_ENV: "production",
                 // Aggressively reduce pool size - Neon serverless has very strict limits
                 // Single connection prevents exhaustion during crash loops

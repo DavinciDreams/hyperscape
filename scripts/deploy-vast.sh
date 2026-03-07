@@ -114,7 +114,7 @@ echo "[deploy] Port proxies running"
 
 # ── Start duel stack via pm2 ─────────────────────────────────
 echo "[deploy] Starting Hyperscape duel stack via pm2..."
-bunx pm2 start ecosystem.config.cjs
+bunx pm2 start ecosystem.config.cjs --update-env
 
 # ── Configure pm2 to survive reboots ─────────────────────────
 echo "[deploy] Saving pm2 process list for reboot survival..."
