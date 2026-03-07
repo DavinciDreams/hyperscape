@@ -6,6 +6,17 @@ set -e
 export PATH="/root/.bun/bin:$PATH"
 cd /root/hyperscape
 
+SECRETS_FILE="/tmp/hyperscape-secrets.env"
+if [ -f "$SECRETS_FILE" ]; then
+    echo "[deploy] Loading runtime secrets from $SECRETS_FILE"
+    set -a
+    # shellcheck disable=SC1090
+    . "$SECRETS_FILE"
+    set +a
+else
+    echo "[deploy] Warning: $SECRETS_FILE not found; relying on existing environment"
+fi
+
 # ── Ensure DNS resolution works (some Vast containers use internal-only DNS) ─
 echo -e "nameserver 8.8.8.8\nnameserver 8.8.4.4" > /etc/resolv.conf
 
