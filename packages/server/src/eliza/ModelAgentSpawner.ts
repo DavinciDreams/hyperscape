@@ -375,15 +375,17 @@ export async function spawnModelAgents(
   agentsToSpawn = agentsToSpawn.slice(0, maxAgents);
 
   // Load shared plugins
-  const modelAgentSqlEnabled = !/^(0|false|no|off)$/i.test(
-    process.env.MODEL_AGENT_SQL_ENABLED || "false",
+  // SQL plugin is required by @elizaos/core >= alpha.26 for DB adapter init.
+  // Can be disabled with MODEL_AGENT_SQL_ENABLED=false but agents will fail to start.
+  const modelAgentSqlDisabled = /^(0|false|no|off)$/i.test(
+    process.env.MODEL_AGENT_SQL_ENABLED ?? "",
   );
-  const sqlPlugin = modelAgentSqlEnabled
+  const sqlPlugin = !modelAgentSqlDisabled
     ? await loadSqlPlugin("ModelAgentSpawner")
     : null;
-  if (!modelAgentSqlEnabled) {
-    console.log(
-      "[ModelAgentSpawner] MODEL_AGENT_SQL_ENABLED=false, skipping SQL plugin for model runtimes",
+  if (modelAgentSqlDisabled) {
+    console.warn(
+      "[ModelAgentSpawner] SQL plugin disabled — agent init will likely fail",
     );
   }
   // Trajectory logger and local embedding plugin are intentionally omitted:

@@ -216,17 +216,17 @@ export class ElizaDuelBot extends EventEmitter {
         // Build plugins
         const plugins: Plugin[] = [modelPlugin, hyperscapePlugin];
 
-        // SQL plugin is optional for duel bots and can add significant startup
-        // memory/migration pressure. Keep it opt-in for stability.
-        const duelBotSqlEnabled = !/^(0|false|no|off)$/i.test(
-          process.env.DUEL_BOT_SQL_ENABLED || "false",
+        // SQL plugin is required by @elizaos/core >= alpha.26 for DB adapter init.
+        // Can be disabled with DUEL_BOT_SQL_ENABLED=false but agents will fail to start.
+        const duelBotSqlDisabled = /^(0|false|no|off)$/i.test(
+          process.env.DUEL_BOT_SQL_ENABLED ?? "",
         );
-        if (duelBotSqlEnabled) {
+        if (!duelBotSqlDisabled) {
           const sqlPlugin = await loadSqlPlugin(tag);
           if (sqlPlugin) plugins.push(sqlPlugin);
         } else {
-          console.log(
-            `[ElizaDuelBot] ${name} skipping SQL plugin (set DUEL_BOT_SQL_ENABLED=true to enable)`,
+          console.warn(
+            `[ElizaDuelBot] ${name} SQL plugin disabled — agent init will likely fail`,
           );
         }
 
