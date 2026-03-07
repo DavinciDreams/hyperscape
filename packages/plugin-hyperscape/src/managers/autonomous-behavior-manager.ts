@@ -413,8 +413,10 @@ export class AutonomousBehaviorManager {
   /** Whether KNOWN_LOCATIONS has been populated from world map data */
   private knownLocationsPopulated = false;
 
-  /** Last time we triggered a periodic state refresh */
-  private lastStateRefreshTime = 0;
+  /** Last time we triggered a periodic state refresh.
+   * Initialized with a random offset so agents don't all hit the DB simultaneously. */
+  private lastStateRefreshTime =
+    Date.now() - Math.floor(Math.random() * 30_000);
   /** How often to refresh quest/bank state to catch missed push events (ms) */
   private static readonly STATE_REFRESH_INTERVAL_MS = 30_000;
 

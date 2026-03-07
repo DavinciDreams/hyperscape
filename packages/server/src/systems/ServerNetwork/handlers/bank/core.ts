@@ -982,7 +982,33 @@ export function handleBankClose(
  * This allows agents to query their bank contents at any time without
  * needing to be near a bank NPC. Reuses sendBankStateWithTabs to send
  * the same bankState packet the client already handles.
+ *
+ * Uses a concurrency limiter to prevent 19 agents from simultaneously
+ * exhausting the DB connection pool when they all refresh at once.
  */
+const BANK_QUERY_MAX_CONCURRENT = 5;
+let bankQueryActive = 0;
+const bankQueryQueue: Array<() => void> = [];
+
+function acquireBankSlot(): Promise<void> {
+  if (bankQueryActive < BANK_QUERY_MAX_CONCURRENT) {
+    bankQueryActive++;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    bankQueryQueue.push(() => {
+      bankQueryActive++;
+      resolve();
+    });
+  });
+}
+
+function releaseBankSlot(): void {
+  bankQueryActive--;
+  const next = bankQueryQueue.shift();
+  if (next) next();
+}
+
 export async function handleRequestBankState(
   socket: ServerSocket,
   _data: unknown,
@@ -994,5 +1020,10 @@ export async function handleRequestBankState(
   const db = getDatabase(world);
   if (!db) return;
 
-  await sendBankStateWithTabs(socket, playerId, db);
+  await acquireBankSlot();
+  try {
+    await sendBankStateWithTabs(socket, playerId, db);
+  } finally {
+    releaseBankSlot();
+  }
 }
