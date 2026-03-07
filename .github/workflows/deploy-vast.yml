@@ -176,13 +176,18 @@ jobs:
             cat > /tmp/hyperscape-secrets.env << ENVEOF
             DATABASE_URL=${{ secrets.DATABASE_URL }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
+            ADMIN_CODE=${{ secrets.ADMIN_CODE }}
+            PRIVY_APP_ID=${{ secrets.PRIVY_APP_ID }}
+            PRIVY_APP_SECRET=${{ secrets.PRIVY_APP_SECRET }}
             ARENA_EXTERNAL_BET_WRITE_KEY=${{ secrets.ARENA_EXTERNAL_BET_WRITE_KEY }}
+            SOLANA_ARENA_AUTHORITY_SECRET=${{ secrets.SOLANA_ARENA_AUTHORITY_SECRET }}
             TWITCH_STREAM_KEY=${{ secrets.TWITCH_STREAM_KEY }}
             X_STREAM_KEY=${{ secrets.X_STREAM_KEY }}
             X_RTMP_URL=${{ secrets.X_RTMP_URL }}
             KICK_STREAM_KEY=${{ secrets.KICK_STREAM_KEY }}
             KICK_RTMP_URL=${{ secrets.KICK_RTMP_URL }}
             YOUTUBE_STREAM_KEY=
+            PUBLIC_CDN_URL=https://assets.hyperscape.club
             SOLANA_DEPLOYER_PRIVATE_KEY=${{ secrets.SOLANA_DEPLOYER_PRIVATE_KEY }}
             ENVEOF
             # Clean up any leading whitespace from heredoc
