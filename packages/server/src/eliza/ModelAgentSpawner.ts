@@ -17,6 +17,8 @@ import {
   ModelType,
   type Plugin,
   type Character,
+  type Memory,
+  type UUID,
   // @ts-ignore — InMemoryDatabaseAdapter is exported at runtime but not in .d.ts
   InMemoryDatabaseAdapter,
 } from "@elizaos/core";
@@ -434,6 +436,30 @@ export async function spawnModelAgents(
           );
         }) as AgentRuntime["getModel"];
 
+        // Cap memory accumulation to prevent unbounded heap growth.
+        // InMemoryDatabaseAdapter stores every createMemory() call forever in Maps.
+        // Agents only read the last ~25 memories for LLM context, so cap at 50.
+        const MAX_AGENT_MEMORIES = 50;
+        const trackedMemoryIds: string[] = [];
+        const originalCreateMemory =
+          runtimeInstance.createMemory.bind(runtimeInstance);
+        runtimeInstance.createMemory = async (
+          memory: Memory,
+          tableName: string,
+          unique?: boolean,
+        ): Promise<UUID> => {
+          // Evict oldest memories when over cap
+          while (trackedMemoryIds.length >= MAX_AGENT_MEMORIES) {
+            const oldId = trackedMemoryIds.shift();
+            if (oldId) {
+              runtimeInstance.deleteMemory(oldId as UUID).catch(() => {});
+            }
+          }
+          const id = await originalCreateMemory(memory, tableName, unique);
+          trackedMemoryIds.push(id);
+          return id;
+        };
+
         runtimeInstance.ensureEmbeddingDimension = async () => {
           try {
             let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -832,11 +858,18 @@ function startAgentBehaviorLoop(
 
   // Start the behavior loop with execution lock to prevent overlapping ticks
   let tickInProgress = false;
+  let tickCount = 0;
+  const GC_EVERY_N_TICKS = 20; // Every ~60 seconds (20 × 3s)
   const interval = setInterval(async () => {
     if (tickInProgress) return;
     tickInProgress = true;
     try {
       await executeBehaviorTick(runtime, service, config);
+      tickCount++;
+      // Periodic GC hint to reclaim short-lived allocations from ticks
+      if (tickCount % GC_EVERY_N_TICKS === 0) {
+        if (typeof Bun !== "undefined" && Bun.gc) Bun.gc(false);
+      }
     } catch (error) {
       console.error(
         `[ModelAgentSpawner] Behavior tick error for ${config.displayName}:`,
