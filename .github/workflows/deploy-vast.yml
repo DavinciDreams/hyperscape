@@ -102,21 +102,29 @@ jobs:
       - name: Enter Maintenance Mode
         continue-on-error: true
         env:
-          VAST_SERVER_URL: ${{ secrets.VAST_SERVER_URL }}
+          VAST_HOST: ${{ secrets.VAST_HOST }}
+          VAST_PORT: ${{ secrets.VAST_PORT }}
+          VAST_SSH_KEY: ${{ secrets.VAST_SSH_KEY }}
           ADMIN_CODE: ${{ secrets.ADMIN_CODE }}
         run: |
-          # Skip if secrets not configured
-          if [ -z "$VAST_SERVER_URL" ] || [ -z "$ADMIN_CODE" ]; then
-            echo "Skipping maintenance mode - secrets not configured"
+          if [ -z "$VAST_HOST" ] || [ -z "$VAST_PORT" ] || [ -z "$VAST_SSH_KEY" ] || [ -z "$ADMIN_CODE" ]; then
+            echo "Skipping maintenance mode - SSH or admin secrets not configured"
             exit 0
           fi
+
+          mkdir -p ~/.ssh
+          echo "$VAST_SSH_KEY" > ~/.ssh/vast_key
+          chmod 600 ~/.ssh/vast_key
+
           echo "Entering maintenance mode..."
-          RESPONSE=$(curl -s -X POST \
-            "$VAST_SERVER_URL/admin/maintenance/enter" \
-            -H "Content-Type: application/json" \
-            -H "x-admin-code: $ADMIN_CODE" \
-            -d '{"reason": "deployment", "timeoutMs": 300000}' \
-            --max-time 600 || echo '{"error": "curl failed"}')
+          RESPONSE=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+            -i ~/.ssh/vast_key -p "$VAST_PORT" "root@$VAST_HOST" \
+            "curl -s -X POST \
+              'http://127.0.0.1:5555/admin/maintenance/enter' \
+              -H 'Content-Type: application/json' \
+              -H 'x-admin-code: $ADMIN_CODE' \
+              -d '{\"reason\":\"deployment\",\"timeoutMs\":300000}' \
+              --max-time 600" || echo '{"error":"ssh or curl failed"}')
 
           echo "Maintenance mode response: $RESPONSE"
 
@@ -190,20 +198,28 @@ jobs:
       - name: Exit Maintenance Mode
         continue-on-error: true
         env:
-          VAST_SERVER_URL: ${{ secrets.VAST_SERVER_URL }}
+          VAST_HOST: ${{ secrets.VAST_HOST }}
+          VAST_PORT: ${{ secrets.VAST_PORT }}
+          VAST_SSH_KEY: ${{ secrets.VAST_SSH_KEY }}
           ADMIN_CODE: ${{ secrets.ADMIN_CODE }}
         run: |
-          # Skip if secrets not configured
-          if [ -z "$VAST_SERVER_URL" ] || [ -z "$ADMIN_CODE" ]; then
-            echo "Skipping maintenance mode exit - secrets not configured"
+          if [ -z "$VAST_HOST" ] || [ -z "$VAST_PORT" ] || [ -z "$VAST_SSH_KEY" ] || [ -z "$ADMIN_CODE" ]; then
+            echo "Skipping maintenance mode exit - SSH or admin secrets not configured"
             exit 0
           fi
+
+          mkdir -p ~/.ssh
+          echo "$VAST_SSH_KEY" > ~/.ssh/vast_key
+          chmod 600 ~/.ssh/vast_key
 
           echo "Waiting for server to be ready after deployment..."
 
           # Wait up to 5 minutes for server to be healthy
           for i in {1..30}; do
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$VAST_SERVER_URL/health" --max-time 10 || echo "000")
+            HTTP_STATUS=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+              -i ~/.ssh/vast_key -p "$VAST_PORT" "root@$VAST_HOST" \
+              "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:5555/health' --max-time 10" \
+              2>/dev/null || echo "000")
 
             if [ "$HTTP_STATUS" = "200" ]; then
               echo "Server is healthy!"
@@ -215,11 +231,13 @@ jobs:
           done
 
           echo "Exiting maintenance mode..."
-          RESPONSE=$(curl -s -X POST \
-            "$VAST_SERVER_URL/admin/maintenance/exit" \
-            -H "Content-Type: application/json" \
-            -H "x-admin-code: $ADMIN_CODE" \
-            --max-time 30 || echo '{"error": "curl failed"}')
+          RESPONSE=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+            -i ~/.ssh/vast_key -p "$VAST_PORT" "root@$VAST_HOST" \
+            "curl -s -X POST \
+              'http://127.0.0.1:5555/admin/maintenance/exit' \
+              -H 'Content-Type: application/json' \
+              -H 'x-admin-code: $ADMIN_CODE' \
+              --max-time 30" || echo '{"error":"ssh or curl failed"}')
 
           echo "Exit maintenance response: $RESPONSE"
 
