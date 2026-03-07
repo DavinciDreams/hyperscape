@@ -16,6 +16,7 @@
 		"provision": "bun run src/cli.ts provision",
 		"status": "bun run src/cli.ts status",
 		"destroy": "bun run src/cli.ts destroy",
+		"cleanup": "bun run src/cli.ts cleanup",
 		"search": "bun run src/cli.ts search",
 		"lint": "eslint src/"
 	},

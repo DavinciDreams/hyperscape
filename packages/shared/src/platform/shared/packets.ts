@@ -126,6 +126,7 @@ const names = [
   'firemakingRequest', // Client -> Server: request to light fire (tinderbox + logs)
   'cookingRequest',    // Client -> Server: request to cook food on fire/range
   'cookingSourceInteract', // Client -> Server: server-authoritative cooking (walk to fire first)
+  'cookingComplete',      // Server -> Client: cooking batch finished
   'fireCreated',          // Server -> Client: fire entity created
   'fireExtinguished',     // Server -> Client: fire entity expired/removed
   'fireLightingStarted',  // Server -> Client: fire lighting begun (show model)
@@ -139,20 +140,25 @@ const names = [
   'smithingInterfaceOpen', // Server -> Client: show smithing interface with available recipes
   'smeltingClose',         // Server -> Client: close smelting interface (walked away, etc.)
   'smithingClose',         // Server -> Client: close smithing interface (walked away, etc.)
+  'smeltingComplete',      // Server -> Client: smelting batch finished
+  'smithingComplete',      // Server -> Client: smithing batch finished
   // Crafting packets (leather, jewelry, gem cutting)
   'craftingSourceInteract', // Client -> Server: player clicked crafting source (needle/chisel)
   'processingCrafting',     // Client -> Server: player selected item to craft from UI
   'craftingInterfaceOpen',  // Server -> Client: show crafting interface with available recipes
   'craftingClose',          // Server -> Client: close crafting interface
+  'craftingComplete',       // Server -> Client: crafting batch finished
   // Fletching packets (knife + logs, stringing, arrow tipping)
   'fletchingSourceInteract', // Client -> Server: player used knife on logs or item-on-item
   'processingFletching',     // Client -> Server: player selected recipe to fletch from UI
   'fletchingInterfaceOpen',  // Server -> Client: show fletching interface with available recipes
   'fletchingClose',          // Server -> Client: close fletching interface
+  'fletchingComplete',       // Server -> Client: fletching batch finished
   // Tanning packets (NPC tanner)
   'processingTanning',      // Client -> Server: player selected hides to tan from UI
   'tanningInterfaceOpen',   // Server -> Client: show tanning interface with available hides
   'tanningClose',           // Server -> Client: close tanning interface
+  'tanningComplete',        // Server -> Client: tanning batch finished
   // Runecrafting packets (essence + altar → runes)
   'runecraftingAltarInteract', // Client -> Server: player clicked runecrafting altar
   // Combat packets
@@ -355,6 +361,7 @@ const names = [
   'duelCompleted',         // Server -> Client: duel completed with results
   'duelOpponentDisconnected', // Server -> Client: opponent disconnected during duel
   'duelOpponentReconnected',  // Server -> Client: opponent reconnected during duel
+  'duelOnDeck',              // Server -> Client: agent is on-deck for next duel (prepare)
   'duel:forfeit',          // Client -> Server: forfeit active duel (surrender)
   // Skill/Spell ability packets
   'useSkill',            // Client -> Server: activate a skill ability
@@ -405,6 +412,10 @@ const names = [
   'streamingLeaderboard',  // Server -> Client: leaderboard update
   // Server-authoritative movement correction packet (keep last to avoid ID churn)
   'positionReconcile',
+  // Agent state query packets (appended to avoid shifting existing IDs)
+  'requestBankState',   // Client -> Server: request bank state without opening bank UI
+  // Combat lifecycle packets (appended to avoid shifting existing IDs)
+  'combatEnded',        // Server -> Client: PvE combat ended (target dead or disengaged)
 ]
 
 const byName: Record<string, PacketInfo> = {};

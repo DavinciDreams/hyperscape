@@ -1378,15 +1378,17 @@ async function main() {
       process.env.SKIP_DEATH_RECOVERY_ON_STARTUP || "true",
     DEATH_RECOVERY_STARTUP_TIMEOUT_MS:
       process.env.DEATH_RECOVERY_STARTUP_TIMEOUT_MS || "5000",
-    // Disable embedded agents — use LLM-driven model agents instead.
+    // Duel stack uses the external dev-duel harness as the active agent pool.
+    // Keep the game server in external-only agent mode by default so it does
+    // not boot an additional in-process population of embedded/model agents.
+    DUEL_SERVER_AGENT_MODE:
+      process.env.DUEL_SERVER_AGENT_MODE || "external",
     AUTO_START_AGENTS: process.env.AUTO_START_AGENTS ?? "false",
-    AUTO_START_AGENTS_MAX: process.env.AUTO_START_AGENTS_MAX || "10",
-    // Enable model agents (LLM-driven, WebSocket-based) for duels and world behavior.
-    SPAWN_MODEL_AGENTS: process.env.SPAWN_MODEL_AGENTS ?? "true",
-    MAX_MODEL_AGENTS: process.env.MAX_MODEL_AGENTS || "10",
-    // Allow model agents even if embedded agents are also running (safety net).
+    AUTO_START_AGENTS_MAX: process.env.AUTO_START_AGENTS_MAX || "0",
+    SPAWN_MODEL_AGENTS: process.env.SPAWN_MODEL_AGENTS ?? "false",
+    MAX_MODEL_AGENTS: process.env.MAX_MODEL_AGENTS || "0",
     SPAWN_MODEL_AGENTS_WITH_EMBEDDED:
-      process.env.SPAWN_MODEL_AGENTS_WITH_EMBEDDED || "true",
+      process.env.SPAWN_MODEL_AGENTS_WITH_EMBEDDED || "false",
     // Prevent aggressive local auto-restarts while tuning duel/MM workflows.
     MEMORY_RESTART_THRESHOLD_MB:
       process.env.MEMORY_RESTART_THRESHOLD_MB || "12288",

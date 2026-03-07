@@ -725,6 +725,17 @@ export class EventBridge {
           data,
         );
       });
+
+      // Forward combat ended so clients/agents can clear inCombat flag
+      this.world.on(EventType.COMBAT_ENDED, (payload: unknown) => {
+        const data = payload as EventMap[EventType.COMBAT_ENDED];
+        if (data.attackerId) {
+          this.broadcast.sendToPlayer(data.attackerId, "combatEnded", {
+            attackerId: data.attackerId,
+            targetId: data.targetId,
+          });
+        }
+      });
     } catch (_err) {
       console.error("[EventBridge] Error setting up combat events:", _err);
     }
@@ -1111,6 +1122,19 @@ export class EventBridge {
         );
       });
 
+      // Forward cooking completion to player
+      this.world.on(EventType.COOKING_COMPLETED, (payload: unknown) => {
+        const data = payload as EventMap[EventType.COOKING_COMPLETED];
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "cookingComplete", {
+            rawItemId: data.rawItemId,
+            resultItemId: data.resultItemId,
+            wasBurnt: data.wasBurnt,
+            xpGained: data.xpGained,
+          });
+        }
+      });
+
       // Broadcast fire extinguish to all clients
       this.on(EventType.FIRE_EXTINGUISHED, (payload: unknown) => {
         const data = payload as EventMap[EventType.FIRE_EXTINGUISHED];
@@ -1156,6 +1180,31 @@ export class EventBridge {
           });
         }
       });
+      // Forward smelting completion to player (batch finished)
+      this.world.on(EventType.SMELTING_COMPLETE, (payload: unknown) => {
+        const data = payload as EventMap[EventType.SMELTING_COMPLETE];
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "smeltingComplete", {
+            barItemId: data.barItemId,
+            totalSmelted: data.totalSmelted,
+            totalFailed: data.totalFailed,
+            totalXp: data.totalXp,
+          });
+        }
+      });
+
+      // Forward smithing completion to player (batch finished)
+      this.world.on(EventType.SMITHING_COMPLETE, (payload: unknown) => {
+        const data = payload as EventMap[EventType.SMITHING_COMPLETE];
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "smithingComplete", {
+            recipeId: data.recipeId,
+            outputItemId: data.outputItemId,
+            totalSmithed: data.totalSmithed,
+            totalXp: data.totalXp,
+          });
+        }
+      });
     } catch (_err) {
       console.error("[EventBridge] Error setting up smelting events:", _err);
     }
@@ -1179,6 +1228,18 @@ export class EventBridge {
           this.broadcast.sendToPlayer(data.playerId, "craftingInterfaceOpen", {
             availableRecipes: data.availableRecipes,
             station: data.station,
+          });
+        }
+      });
+      // Forward crafting completion to player (batch finished)
+      this.world.on(EventType.CRAFTING_COMPLETE, (payload: unknown) => {
+        const data = payload as EventMap[EventType.CRAFTING_COMPLETE];
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "craftingComplete", {
+            recipeId: data.recipeId,
+            outputItemId: data.outputItemId,
+            totalCrafted: data.totalCrafted,
+            totalXp: data.totalXp,
           });
         }
       });
@@ -1207,6 +1268,18 @@ export class EventBridge {
           });
         }
       });
+      // Forward fletching completion to player (batch finished)
+      this.world.on(EventType.FLETCHING_COMPLETE, (payload: unknown) => {
+        const data = payload as EventMap[EventType.FLETCHING_COMPLETE];
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "fletchingComplete", {
+            recipeId: data.recipeId,
+            outputItemId: data.outputItemId,
+            totalCrafted: data.totalCrafted,
+            totalXp: data.totalXp,
+          });
+        }
+      });
     } catch (_err) {
       console.error("[EventBridge] Error setting up fletching events:", _err);
     }
@@ -1229,6 +1302,18 @@ export class EventBridge {
         if (data.playerId) {
           this.broadcast.sendToPlayer(data.playerId, "tanningInterfaceOpen", {
             availableRecipes: data.availableRecipes,
+          });
+        }
+      });
+      // Forward tanning completion to player (batch finished)
+      this.world.on(EventType.TANNING_COMPLETE, (payload: unknown) => {
+        const data = payload as EventMap[EventType.TANNING_COMPLETE];
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "tanningComplete", {
+            inputItemId: data.inputItemId,
+            outputItemId: data.outputItemId,
+            totalTanned: data.totalTanned,
+            totalCost: data.totalCost,
           });
         }
       });
@@ -1285,6 +1370,9 @@ export class EventBridge {
             stage: data.stage,
             progress: data.progress,
             description: data.description,
+            stageType: data.stageType,
+            stageTarget: data.stageTarget,
+            stageCount: data.stageCount,
           });
         }
       });

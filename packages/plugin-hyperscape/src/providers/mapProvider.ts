@@ -47,7 +47,7 @@ export const mapProvider: Provider = {
   name: "worldMap",
   description:
     "Provides world map knowledge: towns, POIs, distances, and compass directions for navigation",
-  dynamic: true,
+  dynamic: false,
   position: 1, // Run after goalProvider
 
   get: async (

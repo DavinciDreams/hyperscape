@@ -23,6 +23,7 @@ import {
   hasHides,
   hasEssence,
 } from "../utils/item-detection.js";
+import { getRuneTypes } from "../utils/world-data.js";
 
 function getDistance2D(
   posA: [number, number, number] | null | undefined,
@@ -152,21 +153,12 @@ function detectHideType(
 }
 
 function detectRuneType(text: string, altarName: string): string {
-  const runeTypes = [
-    "air",
-    "water",
-    "earth",
-    "fire",
-    "mind",
-    "body",
-    "cosmic",
-    "chaos",
-    "nature",
-    "law",
-    "death",
-    "blood",
-    "soul",
-  ];
+  // Use manifest-driven rune types with hardcoded fallback
+  const manifestTypes = getRuneTypes();
+  const runeTypes =
+    manifestTypes.length > 0
+      ? manifestTypes
+      : ["air", "water", "earth", "fire", "mind", "body"];
   for (const rune of runeTypes) {
     if (text.includes(rune)) return rune;
   }

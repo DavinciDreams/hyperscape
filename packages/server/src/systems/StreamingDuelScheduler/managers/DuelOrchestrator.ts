@@ -9,10 +9,13 @@
 import type { World } from "@hyperscape/shared";
 import {
   AttackType,
+  COMBAT_SPELLS,
   DeathState,
+  ELEMENTAL_STAVES,
   EventType,
   ITEMS,
   PlayerEntity,
+  SPELL_ORDER,
   getDuelArenaConfig,
   isPositionInsideCombatArena,
 } from "@hyperscape/shared";
@@ -122,16 +125,21 @@ const STREAMING_COMBAT_STALL_NUDGE_MS = Math.max(
   5_000,
   Number.parseInt(process.env.STREAMING_COMBAT_STALL_NUDGE_MS || "15000", 10),
 );
+/** Interval between escalating stall nudges after the first (#20) */
+const STALL_NUDGE_ESCALATION_INTERVAL_MS = 10_000;
+/** Maximum damage per escalating nudge (#20) */
+const STALL_NUDGE_MAX_DAMAGE = 5;
 
 /** Combat role types for duel arena agents. */
 type DuelCombatRole = "melee" | "ranged" | "mage";
 
-/** Weighted probabilities for random combat role selection. */
-const DUEL_COMBAT_ROLE_WEIGHTS: Record<DuelCombatRole, number> = {
-  melee: 50,
-  ranged: 25,
-  mage: 25,
-};
+/** Fallback gear when skill-based selection fails or entity is missing. */
+const MELEE_FALLBACK_WEAPON = "bronze_shortsword";
+const RANGED_FALLBACK_BOW = "shortbow";
+const RANGED_FALLBACK_ARROW = "bronze_arrow";
+const MAGE_FALLBACK_STAFF = "staff_of_air";
+const MAGE_FALLBACK_SPELL = "wind_strike";
+const RUNE_PROVISION_QTY = 500;
 
 // ============================================================================
 // DuelOrchestrator Class
@@ -146,11 +154,9 @@ export class DuelOrchestrator {
   private duelFoodSlotsByAgent: Map<string, DuelFoodProvisionedSlot[]> =
     new Map();
   private combatRolesByAgent: Map<string, DuelCombatRole> = new Map();
-  /**
-   * Track last nudge timestamp per agent pair to allow re-nudging if combat stalls again.
-   * Key format: "cycleId-agent1Id-agent2Id"
-   */
-  private lastCombatStallNudgeAt: number = 0;
+  /** Escalating stall nudge state (#20) */
+  private combatStallNudgeCount = 0;
+  private lastCombatStallNudgeTime = 0;
 
   // ---- Contestant Cache (Memory Optimization) ----
   /** Cached contestant objects keyed by "agentId:opponentId" */
@@ -445,13 +451,13 @@ export class DuelOrchestrator {
     this.world.emit("player:movement:cancel", { playerId: agent1.characterId });
     this.world.emit("player:movement:cancel", { playerId: agent2.characterId });
 
-    // Pick combat roles and equip agents accordingly.
-    const role1 = this.pickCombatRole();
-    const role2 = this.pickCombatRole();
+    // Pick combat roles based on agent skill levels and equip best available gear.
+    const role1 = this.pickCombatRoleBySkills(agent1.characterId);
+    const role2 = this.pickCombatRoleBySkills(agent2.characterId);
     this.combatRolesByAgent.set(agent1.characterId, role1);
     this.combatRolesByAgent.set(agent2.characterId, role2);
 
-    await Promise.all([
+    const [weapon1, weapon2] = await Promise.all([
       this.ensureAgentCombatSetup(agent1.characterId, role1),
       this.ensureAgentCombatSetup(agent2.characterId, role2),
     ]);
@@ -469,7 +475,7 @@ export class DuelOrchestrator {
 
     Logger.info(
       "StreamingDuelScheduler",
-      `Contestants prepared: ${agent1.name} (${role1}) vs ${agent2.name} (${role2}) (self-provisioned food, levelDiff=${levelDiff})`,
+      `Contestants prepared: ${agent1.name} (${role1}, ${weapon1}) vs ${agent2.name} (${role2}, ${weapon2}) (levelDiff=${levelDiff})`,
     );
   }
 
@@ -511,41 +517,517 @@ export class DuelOrchestrator {
     return normalizedWeaponId.length > 0 ? normalizedWeaponId : null;
   }
 
-  /** Pick a weighted random combat role for an agent. */
-  pickCombatRole(): DuelCombatRole {
-    const entries = Object.entries(DUEL_COMBAT_ROLE_WEIGHTS) as [
-      DuelCombatRole,
-      number,
-    ][];
-    const totalWeight = entries.reduce((sum, [, w]) => sum + w, 0);
-    let roll = Math.random() * totalWeight;
-    for (const [role, weight] of entries) {
-      roll -= weight;
-      if (roll <= 0) return role;
+  /** Get flat skill level map for an agent. Returns `{}` if entity/skills missing. */
+  private getAgentSkillLevels(characterId: string): Record<string, number> {
+    const entity = this.world.entities.get(characterId);
+    if (!entity?.data) return {};
+    const skills = (
+      entity.data as { skills?: Record<string, { level: number }> }
+    ).skills;
+    if (!skills) return {};
+    const result: Record<string, number> = {};
+    for (const [name, data] of Object.entries(skills)) {
+      result[name] = data?.level ?? 1;
     }
-    return "melee";
+    return result;
   }
 
-  /** Equip agent based on their assigned combat role. */
+  /** Pick combat role based on agent's actual skill levels. */
+  pickCombatRoleBySkills(characterId: string): DuelCombatRole {
+    const skills = this.getAgentSkillLevels(characterId);
+    // Melee sums two skills; ranged/magic are single skills scaled ×2 to normalize.
+    const meleeScore = (skills.attack ?? 1) + (skills.strength ?? 1);
+    const rangedScore = (skills.ranged ?? 1) * 2;
+    const mageScore = (skills.magic ?? 1) * 2;
+
+    // Ties break: melee > ranged > mage
+    if (meleeScore >= rangedScore && meleeScore >= mageScore) return "melee";
+    if (rangedScore >= mageScore) return "ranged";
+    return "mage";
+  }
+
+  // --------------------------------------------------------------------------
+  // Weapon scoring helpers
+  // --------------------------------------------------------------------------
+
+  /** Score a melee weapon by its offensive bonuses. */
+  private scoreMeleeWeapon(itemId: string): number {
+    const item = ITEMS.get(itemId);
+    if (!item) return -1;
+    const b = item.bonuses;
+    return (
+      (b?.attack ?? 0) +
+      (b?.attackStab ?? 0) +
+      (b?.attackSlash ?? 0) +
+      (b?.attackCrush ?? 0) +
+      (b?.strength ?? 0) +
+      (b?.meleeStrength ?? 0)
+    );
+  }
+
+  /** Score a ranged bow by its offensive bonuses. */
+  private scoreRangedBow(itemId: string): number {
+    const item = ITEMS.get(itemId);
+    if (!item) return -1;
+    const b = item.bonuses;
+    return (b?.attackRanged ?? 0) + (b?.ranged ?? 0);
+  }
+
+  /** Score arrows by ranged strength. */
+  private scoreArrows(itemId: string): number {
+    const item = ITEMS.get(itemId);
+    if (!item) return -1;
+    const b = item.bonuses;
+    return (b?.rangedStrength ?? 0) + (b?.ranged ?? 0);
+  }
+
+  /** Score a magic staff by its offensive bonuses. */
+  private scoreMageStaff(itemId: string): number {
+    const item = ITEMS.get(itemId);
+    if (!item) return -1;
+    const b = item.bonuses;
+    return (b?.attackMagic ?? 0) + (b?.magicDamage ?? 0);
+  }
+
+  /** Get item IDs from the agent's inventory that match a filter. */
+  private getInventoryItemIds(
+    characterId: string,
+    filter: (itemId: string) => boolean,
+  ): string[] {
+    const inventorySystem = this.getInventorySystem();
+    if (!inventorySystem?.getInventory) return [];
+    const inv = inventorySystem.getInventory(characterId);
+    if (!inv?.items) return [];
+    return inv.items
+      .map((slot) => slot.itemId)
+      .filter((id) => id && filter(id));
+  }
+
+  /** Check if an item is a melee weapon. */
+  private isMeleeWeapon(itemId: string): boolean {
+    const item = ITEMS.get(itemId);
+    if (!item || item.type !== "weapon") return false;
+    if (item.attackType !== AttackType.MELEE) return false;
+    if (item.equipSlot !== "weapon" && item.equipSlot !== "2h") return false;
+    return item.equipable !== false;
+  }
+
+  /** Check if an item is a ranged bow. */
+  private isRangedBow(itemId: string): boolean {
+    const item = ITEMS.get(itemId);
+    if (!item || item.type !== "weapon") return false;
+    if (item.attackType !== AttackType.RANGED) return false;
+    const wt = (item.weaponType ?? "").toString().toUpperCase();
+    return wt === "BOW" && item.equipable !== false;
+  }
+
+  /** Check if an item is a magic staff/wand. */
+  private isMageStaff(itemId: string): boolean {
+    const item = ITEMS.get(itemId);
+    if (!item || item.type !== "weapon") return false;
+    if (item.attackType !== AttackType.MAGIC) return false;
+    const wt = (item.weaponType ?? "").toString().toUpperCase();
+    return (wt === "STAFF" || wt === "WAND") && item.equipable !== false;
+  }
+
+  // --------------------------------------------------------------------------
+  // Best-gear selection helpers
+  // --------------------------------------------------------------------------
+
+  /**
+   * Pick the best melee weapon considering: manifest weapons the agent qualifies
+   * for, their currently equipped weapon, and weapons in their inventory.
+   * Returns `{ weaponId, alreadyEquipped }` so the equip step can be skipped.
+   */
+  private pickBestMeleeWeapon(characterId: string): {
+    weaponId: string;
+    alreadyEquipped: boolean;
+  } {
+    const equipmentSystem = this.getEquipmentSystem();
+
+    // --- Best from manifest (what we'd conjure) ---
+    let manifestBestId: string | null = null;
+    let manifestBestScore = -1;
+
+    for (const item of ITEMS.values()) {
+      if (item.type !== "weapon") continue;
+      if (item.attackType !== AttackType.MELEE) continue;
+      if (item.equipSlot !== "weapon" && item.equipSlot !== "2h") continue;
+      if (item.equipable === false) continue;
+
+      if (
+        equipmentSystem?.canPlayerEquipItem &&
+        !equipmentSystem.canPlayerEquipItem(characterId, item.id)
+      ) {
+        continue;
+      }
+
+      const score = this.scoreMeleeWeapon(item.id);
+      if (score > manifestBestScore) {
+        manifestBestScore = score;
+        manifestBestId = item.id;
+      }
+    }
+
+    // --- Currently equipped weapon ---
+    const equippedId = this.getEquippedWeaponId(characterId);
+    const equippedScore =
+      equippedId && this.isMeleeWeapon(equippedId)
+        ? this.scoreMeleeWeapon(equippedId)
+        : -1;
+
+    // --- Best melee weapon in inventory ---
+    const invMeleeIds = this.getInventoryItemIds(characterId, (id) =>
+      this.isMeleeWeapon(id),
+    );
+    let invBestId: string | null = null;
+    let invBestScore = -1;
+    for (const id of invMeleeIds) {
+      // Must also pass equip requirements
+      if (
+        equipmentSystem?.canPlayerEquipItem &&
+        !equipmentSystem.canPlayerEquipItem(characterId, id)
+      ) {
+        continue;
+      }
+      const score = this.scoreMeleeWeapon(id);
+      if (score > invBestScore) {
+        invBestScore = score;
+        invBestId = id;
+      }
+    }
+
+    // --- Pick the overall best ---
+    // Prefer agent's own gear (equipped > inventory) over conjured manifest weapons
+    if (
+      equippedScore >= manifestBestScore &&
+      equippedScore >= invBestScore &&
+      equippedId
+    ) {
+      Logger.info(
+        "StreamingDuelScheduler",
+        `Agent ${characterId} keeping equipped melee weapon ${equippedId} (score=${equippedScore})`,
+      );
+      return { weaponId: equippedId, alreadyEquipped: true };
+    }
+
+    if (invBestScore > manifestBestScore && invBestId) {
+      Logger.info(
+        "StreamingDuelScheduler",
+        `Agent ${characterId} equipping inventory melee weapon ${invBestId} (score=${invBestScore} > manifest=${manifestBestScore})`,
+      );
+      return { weaponId: invBestId, alreadyEquipped: false };
+    }
+
+    if (manifestBestId) {
+      return { weaponId: manifestBestId, alreadyEquipped: false };
+    }
+
+    // Fallback
+    const pool = this.getBronzeWeaponPool();
+    return {
+      weaponId: pool[0] ?? MELEE_FALLBACK_WEAPON,
+      alreadyEquipped: false,
+    };
+  }
+
+  /**
+   * Pick the best ranged bow + arrows, considering equipped gear and inventory.
+   */
+  private pickBestRangedWeapon(characterId: string): {
+    bowId: string;
+    arrowId: string;
+    bowAlreadyEquipped: boolean;
+  } {
+    const equipmentSystem = this.getEquipmentSystem();
+    const skills = this.getAgentSkillLevels(characterId);
+    const rangedLevel = skills.ranged ?? 1;
+
+    // --- Best bow from manifest ---
+    let manifestBowId: string | null = null;
+    let manifestBowScore = -1;
+    for (const item of ITEMS.values()) {
+      if (item.type !== "weapon") continue;
+      if (item.attackType !== AttackType.RANGED) continue;
+      const wt = (item.weaponType ?? "").toString().toUpperCase();
+      if (wt !== "BOW") continue;
+      if (item.equipable === false) continue;
+
+      if (
+        equipmentSystem?.canPlayerEquipItem &&
+        !equipmentSystem.canPlayerEquipItem(characterId, item.id)
+      ) {
+        continue;
+      }
+
+      const score = this.scoreRangedBow(item.id);
+      if (score > manifestBowScore) {
+        manifestBowScore = score;
+        manifestBowId = item.id;
+      }
+    }
+
+    // --- Currently equipped bow ---
+    const equippedId = this.getEquippedWeaponId(characterId);
+    const equippedBowScore =
+      equippedId && this.isRangedBow(equippedId)
+        ? this.scoreRangedBow(equippedId)
+        : -1;
+
+    // --- Best bow in inventory ---
+    const invBowIds = this.getInventoryItemIds(characterId, (id) =>
+      this.isRangedBow(id),
+    );
+    let invBowId: string | null = null;
+    let invBowScore = -1;
+    for (const id of invBowIds) {
+      if (
+        equipmentSystem?.canPlayerEquipItem &&
+        !equipmentSystem.canPlayerEquipItem(characterId, id)
+      ) {
+        continue;
+      }
+      const score = this.scoreRangedBow(id);
+      if (score > invBowScore) {
+        invBowScore = score;
+        invBowId = id;
+      }
+    }
+
+    // Pick best bow
+    let finalBowId: string;
+    let bowAlreadyEquipped = false;
+    if (
+      equippedBowScore >= manifestBowScore &&
+      equippedBowScore >= invBowScore &&
+      equippedId
+    ) {
+      finalBowId = equippedId;
+      bowAlreadyEquipped = true;
+      Logger.info(
+        "StreamingDuelScheduler",
+        `Agent ${characterId} keeping equipped bow ${equippedId} (score=${equippedBowScore})`,
+      );
+    } else if (invBowScore > manifestBowScore && invBowId) {
+      finalBowId = invBowId;
+      Logger.info(
+        "StreamingDuelScheduler",
+        `Agent ${characterId} equipping inventory bow ${invBowId} (score=${invBowScore} > manifest=${manifestBowScore})`,
+      );
+    } else {
+      finalBowId = manifestBowId ?? RANGED_FALLBACK_BOW;
+    }
+
+    // --- Best arrows from manifest ---
+    let bestArrowId: string | null = null;
+    let bestArrowScore = -1;
+    for (const item of ITEMS.values()) {
+      if (item.type !== "ammunition") continue;
+      if (item.equipSlot !== "arrows") continue;
+      const reqLevel =
+        item.requirements?.skills?.ranged ?? item.requirements?.level ?? 1;
+      if (rangedLevel < reqLevel) continue;
+
+      const score = this.scoreArrows(item.id);
+      if (score > bestArrowScore) {
+        bestArrowScore = score;
+        bestArrowId = item.id;
+      }
+    }
+
+    // Check inventory for arrows too
+    const invArrowIds = this.getInventoryItemIds(characterId, (id) => {
+      const item = ITEMS.get(id);
+      return item?.type === "ammunition" && item?.equipSlot === "arrows";
+    });
+    for (const id of invArrowIds) {
+      const item = ITEMS.get(id);
+      const reqLevel =
+        item?.requirements?.skills?.ranged ?? item?.requirements?.level ?? 1;
+      if (rangedLevel < reqLevel) continue;
+      const score = this.scoreArrows(id);
+      if (score > bestArrowScore) {
+        bestArrowScore = score;
+        bestArrowId = id;
+      }
+    }
+
+    return {
+      bowId: finalBowId,
+      arrowId: bestArrowId ?? RANGED_FALLBACK_ARROW,
+      bowAlreadyEquipped,
+    };
+  }
+
+  /**
+   * Pick the best mage setup, considering equipped staff and inventory.
+   */
+  private pickBestMageSetup(characterId: string): {
+    staffId: string;
+    spellId: string;
+    runes: Array<{ runeId: string; quantity: number }>;
+    staffAlreadyEquipped: boolean;
+  } {
+    const equipmentSystem = this.getEquipmentSystem();
+    const skills = this.getAgentSkillLevels(characterId);
+    const magicLevel = skills.magic ?? 1;
+
+    // --- Best spell (highest-level spell the agent qualifies for) ---
+    let bestSpellId = MAGE_FALLBACK_SPELL;
+    for (const id of SPELL_ORDER) {
+      const spell = COMBAT_SPELLS[id];
+      if (spell && magicLevel >= spell.level) {
+        bestSpellId = id;
+      }
+    }
+    const chosenSpell = COMBAT_SPELLS[bestSpellId];
+    const spellElement = chosenSpell?.element ?? "air";
+
+    // --- Best staff from manifest ---
+    let manifestStaffId: string | null = null;
+    let manifestStaffScore = -1;
+    let manifestMatchesElement = false;
+
+    for (const item of ITEMS.values()) {
+      if (item.type !== "weapon") continue;
+      if (item.attackType !== AttackType.MAGIC) continue;
+      const wt = (item.weaponType ?? "").toString().toUpperCase();
+      if (wt !== "STAFF" && wt !== "WAND") continue;
+      if (item.equipable === false) continue;
+
+      if (
+        equipmentSystem?.canPlayerEquipItem &&
+        !equipmentSystem.canPlayerEquipItem(characterId, item.id)
+      ) {
+        continue;
+      }
+
+      const score = this.scoreMageStaff(item.id);
+      const infiniteRunes = ELEMENTAL_STAVES[item.id] ?? [];
+      const matchesElement = infiniteRunes.includes(`${spellElement}_rune`);
+
+      if (
+        score > manifestStaffScore ||
+        (score === manifestStaffScore &&
+          matchesElement &&
+          !manifestMatchesElement)
+      ) {
+        manifestStaffScore = score;
+        manifestStaffId = item.id;
+        manifestMatchesElement = matchesElement;
+      }
+    }
+
+    // --- Currently equipped staff ---
+    const equippedId = this.getEquippedWeaponId(characterId);
+    const equippedStaffScore =
+      equippedId && this.isMageStaff(equippedId)
+        ? this.scoreMageStaff(equippedId)
+        : -1;
+
+    // --- Best staff in inventory ---
+    const invStaffIds = this.getInventoryItemIds(characterId, (id) =>
+      this.isMageStaff(id),
+    );
+    let invStaffId: string | null = null;
+    let invStaffScore = -1;
+    for (const id of invStaffIds) {
+      if (
+        equipmentSystem?.canPlayerEquipItem &&
+        !equipmentSystem.canPlayerEquipItem(characterId, id)
+      ) {
+        continue;
+      }
+      const score = this.scoreMageStaff(id);
+      if (score > invStaffScore) {
+        invStaffScore = score;
+        invStaffId = id;
+      }
+    }
+
+    // Pick best staff
+    let staffId: string;
+    let staffAlreadyEquipped = false;
+    if (
+      equippedStaffScore >= manifestStaffScore &&
+      equippedStaffScore >= invStaffScore &&
+      equippedId
+    ) {
+      staffId = equippedId;
+      staffAlreadyEquipped = true;
+      Logger.info(
+        "StreamingDuelScheduler",
+        `Agent ${characterId} keeping equipped staff ${equippedId} (score=${equippedStaffScore})`,
+      );
+    } else if (invStaffScore > manifestStaffScore && invStaffId) {
+      staffId = invStaffId;
+      Logger.info(
+        "StreamingDuelScheduler",
+        `Agent ${characterId} equipping inventory staff ${invStaffId} (score=${invStaffScore} > manifest=${manifestStaffScore})`,
+      );
+    } else {
+      staffId = manifestStaffId ?? MAGE_FALLBACK_STAFF;
+    }
+
+    // --- Runes needed (exclude runes provided by the chosen staff) ---
+    const infiniteFromStaff = ELEMENTAL_STAVES[staffId] ?? [];
+    const runes: Array<{ runeId: string; quantity: number }> = [];
+    if (chosenSpell?.runes) {
+      for (const req of chosenSpell.runes) {
+        if (!infiniteFromStaff.includes(req.runeId)) {
+          runes.push({ runeId: req.runeId, quantity: RUNE_PROVISION_QTY });
+        }
+      }
+    }
+
+    return { staffId, spellId: bestSpellId, runes, staffAlreadyEquipped };
+  }
+
+  /** Equip agent based on their assigned combat role with best available gear. */
   async ensureAgentCombatSetup(
     playerId: string,
     role: DuelCombatRole,
-  ): Promise<void> {
+  ): Promise<string> {
     switch (role) {
-      case "melee":
-        await this.equipMeleeWeapon(playerId);
-        break;
-      case "ranged":
-        await this.equipRangedGear(playerId);
-        break;
-      case "mage":
-        await this.equipMageGear(playerId);
-        break;
+      case "melee": {
+        const { weaponId, alreadyEquipped } =
+          this.pickBestMeleeWeapon(playerId);
+        if (!alreadyEquipped) {
+          await this.equipMeleeWeapon(playerId, weaponId);
+        }
+        return weaponId;
+      }
+      case "ranged": {
+        const { bowId, arrowId, bowAlreadyEquipped } =
+          this.pickBestRangedWeapon(playerId);
+        await this.equipRangedGear(
+          playerId,
+          bowId,
+          arrowId,
+          bowAlreadyEquipped,
+        );
+        return bowId;
+      }
+      case "mage": {
+        const { staffId, spellId, runes, staffAlreadyEquipped } =
+          this.pickBestMageSetup(playerId);
+        await this.equipMageGear(
+          playerId,
+          staffId,
+          spellId,
+          runes,
+          staffAlreadyEquipped,
+        );
+        return staffId;
+      }
     }
   }
 
-  /** Equip a random bronze melee weapon (existing behavior). */
-  private async equipMeleeWeapon(playerId: string): Promise<void> {
+  /** Equip a specific melee weapon, falling back to bronze if it fails. */
+  private async equipMeleeWeapon(
+    playerId: string,
+    weaponId: string,
+  ): Promise<void> {
     const equipmentSystem = this.getEquipmentSystem();
     if (
       !equipmentSystem?.getPlayerEquipment ||
@@ -554,150 +1036,298 @@ export class DuelOrchestrator {
       return;
     }
 
-    const weaponPool = [...this.getBronzeWeaponPool()];
-    for (let i = weaponPool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [weaponPool[i], weaponPool[j]] = [weaponPool[j], weaponPool[i]];
-    }
-
-    let attempted = 0;
-    for (const weaponId of weaponPool) {
-      if (
-        equipmentSystem.canPlayerEquipItem &&
-        !equipmentSystem.canPlayerEquipItem(playerId, weaponId)
-      ) {
-        continue;
-      }
-
-      attempted++;
-      try {
-        const equipResult = await equipmentSystem.equipItemDirect(
-          playerId,
-          weaponId,
-        );
-        if (!equipResult.success) {
-          Logger.warn(
-            "StreamingDuelScheduler",
-            `Failed to auto-equip ${weaponId} for ${playerId}: ${equipResult.error ?? "unknown error"}`,
-          );
-          continue;
-        }
-
+    // Try the chosen weapon first
+    try {
+      const equipResult = await equipmentSystem.equipItemDirect(
+        playerId,
+        weaponId,
+      );
+      if (equipResult.success) {
         Logger.info(
           "StreamingDuelScheduler",
           `Auto-equipped melee ${weaponId} for ${playerId}`,
         );
         return;
-      } catch (err) {
-        Logger.warn(
-          "StreamingDuelScheduler",
-          `Error auto-equipping ${weaponId} for ${playerId}: ${errMsg(err)}`,
-        );
+      }
+      Logger.warn(
+        "StreamingDuelScheduler",
+        `Failed to auto-equip ${weaponId} for ${playerId}: ${equipResult.error ?? "unknown error"}`,
+      );
+    } catch (err) {
+      Logger.warn(
+        "StreamingDuelScheduler",
+        `Error auto-equipping ${weaponId} for ${playerId}: ${errMsg(err)}`,
+      );
+    }
+
+    // Fallback: try bronze weapons from the pool
+    if (weaponId !== MELEE_FALLBACK_WEAPON) {
+      const fallbacks = this.getBronzeWeaponPool();
+      for (const fallbackId of fallbacks) {
+        if (
+          equipmentSystem.canPlayerEquipItem &&
+          !equipmentSystem.canPlayerEquipItem(playerId, fallbackId)
+        ) {
+          continue;
+        }
+        try {
+          const result = await equipmentSystem.equipItemDirect(
+            playerId,
+            fallbackId,
+          );
+          if (result.success) {
+            Logger.info(
+              "StreamingDuelScheduler",
+              `Fallback-equipped melee ${fallbackId} for ${playerId} (wanted ${weaponId})`,
+            );
+            return;
+          }
+        } catch {
+          // Try next fallback
+        }
       }
     }
 
     Logger.warn(
       "StreamingDuelScheduler",
-      attempted > 0
-        ? `Cannot auto-equip a bronze weapon for ${playerId}: all ${attempted} attempt(s) failed`
-        : `Cannot auto-equip a bronze weapon for ${playerId}: no equipable option found`,
+      `Cannot auto-equip any melee weapon for ${playerId} (tried ${weaponId} + fallbacks)`,
     );
   }
 
-  /** Equip shortbow + bronze arrows for ranged agents. */
-  private async equipRangedGear(playerId: string): Promise<void> {
+  /** Equip bow + arrows for ranged agents. */
+  private async equipRangedGear(
+    playerId: string,
+    bowId: string,
+    arrowId: string,
+    bowAlreadyEquipped = false,
+  ): Promise<void> {
     const equipmentSystem = this.getEquipmentSystem();
     if (!equipmentSystem?.equipItemDirect) return;
 
-    // Equip shortbow (2h weapon, auto-routes to weapon slot)
-    try {
-      const bowResult = await equipmentSystem.equipItemDirect(
-        playerId,
-        "shortbow",
-      );
-      if (bowResult.success) {
-        Logger.info(
-          "StreamingDuelScheduler",
-          `Equipped shortbow for ranged agent ${playerId}`,
+    // Skip bow equip if agent already has this bow equipped
+    let bowEquipped = bowAlreadyEquipped;
+    if (!bowAlreadyEquipped) {
+      try {
+        const bowResult = await equipmentSystem.equipItemDirect(
+          playerId,
+          bowId,
         );
-      } else {
+        if (bowResult.success) {
+          bowEquipped = true;
+          Logger.info(
+            "StreamingDuelScheduler",
+            `Equipped ${bowId} for ranged agent ${playerId}`,
+          );
+        } else {
+          Logger.warn(
+            "StreamingDuelScheduler",
+            `Failed to equip ${bowId} for ${playerId}: ${bowResult.error ?? "unknown"}`,
+          );
+        }
+      } catch (err) {
         Logger.warn(
           "StreamingDuelScheduler",
-          `Failed to equip shortbow for ${playerId}: ${bowResult.error ?? "unknown"}`,
+          `Error equipping ${bowId} for ${playerId}: ${errMsg(err)}`,
         );
       }
-    } catch (err) {
-      Logger.warn(
-        "StreamingDuelScheduler",
-        `Error equipping shortbow for ${playerId}: ${errMsg(err)}`,
-      );
+
+      // Fallback bow if chosen one failed
+      if (!bowEquipped && bowId !== RANGED_FALLBACK_BOW) {
+        try {
+          const fallbackResult = await equipmentSystem.equipItemDirect(
+            playerId,
+            RANGED_FALLBACK_BOW,
+          );
+          if (fallbackResult.success) {
+            Logger.info(
+              "StreamingDuelScheduler",
+              `Fallback-equipped ${RANGED_FALLBACK_BOW} for ranged agent ${playerId} (wanted ${bowId})`,
+            );
+          }
+        } catch {
+          // Best effort
+        }
+      }
     }
 
-    // Equip bronze arrows (auto-routes to arrows slot via equipSlot="arrows")
+    // Equip arrows (auto-routes to arrows slot via equipSlot="arrows")
     try {
       const arrowResult = await equipmentSystem.equipItemDirect(
         playerId,
-        "bronze_arrow",
+        arrowId,
       );
       if (arrowResult.success) {
-        // equipItemDirect doesn't set quantity for stackable items — set directly
+        // equipItemDirect doesn't set quantity for stackable items.
+        // Set quantity on the live equipment reference AND provision via
+        // inventory so the combat system sees the full stack.
         const equipment = equipmentSystem.getPlayerEquipment?.(playerId) as
           | Record<
               string,
               { quantity?: number; itemId?: string | number | null }
             >
           | undefined;
-        if (equipment?.arrows?.itemId) {
-          equipment.arrows.quantity = 500;
+        if (equipment?.arrows) {
+          equipment.arrows.quantity = RUNE_PROVISION_QTY;
         }
+
+        // Also add arrows to inventory as a backup — some combat paths
+        // read arrow count from inventory rather than equipment slot.
+        const inventorySystem = this.getInventorySystem();
+        if (inventorySystem?.addItemDirect) {
+          try {
+            await inventorySystem.addItemDirect(playerId, {
+              itemId: arrowId,
+              quantity: RUNE_PROVISION_QTY,
+            });
+          } catch {
+            // Best effort — equipment slot quantity is the primary source
+          }
+        }
+
         Logger.info(
           "StreamingDuelScheduler",
-          `Equipped bronze arrows (qty=500) for ranged agent ${playerId}`,
+          `Equipped ${arrowId} (qty=${RUNE_PROVISION_QTY}) for ranged agent ${playerId}`,
         );
       } else {
         Logger.warn(
           "StreamingDuelScheduler",
-          `Failed to equip bronze arrows for ${playerId}: ${arrowResult.error ?? "unknown"}`,
+          `Failed to equip ${arrowId} for ${playerId}: ${arrowResult.error ?? "unknown"}`,
         );
       }
     } catch (err) {
       Logger.warn(
         "StreamingDuelScheduler",
-        `Error equipping bronze arrows for ${playerId}: ${errMsg(err)}`,
+        `Error equipping ${arrowId} arrows for ${playerId}: ${errMsg(err)}`,
       );
     }
   }
 
-  /** Equip staff of air, set autocast to wind strike, and add runes for mage agents. */
-  private async equipMageGear(playerId: string): Promise<void> {
+  /** Equip staff, set autocast spell, and add required runes for mage agents. */
+  private async equipMageGear(
+    playerId: string,
+    staffId: string,
+    spellId: string,
+    runes: Array<{ runeId: string; quantity: number }>,
+    staffAlreadyEquipped = false,
+  ): Promise<void> {
     const equipmentSystem = this.getEquipmentSystem();
     if (!equipmentSystem?.equipItemDirect) return;
 
-    // Equip staff of air (provides infinite air runes, weapon slot)
-    try {
-      const staffResult = await equipmentSystem.equipItemDirect(
-        playerId,
-        "staff_of_air",
-      );
-      if (staffResult.success) {
-        Logger.info(
-          "StreamingDuelScheduler",
-          `Equipped staff_of_air for mage agent ${playerId}`,
+    // Skip staff equip if agent already has this staff equipped
+    if (!staffAlreadyEquipped) {
+      let staffEquipped = false;
+      try {
+        const staffResult = await equipmentSystem.equipItemDirect(
+          playerId,
+          staffId,
         );
-      } else {
+        if (staffResult.success) {
+          staffEquipped = true;
+          Logger.info(
+            "StreamingDuelScheduler",
+            `Equipped ${staffId} for mage agent ${playerId}`,
+          );
+        } else {
+          Logger.warn(
+            "StreamingDuelScheduler",
+            `Failed to equip ${staffId} for ${playerId}: ${staffResult.error ?? "unknown"}`,
+          );
+        }
+      } catch (err) {
         Logger.warn(
           "StreamingDuelScheduler",
-          `Failed to equip staff_of_air for ${playerId}: ${staffResult.error ?? "unknown"}`,
+          `Error equipping ${staffId} for ${playerId}: ${errMsg(err)}`,
         );
       }
-    } catch (err) {
-      Logger.warn(
-        "StreamingDuelScheduler",
-        `Error equipping staff_of_air for ${playerId}: ${errMsg(err)}`,
-      );
+
+      // Fallback staff if chosen one failed
+      if (!staffEquipped && staffId !== MAGE_FALLBACK_STAFF) {
+        try {
+          const fallbackResult = await equipmentSystem.equipItemDirect(
+            playerId,
+            MAGE_FALLBACK_STAFF,
+          );
+          if (fallbackResult.success) {
+            Logger.info(
+              "StreamingDuelScheduler",
+              `Fallback-equipped ${MAGE_FALLBACK_STAFF} for mage agent ${playerId} (wanted ${staffId})`,
+            );
+            // Recalculate runes for fallback staff (it provides different infinite runes)
+            const fallbackInfinite =
+              ELEMENTAL_STAVES[MAGE_FALLBACK_STAFF] ?? [];
+            const spell = COMBAT_SPELLS[spellId];
+            if (spell?.runes) {
+              runes = [];
+              for (const req of spell.runes) {
+                if (!fallbackInfinite.includes(req.runeId)) {
+                  runes.push({
+                    runeId: req.runeId,
+                    quantity: RUNE_PROVISION_QTY,
+                  });
+                }
+              }
+            }
+          }
+        } catch {
+          // Best effort
+        }
+      }
     }
 
-    // Set autocast to wind_strike.
+    // (#19) Validate spell element matches staff element after any fallback.
+    // If mismatched, find the best spell matching the staff's infinite runes.
+    const actualStaffId = staffAlreadyEquipped
+      ? staffId
+      : (this.getEquippedWeaponId(playerId) ?? staffId);
+    const staffInfinite = ELEMENTAL_STAVES[actualStaffId] ?? [];
+    const currentSpell = COMBAT_SPELLS[spellId];
+    if (currentSpell) {
+      const spellElement = currentSpell.element ?? "air";
+      const staffProvidesSpellElement = staffInfinite.includes(
+        `${spellElement}_rune`,
+      );
+      if (!staffProvidesSpellElement && staffInfinite.length > 0) {
+        // Staff doesn't match spell element — find best spell that matches
+        const staffElements = staffInfinite
+          .filter((r: string) => r.endsWith("_rune"))
+          .map((r: string) => r.replace("_rune", ""));
+        const skills = this.getAgentSkillLevels(playerId);
+        const magicLevel = skills.magic ?? 1;
+        let bestMatchSpellId = spellId; // keep current as fallback
+        for (const sid of SPELL_ORDER) {
+          const sp = COMBAT_SPELLS[sid];
+          if (
+            sp &&
+            magicLevel >= sp.level &&
+            staffElements.includes(sp.element ?? "")
+          ) {
+            bestMatchSpellId = sid;
+          }
+        }
+        if (bestMatchSpellId !== spellId) {
+          spellId = bestMatchSpellId;
+          // Recalculate runes for the new spell
+          const newSpell = COMBAT_SPELLS[spellId];
+          if (newSpell?.runes) {
+            runes = [];
+            for (const req of newSpell.runes) {
+              if (!staffInfinite.includes(req.runeId)) {
+                runes.push({
+                  runeId: req.runeId,
+                  quantity: RUNE_PROVISION_QTY,
+                });
+              }
+            }
+          }
+          Logger.info(
+            "StreamingDuelScheduler",
+            `Spell validation: switched ${playerId} to ${spellId} (matches staff ${actualStaffId})`,
+          );
+        }
+      }
+    }
+
+    // Set autocast spell.
     // Belt-and-suspenders: set selectedSpell directly on entity data AND via
     // world.getPlayer() (which the CombatSystem reads), then emit the event.
     // The event handler in PlayerSystem early-returns if the agent isn't in its
@@ -706,7 +1336,7 @@ export class DuelOrchestrator {
     const entity = this.world.entities.get(playerId);
     if (entity?.data) {
       (entity.data as { selectedSpell?: string | null }).selectedSpell =
-        "wind_strike";
+        spellId;
     }
     const playerEntity = (
       this.world as {
@@ -714,15 +1344,22 @@ export class DuelOrchestrator {
       }
     ).getPlayer?.(playerId);
     if (playerEntity?.data) {
-      playerEntity.data.selectedSpell = "wind_strike";
+      playerEntity.data.selectedSpell = spellId;
     }
     this.world.emit(EventType.PLAYER_SET_AUTOCAST, {
       playerId,
-      spellId: "wind_strike",
+      spellId,
     });
 
-    // Add runes to inventory (staff_of_air provides infinite air runes,
-    // but add both as a safety net; mind runes are consumed 1 per cast)
+    // Add required runes to inventory
+    if (runes.length === 0) {
+      Logger.info(
+        "StreamingDuelScheduler",
+        `No runes needed for mage agent ${playerId} (staff covers all spell runes)`,
+      );
+      return;
+    }
+
     const inventorySystem = this.getInventorySystem();
     if (inventorySystem?.addItemDirect) {
       // CRITICAL: Wait for inventory to finish loading from DB before adding
@@ -738,24 +1375,25 @@ export class DuelOrchestrator {
         }
       }
 
+      const results: string[] = [];
       try {
-        const mindAdded = await inventorySystem.addItemDirect(playerId, {
-          itemId: "mind_rune",
-          quantity: 500,
-        });
-        const airAdded = await inventorySystem.addItemDirect(playerId, {
-          itemId: "air_rune",
-          quantity: 500,
-        });
-        if (!mindAdded || !airAdded) {
+        for (const rune of runes) {
+          const added = await inventorySystem.addItemDirect(playerId, {
+            itemId: rune.runeId,
+            quantity: rune.quantity,
+          });
+          results.push(`${rune.runeId}=${added}`);
+        }
+        const allOk = results.every((r) => r.endsWith("=true"));
+        if (!allOk) {
           Logger.warn(
             "StreamingDuelScheduler",
-            `Failed to add runes for mage agent ${playerId}: mind=${mindAdded} air=${airAdded} (inventory may be full or item not in manifest)`,
+            `Partial rune add for mage agent ${playerId}: ${results.join(", ")}`,
           );
         } else {
           Logger.info(
             "StreamingDuelScheduler",
-            `Added runes (500 mind, 500 air) for mage agent ${playerId}`,
+            `Added runes for mage agent ${playerId}: ${runes.map((r) => `${r.quantity} ${r.runeId}`).join(", ")}`,
           );
         }
       } catch (err) {
@@ -1249,6 +1887,10 @@ export class DuelOrchestrator {
     // Phase guard — only transition from COUNTDOWN (Fix B).
     if (cycle.phase !== "COUNTDOWN") return;
 
+    // Reset escalating stall nudge state for new fight (#20)
+    this.combatStallNudgeCount = 0;
+    this.lastCombatStallNudgeTime = 0;
+
     const { agent1, agent2 } = cycle;
 
     // Validate both agents exist and are alive (Fix B).
@@ -1292,7 +1934,7 @@ export class DuelOrchestrator {
     if (agent1) this.restoreHealth(agent1.characterId, true);
     if (agent2) this.restoreHealth(agent2.characterId, true);
 
-    // Emit fight start
+    // Emit fight start (streaming-specific event for spectator UI)
     this.world.emit("streaming:fight:start", {
       cycleId: cycle.cycleId,
       agent1Id: agent1?.characterId,
@@ -1301,6 +1943,18 @@ export class DuelOrchestrator {
         STREAMING_TIMING.FIGHTING_DURATION +
         STREAMING_TIMING.END_WARNING_DURATION,
     });
+
+    // Emit standard duel fight start so agent plugins enter combat mode.
+    // The duel-events listener sends duelFightStart to both agent sockets.
+    if (agent1 && agent2) {
+      const duelId = cycle.duelId ?? `streaming-${cycle.cycleId}`;
+      this.world.emit(EventType.DUEL_FIGHT_START, {
+        duelId,
+        challengerId: agent1.characterId,
+        targetId: agent2.characterId,
+        arenaId: cycle.arenaId ?? 0,
+      });
+    }
 
     // Make agents attack each other
     this.initiateAgentCombat();
@@ -1946,6 +2600,12 @@ export class DuelOrchestrator {
     }
   }
 
+  /**
+   * Escalating combat stall nudge (#20).
+   * First nudge at STREAMING_COMBAT_STALL_NUDGE_MS, subsequent every 10s.
+   * Damage escalates: min(count+1, 5). Alternates targets. Resets on combat evidence.
+   * Floors HP at 1 to avoid accidental kills.
+   */
   applyCombatStallNudge(now: number): void {
     const cycle = this.getCurrentCycle();
     if (!cycle || cycle.phase !== "FIGHTING") return;
@@ -1953,33 +2613,45 @@ export class DuelOrchestrator {
     const { agent1, agent2 } = cycle;
     if (!agent1 || !agent2) return;
 
-    // Cooldown: don't nudge more than once per STREAMING_COMBAT_STALL_NUDGE_MS
-    // This allows re-nudging if combat stalls again after the cooldown
-    const timeSinceLastNudge = now - this.lastCombatStallNudgeAt;
-    if (timeSinceLastNudge < STREAMING_COMBAT_STALL_NUDGE_MS) return;
-
-    // Check if there's evidence of active combat SINCE the last nudge
-    // We look at recent damage, not total damage, to allow re-nudging
-    const recentCombatEvidence =
-      agent1.currentHp < agent1.maxHp || agent2.currentHp < agent2.maxHp;
-
-    // If both agents are at full HP, combat hasn't started - nudge needed
-    // If HP is damaged but no recent damage in the last stall window, also nudge
-    if (recentCombatEvidence) {
-      // Combat is happening, no nudge needed
+    // Reset nudge state if there's combat evidence
+    const hasCombatEvidence =
+      agent1.currentHp < agent1.maxHp ||
+      agent2.currentHp < agent2.maxHp ||
+      agent1.damageDealtThisFight > 0 ||
+      agent2.damageDealtThisFight > 0;
+    if (hasCombatEvidence) {
+      this.combatStallNudgeCount = 0;
+      this.lastCombatStallNudgeTime = 0;
       return;
     }
 
-    const attackerId = agent1.characterId;
-    const targetId = agent2.characterId;
+    // Check cooldown: first nudge uses the initial stall threshold,
+    // subsequent nudges use the escalation interval
+    if (this.combatStallNudgeCount > 0) {
+      if (
+        now - this.lastCombatStallNudgeTime <
+        STALL_NUDGE_ESCALATION_INTERVAL_MS
+      )
+        return;
+    }
+
+    // Alternate targets based on nudge count
+    const isEven = this.combatStallNudgeCount % 2 === 0;
+    const attackerId = isEven ? agent1.characterId : agent2.characterId;
+    const targetId = isEven ? agent2.characterId : agent1.characterId;
+    const targetAgent = isEven ? agent2 : agent1;
     const targetEntity = this.world.entities.get(targetId);
     if (!targetEntity) return;
 
     const currentHp = Number((targetEntity.data as { health?: number }).health);
     const safeCurrentHp = Number.isFinite(currentHp)
       ? currentHp
-      : agent2.currentHp;
-    const nextHp = Math.max(1, safeCurrentHp - 1);
+      : targetAgent.currentHp;
+    const nudgeDamage = Math.min(
+      this.combatStallNudgeCount + 1,
+      STALL_NUDGE_MAX_DAMAGE,
+    );
+    const nextHp = Math.max(1, safeCurrentHp - nudgeDamage);
     const damage = safeCurrentHp - nextHp;
     if (damage <= 0) return;
 
@@ -1999,10 +2671,11 @@ export class DuelOrchestrator {
       damage,
     });
 
-    this.lastCombatStallNudgeAt = now;
+    this.combatStallNudgeCount++;
+    this.lastCombatStallNudgeTime = now;
     Logger.warn(
       "StreamingDuelScheduler",
-      `Applied fallback combat nudge (${attackerId} -> ${targetId}, damage=${damage}, timeSinceLastNudge=${timeSinceLastNudge}ms)`,
+      `Applied escalating combat nudge #${this.combatStallNudgeCount} (${attackerId} -> ${targetId}, damage=${damage})`,
     );
   }
 
@@ -2046,14 +2719,10 @@ export class DuelOrchestrator {
         loserId = agent1.characterId;
         winReason = "damage_advantage";
       } else {
-        // True draw - agent1 wins by coin flip
-        winnerId =
-          Math.random() > 0.5 ? agent1.characterId : agent2.characterId;
-        loserId =
-          winnerId === agent1.characterId
-            ? agent2.characterId
-            : agent1.characterId;
-        winReason = "draw";
+        // True draw — both HP and damage equal (#24)
+        // Resolve as a proper draw: no winner/loser, just record it
+        this.onResolution(agent1.characterId, agent2.characterId, "draw");
+        return;
       }
     }
 
@@ -2371,7 +3040,10 @@ export class DuelOrchestrator {
     this.stopCombatAIs();
     this.duelFoodSlotsByAgent.clear();
     this.combatRolesByAgent.clear();
-    this.lastCombatStallNudgeAt = 0;
+    this.combatStallNudgeCount = 0;
+    this.lastCombatStallNudgeTime = 0;
+    this._contestantCache.clear();
+    this._contestantCacheExpiry = 0;
     this.combatLoopTickCount = 0;
   }
 }

@@ -117,11 +117,12 @@ describe("CycleStateMachine", () => {
       expect(() => sm.transition("ANNOUNCEMENT")).toThrow("Illegal transition");
     });
 
-    it("COUNTDOWN → RESOLUTION throws (must go through FIGHTING)", () => {
+    it("COUNTDOWN → RESOLUTION is allowed for pre-fight resolution", () => {
       const sm = new CycleStateMachine();
       sm.transition("ANNOUNCEMENT");
       sm.transition("COUNTDOWN");
-      expect(() => sm.transition("RESOLUTION")).toThrow("Illegal transition");
+      sm.transition("RESOLUTION");
+      expect(sm.phase).toBe("RESOLUTION");
     });
 
     it("FIGHTING → ANNOUNCEMENT throws", () => {

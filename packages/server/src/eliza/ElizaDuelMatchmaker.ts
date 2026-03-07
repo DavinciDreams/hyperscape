@@ -113,7 +113,7 @@ export class ElizaDuelMatchmaker extends EventEmitter {
     this.config = {
       wsUrl: config.wsUrl,
       botCount: effectiveBotCount,
-      rampUpDelayMs: config.rampUpDelayMs ?? 8000,
+      rampUpDelayMs: config.rampUpDelayMs ?? 1500,
       connectTimeoutMs: config.connectTimeoutMs ?? 30000,
       matchIntervalMs: config.matchIntervalMs ?? 10000,
       verbose: config.verbose ?? false,

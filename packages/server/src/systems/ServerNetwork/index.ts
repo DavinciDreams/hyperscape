@@ -173,6 +173,7 @@ import {
   handleBankWithdrawToEquipment,
   handleBankDepositEquipment,
   handleBankDepositAllEquipment,
+  handleRequestBankState,
 } from "./handlers/bank";
 import {
   handleEntityModified,
@@ -361,6 +362,25 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   /** Character ID to socket mapping for sending goal overrides */
   static characterSockets: Map<string, ServerSocket> = new Map();
 
+  /** Agent personality traits (characterId -> traits) for dashboard display */
+  static agentPersonality: Map<
+    string,
+    {
+      sociability: number;
+      helpfulness: number;
+      adventurousness: number;
+      chattiness: number;
+      aggression: number;
+      patience: number;
+    }
+  > = new Map();
+
+  /** Agent desire scores (characterId -> scored candidates) for dashboard display */
+  static agentDesireScores: Map<
+    string,
+    Array<{ goalType: string; score: number; breakdown: string }>
+  > = new Map();
+
   /** Agent thought storage (characterId -> recent thoughts) for dashboard display */
   static agentThoughts: Map<
     string,
@@ -369,6 +389,19 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       type: "situation" | "evaluation" | "thinking" | "decision" | "action";
       content: string;
       timestamp: number;
+      health?: {
+        current: number;
+        max: number;
+        percent: number;
+        urgency: "critical" | "warning" | "safe";
+      };
+      decisionPath?:
+        | "short-circuit"
+        | "llm"
+        | "scripted"
+        | "planner"
+        | "curiosity";
+      providers?: string[];
     }>
   > = new Map();
 
@@ -504,6 +537,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     ServerNetwork.capAgentDashboardMap(ServerNetwork.agentGoalsPaused);
     ServerNetwork.capAgentDashboardMap(ServerNetwork.agentThoughts);
     ServerNetwork.capAgentDashboardMap(ServerNetwork.characterSockets);
+    ServerNetwork.capAgentDashboardMap(ServerNetwork.agentPersonality);
+    ServerNetwork.capAgentDashboardMap(ServerNetwork.agentDesireScores);
   }
 
   /**
@@ -1146,6 +1181,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       ServerNetwork.agentAvailableGoals.delete(event.playerId);
       ServerNetwork.agentGoalsPaused.delete(event.playerId);
       ServerNetwork.agentThoughts.delete(event.playerId);
+      ServerNetwork.agentPersonality.delete(event.playerId);
+      ServerNetwork.agentDesireScores.delete(event.playerId);
     });
 
     // Seed spatial index on initial join so sendToNearby() works from first tick
@@ -2161,6 +2198,22 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           );
         }
 
+        // Store personality traits if provided
+        if (goalData.personality) {
+          ServerNetwork.agentPersonality.set(
+            goalData.characterId,
+            goalData.personality,
+          );
+        }
+
+        // Store desire scores if provided
+        if (goalData.desireScores) {
+          ServerNetwork.agentDesireScores.set(
+            goalData.characterId,
+            goalData.desireScores,
+          );
+        }
+
         // Track socket for this character (for sending goal overrides)
         ServerNetwork.characterSockets.set(goalData.characterId, socket);
         this.trimAgentDashboardCaches();
@@ -2298,6 +2351,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.handlers["onBankDepositEquipment"];
     this.handlers["bankDepositAllEquipment"] =
       this.handlers["onBankDepositAllEquipment"];
+
+    // Bank state query (no bank NPC required)
+    this.handlers["onRequestBankState"] = (socket, data) =>
+      handleRequestBankState(socket, data, this.world);
+    this.handlers["requestBankState"] = this.handlers["onRequestBankState"];
 
     // NPC interaction handler - client clicked on NPC
     this.handlers["onNpcInteract"] = (socket, data) => {
@@ -2843,6 +2901,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     ServerNetwork.agentAvailableGoals.clear();
     ServerNetwork.agentGoalsPaused.clear();
     ServerNetwork.agentThoughts.clear();
+    ServerNetwork.agentPersonality.clear();
+    ServerNetwork.agentDesireScores.clear();
 
     // Clean up duel event listeners to prevent memory leak
     if (this.cleanupDuelEventListeners) {

@@ -25,6 +25,22 @@ import {
   Skull,
   ChevronRight,
   X,
+  Zap,
+  Settings,
+  Sparkles,
+  Compass,
+  ClipboardList,
+  MessageCircle,
+  Gauge,
+  TreePine,
+  Pickaxe,
+  Fish,
+  Hammer,
+  Navigation,
+  Landmark,
+  Flame,
+  ScrollText,
+  type LucideIcon,
 } from "lucide-react";
 import "./AgentMonitorScreen.css";
 
@@ -46,6 +62,29 @@ interface AgentThought {
   type: string;
   content: string;
   timestamp: number;
+  decisionPath?: "short-circuit" | "llm" | "scripted" | "planner" | "curiosity";
+  providers?: string[];
+  health?: {
+    current: number;
+    max: number;
+    percent: number;
+    urgency: "critical" | "warning" | "safe";
+  };
+}
+
+interface PersonalityTraits {
+  sociability: number;
+  helpfulness: number;
+  adventurousness: number;
+  chattiness: number;
+  aggression: number;
+  patience: number;
+}
+
+interface DesireScore {
+  goalType: string;
+  score: number;
+  breakdown: string;
 }
 
 interface AgentData {
@@ -67,6 +106,8 @@ interface AgentData {
 
   goal: AgentGoal | null;
   goalsPaused: boolean;
+  personality: PersonalityTraits | null;
+  desireScores: DesireScore[];
 
   skills: Record<string, { level: number; xp: number }>;
   combatLevel: number;
@@ -175,7 +216,8 @@ type DetailTab =
   | "bank"
   | "kills"
   | "duels"
-  | "actions";
+  | "actions"
+  | "pipeline";
 
 // ─── XP Table ───────────────────────────────────────────────────────────────
 
@@ -730,6 +772,75 @@ function OverviewTab({ agent }: { agent: AgentData }) {
           </div>
         )}
       </div>
+
+      {/* Personality Traits */}
+      {agent.personality && (
+        <div className="detail-section">
+          <div className="detail-section-title">Personality</div>
+          <div className="personality-grid">
+            {(
+              [
+                ["Sociability", "sociability"],
+                ["Helpfulness", "helpfulness"],
+                ["Adventurousness", "adventurousness"],
+                ["Chattiness", "chattiness"],
+                ["Aggression", "aggression"],
+                ["Patience", "patience"],
+              ] as const
+            ).map(([label, key]) => (
+              <div key={key} className="personality-trait">
+                <span className="trait-label">{label}</span>
+                <div className="trait-bar-track">
+                  <div
+                    className="trait-bar-fill"
+                    style={{
+                      width: `${Math.round(agent.personality![key] * 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="trait-value">
+                  {Math.round(agent.personality![key] * 100)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Desire Scores */}
+      {agent.desireScores && agent.desireScores.length > 0 && (
+        <div className="detail-section">
+          <div className="detail-section-title">Desire Scores</div>
+          <div className="desire-scores">
+            {agent.desireScores
+              .filter((d) => d.score > 0)
+              .map((d) => (
+                <div key={d.goalType} className="desire-row">
+                  <span className="desire-type">
+                    {d.goalType.replace(/_/g, " ")}
+                  </span>
+                  <div className="desire-bar-track">
+                    <div
+                      className="desire-bar-fill"
+                      style={{
+                        width: `${Math.min((d.score / 50) * 100, 100)}%`,
+                        background:
+                          d.score >= 30
+                            ? "#4ade80"
+                            : d.score >= 10
+                              ? "#facc15"
+                              : "#6b7280",
+                      }}
+                    />
+                  </div>
+                  <span className="desire-value" title={d.breakdown}>
+                    {d.score}
+                  </span>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1195,6 +1306,21 @@ function ActionLogTab({ agent }: { agent: AgentData }) {
               <span className={`action-log-type type-${thought.type}`}>
                 {thought.type}
               </span>
+              {thought.decisionPath && (
+                <span
+                  className={`decision-path-badge dp-${thought.decisionPath}`}
+                >
+                  {thought.decisionPath === "short-circuit"
+                    ? "SC"
+                    : thought.decisionPath === "llm"
+                      ? "LLM"
+                      : thought.decisionPath === "planner"
+                        ? "PLAN"
+                        : thought.decisionPath === "curiosity"
+                          ? "CURIOUS"
+                          : "SCRIPT"}
+                </span>
+              )}
               <ChevronRight
                 size={12}
                 className={`action-log-chevron ${expanded ? "open" : ""}`}
@@ -1204,9 +1330,957 @@ function ActionLogTab({ agent }: { agent: AgentData }) {
               >
                 {thought.content}
               </span>
+              {expanded &&
+                thought.providers &&
+                thought.decisionPath === "llm" && (
+                  <div className="provider-chips">
+                    {thought.providers.map((p) => (
+                      <span key={p} className="provider-chip">
+                        {p}
+                      </span>
+                    ))}
+                  </div>
+                )}
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Pipeline Tab (React Flow) ─────────────────────────────────────────────
+
+import {
+  ReactFlow,
+  Handle,
+  Position,
+  BaseEdge,
+  getSmoothStepPath,
+  type Node,
+  type Edge,
+  type NodeProps,
+  type EdgeProps,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+
+type DecisionPath =
+  | "short-circuit"
+  | "llm"
+  | "planner"
+  | "curiosity"
+  | "scripted";
+
+const PATH_COLORS: Record<DecisionPath, string> = {
+  "short-circuit": "#3b82f6",
+  llm: "#a855f7",
+  planner: "#22c55e",
+  curiosity: "#f97316",
+  scripted: "#6b7280",
+};
+
+const PATH_CSS_SUFFIX: Record<DecisionPath, string> = {
+  "short-circuit": "sc",
+  llm: "llm",
+  planner: "planner",
+  curiosity: "curiosity",
+  scripted: "scripted",
+};
+
+const ACTIVE_NODES: Record<DecisionPath, string[]> = {
+  "short-circuit": ["survival", "short-circuit", "action"],
+  llm: ["survival", "providers", "evaluators", "llm", "action"],
+  planner: ["personality", "planner", "goal-selection"],
+  curiosity: ["curiosity", "action"],
+  scripted: ["survival"],
+};
+
+const ACTIVE_CONNECTORS: Record<DecisionPath, string[]> = {
+  "short-circuit": ["survival→short-circuit", "short-circuit→action"],
+  llm: [
+    "survival→providers",
+    "providers→evaluators",
+    "evaluators→llm",
+    "llm→action",
+  ],
+  planner: ["personality→planner", "planner→goal-selection"],
+  curiosity: ["curiosity→action"],
+  scripted: [],
+};
+
+// Node layout — strict 5-column × 3-row grid:
+//
+//   Col 0         Col 1           Col 2          Col 3         Col 4
+//   ─────         ─────           ─────          ─────         ─────
+//   [Social]      [Short-Circuit] ─────────────────────────► [Action]    Row 0
+//   [Survival] ──►[Providers] ──► [Evaluators] ──► [LLM] ──────► ▲      Row 1
+//   [Personality]►[Planner] ────► [Goal Select] ──────────────────┤      Row 2
+//                                                  [Curiosity] ──►┘
+//
+// Columns: x = 0, 230, 460, 690, 920
+// Rows:    y = 0, 160, 320
+
+const PIPELINE_NODE_CONFIGS = [
+  { id: "social", label: "Social Impulse", x: 0, y: 0 },
+  { id: "short-circuit", label: "Short-Circuit", x: 230, y: 0 },
+  { id: "action", label: "Action Executor", x: 920, y: 0 },
+  { id: "survival", label: "Survival Check", x: 0, y: 160 },
+  { id: "providers", label: "Providers", x: 230, y: 160 },
+  { id: "evaluators", label: "Evaluators", x: 460, y: 160 },
+  { id: "llm", label: "LLM Reasoning", x: 690, y: 160 },
+  { id: "curiosity", label: "Curiosity", x: 920, y: 160 },
+  { id: "personality", label: "Personality", x: 0, y: 320 },
+  { id: "planner", label: "Goal Planner", x: 230, y: 320 },
+  { id: "goal-selection", label: "Goal Selection", x: 460, y: 320 },
+] as const;
+
+const PIPELINE_EDGE_CONFIGS = [
+  {
+    id: "e-social-action",
+    source: "social",
+    target: "action",
+    sourceHandle: undefined as string | undefined,
+    targetHandle: undefined as string | undefined,
+  },
+  {
+    id: "e-surv-sc",
+    source: "survival",
+    target: "short-circuit",
+    sourceHandle: "top" as string | undefined,
+    targetHandle: undefined as string | undefined,
+  },
+  {
+    id: "e-surv-prov",
+    source: "survival",
+    target: "providers",
+    sourceHandle: "right" as string | undefined,
+    targetHandle: undefined,
+  },
+  {
+    id: "e-sc-action",
+    source: "short-circuit",
+    target: "action",
+    sourceHandle: undefined,
+    targetHandle: undefined,
+  },
+  {
+    id: "e-prov-eval",
+    source: "providers",
+    target: "evaluators",
+    sourceHandle: undefined,
+    targetHandle: undefined,
+  },
+  {
+    id: "e-eval-llm",
+    source: "evaluators",
+    target: "llm",
+    sourceHandle: undefined,
+    targetHandle: undefined,
+  },
+  {
+    id: "e-llm-action",
+    source: "llm",
+    target: "action",
+    sourceHandle: undefined,
+    targetHandle: "bottom" as string | undefined,
+  },
+  {
+    id: "e-pers-plan",
+    source: "personality",
+    target: "planner",
+    sourceHandle: undefined,
+    targetHandle: undefined,
+  },
+  {
+    id: "e-plan-goal",
+    source: "planner",
+    target: "goal-selection",
+    sourceHandle: undefined,
+    targetHandle: undefined,
+  },
+  {
+    id: "e-goal-eval",
+    source: "goal-selection",
+    target: "evaluators",
+    sourceHandle: undefined,
+    targetHandle: "bottom" as string | undefined,
+  },
+  {
+    id: "e-curi-action",
+    source: "curiosity",
+    target: "action",
+    sourceHandle: undefined,
+    targetHandle: "bottom" as string | undefined,
+  },
+];
+
+const CONN_KEY_MAP: Record<string, string> = {
+  "e-social-action": "social→action",
+  "e-surv-sc": "survival→short-circuit",
+  "e-surv-prov": "survival→providers",
+  "e-sc-action": "short-circuit→action",
+  "e-prov-eval": "providers→evaluators",
+  "e-eval-llm": "evaluators→llm",
+  "e-llm-action": "llm→action",
+  "e-pers-plan": "personality→planner",
+  "e-plan-goal": "planner→goal-selection",
+  "e-goal-eval": "goal-selection→evaluators",
+  "e-curi-action": "curiosity→action",
+};
+
+const NODE_ROLES: Record<string, "entry" | "output"> = {
+  survival: "entry",
+  action: "output",
+};
+
+const PATH_DESCRIPTIONS: Record<DecisionPath, string> = {
+  "short-circuit": "Fast reflexive response",
+  llm: "Full LLM reasoning chain",
+  planner: "Goal planning & desire scoring",
+  curiosity: "Exploration-driven action",
+  scripted: "Scripted behavior fallback",
+};
+
+const DECISION_PATH_ORDER: DecisionPath[] = [
+  "short-circuit",
+  "llm",
+  "planner",
+  "curiosity",
+  "scripted",
+];
+
+const RF_PRO_OPTIONS = { hideAttribution: true };
+const RF_FIT_VIEW_OPTIONS = { padding: 0.15 };
+
+// ─── Action Category Visuals ──────────────────────────────────────────────
+// Maps action names → visual category (color, icon, short label)
+
+type ActionCategory = {
+  color: string;
+  icon: LucideIcon;
+  label: string;
+};
+
+const ACTION_CATEGORIES: Record<string, ActionCategory> = {
+  // Navigation
+  EXPLORE: { color: "#38bdf8", icon: Compass, label: "Exploring" },
+  NAVIGATE_TO: { color: "#38bdf8", icon: Navigation, label: "Navigating" },
+  MOVE_TO: { color: "#38bdf8", icon: Navigation, label: "Moving" },
+  APPROACH_ENTITY: { color: "#38bdf8", icon: Navigation, label: "Approaching" },
+  FOLLOW_ENTITY: { color: "#38bdf8", icon: Navigation, label: "Following" },
+  HOME_TELEPORT: { color: "#38bdf8", icon: Navigation, label: "Teleporting" },
+  // Combat
+  ATTACK_ENTITY: { color: "#ef4444", icon: Swords, label: "Fighting" },
+  ATTACK_TARGET: { color: "#ef4444", icon: Swords, label: "Fighting" },
+  FLEE: { color: "#ef4444", icon: Swords, label: "Fleeing" },
+  // Gathering
+  MINE_ROCK: { color: "#a78bfa", icon: Pickaxe, label: "Mining" },
+  CHOP_TREE: { color: "#4ade80", icon: TreePine, label: "Woodcutting" },
+  CATCH_FISH: { color: "#22d3ee", icon: Fish, label: "Fishing" },
+  // Crafting
+  COOK_FOOD: { color: "#fb923c", icon: Flame, label: "Cooking" },
+  LIGHT_FIRE: { color: "#fb923c", icon: Flame, label: "Firemaking" },
+  SMELT_ORE: { color: "#fb923c", icon: Hammer, label: "Smelting" },
+  SMITH_ITEM: { color: "#fb923c", icon: Hammer, label: "Smithing" },
+  FLETCH_ITEM: { color: "#fb923c", icon: Hammer, label: "Fletching" },
+  RUNECRAFT: { color: "#c084fc", icon: Sparkles, label: "Runecrafting" },
+  // Banking
+  BANK_DEPOSIT: { color: "#fbbf24", icon: Landmark, label: "Banking" },
+  BANK_WITHDRAW: { color: "#fbbf24", icon: Landmark, label: "Banking" },
+  BANK_DEPOSIT_ALL: { color: "#fbbf24", icon: Landmark, label: "Banking" },
+  // Commerce
+  BUY_ITEM: { color: "#34d399", icon: Package, label: "Shopping" },
+  SELL_ITEM: { color: "#34d399", icon: Package, label: "Selling" },
+  // Quest / NPC
+  TALK_TO_NPC: { color: "#818cf8", icon: ScrollText, label: "Talking" },
+  ACCEPT_QUEST: { color: "#818cf8", icon: ScrollText, label: "Quest" },
+  COMPLETE_QUEST: { color: "#818cf8", icon: Trophy, label: "Quest Done" },
+  // Social
+  GREET_PLAYER: { color: "#f472b6", icon: MessageCircle, label: "Social" },
+  CHAT_MESSAGE: { color: "#f472b6", icon: MessageCircle, label: "Chatting" },
+  // Items
+  EQUIP_ITEM: { color: "#94a3b8", icon: Shield, label: "Equipping" },
+  USE_ITEM: { color: "#94a3b8", icon: Package, label: "Using Item" },
+  PICKUP_ITEM: { color: "#94a3b8", icon: Package, label: "Looting" },
+};
+
+const DEFAULT_ACTION_CATEGORY: ActionCategory = {
+  color: "#6b7280",
+  icon: Play,
+  label: "Acting",
+};
+
+/** Extract the action name (e.g. "MINE_ROCK") from a thought content string */
+function extractActionName(content: string): string {
+  // Thought content formats: "MINE_ROCK", "MINE_ROCK: mining copper...", "Executing MINE_ROCK"
+  const upper = content.toUpperCase();
+  for (const key of Object.keys(ACTION_CATEGORIES)) {
+    if (upper.includes(key)) return key;
+  }
+  return "";
+}
+
+// ─── Pipeline Node ─────────────────────────────────────────────────────────
+
+type PipelineNodeData = {
+  label: string;
+  nodeType: string;
+  active: boolean;
+  pathColor: string;
+  cssSuffix: string;
+  frequency: number;
+  role: "entry" | "output" | "node";
+  // Pre-computed content — avoids passing entire agent to every node
+  health: number;
+  maxHealth: number;
+  thoughtText: string;
+  providers: string[];
+  evaluatorNames: string[];
+  isExploring: boolean;
+  isSocial: boolean;
+  socialChance: number;
+  traitEntries: [string, number][];
+  desireType: string;
+  desireScore: number;
+  goalType: string;
+  goalProgress: number;
+  goalTarget: number;
+  // Action executor specific — current action category visuals
+  actionName: string;
+  actionColor: string;
+};
+
+type PipelineNodeType = Node<PipelineNodeData, "pipeline">;
+
+function PipelineNodeIcon({ nodeType }: { nodeType: string }) {
+  const size = 14;
+  const sw = 1.5;
+  switch (nodeType) {
+    case "survival":
+      return <Heart size={size} strokeWidth={sw} />;
+    case "short-circuit":
+      return <Zap size={size} strokeWidth={sw} />;
+    case "action":
+      return <Play size={size} strokeWidth={sw} />;
+    case "providers":
+      return <Settings size={size} strokeWidth={sw} />;
+    case "evaluators":
+      return <Gauge size={size} strokeWidth={sw} />;
+    case "llm":
+      return <Sparkles size={size} strokeWidth={sw} />;
+    case "curiosity":
+      return <Compass size={size} strokeWidth={sw} />;
+    case "personality":
+      return <User size={size} strokeWidth={sw} />;
+    case "planner":
+      return <Target size={size} strokeWidth={sw} />;
+    case "goal-selection":
+      return <ClipboardList size={size} strokeWidth={sw} />;
+    case "social":
+      return <MessageCircle size={size} strokeWidth={sw} />;
+    default:
+      return null;
+  }
+}
+
+function PipelineNode({ data }: NodeProps<PipelineNodeType>) {
+  const { label, nodeType, active, pathColor, cssSuffix, frequency, role } =
+    data;
+  const activeClass = active ? `active active-${cssSuffix}` : "";
+
+  // For the action node, use the action category color when available
+  const effectiveColor =
+    active && nodeType === "action" && data.actionColor
+      ? data.actionColor
+      : pathColor;
+
+  const accentStyle: React.CSSProperties = {};
+  if (active) {
+    if (role === "entry") {
+      accentStyle.borderLeftColor = effectiveColor;
+    } else {
+      accentStyle.borderTopColor = effectiveColor;
+    }
+    accentStyle.boxShadow = `0 0 20px ${effectiveColor}40, 0 0 40px ${effectiveColor}15`;
+  }
+
+  return (
+    <div className={`pn ${activeClass} pn-${role}`} style={accentStyle}>
+      {/* Target handles */}
+      {(nodeType === "short-circuit" ||
+        nodeType === "llm" ||
+        nodeType === "action" ||
+        nodeType === "planner" ||
+        nodeType === "goal-selection" ||
+        nodeType === "evaluators" ||
+        nodeType === "providers") && (
+        <Handle type="target" position={Position.Left} className="pn-handle" />
+      )}
+      {(nodeType === "action" || nodeType === "evaluators") && (
+        <Handle
+          type="target"
+          position={Position.Bottom}
+          id="bottom"
+          className="pn-handle"
+        />
+      )}
+
+      {/* Header */}
+      <div className="pn-header">
+        <span className="pn-icon">
+          <PipelineNodeIcon nodeType={nodeType} />
+        </span>
+        <span className="pn-label">{label}</span>
+        <span className="pn-freq">{frequency}%</span>
+      </div>
+
+      <div
+        className="pn-divider"
+        style={active ? { background: `${effectiveColor}30` } : undefined}
+      />
+
+      <div className="pn-body">
+        <PipelineNodeBody data={data} />
+      </div>
+
+      {active && (
+        <div className="pn-pulse" style={{ background: effectiveColor }} />
+      )}
+
+      {/* Source handles */}
+      {nodeType === "survival" && (
+        <>
+          <Handle
+            type="source"
+            position={Position.Top}
+            id="top"
+            className="pn-handle"
+          />
+          <Handle
+            type="source"
+            position={Position.Right}
+            id="right"
+            className="pn-handle"
+          />
+        </>
+      )}
+      {nodeType === "short-circuit" && (
+        <Handle type="source" position={Position.Right} className="pn-handle" />
+      )}
+      {nodeType === "providers" && (
+        <Handle type="source" position={Position.Right} className="pn-handle" />
+      )}
+      {nodeType === "evaluators" && (
+        <Handle type="source" position={Position.Right} className="pn-handle" />
+      )}
+      {nodeType === "llm" && (
+        <Handle type="source" position={Position.Right} className="pn-handle" />
+      )}
+      {nodeType === "curiosity" && (
+        <Handle type="source" position={Position.Top} className="pn-handle" />
+      )}
+      {nodeType === "personality" && (
+        <Handle type="source" position={Position.Right} className="pn-handle" />
+      )}
+      {nodeType === "planner" && (
+        <Handle type="source" position={Position.Right} className="pn-handle" />
+      )}
+      {nodeType === "goal-selection" && (
+        <Handle type="source" position={Position.Top} className="pn-handle" />
+      )}
+      {nodeType === "social" && (
+        <Handle type="source" position={Position.Right} className="pn-handle" />
+      )}
+    </div>
+  );
+}
+
+function PipelineNodeBody({ data }: { data: PipelineNodeData }) {
+  const { nodeType, active, pathColor } = data;
+
+  switch (nodeType) {
+    case "survival": {
+      const pct = data.maxHealth > 0 ? (data.health / data.maxHealth) * 100 : 0;
+      const color = pct < 25 ? "#ef4444" : pct < 50 ? "#eab308" : "#22c55e";
+      return (
+        <div className="pn-survival">
+          <div className="pn-hp-track">
+            <div
+              className="pn-hp-fill"
+              style={{
+                width: `${pct}%`,
+                background: color,
+                boxShadow: `0 0 8px ${color}60`,
+              }}
+            />
+          </div>
+          <div className="pn-hp-label">
+            <span style={{ color, fontWeight: 700 }}>{data.health}</span>
+            <span className="pn-hp-sep">/</span>
+            <span>{data.maxHealth}</span>
+          </div>
+        </div>
+      );
+    }
+    case "short-circuit":
+    case "llm":
+      return (
+        <div className={`pn-thought ${active ? "active" : ""}`}>
+          {data.thoughtText ? (
+            `"${data.thoughtText}"`
+          ) : (
+            <span className="pn-idle">Waiting...</span>
+          )}
+        </div>
+      );
+    case "action": {
+      const cat = ACTION_CATEGORIES[data.actionName] ?? DEFAULT_ACTION_CATEGORY;
+      const ActionIcon = cat.icon;
+      const hasAction = !!data.actionName;
+      return (
+        <div className="pn-action-body">
+          {hasAction && (
+            <div
+              className={`pn-action-badge ${active ? "active" : ""}`}
+              style={{
+                borderColor: `${cat.color}60`,
+                background: `${cat.color}18`,
+                color: cat.color,
+              }}
+            >
+              <ActionIcon size={12} strokeWidth={2} />
+              <span>{cat.label}</span>
+            </div>
+          )}
+          <div className={`pn-thought ${active ? "active" : ""}`}>
+            {data.thoughtText ? (
+              `"${data.thoughtText}"`
+            ) : (
+              <span className="pn-idle">Waiting...</span>
+            )}
+          </div>
+        </div>
+      );
+    }
+    case "providers":
+      return (
+        <div className="pn-pills">
+          {data.providers.length > 0 ? (
+            data.providers.map((p) => (
+              <span
+                key={p}
+                className="pn-pill"
+                style={
+                  active
+                    ? {
+                        borderColor: `${pathColor}50`,
+                        background: `${pathColor}15`,
+                      }
+                    : undefined
+                }
+              >
+                {p}
+              </span>
+            ))
+          ) : (
+            <span className="pn-idle">No providers</span>
+          )}
+        </div>
+      );
+    case "evaluators":
+      return (
+        <div className="pn-pills">
+          {data.evaluatorNames.map((e) => (
+            <span
+              key={e}
+              className="pn-pill"
+              style={
+                active
+                  ? {
+                      borderColor: `${pathColor}50`,
+                      background: `${pathColor}15`,
+                    }
+                  : undefined
+              }
+            >
+              {e}
+            </span>
+          ))}
+        </div>
+      );
+    case "social": {
+      const pct = Math.round(data.socialChance * 100);
+      return (
+        <div className="pn-status-badge-wrap">
+          <span className={`pn-status-badge ${data.isSocial ? "on" : "off"}`}>
+            <span className={`pn-status-dot ${data.isSocial ? "on" : ""}`} />
+            {data.isSocial ? "Triggered" : `${pct}% chance`}
+          </span>
+        </div>
+      );
+    }
+    case "curiosity":
+      return (
+        <div className="pn-status-badge-wrap">
+          <span
+            className={`pn-status-badge ${data.isExploring ? "on" : "off"}`}
+          >
+            <span className={`pn-status-dot ${data.isExploring ? "on" : ""}`} />
+            {data.isExploring ? "Exploring" : "Idle"}
+          </span>
+        </div>
+      );
+    case "personality":
+      if (!data.traitEntries.length)
+        return <span className="pn-idle">No data</span>;
+      return (
+        <div className="pn-traits">
+          {data.traitEntries.map(([key, val]) => (
+            <div key={key} className="pn-trait-row">
+              <span className="pn-trait-name">{key.slice(0, 4)}</span>
+              <div className="pn-trait-track">
+                <div
+                  className="pn-trait-fill"
+                  style={{ width: `${val * 100}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    case "planner":
+      if (!data.desireType) return <span className="pn-idle">No desires</span>;
+      return (
+        <div className="pn-desire">
+          <span className="pn-desire-type">{data.desireType}</span>
+          <span className="pn-desire-score">{data.desireScore.toFixed(1)}</span>
+        </div>
+      );
+    case "goal-selection": {
+      if (!data.goalType) return <span className="pn-idle">No goal</span>;
+      const pct =
+        data.goalTarget > 0 ? (data.goalProgress / data.goalTarget) * 100 : 0;
+      return (
+        <div className="pn-goal">
+          <span className="pn-goal-type">{data.goalType}</span>
+          <div className="pn-goal-track">
+            <div className="pn-goal-fill" style={{ width: `${pct}%` }} />
+          </div>
+          <span className="pn-goal-nums">
+            {data.goalProgress}/{data.goalTarget}
+          </span>
+        </div>
+      );
+    }
+    default:
+      return null;
+  }
+}
+
+// ─── Pipeline Edge ─────────────────────────────────────────────────────────
+
+type DataFlowEdgeData = {
+  active: boolean;
+  pathColor: string;
+};
+
+type DataFlowEdgeType = Edge<DataFlowEdgeData, "dataFlow">;
+
+function DataFlowEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  data,
+}: EdgeProps<DataFlowEdgeType>) {
+  const [edgePath] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+    borderRadius: 12,
+  });
+
+  const isActive = data?.active ?? false;
+  const color = data?.pathColor ?? "#2a2a35";
+
+  return (
+    <>
+      {isActive && (
+        <BaseEdge
+          id={`${id}-glow`}
+          path={edgePath}
+          style={{
+            stroke: color,
+            strokeWidth: 6,
+            strokeOpacity: 0.15,
+            filter: "blur(3px)",
+          }}
+        />
+      )}
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={{
+          stroke: isActive ? color : "#33334a",
+          strokeWidth: isActive ? 2 : 1,
+          strokeDasharray: isActive ? undefined : "4 4",
+          strokeOpacity: isActive ? 1 : 0.8,
+        }}
+      />
+      {isActive && (
+        <>
+          <circle
+            r="4"
+            fill={color}
+            opacity="0.9"
+            filter={`drop-shadow(0 0 4px ${color})`}
+          >
+            <animateMotion dur="2s" repeatCount="indefinite" path={edgePath} />
+          </circle>
+          <circle r="2" fill="#fff" opacity="0.8">
+            <animateMotion dur="2s" repeatCount="indefinite" path={edgePath} />
+          </circle>
+        </>
+      )}
+    </>
+  );
+}
+
+// Defined outside component to prevent remounting
+const pipelineNodeTypes = { pipeline: PipelineNode };
+const pipelineEdgeTypes = { dataFlow: DataFlowEdge };
+
+// ─── Pipeline Tab Component ────────────────────────────────────────────────
+
+function PipelineTab({ agent }: { agent: AgentData }) {
+  const latestThought = agent.recentThoughts[0] as AgentThought | undefined;
+  const activePath: DecisionPath | null =
+    (latestThought?.decisionPath as DecisionPath) ?? null;
+
+  const activeNodeSet = new Set(activePath ? ACTIVE_NODES[activePath] : []);
+  const activeConnSet = new Set(
+    activePath ? ACTIVE_CONNECTORS[activePath] : [],
+  );
+  const cssSuffix = activePath ? PATH_CSS_SUFFIX[activePath] : "";
+  const pathColor = activePath ? PATH_COLORS[activePath] : "#2a2a35";
+
+  // Heat map frequencies
+  const counts: Record<string, number> = {
+    "short-circuit": 0,
+    llm: 0,
+    planner: 0,
+    curiosity: 0,
+    scripted: 0,
+  };
+  for (const t of agent.recentThoughts) {
+    if (t.decisionPath && t.decisionPath in counts) counts[t.decisionPath]++;
+  }
+  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+
+  const llmPct = Math.round((counts.llm / total) * 100);
+  const plannerPct = Math.round((counts.planner / total) * 100);
+  const nodeFreq: Record<string, number> = {
+    social: 0,
+    survival: 100,
+    "short-circuit": Math.round((counts["short-circuit"] / total) * 100),
+    action: Math.round(
+      ((counts["short-circuit"] + counts.llm + counts.curiosity) / total) * 100,
+    ),
+    providers: llmPct,
+    evaluators: llmPct,
+    llm: llmPct,
+    curiosity: Math.round((counts.curiosity / total) * 100),
+    personality: plannerPct,
+    planner: plannerPct,
+    "goal-selection": plannerPct,
+  };
+
+  // Pre-compute content — single pass, no repeated .find() per node
+  const latestSC = agent.recentThoughts.find(
+    (t) => t.decisionPath === "short-circuit",
+  );
+  const latestLLM = agent.recentThoughts.find((t) => t.decisionPath === "llm");
+  const latestAction = agent.recentThoughts.find((t) => t.type === "action");
+  const latestCuriosity = agent.recentThoughts.find(
+    (t) => t.decisionPath === "curiosity",
+  );
+  const topDesire = agent.desireScores[0];
+  const traitEntries: [string, number][] = agent.personality
+    ? (Object.entries(agent.personality).slice(0, 6) as [string, number][])
+    : [];
+
+  // Social chance is personality-driven: base 3% + sociability * 5%
+  const sociability = agent.personality?.sociability ?? 0.5;
+  const socialChance = 0.03 + sociability * 0.05;
+
+  // The 4 evaluators that run on the LLM path
+  const evaluatorNames = ["Survival", "Explore", "Social", "Combat"];
+
+  const empty = {
+    health: 0,
+    maxHealth: 0,
+    thoughtText: "",
+    providers: [],
+    evaluatorNames: [],
+    isExploring: false,
+    isSocial: false,
+    socialChance: 0,
+    traitEntries: [] as [string, number][],
+    desireType: "",
+    desireScore: 0,
+    goalType: "",
+    goalProgress: 0,
+    goalTarget: 0,
+    actionName: "",
+    actionColor: "",
+  };
+
+  const nodeContent: Record<
+    string,
+    Omit<
+      PipelineNodeData,
+      | "label"
+      | "nodeType"
+      | "active"
+      | "pathColor"
+      | "cssSuffix"
+      | "frequency"
+      | "role"
+    >
+  > = {
+    social: {
+      ...empty,
+      isSocial:
+        latestAction?.content.includes("GREET") ||
+        latestAction?.content.includes("SOCIAL") ||
+        false,
+      socialChance,
+    },
+    survival: { ...empty, health: agent.health, maxHealth: agent.maxHealth },
+    "short-circuit": {
+      ...empty,
+      thoughtText: latestSC?.content.slice(0, 38) ?? "",
+    },
+    action: (() => {
+      const actionContent = latestAction?.content ?? "";
+      const actionName = extractActionName(actionContent);
+      const cat = ACTION_CATEGORIES[actionName] ?? DEFAULT_ACTION_CATEGORY;
+      return {
+        ...empty,
+        thoughtText: actionContent.slice(0, 45),
+        actionName,
+        actionColor: actionName ? cat.color : "",
+      };
+    })(),
+    providers: {
+      ...empty,
+      providers: (latestLLM?.providers ?? []).slice(0, 5),
+    },
+    evaluators: { ...empty, evaluatorNames },
+    llm: { ...empty, thoughtText: latestLLM?.content.slice(0, 55) ?? "" },
+    curiosity: { ...empty, isExploring: !!latestCuriosity },
+    personality: { ...empty, traitEntries },
+    planner: {
+      ...empty,
+      desireType: topDesire?.goalType ?? "",
+      desireScore: topDesire?.score ?? 0,
+    },
+    "goal-selection": {
+      ...empty,
+      goalType: agent.goal?.type ?? "",
+      goalProgress: agent.goal?.progress ?? 0,
+      goalTarget: agent.goal?.target ?? 0,
+    },
+  };
+
+  const nodes: Node<PipelineNodeData>[] = PIPELINE_NODE_CONFIGS.map((n) => ({
+    id: n.id,
+    type: "pipeline" as const,
+    position: { x: n.x, y: n.y },
+    data: {
+      label: n.label,
+      nodeType: n.id,
+      active: activeNodeSet.has(n.id),
+      pathColor,
+      cssSuffix,
+      frequency: nodeFreq[n.id] ?? 0,
+      role: NODE_ROLES[n.id] ?? ("node" as const),
+      ...nodeContent[n.id],
+    },
+  }));
+
+  const edges: Edge<DataFlowEdgeData>[] = PIPELINE_EDGE_CONFIGS.map((e) => {
+    const connKey = CONN_KEY_MAP[e.id];
+    const isActive = activeConnSet.has(connKey);
+    return {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle,
+      targetHandle: e.targetHandle,
+      type: "dataFlow" as const,
+      data: { active: isActive, pathColor: isActive ? pathColor : "#2a2a35" },
+    };
+  });
+
+  return (
+    <div className="pipeline-tab">
+      <div className="pipeline-flow-container">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={pipelineNodeTypes}
+          edgeTypes={pipelineEdgeTypes}
+          colorMode="dark"
+          fitView
+          fitViewOptions={RF_FIT_VIEW_OPTIONS}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          panOnDrag={false}
+          zoomOnScroll={false}
+          zoomOnPinch={false}
+          zoomOnDoubleClick={false}
+          preventScrolling={false}
+          proOptions={RF_PRO_OPTIONS}
+        ></ReactFlow>
+      </div>
+
+      {/* Legend */}
+      <div className="pipeline-legend">
+        <span className="pipeline-legend-title">Decision Paths</span>
+        {DECISION_PATH_ORDER.map((dp) => {
+          const isLive = dp === activePath;
+          return (
+            <span
+              key={dp}
+              className={`pipeline-legend-item ${isLive ? "live" : ""}`}
+            >
+              <span
+                className="pipeline-legend-dot"
+                style={{
+                  background: PATH_COLORS[dp],
+                  boxShadow: isLive ? `0 0 6px ${PATH_COLORS[dp]}` : undefined,
+                }}
+              />
+              <span className="pipeline-legend-label">{dp}</span>
+              <span className="pipeline-legend-pct">
+                {Math.round((counts[dp] / total) * 100)}%
+              </span>
+            </span>
+          );
+        })}
+        {activePath && (
+          <span className="pipeline-legend-active">
+            <strong>{PATH_DESCRIPTIONS[activePath]}</strong>
+          </span>
+        )}
       </div>
     </div>
   );
@@ -1478,6 +2552,7 @@ function AgentDetailPanel({
             ["kills", "Kills"],
             ["duels", "Duels"],
             ["actions", "Log"],
+            ["pipeline", "Pipeline"],
           ] as [DetailTab, string][]
         ).map(([key, label]) => (
           <button
@@ -1503,6 +2578,7 @@ function AgentDetailPanel({
           <DuelsTab characterId={agent.characterId} duelStatus={duelStatus} />
         )}
         {tab === "actions" && <ActionLogTab agent={agent} />}
+        {tab === "pipeline" && <PipelineTab agent={agent} />}
       </div>
     </div>
   );
@@ -1511,12 +2587,16 @@ function AgentDetailPanel({
 // ─── Main Screen ────────────────────────────────────────────────────────────
 
 export const AgentMonitorScreen: React.FC = () => {
-  const [adminCode, setAdminCode] = useState<string>(
+  const [adminCode, setAdminCode] = useState(
     () => localStorage.getItem(ADMIN_CODE_KEY) || "",
   );
   const [isAuthed, setIsAuthed] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+  // True while we auto-check a stored code on mount (shows spinner, not form)
+  const [checkingStored, setCheckingStored] = useState(
+    () => !!localStorage.getItem(ADMIN_CODE_KEY),
+  );
 
   const [data, setData] = useState<MonitorResponse | null>(null);
   const [duelStatus, setDuelStatus] = useState<DuelStatusResponse | null>(null);
@@ -1526,58 +2606,81 @@ export const AgentMonitorScreen: React.FC = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const adminCodeRef = useRef(adminCode);
+  adminCodeRef.current = adminCode;
 
+  // Simple fetch wrapper that attaches admin code header
   const adminFetch = useCallback(
-    async (path: string) => {
-      const response = await fetch(`${GAME_API_URL}${path}`, {
+    async (path: string, options?: RequestInit) => {
+      const res = await fetch(`${GAME_API_URL}${path}`, {
+        ...options,
         headers: {
-          "x-admin-code": adminCode,
+          "x-admin-code": adminCodeRef.current,
           "Content-Type": "application/json",
+          ...(options?.headers || {}),
         },
       });
-
-      if (response.status === 403) {
-        setIsAuthed(false);
-        setAuthError("Invalid admin code");
-        localStorage.removeItem(ADMIN_CODE_KEY);
-        throw new Error("Unauthorized");
-      }
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      return response.json();
+      if (res.status === 403) throw new Error("Unauthorized");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
     },
-    [adminCode],
+    [],
   );
 
-  const verifyAdminCode = useCallback(async () => {
-    if (!adminCode) return;
+  // Try a code against the server — single attempt, no retry loops
+  const tryAuth = useCallback(
+    async (code: string): Promise<boolean> => {
+      adminCodeRef.current = code;
+      try {
+        await adminFetch("/admin/stats");
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [adminFetch],
+  );
+
+  // On mount: if we have a stored code, check it once
+  useEffect(() => {
+    const stored = localStorage.getItem(ADMIN_CODE_KEY);
+    if (!stored) {
+      setCheckingStored(false);
+      return;
+    }
+    let cancelled = false;
+    tryAuth(stored).then((ok) => {
+      if (cancelled) return;
+      if (ok) {
+        setIsAuthed(true);
+      } else {
+        localStorage.removeItem(ADMIN_CODE_KEY);
+      }
+      setCheckingStored(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tryAuth]);
+
+  // Manual login button
+  const handleLogin = useCallback(async () => {
+    const code = adminCodeRef.current;
+    if (!code) return;
     setAuthLoading(true);
     setAuthError(null);
-    try {
-      await adminFetch("/admin/stats");
+    const ok = await tryAuth(code);
+    if (ok) {
       setIsAuthed(true);
-      localStorage.setItem(ADMIN_CODE_KEY, adminCode);
-    } catch {
-      setIsAuthed(false);
-      setAuthError("Invalid admin code");
-      localStorage.removeItem(ADMIN_CODE_KEY);
-    } finally {
-      setAuthLoading(false);
+      localStorage.setItem(ADMIN_CODE_KEY, code);
+    } else {
+      setAuthError("Invalid code or server unreachable");
     }
-  }, [adminCode, adminFetch]);
+    setAuthLoading(false);
+  }, [tryAuth]);
 
-  useEffect(() => {
-    const storedCode = localStorage.getItem(ADMIN_CODE_KEY);
-    if (storedCode && adminCode === storedCode) {
-      verifyAdminCode();
-    }
-  }, [verifyAdminCode, adminCode]);
-
+  // Fetch dashboard data
   const fetchData = useCallback(async () => {
-    if (!isAuthed) return;
     setLoading(true);
     try {
       const [monitorResult, duelResult] = await Promise.all([
@@ -1590,16 +2693,22 @@ export const AgentMonitorScreen: React.FC = () => {
       if (duelResult) setDuelStatus(duelResult);
       setFetchError(null);
     } catch (err) {
-      if (err instanceof Error && err.message !== "Unauthorized") {
+      if (err instanceof Error && err.message === "Unauthorized") {
+        setIsAuthed(false);
+        setAuthError("Session expired");
+        localStorage.removeItem(ADMIN_CODE_KEY);
+      } else if (err instanceof Error) {
         setFetchError(err.message);
       }
     } finally {
       setLoading(false);
     }
-  }, [isAuthed, adminFetch]);
+  }, [adminFetch]);
 
+  // Fetch once on auth, then poll
   useEffect(() => {
-    if (isAuthed) fetchData();
+    if (!isAuthed) return;
+    fetchData();
   }, [isAuthed, fetchData]);
 
   useEffect(() => {
@@ -1631,6 +2740,26 @@ export const AgentMonitorScreen: React.FC = () => {
 
   // ─── Auth Gate ──────────────────────────────────────────────────────
 
+  if (!isAuthed && checkingStored) {
+    return (
+      <div className="agent-monitor">
+        <div className="agent-monitor-auth">
+          <div className="agent-monitor-auth-card">
+            <RefreshCw
+              size={36}
+              style={{
+                color: "#d4a84b",
+                marginBottom: 16,
+                animation: "spin 1.5s linear infinite",
+              }}
+            />
+            <h1>Agent Monitor</h1>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthed) {
     return (
       <div className="agent-monitor">
@@ -1648,15 +2777,18 @@ export const AgentMonitorScreen: React.FC = () => {
               placeholder="Admin code"
               value={adminCode}
               onChange={(e) => setAdminCode(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && verifyAdminCode()}
+              onKeyDown={(e) =>
+                e.key === "Enter" && !authLoading && handleLogin()
+              }
               autoFocus
+              disabled={authLoading}
             />
             <button
               className="agent-monitor-auth-button"
-              onClick={verifyAdminCode}
+              onClick={handleLogin}
               disabled={authLoading || !adminCode}
             >
-              {authLoading ? "Verifying..." : "Authenticate"}
+              {authLoading ? "Checking..." : "Authenticate"}
             </button>
           </div>
         </div>

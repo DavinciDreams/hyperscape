@@ -10,20 +10,18 @@
  * initiates challenges between bots.
  */
 
-import { AgentRuntime, type Plugin } from "@elizaos/core";
+import {
+  AgentRuntime,
+  type Plugin,
+  // @ts-ignore — InMemoryDatabaseAdapter is exported at runtime but not in .d.ts
+  InMemoryDatabaseAdapter,
+} from "@elizaos/core";
 import { EventEmitter } from "events";
-import fs from "fs";
-import path from "path";
 import { hyperscapePlugin } from "@hyperscape/plugin-hyperscape";
 import { createJWT } from "../shared/utils.js";
 import { errMsg } from "../shared/errMsg.js";
 import type { ModelProviderConfig } from "./ModelAgentSpawner.js";
-import {
-  loadModelPlugin,
-  loadSqlPlugin,
-  createAgentCharacter,
-  ensurePgliteDataDir,
-} from "./agentHelpers.js";
+import { loadModelPlugin, createAgentCharacter } from "./agentHelpers.js";
 
 // Re-export for convenience
 export { MODEL_AGENTS } from "./ModelAgentSpawner.js";
@@ -163,11 +161,6 @@ export class ElizaDuelBot extends EventEmitter {
           console.log(
             `[ElizaDuelBot] ${name} retry ${attempt}/${MAX_INIT_RETRIES}...`,
           );
-          // Recreate in-memory data directory assignment
-          const agentId = `agent-${modelConfig.provider}-${modelConfig.model
-            .replace(/[^a-z0-9]/gi, "-")
-            .toLowerCase()}`;
-          ensurePgliteDataDir(agentId);
           // Small delay before retry
           await new Promise((r) => setTimeout(r, 2000));
         }
@@ -184,12 +177,6 @@ export class ElizaDuelBot extends EventEmitter {
         const authToken = await createJWT({ userId: accountId });
 
         // Create character using shared helper
-        const duelBotUsePostgres = !/^(0|false|no|off)$/i.test(
-          process.env.DUEL_BOT_USE_POSTGRES || "false",
-        );
-        const duelBotDatabaseUrl = duelBotUsePostgres
-          ? process.env.DATABASE_URL || process.env.POSTGRES_URL || ""
-          : "";
         const { character, characterId } = createAgentCharacter(modelConfig, {
           idPrefix: "agent",
           name,
@@ -201,10 +188,6 @@ export class ElizaDuelBot extends EventEmitter {
             HYPERSCAPE_CHARACTER_ID: "",
             HYPERSCAPE_AUTONOMY_MODE: "llm",
             HYPERSCAPE_AUTO_ACCEPT_DUELS: "true",
-            // Duel bots should default to in-memory PGLite so local duel stack
-            // does not depend on Postgres + pgvector availability.
-            POSTGRES_URL: duelBotDatabaseUrl,
-            DATABASE_URL: duelBotDatabaseUrl,
           },
         });
         if (character.settings?.secrets) {
@@ -213,27 +196,26 @@ export class ElizaDuelBot extends EventEmitter {
           ).HYPERSCAPE_CHARACTER_ID = characterId;
         }
 
-        // Build plugins
+        // Build plugins (no SQL plugin — InMemoryDatabaseAdapter replaces PGLite WASM)
         const plugins: Plugin[] = [modelPlugin, hyperscapePlugin];
 
-        // SQL plugin is optional for duel bots and can add significant startup
-        // memory/migration pressure. Keep it opt-in for stability.
-        const duelBotSqlEnabled = !/^(0|false|no|off)$/i.test(
-          process.env.DUEL_BOT_SQL_ENABLED || "false",
-        );
-        if (duelBotSqlEnabled) {
-          const sqlPlugin = await loadSqlPlugin(tag);
-          if (sqlPlugin) plugins.push(sqlPlugin);
-        } else {
-          console.log(
-            `[ElizaDuelBot] ${name} skipping SQL plugin (set DUEL_BOT_SQL_ENABLED=true to enable)`,
-          );
-        }
+        // Create a memory-safe adapter (cap logs + fix memoriesByRoom leak)
+        const adapter = new InMemoryDatabaseAdapter();
+        const MAX_LOGS = 20;
+        const origLog = adapter.log.bind(adapter);
+        adapter.log = async (params: Parameters<typeof origLog>[0]) => {
+          await origLog(params);
+          const logs = (adapter as unknown as { logs: unknown[] }).logs;
+          if (logs && logs.length > MAX_LOGS) {
+            logs.splice(0, logs.length - MAX_LOGS);
+          }
+        };
 
-        // Create runtime
+        // Create runtime with lightweight in-memory adapter (no PGLite WASM overhead)
         this.runtime = new AgentRuntime({
           character,
           plugins,
+          adapter,
         });
 
         // Initialize with timeout to prevent hanging

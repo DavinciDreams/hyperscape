@@ -54,9 +54,14 @@ function isQuestNpc(entity: Entity): boolean {
   return entityType === "npc" || type === "npc" || entityType === "quest_giver";
 }
 
-function findNpcByName(entities: Entity[], text: string): Entity | null {
+function findNpcByName(
+  entities: Entity[],
+  text: string,
+  preferQuestNpcs?: boolean,
+): Entity | null {
   const lowerText = text.toLowerCase();
-  const npcs = entities.filter(isNpcEntity);
+  // When looking for quest NPCs, exclude bankers/shopkeepers from results
+  const npcs = entities.filter(preferQuestNpcs ? isQuestNpc : isNpcEntity);
 
   const exactMatch = npcs.find((n) => n.name?.toLowerCase() === lowerText);
   if (exactMatch) return exactMatch;
@@ -68,7 +73,11 @@ function findNpcByName(entities: Entity[], text: string): Entity | null {
   );
   if (partialMatch) return partialMatch;
 
-  return npcs.length > 0 ? npcs[0] : null;
+  // Only fall back to first NPC if NOT looking for quest NPCs.
+  // Picking a random NPC (often a banker) when looking for a quest giver is wrong.
+  if (!preferQuestNpcs && npcs.length > 0) return npcs[0];
+
+  return null;
 }
 
 /**
@@ -93,8 +102,8 @@ export const talkToNpcAction: Action = {
     if (!service?.isConnected()) return false;
 
     const player = service.getPlayerEntity();
-    if (!player?.position || player.inCombat) return false;
-
+    if (!player?.position) return false;
+    if (player.alive === false || player.inCombat) return false;
     const nearbyEntities = service.getNearbyEntities();
     const npcs = nearbyEntities.filter(isNpcEntity);
 
@@ -121,10 +130,29 @@ export const talkToNpcAction: Action = {
     const nearbyEntities = service.getNearbyEntities();
     const text = message.content.text || "";
 
-    const npc = findNpcByName(nearbyEntities, text);
+    // If the agent has a quest goal with a specific NPC, prioritize finding that NPC
+    const behaviorManager = service.getBehaviorManager?.();
+    const currentGoal = behaviorManager?.getGoal?.();
+    const goalNpc = currentGoal?.questStartNpc;
+    let npc: Entity | null = null;
+    if (goalNpc) {
+      // Convert NPC ID (e.g. "forester_wilma") to display name for matching
+      const displayName = npcIdToDisplayName(goalNpc);
+      npc = findNpcByName(nearbyEntities, displayName, true);
+      if (!npc) {
+        // Also try the raw ID
+        npc = findNpcByName(nearbyEntities, goalNpc, true);
+      }
+    }
+    // Fall back to message text search
+    if (!npc) {
+      npc = findNpcByName(nearbyEntities, text);
+    }
     if (!npc) {
       await callback?.({
-        text: "No NPC found nearby to talk to.",
+        text: goalNpc
+          ? `Quest NPC "${npcIdToDisplayName(goalNpc)}" not found nearby. Need to travel closer.`
+          : "No NPC found nearby to talk to.",
         action: "TALK_TO_NPC",
       });
       return { success: false, error: "No NPC nearby" };
@@ -177,8 +205,10 @@ export const acceptQuestAction: Action = {
     if (!service?.isConnected()) return false;
 
     const player = service.getPlayerEntity();
-    if (!player?.position || player.inCombat) return false;
+    if (!player?.position) return false;
 
+    // Allow accepting quests even during combat — agents shouldn't be blocked
+    // from quest progression by goblin aggro near spawn
     const questState = service.getQuestState();
     return questState.some((q) => q.status === "not_started");
   },

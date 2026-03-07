@@ -35,7 +35,12 @@ import type { World } from "@hyperscape/shared";
 function resolveBooleanEnvFlag(name: string, defaultEnabled: boolean): boolean {
   const raw = process.env[name];
   if (raw === undefined) return defaultEnabled;
-  return raw !== "false";
+  const normalized = raw
+    .trim()
+    .replace(/^['"]|['"]$/g, "")
+    .toLowerCase();
+  if (!normalized) return defaultEnabled;
+  return !["0", "false", "no", "off"].includes(normalized);
 }
 
 /**
@@ -205,9 +210,28 @@ async function startServer() {
   // Step 10: Initialize embedded agents
   try {
     console.log("[Server] Step 10/10: Initializing embedded agents...");
-    const agentManager = await initializeAgents(world, {
-      autoStartAgents: process.env.AUTO_START_AGENTS !== "false",
-    });
+    const duelServerAgentMode = (process.env.DUEL_SERVER_AGENT_MODE || "")
+      .trim()
+      .toLowerCase();
+    const externalAgentsOnly =
+      duelServerAgentMode === "external" ||
+      duelServerAgentMode === "external-only";
+    if (externalAgentsOnly) {
+      console.log(
+        "[Server] Agent mode: external-only (skipping in-process embedded/model agents)",
+      );
+    }
+    const agentInitConfig: NonNullable<Parameters<typeof initializeAgents>[1]> =
+      {
+        autoStartAgents:
+          !externalAgentsOnly &&
+          resolveBooleanEnvFlag("AUTO_START_AGENTS", true),
+      };
+    if (externalAgentsOnly) {
+      agentInitConfig.spawnModelAgents = false;
+      agentInitConfig.maxModelAgents = 0;
+    }
+    const agentManager = await initializeAgents(world, agentInitConfig);
     console.log(
       `[Server] ✅ Embedded agents initialized (${agentManager.getAllAgents().length} agent(s))`,
     );

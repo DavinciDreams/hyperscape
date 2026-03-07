@@ -196,6 +196,14 @@ export class BroadcastManager {
         return socket;
       }
     }
+    // Fallback: check socket.characterId for agents still completing async init.
+    // socket.characterId is set immediately during handleEnterWorld, while
+    // socket.player is only assigned after async DB/terrain operations complete.
+    for (const socket of this.sockets.values()) {
+      if (socket.characterId === playerId) {
+        return socket;
+      }
+    }
     return undefined;
   }
 

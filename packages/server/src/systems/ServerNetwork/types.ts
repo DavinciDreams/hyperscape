@@ -166,6 +166,19 @@ export interface AgentGoalSyncPayload {
   characterId?: string;
   goal: unknown;
   availableGoals?: unknown[];
+  personality?: {
+    sociability: number;
+    helpfulness: number;
+    adventurousness: number;
+    chattiness: number;
+    aggression: number;
+    patience: number;
+  };
+  desireScores?: Array<{
+    goalType: string;
+    score: number;
+    breakdown: string;
+  }>;
 }
 
 /** Payload for agent thought sync */
@@ -176,6 +189,19 @@ export interface AgentThoughtSyncPayload {
     type: "situation" | "evaluation" | "thinking" | "decision" | "action";
     content: string;
     timestamp: number;
+    health?: {
+      current: number;
+      max: number;
+      percent: number;
+      urgency: "critical" | "warning" | "safe";
+    };
+    decisionPath?:
+      | "short-circuit"
+      | "llm"
+      | "scripted"
+      | "planner"
+      | "curiosity";
+    providers?: string[];
   };
 }
 

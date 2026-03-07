@@ -181,13 +181,10 @@ export function buildModelSecrets(
 }
 
 /**
- * Create a unique PGLite data directory for an agent so multiple
- * runtimes don't conflict on disk.
+ * @deprecated PGLite has been replaced by InMemoryDatabaseAdapter.
+ * Kept for backward compatibility with external callers.
  */
 export function ensurePgliteDataDir(agentId: string): string {
-  // Use in-memory database to prevent migration collisions,
-  // disk corruption, and PGLite singleton race conditions
-  // across concurrent bot spawns. Data does not need to persist.
   return `memory://${agentId}`;
 }
 
@@ -218,7 +215,6 @@ export function createAgentCharacter(
     .toLowerCase()}`;
   const characterId = agentId;
 
-  const pgliteDataDir = ensurePgliteDataDir(agentId);
   const modelSecrets = buildModelSecrets(config, overrides.smallModel);
 
   const character: Character = {
@@ -237,13 +233,8 @@ export function createAgentCharacter(
     settings: {
       model: config.model,
       secrets: {
-        PGLITE_DATA_DIR: pgliteDataDir,
-        // Force PGLite in-memory DB — do NOT pass POSTGRES_URL/DATABASE_URL.
-        // The ElizaOS SQL plugin prioritizes Postgres over PGLite when both
-        // are set, which causes destructive schema migrations against the
-        // game database (different schema than ElizaOS expects).
-        // Long-term memory is disabled anyway, so agents don't need Postgres.
-        // Disable memory accumulation: agents use live world state, not persistent memories
+        // Disable memory accumulation: agents use live world state, not persistent memories.
+        // InMemoryDatabaseAdapter is passed directly to AgentRuntime — no PGLite/Postgres needed.
         MEMORY_LONG_TERM_ENABLED: "false",
         MEMORY_LONG_TERM_VECTOR_SEARCH_ENABLED: "false",
         MEMORY_SUMMARIZATION_THRESHOLD: "9999",

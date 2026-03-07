@@ -56,6 +56,66 @@ export function registerDuelEventListeners(deps: DuelEventDeps): () => void {
     world.on(event, handler);
   };
 
+  // -- on-deck notification (next duel pair selected, agents should prepare) --
+  world.on("duel:on-deck", (event) => {
+    const { agent1Id, agent1Name, agent2Id, agent2Name } = event as {
+      agent1Id: string;
+      agent1Name: string;
+      agent2Id: string;
+      agent2Name: string;
+    };
+
+    const agent1Socket = getSocketByPlayerId(agent1Id);
+    if (agent1Socket) {
+      agent1Socket.send("duelOnDeck", {
+        opponentId: agent2Id,
+        opponentName: agent2Name,
+      });
+    }
+
+    const agent2Socket = getSocketByPlayerId(agent2Id);
+    if (agent2Socket) {
+      agent2Socket.send("duelOnDeck", {
+        opponentId: agent1Id,
+        opponentName: agent1Name,
+      });
+    }
+  });
+
+  // -- session created (also used by StreamingDuelScheduler to notify agents) --
+  world.on("duel:session:created", (event) => {
+    const { duelId, challengerId, challengerName, targetId, targetName } =
+      event as EventMap[typeof EventType.DUEL_SESSION_CREATED];
+
+    const challengerSocket = getSocketByPlayerId(challengerId);
+    if (challengerSocket) {
+      challengerSocket.send("duelSessionStarted", {
+        duelId,
+        opponentId: targetId,
+        opponentName: targetName,
+        isChallenger: true,
+      });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for challenger ${challengerId} — duelSessionStarted not sent`,
+      );
+    }
+
+    const targetSocket = getSocketByPlayerId(targetId);
+    if (targetSocket) {
+      targetSocket.send("duelSessionStarted", {
+        duelId,
+        opponentId: challengerId,
+        opponentName: challengerName,
+        isChallenger: false,
+      });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for target ${targetId} — duelSessionStarted not sent`,
+      );
+    }
+  });
+
   // -- countdown start --
   on("duel:countdown:start", (event) => {
     const { duelId, arenaId, challengerId, targetId } =
@@ -105,6 +165,10 @@ export function registerDuelEventListeners(deps: DuelEventDeps): () => void {
         opponentId: targetId,
         bounds,
       });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for challenger ${challengerId} — duelFightStart not sent`,
+      );
     }
 
     const targetSocket = getSocketByPlayerId(targetId);
@@ -115,6 +179,10 @@ export function registerDuelEventListeners(deps: DuelEventDeps): () => void {
         opponentId: challengerId,
         bounds,
       });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for target ${targetId} — duelFightStart not sent`,
+      );
     }
   });
 

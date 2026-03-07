@@ -3,6 +3,7 @@ import { Plus, Settings, LogOut, Play, Square } from "lucide-react";
 import type { Agent } from "./types";
 import { AgentSummaryCard } from "./AgentSummaryCard";
 import { AgentGoalPanel } from "./AgentGoalPanel";
+import { AgentQuestPanel } from "./AgentQuestPanel";
 import { AgentSkillsPanel } from "./AgentSkillsPanel";
 import { AgentActivityPanel } from "./AgentActivityPanel";
 import { AgentPositionPanel } from "./AgentPositionPanel";
@@ -140,6 +141,12 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({
         <div className="flex-shrink overflow-y-auto max-h-[400px] scrollbar-thin scrollbar-thumb-[#8b4513]/30 scrollbar-track-transparent">
           {/* Goal Panel - Current objective and progress */}
           <AgentGoalPanel
+            agent={selectedAgent}
+            isViewportActive={viewportAgentId === selectedAgentId}
+          />
+
+          {/* Quest Panel - Quest status and progress */}
+          <AgentQuestPanel
             agent={selectedAgent}
             isViewportActive={viewportAgentId === selectedAgentId}
           />

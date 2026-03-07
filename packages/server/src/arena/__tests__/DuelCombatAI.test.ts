@@ -86,18 +86,31 @@ describe("DuelCombatAI", () => {
   describe("prayer state tracking", () => {
     it("does not toggle a prayer that is already active", async () => {
       const ai = new DuelCombatAI(service as never, "opponent-1");
+      const activePrayers = new Set<string>();
 
-      service.getGameState.mockReturnValue({
+      service.executePrayerToggle.mockImplementation(
+        async (prayerId: string) => {
+          if (activePrayers.has(prayerId)) {
+            activePrayers.delete(prayerId);
+          } else {
+            activePrayers.add(prayerId);
+          }
+          return true;
+        },
+      );
+
+      service.getGameState.mockImplementation(() => ({
         health: 80,
         maxHealth: 99,
         alive: true,
         inCombat: true,
         currentTarget: "opponent-1",
         inventory: [],
+        activePrayers: [...activePrayers],
         nearbyEntities: [
           { id: "opponent-1", health: 60, maxHealth: 99, distance: 2 },
         ],
-      });
+      }));
 
       ai.start();
 

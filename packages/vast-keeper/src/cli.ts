@@ -20,6 +20,11 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  buildTargetFromEnv,
+  isActiveInstance,
+  partitionInstances,
+} from "./instance-utils.js";
 
 // Colors for terminal output
 const RED = "\x1b[31m";
@@ -51,6 +56,7 @@ const CONFIG = {
   diskSize: Number.parseInt(process.env.VAST_DISK_GB || "120", 10),
   maxWaitTime: 300000, // 5 minutes
 };
+const INSTANCE_TARGET = buildTargetFromEnv(process.env);
 
 interface VastInstance {
   id: number;
@@ -63,6 +69,7 @@ interface VastInstance {
   reliability: number;
   gpu_display_active: boolean;
   public_ipaddr?: string;
+  start_date?: number;
 }
 
 interface VastOffer {
@@ -159,11 +166,14 @@ async function searchOffers(): Promise<VastOffer[]> {
 }
 
 async function getActiveInstances(): Promise<VastInstance[]> {
+  const instances = await getAllInstances();
+  return instances.filter(isActiveInstance);
+}
+
+async function getAllInstances(): Promise<VastInstance[]> {
   const instances = runVastCmd(["show", "instances"]) as VastInstance[];
   if (!Array.isArray(instances)) return [];
-  return instances.filter(
-    (i) => i.actual_status === "running" || i.actual_status === "loading",
-  );
+  return instances;
 }
 
 async function waitForInstance(
@@ -445,6 +455,55 @@ async function cmdDestroy(): Promise<void> {
   }
 }
 
+async function cmdCleanup(): Promise<void> {
+  await ensureApiKeyFile();
+
+  log.header("Cleaning Up Vast.ai Instances");
+
+  const instances = await getAllInstances();
+
+  if (instances.length === 0) {
+    log.warn("No instances found.");
+    return;
+  }
+
+  const activeInstances = instances.filter(isActiveInstance);
+  const { primary } = partitionInstances(activeInstances, INSTANCE_TARGET);
+
+  if (primary) {
+    log.info(
+      `Keeping instance ${primary.id} (${primary.gpu_name}) at ${primary.ssh_host}:${primary.ssh_port}`,
+    );
+  } else {
+    log.warn(
+      "No active instance found. Cleanup will remove all stale contracts.",
+    );
+  }
+
+  const instancesToDestroy = instances.filter(
+    (instance) => instance.id !== primary?.id,
+  );
+
+  if (instancesToDestroy.length === 0) {
+    log.success("No surplus instances found.");
+    return;
+  }
+
+  for (const instance of instancesToDestroy) {
+    const state = isActiveInstance(instance) ? "active" : "inactive";
+    log.info(
+      `Destroying ${state} instance ${instance.id} (${instance.gpu_name})...`,
+    );
+
+    try {
+      runVastCmd(["destroy", "instance", String(instance.id)]);
+      log.success(`Instance ${instance.id} destroyed.`);
+    } catch (err) {
+      log.error(`Failed to destroy instance ${instance.id}: ${err}`);
+    }
+  }
+}
+
 async function cmdSsh(): Promise<void> {
   await ensureApiKeyFile();
 
@@ -485,6 +544,9 @@ async function main(): Promise<void> {
     case "destroy":
       await cmdDestroy();
       break;
+    case "cleanup":
+      await cmdCleanup();
+      break;
     case "ssh":
       await cmdSsh();
       break;
@@ -501,16 +563,20 @@ ${BOLD}Commands:${NC}
   status     - Show current instance status and SSH info
   search     - Search for available GPU instances
   destroy    - Destroy all running instances
+  cleanup    - Keep the selected active instance and destroy every other contract
   ssh        - Print SSH connection command
 
 ${BOLD}Environment:${NC}
   VAST_API_KEY     - Required. Your Vast.ai API key
   VAST_SEARCH_QUERY - Optional. Custom search query (must include gpu_display_active=true)
+  VAST_TARGET_INSTANCE_ID - Optional. Explicit instance to keep during cleanup
+  VAST_TARGET_SSH_HOST / VAST_TARGET_SSH_PORT - Optional. Explicit SSH target to keep during cleanup
 
 ${BOLD}Examples:${NC}
   VAST_API_KEY=xxx bun run provision
   VAST_API_KEY=xxx bun run status
   VAST_API_KEY=xxx bun run search
+  VAST_API_KEY=xxx bun run cleanup
 
 ${BOLD}Workflow:${NC}
   1. Run 'bun run provision' to create a new instance

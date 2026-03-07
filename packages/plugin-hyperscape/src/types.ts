@@ -40,7 +40,14 @@ export type EventType =
   | "PLAYER_EQUIPMENT_CHANGED"
   | "CHAT_MESSAGE"
   | "DUEL_FIGHT_START"
-  | "DUEL_COMPLETED";
+  | "DUEL_SESSION_STARTED"
+  | "DUEL_COMPLETED"
+  | "DUEL_CANCELLED"
+  | "DUEL_ON_DECK"
+  | "DUEL_COUNTDOWN_START"
+  | "DUEL_COUNTDOWN_TICK"
+  | "DUEL_OPPONENT_DISCONNECTED"
+  | "DUEL_OPPONENT_RECONNECTED";
 
 // Goal types used by the autonomous behavior system
 export type AvailableGoalType =
@@ -195,7 +202,12 @@ export interface QuestData {
   questId?: string;
   status?: string;
   description?: string;
+  currentStage?: string;
   stageProgress?: Record<string, number>;
+  startNpc?: string;
+  stageType?: string;
+  stageTarget?: string;
+  stageCount?: number;
 }
 
 /**
@@ -282,6 +294,12 @@ export interface GameStateCache {
   quests: QuestData[];
   /** Cached bank contents (populated when bank is opened or on spawn) */
   bankItems: BankItem[];
+  /** Timestamp when bank items were last updated from server */
+  bankItemsUpdatedAt?: number;
+  /** Timestamp when quest list was last updated from server */
+  questsUpdatedAt?: number;
+  /** Timestamp when inventory was last updated from server */
+  inventoryUpdatedAt?: number;
 }
 
 /**

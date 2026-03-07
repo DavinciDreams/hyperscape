@@ -1161,14 +1161,17 @@ export function registerAdminRoutes(
           const goalsPaused =
             ServerNetwork.agentGoalsPaused.get(characterId) ?? false;
 
-          // Get thoughts from ServerNetwork
+          // Get thoughts from ServerNetwork (include audit fields)
           const rawThoughts =
             ServerNetwork.agentThoughts.get(characterId) ?? [];
-          const recentThoughts = rawThoughts.slice(0, 10).map((t) => ({
+          const recentThoughts = rawThoughts.slice(0, 100).map((t) => ({
             id: t.id,
             type: t.type,
             content: t.content,
             timestamp: t.timestamp,
+            health: t.health,
+            decisionPath: t.decisionPath,
+            providers: t.providers,
           }));
 
           // Skills: gameState > SkillsSystem > entity.data.skills
@@ -1424,6 +1427,10 @@ export function registerAdminRoutes(
                 }
               : null,
             goalsPaused,
+            personality:
+              ServerNetwork.agentPersonality.get(characterId) ?? null,
+            desireScores:
+              ServerNetwork.agentDesireScores.get(characterId) ?? [],
 
             skills,
             combatLevel,

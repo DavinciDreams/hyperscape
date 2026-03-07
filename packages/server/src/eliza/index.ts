@@ -64,6 +64,7 @@ export {
   loadSqlPlugin as loadAgentSqlPlugin,
   createAgentCharacter as createAgentCharacterConfig,
   buildModelSecrets,
+  /** @deprecated PGLite replaced by InMemoryDatabaseAdapter */
   ensurePgliteDataDir,
   DEFAULT_SMALL_MODELS,
   MODEL_SETTING_KEYS,
@@ -127,7 +128,9 @@ export async function initializeAgents(
     spawnEnvValue == null || spawnEnvValue === ""
       ? null
       : spawnEnvValue !== "false";
-  const defaultSpawnModelAgents = process.env.NODE_ENV === "production";
+  const streamingDuelEnabled = process.env.STREAMING_DUEL_ENABLED === "true";
+  const defaultSpawnModelAgents =
+    process.env.NODE_ENV === "production" || streamingDuelEnabled;
   const spawnRequested =
     config?.spawnModelAgents ?? spawnRequestedByEnv ?? defaultSpawnModelAgents;
   const embeddedAgentCount = manager.getAllAgents().length;
@@ -157,7 +160,7 @@ export async function initializeAgents(
       console.log("[Eliza] Spawning ElizaOS model agents for dueling...");
       const maxAgents =
         config?.maxModelAgents ??
-        parseInt(process.env.MAX_MODEL_AGENTS || "10", 10);
+        parseInt(process.env.MAX_MODEL_AGENTS || "25", 10);
 
       const spawnedCount = await spawnModelAgents(world, {
         maxAgents,

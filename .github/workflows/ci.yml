@@ -21,7 +21,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.1.38
 
       - name: Install dependencies
         run: |
@@ -80,7 +80,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.1.38
 
       - name: Cache Turbo
         uses: actions/cache@v4
@@ -115,7 +115,7 @@ jobs:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
 
       - name: Run tests
-        run: bunx turbo run test --filter='!@hyperscape/app' --filter='!@hyperscape/evm-contracts' --filter='!@hyperscape/contracts' --filter='!@hyperscape/gold-betting-demo'
+        run: bunx turbo run test --filter='!@hyperscape/app' --filter='!@hyperscape/evm-contracts' --filter='!@hyperscape/contracts' --filter='!@hyperscape/gold-betting-demo' --filter='!gold-betting-demo-app' --filter='!gold-betting-demo-anchor' --filter='!gold-betting-demo-keeper'
         env:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
           NODE_ENV: test
@@ -148,7 +148,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.1.38
 
       - name: Cache Turbo
         uses: actions/cache@v4
@@ -167,7 +167,7 @@ jobs:
           done
 
       - name: Build all packages with Turbo
-        run: bunx turbo run build --filter=!@hyperscape/app
+        run: bunx turbo run build --filter=!@hyperscape/app --filter=!@hyperscape/gold-betting-demo --filter=!gold-betting-demo-app --filter=!gold-betting-demo-anchor --filter=!gold-betting-demo-keeper
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

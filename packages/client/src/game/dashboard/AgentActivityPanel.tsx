@@ -147,7 +147,7 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
       details,
     };
 
-    setActivities((prev) => [newActivity, ...prev].slice(0, 15));
+    setActivities((prev) => [newActivity, ...prev].slice(0, 100));
 
     // Update session stats
     if (xpGained) {
@@ -311,8 +311,11 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
               </div>
             </div>
           ) : (
-            <div className="space-y-0.5 max-h-32 overflow-y-auto">
-              {activities.slice(0, 10).map((activity) => (
+            <div
+              className="space-y-0.5 max-h-64 overflow-y-auto"
+              style={{ scrollbarWidth: "thin" }}
+            >
+              {activities.map((activity) => (
                 <div
                   key={activity.id}
                   className="flex items-center gap-2 p-1 rounded bg-black/20 hover:bg-black/30 transition-colors"

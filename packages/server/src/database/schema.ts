@@ -2537,3 +2537,33 @@ export const arenaFailedAwards = pgTable(
     ),
   }),
 );
+
+/**
+ * Streaming Duel History - Persisted log of every streaming duel outcome.
+ *
+ * Written fire-and-forget by MatchmakingManager after each cycle resolves.
+ * Used for analytics, replay feeds, and leaderboard verification.
+ */
+export const streamingDuelHistory = pgTable(
+  "streaming_duel_history",
+  {
+    id: serial("id").primaryKey(),
+    cycleId: text("cycleId").notNull(),
+    duelId: text("duelId"),
+    finishedAt: bigint("finishedAt", { mode: "number" }).notNull(),
+    winnerId: text("winnerId").notNull(),
+    winnerName: text("winnerName").notNull(),
+    loserId: text("loserId").notNull(),
+    loserName: text("loserName").notNull(),
+    winReason: text("winReason").notNull(),
+    damageWinner: integer("damageWinner").notNull().default(0),
+    damageLoser: integer("damageLoser").notNull().default(0),
+  },
+  (table) => ({
+    finishedAtIdx: index("idx_streaming_duel_history_finished").on(
+      table.finishedAt,
+    ),
+    winnerIdx: index("idx_streaming_duel_history_winner").on(table.winnerId),
+    loserIdx: index("idx_streaming_duel_history_loser").on(table.loserId),
+  }),
+);

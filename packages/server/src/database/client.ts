@@ -263,7 +263,7 @@ export async function initializeDatabase(connectionString: string) {
   // - Keepalive to prevent unexpected disconnects
   // - Lower max connections (serverless pools are limited)
   // Supavisor pooler needs even lower max connections
-  const defaultMax = useSupavisor ? 6 : isServerless ? 10 : 20;
+  const defaultMax = useSupavisor ? 6 : isServerless ? 15 : 30;
   const defaultMin = isServerless ? 1 : 2;
   const envMax = parseOptionalInt(
     process.env.POSTGRES_POOL_MAX || process.env.DB_POOL_MAX,
@@ -284,7 +284,7 @@ export async function initializeDatabase(connectionString: string) {
     min: poolMin,
     // Serverless DBs close idle connections quickly, so use shorter timeout
     idleTimeoutMillis: isServerless ? 20000 : 30000,
-    connectionTimeoutMillis: 30000,
+    connectionTimeoutMillis: 60000,
     allowExitOnIdle: true,
     // Enable SSL for cloud databases
     ssl: needsSSL ? { rejectUnauthorized: false } : undefined,

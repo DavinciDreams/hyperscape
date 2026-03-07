@@ -2,6 +2,11 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildTargetFromEnv,
+  isActiveInstance,
+  partitionInstances,
+} from "./instance-utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -20,6 +25,9 @@ const TARGET_IMAGE =
   process.env.VAST_IMAGE || "nvidia/cuda:12.4.0-runtime-ubuntu22.04";
 const DISK_SIZE_GB = Number.parseInt(process.env.VAST_DISK_GB || "120", 10);
 const RTMP_MULTIPLEXER_URL = process.env.RTMP_MULTIPLEXER_URL;
+const INSTANCE_TARGET = buildTargetFromEnv(process.env);
+const PRUNE_EXTRA_INSTANCES =
+  process.env.KEEPER_PRUNE_EXTRA_INSTANCES !== "false";
 
 // Health check configuration
 const HEALTH_CHECK_ENABLED =
@@ -51,6 +59,8 @@ interface VastInstance {
   actual_status: string;
   ssh_host: string;
   ssh_port: number;
+  gpu_display_active?: boolean;
+  start_date?: number;
   [key: string]: unknown;
 }
 
@@ -115,10 +125,7 @@ async function runVastCmd(args: string[]): Promise<unknown> {
 
 async function getActiveInstances(): Promise<VastInstance[]> {
   const instances = (await runVastCmd(["show", "instances"])) as VastInstance[];
-  // Filter out instances that are stopped or exited
-  return instances.filter(
-    (i) => i.actual_status === "running" || i.actual_status === "loading",
-  );
+  return instances.filter(isActiveInstance);
 }
 
 async function findOffers(): Promise<VastOffer[]> {
@@ -380,7 +387,7 @@ async function loop() {
       await checkApiKeyFile();
 
       console.log("[Keeper] Checking active instances...");
-      const instances = await getActiveInstances();
+      let instances = await getActiveInstances();
 
       if (instances.length === 0) {
         console.log(
@@ -443,6 +450,41 @@ async function loop() {
         await deployToServer(instanceInfo.ssh_host, instanceInfo.ssh_port);
       } else {
         console.log(`[Keeper] Found ${instances.length} running instances.`);
+
+        if (instances.length > 1 && PRUNE_EXTRA_INSTANCES) {
+          const { primary, extras } = partitionInstances(
+            instances,
+            INSTANCE_TARGET,
+          );
+
+          if (primary) {
+            const healthUrl = buildHealthUrl(primary);
+            const primaryReady =
+              primary.actual_status === "running" &&
+              (!HEALTH_CHECK_ENABLED ||
+                !healthUrl ||
+                (await checkServerHealth(healthUrl)));
+
+            if (primaryReady) {
+              console.log(
+                `[Keeper] Keeping instance ${primary.id} as the active target.`,
+              );
+
+              for (const extra of extras) {
+                console.warn(
+                  `[Keeper] Destroying duplicate active instance ${extra.id}.`,
+                );
+                await destroyInstance(extra.id);
+              }
+
+              instances = [primary];
+            } else {
+              console.warn(
+                "[Keeper] Multiple active instances detected, but the preferred target is not healthy yet. Skipping duplicate cleanup this iteration.",
+              );
+            }
+          }
+        }
 
         // Health check the running instance
         for (const instance of instances) {
