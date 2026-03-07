@@ -17,9 +17,9 @@ import {
   ModelType,
   type Plugin,
   type Character,
+  // @ts-ignore — InMemoryDatabaseAdapter is exported at runtime but not in .d.ts
+  InMemoryDatabaseAdapter,
 } from "@elizaos/core";
-import fs from "fs";
-import path from "path";
 import { EventType, getDuelArenaConfig, type World } from "@hyperscape/shared";
 import { createJWT } from "../shared/utils.js";
 import { errMsg } from "../shared/errMsg.js";
@@ -30,11 +30,7 @@ import {
   recoverAgentFromDeathLoop,
 } from "./agentRecovery.js";
 import { getAgentManager } from "./AgentManager.js";
-import {
-  loadModelPlugin,
-  loadSqlPlugin,
-  createAgentCharacter,
-} from "./agentHelpers.js";
+import { loadModelPlugin, createAgentCharacter } from "./agentHelpers.js";
 
 /**
  * Model provider configuration
@@ -247,101 +243,6 @@ function resolveModelAgentServerUrls(): { wsUrl: string; apiUrl: string } {
   return { wsUrl, apiUrl };
 }
 
-function collectErrorMessages(error: unknown): string[] {
-  const messages: string[] = [];
-  const visited = new Set<unknown>();
-  const queue: unknown[] = [error];
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current || visited.has(current)) continue;
-    visited.add(current);
-
-    if (current instanceof Error) {
-      if (current.message) messages.push(current.message);
-      if (current.stack) messages.push(current.stack);
-
-      const cause = (current as Error & { cause?: unknown }).cause;
-      if (cause) queue.push(cause);
-      continue;
-    }
-
-    if (typeof current === "string") {
-      messages.push(current);
-      continue;
-    }
-
-    if (typeof current === "object") {
-      const candidate = current as {
-        message?: unknown;
-        stack?: unknown;
-        cause?: unknown;
-      };
-      if (typeof candidate.message === "string")
-        messages.push(candidate.message);
-      if (typeof candidate.stack === "string") messages.push(candidate.stack);
-      if (candidate.cause) queue.push(candidate.cause);
-    }
-  }
-
-  return messages;
-}
-
-function isRecoverableModelRuntimeInitError(error: unknown): boolean {
-  const haystack = collectErrorMessages(error).join("\n").toLowerCase();
-  if (!haystack) return false;
-
-  const destructiveMigrationBlocked = haystack.includes(
-    "destructive migration blocked",
-  );
-  const pgliteMigrationsSchemaError = haystack.includes(
-    "create schema if not exists migrations",
-  );
-  const pgliteAbort =
-    haystack.includes("pglite") &&
-    haystack.includes("aborted(). build with -sassertions");
-
-  return (
-    destructiveMigrationBlocked || pgliteMigrationsSchemaError || pgliteAbort
-  );
-}
-
-async function resetAgentPgliteDataDir(
-  dataDir: string,
-  displayName: string,
-): Promise<void> {
-  const normalized = path.resolve(dataDir);
-  const root = path.parse(normalized).root;
-  if (normalized === root) {
-    throw new Error(
-      `[ModelAgentSpawner] Refusing to reset unsafe PGLite path for ${displayName}: ${normalized}`,
-    );
-  }
-
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\..*$/, "")
-    .replace("T", "-");
-  const backupDir = `${normalized}.corrupt-${stamp}`;
-
-  if (fs.existsSync(normalized)) {
-    try {
-      await fs.promises.rename(normalized, backupDir);
-      console.warn(
-        `[ModelAgentSpawner] Backed up ${displayName} PGLite dir to ${backupDir}`,
-      );
-    } catch (renameError) {
-      console.warn(
-        `[ModelAgentSpawner] Failed to back up PGLite dir for ${displayName}: ${errMsg(renameError)}. Deleting ${normalized} instead.`,
-      );
-      await fs.promises.rm(normalized, { recursive: true, force: true });
-    }
-  }
-
-  await fs.promises.mkdir(normalized, { recursive: true });
-}
-
 /**
  * Spawn ElizaOS agents with different AI models
  *
@@ -374,20 +275,13 @@ export async function spawnModelAgents(
   }
   agentsToSpawn = agentsToSpawn.slice(0, maxAgents);
 
-  // Load shared plugins
-  // SQL plugin is required by @elizaos/core >= alpha.26 for DB adapter init.
-  // Can be disabled with MODEL_AGENT_SQL_ENABLED=false but agents will fail to start.
-  const modelAgentSqlDisabled = /^(0|false|no|off)$/i.test(
-    process.env.MODEL_AGENT_SQL_ENABLED ?? "",
+  // Use lightweight InMemoryDatabaseAdapter instead of PGLite WASM.
+  // PGLite allocates ~2-4GB WASM heap per instance; with 19 agents that's 38-76GB.
+  // Agents don't persist data (all memory flags disabled), so InMemoryDatabaseAdapter
+  // provides the required IDatabaseAdapter surface with zero WASM overhead.
+  console.log(
+    "[ModelAgentSpawner] Using InMemoryDatabaseAdapter (no PGLite WASM overhead)",
   );
-  const sqlPlugin = !modelAgentSqlDisabled
-    ? await loadSqlPlugin("ModelAgentSpawner")
-    : null;
-  if (modelAgentSqlDisabled) {
-    console.warn(
-      "[ModelAgentSpawner] SQL plugin disabled — agent init will likely fail",
-    );
-  }
   // Trajectory logger and local embedding plugin are intentionally omitted:
   // both cause unbounded memory growth (WASM heap + in-memory log accumulation).
 
@@ -490,9 +384,6 @@ export async function spawnModelAgents(
         HYPERSCAPE_PRIVY_USER_ID: accountId,
         HYPERSCAPE_CHARACTER_ID: "",
       };
-      if (sqlPlugin) {
-        perAgentSecrets.ELIZA_ALLOW_DESTRUCTIVE_MIGRATIONS = "true";
-      }
 
       const { character, characterId } = createAgentCharacter(agentConfig, {
         secrets: perAgentSecrets,
@@ -532,6 +423,7 @@ export async function spawnModelAgents(
         const runtimeInstance = new AgentRuntime({
           character,
           plugins: runtimePlugins,
+          adapter: new InMemoryDatabaseAdapter(),
         });
 
         const originalGetModel = runtimeInstance.getModel.bind(runtimeInstance);
@@ -575,7 +467,6 @@ export async function spawnModelAgents(
       const initializeRuntimeInstance = async (
         ri: AgentRuntime,
       ): Promise<void> => {
-        if (sqlPlugin) await ri.registerPlugin(sqlPlugin);
         const initPromise = ri.initialize();
         let timedOut = false;
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -599,36 +490,10 @@ export async function spawnModelAgents(
         }
       };
 
-      const pgliteDataDir =
-        typeof character.settings?.secrets?.PGLITE_DATA_DIR === "string"
-          ? character.settings.secrets.PGLITE_DATA_DIR
-          : null;
-
-      let runtimeInstance = createRuntimeInstance();
+      const runtimeInstance = createRuntimeInstance();
       runtime = runtimeInstance;
 
-      try {
-        await initializeRuntimeInstance(runtimeInstance);
-      } catch (initializeError) {
-        if (
-          pgliteDataDir &&
-          isRecoverableModelRuntimeInitError(initializeError)
-        ) {
-          console.warn(
-            `[ModelAgentSpawner] ${tag} Init failed for ${agentConfig.displayName}: ${errMsg(initializeError)}. Resetting PGLite and retrying.`,
-          );
-          await Promise.race([
-            runtimeInstance.stop().catch(() => undefined),
-            new Promise((r) => setTimeout(r, 10_000)),
-          ]);
-          await resetAgentPgliteDataDir(pgliteDataDir, agentConfig.displayName);
-          runtimeInstance = createRuntimeInstance();
-          runtime = runtimeInstance;
-          await initializeRuntimeInstance(runtimeInstance);
-        } else {
-          throw initializeError;
-        }
-      }
+      await initializeRuntimeInstance(runtimeInstance);
 
       runningAgents.set(agentKey, {
         config: agentConfig,
@@ -671,16 +536,16 @@ export async function spawnModelAgents(
     }
   };
 
-  // ---- Spawn first agent alone to run DB migrations, then batch the rest ----
+  // ---- Spawn first agent alone, then batch the rest ----
   const BATCH_SIZE = 3;
   const BATCH_DELAY_MS = 2000;
 
   console.log(
-    `[ModelAgentSpawner] Spawning ${eligible.length} agents (first sequential for migrations, then batches of ${BATCH_SIZE})...`,
+    `[ModelAgentSpawner] Spawning ${eligible.length} agents (first sequential, then batches of ${BATCH_SIZE})...`,
   );
   const startTime = Date.now();
 
-  // First agent runs solo so SQL plugin migrations complete without races
+  // First agent runs solo to validate init works before batching the rest
   const firstResult = await spawnOne(eligible[0], 0);
   if (firstResult) {
     spawnedCount++;
@@ -689,7 +554,7 @@ export async function spawnModelAgents(
   }
   await yieldToEventLoop();
 
-  // Remaining agents in parallel batches (migrations already done)
+  // Remaining agents in parallel batches
   for (let i = 1; i < eligible.length; i += BATCH_SIZE) {
     const batch = eligible.slice(i, i + BATCH_SIZE);
     const batchNum = Math.floor((i - 1) / BATCH_SIZE) + 1;
@@ -771,8 +636,7 @@ export async function stopModelAgent(
   } catch (error) {
     stopError = error;
   } finally {
-    // Explicitly close DB adapter to free PGLite WASM heap memory.
-    // runtime.stop() should do this, but we ensure it as a safety net.
+    // Explicitly close DB adapter to release any resources.
     try {
       const adapter = agent.runtime.adapter as {
         close?: () => Promise<void>;
@@ -784,6 +648,11 @@ export async function stopModelAgent(
       /* best-effort cleanup */
     }
     runningAgents.delete(key);
+  }
+
+  // Hint GC to reclaim memory from the stopped agent's runtime
+  if (typeof Bun !== "undefined" && Bun.gc) {
+    Bun.gc(true);
   }
 
   if (stopError) {

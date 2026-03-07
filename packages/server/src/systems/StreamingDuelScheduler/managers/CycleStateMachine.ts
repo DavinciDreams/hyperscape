@@ -12,7 +12,7 @@ import type { StreamingPhase } from "../types.js";
 const TRANSITION_TABLE: Record<StreamingPhase, readonly StreamingPhase[]> = {
   IDLE: ["ANNOUNCEMENT"],
   ANNOUNCEMENT: ["COUNTDOWN", "IDLE"],
-  COUNTDOWN: ["FIGHTING", "IDLE"],
+  COUNTDOWN: ["FIGHTING", "RESOLUTION", "IDLE"],
   FIGHTING: ["RESOLUTION", "IDLE"],
   RESOLUTION: ["IDLE"],
 } as const;

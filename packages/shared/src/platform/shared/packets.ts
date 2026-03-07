@@ -361,6 +361,7 @@ const names = [
   'duelCompleted',         // Server -> Client: duel completed with results
   'duelOpponentDisconnected', // Server -> Client: opponent disconnected during duel
   'duelOpponentReconnected',  // Server -> Client: opponent reconnected during duel
+  'duelOnDeck',              // Server -> Client: agent is on-deck for next duel (prepare)
   'duel:forfeit',          // Client -> Server: forfeit active duel (surrender)
   // Skill/Spell ability packets
   'useSkill',            // Client -> Server: activate a skill ability

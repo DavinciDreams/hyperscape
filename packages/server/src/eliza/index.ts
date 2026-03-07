@@ -64,6 +64,7 @@ export {
   loadSqlPlugin as loadAgentSqlPlugin,
   createAgentCharacter as createAgentCharacterConfig,
   buildModelSecrets,
+  /** @deprecated PGLite replaced by InMemoryDatabaseAdapter */
   ensurePgliteDataDir,
   DEFAULT_SMALL_MODELS,
   MODEL_SETTING_KEYS,
