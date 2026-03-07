@@ -727,16 +727,9 @@ export async function clearRockCacheAll(): Promise<void> {
  * Used when no specific biome rock config is provided.
  */
 export const BIOME_ROCK_PRESETS: Record<string, string[]> = {
+  tundra: ["granite", "basalt", "boulder"],
   forest: ["boulder", "granite", "limestone"],
-  plains: ["boulder", "pebble", "sandstone"],
-  desert: ["sandstone", "limestone", "pebble"],
-  mountains: ["granite", "basalt", "cliff"],
-  mountain: ["granite", "basalt", "cliff"],
-  swamp: ["limestone", "slate", "pebble"],
-  frozen: ["granite", "basalt", "boulder"],
-  wastes: ["basalt", "slate", "asteroid"],
-  corrupted: ["obsidian", "basalt", "crystal"],
-  lake: ["pebble", "limestone", "boulder"],
+  canyon: ["sandstone", "limestone", "pebble"],
 };
 
 /**

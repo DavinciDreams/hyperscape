@@ -71,11 +71,11 @@ const FOREST_GRASS_DARK = vec3(0.18, 0.42, 0.08);
 const FOREST_DIRT = vec3(0.35, 0.24, 0.12);
 const FOREST_DIRT_DARK = vec3(0.22, 0.15, 0.08);
 
-// --- Desert palette: red-orange sand with deep crimson rock ---
-const DESERT_SAND = vec3(0.82, 0.52, 0.28);
-const DESERT_SAND_DARK = vec3(0.72, 0.42, 0.2);
-const DESERT_ROCK = vec3(0.62, 0.28, 0.15);
-const DESERT_ROCK_DARK = vec3(0.48, 0.2, 0.1);
+// --- Canyon palette: red-orange sand with deep crimson rock ---
+const CANYON_SAND = vec3(0.82, 0.52, 0.28);
+const CANYON_SAND_DARK = vec3(0.72, 0.42, 0.2);
+const CANYON_ROCK = vec3(0.62, 0.28, 0.15);
+const CANYON_ROCK_DARK = vec3(0.48, 0.2, 0.1);
 
 // Legacy aliases used by road overlay and other shader sections (default = forest)
 const GRASS_GREEN = FOREST_GRASS;
@@ -99,7 +99,7 @@ const WATER_EDGE = vec3(0.08, 0.06, 0.04);
  * @param noiseVal - primary Perlin noise sample (noiseTex @ worldXZ * NOISE_SCALE)
  * @param noiseVal2 - derived noise: sin(noiseVal * 6.28) * 0.3 + 0.5
  * @param forestWeight - biome weight for forest [0..1]
- * @param desertWeight - biome weight for desert [0..1]
+ * @param canyonWeight - biome weight for canyon [0..1]
  */
 export function computeTerrainBaseColor(
   height: any,
@@ -107,20 +107,20 @@ export function computeTerrainBaseColor(
   noiseVal: any,
   noiseVal2: any,
   forestWeight?: any,
-  desertWeight?: any,
+  canyonWeight?: any,
 ) {
   const fW = forestWeight ?? float(0.0);
-  const dW = desertWeight ?? float(0.0);
+  const dW = canyonWeight ?? float(0.0);
   const tW = sub(float(1.0), add(fW, dW));
 
   // Biome-blended grass
   const grassVariation = smoothstep(float(0.4), float(0.6), noiseVal2);
   const tundraGrass = mix(TUNDRA_GRASS, TUNDRA_GRASS_DARK, grassVariation);
   const forestGrass = mix(FOREST_GRASS, FOREST_GRASS_DARK, grassVariation);
-  const desertGrass = mix(DESERT_SAND, DESERT_SAND_DARK, grassVariation);
+  const canyonGrass = mix(CANYON_SAND, CANYON_SAND_DARK, grassVariation);
   let c: any = add(
     add(mul(tundraGrass, tW), mul(forestGrass, fW)),
-    mul(desertGrass, dW),
+    mul(canyonGrass, dW),
   );
 
   // Biome-blended dirt
@@ -133,10 +133,10 @@ export function computeTerrainBaseColor(
   const dirtVariation = smoothstep(float(0.3), float(0.7), noiseVal2);
   const tundraDirt = mix(TUNDRA_DIRT, TUNDRA_DIRT_DARK, dirtVariation);
   const forestDirt = mix(FOREST_DIRT, FOREST_DIRT_DARK, dirtVariation);
-  const desertDirt = mix(DESERT_ROCK, DESERT_ROCK_DARK, dirtVariation);
+  const canyonDirt = mix(CANYON_ROCK, CANYON_ROCK_DARK, dirtVariation);
   const dirtColor = add(
     add(mul(tundraDirt, tW), mul(forestDirt, fW)),
-    mul(desertDirt, dW),
+    mul(canyonDirt, dW),
   );
   c = mix(c, dirtColor, mul(dirtPatchFactor, flatnessFactor));
 
@@ -166,7 +166,7 @@ export function computeTerrainBaseColor(
     ),
   );
 
-  // Sand near water (flat areas, stronger in desert)
+  // Sand near water (flat areas, stronger in canyon)
   const sandBlend = mul(
     smoothstep(float(10.0), float(6.0), height),
     smoothstep(float(0.25), float(0.0), slope),
@@ -652,7 +652,7 @@ export function createTerrainMaterial(): THREE.Material & {
 
   // Biome weight attributes (computed per-vertex by QuadChunkWorker)
   const biomeForestW = attribute("biomeForestWeight", "float");
-  const biomeDesertW = attribute("biomeDesertWeight", "float");
+  const biomeCanyonW = attribute("biomeCanyonWeight", "float");
 
   // Base color from shared procedural palette
   const baseColor = computeTerrainBaseColor(
@@ -661,7 +661,7 @@ export function createTerrainMaterial(): THREE.Material & {
     noiseValue,
     noiseValue2,
     biomeForestW,
-    biomeDesertW,
+    biomeCanyonW,
   );
 
   // Anti-dithering noise variation (±4% brightness, ±2% color shift)

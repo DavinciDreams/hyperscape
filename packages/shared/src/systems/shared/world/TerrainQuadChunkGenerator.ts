@@ -90,7 +90,7 @@ export function assembleQuadChunkGeometry(
     colorData,
     biomeData,
     biomeForestWeight,
-    biomeDesertWeight,
+    biomeCanyonWeight,
   } = workerData;
   const segments = resolution;
   const halfSize = size * 0.5;
@@ -103,7 +103,7 @@ export function assembleQuadChunkGeometry(
   const colors = new Float32Array(totalVertices * 3);
   const biomeIds = new Float32Array(totalVertices);
   const forestWeights = new Float32Array(totalVertices);
-  const desertWeights = new Float32Array(totalVertices);
+  const canyonWeights = new Float32Array(totalVertices);
   const roadInfluences = new Float32Array(totalVertices);
 
   let flatZoneModified = false;
@@ -140,7 +140,7 @@ export function assembleQuadChunkGeometry(
 
       biomeIds[idx] = biomeData[idx];
       forestWeights[idx] = biomeForestWeight[idx];
-      desertWeights[idx] = biomeDesertWeight[idx];
+      canyonWeights[idx] = biomeCanyonWeight[idx];
 
       const roadTileX = Math.floor(worldX / provider.TILE_SIZE);
       const roadTileZ = Math.floor(worldZ / provider.TILE_SIZE);
@@ -176,7 +176,7 @@ export function assembleQuadChunkGeometry(
     colors[si3 + 2] = colors[mi3 + 2];
     biomeIds[skirtIdx] = biomeIds[mainIdx];
     forestWeights[skirtIdx] = forestWeights[mainIdx];
-    desertWeights[skirtIdx] = desertWeights[mainIdx];
+    canyonWeights[skirtIdx] = canyonWeights[mainIdx];
     roadInfluences[skirtIdx] = roadInfluences[mainIdx];
     skirtIdx++;
   };
@@ -284,8 +284,8 @@ export function assembleQuadChunkGeometry(
     new THREE.BufferAttribute(forestWeights, 1),
   );
   geometry.setAttribute(
-    "biomeDesertWeight",
-    new THREE.BufferAttribute(desertWeights, 1),
+    "biomeCanyonWeight",
+    new THREE.BufferAttribute(canyonWeights, 1),
   );
   geometry.setAttribute(
     "roadInfluence",
@@ -410,7 +410,7 @@ export function generateQuadChunkDataSync(
   const colorData = new Float32Array(vertexCount * 3);
   const biomeData = new Uint8Array(vertexCount);
   const biomeForestWeight = new Float32Array(vertexCount);
-  const biomeDesertWeight = new Float32Array(vertexCount);
+  const biomeCanyonWeight = new Float32Array(vertexCount);
 
   for (let iz = 0; iz < segments; iz++) {
     for (let ix = 0; ix < segments; ix++) {
@@ -460,10 +460,10 @@ export function generateQuadChunkDataSync(
           : 0;
       const dwNorm =
         totalWeight > 0
-          ? (biomeWeightMap.get(BiomeType.Desert) || 0) / totalWeight
+          ? (biomeWeightMap.get(BiomeType.Canyon) || 0) / totalWeight
           : 0;
       biomeForestWeight[idx] = fwNorm;
-      biomeDesertWeight[idx] = dwNorm;
+      biomeCanyonWeight[idx] = dwNorm;
 
       const waterLevel = provider.WATER_LEVEL_NORMALIZED;
       const shoreThreshold = provider.SHORELINE_THRESHOLD;
@@ -494,6 +494,6 @@ export function generateQuadChunkDataSync(
     colorData,
     biomeData,
     biomeForestWeight,
-    biomeDesertWeight,
+    biomeCanyonWeight,
   };
 }

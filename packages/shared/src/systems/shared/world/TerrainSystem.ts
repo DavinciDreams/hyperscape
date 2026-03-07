@@ -865,7 +865,7 @@ export class TerrainSystem extends System {
     const positions = geometry.attributes.position;
     const roadInfluences = new Float32Array(positions.count);
     const forestWeights = new Float32Array(positions.count);
-    const desertWeights = new Float32Array(positions.count);
+    const canyonWeights = new Float32Array(positions.count);
 
     const tileKey = `${tileX}_${tileZ}`;
     const hasFlatZones = (this.flatZonesByTile.get(tileKey)?.length ?? 0) > 0;
@@ -913,7 +913,7 @@ export class TerrainSystem extends System {
       if (totalWeight > 0) {
         const invW = 1 / totalWeight;
         forestWeights[i] = (biomeWeightMap.get(BiomeType.Forest) || 0) * invW;
-        desertWeights[i] = (biomeWeightMap.get(BiomeType.Desert) || 0) * invW;
+        canyonWeights[i] = (biomeWeightMap.get(BiomeType.Canyon) || 0) * invW;
       }
     }
 
@@ -932,8 +932,8 @@ export class TerrainSystem extends System {
       new THREE.BufferAttribute(forestWeights, 1),
     );
     geometry.setAttribute(
-      "biomeDesertWeight",
-      new THREE.BufferAttribute(desertWeights, 1),
+      "biomeCanyonWeight",
+      new THREE.BufferAttribute(canyonWeights, 1),
     );
 
     // DEBUG: log biome weights for first 5 tiles
@@ -945,14 +945,14 @@ export class TerrainSystem extends System {
         sumD = 0;
       for (let _d = 0; _d < forestWeights.length; _d++) {
         sumF += forestWeights[_d];
-        sumD += desertWeights[_d];
+        sumD += canyonWeights[_d];
         maxF = Math.max(maxF, forestWeights[_d]);
-        maxD = Math.max(maxD, desertWeights[_d]);
+        maxD = Math.max(maxD, canyonWeights[_d]);
       }
       const n = forestWeights.length;
       const avgP = (1 - sumF / n - sumD / n).toFixed(3);
       console.log(
-        `[BiomeDebug/WorkerTile] Tile(${tileX},${tileZ}) plains=${avgP} forest=${(sumF / n).toFixed(3)} desert=${(sumD / n).toFixed(3)}`,
+        `[BiomeDebug/WorkerTile] Tile(${tileX},${tileZ}) plains=${avgP} forest=${(sumF / n).toFixed(3)} canyon=${(sumD / n).toFixed(3)}`,
       );
     }
 
@@ -2585,7 +2585,7 @@ export class TerrainSystem extends System {
     const biomeIds = new Float32Array(positions.count);
     const roadInfluences = new Float32Array(positions.count);
     const forestWeights = new Float32Array(positions.count);
-    const desertWeights = new Float32Array(positions.count);
+    const canyonWeights = new Float32Array(positions.count);
 
     // Verify biome data is loaded - error if not
     if (Object.keys(BIOMES).length === 0) {
@@ -2593,9 +2593,11 @@ export class TerrainSystem extends System {
         "[TerrainSystem] BIOMES data not loaded! DataManager must initialize before terrain generation.",
       );
     }
-    const defaultBiomeData = BIOMES[DEFAULT_BIOME] || BIOMES["plains"];
+    const defaultBiomeData = BIOMES[DEFAULT_BIOME];
     if (!defaultBiomeData) {
-      throw new Error("[TerrainSystem] Plains biome not found in BIOMES data!");
+      throw new Error(
+        "[TerrainSystem] Default biome not found in BIOMES data!",
+      );
     }
 
     // Generate heightmap and vertex colors
@@ -2658,7 +2660,7 @@ export class TerrainSystem extends System {
           colorB += this._tempColor.b * weight;
         }
       } else {
-        const biomeData = BIOMES[DEFAULT_BIOME] || BIOMES["plains"];
+        const biomeData = BIOMES[DEFAULT_BIOME];
         if (!biomeData) {
           throw new Error(
             `[TerrainSystem] Default biome not found in BIOMES data!`,
@@ -2674,7 +2676,7 @@ export class TerrainSystem extends System {
       if (totalWeight > 0) {
         const invW = 1 / totalWeight;
         forestWeights[i] = (biomeWeightMap.get(BiomeType.Forest) || 0) * invW;
-        desertWeights[i] = (biomeWeightMap.get(BiomeType.Desert) || 0) * invW;
+        canyonWeights[i] = (biomeWeightMap.get(BiomeType.Canyon) || 0) * invW;
       }
 
       // Apply brownish shoreline tint near water level
@@ -2720,8 +2722,8 @@ export class TerrainSystem extends System {
       new THREE.BufferAttribute(forestWeights, 1),
     );
     geometry.setAttribute(
-      "biomeDesertWeight",
-      new THREE.BufferAttribute(desertWeights, 1),
+      "biomeCanyonWeight",
+      new THREE.BufferAttribute(canyonWeights, 1),
     );
 
     // DEBUG: log biome weights for first 5 sync tiles
@@ -2731,12 +2733,12 @@ export class TerrainSystem extends System {
         sumD = 0;
       for (let _d = 0; _d < forestWeights.length; _d++) {
         sumF += forestWeights[_d];
-        sumD += desertWeights[_d];
+        sumD += canyonWeights[_d];
       }
       const n = forestWeights.length;
       const avgP = (1 - sumF / n - sumD / n).toFixed(3);
       console.log(
-        `[BiomeDebug/SyncTile] Tile(${tileX},${tileZ}) plains=${avgP} forest=${(sumF / n).toFixed(3)} desert=${(sumD / n).toFixed(3)}`,
+        `[BiomeDebug/SyncTile] Tile(${tileX},${tileZ}) plains=${avgP} forest=${(sumF / n).toFixed(3)} canyon=${(sumD / n).toFixed(3)}`,
       );
     }
 
@@ -3267,9 +3269,9 @@ export class TerrainSystem extends System {
    */
   private getBiomeId(biomeName: string): number {
     const biomeIds: Record<string, number> = {
-      plains: 0,
+      tundra: 0,
       forest: 1,
-      desert: 2,
+      canyon: 2,
     };
     return biomeIds[biomeName] ?? 0;
   }
@@ -4657,23 +4659,12 @@ export class TerrainSystem extends System {
     );
   }
 
-  // Map internal biome keys to generic TerrainTileData biome set.
-  // Only tundra/forest/desert biome centers exist (see initializeBiomeCenters).
-  private mapBiomeToGeneric(
-    internal: string,
-  ):
-    | "forest"
-    | "plains"
-    | "desert"
-    | "mountains"
-    | "swamp"
-    | "tundra"
-    | "jungle" {
+  private mapBiomeToGeneric(internal: string): "tundra" | "forest" | "canyon" {
     switch (internal) {
       case BiomeType.Forest:
         return "forest";
-      case BiomeType.Desert:
-        return "desert";
+      case BiomeType.Canyon:
+        return "canyon";
       case BiomeType.Tundra:
       default:
         return "tundra";

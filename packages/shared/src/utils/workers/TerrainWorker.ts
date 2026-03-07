@@ -118,7 +118,7 @@ ${buildBiomeConstantsJS()}
 var BIOME_IDS = {};
 BIOME_IDS[BT_TUNDRA] = 0;
 BIOME_IDS[BT_FOREST] = 1;
-BIOME_IDS[BT_DESERT] = 2;
+BIOME_IDS[BT_CANYON] = 2;
 
 function generateHeightmap(input) {
   const { tileX, tileZ, config, seed, biomeCenters, biomes } = input;

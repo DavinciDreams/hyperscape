@@ -46,7 +46,7 @@ const GRID_CONFIG = {
   RECENTER_THRESHOLD: 64, // Re-center when player moves 64m from texture center
   /** Biomes where grass never grows - matched from biomes.json terrain types */
   NON_GRASSY_TERRAINS: new Set<string>([
-    BiomeType.Desert,
+    BiomeType.Canyon,
     BiomeType.Tundra,
     "mountains",
     "lake",
@@ -64,7 +64,7 @@ const GRID_CONFIG = {
  */
 type ExclusionReason =
   | "collision" // CollisionMatrix blocked (rock, tree, building, etc.)
-  | "biome" // Non-grassy biome (desert, tundra, etc.)
+  | "biome" // Non-grassy biome (canyon, tundra, etc.)
   | "water" // Below water level
   | "slope"; // Too steep
 

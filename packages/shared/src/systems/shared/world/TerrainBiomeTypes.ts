@@ -9,7 +9,7 @@
 export enum BiomeType {
   Tundra = "tundra",
   Forest = "forest",
-  Desert = "desert",
+  Canyon = "canyon",
 }
 
 export const DEFAULT_BIOME = BiomeType.Forest;
@@ -18,13 +18,13 @@ export const BIOME_LIST: BiomeType[] = Object.values(BiomeType);
 /**
  * Worker-injectable JS that defines BiomeType constants.
  * Injected once at the top of inline worker code so the worker
- * can reference BT_TUNDRA, BT_FOREST, BT_DESERT without magic strings.
+ * can reference BT_TUNDRA, BT_FOREST, BT_CANYON without magic strings.
  */
 export function buildBiomeConstantsJS(): string {
   return `
   var BT_TUNDRA = "${BiomeType.Tundra}";
   var BT_FOREST = "${BiomeType.Forest}";
-  var BT_DESERT = "${BiomeType.Desert}";
+  var BT_CANYON = "${BiomeType.Canyon}";
   var BT_DEFAULT = BT_FOREST;
   `;
 }

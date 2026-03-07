@@ -358,17 +358,7 @@ export interface BiomeData {
   name: string;
   description: string;
   difficultyLevel: 0 | 1 | 2 | 3; // 0 = safe zones, 1-3 = mob levels
-  terrain:
-    | "forest"
-    | "wastes"
-    | "plains"
-    | "frozen"
-    | "corrupted"
-    | "lake"
-    | "mountain"
-    | "mountains"
-    | "desert"
-    | "swamp";
+  terrain: "tundra" | "forest" | "canyon";
   resources: string[]; // Available resource types
   mobs: string[]; // Mob types that spawn here
   fogIntensity: number; // 0-1 for visual atmosphere

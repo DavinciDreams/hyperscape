@@ -510,17 +510,9 @@ export function clearPlantCache(): void {
  * Default plant presets per biome type.
  */
 export const BIOME_PLANT_PRESETS: Record<string, string[]> = {
+  tundra: ["bergenia", "pulmonaria"],
   forest: ["monstera", "philodendron", "calathea", "ficus", "hosta"],
-  plains: ["hosta", "heuchera", "bergenia", "maranta"],
-  desert: ["zamioculcas", "aglaonema", "syngonium"],
-  mountains: ["bergenia", "pulmonaria", "heuchera"],
-  mountain: ["bergenia", "pulmonaria", "heuchera"],
-  swamp: ["monstera", "colocasia", "xanthosoma", "alocasia", "spathiphyllum"],
-  frozen: ["bergenia", "pulmonaria"],
-  wastes: ["zamioculcas", "aglaonema"],
-  corrupted: ["alocasia", "caladium", "anthurium"],
-  lake: ["colocasia", "calla", "arum", "spathiphyllum"],
-  tropical: ["monstera", "philodendron", "alocasia", "colocasia", "calathea"],
+  canyon: ["zamioculcas", "aglaonema", "syngonium"],
 };
 
 /**

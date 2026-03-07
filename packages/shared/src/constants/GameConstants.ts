@@ -382,14 +382,9 @@ export const MOB_TYPES = {} as const;
 
 // === BIOME TYPES ===
 export const BIOME_TYPES = {
-  PLAINS: "plains",
-  FOREST: "forest",
-  VALLEY: "valley",
-  MOUNTAINS: "mountains",
   TUNDRA: "tundra",
-  DESERT: "desert",
-  LAKES: "lakes",
-  SWAMP: "swamp",
+  FOREST: "forest",
+  CANYON: "canyon",
 } as const;
 
 // === SKILL NAMES ===

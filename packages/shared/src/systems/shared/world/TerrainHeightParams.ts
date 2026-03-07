@@ -149,7 +149,7 @@ export const FOREST_PROFILE: BiomeNoiseProfile = {
   terraceSlope: 0,
 };
 
-export const DESERT_PROFILE: BiomeNoiseProfile = {
+export const CANYON_PROFILE: BiomeNoiseProfile = {
   continentWeight: 0.32,
   ridgeWeight: 0.25,
   hillWeight: 0.18,
@@ -165,7 +165,7 @@ export const DESERT_PROFILE: BiomeNoiseProfile = {
 export const BIOME_PROFILES: Record<string, BiomeNoiseProfile> = {
   [BiomeType.Tundra]: TUNDRA_PROFILE,
   [BiomeType.Forest]: FOREST_PROFILE,
-  [BiomeType.Desert]: DESERT_PROFILE,
+  [BiomeType.Canyon]: CANYON_PROFILE,
 };
 
 // ---------------------------------------------------------------------------
@@ -653,7 +653,7 @@ const PROFILES_JS = `
   var BIOME_PROFILES = {};
   BIOME_PROFILES[BT_TUNDRA]  = { cW: ${TUNDRA_PROFILE.continentWeight}, rW: ${TUNDRA_PROFILE.ridgeWeight}, hW: ${TUNDRA_PROFILE.hillWeight}, eW: ${TUNDRA_PROFILE.erosionWeight}, dW: ${TUNDRA_PROFILE.detailWeight}, pC: ${TUNDRA_PROFILE.powerCurve}, tS: ${TUNDRA_PROFILE.terraceStrength}, tSh: ${TUNDRA_PROFILE.terraceSharpness}, tHS: ${TUNDRA_PROFILE.terraceHeightScale}, tSl: ${TUNDRA_PROFILE.terraceSlope} };
   BIOME_PROFILES[BT_FOREST]  = { cW: ${FOREST_PROFILE.continentWeight}, rW: ${FOREST_PROFILE.ridgeWeight}, hW: ${FOREST_PROFILE.hillWeight}, eW: ${FOREST_PROFILE.erosionWeight}, dW: ${FOREST_PROFILE.detailWeight}, pC: ${FOREST_PROFILE.powerCurve}, tS: ${FOREST_PROFILE.terraceStrength}, tSh: ${FOREST_PROFILE.terraceSharpness}, tHS: ${FOREST_PROFILE.terraceHeightScale}, tSl: ${FOREST_PROFILE.terraceSlope} };
-  BIOME_PROFILES[BT_DESERT]  = { cW: ${DESERT_PROFILE.continentWeight}, rW: ${DESERT_PROFILE.ridgeWeight}, hW: ${DESERT_PROFILE.hillWeight}, eW: ${DESERT_PROFILE.erosionWeight}, dW: ${DESERT_PROFILE.detailWeight}, pC: ${DESERT_PROFILE.powerCurve}, tS: ${DESERT_PROFILE.terraceStrength}, tSh: ${DESERT_PROFILE.terraceSharpness}, tHS: ${DESERT_PROFILE.terraceHeightScale}, tSl: ${DESERT_PROFILE.terraceSlope} };
+  BIOME_PROFILES[BT_CANYON]  = { cW: ${CANYON_PROFILE.continentWeight}, rW: ${CANYON_PROFILE.ridgeWeight}, hW: ${CANYON_PROFILE.hillWeight}, eW: ${CANYON_PROFILE.erosionWeight}, dW: ${CANYON_PROFILE.detailWeight}, pC: ${CANYON_PROFILE.powerCurve}, tS: ${CANYON_PROFILE.terraceStrength}, tSh: ${CANYON_PROFILE.terraceSharpness}, tHS: ${CANYON_PROFILE.terraceHeightScale}, tSl: ${CANYON_PROFILE.terraceSlope} };
 `;
 
 /**

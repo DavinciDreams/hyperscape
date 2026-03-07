@@ -77,7 +77,7 @@ export interface QuadChunkWorkerOutput {
   colorData: Float32Array;
   biomeData: Uint8Array;
   biomeForestWeight: Float32Array;
-  biomeDesertWeight: Float32Array;
+  biomeCanyonWeight: Float32Array;
 }
 
 const QUAD_CHUNK_WORKER_CODE = `
@@ -87,7 +87,7 @@ ${buildBiomeConstantsJS()}
 var BIOME_IDS = {};
 BIOME_IDS[BT_TUNDRA] = 0;
 BIOME_IDS[BT_FOREST] = 1;
-BIOME_IDS[BT_DESERT] = 2;
+BIOME_IDS[BT_CANYON] = 2;
 
 function generateQuadChunk(input) {
   const { centerX, centerZ, size, resolution, config, seed, biomeCenters, biomes } = input;
@@ -177,7 +177,7 @@ function generateQuadChunk(input) {
   const colorData = new Float32Array(vertexCount * 3);
   const biomeData = new Uint8Array(vertexCount);
   const biomeForestWeight = new Float32Array(vertexCount);
-  const biomeDesertWeight = new Float32Array(vertexCount);
+  const biomeCanyonWeight = new Float32Array(vertexCount);
 
   for (let iz = 0; iz < segments; iz++) {
     for (let ix = 0; ix < segments; ix++) {
@@ -192,9 +192,9 @@ function generateQuadChunk(input) {
 
       var bw = computeBiomeWeightsByPosition(worldX, worldZ);
       var forestW = bw[BT_FOREST] || 0;
-      var desertW = bw[BT_DESERT] || 0;
+      var canyonW = bw[BT_CANYON] || 0;
       biomeForestWeight[idx] = forestW;
-      biomeDesertWeight[idx] = desertW;
+      biomeCanyonWeight[idx] = canyonW;
 
       var dominantBiome = BT_DEFAULT;
       var dominantWeight = -1;
@@ -238,7 +238,7 @@ function generateQuadChunk(input) {
     colorData,
     biomeData,
     biomeForestWeight,
-    biomeDesertWeight
+    biomeCanyonWeight
   };
 }
 
@@ -253,7 +253,7 @@ self.onmessage = function(e) {
         result.colorData.buffer,
         result.biomeData.buffer,
         result.biomeForestWeight.buffer,
-        result.biomeDesertWeight.buffer
+        result.biomeCanyonWeight.buffer
       ]);
     } catch (error) {
       self.postMessage({ error: error.message || 'Unknown error' });

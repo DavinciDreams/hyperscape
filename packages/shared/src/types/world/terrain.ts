@@ -50,14 +50,7 @@ export interface TerrainResourceSpawnPoint {
 export interface TerrainTileData {
   tileId: string;
   position: { x: number; z: number };
-  biome:
-    | "forest"
-    | "plains"
-    | "desert"
-    | "mountains"
-    | "swamp"
-    | "tundra"
-    | "jungle";
+  biome: "tundra" | "forest" | "canyon";
   tileX: number;
   tileZ: number;
   resources: TerrainResource[];
@@ -76,14 +69,7 @@ export interface TerrainTile {
   z: number;
   mesh: THREE.Mesh;
   collision: PMeshHandle | null;
-  biome:
-    | "forest"
-    | "plains"
-    | "desert"
-    | "mountains"
-    | "swamp"
-    | "tundra"
-    | "jungle";
+  biome: "tundra" | "forest" | "canyon";
   resources: ResourceNode[];
   roads: RoadSegment[];
   waterMeshes: THREE.Mesh[];

@@ -43,10 +43,10 @@ describe("Biome Configuration Loading", () => {
       );
       const mockBiomes: Array<BiomeData> = [
         {
-          id: "plains",
-          name: "Plains",
+          id: "tundra",
+          name: "Tundra",
           difficultyLevel: 0,
-          terrain: { type: "plains" } as any,
+          terrain: "tundra" as any,
           vegetation: {
             enabled: true,
             layers: [
@@ -61,7 +61,7 @@ describe("Biome Configuration Loading", () => {
           id: "forest",
           name: "Forest",
           difficultyLevel: 1,
-          terrain: { type: "forest" } as any,
+          terrain: "forest" as any,
           vegetation: {
             enabled: true,
             layers: [
@@ -73,10 +73,10 @@ describe("Biome Configuration Loading", () => {
           colorScheme: {} as any,
         },
         {
-          id: "mountains",
-          name: "Mountains",
+          id: "canyon",
+          name: "Canyon",
           difficultyLevel: 2,
-          terrain: { type: "mountains" } as any,
+          terrain: "canyon" as any,
           colorScheme: {} as any,
         },
       ];

@@ -69,17 +69,7 @@ function createTestContext(
 describe("Rock Generation Algorithms", () => {
   describe("ROCK_BIOME_DEFAULTS", () => {
     it("has presets defined for all major biome types", () => {
-      const expectedBiomes = [
-        "forest",
-        "plains",
-        "desert",
-        "mountains",
-        "swamp",
-        "frozen",
-        "wastes",
-        "corrupted",
-        "lake",
-      ];
+      const expectedBiomes = ["tundra", "forest", "canyon"];
 
       for (const biome of expectedBiomes) {
         expect(ROCK_BIOME_DEFAULTS[biome]).toBeDefined();
@@ -96,15 +86,15 @@ describe("Rock Generation Algorithms", () => {
       expect(forestRocks.presets).toContain("granite");
     });
 
-    it("desert biome has appropriate rock types", () => {
-      const desertRocks = ROCK_BIOME_DEFAULTS.desert;
-      expect(desertRocks.presets).toContain("sandstone");
+    it("canyon biome has appropriate rock types", () => {
+      const canyonRocks = ROCK_BIOME_DEFAULTS.canyon;
+      expect(canyonRocks.presets).toContain("sandstone");
     });
 
-    it("corrupted biome has unique rock types", () => {
-      const corruptedRocks = ROCK_BIOME_DEFAULTS.corrupted;
-      expect(corruptedRocks.presets).toContain("obsidian");
-      expect(corruptedRocks.presets).toContain("crystal");
+    it("tundra biome has appropriate rock types", () => {
+      const tundraRocks = ROCK_BIOME_DEFAULTS.tundra;
+      expect(tundraRocks.presets).toContain("granite");
+      expect(tundraRocks.presets).toContain("basalt");
     });
   });
 
@@ -113,8 +103,8 @@ describe("Rock Generation Algorithms", () => {
       const forestPresets = getRockPresetsForBiome("forest");
       expect(forestPresets.presets).toContain("boulder");
 
-      const desertPresets = getRockPresetsForBiome("desert");
-      expect(desertPresets.presets).toContain("sandstone");
+      const canyonPresets = getRockPresetsForBiome("canyon");
+      expect(canyonPresets.presets).toContain("sandstone");
     });
 
     it("returns default presets for unknown biome", () => {
@@ -285,15 +275,7 @@ describe("Rock Generation Algorithms", () => {
 describe("Plant Generation Algorithms", () => {
   describe("PLANT_BIOME_DEFAULTS", () => {
     it("has presets defined for all major biome types", () => {
-      const expectedBiomes = [
-        "forest",
-        "plains",
-        "desert",
-        "mountains",
-        "swamp",
-        "frozen",
-        "lake",
-      ];
+      const expectedBiomes = ["tundra", "forest", "canyon"];
 
       for (const biome of expectedBiomes) {
         expect(PLANT_BIOME_DEFAULTS[biome]).toBeDefined();
@@ -307,10 +289,10 @@ describe("Plant Generation Algorithms", () => {
       expect(forestPlants.presets).toContain("philodendron");
     });
 
-    it("swamp biome has water-loving plants", () => {
-      const swampPlants = PLANT_BIOME_DEFAULTS.swamp;
-      expect(swampPlants.presets).toContain("colocasia");
-      expect(swampPlants.presets).toContain("spathiphyllum");
+    it("tundra biome has hardy plants", () => {
+      const tundraPlants = PLANT_BIOME_DEFAULTS.tundra;
+      expect(tundraPlants.presets).toContain("bergenia");
+      expect(tundraPlants.presets).toContain("pulmonaria");
     });
   });
 
@@ -319,8 +301,8 @@ describe("Plant Generation Algorithms", () => {
       const forestPresets = getPlantPresetsForBiome("forest");
       expect(forestPresets.presets).toContain("monstera");
 
-      const swampPresets = getPlantPresetsForBiome("swamp");
-      expect(swampPresets.presets).toContain("colocasia");
+      const canyonPresets = getPlantPresetsForBiome("canyon");
+      expect(canyonPresets.presets).toContain("zamioculcas");
     });
 
     it("returns default presets for unknown biome", () => {
@@ -472,7 +454,7 @@ describe("Biome Integration", () => {
 
   it("different biomes produce different vegetation", () => {
     const forestCtx = createTestContext(0, 0);
-    const desertCtx = createTestContext(10, 10);
+    const canyonCtx = createTestContext(10, 10);
 
     const rockConfig: BiomeRockConfig = {
       enabled: true,
@@ -484,14 +466,14 @@ describe("Biome Integration", () => {
     };
 
     const forestRocks = generateRocks(forestCtx, rockConfig, "forest");
-    const desertRocks = generateRocks(desertCtx, rockConfig, "desert");
+    const canyonRocks = generateRocks(canyonCtx, rockConfig, "canyon");
 
     // Should use different rock types
     const forestTypes = new Set(forestRocks.map((r) => r.assetId));
-    const desertTypes = new Set(desertRocks.map((r) => r.assetId));
+    const canyonTypes = new Set(canyonRocks.map((r) => r.assetId));
 
-    // Desert should have sandstone, forest should not
-    expect(desertTypes.has("sandstone")).toBe(true);
+    // Canyon should have sandstone, forest should not
+    expect(canyonTypes.has("sandstone")).toBe(true);
     expect(forestTypes.has("sandstone")).toBe(false);
   });
 });
@@ -1328,10 +1310,10 @@ describe("Biome Defaults Completeness", () => {
     }
   });
 
-  it("mountain and mountains aliases have same presets", () => {
-    const mountainPresets = getRockPresetsForBiome("mountain");
-    const mountainsPresets = getRockPresetsForBiome("mountains");
-    expect(mountainPresets.presets).toEqual(mountainsPresets.presets);
+  it("unknown biomes fall back to forest presets", () => {
+    const unknownPresets = getRockPresetsForBiome("nonexistent");
+    const forestPresets = getRockPresetsForBiome("forest");
+    expect(unknownPresets.presets).toEqual(forestPresets.presets);
   });
 });
 
@@ -1501,7 +1483,7 @@ describe("ProcgenPlantCache Exports", () => {
 
   describe("getCachePlantPresets", () => {
     it("returns array for known biomes", () => {
-      const presets = getCachePlantPresets("swamp");
+      const presets = getCachePlantPresets("canyon");
       expect(Array.isArray(presets)).toBe(true);
       expect(presets.length).toBeGreaterThan(0);
     });

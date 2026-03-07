@@ -50,47 +50,47 @@ const CATEGORY_PROPERTIES: Record<
   dungeon: {
     radius: 30,
     baseImportance: 0.9,
-    preferredBiomes: ["mountains", "forest", "swamp"],
+    preferredBiomes: ["canyon", "tundra"],
   },
   shrine: {
     radius: 10,
     baseImportance: 0.6,
-    preferredBiomes: ["forest", "plains", "valley"],
+    preferredBiomes: ["forest", "tundra"],
   },
   landmark: {
     radius: 20,
     baseImportance: 0.5,
-    preferredBiomes: ["mountains", "plains", "desert"],
+    preferredBiomes: ["canyon", "tundra"],
   },
   resource_area: {
     radius: 25,
     baseImportance: 0.7,
-    preferredBiomes: ["forest", "mountains", "plains"],
+    preferredBiomes: ["forest", "canyon"],
   },
   ruin: {
     radius: 35,
     baseImportance: 0.8,
-    preferredBiomes: ["desert", "forest", "swamp"],
+    preferredBiomes: ["canyon", "tundra"],
   },
   camp: {
     radius: 20,
     baseImportance: 0.4,
-    preferredBiomes: ["forest", "plains", "mountains"],
+    preferredBiomes: ["forest", "tundra"],
   },
   crossing: {
     radius: 15,
     baseImportance: 0.85,
-    preferredBiomes: ["mountains", "swamp", "valley"],
+    preferredBiomes: ["canyon", "tundra"],
   },
   waystation: {
     radius: 12,
     baseImportance: 0.3,
-    preferredBiomes: ["plains", "valley", "forest"],
+    preferredBiomes: ["forest", "tundra"],
   },
   fishing_spot: {
     radius: 15,
-    baseImportance: 0.75, // High importance to ensure road connections
-    preferredBiomes: ["plains", "forest", "valley"], // Near lakes in temperate areas
+    baseImportance: 0.75,
+    preferredBiomes: ["forest", "tundra"],
   },
 };
 
@@ -310,7 +310,7 @@ export class POISystem extends System {
       // Get terrain info
       const y = this.terrainSystem!.getHeightAt(x, z);
       const biome =
-        this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? "plains";
+        this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? "forest";
 
       // Skip underwater
       const waterThreshold = 5.4;
@@ -438,7 +438,7 @@ export class POISystem extends System {
       // Get terrain info at the water edge (on land side)
       const y = this.terrainSystem!.getHeightAt(x, z);
       const biome =
-        this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? "plains";
+        this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? "forest";
 
       // Calculate importance - fishing spots are important destinations
       let importance = properties.baseImportance;

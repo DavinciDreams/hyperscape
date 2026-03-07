@@ -596,10 +596,9 @@ class MockTerrainSystem {
 
   getBiome(x: number, z: number): string {
     const noise = Math.sin(x * 0.005 + z * 0.003 + this.seed);
-    if (noise > 0.3) return "plains";
-    if (noise > 0) return "forest";
-    if (noise > -0.3) return "valley";
-    return "mountains";
+    if (noise > 0.3) return "forest";
+    if (noise > 0) return "tundra";
+    return "canyon";
   }
 }
 

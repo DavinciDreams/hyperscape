@@ -27,14 +27,9 @@ const COST_BASE = 1.0;
 const COST_SLOPE_MULTIPLIER = 5.0;
 const COST_WATER_PENALTY = 1000;
 const COST_BIOME_MULTIPLIER: Record<string, number> = {
-  plains: 1.0,
-  valley: 1.0,
-  forest: 1.3,
+  forest: 1.0,
   tundra: 1.5,
-  desert: 2.0,
-  swamp: 2.5,
-  mountains: 3.0,
-  lakes: 100,
+  canyon: 2.0,
 };
 
 const SMOOTHING_ITERATIONS = 2;
@@ -474,33 +469,33 @@ describe("RoadNetworkSystem Algorithms", () => {
     it("biome affects cost", () => {
       const flatHeight = () => 10;
 
-      const plainsCost = calculateMovementCost(
+      const forestCost = calculateMovementCost(
         0,
         0,
         10,
         0,
         flatHeight,
-        () => "plains",
+        () => "forest",
       );
-      const swampCost = calculateMovementCost(
+      const tundraCost = calculateMovementCost(
         0,
         0,
         10,
         0,
         flatHeight,
-        () => "swamp",
+        () => "tundra",
       );
-      const mountainsCost = calculateMovementCost(
+      const canyonCost = calculateMovementCost(
         0,
         0,
         10,
         0,
         flatHeight,
-        () => "mountains",
+        () => "canyon",
       );
 
-      expect(swampCost).toBeGreaterThan(plainsCost);
-      expect(mountainsCost).toBeGreaterThan(swampCost);
+      expect(tundraCost).toBeGreaterThan(forestCost);
+      expect(canyonCost).toBeGreaterThan(tundraCost);
     });
 
     it("diagonal movement costs more than cardinal", () => {
@@ -1873,7 +1868,7 @@ describe("RoadNetworkSystem Algorithms", () => {
       const biome = (x: number, z: number) => {
         const tx = Math.floor(x / 50);
         const tz = Math.floor(z / 50);
-        const biomes = ["plains", "forest", "desert", "mountains"];
+        const biomes = ["tundra", "forest", "canyon"];
         return biomes[(tx + tz) % biomes.length];
       };
 

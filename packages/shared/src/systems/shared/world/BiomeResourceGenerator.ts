@@ -469,45 +469,17 @@ export const ROCK_BIOME_DEFAULTS: Record<
   string,
   { presets: string[]; distribution: Record<string, number> }
 > = {
+  tundra: {
+    presets: ["granite", "basalt", "boulder"],
+    distribution: { granite: 2, basalt: 2, boulder: 2 },
+  },
   forest: {
     presets: ["boulder", "granite", "limestone"],
     distribution: { boulder: 3, granite: 2, limestone: 1 },
   },
-  plains: {
-    presets: ["boulder", "pebble", "sandstone"],
-    distribution: { boulder: 2, pebble: 3, sandstone: 1 },
-  },
-  desert: {
+  canyon: {
     presets: ["sandstone", "limestone", "pebble"],
     distribution: { sandstone: 4, limestone: 2, pebble: 1 },
-  },
-  mountains: {
-    presets: ["granite", "basalt", "cliff"],
-    distribution: { granite: 3, basalt: 2, cliff: 2 },
-  },
-  mountain: {
-    presets: ["granite", "basalt", "cliff"],
-    distribution: { granite: 3, basalt: 2, cliff: 2 },
-  },
-  swamp: {
-    presets: ["limestone", "slate", "pebble"],
-    distribution: { limestone: 2, slate: 2, pebble: 3 },
-  },
-  frozen: {
-    presets: ["granite", "basalt", "boulder"],
-    distribution: { granite: 2, basalt: 2, boulder: 2 },
-  },
-  wastes: {
-    presets: ["basalt", "slate", "asteroid"],
-    distribution: { basalt: 3, slate: 2, asteroid: 1 },
-  },
-  corrupted: {
-    presets: ["obsidian", "basalt", "crystal"],
-    distribution: { obsidian: 3, basalt: 2, crystal: 2 },
-  },
-  lake: {
-    presets: ["pebble", "limestone", "boulder"],
-    distribution: { pebble: 4, limestone: 2, boulder: 1 },
   },
 };
 
@@ -702,6 +674,10 @@ export const PLANT_BIOME_DEFAULTS: Record<
   string,
   { presets: string[]; distribution: Record<string, number> }
 > = {
+  tundra: {
+    presets: ["bergenia", "pulmonaria"],
+    distribution: { bergenia: 2, pulmonaria: 2 },
+  },
   forest: {
     presets: ["monstera", "philodendron", "calathea", "ficus", "hosta"],
     distribution: {
@@ -712,53 +688,9 @@ export const PLANT_BIOME_DEFAULTS: Record<
       hosta: 3,
     },
   },
-  plains: {
-    presets: ["hosta", "heuchera", "bergenia", "maranta"],
-    distribution: { hosta: 3, heuchera: 2, bergenia: 2, maranta: 1 },
-  },
-  desert: {
+  canyon: {
     presets: ["zamioculcas", "aglaonema", "syngonium"],
     distribution: { zamioculcas: 3, aglaonema: 2, syngonium: 1 },
-  },
-  mountains: {
-    presets: ["bergenia", "pulmonaria", "heuchera"],
-    distribution: { bergenia: 2, pulmonaria: 2, heuchera: 2 },
-  },
-  mountain: {
-    presets: ["bergenia", "pulmonaria", "heuchera"],
-    distribution: { bergenia: 2, pulmonaria: 2, heuchera: 2 },
-  },
-  swamp: {
-    presets: [
-      "monstera",
-      "colocasia",
-      "xanthosoma",
-      "alocasia",
-      "spathiphyllum",
-    ],
-    distribution: {
-      monstera: 2,
-      colocasia: 3,
-      xanthosoma: 2,
-      alocasia: 2,
-      spathiphyllum: 2,
-    },
-  },
-  frozen: {
-    presets: ["bergenia", "pulmonaria"],
-    distribution: { bergenia: 2, pulmonaria: 2 },
-  },
-  wastes: {
-    presets: ["zamioculcas", "aglaonema"],
-    distribution: { zamioculcas: 2, aglaonema: 2 },
-  },
-  corrupted: {
-    presets: ["alocasia", "caladium", "anthurium"],
-    distribution: { alocasia: 2, caladium: 2, anthurium: 2 },
-  },
-  lake: {
-    presets: ["colocasia", "calla", "arum", "spathiphyllum"],
-    distribution: { colocasia: 2, calla: 2, arum: 2, spathiphyllum: 2 },
   },
 };
 
