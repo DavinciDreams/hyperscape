@@ -55,6 +55,12 @@ module.exports = {
                 USE_LOCAL_POSTGRES: "false",
                 SOLANA_RPC_URL: "https://api.devnet.solana.com",
                 SOLANA_WS_URL: "wss://api.devnet.solana.com/",
+                SOLANA_ARENA_MARKET_PROGRAM_ID:
+                    process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
+                    "9NdidShnVzy1fc1WHWJTvyuXmH47ynfNGA6QFdyfAuSU",
+                SOLANA_GOLD_MINT:
+                    process.env.SOLANA_GOLD_MINT ||
+                    "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
                 BOT_KEYPAIR:
                     process.env.BOT_KEYPAIR ||
                     "~/.config/solana/oracle-authority.json",
