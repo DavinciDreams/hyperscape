@@ -985,8 +985,11 @@ export function handleBankClose(
  *
  * Uses a concurrency limiter to prevent 19 agents from simultaneously
  * exhausting the DB connection pool when they all refresh at once.
+ * Agent-side STATE_REFRESH_INTERVAL_MS is set to 120s (not 30s) to further
+ * reduce burst pressure; bank state is also fetched on spawn so agents
+ * don't need to wait for the first periodic refresh.
  */
-const BANK_QUERY_MAX_CONCURRENT = 5;
+const BANK_QUERY_MAX_CONCURRENT = 3;
 let bankQueryActive = 0;
 const bankQueryQueue: Array<() => void> = [];
 

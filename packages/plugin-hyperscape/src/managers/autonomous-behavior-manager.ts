@@ -416,9 +416,12 @@ export class AutonomousBehaviorManager {
   /** Last time we triggered a periodic state refresh.
    * Initialized with a random offset so agents don't all hit the DB simultaneously. */
   private lastStateRefreshTime =
-    Date.now() - Math.floor(Math.random() * 30_000);
-  /** How often to refresh quest/bank state to catch missed push events (ms) */
-  private static readonly STATE_REFRESH_INTERVAL_MS = 30_000;
+    Date.now() - Math.floor(Math.random() * 120_000);
+  /** How often to refresh quest/bank state to catch missed push events (ms).
+   * Set high because bank/quest changes are already pushed via events;
+   * this is only a safety net for dropped packets.
+   * With 19 agents, lower values cause DB pool exhaustion. */
+  private static readonly STATE_REFRESH_INTERVAL_MS = 120_000;
 
   /** Duel outcome history for strategy analysis */
   private duelHistory: Array<{
@@ -3588,33 +3591,22 @@ export class AutonomousBehaviorManager {
     }
 
     // Step 2b: Bank cache doesn't have materials (or is empty).
-    // If bank was never opened (cache empty) and we haven't checked recently,
-    // try one bank visit to be sure.
+    // If bank cache is empty, request a remote refresh instead of physically
+    // visiting the bank. The agent already gets bank state on spawn and via
+    // periodic refresh — this just catches edge cases where data hasn't arrived yet.
     if (
       bankItems.length === 0 &&
       Date.now() - this.lastBankWithdrawalAttempt >= 60_000 &&
       gathered > cooked
     ) {
       logger.info(
-        `[AutonomousBehavior] Bank cache empty, ${requiredItemPattern} might be in bank (gathered ${gathered}, cooked ${cooked}) — checking bank`,
+        `[AutonomousBehavior] Bank cache empty, requesting remote bank state (${requiredItemPattern} might be in bank)`,
       );
-
       this.lastBankWithdrawalAttempt = Date.now();
-      this.pushGoal(goal);
-      this.currentGoal = {
-        type: "banking",
-        description: `Withdraw ${requiredItemPattern} from bank for quest`,
-        target: 1,
-        progress: 0,
-        location: "bank",
-        startedAt: Date.now(),
-        bankWithdrawItems: [requiredItemPattern],
-      };
-      this.nextTickFast = true;
-
-      return (
-        this.getAvailableActions().find((a) => a.name === "NAVIGATE_TO") || null
-      );
+      // Request bank state remotely — no physical bank visit needed.
+      // Next tick will re-evaluate with fresh data.
+      this.service?.requestBankState?.();
+      return null;
     }
 
     // Step 2c: No raw materials in inventory, bank cache checked and doesn't

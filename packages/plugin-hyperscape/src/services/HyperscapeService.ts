@@ -2175,12 +2175,13 @@ Respond with ONLY the action name, nothing else.`;
             );
           }
 
-          // Request quest list now that the player has spawned in the world.
+          // Request quest list and bank state now that the player has spawned.
           // Server needs socket.player to be set (which happens during enterWorld)
-          // so this is the earliest safe point to request quests.
+          // so this is the earliest safe point to request quests/bank.
           this.requestQuestList();
+          this.requestBankState();
           logger.info(
-            `[HyperscapeService] 📜 Requested quest list after player spawn`,
+            `[HyperscapeService] 📜 Requested quest list + bank state after player spawn`,
           );
         } else if (data && data.id) {
           // Debug: Log mob entity additions with position info
