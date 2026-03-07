@@ -1,7 +1,7 @@
 #!/bin/bash
 # Hyperscape CI/CD Deploy for Vast.ai
 # Pulls latest, builds, and starts the full duel stack under pm2
-set -e
+set -euo pipefail
 
 export PATH="/root/.bun/bin:$PATH"
 cd /root/hyperscape
@@ -93,9 +93,10 @@ cd packages/asset-forge && bun run build:services && cd ../..
 cd packages/shared && bun run build && cd ../..
 
 # ── Database migration (after connections cleared) ────────────
-echo "[deploy] Pushing database schema..."
+echo "[deploy] Applying database migrations..."
 cd packages/server
-bunx drizzle-kit push --force
+echo "[deploy] Applying checked-in database migrations..."
+bunx drizzle-kit migrate
 cd ../..
 
 # ── Start socat port proxies ─────────────────────────────────
@@ -115,6 +116,41 @@ echo "[deploy] Port proxies running"
 # ── Start duel stack via pm2 ─────────────────────────────────
 echo "[deploy] Starting Hyperscape duel stack via pm2..."
 bunx pm2 start ecosystem.config.cjs --update-env
+
+echo "[deploy] Waiting for local services to become healthy..."
+for attempt in $(seq 1 30); do
+    SERVER_OK=false
+    STREAMING_OK=false
+    CDN_OK=false
+
+    if curl -fsS http://127.0.0.1:5555/health > /dev/null 2>&1; then
+        SERVER_OK=true
+    fi
+    if curl -fsS http://127.0.0.1:5555/api/streaming/state > /dev/null 2>&1; then
+        STREAMING_OK=true
+    fi
+    if curl -fsS http://127.0.0.1:8080/health > /dev/null 2>&1; then
+        CDN_OK=true
+    fi
+
+    if [ "$SERVER_OK" = true ] && [ "$STREAMING_OK" = true ] && [ "$CDN_OK" = true ]; then
+        echo "[deploy] Local services are healthy"
+        break
+    fi
+
+    if [ "$attempt" -eq 30 ]; then
+        echo "[deploy] ERROR: local services failed health checks after ${attempt} attempts"
+        echo "[deploy] pm2 status:"
+        bunx pm2 status || true
+        echo "[deploy] tailing duel logs:"
+        tail -n 200 "$LOG_DIR/duel-error.log" 2>/dev/null || true
+        tail -n 200 "$LOG_DIR/duel-out.log" 2>/dev/null || true
+        exit 1
+    fi
+
+    echo "[deploy] health check ${attempt}/30 pending (server=$SERVER_OK streaming=$STREAMING_OK cdn=$CDN_OK)"
+    sleep 10
+done
 
 # ── Configure pm2 to survive reboots ─────────────────────────
 echo "[deploy] Saving pm2 process list for reboot survival..."

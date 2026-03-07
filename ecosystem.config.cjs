@@ -45,7 +45,7 @@ module.exports = {
                 // Single connection prevents exhaustion during crash loops
                 POSTGRES_POOL_MAX: "1",
                 POSTGRES_POOL_MIN: "0",
-                // Skip DB migrations on startup (already pushed via drizzle-kit)
+                // Skip DB migrations on startup (deploy applies checked-in migrations first).
                 SKIP_MIGRATIONS: "true",
                 STREAMING_DUEL_ENABLED: "true",
                 DUEL_MARKET_MAKER_ENABLED: "true",
