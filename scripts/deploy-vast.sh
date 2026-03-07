@@ -117,11 +117,19 @@ echo "[deploy] Port proxies running"
 echo "[deploy] Starting Hyperscape duel stack via pm2..."
 bunx pm2 start ecosystem.config.cjs --update-env
 
+REQUIRE_LOCAL_CDN=false
+PUBLIC_CDN_URL_EFFECTIVE="${PUBLIC_CDN_URL:-https://assets.hyperscape.club}"
+case "$PUBLIC_CDN_URL_EFFECTIVE" in
+    http://localhost:*|https://localhost:*|http://127.0.0.1:*|https://127.0.0.1:*|http://0.0.0.0:*|https://0.0.0.0:*)
+        REQUIRE_LOCAL_CDN=true
+        ;;
+esac
+
 echo "[deploy] Waiting for local services to become healthy..."
 for attempt in $(seq 1 30); do
     SERVER_OK=false
     STREAMING_OK=false
-    CDN_OK=false
+    CDN_OK=true
 
     if curl -fsS http://127.0.0.1:5555/health > /dev/null 2>&1; then
         SERVER_OK=true
@@ -129,8 +137,11 @@ for attempt in $(seq 1 30); do
     if curl -fsS http://127.0.0.1:5555/api/streaming/state > /dev/null 2>&1; then
         STREAMING_OK=true
     fi
-    if curl -fsS http://127.0.0.1:8080/health > /dev/null 2>&1; then
-        CDN_OK=true
+    if [ "$REQUIRE_LOCAL_CDN" = true ]; then
+        CDN_OK=false
+        if curl -fsS http://127.0.0.1:8080/health > /dev/null 2>&1; then
+            CDN_OK=true
+        fi
     fi
 
     if [ "$SERVER_OK" = true ] && [ "$STREAMING_OK" = true ] && [ "$CDN_OK" = true ]; then
