@@ -2587,12 +2587,16 @@ function AgentDetailPanel({
 // ─── Main Screen ────────────────────────────────────────────────────────────
 
 export const AgentMonitorScreen: React.FC = () => {
-  const [adminCode, setAdminCode] = useState<string>(
+  const [adminCode, setAdminCode] = useState(
     () => localStorage.getItem(ADMIN_CODE_KEY) || "",
   );
   const [isAuthed, setIsAuthed] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+  // True while we auto-check a stored code on mount (shows spinner, not form)
+  const [checkingStored, setCheckingStored] = useState(
+    () => !!localStorage.getItem(ADMIN_CODE_KEY),
+  );
 
   const [data, setData] = useState<MonitorResponse | null>(null);
   const [duelStatus, setDuelStatus] = useState<DuelStatusResponse | null>(null);
@@ -2602,58 +2606,81 @@ export const AgentMonitorScreen: React.FC = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const adminCodeRef = useRef(adminCode);
+  adminCodeRef.current = adminCode;
 
+  // Simple fetch wrapper that attaches admin code header
   const adminFetch = useCallback(
-    async (path: string) => {
-      const response = await fetch(`${GAME_API_URL}${path}`, {
+    async (path: string, options?: RequestInit) => {
+      const res = await fetch(`${GAME_API_URL}${path}`, {
+        ...options,
         headers: {
-          "x-admin-code": adminCode,
+          "x-admin-code": adminCodeRef.current,
           "Content-Type": "application/json",
+          ...(options?.headers || {}),
         },
       });
-
-      if (response.status === 403) {
-        setIsAuthed(false);
-        setAuthError("Invalid admin code");
-        localStorage.removeItem(ADMIN_CODE_KEY);
-        throw new Error("Unauthorized");
-      }
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      return response.json();
+      if (res.status === 403) throw new Error("Unauthorized");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
     },
-    [adminCode],
+    [],
   );
 
-  const verifyAdminCode = useCallback(async () => {
-    if (!adminCode) return;
+  // Try a code against the server — single attempt, no retry loops
+  const tryAuth = useCallback(
+    async (code: string): Promise<boolean> => {
+      adminCodeRef.current = code;
+      try {
+        await adminFetch("/admin/stats");
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [adminFetch],
+  );
+
+  // On mount: if we have a stored code, check it once
+  useEffect(() => {
+    const stored = localStorage.getItem(ADMIN_CODE_KEY);
+    if (!stored) {
+      setCheckingStored(false);
+      return;
+    }
+    let cancelled = false;
+    tryAuth(stored).then((ok) => {
+      if (cancelled) return;
+      if (ok) {
+        setIsAuthed(true);
+      } else {
+        localStorage.removeItem(ADMIN_CODE_KEY);
+      }
+      setCheckingStored(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tryAuth]);
+
+  // Manual login button
+  const handleLogin = useCallback(async () => {
+    const code = adminCodeRef.current;
+    if (!code) return;
     setAuthLoading(true);
     setAuthError(null);
-    try {
-      await adminFetch("/admin/stats");
+    const ok = await tryAuth(code);
+    if (ok) {
       setIsAuthed(true);
-      localStorage.setItem(ADMIN_CODE_KEY, adminCode);
-    } catch {
-      setIsAuthed(false);
-      setAuthError("Invalid admin code");
-      localStorage.removeItem(ADMIN_CODE_KEY);
-    } finally {
-      setAuthLoading(false);
+      localStorage.setItem(ADMIN_CODE_KEY, code);
+    } else {
+      setAuthError("Invalid code or server unreachable");
     }
-  }, [adminCode, adminFetch]);
+    setAuthLoading(false);
+  }, [tryAuth]);
 
-  useEffect(() => {
-    const storedCode = localStorage.getItem(ADMIN_CODE_KEY);
-    if (storedCode && adminCode === storedCode) {
-      verifyAdminCode();
-    }
-  }, [verifyAdminCode, adminCode]);
-
+  // Fetch dashboard data
   const fetchData = useCallback(async () => {
-    if (!isAuthed) return;
     setLoading(true);
     try {
       const [monitorResult, duelResult] = await Promise.all([
@@ -2666,16 +2693,22 @@ export const AgentMonitorScreen: React.FC = () => {
       if (duelResult) setDuelStatus(duelResult);
       setFetchError(null);
     } catch (err) {
-      if (err instanceof Error && err.message !== "Unauthorized") {
+      if (err instanceof Error && err.message === "Unauthorized") {
+        setIsAuthed(false);
+        setAuthError("Session expired");
+        localStorage.removeItem(ADMIN_CODE_KEY);
+      } else if (err instanceof Error) {
         setFetchError(err.message);
       }
     } finally {
       setLoading(false);
     }
-  }, [isAuthed, adminFetch]);
+  }, [adminFetch]);
 
+  // Fetch once on auth, then poll
   useEffect(() => {
-    if (isAuthed) fetchData();
+    if (!isAuthed) return;
+    fetchData();
   }, [isAuthed, fetchData]);
 
   useEffect(() => {
@@ -2707,6 +2740,26 @@ export const AgentMonitorScreen: React.FC = () => {
 
   // ─── Auth Gate ──────────────────────────────────────────────────────
 
+  if (!isAuthed && checkingStored) {
+    return (
+      <div className="agent-monitor">
+        <div className="agent-monitor-auth">
+          <div className="agent-monitor-auth-card">
+            <RefreshCw
+              size={36}
+              style={{
+                color: "#d4a84b",
+                marginBottom: 16,
+                animation: "spin 1.5s linear infinite",
+              }}
+            />
+            <h1>Agent Monitor</h1>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthed) {
     return (
       <div className="agent-monitor">
@@ -2724,15 +2777,18 @@ export const AgentMonitorScreen: React.FC = () => {
               placeholder="Admin code"
               value={adminCode}
               onChange={(e) => setAdminCode(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && verifyAdminCode()}
+              onKeyDown={(e) =>
+                e.key === "Enter" && !authLoading && handleLogin()
+              }
               autoFocus
+              disabled={authLoading}
             />
             <button
               className="agent-monitor-auth-button"
-              onClick={verifyAdminCode}
+              onClick={handleLogin}
               disabled={authLoading || !adminCode}
             >
-              {authLoading ? "Verifying..." : "Authenticate"}
+              {authLoading ? "Checking..." : "Authenticate"}
             </button>
           </div>
         </div>

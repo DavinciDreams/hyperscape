@@ -11,7 +11,7 @@
  */
 
 import { GAME_API_URL } from "@/lib/api-config";
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   Users,
   User,
@@ -121,12 +121,15 @@ interface Pagination {
 const ADMIN_CODE_KEY = "hyperscape_admin_code";
 
 export const AdminScreen: React.FC = () => {
-  // Auth state
-  const [adminCode, setAdminCode] = useState<string>(
+  const [adminCode, setAdminCode] = useState(
     () => localStorage.getItem(ADMIN_CODE_KEY) || "",
   );
   const [isAuthed, setIsAuthed] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [checkingStored, setCheckingStored] = useState(
+    () => !!localStorage.getItem(ADMIN_CODE_KEY),
+  );
 
   // View state
   const [activeView, setActiveView] = useState<"users" | "player" | "activity">(
@@ -158,99 +161,133 @@ export const AdminScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Admin API helper
+  const adminCodeRef = useRef(adminCode);
+  adminCodeRef.current = adminCode;
+  const activeAbort = useRef<AbortController | null>(null);
+
+  // Simple fetch wrapper
   const adminFetch = useCallback(
     async (path: string, options?: RequestInit) => {
-      const response = await fetch(`${GAME_API_URL}${path}`, {
+      const res = await fetch(`${GAME_API_URL}${path}`, {
         ...options,
         headers: {
-          "x-admin-code": adminCode,
+          "x-admin-code": adminCodeRef.current,
           "Content-Type": "application/json",
           ...(options?.headers || {}),
         },
       });
-
-      if (response.status === 403) {
-        setIsAuthed(false);
-        setAuthError("Invalid admin code");
-        throw new Error("Unauthorized");
-      }
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      return response.json();
+      if (res.status === 403) throw new Error("Unauthorized");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
     },
-    [adminCode],
+    [],
   );
 
-  // Verify admin code function
-  const verifyAdminCode = useCallback(async () => {
-    if (!adminCode) return;
-    setLoading(true);
-    setAuthError(null);
-    try {
-      await adminFetch("/admin/stats");
-      setIsAuthed(true);
-      localStorage.setItem(ADMIN_CODE_KEY, adminCode);
-    } catch {
-      setIsAuthed(false);
-      setAuthError("Invalid admin code");
-      localStorage.removeItem(ADMIN_CODE_KEY);
-    } finally {
-      setLoading(false);
-    }
-  }, [adminCode, adminFetch]);
+  // Single-attempt auth check
+  const tryAuth = useCallback(
+    async (code: string): Promise<boolean> => {
+      adminCodeRef.current = code;
+      try {
+        await adminFetch("/admin/stats");
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [adminFetch],
+  );
 
-  // Verify admin code on load (only when initially set from localStorage)
+  // On mount: check stored code once
   useEffect(() => {
-    const storedCode = localStorage.getItem(ADMIN_CODE_KEY);
-    if (storedCode && adminCode === storedCode) {
-      verifyAdminCode();
+    const stored = localStorage.getItem(ADMIN_CODE_KEY);
+    if (!stored) {
+      setCheckingStored(false);
+      return;
     }
-  }, [verifyAdminCode, adminCode]);
+    let cancelled = false;
+    tryAuth(stored).then((ok) => {
+      if (cancelled) return;
+      if (ok) {
+        setIsAuthed(true);
+      } else {
+        localStorage.removeItem(ADMIN_CODE_KEY);
+      }
+      setCheckingStored(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tryAuth]);
+
+  // Manual login
+  const handleLogin = useCallback(async () => {
+    const code = adminCodeRef.current;
+    if (!code) return;
+    setAuthLoading(true);
+    setAuthError(null);
+    const ok = await tryAuth(code);
+    if (ok) {
+      setIsAuthed(true);
+      localStorage.setItem(ADMIN_CODE_KEY, code);
+    } else {
+      setAuthError("Invalid code or server unreachable");
+    }
+    setAuthLoading(false);
+  }, [tryAuth]);
 
   // Fetch users
-  const fetchUsers = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const params = new URLSearchParams({
-        page: currentPage.toString(),
-        limit: "20",
-      });
-      if (searchQuery) params.set("search", searchQuery);
-      if (roleFilter) params.set("role", roleFilter);
-
-      const data = await adminFetch(`/admin/users?${params}`);
-      setUsers(data.users);
-      setUsersPagination(data.pagination);
-    } catch (error) {
-      const msg =
-        error instanceof Error ? error.message : "Failed to fetch users";
-      setFetchError(msg);
-      console.error("Failed to fetch users:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [adminFetch, currentPage, searchQuery, roleFilter]);
-
-  // Fetch player details
-  const fetchPlayerDetails = useCallback(
-    async (playerId: string) => {
+  const fetchUsers = useCallback(
+    async (signal?: AbortSignal) => {
       setLoading(true);
       setFetchError(null);
       try {
-        const data = await adminFetch(`/admin/players/${playerId}`);
+        const params = new URLSearchParams({
+          page: currentPage.toString(),
+          limit: "20",
+        });
+        if (searchQuery) params.set("search", searchQuery);
+        if (roleFilter) params.set("role", roleFilter);
+
+        const data = await adminFetch(`/admin/users?${params}`, { signal });
+        setUsers(data.users);
+        setUsersPagination(data.pagination);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        if (error instanceof Error && error.message === "Unauthorized") {
+          setIsAuthed(false);
+          localStorage.removeItem(ADMIN_CODE_KEY);
+          return;
+        }
+        const msg =
+          error instanceof Error ? error.message : "Failed to fetch users";
+        setFetchError(msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [adminFetch, currentPage, searchQuery, roleFilter],
+  );
+
+  // Fetch player details
+  const fetchPlayerDetails = useCallback(
+    async (playerId: string, signal?: AbortSignal) => {
+      setLoading(true);
+      setFetchError(null);
+      try {
+        const data = await adminFetch(`/admin/players/${playerId}`, { signal });
         setPlayerDetails(data);
       } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        if (error instanceof Error && error.message === "Unauthorized") {
+          setIsAuthed(false);
+          localStorage.removeItem(ADMIN_CODE_KEY);
+          return;
+        }
         const msg =
           error instanceof Error
             ? error.message
             : "Failed to fetch player details";
         setFetchError(msg);
-        console.error("Failed to fetch player details:", error);
       } finally {
         setLoading(false);
       }
@@ -260,7 +297,7 @@ export const AdminScreen: React.FC = () => {
 
   // Fetch activities
   const fetchActivities = useCallback(
-    async (playerId?: string) => {
+    async (playerId?: string, signal?: AbortSignal) => {
       setLoading(true);
       setFetchError(null);
       try {
@@ -274,14 +311,19 @@ export const AdminScreen: React.FC = () => {
           ? `/admin/players/${playerId}/activity?${params}`
           : `/admin/activity?${params}`;
 
-        const data = await adminFetch(endpoint);
+        const data = await adminFetch(endpoint, { signal });
         setActivities(data.activities);
         setActivityPagination(data.pagination);
       } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        if (error instanceof Error && error.message === "Unauthorized") {
+          setIsAuthed(false);
+          localStorage.removeItem(ADMIN_CODE_KEY);
+          return;
+        }
         const msg =
           error instanceof Error ? error.message : "Failed to fetch activities";
         setFetchError(msg);
-        console.error("Failed to fetch activities:", error);
       } finally {
         setLoading(false);
       }
@@ -290,28 +332,36 @@ export const AdminScreen: React.FC = () => {
   );
 
   // Fetch event types
-  const fetchEventTypes = useCallback(async () => {
-    try {
-      const data = await adminFetch("/admin/activity/types");
-      setEventTypes(data.eventTypes || []);
-    } catch (error) {
-      // Non-critical, don't show error to user
-      console.error("Failed to fetch event types:", error);
-    }
-  }, [adminFetch]);
+  const fetchEventTypes = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const data = await adminFetch("/admin/activity/types", { signal });
+        setEventTypes(data.eventTypes || []);
+      } catch {
+        // Non-critical
+      }
+    },
+    [adminFetch],
+  );
 
-  // Effects
+  // Data-fetching effects with AbortController cleanup
   useEffect(() => {
-    if (isAuthed && activeView === "users") {
-      fetchUsers();
-    }
+    if (!isAuthed || activeView !== "users") return;
+    const ac = new AbortController();
+    activeAbort.current?.abort();
+    activeAbort.current = ac;
+    fetchUsers(ac.signal);
+    return () => ac.abort();
   }, [isAuthed, activeView, fetchUsers]);
 
   useEffect(() => {
-    if (isAuthed && activeView === "player" && selectedPlayerId) {
-      fetchPlayerDetails(selectedPlayerId);
-      fetchActivities(selectedPlayerId);
-    }
+    if (!isAuthed || activeView !== "player" || !selectedPlayerId) return;
+    const ac = new AbortController();
+    activeAbort.current?.abort();
+    activeAbort.current = ac;
+    fetchPlayerDetails(selectedPlayerId, ac.signal);
+    fetchActivities(selectedPlayerId, ac.signal);
+    return () => ac.abort();
   }, [
     isAuthed,
     activeView,
@@ -321,10 +371,13 @@ export const AdminScreen: React.FC = () => {
   ]);
 
   useEffect(() => {
-    if (isAuthed && activeView === "activity") {
-      fetchActivities();
-      fetchEventTypes();
-    }
+    if (!isAuthed || activeView !== "activity") return;
+    const ac = new AbortController();
+    activeAbort.current?.abort();
+    activeAbort.current = ac;
+    fetchActivities(undefined, ac.signal);
+    fetchEventTypes(ac.signal);
+    return () => ac.abort();
   }, [isAuthed, activeView, fetchActivities, fetchEventTypes]);
 
   // Handlers
@@ -345,7 +398,23 @@ export const AdminScreen: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // Auth screen
+  if (!isAuthed && checkingStored) {
+    return (
+      <div className="admin-screen">
+        <div className="admin-auth">
+          <div className="admin-auth-card">
+            <RefreshCw
+              className="admin-auth-icon"
+              size={48}
+              style={{ animation: "spin 1.5s linear infinite" }}
+            />
+            <h1>Admin Panel</h1>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthed) {
     return (
       <div className="admin-screen">
@@ -360,15 +429,18 @@ export const AdminScreen: React.FC = () => {
               onChange={(e) => setAdminCode(e.target.value)}
               placeholder="Admin Code"
               className="admin-auth-input"
-              onKeyDown={(e) => e.key === "Enter" && verifyAdminCode()}
+              onKeyDown={(e) =>
+                e.key === "Enter" && !authLoading && handleLogin()
+              }
+              disabled={authLoading}
             />
             {authError && <p className="admin-auth-error">{authError}</p>}
             <button
-              onClick={verifyAdminCode}
-              disabled={loading || !adminCode}
+              onClick={handleLogin}
+              disabled={authLoading || !adminCode}
               className="admin-auth-button"
             >
-              {loading ? "Verifying..." : "Enter"}
+              {authLoading ? "Checking..." : "Enter"}
             </button>
           </div>
         </div>

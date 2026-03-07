@@ -422,8 +422,7 @@ export async function spawnModelAgents(
   }
 
   let spawnedCount = 0;
-  let consecutiveFailures = 0;
-  const MAX_CONSECUTIVE_FAILURES = 3;
+  let totalFailures = 0;
   const { wsUrl: hyperscapeServerUrl, apiUrl: hyperscapeApiUrl } =
     resolveModelAgentServerUrls();
 
@@ -434,23 +433,15 @@ export async function spawnModelAgents(
     `[ModelAgentSpawner] Using HYPERSCAPE_API_URL=${hyperscapeApiUrl} for model-agent runtimes`,
   );
 
-  let agentIndex = 0;
+  // ---- Pre-filter: skip agents with no API key or already running ----
+  const eligible: ModelProviderConfig[] = [];
   for (const agentConfig of agentsToSpawn) {
-    agentIndex++;
-    console.log(
-      `[ModelAgentSpawner] [${agentIndex}/${agentsToSpawn.length}] Attempting: ${agentConfig.displayName} (${agentConfig.provider}/${agentConfig.model}) | consecutiveFailures=${consecutiveFailures}`,
-    );
-    let spawnedThisIteration = false;
-
-    // Check if API key is available
     if (!process.env[agentConfig.apiKeyEnv]) {
       console.log(
         `[ModelAgentSpawner] Skipping ${agentConfig.displayName} - no API key`,
       );
       continue;
     }
-
-    // Check if already running
     const agentKey = getModelAgentKey(agentConfig);
     if (runningAgents.has(agentKey)) {
       console.log(
@@ -458,36 +449,46 @@ export async function spawnModelAgents(
       );
       continue;
     }
+    eligible.push(agentConfig);
+  }
 
+  if (eligible.length === 0) {
+    console.log("[ModelAgentSpawner] No eligible agents to spawn");
+    return 0;
+  }
+
+  // ---- Pre-load model plugins (one per provider, cached by import system) ----
+  const pluginCache = new Map<string, Plugin>();
+  for (const config of eligible) {
+    if (!pluginCache.has(config.pluginModule)) {
+      const plugin = await loadModelPlugin(config, "ModelAgentSpawner");
+      if (plugin) pluginCache.set(config.pluginModule, plugin);
+    }
+  }
+
+  const embeddedAgentManager = getAgentManager();
+  const MODEL_AGENT_INIT_TIMEOUT_MS = 45_000;
+
+  // ---- Spawn a single agent (self-contained, safe for concurrent use) ----
+  const spawnOne = async (
+    agentConfig: ModelProviderConfig,
+    index: number,
+  ): Promise<boolean> => {
+    const tag = `[${index + 1}/${eligible.length}]`;
+    const modelPlugin = pluginCache.get(agentConfig.pluginModule);
+    if (!modelPlugin) return false;
+
+    const agentKey = getModelAgentKey(agentConfig);
     let runtime: AgentRuntime | null = null;
+
     try {
-      // Load model-specific plugin (shared helper)
-      const modelPlugin = await loadModelPlugin(
-        agentConfig,
-        "ModelAgentSpawner",
-      );
-      if (!modelPlugin) {
-        continue;
-      }
-
-      // Yield after heavy plugin loading to let tick callbacks fire
-      await yieldToEventLoop();
-
-      // Generate authentication token for this agent
       const authToken = await createJWT({ userId: accountId });
-
-      // Create character using shared helper — includes PGLITE_DATA_DIR,
-      // model routing secrets, and system prompt
-      // Per-agent env: pass connection and migration settings via character
-      // secrets instead of mutating global process.env.  The hyperscapePlugin
-      // reads these through getRuntimeSettingString() which checks secrets
-      // before falling back to process.env.
       const perAgentSecrets: Record<string, string> = {
         HYPERSCAPE_SERVER_URL: hyperscapeServerUrl,
         HYPERSCAPE_API_URL: hyperscapeApiUrl,
         HYPERSCAPE_AUTH_TOKEN: authToken,
         HYPERSCAPE_PRIVY_USER_ID: accountId,
-        HYPERSCAPE_CHARACTER_ID: "", // will be patched below
+        HYPERSCAPE_CHARACTER_ID: "",
       };
       if (sqlPlugin) {
         perAgentSecrets.ELIZA_ALLOW_DESTRUCTIVE_MIGRATIONS = "true";
@@ -496,7 +497,6 @@ export async function spawnModelAgents(
       const { character, characterId } = createAgentCharacter(agentConfig, {
         secrets: perAgentSecrets,
       });
-      // Patch characterId into secrets now that we know it
       if (character.settings?.secrets) {
         (
           character.settings.secrets as Record<string, string>
@@ -517,54 +517,34 @@ export async function spawnModelAgents(
           isAgent: 1,
           createdAt: Date.now(),
         });
-        console.log(
-          `[ModelAgentSpawner] Created character: ${agentConfig.displayName}`,
-        );
       }
 
-      const embeddedAgentManager = getAgentManager();
       if (embeddedAgentManager?.hasAgent(characterId)) {
         console.log(
-          `[ModelAgentSpawner] Skipping ${agentConfig.displayName} (${characterId}) - already managed by embedded AgentManager`,
+          `[ModelAgentSpawner] ${tag} Skipping ${agentConfig.displayName} - already managed`,
         );
-        continue;
+        return false;
       }
 
-      // Build runtime plugin list. SQL is pre-registered before initialize()
-      // so its adapter/migrations complete before other plugin services start.
       const runtimePlugins: Plugin[] = [modelPlugin, hyperscapePlugin];
-
-      // Create ElizaOS AgentRuntime
-      console.log(
-        `[ModelAgentSpawner] Creating AgentRuntime for ${agentConfig.displayName}...`,
-      );
 
       const createRuntimeInstance = (): AgentRuntime => {
         const runtimeInstance = new AgentRuntime({
           character,
           plugins: runtimePlugins,
-          // token: process.env[agentConfig.apiKeyEnv],
-          // databaseAdapter: undefined, // Will use in-memory or default
         });
 
-        // Model agents only need TEXT_* generation; disabling TEXT_EMBEDDING
-        // avoids bootstrap ActionFilter/embedding services generating heavy
-        // startup embedding traffic and memory churn.
         const originalGetModel = runtimeInstance.getModel.bind(runtimeInstance);
         runtimeInstance.getModel = ((modelType: unknown) => {
-          if (modelType === ModelType.TEXT_EMBEDDING) {
-            return null;
-          }
+          if (modelType === ModelType.TEXT_EMBEDDING) return null;
           return originalGetModel(
             modelType as Parameters<AgentRuntime["getModel"]>[0],
           );
         }) as AgentRuntime["getModel"];
 
-        // Prevent ensureEmbeddingDimension from taking > 30s due to API timeouts/rate limits
         runtimeInstance.ensureEmbeddingDimension = async () => {
           try {
             let timeoutId: ReturnType<typeof setTimeout> | null = null;
-            // Give the API 5 seconds to reply
             try {
               await Promise.race([
                 AgentRuntime.prototype.ensureEmbeddingDimension.call(
@@ -579,14 +559,11 @@ export async function spawnModelAgents(
                 }),
               ]);
             } finally {
-              if (timeoutId) {
-                clearTimeout(timeoutId);
-                timeoutId = null;
-              }
+              if (timeoutId) clearTimeout(timeoutId);
             }
           } catch (err) {
             console.warn(
-              `[ModelAgentSpawner] ensureEmbeddingDimension failed or timed out: ${errMsg(err)}. Using fallback 1536.`,
+              `[ModelAgentSpawner] ensureEmbeddingDimension failed: ${errMsg(err)}. Using fallback 1536.`,
             );
             await runtimeInstance.adapter?.ensureEmbeddingDimension?.(1536);
           }
@@ -595,15 +572,11 @@ export async function spawnModelAgents(
         return runtimeInstance;
       };
 
-      const MODEL_AGENT_INIT_TIMEOUT_MS = 45_000;
-
       const initializeRuntimeInstance = async (
-        runtimeInstance: AgentRuntime,
+        ri: AgentRuntime,
       ): Promise<void> => {
-        if (sqlPlugin) {
-          await runtimeInstance.registerPlugin(sqlPlugin);
-        }
-        const initPromise = runtimeInstance.initialize();
+        if (sqlPlugin) await ri.registerPlugin(sqlPlugin);
+        const initPromise = ri.initialize();
         let timedOut = false;
         const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => {
@@ -619,12 +592,8 @@ export async function spawnModelAgents(
           await Promise.race([initPromise, timeoutPromise]);
         } catch (err) {
           if (timedOut) {
-            // Swallow the dangling initPromise so it doesn't surface as
-            // an unhandled rejection when it eventually settles.
             initPromise.catch(() => {});
-            // Kick off stop() to tear down any partially-initialized
-            // plugins / WASM heaps from the background initialize().
-            runtimeInstance.stop().catch(() => {});
+            ri.stop().catch(() => {});
           }
           throw err;
         }
@@ -639,7 +608,6 @@ export async function spawnModelAgents(
       runtime = runtimeInstance;
 
       try {
-        // Initialize the runtime (required for plugins to start)
         await initializeRuntimeInstance(runtimeInstance);
       } catch (initializeError) {
         if (
@@ -647,14 +615,13 @@ export async function spawnModelAgents(
           isRecoverableModelRuntimeInitError(initializeError)
         ) {
           console.warn(
-            `[ModelAgentSpawner] Runtime init failed for ${agentConfig.displayName}: ${errMsg(initializeError)}. Resetting ${pgliteDataDir} and retrying once.`,
+            `[ModelAgentSpawner] ${tag} Init failed for ${agentConfig.displayName}: ${errMsg(initializeError)}. Resetting PGLite and retrying.`,
           );
           await Promise.race([
             runtimeInstance.stop().catch(() => undefined),
             new Promise((r) => setTimeout(r, 10_000)),
           ]);
           await resetAgentPgliteDataDir(pgliteDataDir, agentConfig.displayName);
-
           runtimeInstance = createRuntimeInstance();
           runtime = runtimeInstance;
           await initializeRuntimeInstance(runtimeInstance);
@@ -663,13 +630,6 @@ export async function spawnModelAgents(
         }
       }
 
-      // Yield after heavy runtime init to let tick callbacks fire
-      await yieldToEventLoop();
-      console.log(
-        `[ModelAgentSpawner] AgentRuntime initialized for ${agentConfig.displayName}`,
-      );
-
-      // Store running agent
       runningAgents.set(agentKey, {
         config: agentConfig,
         runtime: runtimeInstance,
@@ -677,12 +637,10 @@ export async function spawnModelAgents(
         accountId,
       });
 
-      spawnedCount++;
-      spawnedThisIteration = true;
-      consecutiveFailures = 0;
       console.log(
-        `[ModelAgentSpawner] ✅ Spawned: ${agentConfig.displayName} (${agentConfig.model})`,
+        `[ModelAgentSpawner] ${tag} ✅ ${agentConfig.displayName} (${agentConfig.model})`,
       );
+      return true;
     } catch (error) {
       stopAgentBehaviorLoop(agentKey);
       agentPlans.delete(agentKey);
@@ -692,12 +650,9 @@ export async function spawnModelAgents(
             runtime.stop(),
             new Promise((r) => setTimeout(r, 10_000)),
           ]);
-        } catch (stopErr) {
-          console.warn(
-            `[ModelAgentSpawner] Failed to cleanup runtime for ${agentConfig.displayName}: ${errMsg(stopErr)}`,
-          );
+        } catch {
+          /* best-effort */
         }
-        // Explicitly close DB adapter to free PGLite WASM heap
         try {
           const adapter = runtime.adapter as {
             close?: () => Promise<void>;
@@ -706,36 +661,67 @@ export async function spawnModelAgents(
           await adapter?.close?.();
           await adapter?.db?.close?.();
         } catch {
-          /* best-effort cleanup */
+          /* best-effort */
         }
-        runtime = null;
       }
       console.error(
-        `[ModelAgentSpawner] ❌ Failed to spawn ${agentConfig.displayName}:`,
-        errMsg(error),
+        `[ModelAgentSpawner] ${tag} ❌ ${agentConfig.displayName}: ${errMsg(error)}`,
       );
-      consecutiveFailures++;
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.error(
-          `[ModelAgentSpawner] Circuit breaker: ${MAX_CONSECUTIVE_FAILURES} consecutive failures, aborting remaining spawns`,
-        );
-        break;
+      return false;
+    }
+  };
+
+  // ---- Spawn first agent alone to run DB migrations, then batch the rest ----
+  const BATCH_SIZE = 3;
+  const BATCH_DELAY_MS = 2000;
+
+  console.log(
+    `[ModelAgentSpawner] Spawning ${eligible.length} agents (first sequential for migrations, then batches of ${BATCH_SIZE})...`,
+  );
+  const startTime = Date.now();
+
+  // First agent runs solo so SQL plugin migrations complete without races
+  const firstResult = await spawnOne(eligible[0], 0);
+  if (firstResult) {
+    spawnedCount++;
+  } else {
+    totalFailures++;
+  }
+  await yieldToEventLoop();
+
+  // Remaining agents in parallel batches (migrations already done)
+  for (let i = 1; i < eligible.length; i += BATCH_SIZE) {
+    const batch = eligible.slice(i, i + BATCH_SIZE);
+    const batchNum = Math.floor((i - 1) / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil((eligible.length - 1) / BATCH_SIZE);
+    console.log(
+      `[ModelAgentSpawner] Batch ${batchNum}/${totalBatches}: ${batch.map((c) => c.displayName).join(", ")}`,
+    );
+
+    const results = await Promise.allSettled(
+      batch.map((config, j) => spawnOne(config, i + j)),
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) {
+        spawnedCount++;
+      } else {
+        totalFailures++;
       }
     }
 
-    // Stagger successful agent spawns to avoid concurrent PGLite/API contention
-    // that causes ElizaOS service registration timeouts (30s limit)
-    if (spawnedThisIteration) {
-      const SPAWN_DELAY_MS = 5000;
-      console.log(
-        `[ModelAgentSpawner] Waiting ${SPAWN_DELAY_MS / 1000}s before next agent...`,
-      );
-      await new Promise((r) => setTimeout(r, SPAWN_DELAY_MS));
+    // Yield to event loop between batches so tick callbacks can fire
+    await yieldToEventLoop();
+
+    // Short delay between batches (not between individual agents)
+    if (i + BATCH_SIZE < eligible.length) {
+      await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
     }
   }
 
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(
-    `[ModelAgentSpawner] ✅ Spawned ${spawnedCount}/${agentsToSpawn.length} model agents`,
+    `[ModelAgentSpawner] ✅ Spawned ${spawnedCount}/${eligible.length} model agents in ${elapsed}s (${totalFailures} failed)`,
   );
 
   return spawnedCount;

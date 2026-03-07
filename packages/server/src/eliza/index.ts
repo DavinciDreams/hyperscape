@@ -127,7 +127,9 @@ export async function initializeAgents(
     spawnEnvValue == null || spawnEnvValue === ""
       ? null
       : spawnEnvValue !== "false";
-  const defaultSpawnModelAgents = process.env.NODE_ENV === "production";
+  const streamingDuelEnabled = process.env.STREAMING_DUEL_ENABLED === "true";
+  const defaultSpawnModelAgents =
+    process.env.NODE_ENV === "production" || streamingDuelEnabled;
   const spawnRequested =
     config?.spawnModelAgents ?? spawnRequestedByEnv ?? defaultSpawnModelAgents;
   const embeddedAgentCount = manager.getAllAgents().length;
