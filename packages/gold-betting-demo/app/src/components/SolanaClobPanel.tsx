@@ -20,6 +20,12 @@ import {
 import { getStoredInviteCode } from "../lib/invite";
 import { findClobConfigPda } from "../lib/clobPdas";
 import { findMatchPda, findOracleConfigPda } from "../lib/pdas";
+import { findProgramAddressSync } from "../lib/programAddress";
+import {
+  confirmSignatureViaRpc,
+  getLatestBlockhashViaRpc,
+  sendRawTransactionViaRpc,
+} from "../lib/solanaRpc";
 import {
   PredictionMarketPanel,
   type ChartDataPoint,
@@ -69,7 +75,7 @@ const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
 const SOLANA_SETTLEMENT_DECIMALS = 9;
 
 function deriveProgramDataAddress(programId: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync(
+  return findProgramAddressSync(
     [programId.toBuffer()],
     BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
   )[0];
@@ -129,36 +135,6 @@ function clampPrice(value: string): number {
   return Math.min(999, Math.max(1, Math.floor(parsed)));
 }
 
-async function ensureVaultRentExempt(
-  connection: ReturnType<typeof useConnection>["connection"],
-  provider: ReturnType<typeof createPrograms>["provider"] | null | undefined,
-  walletPublicKey: PublicKey | null,
-  vault: PublicKey,
-): Promise<void> {
-  if (!provider || !walletPublicKey) {
-    throw new Error("Connect wallet first");
-  }
-
-  const minVaultLamports = await connection.getMinimumBalanceForRentExemption(
-    0,
-    "confirmed",
-  );
-  const currentVaultLamports = await connection.getBalance(vault, "confirmed");
-  if (currentVaultLamports >= minVaultLamports) {
-    return;
-  }
-
-  const topUpLamports = minVaultLamports - currentVaultLamports;
-  const tx = new Transaction().add(
-    SystemProgram.transfer({
-      fromPubkey: walletPublicKey,
-      toPubkey: vault,
-      lamports: topUpLamports,
-    }),
-  );
-  await provider.sendAndConfirm(tx, []);
-}
-
 function fmtAmount(value: bigint): number {
   return Number(value) / 10 ** SOLANA_SETTLEMENT_DECIMALS;
 }
@@ -174,12 +150,25 @@ interface SolanaClobPanelProps {
   agent2Name: string;
   /** Sidebar compact mode: hides admin/debug panel, uses single-column PredictionMarketPanel */
   compact?: boolean;
+  onMarketSnapshot?: (snapshot: SolanaClobMarketSnapshot) => void;
+}
+
+export interface SolanaClobMarketSnapshot {
+  matchLabel: string;
+  marketStatus: string;
+  yesPool: bigint;
+  noPool: bigint;
+  bids: OrderLevel[];
+  asks: OrderLevel[];
+  recentTrades: Trade[];
+  chartData: ChartDataPoint[];
 }
 
 export function SolanaClobPanel({
   agent1Name,
   agent2Name,
   compact = false,
+  onMarketSnapshot,
 }: SolanaClobPanelProps) {
   const { connection } = useConnection();
   const wallet = useWallet();
@@ -233,6 +222,73 @@ export function SolanaClobPanel({
   const readonlyPrograms = useMemo(
     () => createReadonlyPrograms(connection),
     [connection],
+  );
+
+  const submitTransaction = useCallback(
+    async (
+      transaction: Transaction,
+      signers: Keypair[] = [],
+      context: string,
+    ): Promise<string> => {
+      if (!wallet.publicKey || !wallet.signTransaction) {
+        throw new Error("Connect wallet first");
+      }
+
+      let stage = "fetching blockhash";
+      try {
+        transaction.feePayer = wallet.publicKey;
+        const latest = await getLatestBlockhashViaRpc(connection);
+        transaction.recentBlockhash = latest.blockhash;
+
+        if (signers.length > 0) {
+          stage = "applying signer";
+          transaction.partialSign(...signers);
+        }
+
+        stage = "signing transaction";
+        const signed = await wallet.signTransaction(transaction);
+
+        stage = "sending transaction";
+        const signature = await sendRawTransactionViaRpc(connection, signed);
+
+        stage = "confirming transaction";
+        await confirmSignatureViaRpc(connection, signature);
+        return signature;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`${context}: ${stage}: ${message}`);
+      }
+    },
+    [connection, wallet.publicKey, wallet.signTransaction],
+  );
+
+  const ensureVaultRentExempt = useCallback(
+    async (vault: PublicKey): Promise<void> => {
+      if (!wallet.publicKey) {
+        throw new Error("Connect wallet first");
+      }
+
+      const minVaultLamports =
+        await connection.getMinimumBalanceForRentExemption(0, "confirmed");
+      const currentVaultLamports = await connection.getBalance(
+        vault,
+        "confirmed",
+      );
+      if (currentVaultLamports >= minVaultLamports) {
+        return;
+      }
+
+      const topUpLamports = minVaultLamports - currentVaultLamports;
+      const transaction = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: wallet.publicKey,
+          toPubkey: vault,
+          lamports: topUpLamports,
+        }),
+      );
+      await submitTransaction(transaction, [], "funding vault rent");
+    },
+    [connection, submitTransaction, wallet.publicKey],
   );
 
   const updateChartAndTrades = useCallback(
@@ -364,7 +420,7 @@ export function SolanaClobPanel({
         matchEntries[matchEntries.length - 1];
 
       const matchStatePk = selected.publicKey;
-      const vault = PublicKey.findProgramAddressSync(
+      const vault = findProgramAddressSync(
         [SEED_VAULT, matchStatePk.toBytes()],
         clobProgram.programId,
       )[0];
@@ -507,7 +563,7 @@ export function SolanaClobPanel({
     )) as any;
 
     if (!config) {
-      await fightProgram.methods
+      const transaction = await fightProgram.methods
         .initializeOracle()
         .accountsPartial({
           authority: wallet.publicKey,
@@ -516,7 +572,8 @@ export function SolanaClobPanel({
           programData: deriveProgramDataAddress(fightProgram.programId),
           systemProgram: SystemProgram.programId,
         })
-        .rpc();
+        .transaction();
+      await submitTransaction(transaction, [], "initializing oracle config");
       config = (await fightProgram.account.oracleConfig.fetchNullable(
         oracleConfigPda,
       )) as any;
@@ -532,7 +589,7 @@ export function SolanaClobPanel({
     }
 
     return oracleConfigPda;
-  }, [wallet.publicKey, writablePrograms]);
+  }, [submitTransaction, wallet.publicKey, writablePrograms]);
 
   useEffect(() => {
     void refreshData();
@@ -542,7 +599,7 @@ export function SolanaClobPanel({
 
   const ensureConfig = useCallback(async (): Promise<ClobConfigAccount> => {
     const clobProgram: any = writablePrograms?.goldClobMarket;
-    if (!clobProgram || !wallet.publicKey || !wallet.sendTransaction) {
+    if (!clobProgram || !wallet.publicKey || !wallet.signTransaction) {
       throw new Error("Connect wallet first");
     }
     const runtimeConfigPda = findClobConfigPda(clobProgram.programId);
@@ -569,7 +626,7 @@ export function SolanaClobPanel({
           !cfg.marketMaker.equals(wallet.publicKey)) &&
         (existing.authority as PublicKey).equals(wallet.publicKey)
       ) {
-        await clobProgram.methods
+        const transaction = await clobProgram.methods
           .updateConfig(
             wallet.publicKey,
             wallet.publicKey,
@@ -581,7 +638,8 @@ export function SolanaClobPanel({
             authority: wallet.publicKey,
             config: runtimeConfigPda,
           })
-          .rpc();
+          .transaction();
+        await submitTransaction(transaction, [], "updating local CLOB config");
 
         cfg = {
           ...cfg,
@@ -605,7 +663,7 @@ export function SolanaClobPanel({
       localFeeOwner ??
       new PublicKey(DEFAULT_MARKET_MAKER_FEE_OWNER);
 
-    const initConfigTx = (await clobProgram.methods
+    const initConfigTransaction = await clobProgram.methods
       .initializeConfig(treasuryFeeOwner, marketMakerFeeOwner, 100, 100, 200)
       .accountsPartial({
         authority: wallet.publicKey,
@@ -614,7 +672,12 @@ export function SolanaClobPanel({
         programData: deriveProgramDataAddress(clobProgram.programId),
         systemProgram: SystemProgram.programId,
       })
-      .rpc()) as string;
+      .transaction();
+    const initConfigTx = await submitTransaction(
+      initConfigTransaction,
+      [],
+      "initializing CLOB config",
+    );
 
     setTxs((prev) => ({ ...prev, initConfig: initConfigTx }));
 
@@ -630,11 +693,16 @@ export function SolanaClobPanel({
     };
     setConfigAccount(cfg);
     return cfg;
-  }, [wallet.publicKey, wallet.sendTransaction, writablePrograms]);
+  }, [
+    submitTransaction,
+    wallet.publicKey,
+    wallet.signTransaction,
+    writablePrograms,
+  ]);
 
   const handleCreateMatch = async () => {
     try {
-      if (!wallet.publicKey || !wallet.sendTransaction) {
+      if (!wallet.publicKey || !wallet.signTransaction) {
         throw new Error("Connect wallet first");
       }
       const fightProgram: any = writablePrograms?.fightOracle;
@@ -654,7 +722,7 @@ export function SolanaClobPanel({
         agent1: agent1Name,
         agent2: agent2Name,
       });
-      await fightProgram.methods
+      const createOracleMatchTransaction = await fightProgram.methods
         .createMatch(
           new BN(matchId.toString()),
           new BN(DEFAULT_NEW_ROUND_BET_WINDOW_SECONDS),
@@ -666,16 +734,21 @@ export function SolanaClobPanel({
           matchResult: oracleMatchPda,
           systemProgram: SystemProgram.programId,
         })
-        .rpc();
+        .transaction();
+      await submitTransaction(
+        createOracleMatchTransaction,
+        [],
+        "creating oracle match",
+      );
 
       const matchState = Keypair.generate();
       const orderBook = Keypair.generate();
-      const vaultPda = PublicKey.findProgramAddressSync(
+      const vaultPda = findProgramAddressSync(
         [SEED_VAULT, matchState.publicKey.toBytes()],
         clobProgram.programId,
       )[0];
 
-      const matchTx = (await clobProgram.methods
+      const initializeMatchTransaction = await clobProgram.methods
         .initializeMatch(500)
         .accountsPartial({
           matchState: matchState.publicKey,
@@ -685,18 +758,17 @@ export function SolanaClobPanel({
           vault: vaultPda,
           systemProgram: SystemProgram.programId,
         })
-        .signers([matchState])
-        .rpc()) as string;
+        .transaction();
+      const matchTx = await submitTransaction(
+        initializeMatchTransaction,
+        [matchState],
+        "initializing CLOB match",
+      );
       setTxs((prev) => ({ ...prev, createMatch: matchTx }));
 
-      await ensureVaultRentExempt(
-        connection,
-        writablePrograms?.provider,
-        wallet.publicKey,
-        vaultPda,
-      );
+      await ensureVaultRentExempt(vaultPda);
 
-      const orderBookTx = (await clobProgram.methods
+      const initializeOrderbookTransaction = await clobProgram.methods
         .initializeOrderBook()
         .accounts({
           user: wallet.publicKey,
@@ -704,8 +776,12 @@ export function SolanaClobPanel({
           orderBook: orderBook.publicKey,
           systemProgram: SystemProgram.programId,
         })
-        .signers([orderBook])
-        .rpc()) as string;
+        .transaction();
+      const orderBookTx = await submitTransaction(
+        initializeOrderbookTransaction,
+        [orderBook],
+        "initializing order book",
+      );
       setTxs((prev) => ({ ...prev, initOrderBook: orderBookTx }));
 
       preferredMatchRef.current = matchState.publicKey.toBase58();
@@ -762,7 +838,7 @@ export function SolanaClobPanel({
 
       const remainingAccounts = [];
       for (const order of openMakerOrders.slice(0, 15)) {
-        const makerBalancePda = PublicKey.findProgramAddressSync(
+        const makerBalancePda = findProgramAddressSync(
           [
             Buffer.from("balance"),
             activeMatch.matchState.toBytes(),
@@ -790,7 +866,7 @@ export function SolanaClobPanel({
       const useSeededE2ePdas =
         CONFIG.cluster === "localnet" &&
         E2E_CLOB_MATCH_STATE?.equals(activeMatch.matchState) === true;
-      const orderPda = PublicKey.findProgramAddressSync(
+      const orderPda = findProgramAddressSync(
         [
           SEED_ORDER,
           activeMatch.matchState.toBytes(),
@@ -799,7 +875,7 @@ export function SolanaClobPanel({
         ],
         clobProgram.programId,
       )[0];
-      const derivedUserBalancePda = PublicKey.findProgramAddressSync(
+      const derivedUserBalancePda = findProgramAddressSync(
         [
           SEED_BALANCE,
           activeMatch.matchState.toBytes(),
@@ -807,7 +883,7 @@ export function SolanaClobPanel({
         ],
         clobProgram.programId,
       )[0];
-      const derivedVaultPda = PublicKey.findProgramAddressSync(
+      const derivedVaultPda = findProgramAddressSync(
         [SEED_VAULT, activeMatch.matchState.toBytes()],
         clobProgram.programId,
       )[0];
@@ -823,15 +899,10 @@ export function SolanaClobPanel({
           : orderPda;
 
       if (activeMatch.authority.equals(wallet.publicKey)) {
-        await ensureVaultRentExempt(
-          connection,
-          writablePrograms?.provider,
-          wallet.publicKey,
-          vaultPda,
-        );
+        await ensureVaultRentExempt(vaultPda);
       }
 
-      const txSignature = (await clobProgram.methods
+      const placeOrderTransaction = await clobProgram.methods
         .placeOrder(
           new BN(orderId.toString()),
           isBuy,
@@ -851,7 +922,12 @@ export function SolanaClobPanel({
           systemProgram: SystemProgram.programId,
         })
         .remainingAccounts(remainingAccounts)
-        .rpc()) as string;
+        .transaction();
+      const txSignature = await submitTransaction(
+        placeOrderTransaction,
+        [],
+        "placing order",
+      );
       setTxs((prev) => ({ ...prev, placeOrder: txSignature }));
 
       const after = (await clobProgram.account.matchState.fetch(
@@ -919,7 +995,7 @@ export function SolanaClobPanel({
         throw new Error("No active order book");
       }
       if (!lastOrderId) throw new Error("No local open order to cancel");
-      const orderPda = PublicKey.findProgramAddressSync(
+      const orderPda = findProgramAddressSync(
         [
           SEED_ORDER,
           activeMatch.matchState.toBytes(),
@@ -928,12 +1004,12 @@ export function SolanaClobPanel({
         ],
         clobProgram.programId,
       )[0];
-      const vaultPda = PublicKey.findProgramAddressSync(
+      const vaultPda = findProgramAddressSync(
         [SEED_VAULT, activeMatch.matchState.toBytes()],
         clobProgram.programId,
       )[0];
 
-      const txSignature = (await clobProgram.methods
+      const cancelOrderTransaction = await clobProgram.methods
         .cancelOrder(new BN(lastOrderId.toString()))
         .accountsPartial({
           matchState: activeMatch.matchState,
@@ -943,7 +1019,12 @@ export function SolanaClobPanel({
           user: wallet.publicKey,
           systemProgram: SystemProgram.programId,
         })
-        .rpc()) as string;
+        .transaction();
+      const txSignature = await submitTransaction(
+        cancelOrderTransaction,
+        [],
+        "canceling order",
+      );
 
       setTxs((prev) => ({ ...prev, cancelOrder: txSignature }));
       setStatus("Order canceled");
@@ -964,7 +1045,7 @@ export function SolanaClobPanel({
 
       const winner = side === "YES" ? { yes: {} } : { no: {} };
       const replayHash = window.crypto.getRandomValues(new Uint8Array(32));
-      await fightProgram.methods
+      const postResultTransaction = await fightProgram.methods
         .postResult(
           winner,
           new BN(Date.now().toString()),
@@ -975,15 +1056,21 @@ export function SolanaClobPanel({
           oracleConfig: oracleConfigPda,
           matchResult: activeMatch.oracleMatch,
         })
-        .rpc();
+        .transaction();
+      await submitTransaction(postResultTransaction, [], "posting result");
 
-      const txSignature = (await clobProgram.methods
+      const resolveMatchTransaction = await clobProgram.methods
         .resolveMatch()
         .accounts({
           matchState: activeMatch.matchState,
           oracleMatch: activeMatch.oracleMatch,
         })
-        .rpc()) as string;
+        .transaction();
+      const txSignature = await submitTransaction(
+        resolveMatchTransaction,
+        [],
+        "resolving match",
+      );
 
       setTxs((prev) => ({ ...prev, resolveMatch: txSignature }));
       setStatus(`Resolved. Winner: ${side}`);
@@ -1002,7 +1089,7 @@ export function SolanaClobPanel({
         if (!activeMatch || !configAccount)
           throw new Error("Missing market/config state");
         const runtimeConfigPda = findClobConfigPda(clobProgram.programId);
-        const userBalancePda = PublicKey.findProgramAddressSync(
+        const userBalancePda = findProgramAddressSync(
           [
             SEED_BALANCE,
             activeMatch.matchState.toBytes(),
@@ -1010,7 +1097,7 @@ export function SolanaClobPanel({
           ],
           clobProgram.programId,
         )[0];
-        const vaultPda = PublicKey.findProgramAddressSync(
+        const vaultPda = findProgramAddressSync(
           [SEED_VAULT, activeMatch.matchState.toBytes()],
           clobProgram.programId,
         )[0];
@@ -1019,7 +1106,7 @@ export function SolanaClobPanel({
           setStatus("Auto-claiming payout...");
         }
 
-        const txSignature = (await clobProgram.methods
+        const claimTransaction = await clobProgram.methods
           .claim()
           .accountsPartial({
             matchState: activeMatch.matchState,
@@ -1031,7 +1118,12 @@ export function SolanaClobPanel({
             user: wallet.publicKey,
             systemProgram: SystemProgram.programId,
           })
-          .rpc()) as string;
+          .transaction();
+        const txSignature = await submitTransaction(
+          claimTransaction,
+          [],
+          "claiming payout",
+        );
 
         setTxs((prev) => ({ ...prev, claim: txSignature }));
         setStatus(source === "auto" ? "Auto-claim complete" : "Claim complete");
@@ -1048,6 +1140,7 @@ export function SolanaClobPanel({
       activeMatch,
       configAccount,
       refreshData,
+      submitTransaction,
       wallet.publicKey,
       writablePrograms,
     ],
@@ -1094,10 +1187,45 @@ export function SolanaClobPanel({
   const noPercent = 100 - yesPercent;
 
   const matchLabel = activeMatch?.matchState.toBase58() ?? "-";
+  const marketStatus = activeMatch
+    ? activeMatch.isOpen
+      ? "OPEN"
+      : activeMatch.winner === 1
+        ? "RESOLVED YES"
+        : activeMatch.winner === 2
+          ? "RESOLVED NO"
+          : "RESOLVED"
+    : isRefreshing
+      ? "REFRESHING"
+      : "PENDING";
   const walletConnected = walletReady(wallet);
   const marketFeeSummary = configAccount
     ? `${configAccount.tradeTreasuryFeeBps / 100}% trade -> treasury, ${configAccount.tradeMarketMakerFeeBps / 100}% trade -> MM, ${configAccount.winningsMarketMakerFeeBps / 100}% winnings -> MM`
     : "Config not initialized";
+
+  useEffect(() => {
+    if (!onMarketSnapshot) return;
+    onMarketSnapshot({
+      matchLabel,
+      marketStatus,
+      yesPool,
+      noPool,
+      bids: bids.map((level) => ({ ...level })),
+      asks: asks.map((level) => ({ ...level })),
+      recentTrades: recentTrades.map((trade) => ({ ...trade })),
+      chartData: chartData.map((point) => ({ ...point })),
+    });
+  }, [
+    asks,
+    bids,
+    chartData,
+    marketStatus,
+    matchLabel,
+    noPool,
+    onMarketSnapshot,
+    recentTrades,
+    yesPool,
+  ]);
 
   return (
     <div

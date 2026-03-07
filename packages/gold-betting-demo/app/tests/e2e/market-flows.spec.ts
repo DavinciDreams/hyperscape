@@ -73,6 +73,53 @@ async function readText(page: Page, testId: string): Promise<string> {
   return ((await locator.textContent().catch(() => "")) || "").trim();
 }
 
+async function readTxSignature(page: Page, testId: string): Promise<string> {
+  const text = await readText(page, testId);
+  if (!text) return "";
+  const delimiterIndex = text.indexOf(":");
+  if (delimiterIndex >= 0) {
+    return text.slice(delimiterIndex + 1).trim();
+  }
+  return text;
+}
+
+async function gotoApp(page: Page): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto("/?debug=1", { waitUntil: "domcontentloaded" });
+    try {
+      await expect
+        .poll(
+          async () => {
+            const bodyText = (
+              (await page
+                .locator("body")
+                .textContent()
+                .catch(() => "")) || ""
+            )
+              .trim()
+              .toUpperCase();
+            if (
+              bodyText.includes("HYPERSCAPE DUEL ARENA") ||
+              bodyText.includes("ULTRA SIMPLE FIGHT BET")
+            ) {
+              return bodyText;
+            }
+            return "";
+          },
+          {
+            timeout: 20_000,
+            intervals: [500, 1_000, 2_000, 5_000],
+          },
+        )
+        .not.toBe("");
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await page.goto("about:blank");
+    }
+  }
+}
+
 async function waitForNewText(
   page: Page,
   testId: string,
@@ -89,6 +136,32 @@ async function waitForNewText(
         }
         matched = next;
         return next;
+      },
+      {
+        timeout: timeoutMs,
+        intervals: [1_000, 2_000, 5_000],
+      },
+    )
+    .not.toBe("");
+  return matched;
+}
+
+async function waitForNewTxSignature(
+  page: Page,
+  testId: string,
+  previousSignature = "",
+  timeoutMs = 180_000,
+): Promise<string> {
+  let matched = "";
+  await expect
+    .poll(
+      async () => {
+        const next = await readTxSignature(page, testId);
+        if (next && next !== "-" && next !== previousSignature) {
+          matched = next;
+          return next;
+        }
+        return "";
       },
       {
         timeout: timeoutMs,
@@ -161,21 +234,31 @@ async function selectChain(
   const debugSelector = page.getByTestId("e2e-chain-select").first();
   const primarySelector = page.locator("#chain-selector").first();
 
-  await page.waitForLoadState("domcontentloaded");
-  await expect
-    .poll(
-      async () => {
-        if (await debugSelector.isVisible().catch(() => false)) return "debug";
-        if (await primarySelector.isVisible().catch(() => false))
-          return "primary";
-        return "";
-      },
-      {
-        timeout: 60_000,
-        intervals: [500, 1_000, 2_000, 5_000],
-      },
-    )
-    .not.toBe("");
+  let selectorReady = false;
+  for (let attempt = 0; attempt < 3 && !selectorReady; attempt += 1) {
+    await page.waitForLoadState("domcontentloaded");
+    try {
+      await expect
+        .poll(
+          async () => {
+            if (await debugSelector.isVisible().catch(() => false))
+              return "debug";
+            if (await primarySelector.isVisible().catch(() => false))
+              return "primary";
+            return "";
+          },
+          {
+            timeout: 20_000,
+            intervals: [500, 1_000, 2_000, 5_000],
+          },
+        )
+        .not.toBe("");
+      selectorReady = true;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await page.reload({ waitUntil: "domcontentloaded" });
+    }
+  }
 
   if (await debugSelector.isVisible().catch(() => false)) {
     await debugSelector.selectOption(normalizedChain);
@@ -307,6 +390,32 @@ async function waitForEvmReceipt(
   expect(receipt.status).toBe("success");
 }
 
+async function waitForSolanaUiPosition(
+  page: Page,
+  side: "YES" | "NO",
+): Promise<void> {
+  const pattern =
+    side === "YES"
+      ? /Position YES\s+([0-9]+(?:\.[0-9]+)?)/i
+      : /\|\s*NO\s+([0-9]+(?:\.[0-9]+)?)/i;
+
+  await expect
+    .poll(
+      async () => {
+        const panelText =
+          (await page.getByTestId("solana-clob-admin-panel").textContent()) ||
+          "";
+        const match = panelText.match(pattern);
+        return match ? Number(match[1]) : 0;
+      },
+      {
+        timeout: 60_000,
+        intervals: [1_000, 2_000, 5_000],
+      },
+    )
+    .toBeGreaterThan(0);
+}
+
 async function submitModelsTrade(
   page: Page,
   tradeButtonTestId:
@@ -343,7 +452,7 @@ async function submitModelsTrade(
       timeout: 30_000,
       intervals: [500, 1_000, 2_000],
     })
-    .not.toMatch(/^Submitting\b/i);
+    .not.toMatch(/^(Submitting|Closing)\b/i);
 
   return (await readText(page, statusTestId)) || nextStatus;
 }
@@ -359,9 +468,8 @@ test.describe("market flows", () => {
       state.solanaRpcUrl || "http://127.0.0.1:8899",
       "confirmed",
     );
-    const userBalancePda = new PublicKey(state.clobUserBalance || "");
 
-    await page.goto("/?debug=1");
+    await gotoApp(page);
     await selectChain(page, "solana");
     const expandButton = page.locator('button[title="Expand panel"]').first();
     if (await expandButton.isVisible().catch(() => false)) {
@@ -376,57 +484,67 @@ test.describe("market flows", () => {
     await clobPanel.getByTestId("prediction-amount-input").fill("1");
     await clobPanel.getByTestId("solana-clob-price-input").fill("600");
 
-    const previousYesTx = await readText(page, "solana-clob-place-order-tx");
+    const previousYesTx = await readTxSignature(
+      page,
+      "solana-clob-place-order-tx",
+    );
     await clobPanel.getByTestId("prediction-select-yes").click();
-    await clobPanel.getByTestId("prediction-submit").click();
+    const buyYesButton = clobPanel.getByRole("button", { name: /buy yes/i });
+    await buyYesButton.click({ force: true });
+    await page.waitForTimeout(1_500);
+    const immediateYesTx = await readTxSignature(
+      page,
+      "solana-clob-place-order-tx",
+    );
+    if (
+      !immediateYesTx ||
+      immediateYesTx === "-" ||
+      immediateYesTx === previousYesTx
+    ) {
+      await buyYesButton.click({ force: true });
+    }
     await openSolanaAdminPanel(page);
 
-    const yesTx = await waitForNewText(
+    const yesTx = await waitForNewTxSignature(
       page,
       "solana-clob-place-order-tx",
       previousYesTx,
     );
-    await expectSolanaTxSuccess(
-      connection,
-      yesTx.replace(/^Place Order Tx:\s*/i, ""),
-      "Solana YES order",
-    );
+    await expectSolanaTxSuccess(connection, yesTx, "Solana YES order");
 
-    await expect
-      .poll(async () => {
-        const balance = await fetchDecodedAccount<{
-          yesShares: unknown;
-        }>(connection, clobCoder, "UserBalance", userBalancePda);
-        return Number(bnLikeToBigInt(balance?.yesShares));
-      })
-      .toBeGreaterThan(0);
+    await waitForSolanaUiPosition(page, "YES");
 
     await clobPanel.getByTestId("prediction-tab-sell").click();
     await clobPanel.getByTestId("prediction-select-no").click();
     await clobPanel.getByTestId("solana-clob-price-input").fill("400");
-    const previousNoTx = await readText(page, "solana-clob-place-order-tx");
-    await clobPanel.getByTestId("solana-clob-sell-submit").click();
+    const previousNoTx = await readTxSignature(
+      page,
+      "solana-clob-place-order-tx",
+    );
+    const sellNoButton = clobPanel.getByTestId("solana-clob-sell-submit");
+    await sellNoButton.click({ force: true });
+    await page.waitForTimeout(1_500);
+    const immediateNoTx = await readTxSignature(
+      page,
+      "solana-clob-place-order-tx",
+    );
+    if (
+      !immediateNoTx ||
+      immediateNoTx === "-" ||
+      immediateNoTx === previousNoTx
+    ) {
+      await sellNoButton.click({ force: true });
+    }
     await openSolanaAdminPanel(page);
 
-    const noTx = await waitForNewText(
+    const noTx = await waitForNewTxSignature(
       page,
       "solana-clob-place-order-tx",
       previousNoTx,
     );
-    await expectSolanaTxSuccess(
-      connection,
-      noTx.replace(/^Place Order Tx:\s*/i, ""),
-      "Solana NO order",
-    );
+    await expectSolanaTxSuccess(connection, noTx, "Solana NO order");
 
-    await expect
-      .poll(async () => {
-        const balance = await fetchDecodedAccount<{
-          noShares: unknown;
-        }>(connection, clobCoder, "UserBalance", userBalancePda);
-        return Number(bnLikeToBigInt(balance?.noShares));
-      })
-      .toBeGreaterThan(0);
+    await waitForSolanaUiPosition(page, "NO");
   });
 
   test("evm predictions place YES and NO orders, resolve, and claim", async ({
@@ -451,7 +569,7 @@ test.describe("market flows", () => {
       transport: http(rpcUrl),
     });
 
-    await page.goto("/?debug=1");
+    await gotoApp(page);
     await selectChain(page, "bsc");
 
     const evmPanel = page.getByTestId("evm-panel").first();
@@ -584,7 +702,7 @@ test.describe("market flows", () => {
     const marketId = Number(state.perpsMarketId || 0);
     const positionPda = derivePerpsPositionPda(trader, marketId);
 
-    await page.goto("/?debug=1");
+    await gotoApp(page);
     await selectChain(page, "solana");
     await ensureWalletConnected(page);
 

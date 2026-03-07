@@ -1,26 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BN } from "@coral-xyz/anchor";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Connection, PublicKey, SystemProgram } from "@solana/web3.js";
-import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { PublicKey } from "@solana/web3.js";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
 
 import {
-  DEFAULT_AUTO_SEED_DELAY_SECONDS,
-  DEFAULT_BET_FEE_BPS,
-  DEFAULT_NEW_ROUND_BET_WINDOW_SECONDS,
   DEFAULT_REFRESH_INTERVAL_MS,
-  DEFAULT_SEED_GOLD_AMOUNT,
-  GOLD_DECIMALS,
-  GOLD_MAINNET_MINT,
-  GAME_API_URL,
   UI_SYNC_DELAY_MS,
-  buildArenaWriteHeaders,
   getFixedMatchId,
   getCluster,
-  toBaseUnits,
   STREAM_URLS,
   CONFIG,
 } from "./lib/config";
@@ -32,7 +21,10 @@ import {
 import { StreamPlayer } from "./components/StreamPlayer";
 import { ChainSelector } from "./components/ChainSelector";
 import { EvmBettingPanel } from "./components/EvmBettingPanel";
-import { SolanaClobPanel } from "./components/SolanaClobPanel";
+import {
+  SolanaClobPanel,
+  type SolanaClobMarketSnapshot,
+} from "./components/SolanaClobPanel";
 import { type ChartDataPoint } from "./components/PredictionMarketPanel";
 import { ModelsMarketView } from "./components/ModelsMarketView";
 import { PointsDisplay } from "./components/PointsDisplay";
@@ -44,24 +36,8 @@ import { useChain } from "./lib/ChainContext";
 import {
   FIGHT_ORACLE_PROGRAM_ID,
   GOLD_CLOB_MARKET_PROGRAM_ID,
-  GOLD_BINARY_MARKET_PROGRAM_ID,
-  createPrograms,
   createReadonlyPrograms,
-  noEnum,
-  toBnAmount,
-  yesEnum,
 } from "./lib/programs";
-import {
-  findMarketConfigPda,
-  findMarketPda,
-  findNoVaultPda,
-  findOracleConfigPda,
-  findPositionPda,
-  findVaultAuthorityPda,
-  findYesVaultPda,
-} from "./lib/pdas";
-import { findAnyGoldAccount } from "./lib/token";
-import { simulateFight, type FightResult } from "./lib/fight";
 import { isHeadlessWalletEnabled } from "./lib/headlessWallet";
 import { useStreamingState } from "./spectator/useStreamingState";
 import { useDuelContext } from "./spectator/useDuelContext";
@@ -76,17 +52,6 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-
-const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
-  "BPFLoaderUpgradeab1e11111111111111111111111",
-);
-
-function deriveProgramDataAddress(programId: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [programId.toBuffer()],
-    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
-  )[0];
-}
 
 // ── Shared UI utilities ──────────────────────────────────────────────────────
 function formatGold(v: number): string {
@@ -138,18 +103,16 @@ type ProgramDeploymentState = {
   market: boolean;
 };
 
-type SolanaTxState = {
-  seed: string;
-  placeBet: string;
-  resolveOracle: string;
-  resolveMarket: string;
-  claim: string;
-  startMarket: string;
+const EMPTY_SOLANA_CLOB_SNAPSHOT: SolanaClobMarketSnapshot = {
+  matchLabel: "-",
+  marketStatus: "PENDING",
+  yesPool: 0n,
+  noPool: 0n,
+  bids: [],
+  asks: [],
+  recentTrades: [],
+  chartData: [],
 };
-
-const DEFAULT_TRADE_TREASURY_FEE_BPS = 100;
-const DEFAULT_TRADE_MARKET_MAKER_FEE_BPS = 100;
-const DEFAULT_WINNINGS_MARKET_MAKER_FEE_BPS = 200;
 
 function isWalletReady(wallet: ReturnType<typeof useWallet>): boolean {
   return Boolean(
@@ -186,7 +149,6 @@ function enumIs(value: unknown, variant: string): boolean {
   return key === variant;
 }
 
-import { Provider } from "@coral-xyz/anchor";
 import { type Trade } from "./components/RecentTrades";
 import { type OrderLevel } from "./components/OrderBook";
 
@@ -220,66 +182,9 @@ function sideFromEnum(value: unknown): BetSide | null {
   return null;
 }
 
-function marketStatusLabel(value: unknown): string {
-  if (enumIs(value, "open")) return "OPEN";
-  if (enumIs(value, "resolved")) return "RESOLVED";
-  if (enumIs(value, "void")) return "VOID";
-  return "UNKNOWN";
-}
-
 function formatUtc(ts: number | null): string {
   if (!ts) return "-";
   return new Date(ts * 1000).toISOString();
-}
-
-function isMintLookupError(error: unknown): boolean {
-  const message = (error as Error)?.message?.toLowerCase?.() ?? "";
-  return message.includes("could not find mint");
-}
-
-function extractTxSignature(error: unknown): string | null {
-  const message = (error as Error)?.message ?? "";
-  const match = message.match(/signature\s+([1-9A-HJ-NP-Za-km-z]{32,88})/i);
-  return match?.[1] ?? null;
-}
-
-async function waitForTxSuccessBySignature(
-  connection: Connection,
-  signature: string,
-  timeoutMs = 60_000,
-): Promise<boolean> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const statuses = await connection.getSignatureStatuses([signature], {
-      searchTransactionHistory: true,
-    });
-    const status = statuses.value[0];
-    if (status) {
-      if (status.err) return false;
-      if (status.confirmationStatus) return true;
-    }
-    await new Promise((resolve) => window.setTimeout(resolve, 2_000));
-  }
-  return false;
-}
-
-async function recoverTimedOutTransaction(
-  connection: Connection,
-  error: unknown,
-  timeoutMs = 60_000,
-): Promise<boolean> {
-  const signature = extractTxSignature(error);
-  if (!signature) return false;
-  try {
-    return await waitForTxSuccessBySignature(connection, signature, timeoutMs);
-  } catch {
-    return false;
-  }
-}
-
-function goldDisplay(amount: unknown): string {
-  const raw = asNumber(amount, 0);
-  return (raw / 10 ** GOLD_DECIMALS).toFixed(6);
 }
 
 export function App() {
@@ -316,40 +221,21 @@ export function App() {
     return activeChain === "solana" ? "solana" : "evm";
   }, [activeChain, evmWalletAddress, pointsWalletAddress, solanaWalletAddress]);
 
-  const [amountInput, setAmountInput] = useState<string>("1");
   const [surfaceMode, setSurfaceMode] = useState<"DUELS" | "MODELS">("DUELS");
-  const [side, setSide] = useState<BetSide>("YES");
-  const [e2ePayAsset, setE2ePayAsset] = useState<"GOLD" | "SOL" | "USDC">(
-    "GOLD",
-  );
   const [status, setStatus] = useState<string>("");
-  const [fightResult, setFightResult] = useState<FightResult | null>(null);
   const [currentMatch, setCurrentMatch] = useState<DiscoveredMatch | null>(
     null,
   );
-  const [lastResolvedMatch, setLastResolvedMatch] =
-    useState<DiscoveredMatch | null>(null);
-  const [currentMarketState, setCurrentMarketState] = useState<any>(null);
-  const [marketConfigState, setMarketConfigState] = useState<any>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [nowTs, setNowTs] = useState(() => Math.floor(Date.now() / 1000));
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [configuredGoldTokenProgram, setConfiguredGoldTokenProgram] =
-    useState<PublicKey>(TOKEN_2022_PROGRAM_ID);
   const [programDeployment, setProgramDeployment] =
     useState<ProgramDeploymentState>({
       checked: false,
       oracle: false,
       market: false,
     });
-  const [solanaTxs, setSolanaTxs] = useState<SolanaTxState>({
-    seed: "-",
-    placeBet: "-",
-    resolveOracle: "-",
-    resolveMarket: "-",
-    claim: "-",
-    startMarket: "-",
-  });
+  const [solanaClobSnapshot, setSolanaClobSnapshot] =
+    useState<SolanaClobMarketSnapshot>(EMPTY_SOLANA_CLOB_SNAPSHOT);
   const [inviteCode, setInviteCode] = useState<string | null>(() =>
     getStoredInviteCode(),
   );
@@ -391,16 +277,6 @@ export function App() {
     "leaderboard" | "history" | "referral"
   >("leaderboard");
 
-  // Real-time tracking for Solana UI
-  const [solanaRecentTrades, setSolanaRecentTrades] = useState<Trade[]>([]);
-  const [solanaChartData, setSolanaChartData] = useState<ChartDataPoint[]>([]);
-  const lastStateRef = useRef({
-    yesPot: 0,
-    noPot: 0,
-    lastUpdate: 0,
-  });
-  const autoSeededMarketsRef = useRef<Set<string>>(new Set());
-  const autoClaimedMarketsRef = useRef<Set<string>>(new Set());
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const bettingDockInnerRef = useRef<HTMLDivElement | null>(null);
 
@@ -946,7 +822,7 @@ export function App() {
     }
     const oracleConfig = findOracleConfigPda(FIGHT_ORACLE_PROGRAM_ID);
     const matchIdBn = new BN(matchId.toString());
-    const matchPda = PublicKey.findProgramAddressSync(
+    const matchPda = findProgramAddressSync(
       [Buffer.from("match"), matchIdBn.toArrayLike(Buffer, "le", 8)],
       FIGHT_ORACLE_PROGRAM_ID,
     )[0];

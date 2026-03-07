@@ -455,6 +455,21 @@ const USE_GAME_RPC_PROXY =
   CONFIG.cluster === "mainnet-beta"
     ? true
     : readEnvBoolean("VITE_USE_GAME_RPC_PROXY", false);
+const LOCAL_SOLANA_RPC_PROXY_PREFIX = "/__solana";
+
+function isLoopbackRpcUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "::1"
+    );
+  } catch {
+    return false;
+  }
+}
+
 const configuredManualMarketControls = readEnvBoolean(
   "VITE_ENABLE_MANUAL_MARKET_ADMIN_CONTROLS",
   RUNTIME_ENV === "localnet" || RUNTIME_ENV === "e2e",
@@ -485,7 +500,35 @@ export function getCluster(): SolanaCluster {
   return CONFIG.cluster;
 }
 
+function shouldUseLocalSolanaRpcProxy(): boolean {
+  if (isPublicBrowserRuntime()) return false;
+  const explicitOverride = readEnvString("VITE_USE_LOCAL_SOLANA_RPC_PROXY");
+  if (explicitOverride === "true") return true;
+  if (explicitOverride === "false") return false;
+  if (import.meta.env.MODE === "e2e") return true;
+  return import.meta.env.DEV && isLoopbackRpcUrl(CONFIG.rpcUrl);
+}
+
+function buildLocalSolanaProxyUrl(
+  pathname: string,
+  protocol: "http" | "ws",
+): string {
+  if (typeof window === "undefined") {
+    return `${LOCAL_SOLANA_RPC_PROXY_PREFIX}${pathname}`;
+  }
+  const resolvedProtocol =
+    protocol === "ws"
+      ? window.location.protocol === "https:"
+        ? "wss:"
+        : "ws:"
+      : window.location.protocol;
+  return `${resolvedProtocol}//${window.location.host}${LOCAL_SOLANA_RPC_PROXY_PREFIX}${pathname}`;
+}
+
 export function getRpcUrl(): string {
+  if (shouldUseLocalSolanaRpcProxy()) {
+    return buildLocalSolanaProxyUrl("/rpc", "http");
+  }
   // Non-proxy environments (for example standalone dev) use direct RPC.
   if (!USE_GAME_RPC_PROXY || CONFIG.cluster === "localnet") {
     return CONFIG.rpcUrl;
@@ -494,6 +537,9 @@ export function getRpcUrl(): string {
 }
 
 export function getWsUrl(): string | undefined {
+  if (shouldUseLocalSolanaRpcProxy() && typeof window !== "undefined") {
+    return buildLocalSolanaProxyUrl("/ws", "ws");
+  }
   if (!USE_GAME_RPC_PROXY) {
     return CONFIG.wsUrl;
   }

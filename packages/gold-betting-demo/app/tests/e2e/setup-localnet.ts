@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 
 import { AnchorProvider, BN, Idl, Program, Wallet } from "@coral-xyz/anchor";
 import {
+  ConfirmOptions,
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
+  Signer,
   SystemProgram,
   Transaction,
   VersionedTransaction,
@@ -39,6 +41,10 @@ const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
   "BPFLoaderUpgradeab1e11111111111111111111111",
 );
 const E2E_PERPS_MAX_ORACLE_STALENESS_SECONDS = 3_600;
+const E2E_TRADER_SEED = Uint8Array.from([
+  88, 41, 190, 12, 77, 164, 231, 5, 199, 118, 43, 91, 16, 220, 58, 147, 9, 175,
+  63, 204, 132, 54, 241, 28, 115, 67, 154, 210, 36, 143, 80, 11,
+]);
 
 function deriveProgramDataAddress(programId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
@@ -167,6 +173,103 @@ async function ensureTransferredBalance(
   await provider.sendAndConfirm(transferTx);
 }
 
+async function waitForSignatureConfirmation(
+  connection: Connection,
+  signature: string,
+  timeoutMs = 120_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const statuses = await connection.getSignatureStatuses([signature], {
+        searchTransactionHistory: true,
+      });
+      const status = statuses.value[0];
+      if (status?.err) {
+        throw new Error(
+          `Transaction ${signature} failed: ${JSON.stringify(status.err)}`,
+        );
+      }
+      if (
+        status?.confirmationStatus === "confirmed" ||
+        status?.confirmationStatus === "finalized"
+      ) {
+        return;
+      }
+    } catch (error) {
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw error;
+      }
+    }
+    await sleep(500);
+  }
+  throw new Error(
+    `Transaction ${signature} was not confirmed within ${timeoutMs}ms`,
+  );
+}
+
+async function waitForAccountExists(
+  connection: Connection,
+  address: PublicKey,
+  timeoutMs = 120_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const account = await connection.getAccountInfo(address, "confirmed");
+    if (account) return;
+    await sleep(500);
+  }
+  throw new Error(
+    `Account ${address.toBase58()} was not visible within ${timeoutMs}ms`,
+  );
+}
+
+async function reliableSendAndConfirm(
+  provider: AnchorProvider,
+  connection: Connection,
+  tx: SignableTx,
+  signers?: Signer[],
+  opts?: ConfirmOptions,
+): Promise<string> {
+  const resolvedOpts = opts ?? provider.opts;
+  const preflightCommitment =
+    resolvedOpts.preflightCommitment ?? resolvedOpts.commitment ?? "confirmed";
+
+  if (tx instanceof VersionedTransaction) {
+    if (signers && signers.length > 0) {
+      tx.sign(signers);
+    }
+  } else {
+    tx.feePayer = tx.feePayer ?? provider.wallet.publicKey;
+    const latestBlockhash =
+      await connection.getLatestBlockhash(preflightCommitment);
+    tx.recentBlockhash = latestBlockhash.blockhash;
+    if (signers && signers.length > 0) {
+      for (const signer of signers) {
+        tx.partialSign(signer);
+      }
+    }
+  }
+
+  const signedTx = await provider.wallet.signTransaction(tx);
+  const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+    skipPreflight: resolvedOpts.skipPreflight,
+    maxRetries: resolvedOpts.maxRetries,
+    preflightCommitment,
+  });
+  await waitForSignatureConfirmation(connection, signature);
+  return signature;
+}
+
+function attachReliableSendAndConfirm(
+  provider: AnchorProvider,
+  connection: Connection,
+): void {
+  provider.sendAndConfirm = (async (tx, signers, opts) => {
+    return reliableSendAndConfirm(provider, connection, tx, signers, opts);
+  }) as AnchorProvider["sendAndConfirm"];
+}
+
 async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const appDir = path.resolve(__dirname, "../..");
@@ -175,6 +278,10 @@ async function main(): Promise<void> {
   const solanaRpcUrl =
     process.env.E2E_SOLANA_RPC_URL || "http://127.0.0.1:8899";
   const solanaWsUrl = process.env.E2E_SOLANA_WS_URL || "ws://127.0.0.1:8900";
+  const browserSolanaRpcUrl =
+    process.env.E2E_BROWSER_SOLANA_RPC_URL || solanaRpcUrl;
+  const browserSolanaWsUrl =
+    process.env.E2E_BROWSER_SOLANA_WS_URL || solanaWsUrl;
   const clobProgramId = resolveIdlAddress(
     goldClobIdl as unknown as IdlWithAddress,
     "gold_clob_market",
@@ -184,13 +291,18 @@ async function main(): Promise<void> {
     "gold_perps_market",
   );
 
-  const connection = new Connection(solanaRpcUrl, "confirmed");
+  const connection = new Connection(solanaRpcUrl, {
+    commitment: "confirmed",
+    wsEndpoint: solanaWsUrl,
+    confirmTransactionInitialTimeout: 120_000,
+  });
   const authority = await loadBootstrapAuthority();
-  const trader = Keypair.generate();
+  const trader = Keypair.fromSeed(E2E_TRADER_SEED);
   let provider = new AnchorProvider(connection, toWallet(authority), {
     commitment: "confirmed",
     preflightCommitment: "confirmed",
   });
+  attachReliableSendAndConfirm(provider, connection);
 
   let fightProgram = new Program(fightOracleIdl as Idl, provider);
   let fight: any = fightProgram;
@@ -359,6 +471,7 @@ async function main(): Promise<void> {
         systemProgram: SystemProgram.programId,
       })
       .rpc();
+    await waitForAccountExists(connection, perpsConfigPda);
   }
 
   await perps.methods
@@ -506,8 +619,9 @@ async function main(): Promise<void> {
 
   const envBody = [
     "VITE_SOLANA_CLUSTER=localnet",
-    `VITE_SOLANA_RPC_URL=${solanaRpcUrl}`,
-    `VITE_SOLANA_WS_URL=${solanaWsUrl}`,
+    `VITE_SOLANA_RPC_URL=${browserSolanaRpcUrl}`,
+    `VITE_SOLANA_WS_URL=${browserSolanaWsUrl}`,
+    "VITE_USE_LOCAL_SOLANA_RPC_PROXY=true",
     `VITE_FIGHT_ORACLE_PROGRAM_ID=${fightProgram.programId.toBase58()}`,
     `VITE_GOLD_CLOB_MARKET_PROGRAM_ID=${clobProgramId}`,
     `VITE_GOLD_BINARY_MARKET_PROGRAM_ID=${clobProgramId}`,
@@ -591,6 +705,8 @@ async function main(): Promise<void> {
         authority: authority.publicKey.toBase58(),
         trader: trader.publicKey.toBase58(),
         goldMint: goldMint.toBase58(),
+        browserSolanaRpcUrl,
+        browserSolanaWsUrl,
         currentMatchId,
         clobMatchState: clobMatchState.publicKey.toBase58(),
         clobUserBalance: clobUserBalancePda.toBase58(),

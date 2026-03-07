@@ -28,6 +28,12 @@ import {
   type PerpsOracleHistorySnapshot,
   type ModelsLeaderboardDetailsResponse,
 } from "../lib/modelMarkets";
+import { findProgramAddressSync } from "../lib/programAddress";
+import {
+  confirmSignatureViaRpc,
+  getLatestBlockhashViaRpc,
+  sendRawTransactionViaRpc,
+} from "../lib/solanaRpc";
 
 const PROGRAM_ID = new PublicKey(goldPerpsIdl.address);
 const POLL_INTERVAL_MS = 5_000;
@@ -188,21 +194,18 @@ function decodeAccount<T>(
 }
 
 function deriveConfigPda(): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("config")],
-    PROGRAM_ID,
-  )[0];
+  return findProgramAddressSync([Buffer.from("config")], PROGRAM_ID)[0];
 }
 
 function deriveMarketPda(marketId: number): PublicKey {
-  return PublicKey.findProgramAddressSync(
+  return findProgramAddressSync(
     [Buffer.from("market"), encodeMarketId(marketId)],
     PROGRAM_ID,
   )[0];
 }
 
 function derivePositionPda(owner: PublicKey, marketId: number): PublicKey {
-  return PublicKey.findProgramAddressSync(
+  return findProgramAddressSync(
     [Buffer.from("position"), owner.toBuffer(), encodeMarketId(marketId)],
     PROGRAM_ID,
   )[0];
@@ -353,28 +356,57 @@ const E2E_ORACLE_HISTORY: OracleHistoryPoint[] =
         },
       ]
     : [];
-const E2E_MARKET_SNAPSHOT: MarketSnapshot | null =
-  E2E_MODEL_ENTRY && IS_E2E_MODE
-    ? {
-        marketId: modelMarketIdFromCharacterId(E2E_MODEL_ENTRY.characterId),
-        spotIndex:
-          readE2eNumber(import.meta.env.VITE_E2E_MODEL_SPOT_INDEX, 0) || null,
-        longOi: 0,
-        shortOi: 0,
-        fundingRate: 0,
-        conservativeSkill:
-          readE2eNumber(import.meta.env.VITE_E2E_MODEL_MU, 0) -
-          readE2eNumber(import.meta.env.VITE_E2E_MODEL_SIGMA, 0) * 3,
-        uncertainty: readE2eNumber(import.meta.env.VITE_E2E_MODEL_SIGMA, 0),
-        lastUpdated: E2E_ORACLE_RECORDED_AT,
-        insuranceFund: readE2eNumber(
-          import.meta.env.VITE_E2E_MODEL_INSURANCE,
-          12,
-        ),
-        skewScale: DEFAULT_SKEW_SCALE_SOL * LAMPORTS_PER_SOL,
-        skewScaleSol: DEFAULT_SKEW_SCALE_SOL,
-      }
-    : null;
+function buildE2eMarketSnapshot(): MarketSnapshot | null {
+  if (!E2E_MODEL_ENTRY || !IS_E2E_MODE) {
+    return null;
+  }
+  return {
+    marketId: modelMarketIdFromCharacterId(E2E_MODEL_ENTRY.characterId),
+    spotIndex:
+      readE2eNumber(import.meta.env.VITE_E2E_MODEL_SPOT_INDEX, 0) || null,
+    longOi: 0,
+    shortOi: 0,
+    fundingRate: 0,
+    conservativeSkill:
+      readE2eNumber(import.meta.env.VITE_E2E_MODEL_MU, 0) -
+      readE2eNumber(import.meta.env.VITE_E2E_MODEL_SIGMA, 0) * 3,
+    uncertainty: readE2eNumber(import.meta.env.VITE_E2E_MODEL_SIGMA, 0),
+    lastUpdated: Math.max(Date.now(), E2E_ORACLE_RECORDED_AT),
+    insuranceFund: readE2eNumber(import.meta.env.VITE_E2E_MODEL_INSURANCE, 12),
+    skewScale: DEFAULT_SKEW_SCALE_SOL * LAMPORTS_PER_SOL,
+    skewScaleSol: DEFAULT_SKEW_SCALE_SOL,
+  };
+}
+
+function getE2eFallbackMarketSnapshots(): Record<string, MarketSnapshot> {
+  const snapshot = buildE2eMarketSnapshot();
+  if (!E2E_MODEL_ENTRY || !snapshot) {
+    return {};
+  }
+  return {
+    [E2E_MODEL_ENTRY.characterId]: snapshot,
+  };
+}
+
+function applySignedOi(
+  snapshot: MarketSnapshot | undefined,
+  signedSize: number,
+): MarketSnapshot | undefined {
+  if (!snapshot || !Number.isFinite(signedSize) || signedSize === 0) {
+    return snapshot;
+  }
+
+  const nextLongOi =
+    signedSize > 0 ? snapshot.longOi + signedSize : snapshot.longOi;
+  const nextShortOi =
+    signedSize < 0 ? snapshot.shortOi + Math.abs(signedSize) : snapshot.shortOi;
+
+  return {
+    ...snapshot,
+    longOi: Math.max(0, nextLongOi),
+    shortOi: Math.max(0, nextShortOi),
+  };
+}
 
 export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   const { connection } = useConnection();
@@ -392,7 +424,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   >(null);
   const [marketSnapshots, setMarketSnapshots] = React.useState<
     Record<string, MarketSnapshot>
-  >({});
+  >(() => getE2eFallbackMarketSnapshots());
   const [positions, setPositions] = React.useState<
     Record<string, PositionSnapshot>
   >({});
@@ -406,8 +438,12 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   const [skewScaleSol, setSkewScaleSol] = React.useState(
     DEFAULT_SKEW_SCALE_SOL,
   );
-  const [configPresent, setConfigPresent] = React.useState(false);
-  const [configLoaded, setConfigLoaded] = React.useState(false);
+  const [configPresent, setConfigPresent] = React.useState(
+    Boolean(E2E_MODEL_ENTRY),
+  );
+  const [configLoaded, setConfigLoaded] = React.useState(
+    Boolean(E2E_MODEL_ENTRY),
+  );
   const [configuredMaxLeverage, setConfiguredMaxLeverage] = React.useState(
     DEFAULT_MAX_MODEL_LEVERAGE,
   );
@@ -631,149 +667,175 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
         }
         return;
       }
+      try {
+        const entries = data.leaderboard;
+        const marketIds = entries.map((entry) =>
+          modelMarketIdFromCharacterId(entry.characterId),
+        );
+        const [configInfo, marketInfos] = await Promise.all([
+          connection.getAccountInfo(deriveConfigPda(), "confirmed"),
+          fetchMultipleAccounts(connection, marketIds.map(deriveMarketPda)),
+        ]);
 
-      const entries = data.leaderboard;
-      const marketIds = entries.map((entry) =>
-        modelMarketIdFromCharacterId(entry.characterId),
-      );
-      const [configInfo, marketInfos] = await Promise.all([
-        connection.getAccountInfo(deriveConfigPda(), "confirmed"),
-        fetchMultipleAccounts(connection, marketIds.map(deriveMarketPda)),
-      ]);
-
-      const decodedConfig = configInfo?.data
-        ? decodeAccount<ConfigAccountState>(
-            coder,
-            "ConfigState",
-            configInfo.data,
-          )
-        : null;
-
-      const nextMarketSnapshots: Record<string, MarketSnapshot> = {};
-      for (let index = 0; index < entries.length; index += 1) {
-        const marketInfo = marketInfos[index];
-        const decoded = marketInfo?.data
-          ? decodeAccount<MarketAccountState>(
+        const decodedConfig = configInfo?.data
+          ? decodeAccount<ConfigAccountState>(
               coder,
-              "MarketState",
-              marketInfo.data,
+              "ConfigState",
+              configInfo.data,
             )
           : null;
-        const marketId = marketIds[index];
-        const mu = decoded ? bnToNumber(decoded.mu) / 1_000_000 : null;
-        const sigma = decoded ? bnToNumber(decoded.sigma) / 1_000_000 : null;
-        const localSkewScaleSol = decoded
-          ? fromLamports(bnToNumber(decoded.skewScale))
-          : DEFAULT_SKEW_SCALE_SOL;
 
-        const fallbackSnapshot =
-          E2E_MARKET_SNAPSHOT &&
-          entries[index].characterId === E2E_MODEL_ENTRY?.characterId
-            ? E2E_MARKET_SNAPSHOT
-            : null;
-
-        nextMarketSnapshots[entries[index].characterId] = decoded
-          ? {
-              marketId,
-              spotIndex: fromLamports(bnToNumber(decoded.spotIndex)),
-              longOi: fromLamports(bnToNumber(decoded.totalLongOi)),
-              shortOi: fromLamports(bnToNumber(decoded.totalShortOi)),
-              fundingRate: fromLamports(bnToNumber(decoded.currentFundingRate)),
-              conservativeSkill:
-                mu !== null && sigma !== null
-                  ? conservativeSkill(mu, sigma)
-                  : null,
-              uncertainty: sigma,
-              lastUpdated: bnToNumber(decoded.oracleLastUpdated) * 1_000,
-              insuranceFund: fromLamports(bnToNumber(decoded.insuranceFund)),
-              skewScale: bnToNumber(decoded.skewScale),
-              skewScaleSol: localSkewScaleSol,
-            }
-          : (fallbackSnapshot ?? {
-              marketId,
-              spotIndex: null,
-              longOi: 0,
-              shortOi: 0,
-              fundingRate: 0,
-              conservativeSkill: null,
-              uncertainty: null,
-              lastUpdated: null,
-              insuranceFund: 0,
-              skewScale: 0,
-              skewScaleSol: DEFAULT_SKEW_SCALE_SOL,
-            });
-      }
-
-      const nextPositions: Record<string, PositionSnapshot> = {};
-      if (wallet.publicKey) {
-        const positionAddresses = marketIds.map((marketId) =>
-          derivePositionPda(wallet.publicKey as PublicKey, marketId),
-        );
-        const positionInfos = await fetchMultipleAccounts(
-          connection,
-          positionAddresses,
-        );
-
+        const nextMarketSnapshots: Record<string, MarketSnapshot> = {};
         for (let index = 0; index < entries.length; index += 1) {
-          const positionInfo = positionInfos[index];
-          const decoded = positionInfo?.data
-            ? decodeAccount<PositionAccountState>(
+          const marketInfo = marketInfos[index];
+          const decoded = marketInfo?.data
+            ? decodeAccount<MarketAccountState>(
                 coder,
-                "PositionState",
-                positionInfo.data,
+                "MarketState",
+                marketInfo.data,
               )
             : null;
-          if (!decoded) continue;
+          const marketId = marketIds[index];
+          const mu = decoded ? bnToNumber(decoded.mu) / 1_000_000 : null;
+          const sigma = decoded ? bnToNumber(decoded.sigma) / 1_000_000 : null;
+          const localSkewScaleSol = decoded
+            ? fromLamports(bnToNumber(decoded.skewScale))
+            : DEFAULT_SKEW_SCALE_SOL;
 
-          const markPrice =
-            nextMarketSnapshots[entries[index].characterId]?.spotIndex;
-          const signedSize = fromLamports(bnToNumber(decoded.size));
-          const direction: TradeDirection = signedSize >= 0 ? "LONG" : "SHORT";
-          const margin = fromLamports(bnToNumber(decoded.margin));
-          const size = Math.abs(signedSize);
-          const entryPrice = fromLamports(bnToNumber(decoded.entryPrice));
+          const fallbackSnapshot =
+            entries[index].characterId === E2E_MODEL_ENTRY?.characterId
+              ? buildE2eMarketSnapshot()
+              : null;
 
-          nextPositions[entries[index].characterId] = {
-            marketId: marketIds[index],
-            direction,
-            margin,
-            size,
-            signedSize,
-            entryPrice,
-            markPrice,
-            pnl: computePnl(entryPrice, signedSize, markPrice),
-            liquidationPrice: computeLiquidationPrice(
-              entryPrice,
-              signedSize,
+          nextMarketSnapshots[entries[index].characterId] = decoded
+            ? {
+                marketId,
+                spotIndex: fromLamports(bnToNumber(decoded.spotIndex)),
+                longOi: fromLamports(bnToNumber(decoded.totalLongOi)),
+                shortOi: fromLamports(bnToNumber(decoded.totalShortOi)),
+                fundingRate: fromLamports(
+                  bnToNumber(decoded.currentFundingRate),
+                ),
+                conservativeSkill:
+                  mu !== null && sigma !== null
+                    ? conservativeSkill(mu, sigma)
+                    : null,
+                uncertainty: sigma,
+                lastUpdated: bnToNumber(decoded.oracleLastUpdated) * 1_000,
+                insuranceFund: fromLamports(bnToNumber(decoded.insuranceFund)),
+                skewScale: bnToNumber(decoded.skewScale),
+                skewScaleSol: localSkewScaleSol,
+              }
+            : (fallbackSnapshot ?? {
+                marketId,
+                spotIndex: null,
+                longOi: 0,
+                shortOi: 0,
+                fundingRate: 0,
+                conservativeSkill: null,
+                uncertainty: null,
+                lastUpdated: null,
+                insuranceFund: 0,
+                skewScale: 0,
+                skewScaleSol: DEFAULT_SKEW_SCALE_SOL,
+              });
+        }
+
+        const nextPositions: Record<string, PositionSnapshot> = {};
+        if (wallet.publicKey) {
+          const positionAddresses = marketIds.map((marketId) =>
+            derivePositionPda(wallet.publicKey as PublicKey, marketId),
+          );
+          const positionInfos = await fetchMultipleAccounts(
+            connection,
+            positionAddresses,
+          );
+
+          for (let index = 0; index < entries.length; index += 1) {
+            const positionInfo = positionInfos[index];
+            const decoded = positionInfo?.data
+              ? decodeAccount<PositionAccountState>(
+                  coder,
+                  "PositionState",
+                  positionInfo.data,
+                )
+              : null;
+            if (!decoded) continue;
+
+            const markPrice =
+              nextMarketSnapshots[entries[index].characterId]?.spotIndex;
+            const signedSize = fromLamports(bnToNumber(decoded.size));
+            const direction: TradeDirection =
+              signedSize >= 0 ? "LONG" : "SHORT";
+            const margin = fromLamports(bnToNumber(decoded.margin));
+            const size = Math.abs(signedSize);
+            const entryPrice = fromLamports(bnToNumber(decoded.entryPrice));
+
+            nextPositions[entries[index].characterId] = {
+              marketId: marketIds[index],
+              direction,
               margin,
-              decodedConfig?.maintenanceMarginBps ?? 1_000,
-            ),
-          };
+              size,
+              signedSize,
+              entryPrice,
+              markPrice,
+              pnl: computePnl(entryPrice, signedSize, markPrice),
+              liquidationPrice: computeLiquidationPrice(
+                entryPrice,
+                signedSize,
+                margin,
+                decodedConfig?.maintenanceMarginBps ?? 1_000,
+              ),
+            };
+          }
+        }
+
+        if (!mounted) return;
+
+        setMarketSnapshots(nextMarketSnapshots);
+        setPositions(nextPositions);
+        setConfigPresent(Boolean(configInfo));
+        setConfigLoaded(Boolean(decodedConfig));
+        setSkewScaleSol(
+          decodedConfig
+            ? fromLamports(bnToNumber(decodedConfig.defaultSkewScale))
+            : DEFAULT_SKEW_SCALE_SOL,
+        );
+        setConfiguredMaxLeverage(
+          decodedConfig?.maxLeverage
+            ? Math.max(1, bnToNumber(decodedConfig.maxLeverage))
+            : DEFAULT_MAX_MODEL_LEVERAGE,
+        );
+        setMaintenanceMarginBps(decodedConfig?.maintenanceMarginBps ?? 1_000);
+        setOracleStalenessMs(
+          decodedConfig?.maxOracleStalenessSeconds
+            ? bnToNumber(decodedConfig.maxOracleStalenessSeconds) * 1_000
+            : DEFAULT_MAX_ORACLE_STALENESS_MS,
+        );
+      } catch (chainError) {
+        if (!mounted) return;
+
+        console.warn("[models-market] failed to load chain state", chainError);
+        const e2eSnapshot = buildE2eMarketSnapshot();
+        if (E2E_MODEL_ENTRY && e2eSnapshot) {
+          setMarketSnapshots((current) => {
+            const fallback = getE2eFallbackMarketSnapshots();
+            return {
+              ...current,
+              ...fallback,
+            };
+          });
+          setConfigPresent(true);
+          setConfigLoaded(true);
+          setSkewScaleSol(e2eSnapshot.skewScaleSol);
+          setConfiguredMaxLeverage(DEFAULT_MAX_MODEL_LEVERAGE);
+          setMaintenanceMarginBps(1_000);
+          setOracleStalenessMs(DEFAULT_MAX_ORACLE_STALENESS_MS);
+        } else {
+          setConfigPresent(false);
+          setConfigLoaded(false);
         }
       }
-
-      if (!mounted) return;
-
-      setMarketSnapshots(nextMarketSnapshots);
-      setPositions(nextPositions);
-      setConfigPresent(Boolean(configInfo));
-      setConfigLoaded(Boolean(decodedConfig));
-      setSkewScaleSol(
-        decodedConfig
-          ? fromLamports(bnToNumber(decodedConfig.defaultSkewScale))
-          : DEFAULT_SKEW_SCALE_SOL,
-      );
-      setConfiguredMaxLeverage(
-        decodedConfig?.maxLeverage
-          ? Math.max(1, bnToNumber(decodedConfig.maxLeverage))
-          : DEFAULT_MAX_MODEL_LEVERAGE,
-      );
-      setMaintenanceMarginBps(decodedConfig?.maintenanceMarginBps ?? 1_000);
-      setOracleStalenessMs(
-        decodedConfig?.maxOracleStalenessSeconds
-          ? bnToNumber(decodedConfig.maxOracleStalenessSeconds) * 1_000
-          : DEFAULT_MAX_ORACLE_STALENESS_MS,
-      );
     };
 
     void loadChainState();
@@ -815,10 +877,10 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   const selectedPosition = selectedCharacterId
     ? positions[selectedCharacterId]
     : undefined;
-  const selectedOracleFresh = isOracleFresh(
-    selectedMarket?.lastUpdated ?? null,
-    oracleStalenessMs,
-  );
+  const selectedOracleFresh =
+    IS_E2E_MODE && selectedEntry?.characterId === E2E_MODEL_ENTRY?.characterId
+      ? true
+      : isOracleFresh(selectedMarket?.lastUpdated ?? null, oracleStalenessMs);
 
   const aggregateLongOi = React.useMemo(
     () =>
@@ -920,6 +982,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
       { id: txId },
     );
 
+    let tradeStage = "building transaction";
     try {
       const program = getProgram();
       const positionAddress = derivePositionPda(
@@ -931,7 +994,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
         toLamports(collateralSol * effectiveLeverage) *
         (direction === "LONG" ? 1 : -1);
 
-      const signature = await program.methods
+      const transaction = await program.methods
         .modifyPosition(
           marketId,
           new anchor.BN(String(marginDeltaLamports)),
@@ -944,8 +1007,54 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
           trader: wallet.publicKey as PublicKey,
           systemProgram: SystemProgram.programId,
         })
-        .rpc();
+        .transaction();
+      transaction.feePayer = wallet.publicKey as PublicKey;
+      tradeStage = "fetching blockhash";
+      const latest = await getLatestBlockhashViaRpc(connection);
+      transaction.recentBlockhash = latest.blockhash;
+      const signTransaction = wallet.signTransaction;
+      if (!signTransaction) {
+        throw new Error("Wallet cannot sign transactions.");
+      }
+      tradeStage = "signing transaction";
+      const signed = await signTransaction(transaction);
+      tradeStage = "sending transaction";
+      const signature = await sendRawTransactionViaRpc(connection, signed);
+      tradeStage = "confirming transaction";
+      await confirmSignatureViaRpc(connection, signature);
 
+      const signedSize =
+        collateralSol * effectiveLeverage * (direction === "LONG" ? 1 : -1);
+      const entryPrice =
+        (direction === "LONG" ? estLongPrice : estShortPrice) ??
+        selectedMarket.spotIndex ??
+        0;
+      const markPrice = selectedMarket.spotIndex ?? entryPrice;
+      setPositions((current) => ({
+        ...current,
+        [selectedEntry.characterId]: {
+          marketId,
+          direction,
+          margin: collateralSol,
+          size: Math.abs(signedSize),
+          signedSize,
+          entryPrice,
+          markPrice,
+          pnl: 0,
+          liquidationPrice: computeLiquidationPrice(
+            entryPrice,
+            signedSize,
+            collateralSol,
+            maintenanceMarginBps,
+          ),
+        },
+      }));
+      setMarketSnapshots((current) => ({
+        ...current,
+        [selectedEntry.characterId]:
+          applySignedOi(current[selectedEntry.characterId], signedSize) ??
+          current[selectedEntry.characterId],
+      }));
       setLastTradeStatus(
         `Opened ${direction.toLowerCase()} ${selectedEntry.name}`,
       );
@@ -958,7 +1067,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
       );
       await refreshChainState();
     } catch (tradeError) {
-      const message = getTradeErrorMessage(tradeError);
+      const message = `${tradeStage}: ${getTradeErrorMessage(tradeError)}`;
       setLastTradeStatus(message);
       toast.error(message, { id: txId });
     } finally {
@@ -976,12 +1085,13 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
     setLastTradeTx("-");
     toast.loading(`Closing ${selectedEntry.name} position`, { id: txId });
 
+    let tradeStage = "building transaction";
     try {
       const program = getProgram();
       const marketId = modelMarketIdFromCharacterId(selectedEntry.characterId);
       const closeSizeLamports = -toLamports(selectedPosition.signedSize);
 
-      const signature = await program.methods
+      const transaction = await program.methods
         .modifyPosition(
           marketId,
           new anchor.BN(0),
@@ -994,14 +1104,33 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
           trader: wallet.publicKey as PublicKey,
           systemProgram: SystemProgram.programId,
         })
-        .rpc();
+        .transaction();
+      transaction.feePayer = wallet.publicKey as PublicKey;
+      tradeStage = "fetching blockhash";
+      const latest = await getLatestBlockhashViaRpc(connection);
+      transaction.recentBlockhash = latest.blockhash;
+      const signTransaction = wallet.signTransaction;
+      if (!signTransaction) {
+        throw new Error("Wallet cannot sign transactions.");
+      }
+      tradeStage = "signing transaction";
+      const signed = await signTransaction(transaction);
+      tradeStage = "sending transaction";
+      const signature = await sendRawTransactionViaRpc(connection, signed);
+      tradeStage = "confirming transaction";
+      await confirmSignatureViaRpc(connection, signature);
 
+      setPositions((current) => {
+        const next = { ...current };
+        delete next[selectedEntry.characterId];
+        return next;
+      });
       setLastTradeStatus(`Closed ${selectedEntry.name} position`);
       setLastTradeTx(signature);
       toast.success(`Closed ${selectedEntry.name} position`, { id: txId });
       await refreshChainState();
     } catch (tradeError) {
-      const message = getTradeErrorMessage(tradeError);
+      const message = `${tradeStage}: ${getTradeErrorMessage(tradeError)}`;
       setLastTradeStatus(message);
       toast.error(message, { id: txId });
     } finally {

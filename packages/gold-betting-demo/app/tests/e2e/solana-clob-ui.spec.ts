@@ -31,6 +31,43 @@ async function readTxSignature(page: Page, testId: string): Promise<string> {
   return text;
 }
 
+async function gotoApp(page: Page): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    try {
+      await expect
+        .poll(
+          async () => {
+            const bodyText = (
+              (await page
+                .locator("body")
+                .textContent()
+                .catch(() => "")) || ""
+            )
+              .trim()
+              .toUpperCase();
+            if (
+              bodyText.includes("HYPERSCAPE DUEL ARENA") ||
+              bodyText.includes("ULTRA SIMPLE FIGHT BET")
+            ) {
+              return bodyText;
+            }
+            return "";
+          },
+          {
+            timeout: 20_000,
+            intervals: [500, 1_000, 2_000, 5_000],
+          },
+        )
+        .not.toBe("");
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await page.goto("about:blank");
+    }
+  }
+}
+
 async function waitForMatchValue(
   page: Page,
   expectedMatch = "",
@@ -200,28 +237,37 @@ async function openSolanaAdminPanel(page: Page): Promise<void> {
 }
 
 async function switchToSolanaChain(page: Page): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const markers = [
-          page.locator("#chain-selector").first(),
-          page.getByTestId("e2e-chain-select").first(),
-          page.locator(".chain-badge-name").first(),
-          page.getByTestId("solana-clob-panel").first(),
-        ];
-        for (const marker of markers) {
-          if (await marker.isVisible().catch(() => false)) {
-            return true;
-          }
-        }
-        return false;
-      },
-      {
-        timeout: 90_000,
-        intervals: [500, 1_000, 2_000, 5_000],
-      },
-    )
-    .toBe(true);
+  const markers = [
+    page.locator("#chain-selector").first(),
+    page.getByTestId("e2e-chain-select").first(),
+    page.locator(".chain-badge-name").first(),
+    page.getByTestId("solana-clob-panel").first(),
+  ];
+  let ready = false;
+  for (let attempt = 0; attempt < 3 && !ready; attempt += 1) {
+    try {
+      await expect
+        .poll(
+          async () => {
+            for (const marker of markers) {
+              if (await marker.isVisible().catch(() => false)) {
+                return true;
+              }
+            }
+            return false;
+          },
+          {
+            timeout: 30_000,
+            intervals: [500, 1_000, 2_000, 5_000],
+          },
+        )
+        .toBe(true);
+      ready = true;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await page.reload({ waitUntil: "domcontentloaded" });
+    }
+  }
 
   const debugActiveChain = page.getByTestId("e2e-active-chain");
   if (await debugActiveChain.isVisible().catch(() => false)) {
@@ -312,7 +358,7 @@ test("runs non-debug Solana CLOB UI E2E and validates txs", async ({
     "confirmed",
   );
 
-  await page.goto("/");
+  await gotoApp(page);
   await switchToSolanaChain(page);
 
   const expandButton = page.locator('button[title="Expand panel"]').first();

@@ -1,4 +1,4 @@
-import { defineConfig, type UserConfig } from "vite";
+import { defineConfig, loadEnv, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import * as path from "path";
 import * as fs from "fs";
@@ -8,7 +8,8 @@ import { createRequire } from "module";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ mode }) => {
+  const env = loadEnv(mode, __dirname, "");
   const plugins: any[] = [react()];
   const alias: Record<string, string> = {};
   const polyfillShimsPath = path.resolve(
@@ -194,11 +195,41 @@ export default defineConfig(async () => {
   };
   plugins.push(hlsPlugin);
 
+  const solanaRpcTarget = env.VITE_SOLANA_RPC_URL?.trim();
+  const solanaWsTarget = env.VITE_SOLANA_WS_URL?.trim();
+  const useLocalSolanaProxy =
+    Boolean(solanaRpcTarget) &&
+    /^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::\d+)?/i.test(
+      solanaRpcTarget,
+    );
+  const solanaProxyConfig = useLocalSolanaProxy
+    ? {
+        "/__solana/rpc": {
+          target: solanaRpcTarget,
+          changeOrigin: true,
+          secure: false,
+          rewrite: () => "/",
+        },
+        "/__solana/ws": {
+          target: solanaWsTarget || solanaRpcTarget,
+          changeOrigin: true,
+          secure: false,
+          ws: true,
+          rewrite: () => "/",
+        },
+      }
+    : undefined;
+
   const config: UserConfig = {
     plugins,
     server: {
       host: true,
       port: 4179,
+      proxy: solanaProxyConfig,
+    },
+    preview: {
+      host: true,
+      proxy: solanaProxyConfig,
     },
     resolve: {
       alias,

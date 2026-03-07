@@ -9,6 +9,7 @@ LEDGER_DIR="${E2E_SOLANA_LEDGER_DIR:-/tmp/hyperscape-gold-e2e-ledger}"
 VALIDATOR_LOG="$APP_DIR/.e2e-validator.log"
 ANVIL_LOG="$APP_DIR/.e2e-anvil.log"
 APP_LOG="$APP_DIR/.e2e-app.log"
+SOLANA_PROXY_LOG="$APP_DIR/.e2e-solana-proxy.log"
 PROGRAM_ORACLE_ID="A6utqr1N4KP3Tst2tMCqfJR4mhCRNw4M2uN3Nb6nPBcS"
 PROGRAM_MARKET_ID="GzwZKz1fku9sPVN8G3JdnLHTzGyPzW9MkgVfMcdJGc7e"
 PROGRAM_CLOB_ID="4phSkAVkbtGbQbrT3p2xjNPLAyw1DWz99wT7g4dQMyiX"
@@ -18,6 +19,9 @@ SOLANA_WS_PORT="${E2E_SOLANA_WS_PORT:-18900}"
 SOLANA_FAUCET_PORT="${E2E_SOLANA_FAUCET_PORT:-18901}"
 SOLANA_RPC_URL="http://127.0.0.1:${SOLANA_RPC_PORT}"
 SOLANA_WS_URL="ws://127.0.0.1:${SOLANA_WS_PORT}"
+SOLANA_PROXY_PORT="${E2E_SOLANA_PROXY_PORT:-$((20000 + RANDOM % 10000))}"
+SOLANA_PROXY_URL="http://127.0.0.1:${SOLANA_PROXY_PORT}"
+SOLANA_PROXY_WS_URL="ws://127.0.0.1:${SOLANA_PROXY_PORT}"
 SOLANA_MINT_AUTHORITY="${E2E_SOLANA_MINT_AUTHORITY:-DfEnrzh4cgnHxfuZRxLGX69fnLd9DP41XxGuE4gtyJpn}"
 ANVIL_PORT="${E2E_EVM_PORT:-8545}"
 # Always target the local anvil instance spawned by this script.
@@ -27,6 +31,7 @@ EVM_CHAIN_ID="${E2E_EVM_CHAIN_ID:-97}"
 VALIDATOR_PID=""
 ANVIL_PID=""
 APP_PID=""
+SOLANA_PROXY_PID=""
 
 cleanup() {
   if [[ -n "$APP_PID" ]] && kill -0 "$APP_PID" >/dev/null 2>&1; then
@@ -36,6 +41,10 @@ cleanup() {
   if [[ -n "$ANVIL_PID" ]] && kill -0 "$ANVIL_PID" >/dev/null 2>&1; then
     kill "$ANVIL_PID" >/dev/null 2>&1 || true
     wait "$ANVIL_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$SOLANA_PROXY_PID" ]] && kill -0 "$SOLANA_PROXY_PID" >/dev/null 2>&1; then
+    kill "$SOLANA_PROXY_PID" >/dev/null 2>&1 || true
+    wait "$SOLANA_PROXY_PID" >/dev/null 2>&1 || true
   fi
   if [[ -n "$VALIDATOR_PID" ]] && kill -0 "$VALIDATOR_PID" >/dev/null 2>&1; then
     kill "$VALIDATOR_PID" >/dev/null 2>&1 || true
@@ -49,6 +58,30 @@ wait_for_solana_rpc() {
     if curl -s -X POST "$SOLANA_RPC_URL" \
       -H "content-type: application/json" \
       -d '{"jsonrpc":"2.0","id":1,"method":"getLatestBlockhash","params":[{"commitment":"confirmed"}]}' | rg -q '"blockhash"'; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_solana_ws() {
+  for _ in {1..90}; do
+    if (exec 3<>"/dev/tcp/127.0.0.1/${SOLANA_WS_PORT}") >/dev/null 2>&1; then
+      exec 3>&-
+      exec 3<&-
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_solana_proxy() {
+  for _ in {1..90}; do
+    if curl -s -X POST "$SOLANA_PROXY_URL" \
+      -H "content-type: application/json" \
+      -d '{"jsonrpc":"2.0","id":1,"method":"getVersion"}' | rg -q '"solana-core"'; then
       return 0
     fi
     sleep 1
@@ -118,6 +151,8 @@ kill_listeners "$APP_PORT"
 kill_listeners "$SOLANA_RPC_PORT"
 kill_listeners "$SOLANA_WS_PORT"
 kill_listeners "$SOLANA_FAUCET_PORT"
+pkill -f "packages/gold-betting-demo/app/scripts/solana-rpc-proxy.mjs" >/dev/null 2>&1 || true
+kill_listeners "$SOLANA_PROXY_PORT"
 kill_listeners "$ANVIL_PORT"
 
 echo "[e2e] building anchor programs"
@@ -159,7 +194,26 @@ if ! wait_for_solana_rpc; then
   tail -n 80 "$VALIDATOR_LOG" || true
   exit 1
 fi
+if ! wait_for_solana_ws; then
+  echo "[e2e] validator websocket did not become ready"
+  tail -n 80 "$VALIDATOR_LOG" || true
+  exit 1
+fi
 sleep 2
+
+echo "[e2e] starting local solana rpc proxy"
+env \
+  SOLANA_RPC_TARGET="$SOLANA_RPC_URL" \
+  SOLANA_WS_TARGET="$SOLANA_WS_URL" \
+  SOLANA_PROXY_PORT="$SOLANA_PROXY_PORT" \
+  node "$APP_DIR/scripts/solana-rpc-proxy.mjs" >"$SOLANA_PROXY_LOG" 2>&1 &
+SOLANA_PROXY_PID="$!"
+
+if ! wait_for_solana_proxy; then
+  echo "[e2e] solana proxy did not become ready"
+  tail -n 80 "$SOLANA_PROXY_LOG" || true
+  exit 1
+fi
 
 echo "[e2e] starting local anvil"
 anvil \
@@ -183,6 +237,8 @@ run_with_retries \
   env \
     E2E_SOLANA_RPC_URL="$SOLANA_RPC_URL" \
     E2E_SOLANA_WS_URL="$SOLANA_WS_URL" \
+    E2E_BROWSER_SOLANA_RPC_URL="$SOLANA_PROXY_URL" \
+    E2E_BROWSER_SOLANA_WS_URL="$SOLANA_PROXY_WS_URL" \
     bun run "$APP_DIR/tests/e2e/setup-localnet.ts"
 
 echo "[e2e] seeding local evm state + extending .env.e2e"
