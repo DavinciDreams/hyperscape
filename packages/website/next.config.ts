@@ -1,7 +1,15 @@
 import type { NextConfig } from "next";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const projectRoot = dirname(fileURLToPath(import.meta.url));
+const workspaceRoot = resolve(projectRoot, "../..");
 
 const config: NextConfig = {
   output: "export",
+  turbopack: {
+    root: workspaceRoot,
+  },
   images: {
     unoptimized: true,
   },

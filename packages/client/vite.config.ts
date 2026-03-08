@@ -331,7 +331,7 @@ export default defineConfig(({ mode }) => {
         },
       },
       // Mobile optimization
-      chunkSizeWarningLimit: 2000, // Increase for large 3D assets
+      chunkSizeWarningLimit: 8000, // WebGPU/PhysX bundles are intentionally large until deeper splitting lands
       cssCodeSplit: true, // Split CSS for better caching
     },
 

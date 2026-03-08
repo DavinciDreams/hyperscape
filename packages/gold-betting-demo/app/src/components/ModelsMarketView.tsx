@@ -16,7 +16,7 @@ import { Toaster, toast } from "sonner";
 
 import goldPerpsIdl from "../idl/gold_perps_market.json";
 import { useChain } from "../lib/ChainContext";
-import { GAME_API_URL } from "../lib/config";
+import { CONFIG, GAME_API_URL } from "../lib/config";
 import {
   buildOracleHistoryLabel,
   modelMarketIdFromCharacterId,
@@ -34,7 +34,9 @@ import {
   sendRawTransactionViaRpc,
 } from "../lib/solanaRpc";
 
-const PROGRAM_ID = new PublicKey(goldPerpsIdl.address);
+const PROGRAM_ID = new PublicKey(
+  CONFIG.goldPerpsMarketProgramId || goldPerpsIdl.address,
+);
 const POLL_INTERVAL_MS = 5_000;
 const CHAIN_POLL_INTERVAL_MS = 6_000;
 const DEFAULT_SKEW_SCALE_SOL = 1_000_000;

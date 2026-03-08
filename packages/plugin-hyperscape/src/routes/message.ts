@@ -63,15 +63,8 @@ export const messageRoute: Route = {
         },
       };
 
-      // Compose state from the memory
-      const state = await runtime.composeState(memory);
-
       // Check if the agent should respond
-      const shouldRespondToMessage = await shouldRespond(
-        runtime,
-        memory,
-        state,
-      );
+      const shouldRespondToMessage = await shouldRespond(runtime, memory);
 
       if (!shouldRespondToMessage) {
         logger.debug("[MessageRoute] Agent chose not to respond");
@@ -82,6 +75,9 @@ export const messageRoute: Route = {
         });
         return;
       }
+
+      // Compose the full state only when we know the agent is responding.
+      const state = await runtime.composeState(memory);
 
       // Generate response using context
       const context = await composeContext({

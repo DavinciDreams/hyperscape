@@ -71,9 +71,14 @@
       "outputs": ["app/dist/**"],
       "cache": true
     },
-    "@hyperscape/solana-prediction-market#build": {
+    "gold-betting-demo-anchor#build": {
       "dependsOn": ["^build"],
       "outputs": ["target/**"],
+      "cache": true
+    },
+    "@hyperscape/solana-prediction-market#build": {
+      "dependsOn": ["^build"],
+      "outputs": [],
       "cache": true
     },
     "dev": {

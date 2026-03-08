@@ -48,6 +48,14 @@ interface PrioritizedHandler {
   subscriptionId: string;
 }
 
+interface PendingAsyncHandlerMetric {
+  label: string;
+  pending: number;
+  peakPending: number;
+  totalStarted: number;
+  lastStartedAt: number;
+}
+
 /**
  * Type-safe event bus for world-wide event communication
  */
@@ -69,6 +77,11 @@ export class EventBus extends EventEmitter {
    * Allows waiting for all async operations to complete before shutdown
    */
   private pendingAsyncHandlers: Set<Promise<unknown>> = new Set();
+  private pendingAsyncHandlerLabels = new Map<Promise<unknown>, string>();
+  private pendingAsyncHandlerMetrics = new Map<
+    string,
+    PendingAsyncHandlerMetric
+  >();
 
   /**
    * Priority-ordered handlers for each event type.
@@ -182,6 +195,7 @@ export class EventBus extends EventEmitter {
   ): EventSubscription {
     const subscriptionId = `sub-${++this.subscriptionCounter}`;
     let active = true;
+    const typeLabel = String(type);
 
     // Handle backwards compatibility
     const options =
@@ -201,7 +215,22 @@ export class EventBus extends EventEmitter {
 
       // Handle async handlers - track for graceful shutdown
       if (result instanceof Promise) {
+        const metric = this.pendingAsyncHandlerMetrics.get(typeLabel) ?? {
+          label: typeLabel,
+          pending: 0,
+          peakPending: 0,
+          totalStarted: 0,
+          lastStartedAt: 0,
+        };
+        metric.pending++;
+        metric.totalStarted++;
+        metric.lastStartedAt = Date.now();
+        if (metric.pending > metric.peakPending) {
+          metric.peakPending = metric.pending;
+        }
+        this.pendingAsyncHandlerMetrics.set(typeLabel, metric);
         this.pendingAsyncHandlers.add(result);
+        this.pendingAsyncHandlerLabels.set(result, typeLabel);
         result
           .catch((err) => {
             // Log error but don't crash - handlers should handle their own errors
@@ -209,6 +238,14 @@ export class EventBus extends EventEmitter {
           })
           .finally(() => {
             this.pendingAsyncHandlers.delete(result);
+            const label = this.pendingAsyncHandlerLabels.get(result);
+            if (label) {
+              this.pendingAsyncHandlerLabels.delete(result);
+              const pendingMetric = this.pendingAsyncHandlerMetrics.get(label);
+              if (pendingMetric) {
+                pendingMetric.pending = Math.max(0, pendingMetric.pending - 1);
+              }
+            }
           });
       }
 
@@ -429,6 +466,43 @@ export class EventBus extends EventEmitter {
   }
 
   /**
+   * Get pending async handler counts grouped by event type.
+   */
+  getPendingHandlerBreakdown(limit: number = 20): PendingAsyncHandlerMetric[] {
+    return Array.from(this.pendingAsyncHandlerMetrics.values())
+      .filter((metric) => metric.pending > 0)
+      .sort((a, b) => {
+        if (b.pending !== a.pending) {
+          return b.pending - a.pending;
+        }
+        if (b.peakPending !== a.peakPending) {
+          return b.peakPending - a.peakPending;
+        }
+        return b.totalStarted - a.totalStarted;
+      })
+      .slice(0, limit)
+      .map((metric) => ({ ...metric }));
+  }
+
+  /**
+   * Get async handler metrics grouped by event type, including completed paths.
+   */
+  getAsyncHandlerDiagnostics(limit: number = 20): PendingAsyncHandlerMetric[] {
+    return Array.from(this.pendingAsyncHandlerMetrics.values())
+      .sort((a, b) => {
+        if (b.totalStarted !== a.totalStarted) {
+          return b.totalStarted - a.totalStarted;
+        }
+        if (b.peakPending !== a.peakPending) {
+          return b.peakPending - a.peakPending;
+        }
+        return b.pending - a.pending;
+      })
+      .slice(0, limit)
+      .map((metric) => ({ ...metric }));
+  }
+
+  /**
    * Cleanup all subscriptions
    */
   cleanup(): void {
@@ -439,6 +513,8 @@ export class EventBus extends EventEmitter {
     this.prioritizedHandlers.clear();
     this.eventHistory.length = 0;
     this.pendingAsyncHandlers.clear();
+    this.pendingAsyncHandlerLabels.clear();
+    this.pendingAsyncHandlerMetrics.clear();
     this.removeAllListeners();
   }
 

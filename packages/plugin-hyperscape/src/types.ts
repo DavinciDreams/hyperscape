@@ -483,6 +483,7 @@ export interface HyperscapeServiceInterface {
   getPlayerEntity(): PlayerEntity | null;
   getNearbyEntities(): Entity[];
   getGameState(): GameStateCache;
+  getWorldMapSignature(): string | null;
 
   // Command execution
   executeMove(command: MoveToCommand): Promise<void>;

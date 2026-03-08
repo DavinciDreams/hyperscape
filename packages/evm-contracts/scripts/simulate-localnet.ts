@@ -1,6 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { TransactionResponse } from "ethers";
 import { ethers } from "hardhat";
+import { deployGoldClob } from "../typed-contracts";
 
 type Winner = "YES" | "NO";
 type Strategy =
@@ -200,22 +202,19 @@ async function main() {
     claimFailures: 0,
   };
 
-  const GoldClob = await ethers.getContractFactory("GoldClob");
-  const clob = await GoldClob.deploy(treasury.address, houseBidSigner.address);
+  const clob = await deployGoldClob(treasury.address, houseBidSigner.address);
   await clob.waitForDeployment();
   const clobAddress = await clob.getAddress();
   const tradeTreasuryFeeBps = BigInt(await clob.tradeTreasuryFeeBps());
   const tradeMarketMakerFeeBps = BigInt(await clob.tradeMarketMakerFeeBps());
 
-  async function sendTx(
-    txPromise: Promise<{
-      hash: string;
-      wait: () => Promise<{ status: bigint | number | null }>;
-    }>,
-  ) {
+  async function sendTx(txPromise: Promise<TransactionResponse>) {
     const tx = await txPromise;
     txHashes.push(tx.hash);
     const receipt = await tx.wait();
+    if (!receipt) {
+      throw new Error(`Missing transaction receipt: ${tx.hash}`);
+    }
     const status =
       typeof receipt.status === "bigint"
         ? Number(receipt.status)

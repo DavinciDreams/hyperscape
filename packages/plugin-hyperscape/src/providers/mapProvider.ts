@@ -21,6 +21,9 @@ import {
   populateKnownLocationsFromWorldMap,
 } from "./goalProvider.js";
 
+const MAP_PROVIDER_CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_MAP_PROVIDER_CACHE_ENTRIES = 128;
+
 /** Calculate 2D distance between player and a world position */
 function dist2D(px: number, pz: number, tx: number, tz: number): number {
   return Math.sqrt((tx - px) ** 2 + (tz - pz) ** 2);
@@ -42,18 +45,74 @@ function getDirection(px: number, pz: number, tx: number, tz: number): string {
   return "northeast";
 }
 
-/** Track the last world map we used to populate known locations */
+interface CachedMapProviderResult {
+  expiresAt: number;
+  playerPositionKey: string;
+  result: ProviderResult;
+  worldMapSignature: string;
+}
+
+const mapProviderCache = new Map<string, CachedMapProviderResult>();
 let lastWorldMapSignature: string | null = null;
 
-export function clearMapProviderCache(_agentId?: string): void {
+export function clearMapProviderCache(agentId?: string): void {
+  if (agentId) {
+    mapProviderCache.delete(agentId);
+    if (mapProviderCache.size === 0) {
+      lastWorldMapSignature = null;
+    }
+    return;
+  }
+
+  mapProviderCache.clear();
   lastWorldMapSignature = null;
+}
+
+function pruneMapProviderCache(now: number): void {
+  for (const [agentId, cached] of mapProviderCache) {
+    if (cached.expiresAt <= now) {
+      mapProviderCache.delete(agentId);
+    }
+  }
+
+  while (mapProviderCache.size > MAX_MAP_PROVIDER_CACHE_ENTRIES) {
+    const oldestAgentId = mapProviderCache.keys().next().value;
+    if (!oldestAgentId) {
+      break;
+    }
+    mapProviderCache.delete(oldestAgentId);
+  }
+}
+
+function getPlayerPositionXZ(playerPosition: unknown): {
+  x: number;
+  z: number;
+} {
+  if (Array.isArray(playerPosition) && playerPosition.length >= 3) {
+    return { x: playerPosition[0], z: playerPosition[2] };
+  }
+  if (
+    playerPosition &&
+    typeof playerPosition === "object" &&
+    "x" in playerPosition &&
+    "z" in playerPosition
+  ) {
+    const pos = playerPosition as { x: number; z: number };
+    return { x: pos.x, z: pos.z };
+  }
+  return { x: 0, z: 0 };
+}
+
+function getPlayerPositionKey(playerPosition: unknown): string {
+  const { x, z } = getPlayerPositionXZ(playerPosition);
+  return `${x.toFixed(2)}:${z.toFixed(2)}`;
 }
 
 export const mapProvider: Provider = {
   name: "worldMap",
   description:
     "Provides world map knowledge: towns, POIs, distances, and compass directions for navigation",
-  dynamic: false,
+  dynamic: true,
   position: 1, // Run after goalProvider
 
   get: async (
@@ -63,6 +122,7 @@ export const mapProvider: Provider = {
   ): Promise<ProviderResult> => {
     const service = runtime.getService<HyperscapeService>("hyperscapeService");
     if (!service?.isConnected()) {
+      clearMapProviderCache(runtime.agentId);
       return { text: "", values: {}, data: {} };
     }
 
@@ -71,6 +131,7 @@ export const mapProvider: Provider = {
       !worldMap ||
       (worldMap.towns.length === 0 && worldMap.pois.length === 0)
     ) {
+      clearMapProviderCache(runtime.agentId);
       return {
         text: "## World Map\nNo map data available yet.",
         values: { hasWorldMap: false },
@@ -78,7 +139,13 @@ export const mapProvider: Provider = {
       };
     }
 
-    const worldMapSignature = getWorldMapSignature(worldMap);
+    const now = Date.now();
+    pruneMapProviderCache(now);
+    const player = service.getPlayerEntity();
+    const playerPositionKey = getPlayerPositionKey(player?.position);
+    const worldMapSignature =
+      service.getWorldMapSignature?.() ?? getWorldMapSignature(worldMap);
+
     if (lastWorldMapSignature !== worldMapSignature) {
       populateKnownLocationsFromWorldMap(worldMap);
       lastWorldMapSignature = worldMapSignature;
@@ -87,12 +154,24 @@ export const mapProvider: Provider = {
       );
     }
 
-    // Get player position
-    const player = service.getPlayerEntity();
-    const px =
-      (player?.position as any)?.x ?? (player?.position as any)?.[0] ?? 0;
-    const pz =
-      (player?.position as any)?.z ?? (player?.position as any)?.[2] ?? 0;
+    const cached = mapProviderCache.get(runtime.agentId);
+    if (
+      cached &&
+      cached.expiresAt > now &&
+      cached.playerPositionKey === playerPositionKey &&
+      cached.worldMapSignature === worldMapSignature
+    ) {
+      cached.expiresAt = now + MAP_PROVIDER_CACHE_TTL_MS;
+      mapProviderCache.delete(runtime.agentId);
+      mapProviderCache.set(runtime.agentId, cached);
+      return cached.result;
+    }
+
+    if (cached && cached.expiresAt <= now) {
+      mapProviderCache.delete(runtime.agentId);
+    }
+
+    const { x: px, z: pz } = getPlayerPositionXZ(player?.position);
 
     // Format towns sorted by distance
     const townEntries = worldMap.towns
@@ -161,7 +240,7 @@ ${directionSummaries.join("\n")}
 
 Use EXPLORE with a direction (e.g., "EXPLORE north") or town/POI name (e.g., "EXPLORE toward ${townEntries[0]?.name || "town"}") to navigate to distant locations.`;
 
-    return {
+    const result: ProviderResult = {
       text,
       values: {
         hasWorldMap: true,
@@ -176,5 +255,14 @@ Use EXPLORE with a direction (e.g., "EXPLORE north") or town/POI name (e.g., "EX
         poiEntries: poiEntries.slice(0, 5),
       },
     };
+
+    mapProviderCache.set(runtime.agentId, {
+      expiresAt: now + MAP_PROVIDER_CACHE_TTL_MS,
+      playerPositionKey,
+      result,
+      worldMapSignature,
+    });
+
+    return result;
   },
 };

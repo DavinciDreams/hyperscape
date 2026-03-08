@@ -4,6 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "bash scripts/build-workspace.sh",
+    "deploy:devnet": "bash scripts/deploy-programs.sh devnet",
+    "deploy:testnet": "bash scripts/deploy-programs.sh testnet",
+    "deploy:mainnet": "bash scripts/deploy-programs.sh mainnet-beta",
     "lint:rust": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
     "test:rust": "cargo test --workspace",
     "audit": "bash scripts/run-cargo-audit.sh",

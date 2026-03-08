@@ -2,7 +2,6 @@
 
 use crate::error::ErrorCode;
 use crate::*;
-use solana_program::system_program;
 use std::ops::Deref;
 
 /// Type validating that the account is owned by the system program
@@ -22,7 +21,7 @@ impl<'info> SystemAccount<'info> {
 
     #[inline(never)]
     pub fn try_from(info: &'info AccountInfo<'info>) -> Result<SystemAccount<'info>> {
-        if *info.owner != system_program::ID {
+        if *info.owner != crate::system_program::ID {
             return Err(ErrorCode::AccountNotSystemOwned.into());
         }
         Ok(SystemAccount::new(info))

@@ -339,6 +339,7 @@ export default defineConfig(async ({ mode }) => {
     build: {
       outDir: "dist",
       sourcemap: env.VITE_BUILD_SOURCEMAP === "true",
+      chunkSizeWarningLimit: 3000,
     },
   };
 

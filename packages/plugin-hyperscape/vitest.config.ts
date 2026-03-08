@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
+    setupFiles: ["./vitest.setup.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
@@ -28,9 +29,23 @@ export default defineConfig({
     hookTimeout: 30000,
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-      "@hyperscape/shared": path.resolve(__dirname, "./src"),
-    },
+    alias: [
+      {
+        find: /^@hyperscape\/shared\/client$/,
+        replacement: path.resolve(__dirname, "../shared/src/index.client.ts"),
+      },
+      {
+        find: /^@hyperscape\/shared$/,
+        replacement: path.resolve(__dirname, "../shared/src/index.ts"),
+      },
+      {
+        find: /^@hyperscape\/shared\/(.*)$/,
+        replacement: path.resolve(__dirname, "../shared/src/$1"),
+      },
+      {
+        find: "@",
+        replacement: path.resolve(__dirname, "./src"),
+      },
+    ],
   },
 });

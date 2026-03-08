@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       target: "esnext", // Support top-level await
+      chunkSizeWarningLimit: 9000, // Asset tooling intentionally ships large WebGPU/PhysX chunks
     },
     resolve: {
       dedupe: ["react", "react-dom", "react/jsx-runtime", "three"],

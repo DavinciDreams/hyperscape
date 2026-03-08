@@ -3,6 +3,30 @@
  * which includes Three.js WebGPU code expecting browser APIs.
  */
 
+import "../shared/src/extras/three/webgpu-polyfills";
+import { vi } from "vitest";
+
+type TimerCompat = typeof vi & {
+  advanceTimersByTimeAsync?: (ms: number) => Promise<void>;
+  runAllTicks?: () => Promise<void> | void;
+};
+
+const viCompat = vi as TimerCompat;
+
+if (typeof viCompat.advanceTimersByTimeAsync !== "function") {
+  viCompat.advanceTimersByTimeAsync = async (ms: number) => {
+    vi.advanceTimersByTime(ms);
+    await Promise.resolve();
+  };
+}
+
+if (typeof viCompat.runAllTicks !== "function") {
+  viCompat.runAllTicks = async () => {
+    vi.runAllTimers();
+    await Promise.resolve();
+  };
+}
+
 // Mock WebGPU globals that Three.js WebGPU renderer expects
 if (typeof globalThis.GPUShaderStage === "undefined") {
   (globalThis as Record<string, unknown>).GPUShaderStage = {

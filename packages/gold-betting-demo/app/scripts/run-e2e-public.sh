@@ -7,8 +7,12 @@ ANCHOR_DIR="$DEMO_DIR/anchor"
 APP_PORT="${E2E_APP_PORT:-4182}"
 APP_LOG="$APP_DIR/.e2e-app-${E2E_CLUSTER:-mainnet-beta}.log"
 CLUSTER="${E2E_CLUSTER:-mainnet-beta}"
-DEFAULT_PUBLIC_ORACLE_ID="EW9GwxawnPEHA4eFgqd2oq9t55gSG4ReNqPRyG6Ui6PF"
-PROGRAM_ORACLE_ID="${VITE_FIGHT_ORACLE_PROGRAM_ID:-$DEFAULT_PUBLIC_ORACLE_ID}"
+ORACLE_KEYPAIR_PATH="$ANCHOR_DIR/target/deploy/fight_oracle-keypair.json"
+CLOB_KEYPAIR_PATH="$ANCHOR_DIR/target/deploy/gold_clob_market-keypair.json"
+PERPS_KEYPAIR_PATH="$ANCHOR_DIR/target/deploy/gold_perps_market-keypair.json"
+PROGRAM_ORACLE_ID="$(solana-keygen pubkey "$ORACLE_KEYPAIR_PATH")"
+PROGRAM_CLOB_ID="$(solana-keygen pubkey "$CLOB_KEYPAIR_PATH")"
+PROGRAM_PERPS_ID="$(solana-keygen pubkey "$PERPS_KEYPAIR_PATH")"
 
 APP_PID=""
 
@@ -61,28 +65,15 @@ deploy_testnet_programs_if_requested() {
     return 0
   fi
 
-  if account_exists testnet "$PROGRAM_ORACLE_ID"; then
+  if account_exists testnet "$PROGRAM_ORACLE_ID" \
+    && account_exists testnet "$PROGRAM_CLOB_ID" \
+    && account_exists testnet "$PROGRAM_PERPS_ID"; then
     echo "[e2e] testnet programs already deployed"
     return 0
   fi
 
-  echo "[e2e] testnet deploy requested, building anchor programs"
-  bun run --cwd "$ANCHOR_DIR" build >/tmp/gold-betting-demo-e2e-testnet-build.log 2>&1
-
-  local balance
-  balance="$(solana balance --url testnet | awk '{print $1}')"
-  if ! awk -v b="$balance" 'BEGIN { exit !(b + 0 >= 4) }'; then
-    echo "[e2e] testnet deploy requires at least ~4 SOL in deploy wallet."
-    echo "[e2e] current testnet balance: ${balance} SOL"
-    echo "[e2e] fund $(solana address) on testnet, then rerun with E2E_DEPLOY_TESTNET_PROGRAMS=true"
-    exit 1
-  fi
-
-  echo "[e2e] deploying oracle program to testnet"
-  solana program deploy \
-    --url testnet \
-    --program-id "$ANCHOR_DIR/target/deploy/fight_oracle-keypair.json" \
-    "$ANCHOR_DIR/target/deploy/fight_oracle.so"
+  echo "[e2e] testnet deploy requested, deploying all Solana betting programs"
+  bash "$ANCHOR_DIR/scripts/deploy-programs.sh" testnet
 }
 
 case "$CLUSTER" in

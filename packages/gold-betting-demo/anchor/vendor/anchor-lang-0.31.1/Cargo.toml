@@ -129,5 +129,12 @@ version = "1"
 [dependencies.solana-program]
 version = "2"
 
+[dependencies.solana-loader-v3-interface]
+version = "5.0.0"
+features = ["bincode"]
+
+[dependencies.solana-sdk-ids]
+version = "2.2.1"
+
 [dependencies.thiserror]
 version = "1"

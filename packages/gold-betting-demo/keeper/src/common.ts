@@ -15,6 +15,7 @@ import {
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import dotenv from "dotenv";
 
+import { resolveBettingSolanaDeployment } from "../../deployments";
 import fightOracleIdl from "./idl/fight_oracle.json";
 import goldClobMarketIdl from "./idl/gold_clob_market.json";
 import goldPerpsMarketIdl from "./idl/gold_perps_market.json";
@@ -35,6 +36,7 @@ const envClusterSuffix =
   configuredCluster === "mainnet" || configuredCluster === "mainnet-beta"
     ? "mainnet"
     : configuredCluster;
+const solanaDeployment = resolveBettingSolanaDeployment(configuredClusterRaw);
 
 // Load cluster-specific defaults first, then generic .env fallback.
 dotenv.config({ path: path.join(envRoot, `.env.${envClusterSuffix}`) });
@@ -135,6 +137,18 @@ function resolveProgramId(idlJson: unknown, fallback: string): PublicKey {
   return new PublicKey(address);
 }
 
+function resolveConfiguredProgramId(
+  configuredAddress: string | undefined,
+  idlJson: unknown,
+  fallback: string,
+): PublicKey {
+  const trimmedConfigured = configuredAddress?.trim() ?? "";
+  if (trimmedConfigured.length > 0) {
+    return new PublicKey(trimmedConfigured);
+  }
+  return resolveProgramId(idlJson, fallback);
+}
+
 function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
   const idlWithMaybeAddress = idlJson as Idl & { address?: string };
   return {
@@ -146,17 +160,20 @@ function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
   } as Idl;
 }
 
-export const FIGHT_ORACLE_PROGRAM_ID = resolveProgramId(
+export const FIGHT_ORACLE_PROGRAM_ID = resolveConfiguredProgramId(
+  process.env.FIGHT_ORACLE_PROGRAM_ID,
   fightOracleIdl,
-  "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
+  solanaDeployment.fightOracleProgramId,
 );
-export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveProgramId(
+export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
+  process.env.GOLD_CLOB_MARKET_PROGRAM_ID,
   goldClobMarketIdl,
-  "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
+  solanaDeployment.goldClobMarketProgramId,
 );
-export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveProgramId(
+export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
+  process.env.GOLD_PERPS_MARKET_PROGRAM_ID,
   goldPerpsMarketIdl,
-  "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik",
+  solanaDeployment.goldPerpsMarketProgramId,
 );
 
 /** @deprecated Binary market is no longer deployed. Retained for backward compat. */

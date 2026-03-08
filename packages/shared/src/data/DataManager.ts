@@ -564,9 +564,14 @@ export class DataManager {
    * Uses packages/server/world/assets/manifests/ directory
    */
   private async loadManifestsFromFilesystem(): Promise<void> {
-    // Dynamic import for Node.js modules (not available in browser)
-    const fs = await import("fs/promises");
-    const path = await import("path");
+    const fsModuleId = "node:fs/promises";
+    const pathModuleId = "node:path";
+    const fs = (await import(
+      /* @vite-ignore */ fsModuleId
+    )) as typeof import("node:fs/promises");
+    const path = (await import(
+      /* @vite-ignore */ pathModuleId
+    )) as typeof import("node:path");
 
     // Check if we're in a TEST environment where manifests might not exist
     // NOTE: CI=true is often set by CI/CD platforms AND production deployments (Railway)

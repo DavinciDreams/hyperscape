@@ -6,8 +6,8 @@ DEMO_DIR="$(cd "$APP_DIR/.." && pwd)"
 ANCHOR_DIR="$DEMO_DIR/anchor"
 LEDGER_DIR="$ANCHOR_DIR/.local-demo-ledger"
 VALIDATOR_LOG="$APP_DIR/.local-demo-validator.log"
-PROGRAM_ORACLE_ID="A6utqr1N4KP3Tst2tMCqfJR4mhCRNw4M2uN3Nb6nPBcS"
-PROGRAM_CLOB_ID="4phSkAVkbtGbQbrT3p2xjNPLAyw1DWz99wT7g4dQMyiX"
+PROGRAM_ORACLE_ID="6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
+PROGRAM_CLOB_ID="ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi"
 APP_PORT="${APP_PORT:-4179}"
 RPC_URL="http://127.0.0.1:8899"
 
@@ -51,6 +51,15 @@ kill_listeners 8899
 
 echo "[local-demo] building anchor programs"
 bun run --cwd "$ANCHOR_DIR" build >/tmp/gold-betting-demo-local-build.log 2>&1
+
+IDL_ORACLE_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/fight_oracle.json" 2>/dev/null || true)"
+IDL_CLOB_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/gold_clob_market.json" 2>/dev/null || true)"
+if [[ -n "$IDL_ORACLE_ID" && "$IDL_ORACLE_ID" != "null" ]]; then
+  PROGRAM_ORACLE_ID="$IDL_ORACLE_ID"
+fi
+if [[ -n "$IDL_CLOB_ID" && "$IDL_CLOB_ID" != "null" ]]; then
+  PROGRAM_CLOB_ID="$IDL_CLOB_ID"
+fi
 
 echo "[local-demo] starting local validator"
 rm -rf "$LEDGER_DIR"

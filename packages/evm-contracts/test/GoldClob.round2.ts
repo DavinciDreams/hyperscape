@@ -1,12 +1,12 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { deployGoldClob } from "../typed-contracts";
 
 describe("GoldClob — Round 2 Security Fixes", function () {
   async function deployFixture() {
     const [owner, attacker, maker, taker, treasury] = await ethers.getSigners();
 
-    const GoldClob = await ethers.getContractFactory("GoldClob");
-    const clob = await GoldClob.deploy(treasury.address, owner.address);
+    const clob = await deployGoldClob(treasury.address, owner.address);
     await clob.waitForDeployment();
 
     return { clob, owner, attacker, maker, taker, treasury };
@@ -74,7 +74,7 @@ describe("GoldClob — Round 2 Security Fixes", function () {
         .connect(taker)
         .placeOrder(1, false, 500, 100, { value: takerValue });
       const receipt = await tx.wait();
-      const gasCost = receipt!.gasUsed * receipt!.gasPrice;
+      const gasCost = BigInt(receipt!.gasUsed) * BigInt(receipt!.gasPrice);
 
       const takerBalAfter = await ethers.provider.getBalance(taker.address);
 

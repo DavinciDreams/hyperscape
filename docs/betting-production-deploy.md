@@ -104,7 +104,6 @@ Cloudflare Pages headers/SPA rules are already added in:
 Deployment metadata:
 
 - `build-info.json` is emitted into `dist/` on every build and should be served with `Cache-Control: no-store`.
-
 ## 5) Verify production
 
 Health:
