@@ -4,16 +4,21 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEMO_DIR="$(cd "$APP_DIR/.." && pwd)"
 ANCHOR_DIR="$DEMO_DIR/anchor"
+KEEPER_DIR="$DEMO_DIR/keeper"
 EVM_DIR="$(cd "$DEMO_DIR/../evm-contracts" && pwd)"
 LEDGER_DIR="${E2E_SOLANA_LEDGER_DIR:-/tmp/hyperscape-gold-e2e-ledger}"
 VALIDATOR_LOG="$APP_DIR/.e2e-validator.log"
 ANVIL_LOG="$APP_DIR/.e2e-anvil.log"
 APP_LOG="$APP_DIR/.e2e-app.log"
 SOLANA_PROXY_LOG="$APP_DIR/.e2e-solana-proxy.log"
+KEEPER_LOG="$APP_DIR/.e2e-keeper.log"
 PROGRAM_ORACLE_ID="A6utqr1N4KP3Tst2tMCqfJR4mhCRNw4M2uN3Nb6nPBcS"
 PROGRAM_MARKET_ID="GzwZKz1fku9sPVN8G3JdnLHTzGyPzW9MkgVfMcdJGc7e"
 PROGRAM_CLOB_ID="4phSkAVkbtGbQbrT3p2xjNPLAyw1DWz99wT7g4dQMyiX"
 APP_PORT="${E2E_APP_PORT:-4181}"
+GAME_API_PORT="${E2E_GAME_API_PORT:-5555}"
+GAME_API_URL="http://127.0.0.1:${GAME_API_PORT}"
+KEEPER_DB_PATH="${E2E_KEEPER_DB_PATH:-$APP_DIR/.e2e-keeper.sqlite}"
 SOLANA_RPC_PORT="${E2E_SOLANA_RPC_PORT:-18899}"
 SOLANA_WS_PORT="${E2E_SOLANA_WS_PORT:-18900}"
 SOLANA_FAUCET_PORT="${E2E_SOLANA_FAUCET_PORT:-18901}"
@@ -32,11 +37,16 @@ VALIDATOR_PID=""
 ANVIL_PID=""
 APP_PID=""
 SOLANA_PROXY_PID=""
+KEEPER_PID=""
 
 cleanup() {
   if [[ -n "$APP_PID" ]] && kill -0 "$APP_PID" >/dev/null 2>&1; then
     kill "$APP_PID" >/dev/null 2>&1 || true
     wait "$APP_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$KEEPER_PID" ]] && kill -0 "$KEEPER_PID" >/dev/null 2>&1; then
+    kill "$KEEPER_PID" >/dev/null 2>&1 || true
+    wait "$KEEPER_PID" >/dev/null 2>&1 || true
   fi
   if [[ -n "$ANVIL_PID" ]] && kill -0 "$ANVIL_PID" >/dev/null 2>&1; then
     kill "$ANVIL_PID" >/dev/null 2>&1 || true
@@ -148,12 +158,14 @@ kill_listeners() {
 }
 
 kill_listeners "$APP_PORT"
+kill_listeners "$GAME_API_PORT"
 kill_listeners "$SOLANA_RPC_PORT"
 kill_listeners "$SOLANA_WS_PORT"
 kill_listeners "$SOLANA_FAUCET_PORT"
 pkill -f "packages/gold-betting-demo/app/scripts/solana-rpc-proxy.mjs" >/dev/null 2>&1 || true
 kill_listeners "$SOLANA_PROXY_PORT"
 kill_listeners "$ANVIL_PORT"
+rm -f "$KEEPER_DB_PATH" "${KEEPER_DB_PATH}-shm" "${KEEPER_DB_PATH}-wal"
 
 echo "[e2e] building anchor programs"
 bun run --cwd "$ANCHOR_DIR" build >/tmp/gold-betting-demo-e2e-build.log 2>&1
@@ -250,8 +262,37 @@ run_with_retries \
     E2E_EVM_CHAIN_ID="$EVM_CHAIN_ID" \
     bun run "$APP_DIR/tests/e2e/setup-evm-local.ts"
 
+echo "[e2e] seeding keeper database"
+env \
+  KEEPER_DB_PATH="$KEEPER_DB_PATH" \
+  bun run "$APP_DIR/tests/e2e/setup-api-local.ts"
+
+echo "[e2e] starting keeper api on :$GAME_API_PORT"
+env \
+  PORT="$GAME_API_PORT" \
+  KEEPER_DB_PATH="$KEEPER_DB_PATH" \
+  ENABLE_KEEPER_BOT=false \
+  bun run --cwd "$KEEPER_DIR" service >"$KEEPER_LOG" 2>&1 &
+KEEPER_PID="$!"
+
+if ! wait_for_app "$GAME_API_URL/status"; then
+  echo "[e2e] keeper api did not become ready"
+  tail -n 80 "$KEEPER_LOG" || true
+  exit 1
+fi
+
+echo "[e2e] seeding keeper live api state"
+env \
+  E2E_GAME_API_URL="$GAME_API_URL" \
+  bun run "$APP_DIR/tests/e2e/seed-api-local.ts"
+
 echo "[e2e] starting app on :$APP_PORT"
-bun run --cwd "$APP_DIR" dev --mode e2e --port "$APP_PORT" --strictPort >"$APP_LOG" 2>&1 &
+(
+  cd "$APP_DIR"
+  env \
+    VITE_GAME_API_URL="$GAME_API_URL" \
+    ./node_modules/.bin/vite --mode e2e --port "$APP_PORT" --strictPort
+) >"$APP_LOG" 2>&1 &
 APP_PID="$!"
 
 if ! wait_for_app "http://127.0.0.1:$APP_PORT/"; then
@@ -262,4 +303,5 @@ fi
 
 echo "[e2e] running playwright tests"
 E2E_BASE_URL="http://127.0.0.1:$APP_PORT" \
+E2E_GAME_API_URL="$GAME_API_URL" \
   bunx playwright test --config "$APP_DIR/tests/e2e/playwright.config.ts" "$@"

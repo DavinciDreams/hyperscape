@@ -24,6 +24,13 @@ export const DEFAULT_MIN_MARGIN = SOL(0.1);
 export const DEFAULT_MAX_LEVERAGE = 5;
 export const DEFAULT_MAINTENANCE_MARGIN_BPS = 500;
 export const DEFAULT_LIQUIDATION_FEE_BPS = 100;
+export const DEFAULT_TRADE_TREASURY_FEE_BPS = 25;
+export const DEFAULT_TRADE_MARKET_MAKER_FEE_BPS = 25;
+export const PERPS_STATUS_ACTIVE = 0;
+export const PERPS_STATUS_CLOSE_ONLY = 1;
+export const PERPS_STATUS_ARCHIVED = 2;
+export const TOTAL_TRADE_FEE_BPS =
+  DEFAULT_TRADE_TREASURY_FEE_BPS + DEFAULT_TRADE_MARKET_MAKER_FEE_BPS;
 export const DEFAULT_STALE_WAIT_MS = Number(
   process.env.GOLD_PERPS_TEST_STALE_WAIT_MS ||
     String((DEFAULT_MAX_ORACLE_STALENESS_SECONDS + 2) * 1_000),
@@ -49,6 +56,12 @@ export function num(value: anchor.BN | number | bigint): number {
 
 export function uniqueMarketId(baseMarketId: number): number {
   return baseMarketId + TEST_RUN_OFFSET;
+}
+
+export function tradeFeeLamports(sizeDeltaLamports: number): number {
+  return Math.floor(
+    (Math.abs(sizeDeltaLamports) * TOTAL_TRADE_FEE_BPS) / 10_000,
+  );
 }
 
 export function deriveProgramDataAddress(programId: PublicKey): PublicKey {
@@ -148,6 +161,8 @@ export async function ensurePerpsConfig(
   await program.methods
     .initializeConfig(
       keeperAuthority,
+      authority.publicKey,
+      authority.publicKey,
       toBn(DEFAULT_SKEW_SCALE),
       toBn(DEFAULT_FUNDING_VELOCITY),
       new anchor.BN(DEFAULT_MAX_ORACLE_STALENESS_SECONDS),
@@ -155,6 +170,8 @@ export async function ensurePerpsConfig(
       toBn(DEFAULT_MIN_MARGIN),
       DEFAULT_MAINTENANCE_MARGIN_BPS,
       DEFAULT_LIQUIDATION_FEE_BPS,
+      DEFAULT_TRADE_TREASURY_FEE_BPS,
+      DEFAULT_TRADE_MARKET_MAKER_FEE_BPS,
     )
     .accountsPartial({
       config,

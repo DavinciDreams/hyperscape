@@ -7,11 +7,15 @@ import { createPublicClient, http, type Address } from "viem";
 
 import { createPrograms, findMarketPda, readKeypair } from "./common";
 import {
+  deleteIdentityMembers,
   loadAll,
+  loadPerpsMarkets,
   loadPerpsOracleSnapshots,
   saveBet,
+  savePointsEvent,
   saveWalletDisplay,
   saveWalletPoints,
+  saveWalletGoldState,
   saveWalletCanonical,
   saveIdentityMembers,
   saveInviteCode,
@@ -51,6 +55,28 @@ type WalletPoints = {
   referralPoints: number;
   stakingPoints: number;
 };
+
+type PointsEventRecord = {
+  id: number;
+  wallet: string;
+  eventType: string;
+  status: string;
+  totalPoints: number;
+  referenceType: string | null;
+  referenceId: string | null;
+  relatedWallet: string | null;
+  createdAt: number;
+};
+
+type WalletGoldState = {
+  goldBalance: number;
+  goldHoldDays: number;
+  updatedAt: number;
+};
+
+type PointsWindow = "alltime" | "daily" | "weekly" | "monthly";
+
+type MultiplierTier = "NONE" | "BRONZE" | "SILVER" | "GOLD" | "DIAMOND";
 
 type ParserState = {
   enabled: boolean;
@@ -187,6 +213,8 @@ const _db = loadAll(BET_STORE_LIMIT);
 const bets: BetRecord[] = _db.bets;
 const walletDisplay: Map<string, string> = _db.walletDisplay;
 const pointsByWallet: Map<string, WalletPoints> = _db.pointsByWallet;
+const pointsEvents: PointsEventRecord[] = _db.pointsEvents;
+const walletGoldState: Map<string, WalletGoldState> = _db.walletGoldState;
 const canonicalByWallet: Map<string, string> = _db.canonicalByWallet;
 const identityMembers: Map<string, Set<string>> = _db.identityMembers;
 const inviteCodeByWallet: Map<string, string> = _db.inviteCodeByWallet;
@@ -291,6 +319,20 @@ function ensureWalletPoints(wallet: string): WalletPoints {
   return pointsByWallet.get(normalized)!;
 }
 
+function ensureWalletGoldState(wallet: string): WalletGoldState {
+  const normalized = rememberWalletCase(wallet);
+  if (!walletGoldState.has(normalized)) {
+    const initial: WalletGoldState = {
+      goldBalance: 0,
+      goldHoldDays: 0,
+      updatedAt: Date.now(),
+    };
+    walletGoldState.set(normalized, initial);
+    saveWalletGoldState(normalized, initial);
+  }
+  return walletGoldState.get(normalized)!;
+}
+
 function ensureIdentity(wallet: string): string {
   const normalized = rememberWalletCase(wallet);
   const existingCanonical = canonicalByWallet.get(normalized);
@@ -326,9 +368,7 @@ function mergeIdentity(walletA: string, walletB: string): boolean {
   identityMembers.set(mergedCanonical, mergedMembers);
   saveIdentityMembers(mergedCanonical, mergedMembers);
   identityMembers.delete(obsoleteCanonical);
-  // Remove obsolete canonical's rows (saveIdentityMembers deletes + re-inserts,
-  // so removing from the map is sufficient; the old rows were already cleared
-  // when we persisted mergedCanonical above).
+  deleteIdentityMembers(obsoleteCanonical);
   return true;
 }
 
@@ -363,6 +403,195 @@ function aggregatePoints(wallets: string[]): WalletPoints {
     },
     { selfPoints: 0, winPoints: 0, referralPoints: 0, stakingPoints: 0 },
   );
+}
+
+function recordPointsEvent(
+  event: Omit<PointsEventRecord, "id">,
+): PointsEventRecord {
+  const normalizedWallet = rememberWalletCase(event.wallet);
+  const normalizedRelatedWallet = event.relatedWallet
+    ? rememberWalletCase(event.relatedWallet)
+    : null;
+  const payload = {
+    ...event,
+    wallet: normalizedWallet,
+    relatedWallet: normalizedRelatedWallet,
+  };
+  const id = savePointsEvent(payload);
+  const record: PointsEventRecord = { id, ...payload };
+  pointsEvents.unshift(record);
+  return record;
+}
+
+function readPointsWindow(rawValue: string | null): PointsWindow {
+  switch (rawValue?.toLowerCase()) {
+    case "daily":
+      return "daily";
+    case "weekly":
+      return "weekly";
+    case "monthly":
+      return "monthly";
+    default:
+      return "alltime";
+  }
+}
+
+function startOfTodayMs(now = Date.now()): number {
+  const date = new Date(now);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function startOfWeekMs(now = Date.now()): number {
+  const date = new Date(now);
+  date.setHours(0, 0, 0, 0);
+  const day = date.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  date.setDate(date.getDate() - diff);
+  return date.getTime();
+}
+
+function startOfMonthMs(now = Date.now()): number {
+  const date = new Date(now);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(1);
+  return date.getTime();
+}
+
+function pointsWindowStartMs(window: PointsWindow): number | null {
+  switch (window) {
+    case "daily":
+      return startOfTodayMs();
+    case "weekly":
+      return startOfWeekMs();
+    case "monthly":
+      return startOfMonthMs();
+    case "alltime":
+    default:
+      return null;
+  }
+}
+
+function totalPointsFromEvents(
+  wallets: Set<string>,
+  window: PointsWindow,
+): number {
+  const windowStart = pointsWindowStartMs(window);
+  return pointsEvents.reduce((sum, event) => {
+    if (!wallets.has(event.wallet)) return sum;
+    if (windowStart != null && event.createdAt < windowStart) return sum;
+    return sum + event.totalPoints;
+  }, 0);
+}
+
+function aggregateGoldState(wallets: string[]): WalletGoldState {
+  return wallets.reduce<WalletGoldState>(
+    (acc, wallet) => {
+      const goldState = ensureWalletGoldState(wallet);
+      acc.goldBalance += goldState.goldBalance;
+      acc.goldHoldDays = Math.max(acc.goldHoldDays, goldState.goldHoldDays);
+      acc.updatedAt = Math.max(acc.updatedAt, goldState.updatedAt);
+      return acc;
+    },
+    { goldBalance: 0, goldHoldDays: 0, updatedAt: 0 },
+  );
+}
+
+function multiplierDetailForWallets(wallets: string[]): {
+  multiplier: number;
+  tier: MultiplierTier;
+  nextTierThreshold: number | null;
+  goldBalance: string;
+  goldHoldDays: number;
+} {
+  const aggregate = aggregateGoldState(wallets);
+  const balance = aggregate.goldBalance;
+  const holdDays = aggregate.goldHoldDays;
+
+  if (balance >= 1_000_000) {
+    const multiplier = holdDays >= 10 ? 4 : 3;
+    return {
+      multiplier,
+      tier: holdDays >= 10 ? "DIAMOND" : "GOLD",
+      nextTierThreshold: null,
+      goldBalance: String(Math.round(balance)),
+      goldHoldDays: holdDays,
+    };
+  }
+
+  if (balance >= 100_000) {
+    return {
+      multiplier: 2,
+      tier: "SILVER",
+      nextTierThreshold: 1_000_000,
+      goldBalance: String(Math.round(balance)),
+      goldHoldDays: holdDays,
+    };
+  }
+
+  if (balance >= 1_000) {
+    return {
+      multiplier: 1,
+      tier: "BRONZE",
+      nextTierThreshold: 100_000,
+      goldBalance: String(Math.round(balance)),
+      goldHoldDays: holdDays,
+    };
+  }
+
+  return {
+    multiplier: 1,
+    tier: "NONE",
+    nextTierThreshold: 1_000,
+    goldBalance: String(Math.round(balance)),
+    goldHoldDays: holdDays,
+  };
+}
+
+function leaderboardRows(
+  scope: string | null,
+  window: PointsWindow,
+): Array<{ wallet: string; totalPoints: number }> {
+  const useLinked = scope?.toLowerCase() === "linked";
+
+  if (useLinked) {
+    const rows = [...identityMembers.entries()].map(([canonical, members]) => {
+      const memberList = [...members];
+      const total =
+        window === "alltime" && pointsEvents.length === 0
+          ? totalPoints(aggregatePoints(memberList))
+          : totalPointsFromEvents(new Set(memberList), window);
+      return {
+        wallet: displayWallet(canonical),
+        totalPoints: total,
+      };
+    });
+    return rows
+      .filter((entry) => entry.totalPoints > 0)
+      .sort(
+        (left, right) =>
+          right.totalPoints - left.totalPoints ||
+          left.wallet.localeCompare(right.wallet),
+      );
+  }
+
+  const rows = [...pointsByWallet.keys()].map((wallet) => {
+    const total =
+      window === "alltime" && pointsEvents.length === 0
+        ? totalPoints(ensureWalletPoints(wallet))
+        : totalPointsFromEvents(new Set([wallet]), window);
+    return {
+      wallet: displayWallet(wallet),
+      totalPoints: total,
+    };
+  });
+  return rows
+    .filter((entry) => entry.totalPoints > 0)
+    .sort(
+      (left, right) =>
+        right.totalPoints - left.totalPoints ||
+        left.wallet.localeCompare(right.wallet),
+    );
 }
 
 function inviteCodeForWallet(wallet: string): string {
@@ -520,6 +749,76 @@ function handlePerpsOracleHistory(req: Request, url: URL): Response {
       marketId,
       snapshots,
       updatedAt: Date.now(),
+    },
+    200,
+    {
+      "cache-control": "no-store",
+    },
+  );
+}
+
+function handlePerpsMarkets(req: Request): Response {
+  return jsonResponse(
+    req,
+    {
+      markets: loadPerpsMarkets().map((market) => ({
+        characterId: market.agentId,
+        marketId: market.marketId,
+        rank: market.rank,
+        name: market.name,
+        provider: market.provider,
+        model: market.model,
+        wins: market.wins,
+        losses: market.losses,
+        winRate: market.winRate,
+        combatLevel: market.combatLevel,
+        currentStreak: market.currentStreak,
+        status: market.status,
+        lastSeenAt: market.lastSeenAt,
+        deprecatedAt: market.deprecatedAt,
+        updatedAt: market.updatedAt,
+      })),
+      updatedAt: Date.now(),
+    },
+    200,
+    {
+      "cache-control": "no-store",
+    },
+  );
+}
+
+function handleDuelContext(req: Request): Response {
+  return jsonResponse(
+    req,
+    {
+      type: "STREAMING_DUEL_CONTEXT",
+      cycle: streamState.cycle,
+      leaderboard: streamState.leaderboard,
+      cameraTarget: streamState.cameraTarget,
+      updatedAt: streamState.emittedAt,
+    },
+    200,
+    {
+      "cache-control": "no-store",
+    },
+  );
+}
+
+function handleStreamingLeaderboardDetails(req: Request, url: URL): Response {
+  const historyLimit = parseBoundedInteger(
+    url.searchParams.get("historyLimit"),
+    10,
+    1,
+    100,
+  );
+  return jsonResponse(
+    req,
+    {
+      leaderboard: streamState.leaderboard,
+      cycle: streamState.cycle,
+      recentDuels: [],
+      historyLimit,
+      updatedAt: streamState.emittedAt,
     },
     200,
     {
@@ -959,6 +1258,7 @@ function pointsForWalletResponse(
 ): Record<string, any> {
   const wallets = identityWallets(wallet, scope);
   const aggregate = aggregatePoints(wallets);
+  const multiplierDetail = multiplierDetailForWallets(wallets);
   const normalized = rememberWalletCase(wallet);
   const referredBy = getReferralOwner(normalized);
 
@@ -971,9 +1271,9 @@ function pointsForWalletResponse(
     winPoints: aggregate.winPoints,
     referralPoints: aggregate.referralPoints,
     stakingPoints: aggregate.stakingPoints,
-    multiplier: 1,
-    goldBalance: null,
-    goldHoldDays: 0,
+    multiplier: multiplierDetail.multiplier,
+    goldBalance: multiplierDetail.goldBalance,
+    goldHoldDays: multiplierDetail.goldHoldDays,
     invitedWalletCount: (
       invitedWalletsByWallet.get(ensureIdentity(normalized)) ?? new Set()
     ).size,
@@ -990,29 +1290,11 @@ function leaderboardResponse(
   limit: number,
   offset: number,
   scope: string | null,
+  window: PointsWindow,
 ): {
   leaderboard: Array<{ rank: number; wallet: string; totalPoints: number }>;
 } {
-  const useLinked = scope?.toLowerCase() === "linked";
-
-  let rows: Array<{ wallet: string; totalPoints: number }>;
-  if (useLinked) {
-    rows = [];
-    for (const [canonical, members] of identityMembers.entries()) {
-      const aggregate = aggregatePoints([...members]);
-      rows.push({
-        wallet: displayWallet(canonical),
-        totalPoints: totalPoints(aggregate),
-      });
-    }
-  } else {
-    rows = [...pointsByWallet.entries()].map(([wallet, points]) => ({
-      wallet: displayWallet(wallet),
-      totalPoints: totalPoints(points),
-    }));
-  }
-
-  rows.sort((a, b) => b.totalPoints - a.totalPoints);
+  const rows = leaderboardRows(scope, window);
   const sliced = rows.slice(offset, offset + limit);
   return {
     leaderboard: sliced.map((row, index) => ({
@@ -1020,6 +1302,73 @@ function leaderboardResponse(
       wallet: row.wallet,
       totalPoints: row.totalPoints,
     })),
+  };
+}
+
+function rankResponse(wallet: string): Record<string, any> {
+  const normalized = rememberWalletCase(wallet);
+  const canonical = ensureIdentity(normalized);
+  const rows = leaderboardRows("linked", "alltime");
+  const rank =
+    rows.findIndex((entry) => normalizeWallet(entry.wallet) === canonical) + 1;
+  const wallets = identityWallets(normalized, "linked");
+
+  return {
+    wallet: displayWallet(canonical),
+    rank: rank > 0 ? rank : 0,
+    totalPoints: totalPoints(aggregatePoints(wallets)),
+  };
+}
+
+function historyResponse(
+  wallet: string,
+  limit: number,
+  offset: number,
+  eventType: string | null,
+): Record<string, any> {
+  const normalized = rememberWalletCase(wallet);
+  const wallets = new Set(identityWallets(normalized, "linked"));
+  const filtered = pointsEvents.filter((entry) => {
+    if (!wallets.has(entry.wallet)) return false;
+    if (eventType && entry.eventType !== eventType) return false;
+    return true;
+  });
+
+  const entries = filtered.slice(offset, offset + limit).map((entry) => ({
+    id: entry.id,
+    wallet: displayWallet(entry.wallet),
+    eventType: entry.eventType,
+    status: entry.status,
+    totalPoints: entry.totalPoints,
+    referenceType: entry.referenceType,
+    referenceId: entry.referenceId,
+    relatedWallet: entry.relatedWallet
+      ? displayWallet(entry.relatedWallet)
+      : entry.wallet !== normalized
+        ? displayWallet(entry.wallet)
+        : null,
+    createdAt: entry.createdAt,
+  }));
+
+  return {
+    wallet: wallet.trim(),
+    entries,
+    total: filtered.length,
+    limit,
+    offset,
+  };
+}
+
+function multiplierResponse(wallet: string): Record<string, any> {
+  const wallets = identityWallets(wallet, "linked");
+  const detail = multiplierDetailForWallets(wallets);
+  return {
+    wallet: wallet.trim(),
+    multiplier: detail.multiplier,
+    tier: detail.tier,
+    nextTierThreshold: detail.nextTierThreshold,
+    goldBalance: detail.goldBalance,
+    goldHoldDays: detail.goldHoldDays,
   };
 }
 
@@ -1047,6 +1396,7 @@ async function handleBetRecord(req: Request): Promise<Response> {
   const sourceAmount = parseNumberInput(payload.sourceAmount, 0);
   const goldAmount = parseNumberInput(payload.goldAmount, sourceAmount);
   const feeBps = Math.max(0, parseNumberInput(payload.feeBps, 0));
+  const recordedAt = Date.now();
 
   const normalizedWallet = rememberWalletCase(walletRaw);
   ensureIdentity(normalizedWallet);
@@ -1055,12 +1405,29 @@ async function handleBetRecord(req: Request): Promise<Response> {
     1,
     Math.round(Math.max(goldAmount, sourceAmount) * 10),
   );
+  const record: BetRecord = {
+    id: `${recordedAt}-${Math.random().toString(36).slice(2, 10)}`,
+    bettorWallet: displayWallet(normalizedWallet),
+    chain: chainValue,
+    sourceAsset: String(payload.sourceAsset || "GOLD"),
+    sourceAmount,
+    goldAmount,
+    feeBps,
+    txSignature: String(payload.txSignature || ""),
+    marketPda: payload.marketPda ? String(payload.marketPda) : null,
+    inviteCode: null,
+    externalBetRef: payload.externalBetRef
+      ? String(payload.externalBetRef)
+      : null,
+    recordedAt,
+  };
   points.selfPoints += pointsAwarded;
   saveWalletPoints(normalizedWallet, points);
 
   const inviteCodeRaw = String(payload.inviteCode || "")
     .trim()
     .toUpperCase();
+  record.inviteCode = inviteCodeRaw || null;
   if (inviteCodeRaw && !referredByWallet.has(normalizedWallet)) {
     const inviter = walletByInviteCode.get(inviteCodeRaw);
     if (inviter && inviter !== normalizedWallet) {
@@ -1075,6 +1442,17 @@ async function handleBetRecord(req: Request): Promise<Response> {
       saveInvitedWallet(inviter, normalizedWallet);
     }
   }
+
+  recordPointsEvent({
+    wallet: normalizedWallet,
+    eventType: "BET_PLACED",
+    status: "CONFIRMED",
+    totalPoints: pointsAwarded,
+    referenceType: "BET",
+    referenceId: record.externalBetRef ?? record.txSignature ?? record.id,
+    relatedWallet: null,
+    createdAt: record.recordedAt,
+  });
 
   const referrer = getReferralOwner(normalizedWallet);
   if (referrer && referrer.wallet !== normalizedWallet) {
@@ -1094,24 +1472,17 @@ async function handleBetRecord(req: Request): Promise<Response> {
     referralFeeShareGoldByWallet.set(referrer.wallet, newFeeShare);
     treasuryFeesFromReferralsByWallet.set(referrer.wallet, newTreasuryFees);
     saveReferralFees(referrer.wallet, newFeeShare, newTreasuryFees);
+    recordPointsEvent({
+      wallet: referrer.wallet,
+      eventType: "REFERRAL_WIN",
+      status: "CONFIRMED",
+      totalPoints: referralPointsAwarded,
+      referenceType: "BET",
+      referenceId: record.externalBetRef ?? record.txSignature ?? record.id,
+      relatedWallet: normalizedWallet,
+      createdAt: record.recordedAt,
+    });
   }
-
-  const record: BetRecord = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-    bettorWallet: displayWallet(normalizedWallet),
-    chain: chainValue,
-    sourceAsset: String(payload.sourceAsset || "GOLD"),
-    sourceAmount,
-    goldAmount,
-    feeBps,
-    txSignature: String(payload.txSignature || ""),
-    marketPda: payload.marketPda ? String(payload.marketPda) : null,
-    inviteCode: inviteCodeRaw || null,
-    externalBetRef: payload.externalBetRef
-      ? String(payload.externalBetRef)
-      : null,
-    recordedAt: Date.now(),
-  };
   bets.unshift(record);
   if (bets.length > BET_STORE_LIMIT) {
     bets.length = BET_STORE_LIMIT;
@@ -1187,6 +1558,31 @@ async function handleInviteRedeem(req: Request): Promise<Response> {
   const walletPts = ensureWalletPoints(wallet);
   walletPts.selfPoints += signupBonus;
   saveWalletPoints(wallet, walletPts);
+  recordPointsEvent({
+    wallet,
+    eventType: "SIGNUP_REFEREE",
+    status: "CONFIRMED",
+    totalPoints: signupBonus,
+    referenceType: "INVITE",
+    referenceId: inviteCode,
+    relatedWallet: inviterWallet,
+    createdAt: Date.now(),
+  });
+
+  const referrerSignupBonus = 25;
+  const referrerPoints = ensureWalletPoints(inviterWallet);
+  referrerPoints.referralPoints += referrerSignupBonus;
+  saveWalletPoints(inviterWallet, referrerPoints);
+  recordPointsEvent({
+    wallet: inviterWallet,
+    eventType: "SIGNUP_REFERRER",
+    status: "CONFIRMED",
+    totalPoints: referrerSignupBonus,
+    referenceType: "INVITE",
+    referenceId: inviteCode,
+    relatedWallet: wallet,
+    createdAt: Date.now(),
+  });
 
   return jsonResponse(req, {
     result: {
@@ -1227,6 +1623,16 @@ async function handleWalletLink(req: Request): Promise<Response> {
     const walletPts = ensureWalletPoints(wallet);
     walletPts.selfPoints += awardedPoints;
     saveWalletPoints(wallet, walletPts);
+    recordPointsEvent({
+      wallet,
+      eventType: "WALLET_LINK",
+      status: "CONFIRMED",
+      totalPoints: awardedPoints,
+      referenceType: "IDENTITY",
+      referenceId: `${wallet}:${linkedWallet}`,
+      relatedWallet: linkedWallet,
+      createdAt: Date.now(),
+    });
   }
 
   return jsonResponse(req, {
@@ -1250,6 +1656,13 @@ function inviteSummary(
   const invitedWallets = [...invited].map((entry) => displayWallet(entry));
   const feeShare = referralFeeShareGoldByWallet.get(canonical) ?? 0;
   const treasuryFees = treasuryFeesFromReferralsByWallet.get(canonical) ?? 0;
+  const inviteWallets = new Set(identityWallets(wallet, "linked"));
+  const totalReferralWinPoints = pointsEvents
+    .filter(
+      (entry) =>
+        inviteWallets.has(entry.wallet) && entry.eventType === "REFERRAL_WIN",
+    )
+    .reduce((sum, entry) => sum + entry.totalPoints, 0);
 
   return {
     wallet: displayWallet(wallet),
@@ -1265,7 +1678,7 @@ function inviteSummary(
     referredByCode: referredBy ? referredBy.code : null,
     activeReferralCount: invitedWallets.length,
     pendingSignupBonuses: 0,
-    totalReferralWinPoints: 0,
+    totalReferralWinPoints,
   };
 }
 
@@ -1521,6 +1934,20 @@ const server = Bun.serve({
 
     if (
       req.method === "GET" &&
+      url.pathname === "/api/streaming/duel-context"
+    ) {
+      return handleDuelContext(req);
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/streaming/leaderboard/details"
+    ) {
+      return handleStreamingLeaderboardDetails(req, url);
+    }
+
+    if (
+      req.method === "GET" &&
       url.pathname === "/api/streaming/state/events"
     ) {
       const stream = new ReadableStream<Uint8Array>({
@@ -1574,6 +2001,7 @@ const server = Bun.serve({
         limit,
         offset,
         url.searchParams.get("scope"),
+        readPointsWindow(url.searchParams.get("window")),
       );
       return jsonResponse(req, {
         ...payload,
@@ -1584,6 +2012,72 @@ const server = Bun.serve({
 
     if (req.method === "GET" && url.pathname === "/api/perps/oracle-history") {
       return handlePerpsOracleHistory(req, url);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/perps/markets") {
+      return handlePerpsMarkets(req);
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname.startsWith("/api/arena/points/rank/")
+    ) {
+      const wallet = decodeURIComponent(
+        url.pathname.replace("/api/arena/points/rank/", ""),
+      );
+      if (!wallet) {
+        return jsonResponse(req, { error: "Wallet is required" }, 400);
+      }
+      return jsonResponse(req, rankResponse(wallet), 200, {
+        "cache-control": "no-store",
+      });
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname.startsWith("/api/arena/points/history/")
+    ) {
+      const wallet = decodeURIComponent(
+        url.pathname.replace("/api/arena/points/history/", ""),
+      );
+      if (!wallet) {
+        return jsonResponse(req, { error: "Wallet is required" }, 400);
+      }
+      const limit = parseBoundedInteger(
+        url.searchParams.get("limit"),
+        15,
+        1,
+        100,
+      );
+      const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
+      return jsonResponse(
+        req,
+        historyResponse(
+          wallet,
+          limit,
+          offset,
+          url.searchParams.get("eventType"),
+        ),
+        200,
+        {
+          "cache-control": "no-store",
+        },
+      );
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname.startsWith("/api/arena/points/multiplier/")
+    ) {
+      const wallet = decodeURIComponent(
+        url.pathname.replace("/api/arena/points/multiplier/", ""),
+      );
+      if (!wallet) {
+        return jsonResponse(req, { error: "Wallet is required" }, 400);
+      }
+      return jsonResponse(req, multiplierResponse(wallet), 200, {
+        "cache-control": "no-store",
+      });
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/arena/points/")) {

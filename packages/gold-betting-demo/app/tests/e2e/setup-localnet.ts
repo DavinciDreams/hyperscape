@@ -455,6 +455,8 @@ async function main(): Promise<void> {
     await perps.methods
       .initializeConfig(
         authority.publicKey,
+        authority.publicKey,
+        authority.publicKey,
         lamportsBn(1_000_000),
         new BN(1_000),
         new BN(E2E_PERPS_MAX_ORACLE_STALENESS_SECONDS),
@@ -462,6 +464,8 @@ async function main(): Promise<void> {
         lamportsBn(0.01),
         1_000,
         200,
+        25,
+        25,
       )
       .accountsPartial({
         config: perpsConfigPda,

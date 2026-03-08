@@ -3,13 +3,14 @@ import { ethers } from "hardhat";
 
 describe("GoldClob", function () {
   async function deployFixture() {
-    const [owner, maker, taker, treasury] = await ethers.getSigners();
+    const [owner, marketMaker, maker, taker, treasury] =
+      await ethers.getSigners();
 
     const GoldClob = await ethers.getContractFactory("GoldClob");
-    const clob = await GoldClob.deploy(treasury.address, owner.address);
+    const clob = await GoldClob.deploy(treasury.address, marketMaker.address);
     await clob.waitForDeployment();
 
-    return { clob, owner, maker, taker, treasury };
+    return { clob, owner, marketMaker, maker, taker, treasury };
   }
 
   it("Should create a match", async function () {
@@ -43,5 +44,59 @@ describe("GoldClob", function () {
 
     expect(posMaker.yesShares).to.equal(10n);
     expect(posTaker.noShares).to.equal(10n);
+  });
+
+  it("routes trade fees to treasury and market maker, then routes claim fees to the market maker", async function () {
+    const { clob, maker, taker, treasury, marketMaker, owner } =
+      await deployFixture();
+    await clob.connect(owner).createMatch();
+
+    const amount = 10_000n;
+    const price = 600;
+    const tradeTreasuryFeeBps = await clob.tradeTreasuryFeeBps();
+    const tradeMarketMakerFeeBps = await clob.tradeMarketMakerFeeBps();
+    const winningsMarketMakerFeeBps = await clob.winningsMarketMakerFeeBps();
+
+    const makerCost = (amount * 400n) / 1000n;
+    const makerTreasuryFee = (makerCost * tradeTreasuryFeeBps) / 10_000n;
+    const makerMmFee = (makerCost * tradeMarketMakerFeeBps) / 10_000n;
+    const takerCost = (amount * 600n) / 1000n;
+    const takerTreasuryFee = (takerCost * tradeTreasuryFeeBps) / 10_000n;
+    const takerMmFee = (takerCost * tradeMarketMakerFeeBps) / 10_000n;
+
+    const treasuryBefore = await ethers.provider.getBalance(treasury.address);
+    const marketMakerBefore = await ethers.provider.getBalance(
+      marketMaker.address,
+    );
+
+    await clob.connect(maker).placeOrder(1, false, price, amount, {
+      value: makerCost + makerTreasuryFee + makerMmFee,
+    });
+    await clob.connect(taker).placeOrder(1, true, price, amount, {
+      value: takerCost + takerTreasuryFee + takerMmFee,
+    });
+
+    const treasuryAfterTrades = await ethers.provider.getBalance(
+      treasury.address,
+    );
+    const marketMakerAfterTrades = await ethers.provider.getBalance(
+      marketMaker.address,
+    );
+
+    expect(treasuryAfterTrades - treasuryBefore).to.equal(
+      makerTreasuryFee + takerTreasuryFee,
+    );
+    expect(marketMakerAfterTrades - marketMakerBefore).to.equal(
+      makerMmFee + takerMmFee,
+    );
+
+    await clob.connect(owner).resolveMatch(1, 1);
+    await clob.connect(taker).claim(1);
+
+    const marketMakerAfterClaim = await ethers.provider.getBalance(
+      marketMaker.address,
+    );
+    const claimFee = (amount * winningsMarketMakerFeeBps) / 10_000n;
+    expect(marketMakerAfterClaim - marketMakerAfterTrades).to.equal(claimFee);
   });
 });

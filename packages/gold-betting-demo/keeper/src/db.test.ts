@@ -59,4 +59,46 @@ describe("keeper db persistence", () => {
       },
     ]);
   });
+
+  test("stores canonical perps market registry rows", async () => {
+    const db = await import(`./db.ts?case=${Date.now()}-markets`);
+
+    db.savePerpsMarket({
+      agentId: "gpt-4.1",
+      marketId: 42,
+      rank: 1,
+      name: "GPT 4.1",
+      provider: "OpenAI",
+      model: "gpt-4.1",
+      wins: 12,
+      losses: 3,
+      winRate: 80,
+      combatLevel: 99,
+      currentStreak: 4,
+      status: "ACTIVE",
+      lastSeenAt: 1_700_000_000_000,
+      deprecatedAt: null,
+      updatedAt: 1_700_000_000_500,
+    });
+
+    expect(db.loadPerpsMarkets()).toEqual([
+      {
+        agentId: "gpt-4.1",
+        marketId: 42,
+        rank: 1,
+        name: "GPT 4.1",
+        provider: "OpenAI",
+        model: "gpt-4.1",
+        wins: 12,
+        losses: 3,
+        winRate: 80,
+        combatLevel: 99,
+        currentStreak: 4,
+        status: "ACTIVE",
+        lastSeenAt: 1_700_000_000_000,
+        deprecatedAt: null,
+        updatedAt: 1_700_000_000_500,
+      },
+    ]);
+  });
 });
