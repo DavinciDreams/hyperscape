@@ -90,9 +90,10 @@ module.exports = {
                 STREAM_CAPTURE_DISABLE_WEBGPU: "false",
                 FFMPEG_PATH: "/usr/bin/ffmpeg",
                 DUEL_DISABLE_BRIDGE_CAPTURE: "false",
-                YOUTUBE_STREAM_URL:
-                    process.env.YOUTUBE_STREAM_URL ||
-                    "rtmp://a.rtmp.youtube.com/live2",
+                TWITCH_STREAM_URL:
+                    process.env.TWITCH_STREAM_URL ||
+                    "rtmp://live.twitch.tv/app",
+                YOUTUBE_STREAM_URL: process.env.YOUTUBE_STREAM_URL || "",
                 DUEL_FORCE_WEBGL_FALLBACK: "false",
                 GAME_URL: "http://localhost:3333/?page=stream",
                 GAME_FALLBACK_URLS:
