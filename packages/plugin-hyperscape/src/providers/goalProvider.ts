@@ -110,6 +110,53 @@ function setKnownLocationPosition(
   };
 }
 
+export function getWorldMapSignature(worldMap: WorldMapData): string {
+  return JSON.stringify({
+    towns: worldMap.towns.map((town) => [
+      town.name,
+      town.size,
+      town.biome,
+      town.position.x,
+      town.position.y,
+      town.position.z,
+      town.buildings.map((building) => building.type),
+    ]),
+    pois: worldMap.pois.map((poi) => [
+      poi.name,
+      poi.category,
+      poi.biome,
+      poi.position.x,
+      poi.position.y,
+      poi.position.z,
+    ]),
+    resources: (worldMap.resources ?? []).map((resource) => [
+      resource.type,
+      resource.resourceId,
+      resource.areaId,
+      resource.position.x,
+      resource.position.y,
+      resource.position.z,
+    ]),
+    stations: (worldMap.stations ?? []).map((station) => [
+      station.id,
+      station.type,
+      station.areaId,
+      station.position.x,
+      station.position.y,
+      station.position.z,
+    ]),
+    npcs: (worldMap.npcs ?? []).map((npc) => [
+      npc.id,
+      npc.type,
+      npc.name ?? "",
+      npc.areaId,
+      npc.position.x,
+      npc.position.y,
+      npc.position.z,
+    ]),
+  });
+}
+
 /**
  * Populate KNOWN_LOCATIONS from world map data (towns, POIs, resources, stations, NPCs).
  * Called once by mapProvider when world data first arrives from the server.

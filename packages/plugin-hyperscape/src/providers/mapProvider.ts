@@ -43,6 +43,10 @@ function getDirection(px: number, pz: number, tx: number, tz: number): string {
 /** Track whether we've populated locations already */
 let locationsPopulated = false;
 
+export function clearMapProviderCache(_agentId?: string): void {
+  locationsPopulated = false;
+}
+
 export const mapProvider: Provider = {
   name: "worldMap",
   description:
