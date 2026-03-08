@@ -17,6 +17,7 @@ import type { EmbeddedHyperscapeService } from "../eliza/EmbeddedHyperscapeServi
 import type { EmbeddedGameState } from "../eliza/types";
 import { type AgentRuntime, ModelType } from "@elizaos/core";
 import { errMsg } from "../shared/errMsg";
+import { duelLogDebug, duelLogInfo } from "../eliza/logging.js";
 
 export interface DuelCombatConfig {
   healThresholdPct: number;
@@ -298,7 +299,7 @@ export class DuelCombatAI {
         Math.random() * (AMBIENT_TAUNT_MAX_TICKS - AMBIENT_TAUNT_MIN_TICKS),
       );
 
-    console.log(`[DuelCombatAI] Started combat against ${this.opponentId}`);
+    duelLogInfo("DuelCombatAI", `Started combat against ${this.opponentId}`);
 
     // Fire an opening taunt immediately when the fight starts
     this.fireTrashTalk(
@@ -313,8 +314,9 @@ export class DuelCombatAI {
     if (!this.isRunning) return;
     this.isRunning = false;
 
-    console.log(
-      `[DuelCombatAI] Stopped after ${this.tickCount} ticks. ` +
+    duelLogInfo(
+      "DuelCombatAI",
+      `Stopped after ${this.tickCount} ticks. ` +
         `Attacks: ${this.attacksLanded}, Heals: ${this.healsUsed}, ` +
         `Dmg dealt: ${this.totalDamageDealt}, Dmg received: ${this.totalDamageReceived}`,
     );
@@ -510,8 +512,9 @@ export class DuelCombatAI {
       this.lastFoodUseTime = Date.now();
       return true;
     } catch (err) {
-      console.debug(
-        `[DuelCombatAI] Heal failed (${food.itemId}):`,
+      duelLogDebug(
+        "DuelCombatAI",
+        `Heal failed (${food.itemId}):`,
         errMsg(err),
       );
       return false;
@@ -541,8 +544,9 @@ export class DuelCombatAI {
       await this.service.executeUse(potion.itemId);
       return true;
     } catch (err) {
-      console.debug(
-        `[DuelCombatAI] Buff failed (${potion.itemId}):`,
+      duelLogDebug(
+        "DuelCombatAI",
+        `Buff failed (${potion.itemId}):`,
         errMsg(err),
       );
       return false;
@@ -595,8 +599,9 @@ export class DuelCombatAI {
         this.strategyPlanned = true;
       })
       .catch((err) => {
-        console.debug(
-          `[DuelCombatAI] Background strategy planning failed:`,
+        duelLogDebug(
+          "DuelCombatAI",
+          "Background strategy planning failed:",
           err instanceof Error ? err.message : String(err),
         );
       })
@@ -688,13 +693,15 @@ export class DuelCombatAI {
               : this.strategy.switchDefensiveAt,
           reasoning: parsed.reasoning || "",
         };
-        console.log(
-          `[DuelCombatAI] Strategy planned: ${this.strategy.approach}, style=${this.strategy.attackStyle}, prayer=${this.strategy.prayer}, eat@${this.strategy.foodThreshold}%`,
+        duelLogDebug(
+          "DuelCombatAI",
+          `Strategy planned: ${this.strategy.approach}, style=${this.strategy.attackStyle}, prayer=${this.strategy.prayer}, eat@${this.strategy.foodThreshold}%`,
         );
       }
     } catch (err) {
-      console.debug(
-        `[DuelCombatAI] Strategy planning failed, keeping current:`,
+      duelLogDebug(
+        "DuelCombatAI",
+        "Strategy planning failed, keeping current:",
         errMsg(err),
       );
     }
@@ -728,7 +735,7 @@ export class DuelCombatAI {
           await this.service.executeChangeStyle("defensive");
           this.currentStyle = "defensive";
         } catch (err) {
-          console.debug(`[DuelCombatAI] Style switch failed:`, errMsg(err));
+          duelLogDebug("DuelCombatAI", "Style switch failed:", errMsg(err));
         }
       }
       return;
@@ -755,7 +762,7 @@ export class DuelCombatAI {
         await this.service.executeChangeStyle(desiredStyle);
         this.currentStyle = desiredStyle;
       } catch (err) {
-        console.debug(`[DuelCombatAI] Style switch failed:`, errMsg(err));
+        duelLogDebug("DuelCombatAI", "Style switch failed:", errMsg(err));
       }
     }
   }
@@ -797,7 +804,7 @@ export class DuelCombatAI {
         await this.activatePrayer(offPrayer);
       }
     } catch (err) {
-      console.debug(`[DuelCombatAI] Prayer switch failed:`, errMsg(err));
+      duelLogDebug("DuelCombatAI", "Prayer switch failed:", errMsg(err));
     }
   }
 
@@ -837,7 +844,7 @@ export class DuelCombatAI {
       await this.service.executeChangeStyle(desiredStyle);
       this.currentStyle = desiredStyle;
     } catch (err) {
-      console.debug(`[DuelCombatAI] Style switch failed:`, errMsg(err));
+      duelLogDebug("DuelCombatAI", "Style switch failed:", errMsg(err));
     }
   }
 
@@ -1130,7 +1137,7 @@ export class DuelCombatAI {
       void this.service.executeMove([targetX, ownPos[1], targetZ], run);
       this.lastMoveTime = now;
     } catch (err) {
-      console.debug(`[DuelCombatAI] Move failed:`, errMsg(err));
+      duelLogDebug("DuelCombatAI", "Move failed:", errMsg(err));
     }
   }
 
@@ -1164,7 +1171,7 @@ export class DuelCombatAI {
         this._lastEngageTick = this.tickCount;
         if (needsEngagement) this.attacksLanded++;
       } catch (err) {
-        console.debug(`[DuelCombatAI] Attack failed:`, errMsg(err));
+        duelLogDebug("DuelCombatAI", "Attack failed:", errMsg(err));
       }
     }
   }

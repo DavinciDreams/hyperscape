@@ -168,6 +168,50 @@ const FALLBACK_PACKET_NAMES: Record<number, string> = Object.fromEntries(
   Object.entries(FALLBACK_PACKET_IDS).map(([name, id]) => [id, name]),
 ) as Record<number, string>;
 
+type AgentLogLevel = "debug" | "info" | "warn" | "error";
+
+const AGENT_LOG_LEVEL_PRIORITY: Record<AgentLogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
+function isAgentLogLevelEnabled(level: AgentLogLevel): boolean {
+  const configuredLevel = (
+    process.env.DUEL_AGENT_LOG_LEVEL ||
+    process.env.DUEL_LOG_LEVEL ||
+    process.env.LOG_LEVEL ||
+    process.env.DEFAULT_LOG_LEVEL ||
+    (process.env.NODE_ENV === "production" ? "warn" : "info")
+  )
+    .trim()
+    .toLowerCase();
+  const normalizedLevel =
+    configuredLevel === "debug" ||
+    configuredLevel === "info" ||
+    configuredLevel === "warn" ||
+    configuredLevel === "error"
+      ? configuredLevel
+      : process.env.NODE_ENV === "production"
+        ? "warn"
+        : "info";
+  return (
+    AGENT_LOG_LEVEL_PRIORITY[level] >= AGENT_LOG_LEVEL_PRIORITY[normalizedLevel]
+  );
+}
+
+function safeSerializeLogData(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+const AGENT_INFO_LOGS_ENABLED = isAgentLogLevelEnabled("info");
+const AGENT_DEBUG_LOGS_ENABLED = isAgentLogLevelEnabled("debug");
+
 function getRuntimeSettingString(
   runtime: IAgentRuntime,
   key: string,
@@ -318,6 +362,24 @@ export class HyperscapeService
   }> = [];
   private static readonly LOCAL_CHAT_BUFFER_SIZE = 10;
   private static readonly LOCAL_CHAT_RADIUS = 50; // 50m
+  private static readonly QUEST_LIST_REQUEST_MIN_INTERVAL_MS = 3_000;
+  private static readonly BANK_STATE_REQUEST_MIN_INTERVAL_MS = 5_000;
+  private static readonly REQUEST_IN_FLIGHT_TIMEOUT_MS = 15_000;
+  private static readonly GOAL_SYNC_MIN_INTERVAL_MS = 2_000;
+  private static readonly THOUGHT_SYNC_MIN_INTERVAL_MS = 1_500;
+  private static readonly THOUGHT_DUPLICATE_WINDOW_MS = 10_000;
+  private static readonly MAX_THOUGHT_SYNC_CHARS = 400;
+
+  private lastQuestListRequestAt = 0;
+  private questListRequestInFlight = false;
+  private lastBankStateRequestAt = 0;
+  private bankStateRequestInFlight = false;
+  private lastGoalSyncAt = 0;
+  private lastGoalSyncSignature: string | null = null;
+  private lastThoughtSyncAt = 0;
+  private lastThoughtSyncSignature: string | null = null;
+  private thoughtSequence = 0;
+  private clientReadySent = false;
 
   constructor(runtime?: IAgentRuntime) {
     super(runtime);
@@ -1282,6 +1344,7 @@ Respond with ONLY the action name, nothing else.`;
 
     // Reset snapshot flag for new connection
     this.hasReceivedSnapshot = false;
+    this.clientReadySent = false;
 
     return new Promise((resolve, reject) => {
       // Connection timeout - fail fast to avoid hitting ElizaOS's 30s service registration timeout
@@ -1694,6 +1757,9 @@ Respond with ONLY the action name, nothing else.`;
 
     this.connectionState.connected = false;
     this.connectionState.connecting = false;
+    this.questListRequestInFlight = false;
+    this.bankStateRequestInFlight = false;
+    this.clientReadySent = false;
 
     // Restore auto-reconnect setting for future manual connects
     this.autoReconnect = wasAutoReconnect;
@@ -1805,23 +1871,24 @@ Respond with ONLY the action name, nothing else.`;
       this.updateGameStateFromPacket(packetName, packetData);
 
       // Debug logging for chatAdded packets
-      if (packetName === "chatAdded") {
-        logger.info(
-          `[HyperscapeService] 💬 Received chatAdded packet:`,
-          JSON.stringify(packetData),
+      if (packetName === "chatAdded" && AGENT_DEBUG_LOGS_ENABLED) {
+        logger.debug(
+          `[HyperscapeService] 💬 Received chatAdded packet: ${safeSerializeLogData(packetData)}`,
         );
       }
 
       // Broadcast to registered event handlers
       const eventType = this.packetNameToEventType(packetName);
       if (eventType) {
-        if (packetName === "chatAdded") {
-          logger.info(`[HyperscapeService] 📢 Broadcasting CHAT_MESSAGE event`);
+        if (packetName === "chatAdded" && AGENT_DEBUG_LOGS_ENABLED) {
+          logger.debug(
+            "[HyperscapeService] 📢 Broadcasting CHAT_MESSAGE event",
+          );
         }
         // Debug: Log entityRemoved packets
-        if (packetName === "entityRemoved") {
-          logger.info(
-            `[HyperscapeService] 🗑️ entityRemoved packet received: ${JSON.stringify(packetData)}, lastRemovedEntity: ${this._lastRemovedEntity?.name || "none"}`,
+        if (packetName === "entityRemoved" && AGENT_DEBUG_LOGS_ENABLED) {
+          logger.debug(
+            `[HyperscapeService] 🗑️ entityRemoved packet received: ${safeSerializeLogData(packetData)}, lastRemovedEntity: ${this._lastRemovedEntity?.name || "none"}`,
           );
         }
         this.broadcastEvent(eventType, packetData);
@@ -2230,11 +2297,19 @@ Respond with ONLY the action name, nothing else.`;
             );
           }
 
+          if (!this.clientReadySent) {
+            this.sendCommand("clientReady", {});
+            this.clientReadySent = true;
+            logger.debug(
+              "[HyperscapeService] Sent clientReady after player spawn",
+            );
+          }
+
           // Request quest list now that the player has spawned in the world.
           // Server needs socket.player to be set (which happens during enterWorld)
           // so this is the earliest safe point to request quests.
           this.requestQuestList();
-          logger.info(
+          logger.debug(
             `[HyperscapeService] 📜 Requested quest list after player spawn`,
           );
         } else if (data && data.id) {
@@ -2356,7 +2431,7 @@ Respond with ONLY the action name, nothing else.`;
             );
             if (normalizedPos) {
               this.gameState.playerEntity.position = normalizedPos;
-              logger.info(
+              logger.debug(
                 `[HyperscapeService] 📍 Player position updated: [${normalizedPos[0].toFixed(0)}, ${normalizedPos[2].toFixed(0)}]`,
               );
             }
@@ -2448,7 +2523,7 @@ Respond with ONLY the action name, nothing else.`;
           }
           Object.assign(this.gameState.playerEntity, invData);
           this.gameState.inventoryUpdatedAt = Date.now();
-          logger.info(
+          logger.debug(
             `[HyperscapeService] 📦 Inventory updated: ${invData.items?.length || 0} items`,
           );
         }
@@ -2467,9 +2542,7 @@ Respond with ONLY the action name, nothing else.`;
           if (equipData.equipment) {
             this.gameState.playerEntity.equipment =
               equipData.equipment as typeof this.gameState.playerEntity.equipment;
-            logger.info(
-              `[HyperscapeService] ⚔️ Equipment updated: ${JSON.stringify(equipData.equipment)}`,
-            );
+            logger.debug("[HyperscapeService] ⚔️ Equipment updated");
           }
         }
         break;
@@ -2493,7 +2566,7 @@ Respond with ONLY the action name, nothing else.`;
             );
             if (normalizedPos) {
               this.gameState.playerEntity.position = normalizedPos;
-              logger.info(
+              logger.debug(
                 `[HyperscapeService] 📍 Player position via ${packetName}: [${normalizedPos[0].toFixed(0)}, ${normalizedPos[2].toFixed(0)}]`,
               );
 
@@ -2532,7 +2605,7 @@ Respond with ONLY the action name, nothing else.`;
               current: healthData.health,
               max: healthData.maxHealth ?? savedHealth?.max ?? 100,
             };
-            logger.info(
+            logger.debug(
               `[HyperscapeService] 🏥 Health update via ${packetName}: ${normalizedHealth.current}/${normalizedHealth.max}`,
             );
           } else if (
@@ -2544,7 +2617,7 @@ Respond with ONLY the action name, nothing else.`;
               current: healthData.health.current ?? savedHealth?.current ?? 100,
               max: healthData.health.max ?? savedHealth?.max ?? 100,
             };
-            logger.info(
+            logger.debug(
               `[HyperscapeService] 🏥 Health update via ${packetName}: ${normalizedHealth.current}/${normalizedHealth.max}`,
             );
           } else if (healthData.hp !== undefined) {
@@ -2553,7 +2626,7 @@ Respond with ONLY the action name, nothing else.`;
               current: healthData.hp,
               max: healthData.maxHp ?? savedHealth?.max ?? 100,
             };
-            logger.info(
+            logger.debug(
               `[HyperscapeService] 🏥 Health update via ${packetName}: ${normalizedHealth.current}/${normalizedHealth.max}`,
             );
           }
@@ -2836,12 +2909,12 @@ Respond with ONLY the action name, nothing else.`;
           const currentHealth =
             this.gameState.playerEntity.health?.current ?? "?";
           const maxHealth = this.gameState.playerEntity.health?.max ?? "?";
-          logger.info(
+          logger.debug(
             `[HyperscapeService] ⚔️ DAMAGE TAKEN: ${damageData.damage} damage from ${damageData.attackerId}! (current health: ${currentHealth}/${maxHealth})`,
           );
         } else if (damageData.attackerId === this.characterId) {
           // We dealt damage to something
-          logger.info(
+          logger.debug(
             `[HyperscapeService] ⚔️ DAMAGE DEALT: ${damageData.damage} damage to ${damageData.targetId}`,
           );
         }
@@ -2885,7 +2958,9 @@ Respond with ONLY the action name, nothing else.`;
         };
         const xp = completionData.totalXp ?? completionData.xpGained ?? 0;
         const skill = packetName.replace("Complete", "");
-        logger.info(`[HyperscapeService] ${packetName} received — xp: ${xp}`);
+        if (AGENT_INFO_LOGS_ENABLED) {
+          logger.info(`[HyperscapeService] ${packetName} received — xp: ${xp}`);
+        }
         this.broadcastEvent("CRAFTING_COMPLETE" as EventType, {
           ...completionData,
           skill,
@@ -2898,6 +2973,7 @@ Respond with ONLY the action name, nothing else.`;
       // ============================================================================
 
       case "questList": {
+        this.questListRequestInFlight = false;
         const questListData = data as {
           quests?: Array<{
             id: string;
@@ -2926,7 +3002,7 @@ Respond with ONLY the action name, nothing else.`;
             stageProgress: q.stageProgress,
           }));
           this.gameState.questsUpdatedAt = Date.now();
-          logger.info(
+          logger.debug(
             `[HyperscapeService] 📜 Quest list received: ${questListData.quests.length} quests`,
           );
         }
@@ -3026,6 +3102,7 @@ Respond with ONLY the action name, nothing else.`;
       // ============================================================================
 
       case "bankState": {
+        this.bankStateRequestInFlight = false;
         const bankData = data as {
           items?: Array<{
             item_id?: string;
@@ -3046,7 +3123,7 @@ Respond with ONLY the action name, nothing else.`;
             tabIndex: item.tab_index ?? item.tabIndex,
           }));
           this.gameState.bankItemsUpdatedAt = Date.now();
-          logger.info(
+          logger.debug(
             `[HyperscapeService] 🏦 Bank state cached: ${this.gameState.bankItems.length} items`,
           );
         }
@@ -3716,7 +3793,7 @@ Respond with ONLY the action name, nothing else.`;
     // Debug logging for movement packets
     if (packetName === "moveRequest") {
       const wsId = (this.ws as TaggedWebSocket).__wsId || "unknown";
-      logger.info(
+      logger.debug(
         `[HyperscapeService] 📤 Sending ${packetName} (id: ${packetId}) via WebSocket ${wsId} - wsReady: ${this.ws?.readyState === 1}, hasPlayer: ${!!this.gameState.playerEntity}, runtime: ${this.runtime.agentId}`,
       );
     }
@@ -4162,7 +4239,7 @@ Respond with ONLY the action name, nothing else.`;
    * Open a bank session (must be called before deposit/withdraw)
    */
   async openBank(bankId: string): Promise<void> {
-    logger.info(`[HyperscapeService] Opening bank: ${bankId}`);
+    logger.debug(`[HyperscapeService] Opening bank: ${bankId}`);
     this.sendCommand("bankOpen", { bankId });
   }
 
@@ -4170,7 +4247,7 @@ Respond with ONLY the action name, nothing else.`;
    * Deposit a specific item into the bank
    */
   async bankDeposit(itemId: string, quantity: number): Promise<void> {
-    logger.info(`[HyperscapeService] Depositing ${quantity}x ${itemId}`);
+    logger.debug(`[HyperscapeService] Depositing ${quantity}x ${itemId}`);
     this.sendCommand("bankDeposit", { itemId, quantity });
   }
 
@@ -4178,7 +4255,7 @@ Respond with ONLY the action name, nothing else.`;
    * Deposit all inventory items into the bank
    */
   async bankDepositAll(): Promise<void> {
-    logger.info("[HyperscapeService] Depositing all items");
+    logger.debug("[HyperscapeService] Depositing all items");
     this.sendCommand("bankDepositAll", {});
   }
 
@@ -4186,7 +4263,7 @@ Respond with ONLY the action name, nothing else.`;
    * Withdraw items from the bank
    */
   async bankWithdraw(itemId: string, quantity: number): Promise<void> {
-    logger.info(`[HyperscapeService] Withdrawing ${quantity}x ${itemId}`);
+    logger.debug(`[HyperscapeService] Withdrawing ${quantity}x ${itemId}`);
     this.sendCommand("bankWithdraw", { itemId, quantity });
   }
 
@@ -4194,7 +4271,7 @@ Respond with ONLY the action name, nothing else.`;
    * Close the current bank session
    */
   async closeBank(): Promise<void> {
-    logger.info("[HyperscapeService] Closing bank");
+    logger.debug("[HyperscapeService] Closing bank");
     this.sendCommand("bankClose", {});
   }
 
@@ -4277,7 +4354,7 @@ Respond with ONLY the action name, nothing else.`;
     if (!this.characterId) {
       throw new Error("No characterId - cannot challenge to duel");
     }
-    logger.info(
+    logger.debug(
       `[HyperscapeService] Sending duel:challenge to ${command.targetPlayerId}`,
     );
     this.sendCommand("duel:challenge", {
@@ -4553,8 +4630,55 @@ Respond with ONLY the action name, nothing else.`;
   }
 
   syncGoalToServer(): void {
+    if (!this.characterId || !this.isConnected()) {
+      return;
+    }
+
     const goal = this.autonomousBehaviorManager?.getGoal();
     const availableGoals = getAvailableGoals(this);
+    const goalSnapshot = goal
+      ? {
+          type: goal.type,
+          description: goal.description,
+          progress: goal.progress,
+          target: goal.target,
+          location: goal.location,
+          targetEntity: goal.targetEntity,
+          targetSkill: goal.targetSkill,
+          targetSkillLevel: goal.targetSkillLevel,
+          startedAt: goal.startedAt,
+          locked: goal.locked,
+          lockedBy: goal.lockedBy,
+        }
+      : null;
+    const availableGoalsSnapshot = availableGoals.map((g) => ({
+      id: g.id,
+      type: g.type,
+      description: g.description,
+      priority: g.priority,
+      targetSkill: g.targetSkill,
+      targetSkillLevel: g.targetSkillLevel,
+      location: g.location,
+    }));
+    const availableGoalsPayload = availableGoals.map((g, index) => ({
+      ...availableGoalsSnapshot[index],
+      reason: g.reason,
+    }));
+    const goalSignature = JSON.stringify({
+      goal: goalSnapshot,
+      availableGoals: availableGoalsSnapshot,
+    });
+    if (goalSignature === this.lastGoalSyncSignature) {
+      return;
+    }
+
+    const now = Date.now();
+    if (
+      now - this.lastGoalSyncAt <
+      HyperscapeService.GOAL_SYNC_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
 
     // Include personality traits (computed once per session, cached)
     const traits = getPersonalityTraits(this.runtime);
@@ -4572,34 +4696,13 @@ Respond with ONLY the action name, nothing else.`;
 
     this.sendCommand("syncGoal", {
       characterId: this.characterId,
-      goal: goal
-        ? {
-            type: goal.type,
-            description: goal.description,
-            progress: goal.progress,
-            target: goal.target,
-            location: goal.location,
-            targetEntity: goal.targetEntity,
-            targetSkill: goal.targetSkill,
-            targetSkillLevel: goal.targetSkillLevel,
-            startedAt: goal.startedAt,
-            locked: goal.locked,
-            lockedBy: goal.lockedBy,
-          }
-        : null,
-      availableGoals: availableGoals.map((g) => ({
-        id: g.id,
-        type: g.type,
-        description: g.description,
-        priority: g.priority,
-        reason: g.reason,
-        targetSkill: g.targetSkill,
-        targetSkillLevel: g.targetSkillLevel,
-        location: g.location,
-      })),
+      goal: goalSnapshot,
+      availableGoals: availableGoalsPayload,
       personality,
       desireScores: desireScores.length > 0 ? desireScores : undefined,
     });
+    this.lastGoalSyncSignature = goalSignature;
+    this.lastGoalSyncAt = now;
   }
 
   /**
@@ -4629,28 +4732,65 @@ Respond with ONLY the action name, nothing else.`;
       providers?: string[];
     },
   ): void {
-    if (!this.characterId) {
+    if (!this.characterId || !this.isConnected()) {
       logger.debug("[HyperscapeService] Cannot sync thought: no characterId");
       return;
     }
 
-    const thought: Record<string, unknown> = {
-      id: `thought-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    const normalizedContent = content
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, HyperscapeService.MAX_THOUGHT_SYNC_CHARS);
+    if (normalizedContent.length === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    const providers =
+      meta?.providers?.filter((provider) => provider.trim().length > 0) ||
+      undefined;
+    const thoughtSignature = JSON.stringify({
       type,
-      content,
-      timestamp: Date.now(),
+      content: normalizedContent,
+      health: meta?.health,
+      decisionPath: meta?.decisionPath,
+      providers,
+    });
+    if (
+      thoughtSignature === this.lastThoughtSyncSignature &&
+      now - this.lastThoughtSyncAt <
+        HyperscapeService.THOUGHT_DUPLICATE_WINDOW_MS
+    ) {
+      return;
+    }
+    if (
+      now - this.lastThoughtSyncAt <
+      HyperscapeService.THOUGHT_SYNC_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    const thought: Record<string, unknown> = {
+      id: `thought-${++this.thoughtSequence}`,
+      type,
+      content: normalizedContent,
+      timestamp: now,
     };
 
     if (meta?.health) thought.health = meta.health;
     if (meta?.decisionPath) thought.decisionPath = meta.decisionPath;
-    if (meta?.providers) thought.providers = meta.providers;
+    if (providers) thought.providers = providers;
 
     this.sendCommand("syncAgentThought", {
       characterId: this.characterId,
       thought,
     });
+    this.lastThoughtSyncSignature = thoughtSignature;
+    this.lastThoughtSyncAt = now;
 
-    logger.debug(`[HyperscapeService] 🧠 Synced thought: [${type}]`);
+    if (AGENT_DEBUG_LOGS_ENABLED) {
+      logger.debug(`[HyperscapeService] 🧠 Synced thought: [${type}]`);
+    }
   }
 
   /**
@@ -4757,7 +4897,29 @@ Respond with ONLY the action name, nothing else.`;
    * Response arrives via "questList" packet which populates gameState.quests.
    */
   public requestQuestList(): void {
-    this.sendCommand("getQuestList", {});
+    const now = Date.now();
+    const questRequestStillInFlight =
+      this.questListRequestInFlight &&
+      now - this.lastQuestListRequestAt <
+        HyperscapeService.REQUEST_IN_FLIGHT_TIMEOUT_MS;
+    if (questRequestStillInFlight) {
+      return;
+    }
+    if (
+      now - this.lastQuestListRequestAt <
+      HyperscapeService.QUEST_LIST_REQUEST_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.questListRequestInFlight = true;
+    this.lastQuestListRequestAt = now;
+    try {
+      this.sendCommand("getQuestList", {});
+    } catch (error) {
+      this.questListRequestInFlight = false;
+      throw error;
+    }
   }
 
   /**
@@ -4787,7 +4949,29 @@ Respond with ONLY the action name, nothing else.`;
    * Response arrives via "bankState" packet which populates gameState.bankItems.
    */
   public requestBankState(): void {
-    this.sendCommand("requestBankState", {});
+    const now = Date.now();
+    const bankRequestStillInFlight =
+      this.bankStateRequestInFlight &&
+      now - this.lastBankStateRequestAt <
+        HyperscapeService.REQUEST_IN_FLIGHT_TIMEOUT_MS;
+    if (bankRequestStillInFlight) {
+      return;
+    }
+    if (
+      now - this.lastBankStateRequestAt <
+      HyperscapeService.BANK_STATE_REQUEST_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.bankStateRequestInFlight = true;
+    this.lastBankStateRequestAt = now;
+    try {
+      this.sendCommand("requestBankState", {});
+    } catch (error) {
+      this.bankStateRequestInFlight = false;
+      throw error;
+    }
   }
 
   /**

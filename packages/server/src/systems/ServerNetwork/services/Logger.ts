@@ -20,6 +20,29 @@ export enum LogLevel {
   ERROR = 3,
 }
 
+const LOG_LEVEL_MAP: Record<string, LogLevel> = {
+  debug: LogLevel.DEBUG,
+  info: LogLevel.INFO,
+  warn: LogLevel.WARN,
+  warning: LogLevel.WARN,
+  error: LogLevel.ERROR,
+};
+
+function resolveConfiguredLogLevel(): LogLevel {
+  const configuredLevel = (
+    process.env.DUEL_LOG_LEVEL ||
+    process.env.LOG_LEVEL ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+  const mappedLevel = LOG_LEVEL_MAP[configuredLevel];
+  if (mappedLevel !== undefined) {
+    return mappedLevel;
+  }
+  return process.env.NODE_ENV === "production" ? LogLevel.INFO : LogLevel.DEBUG;
+}
+
 /**
  * Structured Logger with level filtering
  *
@@ -27,8 +50,7 @@ export enum LogLevel {
  * In development, all logs are shown.
  */
 export class Logger {
-  private static level: LogLevel =
-    process.env.NODE_ENV === "production" ? LogLevel.INFO : LogLevel.DEBUG;
+  private static level: LogLevel = resolveConfiguredLogLevel();
 
   /**
    * Set the minimum log level
@@ -44,6 +66,10 @@ export class Logger {
     return this.level;
   }
 
+  static isLevelEnabled(level: LogLevel): boolean {
+    return this.level <= level;
+  }
+
   /**
    * Log a debug message (suppressed in production)
    */
@@ -52,9 +78,8 @@ export class Logger {
     message: string,
     data?: Record<string, unknown>,
   ): void {
-    if (this.level <= LogLevel.DEBUG) {
-      this.log("DEBUG", system, message, data);
-    }
+    if (!this.isLevelEnabled(LogLevel.DEBUG)) return;
+    this.log("DEBUG", system, message, data);
   }
 
   /**
@@ -65,9 +90,8 @@ export class Logger {
     message: string,
     data?: Record<string, unknown>,
   ): void {
-    if (this.level <= LogLevel.INFO) {
-      this.log("INFO", system, message, data);
-    }
+    if (!this.isLevelEnabled(LogLevel.INFO)) return;
+    this.log("INFO", system, message, data);
   }
 
   /**
@@ -78,9 +102,8 @@ export class Logger {
     message: string,
     data?: Record<string, unknown>,
   ): void {
-    if (this.level <= LogLevel.WARN) {
-      this.log("WARN", system, message, data);
-    }
+    if (!this.isLevelEnabled(LogLevel.WARN)) return;
+    this.log("WARN", system, message, data);
   }
 
   /**
@@ -92,6 +115,7 @@ export class Logger {
     error?: Error | null,
     data?: Record<string, unknown>,
   ): void {
+    if (!this.isLevelEnabled(LogLevel.ERROR)) return;
     const errorData = error
       ? {
           ...data,
@@ -107,18 +131,25 @@ export class Logger {
    * Internal log method that formats and outputs the log entry
    */
   private static log(
-    _level: string,
+    level: string,
     system: string,
     message: string,
     data?: Record<string, unknown>,
   ): void {
-    const prefix = `[${system}]`;
+    const prefix = `[${system}] ${message}`;
+    const output =
+      level === "DEBUG"
+        ? console.debug
+        : level === "INFO"
+          ? console.info
+          : level === "WARN"
+            ? console.warn
+            : console.error;
 
     if (data && Object.keys(data).length > 0) {
-      // Structured output for log aggregation
-      console.log(`${prefix} ${message}`, JSON.stringify(data));
+      output(prefix, data);
     } else {
-      console.log(`${prefix} ${message}`);
+      output(prefix);
     }
   }
 }

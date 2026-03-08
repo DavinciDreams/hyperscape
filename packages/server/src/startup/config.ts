@@ -241,6 +241,19 @@ async function fetchManifestsFromCDN(
   manifestsDir: string,
   nodeEnv: string,
 ): Promise<void> {
+  if (process.env.SKIP_CDN_MANIFEST_FETCH === "true") {
+    const missingRequired = await getMissingRequiredManifests(manifestsDir);
+    if (missingRequired.length === 0) {
+      console.log(
+        "[Config] ⏭️  Skipping CDN fetch (SKIP_CDN_MANIFEST_FETCH=true)",
+      );
+      return;
+    }
+    console.warn(
+      `[Config] SKIP_CDN_MANIFEST_FETCH=true but required manifests are missing: ${missingRequired.join(", ")}`,
+    );
+  }
+
   // In development, skip CDN fetch only if REQUIRED local manifests already exist.
   // This preserves local asset editing while preventing partial-cache startup failures.
   if (nodeEnv === "development") {
@@ -348,7 +361,7 @@ async function fetchManifestsFromCDN(
 
     throw new Error(
       `Missing required manifests in ${manifestsDir}: ${missingRequiredAfter.join(", ")}. ` +
-      `Ensure your CDN has /manifests populated (PUBLIC_CDN_URL=${cdnUrl}) or run 'bun install' to download assets for local development.`,
+        `Ensure your CDN has /manifests populated (PUBLIC_CDN_URL=${cdnUrl}) or run 'bun install' to download assets for local development.`,
     );
   }
 }

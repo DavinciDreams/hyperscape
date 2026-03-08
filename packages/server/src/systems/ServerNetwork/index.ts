@@ -272,6 +272,12 @@ import { registerDuelEventListeners } from "./duel-events";
 const DEBUG_ATTACK_MOB =
   process.env.DEBUG_ATTACK_MOB === "true" ||
   process.env.DEBUG_ATTACK_MOB === "1";
+const DEBUG_AGENT_DASHBOARD_SYNC =
+  process.env.DEBUG_AGENT_DASHBOARD_SYNC === "true" ||
+  process.env.DEBUG_AGENT_DASHBOARD_SYNC === "1";
+const DEBUG_DUEL_PACKET_TRAFFIC =
+  process.env.DEBUG_DUEL_PACKET_TRAFFIC === "true" ||
+  process.env.DEBUG_DUEL_PACKET_TRAFFIC === "1";
 const IS_PLAYWRIGHT_TEST = process.env.PLAYWRIGHT_TEST === "true";
 const PLAYWRIGHT_LOG_THROTTLE_MS = Math.max(
   1000,
@@ -2218,13 +2224,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         ServerNetwork.characterSockets.set(goalData.characterId, socket);
         this.trimAgentDashboardCaches();
 
-        console.log(
-          `[ServerNetwork] Goal synced for character ${goalData.characterId}:`,
-          goalData.goal ? "active" : "cleared",
-          goalData.availableGoals
-            ? `(${goalData.availableGoals.length} available goals)`
-            : "",
-        );
+        if (DEBUG_AGENT_DASHBOARD_SYNC) {
+          console.log(
+            `[ServerNetwork] Goal synced for character ${goalData.characterId}:`,
+            goalData.goal ? "active" : "cleared",
+            goalData.availableGoals
+              ? `(${goalData.availableGoals.length} available goals)`
+              : "",
+          );
+        }
       }
     };
 
@@ -2248,9 +2256,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         ServerNetwork.agentThoughts.set(thoughtData.characterId, thoughts);
         this.trimAgentDashboardCaches();
 
-        console.log(
-          `[ServerNetwork] Agent thought synced for character ${thoughtData.characterId}: [${thoughtData.thought.type}]`,
-        );
+        if (DEBUG_AGENT_DASHBOARD_SYNC) {
+          console.log(
+            `[ServerNetwork] Agent thought synced for character ${thoughtData.characterId}: [${thoughtData.thought.type}]`,
+          );
+        }
       }
     };
 
@@ -3168,7 +3178,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const [socket, method, data] = this.queue.shift()!;
 
       // Debug: Log duel-related packets
-      if (method.includes("duel") || method.includes("Duel")) {
+      if (
+        DEBUG_DUEL_PACKET_TRAFFIC &&
+        (method.includes("duel") || method.includes("Duel"))
+      ) {
         console.log(`[ServerNetwork] Received duel packet: ${method}`, data);
       }
 

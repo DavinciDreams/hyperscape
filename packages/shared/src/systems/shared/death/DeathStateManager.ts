@@ -25,9 +25,11 @@ import { EventType } from "../../../types/events";
 const DEBUG_DEATH_STATE = false;
 const isTruthyEnv = (value: string | undefined): boolean =>
   value != null && /^(1|true|yes|on)$/i.test(value.trim());
+const DEATH_STATE_DEBUG_LOGS =
+  DEBUG_DEATH_STATE || isTruthyEnv(process.env.DEATH_STATE_DEBUG);
 
 function _debugLog(message: string, ...args: unknown[]): void {
-  if (DEBUG_DEATH_STATE) {
+  if (DEATH_STATE_DEBUG_LOGS) {
     console.log(message, ...args);
   }
 }
@@ -158,12 +160,12 @@ export class DeathStateManager {
    * Recovers unfinished deaths from previous server session.
    */
   async start(): Promise<void> {
-    console.log(
+    _debugLog(
       `[DeathStateManager] start() called - isServer: ${this.world.isServer}, hasDB: ${!!this.databaseSystem}`,
     );
     if (this.world.isServer && this.databaseSystem) {
       if (isTruthyEnv(process.env.SKIP_DEATH_RECOVERY_ON_STARTUP)) {
-        console.warn(
+        _debugLog(
           "[DeathStateManager] Skipping startup death recovery (SKIP_DEATH_RECOVERY_ON_STARTUP=true)",
         );
         return;

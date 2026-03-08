@@ -76,7 +76,6 @@ export function registerEventHandlers(
     "[HyperscapePlugin] 📝 Registering ENTITY_LEFT handler for kill tracking",
   );
   service.onGameEvent("ENTITY_LEFT", async (data: unknown) => {
-    logger.info("[HyperscapePlugin] 🔔 ENTITY_LEFT handler invoked");
     // Get the removed entity data (stored by HyperscapeService before cache deletion)
     const entity = service.getLastRemovedEntity();
     if (!entity) {
@@ -152,7 +151,7 @@ export function registerEventHandlers(
   // (mobs that were damaged but never killed won't be cleaned up otherwise)
   const MOB_HEALTH_PRUNE_INTERVAL = 60_000; // every 60s
   const MOB_HEALTH_MAX_ENTRIES = 100;
-  setInterval(() => {
+  const mobHealthPruneTimer = setInterval(() => {
     if (previousMobHealth.size > MOB_HEALTH_MAX_ENTRIES) {
       // Remove oldest entries (Map preserves insertion order)
       const excess = previousMobHealth.size - MOB_HEALTH_MAX_ENTRIES;
@@ -164,6 +163,7 @@ export function registerEventHandlers(
       }
     }
   }, MOB_HEALTH_PRUNE_INTERVAL);
+  mobHealthPruneTimer.unref?.();
 
   logger.info(
     "[HyperscapePlugin] 📝 Registering ENTITY_UPDATED handler for kill tracking",

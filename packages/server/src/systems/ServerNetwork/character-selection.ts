@@ -33,6 +33,22 @@ import {
 import { getAgentManager } from "../../eliza";
 import { getAgentRuntimeByCharacterId } from "../../eliza/ModelAgentSpawner.js";
 
+const TRUSTED_DUEL_BOT_ACCOUNT_IDS = new Set(
+  (
+    process.env.HYPERSCAPE_TRUSTED_DUEL_BOT_ACCOUNT_IDS ||
+    "eliza-duel-bots-account"
+  )
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0),
+);
+
+function isTrustedDuelBotAccount(
+  accountId: string | null | undefined,
+): boolean {
+  return !!accountId && TRUSTED_DUEL_BOT_ACCOUNT_IDS.has(accountId);
+}
+
 /**
  * Create an ElizaOS agent record for a character
  * This allows the character to appear in the dashboard and be managed as an agent
@@ -451,7 +467,10 @@ export async function handleEnterWorld(
   const agentIsDuelBot = isEmbeddedAgent || isModelAgent;
   const loadTestDuelBot =
     isLoadTestBot && (payload.duelBot === true || payload.duelBot === "true");
-  const isDuelBot = agentIsDuelBot || loadTestDuelBot;
+  const trustedAccountDuelBot =
+    isTrustedDuelBotAccount(socket.accountId) &&
+    (payload.duelBot === true || payload.duelBot === "true");
+  const isDuelBot = agentIsDuelBot || loadTestDuelBot || trustedAccountDuelBot;
   const botName = payload.botName;
 
   console.log("[PlayerLoading] enterWorld received", {
@@ -461,6 +480,7 @@ export async function handleEnterWorld(
     hasExistingPlayer: !!socket.player,
     isLoadTestBot,
     isDuelBot,
+    trustedAccountDuelBot,
   });
 
   // Spawn the entity now, preserving legacy spawn shape

@@ -407,6 +407,33 @@ function buildNetworkDebugSummary(world: unknown): string {
     networkRecord.processingRateLimiter,
   );
 
+  const sockets = networkRecord.sockets;
+  if (sockets instanceof Map) {
+    let totalBufferedBytes = 0;
+    let maxBufferedBytes = 0;
+
+    for (const socket of sockets.values()) {
+      const bufferedAmount = Number(
+        (
+          socket as {
+            ws?: { bufferedAmount?: unknown };
+          }
+        ).ws?.bufferedAmount ?? 0,
+      );
+      if (!Number.isFinite(bufferedAmount) || bufferedAmount <= 0) {
+        continue;
+      }
+      totalBufferedBytes += bufferedAmount;
+      if (bufferedAmount > maxBufferedBytes) {
+        maxBufferedBytes = bufferedAmount;
+      }
+    }
+
+    const MB = 1024 * 1024;
+    metrics.push(`socket.bufferedMB=${(totalBufferedBytes / MB).toFixed(1)}`);
+    metrics.push(`socket.maxBufferedMB=${(maxBufferedBytes / MB).toFixed(1)}`);
+  }
+
   const socketManager = networkRecord.socketManager;
   if (socketManager && typeof socketManager === "object") {
     pushMetric("socket.firstSeen", socketManager.socketFirstSeenAt);
@@ -505,6 +532,10 @@ function startMemoryMonitor(world: unknown): void {
     parseInt(process.env.MEMORY_COLLECTION_LIMIT || "12", 10) || 12,
   );
   const memLimitGB = Number(process.env.MEMORY_LIMIT_GB) || 12;
+  const memoryStdioEnabled =
+    process.env.MEMORY_MONITOR_STDIO === "true" ||
+    (isPlaywrightTest && process.env.MEMORY_MONITOR_STDIO !== "false") ||
+    collectionDebugEnabled;
 
   // Start the memory monitoring infrastructure (provides trend analysis, leak detection, API)
   const monitorConfig: MemoryMonitorConfig = {
@@ -550,18 +581,20 @@ function startMemoryMonitor(world: unknown): void {
     const heapUsedMB = (mem.heapUsed / MB).toFixed(1);
     const heapTotalMB = (mem.heapTotal / MB).toFixed(1);
     const externalMB = (mem.external / MB).toFixed(1);
-    // Use stderr so output is visible even when stdout is piped through duel-stack
-    process.stderr.write(
-      `[Memory] RSS=${rssMB}MB  HeapUsed=${heapUsedMB}MB  HeapTotal=${heapTotalMB}MB  External=${externalMB}MB\n`,
-    );
-    if (collectionDebugEnabled) {
-      const summary = buildCollectionSummary(world, collectionLimit);
-      if (summary) {
-        process.stderr.write(`[MemoryCollections] ${summary}\n`);
-      }
-      const networkSummary = buildNetworkDebugSummary(world);
-      if (networkSummary) {
-        process.stderr.write(`[MemoryNetwork] ${networkSummary}\n`);
+    if (memoryStdioEnabled) {
+      // Use stderr so output is visible even when stdout is piped through duel-stack
+      process.stderr.write(
+        `[Memory] RSS=${rssMB}MB  HeapUsed=${heapUsedMB}MB  HeapTotal=${heapTotalMB}MB  External=${externalMB}MB\n`,
+      );
+      if (collectionDebugEnabled) {
+        const summary = buildCollectionSummary(world, collectionLimit);
+        if (summary) {
+          process.stderr.write(`[MemoryCollections] ${summary}\n`);
+        }
+        const networkSummary = buildNetworkDebugSummary(world);
+        if (networkSummary) {
+          process.stderr.write(`[MemoryNetwork] ${networkSummary}\n`);
+        }
       }
     }
 

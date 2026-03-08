@@ -339,6 +339,7 @@ export class MemoryMonitor {
     // Track ServerNetwork static collections via systemsByName
     const networkSystem = worldRecord.systemsByName?.get("network") as
       | {
+          queue?: unknown[];
           constructor?: {
             characterSockets?: Map<string, unknown>;
             agentGoals?: Map<string, unknown>;
@@ -348,6 +349,7 @@ export class MemoryMonitor {
       | undefined;
 
     if (networkSystem?.constructor) {
+      this.trackCollectionSize("ServerNetwork.queue", networkSystem.queue);
       const ctor = networkSystem.constructor as {
         characterSockets?: Map<string, unknown>;
         agentGoals?: Map<string, unknown>;

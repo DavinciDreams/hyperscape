@@ -2,16 +2,21 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
+import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   // Load env from both workspace root and client directory
   const workspaceRoot = path.resolve(__dirname, "../..");
   const clientDir = __dirname;
+  const nodePolyfillsRoot = path.dirname(
+    path.dirname(require.resolve("vite-plugin-node-polyfills")),
+  );
 
   // Load from both locations - client dir takes precedence
   const workspaceEnv = loadEnv(mode, workspaceRoot, ["PUBLIC_", "VITE_"]);
@@ -458,22 +463,22 @@ export default defineConfig(({ mode }) => {
         {
           find: "vite-plugin-node-polyfills/shims/process",
           replacement: path.resolve(
-            __dirname,
-            "node_modules/vite-plugin-node-polyfills/shims/process/dist/index.js",
+            nodePolyfillsRoot,
+            "shims/process/dist/index.js",
           ),
         },
         {
           find: "vite-plugin-node-polyfills/shims/buffer",
           replacement: path.resolve(
-            __dirname,
-            "node_modules/vite-plugin-node-polyfills/shims/buffer/dist/index.js",
+            nodePolyfillsRoot,
+            "shims/buffer/dist/index.js",
           ),
         },
         {
           find: "vite-plugin-node-polyfills/shims/global",
           replacement: path.resolve(
-            __dirname,
-            "node_modules/vite-plugin-node-polyfills/shims/global/dist/index.js",
+            nodePolyfillsRoot,
+            "shims/global/dist/index.js",
           ),
         },
         // Use client-only build of shared package to avoid Node.js module leakage

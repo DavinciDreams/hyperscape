@@ -309,12 +309,83 @@ const disableBridgeCapture =
 const streamCaptureUrl = withCaptureParams(streamPageUrl);
 const embeddedSpectatorCaptureUrl = withCaptureParams(embeddedSpectatorUrl);
 const homeCaptureUrl = withCaptureParams(`${clientUrl}/`);
+const duelNodeEnv = (process.env.DUEL_NODE_ENV || "production").trim().toLowerCase();
+const duelQuietMode =
+  options.verbose === true
+    ? false
+    : !/^(0|false|no|off)$/i.test(process.env.DUEL_QUIET || "true");
+const duelRuntimeLogLevel = (
+  process.env.DUEL_LOG_LEVEL ||
+  process.env.LOG_LEVEL ||
+  "error"
+)
+  .trim()
+  .toLowerCase();
 
 const managed = [];
 let shuttingDown = false;
+const CHILD_OUTPUT_ERROR_PATTERN =
+  /\b(error|failed|failure|exception|uncaught|unhandled|fatal)\b/i;
+const CHILD_OUTPUT_WARN_PATTERN = /\bwarn(?:ing)?\b/i;
+const childStdoutMode = (
+  options.verbose === true
+    ? "all"
+    : process.env.DUEL_CHILD_STDOUT_MODE || "errors-only"
+).trim().toLowerCase();
+const childStderrMode = (
+  options.verbose === true
+    ? "all"
+    : process.env.DUEL_CHILD_STDERR_MODE || "errors-only"
+).trim().toLowerCase();
 
 function log(message) {
   console.log(`[duel] ${message}`);
+}
+
+function shouldForwardChildLine(channel, line) {
+  const mode = channel === "stderr" ? childStderrMode : childStdoutMode;
+  if (mode === "off") return false;
+  if (mode === "all") return true;
+  const isErrorLine = CHILD_OUTPUT_ERROR_PATTERN.test(line);
+  if (mode === "errors-only") {
+    return isErrorLine;
+  }
+  if (mode === "warn-and-error") {
+    return isErrorLine || CHILD_OUTPUT_WARN_PATTERN.test(line);
+  }
+  return channel === "stderr";
+}
+
+function attachPrefixedOutput(stream, prefix, channel) {
+  if (!stream) return;
+  stream.setEncoding?.("utf8");
+  let buffer = "";
+
+  const flushLine = (line) => {
+    const trimmedLine = line.replace(/\r$/, "");
+    if (!trimmedLine) return;
+    if (!shouldForwardChildLine(channel, trimmedLine)) return;
+    if (channel === "stderr") {
+      console.error(`${prefix} ${trimmedLine}`);
+      return;
+    }
+    console.log(`${prefix} ${trimmedLine}`);
+  };
+
+  stream.on("data", (chunk) => {
+    buffer += chunk;
+    let newlineIndex = buffer.indexOf("\n");
+    while (newlineIndex !== -1) {
+      flushLine(buffer.slice(0, newlineIndex));
+      buffer = buffer.slice(newlineIndex + 1);
+      newlineIndex = buffer.indexOf("\n");
+    }
+  });
+
+  stream.on("end", () => {
+    flushLine(buffer);
+    buffer = "";
+  });
 }
 
 function signalProcessTree(proc, signal) {
@@ -879,21 +950,19 @@ function spawnManaged(name, command, args, opts = {}) {
     const proc = spawn(command, args, {
       cwd: ROOT,
       env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [
+        "ignore",
+        childStdoutMode === "off" ? "ignore" : "pipe",
+        childStderrMode === "off" ? "ignore" : "pipe",
+      ],
       detached: true,
       ...entry.spawnOptions,
     });
     entry.proc = proc;
 
     const prefix = `[${name}]`;
-    proc.stdout?.on("data", (chunk) => {
-      const lines = chunk.toString().split("\n").filter(Boolean);
-      for (const line of lines) console.log(`${prefix} ${line}`);
-    });
-    proc.stderr?.on("data", (chunk) => {
-      const lines = chunk.toString().split("\n").filter(Boolean);
-      for (const line of lines) console.error(`${prefix} ${line}`);
-    });
+    attachPrefixedOutput(proc.stdout, prefix, "stdout");
+    attachPrefixedOutput(proc.stderr, prefix, "stderr");
     proc.on("exit", (code, signal) => {
       entry.proc = null;
       if (shuttingDown) return;
@@ -938,19 +1007,17 @@ function runCommand(name, command, args, opts = {}) {
     const proc = spawn(command, args, {
       cwd: ROOT,
       env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [
+        "ignore",
+        childStdoutMode === "off" ? "ignore" : "pipe",
+        childStderrMode === "off" ? "ignore" : "pipe",
+      ],
       ...opts,
     });
 
     const prefix = `[${name}]`;
-    proc.stdout?.on("data", (chunk) => {
-      const lines = chunk.toString().split("\n").filter(Boolean);
-      for (const line of lines) console.log(`${prefix} ${line}`);
-    });
-    proc.stderr?.on("data", (chunk) => {
-      const lines = chunk.toString().split("\n").filter(Boolean);
-      for (const line of lines) console.error(`${prefix} ${line}`);
-    });
+    attachPrefixedOutput(proc.stdout, prefix, "stdout");
+    attachPrefixedOutput(proc.stderr, prefix, "stderr");
     proc.on("error", (error) => {
       reject(error);
     });
@@ -1292,6 +1359,27 @@ async function main() {
   const gameEnv = {
     ...serverEnv,
     ...process.env,
+    NODE_ENV: duelNodeEnv,
+    LOG_LEVEL: duelRuntimeLogLevel,
+    DEFAULT_LOG_LEVEL:
+      process.env.DUEL_DEFAULT_LOG_LEVEL ||
+      process.env.DEFAULT_LOG_LEVEL ||
+      duelRuntimeLogLevel,
+    DUEL_LOG_LEVEL:
+      process.env.DUEL_LOG_LEVEL || duelRuntimeLogLevel,
+    DUEL_AGENT_LOG_LEVEL:
+      process.env.DUEL_AGENT_LOG_LEVEL || duelRuntimeLogLevel,
+    DUEL_QUIET: duelQuietMode ? "true" : "false",
+    SKIP_CDN_MANIFEST_FETCH:
+      process.env.SKIP_CDN_MANIFEST_FETCH || "true",
+    DATA_OPTIONAL_MANIFEST_WARNINGS:
+      process.env.DATA_OPTIONAL_MANIFEST_WARNINGS || "false",
+    MEMORY_MONITOR_STDIO:
+      process.env.MEMORY_MONITOR_STDIO || "false",
+    SERVER_RUNTIME_LAG_WARNINGS:
+      process.env.SERVER_RUNTIME_LAG_WARNINGS || "false",
+    SERVER_RUNTIME_TPS_LOGS:
+      process.env.SERVER_RUNTIME_TPS_LOGS || "false",
     SOLANA_CLUSTER:
       process.env.DUEL_SOLANA_CLUSTER ||
       serverEnv.SOLANA_CLUSTER ||
@@ -1552,7 +1640,7 @@ async function main() {
       // preview server unless development mode is explicitly requested.
       const useProductionBuild =
         !forceDevClient &&
-        (process.env.NODE_ENV === "production" ||
+        (duelNodeEnv === "production" ||
           duelClientMode === "production" ||
           verifyEnabled ||
           /^(1|true|yes|on)$/i.test(
@@ -1632,6 +1720,7 @@ async function main() {
         `--bots=${bots}`,
         `--url=${serverWsUrl}`,
         `--client-url=${clientUrl}`,
+        "--connect-only",
       ],
       {
         env: gameEnv,
@@ -1651,6 +1740,13 @@ async function main() {
       ...process.env,
       ...readEnvFile(path.join(ROOT, "packages/gold-betting-demo/.env.devnet")),
       ...readEnvFile(path.join(ROOT, "packages/gold-betting-demo/app/.env.devnet")),
+      NODE_ENV: duelNodeEnv,
+      LOG_LEVEL: duelRuntimeLogLevel,
+      DEFAULT_LOG_LEVEL:
+        process.env.DUEL_DEFAULT_LOG_LEVEL ||
+        process.env.DEFAULT_LOG_LEVEL ||
+        duelRuntimeLogLevel,
+      DUEL_QUIET: duelQuietMode ? "true" : "false",
       // Prefer same-origin app stream path for reliability on :4179.
       VITE_STREAM_URL: process.env.VITE_STREAM_URL || localBettingHlsPath,
       VITE_GAME_API_URL: process.env.VITE_GAME_API_URL || serverHttpUrl,

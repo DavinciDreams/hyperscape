@@ -301,6 +301,7 @@ export class AutonomousBehaviorManager {
   private debug: boolean;
   private allowedActions: Set<string>;
   private autonomyMode: AutonomyMode;
+  private readonly dedicatedDuelBot: boolean;
   private scriptedRole: ScriptedRole | null = null;
   private actionContext: { messageText?: string } | null = null;
   private lastTickTime = 0;
@@ -527,6 +528,12 @@ export class AutonomousBehaviorManager {
         | "") ||
       (SCRIPTED_AUTONOMY_CONFIG.MODE as AutonomyMode);
     this.autonomyMode = rawMode === "scripted" ? "scripted" : "llm";
+
+    const duelBotSetting = runtime.getSetting("HYPERSCAPE_AUTO_ACCEPT_DUELS");
+    this.dedicatedDuelBot =
+      typeof duelBotSetting === "boolean"
+        ? duelBotSetting
+        : /^(1|true|yes|on)$/i.test(String(duelBotSetting || "").trim());
 
     const rawRole = String(
       runtime.getSetting("HYPERSCAPE_SCRIPTED_ROLE") ||
@@ -1067,6 +1074,14 @@ export class AutonomousBehaviorManager {
       }
     }
 
+    if (
+      this.dedicatedDuelBot &&
+      !this.duelPrepPhase &&
+      this.duelPhase === null
+    ) {
+      return;
+    }
+
     // Periodic state refresh — catch any missed push events (dropped packet, race condition)
     if (
       Date.now() - this.lastStateRefreshTime >
@@ -1130,18 +1145,22 @@ export class AutonomousBehaviorManager {
         elapsed < this.actionLock.timeoutMs &&
         (isMoving || withinMinDuration)
       ) {
-        logger.debug(
-          `[AutonomousBehavior] Action lock active: ${this.actionLock.actionName} ` +
-            `(${Math.round(elapsed / 1000)}s) — ${isMoving ? "moving" : "cooldown"}, skipping tick`,
-        );
+        if (this.debug) {
+          logger.debug(
+            `[AutonomousBehavior] Action lock active: ${this.actionLock.actionName} ` +
+              `(${Math.round(elapsed / 1000)}s) — ${isMoving ? "moving" : "cooldown"}, skipping tick`,
+          );
+        }
         return;
       }
 
       // Lock expired or movement/cooldown finished — clear it
-      logger.info(
-        `[AutonomousBehavior] Action lock cleared: ${this.actionLock.actionName} ` +
-          `(${isMoving ? "timeout" : withinMinDuration ? "timeout" : "complete"})`,
-      );
+      if (this.debug) {
+        logger.debug(
+          `[AutonomousBehavior] Action lock cleared: ${this.actionLock.actionName} ` +
+            `(${isMoving ? "timeout" : withinMinDuration ? "timeout" : "complete"})`,
+        );
+      }
       this.actionLock = null;
       this.nextTickFast = true; // Quick follow-up after lock clears
     }
@@ -1163,7 +1182,9 @@ export class AutonomousBehaviorManager {
     // Process pending combat chat reaction (non-blocking)
     await this.processCombatChatReaction();
 
-    logger.info(`[AutonomousBehavior] === Tick ${this.tickCount} ===`);
+    if (this.debug) {
+      logger.debug(`[AutonomousBehavior] === Tick ${this.tickCount} ===`);
+    }
 
     // SPONTANEOUS SOCIAL BEHAVIOR
     // Personality-driven chance to do something social instead of grinding
@@ -1311,21 +1332,27 @@ export class AutonomousBehaviorManager {
     const state = selectionResult?.state ?? ({} as State);
 
     if (!selectedAction) {
-      logger.info("[AutonomousBehavior] No action selected this tick");
+      if (this.debug) {
+        logger.debug("[AutonomousBehavior] No action selected this tick");
+      }
       return;
     }
 
-    logger.info(
-      `[AutonomousBehavior] LLM selected action: ${selectedAction.name}`,
-    );
+    if (this.debug) {
+      logger.debug(
+        `[AutonomousBehavior] LLM selected action: ${selectedAction.name}`,
+      );
+    }
 
     // NOTE: Removed defensive overrides - LLM now has full autonomy to:
     // - Choose actions even without a goal (it will learn from context)
     // - Choose when to equip weapons (it has equipment context)
 
-    logger.info(
-      `[AutonomousBehavior] Executing action: ${selectedAction.name}`,
-    );
+    if (this.debug) {
+      logger.debug(
+        `[AutonomousBehavior] Executing action: ${selectedAction.name}`,
+      );
+    }
 
     // Step 6: Validate the selected action
     const isValid = await selectedAction.validate(
@@ -1588,7 +1615,9 @@ export class AutonomousBehaviorManager {
       // Store thinking for dashboard sync
       if (thinking) {
         this.lastThinking = thinking;
-        logger.info(`[AutonomousBehavior] LLM Thinking: ${thinking}`);
+        if (this.debug) {
+          logger.debug(`[AutonomousBehavior] LLM Thinking: ${thinking}`);
+        }
 
         // Sync to dashboard via service
         this.syncThinkingToDashboard(thinking, {
@@ -5163,7 +5192,9 @@ export class AutonomousBehaviorManager {
     message: Memory,
     state: State,
   ): Promise<void> {
-    logger.info(`[AutonomousBehavior] Executing action: ${action.name}`);
+    if (this.debug) {
+      logger.debug(`[AutonomousBehavior] Executing action: ${action.name}`);
+    }
 
     try {
       const actionMessage: Memory = this.actionContext?.messageText
@@ -7117,7 +7148,10 @@ export class AutonomousBehaviorManager {
       duelId?: string;
     };
 
-    const myId = this.runtime.agentId;
+    const myId =
+      this.service?.getPlayerEntity()?.id ||
+      String(this.runtime.getSetting("HYPERSCAPE_CHARACTER_ID") || "").trim() ||
+      this.runtime.agentId;
     const won = duelData.winnerId === myId;
     const opponentName = won
       ? duelData.loserName || "Unknown"
@@ -7147,6 +7181,13 @@ export class AutonomousBehaviorManager {
     this.duelOpponentName = null;
     this.duelId = null;
     this.resetDuelCombatState();
+
+    if (this.dedicatedDuelBot) {
+      this.currentGoal = null;
+      this.goalStack.length = 0;
+      this.nextTickFast = true;
+      return;
+    }
 
     // Generate post-duel assessment and adjust strategy
     const assessment = this.assessDuelOutcome(won, opponentName, player);
@@ -7200,6 +7241,13 @@ export class AutonomousBehaviorManager {
     const player = this.service?.getPlayerEntity();
     if (player) {
       player.inCombat = false;
+    }
+
+    if (this.dedicatedDuelBot) {
+      this.currentGoal = null;
+      this.goalStack.length = 0;
+      this.nextTickFast = true;
+      return;
     }
 
     // Restore saved goal

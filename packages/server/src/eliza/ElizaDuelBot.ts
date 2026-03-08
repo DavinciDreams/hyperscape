@@ -22,6 +22,7 @@ import { createJWT } from "../shared/utils.js";
 import { errMsg } from "../shared/errMsg.js";
 import type { ModelProviderConfig } from "./ModelAgentSpawner.js";
 import { loadModelPlugin, createAgentCharacter } from "./agentHelpers.js";
+import { duelLogError, duelLogInfo, duelLogWarn } from "./logging.js";
 
 // Re-export for convenience
 export { MODEL_AGENTS } from "./ModelAgentSpawner.js";
@@ -144,13 +145,38 @@ export class ElizaDuelBot extends EventEmitter {
     return this._id;
   }
 
+  private getHyperscapeService(): HyperscapeServiceHandle | null {
+    if (!this.runtime) return null;
+    return this.runtime.getService(
+      "hyperscapeService",
+    ) as HyperscapeServiceHandle | null;
+  }
+
+  private async waitForPlayerSpawnReady(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      const playerEntity = this.getHyperscapeService()?.getPlayerEntity?.();
+      if (playerEntity) {
+        return;
+      }
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    }
+
+    throw new Error(
+      `player entity not ready within ${Math.round(timeoutMs / 1000)}s`,
+    );
+  }
+
   async connect(): Promise<void> {
     this.state = "connecting";
     const { modelConfig, wsUrl, name, accountId } = this.config;
     const tag = `ElizaDuelBot:${name}`;
 
-    console.log(
-      `[ElizaDuelBot] ${name} connecting (${modelConfig.displayName} / ${modelConfig.model})...`,
+    duelLogInfo(
+      "ElizaDuelBot",
+      `${name} connecting (${modelConfig.displayName} / ${modelConfig.model})...`,
     );
 
     let lastError: Error | null = null;
@@ -158,8 +184,9 @@ export class ElizaDuelBot extends EventEmitter {
     for (let attempt = 0; attempt <= MAX_INIT_RETRIES; attempt++) {
       try {
         if (attempt > 0) {
-          console.log(
-            `[ElizaDuelBot] ${name} retry ${attempt}/${MAX_INIT_RETRIES}...`,
+          duelLogWarn(
+            "ElizaDuelBot",
+            `${name} retry ${attempt}/${MAX_INIT_RETRIES}...`,
           );
           // Small delay before retry
           await new Promise((r) => setTimeout(r, 2000));
@@ -242,6 +269,8 @@ export class ElizaDuelBot extends EventEmitter {
           }
         }
 
+        await this.waitForPlayerSpawnReady(this.config.connectTimeoutMs);
+
         this._id = characterId;
         this._connected = true;
         this.metrics.isConnected = true;
@@ -251,15 +280,17 @@ export class ElizaDuelBot extends EventEmitter {
         // Listen for duel events from HyperscapeService
         this.setupDuelEventListeners();
 
-        console.log(
-          `[ElizaDuelBot] ✅ ${name} connected (${modelConfig.displayName}, model: ${modelConfig.model}, id: ${characterId})`,
+        duelLogInfo(
+          "ElizaDuelBot",
+          `✅ ${name} connected (${modelConfig.displayName}, model: ${modelConfig.model}, id: ${characterId})`,
         );
         this.emit("connected", { name: this.config.name, id: this._id });
         return; // Success — exit retry loop
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
-        console.error(
-          `[ElizaDuelBot] ❌ ${name} init attempt ${attempt + 1} failed: ${lastError.message}`,
+        duelLogError(
+          "ElizaDuelBot",
+          `❌ ${name} init attempt ${attempt + 1} failed: ${lastError.message}`,
         );
 
         // Stop any partially-initialized runtime
@@ -271,6 +302,7 @@ export class ElizaDuelBot extends EventEmitter {
           }
           this.runtime = null;
         }
+        this._id = null;
       }
     }
 
@@ -278,8 +310,9 @@ export class ElizaDuelBot extends EventEmitter {
     this.state = "disconnected";
     this._connected = false;
     this.metrics.isConnected = false;
-    console.error(
-      `[ElizaDuelBot] ❌ ${name} failed to connect after ${MAX_INIT_RETRIES + 1} attempts`,
+    duelLogError(
+      "ElizaDuelBot",
+      `❌ ${name} failed to connect after ${MAX_INIT_RETRIES + 1} attempts`,
     );
     throw lastError || new Error(`${name} failed to connect`);
   }
@@ -298,8 +331,9 @@ export class ElizaDuelBot extends EventEmitter {
 
     if (this.runtime) {
       this.runtime.stop().catch((err) => {
-        console.warn(
-          `[ElizaDuelBot] Error stopping runtime for ${this.config.name}:`,
+        duelLogWarn(
+          "ElizaDuelBot",
+          `Error stopping runtime for ${this.config.name}:`,
           errMsg(err),
         );
       });
@@ -315,47 +349,53 @@ export class ElizaDuelBot extends EventEmitter {
    */
   challengePlayer(targetId: string): void {
     if (this.state !== "idle") {
-      console.log(
-        `[ElizaDuelBot] ${this.config.name} cannot challenge: state=${this.state}`,
+      duelLogWarn(
+        "ElizaDuelBot",
+        `${this.config.name} cannot challenge: state=${this.state}`,
       );
       return;
     }
 
     if (!this.runtime) {
-      console.warn(`[ElizaDuelBot] ${this.config.name} has no runtime`);
+      duelLogWarn("ElizaDuelBot", `${this.config.name} has no runtime`);
+      return;
+    }
+
+    const service = this.getHyperscapeService();
+    if (!service?.executeDuelChallenge) {
+      duelLogWarn(
+        "ElizaDuelBot",
+        `${this.config.name} - HyperscapeService not available yet`,
+      );
+      this.state = "idle";
+      return;
+    }
+
+    if (!service.getPlayerEntity?.()) {
+      duelLogWarn(
+        "ElizaDuelBot",
+        `${this.config.name} cannot challenge before spawn is ready`,
+      );
       return;
     }
 
     this.state = "challenged";
-    console.log(`[ElizaDuelBot] ${this.config.name} challenging ${targetId}`);
+    duelLogInfo("ElizaDuelBot", `${this.config.name} challenging ${targetId}`);
 
-    // Access HyperscapeService through runtime
-    const service = this.runtime.getService(
-      "hyperscapeService",
-    ) as HyperscapeServiceHandle | null;
-    if (service?.executeDuelChallenge) {
-      service
-        .executeDuelChallenge({ targetPlayerId: targetId })
-        .catch((err: Error) => {
-          console.warn(
-            `[ElizaDuelBot] ${this.config.name} challenge failed:`,
-            err.message,
-          );
-          this.state = "idle";
-        });
-    } else {
-      console.warn(
-        `[ElizaDuelBot] ${this.config.name} - HyperscapeService not available yet`,
-      );
-      this.state = "idle";
-    }
+    service
+      .executeDuelChallenge({ targetPlayerId: targetId })
+      .catch((err: Error) => {
+        duelLogWarn(
+          "ElizaDuelBot",
+          `${this.config.name} challenge failed:`,
+          err.message,
+        );
+        this.state = "idle";
+      });
   }
 
   getPosition(): { x: number; y: number; z: number } | null {
-    if (!this.runtime) return null;
-    const service = this.runtime.getService(
-      "hyperscapeService",
-    ) as HyperscapeServiceHandle | null;
+    const service = this.getHyperscapeService();
     const playerEntity = service?.getPlayerEntity?.();
     if (!playerEntity) return null;
     const pos = playerEntity.position;
@@ -372,9 +412,7 @@ export class ElizaDuelBot extends EventEmitter {
     // Guard against duplicate listener registration across reconnects
     if (this.duelListenersRegistered) return;
 
-    const service = this.runtime.getService(
-      "hyperscapeService",
-    ) as HyperscapeServiceHandle | null;
+    const service = this.getHyperscapeService();
     if (!service) {
       // Service may not be ready yet — retry after a short delay.
       // Track the timer so disconnect() can cancel it.
@@ -444,9 +482,7 @@ export class ElizaDuelBot extends EventEmitter {
       return;
     }
 
-    const service = this.runtime.getService(
-      "hyperscapeService",
-    ) as HyperscapeServiceHandle | null;
+    const service = this.getHyperscapeService();
     if (service?.offGameEvent) {
       if (this.duelFightStartHandler) {
         service.offGameEvent("DUEL_FIGHT_START", this.duelFightStartHandler);
