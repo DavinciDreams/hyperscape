@@ -17,6 +17,9 @@ concurrency:
 
 env:
   BETTING_KEEPER_URL: https://gold-betting-keeper-production.up.railway.app
+  RAILWAY_PROJECT_ID: e5f5ba11-0380-4d71-aa0b-343d89a58c0d
+  RAILWAY_PRODUCTION_ENVIRONMENT_ID: 194f3565-ba2f-4c98-87d2-85dfc3a5110b
+  RAILWAY_KEEPER_SERVICE_ID: 330ea18e-b215-4cf9-9fe2-4bb09fc2ec63
 
 jobs:
   deploy:
@@ -67,15 +70,37 @@ jobs:
       - name: Install Railway CLI
         run: bun add -g @railway/cli
 
-      - name: Link Railway service
+      - name: Seed Railway keeper context
         working-directory: packages/gold-betting-demo/keeper
-        run: railway link -p hyperscape -e production -s gold-betting-keeper
+        run: |
+          keeper_path="$(pwd)"
+          mkdir -p "${HOME}/.railway"
+          cat > "${HOME}/.railway/config.json" <<EOF
+          {
+            "projects": {
+              "${keeper_path}": {
+                "projectPath": "${keeper_path}",
+                "name": "hyperscape",
+                "project": "${RAILWAY_PROJECT_ID}",
+                "environment": "${RAILWAY_PRODUCTION_ENVIRONMENT_ID}",
+                "environmentName": "production",
+                "service": "${RAILWAY_KEEPER_SERVICE_ID}"
+              }
+            }
+          }
+          EOF
+          railway status
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Deploy keeper
         working-directory: packages/gold-betting-demo/keeper
-        run: railway up . --path-as-root --detach
+        run: |
+          railway up . \
+            --path-as-root \
+            --detach \
+            --service "${RAILWAY_KEEPER_SERVICE_ID}" \
+            --environment "${RAILWAY_PRODUCTION_ENVIRONMENT_ID}"
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           CI: "true"
