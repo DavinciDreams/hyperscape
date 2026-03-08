@@ -4,6 +4,7 @@ import { WalletContextState } from "@solana/wallet-adapter-react";
 
 import fightOracleIdl from "../idl/fight_oracle.json";
 import goldClobMarketIdl from "../idl/gold_clob_market.json";
+import { CONFIG } from "./config";
 
 function extractProgramAddressFromIdl(idlJson: unknown): string | null {
   if (!idlJson || typeof idlJson !== "object") return null;
@@ -26,10 +27,17 @@ function resolveProgramId(idlJson: unknown, fallback: string): PublicKey {
   return new PublicKey(address);
 }
 
-const ENV_FIGHT_ORACLE_PROGRAM_ID =
-  import.meta.env.VITE_FIGHT_ORACLE_PROGRAM_ID?.trim();
-const ENV_GOLD_CLOB_MARKET_PROGRAM_ID =
-  import.meta.env.VITE_GOLD_CLOB_MARKET_PROGRAM_ID?.trim();
+function resolveConfiguredProgramId(
+  configuredAddress: string,
+  idlJson: unknown,
+  fallback: string,
+): PublicKey {
+  const trimmedConfigured = configuredAddress.trim();
+  if (trimmedConfigured.length > 0) {
+    return new PublicKey(trimmedConfigured);
+  }
+  return resolveProgramId(idlJson, fallback);
+}
 
 function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
   const idlWithMaybeAddress = idlJson as Idl & { address?: string };
@@ -44,18 +52,16 @@ function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
   } as Idl;
 }
 
-export const FIGHT_ORACLE_PROGRAM_ID = ENV_FIGHT_ORACLE_PROGRAM_ID
-  ? new PublicKey(ENV_FIGHT_ORACLE_PROGRAM_ID)
-  : resolveProgramId(
-      fightOracleIdl,
-      "A6utqr1N4KP3Tst2tMCqfJR4mhCRNw4M2uN3Nb6nPBcS",
-    );
-export const GOLD_CLOB_MARKET_PROGRAM_ID = ENV_GOLD_CLOB_MARKET_PROGRAM_ID
-  ? new PublicKey(ENV_GOLD_CLOB_MARKET_PROGRAM_ID)
-  : resolveProgramId(
-      goldClobMarketIdl,
-      "4phSkAVkbtGbQbrT3p2xjNPLAyw1DWz99wT7g4dQMyiX",
-    );
+export const FIGHT_ORACLE_PROGRAM_ID = resolveConfiguredProgramId(
+  CONFIG.fightOracleProgramId,
+  fightOracleIdl,
+  "",
+);
+export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
+  CONFIG.goldClobMarketProgramId,
+  goldClobMarketIdl,
+  "",
+);
 
 const FIGHT_ORACLE_IDL = ensureIdlAddress(
   fightOracleIdl,

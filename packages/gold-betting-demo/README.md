@@ -5,7 +5,8 @@ Standalone demo package for a binary YES/NO betting market settled from a separa
 ## What this includes
 
 - `anchor/programs/fight_oracle`: on-chain match lifecycle and winner posting.
-- `anchor/programs/gold_binary_market`: on-chain GOLD-only binary market, fee routing, market-maker seed logic, and winner claims.
+- `anchor/programs/gold_clob_market`: on-chain GOLD CLOB market for binary prediction trading and winner claims.
+- `anchor/programs/gold_perps_market`: on-chain perps market used by the models / futures view.
 - `anchor/tests/gold-betting-demo.ts`: local end-to-end tests using mock GOLD token accounts and local validator.
 - `app`: standalone Vite app for wallet connect, market creation, bet placement, Jupiter conversion (SOL/USDC -> GOLD), settlement, and claiming.
 - `keeper`: CLI automation scripts for market-maker seeding and oracle resolution, using Helius RPC.
@@ -24,9 +25,13 @@ Standalone demo package for a binary YES/NO betting market settled from a separa
 
 ## Programs
 
-- Fight oracle program id: `EW9GwxawnPEHA4eFgqd2oq9t55gSG4ReNqPRyG6Ui6PF`
-- Market program id: `23YJWaC8AhEufH8eYdPMAouyWEgJ5MQWyvz3z8akTtR6`
+- Fight oracle program id: `6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD`
+- GOLD CLOB program id: `ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi`
+- GOLD perps program id: `HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik`
 - Mainnet GOLD mint: `DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump`
+
+Public contract metadata now lives in `/Users/shawwalters/eliza-workspace/hyperscape/packages/gold-betting-demo/deployments/contracts.json`.
+That file is the shared source of truth for app defaults, keeper defaults, local scripts, and EVM deploy receipt syncing.
 
 ## Local E2E tests (Anchor + mock GOLD)
 
@@ -115,7 +120,8 @@ Notes for balances:
 - Mainnet E2E uses real GOLD mint `DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump`.
 - If the wallet has no GOLD, test automatically places bet using `SOL` (swap-to-GOLD path), while seed-liquidity is expected to fail unless wallet already has GOLD.
 - For full mainnet button-success flow (including seed), pre-fund the headless wallet with GOLD.
-- Testnet deploy-on-demand needs enough SOL for both program deploys. The script now checks for approximately `>= 4 SOL` before deploy.
+- Testnet deploy-on-demand now deploys all three Solana betting programs (`fight_oracle`, `gold_clob_market`, `gold_perps_market`) using the checked-in program keypairs.
+- Testnet deploy-on-demand needs enough SOL for all program deploys. Plan for approximately `>= 4 SOL` before deploy.
 
 ## Run the Vite app
 
@@ -209,16 +215,42 @@ Bot behavior:
 - posts oracle result after close and resolves open market
 - auto-seeds empty markets after delay using market-maker wallet balance (including collected fees)
 
-## Mainnet environment
+## Deployment prep
 
-Prepared files:
+Preflight the repo before touching real chains:
+
+```bash
+bun run deploy:preflight:testnet
+bun run deploy:preflight:mainnet
+```
+
+Deploy Solana programs with the checked-in keypairs:
+
+```bash
+bun run anchor:deploy:testnet
+bun run anchor:deploy:mainnet
+```
+
+Deploy EVM GoldClob contracts:
+
+```bash
+bun run deploy:evm:bsc-testnet
+bun run deploy:evm:bsc
+# optional if you want Base enabled too
+bun run deploy:evm:base-sepolia
+bun run deploy:evm:base
+```
+
+The EVM deploy script now writes a receipt to `/Users/shawwalters/eliza-workspace/hyperscape/packages/evm-contracts/deployments/<network>.json`
+and updates `/Users/shawwalters/eliza-workspace/hyperscape/packages/gold-betting-demo/deployments/contracts.json` automatically.
+
+Private env files stay local:
 
 - `/Users/shawwalters/eliza-workspace/hyperscape/packages/gold-betting-demo/.env.mainnet`
 - `/Users/shawwalters/eliza-workspace/hyperscape/packages/gold-betting-demo/.env.testnet`
 - `/Users/shawwalters/eliza-workspace/hyperscape/packages/gold-betting-demo/app/.env.mainnet`
 
-These include provided Helius and Birdeye keys and default GOLD mint settings.
-They now also include fee + bot defaults (`BET_FEE_BPS`, poll loop settings).
+These should hold RPC URLs, signer paths, and private API keys. They should not be treated as public deployment metadata.
 
 ## Notes
 

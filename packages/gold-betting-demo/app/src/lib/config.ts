@@ -1,5 +1,12 @@
 import { PublicKey } from "@solana/web3.js";
 
+import {
+  type BettingAppEnvironment,
+  type BettingEvmNetwork,
+  resolveBettingEvmDefaults,
+  resolveBettingSolanaDeployment,
+} from "../../../deployments";
+
 export type SolanaCluster = "localnet" | "devnet" | "testnet" | "mainnet-beta";
 
 // ============================================================================
@@ -123,11 +130,80 @@ function resolveRuntimeEnvironment(buildEnv: Environment): Environment {
 
 export const RUNTIME_ENV: Environment = resolveRuntimeEnvironment(ACTIVE_ENV);
 
+function asDeploymentEnvironment(
+  environment: Environment,
+): BettingAppEnvironment {
+  return environment;
+}
+
+function defaultRpcUrlForEvmNetwork(network: BettingEvmNetwork): string {
+  switch (network) {
+    case "bsc":
+      return "https://bsc-dataseed.binance.org";
+    case "bscTestnet":
+      return "https://data-seed-prebsc-1-s1.binance.org:8545";
+    case "base":
+      return "https://mainnet.base.org";
+    case "baseSepolia":
+      return "https://sepolia.base.org";
+  }
+}
+
+function buildSolanaProgramConfig(
+  environment: Environment,
+): Pick<
+  EnvConfig,
+  | "fightOracleProgramId"
+  | "goldClobMarketProgramId"
+  | "goldPerpsMarketProgramId"
+  | "goldMint"
+  | "usdcMint"
+> {
+  const deployment = resolveBettingSolanaDeployment(environment);
+  return {
+    fightOracleProgramId: deployment.fightOracleProgramId,
+    goldClobMarketProgramId: deployment.goldClobMarketProgramId,
+    goldPerpsMarketProgramId: deployment.goldPerpsMarketProgramId,
+    goldMint: deployment.goldMint,
+    usdcMint: deployment.usdcMint,
+  };
+}
+
+function buildEvmConfig(
+  environment: Environment,
+): Pick<
+  EnvConfig,
+  | "bscRpcUrl"
+  | "bscChainId"
+  | "bscGoldClobAddress"
+  | "bscGoldTokenAddress"
+  | "baseRpcUrl"
+  | "baseChainId"
+  | "baseGoldClobAddress"
+  | "baseGoldTokenAddress"
+> {
+  const defaults = resolveBettingEvmDefaults(
+    asDeploymentEnvironment(environment),
+  );
+  return {
+    bscRpcUrl: defaultRpcUrlForEvmNetwork(defaults.bsc.networkKey),
+    bscChainId: defaults.bsc.chainId,
+    bscGoldClobAddress: defaults.bsc.goldClobAddress,
+    bscGoldTokenAddress: defaults.bsc.goldTokenAddress,
+    baseRpcUrl: defaultRpcUrlForEvmNetwork(defaults.base.networkKey),
+    baseChainId: defaults.base.chainId,
+    baseGoldClobAddress: defaults.base.goldClobAddress,
+    baseGoldTokenAddress: defaults.base.goldTokenAddress,
+  };
+}
+
 export interface EnvConfig {
   cluster: SolanaCluster;
   rpcUrl: string;
   wsUrl?: string;
   fightOracleProgramId: string;
+  goldClobMarketProgramId: string;
+  goldPerpsMarketProgramId: string;
   goldMint: string;
   usdcMint?: string;
   betWindowSeconds: number;
@@ -195,16 +271,6 @@ const baseConfig: Partial<EnvConfig> = {
     import.meta.env.VITE_HEADLESS_WALLET_SECRET_KEY || "",
   headlessWalletsJson: import.meta.env.VITE_HEADLESS_WALLETS || "",
 
-  bscRpcUrl: "https://data-seed-prebsc-1-s1.binance.org:8545",
-  bscChainId: 97,
-  bscGoldClobAddress: "",
-  bscGoldTokenAddress: "",
-
-  baseRpcUrl: "https://sepolia.base.org",
-  baseChainId: 84532,
-  baseGoldClobAddress: "",
-  baseGoldTokenAddress: "",
-
   walletConnectProjectId: (
     import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || ""
   ).trim(),
@@ -213,33 +279,33 @@ const baseConfig: Partial<EnvConfig> = {
 export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
   devnet: {
     ...baseConfig,
+    ...buildSolanaProgramConfig("devnet"),
+    ...buildEvmConfig("devnet"),
     cluster: "devnet",
     rpcUrl: "https://api.devnet.solana.com",
     wsUrl: "wss://api.devnet.solana.com/",
-    fightOracleProgramId: "A6utqr1N4KP3Tst2tMCqfJR4mhCRNw4M2uN3Nb6nPBcS",
-    goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
     uiSyncDelayMs: 0,
     headlessWalletName: "Headless Test Wallet",
     headlessWalletAutoConnect: false,
   } as EnvConfig,
   testnet: {
     ...baseConfig,
+    ...buildSolanaProgramConfig("testnet"),
+    ...buildEvmConfig("testnet"),
     cluster: "testnet",
     rpcUrl: "https://api.testnet.solana.com",
     wsUrl: "wss://api.testnet.solana.com/",
-    fightOracleProgramId: "EW9GwxawnPEHA4eFgqd2oq9t55gSG4ReNqPRyG6Ui6PF",
-    goldMint: "", // From .env.testnet
     uiSyncDelayMs: 0,
     headlessWalletName: "Headless Test Wallet",
     headlessWalletAutoConnect: false,
   } as EnvConfig,
   localnet: {
     ...baseConfig,
+    ...buildSolanaProgramConfig("localnet"),
+    ...buildEvmConfig("localnet"),
     cluster: "localnet",
     rpcUrl: "http://127.0.0.1:8899",
     wsUrl: "ws://127.0.0.1:8900",
-    fightOracleProgramId: "",
-    goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
     streamUrl: "",
     uiSyncDelayMs: 0,
     headlessWalletName: "Headless Test Wallet",
@@ -247,10 +313,11 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
   } as EnvConfig,
   e2e: {
     ...baseConfig,
+    ...buildSolanaProgramConfig("localnet"),
+    ...buildEvmConfig("e2e"),
     cluster: "localnet",
     rpcUrl: "http://127.0.0.1:8899",
     wsUrl: "ws://127.0.0.1:8900",
-    fightOracleProgramId: "",
     goldMint: "XeYyjz6Y351cyYDJAyghh6gJja9NF1ssiAXuem8YDyx",
     streamUrl: "",
     enableAutoSeed: false,
@@ -261,10 +328,11 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
   } as EnvConfig,
   "stream-ui": {
     ...baseConfig,
+    ...buildSolanaProgramConfig("devnet"),
+    ...buildEvmConfig("stream-ui"),
     cluster: "devnet",
     rpcUrl: "https://api.devnet.solana.com",
     fightOracleProgramId: "11111111111111111111111111111111",
-    goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
     streamUrl: "",
     enableAutoSeed: false,
     refreshIntervalMs: 60000,
@@ -274,14 +342,13 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
   } as EnvConfig,
   "mainnet-beta": {
     ...baseConfig,
+    ...buildSolanaProgramConfig("mainnet-beta"),
+    ...buildEvmConfig("mainnet-beta"),
     cluster: "mainnet-beta",
     rpcUrl: "https://api.mainnet-beta.solana.com",
     wsUrl: "wss://api.mainnet-beta.solana.com/",
     gameApiUrl: DEFAULT_PRODUCTION_GAME_API_URL,
     gameWsUrl: `${DEFAULT_PRODUCTION_GAME_API_URL.replace(/^http/, "ws")}/ws`,
-    fightOracleProgramId: "EW9GwxawnPEHA4eFgqd2oq9t55gSG4ReNqPRyG6Ui6PF",
-    goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
-    usdcMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     uiSyncDelayMs: 0,
     headlessWalletName: "Headless Test Wallet",
     headlessWalletAutoConnect: false,
@@ -328,6 +395,12 @@ export const CONFIG: EnvConfig = {
   fightOracleProgramId:
     readEnvString("VITE_FIGHT_ORACLE_PROGRAM_ID") ??
     baseEnvConfig.fightOracleProgramId,
+  goldClobMarketProgramId:
+    readEnvString("VITE_GOLD_CLOB_MARKET_PROGRAM_ID") ??
+    baseEnvConfig.goldClobMarketProgramId,
+  goldPerpsMarketProgramId:
+    readEnvString("VITE_GOLD_PERPS_MARKET_PROGRAM_ID") ??
+    baseEnvConfig.goldPerpsMarketProgramId,
   goldMint: readEnvString("VITE_GOLD_MINT") ?? baseEnvConfig.goldMint,
   usdcMint: readEnvString("VITE_USDC_MINT") ?? baseEnvConfig.usdcMint,
   betWindowSeconds: readEnvNumber(
