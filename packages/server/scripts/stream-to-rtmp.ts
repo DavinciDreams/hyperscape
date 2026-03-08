@@ -174,6 +174,13 @@ const CAPTURE_RECOVERY_MAX_FAILURES = Math.max(
     10,
   ) || 2,
 );
+const CDP_STARTUP_TIMEOUT_MS = Math.max(
+  5_000,
+  Number.parseInt(
+    process.env.STREAM_CAPTURE_START_TIMEOUT_MS || "15_000",
+    10,
+  ) || 15_000,
+);
 
 // ── CDP Frame Rate Tracking ────────────────────────────────────────────────
 
@@ -642,14 +649,12 @@ async function startLegacyCapture(bridge: ReturnType<typeof getRTMPBridge>) {
   // Start WebSocket bridge for MediaRecorder chunks
   bridge.start(BRIDGE_PORT);
 
-  if (
-    !REQUIRE_IN_PAGE_READY_PROBE &&
-    selectedGameUrl?.includes("?page=stream")
-  ) {
+  const streamPageMayAlreadyCapture =
+    !REQUIRE_IN_PAGE_READY_PROBE && selectedGameUrl?.includes("?page=stream");
+  if (streamPageMayAlreadyCapture) {
     console.log(
-      "[Main] Relying on built-in stream-page bridge capture; skipping Playwright MediaRecorder injection.",
+      "[Main] Stream page capture bridge may already be active; will inject MediaRecorder only if the in-page bridge is inactive.",
     );
-    return null;
   }
 
   const captureScript = generateCaptureScript({
@@ -910,7 +915,42 @@ async function main() {
 
   if (CAPTURE_MODE === "cdp") {
     // ── CDP Mode: Direct screencast frame piping ──
-    await startCdpCapture(bridge);
+    try {
+      await withTimeout(
+        startCdpCapture(bridge),
+        CDP_STARTUP_TIMEOUT_MS,
+        "CDP screencast startup",
+      );
+    } catch (err) {
+      console.warn(
+        `[Main] CDP startup failed; falling back to MediaRecorder injection: ${errMsg(err)}`,
+      );
+      await withTimeout(
+        stopCdpCapture(),
+        5_000,
+        "Stop failed CDP capture",
+      ).catch(() => undefined);
+      bridge.stop();
+      bridge.startSpectatorServer(SPECTATOR_PORT);
+      captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
+      activeCaptureMode = "mediarecorder";
+
+      const healthy = await waitForCaptureTraffic(bridge, 20_000);
+      if (!healthy) {
+        console.warn(
+          "[Main] MediaRecorder fallback produced no media within 20s; trying WebCodecs capture.",
+        );
+        if (captureWatchdog) {
+          clearInterval(captureWatchdog);
+          captureWatchdog = null;
+        }
+        await stopInPageCaptureControl();
+        bridge.stop();
+        bridge.startSpectatorServer(SPECTATOR_PORT);
+        captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
+        activeCaptureMode = "webcodecs";
+      }
+    }
   } else if (CAPTURE_MODE === "webcodecs") {
     // ── WebCodecs Mode: Native VideoEncoder API to FFmpeg -c:v copy ──
     captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
