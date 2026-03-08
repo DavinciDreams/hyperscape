@@ -70,7 +70,7 @@ jobs:
       - name: Install Railway CLI
         run: bun add -g @railway/cli
 
-      - name: Seed Railway keeper context
+      - name: Write Railway keeper context
         working-directory: packages/gold-betting-demo/keeper
         run: |
           keeper_path="$(pwd)"
@@ -89,7 +89,6 @@ jobs:
             }
           }
           EOF
-          railway status
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
