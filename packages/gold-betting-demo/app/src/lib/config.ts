@@ -240,12 +240,8 @@ export interface EnvConfig {
   walletConnectProjectId: string;
 }
 
-const DEFAULT_STREAM_SOURCES = [
-  "https://www.youtube.com/embed/live_stream?channel=UCiDiDJaRuJ-Iq9M5SNGDsUw",
-  "https://www.twitch.tv/shawmakesmagic",
-] as const;
-const DEFAULT_STREAM_URL = DEFAULT_STREAM_SOURCES[0];
-const DEFAULT_STREAM_FALLBACK_URL = DEFAULT_STREAM_SOURCES[1];
+const DEFAULT_STREAM_URL = "https://www.twitch.tv/hyperscapeai";
+const DEFAULT_STREAM_FALLBACK_URL = "";
 const DEFAULT_GAME_API_URL = "http://127.0.0.1:5555";
 const DEFAULT_PRODUCTION_GAME_API_URL =
   "https://gold-betting-keeper-production.up.railway.app";

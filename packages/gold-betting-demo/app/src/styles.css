@@ -2771,17 +2771,24 @@ select:focus-visible {
 /* ---- Viewport Row ---- */
 .hm-viewport-row {
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+  background: var(--hm-bg);
 }
 
 .hm-game-viewport {
-  /* Width set by JS via inline style; flex-shrink: 0 so it holds its size */
-  flex-shrink: 0;
+  flex: none;
   position: relative;
+  width: 100%;
   min-width: 0;
+  min-height: 240px;
+  aspect-ratio: 16 / 9;
+  max-height: min(44vh, 560px);
   overflow: hidden;
   background: var(--hm-bg);
+  border-bottom: 1px solid var(--hm-border);
 }
 
 .hm-game-placeholder {
@@ -2877,6 +2884,7 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 220px;
   position: relative;
   background: var(--hm-surface);
   border-bottom: 1px solid var(--hm-border);
@@ -4872,16 +4880,17 @@ select:focus-visible {
   }
 
   .hm-game-viewport {
-    flex: 1.8;
-    border-right: 1px solid var(--hm-border);
-    border-bottom: none;
-    /* Width controlled by CSS flex — JS inline style is suppressed on mobile */
-    width: auto !important;
+    width: 100% !important;
+    min-height: 220px;
+    max-height: min(40vh, 480px);
+    border-right: none;
+    border-bottom: 1px solid var(--hm-border);
   }
 
   .hm-chart-panel {
     flex: 1;
     min-width: 0;
+    min-height: 180px;
   }
 
   .hm-bottom-panel {

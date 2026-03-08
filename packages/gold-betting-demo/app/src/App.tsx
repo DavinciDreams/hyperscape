@@ -284,7 +284,6 @@ export function App() {
   const [isShowingStats, setIsShowingStats] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [streamSourceIndex, setStreamSourceIndex] = useState(0);
-  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
   const [showPointsDrawer, setShowPointsDrawer] = useState(false);
 
   // ── Resizable panels ─────────────────────────────────────────────────────
@@ -292,13 +291,6 @@ export function App() {
   // because they override CSS media-query layout (sidebar fixed sheet, etc.)
   const isMobile = useIsMobile(768);
 
-  // Stream panel width (left column in viewport-row)
-  const { size: streamWidthPx, startDrag: startStreamDrag } = useResizePanel({
-    initial: 520,
-    min: 180,
-    max: 1400,
-    storageKey: "hs-panel-stream",
-  });
   // Sidebar width (right column)
   const { size: sidebarWidthPx, startDrag: startSidebarDrag } = useResizePanel({
     initial: 320,
@@ -1628,10 +1620,7 @@ export function App() {
                 )}
 
                 {/* Game Viewport */}
-                <div
-                  className="hm-game-viewport"
-                  style={isMobile ? undefined : { width: streamWidthPx }}
-                >
+                <div className="hm-game-viewport">
                   {activeStreamUrl ? (
                     <>
                       <StreamPlayer
@@ -1706,11 +1695,6 @@ export function App() {
                     </div>
                   )}
                 </div>
-
-                <ResizeHandle
-                  direction="h"
-                  onMouseDown={(e) => startStreamDrag(e, "x")}
-                />
 
                 {/* Odds Chart */}
                 <div className="hm-chart-panel">
