@@ -76,36 +76,37 @@ export default defineConfig(async ({ mode }) => {
   assertPublicBuildSecrets(mode, env);
   const plugins: any[] = [react()];
   const alias: Record<string, string> = {};
-  const polyfillShimsPath = path.resolve(
-    __dirname,
-    "node_modules",
-    "vite-plugin-node-polyfills",
-    "shims",
+  const require = createRequire(import.meta.url);
+  const nodePolyfillsRoot = path.dirname(
+    path.dirname(require.resolve("vite-plugin-node-polyfills")),
   );
 
   // Some transitive deps (for example @metamask/sdk) import these shim paths
-  // directly, and with workspace hoisting they may resolve outside this package.
-  // Pin them to this app's installed shim files so Rollup resolution is stable.
-  alias["vite-plugin-node-polyfills/shims/global"] = path.resolve(
-    polyfillShimsPath,
+  // directly. Resolve them from the installed package root so the build remains
+  // stable whether Bun installs them locally or hoists them in CI, while still
+  // pointing Vite dev/build at the ESM shim files.
+  alias["vite-plugin-node-polyfills/shims/global"] = path.join(
+    nodePolyfillsRoot,
+    "shims",
     "global",
     "dist",
     "index.js",
   );
-  alias["vite-plugin-node-polyfills/shims/process"] = path.resolve(
-    polyfillShimsPath,
+  alias["vite-plugin-node-polyfills/shims/process"] = path.join(
+    nodePolyfillsRoot,
+    "shims",
     "process",
     "dist",
     "index.js",
   );
-  alias["vite-plugin-node-polyfills/shims/buffer"] = path.resolve(
-    polyfillShimsPath,
+  alias["vite-plugin-node-polyfills/shims/buffer"] = path.join(
+    nodePolyfillsRoot,
+    "shims",
     "buffer",
     "dist",
     "index.js",
   );
 
-  const require = createRequire(import.meta.url);
   const curvesMainPath = require.resolve("@noble/curves");
 
   // Fix for @noble/curves import resolution inside the turbo monorepo
