@@ -86,6 +86,9 @@ jobs:
                 "environmentName": "production",
                 "service": "${RAILWAY_KEEPER_SERVICE_ID}"
               }
+            },
+            "user": {
+              "token": "${RAILWAY_TOKEN}"
             }
           }
           EOF
