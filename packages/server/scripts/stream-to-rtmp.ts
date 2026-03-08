@@ -119,6 +119,24 @@ const CDP_QUALITY = Math.min(
   Math.max(1, parseInt(process.env.STREAM_CDP_QUALITY || "80", 10)),
 );
 const TARGET_FPS = parseInt(process.env.STREAM_FPS || "30", 10);
+const STREAM_CAPTURE_WARMUP_MS = Math.max(
+  250,
+  Number.parseInt(process.env.STREAM_CAPTURE_WARMUP_MS || "1000", 10) || 1000,
+);
+const REQUIRE_IN_PAGE_READY_PROBE =
+  process.env.STREAM_CAPTURE_REQUIRE_READY_PROBE === "true";
+const USE_TIMED_STREAM_WARMUP =
+  !REQUIRE_IN_PAGE_READY_PROBE &&
+  process.platform === "linux" &&
+  !STREAM_CAPTURE_HEADLESS;
+const STREAM_CAPTURE_POST_NAV_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(
+    process.env.STREAM_CAPTURE_POST_NAV_DELAY_MS ||
+      (USE_TIMED_STREAM_WARMUP ? "250" : "5000"),
+    10,
+  ) || 0,
+);
 
 function parseEvenDimension(
   rawValue: string | undefined,
@@ -496,6 +514,15 @@ async function setupBrowser() {
         continue;
       }
 
+      if (USE_TIMED_STREAM_WARMUP) {
+        console.log(
+          `[Main] Using timed warmup (${STREAM_CAPTURE_WARMUP_MS}ms) for ${candidateUrl}; skipping in-page readiness probe on headed Linux CDP capture.`,
+        );
+        await page.waitForTimeout(STREAM_CAPTURE_WARMUP_MS);
+        selectedGameUrl = candidateUrl;
+        break;
+      }
+
       console.log(`[Main] Waiting for stream readiness on ${candidateUrl}...`);
       const isReady = await waitForStreamReadiness(page, 90_000);
       if (isReady) {
@@ -532,8 +559,12 @@ async function setupBrowser() {
   }
 
   console.log(`[Main] Using game page: ${selectedGameUrl}`);
-  console.log("[Main] Waiting for game to initialize...");
-  await page.waitForTimeout(5000);
+  if (STREAM_CAPTURE_POST_NAV_DELAY_MS > 0) {
+    console.log(
+      `[Main] Waiting ${STREAM_CAPTURE_POST_NAV_DELAY_MS}ms before starting capture...`,
+    );
+    await page.waitForTimeout(STREAM_CAPTURE_POST_NAV_DELAY_MS);
+  }
 
   launchTime = Date.now();
 }
@@ -610,6 +641,16 @@ async function startLegacyCapture(bridge: ReturnType<typeof getRTMPBridge>) {
 
   // Start WebSocket bridge for MediaRecorder chunks
   bridge.start(BRIDGE_PORT);
+
+  if (
+    !REQUIRE_IN_PAGE_READY_PROBE &&
+    selectedGameUrl?.includes("?page=stream")
+  ) {
+    console.log(
+      "[Main] Relying on built-in stream-page bridge capture; skipping Playwright MediaRecorder injection.",
+    );
+    return null;
+  }
 
   const captureScript = generateCaptureScript({
     bridgeUrl: BRIDGE_URL,

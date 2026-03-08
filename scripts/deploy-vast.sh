@@ -91,6 +91,8 @@ cd packages/impostors && bun run build && cd ../..
 cd packages/procgen && bun run build && cd ../..
 cd packages/asset-forge && bun run build:services && cd ../..
 cd packages/shared && bun run build && cd ../..
+echo "[deploy] Building fresh client dist for stream/runtime pages..."
+cd packages/client && bun run build:cf && cd ../..
 
 # ── Database migration (after connections cleared) ────────────
 echo "[deploy] Applying database migrations..."
