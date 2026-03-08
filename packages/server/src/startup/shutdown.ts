@@ -112,7 +112,6 @@ export function registerShutdownHandlers(
   dbContext: DatabaseContext,
   web3Context: Web3Context | null = null,
 ): void {
-  console.log("[Shutdown] Registering shutdown handlers...");
   const dbWriteErrorsNonFatal = /^(1|true|yes|on)$/i.test(
     process.env.DB_WRITE_ERRORS_NON_FATAL || "",
   );
@@ -132,12 +131,9 @@ export function registerShutdownHandlers(
    */
   const gracefulShutdown = async (signal: string) => {
     if (isShuttingDown) {
-      console.log(`[Shutdown] Already shutting down, ignoring ${signal}`);
       return;
     }
     isShuttingDown = true;
-
-    console.log(`[Shutdown] Received ${signal}, starting graceful shutdown...`);
     if (signal !== "SIGUSR2") {
       const details: Record<string, string> = {
         signal,
@@ -155,9 +151,7 @@ export function registerShutdownHandlers(
     try {
       const capture = getStreamCapture();
       if (capture.isRunning()) {
-        console.log("[Shutdown] Stopping stream capture...");
         await capture.stop();
-        console.log("[Shutdown] ✅ Stream capture stopped");
       }
     } catch {
       // Stream capture may not have been initialized
@@ -176,9 +170,7 @@ export function registerShutdownHandlers(
     try {
       const scheduler = getStreamingDuelScheduler();
       if (scheduler) {
-        console.log("[Shutdown] Destroying StreamingDuelScheduler...");
         scheduler.destroy();
-        console.log("[Shutdown] ✅ StreamingDuelScheduler destroyed");
       }
     } catch (err) {
       console.error(
@@ -191,9 +183,7 @@ export function registerShutdownHandlers(
     try {
       const arenaService = ArenaService.tryForWorld(context.world);
       if (arenaService) {
-        console.log("[Shutdown] Destroying ArenaService...");
         arenaService.destroy();
-        console.log("[Shutdown] ✅ ArenaService destroyed");
       }
     } catch (err) {
       console.error("[Shutdown] Error destroying ArenaService:", err);
@@ -203,9 +193,7 @@ export function registerShutdownHandlers(
     try {
       const marketMaker = getDuelMarketMaker();
       if (marketMaker) {
-        console.log("[Shutdown] Destroying DuelMarketMaker...");
         marketMaker.destroy();
-        console.log("[Shutdown] ✅ DuelMarketMaker destroyed");
       }
     } catch (err) {
       console.error("[Shutdown] Failed to destroy DuelMarketMaker:", err);
@@ -234,15 +222,12 @@ export function registerShutdownHandlers(
     // Step 8: Stop memory monitor
     try {
       stopMemoryMonitor();
-      console.log("[Shutdown] ✅ Memory monitor stopped");
     } catch {
       // Memory monitor may not have been started
     }
 
     // Step 9: Clear startup flag
     clearStartupFlag();
-
-    console.log("[Shutdown] ✅ Graceful shutdown complete");
 
     // For hot reload (SIGUSR2), don't exit process
     if (signal === "SIGUSR2") {
@@ -308,10 +293,6 @@ export function registerShutdownHandlers(
 
     if (isShuttingDown) {
       if (isNonFatalAgentError) {
-        console.log(
-          "[Shutdown] Suppressing expected shutdown error:",
-          reasonStr.substring(0, 100),
-        );
         return;
       }
       console.error(
@@ -339,13 +320,6 @@ export function registerShutdownHandlers(
     };
     void gracefulShutdown("unhandledRejection");
   });
-
-  // Log that hot reload is supported
-  if (process.env.NODE_ENV === "development") {
-    console.log("[Shutdown] Hot reload supported (SIGUSR2)");
-  }
-
-  console.log("[Shutdown] ✅ Shutdown handlers registered");
 }
 
 /**
@@ -357,13 +331,9 @@ export function registerShutdownHandlers(
  */
 async function shutdownAgents(): Promise<void> {
   try {
-    console.log("[Shutdown] Shutting down embedded agents...");
     const agentManager = getAgentManager();
     if (agentManager) {
       await agentManager.shutdown();
-      console.log("[Shutdown] ✅ Embedded agents shut down");
-    } else {
-      console.log("[Shutdown] No agent manager found, skipping agent shutdown");
     }
   } catch (err) {
     console.error("[Shutdown] Error shutting down agents:", err);
@@ -372,9 +342,7 @@ async function shutdownAgents(): Promise<void> {
   // Stop model agents (ElizaOS LLM agents managed by ModelAgentSpawner).
   // This clears behaviorIntervals, agentPlans, and stops all runtimes.
   try {
-    console.log("[Shutdown] Stopping model agents...");
     await stopAllModelAgents();
-    console.log("[Shutdown] ✅ Model agents stopped");
   } catch (err) {
     console.error("[Shutdown] Error stopping model agents:", err);
   }
@@ -394,9 +362,7 @@ async function shutdownWeb3(context: ShutdownContext): Promise<void> {
   }
 
   try {
-    console.log("[Shutdown] Shutting down Web3 chain writer...");
     await context.web3Context.shutdown();
-    console.log("[Shutdown] ✅ Web3 chain writer shut down");
   } catch (err) {
     console.error("[Shutdown] Error shutting down Web3:", err);
   }
@@ -417,8 +383,6 @@ async function shutdownWeb3(context: ShutdownContext): Promise<void> {
  */
 async function forcePlayerDataSave(context: ShutdownContext): Promise<void> {
   try {
-    console.log("[Shutdown] Force-saving all player data...");
-
     const savePromises: Promise<void>[] = [];
 
     // Get each critical system and call destroyAsync() directly
@@ -456,7 +420,6 @@ async function forcePlayerDataSave(context: ShutdownContext): Promise<void> {
     }
 
     await Promise.all(savePromises);
-    console.log("[Shutdown] ✅ Player data saved");
   } catch (err) {
     console.error("[Shutdown] Error force-saving player data:", err);
   }
@@ -472,9 +435,7 @@ async function forcePlayerDataSave(context: ShutdownContext): Promise<void> {
  */
 async function closeHttpServer(context: ShutdownContext): Promise<void> {
   try {
-    console.log("[Shutdown] Closing HTTP server...");
     await context.fastify.close();
-    console.log("[Shutdown] ✅ HTTP server closed");
   } catch (err) {
     console.error("[Shutdown] Error closing HTTP server:", err);
   }
@@ -493,14 +454,12 @@ async function waitForDatabaseOperations(
   context: ShutdownContext,
 ): Promise<void> {
   try {
-    console.log("[Shutdown] Waiting for pending database operations...");
     const databaseSystem = context.world.getSystem("database") as
       | DatabaseSystem
       | undefined;
 
     if (databaseSystem) {
       await databaseSystem.waitForPendingOperations();
-      console.log("[Shutdown] ✅ Database operations complete");
     }
   } catch (err) {
     console.error(
@@ -520,15 +479,11 @@ async function waitForDatabaseOperations(
  */
 async function cleanupGlobalServices(): Promise<void> {
   try {
-    console.log("[Shutdown] Cleaning up global services...");
-
     // Destroy all rate limiters (clears cleanup intervals and player entries)
     destroyAllRateLimiters();
-    console.log("[Shutdown] ✅ Rate limiters destroyed");
 
     // Destroy idempotency service (clears cleanup interval and request hashes)
     destroyIdempotencyService();
-    console.log("[Shutdown] ✅ Idempotency service destroyed");
   } catch (err) {
     console.error("[Shutdown] Error cleaning up global services:", err);
   }
@@ -544,9 +499,7 @@ async function cleanupGlobalServices(): Promise<void> {
  */
 async function destroyWorld(context: ShutdownContext): Promise<void> {
   try {
-    console.log("[Shutdown] Destroying world...");
     context.world.destroy();
-    console.log("[Shutdown] ✅ World destroyed");
   } catch (err) {
     console.error("[Shutdown] Error destroying world:", err);
   }
@@ -564,9 +517,7 @@ async function closeDatabaseConnections(
   _context: ShutdownContext,
 ): Promise<void> {
   try {
-    console.log("[Shutdown] Closing database connections...");
     await closeDatabase();
-    console.log("[Shutdown] ✅ Database connections closed");
   } catch (err) {
     console.error("[Shutdown] Error closing database:", err);
   }
@@ -583,9 +534,7 @@ async function closeDatabaseConnections(
 async function stopDocker(context: ShutdownContext): Promise<void> {
   try {
     if (context.dbContext.dockerManager) {
-      console.log("[Shutdown] Stopping Docker PostgreSQL...");
       await context.dbContext.dockerManager.stopPostgres();
-      console.log("[Shutdown] ✅ Docker stopped");
     }
   } catch (err) {
     console.error("[Shutdown] Error stopping Docker:", err);

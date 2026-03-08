@@ -155,15 +155,12 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
    * Initialize the service and spawn the agent's player entity
    */
   async initialize(): Promise<void> {
-    console.log(
-      `[EmbeddedHyperscapeService] Initializing agent ${this.name} (${this.characterId})`,
-    );
     const traceEnabled = process.env.EMBEDDED_AGENT_INIT_TRACE === "true";
     const startTime = Date.now();
     const trace = (step: string) => {
       if (!traceEnabled) return;
       const elapsed = Date.now() - startTime;
-      console.log(
+      console.debug(
         `[EmbeddedHyperscapeService][Trace] ${this.characterId} ${step} (+${elapsed}ms)`,
       );
     };
@@ -171,9 +168,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     // Check if player entity already exists
     const existingEntity = this.world.entities.get(this.characterId);
     if (existingEntity) {
-      console.log(
-        `[EmbeddedHyperscapeService] Player entity already exists: ${this.characterId}`,
-      );
       this.playerEntityId = this.characterId;
       this.isActive = true;
       this.subscribeToWorldEvents();
@@ -342,11 +336,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     // Calculate health from constitution
     const health = skills.constitution.level;
 
-    // Spawn the player entity
-    console.log(
-      `[EmbeddedHyperscapeService] Spawning agent at position [${position.join(", ")}]`,
-    );
-
     const addedEntity = this.world.entities.add
       ? this.world.entities.add({
           id: this.characterId,
@@ -398,10 +387,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
         addedEntity as unknown as import("@hyperscape/shared").PlayerLocal,
       isEmbeddedAgent: true,
     });
-
-    console.log(
-      `[EmbeddedHyperscapeService] ✅ Agent ${this.name} spawned successfully`,
-    );
 
     // Subscribe to world events
     this.subscribeToWorldEvents();
@@ -555,8 +540,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
    * Stop the service and remove the player entity
    */
   async stop(): Promise<void> {
-    console.log(`[EmbeddedHyperscapeService] Stopping agent ${this.name}`);
-
     this.isActive = false;
 
     // Remove world event listeners to prevent leaks on agent restart
@@ -590,8 +573,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     this.localChatBuffer = [];
 
     this.eventHandlers.clear();
-
-    console.log(`[EmbeddedHyperscapeService] ✅ Agent ${this.name} stopped`);
   }
 
   // ============================================================================

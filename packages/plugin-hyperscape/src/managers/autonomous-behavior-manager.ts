@@ -81,6 +81,7 @@ import {
 } from "../actions/banking.js";
 import { moveToAction } from "../actions/movement.js";
 import {
+  getWorldMapSignature,
   KNOWN_LOCATIONS,
   updateKnownLocationsFromNearbyEntities,
   populateKnownLocationsFromWorldMap,
@@ -411,8 +412,9 @@ export class AutonomousBehaviorManager {
   /** Prevents duplicate async bank withdrawal calls */
   private bankWithdrawalInProgress = false;
 
-  /** Whether KNOWN_LOCATIONS has been populated from world map data */
-  private knownLocationsPopulated = false;
+  /** Last world-map signature applied to KNOWN_LOCATIONS */
+  private knownLocationsWorldMapSignature: string | null = null;
+  private warnedAboutMissingWorldMap = false;
 
   /** Last time we triggered a periodic state refresh.
    * Initialized with a random offset so agents don't all hit the DB simultaneously. */
@@ -1113,24 +1115,30 @@ export class AutonomousBehaviorManager {
       return;
     }
 
-    // Ensure KNOWN_LOCATIONS is populated from world map (once)
-    // This must happen before the short-circuit tries to resolve NPC positions.
-    // mapProvider populates lazily on LLM path, but short-circuit runs first.
-    if (!this.knownLocationsPopulated && this.service) {
+    // Ensure KNOWN_LOCATIONS is populated from world map before short-circuit
+    // navigation reads it. Refresh when the world map changes, not just once.
+    if (this.service) {
       const worldMap = this.service.getWorldMap?.();
       if (worldMap) {
-        logger.info(
-          `[AutonomousBehavior] WorldMap data: towns=${worldMap.towns?.length ?? 0}, pois=${worldMap.pois?.length ?? 0}, npcs=${worldMap.npcs?.length ?? 0}, resources=${worldMap.resources?.length ?? 0}, stations=${worldMap.stations?.length ?? 0}`,
-        );
-        populateKnownLocationsFromWorldMap(worldMap);
-        this.knownLocationsPopulated = true;
-        logger.info(
-          `[AutonomousBehavior] Populated KNOWN_LOCATIONS from world map`,
-        );
-      } else {
+        const worldMapSignature =
+          this.service.getWorldMapSignature?.() ??
+          getWorldMapSignature(worldMap);
+        if (this.knownLocationsWorldMapSignature !== worldMapSignature) {
+          logger.info(
+            `[AutonomousBehavior] WorldMap data: towns=${worldMap.towns?.length ?? 0}, pois=${worldMap.pois?.length ?? 0}, npcs=${worldMap.npcs?.length ?? 0}, resources=${worldMap.resources?.length ?? 0}, stations=${worldMap.stations?.length ?? 0}`,
+          );
+          populateKnownLocationsFromWorldMap(worldMap);
+          this.knownLocationsWorldMapSignature = worldMapSignature;
+          logger.info(
+            `[AutonomousBehavior] Populated KNOWN_LOCATIONS from world map`,
+          );
+        }
+        this.warnedAboutMissingWorldMap = false;
+      } else if (!this.warnedAboutMissingWorldMap) {
         logger.warn(
           `[AutonomousBehavior] getWorldMap() returned ${worldMap === undefined ? "undefined" : "null"} — worldMap not available yet`,
         );
+        this.warnedAboutMissingWorldMap = true;
       }
     }
 
@@ -1553,15 +1561,14 @@ export class AutonomousBehaviorManager {
         ? `${goal.type} ${goal.description || ""} ${goal.targetSkill || ""}`
         : "idle exploration";
 
-      // Fetch recent (last 5) and relevant (top 3 by keyword match) in parallel
-      const [recentMems, relevantMems] = await Promise.all([
-        this.runtime.getMemories({
-          roomId: message.roomId,
-          count: 5,
-          tableName: "messages",
-        }),
-        this.queryRelevantMemories(message.roomId, situation),
-      ]);
+      // Fetch one window and derive both recent and situation-relevant memories from it.
+      const memoryWindow = await this.runtime.getMemories({
+        roomId: message.roomId,
+        count: 20,
+        tableName: "messages",
+      });
+      const recentMems = memoryWindow.slice(0, 5);
+      const relevantMems = this.queryRelevantMemories(memoryWindow, situation);
 
       const recentTexts = recentMems
         .map((m) => {
@@ -5470,53 +5477,47 @@ export class AutonomousBehaviorManager {
    * Scores each memory by keyword overlap with the situation string,
    * returns top 3 most relevant as formatted strings.
    */
-  private async queryRelevantMemories(
-    roomId: UUID,
+  private queryRelevantMemories(
+    memories: Array<{
+      content?: { text?: string; action?: string };
+    }>,
     situation: string,
-  ): Promise<string[]> {
-    try {
-      const memories = await this.runtime.getMemories({
-        roomId,
-        count: 20,
-        tableName: "messages",
-      });
-      if (memories.length === 0) return [];
+  ): string[] {
+    if (memories.length === 0) return [];
 
-      // Extract keywords from situation (3+ char words, lowercased)
-      const keywords = situation
-        .toLowerCase()
-        .split(/\W+/)
-        .filter((w) => w.length >= 3);
-      if (keywords.length === 0)
-        return memories
-          .slice(0, 3)
-          .map((m) => m.content?.text || "")
-          .filter(Boolean);
-
-      // Score each memory by keyword overlap
-      const scored = memories
-        .map((m) => {
-          const text = (m.content?.text || "").toLowerCase();
-          const action = (m.content?.action || "") as string;
-          let score = 0;
-          for (const kw of keywords) {
-            if (text.includes(kw)) score++;
-          }
-          return {
-            text: action
-              ? `${action}: ${m.content?.text || ""}`
-              : m.content?.text || "",
-            score,
-          };
-        })
-        .filter((s) => s.text.length > 0);
-
-      // Sort by score descending, take top 3
-      scored.sort((a, b) => b.score - a.score);
-      return scored.slice(0, 3).map((s) => s.text);
-    } catch {
-      return [];
+    // Extract keywords from situation (3+ char words, lowercased)
+    const keywords = situation
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((w) => w.length >= 3);
+    if (keywords.length === 0) {
+      return memories
+        .slice(0, 3)
+        .map((m) => m.content?.text || "")
+        .filter((text): text is string => text.length > 0);
     }
+
+    // Score each memory by keyword overlap
+    const scored = memories
+      .map((memory) => {
+        const text = (memory.content?.text || "").toLowerCase();
+        const action = memory.content?.action || "";
+        let score = 0;
+        for (const keyword of keywords) {
+          if (text.includes(keyword)) score++;
+        }
+        return {
+          text: action
+            ? `${action}: ${memory.content?.text || ""}`
+            : memory.content?.text || "",
+          score,
+        };
+      })
+      .filter((entry) => entry.text.length > 0);
+
+    // Sort by score descending, take top 3
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 3).map((entry) => entry.text);
   }
 
   /**

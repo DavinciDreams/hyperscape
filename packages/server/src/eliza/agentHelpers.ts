@@ -103,9 +103,6 @@ export async function loadModelPlugin(
 ): Promise<Plugin | null> {
   const apiKey = process.env[config.apiKeyEnv];
   if (!apiKey) {
-    console.log(
-      `[${tag}] Skipping ${config.displayName} - ${config.apiKeyEnv} not set`,
-    );
     return null;
   }
 
@@ -113,7 +110,6 @@ export async function loadModelPlugin(
     const mod = await import(config.pluginModule);
     const plugin = mod[config.pluginExport] ?? mod.default;
     if (plugin) {
-      console.log(`[${tag}] Loaded plugin for ${config.displayName}`);
       return plugin as Plugin;
     }
     console.warn(
@@ -137,7 +133,6 @@ export async function loadSqlPlugin(tag = "Agent"): Promise<Plugin | null> {
     const mod = await import("@elizaos/plugin-sql");
     const sqlPlugin = mod.plugin ?? mod.default;
     if (sqlPlugin) {
-      console.log(`[${tag}] ✅ SQL plugin loaded`);
       return sqlPlugin;
     }
     console.warn(`[${tag}] ⚠️ SQL plugin module loaded but no export found`);

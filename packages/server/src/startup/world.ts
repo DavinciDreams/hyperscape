@@ -66,10 +66,8 @@ export async function initializeWorld(
   config: ServerConfig,
   dbContext: DatabaseContext,
 ): Promise<World> {
-  console.log("[World] Installing Three.js extensions...");
   installThreeJSExtensions();
 
-  console.log("[World] Creating server world...");
   const world = await createServerWorld();
   const terrainSeedRaw = process.env.TERRAIN_SEED;
   const terrainSeed =
@@ -108,17 +106,12 @@ export async function initializeWorld(
       (
         world as unknown as { solanaArenaOperator: typeof solanaOperator }
       ).solanaArenaOperator = solanaOperator;
-
-      console.log(
-        "[World] ✅ SolanaArenaOperator attached for duel betting (pre-init)",
-      );
     } catch (error) {
       console.warn("[World] Failed to initialize SolanaArenaOperator:", error);
     }
   }
 
   // Register server-specific systems
-  console.log("[World] Registering server systems...");
   const { DatabaseSystem: ServerDatabaseSystem } =
     await import("../systems/DatabaseSystem/index.js");
   const { KillTrackerSystem } =
@@ -130,11 +123,8 @@ export async function initializeWorld(
   world.register("kill-tracker", KillTrackerSystem);
   if (process.env.DISABLE_ACTIVITY_LOGGER !== "true") {
     world.register("activity-logger", ActivityLoggerSystem);
-  } else {
-    console.log("[World] ActivityLogger disabled via DISABLE_ACTIVITY_LOGGER");
   }
   world.register("network", ServerNetwork);
-  console.log("[World] ✅ Systems registered");
 
   // Make PostgreSQL pool and Drizzle DB available for DatabaseSystem to use
   world.pgPool = dbContext.pgPool;
@@ -150,7 +140,6 @@ export async function initializeWorld(
   const storage = new Storage();
 
   // Initialize world (this starts all systems)
-  console.log("[World] Initializing world...");
   await world.init({
     db: dbContext.db as SystemDatabase | undefined,
     storage,
@@ -163,12 +152,8 @@ export async function initializeWorld(
     world.assetsUrl += "/";
   }
 
-  console.log("[World] ✅ World initialized");
-
   // Load entities from world.json
   await loadWorldEntities(world, config);
-
-  console.log("[World] ✅ World ready");
   return world;
 }
 
@@ -189,15 +174,12 @@ async function loadWorldEntities(
   const worldConfigPath = path.join(config.worldDir, "world.json");
 
   if (!(await fs.pathExists(worldConfigPath))) {
-    console.log("[World] No world.json found, skipping entity loading");
     return;
   }
 
-  console.log("[World] Loading entities from world.json...");
   const worldConfig: WorldConfig = await fs.readJson(worldConfigPath);
 
   if (!worldConfig.entities || worldConfig.entities.length === 0) {
-    console.log("[World] No entities in world.json");
     return;
   }
 
@@ -222,8 +204,4 @@ async function loadWorldEntities(
     // Add entity to world
     world.entities.add!(entityToAdd, true);
   }
-
-  console.log(
-    `[World] ✅ Loaded ${worldConfig.entities.length} entities from world.json`,
-  );
 }

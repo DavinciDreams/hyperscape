@@ -40,7 +40,7 @@ function resolveConfiguredLogLevel(): LogLevel {
   if (mappedLevel !== undefined) {
     return mappedLevel;
   }
-  return process.env.NODE_ENV === "production" ? LogLevel.INFO : LogLevel.DEBUG;
+  return LogLevel.WARN;
 }
 
 /**

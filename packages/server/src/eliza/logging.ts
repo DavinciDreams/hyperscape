@@ -37,13 +37,7 @@ function resolveDuelLogLevel(): DuelLogLevel {
   if (explicitLevel) {
     return explicitLevel;
   }
-
-  const quietMode = /^(1|true|yes|on)$/i.test(process.env.DUEL_QUIET || "");
-  if (quietMode) {
-    return "error";
-  }
-
-  return process.env.NODE_ENV === "production" ? "warn" : "info";
+  return "warn";
 }
 
 const resolvedDuelLogLevel = resolveDuelLogLevel();

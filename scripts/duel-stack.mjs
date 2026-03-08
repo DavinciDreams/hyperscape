@@ -310,23 +310,38 @@ const streamCaptureUrl = withCaptureParams(streamPageUrl);
 const embeddedSpectatorCaptureUrl = withCaptureParams(embeddedSpectatorUrl);
 const homeCaptureUrl = withCaptureParams(`${clientUrl}/`);
 const duelNodeEnv = (process.env.DUEL_NODE_ENV || "production").trim().toLowerCase();
-const duelQuietMode =
-  options.verbose === true
-    ? false
-    : !/^(0|false|no|off)$/i.test(process.env.DUEL_QUIET || "true");
 const duelRuntimeLogLevel = (
   process.env.DUEL_LOG_LEVEL ||
   process.env.LOG_LEVEL ||
-  "error"
+  "warn"
 )
   .trim()
   .toLowerCase();
+const DUEL_LOG_LEVEL_PRIORITY = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+const normalizedDuelRuntimeLogLevel =
+  duelRuntimeLogLevel === "debug" ||
+  duelRuntimeLogLevel === "info" ||
+  duelRuntimeLogLevel === "warn" ||
+  duelRuntimeLogLevel === "error"
+    ? duelRuntimeLogLevel
+    : "warn";
 
 const managed = [];
 let shuttingDown = false;
-const CHILD_OUTPUT_ERROR_PATTERN =
-  /\b(error|failed|failure|exception|uncaught|unhandled|fatal)\b/i;
-const CHILD_OUTPUT_WARN_PATTERN = /\bwarn(?:ing)?\b/i;
+const CHILD_OUTPUT_ERROR_PATTERNS = [
+  /(^|[^A-Za-z0-9_-])error(?::|\s|$)/i,
+  /\b(?:failed|failure|exception|uncaught|unhandled|fatal)\b(?::|\s|$)/i,
+  /\b(?:TypeError|ReferenceError|SyntaxError|RangeError|AggregateError|EvalError|URIError)\b(?::|\s|$)/,
+  /\bERR_[A-Z0-9_]+\b/,
+];
+const CHILD_OUTPUT_WARN_PATTERN = /(^|[^A-Za-z0-9_-])warn(?:ing)?(?::|\s|$)/i;
+const EXPECTED_BUN_SHUTDOWN_PATTERN =
+  /^error: script "[^"]+" (?:was terminated by signal SIGTERM|exited with code 143)\b/i;
 const childStdoutMode = (
   options.verbose === true
     ? "all"
@@ -339,14 +354,41 @@ const childStderrMode = (
 ).trim().toLowerCase();
 
 function log(message) {
+  if (
+    options.verbose !== true &&
+    DUEL_LOG_LEVEL_PRIORITY.info <
+      DUEL_LOG_LEVEL_PRIORITY[normalizedDuelRuntimeLogLevel]
+  ) {
+    return;
+  }
   console.log(`[duel] ${message}`);
 }
 
+function warnLog(message) {
+  if (
+    DUEL_LOG_LEVEL_PRIORITY.warn <
+    DUEL_LOG_LEVEL_PRIORITY[normalizedDuelRuntimeLogLevel]
+  ) {
+    return;
+  }
+  console.warn(`[duel] ${message}`);
+}
+
+function isErrorLikeChildLine(line) {
+  for (const pattern of CHILD_OUTPUT_ERROR_PATTERNS) {
+    if (pattern.test(line)) return true;
+  }
+  return false;
+}
+
 function shouldForwardChildLine(channel, line) {
+  if (shuttingDown && EXPECTED_BUN_SHUTDOWN_PATTERN.test(line)) {
+    return false;
+  }
   const mode = channel === "stderr" ? childStderrMode : childStdoutMode;
   if (mode === "off") return false;
   if (mode === "all") return true;
-  const isErrorLine = CHILD_OUTPUT_ERROR_PATTERN.test(line);
+  const isErrorLine = isErrorLikeChildLine(line);
   if (mode === "errors-only") {
     return isErrorLine;
   }
@@ -818,7 +860,7 @@ async function cleanupStaleLocalPostgresSessions(serverEnv) {
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    log(`warning: unable to cleanup stale PostgreSQL sessions (${reason})`);
+    warnLog(`unable to cleanup stale PostgreSQL sessions (${reason})`);
   } finally {
     if (pool) {
       try {
@@ -866,9 +908,9 @@ function prepareHlsOutput(filePath) {
 function ensureMadviseEagainShim() {
   if (!enableMadviseEagainShim) return null;
   if (!fs.existsSync(madviseShimSource)) {
-    log(
-      `warning: madvise shim source not found at ${madviseShimSource}; continuing without shim`,
-    );
+      warnLog(
+        `madvise shim source not found at ${madviseShimSource}; continuing without shim`,
+      );
     return null;
   }
 
@@ -905,8 +947,8 @@ function ensureMadviseEagainShim() {
       log(`compiled madvise EAGAIN shim at ${madviseShimOutput}`);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      log(
-        `warning: failed to compile madvise shim (${reason}); continuing without shim`,
+      warnLog(
+        `failed to compile madvise shim (${reason}); continuing without shim`,
       );
       return null;
     }
@@ -1300,13 +1342,13 @@ async function main() {
           `using Solana duel market program ${resolvedSolanaProgram.programId} (validated with ${resolvedSolanaProgram.signerPubkey})`,
         );
       } else {
-        log(
-          "warning: unable to validate a Solana prediction-market program; duel server will use configured env values",
+        warnLog(
+          "unable to validate a Solana prediction-market program; duel server will use configured env values",
         );
       }
     } else {
-      log(
-        "warning: unable to find a fee-payer-safe Solana authority for duel market writes; duel server will use configured env values",
+      warnLog(
+        "unable to find a fee-payer-safe Solana authority for duel market writes; duel server will use configured env values",
       );
     }
   }
@@ -1369,7 +1411,6 @@ async function main() {
       process.env.DUEL_LOG_LEVEL || duelRuntimeLogLevel,
     DUEL_AGENT_LOG_LEVEL:
       process.env.DUEL_AGENT_LOG_LEVEL || duelRuntimeLogLevel,
-    DUEL_QUIET: duelQuietMode ? "true" : "false",
     SKIP_CDN_MANIFEST_FETCH:
       process.env.SKIP_CDN_MANIFEST_FETCH || "true",
     DATA_OPTIONAL_MANIFEST_WARNINGS:
@@ -1692,8 +1733,8 @@ async function main() {
     );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    log(
-      `warning: streaming duel api not ready at ${gameStreamingStateUrl} (${reason}) - continuing startup`,
+    warnLog(
+      `streaming duel api not ready at ${gameStreamingStateUrl} (${reason}) - continuing startup`,
     );
   }
   // Game client is optional for the duel/betting stack — only wait if it was
@@ -1705,7 +1746,7 @@ async function main() {
     if (clientOk) {
       log(`game client ready at ${clientUrl}`);
     } else {
-      log(`warning: game client not reachable at ${clientUrl} - continuing without it`);
+      warnLog(`game client not reachable at ${clientUrl} - continuing without it`);
     }
   }
 
@@ -1746,7 +1787,6 @@ async function main() {
         process.env.DUEL_DEFAULT_LOG_LEVEL ||
         process.env.DEFAULT_LOG_LEVEL ||
         duelRuntimeLogLevel,
-      DUEL_QUIET: duelQuietMode ? "true" : "false",
       // Prefer same-origin app stream path for reliability on :4179.
       VITE_STREAM_URL: process.env.VITE_STREAM_URL || localBettingHlsPath,
       VITE_GAME_API_URL: process.env.VITE_GAME_API_URL || serverHttpUrl,
@@ -1927,8 +1967,8 @@ async function main() {
     // Non-fatal: if HLS stream never comes up (e.g. no RTMP source) just warn
     // and keep the rest of the stack (betting app, bots, keeper) running.
     waitForLiveHls(hlsUrl, hlsReadyTimeoutMs).catch((err) => {
-      log(`warning: HLS stream not ready - ${err.message}`);
-      log("stream may not be available, but the rest of the stack continues");
+      warnLog(`HLS stream not ready - ${err.message}`);
+      warnLog("stream may not be available, but the rest of the stack continues");
     });
   }
 
@@ -1969,8 +2009,8 @@ async function main() {
 
     if (resolvedMode === "multi") {
       if (!mmConfigExists) {
-        log(
-          `warning: MM multi config not found at ${mmConfigPath}; falling back to single mode`,
+        warnLog(
+          `MM multi config not found at ${mmConfigPath}; falling back to single mode`,
         );
       } else {
         mmRuntimeMode = "multi";

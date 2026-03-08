@@ -59,7 +59,7 @@ class LoggerImpl {
     const resolvedMaxEntries = envMaxEntries ?? 2000;
 
     this.config = {
-      minLevel: LogLevel.INFO,
+      minLevel: LogLevel.WARN,
       enableConsole: true,
       enableFile: false,
       enableMemoryBuffer: resolvedMaxEntries > 0,
@@ -595,9 +595,8 @@ if (typeof process !== "undefined" && process.env) {
       enableTestLogs: true,
     });
   } else {
-    // Development environment
     Logger.configure({
-      minLevel: LogLevel.DEBUG,
+      minLevel: LogLevel.WARN,
       enableConsole: true,
       enableSystemLogs: true,
       enablePlayerLogs: true,
