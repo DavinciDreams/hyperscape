@@ -264,9 +264,6 @@ export class AgentBehaviorTicker {
         const message = this.getCombatChatResponse(reaction);
         await instance.service.sendChatMessage(message);
         instance.lastCombatChatAt = Date.now();
-        console.log(
-          `[AgentManager] ${instance.config.name} combat chat (${reaction.type}): "${message}"`,
-        );
       } catch (err) {
         console.warn(
           `[AgentManager] ${instance.config.name} failed to send combat chat: ${errMsg(err)}`,
@@ -316,9 +313,6 @@ export class AgentBehaviorTicker {
           corpseId: action.gravestoneId,
           playerId: instance.service.getPlayerId(),
         });
-        console.log(
-          `[AgentManager] ${instance.config.name} looting gravestone ${action.gravestoneId}`,
-        );
         instance.lastActivity = Date.now();
         break;
 
@@ -345,9 +339,6 @@ export class AgentBehaviorTicker {
           );
           if (questStarted) {
             instance.questsAccepted.add(action.questId);
-            console.log(
-              `[AgentManager] ${instance.config.name} accepted quest: ${action.questId}`,
-            );
           } else {
             console.warn(
               `[AgentManager] ${instance.config.name} quest accept sent but not started yet: ${action.questId} (will retry)`,
@@ -360,9 +351,6 @@ export class AgentBehaviorTicker {
 
       case "questComplete":
         await instance.service.executeQuestComplete(action.questId);
-        console.log(
-          `[AgentManager] ${instance.config.name} completed quest: ${action.questId}`,
-        );
         instance.goal = null;
         instance.lastActivity = Date.now();
         break;
@@ -516,16 +504,10 @@ export class AgentBehaviorTicker {
       })
     ) {
       if (coins >= 100) {
-        console.log(
-          `[AgentManager] ${instance.config.name} buying bronze_shortsword (unarmed, ${coins} coins)`,
-        );
         instance.service.executeStoreBuy("sword_store", "bronze_shortsword", 1);
         return;
       }
       if (coins >= 10) {
-        console.log(
-          `[AgentManager] ${instance.config.name} buying bronze_dagger (unarmed, ${coins} coins)`,
-        );
         instance.service.executeStoreBuy("sword_store", "bronze_dagger", 1);
         return;
       }
@@ -543,9 +525,6 @@ export class AgentBehaviorTicker {
       ) {
         if (!hasAnyOfType("hatchet")) {
           if (coins >= 50) {
-            console.log(
-              `[AgentManager] ${instance.config.name} buying bronze_hatchet for woodcutting quest (${coins} coins)`,
-            );
             instance.service.executeStoreBuy(
               "general_store",
               "bronze_hatchet",
@@ -564,9 +543,6 @@ export class AgentBehaviorTicker {
       ) {
         if (!hasAnyOfType("pickaxe")) {
           if (coins >= 50) {
-            console.log(
-              `[AgentManager] ${instance.config.name} buying bronze_pickaxe for mining quest (${coins} coins)`,
-            );
             instance.service.executeStoreBuy(
               "general_store",
               "bronze_pickaxe",
@@ -584,9 +560,6 @@ export class AgentBehaviorTicker {
       ) {
         if (!hasItemInInventoryOrEquipped("small_fishing_net")) {
           if (coins >= 5) {
-            console.log(
-              `[AgentManager] ${instance.config.name} buying small_fishing_net for fishing quest (${coins} coins)`,
-            );
             instance.service.executeStoreBuy(
               "fishing_store",
               "small_fishing_net",
@@ -601,9 +574,6 @@ export class AgentBehaviorTicker {
       if (stageType === "interact" && stageTarget.includes("fire")) {
         if (!hasItemInInventoryOrEquipped("tinderbox")) {
           if (coins >= 5) {
-            console.log(
-              `[AgentManager] ${instance.config.name} buying tinderbox (${coins} coins)`,
-            );
             instance.service.executeStoreBuy("general_store", "tinderbox", 1);
             return;
           }
@@ -675,9 +645,6 @@ export class AgentBehaviorTicker {
 
       // Bones — bury for prayer XP instead of dropping
       if (slot.itemId === "bones" || slot.itemId.endsWith("_bones")) {
-        console.log(
-          `[AgentManager] ${instance.config.name} burying ${slot.itemId} for prayer XP`,
-        );
         instance.service.executeUse(slot.itemId);
         return; // One action per tick
       }
@@ -700,9 +667,6 @@ export class AgentBehaviorTicker {
       inventory.length >= 27 ? Math.min(3, dropCandidates.length) : 1;
     for (let i = 0; i < dropCount; i++) {
       const toDrop = dropCandidates[i];
-      console.log(
-        `[AgentManager] ${instance.config.name} dropping ${toDrop.itemId} (inventory: ${inventory.length - i}/28)`,
-      );
       instance.service.executeDrop(toDrop.itemId, 1);
     }
 
@@ -781,9 +745,6 @@ export class AgentBehaviorTicker {
 
     if (!bestFood) return false;
 
-    console.log(
-      `[AgentManager] ${instance.config.name} eating ${bestFood.itemId} (hp: ${health}/${maxHealth}, heal: ${bestFood.healAmount})`,
-    );
     instance.service.executeUse(bestFood.itemId);
     instance.lastAteAt = Date.now();
     return true;
@@ -840,9 +801,6 @@ export class AgentBehaviorTicker {
       bestWeapon.score > equippedWeaponScore &&
       bestWeapon.itemId !== equippedWeaponId
     ) {
-      console.log(
-        `[AgentManager] ${instance.config.name} equipping weapon ${bestWeapon.itemId} (score ${bestWeapon.score} > ${equippedWeaponScore})`,
-      );
       instance.service.executeEquip(bestWeapon.itemId);
       return; // one equip per tick
     }
@@ -887,9 +845,6 @@ export class AgentBehaviorTicker {
         }
 
         if (bestArmor.score > currentScore && bestArmor.itemId !== equippedId) {
-          console.log(
-            `[AgentManager] ${instance.config.name} equipping ${bestArmor.itemId} in ${slotName} (score ${bestArmor.score} > ${currentScore})`,
-          );
           instance.service.executeEquip(bestArmor.itemId);
           return; // one equip per tick
         }
@@ -1052,9 +1007,6 @@ export class AgentBehaviorTicker {
             ) {
               return { type: "idle" };
             }
-            console.log(
-              `[AgentManager] ${instance.config.name} gathering ${resource.name || resource.id} for quest`,
-            );
             instance.lastGatherTargetId = resource.id;
             instance.lastGatherQueuedAt = Date.now();
             return { type: "gather", targetId: resource.id };

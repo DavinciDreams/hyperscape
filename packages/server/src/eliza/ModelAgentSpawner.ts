@@ -276,8 +276,6 @@ export async function spawnModelAgents(
   const yieldToEventLoop = () =>
     new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-  console.log("[ModelAgentSpawner] Starting ElizaOS model agent spawning...");
-
   // Filter agents by provider if specified
   let agentsToSpawn = MODEL_AGENTS;
   if (providers.length > 0) {
@@ -289,9 +287,6 @@ export async function spawnModelAgents(
   // PGLite allocates ~2-4GB WASM heap per instance; with 19 agents that's 38-76GB.
   // Agents don't persist data (all memory flags disabled), so InMemoryDatabaseAdapter
   // provides the required IDatabaseAdapter surface with zero WASM overhead.
-  console.log(
-    "[ModelAgentSpawner] Using InMemoryDatabaseAdapter (no PGLite WASM overhead)",
-  );
   // Trajectory logger and local embedding plugin are intentionally omitted:
   // both cause unbounded memory growth (WASM heap + in-memory log accumulation).
 
@@ -322,7 +317,6 @@ export async function spawnModelAgents(
       roles: "agent",
       createdAt: new Date().toISOString(),
     });
-    console.log("[ModelAgentSpawner] Created shared account for model agents");
   }
 
   let spawnedCount = 0;
@@ -330,34 +324,20 @@ export async function spawnModelAgents(
   const { wsUrl: hyperscapeServerUrl, apiUrl: hyperscapeApiUrl } =
     resolveModelAgentServerUrls();
 
-  console.log(
-    `[ModelAgentSpawner] Using HYPERSCAPE_SERVER_URL=${hyperscapeServerUrl} for model-agent runtimes`,
-  );
-  console.log(
-    `[ModelAgentSpawner] Using HYPERSCAPE_API_URL=${hyperscapeApiUrl} for model-agent runtimes`,
-  );
-
   // ---- Pre-filter: skip agents with no API key or already running ----
   const eligible: ModelProviderConfig[] = [];
   for (const agentConfig of agentsToSpawn) {
     if (!process.env[agentConfig.apiKeyEnv]) {
-      console.log(
-        `[ModelAgentSpawner] Skipping ${agentConfig.displayName} - no API key`,
-      );
       continue;
     }
     const agentKey = getModelAgentKey(agentConfig);
     if (runningAgents.has(agentKey)) {
-      console.log(
-        `[ModelAgentSpawner] ${agentConfig.displayName} already running`,
-      );
       continue;
     }
     eligible.push(agentConfig);
   }
 
   if (eligible.length === 0) {
-    console.log("[ModelAgentSpawner] No eligible agents to spawn");
     return 0;
   }
 
@@ -421,9 +401,6 @@ export async function spawnModelAgents(
       }
 
       if (embeddedAgentManager?.hasAgent(characterId)) {
-        console.log(
-          `[ModelAgentSpawner] ${tag} Skipping ${agentConfig.displayName} - already managed`,
-        );
         return false;
       }
 
@@ -607,10 +584,6 @@ export async function spawnModelAgents(
             adapter: unknown;
           }
         ).adapter = adapterBeforeInit;
-      } else {
-        console.log(
-          `[ModelAgentSpawner] ${tag} ✓ Adapter verified: ${adapterNameAfter}`,
-        );
       }
 
       runningAgents.set(agentKey, {
@@ -619,10 +592,6 @@ export async function spawnModelAgents(
         characterId,
         accountId,
       });
-
-      console.log(
-        `[ModelAgentSpawner] ${tag} ✅ ${agentConfig.displayName} (${agentConfig.model})`,
-      );
       return true;
     } catch (error) {
       stopAgentBehaviorLoop(agentKey);
@@ -657,10 +626,6 @@ export async function spawnModelAgents(
   // ---- Spawn first agent alone, then batch the rest ----
   const BATCH_SIZE = 3;
   const BATCH_DELAY_MS = 2000;
-
-  console.log(
-    `[ModelAgentSpawner] Spawning ${eligible.length} agents (first sequential, then batches of ${BATCH_SIZE})...`,
-  );
   const startTime = Date.now();
 
   // First agent runs solo to validate init works before batching the rest
@@ -675,11 +640,6 @@ export async function spawnModelAgents(
   // Remaining agents in parallel batches
   for (let i = 1; i < eligible.length; i += BATCH_SIZE) {
     const batch = eligible.slice(i, i + BATCH_SIZE);
-    const batchNum = Math.floor((i - 1) / BATCH_SIZE) + 1;
-    const totalBatches = Math.ceil((eligible.length - 1) / BATCH_SIZE);
-    console.log(
-      `[ModelAgentSpawner] Batch ${batchNum}/${totalBatches}: ${batch.map((c) => c.displayName).join(", ")}`,
-    );
 
     const results = await Promise.allSettled(
       batch.map((config, j) => spawnOne(config, i + j)),
@@ -701,11 +661,8 @@ export async function spawnModelAgents(
       await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
     }
   }
-
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(
-    `[ModelAgentSpawner] ✅ Spawned ${spawnedCount}/${eligible.length} model agents in ${elapsed}s (${totalFailures} failed)`,
-  );
+  void startTime;
+  void totalFailures;
 
   // Start periodic adapter health monitor + flush + GC (every 60s)
   if (spawnedCount > 0 && !adapterHealthInterval) {
@@ -773,10 +730,6 @@ export async function spawnModelAgents(
         }
       }
 
-      console.log(
-        `[ModelAgentSpawner] 📊 Adapter health (${runningAgents.size} agents): ` +
-          `logs=${totalLogs}, memories=${totalMemories}, cache=${totalCache}, entities=${totalEntities}`,
-      );
       // Periodic GC hint
       getBunRuntime()?.gc?.(false);
     }, 60_000);
@@ -856,8 +809,6 @@ export async function stopModelAgent(
     );
     return false;
   }
-
-  console.log(`[ModelAgentSpawner] Stopped agent: ${agent.config.displayName}`);
   return true;
 }
 
@@ -865,10 +816,6 @@ export async function stopModelAgent(
  * Stop all running model agents
  */
 export async function stopAllModelAgents(): Promise<void> {
-  console.log(
-    `[ModelAgentSpawner] Stopping ${runningAgents.size} model agents...`,
-  );
-
   const stopPromises: Promise<boolean>[] = [];
 
   for (const agent of runningAgents.values()) {
@@ -878,8 +825,6 @@ export async function stopAllModelAgents(): Promise<void> {
   }
 
   await Promise.all(stopPromises);
-
-  console.log("[ModelAgentSpawner] All model agents stopped");
 }
 
 /**
@@ -1014,10 +959,6 @@ function startAgentBehaviorLoop(
 ): void {
   const agentKey = getModelAgentKey(config);
 
-  console.log(
-    `[ModelAgentSpawner] Starting behavior loop for ${config.displayName}`,
-  );
-
   // Clear any existing interval
   const existingInterval = behaviorIntervals.get(agentKey);
   if (existingInterval) {
@@ -1121,12 +1062,7 @@ async function getOrCreatePlan(
       agentPlans.set(planKey, plan);
       return plan;
     }
-  } catch (err) {
-    console.debug(
-      `[${config.displayName}] LLM plan failed, using fallback:`,
-      errMsg(err),
-    );
-  }
+  } catch {}
 
   return null;
 }
@@ -1534,12 +1470,7 @@ async function executeBehaviorTick(
 
   try {
     await executeQueuedAction(service, nextAction, gameState, world);
-  } catch (err) {
-    console.debug(
-      `[${config.displayName}] Plan action ${nextAction.action} failed:`,
-      errMsg(err),
-    );
-  }
+  } catch {}
 
   // If plan is exhausted, clear it so next tick re-plans
   if (plan.actions.length === 0) {

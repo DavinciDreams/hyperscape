@@ -62,7 +62,6 @@ async function getSqlPlugin(): Promise<Plugin | null> {
     const mod = await import("@elizaos/plugin-sql");
     const sqlPlugin = mod.plugin ?? mod.default;
     if (sqlPlugin) {
-      console.log("[AgentManager] Loaded SQL plugin for database support");
       return sqlPlugin;
     }
     console.warn(
@@ -88,7 +87,6 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
   if (process.env.OPENAI_API_KEY) {
     try {
       const mod = await import("@elizaos/plugin-openai");
-      console.log("[AgentManager] Using OpenAI model provider");
       return mod.openaiPlugin;
     } catch (err) {
       console.warn("[AgentManager] Failed to load OpenAI plugin:", errMsg(err));
@@ -99,7 +97,6 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const mod = await import("@elizaos/plugin-anthropic");
-      console.log("[AgentManager] Using Anthropic model provider");
       return mod.anthropicPlugin ?? mod.default;
     } catch (err) {
       console.warn(
@@ -113,7 +110,6 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
   if (process.env.OPENROUTER_API_KEY) {
     try {
       const mod = await import("@elizaos/plugin-openrouter");
-      console.log("[AgentManager] Using OpenRouter model provider");
       return mod.openrouterPlugin ?? mod.default;
     } catch (err) {
       console.warn(
@@ -126,7 +122,6 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
   // Fall back to Ollama for local development (no API key needed)
   try {
     const mod = await import("@elizaos/plugin-ollama");
-    console.log("[AgentManager] Using Ollama model provider (local fallback)");
     return mod.ollamaPlugin;
   } catch (err) {
     console.warn("[AgentManager] Failed to load Ollama plugin:", errMsg(err));
@@ -281,8 +276,6 @@ export class AgentManager {
     };
     this.world.on(EventType.COMBAT_DAMAGE_DEALT, this.combatDamageListener);
     this.worldListenerActive = true;
-
-    console.log("[AgentManager] Initialized with combat chat reactions");
   }
 
   /**
@@ -313,8 +306,6 @@ export class AgentManager {
       );
       return characterId;
     }
-
-    console.log(`[AgentManager] Creating agent: ${name} (${characterId})`);
 
     // Create the embedded service
     const service = new EmbeddedHyperscapeService(
@@ -375,13 +366,8 @@ export class AgentManager {
     }
 
     if (instance.state === "running") {
-      console.log(`[AgentManager] Agent ${characterId} is already running`);
       return;
     }
-
-    console.log(
-      `[AgentManager] Starting agent: ${instance.config.name} (${characterId})`,
-    );
 
     instance.state = "initializing";
     instance.lastActivity = Date.now();
@@ -402,14 +388,7 @@ export class AgentManager {
           instance.service as unknown as HyperscapeService,
           false,
         );
-        console.log(
-          `[AgentManager] Autonomous behavior disabled for ${instance.config.name} via EMBEDDED_AGENT_AUTONOMY_ENABLED=false`,
-        );
       }
-
-      console.log(
-        `[AgentManager] Agent ${instance.config.name} is now running`,
-      );
     } catch (err) {
       instance.state = "error";
       instance.error = errMsg(err);
@@ -429,13 +408,8 @@ export class AgentManager {
     }
 
     if (instance.state === "stopped") {
-      console.log(`[AgentManager] Agent ${characterId} is already stopped`);
       return;
     }
-
-    console.log(
-      `[AgentManager] Stopping agent: ${instance.config.name} (${characterId})`,
-    );
 
     try {
       // Stop autonomous behavior first.
@@ -444,8 +418,6 @@ export class AgentManager {
       await instance.service.stop();
       instance.state = "stopped";
       instance.lastActivity = Date.now();
-
-      console.log(`[AgentManager] Agent ${instance.config.name} stopped`);
     } catch (err) {
       instance.state = "error";
       instance.error = errMsg(err);
@@ -465,22 +437,13 @@ export class AgentManager {
     }
 
     if (instance.state !== "running") {
-      console.log(
-        `[AgentManager] Agent ${characterId} is not running (state: ${instance.state})`,
-      );
       return;
     }
-
-    console.log(
-      `[AgentManager] Pausing agent: ${instance.config.name} (${characterId})`,
-    );
 
     // Stop autonomous behavior without removing the entity.
     this.behaviorTicker.stopBehaviorLoop(characterId);
     instance.state = "paused";
     instance.lastActivity = Date.now();
-
-    console.log(`[AgentManager] Agent ${instance.config.name} paused`);
   }
 
   /**
@@ -495,15 +458,8 @@ export class AgentManager {
     }
 
     if (instance.state !== "paused") {
-      console.log(
-        `[AgentManager] Agent ${characterId} is not paused (state: ${instance.state})`,
-      );
       return;
     }
-
-    console.log(
-      `[AgentManager] Resuming agent: ${instance.config.name} (${characterId})`,
-    );
 
     instance.state = "running";
     instance.lastActivity = Date.now();
@@ -515,8 +471,6 @@ export class AgentManager {
         false,
       );
     }
-
-    console.log(`[AgentManager] Agent ${instance.config.name} resumed`);
   }
 
   /**
@@ -527,15 +481,8 @@ export class AgentManager {
   async removeAgent(characterId: string): Promise<void> {
     const instance = this.agents.get(characterId);
     if (!instance) {
-      console.log(
-        `[AgentManager] Agent ${characterId} not found, nothing to remove`,
-      );
       return;
     }
-
-    console.log(
-      `[AgentManager] Removing agent: ${instance.config.name} (${characterId})`,
-    );
 
     // Stop first if running
     if (instance.state === "running" || instance.state === "paused") {
@@ -544,8 +491,6 @@ export class AgentManager {
 
     // Remove from tracking
     this.agents.delete(characterId);
-
-    console.log(`[AgentManager] Agent ${instance.config.name} removed`);
   }
 
   // ─── QUERIES ────────────────────────────────────────────────────────
@@ -652,8 +597,6 @@ export class AgentManager {
    * and auto-start them
    */
   async loadAgentsFromDatabase(): Promise<void> {
-    console.log("[AgentManager] Loading agents from database...");
-
     const databaseSystem = this.world.getSystem("database") as
       | {
           db: {
@@ -701,10 +644,6 @@ export class AgentManager {
         .from(characters)
         .where(eq(characters.isAgent, 1));
 
-      console.log(
-        `[AgentManager] Found ${agentCharacters.length} agent character(s) in database`,
-      );
-
       const shouldLimit = autoStartMax < agentCharacters.length;
       const charactersToLoad = shouldLimit
         ? agentCharacters.slice(0, autoStartMax)
@@ -732,12 +671,6 @@ export class AgentManager {
           );
         }
       }
-
-      console.log(
-        `[AgentManager] Loaded ${this.agents.size} agent(s)${
-          shouldLimit ? ` (capped from ${agentCharacters.length})` : ""
-        }`,
-      );
     } catch (err) {
       console.error(
         "[AgentManager] Error loading agents from database:",
@@ -757,7 +690,6 @@ export class AgentManager {
     }
 
     this.isShuttingDown = true;
-    console.log(`[AgentManager] Shutting down ${this.agents.size} agent(s)...`);
 
     const stopPromises: Promise<void>[] = [];
 
@@ -776,7 +708,6 @@ export class AgentManager {
 
     this.dispose();
     this.agents.clear();
-    console.log("[AgentManager] All agents shut down");
   }
 }
 

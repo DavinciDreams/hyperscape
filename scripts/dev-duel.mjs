@@ -149,21 +149,40 @@ const opts = parseArgs({
   },
   strict: true,
 }).values;
-const quietMode =
-  opts.verbose === true
-    ? false
-    : !/^(0|false|no|off)$/i.test(
-        process.env.DUEL_QUIET ||
-          (process.env.NODE_ENV === "production" ? "true" : "false"),
-      );
+const LOG_LEVEL_PRIORITY = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+const configuredLogLevel = (
+  process.env.DUEL_LOG_LEVEL ||
+  process.env.LOG_LEVEL ||
+  process.env.DEFAULT_LOG_LEVEL ||
+  "warn"
+)
+  .trim()
+  .toLowerCase();
+const normalizedLogLevel =
+  configuredLogLevel === "debug" ||
+  configuredLogLevel === "info" ||
+  configuredLogLevel === "warn" ||
+  configuredLogLevel === "error"
+    ? configuredLogLevel
+    : "warn";
+const infoLogsEnabled =
+  opts.verbose === true ||
+  LOG_LEVEL_PRIORITY.info >= LOG_LEVEL_PRIORITY[normalizedLogLevel];
+const warnLogsEnabled =
+  LOG_LEVEL_PRIORITY.warn >= LOG_LEVEL_PRIORITY[normalizedLogLevel];
 
 function info(message = "") {
-  if (quietMode) return;
+  if (!infoLogsEnabled) return;
   console.log(message);
 }
 
 function warn(message, ...args) {
-  if (quietMode) return;
+  if (!warnLogsEnabled) return;
   console.warn(message, ...args);
 }
 
@@ -210,7 +229,7 @@ const MAX_WAIT = 120000; // 2 minutes
 
 async function waitForServer() {
   const start = Date.now();
-  if (!quietMode) {
+  if (infoLogsEnabled) {
     process.stdout.write("Waiting for server");
   }
 
@@ -221,19 +240,19 @@ async function waitForServer() {
       const res = await fetch(HEALTH_URL, { signal: controller.signal });
       clearTimeout(timeout);
       if (res.ok) {
-        if (!quietMode) {
+        if (infoLogsEnabled) {
           console.log(" ready!");
         }
         return true;
       }
     } catch { }
-    if (!quietMode) {
+    if (infoLogsEnabled) {
       process.stdout.write(".");
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
 
-  if (!quietMode) {
+  if (infoLogsEnabled) {
     console.log(" timeout!");
   }
   return false;
@@ -248,7 +267,7 @@ async function startDev() {
     detached: true,
   });
 
-  if (!quietMode) {
+  if (infoLogsEnabled) {
     dev.stdout.on("data", (data) => {
       for (const line of data.toString().split("\n").filter(Boolean)) {
         console.log(`[dev] ${line}`);
@@ -359,12 +378,12 @@ async function runMatchmaker() {
     rampUpDelayMs,
     matchIntervalMs,
     connectOnly,
-    verbose: opts.verbose && !quietMode,
+    verbose: opts.verbose === true,
   });
 
   // Event handlers
   matchmaker.on("ready", (data) => {
-    if (quietMode) return;
+    if (!infoLogsEnabled) return;
     console.log(`\n[Matchmaker] Ready! ${data.connectedBots}/${data.totalBots} bots connected`);
     if (connectOnly) {
       console.log("[Matchmaker] Waiting for server-side duel scheduling...\n");
@@ -374,7 +393,7 @@ async function runMatchmaker() {
   });
 
   matchmaker.on("matchScheduled", (data) => {
-    if (quietMode) return;
+    if (!infoLogsEnabled) return;
     const p1 = data.bot1Personality ? ` [${data.bot1Personality}]` : "";
     const p2 = data.bot2Personality ? ` [${data.bot2Personality}]` : "";
     console.log(`\n[Match] ${data.matchId}: ${data.bot1Name}${p1} vs ${data.bot2Name}${p2}`);
@@ -391,7 +410,7 @@ async function runMatchmaker() {
   });
 
   matchmaker.on("matchComplete", (result) => {
-    if (quietMode) return;
+    if (!infoLogsEnabled) return;
     const wp = result.winnerPersonality ? ` [${result.winnerPersonality}]` : "";
     const lp = result.loserPersonality ? ` [${result.loserPersonality}]` : "";
     console.log(`\n[Result] ${result.winnerName}${wp} defeated ${result.loserName}${lp}!`);
@@ -410,8 +429,7 @@ async function runMatchmaker() {
   });
 
   matchmaker.on("botDisconnected", (data) => {
-    if (quietMode) return;
-    console.log(`[Warning] ${data.name} disconnected: ${data.reason || "unknown"}`);
+    warn(`[Warning] ${data.name} disconnected: ${data.reason || "unknown"}`);
   });
 
   // Start matchmaker
@@ -436,7 +454,7 @@ async function runMatchmaker() {
 `);
 
     const leaderboard = matchmaker.getLeaderboard();
-    if (!quietMode) {
+    if (infoLogsEnabled) {
       console.log("[Final Leaderboard]");
       leaderboard.forEach((entry, i) => {
         const medal = i === 0 ? "🏆" : i === 1 ? "🥈" : i === 2 ? "🥉" : "  ";

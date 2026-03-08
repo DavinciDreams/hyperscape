@@ -34,6 +34,8 @@ interface HyperscapeServiceHandle {
     position?: [number, number, number] | { x: number; y: number; z: number };
   } | null;
   startAutonomousBehavior?: () => void;
+  stopAutonomousBehavior?: () => void;
+  setAutonomousBehaviorEnabled?: (enabled: boolean) => void;
   onGameEvent?: (
     event: string,
     handler: (data: Record<string, unknown>) => void,
@@ -271,6 +273,10 @@ export class ElizaDuelBot extends EventEmitter {
 
         await this.waitForPlayerSpawnReady(this.config.connectTimeoutMs);
 
+        const service = this.getHyperscapeService();
+        service?.setAutonomousBehaviorEnabled?.(false);
+        service?.stopAutonomousBehavior?.();
+
         this._id = characterId;
         this._connected = true;
         this.metrics.isConnected = true;
@@ -426,10 +432,9 @@ export class ElizaDuelBot extends EventEmitter {
       return;
     }
 
-    // Listen for duel state changes via the service's event system
-    if (service.startAutonomousBehavior) {
-      service.startAutonomousBehavior();
-    }
+    // Listen for duel state changes via the service's event system.
+    // Dedicated duel bots rely on the server-side duel scheduler for prep and
+    // combat flow, so do not bootstrap open-world autonomy here.
     if (service.onGameEvent) {
       if (!this.duelFightStartHandler) {
         this.duelFightStartHandler = (data: Record<string, unknown>) => {

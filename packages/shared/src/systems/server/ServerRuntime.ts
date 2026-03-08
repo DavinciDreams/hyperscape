@@ -15,8 +15,7 @@ const MIN_SCHEDULE_DELAY_MS = Math.max(
   Number.parseInt(process.env.SERVER_RUNTIME_MIN_DELAY_MS || "", 10) || 5,
 );
 const SERVER_RUNTIME_LAG_WARNINGS_ENABLED =
-  process.env.SERVER_RUNTIME_LAG_WARNINGS !== "false" &&
-  !/^(1|true|yes|on)$/i.test(process.env.DUEL_QUIET || "");
+  process.env.SERVER_RUNTIME_LAG_WARNINGS !== "false";
 const SERVER_RUNTIME_TPS_LOGS_ENABLED =
   process.env.SERVER_RUNTIME_TPS_LOGS === "true";
 

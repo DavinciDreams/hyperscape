@@ -41,7 +41,11 @@ import type {
 } from "../types.js";
 import { AutonomousBehaviorManager } from "../managers/autonomous-behavior-manager.js";
 import { registerEventHandlers } from "../events/handlers.js";
-import { getAvailableGoals } from "../providers/goalProvider.js";
+import {
+  getAvailableGoals,
+  getWorldMapSignature,
+} from "../providers/goalProvider.js";
+import { clearMapProviderCache } from "../providers/mapProvider.js";
 import { getPersonalityTraits } from "../providers/personalityProvider.js";
 import { getLastDesireCandidates } from "../managers/goal-progression-planner.js";
 import { SCRIPTED_AUTONOMY_CONFIG } from "../config/constants.js";
@@ -183,7 +187,7 @@ function isAgentLogLevelEnabled(level: AgentLogLevel): boolean {
     process.env.DUEL_LOG_LEVEL ||
     process.env.LOG_LEVEL ||
     process.env.DEFAULT_LOG_LEVEL ||
-    (process.env.NODE_ENV === "production" ? "warn" : "info")
+    "warn"
   )
     .trim()
     .toLowerCase();
@@ -193,9 +197,7 @@ function isAgentLogLevelEnabled(level: AgentLogLevel): boolean {
     configuredLevel === "warn" ||
     configuredLevel === "error"
       ? configuredLevel
-      : process.env.NODE_ENV === "production"
-        ? "warn"
-        : "info";
+      : "warn";
   return (
     AGENT_LOG_LEVEL_PRIORITY[level] >= AGENT_LOG_LEVEL_PRIORITY[normalizedLevel]
   );
@@ -311,6 +313,8 @@ export class HyperscapeService
 
   private ws: WebSocket | null = null;
   private gameState: GameStateCache;
+  private nearbyEntitiesSnapshot: Entity[] | null = null;
+  private worldMapSignature: string | null = null;
   private connectionState: ConnectionState;
   private eventHandlers: Map<
     EventType,
@@ -406,6 +410,31 @@ export class HyperscapeService
     this.logBuffer = [];
   }
 
+  private invalidateNearbyEntitiesSnapshot(): void {
+    this.nearbyEntitiesSnapshot = null;
+  }
+
+  private upsertNearbyEntity(entityId: string, entity: Entity): void {
+    this.gameState.nearbyEntities.set(entityId, entity);
+    this.invalidateNearbyEntitiesSnapshot();
+  }
+
+  private removeNearbyEntity(entityId: string): Entity | undefined {
+    const existingEntity = this.gameState.nearbyEntities.get(entityId);
+    if (!existingEntity) {
+      return undefined;
+    }
+
+    this.gameState.nearbyEntities.delete(entityId);
+    this.invalidateNearbyEntitiesSnapshot();
+    return existingEntity;
+  }
+
+  private updateWorldMapCache(worldMap?: WorldMapData): void {
+    this.gameState.worldMap = worldMap;
+    this.worldMapSignature = worldMap ? getWorldMapSignature(worldMap) : null;
+  }
+
   private isDuelBotRuntime(): boolean {
     if (
       getRuntimeSettingBoolean(this.runtime, "HYPERSCAPE_AUTO_ACCEPT_DUELS")
@@ -436,6 +465,26 @@ export class HyperscapeService
       !!privyId &&
       trustedIds.has(privyId)
     );
+  }
+
+  private shouldRunOpenWorldAutonomy(): boolean {
+    if (!this.isDuelBotRuntime()) {
+      return true;
+    }
+
+    if (
+      getRuntimeSettingBoolean(
+        this.runtime,
+        "HYPERSCAPE_ENABLE_DUEL_BOT_AUTONOMY",
+      )
+    ) {
+      return true;
+    }
+
+    const envOverride =
+      process.env.HYPERSCAPE_ENABLE_DUEL_BOT_AUTONOMY ||
+      process.env.DUEL_BOT_AUTONOMY_ENABLED;
+    return envOverride ? /^(1|true|yes|on)$/i.test(envOverride.trim()) : false;
   }
 
   private isPlayerInStreamingDuel(): boolean {
@@ -480,6 +529,13 @@ export class HyperscapeService
       this.autonomousBehaviorEnabled;
     this.autonomySuspendedForStreamingDuel = false;
     this.autonomyWasRunningBeforeStreamingDuel = false;
+
+    if (!this.shouldRunOpenWorldAutonomy()) {
+      logger.info(
+        "[HyperscapeService] Streaming duel complete, keeping duel bot autonomy disabled",
+      );
+      return;
+    }
 
     logger.info(
       "[HyperscapeService] Streaming duel complete, restoring autonomous behavior",
@@ -726,6 +782,13 @@ export class HyperscapeService
     if (!service.authToken) {
       logger.warn(
         "[HyperscapeService] ⚠️ No HYPERSCAPE_AUTH_TOKEN - agent will NOT be able to authenticate!",
+      );
+    }
+
+    if (!service.shouldRunOpenWorldAutonomy()) {
+      service.autonomousBehaviorEnabled = false;
+      logger.info(
+        "[HyperscapeService] Dedicated duel bot detected, keeping open-world autonomy disabled",
       );
     }
 
@@ -1283,6 +1346,7 @@ Respond with ONLY the action name, nothing else.`;
     this.autoReconnect = false;
     this.stopAutonomousBehavior();
     this.autonomousBehaviorManager = null;
+    clearMapProviderCache(this.runtime.agentId);
 
     if (this.reconnectInterval) {
       clearTimeout(this.reconnectInterval);
@@ -1755,6 +1819,9 @@ Respond with ONLY the action name, nothing else.`;
       await this.liveKit.stop();
     }
 
+    clearMapProviderCache(this.runtime.agentId);
+    this.invalidateNearbyEntitiesSnapshot();
+    this.updateWorldMapCache(undefined);
     this.connectionState.connected = false;
     this.connectionState.connecting = false;
     this.questListRequestInFlight = false;
@@ -2104,7 +2171,7 @@ Respond with ONLY the action name, nothing else.`;
       // Extract and store world map data (towns + POIs) from snapshot
       if (snapshotData?.worldMap) {
         const wm = snapshotData.worldMap as WorldMapData;
-        this.gameState.worldMap = wm;
+        this.updateWorldMapCache(wm);
         const townCount = wm.towns?.length ?? 0;
         const poiCount = wm.pois?.length ?? 0;
         logger.info(
@@ -2287,10 +2354,16 @@ Respond with ONLY the action name, nothing else.`;
           const normalizedPos = this.normalizePosition(data.position);
           if (normalizedPos) {
             this.gameState.playerEntity.position = normalizedPos;
-            logger.info(
-              `[HyperscapeService] Position available on spawn: [${normalizedPos[0].toFixed(0)}, ${normalizedPos[2].toFixed(0)}], starting autonomous exploration`,
-            );
-            this.startAutonomousExploration();
+            if (this.shouldRunOpenWorldAutonomy()) {
+              logger.info(
+                `[HyperscapeService] Position available on spawn: [${normalizedPos[0].toFixed(0)}, ${normalizedPos[2].toFixed(0)}], starting autonomous exploration`,
+              );
+              this.startAutonomousExploration();
+            } else {
+              logger.info(
+                `[HyperscapeService] Position available on spawn: [${normalizedPos[0].toFixed(0)}, ${normalizedPos[2].toFixed(0)}], duel bot autonomy remains disabled`,
+              );
+            }
           } else {
             logger.info(
               `[HyperscapeService] Waiting for position before starting autonomous exploration (raw position: ${JSON.stringify(data.position)})`,
@@ -2362,7 +2435,7 @@ Respond with ONLY the action name, nothing else.`;
               ...data,
               position: existingPos,
             } as unknown as Entity;
-            this.gameState.nearbyEntities.set(entityId, mergedEntity);
+            this.upsertNearbyEntity(entityId, mergedEntity);
             // Disabled verbose mob logging
             // if (isMob) {
             //   logger.debug(`[HyperscapeService] MOB PRESERVED POSITION: "${entityData.name}"`);
@@ -2399,10 +2472,7 @@ Respond with ONLY the action name, nothing else.`;
                 entityToStore.position = [objPos.x, objPos.y ?? 0, objPos.z];
               }
             }
-            this.gameState.nearbyEntities.set(
-              entityId,
-              entityToStore as Entity,
-            );
+            this.upsertNearbyEntity(entityId, entityToStore as Entity);
           }
         }
         break;
@@ -2477,8 +2547,7 @@ Respond with ONLY the action name, nothing else.`;
           | undefined;
         if (removedId) {
           // Save entity data BEFORE deletion for the event handler
-          const removedEntity = this.gameState.nearbyEntities.get(removedId);
-          this.gameState.nearbyEntities.delete(removedId);
+          const removedEntity = this.removeNearbyEntity(removedId);
 
           // Store the removed entity in a temporary property for the broadcast
           // We need to store it somewhere handlers can access since we can't
@@ -2572,10 +2641,16 @@ Respond with ONLY the action name, nothing else.`;
 
               // Start autonomous exploration if this is the first position and not already running
               if (!hadPositionBefore && !this.isAutonomousBehaviorRunning()) {
-                logger.info(
-                  `[HyperscapeService] First position received, starting autonomous exploration`,
-                );
-                this.startAutonomousExploration();
+                if (this.shouldRunOpenWorldAutonomy()) {
+                  logger.info(
+                    `[HyperscapeService] First position received, starting autonomous exploration`,
+                  );
+                  this.startAutonomousExploration();
+                } else {
+                  logger.info(
+                    "[HyperscapeService] First position received, duel bot autonomy remains disabled",
+                  );
+                }
               }
             } else {
               logger.warn(
@@ -2690,10 +2765,16 @@ Respond with ONLY the action name, nothing else.`;
 
             // Start autonomous exploration if this is the first position
             if (!hadPositionBefore && !this.isAutonomousBehaviorRunning()) {
-              logger.info(
-                `[HyperscapeService] First position via tileMovementStart: [${moveData.startTile.x}, ${moveData.startTile.z}], starting autonomous exploration`,
-              );
-              this.startAutonomousExploration();
+              if (this.shouldRunOpenWorldAutonomy()) {
+                logger.info(
+                  `[HyperscapeService] First position via tileMovementStart: [${moveData.startTile.x}, ${moveData.startTile.z}], starting autonomous exploration`,
+                );
+                this.startAutonomousExploration();
+              } else {
+                logger.info(
+                  `[HyperscapeService] First position via tileMovementStart: [${moveData.startTile.x}, ${moveData.startTile.z}], duel bot autonomy remains disabled`,
+                );
+              }
             }
           }
           logger.debug(
@@ -3373,10 +3454,7 @@ Respond with ONLY the action name, nothing else.`;
         // Update nearby entities
         const entityData = event.data as { id?: string };
         if (entityData && entityData.id) {
-          this.gameState.nearbyEntities.set(
-            entityData.id,
-            event.data as Entity,
-          );
+          this.upsertNearbyEntity(entityData.id, event.data as Entity);
         }
         break;
 
@@ -3384,7 +3462,7 @@ Respond with ONLY the action name, nothing else.`;
         // Remove entity from nearby
         const leftEntityData = event.data as { id?: string };
         if (leftEntityData && leftEntityData.id) {
-          this.gameState.nearbyEntities.delete(leftEntityData.id);
+          this.removeNearbyEntity(leftEntityData.id);
         }
         break;
 
@@ -3523,7 +3601,13 @@ Respond with ONLY the action name, nothing else.`;
    * Get nearby entities
    */
   getNearbyEntities(): Entity[] {
-    return Array.from(this.gameState.nearbyEntities.values());
+    if (!this.nearbyEntitiesSnapshot) {
+      this.nearbyEntitiesSnapshot = Array.from(
+        this.gameState.nearbyEntities.values(),
+      );
+    }
+
+    return this.nearbyEntitiesSnapshot;
   }
 
   /**
@@ -3656,6 +3740,13 @@ Respond with ONLY the action name, nothing else.`;
    * Called automatically when player spawns, but can also be called manually
    */
   startAutonomousBehavior(): void {
+    if (!this.shouldRunOpenWorldAutonomy()) {
+      logger.info(
+        "[HyperscapeService] Dedicated duel bot skipping open-world autonomous behavior",
+      );
+      return;
+    }
+
     if (!this.autonomousBehaviorEnabled) {
       logger.info("[HyperscapeService] Autonomous behavior is disabled");
       return;
@@ -4980,5 +5071,9 @@ Respond with ONLY the action name, nothing else.`;
    */
   public getWorldMap(): import("../types.js").WorldMapData | undefined {
     return this.gameState.worldMap;
+  }
+
+  public getWorldMapSignature(): string | null {
+    return this.worldMapSignature;
   }
 }

@@ -86,6 +86,59 @@ interface GlobalWithPolyfills {
   __filename: string;
 }
 
+type ConsoleLevel = "debug" | "info" | "warn" | "error" | "off";
+
+function resolveConsoleLevel(): ConsoleLevel {
+  const rawLevel =
+    process.env.LOG_LEVEL || process.env.DEFAULT_LOG_LEVEL || "warn";
+  const normalized = rawLevel.trim().toLowerCase();
+  if (normalized === "debug") return "debug";
+  if (normalized === "info" || normalized === "log") return "info";
+  if (normalized === "warn" || normalized === "warning") return "warn";
+  if (normalized === "error") return "error";
+  if (normalized === "off" || normalized === "silent" || normalized === "none")
+    return "off";
+  return "warn";
+}
+
+function installConsoleLevelFilter(): void {
+  const severityOrder: Record<ConsoleLevel, number> = {
+    debug: 10,
+    info: 20,
+    warn: 30,
+    error: 40,
+    off: 50,
+  };
+  const currentLevel = resolveConsoleLevel();
+  const minimumSeverity = severityOrder[currentLevel];
+  const noop = () => {};
+
+  const allow = (methodLevel: Exclude<ConsoleLevel, "off">): boolean =>
+    severityOrder[methodLevel] >= minimumSeverity;
+
+  if (!allow("debug")) {
+    console.debug = noop;
+    console.trace = noop;
+  }
+  if (!allow("info")) {
+    console.info = noop;
+    console.log = noop;
+    console.dir = noop;
+    console.table = noop;
+    console.group = noop;
+    console.groupCollapsed = noop;
+    console.groupEnd = noop;
+  }
+  if (!allow("warn")) {
+    console.warn = noop;
+  }
+  if (!allow("error")) {
+    console.error = noop;
+  }
+}
+
+installConsoleLevelFilter();
+
 // Set up self global with URL support for GLTFLoader
 const globalWithPolyfills = globalThis as unknown as GlobalWithPolyfills;
 globalWithPolyfills.self = globalWithPolyfills;

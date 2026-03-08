@@ -75,8 +75,7 @@ const OPTIONAL_ITEM_FILES = ["ammunition", "runes", "armor"] as const;
 
 const ITEM_CATEGORY_FILES = [...REQUIRED_ITEM_FILES, ...OPTIONAL_ITEM_FILES];
 const OPTIONAL_DATA_WARNINGS_ENABLED =
-  process.env.DATA_OPTIONAL_MANIFEST_WARNINGS !== "false" &&
-  !/^(1|true|yes|on)$/i.test(process.env.DUEL_QUIET || "");
+  process.env.DATA_OPTIONAL_MANIFEST_WARNINGS !== "false";
 const getAllTreasureLocations = () => TREASURE_LOCATIONS;
 const getTreasureLocationsByDifficulty = (_difficulty: number) =>
   TREASURE_LOCATIONS;
