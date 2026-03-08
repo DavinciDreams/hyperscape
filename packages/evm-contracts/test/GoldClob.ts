@@ -1,13 +1,13 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { deployGoldClob } from "../typed-contracts";
 
 describe("GoldClob", function () {
   async function deployFixture() {
     const [owner, marketMaker, maker, taker, treasury] =
       await ethers.getSigners();
 
-    const GoldClob = await ethers.getContractFactory("GoldClob");
-    const clob = await GoldClob.deploy(treasury.address, marketMaker.address);
+    const clob = await deployGoldClob(treasury.address, marketMaker.address);
     await clob.waitForDeployment();
 
     return { clob, owner, marketMaker, maker, taker, treasury };

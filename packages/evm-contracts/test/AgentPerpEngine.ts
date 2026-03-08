@@ -1,5 +1,10 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import {
+  deployAgentPerpEngine,
+  deployMockErc20,
+  deploySkillOracle,
+} from "../typed-contracts";
 
 describe("AgentPerpEngine — security regressions", function () {
   async function deployFixture() {
@@ -7,24 +12,20 @@ describe("AgentPerpEngine — security regressions", function () {
     const agentId = ethers.encodeBytes32String("MODEL_A");
     const otherAgentId = ethers.encodeBytes32String("MODEL_B");
 
-    const SkillOracle = await ethers.getContractFactory("SkillOracle");
-    const oracle = await SkillOracle.connect(owner).deploy(
-      ethers.parseEther("100"),
-    );
+    const oracle = await deploySkillOracle(ethers.parseEther("100"), owner);
     await oracle.waitForDeployment();
 
     await oracle.connect(owner).updateAgentSkill(agentId, 1500, 0);
     await oracle.connect(owner).updateAgentSkill(otherAgentId, 1500, 0);
 
-    const MockERC20 = await ethers.getContractFactory("MockERC20");
-    const marginToken = await MockERC20.connect(owner).deploy("USDC", "USDC");
+    const marginToken = await deployMockErc20("USDC", "USDC", owner);
     await marginToken.waitForDeployment();
 
-    const AgentPerpEngine = await ethers.getContractFactory("AgentPerpEngine");
-    const engine = await AgentPerpEngine.connect(owner).deploy(
+    const engine = await deployAgentPerpEngine(
       await oracle.getAddress(),
       await marginToken.getAddress(),
       ethers.parseEther("1000000000000"),
+      owner,
     );
     await engine.waitForDeployment();
 

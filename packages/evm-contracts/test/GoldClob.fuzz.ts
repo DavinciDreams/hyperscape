@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { deployGoldClob } from "../typed-contracts";
 
 type Rng = () => number;
 
@@ -47,8 +48,7 @@ describe("GoldClob — Randomized Invariants", function () {
       await ethers.getSigners();
     const activeTraders = traders.slice(0, 12);
 
-    const GoldClob = await ethers.getContractFactory("GoldClob");
-    const clob = await GoldClob.deploy(treasury.address, marketMaker.address);
+    const clob = await deployGoldClob(treasury.address, marketMaker.address);
     await clob.waitForDeployment();
 
     return {
@@ -162,7 +162,7 @@ describe("GoldClob — Randomized Invariants", function () {
 
         const tx = await clob.connect(trader).claim(matchId);
         const receipt = await tx.wait();
-        const gasCost = receipt!.gasUsed * receipt!.gasPrice;
+        const gasCost = BigInt(receipt!.gasUsed) * BigInt(receipt!.gasPrice);
 
         const fee = (winningShares * 200n) / 10000n;
         const payout = winningShares - fee;

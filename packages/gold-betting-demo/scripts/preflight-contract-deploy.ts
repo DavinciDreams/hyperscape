@@ -40,6 +40,13 @@ const PROGRAMS: SolanaProgramCheck[] = [
   },
 ] as const;
 
+const HARDHAT_RPC_FALLBACKS: Record<BettingEvmNetwork, string> = {
+  bscTestnet: "https://data-seed-prebsc-1-s1.binance.org:8545",
+  baseSepolia: "https://sepolia.base.org",
+  bsc: "https://bsc-dataseed.binance.org",
+  base: "https://mainnet.base.org",
+};
+
 function parseTarget(argv: string[]): Target {
   const index = argv.findIndex((arg) => arg === "--target");
   const value = index >= 0 ? argv[index + 1] : "testnet";
@@ -227,14 +234,12 @@ async function main(): Promise<void> {
     const rpcConfigured =
       typeof evmEnv[deployment.rpcEnvVar] === "string" &&
       evmEnv[deployment.rpcEnvVar]!.trim().length > 0;
-    const missingRpcIsWarning = deployment.chain === "base";
-    appendStatus(
-      rpcConfigured,
-      `${deployment.label} deploy RPC env ${deployment.rpcEnvVar} is ${rpcConfigured ? "configured" : "missing"}`,
-      failures,
-      warnings,
-      missingRpcIsWarning,
-    );
+    const fallbackRpc = HARDHAT_RPC_FALLBACKS[network];
+    const rpcAvailable = rpcConfigured || fallbackRpc.trim().length > 0;
+    const rpcMessage = rpcConfigured
+      ? `${deployment.label} deploy RPC env ${deployment.rpcEnvVar} is configured`
+      : `${deployment.label} deploy RPC env ${deployment.rpcEnvVar} is missing; using Hardhat fallback ${fallbackRpc}`;
+    appendStatus(rpcAvailable, rpcMessage, failures, warnings, !rpcConfigured);
 
     const hasAddress = deployment.goldClobAddress.trim().length > 0;
     appendStatus(

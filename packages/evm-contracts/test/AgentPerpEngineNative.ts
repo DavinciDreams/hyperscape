@@ -1,5 +1,9 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import {
+  deployAgentPerpEngineNative,
+  deploySkillOracle,
+} from "../typed-contracts";
 
 describe("AgentPerpEngineNative — security regressions", function () {
   it("realizes PnL only on the closed portion of a position", async function () {
@@ -7,21 +11,16 @@ describe("AgentPerpEngineNative — security regressions", function () {
     const agentId = ethers.encodeBytes32String("MODEL_A");
     const otherAgentId = ethers.encodeBytes32String("MODEL_B");
 
-    const SkillOracle = await ethers.getContractFactory("SkillOracle");
-    const oracle = await SkillOracle.connect(owner).deploy(
-      ethers.parseEther("100"),
-    );
+    const oracle = await deploySkillOracle(ethers.parseEther("100"), owner);
     await oracle.waitForDeployment();
 
     await oracle.connect(owner).updateAgentSkill(agentId, 1500, 0);
     await oracle.connect(owner).updateAgentSkill(otherAgentId, 1500, 0);
 
-    const AgentPerpEngineNative = await ethers.getContractFactory(
-      "AgentPerpEngineNative",
-    );
-    const engine = await AgentPerpEngineNative.connect(owner).deploy(
+    const engine = await deployAgentPerpEngineNative(
       await oracle.getAddress(),
       ethers.parseEther("1000000000000"),
+      owner,
     );
     await engine.waitForDeployment();
 
@@ -51,20 +50,15 @@ describe("AgentPerpEngineNative — security regressions", function () {
     const [owner, trader] = await ethers.getSigners();
     const agentId = ethers.encodeBytes32String("MODEL_A");
 
-    const SkillOracle = await ethers.getContractFactory("SkillOracle");
-    const oracle = await SkillOracle.connect(owner).deploy(
-      ethers.parseEther("100"),
-    );
+    const oracle = await deploySkillOracle(ethers.parseEther("100"), owner);
     await oracle.waitForDeployment();
 
     await oracle.connect(owner).updateAgentSkill(agentId, 1500, 0);
 
-    const AgentPerpEngineNative = await ethers.getContractFactory(
-      "AgentPerpEngineNative",
-    );
-    const engine = await AgentPerpEngineNative.connect(owner).deploy(
+    const engine = await deployAgentPerpEngineNative(
       await oracle.getAddress(),
       ethers.parseEther("1000000"),
+      owner,
     );
     await engine.waitForDeployment();
 
