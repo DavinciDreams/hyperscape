@@ -1,4 +1,4 @@
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519 } from "@noble/curves/ed25519.js";
 
 // solana/web3.js v1 expects randomPrivateKey(), while newer @noble/curves
 // exposes randomSecretKey(). Patch once at app bootstrap time.
