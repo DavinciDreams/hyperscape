@@ -53,14 +53,19 @@ interface CachedMapProviderResult {
 }
 
 const mapProviderCache = new Map<string, CachedMapProviderResult>();
+let lastWorldMapSignature: string | null = null;
 
 export function clearMapProviderCache(agentId?: string): void {
   if (agentId) {
     mapProviderCache.delete(agentId);
+    if (mapProviderCache.size === 0) {
+      lastWorldMapSignature = null;
+    }
     return;
   }
 
   mapProviderCache.clear();
+  lastWorldMapSignature = null;
 }
 
 function pruneMapProviderCache(now: number): void {
@@ -140,6 +145,15 @@ export const mapProvider: Provider = {
     const playerPositionKey = getPlayerPositionKey(player?.position);
     const worldMapSignature =
       service.getWorldMapSignature?.() ?? getWorldMapSignature(worldMap);
+
+    if (lastWorldMapSignature !== worldMapSignature) {
+      populateKnownLocationsFromWorldMap(worldMap);
+      lastWorldMapSignature = worldMapSignature;
+      logger.info(
+        `[mapProvider] Populated KNOWN_LOCATIONS with ${worldMap.towns.length} towns and ${worldMap.pois.length} POIs`,
+      );
+    }
+
     const cached = mapProviderCache.get(runtime.agentId);
     if (
       cached &&
@@ -155,13 +169,6 @@ export const mapProvider: Provider = {
 
     if (cached && cached.expiresAt <= now) {
       mapProviderCache.delete(runtime.agentId);
-    }
-
-    if (cached?.worldMapSignature !== worldMapSignature) {
-      populateKnownLocationsFromWorldMap(worldMap);
-      logger.info(
-        `[mapProvider] Populated KNOWN_LOCATIONS with ${worldMap.towns.length} towns and ${worldMap.pois.length} POIs`,
-      );
     }
 
     const { x: px, z: pz } = getPlayerPositionXZ(player?.position);

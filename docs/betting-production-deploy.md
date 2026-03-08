@@ -6,7 +6,7 @@ This is the recommended production topology for the betting stack in this repo:
 - Betting API (`/packages/gold-betting-demo/keeper`): Railway
 - Live duel/stream source (`/packages/server` or Vast duel stack): separate upstream that the keeper polls
 - DDoS/WAF/edge cache: Cloudflare proxy in front of the betting API
-- Contracts/state: Solana + EVM (configured by env vars below)
+- Contracts/state: Solana + EVM (configured by env vars below, proxied server-side)
 
 ## 1) Deploy the betting keeper to Railway
 
@@ -43,6 +43,7 @@ Persistence:
 Notes:
 
 - The keeper serves the Pages app's read/write betting APIs. It is not the same process as the Hyperscape duel server.
+- The keeper also proxies Solana and EVM JSON-RPC for the public app. Keep provider-keyed RPC URLs on Railway, not in Cloudflare Pages build vars.
 - The keeper will return boot fallback duel data until `STREAM_STATE_SOURCE_URL` is set and the upstream duel server responds.
 - The autonomous keeper bot also needs a funded signer wallet on Solana to create/resolve markets in production.
 
@@ -79,7 +80,7 @@ Project root:
 
 Build/output:
 
-- Build command: `bun install && bun run build`
+- Build command: `bun install && bun run build --mode mainnet-beta`
 - Output directory: `dist`
 
 Frontend env vars (Cloudflare Pages):
@@ -87,17 +88,22 @@ Frontend env vars (Cloudflare Pages):
 - `VITE_GAME_API_URL=https://api.yourdomain.com`
 - `VITE_GAME_WS_URL=wss://api.yourdomain.com/ws` if the keeper exposes websocket features you use
 - `VITE_SOLANA_CLUSTER=mainnet-beta` (or testnet/devnet)
-- `VITE_SOLANA_RPC_URL` (optional override)
-- `VITE_BSC_RPC_URL` / `VITE_BASE_RPC_URL`
+- `VITE_USE_GAME_RPC_PROXY=true`
+- `VITE_USE_GAME_EVM_RPC_PROXY=true`
 - `VITE_BSC_GOLD_CLOB_ADDRESS` / `VITE_BASE_GOLD_CLOB_ADDRESS`
 - `VITE_BSC_GOLD_TOKEN_ADDRESS` / `VITE_BASE_GOLD_TOKEN_ADDRESS`
 - `VITE_STREAM_SOURCES=https://your-hls-or-embed-source,...`
+
+Do not set provider-keyed values in any `VITE_*RPC_URL` variable for production builds. The betting app build fails intentionally if a public RPC URL looks like a Helius / Alchemy / Infura / QuickNode / dRPC secret endpoint.
 
 Cloudflare Pages headers/SPA rules are already added in:
 
 - `packages/gold-betting-demo/app/public/_headers`
 - `packages/gold-betting-demo/app/public/_redirects`
 
+Deployment metadata:
+
+- `build-info.json` is emitted into `dist/` on every build and should be served with `Cache-Control: no-store`.
 ## 5) Verify production
 
 Health:
@@ -107,6 +113,8 @@ Health:
 - `https://api.yourdomain.com/api/streaming/state`
 - `https://api.yourdomain.com/api/streaming/duel-context`
 - `https://api.yourdomain.com/api/perps/markets`
+- `https://api.yourdomain.com/api/proxy/evm/rpc?chain=bsc` (POST JSON-RPC smoke test)
+- `https://bet.yourdomain.com/build-info.json`
 
 End-to-end checks from repo root:
 
@@ -117,5 +125,6 @@ bun run duel:verify --server-url=https://your-stream-source.example --betting-ur
 ## 6) Security notes
 
 - Do not expose `ARENA_EXTERNAL_BET_WRITE_KEY` in public frontend env vars.
+- Do not ship provider-keyed RPC URLs in public frontend env vars. Keep them on Railway and let the keeper proxy them.
 - Rotate all secrets before production if they were ever committed/shared.
 - Keep `DISABLE_RATE_LIMIT` unset in production.

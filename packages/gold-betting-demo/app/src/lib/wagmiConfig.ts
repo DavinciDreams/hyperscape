@@ -7,10 +7,11 @@ import { createConfig, http } from "wagmi";
 import { injected } from "wagmi/connectors";
 import { getDefaultConfig } from "@rainbow-me/rainbowkit";
 import { getWagmiChains, getEnabledEvmChains } from "./chainConfig";
-import { CONFIG, BSC_RPC_URL, BASE_RPC_URL } from "./config";
+import { CONFIG } from "./config";
 
 const chains = getWagmiChains();
 const enabledEvmChains = getEnabledEvmChains();
+const fallbackRpcUrl = enabledEvmChains[0]?.rpcUrl;
 
 // Build transport map from enabled chains
 const transports: Record<number, ReturnType<typeof http>> = {};
@@ -20,8 +21,7 @@ for (const evmChain of enabledEvmChains) {
 // Fallback for any chain that didn't get explicitly mapped
 for (const chain of chains) {
   if (!transports[chain.id]) {
-    // Use BSC or Base RPC as fallback
-    transports[chain.id] = http(BSC_RPC_URL || BASE_RPC_URL || undefined);
+    transports[chain.id] = http(fallbackRpcUrl);
   }
 }
 

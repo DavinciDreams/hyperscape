@@ -518,6 +518,10 @@ const USE_GAME_RPC_PROXY =
   CONFIG.cluster === "mainnet-beta"
     ? true
     : readEnvBoolean("VITE_USE_GAME_RPC_PROXY", false);
+const USE_GAME_EVM_RPC_PROXY =
+  CONFIG.cluster === "mainnet-beta"
+    ? true
+    : readEnvBoolean("VITE_USE_GAME_EVM_RPC_PROXY", false);
 const LOCAL_SOLANA_RPC_PROXY_PREFIX = "/__solana";
 
 function isLoopbackRpcUrl(url: string): boolean {
@@ -609,7 +613,7 @@ export function getWsUrl(): string | undefined {
   if (CONFIG.cluster === "localnet" && CONFIG.wsUrl) {
     return CONFIG.wsUrl;
   }
-  // The backend currently proxies Solana HTTP RPC only.
+  // Public builds proxy HTTP RPC through the keeper; websocket stays direct.
   return undefined;
 }
 
@@ -617,12 +621,23 @@ export function getWsUrl(): string | undefined {
 // EVM Chain Configuration
 // ============================================================================
 
-export const BSC_RPC_URL: string = CONFIG.bscRpcUrl;
+function shouldUseGameEvmRpcProxy(): boolean {
+  return USE_GAME_EVM_RPC_PROXY && CONFIG.cluster !== "localnet";
+}
+
+export function getEvmRpcUrl(chain: "bsc" | "base"): string {
+  if (shouldUseGameEvmRpcProxy()) {
+    return `${GAME_API_URL}/api/proxy/evm/rpc?chain=${encodeURIComponent(chain)}`;
+  }
+  return chain === "bsc" ? CONFIG.bscRpcUrl : CONFIG.baseRpcUrl;
+}
+
+export const BSC_RPC_URL: string = getEvmRpcUrl("bsc");
 export const BSC_CHAIN_ID: number = CONFIG.bscChainId;
 export const BSC_GOLD_CLOB_ADDRESS: string = CONFIG.bscGoldClobAddress;
 export const BSC_GOLD_TOKEN_ADDRESS: string = CONFIG.bscGoldTokenAddress;
 
-export const BASE_RPC_URL: string = CONFIG.baseRpcUrl;
+export const BASE_RPC_URL: string = getEvmRpcUrl("base");
 export const BASE_CHAIN_ID: number = CONFIG.baseChainId;
 export const BASE_GOLD_CLOB_ADDRESS: string = CONFIG.baseGoldClobAddress;
 export const BASE_GOLD_TOKEN_ADDRESS: string = CONFIG.baseGoldTokenAddress;
