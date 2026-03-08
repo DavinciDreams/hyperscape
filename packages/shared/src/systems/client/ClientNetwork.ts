@@ -1761,6 +1761,40 @@ export class ClientNetwork extends SystemBase {
     };
   }
 
+  private getOldestInterpolationSnapshotIndex(
+    state: InterpolationState,
+  ): number {
+    if (state.snapshotCount === 0) {
+      return 0;
+    }
+
+    return state.snapshotCount === this.maxSnapshots ? state.snapshotIndex : 0;
+  }
+
+  private getLatestInterpolationSnapshotIndex(
+    state: InterpolationState,
+  ): number {
+    if (state.snapshotCount === 0) {
+      return 0;
+    }
+
+    if (state.snapshotCount < this.maxSnapshots) {
+      return state.snapshotCount - 1;
+    }
+
+    return (state.snapshotIndex - 1 + this.maxSnapshots) % this.maxSnapshots;
+  }
+
+  private getInterpolationSnapshotAt(
+    state: InterpolationState,
+    chronologicalIndex: number,
+  ): EntitySnapshot {
+    const oldestIndex = this.getOldestInterpolationSnapshotIndex(state);
+    return state.snapshots[
+      (oldestIndex + chronologicalIndex) % this.maxSnapshots
+    ];
+  }
+
   // PERFORMANCE: Track rotation index for progressive interpolation
   private _interpolationRotationIndex = 0;
   private readonly MAX_INTERPOLATIONS_PER_FRAME =
@@ -1899,7 +1933,8 @@ export class ClientNetwork extends SystemBase {
   ): void {
     if (state.snapshotCount < 2) {
       if (state.snapshotCount === 1) {
-        const snapshot = state.snapshots[0];
+        const snapshot =
+          state.snapshots[this.getLatestInterpolationSnapshotIndex(state)];
         state.tempPosition.set(
           snapshot.position[0],
           snapshot.position[1],
@@ -1927,8 +1962,8 @@ export class ClientNetwork extends SystemBase {
     let newer: EntitySnapshot | null = null;
 
     for (let i = 0; i < state.snapshotCount - 1; i++) {
-      const curr = state.snapshots[i];
-      const next = state.snapshots[(i + 1) % this.maxSnapshots];
+      const curr = this.getInterpolationSnapshotAt(state, i);
+      const next = this.getInterpolationSnapshotAt(state, i + 1);
 
       if (curr.timestamp <= renderTime && next.timestamp >= renderTime) {
         older = curr;
@@ -1938,8 +1973,9 @@ export class ClientNetwork extends SystemBase {
     }
 
     if (older && newer) {
+      const snapshotSpan = newer.timestamp - older.timestamp;
       const t =
-        (renderTime - older.timestamp) / (newer.timestamp - older.timestamp);
+        snapshotSpan > 0 ? (renderTime - older.timestamp) / snapshotSpan : 1;
 
       state.tempPosition.set(
         older.position[0] + (newer.position[0] - older.position[0]) * t,
@@ -1967,9 +2003,8 @@ export class ClientNetwork extends SystemBase {
       // Use most recent snapshot
       const timeSinceUpdate = now - state.lastUpdate;
       if (timeSinceUpdate < this.extrapolationLimit) {
-        const lastIndex =
-          (state.snapshotIndex - 1 + this.maxSnapshots) % this.maxSnapshots;
-        const last = state.snapshots[lastIndex];
+        const last =
+          state.snapshots[this.getLatestInterpolationSnapshotIndex(state)];
         state.tempPosition.set(
           last.position[0],
           last.position[1],

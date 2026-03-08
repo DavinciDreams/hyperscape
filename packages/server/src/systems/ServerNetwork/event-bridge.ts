@@ -154,16 +154,16 @@ export class EventBridge {
    */
   private setupResourceEvents(): void {
     try {
-      this.on(EventType.RESOURCE_DEPLETED, (...args: unknown[]) => {
-        this.broadcast.sendToAll("resourceDepleted", args[0]);
+      this.on(EventType.RESOURCE_DEPLETED, (payload: unknown) => {
+        this.sendResourceEvent("resourceDepleted", payload);
       });
 
-      this.on(EventType.RESOURCE_RESPAWNED, (...args: unknown[]) => {
-        this.broadcast.sendToAll("resourceRespawned", args[0]);
+      this.on(EventType.RESOURCE_RESPAWNED, (payload: unknown) => {
+        this.sendResourceEvent("resourceRespawned", payload);
       });
 
-      this.on(EventType.RESOURCE_SPAWNED, (...args: unknown[]) => {
-        this.broadcast.sendToAll("resourceSpawned", args[0]);
+      this.on(EventType.RESOURCE_SPAWNED, (payload: unknown) => {
+        this.sendResourceEvent("resourceSpawned", payload);
       });
 
       // Use tracked this.on() for proper cleanup in destroy()
@@ -727,7 +727,7 @@ export class EventBridge {
       });
 
       // Forward combat ended so clients/agents can clear inCombat flag
-      this.world.on(EventType.COMBAT_ENDED, (payload: unknown) => {
+      this.on(EventType.COMBAT_ENDED, (payload: unknown) => {
         const data = payload as EventMap[EventType.COMBAT_ENDED];
         if (data.attackerId) {
           this.broadcast.sendToPlayer(data.attackerId, "combatEnded", {
@@ -1123,7 +1123,7 @@ export class EventBridge {
       });
 
       // Forward cooking completion to player
-      this.world.on(EventType.COOKING_COMPLETED, (payload: unknown) => {
+      this.on(EventType.COOKING_COMPLETED, (payload: unknown) => {
         const data = payload as EventMap[EventType.COOKING_COMPLETED];
         if (data.playerId) {
           this.broadcast.sendToPlayer(data.playerId, "cookingComplete", {
@@ -1181,7 +1181,7 @@ export class EventBridge {
         }
       });
       // Forward smelting completion to player (batch finished)
-      this.world.on(EventType.SMELTING_COMPLETE, (payload: unknown) => {
+      this.on(EventType.SMELTING_COMPLETE, (payload: unknown) => {
         const data = payload as EventMap[EventType.SMELTING_COMPLETE];
         if (data.playerId) {
           this.broadcast.sendToPlayer(data.playerId, "smeltingComplete", {
@@ -1194,7 +1194,7 @@ export class EventBridge {
       });
 
       // Forward smithing completion to player (batch finished)
-      this.world.on(EventType.SMITHING_COMPLETE, (payload: unknown) => {
+      this.on(EventType.SMITHING_COMPLETE, (payload: unknown) => {
         const data = payload as EventMap[EventType.SMITHING_COMPLETE];
         if (data.playerId) {
           this.broadcast.sendToPlayer(data.playerId, "smithingComplete", {
@@ -1232,7 +1232,7 @@ export class EventBridge {
         }
       });
       // Forward crafting completion to player (batch finished)
-      this.world.on(EventType.CRAFTING_COMPLETE, (payload: unknown) => {
+      this.on(EventType.CRAFTING_COMPLETE, (payload: unknown) => {
         const data = payload as EventMap[EventType.CRAFTING_COMPLETE];
         if (data.playerId) {
           this.broadcast.sendToPlayer(data.playerId, "craftingComplete", {
@@ -1269,7 +1269,7 @@ export class EventBridge {
         }
       });
       // Forward fletching completion to player (batch finished)
-      this.world.on(EventType.FLETCHING_COMPLETE, (payload: unknown) => {
+      this.on(EventType.FLETCHING_COMPLETE, (payload: unknown) => {
         const data = payload as EventMap[EventType.FLETCHING_COMPLETE];
         if (data.playerId) {
           this.broadcast.sendToPlayer(data.playerId, "fletchingComplete", {
@@ -1306,7 +1306,7 @@ export class EventBridge {
         }
       });
       // Forward tanning completion to player (batch finished)
-      this.world.on(EventType.TANNING_COMPLETE, (payload: unknown) => {
+      this.on(EventType.TANNING_COMPLETE, (payload: unknown) => {
         const data = payload as EventMap[EventType.TANNING_COMPLETE];
         if (data.playerId) {
           this.broadcast.sendToPlayer(data.playerId, "tanningComplete", {
@@ -1392,6 +1392,23 @@ export class EventBridge {
     } catch (_err) {
       console.error("[EventBridge] Error setting up quest events:", _err);
     }
+  }
+
+  private sendResourceEvent(
+    packetName: "resourceDepleted" | "resourceRespawned" | "resourceSpawned",
+    payload: unknown,
+  ): void {
+    const resourceEvent = payload as {
+      position?: { x: number; y: number; z: number };
+    };
+    const position = resourceEvent.position;
+
+    if (position) {
+      this.broadcast.sendToNearby(packetName, payload, position.x, position.z);
+      return;
+    }
+
+    this.broadcast.sendToAll(packetName, payload);
   }
 
   /**
