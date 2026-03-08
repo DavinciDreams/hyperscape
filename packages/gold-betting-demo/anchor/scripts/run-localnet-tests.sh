@@ -80,7 +80,7 @@ kill_stale_validator_listener() {
 
 wait_for_rpc() {
   local rpc_url="$1"
-  for _ in {1..90}; do
+  for _ in {1..180}; do
     if curl -s -X POST "$rpc_url" \
       -H "content-type: application/json" \
       -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' | rg -q '"result":"ok"'; then
@@ -97,7 +97,7 @@ wait_for_program() {
   local rpc_url="$1"
   local program_id="$2"
 
-  for _ in {1..90}; do
+  for _ in {1..180}; do
     if curl -s -X POST "$rpc_url" \
       -H "content-type: application/json" \
       -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getAccountInfo\",\"params\":[\"${program_id}\",{\"encoding\":\"base64\"}]}" \
