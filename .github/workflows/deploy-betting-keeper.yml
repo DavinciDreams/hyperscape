@@ -1,0 +1,94 @@
+name: Deploy Betting Keeper
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/gold-betting-demo/keeper/**"
+      - ".github/workflows/deploy-betting-keeper.yml"
+      - "docs/betting-production-deploy.md"
+      - "package.json"
+      - "bun.lock"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BETTING_KEEPER_URL: https://gold-betting-keeper-production.up.railway.app
+
+jobs:
+  deploy:
+    name: Deploy gold-betting-keeper
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.38
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run keeper tests
+        run: |
+          bun test \
+            packages/gold-betting-demo/keeper/src/walletKeys.test.ts \
+            packages/gold-betting-demo/keeper/src/modelMarkets.test.ts \
+            packages/gold-betting-demo/keeper/src/db.test.ts \
+            packages/gold-betting-demo/keeper/src/perpsMath.test.ts
+
+      - name: Smoke test keeper service
+        run: |
+          PORT=18080 \
+          ENABLE_KEEPER_BOT=false \
+          SOLANA_RPC_URL=https://api.mainnet-beta.solana.com \
+          bun --bun packages/gold-betting-demo/keeper/src/service.ts >/tmp/betting-keeper.log 2>&1 &
+          KEEPER_PID=$!
+          trap 'kill "$KEEPER_PID" >/dev/null 2>&1 || true' EXIT
+
+          for attempt in $(seq 1 20); do
+            if curl -fsSL http://127.0.0.1:18080/status | jq -e '.ok == true and .proxies != null' >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          cat /tmp/betting-keeper.log
+          exit 1
+
+      - name: Install Railway CLI
+        run: bun add -g @railway/cli
+
+      - name: Link Railway service
+        working-directory: packages/gold-betting-demo/keeper
+        run: railway link -p hyperscape -e production -s gold-betting-keeper
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Deploy keeper
+        working-directory: packages/gold-betting-demo/keeper
+        run: railway up . --path-as-root --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          CI: "true"
+
+      - name: Verify keeper endpoints
+        run: |
+          for attempt in $(seq 1 20); do
+            status_payload="$(curl -fsSL "${BETTING_KEEPER_URL}/status" || true)"
+            if [ -n "$status_payload" ] && echo "$status_payload" | jq -e '.ok == true and .proxies.solanaRpc == true and .parsers != null' >/dev/null; then
+              break
+            fi
+            sleep 15
+          done
+
+          curl -fsSL "${BETTING_KEEPER_URL}/status" | jq -e '.ok == true'
+          curl -fsSL "${BETTING_KEEPER_URL}/api/streaming/duel-context" | jq -e '.type == "STREAMING_DUEL_CONTEXT"'
+          curl -fsSL "${BETTING_KEEPER_URL}/api/streaming/leaderboard/details" | jq -e '.leaderboard != null and .cycle != null'
+          curl -fsSL "${BETTING_KEEPER_URL}/api/perps/markets" | jq -e '.markets != null'

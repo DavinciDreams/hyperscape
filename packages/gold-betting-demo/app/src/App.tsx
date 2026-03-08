@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
@@ -22,17 +31,8 @@ import {
 } from "./lib/invite";
 import { StreamPlayer } from "./components/StreamPlayer";
 import { ChainSelector } from "./components/ChainSelector";
-import { EvmBettingPanel } from "./components/EvmBettingPanel";
-import {
-  SolanaClobPanel,
-  type SolanaClobMarketSnapshot,
-} from "./components/SolanaClobPanel";
-import { ModelsMarketView } from "./components/ModelsMarketView";
 import { PointsDisplay } from "./components/PointsDisplay";
-import { PointsLeaderboard } from "./components/PointsLeaderboard";
-import { PointsHistory } from "./components/PointsHistory";
-import { ReferralPanel } from "./components/ReferralPanel";
-import { AgentStats } from "./components/AgentStats";
+import type { SolanaClobMarketSnapshot } from "./components/SolanaClobPanel";
 import { useChain } from "./lib/ChainContext";
 import {
   FIGHT_ORACLE_PROGRAM_ID,
@@ -163,6 +163,69 @@ function sideFromEnum(value: unknown): BetSide | null {
 function goldDisplay(amount: unknown): string {
   const raw = asNumber(amount, 0);
   return (raw / 10 ** GOLD_DECIMALS).toFixed(6);
+}
+
+const EvmBettingPanel = lazy(() =>
+  import("./components/EvmBettingPanel").then((module) => ({
+    default: module.EvmBettingPanel,
+  })),
+);
+const SolanaClobPanel = lazy(() =>
+  import("./components/SolanaClobPanel").then((module) => ({
+    default: module.SolanaClobPanel,
+  })),
+);
+const ModelsMarketView = lazy(() =>
+  import("./components/ModelsMarketView").then((module) => ({
+    default: module.ModelsMarketView,
+  })),
+);
+const PointsLeaderboard = lazy(() =>
+  import("./components/PointsLeaderboard").then((module) => ({
+    default: module.PointsLeaderboard,
+  })),
+);
+const PointsHistory = lazy(() =>
+  import("./components/PointsHistory").then((module) => ({
+    default: module.PointsHistory,
+  })),
+);
+const ReferralPanel = lazy(() =>
+  import("./components/ReferralPanel").then((module) => ({
+    default: module.ReferralPanel,
+  })),
+);
+const AgentStats = lazy(() =>
+  import("./components/AgentStats").then((module) => ({
+    default: module.AgentStats,
+  })),
+);
+
+function PanelFallback({
+  label,
+  minHeight = 220,
+}: {
+  label: string;
+  minHeight?: number;
+}) {
+  return (
+    <div
+      style={{
+        minHeight,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.03)",
+        color: "rgba(255,255,255,0.58)",
+        textTransform: "uppercase",
+        letterSpacing: 1,
+        fontSize: 12,
+      }}
+    >
+      {label}
+    </div>
+  );
 }
 
 export function App() {
@@ -925,7 +988,9 @@ export function App() {
                     key={tab.key}
                     type="button"
                     data-testid={`points-drawer-tab-${tab.key}`}
-                    onClick={() => setPointsDrawerTab(tab.key)}
+                    onClick={() =>
+                      startTransition(() => setPointsDrawerTab(tab.key))
+                    }
                     style={{
                       flex: 1,
                       padding: "8px 0",
@@ -966,23 +1031,33 @@ export function App() {
                 overflowY: "auto",
               }}
             >
-              {pointsDrawerTab === "leaderboard" && <PointsLeaderboard />}
+              {pointsDrawerTab === "leaderboard" && (
+                <Suspense
+                  fallback={<PanelFallback label="Loading leaderboard" />}
+                >
+                  <PointsLeaderboard />
+                </Suspense>
+              )}
               {pointsDrawerTab === "history" && (
-                <PointsHistory walletAddress={pointsWalletAddress} />
+                <Suspense fallback={<PanelFallback label="Loading history" />}>
+                  <PointsHistory walletAddress={pointsWalletAddress} />
+                </Suspense>
               )}
               {pointsDrawerTab === "referral" && (
-                <ReferralPanel
-                  activeChain={activeChain}
-                  solanaWallet={solanaWalletAddress}
-                  evmWallet={evmWalletAddress ?? null}
-                  evmWalletPlatform={
-                    activeChain === "bsc"
-                      ? "BSC"
-                      : activeChain === "base"
-                        ? "BASE"
-                        : null
-                  }
-                />
+                <Suspense fallback={<PanelFallback label="Loading referral" />}>
+                  <ReferralPanel
+                    activeChain={activeChain}
+                    solanaWallet={solanaWalletAddress}
+                    evmWallet={evmWalletAddress ?? null}
+                    evmWalletPlatform={
+                      activeChain === "bsc"
+                        ? "BSC"
+                        : activeChain === "base"
+                          ? "BASE"
+                          : null
+                    }
+                  />
+                </Suspense>
               )}
             </div>
           </div>
@@ -1094,10 +1169,16 @@ export function App() {
               </button>
             </div>
             <div style={{ position: "relative", zIndex: 1 }}>
-              <AgentStats
-                agent={selectedAgentForStats}
-                side={selectedAgentForStats.id === "YES" ? "left" : "right"}
-              />
+              <Suspense
+                fallback={
+                  <PanelFallback label="Loading agent stats" minHeight={320} />
+                }
+              >
+                <AgentStats
+                  agent={selectedAgentForStats}
+                  side={selectedAgentForStats.id === "YES" ? "left" : "right"}
+                />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -1264,7 +1345,7 @@ export function App() {
                 <button
                   data-testid="surface-mode-duels"
                   className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => setSurfaceMode("DUELS")}
+                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
                   type="button"
                 >
                   Duels
@@ -1272,7 +1353,9 @@ export function App() {
                 <button
                   data-testid="surface-mode-models"
                   className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => setSurfaceMode("MODELS")}
+                  onClick={() =>
+                    startTransition(() => setSurfaceMode("MODELS"))
+                  }
                   type="button"
                 >
                   Models
@@ -1330,7 +1413,7 @@ export function App() {
                 <button
                   data-testid="surface-mode-duels"
                   className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => setSurfaceMode("DUELS")}
+                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
                   type="button"
                 >
                   Duels
@@ -1338,7 +1421,9 @@ export function App() {
                 <button
                   data-testid="surface-mode-models"
                   className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => setSurfaceMode("MODELS")}
+                  onClick={() =>
+                    startTransition(() => setSurfaceMode("MODELS"))
+                  }
                   type="button"
                 >
                   Models
@@ -1511,9 +1596,15 @@ export function App() {
       {surfaceMode === "MODELS" ? (
         <div className="hm-main hm-main--models">
           <div className="hm-models-main">
-            <ModelsMarketView
-              activeMatchup={`${effA1.name} vs ${effA2.name}`}
-            />
+            <Suspense
+              fallback={
+                <PanelFallback label="Loading model markets" minHeight={480} />
+              }
+            >
+              <ModelsMarketView
+                activeMatchup={`${effA1.name} vs ${effA2.name}`}
+              />
+            </Suspense>
           </div>
         </div>
       ) : (
@@ -2118,19 +2209,37 @@ export function App() {
                 <div className="hm-market-panel-body">
                   {isEvmChain ? (
                     /* EVM — single panel, no tabs */
-                    <EvmBettingPanel
-                      agent1Name={effAgent1Name}
-                      agent2Name={effAgent2Name}
-                      compact
-                    />
+                    <Suspense
+                      fallback={
+                        <PanelFallback
+                          label="Loading EVM market"
+                          minHeight={360}
+                        />
+                      }
+                    >
+                      <EvmBettingPanel
+                        agent1Name={effAgent1Name}
+                        agent2Name={effAgent2Name}
+                        compact
+                      />
+                    </Suspense>
                   ) : (
                     /* Predictions — Solana CLOB panel */
-                    <SolanaClobPanel
-                      agent1Name={effAgent1Name}
-                      agent2Name={effAgent2Name}
-                      compact={!isE2eMode}
-                      onMarketSnapshot={handleSolanaClobSnapshot}
-                    />
+                    <Suspense
+                      fallback={
+                        <PanelFallback
+                          label="Loading Solana market"
+                          minHeight={360}
+                        />
+                      }
+                    >
+                      <SolanaClobPanel
+                        agent1Name={effAgent1Name}
+                        agent2Name={effAgent2Name}
+                        compact={!isE2eMode}
+                        onMarketSnapshot={handleSolanaClobSnapshot}
+                      />
+                    </Suspense>
                   )}
                 </div>
               </div>
