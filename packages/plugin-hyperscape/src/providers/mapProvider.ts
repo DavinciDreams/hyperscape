@@ -16,8 +16,10 @@ import type {
 } from "@elizaos/core";
 import { logger } from "@elizaos/core";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
-import type { WorldMapData } from "../types.js";
-import { populateKnownLocationsFromWorldMap } from "./goalProvider.js";
+import {
+  getWorldMapSignature,
+  populateKnownLocationsFromWorldMap,
+} from "./goalProvider.js";
 
 /** Calculate 2D distance between player and a world position */
 function dist2D(px: number, pz: number, tx: number, tz: number): number {
@@ -40,11 +42,11 @@ function getDirection(px: number, pz: number, tx: number, tz: number): string {
   return "northeast";
 }
 
-/** Track whether we've populated locations already */
-let locationsPopulated = false;
+/** Track the last world map we used to populate known locations */
+let lastWorldMapSignature: string | null = null;
 
 export function clearMapProviderCache(_agentId?: string): void {
-  locationsPopulated = false;
+  lastWorldMapSignature = null;
 }
 
 export const mapProvider: Provider = {
@@ -76,10 +78,10 @@ export const mapProvider: Provider = {
       };
     }
 
-    // Populate KNOWN_LOCATIONS once when we first get map data
-    if (!locationsPopulated) {
+    const worldMapSignature = getWorldMapSignature(worldMap);
+    if (lastWorldMapSignature !== worldMapSignature) {
       populateKnownLocationsFromWorldMap(worldMap);
-      locationsPopulated = true;
+      lastWorldMapSignature = worldMapSignature;
       logger.info(
         `[mapProvider] Populated KNOWN_LOCATIONS with ${worldMap.towns.length} towns and ${worldMap.pois.length} POIs`,
       );
