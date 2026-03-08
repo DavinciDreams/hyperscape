@@ -152,7 +152,9 @@ dependencies = [
  "borsh 0.10.4",
  "bytemuck",
  "hyperscape-bincode",
+ "solana-loader-v3-interface",
  "solana-program",
+ "solana-sdk-ids",
  "thiserror 1.0.69",
 ]
 

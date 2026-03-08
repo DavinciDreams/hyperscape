@@ -1,8 +1,7 @@
 use crate::error::ErrorCode;
 use crate::{AccountDeserialize, AccountSerialize, Owner, Result};
-use solana_program::{
-    bpf_loader_upgradeable::UpgradeableLoaderState, program_error::ProgramError, pubkey::Pubkey,
-};
+use solana_loader_v3_interface::state::UpgradeableLoaderState;
+use solana_program::{program_error::ProgramError, pubkey::Pubkey};
 
 #[derive(Clone)]
 pub struct ProgramData {
@@ -46,13 +45,13 @@ impl AccountSerialize for ProgramData {
 
 impl Owner for ProgramData {
     fn owner() -> solana_program::pubkey::Pubkey {
-        anchor_lang::solana_program::bpf_loader_upgradeable::ID
+        solana_sdk_ids::bpf_loader_upgradeable::ID
     }
 }
 
 impl Owner for UpgradeableLoaderState {
     fn owner() -> Pubkey {
-        anchor_lang::solana_program::bpf_loader_upgradeable::ID
+        solana_sdk_ids::bpf_loader_upgradeable::ID
     }
 }
 
