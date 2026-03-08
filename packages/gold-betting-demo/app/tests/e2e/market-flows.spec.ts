@@ -146,6 +146,34 @@ async function waitForNewText(
   return matched;
 }
 
+async function waitForNewEvmTxText(
+  page: Page,
+  txTestId: string,
+  previousValue: string,
+  label: string,
+  timeoutMs = 60_000,
+): Promise<string> {
+  const startedAt = Date.now();
+  let lastStatus = "";
+  let lastTx = "";
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastTx = await readText(page, txTestId);
+    lastStatus = await readText(page, "evm-status");
+    console.log(
+      `[e2e][evm] ${label} status=${lastStatus || "-"} tx=${lastTx || "-"}`,
+    );
+    if (lastTx && lastTx !== "-" && lastTx !== previousValue) {
+      return lastTx;
+    }
+    await page.waitForTimeout(1_000);
+  }
+
+  throw new Error(
+    `[e2e][evm] Timed out waiting for ${label}. status=${lastStatus || "-"} tx=${lastTx || "-"}`,
+  );
+}
+
 async function waitForNewTxSignature(
   page: Page,
   testId: string,
@@ -598,10 +626,11 @@ test.describe("market flows", () => {
     const previousYesTx = await readText(page, "evm-last-order-tx");
     await evmPanel.getByTestId("evm-pick-yes").click();
     await evmPanel.getByTestId("evm-place-order").click();
-    const yesTx = await waitForNewText(
+    const yesTx = await waitForNewEvmTxText(
       page,
       "evm-last-order-tx",
       previousYesTx,
+      "YES order",
     );
     await waitForEvmReceipt(publicClient, yesTx as Hash);
 
@@ -621,7 +650,12 @@ test.describe("market flows", () => {
     const previousNoTx = await readText(page, "evm-last-order-tx");
     await evmPanel.getByTestId("evm-pick-no").click();
     await evmPanel.getByTestId("evm-place-order").click();
-    const noTx = await waitForNewText(page, "evm-last-order-tx", previousNoTx);
+    const noTx = await waitForNewEvmTxText(
+      page,
+      "evm-last-order-tx",
+      previousNoTx,
+      "NO order",
+    );
     await waitForEvmReceipt(publicClient, noTx as Hash);
 
     await expect
@@ -639,10 +673,11 @@ test.describe("market flows", () => {
     console.log("[e2e][evm] resolving YES winner");
     const previousResolveTx = await readText(page, "evm-last-resolve-tx");
     await evmPanel.getByTestId("evm-resolve-match").click();
-    const resolveTx = await waitForNewText(
+    const resolveTx = await waitForNewEvmTxText(
       page,
       "evm-last-resolve-tx",
       previousResolveTx,
+      "resolve",
     );
     await waitForEvmReceipt(publicClient, resolveTx as Hash);
 
@@ -689,10 +724,11 @@ test.describe("market flows", () => {
           timeout: 20_000,
         });
         await evmPanel.getByTestId("evm-claim-payout").click();
-        claimTx = await waitForNewText(
+        claimTx = await waitForNewEvmTxText(
           page,
           "evm-last-claim-tx",
           previousClaimTx,
+          "manual claim",
         );
         await waitForEvmReceipt(publicClient, claimTx as Hash);
       }
