@@ -24,6 +24,10 @@ import {
   saveReferralFees,
 } from "./db";
 import { modelMarketIdFromCharacterId } from "./modelMarkets";
+import {
+  isLegacyDerivedPointsWalletKey,
+  normalizePointsWalletInput,
+} from "./walletKeys";
 
 type StreamState = {
   type: "STREAMING_STATE_UPDATE";
@@ -373,7 +377,7 @@ function mergeIdentity(walletA: string, walletB: string): boolean {
 }
 
 function identityWallets(wallet: string, scope: string | null): string[] {
-  const normalized = rememberWalletCase(wallet);
+  const normalized = rememberWalletCase(normalizePointsWalletInput(wallet));
   const canonical = ensureIdentity(normalized);
   if (scope?.toLowerCase() !== "linked") {
     return [normalized];
@@ -575,16 +579,18 @@ function leaderboardRows(
       );
   }
 
-  const rows = [...pointsByWallet.keys()].map((wallet) => {
-    const total =
-      window === "alltime" && pointsEvents.length === 0
-        ? totalPoints(ensureWalletPoints(wallet))
-        : totalPointsFromEvents(new Set([wallet]), window);
-    return {
-      wallet: displayWallet(wallet),
-      totalPoints: total,
-    };
-  });
+  const rows = [...pointsByWallet.keys()]
+    .filter((wallet) => !isLegacyDerivedPointsWalletKey(wallet))
+    .map((wallet) => {
+      const total =
+        window === "alltime" && pointsEvents.length === 0
+          ? totalPoints(ensureWalletPoints(wallet))
+          : totalPointsFromEvents(new Set([wallet]), window);
+      return {
+        wallet: displayWallet(wallet),
+        totalPoints: total,
+      };
+    });
   return rows
     .filter((entry) => entry.totalPoints > 0)
     .sort(
@@ -2022,8 +2028,8 @@ const server = Bun.serve({
       req.method === "GET" &&
       url.pathname.startsWith("/api/arena/points/rank/")
     ) {
-      const wallet = decodeURIComponent(
-        url.pathname.replace("/api/arena/points/rank/", ""),
+      const wallet = normalizePointsWalletInput(
+        decodeURIComponent(url.pathname.replace("/api/arena/points/rank/", "")),
       );
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);
@@ -2037,8 +2043,10 @@ const server = Bun.serve({
       req.method === "GET" &&
       url.pathname.startsWith("/api/arena/points/history/")
     ) {
-      const wallet = decodeURIComponent(
-        url.pathname.replace("/api/arena/points/history/", ""),
+      const wallet = normalizePointsWalletInput(
+        decodeURIComponent(
+          url.pathname.replace("/api/arena/points/history/", ""),
+        ),
       );
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);
@@ -2069,8 +2077,10 @@ const server = Bun.serve({
       req.method === "GET" &&
       url.pathname.startsWith("/api/arena/points/multiplier/")
     ) {
-      const wallet = decodeURIComponent(
-        url.pathname.replace("/api/arena/points/multiplier/", ""),
+      const wallet = normalizePointsWalletInput(
+        decodeURIComponent(
+          url.pathname.replace("/api/arena/points/multiplier/", ""),
+        ),
       );
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);
@@ -2081,8 +2091,8 @@ const server = Bun.serve({
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/arena/points/")) {
-      const wallet = decodeURIComponent(
-        url.pathname.replace("/api/arena/points/", ""),
+      const wallet = normalizePointsWalletInput(
+        decodeURIComponent(url.pathname.replace("/api/arena/points/", "")),
       );
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);

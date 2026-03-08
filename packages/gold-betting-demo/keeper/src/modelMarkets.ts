@@ -6,16 +6,18 @@ const MIN_INDEX = 1;
 const MAX_Z_SCORE = 4;
 
 export function modelMarketIdFromCharacterId(characterId: string): number {
-  let hash = 0x811c9dc5;
   const namespaced = `hyperscape:model:${characterId.trim().toLowerCase()}`;
+  let hash = 0xcbf29ce484222325n;
+  const fnvPrime = 0x100000001b3n;
+  const maxSafeMarketId = 0x1fffffffffffffn;
 
   for (let index = 0; index < namespaced.length; index += 1) {
-    hash ^= namespaced.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
+    hash ^= BigInt(namespaced.charCodeAt(index));
+    hash = (hash * fnvPrime) & 0xffffffffffffffffn;
   }
 
-  const normalized = hash >>> 0;
-  return normalized === 0 ? 1 : normalized;
+  const normalized = hash & maxSafeMarketId;
+  return Number(normalized === 0n ? 1n : normalized);
 }
 
 export function conservativeSkill(rating: AgentRating): number {

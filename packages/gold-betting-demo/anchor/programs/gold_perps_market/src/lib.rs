@@ -86,7 +86,7 @@ pub mod gold_perps_market {
 
     pub fn update_market_oracle(
         ctx: Context<UpdateMarketOracle>,
-        market_id: u32,
+        market_id: u64,
         spot_index: u64,
         mu: u64,
         sigma: u64,
@@ -135,7 +135,7 @@ pub mod gold_perps_market {
 
     pub fn deposit_insurance(
         ctx: Context<DepositInsurance>,
-        market_id: u32,
+        market_id: u64,
         amount: u64,
     ) -> Result<()> {
         require!(amount > 0, PerpsError::InvalidInsuranceDeposit);
@@ -164,7 +164,7 @@ pub mod gold_perps_market {
 
     pub fn modify_position(
         ctx: Context<ModifyPosition>,
-        market_id: u32,
+        market_id: u64,
         margin_delta: i64,
         size_delta: i64,
         acceptable_price: u64,
@@ -346,7 +346,7 @@ pub mod gold_perps_market {
 
     pub fn liquidate_position(
         ctx: Context<LiquidatePosition>,
-        market_id: u32,
+        market_id: u64,
     ) -> Result<()> {
         let config = &ctx.accounts.config;
         let market = &mut ctx.accounts.market;
@@ -426,7 +426,7 @@ pub mod gold_perps_market {
 
     pub fn set_market_status(
         ctx: Context<SetMarketStatus>,
-        market_id: u32,
+        market_id: u64,
         next_status: u8,
         settlement_spot_index: u64,
     ) -> Result<()> {
@@ -439,10 +439,6 @@ pub mod gold_perps_market {
         let now = Clock::get()?.unix_timestamp;
         match next_status {
             MARKET_STATUS_ACTIVE => {
-                require!(
-                    market.status != MARKET_STATUS_ARCHIVED,
-                    PerpsError::MarketArchived
-                );
                 market.status = MARKET_STATUS_ACTIVE;
                 market.settlement_spot_index = 0;
                 market.last_funding_time = now;
@@ -477,7 +473,7 @@ pub mod gold_perps_market {
 
     pub fn recycle_market_maker_fees(
         ctx: Context<RecycleMarketMakerFees>,
-        market_id: u32,
+        market_id: u64,
         amount: u64,
     ) -> Result<()> {
         require!(amount > 0, PerpsError::InvalidFeeWithdrawal);
@@ -500,7 +496,7 @@ pub mod gold_perps_market {
 
     pub fn withdraw_fee_balance(
         ctx: Context<WithdrawFeeBalance>,
-        market_id: u32,
+        market_id: u64,
         fee_bucket: u8,
         amount: u64,
     ) -> Result<()> {
@@ -1009,7 +1005,7 @@ pub struct InitializeConfig<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct UpdateMarketOracle<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigState>,
@@ -1027,7 +1023,7 @@ pub struct UpdateMarketOracle<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct DepositInsurance<'info> {
     #[account(
         mut,
@@ -1041,7 +1037,7 @@ pub struct DepositInsurance<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct ModifyPosition<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigState>,
@@ -1065,7 +1061,7 @@ pub struct ModifyPosition<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct LiquidatePosition<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigState>,
@@ -1090,7 +1086,7 @@ pub struct LiquidatePosition<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct SetMarketStatus<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigState>,
@@ -1104,7 +1100,7 @@ pub struct SetMarketStatus<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct RecycleMarketMakerFees<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigState>,
@@ -1118,7 +1114,7 @@ pub struct RecycleMarketMakerFees<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct WithdrawFeeBalance<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigState>,
@@ -1157,7 +1153,7 @@ impl ConfigState {
 #[account]
 pub struct MarketState {
     pub initialized: bool,
-    pub market_id: u32,
+    pub market_id: u64,
     pub status: u8,
     pub insurance_fund: u64,
     pub treasury_fee_balance: u64,
@@ -1184,7 +1180,7 @@ impl MarketState {
 pub struct PositionState {
     pub initialized: bool,
     pub owner: Pubkey,
-    pub market_id: u32,
+    pub market_id: u64,
     pub margin: u64,
     pub size: i64,
     pub entry_price: u64,

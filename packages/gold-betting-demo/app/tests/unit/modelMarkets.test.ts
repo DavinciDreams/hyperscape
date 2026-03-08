@@ -74,6 +74,23 @@ describe("sanitizePerpsMarketsResponse", () => {
           characterId: "broken",
           marketId: "oops",
         },
+        {
+          rank: 2,
+          characterId: "bad-status",
+          marketId: 456,
+          name: "Bad Status",
+          provider: "",
+          model: "",
+          wins: 0,
+          losses: 0,
+          winRate: 0,
+          combatLevel: 1,
+          currentStreak: 0,
+          status: "PAUSED",
+          lastSeenAt: 1_000,
+          deprecatedAt: null,
+          updatedAt: 2_000,
+        },
       ],
     });
 

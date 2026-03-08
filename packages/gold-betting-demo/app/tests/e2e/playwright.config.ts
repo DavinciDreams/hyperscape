@@ -1,5 +1,24 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const IS_LINUX = process.platform === "linux";
+const DEFAULT_LINUX_WEBGPU_ARGS = [
+  "--enable-unsafe-webgpu",
+  "--ozone-platform=x11",
+  "--use-angle=vulkan",
+  "--enable-features=Vulkan,VulkanFromANGLE",
+];
+const EXTRA_WEBGPU_ARGS = (process.env.PW_WEBGPU_ARGS ?? "")
+  .split(" ")
+  .map((arg) => arg.trim())
+  .filter(Boolean);
+const WEBGPU_LAUNCH_ARGS = [
+  ...(IS_LINUX ? DEFAULT_LINUX_WEBGPU_ARGS : []),
+  ...EXTRA_WEBGPU_ARGS,
+];
+
+// Playwright sets FORCE_COLOR; if NO_COLOR is also present it emits noisy startup warnings.
+delete process.env.NO_COLOR;
+
 export default defineConfig({
   testDir: ".",
   testMatch: "**/*.spec.ts",
@@ -25,7 +44,11 @@ export default defineConfig({
     video: "retain-on-failure",
     actionTimeout: 30_000,
     navigationTimeout: 60_000,
-    headless: true,
+    // WebGPU is required for Hyperscape surfaces; run headed sessions.
+    headless: false,
+    launchOptions: WEBGPU_LAUNCH_ARGS.length
+      ? { args: WEBGPU_LAUNCH_ARGS }
+      : undefined,
   },
   projects: [
     {

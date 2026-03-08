@@ -23,6 +23,7 @@ import {
   configPda,
   ensurePerpsConfig,
   hasProgramError,
+  marketIdBn,
   marketPda,
   num,
   positionPda,
@@ -90,7 +91,7 @@ describe("gold_perps_market", () => {
     const lamportsBeforeDeposit = await provider.connection.getBalance(market);
 
     await program.methods
-      .depositInsurance(marketId, toBn(SOL(3)))
+      .depositInsurance(marketIdBn(marketId), toBn(SOL(3)))
       .accountsPartial({
         market,
         payer: authority.publicKey,
@@ -123,7 +124,7 @@ describe("gold_perps_market", () => {
     const position = positionPda(program.programId, trader.publicKey, marketId);
 
     await program.methods
-      .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(2)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(2)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -137,7 +138,12 @@ describe("gold_perps_market", () => {
     await refreshMarketOracle(program, authority, marketId, PRICE(100));
 
     await program.methods
-      .modifyPosition(marketId, toBn(SOL(0.5)), toBn(SOL(1)), toBn(0))
+      .modifyPosition(
+        marketIdBn(marketId),
+        toBn(SOL(0.5)),
+        toBn(SOL(1)),
+        toBn(0),
+      )
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -179,7 +185,7 @@ describe("gold_perps_market", () => {
     const position = positionPda(program.programId, trader.publicKey, marketId);
 
     await program.methods
-      .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(2)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(2)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -192,7 +198,7 @@ describe("gold_perps_market", () => {
 
     await program.methods
       .updateMarketOracle(
-        marketId,
+        marketIdBn(marketId),
         toBn(PRICE(130)),
         toBn(PRICE(130)),
         toBn(PRICE(13)),
@@ -211,7 +217,7 @@ describe("gold_perps_market", () => {
     );
 
     await program.methods
-      .modifyPosition(marketId, toBn(0), toBn(-SOL(2)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(0), toBn(-SOL(2)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -249,7 +255,12 @@ describe("gold_perps_market", () => {
     const position = positionPda(program.programId, trader.publicKey, marketId);
 
     await program.methods
-      .modifyPosition(marketId, toBn(SOL(1)), toBn(-SOL(2)), toBn(0))
+      .modifyPosition(
+        marketIdBn(marketId),
+        toBn(SOL(1)),
+        toBn(-SOL(2)),
+        toBn(0),
+      )
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -262,7 +273,7 @@ describe("gold_perps_market", () => {
 
     await program.methods
       .updateMarketOracle(
-        marketId,
+        marketIdBn(marketId),
         toBn(PRICE(80)),
         toBn(PRICE(80)),
         toBn(PRICE(8)),
@@ -281,7 +292,7 @@ describe("gold_perps_market", () => {
     );
 
     await program.methods
-      .modifyPosition(marketId, toBn(0), toBn(SOL(2)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(0), toBn(SOL(2)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -316,7 +327,7 @@ describe("gold_perps_market", () => {
     const position = positionPda(program.programId, trader.publicKey, marketId);
 
     await program.methods
-      .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(3)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(3)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -332,7 +343,7 @@ describe("gold_perps_market", () => {
 
     await program.methods
       .updateMarketOracle(
-        marketId,
+        marketIdBn(marketId),
         toBn(PRICE(100)),
         toBn(PRICE(100)),
         toBn(PRICE(10)),
@@ -371,7 +382,12 @@ describe("gold_perps_market", () => {
 
     try {
       await program.methods
-        .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(2)), toBn(0))
+        .modifyPosition(
+          marketIdBn(marketId),
+          toBn(SOL(1)),
+          toBn(SOL(2)),
+          toBn(0),
+        )
         .accountsPartial({
           config: configPda(program.programId),
           market,
@@ -405,7 +421,7 @@ describe("gold_perps_market", () => {
     const position = positionPda(program.programId, trader.publicKey, marketId);
 
     await program.methods
-      .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(2)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(2)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -420,7 +436,7 @@ describe("gold_perps_market", () => {
 
     try {
       await program.methods
-        .modifyPosition(marketId, toBn(0), toBn(-SOL(2)), toBn(0))
+        .modifyPosition(marketIdBn(marketId), toBn(0), toBn(-SOL(2)), toBn(0))
         .accountsPartial({
           config: configPda(program.programId),
           market,
@@ -440,7 +456,7 @@ describe("gold_perps_market", () => {
 
     await program.methods
       .updateMarketOracle(
-        marketId,
+        marketIdBn(marketId),
         toBn(PRICE(110)),
         toBn(PRICE(110)),
         toBn(PRICE(11)),
@@ -455,7 +471,7 @@ describe("gold_perps_market", () => {
       .rpc();
 
     await program.methods
-      .modifyPosition(marketId, toBn(0), toBn(-SOL(2)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(0), toBn(-SOL(2)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -482,7 +498,7 @@ describe("gold_perps_market", () => {
     const position = positionPda(program.programId, trader.publicKey, marketId);
 
     await program.methods
-      .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(4)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(4)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -495,7 +511,7 @@ describe("gold_perps_market", () => {
 
     await program.methods
       .updateMarketOracle(
-        marketId,
+        marketIdBn(marketId),
         toBn(PRICE(79)),
         toBn(PRICE(79)),
         toBn(PRICE(7.9)),
@@ -514,7 +530,7 @@ describe("gold_perps_market", () => {
     );
 
     await program.methods
-      .liquidatePosition(marketId)
+      .liquidatePosition(marketIdBn(marketId))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -567,7 +583,12 @@ describe("gold_perps_market", () => {
     await refreshMarketOracle(program, authority, shortMarketId, PRICE(200));
 
     await program.methods
-      .modifyPosition(longMarketId, toBn(SOL(1)), toBn(SOL(2)), toBn(0))
+      .modifyPosition(
+        marketIdBn(longMarketId),
+        toBn(SOL(1)),
+        toBn(SOL(2)),
+        toBn(0),
+      )
       .accountsPartial({
         config: configPda(program.programId),
         market: longMarket,
@@ -583,7 +604,12 @@ describe("gold_perps_market", () => {
       .rpc();
 
     await program.methods
-      .modifyPosition(shortMarketId, toBn(SOL(1)), toBn(-SOL(3)), toBn(0))
+      .modifyPosition(
+        marketIdBn(shortMarketId),
+        toBn(SOL(1)),
+        toBn(-SOL(3)),
+        toBn(0),
+      )
       .accountsPartial({
         config: configPda(program.programId),
         market: shortMarket,
@@ -625,7 +651,7 @@ describe("gold_perps_market", () => {
     const position = positionPda(program.programId, trader.publicKey, marketId);
 
     await program.methods
-      .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(2)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(2)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -642,7 +668,7 @@ describe("gold_perps_market", () => {
 
     await program.methods
       .recycleMarketMakerFees(
-        marketId,
+        marketIdBn(marketId),
         toBn(num(beforeRecycle.marketMakerFeeBalance)),
       )
       .accountsPartial({
@@ -661,7 +687,7 @@ describe("gold_perps_market", () => {
 
     await program.methods
       .withdrawFeeBalance(
-        marketId,
+        marketIdBn(marketId),
         0,
         toBn(num(afterRecycle.treasuryFeeBalance)),
       )
@@ -697,7 +723,7 @@ describe("gold_perps_market", () => {
     const position = positionPda(program.programId, trader.publicKey, marketId);
 
     await program.methods
-      .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(2)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(2)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -709,7 +735,11 @@ describe("gold_perps_market", () => {
       .rpc();
 
     await program.methods
-      .setMarketStatus(marketId, PERPS_STATUS_CLOSE_ONLY, toBn(PRICE(95)))
+      .setMarketStatus(
+        marketIdBn(marketId),
+        PERPS_STATUS_CLOSE_ONLY,
+        toBn(PRICE(95)),
+      )
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -722,7 +752,12 @@ describe("gold_perps_market", () => {
 
     try {
       await program.methods
-        .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(1)), toBn(0))
+        .modifyPosition(
+          marketIdBn(marketId),
+          toBn(SOL(1)),
+          toBn(SOL(1)),
+          toBn(0),
+        )
         .accountsPartial({
           config: configPda(program.programId),
           market,
@@ -745,7 +780,7 @@ describe("gold_perps_market", () => {
     }
 
     await program.methods
-      .modifyPosition(marketId, toBn(0), toBn(-SOL(2)), toBn(0))
+      .modifyPosition(marketIdBn(marketId), toBn(0), toBn(-SOL(2)), toBn(0))
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -775,7 +810,11 @@ describe("gold_perps_market", () => {
     );
 
     await program.methods
-      .setMarketStatus(marketId, PERPS_STATUS_CLOSE_ONLY, toBn(PRICE(100)))
+      .setMarketStatus(
+        marketIdBn(marketId),
+        PERPS_STATUS_CLOSE_ONLY,
+        toBn(PRICE(100)),
+      )
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -785,7 +824,11 @@ describe("gold_perps_market", () => {
       .rpc();
 
     await program.methods
-      .setMarketStatus(marketId, PERPS_STATUS_ARCHIVED, toBn(PRICE(100)))
+      .setMarketStatus(
+        marketIdBn(marketId),
+        PERPS_STATUS_ARCHIVED,
+        toBn(PRICE(100)),
+      )
       .accountsPartial({
         config: configPda(program.programId),
         market,
@@ -796,6 +839,62 @@ describe("gold_perps_market", () => {
 
     const marketState = await program.account.marketState.fetch(market);
     assert.strictEqual(marketState.status, PERPS_STATUS_ARCHIVED);
+  });
+
+  it("reactivates an archived market when the model returns", async () => {
+    const marketId = uniqueMarketId(2_014);
+    const market = await seedMarket(
+      program,
+      authority,
+      marketId,
+      PRICE(100),
+      SOL(2),
+    );
+
+    await program.methods
+      .setMarketStatus(
+        marketIdBn(marketId),
+        PERPS_STATUS_CLOSE_ONLY,
+        toBn(PRICE(100)),
+      )
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    await program.methods
+      .setMarketStatus(
+        marketIdBn(marketId),
+        PERPS_STATUS_ARCHIVED,
+        toBn(PRICE(100)),
+      )
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    await program.methods
+      .setMarketStatus(marketIdBn(marketId), 0, new anchor.BN(0))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    await refreshMarketOracle(program, authority, marketId, PRICE(108));
+
+    const marketState = await program.account.marketState.fetch(market);
+    assert.strictEqual(marketState.status, 0);
+    assert.strictEqual(num(marketState.settlementSpotIndex), 0);
+    assert.strictEqual(num(marketState.spotIndex), PRICE(108));
   });
 
   it("rejects trades that exceed the caller's acceptable slippage", async () => {
@@ -813,7 +912,12 @@ describe("gold_perps_market", () => {
 
     try {
       await program.methods
-        .modifyPosition(marketId, toBn(SOL(1)), toBn(SOL(2)), toBn(PRICE(99)))
+        .modifyPosition(
+          marketIdBn(marketId),
+          toBn(SOL(1)),
+          toBn(SOL(2)),
+          toBn(PRICE(99)),
+        )
         .accountsPartial({
           config: configPda(program.programId),
           market,

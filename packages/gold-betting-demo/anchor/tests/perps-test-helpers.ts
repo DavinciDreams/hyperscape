@@ -48,6 +48,10 @@ export function toBn(value: number): anchor.BN {
   return new anchor.BN(Math.round(value));
 }
 
+export function marketIdBn(marketId: number): anchor.BN {
+  return new anchor.BN(String(marketId));
+}
+
 export function num(value: anchor.BN | number | bigint): number {
   if (typeof value === "number") return value;
   if (typeof value === "bigint") return Number(value);
@@ -79,8 +83,8 @@ export function configPda(programId: PublicKey): PublicKey {
 }
 
 export function marketPda(programId: PublicKey, marketId: number): PublicKey {
-  const marketIdBytes = Buffer.alloc(4);
-  marketIdBytes.writeUInt32LE(marketId, 0);
+  const marketIdBytes = Buffer.alloc(8);
+  marketIdBytes.writeBigUInt64LE(BigInt(marketId), 0);
   return PublicKey.findProgramAddressSync(
     [Buffer.from("market"), marketIdBytes],
     programId,
@@ -92,8 +96,8 @@ export function positionPda(
   trader: PublicKey,
   marketId: number,
 ): PublicKey {
-  const marketIdBytes = Buffer.alloc(4);
-  marketIdBytes.writeUInt32LE(marketId, 0);
+  const marketIdBytes = Buffer.alloc(8);
+  marketIdBytes.writeBigUInt64LE(BigInt(marketId), 0);
   return PublicKey.findProgramAddressSync(
     [Buffer.from("position"), trader.toBuffer(), marketIdBytes],
     programId,
@@ -209,7 +213,7 @@ export async function seedMarket(
 
   if (insuranceLamports > 0) {
     await program.methods
-      .depositInsurance(marketId, toBn(insuranceLamports))
+      .depositInsurance(marketIdBn(marketId), toBn(insuranceLamports))
       .accountsPartial({
         market,
         payer: authority.publicKey,
@@ -230,7 +234,7 @@ export async function refreshMarketOracle(
 ): Promise<void> {
   await program.methods
     .updateMarketOracle(
-      marketId,
+      marketIdBn(marketId),
       toBn(spotIndex),
       toBn(spotIndex),
       toBn(Math.max(1, Math.floor(spotIndex / 10))),

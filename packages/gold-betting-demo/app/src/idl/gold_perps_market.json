@@ -69,7 +69,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         },
         {
           "name": "amount",
@@ -248,7 +248,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         }
       ]
     },
@@ -348,7 +348,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         },
         {
           "name": "margin_delta",
@@ -426,7 +426,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         },
         {
           "name": "amount",
@@ -496,7 +496,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         },
         {
           "name": "next_status",
@@ -575,7 +575,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         },
         {
           "name": "spot_index",
@@ -657,7 +657,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         },
         {
           "name": "fee_bucket",
@@ -910,7 +910,7 @@
           },
           {
             "name": "market_id",
-            "type": "u32"
+            "type": "u64"
           },
           {
             "name": "status",
@@ -994,7 +994,7 @@
           },
           {
             "name": "market_id",
-            "type": "u32"
+            "type": "u64"
           },
           {
             "name": "margin",
