@@ -45,7 +45,9 @@ jobs:
           bun-version: 1.1.38
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: |
+          bun install --frozen-lockfile
+          bun install --cwd packages/gold-betting-demo/app --frozen-lockfile
 
       - name: Build production app
         run: bun run --cwd packages/gold-betting-demo/app build --mode mainnet-beta
