@@ -77,9 +77,29 @@ export default defineConfig(async ({ mode }) => {
   const plugins: any[] = [react()];
   const alias: Record<string, string> = {};
   const require = createRequire(import.meta.url);
+  const wagmiRoot = path.dirname(require.resolve("wagmi/package.json"));
+  const wagmiCoreRoot = path.dirname(
+    require.resolve("@wagmi/core/package.json"),
+  );
+  const wagmiConnectorsRoot = path.dirname(
+    require.resolve("@wagmi/connectors/package.json"),
+  );
+  const reactQueryRoot = path.dirname(
+    require.resolve("@tanstack/react-query/package.json"),
+  );
+  const viemRoot = path.dirname(require.resolve("viem/package.json"));
   const nodePolyfillsRoot = path.dirname(
     path.dirname(require.resolve("vite-plugin-node-polyfills")),
   );
+
+  // Pin the betting app to its own EVM wallet stack. In the monorepo, the
+  // workspace root also installs an older wagmi major, and Vite can otherwise
+  // mix provider and hook imports across versions at bundle time.
+  alias["wagmi"] = wagmiRoot;
+  alias["@wagmi/core"] = wagmiCoreRoot;
+  alias["@wagmi/connectors"] = wagmiConnectorsRoot;
+  alias["@tanstack/react-query"] = reactQueryRoot;
+  alias["viem"] = viemRoot;
 
   // Some transitive deps (for example @metamask/sdk) import these shim paths
   // directly. Resolve them from the installed package root so the build remains
@@ -331,6 +351,11 @@ export default defineConfig(async ({ mode }) => {
         "react-dom",
         "react/jsx-runtime",
         "react/jsx-dev-runtime",
+        "wagmi",
+        "@wagmi/core",
+        "@wagmi/connectors",
+        "@tanstack/react-query",
+        "viem",
       ],
     },
     optimizeDeps: {
