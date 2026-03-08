@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
@@ -22,17 +31,8 @@ import {
 } from "./lib/invite";
 import { StreamPlayer } from "./components/StreamPlayer";
 import { ChainSelector } from "./components/ChainSelector";
-import { EvmBettingPanel } from "./components/EvmBettingPanel";
-import {
-  SolanaClobPanel,
-  type SolanaClobMarketSnapshot,
-} from "./components/SolanaClobPanel";
-import { ModelsMarketView } from "./components/ModelsMarketView";
 import { PointsDisplay } from "./components/PointsDisplay";
-import { PointsLeaderboard } from "./components/PointsLeaderboard";
-import { PointsHistory } from "./components/PointsHistory";
-import { ReferralPanel } from "./components/ReferralPanel";
-import { AgentStats } from "./components/AgentStats";
+import type { SolanaClobMarketSnapshot } from "./components/SolanaClobPanel";
 import { useChain } from "./lib/ChainContext";
 import {
   FIGHT_ORACLE_PROGRAM_ID,
@@ -163,6 +163,69 @@ function sideFromEnum(value: unknown): BetSide | null {
 function goldDisplay(amount: unknown): string {
   const raw = asNumber(amount, 0);
   return (raw / 10 ** GOLD_DECIMALS).toFixed(6);
+}
+
+const EvmBettingPanel = lazy(() =>
+  import("./components/EvmBettingPanel").then((module) => ({
+    default: module.EvmBettingPanel,
+  })),
+);
+const SolanaClobPanel = lazy(() =>
+  import("./components/SolanaClobPanel").then((module) => ({
+    default: module.SolanaClobPanel,
+  })),
+);
+const ModelsMarketView = lazy(() =>
+  import("./components/ModelsMarketView").then((module) => ({
+    default: module.ModelsMarketView,
+  })),
+);
+const PointsLeaderboard = lazy(() =>
+  import("./components/PointsLeaderboard").then((module) => ({
+    default: module.PointsLeaderboard,
+  })),
+);
+const PointsHistory = lazy(() =>
+  import("./components/PointsHistory").then((module) => ({
+    default: module.PointsHistory,
+  })),
+);
+const ReferralPanel = lazy(() =>
+  import("./components/ReferralPanel").then((module) => ({
+    default: module.ReferralPanel,
+  })),
+);
+const AgentStats = lazy(() =>
+  import("./components/AgentStats").then((module) => ({
+    default: module.AgentStats,
+  })),
+);
+
+function PanelFallback({
+  label,
+  minHeight = 220,
+}: {
+  label: string;
+  minHeight?: number;
+}) {
+  return (
+    <div
+      style={{
+        minHeight,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.03)",
+        color: "rgba(255,255,255,0.58)",
+        textTransform: "uppercase",
+        letterSpacing: 1,
+        fontSize: 12,
+      }}
+    >
+      {label}
+    </div>
+  );
 }
 
 export function App() {
@@ -633,23 +696,30 @@ export function App() {
   })();
   const effStatus = status;
   const effPhase = liveCycle?.phase ?? "IDLE";
+  const contextAgent1 = duelContext?.cycle.agent1 ?? null;
+  const contextAgent2 = duelContext?.cycle.agent2 ?? null;
 
   // Agent context from live SSE + duel-context polling
   const effA1 = {
     id: "agent1",
     name: effAgent1Name,
-    hp: liveCycle?.agent1?.hp ?? 100,
-    maxHp: liveCycle?.agent1?.maxHp ?? 100,
-    wins: liveCycle?.agent1?.wins ?? 0,
-    losses: liveCycle?.agent1?.losses ?? 0,
+    hp: contextAgent1?.hp ?? liveCycle?.agent1?.hp ?? 100,
+    maxHp: contextAgent1?.maxHp ?? liveCycle?.agent1?.maxHp ?? 100,
+    wins: contextAgent1?.wins ?? liveCycle?.agent1?.wins ?? 0,
+    losses: contextAgent1?.losses ?? liveCycle?.agent1?.losses ?? 0,
     rank: 1,
-    combatLevel: liveCycle?.agent1?.combatLevel ?? 1,
-    provider: liveCycle?.agent1?.provider ?? "",
-    model: liveCycle?.agent1?.model ?? "",
-    damageDealtThisFight: liveCycle?.agent1?.damageDealtThisFight ?? 0,
+    combatLevel:
+      contextAgent1?.combatLevel ?? liveCycle?.agent1?.combatLevel ?? 1,
+    provider: contextAgent1?.provider ?? liveCycle?.agent1?.provider ?? "",
+    model: contextAgent1?.model ?? liveCycle?.agent1?.model ?? "",
+    damageDealtThisFight:
+      contextAgent1?.damageDealtThisFight ??
+      liveCycle?.agent1?.damageDealtThisFight ??
+      0,
     headToHeadWins: 0,
     headToHeadLosses: 0,
-    monologues: [] as {
+    inventory: contextAgent1?.inventory ?? [],
+    monologues: (contextAgent1?.monologues ?? []) as {
       id: string;
       type: string;
       content: string;
@@ -659,18 +729,23 @@ export function App() {
   const effA2 = {
     id: "agent2",
     name: effAgent2Name,
-    hp: liveCycle?.agent2?.hp ?? 100,
-    maxHp: liveCycle?.agent2?.maxHp ?? 100,
-    wins: liveCycle?.agent2?.wins ?? 0,
-    losses: liveCycle?.agent2?.losses ?? 0,
+    hp: contextAgent2?.hp ?? liveCycle?.agent2?.hp ?? 100,
+    maxHp: contextAgent2?.maxHp ?? liveCycle?.agent2?.maxHp ?? 100,
+    wins: contextAgent2?.wins ?? liveCycle?.agent2?.wins ?? 0,
+    losses: contextAgent2?.losses ?? liveCycle?.agent2?.losses ?? 0,
     rank: 2,
-    combatLevel: liveCycle?.agent2?.combatLevel ?? 1,
-    provider: liveCycle?.agent2?.provider ?? "",
-    model: liveCycle?.agent2?.model ?? "",
-    damageDealtThisFight: liveCycle?.agent2?.damageDealtThisFight ?? 0,
+    combatLevel:
+      contextAgent2?.combatLevel ?? liveCycle?.agent2?.combatLevel ?? 1,
+    provider: contextAgent2?.provider ?? liveCycle?.agent2?.provider ?? "",
+    model: contextAgent2?.model ?? liveCycle?.agent2?.model ?? "",
+    damageDealtThisFight:
+      contextAgent2?.damageDealtThisFight ??
+      liveCycle?.agent2?.damageDealtThisFight ??
+      0,
     headToHeadWins: 0,
     headToHeadLosses: 0,
-    monologues: [] as {
+    inventory: contextAgent2?.inventory ?? [],
+    monologues: (contextAgent2?.monologues ?? []) as {
       id: string;
       type: string;
       content: string;
@@ -777,6 +852,7 @@ export function App() {
       {/* Points / Leaderboard / Referral Drawer */}
       {showPointsDrawer && (
         <div
+          data-testid="points-drawer-overlay"
           style={{
             position: "absolute",
             top: 0,
@@ -795,6 +871,7 @@ export function App() {
           onClick={() => setShowPointsDrawer(false)}
         >
           <div
+            data-testid="points-drawer"
             style={{
               background:
                 "linear-gradient(180deg, rgba(20,22,30,0.95) 0%, rgba(14,16,24,0.98) 100%)",
@@ -866,6 +943,7 @@ export function App() {
               </div>
               <button
                 type="button"
+                data-testid="points-drawer-close"
                 onClick={() => setShowPointsDrawer(false)}
                 style={{
                   background: "rgba(0,0,0,0.3)",
@@ -909,7 +987,10 @@ export function App() {
                   <button
                     key={tab.key}
                     type="button"
-                    onClick={() => setPointsDrawerTab(tab.key)}
+                    data-testid={`points-drawer-tab-${tab.key}`}
+                    onClick={() =>
+                      startTransition(() => setPointsDrawerTab(tab.key))
+                    }
                     style={{
                       flex: 1,
                       padding: "8px 0",
@@ -942,6 +1023,7 @@ export function App() {
 
             {/* Tab Content */}
             <div
+              data-testid={`points-drawer-panel-${pointsDrawerTab}`}
               style={{
                 position: "relative",
                 zIndex: 1,
@@ -949,23 +1031,33 @@ export function App() {
                 overflowY: "auto",
               }}
             >
-              {pointsDrawerTab === "leaderboard" && <PointsLeaderboard />}
+              {pointsDrawerTab === "leaderboard" && (
+                <Suspense
+                  fallback={<PanelFallback label="Loading leaderboard" />}
+                >
+                  <PointsLeaderboard />
+                </Suspense>
+              )}
               {pointsDrawerTab === "history" && (
-                <PointsHistory walletAddress={pointsWalletAddress} />
+                <Suspense fallback={<PanelFallback label="Loading history" />}>
+                  <PointsHistory walletAddress={pointsWalletAddress} />
+                </Suspense>
               )}
               {pointsDrawerTab === "referral" && (
-                <ReferralPanel
-                  activeChain={activeChain}
-                  solanaWallet={solanaWalletAddress}
-                  evmWallet={evmWalletAddress ?? null}
-                  evmWalletPlatform={
-                    activeChain === "bsc"
-                      ? "BSC"
-                      : activeChain === "base"
-                        ? "BASE"
-                        : null
-                  }
-                />
+                <Suspense fallback={<PanelFallback label="Loading referral" />}>
+                  <ReferralPanel
+                    activeChain={activeChain}
+                    solanaWallet={solanaWalletAddress}
+                    evmWallet={evmWalletAddress ?? null}
+                    evmWalletPlatform={
+                      activeChain === "bsc"
+                        ? "BSC"
+                        : activeChain === "base"
+                          ? "BASE"
+                          : null
+                    }
+                  />
+                </Suspense>
               )}
             </div>
           </div>
@@ -1077,10 +1169,16 @@ export function App() {
               </button>
             </div>
             <div style={{ position: "relative", zIndex: 1 }}>
-              <AgentStats
-                agent={selectedAgentForStats}
-                side={selectedAgentForStats.id === "YES" ? "left" : "right"}
-              />
+              <Suspense
+                fallback={
+                  <PanelFallback label="Loading agent stats" minHeight={320} />
+                }
+              >
+                <AgentStats
+                  agent={selectedAgentForStats}
+                  side={selectedAgentForStats.id === "YES" ? "left" : "right"}
+                />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -1172,6 +1270,7 @@ export function App() {
                   type="button"
                   className="hm-header-mob-icon-btn"
                   title="Leaderboard"
+                  data-testid="points-drawer-open"
                   onClick={() => setShowPointsDrawer(true)}
                 >
                   🏆
@@ -1246,7 +1345,7 @@ export function App() {
                 <button
                   data-testid="surface-mode-duels"
                   className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => setSurfaceMode("DUELS")}
+                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
                   type="button"
                 >
                   Duels
@@ -1254,7 +1353,9 @@ export function App() {
                 <button
                   data-testid="surface-mode-models"
                   className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => setSurfaceMode("MODELS")}
+                  onClick={() =>
+                    startTransition(() => setSurfaceMode("MODELS"))
+                  }
                   type="button"
                 >
                   Models
@@ -1312,7 +1413,7 @@ export function App() {
                 <button
                   data-testid="surface-mode-duels"
                   className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => setSurfaceMode("DUELS")}
+                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
                   type="button"
                 >
                   Duels
@@ -1320,7 +1421,9 @@ export function App() {
                 <button
                   data-testid="surface-mode-models"
                   className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => setSurfaceMode("MODELS")}
+                  onClick={() =>
+                    startTransition(() => setSurfaceMode("MODELS"))
+                  }
                   type="button"
                 >
                   Models
@@ -1419,6 +1522,7 @@ export function App() {
                 type="button"
                 className="dock-collapse-btn"
                 title="Leaderboard & Stats"
+                data-testid="points-drawer-open"
                 onClick={() => setShowPointsDrawer(true)}
                 style={{ fontSize: 16 }}
               >
@@ -1492,9 +1596,15 @@ export function App() {
       {surfaceMode === "MODELS" ? (
         <div className="hm-main hm-main--models">
           <div className="hm-models-main">
-            <ModelsMarketView
-              activeMatchup={`${effA1.name} vs ${effA2.name}`}
-            />
+            <Suspense
+              fallback={
+                <PanelFallback label="Loading model markets" minHeight={480} />
+              }
+            >
+              <ModelsMarketView
+                activeMatchup={`${effA1.name} vs ${effA2.name}`}
+              />
+            </Suspense>
           </div>
         </div>
       ) : (
@@ -1693,6 +1803,7 @@ export function App() {
                     <button
                       key={key}
                       role="tab"
+                      data-testid={`duels-bottom-tab-${key}`}
                       aria-selected={hmBottomTab === key}
                       className={`hm-bottom-tab ${hmBottomTab === key ? "hm-bottom-tab--active" : ""}`}
                       onClick={() => setHmBottomTab(key)}
@@ -1704,7 +1815,11 @@ export function App() {
                 </nav>
 
                 {hmBottomTab === "trades" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-trades"
+                  >
                     <div className="hm-trades-summary">
                       <span>
                         Pool <strong>{formatGold(effTotalPool)}</strong>
@@ -1771,7 +1886,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "orders" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-orders"
+                  >
                     <div className="hm-orderbook">
                       <div className="hm-ob-side hm-ob-side--bids">
                         <div className="hm-ob-header">BIDS ({effA1.name})</div>
@@ -1827,7 +1946,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "topTraders" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-topTraders"
+                  >
                     <div className="hm-trades-table-wrap">
                       <table className="hm-trades-table" role="grid">
                         <thead>
@@ -1878,7 +2001,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "holders" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-holders"
+                  >
                     <div className="hm-agents-detail">
                       {[effA1, effA2].map((agent) => {
                         const hpPct =
@@ -1964,7 +2091,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "news" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-news"
+                  >
                     <div className="hm-match-log">
                       <div className="hm-log-entry">
                         <span className="hm-log-phase">{effCycle.phase}</span>
@@ -1999,7 +2130,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "positions" && (
-                  <div className="hm-empty-tab" role="tabpanel">
+                  <div
+                    className="hm-empty-tab"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-positions"
+                  >
                     <p>No open positions</p>
                   </div>
                 )}
@@ -2074,19 +2209,37 @@ export function App() {
                 <div className="hm-market-panel-body">
                   {isEvmChain ? (
                     /* EVM — single panel, no tabs */
-                    <EvmBettingPanel
-                      agent1Name={effAgent1Name}
-                      agent2Name={effAgent2Name}
-                      compact
-                    />
+                    <Suspense
+                      fallback={
+                        <PanelFallback
+                          label="Loading EVM market"
+                          minHeight={360}
+                        />
+                      }
+                    >
+                      <EvmBettingPanel
+                        agent1Name={effAgent1Name}
+                        agent2Name={effAgent2Name}
+                        compact
+                      />
+                    </Suspense>
                   ) : (
                     /* Predictions — Solana CLOB panel */
-                    <SolanaClobPanel
-                      agent1Name={effAgent1Name}
-                      agent2Name={effAgent2Name}
-                      compact={!isE2eMode}
-                      onMarketSnapshot={handleSolanaClobSnapshot}
-                    />
+                    <Suspense
+                      fallback={
+                        <PanelFallback
+                          label="Loading Solana market"
+                          minHeight={360}
+                        />
+                      }
+                    >
+                      <SolanaClobPanel
+                        agent1Name={effAgent1Name}
+                        agent2Name={effAgent2Name}
+                        compact={!isE2eMode}
+                        onMarketSnapshot={handleSolanaClobSnapshot}
+                      />
+                    </Suspense>
                   )}
                 </div>
               </div>

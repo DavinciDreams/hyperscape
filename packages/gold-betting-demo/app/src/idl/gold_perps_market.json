@@ -69,7 +69,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         },
         {
           "name": "amount",
@@ -132,6 +132,14 @@
           "type": "pubkey"
         },
         {
+          "name": "treasury_authority",
+          "type": "pubkey"
+        },
+        {
+          "name": "market_maker_authority",
+          "type": "pubkey"
+        },
+        {
           "name": "default_skew_scale",
           "type": "u64"
         },
@@ -157,6 +165,14 @@
         },
         {
           "name": "liquidation_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "trade_treasury_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "trade_market_maker_fee_bps",
           "type": "u16"
         }
       ]
@@ -232,7 +248,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         }
       ]
     },
@@ -332,7 +348,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         },
         {
           "name": "margin_delta",
@@ -341,6 +357,154 @@
         {
           "name": "size_delta",
           "type": "i64"
+        },
+        {
+          "name": "acceptable_price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "recycle_market_maker_fees",
+      "discriminator": [
+        223,
+        161,
+        208,
+        139,
+        228,
+        66,
+        247,
+        207
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "market_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_market_status",
+      "discriminator": [
+        101,
+        175,
+        83,
+        107,
+        200,
+        141,
+        155,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "market_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "next_status",
+          "type": "u8"
+        },
+        {
+          "name": "settlement_spot_index",
+          "type": "u64"
         }
       ]
     },
@@ -411,7 +575,7 @@
       "args": [
         {
           "name": "market_id",
-          "type": "u32"
+          "type": "u64"
         },
         {
           "name": "spot_index",
@@ -423,6 +587,84 @@
         },
         {
           "name": "sigma",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_fee_balance",
+      "discriminator": [
+        226,
+        225,
+        74,
+        191,
+        99,
+        227,
+        10,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "market_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "recipient",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "fee_bucket",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
           "type": "u64"
         }
       ]
@@ -537,16 +779,61 @@
     },
     {
       "code": 6013,
+      "name": "MarketNotActive",
+      "msg": "Market is not active for new oracle updates"
+    },
+    {
+      "code": 6014,
+      "name": "MarketCloseOnly",
+      "msg": "Market is close-only; only reductions and closes are allowed"
+    },
+    {
+      "code": 6015,
+      "name": "MarketArchived",
+      "msg": "Market is archived and cannot be traded"
+    },
+    {
+      "code": 6016,
+      "name": "InvalidMarketStatus",
+      "msg": "Market status transition is invalid"
+    },
+    {
+      "code": 6017,
+      "name": "MarketHasOpenPositions",
+      "msg": "Market still has open positions or open interest"
+    },
+    {
+      "code": 6018,
       "name": "InvalidInsuranceDeposit",
       "msg": "Insurance deposit amount must be greater than zero"
     },
     {
-      "code": 6014,
+      "code": 6019,
+      "name": "SlippageExceeded",
+      "msg": "Trade execution exceeded the caller's acceptable price"
+    },
+    {
+      "code": 6020,
+      "name": "InvalidFeeWithdrawal",
+      "msg": "Fee balance or fee withdrawal is invalid"
+    },
+    {
+      "code": 6021,
+      "name": "InvalidFeeRecipient",
+      "msg": "Fee recipient does not match the configured authority"
+    },
+    {
+      "code": 6022,
+      "name": "InvalidFeeBucket",
+      "msg": "Fee bucket is invalid"
+    },
+    {
+      "code": 6023,
       "name": "InvalidPositionState",
       "msg": "Position state is invalid"
     },
     {
-      "code": 6015,
+      "code": 6024,
       "name": "Overflow",
       "msg": "Numeric overflow in perps calculation"
     }
@@ -563,6 +850,14 @@
           },
           {
             "name": "keeper_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_maker_authority",
             "type": "pubkey"
           },
           {
@@ -592,6 +887,14 @@
           {
             "name": "liquidation_fee_bps",
             "type": "u16"
+          },
+          {
+            "name": "trade_treasury_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "trade_market_maker_fee_bps",
+            "type": "u16"
           }
         ]
       }
@@ -607,11 +910,27 @@
           },
           {
             "name": "market_id",
-            "type": "u32"
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": "u8"
           },
           {
             "name": "insurance_fund",
             "type": "u64"
+          },
+          {
+            "name": "treasury_fee_balance",
+            "type": "u64"
+          },
+          {
+            "name": "market_maker_fee_balance",
+            "type": "u64"
+          },
+          {
+            "name": "open_positions",
+            "type": "u32"
           },
           {
             "name": "skew_scale",
@@ -623,6 +942,10 @@
           },
           {
             "name": "spot_index",
+            "type": "u64"
+          },
+          {
+            "name": "settlement_spot_index",
             "type": "u64"
           },
           {
@@ -671,7 +994,7 @@
           },
           {
             "name": "market_id",
-            "type": "u32"
+            "type": "u64"
           },
           {
             "name": "margin",

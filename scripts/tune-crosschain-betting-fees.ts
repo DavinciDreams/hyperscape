@@ -185,12 +185,14 @@ async function tuneSolanaClobFees(
   authority: Keypair,
   config: FeeConfig,
 ): Promise<string> {
-  const treasuryTokenAccountRaw =
+  const treasuryWalletRaw =
+    process.env.CLOB_TREASURY_WALLET?.trim() ||
     process.env.CLOB_TREASURY_TOKEN_ACCOUNT?.trim();
-  const marketMakerTokenAccountRaw =
+  const marketMakerWalletRaw =
+    process.env.CLOB_MARKET_MAKER_WALLET?.trim() ||
     process.env.CLOB_MARKET_MAKER_TOKEN_ACCOUNT?.trim();
-  if (!treasuryTokenAccountRaw || !marketMakerTokenAccountRaw) {
-    return "skipped (set CLOB_TREASURY_TOKEN_ACCOUNT, CLOB_MARKET_MAKER_TOKEN_ACCOUNT)";
+  if (!treasuryWalletRaw || !marketMakerWalletRaw) {
+    return "skipped (set CLOB_TREASURY_WALLET, CLOB_MARKET_MAKER_WALLET)";
   }
 
   const idl = loadAnchorIdl("gold_clob_market");
@@ -202,8 +204,8 @@ async function tuneSolanaClobFees(
     [Buffer.from("config")],
     programId,
   );
-  const treasuryTokenAccount = new PublicKey(treasuryTokenAccountRaw);
-  const marketMakerTokenAccount = new PublicKey(marketMakerTokenAccountRaw);
+  const treasuryWallet = new PublicKey(treasuryWalletRaw);
+  const marketMakerWallet = new PublicKey(marketMakerWalletRaw);
 
   const provider = createAnchorProvider(connection, authority);
   const program = new Program(
@@ -217,8 +219,8 @@ async function tuneSolanaClobFees(
   if (configExists) {
     const signature = (await program.methods
       .updateConfig(
-        treasuryTokenAccount,
-        marketMakerTokenAccount,
+        treasuryWallet,
+        marketMakerWallet,
         config.tradeTreasuryFeeBps,
         config.tradeMarketMakerFeeBps,
         config.winningsMarketMakerFeeBps,
@@ -233,8 +235,8 @@ async function tuneSolanaClobFees(
 
   const signature = (await program.methods
     .initializeConfig(
-      treasuryTokenAccount,
-      marketMakerTokenAccount,
+      treasuryWallet,
+      marketMakerWallet,
       config.tradeTreasuryFeeBps,
       config.tradeMarketMakerFeeBps,
       config.winningsMarketMakerFeeBps,

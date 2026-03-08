@@ -309,6 +309,7 @@ export function ReferralPanel(props: {
 
   return (
     <div
+      data-testid="referral-panel"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -333,16 +334,23 @@ export function ReferralPanel(props: {
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.62)" }}>
             Wallet: {shortWallet(primaryWallet)}
           </div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.52)" }}>
+          <div
+            data-testid="referral-panel-wallet-mode"
+            style={{ fontSize: 11, color: "rgba(255,255,255,0.52)" }}
+          >
             Viewing: {walletModeLabel}
           </div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.52)" }}>
+          <div
+            data-testid="referral-panel-points-scope"
+            style={{ fontSize: 11, color: "rgba(255,255,255,0.52)" }}
+          >
             Points Scope: {points?.pointsScope ?? "WALLET"} (
             {points?.identityWalletCount ?? 1} wallet
             {(points?.identityWalletCount ?? 1) === 1 ? "" : "s"})
           </div>
           {points?.referredBy ? (
             <div
+              data-testid="referral-panel-referred-by"
               style={{
                 padding: "8px 10px",
                 borderRadius: 8,
@@ -411,6 +419,7 @@ export function ReferralPanel(props: {
 
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <code
+              data-testid="referral-panel-invite-code"
               style={{
                 flex: 1,
                 fontSize: 11,
@@ -443,6 +452,7 @@ export function ReferralPanel(props: {
 
       <div style={{ display: "flex", gap: 8 }}>
         <input
+          data-testid="referral-panel-redeem-input"
           type="text"
           placeholder="Redeem invite code or link"
           value={redeemCode}
@@ -459,6 +469,7 @@ export function ReferralPanel(props: {
         />
         <button
           type="button"
+          data-testid="referral-panel-redeem-button"
           onClick={() => void handleRedeem()}
           disabled={busy || !primaryWallet}
           style={{
@@ -478,6 +489,7 @@ export function ReferralPanel(props: {
 
       <button
         type="button"
+        data-testid="referral-panel-link-wallets"
         onClick={() => void handleLinkWallets()}
         disabled={busy || !canLinkWallets}
         style={{
@@ -496,7 +508,10 @@ export function ReferralPanel(props: {
       </button>
 
       {status ? (
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.68)" }}>
+        <div
+          data-testid="referral-panel-status"
+          style={{ fontSize: 11, color: "rgba(255,255,255,0.68)" }}
+        >
           {status}
         </div>
       ) : null}

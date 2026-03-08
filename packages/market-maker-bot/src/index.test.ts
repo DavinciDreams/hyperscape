@@ -5,6 +5,8 @@ import bs58 from "bs58";
 const mockContract = {
   target: "0x1234567890123456789012345678901234567890",
   nextMatchId: vi.fn().mockResolvedValue(2n),
+  tradeTreasuryFeeBps: vi.fn().mockResolvedValue(100n),
+  tradeMarketMakerFeeBps: vi.fn().mockResolvedValue(100n),
   matches: vi
     .fn()
     .mockResolvedValue({ status: 1n, winner: 0n, yesPool: 0n, noPool: 0n }),
@@ -41,6 +43,10 @@ vi.mock("ethers", () => {
 
     async getCode() {
       return "0x6000";
+    }
+
+    async getBalance() {
+      return 10n ** 18n;
     }
 
     async getTransactionCount() {
@@ -131,6 +137,15 @@ describe("CrossChainMarketMaker", () => {
     process.env.SOLANA_PRIVATE_KEY = bs58.encode(new Uint8Array(64).fill(7));
     process.env.TARGET_SPREAD_BPS = "200";
     process.env.MAX_INVENTORY_CAP = "500";
+    Object.values(mockContract).forEach((value) => {
+      if (
+        typeof value === "function" &&
+        "mockClear" in value &&
+        typeof value.mockClear === "function"
+      ) {
+        value.mockClear();
+      }
+    });
     mockFromSecretKey.mockClear();
     mockFromSeed.mockClear();
     mockGenerate.mockClear();
@@ -176,6 +191,15 @@ describe("CrossChainMarketMaker", () => {
   describe("Market Making Cycle", () => {
     it("should execute a full cycle without errors", async () => {
       await expect(mm.marketMakeCycle()).resolves.not.toThrow();
+    });
+
+    it("should send the payable native value required by the contract", async () => {
+      await mm.marketMakeCycle();
+      expect(mockContract.placeOrder).toHaveBeenCalled();
+      const firstCall = mockContract.placeOrder.mock.calls[0];
+      expect(firstCall).toHaveLength(5);
+      expect(typeof firstCall[4]?.value).toBe("bigint");
+      expect(firstCall[4].value).toBeGreaterThan(0n);
     });
 
     it("should place orders on both sides after a cycle", async () => {

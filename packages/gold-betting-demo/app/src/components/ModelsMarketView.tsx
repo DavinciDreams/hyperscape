@@ -21,12 +21,11 @@ import {
   buildOracleHistoryLabel,
   modelMarketIdFromCharacterId,
   sanitizePerpsOracleHistoryResponse,
-  sanitizeModelsLeaderboardResponse,
+  sanitizePerpsMarketsResponse,
   toWinRatePercent,
-  type ModelsLeaderboardEntry,
-  type ModelsCycleSnapshot,
+  type PerpsMarketDirectoryEntry,
   type PerpsOracleHistorySnapshot,
-  type ModelsLeaderboardDetailsResponse,
+  type PerpsMarketsResponse,
 } from "../lib/modelMarkets";
 import { findProgramAddressSync } from "../lib/programAddress";
 import {
@@ -176,8 +175,8 @@ function chunkArray<T>(items: readonly T[], size: number): T[][] {
 }
 
 function encodeMarketId(marketId: number): Buffer {
-  const bytes = Buffer.alloc(4);
-  bytes.writeUInt32LE(marketId, 0);
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64LE(BigInt(marketId), 0);
   return bytes;
 }
 
@@ -289,11 +288,12 @@ async function fetchMultipleAccounts(
 const E2E_MODEL_CHARACTER_ID = readE2eString(
   import.meta.env.VITE_E2E_MODEL_CHARACTER_ID,
 );
-const E2E_MODEL_ENTRY: ModelsLeaderboardEntry | null =
+const E2E_MODEL_ENTRY: PerpsMarketDirectoryEntry | null =
   IS_E2E_MODE && E2E_MODEL_CHARACTER_ID
     ? {
         rank: 1,
         characterId: E2E_MODEL_CHARACTER_ID,
+        marketId: modelMarketIdFromCharacterId(E2E_MODEL_CHARACTER_ID),
         name: readE2eString(import.meta.env.VITE_E2E_MODEL_NAME) || "E2E Model",
         provider:
           readE2eString(import.meta.env.VITE_E2E_MODEL_PROVIDER) ||
@@ -308,6 +308,10 @@ const E2E_MODEL_ENTRY: ModelsLeaderboardEntry | null =
           80,
         ),
         currentStreak: readE2eNumber(import.meta.env.VITE_E2E_MODEL_STREAK, 3),
+        status: "ACTIVE",
+        lastSeenAt: Date.now(),
+        deprecatedAt: null,
+        updatedAt: Date.now(),
       }
     : null;
 
@@ -322,20 +326,6 @@ const E2E_ORACLE_RECORDED_AT = readE2eNumber(
   import.meta.env.VITE_E2E_MODEL_ORACLE_RECORDED_AT,
   Date.now(),
 );
-const E2E_FALLBACK_CYCLE: ModelsCycleSnapshot = {
-  cycleId: "e2e-models-cycle",
-  phase: "IDLE",
-  cycleStartTime: E2E_ORACLE_RECORDED_AT,
-  phaseStartTime: E2E_ORACLE_RECORDED_AT,
-  phaseEndTime: E2E_ORACLE_RECORDED_AT,
-  timeRemaining: 0,
-  agent1: null,
-  agent2: null,
-  countdown: null,
-  winnerId: null,
-  winnerName: null,
-  winReason: null,
-};
 const E2E_ORACLE_HISTORY: OracleHistoryPoint[] =
   E2E_MODEL_ENTRY && IS_E2E_MODE
     ? [
@@ -414,8 +404,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   const { setVisible: setWalletModalVisible } = useWalletModal();
   const { activeChain, setActiveChain } = useChain();
 
-  const [data, setData] =
-    React.useState<ModelsLeaderboardDetailsResponse | null>(null);
+  const [data, setData] = React.useState<PerpsMarketsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [searchTerm, setSearchTerm] = React.useState("");
@@ -466,9 +455,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   React.useEffect(() => {
     if (E2E_MODEL_ENTRY) {
       setData({
-        leaderboard: [E2E_MODEL_ENTRY],
-        cycle: E2E_FALLBACK_CYCLE,
-        recentDuels: [],
+        markets: [E2E_MODEL_ENTRY],
         updatedAt: Date.now(),
       });
       setError(null);
@@ -484,21 +471,16 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
       inFlight = new AbortController();
 
       try {
-        const response = await fetch(
-          `${GAME_API_URL}/api/streaming/leaderboard/details?historyLimit=80`,
-          {
-            cache: "no-store",
-            signal: inFlight.signal,
-          },
-        );
+        const response = await fetch(`${GAME_API_URL}/api/perps/markets`, {
+          cache: "no-store",
+          signal: inFlight.signal,
+        });
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
 
-        const payload = sanitizeModelsLeaderboardResponse(
-          await response.json(),
-        );
+        const payload = sanitizePerpsMarketsResponse(await response.json());
         if (!mounted) return;
 
         setData(payload);
@@ -535,16 +517,14 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   }, []);
 
   React.useEffect(() => {
-    if (!data?.leaderboard.length) return;
+    if (!data?.markets.length) return;
 
     const selectedStillExists =
       selectedCharacterId &&
-      data.leaderboard.some(
-        (entry) => entry.characterId === selectedCharacterId,
-      );
+      data.markets.some((entry) => entry.characterId === selectedCharacterId);
 
     if (!selectedStillExists) {
-      setSelectedCharacterId(data.leaderboard[0].characterId);
+      setSelectedCharacterId(data.markets[0].characterId);
     }
   }, [data, selectedCharacterId]);
 
@@ -643,7 +623,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   }, [selectedCharacterId]);
 
   const leaderboardKey = React.useMemo(
-    () => data?.leaderboard.map((entry) => entry.characterId).join("|") ?? "",
+    () => data?.markets.map((entry) => entry.characterId).join("|") ?? "",
     [data],
   );
 
@@ -654,7 +634,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
     );
 
     const loadChainState = async () => {
-      if (!leaderboardKey || !data?.leaderboard.length) {
+      if (!leaderboardKey || !data?.markets.length) {
         if (mounted) {
           setMarketSnapshots({});
           setPositions({});
@@ -668,10 +648,8 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
         return;
       }
       try {
-        const entries = data.leaderboard;
-        const marketIds = entries.map((entry) =>
-          modelMarketIdFromCharacterId(entry.characterId),
-        );
+        const entries = data.markets;
+        const marketIds = entries.map((entry) => entry.marketId);
         const [configInfo, marketInfos] = await Promise.all([
           connection.getAccountInfo(deriveConfigPda(), "confirmed"),
           fetchMultipleAccounts(connection, marketIds.map(deriveMarketPda)),
@@ -850,12 +828,12 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   }, [connection, data, leaderboardKey, wallet.publicKey]);
 
   const filteredLeaderboard = React.useMemo(() => {
-    if (!data?.leaderboard.length) return [];
+    if (!data?.markets.length) return [];
 
     const normalizedSearch = searchTerm.trim().toLowerCase();
-    if (!normalizedSearch) return data.leaderboard;
+    if (!normalizedSearch) return data.markets;
 
-    return data.leaderboard.filter((entry) => {
+    return data.markets.filter((entry) => {
       const haystack =
         `${entry.name} ${entry.provider} ${entry.model}`.toLowerCase();
       return haystack.includes(normalizedSearch);
@@ -865,9 +843,8 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   const selectedEntry = React.useMemo(() => {
     if (!data || !selectedCharacterId) return null;
     return (
-      data.leaderboard.find(
-        (entry) => entry.characterId === selectedCharacterId,
-      ) ?? null
+      data.markets.find((entry) => entry.characterId === selectedCharacterId) ??
+      null
     );
   }, [data, selectedCharacterId]);
 
@@ -877,10 +854,17 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   const selectedPosition = selectedCharacterId
     ? positions[selectedCharacterId]
     : undefined;
+  const selectedMarketActive = selectedEntry?.status === "ACTIVE";
+  const selectedMarketCloseOnly = selectedEntry?.status === "CLOSE_ONLY";
   const selectedOracleFresh =
     IS_E2E_MODE && selectedEntry?.characterId === E2E_MODEL_ENTRY?.characterId
       ? true
       : isOracleFresh(selectedMarket?.lastUpdated ?? null, oracleStalenessMs);
+  const selectedCanOpen = Boolean(selectedMarketActive && selectedOracleFresh);
+  const selectedCanClose = Boolean(
+    selectedPosition &&
+    ((selectedMarketActive && selectedOracleFresh) || selectedMarketCloseOnly),
+  );
 
   const aggregateLongOi = React.useMemo(
     () =>
@@ -914,7 +898,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
     selectedMarket?.skewScaleSol ?? skewScaleSol,
   );
 
-  const ensureTradable = (): boolean => {
+  const ensureTradable = (intent: "open" | "close"): boolean => {
     if (activeChain !== "solana") {
       setLastTradeStatus("Switch the demo to Solana to trade model perps.");
       toast.error("Switch the demo to Solana to trade model perps.");
@@ -933,7 +917,13 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
       return false;
     }
 
-    if (!selectedOracleFresh) {
+    if (intent === "open" && !selectedMarketActive) {
+      setLastTradeStatus("This model market is not accepting new positions.");
+      toast.error("This model market is not accepting new positions.");
+      return false;
+    }
+
+    if (intent === "open" && !selectedOracleFresh) {
       setLastTradeStatus(
         "This model market is waiting on a fresh oracle update.",
       );
@@ -941,15 +931,19 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
       return false;
     }
 
+    if (intent === "close" && selectedEntry?.status === "ARCHIVED") {
+      setLastTradeStatus("This model market has been archived.");
+      toast.error("This model market has been archived.");
+      return false;
+    }
+
     return true;
   };
 
   const refreshChainState = React.useCallback(async () => {
-    if (!data?.leaderboard.length) return;
-    const freshResponse = sanitizeModelsLeaderboardResponse({
-      leaderboard: data.leaderboard,
-      cycle: data.cycle,
-      recentDuels: data.recentDuels,
+    if (!data?.markets.length) return;
+    const freshResponse = sanitizePerpsMarketsResponse({
+      markets: data.markets,
       updatedAt: Date.now(),
     });
     setData(freshResponse);
@@ -968,9 +962,9 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
 
   const handleOpenPosition = async (direction: TradeDirection) => {
     if (!selectedEntry || !selectedMarket) return;
-    if (!ensureTradable()) return;
+    if (!ensureTradable("open")) return;
 
-    const marketId = modelMarketIdFromCharacterId(selectedEntry.characterId);
+    const marketId = selectedEntry.marketId;
     const txId = `model-market-${selectedEntry.characterId}-${direction.toLowerCase()}`;
     setSubmittingTrade(txId);
     setLastTradeStatus(
@@ -993,12 +987,26 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
       const signedSizeLamports =
         toLamports(collateralSol * effectiveLeverage) *
         (direction === "LONG" ? 1 : -1);
+      const quotedEntryPrice =
+        (direction === "LONG" ? estLongPrice : estShortPrice) ??
+        selectedMarket.spotIndex ??
+        0;
+      const acceptablePriceLamports =
+        quotedEntryPrice <= 0
+          ? 0
+          : toLamports(
+              direction === "LONG"
+                ? quotedEntryPrice * 1.02
+                : quotedEntryPrice * 0.98,
+            );
+      const marketIdArg = new anchor.BN(String(marketId));
 
       const transaction = await program.methods
         .modifyPosition(
-          marketId,
+          marketIdArg,
           new anchor.BN(String(marginDeltaLamports)),
           new anchor.BN(String(signedSizeLamports)),
+          new anchor.BN(String(acceptablePriceLamports)),
         )
         .accountsPartial({
           config: deriveConfigPda(),
@@ -1025,10 +1033,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
 
       const signedSize =
         collateralSol * effectiveLeverage * (direction === "LONG" ? 1 : -1);
-      const entryPrice =
-        (direction === "LONG" ? estLongPrice : estShortPrice) ??
-        selectedMarket.spotIndex ??
-        0;
+      const entryPrice = quotedEntryPrice;
       const markPrice = selectedMarket.spotIndex ?? entryPrice;
       setPositions((current) => ({
         ...current,
@@ -1077,7 +1082,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
 
   const handleClosePosition = async () => {
     if (!selectedEntry || !selectedPosition) return;
-    if (!ensureTradable()) return;
+    if (!ensureTradable("close")) return;
 
     const txId = `close-model-${selectedEntry.characterId}`;
     setSubmittingTrade(txId);
@@ -1088,14 +1093,30 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
     let tradeStage = "building transaction";
     try {
       const program = getProgram();
-      const marketId = modelMarketIdFromCharacterId(selectedEntry.characterId);
+      const marketId = selectedEntry.marketId;
       const closeSizeLamports = -toLamports(selectedPosition.signedSize);
+      const quotedClosePrice =
+        (selectedPosition.direction === "LONG"
+          ? estShortPrice
+          : estLongPrice) ??
+        selectedMarket?.spotIndex ??
+        selectedPosition.entryPrice;
+      const acceptablePriceLamports =
+        quotedClosePrice <= 0
+          ? 0
+          : toLamports(
+              selectedPosition.direction === "LONG"
+                ? quotedClosePrice * 0.98
+                : quotedClosePrice * 1.02,
+            );
+      const marketIdArg = new anchor.BN(String(marketId));
 
       const transaction = await program.methods
         .modifyPosition(
-          marketId,
+          marketIdArg,
           new anchor.BN(0),
           new anchor.BN(String(closeSizeLamports)),
+          new anchor.BN(String(acceptablePriceLamports)),
         )
         .accountsPartial({
           config: deriveConfigPda(),
@@ -1156,7 +1177,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
         <div className="models-market-metrics">
           <article className="models-market-metric-card">
             <span className="models-market-metric-label">Tracked Models</span>
-            <strong>{data?.leaderboard.length ?? 0}</strong>
+            <strong>{data?.markets.length ?? 0}</strong>
             <small>Current duel: {activeMatchup}</small>
           </article>
           <article className="models-market-metric-card">
@@ -1227,13 +1248,14 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                   <th>Long OI</th>
                   <th>Short OI</th>
                   <th>Funding</th>
+                  <th>Status</th>
                   <th>Your Position</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && filteredLeaderboard.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="models-market-empty">
+                    <td colSpan={10} className="models-market-empty">
                       Loading models market…
                     </td>
                   </tr>
@@ -1241,7 +1263,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
 
                 {!loading && filteredLeaderboard.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="models-market-empty">
+                    <td colSpan={10} className="models-market-empty">
                       No models matched the current filter.
                     </td>
                   </tr>
@@ -1261,7 +1283,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                       }
                       onClick={() => setSelectedCharacterId(entry.characterId)}
                     >
-                      <td>#{entry.rank}</td>
+                      <td>{entry.rank ? `#${entry.rank}` : "—"}</td>
                       <td>
                         <strong>{entry.name}</strong>
                         <span>{entry.model || "Unnamed model"}</span>
@@ -1295,6 +1317,13 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                         }`}
                       >
                         {market ? market.fundingRate.toFixed(6) : "—"}
+                      </td>
+                      <td className="models-market-mono">
+                        {entry.status === "ACTIVE"
+                          ? "ACTIVE"
+                          : entry.status === "CLOSE_ONLY"
+                            ? "CLOSE ONLY"
+                            : "ARCHIVED"}
                       </td>
                       <td className="models-market-mono">
                         {position ? (
@@ -1332,12 +1361,20 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                 </div>
                 <div
                   className={`models-market-rank-chip ${
-                    selectedOracleFresh ? "" : "is-stale"
+                    selectedOracleFresh || selectedEntry.status !== "ACTIVE"
+                      ? ""
+                      : "is-stale"
                   }`}
                 >
-                  {selectedOracleFresh
-                    ? `Rank #${selectedEntry.rank}`
-                    : "Oracle Stale"}
+                  {selectedEntry.status === "ACTIVE"
+                    ? selectedOracleFresh
+                      ? selectedEntry.rank
+                        ? `Rank #${selectedEntry.rank}`
+                        : "ACTIVE"
+                      : "Oracle Stale"
+                    : selectedEntry.status === "CLOSE_ONLY"
+                      ? "Close Only"
+                      : "Archived"}
                 </div>
               </div>
 
@@ -1376,7 +1413,10 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                 </div>
               </div>
 
-              <div className="models-market-history-card">
+              <div
+                className="models-market-history-card"
+                data-testid="models-market-oracle-history"
+              >
                 <div className="models-market-history-header">
                   <div>
                     <h4>Oracle History</h4>
@@ -1506,9 +1546,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                       type="button"
                       data-testid="models-market-close-position"
                       onClick={() => void handleClosePosition()}
-                      disabled={
-                        Boolean(submittingTrade) || !selectedOracleFresh
-                      }
+                      disabled={Boolean(submittingTrade) || !selectedCanClose}
                     >
                       Close Position
                     </button>
@@ -1636,7 +1674,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                     disabled={
                       Boolean(submittingTrade) ||
                       collateralSol <= 0 ||
-                      !selectedOracleFresh
+                      !selectedCanOpen
                     }
                     onClick={() => void handleOpenPosition("LONG")}
                   >
@@ -1649,17 +1687,20 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                     disabled={
                       Boolean(submittingTrade) ||
                       collateralSol <= 0 ||
-                      !selectedOracleFresh
+                      !selectedCanOpen
                     }
                     onClick={() => void handleOpenPosition("SHORT")}
                   >
                     Short {selectedEntry.name}
                   </button>
                 </div>
-                {!selectedOracleFresh && (
+                {!selectedCanOpen && (
                   <div className="models-market-empty">
-                    Trading is paused until the keeper posts a fresh oracle
-                    update for this model.
+                    {selectedEntry.status === "ACTIVE"
+                      ? "Trading is paused until the keeper posts a fresh oracle update for this model."
+                      : selectedEntry.status === "CLOSE_ONLY"
+                        ? "This model has been deprecated. Existing positions can be reduced or closed, but new exposure is disabled."
+                        : "This model market has been archived."}
                   </div>
                 )}
               </div>

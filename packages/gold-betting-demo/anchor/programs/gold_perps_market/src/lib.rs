@@ -12,6 +12,11 @@ declare_id!("HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik");
 const FUNDING_RATE_PRECISION: i128 = 1_000_000_000;
 const BPS_DENOMINATOR: u64 = 10_000;
 const DEFAULT_BOOTSTRAP_AUTHORITY: &str = "DfEnrzh4cgnHxfuZRxLGX69fnLd9DP41XxGuE4gtyJpn";
+const MARKET_STATUS_ACTIVE: u8 = 0;
+const MARKET_STATUS_CLOSE_ONLY: u8 = 1;
+const MARKET_STATUS_ARCHIVED: u8 = 2;
+const FEE_BUCKET_TREASURY: u8 = 0;
+const FEE_BUCKET_MARKET_MAKER: u8 = 1;
 
 fn bootstrap_authority() -> Pubkey {
     if let Some(value) = option_env!("HYPERSCAPE_BOOTSTRAP_AUTHORITY") {
@@ -39,6 +44,8 @@ pub mod gold_perps_market {
     pub fn initialize_config(
         ctx: Context<InitializeConfig>,
         keeper_authority: Pubkey,
+        treasury_authority: Pubkey,
+        market_maker_authority: Pubkey,
         default_skew_scale: u64,
         default_funding_velocity: u64,
         max_oracle_staleness_seconds: i64,
@@ -46,6 +53,8 @@ pub mod gold_perps_market {
         min_margin_lamports: u64,
         maintenance_margin_bps: u16,
         liquidation_fee_bps: u16,
+        trade_treasury_fee_bps: u16,
+        trade_market_maker_fee_bps: u16,
     ) -> Result<()> {
         validate_config_inputs(
             default_skew_scale,
@@ -54,11 +63,15 @@ pub mod gold_perps_market {
             min_margin_lamports,
             maintenance_margin_bps,
             liquidation_fee_bps,
+            trade_treasury_fee_bps,
+            trade_market_maker_fee_bps,
         )?;
 
         let config = &mut ctx.accounts.config;
         config.authority = ctx.accounts.authority.key();
         config.keeper_authority = keeper_authority;
+        config.treasury_authority = treasury_authority;
+        config.market_maker_authority = market_maker_authority;
         config.default_skew_scale = default_skew_scale;
         config.default_funding_velocity = default_funding_velocity;
         config.max_oracle_staleness_seconds = max_oracle_staleness_seconds;
@@ -66,12 +79,14 @@ pub mod gold_perps_market {
         config.min_margin_lamports = min_margin_lamports;
         config.maintenance_margin_bps = maintenance_margin_bps;
         config.liquidation_fee_bps = liquidation_fee_bps;
+        config.trade_treasury_fee_bps = trade_treasury_fee_bps;
+        config.trade_market_maker_fee_bps = trade_market_maker_fee_bps;
         Ok(())
     }
 
     pub fn update_market_oracle(
         ctx: Context<UpdateMarketOracle>,
-        market_id: u32,
+        market_id: u64,
         spot_index: u64,
         mu: u64,
         sigma: u64,
@@ -85,10 +100,15 @@ pub mod gold_perps_market {
         if !market.initialized {
             market.initialized = true;
             market.market_id = market_id;
+            market.status = MARKET_STATUS_ACTIVE;
             market.insurance_fund = 0;
+            market.treasury_fee_balance = 0;
+            market.market_maker_fee_balance = 0;
+            market.open_positions = 0;
             market.skew_scale = ctx.accounts.config.default_skew_scale;
             market.funding_velocity = ctx.accounts.config.default_funding_velocity;
             market.spot_index = spot_index;
+            market.settlement_spot_index = 0;
             market.mu = mu;
             market.sigma = sigma;
             market.oracle_last_updated = now;
@@ -100,6 +120,10 @@ pub mod gold_perps_market {
         }
 
         require!(market.market_id == market_id, PerpsError::InvalidMarket);
+        require!(
+            market.status == MARKET_STATUS_ACTIVE,
+            PerpsError::MarketNotActive
+        );
         drift_funding(market, now)?;
 
         market.spot_index = spot_index;
@@ -111,7 +135,7 @@ pub mod gold_perps_market {
 
     pub fn deposit_insurance(
         ctx: Context<DepositInsurance>,
-        market_id: u32,
+        market_id: u64,
         amount: u64,
     ) -> Result<()> {
         require!(amount > 0, PerpsError::InvalidInsuranceDeposit);
@@ -140,9 +164,10 @@ pub mod gold_perps_market {
 
     pub fn modify_position(
         ctx: Context<ModifyPosition>,
-        market_id: u32,
+        market_id: u64,
         margin_delta: i64,
         size_delta: i64,
+        acceptable_price: u64,
     ) -> Result<()> {
         require!(
             margin_delta != 0 || size_delta != 0,
@@ -152,17 +177,6 @@ pub mod gold_perps_market {
         let config = &ctx.accounts.config;
         let now = Clock::get()?.unix_timestamp;
         let position_exists = ctx.accounts.position.initialized;
-
-        {
-            let market = &mut ctx.accounts.market;
-            require!(market.initialized, PerpsError::InvalidMarket);
-            require!(market.market_id == market_id, PerpsError::InvalidMarket);
-            if size_delta != 0 || margin_delta < 0 {
-                require_fresh_market(market, config, now)?;
-            }
-            drift_funding(market, now)?;
-        }
-
         let trader_key = ctx.accounts.trader.key();
         let old_owner = ctx.accounts.position.owner;
         let old_market_id = ctx.accounts.position.market_id;
@@ -170,6 +184,32 @@ pub mod gold_perps_market {
         let old_size = ctx.accounts.position.size as i128;
         let old_entry_price = ctx.accounts.position.entry_price;
         let old_last_funding_rate = ctx.accounts.position.last_funding_rate as i128;
+        let new_size = old_size
+            .checked_add(size_delta as i128)
+            .ok_or(PerpsError::Overflow)?;
+
+        {
+            let market = &mut ctx.accounts.market;
+            require!(market.initialized, PerpsError::InvalidMarket);
+            require!(market.market_id == market_id, PerpsError::InvalidMarket);
+            match market.status {
+                MARKET_STATUS_ACTIVE => {
+                    if size_delta != 0 || margin_delta < 0 {
+                        require_fresh_market(market, config, now)?;
+                    }
+                    drift_funding(market, now)?;
+                }
+                MARKET_STATUS_CLOSE_ONLY => {
+                    require!(
+                        size_delta == 0 || is_reduce_only_change(old_size, new_size),
+                        PerpsError::MarketCloseOnly
+                    );
+                    require!(market_index_price(market)? > 0, PerpsError::InvalidSpotIndex);
+                }
+                MARKET_STATUS_ARCHIVED => return err!(PerpsError::MarketArchived),
+                _ => return err!(PerpsError::InvalidMarketStatus),
+            }
+        }
 
         if position_exists {
             require!(old_owner == trader_key, PerpsError::InvalidPositionOwner);
@@ -203,8 +243,9 @@ pub mod gold_perps_market {
         let execution_price = if size_delta != 0 {
             execution_price(&ctx.accounts.market, size_delta as i128)?
         } else {
-            ctx.accounts.market.spot_index
+            market_index_price(&ctx.accounts.market)?
         };
+        require_acceptable_price(execution_price, size_delta as i128, acceptable_price)?;
 
         let realized_trade_pnl = calculate_realized_trade_pnl(
             old_size,
@@ -213,13 +254,19 @@ pub mod gold_perps_market {
             size_delta as i128,
         )?;
 
-        let new_size = old_size
-            .checked_add(size_delta as i128)
+        let (treasury_fee, market_maker_fee) = calculate_trade_fees(
+            size_delta as i128,
+            config.trade_treasury_fee_bps,
+            config.trade_market_maker_fee_bps,
+        )?;
+        let total_trade_fee = i128::from(treasury_fee)
+            .checked_add(i128::from(market_maker_fee))
             .ok_or(PerpsError::Overflow)?;
         let next_margin = old_margin
             .checked_add(funding_pnl)
             .and_then(|value| value.checked_add(realized_trade_pnl))
             .and_then(|value| value.checked_add(margin_delta as i128))
+            .and_then(|value| value.checked_sub(total_trade_fee))
             .ok_or(PerpsError::Overflow)?;
 
         let next_entry_price = calculate_next_entry_price(
@@ -233,6 +280,25 @@ pub mod gold_perps_market {
         {
             let market = &mut ctx.accounts.market;
             update_market_open_interest(market, old_size, new_size)?;
+            market.treasury_fee_balance = market
+                .treasury_fee_balance
+                .checked_add(treasury_fee)
+                .ok_or(PerpsError::Overflow)?;
+            market.market_maker_fee_balance = market
+                .market_maker_fee_balance
+                .checked_add(market_maker_fee)
+                .ok_or(PerpsError::Overflow)?;
+            if !position_exists && new_size != 0 {
+                market.open_positions = market
+                    .open_positions
+                    .checked_add(1)
+                    .ok_or(PerpsError::Overflow)?;
+            } else if position_exists && old_size != 0 && new_size == 0 {
+                market.open_positions = market
+                    .open_positions
+                    .checked_sub(1)
+                    .ok_or(PerpsError::Overflow)?;
+            }
         }
 
         if new_size == 0 {
@@ -280,7 +346,7 @@ pub mod gold_perps_market {
 
     pub fn liquidate_position(
         ctx: Context<LiquidatePosition>,
-        market_id: u32,
+        market_id: u64,
     ) -> Result<()> {
         let config = &ctx.accounts.config;
         let market = &mut ctx.accounts.market;
@@ -296,8 +362,17 @@ pub mod gold_perps_market {
         );
 
         let now = Clock::get()?.unix_timestamp;
-        require_fresh_market(market, config, now)?;
-        drift_funding(market, now)?;
+        match market.status {
+            MARKET_STATUS_ACTIVE => {
+                require_fresh_market(market, config, now)?;
+                drift_funding(market, now)?;
+            }
+            MARKET_STATUS_CLOSE_ONLY => {
+                require!(market_index_price(market)? > 0, PerpsError::InvalidSpotIndex);
+            }
+            MARKET_STATUS_ARCHIVED => return err!(PerpsError::MarketArchived),
+            _ => return err!(PerpsError::InvalidMarketStatus),
+        }
 
         let old_size = position.size as i128;
         require!(old_size != 0, PerpsError::NoOpenPosition);
@@ -318,6 +393,10 @@ pub mod gold_perps_market {
         require!(equity < maintenance_margin, PerpsError::NotLiquidatable);
 
         update_market_open_interest(market, old_size, 0)?;
+        market.open_positions = market
+            .open_positions
+            .checked_sub(1)
+            .ok_or(PerpsError::Overflow)?;
 
         let positive_equity = cmp::max(0, equity);
         let positive_equity_u64 =
@@ -344,6 +423,119 @@ pub mod gold_perps_market {
         )?;
         Ok(())
     }
+
+    pub fn set_market_status(
+        ctx: Context<SetMarketStatus>,
+        market_id: u64,
+        next_status: u8,
+        settlement_spot_index: u64,
+    ) -> Result<()> {
+        require_operator(&ctx.accounts.config, ctx.accounts.authority.key())?;
+
+        let market = &mut ctx.accounts.market;
+        require!(market.initialized, PerpsError::InvalidMarket);
+        require!(market.market_id == market_id, PerpsError::InvalidMarket);
+
+        let now = Clock::get()?.unix_timestamp;
+        match next_status {
+            MARKET_STATUS_ACTIVE => {
+                market.status = MARKET_STATUS_ACTIVE;
+                market.settlement_spot_index = 0;
+                market.last_funding_time = now;
+            }
+            MARKET_STATUS_CLOSE_ONLY => {
+                let frozen_price = if settlement_spot_index > 0 {
+                    settlement_spot_index
+                } else {
+                    market_index_price(market)?
+                };
+                require!(frozen_price > 0, PerpsError::InvalidSpotIndex);
+                market.status = MARKET_STATUS_CLOSE_ONLY;
+                market.settlement_spot_index = frozen_price;
+                market.last_funding_time = now;
+            }
+            MARKET_STATUS_ARCHIVED => {
+                require!(
+                    market.total_long_oi == 0
+                        && market.total_short_oi == 0
+                        && market.open_positions == 0,
+                    PerpsError::MarketHasOpenPositions
+                );
+                market.status = MARKET_STATUS_ARCHIVED;
+                if settlement_spot_index > 0 {
+                    market.settlement_spot_index = settlement_spot_index;
+                }
+            }
+            _ => return err!(PerpsError::InvalidMarketStatus),
+        }
+        Ok(())
+    }
+
+    pub fn recycle_market_maker_fees(
+        ctx: Context<RecycleMarketMakerFees>,
+        market_id: u64,
+        amount: u64,
+    ) -> Result<()> {
+        require!(amount > 0, PerpsError::InvalidFeeWithdrawal);
+        require_market_maker(&ctx.accounts.config, ctx.accounts.authority.key())?;
+
+        let market = &mut ctx.accounts.market;
+        require!(market.initialized, PerpsError::InvalidMarket);
+        require!(market.market_id == market_id, PerpsError::InvalidMarket);
+
+        market.market_maker_fee_balance = market
+            .market_maker_fee_balance
+            .checked_sub(amount)
+            .ok_or(PerpsError::InvalidFeeWithdrawal)?;
+        market.insurance_fund = market
+            .insurance_fund
+            .checked_add(amount)
+            .ok_or(PerpsError::Overflow)?;
+        Ok(())
+    }
+
+    pub fn withdraw_fee_balance(
+        ctx: Context<WithdrawFeeBalance>,
+        market_id: u64,
+        fee_bucket: u8,
+        amount: u64,
+    ) -> Result<()> {
+        require!(amount > 0, PerpsError::InvalidFeeWithdrawal);
+
+        let market = &mut ctx.accounts.market;
+        require!(market.initialized, PerpsError::InvalidMarket);
+        require!(market.market_id == market_id, PerpsError::InvalidMarket);
+
+        match fee_bucket {
+            FEE_BUCKET_TREASURY => {
+                require_treasury(&ctx.accounts.config, ctx.accounts.authority.key())?;
+                require!(
+                    ctx.accounts.recipient.key() == ctx.accounts.config.treasury_authority,
+                    PerpsError::InvalidFeeRecipient
+                );
+                market.treasury_fee_balance = market
+                    .treasury_fee_balance
+                    .checked_sub(amount)
+                    .ok_or(PerpsError::InvalidFeeWithdrawal)?;
+            }
+            FEE_BUCKET_MARKET_MAKER => {
+                require_market_maker(&ctx.accounts.config, ctx.accounts.authority.key())?;
+                require!(
+                    ctx.accounts.recipient.key()
+                        == ctx.accounts.config.market_maker_authority,
+                    PerpsError::InvalidFeeRecipient
+                );
+                market.market_maker_fee_balance = market
+                    .market_maker_fee_balance
+                    .checked_sub(amount)
+                    .ok_or(PerpsError::InvalidFeeWithdrawal)?;
+            }
+            _ => return err!(PerpsError::InvalidFeeBucket),
+        }
+
+        transfer_from_market(market, &ctx.accounts.recipient.to_account_info(), amount, false)?;
+        Ok(())
+    }
 }
 
 fn validate_config_inputs(
@@ -353,6 +545,8 @@ fn validate_config_inputs(
     min_margin_lamports: u64,
     maintenance_margin_bps: u16,
     liquidation_fee_bps: u16,
+    trade_treasury_fee_bps: u16,
+    trade_market_maker_fee_bps: u16,
 ) -> Result<()> {
     require!(default_skew_scale > 0, PerpsError::InvalidRiskConfig);
     require!(
@@ -371,6 +565,11 @@ fn validate_config_inputs(
     );
     require!(
         u64::from(liquidation_fee_bps) < BPS_DENOMINATOR,
+        PerpsError::InvalidRiskConfig
+    );
+    require!(
+        u64::from(trade_treasury_fee_bps) + u64::from(trade_market_maker_fee_bps)
+            < BPS_DENOMINATOR,
         PerpsError::InvalidRiskConfig
     );
 
@@ -392,6 +591,22 @@ fn require_operator(config: &ConfigState, signer: Pubkey) -> Result<()> {
     Ok(())
 }
 
+fn require_treasury(config: &ConfigState, signer: Pubkey) -> Result<()> {
+    require!(
+        signer == config.authority || signer == config.treasury_authority,
+        PerpsError::InvalidAuthority
+    );
+    Ok(())
+}
+
+fn require_market_maker(config: &ConfigState, signer: Pubkey) -> Result<()> {
+    require!(
+        signer == config.authority || signer == config.market_maker_authority,
+        PerpsError::InvalidAuthority
+    );
+    Ok(())
+}
+
 fn require_fresh_market(market: &MarketState, config: &ConfigState, now: i64) -> Result<()> {
     require!(market.spot_index > 0, PerpsError::InvalidSpotIndex);
     require!(
@@ -408,6 +623,9 @@ fn require_fresh_market(market: &MarketState, config: &ConfigState, now: i64) ->
 
 fn drift_funding(market: &mut MarketState, now: i64) -> Result<()> {
     require!(market.skew_scale > 0, PerpsError::InvalidRiskConfig);
+    if market.status != MARKET_STATUS_ACTIVE {
+        return Ok(());
+    }
     if market.last_funding_time == 0 {
         market.last_funding_time = now;
         return Ok(());
@@ -434,7 +652,7 @@ fn drift_funding(market: &mut MarketState, now: i64) -> Result<()> {
 }
 
 fn execution_price(market: &MarketState, size_delta: i128) -> Result<u64> {
-    require!(market.spot_index > 0, PerpsError::InvalidSpotIndex);
+    let index_price = market_index_price(market)?;
     require!(market.skew_scale > 0, PerpsError::InvalidRiskConfig);
 
     let skew = market.total_long_oi as i128 - market.total_short_oi as i128;
@@ -443,7 +661,7 @@ fn execution_price(market: &MarketState, size_delta: i128) -> Result<u64> {
     let y2 = y1.checked_add(size_delta).ok_or(PerpsError::Overflow)?;
     require!(y1 > 0 && y2 > 0, PerpsError::InvalidPositionState);
 
-    let part1 = (market.spot_index as i128)
+    let part1 = (index_price as i128)
         .checked_mul(y1)
         .ok_or(PerpsError::Overflow)?
         .checked_div(d)
@@ -454,6 +672,16 @@ fn execution_price(market: &MarketState, size_delta: i128) -> Result<u64> {
         .checked_div(d)
         .ok_or(PerpsError::Overflow)?;
     u64::try_from(exec).map_err(|_| PerpsError::Overflow.into())
+}
+
+fn market_index_price(market: &MarketState) -> Result<u64> {
+    let price = if market.status == MARKET_STATUS_CLOSE_ONLY && market.settlement_spot_index > 0 {
+        market.settlement_spot_index
+    } else {
+        market.spot_index
+    };
+    require!(price > 0, PerpsError::InvalidSpotIndex);
+    Ok(price)
 }
 
 fn calculate_funding_pnl(size: i128, funding_delta: i128) -> Result<i128> {
@@ -560,6 +788,52 @@ fn calculate_liquidation_fee(size: i128, liquidation_fee_bps: u16) -> Result<u64
     u64::try_from(fee).map_err(|_| PerpsError::Overflow.into())
 }
 
+fn calculate_trade_fees(
+    size_delta: i128,
+    treasury_fee_bps: u16,
+    market_maker_fee_bps: u16,
+) -> Result<(u64, u64)> {
+    let abs_size = abs_i128(size_delta);
+    if abs_size == 0 {
+        return Ok((0, 0));
+    }
+
+    let treasury_fee = abs_size
+        .checked_mul(i128::from(treasury_fee_bps))
+        .ok_or(PerpsError::Overflow)?
+        .checked_div(BPS_DENOMINATOR as i128)
+        .ok_or(PerpsError::Overflow)?;
+    let market_maker_fee = abs_size
+        .checked_mul(i128::from(market_maker_fee_bps))
+        .ok_or(PerpsError::Overflow)?
+        .checked_div(BPS_DENOMINATOR as i128)
+        .ok_or(PerpsError::Overflow)?;
+    Ok((to_u64(treasury_fee)?, to_u64(market_maker_fee)?))
+}
+
+fn require_acceptable_price(
+    execution_price: u64,
+    size_delta: i128,
+    acceptable_price: u64,
+) -> Result<()> {
+    if size_delta == 0 || acceptable_price == 0 {
+        return Ok(());
+    }
+
+    if size_delta > 0 {
+        require!(
+            execution_price <= acceptable_price,
+            PerpsError::SlippageExceeded
+        );
+    } else {
+        require!(
+            execution_price >= acceptable_price,
+            PerpsError::SlippageExceeded
+        );
+    }
+    Ok(())
+}
+
 fn require_leverage(margin: u64, size: i128, max_leverage: u64) -> Result<()> {
     let margin_i128 = i128::from(margin);
     let leverage_capacity = margin_i128
@@ -611,6 +885,19 @@ fn update_market_open_interest(
     Ok(())
 }
 
+fn is_reduce_only_change(old_size: i128, new_size: i128) -> bool {
+    if old_size == 0 {
+        return false;
+    }
+    if new_size == 0 {
+        return true;
+    }
+    if !same_sign(old_size, new_size) {
+        return false;
+    }
+    abs_i128(new_size) <= abs_i128(old_size)
+}
+
 fn transfer_from_market<'info>(
     market: &mut Account<'info, MarketState>,
     recipient: &AccountInfo<'info>,
@@ -624,11 +911,23 @@ fn transfer_from_market<'info>(
     let market_info = market.to_account_info();
     let rent_floor = Rent::get()?.minimum_balance(MarketState::SIZE);
     let available_after_rent = market_info.lamports().saturating_sub(rent_floor);
+    let reserved_non_insurance = market
+        .treasury_fee_balance
+        .checked_add(market.market_maker_fee_balance)
+        .ok_or(PerpsError::Overflow)?;
 
     let insurance_used = if allow_insurance {
-        calculate_insurance_usage(amount, available_after_rent, market.insurance_fund)?
+        calculate_insurance_usage(
+            amount,
+            available_after_rent,
+            reserved_non_insurance,
+            market.insurance_fund,
+        )?
     } else {
-        let free_liquidity = available_after_rent.saturating_sub(market.insurance_fund);
+        let reserved_total = reserved_non_insurance
+            .checked_add(market.insurance_fund)
+            .ok_or(PerpsError::Overflow)?;
+        let free_liquidity = available_after_rent.saturating_sub(reserved_total);
         require!(free_liquidity >= amount, PerpsError::InsufficientLiquidity);
         0
     };
@@ -648,13 +947,17 @@ fn transfer_from_market<'info>(
 fn calculate_insurance_usage(
     settlement: u64,
     available_after_rent: u64,
+    reserved_non_insurance: u64,
     insurance_fund: u64,
 ) -> Result<u64> {
     require!(
         available_after_rent >= settlement,
         PerpsError::InsufficientLiquidity
     );
-    let free_liquidity = available_after_rent.saturating_sub(insurance_fund);
+    let reserved_total = reserved_non_insurance
+        .checked_add(insurance_fund)
+        .ok_or(PerpsError::Overflow)?;
+    let free_liquidity = available_after_rent.saturating_sub(reserved_total);
     let insurance_used = settlement.saturating_sub(free_liquidity);
     require!(
         insurance_used <= insurance_fund,
@@ -702,7 +1005,7 @@ pub struct InitializeConfig<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct UpdateMarketOracle<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigState>,
@@ -720,7 +1023,7 @@ pub struct UpdateMarketOracle<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct DepositInsurance<'info> {
     #[account(
         mut,
@@ -734,7 +1037,7 @@ pub struct DepositInsurance<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct ModifyPosition<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigState>,
@@ -758,7 +1061,7 @@ pub struct ModifyPosition<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(market_id: u32)]
+#[instruction(market_id: u64)]
 pub struct LiquidatePosition<'info> {
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigState>,
@@ -782,10 +1085,56 @@ pub struct LiquidatePosition<'info> {
     pub liquidator: Signer<'info>,
 }
 
+#[derive(Accounts)]
+#[instruction(market_id: u64)]
+pub struct SetMarketStatus<'info> {
+    #[account(seeds = [b"config"], bump)]
+    pub config: Account<'info, ConfigState>,
+    #[account(
+        mut,
+        seeds = [b"market", market_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub market: Account<'info, MarketState>,
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(market_id: u64)]
+pub struct RecycleMarketMakerFees<'info> {
+    #[account(seeds = [b"config"], bump)]
+    pub config: Account<'info, ConfigState>,
+    #[account(
+        mut,
+        seeds = [b"market", market_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub market: Account<'info, MarketState>,
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(market_id: u64)]
+pub struct WithdrawFeeBalance<'info> {
+    #[account(seeds = [b"config"], bump)]
+    pub config: Account<'info, ConfigState>,
+    #[account(
+        mut,
+        seeds = [b"market", market_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub market: Account<'info, MarketState>,
+    #[account(mut)]
+    pub recipient: SystemAccount<'info>,
+    pub authority: Signer<'info>,
+}
+
 #[account]
 pub struct ConfigState {
     pub authority: Pubkey,
     pub keeper_authority: Pubkey,
+    pub treasury_authority: Pubkey,
+    pub market_maker_authority: Pubkey,
     pub default_skew_scale: u64,
     pub default_funding_velocity: u64,
     pub max_oracle_staleness_seconds: i64,
@@ -793,20 +1142,27 @@ pub struct ConfigState {
     pub min_margin_lamports: u64,
     pub maintenance_margin_bps: u16,
     pub liquidation_fee_bps: u16,
+    pub trade_treasury_fee_bps: u16,
+    pub trade_market_maker_fee_bps: u16,
 }
 
 impl ConfigState {
-    pub const SIZE: usize = 8 + 128;
+    pub const SIZE: usize = 8 + 192;
 }
 
 #[account]
 pub struct MarketState {
     pub initialized: bool,
-    pub market_id: u32,
+    pub market_id: u64,
+    pub status: u8,
     pub insurance_fund: u64,
+    pub treasury_fee_balance: u64,
+    pub market_maker_fee_balance: u64,
+    pub open_positions: u32,
     pub skew_scale: u64,
     pub funding_velocity: u64,
     pub spot_index: u64,
+    pub settlement_spot_index: u64,
     pub mu: u64,
     pub sigma: u64,
     pub oracle_last_updated: i64,
@@ -817,14 +1173,14 @@ pub struct MarketState {
 }
 
 impl MarketState {
-    pub const SIZE: usize = 8 + 128;
+    pub const SIZE: usize = 8 + 192;
 }
 
 #[account]
 pub struct PositionState {
     pub initialized: bool,
     pub owner: Pubkey,
-    pub market_id: u32,
+    pub market_id: u64,
     pub margin: u64,
     pub size: i64,
     pub entry_price: u64,
@@ -863,8 +1219,26 @@ pub enum PerpsError {
     InsufficientLiquidity,
     #[msg("Position is not undercollateralized; cannot liquidate")]
     NotLiquidatable,
+    #[msg("Market is not active for new oracle updates")]
+    MarketNotActive,
+    #[msg("Market is close-only; only reductions and closes are allowed")]
+    MarketCloseOnly,
+    #[msg("Market is archived and cannot be traded")]
+    MarketArchived,
+    #[msg("Market status transition is invalid")]
+    InvalidMarketStatus,
+    #[msg("Market still has open positions or open interest")]
+    MarketHasOpenPositions,
     #[msg("Insurance deposit amount must be greater than zero")]
     InvalidInsuranceDeposit,
+    #[msg("Trade execution exceeded the caller's acceptable price")]
+    SlippageExceeded,
+    #[msg("Fee balance or fee withdrawal is invalid")]
+    InvalidFeeWithdrawal,
+    #[msg("Fee recipient does not match the configured authority")]
+    InvalidFeeRecipient,
+    #[msg("Fee bucket is invalid")]
+    InvalidFeeBucket,
     #[msg("Position state is invalid")]
     InvalidPositionState,
     #[msg("Numeric overflow in perps calculation")]
@@ -886,8 +1260,8 @@ mod tests {
 
     #[test]
     fn insurance_usage_only_consumes_reserved_balance_when_needed() {
-        assert_eq!(calculate_insurance_usage(400, 1_000, 250).unwrap(), 0);
-        assert_eq!(calculate_insurance_usage(900, 1_000, 250).unwrap(), 150);
+        assert_eq!(calculate_insurance_usage(400, 1_000, 100, 250).unwrap(), 0);
+        assert_eq!(calculate_insurance_usage(900, 1_000, 100, 250).unwrap(), 250);
     }
 
     #[test]
@@ -900,5 +1274,15 @@ mod tests {
 
         let flipped = calculate_next_entry_price(2_000, 100, -3_000, -1_000, 130).unwrap();
         assert_eq!(flipped, 130);
+    }
+
+    #[test]
+    fn reduce_only_logic_rejects_flips_and_new_positions() {
+        assert!(is_reduce_only_change(10, 5));
+        assert!(is_reduce_only_change(-10, -4));
+        assert!(is_reduce_only_change(10, 0));
+        assert!(!is_reduce_only_change(0, 5));
+        assert!(!is_reduce_only_change(10, -1));
+        assert!(!is_reduce_only_change(10, 15));
     }
 }

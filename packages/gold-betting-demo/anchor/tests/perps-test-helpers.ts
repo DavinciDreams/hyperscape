@@ -24,6 +24,13 @@ export const DEFAULT_MIN_MARGIN = SOL(0.1);
 export const DEFAULT_MAX_LEVERAGE = 5;
 export const DEFAULT_MAINTENANCE_MARGIN_BPS = 500;
 export const DEFAULT_LIQUIDATION_FEE_BPS = 100;
+export const DEFAULT_TRADE_TREASURY_FEE_BPS = 25;
+export const DEFAULT_TRADE_MARKET_MAKER_FEE_BPS = 25;
+export const PERPS_STATUS_ACTIVE = 0;
+export const PERPS_STATUS_CLOSE_ONLY = 1;
+export const PERPS_STATUS_ARCHIVED = 2;
+export const TOTAL_TRADE_FEE_BPS =
+  DEFAULT_TRADE_TREASURY_FEE_BPS + DEFAULT_TRADE_MARKET_MAKER_FEE_BPS;
 export const DEFAULT_STALE_WAIT_MS = Number(
   process.env.GOLD_PERPS_TEST_STALE_WAIT_MS ||
     String((DEFAULT_MAX_ORACLE_STALENESS_SECONDS + 2) * 1_000),
@@ -41,6 +48,10 @@ export function toBn(value: number): anchor.BN {
   return new anchor.BN(Math.round(value));
 }
 
+export function marketIdBn(marketId: number): anchor.BN {
+  return new anchor.BN(String(marketId));
+}
+
 export function num(value: anchor.BN | number | bigint): number {
   if (typeof value === "number") return value;
   if (typeof value === "bigint") return Number(value);
@@ -49,6 +60,12 @@ export function num(value: anchor.BN | number | bigint): number {
 
 export function uniqueMarketId(baseMarketId: number): number {
   return baseMarketId + TEST_RUN_OFFSET;
+}
+
+export function tradeFeeLamports(sizeDeltaLamports: number): number {
+  return Math.floor(
+    (Math.abs(sizeDeltaLamports) * TOTAL_TRADE_FEE_BPS) / 10_000,
+  );
 }
 
 export function deriveProgramDataAddress(programId: PublicKey): PublicKey {
@@ -66,8 +83,8 @@ export function configPda(programId: PublicKey): PublicKey {
 }
 
 export function marketPda(programId: PublicKey, marketId: number): PublicKey {
-  const marketIdBytes = Buffer.alloc(4);
-  marketIdBytes.writeUInt32LE(marketId, 0);
+  const marketIdBytes = Buffer.alloc(8);
+  marketIdBytes.writeBigUInt64LE(BigInt(marketId), 0);
   return PublicKey.findProgramAddressSync(
     [Buffer.from("market"), marketIdBytes],
     programId,
@@ -79,8 +96,8 @@ export function positionPda(
   trader: PublicKey,
   marketId: number,
 ): PublicKey {
-  const marketIdBytes = Buffer.alloc(4);
-  marketIdBytes.writeUInt32LE(marketId, 0);
+  const marketIdBytes = Buffer.alloc(8);
+  marketIdBytes.writeBigUInt64LE(BigInt(marketId), 0);
   return PublicKey.findProgramAddressSync(
     [Buffer.from("position"), trader.toBuffer(), marketIdBytes],
     programId,
@@ -148,6 +165,8 @@ export async function ensurePerpsConfig(
   await program.methods
     .initializeConfig(
       keeperAuthority,
+      authority.publicKey,
+      authority.publicKey,
       toBn(DEFAULT_SKEW_SCALE),
       toBn(DEFAULT_FUNDING_VELOCITY),
       new anchor.BN(DEFAULT_MAX_ORACLE_STALENESS_SECONDS),
@@ -155,6 +174,8 @@ export async function ensurePerpsConfig(
       toBn(DEFAULT_MIN_MARGIN),
       DEFAULT_MAINTENANCE_MARGIN_BPS,
       DEFAULT_LIQUIDATION_FEE_BPS,
+      DEFAULT_TRADE_TREASURY_FEE_BPS,
+      DEFAULT_TRADE_MARKET_MAKER_FEE_BPS,
     )
     .accountsPartial({
       config,
@@ -192,7 +213,7 @@ export async function seedMarket(
 
   if (insuranceLamports > 0) {
     await program.methods
-      .depositInsurance(marketId, toBn(insuranceLamports))
+      .depositInsurance(marketIdBn(marketId), toBn(insuranceLamports))
       .accountsPartial({
         market,
         payer: authority.publicKey,
@@ -213,7 +234,7 @@ export async function refreshMarketOracle(
 ): Promise<void> {
   await program.methods
     .updateMarketOracle(
-      marketId,
+      marketIdBn(marketId),
       toBn(spotIndex),
       toBn(spotIndex),
       toBn(Math.max(1, Math.floor(spotIndex / 10))),

@@ -89,6 +89,8 @@ const GOLD_CLOB_ABI = [
   "function orders(uint64 orderId) view returns (uint64 id, uint16 price, bool isBuy, address maker, uint128 amount, uint128 filled)",
   "function nextOrderId() view returns (uint64)",
   "function nextMatchId() view returns (uint256)",
+  "function tradeTreasuryFeeBps() view returns (uint256)",
+  "function tradeMarketMakerFeeBps() view returns (uint256)",
   "function goldToken() view returns (address)",
   "function matches(uint256 matchId) view returns (uint8 status, uint8 winner, uint256 yesPool, uint256 noPool)",
   "function positions(uint256 matchId, address user) view returns (uint256 yesShares, uint256 noShares)",
@@ -349,13 +351,31 @@ class CrossChainMarketMaker {
     const getWallet = (label: "bsc" | "base") =>
       label === "bsc" ? this.bscWallet : this.baseWallet;
 
+    const ensureNativeLiquidityReady = async (
+      label: "bsc" | "base",
+      provider: ethers.JsonRpcProvider,
+    ) => {
+      const wallet = getWallet(label);
+      const nativeBalance = await provider.getBalance(wallet.address);
+      if (nativeBalance <= 0n) {
+        setChainEnabled(label, false);
+        console.warn(
+          `[${label.toUpperCase()}] Disabled: zero native balance for ${wallet.address}.`,
+        );
+        return;
+      }
+      console.log(
+        `[${label.toUpperCase()}] Native balance=${nativeBalance.toString()} for ${wallet.address}.`,
+      );
+    };
+
     const ensureSettlementTokenReady = async (
       label: "bsc" | "base",
       clob: ethers.Contract,
     ) => {
       if (typeof (clob as { goldToken?: unknown }).goldToken !== "function") {
-        console.warn(
-          `[${label.toUpperCase()}] Skipping token readiness check: clob.goldToken() unavailable.`,
+        console.log(
+          `[${label.toUpperCase()}] Native-settled CLOB detected; no token approval check needed.`,
         );
         return;
       }
@@ -417,6 +437,13 @@ class CrossChainMarketMaker {
           return;
         }
         await clob.nextMatchId();
+        await ensureNativeLiquidityReady(label, provider);
+        if (
+          (label === "bsc" && !this.bscEnabled) ||
+          (label === "base" && !this.baseEnabled)
+        ) {
+          return;
+        }
         await ensureSettlementTokenReady(label, clob);
         if (
           (label === "bsc" && !this.bscEnabled) ||
@@ -695,7 +722,33 @@ class CrossChainMarketMaker {
         return;
       }
 
-      const tx = await clob.placeOrder(matchId, isBuy, price, onChainAmount);
+      const priceComponent = BigInt(isBuy ? price : 1000 - price);
+      const quoteValue = onChainAmount * priceComponent;
+      if (quoteValue % 1000n !== 0n) {
+        console.warn(
+          `[${chain.toUpperCase()}] Skipping order with invalid precision amount=${onChainAmount.toString()} price=${price}`,
+        );
+        return;
+      }
+      const cost = quoteValue / 1000n;
+      if (cost <= 0n) {
+        console.warn(
+          `[${chain.toUpperCase()}] Skipping order with zero native cost amount=${onChainAmount.toString()} price=${price}`,
+        );
+        return;
+      }
+      const [tradeTreasuryFeeBps, tradeMarketMakerFeeBps] = await Promise.all([
+        clob.tradeTreasuryFeeBps() as Promise<bigint>,
+        clob.tradeMarketMakerFeeBps() as Promise<bigint>,
+      ]);
+      const nativeValue =
+        cost +
+        (cost * tradeTreasuryFeeBps) / 10_000n +
+        (cost * tradeMarketMakerFeeBps) / 10_000n;
+
+      const tx = await clob.placeOrder(matchId, isBuy, price, onChainAmount, {
+        value: nativeValue,
+      });
       const receipt = await tx.wait();
       if (!receipt) throw new Error("Missing transaction receipt");
 
@@ -733,7 +786,7 @@ class CrossChainMarketMaker {
       else this.inventoryNo += cappedAmount;
 
       console.log(
-        `[${chain.toUpperCase()}] ✓ ${intent === "taker" ? (isBuy ? "TAKER-BUY" : "TAKER-SELL") : isBuy ? "BID" : "ASK"} @ ${price} x${cappedAmount} (${onChainAmount.toString()} raw) (orderId: ${orderId})`,
+        `[${chain.toUpperCase()}] ✓ ${intent === "taker" ? (isBuy ? "TAKER-BUY" : "TAKER-SELL") : isBuy ? "BID" : "ASK"} @ ${price} x${cappedAmount} (${onChainAmount.toString()} raw, value=${nativeValue.toString()}) (orderId: ${orderId})`,
       );
     } catch (e: any) {
       if (this.isRetryableNonceError(e)) {

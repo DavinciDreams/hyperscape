@@ -2,46 +2,111 @@ import { defineConfig, loadEnv, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import * as path from "path";
 import * as fs from "fs";
+import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 // @ts-ignore
 import { createRequire } from "module";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const PUBLIC_SECRET_PATTERNS = [
+  /[?&](api[-_]?key|token)=/i,
+  /helius-rpc\.com\/\?api-key=/i,
+  /alchemy\.com\/v2\//i,
+  /infura\.io\/v3\//i,
+  /quicknode\.(com|pro)\//i,
+  /drpc\.org\//i,
+] as const;
+
+function looksLikePublicSecretUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  return PUBLIC_SECRET_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function readGitRevision(): string | null {
+  try {
+    return execSync("git rev-parse HEAD", {
+      cwd: __dirname,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString("utf8")
+      .trim();
+  } catch {
+    return null;
+  }
+}
+
+function assertPublicBuildSecrets(
+  mode: string,
+  env: Record<string, string>,
+): void {
+  const isPublicBuild =
+    mode === "production" || mode === "mainnet" || mode === "mainnet-beta";
+  if (!isPublicBuild) return;
+
+  const publicRpcVars = [
+    "VITE_SOLANA_RPC_URL",
+    "VITE_BSC_RPC_URL",
+    "VITE_BASE_RPC_URL",
+  ] as const;
+  for (const name of publicRpcVars) {
+    if (looksLikePublicSecretUrl(env[name]?.trim())) {
+      throw new Error(
+        `[build] ${name} contains a provider-keyed RPC URL. Keep provider keys on the keeper service and proxy public traffic through the backend.`,
+      );
+    }
+  }
+
+  const forbiddenPublicVars = [
+    "VITE_ARENA_EXTERNAL_BET_WRITE_KEY",
+    "VITE_HEADLESS_WALLET_SECRET_KEY",
+    "VITE_HEADLESS_WALLETS",
+  ] as const;
+  for (const name of forbiddenPublicVars) {
+    if (env[name]?.trim()) {
+      throw new Error(
+        `[build] ${name} must not be set for public builds. Move secrets to server-side environment variables instead.`,
+      );
+    }
+  }
+}
+
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, __dirname, "");
+  assertPublicBuildSecrets(mode, env);
   const plugins: any[] = [react()];
   const alias: Record<string, string> = {};
-  const polyfillShimsPath = path.resolve(
-    __dirname,
-    "node_modules",
-    "vite-plugin-node-polyfills",
-    "shims",
+  const require = createRequire(import.meta.url);
+  const nodePolyfillsRoot = path.dirname(
+    path.dirname(require.resolve("vite-plugin-node-polyfills")),
   );
 
   // Some transitive deps (for example @metamask/sdk) import these shim paths
-  // directly, and with workspace hoisting they may resolve outside this package.
-  // Pin them to this app's installed shim files so Rollup resolution is stable.
-  alias["vite-plugin-node-polyfills/shims/global"] = path.resolve(
-    polyfillShimsPath,
+  // directly. Resolve them from the installed package root so the build remains
+  // stable whether Bun installs them locally or hoists them in CI, while still
+  // pointing Vite dev/build at the ESM shim files.
+  alias["vite-plugin-node-polyfills/shims/global"] = path.join(
+    nodePolyfillsRoot,
+    "shims",
     "global",
     "dist",
     "index.js",
   );
-  alias["vite-plugin-node-polyfills/shims/process"] = path.resolve(
-    polyfillShimsPath,
+  alias["vite-plugin-node-polyfills/shims/process"] = path.join(
+    nodePolyfillsRoot,
+    "shims",
     "process",
     "dist",
     "index.js",
   );
-  alias["vite-plugin-node-polyfills/shims/buffer"] = path.resolve(
-    polyfillShimsPath,
+  alias["vite-plugin-node-polyfills/shims/buffer"] = path.join(
+    nodePolyfillsRoot,
+    "shims",
     "buffer",
     "dist",
     "index.js",
   );
 
-  const require = createRequire(import.meta.url);
   const curvesMainPath = require.resolve("@noble/curves");
 
   // Fix for @noble/curves import resolution inside the turbo monorepo
@@ -195,6 +260,34 @@ export default defineConfig(async ({ mode }) => {
   };
   plugins.push(hlsPlugin);
 
+  const buildInfoPlugin = {
+    name: "emit-build-info",
+    generateBundle(this: {
+      emitFile: (file: {
+        type: "asset";
+        fileName: string;
+        source: string;
+      }) => void;
+    }) {
+      const commitHash =
+        env.CF_PAGES_COMMIT_SHA?.trim() ||
+        process.env.GITHUB_SHA?.trim() ||
+        readGitRevision();
+      const buildInfo = {
+        app: "gold-betting-demo",
+        mode,
+        commitHash: commitHash || null,
+        builtAt: new Date().toISOString(),
+      };
+      this.emitFile({
+        type: "asset",
+        fileName: "build-info.json",
+        source: JSON.stringify(buildInfo, null, 2),
+      });
+    },
+  };
+  plugins.push(buildInfoPlugin);
+
   const solanaRpcTarget = env.VITE_SOLANA_RPC_URL?.trim();
   const solanaWsTarget = env.VITE_SOLANA_WS_URL?.trim();
   const useLocalSolanaProxy =
@@ -245,7 +338,7 @@ export default defineConfig(async ({ mode }) => {
     },
     build: {
       outDir: "dist",
-      sourcemap: true,
+      sourcemap: env.VITE_BUILD_SOURCEMAP === "true",
     },
   };
 

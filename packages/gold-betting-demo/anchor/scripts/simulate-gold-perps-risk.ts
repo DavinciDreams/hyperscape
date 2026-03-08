@@ -13,6 +13,8 @@ interface PerpsParams {
   maintenanceMarginBps: bigint;
   skewScaleLamports: bigint;
   fundingVelocity: bigint;
+  tradeTreasuryFeeBps: bigint;
+  tradeMarketMakerFeeBps: bigint;
 }
 
 interface MarketState {
@@ -176,7 +178,13 @@ function defaultParams(): PerpsParams {
     maintenanceMarginBps: 500n,
     skewScaleLamports: sol(100),
     fundingVelocity: 50_000_000n,
+    tradeTreasuryFeeBps: 25n,
+    tradeMarketMakerFeeBps: 25n,
   };
+}
+
+function tradeFeeLamports(sizeLamports: bigint, feeBps: bigint): bigint {
+  return (absBigInt(sizeLamports) * feeBps) / BPS_DENOMINATOR;
 }
 
 function scenarioWhaleRoundTrip(): ScenarioResult {
@@ -429,6 +437,54 @@ function scenarioLocalInsuranceShortfall(): ScenarioResult {
   };
 }
 
+function scenarioFeeRecycling(): ScenarioResult {
+  const params = defaultParams();
+  const sizeLamports = sol(5);
+  const treasuryFeeLamports = tradeFeeLamports(
+    sizeLamports,
+    params.tradeTreasuryFeeBps,
+  );
+  const marketMakerFeeLamports = tradeFeeLamports(
+    sizeLamports,
+    params.tradeMarketMakerFeeBps,
+  );
+  const recycledInsuranceLamports = sol(1) + marketMakerFeeLamports;
+
+  return {
+    name: "Fee recycling into isolated insurance",
+    category: "ops",
+    summary:
+      "Per-trade fees can be split between treasury and market maker, then the market-maker share can be recycled back into that model's insurance reserve.",
+    weakness: null,
+    metrics: {
+      trade_notional_sol: lamportsToSol(sizeLamports),
+      treasury_fee_sol: Number(lamportsToSol(treasuryFeeLamports).toFixed(6)),
+      market_maker_fee_sol: Number(
+        lamportsToSol(marketMakerFeeLamports).toFixed(6),
+      ),
+      recycled_market_insurance_sol: Number(
+        lamportsToSol(recycledInsuranceLamports).toFixed(6),
+      ),
+    },
+  };
+}
+
+function scenarioModelDeprecation(): ScenarioResult {
+  return {
+    name: "Model deprecation lifecycle",
+    category: "ops",
+    summary:
+      "When a model disappears, the market can move to close-only mode: no new exposure, but existing traders can still reduce and exit against the frozen settlement price.",
+    weakness: null,
+    metrics: {
+      new_exposure_allowed: false,
+      close_only_allows_exit: true,
+      oracle_must_stay_live: false,
+      archived_requires_zero_open_interest: true,
+    },
+  };
+}
+
 function runScenarios(): ScenarioResult[] {
   return [
     scenarioWhaleRoundTrip(),
@@ -436,6 +492,8 @@ function runScenarios(): ScenarioResult[] {
     scenarioIsolatedInsuranceContainment(),
     scenarioPositiveEquityLiquidation(),
     scenarioLocalInsuranceShortfall(),
+    scenarioFeeRecycling(),
+    scenarioModelDeprecation(),
   ];
 }
 
