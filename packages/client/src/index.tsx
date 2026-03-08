@@ -24,6 +24,7 @@ import { SolanaWalletProvider } from "./auth/SolanaWalletProvider";
 import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
+import { logger } from "./lib/logger";
 // Loading fallback for lazy-loaded screens
 function ScreenLoadingFallback() {
   return (
@@ -259,12 +260,9 @@ if (isEmbedded) {
     window.parent.postMessage({ type: "HYPERSCAPE_READY" }, "*");
   }
 
-  // Use logger to safely redact sensitive data
-  import("./lib/logger").then(({ logger }) => {
-    logger.config("[Hyperscape] Configured from validated URL params:", {
-      ...config,
-      authToken: config.authToken ? "[REDACTED]" : "[PENDING]",
-    });
+  logger.config("[Hyperscape] Configured from validated URL params:", {
+    ...config,
+    authToken: config.authToken ? "[REDACTED]" : "[PENDING]",
   });
 }
 

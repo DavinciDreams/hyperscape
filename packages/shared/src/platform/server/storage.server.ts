@@ -40,8 +40,14 @@ export class NodeStorage {
       return;
     }
 
-    const { promises: fs } = await import("fs");
-    const path = await import("path");
+    const fsModuleId = "node:fs";
+    const pathModuleId = "node:path";
+    const { promises: fs } = (await import(
+      /* @vite-ignore */ fsModuleId
+    )) as typeof import("node:fs");
+    const path = (await import(
+      /* @vite-ignore */ pathModuleId
+    )) as typeof import("node:path");
     this.fs = fs;
     this.path = path;
 

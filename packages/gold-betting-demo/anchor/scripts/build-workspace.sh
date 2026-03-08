@@ -3,6 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_VERSION="${ANCHOR_SBF_TOOLS_VERSION:-v1.44}"
+BASE_RUSTFLAGS="${RUSTFLAGS:-}"
+ANCHOR_RUSTFLAGS="${BASE_RUSTFLAGS} -A deprecated -A mismatched_lifetime_syntaxes"
+export RUSTFLAGS="${ANCHOR_RUSTFLAGS# }"
 PROGRAMS=(
   "fight_oracle"
   "gold_clob_market"

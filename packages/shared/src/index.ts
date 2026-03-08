@@ -693,9 +693,8 @@ export type { GLBData } from "./types/index";
 // Re-export storage types
 export type { Storage } from "./platform/shared/storage";
 export { LocalStorage } from "./platform/shared/storage";
-// Export server-side NodeStorage from storage.server
-// Note: This import uses the build-time path (relative to build directory)
-export { NodeStorage } from "./storage.server";
+// Export server-side NodeStorage for Node/Bun runtimes
+export { NodeStorage } from "./platform/server/storage.server";
 // Export file-based Storage class (for server use)
 // export { Storage as FileStorage } from './systems/Storage'; // Disabled: file doesn't exist
 

@@ -10,8 +10,31 @@
  * initialization of singletons like ProcessingDataProvider).
  */
 
+import "./src/extras/three/webgpu-polyfills";
 import { dataManager } from "./src/data/DataManager";
 import { ProcessingDataProvider } from "./src/data/ProcessingDataProvider";
+import { vi } from "vitest";
+
+type TimerCompat = typeof vi & {
+  advanceTimersByTimeAsync?: (ms: number) => Promise<void>;
+  runAllTicks?: () => Promise<void> | void;
+};
+
+const viCompat = vi as TimerCompat;
+
+if (typeof viCompat.advanceTimersByTimeAsync !== "function") {
+  viCompat.advanceTimersByTimeAsync = async (ms: number) => {
+    vi.advanceTimersByTime(ms);
+    await Promise.resolve();
+  };
+}
+
+if (typeof viCompat.runAllTicks !== "function") {
+  viCompat.runAllTicks = async () => {
+    vi.runAllTimers();
+    await Promise.resolve();
+  };
+}
 
 // Use top-level initialization to ensure it runs before any tests
 // This is critical because test file imports can trigger singleton initialization

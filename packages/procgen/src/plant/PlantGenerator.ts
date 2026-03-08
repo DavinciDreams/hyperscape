@@ -2388,9 +2388,11 @@ export async function exportPlantToGLBFile(
     };
     await BunRuntime.write(outputPath, glbResult.data);
   } else {
-    // Node.js fallback using dynamic import
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(outputPath, Buffer.from(glbResult.data));
+    const fsModuleId = "node:fs/promises";
+    const { writeFile } = (await import(
+      /* @vite-ignore */ fsModuleId
+    )) as typeof import("node:fs/promises");
+    await writeFile(outputPath, new Uint8Array(glbResult.data));
   }
 
   return glbResult;

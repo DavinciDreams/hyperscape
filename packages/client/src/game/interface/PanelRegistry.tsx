@@ -24,8 +24,16 @@ import {
   ActionBarPanel,
   ACTION_BAR_DIMENSIONS,
 } from "../../game/panels/ActionBarPanel";
-import { PRAYER_PANEL_DIMENSIONS } from "../../game/panels/PrayerPanel";
-import { SPELLS_PANEL_DIMENSIONS } from "../../game/panels/SpellsPanel";
+import { InventoryPanel } from "../../game/panels/InventoryPanel";
+import { StatsPanel } from "../../game/panels/StatsPanel";
+import {
+  PrayerPanel,
+  PRAYER_PANEL_DIMENSIONS,
+} from "../../game/panels/PrayerPanel";
+import {
+  SpellsPanel,
+  SPELLS_PANEL_DIMENSIONS,
+} from "../../game/panels/SpellsPanel";
 import {
   PresetPanel,
   AccessibilityPanel,
@@ -854,11 +862,6 @@ function MenuBarPanel({
 }
 
 // Lazy load panels for better code splitting
-const InventoryPanel = lazy(() =>
-  import("../../game/panels/InventoryPanel").then((m) => ({
-    default: m.InventoryPanel,
-  })),
-);
 const EquipmentPanel = lazy(() =>
   import("../../game/panels/EquipmentPanel").then((m) => ({
     default: m.EquipmentPanel,
@@ -899,22 +902,6 @@ const FriendsPanel = lazy(() =>
     default: m.FriendsPanel,
   })),
 );
-const StatsPanel = lazy(() =>
-  import("../../game/panels/StatsPanel").then((m) => ({
-    default: m.StatsPanel,
-  })),
-);
-const PrayerPanel = lazy(() =>
-  import("../../game/panels/PrayerPanel").then((m) => ({
-    default: m.PrayerPanel,
-  })),
-);
-const SpellsPanel = lazy(() =>
-  import("../../game/panels/SpellsPanel").then((m) => ({
-    default: m.SpellsPanel,
-  })),
-);
-
 /** Panel loading fallback */
 function PanelLoadingFallback(): React.ReactElement {
   return (

@@ -46,6 +46,29 @@ export interface GLBExportResult {
   };
 }
 
+async function writeArrayBufferToFile(
+  outputPath: string,
+  data: ArrayBuffer,
+): Promise<void> {
+  const globalObj = globalThis as Record<string, unknown>;
+  if (
+    globalObj.Bun &&
+    typeof (globalObj.Bun as { write: unknown }).write === "function"
+  ) {
+    const bunRuntime = globalObj.Bun as {
+      write: (path: string, data: ArrayBuffer) => Promise<void>;
+    };
+    await bunRuntime.write(outputPath, data);
+    return;
+  }
+
+  const fsModuleId = "node:fs/promises";
+  const { writeFile } = (await import(
+    /* @vite-ignore */ fsModuleId
+  )) as typeof import("node:fs/promises");
+  await writeFile(outputPath, new Uint8Array(data));
+}
+
 /**
  * Export a Three.js Object3D (Group, Mesh, Scene) to GLB format
  *
@@ -159,9 +182,7 @@ export async function exportToGLBFile(
     };
     await BunRuntime.write(outputPath, result.data);
   } else {
-    // Node.js fallback using dynamic import
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(outputPath, Buffer.from(result.data));
+    await writeArrayBufferToFile(outputPath, result.data);
   }
 
   return result;

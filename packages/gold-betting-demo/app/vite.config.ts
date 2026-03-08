@@ -246,6 +246,7 @@ export default defineConfig(async ({ mode }) => {
     build: {
       outDir: "dist",
       sourcemap: true,
+      chunkSizeWarningLimit: 3000,
     },
   };
 

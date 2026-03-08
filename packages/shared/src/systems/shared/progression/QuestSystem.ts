@@ -222,8 +222,14 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
       }
 
       // Server-side: Load from filesystem
-      const fs = await import("fs/promises");
-      const path = await import("path");
+      const fsModuleId = "node:fs/promises";
+      const pathModuleId = "node:path";
+      const fs = (await import(
+        /* @vite-ignore */ fsModuleId
+      )) as typeof import("node:fs/promises");
+      const path = (await import(
+        /* @vite-ignore */ pathModuleId
+      )) as typeof import("node:path");
 
       // Find manifests directory
       let manifestsDir: string;

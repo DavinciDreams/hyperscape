@@ -9,6 +9,7 @@ import {
   Skeleton,
   Bone,
 } from "three";
+import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 
 import { MeshFittingService } from "./MeshFittingService";
@@ -1999,8 +2000,6 @@ export class ArmorFittingService {
     console.log(`Export scene contains ${nodeCount} nodes`);
 
     // Export with specific options
-    const { GLTFExporter } =
-      await import("three/examples/jsm/exporters/GLTFExporter.js");
     const exporter = new GLTFExporter();
 
     try {
@@ -2086,8 +2085,6 @@ export class ArmorFittingService {
     clonedMesh.scale.set(1, 1, 1);
 
     // Export
-    const { GLTFExporter } =
-      await import("three/examples/jsm/exporters/GLTFExporter.js");
     const exporter = new GLTFExporter();
 
     const gltf = await exporter.parseAsync(exportScene, {
@@ -2200,8 +2197,6 @@ export class ArmorFittingService {
     exportScene.add(new THREE.AmbientLight(0x404040));
 
     // Export
-    const { GLTFExporter } =
-      await import("three/examples/jsm/exporters/GLTFExporter.js");
     const exporter = new GLTFExporter();
 
     const gltf = await exporter.parseAsync(exportScene, {
@@ -2441,8 +2436,6 @@ export class ArmorFittingService {
     };
 
     // Use GLTFExporter to export
-    const { GLTFExporter } =
-      await import("three/examples/jsm/exporters/GLTFExporter.js");
     const exporter = new GLTFExporter();
 
     // Log debug info
