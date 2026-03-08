@@ -58,8 +58,8 @@ jobs:
           VITE_USE_GAME_EVM_RPC_PROXY: "true"
           VITE_BSC_CHAIN_ID: "97"
           VITE_BASE_CHAIN_ID: "84532"
-          VITE_BSC_GOLD_CLOB_ADDRESS: 0x1224094aAe93bc9c52FA6F02a0B1F4700721E26E
-          VITE_BASE_GOLD_CLOB_ADDRESS: 0x1224094aAe93bc9c52FA6F02a0B1F4700721E26E
+          VITE_BSC_GOLD_CLOB_ADDRESS: "0x1224094aAe93bc9c52FA6F02a0B1F4700721E26E"
+          VITE_BASE_GOLD_CLOB_ADDRESS: "0x1224094aAe93bc9c52FA6F02a0B1F4700721E26E"
 
       - name: Verify dist hygiene
         run: |
@@ -95,7 +95,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Verify production build metadata
-        if: github.event_name != 'workflow_dispatch' || inputs.environment == 'production'
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.environment == 'production' }}
         run: |
           for attempt in $(seq 1 20); do
             payload="$(curl -fsSL "${PAGES_PRODUCTION_URL}/build-info.json" || true)"
