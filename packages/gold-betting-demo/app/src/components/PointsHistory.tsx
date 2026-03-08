@@ -119,6 +119,7 @@ export function PointsHistory({
   if (!walletAddress) {
     return (
       <div
+        data-testid="points-history-placeholder"
         style={{
           padding: "16px",
           borderRadius: 12,
@@ -137,6 +138,7 @@ export function PointsHistory({
 
   return (
     <div
+      data-testid="points-history"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -164,6 +166,7 @@ export function PointsHistory({
         </div>
 
         <select
+          data-testid="points-history-filter"
           value={eventFilter}
           onChange={(e) => setEventFilter(e.target.value)}
           style={{
@@ -233,6 +236,7 @@ export function PointsHistory({
             return (
               <div
                 key={entry.id}
+                data-testid={`points-history-row-${entry.id}`}
                 style={{
                   display: "flex",
                   alignItems: "center",

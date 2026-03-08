@@ -106,6 +106,14 @@ export type GoldPerpsMarket = {
           type: "pubkey";
         },
         {
+          name: "treasuryAuthority";
+          type: "pubkey";
+        },
+        {
+          name: "marketMakerAuthority";
+          type: "pubkey";
+        },
+        {
           name: "defaultSkewScale";
           type: "u64";
         },
@@ -131,6 +139,14 @@ export type GoldPerpsMarket = {
         },
         {
           name: "liquidationFeeBps";
+          type: "u16";
+        },
+        {
+          name: "tradeTreasuryFeeBps";
+          type: "u16";
+        },
+        {
+          name: "tradeMarketMakerFeeBps";
           type: "u16";
         },
       ];
@@ -261,6 +277,108 @@ export type GoldPerpsMarket = {
           name: "sizeDelta";
           type: "i64";
         },
+        {
+          name: "acceptablePrice";
+          type: "u64";
+        },
+      ];
+    },
+    {
+      name: "recycleMarketMakerFees";
+      discriminator: [223, 161, 208, 139, 228, 66, 247, 207];
+      accounts: [
+        {
+          name: "config";
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [99, 111, 110, 102, 105, 103];
+              },
+            ];
+          };
+        },
+        {
+          name: "market";
+          writable: true;
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [109, 97, 114, 107, 101, 116];
+              },
+              {
+                kind: "arg";
+                path: "marketId";
+              },
+            ];
+          };
+        },
+        {
+          name: "authority";
+          signer: true;
+        },
+      ];
+      args: [
+        {
+          name: "marketId";
+          type: "u32";
+        },
+        {
+          name: "amount";
+          type: "u64";
+        },
+      ];
+    },
+    {
+      name: "setMarketStatus";
+      discriminator: [101, 175, 83, 107, 200, 141, 155, 182];
+      accounts: [
+        {
+          name: "config";
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [99, 111, 110, 102, 105, 103];
+              },
+            ];
+          };
+        },
+        {
+          name: "market";
+          writable: true;
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [109, 97, 114, 107, 101, 116];
+              },
+              {
+                kind: "arg";
+                path: "marketId";
+              },
+            ];
+          };
+        },
+        {
+          name: "authority";
+          signer: true;
+        },
+      ];
+      args: [
+        {
+          name: "marketId";
+          type: "u32";
+        },
+        {
+          name: "nextStatus";
+          type: "u8";
+        },
+        {
+          name: "settlementSpotIndex";
+          type: "u64";
+        },
       ];
     },
     {
@@ -319,6 +437,61 @@ export type GoldPerpsMarket = {
         },
         {
           name: "sigma";
+          type: "u64";
+        },
+      ];
+    },
+    {
+      name: "withdrawFeeBalance";
+      discriminator: [226, 225, 74, 191, 99, 227, 10, 156];
+      accounts: [
+        {
+          name: "config";
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [99, 111, 110, 102, 105, 103];
+              },
+            ];
+          };
+        },
+        {
+          name: "market";
+          writable: true;
+          pda: {
+            seeds: [
+              {
+                kind: "const";
+                value: [109, 97, 114, 107, 101, 116];
+              },
+              {
+                kind: "arg";
+                path: "marketId";
+              },
+            ];
+          };
+        },
+        {
+          name: "recipient";
+          writable: true;
+        },
+        {
+          name: "authority";
+          signer: true;
+        },
+      ];
+      args: [
+        {
+          name: "marketId";
+          type: "u32";
+        },
+        {
+          name: "feeBucket";
+          type: "u8";
+        },
+        {
+          name: "amount";
           type: "u64";
         },
       ];
@@ -406,16 +579,61 @@ export type GoldPerpsMarket = {
     },
     {
       code: 6013;
+      name: "marketNotActive";
+      msg: "Market is not active for new oracle updates";
+    },
+    {
+      code: 6014;
+      name: "marketCloseOnly";
+      msg: "Market is close-only; only reductions and closes are allowed";
+    },
+    {
+      code: 6015;
+      name: "marketArchived";
+      msg: "Market is archived and cannot be traded";
+    },
+    {
+      code: 6016;
+      name: "invalidMarketStatus";
+      msg: "Market status transition is invalid";
+    },
+    {
+      code: 6017;
+      name: "marketHasOpenPositions";
+      msg: "Market still has open positions or open interest";
+    },
+    {
+      code: 6018;
       name: "invalidInsuranceDeposit";
       msg: "Insurance deposit amount must be greater than zero";
     },
     {
-      code: 6014;
+      code: 6019;
+      name: "slippageExceeded";
+      msg: "Trade execution exceeded the caller's acceptable price";
+    },
+    {
+      code: 6020;
+      name: "invalidFeeWithdrawal";
+      msg: "Fee balance or fee withdrawal is invalid";
+    },
+    {
+      code: 6021;
+      name: "invalidFeeRecipient";
+      msg: "Fee recipient does not match the configured authority";
+    },
+    {
+      code: 6022;
+      name: "invalidFeeBucket";
+      msg: "Fee bucket is invalid";
+    },
+    {
+      code: 6023;
       name: "invalidPositionState";
       msg: "Position state is invalid";
     },
     {
-      code: 6015;
+      code: 6024;
       name: "overflow";
       msg: "Numeric overflow in perps calculation";
     },
@@ -432,6 +650,14 @@ export type GoldPerpsMarket = {
           },
           {
             name: "keeperAuthority";
+            type: "pubkey";
+          },
+          {
+            name: "treasuryAuthority";
+            type: "pubkey";
+          },
+          {
+            name: "marketMakerAuthority";
             type: "pubkey";
           },
           {
@@ -462,6 +688,14 @@ export type GoldPerpsMarket = {
             name: "liquidationFeeBps";
             type: "u16";
           },
+          {
+            name: "tradeTreasuryFeeBps";
+            type: "u16";
+          },
+          {
+            name: "tradeMarketMakerFeeBps";
+            type: "u16";
+          },
         ];
       };
     },
@@ -479,8 +713,24 @@ export type GoldPerpsMarket = {
             type: "u32";
           },
           {
+            name: "status";
+            type: "u8";
+          },
+          {
             name: "insuranceFund";
             type: "u64";
+          },
+          {
+            name: "treasuryFeeBalance";
+            type: "u64";
+          },
+          {
+            name: "marketMakerFeeBalance";
+            type: "u64";
+          },
+          {
+            name: "openPositions";
+            type: "u32";
           },
           {
             name: "skewScale";
@@ -492,6 +742,10 @@ export type GoldPerpsMarket = {
           },
           {
             name: "spotIndex";
+            type: "u64";
+          },
+          {
+            name: "settlementSpotIndex";
             type: "u64";
           },
           {

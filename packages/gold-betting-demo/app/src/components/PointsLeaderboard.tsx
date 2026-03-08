@@ -91,6 +91,7 @@ export function PointsLeaderboard() {
 
   return (
     <div
+      data-testid="points-leaderboard"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -123,6 +124,7 @@ export function PointsLeaderboard() {
             <button
               key={opt.value}
               type="button"
+              data-testid={`points-leaderboard-scope-${opt.value}`}
               onClick={() => setScope(opt.value)}
               style={filterBtnStyle(scope === opt.value)}
             >
@@ -137,6 +139,7 @@ export function PointsLeaderboard() {
           <button
             key={opt.value}
             type="button"
+            data-testid={`points-leaderboard-window-${opt.value}`}
             onClick={() => setTimeWindow(opt.value)}
             style={filterBtnStyle(timeWindow === opt.value)}
           >
@@ -205,6 +208,7 @@ export function PointsLeaderboard() {
           {leaderboard.map((entry) => (
             <div
               key={entry.wallet}
+              data-testid={`points-leaderboard-row-${entry.rank}`}
               style={{
                 display: "flex",
                 alignItems: "center",

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-07T09:10:31.099Z",
+  "generatedAt": "2026-03-08T10:57:15.029Z",
   "results": [
     {
       "name": "Whale round trip",
@@ -59,6 +59,30 @@
         "settlement_required_sol": 2.6,
         "local_liquidity_sol": 1.5,
         "shortfall_sol": 1.1
+      }
+    },
+    {
+      "name": "Fee recycling into isolated insurance",
+      "category": "ops",
+      "summary": "Per-trade fees can be split between treasury and market maker, then the market-maker share can be recycled back into that model's insurance reserve.",
+      "weakness": null,
+      "metrics": {
+        "trade_notional_sol": 5,
+        "treasury_fee_sol": 0.0125,
+        "market_maker_fee_sol": 0.0125,
+        "recycled_market_insurance_sol": 1.0125
+      }
+    },
+    {
+      "name": "Model deprecation lifecycle",
+      "category": "ops",
+      "summary": "When a model disappears, the market can move to close-only mode: no new exposure, but existing traders can still reduce and exit against the frozen settlement price.",
+      "weakness": null,
+      "metrics": {
+        "new_exposure_allowed": false,
+        "close_only_allows_exit": true,
+        "oracle_must_stay_live": false,
+        "archived_requires_zero_open_interest": true
       }
     }
   ],

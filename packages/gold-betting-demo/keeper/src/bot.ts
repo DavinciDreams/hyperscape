@@ -5,16 +5,14 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
+  Transaction,
 } from "@solana/web3.js";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
 import {
-  baseUnitsFromGold,
   createPrograms,
-  detectTokenProgramForMint,
   enumIs,
-  findAnyTokenAccountForMint,
   findMatchPda,
   findOracleConfigPda,
   readKeypair,
@@ -140,10 +138,19 @@ const args = await yargs(hideBin(process.argv))
     default: Number(process.env.AUTO_SEED_DELAY_SECONDS || 10),
     describe: "Auto-seed delay for new markets",
   })
+  .option("seed-sol", {
+    type: "number",
+    default: Number(
+      process.env.MARKET_MAKER_SEED_SOL ||
+        process.env.MARKET_MAKER_SEED_GOLD ||
+        1,
+    ),
+    describe: "Target seed SOL on each side",
+  })
   .option("seed-gold", {
     type: "number",
-    default: Number(process.env.MARKET_MAKER_SEED_GOLD || 1),
-    describe: "Target seed GOLD on each side",
+    default: undefined,
+    describe: "Deprecated alias for --seed-sol",
   })
   .option("fee-bps", {
     type: "number",
@@ -167,10 +174,9 @@ const args = await yargs(hideBin(process.argv))
   })
   .option("market-mint", {
     type: "string",
-    // Default to native SOL (WSOL) - markets use native token of each chain
     default:
       process.env.MARKET_MINT || "So11111111111111111111111111111111111111112",
-    describe: "Token mint for markets (defaults to WSOL/native token)",
+    describe: "Deprecated no-op; prediction markets settle in native SOL",
   })
   .option("game-url", {
     type: "string",
@@ -205,9 +211,13 @@ import path from "node:path";
 import fs_node from "node:fs";
 import {
   loadAgentRatings,
+  loadPerpsMarkets,
   saveAgentRating,
   saveAgentRatings,
+  savePerpsMarket,
   savePerpsOracleSnapshot,
+  type DbPerpsMarketRecord,
+  type DbPerpsMarketStatus,
 } from "./db";
 
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
@@ -247,7 +257,7 @@ const botKeypair = readKeypair(
     process.env.MARKET_MAKER_KEYPAIR ||
     requireEnv("ORACLE_AUTHORITY_KEYPAIR"),
 );
-const { connection, fightOracle, goldClobMarket, goldPerpsMarket } =
+const { connection, provider, fightOracle, goldClobMarket, goldPerpsMarket } =
   createPrograms(botKeypair);
 const fightProgram = fightOracle as Program<FightOracle>;
 const marketProgram = goldClobMarket as Program<GoldClobMarket>;
@@ -294,6 +304,55 @@ const PERPS_MAX_ORACLE_STALENESS_SECONDS = Math.max(
   10,
   Number(process.env.PERPS_MAX_ORACLE_STALENESS_SECONDS || 120),
 );
+const PERPS_MARKET_STATUS_ACTIVE: DbPerpsMarketStatus = "ACTIVE";
+const PERPS_MARKET_STATUS_CLOSE_ONLY: DbPerpsMarketStatus = "CLOSE_ONLY";
+const PERPS_MARKET_STATUS_ARCHIVED: DbPerpsMarketStatus = "ARCHIVED";
+const PERPS_CONFIG_DEFAULT_SKEW_SCALE_SOL = Math.max(
+  1,
+  Number(process.env.PERPS_DEFAULT_SKEW_SCALE_SOL || 1_000_000),
+);
+const PERPS_CONFIG_DEFAULT_FUNDING_VELOCITY = Math.max(
+  1,
+  Number(process.env.PERPS_DEFAULT_FUNDING_VELOCITY || 1_000),
+);
+const PERPS_CONFIG_MAX_LEVERAGE = Math.max(
+  1,
+  Number(process.env.PERPS_MAX_LEVERAGE || 5),
+);
+const PERPS_CONFIG_MIN_MARGIN_SOL = Math.max(
+  0.001,
+  Number(process.env.PERPS_MIN_MARGIN_SOL || 0.01),
+);
+const PERPS_CONFIG_MAINTENANCE_MARGIN_BPS = Math.max(
+  1,
+  Number(process.env.PERPS_MAINTENANCE_MARGIN_BPS || 1_000),
+);
+const PERPS_CONFIG_LIQUIDATION_FEE_BPS = Math.max(
+  0,
+  Number(process.env.PERPS_LIQUIDATION_FEE_BPS || 200),
+);
+const PERPS_TRADE_TREASURY_FEE_BPS = Math.max(
+  0,
+  Number(process.env.PERPS_TRADE_TREASURY_FEE_BPS || 25),
+);
+const PERPS_TRADE_MARKET_MAKER_FEE_BPS = Math.max(
+  0,
+  Number(process.env.PERPS_TRADE_MARKET_MAKER_FEE_BPS || 25),
+);
+const PERPS_MARKET_BOOTSTRAP_INSURANCE_SOL = Math.max(
+  0,
+  Number(process.env.PERPS_MARKET_BOOTSTRAP_INSURANCE_SOL || 12),
+);
+const PERPS_MARKET_DEPRECATION_MS = Math.max(
+  60_000,
+  Number(process.env.PERPS_MARKET_DEPRECATION_MS || 5 * 60 * 1000),
+);
+const PERPS_MARKET_MAKER_RECYCLE_ENABLED =
+  process.env.ENABLE_PERPS_MARKET_MAKER_RECYCLE !== "false";
+const PERPS_MARKET_MAKER_RECYCLE_MIN_SOL = Math.max(
+  0,
+  Number(process.env.PERPS_MARKET_MAKER_RECYCLE_MIN_SOL || 0.25),
+);
 
 function asBigInt(value: unknown, fallback = 0n): bigint {
   if (typeof value === "bigint") return value;
@@ -317,12 +376,229 @@ function asBigInt(value: unknown, fallback = 0n): bigint {
   return fallback;
 }
 
+function lamportsBnFromSol(solAmount: number): BN {
+  return new BN(Math.round(solAmount * LAMPORTS_PER_SOL));
+}
+
+async function ensurePerpsConfigReady(): Promise<void> {
+  if (!PERPS_ORACLE_ENABLED && !PERPS_LIQUIDATOR_ENABLED) {
+    return;
+  }
+
+  const configPda = derivePerpsConfigPda();
+  const existingConfig =
+    await perpsProgram.account.configState.fetchNullable(configPda);
+  if (existingConfig) {
+    return;
+  }
+
+  await runWithRecovery(
+    () =>
+      perpsProgram.methods
+        .initializeConfig(
+          botKeypair.publicKey,
+          configuredPerpsTreasuryWallet,
+          configuredPerpsMarketMakerWallet,
+          lamportsBnFromSol(PERPS_CONFIG_DEFAULT_SKEW_SCALE_SOL),
+          new BN(PERPS_CONFIG_DEFAULT_FUNDING_VELOCITY),
+          new BN(PERPS_MAX_ORACLE_STALENESS_SECONDS),
+          new BN(PERPS_CONFIG_MAX_LEVERAGE),
+          lamportsBnFromSol(PERPS_CONFIG_MIN_MARGIN_SOL),
+          PERPS_CONFIG_MAINTENANCE_MARGIN_BPS,
+          PERPS_CONFIG_LIQUIDATION_FEE_BPS,
+          PERPS_TRADE_TREASURY_FEE_BPS,
+          PERPS_TRADE_MARKET_MAKER_FEE_BPS,
+        )
+        .accountsPartial({
+          config: configPda,
+          authority: botKeypair.publicKey,
+          program: perpsProgram.programId,
+          programData: deriveProgramDataAddress(perpsProgram.programId),
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc(),
+    connection,
+  );
+
+  console.log(`[Keeper] Initialized perps config ${configPda.toBase58()}`);
+}
+
+async function maybeSetPerpsMarketStatus(
+  marketId: number,
+  nextStatus: 0 | 1 | 2,
+  settlementSpotLamports = 0,
+): Promise<void> {
+  if (!PERPS_ORACLE_ENABLED) return;
+
+  await runWithRecovery(
+    () =>
+      perpsProgram.methods
+        .setMarketStatus(
+          marketId,
+          nextStatus,
+          new BN(String(settlementSpotLamports)),
+        )
+        .accountsPartial({
+          config: derivePerpsConfigPda(),
+          market: derivePerpsMarketPda(marketId),
+          authority: botKeypair.publicKey,
+        })
+        .rpc(),
+    connection,
+  );
+}
+
+async function ensurePerpsMarketBootstrapInsurance(
+  marketId: number,
+): Promise<void> {
+  if (!PERPS_ORACLE_ENABLED || PERPS_MARKET_BOOTSTRAP_INSURANCE_SOL <= 0) {
+    return;
+  }
+
+  const marketPda = derivePerpsMarketPda(marketId);
+  const marketAcc =
+    await perpsProgram.account.marketState.fetchNullable(marketPda);
+  if (!marketAcc?.initialized) {
+    return;
+  }
+
+  const targetInsuranceLamports = Math.round(
+    PERPS_MARKET_BOOTSTRAP_INSURANCE_SOL * LAMPORTS_PER_SOL,
+  );
+  const currentInsuranceLamports = asNum(marketAcc.insuranceFund);
+  if (currentInsuranceLamports >= targetInsuranceLamports) {
+    return;
+  }
+
+  const depositLamports = targetInsuranceLamports - currentInsuranceLamports;
+  await runWithRecovery(
+    () =>
+      perpsProgram.methods
+        .depositInsurance(marketId, new BN(String(depositLamports)))
+        .accountsPartial({
+          market: marketPda,
+          payer: botKeypair.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc(),
+    connection,
+  );
+}
+
+async function maybeRecyclePerpsMarketMakerFees(
+  marketId: number,
+): Promise<void> {
+  if (!PERPS_MARKET_MAKER_RECYCLE_ENABLED) {
+    return;
+  }
+
+  const thresholdLamports = Math.round(
+    PERPS_MARKET_MAKER_RECYCLE_MIN_SOL * LAMPORTS_PER_SOL,
+  );
+  const marketAcc = await perpsProgram.account.marketState.fetchNullable(
+    derivePerpsMarketPda(marketId),
+  );
+  if (!marketAcc?.initialized) {
+    return;
+  }
+
+  const pendingFeesLamports = asNum(marketAcc.marketMakerFeeBalance);
+  if (pendingFeesLamports < thresholdLamports || pendingFeesLamports <= 0) {
+    return;
+  }
+
+  await runWithRecovery(
+    () =>
+      perpsProgram.methods
+        .recycleMarketMakerFees(marketId, new BN(String(pendingFeesLamports)))
+        .accountsPartial({
+          config: derivePerpsConfigPda(),
+          market: derivePerpsMarketPda(marketId),
+          authority: botKeypair.publicKey,
+        })
+        .rpc(),
+    connection,
+  );
+}
+
+async function deprecateMissingPerpsMarkets(
+  trackedEntries: readonly TrackedModelEntry[],
+): Promise<void> {
+  if (!PERPS_ORACLE_ENABLED) return;
+
+  const now = Date.now();
+  const trackedIds = new Set(trackedEntries.map((entry) => entry.characterId));
+  const allMarkets = loadPerpsMarkets();
+
+  for (const record of allMarkets) {
+    if (record.status !== PERPS_MARKET_STATUS_ACTIVE) {
+      continue;
+    }
+    if (trackedIds.has(record.agentId)) {
+      continue;
+    }
+    if (now - record.lastSeenAt < PERPS_MARKET_DEPRECATION_MS) {
+      continue;
+    }
+
+    const marketAcc = await perpsProgram.account.marketState.fetchNullable(
+      derivePerpsMarketPda(record.marketId),
+    );
+    const frozenSpotLamports = marketAcc
+      ? asNum(marketAcc.settlementSpotIndex)
+      : 0;
+    const settlementSpotLamports =
+      frozenSpotLamports > 0
+        ? frozenSpotLamports
+        : marketAcc
+          ? asNum(marketAcc.spotIndex)
+          : 0;
+
+    try {
+      await maybeSetPerpsMarketStatus(
+        record.marketId,
+        1,
+        settlementSpotLamports,
+      );
+    } catch (error) {
+      console.error(
+        `[Keeper] Failed to deprecate perps market ${record.marketId} (${record.agentId})`,
+        error,
+      );
+      continue;
+    }
+
+    savePerpsMarket({
+      ...record,
+      status: PERPS_MARKET_STATUS_CLOSE_ONLY,
+      deprecatedAt: now,
+      updatedAt: now,
+    });
+    console.log(
+      `[Keeper] Deprecated perps market ${record.marketId} for ${record.agentId}`,
+    );
+  }
+}
+
 async function updatePerpsOracle(agentId: string, rating: AgentRating) {
   // Skip if perps oracle is disabled (program not deployed)
   if (!PERPS_ORACLE_ENABLED) return;
 
   try {
     const marketId = modelMarketIdFromCharacterId(agentId);
+    const registeredMarket = loadPerpsMarkets().find(
+      (record) => record.agentId === agentId,
+    );
+    if (registeredMarket?.status === PERPS_MARKET_STATUS_CLOSE_ONLY) {
+      await maybeSetPerpsMarketStatus(marketId, 0, 0);
+      savePerpsMarket({
+        ...registeredMarket,
+        status: PERPS_MARKET_STATUS_ACTIVE,
+        deprecatedAt: null,
+        updatedAt: Date.now(),
+      });
+    }
+
     const population = Object.values(agentRatings);
     const spotIndex = calculateSyntheticSpotIndex(rating, population);
     const spotIndexScaled = new BN(Math.floor(spotIndex * LAMPORTS_PER_SOL));
@@ -354,6 +630,8 @@ async function updatePerpsOracle(agentId: string, rating: AgentRating) {
       sigma: rating.sigma,
       recordedAt: Date.now(),
     });
+    await ensurePerpsMarketBootstrapInsurance(marketId);
+    await maybeRecyclePerpsMarketMakerFees(marketId);
     console.log(
       "[Keeper] Updated Perps Oracle for agent",
       agentId,
@@ -368,14 +646,63 @@ async function updatePerpsOracle(agentId: string, rating: AgentRating) {
 }
 
 interface LeaderboardApiEntry {
+  rank?: number;
+  characterId?: string;
+  name?: string;
+  provider?: string;
+  model?: string;
+  wins?: number;
+  losses?: number;
+  winRate?: number;
+  combatLevel?: number;
+  currentStreak?: number;
+}
+
+interface TrackedModelEntry {
+  rank: number | null;
   characterId: string;
+  name: string;
+  provider: string;
+  model: string;
+  wins: number;
+  losses: number;
+  winRate: number;
+  combatLevel: number;
+  currentStreak: number;
 }
 
 interface LeaderboardApiResponse {
   leaderboard?: LeaderboardApiEntry[];
 }
 
-async function fetchTrackedModelIds(): Promise<string[]> {
+function normalizeTrackedModelEntry(
+  entry: LeaderboardApiEntry,
+): TrackedModelEntry | null {
+  if (typeof entry.characterId !== "string" || entry.characterId.length === 0) {
+    return null;
+  }
+
+  return {
+    rank:
+      typeof entry.rank === "number" && Number.isFinite(entry.rank)
+        ? Math.floor(entry.rank)
+        : null,
+    characterId: entry.characterId,
+    name: typeof entry.name === "string" ? entry.name : entry.characterId,
+    provider: typeof entry.provider === "string" ? entry.provider : "",
+    model: typeof entry.model === "string" ? entry.model : "",
+    wins: asNum(entry.wins),
+    losses: asNum(entry.losses),
+    winRate:
+      typeof entry.winRate === "number" && Number.isFinite(entry.winRate)
+        ? entry.winRate
+        : 0,
+    combatLevel: asNum(entry.combatLevel),
+    currentStreak: asNum(entry.currentStreak),
+  };
+}
+
+async function fetchTrackedModels(): Promise<TrackedModelEntry[]> {
   try {
     const response = await fetch(
       `${args["game-url"]}/api/streaming/leaderboard/details?historyLimit=1`,
@@ -397,35 +724,94 @@ async function fetchTrackedModelIds(): Promise<string[]> {
     }
 
     return payload.leaderboard
-      .map((entry) =>
-        typeof entry?.characterId === "string" ? entry.characterId : "",
-      )
-      .filter((value) => value.length > 0);
+      .map(normalizeTrackedModelEntry)
+      .filter((value): value is TrackedModelEntry => value !== null);
   } catch {
     return [];
   }
 }
 
-async function syncPerpsOracles(agentIds: readonly string[]): Promise<void> {
+function toPerpsMarketRecord(
+  entry: TrackedModelEntry,
+  status: DbPerpsMarketStatus,
+  now: number,
+  previous?: DbPerpsMarketRecord,
+): DbPerpsMarketRecord {
+  return {
+    agentId: entry.characterId,
+    marketId: modelMarketIdFromCharacterId(entry.characterId),
+    rank: entry.rank,
+    name: entry.name,
+    provider: entry.provider,
+    model: entry.model,
+    wins: entry.wins,
+    losses: entry.losses,
+    winRate: entry.winRate,
+    combatLevel: entry.combatLevel,
+    currentStreak: entry.currentStreak,
+    status,
+    lastSeenAt: now,
+    deprecatedAt:
+      status === PERPS_MARKET_STATUS_ACTIVE
+        ? null
+        : (previous?.deprecatedAt ?? now),
+    updatedAt: now,
+  };
+}
+
+async function syncPerpsOracles(
+  entries: readonly TrackedModelEntry[],
+): Promise<void> {
   if (!PERPS_ORACLE_ENABLED) return;
 
-  const uniqueIds = [...new Set(agentIds)].filter((value) => value.length > 0);
-  if (uniqueIds.length === 0) return;
+  const uniqueEntries = [
+    ...new Map(entries.map((entry) => [entry.characterId, entry])).values(),
+  ];
+  if (uniqueEntries.length === 0) return;
+  const now = Date.now();
+  const knownMarkets = loadPerpsMarkets();
+  const marketByAgentId = new Map(
+    knownMarkets.map((record) => [record.agentId, record]),
+  );
+  const agentIdByMarketId = new Map<number, string>();
 
-  for (const agentId of uniqueIds) {
-    getRating(agentId);
+  for (const record of knownMarkets) {
+    agentIdByMarketId.set(record.marketId, record.agentId);
   }
 
-  for (const agentId of uniqueIds) {
-    await updatePerpsOracle(agentId, getRating(agentId));
+  for (const entry of uniqueEntries) {
+    const marketId = modelMarketIdFromCharacterId(entry.characterId);
+    const existingAgentForMarket = agentIdByMarketId.get(marketId);
+    if (
+      existingAgentForMarket &&
+      existingAgentForMarket !== entry.characterId
+    ) {
+      console.error(
+        `[Keeper] Refusing to sync perps market ${marketId}: collision between ${entry.characterId} and ${existingAgentForMarket}`,
+      );
+      continue;
+    }
+
+    const previous = marketByAgentId.get(entry.characterId);
+    savePerpsMarket(
+      toPerpsMarketRecord(entry, PERPS_MARKET_STATUS_ACTIVE, now, previous),
+    );
+    agentIdByMarketId.set(marketId, entry.characterId);
+    getRating(entry.characterId);
   }
+
+  for (const entry of uniqueEntries) {
+    await updatePerpsOracle(entry.characterId, getRating(entry.characterId));
+  }
+
+  await deprecateMissingPerpsMarkets(uniqueEntries);
 }
 
 async function syncPerpsOraclesFromLeaderboard(): Promise<void> {
-  const trackedModelIds = await fetchTrackedModelIds();
-  if (trackedModelIds.length === 0) return;
+  const trackedModels = await fetchTrackedModels();
+  if (trackedModels.length === 0) return;
 
-  await syncPerpsOracles(trackedModelIds);
+  await syncPerpsOracles(trackedModels);
   saveRatings();
 }
 
@@ -498,9 +884,6 @@ const marketConfigPda = PublicKey.findProgramAddressSync(
   goldClobMarket.programId,
 )[0];
 
-// Market mint defaults to WSOL (native token) - always available
-const marketMint = new PublicKey(args["market-mint"]);
-
 const legacyFeeBps = Number(args["fee-bps"]);
 const tradeTreasuryFeeBps = Number.isFinite(legacyFeeBps)
   ? Math.max(0, Math.floor(legacyFeeBps / 2))
@@ -517,6 +900,31 @@ const configuredTradeTreasuryWallet = process.env.TRADE_TREASURY_WALLET
 const configuredTradeMarketMakerWallet = process.env.TRADE_MARKET_MAKER_WALLET
   ? new PublicKey(process.env.TRADE_MARKET_MAKER_WALLET)
   : botKeypair.publicKey;
+const configuredPerpsTreasuryWallet = process.env.PERPS_TREASURY_WALLET
+  ? new PublicKey(process.env.PERPS_TREASURY_WALLET)
+  : botKeypair.publicKey;
+const configuredPerpsMarketMakerWallet = process.env.PERPS_MARKET_MAKER_WALLET
+  ? new PublicKey(process.env.PERPS_MARKET_MAKER_WALLET)
+  : botKeypair.publicKey;
+const configuredSeedSol = Number.isFinite(Number(args["seed-gold"]))
+  ? Number(args["seed-gold"])
+  : Number(args["seed-sol"]);
+const marketMakerSeedLamports = Math.max(
+  1_000,
+  Math.floor(configuredSeedSol * LAMPORTS_PER_SOL),
+);
+const autoSeedDelayMs = Math.max(
+  0,
+  Math.floor(Number(args["auto-seed-delay-seconds"]) * 1000),
+);
+const configuredBidPrice = Math.max(
+  1,
+  Math.min(999, Math.floor(Number(process.env.MARKET_MAKER_BID_PRICE || 400))),
+);
+const configuredAskPrice = Math.max(
+  configuredBidPrice + 1,
+  Math.min(999, Math.floor(Number(process.env.MARKET_MAKER_ASK_PRICE || 600))),
+);
 
 const requiredPrograms = [
   {
@@ -668,6 +1076,35 @@ async function ensureKeeperChainReady(): Promise<boolean> {
   }
 }
 
+async function ensureWalletAccountReady(
+  wallet: PublicKey,
+  label: string,
+): Promise<void> {
+  const existingAccount = await connection.getAccountInfo(wallet, "confirmed");
+  if (existingAccount) {
+    return;
+  }
+
+  if (!canRequestAirdrop) {
+    throw new Error(
+      `[bot] ${label} wallet ${wallet.toBase58()} does not exist on-chain`,
+    );
+  }
+
+  const signature = await connection.requestAirdrop(wallet, minSignerLamports);
+  await connection.confirmTransaction(signature, "confirmed");
+  const fundedAccount = await connection.getAccountInfo(wallet, "confirmed");
+  if (!fundedAccount) {
+    throw new Error(
+      `[bot] failed to initialize ${label} wallet ${wallet.toBase58()} on-chain`,
+    );
+  }
+
+  console.log(
+    `[bot] Initialized ${label} wallet ${wallet.toBase58()} with ${minSignerLamports} lamports`,
+  );
+}
+
 const ensureOracleReady = async (): Promise<void> => {
   let config =
     await fightProgram.account.oracleConfig.fetchNullable(oracleConfigPda);
@@ -701,36 +1138,35 @@ const ensureOracleReady = async (): Promise<void> => {
   }
 };
 
-const ensureMarketConfigReady = async (
-  tokenMint: PublicKey,
-): Promise<PublicKey> => {
+const ensureMarketConfigReady = async (): Promise<void> => {
+  await Promise.all([
+    ensureWalletAccountReady(configuredTradeTreasuryWallet, "trade treasury"),
+    ensureWalletAccountReady(
+      configuredTradeMarketMakerWallet,
+      "trade market maker",
+    ),
+  ]);
+
   const existingConfig =
     await marketProgram.account.marketConfig.fetchNullable(marketConfigPda);
-  if (!existingConfig) {
-    const treasuryToken = await findAnyTokenAccountForMint(
-      connection,
-      configuredTradeTreasuryWallet,
-      tokenMint,
-    );
-    const marketMakerToken = await findAnyTokenAccountForMint(
-      connection,
-      configuredTradeMarketMakerWallet,
-      tokenMint,
-    );
-    const treasuryTokenAccount =
-      treasuryToken.tokenAccount ?? configuredTradeTreasuryWallet;
-    const marketMakerTokenAccount =
-      marketMakerToken.tokenAccount ?? configuredTradeMarketMakerWallet;
+  const expectedConfig = {
+    treasury: configuredTradeTreasuryWallet,
+    marketMaker: configuredTradeMarketMakerWallet,
+    tradeTreasuryFeeBps,
+    tradeMarketMakerFeeBps,
+    winningsMarketMakerFeeBps,
+  };
 
+  if (!existingConfig) {
     await runWithRecovery(
       () =>
         marketProgram.methods
           .initializeConfig(
-            treasuryTokenAccount,
-            marketMakerTokenAccount,
-            tradeTreasuryFeeBps,
-            tradeMarketMakerFeeBps,
-            winningsMarketMakerFeeBps,
+            expectedConfig.treasury,
+            expectedConfig.marketMaker,
+            expectedConfig.tradeTreasuryFeeBps,
+            expectedConfig.tradeMarketMakerFeeBps,
+            expectedConfig.winningsMarketMakerFeeBps,
           )
           .accountsPartial({
             authority: botKeypair.publicKey,
@@ -745,13 +1181,47 @@ const ensureMarketConfigReady = async (
     console.log(
       `[bot] CLOB market config initialized at ${marketConfigPda.toBase58()}`,
     );
+    return;
+  }
+
+  const configNeedsUpdate =
+    !(existingConfig.treasury as PublicKey).equals(expectedConfig.treasury) ||
+    !(existingConfig.marketMaker as PublicKey).equals(
+      expectedConfig.marketMaker,
+    ) ||
+    asNum(existingConfig.tradeTreasuryFeeBps) !==
+      expectedConfig.tradeTreasuryFeeBps ||
+    asNum(existingConfig.tradeMarketMakerFeeBps) !==
+      expectedConfig.tradeMarketMakerFeeBps ||
+    asNum(existingConfig.winningsMarketMakerFeeBps) !==
+      expectedConfig.winningsMarketMakerFeeBps;
+
+  if (configNeedsUpdate) {
+    await runWithRecovery(
+      () =>
+        marketProgram.methods
+          .updateConfig(
+            expectedConfig.treasury,
+            expectedConfig.marketMaker,
+            expectedConfig.tradeTreasuryFeeBps,
+            expectedConfig.tradeMarketMakerFeeBps,
+            expectedConfig.winningsMarketMakerFeeBps,
+          )
+          .accountsPartial({
+            authority: botKeypair.publicKey,
+            config: marketConfigPda,
+          })
+          .rpc(),
+      connection,
+    );
+    console.log(
+      `[bot] CLOB market config updated at ${marketConfigPda.toBase58()} treasury=${expectedConfig.treasury.toBase58()} marketMaker=${expectedConfig.marketMaker.toBase58()}`,
+    );
   } else {
     console.log(
       `[bot] CLOB market config already exists at ${marketConfigPda.toBase58()}`,
     );
   }
-
-  return await detectTokenProgramForMint(connection, tokenMint);
 };
 
 async function getMatchState(matchPda: PublicKey): Promise<any | null> {
@@ -764,15 +1234,160 @@ async function getClobMatchState(
   return marketProgram.account.matchState.fetchNullable(matchStatePda);
 }
 
+type ManagedClobOrder = {
+  orderId: number;
+  isBuy: boolean;
+  price: number;
+  amountLamports: number;
+};
+
+type ActiveClobMatch = {
+  matchState: PublicKey;
+  orderBook: PublicKey;
+  vault: PublicKey;
+  createdAt: number;
+  yesBidOrder: ManagedClobOrder | null;
+  noAskOrder: ManagedClobOrder | null;
+};
+
+function deriveClobUserBalancePda(
+  matchState: PublicKey,
+  user: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("balance"), matchState.toBuffer(), user.toBuffer()],
+    marketProgram.programId,
+  )[0];
+}
+
+function deriveClobOrderPda(
+  matchState: PublicKey,
+  user: PublicKey,
+  orderId: BN,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("order"),
+      matchState.toBuffer(),
+      user.toBuffer(),
+      orderId.toArrayLike(Buffer, "le", 8),
+    ],
+    marketProgram.programId,
+  )[0];
+}
+
+async function ensureClobVaultReady(vault: PublicKey): Promise<void> {
+  const minimumLamports = await connection.getMinimumBalanceForRentExemption(
+    0,
+    "confirmed",
+  );
+  const currentLamports = await connection.getBalance(vault, "confirmed");
+  if (currentLamports >= minimumLamports) {
+    return;
+  }
+
+  const topUpLamports = minimumLamports - currentLamports;
+  const topUpTx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: botKeypair.publicKey,
+      toPubkey: vault,
+      lamports: topUpLamports,
+    }),
+  );
+  await provider.sendAndConfirm(topUpTx, [botKeypair]);
+}
+
+async function placeManagedClobOrder(
+  trackedMatch: ActiveClobMatch,
+  isBuy: boolean,
+  price: number,
+): Promise<ManagedClobOrder> {
+  const matchState = await getClobMatchState(trackedMatch.matchState);
+  if (!matchState?.isOpen) {
+    throw new Error(
+      `Cannot seed closed match ${trackedMatch.matchState.toBase58()}`,
+    );
+  }
+
+  const orderId = asNum(matchState.nextOrderId);
+  const orderIdBn = new BN(orderId);
+  const userBalance = deriveClobUserBalancePda(
+    trackedMatch.matchState,
+    botKeypair.publicKey,
+  );
+  const newOrder = deriveClobOrderPda(
+    trackedMatch.matchState,
+    botKeypair.publicKey,
+    orderIdBn,
+  );
+
+  await runWithRecovery(
+    () =>
+      marketProgram.methods
+        .placeOrder(orderIdBn, isBuy, price, new BN(marketMakerSeedLamports))
+        .accountsPartial({
+          matchState: trackedMatch.matchState,
+          orderBook: trackedMatch.orderBook,
+          userBalance,
+          newOrder,
+          config: marketConfigPda,
+          treasury: configuredTradeTreasuryWallet,
+          marketMaker: configuredTradeMarketMakerWallet,
+          vault: trackedMatch.vault,
+          user: botKeypair.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc(),
+    connection,
+  );
+
+  console.log(
+    `[bot] Seeded ${isBuy ? "YES-bid" : "NO-ask"} liquidity for ${trackedMatch.matchState.toBase58()} orderId=${orderId} price=${price} amountLamports=${marketMakerSeedLamports}`,
+  );
+
+  return {
+    orderId,
+    isBuy,
+    price,
+    amountLamports: marketMakerSeedLamports,
+  };
+}
+
+async function ensureManagedClobOrder(
+  trackedMatch: ActiveClobMatch,
+  side: "yesBidOrder" | "noAskOrder",
+): Promise<void> {
+  const trackedOrder = trackedMatch[side];
+  if (trackedOrder) {
+    const orderPda = deriveClobOrderPda(
+      trackedMatch.matchState,
+      botKeypair.publicKey,
+      new BN(trackedOrder.orderId),
+    );
+    const orderAccount =
+      await marketProgram.account.order.fetchNullable(orderPda);
+    if (
+      orderAccount &&
+      asNum(orderAccount.filled) < asNum(orderAccount.amount)
+    ) {
+      return;
+    }
+  }
+
+  trackedMatch[side] = await placeManagedClobOrder(
+    trackedMatch,
+    side === "yesBidOrder",
+    side === "yesBidOrder" ? configuredBidPrice : configuredAskPrice,
+  );
+}
+
 async function createRound(
-  _tokenMint: PublicKey, // Market token mint (WSOL by default)
-  _tokenProgram: PublicKey,
   matchIdInput: number,
   metadata: string,
 ): Promise<{
   matchId: number;
   matchPda: PublicKey;
-  matchStateKeypair: Keypair;
+  trackedMatch: ActiveClobMatch;
 }> {
   const matchId = matchIdInput;
   const matchPda = findMatchPda(fightOracle.programId, new BN(matchId));
@@ -836,15 +1451,33 @@ async function createRound(
   console.log(
     `[bot] CLOB match: ${matchStateKeypair.publicKey.toBase58()}, book: ${orderBookKeypair.publicKey.toBase58()}`,
   );
-  return { matchId, matchPda, matchStateKeypair };
+  return {
+    matchId,
+    matchPda,
+    trackedMatch: {
+      matchState: matchStateKeypair.publicKey,
+      orderBook: orderBookKeypair.publicKey,
+      vault: vaultPda,
+      createdAt: Date.now(),
+      yesBidOrder: null,
+      noAskOrder: null,
+    },
+  };
 }
 
-async function maybeSeedMarket(
-  _marketPda: PublicKey,
-  _market: any,
-): Promise<void> {
-  // CLOB markets don't need seeding — users place limit orders directly
-  return;
+async function maybeSeedMarket(trackedMatch: ActiveClobMatch): Promise<void> {
+  if (Date.now() - trackedMatch.createdAt < autoSeedDelayMs) {
+    return;
+  }
+
+  const matchState = await getClobMatchState(trackedMatch.matchState);
+  if (!matchState?.isOpen) {
+    return;
+  }
+
+  await ensureClobVaultReady(trackedMatch.vault);
+  await ensureManagedClobOrder(trackedMatch, "noAskOrder");
+  await ensureManagedClobOrder(trackedMatch, "yesBidOrder");
 }
 
 async function maybeResolveMatch(
@@ -890,15 +1523,16 @@ async function maybeResolveMatch(
   );
 }
 
-const activeClobMatches = new Map<number, PublicKey>();
+const activeClobMatches = new Map<number, ActiveClobMatch>();
 
 async function maybeResolveMarket(
   matchPda: PublicKey,
   duelId?: number,
 ): Promise<void> {
   if (!duelId) return;
-  const matchStatePubkey = activeClobMatches.get(duelId);
-  if (!matchStatePubkey) return;
+  const trackedMatch = activeClobMatches.get(duelId);
+  if (!trackedMatch) return;
+  const matchStatePubkey = trackedMatch.matchState;
 
   const clobMatch = await getClobMatchState(matchStatePubkey);
   if (!clobMatch || !clobMatch.isOpen) return;
@@ -979,15 +1613,10 @@ gameClient.onDuelStart(async (data: any) => {
       agent2: data.agent2?.name || "Agent B",
     });
 
-    // Markets use native token (WSOL on Solana)
-    const tokenProgram = await ensureMarketConfigReady(marketMint);
-    const result = await createRound(
-      marketMint,
-      tokenProgram,
-      numericMatchId,
-      metadata,
-    );
-    activeClobMatches.set(numericMatchId, result.matchStateKeypair.publicKey);
+    await ensureMarketConfigReady();
+    const result = await createRound(numericMatchId, metadata);
+    activeClobMatches.set(numericMatchId, result.trackedMatch);
+    await maybeSeedMarket(result.trackedMatch);
     console.log(`Created CLOB market for duel ${numericMatchId}`);
   } catch (err) {
     console.error("Failed to create market for duel:", err);
@@ -1046,13 +1675,35 @@ gameClient.onDuelEnd(async (data: any) => {
       agentRatings[data.agent2.id.toString()] = isAgent1 ? loser : winner;
       saveRatings();
 
-      const trackedModelIds = await fetchTrackedModelIds();
-      const fallbackIds = [
-        data.agent1.id.toString(),
-        data.agent2.id.toString(),
+      const trackedModels = await fetchTrackedModels();
+      const fallbackModels: TrackedModelEntry[] = [
+        {
+          rank: null,
+          characterId: data.agent1.id.toString(),
+          name: data.agent1?.name || data.agent1.id.toString(),
+          provider: "",
+          model: "",
+          wins: 0,
+          losses: 0,
+          winRate: 0,
+          combatLevel: 0,
+          currentStreak: 0,
+        },
+        {
+          rank: null,
+          characterId: data.agent2.id.toString(),
+          name: data.agent2?.name || data.agent2.id.toString(),
+          provider: "",
+          model: "",
+          wins: 0,
+          losses: 0,
+          winRate: 0,
+          combatLevel: 0,
+          currentStreak: 0,
+        },
       ];
       await syncPerpsOracles(
-        trackedModelIds.length > 0 ? trackedModelIds : fallbackIds,
+        trackedModels.length > 0 ? trackedModels : fallbackModels,
       );
     }
 
@@ -1114,14 +1765,20 @@ async function runMaintenance(): Promise<void> {
     return;
   }
   await ensureOracleReady();
+  await ensurePerpsConfigReady();
   // ... (simplified loop for seeing liquidity and resolving old markets)
   await syncPerpsOraclesFromLeaderboard();
+  if (PERPS_MARKET_MAKER_RECYCLE_ENABLED) {
+    const perpsMarkets = loadPerpsMarkets().filter(
+      (record) => record.status !== PERPS_MARKET_STATUS_ARCHIVED,
+    );
+    for (const record of perpsMarkets) {
+      await maybeRecyclePerpsMarketMakerFees(record.marketId);
+    }
+  }
 
   // Poll only the actively tracked CLOB matches we created
-  for (const [
-    numericMatchId,
-    matchStatePubkey,
-  ] of activeClobMatches.entries()) {
+  for (const [numericMatchId, trackedMatch] of activeClobMatches.entries()) {
     const matchPda = findMatchPda(
       fightOracle.programId,
       new BN(numericMatchId),
@@ -1132,6 +1789,7 @@ async function runMaintenance(): Promise<void> {
     if (!oracleMatch) continue;
 
     if (enumIs(oracleMatch.status, "open")) {
+      await maybeSeedMarket(trackedMatch);
       await maybeResolveMatch(matchPda, oracleMatch);
     } else if (enumIs(oracleMatch.status, "resolved")) {
       await maybeResolveMarket(matchPda, numericMatchId);

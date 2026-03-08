@@ -129,11 +129,19 @@ export function PointsDisplay({
   };
 
   if (!walletAddress) {
-    return <div style={placeholderStyle}>Connect wallet to view points</div>;
+    return (
+      <div data-testid="points-display-placeholder" style={placeholderStyle}>
+        Connect wallet to view points
+      </div>
+    );
   }
 
   if (loading && !points) {
-    return <div style={placeholderStyle}>Loading points...</div>;
+    return (
+      <div data-testid="points-display-loading" style={placeholderStyle}>
+        Loading points...
+      </div>
+    );
   }
 
   const multiplier = points?.multiplier ?? 0;
@@ -141,6 +149,7 @@ export function PointsDisplay({
 
   return (
     <div
+      data-testid={compact ? "points-display-compact" : "points-display"}
       className={compact ? "points-pill points-pill-compact" : "points-pill"}
       style={{
         display: "flex",
@@ -188,6 +197,7 @@ export function PointsDisplay({
         </span>
         <div>
           <div
+            data-testid="points-display-total"
             style={{
               fontSize: compact ? 13 : 20,
               fontWeight: 900,
@@ -244,7 +254,7 @@ export function PointsDisplay({
           }}
         >
           {rank && rank.rank > 0 && (
-            <span>
+            <span data-testid="points-display-rank">
               RANK: <span style={{ color: "#f2d08a" }}>#{rank.rank}</span>
             </span>
           )}
@@ -257,12 +267,15 @@ export function PointsDisplay({
           </span>
           <span>
             GOLD:{" "}
-            <span style={{ color: "#f2d08a" }}>
+            <span
+              data-testid="points-display-gold"
+              style={{ color: "#f2d08a" }}
+            >
               {points?.goldBalance ?? "0"}
             </span>
           </span>
           {multiplierDetail && multiplierDetail.tier !== "NONE" && (
-            <span>
+            <span data-testid="points-display-tier">
               TIER:{" "}
               <span style={{ color: TIER_COLORS[multiplierDetail.tier] }}>
                 {multiplierDetail.tier}
@@ -275,6 +288,7 @@ export function PointsDisplay({
       {multiplier > 1 && (
         <button
           type="button"
+          data-testid="points-display-boost"
           onClick={() => setShowPopup((v) => !v)}
           style={{
             display: "flex",
@@ -334,6 +348,7 @@ function GoldBonusPopupInline({
 }) {
   return (
     <div
+      data-testid="points-display-boost-popup"
       style={{
         position: "absolute",
         top: "calc(100% + 8px)",

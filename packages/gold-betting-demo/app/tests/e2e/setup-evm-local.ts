@@ -9,7 +9,7 @@ import {
   parseUnits,
   type Address,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
 
 import mockErc20Artifact from "../../../../evm-contracts/artifacts/contracts/MockERC20.sol/MockERC20.json";
 import goldClobArtifact from "../../../../evm-contracts/artifacts/contracts/GoldClob.sol/GoldClob.json";
@@ -30,6 +30,8 @@ const DEFAULT_RPC_URL = "http://127.0.0.1:8545";
 const DEFAULT_CHAIN_ID = 97;
 const DEFAULT_ADMIN_PRIVATE_KEY =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const DEFAULT_ANVIL_MNEMONIC =
+  "test test test test test test test test test test test junk";
 
 function parseDotEnv(body: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -80,6 +82,7 @@ async function main(): Promise<void> {
   const chainId = Number(process.env.E2E_EVM_CHAIN_ID || DEFAULT_CHAIN_ID);
   const adminPrivateKey =
     process.env.E2E_EVM_ADMIN_PRIVATE_KEY || DEFAULT_ADMIN_PRIVATE_KEY;
+  const makerPrivateKey = process.env.E2E_EVM_MAKER_PRIVATE_KEY || "";
   const seedNoOrderPrice = Number(
     process.env.E2E_EVM_SEED_NO_ORDER_PRICE || 600,
   );
@@ -108,8 +111,19 @@ async function main(): Promise<void> {
   });
 
   const adminAccount = privateKeyToAccount(adminPrivateKey as `0x${string}`);
+  const makerAccount = makerPrivateKey
+    ? privateKeyToAccount(makerPrivateKey as `0x${string}`)
+    : mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
+        accountIndex: 0,
+        addressIndex: 1,
+      });
   const walletClient = createWalletClient({
     account: adminAccount,
+    chain: localChain,
+    transport: http(rpcUrl),
+  });
+  const makerWalletClient = createWalletClient({
+    account: makerAccount,
     chain: localChain,
     transport: http(rpcUrl),
   });
@@ -124,9 +138,18 @@ async function main(): Promise<void> {
     address: adminAccount.address,
     blockTag: "pending",
   });
+  let nextMakerNonce = await publicClient.getTransactionCount({
+    address: makerAccount.address,
+    blockTag: "pending",
+  });
   const consumeNonce = (): number => {
     const nonce = nextNonce;
     nextNonce += 1;
+    return nonce;
+  };
+  const consumeMakerNonce = (): number => {
+    const nonce = nextMakerNonce;
+    nextMakerNonce += 1;
     return nonce;
   };
 
@@ -185,7 +208,7 @@ async function main(): Promise<void> {
   })) as bigint;
   const currentMatchId = nextMatchId > 1n ? nextMatchId - 1n : 1n;
 
-  const seedNoOrderTx = await walletClient.writeContract({
+  const seedNoOrderTx = await makerWalletClient.writeContract({
     address: goldClobAddress as Address,
     abi: goldClobArtifact.abi,
     functionName: "placeOrder",
@@ -203,12 +226,12 @@ async function main(): Promise<void> {
       const tradeMarketMakerFee = cost / 100n;
       return cost + tradeTreasuryFee + tradeMarketMakerFee;
     })(),
-    account: adminAccount,
-    nonce: consumeNonce(),
+    account: makerAccount,
+    nonce: consumeMakerNonce(),
   });
   await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
 
-  const seedYesOrderTx = await walletClient.writeContract({
+  const seedYesOrderTx = await makerWalletClient.writeContract({
     address: goldClobAddress as Address,
     abi: goldClobArtifact.abi,
     functionName: "placeOrder",
@@ -226,8 +249,8 @@ async function main(): Promise<void> {
       const tradeMarketMakerFee = cost / 100n;
       return cost + tradeTreasuryFee + tradeMarketMakerFee;
     })(),
-    account: adminAccount,
-    nonce: consumeNonce(),
+    account: makerAccount,
+    nonce: consumeMakerNonce(),
   });
   await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
 

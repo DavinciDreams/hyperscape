@@ -633,23 +633,30 @@ export function App() {
   })();
   const effStatus = status;
   const effPhase = liveCycle?.phase ?? "IDLE";
+  const contextAgent1 = duelContext?.cycle.agent1 ?? null;
+  const contextAgent2 = duelContext?.cycle.agent2 ?? null;
 
   // Agent context from live SSE + duel-context polling
   const effA1 = {
     id: "agent1",
     name: effAgent1Name,
-    hp: liveCycle?.agent1?.hp ?? 100,
-    maxHp: liveCycle?.agent1?.maxHp ?? 100,
-    wins: liveCycle?.agent1?.wins ?? 0,
-    losses: liveCycle?.agent1?.losses ?? 0,
+    hp: contextAgent1?.hp ?? liveCycle?.agent1?.hp ?? 100,
+    maxHp: contextAgent1?.maxHp ?? liveCycle?.agent1?.maxHp ?? 100,
+    wins: contextAgent1?.wins ?? liveCycle?.agent1?.wins ?? 0,
+    losses: contextAgent1?.losses ?? liveCycle?.agent1?.losses ?? 0,
     rank: 1,
-    combatLevel: liveCycle?.agent1?.combatLevel ?? 1,
-    provider: liveCycle?.agent1?.provider ?? "",
-    model: liveCycle?.agent1?.model ?? "",
-    damageDealtThisFight: liveCycle?.agent1?.damageDealtThisFight ?? 0,
+    combatLevel:
+      contextAgent1?.combatLevel ?? liveCycle?.agent1?.combatLevel ?? 1,
+    provider: contextAgent1?.provider ?? liveCycle?.agent1?.provider ?? "",
+    model: contextAgent1?.model ?? liveCycle?.agent1?.model ?? "",
+    damageDealtThisFight:
+      contextAgent1?.damageDealtThisFight ??
+      liveCycle?.agent1?.damageDealtThisFight ??
+      0,
     headToHeadWins: 0,
     headToHeadLosses: 0,
-    monologues: [] as {
+    inventory: contextAgent1?.inventory ?? [],
+    monologues: (contextAgent1?.monologues ?? []) as {
       id: string;
       type: string;
       content: string;
@@ -659,18 +666,23 @@ export function App() {
   const effA2 = {
     id: "agent2",
     name: effAgent2Name,
-    hp: liveCycle?.agent2?.hp ?? 100,
-    maxHp: liveCycle?.agent2?.maxHp ?? 100,
-    wins: liveCycle?.agent2?.wins ?? 0,
-    losses: liveCycle?.agent2?.losses ?? 0,
+    hp: contextAgent2?.hp ?? liveCycle?.agent2?.hp ?? 100,
+    maxHp: contextAgent2?.maxHp ?? liveCycle?.agent2?.maxHp ?? 100,
+    wins: contextAgent2?.wins ?? liveCycle?.agent2?.wins ?? 0,
+    losses: contextAgent2?.losses ?? liveCycle?.agent2?.losses ?? 0,
     rank: 2,
-    combatLevel: liveCycle?.agent2?.combatLevel ?? 1,
-    provider: liveCycle?.agent2?.provider ?? "",
-    model: liveCycle?.agent2?.model ?? "",
-    damageDealtThisFight: liveCycle?.agent2?.damageDealtThisFight ?? 0,
+    combatLevel:
+      contextAgent2?.combatLevel ?? liveCycle?.agent2?.combatLevel ?? 1,
+    provider: contextAgent2?.provider ?? liveCycle?.agent2?.provider ?? "",
+    model: contextAgent2?.model ?? liveCycle?.agent2?.model ?? "",
+    damageDealtThisFight:
+      contextAgent2?.damageDealtThisFight ??
+      liveCycle?.agent2?.damageDealtThisFight ??
+      0,
     headToHeadWins: 0,
     headToHeadLosses: 0,
-    monologues: [] as {
+    inventory: contextAgent2?.inventory ?? [],
+    monologues: (contextAgent2?.monologues ?? []) as {
       id: string;
       type: string;
       content: string;
@@ -777,6 +789,7 @@ export function App() {
       {/* Points / Leaderboard / Referral Drawer */}
       {showPointsDrawer && (
         <div
+          data-testid="points-drawer-overlay"
           style={{
             position: "absolute",
             top: 0,
@@ -795,6 +808,7 @@ export function App() {
           onClick={() => setShowPointsDrawer(false)}
         >
           <div
+            data-testid="points-drawer"
             style={{
               background:
                 "linear-gradient(180deg, rgba(20,22,30,0.95) 0%, rgba(14,16,24,0.98) 100%)",
@@ -866,6 +880,7 @@ export function App() {
               </div>
               <button
                 type="button"
+                data-testid="points-drawer-close"
                 onClick={() => setShowPointsDrawer(false)}
                 style={{
                   background: "rgba(0,0,0,0.3)",
@@ -909,6 +924,7 @@ export function App() {
                   <button
                     key={tab.key}
                     type="button"
+                    data-testid={`points-drawer-tab-${tab.key}`}
                     onClick={() => setPointsDrawerTab(tab.key)}
                     style={{
                       flex: 1,
@@ -942,6 +958,7 @@ export function App() {
 
             {/* Tab Content */}
             <div
+              data-testid={`points-drawer-panel-${pointsDrawerTab}`}
               style={{
                 position: "relative",
                 zIndex: 1,
@@ -1172,6 +1189,7 @@ export function App() {
                   type="button"
                   className="hm-header-mob-icon-btn"
                   title="Leaderboard"
+                  data-testid="points-drawer-open"
                   onClick={() => setShowPointsDrawer(true)}
                 >
                   🏆
@@ -1419,6 +1437,7 @@ export function App() {
                 type="button"
                 className="dock-collapse-btn"
                 title="Leaderboard & Stats"
+                data-testid="points-drawer-open"
                 onClick={() => setShowPointsDrawer(true)}
                 style={{ fontSize: 16 }}
               >
@@ -1693,6 +1712,7 @@ export function App() {
                     <button
                       key={key}
                       role="tab"
+                      data-testid={`duels-bottom-tab-${key}`}
                       aria-selected={hmBottomTab === key}
                       className={`hm-bottom-tab ${hmBottomTab === key ? "hm-bottom-tab--active" : ""}`}
                       onClick={() => setHmBottomTab(key)}
@@ -1704,7 +1724,11 @@ export function App() {
                 </nav>
 
                 {hmBottomTab === "trades" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-trades"
+                  >
                     <div className="hm-trades-summary">
                       <span>
                         Pool <strong>{formatGold(effTotalPool)}</strong>
@@ -1771,7 +1795,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "orders" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-orders"
+                  >
                     <div className="hm-orderbook">
                       <div className="hm-ob-side hm-ob-side--bids">
                         <div className="hm-ob-header">BIDS ({effA1.name})</div>
@@ -1827,7 +1855,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "topTraders" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-topTraders"
+                  >
                     <div className="hm-trades-table-wrap">
                       <table className="hm-trades-table" role="grid">
                         <thead>
@@ -1878,7 +1910,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "holders" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-holders"
+                  >
                     <div className="hm-agents-detail">
                       {[effA1, effA2].map((agent) => {
                         const hpPct =
@@ -1964,7 +2000,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "news" && (
-                  <div className="hm-trades-panel" role="tabpanel">
+                  <div
+                    className="hm-trades-panel"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-news"
+                  >
                     <div className="hm-match-log">
                       <div className="hm-log-entry">
                         <span className="hm-log-phase">{effCycle.phase}</span>
@@ -1999,7 +2039,11 @@ export function App() {
                 )}
 
                 {hmBottomTab === "positions" && (
-                  <div className="hm-empty-tab" role="tabpanel">
+                  <div
+                    className="hm-empty-tab"
+                    role="tabpanel"
+                    data-testid="duels-bottom-panel-positions"
+                  >
                     <p>No open positions</p>
                   </div>
                 )}

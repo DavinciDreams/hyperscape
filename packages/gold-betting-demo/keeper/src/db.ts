@@ -38,6 +38,24 @@ export type DbWalletPoints = {
   stakingPoints: number;
 };
 
+export type DbPointsEventRecord = {
+  id: number;
+  wallet: string;
+  eventType: string;
+  status: string;
+  totalPoints: number;
+  referenceType: string | null;
+  referenceId: string | null;
+  relatedWallet: string | null;
+  createdAt: number;
+};
+
+export type DbWalletGoldState = {
+  goldBalance: number;
+  goldHoldDays: number;
+  updatedAt: number;
+};
+
 export type DbAgentRating = AgentRating & {
   agentId: string;
   updatedAt: number;
@@ -51,6 +69,26 @@ export type DbPerpsOracleSnapshot = {
   mu: number;
   sigma: number;
   recordedAt: number;
+};
+
+export type DbPerpsMarketStatus = "ACTIVE" | "CLOSE_ONLY" | "ARCHIVED";
+
+export type DbPerpsMarketRecord = {
+  agentId: string;
+  marketId: number;
+  rank: number | null;
+  name: string;
+  provider: string;
+  model: string;
+  wins: number;
+  losses: number;
+  winRate: number;
+  combatLevel: number;
+  currentStreak: number;
+  status: DbPerpsMarketStatus;
+  lastSeenAt: number;
+  deprecatedAt: number | null;
+  updatedAt: number;
 };
 
 // ── DB singleton ──────────────────────────────────────────────────────────────
@@ -88,6 +126,31 @@ db.run(`CREATE TABLE IF NOT EXISTS wallet_points (
   win_points REAL NOT NULL DEFAULT 0,
   referral_points REAL NOT NULL DEFAULT 0,
   staking_points REAL NOT NULL DEFAULT 0
+)`);
+
+db.run(`CREATE TABLE IF NOT EXISTS points_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  wallet TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'CONFIRMED',
+  total_points REAL NOT NULL DEFAULT 0,
+  reference_type TEXT,
+  reference_id TEXT,
+  related_wallet TEXT,
+  created_at INTEGER NOT NULL
+)`);
+
+db.run(`CREATE INDEX IF NOT EXISTS idx_points_events_wallet_time
+  ON points_events (wallet, created_at DESC)`);
+
+db.run(`CREATE INDEX IF NOT EXISTS idx_points_events_type_time
+  ON points_events (event_type, created_at DESC)`);
+
+db.run(`CREATE TABLE IF NOT EXISTS wallet_gold_state (
+  wallet TEXT PRIMARY KEY,
+  gold_balance REAL NOT NULL DEFAULT 0,
+  gold_hold_days INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0
 )`);
 
 db.run(`CREATE TABLE IF NOT EXISTS wallet_canonical (
@@ -149,6 +212,27 @@ db.run(`CREATE INDEX IF NOT EXISTS idx_perps_oracle_snapshots_agent_time
 db.run(`CREATE INDEX IF NOT EXISTS idx_perps_oracle_snapshots_market_time
   ON perps_oracle_snapshots (market_id, recorded_at DESC)`);
 
+db.run(`CREATE TABLE IF NOT EXISTS perps_markets (
+  agent_id TEXT PRIMARY KEY,
+  market_id INTEGER NOT NULL UNIQUE,
+  rank INTEGER,
+  name TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  win_rate REAL NOT NULL DEFAULT 0,
+  combat_level INTEGER NOT NULL DEFAULT 0,
+  current_streak INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  last_seen_at INTEGER NOT NULL DEFAULT 0,
+  deprecated_at INTEGER,
+  updated_at INTEGER NOT NULL DEFAULT 0
+)`);
+
+db.run(`CREATE INDEX IF NOT EXISTS idx_perps_markets_status_seen
+  ON perps_markets (status, last_seen_at DESC)`);
+
 // ── Prepared statements ───────────────────────────────────────────────────────
 
 const insertBet = db.prepare(`INSERT OR IGNORE INTO bets
@@ -170,6 +254,18 @@ const upsertWalletPoints = db.prepare(`INSERT INTO wallet_points
     win_points = excluded.win_points,
     referral_points = excluded.referral_points,
     staking_points = excluded.staking_points`);
+
+const insertPointsEvent = db.prepare(`INSERT INTO points_events
+  (wallet, event_type, status, total_points, reference_type, reference_id, related_wallet, created_at)
+  VALUES ($wallet, $eventType, $status, $totalPoints, $referenceType, $referenceId, $relatedWallet, $createdAt)`);
+
+const upsertWalletGoldState = db.prepare(`INSERT INTO wallet_gold_state
+  (wallet, gold_balance, gold_hold_days, updated_at)
+  VALUES ($wallet, $goldBalance, $goldHoldDays, $updatedAt)
+  ON CONFLICT(wallet) DO UPDATE SET
+    gold_balance = excluded.gold_balance,
+    gold_hold_days = excluded.gold_hold_days,
+    updated_at = excluded.updated_at`);
 
 const upsertWalletCanonical =
   db.prepare(`INSERT INTO wallet_canonical (wallet, canonical)
@@ -219,12 +315,35 @@ const insertPerpsOracleSnapshot = db.prepare(`INSERT INTO perps_oracle_snapshots
   (agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at)
   VALUES ($agentId, $marketId, $spotIndex, $conservativeSkill, $mu, $sigma, $recordedAt)`);
 
+const upsertPerpsMarket = db.prepare(`INSERT INTO perps_markets
+  (agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
+   combat_level, current_streak, status, last_seen_at, deprecated_at, updated_at)
+  VALUES ($agentId, $marketId, $rank, $name, $provider, $model, $wins, $losses, $winRate,
+          $combatLevel, $currentStreak, $status, $lastSeenAt, $deprecatedAt, $updatedAt)
+  ON CONFLICT(agent_id) DO UPDATE SET
+    market_id = excluded.market_id,
+    rank = excluded.rank,
+    name = excluded.name,
+    provider = excluded.provider,
+    model = excluded.model,
+    wins = excluded.wins,
+    losses = excluded.losses,
+    win_rate = excluded.win_rate,
+    combat_level = excluded.combat_level,
+    current_streak = excluded.current_streak,
+    status = excluded.status,
+    last_seen_at = excluded.last_seen_at,
+    deprecated_at = excluded.deprecated_at,
+    updated_at = excluded.updated_at`);
+
 // ── Load (hydrate in-memory state from DB at startup) ─────────────────────────
 
 export type HydratedState = {
   bets: DbBetRecord[];
   walletDisplay: Map<string, string>;
   pointsByWallet: Map<string, DbWalletPoints>;
+  pointsEvents: DbPointsEventRecord[];
+  walletGoldState: Map<string, DbWalletGoldState>;
   canonicalByWallet: Map<string, string>;
   identityMembers: Map<string, Set<string>>;
   inviteCodeByWallet: Map<string, string>;
@@ -280,6 +399,43 @@ export function loadAll(betLimit = 5000): HydratedState {
       winPoints: Number(row.win_points),
       referralPoints: Number(row.referral_points),
       stakingPoints: Number(row.staking_points),
+    });
+  }
+
+  const pointsEvents = (
+    db
+      .prepare(
+        `SELECT id, wallet, event_type, status, total_points, reference_type, reference_id, related_wallet, created_at
+         FROM points_events
+         ORDER BY created_at DESC, id DESC`,
+      )
+      .all() as Array<Record<string, unknown>>
+  ).map(
+    (row): DbPointsEventRecord => ({
+      id: Number(row.id),
+      wallet: String(row.wallet),
+      eventType: String(row.event_type),
+      status: String(row.status),
+      totalPoints: Number(row.total_points),
+      referenceType:
+        row.reference_type == null ? null : String(row.reference_type),
+      referenceId: row.reference_id == null ? null : String(row.reference_id),
+      relatedWallet:
+        row.related_wallet == null ? null : String(row.related_wallet),
+      createdAt: Number(row.created_at),
+    }),
+  );
+
+  const walletGoldState = new Map<string, DbWalletGoldState>();
+  for (const row of db
+    .prepare(
+      "SELECT wallet, gold_balance, gold_hold_days, updated_at FROM wallet_gold_state",
+    )
+    .all() as Array<Record<string, unknown>>) {
+    walletGoldState.set(String(row.wallet), {
+      goldBalance: Number(row.gold_balance),
+      goldHoldDays: Number(row.gold_hold_days),
+      updatedAt: Number(row.updated_at),
     });
   }
 
@@ -350,6 +506,8 @@ export function loadAll(betLimit = 5000): HydratedState {
     bets,
     walletDisplay,
     pointsByWallet,
+    pointsEvents,
+    walletGoldState,
     canonicalByWallet,
     identityMembers,
     inviteCodeByWallet,
@@ -394,6 +552,35 @@ export function saveWalletPoints(wallet: string, points: DbWalletPoints): void {
   });
 }
 
+export function savePointsEvent(
+  event: Omit<DbPointsEventRecord, "id">,
+): number {
+  const result = insertPointsEvent.run({
+    $wallet: event.wallet,
+    $eventType: event.eventType,
+    $status: event.status,
+    $totalPoints: event.totalPoints,
+    $referenceType: event.referenceType,
+    $referenceId: event.referenceId,
+    $relatedWallet: event.relatedWallet,
+    $createdAt: event.createdAt,
+  }) as { lastInsertRowid?: number | bigint };
+
+  return Number(result.lastInsertRowid ?? 0);
+}
+
+export function saveWalletGoldState(
+  wallet: string,
+  state: DbWalletGoldState,
+): void {
+  upsertWalletGoldState.run({
+    $wallet: wallet,
+    $goldBalance: state.goldBalance,
+    $goldHoldDays: state.goldHoldDays,
+    $updatedAt: state.updatedAt,
+  });
+}
+
 export function saveWalletCanonical(wallet: string, canonical: string): void {
   upsertWalletCanonical.run({ $wallet: wallet, $canonical: canonical });
 }
@@ -410,6 +597,10 @@ export function saveIdentityMembers(
     }
   });
   doSave();
+}
+
+export function deleteIdentityMembers(canonical: string): void {
+  deleteIdentityMembersForCanonical.run({ $canonical: canonical });
 }
 
 export function saveInviteCode(wallet: string, code: string): void {
@@ -496,6 +687,57 @@ export function loadPerpsOracleSnapshots(
   );
 }
 
+export function loadPerpsMarkets(
+  status?: DbPerpsMarketStatus,
+): DbPerpsMarketRecord[] {
+  const rows = status
+    ? (db
+        .prepare(
+          `SELECT agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
+                  combat_level, current_streak, status, last_seen_at, deprecated_at, updated_at
+           FROM perps_markets
+           WHERE status = ?
+           ORDER BY COALESCE(rank, 2147483647) ASC, name ASC`,
+        )
+        .all(status) as Array<Record<string, unknown>>)
+    : (db
+        .prepare(
+          `SELECT agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
+                  combat_level, current_streak, status, last_seen_at, deprecated_at, updated_at
+           FROM perps_markets
+           ORDER BY
+             CASE status
+               WHEN 'ACTIVE' THEN 0
+               WHEN 'CLOSE_ONLY' THEN 1
+               ELSE 2
+             END,
+             COALESCE(rank, 2147483647) ASC,
+             name ASC`,
+        )
+        .all() as Array<Record<string, unknown>>);
+
+  return rows.map(
+    (row): DbPerpsMarketRecord => ({
+      agentId: String(row.agent_id),
+      marketId: Number(row.market_id),
+      rank: row.rank == null ? null : Number(row.rank),
+      name: String(row.name ?? ""),
+      provider: String(row.provider ?? ""),
+      model: String(row.model ?? ""),
+      wins: Number(row.wins ?? 0),
+      losses: Number(row.losses ?? 0),
+      winRate: Number(row.win_rate ?? 0),
+      combatLevel: Number(row.combat_level ?? 0),
+      currentStreak: Number(row.current_streak ?? 0),
+      status: String(row.status) as DbPerpsMarketStatus,
+      lastSeenAt: Number(row.last_seen_at ?? 0),
+      deprecatedAt:
+        row.deprecated_at == null ? null : Number(row.deprecated_at),
+      updatedAt: Number(row.updated_at ?? 0),
+    }),
+  );
+}
+
 export function saveAgentRating(
   agentId: string,
   rating: AgentRating,
@@ -540,5 +782,25 @@ export function savePerpsOracleSnapshot(snapshot: DbPerpsOracleSnapshot): void {
     $mu: snapshot.mu,
     $sigma: snapshot.sigma,
     $recordedAt: snapshot.recordedAt,
+  });
+}
+
+export function savePerpsMarket(record: DbPerpsMarketRecord): void {
+  upsertPerpsMarket.run({
+    $agentId: record.agentId,
+    $marketId: record.marketId,
+    $rank: record.rank,
+    $name: record.name,
+    $provider: record.provider,
+    $model: record.model,
+    $wins: record.wins,
+    $losses: record.losses,
+    $winRate: record.winRate,
+    $combatLevel: record.combatLevel,
+    $currentStreak: record.currentStreak,
+    $status: record.status,
+    $lastSeenAt: record.lastSeenAt,
+    $deprecatedAt: record.deprecatedAt,
+    $updatedAt: record.updatedAt,
   });
 }
