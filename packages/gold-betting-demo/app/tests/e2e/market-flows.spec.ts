@@ -45,8 +45,8 @@ function loadState(): E2eState {
 }
 
 function encodeMarketId(marketId: number): Buffer {
-  const bytes = Buffer.alloc(4);
-  bytes.writeUInt32LE(marketId, 0);
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64LE(BigInt(marketId), 0);
   return bytes;
 }
 
@@ -390,6 +390,20 @@ async function waitForEvmReceipt(
   expect(receipt.status).toBe("success");
 }
 
+async function readEvmPosition(
+  publicClient: ReturnType<typeof createPublicClient>,
+  contractAddress: Address,
+  matchId: bigint,
+  userAddress: Address,
+): Promise<[bigint, bigint]> {
+  return (await publicClient.readContract({
+    address: contractAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "positions",
+    args: [matchId, userAddress],
+  })) as [bigint, bigint];
+}
+
 async function waitForSolanaUiPosition(
   page: Page,
   side: "YES" | "NO",
@@ -580,6 +594,7 @@ test.describe("market flows", () => {
 
     await evmPanel.getByTestId("evm-amount-input").fill("1");
 
+    console.log("[e2e][evm] placing YES order");
     const previousYesTx = await readText(page, "evm-last-order-tx");
     await evmPanel.getByTestId("evm-pick-yes").click();
     await evmPanel.getByTestId("evm-place-order").click();
@@ -592,16 +607,17 @@ test.describe("market flows", () => {
 
     await expect
       .poll(async () => {
-        const result = (await publicClient.readContract({
-          address: contractAddress,
-          abi: GOLD_CLOB_ABI,
-          functionName: "positions",
-          args: [matchId, userAddress],
-        })) as [bigint, bigint];
+        const result = await readEvmPosition(
+          publicClient,
+          contractAddress,
+          matchId,
+          userAddress,
+        );
         return result[0];
       })
       .toBeGreaterThan(0n);
 
+    console.log("[e2e][evm] placing NO order");
     const previousNoTx = await readText(page, "evm-last-order-tx");
     await evmPanel.getByTestId("evm-pick-no").click();
     await evmPanel.getByTestId("evm-place-order").click();
@@ -610,16 +626,17 @@ test.describe("market flows", () => {
 
     await expect
       .poll(async () => {
-        const result = (await publicClient.readContract({
-          address: contractAddress,
-          abi: GOLD_CLOB_ABI,
-          functionName: "positions",
-          args: [matchId, userAddress],
-        })) as [bigint, bigint];
+        const result = await readEvmPosition(
+          publicClient,
+          contractAddress,
+          matchId,
+          userAddress,
+        );
         return result[1];
       })
       .toBeGreaterThan(0n);
 
+    console.log("[e2e][evm] resolving YES winner");
     const previousResolveTx = await readText(page, "evm-last-resolve-tx");
     await evmPanel.getByTestId("evm-resolve-match").click();
     const resolveTx = await waitForNewText(
@@ -631,42 +648,43 @@ test.describe("market flows", () => {
 
     const previousClaimTx = await readText(page, "evm-last-claim-tx");
     let claimTx = "";
-    await expect
-      .poll(
-        async () => {
-          const claimText = await readText(page, "evm-last-claim-tx");
-          const positions = (await publicClient.readContract({
-            address: contractAddress,
-            abi: GOLD_CLOB_ABI,
-            functionName: "positions",
-            args: [matchId, userAddress],
-          })) as [bigint, bigint];
-          return {
-            claimText,
-            yes: positions[0].toString(),
-            no: positions[1].toString(),
-          };
-        },
-        {
-          timeout: 60_000,
-          intervals: [1_000, 2_000, 5_000],
-        },
-      )
-      .toMatchObject({
-        yes: "0",
-      });
+    console.log("[e2e][evm] waiting for auto-claim or zeroed YES position");
+    const autoClaimDeadline = Date.now() + 15_000;
+    let claimedPosition = await readEvmPosition(
+      publicClient,
+      contractAddress,
+      matchId,
+      userAddress,
+    );
+    while (Date.now() < autoClaimDeadline && claimedPosition[0] > 0n) {
+      await page.waitForTimeout(1_000);
+      claimedPosition = await readEvmPosition(
+        publicClient,
+        contractAddress,
+        matchId,
+        userAddress,
+      );
+    }
 
     claimTx = await readText(page, "evm-last-claim-tx");
-    if (claimTx && claimTx !== "-" && claimTx !== previousClaimTx) {
+    if (
+      claimedPosition[0] === 0n &&
+      claimTx &&
+      claimTx !== "-" &&
+      claimTx !== previousClaimTx
+    ) {
+      console.log("[e2e][evm] observed auto-claim transaction");
       await waitForEvmReceipt(publicClient, claimTx as Hash);
     } else {
-      const maybeClaimed = (await publicClient.readContract({
-        address: contractAddress,
-        abi: GOLD_CLOB_ABI,
-        functionName: "positions",
-        args: [matchId, userAddress],
-      })) as [bigint, bigint];
+      const maybeClaimed = await readEvmPosition(
+        publicClient,
+        contractAddress,
+        matchId,
+        userAddress,
+      );
       if (maybeClaimed[0] > 0n) {
+        console.log("[e2e][evm] auto-claim not observed, claiming manually");
+        await evmPanel.getByTestId("evm-refresh-market").click();
         await expect(evmPanel.getByTestId("evm-claim-payout")).toBeEnabled({
           timeout: 20_000,
         });
@@ -680,12 +698,12 @@ test.describe("market flows", () => {
       }
     }
 
-    const finalPosition = (await publicClient.readContract({
-      address: contractAddress,
-      abi: GOLD_CLOB_ABI,
-      functionName: "positions",
-      args: [matchId, userAddress],
-    })) as [bigint, bigint];
+    const finalPosition = await readEvmPosition(
+      publicClient,
+      contractAddress,
+      matchId,
+      userAddress,
+    );
     expect(finalPosition[0]).toBe(0n);
     expect(finalPosition[1]).toBeGreaterThan(0n);
   });
@@ -723,6 +741,7 @@ test.describe("market flows", () => {
     await expect(page.getByTestId("models-market-open-long")).toBeEnabled({
       timeout: 60_000,
     });
+    console.log("[e2e][perps] opening long");
     const longStatus = await submitModelsTrade(page, "models-market-open-long");
     expect(longStatus).toMatch(/opened/i);
 
@@ -738,6 +757,7 @@ test.describe("market flows", () => {
     await expect(page.getByTestId("models-market-close-position")).toBeVisible({
       timeout: 60_000,
     });
+    console.log("[e2e][perps] closing long");
     const closeLongStatus = await submitModelsTrade(
       page,
       "models-market-close-position",
@@ -753,6 +773,7 @@ test.describe("market flows", () => {
       })
       .toBe(0);
 
+    console.log("[e2e][perps] opening short");
     const shortStatus = await submitModelsTrade(
       page,
       "models-market-open-short",
@@ -771,6 +792,7 @@ test.describe("market flows", () => {
     await expect(page.getByTestId("models-market-close-position")).toBeVisible({
       timeout: 60_000,
     });
+    console.log("[e2e][perps] closing short");
     const closeShortStatus = await submitModelsTrade(
       page,
       "models-market-close-position",

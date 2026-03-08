@@ -232,8 +232,8 @@ function deriveProgramDataAddress(programId: PublicKey): PublicKey {
 }
 
 function encodePerpsMarketId(marketId: number): Buffer {
-  const bytes = Buffer.alloc(4);
-  bytes.writeUInt32LE(marketId, 0);
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64LE(BigInt(marketId), 0);
   return bytes;
 }
 
@@ -429,12 +429,13 @@ async function maybeSetPerpsMarketStatus(
   settlementSpotLamports = 0,
 ): Promise<void> {
   if (!PERPS_ORACLE_ENABLED) return;
+  const marketIdBn = new BN(String(marketId));
 
   await runWithRecovery(
     () =>
       perpsProgram.methods
         .setMarketStatus(
-          marketId,
+          marketIdBn,
           nextStatus,
           new BN(String(settlementSpotLamports)),
         )
@@ -471,10 +472,11 @@ async function ensurePerpsMarketBootstrapInsurance(
   }
 
   const depositLamports = targetInsuranceLamports - currentInsuranceLamports;
+  const marketIdBn = new BN(String(marketId));
   await runWithRecovery(
     () =>
       perpsProgram.methods
-        .depositInsurance(marketId, new BN(String(depositLamports)))
+        .depositInsurance(marketIdBn, new BN(String(depositLamports)))
         .accountsPartial({
           market: marketPda,
           payer: botKeypair.publicKey,
@@ -507,10 +509,11 @@ async function maybeRecyclePerpsMarketMakerFees(
     return;
   }
 
+  const marketIdBn = new BN(String(marketId));
   await runWithRecovery(
     () =>
       perpsProgram.methods
-        .recycleMarketMakerFees(marketId, new BN(String(pendingFeesLamports)))
+        .recycleMarketMakerFees(marketIdBn, new BN(String(pendingFeesLamports)))
         .accountsPartial({
           config: derivePerpsConfigPda(),
           market: derivePerpsMarketPda(marketId),
@@ -519,6 +522,85 @@ async function maybeRecyclePerpsMarketMakerFees(
         .rpc(),
     connection,
   );
+}
+
+async function maybeArchiveSettledPerpsMarkets(): Promise<void> {
+  if (!PERPS_ORACLE_ENABLED) {
+    return;
+  }
+
+  const now = Date.now();
+  const closableMarkets = loadPerpsMarkets().filter(
+    (record) => record.status === PERPS_MARKET_STATUS_CLOSE_ONLY,
+  );
+
+  for (const record of closableMarkets) {
+    const marketPda = derivePerpsMarketPda(record.marketId);
+    const marketAcc =
+      await perpsProgram.account.marketState.fetchNullable(marketPda);
+    if (!marketAcc?.initialized) {
+      continue;
+    }
+
+    if (
+      asNum(marketAcc.openPositions) !== 0 ||
+      asNum(marketAcc.totalLongOi) !== 0 ||
+      asNum(marketAcc.totalShortOi) !== 0
+    ) {
+      continue;
+    }
+
+    const pendingMarketMakerFees = asNum(marketAcc.marketMakerFeeBalance);
+    if (pendingMarketMakerFees > 0) {
+      await runWithRecovery(
+        () =>
+          perpsProgram.methods
+            .recycleMarketMakerFees(
+              new BN(String(record.marketId)),
+              new BN(String(pendingMarketMakerFees)),
+            )
+            .accountsPartial({
+              config: derivePerpsConfigPda(),
+              market: marketPda,
+              authority: botKeypair.publicKey,
+            })
+            .rpc(),
+        connection,
+      );
+    }
+
+    const settlementSpotLamports = (() => {
+      const settlement = asNum(marketAcc.settlementSpotIndex);
+      if (settlement > 0) {
+        return settlement;
+      }
+      const liveSpot = asNum(marketAcc.spotIndex);
+      return liveSpot > 0 ? liveSpot : 0;
+    })();
+
+    try {
+      await maybeSetPerpsMarketStatus(
+        record.marketId,
+        2,
+        settlementSpotLamports,
+      );
+    } catch (error) {
+      console.error(
+        `[Keeper] Failed to archive settled perps market ${record.marketId} (${record.agentId})`,
+        error,
+      );
+      continue;
+    }
+
+    savePerpsMarket({
+      ...record,
+      status: PERPS_MARKET_STATUS_ARCHIVED,
+      updatedAt: now,
+    });
+    console.log(
+      `[Keeper] Archived perps market ${record.marketId} for ${record.agentId}`,
+    );
+  }
 }
 
 async function deprecateMissingPerpsMarkets(
@@ -580,23 +662,24 @@ async function deprecateMissingPerpsMarkets(
   }
 }
 
-async function updatePerpsOracle(agentId: string, rating: AgentRating) {
+async function updatePerpsOracle(
+  agentId: string,
+  rating: AgentRating,
+): Promise<boolean> {
   // Skip if perps oracle is disabled (program not deployed)
-  if (!PERPS_ORACLE_ENABLED) return;
+  if (!PERPS_ORACLE_ENABLED) return false;
 
   try {
     const marketId = modelMarketIdFromCharacterId(agentId);
+    const marketIdBn = new BN(String(marketId));
     const registeredMarket = loadPerpsMarkets().find(
       (record) => record.agentId === agentId,
     );
-    if (registeredMarket?.status === PERPS_MARKET_STATUS_CLOSE_ONLY) {
+    if (
+      registeredMarket?.status === PERPS_MARKET_STATUS_CLOSE_ONLY ||
+      registeredMarket?.status === PERPS_MARKET_STATUS_ARCHIVED
+    ) {
       await maybeSetPerpsMarketStatus(marketId, 0, 0);
-      savePerpsMarket({
-        ...registeredMarket,
-        status: PERPS_MARKET_STATUS_ACTIVE,
-        deprecatedAt: null,
-        updatedAt: Date.now(),
-      });
     }
 
     const population = Object.values(agentRatings);
@@ -611,7 +694,12 @@ async function updatePerpsOracle(agentId: string, rating: AgentRating) {
     await runWithRecovery(
       () =>
         perpsProgram.methods
-          .updateMarketOracle(marketId, spotIndexScaled, muScaled, sigmaScaled)
+          .updateMarketOracle(
+            marketIdBn,
+            spotIndexScaled,
+            muScaled,
+            sigmaScaled,
+          )
           .accountsPartial({
             config: configPda,
             market: marketPda,
@@ -640,8 +728,10 @@ async function updatePerpsOracle(agentId: string, rating: AgentRating) {
       ") to spot",
       spotIndex,
     );
+    return true;
   } catch (e) {
     console.error("Failed to update perps oracle", e);
+    return false;
   }
 }
 
@@ -792,16 +882,26 @@ async function syncPerpsOracles(
       continue;
     }
 
-    const previous = marketByAgentId.get(entry.characterId);
-    savePerpsMarket(
-      toPerpsMarketRecord(entry, PERPS_MARKET_STATUS_ACTIVE, now, previous),
-    );
-    agentIdByMarketId.set(marketId, entry.characterId);
     getRating(entry.characterId);
   }
 
   for (const entry of uniqueEntries) {
-    await updatePerpsOracle(entry.characterId, getRating(entry.characterId));
+    const previous = marketByAgentId.get(entry.characterId);
+    const synced = await updatePerpsOracle(
+      entry.characterId,
+      getRating(entry.characterId),
+    );
+    if (!synced) {
+      continue;
+    }
+
+    savePerpsMarket(
+      toPerpsMarketRecord(entry, PERPS_MARKET_STATUS_ACTIVE, now, previous),
+    );
+    agentIdByMarketId.set(
+      modelMarketIdFromCharacterId(entry.characterId),
+      entry.characterId,
+    );
   }
 
   await deprecateMissingPerpsMarkets(uniqueEntries);
@@ -1776,6 +1876,7 @@ async function runMaintenance(): Promise<void> {
       await maybeRecyclePerpsMarketMakerFees(record.marketId);
     }
   }
+  await maybeArchiveSettledPerpsMarkets();
 
   // Poll only the actively tracked CLOB matches we created
   for (const [numericMatchId, trackedMatch] of activeClobMatches.entries()) {
@@ -1821,7 +1922,7 @@ async function runLiquidatorLoop(): Promise<void> {
     for (const pos of allPositions) {
       if (!pos.account.initialized || pos.account.size.eq(new BN(0))) continue;
 
-      const marketId = pos.account.marketId;
+      const marketId = asNum(pos.account.marketId);
       const marketPda = derivePerpsMarketPda(marketId);
       const marketAcc =
         await perpsProgram.account.marketState.fetchNullable(marketPda);
@@ -1882,10 +1983,11 @@ async function runLiquidatorLoop(): Promise<void> {
           `[Keeper] Liquidating position ${pos.publicKey.toBase58()} (Equity ratio: ${(equityRatio * 100).toFixed(2)}%)`,
         );
         try {
+          const marketIdBn = new BN(String(marketId));
           await runWithRecovery(
             () =>
               perpsProgram.methods
-                .liquidatePosition(marketId)
+                .liquidatePosition(marketIdBn)
                 .accountsPartial({
                   config: configPda,
                   market: marketPda,

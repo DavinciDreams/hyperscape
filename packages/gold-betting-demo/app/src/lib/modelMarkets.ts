@@ -44,6 +44,12 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isPerpsMarketLifecycleStatus(
+  value: unknown,
+): value is PerpsMarketLifecycleStatus {
+  return value === "ACTIVE" || value === "CLOSE_ONLY" || value === "ARCHIVED";
+}
+
 function isPerpsOracleHistorySnapshot(
   value: unknown,
 ): value is PerpsOracleHistorySnapshot {
@@ -74,7 +80,7 @@ function isPerpsMarketDirectoryEntry(
     isFiniteNumber(maybe?.winRate) &&
     isFiniteNumber(maybe?.combatLevel) &&
     isFiniteNumber(maybe?.currentStreak) &&
-    typeof maybe?.status === "string" &&
+    isPerpsMarketLifecycleStatus(maybe?.status) &&
     isFiniteNumber(maybe?.lastSeenAt) &&
     isFiniteNumber(maybe?.updatedAt)
   );
@@ -119,16 +125,18 @@ export function sanitizePerpsMarketsResponse(
 }
 
 export function modelMarketIdFromCharacterId(characterId: string): number {
-  let hash = 0x811c9dc5;
   const namespaced = `hyperscape:model:${characterId.trim().toLowerCase()}`;
+  let hash = 0xcbf29ce484222325n;
+  const fnvPrime = 0x100000001b3n;
+  const maxSafeMarketId = 0x1fffffffffffffn;
 
   for (let i = 0; i < namespaced.length; i += 1) {
-    hash ^= namespaced.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
+    hash ^= BigInt(namespaced.charCodeAt(i));
+    hash = (hash * fnvPrime) & 0xffffffffffffffffn;
   }
 
-  const normalized = hash >>> 0;
-  return normalized === 0 ? 1 : normalized;
+  const normalized = hash & maxSafeMarketId;
+  return Number(normalized === 0n ? 1n : normalized);
 }
 
 export function buildOracleHistoryLabel(timestamp: number): string {

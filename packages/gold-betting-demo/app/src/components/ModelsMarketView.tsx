@@ -175,8 +175,8 @@ function chunkArray<T>(items: readonly T[], size: number): T[][] {
 }
 
 function encodeMarketId(marketId: number): Buffer {
-  const bytes = Buffer.alloc(4);
-  bytes.writeUInt32LE(marketId, 0);
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64LE(BigInt(marketId), 0);
   return bytes;
 }
 
@@ -999,10 +999,11 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                 ? quotedEntryPrice * 1.02
                 : quotedEntryPrice * 0.98,
             );
+      const marketIdArg = new anchor.BN(String(marketId));
 
       const transaction = await program.methods
         .modifyPosition(
-          marketId,
+          marketIdArg,
           new anchor.BN(String(marginDeltaLamports)),
           new anchor.BN(String(signedSizeLamports)),
           new anchor.BN(String(acceptablePriceLamports)),
@@ -1108,10 +1109,11 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                 ? quotedClosePrice * 0.98
                 : quotedClosePrice * 1.02,
             );
+      const marketIdArg = new anchor.BN(String(marketId));
 
       const transaction = await program.methods
         .modifyPosition(
-          marketId,
+          marketIdArg,
           new anchor.BN(0),
           new anchor.BN(String(closeSizeLamports)),
           new anchor.BN(String(acceptablePriceLamports)),

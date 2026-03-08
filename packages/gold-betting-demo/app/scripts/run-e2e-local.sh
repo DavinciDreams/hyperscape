@@ -28,10 +28,10 @@ SOLANA_PROXY_PORT="${E2E_SOLANA_PROXY_PORT:-$((20000 + RANDOM % 10000))}"
 SOLANA_PROXY_URL="http://127.0.0.1:${SOLANA_PROXY_PORT}"
 SOLANA_PROXY_WS_URL="ws://127.0.0.1:${SOLANA_PROXY_PORT}"
 SOLANA_MINT_AUTHORITY="${E2E_SOLANA_MINT_AUTHORITY:-DfEnrzh4cgnHxfuZRxLGX69fnLd9DP41XxGuE4gtyJpn}"
-ANVIL_PORT="${E2E_EVM_PORT:-8545}"
+ANVIL_PORT="${E2E_EVM_PORT:-18545}"
 # Always target the local anvil instance spawned by this script.
 ANVIL_RPC_URL="http://127.0.0.1:${ANVIL_PORT}"
-EVM_CHAIN_ID="${E2E_EVM_CHAIN_ID:-97}"
+EVM_CHAIN_ID="${E2E_EVM_CHAIN_ID:-31337}"
 
 VALIDATOR_PID=""
 ANVIL_PID=""
@@ -109,6 +109,21 @@ wait_for_anvil_rpc() {
     sleep 1
   done
   return 1
+}
+
+read_anvil_chain_id() {
+  local response
+  local chain_id_hex
+
+  response="$(curl -s -X POST "$ANVIL_RPC_URL" \
+    -H "content-type: application/json" \
+    -d '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}')"
+  chain_id_hex="$(printf "%s" "$response" | jq -r '.result // empty')"
+  if [[ ! "$chain_id_hex" =~ ^0x[0-9a-fA-F]+$ ]]; then
+    return 1
+  fi
+
+  printf "%d\n" "$((16#${chain_id_hex#0x}))"
 }
 
 wait_for_app() {
@@ -240,6 +255,15 @@ if ! wait_for_anvil_rpc; then
   echo "[e2e] anvil did not become ready"
   tail -n 80 "$ANVIL_LOG" || true
   exit 1
+fi
+
+if ACTUAL_EVM_CHAIN_ID="$(read_anvil_chain_id)"; then
+  if [[ "$ACTUAL_EVM_CHAIN_ID" != "$EVM_CHAIN_ID" ]]; then
+    echo "[e2e] anvil reported chain id ${ACTUAL_EVM_CHAIN_ID} (requested ${EVM_CHAIN_ID})"
+  fi
+  EVM_CHAIN_ID="$ACTUAL_EVM_CHAIN_ID"
+else
+  echo "[e2e] failed to read anvil chain id; continuing with configured ${EVM_CHAIN_ID}"
 fi
 
 echo "[e2e] seeding local solana state + writing .env.e2e"

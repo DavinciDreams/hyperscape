@@ -54,8 +54,8 @@ function deriveProgramDataAddress(programId: PublicKey): PublicKey {
 }
 
 function encodeMarketId(marketId: number): Buffer {
-  const bytes = Buffer.alloc(4);
-  bytes.writeUInt32LE(marketId, 0);
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64LE(BigInt(marketId), 0);
   return bytes;
 }
 
@@ -480,7 +480,7 @@ async function main(): Promise<void> {
 
   await perps.methods
     .updateMarketOracle(
-      e2ePerpsMarketId,
+      new BN(String(e2ePerpsMarketId)),
       lamportsBn(e2eModelSpotIndex),
       lamportsBn(e2eModelMu),
       lamportsBn(e2eModelSigma),
@@ -494,7 +494,7 @@ async function main(): Promise<void> {
     .rpc();
 
   await perps.methods
-    .depositInsurance(e2ePerpsMarketId, lamportsBn(12))
+    .depositInsurance(new BN(String(e2ePerpsMarketId)), lamportsBn(12))
     .accountsPartial({
       market: perpsMarketPda,
       payer: authority.publicKey,

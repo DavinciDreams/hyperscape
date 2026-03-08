@@ -156,7 +156,9 @@ export function EvmBettingPanel({
   const hasHeadlessEvmWallet = Boolean(
     isE2eMode && chainConfig && e2eWalletClient && headlessAccountAddress,
   );
-  const effectiveWalletClient = walletClient ?? e2eWalletClient;
+  const effectiveWalletClient = isE2eMode
+    ? (e2eWalletClient ?? walletClient)
+    : (walletClient ?? e2eWalletClient);
   const effectiveAddress = (address ?? headlessAccountAddress) as
     | Address
     | undefined;

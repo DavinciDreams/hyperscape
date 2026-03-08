@@ -59,7 +59,7 @@ export type GoldPerpsMarket = {
       args: [
         {
           name: "marketId";
-          type: "u32";
+          type: "u64";
         },
         {
           name: "amount";
@@ -199,7 +199,7 @@ export type GoldPerpsMarket = {
       args: [
         {
           name: "marketId";
-          type: "u32";
+          type: "u64";
         },
       ];
     },
@@ -267,7 +267,7 @@ export type GoldPerpsMarket = {
       args: [
         {
           name: "marketId";
-          type: "u32";
+          type: "u64";
         },
         {
           name: "marginDelta";
@@ -322,7 +322,7 @@ export type GoldPerpsMarket = {
       args: [
         {
           name: "marketId";
-          type: "u32";
+          type: "u64";
         },
         {
           name: "amount";
@@ -369,7 +369,7 @@ export type GoldPerpsMarket = {
       args: [
         {
           name: "marketId";
-          type: "u32";
+          type: "u64";
         },
         {
           name: "nextStatus";
@@ -425,7 +425,7 @@ export type GoldPerpsMarket = {
       args: [
         {
           name: "marketId";
-          type: "u32";
+          type: "u64";
         },
         {
           name: "spotIndex";
@@ -484,7 +484,7 @@ export type GoldPerpsMarket = {
       args: [
         {
           name: "marketId";
-          type: "u32";
+          type: "u64";
         },
         {
           name: "feeBucket";
@@ -710,7 +710,7 @@ export type GoldPerpsMarket = {
           },
           {
             name: "marketId";
-            type: "u32";
+            type: "u64";
           },
           {
             name: "status";
@@ -794,7 +794,7 @@ export type GoldPerpsMarket = {
           },
           {
             name: "marketId";
-            type: "u32";
+            type: "u64";
           },
           {
             name: "margin";
