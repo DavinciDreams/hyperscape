@@ -57,7 +57,7 @@ export function registerDuelEventListeners(deps: DuelEventDeps): () => void {
   };
 
   // -- on-deck notification (next duel pair selected, agents should prepare) --
-  world.on("duel:on-deck", (event) => {
+  on("duel:on-deck", (event) => {
     const { agent1Id, agent1Name, agent2Id, agent2Name } = event as {
       agent1Id: string;
       agent1Name: string;
@@ -83,7 +83,7 @@ export function registerDuelEventListeners(deps: DuelEventDeps): () => void {
   });
 
   // -- session created (also used by StreamingDuelScheduler to notify agents) --
-  world.on("duel:session:created", (event) => {
+  on("duel:session:created", (event) => {
     const { duelId, challengerId, challengerName, targetId, targetName } =
       event as EventMap[typeof EventType.DUEL_SESSION_CREATED];
 

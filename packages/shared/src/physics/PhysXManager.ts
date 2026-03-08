@@ -264,15 +264,26 @@ class PhysXManager extends EventEmitter {
 
     // Apply timeout if specified
     if (timeout) {
-      return Promise.race([
-        waitPromise,
-        new Promise<PhysXInfo>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`PhysX load timeout for ${systemName}`)),
-            timeout,
-          ),
-        ),
-      ]);
+      return new Promise<PhysXInfo>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error(`PhysX load timeout for ${systemName}`));
+        }, timeout);
+
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+        };
+
+        waitPromise.then(
+          (info) => {
+            cleanup();
+            resolve(info);
+          },
+          (error) => {
+            cleanup();
+            reject(error);
+          },
+        );
+      });
     }
 
     return waitPromise;

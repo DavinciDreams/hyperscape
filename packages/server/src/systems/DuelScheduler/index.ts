@@ -29,7 +29,9 @@ import { Logger } from "../ServerNetwork/services";
 
 const config = {
   /** Whether the scheduler is enabled */
-  enabled: process.env.DUEL_SCHEDULER_ENABLED !== "false",
+  enabled:
+    process.env.DUEL_SCHEDULER_ENABLED !== "false" &&
+    process.env.STREAMING_DUEL_ENABLED !== "true",
 
   /** Interval between match scheduling attempts (ms) */
   matchIntervalMs: parseInt(
@@ -111,7 +113,10 @@ export class DuelScheduler {
    */
   init(): void {
     if (!config.enabled) {
-      Logger.info("DuelScheduler", "Duel scheduler is disabled");
+      Logger.info("DuelScheduler", "Duel scheduler is disabled", {
+        duelSchedulerEnabled: process.env.DUEL_SCHEDULER_ENABLED !== "false",
+        streamingDuelEnabled: process.env.STREAMING_DUEL_ENABLED === "true",
+      });
       return;
     }
 

@@ -2284,6 +2284,107 @@ export function registerAdminRoutes(
         const collections = monitor.getCollectionMetrics();
         const samples = monitor.getSamples();
         const MB = 1024 * 1024;
+        const eventBus = world.getEventBus();
+        world.enableSystemTiming();
+
+        const combatSystem = world.getSystem("combat") as
+          | {
+              stateService?: {
+                getCombatStatesMap?: () => Map<unknown, unknown>;
+              };
+              nextAttackTicks?: Map<unknown, unknown>;
+              playerEquipmentStats?: Map<unknown, unknown>;
+              eventStore?: {
+                getEventCount?: () => number;
+                getSnapshotCount?: () => number;
+              };
+            }
+          | undefined;
+        const playerDeathSystem = world.getSystem("player-death") as
+          | {
+              respawnTimers?: Map<unknown, unknown>;
+              deathLocations?: Map<unknown, unknown>;
+              playerPositions?: Map<unknown, unknown>;
+              playerInventories?: Map<unknown, unknown>;
+              pendingGravestones?: Map<unknown, unknown>;
+              lastDeathTime?: Map<unknown, unknown>;
+            }
+          | undefined;
+        const databaseSystem = world.getSystem("database") as
+          | {
+              pendingOperations?: Set<unknown>;
+              pendingSaveBuffer?: Map<unknown, unknown>;
+              pendingInventoryBuffer?: Map<unknown, unknown>;
+              inventoryWriteActive?: Map<unknown, unknown>;
+              inventoryWriteQueued?: Map<unknown, unknown>;
+            }
+          | undefined;
+        const entityManagerSystem = world.getSystem("entity-manager") as
+          | {
+              entities?: Map<unknown, unknown>;
+              entitiesNeedingUpdate?: Set<unknown>;
+              networkDirtyEntities?: Set<unknown>;
+              entitiesByType?: Map<unknown, Set<unknown>>;
+              destroyingEntities?: Set<unknown>;
+              _activeEntityIdsCache?: Set<unknown>;
+              _entityUpdateArray?: unknown[];
+              _serverActiveUpdateArray?: unknown[];
+            }
+          | undefined;
+        const activityLoggerSystem = world.getSystem("activity-logger") as
+          | {
+              pendingEntries?: unknown[];
+              knownCharacterIds?: Set<unknown>;
+              skippedCharacterIds?: Set<unknown>;
+              isFlushing?: boolean;
+            }
+          | undefined;
+        const terrainSystem = world.getSystem("terrain") as
+          | {
+              terrainTiles?: Map<unknown, unknown>;
+              activeChunks?: Set<unknown>;
+              flatZones?: Map<unknown, unknown>;
+              flatZonesByTile?: Map<unknown, unknown[]>;
+              pendingTileKeys?: unknown[];
+              pendingTileSet?: Set<unknown>;
+              pendingCollisionKeys?: unknown[];
+              pendingCollisionSet?: Set<unknown>;
+              pendingWorkerTiles?: unknown[];
+              pendingWorkerResults?: Map<unknown, unknown>;
+              pendingResourceInstances?: unknown[];
+              terrainBoundingBoxes?: Map<unknown, unknown>;
+              pendingSerializationData?: Map<unknown, unknown>;
+              playerChunks?: Map<unknown, Set<unknown>>;
+              chunkPlayerCounts?: Map<unknown, unknown>;
+              simulatedChunks?: Set<unknown>;
+              _queuedTileRegenerations?: Map<unknown, unknown>;
+              _pendingTileRegeneration?: Set<unknown>;
+              _initialTilesReady?: boolean;
+            }
+          | undefined;
+        const networkSystem = world.getSystem("network") as
+          | {
+              queue?: unknown[];
+              sockets?: Map<unknown, unknown>;
+              processingRateLimiter?: Map<unknown, unknown>;
+              messageMetrics?: Map<unknown, unknown>;
+              getMessageDiagnostics?: (
+                limit?: number,
+              ) => Array<Record<string, unknown>>;
+              constructor?: {
+                agentGoals?: Map<unknown, unknown>;
+                agentAvailableGoals?: Map<unknown, unknown[]>;
+                agentGoalsPaused?: Map<unknown, unknown>;
+                characterSockets?: Map<unknown, unknown>;
+                agentPersonality?: Map<unknown, unknown>;
+                agentDesireScores?: Map<unknown, unknown>;
+                agentThoughts?: Map<unknown, unknown>;
+              };
+            }
+          | undefined;
+        const worldCollections = world as World & {
+          hot?: Set<unknown>;
+        };
 
         return reply.send({
           uptime: stats.uptime,
@@ -2298,7 +2399,148 @@ export function registerAdminRoutes(
                 externalMB: (stats.currentMemory.external / MB).toFixed(1),
               }
             : null,
+          jscHeapStatsEnabled: stats.jscHeapStatsEnabled,
+          jscHeap: stats.currentJSCHeap
+            ? {
+                heapSizeMB: (stats.currentJSCHeap.heapSize / MB).toFixed(1),
+                heapCapacityMB: (
+                  stats.currentJSCHeap.heapCapacity / MB
+                ).toFixed(1),
+                extraMemoryMB: (
+                  stats.currentJSCHeap.extraMemorySize / MB
+                ).toFixed(1),
+                objectCount: stats.currentJSCHeap.objectCount,
+                protectedObjectCount: stats.currentJSCHeap.protectedObjectCount,
+                globalObjectCount: stats.currentJSCHeap.globalObjectCount,
+                protectedGlobalObjectCount:
+                  stats.currentJSCHeap.protectedGlobalObjectCount,
+                topObjectTypes: stats.currentJSCHeap.topObjectTypes,
+                growingObjectTypes: stats.currentJSCHeap.growingObjectTypes,
+                topProtectedObjectTypes:
+                  stats.currentJSCHeap.topProtectedObjectTypes,
+              }
+            : null,
           collections: collections.slice(0, 20),
+          diagnostics: {
+            eventBus: {
+              pendingAsyncHandlers: eventBus.getPendingHandlerCount(),
+              pendingBreakdown: eventBus.getPendingHandlerBreakdown(20),
+              asyncHandlers: eventBus.getAsyncHandlerDiagnostics(20),
+            },
+            world: {
+              hotItems: worldCollections.hot?.size ?? 0,
+              systems: world.systems.length,
+              systemsByName: world.systemsByName.size,
+              asyncTickCalls: world.getAsyncTickDiagnostics(20),
+              systemTimings: world.getSystemTimings(),
+            },
+            entityManager: {
+              entities: entityManagerSystem?.entities?.size ?? 0,
+              entitiesNeedingUpdate:
+                entityManagerSystem?.entitiesNeedingUpdate?.size ?? 0,
+              networkDirtyEntities:
+                entityManagerSystem?.networkDirtyEntities?.size ?? 0,
+              entitiesByType: entityManagerSystem?.entitiesByType?.size ?? 0,
+              destroyingEntities:
+                entityManagerSystem?.destroyingEntities?.size ?? 0,
+              activeEntityCache:
+                entityManagerSystem?._activeEntityIdsCache?.size ?? 0,
+              entityUpdateArray:
+                entityManagerSystem?._entityUpdateArray?.length ?? 0,
+              serverActiveUpdateArray:
+                entityManagerSystem?._serverActiveUpdateArray?.length ?? 0,
+            },
+            combat: {
+              activeCombats:
+                combatSystem?.stateService?.getCombatStatesMap?.().size ?? 0,
+              nextAttackTicks: combatSystem?.nextAttackTicks?.size ?? 0,
+              playerEquipmentStats:
+                combatSystem?.playerEquipmentStats?.size ?? 0,
+              eventStoreEvents:
+                combatSystem?.eventStore?.getEventCount?.() ?? 0,
+              eventStoreSnapshots:
+                combatSystem?.eventStore?.getSnapshotCount?.() ?? 0,
+            },
+            playerDeath: {
+              respawnTimers: playerDeathSystem?.respawnTimers?.size ?? 0,
+              deathLocations: playerDeathSystem?.deathLocations?.size ?? 0,
+              playerPositions: playerDeathSystem?.playerPositions?.size ?? 0,
+              playerInventories:
+                playerDeathSystem?.playerInventories?.size ?? 0,
+              pendingGravestones:
+                playerDeathSystem?.pendingGravestones?.size ?? 0,
+              lastDeathTime: playerDeathSystem?.lastDeathTime?.size ?? 0,
+            },
+            database: {
+              pendingOperations: databaseSystem?.pendingOperations?.size ?? 0,
+              pendingSaveBuffer: databaseSystem?.pendingSaveBuffer?.size ?? 0,
+              pendingInventoryBuffer:
+                databaseSystem?.pendingInventoryBuffer?.size ?? 0,
+              inventoryWriteActive:
+                databaseSystem?.inventoryWriteActive?.size ?? 0,
+              inventoryWriteQueued:
+                databaseSystem?.inventoryWriteQueued?.size ?? 0,
+            },
+            terrain: {
+              terrainTiles: terrainSystem?.terrainTiles?.size ?? 0,
+              activeChunks: terrainSystem?.activeChunks?.size ?? 0,
+              flatZones: terrainSystem?.flatZones?.size ?? 0,
+              flatZonesByTile: terrainSystem?.flatZonesByTile?.size ?? 0,
+              pendingTileKeys: terrainSystem?.pendingTileKeys?.length ?? 0,
+              pendingTileSet: terrainSystem?.pendingTileSet?.size ?? 0,
+              pendingCollisionKeys:
+                terrainSystem?.pendingCollisionKeys?.length ?? 0,
+              pendingCollisionSet:
+                terrainSystem?.pendingCollisionSet?.size ?? 0,
+              pendingWorkerTiles:
+                terrainSystem?.pendingWorkerTiles?.length ?? 0,
+              pendingWorkerResults:
+                terrainSystem?.pendingWorkerResults?.size ?? 0,
+              pendingResourceInstances:
+                terrainSystem?.pendingResourceInstances?.length ?? 0,
+              terrainBoundingBoxes:
+                terrainSystem?.terrainBoundingBoxes?.size ?? 0,
+              pendingSerializationData:
+                terrainSystem?.pendingSerializationData?.size ?? 0,
+              playerChunks: terrainSystem?.playerChunks?.size ?? 0,
+              chunkPlayerCounts: terrainSystem?.chunkPlayerCounts?.size ?? 0,
+              simulatedChunks: terrainSystem?.simulatedChunks?.size ?? 0,
+              queuedTileRegenerations:
+                terrainSystem?._queuedTileRegenerations?.size ?? 0,
+              pendingTileRegeneration:
+                terrainSystem?._pendingTileRegeneration?.size ?? 0,
+              initialTilesReady: terrainSystem?._initialTilesReady ?? false,
+            },
+            network: {
+              queue: networkSystem?.queue?.length ?? 0,
+              sockets: networkSystem?.sockets?.size ?? 0,
+              processingRateLimiter:
+                networkSystem?.processingRateLimiter?.size ?? 0,
+              messageMetricCount: networkSystem?.messageMetrics?.size ?? 0,
+              agentGoals: networkSystem?.constructor?.agentGoals?.size ?? 0,
+              agentAvailableGoals:
+                networkSystem?.constructor?.agentAvailableGoals?.size ?? 0,
+              agentGoalsPaused:
+                networkSystem?.constructor?.agentGoalsPaused?.size ?? 0,
+              characterSockets:
+                networkSystem?.constructor?.characterSockets?.size ?? 0,
+              agentPersonality:
+                networkSystem?.constructor?.agentPersonality?.size ?? 0,
+              agentDesireScores:
+                networkSystem?.constructor?.agentDesireScores?.size ?? 0,
+              agentThoughts:
+                networkSystem?.constructor?.agentThoughts?.size ?? 0,
+              messageHandlers: networkSystem?.getMessageDiagnostics?.(20) ?? [],
+            },
+            activityLogger: {
+              pendingEntries: activityLoggerSystem?.pendingEntries?.length ?? 0,
+              knownCharacterIds:
+                activityLoggerSystem?.knownCharacterIds?.size ?? 0,
+              skippedCharacterIds:
+                activityLoggerSystem?.skippedCharacterIds?.size ?? 0,
+              isFlushing: activityLoggerSystem?.isFlushing ?? false,
+            },
+          },
           leakWarningCount: stats.leakWarningCount,
           recentWarnings: stats.recentWarnings,
           sampleCount: samples.length,
@@ -2308,6 +2550,40 @@ export function registerAdminRoutes(
         return reply
           .code(500)
           .send({ error: "Failed to generate memory report" });
+      }
+    },
+  );
+
+  /** Capture a one-shot JSC heap summary without enabling periodic JSC sampling */
+  fastify.get(
+    "/admin/memory/jsc-heap",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const monitor = getMemoryMonitor();
+        const summary = monitor.captureJSCHeapSummary();
+        const MB = 1024 * 1024;
+
+        return reply.send({
+          jscHeapStatsEnabled: true,
+          jscHeap: summary
+            ? {
+                heapSizeMB: (summary.heapSize / MB).toFixed(1),
+                heapCapacityMB: (summary.heapCapacity / MB).toFixed(1),
+                extraMemoryMB: (summary.extraMemorySize / MB).toFixed(1),
+                objectCount: summary.objectCount,
+                protectedObjectCount: summary.protectedObjectCount,
+                globalObjectCount: summary.globalObjectCount,
+                protectedGlobalObjectCount: summary.protectedGlobalObjectCount,
+                topObjectTypes: summary.topObjectTypes,
+                growingObjectTypes: summary.growingObjectTypes,
+                topProtectedObjectTypes: summary.topProtectedObjectTypes,
+              }
+            : null,
+        });
+      } catch (err) {
+        console.error("[AdminRoutes] JSC heap summary error:", err);
+        return reply.code(500).send({ error: "Failed to capture JSC heap" });
       }
     },
   );

@@ -14,13 +14,31 @@ export class NodeStorage {
     dirname: (path: string) => string;
   } | null = null;
   private initialized: boolean = false;
+  private initializationPromise: Promise<void> | null = null;
 
   constructor() {
-    this.initialize();
+    void this.ensureInitialized();
   }
 
-  private async initialize() {
-    if (this.initialized) return;
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    if (!this.initializationPromise) {
+      this.initializationPromise = this.initialize().catch((error) => {
+        this.initializationPromise = null;
+        throw error;
+      });
+    }
+
+    await this.initializationPromise;
+  }
+
+  private async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
 
     const { promises: fs } = await import("fs");
     const path = await import("path");
@@ -41,36 +59,37 @@ export class NodeStorage {
     } else {
       // Create empty file
       this.data = {};
-      await this.save();
+      const dir = this.path!.dirname(this.file);
+      await this.fs!.mkdir(dir, { recursive: true });
+      await this.fs!.writeFile(this.file, JSON.stringify(this.data, null, 2));
     }
 
     this.initialized = true;
+    this.initializationPromise = null;
   }
 
   async save(): Promise<void> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
+    await this.ensureInitialized();
     const dir = this.path!.dirname(this.file);
     await this.fs!.mkdir(dir, { recursive: true });
     await this.fs!.writeFile(this.file, JSON.stringify(this.data, null, 2));
   }
 
   async get(key: string): Promise<unknown> {
-    if (!this.initialized) await this.initialize();
+    await this.ensureInitialized();
     const value = this.data[key];
     if (value === undefined) return null;
     return value;
   }
 
   async set(key: string, value: unknown): Promise<void> {
-    if (!this.initialized) await this.initialize();
+    await this.ensureInitialized();
     this.data[key] = value;
     await this.save();
   }
 
   async remove(key: string): Promise<void> {
-    if (!this.initialized) await this.initialize();
+    await this.ensureInitialized();
     delete this.data[key];
     await this.save();
   }

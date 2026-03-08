@@ -12,6 +12,7 @@
  */
 
 import type { World } from "@hyperscape/shared";
+import { createRequire } from "node:module";
 import v8 from "v8";
 import fs from "fs";
 import path from "path";
@@ -23,6 +24,44 @@ interface MemorySample {
   heapUsed: number;
   heapTotal: number;
   external: number;
+}
+
+type BunJSCHeapStats = {
+  heapSize: number;
+  heapCapacity: number;
+  extraMemorySize: number;
+  objectCount: number;
+  protectedObjectCount: number;
+  globalObjectCount: number;
+  protectedGlobalObjectCount: number;
+  objectTypeCounts: Record<string, number>;
+  protectedObjectTypeCounts: Record<string, number>;
+};
+
+type BunJSCModule = {
+  heapStats: () => BunJSCHeapStats;
+  fullGC?: () => number;
+  gcAndSweep?: () => number;
+};
+
+export interface JSCObjectTypeMetric {
+  name: string;
+  count: number;
+  previousCount: number;
+  growth: number;
+}
+
+export interface JSCHeapSummary {
+  heapSize: number;
+  heapCapacity: number;
+  extraMemorySize: number;
+  objectCount: number;
+  protectedObjectCount: number;
+  globalObjectCount: number;
+  protectedGlobalObjectCount: number;
+  topObjectTypes: JSCObjectTypeMetric[];
+  growingObjectTypes: JSCObjectTypeMetric[];
+  topProtectedObjectTypes: JSCObjectTypeMetric[];
 }
 
 /** Collection metric for tracking internal data structures */
@@ -72,6 +111,8 @@ export interface CollectionAccessor {
  * Central service for monitoring server memory usage and detecting leaks.
  */
 export class MemoryMonitor {
+  private static bunJSCModule: BunJSCModule | null | undefined = undefined;
+
   private config: Required<MemoryMonitorConfig>;
   private samples: MemorySample[] = [];
   private collectionMetrics: Map<string, CollectionMetric> = new Map();
@@ -81,9 +122,20 @@ export class MemoryMonitor {
   private customCollections: CollectionAccessor[] = [];
   private startTime: number = Date.now();
   private isRunning = false;
+  private readonly jscHeapStatsEnabled =
+    (process.env.MEMORY_MONITOR_JSC_HEAP_STATS || "false").toLowerCase() ===
+    "true";
+  private readonly bunJSC = this.jscHeapStatsEnabled
+    ? MemoryMonitor.loadBunJSCModule()
+    : null;
+  private jscHeapSummary: JSCHeapSummary | null = null;
+  private lastJSCObjectTypeCounts: Record<string, number> | null = null;
+  private lastProtectedJSCObjectTypeCounts: Record<string, number> | null =
+    null;
 
   /** Maximum leak warnings to retain */
   private static readonly MAX_LEAK_WARNINGS = 100;
+  private static readonly JSC_OBJECT_TYPE_LIMIT = 12;
 
   constructor(config: MemoryMonitorConfig = {}) {
     this.config = {
@@ -96,6 +148,26 @@ export class MemoryMonitor {
       verbose: config.verbose ?? false,
       trackCollections: config.trackCollections ?? true,
     };
+  }
+
+  private static loadBunJSCModule(): BunJSCModule | null {
+    if (MemoryMonitor.bunJSCModule !== undefined) {
+      return MemoryMonitor.bunJSCModule;
+    }
+
+    if (typeof globalThis.Bun === "undefined") {
+      MemoryMonitor.bunJSCModule = null;
+      return null;
+    }
+
+    try {
+      const require = createRequire(import.meta.url);
+      MemoryMonitor.bunJSCModule = require("bun:jsc") as BunJSCModule;
+    } catch {
+      MemoryMonitor.bunJSCModule = null;
+    }
+
+    return MemoryMonitor.bunJSCModule;
   }
 
   /**
@@ -127,7 +199,7 @@ export class MemoryMonitor {
     this.timer.unref?.();
 
     console.log(
-      `[MemoryMonitor] Started (interval: ${this.config.sampleIntervalMs}ms, history: ${this.config.sampleHistorySize} samples)`,
+      `[MemoryMonitor] Started (interval: ${this.config.sampleIntervalMs}ms, history: ${this.config.sampleHistorySize} samples, jscHeapStats: ${this.jscHeapStatsEnabled ? "enabled" : "disabled"})`,
     );
   }
 
@@ -173,6 +245,7 @@ export class MemoryMonitor {
       external: mem.external,
     };
 
+    this.updateJSCHeapSummary();
     this.samples.push(sample);
 
     // Keep only the configured history size
@@ -186,7 +259,109 @@ export class MemoryMonitor {
         `[MemoryMonitor] Sample: RSS=${(sample.rss / MB).toFixed(1)}MB ` +
           `HeapUsed=${(sample.heapUsed / MB).toFixed(1)}MB`,
       );
+      const growingTypes = this.jscHeapSummary?.growingObjectTypes
+        .slice(0, 3)
+        .filter((metric) => metric.growth > 0);
+      if (growingTypes && growingTypes.length > 0) {
+        console.log(
+          `[MemoryMonitor] JSC growth: ${growingTypes
+            .map((metric) => `${metric.name}=+${metric.growth}`)
+            .join(", ")}`,
+        );
+      }
     }
+  }
+
+  private updateJSCHeapSummary(): void {
+    if (!this.jscHeapStatsEnabled || !this.bunJSC?.heapStats) return;
+
+    try {
+      this.applyJSCHeapStats(this.bunJSC.heapStats());
+    } catch {
+      this.jscHeapSummary = null;
+    }
+  }
+
+  captureJSCHeapSummary(): JSCHeapSummary | null {
+    const bunJSC = this.bunJSC ?? MemoryMonitor.loadBunJSCModule();
+    if (!bunJSC?.heapStats) {
+      this.jscHeapSummary = null;
+      return null;
+    }
+
+    try {
+      this.applyJSCHeapStats(bunJSC.heapStats());
+      return this.jscHeapSummary;
+    } catch {
+      this.jscHeapSummary = null;
+      return null;
+    }
+  }
+
+  private applyJSCHeapStats(stats: BunJSCHeapStats): void {
+    const previousObjectTypeCounts = this.lastJSCObjectTypeCounts ?? {};
+    const previousProtectedTypeCounts =
+      this.lastProtectedJSCObjectTypeCounts ?? {};
+
+    const objectTypeMetrics = this.buildJSCObjectTypeMetrics(
+      stats.objectTypeCounts,
+      previousObjectTypeCounts,
+    );
+    const protectedObjectTypeMetrics = this.buildJSCObjectTypeMetrics(
+      stats.protectedObjectTypeCounts,
+      previousProtectedTypeCounts,
+    );
+
+    this.jscHeapSummary = {
+      heapSize: stats.heapSize,
+      heapCapacity: stats.heapCapacity,
+      extraMemorySize: stats.extraMemorySize,
+      objectCount: stats.objectCount,
+      protectedObjectCount: stats.protectedObjectCount,
+      globalObjectCount: stats.globalObjectCount,
+      protectedGlobalObjectCount: stats.protectedGlobalObjectCount,
+      topObjectTypes: objectTypeMetrics
+        .slice()
+        .sort((left, right) => {
+          if (right.count !== left.count) return right.count - left.count;
+          return right.growth - left.growth;
+        })
+        .slice(0, MemoryMonitor.JSC_OBJECT_TYPE_LIMIT),
+      growingObjectTypes: objectTypeMetrics
+        .filter((metric) => metric.growth > 0)
+        .sort((left, right) => {
+          if (right.growth !== left.growth) return right.growth - left.growth;
+          return right.count - left.count;
+        })
+        .slice(0, MemoryMonitor.JSC_OBJECT_TYPE_LIMIT),
+      topProtectedObjectTypes: protectedObjectTypeMetrics
+        .slice()
+        .sort((left, right) => {
+          if (right.count !== left.count) return right.count - left.count;
+          return right.growth - left.growth;
+        })
+        .slice(0, MemoryMonitor.JSC_OBJECT_TYPE_LIMIT),
+    };
+
+    this.lastJSCObjectTypeCounts = { ...stats.objectTypeCounts };
+    this.lastProtectedJSCObjectTypeCounts = {
+      ...stats.protectedObjectTypeCounts,
+    };
+  }
+
+  private buildJSCObjectTypeMetrics(
+    currentCounts: Record<string, number>,
+    previousCounts: Record<string, number>,
+  ): JSCObjectTypeMetric[] {
+    return Object.entries(currentCounts).map(([name, count]) => {
+      const previousCount = previousCounts[name] ?? count;
+      return {
+        name,
+        count,
+        previousCount,
+        growth: count - previousCount,
+      };
+    });
   }
 
   /**
@@ -322,6 +497,10 @@ export class MemoryMonitor {
         players?: { length?: number; size?: number };
       };
       systemsByName?: Map<string, unknown>;
+      getSystem?: (name: string) => unknown;
+      getEventBus?: () => {
+        getPendingHandlerCount?: () => number;
+      };
     };
 
     // Track entity counts
@@ -333,6 +512,167 @@ export class MemoryMonitor {
       this.trackCollectionSize(
         "world.entities.players",
         worldRecord.entities.players,
+      );
+    }
+
+    const eventBus = worldRecord.getEventBus?.();
+    if (eventBus?.getPendingHandlerCount) {
+      this.trackCollectionSize("World.eventBus.pendingAsyncHandlers", {
+        size: eventBus.getPendingHandlerCount(),
+      });
+    }
+
+    const getSystem =
+      typeof worldRecord.getSystem === "function"
+        ? worldRecord.getSystem.bind(worldRecord)
+        : null;
+
+    const combatSystem = getSystem?.("combat") as
+      | {
+          stateService?: {
+            getCombatStatesMap?: () => Map<unknown, unknown>;
+          };
+          nextAttackTicks?: Map<unknown, unknown>;
+          playerEquipmentStats?: Map<unknown, unknown>;
+          eventStore?: {
+            getEventCount?: () => number;
+            getSnapshotCount?: () => number;
+          };
+        }
+      | undefined;
+    if (combatSystem) {
+      this.trackCollectionSize("Combat.stateService.combatStates", {
+        size: combatSystem.stateService?.getCombatStatesMap?.().size ?? 0,
+      });
+      this.trackCollectionSize(
+        "Combat.nextAttackTicks",
+        combatSystem.nextAttackTicks,
+      );
+      this.trackCollectionSize(
+        "Combat.playerEquipmentStats",
+        combatSystem.playerEquipmentStats,
+      );
+      this.trackCollectionSize("Combat.eventStore.events", {
+        size: combatSystem.eventStore?.getEventCount?.() ?? 0,
+      });
+      this.trackCollectionSize("Combat.eventStore.snapshots", {
+        size: combatSystem.eventStore?.getSnapshotCount?.() ?? 0,
+      });
+    }
+
+    const playerDeathSystem = getSystem?.("player-death") as
+      | {
+          respawnTimers?: Map<unknown, unknown>;
+          deathLocations?: Map<unknown, unknown>;
+          playerPositions?: Map<unknown, unknown>;
+          playerInventories?: Map<unknown, unknown>;
+          pendingGravestones?: Map<unknown, unknown>;
+          lastDeathTime?: Map<unknown, unknown>;
+        }
+      | undefined;
+    if (playerDeathSystem) {
+      this.trackCollectionSize(
+        "PlayerDeath.respawnTimers",
+        playerDeathSystem.respawnTimers,
+      );
+      this.trackCollectionSize(
+        "PlayerDeath.deathLocations",
+        playerDeathSystem.deathLocations,
+      );
+      this.trackCollectionSize(
+        "PlayerDeath.playerPositions",
+        playerDeathSystem.playerPositions,
+      );
+      this.trackCollectionSize(
+        "PlayerDeath.playerInventories",
+        playerDeathSystem.playerInventories,
+      );
+      this.trackCollectionSize(
+        "PlayerDeath.pendingGravestones",
+        playerDeathSystem.pendingGravestones,
+      );
+      this.trackCollectionSize(
+        "PlayerDeath.lastDeathTime",
+        playerDeathSystem.lastDeathTime,
+      );
+    }
+
+    const databaseSystem = getSystem?.("database") as
+      | {
+          pendingOperations?: Set<unknown>;
+          pendingSaveBuffer?: Map<unknown, unknown>;
+          pendingInventoryBuffer?: Map<unknown, unknown>;
+          inventoryWriteActive?: Map<unknown, unknown>;
+          inventoryWriteQueued?: Map<unknown, unknown>;
+        }
+      | undefined;
+    if (databaseSystem) {
+      this.trackCollectionSize(
+        "Database.pendingOperations",
+        databaseSystem.pendingOperations,
+      );
+      this.trackCollectionSize(
+        "Database.pendingSaveBuffer",
+        databaseSystem.pendingSaveBuffer,
+      );
+      this.trackCollectionSize(
+        "Database.pendingInventoryBuffer",
+        databaseSystem.pendingInventoryBuffer,
+      );
+      this.trackCollectionSize(
+        "Database.inventoryWriteActive",
+        databaseSystem.inventoryWriteActive,
+      );
+      this.trackCollectionSize(
+        "Database.inventoryWriteQueued",
+        databaseSystem.inventoryWriteQueued,
+      );
+    }
+
+    const terrainSystem = getSystem?.("terrain") as
+      | {
+          terrainTiles?: Map<unknown, unknown>;
+          pendingTileKeys?: unknown[];
+          pendingTileSet?: Set<unknown>;
+          pendingCollisionKeys?: unknown[];
+          pendingCollisionSet?: Set<unknown>;
+          pendingWorkerTiles?: unknown[];
+          pendingWorkerResults?: Map<unknown, unknown>;
+          pendingResourceInstances?: unknown[];
+        }
+      | undefined;
+    if (terrainSystem) {
+      this.trackCollectionSize(
+        "Terrain.terrainTiles",
+        terrainSystem.terrainTiles,
+      );
+      this.trackCollectionSize(
+        "Terrain.pendingTileKeys",
+        terrainSystem.pendingTileKeys,
+      );
+      this.trackCollectionSize(
+        "Terrain.pendingTileSet",
+        terrainSystem.pendingTileSet,
+      );
+      this.trackCollectionSize(
+        "Terrain.pendingCollisionKeys",
+        terrainSystem.pendingCollisionKeys,
+      );
+      this.trackCollectionSize(
+        "Terrain.pendingCollisionSet",
+        terrainSystem.pendingCollisionSet,
+      );
+      this.trackCollectionSize(
+        "Terrain.pendingWorkerTiles",
+        terrainSystem.pendingWorkerTiles,
+      );
+      this.trackCollectionSize(
+        "Terrain.pendingWorkerResults",
+        terrainSystem.pendingWorkerResults,
+      );
+      this.trackCollectionSize(
+        "Terrain.pendingResourceInstances",
+        terrainSystem.pendingResourceInstances,
       );
     }
 
@@ -430,6 +770,8 @@ export class MemoryMonitor {
     collectionCount: number;
     leakWarningCount: number;
     recentWarnings: LeakWarning[];
+    jscHeapStatsEnabled: boolean;
+    currentJSCHeap: JSCHeapSummary | null;
   } {
     const currentMemory = this.samples[this.samples.length - 1] ?? null;
     let memoryTrend: "stable" | "growing" | "shrinking" = "stable";
@@ -467,6 +809,8 @@ export class MemoryMonitor {
       collectionCount: this.collectionMetrics.size,
       leakWarningCount: this.leakWarnings.length,
       recentWarnings,
+      jscHeapStatsEnabled: this.jscHeapStatsEnabled,
+      currentJSCHeap: this.jscHeapSummary,
     };
   }
 
@@ -486,11 +830,21 @@ export class MemoryMonitor {
     return [...this.samples];
   }
 
+  getJSCHeapSummary(): JSCHeapSummary | null {
+    return this.jscHeapSummary;
+  }
+
   /**
    * Trigger a manual garbage collection (if available)
    */
   forceGC(): boolean {
     try {
+      if (this.bunJSC?.fullGC) {
+        this.bunJSC.fullGC();
+        this.bunJSC.gcAndSweep?.();
+        return true;
+      }
+
       const globalWithBun = globalThis as typeof globalThis & {
         Bun?: { gc?: (force?: boolean) => void };
       };
@@ -539,8 +893,26 @@ export class MemoryMonitor {
       console.log(`[MemoryMonitor] Writing heap snapshot to ${filepath}...`);
       const startTime = Date.now();
 
-      // v8.writeHeapSnapshot returns the filename
-      const actualPath = v8.writeHeapSnapshot(filepath);
+      let actualPath = filepath;
+      const globalWithBun = globalThis as typeof globalThis & {
+        Bun?: {
+          generateHeapSnapshot?: (
+            format: "v8",
+            encoding: "arraybuffer",
+          ) => ArrayBuffer;
+        };
+      };
+
+      if (globalWithBun.Bun?.generateHeapSnapshot) {
+        const snapshot = globalWithBun.Bun.generateHeapSnapshot(
+          "v8",
+          "arraybuffer",
+        );
+        fs.writeFileSync(filepath, Buffer.from(snapshot));
+      } else {
+        // v8.writeHeapSnapshot returns the filename
+        actualPath = v8.writeHeapSnapshot(filepath);
+      }
 
       const duration = Date.now() - startTime;
       const stats = fs.statSync(actualPath);
@@ -641,6 +1013,36 @@ export class MemoryMonitor {
       lines.push(
         `  External: ${(stats.currentMemory.external / MB).toFixed(1)} MB`,
       );
+    }
+
+    if (stats.currentJSCHeap) {
+      lines.push("");
+      lines.push("JSC Heap:");
+      lines.push(
+        `  Heap Size: ${(stats.currentJSCHeap.heapSize / MB).toFixed(1)} MB`,
+      );
+      lines.push(
+        `  Heap Capacity: ${(stats.currentJSCHeap.heapCapacity / MB).toFixed(1)} MB`,
+      );
+      lines.push(
+        `  Extra Memory: ${(stats.currentJSCHeap.extraMemorySize / MB).toFixed(1)} MB`,
+      );
+      lines.push(`  Objects: ${stats.currentJSCHeap.objectCount}`);
+      lines.push(
+        `  Protected Objects: ${stats.currentJSCHeap.protectedObjectCount}`,
+      );
+      if (stats.currentJSCHeap.growingObjectTypes.length > 0) {
+        lines.push("  Fastest Growing Types:");
+        for (const metric of stats.currentJSCHeap.growingObjectTypes.slice(
+          0,
+          8,
+        )) {
+          lines.push(`    ${metric.name}: ${metric.count} (+${metric.growth})`);
+        }
+      }
+    } else if (!stats.jscHeapStatsEnabled) {
+      lines.push("");
+      lines.push("JSC Heap: disabled");
     }
 
     const collections = this.getCollectionMetrics();

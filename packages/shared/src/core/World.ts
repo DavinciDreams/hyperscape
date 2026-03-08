@@ -129,6 +129,16 @@ function _isNetworkWithSocket(
   );
 }
 
+interface AsyncTickCallMetric {
+  label: string;
+  phase: "fixedUpdate" | "update" | "lateUpdate";
+  observed: number;
+  inFlight: number;
+  peakInFlight: number;
+  rejections: number;
+  lastSeenAt: number;
+}
+
 /**
  * World - Central Game World Container
  *
@@ -1429,6 +1439,7 @@ export class World extends EventEmitter {
 
   /** Maximum samples to keep for averaging */
   private readonly _maxTimingSamples = 30;
+  private _asyncTickCallMetrics = new Map<string, AsyncTickCallMetric>();
 
   /**
    * Enable system timing measurement
@@ -1484,6 +1495,59 @@ export class World extends EventEmitter {
     // Sort by average time (slowest first)
     result.sort((a, b) => b.avg - a.avg);
     return result;
+  }
+
+  getAsyncTickDiagnostics(limit: number = 20): AsyncTickCallMetric[] {
+    return Array.from(this._asyncTickCallMetrics.values())
+      .sort((a, b) => {
+        if (b.inFlight !== a.inFlight) {
+          return b.inFlight - a.inFlight;
+        }
+        if (b.peakInFlight !== a.peakInFlight) {
+          return b.peakInFlight - a.peakInFlight;
+        }
+        return b.observed - a.observed;
+      })
+      .slice(0, limit)
+      .map((metric) => ({ ...metric }));
+  }
+
+  private trackAsyncTickResult(
+    phase: AsyncTickCallMetric["phase"],
+    label: string,
+    result: unknown,
+  ): void {
+    if (!result || typeof result !== "object" || !("then" in result)) {
+      return;
+    }
+
+    const promiseLike = result as Promise<unknown>;
+    const metricLabel = `${phase}:${label}`;
+    const metric = this._asyncTickCallMetrics.get(metricLabel) ?? {
+      label,
+      phase,
+      observed: 0,
+      inFlight: 0,
+      peakInFlight: 0,
+      rejections: 0,
+      lastSeenAt: 0,
+    };
+
+    metric.observed++;
+    metric.inFlight++;
+    metric.lastSeenAt = Date.now();
+    if (metric.inFlight > metric.peakInFlight) {
+      metric.peakInFlight = metric.inFlight;
+    }
+    this._asyncTickCallMetrics.set(metricLabel, metric);
+
+    promiseLike
+      .catch(() => {
+        metric.rejections++;
+      })
+      .finally(() => {
+        metric.inFlight = Math.max(0, metric.inFlight - 1);
+      });
   }
 
   /**
@@ -1587,7 +1651,12 @@ export class World extends EventEmitter {
     // Iterate Set directly instead of Array.from to avoid allocation each frame
     for (const item of this.hot) {
       if (item.fixedUpdate) {
-        item.fixedUpdate(delta);
+        const result = item.fixedUpdate(delta);
+        this.trackAsyncTickResult(
+          "fixedUpdate",
+          `hot:${item.constructor?.name || "anonymous"}`,
+          result,
+        );
       }
     }
 
@@ -1596,7 +1665,12 @@ export class World extends EventEmitter {
       for (let i = 0; i < this.systems.length; i++) {
         const system = this.systems[i];
         const start = performance.now();
-        system.fixedUpdate(delta);
+        const result = system.fixedUpdate(delta);
+        this.trackAsyncTickResult(
+          "fixedUpdate",
+          this._getSystemName(system),
+          result,
+        );
         const elapsed = performance.now() - start;
         const name = this._getSystemName(system);
         this.recordSystemTiming(name, "fixedUpdate", elapsed);
@@ -1604,7 +1678,12 @@ export class World extends EventEmitter {
     } else {
       // Fast path: no timing
       for (const system of this.systems) {
-        system.fixedUpdate(delta);
+        const result = system.fixedUpdate(delta);
+        this.trackAsyncTickResult(
+          "fixedUpdate",
+          this._getSystemName(system),
+          result,
+        );
       }
     }
   }
@@ -1637,7 +1716,12 @@ export class World extends EventEmitter {
   private update(delta: number, _alpha: number): void {
     // Iterate Set directly instead of Array.from to avoid allocation each frame
     for (const item of this.hot) {
-      item.update(delta);
+      const result = item.update(delta);
+      this.trackAsyncTickResult(
+        "update",
+        `hot:${item.constructor?.name || "anonymous"}`,
+        result,
+      );
     }
 
     if (this._measureSystemTiming) {
@@ -1645,7 +1729,12 @@ export class World extends EventEmitter {
       for (let i = 0; i < this.systems.length; i++) {
         const system = this.systems[i];
         const start = performance.now();
-        system.update(delta);
+        const result = system.update(delta);
+        this.trackAsyncTickResult(
+          "update",
+          this._getSystemName(system),
+          result,
+        );
         const elapsed = performance.now() - start;
         const name = this._getSystemName(system);
         this.recordSystemTiming(name, "update", elapsed);
@@ -1653,7 +1742,12 @@ export class World extends EventEmitter {
     } else {
       // Fast path: no timing
       for (const system of this.systems) {
-        system.update(delta);
+        const result = system.update(delta);
+        this.trackAsyncTickResult(
+          "update",
+          this._getSystemName(system),
+          result,
+        );
       }
     }
   }
@@ -1699,7 +1793,12 @@ export class World extends EventEmitter {
     // Iterate Set directly instead of Array.from to avoid allocation each frame
     for (const item of this.hot) {
       if (item.lateUpdate) {
-        item.lateUpdate(delta);
+        const result = item.lateUpdate(delta);
+        this.trackAsyncTickResult(
+          "lateUpdate",
+          `hot:${item.constructor?.name || "anonymous"}`,
+          result,
+        );
       }
     }
 
@@ -1708,7 +1807,12 @@ export class World extends EventEmitter {
       for (let i = 0; i < this.systems.length; i++) {
         const system = this.systems[i];
         const start = performance.now();
-        system.lateUpdate(delta);
+        const result = system.lateUpdate(delta);
+        this.trackAsyncTickResult(
+          "lateUpdate",
+          this._getSystemName(system),
+          result,
+        );
         const elapsed = performance.now() - start;
         const name = this._getSystemName(system);
         this.recordSystemTiming(name, "lateUpdate", elapsed);
@@ -1716,7 +1820,12 @@ export class World extends EventEmitter {
     } else {
       // Fast path: no timing
       for (const system of this.systems) {
-        system.lateUpdate(delta);
+        const result = system.lateUpdate(delta);
+        this.trackAsyncTickResult(
+          "lateUpdate",
+          this._getSystemName(system),
+          result,
+        );
       }
     }
   }

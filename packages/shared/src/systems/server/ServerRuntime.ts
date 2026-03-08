@@ -168,7 +168,7 @@ export class ServerRuntime extends System {
 
       // Schedule next check
       this.scheduleTick();
-    });
+    }, delay);
   }
 
   /**

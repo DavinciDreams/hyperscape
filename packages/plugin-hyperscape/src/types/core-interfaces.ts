@@ -53,6 +53,7 @@ export interface IHyperscapeService extends Service {
   getPlayerEntity(): Player | null;
   getNearbyEntities(): Entity[];
   getGameState(): unknown;
+  getWorldMapSignature(): string | null;
 
   // Command execution
   executeMove(command: { target: Position; runMode?: boolean }): Promise<void>;
