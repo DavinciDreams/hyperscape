@@ -33,7 +33,7 @@ git pull origin main
 
 # ── Install system dependencies (needed for native modules) ───
 echo "[deploy] Installing system build dependencies..."
-apt-get update && apt-get install -y build-essential python3 socat xvfb git-lfs ffmpeg wget gnupg || true
+apt-get update && apt-get install -y build-essential python3 socat xvfb git-lfs ffmpeg wget gnupg iproute2 lsof || true
 git lfs install || true
 
 # ── Install Chrome Dev channel (has WebGPU enabled by default) ─
@@ -78,6 +78,7 @@ pkill -f "chrome" || true
 # Kill node processes that might hold DB connections (not bun itself)
 pkill -f "node.*packages/server" || true
 pkill -f "drizzle" || true
+rm -f /root/hyperscape/.runtime-locks/rtmp-status.json || true
 
 # Wait for database connections to be released by Neon pooler
 echo "[deploy] Waiting 30s for database connections to clear..."

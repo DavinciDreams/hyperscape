@@ -311,6 +311,7 @@ async function waitForStreamReadiness(
 ): Promise<boolean> {
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;
+  const hardFallbackMs = Math.max(10_000, Math.min(timeoutMs - 5_000, 30_000));
 
   while (Date.now() < deadline) {
     try {
@@ -337,14 +338,22 @@ async function waitForStreamReadiness(
         return true;
       }
 
-      // Allow capture once we have a canvas and the stream boot/loading UI has
-      // cleared (the old gate accepted any canvas, which could lock us at 3%).
-      if (probe.hasCanvas && !probe.hasStreamingBootUi) {
+      // Streaming is better than waiting forever for a "perfect" ready state.
+      // Once a canvas exists, allow a short boot window and then start capture
+      // even if the loading UI is still present.
+      if (
+        probe.hasCanvas &&
+        (!probe.hasStreamingBootUi || Date.now() - startedAt >= 5_000)
+      ) {
         return true;
       }
 
-      // Hard fallback after sustained boot-screen presence to avoid deadlock.
-      if (probe.hasStreamingBootUi && Date.now() - startedAt >= 180_000) {
+      // Final fallback in case the page never exposes a canvas but the boot UI
+      // is clearly alive.
+      if (
+        probe.hasStreamingBootUi &&
+        Date.now() - startedAt >= hardFallbackMs
+      ) {
         return true;
       }
     } catch (err) {
@@ -435,6 +444,12 @@ async function launchCaptureBrowser() {
 async function setupBrowser() {
   if (browser) await cleanup();
 
+  const streamReadyTimeoutMs = Math.max(
+    10_000,
+    Number.parseInt(process.env.STREAM_READY_TIMEOUT_MS || "30000", 10) ||
+      30_000,
+  );
+
   console.log(
     `[Main] Launching browser (headless=${STREAM_CAPTURE_HEADLESS}, angle=${ANGLE_BACKEND}${STREAM_CAPTURE_CHANNEL ? `, channel=${STREAM_CAPTURE_CHANNEL}` : ""}, mode=${CAPTURE_MODE})...`,
   );
@@ -524,7 +539,7 @@ async function setupBrowser() {
       }
 
       console.log(`[Main] Waiting for stream readiness on ${candidateUrl}...`);
-      const isReady = await waitForStreamReadiness(page, 90_000);
+      const isReady = await waitForStreamReadiness(page, streamReadyTimeoutMs);
       if (isReady) {
         selectedGameUrl = candidateUrl;
         break;
@@ -587,25 +602,33 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
   startFpsTracking();
 
   // Handle incoming frames from CDP
-  cdpSession.on("Page.screencastFrame", async (params) => {
-    const { sessionId, data: base64Data } = params;
+  cdpSession.on("Page.screencastFrame", (params) => {
+    void (async () => {
+      try {
+        const { sessionId, data: base64Data } = params;
 
-    // Acknowledge the frame immediately to request the next one
-    try {
-      await cdpSession?.send("Page.screencastFrameAck", { sessionId });
-    } catch {
-      // Session may have been destroyed during page navigation
-    }
+        // Acknowledge the frame immediately to request the next one
+        try {
+          await cdpSession?.send("Page.screencastFrameAck", { sessionId });
+        } catch {
+          // Session may have been destroyed during page navigation
+        }
 
-    // Decode base64 JPEG and feed to FFmpeg
-    const jpegBuffer = Buffer.from(base64Data, "base64");
-    const written = bridge.feedFrame(jpegBuffer);
+        // Decode base64 JPEG and feed to FFmpeg
+        const jpegBuffer = Buffer.from(base64Data, "base64");
+        const written = bridge.feedFrame(jpegBuffer);
 
-    if (written) {
-      cdpFrameCount++;
-    } else {
-      cdpDroppedFrames++;
-    }
+        if (written) {
+          cdpFrameCount++;
+        } else {
+          cdpDroppedFrames++;
+        }
+      } catch (err) {
+        if (!isTransientPageEvalError(err)) {
+          console.warn("[CDP] Frame handling error:", errMsg(err));
+        }
+      }
+    })();
   });
 
   // Start the screencast
@@ -618,6 +641,25 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
   });
 
   console.log("[CDP] ✅ Screencast capture started — frames piping to FFmpeg");
+}
+
+async function startCdpCaptureWithRecovery(
+  bridge: ReturnType<typeof getRTMPBridge>,
+): Promise<void> {
+  try {
+    await startCdpCapture(bridge);
+  } catch (err) {
+    if (!isTransientPageEvalError(err)) {
+      throw err;
+    }
+
+    console.warn(
+      `[CDP] Initial screencast setup failed (${errMsg(err)}); retrying with a fresh browser session...`,
+    );
+    await stopCdpCapture().catch(() => undefined);
+    await setupBrowser();
+    await startCdpCaptureWithRecovery(bridge);
+  }
 }
 
 async function stopCdpCapture() {
@@ -907,27 +949,73 @@ async function main() {
   let lastCdpBytesReceived = 0;
   let cdpRecoveryInFlight = false;
   let cdpRecoveryFailures = 0;
+  let browserCaptureStalledIntervals = 0;
+  let lastBrowserBytesReceived = 0;
+  let browserCaptureRecoveryInFlight = false;
+
+  const fallbackBrowserCaptureToCdp = async (
+    reason: string,
+  ): Promise<boolean> => {
+    if (browserCaptureRecoveryInFlight) {
+      console.warn(
+        "[Main] Browser capture fallback already in progress; skipping duplicate request.",
+      );
+      return false;
+    }
+
+    browserCaptureRecoveryInFlight = true;
+    console.warn(`[Main] ${reason} Falling back to CDP capture.`);
+
+    try {
+      if (captureWatchdog) {
+        clearInterval(captureWatchdog);
+        captureWatchdog = null;
+      }
+      await withTimeout(
+        stopInPageCaptureControl(),
+        5_000,
+        "Stop browser capture control",
+      ).catch(() => undefined);
+      bridge.stop();
+      bridge.startSpectatorServer(SPECTATOR_PORT);
+      await withTimeout(
+        (async () => {
+          await setupBrowser();
+          await startCdpCaptureWithRecovery(bridge);
+        })(),
+        CAPTURE_RECOVERY_TIMEOUT_MS,
+        "Browser capture fallback to CDP",
+      );
+      activeCaptureMode = "cdp";
+      cdpStalledIntervals = 0;
+      cdpRecoveryFailures = 0;
+      browserCaptureStalledIntervals = 0;
+      lastBrowserBytesReceived = 0;
+      lastCdpBytesReceived = bridge.getStats().bytesReceived;
+      console.log("[Main] Browser capture fallback to CDP complete");
+      return true;
+    } catch (err) {
+      console.error(
+        "[Main] Browser capture fallback to CDP failed:",
+        errMsg(err),
+      );
+      return false;
+    } finally {
+      browserCaptureRecoveryInFlight = false;
+    }
+  };
 
   if (CAPTURE_MODE === "cdp") {
     // ── CDP Mode: Direct screencast frame piping ──
-    await startCdpCapture(bridge);
+    await startCdpCaptureWithRecovery(bridge);
   } else if (CAPTURE_MODE === "webcodecs") {
     // ── WebCodecs Mode: Native VideoEncoder API to FFmpeg -c:v copy ──
     captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
     const healthy = await waitForCaptureTraffic(bridge, 20000);
     if (!healthy) {
-      console.warn(
-        "[Main] WebCodecs capture produced no media within 20s; falling back to CDP screencast capture.",
+      await fallbackBrowserCaptureToCdp(
+        "WebCodecs capture produced no media within 20s.",
       );
-      if (captureWatchdog) {
-        clearInterval(captureWatchdog);
-        captureWatchdog = null;
-      }
-      await stopInPageCaptureControl();
-      bridge.stop();
-      bridge.startSpectatorServer(SPECTATOR_PORT);
-      await startCdpCapture(bridge);
-      activeCaptureMode = "cdp";
     }
   } else {
     // ── Legacy Mode: MediaRecorder + WebSocket ──
@@ -1011,7 +1099,7 @@ async function main() {
             (async () => {
               await stopCdpCapture();
               await setupBrowser();
-              await startCdpCapture(bridge);
+              await startCdpCaptureWithRecovery(bridge);
             })(),
             CAPTURE_RECOVERY_TIMEOUT_MS,
             "CDP restart",
@@ -1066,6 +1154,9 @@ async function main() {
     } else {
       try {
         const captureStatus = await getBrowserCaptureStatus();
+        const bytesDelta = stats.bytesReceived - lastBrowserBytesReceived;
+        lastBrowserBytesReceived = stats.bytesReceived;
+        const hasMeaningfulTraffic = bytesDelta > 16 * 1024;
         if (captureStatus) {
           console.log("[Status] Capture:", captureStatus);
           if (typeof captureStatus.captureFps === "number") {
@@ -1081,6 +1172,26 @@ async function main() {
         console.log(
           `[Stream Health] BridgeDrops: ${stats.droppedFrames} | Backpressure: ${stats.backpressured ? "ON" : "off"}`,
         );
+
+        if (activeCaptureMode === "webcodecs") {
+          const captureLooksConnected =
+            captureStatus?.recording === true ||
+            captureStatus?.wsConnected === true;
+          const captureLooksHealthy =
+            bridgeStatus.ffmpegRunning && hasMeaningfulTraffic;
+          if (captureLooksHealthy || !captureLooksConnected) {
+            browserCaptureStalledIntervals = 0;
+          } else {
+            browserCaptureStalledIntervals += 1;
+          }
+
+          if (browserCaptureStalledIntervals >= 2) {
+            browserCaptureStalledIntervals = 0;
+            await fallbackBrowserCaptureToCdp(
+              "WebCodecs capture stalled after startup.",
+            );
+          }
+        }
       } catch {
         console.log("[Status] Capture: unavailable");
       }
@@ -1110,7 +1221,7 @@ async function main() {
           }
           await setupBrowser();
           if (activeCaptureMode === "cdp") {
-            await startCdpCapture(bridge);
+            await startCdpCaptureWithRecovery(bridge);
           } else if (activeCaptureMode === "mediarecorder") {
             captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
           }

@@ -48,7 +48,7 @@ module.exports = {
                 // Skip DB migrations on startup (deploy applies checked-in migrations first).
                 SKIP_MIGRATIONS: "true",
                 STREAMING_DUEL_ENABLED: "true",
-                DUEL_MARKET_MAKER_ENABLED: "true",
+                DUEL_MARKET_MAKER_ENABLED: "false",
                 DUEL_BETTING_ENABLED: "false",
                 ARENA_SERVICE_ENABLED: "false",
                 DUEL_SKIP_CHAIN_SETUP: "true",

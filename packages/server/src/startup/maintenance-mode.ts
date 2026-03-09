@@ -164,7 +164,7 @@ export function getMaintenanceStatus(): MaintenanceStatus {
     currentPhase === "FIGHTING" ||
     currentPhase === "COUNTDOWN" ||
     currentPhase === "ANNOUNCEMENT";
-  const hasPendingMarkets = pendingMarkets > 0 && marketStatus !== "resolved";
+  const hasPendingMarkets = pendingMarkets > 0;
 
   const safeToDeploy =
     maintenanceState.active && !inActiveDuel && !hasPendingMarkets;

@@ -1207,7 +1207,22 @@ function getListeningPids(port) {
       .map((value) => Number.parseInt(value, 10))
       .filter((pid) => Number.isFinite(pid) && pid > 0 && pid !== process.pid);
   } catch {
-    return [];
+    try {
+      const output = execFileSync(
+        "ss",
+        ["-ltnp", `sport = :${port}`],
+        { encoding: "utf8" },
+      );
+      const pids = Array.from(
+        output.matchAll(/pid=(\d+)/g),
+        (match) => Number.parseInt(match[1], 10),
+      ).filter(
+        (pid) => Number.isFinite(pid) && pid > 0 && pid !== process.pid,
+      );
+      return Array.from(new Set(pids));
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -1804,7 +1819,7 @@ async function main() {
   }
 
   if (!options["skip-stream"]) {
-    startStreamBridge();
+    await startStreamBridge();
   }
 
   if (!skipBettingApp && hyperbetEnabled && hyperbetAvailable) {
@@ -1858,8 +1873,16 @@ async function main() {
     );
   }
 
-  function startStreamBridge() {
+  async function startStreamBridge() {
     log("starting RTMP bridge + local HLS fanout...");
+    await terminateProcessesByCommandPatterns(
+      [
+        "bun run --cwd packages/server stream:rtmp",
+        "packages/server/scripts/stream-to-rtmp.ts",
+        "bun scripts/stream-to-rtmp.ts",
+      ],
+      "duel/rtmp-bridge",
+    );
     const defaultCaptureHeadless =
       process.platform === "linux" ? "false" : "true";
     const captureHeadless = (
@@ -1899,10 +1922,11 @@ async function main() {
       HLS_FLAGS:
         process.env.HLS_FLAGS ||
         "delete_segments+append_list+independent_segments+program_date_time+omit_endlist+temp_file",
-      // Prefer WebCodecs by default for lower CPU and smoother 720p stream.
+      // Vast has been more reliable with CDP capture than WebCodecs. Keep
+      // WebCodecs opt-in via env until the Linux encoder path is proven stable.
       STREAM_CAPTURE_MODE:
         process.env.STREAM_CAPTURE_MODE ||
-        (process.platform === "linux" ? "webcodecs" : "cdp"),
+        "cdp",
       STREAM_CAPTURE_CHANNEL:
         process.env.STREAM_CAPTURE_CHANNEL ||
         (process.platform === "linux"
@@ -1947,6 +1971,10 @@ async function main() {
     const captureHeadlessForLaunch = (
       streamEnv.STREAM_CAPTURE_HEADLESS || "true"
     ).toLowerCase() === "true";
+    const spectatorPort = Number.parseInt(
+      process.env.SPECTATOR_PORT || "4180",
+      10,
+    );
 
     // Check if we already have a properly configured DISPLAY (e.g., from deploy-vast.sh)
     // If DISPLAY is already set (e.g., :99), use it directly instead of spawning a new Xvfb
@@ -1964,6 +1992,17 @@ async function main() {
       log(`using existing display ${existingDisplay} (not spawning new Xvfb)`);
       streamEnv.DISPLAY = existingDisplay;
     }
+
+    await clearUnhealthyListener(
+      "rtmp bridge websocket",
+      `http://127.0.0.1:${rtmpPort}`,
+      true,
+    );
+    await clearUnhealthyListener(
+      "rtmp spectator websocket",
+      `http://127.0.0.1:${spectatorPort}`,
+      true,
+    );
 
     const rtmpCommand = useXvfbForCapture ? "xvfb-run" : "bun";
     const rtmpArgs = useXvfbForCapture
