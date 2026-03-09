@@ -91,6 +91,7 @@ module.exports = {
       env: {
         ...runtimeEnv,
         NODE_ENV: "production",
+        DISPLAY: process.env.DISPLAY || ":99",
         POSTGRES_POOL_MAX: "1",
         POSTGRES_POOL_MIN: "0",
         SKIP_MIGRATIONS: "true",
