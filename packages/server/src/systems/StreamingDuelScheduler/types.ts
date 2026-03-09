@@ -44,9 +44,13 @@ export interface StreamingDuelCycle {
 
   // Active duel tracking
   duelId: string | null;
+  duelKeyHex: string | null;
   arenaId: number | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
   countdownValue: number | null; // 3, 2, 1, 0
   fightStartTime: number | null;
+  duelEndTime: number | null;
   arenaPositions: {
     agent1: [number, number, number];
     agent2: [number, number, number];
@@ -56,6 +60,8 @@ export interface StreamingDuelCycle {
   winnerId: string | null;
   loserId: string | null;
   winReason: "kill" | "hp_advantage" | "damage_advantage" | "draw" | null;
+  seed: string | null;
+  replayHash: string | null;
 }
 
 export interface AgentDuelStats {
@@ -130,8 +136,13 @@ export interface StreamingStateUpdate {
     agent1: StreamingCycleAgent | null;
     agent2: StreamingCycleAgent | null;
 
+    duelId: string | null;
+    duelKeyHex: string | null;
+    betOpenTime: number | null;
+    betCloseTime: number | null;
     countdown: number | null;
     fightStartTime: number | null;
+    duelEndTime: number | null;
     arenaPositions: {
       agent1: [number, number, number];
       agent2: [number, number, number];
@@ -139,6 +150,8 @@ export interface StreamingStateUpdate {
     winnerId: string | null;
     winnerName: string | null;
     winReason: string | null;
+    seed: string | null;
+    replayHash: string | null;
   };
   leaderboard: LeaderboardEntry[];
   cameraTarget: string | null;

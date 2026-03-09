@@ -58,8 +58,13 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const KNOWN_CROSS_ORIGIN_PATTERNS = [
   /^https?:\/\/(www\.)?hyperscape\.gg$/,
   /^https?:\/\/(www\.)?hyperbet\.win$/,
-  /^https?:\/\/.+\.hyperscape\.pages\.dev$/,
+  /^https?:\/\/(www\.)?bsc\.hyperbet\.win$/,
+  /^https?:\/\/(www\.)?hyperscape-betting\.pages\.dev$/,
   /^https?:\/\/.+\.hyperscape-betting\.pages\.dev$/,
+  /^https?:\/\/.+\.hyperbet\.pages\.dev$/,
+  /^https?:\/\/.+\.hyperbet-solana\.pages\.dev$/,
+  /^https?:\/\/.+\.hyperbet-bsc\.pages\.dev$/,
+  /^https?:\/\/.+\.hyperscape\.pages\.dev$/,
 ];
 
 /**

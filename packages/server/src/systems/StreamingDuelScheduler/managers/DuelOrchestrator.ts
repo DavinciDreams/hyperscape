@@ -19,7 +19,7 @@ import {
   getDuelArenaConfig,
   isPositionInsideCombatArena,
 } from "@hyperscape/shared";
-import { DuelCombatAI } from "../../../arena/DuelCombatAI.js";
+import { DuelCombatAI } from "../../../duel/DuelCombatAI.js";
 import {
   type StreamingDuelCycle,
   type AgentContestant,
@@ -1937,6 +1937,9 @@ export class DuelOrchestrator {
     // Emit fight start (streaming-specific event for spectator UI)
     this.world.emit("streaming:fight:start", {
       cycleId: cycle.cycleId,
+      duelId: cycle.duelId ?? `streaming-${cycle.cycleId}`,
+      duelKeyHex: cycle.duelKeyHex,
+      fightStartTime: now,
       agent1Id: agent1?.characterId,
       agent2Id: agent2?.characterId,
       duration:

@@ -1,0 +1,149 @@
+export type DuelArenaOracleProfile = "testnet" | "mainnet" | "all";
+
+export type DuelArenaOracleChainKey =
+  | "baseSepolia"
+  | "bscTestnet"
+  | "avaxFuji"
+  | "base"
+  | "bsc"
+  | "avax"
+  | "solanaDevnet"
+  | "solanaMainnet";
+
+export type DuelArenaOracleStatus =
+  | "BETTING_OPEN"
+  | "LOCKED"
+  | "RESOLVED"
+  | "CANCELLED";
+
+export type DuelArenaOracleWinnerSide = "A" | "B";
+
+export interface DuelArenaOracleParticipant {
+  id: string;
+  name: string;
+  hashHex: string;
+}
+
+export interface DuelArenaOracleChainState {
+  target: DuelArenaOracleChainKey;
+  kind: "evm" | "solana";
+  label: string;
+  lastAction: "UPSERT" | "RESOLVE" | "CANCEL" | null;
+  lastTxHash: string | null;
+  lastError: string | null;
+  updatedAt: string;
+}
+
+export interface DuelArenaOracleRecord {
+  duelId: string;
+  cycleId: string;
+  duelKeyHex: string;
+  status: DuelArenaOracleStatus;
+  metadataUri: string;
+  participantA: DuelArenaOracleParticipant;
+  participantB: DuelArenaOracleParticipant;
+  betOpenTime: number;
+  betCloseTime: number;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  winnerId: string | null;
+  loserId: string | null;
+  winnerSide: DuelArenaOracleWinnerSide | null;
+  winnerName: string | null;
+  loserName: string | null;
+  winReason: "kill" | "hp_advantage" | "damage_advantage" | "draw" | null;
+  seed: string | null;
+  replayHashHex: string | null;
+  resultHashHex: string | null;
+  chainState: Partial<
+    Record<DuelArenaOracleChainKey, DuelArenaOracleChainState>
+  >;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DuelArenaOracleStoreFile {
+  updatedAt: string;
+  records: DuelArenaOracleRecord[];
+}
+
+export interface DuelArenaOracleAnnouncementEvent {
+  cycleId: string;
+  duelId: string;
+  duelKeyHex: string;
+  betOpenTime: number;
+  betCloseTime: number;
+  agent1: {
+    id: string;
+    name: string;
+  };
+  agent2: {
+    id: string;
+    name: string;
+  };
+}
+
+export interface DuelArenaOracleFightStartEvent {
+  cycleId: string;
+  duelId: string;
+  duelKeyHex: string;
+  fightStartTime: number;
+  agent1Id: string | null;
+  agent2Id: string | null;
+  duration: number;
+}
+
+export interface DuelArenaOracleResolutionEvent {
+  cycleId: string;
+  duelId: string;
+  duelKeyHex: string;
+  duelEndTime: number;
+  winnerId: string;
+  loserId: string;
+  winnerName: string;
+  loserName: string;
+  winReason: "kill" | "hp_advantage" | "damage_advantage" | "draw";
+  seed: string | null;
+  replayHash: string | null;
+}
+
+export interface DuelArenaOracleAbortEvent {
+  cycleId: string;
+  duelId: string;
+  duelKeyHex: string;
+  reason: string;
+  agent1Id: string | null;
+  agent2Id: string | null;
+  agent1Name: string | null;
+  agent2Name: string | null;
+}
+
+export interface DuelArenaOracleEvmTargetConfig {
+  key: Extract<
+    DuelArenaOracleChainKey,
+    "baseSepolia" | "bscTestnet" | "avaxFuji" | "base" | "bsc" | "avax"
+  >;
+  label: string;
+  rpcUrl: string;
+  contractAddress: `0x${string}`;
+  privateKey: `0x${string}`;
+}
+
+export interface DuelArenaOracleSolanaTargetConfig {
+  key: Extract<DuelArenaOracleChainKey, "solanaDevnet" | "solanaMainnet">;
+  label: string;
+  rpcUrl: string;
+  wsUrl: string;
+  programId: string;
+  authoritySecret: string | null;
+  reporterSecret: string | null;
+}
+
+export interface DuelArenaOracleConfig {
+  enabled: boolean;
+  profile: DuelArenaOracleProfile;
+  metadataBaseUrl: string;
+  storePath: string;
+  evmTargets: DuelArenaOracleEvmTargetConfig[];
+  solanaTargets: DuelArenaOracleSolanaTargetConfig[];
+}

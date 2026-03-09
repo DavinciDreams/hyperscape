@@ -1,0 +1,48 @@
+{
+  "name": "@hyperscapeai/duel-oracle-solana",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Canonical Hyperscape Solana duel oracle program, IDL, and PDA helpers",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hyperscapeai/hyperscape.git",
+    "directory": "packages/duel-oracle-solana"
+  },
+  "files": [
+    "dist",
+    "anchor/Anchor.toml",
+    "anchor/Cargo.lock",
+    "anchor/Cargo.toml",
+    "anchor/package.json",
+    "anchor/programs/fight_oracle",
+    "anchor/scripts/build-workspace.sh",
+    "anchor/scripts/deploy-fight-oracle.sh",
+    "anchor/vendor"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "anchor:build": "bash anchor/scripts/build-workspace.sh",
+    "anchor:deploy:devnet": "bash anchor/scripts/deploy-fight-oracle.sh devnet",
+    "anchor:deploy:testnet": "bash anchor/scripts/deploy-fight-oracle.sh testnet",
+    "anchor:deploy:mainnet": "bash anchor/scripts/deploy-fight-oracle.sh mainnet-beta",
+    "prepack": "bun run build"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

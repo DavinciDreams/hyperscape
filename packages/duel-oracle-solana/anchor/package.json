@@ -1,0 +1,11 @@
+{
+  "name": "duel-oracle-solana-anchor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bash scripts/build-workspace.sh",
+    "deploy:devnet": "bash scripts/deploy-fight-oracle.sh devnet",
+    "deploy:testnet": "bash scripts/deploy-fight-oracle.sh testnet",
+    "deploy:mainnet": "bash scripts/deploy-fight-oracle.sh mainnet-beta"
+  }
+}

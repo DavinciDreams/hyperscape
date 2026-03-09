@@ -6,8 +6,8 @@
  * - game server + client (streaming duel scheduler)
  * - duel bot matchmaker
  * - RTMP bridge + local HLS fanout
- * - betting app
- * - keeper bot automation
+ * - optional sibling Hyperbet app
+ * - optional sibling Hyperbet keeper automation
  */
 
 import fs from "node:fs";
@@ -40,7 +40,7 @@ const options = parseArgs({
       type: "string",
       default:
         process.env.DUEL_MM_CONFIG ||
-        "packages/market-maker-bot/wallets.generated.json",
+        "../hyperbet/packages/market-maker-bot/wallets.generated.json",
     },
     "mm-stagger-ms": {
       type: "string",
@@ -72,26 +72,26 @@ Usage:
 Options:
   -h, --help              Show this help
   -b, --bots <n>          Duel bot count (default: 4)
-  --betting-port <n>      Betting app dev port (default: 4179)
+  --betting-port <n>      Hyperbet app dev port (default: 4179)
   --rtmp-port <n>         RTMP bridge websocket port (default: 8765)
   --server-url <url>      Game HTTP base URL (default: http://localhost:5555)
   --ws-url <url>          Game WS URL (default: ws://localhost:5555/ws)
   --client-url <url>      Game client URL (default: http://localhost:3333)
-  --remote-betting        Do not start local betting app (external platform mode)
+  --remote-betting        Do not start the sibling Hyperbet app (external platform mode)
   --skip-chain-setup      Start server without setup-chain/anvil bootstrap
   --skip-keeper           Skip keeper bot
   --skip-stream           Skip RTMP/HLS bridge process
-  --skip-betting          Skip betting app
+  --skip-betting          Skip the sibling Hyperbet app
   --skip-bots             Skip duel matchmaker bots
-  --with-mm               Start market-maker bot(s) after duel stack is ready
+  --with-mm               Start sibling Hyperbet market-maker bot(s) after duel stack is ready
   --mm-mode <mode>        MM startup mode: auto|single|multi (default: auto)
-  --mm-config <path>      MM multi-wallet config path (default: packages/market-maker-bot/wallets.generated.json)
+  --mm-config <path>      MM multi-wallet config path (default: ../hyperbet/packages/market-maker-bot/wallets.generated.json)
   --mm-stagger-ms <n>     MM multi startup stagger in ms (default: 900)
   --mm-start-delay-ms <n> Delay before MM startup in ms (default: 1000)
   --fresh                 Force fresh restart of game server + client
   --verify                Run startup verification checks after boot
   --verify-timeout-ms <n> Verification timeout in ms (default: 240000)
-  --startup-timeout-ms <n> Readiness timeout for game/client/betting startup (default: 420000)
+  --startup-timeout-ms <n> Readiness timeout for game/client/Hyperbet startup (default: 420000)
   -v, --verbose           Verbose status logs
 `);
   process.exit(0);
@@ -206,11 +206,29 @@ const mmStartDelayMs = Math.max(
   0,
   Number.parseInt(options["mm-start-delay-ms"], 10) || 1000,
 );
+const hyperbetRoot = path.resolve(ROOT, "..", "hyperbet");
+const hyperbetSolanaDir = path.join(hyperbetRoot, "packages", "hyperbet-solana");
+const hyperbetAppDir = path.join(hyperbetSolanaDir, "app");
+const hyperbetMarketMakerDir = path.join(
+  hyperbetRoot,
+  "packages",
+  "market-maker-bot",
+);
+const hyperbetMarketMakerRelativeDir = path.relative(ROOT, hyperbetMarketMakerDir);
+const hyperbetEnabled = /^(1|true|yes|on)$/i.test(
+  process.env.DUEL_WITH_HYPERBET || "",
+);
+const hyperbetAvailable = fs.existsSync(hyperbetAppDir);
+const hyperbetMarketMakerAvailable = fs.existsSync(hyperbetMarketMakerDir);
 const skipChainSetup =
   options["skip-chain-setup"] === true ||
   remoteBettingMode ||
   /^(1|true|yes|on)$/i.test(process.env.DUEL_SKIP_CHAIN_SETUP || "");
-const skipBettingApp = options["skip-betting"] === true || remoteBettingMode;
+const skipBettingApp =
+  options["skip-betting"] === true ||
+  remoteBettingMode ||
+  !hyperbetEnabled ||
+  !hyperbetAvailable;
 const verifyTimeoutMs =
   Number.parseInt(options["verify-timeout-ms"], 10) || 240_000;
 const startupTimeoutMs =
@@ -249,7 +267,7 @@ const KEEPER_PERPS_PROGRAM = {
   programId: "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik",
 };
 
-const bettingAppDir = path.join(ROOT, "packages/gold-betting-demo/app");
+const bettingAppDir = hyperbetAppDir;
 const bettingPublicDir = path.join(bettingAppDir, "public");
 const serverPublicDir = path.join(ROOT, "packages/server/public");
 const defaultHlsOutputPath = path.join(serverPublicDir, "live", "stream.m3u8");
@@ -317,6 +335,10 @@ const duelRuntimeLogLevel = (
 )
   .trim()
   .toLowerCase();
+const useExternalAgentPool = options["skip-bots"] !== true;
+const defaultDuelServerAgentMode = useExternalAgentPool
+  ? "external"
+  : "embedded";
 const DUEL_LOG_LEVEL_PRIORITY = {
   debug: 0,
   info: 1,
@@ -1387,10 +1409,10 @@ async function main() {
     );
     await terminateProcessesByCommandPatterns(
       [
-        "bun run --cwd packages/market-maker-bot start",
-        "bun run --cwd packages/market-maker-bot start:multi",
-        "packages/market-maker-bot/src/index.ts",
-        "packages/market-maker-bot/src/run-multi.ts",
+        `bun run --cwd ${hyperbetMarketMakerRelativeDir} start`,
+        `bun run --cwd ${hyperbetMarketMakerRelativeDir} start:multi`,
+        `${hyperbetMarketMakerRelativeDir}/src/index.ts`,
+        `${hyperbetMarketMakerRelativeDir}/src/run-multi.ts`,
       ],
       "duel/market-maker",
     );
@@ -1477,17 +1499,9 @@ async function main() {
       serverWsUrl,
     PUBLIC_CDN_URL: resolvedPublicCdnUrl,
     STREAMING_DUEL_ENABLED: process.env.STREAMING_DUEL_ENABLED || "true",
-    DUEL_MARKET_MAKER_ENABLED:
-      process.env.DUEL_MARKET_MAKER_ENABLED ||
-      (remoteBettingMode ? "false" : "true"),
-    DUEL_BETTING_ENABLED:
-      process.env.DUEL_BETTING_ENABLED ||
-      (skipBettingApp || remoteBettingMode ? "false" : "true"),
-    // In remote-betting mode, disable local ArenaService loop/routes to avoid
-    // duplicate market orchestration and keep duel runtime responsive.
-    ARENA_SERVICE_ENABLED:
-      process.env.ARENA_SERVICE_ENABLED ||
-      (skipBettingApp ? "false" : "true"),
+    DUEL_MARKET_MAKER_ENABLED: "false",
+    DUEL_BETTING_ENABLED: "false",
+    ARENA_SERVICE_ENABLED: "false",
     DISABLE_RATE_LIMIT: process.env.DISABLE_RATE_LIMIT || "true",
     ALLOW_DESTRUCTIVE_CHANGES:
       process.env.ALLOW_DESTRUCTIVE_CHANGES || "false",
@@ -1507,17 +1521,34 @@ async function main() {
       process.env.SKIP_DEATH_RECOVERY_ON_STARTUP || "true",
     DEATH_RECOVERY_STARTUP_TIMEOUT_MS:
       process.env.DEATH_RECOVERY_STARTUP_TIMEOUT_MS || "5000",
-    // Duel stack uses the external dev-duel harness as the active agent pool.
-    // Keep the game server in external-only agent mode by default so it does
-    // not boot an additional in-process population of embedded/model agents.
+    // When duel bots are running, keep the game server in external agent mode
+    // to avoid double-populating the arena. When they are skipped, fall back
+    // to embedded/model agents so streaming still has contestants.
     DUEL_SERVER_AGENT_MODE:
-      process.env.DUEL_SERVER_AGENT_MODE || "external",
-    AUTO_START_AGENTS: process.env.AUTO_START_AGENTS ?? "false",
-    AUTO_START_AGENTS_MAX: process.env.AUTO_START_AGENTS_MAX || "0",
-    SPAWN_MODEL_AGENTS: process.env.SPAWN_MODEL_AGENTS ?? "false",
-    MAX_MODEL_AGENTS: process.env.MAX_MODEL_AGENTS || "0",
+      process.env.DUEL_SERVER_AGENT_MODE || defaultDuelServerAgentMode,
+    AUTO_START_AGENTS:
+      process.env.AUTO_START_AGENTS ??
+      (useExternalAgentPool
+        ? "false"
+        : serverEnv.AUTO_START_AGENTS || "true"),
+    AUTO_START_AGENTS_MAX:
+      process.env.AUTO_START_AGENTS_MAX ||
+      (useExternalAgentPool
+        ? "0"
+        : serverEnv.AUTO_START_AGENTS_MAX || "10"),
+    SPAWN_MODEL_AGENTS:
+      process.env.SPAWN_MODEL_AGENTS ??
+      (useExternalAgentPool
+        ? "false"
+        : serverEnv.SPAWN_MODEL_AGENTS || "true"),
+    MAX_MODEL_AGENTS:
+      process.env.MAX_MODEL_AGENTS ||
+      (useExternalAgentPool ? "0" : serverEnv.MAX_MODEL_AGENTS || "4"),
     SPAWN_MODEL_AGENTS_WITH_EMBEDDED:
-      process.env.SPAWN_MODEL_AGENTS_WITH_EMBEDDED || "false",
+      process.env.SPAWN_MODEL_AGENTS_WITH_EMBEDDED ||
+      (useExternalAgentPool
+        ? "false"
+        : serverEnv.SPAWN_MODEL_AGENTS_WITH_EMBEDDED || "false"),
     // Prevent aggressive local auto-restarts while tuning duel/MM workflows.
     MEMORY_RESTART_THRESHOLD_MB:
       process.env.MEMORY_RESTART_THRESHOLD_MB || "12288",
@@ -1776,11 +1807,11 @@ async function main() {
     startStreamBridge();
   }
 
-  if (!skipBettingApp) {
+  if (!skipBettingApp && hyperbetEnabled && hyperbetAvailable) {
     const bettingEnv = {
       ...process.env,
-      ...readEnvFile(path.join(ROOT, "packages/gold-betting-demo/.env.devnet")),
-      ...readEnvFile(path.join(ROOT, "packages/gold-betting-demo/app/.env.devnet")),
+      ...readEnvFile(path.join(hyperbetSolanaDir, ".env.devnet")),
+      ...readEnvFile(path.join(hyperbetAppDir, ".env.devnet")),
       NODE_ENV: duelNodeEnv,
       LOG_LEVEL: duelRuntimeLogLevel,
       DEFAULT_LOG_LEVEL:
@@ -1795,14 +1826,14 @@ async function main() {
     };
 
     await clearUnhealthyListener("betting-app", `http://localhost:${bettingPort}`, options.fresh === true);
-    log(`starting betting app on :${bettingPort}...`);
+    log(`starting Hyperbet app on :${bettingPort}...`);
     spawnManaged(
       "betting-app",
       "bun",
       [
         "run",
         "--cwd",
-        "packages/gold-betting-demo/app",
+        path.relative(ROOT, hyperbetAppDir),
         "dev",
         "--mode",
         "devnet",
@@ -1818,8 +1849,12 @@ async function main() {
     );
     await waitForHttp(
       `http://localhost:${bettingPort}`,
-      "betting app",
+      "Hyperbet app",
       startupTimeoutMs,
+    );
+  } else if (!skipBettingApp && !hyperbetEnabled) {
+    log(
+      "skipping Hyperbet app; set DUEL_WITH_HYPERBET=true to boot the sibling Hyperbet repo alongside Hyperscape",
     );
   }
 
@@ -1965,7 +2000,7 @@ async function main() {
       Number.parseInt(process.env.DUEL_STREAM_READY_TIMEOUT_MS || "", 10) ||
       180_000;
     // Non-fatal: if HLS stream never comes up (e.g. no RTMP source) just warn
-    // and keep the rest of the stack (betting app, bots, keeper) running.
+    // and keep the rest of the stack (Hyperbet app, bots, keeper) running.
     waitForLiveHls(hlsUrl, hlsReadyTimeoutMs).catch((err) => {
       warnLog(`HLS stream not ready - ${err.message}`);
       warnLog("stream may not be available, but the rest of the stack continues");
@@ -1978,7 +2013,14 @@ async function main() {
       return;
     }
 
-    const marketMakerDir = path.join(ROOT, "packages/market-maker-bot");
+    if (!hyperbetMarketMakerAvailable) {
+      warnLog(
+        `Hyperbet market-maker package not found at ${hyperbetMarketMakerDir}; skipping market-maker startup`,
+      );
+      return;
+    }
+
+    const marketMakerDir = hyperbetMarketMakerDir;
     const resolvedMode =
       mmMode === "auto" ? (mmConfigExists ? "multi" : "single") : mmMode;
     const mmEnv = {
@@ -2014,14 +2056,14 @@ async function main() {
         );
       } else {
         mmRuntimeMode = "multi";
-        log(`starting market maker bots (multi) using ${mmConfigPath}...`);
+        log(`starting Hyperbet market maker bots (multi) using ${mmConfigPath}...`);
         spawnManaged(
           "market-maker",
           "bun",
           [
             "run",
             "--cwd",
-            "packages/market-maker-bot",
+            hyperbetMarketMakerRelativeDir,
             "start:multi",
             "--",
             "--config",
@@ -2041,11 +2083,11 @@ async function main() {
     }
 
     mmRuntimeMode = "single";
-    log("starting market maker bot (single)...");
+    log("starting Hyperbet market maker bot (single)...");
     spawnManaged(
       "market-maker",
       "bun",
-      ["run", "--cwd", "packages/market-maker-bot", "start"],
+      ["run", "--cwd", hyperbetMarketMakerRelativeDir, "start"],
       {
         env: mmEnv,
         critical: false,
@@ -2055,7 +2097,7 @@ async function main() {
     );
   }
 
-  if (!options["skip-keeper"]) {
+  if (!options["skip-keeper"] && hyperbetEnabled && hyperbetAvailable) {
     const keeperGameUrl = (
       process.env.DUEL_KEEPER_GAME_URL ||
       process.env.KEEPER_GAME_URL ||
@@ -2081,7 +2123,7 @@ async function main() {
         ? ".env.mainnet"
         : ".env.devnet";
     const keeperDefaults = readEnvFile(
-      path.join(ROOT, "packages/gold-betting-demo", keeperDefaultsFile),
+      path.join(hyperbetSolanaDir, keeperDefaultsFile),
     );
     const keeperCluster = (
       process.env.DUEL_KEEPER_SOLANA_CLUSTER ||
@@ -2166,7 +2208,7 @@ async function main() {
       spawnManaged(
         "keeper-bot",
         "bun",
-        ["run", "--cwd", "packages/gold-betting-demo", "keeper:bot"],
+        ["run", "--cwd", path.relative(ROOT, hyperbetSolanaDir), "keeper:bot"],
         {
           env: keeperEnv,
           critical: false,
@@ -2175,6 +2217,10 @@ async function main() {
         },
       );
     }
+  } else if (!options["skip-keeper"] && !hyperbetEnabled) {
+    log(
+      "skipping Hyperbet keeper; run it from ../hyperbet or set DUEL_WITH_HYPERBET=true to boot the sibling repo automatically",
+    );
   }
 
   await startMarketMakers();
@@ -2215,8 +2261,8 @@ async function main() {
   log(`embedded spectator: ${embeddedSpectatorUrl}`);
   log(
     skipBettingApp
-      ? "betting app: skipped (remote betting mode)"
-      : `betting app: http://localhost:${bettingPort}`,
+      ? "Hyperbet app: skipped (remote betting mode)"
+      : `Hyperbet app: http://localhost:${bettingPort}`,
   );
   log(`hls stream url: ${hlsUrl}`);
   log(

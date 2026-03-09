@@ -15,6 +15,7 @@
 
 import type { World } from "@hyperscape/shared";
 import { EventType, DEFAULT_DUEL_RULES } from "@hyperscape/shared";
+import crypto from "node:crypto";
 
 /** Type for network with send method */
 interface NetworkWithSend {
@@ -177,12 +178,19 @@ export class StreamingDuelScheduler {
     timeRemaining: 0,
     agent1: null,
     agent2: null,
+    duelId: null,
+    duelKeyHex: null,
+    betOpenTime: null,
+    betCloseTime: null,
     countdown: null,
     fightStartTime: null,
+    duelEndTime: null,
     arenaPositions: null,
     winnerId: null,
     winnerName: null,
     winReason: null,
+    seed: null,
+    replayHash: null,
   };
   /** Pre-allocated active cycle object (reused during active cycle) */
   private readonly _activeCycleObject: StreamingStateUpdate["cycle"] = {
@@ -194,12 +202,19 @@ export class StreamingDuelScheduler {
     timeRemaining: 0,
     agent1: null,
     agent2: null,
+    duelId: null,
+    duelKeyHex: null,
+    betOpenTime: null,
+    betCloseTime: null,
     countdown: null,
     fightStartTime: null,
+    duelEndTime: null,
     arenaPositions: null,
     winnerId: null,
     winnerName: null,
     winReason: null,
+    seed: null,
+    replayHash: null,
   };
   /** Pre-allocated streaming state return object */
   private readonly _streamingStateObject: StreamingStateUpdate = {
@@ -326,6 +341,13 @@ export class StreamingDuelScheduler {
         if (pair) this.notifyOnDeckAgents();
       },
     });
+  }
+
+  private deriveStreamingDuelKeyHex(cycleId: string): string {
+    return crypto
+      .createHash("sha256")
+      .update(`hyperscape-streaming-duel:${cycleId}`)
+      .digest("hex");
   }
 
   // ============================================================================
@@ -831,6 +853,9 @@ export class StreamingDuelScheduler {
     }
 
     this.phaseStateMachine.transition("ANNOUNCEMENT");
+    const duelId = `streaming-${cycleId}`;
+    const betOpenTime = now;
+    const betCloseTime = now + STREAMING_TIMING.ANNOUNCEMENT_DURATION;
     this.currentCycle = {
       cycleId,
       phase: "ANNOUNCEMENT",
@@ -838,14 +863,20 @@ export class StreamingDuelScheduler {
       phaseStartTime: now,
       agent1,
       agent2,
-      duelId: null,
+      duelId,
+      duelKeyHex: this.deriveStreamingDuelKeyHex(cycleId),
       arenaId: null,
+      betOpenTime,
+      betCloseTime,
       countdownValue: null,
       fightStartTime: null,
+      duelEndTime: null,
       arenaPositions: null,
       winnerId: null,
       loserId: null,
       winReason: null,
+      seed: null,
+      replayHash: null,
     };
     this.matchmaking.refreshNextDuelPair(now);
     this.notifyOnDeckAgents();
@@ -873,14 +904,22 @@ export class StreamingDuelScheduler {
     // Emit announcement event
     this.world.emit("streaming:cycle:started", {
       cycleId,
+      duelId,
+      duelKeyHex: this.currentCycle.duelKeyHex,
+      betOpenTime,
+      betCloseTime,
       agent1: { id: agent1.characterId, name: agent1.name },
       agent2: { id: agent2.characterId, name: agent2.name },
     });
 
     this.world.emit("streaming:announcement:start", {
       cycleId,
-      agent1,
-      agent2,
+      duelId,
+      duelKeyHex: this.currentCycle.duelKeyHex,
+      betOpenTime,
+      betCloseTime,
+      agent1: { id: agent1.characterId, name: agent1.name },
+      agent2: { id: agent2.characterId, name: agent2.name },
       duration: STREAMING_TIMING.ANNOUNCEMENT_DURATION,
     });
   }
@@ -974,7 +1013,11 @@ export class StreamingDuelScheduler {
 
       // Prepare contestants (fill food, restore HP) but NOT teleport yet.
       // Fix J — timeout wrapper so prep can't block forever.
-      const PREP_TIMEOUT_MS = 10_000;
+      const PREP_TIMEOUT_MS = Math.max(
+        5_000,
+        Number.parseInt(process.env.STREAMING_PREP_TIMEOUT_MS || "30000", 10) ||
+          30_000,
+      );
       try {
         await Promise.race([
           this.orchestrator.prepareContestantsForDuel(),
@@ -990,6 +1033,8 @@ export class StreamingDuelScheduler {
           "StreamingDuelScheduler",
           `Contestant prep failed: ${errMsg(err)}`,
         );
+        this.abortCycleToIdle("contestant_prep_failed");
+        return;
       }
 
       // Scheduler may have advanced/ended while awaiting prep.
@@ -1200,6 +1245,46 @@ export class StreamingDuelScheduler {
   // Resolution Handling (callback from DuelOrchestrator)
   // ============================================================================
 
+  private buildOracleProof(
+    cycle: StreamingDuelCycle,
+    winnerId: string,
+    loserId: string,
+    winReason: "kill" | "hp_advantage" | "damage_advantage" | "draw",
+    finishedAt: number,
+  ): { seed: string; replayHash: string } {
+    const duelId = cycle.duelId ?? `streaming-${cycle.cycleId}`;
+    const fightStartedAt = cycle.fightStartTime ?? cycle.cycleStartTime;
+    const duelSeedHex = crypto
+      .createHash("sha256")
+      .update(`${duelId}-${fightStartedAt}`)
+      .digest("hex")
+      .slice(0, 16);
+    const seed = BigInt(`0x${duelSeedHex}`).toString();
+    const replayHash = crypto
+      .createHash("sha256")
+      .update(
+        JSON.stringify({
+          duelId,
+          cycleId: cycle.cycleId,
+          winnerId,
+          loserId,
+          winReason,
+          fightStartedAt,
+          finishedAt,
+          damageWinner:
+            cycle.agent1?.characterId === winnerId
+              ? cycle.agent1.damageDealtThisFight
+              : (cycle.agent2?.damageDealtThisFight ?? 0),
+          damageLoser:
+            cycle.agent1?.characterId === loserId
+              ? cycle.agent1.damageDealtThisFight
+              : (cycle.agent2?.damageDealtThisFight ?? 0),
+        }),
+      )
+      .digest("hex");
+    return { seed, replayHash };
+  }
+
   /**
    * Handle resolution when DuelOrchestrator calls onResolution.
    * This is the facade's responsibility: phase transition, stats, recording, camera.
@@ -1232,9 +1317,19 @@ export class StreamingDuelScheduler {
     this.phaseStateMachine.transition("RESOLUTION");
     this.currentCycle.phase = "RESOLUTION";
     this.currentCycle.phaseStartTime = now;
+    this.currentCycle.duelEndTime = now;
     this.currentCycle.winnerId = winnerId;
     this.currentCycle.loserId = loserId;
     this.currentCycle.winReason = winReason;
+    const oracleProof = this.buildOracleProof(
+      this.currentCycle,
+      winnerId,
+      loserId,
+      winReason,
+      now,
+    );
+    this.currentCycle.seed = oracleProof.seed;
+    this.currentCycle.replayHash = oracleProof.replayHash;
 
     // Update stats — draws don't affect win/loss/streaks (#24)
     if (winReason === "draw") {
@@ -1279,10 +1374,17 @@ export class StreamingDuelScheduler {
     // Emit resolution event (spectator UI)
     this.world.emit("streaming:resolution:start", {
       cycleId: this.currentCycle.cycleId,
+      duelId:
+        this.currentCycle.duelId ?? `streaming-${this.currentCycle.cycleId}`,
+      duelKeyHex: this.currentCycle.duelKeyHex,
+      duelEndTime: now,
       winnerId,
       loserId,
       winnerName,
+      loserName,
       winReason,
+      seed: oracleProof.seed,
+      replayHash: oracleProof.replayHash,
     });
 
     // Emit standard duel completed so agent plugins exit duel mode.
@@ -1295,6 +1397,8 @@ export class StreamingDuelScheduler {
       loserId,
       loserName,
       reason: winReason === "kill" ? "death" : "death",
+      seed: oracleProof.seed,
+      replayHash: oracleProof.replayHash,
       forfeit: false,
       winnerReceives: [],
       winnerReceivesValue: 0,
@@ -1362,6 +1466,8 @@ export class StreamingDuelScheduler {
     // Emit cycle end
     this.world.emit("streaming:resolution:end", {
       cycleId: cycleSnapshot.cycleId,
+      duelId: cycleSnapshot.duelId,
+      duelKeyHex: cycleSnapshot.duelKeyHex,
       winnerId,
       loserId,
     });
@@ -1430,6 +1536,7 @@ export class StreamingDuelScheduler {
    */
   private abortCycleToIdle(reason: string): void {
     Logger.warn("StreamingDuelScheduler", `Aborting cycle to IDLE: ${reason}`);
+    const cycleSnapshot = this.currentCycle;
 
     this.orchestrator.stopCombatLoop();
     this.orchestrator.clearCombatRetryTimeout();
@@ -1441,7 +1548,20 @@ export class StreamingDuelScheduler {
       this.countdownTimeout = null;
     }
 
-    this.orchestrator.clearDuelFlagsForCycle(this.currentCycle);
+    if (cycleSnapshot) {
+      this.world.emit("streaming:cycle:aborted", {
+        cycleId: cycleSnapshot.cycleId,
+        duelId: cycleSnapshot.duelId,
+        duelKeyHex: cycleSnapshot.duelKeyHex,
+        reason,
+        agent1Id: cycleSnapshot.agent1?.characterId ?? null,
+        agent2Id: cycleSnapshot.agent2?.characterId ?? null,
+        agent1Name: cycleSnapshot.agent1?.name ?? null,
+        agent2Name: cycleSnapshot.agent2?.name ?? null,
+      });
+    }
+
+    this.orchestrator.clearDuelFlagsForCycle(cycleSnapshot);
     this.orchestrator.getDuelFoodSlotsByAgent().clear();
     this.currentCycle = null;
     this._endCycleInProgress = false;
@@ -1820,9 +1940,14 @@ export class StreamingDuelScheduler {
     this._activeCycleObject.timeRemaining = timeRemaining;
     this._activeCycleObject.agent1 = this._cachedAgent1;
     this._activeCycleObject.agent2 = this._cachedAgent2;
+    this._activeCycleObject.duelId = this.currentCycle.duelId;
+    this._activeCycleObject.duelKeyHex = this.currentCycle.duelKeyHex;
+    this._activeCycleObject.betOpenTime = this.currentCycle.betOpenTime;
+    this._activeCycleObject.betCloseTime = this.currentCycle.betCloseTime;
     this._activeCycleObject.countdown = this.currentCycle.countdownValue;
     this._activeCycleObject.fightStartTime =
       this.currentCycle.fightStartTime ?? null;
+    this._activeCycleObject.duelEndTime = this.currentCycle.duelEndTime ?? null;
     this._activeCycleObject.arenaPositions =
       this.currentCycle.arenaPositions ?? null;
     this._activeCycleObject.winnerId = this.currentCycle.winnerId;
@@ -1832,6 +1957,8 @@ export class StreamingDuelScheduler {
           : this.currentCycle.agent2?.name) || null
       : null;
     this._activeCycleObject.winReason = this.currentCycle.winReason;
+    this._activeCycleObject.seed = this.currentCycle.seed;
+    this._activeCycleObject.replayHash = this.currentCycle.replayHash;
 
     // Update return object in place
     this._streamingStateObject.cycle = this._activeCycleObject;

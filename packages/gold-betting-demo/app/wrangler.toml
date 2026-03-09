@@ -1,8 +1,0 @@
-# Cloudflare Pages configuration for the betting frontend.
-# Project: hyperscape-betting
-
-name = "hyperscape-betting"
-compatibility_date = "2025-03-01"
-
-[assets]
-directory = "./dist"

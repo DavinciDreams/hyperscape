@@ -20,10 +20,11 @@ import { initializeAgents } from "./eliza/index.js";
 
 // Import streaming duel scheduler
 import { initStreamingDuelScheduler } from "./systems/StreamingDuelScheduler/index.js";
+import { DuelArenaOraclePublisher } from "./oracle/DuelArenaOraclePublisher.js";
+import { getDuelArenaOracleConfig } from "./oracle/config.js";
 
 // Import stream capture pipeline
 import { initStreamCapture } from "./streaming/stream-capture.js";
-import { validateArenaDeployEnv } from "./startup/arena-deploy-config.js";
 
 // Import memory monitoring infrastructure
 import {
@@ -75,10 +76,6 @@ async function startServer() {
   if (!isDevelopment) {
     const missing: string[] = [];
     if (!process.env.DATABASE_URL) missing.push("DATABASE_URL");
-    if (!process.env.ARENA_EXTERNAL_BET_WRITE_KEY?.trim())
-      missing.push("ARENA_EXTERNAL_BET_WRITE_KEY");
-    const arenaDeployValidation = validateArenaDeployEnv(process.env);
-    missing.push(...arenaDeployValidation.missing);
     if (missing.length > 0) {
       console.error(
         `[Server] FATAL: Missing required production config: ${missing.join(", ")}`,
@@ -89,7 +86,6 @@ async function startServer() {
     if (!process.env.PRIVY_APP_ID && !process.env.PUBLIC_PRIVY_APP_ID)
       warnings.push("PRIVY_APP_ID");
     if (!process.env.PRIVY_APP_SECRET) warnings.push("PRIVY_APP_SECRET");
-    warnings.push(...arenaDeployValidation.warnings);
     if (warnings.length > 0) {
       console.warn(
         `[Server] WARNING: Missing recommended production config: ${warnings.join(", ")}`,
@@ -114,6 +110,21 @@ async function startServer() {
 
   // Step 3: Initialize world
   const world = await initializeWorld(config, dbContext);
+
+  if (process.env.DUEL_ARENA_ORACLE_ENABLED === "true") {
+    try {
+      const oraclePublisher = new DuelArenaOraclePublisher(
+        world,
+        getDuelArenaOracleConfig(),
+      );
+      await oraclePublisher.init();
+    } catch (err) {
+      console.error(
+        "[Server] ⚠️ Duel arena oracle publisher failed to initialize, continuing degraded:",
+        errMsg(err),
+      );
+    }
+  }
 
   // Step 3b: Initialize Web3 (EVM chain writer) if enabled
   let web3Context: { shutdown: () => Promise<void> } | null = null;
@@ -154,27 +165,7 @@ async function startServer() {
     }
   }
 
-  // Step 9: Initialize duel market maker (Solana betting integration)
-  if (process.env.DUEL_MARKET_MAKER_ENABLED === "true") {
-    try {
-      const { DuelMarketMaker, setDuelMarketMaker } =
-        await import("./arena/DuelMarketMaker.js");
-      const seedAmount = parseInt(
-        process.env.MARKET_MAKER_SEED_GOLD || "10",
-        10,
-      );
-      const marketMaker = new DuelMarketMaker(world, seedAmount);
-      await marketMaker.init();
-      setDuelMarketMaker(marketMaker);
-    } catch (err) {
-      console.error(
-        "[Server] ⚠️ Duel market maker failed to initialize, continuing degraded:",
-        errMsg(err),
-      );
-    }
-  }
-
-  // Step 10: Initialize embedded agents
+  // Step 9: Initialize embedded agents
   try {
     const duelServerAgentMode = (process.env.DUEL_SERVER_AGENT_MODE || "")
       .trim()
@@ -200,7 +191,7 @@ async function startServer() {
     );
   }
 
-  // Step 11: Initialize stream capture pipeline (RTMPBridge → HLS)
+  // Step 10: Initialize stream capture pipeline (RTMPBridge → HLS)
   if (streamCaptureEnabled) {
     try {
       const captureStarted = initStreamCapture();

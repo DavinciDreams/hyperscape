@@ -37,12 +37,11 @@ import { getAgentManager } from "../eliza/index.js";
 import { stopAllModelAgents } from "../eliza/ModelAgentSpawner.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
 import { errMsg } from "../shared/errMsg.js";
-import { ArenaService } from "../arena/ArenaService.js";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
-import { getDuelMarketMaker } from "../arena/DuelMarketMaker.js";
 import { destroyAllRateLimiters } from "../systems/ServerNetwork/services/SlidingWindowRateLimiter.js";
 import { destroyIdempotencyService } from "../systems/ServerNetwork/services/IdempotencyService.js";
 import { stopMemoryMonitor } from "../infrastructure/memory-monitor.js";
+import { getDuelArenaOraclePublisher } from "../oracle/DuelArenaOraclePublisher.js";
 
 /**
  * Web3 context for chain writer shutdown
@@ -179,24 +178,17 @@ export function registerShutdownHandlers(
       );
     }
 
-    // Step 2d: Shutdown ArenaService (stop tick loop, clean up listeners)
+    // Step 2d: Shutdown DuelArenaOraclePublisher
     try {
-      const arenaService = ArenaService.tryForWorld(context.world);
-      if (arenaService) {
-        arenaService.destroy();
+      const oraclePublisher = getDuelArenaOraclePublisher(context.world);
+      if (oraclePublisher) {
+        oraclePublisher.destroy();
       }
     } catch (err) {
-      console.error("[Shutdown] Error destroying ArenaService:", err);
-    }
-
-    // Step 2e: Shutdown DuelMarketMaker (clean up event listeners, clear markets)
-    try {
-      const marketMaker = getDuelMarketMaker();
-      if (marketMaker) {
-        marketMaker.destroy();
-      }
-    } catch (err) {
-      console.error("[Shutdown] Failed to destroy DuelMarketMaker:", err);
+      console.error(
+        "[Shutdown] Failed to destroy DuelArenaOraclePublisher:",
+        err,
+      );
     }
 
     // Step 3: Force-save all player data (inventory, equipment, coins)

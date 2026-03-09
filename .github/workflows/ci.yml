@@ -115,7 +115,7 @@ jobs:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
 
       - name: Run tests
-        run: bunx turbo run test --filter='!@hyperscape/app' --filter='!@hyperscape/evm-contracts' --filter='!@hyperscape/contracts' --filter='!@hyperscape/gold-betting-demo' --filter='!gold-betting-demo-app' --filter='!gold-betting-demo-anchor' --filter='!gold-betting-demo-keeper'
+        run: bunx turbo run test --filter='!@hyperscape/app' --filter='!@hyperscape/contracts'
         env:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
           NODE_ENV: test
@@ -167,7 +167,7 @@ jobs:
           done
 
       - name: Build all packages with Turbo
-        run: bunx turbo run build --filter=!@hyperscape/app --filter=!@hyperscape/gold-betting-demo --filter=!gold-betting-demo-app --filter=!gold-betting-demo-anchor --filter=!gold-betting-demo-keeper
+        run: bunx turbo run build --filter=!@hyperscape/app
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

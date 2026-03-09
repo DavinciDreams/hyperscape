@@ -66,7 +66,7 @@ Optional client-side extra delay (usually keep `0` if server delay is enabled):
 Website/betting embed input (recommended):
 
 - `NEXT_PUBLIC_ARENA_STREAM_EMBED_URL` (in `packages/website/.env.local`)
-- `VITE_STREAM_EMBED_URL` (in `packages/gold-betting-demo/app/.env*`)
+- `VITE_STREAM_EMBED_URL` (in the Hyperbet app `.env*` files if you boot the sibling repo locally)
 
 When `STREAMING_PUBLIC_DELAY_MS > 0`, live `mode=streaming` WebSocket viewers are restricted to:
 - loopback/local capture clients, or

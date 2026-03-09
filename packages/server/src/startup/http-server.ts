@@ -154,6 +154,8 @@ export async function createHttpServer(
     // Production domains (HTTPS)
     "https://hyperbet.win",
     "https://www.hyperbet.win",
+    "https://bsc.hyperbet.win",
+    "https://www.bsc.hyperbet.win",
     "https://hyperscape.gg",
     "https://www.hyperscape.gg",
     "https://hyperscape.bet",
@@ -162,11 +164,18 @@ export async function createHttpServer(
     "https://www.hyperscape.club",
     "https://hyperscape.pages.dev",
     "https://hyperscape-betting.pages.dev",
+    "https://hyperbet.pages.dev",
+    "https://hyperbet-solana.pages.dev",
+    "https://hyperbet-bsc.pages.dev",
     "https://hyperscape-production.up.railway.app",
-    "https://gold-betting-keeper-production.up.railway.app",
+    "https://api.hyperbet.win",
+    "https://bsc-api.hyperbet.win",
     // Production domains (HTTP for legacy/testing)
     "http://hyperscape.pages.dev",
     "http://hyperscape-betting.pages.dev",
+    "http://hyperbet.pages.dev",
+    "http://hyperbet-solana.pages.dev",
+    "http://hyperbet-bsc.pages.dev",
     // Development (from env vars or defaults)
     elizaOSUrl, // ElizaOS API
     clientUrl, // Game Client
@@ -175,12 +184,15 @@ export async function createHttpServer(
     /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/, // Matches http://localhost:3333, http://127.0.0.1:4179, etc.
     /^https?:\/\/(www\.)?hyperbet\.win$/, // hyperbet.win apex and www
     /^https?:\/\/.+\.hyperbet\.win$/, // hyperbet.win subdomains
+    /^https?:\/\/.+\.hyperscape-betting\.pages\.dev$/, // Existing Hyperbet Pages preview deployments
+    /^https?:\/\/.+\.hyperbet\.pages\.dev$/, // Hyperbet Pages preview deployments
+    /^https?:\/\/.+\.hyperbet-solana\.pages\.dev$/, // Hyperbet Solana preview deployments
+    /^https?:\/\/.+\.hyperbet-bsc\.pages\.dev$/, // Hyperbet BSC preview deployments
     /^https?:\/\/(www\.)?hyperscape\.gg$/, // hyperscape.gg apex and www
     /^https?:\/\/.+\.hyperscape\.gg$/, // hyperscape.gg subdomains
     /^https?:\/\/(www\.)?hyperscape\.bet$/, // hyperscape.bet apex and www
     /^https?:\/\/.+\.hyperscape\.bet$/, // hyperscape.bet subdomains
     /^https?:\/\/.+\.hyperscape\.pages\.dev$/, // Cloudflare Pages preview deployments
-    /^https?:\/\/.+\.hyperscape-betting\.pages\.dev$/, // Cloudflare Pages betting preview deployments
     /^https:\/\/.+\.farcaster\.xyz$/,
     /^https:\/\/.+\.warpcast\.com$/,
     /^https:\/\/.+\.privy\.io$/,
