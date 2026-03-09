@@ -21,7 +21,7 @@
 // ElizaOS agent routes are now served directly from the Hyperscape game server.
 // No separate ElizaOS process needed - routes are at /api/agents, /api/agents/:id, etc.
 
-export const ELIZAOS_URL =
+export const ELIZAOS_URL: string =
   import.meta.env.PUBLIC_ELIZAOS_URL ||
   import.meta.env.PUBLIC_API_URL ||
   (import.meta.env.PROD
@@ -35,13 +35,13 @@ export const ELIZAOS_API = `${ELIZAOS_URL}/api`;
 // =============================================================================
 // These are replaced at build time by Vite's define feature
 
-export const GAME_API_URL =
+export const GAME_API_URL: string =
   import.meta.env.PUBLIC_API_URL ||
   (import.meta.env.PROD
     ? "https://hyperscape-production.up.railway.app"
     : "http://localhost:5555");
 
-export const GAME_WS_URL =
+export const GAME_WS_URL: string =
   import.meta.env.PUBLIC_WS_URL ||
   (import.meta.env.PROD
     ? "wss://hyperscape-production.up.railway.app/ws"
@@ -51,8 +51,9 @@ export const GAME_WS_URL =
 // CDN for Static Assets
 // =============================================================================
 
-export const CDN_URL =
+export const CDN_URL: string =
   import.meta.env.PUBLIC_CDN_URL ||
   (import.meta.env.PROD
     ? "https://assets.hyperscape.club"
     : "http://localhost:5555/game-assets");
+
