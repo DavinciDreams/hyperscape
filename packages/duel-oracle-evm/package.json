@@ -5,7 +5,7 @@
   "description": "Canonical Hyperscape EVM duel oracle ABI and contract source",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hyperscapeai/hyperscape.git",
+    "url": "git+https://github.com/hyperscapeai/hyperscape.git",
     "directory": "packages/duel-oracle-evm"
   },
   "files": [
@@ -26,12 +26,13 @@
     "build": "tsc -p tsconfig.json",
     "compile": "hardhat compile",
     "test": "hardhat test test/DuelOutcomeOracle.ts",
-    "deploy:base-sepolia": "hardhat run scripts/deploy-duel-oracle.ts --network baseSepolia",
-    "deploy:bsc-testnet": "hardhat run scripts/deploy-duel-oracle.ts --network bscTestnet",
-    "deploy:avax-fuji": "hardhat run scripts/deploy-duel-oracle.ts --network avaxFuji",
-    "deploy:base": "hardhat run scripts/deploy-duel-oracle.ts --network base",
-    "deploy:bsc": "hardhat run scripts/deploy-duel-oracle.ts --network bsc",
-    "deploy:avax": "hardhat run scripts/deploy-duel-oracle.ts --network avax",
+    "deploy:anvil": "bun scripts/deploy-duel-oracle-local.ts",
+    "deploy:base-sepolia": "node scripts/deploy-duel-oracle-direct.js --network baseSepolia",
+    "deploy:bsc-testnet": "node scripts/deploy-duel-oracle-direct.js --network bscTestnet",
+    "deploy:avax-fuji": "node scripts/deploy-duel-oracle-direct.js --network avaxFuji",
+    "deploy:base": "node scripts/deploy-duel-oracle-direct.js --network base",
+    "deploy:bsc": "node scripts/deploy-duel-oracle-direct.js --network bsc",
+    "deploy:avax": "node scripts/deploy-duel-oracle-direct.js --network avax",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "prepack": "bun run build"

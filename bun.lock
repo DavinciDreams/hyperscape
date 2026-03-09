@@ -5,12 +5,12 @@
     "": {
       "name": "@hyperscape/hyperscape",
       "dependencies": {
-        "@elizaos/core": "^2.0.0-alpha.33",
-        "@elizaos/plugin-anthropic": "^2.0.0-alpha.7",
-        "@elizaos/plugin-groq": "^2.0.0-alpha.8",
-        "@elizaos/plugin-openai": "^2.0.0-alpha.9",
-        "@elizaos/plugin-sql": "^2.0.0-alpha.13",
-        "@elizaos/prompts": "^2.0.0-alpha.33",
+        "@elizaos/core": "alpha",
+        "@elizaos/plugin-anthropic": "alpha",
+        "@elizaos/plugin-groq": "alpha",
+        "@elizaos/plugin-openai": "alpha",
+        "@elizaos/plugin-sql": "alpha",
+        "@elizaos/prompts": "alpha",
         "@livekit/rtc-node-linux-x64-gnu": "0.13.24",
         "@nomicfoundation/hardhat-ignition": "^3.0.7",
         "@rollup/rollup-darwin-x64": "^4.52.4",
