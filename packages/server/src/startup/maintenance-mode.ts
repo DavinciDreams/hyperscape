@@ -12,7 +12,6 @@
  */
 
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
-import { getDuelMarketMaker } from "../arena/DuelMarketMaker.js";
 import { Logger } from "../systems/ServerNetwork/services/Logger.js";
 
 export interface MaintenanceStatus {
@@ -144,7 +143,6 @@ export function exitMaintenanceMode(): MaintenanceStatus {
  */
 export function getMaintenanceStatus(): MaintenanceStatus {
   const scheduler = getStreamingDuelScheduler();
-  const marketMaker = getDuelMarketMaker();
 
   // Get current phase from scheduler
   let currentPhase: string | null = null;
@@ -159,17 +157,6 @@ export function getMaintenanceStatus(): MaintenanceStatus {
   let marketStatus: "betting" | "locked" | "resolved" | "none" = "none";
   let pendingMarkets = 0;
 
-  if (marketMaker) {
-    const activeMarkets = marketMaker.getActiveMarkets();
-    pendingMarkets = activeMarkets.length;
-
-    if (pendingMarkets > 0) {
-      // Get the most recent market's status
-      const latestMarket = activeMarkets[activeMarkets.length - 1];
-      marketStatus = latestMarket.status;
-    }
-  }
-
   // Safe to deploy when:
   // 1. Not in active duel phase (FIGHTING, COUNTDOWN)
   // 2. No pending betting markets
@@ -177,7 +164,7 @@ export function getMaintenanceStatus(): MaintenanceStatus {
     currentPhase === "FIGHTING" ||
     currentPhase === "COUNTDOWN" ||
     currentPhase === "ANNOUNCEMENT";
-  const hasPendingMarkets = pendingMarkets > 0 && marketStatus !== "resolved";
+  const hasPendingMarkets = pendingMarkets > 0;
 
   const safeToDeploy =
     maintenanceState.active && !inActiveDuel && !hasPendingMarkets;

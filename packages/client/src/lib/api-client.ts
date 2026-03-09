@@ -136,9 +136,13 @@ async function getCsrfToken(): Promise<string | null> {
     });
 
     if (response.ok) {
-      const data = (await response.json()) as { csrfToken?: string };
-      if (data.csrfToken) {
-        csrfToken = data.csrfToken;
+      const data = (await response.json()) as {
+        csrfToken?: string;
+        token?: string;
+      };
+      const token = data.csrfToken ?? data.token;
+      if (token) {
+        csrfToken = token;
         csrfTokenExpiry = now + CSRF_TOKEN_TTL;
         return csrfToken;
       }

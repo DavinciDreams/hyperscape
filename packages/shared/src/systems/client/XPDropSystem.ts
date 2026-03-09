@@ -22,6 +22,7 @@ import { System } from "../shared/infrastructure/System";
 import { EventType } from "../../types/events";
 import { SKILL_ICONS } from "../../data/skill-icons";
 import type { World } from "../../core/World";
+import type { WorldOptions } from "../../types/index";
 
 /** Pooled GPU resources for a single XP drop sprite. Reused across events. */
 interface XPDropPoolItem {
@@ -56,6 +57,7 @@ export class XPDropSystem extends System {
 
   // Reusable sprite pool — eliminates per-event CanvasTexture/SpriteMaterial allocation
   private pool: XPDropPoolItem[] = [];
+  private poolInitialized = false;
 
   // Stored bound handler so it can be removed in destroy()
   private readonly _boundOnXPDrop: (data: unknown) => void;
@@ -65,14 +67,17 @@ export class XPDropSystem extends System {
     this._boundOnXPDrop = this.onXPDrop.bind(this);
   }
 
-  async init(): Promise<void> {
+  async init(options?: WorldOptions): Promise<void> {
+    await super.init(options as WorldOptions);
+
     if (!this.world.isClient) return;
 
-    this.initPool();
     this.world.on(EventType.XP_DROP_RECEIVED, this._boundOnXPDrop, this);
   }
 
   private initPool(): void {
+    if (this.poolInitialized) return;
+
     for (let i = 0; i < this.POOL_SIZE; i++) {
       const canvas = document.createElement("canvas");
       canvas.width = this.CANVAS_SIZE;
@@ -101,9 +106,13 @@ export class XPDropSystem extends System {
         active: false,
       });
     }
+
+    this.poolInitialized = true;
   }
 
   private acquirePoolItem(): XPDropPoolItem | null {
+    this.initPool();
+
     for (const item of this.pool) {
       if (!item.active) {
         item.active = true;

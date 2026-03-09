@@ -206,7 +206,7 @@ test.describe("Visual Regression", () => {
 
       const ctx = canvas.getContext("2d");
       if (!ctx) {
-        // WebGL context - can't easily check pixel data
+        // WebGPU context - can't easily check pixel data
         return true;
       }
 

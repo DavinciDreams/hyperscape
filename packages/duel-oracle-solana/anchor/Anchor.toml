@@ -1,0 +1,29 @@
+[toolchain]
+anchor_version = "0.31.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+fight_oracle = "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV"
+
+[programs.localnet]
+fight_oracle = "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV"
+
+[programs.mainnet]
+fight_oracle = "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV"
+
+[registry]
+url = "https://api.apr.dev"
+
+[test]
+startup_wait = 60000
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/hyperscape-keys/deployer.json"
+
+[workspace]
+members = ["programs/fight_oracle"]
+types = "../src/generated"

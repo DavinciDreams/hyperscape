@@ -1917,6 +1917,8 @@ export interface DuelCompletedPayload {
   loserId: string;
   loserName: string;
   reason: "death" | "forfeit";
+  seed?: string;
+  replayHash?: string;
   forfeit: boolean;
   winnerReceives: StakedItem[];
   winnerReceivesValue: number;

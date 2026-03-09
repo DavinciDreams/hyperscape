@@ -65,6 +65,8 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
       baseScale,
       config.depletedModelPath ?? null,
       config.depletedModelScale ?? 0.3,
+      config.lod1Model ?? null,
+      config.lod2Model ?? null,
     );
 
     if (success) {

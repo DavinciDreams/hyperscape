@@ -14,14 +14,14 @@ interface ThreeErrorBoundaryProps {
 interface ThreeErrorBoundaryState {
   hasError: boolean;
   error?: Error;
-  errorType?: "webgl" | "render" | "unknown";
+  errorType?: "webgpu" | "render" | "unknown";
 }
 
 /**
  * Error Boundary specialized for Three.js components
  *
  * Catches and handles Three.js specific errors including:
- * - WebGL context errors
+ * - WebGPU context errors
  * - Shader compilation errors
  * - Renderer initialization failures
  * - GPU resource exhaustion
@@ -50,16 +50,16 @@ export class ThreeErrorBoundary extends React.Component<
   static getDerivedStateFromError(error: Error): ThreeErrorBoundaryState {
     // Categorize the error type
     const errorMessage = error.message.toLowerCase();
-    let errorType: "webgl" | "render" | "unknown" = "unknown";
+    let errorType: "webgpu" | "render" | "unknown" = "unknown";
 
     if (
       errorMessage.includes("webgpu") ||
-      errorMessage.includes("webgl") ||
+      errorMessage.includes("webgpu") ||
       errorMessage.includes("context") ||
       errorMessage.includes("gpu") ||
       errorMessage.includes("renderer")
     ) {
-      errorType = "webgl"; // Keep as "webgl" for backwards compat, but it handles WebGPU errors too
+      errorType = "webgpu";
     } else if (
       errorMessage.includes("render") ||
       errorMessage.includes("shader") ||
@@ -104,7 +104,7 @@ export class ThreeErrorBoundary extends React.Component<
     const { errorType } = this.state;
 
     switch (errorType) {
-      case "webgl":
+      case "webgpu":
         return "WebGPU initialization failed. Your browser may not support WebGPU, or GPU resources are exhausted.";
       case "render":
         return "3D rendering failed. There may be an issue with graphics resources.";
@@ -117,7 +117,7 @@ export class ThreeErrorBoundary extends React.Component<
     const { errorType } = this.state;
 
     switch (errorType) {
-      case "webgl":
+      case "webgpu":
         return "Hyperscape requires WebGPU. Use Chrome 113+, Edge 113+, or Safari 17+. Try refreshing the page or updating your graphics drivers.";
       case "render":
         return "Try refreshing the page. If the problem persists, please report this issue.";

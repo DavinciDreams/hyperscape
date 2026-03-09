@@ -30,6 +30,7 @@ export const CAPTURE_SCRIPT = `
   const BRIDGE_URL = window.__RTMP_BRIDGE_URL__ || 'ws://localhost:8765';
   const TARGET_FPS = window.__TARGET_FPS__ || 30;
   const VIDEO_BITRATE = window.__VIDEO_BITRATE__ || 6000000; // 6 Mbps
+  const ATTACH_SILENT_AUDIO = window.__CAPTURE_ATTACH_AUDIO__ === true;
 
   console.log('[Capture] Starting canvas capture...');
   console.log('[Capture] Bridge URL:', BRIDGE_URL);
@@ -59,25 +60,28 @@ export const CAPTURE_SCRIPT = `
       return false;
     }
 
-    // Try to add audio context for silent audio track (some RTMP servers require audio)
-    try {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      oscillator = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-      gainNode.gain.value = 0; // Silent
-      oscillator.connect(gainNode);
-      const dest = audioCtx.createMediaStreamDestination();
-      gainNode.connect(dest);
-      oscillator.start();
+    // The bridge owns audio timing. Only attach browser-side silent audio when
+    // explicitly requested for debugging or compatibility testing.
+    if (ATTACH_SILENT_AUDIO) {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        gainNode.gain.value = 0; // Silent
+        oscillator.connect(gainNode);
+        const dest = audioCtx.createMediaStreamDestination();
+        gainNode.connect(dest);
+        oscillator.start();
 
-      // Add silent audio track to stream
-      const audioTrack = dest.stream.getAudioTracks()[0];
-      if (audioTrack) {
-        stream.addTrack(audioTrack);
-        console.log('[Capture] Added silent audio track');
+        // Add silent audio track to stream
+        const audioTrack = dest.stream.getAudioTracks()[0];
+        if (audioTrack) {
+          stream.addTrack(audioTrack);
+          console.log('[Capture] Added silent audio track');
+        }
+      } catch (err) {
+        console.warn('[Capture] Could not add audio track:', err);
       }
-    } catch (err) {
-      console.warn('[Capture] Could not add audio track:', err);
     }
     return true;
   }
@@ -360,17 +364,20 @@ export function generateCaptureScript(options: {
   bridgeUrl?: string;
   fps?: number;
   bitrate?: number;
+  attachSilentAudio?: boolean;
 }): string {
   const {
     bridgeUrl = "ws://localhost:8765",
     fps = 30,
     bitrate = 6000000,
+    attachSilentAudio = false,
   } = options;
 
   return `
     window.__RTMP_BRIDGE_URL__ = '${bridgeUrl}';
     window.__TARGET_FPS__ = ${fps};
     window.__VIDEO_BITRATE__ = ${bitrate};
+    window.__CAPTURE_ATTACH_AUDIO__ = ${attachSilentAudio ? "true" : "false"};
     ${CAPTURE_SCRIPT}
   `;
 }

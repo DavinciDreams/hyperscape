@@ -7,6 +7,11 @@ import {
   isActiveInstance,
   partitionInstances,
 } from "./instance-utils.js";
+import {
+  DEFAULT_US_STREAM_SEARCH_QUERY,
+  filterOffersForStream,
+  sortOffersByPreference,
+} from "./offer-utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,8 +23,7 @@ const POLL_INTERVAL_MS = Number.parseInt(
 // CRITICAL: gpu_display_active=true is REQUIRED for WebGPU streaming
 // Without display driver support, WebGPU will not work (only compute is available)
 const SEARCH_QUERY =
-  process.env.VAST_SEARCH_QUERY ||
-  "gpu_display_active=true reliability > 0.95 gpu_name in [RTX_4090, RTX_4080, RTX_3090, A6000] num_gpus=1 rented=False dph < 2.0";
+  process.env.VAST_SEARCH_QUERY || DEFAULT_US_STREAM_SEARCH_QUERY;
 const API_KEY = process.env.VAST_API_KEY;
 const TARGET_IMAGE =
   process.env.VAST_IMAGE || "nvidia/cuda:12.4.0-runtime-ubuntu22.04";
@@ -65,9 +69,14 @@ interface VastInstance {
 }
 
 interface VastOffer {
+  cpu_ram?: number;
+  cpu_cores_effective?: number;
   id: number;
   dph: number;
+  disk_space?: number;
+  geolocation?: string;
   gpu_name: string;
+  gpu_ram?: number;
   [key: string]: unknown;
 }
 
@@ -134,12 +143,12 @@ async function findOffers(): Promise<VastOffer[]> {
     "offers",
     SEARCH_QUERY,
   ])) as VastOffer[];
-  if (!offers || offers.length === 0) {
+  const filteredOffers = offers ? filterOffersForStream(offers) : [];
+  if (!filteredOffers || filteredOffers.length === 0) {
     throw new Error("No offers found matching query.");
   }
-  // Sort logic: Vast returns them pre-ordered by score usually, but let's grab the cheapest reliable one
-  offers.sort((a, b) => a.dph - b.dph);
-  return offers;
+  sortOffersByPreference(filteredOffers);
+  return filteredOffers;
 }
 
 async function createInstance(offerId: number): Promise<string> {

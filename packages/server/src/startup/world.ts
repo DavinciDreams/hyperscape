@@ -82,35 +82,6 @@ export async function initializeWorld(
     };
   }
 
-  // Initialize Solana arena operator before systems start when either
-  // legacy duel betting OR streaming duel market-maker flow is enabled.
-  const solanaOperatorEnabled =
-    process.env.DUEL_BETTING_ENABLED === "true" ||
-    process.env.DUEL_MARKET_MAKER_ENABLED === "true";
-  if (solanaOperatorEnabled) {
-    try {
-      const { SolanaArenaOperator } =
-        await import("../arena/SolanaArenaOperator.js");
-      const { getSolanaArenaConfig } = await import("../arena/config.js");
-
-      const solanaConfig = getSolanaArenaConfig();
-      const solanaOperator = new SolanaArenaOperator(solanaConfig);
-      const readiness = await solanaOperator.validateRoundInitialization();
-      if (!readiness.ready) {
-        console.warn(
-          "[World] SolanaArenaOperator write path disabled:",
-          readiness.reason,
-        );
-      }
-
-      (
-        world as unknown as { solanaArenaOperator: typeof solanaOperator }
-      ).solanaArenaOperator = solanaOperator;
-    } catch (error) {
-      console.warn("[World] Failed to initialize SolanaArenaOperator:", error);
-    }
-  }
-
   // Register server-specific systems
   const { DatabaseSystem: ServerDatabaseSystem } =
     await import("../systems/DatabaseSystem/index.js");

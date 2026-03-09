@@ -14,114 +14,160 @@
  * and exits with code 1. PM2 then restarts it from scratch, giving us an
  * infinite self-healing loop.
  */
+
+function isLoopbackHostname(hostname) {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "0.0.0.0" ||
+    hostname === "::1"
+  );
+}
+
+function isLocalDatabaseUrl(rawValue) {
+  if (!rawValue) return false;
+  try {
+    return isLoopbackHostname(new URL(rawValue).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeRuntimeEnv() {
+  const requestedDatabaseMode =
+    (process.env.DUEL_DATABASE_MODE || "").trim().toLowerCase() || "local";
+  const useRemoteDatabase = requestedDatabaseMode === "remote";
+  const runtimeEnv = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value == null) continue;
+    if (!useRemoteDatabase) {
+      if (
+        key === "DATABASE_URL" ||
+        key === "POSTGRES_URL" ||
+        key === "USE_LOCAL_POSTGRES"
+      ) {
+        continue;
+      }
+    }
+    runtimeEnv[key] = value;
+  }
+
+  runtimeEnv.DUEL_DATABASE_MODE = useRemoteDatabase ? "remote" : "local";
+  runtimeEnv.USE_LOCAL_POSTGRES =
+    process.env.USE_LOCAL_POSTGRES ||
+    (useRemoteDatabase ? "false" : "true");
+
+  if (!useRemoteDatabase && isLocalDatabaseUrl(process.env.DATABASE_URL)) {
+    runtimeEnv.DATABASE_URL = process.env.DATABASE_URL;
+  }
+  if (useRemoteDatabase && process.env.DATABASE_URL) {
+    runtimeEnv.DATABASE_URL = process.env.DATABASE_URL;
+  }
+
+  return runtimeEnv;
+}
+
+const runtimeEnv = sanitizeRuntimeEnv();
+
 module.exports = {
-    apps: [
-        {
-            name: "hyperscape-duel",
-            script: "scripts/duel-stack.mjs",
-            interpreter: "bun",
-            args: "--skip-betting --skip-bots",
-            cwd: __dirname,
-            // Restart policy
-            autorestart: true,
-            max_restarts: 999999,
-            min_uptime: "10s",        // consider healthy after 10s
-            restart_delay: 10000,     // 10s cooldown between restarts (allow connections to close)
-            // Crash-loop protection: exponential backoff starting at 2s
-            exp_backoff_restart_delay: 2000,
-            // Resource limits – restart if memory exceeds 4GB
-            max_memory_restart: "4G",
-            // Logging
-            error_file: "logs/duel-error.log",
-            out_file: "logs/duel-out.log",
-            merge_logs: true,
-            log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-            // Environment
-            env: {
-                // Preserve deploy-time secrets loaded by the Vast bootstrap shell.
-                ...process.env,
-                NODE_ENV: "production",
-                // Aggressively reduce pool size - Neon serverless has very strict limits
-                // Single connection prevents exhaustion during crash loops
-                POSTGRES_POOL_MAX: "1",
-                POSTGRES_POOL_MIN: "0",
-                // Skip DB migrations on startup (deploy applies checked-in migrations first).
-                SKIP_MIGRATIONS: "true",
-                STREAMING_DUEL_ENABLED: "true",
-                DUEL_MARKET_MAKER_ENABLED: "true",
-                DUEL_BETTING_ENABLED: "false",
-                ARENA_SERVICE_ENABLED: "false",
-                DUEL_SKIP_CHAIN_SETUP: "true",
-                USE_LOCAL_POSTGRES: "false",
-                SOLANA_RPC_URL: "https://api.devnet.solana.com",
-                SOLANA_WS_URL: "wss://api.devnet.solana.com/",
-                SOLANA_ARENA_MARKET_PROGRAM_ID:
-                    process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
-                    "9NdidShnVzy1fc1WHWJTvyuXmH47ynfNGA6QFdyfAuSU",
-                SOLANA_GOLD_MINT:
-                    process.env.SOLANA_GOLD_MINT ||
-                    "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
-                BOT_KEYPAIR:
-                    process.env.BOT_KEYPAIR ||
-                    "~/.config/solana/oracle-authority.json",
-                ORACLE_AUTHORITY_KEYPAIR:
-                    process.env.ORACLE_AUTHORITY_KEYPAIR ||
-                    "~/.config/solana/oracle-authority.json",
-                MARKET_MAKER_KEYPAIR:
-                    process.env.MARKET_MAKER_KEYPAIR ||
-                    "~/.config/solana/oracle-authority.json",
-                DISABLE_RATE_LIMIT: "true",
-                ALLOW_DESTRUCTIVE_CHANGES: "false",
-                AUTO_START_AGENTS: "true",
-                AUTO_START_AGENTS_MAX: "10",
-                SPAWN_MODEL_AGENTS: "true",
-                MAX_MODEL_AGENTS: "4",
-                MALLOC_TRIM_THRESHOLD_: "-1",
-                MIMALLOC_ALLOW_DECOMMIT: "0",
-                MIMALLOC_ALLOW_RESET: "0",
-                MIMALLOC_PAGE_RESET: "0",
-                MIMALLOC_PURGE_DELAY: "1000000",
-                STREAM_CAPTURE_MODE: "cdp",
-                STREAM_CAPTURE_HEADLESS: "false",
-                STREAM_CAPTURE_CHANNEL: "chrome-dev",
-                STREAM_CAPTURE_ANGLE: "vulkan",
-                STREAM_CAPTURE_WIDTH: "1280",
-                STREAM_CAPTURE_HEIGHT: "720",
-                STREAM_CAPTURE_DISABLE_WEBGPU: "false",
-                FFMPEG_PATH: "/usr/bin/ffmpeg",
-                DUEL_DISABLE_BRIDGE_CAPTURE: "false",
-                TWITCH_STREAM_URL:
-                    process.env.TWITCH_STREAM_URL ||
-                    "rtmp://live.twitch.tv/app",
-                TWITCH_STREAM_KEY:
-                    process.env.TWITCH_STREAM_KEY ||
-                    process.env.TWITCH_RTMP_STREAM_KEY ||
-                    "",
-                KICK_STREAM_KEY: process.env.KICK_STREAM_KEY || "",
-                KICK_RTMP_URL:
-                    process.env.KICK_RTMP_URL ||
-                    "rtmps://fa723fc1b171.global-contribute.live-video.net/app",
-                STREAM_ENABLED_DESTINATIONS:
-                    process.env.STREAM_ENABLED_DESTINATIONS ||
-                    process.env.DUEL_STREAM_DESTINATIONS ||
-                    "",
-                YOUTUBE_STREAM_URL:
-                    process.env.YOUTUBE_STREAM_URL ||
-                    "rtmp://a.rtmp.youtube.com/live2",
-                DUEL_FORCE_WEBGL_FALLBACK: "false",
-                GAME_URL: "http://localhost:3333/?page=stream",
-                GAME_FALLBACK_URLS:
-                    "http://localhost:3333/?page=stream,http://localhost:3333/?embedded=true&mode=spectator,http://localhost:3333/",
-                DUEL_CAPTURE_USE_XVFB: "true",
-                // Stabilize long-running streams by avoiding per-agent DuelCombatAI state polling churn.
-                STREAMING_DUEL_COMBAT_AI_ENABLED: "false",
-                SERVER_RUNTIME_MAX_TICKS_PER_FRAME: "1",
-                SERVER_RUNTIME_MIN_DELAY_MS: "10",
-                GAME_STATE_POLL_TIMEOUT_MS: "5000",
-                GAME_STATE_POLL_INTERVAL_MS: "3000",
-                DUEL_RUNTIME_HEALTH_INTERVAL_MS: "15000",
-                DUEL_RUNTIME_HEALTH_MAX_FAILURES: "30",
-            },
-        },
-    ],
+  apps: [
+    {
+      name: "hyperscape-duel",
+      script: "scripts/duel-stack.mjs",
+      interpreter: "bun",
+      args: "--skip-betting --skip-bots",
+      cwd: __dirname,
+      autorestart: true,
+      max_restarts: 999999,
+      min_uptime: "10s",
+      restart_delay: 10000,
+      exp_backoff_restart_delay: 2000,
+      max_memory_restart: "4G",
+      error_file: "logs/duel-error.log",
+      out_file: "logs/duel-out.log",
+      merge_logs: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+      env: {
+        ...runtimeEnv,
+        NODE_ENV: "production",
+        POSTGRES_POOL_MAX: "1",
+        POSTGRES_POOL_MIN: "0",
+        SKIP_MIGRATIONS: "true",
+        STREAMING_DUEL_ENABLED: "true",
+        DUEL_MARKET_MAKER_ENABLED: "true",
+        DUEL_BETTING_ENABLED: "false",
+        ARENA_SERVICE_ENABLED: "false",
+        DUEL_SKIP_CHAIN_SETUP: "true",
+        USE_LOCAL_POSTGRES: "false",
+        SOLANA_RPC_URL: "https://api.devnet.solana.com",
+        SOLANA_WS_URL: "wss://api.devnet.solana.com/",
+        SOLANA_ARENA_MARKET_PROGRAM_ID:
+          process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
+          "9NdidShnVzy1fc1WHWJTvyuXmH47ynfNGA6QFdyfAuSU",
+        SOLANA_GOLD_MINT:
+          process.env.SOLANA_GOLD_MINT ||
+          "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
+        BOT_KEYPAIR:
+          process.env.BOT_KEYPAIR ||
+          "~/.config/solana/oracle-authority.json",
+        ORACLE_AUTHORITY_KEYPAIR:
+          process.env.ORACLE_AUTHORITY_KEYPAIR ||
+          "~/.config/solana/oracle-authority.json",
+        MARKET_MAKER_KEYPAIR:
+          process.env.MARKET_MAKER_KEYPAIR ||
+          "~/.config/solana/oracle-authority.json",
+        DISABLE_RATE_LIMIT: "true",
+        ALLOW_DESTRUCTIVE_CHANGES: "false",
+        AUTO_START_AGENTS: "true",
+        AUTO_START_AGENTS_MAX: "10",
+        SPAWN_MODEL_AGENTS: "true",
+        MAX_MODEL_AGENTS: "4",
+        MALLOC_TRIM_THRESHOLD_: "-1",
+        MIMALLOC_ALLOW_DECOMMIT: "0",
+        MIMALLOC_ALLOW_RESET: "0",
+        MIMALLOC_PAGE_RESET: "0",
+        MIMALLOC_PURGE_DELAY: "1000000",
+        STREAM_CAPTURE_MODE: "cdp",
+        STREAM_CAPTURE_HEADLESS: "false",
+        STREAM_CAPTURE_CHANNEL: "chrome-dev",
+        STREAM_CAPTURE_ANGLE: "vulkan",
+        STREAM_CAPTURE_WIDTH: "1280",
+        STREAM_CAPTURE_HEIGHT: "720",
+        STREAM_CAPTURE_DISABLE_WEBGPU: "false",
+        FFMPEG_PATH: "/usr/bin/ffmpeg",
+        DUEL_DISABLE_BRIDGE_CAPTURE: "false",
+        TWITCH_STREAM_URL:
+          process.env.TWITCH_STREAM_URL ||
+          "rtmp://live.twitch.tv/app",
+        TWITCH_STREAM_KEY:
+          process.env.TWITCH_STREAM_KEY ||
+          process.env.TWITCH_RTMP_STREAM_KEY ||
+          "",
+        KICK_STREAM_KEY: process.env.KICK_STREAM_KEY || "",
+        KICK_RTMP_URL:
+          process.env.KICK_RTMP_URL ||
+          "rtmps://fa723fc1b171.global-contribute.live-video.net/app",
+        STREAM_ENABLED_DESTINATIONS:
+          process.env.STREAM_ENABLED_DESTINATIONS ||
+          process.env.DUEL_STREAM_DESTINATIONS ||
+          "",
+        YOUTUBE_STREAM_URL:
+          process.env.YOUTUBE_STREAM_URL ||
+          "rtmp://a.rtmp.youtube.com/live2",
+        DUEL_FORCE_WEBGL_FALLBACK: "false",
+        GAME_URL: "http://localhost:3333/?page=stream",
+        GAME_FALLBACK_URLS:
+          "http://localhost:3333/?page=stream,http://localhost:3333/?embedded=true&mode=spectator,http://localhost:3333/",
+        DUEL_CAPTURE_USE_XVFB: "true",
+        STREAMING_DUEL_COMBAT_AI_ENABLED: "false",
+        SERVER_RUNTIME_MAX_TICKS_PER_FRAME: "1",
+        SERVER_RUNTIME_MIN_DELAY_MS: "10",
+        GAME_STATE_POLL_TIMEOUT_MS: "5000",
+        GAME_STATE_POLL_INTERVAL_MS: "3000",
+        DUEL_RUNTIME_HEALTH_INTERVAL_MS: "15000",
+        DUEL_RUNTIME_HEALTH_MAX_FAILURES: "30",
+      },
+    },
+  ],
 };

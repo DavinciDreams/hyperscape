@@ -641,8 +641,8 @@ export class DataManager {
     if (!foundManifestsDir) {
       console.warn(
         `[DataManager] Could not verify manifests path from cwd=${cwd}. ` +
-          `Tried: ${candidateManifestsDirs.join(", ")}. ` +
-          `Proceeding with ${manifestsDir}. Set ASSETS_DIR to override.`,
+        `Tried: ${candidateManifestsDirs.join(", ")}. ` +
+        `Proceeding with ${manifestsDir}. Set ASSETS_DIR to override.`,
       );
     }
 
@@ -1314,9 +1314,9 @@ export class DataManager {
       const craftingData = await fs.readFile(craftingPath, "utf-8");
       const craftingManifest = JSON.parse(craftingData) as CraftingManifest;
       processingDataProvider.loadCraftingRecipes(craftingManifest);
-    } catch {
+    } catch (e: any) {
       warnOptionalData(
-        "[DataManager] recipes/crafting.json not found, crafting will be unavailable",
+        `[DataManager] recipes/crafting.json failed to load: ${e.message}`,
       );
     }
 

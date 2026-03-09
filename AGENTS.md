@@ -25,12 +25,23 @@ This is a hard requirement. DO NOT:
 ### Server/Streaming (Vast.ai)
 - NVIDIA GPU with Vulkan support is REQUIRED
 - Must run headful with Xorg or Xvfb (NOT headless Chrome)
-- Chrome uses ANGLE/Vulkan for WebGPU
+- **CRITICAL LINUX NOTE**: It is important on Linux to use **Chrome Canary** and the **ANGLE** backend, **NOT** Vulkan (`--use-vulkan`). Using the native Vulkan backend with WebGPU will crash.
+- **CRITICAL MAC NOTE**: It is important on macOS to use **Google Chrome** with the **Metal** backend for ANGLE (`--use-angle=metal`).
 - If WebGPU cannot initialize, deployment MUST FAIL
 
 ## Project Overview
 
 Hyperscape is a RuneScape-style MMORPG built on Three.js WebGPURenderer with TSL shaders.
+
+## CRITICAL: Secrets and Private Keys
+
+**Never put private keys, seed phrases, API keys, tokens, RPC secrets, or wallet secrets into any file that could be committed.**
+
+- ALWAYS use local untracked `.env` files for real secrets
+- NEVER hardcode secrets in source files, tests, docs, JSON fixtures, scripts, config files, or workflow YAML
+- NEVER put real secrets in `.env.example`; placeholders only
+- If a secret is needed in production or CI, use the platform secret store, not a tracked file
+- If a task requires a new secret, document the variable name and load it from `.env`, `.env.local`, or deployment secrets
 
 ## Key Rules
 
@@ -39,6 +50,7 @@ Hyperscape is a RuneScape-style MMORPG built on Three.js WebGPURenderer with TSL
 3. **No mocks in tests** - Use real Playwright browser sessions
 4. **Bun package manager** - Use `bun install`, not npm
 5. **Strong typing** - Prefer classes over interfaces
+6. **Secrets stay out of git** - Real keys must only come from local `.env` files or secret managers
 
 ## Tech Stack
 

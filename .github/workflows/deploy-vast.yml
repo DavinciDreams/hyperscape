@@ -179,7 +179,6 @@ jobs:
             ADMIN_CODE=${{ secrets.ADMIN_CODE }}
             PRIVY_APP_ID=${{ secrets.PRIVY_APP_ID }}
             PRIVY_APP_SECRET=${{ secrets.PRIVY_APP_SECRET }}
-            ARENA_EXTERNAL_BET_WRITE_KEY=${{ secrets.ARENA_EXTERNAL_BET_WRITE_KEY }}
             SOLANA_ARENA_AUTHORITY_SECRET=${{ secrets.SOLANA_ARENA_AUTHORITY_SECRET }}
             TWITCH_STREAM_KEY=${{ secrets.TWITCH_STREAM_KEY }}
             TWITCH_RTMP_STREAM_KEY=${{ secrets.TWITCH_STREAM_KEY }}

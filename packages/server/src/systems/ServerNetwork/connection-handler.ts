@@ -49,6 +49,7 @@ import type {
   SystemDatabase,
 } from "../../shared/types";
 import { STREAMING_PUBLIC_DELAY_MS } from "../../streaming/streaming-policy.js";
+import { resolveStreamingViewerAccessToken } from "../../streaming/stream-viewer-access-token.js";
 import { authenticateUser, checkUserBan } from "./authentication";
 import { loadCharacterList } from "./character-selection";
 import type { BroadcastManager } from "./broadcast";
@@ -99,9 +100,7 @@ function formatBanMessage(banInfo: {
   return message;
 }
 
-const STREAMING_VIEWER_ACCESS_TOKEN = (
-  process.env.STREAMING_VIEWER_ACCESS_TOKEN || ""
-).trim();
+const STREAMING_VIEWER_ACCESS_TOKEN = resolveStreamingViewerAccessToken();
 const IS_PLAYWRIGHT_TEST = process.env.PLAYWRIGHT_TEST === "true";
 let lastSpectatorTargetMissingWarnAt = 0;
 
@@ -125,7 +124,7 @@ export class ConnectionHandler {
     private sockets: Map<string, ServerSocket>,
     private broadcast: BroadcastManager,
     private db: SystemDatabase,
-  ) {}
+  ) { }
 
   private isLoopbackWs(ws: NodeWebSocket): boolean {
     const rawAddress =
@@ -714,15 +713,15 @@ export class ConnectionHandler {
       // Get towns from TownSystem
       const townSystem = this.world.getSystem("towns") as
         | {
-            getTowns?: () => Array<{
-              id: string;
-              name: string;
-              position: { x: number; y: number; z: number };
-              size: string;
-              biome: string;
-              buildings: Array<{ type: string }>;
-            }>;
-          }
+          getTowns?: () => Array<{
+            id: string;
+            name: string;
+            position: { x: number; y: number; z: number };
+            size: string;
+            biome: string;
+            buildings: Array<{ type: string }>;
+          }>;
+        }
         | undefined;
 
       if (townSystem?.getTowns) {
@@ -740,14 +739,14 @@ export class ConnectionHandler {
       // Get POIs from POISystem
       const poiSystem = this.world.getSystem("pois") as
         | {
-            getPOIs?: () => Array<{
-              id: string;
-              name: string;
-              category: string;
-              position: { x: number; y: number; z: number };
-              biome: string;
-            }>;
-          }
+          getPOIs?: () => Array<{
+            id: string;
+            name: string;
+            category: string;
+            position: { x: number; y: number; z: number };
+            biome: string;
+          }>;
+        }
         | undefined;
 
       if (poiSystem?.getPOIs) {
@@ -979,19 +978,19 @@ export class ConnectionHandler {
         entity as {
           data?: {
             position?:
-              | [number, number, number]
-              | { x?: number; y?: number; z?: number };
-          };
-          position?:
             | [number, number, number]
             | { x?: number; y?: number; z?: number };
+          };
+          position?:
+          | [number, number, number]
+          | { x?: number; y?: number; z?: number };
         }
       ).data?.position ??
       (
         entity as {
           position?:
-            | [number, number, number]
-            | { x?: number; y?: number; z?: number };
+          | [number, number, number]
+          | { x?: number; y?: number; z?: number };
         }
       ).position;
 
@@ -1136,10 +1135,10 @@ export class ConnectionHandler {
       const state = scheduler?.getStreamingState();
       const cycle = state?.cycle as
         | {
-            phase?: string;
-            agent1?: { id?: string } | null;
-            agent2?: { id?: string } | null;
-          }
+          phase?: string;
+          agent1?: { id?: string } | null;
+          agent2?: { id?: string } | null;
+        }
         | undefined;
 
       const contestants = [
@@ -1459,13 +1458,13 @@ export class ConnectionHandler {
     try {
       const invSystem = this.world.getSystem?.("inventory") as
         | {
-            getInventoryData?: (id: string) => {
-              items: unknown[];
-              coins: number;
-              maxSlots: number;
-            };
-            isInventoryReady?: (id: string) => boolean;
-          }
+          getInventoryData?: (id: string) => {
+            items: unknown[];
+            coins: number;
+            maxSlots: number;
+          };
+          isInventoryReady?: (id: string) => boolean;
+        }
         | undefined;
 
       // Wait a bit for inventory to be ready if loading
@@ -1591,6 +1590,7 @@ export class ConnectionHandler {
     const streamingSnapshot = {
       id: socket.id,
       serverTime: performance.now(),
+      worldTime: this.world.getTime(), // Synced world time for day/night cycle
       assetsUrl: this.world.assetsUrl,
       apiUrl: process.env.PUBLIC_API_URL,
       maxUploadSize: process.env.PUBLIC_MAX_UPLOAD_SIZE,
@@ -1608,6 +1608,7 @@ export class ConnectionHandler {
       spectatorMode: true, // Mark as spectator for client behavior
       streamingMode: true, // Additional flag for streaming-specific behavior
       followEntity,
+      worldMap: this.serializeWorldMap(), // World map data for terrain/navigation
     };
 
     socket.send("snapshot", streamingSnapshot);

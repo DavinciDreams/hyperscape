@@ -12,7 +12,7 @@
  *
  * Architecture:
  * - Listens to DUEL_COUNTDOWN_TICK events from ClientNetwork
- * - Pre-renders 4 textures (one per count value) at init — no per-event canvas creation
+ * - Pre-renders 4 textures (one per count value) on first use — no per-event canvas creation
  * - Maintains a pool of sprite+material pairs reused across ticks
  * - Animates with scale punch and fade effects
  */
@@ -62,7 +62,7 @@ export class DuelCountdownSplatSystem extends System {
   private boundCountdownHandler: ((data: unknown) => void) | null = null;
 
   // Pre-rendered textures: one per count value (0=FIGHT!, 1, 2, 3)
-  // Created once at init, reused for every countdown tick — no per-event canvas allocation
+  // Created once on first use, reused for every countdown tick — no per-event canvas allocation
   private countTextures: Map<number, THREE.CanvasTexture> = new Map();
 
   // Pool of reusable sprite+material pairs
@@ -80,8 +80,6 @@ export class DuelCountdownSplatSystem extends System {
 
     // Prevent duplicate subscriptions
     if (this.boundCountdownHandler) return;
-
-    this.initPool();
 
     this.boundCountdownHandler = this.onCountdownTick.bind(this);
     this.world.on(
@@ -156,6 +154,9 @@ export class DuelCountdownSplatSystem extends System {
   }
 
   private acquirePoolItem(): SplatPoolItem | null {
+    if (!this.poolInitialized) {
+      this.initPool();
+    }
     for (const item of this.splatPool) {
       if (!item.active) {
         item.active = true;

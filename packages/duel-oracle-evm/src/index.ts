@@ -1,0 +1,52 @@
+export { DUEL_OUTCOME_ORACLE_ABI } from "./generated/duelOutcomeOracleAbi.js";
+
+export const DUEL_OUTCOME_ORACLE_DEPLOYMENTS = {
+  anvil: {
+    chainId: 31337,
+    label: "Local Anvil",
+    rpcUrl: "http://127.0.0.1:8545",
+    address: null,
+  },
+  baseSepolia: {
+    chainId: 84532,
+    label: "Base Sepolia",
+    rpcUrl: "https://sepolia.base.org",
+    address: null,
+  },
+  bscTestnet: {
+    chainId: 97,
+    label: "BSC Testnet",
+    rpcUrl: "https://data-seed-prebsc-1-s1.binance.org:8545",
+    address: null,
+  },
+  avaxFuji: {
+    chainId: 43113,
+    label: "Avalanche Fuji",
+    rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc",
+    address: null,
+  },
+  base: {
+    chainId: 8453,
+    label: "Base Mainnet",
+    rpcUrl: "https://mainnet.base.org",
+    address: "0x6fabf21b0589C8E591bff87729bBF4A429acc3Fc",
+  },
+  bsc: {
+    chainId: 56,
+    label: "BSC Mainnet",
+    rpcUrl: "https://bsc-dataseed.binance.org",
+    address: "0x007571e57366981c4069cc722A3a5fa5272CA2c8",
+  },
+  avax: {
+    chainId: 43114,
+    label: "Avalanche Mainnet",
+    rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
+    address: "0x30eD46DD26BC48E6e2e985113ACB1fcA8bF4a090",
+  },
+} as const;
+
+export type DuelOutcomeOracleChainKey =
+  keyof typeof DUEL_OUTCOME_ORACLE_DEPLOYMENTS;
+
+export type DuelOutcomeOracleDeployment =
+  (typeof DUEL_OUTCOME_ORACLE_DEPLOYMENTS)[DuelOutcomeOracleChainKey];

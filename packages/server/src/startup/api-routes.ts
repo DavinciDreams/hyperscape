@@ -52,8 +52,8 @@ import { registerAdminRoutes } from "./routes/admin-routes.js";
 import { registerLayoutRoutes } from "./routes/layout-routes.js";
 import { registerDataRoutes } from "./routes/data-routes.js";
 import { registerProxyRoutes } from "../routes/proxy-routes.js";
-import { registerArenaRoutes } from "./routes/arena-routes.js";
 import { registerStreamingRoutes } from "../routes/streaming.js";
+import { registerDuelOracleRoutes } from "./routes/duel-oracle-routes.js";
 
 /**
  * Register all API routes
@@ -115,17 +115,11 @@ export function registerApiRoutes(
   // Static game data endpoints
   registerDataRoutes(fastify);
 
-  // Streamed duel arena + Solana betting endpoints
-  if (process.env.ARENA_SERVICE_ENABLED !== "false") {
-    registerArenaRoutes(fastify, world);
-  } else {
-    console.log(
-      "[API] Arena routes/service disabled (ARENA_SERVICE_ENABLED=false)",
-    );
-  }
-
   // Streaming mode state and leaderboard
   registerStreamingRoutes(fastify, world);
+
+  // Duel arena oracle metadata and inspection
+  registerDuelOracleRoutes(fastify, world);
 
   console.log("[API] ✅ API routes registered");
 }

@@ -1,4 +1,8 @@
-import { GAME_WS_URL, CDN_URL } from "@/lib/api-config";
+import {
+  GAME_WS_URL,
+  CDN_URL,
+  normalizeBrowserLoopbackUrl,
+} from "@/lib/api-config";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   THREE,
@@ -24,7 +28,6 @@ type PublicRuntimeEnv = {
   PUBLIC_CDN_URL?: string;
   PUBLIC_WS_URL?: string;
   PUBLIC_API_URL?: string;
-  PUBLIC_FORCE_WEBGL?: string;
   PUBLIC_DISABLE_WEBGPU?: string;
 };
 
@@ -38,11 +41,8 @@ const getRuntimeEnv = (): PublicRuntimeEnv | undefined => {
 const normalizeEnvValue = (value?: string): string | undefined => {
   if (!value) return undefined;
   if (value === "undefined") return undefined;
-  return value;
+  return normalizeBrowserLoopbackUrl(value);
 };
-
-const isLocalHostName = (hostname: string): boolean =>
-  hostname === "localhost" || hostname === "127.0.0.1";
 
 const resolveCdnUrlForClient = (
   runtimeCdnUrl?: string,
@@ -327,15 +327,13 @@ export function GameClient({
       event.preventDefault?.();
       console.error(
         "[GameClient] GPU context lost - WebGPU device may have been lost. " +
-          "This indicates GPU resource exhaustion or driver issues.",
+        "This indicates GPU resource exhaustion or driver issues.",
       );
     };
-
-    // Listen for both WebGL (legacy) and WebGPU context lost events
-    canvas.addEventListener("webglcontextlost", handleContextLost);
+    // Listen for WebGPU context lost events (if supported in future/custom)
+    // canvas.addEventListener("webgpucontextlost", handleContextLost);
 
     return () => {
-      canvas.removeEventListener("webglcontextlost", handleContextLost);
     };
   }, [world]);
 
@@ -383,9 +381,9 @@ export function GameClient({
 
       // Direct connection - no Vite proxy
       // Default to game server on 5555, CDN on 8080
-      const finalWsUrl = wsUrl || import.meta.env.PUBLIC_WS_URL || GAME_WS_URL;
-
       const runtimeEnv = await loadRuntimeEnv();
+      const runtimeWsUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_WS_URL);
+      const finalWsUrl = wsUrl || runtimeWsUrl || GAME_WS_URL;
       const runtimeCdnUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_CDN_URL);
       const buildCdnUrl = normalizeEnvValue(CDN_URL);
       const resolvedCdnUrl = resolveCdnUrlForClient(runtimeCdnUrl, buildCdnUrl);

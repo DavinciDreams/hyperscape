@@ -119,6 +119,8 @@ import { InteractionRouter } from "../systems/client/interaction";
 import { Particles } from "../systems/shared";
 import { Wind } from "../systems/shared";
 import { ClientTeleportEffectsSystem } from "../systems/client/ClientTeleportEffectsSystem";
+import type { SystemConstructor } from "../systems/shared/infrastructure/System";
+import { isStreamingLikeViewport } from "./clientViewportMode";
 
 /**
  * Window extension for browser testing and debugging.
@@ -133,27 +135,38 @@ interface WindowWithWorld extends Window {
   };
 }
 
-function shouldPrewarmTreeCacheForCurrentMode(): boolean {
-  if (typeof window === "undefined") return true;
-
-  const win = window as WindowWithWorld;
-  const isEmbeddedSpectator =
-    win.__HYPERSCAPE_EMBEDDED__ === true &&
-    win.__HYPERSCAPE_CONFIG__?.mode === "spectator";
-
-  // Embedded spectator views should prioritize first-frame latency over
-  // proactive cache warmup to avoid CPU contention during stream join.
-  return !isEmbeddedSpectator;
-}
-
-function isEmbeddedSpectatorMode(): boolean {
+function isInitTraceEnabled(): boolean {
   if (typeof window === "undefined") return false;
 
-  const win = window as WindowWithWorld;
-  return (
-    win.__HYPERSCAPE_EMBEDDED__ === true &&
-    win.__HYPERSCAPE_CONFIG__?.mode === "spectator"
-  );
+  try {
+    return new URLSearchParams(window.location.search).get("traceInit") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function shouldPrewarmTreeCacheForCurrentMode(): boolean {
+  // Stream and spectator viewers should prioritize first-frame latency over
+  // proactive cache warmup to avoid CPU contention during stream join.
+  return !isStreamingLikeViewport();
+}
+
+function removeSystem(world: World, key: string): void {
+  const existingSystem = world.systemsByName.get(key);
+  if (!existingSystem) return;
+
+  world.systems = world.systems.filter((system) => system !== existingSystem);
+  world.systemsByName.delete(key);
+  delete (world as unknown as Record<string, unknown>)[key];
+}
+
+function replaceSystem(
+  world: World,
+  key: string,
+  SystemClass: SystemConstructor,
+): void {
+  removeSystem(world, key);
+  world.register(key, SystemClass);
 }
 
 /**
@@ -167,6 +180,7 @@ function isEmbeddedSpectatorMode(): boolean {
  */
 export function createClientWorld() {
   const world = new World();
+  const disableLocalPhysics = isStreamingLikeViewport();
 
   // ============================================================================
   // FRAME BUDGET MANAGER
@@ -215,7 +229,7 @@ export function createClientWorld() {
 
   // Lifecycle and networking
   world.register("client-runtime", ClientRuntime); // Client lifecycle, diagnostics
-  world.register("stage", Stage); // Three.js scene graph root
+  replaceSystem(world, "stage", Stage); // Three.js scene graph root
   world.register("livekit", ClientLiveKit); // Voice chat client
   world.register("network", ClientNetwork); // WebSocket connection to server
   world.register("loader", ClientLoader); // Asset loading and caching
@@ -240,7 +254,14 @@ export function createClientWorld() {
   world.register("prefs", ClientInterface); // User preferences and UI state
 
   // Physics (local simulation, validated by server)
-  world.register("physics", Physics); // PhysX collision and raycasting
+  if (disableLocalPhysics) {
+    removeSystem(world, "physics");
+    console.log(
+      "[createClientWorld] Local PhysX disabled for stream/spectator viewport",
+    );
+  } else {
+    replaceSystem(world, "physics", Physics); // PhysX collision and raycasting
+  }
 
   // Interaction system - handles clicks, raycasting, context menus
   // MUST be registered before ClientCameraSystem which uses its RaycastService
@@ -373,7 +394,15 @@ export function createClientWorld() {
 
   (async () => {
     try {
+      const traceInit = isInitTraceEnabled();
+
+      if (traceInit) {
+        console.log("[createClientWorld] -> registerSystems");
+      }
       await registerSystems(world);
+      if (traceInit) {
+        console.log("[createClientWorld] <- registerSystems");
+      }
 
       if (shouldPrewarmTreeCacheForCurrentMode()) {
         // Pre-warm procgen tree cache AFTER PhysX is loaded (prevents WASM timeout)
@@ -400,8 +429,14 @@ export function createClientWorld() {
         })();
       } else {
         console.log(
-          "[createClientWorld] Skipping tree cache pre-warm for embedded spectator mode",
+          "[createClientWorld] Skipping tree cache pre-warm for stream/spectator viewport",
         );
+        // CRITICAL: We still need to load PhysX even if we skip tree pre-warming!
+        // In stream mode, there is no local player, so PlayerLocal won't trigger the load either.
+        // We trigger it here in the background so colliders and static actors can initialize.
+        waitForPhysX("StreamInitialization", 120000).catch((err) => {
+          console.warn("[createClientWorld] Background PhysX load failed:", err);
+        });
       }
 
       // Pre-warm mob/NPC animated impostors AFTER renderer is ready
@@ -428,22 +463,46 @@ export function createClientWorld() {
 
       const equipmentSystem = world.getSystem("equipment");
       if (equipmentSystem && !equipmentSystem.isInitialized()) {
+        if (traceInit) {
+          console.log("[createClientWorld] -> init equipment");
+        }
         await equipmentSystem.init(worldOptions);
+        if (traceInit) {
+          console.log("[createClientWorld] <- init equipment");
+        }
       }
 
       const damageSplatSystem = world.getSystem("damage-splat");
       if (damageSplatSystem && !damageSplatSystem.isInitialized()) {
+        if (traceInit) {
+          console.log("[createClientWorld] -> init damage-splat");
+        }
         await damageSplatSystem.init(worldOptions);
+        if (traceInit) {
+          console.log("[createClientWorld] <- init damage-splat");
+        }
       }
 
       const duelCountdownSplat = world.getSystem("duel-countdown-splat");
       if (duelCountdownSplat && !duelCountdownSplat.isInitialized()) {
+        if (traceInit) {
+          console.log("[createClientWorld] -> init duel-countdown-splat");
+        }
         await duelCountdownSplat.init(worldOptions);
+        if (traceInit) {
+          console.log("[createClientWorld] <- init duel-countdown-splat");
+        }
       }
 
       const projectileRenderer = world.getSystem("projectile-renderer");
       if (projectileRenderer && !projectileRenderer.isInitialized()) {
+        if (traceInit) {
+          console.log("[createClientWorld] -> init projectile-renderer");
+        }
         await projectileRenderer.init(worldOptions);
+        if (traceInit) {
+          console.log("[createClientWorld] <- init projectile-renderer");
+        }
       }
 
       // Re-expose utilities after RPG systems load (in case they were cleared)

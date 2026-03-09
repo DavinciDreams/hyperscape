@@ -713,6 +713,12 @@ export class VegetationSystem extends System {
           continue;
         }
 
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("text/html")) {
+          lastErrorMessage = "Not Found (HTML SPA fallback)";
+          continue;
+        }
+
         const settings = (await response.json()) as {
           version?: number;
           distanceThresholds?: Record<
@@ -1086,9 +1092,9 @@ export class VegetationSystem extends System {
         ) {
           const next = this.pendingTileRegenerations.entries().next().value as
             | [
-                string,
-                { tileX: number; tileZ: number; biome: string; reason: string },
-              ]
+              string,
+              { tileX: number; tileZ: number; biome: string; reason: string },
+            ]
             | undefined;
           if (!next) break;
 
@@ -3277,9 +3283,9 @@ export class VegetationSystem extends System {
       const createMesh =
         lodLevel === 1
           ? (x: number, z: number) =>
-              this.getOrCreateLOD1ChunkedMesh(x, z, assetId, assetDataRef)
+            this.getOrCreateLOD1ChunkedMesh(x, z, assetId, assetDataRef)
           : (x: number, z: number) =>
-              this.getOrCreateLOD2ChunkedMesh(x, z, assetId, assetDataRef);
+            this.getOrCreateLOD2ChunkedMesh(x, z, assetId, assetDataRef);
 
       // Process up to MAX_LOD_CHUNKS_PER_FRAME chunks
       const endIndex = Math.min(
@@ -3420,24 +3426,24 @@ export class VegetationSystem extends System {
       const cameraSystem =
         (this.world.getSystem("client-camera-system") as
           | {
-              getCameraInfo?: () => {
-                target?: { position?: THREE.Vector3 } | null;
-              };
-            }
+            getCameraInfo?: () => {
+              target?: { position?: THREE.Vector3 } | null;
+            };
+          }
           | undefined) ??
         (this.world.getSystem("client-camera") as
           | {
-              getCameraInfo?: () => {
-                target?: { position?: THREE.Vector3 } | null;
-              };
-            }
+            getCameraInfo?: () => {
+              target?: { position?: THREE.Vector3 } | null;
+            };
+          }
           | undefined) ??
         (this.world.getSystem("camera") as
           | {
-              getCameraInfo?: () => {
-                target?: { position?: THREE.Vector3 } | null;
-              };
-            }
+            getCameraInfo?: () => {
+              target?: { position?: THREE.Vector3 } | null;
+            };
+          }
           | undefined);
       const targetPos = cameraSystem?.getCameraInfo?.().target?.position;
       if (targetPos) {

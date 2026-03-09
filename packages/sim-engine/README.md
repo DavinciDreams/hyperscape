@@ -1,5 +1,18 @@
 # Hyperscape Duel Index + Perp Simulator
 
+This package is a research simulator for target-state market design. It is not a proof that the currently deployed Solana perps program implements every protection modeled here.
+
+For launch-readiness checks against the current `gold_perps_market` contract, use the chain-faithful script in `/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/anchor/scripts/simulate-gold-perps-risk.ts`.
+
+Important parity gaps versus the current on-chain perps program:
+
+- no portfolio margin on-chain; current contract is isolated per market
+- no partial liquidation target/buffer on-chain; current contract fully liquidates
+- no ADL on-chain
+- no on-chain anti-bot order/notional/imbalance throttles
+- no on-chain risk-governor state machine or oracle-lag hardening
+- no on-chain global/per-market dynamic OI ladder beyond the explicit cap configured in `gold_perps_market`
+
 Self-contained simulator for:
 
 - nonstationary duel skill/rating dynamics

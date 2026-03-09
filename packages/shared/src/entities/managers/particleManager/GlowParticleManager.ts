@@ -750,7 +750,6 @@ export class GlowParticleManager {
 
   private createPool(motion: MotionType, maxCount: number): PoolLayer {
     const geometry = new THREE.PlaneGeometry(1, 1);
-    geometry.deleteAttribute("normal");
 
     const emitterPosArr = new Float32Array(maxCount * 3);
     const ageLifetimeArr = new Float32Array(maxCount * 2);

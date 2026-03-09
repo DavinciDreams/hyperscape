@@ -129,6 +129,23 @@ function _isNetworkWithSocket(
   );
 }
 
+function isInitTraceEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+
+  try {
+    return new URLSearchParams(window.location.search).get("traceInit") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function getSystemDebugName(
+  systemNameMap: Map<System, string>,
+  system: System,
+): string {
+  return systemNameMap.get(system) || system.constructor.name || "Unknown";
+}
+
 interface AsyncTickCallMetric {
   label: string;
   phase: "fixedUpdate" | "update" | "lateUpdate";
@@ -1225,6 +1242,7 @@ export class World extends EventEmitter {
     for (const [name, system] of this.systemsByName) {
       systemNameMap.set(system, name);
     }
+    const traceInit = isInitTraceEnabled();
 
     // Initialize systems wave by wave (systems in same wave run in parallel)
     for (let waveIndex = 0; waveIndex < systemWaves.length; waveIndex++) {
@@ -1245,7 +1263,18 @@ export class World extends EventEmitter {
       });
 
       // Initialize all systems in this wave in parallel
-      await Promise.all(wave.map((system) => system.init(options)));
+      await Promise.all(
+        wave.map(async (system) => {
+          const systemName = getSystemDebugName(systemNameMap, system);
+          if (traceInit) {
+            console.log(`[World.init] -> init ${systemName}`);
+          }
+          await system.init(options);
+          if (traceInit) {
+            console.log(`[World.init] <- init ${systemName}`);
+          }
+        }),
+      );
       initializedSystems += wave.length;
     }
 
@@ -1282,6 +1311,7 @@ export class World extends EventEmitter {
     for (const [key, sys] of this.systemsByName) {
       nameBySystem.set(sys, key);
     }
+    const traceInit = isInitTraceEnabled();
 
     const deferred: System[] = [];
 
@@ -1290,17 +1320,31 @@ export class World extends EventEmitter {
         deferred.push(system);
         continue;
       }
+      const systemName = getSystemDebugName(nameBySystem, system);
+      if (traceInit) {
+        console.log(`[World.start] -> start ${systemName}`);
+      }
       const startResult = system.start();
       if (startResult instanceof Promise) {
         await startResult;
+      }
+      if (traceInit) {
+        console.log(`[World.start] <- start ${systemName}`);
       }
     }
 
     // Start tick-loop systems last so they begin with a clean clock
     for (const system of deferred) {
+      const systemName = getSystemDebugName(nameBySystem, system);
+      if (traceInit) {
+        console.log(`[World.start] -> start ${systemName}`);
+      }
       const startResult = system.start();
       if (startResult instanceof Promise) {
         await startResult;
+      }
+      if (traceInit) {
+        console.log(`[World.start] <- start ${systemName}`);
       }
     }
   }
@@ -2199,7 +2243,7 @@ export class World extends EventEmitter {
    * @returns Bitmask for physics queries
    */
   createLayerMask(...layers: string[]): number {
-    return this.physics.createLayerMask(...layers);
+    return this.physics?.createLayerMask(...layers) ?? 0;
   }
 
   /**

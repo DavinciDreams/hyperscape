@@ -13,14 +13,25 @@
 
 set -e
 
+SEARCH_ONLY=false
+for arg in "$@"; do
+    case "$arg" in
+        --search)
+            SEARCH_ONLY=true
+            ;;
+    esac
+done
+
 # ── Configuration ────────────────────────────────────────────────────────────
 # Minimum requirements for WebGPU streaming
 # CRITICAL: gpu_display_active=true is non-negotiable for WebGPU
-MIN_GPU_RAM=20          # GB - RTX 4090 has 24GB
-MIN_RELIABILITY=0.95    # 95% uptime
-MAX_PRICE_PER_HOUR=2.0  # USD per hour
-PREFERRED_GPUS="RTX_4090,RTX_3090,RTX_A6000,A100"
-DISK_SPACE=120          # GB minimum (increased for builds)
+MIN_GPU_RAM=10          # GB - enough for 720p WebGPU streaming without forcing 4090-class cards
+MIN_RELIABILITY=0.96    # 96% uptime
+MAX_PRICE_PER_HOUR=2.5  # USD per hour
+PREFERRED_GPUS="RTX_4070,RTX_3080,RTX_3090,RTX_A4500,RTX_A5000,A10,L4"
+DISK_SPACE=80           # GB minimum for builds and stream assets
+US_WEST_REGEX='california|washington|oregon|arizona|nevada|utah'
+MIN_GPU_RAM_MB=$((MIN_GPU_RAM * 1000))
 
 # ── Colors for output ────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -50,27 +61,45 @@ log_info "Vast.ai CLI ready"
 
 # ── Search for instances with display support ────────────────────────────────
 log_info "═══════════════════════════════════════════════════════════════════"
-log_info "Searching for GPU instances with DISPLAY DRIVER support..."
+log_info "Searching for U.S. GPU instances with DISPLAY DRIVER support..."
 log_info "Filter: gpu_display_active=true (REQUIRED for WebGPU)"
 log_info "═══════════════════════════════════════════════════════════════════"
 
 # Build search query
 # CRITICAL: gpu_display_active=true ensures the GPU has display driver support
-SEARCH_QUERY="gpu_display_active=true reliability>=${MIN_RELIABILITY} gpu_ram>=${MIN_GPU_RAM} disk_space>=${DISK_SPACE} dph<=${MAX_PRICE_PER_HOUR}"
+SEARCH_QUERY="gpu_display_active=true geolocation in [US] num_gpus=1 rented=False dph <= ${MAX_PRICE_PER_HOUR}"
 
 log_info "Search query: $SEARCH_QUERY"
 
 # Search and get results as JSON
 SEARCH_RESULTS=$(vastai search offers "$SEARCH_QUERY" --raw 2>/dev/null || echo "[]")
+FILTERED_RESULTS=$(echo "$SEARCH_RESULTS" | jq --argjson minReliability "$MIN_RELIABILITY" --argjson minCpuRam 16000 --argjson minCpuCores 8 --argjson minGpuRam "$MIN_GPU_RAM_MB" --argjson minDisk "$DISK_SPACE" '
+    map(
+        select(
+            (.reliability // 0) >= $minReliability and
+            (.cpu_ram // 0) >= $minCpuRam and
+            (.cpu_cores_effective // 0) >= $minCpuCores and
+            (.gpu_ram // 0) >= $minGpuRam and
+            (.disk_space // 0) >= $minDisk
+        )
+    )
+')
+SORTED_RESULTS=$(echo "$FILTERED_RESULTS" | jq --arg westRegex "$US_WEST_REGEX" '
+    sort_by([
+        ((.geolocation // "") | ascii_downcase | test($westRegex) | not),
+        .dph_total,
+        -(.reliability // 0)
+    ])
+')
 
 # Count results
-RESULT_COUNT=$(echo "$SEARCH_RESULTS" | jq 'length' 2>/dev/null || echo "0")
+RESULT_COUNT=$(echo "$SORTED_RESULTS" | jq 'length' 2>/dev/null || echo "0")
 
 if [ "$RESULT_COUNT" = "0" ]; then
     log_warn "No instances found with gpu_display_active=true"
     log_info "Trying broader search without display filter for comparison..."
 
-    BROAD_RESULTS=$(vastai search offers "reliability>=${MIN_RELIABILITY} gpu_ram>=${MIN_GPU_RAM}" --raw 2>/dev/null || echo "[]")
+    BROAD_RESULTS=$(vastai search offers "geolocation in [US] num_gpus=1 rented=False dph <= ${MAX_PRICE_PER_HOUR}" --raw 2>/dev/null || echo "[]")
     BROAD_COUNT=$(echo "$BROAD_RESULTS" | jq 'length' 2>/dev/null || echo "0")
 
     log_info "Found $BROAD_COUNT instances WITHOUT display filter"
@@ -91,14 +120,15 @@ log_success "Found $RESULT_COUNT instances with display driver support!"
 log_info ""
 log_info "Top 5 available instances:"
 log_info "─────────────────────────────────────────────────────────────────"
-echo "$SEARCH_RESULTS" | jq -r '.[0:5] | .[] | "ID: \(.id) | GPU: \(.gpu_name) | RAM: \(.gpu_ram)GB | \(.dph_total|tostring|.[0:5])$/hr | Reliability: \(.reliability|tostring|.[0:4]) | Display: \(.gpu_display_active)"'
+echo "$SORTED_RESULTS" | jq -r '.[0:5] | .[] | "ID: \(.id) | GPU: \(.gpu_name) | RAM: \(.gpu_ram / 1024 | floor)GB | \(.dph_total|tostring|.[0:5])$/hr | Reliability: \(.reliability|tostring|.[0:4]) | Region: \(.geolocation) | Display: \(.gpu_display_active)"'
 log_info "─────────────────────────────────────────────────────────────────"
 
 # Get the best offer (first one, sorted by value)
-BEST_OFFER=$(echo "$SEARCH_RESULTS" | jq '.[0]')
+BEST_OFFER=$(echo "$SORTED_RESULTS" | jq '.[0]')
 OFFER_ID=$(echo "$BEST_OFFER" | jq -r '.id')
 GPU_NAME=$(echo "$BEST_OFFER" | jq -r '.gpu_name')
 GPU_RAM=$(echo "$BEST_OFFER" | jq -r '.gpu_ram')
+GPU_RAM_GB=$(echo "$BEST_OFFER" | jq -r '(.gpu_ram / 1024 | floor)')
 PRICE=$(echo "$BEST_OFFER" | jq -r '.dph_total')
 RELIABILITY=$(echo "$BEST_OFFER" | jq -r '.reliability')
 DISPLAY_ACTIVE=$(echo "$BEST_OFFER" | jq -r '.gpu_display_active')
@@ -106,10 +136,16 @@ DISPLAY_ACTIVE=$(echo "$BEST_OFFER" | jq -r '.gpu_display_active')
 log_info ""
 log_info "Best offer selected:"
 log_info "  Offer ID: $OFFER_ID"
-log_info "  GPU: $GPU_NAME ($GPU_RAM GB)"
+log_info "  GPU: $GPU_NAME (${GPU_RAM_GB} GB)"
 log_info "  Price: \$$PRICE/hour"
 log_info "  Reliability: $RELIABILITY"
 log_info "  Display Active: $DISPLAY_ACTIVE"
+
+if [ "$SEARCH_ONLY" = true ]; then
+    log_info ""
+    log_success "Search completed without provisioning (--search)"
+    exit 0
+fi
 
 # Confirm display support
 if [ "$DISPLAY_ACTIVE" != "true" ]; then

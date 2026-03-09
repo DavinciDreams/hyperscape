@@ -45,12 +45,12 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.1.38
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
+          version: v1.2.3
 
       - name: Install dependencies
         run: |
@@ -141,4 +141,3 @@ jobs:
           path: |
             packages/server/logs/
           retention-days: 7
-

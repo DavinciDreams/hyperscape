@@ -16,6 +16,7 @@ import type {
 } from "../../types/systems/physics";
 import * as THREE from "../../extras/three/three";
 import { getPhysX } from "../../physics/PhysXManager";
+import { installWebGPUAttributeUploadFallback } from "../rendering/webgpuBufferUploads";
 
 const _v1 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion();
@@ -174,6 +175,8 @@ export function cleanupPxVec3(vec: PxVec3 | PhysX.PxVec3): void {
  * instead of creating new PxVec3/PxQuat objects every call, avoiding per-frame allocations.
  */
 export function installThreeJSExtensions(): void {
+  installWebGPUAttributeUploadFallback();
+
   // Extend Vector3 prototype with physics transform method
   if (!THREE.Vector3.prototype.toPxTransform) {
     THREE.Vector3.prototype.toPxTransform = function (

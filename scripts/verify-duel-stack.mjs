@@ -170,7 +170,13 @@ async function assertHlsReady(label, url, checkTimeoutMs) {
       const response = await fetchWithTimeout(url);
       if (!response.ok) return null;
       const body = await response.text();
-      return body.includes("#EXTM3U") ? body : null;
+      const hasPlaylist = body.includes("#EXTM3U");
+      const hasMediaSegments =
+        body.includes("#EXTINF:") ||
+        body.includes("#EXT-X-PART:") ||
+        /\.ts(?:$|\?)/.test(body) ||
+        /\.m4s(?:$|\?)/.test(body);
+      return hasPlaylist && hasMediaSegments ? body : null;
     },
     checkTimeoutMs,
   );
@@ -353,6 +359,15 @@ async function verify() {
       bytesReceived: null,
       note: `status check failed: ${error instanceof Error ? error.message : String(error)}`,
     };
+  }
+
+  if (
+    requiredDestinations.length > 0 &&
+    !(typeof rtmpEvidence.bytesReceived === "number" && rtmpEvidence.bytesReceived > 0)
+  ) {
+    throw new Error(
+      `required RTMP destinations never received ingest bytes (${rtmpEvidence.note})`,
+    );
   }
 
   if (hlsUrl) {
