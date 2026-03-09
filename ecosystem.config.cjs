@@ -95,12 +95,15 @@ module.exports = {
         POSTGRES_POOL_MAX: "1",
         POSTGRES_POOL_MIN: "0",
         SKIP_MIGRATIONS: "true",
+        DATABASE_URL: process.env.DATABASE_URL || "",
+        USE_LOCAL_POSTGRES:
+          process.env.USE_LOCAL_POSTGRES ||
+          (process.env.DATABASE_URL ? "false" : "true"),
         STREAMING_DUEL_ENABLED: "true",
         DUEL_MARKET_MAKER_ENABLED: "true",
         DUEL_BETTING_ENABLED: "false",
         ARENA_SERVICE_ENABLED: "false",
         DUEL_SKIP_CHAIN_SETUP: "true",
-        USE_LOCAL_POSTGRES: "false",
         SOLANA_RPC_URL: "https://api.devnet.solana.com",
         SOLANA_WS_URL: "wss://api.devnet.solana.com/",
         SOLANA_ARENA_MARKET_PROGRAM_ID:
