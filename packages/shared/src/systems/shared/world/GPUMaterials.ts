@@ -1053,6 +1053,17 @@ export function createTreeDissolveMaterial(
     })();
   }
 
+  // --- Sky-color fog (same as terrain/vegetation) ---
+  const treeFogTex = texture(fogRenderTarget.texture, screenUV);
+  const treeToCam = sub(cameraPosition, positionWorld);
+  const treeFogDistSq = dot(treeToCam, treeToCam);
+  const treeFogFactor = smoothstep(
+    float(FOG_NEAR_SQ),
+    float(FOG_FAR_SQ),
+    treeFogDistSq,
+  );
+  material.fog = false;
+
   // --- Output: soft clamped lighting (bypass PBR, compute Lambert from scratch) ---
   const albedoMap = material.map;
   const matColor = vec3(material.color.r, material.color.g, material.color.b);
@@ -1144,7 +1155,10 @@ export function createTreeDissolveMaterial(
     const highlighted = add(brightened, rimGlow);
     const finalRgb = mix(boosted, highlighted, hlIntensity);
 
-    return vec4(finalRgb, pbrOut.a);
+    // ---- Sky-color fog ----
+    const fogged = mix(finalRgb, treeFogTex.rgb, treeFogFactor);
+
+    return vec4(fogged, pbrOut.a);
   })();
 
   material.needsUpdate = true;
