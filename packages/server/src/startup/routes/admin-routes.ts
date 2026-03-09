@@ -1508,6 +1508,55 @@ export function registerAdminRoutes(
           }
         }
 
+        // 3. External agents (e.g. duel bots) — connected via WebSocket but
+        //    not tracked by AgentManager or ModelAgentSpawner.  Detect them
+        //    from world entities with the isAgent flag or agent- ID prefix.
+        const detectExternalAgent = (
+          entityId: string,
+          entity: unknown,
+          requirePlayerType: boolean,
+        ) => {
+          if (agentPromises.has(entityId)) return;
+          const typed = entity as {
+            type?: string;
+            name?: string;
+            data?: { isAgent?: boolean | number; name?: string };
+          };
+          if (
+            requirePlayerType &&
+            typed.type !== "player" &&
+            typed.type !== "Player"
+          )
+            return;
+          const isAgentEntity =
+            entityId.startsWith("agent-") ||
+            typed.data?.isAgent === true ||
+            typed.data?.isAgent === 1;
+          if (!isAgentEntity) return;
+          agentPromises.set(
+            entityId,
+            buildAgentData(
+              entityId,
+              typed.name || typed.data?.name || entityId,
+              "running",
+              Date.now(),
+              Date.now(),
+            ),
+          );
+        };
+        // Check players map first (primary)
+        if (world.entities?.players) {
+          for (const [entityId, entity] of world.entities.players) {
+            detectExternalAgent(entityId, entity, false);
+          }
+        }
+        // Fallback: check items map for player-type entities
+        if (world.entities?.items) {
+          for (const [entityId, entity] of world.entities.items) {
+            detectExternalAgent(entityId, entity, true);
+          }
+        }
+
         const agents = await Promise.all(agentPromises.values());
 
         return reply.send({
