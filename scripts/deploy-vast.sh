@@ -17,6 +17,18 @@ else
     echo "[deploy] Warning: $SECRETS_FILE not found; relying on existing environment"
 fi
 
+# Auto-detect database mode: if DATABASE_URL is set to a remote host, use remote mode
+if [ -z "${DUEL_DATABASE_MODE:-}" ] && [ -n "${DATABASE_URL:-}" ]; then
+    case "$DATABASE_URL" in
+        *localhost*|*127.0.0.1*|*0.0.0.0*|*::1*)
+            DUEL_DATABASE_MODE="local"
+            ;;
+        *)
+            DUEL_DATABASE_MODE="remote"
+            echo "[deploy] Auto-detected remote database from DATABASE_URL"
+            ;;
+    esac
+fi
 DUEL_DATABASE_MODE="${DUEL_DATABASE_MODE:-local}"
 LOCAL_POSTGRES_HOST="${LOCAL_POSTGRES_HOST:-127.0.0.1}"
 LOCAL_POSTGRES_PORT="${LOCAL_POSTGRES_PORT:-5432}"
@@ -126,6 +138,9 @@ if ! command -v google-chrome-unstable &> /dev/null; then
 else
     echo "[deploy] Chrome Dev already installed: $(google-chrome-unstable --version)"
 fi
+
+# ── Fix any broken apt dependencies (NVIDIA driver conflicts) ─
+apt-get --fix-broken install -y 2>/dev/null || true
 
 # ── Install Playwright system deps for RTMP streaming ─────────
 export PATH="/root/.bun/bin:$PATH"
