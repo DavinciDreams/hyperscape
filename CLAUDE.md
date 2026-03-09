@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hyperscape is a RuneScape-style MMORPG built on a custom 3D multiplayer engine. The project features a real-time 3D metaverse engine (Hyperscape) in a persistent world.
 
+## CRITICAL: Secrets and Private Keys
+
+**Never put private keys, seed phrases, API keys, tokens, RPC secrets, or wallet secrets into any tracked file.**
+
+- ALWAYS use local untracked `.env` files for real secrets during development
+- NEVER hardcode secrets in source, tests, docs, fixtures, scripts, config files, or GitHub workflow files
+- NEVER place real credentials in `.env.example`; placeholders only
+- Production and CI secrets must live in the platform secret manager, not in git
+- If a new secret is required, add only the variable name to docs or `.env.example` and load the real value from `.env`, `.env.local`, or deployment secrets
+
 ## CRITICAL: WebGPU Required (NO WebGL)
 
 **Hyperscape requires WebGPU. WebGL WILL NOT WORK.**
@@ -317,6 +327,11 @@ All services have unique default ports to avoid conflicts:
 ### Environment Variables
 
 **Zero-config local development**: The defaults work out of the box. Just run `bun run dev`.
+
+**Secret handling is non-negotiable**:
+- Real private keys and API tokens must come from local untracked `.env` files
+- Tracked files may only contain placeholders and variable names
+- If you find a real credential in a tracked file, remove it and move it to `.env` or the deployment secret store immediately
 
 **Package-specific `.env` files**: Each package has its own `.env.example` with deployment documentation:
 

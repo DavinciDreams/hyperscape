@@ -32,6 +32,16 @@ This is a hard requirement. DO NOT:
 
 Hyperscape is a RuneScape-style MMORPG built on Three.js WebGPURenderer with TSL shaders.
 
+## CRITICAL: Secrets and Private Keys
+
+**Never put private keys, seed phrases, API keys, tokens, RPC secrets, or wallet secrets into any file that could be committed.**
+
+- ALWAYS use local untracked `.env` files for real secrets
+- NEVER hardcode secrets in source files, tests, docs, JSON fixtures, scripts, config files, or workflow YAML
+- NEVER put real secrets in `.env.example`; placeholders only
+- If a secret is needed in production or CI, use the platform secret store, not a tracked file
+- If a task requires a new secret, document the variable name and load it from `.env`, `.env.local`, or deployment secrets
+
 ## Key Rules
 
 1. **No `any` types** - ESLint will reject them
@@ -39,6 +49,7 @@ Hyperscape is a RuneScape-style MMORPG built on Three.js WebGPURenderer with TSL
 3. **No mocks in tests** - Use real Playwright browser sessions
 4. **Bun package manager** - Use `bun install`, not npm
 5. **Strong typing** - Prefer classes over interfaces
+6. **Secrets stay out of git** - Real keys must only come from local `.env` files or secret managers
 
 ## Tech Stack
 
