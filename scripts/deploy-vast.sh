@@ -17,11 +17,82 @@ else
     echo "[deploy] Warning: $SECRETS_FILE not found; relying on existing environment"
 fi
 
+DUEL_DATABASE_MODE="${DUEL_DATABASE_MODE:-local}"
+LOCAL_POSTGRES_HOST="${LOCAL_POSTGRES_HOST:-127.0.0.1}"
+LOCAL_POSTGRES_PORT="${LOCAL_POSTGRES_PORT:-5432}"
+LOCAL_POSTGRES_USER="${LOCAL_POSTGRES_USER:-hyperscape}"
+LOCAL_POSTGRES_PASSWORD="${LOCAL_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-hyperscape_dev_password}}"
+LOCAL_POSTGRES_DB="${LOCAL_POSTGRES_DB:-${POSTGRES_DB:-hyperscape}}"
+
+if [ -z "${STREAM_ENABLED_DESTINATIONS:-}" ] && [ -z "${DUEL_STREAM_DESTINATIONS:-}" ]; then
+    if [ -n "${TWITCH_STREAM_KEY:-${TWITCH_RTMP_STREAM_KEY:-}}" ] && [ -n "${KICK_STREAM_KEY:-}" ]; then
+        export STREAM_ENABLED_DESTINATIONS="twitch,kick"
+    fi
+fi
+
 # ── Ensure DNS resolution works (some Vast containers use internal-only DNS) ─
 echo -e "nameserver 8.8.8.8\nnameserver 8.8.4.4" > /etc/resolv.conf
 
 LOG_DIR="/root/hyperscape/logs"
 mkdir -p "$LOG_DIR"
+
+escape_sql_literal() {
+    printf "%s" "$1" | sed "s/'/''/g"
+}
+
+ensure_local_postgres() {
+    local user_escaped password_escaped db_escaped
+    user_escaped="$(escape_sql_literal "$LOCAL_POSTGRES_USER")"
+    password_escaped="$(escape_sql_literal "$LOCAL_POSTGRES_PASSWORD")"
+    db_escaped="$(escape_sql_literal "$LOCAL_POSTGRES_DB")"
+
+    echo "[deploy] Ensuring local PostgreSQL is running..."
+
+    if command -v pg_lsclusters >/dev/null 2>&1; then
+        while read -r version cluster _; do
+            [ -n "${version:-}" ] || continue
+            pg_ctlcluster --skip-systemctl-redirect "$version" "$cluster" start 2>/dev/null || true
+        done < <(pg_lsclusters --no-header 2>/dev/null || true)
+    fi
+    service postgresql start 2>/dev/null || /etc/init.d/postgresql start 2>/dev/null || true
+
+    for attempt in $(seq 1 20); do
+        if pg_isready -h "$LOCAL_POSTGRES_HOST" -p "$LOCAL_POSTGRES_PORT" -U postgres >/dev/null 2>&1; then
+            break
+        fi
+        if [ "$attempt" -eq 20 ]; then
+            echo "[deploy] ERROR: local PostgreSQL did not become ready"
+            exit 1
+        fi
+        sleep 1
+    done
+
+    runuser -u postgres -- psql postgres <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${user_escaped}') THEN
+    CREATE ROLE "${LOCAL_POSTGRES_USER}" LOGIN PASSWORD '${password_escaped}';
+  ELSE
+    ALTER ROLE "${LOCAL_POSTGRES_USER}" WITH LOGIN PASSWORD '${password_escaped}';
+  END IF;
+END
+\$\$;
+SQL
+
+    if ! runuser -u postgres -- psql postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '${db_escaped}'" | grep -q 1; then
+        runuser -u postgres -- createdb -O "$LOCAL_POSTGRES_USER" "$LOCAL_POSTGRES_DB"
+    fi
+
+    export POSTGRES_HOST="$LOCAL_POSTGRES_HOST"
+    export POSTGRES_PORT="$LOCAL_POSTGRES_PORT"
+    export POSTGRES_USER="$LOCAL_POSTGRES_USER"
+    export POSTGRES_PASSWORD="$LOCAL_POSTGRES_PASSWORD"
+    export POSTGRES_DB="$LOCAL_POSTGRES_DB"
+    export DATABASE_URL="postgresql://${LOCAL_POSTGRES_USER}:${LOCAL_POSTGRES_PASSWORD}@${LOCAL_POSTGRES_HOST}:${LOCAL_POSTGRES_PORT}/${LOCAL_POSTGRES_DB}"
+    unset POSTGRES_URL
+
+    echo "[deploy] Local PostgreSQL ready at ${LOCAL_POSTGRES_HOST}:${LOCAL_POSTGRES_PORT}/${LOCAL_POSTGRES_DB}"
+}
 
 echo "[deploy] Starting Hyperscape CI/CD update on Vast.ai..."
 
@@ -33,7 +104,7 @@ git pull origin main
 
 # ── Install system dependencies (needed for native modules) ───
 echo "[deploy] Installing system build dependencies..."
-apt-get update && apt-get install -y build-essential python3 socat xvfb git-lfs ffmpeg wget gnupg iproute2 lsof || true
+apt-get update && apt-get install -y build-essential python3 socat xvfb git-lfs ffmpeg wget gnupg iproute2 lsof postgresql postgresql-client || true
 git lfs install || true
 
 # ── Install Chrome Dev channel (has WebGPU enabled by default) ─
@@ -50,6 +121,16 @@ fi
 # ── Install Playwright system deps for RTMP streaming ─────────
 export PATH="/root/.bun/bin:$PATH"
 bunx playwright install-deps chromium || true
+
+if [ "$DUEL_DATABASE_MODE" != "remote" ]; then
+    unset DATABASE_URL
+    unset POSTGRES_URL
+    export USE_LOCAL_POSTGRES=true
+    ensure_local_postgres
+else
+    export USE_LOCAL_POSTGRES=false
+    echo "[deploy] Using external DATABASE_URL from runtime environment"
+fi
 
 # ── Install dependencies ──────────────────────────────────────
 echo "[deploy] Installing dependencies..."
@@ -72,6 +153,7 @@ sleep 2
 pkill -f "hyperscape-duel" || true
 pkill -f "watchdog.sh" || true
 pkill -f "stream-to-rtmp" || true
+pkill -f "xvfb-run.*packages/server.*stream:rtmp" || true
 pkill -f "turbo.*dev" || true
 pkill -f "chromium" || true
 pkill -f "chrome" || true
@@ -80,9 +162,12 @@ pkill -f "node.*packages/server" || true
 pkill -f "drizzle" || true
 rm -f /root/hyperscape/.runtime-locks/rtmp-status.json || true
 
-# Wait for database connections to be released by Neon pooler
-echo "[deploy] Waiting 30s for database connections to clear..."
-sleep 30
+DB_DRAIN_WAIT_SECONDS=5
+if [ "$DUEL_DATABASE_MODE" = "remote" ]; then
+    DB_DRAIN_WAIT_SECONDS=30
+fi
+echo "[deploy] Waiting ${DB_DRAIN_WAIT_SECONDS}s for database/process cleanup..."
+sleep "$DB_DRAIN_WAIT_SECONDS"
 
 # ── Build core packages ──────────────────────────────────────
 echo "[deploy] Building core dependencies..."

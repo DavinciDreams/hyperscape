@@ -713,6 +713,12 @@ export class VegetationSystem extends System {
           continue;
         }
 
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("text/html")) {
+          lastErrorMessage = "Not Found (HTML SPA fallback)";
+          continue;
+        }
+
         const settings = (await response.json()) as {
           version?: number;
           distanceThresholds?: Record<

@@ -25,7 +25,8 @@ This is a hard requirement. DO NOT:
 ### Server/Streaming (Vast.ai)
 - NVIDIA GPU with Vulkan support is REQUIRED
 - Must run headful with Xorg or Xvfb (NOT headless Chrome)
-- Chrome uses ANGLE/Vulkan for WebGPU
+- **CRITICAL LINUX NOTE**: It is important on Linux to use **Chrome Canary** and the **ANGLE** backend, **NOT** Vulkan (`--use-vulkan`). Using the native Vulkan backend with WebGPU will crash.
+- **CRITICAL MAC NOTE**: It is important on macOS to use **Google Chrome** with the **Metal** backend for ANGLE (`--use-angle=metal`).
 - If WebGPU cannot initialize, deployment MUST FAIL
 
 ## Project Overview

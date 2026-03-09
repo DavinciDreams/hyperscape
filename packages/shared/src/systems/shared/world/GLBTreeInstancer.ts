@@ -76,13 +76,6 @@ let world: World | null = null;
 const pools = new Map<string, ModelPool>();
 const entityToModel = new Map<string, string>();
 
-function inferLOD1Path(lod0Path: string): string {
-  return lod0Path.replace(/\.glb$/i, "_lod1.glb");
-}
-function inferLOD2Path(lod0Path: string): string {
-  return lod0Path.replace(/\.glb$/i, "_lod2.glb");
-}
-
 // ---- Geometry extraction (portfolio pattern: reference, not clone) ----
 
 function extractGeometryAndMaterial(
@@ -183,6 +176,8 @@ function createHighlightMesh(
 async function ensureModelPool(
   modelPath: string,
   depletedModelPath?: string | null,
+  lod1ModelPath?: string | null,
+  lod2ModelPath?: string | null,
 ): Promise<ModelPool> {
   const existing = pools.get(modelPath);
   if (existing) {
@@ -221,32 +216,36 @@ async function ensureModelPool(
 
     // LOD1
     let lod1Pool: LODPool | null = null;
-    const lod1Data = await loadLODModel(inferLOD1Path(modelPath));
-    if (lod1Data) {
-      const lod1Material = createDissolveMaterial(lod1Data.material, {
-        fadeStart: GPU_VEG_CONFIG.FADE_START,
-        fadeEnd: GPU_VEG_CONFIG.FADE_END,
-        enableNearFade: false,
-        enableWaterCulling: false,
-        enableOcclusionDissolve: false,
-      });
-      world!.setupMaterial(lod1Material);
-      lod1Pool = createLODPool(lod1Data.geometry, lod1Material);
+    if (lod1ModelPath) {
+      const lod1Data = await loadLODModel(lod1ModelPath);
+      if (lod1Data) {
+        const lod1Material = createDissolveMaterial(lod1Data.material, {
+          fadeStart: GPU_VEG_CONFIG.FADE_START,
+          fadeEnd: GPU_VEG_CONFIG.FADE_END,
+          enableNearFade: false,
+          enableWaterCulling: false,
+          enableOcclusionDissolve: false,
+        });
+        world!.setupMaterial(lod1Material);
+        lod1Pool = createLODPool(lod1Data.geometry, lod1Material);
+      }
     }
 
     // LOD2
     let lod2Pool: LODPool | null = null;
-    const lod2Data = await loadLODModel(inferLOD2Path(modelPath));
-    if (lod2Data) {
-      const lod2Material = createDissolveMaterial(lod2Data.material, {
-        fadeStart: GPU_VEG_CONFIG.FADE_START,
-        fadeEnd: GPU_VEG_CONFIG.FADE_END,
-        enableNearFade: false,
-        enableWaterCulling: false,
-        enableOcclusionDissolve: false,
-      });
-      world!.setupMaterial(lod2Material);
-      lod2Pool = createLODPool(lod2Data.geometry, lod2Material);
+    if (lod2ModelPath) {
+      const lod2Data = await loadLODModel(lod2ModelPath);
+      if (lod2Data) {
+        const lod2Material = createDissolveMaterial(lod2Data.material, {
+          fadeStart: GPU_VEG_CONFIG.FADE_START,
+          fadeEnd: GPU_VEG_CONFIG.FADE_END,
+          enableNearFade: false,
+          enableWaterCulling: false,
+          enableOcclusionDissolve: false,
+        });
+        world!.setupMaterial(lod2Material);
+        lod2Pool = createLODPool(lod2Data.geometry, lod2Material);
+      }
     }
 
     const pool: ModelPool = {
@@ -398,11 +397,18 @@ export async function addInstance(
   scale: number,
   depletedModelPath?: string | null,
   depletedScale?: number,
+  lod1ModelPath?: string | null,
+  lod2ModelPath?: string | null,
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
   try {
-    const pool = await ensureModelPool(modelPath, depletedModelPath);
+    const pool = await ensureModelPool(
+      modelPath,
+      depletedModelPath,
+      lod1ModelPath,
+      lod2ModelPath,
+    );
 
     if (pool.lod0 && pool.lod0.activeCount >= MAX_INSTANCES) {
       console.warn(

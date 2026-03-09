@@ -41,6 +41,11 @@ const config: HardhatUserConfig = {
     hardhat: {
       chainId: 31337,
     },
+    anvil: {
+      url: process.env.ANVIL_RPC_URL || "http://127.0.0.1:8545",
+      chainId: Number.parseInt(process.env.ANVIL_CHAIN_ID || "31337", 10),
+      accounts: resolveAccounts("ANVIL_PRIVATE_KEY"),
+    },
     bscTestnet: {
       url:
         process.env.BSC_TESTNET_RPC ||

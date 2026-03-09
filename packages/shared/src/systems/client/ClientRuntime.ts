@@ -4,6 +4,7 @@ import { initYoga } from "../../extras/ui/yoga";
 import type { World, WorldOptions } from "../../types";
 import type { Entity } from "../../entities/Entity";
 import type { Entities } from "../shared";
+import { isStreamPageRoute } from "../../runtime/clientViewportMode";
 
 // Pre-allocated temp objects to avoid allocations
 const _diagnosticPos = new THREE.Vector3();
@@ -300,7 +301,9 @@ export class ClientRuntime extends System {
       const searchParams = new URLSearchParams(window.location.search);
       const page = (searchParams.get("page") || "").trim().toLowerCase();
       const mode = (searchParams.get("mode") || "").trim().toLowerCase();
-      if (page === "stream" || mode === "spectator") return true;
+      if (page === "stream" || mode === "spectator" || isStreamPageRoute()) {
+        return true;
+      }
       if (parseTruthy(searchParams.get("disableVisibilityThrottle"))) {
         return true;
       }

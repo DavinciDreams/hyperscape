@@ -99,7 +99,10 @@ contract DuelOutcomeOracle is AccessControl {
             "invalid status"
         );
         require(betOpenTs > 0 && betCloseTs > betOpenTs, "invalid betting window");
-        require(duelStartTs >= betCloseTs, "invalid duel start");
+
+        uint64 normalizedDuelStartTs = duelStartTs < betCloseTs
+            ? betCloseTs
+            : duelStartTs;
 
         DuelState storage duel = duels[duelKey];
         require(duel.status != DuelStatus.RESOLVED, "duel resolved");
@@ -112,7 +115,7 @@ contract DuelOutcomeOracle is AccessControl {
         duel.status = status;
         duel.betOpenTs = betOpenTs;
         duel.betCloseTs = betCloseTs;
-        duel.duelStartTs = duelStartTs;
+        duel.duelStartTs = normalizedDuelStartTs;
         duel.metadataUri = metadataUri;
 
         emit DuelUpserted(
@@ -120,7 +123,7 @@ contract DuelOutcomeOracle is AccessControl {
             status,
             betOpenTs,
             betCloseTs,
-            duelStartTs,
+            normalizedDuelStartTs,
             metadataUri
         );
     }

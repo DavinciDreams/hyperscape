@@ -1,10 +1,10 @@
 name: Deploy Client to Cloudflare Pages
 
-# Deploys the web client to Cloudflare Pages on pushes to main
-# Triggers on changes to client or shared packages (shared contains packet definitions)
+# Deploys the web client to Cloudflare Pages.
+# Production deploys on pushes to main; manual dispatch supports production or preview deploys.
 #
 # Frontend URLs:
-#   - Production: hyperscape.gg, hyperscape.club
+#   - Production: custom domain(s) on the Cloudflare Pages project
 #   - Preview: <commit>.hyperscape.pages.dev
 
 on:
@@ -60,19 +60,32 @@ jobs:
           PUBLIC_API_URL: https://hyperscape-production.up.railway.app
           PUBLIC_WS_URL: wss://hyperscape-production.up.railway.app/ws
           PUBLIC_CDN_URL: https://assets.hyperscape.club
-          PUBLIC_APP_URL: https://hyperscape.gg
+
+      - name: Determine Pages deployment target
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.environment }}" = "production" ]; then
+            echo "branch=main" >> "$GITHUB_OUTPUT"
+            echo "label=production" >> "$GITHUB_OUTPUT"
+          else
+            SAFE_REF=$(echo "${{ github.ref_name }}" | tr '[:upper:]/_' '[:lower:]--' | tr -cd 'a-z0-9-' | cut -c1-40)
+            if [ -z "$SAFE_REF" ]; then
+              SAFE_REF="manual"
+            fi
+
+            echo "branch=preview-${SAFE_REF}-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+            echo "label=preview" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Deploy to Cloudflare Pages
         working-directory: packages/client
         run: |
-          # Extract first line of commit message to avoid multi-line issues
-          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -1 | tr -d '"' | cut -c1-100)
-          npx wrangler pages deploy dist \
+          COMMIT_MSG=$(git log -1 --pretty=%s | tr -d '"' | cut -c1-100)
+          bunx wrangler pages deploy dist \
             --project-name=hyperscape \
-            --branch=${{ github.ref_name }} \
+            --branch=${{ steps.target.outputs.branch }} \
             --commit-hash=${{ github.sha }} \
-            --commit-message="$COMMIT_MSG" \
-            --commit-dirty=true
+            --commit-message="$COMMIT_MSG"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
@@ -80,9 +93,11 @@ jobs:
         run: |
           echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Mode:** ${{ steps.target.outputs.label }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Git ref:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Pages branch:** ${{ steps.target.outputs.branch }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**URLs:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Production: https://hyperscape.gg" >> $GITHUB_STEP_SUMMARY
-          echo "- Preview: https://${{ github.sha }}.hyperscape.pages.dev" >> $GITHUB_STEP_SUMMARY
+          echo "- Production: whichever custom domain is attached to the Cloudflare Pages project" >> $GITHUB_STEP_SUMMARY
+          echo "- Preview: see Wrangler output for the generated preview URL" >> $GITHUB_STEP_SUMMARY

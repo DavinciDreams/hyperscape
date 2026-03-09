@@ -118,6 +118,7 @@ import type {
 } from "../../types/game/social-types";
 import { uuid } from "../../utils";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
+import { isStreamingLikeViewport } from "../../runtime/clientViewportMode";
 import { PlayerLocal } from "../../entities/player/PlayerLocal";
 import { TileInterpolator } from "./TileInterpolator";
 import { type TileCoord } from "../shared/movement/TileSystem"; // Internal import within shared package
@@ -989,16 +990,22 @@ export class ClientNetwork extends SystemBase {
     }
     // Ensure Physics is fully initialized before processing entities
     // This is needed because PlayerLocal uses physics extensions during construction
-    if (!this.world.physics.physics) {
+    const physicsSystem = this.world.physics as
+      | { physics?: unknown }
+      | undefined;
+    const needsLocalPhysics = !isSpectatorMode;
+    if (physicsSystem && !physicsSystem.physics && needsLocalPhysics) {
       // Wait a bit for Physics to initialize
       let attempts = 0;
-      while (!this.world.physics.physics && attempts < 50) {
+      while (!physicsSystem.physics && attempts < 50) {
         await new Promise((resolve) => setTimeout(resolve, 10));
         attempts++;
       }
-      if (!this.world.physics.physics) {
+      if (!physicsSystem.physics) {
         this.logger.error("Physics failed to initialize after waiting");
       }
+    } else if (!physicsSystem && needsLocalPhysics) {
+      this.logger.warn("Physics system unavailable while processing snapshot");
     }
 
     // Already set above
@@ -4204,8 +4211,8 @@ export class ClientNetwork extends SystemBase {
   }) => {
     const localPlayer = this.world.getPlayer();
     if (!localPlayer) {
-      // Embedded spectator sessions intentionally have no local player.
-      if (this.isEmbeddedSpectator) {
+      // Embedded spectator sessions and stream modes intentionally have no local player.
+      if (this.isEmbeddedSpectator || isStreamingLikeViewport()) {
         return;
       }
       console.warn("[ClientNetwork] onPlayerUpdated: No local player found");

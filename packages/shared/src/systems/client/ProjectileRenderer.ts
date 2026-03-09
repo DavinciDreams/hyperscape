@@ -124,9 +124,6 @@ export class ProjectileRenderer extends System {
   private readonly _pendingDelays: Set<ReturnType<typeof setTimeout>> =
     new Set();
 
-  // Cached textures to avoid per-projectile allocation
-  private arrowTextures: Map<string, THREE.Texture> = new Map();
-
   // DataTexture-based glow caches (WebGPU-safe, color baked into pixels)
   // Used for both projectile layers and trail meshes via getCachedGlowTexture()
   private spellGlowTextures: Map<string, THREE.DataTexture> = new Map();
@@ -169,81 +166,6 @@ export class ProjectileRenderer extends System {
       this,
     );
     this.world.on(EventType.COMBAT_PROJECTILE_HIT, this.boundHitHandler, this);
-
-    // Pre-create arrow texture
-    this.createArrowTexture("default", getArrowVisual("default"));
-  }
-
-  /**
-   * Create arrow texture with specific visual config
-   * Draws a clear arrow shape: line shaft with triangular head
-   */
-  private createArrowTexture(id: string, config: ArrowVisualConfig): void {
-    if (this.arrowTextures.has(id)) return;
-
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Use larger canvas for better detail
-    const width = 128;
-    const height = 32;
-    canvas.width = width;
-    canvas.height = height;
-
-    const centerY = height / 2;
-
-    // Convert colors to CSS
-    const shaftColor = `#${config.shaftColor.toString(16).padStart(6, "0")}`;
-    const headColor = `#${config.headColor.toString(16).padStart(6, "0")}`;
-    const fletchColor = `#${config.fletchingColor.toString(16).padStart(6, "0")}`;
-
-    // Clear with transparency
-    ctx.clearRect(0, 0, width, height);
-
-    // Draw fletching (feathers at back) - small diagonal lines
-    ctx.strokeStyle = fletchColor;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(8, centerY - 8);
-    ctx.lineTo(16, centerY);
-    ctx.lineTo(8, centerY + 8);
-    ctx.stroke();
-
-    // Draw arrow shaft (thick line)
-    ctx.strokeStyle = shaftColor;
-    ctx.lineWidth = 4;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(12, centerY);
-    ctx.lineTo(95, centerY);
-    ctx.stroke();
-
-    // Add darker outline to shaft for visibility
-    ctx.strokeStyle = this.darkenColor(shaftColor);
-    ctx.lineWidth = 6;
-    ctx.globalCompositeOperation = "destination-over";
-    ctx.beginPath();
-    ctx.moveTo(12, centerY);
-    ctx.lineTo(95, centerY);
-    ctx.stroke();
-    ctx.globalCompositeOperation = "source-over";
-
-    // Draw arrowhead (filled triangle pointing right)
-    ctx.fillStyle = headColor;
-    ctx.strokeStyle = this.darkenColor(headColor);
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(90, centerY - 10);
-    ctx.lineTo(120, centerY);
-    ctx.lineTo(90, centerY + 10);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    this.arrowTextures.set(id, texture);
   }
 
   /**
@@ -290,17 +212,6 @@ export class ProjectileRenderer extends System {
     group.add(head);
 
     return group;
-  }
-
-  /**
-   * Darken a CSS color for outline
-   */
-  private darkenColor(color: string): string {
-    const hex = color.replace("#", "");
-    const r = Math.max(0, parseInt(hex.slice(0, 2), 16) - 40);
-    const g = Math.max(0, parseInt(hex.slice(2, 4), 16) - 40);
-    const b = Math.max(0, parseInt(hex.slice(4, 6), 16) - 40);
-    return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
   }
 
   /**
@@ -1167,12 +1078,6 @@ export class ProjectileRenderer extends System {
       this.world.stage?.scene.remove(p.mesh);
     }
     this.activeImpactParticles = [];
-
-    // Dispose and clear all texture caches
-    for (const tex of this.arrowTextures.values()) {
-      tex.dispose();
-    }
-    this.arrowTextures.clear();
 
     for (const tex of this.spellGlowTextures.values()) {
       tex.dispose();

@@ -46,8 +46,14 @@ function getBunRuntime(): BunRuntime | undefined {
  * Model provider configuration
  */
 export interface ModelProviderConfig {
-  /** Provider name (openai, anthropic, groq, xai) */
-  provider: "openai" | "anthropic" | "groq" | "xai" | "openrouter";
+  /** Provider name (openai, anthropic, groq, xai, elizacloud) */
+  provider:
+    | "openai"
+    | "anthropic"
+    | "groq"
+    | "xai"
+    | "openrouter"
+    | "elizacloud";
   /** Specific model to use */
   model: string;
   /** Display name for the agent */
@@ -64,144 +70,111 @@ export interface ModelProviderConfig {
  * AI model configurations for agents
  */
 export const MODEL_AGENTS: ModelProviderConfig[] = [
-  // ── OpenAI Models ──────────────────────────────────────────────────────
+  // ── Frontier American Models ───────────────────────────────────────────
   {
-    provider: "openai",
-    model: "gpt-4o",
-    displayName: "GPT-4o",
-    apiKeyEnv: "OPENAI_API_KEY",
-    pluginModule: "@elizaos/plugin-openai",
-    pluginExport: "openaiPlugin",
+    provider: "elizacloud",
+    model: "openai/gpt-5",
+    displayName: "GPT-5",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "openai",
-    model: "gpt-4o-mini",
-    displayName: "GPT-4o Mini",
-    apiKeyEnv: "OPENAI_API_KEY",
-    pluginModule: "@elizaos/plugin-openai",
-    pluginExport: "openaiPlugin",
-  },
-  {
-    provider: "openai",
-    model: "gpt-4.1",
-    displayName: "GPT-4.1",
-    apiKeyEnv: "OPENAI_API_KEY",
-    pluginModule: "@elizaos/plugin-openai",
-    pluginExport: "openaiPlugin",
-  },
-  {
-    provider: "openai",
-    model: "gpt-4.1-mini",
-    displayName: "GPT-4.1 Mini",
-    apiKeyEnv: "OPENAI_API_KEY",
-    pluginModule: "@elizaos/plugin-openai",
-    pluginExport: "openaiPlugin",
-  },
-  {
-    provider: "openai",
-    model: "gpt-4.1-nano",
-    displayName: "GPT-4.1 Nano",
-    apiKeyEnv: "OPENAI_API_KEY",
-    pluginModule: "@elizaos/plugin-openai",
-    pluginExport: "openaiPlugin",
-  },
-  {
-    provider: "openai",
-    model: "o4-mini",
-    displayName: "o4 Mini",
-    apiKeyEnv: "OPENAI_API_KEY",
-    pluginModule: "@elizaos/plugin-openai",
-    pluginExport: "openaiPlugin",
-  },
-  {
-    provider: "openai",
-    model: "o3-mini",
-    displayName: "o3 Mini",
-    apiKeyEnv: "OPENAI_API_KEY",
-    pluginModule: "@elizaos/plugin-openai",
-    pluginExport: "openaiPlugin",
-  },
-  // ── Anthropic Models ───────────────────────────────────────────────────
-  {
-    provider: "anthropic",
-    model: "claude-opus-4-6",
-    displayName: "Claude Opus 4.6",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    pluginModule: "@elizaos/plugin-anthropic",
-    pluginExport: "anthropicPlugin",
-  },
-  {
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
+    provider: "elizacloud",
+    model: "anthropic/claude-sonnet-4.6",
     displayName: "Claude Sonnet 4.6",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    pluginModule: "@elizaos/plugin-anthropic",
-    pluginExport: "anthropicPlugin",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "anthropic",
-    model: "claude-haiku-4-5-20251001",
-    displayName: "Claude Haiku 4.5",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    pluginModule: "@elizaos/plugin-anthropic",
-    pluginExport: "anthropicPlugin",
+    provider: "elizacloud",
+    model: "anthropic/claude-opus-4.6",
+    displayName: "Claude Opus 4.6",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "anthropic",
-    model: "claude-opus-4-20250514",
-    displayName: "Claude Opus 4",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    pluginModule: "@elizaos/plugin-anthropic",
-    pluginExport: "anthropicPlugin",
+    provider: "elizacloud",
+    model: "google/gemini-3.1-pro-preview",
+    displayName: "Gemini 3.1 Pro",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
-    displayName: "Claude Sonnet 4",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    pluginModule: "@elizaos/plugin-anthropic",
-    pluginExport: "anthropicPlugin",
-  },
-  // ── Groq Models ────────────────────────────────────────────────────────
-  {
-    provider: "groq",
-    model: "meta-llama/llama-4-scout-17b-16e-instruct",
-    displayName: "Llama 4 Scout",
-    apiKeyEnv: "GROQ_API_KEY",
-    pluginModule: "@elizaos/plugin-groq",
-    pluginExport: "groqPlugin",
+    provider: "elizacloud",
+    model: "xai/grok-4",
+    displayName: "Grok 4",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "groq",
-    model: "meta-llama/llama-4-maverick-17b-128e-instruct",
+    provider: "elizacloud",
+    model: "meta/llama-4-maverick",
     displayName: "Llama 4 Maverick",
-    apiKeyEnv: "GROQ_API_KEY",
-    pluginModule: "@elizaos/plugin-groq",
-    pluginExport: "groqPlugin",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "groq",
-    model: "llama-3.3-70b-versatile",
-    displayName: "Llama 3.3 70B",
-    apiKeyEnv: "GROQ_API_KEY",
-    pluginModule: "@elizaos/plugin-groq",
-    pluginExport: "groqPlugin",
+    provider: "elizacloud",
+    model: "mistral/magistral-medium",
+    displayName: "Magistral Medium",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  // ── Frontier Chinese Models ────────────────────────────────────────────
+  {
+    provider: "elizacloud",
+    model: "deepseek/deepseek-v3.2",
+    displayName: "DeepSeek V3.2",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "groq",
-    model: "moonshotai/kimi-k2-instruct",
-    displayName: "Kimi K2",
-    apiKeyEnv: "GROQ_API_KEY",
-    pluginModule: "@elizaos/plugin-groq",
-    pluginExport: "groqPlugin",
+    provider: "elizacloud",
+    model: "alibaba/qwen3-max",
+    displayName: "Qwen 3 Max",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "groq",
-    model: "qwen/qwen3-32b",
-    displayName: "Qwen 3 30B",
-    apiKeyEnv: "GROQ_API_KEY",
-    pluginModule: "@elizaos/plugin-groq",
-    pluginExport: "groqPlugin",
+    provider: "elizacloud",
+    model: "minimax/minimax-m2.5",
+    displayName: "Minimax M2.5",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  {
+    provider: "elizacloud",
+    model: "zai/glm-5",
+    displayName: "GLM-5",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  {
+    provider: "elizacloud",
+    model: "moonshotai/kimi-k2.5",
+    displayName: "Kimi K2.5",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  {
+    provider: "elizacloud",
+    model: "bytedance/seed-1.8",
+    displayName: "Seed 1.8",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
 ];
 
@@ -266,7 +239,9 @@ export async function spawnModelAgents(
     /** Maximum number of agents to spawn */
     maxAgents?: number;
     /** Specific providers to spawn (if empty, spawns all available) */
-    providers?: Array<"openai" | "anthropic" | "groq" | "xai" | "openrouter">;
+    providers?: Array<
+      "openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud"
+    >;
   } = {},
 ): Promise<number> {
   const { maxAgents = 10, providers = [] } = options;

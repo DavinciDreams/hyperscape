@@ -26,7 +26,7 @@
  *   STREAM_CAPTURE_MODE      - 'cdp' (default) or 'mediarecorder' (legacy)
  *   STREAM_CAPTURE_HEADLESS  - 'true' for headless (default: false for better GPU rendering)
  *   STREAM_CAPTURE_CHANNEL   - Browser channel ('chrome', 'msedge', etc.)
- *   STREAM_CAPTURE_ANGLE     - ANGLE backend (default: metal on macOS, vulkan elsewhere)
+ *   STREAM_CAPTURE_ANGLE     - Optional ANGLE backend override ('metal', 'gl', etc.); use 'default' or unset to let Chrome choose
  *   STREAM_CDP_QUALITY       - JPEG quality for CDP screencast (1-100, default: 80)
  *   STREAM_FPS               - Target frames per second (default: 30)
  *   TWITCH_STREAM_KEY / TWITCH_RTMP_STREAM_KEY - Twitch stream key
@@ -45,14 +45,26 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { chromium, type Browser, type Page, type CDPSession } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type CDPSession,
+  type Page,
+} from "playwright";
 import {
   getRTMPBridge,
   startRTMPBridge,
   generateCaptureScript,
   generateWebCodecsCaptureScript,
 } from "../src/streaming/index.js";
+import {
+  isStreamDestinationEnabled,
+  resolveEnabledStreamDestinations,
+} from "../src/streaming/stream-destinations.js";
+import { resolveStreamingViewerAccessToken } from "../src/streaming/stream-viewer-access-token.js";
 import { errMsg } from "../src/shared/errMsg.ts";
 import { getStreamLeakDiagnostics } from "../src/streaming/stream-leak-diagnostics.js";
 
@@ -62,27 +74,31 @@ getStreamLeakDiagnostics();
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-const GAME_URL = process.env.GAME_URL || "http://localhost:3333/?page=stream";
+const GAME_URL = process.env.GAME_URL || "http://localhost:3333/stream.html";
 const GAME_FALLBACK_URLS = (
   process.env.GAME_FALLBACK_URLS ||
-  "http://localhost:3333/?embedded=true&mode=spectator,http://localhost:3333/"
+  "http://localhost:3333/?page=stream,http://localhost:3333/?embedded=true&mode=spectator,http://localhost:3333/"
 )
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
-const STREAMING_VIEWER_ACCESS_TOKEN = (
-  process.env.STREAMING_VIEWER_ACCESS_TOKEN || ""
-).trim();
+const STREAMING_VIEWER_ACCESS_TOKEN = resolveStreamingViewerAccessToken();
 
 function withViewerAccessToken(rawUrl: string): string {
-  if (!STREAMING_VIEWER_ACCESS_TOKEN) return rawUrl;
   try {
     const url = new URL(rawUrl);
-    url.searchParams.set("streamToken", STREAMING_VIEWER_ACCESS_TOKEN);
+    url.searchParams.set("internalCapture", "1");
+    if (STREAMING_VIEWER_ACCESS_TOKEN) {
+      url.searchParams.set("streamToken", STREAMING_VIEWER_ACCESS_TOKEN);
+    }
     return url.toString();
   } catch {
+    if (!STREAMING_VIEWER_ACCESS_TOKEN) {
+      const separator = rawUrl.includes("?") ? "&" : "?";
+      return `${rawUrl}${separator}internalCapture=1`;
+    }
     const separator = rawUrl.includes("?") ? "&" : "?";
-    return `${rawUrl}${separator}streamToken=${encodeURIComponent(STREAMING_VIEWER_ACCESS_TOKEN)}`;
+    return `${rawUrl}${separator}internalCapture=1&streamToken=${encodeURIComponent(STREAMING_VIEWER_ACCESS_TOKEN)}`;
   }
 }
 
@@ -91,21 +107,36 @@ const GAME_URL_CANDIDATES = Array.from(
 );
 
 const BRIDGE_PORT = parseInt(process.env.RTMP_BRIDGE_PORT || "8765", 10);
-const BRIDGE_URL = `ws://localhost:${BRIDGE_PORT}`;
+const BRIDGE_URL = `ws://127.0.0.1:${BRIDGE_PORT}`;
 const SPECTATOR_PORT = parseInt(process.env.SPECTATOR_PORT || "4180", 10);
 const EXTERNAL_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
+const ENABLED_STREAM_DESTINATIONS = resolveEnabledStreamDestinations(
+  process.env.STREAM_ENABLED_DESTINATIONS ||
+    process.env.DUEL_STREAM_DESTINATIONS,
+);
 let externalStatusWriteErrored = false;
 
 /** Capture mode: 'cdp' (fast) or 'mediarecorder' (legacy) or 'webcodecs' (holy grail) */
-const CAPTURE_MODE = (process.env.STREAM_CAPTURE_MODE?.trim() || "cdp") as
-  | "cdp"
-  | "mediarecorder"
-  | "webcodecs";
 const STREAM_CAPTURE_HEADLESS = process.env.STREAM_CAPTURE_HEADLESS === "true";
-const STREAM_CAPTURE_CHANNEL = process.env.STREAM_CAPTURE_CHANNEL?.trim() || "";
+const DEFAULT_CAPTURE_MODE =
+  process.platform === "linux" && !STREAM_CAPTURE_HEADLESS
+    ? "mediarecorder"
+    : "cdp";
+const CAPTURE_MODE = (process.env.STREAM_CAPTURE_MODE?.trim() ||
+  DEFAULT_CAPTURE_MODE) as "cdp" | "mediarecorder" | "webcodecs";
+const requestedCaptureChannel =
+  process.env.STREAM_CAPTURE_CHANNEL?.trim() || "";
+const STREAM_CAPTURE_CHANNEL =
+  process.platform === "darwin" && requestedCaptureChannel === "chromium"
+    ? "chrome"
+    : requestedCaptureChannel;
+const requestedAngleBackend = process.env.STREAM_CAPTURE_ANGLE?.trim() || "";
 const ANGLE_BACKEND =
-  process.env.STREAM_CAPTURE_ANGLE?.trim() ||
-  (process.platform === "darwin" ? "metal" : "vulkan");
+  requestedAngleBackend && requestedAngleBackend.toLowerCase() !== "default"
+    ? requestedAngleBackend
+    : process.platform === "darwin"
+      ? "metal"
+      : "";
 const STREAM_CAPTURE_DISABLE_WEBGPU = /^(1|true|yes|on)$/i.test(
   process.env.STREAM_CAPTURE_DISABLE_WEBGPU || "",
 );
@@ -155,9 +186,11 @@ const VIEWPORT = {
 };
 
 let browser: Browser | null = null;
+let browserContext: BrowserContext | null = null;
 let page: Page | null = null;
 let cdpSession: CDPSession | null = null;
 let selectedGameUrl: string | null = null;
+let persistentUserDataDir: string | null = null;
 let launchTime = Date.now();
 const BROWSER_RESTART_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 Hour
 const CAPTURE_RECOVERY_TIMEOUT_MS = Math.max(
@@ -288,20 +321,39 @@ function withTimeout<T>(
 }
 
 function hasConfiguredOutput(): boolean {
-  const hasTwitchKey = Boolean(
-    process.env.TWITCH_STREAM_KEY || process.env.TWITCH_RTMP_STREAM_KEY,
-  );
-  const hasYoutubeKey = Boolean(
-    process.env.YOUTUBE_STREAM_KEY || process.env.YOUTUBE_RTMP_STREAM_KEY,
-  );
+  const hasTwitchKey =
+    isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "twitch") &&
+    Boolean(
+      process.env.TWITCH_STREAM_KEY || process.env.TWITCH_RTMP_STREAM_KEY,
+    );
+  const hasYoutubeKey =
+    isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "youtube") &&
+    Boolean(
+      process.env.YOUTUBE_STREAM_KEY || process.env.YOUTUBE_RTMP_STREAM_KEY,
+    );
+  const hasKickKey =
+    isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "kick") &&
+    Boolean(process.env.KICK_STREAM_KEY);
+  const hasPumpfunUrl =
+    isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "pumpfun") &&
+    Boolean(process.env.PUMPFUN_RTMP_URL);
+  const hasXUrl =
+    isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "x") &&
+    Boolean(process.env.X_RTMP_URL);
+  const hasMultiplexerUrl =
+    isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "multiplexer") &&
+    Boolean(process.env.RTMP_MULTIPLEXER_URL);
+  const hasCustomDestinations =
+    isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "custom") &&
+    Boolean(process.env.RTMP_DESTINATIONS_JSON);
   return Boolean(
-    process.env.RTMP_MULTIPLEXER_URL ||
+    hasMultiplexerUrl ||
     hasTwitchKey ||
     hasYoutubeKey ||
-    process.env.KICK_STREAM_KEY ||
-    process.env.PUMPFUN_RTMP_URL ||
-    process.env.X_RTMP_URL ||
-    process.env.RTMP_DESTINATIONS_JSON,
+    hasKickKey ||
+    hasPumpfunUrl ||
+    hasXUrl ||
+    hasCustomDestinations,
   );
 }
 
@@ -371,30 +423,66 @@ async function waitForStreamReadiness(
 // ── Browser Launch ─────────────────────────────────────────────────────────
 
 async function launchCaptureBrowser() {
-  const featureFlags = "--enable-features=Vulkan,UseSkiaRenderer,WebGPU";
+  const featureFlags = "--enable-features=UseSkiaRenderer,WebGPU";
+  const launchArgs = [
+    // GPU / WebGPU essentials
+    "--use-gl=angle",
+    ...(ANGLE_BACKEND ? [`--use-angle=${ANGLE_BACKEND}`] : []),
+    "--enable-webgl",
+    "--enable-unsafe-webgpu",
+    featureFlags,
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
+    // Sandbox & stability
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-web-security",
+    "--autoplay-policy=no-user-gesture-required",
+    // Prevent Chromium from throttling rendering/timers
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-hang-monitor",
+  ];
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,
-    args: [
-      // GPU / WebGPU essentials
-      "--use-gl=angle",
-      `--use-angle=${ANGLE_BACKEND}`,
-      "--enable-webgl",
-      "--enable-unsafe-webgpu",
-      featureFlags,
-      "--ignore-gpu-blocklist",
-      "--enable-gpu-rasterization",
-      // Sandbox & stability
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-web-security",
-      "--autoplay-policy=no-user-gesture-required",
-      // Prevent Chromium from throttling rendering/timers
-      "--disable-background-timer-throttling",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-renderer-backgrounding",
-      "--disable-hang-monitor",
-    ],
+    args: launchArgs,
   };
+  const usePersistentContext =
+    process.platform === "linux" && STREAM_CAPTURE_HEADLESS === false;
+
+  if (usePersistentContext) {
+    persistentUserDataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hyperscape-stream-profile-"),
+    );
+    const persistentLaunchConfig = {
+      ...launchConfig,
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+      serviceWorkers: "block" as const,
+      args: [
+        ...launchArgs,
+        `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
+        "--window-position=0,0",
+      ],
+    };
+
+    console.log(
+      "[Main] Launching persistent browser context for visible X11 window capture...",
+    );
+
+    if (STREAM_CAPTURE_CHANNEL) {
+      return await chromium.launchPersistentContext(persistentUserDataDir, {
+        ...persistentLaunchConfig,
+        channel: STREAM_CAPTURE_CHANNEL,
+      });
+    }
+
+    return await chromium.launchPersistentContext(
+      persistentUserDataDir,
+      persistentLaunchConfig,
+    );
+  }
 
   if (STREAM_CAPTURE_CHANNEL) {
     console.log(
@@ -442,7 +530,7 @@ async function launchCaptureBrowser() {
 }
 
 async function setupBrowser() {
-  if (browser) await cleanup();
+  if (browser || browserContext) await cleanup();
 
   const streamReadyTimeoutMs = Math.max(
     10_000,
@@ -453,13 +541,21 @@ async function setupBrowser() {
   console.log(
     `[Main] Launching browser (headless=${STREAM_CAPTURE_HEADLESS}, angle=${ANGLE_BACKEND}${STREAM_CAPTURE_CHANNEL ? `, channel=${STREAM_CAPTURE_CHANNEL}` : ""}, mode=${CAPTURE_MODE})...`,
   );
-  browser = await launchCaptureBrowser();
+  const launched = await launchCaptureBrowser();
 
-  const context = await browser.newContext({
-    viewport: VIEWPORT,
-    deviceScaleFactor: 1,
-  });
-  page = await context.newPage();
+  if ("newPage" in launched && "pages" in launched) {
+    browserContext = launched as BrowserContext;
+    browser = browserContext.browser();
+    page = browserContext.pages()[0] ?? (await browserContext.newPage());
+  } else {
+    browser = launched as Browser;
+    browserContext = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+      serviceWorkers: "block",
+    });
+    page = await browserContext.newPage();
+  }
 
   // Keep compositor frames flowing for CDP screencast even when the scene is
   // visually static (e.g. waiting overlays), otherwise some Chromium builds
@@ -514,6 +610,9 @@ async function setupBrowser() {
     } else if (text.includes("[Capture]") || text.includes("[StreamingMode]")) {
       console.log("[Browser]", text);
     }
+  });
+  page.on("pageerror", (err) => {
+    console.error("[Browser][PageError]", errMsg(err));
   });
 
   if (!selectedGameUrl) {
@@ -632,13 +731,17 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
   });
 
   // Start the screencast
-  await cdpSession.send("Page.startScreencast", {
-    format: "jpeg",
-    quality: CDP_QUALITY,
-    maxWidth: VIEWPORT.width,
-    maxHeight: VIEWPORT.height,
-    everyNthFrame: 1, // Capture every frame
-  });
+  await withTimeout(
+    cdpSession.send("Page.startScreencast", {
+      format: "jpeg",
+      quality: CDP_QUALITY,
+      maxWidth: VIEWPORT.width,
+      maxHeight: VIEWPORT.height,
+      everyNthFrame: 1, // Capture every frame
+    }),
+    10_000,
+    "Page.startScreencast",
+  );
 
   console.log("[CDP] ✅ Screencast capture started — frames piping to FFmpeg");
 }
@@ -686,7 +789,8 @@ async function startLegacyCapture(bridge: ReturnType<typeof getRTMPBridge>) {
 
   if (
     !REQUIRE_IN_PAGE_READY_PROBE &&
-    selectedGameUrl?.includes("?page=stream")
+    selectedGameUrl?.includes("?page=stream") &&
+    !selectedGameUrl.includes("disableBridgeCapture=1")
   ) {
     console.log(
       "[Main] Relying on built-in stream-page bridge capture; skipping Playwright MediaRecorder injection.",
@@ -936,15 +1040,20 @@ async function main() {
 
   // Get bridge instance
   const bridge = getRTMPBridge();
+  let activeCaptureMode: ActiveCaptureMode = CAPTURE_MODE;
+  let statusSnapshotInterval: ReturnType<typeof setInterval> | null = null;
 
   // Start Spectator Server for zero-latency WebSockets stream
   bridge.startSpectatorServer(SPECTATOR_PORT);
+  writeExternalStatusSnapshot(bridge, activeCaptureMode);
+  statusSnapshotInterval = setInterval(() => {
+    writeExternalStatusSnapshot(bridge, activeCaptureMode);
+  }, 2000);
 
   // Setup browser
   await setupBrowser();
 
   let captureWatchdog: ReturnType<typeof setInterval> | null = null;
-  let activeCaptureMode: "cdp" | "webcodecs" | "mediarecorder" = CAPTURE_MODE;
   let cdpStalledIntervals = 0;
   let lastCdpBytesReceived = 0;
   let cdpRecoveryInFlight = false;
@@ -1007,7 +1116,22 @@ async function main() {
 
   if (CAPTURE_MODE === "cdp") {
     // ── CDP Mode: Direct screencast frame piping ──
-    await startCdpCaptureWithRecovery(bridge);
+    try {
+      await startCdpCaptureWithRecovery(bridge);
+    } catch (err) {
+      const canFallbackToLegacy =
+        process.platform === "linux" && !STREAM_CAPTURE_HEADLESS;
+      if (!canFallbackToLegacy) {
+        throw err;
+      }
+      console.warn(
+        `[Main] CDP capture unavailable (${errMsg(err)}). Falling back to MediaRecorder bridge capture.`,
+      );
+      await stopCdpCapture().catch(() => undefined);
+      bridge.stopProcessing();
+      captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
+      activeCaptureMode = "mediarecorder";
+    }
   } else if (CAPTURE_MODE === "webcodecs") {
     // ── WebCodecs Mode: Native VideoEncoder API to FFmpeg -c:v copy ──
     captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
@@ -1028,11 +1152,6 @@ async function main() {
   console.log("Streaming active! Press Ctrl+C to stop.");
   console.log("=".repeat(60));
   console.log("");
-
-  writeExternalStatusSnapshot(bridge, activeCaptureMode);
-  const statusSnapshotInterval = setInterval(() => {
-    writeExternalStatusSnapshot(bridge, activeCaptureMode);
-  }, 2000);
 
   // Status updates every 30 seconds
   const statusInterval = setInterval(async () => {
@@ -1236,7 +1355,7 @@ async function main() {
   const shutdown = async () => {
     console.log("\n[Main] Shutting down...");
     if (captureWatchdog) clearInterval(captureWatchdog);
-    clearInterval(statusSnapshotInterval);
+    if (statusSnapshotInterval) clearInterval(statusSnapshotInterval);
     clearInterval(statusInterval);
     await stopCdpCapture();
     getRTMPBridge().stop();
@@ -1285,7 +1404,26 @@ async function cleanup() {
   bridge.stopProcessing();
 
   if (browser) {
-    await browser.close();
+    if (browserContext) {
+      await browserContext.close();
+      browserContext = null;
+      browser = null;
+    } else {
+      await browser.close();
+      browser = null;
+    }
+  } else if (browserContext) {
+    await browserContext.close();
+    browserContext = null;
+  }
+
+  if (persistentUserDataDir) {
+    try {
+      fs.rmSync(persistentUserDataDir, { recursive: true, force: true });
+    } catch {
+      // Ignore temporary profile cleanup failures.
+    }
+    persistentUserDataDir = null;
     browser = null;
   }
 

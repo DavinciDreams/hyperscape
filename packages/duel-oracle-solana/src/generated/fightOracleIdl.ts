@@ -1,5 +1,5 @@
 export const FIGHT_ORACLE_IDL = {
-  address: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
+  address: "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV",
   metadata: {
     name: "fight_oracle",
     version: "0.1.0",
@@ -83,7 +83,7 @@ export const FIGHT_ORACLE_IDL = {
         },
         {
           name: "program",
-          address: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
+          address: "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV",
         },
         {
           name: "program_data",

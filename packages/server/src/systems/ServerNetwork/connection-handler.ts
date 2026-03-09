@@ -49,6 +49,7 @@ import type {
   SystemDatabase,
 } from "../../shared/types";
 import { STREAMING_PUBLIC_DELAY_MS } from "../../streaming/streaming-policy.js";
+import { resolveStreamingViewerAccessToken } from "../../streaming/stream-viewer-access-token.js";
 import { authenticateUser, checkUserBan } from "./authentication";
 import { loadCharacterList } from "./character-selection";
 import type { BroadcastManager } from "./broadcast";
@@ -99,9 +100,7 @@ function formatBanMessage(banInfo: {
   return message;
 }
 
-const STREAMING_VIEWER_ACCESS_TOKEN = (
-  process.env.STREAMING_VIEWER_ACCESS_TOKEN || ""
-).trim();
+const STREAMING_VIEWER_ACCESS_TOKEN = resolveStreamingViewerAccessToken();
 const IS_PLAYWRIGHT_TEST = process.env.PLAYWRIGHT_TEST === "true";
 let lastSpectatorTargetMissingWarnAt = 0;
 
@@ -1591,6 +1590,7 @@ export class ConnectionHandler {
     const streamingSnapshot = {
       id: socket.id,
       serverTime: performance.now(),
+      worldTime: this.world.getTime(), // Synced world time for day/night cycle
       assetsUrl: this.world.assetsUrl,
       apiUrl: process.env.PUBLIC_API_URL,
       maxUploadSize: process.env.PUBLIC_MAX_UPLOAD_SIZE,
@@ -1608,6 +1608,7 @@ export class ConnectionHandler {
       spectatorMode: true, // Mark as spectator for client behavior
       streamingMode: true, // Additional flag for streaming-specific behavior
       followEntity,
+      worldMap: this.serializeWorldMap(), // World map data for terrain/navigation
     };
 
     socket.send("snapshot", streamingSnapshot);

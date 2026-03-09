@@ -29,11 +29,17 @@ resolve_wallet_path() {
 }
 
 if [[ -z "$TARGET_CLUSTER" ]]; then
-  echo "usage: bash anchor/scripts/deploy-fight-oracle.sh <devnet|testnet|mainnet-beta>" >&2
+  echo "usage: bash anchor/scripts/deploy-fight-oracle.sh <localnet|devnet|testnet|mainnet-beta>" >&2
   exit 1
 fi
 
+TARGET_URL="$TARGET_CLUSTER"
+
 case "$TARGET_CLUSTER" in
+  localnet|localhost)
+    TARGET_CLUSTER="localnet"
+    TARGET_URL="${SOLANA_LOCALNET_RPC_URL:-http://127.0.0.1:8899}"
+    ;;
   devnet|testnet|mainnet-beta) ;;
   mainnet)
     TARGET_CLUSTER="mainnet-beta"
@@ -65,9 +71,10 @@ if [[ ! -f "$BINARY_PATH" ]]; then
 fi
 
 echo "[deploy] cluster: $TARGET_CLUSTER"
+echo "[deploy] rpc url:  $TARGET_URL"
 echo "[deploy] wallet:  $WALLET_PATH"
 echo "[deploy] address: $(solana-keygen pubkey "$WALLET_PATH")"
-echo "[deploy] balance: $(solana balance --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH")"
+echo "[deploy] balance: $(solana balance --url "$TARGET_URL" --keypair "$WALLET_PATH")"
 
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
   echo "[deploy] building anchor workspace"
@@ -77,12 +84,12 @@ fi
 PROGRAM_ID="$(solana-keygen pubkey "$KEYPAIR_PATH")"
 echo "[deploy] deploying $PROGRAM ($PROGRAM_ID)"
 solana program deploy \
-  --url "$TARGET_CLUSTER" \
+  --url "$TARGET_URL" \
   --keypair "$WALLET_PATH" \
   --program-id "$KEYPAIR_PATH" \
   "$BINARY_PATH"
 
 echo "[deploy] verifying $PROGRAM ($PROGRAM_ID)"
-solana program show --url "$TARGET_CLUSTER" "$PROGRAM_ID"
+solana program show --url "$TARGET_URL" "$PROGRAM_ID"
 
 echo "[deploy] complete"

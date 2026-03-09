@@ -1314,9 +1314,9 @@ export class DataManager {
       const craftingData = await fs.readFile(craftingPath, "utf-8");
       const craftingManifest = JSON.parse(craftingData) as CraftingManifest;
       processingDataProvider.loadCraftingRecipes(craftingManifest);
-    } catch {
+    } catch (e: any) {
       warnOptionalData(
-        "[DataManager] recipes/crafting.json not found, crafting will be unavailable",
+        `[DataManager] recipes/crafting.json failed to load: ${e.message}`,
       );
     }
 

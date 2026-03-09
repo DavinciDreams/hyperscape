@@ -1,6 +1,6 @@
 name: Deploy Assets to Cloudflare R2
 
-# NOTE: Frontend deployment is handled by deploy-pages.yml workflow
+# NOTE: Frontend deployment is handled by deploy-pages.yml.
 # This workflow only handles R2 asset uploads (manifests, WASM, models, etc.)
 # Only runs on pushes to main branch (NOT on PRs or staging branch)
 #
@@ -91,10 +91,10 @@ jobs:
                   "origins": [
                     "https://hyperscape.gg",
                     "https://www.hyperscape.gg",
+                    "https://hyperscape.club",
+                    "https://www.hyperscape.club",
                     "https://hyperbet.win",
                     "https://www.hyperbet.win",
-                    "https://hyperscape.bet",
-                    "https://www.hyperscape.bet",
                     "https://hyperscape-production.up.railway.app",
                     "https://*.hyperscape.pages.dev",
                     "https://*.hyperscape-betting.pages.dev",

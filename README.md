@@ -39,6 +39,8 @@ bun install
 
 ### Setup Environment Files
 
+> **⚠️ WebGPU Linux / Streaming Note**: When running Hyperscape on Linux (e.g. Vast.ai), you must use headful Chrome with Xorg/Xvfb. You MUST use the ANGLE backend for WebGPU, **NOT** Vulkan (`--use-vulkan`). Using the native Vulkan backend with WebGPU currently will crash.
+
 ```bash
 # Required: Copy both client and server env files
 cp packages/client/.env.example packages/client/.env

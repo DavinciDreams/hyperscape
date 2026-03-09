@@ -65,11 +65,12 @@ export function getFarcasterFrameConfig(): FarcasterFrameConfig | null {
   }
 
   const appUrl =
+    (typeof window !== "undefined" && window.location.origin) ||
     (typeof window !== "undefined" &&
       (window as typeof window & { env?: { PUBLIC_APP_URL?: string } }).env
         ?.PUBLIC_APP_URL) ||
     import.meta.env.PUBLIC_APP_URL ||
-    (typeof window !== "undefined" ? window.location.origin : "");
+    "";
 
   return {
     version: "next",

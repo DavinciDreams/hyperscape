@@ -40,7 +40,7 @@ interface PhysXShapeFlags {
   clear: (flag: number) => void;
 }
 
-declare const PHYSX: {
+type RuntimePhysX = {
   PxBoxGeometry: new (x: number, y: number, z: number) => PxBoxGeometry;
   PxSphereGeometry: new (radius: number) => PxSphereGeometry;
   PxMeshScale: new (scale: PxVec3, rotation: PxQuat) => PxMeshScale;
@@ -74,6 +74,12 @@ declare const PHYSX: {
   PxTransform: new () => PxTransform;
   destroy: (obj: unknown) => void;
 };
+
+function getRuntimePhysX(): RuntimePhysX | null {
+  return (
+    (globalThis as typeof globalThis & { PHYSX?: RuntimePhysX }).PHYSX ?? null
+  );
+}
 
 // Type extensions for PhysX integration
 interface PhysXShape extends PxShape {
@@ -154,21 +160,23 @@ export class Collider extends Node {
   }
 
   mount() {
-    if (!PHYSX) {
+    const physx = getRuntimePhysX();
+    if (!physx) {
       console.warn("[collider] PHYSX not initialized yet");
+      this.needsRebuild = true;
       return;
     }
 
     let geometry;
     let pmesh;
     if (this._type === "box") {
-      geometry = new PHYSX.PxBoxGeometry(
+      geometry = new physx.PxBoxGeometry(
         this._width! / 2,
         this._height! / 2,
         this._depth! / 2,
       );
     } else if (this._type === "sphere") {
-      geometry = new PHYSX.PxSphereGeometry(this._radius!);
+      geometry = new physx.PxSphereGeometry(this._radius!);
     } else if (this._type === "geometry") {
       // note: triggers MUST be convex according to PhysX/Unity
       const isConvex = this._trigger || this._convex || false;
@@ -182,18 +190,18 @@ export class Collider extends Node {
       const plainMatrix = m1.copy(this.matrixWorld);
       safeMatrixDecompose(plainMatrix, tempPos, tempQuat, tempScale);
       _v1.multiplyScalar(0.02); // for visible selection
-      const scale = new PHYSX.PxMeshScale(
-        new PHYSX.PxVec3(_v2.x, _v2.y, _v2.z),
-        new PHYSX.PxQuat(0, 0, 0, 1),
+      const scale = new physx.PxMeshScale(
+        new physx.PxVec3(_v2.x, _v2.y, _v2.z),
+        new physx.PxQuat(0, 0, 0, 1),
       );
       if (isConvex) {
-        geometry = new PHYSX.PxConvexMeshGeometry(pmesh.value, scale);
+        geometry = new physx.PxConvexMeshGeometry(pmesh.value, scale);
       } else {
         // const flags = new PHYSX.PxMeshGeometryFlags()
         // flags.raise(PHYSX.PxMeshGeometryFlagEnum.eDOUBLE_SIDED)
-        geometry = new PHYSX.PxTriangleMeshGeometry(pmesh.value, scale);
+        geometry = new physx.PxTriangleMeshGeometry(pmesh.value, scale);
       }
-      PHYSX.destroy(scale);
+      physx.destroy(scale);
     }
     const worldPhysics = this.ctx!.physics;
     const physics = worldPhysics;
@@ -202,13 +210,13 @@ export class Collider extends Node {
       this._dynamicFriction!,
       this._restitution!,
     );
-    const flags = new PHYSX.PxShapeFlags();
+    const flags = new physx.PxShapeFlags();
     if (this._trigger) {
-      flags.raise(PHYSX.PxShapeFlagEnum.eTRIGGER_SHAPE);
+      flags.raise(physx.PxShapeFlagEnum.eTRIGGER_SHAPE);
     } else {
       flags.raise(
-        (PHYSX.PxShapeFlagEnum.eSCENE_QUERY_SHAPE as number) |
-          (PHYSX.PxShapeFlagEnum.eSIMULATION_SHAPE as number),
+        (physx.PxShapeFlagEnum.eSCENE_QUERY_SHAPE as number) |
+          (physx.PxShapeFlagEnum.eSIMULATION_SHAPE as number),
       );
     }
     const layer = Layers[this._layer!];
@@ -216,13 +224,13 @@ export class Collider extends Node {
       throw new Error(`[collider] layer not found: ${this._layer}`);
     }
     let pairFlags =
-      (PHYSX.PxPairFlagEnum.eNOTIFY_TOUCH_FOUND as number) |
-      (PHYSX.PxPairFlagEnum.eNOTIFY_TOUCH_LOST as number);
+      (physx.PxPairFlagEnum.eNOTIFY_TOUCH_FOUND as number) |
+      (physx.PxPairFlagEnum.eNOTIFY_TOUCH_LOST as number);
     if (!this._trigger) {
-      pairFlags |= PHYSX.PxPairFlagEnum.eNOTIFY_CONTACT_POINTS as number;
+      pairFlags |= physx.PxPairFlagEnum.eNOTIFY_CONTACT_POINTS as number;
     }
     this.pmesh = pmesh;
-    const filterData = new PHYSX.PxFilterData(
+    const filterData = new physx.PxFilterData(
       layer.group,
       layer.mask,
       pairFlags,
@@ -246,7 +254,7 @@ export class Collider extends Node {
     const position: THREE.Vector3 = _v1
       .copy(plainPosition)
       .multiply(plainScale);
-    const pose = new PHYSX.PxTransform();
+    const pose = new physx.PxTransform();
 
     // Set position directly on pose (PxTransform has p: PxVec3)
     const poseP = (pose as { p: { x: number; y: number; z: number } }).p;
@@ -271,7 +279,7 @@ export class Collider extends Node {
       }
     }
     // this._geometry = geometry
-    PHYSX.destroy(geometry);
+    physx.destroy(geometry);
     this.needsRebuild = false;
   }
 

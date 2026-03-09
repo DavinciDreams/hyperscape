@@ -27,11 +27,34 @@ bun --cwd packages/server run scripts/generate-duel-oracle-wallets.ts
 This writes:
 
 - `packages/server/.env`
-- `packages/duel-oracle-evm/.env` if you choose to keep EVM deploy env there
+- `packages/duel-oracle-evm/.env`
 - public summary: `.codex-artifacts/duel-arena-oracle-wallets/public-addresses.json`
-- Solana keypair files: `.codex-artifacts/duel-arena-oracle-wallets/*.json`
+- Solana keypair file: `.codex-artifacts/duel-arena-oracle-wallets/solana-shared.json`
 
-Use the generated public addresses for funding. Keep the `.env` files and `.codex-artifacts` directory private.
+The generator creates:
+
+- one shared EVM signer for Base, BSC, and AVAX
+- one shared Solana signer for devnet and mainnet-beta
+
+Use the generated public addresses for funding. The address string is the same across all EVM chains, but you still need to fund native gas separately on Base, BSC, and AVAX. Keep the `.env` files and `.codex-artifacts` directory private.
+
+## Local End-to-End Verification
+
+Run the full local duel, streaming, and oracle publish flow against Anvil and Solana localnet:
+
+```bash
+bun run duel:oracle:verify:local
+```
+
+This command:
+
+1. Starts or reuses local Anvil on `http://127.0.0.1:8545`
+2. Starts or reuses `solana-test-validator` on `http://127.0.0.1:8899`
+3. Deploys `DuelOutcomeOracle` to Anvil
+4. Builds and deploys `fight_oracle` to localnet
+5. Starts the local duel stack
+6. Verifies streaming combat
+7. Confirms the resolved duel record exists on both local chains
 
 ## Server Runtime Config
 
@@ -52,11 +75,20 @@ Profiles:
 - `mainnet`: Base, BSC, Avalanche C-Chain, Solana Mainnet
 - `all`: publish to every configured target
 
-The publisher only activates targets that have both a deploy key and a contract/program target configured.
+Shared signer env vars:
+
+```dotenv
+DUEL_ARENA_ORACLE_EVM_PRIVATE_KEY=0x...
+DUEL_ARENA_ORACLE_SOLANA_AUTHORITY_SECRET=base64:...
+DUEL_ARENA_ORACLE_SOLANA_REPORTER_SECRET=base64:...
+DUEL_ARENA_ORACLE_SOLANA_KEYPAIR_PATH=/absolute/path/to/solana-shared.json
+```
+
+Per-target private key env vars still work and override the shared signer when set. The publisher only activates targets that have both signer material and a contract/program target configured.
 
 ## EVM Deploy
 
-EVM deploy config lives in `packages/duel-oracle-evm/.env` if you keep a local deploy file there. The canonical contract source shipped to consumers is under `packages/duel-oracle-evm/contracts/DuelOutcomeOracle.sol`.
+EVM deploy config lives in `packages/duel-oracle-evm/.env`. The default pattern is one shared `PRIVATE_KEY` for Base, BSC, and AVAX, with optional per-network overrides. See `packages/duel-oracle-evm/.env.example`. The canonical contract source shipped to consumers is under `packages/duel-oracle-evm/contracts/DuelOutcomeOracle.sol`.
 
 Compile:
 
@@ -112,14 +144,15 @@ Deploy oracle-only:
 
 ```bash
 cd packages/duel-oracle-solana/anchor
-ANCHOR_WALLET=/absolute/path/to/solana-devnet.json bash scripts/deploy-fight-oracle.sh devnet
-ANCHOR_WALLET=/absolute/path/to/solana-mainnet.json bash scripts/deploy-fight-oracle.sh mainnet-beta
+ANCHOR_WALLET=/absolute/path/to/solana-shared.json bash scripts/deploy-fight-oracle.sh devnet
+ANCHOR_WALLET=/absolute/path/to/solana-shared.json bash scripts/deploy-fight-oracle.sh mainnet-beta
 ```
 
 Program IDs default to:
 
-- Devnet: `6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD`
-- Mainnet: `6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD`
+- Localnet: `6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV`
+- Devnet: `6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV`
+- Mainnet: `6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV`
 
 If you change program IDs, update:
 
@@ -133,11 +166,13 @@ The server publisher auto-initializes the on-chain oracle config when the author
 EVM ABI:
 
 - package export: `packages/duel-oracle-evm/src/generated/duelOutcomeOracleAbi.ts`
+- published public config manifest: `@hyperscapeai/duel-oracle-evm/config.json`
 
 Solana IDL:
 
 - canonical IDL JSON: `packages/duel-oracle-solana/anchor/target/idl/fight_oracle.json`
 - generated TS package export: `packages/duel-oracle-solana/src/generated/fightOracleIdl.ts`
+- published public config manifest: `@hyperscapeai/duel-oracle-solana/config.json`
 
 EVM `viem` example:
 
@@ -152,11 +187,22 @@ const client = createPublicClient({
 });
 
 const duel = await client.readContract({
-  address: process.env.DUEL_ARENA_ORACLE_BASE_SEPOLIA_CONTRACT_ADDRESS as `0x${string}`,
+  address: process.env
+    .DUEL_ARENA_ORACLE_BASE_SEPOLIA_CONTRACT_ADDRESS as `0x${string}`,
   abi: DUEL_OUTCOME_ORACLE_ABI,
   functionName: "getDuel",
   args: ["0x..."],
 });
+```
+
+Published config manifest example:
+
+```ts
+import duelOracleConfig from "@hyperscapeai/duel-oracle-evm/config.json";
+import duelOracleSolanaConfig from "@hyperscapeai/duel-oracle-solana/config.json";
+
+const baseMainnetOracle = duelOracleConfig.deployments.base.address;
+const solanaMainnetProgram = duelOracleSolanaConfig.programIds.mainnet;
 ```
 
 Solana `web3.js` / Anchor example:
@@ -174,7 +220,7 @@ The current on-chain schema still uses `betOpenTs` and `betCloseTs`. In the duel
 
 ## Production Checklist
 
-1. Generate wallets and fund the correct public addresses for the target profile.
+1. Generate wallets and fund the shared EVM address on each destination EVM chain plus the shared Solana pubkey on the target cluster.
 2. Deploy EVM contracts and Solana program.
 3. Set the deployed contract/program addresses in `packages/server/.env`.
 4. Set `DUEL_ARENA_ORACLE_ENABLED=true` and choose the correct `DUEL_ARENA_ORACLE_PROFILE`.

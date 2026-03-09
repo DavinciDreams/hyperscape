@@ -384,7 +384,7 @@ evmTest.describe("Privy SDK Initialization", () => {
         !e.includes("ResizeObserver") &&
         !e.includes("Script error") &&
         !e.includes("favicon") &&
-        !e.includes("WebGL") &&
+        !e.includes("WebGPU") &&
         !e.includes("WebGPU"),
     );
 
