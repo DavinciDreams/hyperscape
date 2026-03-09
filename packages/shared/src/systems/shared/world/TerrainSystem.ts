@@ -107,6 +107,7 @@ import {
   TerrainUniforms,
 } from "./TerrainShader";
 import { isLamppostLightTextureReady } from "./LamppostLightMask";
+import { isCsmEnabled } from "./Environment";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 import type { TownSystem } from "./TownSystem";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
@@ -1013,7 +1014,7 @@ export class TerrainSystem extends System {
       tileZ * this.CONFIG.TILE_SIZE,
     );
     mesh.name = `Terrain_${key}`;
-    mesh.receiveShadow = this.CONFIG.TERRAIN_RECEIVE_SHADOW;
+    mesh.receiveShadow = this.CONFIG.TERRAIN_RECEIVE_SHADOW && !isCsmEnabled();
     mesh.castShadow = this.CONFIG.TERRAIN_CAST_SHADOW;
     mesh.frustumCulled = true;
     mesh.userData = {
@@ -1468,7 +1469,10 @@ export class TerrainSystem extends System {
     QUADTREE_MAX_ASSEMBLIES_PER_FRAME: 6,
 
     // Shadow settings for terrain meshes (applies to both flat-grid and quad-tree)
-    TERRAIN_RECEIVE_SHADOW: false,
+    // NOTE: receiveShadow only works with single shadow map (ENABLE_CSM=false).
+    // CSM adds too many shadow textures per cascade, exceeding WebGPU's 16-texture
+    // limit (terrain already uses 13 textures for biomes + noise + fog + masks).
+    TERRAIN_RECEIVE_SHADOW: true,
     TERRAIN_CAST_SHADOW: false,
   };
 
@@ -1938,7 +1942,7 @@ export class TerrainSystem extends System {
       biomeCenters,
       workerBiomes,
       this.CONFIG.QUADTREE_DEBUG_WIREFRAME,
-      this.CONFIG.TERRAIN_RECEIVE_SHADOW,
+      this.CONFIG.TERRAIN_RECEIVE_SHADOW && !isCsmEnabled(),
       this.CONFIG.TERRAIN_CAST_SHADOW,
       this.CONFIG.QUADTREE_MAX_SYNC_PER_FRAME,
       this.CONFIG.QUADTREE_MAX_ASSEMBLIES_PER_FRAME,
@@ -2293,7 +2297,7 @@ export class TerrainSystem extends System {
     );
     mesh.name = `Terrain_${key}`;
 
-    mesh.receiveShadow = this.CONFIG.TERRAIN_RECEIVE_SHADOW;
+    mesh.receiveShadow = this.CONFIG.TERRAIN_RECEIVE_SHADOW && !isCsmEnabled();
     mesh.castShadow = this.CONFIG.TERRAIN_CAST_SHADOW;
 
     // Enable frustum culling (Three.js built-in)
