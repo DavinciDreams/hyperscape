@@ -225,6 +225,14 @@ nohup socat TCP-LISTEN:35079,reuseaddr,fork TCP:127.0.0.1:5555 > /dev/null 2>&1 
 nohup socat TCP-LISTEN:35144,reuseaddr,fork TCP:127.0.0.1:8080 > /dev/null 2>&1 &
 echo "[deploy] Port proxies running"
 
+# ── Start Xvfb virtual display for WebGPU streaming ──────────
+echo "[deploy] Starting Xvfb virtual display..."
+pkill -f "Xvfb :99" || true
+sleep 1
+Xvfb :99 -screen 0 1280x720x24 &
+export DISPLAY=:99
+echo "[deploy] Xvfb started on DISPLAY=$DISPLAY"
+
 # ── Start duel stack via pm2 ─────────────────────────────────
 echo "[deploy] Starting Hyperscape duel stack via pm2..."
 bunx pm2 start ecosystem.config.cjs --update-env
