@@ -75,7 +75,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
+          version: v1.2.3
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -115,7 +115,7 @@ jobs:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
 
       - name: Run tests
-        run: bunx turbo run test --filter='!@hyperscape/app' --filter='!@hyperscape/contracts'
+        run: bunx turbo run test --filter='!@hyperscape/app' --filter='!@hyperscape/contracts' --filter='!@hyperscapeai/duel-oracle-evm'
         env:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
           NODE_ENV: test

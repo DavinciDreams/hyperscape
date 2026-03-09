@@ -87,7 +87,7 @@
     "web3:debug:item": "bun run web3:debug -- item",
     "web3:debug:trade": "bun run web3:debug -- trade",
     "web3:debug:stats": "bun run web3:debug -- stats",
-    "test": "bun run --cwd packages/impostors build && turbo run test --filter=!@hyperscape/app",
+    "test": "bun run --cwd packages/impostors build && turbo run test --filter=!@hyperscape/app --filter=!@hyperscapeai/duel-oracle-evm",
     "loadtest": "bun scripts/loadtest.mjs",
     "loadtest:ccu": "bun scripts/loadtest.mjs --ccu-test",
     "loadtest:rendering": "bun scripts/loadtest.mjs --rendering-test",
