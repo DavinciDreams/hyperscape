@@ -128,15 +128,15 @@ echo "[deploy] Installing system build dependencies..."
 apt-get update && apt-get install -y build-essential python3 socat xvfb git-lfs ffmpeg wget gnupg iproute2 lsof postgresql postgresql-client || true
 git lfs install || true
 
-# ── Install Chrome Dev channel (has WebGPU enabled by default) ─
-echo "[deploy] Installing Chrome Dev channel for WebGPU support..."
-if ! command -v google-chrome-unstable &> /dev/null; then
+# ── Install Chrome Beta channel (WebGPU + better stability than Dev) ─
+echo "[deploy] Installing Chrome Beta for WebGPU support..."
+if ! command -v google-chrome-beta &> /dev/null; then
     wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - || true
     echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-    apt-get update && apt-get install -y google-chrome-unstable || true
-    echo "[deploy] Chrome Dev installed: $(google-chrome-unstable --version 2>/dev/null || echo 'install failed')"
+    apt-get update && apt-get install -y google-chrome-beta || true
+    echo "[deploy] Chrome Beta installed: $(google-chrome-beta --version 2>/dev/null || echo 'install failed')"
 else
-    echo "[deploy] Chrome Dev already installed: $(google-chrome-unstable --version)"
+    echo "[deploy] Chrome Beta already installed: $(google-chrome-beta --version)"
 fi
 
 # ── Fix any broken apt dependencies (NVIDIA driver conflicts) ─
