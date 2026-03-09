@@ -32,7 +32,62 @@ export const TREE_TYPES = {
   fir: {
     name: "Fir Tree",
     levelRequired: 1,
-    spawnWeight: 100,
+    spawnWeight: 10,
+  },
+  pine: {
+    name: "Pine Tree",
+    levelRequired: 1,
+    spawnWeight: 10,
+  },
+  oak: {
+    name: "Oak Tree",
+    levelRequired: 15,
+    spawnWeight: 10,
+  },
+  birch: {
+    name: "Birch Tree",
+    levelRequired: 1,
+    spawnWeight: 10,
+  },
+  bamboo: {
+    name: "Bamboo Tree",
+    levelRequired: 1,
+    spawnWeight: 10,
+  },
+  chinaPine: {
+    name: "China Pine",
+    levelRequired: 1,
+    spawnWeight: 10,
+  },
+  maple: {
+    name: "Maple Tree",
+    levelRequired: 45,
+    spawnWeight: 10,
+  },
+  coconut: {
+    name: "Coconut Palm",
+    levelRequired: 1,
+    spawnWeight: 10,
+  },
+  palm: {
+    name: "Desert Palm",
+    levelRequired: 1,
+    spawnWeight: 10,
+  },
+  dead: {
+    name: "Dead Tree",
+    levelRequired: 1,
+    spawnWeight: 10,
+  },
+  cactus: {
+    name: "Cactus",
+    levelRequired: 1,
+    spawnWeight: 10,
+  },
+  knotwood: {
+    name: "Knotwood Tree",
+    levelRequired: 1,
+    spawnWeight: 80,
   },
 } as const satisfies Record<string, TreeTypeDefinition>;
 

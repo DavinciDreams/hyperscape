@@ -25,7 +25,9 @@ import {
   GPU_VEG_CONFIG,
   type DissolveMaterial,
   type TreeDissolveMaterial,
+  type TreeMaterialOptions,
 } from "./GPUMaterials";
+import type { Wind } from "./Wind";
 import { getLODDistances } from "./LODConfig";
 
 const MAX_INSTANCES = 512;
@@ -253,7 +255,13 @@ async function ensureModelPool(
       parts: MeshPart[],
     ): { geometry: THREE.BufferGeometry; material: DissolveMaterial }[] {
       return parts.map((p) => {
-        const dm = createTreeDissolveMaterial(p.material, dissolveOpts);
+        const isLeaf =
+          !!(p.material as any).transparent ||
+          (p.material as any).side === THREE.DoubleSide;
+        const dm = createTreeDissolveMaterial(p.material, {
+          ...dissolveOpts,
+          isLeafMaterial: isLeaf,
+        } as TreeMaterialOptions);
         dm.side = THREE.DoubleSide;
         enableTextureRepeat(dm);
         world!.setupMaterial(dm);
@@ -733,6 +741,8 @@ export function updateGLBTreeInstancer(): void {
     hemisphereLight?: { color: THREE.Color };
   } | null;
 
+  const wind = world.getSystem("wind") as Wind | null;
+
   for (const pool of pools.values()) {
     for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
       if (!lodPool) continue;
@@ -752,7 +762,6 @@ export function updateGLBTreeInstancer(): void {
           playerPos.z,
         );
 
-        // Sync tree-specific uniforms (sun direction, intensity, shade color)
         const treeMat = mat as TreeDissolveMaterial;
         if (treeMat.treeUniforms) {
           if (env?.lightDirection) {
@@ -776,6 +785,13 @@ export function updateGLBTreeInstancer(): void {
                 c.b / avg,
               );
             }
+          }
+          if (wind) {
+            treeMat.treeUniforms.windTime.value = wind.uniforms.time.value;
+            treeMat.treeUniforms.windStrength.value =
+              wind.uniforms.windStrength.value;
+            const wd = wind.uniforms.windDirection.value;
+            treeMat.treeUniforms.windDirection.value.set(wd.x, wd.z);
           }
         }
       }

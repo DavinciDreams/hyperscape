@@ -22,7 +22,9 @@ import {
   GPU_VEG_CONFIG,
   type DissolveMaterial,
   type TreeDissolveMaterial,
+  type TreeMaterialOptions,
 } from "./GPUMaterials";
+import type { Wind } from "./Wind";
 import { getLODDistances } from "./LODConfig";
 
 const MAX_INSTANCES = 512;
@@ -337,10 +339,14 @@ async function ensureTreeTypePool(
     };
 
     function buildMaterialForPart(p: MeshPart): DissolveMaterial {
+      const isLeaf =
+        !!(p.material as any).transparent ||
+        (p.material as any).side === THREE.DoubleSide;
       const dm = createTreeDissolveMaterial(p.material, {
         ...dissolveOpts,
         batched: true,
-      });
+        isLeafMaterial: isLeaf,
+      } as TreeMaterialOptions);
       dm.side = THREE.DoubleSide;
       enableTextureRepeat(dm);
       world!.setupMaterial(dm);
@@ -878,6 +884,8 @@ export function updateGLBTreeBatchedInstancer(): void {
     hemisphereLight?: { color: THREE.Color };
   } | null;
 
+  const wind = world.getSystem("wind") as Wind | null;
+
   for (const pool of pools.values()) {
     for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
       if (!lodPool) continue;
@@ -913,6 +921,13 @@ export function updateGLBTreeBatchedInstancer(): void {
                 c.b / avg,
               );
             }
+          }
+          if (wind) {
+            treeMat.treeUniforms.windTime.value = wind.uniforms.time.value;
+            treeMat.treeUniforms.windStrength.value =
+              wind.uniforms.windStrength.value;
+            const wd = wind.uniforms.windDirection.value;
+            treeMat.treeUniforms.windDirection.value.set(wd.x, wd.z);
           }
         }
       }

@@ -29,9 +29,11 @@ import {
   MeshStandardNodeMaterial,
   float,
   dot,
+  vec2,
   vec3,
   vec4,
   smoothstep,
+  positionLocal,
   positionWorld,
   screenUV,
   cameraPosition,
@@ -46,6 +48,7 @@ import {
   mod,
   floor,
   abs,
+  sin,
   viewportCoordinate,
   normalView,
   normalWorld,
@@ -943,11 +946,21 @@ export function applyRimHighlight(
 // ============================================================================
 
 /**
- * Tree-specific dissolve material with stylized foliage shading.
+ * Options for creating tree dissolve materials.
+ */
+export type TreeMaterialOptions = DissolveMaterialOptions & {
+  /** Whether this material covers leaf geometry (enables wind + SSS) */
+  isLeafMaterial?: boolean;
+};
+
+/**
+ * Tree-specific dissolve material with soft stylized shading.
  * Extends DissolveMaterial with:
+ * - Soft clamped lighting (Lambert compressed to [0.7, 1.0], no harsh shadows)
+ * - Fresnel edge brightening on leaves (morpho-style rim glow)
+ * - Back-SSS translucency for leaves (warm glow when backlit by sun)
+ * - Wind vertex animation for leaves
  * - Vertex-color AO (G channel darkens crevices)
- * - Back-SSS translucency (warm glow when backlit by sun)
- * - Subtle saturation boost for rich foliage colors
  * - Per-instance rim highlight
  */
 export type TreeDissolveMaterial = DissolveMaterial & {
@@ -955,28 +968,29 @@ export type TreeDissolveMaterial = DissolveMaterial & {
     sunDirection: { value: THREE.Vector3 };
     sunIntensity: { value: number };
     shadeColor: { value: THREE.Color };
+    windTime: { value: number };
+    windStrength: { value: number };
+    windDirection: { value: THREE.Vector2 };
   };
 };
 
 /**
- * Creates a tree dissolve material from an existing source material.
- * Builds on the standard dissolve material (dithered fade, water culling, etc.)
- * and layers Fortnite-inspired foliage shading on top:
+ * Creates a tree dissolve material with soft clamped lighting, SSS, and wind.
  *
- * 1. **AO** — Reads the vertex color G channel as ambient occlusion,
- *    darkening crevices and inner branches for depth.
- * 2. **Sun shade** — Shadow-side surfaces get tinted by the sky's ambient
- *    color (from the hemisphere light), shifting cool during day and
- *    dark-blue at night.
- * 3. **Saturation** — Subtle boost keeps colors rich without being cartoonish.
- * 4. **Rim highlight** — Per-instance Fresnel glow for hover feedback.
+ * 1. **Soft lighting** — Lambert + smoothstep clamped to [0.7, 1.0] (no harsh shadows).
+ * 2. **AO** — Vertex color G channel as ambient occlusion.
+ * 3. **SSS** — Back-scatter translucency on leaf materials (warm glow when backlit).
+ * 4. **Wind** — Sine-wave vertex displacement on leaf materials.
+ * 5. **Edge brightening** — Fresnel-based rim glow on leaves (morpho effect).
+ * 6. **Saturation** — Subtle boost keeps colors rich.
+ * 7. **Rim highlight** — Per-instance Fresnel glow for hover feedback.
  *
  * @param source - Source material to clone PBR properties from
- * @param options - Dissolve configuration (fade distances, etc.)
+ * @param options - Dissolve + tree configuration (fade distances, isLeafMaterial, etc.)
  */
 export function createTreeDissolveMaterial(
   source: THREE.MeshStandardMaterial | THREE.Material,
-  options: DissolveMaterialOptions = {},
+  options: TreeMaterialOptions = {},
 ): TreeDissolveMaterial {
   const baseDm = createDissolveMaterial(source, {
     ...options,
@@ -984,57 +998,126 @@ export function createTreeDissolveMaterial(
   });
 
   const material = baseDm as unknown as THREE.MeshStandardNodeMaterial;
+  const isLeaf = options.isLeafMaterial ?? false;
 
-  // Check if source has vertex colors before disabling them.
-  // We read vertex color manually in the shader for AO only (G channel).
   const hasVertexColors = !!(source as any).vertexColors;
   material.vertexColors = false;
 
-  // Boost normal map effect when present for more realistic surface detail
   const srcStd = source as THREE.MeshStandardMaterial;
   if (srcStd.normalMap) {
     material.normalScale = new THREE.Vector2(2, 2);
   }
 
-  // --- Tree-specific uniforms ---
+  // --- Uniforms ---
   const uSunDir = uniform(new THREE.Vector3(0.5, 0.8, 0.3));
   const uSunIntensity = uniform(1.0);
   const uShadeColor = uniform(new THREE.Color(0.7, 1.08, 1.22));
   const uHighlightColor = uniform(new THREE.Color(0x00ffff));
+  const uWindTime = uniform(0.0);
+  const uWindStrength = uniform(0.3);
+  const uWindDir = uniform(new THREE.Vector2(1, 0));
 
-  // --- Tuning constants ---
+  // --- Tuning ---
   const AO_POWER = 1.8;
   const AO_DARK = 0.35;
-  const SAT_BOOST = 1.1;
+  const SAT_BOOST = 1.15;
   const HL_BRIGHTEN = 0.08;
   const HL_RIM_POWER = 2.5;
   const HL_RIM_STRENGTH = 0.4;
+  const LIGHT_AMBIENT = 0.3;
+  const LIGHT_DIFFUSE_STR = 2.0;
+  const LIGHT_CLAMP_LO = 0.7;
+  const LIGHT_CLAMP_HI = 1.0;
+  const LIGHT_AMBIENT_BOOST = 0.15;
+  const EDGE_BRIGHT = 1.25;
+
+  // --- Wind vertex displacement (leaf materials only) ---
+  // Displacement is proportional to local Y so it auto-scales to any model
+  // coordinate system (bamboo Y~15 at scale 0.8 vs fir Y~1900 at scale 0.008).
+  if (isLeaf) {
+    material.positionNode = Fn(() => {
+      const pos = positionLocal;
+      const phase = add(mul(pos.x, float(0.013)), mul(pos.z, float(0.017)));
+      const wave1 = sin(add(mul(uWindTime, float(1.8)), phase));
+      const wave2 = sin(
+        add(mul(uWindTime, float(3.2)), mul(phase, float(0.6))),
+      );
+      const combined = add(mul(wave1, float(0.65)), mul(wave2, float(0.35)));
+      const amplitude = mul(abs(pos.y), float(0.006));
+      const disp = mul(combined, mul(uWindStrength, amplitude));
+      return vec3(
+        add(pos.x, mul(disp, uWindDir.x)),
+        pos.y,
+        add(pos.z, mul(disp, uWindDir.y)),
+      );
+    })();
+  }
+
+  // --- Output: soft clamped lighting (bypass PBR, compute Lambert from scratch) ---
+  const albedoMap = material.map;
+  const matColor = vec3(material.color.r, material.color.g, material.color.b);
 
   material.outputNode = Fn(() => {
-    const litColor = output;
+    const pbrOut = output;
 
-    // ---- Vertex-color AO (skip if model has no vertex colors) ----
-    const aoResult = hasVertexColors
-      ? (() => {
-          const aoRaw = attribute("color", "vec3").y;
-          const aoFactor = pow(aoRaw, float(AO_POWER));
-          const aoMul = mix(float(AO_DARK), float(1.0), aoFactor);
-          return mul(litColor.rgb, aoMul);
-        })()
-      : litColor.rgb;
+    // ---- Albedo (sample texture directly, bypass PBR lighting) ----
+    const texCoord = attribute("uv", "vec2");
+    const albedoSample = albedoMap
+      ? texture(albedoMap, texCoord)
+      : vec4(1, 1, 1, 1);
+    let baseAlbedo: any = mul(albedoSample.rgb, matColor);
 
-    // ---- Sun shade ----
-    const shadeResult = applyTerrainSunShade(
-      aoResult,
-      normalWorld,
-      vec3(uSunDir),
-      vec3(uShadeColor),
+    // ---- Vertex-color AO ----
+    if (hasVertexColors) {
+      const aoRaw = attribute("color", "vec3").y;
+      const aoFactor = pow(aoRaw, float(AO_POWER));
+      const aoMul = mix(float(AO_DARK), float(1.0), aoFactor);
+      baseAlbedo = mul(baseAlbedo, aoMul);
+    }
+
+    // ---- Custom Lambert lighting (soft clamped, scaled by sun intensity) ----
+    const N = normalize(normalWorld);
+    const L = normalize(vec3(uSunDir));
+    const NdotL = dot(N, L);
+    const sunI = clamp(uSunIntensity, float(0.0), float(2.0));
+    const dayFactor = div(sunI, float(2.0));
+    const diffuse = mul(
+      mul(max(NdotL, float(0.0)), float(LIGHT_DIFFUSE_STR)),
+      sunI,
     );
+    const ambient = mul(float(LIGHT_AMBIENT), dayFactor);
+    const totalLight = add(ambient, diffuse);
+    const clampLo = max(float(0.08), mul(float(LIGHT_CLAMP_LO), dayFactor));
+    const softLight = clamp(
+      smoothstep(float(0.9), float(1.1), totalLight),
+      clampLo,
+      float(LIGHT_CLAMP_HI),
+    );
+    const ambientBoost = mul(float(LIGHT_AMBIENT_BOOST), dayFactor);
+    let result: any = mul(baseAlbedo, add(softLight, ambientBoost));
+
+    // ---- Sun shade (shadow-side sky tint, matches terrain) ----
+    result = applyTerrainSunShade(result, N, L, vec3(uShadeColor));
+
+    // ---- SSS + Fresnel edge brightening (leaf only) ----
+    if (isLeaf) {
+      const V = normalize(sub(cameraPosition, positionWorld));
+
+      // Back-scatter SSS
+      const backL = normalize(sub(vec3(0, 0, 0), L));
+      const backSSS = clamp(dot(V, backL), float(0), float(1));
+      const sssFactor = mul(pow(backSSS, float(3.0)), float(0.12));
+      result = add(result, mul(vec3(0.95, 1.0, 0.7), sssFactor));
+
+      // Edge brightening (morpho effect)
+      const EDotN = clamp(dot(V, N), float(0.0), float(1.0));
+      result = mix(mul(result, float(EDGE_BRIGHT)), result, EDotN);
+    }
 
     // ---- Saturation boost ----
-    const luma = dot(shadeResult, vec3(0.299, 0.587, 0.114));
+    const luma = dot(result, vec3(0.299, 0.587, 0.114));
     const boosted = add(
-      mul(sub(shadeResult, vec3(luma, luma, luma)), float(SAT_BOOST)),
+      mul(sub(result, vec3(luma, luma, luma)), float(SAT_BOOST)),
       vec3(luma, luma, luma),
     );
 
@@ -1061,7 +1144,7 @@ export function createTreeDissolveMaterial(
     const highlighted = add(brightened, rimGlow);
     const finalRgb = mix(boosted, highlighted, hlIntensity);
 
-    return vec4(finalRgb, litColor.a);
+    return vec4(finalRgb, pbrOut.a);
   })();
 
   material.needsUpdate = true;
@@ -1072,6 +1155,9 @@ export function createTreeDissolveMaterial(
     sunDirection: uSunDir as unknown as { value: THREE.Vector3 },
     sunIntensity: uSunIntensity as unknown as { value: number },
     shadeColor: uShadeColor as unknown as { value: THREE.Color },
+    windTime: uWindTime as unknown as { value: number },
+    windStrength: uWindStrength as unknown as { value: number },
+    windDirection: uWindDir as unknown as { value: THREE.Vector2 },
   };
 
   return treeMat;
