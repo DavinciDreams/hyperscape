@@ -64,18 +64,24 @@ const TUNDRA_GRASS = vec3(0.78, 0.82, 0.85);
 const TUNDRA_GRASS_DARK = vec3(0.65, 0.7, 0.75);
 const TUNDRA_DIRT = vec3(0.55, 0.55, 0.58);
 const TUNDRA_DIRT_DARK = vec3(0.42, 0.42, 0.45);
+const TUNDRA_CLIFF = vec3(0.5, 0.52, 0.56);
+const TUNDRA_CLIFF_DARK = vec3(0.38, 0.4, 0.44);
 
 // --- Forest palette: vibrant energetic greens with warm brown earth ---
 const FOREST_GRASS = vec3(0.3, 0.58, 0.15);
 const FOREST_GRASS_DARK = vec3(0.18, 0.42, 0.08);
 const FOREST_DIRT = vec3(0.35, 0.24, 0.12);
 const FOREST_DIRT_DARK = vec3(0.22, 0.15, 0.08);
+const FOREST_CLIFF = vec3(0.4, 0.38, 0.32);
+const FOREST_CLIFF_DARK = vec3(0.28, 0.26, 0.22);
 
 // --- Canyon palette: red-orange sand with deep crimson rock ---
 const CANYON_SAND = vec3(0.82, 0.52, 0.28);
 const CANYON_SAND_DARK = vec3(0.72, 0.42, 0.2);
 const CANYON_ROCK = vec3(0.62, 0.28, 0.15);
 const CANYON_ROCK_DARK = vec3(0.48, 0.2, 0.1);
+const CANYON_CLIFF = vec3(0.72, 0.38, 0.18);
+const CANYON_CLIFF_DARK = vec3(0.55, 0.25, 0.12);
 
 // Legacy aliases used by road overlay and other shader sections (default = forest)
 const GRASS_GREEN = FOREST_GRASS;
@@ -140,31 +146,23 @@ export function computeTerrainBaseColor(
   );
   c = mix(c, dirtColor, mul(dirtPatchFactor, flatnessFactor));
 
-  // Slope-based dirt
-  c = mix(
-    c,
-    dirtColor,
-    mul(smoothstep(float(0.15), float(0.5), slope), float(0.6)),
+  // Slope-based dirt — fades out at steep slopes where cliff color takes over
+  const dirtSlopeFactor = mul(
+    smoothstep(float(0.15), float(0.4), slope),
+    smoothstep(float(0.6), float(0.3), slope),
   );
+  c = mix(c, dirtColor, mul(dirtSlopeFactor, float(0.6)));
 
-  // Rock on steep slopes
-  const rockVariation = smoothstep(float(0.3), float(0.7), noiseVal);
-  const rockColor = mix(ROCK_GRAY, ROCK_DARK, rockVariation);
-  c = mix(c, rockColor, smoothstep(float(0.45), float(0.75), slope));
-
-  // Snow at high elevation — only in tundra biome (tW = tundra weight)
-  c = mix(
-    c,
-    SNOW_WHITE,
-    mul(
-      smoothstep(
-        float(TERRAIN_SHADER_CONSTANTS.SNOW_HEIGHT - 5.0),
-        float(60.0),
-        height,
-      ),
-      tW,
-    ),
+  // Per-biome cliff color on steep slopes (terrace sides, rock faces)
+  const cliffVariation = smoothstep(float(0.3), float(0.7), noiseVal);
+  const tundraCliff = mix(TUNDRA_CLIFF, TUNDRA_CLIFF_DARK, cliffVariation);
+  const forestCliff = mix(FOREST_CLIFF, FOREST_CLIFF_DARK, cliffVariation);
+  const canyonCliff = mix(CANYON_CLIFF, CANYON_CLIFF_DARK, cliffVariation);
+  const cliffColor = add(
+    add(mul(tundraCliff, tW), mul(forestCliff, fW)),
+    mul(canyonCliff, dW),
   );
+  c = mix(c, cliffColor, smoothstep(float(0.3), float(0.55), slope));
 
   // Sand near water (flat areas, stronger in canyon)
   const sandBlend = mul(
@@ -465,17 +463,6 @@ export function getGrassiness(
   if (slope > 0.6) {
     const rockFactor = smoothstepCPU(0.6, 0.8, slope);
     grassiness -= rockFactor;
-  }
-
-  // === SNOW AT HIGH ELEVATION ===
-  // Snow line at ~50m, full snow by 55m
-  if (height > TERRAIN_SHADER_CONSTANTS.SNOW_HEIGHT - 5.0) {
-    const snowFactor = smoothstepCPU(
-      TERRAIN_SHADER_CONSTANTS.SNOW_HEIGHT - 5.0,
-      TERRAIN_SHADER_CONSTANTS.SNOW_HEIGHT + 5.0,
-      height,
-    );
-    grassiness -= snowFactor;
   }
 
   // Clamp to 0-1

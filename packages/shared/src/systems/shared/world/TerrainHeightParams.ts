@@ -208,40 +208,44 @@ export interface LandscapeFeatureDef {
  * Predefined landscape features — add/remove entries here to control
  * exactly where mountains, ponds, and plateaus appear on the island.
  *
+ * Algorithm: radial envelope × domain-warped noise → terrace quantization.
+ * The envelope defines the feature's footprint; noise drives internal terrain.
+ * Terracing follows noise contours, producing organic (non-circular) layers.
+ *
  * Parameter guide:
- *   layers        - number of terrace levels (1 = single plateau, 4+ = tiered mountain)
- *   shapePower    - falloff curve (0.3 = dome, 1 = cone, 4+ = flat-topped mesa)
- *   edgeSharpness - transition between layers (0 = smooth blend, 1 = hard cliff)
- *   layerSlope    - incline within each layer (0 = perfectly flat shelves, 1 = full natural slope)
- *   noiseScale    - frequency of edge wobble (higher = more detailed wiggles)
- *   noiseAmount   - amplitude of edge wobble (0 = perfect circles, 0.3 = organic edges)
+ *   layers        - number of terrace levels (1 = single plateau, 6+ = tiered mountain)
+ *   shapePower    - envelope falloff (0.3 = dome, 1 = cone, 4+ = flat-topped mesa)
+ *   edgeSharpness - terrace cliff sharpness (0 = smooth ramp, 1 = hard cliff)
+ *   layerSlope    - incline within each shelf (0 = flat, 0.5 = gentle slope, 1 = full slope)
+ *   noiseScale    - frequency of internal terrain (0.02 = broad ridges, 0.05 = fine detail)
+ *   noiseAmount   - noise vs envelope blend (0 = smooth dome, 0.6 = organic ridges)
  */
 export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
   {
     type: LandscapeType.Mountain,
     x: -168.5,
     z: -352.5,
-    radius: 150,
-    strength: 4.0,
+    radius: 250,
+    strength: 5.5,
     layers: 5,
-    shapePower: 1.8,
-    edgeSharpness: 0.7,
-    layerSlope: 0.5,
-    noiseScale: 0.015,
-    noiseAmount: 0.2,
+    shapePower: 2.0,
+    edgeSharpness: 0.2,
+    layerSlope: 0.9,
+    noiseScale: 0.025,
+    noiseAmount: 0.6,
   },
   {
     type: LandscapeType.Mountain,
     x: 265.5,
     z: 322.5,
-    radius: 100,
-    strength: 0.7,
-    layers: 3,
-    shapePower: 1.5,
-    edgeSharpness: 0.6,
-    layerSlope: 0.4,
-    noiseScale: 0.02,
-    noiseAmount: 0.15,
+    radius: 130,
+    strength: 2.5,
+    layers: 5,
+    shapePower: 1.3,
+    edgeSharpness: 0.3,
+    layerSlope: 0.55,
+    noiseScale: 0.025,
+    noiseAmount: 0.55,
   },
   {
     type: LandscapeType.Pond,
@@ -334,20 +338,32 @@ export function applyLandscapeFeaturesPure(
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist >= feat.radius) continue;
 
-    const nv =
-      feat.noiseAmount > 0
-        ? noise.simplex2D(worldX * feat.noiseScale, worldZ * feat.noiseScale) *
-          feat.noiseAmount
-        : 0;
+    const t = Math.max(0, 1 - dist / feat.radius);
+    const envelope = Math.pow(t, feat.shapePower);
 
-    const t = Math.max(0, Math.min(1, 1 - dist / feat.radius + nv));
-    const shaped = Math.pow(t, feat.shapePower);
+    const warpScale = feat.noiseScale * 0.4;
+    const warpStr = feat.radius * feat.noiseAmount * 0.3;
+    const warpX =
+      noise.simplex2D(worldX * warpScale, worldZ * warpScale) * warpStr;
+    const warpZ =
+      noise.simplex2D(worldX * warpScale + 31.7, worldZ * warpScale + 47.3) *
+      warpStr;
+
+    const sx = (worldX + warpX) * feat.noiseScale;
+    const sz = (worldZ + warpZ) * feat.noiseScale;
+
+    const ridgeN = noise.ridgeNoise2D(sx, sz);
+    const detailN = noise.fractal2D(sx * 2.3, sz * 2.3, 3, 0.5, 2.0);
+    const mNoise = (ridgeN * 0.6 + detailN * 0.4 + 1) * 0.5;
+
+    let rawH = envelope * (1 - feat.noiseAmount + feat.noiseAmount * mNoise);
+    rawH = Math.max(0, Math.min(1, rawH));
 
     let influence: number;
     if (feat.layers >= 1) {
-      const stepped = Math.floor(shaped * feat.layers) / feat.layers;
+      const stepped = Math.floor(rawH * feat.layers) / feat.layers;
       const nextStep = Math.min(1, stepped + 1 / feat.layers);
-      const frac = (shaped - stepped) * feat.layers;
+      const frac = (rawH - stepped) * feat.layers;
       const blendStart = 1 - feat.edgeSharpness;
       const edgeBlend =
         frac <= blendStart ? 0 : (frac - blendStart) / (1 - blendStart);
@@ -355,7 +371,7 @@ export function applyLandscapeFeaturesPure(
       const slopedStep = stepped + frac * (nextStep - stepped);
       influence = flatStep + feat.layerSlope * (slopedStep - flatStep);
     } else {
-      influence = shaped;
+      influence = rawH;
     }
 
     if (feat.type === LandscapeType.Pond) {
@@ -617,25 +633,36 @@ export function buildApplyLandscapeFeaturesJS(): string {
       var dist = Math.sqrt(dx * dx + dz * dz);
       if (dist >= feat.radius) continue;
 
-      var nv = feat.noiseAmount > 0
-        ? noise.simplex2D(worldX * feat.noiseScale, worldZ * feat.noiseScale) * feat.noiseAmount
-        : 0;
+      var t = Math.max(0, 1 - dist / feat.radius);
+      var envelope = Math.pow(t, feat.shapePower);
 
-      var t = Math.max(0, Math.min(1, 1 - dist / feat.radius + nv));
-      var shaped = Math.pow(t, feat.shapePower);
+      var warpScale = feat.noiseScale * 0.4;
+      var warpStr = feat.radius * feat.noiseAmount * 0.3;
+      var warpX = noise.simplex2D(worldX * warpScale, worldZ * warpScale) * warpStr;
+      var warpZ = noise.simplex2D(worldX * warpScale + 31.7, worldZ * warpScale + 47.3) * warpStr;
+
+      var sx = (worldX + warpX) * feat.noiseScale;
+      var sz = (worldZ + warpZ) * feat.noiseScale;
+
+      var ridgeN = noise.ridgeNoise2D(sx, sz);
+      var detailN = noise.fractal2D(sx * 2.3, sz * 2.3, 3, 0.5, 2.0);
+      var mNoise = (ridgeN * 0.6 + detailN * 0.4 + 1) * 0.5;
+
+      var rawH = envelope * (1 - feat.noiseAmount + feat.noiseAmount * mNoise);
+      rawH = Math.max(0, Math.min(1, rawH));
 
       var influence;
       if (feat.layers >= 1) {
-        var stepped = Math.floor(shaped * feat.layers) / feat.layers;
+        var stepped = Math.floor(rawH * feat.layers) / feat.layers;
         var nextStep = Math.min(1, stepped + 1 / feat.layers);
-        var frac = (shaped - stepped) * feat.layers;
+        var frac = (rawH - stepped) * feat.layers;
         var blendStart = 1 - feat.edgeSharpness;
         var edgeBlend = frac <= blendStart ? 0 : (frac - blendStart) / (1 - blendStart);
         var flatStep = stepped + edgeBlend * (nextStep - stepped);
         var slopedStep = stepped + frac * (nextStep - stepped);
         influence = flatStep + feat.layerSlope * (slopedStep - flatStep);
       } else {
-        influence = shaped;
+        influence = rawH;
       }
 
       if (feat.type === '${LandscapeType.Pond}') {
