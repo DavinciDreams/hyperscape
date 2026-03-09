@@ -186,10 +186,13 @@ async function deployContracts() {
         const mudBin = fs.existsSync(path.join(contractsDir, "node_modules/.bin/mud"))
             ? path.join(contractsDir, "node_modules/.bin/mud")
             : path.resolve(contractsDir, "../../node_modules/.bin/mud");
+        const cleanEnv = { ...process.env, PATH: envPATH };
+        delete cleanEnv.NODE_OPTIONS;
+
         const child = spawn("node", [mudBin, "deploy"], {
             cwd: contractsDir,
             stdio: "inherit",
-            env: { ...process.env, PATH: envPATH },
+            env: cleanEnv,
         });
 
         child.on("error", (err) => {

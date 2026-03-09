@@ -10,6 +10,8 @@ type DuelOutcomeOracleContract = Awaited<
     duelKey: string;
     status: bigint;
     winner: bigint;
+    betCloseTs: bigint;
+    duelStartTs: bigint;
     seed: bigint;
     duelEndTs: bigint;
   }>;
@@ -114,6 +116,35 @@ describe("DuelOutcomeOracle", () => {
           2,
         ),
     ).to.be.reverted;
+  });
+
+  it("clamps duel start to the betting close when publishers send an earlier fight start", async () => {
+    const { oracle, reporter } = await deployFixture();
+    const duelKey =
+      "0x4444444444444444444444444444444444444444444444444444444444444444";
+    const participantAHash =
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const participantBHash =
+      "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    await expect(
+      oracle
+        .connect(reporter)
+        .upsertDuel(
+          duelKey,
+          participantAHash,
+          participantBHash,
+          1_000,
+          2_000,
+          1_500,
+          "https://example.com/duels/4",
+          3,
+        ),
+    ).to.emit(oracle, "DuelUpserted");
+
+    const duel = await oracle.getDuel(duelKey);
+    expect(duel.betCloseTs).to.equal(2_000n);
+    expect(duel.duelStartTs).to.equal(2_000n);
   });
 
   it("allows the admin to rotate the reporter", async () => {

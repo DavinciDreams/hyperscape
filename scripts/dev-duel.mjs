@@ -165,9 +165,9 @@ const configuredLogLevel = (
   .toLowerCase();
 const normalizedLogLevel =
   configuredLogLevel === "debug" ||
-  configuredLogLevel === "info" ||
-  configuredLogLevel === "warn" ||
-  configuredLogLevel === "error"
+    configuredLogLevel === "info" ||
+    configuredLogLevel === "warn" ||
+    configuredLogLevel === "error"
     ? configuredLogLevel
     : "warn";
 const infoLogsEnabled =
@@ -224,7 +224,20 @@ Spectator Mode:
 
 const releaseRunLock = acquireSingletonLock("dev-duel");
 
-const HEALTH_URL = "http://localhost:5555/health";
+function resolveHealthUrl(rawWsUrl) {
+  try {
+    const parsed = new URL(rawWsUrl);
+    parsed.protocol = parsed.protocol === "wss:" ? "https:" : "http:";
+    parsed.pathname = "/health";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return "http://localhost:5555/health";
+  }
+}
+
+const HEALTH_URL = resolveHealthUrl(opts.url);
 const MAX_WAIT = 120000; // 2 minutes
 
 async function waitForServer() {
@@ -303,14 +316,18 @@ async function loadMatchmaker() {
       if (mod?.ElizaDuelMatchmaker) {
         return mod;
       }
-    } catch { }
+    } catch (err) {
+      console.warn(`[dev-duel] Failed to import ${entry}:`, err.message);
+    }
   }
 
   // Fallback: try the compiled server build
   try {
     const mod = await import("@hyperscape/server/eliza");
     if (mod?.ElizaDuelMatchmaker) return mod;
-  } catch { }
+  } catch (err) {
+    console.warn(`[dev-duel] Failed to import @hyperscape/server/eliza:`, err.message);
+  }
 
   // Final fallback: try loading the old DuelMatchmaker from shared
   try {
@@ -319,7 +336,9 @@ async function loadMatchmaker() {
       warn("[dev-duel] Falling back to old DuelMatchmaker (no LLM)");
       return { ElizaDuelMatchmaker: mod.DuelMatchmaker };
     }
-  } catch { }
+  } catch (err) {
+    console.warn(`[dev-duel] Failed to import old DuelMatchmaker:`, err.message);
+  }
 
   console.error("Cannot load ElizaDuelMatchmaker.");
   console.error(

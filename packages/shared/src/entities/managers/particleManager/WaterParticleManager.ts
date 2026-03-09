@@ -283,7 +283,6 @@ export class WaterParticleManager {
     layerType: "splash" | "bubble" | "shimmer",
   ): ParticleLayer {
     const geometry = new THREE.PlaneGeometry(1, 1);
-    geometry.deleteAttribute("normal");
 
     const spotPosArr = new Float32Array(maxInstances * 3);
     const ageLifetimeArr = new Float32Array(maxInstances * 2);
@@ -356,7 +355,6 @@ export class WaterParticleManager {
     colorHex: number,
   ): RippleLayer {
     const geometry = new THREE.CircleGeometry(0.5, 24);
-    geometry.deleteAttribute("normal");
 
     const spotPosArr = new Float32Array(maxInstances * 3);
     const rippleParamsArr = new Float32Array(maxInstances * 2);

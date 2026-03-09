@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * Deploy Hyperscape Client to Cloudflare Pages
- * 
- * NOTE: Production deployments are handled automatically by Cloudflare Pages
- * GitHub integration. This script is for manual/preview deployments only.
- * 
- * Production: https://hyperscape.club (auto-deploys from main branch)
+ *
+ * NOTE: Production deployments normally run via the GitHub Actions workflow.
+ * This script is for manual/preview deployments or emergency production deploys.
+ *
+ * Production domains: https://hyperscape.club, https://hyperscape.gg
  */
 
 import { execSync } from 'child_process'
@@ -24,10 +24,10 @@ async function main() {
   console.log('🚀 Deploying Hyperscape to Cloudflare Pages')
   console.log(`   Project: ${PROJECT_NAME}`)
   console.log(`   Environment: ${PRODUCTION ? 'Production' : 'Preview'}`)
-  console.log(`   Domain: https://hyperscape.club`)
+  console.log('   Domains: https://hyperscape.club, https://hyperscape.gg')
   
   if (PRODUCTION) {
-    console.log('\n⚠️  Note: Production deploys automatically from GitHub.')
+    console.log('\n⚠️  Note: Production deploys normally run from GitHub Actions.')
     console.log('   This will create a manual production deployment.\n')
   }
   
@@ -62,7 +62,7 @@ async function main() {
     console.log('\n✅ Deployment successful!')
     
     if (PRODUCTION) {
-      console.log(`\n📡 Production URL: https://hyperscape.club`)
+      console.log('\n📡 Production URLs: https://hyperscape.club, https://hyperscape.gg')
     } else {
       console.log(`\n📡 Preview URL: Check output above`)
     }
@@ -80,4 +80,3 @@ main().catch(error => {
   console.error('❌ Deploy script failed:', error)
   process.exit(1)
 })
-

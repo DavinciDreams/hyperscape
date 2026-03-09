@@ -75,7 +75,12 @@ async function startServer() {
   // Validate critical secrets in production
   if (!isDevelopment) {
     const missing: string[] = [];
-    if (!process.env.DATABASE_URL) missing.push("DATABASE_URL");
+    const useLocalPostgres =
+      process.env.USE_LOCAL_POSTGRES === "true" ||
+      process.env.USE_LOCAL_POSTGRES === "1";
+    if (!process.env.DATABASE_URL && !useLocalPostgres) {
+      missing.push("DATABASE_URL or USE_LOCAL_POSTGRES=true");
+    }
     if (missing.length > 0) {
       console.error(
         `[Server] FATAL: Missing required production config: ${missing.join(", ")}`,

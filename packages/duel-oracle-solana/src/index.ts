@@ -6,8 +6,9 @@ export type { FightOracle } from "./generated/fightOracleTypes.js";
 export { FIGHT_ORACLE_IDL } from "./generated/fightOracleIdl.js";
 
 export const DUEL_ORACLE_SOLANA_PROGRAM_IDS = {
-  devnet: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
-  mainnet: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
+  localnet: "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV",
+  devnet: "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV",
+  mainnet: "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV",
 } as const;
 
 export type DuelOracleSolanaNetwork =

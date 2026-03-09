@@ -158,8 +158,6 @@ export async function createHttpServer(
     "https://www.bsc.hyperbet.win",
     "https://hyperscape.gg",
     "https://www.hyperscape.gg",
-    "https://hyperscape.bet",
-    "https://www.hyperscape.bet",
     "https://hyperscape.club",
     "https://www.hyperscape.club",
     "https://hyperscape.pages.dev",
@@ -190,8 +188,6 @@ export async function createHttpServer(
     /^https?:\/\/.+\.hyperbet-bsc\.pages\.dev$/, // Hyperbet BSC preview deployments
     /^https?:\/\/(www\.)?hyperscape\.gg$/, // hyperscape.gg apex and www
     /^https?:\/\/.+\.hyperscape\.gg$/, // hyperscape.gg subdomains
-    /^https?:\/\/(www\.)?hyperscape\.bet$/, // hyperscape.bet apex and www
-    /^https?:\/\/.+\.hyperscape\.bet$/, // hyperscape.bet subdomains
     /^https?:\/\/.+\.hyperscape\.pages\.dev$/, // Cloudflare Pages preview deployments
     /^https:\/\/.+\.farcaster\.xyz$/,
     /^https:\/\/.+\.warpcast\.com$/,
@@ -524,6 +520,7 @@ async function registerStaticFiles(
   // Always serve manifests from the dedicated cache directory for compatibility.
   // This guarantees /game-assets/manifests/* works even when game-assets root points
   // at a directory that doesn't contain the full manifest set.
+  console.error(`[HTTP DEBUG] Registering /game-assets/manifests/ with root: ${config.manifestsDir}`);
   await fastify.register(statics, {
     root: config.manifestsDir,
     prefix: "/game-assets/manifests/",

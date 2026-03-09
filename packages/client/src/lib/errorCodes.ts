@@ -93,7 +93,7 @@ export enum ErrorCode {
 
   // System Errors (E9xx)
   SYSTEM_UNKNOWN = "E901",
-  SYSTEM_WEBGL_ERROR = "E902",
+  SYSTEM_WEBGPU_ERROR = "E902",
   SYSTEM_PHYSICS_ERROR = "E903",
   SYSTEM_AUDIO_ERROR = "E904",
   SYSTEM_BROWSER_UNSUPPORTED = "E905",
@@ -518,8 +518,8 @@ export const ERROR_META: Record<ErrorCode, ErrorMeta> = {
     userMessage: "An error occurred.",
     recoverable: true,
   },
-  [ErrorCode.SYSTEM_WEBGL_ERROR]: {
-    code: ErrorCode.SYSTEM_WEBGL_ERROR,
+  [ErrorCode.SYSTEM_WEBGPU_ERROR]: {
+    code: ErrorCode.SYSTEM_WEBGPU_ERROR,
     severity: ErrorSeverity.CRITICAL,
     message: "WebGPU error",
     userMessage:

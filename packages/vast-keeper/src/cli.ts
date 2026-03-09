@@ -25,6 +25,11 @@ import {
   isActiveInstance,
   partitionInstances,
 } from "./instance-utils.js";
+import {
+  DEFAULT_US_STREAM_SEARCH_QUERY,
+  filterOffersForStream,
+  sortOffersByPreference,
+} from "./offer-utils.js";
 
 // Colors for terminal output
 const RED = "\x1b[31m";
@@ -49,9 +54,7 @@ const log = {
 // Configuration - CRITICAL: gpu_display_active=true is required for WebGPU
 const CONFIG = {
   // WebGPU requires display driver support, not just compute
-  searchQuery:
-    process.env.VAST_SEARCH_QUERY ||
-    "gpu_display_active=true reliability > 0.95 gpu_ram >= 20 num_gpus=1 rented=False dph < 2.0",
+  searchQuery: process.env.VAST_SEARCH_QUERY || DEFAULT_US_STREAM_SEARCH_QUERY,
   image: process.env.VAST_IMAGE || "nvidia/cuda:12.4.0-runtime-ubuntu22.04",
   diskSize: Number.parseInt(process.env.VAST_DISK_GB || "120", 10),
   maxWaitTime: 300000, // 5 minutes
@@ -73,8 +76,11 @@ interface VastInstance {
 }
 
 interface VastOffer {
+  cpu_ram?: number;
+  cpu_cores_effective?: number;
   id: number;
   dph_total: number;
+  geolocation?: string;
   gpu_name: string;
   gpu_ram: number;
   reliability: number;
@@ -128,8 +134,13 @@ function runVastCmd(args: string[]): unknown {
   }
 }
 
+function formatGpuRam(gpuRam: number): string {
+  const gpuRamGb = gpuRam / 1024;
+  return `${gpuRamGb % 1 === 0 ? gpuRamGb.toFixed(0) : gpuRamGb.toFixed(1)}GB`;
+}
+
 async function searchOffers(): Promise<VastOffer[]> {
-  log.header("Searching for GPU instances with WebGPU support");
+  log.header("Searching for U.S. GPU instances with WebGPU support");
   log.info(`Search query: ${CONFIG.searchQuery}`);
   log.info("(gpu_display_active=true is REQUIRED for WebGPU streaming)");
 
@@ -138,8 +149,11 @@ async function searchOffers(): Promise<VastOffer[]> {
     "offers",
     CONFIG.searchQuery,
   ]) as VastOffer[];
+  const filteredOffers = Array.isArray(offers)
+    ? filterOffersForStream(offers)
+    : [];
 
-  if (!Array.isArray(offers) || offers.length === 0) {
+  if (!Array.isArray(offers) || filteredOffers.length === 0) {
     log.warn("No offers found with gpu_display_active=true");
     log.info("");
     log.info("Searching without display requirement for comparison...");
@@ -160,9 +174,8 @@ async function searchOffers(): Promise<VastOffer[]> {
     return [];
   }
 
-  // Sort by price
-  offers.sort((a, b) => a.dph_total - b.dph_total);
-  return offers;
+  sortOffersByPreference(filteredOffers);
+  return filteredOffers;
 }
 
 async function getActiveInstances(): Promise<VastInstance[]> {
@@ -253,24 +266,27 @@ async function cmdSearch(): Promise<void> {
   log.success(`Found ${offers.length} instances with WebGPU support!`);
   console.log("");
   console.log(`${BOLD}Top 10 available instances:${NC}`);
-  console.log("─".repeat(100));
+  console.log("─".repeat(120));
   console.log(
-    `${"ID".padEnd(10)} ${"GPU".padEnd(20)} ${"RAM".padEnd(8)} ${"$/hr".padEnd(10)} ${"Reliability".padEnd(12)} Display`,
+    `${"ID".padEnd(10)} ${"GPU".padEnd(20)} ${"RAM".padEnd(8)} ${"$/hr".padEnd(10)} ${"Reliability".padEnd(12)} ${"Region".padEnd(18)} Display`,
   );
-  console.log("─".repeat(100));
+  console.log("─".repeat(120));
 
   for (const offer of offers.slice(0, 10)) {
     const id = String(offer.id).padEnd(10);
     const gpu = offer.gpu_name.padEnd(20);
-    const ram = `${offer.gpu_ram}GB`.padEnd(8);
+    const ram = formatGpuRam(offer.gpu_ram).padEnd(8);
     const price = `$${offer.dph_total.toFixed(3)}`.padEnd(10);
     const reliability = offer.reliability.toFixed(3).padEnd(12);
+    const region = (offer.geolocation || "Unknown").padEnd(18);
     const display = offer.gpu_display_active
       ? `${GREEN}YES${NC}`
       : `${RED}NO${NC}`;
-    console.log(`${id} ${gpu} ${ram} ${price} ${reliability} ${display}`);
+    console.log(
+      `${id} ${gpu} ${ram} ${price} ${reliability} ${region} ${display}`,
+    );
   }
-  console.log("─".repeat(100));
+  console.log("─".repeat(120));
 }
 
 async function cmdStatus(): Promise<void> {

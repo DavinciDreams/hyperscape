@@ -9,9 +9,11 @@
     "directory": "packages/duel-oracle-evm"
   },
   "files": [
+    "config.json",
     "dist",
     "contracts/DuelOutcomeOracle.sol",
     "hardhat.config.ts",
+    "scripts/deploy-duel-oracle-direct.js",
     "scripts/deploy-duel-oracle.ts",
     "test/DuelOutcomeOracle.ts"
   ],
@@ -20,6 +22,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./config.json": "./config.json",
     "./package.json": "./package.json"
   },
   "scripts": {

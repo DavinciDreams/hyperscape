@@ -272,8 +272,8 @@ export function createErrorLogger(page: Page, testName: string): ErrorLogger {
 export const KNOWN_ERROR_PATTERNS: RegExp[] = [
   // Source map warnings
   /DevTools failed to load source map/i,
-  // WebGL context warnings
-  /WebGL context/i,
+  // WebGPU context warnings
+  /WebGPU context/i,
   // Extension-related errors
   /Extension context invalidated/i,
   // React development warnings in dev mode

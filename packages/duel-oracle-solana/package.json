@@ -9,6 +9,7 @@
     "directory": "packages/duel-oracle-solana"
   },
   "files": [
+    "config.json",
     "dist",
     "anchor/Anchor.toml",
     "anchor/Cargo.lock",
@@ -24,6 +25,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./config.json": "./config.json",
     "./package.json": "./package.json"
   },
   "scripts": {

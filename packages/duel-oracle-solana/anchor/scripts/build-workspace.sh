@@ -45,14 +45,13 @@ mkdir -p "${ROOT_DIR}/target/idl"
 
 if command -v anchor >/dev/null 2>&1; then
   (cd "${ROOT_DIR}" && anchor build)
-  exit 0
-fi
+else
+  if cargo --list | grep -q "build-sbf"; then
+    cargo build-sbf --tools-version "${TOOLS_VERSION}" --manifest-path "${ROOT_DIR}/programs/${PROGRAM}/Cargo.toml"
+  fi
 
-if cargo --list | grep -q "build-sbf"; then
-  cargo build-sbf --tools-version "${TOOLS_VERSION}" --manifest-path "${ROOT_DIR}/programs/${PROGRAM}/Cargo.toml"
+  generate_idl
 fi
-
-generate_idl
 export ROOT_DIR
 node <<'EOF'
 const fs = require("node:fs");

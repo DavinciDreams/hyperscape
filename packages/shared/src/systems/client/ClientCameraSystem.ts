@@ -12,6 +12,10 @@ import { SystemBase } from "../shared/infrastructure/SystemBase";
 import type { CameraTarget, System, World } from "../../types";
 import { EventType } from "../../types/events";
 import { clamp } from "../../utils";
+import {
+  isEmbeddedSpectatorViewport,
+  isStreamPageRoute,
+} from "../../runtime/clientViewportMode";
 import { RaycastService } from "./interaction/services/RaycastService";
 // CameraTarget interface moved to shared types
 
@@ -965,32 +969,10 @@ export class ClientCameraSystem extends SystemBase {
       return { streamPageMode: false, embeddedSpectatorMode: false };
     }
 
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const streamPageMode = params.get("page") === "stream";
-      const embeddedFlag = (params.get("embedded") ?? "").toLowerCase();
-      const mode = (params.get("mode") ?? "").toLowerCase();
-      const embeddedFromQuery =
-        (embeddedFlag === "1" ||
-          embeddedFlag === "true" ||
-          embeddedFlag === "yes") &&
-        mode === "spectator";
-
-      const win = window as Window & {
-        __HYPERSCAPE_EMBEDDED__?: boolean;
-        __HYPERSCAPE_CONFIG__?: { mode?: string };
-      };
-      const embeddedFromConfig =
-        win.__HYPERSCAPE_EMBEDDED__ === true &&
-        win.__HYPERSCAPE_CONFIG__?.mode === "spectator";
-
-      return {
-        streamPageMode,
-        embeddedSpectatorMode: embeddedFromQuery || embeddedFromConfig,
-      };
-    } catch {
-      return { streamPageMode: false, embeddedSpectatorMode: false };
-    }
+    return {
+      streamPageMode: isStreamPageRoute(),
+      embeddedSpectatorMode: isEmbeddedSpectatorViewport(),
+    };
   }
 
   private isCinematicCameraActive(): boolean {

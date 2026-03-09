@@ -390,6 +390,7 @@
         "@ai-sdk/openai": "^3.0.30",
         "@elizaos/core": "alpha",
         "@elizaos/plugin-anthropic": "alpha",
+        "@elizaos/plugin-elizacloud": "^1.8.0",
         "@elizaos/plugin-groq": "alpha",
         "@elizaos/plugin-openai": "alpha",
         "@elizaos/plugin-sql": "alpha",
@@ -1238,6 +1239,8 @@
     "@elizaos/core": ["@elizaos/core@2.0.0-alpha.33", "", { "dependencies": { "@bufbuild/protobuf": "^2.10.2", "@elizaos/prompts": "2.0.0-alpha.33", "@langchain/core": "^1.1.12", "@langchain/textsplitters": "^1.0.1", "adze": "^2.2.5", "crypto-browserify": "^3.12.0", "dedent": "^1.7.1", "dotenv": "^17.2.3", "drizzle-orm": "^0.44.7", "fast-redact": "^3.5.0", "file-type": "^21.3.0", "glob": "^13.0.0", "handlebars": "^4.7.8", "markdown-it": "^14.1.0", "pdfjs-dist": "^5.4.530", "unique-names-generator": "^4.7.1", "uuid": "^13.0.0", "yaml": "^2.8.1", "zod": "^4.3.6" } }, "sha512-VI7qrGbBmxwThIS5qHMUJaTBgN8Be2aA0yw2An8SNmM8XtH1YISyNUJKzctsEiNr5DMBvZH4OePCQp3a/aZUKw=="],
 
     "@elizaos/plugin-anthropic": ["@elizaos/plugin-anthropic@2.0.0-alpha.7", "", { "dependencies": { "@ai-sdk/anthropic": "^3.0.9", "@elizaos/core": "alpha", "ai": "^6.0.23", "jsonrepair": "^3.12.0", "undici": "^7.16.0" } }, "sha512-BqTU9DgLdu+HNAxI5hrvBI4t3Ci2oD9EZ2tuC+IUie3ipB1LL/4A6OhvqKOtjMgJI5pgOXHY71zrjOARVTYniw=="],
+
+    "@elizaos/plugin-elizacloud": ["@elizaos/plugin-elizacloud@1.8.0", "", { "dependencies": { "@ai-sdk/openai": "^2.0.88", "@elizaos/core": "^1.7.0", "ai": "^5.0.116", "js-tiktoken": "^1.0.21", "undici": "^7.16.0" }, "peerDependencies": { "zod": "^4.2.1" } }, "sha512-E37eyrZkC34JPkdo72ZlVwcjKQMuQeIlL2xTBY+SWWIDpaq6acxzv/jJrRuxm8E9s8CxWUbLEqaGV09gj+99Bg=="],
 
     "@elizaos/plugin-groq": ["@elizaos/plugin-groq@2.0.0-alpha.8", "", { "dependencies": { "@ai-sdk/groq": "^3.0.4", "@elizaos/core": "alpha", "ai": "^6.0.0" } }, "sha512-BTpT8Q1YaapmcrfZ8gc9jhd+10r5ZbRvT5uaz+0TtmD5+tL3hstalJsyoEH7zyjI9fIVgP2Z6bO5wKXLzhUblg=="],
 
@@ -6991,6 +6994,8 @@
 
     "@elizaos/core/dotenv": ["dotenv@17.3.1", "", {}, "sha512-IO8C/dzEb6O3F9/twg6ZLXz164a2fhTnEWb95H23Dm4OuN+92NmEAlTrupP9VW6Jm3sO26tQlqyvyi4CsnY9GA=="],
 
+    "@elizaos/plugin-elizacloud/@ai-sdk/openai": ["@ai-sdk/openai@2.0.98", "", { "dependencies": { "@ai-sdk/provider": "2.0.1", "@ai-sdk/provider-utils": "3.0.22" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-6BI2lpY0WBuLzwz1bVTVkB4gpupisiN5/bFrud0+gHNhgspYOvh5uLf+7sz/NKvAtRB47WEzlBxwDQwGdIpbQw=="],
+
     "@elizaos/plugin-openai/@ai-sdk/openai": ["@ai-sdk/openai@3.0.39", "", { "dependencies": { "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.17" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-EZrs4L6kMkPQhpodagpEvqLSryOIK99WgblN0IsVHr1xhajWizQOZ0XMa7c5JpSYgIjV6u8GCpGV6hS3Mk2Bug=="],
 
     "@elizaos/plugin-sql/dotenv": ["dotenv@17.3.1", "", {}, "sha512-IO8C/dzEb6O3F9/twg6ZLXz164a2fhTnEWb95H23Dm4OuN+92NmEAlTrupP9VW6Jm3sO26tQlqyvyi4CsnY9GA=="],
@@ -8522,6 +8527,10 @@
     "@donmccurdy/caporal/table/slice-ansi": ["slice-ansi@2.1.0", "", { "dependencies": { "ansi-styles": "^3.2.0", "astral-regex": "^1.0.0", "is-fullwidth-code-point": "^2.0.0" } }, "sha512-Qu+VC3EwYLldKa1fCxuuvULvSJOKEgk9pi8dZeCVK7TqBfUNTH4sFkk4joj8afVSfAYgJoSOetjx9QWOJ5mYoQ=="],
 
     "@donmccurdy/caporal/table/string-width": ["string-width@3.1.0", "", { "dependencies": { "emoji-regex": "^7.0.1", "is-fullwidth-code-point": "^2.0.0", "strip-ansi": "^5.1.0" } }, "sha512-vafcv6KjVZKSgz06oM/H6GDBrAtz8vdhQakGjFIvNrHA6y3HCF1CInLy+QLq8dTJPQ1b+KDUqDFctkdRW44e1w=="],
+
+    "@elizaos/plugin-elizacloud/@ai-sdk/openai/@ai-sdk/provider": ["@ai-sdk/provider@2.0.1", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-KCUwswvsC5VsW2PWFqF8eJgSCu5Ysj7m1TxiHTVA6g7k360bk0RNQENT8KTMAYEs+8fWPD3Uu4dEmzGHc+jGng=="],
+
+    "@elizaos/plugin-elizacloud/@ai-sdk/openai/@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@3.0.22", "", { "dependencies": { "@ai-sdk/provider": "2.0.1", "@standard-schema/spec": "^1.0.0", "eventsource-parser": "^3.0.6" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-fFT1KfUUKktfAFm5mClJhS1oux9tP2qgzmEZVl5UdwltQ1LO/s8hd7znVrgKzivwv1s1FIPza0s9OpJaNB/vHw=="],
 
     "@eslint/eslintrc/ajv/json-schema-traverse": ["json-schema-traverse@0.4.1", "", {}, "sha512-xbbCH5dCYU5T8LcEhhuh7HJ88HXuW3qsI3Y0zOZFKfZEHcpWiHU/Jxzk629Brsab/mMiHQti9wMP+845RPe3Vg=="],
 

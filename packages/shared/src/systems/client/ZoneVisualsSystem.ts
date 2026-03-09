@@ -80,14 +80,6 @@ export class ZoneVisualsSystem extends SystemBase {
     });
   }
 
-  async init(): Promise<void> {
-    console.log("[ZoneVisualsSystem] init() called");
-    // Pre-create emoji textures
-    this.emojiTextures.set("skull", this.createEmojiTexture("💀", "skull"));
-    this.emojiTextures.set("home", this.createEmojiTexture("🏠", "home"));
-    this.emojiTextures.set("swords", this.createEmojiTexture("⚔️", "swords"));
-  }
-
   start(): void {
     console.log("[ZoneVisualsSystem] start() called, creating zone visuals...");
     // Create zone visual elements (moved from init to ensure scene is ready)
@@ -127,6 +119,19 @@ export class ZoneVisualsSystem extends SystemBase {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.needsUpdate = true;
+    return texture;
+  }
+
+  private getOrCreateEmojiTexture(type: ZoneEmojiType): THREE.CanvasTexture {
+    const cachedTexture = this.emojiTextures.get(type);
+    if (cachedTexture) {
+      return cachedTexture;
+    }
+
+    const emoji =
+      type === "skull" ? "💀" : type === "home" ? "🏠" : "⚔️";
+    const texture = this.createEmojiTexture(emoji, type);
+    this.emojiTextures.set(type, texture);
     return texture;
   }
 
@@ -247,9 +252,9 @@ export class ZoneVisualsSystem extends SystemBase {
    * Create floating marker sprite with the given emoji type
    */
   private createMarkerSprite(emojiType: ZoneEmojiType): THREE.Sprite {
-    const texture = this.emojiTextures.get(emojiType);
+    const texture = this.getOrCreateEmojiTexture(emojiType);
     const material = new SpriteNodeMaterial();
-    material.map = texture ?? null;
+    material.map = texture;
     material.transparent = true;
     material.depthWrite = false;
 

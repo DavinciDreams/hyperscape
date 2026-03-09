@@ -19,6 +19,7 @@ import {
   type Hex,
 } from "viem";
 import {
+  foundry,
   avalanche,
   avalancheFuji,
   base,
@@ -65,6 +66,7 @@ const WINNER_SIDE_TO_VARIANT: Record<DuelArenaOracleWinnerSide, number> = {
   B: 2,
 };
 const EVM_CHAIN_MAP: Record<DuelArenaOracleEvmTargetConfig["key"], Chain> = {
+  anvil: foundry,
   baseSepolia,
   bscTestnet,
   avaxFuji: avalancheFuji,
@@ -109,6 +111,13 @@ function buildResultHash(record: DuelArenaOracleRecord): string {
       }),
     )
     .digest("hex");
+}
+
+function resolveOracleDuelStartTime(record: DuelArenaOracleRecord): number {
+  return Math.max(
+    record.fightStartTime ?? record.betCloseTime,
+    record.betCloseTime,
+  );
 }
 
 function encodeString(value: string): Buffer {
@@ -284,7 +293,7 @@ class EvmOracleTarget {
         prefixedHex(record.participantB.hashHex),
         BigInt(record.betOpenTime),
         BigInt(record.betCloseTime),
-        BigInt(record.fightStartTime || record.betCloseTime),
+        BigInt(resolveOracleDuelStartTime(record)),
         record.metadataUri,
         EVM_STATUS_TO_VARIANT[status],
       ],
@@ -473,7 +482,7 @@ class SolanaOracleTarget {
         Buffer.from(record.participantB.hashHex, "hex"),
         encodeI64(record.betOpenTime),
         encodeI64(record.betCloseTime),
-        encodeI64(record.fightStartTime || record.betCloseTime),
+        encodeI64(resolveOracleDuelStartTime(record)),
         encodeString(record.metadataUri),
         Buffer.from([SOLANA_STATUS_TO_VARIANT[status]]),
       ]),

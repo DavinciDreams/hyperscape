@@ -1,12 +1,14 @@
-export type DuelArenaOracleProfile = "testnet" | "mainnet" | "all";
+export type DuelArenaOracleProfile = "local" | "testnet" | "mainnet" | "all";
 
 export type DuelArenaOracleChainKey =
+  | "anvil"
   | "baseSepolia"
   | "bscTestnet"
   | "avaxFuji"
   | "base"
   | "bsc"
   | "avax"
+  | "solanaLocalnet"
   | "solanaDevnet"
   | "solanaMainnet";
 
@@ -121,7 +123,7 @@ export interface DuelArenaOracleAbortEvent {
 export interface DuelArenaOracleEvmTargetConfig {
   key: Extract<
     DuelArenaOracleChainKey,
-    "baseSepolia" | "bscTestnet" | "avaxFuji" | "base" | "bsc" | "avax"
+    "anvil" | "baseSepolia" | "bscTestnet" | "avaxFuji" | "base" | "bsc" | "avax"
   >;
   label: string;
   rpcUrl: string;
@@ -130,7 +132,10 @@ export interface DuelArenaOracleEvmTargetConfig {
 }
 
 export interface DuelArenaOracleSolanaTargetConfig {
-  key: Extract<DuelArenaOracleChainKey, "solanaDevnet" | "solanaMainnet">;
+  key: Extract<
+    DuelArenaOracleChainKey,
+    "solanaLocalnet" | "solanaDevnet" | "solanaMainnet"
+  >;
   label: string;
   rpcUrl: string;
   wsUrl: string;

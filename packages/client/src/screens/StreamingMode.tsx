@@ -238,7 +238,7 @@ export function StreamingMode() {
             c.agent1?.damageDealtThisFight === p.agent1?.damageDealtThisFight &&
             c.agent2?.damageDealtThisFight === p.agent2?.damageDealtThisFight &&
             Math.floor(c.timeRemaining / 1000) ===
-              Math.floor(p.timeRemaining / 1000) &&
+            Math.floor(p.timeRemaining / 1000) &&
             state.leaderboard.length === prev.leaderboard.length
           ) {
             return prev; // Same reference = no re-render
@@ -431,15 +431,21 @@ export function StreamingMode() {
     const hasExternalStreamToken = Boolean(
       (searchParams.get("streamToken") || "").trim(),
     );
+    const internalCaptureValue = (
+      searchParams.get("internalCapture") || ""
+    ).toLowerCase();
+    const internalCapture = ["1", "true", "yes", "on"].includes(
+      internalCaptureValue,
+    );
     const captureDebugValue = (
       searchParams.get("captureDebug") || ""
     ).toLowerCase();
     const captureDebug = ["1", "true", "yes", "on"].includes(captureDebugValue);
-    if (disableBridgeCapture || hasExternalStreamToken) {
+    if (disableBridgeCapture || !internalCapture) {
       console.log(
         disableBridgeCapture
           ? "[StreamingMode] Bridge capture disabled by URL param, skipping in-page capture"
-          : "[StreamingMode] Bridge capture disabled for external stream session, skipping in-page capture",
+          : "[StreamingMode] Bridge capture disabled: 'internalCapture=1' is required to enable in-page capture",
       );
       return;
     }
@@ -479,7 +485,7 @@ export function StreamingMode() {
       delete win.__captureControl__;
     }
 
-    const bridgeUrl = searchParams.get("bridgeUrl") || "ws://localhost:8765";
+    const bridgeUrl = searchParams.get("bridgeUrl") || "ws://127.0.0.1:8765";
 
     console.log("[StreamingMode] Starting canvas capture to", bridgeUrl);
 
@@ -575,22 +581,8 @@ export function StreamingMode() {
         return;
       }
 
-      // Add silent audio (some RTMP servers require it)
-      try {
-        audioCtx = new AudioContext();
-        const osc = audioCtx.createOscillator();
-        oscillator = osc;
-        const gain = audioCtx.createGain();
-        gain.gain.value = 0;
-        osc.connect(gain);
-        const dest = audioCtx.createMediaStreamDestination();
-        gain.connect(dest);
-        osc.start();
-        const audioTrack = dest.stream.getAudioTracks()[0];
-        if (audioTrack && stream) stream.addTrack(audioTrack);
-      } catch (error) {
-        console.warn("[Capture] Failed to attach silent audio track:", error);
-      }
+      // The RTMP bridge owns audio timing and can inject silent fallback audio
+      // when system audio capture is unavailable.
 
       let mimeType = "video/webm;codecs=h264";
       // eslint-disable-next-line no-undef
@@ -642,7 +634,7 @@ export function StreamingMode() {
         if (!recorder || recorder.state !== "recording") return;
         try {
           recorder.requestData();
-        } catch {}
+        } catch { }
       }, 250);
       healthTimer = setInterval(() => {
         if (!recorder || recorder.state !== "recording") return;
@@ -654,7 +646,7 @@ export function StreamingMode() {
           );
           try {
             recorder.requestData();
-          } catch {}
+          } catch { }
         }
       }, 2000);
       const videoTrack = stream?.getVideoTracks?.()[0] as  // eslint-disable-next-line no-undef
@@ -665,7 +657,7 @@ export function StreamingMode() {
         forceFrameTimer = setInterval(() => {
           try {
             videoTrack.requestFrame?.();
-          } catch {}
+          } catch { }
         }, frameIntervalMs);
       }
       if (captureDebug) {
@@ -684,7 +676,7 @@ export function StreamingMode() {
       if (recorder && recorder.state !== "inactive") {
         try {
           recorder.stop();
-        } catch {}
+        } catch { }
       }
       if (recorder) {
         recorder.ondataavailable = null;
@@ -698,7 +690,7 @@ export function StreamingMode() {
       if (oscillator) {
         try {
           oscillator.stop();
-        } catch {}
+        } catch { }
         oscillator.disconnect();
         oscillator = null;
       }

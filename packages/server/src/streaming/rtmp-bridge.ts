@@ -22,6 +22,10 @@ import type {
   DestinationStatus,
 } from "./types.js";
 import { DEFAULT_STREAMING_CONFIG } from "./types.js";
+import {
+  isStreamDestinationEnabled,
+  resolveEnabledStreamDestinations,
+} from "./stream-destinations.js";
 
 const require = createRequire(import.meta.url);
 let resolvedFfmpegCommand: string | null = null;
@@ -319,11 +323,80 @@ export class RTMPBridge {
     return `rtmp://${trimmed}`;
   }
 
+  private static normalizeKickRtmpUrl(input: string): string {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return "rtmps://fa723fc1b171.global-contribute.live-video.net/app";
+    }
+
+    const legacyKickPattern =
+      /^(?:rtmps?:\/\/)?ingest\.kick\.com\/live(?:\/([^/?#]+))?\/?$/i;
+    const legacyMatch = trimmed.match(legacyKickPattern);
+    if (legacyMatch) {
+      const embeddedKey = legacyMatch[1]?.trim();
+      const baseUrl = "rtmps://fa723fc1b171.global-contribute.live-video.net/app";
+      return embeddedKey ? `${baseUrl}/${embeddedKey}` : baseUrl;
+    }
+
+    return RTMPBridge.toRtmpUrl(trimmed);
+  }
+
   private static teeEscape(value: string): string {
     return value
       .replace(/\\/g, "\\\\")
       .replace(/:/g, "\\:")
       .replace(/\|/g, "\\|");
+  }
+
+  private buildBridgeAudioInputArgs(): string[] {
+    const audioEnabled = process.env.STREAM_AUDIO_ENABLED !== "false";
+    const pulseDevice =
+      process.env.PULSE_AUDIO_DEVICE || "chrome_audio.monitor";
+    let usePulseAudio = audioEnabled && process.platform === "linux";
+
+    if (usePulseAudio) {
+      try {
+        execSync("pactl info", { timeout: 2000, stdio: "pipe" });
+        const sinks = execSync("pactl list short sinks", {
+          timeout: 2000,
+          stdio: "pipe",
+        }).toString();
+        if (!sinks.includes("chrome_audio")) {
+          console.log(
+            "[RTMPBridge] PulseAudio accessible but chrome_audio sink not found, falling back to silent audio",
+          );
+          usePulseAudio = false;
+        }
+      } catch {
+        console.log(
+          "[RTMPBridge] PulseAudio not accessible, falling back to silent audio",
+        );
+        usePulseAudio = false;
+      }
+    }
+
+    if (usePulseAudio) {
+      console.log(`[RTMPBridge] Audio capture from PulseAudio: ${pulseDevice}`);
+      return [
+        "-thread_queue_size",
+        "1024",
+        "-use_wallclock_as_timestamps",
+        "1",
+        "-f",
+        "pulse",
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-i",
+        pulseDevice,
+      ];
+    }
+
+    console.log(
+      "[RTMPBridge] Audio: using bridge-managed silent source (anullsrc)",
+    );
+    return ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"];
   }
 
   private toBuffer(data: RawData): Buffer | null {
@@ -393,6 +466,10 @@ export class RTMPBridge {
   loadDestinationsFromEnv(): void {
     // Keep any manually added destinations, just add from env
     const existingNames = new Set(this.destinations.map((d) => d.name));
+    const enabledDestinations = resolveEnabledStreamDestinations(
+      process.env.STREAM_ENABLED_DESTINATIONS ||
+        process.env.DUEL_STREAM_DESTINATIONS,
+    );
     const twitchStreamKey = (
       process.env.TWITCH_STREAM_KEY ||
       process.env.TWITCH_RTMP_STREAM_KEY ||
@@ -416,6 +493,7 @@ export class RTMPBridge {
 
     // Optional external multiplexer (Restream/livepeer/etc.)
     if (
+      isStreamDestinationEnabled(enabledDestinations, "multiplexer") &&
       process.env.RTMP_MULTIPLEXER_URL &&
       !existingNames.has(
         process.env.RTMP_MULTIPLEXER_NAME || "RTMP Multiplexer",
@@ -429,7 +507,11 @@ export class RTMPBridge {
     }
 
     // Twitch
-    if (twitchStreamKey && !existingNames.has("Twitch")) {
+    if (
+      isStreamDestinationEnabled(enabledDestinations, "twitch") &&
+      twitchStreamKey &&
+      !existingNames.has("Twitch")
+    ) {
       const server =
         process.env.TWITCH_STREAM_URL ||
         process.env.TWITCH_RTMP_URL ||
@@ -439,7 +521,11 @@ export class RTMPBridge {
     }
 
     // YouTube
-    if (youtubeStreamKey && !existingNames.has("YouTube")) {
+    if (
+      isStreamDestinationEnabled(enabledDestinations, "youtube") &&
+      youtubeStreamKey &&
+      !existingNames.has("YouTube")
+    ) {
       const server =
         process.env.YOUTUBE_STREAM_URL ||
         process.env.YOUTUBE_RTMP_URL ||
@@ -448,12 +534,14 @@ export class RTMPBridge {
     }
 
     // Kick (uses RTMPS with regional ingest)
-    const kickServer =
+    const kickServer = RTMPBridge.normalizeKickRtmpUrl(
       process.env.KICK_RTMP_URL ||
-      "rtmps://fa723fc1b171.global-contribute.live-video.net/app";
+        "rtmps://fa723fc1b171.global-contribute.live-video.net/app",
+    );
     const kickStreamKey = process.env.KICK_STREAM_KEY?.trim() || "";
-    const kickUrlHasEmbeddedKey = /\/live\/[^/]+/.test(kickServer);
+    const kickUrlHasEmbeddedKey = /\/(?:live|app)\/[^/]+/.test(kickServer);
     if (
+      isStreamDestinationEnabled(enabledDestinations, "kick") &&
       (kickStreamKey || kickUrlHasEmbeddedKey) &&
       !existingNames.has("Kick")
     ) {
@@ -461,7 +549,11 @@ export class RTMPBridge {
     }
 
     // Pump.fun (full URL provided)
-    if (process.env.PUMPFUN_RTMP_URL && !existingNames.has("Pump.fun")) {
+    if (
+      isStreamDestinationEnabled(enabledDestinations, "pumpfun") &&
+      process.env.PUMPFUN_RTMP_URL &&
+      !existingNames.has("Pump.fun")
+    ) {
       addDestination(
         "Pump.fun",
         process.env.PUMPFUN_RTMP_URL,
@@ -470,7 +562,11 @@ export class RTMPBridge {
     }
 
     // X/Twitter (full URL provided via Media Studio)
-    if (process.env.X_RTMP_URL && !existingNames.has("X/Twitter")) {
+    if (
+      isStreamDestinationEnabled(enabledDestinations, "x") &&
+      process.env.X_RTMP_URL &&
+      !existingNames.has("X/Twitter")
+    ) {
       addDestination(
         "X/Twitter",
         process.env.X_RTMP_URL,
@@ -480,6 +576,7 @@ export class RTMPBridge {
 
     // Generic custom destination
     if (
+      isStreamDestinationEnabled(enabledDestinations, "custom") &&
       process.env.CUSTOM_RTMP_URL &&
       !existingNames.has(process.env.CUSTOM_RTMP_NAME || "Custom")
     ) {
@@ -778,6 +875,23 @@ export class RTMPBridge {
     ];
   }
 
+  private buildOutputVideoFilter(resetPts: boolean = false): string {
+    const outputWidth = Math.max(
+      2,
+      this.config.width - (this.config.width % 2),
+    );
+    const outputHeight = Math.max(
+      2,
+      this.config.height - (this.config.height % 2),
+    );
+    const filters = resetPts ? ["setpts=PTS-STARTPTS"] : [];
+    filters.push(
+      `scale=${outputWidth}:${outputHeight}:flags=lanczos`,
+      "format=yuv420p",
+    );
+    return filters.join(",");
+  }
+
   /**
    * Common FFmpeg post-spawn setup: status init, event handlers, health monitoring.
    * @param label - Log label for this FFmpeg mode (e.g. "CDP direct", "WebCodecs")
@@ -927,63 +1041,7 @@ export class RTMPBridge {
       "-i",
       "pipe:0",
     );
-
-    // Audio input: try PulseAudio first, fallback to silent if not available
-    const audioEnabled = process.env.STREAM_AUDIO_ENABLED !== "false";
-    const pulseDevice =
-      process.env.PULSE_AUDIO_DEVICE || "chrome_audio.monitor";
-    let usePulseAudio = audioEnabled && process.platform === "linux";
-
-    // Check if PulseAudio is actually accessible before trying to use it
-    if (usePulseAudio) {
-      try {
-        // Test if we can access PulseAudio - pactl info will fail if not
-        execSync("pactl info", { timeout: 2000, stdio: "pipe" });
-        // Also verify the specific sink exists
-        const sinks = execSync("pactl list short sinks", {
-          timeout: 2000,
-          stdio: "pipe",
-        }).toString();
-        if (!sinks.includes("chrome_audio")) {
-          console.log(
-            "[RTMPBridge] PulseAudio accessible but chrome_audio sink not found, falling back to silent",
-          );
-          usePulseAudio = false;
-        }
-      } catch {
-        console.log(
-          "[RTMPBridge] PulseAudio not accessible, falling back to silent audio",
-        );
-        usePulseAudio = false;
-      }
-    }
-
-    if (usePulseAudio) {
-      // Capture from PulseAudio virtual sink (Chrome outputs here)
-      // Use thread_queue_size to buffer audio and prevent underruns
-      // Use wallclock timestamps to maintain real-time timing
-      args.push(
-        "-thread_queue_size",
-        "1024",
-        "-use_wallclock_as_timestamps",
-        "1",
-        "-f",
-        "pulse",
-        "-ac",
-        "2",
-        "-ar",
-        "44100",
-        "-i",
-        pulseDevice,
-      );
-      console.log(`[RTMPBridge] Audio capture from PulseAudio: ${pulseDevice}`);
-    } else {
-      // Fallback: silent audio source (many RTMP servers require an audio track)
-      args.push("-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo");
-      console.log(
-        "[RTMPBridge] Audio: using silent source (PulseAudio not available)",
-      );
-    }
+    args.push(...this.buildBridgeAudioInputArgs());
 
     // Map video from pipe and audio from PulseAudio/anullsrc
     args.push("-map", "0:v:0", "-map", "1:a:0");
@@ -991,20 +1049,9 @@ export class RTMPBridge {
     // Force output frame rate
     args.push("-r", String(this.config.fps));
 
-    // Normalize to a deterministic even output size for H.264 encoders.
-    // Browsers may emit odd canvas dimensions (e.g. 1024x637) under some
-    // deviceScaleFactor/layout paths, which causes libx264 to fail.
-    const outputWidth = Math.max(
-      2,
-      this.config.width - (this.config.width % 2),
-    );
-    const outputHeight = Math.max(
-      2,
-      this.config.height - (this.config.height % 2),
-    );
     args.push(
       "-vf",
-      `scale=${outputWidth}:${outputHeight}:flags=lanczos,format=yuv420p`,
+      this.buildOutputVideoFilter(true),
     );
 
     // Video encoder
@@ -1402,34 +1449,29 @@ export class RTMPBridge {
 
     // Build FFmpeg arguments
     const args = [
+      "-fflags",
+      "+genpts+discardcorrupt",
+      "-thread_queue_size",
+      "1024",
       // Input: pipe from stdin (WebM from MediaRecorder)
       "-i",
       "pipe:0",
+      ...this.buildBridgeAudioInputArgs(),
 
       // Explicitly map input streams for tee outputs.
-      // Some FFmpeg builds fail stream auto-selection with tee + WebM pipe input.
+      // Ignore MediaRecorder's synthetic audio and let the bridge own A/V timing.
       "-map",
       "0:v:0",
       "-map",
-      "0:a:0?",
+      "1:a:0",
 
       // Force constant frame rate output for strict RTMP ingestion (Twitch/YouTube)
       "-r",
       String(this.config.fps),
     ];
-
-    // Normalize to deterministic even dimensions for H.264 output.
-    const outputWidth = Math.max(
-      2,
-      this.config.width - (this.config.width % 2),
-    );
-    const outputHeight = Math.max(
-      2,
-      this.config.height - (this.config.height % 2),
-    );
     args.push(
       "-vf",
-      `scale=${outputWidth}:${outputHeight}:flags=lanczos,format=yuv420p`,
+      this.buildOutputVideoFilter(true),
     );
 
     // Video codec settings
@@ -1488,13 +1530,7 @@ export class RTMPBridge {
       String(this.config.fps),
       "-i",
       "pipe:0",
-
-      // Generate silent audio source
-      "-f",
-      "lavfi",
-      "-i",
-      "anullsrc=r=44100:cl=stereo",
-      "-shortest",
+      ...this.buildBridgeAudioInputArgs(),
 
       "-map",
       "0:v:0",
@@ -1546,6 +1582,18 @@ export class RTMPBridge {
    * Parse FFmpeg output for connection status
    */
   private parseFFmpegOutput(msg: string): void {
+    const slaveMuxerFailureMatch = msg.match(/Slave muxer #(\d+) failed/i);
+    if (slaveMuxerFailureMatch) {
+      const destIndex = Number.parseInt(slaveMuxerFailureMatch[1] || "", 10);
+      if (Number.isFinite(destIndex)) {
+        const destination = this.status.destinations[destIndex];
+        if (destination) {
+          destination.connected = false;
+          destination.error = msg.trim();
+        }
+      }
+    }
+
     // Check for RTMP connection errors
     for (const dest of this.status.destinations) {
       if (

@@ -9,6 +9,7 @@ import type {
 
 function normalizeProfile(value: string | undefined): DuelArenaOracleProfile {
   const normalized = value?.trim().toLowerCase();
+  if (normalized === "local") return "local";
   if (normalized === "mainnet") return "mainnet";
   if (normalized === "all") return "all";
   return "testnet";
@@ -36,6 +37,16 @@ function normalizeEvmAddress(value: string | undefined): `0x${string}` | null {
     return null;
   }
   return trimmed as `0x${string}`;
+}
+
+function readFirstEnvValue(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 function resolveMetadataBaseUrl(): string {
@@ -83,9 +94,12 @@ function buildEvmTarget(
   fallbackRpcUrl: string,
   contractEnv: string,
   privateKeyEnv: string,
+  fallbackPrivateKeyEnvs: string[] = [],
 ): DuelArenaOracleEvmTargetConfig | null {
   const contractAddress = normalizeEvmAddress(process.env[contractEnv]);
-  const privateKey = normalizeHexPrivateKey(process.env[privateKeyEnv]);
+  const privateKey = normalizeHexPrivateKey(
+    readFirstEnvValue(privateKeyEnv, ...fallbackPrivateKeyEnvs),
+  );
   if (!contractAddress || !privateKey) {
     return null;
   }
@@ -110,9 +124,14 @@ function buildSolanaTarget(
   fallbackProgramId: string,
   authoritySecretEnv: string,
   reporterSecretEnv: string,
+  fallbackAuthoritySecretEnvs: string[] = [],
+  fallbackReporterSecretEnvs: string[] = [],
 ): DuelArenaOracleSolanaTargetConfig | null {
-  const reporterSecret = process.env[reporterSecretEnv]?.trim() || null;
-  const authoritySecret = process.env[authoritySecretEnv]?.trim() || null;
+  const reporterSecret =
+    readFirstEnvValue(reporterSecretEnv, ...fallbackReporterSecretEnvs) || null;
+  const authoritySecret =
+    readFirstEnvValue(authoritySecretEnv, ...fallbackAuthoritySecretEnvs) ||
+    null;
   const programId = process.env[programIdEnv]?.trim() || fallbackProgramId;
 
   if (!reporterSecret && !authoritySecret) {
@@ -136,6 +155,38 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
   const evmTargets: DuelArenaOracleEvmTargetConfig[] = [];
   const solanaTargets: DuelArenaOracleSolanaTargetConfig[] = [];
 
+  if (profile === "local" || profile === "all") {
+    maybePushEvmTarget(
+      evmTargets,
+      buildEvmTarget(
+        "anvil",
+        "Local Anvil",
+        "DUEL_ARENA_ORACLE_ANVIL_RPC_URL",
+        "http://127.0.0.1:8545",
+        "DUEL_ARENA_ORACLE_ANVIL_CONTRACT_ADDRESS",
+        "DUEL_ARENA_ORACLE_ANVIL_PRIVATE_KEY",
+        ["DUEL_ARENA_ORACLE_EVM_PRIVATE_KEY"],
+      ),
+    );
+    const localnetTarget = buildSolanaTarget(
+      "solanaLocalnet",
+      "Solana Localnet",
+      "DUEL_ARENA_ORACLE_SOLANA_LOCALNET_RPC_URL",
+      "http://127.0.0.1:8899",
+      "DUEL_ARENA_ORACLE_SOLANA_LOCALNET_WS_URL",
+      "ws://127.0.0.1:8900",
+      "DUEL_ARENA_ORACLE_SOLANA_LOCALNET_PROGRAM_ID",
+      "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV",
+      "DUEL_ARENA_ORACLE_SOLANA_LOCALNET_AUTHORITY_SECRET",
+      "DUEL_ARENA_ORACLE_SOLANA_LOCALNET_REPORTER_SECRET",
+      ["DUEL_ARENA_ORACLE_SOLANA_AUTHORITY_SECRET"],
+      ["DUEL_ARENA_ORACLE_SOLANA_REPORTER_SECRET"],
+    );
+    if (localnetTarget) {
+      solanaTargets.push(localnetTarget);
+    }
+  }
+
   if (profile === "testnet" || profile === "all") {
     maybePushEvmTarget(
       evmTargets,
@@ -146,6 +197,7 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
         "https://sepolia.base.org",
         "DUEL_ARENA_ORACLE_BASE_SEPOLIA_CONTRACT_ADDRESS",
         "DUEL_ARENA_ORACLE_BASE_SEPOLIA_PRIVATE_KEY",
+        ["DUEL_ARENA_ORACLE_EVM_PRIVATE_KEY"],
       ),
     );
     maybePushEvmTarget(
@@ -157,6 +209,7 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
         "https://data-seed-prebsc-1-s1.binance.org:8545",
         "DUEL_ARENA_ORACLE_BSC_TESTNET_CONTRACT_ADDRESS",
         "DUEL_ARENA_ORACLE_BSC_TESTNET_PRIVATE_KEY",
+        ["DUEL_ARENA_ORACLE_EVM_PRIVATE_KEY"],
       ),
     );
     maybePushEvmTarget(
@@ -168,6 +221,7 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
         "https://api.avax-test.network/ext/bc/C/rpc",
         "DUEL_ARENA_ORACLE_AVAX_FUJI_CONTRACT_ADDRESS",
         "DUEL_ARENA_ORACLE_AVAX_FUJI_PRIVATE_KEY",
+        ["DUEL_ARENA_ORACLE_EVM_PRIVATE_KEY"],
       ),
     );
     const devnetTarget = buildSolanaTarget(
@@ -178,9 +232,11 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
       "DUEL_ARENA_ORACLE_SOLANA_DEVNET_WS_URL",
       "wss://api.devnet.solana.com/",
       "DUEL_ARENA_ORACLE_SOLANA_DEVNET_PROGRAM_ID",
-      "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
+      "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV",
       "DUEL_ARENA_ORACLE_SOLANA_DEVNET_AUTHORITY_SECRET",
       "DUEL_ARENA_ORACLE_SOLANA_DEVNET_REPORTER_SECRET",
+      ["DUEL_ARENA_ORACLE_SOLANA_AUTHORITY_SECRET"],
+      ["DUEL_ARENA_ORACLE_SOLANA_REPORTER_SECRET"],
     );
     if (devnetTarget) {
       solanaTargets.push(devnetTarget);
@@ -197,6 +253,7 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
         "https://mainnet.base.org",
         "DUEL_ARENA_ORACLE_BASE_MAINNET_CONTRACT_ADDRESS",
         "DUEL_ARENA_ORACLE_BASE_MAINNET_PRIVATE_KEY",
+        ["DUEL_ARENA_ORACLE_EVM_PRIVATE_KEY"],
       ),
     );
     maybePushEvmTarget(
@@ -208,6 +265,7 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
         "https://bsc-dataseed.binance.org",
         "DUEL_ARENA_ORACLE_BSC_MAINNET_CONTRACT_ADDRESS",
         "DUEL_ARENA_ORACLE_BSC_MAINNET_PRIVATE_KEY",
+        ["DUEL_ARENA_ORACLE_EVM_PRIVATE_KEY"],
       ),
     );
     maybePushEvmTarget(
@@ -219,6 +277,7 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
         "https://api.avax.network/ext/bc/C/rpc",
         "DUEL_ARENA_ORACLE_AVAX_MAINNET_CONTRACT_ADDRESS",
         "DUEL_ARENA_ORACLE_AVAX_MAINNET_PRIVATE_KEY",
+        ["DUEL_ARENA_ORACLE_EVM_PRIVATE_KEY"],
       ),
     );
     const mainnetTarget = buildSolanaTarget(
@@ -229,9 +288,11 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
       "DUEL_ARENA_ORACLE_SOLANA_MAINNET_WS_URL",
       "wss://api.mainnet-beta.solana.com/",
       "DUEL_ARENA_ORACLE_SOLANA_MAINNET_PROGRAM_ID",
-      "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
+      "6Tx7s2UG4maFWakRFVi4GeecXJYyBXQF8f2vJdQShSpV",
       "DUEL_ARENA_ORACLE_SOLANA_MAINNET_AUTHORITY_SECRET",
       "DUEL_ARENA_ORACLE_SOLANA_MAINNET_REPORTER_SECRET",
+      ["DUEL_ARENA_ORACLE_SOLANA_AUTHORITY_SECRET"],
+      ["DUEL_ARENA_ORACLE_SOLANA_REPORTER_SECRET"],
     );
     if (mainnetTarget) {
       solanaTargets.push(mainnetTarget);
