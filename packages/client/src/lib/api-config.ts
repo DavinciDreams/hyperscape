@@ -85,18 +85,18 @@ function getRuntimeEnvValue(
 // No separate ElizaOS process needed - routes are at /api/agents, /api/agents/:id, etc.
 
 export const ELIZAOS_URL: string =
-  getRuntimeEnvValue("PUBLIC_ELIZAOS_URL") ||
-  getRuntimeEnvValue("PUBLIC_API_URL") ||
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_ELIZAOS_URL) ||
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_API_URL) ||
+  getRuntimeEnvValue("PUBLIC_ELIZAOS_URL") ??
+  getRuntimeEnvValue("PUBLIC_API_URL") ??
+  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_ELIZAOS_URL) ??
+  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_API_URL) ??
   normalizeBrowserLoopbackUrl(
     import.meta.env.PROD
       ? "https://hyperscape-production.up.railway.app"
       : "http://localhost:5555",
-  ) ||
+  ) ??
   "http://localhost:5555";
 
-export const ELIZAOS_API = `${ELIZAOS_URL}/api`;
+export const ELIZAOS_API = `${ELIZAOS_URL}/api` as const;
 
 // =============================================================================
 // Hyperscape Game Server
@@ -104,23 +104,23 @@ export const ELIZAOS_API = `${ELIZAOS_URL}/api`;
 // These are replaced at build time by Vite's define feature
 
 export const GAME_API_URL: string =
-  getRuntimeEnvValue("PUBLIC_API_URL") ||
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_API_URL) ||
+  getRuntimeEnvValue("PUBLIC_API_URL") ??
+  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_API_URL) ??
   normalizeBrowserLoopbackUrl(
     import.meta.env.PROD
       ? "https://hyperscape-production.up.railway.app"
       : "http://localhost:5555",
-  ) ||
+  ) ??
   "http://localhost:5555";
 
 export const GAME_WS_URL: string =
-  getRuntimeEnvValue("PUBLIC_WS_URL") ||
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_WS_URL) ||
+  getRuntimeEnvValue("PUBLIC_WS_URL") ??
+  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_WS_URL) ??
   normalizeBrowserLoopbackUrl(
     import.meta.env.PROD
       ? "wss://hyperscape-production.up.railway.app/ws"
       : "ws://localhost:5555/ws",
-  ) ||
+  ) ??
   "ws://localhost:5555/ws";
 
 // =============================================================================
@@ -128,11 +128,11 @@ export const GAME_WS_URL: string =
 // =============================================================================
 
 export const CDN_URL: string =
-  getRuntimeEnvValue("PUBLIC_CDN_URL") ||
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_CDN_URL) ||
+  getRuntimeEnvValue("PUBLIC_CDN_URL") ??
+  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_CDN_URL) ??
   normalizeBrowserLoopbackUrl(
     import.meta.env.PROD
       ? "https://assets.hyperscape.club"
       : "http://localhost:5555/game-assets",
-  ) ||
+  ) ??
   "http://localhost:5555/game-assets";
