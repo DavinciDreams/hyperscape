@@ -90,6 +90,21 @@ module.exports = {
                 STREAM_CAPTURE_DISABLE_WEBGPU: "false",
                 FFMPEG_PATH: "/usr/bin/ffmpeg",
                 DUEL_DISABLE_BRIDGE_CAPTURE: "false",
+                TWITCH_STREAM_URL:
+                    process.env.TWITCH_STREAM_URL ||
+                    "rtmp://live.twitch.tv/app",
+                TWITCH_STREAM_KEY:
+                    process.env.TWITCH_STREAM_KEY ||
+                    process.env.TWITCH_RTMP_STREAM_KEY ||
+                    "",
+                KICK_STREAM_KEY: process.env.KICK_STREAM_KEY || "",
+                KICK_RTMP_URL:
+                    process.env.KICK_RTMP_URL ||
+                    "rtmps://fa723fc1b171.global-contribute.live-video.net/app",
+                STREAM_ENABLED_DESTINATIONS:
+                    process.env.STREAM_ENABLED_DESTINATIONS ||
+                    process.env.DUEL_STREAM_DESTINATIONS ||
+                    "",
                 YOUTUBE_STREAM_URL:
                     process.env.YOUTUBE_STREAM_URL ||
                     "rtmp://a.rtmp.youtube.com/live2",

@@ -182,6 +182,7 @@ jobs:
             ARENA_EXTERNAL_BET_WRITE_KEY=${{ secrets.ARENA_EXTERNAL_BET_WRITE_KEY }}
             SOLANA_ARENA_AUTHORITY_SECRET=${{ secrets.SOLANA_ARENA_AUTHORITY_SECRET }}
             TWITCH_STREAM_KEY=${{ secrets.TWITCH_STREAM_KEY }}
+            TWITCH_RTMP_STREAM_KEY=${{ secrets.TWITCH_STREAM_KEY }}
             X_STREAM_KEY=${{ secrets.X_STREAM_KEY }}
             X_RTMP_URL=${{ secrets.X_RTMP_URL }}
             KICK_STREAM_KEY=${{ secrets.KICK_STREAM_KEY }}

@@ -17,6 +17,21 @@ else
     echo "[deploy] Warning: $SECRETS_FILE not found; relying on existing environment"
 fi
 
+# ── Auto-detect stream destinations from available keys ──────────────────────
+if [ -z "${STREAM_ENABLED_DESTINATIONS:-}" ] && [ -z "${DUEL_STREAM_DESTINATIONS:-}" ]; then
+    DESTS=""
+    if [ -n "${TWITCH_STREAM_KEY:-${TWITCH_RTMP_STREAM_KEY:-}}" ]; then
+        DESTS="twitch"
+    fi
+    if [ -n "${KICK_STREAM_KEY:-}" ]; then
+        DESTS="${DESTS:+${DESTS},}kick"
+    fi
+    if [ -n "$DESTS" ]; then
+        export STREAM_ENABLED_DESTINATIONS="$DESTS"
+        echo "[deploy] Auto-detected stream destinations: $DESTS"
+    fi
+fi
+
 # ── Ensure DNS resolution works (some Vast containers use internal-only DNS) ─
 echo -e "nameserver 8.8.8.8\nnameserver 8.8.4.4" > /etc/resolv.conf
 
