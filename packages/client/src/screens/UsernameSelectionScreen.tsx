@@ -79,9 +79,17 @@ export function UsernameSelectionScreen({
       );
 
       // Create user account with username and main wallet
+      const authToken =
+        privyAuthManager.getToken() || localStorage.getItem("privy_auth_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (authToken) {
+        headers["Authorization"] = `Bearer ${authToken}`;
+      }
       const response = await fetch(`${GAME_API_URL}/api/users/create`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           accountId,
           username: trimmedUsername,
