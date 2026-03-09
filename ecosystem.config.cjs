@@ -15,6 +15,38 @@
  * infinite self-healing loop.
  */
 
+// ── Load deploy-time secrets into process.env ─────────────────────────────
+// bunx pm2 may not inherit the deploy shell's exported env vars, so we
+// read the secrets file directly to ensure DATABASE_URL et al. are present.
+const fs = require("fs");
+const SECRETS_FILES = [
+  "/tmp/hyperscape-secrets.env",
+  require("path").join(__dirname, ".env.production"),
+];
+for (const secretsPath of SECRETS_FILES) {
+  try {
+    if (fs.existsSync(secretsPath)) {
+      const lines = fs.readFileSync(secretsPath, "utf-8").split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx < 1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        let value = trimmed.slice(eqIdx + 1).trim();
+        // Strip surrounding quotes
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    }
+  } catch { /* ignore missing/unreadable files */ }
+}
+
 function isLoopbackHostname(hostname) {
   return (
     hostname === "localhost" ||
