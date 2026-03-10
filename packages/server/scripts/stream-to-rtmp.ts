@@ -446,6 +446,7 @@ async function launchCaptureBrowser() {
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,
     args: launchArgs,
+    ignoreDefaultArgs: ["--enable-unsafe-swiftshader", "--hide-scrollbars"],
   };
   const usePersistentContext =
     process.platform === "linux" && STREAM_CAPTURE_HEADLESS === false;
@@ -1404,6 +1405,12 @@ async function cleanup() {
 
   const bridge = getRTMPBridge();
   bridge.stopProcessing();
+
+  // Force kill any remaining FFmpeg strings so they don't become zombies 
+  // preventing the next RTMP connection stream from working.
+  try {
+    spawnSync("pkill", ["-9", "ffmpeg"]);
+  } catch { }
 
   if (browser) {
     if (browserContext) {
