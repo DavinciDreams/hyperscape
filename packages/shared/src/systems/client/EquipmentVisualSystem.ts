@@ -410,6 +410,13 @@ export class EquipmentVisualSystem extends SystemBase {
           category = categoryMap[itemKey] || categoryMap[itemParts[0]] || "";
         }
 
+        // If no matching category was found, this item type has no 3D models
+        // available (e.g., helms, platelegs, boots, gloves, capes).
+        // Skip visual to avoid generating 404 requests.
+        if (!category) {
+          return;
+        }
+
         // Try fitted version: flat layout first (swords/long-swords/longsword-bronze-aligned.glb),
         // then subdirectory layout (hatchets/hatchet-bronze/hatchet-bronze-aligned.glb)
         const prefix = category ? `${category}/` : "";
