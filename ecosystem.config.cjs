@@ -165,6 +165,7 @@ module.exports = {
         MARKET_MAKER_KEYPAIR:
           process.env.MARKET_MAKER_KEYPAIR ||
           "~/.config/solana/oracle-authority.json",
+        DUEL_PUBLIC_CDN_URL: process.env.PUBLIC_CDN_URL || "https://assets.hyperscape.club",
         DISABLE_RATE_LIMIT: "true",
         ALLOW_DESTRUCTIVE_CHANGES: "false",
         AUTO_START_AGENTS: "true",
