@@ -100,17 +100,8 @@ export type EmbeddedBehaviorAction =
 /** Autonomous behavior tick interval for embedded agents */
 export const EMBEDDED_BEHAVIOR_TICK_INTERVAL = 8000;
 
-export const EMBEDDED_AGENT_AUTONOMY_ENABLED = (() => {
-  const raw = process.env.EMBEDDED_AGENT_AUTONOMY_ENABLED;
-  if (raw == null || raw.trim().length === 0) return true;
-  const normalized = raw.trim().toLowerCase();
-  return !(
-    normalized === "0" ||
-    normalized === "false" ||
-    normalized === "no" ||
-    normalized === "off"
-  );
-})();
+/** Agent autonomy is always enabled — agents always move and act autonomously. */
+export const EMBEDDED_AGENT_AUTONOMY_ENABLED = true;
 
 /** Combat chat reaction thresholds */
 export const CRITICAL_HIT_THRESHOLD = 0.3; // 30% of max health
@@ -146,7 +137,7 @@ export class AgentBehaviorTicker {
       characterId: string,
     ) => AgentInstance | undefined,
     private readonly getAllAgentIds: () => string[],
-  ) {}
+  ) { }
 
   // ─── BEHAVIOR LOOP ───────────────────────────────────────────────────
 
@@ -216,7 +207,7 @@ export class AgentBehaviorTicker {
     }
 
     // Best-effort stop so paused/stopped agents don't keep pathing or attacking.
-    void instance.service.executeStop().catch(() => {});
+    void instance.service.executeStop().catch(() => { });
   }
 
   /**
@@ -607,8 +598,8 @@ export class AgentBehaviorTicker {
       const itemData = getItem(slot.itemId);
       const healAmount = itemData
         ? ((itemData as unknown as Record<string, unknown>).healAmount as
-            | number
-            | undefined)
+          | number
+          | undefined)
         : undefined;
       const isFood = healAmount && healAmount > 0;
       const isWeapon =

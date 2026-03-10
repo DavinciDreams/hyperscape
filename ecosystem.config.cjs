@@ -15,6 +15,50 @@
  * infinite self-healing loop.
  */
 
+// ── Load deploy-time secrets into process.env ─────────────────────────────
+// bunx pm2 may not inherit the deploy shell's exported env vars, so we
+// read the secrets file directly to ensure DATABASE_URL et al. are present.
+const fs = require("fs");
+const SECRETS_FILES = [
+  "/tmp/hyperscape-secrets.env",
+  require("path").join(__dirname, ".env.production"),
+];
+for (const secretsPath of SECRETS_FILES) {
+  try {
+    if (fs.existsSync(secretsPath)) {
+      const lines = fs.readFileSync(secretsPath, "utf-8").split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx < 1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        let value = trimmed.slice(eqIdx + 1).trim();
+        // Strip surrounding quotes
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    }
+  } catch { /* ignore missing/unreadable files */ }
+}
+
+// Auto-detect DUEL_DATABASE_MODE from DATABASE_URL so sanitizeRuntimeEnv()
+// doesn't strip it when the mode defaults to "local".
+if (!process.env.DUEL_DATABASE_MODE && process.env.DATABASE_URL) {
+  try {
+    const dbHost = new URL(process.env.DATABASE_URL).hostname;
+    const isLocal = ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(dbHost);
+    process.env.DUEL_DATABASE_MODE = isLocal ? "local" : "remote";
+  } catch {
+    process.env.DUEL_DATABASE_MODE = "remote";
+  }
+}
+
 function isLoopbackHostname(hostname) {
   return (
     hostname === "localhost" ||
@@ -91,11 +135,16 @@ module.exports = {
       env: {
         ...runtimeEnv,
         NODE_ENV: "production",
+        DISPLAY: process.env.DISPLAY || ":99",
         POSTGRES_POOL_MAX: "1",
         POSTGRES_POOL_MIN: "0",
         SKIP_MIGRATIONS: "true",
+        DATABASE_URL: process.env.DATABASE_URL || "",
+        USE_LOCAL_POSTGRES:
+          process.env.USE_LOCAL_POSTGRES ||
+          (process.env.DATABASE_URL ? "false" : "true"),
         STREAMING_DUEL_ENABLED: "true",
-        DUEL_MARKET_MAKER_ENABLED: "false",
+        DUEL_MARKET_MAKER_ENABLED: "true",
         DUEL_BETTING_ENABLED: "false",
         ARENA_SERVICE_ENABLED: "false",
         DUEL_SKIP_CHAIN_SETUP: "true",
@@ -108,7 +157,8 @@ module.exports = {
           process.env.SOLANA_GOLD_MINT ||
           "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
         BOT_KEYPAIR:
-          process.env.BOT_KEYPAIR || "~/.config/solana/oracle-authority.json",
+          process.env.BOT_KEYPAIR ||
+          "~/.config/solana/oracle-authority.json",
         ORACLE_AUTHORITY_KEYPAIR:
           process.env.ORACLE_AUTHORITY_KEYPAIR ||
           "~/.config/solana/oracle-authority.json",
@@ -126,20 +176,35 @@ module.exports = {
         MIMALLOC_ALLOW_RESET: "0",
         MIMALLOC_PAGE_RESET: "0",
         MIMALLOC_PURGE_DELAY: "1000000",
-        STREAM_CAPTURE_MODE: process.env.STREAM_CAPTURE_MODE || "mediarecorder",
+        STREAM_CAPTURE_MODE: "cdp",
         STREAM_CAPTURE_HEADLESS: "false",
-        STREAM_CAPTURE_CHANNEL: process.env.STREAM_CAPTURE_CHANNEL || "",
-        STREAM_CAPTURE_ANGLE: process.env.STREAM_CAPTURE_ANGLE || "default",
+        STREAM_CAPTURE_CHANNEL: "chrome-beta",
+        STREAM_CAPTURE_ANGLE: "default",
         STREAM_CAPTURE_WIDTH: "1280",
         STREAM_CAPTURE_HEIGHT: "720",
         STREAM_CAPTURE_DISABLE_WEBGPU: "false",
         FFMPEG_PATH: "/usr/bin/ffmpeg",
         DUEL_DISABLE_BRIDGE_CAPTURE: "false",
         TWITCH_STREAM_URL:
-          process.env.TWITCH_STREAM_URL || "rtmp://live.twitch.tv/app",
-        YOUTUBE_STREAM_URL: process.env.YOUTUBE_STREAM_URL || "",
+          process.env.TWITCH_STREAM_URL ||
+          "rtmp://live.twitch.tv/app",
+        TWITCH_STREAM_KEY:
+          process.env.TWITCH_STREAM_KEY ||
+          process.env.TWITCH_RTMP_STREAM_KEY ||
+          "",
+        KICK_STREAM_KEY: process.env.KICK_STREAM_KEY || "",
+        KICK_RTMP_URL:
+          process.env.KICK_RTMP_URL ||
+          "rtmps://fa723fc1b171.global-contribute.live-video.net/app",
+        STREAM_ENABLED_DESTINATIONS:
+          process.env.STREAM_ENABLED_DESTINATIONS ||
+          process.env.DUEL_STREAM_DESTINATIONS ||
+          "",
+        YOUTUBE_STREAM_URL:
+          process.env.YOUTUBE_STREAM_URL ||
+          "rtmp://a.rtmp.youtube.com/live2",
         DUEL_FORCE_WEBGL_FALLBACK: "false",
-        GAME_URL: "http://localhost:3333/stream.html",
+        GAME_URL: "http://localhost:3333/?page=stream",
         GAME_FALLBACK_URLS:
           "http://localhost:3333/?page=stream,http://localhost:3333/?embedded=true&mode=spectator,http://localhost:3333/",
         DUEL_CAPTURE_USE_XVFB: "true",

@@ -17,6 +17,18 @@ else
     echo "[deploy] Warning: $SECRETS_FILE not found; relying on existing environment"
 fi
 
+# Auto-detect database mode: if DATABASE_URL is set to a remote host, use remote mode
+if [ -z "${DUEL_DATABASE_MODE:-}" ] && [ -n "${DATABASE_URL:-}" ]; then
+    case "$DATABASE_URL" in
+        *localhost*|*127.0.0.1*|*0.0.0.0*|*::1*)
+            DUEL_DATABASE_MODE="local"
+            ;;
+        *)
+            DUEL_DATABASE_MODE="remote"
+            echo "[deploy] Auto-detected remote database from DATABASE_URL"
+            ;;
+    esac
+fi
 DUEL_DATABASE_MODE="${DUEL_DATABASE_MODE:-local}"
 LOCAL_POSTGRES_HOST="${LOCAL_POSTGRES_HOST:-127.0.0.1}"
 LOCAL_POSTGRES_PORT="${LOCAL_POSTGRES_PORT:-5432}"
@@ -24,9 +36,18 @@ LOCAL_POSTGRES_USER="${LOCAL_POSTGRES_USER:-hyperscape}"
 LOCAL_POSTGRES_PASSWORD="${LOCAL_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-hyperscape_dev_password}}"
 LOCAL_POSTGRES_DB="${LOCAL_POSTGRES_DB:-${POSTGRES_DB:-hyperscape}}"
 
+# ── Auto-detect stream destinations from available keys ──────────────────────
 if [ -z "${STREAM_ENABLED_DESTINATIONS:-}" ] && [ -z "${DUEL_STREAM_DESTINATIONS:-}" ]; then
-    if [ -n "${TWITCH_STREAM_KEY:-${TWITCH_RTMP_STREAM_KEY:-}}" ] && [ -n "${KICK_STREAM_KEY:-}" ]; then
-        export STREAM_ENABLED_DESTINATIONS="twitch,kick"
+    DESTS=""
+    if [ -n "${TWITCH_STREAM_KEY:-${TWITCH_RTMP_STREAM_KEY:-}}" ]; then
+        DESTS="twitch"
+    fi
+    if [ -n "${KICK_STREAM_KEY:-}" ]; then
+        DESTS="${DESTS:+${DESTS},}kick"
+    fi
+    if [ -n "$DESTS" ]; then
+        export STREAM_ENABLED_DESTINATIONS="$DESTS"
+        echo "[deploy] Auto-detected stream destinations: $DESTS"
     fi
 fi
 
@@ -107,16 +128,19 @@ echo "[deploy] Installing system build dependencies..."
 apt-get update && apt-get install -y build-essential python3 socat xvfb git-lfs ffmpeg wget gnupg iproute2 lsof postgresql postgresql-client || true
 git lfs install || true
 
-# ── Install Chrome Dev channel (has WebGPU enabled by default) ─
-echo "[deploy] Installing Chrome Dev channel for WebGPU support..."
-if ! command -v google-chrome-unstable &> /dev/null; then
+# ── Install Chrome Beta channel (WebGPU + better stability than Dev) ─
+echo "[deploy] Installing Chrome Beta for WebGPU support..."
+if ! command -v google-chrome-beta &> /dev/null; then
     wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - || true
     echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-    apt-get update && apt-get install -y google-chrome-unstable || true
-    echo "[deploy] Chrome Dev installed: $(google-chrome-unstable --version 2>/dev/null || echo 'install failed')"
+    apt-get update && apt-get install -y google-chrome-beta || true
+    echo "[deploy] Chrome Beta installed: $(google-chrome-beta --version 2>/dev/null || echo 'install failed')"
 else
-    echo "[deploy] Chrome Dev already installed: $(google-chrome-unstable --version)"
+    echo "[deploy] Chrome Beta already installed: $(google-chrome-beta --version)"
 fi
+
+# ── Fix any broken apt dependencies (NVIDIA driver conflicts) ─
+apt-get --fix-broken install -y 2>/dev/null || true
 
 # ── Install Playwright system deps for RTMP streaming ─────────
 export PATH="/root/.bun/bin:$PATH"
@@ -200,6 +224,14 @@ nohup socat TCP-LISTEN:35079,reuseaddr,fork TCP:127.0.0.1:5555 > /dev/null 2>&1 
 # CDN: internal 8080 -> external 35144
 nohup socat TCP-LISTEN:35144,reuseaddr,fork TCP:127.0.0.1:8080 > /dev/null 2>&1 &
 echo "[deploy] Port proxies running"
+
+# ── Start Xvfb virtual display for WebGPU streaming ──────────
+echo "[deploy] Starting Xvfb virtual display..."
+pkill -f "Xvfb :99" || true
+sleep 1
+Xvfb :99 -screen 0 1280x720x24 &
+export DISPLAY=:99
+echo "[deploy] Xvfb started on DISPLAY=$DISPLAY"
 
 # ── Start duel stack via pm2 ─────────────────────────────────
 echo "[deploy] Starting Hyperscape duel stack via pm2..."
