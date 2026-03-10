@@ -56,16 +56,18 @@ export function shouldUseLocalPostgres(
  */
 const MANIFEST_FILES = [
   // Root-level manifests
+  "ammunition.json",
   "biomes.json",
   "buildings.json",
-  // Legacy single-file items (backwards compatibility)
-  "items.json",
+  "combat-spells.json",
+  "duel-arenas.json",
+  "lod-settings.json",
   "model-bounds.json",
   "music.json",
   "npcs.json",
   "prayers.json",
-  // Legacy single-file gathering/resources (backwards compatibility)
-  "resources.json",
+  "quests.json",
+  "runes.json",
   "skill-unlocks.json",
   "stations.json",
   "stores.json",
@@ -73,16 +75,15 @@ const MANIFEST_FILES = [
   "tools.json",
   "vegetation.json",
   "world-areas.json",
-  // Items directory
+  // Items directory (split by category)
+  "items/ammunition.json",
+  "items/armor.json",
   "items/food.json",
   "items/misc.json",
   "items/resources.json",
+  "items/runes.json",
   "items/tools.json",
   "items/weapons.json",
-  // Optional category manifests (older CDNs may not have these yet)
-  "items/ammunition.json",
-  "items/armor.json",
-  "items/runes.json",
   // Gathering directory
   "gathering/fishing.json",
   "gathering/mining.json",
@@ -361,7 +362,7 @@ async function fetchManifestsFromCDN(
 
     throw new Error(
       `Missing required manifests in ${manifestsDir}: ${missingRequiredAfter.join(", ")}. ` +
-        `Ensure your CDN has /manifests populated (PUBLIC_CDN_URL=${cdnUrl}) or run 'bun install' to download assets for local development.`,
+      `Ensure your CDN has /manifests populated (PUBLIC_CDN_URL=${cdnUrl}) or run 'bun install' to download assets for local development.`,
     );
   }
 }
