@@ -177,7 +177,7 @@ module.exports = {
         MIMALLOC_ALLOW_RESET: "0",
         MIMALLOC_PAGE_RESET: "0",
         MIMALLOC_PURGE_DELAY: "1000000",
-        STREAM_CAPTURE_MODE: "cdp",
+        STREAM_CAPTURE_MODE: "mediarecorder",
         STREAM_CAPTURE_HEADLESS: "false",
         STREAM_CAPTURE_CHANNEL: "chrome-beta",
         STREAM_CAPTURE_ANGLE: "default",
