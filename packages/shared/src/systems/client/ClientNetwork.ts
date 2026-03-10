@@ -247,6 +247,11 @@ export class ClientNetwork extends SystemBase {
   private lastInitOptions: Record<string, unknown> | null = null;
   private intentionalDisconnect: boolean = false;
 
+  // Application-level keepalive to prevent Cloudflare/proxy WebSocket idle timeout
+  // WS protocol-level ping/pong may not be counted as "activity" by reverse proxies
+  private keepaliveIntervalId: ReturnType<typeof setInterval> | null = null;
+  private static readonly KEEPALIVE_INTERVAL_MS = 30_000; // 30 seconds
+
   // Outgoing message queue (for messages sent while disconnected)
   private outgoingQueue: Array<{
     name: string;
@@ -678,6 +683,22 @@ export class ClientNetwork extends SystemBase {
       clearTimeout(this.reconnectTimeoutId);
       this.reconnectTimeoutId = null;
     }
+
+    // Start application-level keepalive to prevent Cloudflare/proxy idle timeout.
+    // WS protocol-level ping/pong frames may not count as "activity" for reverse proxies,
+    // so we send a lightweight application-level packet periodically.
+    if (this.keepaliveIntervalId) {
+      clearInterval(this.keepaliveIntervalId);
+    }
+    this.keepaliveIntervalId = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(writePacket("keepalive", Date.now()));
+        } catch {
+          // Socket may have closed between check and send
+        }
+      }
+    }, ClientNetwork.KEEPALIVE_INTERVAL_MS);
 
     resolve();
   }
@@ -4987,6 +5008,12 @@ export class ClientNetwork extends SystemBase {
     // Mark as intentional disconnect to prevent reconnection
     this.intentionalDisconnect = true;
     this.cancelReconnect();
+
+    // Clear keepalive interval
+    if (this.keepaliveIntervalId) {
+      clearInterval(this.keepaliveIntervalId);
+      this.keepaliveIntervalId = null;
+    }
 
     if (this.ws) {
       this.ws.removeEventListener("message", this.onPacket);
