@@ -136,8 +136,8 @@ module.exports = {
         ...runtimeEnv,
         NODE_ENV: "production",
         DISPLAY: process.env.DISPLAY || ":99",
-        POSTGRES_POOL_MAX: "1",
-        POSTGRES_POOL_MIN: "0",
+        POSTGRES_POOL_MAX: "20",
+        POSTGRES_POOL_MIN: "2",
         SKIP_MIGRATIONS: "true",
         DATABASE_URL: process.env.DATABASE_URL || "",
         USE_LOCAL_POSTGRES:
