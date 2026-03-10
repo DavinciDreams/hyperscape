@@ -187,7 +187,7 @@ export class Entities extends SystemBase implements IEntities {
   constructor(world: World) {
     super(world, {
       name: "entities",
-      dependencies: { required: [], optional: [] },
+      dependencies: { required: ["physics"], optional: [] },
       autoCleanup: true,
     });
     this.items = new Map();
@@ -304,8 +304,8 @@ export class Entities extends SystemBase implements IEntities {
       const rawScale = (
         data as {
           scale?:
-            | { x: number; y: number; z: number }
-            | [number, number, number];
+          | { x: number; y: number; z: number }
+          | [number, number, number];
         }
       ).scale;
       let finalScale = { x: 1, y: 1, z: 1 };
@@ -692,11 +692,11 @@ export class Entities extends SystemBase implements IEntities {
           (data as { resourceType?: string }).resourceType === "tree"
             ? ResourceType.TREE
             : (data as { resourceType?: string }).resourceType ===
-                "fishing_spot"
+              "fishing_spot"
               ? ResourceType.FISHING_SPOT
               : (data as { resourceType?: string }).resourceType ===
-                    "mining_rock" ||
-                  (data as { resourceType?: string }).resourceType === "ore"
+                "mining_rock" ||
+                (data as { resourceType?: string }).resourceType === "ore"
                 ? ResourceType.MINING_ROCK
                 : ResourceType.TREE,
         resourceId:
@@ -1100,7 +1100,7 @@ export class Entities extends SystemBase implements IEntities {
     const initPromise = entity.init() as Promise<void>;
     if (initPromise) {
       initPromise
-        .then(() => {})
+        .then(() => { })
         .catch((err) => {
           this.logger.error(
             `Entity ${entity.id} (type: ${data.type}) async init failed:`,

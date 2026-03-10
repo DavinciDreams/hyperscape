@@ -47,7 +47,6 @@
     "dist",
     "tests",
     "viewer",
-    "src/building/viewer",
     "**/*.test.ts"
   ]
 }

@@ -40,21 +40,21 @@ import {
   NavigationVisualizer,
   type NavigationVisualizerOptions,
 } from "./NavigationVisualizer";
-import type { TileCoord } from "@hyperscape/shared";
+import type { TileCoord } from "./index";
 
 /** Available material styles for the viewer */
 const MATERIAL_OPTIONS: {
   value: BuildingMaterialType | "vertex-colors";
   label: string;
 }[] = [
-  { value: "vertex-colors", label: "Vertex Colors (Classic)" },
-  { value: "brick", label: "Brick" },
-  { value: "stone-ashlar", label: "Stone (Ashlar)" },
-  { value: "stone-rubble", label: "Stone (Rubble)" },
-  { value: "wood-plank", label: "Wood Planks" },
-  { value: "timber-frame", label: "Timber Frame" },
-  { value: "plaster", label: "Plaster/Stucco" },
-];
+    { value: "vertex-colors", label: "Vertex Colors (Classic)" },
+    { value: "brick", label: "Brick" },
+    { value: "stone-ashlar", label: "Stone (Ashlar)" },
+    { value: "stone-rubble", label: "Stone (Rubble)" },
+    { value: "wood-plank", label: "Wood Planks" },
+    { value: "timber-frame", label: "Timber Frame" },
+    { value: "plaster", label: "Plaster/Stucco" },
+  ];
 
 /** Path info for navigation display */
 export interface PathInfo {
