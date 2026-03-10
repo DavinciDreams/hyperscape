@@ -433,7 +433,6 @@ async function launchCaptureBrowser() {
   const isLinux = process.platform === "linux";
   const featureFlags = [
     "CDPScreenshotNewSurface",
-    "UseSkiaRenderer",
     "WebGPU",
     "UnsafeWebGPU",
     "WebGPUDeveloperFeatures",
@@ -449,14 +448,13 @@ async function launchCaptureBrowser() {
         : []),
     // Force X11 platform on Linux for proper display/GPU context
     ...(process.platform === "linux" ? ["--ozone-platform=x11"] : []),
-    "--enable-webgl",
     `--enable-features=${featureFlags}`,
     // Some Chrome builds require standalone flags in addition to --enable-features
     "--enable-unsafe-webgpu",
     "--enable-webgpu-developer-features",
     "--ignore-gpu-blocklist",
     "--enable-gpu-rasterization",
-    "--disable-gpu-sandbox",
+    "--enable-gpu-service-logging",
     // Sandbox & stability
     "--no-sandbox",
     "--disable-dev-shm-usage",
@@ -474,7 +472,11 @@ async function launchCaptureBrowser() {
   // Playwright unconditionally injects --enable-unsafe-swiftshader on Linux,
   // forcing software rendering. We strip that and --disable-gpu.
   // NOTE: We intentionally do NOT strip --use-gl=disabled — see comment above.
-  const ignoreArgs = ["--enable-unsafe-swiftshader", "--disable-gpu"];
+  const ignoreArgs = [
+    "--enable-unsafe-swiftshader",
+    "--disable-gpu",
+    "--disable-field-trial-config",
+  ];
 
   const usePersistentContext =
     process.platform === "linux" && STREAM_CAPTURE_HEADLESS === false;

@@ -1091,6 +1091,7 @@ export class ClientCameraSystem extends SystemBase {
 
     const target = entity as CameraTarget;
     this.onSetTarget({ target });
+    this._arenaFallbackApplied = false;
     this.emitTypedEvent(EventType.CAMERA_TARGET_CHANGED, { target });
     return true;
   }
@@ -1158,6 +1159,21 @@ export class ClientCameraSystem extends SystemBase {
     }
 
     return false;
+  }
+
+  private _arenaFallbackApplied = false;
+
+  /** Park the camera at the duel arena lobby when no entities exist. */
+  private positionCameraAtArenaFallback(): void {
+    if (this._arenaFallbackApplied || !this.camera) return;
+    // Arena lobby: default { x: 105, y: 0.42, z: 60 }
+    // We offset the camera above and behind the lobby point.
+    const lobbyX = 105;
+    const lobbyY = 0.42;
+    const lobbyZ = 60;
+    this.camera.position.set(lobbyX - 15, lobbyY + 20, lobbyZ + 25);
+    this.camera.lookAt(lobbyX, lobbyY + 2, lobbyZ);
+    this._arenaFallbackApplied = true;
   }
 
   private getTargetWorldPosition(out: THREE.Vector3): boolean {
@@ -2011,6 +2027,11 @@ export class ClientCameraSystem extends SystemBase {
         this.tryAcquireSpectatorFallbackTarget();
       }
       if (!this.target) {
+        // In streaming/spectator mode with no entities, park the camera at the
+        // duel arena lobby so the stream shows the arena instead of void.
+        if (this.cinematicEnabled) {
+          this.positionCameraAtArenaFallback();
+        }
         return;
       }
     }
