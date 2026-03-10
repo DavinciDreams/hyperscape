@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { BiomeType, BIOME_LIST } from "../TerrainBiomeTypes";
 
 // ============== Constants (must match TownSystem.ts) ==============
 const TOWN_COUNT = 25;
@@ -533,7 +534,7 @@ describe("TownSystem Algorithms", () => {
     });
 
     it("all biomes have defined suitability", () => {
-      const biomes = ["tundra", "forest", "canyon"];
+      const biomes = BIOME_LIST;
       for (const biome of biomes) {
         expect(BIOME_SUITABILITY[biome]).toBeDefined();
         expect(BIOME_SUITABILITY[biome]).toBeGreaterThanOrEqual(0);

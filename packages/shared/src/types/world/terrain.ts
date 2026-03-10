@@ -8,6 +8,7 @@
 import * as THREE from "../../extras/three/three";
 import type { Position3D } from "../core/core";
 import type { PMeshHandle } from "../../extras/three/geometryToPxMesh";
+import type { BiomeType } from "../../systems/shared/world/TerrainBiomeTypes";
 import type { ActorHandle } from "../systems/physics";
 import type { TreeSubType as _TreeSubType } from "../../constants/TreeTypes";
 
@@ -50,7 +51,7 @@ export interface TerrainResourceSpawnPoint {
 export interface TerrainTileData {
   tileId: string;
   position: { x: number; z: number };
-  biome: "tundra" | "forest" | "canyon";
+  biome: BiomeType;
   tileX: number;
   tileZ: number;
   resources: TerrainResource[];
@@ -69,7 +70,7 @@ export interface TerrainTile {
   z: number;
   mesh: THREE.Mesh;
   collision: PMeshHandle | null;
-  biome: "tundra" | "forest" | "canyon";
+  biome: BiomeType;
   resources: ResourceNode[];
   roads: RoadSegment[];
   waterMeshes: THREE.Mesh[];

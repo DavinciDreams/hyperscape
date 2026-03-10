@@ -69,6 +69,7 @@ import {
 } from "../../../types/world/building-collision-types";
 import { BFSPathfinder } from "../movement/BFSPathfinder";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import { DEFAULT_BIOME } from "./TerrainBiomeTypes";
 
 // Default configuration values
 // IMPORTANT: waterThreshold must match TERRAIN_CONSTANTS.WATER_THRESHOLD (9.0)
@@ -315,7 +316,9 @@ export class TownSystem extends System {
         return this.terrainSystem?.getHeightAt(x, z) ?? 10;
       },
       getBiomeAt: (x: number, z: number): string => {
-        return this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? "forest";
+        return (
+          this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? DEFAULT_BIOME
+        );
       },
       getWaterThreshold: (): number => {
         return this.config.waterThreshold;
@@ -489,7 +492,7 @@ export class TownSystem extends System {
       this.terrainSystem?.getBiomeAtWorldPosition?.(
         manifest.position.x,
         manifest.position.z,
-      ) ?? "forest";
+      ) ?? DEFAULT_BIOME;
 
     // Convert buildings - positions are relative in manifest, convert to world coords
     // Also calculate entrance positions for each building

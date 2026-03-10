@@ -7,6 +7,12 @@
 
 // Import COMBAT_CONSTANTS from dedicated file
 import { COMBAT_CONSTANTS } from "./CombatConstants";
+// Re-export biome enum as the single source of truth
+export {
+  BiomeType,
+  DEFAULT_BIOME,
+  BIOME_LIST,
+} from "../systems/shared/world/TerrainBiomeTypes";
 // Import banking constants - single source of truth for MAX_BANK_SLOTS
 import { BANKING_CONSTANTS } from "./BankingConstants";
 
@@ -383,10 +389,13 @@ export const ITEM_ID_TO_KEY: Record<number, string> = {
 export const MOB_TYPES = {} as const;
 
 // === BIOME TYPES ===
+// Deprecated: use BiomeType enum (re-exported above) instead.
+// Kept for backward compat; maps to the same string values.
+import { BiomeType as _BT } from "../systems/shared/world/TerrainBiomeTypes";
 export const BIOME_TYPES = {
-  TUNDRA: "tundra",
-  FOREST: "forest",
-  CANYON: "canyon",
+  TUNDRA: _BT.Tundra,
+  FOREST: _BT.Forest,
+  CANYON: _BT.Canyon,
 } as const;
 
 // === SKILL NAMES ===

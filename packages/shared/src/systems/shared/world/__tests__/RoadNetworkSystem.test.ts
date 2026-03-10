@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { BiomeType, BIOME_LIST } from "../TerrainBiomeTypes";
 
 // ============== Types for testing ==============
 type TileEdge = "north" | "south" | "east" | "west";
@@ -475,7 +476,7 @@ describe("RoadNetworkSystem Algorithms", () => {
         10,
         0,
         flatHeight,
-        () => "forest",
+        () => BiomeType.Forest,
       );
       const tundraCost = calculateMovementCost(
         0,
@@ -483,7 +484,7 @@ describe("RoadNetworkSystem Algorithms", () => {
         10,
         0,
         flatHeight,
-        () => "tundra",
+        () => BiomeType.Tundra,
       );
       const canyonCost = calculateMovementCost(
         0,
@@ -491,7 +492,7 @@ describe("RoadNetworkSystem Algorithms", () => {
         10,
         0,
         flatHeight,
-        () => "canyon",
+        () => BiomeType.Canyon,
       );
 
       expect(tundraCost).toBeGreaterThan(forestCost);
@@ -1868,7 +1869,7 @@ describe("RoadNetworkSystem Algorithms", () => {
       const biome = (x: number, z: number) => {
         const tx = Math.floor(x / 50);
         const tz = Math.floor(z / 50);
-        const biomes = ["tundra", "forest", "canyon"];
+        const biomes = BIOME_LIST;
         return biomes[(tx + tz) % biomes.length];
       };
 

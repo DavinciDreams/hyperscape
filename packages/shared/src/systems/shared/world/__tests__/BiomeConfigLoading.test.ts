@@ -12,6 +12,7 @@ import fs from "fs";
 import path from "path";
 import { BIOMES } from "../../../../data/world-structure";
 import type { BiomeData } from "../../../../types/core/core";
+import { BiomeType } from "../TerrainBiomeTypes";
 
 /**
  * Get path to local biomes manifest for tests
@@ -46,7 +47,7 @@ describe("Biome Configuration Loading", () => {
           id: "tundra",
           name: "Tundra",
           difficultyLevel: 0,
-          terrain: "tundra" as any,
+          terrain: BiomeType.Tundra as any,
           vegetation: {
             enabled: true,
             layers: [
@@ -61,7 +62,7 @@ describe("Biome Configuration Loading", () => {
           id: "forest",
           name: "Forest",
           difficultyLevel: 1,
-          terrain: "forest" as any,
+          terrain: BiomeType.Forest as any,
           vegetation: {
             enabled: true,
             layers: [
@@ -76,7 +77,7 @@ describe("Biome Configuration Loading", () => {
           id: "canyon",
           name: "Canyon",
           difficultyLevel: 2,
-          terrain: "canyon" as any,
+          terrain: BiomeType.Canyon as any,
           colorScheme: {} as any,
         },
       ];
