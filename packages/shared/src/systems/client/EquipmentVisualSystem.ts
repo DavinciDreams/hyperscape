@@ -327,6 +327,13 @@ export class EquipmentVisualSystem extends SystemBase {
       const itemData = getItem(itemId);
       let equippedModelPath = itemData?.equippedModelPath;
       let modelPath = itemData?.modelPath;
+
+      // If equippedModelPath is explicitly null (not undefined), the item has no 3D model yet.
+      // Skip visual to avoid convention-based URL fallback producing 404 errors.
+      if (equippedModelPath === null) {
+        return;
+      }
+
       if (!equippedModelPath) {
         const cachedItem = this.getItemFromNetworkCache(playerId, slot);
         if (cachedItem?.equippedModelPath) {
