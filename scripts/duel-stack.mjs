@@ -2054,7 +2054,7 @@ async function main() {
         process.env.STREAM_CAPTURE_ANGLE ||
         (process.platform === "darwin"
           ? "metal"
-          : "gl"),
+          : "vulkan"),
       STREAM_CAPTURE_HEADLESS:
         process.env.STREAM_CAPTURE_HEADLESS || defaultCaptureHeadless,
       RTMP_STATUS_FILE: rtmpStatusFile,

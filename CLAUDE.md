@@ -37,7 +37,7 @@ This is a hard requirement due to our use of TSL (Three Shading Language) for al
 For Vast.ai and other GPU servers running the streaming pipeline:
 - **NVIDIA GPU with ANGLE support is REQUIRED**
 - **Must run headful** with Xorg or Xvfb (NOT headless Chrome)
-- **CRITICAL LINUX NOTE**: On Linux, use **Chrome Beta** (or Canary) with the **ANGLE OpenGL ES** backend (`--use-gl=angle --use-angle=gl`). Do **NOT** use native Vulkan (`--use-vulkan`) — it crashes. The `UnsafeWebGPU` feature flag must be enabled via `--enable-features=WebGPU,UnsafeWebGPU` for `navigator.gpu` to be available.
+- **CRITICAL LINUX NOTE**: On Linux, use **Chrome Beta** (or Canary) with **ANGLE's Vulkan backend** (`--use-gl=angle --use-angle=vulkan --enable-features=DefaultANGLEVulkan,Vulkan,VulkanFromANGLE`). ANGLE OpenGL ES (`--use-angle=gl`) fails with "Invalid visual ID" on NVIDIA. Native Vulkan (`--use-vulkan`) crashes — only ANGLE Vulkan works. The `UnsafeWebGPU` feature flag must be enabled via `--enable-features=WebGPU,UnsafeWebGPU` for `navigator.gpu` to be available.
 - **CRITICAL MAC NOTE**: It is important on macOS to use **Google Chrome** with the **Metal** backend for ANGLE (`--use-angle=metal`).
 - If GPU cannot initialize WebGPU, deployment MUST FAIL (no soft fallbacks)
 

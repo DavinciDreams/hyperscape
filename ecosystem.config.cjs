@@ -168,7 +168,7 @@ module.exports = {
         STREAM_CAPTURE_MODE: "cdp",
         STREAM_CAPTURE_HEADLESS: "false",
         STREAM_CAPTURE_CHANNEL: "chrome-beta",
-        STREAM_CAPTURE_ANGLE: "gl",
+        STREAM_CAPTURE_ANGLE: "vulkan",
         STREAM_CAPTURE_WIDTH: "1280",
         STREAM_CAPTURE_HEIGHT: "720",
         FFMPEG_PATH: process.env.FFMPEG_PATH || "ffmpeg",

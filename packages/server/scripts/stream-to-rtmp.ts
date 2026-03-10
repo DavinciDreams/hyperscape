@@ -43,7 +43,7 @@
  *   RTMP_BRIDGE_PORT         - WebSocket port for legacy bridge (default: 8765)
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -133,7 +133,7 @@ const ANGLE_BACKEND =
     ? requestedAngleBackend
     : process.platform === "darwin"
       ? "metal"
-      : "gl";
+      : "vulkan";
 
 const CDP_QUALITY = Math.min(
   100,
@@ -180,6 +180,7 @@ let browserContext: BrowserContext | null = null;
 let page: Page | null = null;
 let cdpSession: CDPSession | null = null;
 let selectedGameUrl: string | null = null;
+let webgpuProbed = false;
 let persistentUserDataDir: string | null = null;
 let launchTime = Date.now();
 const BROWSER_RESTART_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 Hour
@@ -414,8 +415,7 @@ async function waitForStreamReadiness(
 
 async function launchCaptureBrowser() {
   // On Linux dual-GPU laptops (Intel iGPU + NVIDIA dGPU), ensure Chrome uses
-  // the discrete NVIDIA GPU for WebGPU. Without PRIME offload, Chrome defaults
-  // to the integrated GPU which has limited WebGPU buffer support.
+  // the discrete NVIDIA GPU for WebGPU.
   if (process.platform === "linux") {
     process.env.__NV_PRIME_RENDER_OFFLOAD = "1";
     process.env.__NV_PRIME_RENDER_OFFLOAD_PROVIDER = "NVIDIA-G0";
@@ -425,26 +425,38 @@ async function launchCaptureBrowser() {
   }
 
   // Merge Playwright's CDPScreenshotNewSurface with our WebGPU features in a
-  // single --enable-features flag (last one wins in Chromium). UnsafeWebGPU
-  // ensures navigator.gpu is available on non-HTTPS origins.
-  // NOTE: Do NOT use DefaultANGLEVulkan/Vulkan/VulkanFromANGLE on Linux —
-  // the native Vulkan backend causes black screens and crashes on NVIDIA GPUs.
-  // Use --use-gl=angle --use-angle=gl (OpenGL ES) instead.
+  // single --enable-features flag. UnsafeWebGPU ensures navigator.gpu is
+  // available on non-HTTPS origins (localhost).
+  // On Linux with NVIDIA, ANGLE GL (OpenGL ES) fails with "Invalid visual ID"
+  // during EGL init. ANGLE Vulkan (via feature flags) is required for WebGPU.
+  // This is ANGLE's Vulkan backend — NOT native --use-vulkan (which crashes).
+  const isLinux = process.platform === "linux";
   const featureFlags = [
     "CDPScreenshotNewSurface",
     "UseSkiaRenderer",
     "WebGPU",
     "UnsafeWebGPU",
     "WebGPUDeveloperFeatures",
+    ...(isLinux ? ["DefaultANGLEVulkan", "Vulkan", "VulkanFromANGLE"] : []),
   ].join(",");
+
   const launchArgs = [
-    // GPU / WebGPU essentials
     "--use-gl=angle",
-    ...(ANGLE_BACKEND ? [`--use-angle=${ANGLE_BACKEND}`] : []),
+    ...(isLinux
+      ? ["--use-angle=vulkan"]
+      : ANGLE_BACKEND
+        ? [`--use-angle=${ANGLE_BACKEND}`]
+        : []),
+    // Force X11 platform on Linux for proper display/GPU context
+    ...(process.platform === "linux" ? ["--ozone-platform=x11"] : []),
     "--enable-webgl",
     `--enable-features=${featureFlags}`,
+    // Some Chrome builds require standalone flags in addition to --enable-features
+    "--enable-unsafe-webgpu",
+    "--enable-webgpu-developer-features",
     "--ignore-gpu-blocklist",
     "--enable-gpu-rasterization",
+    "--disable-gpu-sandbox",
     // Sandbox & stability
     "--no-sandbox",
     "--disable-dev-shm-usage",
@@ -458,22 +470,12 @@ async function launchCaptureBrowser() {
     "--disable-renderer-backgrounding",
     "--disable-hang-monitor",
   ];
+
   // Playwright unconditionally injects --enable-unsafe-swiftshader on Linux,
-  // forcing software rendering and preventing WebGPU from using the real GPU.
-  // Additionally, Playwright's --enable-features flag can override ours since
-  // Chrome only respects the last occurrence. We strip both and merge features.
-  const ignoreArgs = [
-    "--enable-unsafe-swiftshader",
-    "--disable-field-trial-config",
-    // Playwright injects --use-gl=disabled which overrides our --use-gl=angle
-    // in the GPU process, preventing WebGPU from initializing.
-    "--use-gl=disabled",
-  ];
-  const launchConfig = {
-    headless: STREAM_CAPTURE_HEADLESS,
-    args: launchArgs,
-    ignoreDefaultArgs: ignoreArgs,
-  };
+  // forcing software rendering. We strip that and --disable-gpu.
+  // NOTE: We intentionally do NOT strip --use-gl=disabled — see comment above.
+  const ignoreArgs = ["--enable-unsafe-swiftshader", "--disable-gpu"];
+
   const usePersistentContext =
     process.platform === "linux" && STREAM_CAPTURE_HEADLESS === false;
 
@@ -482,15 +484,16 @@ async function launchCaptureBrowser() {
       path.join(os.tmpdir(), "hyperscape-stream-profile-"),
     );
     const persistentLaunchConfig = {
-      ...launchConfig,
-      viewport: VIEWPORT,
-      deviceScaleFactor: 1,
-      serviceWorkers: "block" as const,
+      headless: false as const,
       args: [
         ...launchArgs,
         `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
         "--window-position=0,0",
       ],
+      ignoreDefaultArgs: ignoreArgs,
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+      serviceWorkers: "block" as const,
     };
 
     console.log(
@@ -509,6 +512,13 @@ async function launchCaptureBrowser() {
       persistentLaunchConfig,
     );
   }
+
+  // Non-Linux or headless: use standard Playwright launch.
+  const launchConfig = {
+    headless: STREAM_CAPTURE_HEADLESS,
+    args: launchArgs,
+    ignoreDefaultArgs: ignoreArgs,
+  };
 
   if (STREAM_CAPTURE_CHANNEL) {
     console.log(
@@ -557,6 +567,7 @@ async function launchCaptureBrowser() {
 
 async function setupBrowser() {
   if (browser || browserContext) await cleanup();
+  webgpuProbed = false;
 
   const streamReadyTimeoutMs = Math.max(
     10_000,
@@ -652,6 +663,48 @@ async function setupBrowser() {
       } catch (err) {
         console.warn(`[Main] Failed to load ${candidateUrl}:`, err);
         continue;
+      }
+
+      // Probe WebGPU availability on the first successfully loaded page.
+      // WebGPU requires a secure context — localhost qualifies but about:blank
+      // does NOT, so the probe must run after navigating to a real page.
+      if (!webgpuProbed) {
+        webgpuProbed = true;
+        const webgpuAvailable = await page.evaluate(async () => {
+          if (!navigator.gpu)
+            return { available: false, reason: "navigator.gpu is undefined" };
+          try {
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter)
+              return {
+                available: false,
+                reason: "requestAdapter() returned null",
+              };
+            const info = (
+              adapter as unknown as {
+                info?: { vendor?: string; architecture?: string };
+              }
+            ).info;
+            return {
+              available: true,
+              reason: `adapter OK — vendor=${info?.vendor ?? "unknown"}, arch=${info?.architecture ?? "unknown"}`,
+            };
+          } catch (e) {
+            return { available: false, reason: `requestAdapter() threw: ${e}` };
+          }
+        });
+        if (webgpuAvailable.available) {
+          console.log(`[Main] WebGPU probe: ${webgpuAvailable.reason}`);
+        } else {
+          console.error(
+            `[Main] WebGPU probe FAILED: ${webgpuAvailable.reason}`,
+          );
+          console.error(
+            "[Main] WebGPU is REQUIRED. Ensure: headful mode (not headless), " +
+              "GPU drivers installed, DISPLAY set (Xvfb on Linux), " +
+              "--use-gl=angle + --use-angle=vulkan, --enable-features=DefaultANGLEVulkan,Vulkan,VulkanFromANGLE,WebGPU,UnsafeWebGPU.",
+          );
+        }
       }
 
       if (USE_TIMED_STREAM_WARMUP) {

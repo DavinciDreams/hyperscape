@@ -5,9 +5,9 @@ const SERVER_PORT = Number(process.env.PORT ?? 5555);
 const IS_LINUX = process.platform === "linux";
 const DEFAULT_LINUX_WEBGPU_ARGS = [
   "--use-gl=angle",
-  "--use-angle=gl",
+  "--use-angle=vulkan",
   "--ozone-platform=x11",
-  "--enable-features=WebGPU,UnsafeWebGPU,WebGPUDeveloperFeatures",
+  "--enable-features=DefaultANGLEVulkan,Vulkan,VulkanFromANGLE,WebGPU,UnsafeWebGPU,WebGPUDeveloperFeatures",
   "--ignore-gpu-blocklist",
 ];
 const EXTRA_WEBGPU_ARGS = (process.env.PW_WEBGPU_ARGS ?? "")
