@@ -4479,25 +4479,9 @@ export class TerrainSystem extends System {
   }
 
   private getBiomeAt(tileX: number, tileZ: number): string {
-    // Get world coordinates for center of tile
-    const worldX = tileX * this.CONFIG.TILE_SIZE + this.CONFIG.TILE_SIZE / 2;
-    const worldZ = tileZ * this.CONFIG.TILE_SIZE + this.CONFIG.TILE_SIZE / 2;
-
-    // Check if near starter towns first (safe zones)
-    const towns = [
-      { x: 0, z: 0, name: "Brookhaven" },
-      { x: 10, z: 0, name: "Eastport" },
-      { x: -10, z: 0, name: "Westfall" },
-      { x: 0, z: 10, name: "Northridge" },
-      { x: 0, z: -10, name: "Southmere" },
-    ];
-
-    for (const town of towns) {
-      const distance = Math.sqrt((tileX - town.x) ** 2 + (tileZ - town.z) ** 2);
-      if (distance < 3) return DEFAULT_BIOME;
-    }
-
-    return this.getBiomeAtWorldPosition(worldX, worldZ);
+    return this.terrainGenerator
+      .getBiomeSystem()
+      .getBiomeForTile(tileX, tileZ, this.CONFIG.TILE_SIZE);
   }
 
   private getBiomeInfluencesAtPosition(

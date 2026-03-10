@@ -9,7 +9,7 @@
  */
 
 import { NoiseGenerator, createTileRNG } from "./NoiseGenerator";
-import { BiomeSystem, DEFAULT_BIOMES } from "./BiomeSystem";
+import { BiomeSystem } from "./BiomeSystem";
 import { IslandMask, DEFAULT_ISLAND_CONFIG } from "./IslandMask";
 import type {
   TerrainConfig,
@@ -109,7 +109,7 @@ export class TerrainGenerator {
 
   constructor(
     config: Partial<TerrainConfig> = {},
-    biomeDefinitions: Record<string, BiomeDefinition> = DEFAULT_BIOMES,
+    biomeDefinitions: Record<string, BiomeDefinition> = {},
   ) {
     // Merge with defaults
     this.config = {
@@ -440,7 +440,7 @@ export class TerrainGenerator {
     }
 
     // Determine dominant biome for the tile
-    let tileDominantBiome = "plains";
+    let tileDominantBiome = "unknown";
     let maxWeight = 0;
     for (const [biome, weight] of biomeWeights) {
       if (weight > maxWeight) {

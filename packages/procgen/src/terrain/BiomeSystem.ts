@@ -14,95 +14,6 @@ import type {
   BiomeDefinition,
 } from "./types";
 
-/** Numeric biome IDs for shader use */
-export const BIOME_IDS: Record<string, number> = {
-  plains: 0,
-  forest: 1,
-  valley: 2,
-  mountains: 3,
-  tundra: 4,
-  desert: 5,
-  lakes: 6,
-  swamp: 7,
-};
-
-/** Default biome definitions (can be overridden) */
-export const DEFAULT_BIOMES: Record<string, BiomeDefinition> = {
-  plains: {
-    id: "plains",
-    name: "Plains",
-    color: 0x7cba5f,
-    terrainMultiplier: 1.0,
-    difficultyLevel: 0,
-    heightRange: [0.1, 0.5],
-    resourceDensity: 1.0,
-  },
-  forest: {
-    id: "forest",
-    name: "Forest",
-    color: 0x2f7d32,
-    terrainMultiplier: 1.1,
-    difficultyLevel: 1,
-    heightRange: [0.2, 0.6],
-    resourceDensity: 1.5,
-  },
-  valley: {
-    id: "valley",
-    name: "Valley",
-    color: 0x6b8e23,
-    terrainMultiplier: 0.8,
-    difficultyLevel: 1,
-    heightRange: [0.05, 0.3],
-    resourceDensity: 1.2,
-  },
-  mountains: {
-    id: "mountains",
-    name: "Mountains",
-    color: 0x808080,
-    terrainMultiplier: 1.5,
-    difficultyLevel: 3,
-    heightRange: [0.5, 1.0],
-    maxSlope: 0.9,
-    resourceDensity: 0.7,
-  },
-  desert: {
-    id: "desert",
-    name: "Desert",
-    color: 0xdaa520,
-    terrainMultiplier: 0.9,
-    difficultyLevel: 2,
-    heightRange: [0.1, 0.4],
-    resourceDensity: 0.3,
-  },
-  swamp: {
-    id: "swamp",
-    name: "Swamp",
-    color: 0x556b2f,
-    terrainMultiplier: 0.7,
-    difficultyLevel: 2,
-    heightRange: [0.0, 0.25],
-    resourceDensity: 0.8,
-  },
-  tundra: {
-    id: "tundra",
-    name: "Tundra",
-    color: 0xb0c4de,
-    terrainMultiplier: 1.0,
-    difficultyLevel: 3,
-    heightRange: [0.3, 0.8],
-    resourceDensity: 0.4,
-  },
-  lakes: {
-    id: "lakes",
-    name: "Lakes",
-    color: 0x4682b4,
-    terrainMultiplier: 0.5,
-    difficultyLevel: 1,
-    heightRange: [0.0, 0.15],
-    resourceDensity: 0.5,
-  },
-};
-
 /**
  * Default biome configuration
  */
@@ -115,24 +26,6 @@ export const DEFAULT_BIOME_CONFIG: BiomeConfig = {
   boundaryNoiseScale: 0.003,
   boundaryNoiseAmount: 0.15,
 };
-
-/**
- * Weighted biome types for random selection
- * Plains is dominant with variety from other biomes
- */
-const BIOME_TYPE_WEIGHTS = [
-  "plains",
-  "plains",
-  "plains",
-  "forest",
-  "forest",
-  "valley",
-  "mountains",
-  "mountains",
-  "desert",
-  "swamp",
-  "tundra",
-];
 
 /**
  * BiomeSystem handles biome placement and influence calculations
@@ -148,7 +41,7 @@ export class BiomeSystem {
     seed: number,
     worldSizeMeters: number,
     config: Partial<BiomeConfig> = {},
-    biomeDefinitions: Record<string, BiomeDefinition> = DEFAULT_BIOMES,
+    biomeDefinitions: Record<string, BiomeDefinition> = {},
   ) {
     this.config = { ...DEFAULT_BIOME_CONFIG, ...config };
     this.biomeDefinitions = biomeDefinitions;
@@ -200,6 +93,11 @@ export class BiomeSystem {
     // Use deterministic PRNG for reproducible biome placement
     const random = createSeededRNG(seed);
 
+    const biomeTypes = Object.keys(this.biomeDefinitions);
+    if (biomeTypes.length === 0) {
+      return;
+    }
+
     this.biomeCenters = [];
 
     // Grid-jitter placement for even distribution
@@ -216,15 +114,15 @@ export class BiomeSystem {
         const x = baseX + jitterX;
         const z = baseZ + jitterZ;
 
-        // Random biome type and influence
-        const typeIndex = Math.floor(random() * BIOME_TYPE_WEIGHTS.length);
+        // Random biome type from provided definitions and influence
+        const typeIndex = Math.floor(random() * biomeTypes.length);
         const influenceRange = maxInfluence - minInfluence;
         const influence = minInfluence + random() * influenceRange;
 
         this.biomeCenters.push({
           x,
           z,
-          type: BIOME_TYPE_WEIGHTS[typeIndex],
+          type: biomeTypes[typeIndex],
           influence,
         });
       }
@@ -242,14 +140,20 @@ export class BiomeSystem {
    * Get biome definition by ID
    */
   getBiomeDefinition(biomeId: string): BiomeDefinition {
-    return this.biomeDefinitions[biomeId] ?? this.biomeDefinitions["plains"];
-  }
-
-  /**
-   * Get all biome definitions
-   */
-  getAllBiomeDefinitions(): Record<string, BiomeDefinition> {
-    return this.biomeDefinitions;
+    const def = this.biomeDefinitions[biomeId];
+    if (def) return def;
+    const keys = Object.keys(this.biomeDefinitions);
+    return keys.length > 0
+      ? this.biomeDefinitions[keys[0]]
+      : {
+          id: biomeId,
+          name: biomeId,
+          color: 0x808080,
+          terrainMultiplier: 1,
+          difficultyLevel: 0,
+          heightRange: [0, 1],
+          resourceDensity: 1,
+        };
   }
 
   /**
@@ -312,8 +216,8 @@ export class BiomeSystem {
         influence.weight /= totalWeight;
       }
     } else {
-      // Fallback to plains if no biome centers are nearby
-      biomeInfluences.push({ type: "plains", weight: 1.0 });
+      const fallback = Object.keys(this.biomeDefinitions)[0] ?? "unknown";
+      biomeInfluences.push({ type: fallback, weight: 1.0 });
     }
 
     // Sort by weight descending
@@ -331,23 +235,20 @@ export class BiomeSystem {
       worldZ,
       baseHeight,
     );
-    return influences.length > 0 ? influences[0].type : "plains";
+    if (influences.length > 0) return influences[0].type;
+    const keys = Object.keys(this.biomeDefinitions);
+    return keys.length > 0 ? keys[0] : "unknown";
   }
 
   /**
    * Get the dominant biome for a terrain tile (at tile center)
    */
   getBiomeForTile(tileX: number, tileZ: number, tileSize: number): string {
-    // Get world coordinates for center of tile
-    const worldX = tileX * tileSize + tileSize / 2;
-    const worldZ = tileZ * tileSize + tileSize / 2;
-
-    // Use mid-range height for tile-level biome query
-    return this.getDominantBiome(worldX, worldZ, 0.5);
+    // Tile geometry is centered at (tileX * tileSize, tileZ * tileSize)
+    const worldX = tileX * tileSize;
+    const worldZ = tileZ * tileSize;
+    return this.getDominantBiome(worldX, worldZ, 0);
   }
-
-  /** @deprecated Use exported BIOME_IDS constant instead */
-  static readonly BIOME_IDS = BIOME_IDS;
 
   private biomeIds: Record<string, number> = {};
   private nextBiomeId = 0;
