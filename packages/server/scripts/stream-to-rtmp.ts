@@ -112,7 +112,7 @@ const SPECTATOR_PORT = parseInt(process.env.SPECTATOR_PORT || "4180", 10);
 const EXTERNAL_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
 const ENABLED_STREAM_DESTINATIONS = resolveEnabledStreamDestinations(
   process.env.STREAM_ENABLED_DESTINATIONS ||
-  process.env.DUEL_STREAM_DESTINATIONS,
+    process.env.DUEL_STREAM_DESTINATIONS,
 );
 let externalStatusWriteErrored = false;
 
@@ -122,18 +122,17 @@ const DEFAULT_CAPTURE_MODE =
   process.platform === "linux" && !STREAM_CAPTURE_HEADLESS
     ? "mediarecorder"
     : "cdp";
-const CAPTURE_MODE = (
-  process.env.STREAM_CAPTURE_MODE?.trim() || DEFAULT_CAPTURE_MODE
-) as "cdp" | "mediarecorder" | "webcodecs";
-const requestedCaptureChannel = process.env.STREAM_CAPTURE_CHANNEL?.trim() || "";
+const CAPTURE_MODE = (process.env.STREAM_CAPTURE_MODE?.trim() ||
+  DEFAULT_CAPTURE_MODE) as "cdp" | "mediarecorder" | "webcodecs";
+const requestedCaptureChannel =
+  process.env.STREAM_CAPTURE_CHANNEL?.trim() || "";
 const STREAM_CAPTURE_CHANNEL =
   process.platform === "darwin" && requestedCaptureChannel === "chromium"
     ? "chrome"
     : requestedCaptureChannel;
 const requestedAngleBackend = process.env.STREAM_CAPTURE_ANGLE?.trim() || "";
 const ANGLE_BACKEND =
-  requestedAngleBackend &&
-    requestedAngleBackend.toLowerCase() !== "default"
+  requestedAngleBackend && requestedAngleBackend.toLowerCase() !== "default"
     ? requestedAngleBackend
     : process.platform === "darwin"
       ? "metal"
@@ -165,7 +164,7 @@ const STREAM_CAPTURE_POST_NAV_DELAY_MS = Math.max(
   0,
   Number.parseInt(
     process.env.STREAM_CAPTURE_POST_NAV_DELAY_MS ||
-    (USE_TIMED_STREAM_WARMUP ? "250" : "5000"),
+      (USE_TIMED_STREAM_WARMUP ? "250" : "5000"),
     10,
   ) || 0,
 );
@@ -324,7 +323,9 @@ function withTimeout<T>(
 function hasConfiguredOutput(): boolean {
   const hasTwitchKey =
     isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "twitch") &&
-    Boolean(process.env.TWITCH_STREAM_KEY || process.env.TWITCH_RTMP_STREAM_KEY);
+    Boolean(
+      process.env.TWITCH_STREAM_KEY || process.env.TWITCH_RTMP_STREAM_KEY,
+    );
   const hasYoutubeKey =
     isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "youtube") &&
     Boolean(
@@ -422,7 +423,21 @@ async function waitForStreamReadiness(
 // ── Browser Launch ─────────────────────────────────────────────────────────
 
 async function launchCaptureBrowser() {
-  const featureFlags = "--enable-features=UseSkiaRenderer,WebGPU";
+  // On Linux dual-GPU laptops (Intel iGPU + NVIDIA dGPU), ensure Chrome uses
+  // the discrete NVIDIA GPU for WebGPU. Without PRIME offload, Chrome defaults
+  // to the integrated GPU which has limited WebGPU buffer support.
+  if (process.platform === "linux") {
+    process.env.__NV_PRIME_RENDER_OFFLOAD = "1";
+    process.env.__NV_PRIME_RENDER_OFFLOAD_PROVIDER = "NVIDIA-G0";
+    process.env.__GLX_VENDOR_LIBRARY_NAME = "nvidia";
+    process.env.__VK_LAYER_NV_optimus = "NVIDIA_only";
+    process.env.DRI_PRIME = "1";
+  }
+
+  // Merge Playwright's CDPScreenshotNewSurface with our WebGPU features so
+  // Chrome sees a single --enable-features flag (last one wins in Chromium).
+  const featureFlags =
+    "--enable-features=CDPScreenshotNewSurface,UseSkiaRenderer,WebGPU";
   const launchArgs = [
     // GPU / WebGPU essentials
     "--use-gl=angle",
@@ -437,15 +452,26 @@ async function launchCaptureBrowser() {
     "--disable-dev-shm-usage",
     "--disable-web-security",
     "--autoplay-policy=no-user-gesture-required",
+    // Prevent DPI scaling on HiDPI displays (ensures 1:1 pixel mapping)
+    "--force-device-scale-factor=1",
     // Prevent Chromium from throttling rendering/timers
     "--disable-background-timer-throttling",
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
     "--disable-hang-monitor",
   ];
+  // Playwright unconditionally injects --enable-unsafe-swiftshader on Linux,
+  // forcing software rendering and preventing WebGPU from using the real GPU.
+  // Additionally, Playwright's --enable-features flag can override ours since
+  // Chrome only respects the last occurrence. We strip both and merge features.
+  const ignoreArgs = [
+    "--enable-unsafe-swiftshader",
+    "--disable-field-trial-config",
+  ];
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,
     args: launchArgs,
+    ignoreDefaultArgs: ignoreArgs,
   };
   const usePersistentContext =
     process.platform === "linux" && STREAM_CAPTURE_HEADLESS === false;
@@ -471,13 +497,10 @@ async function launchCaptureBrowser() {
     );
 
     if (STREAM_CAPTURE_CHANNEL) {
-      return await chromium.launchPersistentContext(
-        persistentUserDataDir,
-        {
-          ...persistentLaunchConfig,
-          channel: STREAM_CAPTURE_CHANNEL,
-        },
-      );
+      return await chromium.launchPersistentContext(persistentUserDataDir, {
+        ...persistentLaunchConfig,
+        channel: STREAM_CAPTURE_CHANNEL,
+      });
     }
 
     return await chromium.launchPersistentContext(
@@ -537,7 +560,7 @@ async function setupBrowser() {
   const streamReadyTimeoutMs = Math.max(
     10_000,
     Number.parseInt(process.env.STREAM_READY_TIMEOUT_MS || "30000", 10) ||
-    30_000,
+      30_000,
   );
 
   console.log(
@@ -1384,7 +1407,7 @@ async function main() {
   process.on("SIGTERM", shutdown);
 
   // Keep process alive
-  await new Promise(() => { });
+  await new Promise(() => {});
 }
 
 async function cleanup() {

@@ -180,8 +180,6 @@ function replaceSystem(
  */
 export function createClientWorld() {
   const world = new World();
-  const disableLocalPhysics = isStreamingLikeViewport();
-
   // ============================================================================
   // FRAME BUDGET MANAGER
   // ============================================================================
@@ -254,14 +252,9 @@ export function createClientWorld() {
   world.register("prefs", ClientInterface); // User preferences and UI state
 
   // Physics (local simulation, validated by server)
-  if (disableLocalPhysics) {
-    removeSystem(world, "physics");
-    console.log(
-      "[createClientWorld] Local PhysX disabled for stream/spectator viewport",
-    );
-  } else {
-    replaceSystem(world, "physics", Physics); // PhysX collision and raycasting
-  }
+  // Always register physics — streaming/spectator viewports still need it for
+  // entity deserialization (RigidBody/Collider nodes access world.physics on mount).
+  replaceSystem(world, "physics", Physics);
 
   // Interaction system - handles clicks, raycasting, context menus
   // MUST be registered before ClientCameraSystem which uses its RaycastService
@@ -435,7 +428,10 @@ export function createClientWorld() {
         // In stream mode, there is no local player, so PlayerLocal won't trigger the load either.
         // We trigger it here in the background so colliders and static actors can initialize.
         waitForPhysX("StreamInitialization", 120000).catch((err) => {
-          console.warn("[createClientWorld] Background PhysX load failed:", err);
+          console.warn(
+            "[createClientWorld] Background PhysX load failed:",
+            err,
+          );
         });
       }
 

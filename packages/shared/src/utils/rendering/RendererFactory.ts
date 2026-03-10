@@ -234,6 +234,15 @@ export async function createRenderer(
     Logger.warn(
       `[RendererFactory] WebGPU init with extended limits failed (${msg}), retrying with default limits...`,
     );
+    // Dispose the failed renderer to release the canvas WebGPU context
+    // so the retry can acquire a fresh context on the same canvas.
+    if (renderer) {
+      try {
+        renderer.dispose();
+      } catch {
+        // Ignore dispose errors on a partially-initialized renderer
+      }
+    }
     renderer = null;
   }
 
