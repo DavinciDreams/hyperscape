@@ -384,6 +384,21 @@ function cleanupCorruptedPrivyData(): void {
 // Run cleanup on app load
 cleanupCorruptedPrivyData();
 
+// In development, aggressively unregister any stale service workers.
+// Devs occasionally run production builds locally ('vite preview'), which installs
+// a service worker that intercepts dev server requests and causes MIME type errors.
+if (import.meta.env.DEV && "serviceWorker" in navigator) {
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister();
+        console.log("[App] 🧹 Unregistered stale service worker in development mode");
+      }
+    })
+    .catch((err) => console.warn("[App] Failed to unregister service worker:", err));
+}
+
 function App() {
   // Determine Privy availability
   const appId = import.meta.env.PUBLIC_PRIVY_APP_ID || "";

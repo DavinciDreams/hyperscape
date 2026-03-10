@@ -185,11 +185,11 @@ export interface HyperscapeService {
   getNearbyEntities(): Array<{
     id: string;
     harvestSkill?:
-      | "woodcutting"
-      | "fishing"
-      | "mining"
-      | "firemaking"
-      | "cooking";
+    | "woodcutting"
+    | "fishing"
+    | "mining"
+    | "firemaking"
+    | "cooking";
     resourceType?: string;
   }>;
 
@@ -380,15 +380,8 @@ export class AgentManager {
       instance.lastActivity = Date.now();
       instance.error = undefined;
 
-      // Start autonomous behavior loop for embedded agents.
-      if (EMBEDDED_AGENT_AUTONOMY_ENABLED) {
-        this.behaviorTicker.startBehaviorLoop(characterId);
-      } else {
-        setAgentAutonomyIfSupported(
-          instance.service as unknown as HyperscapeService,
-          false,
-        );
-      }
+      // Always start autonomous behavior loop for embedded agents
+      this.behaviorTicker.startBehaviorLoop(characterId);
     } catch (err) {
       instance.state = "error";
       instance.error = errMsg(err);
@@ -463,14 +456,8 @@ export class AgentManager {
 
     instance.state = "running";
     instance.lastActivity = Date.now();
-    if (EMBEDDED_AGENT_AUTONOMY_ENABLED) {
-      this.behaviorTicker.startBehaviorLoop(characterId);
-    } else {
-      setAgentAutonomyIfSupported(
-        instance.service as unknown as HyperscapeService,
-        false,
-      );
-    }
+    // Always start autonomous behavior loop
+    this.behaviorTicker.startBehaviorLoop(characterId);
   }
 
   /**
@@ -599,21 +586,21 @@ export class AgentManager {
   async loadAgentsFromDatabase(): Promise<void> {
     const databaseSystem = this.world.getSystem("database") as
       | {
-          db: {
-            select: () => {
-              from: (table: unknown) => {
-                where: (condition: unknown) => Promise<
-                  Array<{
-                    id: string;
-                    accountId: string;
-                    name: string;
-                    isAgent: boolean;
-                  }>
-                >;
-              };
+        db: {
+          select: () => {
+            from: (table: unknown) => {
+              where: (condition: unknown) => Promise<
+                Array<{
+                  id: string;
+                  accountId: string;
+                  name: string;
+                  isAgent: boolean;
+                }>
+              >;
             };
           };
-        }
+        };
+      }
       | undefined;
 
     if (!databaseSystem?.db) {
