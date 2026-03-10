@@ -455,7 +455,6 @@
         "delaunator": "^5.0.1",
       },
       "devDependencies": {
-        "@hyperscape/shared": "workspace:*",
         "@types/node": "^25.3.0",
         "@types/react": "^19.2.14",
         "@types/react-dom": "^19.2.3",
@@ -466,13 +465,11 @@
         "vitest": "^4.0.6",
       },
       "peerDependencies": {
-        "@hyperscape/shared": "workspace:*",
         "react": "19.2.4",
         "react-dom": "19.2.4",
         "three": ">=0.182.0",
       },
       "optionalPeers": [
-        "@hyperscape/shared",
         "react",
         "react-dom",
       ],
