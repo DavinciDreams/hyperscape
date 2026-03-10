@@ -88,14 +88,16 @@ export const TERRAIN_CONSTANTS = {
   /**
    * Maximum slope for walkable terrain (tan of angle).
    * Slopes steeper than this block movement.
-   * 0.7 ≈ 35 degree angle
+   * 1.5 ≈ 56 degree angle.
    */
-  MAX_WALKABLE_SLOPE: 0.7,
+  MAX_WALKABLE_SLOPE: 1.5,
 
   /**
    * Distance to sample for slope calculation (in meters).
+   * Larger values average slope over a wider area, preventing
+   * terraced cliffs and landscape features from blocking movement.
    */
-  SLOPE_CHECK_DISTANCE: 1.0,
+  SLOPE_CHECK_DISTANCE: 4.0,
 
   /**
    * Tile size in meters (1 tile = 1 meter for movement grid).
