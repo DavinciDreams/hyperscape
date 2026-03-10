@@ -238,7 +238,7 @@ export function StreamingMode() {
             c.agent1?.damageDealtThisFight === p.agent1?.damageDealtThisFight &&
             c.agent2?.damageDealtThisFight === p.agent2?.damageDealtThisFight &&
             Math.floor(c.timeRemaining / 1000) ===
-              Math.floor(p.timeRemaining / 1000) &&
+            Math.floor(p.timeRemaining / 1000) &&
             state.leaderboard.length === prev.leaderboard.length
           ) {
             return prev; // Same reference = no re-render
@@ -634,7 +634,7 @@ export function StreamingMode() {
         if (!recorder || recorder.state !== "recording") return;
         try {
           recorder.requestData();
-        } catch {}
+        } catch { }
       }, 250);
       healthTimer = setInterval(() => {
         if (!recorder || recorder.state !== "recording") return;
@@ -646,7 +646,7 @@ export function StreamingMode() {
           );
           try {
             recorder.requestData();
-          } catch {}
+          } catch { }
         }
       }, 2000);
       const videoTrack = stream?.getVideoTracks?.()[0] as  // eslint-disable-next-line no-undef
@@ -657,7 +657,7 @@ export function StreamingMode() {
         forceFrameTimer = setInterval(() => {
           try {
             videoTrack.requestFrame?.();
-          } catch {}
+          } catch { }
         }, frameIntervalMs);
       }
       if (captureDebug) {
@@ -676,7 +676,7 @@ export function StreamingMode() {
       if (recorder && recorder.state !== "inactive") {
         try {
           recorder.stop();
-        } catch {}
+        } catch { }
       }
       if (recorder) {
         recorder.ondataavailable = null;
@@ -690,7 +690,7 @@ export function StreamingMode() {
       if (oscillator) {
         try {
           oscillator.stop();
-        } catch {}
+        } catch { }
         oscillator.disconnect();
         oscillator = null;
       }

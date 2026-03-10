@@ -1675,10 +1675,10 @@ export class ClientNetwork extends SystemBase {
             pArr && pArr.length === 3
               ? { x: pArr[0], y: pArr[1], z: pArr[2] }
               : {
-                  x: entity.position.x,
-                  y: entity.position.y,
-                  z: entity.position.z,
-                };
+                x: entity.position.x,
+                y: entity.position.y,
+                z: entity.position.z,
+              };
           this.tileInterpolator.setCombatRotation(
             id,
             changesObj.q as number[],
@@ -3428,11 +3428,11 @@ export class ClientNetwork extends SystemBase {
    */
   onPrivateMessageFailed = (data: {
     reason:
-      | "offline"
-      | "ignored"
-      | "not_friends"
-      | "player_not_found"
-      | "rate_limited";
+    | "offline"
+    | "ignored"
+    | "not_friends"
+    | "player_not_found"
+    | "rate_limited";
     targetName: string;
   }) => {
     const reasonMessages: Record<typeof data.reason, string> = {
@@ -3714,7 +3714,7 @@ export class ClientNetwork extends SystemBase {
       // Uses bounding box which includes door approach areas
       collisionService
         ? (x: number, z: number) =>
-            collisionService.isNearBuildingForElevation(x, z)
+          collisionService.isNearBuildingForElevation(x, z)
         : undefined,
       // Pass step height function for smooth entrance stair walking
       collisionService
@@ -3722,7 +3722,7 @@ export class ClientNetwork extends SystemBase {
         : undefined,
       this.world.frameBudget
         ? (minimumMs: number = 1) =>
-            this.world.frameBudget!.hasTimeRemaining(minimumMs)
+          this.world.frameBudget!.hasTimeRemaining(minimumMs)
         : undefined,
     );
   }

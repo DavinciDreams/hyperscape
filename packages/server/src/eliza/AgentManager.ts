@@ -185,11 +185,11 @@ export interface HyperscapeService {
   getNearbyEntities(): Array<{
     id: string;
     harvestSkill?:
-      | "woodcutting"
-      | "fishing"
-      | "mining"
-      | "firemaking"
-      | "cooking";
+    | "woodcutting"
+    | "fishing"
+    | "mining"
+    | "firemaking"
+    | "cooking";
     resourceType?: string;
   }>;
 
@@ -586,21 +586,21 @@ export class AgentManager {
   async loadAgentsFromDatabase(): Promise<void> {
     const databaseSystem = this.world.getSystem("database") as
       | {
-          db: {
-            select: () => {
-              from: (table: unknown) => {
-                where: (condition: unknown) => Promise<
-                  Array<{
-                    id: string;
-                    accountId: string;
-                    name: string;
-                    isAgent: boolean;
-                  }>
-                >;
-              };
+        db: {
+          select: () => {
+            from: (table: unknown) => {
+              where: (condition: unknown) => Promise<
+                Array<{
+                  id: string;
+                  accountId: string;
+                  name: string;
+                  isAgent: boolean;
+                }>
+              >;
             };
           };
-        }
+        };
+      }
       | undefined;
 
     if (!databaseSystem?.db) {
