@@ -137,7 +137,7 @@ export class AgentBehaviorTicker {
       characterId: string,
     ) => AgentInstance | undefined,
     private readonly getAllAgentIds: () => string[],
-  ) { }
+  ) {}
 
   // ─── BEHAVIOR LOOP ───────────────────────────────────────────────────
 
@@ -207,7 +207,7 @@ export class AgentBehaviorTicker {
     }
 
     // Best-effort stop so paused/stopped agents don't keep pathing or attacking.
-    void instance.service.executeStop().catch(() => { });
+    void instance.service.executeStop().catch(() => {});
   }
 
   /**
@@ -598,8 +598,8 @@ export class AgentBehaviorTicker {
       const itemData = getItem(slot.itemId);
       const healAmount = itemData
         ? ((itemData as unknown as Record<string, unknown>).healAmount as
-          | number
-          | undefined)
+            | number
+            | undefined)
         : undefined;
       const isFood = healAmount && healAmount > 0;
       const isWeapon =

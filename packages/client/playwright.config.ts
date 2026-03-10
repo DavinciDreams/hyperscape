@@ -49,13 +49,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   reporter: process.env.CI
     ? [
-      ["html", { open: "never", outputFolder: "playwright-report" }],
-      ["github"],
-    ]
+        ["html", { open: "never", outputFolder: "playwright-report" }],
+        ["github"],
+      ]
     : [
-      ["list"],
-      ["html", { open: "never", outputFolder: "playwright-report" }],
-    ],
+        ["list"],
+        ["html", { open: "never", outputFolder: "playwright-report" }],
+      ],
   use: {
     // WebGPU is required; run headed browser sessions for all E2E tests.
     headless: false,
