@@ -182,6 +182,18 @@ export const HEIGHT_TERRAIN_MIX = 0.2;
 export const BEACH_PROFILE_POWER = 3.0;
 
 // ---------------------------------------------------------------------------
+// Biome configuration — single source of truth for biome placement & blending
+// ---------------------------------------------------------------------------
+
+export const BIOME_CONFIG = {
+  gaussianCoeff: 12.0,
+  boundaryNoiseScale: 0.003,
+  boundaryNoiseAmount: 0.15,
+  placementRadius: ISLAND_RADIUS * 0.45,
+  influenceRadius: ISLAND_RADIUS * 0.6,
+} as const;
+
+// ---------------------------------------------------------------------------
 // Landscape features — mountains & ponds, independent of biomes
 // ---------------------------------------------------------------------------
 

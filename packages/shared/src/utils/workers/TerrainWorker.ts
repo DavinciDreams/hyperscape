@@ -32,12 +32,6 @@ export interface TerrainWorkerConfig {
   BIOME_GAUSSIAN_COEFF: number;
   BIOME_BOUNDARY_NOISE_SCALE: number;
   BIOME_BOUNDARY_NOISE_AMOUNT: number;
-  MOUNTAIN_HEIGHT_THRESHOLD: number;
-  MOUNTAIN_WEIGHT_BOOST: number;
-  VALLEY_HEIGHT_THRESHOLD: number;
-  VALLEY_WEIGHT_BOOST: number;
-  // Mountain height boost - MUST match TerrainSystem.getHeightAtWithoutShore()
-  MOUNTAIN_HEIGHT_BOOST: number;
   // Shoreline config - MUST match TerrainSystem.getHeightAt() and createTileGeometry()
   WATER_THRESHOLD: number;
   WATER_LEVEL_NORMALIZED: number;
@@ -129,11 +123,6 @@ function generateHeightmap(input) {
     BIOME_GAUSSIAN_COEFF,
     BIOME_BOUNDARY_NOISE_SCALE,
     BIOME_BOUNDARY_NOISE_AMOUNT,
-    MOUNTAIN_HEIGHT_THRESHOLD,
-    MOUNTAIN_WEIGHT_BOOST,
-    VALLEY_HEIGHT_THRESHOLD,
-    VALLEY_WEIGHT_BOOST,
-    MOUNTAIN_HEIGHT_BOOST,
     WATER_THRESHOLD,
     WATER_LEVEL_NORMALIZED,
     SHORELINE_THRESHOLD,

@@ -208,8 +208,7 @@ export function buildHeightHelpersJS(): string {
  *   - noise: NoiseGenerator
  *   - biomeCenters: array of biome center objects
  *   - BIOME_GAUSSIAN_COEFF, BIOME_BOUNDARY_NOISE_*: from config
- *   - VALLEY_HEIGHT_THRESHOLD, VALLEY_WEIGHT_BOOST: from config
- *   - BT_DEFAULT, BT_TUNDRA: from buildBiomeConstantsJS()
+ *   - BT_DEFAULT: from buildBiomeConstantsJS()
  */
 export function buildBiomeInfluencesJS(): string {
   return `
@@ -228,10 +227,7 @@ export function buildBiomeInfluencesJS(): string {
       const distance = Math.sqrt(dx * dx + dz * dz);
       const noisyDistance = distance * (1 + boundaryNoise * BIOME_BOUNDARY_NOISE_AMOUNT);
       const normalizedDistance = noisyDistance / center.influence;
-      let weight = Math.exp(-normalizedDistance * normalizedDistance * BIOME_GAUSSIAN_COEFF);
-      if (center.type === BT_TUNDRA && normalizedHeight < VALLEY_HEIGHT_THRESHOLD) {
-        weight *= 1.0 + (VALLEY_HEIGHT_THRESHOLD - normalizedHeight) * VALLEY_WEIGHT_BOOST;
-      }
+      const weight = Math.exp(-normalizedDistance * normalizedDistance * BIOME_GAUSSIAN_COEFF);
       biomeWeightMap[center.type] = (biomeWeightMap[center.type] || 0) + weight;
     }
     const biomeInfluences = [];

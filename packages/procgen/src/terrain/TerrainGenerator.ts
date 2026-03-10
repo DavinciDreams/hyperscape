@@ -88,11 +88,6 @@ export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = {
     gaussianCoeff: 0.15,
     boundaryNoiseScale: 0.003,
     boundaryNoiseAmount: 0.15,
-    mountainHeightThreshold: 0.4,
-    mountainWeightBoost: 2.0,
-    valleyHeightThreshold: 0.4,
-    valleyWeightBoost: 1.5,
-    mountainHeightBoost: 0.5,
   },
   island: DEFAULT_ISLAND_CONFIG,
   shoreline: DEFAULT_SHORELINE_CONFIG,
@@ -253,25 +248,6 @@ export class TerrainGenerator {
   }
 
   /**
-   * Get height with mountain biome boost applied
-   * @returns Height in meters
-   */
-  getHeightWithBiomeBoost(worldX: number, worldZ: number): number {
-    const { maxHeight } = this.config;
-    const baseHeight = this.getBaseHeightAt(worldX, worldZ);
-    const normalizedBase = baseHeight / maxHeight;
-
-    // Apply mountain biome height boost
-    const boostedNormalized = this.biomeSystem.applyMountainHeightBoost(
-      worldX,
-      worldZ,
-      normalizedBase,
-    );
-
-    return boostedNormalized * maxHeight;
-  }
-
-  /**
    * Calculate terrain slope at a position
    */
   private calculateSlopeAt(
@@ -281,19 +257,19 @@ export class TerrainGenerator {
   ): number {
     const { slopeSampleDistance } = this.config.shoreline;
 
-    const northHeight = this.getHeightWithBiomeBoost(
+    const northHeight = this.getBaseHeightAt(
       worldX,
       worldZ + slopeSampleDistance,
     );
-    const southHeight = this.getHeightWithBiomeBoost(
+    const southHeight = this.getBaseHeightAt(
       worldX,
       worldZ - slopeSampleDistance,
     );
-    const eastHeight = this.getHeightWithBiomeBoost(
+    const eastHeight = this.getBaseHeightAt(
       worldX + slopeSampleDistance,
       worldZ,
     );
-    const westHeight = this.getHeightWithBiomeBoost(
+    const westHeight = this.getBaseHeightAt(
       worldX - slopeSampleDistance,
       worldZ,
     );
@@ -359,7 +335,7 @@ export class TerrainGenerator {
     const { waterThreshold } = this.config;
     const { landBand, underwaterBand } = this.config.shoreline;
 
-    const baseHeight = this.getHeightWithBiomeBoost(worldX, worldZ);
+    const baseHeight = this.getBaseHeightAt(worldX, worldZ);
 
     // Skip shoreline adjustment if far from water
     if (

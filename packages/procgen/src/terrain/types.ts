@@ -100,13 +100,13 @@ export interface BiomeInfluence {
  * Configuration for biome generation
  */
 export interface BiomeConfig {
-  /** Grid size for biome center placement (e.g., 3 = 3x3 grid) */
+  /** Grid size for biome center placement (e.g., 3 = 3x3 grid). Ignored when explicitCenters is set. */
   gridSize: number;
-  /** Jitter amount for randomizing positions within grid cells (0-0.5) */
+  /** Jitter amount for randomizing positions within grid cells (0-0.5). Ignored when explicitCenters is set. */
   jitter: number;
-  /** Minimum influence radius in meters */
+  /** Minimum influence radius in meters. Ignored when explicitCenters is set. */
   minInfluence: number;
-  /** Maximum influence radius in meters */
+  /** Maximum influence radius in meters. Ignored when explicitCenters is set. */
   maxInfluence: number;
   /** Gaussian falloff coefficient for influence calculation */
   gaussianCoeff: number;
@@ -114,16 +114,8 @@ export interface BiomeConfig {
   boundaryNoiseScale: number;
   /** Noise amount for boundary variation */
   boundaryNoiseAmount: number;
-  /** Height threshold above which mountains get boosted weight */
-  mountainHeightThreshold: number;
-  /** Weight multiplier for mountains at high elevation */
-  mountainWeightBoost: number;
-  /** Height threshold below which valleys/plains get boosted weight */
-  valleyHeightThreshold: number;
-  /** Weight multiplier for valleys at low elevation */
-  valleyWeightBoost: number;
-  /** Height boost factor for mountain biomes */
-  mountainHeightBoost: number;
+  /** Pre-computed biome centers. When provided, grid-jitter placement is skipped. */
+  explicitCenters?: BiomeCenter[];
 }
 
 // ============== ISLAND CONFIGURATION ==============
