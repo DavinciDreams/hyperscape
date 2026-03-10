@@ -416,6 +416,8 @@ const names = [
   'requestBankState',   // Client -> Server: request bank state without opening bank UI
   // Combat lifecycle packets (appended to avoid shifting existing IDs)
   'combatEnded',        // Server -> Client: PvE combat ended (target dead or disengaged)
+  // Application-level keepalive (prevents Cloudflare/proxy WebSocket idle timeout)
+  'keepalive',          // Client -> Server: periodic heartbeat to keep proxy connection alive
 ]
 
 const byName: Record<string, PacketInfo> = {};

@@ -2386,6 +2386,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       handleRequestBankState(socket, data, this.world);
     this.handlers["requestBankState"] = this.handlers["onRequestBankState"];
 
+    // Application-level keepalive (no-op on server — its only purpose is to keep
+    // Cloudflare/reverse-proxy WebSocket connections alive by sending application data)
+    this.handlers["onKeepalive"] = () => {
+      // Intentionally empty — receiving this packet is enough to reset proxy idle timers
+    };
+    this.handlers["keepalive"] = this.handlers["onKeepalive"];
+
     // NPC interaction handler - client clicked on NPC
     this.handlers["onNpcInteract"] = (socket, data) => {
       const playerEntity = socket.player;

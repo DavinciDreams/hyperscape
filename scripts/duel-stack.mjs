@@ -540,6 +540,7 @@ function withCaptureParams(rawUrl) {
   const params = [];
   if (!disableBridgeCapture) {
     params.push(["bridgeUrl", bridgeCaptureUrl]);
+    params.push(["internalCapture", "1"]);
   }
   if (disableBridgeCapture) {
     params.push(["disableBridgeCapture", "1"]);
