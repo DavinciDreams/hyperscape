@@ -105,7 +105,7 @@ const SPECTATOR_PORT = parseInt(process.env.SPECTATOR_PORT || "4180", 10);
 const EXTERNAL_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
 const ENABLED_STREAM_DESTINATIONS = resolveEnabledStreamDestinations(
   process.env.STREAM_ENABLED_DESTINATIONS ||
-    process.env.DUEL_STREAM_DESTINATIONS,
+  process.env.DUEL_STREAM_DESTINATIONS,
 );
 let externalStatusWriteErrored = false;
 
@@ -147,7 +147,7 @@ const STREAM_CAPTURE_POST_NAV_DELAY_MS = Math.max(
   0,
   Number.parseInt(
     process.env.STREAM_CAPTURE_POST_NAV_DELAY_MS ||
-      (USE_TIMED_STREAM_WARMUP ? "250" : "5000"),
+    (USE_TIMED_STREAM_WARMUP ? "250" : "5000"),
     10,
   ) || 0,
 );
@@ -436,6 +436,7 @@ async function launchCaptureBrowser() {
       "--disable-renderer-backgrounding",
       "--disable-hang-monitor",
     ],
+    ignoreDefaultArgs: ["--enable-unsafe-swiftshader", "--hide-scrollbars"],
   };
 
   if (STREAM_CAPTURE_CHANNEL) {
@@ -489,7 +490,7 @@ async function setupBrowser() {
   const streamReadyTimeoutMs = Math.max(
     10_000,
     Number.parseInt(process.env.STREAM_READY_TIMEOUT_MS || "30000", 10) ||
-      30_000,
+    30_000,
   );
 
   console.log(
@@ -1328,7 +1329,7 @@ async function main() {
   process.on("SIGTERM", shutdown);
 
   // Keep process alive
-  await new Promise(() => {});
+  await new Promise(() => { });
 }
 
 async function cleanup() {
@@ -1348,6 +1349,12 @@ async function cleanup() {
 
   const bridge = getRTMPBridge();
   bridge.stopProcessing();
+
+  // Force kill any remaining FFmpeg strings so they don't become zombies 
+  // preventing the next RTMP connection stream from working.
+  try {
+    spawnSync("pkill", ["-9", "ffmpeg"]);
+  } catch { }
 
   if (browser) {
     await browser.close();
