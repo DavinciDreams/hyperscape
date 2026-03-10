@@ -257,6 +257,12 @@ export function createClientWorld() {
   // browser. RigidBody/Collider nodes already guard against missing PHYSX.
   if (!isStreamingLikeViewport()) {
     replaceSystem(world, "physics", Physics);
+  } else {
+    // The World constructor registers a default PhysicsSystem whose init()
+    // calls waitForPhysX() with a 120s timeout.  If we leave it registered
+    // the entire init chain stalls waiting for PhysX WASM that will never
+    // arrive.  Remove it so the init pipeline proceeds immediately.
+    removeSystem(world, "physics");
   }
 
   // Interaction system - handles clicks, raycasting, context menus
