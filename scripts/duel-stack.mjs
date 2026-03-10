@@ -1456,24 +1456,19 @@ async function main() {
   }
 
   const defaultPublicCdnUrl = `${serverHttpUrl}/game-assets`;
-  const explicitDuelPublicCdnUrl = (process.env.DUEL_PUBLIC_CDN_URL || "").trim();
+  const explicitPublicCdnUrl = (process.env.PUBLIC_CDN_URL || "").trim();
   const inheritedPublicCdnUrl = (
-    process.env.PUBLIC_CDN_URL ||
-    serverEnv.PUBLIC_CDN_URL ||
-    ""
+    serverEnv.PUBLIC_CDN_URL || ""
   ).trim();
-  const allowInheritedPublicCdnUrl = /^(1|true|yes|on)$/i.test(
-    process.env.DUEL_ALLOW_INHERITED_CDN_URL || "",
-  );
   const resolvedPublicCdnUrl = (
-    explicitDuelPublicCdnUrl ||
-    (allowInheritedPublicCdnUrl ? inheritedPublicCdnUrl : "") ||
+    explicitPublicCdnUrl ||
+    inheritedPublicCdnUrl ||
     defaultPublicCdnUrl
   ).replace(/\/$/, "");
   if (options.verbose) {
-    const cdnSource = explicitDuelPublicCdnUrl
-      ? "DUEL_PUBLIC_CDN_URL"
-      : allowInheritedPublicCdnUrl && inheritedPublicCdnUrl
+    const cdnSource = explicitPublicCdnUrl
+      ? "PUBLIC_CDN_URL"
+      : inheritedPublicCdnUrl
         ? "PUBLIC_CDN_URL/server .env"
         : "duel default (/game-assets)";
     log(`using PUBLIC_CDN_URL=${resolvedPublicCdnUrl} (${cdnSource})`);
