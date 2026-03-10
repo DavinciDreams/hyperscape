@@ -180,8 +180,6 @@ function replaceSystem(
  */
 export function createClientWorld() {
   const world = new World();
-  const disableLocalPhysics = isStreamingLikeViewport();
-
   // ============================================================================
   // FRAME BUDGET MANAGER
   // ============================================================================
@@ -254,13 +252,11 @@ export function createClientWorld() {
   world.register("prefs", ClientInterface); // User preferences and UI state
 
   // Physics (local simulation, validated by server)
-  if (disableLocalPhysics) {
-    removeSystem(world, "physics");
-    console.log(
-      "[createClientWorld] Local PhysX disabled for stream/spectator viewport",
-    );
-  } else {
-    replaceSystem(world, "physics", Physics); // PhysX collision and raycasting
+  // Streaming/spectator viewports skip physics entirely — they don't need
+  // collision detection and PhysX WASM can crash in the Playwright capture
+  // browser. RigidBody/Collider nodes already guard against missing PHYSX.
+  if (!isStreamingLikeViewport()) {
+    replaceSystem(world, "physics", Physics);
   }
 
   // Interaction system - handles clicks, raycasting, context menus
@@ -429,14 +425,8 @@ export function createClientWorld() {
         })();
       } else {
         console.log(
-          "[createClientWorld] Skipping tree cache pre-warm for stream/spectator viewport",
+          "[createClientWorld] Skipping tree cache pre-warm and PhysX for stream/spectator viewport",
         );
-        // CRITICAL: We still need to load PhysX even if we skip tree pre-warming!
-        // In stream mode, there is no local player, so PlayerLocal won't trigger the load either.
-        // We trigger it here in the background so colliders and static actors can initialize.
-        waitForPhysX("StreamInitialization", 120000).catch((err) => {
-          console.warn("[createClientWorld] Background PhysX load failed:", err);
-        });
       }
 
       // Pre-warm mob/NPC animated impostors AFTER renderer is ready

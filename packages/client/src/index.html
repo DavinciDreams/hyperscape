@@ -72,16 +72,59 @@
 
   <div id="root"></div>
   <script>
-    // Aggressively unregister stale service workers immediately so they
-    // don't intercept module scripts (like index.tsx) during local dev.
-    if ('serviceWorker' in navigator && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-      navigator.serviceWorker.getRegistrations().then(function (registrations) {
-        for (var i = 0; i < registrations.length; i++) {
-          registrations[i].unregister();
-          console.log('[Dev] Unregistered stale service worker.');
+    // Aggressively unregister stale service workers and clear caches before
+    // loading any module scripts.  A previous production build (or `vite preview`)
+    // may have installed a service worker whose CacheFirst JS strategy now serves
+    // HTML for chunk requests, causing MIME-type errors on dynamic imports.
+    (() => {
+      const isLoopbackHost = ['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(
+        window.location.hostname,
+      );
+      if (!isLoopbackHost) return;
+
+      const reloadMarker = '__hyperscape_sw_reset__';
+
+      void (async () => {
+        let shouldReload = false;
+
+        if ('serviceWorker' in navigator) {
+          try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            if (registrations.length > 0) {
+              await Promise.all(registrations.map(r => r.unregister()));
+              shouldReload = true;
+              console.log('[Dev] Unregistered ' + registrations.length + ' stale service worker(s).');
+            }
+          } catch (e) {
+            console.warn('[Dev] Failed to unregister service workers:', e);
+          }
         }
-      });
-    }
+
+        if ('caches' in window) {
+          try {
+            const cacheKeys = await caches.keys();
+            const staleKeys = cacheKeys.filter(
+              k => k.startsWith('workbox') || k.startsWith('hyperscape'),
+            );
+            if (staleKeys.length > 0) {
+              await Promise.all(staleKeys.map(k => caches.delete(k)));
+              shouldReload = true;
+              console.log('[Dev] Cleared ' + staleKeys.length + ' stale cache bucket(s).');
+            }
+          } catch (e) {
+            console.warn('[Dev] Failed to clear caches:', e);
+          }
+        }
+
+        // Reload once after cleanup so the next page load is free of stale SW interference.
+        if (shouldReload && !sessionStorage.getItem(reloadMarker)) {
+          sessionStorage.setItem(reloadMarker, '1');
+          window.location.reload();
+          return;
+        }
+        sessionStorage.removeItem(reloadMarker);
+      })();
+    })();
   </script>
   <script src="/env.js"></script>
   <script type="module" src="/index.tsx"></script>

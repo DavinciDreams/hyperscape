@@ -71,7 +71,7 @@
     "viewer": "vite --config viewer/vite.config.ts viewer"
   },
   "peerDependencies": {
-    "three": ">=0.182.0",
+    "three": ">=0.183.2",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -84,7 +84,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/three": "0.182.0",
-    "three": "0.182.0",
+    "three": "0.183.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.6",
     "vite": "^6.4.1"

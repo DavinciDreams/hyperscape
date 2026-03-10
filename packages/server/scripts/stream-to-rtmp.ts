@@ -45,15 +45,8 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import {
-  chromium,
-  type Browser,
-  type BrowserContext,
-  type CDPSession,
-  type Page,
-} from "playwright";
+import { chromium, type Browser, type CDPSession, type Page } from "playwright";
 import {
   getRTMPBridge,
   startRTMPBridge,
@@ -118,34 +111,23 @@ let externalStatusWriteErrored = false;
 
 /** Capture mode: 'cdp' (fast) or 'mediarecorder' (legacy) or 'webcodecs' (holy grail) */
 const STREAM_CAPTURE_HEADLESS = process.env.STREAM_CAPTURE_HEADLESS === "true";
-const DEFAULT_CAPTURE_MODE =
-  process.platform === "linux" && !STREAM_CAPTURE_HEADLESS
-    ? "mediarecorder"
-    : "cdp";
-const CAPTURE_MODE = (
-  process.env.STREAM_CAPTURE_MODE?.trim() || DEFAULT_CAPTURE_MODE
-) as "cdp" | "mediarecorder" | "webcodecs";
-const requestedCaptureChannel = process.env.STREAM_CAPTURE_CHANNEL?.trim() || "";
+const DEFAULT_CAPTURE_MODE = "cdp";
+const CAPTURE_MODE = (process.env.STREAM_CAPTURE_MODE?.trim() ||
+  DEFAULT_CAPTURE_MODE) as "cdp" | "mediarecorder" | "webcodecs";
+const requestedCaptureChannel =
+  process.env.STREAM_CAPTURE_CHANNEL?.trim() || "";
 const STREAM_CAPTURE_CHANNEL =
   process.platform === "darwin" && requestedCaptureChannel === "chromium"
     ? "chrome"
     : requestedCaptureChannel;
 const requestedAngleBackend = process.env.STREAM_CAPTURE_ANGLE?.trim() || "";
 const ANGLE_BACKEND =
-  requestedAngleBackend &&
-    requestedAngleBackend.toLowerCase() !== "default"
+  requestedAngleBackend && requestedAngleBackend.toLowerCase() !== "default"
     ? requestedAngleBackend
     : process.platform === "darwin"
       ? "metal"
-      : "";
-const STREAM_CAPTURE_DISABLE_WEBGPU = /^(1|true|yes|on)$/i.test(
-  process.env.STREAM_CAPTURE_DISABLE_WEBGPU || "",
-);
-if (STREAM_CAPTURE_DISABLE_WEBGPU) {
-  throw new Error(
-    "STREAM_CAPTURE_DISABLE_WEBGPU is not supported. Hyperscape capture is WebGPU-only.",
-  );
-}
+      : "vulkan";
+
 const CDP_QUALITY = Math.min(
   100,
   Math.max(1, parseInt(process.env.STREAM_CDP_QUALITY || "80", 10)),
@@ -187,11 +169,9 @@ const VIEWPORT = {
 };
 
 let browser: Browser | null = null;
-let browserContext: BrowserContext | null = null;
 let page: Page | null = null;
 let cdpSession: CDPSession | null = null;
 let selectedGameUrl: string | null = null;
-let persistentUserDataDir: string | null = null;
 let launchTime = Date.now();
 const BROWSER_RESTART_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 Hour
 const CAPTURE_RECOVERY_TIMEOUT_MS = Math.max(
@@ -324,7 +304,9 @@ function withTimeout<T>(
 function hasConfiguredOutput(): boolean {
   const hasTwitchKey =
     isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "twitch") &&
-    Boolean(process.env.TWITCH_STREAM_KEY || process.env.TWITCH_RTMP_STREAM_KEY);
+    Boolean(
+      process.env.TWITCH_STREAM_KEY || process.env.TWITCH_RTMP_STREAM_KEY,
+    );
   const hasYoutubeKey =
     isStreamDestinationEnabled(ENABLED_STREAM_DESTINATIONS, "youtube") &&
     Boolean(
@@ -422,70 +404,40 @@ async function waitForStreamReadiness(
 // ── Browser Launch ─────────────────────────────────────────────────────────
 
 async function launchCaptureBrowser() {
-  const featureFlags = "--enable-features=UseSkiaRenderer,WebGPU";
-  const launchArgs = [
-    // GPU / WebGPU essentials
-    "--use-gl=angle",
-    ...(ANGLE_BACKEND ? [`--use-angle=${ANGLE_BACKEND}`] : []),
-    "--enable-webgl",
-    "--enable-unsafe-webgpu",
-    featureFlags,
-    "--ignore-gpu-blocklist",
-    "--enable-gpu-rasterization",
-    // Sandbox & stability
-    "--no-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-web-security",
-    "--autoplay-policy=no-user-gesture-required",
-    // Prevent Chromium from throttling rendering/timers
-    "--disable-background-timer-throttling",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-    "--disable-hang-monitor",
-  ];
+  // On Linux dual-GPU laptops (Intel iGPU + NVIDIA dGPU), ensure Chrome uses
+  // the discrete NVIDIA GPU for WebGPU.
+  if (process.platform === "linux") {
+    process.env.__NV_PRIME_RENDER_OFFLOAD = "1";
+    process.env.__NV_PRIME_RENDER_OFFLOAD_PROVIDER = "NVIDIA-G0";
+    process.env.__GLX_VENDOR_LIBRARY_NAME = "nvidia";
+    process.env.__VK_LAYER_NV_optimus = "NVIDIA_only";
+    process.env.DRI_PRIME = "1";
+  }
+
+  const featureFlags = "--enable-features=Vulkan,UseSkiaRenderer,WebGPU";
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,
-    args: launchArgs,
+    args: [
+      "--use-gl=angle",
+      `--use-angle=${ANGLE_BACKEND}`,
+      "--enable-webgl",
+      "--enable-unsafe-webgpu",
+      featureFlags,
+      "--ignore-gpu-blocklist",
+      "--enable-gpu-rasterization",
+      // Sandbox & stability
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-web-security",
+      "--autoplay-policy=no-user-gesture-required",
+      // Prevent Chromium from throttling rendering/timers
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-renderer-backgrounding",
+      "--disable-hang-monitor",
+    ],
     ignoreDefaultArgs: ["--enable-unsafe-swiftshader", "--hide-scrollbars"],
   };
-  const usePersistentContext =
-    process.platform === "linux" && STREAM_CAPTURE_HEADLESS === false;
-
-  if (usePersistentContext) {
-    persistentUserDataDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "hyperscape-stream-profile-"),
-    );
-    const persistentLaunchConfig = {
-      ...launchConfig,
-      viewport: VIEWPORT,
-      deviceScaleFactor: 1,
-      serviceWorkers: "block" as const,
-      args: [
-        ...launchArgs,
-        `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
-        "--window-position=0,0",
-      ],
-    };
-
-    console.log(
-      "[Main] Launching persistent browser context for visible X11 window capture...",
-    );
-
-    if (STREAM_CAPTURE_CHANNEL) {
-      return await chromium.launchPersistentContext(
-        persistentUserDataDir,
-        {
-          ...persistentLaunchConfig,
-          channel: STREAM_CAPTURE_CHANNEL,
-        },
-      );
-    }
-
-    return await chromium.launchPersistentContext(
-      persistentUserDataDir,
-      persistentLaunchConfig,
-    );
-  }
 
   if (STREAM_CAPTURE_CHANNEL) {
     console.log(
@@ -533,7 +485,7 @@ async function launchCaptureBrowser() {
 }
 
 async function setupBrowser() {
-  if (browser || browserContext) await cleanup();
+  if (browser) await cleanup();
 
   const streamReadyTimeoutMs = Math.max(
     10_000,
@@ -544,21 +496,13 @@ async function setupBrowser() {
   console.log(
     `[Main] Launching browser (headless=${STREAM_CAPTURE_HEADLESS}, angle=${ANGLE_BACKEND}${STREAM_CAPTURE_CHANNEL ? `, channel=${STREAM_CAPTURE_CHANNEL}` : ""}, mode=${CAPTURE_MODE})...`,
   );
-  const launched = await launchCaptureBrowser();
-
-  if ("newPage" in launched && "pages" in launched) {
-    browserContext = launched as BrowserContext;
-    browser = browserContext.browser();
-    page = browserContext.pages()[0] ?? (await browserContext.newPage());
-  } else {
-    browser = launched as Browser;
-    browserContext = await browser.newContext({
-      viewport: VIEWPORT,
-      deviceScaleFactor: 1,
-      serviceWorkers: "block",
-    });
-    page = await browserContext.newPage();
-  }
+  browser = await launchCaptureBrowser();
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 1,
+    serviceWorkers: "block",
+  });
+  page = await context.newPage();
 
   // Keep compositor frames flowing for CDP screencast even when the scene is
   // visually static (e.g. waiting overlays), otherwise some Chromium builds
@@ -1413,26 +1357,7 @@ async function cleanup() {
   } catch { }
 
   if (browser) {
-    if (browserContext) {
-      await browserContext.close();
-      browserContext = null;
-      browser = null;
-    } else {
-      await browser.close();
-      browser = null;
-    }
-  } else if (browserContext) {
-    await browserContext.close();
-    browserContext = null;
-  }
-
-  if (persistentUserDataDir) {
-    try {
-      fs.rmSync(persistentUserDataDir, { recursive: true, force: true });
-    } catch {
-      // Ignore temporary profile cleanup failures.
-    }
-    persistentUserDataDir = null;
+    await browser.close();
     browser = null;
   }
 

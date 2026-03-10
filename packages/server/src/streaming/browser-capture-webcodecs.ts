@@ -7,7 +7,7 @@
  * It outputs raw H.264 NAL units (Annex B format) over WebSocket directly
  * to Node, which then pipes them to FFmpeg with stream copy (-c:v copy).
  * This completely bypasses all Node-side and FFmpeg CPU video encoding,
- * allowing 60FPS at minimal overhead.
+ * allowing 30fps capture at minimal overhead.
  */
 
 export const WEBCODECS_CAPTURE_SCRIPT = `
@@ -23,7 +23,7 @@ export const WEBCODECS_CAPTURE_SCRIPT = `
   }
 
   const BRIDGE_URL = window.__RTMP_BRIDGE_URL__ || 'ws://localhost:8765';
-  const TARGET_FPS = window.__TARGET_FPS__ || 60;
+  const TARGET_FPS = window.__TARGET_FPS__ || 30;
   const VIDEO_BITRATE = window.__VIDEO_BITRATE__ || 6000000; // 6 Mbps
 
   console.log('[WebCodecs Capture] Starting direct hardware capture...');
