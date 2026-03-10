@@ -21,6 +21,7 @@ import { World } from "../../core/World";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
 import { EventType } from "../../types/events/event-types";
 import { Curve } from "../../extras/animation/Curve";
+import type { WorldOptions } from "../../types/index";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const EFFECT_DURATION = 2.5;
@@ -100,6 +101,7 @@ interface PooledEffect {
 export class ClientTeleportEffectsSystem extends SystemBase {
   // ─── Object pool ────────────────────────────────────────────────────────
   private pool: PooledEffect[] = [];
+  private poolInitialized = false;
 
   // ─── Shared geometries (allocated once) ─────────────────────────────────
   private particleGeo: THREE.PlaneGeometry | null = null;
@@ -130,8 +132,16 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     });
   }
 
-  async init(): Promise<void> {
+  async init(options?: WorldOptions): Promise<void> {
+    await super.init(options as WorldOptions);
+
     this.world.on(EventType.PLAYER_TELEPORTED, this.onPlayerTeleported);
+  }
+
+  private ensurePoolInitialized(): void {
+    if (this.poolInitialized) {
+      return;
+    }
 
     // ─── Shared geometries (lower poly for performance) ─────────────────
     this.particleGeo = new THREE.PlaneGeometry(1, 1);
@@ -187,6 +197,8 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     for (let i = 0; i < POOL_SIZE; i++) {
       this.pool.push(this.createPoolEntry());
     }
+
+    this.poolInitialized = true;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -377,6 +389,8 @@ export class ClientTeleportEffectsSystem extends SystemBase {
   // ═══════════════════════════════════════════════════════════════════════════
   private spawnTeleportEffect(position: THREE.Vector3): void {
     if (!this.world.stage?.scene) return;
+
+    this.ensurePoolInitialized();
 
     // Find an inactive pool entry
     const fx = this.pool.find((e) => !e.active);

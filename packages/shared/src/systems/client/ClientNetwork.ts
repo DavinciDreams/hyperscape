@@ -118,6 +118,7 @@ import type {
 } from "../../types/game/social-types";
 import { uuid } from "../../utils";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
+import { isStreamingLikeViewport } from "../../runtime/clientViewportMode";
 import { PlayerLocal } from "../../entities/player/PlayerLocal";
 import { TileInterpolator } from "./TileInterpolator";
 import { type TileCoord } from "../shared/movement/TileSystem"; // Internal import within shared package
@@ -245,6 +246,11 @@ export class ClientNetwork extends SystemBase {
   private lastWsUrl: string | null = null;
   private lastInitOptions: Record<string, unknown> | null = null;
   private intentionalDisconnect: boolean = false;
+
+  // Application-level keepalive to prevent Cloudflare/proxy WebSocket idle timeout
+  // WS protocol-level ping/pong may not be counted as "activity" by reverse proxies
+  private keepaliveIntervalId: ReturnType<typeof setInterval> | null = null;
+  private static readonly KEEPALIVE_INTERVAL_MS = 30_000; // 30 seconds
 
   // Outgoing message queue (for messages sent while disconnected)
   private outgoingQueue: Array<{
@@ -678,6 +684,22 @@ export class ClientNetwork extends SystemBase {
       this.reconnectTimeoutId = null;
     }
 
+    // Start application-level keepalive to prevent Cloudflare/proxy idle timeout.
+    // WS protocol-level ping/pong frames may not count as "activity" for reverse proxies,
+    // so we send a lightweight application-level packet periodically.
+    if (this.keepaliveIntervalId) {
+      clearInterval(this.keepaliveIntervalId);
+    }
+    this.keepaliveIntervalId = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(writePacket("keepalive", Date.now()));
+        } catch {
+          // Socket may have closed between check and send
+        }
+      }
+    }, ClientNetwork.KEEPALIVE_INTERVAL_MS);
+
     resolve();
   }
 
@@ -989,16 +1011,22 @@ export class ClientNetwork extends SystemBase {
     }
     // Ensure Physics is fully initialized before processing entities
     // This is needed because PlayerLocal uses physics extensions during construction
-    if (!this.world.physics.physics) {
+    const physicsSystem = this.world.physics as
+      | { physics?: unknown }
+      | undefined;
+    const needsLocalPhysics = !isSpectatorMode;
+    if (physicsSystem && !physicsSystem.physics && needsLocalPhysics) {
       // Wait a bit for Physics to initialize
       let attempts = 0;
-      while (!this.world.physics.physics && attempts < 50) {
+      while (!physicsSystem.physics && attempts < 50) {
         await new Promise((resolve) => setTimeout(resolve, 10));
         attempts++;
       }
-      if (!this.world.physics.physics) {
+      if (!physicsSystem.physics) {
         this.logger.error("Physics failed to initialize after waiting");
       }
+    } else if (!physicsSystem && needsLocalPhysics) {
+      this.logger.warn("Physics system unavailable while processing snapshot");
     }
 
     // Already set above
@@ -1761,6 +1789,40 @@ export class ClientNetwork extends SystemBase {
     };
   }
 
+  private getOldestInterpolationSnapshotIndex(
+    state: InterpolationState,
+  ): number {
+    if (state.snapshotCount === 0) {
+      return 0;
+    }
+
+    return state.snapshotCount === this.maxSnapshots ? state.snapshotIndex : 0;
+  }
+
+  private getLatestInterpolationSnapshotIndex(
+    state: InterpolationState,
+  ): number {
+    if (state.snapshotCount === 0) {
+      return 0;
+    }
+
+    if (state.snapshotCount < this.maxSnapshots) {
+      return state.snapshotCount - 1;
+    }
+
+    return (state.snapshotIndex - 1 + this.maxSnapshots) % this.maxSnapshots;
+  }
+
+  private getInterpolationSnapshotAt(
+    state: InterpolationState,
+    chronologicalIndex: number,
+  ): EntitySnapshot {
+    const oldestIndex = this.getOldestInterpolationSnapshotIndex(state);
+    return state.snapshots[
+      (oldestIndex + chronologicalIndex) % this.maxSnapshots
+    ];
+  }
+
   // PERFORMANCE: Track rotation index for progressive interpolation
   private _interpolationRotationIndex = 0;
   private readonly MAX_INTERPOLATIONS_PER_FRAME =
@@ -1899,7 +1961,8 @@ export class ClientNetwork extends SystemBase {
   ): void {
     if (state.snapshotCount < 2) {
       if (state.snapshotCount === 1) {
-        const snapshot = state.snapshots[0];
+        const snapshot =
+          state.snapshots[this.getLatestInterpolationSnapshotIndex(state)];
         state.tempPosition.set(
           snapshot.position[0],
           snapshot.position[1],
@@ -1927,8 +1990,8 @@ export class ClientNetwork extends SystemBase {
     let newer: EntitySnapshot | null = null;
 
     for (let i = 0; i < state.snapshotCount - 1; i++) {
-      const curr = state.snapshots[i];
-      const next = state.snapshots[(i + 1) % this.maxSnapshots];
+      const curr = this.getInterpolationSnapshotAt(state, i);
+      const next = this.getInterpolationSnapshotAt(state, i + 1);
 
       if (curr.timestamp <= renderTime && next.timestamp >= renderTime) {
         older = curr;
@@ -1938,8 +2001,9 @@ export class ClientNetwork extends SystemBase {
     }
 
     if (older && newer) {
+      const snapshotSpan = newer.timestamp - older.timestamp;
       const t =
-        (renderTime - older.timestamp) / (newer.timestamp - older.timestamp);
+        snapshotSpan > 0 ? (renderTime - older.timestamp) / snapshotSpan : 1;
 
       state.tempPosition.set(
         older.position[0] + (newer.position[0] - older.position[0]) * t,
@@ -1967,9 +2031,8 @@ export class ClientNetwork extends SystemBase {
       // Use most recent snapshot
       const timeSinceUpdate = now - state.lastUpdate;
       if (timeSinceUpdate < this.extrapolationLimit) {
-        const lastIndex =
-          (state.snapshotIndex - 1 + this.maxSnapshots) % this.maxSnapshots;
-        const last = state.snapshots[lastIndex];
+        const last =
+          state.snapshots[this.getLatestInterpolationSnapshotIndex(state)];
         state.tempPosition.set(
           last.position[0],
           last.position[1],
@@ -4169,8 +4232,8 @@ export class ClientNetwork extends SystemBase {
   }) => {
     const localPlayer = this.world.getPlayer();
     if (!localPlayer) {
-      // Embedded spectator sessions intentionally have no local player.
-      if (this.isEmbeddedSpectator) {
+      // Embedded spectator sessions and stream modes intentionally have no local player.
+      if (this.isEmbeddedSpectator || isStreamingLikeViewport()) {
         return;
       }
       console.warn("[ClientNetwork] onPlayerUpdated: No local player found");
@@ -4945,6 +5008,12 @@ export class ClientNetwork extends SystemBase {
     // Mark as intentional disconnect to prevent reconnection
     this.intentionalDisconnect = true;
     this.cancelReconnect();
+
+    // Clear keepalive interval
+    if (this.keepaliveIntervalId) {
+      clearInterval(this.keepaliveIntervalId);
+      this.keepaliveIntervalId = null;
+    }
 
     if (this.ws) {
       this.ws.removeEventListener("message", this.onPacket);

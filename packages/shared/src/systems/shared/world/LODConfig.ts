@@ -399,3 +399,23 @@ export function applyLODSettings(settings: {
     `[LODConfig] Applied LOD settings for ${Object.keys(settings.distanceThresholds).length} categories`,
   );
 }
+
+// ============================================================================
+// LOD PATH INFERENCE
+// ============================================================================
+
+/**
+ * Infer LOD1 model path from LOD0 path by appending `_lod1` before `.glb`.
+ * e.g. `trees/oak.glb` → `trees/oak_lod1.glb`
+ */
+export function inferLOD1Path(lod0Path: string): string {
+  return lod0Path.replace(/\.glb$/i, "_lod1.glb");
+}
+
+/**
+ * Infer LOD2 model path from LOD0 path by appending `_lod2` before `.glb`.
+ * e.g. `trees/oak.glb` → `trees/oak_lod2.glb`
+ */
+export function inferLOD2Path(lod0Path: string): string {
+  return lod0Path.replace(/\.glb$/i, "_lod2.glb");
+}

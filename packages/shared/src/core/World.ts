@@ -129,6 +129,33 @@ function _isNetworkWithSocket(
   );
 }
 
+function isInitTraceEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+
+  try {
+    return new URLSearchParams(window.location.search).get("traceInit") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function getSystemDebugName(
+  systemNameMap: Map<System, string>,
+  system: System,
+): string {
+  return systemNameMap.get(system) || system.constructor.name || "Unknown";
+}
+
+interface AsyncTickCallMetric {
+  label: string;
+  phase: "fixedUpdate" | "update" | "lateUpdate";
+  observed: number;
+  inFlight: number;
+  peakInFlight: number;
+  rejections: number;
+  lastSeenAt: number;
+}
+
 /**
  * World - Central Game World Container
  *
@@ -218,6 +245,9 @@ export class World extends EventEmitter {
 
   /** Base URL for loading assets from CDN (e.g., 'https://cdn.example.com/assets/') */
   assetsUrl!: string;
+
+  /** Cached resolved CDN fallback URL (avoids repeated console.warn on every asset resolve) */
+  private _resolvedCdnFallback: string | undefined = undefined;
 
   /** Local directory path for assets (server-side file loading) */
   assetsDir!: string;
@@ -1215,6 +1245,7 @@ export class World extends EventEmitter {
     for (const [name, system] of this.systemsByName) {
       systemNameMap.set(system, name);
     }
+    const traceInit = isInitTraceEnabled();
 
     // Initialize systems wave by wave (systems in same wave run in parallel)
     for (let waveIndex = 0; waveIndex < systemWaves.length; waveIndex++) {
@@ -1235,7 +1266,18 @@ export class World extends EventEmitter {
       });
 
       // Initialize all systems in this wave in parallel
-      await Promise.all(wave.map((system) => system.init(options)));
+      await Promise.all(
+        wave.map(async (system) => {
+          const systemName = getSystemDebugName(systemNameMap, system);
+          if (traceInit) {
+            console.log(`[World.init] -> init ${systemName}`);
+          }
+          await system.init(options);
+          if (traceInit) {
+            console.log(`[World.init] <- init ${systemName}`);
+          }
+        }),
+      );
       initializedSystems += wave.length;
     }
 
@@ -1272,6 +1314,7 @@ export class World extends EventEmitter {
     for (const [key, sys] of this.systemsByName) {
       nameBySystem.set(sys, key);
     }
+    const traceInit = isInitTraceEnabled();
 
     const deferred: System[] = [];
 
@@ -1280,17 +1323,31 @@ export class World extends EventEmitter {
         deferred.push(system);
         continue;
       }
+      const systemName = getSystemDebugName(nameBySystem, system);
+      if (traceInit) {
+        console.log(`[World.start] -> start ${systemName}`);
+      }
       const startResult = system.start();
       if (startResult instanceof Promise) {
         await startResult;
+      }
+      if (traceInit) {
+        console.log(`[World.start] <- start ${systemName}`);
       }
     }
 
     // Start tick-loop systems last so they begin with a clean clock
     for (const system of deferred) {
+      const systemName = getSystemDebugName(nameBySystem, system);
+      if (traceInit) {
+        console.log(`[World.start] -> start ${systemName}`);
+      }
       const startResult = system.start();
       if (startResult instanceof Promise) {
         await startResult;
+      }
+      if (traceInit) {
+        console.log(`[World.start] <- start ${systemName}`);
       }
     }
   }
@@ -1429,6 +1486,7 @@ export class World extends EventEmitter {
 
   /** Maximum samples to keep for averaging */
   private readonly _maxTimingSamples = 30;
+  private _asyncTickCallMetrics = new Map<string, AsyncTickCallMetric>();
 
   /**
    * Enable system timing measurement
@@ -1484,6 +1542,59 @@ export class World extends EventEmitter {
     // Sort by average time (slowest first)
     result.sort((a, b) => b.avg - a.avg);
     return result;
+  }
+
+  getAsyncTickDiagnostics(limit: number = 20): AsyncTickCallMetric[] {
+    return Array.from(this._asyncTickCallMetrics.values())
+      .sort((a, b) => {
+        if (b.inFlight !== a.inFlight) {
+          return b.inFlight - a.inFlight;
+        }
+        if (b.peakInFlight !== a.peakInFlight) {
+          return b.peakInFlight - a.peakInFlight;
+        }
+        return b.observed - a.observed;
+      })
+      .slice(0, limit)
+      .map((metric) => ({ ...metric }));
+  }
+
+  private trackAsyncTickResult(
+    phase: AsyncTickCallMetric["phase"],
+    label: string,
+    result: unknown,
+  ): void {
+    if (!result || typeof result !== "object" || !("then" in result)) {
+      return;
+    }
+
+    const promiseLike = result as Promise<unknown>;
+    const metricLabel = `${phase}:${label}`;
+    const metric = this._asyncTickCallMetrics.get(metricLabel) ?? {
+      label,
+      phase,
+      observed: 0,
+      inFlight: 0,
+      peakInFlight: 0,
+      rejections: 0,
+      lastSeenAt: 0,
+    };
+
+    metric.observed++;
+    metric.inFlight++;
+    metric.lastSeenAt = Date.now();
+    if (metric.inFlight > metric.peakInFlight) {
+      metric.peakInFlight = metric.inFlight;
+    }
+    this._asyncTickCallMetrics.set(metricLabel, metric);
+
+    promiseLike
+      .catch(() => {
+        metric.rejections++;
+      })
+      .finally(() => {
+        metric.inFlight = Math.max(0, metric.inFlight - 1);
+      });
   }
 
   /**
@@ -1587,7 +1698,12 @@ export class World extends EventEmitter {
     // Iterate Set directly instead of Array.from to avoid allocation each frame
     for (const item of this.hot) {
       if (item.fixedUpdate) {
-        item.fixedUpdate(delta);
+        const result = item.fixedUpdate(delta);
+        this.trackAsyncTickResult(
+          "fixedUpdate",
+          `hot:${item.constructor?.name || "anonymous"}`,
+          result,
+        );
       }
     }
 
@@ -1596,7 +1712,12 @@ export class World extends EventEmitter {
       for (let i = 0; i < this.systems.length; i++) {
         const system = this.systems[i];
         const start = performance.now();
-        system.fixedUpdate(delta);
+        const result = system.fixedUpdate(delta);
+        this.trackAsyncTickResult(
+          "fixedUpdate",
+          this._getSystemName(system),
+          result,
+        );
         const elapsed = performance.now() - start;
         const name = this._getSystemName(system);
         this.recordSystemTiming(name, "fixedUpdate", elapsed);
@@ -1604,7 +1725,12 @@ export class World extends EventEmitter {
     } else {
       // Fast path: no timing
       for (const system of this.systems) {
-        system.fixedUpdate(delta);
+        const result = system.fixedUpdate(delta);
+        this.trackAsyncTickResult(
+          "fixedUpdate",
+          this._getSystemName(system),
+          result,
+        );
       }
     }
   }
@@ -1637,7 +1763,12 @@ export class World extends EventEmitter {
   private update(delta: number, _alpha: number): void {
     // Iterate Set directly instead of Array.from to avoid allocation each frame
     for (const item of this.hot) {
-      item.update(delta);
+      const result = item.update(delta);
+      this.trackAsyncTickResult(
+        "update",
+        `hot:${item.constructor?.name || "anonymous"}`,
+        result,
+      );
     }
 
     if (this._measureSystemTiming) {
@@ -1645,7 +1776,12 @@ export class World extends EventEmitter {
       for (let i = 0; i < this.systems.length; i++) {
         const system = this.systems[i];
         const start = performance.now();
-        system.update(delta);
+        const result = system.update(delta);
+        this.trackAsyncTickResult(
+          "update",
+          this._getSystemName(system),
+          result,
+        );
         const elapsed = performance.now() - start;
         const name = this._getSystemName(system);
         this.recordSystemTiming(name, "update", elapsed);
@@ -1653,7 +1789,12 @@ export class World extends EventEmitter {
     } else {
       // Fast path: no timing
       for (const system of this.systems) {
-        system.update(delta);
+        const result = system.update(delta);
+        this.trackAsyncTickResult(
+          "update",
+          this._getSystemName(system),
+          result,
+        );
       }
     }
   }
@@ -1699,7 +1840,12 @@ export class World extends EventEmitter {
     // Iterate Set directly instead of Array.from to avoid allocation each frame
     for (const item of this.hot) {
       if (item.lateUpdate) {
-        item.lateUpdate(delta);
+        const result = item.lateUpdate(delta);
+        this.trackAsyncTickResult(
+          "lateUpdate",
+          `hot:${item.constructor?.name || "anonymous"}`,
+          result,
+        );
       }
     }
 
@@ -1708,7 +1854,12 @@ export class World extends EventEmitter {
       for (let i = 0; i < this.systems.length; i++) {
         const system = this.systems[i];
         const start = performance.now();
-        system.lateUpdate(delta);
+        const result = system.lateUpdate(delta);
+        this.trackAsyncTickResult(
+          "lateUpdate",
+          this._getSystemName(system),
+          result,
+        );
         const elapsed = performance.now() - start;
         const name = this._getSystemName(system);
         this.recordSystemTiming(name, "lateUpdate", elapsed);
@@ -1716,7 +1867,12 @@ export class World extends EventEmitter {
     } else {
       // Fast path: no timing
       for (const system of this.systems) {
-        system.lateUpdate(delta);
+        const result = system.lateUpdate(delta);
+        this.trackAsyncTickResult(
+          "lateUpdate",
+          this._getSystemName(system),
+          result,
+        );
       }
     }
   }
@@ -1867,13 +2023,15 @@ export class World extends EventEmitter {
           // Don't override if we are actually ON the production domain
           !window.location.hostname.includes("hyperscape.club")
         ) {
-          const fallbackCdnUrl =
-            (window as any).__CDN_URL ||
-            `${window.location.origin}/game-assets`;
-          console.warn(
-            `[resolveURL] Origin is ${window.location.origin}, falling back from ${finalAssetsUrl} to local ${fallbackCdnUrl}`,
-          );
-          finalAssetsUrl = fallbackCdnUrl;
+          if (this._resolvedCdnFallback === undefined) {
+            this._resolvedCdnFallback =
+              (window as any).__CDN_URL ||
+              `${window.location.origin}/game-assets`;
+            console.warn(
+              `[resolveURL] Origin is ${window.location.origin}, falling back from ${finalAssetsUrl} to local ${this._resolvedCdnFallback}`,
+            );
+          }
+          finalAssetsUrl = this._resolvedCdnFallback!;
         }
 
         const assetsUrlStr = finalAssetsUrl.endsWith("/")
@@ -2090,7 +2248,7 @@ export class World extends EventEmitter {
    * @returns Bitmask for physics queries
    */
   createLayerMask(...layers: string[]): number {
-    return this.physics.createLayerMask(...layers);
+    return this.physics?.createLayerMask(...layers) ?? 0;
   }
 
   /**
@@ -2249,6 +2407,21 @@ export class World extends EventEmitter {
     }
     super.off(event, fn as (...args: unknown[]) => void, _context, _once);
     return this;
+  }
+
+  /**
+   * Return the number of listeners registered for an event.
+   *
+   * String events are backed by the typed EventBus and tracked in
+   * `__busListenerMap`, so relying on the base EventEmitter count returns false
+   * negatives for world events.
+   */
+  override listenerCount(event: string | symbol): number {
+    if (typeof event === "string") {
+      const busListeners = this.__busListenerMap.get(event)?.size ?? 0;
+      return busListeners + super.listenerCount(event);
+    }
+    return super.listenerCount(event);
   }
 
   /**

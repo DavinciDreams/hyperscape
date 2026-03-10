@@ -5,6 +5,7 @@ import * as THREE from "three";
 
 import type {
   ArrowEffect,
+  CombatHudEffect,
   FishingEffect,
   GlowEffect,
   SpellEffect,
@@ -477,11 +478,6 @@ const GlowParticles: React.FC<{ effect: GlowEffect }> = ({ effect }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  // Build a combined glow texture using the first palette color
-  const primaryColor = useMemo(
-    () => parseInt(effect.palette[0]?.hex.replace("#", "") ?? "ffffff", 16),
-    [effect.palette],
-  );
   const glowTex = useMemo(() => createGlowTexture(0xffffff, 64, 2.5), []);
   const glowMat = useMemo(
     () =>
@@ -529,8 +525,7 @@ const GlowParticles: React.FC<{ effect: GlowEffect }> = ({ effect }) => {
       let x = 0,
         y = 0,
         z = 0,
-        scale = 0.15,
-        opacity = 1;
+        scale = 0.15;
 
       switch (s.type) {
         case "pillar": {
@@ -540,7 +535,6 @@ const GlowParticles: React.FC<{ effect: GlowEffect }> = ({ effect }) => {
           y = 0.5 + bob;
           z = Math.cos(t * 0.3 + s.phase) * 0.04;
           scale = 0.5 + Math.sin(t * 0.7 + s.phase) * 0.08;
-          opacity = 0.3 + Math.sin(t * 0.5 + s.phase) * 0.1;
           break;
         }
         case "wisp": {
@@ -551,9 +545,6 @@ const GlowParticles: React.FC<{ effect: GlowEffect }> = ({ effect }) => {
           y = (s.height ?? 0.3) + Math.sin(cycleT * Math.PI * 2.5) * 0.3;
           z = Math.sin(angle) * r;
           scale = 0.12 + Math.sin(cycleT * Math.PI * 3) * 0.03;
-          const fadeIn = Math.min(cycleT * 3, 1);
-          const fadeOut = Math.min((1 - cycleT) * 3, 1);
-          opacity = 0.5 * fadeIn * fadeOut;
           break;
         }
         case "spark": {
@@ -563,9 +554,6 @@ const GlowParticles: React.FC<{ effect: GlowEffect }> = ({ effect }) => {
           y = -0.2 + cycleT * 1.8;
           z = Math.cos((s.angle ?? 0) + cycleT * 1.5) * (s.driftR ?? 0.15);
           scale = 0.06 * (1 - cycleT * 0.5);
-          const sIn = Math.min(cycleT * 8, 1);
-          const sOut = Math.pow(1 - cycleT, 1.5);
-          opacity = 0.85 * sIn * sOut;
           break;
         }
         case "base": {
@@ -575,7 +563,6 @@ const GlowParticles: React.FC<{ effect: GlowEffect }> = ({ effect }) => {
           y = -0.35;
           z = Math.sin(bAngle) * bR;
           scale = 0.3 + Math.sin(t * 0.8 + s.phase) * 0.04;
-          opacity = 0.15 + Math.sin(t * 0.8) * 0.06;
           break;
         }
         case "riseSpread": {
@@ -583,9 +570,6 @@ const GlowParticles: React.FC<{ effect: GlowEffect }> = ({ effect }) => {
           y = -0.2 + cycleT * (s.speed ?? 1);
           z = (s.offsetZ ?? 0) * (1 + cycleT * 0.5);
           scale = (s.baseScale ?? 0.2) * (1 - cycleT * 0.7);
-          const fIn = Math.min(cycleT * 10, 1);
-          const fOut = Math.pow(1 - cycleT, 1.2);
-          opacity = 0.9 * fIn * fOut;
           break;
         }
       }
@@ -737,20 +721,6 @@ const WaterParticles: React.FC<{ effect: FishingEffect }> = ({ effect }) => {
         vertexColors: true,
       }),
     [glowTex],
-  );
-
-  const ringMat = useMemo(
-    () =>
-      new THREE.MeshBasicMaterial({
-        map: ringTex,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        fog: false,
-        color: baseColor,
-      }),
-    [ringTex, baseColor],
   );
 
   // Per-instance colors
@@ -937,7 +907,7 @@ function hermite(t: number): number {
   return 0.95 + p * 0.05;
 }
 
-const TeleportScene: React.FC<{ effect: TeleportEffect }> = ({ effect }) => {
+const TeleportScene: React.FC = () => {
   const runeRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
   const innerBeamRef = useRef<THREE.Mesh>(null);
@@ -1026,8 +996,6 @@ const TeleportScene: React.FC<{ effect: TeleportEffect }> = ({ effect }) => {
 
   // Glow textures for various components
   const cyanGlow = useMemo(() => createGlowTexture(0x66ccff, 64, 2.0), []);
-  const whiteGlow = useMemo(() => createGlowTexture(0xffffff, 64, 2.5), []);
-
   // Helix particle seeds
   const helixSeeds = useMemo(() => {
     const arr: {
@@ -1642,6 +1610,9 @@ function isWater(e: VFXEffect): e is FishingEffect {
 function isTeleport(e: VFXEffect): e is TeleportEffect {
   return e.category === "teleport";
 }
+function isCombatHud(e: VFXEffect): e is CombatHudEffect {
+  return e.category === "combatHud";
+}
 
 export const VFXPreview: React.FC<{ effect: VFXEffect }> = ({ effect }) => {
   // R3F live previews
@@ -1667,7 +1638,7 @@ export const VFXPreview: React.FC<{ effect: VFXEffect }> = ({ effect }) => {
             {isArrow(effect) && <ArrowMesh effect={effect} />}
             {isGlow(effect) && <GlowParticles effect={effect} />}
             {isWater(effect) && <WaterParticles effect={effect} />}
-            {isTeleport(effect) && <TeleportScene effect={effect} />}
+            {isTeleport(effect) && <TeleportScene />}
           </PreviewScene>
         </Canvas>
       </div>
@@ -1675,7 +1646,7 @@ export const VFXPreview: React.FC<{ effect: VFXEffect }> = ({ effect }) => {
   }
 
   // Canvas previews for combat HUD
-  if (effect.category === "combatHud") {
+  if (isCombatHud(effect)) {
     return (
       <div className="w-full rounded-lg overflow-hidden">
         {effect.id === "damage_splats" ? (

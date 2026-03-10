@@ -109,6 +109,7 @@ import {
   handleCharacterCreate,
   handleCharacterSelected,
   handleEnterWorld,
+  collectInitialSyncEntities,
 } from "./character-selection";
 import { TileMovementManager } from "./tile-movement";
 import { MobTileMovementManager } from "./mob-tile-movement";
@@ -125,6 +126,7 @@ import { ConnectionHandler } from "./connection-handler";
 import { InteractionSessionManager } from "./InteractionSessionManager";
 import { handleChatAdded } from "./handlers/chat";
 import {
+  destroyAllRateLimiters,
   getGlobalSocketRateLimiter,
   getUnknownMessageRateLimiter,
 } from "./services/SlidingWindowRateLimiter";
@@ -173,6 +175,7 @@ import {
   handleBankWithdrawToEquipment,
   handleBankDepositEquipment,
   handleBankDepositAllEquipment,
+  handleRequestBankState,
 } from "./handlers/bank";
 import {
   handleEntityModified,
@@ -271,6 +274,21 @@ import { registerDuelEventListeners } from "./duel-events";
 const DEBUG_ATTACK_MOB =
   process.env.DEBUG_ATTACK_MOB === "true" ||
   process.env.DEBUG_ATTACK_MOB === "1";
+const DEBUG_AGENT_DASHBOARD_SYNC =
+  process.env.DEBUG_AGENT_DASHBOARD_SYNC === "true" ||
+  process.env.DEBUG_AGENT_DASHBOARD_SYNC === "1";
+const DEBUG_DUEL_PACKET_TRAFFIC =
+  process.env.DEBUG_DUEL_PACKET_TRAFFIC === "true" ||
+  process.env.DEBUG_DUEL_PACKET_TRAFFIC === "1";
+
+interface NetworkMessageMetric {
+  method: string;
+  received: number;
+  inFlight: number;
+  peakInFlight: number;
+  errors: number;
+  lastSeenAt: number;
+}
 const IS_PLAYWRIGHT_TEST = process.env.PLAYWRIGHT_TEST === "true";
 const PLAYWRIGHT_LOG_THROTTLE_MS = Math.max(
   1000,
@@ -361,6 +379,25 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   /** Character ID to socket mapping for sending goal overrides */
   static characterSockets: Map<string, ServerSocket> = new Map();
 
+  /** Agent personality traits (characterId -> traits) for dashboard display */
+  static agentPersonality: Map<
+    string,
+    {
+      sociability: number;
+      helpfulness: number;
+      adventurousness: number;
+      chattiness: number;
+      aggression: number;
+      patience: number;
+    }
+  > = new Map();
+
+  /** Agent desire scores (characterId -> scored candidates) for dashboard display */
+  static agentDesireScores: Map<
+    string,
+    Array<{ goalType: string; score: number; breakdown: string }>
+  > = new Map();
+
   /** Agent thought storage (characterId -> recent thoughts) for dashboard display */
   static agentThoughts: Map<
     string,
@@ -369,6 +406,19 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       type: "situation" | "evaluation" | "thinking" | "decision" | "action";
       content: string;
       timestamp: number;
+      health?: {
+        current: number;
+        max: number;
+        percent: number;
+        urgency: "critical" | "warning" | "safe";
+      };
+      decisionPath?:
+        | "short-circuit"
+        | "llm"
+        | "scripted"
+        | "planner"
+        | "curiosity";
+      providers?: string[];
     }>
   > = new Map();
 
@@ -421,6 +471,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     event: string;
     fn: (...args: unknown[]) => void;
   }> = [];
+
+  /** Cleanup function for duel event listeners */
+  private cleanupDuelEventListeners: (() => void) | null = null;
+  private readonly messageMetrics = new Map<string, NetworkMessageMetric>();
 
   constructor(world: World) {
     super(world);
@@ -501,6 +555,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     ServerNetwork.capAgentDashboardMap(ServerNetwork.agentGoalsPaused);
     ServerNetwork.capAgentDashboardMap(ServerNetwork.agentThoughts);
     ServerNetwork.capAgentDashboardMap(ServerNetwork.characterSockets);
+    ServerNetwork.capAgentDashboardMap(ServerNetwork.agentPersonality);
+    ServerNetwork.capAgentDashboardMap(ServerNetwork.agentDesireScores);
   }
 
   /**
@@ -861,7 +917,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Duel system - server-authoritative player-to-player dueling (OSRS-style)
     // Manages duel sessions, rules negotiation, stakes, and combat enforcement
     this.duelSystem = new DuelSystem(this.world);
-    this.duelSystem.init();
 
     // Store duel system on world so handlers can access it
     (this.world as { duelSystem?: DuelSystem }).duelSystem = this.duelSystem;
@@ -875,8 +930,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.duelSystem,
     );
 
-    // Register all duel world-event listeners (countdown, fight, stakes, etc.)
-    registerDuelEventListeners({
+    // Register duel world-event listeners before DuelSystem.init() so the duel
+    // stake-settlement safety check sees the listener graph in its ready state.
+    this.cleanupDuelEventListeners = registerDuelEventListeners({
       world: this.world,
       broadcastManager: this.broadcastManager,
       getSocketByPlayerId: this.getSocketByPlayerId.bind(this),
@@ -894,15 +950,21 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         ),
     });
 
-    // DuelScheduler - automated agent-vs-agent duel pairing for continuous PvP
-    // This system pairs available AI agents and schedules continuous duels
-    // Enable via DUEL_SCHEDULER_ENABLED=true environment variable
-    this.duelScheduler = new DuelScheduler(this.world);
-    this.duelScheduler.init();
+    this.duelSystem.init();
 
-    // Store duel scheduler on world for external access
-    (this.world as { duelScheduler?: DuelScheduler }).duelScheduler =
-      this.duelScheduler;
+    // DuelScheduler - automated agent-vs-agent duel pairing for continuous PvP
+    // Disable it automatically when streaming duel mode owns orchestration.
+    const legacyDuelSchedulerEnabled =
+      process.env.DUEL_SCHEDULER_ENABLED !== "false" &&
+      process.env.STREAMING_DUEL_ENABLED !== "true";
+    if (legacyDuelSchedulerEnabled) {
+      this.duelScheduler = new DuelScheduler(this.world);
+      this.duelScheduler.init();
+
+      // Store duel scheduler on world for external access
+      (this.world as { duelScheduler?: DuelScheduler }).duelScheduler =
+        this.duelScheduler;
+    }
 
     // DuelBettingBridge - connects duel results to Solana prediction markets
     // Creates betting markets when duels are scheduled and resolves them when complete
@@ -1141,6 +1203,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       ServerNetwork.agentAvailableGoals.delete(event.playerId);
       ServerNetwork.agentGoalsPaused.delete(event.playerId);
       ServerNetwork.agentThoughts.delete(event.playerId);
+      ServerNetwork.agentPersonality.delete(event.playerId);
+      ServerNetwork.agentDesireScores.delete(event.playerId);
     });
 
     // Seed spatial index on initial join so sendToNearby() works from first tick
@@ -1429,12 +1493,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.world,
       this.sockets,
       this.broadcastManager,
-      () => this.spawn,
       this.db,
     );
 
     // Register handlers
     this.registerHandlers();
+
+    // Start the core game tick loop
+    // Without this, the server is completely frozen (no movement, combat, or AI processing)
+    this.tickSystem.start();
   }
 
   /**
@@ -2156,17 +2223,35 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           );
         }
 
+        // Store personality traits if provided
+        if (goalData.personality) {
+          ServerNetwork.agentPersonality.set(
+            goalData.characterId,
+            goalData.personality,
+          );
+        }
+
+        // Store desire scores if provided
+        if (goalData.desireScores) {
+          ServerNetwork.agentDesireScores.set(
+            goalData.characterId,
+            goalData.desireScores,
+          );
+        }
+
         // Track socket for this character (for sending goal overrides)
         ServerNetwork.characterSockets.set(goalData.characterId, socket);
         this.trimAgentDashboardCaches();
 
-        console.log(
-          `[ServerNetwork] Goal synced for character ${goalData.characterId}:`,
-          goalData.goal ? "active" : "cleared",
-          goalData.availableGoals
-            ? `(${goalData.availableGoals.length} available goals)`
-            : "",
-        );
+        if (DEBUG_AGENT_DASHBOARD_SYNC) {
+          console.log(
+            `[ServerNetwork] Goal synced for character ${goalData.characterId}:`,
+            goalData.goal ? "active" : "cleared",
+            goalData.availableGoals
+              ? `(${goalData.availableGoals.length} available goals)`
+              : "",
+          );
+        }
       }
     };
 
@@ -2190,9 +2275,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         ServerNetwork.agentThoughts.set(thoughtData.characterId, thoughts);
         this.trimAgentDashboardCaches();
 
-        console.log(
-          `[ServerNetwork] Agent thought synced for character ${thoughtData.characterId}: [${thoughtData.thought.type}]`,
-        );
+        if (DEBUG_AGENT_DASHBOARD_SYNC) {
+          console.log(
+            `[ServerNetwork] Agent thought synced for character ${thoughtData.characterId}: [${thoughtData.thought.type}]`,
+          );
+        }
       }
     };
 
@@ -2293,6 +2380,18 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.handlers["onBankDepositEquipment"];
     this.handlers["bankDepositAllEquipment"] =
       this.handlers["onBankDepositAllEquipment"];
+
+    // Bank state query (no bank NPC required)
+    this.handlers["onRequestBankState"] = (socket, data) =>
+      handleRequestBankState(socket, data, this.world);
+    this.handlers["requestBankState"] = this.handlers["onRequestBankState"];
+
+    // Application-level keepalive (no-op on server — its only purpose is to keep
+    // Cloudflare/reverse-proxy WebSocket connections alive by sending application data)
+    this.handlers["onKeepalive"] = () => {
+      // Intentionally empty — receiving this packet is enough to reset proxy idle timers
+    };
+    this.handlers["keepalive"] = this.handlers["onKeepalive"];
 
     // NPC interaction handler - client clicked on NPC
     this.handlers["onNpcInteract"] = (socket, data) => {
@@ -2703,11 +2802,24 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           entity.data.owner = socket.id;
         }
 
-        // Send all existing entities to reconnected client
-        if (this.world.entities?.items) {
-          for (const [, ent] of this.world.entities.items.entries()) {
-            sendToFn(socket.id, "entityAdded", ent.serialize());
-          }
+        const relevantEntities =
+          entity && "position" in entity
+            ? collectInitialSyncEntities(
+                this.world,
+                entity.position.x,
+                entity.position.z,
+                reconnectedPlayerId,
+              )
+            : [];
+        const relevantEntityIds = new Set(
+          relevantEntities.map((entry) => entry.id),
+        );
+
+        if (entity) {
+          sendToFn(socket.id, "entityAdded", entity.serialize());
+        }
+        for (const ent of relevantEntities) {
+          sendToFn(socket.id, "entityAdded", ent.serialize());
         }
 
         // Re-emit PLAYER_JOINED so systems re-initialize for this session
@@ -2732,6 +2844,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           for (const [entityId, ent] of this.world.entities.items.entries()) {
             if (
               entityId !== reconnectedPlayerId &&
+              relevantEntityIds.has(entityId) &&
               (ent as { type?: string }).type === "player"
             ) {
               const eq = equipSys.getPlayerEquipment(entityId);
@@ -2838,6 +2951,14 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     ServerNetwork.agentAvailableGoals.clear();
     ServerNetwork.agentGoalsPaused.clear();
     ServerNetwork.agentThoughts.clear();
+    ServerNetwork.agentPersonality.clear();
+    ServerNetwork.agentDesireScores.clear();
+
+    // Clean up duel event listeners to prevent memory leak
+    if (this.cleanupDuelEventListeners) {
+      this.cleanupDuelEventListeners();
+      this.cleanupDuelEventListeners = null;
+    }
 
     // Destroy trading system first - cancels all active trades and clears cleanup interval
     if (this.tradingSystem) {
@@ -2854,6 +2975,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();
     this.eventBridge.destroy();
+    destroyAllRateLimiters();
+    this.messageMetrics.clear();
     this.tickSystem.stop();
 
     for (const [_id, socket] of this.sockets) {
@@ -3059,6 +3182,37 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     return true;
   }
 
+  private getOrCreateMessageMetric(method: string): NetworkMessageMetric {
+    let metric = this.messageMetrics.get(method);
+    if (!metric) {
+      metric = {
+        method,
+        received: 0,
+        inFlight: 0,
+        peakInFlight: 0,
+        errors: 0,
+        lastSeenAt: 0,
+      };
+      this.messageMetrics.set(method, metric);
+    }
+    return metric;
+  }
+
+  getMessageDiagnostics(limit: number = 20): NetworkMessageMetric[] {
+    return Array.from(this.messageMetrics.values())
+      .sort((a, b) => {
+        if (b.inFlight !== a.inFlight) {
+          return b.inFlight - a.inFlight;
+        }
+        if (b.peakInFlight !== a.peakInFlight) {
+          return b.peakInFlight - a.peakInFlight;
+        }
+        return b.received - a.received;
+      })
+      .slice(0, limit)
+      .map((metric) => ({ ...metric }));
+  }
+
   enqueue(socket: ServerSocket | Socket, method: string, data: unknown): void {
     // CRITICAL SECURITY: Global rate limiting to prevent DoS attacks (100 msg/sec per socket)
     const socketId = (socket as ServerSocket).id;
@@ -3082,6 +3236,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         return;
       }
     }
+    const metric = this.getOrCreateMessageMetric(method);
+    metric.received++;
+    metric.lastSeenAt = Date.now();
     this.queue.push([socket as ServerSocket, method, data]);
   }
 
@@ -3093,24 +3250,42 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   flush(): void {
-    while (this.queue.length) {
-      const [socket, method, data] = this.queue.shift()!;
+    if (this.queue.length === 0) {
+      return;
+    }
 
+    const queuedMessages = this.queue;
+    this.queue = [];
+
+    for (const [socket, method, data] of queuedMessages) {
       // Debug: Log duel-related packets
-      if (method.includes("duel") || method.includes("Duel")) {
+      if (
+        DEBUG_DUEL_PACKET_TRAFFIC &&
+        (method.includes("duel") || method.includes("Duel"))
+      ) {
         console.log(`[ServerNetwork] Received duel packet: ${method}`, data);
       }
 
       const handler = this.handlers[method];
       if (handler) {
+        const metric = this.getOrCreateMessageMetric(method);
         const result = handler.call(this, socket, data);
         if (result && typeof result.then === "function") {
-          result.catch((err: Error) => {
-            console.error(
-              `[ServerNetwork] Error in async handler ${method}:`,
-              err,
-            );
-          });
+          metric.inFlight++;
+          if (metric.inFlight > metric.peakInFlight) {
+            metric.peakInFlight = metric.inFlight;
+          }
+          result
+            .catch((err: Error) => {
+              metric.errors++;
+              console.error(
+                `[ServerNetwork] Error in async handler ${method}:`,
+                err,
+              );
+            })
+            .finally(() => {
+              metric.inFlight = Math.max(0, metric.inFlight - 1);
+            });
         }
       } else {
         // SECURITY: Rate limit unknown message types to prevent log spam DoS

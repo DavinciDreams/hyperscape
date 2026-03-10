@@ -22,6 +22,7 @@ const serverEnvPath = path.join(workspaceRoot, "packages/server/.env");
 const foundryBin = path.join(os.homedir(), ".foundry", "bin");
 const contractsBin = path.join(contractsDir, "node_modules", ".bin");
 const envPATH = [contractsBin, foundryBin, process.env.PATH].filter(Boolean).join(path.delimiter);
+const bunStoreDir = path.join(workspaceRoot, "node_modules", ".bun");
 
 const ANVIL_PORT = 8545;
 const ANVIL_HOST = "127.0.0.1";
@@ -119,8 +120,65 @@ function updateServerEnv(address) {
     fs.writeFileSync(serverEnvPath, envContent);
 }
 
+function harmonizeMudTrpcPeers() {
+    const stableServerDir = path.join(
+        bunStoreDir,
+        "@trpc+server@10.34.0",
+        "node_modules",
+        "@trpc",
+        "server",
+    );
+    if (!fs.existsSync(stableServerDir) || !fs.existsSync(bunStoreDir)) {
+        return;
+    }
+
+    const storeEntries = fs.readdirSync(bunStoreDir, { withFileTypes: true });
+    const patchedLinks = [];
+    for (const entry of storeEntries) {
+        if (!entry.isDirectory() || !entry.name.startsWith("@trpc+client@10.34.0")) {
+            continue;
+        }
+
+        const trpcDir = path.join(bunStoreDir, entry.name, "node_modules", "@trpc");
+        const serverLink = path.join(trpcDir, "server");
+        if (!fs.existsSync(serverLink)) {
+            continue;
+        }
+
+        let stats;
+        try {
+            stats = fs.lstatSync(serverLink);
+        } catch {
+            continue;
+        }
+        if (!stats.isSymbolicLink()) {
+            continue;
+        }
+
+        const currentTarget = fs.readlinkSync(serverLink);
+        if (currentTarget.includes("@trpc+server@10.34.0")) {
+            continue;
+        }
+
+        const desiredTarget = path.relative(trpcDir, stableServerDir);
+        fs.unlinkSync(serverLink);
+        fs.symlinkSync(desiredTarget, serverLink, "dir");
+        patchedLinks.push(`${entry.name} -> ${desiredTarget}`);
+    }
+
+    if (patchedLinks.length > 0) {
+        log(
+            `Patched Bun tRPC peer links for MUD deploy: ${patchedLinks.join(", ")}`,
+            colors.cyan,
+        );
+    }
+}
+
 async function deployContracts() {
     log("Deploying contracts...", colors.blue);
+    // Bun can peer-resolve MUD's @trpc/client 10.x packages to @trpc/server 11.x,
+    // which breaks `mud deploy` under Node before contract deployment starts.
+    harmonizeMudTrpcPeers();
 
     return new Promise((resolve, reject) => {
         // avoid "bun run" here because MUD uses tsx internally which crashes under bun
@@ -128,10 +186,13 @@ async function deployContracts() {
         const mudBin = fs.existsSync(path.join(contractsDir, "node_modules/.bin/mud"))
             ? path.join(contractsDir, "node_modules/.bin/mud")
             : path.resolve(contractsDir, "../../node_modules/.bin/mud");
+        const cleanEnv = { ...process.env, PATH: envPATH };
+        delete cleanEnv.NODE_OPTIONS;
+
         const child = spawn("node", [mudBin, "deploy"], {
             cwd: contractsDir,
             stdio: "inherit",
-            env: { ...process.env, PATH: envPATH },
+            env: cleanEnv,
         });
 
         child.on("error", (err) => {

@@ -14,7 +14,8 @@
  */
 
 import type { World } from "@hyperscape/shared";
-import { EventType } from "@hyperscape/shared";
+import { EventType, DEFAULT_DUEL_RULES } from "@hyperscape/shared";
+import crypto from "node:crypto";
 
 /** Type for network with send method */
 interface NetworkWithSend {
@@ -138,6 +139,9 @@ export class StreamingDuelScheduler {
     fn: (...args: unknown[]) => void;
   }> = [];
 
+  /** Fast fight broadcast interval (200ms during FIGHTING) (#11) */
+  private fightBroadcastInterval: ReturnType<typeof setInterval> | null = null;
+
   /** Guard against concurrent startCountdown() invocations */
   private _startCountdownInProgress = false;
 
@@ -146,6 +150,79 @@ export class StreamingDuelScheduler {
 
   /** Scheduler state for state machine */
   private schedulerState: "IDLE" | "WAITING_FOR_AGENTS" | "ACTIVE" = "IDLE";
+
+  /** Whether a graceful restart is pending (waits for current duel to end) */
+  private _pendingGracefulRestart = false;
+
+  // ---- Streaming State Cache (Memory Optimization) ----
+  /** Cached streaming state to avoid recreating objects every 500ms */
+  private _cachedStreamingState: StreamingStateUpdate | null = null;
+  /** Last tick when streaming state was fully regenerated */
+  private _lastStreamingStateTick = -1;
+  /** Current game tick counter (updated by tick loop) */
+  private _currentTick = 0;
+  /** Last phase when state was generated (for cache invalidation) */
+  private _lastStreamingStatePhase: StreamingPhase | null = null;
+  /** Last cycle ID when state was generated */
+  private _lastStreamingStateCycleId: string | null = null;
+  /** Cached agent objects to avoid recreation (reused in getStreamingState) */
+  private _cachedAgent1: StreamingStateUpdate["cycle"]["agent1"] = null;
+  private _cachedAgent2: StreamingStateUpdate["cycle"]["agent1"] = null;
+  /** Pre-allocated idle cycle object (reused when no active cycle) */
+  private readonly _idleCycleObject: StreamingStateUpdate["cycle"] = {
+    cycleId: "",
+    phase: "IDLE",
+    cycleStartTime: 0,
+    phaseStartTime: 0,
+    phaseEndTime: 0,
+    timeRemaining: 0,
+    agent1: null,
+    agent2: null,
+    duelId: null,
+    duelKeyHex: null,
+    betOpenTime: null,
+    betCloseTime: null,
+    countdown: null,
+    fightStartTime: null,
+    duelEndTime: null,
+    arenaPositions: null,
+    winnerId: null,
+    winnerName: null,
+    winReason: null,
+    seed: null,
+    replayHash: null,
+  };
+  /** Pre-allocated active cycle object (reused during active cycle) */
+  private readonly _activeCycleObject: StreamingStateUpdate["cycle"] = {
+    cycleId: "",
+    phase: "IDLE",
+    cycleStartTime: 0,
+    phaseStartTime: 0,
+    phaseEndTime: 0,
+    timeRemaining: 0,
+    agent1: null,
+    agent2: null,
+    duelId: null,
+    duelKeyHex: null,
+    betOpenTime: null,
+    betCloseTime: null,
+    countdown: null,
+    fightStartTime: null,
+    duelEndTime: null,
+    arenaPositions: null,
+    winnerId: null,
+    winnerName: null,
+    winReason: null,
+    seed: null,
+    replayHash: null,
+  };
+  /** Pre-allocated streaming state return object */
+  private readonly _streamingStateObject: StreamingStateUpdate = {
+    type: "STREAMING_STATE_UPDATE",
+    cycle: this._idleCycleObject,
+    leaderboard: [],
+    cameraTarget: null,
+  };
 
   constructor(world: World) {
     this.world = world;
@@ -260,7 +337,17 @@ export class StreamingDuelScheduler {
           }
         }
       },
+      onNextDuelPairChanged: (pair) => {
+        if (pair) this.notifyOnDeckAgents();
+      },
     });
+  }
+
+  private deriveStreamingDuelKeyHex(cycleId: string): string {
+    return crypto
+      .createHash("sha256")
+      .update(`hyperscape-streaming-duel:${cycleId}`)
+      .digest("hex");
   }
 
   // ============================================================================
@@ -294,6 +381,61 @@ export class StreamingDuelScheduler {
   /** Get current cycle (public accessor) */
   getCurrentCycle(): StreamingDuelCycle | null {
     return this.currentCycle;
+  }
+
+  /**
+   * Request a graceful server restart after the current duel ends.
+   * The server will complete the current FIGHTING/RESOLUTION phase,
+   * then trigger a SIGTERM to allow PM2 to restart it with new code.
+   *
+   * @returns Whether the restart was scheduled (false if already pending)
+   */
+  requestGracefulRestart(): boolean {
+    if (this._pendingGracefulRestart) {
+      Logger.info("StreamingDuelScheduler", "Graceful restart already pending");
+      return false;
+    }
+
+    this._pendingGracefulRestart = true;
+    const phase = this.currentCycle?.phase ?? "IDLE";
+
+    if (phase === "IDLE" || phase === "ANNOUNCEMENT") {
+      // No active duel, restart immediately
+      Logger.info(
+        "StreamingDuelScheduler",
+        "No active duel, triggering immediate graceful restart",
+      );
+      this.triggerGracefulRestart();
+    } else {
+      Logger.info(
+        "StreamingDuelScheduler",
+        `Graceful restart scheduled after current duel (phase: ${phase})`,
+      );
+    }
+
+    return true;
+  }
+
+  /**
+   * Check if a graceful restart is pending
+   */
+  isPendingRestart(): boolean {
+    return this._pendingGracefulRestart;
+  }
+
+  /**
+   * Trigger the actual graceful restart by sending SIGTERM to self.
+   * PM2 will handle the restart.
+   */
+  private triggerGracefulRestart(): void {
+    Logger.info(
+      "StreamingDuelScheduler",
+      "Triggering graceful restart (SIGTERM)",
+    );
+    // Give a moment for logs to flush
+    setTimeout(() => {
+      process.kill(process.pid, "SIGTERM");
+    }, 500);
   }
 
   /** Initialize the streaming duel scheduler */
@@ -349,6 +491,8 @@ export class StreamingDuelScheduler {
       clearInterval(this.broadcastInterval);
       this.broadcastInterval = null;
     }
+
+    this.stopFightBroadcast();
 
     if (this.countdownTimeout) {
       clearTimeout(this.countdownTimeout);
@@ -709,6 +853,9 @@ export class StreamingDuelScheduler {
     }
 
     this.phaseStateMachine.transition("ANNOUNCEMENT");
+    const duelId = `streaming-${cycleId}`;
+    const betOpenTime = now;
+    const betCloseTime = now + STREAMING_TIMING.ANNOUNCEMENT_DURATION;
     this.currentCycle = {
       cycleId,
       phase: "ANNOUNCEMENT",
@@ -716,16 +863,23 @@ export class StreamingDuelScheduler {
       phaseStartTime: now,
       agent1,
       agent2,
-      duelId: null,
+      duelId,
+      duelKeyHex: this.deriveStreamingDuelKeyHex(cycleId),
       arenaId: null,
+      betOpenTime,
+      betCloseTime,
       countdownValue: null,
       fightStartTime: null,
+      duelEndTime: null,
       arenaPositions: null,
       winnerId: null,
       loserId: null,
       winReason: null,
+      seed: null,
+      replayHash: null,
     };
     this.matchmaking.refreshNextDuelPair(now);
+    this.notifyOnDeckAgents();
 
     // Mark agents as in a streaming duel immediately so their autonomous AI
     // won't make them attack each other or wander into combat during announcement.
@@ -750,16 +904,52 @@ export class StreamingDuelScheduler {
     // Emit announcement event
     this.world.emit("streaming:cycle:started", {
       cycleId,
+      duelId,
+      duelKeyHex: this.currentCycle.duelKeyHex,
+      betOpenTime,
+      betCloseTime,
       agent1: { id: agent1.characterId, name: agent1.name },
       agent2: { id: agent2.characterId, name: agent2.name },
     });
 
     this.world.emit("streaming:announcement:start", {
       cycleId,
-      agent1,
-      agent2,
+      duelId,
+      duelKeyHex: this.currentCycle.duelKeyHex,
+      betOpenTime,
+      betCloseTime,
+      agent1: { id: agent1.characterId, name: agent1.name },
+      agent2: { id: agent2.characterId, name: agent2.name },
       duration: STREAMING_TIMING.ANNOUNCEMENT_DURATION,
     });
+  }
+
+  /**
+   * Notify on-deck agents that they are next up for a duel so they can prepare
+   * (bank items, withdraw food, move to arena lobby).
+   */
+  private notifyOnDeckAgents(): void {
+    const pair = this.matchmaking.nextDuelPair;
+    if (!pair) return;
+
+    const agent1Entity = this.world.entities.get(pair.agent1Id);
+    const agent2Entity = this.world.entities.get(pair.agent2Id);
+    const agent1Name =
+      (agent1Entity?.data as { name?: string })?.name ?? "Unknown";
+    const agent2Name =
+      (agent2Entity?.data as { name?: string })?.name ?? "Unknown";
+
+    this.world.emit("duel:on-deck", {
+      agent1Id: pair.agent1Id,
+      agent1Name,
+      agent2Id: pair.agent2Id,
+      agent2Name,
+    });
+
+    Logger.info(
+      "StreamingDuelScheduler",
+      `On-deck notification sent: ${agent1Name} vs ${agent2Name}`,
+    );
   }
 
   // ============================================================================
@@ -774,6 +964,23 @@ export class StreamingDuelScheduler {
     // Check if announcement phase is over
     if (elapsed >= STREAMING_TIMING.ANNOUNCEMENT_DURATION) {
       void this.startCountdown();
+      return;
+    }
+
+    // Early-exit: after min time, if both agents are ready, skip to countdown (#21)
+    if (elapsed >= STREAMING_TIMING.MIN_ANNOUNCEMENT_DURATION) {
+      const { agent1, agent2 } = this.currentCycle;
+      if (agent1 && agent2) {
+        const entity1 = this.world.entities.get(agent1.characterId);
+        const entity2 = this.world.entities.get(agent2.characterId);
+        const alive1 =
+          entity1 && ((entity1.data as { health?: number }).health ?? 0) > 0;
+        const alive2 =
+          entity2 && ((entity2.data as { health?: number }).health ?? 0) > 0;
+        if (alive1 && alive2) {
+          void this.startCountdown();
+        }
+      }
     }
   }
 
@@ -806,7 +1013,11 @@ export class StreamingDuelScheduler {
 
       // Prepare contestants (fill food, restore HP) but NOT teleport yet.
       // Fix J — timeout wrapper so prep can't block forever.
-      const PREP_TIMEOUT_MS = 10_000;
+      const PREP_TIMEOUT_MS = Math.max(
+        5_000,
+        Number.parseInt(process.env.STREAMING_PREP_TIMEOUT_MS || "30000", 10) ||
+          30_000,
+      );
       try {
         await Promise.race([
           this.orchestrator.prepareContestantsForDuel(),
@@ -822,6 +1033,8 @@ export class StreamingDuelScheduler {
           "StreamingDuelScheduler",
           `Contestant prep failed: ${errMsg(err)}`,
         );
+        this.abortCycleToIdle("contestant_prep_failed");
+        return;
       }
 
       // Scheduler may have advanced/ended while awaiting prep.
@@ -891,6 +1104,17 @@ export class StreamingDuelScheduler {
         playerId: this.currentCycle.agent2.characterId,
       });
 
+      // Notify agent plugins that a duel session is starting so they enter duel mode
+      // (pause autonomous behavior, save goals, stop movement).
+      const streamingDuelId = `streaming-${this.currentCycle.cycleId}`;
+      this.world.emit(EventType.DUEL_SESSION_CREATED, {
+        duelId: streamingDuelId,
+        challengerId: this.currentCycle.agent1.characterId,
+        challengerName: this.currentCycle.agent1.name,
+        targetId: this.currentCycle.agent2.characterId,
+        targetName: this.currentCycle.agent2.name,
+      });
+
       // Transition to COUNTDOWN.
       const now = Date.now();
       const fightStartTime = now + STREAMING_TIMING.COUNTDOWN_DURATION;
@@ -952,7 +1176,7 @@ export class StreamingDuelScheduler {
     // health restore, emit, combat initiation, combat AIs).
     this.orchestrator.startFight();
 
-    // If the orchestrator transitioned to FIGHTING, set camera target.
+    // If the orchestrator transitioned to FIGHTING, set camera target and start fast broadcast.
     // Re-read cycle since startFight() mutates phase via setCurrentCycleFields.
     const cycleAfterFight = this.currentCycle;
     if (
@@ -963,6 +1187,8 @@ export class StreamingDuelScheduler {
         cycleAfterFight.agent1?.characterId ?? null,
         now,
       );
+      // Start fast 200ms broadcast for fight phase (#11)
+      this.startFightBroadcast();
     }
   }
 
@@ -1019,6 +1245,46 @@ export class StreamingDuelScheduler {
   // Resolution Handling (callback from DuelOrchestrator)
   // ============================================================================
 
+  private buildOracleProof(
+    cycle: StreamingDuelCycle,
+    winnerId: string,
+    loserId: string,
+    winReason: "kill" | "hp_advantage" | "damage_advantage" | "draw",
+    finishedAt: number,
+  ): { seed: string; replayHash: string } {
+    const duelId = cycle.duelId ?? `streaming-${cycle.cycleId}`;
+    const fightStartedAt = cycle.fightStartTime ?? cycle.cycleStartTime;
+    const duelSeedHex = crypto
+      .createHash("sha256")
+      .update(`${duelId}-${fightStartedAt}`)
+      .digest("hex")
+      .slice(0, 16);
+    const seed = BigInt(`0x${duelSeedHex}`).toString();
+    const replayHash = crypto
+      .createHash("sha256")
+      .update(
+        JSON.stringify({
+          duelId,
+          cycleId: cycle.cycleId,
+          winnerId,
+          loserId,
+          winReason,
+          fightStartedAt,
+          finishedAt,
+          damageWinner:
+            cycle.agent1?.characterId === winnerId
+              ? cycle.agent1.damageDealtThisFight
+              : (cycle.agent2?.damageDealtThisFight ?? 0),
+          damageLoser:
+            cycle.agent1?.characterId === loserId
+              ? cycle.agent1.damageDealtThisFight
+              : (cycle.agent2?.damageDealtThisFight ?? 0),
+        }),
+      )
+      .digest("hex");
+    return { seed, replayHash };
+  }
+
   /**
    * Handle resolution when DuelOrchestrator calls onResolution.
    * This is the facade's responsibility: phase transition, stats, recording, camera.
@@ -1038,6 +1304,9 @@ export class StreamingDuelScheduler {
       return;
     }
 
+    // Stop fast fight broadcast (#11)
+    this.stopFightBroadcast();
+
     // Clear countdown timeout if still pending (e.g. forfeit during countdown).
     if (this.countdownTimeout) {
       clearTimeout(this.countdownTimeout);
@@ -1048,12 +1317,26 @@ export class StreamingDuelScheduler {
     this.phaseStateMachine.transition("RESOLUTION");
     this.currentCycle.phase = "RESOLUTION";
     this.currentCycle.phaseStartTime = now;
+    this.currentCycle.duelEndTime = now;
     this.currentCycle.winnerId = winnerId;
     this.currentCycle.loserId = loserId;
     this.currentCycle.winReason = winReason;
+    const oracleProof = this.buildOracleProof(
+      this.currentCycle,
+      winnerId,
+      loserId,
+      winReason,
+      now,
+    );
+    this.currentCycle.seed = oracleProof.seed;
+    this.currentCycle.replayHash = oracleProof.replayHash;
 
-    // Update stats
-    this.matchmaking.updateStats(winnerId, loserId);
+    // Update stats — draws don't affect win/loss/streaks (#24)
+    if (winReason === "draw") {
+      this.matchmaking.updateDrawStats(winnerId, loserId);
+    } else {
+      this.matchmaking.updateStats(winnerId, loserId);
+    }
 
     // Get winner/loser names
     const winnerName =
@@ -1088,13 +1371,45 @@ export class StreamingDuelScheduler {
       `Fight ended: ${winnerName} wins by ${winReason}`,
     );
 
-    // Emit resolution event
+    // Emit resolution event (spectator UI)
     this.world.emit("streaming:resolution:start", {
       cycleId: this.currentCycle.cycleId,
+      duelId:
+        this.currentCycle.duelId ?? `streaming-${this.currentCycle.cycleId}`,
+      duelKeyHex: this.currentCycle.duelKeyHex,
+      duelEndTime: now,
       winnerId,
       loserId,
       winnerName,
+      loserName,
       winReason,
+      seed: oracleProof.seed,
+      replayHash: oracleProof.replayHash,
+    });
+
+    // Emit standard duel completed so agent plugins exit duel mode.
+    // The duel-events listener sends duelCompleted to both agent sockets.
+    this.world.emit(EventType.DUEL_COMPLETED, {
+      duelId:
+        this.currentCycle.duelId ?? `streaming-${this.currentCycle.cycleId}`,
+      winnerId,
+      winnerName,
+      loserId,
+      loserName,
+      reason: winReason === "kill" ? "death" : "death",
+      seed: oracleProof.seed,
+      replayHash: oracleProof.replayHash,
+      forfeit: false,
+      winnerReceives: [],
+      winnerReceivesValue: 0,
+      challengerStakes: [],
+      targetStakes: [],
+      summary: {
+        duration: now - (this.currentCycle.cycleStartTime ?? now),
+        rules: DEFAULT_DUEL_RULES,
+        challengerStakeValue: 0,
+        targetStakeValue: 0,
+      },
     });
 
     // Set camera to winner
@@ -1151,6 +1466,8 @@ export class StreamingDuelScheduler {
     // Emit cycle end
     this.world.emit("streaming:resolution:end", {
       cycleId: cycleSnapshot.cycleId,
+      duelId: cycleSnapshot.duelId,
+      duelKeyHex: cycleSnapshot.duelKeyHex,
       winnerId,
       loserId,
     });
@@ -1188,6 +1505,16 @@ export class StreamingDuelScheduler {
         setTimeout(() => {
           this._endCycleInProgress = false;
 
+          // Check for pending graceful restart
+          if (this._pendingGracefulRestart) {
+            Logger.info(
+              "StreamingDuelScheduler",
+              "Duel cycle complete, triggering pending graceful restart",
+            );
+            this.triggerGracefulRestart();
+            return;
+          }
+
           // Start new cycle if enough agents are available
           if (this.matchmaking.availableAgents.size >= config.minAgents) {
             this.schedulerState = "ACTIVE";
@@ -1209,17 +1536,32 @@ export class StreamingDuelScheduler {
    */
   private abortCycleToIdle(reason: string): void {
     Logger.warn("StreamingDuelScheduler", `Aborting cycle to IDLE: ${reason}`);
+    const cycleSnapshot = this.currentCycle;
 
     this.orchestrator.stopCombatLoop();
     this.orchestrator.clearCombatRetryTimeout();
     this.orchestrator.stopCombatAIs();
+    this.stopFightBroadcast();
 
     if (this.countdownTimeout) {
       clearTimeout(this.countdownTimeout);
       this.countdownTimeout = null;
     }
 
-    this.orchestrator.clearDuelFlagsForCycle(this.currentCycle);
+    if (cycleSnapshot) {
+      this.world.emit("streaming:cycle:aborted", {
+        cycleId: cycleSnapshot.cycleId,
+        duelId: cycleSnapshot.duelId,
+        duelKeyHex: cycleSnapshot.duelKeyHex,
+        reason,
+        agent1Id: cycleSnapshot.agent1?.characterId ?? null,
+        agent2Id: cycleSnapshot.agent2?.characterId ?? null,
+        agent1Name: cycleSnapshot.agent1?.name ?? null,
+        agent2Name: cycleSnapshot.agent2?.name ?? null,
+      });
+    }
+
+    this.orchestrator.clearDuelFlagsForCycle(cycleSnapshot);
     this.orchestrator.getDuelFoodSlotsByAgent().clear();
     this.currentCycle = null;
     this._endCycleInProgress = false;
@@ -1354,7 +1696,48 @@ export class StreamingDuelScheduler {
           : this.currentCycle.agent1?.characterId;
 
       if (winnerId) {
-        this.orchestrator.startResolution(winnerId, loserId, "kill");
+        // Check for simultaneous death (#13): if the "winner" is also dead,
+        // resolve by damage comparison or coin flip instead of declaring a kill.
+        const winnerEntity = this.world.entities.get(winnerId);
+        const winnerHp = winnerEntity
+          ? ((winnerEntity.data as { health?: number }).health ?? 0)
+          : 0;
+
+        if (winnerHp <= 0) {
+          // Both dead — resolve by damage advantage
+          const { agent1, agent2 } = this.currentCycle;
+          const dmg1 = agent1?.damageDealtThisFight ?? 0;
+          const dmg2 = agent2?.damageDealtThisFight ?? 0;
+
+          if (dmg1 !== dmg2) {
+            const actualWinner =
+              dmg1 > dmg2 ? agent1?.characterId : agent2?.characterId;
+            const actualLoser =
+              actualWinner === agent1?.characterId
+                ? agent2?.characterId
+                : agent1?.characterId;
+            if (actualWinner && actualLoser) {
+              this.orchestrator.startResolution(
+                actualWinner,
+                actualLoser,
+                "damage_advantage",
+              );
+            }
+          } else {
+            // True draw — coin flip
+            const coinWinner =
+              Math.random() > 0.5 ? agent1?.characterId : agent2?.characterId;
+            const coinLoser =
+              coinWinner === agent1?.characterId
+                ? agent2?.characterId
+                : agent1?.characterId;
+            if (coinWinner && coinLoser) {
+              this.orchestrator.startResolution(coinWinner, coinLoser, "draw");
+            }
+          }
+        } else {
+          this.orchestrator.startResolution(winnerId, loserId, "kill");
+        }
       }
     }
   }
@@ -1368,13 +1751,36 @@ export class StreamingDuelScheduler {
     // waiting for the first interval tick.
     this.broadcastState();
 
-    // Broadcast state every second
+    // Broadcast state every second (skip during FIGHTING when fast broadcast is active)
     this.broadcastInterval = setInterval(() => {
+      // Skip if fast fight broadcast is handling updates at 200ms (#11)
+      if (
+        this.fightBroadcastInterval &&
+        this.currentCycle?.phase === "FIGHTING"
+      )
+        return;
       // Ensure HP is fresh before broadcasting (catches food/regen changes
       // that don't fire damage events).
       this.orchestrator.updateContestantHp();
       this.broadcastState();
     }, STREAMING_TIMING.STATE_BROADCAST_INTERVAL);
+  }
+
+  /** Start fast 200ms broadcast during FIGHTING phase (#11) */
+  private startFightBroadcast(): void {
+    this.stopFightBroadcast();
+    this.fightBroadcastInterval = setInterval(() => {
+      this.orchestrator.updateContestantHp();
+      this.broadcastState();
+    }, STREAMING_TIMING.FIGHT_BROADCAST_INTERVAL);
+  }
+
+  /** Stop fast fight broadcast */
+  private stopFightBroadcast(): void {
+    if (this.fightBroadcastInterval) {
+      clearInterval(this.fightBroadcastInterval);
+      this.fightBroadcastInterval = null;
+    }
   }
 
   private broadcastState(): void {
@@ -1390,105 +1796,246 @@ export class StreamingDuelScheduler {
     }
   }
 
-  /** Get current streaming state for broadcast */
+  /**
+   * Get current streaming state for broadcast.
+   * MEMORY OPTIMIZATION: Reuses pre-allocated objects to avoid GC pressure.
+   * Only creates new contestant objects when agents change.
+   */
   getStreamingState(): StreamingStateUpdate {
     const now = Date.now();
     const leaderboard = this.matchmaking.getLeaderboard();
 
     if (!this.currentCycle) {
+      // IDLE state - use pre-allocated idle cycle object
       const previewPair = this.camera.getIdlePreviewPairSnapshot();
       let previewAgent1Id = previewPair?.agent1Id ?? null;
       let previewAgent2Id = previewPair?.agent2Id ?? null;
 
       if (!previewAgent1Id || !previewAgent2Id) {
-        const fallbackIds: string[] = [];
+        // Collect fallback IDs without allocating if possible
+        let fallbackCount = 0;
+        let fallback1: string | null = null;
+        let fallback2: string | null = null;
         for (const agentId of this.matchmaking.availableAgents) {
           if (!this.camera.isAgentValidCameraCandidate(agentId)) {
             continue;
           }
-          fallbackIds.push(agentId);
-          if (fallbackIds.length >= config.minAgents) {
+          if (fallbackCount === 0) {
+            fallback1 = agentId;
+          } else if (fallbackCount === 1) {
+            fallback2 = agentId;
+          }
+          fallbackCount++;
+          if (fallbackCount >= config.minAgents) {
             break;
           }
         }
-        previewAgent1Id = fallbackIds[0] ?? null;
-        previewAgent2Id = fallbackIds[1] ?? null;
+        previewAgent1Id = previewAgent1Id ?? fallback1;
+        previewAgent2Id = previewAgent2Id ?? fallback2;
       }
 
-      const previewAgent1 = previewAgent1Id
-        ? this.orchestrator.createContestant(
-            previewAgent1Id,
-            previewAgent2Id ?? undefined,
-          )
+      // Only create contestant objects if IDs changed (reduces allocations)
+      const needAgent1Update =
+        this._cachedAgent1 === null ||
+        (this._cachedAgent1 as { id?: string })?.id !== previewAgent1Id;
+      const needAgent2Update =
+        this._cachedAgent2 === null ||
+        (this._cachedAgent2 as { id?: string })?.id !== previewAgent2Id;
+
+      if (needAgent1Update && previewAgent1Id) {
+        const contestant = this.orchestrator.createContestant(
+          previewAgent1Id,
+          previewAgent2Id ?? undefined,
+        );
+        this._cachedAgent1 = this.toStreamingCycleAgentInPlace(
+          contestant,
+          this._cachedAgent1,
+        );
+      } else if (!previewAgent1Id) {
+        this._cachedAgent1 = null;
+      }
+
+      if (needAgent2Update && previewAgent2Id) {
+        const contestant = this.orchestrator.createContestant(
+          previewAgent2Id,
+          previewAgent1Id ?? undefined,
+        );
+        this._cachedAgent2 = this.toStreamingCycleAgentInPlace(
+          contestant,
+          this._cachedAgent2,
+        );
+      } else if (!previewAgent2Id) {
+        this._cachedAgent2 = null;
+      }
+
+      // Update idle cycle object in place (zero allocation)
+      this._idleCycleObject.cycleStartTime = now;
+      this._idleCycleObject.phaseStartTime = now;
+      this._idleCycleObject.phaseEndTime = now;
+      this._idleCycleObject.agent1 = this._cachedAgent1;
+      this._idleCycleObject.agent2 = this._cachedAgent2;
+
+      // Build camera IDs without allocation if possible
+      const cameraId1 = this._cachedAgent1
+        ? (this._cachedAgent1 as { id?: string }).id
         : null;
-      const previewAgent2 = previewAgent2Id
-        ? this.orchestrator.createContestant(
-            previewAgent2Id,
-            previewAgent1Id ?? undefined,
-          )
+      const cameraId2 = this._cachedAgent2
+        ? (this._cachedAgent2 as { id?: string }).id
         : null;
-      const preferredCameraIds = [
-        previewAgent1?.characterId,
-        previewAgent2?.characterId,
-      ].filter((id): id is string => Boolean(id && id.length > 0));
+
+      // Use inline array to avoid allocation when possible
+      const preferredCameraIds: string[] = [];
+      if (cameraId1) preferredCameraIds.push(cameraId1);
+      if (cameraId2) preferredCameraIds.push(cameraId2);
+
       const idleCameraTarget =
         this.camera.getIdleCameraTargetSnapshot(preferredCameraIds);
 
-      return {
-        type: "STREAMING_STATE_UPDATE",
-        cycle: {
-          cycleId: "",
-          phase: "IDLE",
-          cycleStartTime: now,
-          phaseStartTime: now,
-          phaseEndTime: now,
-          timeRemaining: 0,
-          agent1: this.toStreamingCycleAgent(previewAgent1),
-          agent2: this.toStreamingCycleAgent(previewAgent2),
-          countdown: null,
-          fightStartTime: null,
-          arenaPositions: null,
-          winnerId: null,
-          winnerName: null,
-          winReason: null,
-        },
-        leaderboard,
-        cameraTarget: idleCameraTarget,
-      };
+      // Update return object in place
+      this._streamingStateObject.cycle = this._idleCycleObject;
+      this._streamingStateObject.leaderboard = leaderboard;
+      this._streamingStateObject.cameraTarget = idleCameraTarget;
+
+      return this._streamingStateObject;
     }
 
+    // ACTIVE CYCLE - use pre-allocated active cycle object
     const { agent1, agent2 } = this.currentCycle;
     const phaseEndTime = this.getPhaseEndTime();
     const timeRemaining = Math.max(0, phaseEndTime - now);
-
     const cameraTarget = this.getCycleCameraTargetSnapshot();
 
-    return {
-      type: "STREAMING_STATE_UPDATE",
-      cycle: {
-        cycleId: this.currentCycle.cycleId,
-        phase: this.currentCycle.phase,
-        cycleStartTime: this.currentCycle.cycleStartTime,
-        phaseStartTime: this.currentCycle.phaseStartTime,
-        phaseEndTime,
-        timeRemaining,
-        agent1: this.toStreamingCycleAgent(agent1),
-        agent2: this.toStreamingCycleAgent(agent2),
-        countdown: this.currentCycle.countdownValue,
-        fightStartTime: this.currentCycle.fightStartTime ?? null,
-        arenaPositions: this.currentCycle.arenaPositions ?? null,
-        winnerId: this.currentCycle.winnerId,
-        winnerName: this.currentCycle.winnerId
-          ? (this.currentCycle.agent1?.characterId ===
-            this.currentCycle.winnerId
-              ? this.currentCycle.agent1?.name
-              : this.currentCycle.agent2?.name) || null
-          : null,
-        winReason: this.currentCycle.winReason,
-      },
-      leaderboard,
-      cameraTarget,
-    };
+    // Check if we need to update agent objects (only when agent changes or health changes)
+    const currentCycleId = this.currentCycle.cycleId;
+    const cycleChanged = this._lastStreamingStateCycleId !== currentCycleId;
+
+    if (cycleChanged || this._cachedAgent1 === null) {
+      this._cachedAgent1 = this.toStreamingCycleAgentInPlace(
+        agent1,
+        this._cachedAgent1,
+      );
+    } else if (agent1) {
+      // Update HP in place (most common change during fight)
+      this.updateAgentHpInPlace(this._cachedAgent1, agent1);
+    }
+
+    if (cycleChanged || this._cachedAgent2 === null) {
+      this._cachedAgent2 = this.toStreamingCycleAgentInPlace(
+        agent2,
+        this._cachedAgent2,
+      );
+    } else if (agent2) {
+      // Update HP in place (most common change during fight)
+      this.updateAgentHpInPlace(this._cachedAgent2, agent2);
+    }
+
+    this._lastStreamingStateCycleId = currentCycleId;
+
+    // Update active cycle object in place
+    this._activeCycleObject.cycleId = currentCycleId;
+    this._activeCycleObject.phase = this.currentCycle.phase;
+    this._activeCycleObject.cycleStartTime = this.currentCycle.cycleStartTime;
+    this._activeCycleObject.phaseStartTime = this.currentCycle.phaseStartTime;
+    this._activeCycleObject.phaseEndTime = phaseEndTime;
+    this._activeCycleObject.timeRemaining = timeRemaining;
+    this._activeCycleObject.agent1 = this._cachedAgent1;
+    this._activeCycleObject.agent2 = this._cachedAgent2;
+    this._activeCycleObject.duelId = this.currentCycle.duelId;
+    this._activeCycleObject.duelKeyHex = this.currentCycle.duelKeyHex;
+    this._activeCycleObject.betOpenTime = this.currentCycle.betOpenTime;
+    this._activeCycleObject.betCloseTime = this.currentCycle.betCloseTime;
+    this._activeCycleObject.countdown = this.currentCycle.countdownValue;
+    this._activeCycleObject.fightStartTime =
+      this.currentCycle.fightStartTime ?? null;
+    this._activeCycleObject.duelEndTime = this.currentCycle.duelEndTime ?? null;
+    this._activeCycleObject.arenaPositions =
+      this.currentCycle.arenaPositions ?? null;
+    this._activeCycleObject.winnerId = this.currentCycle.winnerId;
+    this._activeCycleObject.winnerName = this.currentCycle.winnerId
+      ? (this.currentCycle.agent1?.characterId === this.currentCycle.winnerId
+          ? this.currentCycle.agent1?.name
+          : this.currentCycle.agent2?.name) || null
+      : null;
+    this._activeCycleObject.winReason = this.currentCycle.winReason;
+    this._activeCycleObject.seed = this.currentCycle.seed;
+    this._activeCycleObject.replayHash = this.currentCycle.replayHash;
+
+    // Update return object in place
+    this._streamingStateObject.cycle = this._activeCycleObject;
+    this._streamingStateObject.leaderboard = leaderboard;
+    this._streamingStateObject.cameraTarget = cameraTarget;
+
+    return this._streamingStateObject;
+  }
+
+  /**
+   * Convert AgentContestant to streaming format, reusing existing object if possible.
+   * MEMORY OPTIMIZATION: Updates properties in place instead of creating new objects.
+   */
+  private toStreamingCycleAgentInPlace(
+    agent: AgentContestant | null,
+    existing: StreamingStateUpdate["cycle"]["agent1"],
+  ): StreamingStateUpdate["cycle"]["agent1"] {
+    if (!agent) {
+      return null;
+    }
+
+    // Reuse existing object if available
+    if (existing) {
+      existing.id = agent.characterId;
+      existing.name = agent.name;
+      existing.provider = agent.provider;
+      existing.model = agent.model;
+      existing.hp = agent.currentHp;
+      existing.maxHp = agent.maxHp;
+      existing.combatLevel = agent.combatLevel;
+      existing.wins = agent.wins;
+      existing.losses = agent.losses;
+      existing.damageDealtThisFight = agent.damageDealtThisFight;
+      existing.rank = agent.rank;
+      existing.headToHeadWins = agent.headToHeadWins;
+      existing.headToHeadLosses = agent.headToHeadLosses;
+      // Equipment: update in place by copying properties
+      if (agent.equipment) {
+        if (!existing.equipment) {
+          existing.equipment = {};
+        }
+        // Clear existing and copy new (avoids creating new object)
+        for (const key of Object.keys(
+          existing.equipment as Record<string, unknown>,
+        )) {
+          delete (existing.equipment as Record<string, unknown>)[key];
+        }
+        Object.assign(existing.equipment, agent.equipment);
+      } else {
+        existing.equipment = {};
+      }
+      // Inventory: we must use the reference since inventory items can change
+      // But cap at 28 items to match original
+      existing.inventory = Array.isArray(agent.inventory)
+        ? agent.inventory.slice(0, 28)
+        : [];
+      return existing;
+    }
+
+    // Create new object (only when no existing object)
+    return this.toStreamingCycleAgent(agent);
+  }
+
+  /**
+   * Update hot combat fields in place during active fights without reallocating
+   * the cached streaming state objects.
+   */
+  private updateAgentHpInPlace(
+    cached: StreamingStateUpdate["cycle"]["agent1"],
+    agent: AgentContestant,
+  ): void {
+    if (!cached) return;
+    cached.hp = agent.currentHp;
+    cached.maxHp = agent.maxHp;
+    cached.damageDealtThisFight = agent.damageDealtThisFight;
+    cached.wins = agent.wins;
+    cached.losses = agent.losses;
   }
 
   // ============================================================================

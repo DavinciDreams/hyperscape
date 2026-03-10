@@ -21,7 +21,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.1.38
 
       - name: Install dependencies
         run: |
@@ -55,4 +55,3 @@ jobs:
       - name: Type check plugin-hyperscape package
         working-directory: packages/plugin-hyperscape
         run: bunx tsc --noEmit
-

@@ -41,23 +41,26 @@ import type {
 import { World } from "../../core/World";
 import * as THREE from "./three";
 
-/** Global PHYSX module declaration for WASM heap access */
-declare const PHYSX:
-  | {
-      _webidl_malloc: (size: number) => number;
-      _webidl_free: (ptr: number) => void;
-      HEAPF32: { set: (data: Float32Array, offset: number) => void };
-      HEAPU16: { set: (data: Uint16Array, offset: number) => void };
-      HEAPU32: { set: (data: Uint32Array, offset: number) => void };
-      PxConvexMeshDesc: new () => unknown;
-      PxTriangleMeshDesc: new () => unknown;
-      PxConvexFlagEnum: { eCOMPUTE_CONVEX: number };
-      PxTriangleMeshFlagEnum: { e16_BIT_INDICES: number };
-      CreateConvexMesh: (params: unknown, desc: unknown) => PhysXMesh | null;
-      CreateTriangleMesh: (params: unknown, desc: unknown) => PhysXMesh | null;
-      destroy: (obj: unknown) => void;
-    }
-  | undefined;
+type RuntimePhysX = {
+  _webidl_malloc: (size: number) => number;
+  _webidl_free: (ptr: number) => void;
+  HEAPF32: { set: (data: Float32Array, offset: number) => void };
+  HEAPU16: { set: (data: Uint16Array, offset: number) => void };
+  HEAPU32: { set: (data: Uint32Array, offset: number) => void };
+  PxConvexMeshDesc: new () => unknown;
+  PxTriangleMeshDesc: new () => unknown;
+  PxConvexFlagEnum: { eCOMPUTE_CONVEX: number };
+  PxTriangleMeshFlagEnum: { e16_BIT_INDICES: number };
+  CreateConvexMesh: (params: unknown, desc: unknown) => PhysXMesh | null;
+  CreateTriangleMesh: (params: unknown, desc: unknown) => PhysXMesh | null;
+  destroy: (obj: unknown) => void;
+};
+
+function getRuntimePhysX(): RuntimePhysX | null {
+  return (
+    (globalThis as typeof globalThis & { PHYSX?: RuntimePhysX }).PHYSX ?? null
+  );
+}
 
 const cache = new Map<string, CacheItem>(); // id -> { id, pmesh, refs }
 
@@ -94,7 +97,8 @@ export function geometryToPxMesh(
   convex: boolean,
 ): PMeshHandle | null {
   // Check if PHYSX is available globally
-  if (!PHYSX) {
+  const physx = getRuntimePhysX();
+  if (!physx) {
     // Don't warn on server - PhysX is optional there
     if (typeof window !== "undefined") {
       console.warn("[geometryToPxMesh] PHYSX not available");
@@ -107,8 +111,6 @@ export function geometryToPxMesh(
     return null;
   }
 
-  // Assert that PHYSX is defined after null check
-  const physx = PHYSX!;
   const id = `${geometry.uuid}_${convex ? "convex" : "triangles"}`;
 
   // check and return cached if already cooked

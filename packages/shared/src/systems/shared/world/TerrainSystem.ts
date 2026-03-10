@@ -68,6 +68,7 @@ import type { RoadTileSegment } from "../../../types/world/world-types";
 import { PhysicsHandle } from "../../../types/systems/physics";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
+import { isStreamingLikeViewport } from "../../../runtime/clientViewportMode";
 import { BIOMES } from "../../../data/world-structure";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import { getDuelArenaConfig } from "../../../data/duel-manifest";
@@ -2182,10 +2183,20 @@ export class TerrainSystem extends System {
     const players = this.world.getPlayers() || [];
     const centers: Array<{ id: string; position: THREE.Vector3 }> = [];
     for (const player of players) {
-      if (!player?.node?.position) continue;
+      // Support both node.position (client) and direct position property (server)
+      const pos = player?.node?.position ?? player?.position;
+      if (!pos) {
+        // MEMORY DEBUG: Log players without position
+        if (Math.random() < 0.01) {
+          console.warn(
+            `[TerrainSystem] Player ${player?.id} missing position (node: ${!!player?.node}, position: ${!!player?.position})`,
+          );
+        }
+        continue;
+      }
       centers.push({
         id: player.id || "player",
-        position: player.node.position,
+        position: pos,
       });
     }
 
@@ -6572,23 +6583,13 @@ export class TerrainSystem extends System {
    * Initialize chunk loading system with 9 core + ring strategy
    */
   private initializeChunkLoadingSystem(): void {
-    const isEmbeddedSpectator = (() => {
-      if (typeof window === "undefined") return false;
-      const win = window as Window & {
-        __HYPERSCAPE_EMBEDDED__?: boolean;
-        __HYPERSCAPE_CONFIG__?: { mode?: string };
-      };
-      return (
-        win.__HYPERSCAPE_EMBEDDED__ === true &&
-        win.__HYPERSCAPE_CONFIG__?.mode === "spectator"
-      );
-    })();
+    const isStreamingViewport = isStreamingLikeViewport();
     // world.isServer can be false during early bootstrap (before network mode
     // is finalized). Resolve runtime role explicitly so server startup always
     // uses tight headless chunk ranges.
     const { isServer: isServerRuntime } = this.resolveRuntimeRole();
 
-    // Embedded spectator prioritizes first-frame time over long-range preload.
+    // Stream and spectator viewers prioritize first-frame time over long-range preload.
     if (isServerRuntime) {
       // Server does not render horizon terrain, so keep chunk windows tight to
       // avoid runaway memory when many autonomous agents are active.
@@ -6597,10 +6598,10 @@ export class TerrainSystem extends System {
       this.terrainOnlyChunkRange = 0; // Never load render-only distant tiles
       this.maxTilesPerFrame = 2;
       this.generationBudgetMsPerFrame = 4;
-    } else if (isEmbeddedSpectator) {
+    } else if (isStreamingViewport) {
       this.coreChunkRange = 1; // 3x3 core grid
       this.ringChunkRange = 2; // Preload ring up to 5x5
-      this.terrainOnlyChunkRange = 2; // Avoid far-horizon churn in embedded stream view
+      this.terrainOnlyChunkRange = 2; // Avoid far-horizon churn in stream/spectator view
       this.maxTilesPerFrame = 4; // Catch up faster after camera retargets
       this.generationBudgetMsPerFrame = 10;
     } else {
@@ -6783,6 +6784,7 @@ export class TerrainSystem extends System {
 
     // Remove tiles that are no longer needed, with hysteresis padding
     // Approximate each player's center from their core chunk set
+    let unloadedCount = 0;
     for (const [tileKey, tile] of this.terrainTiles) {
       if (!neededTiles.has(tileKey)) {
         let minChebyshev = Infinity;
@@ -6792,17 +6794,21 @@ export class TerrainSystem extends System {
         }
         if (minChebyshev > this.terrainOnlyChunkRange + this.unloadPadding) {
           this.unloadTile(tile);
+          unloadedCount++;
         }
       }
     }
 
-    // Log simulation status every 10 updates
+    // Log simulation status every 10 updates (~10 seconds)
     if (Math.random() < 0.1) {
       const _totalPlayers = centers.length;
       const _simulatedChunkCount = this.simulatedChunks.size;
       const _loadedChunkCount = this.terrainTiles.size;
 
-      // Simulation status tracked for debugging
+      // MEMORY DEBUG: Log terrain tile stats
+      console.log(
+        `[TerrainSystem] Tiles: ${_loadedChunkCount} loaded, ${unloadedCount} unloaded this cycle | Players: ${_totalPlayers} | PlayerCenters: ${playerCenters.length} | Needed: ${neededTiles.size}`,
+      );
 
       // Log shared world status
       const sharedChunks = Array.from(this.chunkPlayerCounts.entries())

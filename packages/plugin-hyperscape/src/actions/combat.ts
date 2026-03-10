@@ -15,6 +15,7 @@ import type {
   UseItemCommand,
   CombatStyle,
 } from "../types.js";
+import { getPrayerIds } from "../utils/world-data.js";
 
 export const attackEntityAction: Action = {
   name: "ATTACK_TARGET",
@@ -195,46 +196,21 @@ export const togglePrayerAction: Action = {
     try {
       const content = (message.content.text || "").toLowerCase();
 
+      // Match prayer from manifest (data-driven) with space/underscore normalization
       let prayerId: string | null = null;
-      if (
-        content.includes("protect from melee") ||
-        content.includes("protect_from_melee")
-      )
-        prayerId = "protect_from_melee";
-      else if (
-        content.includes("protect from magic") ||
-        content.includes("protect_from_magic")
-      )
-        prayerId = "protect_from_magic";
-      else if (
-        content.includes("protect from missiles") ||
-        content.includes("protect_from_missiles") ||
-        content.includes("protect from range")
-      )
-        prayerId = "protect_from_missiles";
-      else if (content.includes("thick skin") || content.includes("thick_skin"))
-        prayerId = "thick_skin";
-      else if (
-        content.includes("burst of strength") ||
-        content.includes("burst_of_strength")
-      )
-        prayerId = "burst_of_strength";
-      else if (
-        content.includes("clarity of thought") ||
-        content.includes("clarity_of_thought")
-      )
-        prayerId = "clarity_of_thought";
-      else if (content.includes("piety")) prayerId = "piety";
-      else if (content.includes("chivalry")) prayerId = "chivalry";
-      else if (content.includes("eagle eye") || content.includes("eagle_eye"))
-        prayerId = "eagle_eye";
-      else if (
-        content.includes("mystic might") ||
-        content.includes("mystic_might")
-      )
-        prayerId = "mystic_might";
-      else if (content.includes("smite")) prayerId = "smite";
+      const knownPrayers = getPrayerIds();
+      const normalizedInput = content.replace(/\s+/g, "_");
+      for (const id of knownPrayers) {
+        if (
+          normalizedInput.includes(id) ||
+          content.includes(id.replace(/_/g, " "))
+        ) {
+          prayerId = id;
+          break;
+        }
+      }
 
+      // Regex fallback for when manifests aren't loaded or prayer not in manifest
       if (!prayerId) {
         const match = content.match(/(?:toggle prayer|pray)\s+([a-z_]+)/i);
         if (match && match[1]) {

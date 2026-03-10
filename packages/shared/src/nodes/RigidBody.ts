@@ -24,8 +24,7 @@ import type { EntityData } from "../types/core/base-types";
 import { Node } from "./Node";
 import { vector3ToPxVec3 } from "../utils/physics/PhysicsUtils";
 
-// Global PHYSX declaration with required methods
-declare const PHYSX: {
+type RuntimePhysX = {
   PxTransform: new (identity: unknown) => PxTransform;
   PxVec3: new (x: number, y: number, z: number) => PxVec3;
   PxQuat: new (x: number, y: number, z: number, w: number) => PxQuat;
@@ -50,6 +49,12 @@ declare const PHYSX: {
     getLocalVelocityAtLocalPos: (actor: PxRigidBody, pos: PxVec3) => PxVec3;
   };
 };
+
+function getRuntimePhysX(): RuntimePhysX | null {
+  return (
+    (globalThis as typeof globalThis & { PHYSX?: RuntimePhysX }).PHYSX ?? null
+  );
+}
 
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -83,7 +88,8 @@ const defaults = {
 
 let forceModes: Record<string, number> | undefined;
 function getForceMode(mode: string | number): number {
-  if (!PHYSX) {
+  const physx = getRuntimePhysX();
+  if (!physx) {
     console.warn("[rigidbody] PHYSX not initialized, cannot get force mode");
     return 0;
   }
@@ -148,7 +154,8 @@ export class RigidBody extends Node {
   mount() {
     this.needsRebuild = false;
     if (this.ctx!.moving) return; // physics ignored when moving apps around
-    if (typeof PHYSX === "undefined" || !PHYSX) {
+    const physx = getRuntimePhysX();
+    if (!physx) {
       console.warn(
         "[rigidbody] PHYSX not initialized yet, skipping physics setup",
       );
@@ -157,8 +164,8 @@ export class RigidBody extends Node {
 
     // Initialize PhysX objects now that PHYSX is available
     if (!this._tm) {
-      this._tm = new PHYSX.PxTransform(
-        PHYSX.PxIDENTITYEnum.PxIdentity,
+      this._tm = new physx.PxTransform(
+        physx.PxIDENTITYEnum.PxIdentity,
       ) as PxTransform;
     }
 
@@ -173,8 +180,8 @@ export class RigidBody extends Node {
     _v2.copy(plainScale);
 
     // Create transform and set position/rotation
-    this.transform = new PHYSX.PxTransform(
-      PHYSX.PxIDENTITYEnum.PxIdentity,
+    this.transform = new physx.PxTransform(
+      physx.PxIDENTITYEnum.PxIdentity,
     ) as PxTransform;
     // Set position
     if (this.transform.p) {
@@ -202,20 +209,20 @@ export class RigidBody extends Node {
       if (dynamicActor.setRigidBodyFlag) {
         dynamicActor.setRigidBodyFlag(1, true); // PxRigidBodyFlag.eKINEMATIC
       }
-      if (PHYSX?.PxRigidBodyExt?.setMassAndUpdateInertia) {
-        PHYSX.PxRigidBodyExt.setMassAndUpdateInertia(dynamicActor, this._mass);
+      if (physx.PxRigidBodyExt?.setMassAndUpdateInertia) {
+        physx.PxRigidBodyExt.setMassAndUpdateInertia(dynamicActor, this._mass);
       }
     } else if (this._type === "dynamic") {
       const dynamicActor = this.ctx!.physics.physics.createRigidDynamic(
         this.transform,
       ) as PxRigidDynamic;
       this.actor = dynamicActor;
-      if (PHYSX?.PxRigidBodyExt?.setMassAndUpdateInertia) {
-        PHYSX.PxRigidBodyExt.setMassAndUpdateInertia(dynamicActor, this._mass);
+      if (physx.PxRigidBodyExt?.setMassAndUpdateInertia) {
+        physx.PxRigidBodyExt.setMassAndUpdateInertia(dynamicActor, this._mass);
       }
       if (this._centerOfMass) {
-        const pose = new PHYSX.PxTransform(
-          PHYSX.PxIDENTITYEnum.PxIdentity,
+        const pose = new physx.PxTransform(
+          physx.PxIDENTITYEnum.PxIdentity,
         ) as PxTransform;
         // Set center of mass position
         if (pose.p) {
@@ -443,7 +450,8 @@ export class RigidBody extends Node {
   }
 
   addForce(force: THREE.Vector3, mode: string | number) {
-    if (!this.actor || !PHYSX) return;
+    const physx = getRuntimePhysX();
+    if (!this.actor || !physx) return;
     const forceMode = getForceMode(mode) || 0;
     // PhysXActor interface includes addForce - convert THREE.Vector3 to PxVec3
     const pxForce = vector3ToPxVec3(force);
@@ -455,15 +463,16 @@ export class RigidBody extends Node {
     pos: THREE.Vector3,
     mode: string | number,
   ) {
-    if (!this.actor || !PHYSX) return;
+    const physx = getRuntimePhysX();
+    if (!this.actor || !physx) return;
     const pxForce = _v1.set(force.x, force.y, force.z);
     const pxPos = _v2.set(pos.x, pos.y, pos.z);
     const forceMode = getForceMode(mode) || 0;
-    if (PHYSX?.PxRigidBodyExt?.addForceAtPos) {
+    if (physx.PxRigidBodyExt?.addForceAtPos) {
       // Create proper PxVec3 instances from THREE.Vector3
       const pxForceVec = vector3ToPxVec3(pxForce);
       const pxPosVec = vector3ToPxVec3(pxPos);
-      PHYSX.PxRigidBodyExt.addForceAtPos(
+      physx.PxRigidBodyExt.addForceAtPos(
         this.actor as PxRigidBody,
         pxForceVec,
         pxPosVec,
@@ -478,15 +487,16 @@ export class RigidBody extends Node {
     pos: THREE.Vector3,
     mode: string | number,
   ) {
-    if (!this.actor || !PHYSX) return;
+    const physx = getRuntimePhysX();
+    if (!this.actor || !physx) return;
     const pxForce = _v1.set(force.x, force.y, force.z);
     const pxPos = _v2.set(pos.x, pos.y, pos.z);
     const forceMode = getForceMode(mode) || 0;
-    if (PHYSX?.PxRigidBodyExt?.addForceAtLocalPos) {
+    if (physx.PxRigidBodyExt?.addForceAtLocalPos) {
       // Create proper PxVec3 instances from THREE.Vector3
       const pxForceVec = vector3ToPxVec3(pxForce);
       const pxPosVec = vector3ToPxVec3(pxPos);
-      PHYSX.PxRigidBodyExt.addForceAtLocalPos(
+      physx.PxRigidBodyExt.addForceAtLocalPos(
         this.actor as PxRigidBody,
         pxForceVec,
         pxPosVec,
@@ -497,7 +507,8 @@ export class RigidBody extends Node {
   }
 
   addTorque(torque: THREE.Vector3, mode: string | number) {
-    if (!this.actor || !PHYSX) return;
+    const physx = getRuntimePhysX();
+    if (!this.actor || !physx) return;
     const forceMode = getForceMode(mode) || 0;
     // PhysXActor interface includes addTorque - convert THREE.Vector3 to PxVec3
     const pxTorque = vector3ToPxVec3(torque);
@@ -572,7 +583,8 @@ export class RigidBody extends Node {
   }
 
   setLinearVelocity(vec3: THREE.Vector3) {
-    if (!this.actor || !PHYSX) return;
+    const physx = getRuntimePhysX();
+    if (!this.actor || !physx) return;
     // PhysXActor interface includes setLinearVelocity - convert THREE.Vector3 to PxVec3
     const pxVec = vector3ToPxVec3(vec3);
     (this.actor as PhysXActor).setLinearVelocity?.(pxVec);
@@ -592,16 +604,18 @@ export class RigidBody extends Node {
   }
 
   setAngularVelocity(vec3: THREE.Vector3) {
-    if (!this.actor || !PHYSX) return;
+    const physx = getRuntimePhysX();
+    if (!this.actor || !physx) return;
     // PhysXActor interface includes setAngularVelocity - convert THREE.Vector3 to PxVec3
     const pxVec = vector3ToPxVec3(vec3);
     (this.actor as PhysXActor).setAngularVelocity?.(pxVec);
   }
 
   getVelocityAtPos(pos: THREE.Vector3, vec3: THREE.Vector3) {
-    if (!this.actor || !PHYSX) return vec3.set(0, 0, 0);
+    const physx = getRuntimePhysX();
+    if (!this.actor || !physx) return vec3.set(0, 0, 0);
     const pxPos = vector3ToPxVec3(pos);
-    const result = PHYSX?.PxRigidBodyExt?.getVelocityAtPos(
+    const result = physx.PxRigidBodyExt?.getVelocityAtPos(
       this.actor as PxRigidBody,
       pxPos,
     );
@@ -613,9 +627,10 @@ export class RigidBody extends Node {
   }
 
   getLocalVelocityAtLocalPos(pos: THREE.Vector3, vec3: THREE.Vector3) {
-    if (!this.actor || !PHYSX) return vec3.set(0, 0, 0);
+    const physx = getRuntimePhysX();
+    if (!this.actor || !physx) return vec3.set(0, 0, 0);
     const pxPos = vector3ToPxVec3(pos);
-    const result = PHYSX?.PxRigidBodyExt?.getLocalVelocityAtLocalPos(
+    const result = physx.PxRigidBodyExt?.getLocalVelocityAtLocalPos(
       this.actor as PxRigidBody,
       pxPos,
     );
@@ -633,12 +648,13 @@ export class RigidBody extends Node {
   }
 
   setKinematicTarget(position: THREE.Vector3, quaternion: THREE.Quaternion) {
-    if (this._type !== "kinematic" || !PHYSX) {
+    const physx = getRuntimePhysX();
+    if (this._type !== "kinematic" || !physx) {
       return; // Early return for non-kinematic bodies
     }
     if (!this._tm) {
-      this._tm = new PHYSX.PxTransform(
-        PHYSX.PxIDENTITYEnum.PxIdentity,
+      this._tm = new physx.PxTransform(
+        physx.PxIDENTITYEnum.PxIdentity,
       ) as PxTransform;
     }
     if (

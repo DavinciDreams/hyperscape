@@ -428,13 +428,24 @@ export function StreamingMode() {
     const disableBridgeCapture = ["1", "true", "yes", "on"].includes(
       disableBridgeCaptureValue,
     );
+    const hasExternalStreamToken = Boolean(
+      (searchParams.get("streamToken") || "").trim(),
+    );
+    const internalCaptureValue = (
+      searchParams.get("internalCapture") || ""
+    ).toLowerCase();
+    const internalCapture = ["1", "true", "yes", "on"].includes(
+      internalCaptureValue,
+    );
     const captureDebugValue = (
       searchParams.get("captureDebug") || ""
     ).toLowerCase();
     const captureDebug = ["1", "true", "yes", "on"].includes(captureDebugValue);
-    if (disableBridgeCapture) {
+    if (disableBridgeCapture || !internalCapture) {
       console.log(
-        "[StreamingMode] Bridge capture disabled by URL param, skipping in-page capture",
+        disableBridgeCapture
+          ? "[StreamingMode] Bridge capture disabled by URL param, skipping in-page capture"
+          : "[StreamingMode] Bridge capture disabled: 'internalCapture=1' is required to enable in-page capture",
       );
       return;
     }
@@ -474,7 +485,7 @@ export function StreamingMode() {
       delete win.__captureControl__;
     }
 
-    const bridgeUrl = searchParams.get("bridgeUrl") || "ws://localhost:8765";
+    const bridgeUrl = searchParams.get("bridgeUrl") || "ws://127.0.0.1:8765";
 
     console.log("[StreamingMode] Starting canvas capture to", bridgeUrl);
 
@@ -570,22 +581,8 @@ export function StreamingMode() {
         return;
       }
 
-      // Add silent audio (some RTMP servers require it)
-      try {
-        audioCtx = new AudioContext();
-        const osc = audioCtx.createOscillator();
-        oscillator = osc;
-        const gain = audioCtx.createGain();
-        gain.gain.value = 0;
-        osc.connect(gain);
-        const dest = audioCtx.createMediaStreamDestination();
-        gain.connect(dest);
-        osc.start();
-        const audioTrack = dest.stream.getAudioTracks()[0];
-        if (audioTrack && stream) stream.addTrack(audioTrack);
-      } catch (error) {
-        console.warn("[Capture] Failed to attach silent audio track:", error);
-      }
+      // The RTMP bridge owns audio timing and can inject silent fallback audio
+      // when system audio capture is unavailable.
 
       let mimeType = "video/webm;codecs=h264";
       // eslint-disable-next-line no-undef

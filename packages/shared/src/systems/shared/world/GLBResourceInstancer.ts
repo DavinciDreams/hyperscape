@@ -22,7 +22,7 @@ import {
   GPU_VEG_CONFIG,
   type DissolveMaterial,
 } from "./GPUMaterials";
-import { getLODDistances } from "./LODConfig";
+import { getLODDistances, inferLOD1Path, inferLOD2Path } from "./LODConfig";
 
 const MAX_INSTANCES = 512;
 
@@ -69,13 +69,6 @@ let scene: THREE.Scene | null = null;
 let world: World | null = null;
 const pools = new Map<string, ModelPool>();
 const entityToModel = new Map<string, string>();
-
-function inferLOD1Path(lod0Path: string): string {
-  return lod0Path.replace(/\.glb$/i, "_lod1.glb");
-}
-function inferLOD2Path(lod0Path: string): string {
-  return lod0Path.replace(/\.glb$/i, "_lod2.glb");
-}
 
 function extractGeometryAndMaterial(
   root: THREE.Object3D,
@@ -177,6 +170,8 @@ const pendingEnsure = new Map<string, Promise<ModelPool>>();
 async function ensureModelPool(
   modelPath: string,
   depletedModelPath?: string | null,
+  lod1ModelPath?: string | null,
+  lod2ModelPath?: string | null,
 ): Promise<ModelPool> {
   const existing = pools.get(modelPath);
   if (existing) {
@@ -212,8 +207,11 @@ async function ensureModelPool(
     world!.setupMaterial(lod0Material);
     const lod0Pool = createLODPool(lod0Data.geometry, lod0Material);
 
+    // LOD1 — explicit path first, fall back to inferred naming convention
     let lod1Pool: LODPool | null = null;
-    const lod1Data = await loadLODModel(inferLOD1Path(modelPath));
+    const lod1Data = await loadLODModel(
+      lod1ModelPath ?? inferLOD1Path(modelPath),
+    );
     if (lod1Data) {
       const lod1Material = createDissolveMaterial(
         lod1Data.material,
@@ -221,10 +219,23 @@ async function ensureModelPool(
       );
       world!.setupMaterial(lod1Material);
       lod1Pool = createLODPool(lod1Data.geometry, lod1Material);
+    } else if (lod1ModelPath) {
+      const lod1Inferred = await loadLODModel(inferLOD1Path(modelPath));
+      if (lod1Inferred) {
+        const lod1Material = createDissolveMaterial(
+          lod1Inferred.material,
+          dissolveOpts,
+        );
+        world!.setupMaterial(lod1Material);
+        lod1Pool = createLODPool(lod1Inferred.geometry, lod1Material);
+      }
     }
 
+    // LOD2 — explicit path first, fall back to inferred naming convention
     let lod2Pool: LODPool | null = null;
-    const lod2Data = await loadLODModel(inferLOD2Path(modelPath));
+    const lod2Data = await loadLODModel(
+      lod2ModelPath ?? inferLOD2Path(modelPath),
+    );
     if (lod2Data) {
       const lod2Material = createDissolveMaterial(
         lod2Data.material,
@@ -232,6 +243,16 @@ async function ensureModelPool(
       );
       world!.setupMaterial(lod2Material);
       lod2Pool = createLODPool(lod2Data.geometry, lod2Material);
+    } else if (lod2ModelPath) {
+      const lod2Inferred = await loadLODModel(inferLOD2Path(modelPath));
+      if (lod2Inferred) {
+        const lod2Material = createDissolveMaterial(
+          lod2Inferred.material,
+          dissolveOpts,
+        );
+        world!.setupMaterial(lod2Material);
+        lod2Pool = createLODPool(lod2Inferred.geometry, lod2Material);
+      }
     }
 
     const pool: ModelPool = {
@@ -376,11 +397,18 @@ export async function addInstance(
   scale: number,
   depletedModelPath?: string | null,
   depletedScale?: number,
+  lod1ModelPath?: string | null,
+  lod2ModelPath?: string | null,
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
   try {
-    const pool = await ensureModelPool(modelPath, depletedModelPath);
+    const pool = await ensureModelPool(
+      modelPath,
+      depletedModelPath,
+      lod1ModelPath,
+      lod2ModelPath,
+    );
 
     if (pool.lod0 && pool.lod0.activeCount >= MAX_INSTANCES) {
       console.warn(

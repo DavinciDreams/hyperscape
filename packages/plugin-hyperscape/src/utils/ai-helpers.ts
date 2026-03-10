@@ -4,11 +4,8 @@ import {
   State,
   elizaLogger,
   addHeader,
-  ChannelType,
   ModelType,
-  Content,
 } from "@elizaos/core";
-import { hyperscapeShouldRespondTemplate } from "../templates/index.js";
 
 // Type definitions
 export interface ActionResult {
@@ -126,19 +123,15 @@ export async function shouldRespond(
   runtime: IAgentRuntime,
   message: Memory,
   state?: State,
-  options: {
+  _options: {
     template?: string;
     modelType?: (typeof ModelType)[keyof typeof ModelType];
   } = {},
 ): Promise<boolean> {
-  const context = composeContext({
-    state: state || createEmptyState(),
-    template: options.template || hyperscapeShouldRespondTemplate,
-    runtime,
-  });
-
   const result = await runtime.evaluate(message, state || createEmptyState());
-
+  if (Array.isArray(result)) {
+    return result.length > 0;
+  }
   return !!result;
 }
 

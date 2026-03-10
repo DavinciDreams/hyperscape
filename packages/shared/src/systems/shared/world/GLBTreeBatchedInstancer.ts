@@ -25,7 +25,7 @@ import {
   type TreeMaterialOptions,
 } from "./GPUMaterials";
 import type { Wind } from "./Wind";
-import { getLODDistances } from "./LODConfig";
+import { getLODDistances, inferLOD1Path, inferLOD2Path } from "./LODConfig";
 
 const MAX_INSTANCES = 512;
 
@@ -83,13 +83,6 @@ let scene: THREE.Scene | null = null;
 let world: World | null = null;
 const pools = new Map<string, TreeTypePool>();
 const entityToTreeType = new Map<string, string>();
-
-function inferLOD1Path(lod0Path: string): string {
-  return lod0Path.replace(/\.glb$/i, "_lod1.glb");
-}
-function inferLOD2Path(lod0Path: string): string {
-  return lod0Path.replace(/\.glb$/i, "_lod2.glb");
-}
 
 // ---- Geometry extraction ----
 

@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import path from "path";
 
 export default defineConfig({
   test: {
@@ -16,5 +17,21 @@ export default defineConfig({
     hookTimeout: 30000,
     // Setup file to mock browser globals (WebGPU, etc.)
     setupFiles: ["./vitest.setup.ts"],
+  },
+  resolve: {
+    alias: [
+      {
+        find: /^@hyperscape\/shared\/client$/,
+        replacement: path.resolve(__dirname, "../shared/src/index.client.ts"),
+      },
+      {
+        find: /^@hyperscape\/shared$/,
+        replacement: path.resolve(__dirname, "../shared/src/index.ts"),
+      },
+      {
+        find: /^@hyperscape\/shared\/(.*)$/,
+        replacement: path.resolve(__dirname, "../shared/src/$1"),
+      },
+    ],
   },
 });

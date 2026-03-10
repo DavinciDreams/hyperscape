@@ -74,9 +74,16 @@ const REQUIRED_ITEM_FILES = [
 const OPTIONAL_ITEM_FILES = ["ammunition", "runes", "armor"] as const;
 
 const ITEM_CATEGORY_FILES = [...REQUIRED_ITEM_FILES, ...OPTIONAL_ITEM_FILES];
+const OPTIONAL_DATA_WARNINGS_ENABLED =
+  process.env.DATA_OPTIONAL_MANIFEST_WARNINGS !== "false";
 const getAllTreasureLocations = () => TREASURE_LOCATIONS;
 const getTreasureLocationsByDifficulty = (_difficulty: number) =>
   TREASURE_LOCATIONS;
+
+function warnOptionalData(message: string): void {
+  if (!OPTIONAL_DATA_WARNINGS_ENABLED) return;
+  console.warn(message);
+}
 
 const NPC_MODEL_ARCHETYPES: Record<NPCModelArchetype, string> = {
   // Use GLB version (323KB) instead of VRM (8.7MB) to avoid base64 buffer parsing issues
@@ -470,7 +477,7 @@ export class DataManager {
               DataManager.worldConfig = worldConfigData;
             }
           } catch {
-            console.warn(
+            warnOptionalData(
               "[DataManager] world-config.json not found, using default world generation parameters",
             );
           }
@@ -559,9 +566,14 @@ export class DataManager {
    * Uses packages/server/world/assets/manifests/ directory
    */
   private async loadManifestsFromFilesystem(): Promise<void> {
-    // Dynamic import for Node.js modules (not available in browser)
-    const fs = await import("fs/promises");
-    const path = await import("path");
+    const fsModuleId = "node:fs/promises";
+    const pathModuleId = "node:path";
+    const fs = (await import(
+      /* @vite-ignore */ fsModuleId
+    )) as typeof import("node:fs/promises");
+    const path = (await import(
+      /* @vite-ignore */ pathModuleId
+    )) as typeof import("node:path");
 
     // Check if we're in a TEST environment where manifests might not exist
     // NOTE: CI=true is often set by CI/CD platforms AND production deployments (Railway)
@@ -740,7 +752,7 @@ export class DataManager {
         ) as WorldConfigManifest;
         DataManager.worldConfig = worldConfigManifest;
       } catch {
-        console.warn(
+        warnOptionalData(
           "[DataManager] world-config.json not found, using default world generation parameters",
         );
       }
@@ -1124,7 +1136,7 @@ export class DataManager {
             (await smithingRes.json()) as SmithingManifest;
           processingDataProvider.loadSmithingRecipes(smithingManifest);
         } catch {
-          console.warn(
+          warnOptionalData(
             "[DataManager] recipes/smithing.json not found, falling back to embedded item data",
           );
         }
@@ -1138,7 +1150,7 @@ export class DataManager {
             (await craftingRes.json()) as CraftingManifest;
           processingDataProvider.loadCraftingRecipes(craftingManifest);
         } catch {
-          console.warn(
+          warnOptionalData(
             "[DataManager] recipes/crafting.json not found, crafting will be unavailable",
           );
         }
@@ -1151,7 +1163,7 @@ export class DataManager {
           const tanningManifest = (await tanningRes.json()) as TanningManifest;
           processingDataProvider.loadTanningRecipes(tanningManifest);
         } catch {
-          console.warn(
+          warnOptionalData(
             "[DataManager] recipes/tanning.json not found, tanning will be unavailable",
           );
         }
@@ -1165,7 +1177,7 @@ export class DataManager {
             (await fletchingRes.json()) as FletchingManifest;
           processingDataProvider.loadFletchingRecipes(fletchingManifest);
         } catch {
-          console.warn(
+          warnOptionalData(
             "[DataManager] recipes/fletching.json not found, fletching will be unavailable",
           );
         }
@@ -1181,7 +1193,7 @@ export class DataManager {
             (await runecraftingRes.json()) as RunecraftingManifest;
           processingDataProvider.loadRunecraftingRecipes(runecraftingManifest);
         } catch {
-          console.warn(
+          warnOptionalData(
             "[DataManager] recipes/runecrafting.json not found, runecrafting will be unavailable",
           );
         }
@@ -1293,7 +1305,7 @@ export class DataManager {
       const smithingManifest = JSON.parse(smithingData) as SmithingManifest;
       processingDataProvider.loadSmithingRecipes(smithingManifest);
     } catch {
-      console.warn(
+      warnOptionalData(
         "[DataManager] recipes/smithing.json not found, falling back to embedded item data",
       );
     }
@@ -1304,9 +1316,9 @@ export class DataManager {
       const craftingData = await fs.readFile(craftingPath, "utf-8");
       const craftingManifest = JSON.parse(craftingData) as CraftingManifest;
       processingDataProvider.loadCraftingRecipes(craftingManifest);
-    } catch {
-      console.warn(
-        "[DataManager] recipes/crafting.json not found, crafting will be unavailable",
+    } catch (e: any) {
+      warnOptionalData(
+        `[DataManager] recipes/crafting.json failed to load: ${e.message}`,
       );
     }
 
@@ -1317,7 +1329,7 @@ export class DataManager {
       const tanningManifest = JSON.parse(tanningData) as TanningManifest;
       processingDataProvider.loadTanningRecipes(tanningManifest);
     } catch {
-      console.warn(
+      warnOptionalData(
         "[DataManager] recipes/tanning.json not found, tanning will be unavailable",
       );
     }
@@ -1329,7 +1341,7 @@ export class DataManager {
       const fletchingManifest = JSON.parse(fletchingData) as FletchingManifest;
       processingDataProvider.loadFletchingRecipes(fletchingManifest);
     } catch {
-      console.warn(
+      warnOptionalData(
         "[DataManager] recipes/fletching.json not found, fletching will be unavailable",
       );
     }
@@ -1343,7 +1355,7 @@ export class DataManager {
       ) as RunecraftingManifest;
       processingDataProvider.loadRunecraftingRecipes(runecraftingManifest);
     } catch {
-      console.warn(
+      warnOptionalData(
         "[DataManager] recipes/runecrafting.json not found, runecrafting will be unavailable",
       );
     }

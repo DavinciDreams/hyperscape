@@ -121,18 +121,11 @@ async function tryLocalPostgresFallback(
         if (exists.rowCount === 0) {
           const safeDbName = `"${targetDatabase.replace(/"/g, '""')}"`;
           await client.query(`CREATE DATABASE ${safeDbName}`);
-          console.log(
-            `[Database] ✅ Created local PostgreSQL database "${targetDatabase}"`,
-          );
         }
       }
     } finally {
       client.release();
     }
-
-    console.log(
-      `[Database] ✅ Using local PostgreSQL fallback at ${host}:${port}/${targetDatabase}`,
-    );
     return targetConnectionString;
   } catch (error) {
     console.warn(
@@ -174,11 +167,7 @@ export async function initializeDatabase(
 
       const isPostgresRunning = await dockerManager.checkPostgresRunning();
       if (!isPostgresRunning) {
-        console.log("[Database] Starting Docker PostgreSQL...");
         await dockerManager.startPostgres();
-        console.log("[Database] ✅ PostgreSQL started");
-      } else {
-        console.log("[Database] ✅ PostgreSQL already running");
       }
 
       connectionString = await dockerManager.getConnectionString();
@@ -202,7 +191,6 @@ export async function initializeDatabase(
       connectionString = fallbackConnectionString;
     }
   } else if (config.databaseUrl) {
-    console.log("[Database] Using explicit DATABASE_URL");
     connectionString = config.databaseUrl;
   } else {
     throw new Error(
@@ -211,17 +199,13 @@ export async function initializeDatabase(
   }
 
   // Initialize Drizzle database
-  console.log("[Database] Initializing Drizzle ORM...");
   const { initializeDatabase: initDrizzle } =
     await import("../database/client.js");
   const { db: drizzleDb, pool: pgPool } = await initDrizzle(connectionString);
-  console.log("[Database] ✅ Drizzle ORM initialized");
 
   // Create adapter for systems that need the old database interface
-  console.log("[Database] Creating legacy adapter...");
   const { createDrizzleAdapter } = await import("../database/adapter.js");
   const db = createDrizzleAdapter(drizzleDb as NodePgDatabase<typeof schema>);
-  console.log("[Database] ✅ Legacy adapter created");
 
   return {
     pgPool,
@@ -240,9 +224,7 @@ export async function initializeDatabase(
  * @returns Promise that resolves when cleanup is complete
  */
 export async function closeDatabase(): Promise<void> {
-  console.log("[Database] Closing database connections...");
   const { closeDatabase: closeDatabaseUtil } =
     await import("../database/client.js");
   await closeDatabaseUtil();
-  console.log("[Database] ✅ Database connections closed");
 }

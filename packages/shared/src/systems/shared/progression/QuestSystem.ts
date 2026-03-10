@@ -222,8 +222,14 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
       }
 
       // Server-side: Load from filesystem
-      const fs = await import("fs/promises");
-      const path = await import("path");
+      const fsModuleId = "node:fs/promises";
+      const pathModuleId = "node:path";
+      const fs = (await import(
+        /* @vite-ignore */ fsModuleId
+      )) as typeof import("node:fs/promises");
+      const path = (await import(
+        /* @vite-ignore */ pathModuleId
+      )) as typeof import("node:path");
 
       // Find manifests directory
       let manifestsDir: string;
@@ -879,13 +885,16 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
         false,
       );
 
-      // Emit progress event
+      // Emit progress event (include stage details so clients don't need a round-trip)
       this.emitTypedEvent(EventType.QUEST_PROGRESSED, {
         playerId: killedBy,
         questId,
         stage: progress.currentStage,
         progress: progress.stageProgress,
         description: stage.description,
+        stageType: stage.type,
+        stageTarget: stage.target,
+        stageCount: stage.count,
       });
     }
   }
@@ -988,12 +997,17 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
         progress.stageProgress,
         false,
       );
+      // Include stage details so clients don't need a round-trip
+      const emitStage = currentStage || relevantStage;
       this.emitTypedEvent(EventType.QUEST_PROGRESSED, {
         playerId,
         questId,
         stage: progress.currentStage,
         progress: progress.stageProgress,
-        description: currentStage?.description || relevantStage.description,
+        description: emitStage.description,
+        stageType: emitStage.type,
+        stageTarget: emitStage.target,
+        stageCount: emitStage.count,
       });
     }
   }

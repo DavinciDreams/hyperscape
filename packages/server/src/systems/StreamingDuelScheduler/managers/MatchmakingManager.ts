@@ -54,6 +54,8 @@ type MatchmakingCallbacks = {
   onAgentRegistered?: (agentId: string, now: number) => void;
   /** Called when an agent unregisters so the scheduler can handle forfeit logic */
   onAgentUnregistered?: (agentId: string) => void;
+  /** Called when the pre-selected next duel pair changes (new pair or cleared) */
+  onNextDuelPairChanged?: (pair: NextDuelPair | null) => void;
 };
 
 // ============================================================================
@@ -359,6 +361,7 @@ export class MatchmakingManager {
     }
 
     this.nextDuelPair = this.chooseRandomPairFromPool(pool, now);
+    this.callbacks?.onNextDuelPairChanged?.(this.nextDuelPair);
   }
 
   // ==========================================================================
@@ -592,18 +595,59 @@ export class MatchmakingManager {
     }
   }
 
+  /**
+   * Update stats for a draw outcome (#24).
+   * Does not affect win/loss counts or streaks — just marks leaderboard dirty.
+   */
+  updateDrawStats(_agent1Id: string, _agent2Id: string): void {
+    // Draws don't change win/loss/streak — just dirty the leaderboard
+    // so any future display reflects the draw was recorded.
+    this.leaderboardDirty = true;
+  }
+
   // ==========================================================================
   // Recent Duels
   // ==========================================================================
 
   /**
    * Record a recently completed duel (newest first, capped to maxRecentDuels).
+   * If database persistence is enabled, also writes to streaming_duel_history.
    */
   recordRecentDuel(duel: RecentDuelEntry): void {
     this.recentDuels.unshift(duel);
     if (this.recentDuels.length > this.config.maxRecentDuels) {
       this.recentDuels.length = this.config.maxRecentDuels;
     }
+
+    if (this.config.persistStatsToDatabase) {
+      this.persistDuelHistory(duel).catch((err) => {
+        Logger.warn(
+          "StreamingDuelScheduler",
+          `Failed to persist duel history: ${err}`,
+        );
+      });
+    }
+  }
+
+  private async persistDuelHistory(duel: RecentDuelEntry): Promise<void> {
+    const db = this.getDatabase();
+    if (!db) return;
+
+    const { streamingDuelHistory } =
+      await import("../../../database/schema.js");
+
+    await db.insert(streamingDuelHistory).values({
+      cycleId: duel.cycleId,
+      duelId: duel.duelId,
+      finishedAt: duel.finishedAt,
+      winnerId: duel.winnerId,
+      winnerName: duel.winnerName,
+      loserId: duel.loserId,
+      loserName: duel.loserName,
+      winReason: duel.winReason,
+      damageWinner: duel.damageWinner,
+      damageLoser: duel.damageLoser,
+    });
   }
 
   // ==========================================================================

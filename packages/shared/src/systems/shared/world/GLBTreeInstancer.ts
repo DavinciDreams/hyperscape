@@ -28,7 +28,7 @@ import {
   type TreeMaterialOptions,
 } from "./GPUMaterials";
 import type { Wind } from "./Wind";
-import { getLODDistances } from "./LODConfig";
+import { getLODDistances, inferLOD1Path, inferLOD2Path } from "./LODConfig";
 
 const MAX_INSTANCES = 512;
 
@@ -83,13 +83,6 @@ let scene: THREE.Scene | null = null;
 let world: World | null = null;
 const pools = new Map<string, ModelPool>();
 const entityToModel = new Map<string, string>();
-
-function inferLOD1Path(lod0Path: string): string {
-  return lod0Path.replace(/\.glb$/i, "_lod1.glb");
-}
-function inferLOD2Path(lod0Path: string): string {
-  return lod0Path.replace(/\.glb$/i, "_lod2.glb");
-}
 
 // ---- Geometry extraction (portfolio pattern: reference, not clone) ----
 
@@ -229,6 +222,8 @@ function enableTextureRepeat(mat: DissolveMaterial): void {
 async function ensureModelPool(
   modelPath: string,
   depletedModelPath?: string | null,
+  lod1ModelPath?: string | null,
+  lod2ModelPath?: string | null,
 ): Promise<ModelPool> {
   const existing = pools.get(modelPath);
   if (existing) {
@@ -279,18 +274,34 @@ async function ensureModelPool(
 
     const lod0Pool = createLODPool(buildTreeParts(lod0Parts));
 
-    // LOD1
+    // LOD1 — explicit path first, fall back to inferred naming convention
     let lod1Pool: LODPool | null = null;
-    const lod1Parts = await loadLODParts(inferLOD1Path(modelPath));
-    if (lod1Parts) {
-      lod1Pool = createLODPool(buildTreeParts(lod1Parts));
+    if (lod1ModelPath) {
+      const lod1Parts = await loadLODParts(lod1ModelPath);
+      if (lod1Parts) {
+        lod1Pool = createLODPool(buildTreeParts(lod1Parts));
+      }
+    }
+    if (!lod1Pool) {
+      const lod1Parts = await loadLODParts(inferLOD1Path(modelPath));
+      if (lod1Parts) {
+        lod1Pool = createLODPool(buildTreeParts(lod1Parts));
+      }
     }
 
-    // LOD2
+    // LOD2 — explicit path first, fall back to inferred naming convention
     let lod2Pool: LODPool | null = null;
-    const lod2Parts = await loadLODParts(inferLOD2Path(modelPath));
-    if (lod2Parts) {
-      lod2Pool = createLODPool(buildTreeParts(lod2Parts));
+    if (lod2ModelPath) {
+      const lod2Parts = await loadLODParts(lod2ModelPath);
+      if (lod2Parts) {
+        lod2Pool = createLODPool(buildTreeParts(lod2Parts));
+      }
+    }
+    if (!lod2Pool) {
+      const lod2Parts = await loadLODParts(inferLOD2Path(modelPath));
+      if (lod2Parts) {
+        lod2Pool = createLODPool(buildTreeParts(lod2Parts));
+      }
     }
 
     const pool: ModelPool = {
@@ -447,11 +458,18 @@ export async function addInstance(
   scale: number,
   depletedModelPath?: string | null,
   depletedScale?: number,
+  lod1ModelPath?: string | null,
+  lod2ModelPath?: string | null,
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
   try {
-    const pool = await ensureModelPool(modelPath, depletedModelPath);
+    const pool = await ensureModelPool(
+      modelPath,
+      depletedModelPath,
+      lod1ModelPath,
+      lod2ModelPath,
+    );
 
     if (pool.lod0 && pool.lod0.activeCount >= MAX_INSTANCES) {
       console.warn(

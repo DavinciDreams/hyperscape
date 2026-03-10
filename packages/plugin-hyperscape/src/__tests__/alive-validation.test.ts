@@ -11,6 +11,9 @@ function createRuntime(player: Record<string, unknown>) {
   const service = {
     isConnected: vi.fn().mockReturnValue(true),
     getPlayerEntity: vi.fn().mockReturnValue(player),
+    getNearbyEntities: vi
+      .fn()
+      .mockReturnValue([{ id: "fire-1", name: "Campfire", type: "fire" }]),
   };
 
   return {

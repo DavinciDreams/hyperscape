@@ -28,6 +28,7 @@ export interface LoggerConfig {
   minLevel: LogLevel;
   enableConsole: boolean;
   enableFile: boolean;
+  enableMemoryBuffer: boolean;
   enableSystemLogs: boolean;
   enablePlayerLogs: boolean;
   enableTestLogs: boolean;
@@ -53,17 +54,19 @@ class LoggerImpl {
     const envMaxEntries = (() => {
       if (typeof process === "undefined") return undefined;
       const parsed = Number.parseInt(process.env.LOGGER_MAX_ENTRIES || "", 10);
-      return Number.isFinite(parsed) && parsed >= 100 ? parsed : undefined;
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
     })();
+    const resolvedMaxEntries = envMaxEntries ?? 2000;
 
     this.config = {
-      minLevel: LogLevel.INFO,
+      minLevel: LogLevel.WARN,
       enableConsole: true,
       enableFile: false,
+      enableMemoryBuffer: resolvedMaxEntries > 0,
       enableSystemLogs: true,
       enablePlayerLogs: true,
       enableTestLogs: true,
-      maxLogEntries: envMaxEntries ?? 2000,
+      maxLogEntries: resolvedMaxEntries,
       ...config,
     };
 
@@ -87,6 +90,15 @@ class LoggerImpl {
 
   public configure(config: Partial<LoggerConfig>): void {
     this.config = { ...this.config, ...config };
+    if (
+      config.maxLogEntries !== undefined &&
+      config.enableMemoryBuffer === undefined
+    ) {
+      this.config.enableMemoryBuffer = config.maxLogEntries > 0;
+    }
+    if (!this.config.enableMemoryBuffer || this.config.maxLogEntries <= 0) {
+      this.logs = [];
+    }
   }
 
   public debug(message: string, context?: Record<string, unknown>): void {
@@ -106,7 +118,7 @@ class LoggerImpl {
     error?: Error,
     context?: Record<string, unknown>,
   ): void {
-    this.log(LogLevel.ERROR, message, { ...context }, error);
+    this.log(LogLevel.ERROR, message, context, error);
   }
 
   public system(
@@ -300,6 +312,8 @@ class LoggerImpl {
   ): void {
     if (level < this.config.minLevel) return;
 
+    const shouldBuffer =
+      this.config.enableMemoryBuffer && this.config.maxLogEntries > 0;
     const entry: LogEntry = {
       timestamp: Date.now(),
       level,
@@ -310,10 +324,11 @@ class LoggerImpl {
       playerId,
     };
 
-    // Add to log buffer
-    this.logs.push(entry);
-    if (this.logs.length > this.config.maxLogEntries) {
-      this.cleanupLogs();
+    if (shouldBuffer) {
+      this.logs.push(entry);
+      if (this.logs.length > this.config.maxLogEntries) {
+        this.cleanupLogs();
+      }
     }
 
     // Console output
@@ -563,36 +578,39 @@ export class SystemLogger {
 
 // Environment-based configuration
 if (typeof process !== "undefined" && process.env) {
-  const logLevel = process.env.LOG_LEVEL;
-  if (logLevel) {
-    const level = LogLevel[logLevel as keyof typeof LogLevel];
-    if (level !== undefined) {
-      Logger.setLogLevel(level);
-    }
-  }
-
-  // Configure based on environment
   if (process.env.NODE_ENV === "production") {
     Logger.configure({
       minLevel: LogLevel.WARN,
       enableFile: true,
-      enableConsole: false,
+      enableConsole: true,
+      enableMemoryBuffer: false,
+      maxLogEntries: 0,
     });
   } else if (process.env.NODE_ENV === "test") {
     Logger.configure({
       minLevel: LogLevel.ERROR,
       enableConsole: false,
+      enableMemoryBuffer: false,
+      maxLogEntries: 0,
       enableTestLogs: true,
     });
   } else {
-    // Development environment
     Logger.configure({
-      minLevel: LogLevel.DEBUG,
+      minLevel: LogLevel.WARN,
       enableConsole: true,
       enableSystemLogs: true,
       enablePlayerLogs: true,
       enableTestLogs: true,
     });
+  }
+
+  const logLevel = process.env.LOG_LEVEL;
+  if (logLevel) {
+    const normalizedLevel = logLevel.trim().toUpperCase();
+    const level = LogLevel[normalizedLevel as keyof typeof LogLevel];
+    if (level !== undefined) {
+      Logger.setLogLevel(level);
+    }
   }
 }
 

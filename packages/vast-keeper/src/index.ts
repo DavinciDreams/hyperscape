@@ -2,6 +2,16 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildTargetFromEnv,
+  isActiveInstance,
+  partitionInstances,
+} from "./instance-utils.js";
+import {
+  DEFAULT_US_STREAM_SEARCH_QUERY,
+  filterOffersForStream,
+  sortOffersByPreference,
+} from "./offer-utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -13,13 +23,15 @@ const POLL_INTERVAL_MS = Number.parseInt(
 // CRITICAL: gpu_display_active=true is REQUIRED for WebGPU streaming
 // Without display driver support, WebGPU will not work (only compute is available)
 const SEARCH_QUERY =
-  process.env.VAST_SEARCH_QUERY ||
-  "gpu_display_active=true reliability > 0.95 gpu_name in [RTX_4090, RTX_4080, RTX_3090, A6000] num_gpus=1 rented=False dph < 2.0";
+  process.env.VAST_SEARCH_QUERY || DEFAULT_US_STREAM_SEARCH_QUERY;
 const API_KEY = process.env.VAST_API_KEY;
 const TARGET_IMAGE =
   process.env.VAST_IMAGE || "nvidia/cuda:12.4.0-runtime-ubuntu22.04";
 const DISK_SIZE_GB = Number.parseInt(process.env.VAST_DISK_GB || "120", 10);
 const RTMP_MULTIPLEXER_URL = process.env.RTMP_MULTIPLEXER_URL;
+const INSTANCE_TARGET = buildTargetFromEnv(process.env);
+const PRUNE_EXTRA_INSTANCES =
+  process.env.KEEPER_PRUNE_EXTRA_INSTANCES !== "false";
 
 // Health check configuration
 const HEALTH_CHECK_ENABLED =
@@ -51,13 +63,20 @@ interface VastInstance {
   actual_status: string;
   ssh_host: string;
   ssh_port: number;
+  gpu_display_active?: boolean;
+  start_date?: number;
   [key: string]: unknown;
 }
 
 interface VastOffer {
+  cpu_ram?: number;
+  cpu_cores_effective?: number;
   id: number;
   dph: number;
+  disk_space?: number;
+  geolocation?: string;
   gpu_name: string;
+  gpu_ram?: number;
   [key: string]: unknown;
 }
 
@@ -115,10 +134,7 @@ async function runVastCmd(args: string[]): Promise<unknown> {
 
 async function getActiveInstances(): Promise<VastInstance[]> {
   const instances = (await runVastCmd(["show", "instances"])) as VastInstance[];
-  // Filter out instances that are stopped or exited
-  return instances.filter(
-    (i) => i.actual_status === "running" || i.actual_status === "loading",
-  );
+  return instances.filter(isActiveInstance);
 }
 
 async function findOffers(): Promise<VastOffer[]> {
@@ -127,12 +143,12 @@ async function findOffers(): Promise<VastOffer[]> {
     "offers",
     SEARCH_QUERY,
   ])) as VastOffer[];
-  if (!offers || offers.length === 0) {
+  const filteredOffers = offers ? filterOffersForStream(offers) : [];
+  if (!filteredOffers || filteredOffers.length === 0) {
     throw new Error("No offers found matching query.");
   }
-  // Sort logic: Vast returns them pre-ordered by score usually, but let's grab the cheapest reliable one
-  offers.sort((a, b) => a.dph - b.dph);
-  return offers;
+  sortOffersByPreference(filteredOffers);
+  return filteredOffers;
 }
 
 async function createInstance(offerId: number): Promise<string> {
@@ -380,7 +396,7 @@ async function loop() {
       await checkApiKeyFile();
 
       console.log("[Keeper] Checking active instances...");
-      const instances = await getActiveInstances();
+      let instances = await getActiveInstances();
 
       if (instances.length === 0) {
         console.log(
@@ -443,6 +459,41 @@ async function loop() {
         await deployToServer(instanceInfo.ssh_host, instanceInfo.ssh_port);
       } else {
         console.log(`[Keeper] Found ${instances.length} running instances.`);
+
+        if (instances.length > 1 && PRUNE_EXTRA_INSTANCES) {
+          const { primary, extras } = partitionInstances(
+            instances,
+            INSTANCE_TARGET,
+          );
+
+          if (primary) {
+            const healthUrl = buildHealthUrl(primary);
+            const primaryReady =
+              primary.actual_status === "running" &&
+              (!HEALTH_CHECK_ENABLED ||
+                !healthUrl ||
+                (await checkServerHealth(healthUrl)));
+
+            if (primaryReady) {
+              console.log(
+                `[Keeper] Keeping instance ${primary.id} as the active target.`,
+              );
+
+              for (const extra of extras) {
+                console.warn(
+                  `[Keeper] Destroying duplicate active instance ${extra.id}.`,
+                );
+                await destroyInstance(extra.id);
+              }
+
+              instances = [primary];
+            } else {
+              console.warn(
+                "[Keeper] Multiple active instances detected, but the preferred target is not healthy yet. Skipping duplicate cleanup this iteration.",
+              );
+            }
+          }
+        }
 
         // Health check the running instance
         for (const instance of instances) {

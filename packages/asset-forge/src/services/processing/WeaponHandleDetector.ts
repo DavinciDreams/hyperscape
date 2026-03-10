@@ -25,6 +25,29 @@ interface RedPixelBounds {
   maxY: number;
 }
 
+async function writeArrayBufferToFile(
+  outputPath: string,
+  data: ArrayBuffer,
+): Promise<void> {
+  const globalObj = globalThis as Record<string, unknown>;
+  if (
+    globalObj.Bun &&
+    typeof (globalObj.Bun as { write: unknown }).write === "function"
+  ) {
+    const bunRuntime = globalObj.Bun as {
+      write: (path: string, data: ArrayBuffer) => Promise<void>;
+    };
+    await bunRuntime.write(outputPath, data);
+    return;
+  }
+
+  const fsModuleId = "node:fs/promises";
+  const { writeFile } = (await import(
+    /* @vite-ignore */ fsModuleId
+  )) as typeof import("node:fs/promises");
+  await writeFile(outputPath, new Uint8Array(data));
+}
+
 export class WeaponHandleDetector {
   private renderer: WebGPURenderer | null = null;
   private scene: THREE.Scene;
@@ -276,9 +299,7 @@ export class WeaponHandleDetector {
 
     // Step 8: Save if output path provided
     if (outputPath) {
-      const buffer = Buffer.from(glb);
-      const fs = await import("fs");
-      await fs.promises.writeFile(outputPath, buffer);
+      await writeArrayBufferToFile(outputPath, glb);
       console.log(`💾 Saved normalized weapon to: ${outputPath}`);
     }
 

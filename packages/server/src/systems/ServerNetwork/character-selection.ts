@@ -33,6 +33,22 @@ import {
 import { getAgentManager } from "../../eliza";
 import { getAgentRuntimeByCharacterId } from "../../eliza/ModelAgentSpawner.js";
 
+const TRUSTED_DUEL_BOT_ACCOUNT_IDS = new Set(
+  (
+    process.env.HYPERSCAPE_TRUSTED_DUEL_BOT_ACCOUNT_IDS ||
+    "eliza-duel-bots-account"
+  )
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0),
+);
+
+function isTrustedDuelBotAccount(
+  accountId: string | null | undefined,
+): boolean {
+  return !!accountId && TRUSTED_DUEL_BOT_ACCOUNT_IDS.has(accountId);
+}
+
 /**
  * Create an ElizaOS agent record for a character
  * This allows the character to appear in the dashboard and be managed as an agent
@@ -406,6 +422,48 @@ function isSocketStillActive(socket: ServerSocket, world: World): boolean {
   return true;
 }
 
+export function collectInitialSyncEntities(
+  world: World,
+  x: number,
+  z: number,
+  selfId: string,
+): Entity[] {
+  const entityManager = world.getSystem?.("entity-manager") as
+    | {
+        getEntitiesNearPosition?: (
+          x: number,
+          z: number,
+          radius?: number,
+        ) => Entity[];
+      }
+    | undefined;
+
+  if (entityManager?.getEntitiesNearPosition) {
+    const nearbyEntities = entityManager.getEntitiesNearPosition(x, z);
+    const uniqueEntities = new Map<string, Entity>();
+
+    for (const entity of nearbyEntities) {
+      if (entity.id !== selfId) {
+        uniqueEntities.set(entity.id, entity);
+      }
+    }
+
+    return Array.from(uniqueEntities.values());
+  }
+
+  if (!world.entities?.items) {
+    return [];
+  }
+
+  const allEntities: Entity[] = [];
+  for (const [entityId, entity] of world.entities.items.entries()) {
+    if (entityId !== selfId) {
+      allEntities.push(entity as Entity);
+    }
+  }
+  return allEntities;
+}
+
 /**
  * Handle entering world with selected character
  */
@@ -451,7 +509,10 @@ export async function handleEnterWorld(
   const agentIsDuelBot = isEmbeddedAgent || isModelAgent;
   const loadTestDuelBot =
     isLoadTestBot && (payload.duelBot === true || payload.duelBot === "true");
-  const isDuelBot = agentIsDuelBot || loadTestDuelBot;
+  const trustedAccountDuelBot =
+    isTrustedDuelBotAccount(socket.accountId) &&
+    (payload.duelBot === true || payload.duelBot === "true");
+  const isDuelBot = agentIsDuelBot || loadTestDuelBot || trustedAccountDuelBot;
   const botName = payload.botName;
 
   console.log("[PlayerLoading] enterWorld received", {
@@ -461,6 +522,7 @@ export async function handleEnterWorld(
     hasExistingPlayer: !!socket.player,
     isLoadTestBot,
     isDuelBot,
+    trustedAccountDuelBot,
   });
 
   // Spawn the entity now, preserving legacy spawn shape
@@ -1103,20 +1165,24 @@ export async function handleEnterWorld(
     });
 
     try {
-      // Send to everyone else
-      sendFn("entityAdded", spawnedPlayer.serialize(), socket.id);
-      // And also to the originating socket so their client receives their own entity
-      sendToFn(socket.id, "entityAdded", spawnedPlayer.serialize());
+      const spawnedPlayerSnapshot = spawnedPlayer.serialize();
+      const initialSyncEntities = collectInitialSyncEntities(
+        world,
+        position[0],
+        position[2],
+        spawnedPlayer.id,
+      );
+      const initialSyncEntityIds = new Set(
+        initialSyncEntities.map((entity) => entity.id),
+      );
 
-      // CRITICAL: Send all existing entities (mobs, items, NPCs) to new client
-      // These entities were spawned before this player connected
-      if (world.entities?.items) {
-        for (const [entityId, entity] of world.entities.items.entries()) {
-          // Skip the player we just added
-          if (entityId !== spawnedPlayer.id) {
-            sendToFn(socket.id, "entityAdded", entity.serialize());
-          }
-        }
+      // Send to everyone else
+      sendFn("entityAdded", spawnedPlayerSnapshot, socket.id);
+      // And also to the originating socket so their client receives their own entity
+      sendToFn(socket.id, "entityAdded", spawnedPlayerSnapshot);
+
+      for (const entity of initialSyncEntities) {
+        sendToFn(socket.id, "entityAdded", entity.serialize());
       }
 
       // Send existing players' equipment to the new player
@@ -1132,6 +1198,7 @@ export async function handleEnterWorld(
         for (const [entityId, entity] of world.entities.items.entries()) {
           if (
             entityId !== spawnedPlayer.id &&
+            initialSyncEntityIds.has(entityId) &&
             (entity as Entity).type === "player"
           ) {
             const eq = equipSys.getPlayerEquipment(entityId);

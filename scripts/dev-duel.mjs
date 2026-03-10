@@ -138,6 +138,7 @@ const opts = parseArgs({
     help: { type: "boolean", short: "h" },
     bots: { type: "string", short: "b", default: "4" },
     "skip-dev": { type: "boolean" },
+    "connect-only": { type: "boolean" },
     "match-interval": { type: "string", default: "5000" },
     "ramp-delay": { type: "string", default: "500" },
     url: { type: "string", default: "ws://localhost:5555/ws" },
@@ -148,6 +149,42 @@ const opts = parseArgs({
   },
   strict: true,
 }).values;
+const LOG_LEVEL_PRIORITY = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+const configuredLogLevel = (
+  process.env.DUEL_LOG_LEVEL ||
+  process.env.LOG_LEVEL ||
+  process.env.DEFAULT_LOG_LEVEL ||
+  "warn"
+)
+  .trim()
+  .toLowerCase();
+const normalizedLogLevel =
+  configuredLogLevel === "debug" ||
+    configuredLogLevel === "info" ||
+    configuredLogLevel === "warn" ||
+    configuredLogLevel === "error"
+    ? configuredLogLevel
+    : "warn";
+const infoLogsEnabled =
+  opts.verbose === true ||
+  LOG_LEVEL_PRIORITY.info >= LOG_LEVEL_PRIORITY[normalizedLogLevel];
+const warnLogsEnabled =
+  LOG_LEVEL_PRIORITY.warn >= LOG_LEVEL_PRIORITY[normalizedLogLevel];
+
+function info(message = "") {
+  if (!infoLogsEnabled) return;
+  console.log(message);
+}
+
+function warn(message, ...args) {
+  if (!warnLogsEnabled) return;
+  console.warn(message, ...args);
+}
 
 if (opts.help) {
   console.log(`
@@ -159,6 +196,7 @@ Options:
   -h, --help               Show help
   -b, --bots <n>           Number of bots (default: 4, min: 2)
   --skip-dev               Don't start dev server (assume already running)
+  --connect-only           Connect bots only; let the server schedule duels
   --match-interval <ms>    Time between match scheduling (default: 5000)
   --ramp-delay <ms>        Delay between bot connections (default: 500)
   --url <ws>               Server WebSocket URL (default: ws://localhost:5555/ws)
@@ -186,12 +224,27 @@ Spectator Mode:
 
 const releaseRunLock = acquireSingletonLock("dev-duel");
 
-const HEALTH_URL = "http://localhost:5555/health";
+function resolveHealthUrl(rawWsUrl) {
+  try {
+    const parsed = new URL(rawWsUrl);
+    parsed.protocol = parsed.protocol === "wss:" ? "https:" : "http:";
+    parsed.pathname = "/health";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return "http://localhost:5555/health";
+  }
+}
+
+const HEALTH_URL = resolveHealthUrl(opts.url);
 const MAX_WAIT = 120000; // 2 minutes
 
 async function waitForServer() {
   const start = Date.now();
-  process.stdout.write("Waiting for server");
+  if (infoLogsEnabled) {
+    process.stdout.write("Waiting for server");
+  }
 
   while (Date.now() - start < MAX_WAIT) {
     try {
@@ -200,20 +253,26 @@ async function waitForServer() {
       const res = await fetch(HEALTH_URL, { signal: controller.signal });
       clearTimeout(timeout);
       if (res.ok) {
-        console.log(" ready!");
+        if (infoLogsEnabled) {
+          console.log(" ready!");
+        }
         return true;
       }
     } catch { }
-    process.stdout.write(".");
+    if (infoLogsEnabled) {
+      process.stdout.write(".");
+    }
     await new Promise((r) => setTimeout(r, 1000));
   }
 
-  console.log(" timeout!");
+  if (infoLogsEnabled) {
+    console.log(" timeout!");
+  }
   return false;
 }
 
 async function startDev() {
-  console.log("Starting dev server...\n");
+  info("Starting dev server...\n");
 
   const dev = spawn("bun", ["run", "dev"], {
     cwd: process.cwd(),
@@ -221,16 +280,17 @@ async function startDev() {
     detached: true,
   });
 
-  // Stream server output with prefix
-  dev.stdout.on("data", (data) => {
-    for (const line of data.toString().split("\n").filter(Boolean)) {
-      console.log(`[dev] ${line}`);
-    }
-  });
+  if (infoLogsEnabled) {
+    dev.stdout.on("data", (data) => {
+      for (const line of data.toString().split("\n").filter(Boolean)) {
+        console.log(`[dev] ${line}`);
+      }
+    });
+  }
 
   dev.stderr.on("data", (data) => {
     for (const line of data.toString().split("\n").filter(Boolean)) {
-      console.log(`[dev] ${line}`);
+      console.error(`[dev] ${line}`);
     }
   });
 
@@ -256,23 +316,29 @@ async function loadMatchmaker() {
       if (mod?.ElizaDuelMatchmaker) {
         return mod;
       }
-    } catch { }
+    } catch (err) {
+      console.warn(`[dev-duel] Failed to import ${entry}:`, err.message);
+    }
   }
 
   // Fallback: try the compiled server build
   try {
     const mod = await import("@hyperscape/server/eliza");
     if (mod?.ElizaDuelMatchmaker) return mod;
-  } catch { }
+  } catch (err) {
+    console.warn(`[dev-duel] Failed to import @hyperscape/server/eliza:`, err.message);
+  }
 
   // Final fallback: try loading the old DuelMatchmaker from shared
   try {
     const mod = await import("../packages/shared/src/testing/index.ts");
     if (mod?.DuelMatchmaker) {
-      console.warn("[dev-duel] Falling back to old DuelMatchmaker (no LLM)");
+      warn("[dev-duel] Falling back to old DuelMatchmaker (no LLM)");
       return { ElizaDuelMatchmaker: mod.DuelMatchmaker };
     }
-  } catch { }
+  } catch (err) {
+    console.warn(`[dev-duel] Failed to import old DuelMatchmaker:`, err.message);
+  }
 
   console.error("Cannot load ElizaDuelMatchmaker.");
   console.error(
@@ -298,19 +364,20 @@ async function runMatchmaker() {
   const botCount = Math.max(2, parseInt(opts.bots, 10));
   const matchIntervalMs = parseInt(opts["match-interval"], 10);
   const rampUpDelayMs = parseInt(opts["ramp-delay"], 10);
+  const connectOnly = opts["connect-only"] === true;
   const duration = opts.duration ? parseInt(opts.duration, 10) * 1000 : null;
 
   const clientUrl = opts["client-url"];
 
-  console.log(`
+  info(`
 ====================================================
         ELIZA AI DUEL MATCHMAKER
 ====================================================
   Bots: ${botCount} (capped to available API keys)
-  Match Interval: ${matchIntervalMs}ms
+  Match Interval: ${connectOnly ? "server-owned" : `${matchIntervalMs}ms`}
   Server: ${opts.url}
   Duration: ${duration ? formatTime(duration) : "Continuous"}
-  Mode: ElizaOS LLM agents (each bot = different AI model)
+  Mode: ${connectOnly ? "ElizaOS LLM agents (connect-only; server schedules duels)" : "ElizaOS LLM agents (each bot = different AI model)"}
 ====================================================
 
   Spectator Mode (for streaming):
@@ -329,16 +396,23 @@ async function runMatchmaker() {
     botCount,
     rampUpDelayMs,
     matchIntervalMs,
-    verbose: opts.verbose,
+    connectOnly,
+    verbose: opts.verbose === true,
   });
 
   // Event handlers
   matchmaker.on("ready", (data) => {
+    if (!infoLogsEnabled) return;
     console.log(`\n[Matchmaker] Ready! ${data.connectedBots}/${data.totalBots} bots connected`);
-    console.log("[Matchmaker] Duels will begin automatically...\n");
+    if (connectOnly) {
+      console.log("[Matchmaker] Waiting for server-side duel scheduling...\n");
+    } else {
+      console.log("[Matchmaker] Duels will begin automatically...\n");
+    }
   });
 
   matchmaker.on("matchScheduled", (data) => {
+    if (!infoLogsEnabled) return;
     const p1 = data.bot1Personality ? ` [${data.bot1Personality}]` : "";
     const p2 = data.bot2Personality ? ` [${data.bot2Personality}]` : "";
     console.log(`\n[Match] ${data.matchId}: ${data.bot1Name}${p1} vs ${data.bot2Name}${p2}`);
@@ -355,6 +429,7 @@ async function runMatchmaker() {
   });
 
   matchmaker.on("matchComplete", (result) => {
+    if (!infoLogsEnabled) return;
     const wp = result.winnerPersonality ? ` [${result.winnerPersonality}]` : "";
     const lp = result.loserPersonality ? ` [${result.loserPersonality}]` : "";
     console.log(`\n[Result] ${result.winnerName}${wp} defeated ${result.loserName}${lp}!`);
@@ -373,7 +448,7 @@ async function runMatchmaker() {
   });
 
   matchmaker.on("botDisconnected", (data) => {
-    console.log(`[Warning] ${data.name} disconnected: ${data.reason || "unknown"}`);
+    warn(`[Warning] ${data.name} disconnected: ${data.reason || "unknown"}`);
   });
 
   // Start matchmaker
@@ -385,10 +460,10 @@ async function runMatchmaker() {
     if (stopping) return;
     stopping = true;
 
-    console.log("\n\n[Matchmaker] Shutting down...");
+    info("\n\n[Matchmaker] Shutting down...");
 
     const stats = matchmaker.getStats();
-    console.log(`
+    info(`
 ====================================================
             FINAL RESULTS
 ====================================================
@@ -398,14 +473,16 @@ async function runMatchmaker() {
 `);
 
     const leaderboard = matchmaker.getLeaderboard();
-    console.log("[Final Leaderboard]");
-    leaderboard.forEach((entry, i) => {
-      const medal = i === 0 ? "🏆" : i === 1 ? "🥈" : i === 2 ? "🥉" : "  ";
-      const personality = entry.personality ? ` [${entry.personality}]` : "";
-      console.log(
-        `  ${medal} ${entry.name}${personality}: ${entry.wins}W-${entry.losses}L (${entry.winRate.toFixed(0)}%)`
-      );
-    });
+    if (infoLogsEnabled) {
+      console.log("[Final Leaderboard]");
+      leaderboard.forEach((entry, i) => {
+        const medal = i === 0 ? "🏆" : i === 1 ? "🥈" : i === 2 ? "🥉" : "  ";
+        const personality = entry.personality ? ` [${entry.personality}]` : "";
+        console.log(
+          `  ${medal} ${entry.name}${personality}: ${entry.wins}W-${entry.losses}L (${entry.winRate.toFixed(0)}%)`
+        );
+      });
+    }
 
     await matchmaker.stop();
   };
@@ -415,14 +492,14 @@ async function runMatchmaker() {
 
   // Run for duration or indefinitely
   if (duration) {
-    console.log(`[Matchmaker] Will run for ${formatTime(duration)}...`);
+    info(`[Matchmaker] Will run for ${formatTime(duration)}...`);
     await new Promise((r) => setTimeout(r, duration));
     await shutdown();
     return 0;
   }
 
   // Run indefinitely
-  console.log("[Matchmaker] Running continuously. Press Ctrl+C to stop.\n");
+  info("[Matchmaker] Running continuously. Press Ctrl+C to stop.\n");
   await new Promise(() => { }); // Never resolves
 }
 
@@ -432,7 +509,7 @@ async function main() {
   const cleanup = (codeOrSignal) => {
     const exitCode = typeof codeOrSignal === 'number' ? codeOrSignal : 0;
     if (devProcess) {
-      console.log("\nStopping dev server...");
+      info("\nStopping dev server...");
       try {
         process.kill(-devProcess.pid, "SIGTERM");
       } catch {
@@ -467,11 +544,11 @@ async function main() {
     }
 
     // Extra settle time for world initialization
-    console.log("Waiting for world to initialize...");
+    info("Waiting for world to initialize...");
     await new Promise((r) => setTimeout(r, 3000));
   } else {
     // Verify server is already running
-    console.log("Checking if server is running...");
+    info("Checking if server is running...");
     const ready = await waitForServer();
     if (!ready) {
       console.error("Server not running. Start with 'bun run dev' or remove --skip-dev");
@@ -484,7 +561,7 @@ async function main() {
 
   // Cleanup
   if (devProcess) {
-    console.log("\nStopping dev server...");
+    info("\nStopping dev server...");
     try {
       process.kill(-devProcess.pid, "SIGTERM");
     } catch {

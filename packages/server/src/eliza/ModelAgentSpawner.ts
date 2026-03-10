@@ -17,9 +17,11 @@ import {
   ModelType,
   type Plugin,
   type Character,
+  type Memory,
+  type UUID,
+  // @ts-ignore — InMemoryDatabaseAdapter is exported at runtime but not in .d.ts
+  InMemoryDatabaseAdapter,
 } from "@elizaos/core";
-import fs from "fs";
-import path from "path";
 import { EventType, getDuelArenaConfig, type World } from "@hyperscape/shared";
 import { createJWT } from "../shared/utils.js";
 import { errMsg } from "../shared/errMsg.js";
@@ -30,18 +32,28 @@ import {
   recoverAgentFromDeathLoop,
 } from "./agentRecovery.js";
 import { getAgentManager } from "./AgentManager.js";
-import {
-  loadModelPlugin,
-  loadSqlPlugin,
-  createAgentCharacter,
-} from "./agentHelpers.js";
+import { loadModelPlugin, createAgentCharacter } from "./agentHelpers.js";
+
+type BunRuntime = {
+  gc?: (force?: boolean) => void;
+};
+
+function getBunRuntime(): BunRuntime | undefined {
+  return (globalThis as typeof globalThis & { Bun?: BunRuntime }).Bun;
+}
 
 /**
  * Model provider configuration
  */
 export interface ModelProviderConfig {
-  /** Provider name (openai, anthropic, groq, xai) */
-  provider: "openai" | "anthropic" | "groq" | "xai" | "openrouter";
+  /** Provider name (openai, anthropic, groq, xai, elizacloud) */
+  provider:
+    | "openai"
+    | "anthropic"
+    | "groq"
+    | "xai"
+    | "openrouter"
+    | "elizacloud";
   /** Specific model to use */
   model: string;
   /** Display name for the agent */
@@ -58,80 +70,111 @@ export interface ModelProviderConfig {
  * AI model configurations for agents
  */
 export const MODEL_AGENTS: ModelProviderConfig[] = [
-  // OpenAI Models
+  // ── Frontier American Models ───────────────────────────────────────────
   {
-    provider: "openai",
-    model: "gpt-4o",
-    displayName: "GPT-4o",
-    apiKeyEnv: "OPENAI_API_KEY",
-    pluginModule: "@elizaos/plugin-openai",
-    pluginExport: "openaiPlugin",
+    provider: "elizacloud",
+    model: "openai/gpt-5",
+    displayName: "GPT-5",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "openai",
-    model: "gpt-4o-mini",
-    displayName: "GPT-4o Mini",
-    apiKeyEnv: "OPENAI_API_KEY",
-    pluginModule: "@elizaos/plugin-openai",
-    pluginExport: "openaiPlugin",
-  },
-  // Anthropic Models
-  {
-    provider: "anthropic",
-    model: "claude-opus-4-5-20251101",
-    displayName: "Claude Opus",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    pluginModule: "@elizaos/plugin-anthropic",
-    pluginExport: "anthropicPlugin",
+    provider: "elizacloud",
+    model: "anthropic/claude-sonnet-4.6",
+    displayName: "Claude Sonnet 4.6",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "anthropic",
-    model: "claude-sonnet-4-5-20250929",
-    displayName: "Claude Sonnet",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    pluginModule: "@elizaos/plugin-anthropic",
-    pluginExport: "anthropicPlugin",
+    provider: "elizacloud",
+    model: "anthropic/claude-opus-4.6",
+    displayName: "Claude Opus 4.6",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "anthropic",
-    model: "claude-haiku-4-5-20251001",
-    displayName: "Claude Haiku",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    pluginModule: "@elizaos/plugin-anthropic",
-    pluginExport: "anthropicPlugin",
-  },
-  // Groq Models
-  {
-    provider: "groq",
-    model: "meta-llama/llama-4-scout-17b-16e-instruct",
-    displayName: "Llama 4 Scout",
-    apiKeyEnv: "GROQ_API_KEY",
-    pluginModule: "@elizaos/plugin-groq",
-    pluginExport: "groqPlugin",
+    provider: "elizacloud",
+    model: "google/gemini-3.1-pro-preview",
+    displayName: "Gemini 3.1 Pro",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "groq",
-    model: "meta-llama/llama-4-maverick-17b-128e-instruct",
+    provider: "elizacloud",
+    model: "xai/grok-4",
+    displayName: "Grok 4",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  {
+    provider: "elizacloud",
+    model: "meta/llama-4-maverick",
     displayName: "Llama 4 Maverick",
-    apiKeyEnv: "GROQ_API_KEY",
-    pluginModule: "@elizaos/plugin-groq",
-    pluginExport: "groqPlugin",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "groq",
-    model: "moonshotai/kimi-k2-instruct",
-    displayName: "Kimi K2",
-    apiKeyEnv: "GROQ_API_KEY",
-    pluginModule: "@elizaos/plugin-groq",
-    pluginExport: "groqPlugin",
+    provider: "elizacloud",
+    model: "mistral/magistral-medium",
+    displayName: "Magistral Medium",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  // ── Frontier Chinese Models ────────────────────────────────────────────
+  {
+    provider: "elizacloud",
+    model: "deepseek/deepseek-v3.2",
+    displayName: "DeepSeek V3.2",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
   {
-    provider: "groq",
-    model: "qwen/qwen3-32b",
-    displayName: "Qwen 3 30B",
-    apiKeyEnv: "GROQ_API_KEY",
-    pluginModule: "@elizaos/plugin-groq",
-    pluginExport: "groqPlugin",
+    provider: "elizacloud",
+    model: "alibaba/qwen3-max",
+    displayName: "Qwen 3 Max",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  {
+    provider: "elizacloud",
+    model: "minimax/minimax-m2.5",
+    displayName: "Minimax M2.5",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  {
+    provider: "elizacloud",
+    model: "zai/glm-5",
+    displayName: "GLM-5",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  {
+    provider: "elizacloud",
+    model: "moonshotai/kimi-k2.5",
+    displayName: "Kimi K2.5",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
+  },
+  {
+    provider: "elizacloud",
+    model: "bytedance/seed-1.8",
+    displayName: "Seed 1.8",
+    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
+    pluginModule: "@elizaos/plugin-elizacloud",
+    pluginExport: "elizaOSCloudPlugin",
   },
 ];
 
@@ -183,101 +226,6 @@ function resolveModelAgentServerUrls(): { wsUrl: string; apiUrl: string } {
   return { wsUrl, apiUrl };
 }
 
-function collectErrorMessages(error: unknown): string[] {
-  const messages: string[] = [];
-  const visited = new Set<unknown>();
-  const queue: unknown[] = [error];
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current || visited.has(current)) continue;
-    visited.add(current);
-
-    if (current instanceof Error) {
-      if (current.message) messages.push(current.message);
-      if (current.stack) messages.push(current.stack);
-
-      const cause = (current as Error & { cause?: unknown }).cause;
-      if (cause) queue.push(cause);
-      continue;
-    }
-
-    if (typeof current === "string") {
-      messages.push(current);
-      continue;
-    }
-
-    if (typeof current === "object") {
-      const candidate = current as {
-        message?: unknown;
-        stack?: unknown;
-        cause?: unknown;
-      };
-      if (typeof candidate.message === "string")
-        messages.push(candidate.message);
-      if (typeof candidate.stack === "string") messages.push(candidate.stack);
-      if (candidate.cause) queue.push(candidate.cause);
-    }
-  }
-
-  return messages;
-}
-
-function isRecoverableModelRuntimeInitError(error: unknown): boolean {
-  const haystack = collectErrorMessages(error).join("\n").toLowerCase();
-  if (!haystack) return false;
-
-  const destructiveMigrationBlocked = haystack.includes(
-    "destructive migration blocked",
-  );
-  const pgliteMigrationsSchemaError = haystack.includes(
-    "create schema if not exists migrations",
-  );
-  const pgliteAbort =
-    haystack.includes("pglite") &&
-    haystack.includes("aborted(). build with -sassertions");
-
-  return (
-    destructiveMigrationBlocked || pgliteMigrationsSchemaError || pgliteAbort
-  );
-}
-
-async function resetAgentPgliteDataDir(
-  dataDir: string,
-  displayName: string,
-): Promise<void> {
-  const normalized = path.resolve(dataDir);
-  const root = path.parse(normalized).root;
-  if (normalized === root) {
-    throw new Error(
-      `[ModelAgentSpawner] Refusing to reset unsafe PGLite path for ${displayName}: ${normalized}`,
-    );
-  }
-
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\..*$/, "")
-    .replace("T", "-");
-  const backupDir = `${normalized}.corrupt-${stamp}`;
-
-  if (fs.existsSync(normalized)) {
-    try {
-      await fs.promises.rename(normalized, backupDir);
-      console.warn(
-        `[ModelAgentSpawner] Backed up ${displayName} PGLite dir to ${backupDir}`,
-      );
-    } catch (renameError) {
-      console.warn(
-        `[ModelAgentSpawner] Failed to back up PGLite dir for ${displayName}: ${errMsg(renameError)}. Deleting ${normalized} instead.`,
-      );
-      await fs.promises.rm(normalized, { recursive: true, force: true });
-    }
-  }
-
-  await fs.promises.mkdir(normalized, { recursive: true });
-}
-
 /**
  * Spawn ElizaOS agents with different AI models
  *
@@ -291,7 +239,9 @@ export async function spawnModelAgents(
     /** Maximum number of agents to spawn */
     maxAgents?: number;
     /** Specific providers to spawn (if empty, spawns all available) */
-    providers?: Array<"openai" | "anthropic" | "groq" | "xai" | "openrouter">;
+    providers?: Array<
+      "openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud"
+    >;
   } = {},
 ): Promise<number> {
   const { maxAgents = 10, providers = [] } = options;
@@ -301,8 +251,6 @@ export async function spawnModelAgents(
   const yieldToEventLoop = () =>
     new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-  console.log("[ModelAgentSpawner] Starting ElizaOS model agent spawning...");
-
   // Filter agents by provider if specified
   let agentsToSpawn = MODEL_AGENTS;
   if (providers.length > 0) {
@@ -310,18 +258,10 @@ export async function spawnModelAgents(
   }
   agentsToSpawn = agentsToSpawn.slice(0, maxAgents);
 
-  // Load shared plugins
-  const modelAgentSqlEnabled = !/^(0|false|no|off)$/i.test(
-    process.env.MODEL_AGENT_SQL_ENABLED || "true",
-  );
-  const sqlPlugin = modelAgentSqlEnabled
-    ? await loadSqlPlugin("ModelAgentSpawner")
-    : null;
-  if (!modelAgentSqlEnabled) {
-    console.log(
-      "[ModelAgentSpawner] MODEL_AGENT_SQL_ENABLED=false, skipping SQL plugin for model runtimes",
-    );
-  }
+  // Use lightweight InMemoryDatabaseAdapter instead of PGLite WASM.
+  // PGLite allocates ~2-4GB WASM heap per instance; with 19 agents that's 38-76GB.
+  // Agents don't persist data (all memory flags disabled), so InMemoryDatabaseAdapter
+  // provides the required IDatabaseAdapter surface with zero WASM overhead.
   // Trajectory logger and local embedding plugin are intentionally omitted:
   // both cause unbounded memory growth (WASM heap + in-memory log accumulation).
 
@@ -352,80 +292,67 @@ export async function spawnModelAgents(
       roles: "agent",
       createdAt: new Date().toISOString(),
     });
-    console.log("[ModelAgentSpawner] Created shared account for model agents");
   }
 
   let spawnedCount = 0;
-  let consecutiveFailures = 0;
-  const MAX_CONSECUTIVE_FAILURES = 3;
+  let totalFailures = 0;
   const { wsUrl: hyperscapeServerUrl, apiUrl: hyperscapeApiUrl } =
     resolveModelAgentServerUrls();
 
-  console.log(
-    `[ModelAgentSpawner] Using HYPERSCAPE_SERVER_URL=${hyperscapeServerUrl} for model-agent runtimes`,
-  );
-  console.log(
-    `[ModelAgentSpawner] Using HYPERSCAPE_API_URL=${hyperscapeApiUrl} for model-agent runtimes`,
-  );
-
+  // ---- Pre-filter: skip agents with no API key or already running ----
+  const eligible: ModelProviderConfig[] = [];
   for (const agentConfig of agentsToSpawn) {
-    let spawnedThisIteration = false;
-
-    // Check if API key is available
     if (!process.env[agentConfig.apiKeyEnv]) {
-      console.log(
-        `[ModelAgentSpawner] Skipping ${agentConfig.displayName} - no API key`,
-      );
       continue;
     }
-
-    // Check if already running
     const agentKey = getModelAgentKey(agentConfig);
     if (runningAgents.has(agentKey)) {
-      console.log(
-        `[ModelAgentSpawner] ${agentConfig.displayName} already running`,
-      );
       continue;
     }
+    eligible.push(agentConfig);
+  }
 
+  if (eligible.length === 0) {
+    return 0;
+  }
+
+  // ---- Pre-load model plugins (one per provider, cached by import system) ----
+  const pluginCache = new Map<string, Plugin>();
+  for (const config of eligible) {
+    if (!pluginCache.has(config.pluginModule)) {
+      const plugin = await loadModelPlugin(config, "ModelAgentSpawner");
+      if (plugin) pluginCache.set(config.pluginModule, plugin);
+    }
+  }
+
+  const embeddedAgentManager = getAgentManager();
+  const MODEL_AGENT_INIT_TIMEOUT_MS = 45_000;
+
+  // ---- Spawn a single agent (self-contained, safe for concurrent use) ----
+  const spawnOne = async (
+    agentConfig: ModelProviderConfig,
+    index: number,
+  ): Promise<boolean> => {
+    const tag = `[${index + 1}/${eligible.length}]`;
+    const modelPlugin = pluginCache.get(agentConfig.pluginModule);
+    if (!modelPlugin) return false;
+
+    const agentKey = getModelAgentKey(agentConfig);
     let runtime: AgentRuntime | null = null;
+
     try {
-      // Load model-specific plugin (shared helper)
-      const modelPlugin = await loadModelPlugin(
-        agentConfig,
-        "ModelAgentSpawner",
-      );
-      if (!modelPlugin) {
-        continue;
-      }
-
-      // Yield after heavy plugin loading to let tick callbacks fire
-      await yieldToEventLoop();
-
-      // Generate authentication token for this agent
       const authToken = await createJWT({ userId: accountId });
-
-      // Create character using shared helper — includes PGLITE_DATA_DIR,
-      // model routing secrets, and system prompt
-      // Per-agent env: pass connection and migration settings via character
-      // secrets instead of mutating global process.env.  The hyperscapePlugin
-      // reads these through getRuntimeSettingString() which checks secrets
-      // before falling back to process.env.
       const perAgentSecrets: Record<string, string> = {
         HYPERSCAPE_SERVER_URL: hyperscapeServerUrl,
         HYPERSCAPE_API_URL: hyperscapeApiUrl,
         HYPERSCAPE_AUTH_TOKEN: authToken,
         HYPERSCAPE_PRIVY_USER_ID: accountId,
-        HYPERSCAPE_CHARACTER_ID: "", // will be patched below
+        HYPERSCAPE_CHARACTER_ID: "",
       };
-      if (sqlPlugin) {
-        perAgentSecrets.ELIZA_ALLOW_DESTRUCTIVE_MIGRATIONS = "true";
-      }
 
       const { character, characterId } = createAgentCharacter(agentConfig, {
         secrets: perAgentSecrets,
       });
-      // Patch characterId into secrets now that we know it
       if (character.settings?.secrets) {
         (
           character.settings.secrets as Record<string, string>
@@ -446,68 +373,133 @@ export async function spawnModelAgents(
           isAgent: 1,
           createdAt: Date.now(),
         });
-        console.log(
-          `[ModelAgentSpawner] Created character: ${agentConfig.displayName}`,
-        );
       }
 
-      const embeddedAgentManager = getAgentManager();
       if (embeddedAgentManager?.hasAgent(characterId)) {
-        console.log(
-          `[ModelAgentSpawner] Skipping ${agentConfig.displayName} (${characterId}) - already managed by embedded AgentManager`,
-        );
-        continue;
+        return false;
       }
 
-      // Build runtime plugin list. SQL is pre-registered before initialize()
-      // so its adapter/migrations complete before other plugin services start.
       const runtimePlugins: Plugin[] = [modelPlugin, hyperscapePlugin];
 
-      // Create ElizaOS AgentRuntime
-      console.log(
-        `[ModelAgentSpawner] Creating AgentRuntime for ${agentConfig.displayName}...`,
-      );
-
       const createRuntimeInstance = (): AgentRuntime => {
+        // Create a memory-safe InMemoryDatabaseAdapter that caps internal
+        // data structures. The stock adapter has several unbounded growth paths:
+        //  1. `logs` array — every useModel/action/evaluator call appends here
+        //  2. `memoriesByRoom` — deleteMemory only removes from memoriesById
+        //  3. `cache` Map — no eviction policy
+        const adapter = new InMemoryDatabaseAdapter();
+        const MAX_LOGS = 20;
+        const MAX_MEMORIES = 50;
+        const MAX_CACHE = 100;
+
+        // --- Cap logs (stores full LLM prompts + responses per call) ---
+        const origLog = adapter.log.bind(adapter);
+        adapter.log = async (params: Parameters<typeof origLog>[0]) => {
+          await origLog(params);
+          const logs = (adapter as unknown as { logs: unknown[] }).logs;
+          if (logs && logs.length > MAX_LOGS) {
+            logs.splice(0, logs.length - MAX_LOGS);
+          }
+        };
+
+        // --- Fix deleteMemory to also clean memoriesByRoom ---
+        const origDeleteMemory = adapter.deleteMemory.bind(adapter);
+        adapter.deleteMemory = async (memoryId: UUID) => {
+          // Remove from memoriesByRoom lists (stock impl misses this)
+          const byRoom = (
+            adapter as unknown as {
+              memoriesByRoom: Map<string, Array<{ id: unknown }>>;
+            }
+          ).memoriesByRoom;
+          if (byRoom) {
+            for (const [key, list] of byRoom) {
+              const idx = list.findIndex(
+                (m) => String(m.id) === String(memoryId),
+              );
+              if (idx !== -1) {
+                list.splice(idx, 1);
+                if (list.length === 0) byRoom.delete(key);
+                break;
+              }
+            }
+          }
+          await origDeleteMemory(memoryId);
+        };
+
+        // --- Cap cache Map ---
+        const cacheMap = (
+          adapter as unknown as { cache?: Map<string, unknown> }
+        ).cache;
+        if (cacheMap) {
+          const origSet = cacheMap.set.bind(cacheMap);
+          cacheMap.set = (key: string, value: unknown) => {
+            const result = origSet(key, value);
+            if (cacheMap.size > MAX_CACHE) {
+              const iter = cacheMap.keys();
+              const oldest = iter.next();
+              if (!oldest.done) cacheMap.delete(oldest.value);
+            }
+            return result;
+          };
+        }
+
         const runtimeInstance = new AgentRuntime({
           character,
           plugins: runtimePlugins,
-          // token: process.env[agentConfig.apiKeyEnv],
-          // databaseAdapter: undefined, // Will use in-memory or default
+          adapter,
         });
 
-        // Model agents only need TEXT_* generation; disabling TEXT_EMBEDDING
-        // avoids bootstrap ActionFilter/embedding services generating heavy
-        // startup embedding traffic and memory churn.
         const originalGetModel = runtimeInstance.getModel.bind(runtimeInstance);
         runtimeInstance.getModel = ((modelType: unknown) => {
-          if (modelType === ModelType.TEXT_EMBEDDING) {
-            return null;
-          }
+          if (modelType === ModelType.TEXT_EMBEDDING) return null;
           return originalGetModel(
             modelType as Parameters<AgentRuntime["getModel"]>[0],
           );
         }) as AgentRuntime["getModel"];
 
-        // Prevent ensureEmbeddingDimension from taking > 30s due to API timeouts/rate limits
+        // Cap memory accumulation via createMemory ring buffer.
+        // Even with the adapter fixes above, cap at runtime level too.
+        const trackedMemoryIds: string[] = [];
+        const originalCreateMemory =
+          runtimeInstance.createMemory.bind(runtimeInstance);
+        runtimeInstance.createMemory = async (
+          memory: Memory,
+          tableName: string,
+          unique?: boolean,
+        ): Promise<UUID> => {
+          while (trackedMemoryIds.length >= MAX_MEMORIES) {
+            const oldId = trackedMemoryIds.shift();
+            if (oldId) {
+              runtimeInstance.deleteMemory(oldId as UUID).catch(() => {});
+            }
+          }
+          const id = await originalCreateMemory(memory, tableName, unique);
+          trackedMemoryIds.push(id);
+          return id;
+        };
+
         runtimeInstance.ensureEmbeddingDimension = async () => {
           try {
-            // Give the API 5 seconds to reply
-            await Promise.race([
-              AgentRuntime.prototype.ensureEmbeddingDimension.call(
-                runtimeInstance,
-              ),
-              new Promise((_, reject) =>
-                setTimeout(
-                  () =>
-                    reject(new Error("Embedding dimension check timed out")),
-                  5000,
+            let timeoutId: ReturnType<typeof setTimeout> | null = null;
+            try {
+              await Promise.race([
+                AgentRuntime.prototype.ensureEmbeddingDimension.call(
+                  runtimeInstance,
                 ),
-              ),
-            ]);
+                new Promise((_, reject) => {
+                  timeoutId = setTimeout(
+                    () =>
+                      reject(new Error("Embedding dimension check timed out")),
+                    5000,
+                  );
+                }),
+              ]);
+            } finally {
+              if (timeoutId) clearTimeout(timeoutId);
+            }
           } catch (err) {
             console.warn(
-              `[ModelAgentSpawner] ensureEmbeddingDimension failed or timed out: ${errMsg(err)}. Using fallback 1536.`,
+              `[ModelAgentSpawner] ensureEmbeddingDimension failed: ${errMsg(err)}. Using fallback 1536.`,
             );
             await runtimeInstance.adapter?.ensureEmbeddingDimension?.(1536);
           }
@@ -516,15 +508,10 @@ export async function spawnModelAgents(
         return runtimeInstance;
       };
 
-      const MODEL_AGENT_INIT_TIMEOUT_MS = 45_000;
-
       const initializeRuntimeInstance = async (
-        runtimeInstance: AgentRuntime,
+        ri: AgentRuntime,
       ): Promise<void> => {
-        if (sqlPlugin) {
-          await runtimeInstance.registerPlugin(sqlPlugin);
-        }
-        const initPromise = runtimeInstance.initialize();
+        const initPromise = ri.initialize();
         let timedOut = false;
         const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => {
@@ -540,70 +527,47 @@ export async function spawnModelAgents(
           await Promise.race([initPromise, timeoutPromise]);
         } catch (err) {
           if (timedOut) {
-            // Swallow the dangling initPromise so it doesn't surface as
-            // an unhandled rejection when it eventually settles.
             initPromise.catch(() => {});
-            // Kick off stop() to tear down any partially-initialized
-            // plugins / WASM heaps from the background initialize().
-            runtimeInstance.stop().catch(() => {});
+            ri.stop().catch(() => {});
           }
           throw err;
         }
       };
 
-      const pgliteDataDir =
-        typeof character.settings?.secrets?.PGLITE_DATA_DIR === "string"
-          ? character.settings.secrets.PGLITE_DATA_DIR
-          : null;
-
-      let runtimeInstance = createRuntimeInstance();
+      const runtimeInstance = createRuntimeInstance();
       runtime = runtimeInstance;
 
-      try {
-        // Initialize the runtime (required for plugins to start)
-        await initializeRuntimeInstance(runtimeInstance);
-      } catch (initializeError) {
-        if (
-          pgliteDataDir &&
-          isRecoverableModelRuntimeInitError(initializeError)
-        ) {
-          console.warn(
-            `[ModelAgentSpawner] Runtime init failed for ${agentConfig.displayName}: ${errMsg(initializeError)}. Resetting ${pgliteDataDir} and retrying once.`,
-          );
-          await Promise.race([
-            runtimeInstance.stop().catch(() => undefined),
-            new Promise((r) => setTimeout(r, 10_000)),
-          ]);
-          await resetAgentPgliteDataDir(pgliteDataDir, agentConfig.displayName);
+      // Verify adapter BEFORE initialize
+      const adapterBeforeInit = runtimeInstance.adapter;
+      const adapterNameBefore =
+        adapterBeforeInit?.constructor?.name || "unknown";
 
-          runtimeInstance = createRuntimeInstance();
-          runtime = runtimeInstance;
-          await initializeRuntimeInstance(runtimeInstance);
-        } else {
-          throw initializeError;
-        }
+      await initializeRuntimeInstance(runtimeInstance);
+
+      // Verify adapter AFTER initialize (detect if plugin overrode it)
+      const adapterAfterInit = runtimeInstance.adapter;
+      const adapterNameAfter = adapterAfterInit?.constructor?.name || "unknown";
+
+      if (adapterBeforeInit !== adapterAfterInit) {
+        console.warn(
+          `[ModelAgentSpawner] ${tag} ⚠️  Adapter was SWAPPED during initialize! ` +
+            `${adapterNameBefore} → ${adapterNameAfter}. Re-asserting InMemoryDatabaseAdapter.`,
+        );
+        // Re-register our safe adapter (force override)
+        (
+          runtimeInstance as unknown as {
+            adapter: unknown;
+          }
+        ).adapter = adapterBeforeInit;
       }
 
-      // Yield after heavy runtime init to let tick callbacks fire
-      await yieldToEventLoop();
-      console.log(
-        `[ModelAgentSpawner] AgentRuntime initialized for ${agentConfig.displayName}`,
-      );
-
-      // Store running agent
       runningAgents.set(agentKey, {
         config: agentConfig,
         runtime: runtimeInstance,
         characterId,
         accountId,
       });
-
-      spawnedCount++;
-      spawnedThisIteration = true;
-      consecutiveFailures = 0;
-      console.log(
-        `[ModelAgentSpawner] ✅ Spawned: ${agentConfig.displayName} (${agentConfig.model})`,
-      );
+      return true;
     } catch (error) {
       stopAgentBehaviorLoop(agentKey);
       agentPlans.delete(agentKey);
@@ -613,12 +577,9 @@ export async function spawnModelAgents(
             runtime.stop(),
             new Promise((r) => setTimeout(r, 10_000)),
           ]);
-        } catch (stopErr) {
-          console.warn(
-            `[ModelAgentSpawner] Failed to cleanup runtime for ${agentConfig.displayName}: ${errMsg(stopErr)}`,
-          );
+        } catch {
+          /* best-effort */
         }
-        // Explicitly close DB adapter to free PGLite WASM heap
         try {
           const adapter = runtime.adapter as {
             close?: () => Promise<void>;
@@ -627,40 +588,133 @@ export async function spawnModelAgents(
           await adapter?.close?.();
           await adapter?.db?.close?.();
         } catch {
-          /* best-effort cleanup */
+          /* best-effort */
         }
-        runtime = null;
       }
       console.error(
-        `[ModelAgentSpawner] ❌ Failed to spawn ${agentConfig.displayName}:`,
-        errMsg(error),
+        `[ModelAgentSpawner] ${tag} ❌ ${agentConfig.displayName}: ${errMsg(error)}`,
       );
-      consecutiveFailures++;
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.error(
-          `[ModelAgentSpawner] Circuit breaker: ${MAX_CONSECUTIVE_FAILURES} consecutive failures, aborting remaining spawns`,
-        );
-        break;
+      return false;
+    }
+  };
+
+  // ---- Spawn first agent alone, then batch the rest ----
+  const BATCH_SIZE = 3;
+  const BATCH_DELAY_MS = 2000;
+  const startTime = Date.now();
+
+  // First agent runs solo to validate init works before batching the rest
+  const firstResult = await spawnOne(eligible[0], 0);
+  if (firstResult) {
+    spawnedCount++;
+  } else {
+    totalFailures++;
+  }
+  await yieldToEventLoop();
+
+  // Remaining agents in parallel batches
+  for (let i = 1; i < eligible.length; i += BATCH_SIZE) {
+    const batch = eligible.slice(i, i + BATCH_SIZE);
+
+    const results = await Promise.allSettled(
+      batch.map((config, j) => spawnOne(config, i + j)),
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) {
+        spawnedCount++;
+      } else {
+        totalFailures++;
       }
     }
 
-    // Stagger successful agent spawns to avoid concurrent PGLite/API contention
-    // that causes ElizaOS service registration timeouts (30s limit)
-    if (spawnedThisIteration) {
-      const SPAWN_DELAY_MS = 5000;
-      console.log(
-        `[ModelAgentSpawner] Waiting ${SPAWN_DELAY_MS / 1000}s before next agent...`,
-      );
-      await new Promise((r) => setTimeout(r, SPAWN_DELAY_MS));
+    // Yield to event loop between batches so tick callbacks can fire
+    await yieldToEventLoop();
+
+    // Short delay between batches (not between individual agents)
+    if (i + BATCH_SIZE < eligible.length) {
+      await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
     }
   }
+  void startTime;
+  void totalFailures;
 
-  console.log(
-    `[ModelAgentSpawner] ✅ Spawned ${spawnedCount}/${agentsToSpawn.length} model agents`,
-  );
+  // Start periodic adapter health monitor + flush + GC (every 60s)
+  if (spawnedCount > 0 && !adapterHealthInterval) {
+    adapterHealthInterval = setInterval(() => {
+      let totalLogs = 0;
+      let totalMemories = 0;
+      let totalCache = 0;
+      let totalEntities = 0;
+      for (const agent of runningAgents.values()) {
+        const a = agent.runtime.adapter as unknown as {
+          logs?: unknown[];
+          memoriesById?: Map<unknown, unknown>;
+          memoriesByRoom?: Map<string, unknown[]>;
+          cache?: Map<unknown, unknown>;
+          entities?: Map<unknown, unknown>;
+          rooms?: Map<unknown, unknown>;
+          worlds?: Map<unknown, unknown>;
+          tasks?: Map<unknown, unknown>;
+        } | null;
+        if (!a) continue;
+
+        totalLogs += a.logs?.length ?? 0;
+        totalMemories += a.memoriesById?.size ?? 0;
+        totalCache += a.cache?.size ?? 0;
+        totalEntities += a.entities?.size ?? 0;
+
+        // Flush stale adapter data to prevent unbounded growth.
+        // Agents don't use persistent data — they use live world state.
+        // Logs: already capped by our log() override, but flush old ones
+        if (a.logs && a.logs.length > 10) {
+          a.logs.splice(0, a.logs.length - 10);
+        }
+        // Entities/rooms/worlds/tasks: agents don't use these, clear if any accumulate
+        if (a.entities && a.entities.size > 50) a.entities.clear();
+        if (a.rooms && a.rooms.size > 50) a.rooms.clear();
+        if (a.worlds && a.worlds.size > 10) a.worlds.clear();
+        if (a.tasks && a.tasks.size > 50) a.tasks.clear();
+        // Cache: evict if over threshold
+        if (a.cache && a.cache.size > 100) {
+          const excess = a.cache.size - 50;
+          const iter = a.cache.keys();
+          for (let i = 0; i < excess; i++) {
+            const k = iter.next();
+            if (k.done) break;
+            a.cache.delete(k.value);
+          }
+        }
+      }
+
+      // Also flush runtime stateCache for each agent
+      for (const agent of runningAgents.values()) {
+        const sc = (
+          agent.runtime as unknown as {
+            stateCache?: Map<unknown, unknown>;
+          }
+        ).stateCache;
+        if (sc && sc.size > 100) {
+          const excess = sc.size - 50;
+          const iter = sc.keys();
+          for (let i = 0; i < excess; i++) {
+            const k = iter.next();
+            if (k.done) break;
+            sc.delete(k.value);
+          }
+        }
+      }
+
+      // Periodic GC hint
+      getBunRuntime()?.gc?.(false);
+    }, 60_000);
+  }
 
   return spawnedCount;
 }
+
+/** Interval handle for periodic adapter health monitoring */
+let adapterHealthInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Get all running model agents
@@ -706,8 +760,7 @@ export async function stopModelAgent(
   } catch (error) {
     stopError = error;
   } finally {
-    // Explicitly close DB adapter to free PGLite WASM heap memory.
-    // runtime.stop() should do this, but we ensure it as a safety net.
+    // Explicitly close DB adapter to release any resources.
     try {
       const adapter = agent.runtime.adapter as {
         close?: () => Promise<void>;
@@ -721,6 +774,9 @@ export async function stopModelAgent(
     runningAgents.delete(key);
   }
 
+  // Hint GC to reclaim memory from the stopped agent's runtime
+  getBunRuntime()?.gc?.(true);
+
   if (stopError) {
     console.error(
       `[ModelAgentSpawner] Error stopping agent:`,
@@ -728,8 +784,6 @@ export async function stopModelAgent(
     );
     return false;
   }
-
-  console.log(`[ModelAgentSpawner] Stopped agent: ${agent.config.displayName}`);
   return true;
 }
 
@@ -737,10 +791,6 @@ export async function stopModelAgent(
  * Stop all running model agents
  */
 export async function stopAllModelAgents(): Promise<void> {
-  console.log(
-    `[ModelAgentSpawner] Stopping ${runningAgents.size} model agents...`,
-  );
-
   const stopPromises: Promise<boolean>[] = [];
 
   for (const agent of runningAgents.values()) {
@@ -750,8 +800,6 @@ export async function stopAllModelAgents(): Promise<void> {
   }
 
   await Promise.all(stopPromises);
-
-  console.log("[ModelAgentSpawner] All model agents stopped");
 }
 
 /**
@@ -886,10 +934,6 @@ function startAgentBehaviorLoop(
 ): void {
   const agentKey = getModelAgentKey(config);
 
-  console.log(
-    `[ModelAgentSpawner] Starting behavior loop for ${config.displayName}`,
-  );
-
   // Clear any existing interval
   const existingInterval = behaviorIntervals.get(agentKey);
   if (existingInterval) {
@@ -898,11 +942,18 @@ function startAgentBehaviorLoop(
 
   // Start the behavior loop with execution lock to prevent overlapping ticks
   let tickInProgress = false;
+  let tickCount = 0;
+  const GC_EVERY_N_TICKS = 20; // Every ~60 seconds (20 × 3s)
   const interval = setInterval(async () => {
     if (tickInProgress) return;
     tickInProgress = true;
     try {
       await executeBehaviorTick(runtime, service, config);
+      tickCount++;
+      // Periodic GC hint to reclaim short-lived allocations from ticks
+      if (tickCount % GC_EVERY_N_TICKS === 0) {
+        getBunRuntime()?.gc?.(false);
+      }
     } catch (error) {
       console.error(
         `[ModelAgentSpawner] Behavior tick error for ${config.displayName}:`,
@@ -986,12 +1037,7 @@ async function getOrCreatePlan(
       agentPlans.set(planKey, plan);
       return plan;
     }
-  } catch (err) {
-    console.debug(
-      `[${config.displayName}] LLM plan failed, using fallback:`,
-      errMsg(err),
-    );
-  }
+  } catch {}
 
   return null;
 }
@@ -1399,12 +1445,7 @@ async function executeBehaviorTick(
 
   try {
     await executeQueuedAction(service, nextAction, gameState, world);
-  } catch (err) {
-    console.debug(
-      `[${config.displayName}] Plan action ${nextAction.action} failed:`,
-      errMsg(err),
-    );
-  }
+  } catch {}
 
   // If plan is exhausted, clear it so next tick re-plans
   if (plan.actions.length === 0) {

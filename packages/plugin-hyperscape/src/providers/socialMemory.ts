@@ -32,6 +32,8 @@ export interface PlayerEncounter {
 }
 
 const encounterCache = new Map<string, Map<string, PlayerEncounter>>();
+/** Cap encounters per agent to prevent unbounded growth */
+const MAX_ENCOUNTERS_PER_AGENT = 50;
 let lastSocialAction = 0;
 
 function getEncounters(agentId: string): Map<string, PlayerEncounter> {
@@ -39,6 +41,19 @@ function getEncounters(agentId: string): Map<string, PlayerEncounter> {
     encounterCache.set(agentId, new Map());
   }
   return encounterCache.get(agentId)!;
+}
+
+/** Evict oldest encounters when over cap */
+function evictOldEncounters(encounters: Map<string, PlayerEncounter>): void {
+  if (encounters.size <= MAX_ENCOUNTERS_PER_AGENT) return;
+  // Sort by lastSeen ascending, remove oldest
+  const sorted = [...encounters.entries()].sort(
+    (a, b) => a[1].lastSeen - b[1].lastSeen,
+  );
+  const toRemove = sorted.slice(0, encounters.size - MAX_ENCOUNTERS_PER_AGENT);
+  for (const [key] of toRemove) {
+    encounters.delete(key);
+  }
 }
 
 function isPlayerEntity(
@@ -80,6 +95,7 @@ export function recordEncounter(
       relationship: "stranger",
       notes: note ? [note] : [],
     });
+    evictOldEncounters(encounters);
   }
 }
 

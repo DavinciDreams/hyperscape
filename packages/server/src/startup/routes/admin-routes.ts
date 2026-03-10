@@ -16,6 +16,7 @@ import {
   exitMaintenanceMode,
   getMaintenanceStatus,
 } from "../maintenance-mode.js";
+import { getMemoryMonitor } from "../../infrastructure/memory-monitor.js";
 
 /**
  * Rate limiter for admin authentication attempts.
@@ -33,6 +34,41 @@ const adminAuthAttempts = new Map<string, AdminAuthAttempt>();
 const ADMIN_AUTH_MAX_ATTEMPTS = 5;
 const ADMIN_AUTH_WINDOW_MS = 60 * 1000; // 1 minute
 const ADMIN_AUTH_LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+// Memory leak prevention: max entries and cleanup interval
+const ADMIN_AUTH_MAX_ENTRIES = 10_000;
+const ADMIN_AUTH_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Periodic cleanup to prevent unbounded memory growth */
+function cleanupStaleAuthAttempts(): void {
+  const now = Date.now();
+  const staleThreshold = now - ADMIN_AUTH_LOCKOUT_MS - ADMIN_AUTH_WINDOW_MS;
+
+  for (const [ip, attempt] of adminAuthAttempts) {
+    // Remove entries that are past their lockout and window period
+    if (attempt.lastAttempt < staleThreshold && attempt.blockedUntil < now) {
+      adminAuthAttempts.delete(ip);
+    }
+  }
+
+  // If still over limit, remove oldest entries
+  if (adminAuthAttempts.size > ADMIN_AUTH_MAX_ENTRIES) {
+    const entries = Array.from(adminAuthAttempts.entries()).sort(
+      (a, b) => a[1].lastAttempt - b[1].lastAttempt,
+    );
+    const toRemove = entries.slice(0, entries.length - ADMIN_AUTH_MAX_ENTRIES);
+    for (const [ip] of toRemove) {
+      adminAuthAttempts.delete(ip);
+    }
+  }
+}
+
+// Start periodic cleanup (unref to not keep process alive)
+const adminAuthCleanupTimer = setInterval(
+  cleanupStaleAuthAttempts,
+  ADMIN_AUTH_CLEANUP_INTERVAL_MS,
+);
+adminAuthCleanupTimer.unref?.();
 
 /**
  * Timing-safe string comparison to prevent timing attacks.
@@ -1125,14 +1161,17 @@ export function registerAdminRoutes(
           const goalsPaused =
             ServerNetwork.agentGoalsPaused.get(characterId) ?? false;
 
-          // Get thoughts from ServerNetwork
+          // Get thoughts from ServerNetwork (include audit fields)
           const rawThoughts =
             ServerNetwork.agentThoughts.get(characterId) ?? [];
-          const recentThoughts = rawThoughts.slice(0, 10).map((t) => ({
+          const recentThoughts = rawThoughts.slice(0, 100).map((t) => ({
             id: t.id,
             type: t.type,
             content: t.content,
             timestamp: t.timestamp,
+            health: t.health,
+            decisionPath: t.decisionPath,
+            providers: t.providers,
           }));
 
           // Skills: gameState > SkillsSystem > entity.data.skills
@@ -1388,6 +1427,10 @@ export function registerAdminRoutes(
                 }
               : null,
             goalsPaused,
+            personality:
+              ServerNetwork.agentPersonality.get(characterId) ?? null,
+            desireScores:
+              ServerNetwork.agentDesireScores.get(characterId) ?? [],
 
             skills,
             combatLevel,
@@ -1794,6 +1837,84 @@ export function registerAdminRoutes(
     },
   );
 
+  /**
+   * POST /admin/graceful-restart
+   * Request a graceful server restart after the current duel ends.
+   * PM2 will automatically restart the server when it receives SIGTERM.
+   *
+   * Use this to deploy new code without interrupting an active duel.
+   */
+  fastify.post(
+    "/admin/graceful-restart",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { getStreamingDuelScheduler } =
+          await import("../../systems/StreamingDuelScheduler/index.js");
+        const scheduler = getStreamingDuelScheduler();
+
+        if (!scheduler) {
+          // No scheduler, restart immediately
+          setTimeout(() => {
+            process.kill(process.pid, "SIGTERM");
+          }, 500);
+          return reply.send({
+            success: true,
+            message: "Graceful restart triggered (no active scheduler)",
+            pendingRestart: true,
+          });
+        }
+
+        const scheduled = scheduler.requestGracefulRestart();
+        const cycle = scheduler.getCurrentCycle();
+
+        return reply.send({
+          success: true,
+          message: scheduled
+            ? cycle?.phase === "FIGHTING" || cycle?.phase === "RESOLUTION"
+              ? `Graceful restart scheduled after current duel (phase: ${cycle.phase})`
+              : "Graceful restart triggered"
+            : "Graceful restart already pending",
+          pendingRestart: scheduler.isPendingRestart(),
+          currentPhase: cycle?.phase ?? "IDLE",
+        });
+      } catch (error) {
+        return reply.code(500).send({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to request graceful restart",
+        });
+      }
+    },
+  );
+
+  /**
+   * GET /admin/restart-status
+   * Check if a graceful restart is pending
+   */
+  fastify.get(
+    "/admin/restart-status",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { getStreamingDuelScheduler } =
+          await import("../../systems/StreamingDuelScheduler/index.js");
+        const scheduler = getStreamingDuelScheduler();
+
+        return reply.send({
+          pendingRestart: scheduler?.isPendingRestart() ?? false,
+          currentPhase: scheduler?.getCurrentCycle()?.phase ?? "IDLE",
+        });
+      } catch {
+        return reply.send({
+          pendingRestart: false,
+          currentPhase: "UNKNOWN",
+        });
+      }
+    },
+  );
+
   // ──────────────────────────────────────────────────────────────────────────
   // Duel & Agent Control Endpoints
   // ──────────────────────────────────────────────────────────────────────────
@@ -2144,6 +2265,461 @@ export function registerAdminRoutes(
       } catch (err) {
         console.error("[AdminRoutes] Agent kills error:", err);
         return reply.code(500).send({ error: "Failed to fetch kill data" });
+      }
+    },
+  );
+
+  // ==========================================
+  // Memory Monitoring Endpoints
+  // ==========================================
+
+  /** Get memory monitoring report and statistics */
+  fastify.get(
+    "/admin/memory/report",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const monitor = getMemoryMonitor();
+        const stats = monitor.getStats();
+        const collections = monitor.getCollectionMetrics();
+        const samples = monitor.getSamples();
+        const MB = 1024 * 1024;
+        const eventBus = world.getEventBus();
+        world.enableSystemTiming();
+
+        const combatSystem = world.getSystem("combat") as
+          | {
+              stateService?: {
+                getCombatStatesMap?: () => Map<unknown, unknown>;
+              };
+              nextAttackTicks?: Map<unknown, unknown>;
+              playerEquipmentStats?: Map<unknown, unknown>;
+              eventStore?: {
+                getEventCount?: () => number;
+                getSnapshotCount?: () => number;
+              };
+            }
+          | undefined;
+        const playerDeathSystem = world.getSystem("player-death") as
+          | {
+              respawnTimers?: Map<unknown, unknown>;
+              deathLocations?: Map<unknown, unknown>;
+              playerPositions?: Map<unknown, unknown>;
+              playerInventories?: Map<unknown, unknown>;
+              pendingGravestones?: Map<unknown, unknown>;
+              lastDeathTime?: Map<unknown, unknown>;
+            }
+          | undefined;
+        const databaseSystem = world.getSystem("database") as
+          | {
+              pendingOperations?: Set<unknown>;
+              pendingSaveBuffer?: Map<unknown, unknown>;
+              pendingInventoryBuffer?: Map<unknown, unknown>;
+              inventoryWriteActive?: Map<unknown, unknown>;
+              inventoryWriteQueued?: Map<unknown, unknown>;
+            }
+          | undefined;
+        const entityManagerSystem = world.getSystem("entity-manager") as
+          | {
+              entities?: Map<unknown, unknown>;
+              entitiesNeedingUpdate?: Set<unknown>;
+              networkDirtyEntities?: Set<unknown>;
+              entitiesByType?: Map<unknown, Set<unknown>>;
+              destroyingEntities?: Set<unknown>;
+              _activeEntityIdsCache?: Set<unknown>;
+              _entityUpdateArray?: unknown[];
+              _serverActiveUpdateArray?: unknown[];
+            }
+          | undefined;
+        const activityLoggerSystem = world.getSystem("activity-logger") as
+          | {
+              pendingEntries?: unknown[];
+              knownCharacterIds?: Set<unknown>;
+              skippedCharacterIds?: Set<unknown>;
+              isFlushing?: boolean;
+            }
+          | undefined;
+        const terrainSystem = world.getSystem("terrain") as
+          | {
+              terrainTiles?: Map<unknown, unknown>;
+              activeChunks?: Set<unknown>;
+              flatZones?: Map<unknown, unknown>;
+              flatZonesByTile?: Map<unknown, unknown[]>;
+              pendingTileKeys?: unknown[];
+              pendingTileSet?: Set<unknown>;
+              pendingCollisionKeys?: unknown[];
+              pendingCollisionSet?: Set<unknown>;
+              pendingWorkerTiles?: unknown[];
+              pendingWorkerResults?: Map<unknown, unknown>;
+              pendingResourceInstances?: unknown[];
+              terrainBoundingBoxes?: Map<unknown, unknown>;
+              pendingSerializationData?: Map<unknown, unknown>;
+              playerChunks?: Map<unknown, Set<unknown>>;
+              chunkPlayerCounts?: Map<unknown, unknown>;
+              simulatedChunks?: Set<unknown>;
+              _queuedTileRegenerations?: Map<unknown, unknown>;
+              _pendingTileRegeneration?: Set<unknown>;
+              _initialTilesReady?: boolean;
+            }
+          | undefined;
+        const networkSystem = world.getSystem("network") as
+          | {
+              queue?: unknown[];
+              sockets?: Map<unknown, unknown>;
+              processingRateLimiter?: Map<unknown, unknown>;
+              messageMetrics?: Map<unknown, unknown>;
+              getMessageDiagnostics?: (
+                limit?: number,
+              ) => Array<Record<string, unknown>>;
+              constructor?: {
+                agentGoals?: Map<unknown, unknown>;
+                agentAvailableGoals?: Map<unknown, unknown[]>;
+                agentGoalsPaused?: Map<unknown, unknown>;
+                characterSockets?: Map<unknown, unknown>;
+                agentPersonality?: Map<unknown, unknown>;
+                agentDesireScores?: Map<unknown, unknown>;
+                agentThoughts?: Map<unknown, unknown>;
+              };
+            }
+          | undefined;
+        const worldCollections = world as World & {
+          hot?: Set<unknown>;
+        };
+
+        return reply.send({
+          uptime: stats.uptime,
+          uptimeMinutes: (stats.uptime / 1000 / 60).toFixed(1),
+          trend: stats.memoryTrend,
+          growthRateMBPerMin: stats.growthRateMBPerMin.toFixed(2),
+          currentMemory: stats.currentMemory
+            ? {
+                rssMB: (stats.currentMemory.rss / MB).toFixed(1),
+                heapUsedMB: (stats.currentMemory.heapUsed / MB).toFixed(1),
+                heapTotalMB: (stats.currentMemory.heapTotal / MB).toFixed(1),
+                externalMB: (stats.currentMemory.external / MB).toFixed(1),
+              }
+            : null,
+          jscHeapStatsEnabled: stats.jscHeapStatsEnabled,
+          jscHeap: stats.currentJSCHeap
+            ? {
+                heapSizeMB: (stats.currentJSCHeap.heapSize / MB).toFixed(1),
+                heapCapacityMB: (
+                  stats.currentJSCHeap.heapCapacity / MB
+                ).toFixed(1),
+                extraMemoryMB: (
+                  stats.currentJSCHeap.extraMemorySize / MB
+                ).toFixed(1),
+                objectCount: stats.currentJSCHeap.objectCount,
+                protectedObjectCount: stats.currentJSCHeap.protectedObjectCount,
+                globalObjectCount: stats.currentJSCHeap.globalObjectCount,
+                protectedGlobalObjectCount:
+                  stats.currentJSCHeap.protectedGlobalObjectCount,
+                topObjectTypes: stats.currentJSCHeap.topObjectTypes,
+                growingObjectTypes: stats.currentJSCHeap.growingObjectTypes,
+                topProtectedObjectTypes:
+                  stats.currentJSCHeap.topProtectedObjectTypes,
+              }
+            : null,
+          collections: collections.slice(0, 20),
+          diagnostics: {
+            eventBus: {
+              pendingAsyncHandlers: eventBus.getPendingHandlerCount(),
+              pendingBreakdown: eventBus.getPendingHandlerBreakdown(20),
+              asyncHandlers: eventBus.getAsyncHandlerDiagnostics(20),
+            },
+            world: {
+              hotItems: worldCollections.hot?.size ?? 0,
+              systems: world.systems.length,
+              systemsByName: world.systemsByName.size,
+              asyncTickCalls: world.getAsyncTickDiagnostics(20),
+              systemTimings: world.getSystemTimings(),
+            },
+            entityManager: {
+              entities: entityManagerSystem?.entities?.size ?? 0,
+              entitiesNeedingUpdate:
+                entityManagerSystem?.entitiesNeedingUpdate?.size ?? 0,
+              networkDirtyEntities:
+                entityManagerSystem?.networkDirtyEntities?.size ?? 0,
+              entitiesByType: entityManagerSystem?.entitiesByType?.size ?? 0,
+              destroyingEntities:
+                entityManagerSystem?.destroyingEntities?.size ?? 0,
+              activeEntityCache:
+                entityManagerSystem?._activeEntityIdsCache?.size ?? 0,
+              entityUpdateArray:
+                entityManagerSystem?._entityUpdateArray?.length ?? 0,
+              serverActiveUpdateArray:
+                entityManagerSystem?._serverActiveUpdateArray?.length ?? 0,
+            },
+            combat: {
+              activeCombats:
+                combatSystem?.stateService?.getCombatStatesMap?.().size ?? 0,
+              nextAttackTicks: combatSystem?.nextAttackTicks?.size ?? 0,
+              playerEquipmentStats:
+                combatSystem?.playerEquipmentStats?.size ?? 0,
+              eventStoreEvents:
+                combatSystem?.eventStore?.getEventCount?.() ?? 0,
+              eventStoreSnapshots:
+                combatSystem?.eventStore?.getSnapshotCount?.() ?? 0,
+            },
+            playerDeath: {
+              respawnTimers: playerDeathSystem?.respawnTimers?.size ?? 0,
+              deathLocations: playerDeathSystem?.deathLocations?.size ?? 0,
+              playerPositions: playerDeathSystem?.playerPositions?.size ?? 0,
+              playerInventories:
+                playerDeathSystem?.playerInventories?.size ?? 0,
+              pendingGravestones:
+                playerDeathSystem?.pendingGravestones?.size ?? 0,
+              lastDeathTime: playerDeathSystem?.lastDeathTime?.size ?? 0,
+            },
+            database: {
+              pendingOperations: databaseSystem?.pendingOperations?.size ?? 0,
+              pendingSaveBuffer: databaseSystem?.pendingSaveBuffer?.size ?? 0,
+              pendingInventoryBuffer:
+                databaseSystem?.pendingInventoryBuffer?.size ?? 0,
+              inventoryWriteActive:
+                databaseSystem?.inventoryWriteActive?.size ?? 0,
+              inventoryWriteQueued:
+                databaseSystem?.inventoryWriteQueued?.size ?? 0,
+            },
+            terrain: {
+              terrainTiles: terrainSystem?.terrainTiles?.size ?? 0,
+              activeChunks: terrainSystem?.activeChunks?.size ?? 0,
+              flatZones: terrainSystem?.flatZones?.size ?? 0,
+              flatZonesByTile: terrainSystem?.flatZonesByTile?.size ?? 0,
+              pendingTileKeys: terrainSystem?.pendingTileKeys?.length ?? 0,
+              pendingTileSet: terrainSystem?.pendingTileSet?.size ?? 0,
+              pendingCollisionKeys:
+                terrainSystem?.pendingCollisionKeys?.length ?? 0,
+              pendingCollisionSet:
+                terrainSystem?.pendingCollisionSet?.size ?? 0,
+              pendingWorkerTiles:
+                terrainSystem?.pendingWorkerTiles?.length ?? 0,
+              pendingWorkerResults:
+                terrainSystem?.pendingWorkerResults?.size ?? 0,
+              pendingResourceInstances:
+                terrainSystem?.pendingResourceInstances?.length ?? 0,
+              terrainBoundingBoxes:
+                terrainSystem?.terrainBoundingBoxes?.size ?? 0,
+              pendingSerializationData:
+                terrainSystem?.pendingSerializationData?.size ?? 0,
+              playerChunks: terrainSystem?.playerChunks?.size ?? 0,
+              chunkPlayerCounts: terrainSystem?.chunkPlayerCounts?.size ?? 0,
+              simulatedChunks: terrainSystem?.simulatedChunks?.size ?? 0,
+              queuedTileRegenerations:
+                terrainSystem?._queuedTileRegenerations?.size ?? 0,
+              pendingTileRegeneration:
+                terrainSystem?._pendingTileRegeneration?.size ?? 0,
+              initialTilesReady: terrainSystem?._initialTilesReady ?? false,
+            },
+            network: {
+              queue: networkSystem?.queue?.length ?? 0,
+              sockets: networkSystem?.sockets?.size ?? 0,
+              processingRateLimiter:
+                networkSystem?.processingRateLimiter?.size ?? 0,
+              messageMetricCount: networkSystem?.messageMetrics?.size ?? 0,
+              agentGoals: networkSystem?.constructor?.agentGoals?.size ?? 0,
+              agentAvailableGoals:
+                networkSystem?.constructor?.agentAvailableGoals?.size ?? 0,
+              agentGoalsPaused:
+                networkSystem?.constructor?.agentGoalsPaused?.size ?? 0,
+              characterSockets:
+                networkSystem?.constructor?.characterSockets?.size ?? 0,
+              agentPersonality:
+                networkSystem?.constructor?.agentPersonality?.size ?? 0,
+              agentDesireScores:
+                networkSystem?.constructor?.agentDesireScores?.size ?? 0,
+              agentThoughts:
+                networkSystem?.constructor?.agentThoughts?.size ?? 0,
+              messageHandlers: networkSystem?.getMessageDiagnostics?.(20) ?? [],
+            },
+            activityLogger: {
+              pendingEntries: activityLoggerSystem?.pendingEntries?.length ?? 0,
+              knownCharacterIds:
+                activityLoggerSystem?.knownCharacterIds?.size ?? 0,
+              skippedCharacterIds:
+                activityLoggerSystem?.skippedCharacterIds?.size ?? 0,
+              isFlushing: activityLoggerSystem?.isFlushing ?? false,
+            },
+          },
+          leakWarningCount: stats.leakWarningCount,
+          recentWarnings: stats.recentWarnings,
+          sampleCount: samples.length,
+        });
+      } catch (err) {
+        console.error("[AdminRoutes] Memory report error:", err);
+        return reply
+          .code(500)
+          .send({ error: "Failed to generate memory report" });
+      }
+    },
+  );
+
+  /** Capture a one-shot JSC heap summary without enabling periodic JSC sampling */
+  fastify.get(
+    "/admin/memory/jsc-heap",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const monitor = getMemoryMonitor();
+        const summary = monitor.captureJSCHeapSummary();
+        const MB = 1024 * 1024;
+
+        return reply.send({
+          jscHeapStatsEnabled: true,
+          jscHeap: summary
+            ? {
+                heapSizeMB: (summary.heapSize / MB).toFixed(1),
+                heapCapacityMB: (summary.heapCapacity / MB).toFixed(1),
+                extraMemoryMB: (summary.extraMemorySize / MB).toFixed(1),
+                objectCount: summary.objectCount,
+                protectedObjectCount: summary.protectedObjectCount,
+                globalObjectCount: summary.globalObjectCount,
+                protectedGlobalObjectCount: summary.protectedGlobalObjectCount,
+                topObjectTypes: summary.topObjectTypes,
+                growingObjectTypes: summary.growingObjectTypes,
+                topProtectedObjectTypes: summary.topProtectedObjectTypes,
+              }
+            : null,
+        });
+      } catch (err) {
+        console.error("[AdminRoutes] JSC heap summary error:", err);
+        return reply.code(500).send({ error: "Failed to capture JSC heap" });
+      }
+    },
+  );
+
+  /** Trigger manual garbage collection */
+  fastify.post(
+    "/admin/memory/gc",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const monitor = getMemoryMonitor();
+        const beforeMem = process.memoryUsage();
+        const success = monitor.forceGC();
+        const afterMem = process.memoryUsage();
+        const MB = 1024 * 1024;
+
+        return reply.send({
+          success,
+          freedMB: ((beforeMem.heapUsed - afterMem.heapUsed) / MB).toFixed(1),
+          beforeHeapMB: (beforeMem.heapUsed / MB).toFixed(1),
+          afterHeapMB: (afterMem.heapUsed / MB).toFixed(1),
+        });
+      } catch (err) {
+        console.error("[AdminRoutes] GC trigger error:", err);
+        return reply.code(500).send({ error: "Failed to trigger GC" });
+      }
+    },
+  );
+
+  /** Get memory samples for graphing */
+  fastify.get(
+    "/admin/memory/samples",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const monitor = getMemoryMonitor();
+        const samples = monitor.getSamples();
+        const MB = 1024 * 1024;
+
+        return reply.send({
+          samples: samples.map((s) => ({
+            timestamp: s.timestamp,
+            rssMB: (s.rss / MB).toFixed(1),
+            heapUsedMB: (s.heapUsed / MB).toFixed(1),
+            heapTotalMB: (s.heapTotal / MB).toFixed(1),
+          })),
+        });
+      } catch (err) {
+        console.error("[AdminRoutes] Memory samples error:", err);
+        return reply.code(500).send({ error: "Failed to get memory samples" });
+      }
+    },
+  );
+
+  /** Get plain text memory report */
+  fastify.get(
+    "/admin/memory/report.txt",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const monitor = getMemoryMonitor();
+        const report = monitor.generateReport();
+        return reply.type("text/plain").send(report);
+      } catch (err) {
+        console.error("[AdminRoutes] Memory report error:", err);
+        return reply.code(500).send("Failed to generate memory report");
+      }
+    },
+  );
+
+  /** Write V8 heap snapshot for memory profiling */
+  fastify.post(
+    "/admin/memory/heap-snapshot",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const monitor = getMemoryMonitor();
+        const snapshotPath = monitor.writeHeapSnapshot();
+
+        if (snapshotPath) {
+          // Also print detailed heap stats
+          monitor.printHeapStats();
+
+          return reply.send({
+            success: true,
+            path: snapshotPath,
+            message: "Heap snapshot written. Use Chrome DevTools to analyze.",
+          });
+        } else {
+          return reply.code(500).send({
+            success: false,
+            error: "Failed to write heap snapshot",
+          });
+        }
+      } catch (err) {
+        console.error("[AdminRoutes] Heap snapshot error:", err);
+        return reply.code(500).send({ error: "Failed to write heap snapshot" });
+      }
+    },
+  );
+
+  /** Get V8 heap statistics */
+  fastify.get(
+    "/admin/memory/heap-stats",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const monitor = getMemoryMonitor();
+        const heapStats = monitor.getHeapStatistics();
+        const heapSpaces = monitor.getHeapSpaceStatistics();
+        const MB = 1024 * 1024;
+
+        return reply.send({
+          heap: {
+            totalHeapSizeMB: (heapStats.total_heap_size / MB).toFixed(1),
+            usedHeapSizeMB: (heapStats.used_heap_size / MB).toFixed(1),
+            heapSizeLimitMB: (heapStats.heap_size_limit / MB).toFixed(1),
+            externalMemoryMB: (heapStats.external_memory / MB).toFixed(1),
+            mallocedMemoryMB: (heapStats.malloced_memory / MB).toFixed(1),
+            peakMallocedMemoryMB: (heapStats.peak_malloced_memory / MB).toFixed(
+              1,
+            ),
+            numberOfNativeContexts: heapStats.number_of_native_contexts,
+            numberOfDetachedContexts: heapStats.number_of_detached_contexts,
+          },
+          spaces: heapSpaces.map((space) => ({
+            name: space.space_name,
+            sizeMB: (space.space_size / MB).toFixed(2),
+            usedSizeMB: (space.space_used_size / MB).toFixed(2),
+            availableSizeMB: (space.space_available_size / MB).toFixed(2),
+            physicalSizeMB: (space.physical_space_size / MB).toFixed(2),
+          })),
+        });
+      } catch (err) {
+        console.error("[AdminRoutes] Heap stats error:", err);
+        return reply.code(500).send({ error: "Failed to get heap statistics" });
       }
     },
   );

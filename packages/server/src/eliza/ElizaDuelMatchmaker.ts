@@ -17,6 +17,12 @@ import {
   MODEL_AGENTS,
 } from "./ElizaDuelBot.js";
 import type { ModelProviderConfig } from "./ModelAgentSpawner.js";
+import {
+  duelLogError,
+  duelLogInfo,
+  duelLogWarn,
+  isDuelLogLevelEnabled,
+} from "./logging.js";
 
 export type ElizaDuelMatchmakerConfig = {
   wsUrl: string;
@@ -28,6 +34,8 @@ export type ElizaDuelMatchmakerConfig = {
   connectTimeoutMs?: number;
   /** Delay between scheduling new matches (ms) */
   matchIntervalMs?: number;
+  /** Connect bots only and let the server own duel scheduling */
+  connectOnly?: boolean;
   /** Enable verbose logging */
   verbose?: boolean;
   /** Override model configs (defaults to MODEL_AGENTS) */
@@ -73,6 +81,7 @@ export class ElizaDuelMatchmaker extends EventEmitter {
       | "rampUpDelayMs"
       | "connectTimeoutMs"
       | "matchIntervalMs"
+      | "connectOnly"
       | "verbose"
     >
   > & { modelConfigs: ModelProviderConfig[] };
@@ -102,8 +111,9 @@ export class ElizaDuelMatchmaker extends EventEmitter {
     );
 
     if (availableModels.length < 2) {
-      console.warn(
-        `[ElizaDuelMatchmaker] Only ${availableModels.length} model(s) have API keys set. Need at least 2.`,
+      duelLogWarn(
+        "ElizaDuelMatchmaker",
+        `Only ${availableModels.length} model(s) have API keys set. Need at least 2.`,
       );
     }
 
@@ -113,9 +123,10 @@ export class ElizaDuelMatchmaker extends EventEmitter {
     this.config = {
       wsUrl: config.wsUrl,
       botCount: effectiveBotCount,
-      rampUpDelayMs: config.rampUpDelayMs ?? 8000,
+      rampUpDelayMs: config.rampUpDelayMs ?? 1500,
       connectTimeoutMs: config.connectTimeoutMs ?? 30000,
       matchIntervalMs: config.matchIntervalMs ?? 10000,
+      connectOnly: config.connectOnly ?? false,
       verbose: config.verbose ?? false,
       modelConfigs: availableModels.slice(0, effectiveBotCount),
     };
@@ -131,20 +142,25 @@ export class ElizaDuelMatchmaker extends EventEmitter {
     this.matchHistory = [];
     this.totalMatchesCompleted = 0;
 
-    console.log(
-      `[ElizaDuelMatchmaker] Starting ${this.config.botCount} ElizaOS duel bots...`,
+    duelLogInfo(
+      "ElizaDuelMatchmaker",
+      `Starting ${this.config.botCount} ElizaOS duel bots...`,
     );
-    console.log(
-      `[ElizaDuelMatchmaker] Models: ${this.config.modelConfigs.map((m) => m.displayName).join(", ")}`,
+    duelLogInfo(
+      "ElizaDuelMatchmaker",
+      `Models: ${this.config.modelConfigs.map((m) => m.displayName).join(", ")}`,
     );
 
     await this.spawnBots();
-    this.startMatchScheduler();
+    if (!this.config.connectOnly) {
+      this.startMatchScheduler();
+    }
     this.statsTimer = setInterval(() => this.logStats(), 15000);
 
     const connectedCount = this.getConnectedBots().length;
-    console.log(
-      `[ElizaDuelMatchmaker] Ready. ${connectedCount}/${this.config.botCount} bots connected.`,
+    duelLogInfo(
+      "ElizaDuelMatchmaker",
+      `Ready. ${connectedCount}/${this.config.botCount} bots connected.`,
     );
     this.emit("ready", {
       connectedBots: connectedCount,
@@ -172,11 +188,12 @@ export class ElizaDuelMatchmaker extends EventEmitter {
 
       try {
         await bot.connect();
-        console.log(`[ElizaDuelMatchmaker] ${bot.name} connected`);
+        duelLogInfo("ElizaDuelMatchmaker", `${bot.name} connected`);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
-        console.error(
-          `[ElizaDuelMatchmaker] ${bot.name} failed: ${error.message}`,
+        duelLogError(
+          "ElizaDuelMatchmaker",
+          `${bot.name} failed: ${error.message}`,
         );
       }
 
@@ -197,8 +214,9 @@ export class ElizaDuelMatchmaker extends EventEmitter {
       for (const [matchId, match] of this.activeMatches) {
         if (match.bot1 === bot || match.bot2 === bot) {
           this.activeMatches.delete(matchId);
-          console.log(
-            `[ElizaDuelMatchmaker] Match ${matchId} cancelled: bot disconnected`,
+          duelLogWarn(
+            "ElizaDuelMatchmaker",
+            `Match ${matchId} cancelled: bot disconnected`,
           );
         }
       }
@@ -211,8 +229,9 @@ export class ElizaDuelMatchmaker extends EventEmitter {
         this.reconnectAttempts.set(bot, attempts);
 
         if (attempts > MAX_RECONNECT_ATTEMPTS) {
-          console.error(
-            `[ElizaDuelMatchmaker] ${bot.name} exceeded ${MAX_RECONNECT_ATTEMPTS} reconnect attempts, giving up`,
+          duelLogError(
+            "ElizaDuelMatchmaker",
+            `${bot.name} exceeded ${MAX_RECONNECT_ATTEMPTS} reconnect attempts, giving up`,
           );
           this.reconnectTimers.delete(bot);
           this.reconnectAttempts.delete(bot);
@@ -223,28 +242,31 @@ export class ElizaDuelMatchmaker extends EventEmitter {
           this.reconnectTimers.delete(bot);
           if (!this.isRunning || bot.connected) return;
           try {
-            console.log(
-              `[ElizaDuelMatchmaker] Attempting reconnect for ${bot.name} (${this.reconnectAttempts.get(bot) ?? 0}/${MAX_RECONNECT_ATTEMPTS})...`,
+            duelLogInfo(
+              "ElizaDuelMatchmaker",
+              `Attempting reconnect for ${bot.name} (${this.reconnectAttempts.get(bot) ?? 0}/${MAX_RECONNECT_ATTEMPTS})...`,
             );
             await bot.connect();
             // Reset counter on successful reconnect
             this.reconnectAttempts.delete(bot);
-            console.log(`[ElizaDuelMatchmaker] ${bot.name} reconnected`);
+            duelLogInfo("ElizaDuelMatchmaker", `${bot.name} reconnected`);
           } catch (err) {
             if (!this.isRunning) return;
             const nextAttempts = (this.reconnectAttempts.get(bot) ?? 0) + 1;
             this.reconnectAttempts.set(bot, nextAttempts);
 
             if (nextAttempts > MAX_RECONNECT_ATTEMPTS) {
-              console.error(
-                `[ElizaDuelMatchmaker] ${bot.name} exceeded ${MAX_RECONNECT_ATTEMPTS} reconnect attempts, giving up`,
+              duelLogError(
+                "ElizaDuelMatchmaker",
+                `${bot.name} exceeded ${MAX_RECONNECT_ATTEMPTS} reconnect attempts, giving up`,
               );
               this.reconnectAttempts.delete(bot);
               return;
             }
 
-            console.warn(
-              `[ElizaDuelMatchmaker] ${bot.name} reconnect failed (${nextAttempts}/${MAX_RECONNECT_ATTEMPTS}), retrying in ${backoff}ms`,
+            duelLogWarn(
+              "ElizaDuelMatchmaker",
+              `${bot.name} reconnect failed (${nextAttempts}/${MAX_RECONNECT_ATTEMPTS}), retrying in ${backoff}ms`,
             );
             const timer = setTimeout(attemptReconnect, backoff);
             this.reconnectTimers.set(bot, timer);
@@ -259,9 +281,10 @@ export class ElizaDuelMatchmaker extends EventEmitter {
     bot.on(
       "duelStarted",
       (data: { botName: string; duelId: string | null }) => {
-        if (this.config.verbose) {
-          console.log(
-            `[ElizaDuelMatchmaker] ${data.botName} started duel ${data.duelId}`,
+        if (this.config.verbose && isDuelLogLevelEnabled("info")) {
+          duelLogInfo(
+            "ElizaDuelMatchmaker",
+            `${data.botName} started duel ${data.duelId}`,
           );
         }
       },
@@ -331,8 +354,9 @@ export class ElizaDuelMatchmaker extends EventEmitter {
       }
       this.totalMatchesCompleted++;
 
-      console.log(
-        `[ElizaDuelMatchmaker] Match ${result.matchId}: ${result.winnerName} defeated ${result.loserName} (${Math.round(result.durationMs / 1000)}s)`,
+      duelLogInfo(
+        "ElizaDuelMatchmaker",
+        `Match ${result.matchId}: ${result.winnerName} defeated ${result.loserName} (${Math.round(result.durationMs / 1000)}s)`,
       );
 
       this.emit("matchComplete", result);
@@ -340,6 +364,7 @@ export class ElizaDuelMatchmaker extends EventEmitter {
   }
 
   private startMatchScheduler(): void {
+    if (this.config.connectOnly) return;
     if (this.matchSchedulerTimer) return;
 
     this.matchSchedulerTimer = setInterval(() => {
@@ -354,6 +379,7 @@ export class ElizaDuelMatchmaker extends EventEmitter {
   }
 
   private scheduleMatches(): void {
+    if (this.config.connectOnly) return;
     if (!this.isRunning) return;
 
     let idleBots = this.getIdleBots().filter((b) => b.getId() != null);
@@ -377,8 +403,9 @@ export class ElizaDuelMatchmaker extends EventEmitter {
   private startMatch(bot1: ElizaDuelBot, bot2: ElizaDuelBot): void {
     const matchId = `match-${++this.matchIdCounter}`;
 
-    console.log(
-      `[ElizaDuelMatchmaker] Scheduling ${matchId}: ${bot1.name} vs ${bot2.name}`,
+    duelLogInfo(
+      "ElizaDuelMatchmaker",
+      `Scheduling ${matchId}: ${bot1.name} vs ${bot2.name}`,
     );
 
     const match: ActiveMatch = {
@@ -404,8 +431,9 @@ export class ElizaDuelMatchmaker extends EventEmitter {
     if (targetId) {
       bot1.challengePlayer(targetId);
     } else {
-      console.warn(
-        `[ElizaDuelMatchmaker] Cannot start match: ${bot2.name} has no ID`,
+      duelLogWarn(
+        "ElizaDuelMatchmaker",
+        `Cannot start match: ${bot2.name} has no ID`,
       );
       this.activeMatches.delete(matchId);
     }
@@ -421,7 +449,7 @@ export class ElizaDuelMatchmaker extends EventEmitter {
 
   private logStats(): void {
     const stats = this.getStats();
-    console.log(`[ElizaDuelMatchmaker] Stats:`, {
+    duelLogInfo("ElizaDuelMatchmaker", "Stats", {
       connected: `${stats.connectedBots}/${stats.totalBots}`,
       idle: stats.idleBots,
       inProgress: stats.duelsInProgress,
@@ -485,7 +513,7 @@ export class ElizaDuelMatchmaker extends EventEmitter {
   async stop(): Promise<void> {
     if (!this.isRunning) return;
 
-    console.log("[ElizaDuelMatchmaker] Stopping...");
+    duelLogInfo("ElizaDuelMatchmaker", "Stopping...");
     this.isRunning = false;
 
     if (this.matchSchedulerTimer) {
@@ -519,7 +547,7 @@ export class ElizaDuelMatchmaker extends EventEmitter {
     this.bots = [];
     this.activeMatches.clear();
 
-    console.log("[ElizaDuelMatchmaker] Stopped.");
+    duelLogInfo("ElizaDuelMatchmaker", "Stopped.");
     this.emit("stopped", { totalMatches: this.totalMatchesCompleted });
   }
 

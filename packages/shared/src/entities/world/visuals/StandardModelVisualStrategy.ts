@@ -28,13 +28,6 @@ import type {
 const DEFAULT_RESOURCE_LOD = getLODDistances("resource");
 const SKIP_LOD_TYPES = new Set(["herb", "fishing_spot"]);
 
-function inferLOD1Path(p: string): string {
-  return p.replace(/\.glb$/i, "_lod1.glb");
-}
-function inferLOD2Path(p: string): string {
-  return p.replace(/\.glb$/i, "_lod2.glb");
-}
-
 // ---------------------------------------------------------------------------
 // Shared LOD caches (one entry per model path, shared across all entities)
 // ---------------------------------------------------------------------------
@@ -335,6 +328,9 @@ export class StandardModelVisualStrategy implements ResourceVisualStrategy {
     if (!modelPath) return;
     if (SKIP_LOD_TYPES.has(ctx.config.resourceType)) return;
 
+    const lod1ModelPath = ctx.config.lod1Model;
+    if (!lod1ModelPath) return;
+
     if (lod1MeshCache.has(modelPath)) {
       const cached = lod1MeshCache.get(modelPath);
       if (cached) this.createLODMesh(ctx, cached, lod0Scale, "lod1");
@@ -352,7 +348,7 @@ export class StandardModelVisualStrategy implements ResourceVisualStrategy {
     const loadPromise = this.loadAndCacheLOD(
       ctx,
       modelPath,
-      inferLOD1Path(modelPath),
+      lod1ModelPath,
       lod1MeshCache,
       activeLOD1Materials,
       lod0Scale,
@@ -375,6 +371,9 @@ export class StandardModelVisualStrategy implements ResourceVisualStrategy {
     if (!modelPath) return;
     if (SKIP_LOD_TYPES.has(ctx.config.resourceType)) return;
 
+    const lod2ModelPath = ctx.config.lod2Model;
+    if (!lod2ModelPath) return;
+
     if (lod2MeshCache.has(modelPath)) {
       const cached = lod2MeshCache.get(modelPath);
       if (cached) this.createLODMesh(ctx, cached, lod0Scale, "lod2");
@@ -392,7 +391,7 @@ export class StandardModelVisualStrategy implements ResourceVisualStrategy {
     const loadPromise = this.loadAndCacheLOD(
       ctx,
       modelPath,
-      inferLOD2Path(modelPath),
+      lod2ModelPath,
       lod2MeshCache,
       activeLOD2Materials,
       lod0Scale,

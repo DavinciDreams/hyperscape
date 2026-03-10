@@ -64,6 +64,7 @@ export {
   loadSqlPlugin as loadAgentSqlPlugin,
   createAgentCharacter as createAgentCharacterConfig,
   buildModelSecrets,
+  /** @deprecated PGLite replaced by InMemoryDatabaseAdapter */
   ensurePgliteDataDir,
   DEFAULT_SMALL_MODELS,
   MODEL_SETTING_KEYS,
@@ -83,8 +84,10 @@ interface ServerConfig {
   spawnModelAgents?: boolean;
   /** Maximum number of model agents to spawn */
   maxModelAgents?: number;
-  /** Specific providers to spawn (openai, anthropic, groq, xai) */
-  modelProviders?: Array<"openai" | "anthropic" | "groq" | "xai">;
+  /** Specific providers to spawn (openai, anthropic, groq, xai, elizacloud) */
+  modelProviders?: Array<
+    "openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud"
+  >;
 }
 
 /**
@@ -100,8 +103,6 @@ export async function initializeAgents(
   world: World,
   config?: ServerConfig,
 ): Promise<AgentManager> {
-  console.log("[Eliza] Initializing embedded agent system...");
-
   // Create the agent manager
   const manager = new AgentManager(world);
 
@@ -111,12 +112,7 @@ export async function initializeAgents(
   // Load agents from database if auto-start is enabled
   const autoStart = config?.autoStartAgents !== false;
   if (autoStart) {
-    console.log("[Eliza] Auto-starting agents from database...");
     await manager.loadAgentsFromDatabase();
-  } else {
-    console.log(
-      "[Eliza] Auto-start disabled, agents will not start automatically",
-    );
   }
 
   // Spawn ElizaOS agents with different AI models.
@@ -127,7 +123,9 @@ export async function initializeAgents(
     spawnEnvValue == null || spawnEnvValue === ""
       ? null
       : spawnEnvValue !== "false";
-  const defaultSpawnModelAgents = process.env.NODE_ENV === "production";
+  const streamingDuelEnabled = process.env.STREAMING_DUEL_ENABLED === "true";
+  const defaultSpawnModelAgents =
+    process.env.NODE_ENV === "production" || streamingDuelEnabled;
   const spawnRequested =
     config?.spawnModelAgents ?? spawnRequestedByEnv ?? defaultSpawnModelAgents;
   const embeddedAgentCount = manager.getAllAgents().length;
@@ -142,41 +140,22 @@ export async function initializeAgents(
     embeddedAgentCount > 0 &&
     !allowSpawnWithEmbeddedAgents
   ) {
-    console.log(
-      `[Eliza] Skipping model agent spawn: ${embeddedAgentCount} embedded agent(s) already active. Set SPAWN_MODEL_AGENTS_WITH_EMBEDDED=true to force.`,
-    );
+    return manager;
   }
 
   if (shouldSpawnAgents) {
     const availableModels = getAvailableModels();
-    console.log(
-      `[Eliza] Found ${availableModels.length} model(s) with API keys configured`,
-    );
-
     if (availableModels.length > 0) {
-      console.log("[Eliza] Spawning ElizaOS model agents for dueling...");
       const maxAgents =
         config?.maxModelAgents ??
-        parseInt(process.env.MAX_MODEL_AGENTS || "10", 10);
+        parseInt(process.env.MAX_MODEL_AGENTS || "25", 10);
 
-      const spawnedCount = await spawnModelAgents(world, {
+      await spawnModelAgents(world, {
         maxAgents,
         providers: config?.modelProviders,
       });
-
-      console.log(`[Eliza] ✅ Spawned ${spawnedCount} ElizaOS model agents`);
-    } else {
-      console.log(
-        "[Eliza] No model API keys configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY, or XAI_API_KEY to spawn model agents.",
-      );
     }
-  } else {
-    console.log(
-      `[Eliza] Model agent spawning disabled (requested=${spawnRequested ? "yes" : "no"}, NODE_ENV=${process.env.NODE_ENV || "development"})`,
-    );
   }
-
-  console.log("[Eliza] ✅ Embedded agent system initialized");
 
   return manager;
 }

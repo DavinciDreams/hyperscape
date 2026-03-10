@@ -8,6 +8,7 @@
  */
 
 import THREE from "../../extras/three/three";
+import { alignWebGPUBufferSize } from "../rendering/webgpuBufferUploads";
 
 // ============================================================================
 // TYPES
@@ -241,15 +242,17 @@ export class RuntimeComputeContext {
 
     const buffer = this.device.createBuffer({
       label,
-      size: data.byteLength,
+      size: alignWebGPUBufferSize(data.byteLength),
       usage: usage | GPUBufferUsage.COPY_DST,
-      mappedAtCreation: true,
     });
 
-    new Uint8Array(buffer.getMappedRange()).set(
-      new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+    this.device.queue.writeBuffer(
+      buffer,
+      0,
+      data.buffer as ArrayBuffer,
+      data.byteOffset,
+      data.byteLength,
     );
-    buffer.unmap();
 
     this.buffers.set(label, buffer);
     return buffer;
@@ -751,10 +754,10 @@ export function isWebGPUAvailable(): boolean {
 export function isWebGPURenderer(
   renderer: THREE.Renderer,
 ): renderer is THREE.WebGPURenderer {
-  return (
-    renderer instanceof THREE.WebGPURenderer ||
-    (renderer as { isWebGPURenderer?: boolean }).isWebGPURenderer === true
-  );
+  const rendererWithBackend = renderer as THREE.WebGPURenderer & {
+    backend?: { isWebGPUBackend?: boolean };
+  };
+  return rendererWithBackend.backend?.isWebGPUBackend === true;
 }
 
 /**

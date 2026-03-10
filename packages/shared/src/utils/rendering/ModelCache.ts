@@ -64,7 +64,7 @@ interface CachedModel {
 
 const PROCESSED_DB_NAME = "hyperscape-processed-models";
 const PROCESSED_STORE_NAME = "models";
-const PROCESSED_CACHE_VERSION = 4;
+const PROCESSED_CACHE_VERSION = 5;
 
 /** Serialized mesh data for IndexedDB storage */
 interface SerializedMesh {
@@ -977,6 +977,15 @@ export class ModelCache {
     scene.traverse((node) => {
       if (node instanceof THREE.Mesh || node instanceof THREE.SkinnedMesh) {
         const mesh = node;
+
+        // WebGPU lit materials need normals. Some compressed GLBs only ship
+        // position/color data because they were authored for unlit rendering.
+        // We convert those materials to MeshStandardNodeMaterial below, so
+        // synthesize normals once during model setup before the scene is cached.
+        if (mesh.geometry && !mesh.geometry.attributes.normal) {
+          mesh.geometry.computeVertexNormals();
+          mesh.geometry.attributes.normal.needsUpdate = true;
+        }
 
         // Check if geometry has vertex colors
         const hasVertexColors = mesh.geometry?.attributes?.color !== undefined;

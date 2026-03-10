@@ -175,21 +175,38 @@ function resolveMigrationsFolder(): string {
 }
 
 /**
- * Detect if connection string is for a serverless database (Neon, Supabase, etc.)
- * These require special handling for connection management
+ * Detect if connection string is for a serverless/managed database
+ * These require special handling for connection management:
+ * - Lower max connections (managed DBs have strict limits)
+ * - Shorter idle timeouts
+ * - Keepalive enabled
  */
 function isServerlessDatabase(connectionString: string): boolean {
   return (
     connectionString.includes("neon.tech") ||
     connectionString.includes("supabase.co") ||
     connectionString.includes("pooler") ||
-    connectionString.includes("-pooler.")
+    connectionString.includes("-pooler.") ||
+    connectionString.includes(".rlwy.net") || // Railway proxy
+    connectionString.includes(".railway.app") || // Railway direct
+    connectionString.includes(".railway.internal") || // Railway internal
+    process.env.RAILWAY_ENVIRONMENT !== undefined // Railway environment variable
   );
 }
 
-/** Detect Supabase Supavisor pooler which doesn't support prepared statements */
+/** Detect if using a connection pooler that doesn't support prepared statements */
 function isSupavisorPooler(connectionString: string): boolean {
-  return connectionString.includes("pooler.supabase.com");
+  // Railway proxy uses pgbouncer - detect via env var or URL patterns
+  const isRailwayProxy =
+    process.env.RAILWAY_ENVIRONMENT !== undefined ||
+    connectionString.includes(".proxy.rlwy.net") ||
+    connectionString.includes(".railway.internal");
+
+  return (
+    connectionString.includes("pooler.supabase.com") ||
+    connectionString.includes("pgbouncer=true") ||
+    isRailwayProxy
+  );
 }
 
 function parseOptionalInt(value: string | undefined): number | undefined {
@@ -246,7 +263,7 @@ export async function initializeDatabase(connectionString: string) {
   // - Keepalive to prevent unexpected disconnects
   // - Lower max connections (serverless pools are limited)
   // Supavisor pooler needs even lower max connections
-  const defaultMax = useSupavisor ? 6 : isServerless ? 10 : 20;
+  const defaultMax = useSupavisor ? 6 : isServerless ? 15 : 30;
   const defaultMin = isServerless ? 1 : 2;
   const envMax = parseOptionalInt(
     process.env.POSTGRES_POOL_MAX || process.env.DB_POOL_MAX,
@@ -267,7 +284,7 @@ export async function initializeDatabase(connectionString: string) {
     min: poolMin,
     // Serverless DBs close idle connections quickly, so use shorter timeout
     idleTimeoutMillis: isServerless ? 20000 : 30000,
-    connectionTimeoutMillis: 30000,
+    connectionTimeoutMillis: 60000,
     allowExitOnIdle: true,
     // Enable SSL for cloud databases
     ssl: needsSSL ? { rejectUnauthorized: false } : undefined,

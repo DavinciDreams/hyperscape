@@ -977,10 +977,24 @@ export class DatabaseSystem extends SystemBase {
     sessionData: Omit<PlayerSessionRow, "id" | "sessionId">,
     sessionId?: string,
   ): Promise<string> {
-    return this.sessionRepository.createPlayerSessionAsync(
-      sessionData,
-      sessionId,
-    );
+    try {
+      return await this.sessionRepository.createPlayerSessionAsync(
+        sessionData,
+        sessionId,
+      );
+    } catch (error) {
+      if (DB_WRITE_ERRORS_NON_FATAL && isTransientDbConnectivityError(error)) {
+        console.warn(
+          `[DatabaseSystem] createPlayerSessionAsync(${sessionData.playerId}) failed due to database connectivity; continuing in best-effort mode`,
+          error,
+        );
+        return (
+          sessionId ||
+          `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+        );
+      }
+      throw error;
+    }
   }
 
   /**
@@ -991,7 +1005,21 @@ export class DatabaseSystem extends SystemBase {
     sessionId: string,
     updates: Partial<PlayerSessionRow>,
   ): Promise<void> {
-    return this.sessionRepository.updatePlayerSessionAsync(sessionId, updates);
+    try {
+      return await this.sessionRepository.updatePlayerSessionAsync(
+        sessionId,
+        updates,
+      );
+    } catch (error) {
+      if (DB_WRITE_ERRORS_NON_FATAL && isTransientDbConnectivityError(error)) {
+        console.warn(
+          `[DatabaseSystem] updatePlayerSessionAsync(${sessionId}) failed due to database connectivity; continuing in best-effort mode`,
+          error,
+        );
+        return;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1004,10 +1032,21 @@ export class DatabaseSystem extends SystemBase {
     sessionIds: string[],
     timestamp: number,
   ): Promise<void> {
-    return this.sessionRepository.batchUpdateLastActivityAsync(
-      sessionIds,
-      timestamp,
-    );
+    try {
+      return await this.sessionRepository.batchUpdateLastActivityAsync(
+        sessionIds,
+        timestamp,
+      );
+    } catch (error) {
+      if (DB_WRITE_ERRORS_NON_FATAL && isTransientDbConnectivityError(error)) {
+        console.warn(
+          `[DatabaseSystem] batchUpdateSessionLastActivityAsync(${sessionIds.length}) failed due to database connectivity; continuing in best-effort mode`,
+          error,
+        );
+        return;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1015,7 +1054,18 @@ export class DatabaseSystem extends SystemBase {
    * Delegates to SessionRepository
    */
   async getActivePlayerSessionsAsync(): Promise<PlayerSessionRow[]> {
-    return this.sessionRepository.getActivePlayerSessionsAsync();
+    try {
+      return await this.sessionRepository.getActivePlayerSessionsAsync();
+    } catch (error) {
+      if (DB_WRITE_ERRORS_NON_FATAL && isTransientDbConnectivityError(error)) {
+        console.warn(
+          "[DatabaseSystem] getActivePlayerSessionsAsync failed due to database connectivity; continuing in best-effort mode",
+          error,
+        );
+        return [];
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1026,7 +1076,21 @@ export class DatabaseSystem extends SystemBase {
     sessionId: string,
     reason?: string,
   ): Promise<void> {
-    return this.sessionRepository.endPlayerSessionAsync(sessionId, reason);
+    try {
+      return await this.sessionRepository.endPlayerSessionAsync(
+        sessionId,
+        reason,
+      );
+    } catch (error) {
+      if (DB_WRITE_ERRORS_NON_FATAL && isTransientDbConnectivityError(error)) {
+        console.warn(
+          `[DatabaseSystem] endPlayerSessionAsync(${sessionId}) failed due to database connectivity; continuing in best-effort mode`,
+          error,
+        );
+        return;
+      }
+      throw error;
+    }
   }
 
   // ============================================================================

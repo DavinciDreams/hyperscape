@@ -32,16 +32,92 @@ export interface DuelEventDeps {
   ) => Promise<void>;
 }
 
+/** Stored listener references for cleanup */
+interface DuelEventListener {
+  event: string;
+
+  handler: (payload: any) => void;
+}
+
 /**
  * Register all duel-related world event listeners.
  *
  * Call once during ServerNetwork initialisation (after DuelSystem is available).
+ * Returns a cleanup function to remove all listeners - call this in destroy().
  */
-export function registerDuelEventListeners(deps: DuelEventDeps): void {
+export function registerDuelEventListeners(deps: DuelEventDeps): () => void {
   const { world, getSocketByPlayerId, processedDuelSettlements } = deps;
+  const listeners: DuelEventListener[] = [];
+
+  /** Helper to register and track listeners */
+
+  const on = (event: string, handler: (payload: any) => void): void => {
+    listeners.push({ event, handler });
+    world.on(event, handler);
+  };
+
+  // -- on-deck notification (next duel pair selected, agents should prepare) --
+  on("duel:on-deck", (event) => {
+    const { agent1Id, agent1Name, agent2Id, agent2Name } = event as {
+      agent1Id: string;
+      agent1Name: string;
+      agent2Id: string;
+      agent2Name: string;
+    };
+
+    const agent1Socket = getSocketByPlayerId(agent1Id);
+    if (agent1Socket) {
+      agent1Socket.send("duelOnDeck", {
+        opponentId: agent2Id,
+        opponentName: agent2Name,
+      });
+    }
+
+    const agent2Socket = getSocketByPlayerId(agent2Id);
+    if (agent2Socket) {
+      agent2Socket.send("duelOnDeck", {
+        opponentId: agent1Id,
+        opponentName: agent1Name,
+      });
+    }
+  });
+
+  // -- session created (also used by StreamingDuelScheduler to notify agents) --
+  on("duel:session:created", (event) => {
+    const { duelId, challengerId, challengerName, targetId, targetName } =
+      event as EventMap[typeof EventType.DUEL_SESSION_CREATED];
+
+    const challengerSocket = getSocketByPlayerId(challengerId);
+    if (challengerSocket) {
+      challengerSocket.send("duelSessionStarted", {
+        duelId,
+        opponentId: targetId,
+        opponentName: targetName,
+        isChallenger: true,
+      });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for challenger ${challengerId} — duelSessionStarted not sent`,
+      );
+    }
+
+    const targetSocket = getSocketByPlayerId(targetId);
+    if (targetSocket) {
+      targetSocket.send("duelSessionStarted", {
+        duelId,
+        opponentId: challengerId,
+        opponentName: challengerName,
+        isChallenger: false,
+      });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for target ${targetId} — duelSessionStarted not sent`,
+      );
+    }
+  });
 
   // -- countdown start --
-  world.on("duel:countdown:start", (event) => {
+  on("duel:countdown:start", (event) => {
     const { duelId, arenaId, challengerId, targetId } =
       event as EventMap[typeof EventType.DUEL_COUNTDOWN_START];
 
@@ -59,7 +135,7 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
   });
 
   // -- countdown ticks --
-  world.on("duel:countdown:tick", (event) => {
+  on("duel:countdown:tick", (event) => {
     const { duelId, count, challengerId, targetId } =
       event as EventMap[typeof EventType.DUEL_COUNTDOWN_TICK];
 
@@ -77,7 +153,7 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
   });
 
   // -- fight start --
-  world.on("duel:fight:start", (event) => {
+  on("duel:fight:start", (event) => {
     const { duelId, challengerId, targetId, arenaId, bounds } =
       event as EventMap[typeof EventType.DUEL_FIGHT_START];
 
@@ -89,6 +165,10 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
         opponentId: targetId,
         bounds,
       });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for challenger ${challengerId} — duelFightStart not sent`,
+      );
     }
 
     const targetSocket = getSocketByPlayerId(targetId);
@@ -99,11 +179,15 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
         opponentId: challengerId,
         bounds,
       });
+    } else {
+      console.warn(
+        `[Duel] Socket NOT FOUND for target ${targetId} — duelFightStart not sent`,
+      );
     }
   });
 
   // -- duel completed --
-  world.on("duel:completed", (event) => {
+  on("duel:completed", (event) => {
     const {
       duelId,
       winnerId,
@@ -150,7 +234,7 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
   });
 
   // -- player disconnected during duel --
-  world.on("duel:player:disconnected", (event) => {
+  on("duel:player:disconnected", (event) => {
     const { duelId, playerId, challengerId, targetId, timeoutMs } =
       event as EventMap[typeof EventType.DUEL_PLAYER_DISCONNECTED];
 
@@ -165,7 +249,7 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
   });
 
   // -- player reconnected during duel --
-  world.on("duel:player:reconnected", (event) => {
+  on("duel:player:reconnected", (event) => {
     const { duelId, playerId, challengerId, targetId } =
       event as EventMap[typeof EventType.DUEL_PLAYER_RECONNECTED];
 
@@ -177,7 +261,7 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
   });
 
   // -- equipment restrictions --
-  world.on("duel:equipment:restrict", (event) => {
+  on("duel:equipment:restrict", (event) => {
     const { challengerId, targetId, disabledSlots } =
       event as EventMap[typeof EventType.DUEL_EQUIPMENT_RESTRICT];
 
@@ -196,7 +280,7 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
   });
 
   // -- stakes settle --
-  world.on("duel:stakes:settle", (event) => {
+  on("duel:stakes:settle", (event) => {
     const { playerId, ownStakes, wonStakes, fromPlayerId, duelId, reason } =
       event as EventMap[typeof EventType.DUEL_STAKES_SETTLE];
 
@@ -242,4 +326,12 @@ export function registerDuelEventListeners(deps: DuelEventDeps): void {
         console.error("[Duel] All settlement retries exhausted:", err);
       });
   });
+
+  // Return cleanup function to remove all listeners
+  return () => {
+    for (const { event, handler } of listeners) {
+      world.off(event, handler);
+    }
+    listeners.length = 0;
+  };
 }

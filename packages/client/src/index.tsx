@@ -24,6 +24,7 @@ import { SolanaWalletProvider } from "./auth/SolanaWalletProvider";
 import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
+import { logger } from "./lib/logger";
 // Loading fallback for lazy-loaded screens
 function ScreenLoadingFallback() {
   return (
@@ -116,13 +117,28 @@ if (typeof window !== "undefined") {
   }
 }
 
-// NOTE: __CDN_URL is intentionally NOT set early here.
-// Different systems need different CDN URLs in development:
-// - PhysX WASM: served from Vite at localhost:3333/web/ (uses window.location.origin fallback)
-// - Game manifests: served from game server at localhost:5555/game-assets/manifests/
-// GameClient.tsx sets __CDN_URL later with the proper production CDN URL.
+// Early CDN URL initialization to prevent PhysX WASM loading race condition.
+// When createClientWorld runs, it triggers PhysX WASM load before GameClient mounts.
+// We must expose the CDN URL immediately so PhysX knows where to fetch the WASM file.
+if (typeof window !== "undefined") {
+  const windowWithEnv = window as Window & {
+    env?: { PUBLIC_CDN_URL?: string };
+    __CDN_URL?: string;
+  };
+  // Normalize the CDN URL if provided via env.js
+  const envCdn = windowWithEnv.env?.PUBLIC_CDN_URL;
+  if (envCdn && typeof envCdn === "string" && envCdn !== "undefined") {
+    let resolvedCdn = envCdn;
+    // Handle localhost edge case normalization
+    if (resolvedCdn.includes("127.0.0.1") || resolvedCdn.includes("0.0.0.0")) {
+      resolvedCdn = resolvedCdn
+        .replace("127.0.0.1", "localhost")
+        .replace("0.0.0.0", "localhost");
+    }
+    windowWithEnv.__CDN_URL = resolvedCdn;
+  }
+}
 
-// setImmediate polyfill for Privy/Viem
 // Browser polyfill uses setTimeout which returns a Timeout, but libraries expect
 // the Node.js setImmediate signature. The cast is required for cross-platform compat.
 declare global {
@@ -259,12 +275,9 @@ if (isEmbedded) {
     window.parent.postMessage({ type: "HYPERSCAPE_READY" }, "*");
   }
 
-  // Use logger to safely redact sensitive data
-  import("./lib/logger").then(({ logger }) => {
-    logger.config("[Hyperscape] Configured from validated URL params:", {
-      ...config,
-      authToken: config.authToken ? "[REDACTED]" : "[PENDING]",
-    });
+  logger.config("[Hyperscape] Configured from validated URL params:", {
+    ...config,
+    authToken: config.authToken ? "[REDACTED]" : "[PENDING]",
   });
 }
 
@@ -372,6 +385,25 @@ function cleanupCorruptedPrivyData(): void {
 
 // Run cleanup on app load
 cleanupCorruptedPrivyData();
+
+// In development, aggressively unregister any stale service workers.
+// Devs occasionally run production builds locally ('vite preview'), which installs
+// a service worker that intercepts dev server requests and causes MIME type errors.
+if (import.meta.env.DEV && "serviceWorker" in navigator) {
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister();
+        console.log(
+          "[App] 🧹 Unregistered stale service worker in development mode",
+        );
+      }
+    })
+    .catch((err) =>
+      console.warn("[App] Failed to unregister service worker:", err),
+    );
+}
 
 function App() {
   // Determine Privy availability

@@ -34,6 +34,8 @@ import { BandwidthBudget, PacketPriority } from "./BandwidthBudget";
 export class BroadcastManager {
   private spatialIndex: SpatialIndex | null = null;
   readonly bandwidthBudget = new BandwidthBudget();
+  private readonly playerSocketIds = new Map<string, string>();
+  private readonly socketPlayerIds = new Map<string, string>();
 
   /**
    * Create a BroadcastManager
@@ -65,15 +67,15 @@ export class BroadcastManager {
     priority: PacketPriority = PacketPriority.NORMAL,
   ): number {
     const packet = writePacket(name, data);
-    const packetBytes = packet.byteLength;
     let sentCount = 0;
 
     this.sockets.forEach((socket) => {
       if (socket.id === ignoreSocketId) {
         return;
       }
-      socket.sendPacket(packet);
-      sentCount++;
+      if (this.sendBufferedPacket(socket, packet, priority)) {
+        sentCount++;
+      }
     });
 
     return sentCount;
@@ -116,8 +118,9 @@ export class BroadcastManager {
       for (const playerId of nearbyPlayerIds) {
         const socket = this.getPlayerSocket(playerId);
         if (socket && socket.id !== ignoreSocketId) {
-          socket.sendPacket(packet);
-          sentCount++;
+          if (this.sendBufferedPacket(socket, packet, priority)) {
+            sentCount++;
+          }
         }
       }
     }
@@ -130,8 +133,9 @@ export class BroadcastManager {
       if (socket.id === ignoreSocketId) continue;
       if (!socket.isSpectator) continue;
       if (!packet) packet = writePacket(name, data);
-      socket.sendPacket(packet);
-      sentCount++;
+      if (this.sendBufferedPacket(socket, packet, priority)) {
+        sentCount++;
+      }
     }
 
     return sentCount;
@@ -172,11 +176,10 @@ export class BroadcastManager {
    * @returns True if player was found and message sent
    */
   sendToPlayer<T = unknown>(playerId: string, name: string, data: T): boolean {
-    for (const socket of this.sockets.values()) {
-      if (socket.player && socket.player.id === playerId) {
-        socket.send(name, data);
-        return true;
-      }
+    const socket = this.getPlayerSocket(playerId);
+    if (socket) {
+      socket.send(name, data);
+      return true;
     }
     return false;
   }
@@ -191,8 +194,19 @@ export class BroadcastManager {
    * @returns The socket if found, undefined otherwise
    */
   getPlayerSocket(playerId: string): ServerSocket | undefined {
+    const cachedSocketId = this.playerSocketIds.get(playerId);
+    if (cachedSocketId) {
+      const cachedSocket = this.sockets.get(cachedSocketId);
+      if (this.isSocketForPlayer(cachedSocket, playerId)) {
+        return cachedSocket;
+      }
+      this.playerSocketIds.delete(playerId);
+      this.socketPlayerIds.delete(cachedSocketId);
+    }
+
     for (const socket of this.sockets.values()) {
-      if (socket.player && socket.player.id === playerId) {
+      if (this.isSocketForPlayer(socket, playerId)) {
+        this.trackPlayerSocket(socket, playerId);
         return socket;
       }
     }
@@ -216,21 +230,23 @@ export class BroadcastManager {
     data: T,
   ): number {
     let sentCount = 0;
+    const playerSocket = this.getPlayerSocket(playerId);
+
+    if (playerSocket) {
+      playerSocket.send(name, data);
+      sentCount++;
+    }
 
     for (const socket of this.sockets.values()) {
-      // Send to the player themselves
-      if (socket.player && socket.player.id === playerId) {
-        socket.send(name, data);
-        sentCount++;
-        continue;
-      }
-
       // Send to any spectators watching this player
       // spectatingCharacterId is set when a spectator connects to follow a character
       const socketWithSpectator = socket as ServerSocket & {
         isSpectator?: boolean;
         spectatingCharacterId?: string;
       };
+      if (playerSocket && socket.id === playerSocket.id) {
+        continue;
+      }
       if (
         socketWithSpectator.isSpectator &&
         socketWithSpectator.spectatingCharacterId === playerId
@@ -254,15 +270,20 @@ export class BroadcastManager {
    * @param data - Message payload
    * @returns Number of spectator sockets that received the message
    */
-  sendToSpectators<T = unknown>(name: string, data: T): number {
+  sendToSpectators<T = unknown>(
+    name: string,
+    data: T,
+    priority: PacketPriority = PacketPriority.NORMAL,
+  ): number {
     let packet: ArrayBuffer | null = null;
     let sentCount = 0;
 
     for (const socket of this.sockets.values()) {
       if (!socket.isSpectator) continue;
       if (!packet) packet = writePacket(name, data);
-      socket.sendPacket(packet);
-      sentCount++;
+      if (this.sendBufferedPacket(socket, packet, priority)) {
+        sentCount++;
+      }
     }
 
     return sentCount;
@@ -272,6 +293,50 @@ export class BroadcastManager {
    * Clean up bandwidth tracking for a disconnected socket.
    */
   onSocketDisconnected(socketId: string): void {
+    const playerId = this.socketPlayerIds.get(socketId);
+    if (playerId && this.playerSocketIds.get(playerId) === socketId) {
+      this.playerSocketIds.delete(playerId);
+    }
+    this.socketPlayerIds.delete(socketId);
     this.bandwidthBudget.removeConnection(socketId);
+  }
+
+  private isSocketForPlayer(
+    socket: ServerSocket | undefined,
+    playerId: string,
+  ): socket is ServerSocket {
+    return (
+      !!socket &&
+      (socket.player?.id === playerId || socket.characterId === playerId)
+    );
+  }
+
+  private trackPlayerSocket(socket: ServerSocket, playerId: string): void {
+    this.playerSocketIds.set(playerId, socket.id);
+    this.socketPlayerIds.set(socket.id, playerId);
+  }
+
+  private sendBufferedPacket(
+    socket: ServerSocket,
+    packet: ArrayBuffer,
+    priority: PacketPriority,
+  ): boolean {
+    const packetBytes = packet.byteLength;
+    if (!this.bandwidthBudget.canSend(socket.id, packetBytes, priority)) {
+      return false;
+    }
+
+    try {
+      socket.sendPacket(packet);
+      this.bandwidthBudget.recordSend(socket.id, packetBytes);
+      const trackedPlayerId = socket.player?.id || socket.characterId;
+      if (trackedPlayerId) {
+        this.trackPlayerSocket(socket, trackedPlayerId);
+      }
+      return true;
+    } catch {
+      this.onSocketDisconnected(socket.id);
+      return false;
+    }
   }
 }

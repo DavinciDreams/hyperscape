@@ -71,6 +71,7 @@ export interface AgentInstance {
   lastActivity: number;
   error?: string;
   behaviorInterval: ReturnType<typeof setInterval> | null;
+  behaviorStartTimeout: ReturnType<typeof setTimeout> | null;
   goal: AgentGoal | null;
   questsAccepted: Set<string>;
   currentTargetId: string | null;
@@ -99,17 +100,8 @@ export type EmbeddedBehaviorAction =
 /** Autonomous behavior tick interval for embedded agents */
 export const EMBEDDED_BEHAVIOR_TICK_INTERVAL = 8000;
 
-export const EMBEDDED_AGENT_AUTONOMY_ENABLED = (() => {
-  const raw = process.env.EMBEDDED_AGENT_AUTONOMY_ENABLED;
-  if (raw == null || raw.trim().length === 0) return true;
-  const normalized = raw.trim().toLowerCase();
-  return !(
-    normalized === "0" ||
-    normalized === "false" ||
-    normalized === "no" ||
-    normalized === "off"
-  );
-})();
+/** Agent autonomy is always enabled — agents always move and act autonomously. */
+export const EMBEDDED_AGENT_AUTONOMY_ENABLED = true;
 
 /** Combat chat reaction thresholds */
 export const CRITICAL_HIT_THRESHOLD = 0.3; // 30% of max health
@@ -163,12 +155,12 @@ export class AgentBehaviorTicker {
     this.stopBehaviorLoop(characterId);
 
     const runTick = async () => {
-      try {
-        const current = this.getAgent(characterId);
-        if (!current || current.state !== "running") {
-          return;
-        }
+      const current = this.getAgent(characterId);
+      if (!current || current.state !== "running") {
+        return;
+      }
 
+      try {
         await this.executeBehaviorTick(characterId);
       } catch (err) {
         console.warn(
@@ -190,9 +182,8 @@ export class AgentBehaviorTicker {
 
     // Delay the first tick so PLAYER_REGISTERED has time to fire and
     // QuestSystem can load the player's quest state from the database.
-    setTimeout(() => {
-      if (tickInProgress) return;
-      tickInProgress = true;
+    instance.behaviorStartTimeout = setTimeout(() => {
+      instance.behaviorStartTimeout = null;
       void runTick();
     }, 3000);
   }
@@ -209,6 +200,10 @@ export class AgentBehaviorTicker {
     if (instance.behaviorInterval) {
       clearInterval(instance.behaviorInterval);
       instance.behaviorInterval = null;
+    }
+    if (instance.behaviorStartTimeout) {
+      clearTimeout(instance.behaviorStartTimeout);
+      instance.behaviorStartTimeout = null;
     }
 
     // Best-effort stop so paused/stopped agents don't keep pathing or attacking.
@@ -260,9 +255,6 @@ export class AgentBehaviorTicker {
         const message = this.getCombatChatResponse(reaction);
         await instance.service.sendChatMessage(message);
         instance.lastCombatChatAt = Date.now();
-        console.log(
-          `[AgentManager] ${instance.config.name} combat chat (${reaction.type}): "${message}"`,
-        );
       } catch (err) {
         console.warn(
           `[AgentManager] ${instance.config.name} failed to send combat chat: ${errMsg(err)}`,
@@ -274,35 +266,22 @@ export class AgentBehaviorTicker {
     await this.manageQuests(instance);
 
     // === INVENTORY MANAGEMENT ===
-    await this.manageInventory(instance);
+    this.manageInventory(instance);
 
     // === SHOPPING: buy missing tools/weapons ===
-    await this.manageShopping(instance);
+    this.manageShopping(instance);
 
     // === EQUIPMENT MANAGEMENT ===
-    await this.manageEquipment(instance, gameState);
+    this.manageEquipment(instance, gameState);
 
     // === SURVIVAL: EAT FOOD IF NEEDED ===
-    if (await this.assessAndEat(instance, gameState)) {
+    if (this.assessAndEat(instance, gameState)) {
       return; // Ate food this tick — skip action to let health update
     }
 
     // === PICK ACTION ===
     const action = this.pickBehaviorAction(instance, gameState);
-
-    const logParts = [
-      `[AgentManager] ${instance.config.name} tick: action=${action.type}`,
-    ];
-    if ("targetId" in action) logParts.push(`target=${action.targetId}`);
-    if ("target" in action) {
-      const t = (action as { target: number[] }).target;
-      logParts.push(`pos=[${t.map((n: number) => n.toFixed(0)).join(",")}]`);
-    }
-    if (instance.goal)
-      logParts.push(
-        `goal=${instance.goal.type}${instance.goal.questName ? `:${instance.goal.questName}` : ""}`,
-      );
-    console.log(logParts.join(" "));
+    // PERF: Removed per-tick logging - this creates strings every 33ms per agent
 
     switch (action.type) {
       case "attack":
@@ -325,9 +304,6 @@ export class AgentBehaviorTicker {
           corpseId: action.gravestoneId,
           playerId: instance.service.getPlayerId(),
         });
-        console.log(
-          `[AgentManager] ${instance.config.name} looting gravestone ${action.gravestoneId}`,
-        );
         instance.lastActivity = Date.now();
         break;
 
@@ -354,9 +330,6 @@ export class AgentBehaviorTicker {
           );
           if (questStarted) {
             instance.questsAccepted.add(action.questId);
-            console.log(
-              `[AgentManager] ${instance.config.name} accepted quest: ${action.questId}`,
-            );
           } else {
             console.warn(
               `[AgentManager] ${instance.config.name} quest accept sent but not started yet: ${action.questId} (will retry)`,
@@ -369,9 +342,6 @@ export class AgentBehaviorTicker {
 
       case "questComplete":
         await instance.service.executeQuestComplete(action.questId);
-        console.log(
-          `[AgentManager] ${instance.config.name} completed quest: ${action.questId}`,
-        );
         instance.goal = null;
         instance.lastActivity = Date.now();
         break;
@@ -478,7 +448,7 @@ export class AgentBehaviorTicker {
    * Checks quest requirements, current equipment, and coins.
    * One purchase per tick to avoid spam.
    */
-  public async manageShopping(instance: AgentInstance): Promise<void> {
+  public manageShopping(instance: AgentInstance): void {
     const inventory = instance.service.getInventoryItems();
     const equipped = instance.service.getEquippedItems();
     const goal = instance.goal;
@@ -525,25 +495,11 @@ export class AgentBehaviorTicker {
       })
     ) {
       if (coins >= 100) {
-        console.log(
-          `[AgentManager] ${instance.config.name} buying bronze_shortsword (unarmed, ${coins} coins)`,
-        );
-        await instance.service.executeStoreBuy(
-          "sword_store",
-          "bronze_shortsword",
-          1,
-        );
+        instance.service.executeStoreBuy("sword_store", "bronze_shortsword", 1);
         return;
       }
       if (coins >= 10) {
-        console.log(
-          `[AgentManager] ${instance.config.name} buying bronze_dagger (unarmed, ${coins} coins)`,
-        );
-        await instance.service.executeStoreBuy(
-          "sword_store",
-          "bronze_dagger",
-          1,
-        );
+        instance.service.executeStoreBuy("sword_store", "bronze_dagger", 1);
         return;
       }
     }
@@ -560,10 +516,7 @@ export class AgentBehaviorTicker {
       ) {
         if (!hasAnyOfType("hatchet")) {
           if (coins >= 50) {
-            console.log(
-              `[AgentManager] ${instance.config.name} buying bronze_hatchet for woodcutting quest (${coins} coins)`,
-            );
-            await instance.service.executeStoreBuy(
+            instance.service.executeStoreBuy(
               "general_store",
               "bronze_hatchet",
               1,
@@ -581,10 +534,7 @@ export class AgentBehaviorTicker {
       ) {
         if (!hasAnyOfType("pickaxe")) {
           if (coins >= 50) {
-            console.log(
-              `[AgentManager] ${instance.config.name} buying bronze_pickaxe for mining quest (${coins} coins)`,
-            );
-            await instance.service.executeStoreBuy(
+            instance.service.executeStoreBuy(
               "general_store",
               "bronze_pickaxe",
               1,
@@ -601,10 +551,7 @@ export class AgentBehaviorTicker {
       ) {
         if (!hasItemInInventoryOrEquipped("small_fishing_net")) {
           if (coins >= 5) {
-            console.log(
-              `[AgentManager] ${instance.config.name} buying small_fishing_net for fishing quest (${coins} coins)`,
-            );
-            await instance.service.executeStoreBuy(
+            instance.service.executeStoreBuy(
               "fishing_store",
               "small_fishing_net",
               1,
@@ -618,14 +565,7 @@ export class AgentBehaviorTicker {
       if (stageType === "interact" && stageTarget.includes("fire")) {
         if (!hasItemInInventoryOrEquipped("tinderbox")) {
           if (coins >= 5) {
-            console.log(
-              `[AgentManager] ${instance.config.name} buying tinderbox (${coins} coins)`,
-            );
-            await instance.service.executeStoreBuy(
-              "general_store",
-              "tinderbox",
-              1,
-            );
+            instance.service.executeStoreBuy("general_store", "tinderbox", 1);
             return;
           }
         }
@@ -641,7 +581,7 @@ export class AgentBehaviorTicker {
    * Priority to keep: weapons > armor > tools > food (max 5) > everything else
    * Priority to drop: bones, excess food beyond 5, other junk
    */
-  public async manageInventory(instance: AgentInstance): Promise<void> {
+  public manageInventory(instance: AgentInstance): void {
     const inventory = instance.service.getInventoryItems();
     if (inventory.length < 20) return; // Keep 8+ free slots for quest loot and gear
     if (Date.now() < instance.dropCooldownUntil) return;
@@ -696,10 +636,7 @@ export class AgentBehaviorTicker {
 
       // Bones — bury for prayer XP instead of dropping
       if (slot.itemId === "bones" || slot.itemId.endsWith("_bones")) {
-        console.log(
-          `[AgentManager] ${instance.config.name} burying ${slot.itemId} for prayer XP`,
-        );
-        await instance.service.executeUse(slot.itemId);
+        instance.service.executeUse(slot.itemId);
         return; // One action per tick
       }
 
@@ -721,10 +658,7 @@ export class AgentBehaviorTicker {
       inventory.length >= 27 ? Math.min(3, dropCandidates.length) : 1;
     for (let i = 0; i < dropCount; i++) {
       const toDrop = dropCandidates[i];
-      console.log(
-        `[AgentManager] ${instance.config.name} dropping ${toDrop.itemId} (inventory: ${inventory.length - i}/28)`,
-      );
-      await instance.service.executeDrop(toDrop.itemId, 1);
+      instance.service.executeDrop(toDrop.itemId, 1);
     }
 
     // Set cooldown so agent doesn't immediately pick up what it dropped
@@ -741,10 +675,10 @@ export class AgentBehaviorTicker {
    * - Don't waste high-value food on small damage (pick lowest heal that covers the gap)
    * - Don't eat at full health
    */
-  public async assessAndEat(
+  public assessAndEat(
     instance: AgentInstance,
     gameState: EmbeddedGameState,
-  ): Promise<boolean> {
+  ): boolean {
     const { health, maxHealth, inCombat } = gameState;
     if (maxHealth <= 0) return false;
 
@@ -802,10 +736,7 @@ export class AgentBehaviorTicker {
 
     if (!bestFood) return false;
 
-    console.log(
-      `[AgentManager] ${instance.config.name} eating ${bestFood.itemId} (hp: ${health}/${maxHealth}, heal: ${bestFood.healAmount})`,
-    );
-    await instance.service.executeUse(bestFood.itemId);
+    instance.service.executeUse(bestFood.itemId);
     instance.lastAteAt = Date.now();
     return true;
   }
@@ -818,10 +749,10 @@ export class AgentBehaviorTicker {
    * Reads directly from InventorySystem and EquipmentSystem
    * (entity data.inventory is unreliable — often empty).
    */
-  public async manageEquipment(
+  public manageEquipment(
     instance: AgentInstance,
     _gameState: EmbeddedGameState,
-  ): Promise<void> {
+  ): void {
     // Read real inventory from InventorySystem (not entity data)
     const inventory = instance.service.getInventoryItems();
     if (inventory.length === 0) return;
@@ -861,10 +792,7 @@ export class AgentBehaviorTicker {
       bestWeapon.score > equippedWeaponScore &&
       bestWeapon.itemId !== equippedWeaponId
     ) {
-      console.log(
-        `[AgentManager] ${instance.config.name} equipping weapon ${bestWeapon.itemId} (score ${bestWeapon.score} > ${equippedWeaponScore})`,
-      );
-      await instance.service.executeEquip(bestWeapon.itemId);
+      instance.service.executeEquip(bestWeapon.itemId);
       return; // one equip per tick
     }
 
@@ -908,10 +836,7 @@ export class AgentBehaviorTicker {
         }
 
         if (bestArmor.score > currentScore && bestArmor.itemId !== equippedId) {
-          console.log(
-            `[AgentManager] ${instance.config.name} equipping ${bestArmor.itemId} in ${slotName} (score ${bestArmor.score} > ${currentScore})`,
-          );
-          await instance.service.executeEquip(bestArmor.itemId);
+          instance.service.executeEquip(bestArmor.itemId);
           return; // one equip per tick
         }
       }
@@ -1073,9 +998,6 @@ export class AgentBehaviorTicker {
             ) {
               return { type: "idle" };
             }
-            console.log(
-              `[AgentManager] ${instance.config.name} gathering ${resource.name || resource.id} for quest`,
-            );
             instance.lastGatherTargetId = resource.id;
             instance.lastGatherQueuedAt = Date.now();
             return { type: "gather", targetId: resource.id };

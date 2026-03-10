@@ -2,21 +2,54 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
+import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   // Load env from both workspace root and client directory
   const workspaceRoot = path.resolve(__dirname, "../..");
   const clientDir = __dirname;
+  const nodePolyfillsRoot = path.dirname(
+    path.dirname(require.resolve("vite-plugin-node-polyfills")),
+  );
 
   // Load from both locations - client dir takes precedence
   const workspaceEnv = loadEnv(mode, workspaceRoot, ["PUBLIC_", "VITE_"]);
   const clientEnv = loadEnv(mode, clientDir, ["PUBLIC_", "VITE_"]);
   const env = { ...workspaceEnv, ...clientEnv };
+  const resolvedPublicApiUrl =
+    process.env.PUBLIC_API_URL ||
+    env.PUBLIC_API_URL ||
+    (mode === "production"
+      ? "https://hyperscape-production.up.railway.app"
+      : "http://127.0.0.1:5555");
+  const resolvedPublicWsUrl =
+    process.env.PUBLIC_WS_URL ||
+    env.PUBLIC_WS_URL ||
+    (mode === "production"
+      ? "wss://hyperscape-production.up.railway.app/ws"
+      : "ws://127.0.0.1:5555/ws");
+  const resolvedPublicCdnUrl =
+    process.env.PUBLIC_CDN_URL ||
+    env.PUBLIC_CDN_URL ||
+    (mode === "production"
+      ? "https://assets.hyperscape.club"
+      : "http://127.0.0.1:5555/game-assets");
+  const resolvedPublicAppUrl =
+    process.env.PUBLIC_APP_URL ||
+    env.PUBLIC_APP_URL ||
+    (mode === "production"
+      ? "https://hyperscape.club"
+      : "http://127.0.0.1:3333");
+  const resolvedPublicElizaUrl =
+    process.env.PUBLIC_ELIZAOS_URL ||
+    env.PUBLIC_ELIZAOS_URL ||
+    resolvedPublicApiUrl;
 
   console.log("[Vite Config] Build mode:", mode);
   console.log("[Vite Config] Loaded env from:", clientDir);
@@ -291,7 +324,10 @@ export default defineConfig(({ mode }) => {
       minify: mode === "production" ? "esbuild" : false, // Enable minification in production
       sourcemap: mode !== "production", // Disable source maps in production to save memory
       rollupOptions: {
-        input: path.resolve(__dirname, "src/index.html"),
+        input: {
+          index: path.resolve(__dirname, "src/index.html"),
+          stream: path.resolve(__dirname, "src/stream.html"),
+        },
         external: ["fs", "fs-extra", "path", "node:fs", "node:path", "crypto"],
         output: {
           // Provide empty stubs for Node.js modules
@@ -326,7 +362,7 @@ export default defineConfig(({ mode }) => {
         },
       },
       // Mobile optimization
-      chunkSizeWarningLimit: 2000, // Increase for large 3D assets
+      chunkSizeWarningLimit: 8000, // WebGPU/PhysX bundles are intentionally large until deeper splitting lands
       cssCodeSplit: true, // Split CSS for better caching
     },
 
@@ -384,37 +420,14 @@ export default defineConfig(({ mode }) => {
       //
       // Production: Frontend on Cloudflare Pages (hyperscape.club)
       //             Server on Railway (hyperscape-production.up.railway.app)
-      "import.meta.env.PUBLIC_API_URL": JSON.stringify(
-        env.PUBLIC_API_URL ||
-          (mode === "production"
-            ? "https://hyperscape-production.up.railway.app"
-            : "http://localhost:5555"),
-      ),
-      "import.meta.env.PUBLIC_WS_URL": JSON.stringify(
-        env.PUBLIC_WS_URL ||
-          (mode === "production"
-            ? "wss://hyperscape-production.up.railway.app/ws"
-            : "ws://localhost:5555/ws"),
-      ),
+      "import.meta.env.PUBLIC_API_URL": JSON.stringify(resolvedPublicApiUrl),
+      "import.meta.env.PUBLIC_WS_URL": JSON.stringify(resolvedPublicWsUrl),
       // CDN URL - Cloudflare R2 with custom domain
       // In development without PUBLIC_CDN_URL, use game server's /game-assets/ endpoint.
-      "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(
-        env.PUBLIC_CDN_URL ||
-          (mode === "production"
-            ? "https://assets.hyperscape.club"
-            : "http://localhost:5555/game-assets"),
-      ),
-      "import.meta.env.PUBLIC_APP_URL": JSON.stringify(
-        env.PUBLIC_APP_URL ||
-          (mode === "production"
-            ? "https://hyperscape.club"
-            : "http://localhost:3333"),
-      ),
+      "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(resolvedPublicCdnUrl),
+      "import.meta.env.PUBLIC_APP_URL": JSON.stringify(resolvedPublicAppUrl),
       "import.meta.env.PUBLIC_ELIZAOS_URL": JSON.stringify(
-        env.PUBLIC_ELIZAOS_URL ||
-          (mode === "production"
-            ? "https://hyperscape-production.up.railway.app"
-            : env.PUBLIC_API_URL || "http://localhost:5555"),
+        resolvedPublicElizaUrl,
       ),
       "import.meta.env.PUBLIC_PRIVY_APP_ID": JSON.stringify(
         env.PUBLIC_PRIVY_APP_ID || "",
@@ -458,22 +471,22 @@ export default defineConfig(({ mode }) => {
         {
           find: "vite-plugin-node-polyfills/shims/process",
           replacement: path.resolve(
-            __dirname,
-            "node_modules/vite-plugin-node-polyfills/shims/process/dist/index.js",
+            nodePolyfillsRoot,
+            "shims/process/dist/index.js",
           ),
         },
         {
           find: "vite-plugin-node-polyfills/shims/buffer",
           replacement: path.resolve(
-            __dirname,
-            "node_modules/vite-plugin-node-polyfills/shims/buffer/dist/index.js",
+            nodePolyfillsRoot,
+            "shims/buffer/dist/index.js",
           ),
         },
         {
           find: "vite-plugin-node-polyfills/shims/global",
           replacement: path.resolve(
-            __dirname,
-            "node_modules/vite-plugin-node-polyfills/shims/global/dist/index.js",
+            nodePolyfillsRoot,
+            "shims/global/dist/index.js",
           ),
         },
         // Use client-only build of shared package to avoid Node.js module leakage

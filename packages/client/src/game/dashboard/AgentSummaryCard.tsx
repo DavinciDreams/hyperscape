@@ -1,7 +1,23 @@
 import { GAME_API_URL } from "@/lib/api-config";
 import React, { useState, useEffect } from "react";
 import type { Agent } from "./types";
-import { Swords, Activity, Target, Coins, Clock } from "lucide-react";
+import { Swords, Activity, Target, Coins, Clock, Heart } from "lucide-react";
+
+interface HealthData {
+  current: number;
+  max: number;
+  percent: number;
+  urgency: "critical" | "warning" | "safe";
+}
+
+interface PersonalityData {
+  sociability: number;
+  helpfulness: number;
+  adventurousness: number;
+  chattiness: number;
+  aggression: number;
+  patience: number;
+}
 
 interface SummaryData {
   online: boolean;
@@ -12,6 +28,8 @@ interface SummaryData {
   goalProgress: number;
   sessionXp: number;
   coins: number;
+  health: HealthData | null;
+  personality: PersonalityData | null;
 }
 
 interface AgentSummaryCardProps {
@@ -92,6 +110,8 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
     goalProgress: 0,
     sessionXp: 0,
     coins: 0,
+    health: null,
+    personality: null,
   });
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [sessionStartTime] = useState<number>(Date.now());
@@ -129,15 +149,33 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
 
     const fetchSummary = async () => {
       try {
-        // Fetch goal data
+        // Fetch goal data (includes personality)
         const goalResponse = await fetch(
           `${GAME_API_URL}/api/agents/${agent.id}/goal`,
         );
         let goalData: {
           goal?: { description?: string; progressPercent?: number };
+          personality?: PersonalityData;
         } | null = null;
         if (goalResponse.ok) {
           goalData = await goalResponse.json();
+        }
+
+        // Fetch latest thought for health data
+        let healthData: HealthData | null = null;
+        try {
+          const thoughtsResponse = await fetch(
+            `${GAME_API_URL}/api/agents/${agent.id}/thoughts?limit=1`,
+          );
+          if (thoughtsResponse.ok) {
+            const thoughtsData = await thoughtsResponse.json();
+            const latestThought = thoughtsData.thoughts?.[0];
+            if (latestThought?.health) {
+              healthData = latestThought.health;
+            }
+          }
+        } catch {
+          // Non-critical
         }
 
         // Fetch skills if we have characterId
@@ -165,6 +203,8 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
               totalLevel: calculateTotalLevel(skills),
               currentGoal: goalData?.goal?.description || null,
               goalProgress: goalData?.goal?.progressPercent || 0,
+              health: healthData,
+              personality: goalData?.personality || prev.personality,
             }));
             return;
           }
@@ -179,6 +219,8 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
           totalLevel: calculateTotalLevel(skills),
           currentGoal: goalData?.goal?.description || null,
           goalProgress: goalData?.goal?.progressPercent || 0,
+          health: healthData,
+          personality: goalData?.personality || prev.personality,
         }));
       } catch {
         // Silently fail - keep last known state
@@ -251,6 +293,44 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
         </div>
       </div>
 
+      {/* Health Bar */}
+      {summary.health && (
+        <div className="mb-2 py-1.5 px-2 rounded bg-black/30 border border-[#f2d08a]/10">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Heart
+              size={10}
+              className={
+                summary.health.urgency === "critical"
+                  ? "text-red-400"
+                  : summary.health.urgency === "warning"
+                    ? "text-yellow-400"
+                    : "text-green-400"
+              }
+            />
+            <span className="text-[9px] text-[#f2d08a]/50 uppercase tracking-wider">
+              HP
+            </span>
+            <span className="text-[10px] font-bold text-[#f2d08a] ml-auto">
+              {summary.health.current}/{summary.health.max}
+            </span>
+          </div>
+          <div className="h-1.5 bg-black/50 rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all duration-500 rounded-full ${
+                summary.health.urgency === "critical"
+                  ? "bg-gradient-to-r from-red-600 to-red-400"
+                  : summary.health.urgency === "warning"
+                    ? "bg-gradient-to-r from-yellow-600 to-yellow-400"
+                    : "bg-gradient-to-r from-green-600 to-green-400"
+              }`}
+              style={{
+                width: `${Math.min(summary.health.percent, 100)}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Current Goal */}
       {summary.currentGoal && (
         <div className="mb-2 py-1.5 px-2 rounded bg-black/30 border border-[#f2d08a]/10">
@@ -291,6 +371,44 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
           </div>
         )}
       </div>
+
+      {/* Personality Traits */}
+      {summary.personality && (
+        <div className="mt-2 pt-2 border-t border-[#8b4513]/20">
+          <div className="text-[9px] text-[#f2d08a]/50 uppercase tracking-wider mb-1.5">
+            Personality
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+            {(
+              [
+                ["SOC", "sociability"],
+                ["HLP", "helpfulness"],
+                ["ADV", "adventurousness"],
+                ["CHT", "chattiness"],
+                ["AGR", "aggression"],
+                ["PAT", "patience"],
+              ] as const
+            ).map(([label, key]) => (
+              <div key={key} className="flex items-center gap-1.5">
+                <span className="text-[8px] text-[#f2d08a]/40 w-5 shrink-0">
+                  {label}
+                </span>
+                <div className="flex-1 h-1 bg-black/40 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#c9a227]/60 rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.round(summary.personality![key] * 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="text-[8px] text-[#f2d08a]/30 w-4 text-right">
+                  {Math.round(summary.personality![key] * 100)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

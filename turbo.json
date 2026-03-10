@@ -66,14 +66,9 @@
       "outputs": [],
       "cache": true
     },
-    "@hyperscape/gold-betting-demo#build": {
-      "dependsOn": ["^build"],
-      "outputs": ["app/dist/**"],
-      "cache": true
-    },
     "@hyperscape/solana-prediction-market#build": {
       "dependsOn": ["^build"],
-      "outputs": ["target/**"],
+      "outputs": [],
       "cache": true
     },
     "dev": {

@@ -14,6 +14,10 @@ const MIN_SCHEDULE_DELAY_MS = Math.max(
   1,
   Number.parseInt(process.env.SERVER_RUNTIME_MIN_DELAY_MS || "", 10) || 5,
 );
+const SERVER_RUNTIME_LAG_WARNINGS_ENABLED =
+  process.env.SERVER_RUNTIME_LAG_WARNINGS !== "false";
+const SERVER_RUNTIME_TPS_LOGS_ENABLED =
+  process.env.SERVER_RUNTIME_TPS_LOGS === "true";
 
 /**
  * Maximum ticks to run per frame to prevent "tick storms" after long pauses.
@@ -133,6 +137,7 @@ export class ServerRuntime extends System {
       );
       if (
         ticksStillBehind >= LAG_WARNING_THRESHOLD &&
+        SERVER_RUNTIME_LAG_WARNINGS_ENABLED &&
         this.lagWarningCooldown <= 0
       ) {
         console.warn(
@@ -146,7 +151,10 @@ export class ServerRuntime extends System {
       // Every tick will be processed regardless of how far behind we are.
 
       // Log TPS every 10 seconds (avoids log spam while still diagnosable)
-      if (currentTime - this.lastTpsLogTime >= 10000) {
+      if (
+        SERVER_RUNTIME_TPS_LOGS_ENABLED &&
+        currentTime - this.lastTpsLogTime >= 10000
+      ) {
         const elapsedSec = (currentTime - this.lastTpsLogTime) / 1000;
         const avgTps = Math.round(this.ticksProcessedThisSecond / elapsedSec);
         console.log(
@@ -160,7 +168,7 @@ export class ServerRuntime extends System {
 
       // Schedule next check
       this.scheduleTick();
-    });
+    }, delay);
   }
 
   /**

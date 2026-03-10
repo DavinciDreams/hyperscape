@@ -352,24 +352,12 @@ export async function takeGameScreenshot(
         if (!canvas) return false;
         // Check canvas has meaningful dimensions
         if (canvas.width < 100 || canvas.height < 100) return false;
-        // Check WebGL context is active
-        const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
-        if (gl) {
-          const pixels = new Uint8Array(4);
-          gl.readPixels(
-            Math.floor(canvas.width / 2),
-            Math.floor(canvas.height / 2),
-            1,
-            1,
-            gl.RGBA,
-            gl.UNSIGNED_BYTE,
-            pixels,
-          );
-          // Check if center pixel has any color (not just black)
-          return (
-            pixels[0] > 0 || pixels[1] > 0 || pixels[2] > 0 || pixels[3] > 0
-          );
-        }
+        // WebGPU rendering check
+        if (!navigator.gpu) return false;
+
+        // Try to get a basic 2D context to verify canvas has dimensions and is ready
+        // (Note: WebGPU contexts can't readPixels directly without a staging buffer,
+        // so we just rely on dimensions and Context availability here)
         return canvas.width > 0 && canvas.height > 0;
       })
       .catch(() => false);

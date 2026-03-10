@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 
 import { ArmorFittingService } from "../../../../services/fitting/ArmorFittingService";
@@ -153,8 +154,6 @@ export function useExportHandlers({
           exportScene.add(grid);
 
           // Export
-          const { GLTFExporter } =
-            await import("three/examples/jsm/exporters/GLTFExporter.js");
           const exporter = new GLTFExporter();
           const gltf = await exporter.parseAsync(exportScene, {
             binary: true,

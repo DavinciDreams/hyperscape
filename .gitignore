@@ -128,12 +128,24 @@ packages/server/world/data/
 # HLS streaming segments (generated at runtime by FFmpeg)
 packages/server/public/live/
 packages/gold-betting-demo/app/public/live/
+packages/duel-oracle-evm/artifacts/
+packages/duel-oracle-evm/cache/
+packages/duel-oracle-evm/dist/
 
 # Anvil local blockchain state (large file, local only)
 .anvil/
+packages/duel-oracle-evm/deployments/
 
 # Local test ledgers and caches
 .e2e-ledger-debug/
 .mud/
 packages/server/packages/
 deployer-keypair.json
+.runtime-vast-secrets.env
+
+# Scratch/debug scripts
+test-node-options.js
+packages/server/scripts/test-fastify-static.mjs
+
+# Local server state
+packages/server/.hyperscape-storage.json

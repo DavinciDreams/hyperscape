@@ -69,6 +69,10 @@ export const KNOWN_LOCATIONS: Record<
     description: "Anvil for smithing bars into weapons and armor",
     entities: ["anvil"],
   },
+  range: {
+    description: "Cooking range for cooking raw food",
+    entities: ["range", "cooking_range"],
+  },
 };
 
 function getEntityPosition(entity: Entity): [number, number, number] | null {
@@ -106,9 +110,70 @@ function setKnownLocationPosition(
   };
 }
 
+function upsertKnownLocation(
+  key: string,
+  value: {
+    position?: [number, number, number];
+    description: string;
+    entities?: string[];
+  },
+): void {
+  KNOWN_LOCATIONS[key] = {
+    ...KNOWN_LOCATIONS[key],
+    ...value,
+  };
+}
+
+export function getWorldMapSignature(worldMap: WorldMapData): string {
+  return JSON.stringify({
+    towns: worldMap.towns.map((town) => [
+      town.name,
+      town.size,
+      town.biome,
+      town.position.x,
+      town.position.y,
+      town.position.z,
+      town.buildings.map((building) => building.type),
+    ]),
+    pois: worldMap.pois.map((poi) => [
+      poi.name,
+      poi.category,
+      poi.biome,
+      poi.position.x,
+      poi.position.y,
+      poi.position.z,
+    ]),
+    resources: (worldMap.resources ?? []).map((resource) => [
+      resource.type,
+      resource.resourceId,
+      resource.areaId,
+      resource.position.x,
+      resource.position.y,
+      resource.position.z,
+    ]),
+    stations: (worldMap.stations ?? []).map((station) => [
+      station.id,
+      station.type,
+      station.areaId,
+      station.position.x,
+      station.position.y,
+      station.position.z,
+    ]),
+    npcs: (worldMap.npcs ?? []).map((npc) => [
+      npc.id,
+      npc.type,
+      npc.name ?? "",
+      npc.areaId,
+      npc.position.x,
+      npc.position.y,
+      npc.position.z,
+    ]),
+  });
+}
+
 /**
  * Populate KNOWN_LOCATIONS from world map data (towns, POIs, resources, stations, NPCs).
- * Called once by mapProvider when world data first arrives from the server.
+ * Called whenever world map data changes.
  * This allows NAVIGATE_TO to route to any town, POI, resource, or station by name.
  */
 export function populateKnownLocationsFromWorldMap(
@@ -153,7 +218,7 @@ export function populateKnownLocationsFromWorldMap(
   if (fishingPos) setKnownLocationPosition("fishing", fishingPos);
 
   const minePos =
-    firstResourcePos(["mine", "rock"]) ??
+    firstResourcePos(["ore", "mining_rock", "mine", "rock"]) ??
     findCandidate(["mine", "mining", "ore", "quarry"]);
   if (minePos) setKnownLocationPosition("mine", minePos);
 
@@ -175,58 +240,55 @@ export function populateKnownLocationsFromWorldMap(
     firstStationPos(["anvil"]) ?? findCandidate(["anvil", "smith"]);
   if (anvilPos) setKnownLocationPosition("anvil", anvilPos);
 
+  const rangePos =
+    firstStationPos(["range", "cooking"]) ??
+    findCandidate(["kitchen", "cooking", "range"]);
+  if (rangePos) setKnownLocationPosition("range", rangePos);
+
   // Add towns
   for (const town of worldMap.towns) {
     const key = town.name.toLowerCase().replace(/\s+/g, "_");
-    if (!KNOWN_LOCATIONS[key]) {
-      const buildingTypes = town.buildings.map((b) => b.type);
-      const entities: string[] = [];
-      if (buildingTypes.includes("bank")) entities.push("banker");
-      if (buildingTypes.includes("store")) entities.push("shopkeeper");
-      if (buildingTypes.includes("inn")) entities.push("innkeeper");
-      if (buildingTypes.includes("smithy")) entities.push("blacksmith");
+    const buildingTypes = town.buildings.map((b) => b.type);
+    const entities: string[] = [];
+    if (buildingTypes.includes("bank")) entities.push("banker");
+    if (buildingTypes.includes("store")) entities.push("shopkeeper");
+    if (buildingTypes.includes("inn")) entities.push("innkeeper");
+    if (buildingTypes.includes("smithy")) entities.push("blacksmith");
 
-      KNOWN_LOCATIONS[key] = {
-        position: [town.position.x, town.position.y, town.position.z],
-        description: `${town.name} (${town.size} ${town.biome} town) - has: ${buildingTypes.join(", ") || "houses"}`,
-        entities: entities.length > 0 ? entities : undefined,
-      };
-    }
+    upsertKnownLocation(key, {
+      position: [town.position.x, town.position.y, town.position.z],
+      description: `${town.name} (${town.size} ${town.biome} town) - has: ${buildingTypes.join(", ") || "houses"}`,
+      entities: entities.length > 0 ? entities : undefined,
+    });
   }
 
   // Add POIs
   for (const poi of worldMap.pois) {
     const key = poi.name.toLowerCase().replace(/\s+/g, "_");
-    if (!KNOWN_LOCATIONS[key]) {
-      KNOWN_LOCATIONS[key] = {
-        position: [poi.position.x, poi.position.y, poi.position.z],
-        description: `${poi.name} (${poi.category}) in ${poi.biome}`,
-      };
-    }
+    upsertKnownLocation(key, {
+      position: [poi.position.x, poi.position.y, poi.position.z],
+      description: `${poi.name} (${poi.category}) in ${poi.biome}`,
+    });
   }
 
   // Add stations as known locations (bank, furnace, anvil, range, altar)
   for (const station of worldMap.stations ?? []) {
     const key = `${station.type}_${station.areaId}`;
-    if (!KNOWN_LOCATIONS[key]) {
-      KNOWN_LOCATIONS[key] = {
-        position: [station.position.x, station.position.y, station.position.z],
-        description: `${station.type} station in ${station.areaId.replace(/_/g, " ")}`,
-        entities: [station.type],
-      };
-    }
+    upsertKnownLocation(key, {
+      position: [station.position.x, station.position.y, station.position.z],
+      description: `${station.type} station in ${station.areaId.replace(/_/g, " ")}`,
+      entities: [station.type],
+    });
   }
 
   // Add NPC locations
   for (const npc of worldMap.npcs ?? []) {
     const key = npc.id;
-    if (!KNOWN_LOCATIONS[key]) {
-      KNOWN_LOCATIONS[key] = {
-        position: [npc.position.x, npc.position.y, npc.position.z],
-        description: `${npc.name ?? npc.type} (${npc.type}) in ${npc.areaId.replace(/_/g, " ")}`,
-        entities: [npc.type],
-      };
-    }
+    upsertKnownLocation(key, {
+      position: [npc.position.x, npc.position.y, npc.position.z],
+      description: `${npc.name ?? npc.type} (${npc.type}) in ${npc.areaId.replace(/_/g, " ")}`,
+      entities: [npc.type],
+    });
   }
 
   // Add resource clusters as known locations (group by type per area)
@@ -248,13 +310,11 @@ export function populateKnownLocationsFromWorldMap(
   for (const [areaId, types] of resourcesByArea) {
     for (const [type, pos] of types) {
       const key = `${type}_${areaId}`;
-      if (!KNOWN_LOCATIONS[key]) {
-        KNOWN_LOCATIONS[key] = {
-          position: [pos.x, pos.y, pos.z],
-          description: `${type.replace(/_/g, " ")} resources in ${areaId.replace(/_/g, " ")}`,
-          entities: [type],
-        };
-      }
+      upsertKnownLocation(key, {
+        position: [pos.x, pos.y, pos.z],
+        description: `${type.replace(/_/g, " ")} resources in ${areaId.replace(/_/g, " ")}`,
+        entities: [type],
+      });
     }
   }
 }
@@ -291,51 +351,67 @@ export function updateKnownLocationsFromNearbyEntities(
     return best;
   };
 
-  const spawnCandidate = nearestMatch((entity) => {
-    const name = entity.name?.toLowerCase() || "";
-    return (
-      name.includes("starter chest") ||
-      name.includes("goblin") ||
-      entity.mobType === "goblin"
+  // Only fill in positions that are MISSING — never overwrite worldMap-sourced positions.
+  // WorldMap data is authoritative (from server manifest). Nearby entity positions are
+  // transient and context-dependent (nearest tree != the forest area).
+
+  if (!KNOWN_LOCATIONS["spawn"]?.position) {
+    const spawnCandidate = nearestMatch((entity) => {
+      const name = entity.name?.toLowerCase() || "";
+      return (
+        name.includes("starter chest") ||
+        name.includes("goblin") ||
+        entity.mobType === "goblin"
+      );
+    });
+    if (spawnCandidate) setKnownLocationPosition("spawn", spawnCandidate);
+  }
+
+  if (!KNOWN_LOCATIONS["forest"]?.position) {
+    const forestCandidate = nearestMatch((entity) => {
+      const name = entity.name?.toLowerCase() || "";
+      const resourceType = entity.resourceType?.toLowerCase() || "";
+      return resourceType === "tree" || name.includes("tree");
+    });
+    if (forestCandidate) setKnownLocationPosition("forest", forestCandidate);
+  }
+
+  if (!KNOWN_LOCATIONS["fishing"]?.position) {
+    const fishingCandidate = nearestMatch((entity) => {
+      const name = entity.name?.toLowerCase() || "";
+      const resourceType = entity.resourceType?.toLowerCase() || "";
+      return resourceType === "fishing_spot" || name.includes("fishing spot");
+    });
+    if (fishingCandidate) setKnownLocationPosition("fishing", fishingCandidate);
+  }
+
+  if (!KNOWN_LOCATIONS["mine"]?.position) {
+    const mineCandidate = nearestMatch((entity) => {
+      const name = entity.name?.toLowerCase() || "";
+      const resourceType = entity.resourceType?.toLowerCase() || "";
+      return (
+        resourceType === "mining_rock" ||
+        resourceType === "ore" ||
+        name.includes("rock") ||
+        name.includes("ore")
+      );
+    });
+    if (mineCandidate) setKnownLocationPosition("mine", mineCandidate);
+  }
+
+  if (!KNOWN_LOCATIONS["furnace"]?.position) {
+    const furnaceCandidate = nearestMatch((entity) =>
+      (entity.name?.toLowerCase() || "").includes("furnace"),
     );
-  });
-  if (spawnCandidate) setKnownLocationPosition("spawn", spawnCandidate);
+    if (furnaceCandidate) setKnownLocationPosition("furnace", furnaceCandidate);
+  }
 
-  const forestCandidate = nearestMatch((entity) => {
-    const name = entity.name?.toLowerCase() || "";
-    const resourceType = entity.resourceType?.toLowerCase() || "";
-    return resourceType === "tree" || name.includes("tree");
-  });
-  if (forestCandidate) setKnownLocationPosition("forest", forestCandidate);
-
-  const fishingCandidate = nearestMatch((entity) => {
-    const name = entity.name?.toLowerCase() || "";
-    const resourceType = entity.resourceType?.toLowerCase() || "";
-    return resourceType === "fishing_spot" || name.includes("fishing spot");
-  });
-  if (fishingCandidate) setKnownLocationPosition("fishing", fishingCandidate);
-
-  const mineCandidate = nearestMatch((entity) => {
-    const name = entity.name?.toLowerCase() || "";
-    const resourceType = entity.resourceType?.toLowerCase() || "";
-    return (
-      resourceType === "mining_rock" ||
-      resourceType === "ore" ||
-      name.includes("rock") ||
-      name.includes("ore")
+  if (!KNOWN_LOCATIONS["anvil"]?.position) {
+    const anvilCandidate = nearestMatch((entity) =>
+      (entity.name?.toLowerCase() || "").includes("anvil"),
     );
-  });
-  if (mineCandidate) setKnownLocationPosition("mine", mineCandidate);
-
-  const furnaceCandidate = nearestMatch((entity) =>
-    (entity.name?.toLowerCase() || "").includes("furnace"),
-  );
-  if (furnaceCandidate) setKnownLocationPosition("furnace", furnaceCandidate);
-
-  const anvilCandidate = nearestMatch((entity) =>
-    (entity.name?.toLowerCase() || "").includes("anvil"),
-  );
-  if (anvilCandidate) setKnownLocationPosition("anvil", anvilCandidate);
+    if (anvilCandidate) setKnownLocationPosition("anvil", anvilCandidate);
+  }
 }
 
 /**

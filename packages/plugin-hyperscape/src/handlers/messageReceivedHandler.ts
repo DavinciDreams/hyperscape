@@ -46,11 +46,9 @@ export async function messageReceivedHandler({
 
   try {
     // Check if we should respond to this message
-    const state = await runtime.composeState(message as Memory);
     const shouldRespondToMessage = await shouldRespond(
       runtime,
       message as Memory,
-      state,
     );
 
     if (!shouldRespondToMessage) {
@@ -59,6 +57,8 @@ export async function messageReceivedHandler({
       );
       return;
     }
+
+    const state = await runtime.composeState(message as Memory);
 
     // Generate response using proper context
     const context = await composeContext({

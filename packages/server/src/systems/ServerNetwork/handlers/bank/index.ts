@@ -19,6 +19,7 @@ export {
   handleBankWithdraw,
   handleBankDepositAll,
   handleBankClose,
+  handleRequestBankState,
 } from "./core";
 
 // Coin handlers

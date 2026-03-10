@@ -21,7 +21,7 @@ import { Logger } from "../Logger";
 /**
  * Renderer backend type - WebGPU only
  */
-export type RendererBackend = "webgpu";
+export type RendererBackend = "webgpu" | "webgl";
 
 /**
  * Renderer type used across the app.
@@ -43,6 +43,16 @@ export interface RenderingCapabilities {
   supportsWebGPU: boolean;
   backend: RendererBackend;
 }
+
+type RendererBackendFlags = {
+  isWebGPUBackend?: boolean;
+  isWebGLBackend?: boolean;
+};
+
+type RendererWithBackendState = WebGPURenderer & {
+  backend?: RendererBackendFlags;
+  _getFallback?: (() => unknown) | null;
+};
 
 /**
  * Helper to add timeout to a promise.
@@ -195,6 +205,15 @@ export async function createRenderer(
 
   let renderer: InstanceType<typeof THREE.WebGPURenderer> | null = null;
 
+  const disableRendererFallback = (
+    candidate: InstanceType<typeof THREE.WebGPURenderer>,
+  ): void => {
+    // Hyperscape is WebGPU-only. Allowing Three's implicit WebGL fallback lets
+    // the app continue in a broken state where TSL shaders and compute systems
+    // quietly fail later.
+    (candidate as RendererWithBackendState)._getFallback = null;
+  };
+
   // First attempt: request extended texture array layers
   try {
     renderer = new THREE.WebGPURenderer({
@@ -203,6 +222,7 @@ export async function createRenderer(
         maxTextureArrayLayers: 2048,
       },
     });
+    disableRendererFallback(renderer);
     await withTimeout(
       renderer.init(),
       RENDERER_INIT_TIMEOUT_MS,
@@ -221,6 +241,7 @@ export async function createRenderer(
   if (!renderer) {
     try {
       renderer = new THREE.WebGPURenderer(baseRendererOpts);
+      disableRendererFallback(renderer);
       await withTimeout(
         renderer.init(),
         RENDERER_INIT_TIMEOUT_MS,
@@ -280,14 +301,23 @@ export function isWebGPURenderer(
  * Always returns "webgpu" since that's the only supported backend.
  */
 export function getRendererBackend(renderer: WebGPURenderer): RendererBackend {
-  type BackendWithFlag = { isWebGPUBackend?: true };
-  const backend = (renderer as { backend?: BackendWithFlag }).backend;
-  if (!backend?.isWebGPUBackend) {
-    Logger.error(
-      "[RendererFactory] Renderer does not have WebGPU backend - this should not happen",
-    );
+  const backend = (renderer as RendererWithBackendState).backend;
+
+  if (backend?.isWebGPUBackend === true) {
+    return "webgpu";
   }
-  return "webgpu";
+
+  if (backend?.isWebGLBackend === true) {
+    Logger.error(
+      "[RendererFactory] Renderer initialized with WebGL backend instead of WebGPU",
+    );
+    return "webgl";
+  }
+
+  Logger.error(
+    "[RendererFactory] Renderer backend flags are unavailable; treating backend as non-WebGPU",
+  );
+  return "webgl";
 }
 
 /**

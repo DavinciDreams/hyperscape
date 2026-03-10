@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2021",
+    "lib": ["ES2021", "DOM"],
+    "declaration": true,
+    "declarationMap": true,
+    "types": ["node"],
+    "composite": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": []
+}

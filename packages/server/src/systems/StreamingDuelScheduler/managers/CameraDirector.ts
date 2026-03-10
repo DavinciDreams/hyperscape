@@ -17,7 +17,11 @@ type AgentCombatData = {
   combatTarget?: string | null;
   ct?: string | null;
   attackTarget?: string | null;
+  /** Animation/emote — reveals skilling state (e.g. "chopping", "mining", "fishing") */
+  e?: string;
 };
+
+type AgentActivityType = "combat" | "skilling" | "moving" | "idle";
 
 type AgentActivitySample = {
   lastPosition: [number, number, number] | null;
@@ -128,6 +132,44 @@ const CAMERA_DIRECTOR = {
     maxTotalCutawayMs: 60_000,
     cutawayCooldownMs: 35_000,
   },
+  /**
+   * Idle-phase camera: activity-aware weighted selection so the camera
+   * always follows the most interesting agent between duels.
+   */
+  idle: {
+    /** On-deck agents (next duel pair) get strong preference — builds narrative */
+    onDeckBoost: 2.8,
+    /** Per-activity-type multiplier: combat > skilling > moving >>> idle */
+    activityTypeMultiplier: {
+      combat: 3.2,
+      skilling: 2.0,
+      moving: 1.3,
+      idle: 0.15,
+    } as Record<AgentActivityType, number>,
+    /** Hold times vary by what the current target is doing */
+    holdByActivity: {
+      combat: { minHoldMs: 25_000, maxHoldMs: 75_000 },
+      skilling: { minHoldMs: 18_000, maxHoldMs: 55_000 },
+      moving: { minHoldMs: 10_000, maxHoldMs: 35_000 },
+      idle: { minHoldMs: 6_000, maxHoldMs: 15_000 },
+    } as Record<AgentActivityType, { minHoldMs: number; maxHoldMs: number }>,
+    /** Mild current-target stickiness so camera doesn't jitter */
+    currentTargetBias: 1.15,
+    /** Threshold: new candidate must be this much stronger to trigger early switch */
+    strongerThreshold: 1.2,
+    /** Small random chance to switch for variety (per eligible check) */
+    switchRandomChance: 0.18,
+  },
+  /** Known skilling emotes from PendingGatherManager / PendingCookManager */
+  skillingEmotes: new Set([
+    "chopping",
+    "mining",
+    "fishing",
+    "cooking",
+    "smithing",
+    "firemaking",
+    "smelting",
+  ]),
 } as const;
 
 /** Minimum agents required (matches scheduler config). */
@@ -737,6 +779,98 @@ export class CameraDirector {
     sample.lastFocusedTime = now;
   }
 
+  // ---- Activity-type classification ----
+
+  classifyAgentActivity(agentId: string): AgentActivityType {
+    const entity = this.world.entities.get(agentId);
+    if (!entity) return "idle";
+
+    const data = (entity as { data?: AgentCombatData }).data;
+
+    // Combat is highest-priority signal
+    if (this.isAgentInCombat(data)) return "combat";
+
+    // Check emote for skilling animations
+    const emote = data?.e;
+    if (emote && CAMERA_DIRECTOR.skillingEmotes.has(emote)) return "skilling";
+
+    // Fall back to motion score for movement detection
+    const sample = this.agentActivity.get(agentId);
+    if (sample && sample.motionScore > 0.5) return "moving";
+
+    return "idle";
+  }
+
+  // ---- Idle-phase weighted candidate builder ----
+
+  buildIdleCameraCandidates(
+    now: number,
+    currentTarget: string | null,
+    onDeckIds: Set<string>,
+  ): CameraCandidateWeight[] {
+    const candidates: CameraCandidateWeight[] = [];
+    const availableAgents = this.getAvailableAgents();
+    const cfg = CAMERA_DIRECTOR.idle;
+
+    for (const agentId of availableAgents) {
+      const entity = this.world.entities.get(agentId);
+      if (!entity) continue;
+
+      const sample = this.ensureAgentActivity(agentId, now);
+      this.decayAgentActivity(sample, now);
+      const activityScore = this.getAgentActivityScore(agentId);
+      const entityData = (entity as { data?: AgentCombatData }).data;
+      const isInCombat = this.isAgentInCombat(entityData);
+      const isOnDeck = onDeckIds.has(agentId);
+      const activityType = this.classifyAgentActivity(agentId);
+
+      let weight = 1.0;
+
+      // On-deck boost (narrative: "these two fight next")
+      if (isOnDeck) {
+        weight *= cfg.onDeckBoost;
+      }
+
+      // Activity-type multiplier (combat >> skilling >> moving >> idle)
+      weight *= cfg.activityTypeMultiplier[activityType];
+
+      // Activity score bonus (continuous refinement within type)
+      weight *=
+        1 +
+        clampNumber(
+          activityScore,
+          0,
+          CAMERA_DIRECTOR.activity.maxActivityScore,
+        ) *
+          CAMERA_DIRECTOR.activity.weightPerPoint;
+
+      // Mild current-target stickiness
+      if (agentId === currentTarget) {
+        weight *= cfg.currentTargetBias;
+      }
+
+      // Recency penalty — avoid rapid re-focus on recently-watched agents
+      if (sample.lastFocusedTime > 0 && agentId !== currentTarget) {
+        const msSinceFocused = now - sample.lastFocusedTime;
+        if (msSinceFocused < 25_000) {
+          weight *= CAMERA_DIRECTOR.multipliers.recentFocusPenaltyShort;
+        } else if (msSinceFocused < 60_000) {
+          weight *= CAMERA_DIRECTOR.multipliers.recentFocusPenaltyLong;
+        }
+      }
+
+      candidates.push({
+        agentId,
+        weight: Math.max(0.01, weight),
+        activityScore,
+        isInCombat,
+        isContestant: false,
+      });
+    }
+
+    return candidates;
+  }
+
   updateCameraTarget(now: number): void {
     const cycle = this.getCurrentCycle();
     if (!cycle) return;
@@ -1010,13 +1144,96 @@ export class CameraDirector {
 
   syncIdlePreviewAndCamera(now: number): void {
     const previewPair = this.resolveIdlePreviewPair(now);
-    const preferredIds: string[] = [];
+    const onDeckIds = new Set<string>();
     if (previewPair) {
-      preferredIds.push(previewPair.agent1Id, previewPair.agent2Id);
+      onDeckIds.add(previewPair.agent1Id);
+      onDeckIds.add(previewPair.agent2Id);
     }
-    const idleCameraTarget = this.resolveIdleCameraTarget(now, preferredIds);
-    if (idleCameraTarget) {
-      this.setCameraTarget(idleCameraTarget, now);
+
+    const currentTarget = this.isAgentValidCameraCandidate(this._cameraTarget)
+      ? this._cameraTarget
+      : null;
+
+    // No current target — pick the best candidate immediately
+    if (!currentTarget) {
+      const candidates = this.buildIdleCameraCandidates(now, null, onDeckIds);
+      const selected = this.chooseWeightedCameraCandidate(candidates);
+      if (selected) {
+        this.setCameraTarget(selected.agentId, now);
+      } else {
+        // Absolute fallback: any valid agent
+        const fallback = this.resolveIdleCameraTarget(now, [...onDeckIds]);
+        if (fallback) this.setCameraTarget(fallback, now);
+      }
+      return;
+    }
+
+    // Determine hold timing based on what the current target is doing.
+    // Idle agents get switched off fast; agents in combat get long holds.
+    const currentActivity = this.classifyAgentActivity(currentTarget);
+    const holdTiming = CAMERA_DIRECTOR.idle.holdByActivity[currentActivity];
+    const msSinceSwitch = now - this.lastCameraSwitchTime;
+    const canSwitch = msSinceSwitch >= holdTiming.minHoldMs;
+    const forceSwitch = msSinceSwitch >= holdTiming.maxHoldMs;
+
+    if (!canSwitch && !forceSwitch) {
+      return;
+    }
+
+    // Build weighted candidates and select
+    const candidates = this.buildIdleCameraCandidates(
+      now,
+      currentTarget,
+      onDeckIds,
+    );
+    if (candidates.length <= 1) {
+      return;
+    }
+
+    let selected = this.chooseWeightedCameraCandidate(candidates);
+    if (!selected) {
+      return;
+    }
+
+    // On forced switch, guarantee we actually change target
+    if (
+      forceSwitch &&
+      selected.agentId === currentTarget &&
+      candidates.length > 1
+    ) {
+      const alternatives = candidates.filter(
+        (c) => c.agentId !== currentTarget,
+      );
+      const alt = this.chooseWeightedCameraCandidate(alternatives);
+      if (alt) selected = alt;
+    }
+
+    if (selected.agentId === currentTarget) {
+      return;
+    }
+
+    // Decide whether to switch based on relative weight
+    const byId = new Map(candidates.map((c) => [c.agentId, c]));
+    const currentCandidate = byId.get(currentTarget);
+
+    if (forceSwitch || !currentCandidate) {
+      this.setCameraTarget(selected.agentId, now);
+      return;
+    }
+
+    const selectedIsStronger =
+      selected.weight >
+      currentCandidate.weight * CAMERA_DIRECTOR.idle.strongerThreshold;
+    const currentIsIdle = currentActivity === "idle";
+
+    const shouldSwitch =
+      selectedIsStronger ||
+      (currentIsIdle &&
+        selected.activityScore >= currentCandidate.activityScore) ||
+      Math.random() < CAMERA_DIRECTOR.idle.switchRandomChance;
+
+    if (shouldSwitch) {
+      this.setCameraTarget(selected.agentId, now);
     }
   }
 

@@ -595,6 +595,7 @@ export class ClientLoader extends SystemBase {
           this.stats.networkRequests++;
           const fetchStart = performance.now();
 
+          console.log(`[ClientLoader] Fetching: ${url}`);
           // Use 'default' cache mode to leverage browser HTTP cache
           // This will use cached response if available and not stale
           const resp = await fetch(url, {
@@ -603,6 +604,9 @@ export class ClientLoader extends SystemBase {
           });
 
           if (!resp.ok) {
+            console.error(
+              `[ClientLoader] Fetch failed for ${url} with status: ${resp.status}`,
+            );
             throw new Error(`HTTP error! status: ${resp.status}`);
           }
 

@@ -87,6 +87,7 @@ interface MobEntityInterface {
     update(context: unknown, deltaTime: number): void;
   };
   createAIContext?: () => unknown;
+  runAITick?: (deltaTime: number) => void;
   position?: { x: number; y: number; z: number };
 }
 
@@ -228,8 +229,12 @@ export class GameTickProcessor {
   private readonly _onPlayerJoined = () => {
     this.playerOrderDirty = true;
   };
-  private readonly _onPlayerLeft = () => {
+  private readonly _onPlayerLeft = (event: { playerId: string }) => {
     this.playerOrderDirty = true;
+    // Clean up script queue state for disconnected player to prevent memory leak
+    if (this.playerScriptQueue) {
+      this.playerScriptQueue.cleanup(event.playerId);
+    }
   };
   private readonly _onPlayerRespawned = () => {
     this.playerOrderDirty = true;
@@ -539,9 +544,16 @@ export class GameTickProcessor {
    * Our AIStateMachine handles this internally.
    */
   private processNPCAI(mob: MobEntityInterface, _tickNumber: number): void {
+    const deltaSeconds = TICK_DURATION_MS / 1000;
+
+    // Prefer mob-owned AI tick entrypoint to avoid duplicate per-tick updates.
+    if (mob.runAITick) {
+      mob.runAITick(deltaSeconds);
+      return;
+    }
+
     if (mob.aiStateMachine && mob.createAIContext) {
       const context = mob.createAIContext();
-      const deltaSeconds = TICK_DURATION_MS / 1000;
       mob.aiStateMachine.update(context, deltaSeconds);
     }
   }
@@ -883,5 +895,13 @@ export class GameTickProcessor {
     this.broadcastQueue = [];
     this.npcProcessingOrder = [];
     this.playerProcessingOrder = [];
+
+    // Destroy script queues to prevent memory leaks
+    if (this.playerScriptQueue) {
+      this.playerScriptQueue.destroy();
+    }
+    if (this.npcScriptQueue) {
+      this.npcScriptQueue.destroy();
+    }
   }
 }

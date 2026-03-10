@@ -1,12 +1,18 @@
 /**
- * Goal Progression Planner — deterministic next-goal selection
+ * Goal Progression Planner — personality-driven desire-scored goal selection
  *
  * Pure function: planNextGoal(context) → GoalPlan | null
  *
- * Handles the 90% obvious decisions without LLM. The planner evaluates
- * progression phases in priority order and returns a goal the agent should
- * pursue next. Returns null when no deterministic choice can be made
- * (falls through to LLM).
+ * Two-stage architecture:
+ *   Stage A — Hard constraints (strict priority, first-match-wins):
+ *     Tool quests, quest turn-ins, bank withdrawals, inventory banking.
+ *     These are prerequisites and always fire first.
+ *
+ *   Stage B — Soft desires (scored competition):
+ *     Each potential goal type becomes a "desire" with a computed score
+ *     based on baseWeight × personalityMul × (1 - satiation) × opportunityBonus.
+ *     Highest score wins. Personality traits, recent activity history,
+ *     and contextual opportunity all influence the outcome.
  *
  * Re-evaluated every time a goal completes, so prerequisite chains resolve
  * naturally: "accept quest" → tools granted → "gather resources" now valid.
@@ -15,6 +21,7 @@
 import { logger } from "@elizaos/core";
 import type { CurrentGoal } from "./autonomous-behavior-manager.js";
 import type { PlayerEntity, QuestData } from "../types.js";
+import type { PersonalityTraits } from "../providers/personalityProvider.js";
 import {
   hasAxe,
   hasPickaxe,
@@ -45,6 +52,14 @@ export interface PlannerContext {
   recentGoalCounts: Record<string, number>;
   /** Cached bank item names (lowercase) for tool-in-bank detection */
   bankItemNames?: string[];
+  /** Agent personality traits for desire scoring */
+  personality: PersonalityTraits;
+  /** Full goal history with timestamps for satiation calculation */
+  goalHistory: Array<{
+    type: string;
+    skill?: string;
+    completedAt: number;
+  }>;
 }
 
 /** What the planner outputs */
@@ -53,6 +68,31 @@ export interface GoalPlan {
   /** Human-readable reason (for logs) */
   reason: string;
 }
+
+/** A scored desire candidate competing for selection in Stage B */
+interface DesireCandidate {
+  id: string;
+  baseWeight: number;
+  personalityMul: number;
+  satiation: number;
+  opportunityBonus: number;
+  duelPrepBonus: number;
+  score: number;
+  buildGoal: () => GoalPlan;
+}
+
+/** Default personality when none is provided */
+const DEFAULT_PERSONALITY: PersonalityTraits = {
+  sociability: 0.5,
+  helpfulness: 0.5,
+  adventurousness: 0.5,
+  chattiness: 0.5,
+  aggression: 0.3,
+  patience: 0.5,
+  preferredSkills: [],
+  catchphrases: [],
+  quirks: [],
+};
 
 // ---------------------------------------------------------------------------
 // Quest → tool mapping
@@ -79,13 +119,12 @@ const TOOL_BANK_KEYWORDS: Record<string, string[]> = {
 /**
  * Ordered list of tool-granting quests. Evaluated top-to-bottom;
  * first quest whose tool the player is missing wins.
+ *
+ * Non-combat resource quests come FIRST so agents learn gathering/crafting
+ * skills before being sent to fight goblins. This mirrors natural player
+ * progression: get an axe, pickaxe, fishing net, THEN a weapon.
  */
 const TOOL_QUESTS: ToolQuest[] = [
-  {
-    questId: "goblin_slayer",
-    npc: "guard_captain",
-    hasIt: (p) => hasWeapon(p) || hasCombatCapableItem(p),
-  },
   {
     questId: "lumberjacks_first_lesson",
     npc: "forester_wilma",
@@ -98,12 +137,47 @@ const TOOL_QUESTS: ToolQuest[] = [
   },
   {
     questId: "fresh_catch",
-    npc: "fisherman",
+    npc: "fisherman_pete",
     hasIt: (p) => hasFishingEquipment(p),
+  },
+  {
+    questId: "goblin_slayer",
+    npc: "captain_rowan",
+    hasIt: (p) => hasWeapon(p) || hasCombatCapableItem(p),
   },
 ];
 
-/** Gathering skills the planner round-robins through */
+/**
+ * Reorder tool quests based on personality traits.
+ * Aggressive agents prioritize weapons; adventurous agents get shuffled order.
+ */
+function sortToolQuestsForPersonality(
+  quests: ToolQuest[],
+  personality: PersonalityTraits,
+): ToolQuest[] {
+  const sorted = [...quests];
+  if (personality.aggression > 0.6) {
+    // Aggressive: weapon quest first
+    const weaponIdx = sorted.findIndex((tq) => tq.questId === "goblin_slayer");
+    if (weaponIdx > 0) {
+      const [weapon] = sorted.splice(weaponIdx, 1);
+      sorted.unshift(weapon);
+    }
+  } else if (personality.adventurousness > 0.7) {
+    // Adventurous: shuffle (seeded by traits for consistency)
+    const seed = Math.floor(
+      (personality.aggression + personality.patience) * 10000,
+    );
+    for (let i = sorted.length - 1; i > 0; i--) {
+      const x = Math.sin(seed + i) * 10000;
+      const j = Math.floor((x - Math.floor(x)) * (i + 1));
+      [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
+    }
+  }
+  return sorted;
+}
+
+/** Gathering skills used in desire building */
 const GATHERING_SKILLS: Array<{
   goalType: CurrentGoal["type"];
   skillName: string;
@@ -131,11 +205,47 @@ const GATHERING_SKILLS: Array<{
 ];
 
 // ---------------------------------------------------------------------------
+// Desire base weights
+// ---------------------------------------------------------------------------
+
+const DESIRE_BASE_WEIGHTS: Record<string, number> = {
+  quest_progress: 70,
+  woodcutting: 40,
+  mining: 40,
+  fishing: 40,
+  combat_training: 45,
+  cooking: 35,
+  smithing: 38,
+  gear_upgrade: 55,
+  combat_food_prep: 50,
+  exploration: 20,
+};
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /** Minimum food count before combat training is allowed */
 const COMBAT_FOOD_THRESHOLD = 10;
+
+/** Satiation window in milliseconds (15 minutes) */
+const SATIATION_WINDOW_MS = 15 * 60 * 1000;
+
+/** Last desire candidates from Stage B scoring (for dashboard display) */
+let lastDesireCandidates: Array<{
+  goalType: string;
+  score: number;
+  breakdown: string;
+}> = [];
+
+/** Get the last desire score candidates from the planner's Stage B evaluation */
+export function getLastDesireCandidates(): Array<{
+  goalType: string;
+  score: number;
+  breakdown: string;
+}> {
+  return lastDesireCandidates;
+}
 
 function getSkillLevel(player: PlayerEntity, skill: string): number {
   return player.skills?.[skill]?.level ?? 1;
@@ -235,22 +345,304 @@ function questStatus(quest: QuestData | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// Desire scoring functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute personality multiplier for a desire.
+ * Maps personality traits to per-desire multipliers.
+ */
+function computePersonalityMul(
+  desireId: string,
+  traits: PersonalityTraits,
+): number {
+  let mul = 1.0;
+
+  switch (desireId) {
+    case "quest_progress":
+      mul = 0.7 + traits.adventurousness * 0.6; // 0.7–1.3
+      break;
+    case "exploration":
+      mul = 0.5 + traits.adventurousness * 1.0; // 0.5–1.5
+      break;
+    case "combat_training":
+      mul = 0.8 + traits.aggression * 0.8; // 0.8–1.6
+      break;
+    case "combat_food_prep":
+      mul = 0.8 + traits.aggression * 0.4; // combat-adjacent
+      break;
+    case "gear_upgrade":
+      mul = 0.9 + traits.aggression * 0.3; // combat-adjacent
+      break;
+    // Gathering/processing skills use base 1.0
+  }
+
+  // Preferred skills get a 1.4× stacking bonus
+  const skillMap: Record<string, string[]> = {
+    woodcutting: ["woodcutting"],
+    mining: ["mining"],
+    fishing: ["fishing"],
+    cooking: ["cooking"],
+    smithing: ["smithing"],
+    combat_training: ["attack", "strength", "defense", "combat"],
+    combat_food_prep: ["fishing", "combat"],
+    gear_upgrade: ["smithing"],
+    quest_progress: ["questing"],
+    exploration: ["exploration"],
+  };
+  const relatedSkills = skillMap[desireId] || [];
+  for (const skill of relatedSkills) {
+    if (traits.preferredSkills.includes(skill)) {
+      mul *= 1.4;
+      break; // only apply once per desire
+    }
+  }
+
+  return mul;
+}
+
+/**
+ * Compute satiation for a desire based on recent goal history.
+ * Measures how "full" a desire is from recent satisfaction.
+ * Returns 0.0 (fresh) to 0.8 (heavily penalized).
+ */
+function computeSatiation(
+  desireId: string,
+  goalHistory: Array<{ type: string; skill?: string; completedAt: number }>,
+  patience: number,
+): number {
+  const now = Date.now();
+  let satiation = 0;
+
+  for (const entry of goalHistory) {
+    const age = now - entry.completedAt;
+    if (age > SATIATION_WINDOW_MS) continue;
+
+    // Match desire to history entry
+    const matches =
+      entry.type === desireId ||
+      entry.skill === desireId ||
+      // Map goal types to desire IDs
+      (desireId === "quest_progress" && entry.type === "questing") ||
+      (desireId === "combat_food_prep" &&
+        entry.type === "fishing" &&
+        entry.skill === "fishing") ||
+      (desireId === "gear_upgrade" && entry.type === "smithing");
+
+    if (!matches) continue;
+
+    // Exponential decay: recent goals contribute more
+    const recencyFactor = 1 - age / SATIATION_WINDOW_MS;
+    satiation += recencyFactor * 0.25;
+  }
+
+  // Patient agents tolerate repetition better (up to 40% reduction)
+  const patienceReduction = patience > 0.5 ? 1 - (patience - 0.5) * 0.8 : 1.0;
+  satiation *= patienceReduction;
+
+  return Math.min(0.8, satiation);
+}
+
+/**
+ * Compute contextual opportunity bonus for a desire.
+ * Returns a multiplier based on whether the player has the right
+ * materials, tools, or conditions for the desire.
+ */
+function computeOpportunityBonus(
+  desireId: string,
+  player: PlayerEntity,
+): number {
+  switch (desireId) {
+    case "cooking":
+      return hasRawFood(player) && hasTinderbox(player) ? 1.8 : 0.3;
+
+    case "smithing": {
+      if (hasBars(player)) return 1.6;
+      if (hasOre(player)) return 1.6;
+      return inventoryCount(player) > 20 ? 0.5 : 0.3;
+    }
+
+    case "gear_upgrade": {
+      const attackLevel = getSkillLevel(player, "attack");
+      const bestTier = getBestEquippableTier(attackLevel);
+      const currentTier = getEquippedWeaponTier(player);
+      if (bestTier.tierName === currentTier) return 0.1; // already best gear
+      const smithLevel = getSkillLevel(player, "smithing");
+      if (
+        smithLevel >= bestTier.smithingLevel &&
+        (hasBars(player) || hasOre(player))
+      ) {
+        return 1.5;
+      }
+      return 0.3;
+    }
+
+    case "combat_training": {
+      if (!hasCombatCapableItem(player)) return 0.0;
+      if (countFood(player) < COMBAT_FOOD_THRESHOLD) return 0.2;
+      return 1.3;
+    }
+
+    case "combat_food_prep": {
+      if (!hasCombatCapableItem(player)) return 0.2;
+      if (!hasFishingEquipment(player)) return 0.0;
+      if (countFood(player) >= COMBAT_FOOD_THRESHOLD) return 0.2;
+      return 1.5;
+    }
+
+    case "woodcutting":
+      if (!hasAxe(player)) return 0.0;
+      return getResourcesAtLevel(
+        "woodcutting",
+        getSkillLevel(player, "woodcutting"),
+      ).length > 0
+        ? 1.0
+        : 0.0;
+
+    case "mining":
+      if (!hasPickaxe(player)) return 0.0;
+      return getResourcesAtLevel("mining", getSkillLevel(player, "mining"))
+        .length > 0
+        ? 1.0
+        : 0.0;
+
+    case "fishing":
+      if (!hasFishingEquipment(player)) return 0.0;
+      return getResourcesAtLevel("fishing", getSkillLevel(player, "fishing"))
+        .length > 0
+        ? 1.0
+        : 0.0;
+
+    case "quest_progress":
+      return 1.0; // handled by candidate eligibility
+
+    case "exploration":
+      return 1.0; // always available
+
+    default:
+      return 1.0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Duel preparation bonus
+// ---------------------------------------------------------------------------
+
+/**
+ * How much each desire contributes to duel readiness.
+ *
+ * Every agent knows they're preparing for duels. This additive bonus
+ * lifts combat-relevant activities so agents naturally follow a
+ * progression toward duel strength:
+ *
+ *   mining → smelting → smithing → gear upgrade → combat training
+ *   fishing → cooking → food stockpile → combat endurance
+ *   quests → XP rewards → higher stats
+ *
+ * The bonus is context-aware: activities the agent most needs right now
+ * for duel readiness get a bigger lift.
+ */
+function computeDuelPrepBonus(desireId: string, player: PlayerEntity): number {
+  const combatLevel = getCombatLevel(player);
+  const foodCount = countFood(player);
+  const currentTier = getEquippedWeaponTier(player);
+  const attackLevel = getSkillLevel(player, "attack");
+  const bestTier = getBestEquippableTier(attackLevel);
+  const canUpgradeGear = bestTier.tierName !== currentTier;
+
+  switch (desireId) {
+    // Direct combat impact — highest duel-prep value
+    case "combat_training":
+      return 15;
+
+    case "gear_upgrade":
+      // Massive bonus if agent can actually upgrade to better gear
+      return canUpgradeGear ? 20 : 0;
+
+    // Food is survival in duels — high value when low
+    case "combat_food_prep":
+      return foodCount < 5 ? 20 : foodCount < COMBAT_FOOD_THRESHOLD ? 12 : 0;
+
+    case "cooking":
+      // Cooking raw food into edible food directly supports duel survival
+      return foodCount < COMBAT_FOOD_THRESHOLD ? 10 : 3;
+
+    // Smithing feeds the gear pipeline
+    case "smithing":
+      return canUpgradeGear ? 12 : 5;
+
+    // Mining feeds smithing which feeds gear
+    case "mining":
+      return canUpgradeGear ? 8 : 3;
+
+    // Fishing feeds cooking which feeds food
+    case "fishing":
+      return foodCount < COMBAT_FOOD_THRESHOLD ? 8 : 2;
+
+    // Quests give XP → levels → stronger in duels
+    case "quest_progress":
+      return combatLevel < 10 ? 8 : 3;
+
+    // Woodcutting has minimal duel impact (firemaking → cooking is indirect)
+    case "woodcutting":
+      return 2;
+
+    // Exploration has no direct duel benefit
+    case "exploration":
+      return 0;
+
+    default:
+      return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Core planner
 // ---------------------------------------------------------------------------
 
 /**
- * Deterministic goal selection — evaluate phases in priority order.
+ * Deterministic goal selection with personality-driven desire scoring.
  *
- * Returns the first applicable GoalPlan, or null when the situation is
+ * Stage A: Hard constraints (strict priority, first-match-wins)
+ * Stage B: Soft desires (scored competition, personality-influenced)
+ *
+ * Returns the winning GoalPlan, or null when the situation is
  * ambiguous enough that the LLM should decide.
  */
 export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
-  const { player, quests, recentGoalCounts } = ctx;
+  const { player, quests } = ctx;
+  const personality = ctx.personality || DEFAULT_PERSONALITY;
+  const goalHistory = ctx.goalHistory || [];
+
+  // Personality-driven quest ordering (aggressive → weapon first, adventurous → shuffled)
+  const orderedToolQuests = sortToolQuestsForPersonality(
+    TOOL_QUESTS,
+    personality,
+  );
+
+  // ------------------------------------------------------------------
+  // Guard: Don't make decisions if quest data hasn't loaded yet.
+  // When the agent is missing tools and quests array is empty, the server
+  // hasn't sent quest data yet. Return null to avoid premature exploration
+  // that leads to random actions (attacking goblins, talking to wrong NPCs).
+  // The ABM will retry on the next tick when quest data may have arrived.
+  // ------------------------------------------------------------------
+  const missingTools = TOOL_QUESTS.some((tq) => !tq.hasIt(player));
+  if (missingTools && quests.length === 0) {
+    logger.info(
+      "[GoalPlanner] Waiting for quest data — agent missing tools but quest list empty",
+    );
+    return null;
+  }
+
+  // ==================================================================
+  // STAGE A — Hard constraints (strict priority, first-match-wins)
+  // ==================================================================
 
   // ------------------------------------------------------------------
   // Phase 1 — Bootstrap: accept tool-granting quests
   // ------------------------------------------------------------------
-  for (const tq of TOOL_QUESTS) {
+  for (const tq of orderedToolQuests) {
     if (tq.hasIt(player)) continue; // already have this tool
 
     const quest = findQuest(quests, tq.questId);
@@ -270,9 +662,6 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
         reason: `Missing tool → accept ${tq.questId}`,
       };
     }
-
-    // Quest exists but not available (maybe not in quest list yet) — skip
-    // to let later phases handle it, or LLM fallback
   }
 
   // ------------------------------------------------------------------
@@ -283,6 +672,8 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
     const q = readyQuests[0];
     const questId =
       q.questId || ((q as Record<string, unknown>).id as string) || "";
+    const startNpc =
+      q.startNpc || TOOL_QUESTS.find((tq) => tq.questId === questId)?.npc || "";
     return {
       goal: {
         type: "questing",
@@ -291,21 +682,20 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
         progress: 0,
         startedAt: Date.now(),
         questId,
-        questStartNpc: "",
+        questStartNpc: startNpc,
+        questStageType: "dialogue",
       },
-      reason: `Quest ${questId} ready to complete`,
+      reason: `Quest ${questId} ready to complete — return to ${startNpc}`,
     };
   }
 
   // ------------------------------------------------------------------
   // Phase 2.5 — Tools in bank → withdraw them
-  // If the player doesn't have a tool in inventory but it exists in
-  // the bank, go withdraw it regardless of quest status.
   // ------------------------------------------------------------------
   const bankNames = ctx.bankItemNames || [];
   if (bankNames.length > 0) {
-    for (const tq of TOOL_QUESTS) {
-      if (tq.hasIt(player)) continue; // still have the tool in inventory
+    for (const tq of orderedToolQuests) {
+      if (tq.hasIt(player)) continue;
 
       const toolInBank = TOOL_BANK_KEYWORDS[tq.questId]?.some((kw) =>
         bankNames.some((bn) => bn.includes(kw)),
@@ -348,26 +738,26 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
   // ------------------------------------------------------------------
   // Phase 2.6 — Lost tools recovery (tool quest done but tool missing)
   // ------------------------------------------------------------------
-  for (const tq of TOOL_QUESTS) {
+  for (const tq of orderedToolQuests) {
     if (tq.hasIt(player)) continue;
 
     const quest = findQuest(quests, tq.questId);
     const status = questStatus(quest);
 
-    // Tool quest was completed but player no longer has the tool → lost on death
     if (status === "completed") {
       const coins = countCoins(player);
       if (coins >= 10) {
         return {
           goal: {
-            type: "questing",
-            description: `Buy replacement tool (lost ${tq.questId} reward) from shop`,
+            type: "shopping",
+            description: `Buy replacement tool at general store`,
             target: 1,
             progress: 0,
             startedAt: Date.now(),
             location: "spawn",
+            targetSkill: tq.questId,
           },
-          reason: `Tool lost after completing ${tq.questId} — has ${coins} coins, try shop`,
+          reason: `Tool lost after completing ${tq.questId} — has ${coins} coins, navigate to shop`,
         };
       }
       logger.info(
@@ -375,28 +765,45 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
       );
     }
 
-    // Quest in progress but no tool — keep pursuing it
     if (status === "in_progress") break; // handled by Phase 3
   }
 
   // ------------------------------------------------------------------
-  // Phase 3 — Continue in-progress quests
+  // Phase 3 — Continue in-progress quests (hard constraint)
+  // A human player finishes what they started. This stays deterministic
+  // so agents don't abandon quests mid-way based on personality whims.
+  // When multiple quests are active, prefer non-combat (gather/dialogue)
+  // over combat (kill) so resource skills develop first.
   // ------------------------------------------------------------------
-  const activeQuests = quests.filter((q) => q.status === "in_progress");
-  if (activeQuests.length > 0) {
-    const q = activeQuests[0];
+  const activeQuestsHard = quests.filter((q) => q.status === "in_progress");
+  if (activeQuestsHard.length > 0) {
+    // Prefer non-combat quests over kill quests
+    const nonCombat = activeQuestsHard.filter((q) => q.stageType !== "kill");
+    const q = nonCombat.length > 0 ? nonCombat[0] : activeQuestsHard[0];
     const questId =
       q.questId || ((q as Record<string, unknown>).id as string) || "";
-    const questData = q as Record<string, unknown>;
+    // Resolve startNpc: prefer QuestData.startNpc (from server), fallback to TOOL_QUESTS
+    const startNpc =
+      q.startNpc || TOOL_QUESTS.find((tq) => tq.questId === questId)?.npc || "";
 
-    // Enrich with actual stage progress from quest data
     let enrichedProgress = 0;
     let enrichedTarget = 1;
-    const stageCount = (questData.stageCount as number) || undefined;
+    const stageCount = q.stageCount || undefined;
     if (q.stageProgress && typeof q.stageProgress === "object") {
-      const progressValues = Object.values(q.stageProgress);
-      if (progressValues.length > 0) {
-        enrichedProgress = Math.max(...progressValues);
+      // Use current stage's target key for progress (not max across all keys,
+      // which would show old stage progress like raw_shrimp: 8 on the cooking stage)
+      const stageTargetKey = q.stageTarget;
+      if (stageTargetKey && q.stageProgress[stageTargetKey] !== undefined) {
+        enrichedProgress = q.stageProgress[stageTargetKey];
+      } else if (stageTargetKey) {
+        // Stage target exists but no progress for it yet (e.g., just advanced
+        // from gather to cook) — show 0, not the old stage's progress
+        enrichedProgress = 0;
+      } else {
+        const progressValues = Object.values(q.stageProgress);
+        if (progressValues.length > 0) {
+          enrichedProgress = Math.max(...progressValues);
+        }
       }
     }
     if (stageCount && stageCount > 0) {
@@ -411,10 +818,10 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
         progress: enrichedProgress,
         startedAt: Date.now(),
         questId,
-        questStartNpc: (questData.startNpc as string) || "",
+        questStartNpc: startNpc,
         questStageType:
-          (questData.stageType as CurrentGoal["questStageType"]) || undefined,
-        questStageTarget: (questData.stageTarget as string) || undefined,
+          (q.stageType as CurrentGoal["questStageType"]) || undefined,
+        questStageTarget: q.stageTarget || undefined,
         questStageCount: stageCount,
       },
       reason: `Quest ${questId} in progress (${enrichedProgress}/${enrichedTarget})`,
@@ -438,176 +845,50 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
     };
   }
 
-  // ------------------------------------------------------------------
-  // Phase 4.5 — Gear upgrade: smith better equipment if possible
-  // ------------------------------------------------------------------
-  const attackLevel = getSkillLevel(player, "attack");
-  const bestTier = getBestEquippableTier(attackLevel);
-  const currentWeaponTier = getEquippedWeaponTier(player);
-  const smithingLevel = getSkillLevel(player, "smithing");
+  // ==================================================================
+  // STAGE B — Soft desires (scored competition)
+  // ==================================================================
 
-  if (
-    bestTier.tierName !== currentWeaponTier &&
-    smithingLevel >= bestTier.smithingLevel
-  ) {
-    if (hasBars(player)) {
-      return {
-        goal: {
-          type: "smithing",
-          description: `Smith ${bestTier.tierName} equipment`,
-          target: 1,
-          progress: 0,
-          startedAt: Date.now(),
-          location: "anvil",
-          targetSkill: "smithing",
-          targetSkillLevel: smithingLevel + 1,
-        },
-        reason: `Can equip ${bestTier.tierName} gear (attack ${attackLevel}) and has bars + smithing ${smithingLevel}`,
-      };
-    }
-    if (hasOre(player)) {
-      return {
-        goal: {
-          type: "smithing",
-          description: `Smelt ore for ${bestTier.tierName} gear`,
-          target: 1,
-          progress: 0,
-          startedAt: Date.now(),
-          location: "furnace",
-          targetSkill: "smithing",
-          targetSkillLevel: smithingLevel + 1,
-        },
-        reason: `Smelting ore to prepare ${bestTier.tierName} gear upgrade`,
-      };
-    }
-  }
+  const candidates: DesireCandidate[] = [];
 
-  // ------------------------------------------------------------------
-  // Phase 5 — Process raw materials (ore/bars) when inventory is filling
-  // ------------------------------------------------------------------
-  if (inventoryCount(player) > 20) {
-    if (hasOre(player)) {
-      return {
-        goal: {
-          type: "smithing",
-          description: "Smelt ore into bars",
-          target: 1,
-          progress: 0,
-          startedAt: Date.now(),
-          location: "furnace",
-          targetSkill: "smithing",
-          targetSkillLevel: getSkillLevel(player, "smithing") + 1,
-        },
-        reason: "Has ore + inventory > 20 → smelt",
-      };
-    }
-    if (hasBars(player)) {
-      return {
-        goal: {
-          type: "smithing",
-          description: "Smith bars into items",
-          target: 1,
-          progress: 0,
-          startedAt: Date.now(),
-          location: "anvil",
-          targetSkill: "smithing",
-          targetSkillLevel: getSkillLevel(player, "smithing") + 1,
-        },
-        reason: "Has bars + inventory > 20 → smith",
-      };
-    }
-  }
+  // Note: in-progress quests are handled as a hard constraint in Stage A (Phase 3).
+  // Stage B only fires when there's no active quest to continue.
 
-  // ------------------------------------------------------------------
-  // Phase 5.5 — Cook raw food immediately (don't wait for inventory to fill)
-  // ------------------------------------------------------------------
-  if (hasRawFood(player) && hasTinderbox(player)) {
-    return {
-      goal: {
-        type: "cooking",
-        description: "Cook raw food",
-        target: 1,
-        progress: 0,
-        startedAt: Date.now(),
-        targetSkill: "cooking",
-        targetSkillLevel: getSkillLevel(player, "cooking") + 1,
-      },
-      reason: "Has raw food → cook immediately",
-    };
-  }
-
-  // ------------------------------------------------------------------
-  // Phase 6 — Gather resources (round-robin by lowest level + least recent)
-  // Level-aware: skip skills where no resources exist at the player's level
-  // ------------------------------------------------------------------
-  const eligible = GATHERING_SKILLS.filter((g) => {
-    if (!g.hasIt(player)) return false;
-    // Check if any resources exist at the player's level for this skill
+  // --- Gathering skill desires ---
+  for (const g of GATHERING_SKILLS) {
+    if (!g.hasIt(player)) continue;
     const level = getSkillLevel(player, g.skillName);
     const resources = getResourcesAtLevel(
       g.skillName as "woodcutting" | "mining" | "fishing",
       level,
     );
-    return resources.length > 0;
-  });
-  if (eligible.length > 0 && inventoryCount(player) < 26) {
-    // Score each skill: lower level + less recent history = higher priority
-    const scored = eligible.map((g) => {
-      const level = getSkillLevel(player, g.skillName);
-      const recentCount =
-        recentGoalCounts[g.skillName] || recentGoalCounts[g.goalType] || 0;
-      // Lower is better: level contributes most, recent history breaks ties
-      const score = level + recentCount * 5;
-      return { ...g, score, level };
-    });
+    if (resources.length === 0) continue;
 
-    scored.sort((a, b) => a.score - b.score);
-    const pick = scored[0];
-
-    return {
-      goal: {
-        type: pick.goalType,
-        description: `Train ${pick.skillName} (level ${pick.level})`,
-        target: 1,
-        progress: 0,
-        startedAt: Date.now(),
-        location: pick.location,
-        targetSkill: pick.skillName,
-        targetSkillLevel: pick.level + 1,
-      },
-      reason: `Round-robin gathering → ${pick.skillName} (level ${pick.level}, score ${pick.score})`,
-    };
+    candidates.push(
+      buildDesire(
+        g.skillName,
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: g.goalType,
+            description: `Train ${g.skillName} (level ${level})`,
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            location: g.location,
+            targetSkill: g.skillName,
+            targetSkillLevel: level + 1,
+          },
+          reason: `Desire-scored gathering → ${g.skillName} (level ${level})`,
+        }),
+        ctx.recentGoalCounts,
+      ),
+    );
   }
 
-  // ------------------------------------------------------------------
-  // Phase 7 — Combat prep: not enough food
-  // Only set fishing goal if the player actually has fishing equipment.
-  // Otherwise fall through to combat/exploration — the tool quest loop
-  // (Phase 1 → Phase 3) will resolve the missing tool first.
-  // ------------------------------------------------------------------
-  if (
-    hasCombatCapableItem(player) &&
-    countFood(player) < COMBAT_FOOD_THRESHOLD &&
-    hasFishingEquipment(player)
-  ) {
-    return {
-      goal: {
-        type: "fishing",
-        description: "Fish for food before combat",
-        target: 1,
-        progress: 0,
-        startedAt: Date.now(),
-        location: "fishing",
-        targetSkill: "fishing",
-        targetSkillLevel: getSkillLevel(player, "fishing") + 1,
-      },
-      reason: `Food count ${countFood(player)} < ${COMBAT_FOOD_THRESHOLD} → fish for food`,
-    };
-  }
-
-  // ------------------------------------------------------------------
-  // Phase 8 — Combat training (dynamic monster + style rotation)
-  // ------------------------------------------------------------------
+  // --- Combat training desire ---
   if (
     hasCombatCapableItem(player) &&
     countFood(player) >= COMBAT_FOOD_THRESHOLD
@@ -619,37 +900,255 @@ export function planNextGoal(ctx: PlannerContext): GoalPlan | null {
     );
     const skill = pickCombatStyle(player);
 
-    return {
-      goal: {
-        type: "combat_training",
-        description: `Train ${skill} on ${monster.name}s`,
-        target: 1,
-        progress: 0,
-        startedAt: Date.now(),
-        location: monster.location,
-        targetSkill: skill,
-        targetSkillLevel: getSkillLevel(player, skill) + 1,
-        targetEntity: monster.id,
-      },
-      reason: `Combat level ${combatLevel} → ${monster.name} (lvl ${monster.level}), training ${skill}`,
-    };
+    candidates.push(
+      buildDesire(
+        "combat_training",
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: "combat_training",
+            description: `Train ${skill} on ${monster.name}s`,
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            location: monster.location,
+            targetSkill: skill,
+            targetSkillLevel: getSkillLevel(player, skill) + 1,
+            targetEntity: monster.id,
+          },
+          reason: `Combat level ${combatLevel} → ${monster.name} (lvl ${monster.level}), training ${skill}`,
+        }),
+        ctx.recentGoalCounts,
+      ),
+    );
   }
 
-  // ------------------------------------------------------------------
-  // Phase 9 — Fallback: explore
-  // If quests haven't loaded yet, exploration is still set but the ABM's
-  // stale-exploration invalidation (step 2.5) will clear it once quest
-  // data arrives and re-run the planner with real data.
-  // ------------------------------------------------------------------
+  // --- Cooking desire ---
+  if (hasRawFood(player) && hasTinderbox(player)) {
+    candidates.push(
+      buildDesire(
+        "cooking",
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: "cooking",
+            description: "Cook raw food",
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            targetSkill: "cooking",
+            targetSkillLevel: getSkillLevel(player, "cooking") + 1,
+          },
+          reason: "Has raw food → cook",
+        }),
+        ctx.recentGoalCounts,
+      ),
+    );
+  }
+
+  // --- Smithing desire (process materials) ---
+  if ((hasOre(player) || hasBars(player)) && inventoryCount(player) > 20) {
+    const smithLevel = getSkillLevel(player, "smithing");
+    const playerHasBars = hasBars(player);
+    candidates.push(
+      buildDesire(
+        "smithing",
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: "smithing",
+            description: playerHasBars
+              ? "Smith bars into items"
+              : "Smelt ore into bars",
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            location: playerHasBars ? "anvil" : "furnace",
+            targetSkill: "smithing",
+            targetSkillLevel: smithLevel + 1,
+          },
+          reason: playerHasBars
+            ? "Has bars + inventory > 20 → smith"
+            : "Has ore + inventory > 20 → smelt",
+        }),
+        ctx.recentGoalCounts,
+      ),
+    );
+  }
+
+  // --- Gear upgrade desire ---
+  {
+    const attackLevel = getSkillLevel(player, "attack");
+    const bestTier = getBestEquippableTier(attackLevel);
+    const currentWeaponTier = getEquippedWeaponTier(player);
+    const smithLevel = getSkillLevel(player, "smithing");
+
+    if (
+      bestTier.tierName !== currentWeaponTier &&
+      smithLevel >= bestTier.smithingLevel &&
+      (hasBars(player) || hasOre(player))
+    ) {
+      const playerHasBars = hasBars(player);
+      candidates.push(
+        buildDesire(
+          "gear_upgrade",
+          personality,
+          goalHistory,
+          player,
+          () => ({
+            goal: {
+              type: "smithing",
+              description: playerHasBars
+                ? `Smith ${bestTier.tierName} equipment`
+                : `Smelt ore for ${bestTier.tierName} gear`,
+              target: 1,
+              progress: 0,
+              startedAt: Date.now(),
+              location: playerHasBars ? "anvil" : "furnace",
+              targetSkill: "smithing",
+              targetSkillLevel: smithLevel + 1,
+            },
+            reason: `Gear upgrade → ${bestTier.tierName} (attack ${attackLevel}, smithing ${smithLevel})`,
+          }),
+          ctx.recentGoalCounts,
+        ),
+      );
+    }
+  }
+
+  // --- Combat food prep desire (fishing for food before combat) ---
+  if (
+    hasCombatCapableItem(player) &&
+    countFood(player) < COMBAT_FOOD_THRESHOLD &&
+    hasFishingEquipment(player)
+  ) {
+    candidates.push(
+      buildDesire(
+        "combat_food_prep",
+        personality,
+        goalHistory,
+        player,
+        () => ({
+          goal: {
+            type: "fishing",
+            description: "Fish for food before combat",
+            target: 1,
+            progress: 0,
+            startedAt: Date.now(),
+            location: "fishing",
+            targetSkill: "fishing",
+            targetSkillLevel: getSkillLevel(player, "fishing") + 1,
+          },
+          reason: `Food count ${countFood(player)} < ${COMBAT_FOOD_THRESHOLD} → fish for food`,
+        }),
+        ctx.recentGoalCounts,
+      ),
+    );
+  }
+
+  // --- Exploration desire (always available as fallback) ---
+  candidates.push(
+    buildDesire(
+      "exploration",
+      personality,
+      goalHistory,
+      player,
+      () => ({
+        goal: {
+          type: "exploration",
+          description: "Explore the world",
+          target: 3,
+          progress: 0,
+          startedAt: Date.now(),
+        },
+        reason: "Exploration desire",
+      }),
+      ctx.recentGoalCounts,
+    ),
+  );
+
+  // --- Score and sort candidates ---
+  candidates.sort((a, b) => b.score - a.score);
+
+  // Store desire candidates for dashboard display
+  lastDesireCandidates = candidates.map((c) => ({
+    goalType: c.id,
+    score: Math.round(c.score * 10) / 10,
+    breakdown: `base=${c.baseWeight}+duel${c.duelPrepBonus} pers=${c.personalityMul.toFixed(2)} sat=${c.satiation.toFixed(2)} opp=${c.opportunityBonus.toFixed(1)}`,
+  }));
+
+  // Log all desire scores
+  const scoreLog = candidates
+    .map((c) => `${c.id}=${c.score.toFixed(1)}`)
+    .join(", ");
+  logger.info(`[GoalPlanner] Desire scores: ${scoreLog}`);
+
+  // Pick the winner (first with score > 0)
+  const winner = candidates.find((c) => c.score > 0);
+  if (winner) {
+    const plan = winner.buildGoal();
+    plan.reason += ` [score=${winner.score.toFixed(1)} base=${winner.baseWeight}+duel${winner.duelPrepBonus} pers=${winner.personalityMul.toFixed(2)} sat=${winner.satiation.toFixed(2)} opp=${winner.opportunityBonus.toFixed(1)}]`;
+    return plan;
+  }
+
+  // All desires scored 0 — fall through to LLM
+  return null;
+}
+
+/**
+ * Build a scored DesireCandidate from components.
+ */
+function buildDesire(
+  id: string,
+  personality: PersonalityTraits,
+  goalHistory: Array<{ type: string; skill?: string; completedAt: number }>,
+  player: PlayerEntity,
+  buildGoal: () => GoalPlan,
+  recentGoalCounts?: Record<string, number>,
+): DesireCandidate {
+  const baseWeight = DESIRE_BASE_WEIGHTS[id] ?? 20;
+  const personalityMul = computePersonalityMul(id, personality);
+  const satiation = computeSatiation(id, goalHistory, personality.patience);
+  const opportunityBonus = computeOpportunityBonus(id, player);
+  const duelPrepBonus = computeDuelPrepBonus(id, player);
+
+  // Activity variety multiplier — penalize over-represented goal types
+  let varietyMul = 1.0;
+  if (recentGoalCounts) {
+    const myCount = recentGoalCounts[id] ?? 0;
+    const totalGoals = Object.values(recentGoalCounts).reduce(
+      (sum, v) => sum + v,
+      0,
+    );
+    if (totalGoals > 0) {
+      varietyMul = Math.max(0.7, 1.3 - (myCount / totalGoals) * 0.6);
+    }
+  }
+
+  // Duel-prep bonus is additive to base weight, then scaled by personality/satiation/opportunity/variety
+  const effectiveBase = baseWeight + duelPrepBonus;
+  const score =
+    effectiveBase *
+    personalityMul *
+    (1 - satiation) *
+    opportunityBonus *
+    varietyMul;
+
   return {
-    goal: {
-      type: "exploration",
-      description: "Explore the world",
-      target: 3,
-      progress: 0,
-      startedAt: Date.now(),
-    },
-    reason: "No other phase matched → exploration",
+    id,
+    baseWeight,
+    personalityMul,
+    satiation,
+    opportunityBonus,
+    duelPrepBonus,
+    score,
+    buildGoal,
   };
 }
 
@@ -661,8 +1160,17 @@ export function buildPlannerContext(
   quests: QuestData[],
   recentGoalCounts: Record<string, number>,
   bankItemNames?: string[],
+  personality?: PersonalityTraits,
+  goalHistory?: Array<{ type: string; skill?: string; completedAt: number }>,
 ): PlannerContext {
-  return { player, quests, recentGoalCounts, bankItemNames };
+  return {
+    player,
+    quests,
+    recentGoalCounts,
+    bankItemNames,
+    personality: personality || DEFAULT_PERSONALITY,
+    goalHistory: goalHistory || [],
+  };
 }
 
 /**

@@ -391,6 +391,13 @@ export { prayerDataProvider } from "./data/PrayerDataProvider";
 export { spellService } from "./systems/shared/combat/SpellService";
 export type { Spell } from "./systems/shared/combat/SpellService";
 
+// Export combat spell manifest data (used by duel orchestrator for best-spell selection)
+export { COMBAT_SPELLS, SPELL_ORDER } from "./data/combat-spells";
+export type { SpellData } from "./data/combat-spells";
+
+// Export elemental staff rune mappings (used by duel orchestrator for rune provisioning)
+export { ELEMENTAL_STAVES } from "./data/runes";
+
 // Export world area data for server use
 export { ALL_WORLD_AREAS, STARTER_TOWNS } from "./data/world-areas";
 
@@ -686,9 +693,8 @@ export type { GLBData } from "./types/index";
 // Re-export storage types
 export type { Storage } from "./platform/shared/storage";
 export { LocalStorage } from "./platform/shared/storage";
-// Export server-side NodeStorage from storage.server
-// Note: This import uses the build-time path (relative to build directory)
-export { NodeStorage } from "./storage.server";
+// Export server-side NodeStorage for Node/Bun runtimes
+export { NodeStorage } from "./platform/server/storage.server";
 // Export file-based Storage class (for server use)
 // export { Storage as FileStorage } from './systems/Storage'; // Disabled: file doesn't exist
 

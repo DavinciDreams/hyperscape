@@ -579,7 +579,7 @@ export class ResourceSystem extends SystemBase {
     // Load explicit resource placements from world-areas.json (server only)
     // This must be in start() not init() because network broadcast isn't ready during init()
     if (this.world.isServer) {
-      this.initializeWorldAreaResources();
+      await this.initializeWorldAreaResources();
 
       // SECURITY: Periodic cleanup of stale rate limit entries
       // Prevents memory leak from disconnected players
@@ -600,7 +600,7 @@ export class ResourceSystem extends SystemBase {
    * Initialize resources from world-areas.json manifest
    * Called once on server startup to spawn explicit resource placements
    */
-  private initializeWorldAreaResources(): void {
+  private async initializeWorldAreaResources(): Promise<void> {
     // Type mapping: resources.json type → TerrainResourceSpawnPoint type
     const typeMap: Record<string, TerrainResourceSpawnPoint["type"]> = {
       tree: "tree",
@@ -676,7 +676,7 @@ export class ResourceSystem extends SystemBase {
           );
         }
         // Pass isManifest: true to protect these resources from tile unload deletion
-        this.registerTerrainResources({ spawnPoints, isManifest: true });
+        await this.registerTerrainResources({ spawnPoints, isManifest: true });
       }
 
       // Spawn dynamic fishing spots if configured for this area
@@ -849,136 +849,142 @@ export class ResourceSystem extends SystemBase {
     let spawned = 0;
 
     for (const spawnPoint of spawnPoints) {
-      const resource = this.createResourceFromSpawnPoint(spawnPoint);
-      if (!resource) {
-        continue;
-      }
-
-      // Store in map for tracking
-      const rid = createResourceID(resource.id);
-      this.resources.set(rid, resource);
-
-      // Mark manifest resources so they're not deleted on tile unload
-      if (isManifest) {
-        this.manifestResourceIds.add(rid);
-      }
-
-      if (DEBUG_GATHERING) {
-        console.log(
-          `[ResourceSystem] Stored resource in map: id="${resource.id}", rid="${rid}", map size=${this.resources.size}${isManifest ? " (manifest)" : ""}`,
-        );
-      }
-      // Track variant/subtype for tuning (e.g., 'tree_oak', 'ore_copper')
-      const variant = spawnPoint.subType
-        ? `${resource.type}_${spawnPoint.subType}`
-        : `${resource.type}_normal`;
-      this.resourceVariants.set(rid, variant);
-
-      // OSRS-ACCURACY: Initialize fishing spot movement timer
-      if (
-        resource.type === "fishing_spot" ||
-        resource.skillRequired === "fishing"
-      ) {
-        this.initializeFishingSpotTimer(rid, resource.position);
-      }
-
-      // Spawn actual ResourceEntity instance
-      // Use rotation from spawn point if available (deterministic from BiomeResourceGenerator)
-      // Otherwise fall back to random rotation
-      const yRotation = spawnPoint.rotation ?? Math.random() * Math.PI * 2;
-      const quat = {
-        x: 0,
-        y: Math.sin(yRotation / 2),
-        z: 0,
-        w: Math.cos(yRotation / 2),
-      };
-
-      // OSRS-ACCURACY: Calculate tile footprint data for proper interaction positioning
-      const footprint: ResourceFootprint = resource.footprint || "standard";
-      const anchorTile = worldToTile(resource.position.x, resource.position.z);
-      const occupiedTiles = this.getOccupiedTiles(anchorTile, footprint);
-
-      // Get base scale from manifest and multiply by spawn point variation
-      const baseScale = this.getScaleForResource(
-        resource.type,
-        spawnPoint.subType,
-      );
-      const scaleVariation = spawnPoint.scale ?? 1.0;
-      const finalScale = baseScale * scaleVariation;
-
-      // Same for depleted model scale
-      const baseDepletedScale = this.getDepletedScaleForResource(
-        resource.type,
-        spawnPoint.subType,
-      );
-      const finalDepletedScale = baseDepletedScale * scaleVariation;
-
-      const resourceConfig = {
-        id: resource.id,
-        type: "resource" as const,
-        name: resource.name,
-        position: {
-          x: resource.position.x,
-          y: resource.position.y,
-          z: resource.position.z,
-        },
-        rotation: quat, // Quaternion from spawn point or random
-        scale: { x: 1, y: 1, z: 1 }, // ALWAYS uniform scale - ResourceEntity handles mesh scale
-        visible: true,
-        interactable: true,
-        interactionType: "harvest",
-        interactionDistance: 3,
-        description: `${resource.name} - Requires level ${resource.levelRequired} ${resource.skillRequired}`,
-        model: this.getModelPathForResource(resource.type, spawnPoint.subType),
-        properties: {},
-        // ResourceEntity specific
-        // Map manifest type to ResourceType enum value
-        // Manifest uses: "tree", "ore", "fishing_spot"
-        // Enum expects: "tree", "mining_rock", "fishing_spot"
-        resourceType: resource.type === "ore" ? "mining_rock" : resource.type,
-        resourceId: spawnPoint.subType
-          ? `${resource.type}_${spawnPoint.subType}`
-          : `${resource.type}_normal`,
-        harvestSkill: resource.skillRequired,
-        requiredLevel: resource.levelRequired,
-        harvestTime: 3000,
-        harvestYield: resource.drops.map((drop) => ({
-          itemId: drop.itemId,
-          quantity: drop.quantity,
-          chance: drop.chance,
-        })),
-        respawnTime: resource.respawnTime,
-        depleted: false,
-        // Manifest-driven model config with scale variation applied
-        depletedModelPath: this.getDepletedModelPathForResource(
-          resource.type,
-          spawnPoint.subType,
-        ),
-        modelScale: finalScale,
-        depletedModelScale: finalDepletedScale,
-        // LOD support - use LOD1 model for medium distance rendering
-        lod1Model: this.getLod1ModelPathForResource(
-          resource.type,
-          spawnPoint.subType,
-        ),
-        lod1ModelScale: finalScale, // Same scale variation as main model
-        // Procgen preset for runtime procedural tree generation
-        procgenPreset: this.getProcgenPresetForResource(
-          resource.type,
-          spawnPoint.subType,
-        ),
-        // Model variants for visual variation (hash-picked per instance)
-        modelVariants: this.getModelVariantsForResource(
-          resource.type,
-          spawnPoint.subType,
-        ),
-        // OSRS-ACCURACY: Tile-based positioning for face direction and interaction
-        footprint,
-        anchorTile,
-        occupiedTiles,
-      };
-
       try {
+        const resource = this.createResourceFromSpawnPoint(spawnPoint);
+        if (!resource) {
+          continue;
+        }
+
+        // Store in map for tracking
+        const rid = createResourceID(resource.id);
+        this.resources.set(rid, resource);
+
+        // Mark manifest resources so they're not deleted on tile unload
+        if (isManifest) {
+          this.manifestResourceIds.add(rid);
+        }
+
+        if (DEBUG_GATHERING) {
+          console.log(
+            `[ResourceSystem] Stored resource in map: id="${resource.id}", rid="${rid}", map size=${this.resources.size}${isManifest ? " (manifest)" : ""}`,
+          );
+        }
+        // Track variant/subtype for tuning (e.g., 'tree_oak', 'ore_copper')
+        const variant = spawnPoint.subType
+          ? `${resource.type}_${spawnPoint.subType}`
+          : `${resource.type}_normal`;
+        this.resourceVariants.set(rid, variant);
+
+        // OSRS-ACCURACY: Initialize fishing spot movement timer
+        if (
+          resource.type === "fishing_spot" ||
+          resource.skillRequired === "fishing"
+        ) {
+          this.initializeFishingSpotTimer(rid, resource.position);
+        }
+
+        // Spawn actual ResourceEntity instance
+        // Use rotation from spawn point if available (deterministic from BiomeResourceGenerator)
+        // Otherwise fall back to random rotation
+        const yRotation = spawnPoint.rotation ?? Math.random() * Math.PI * 2;
+        const quat = {
+          x: 0,
+          y: Math.sin(yRotation / 2),
+          z: 0,
+          w: Math.cos(yRotation / 2),
+        };
+
+        // OSRS-ACCURACY: Calculate tile footprint data for proper interaction positioning
+        const footprint: ResourceFootprint = resource.footprint || "standard";
+        const anchorTile = worldToTile(
+          resource.position.x,
+          resource.position.z,
+        );
+        const occupiedTiles = this.getOccupiedTiles(anchorTile, footprint);
+
+        // Get base scale from manifest and multiply by spawn point variation
+        const baseScale = this.getScaleForResource(
+          resource.type,
+          spawnPoint.subType,
+        );
+        const scaleVariation = spawnPoint.scale ?? 1.0;
+        const finalScale = baseScale * scaleVariation;
+
+        // Same for depleted model scale
+        const baseDepletedScale = this.getDepletedScaleForResource(
+          resource.type,
+          spawnPoint.subType,
+        );
+        const finalDepletedScale = baseDepletedScale * scaleVariation;
+
+        const resourceConfig = {
+          id: resource.id,
+          type: "resource" as const,
+          name: resource.name,
+          position: {
+            x: resource.position.x,
+            y: resource.position.y,
+            z: resource.position.z,
+          },
+          rotation: quat, // Quaternion from spawn point or random
+          scale: { x: 1, y: 1, z: 1 }, // ALWAYS uniform scale - ResourceEntity handles mesh scale
+          visible: true,
+          interactable: true,
+          interactionType: "harvest",
+          interactionDistance: 3,
+          description: `${resource.name} - Requires level ${resource.levelRequired} ${resource.skillRequired}`,
+          model: this.getModelPathForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          properties: {},
+          // ResourceEntity specific
+          // Map manifest type to ResourceType enum value
+          // Manifest uses: "tree", "ore", "fishing_spot"
+          // Enum expects: "tree", "mining_rock", "fishing_spot"
+          resourceType: resource.type === "ore" ? "mining_rock" : resource.type,
+          resourceId: spawnPoint.subType
+            ? `${resource.type}_${spawnPoint.subType}`
+            : `${resource.type}_normal`,
+          harvestSkill: resource.skillRequired,
+          requiredLevel: resource.levelRequired,
+          harvestTime: 3000,
+          harvestYield: resource.drops.map((drop) => ({
+            itemId: drop.itemId,
+            quantity: drop.quantity,
+            chance: drop.chance,
+          })),
+          respawnTime: resource.respawnTime,
+          depleted: false,
+          // Manifest-driven model config with scale variation applied
+          depletedModelPath: this.getDepletedModelPathForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          modelScale: finalScale,
+          depletedModelScale: finalDepletedScale,
+          // LOD support - use LOD1 model for medium distance rendering
+          lod1Model: this.getLod1ModelPathForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          lod1ModelScale: finalScale, // Same scale variation as main model
+          // Procgen preset for runtime procedural tree generation
+          procgenPreset: this.getProcgenPresetForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          // Model variants for visual variation (hash-picked per instance)
+          modelVariants: this.getModelVariantsForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          // OSRS-ACCURACY: Tile-based positioning for face direction and interaction
+          footprint,
+          anchorTile,
+          occupiedTiles,
+        };
+
         const spawnedEntity = (await entityManager.spawnEntity(
           resourceConfig,
         )) as { id?: string } | null;
@@ -987,14 +993,16 @@ export class ResourceSystem extends SystemBase {
         }
       } catch (err) {
         console.error(
-          `[ResourceSystem] Failed to spawn resource entity ${resource.id}:`,
+          `[ResourceSystem] Failed to spawn resource "${spawnPoint.subType ?? "normal"}" (type=${spawnPoint.type}):`,
           err,
         );
       }
     }
 
     if (spawned > 0) {
-      // Resources spawned successfully
+      console.log(
+        `[ResourceSystem] Spawned ${spawned}/${spawnPoints.length} resource entities${isManifest ? " (manifest)" : ""}`,
+      );
     }
   }
 
@@ -3090,6 +3098,21 @@ export class ResourceSystem extends SystemBase {
    */
   getResource(resourceId: string): Resource | undefined {
     return this.resources.get(createResourceID(resourceId));
+  }
+
+  /**
+   * Check if a player is actively gathering a specific resource.
+   * Used to prevent repeated gather requests from creating unnecessary objects.
+   *
+   * @param playerId - The player ID
+   * @param resourceId - The resource ID to check
+   * @returns true if player is actively gathering this exact resource
+   */
+  isPlayerGatheringResource(playerId: string, resourceId: string): boolean {
+    const session = this.activeGathering.get(playerId as PlayerID);
+    if (!session) return false;
+    const normalizedResourceId = createResourceID(resourceId);
+    return session.resourceId === normalizedResourceId;
   }
 
   /**

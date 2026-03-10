@@ -44,9 +44,13 @@ export interface StreamingDuelCycle {
 
   // Active duel tracking
   duelId: string | null;
+  duelKeyHex: string | null;
   arenaId: number | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
   countdownValue: number | null; // 3, 2, 1, 0
   fightStartTime: number | null;
+  duelEndTime: number | null;
   arenaPositions: {
     agent1: [number, number, number];
     agent2: [number, number, number];
@@ -56,6 +60,8 @@ export interface StreamingDuelCycle {
   winnerId: string | null;
   loserId: string | null;
   winReason: "kill" | "hp_advantage" | "damage_advantage" | "draw" | null;
+  seed: string | null;
+  replayHash: string | null;
 }
 
 export interface AgentDuelStats {
@@ -130,8 +136,13 @@ export interface StreamingStateUpdate {
     agent1: StreamingCycleAgent | null;
     agent2: StreamingCycleAgent | null;
 
+    duelId: string | null;
+    duelKeyHex: string | null;
+    betOpenTime: number | null;
+    betCloseTime: number | null;
     countdown: number | null;
     fightStartTime: number | null;
+    duelEndTime: number | null;
     arenaPositions: {
       agent1: [number, number, number];
       agent2: [number, number, number];
@@ -139,6 +150,8 @@ export interface StreamingStateUpdate {
     winnerId: string | null;
     winnerName: string | null;
     winReason: string | null;
+    seed: string | null;
+    replayHash: string | null;
   };
   leaderboard: LeaderboardEntry[];
   cameraTarget: string | null;
@@ -203,6 +216,8 @@ export const STREAMING_TIMING = {
   COUNTDOWN_DURATION: (COUNTDOWN_TICKS + 1) * 1000,
   STATE_BROADCAST_INTERVAL: 1000, // Broadcast every 1 second
   FIGHT_BROADCAST_INTERVAL: 200, // Faster updates during fight
+  /** Minimum announcement time before early-exit is allowed (#21) */
+  MIN_ANNOUNCEMENT_DURATION: 10_000,
   /** Delay between end of one cycle's cleanup and start of the next cycle.
    * Gives spectators a visual reset and prevents stale avatar artifacts. */
   INTER_CYCLE_DELAY_MS: 2000,

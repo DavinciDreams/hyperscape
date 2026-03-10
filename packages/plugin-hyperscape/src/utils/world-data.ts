@@ -42,6 +42,26 @@ export interface GearTier {
   smithingLevel: number;
 }
 
+export interface PrayerEntry {
+  id: string;
+  name: string;
+  level: number;
+  category: string;
+}
+
+export interface RuneEntry {
+  id: string;
+  name: string;
+  element: string | null;
+}
+
+export interface ToolEntry {
+  itemId: string;
+  skill: string;
+  tier: string;
+  levelRequired: number;
+}
+
 interface ManifestCache {
   woodcutting: ResourceEntry[] | null;
   mining: ResourceEntry[] | null;
@@ -49,6 +69,9 @@ interface ManifestCache {
   food: FoodEntry[] | null;
   bankPosition: [number, number, number] | null;
   monsters: MonsterTier[] | null;
+  prayers: PrayerEntry[] | null;
+  runes: RuneEntry[] | null;
+  tools: ToolEntry[] | null;
   loaded: boolean;
 }
 
@@ -63,6 +86,9 @@ const cache: ManifestCache = {
   food: null,
   bankPosition: null,
   monsters: null,
+  prayers: null,
+  runes: null,
+  tools: null,
   loaded: false,
 };
 
@@ -232,8 +258,56 @@ function ensureLoaded(): void {
         .sort((a, b) => a.level - b.level);
     }
 
+    // Prayers
+    const pr = readJSON(path.join(dir, "prayers.json")) as {
+      prayers?: Array<{
+        id: string;
+        name: string;
+        level: number;
+        category: string;
+      }>;
+    } | null;
+    if (pr?.prayers) {
+      cache.prayers = pr.prayers.map((p) => ({
+        id: p.id,
+        name: p.name,
+        level: p.level ?? 1,
+        category: p.category ?? "offensive",
+      }));
+    }
+
+    // Runes
+    const rn = readJSON(path.join(dir, "runes.json")) as {
+      runes?: Array<{ id: string; name: string; element: string | null }>;
+    } | null;
+    if (rn?.runes) {
+      cache.runes = rn.runes.map((r) => ({
+        id: r.id,
+        name: r.name,
+        element: r.element ?? null,
+      }));
+    }
+
+    // Tools (root is array)
+    const tl = readJSON(path.join(dir, "tools.json"));
+    if (Array.isArray(tl)) {
+      cache.tools = (
+        tl as Array<{
+          itemId: string;
+          skill: string;
+          tier: string;
+          levelRequired: number;
+        }>
+      ).map((t) => ({
+        itemId: t.itemId,
+        skill: t.skill,
+        tier: t.tier ?? "standard",
+        levelRequired: t.levelRequired ?? 1,
+      }));
+    }
+
     logger.info(
-      `[WorldData] Loaded manifests: ${cache.woodcutting?.length ?? 0} trees, ${cache.mining?.length ?? 0} rocks, ${cache.fishing?.length ?? 0} fishing spots, ${cache.food?.length ?? 0} food items, ${cache.monsters?.length ?? 0} monsters, bank=${cache.bankPosition ? "yes" : "no"}`,
+      `[WorldData] Loaded manifests: ${cache.woodcutting?.length ?? 0} trees, ${cache.mining?.length ?? 0} rocks, ${cache.fishing?.length ?? 0} fishing spots, ${cache.food?.length ?? 0} food items, ${cache.monsters?.length ?? 0} monsters, ${cache.prayers?.length ?? 0} prayers, ${cache.runes?.length ?? 0} runes, ${cache.tools?.length ?? 0} tools, bank=${cache.bankPosition ? "yes" : "no"}`,
     );
   } catch (err) {
     logger.warn(
@@ -323,6 +397,44 @@ export function getMonsterForCombatLevel(
     }
   }
   return best;
+}
+
+/**
+ * Get all prayer IDs from manifest.
+ * Returns empty array if manifests not loaded.
+ */
+export function getPrayerIds(): string[] {
+  ensureLoaded();
+  return cache.prayers?.map((p) => p.id) ?? [];
+}
+
+/**
+ * Get rune element types from manifest (unique, non-null elements).
+ * Returns empty array if manifests not loaded.
+ */
+export function getRuneTypes(): string[] {
+  ensureLoaded();
+  if (!cache.runes) return [];
+  const elements = cache.runes
+    .map((r) => r.element)
+    .filter((e): e is string => e !== null);
+  return [...new Set(elements)];
+}
+
+/**
+ * Get all tool item IDs from manifest.
+ */
+export function getToolIds(): string[] {
+  ensureLoaded();
+  return cache.tools?.map((t) => t.itemId) ?? [];
+}
+
+/**
+ * Get tools filtered by skill name (e.g. "woodcutting", "mining", "fishing").
+ */
+export function getToolsForSkill(skill: string): ToolEntry[] {
+  ensureLoaded();
+  return cache.tools?.filter((t) => t.skill === skill) ?? [];
 }
 
 // ---------------------------------------------------------------------------

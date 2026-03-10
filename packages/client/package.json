@@ -24,9 +24,9 @@
     "preview": "vite preview",
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "test": "node node_modules/vitest/vitest.mjs run --passWithNoTests",
-    "test:watch": "node node_modules/vitest/vitest.mjs",
-    "test:coverage": "node node_modules/vitest/vitest.mjs run --coverage",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ci": "PW_HEADLESS=0 xvfb-run -a playwright test",
     "test:e2e:web3": "playwright test tests/e2e/web3-login.spec.ts",
@@ -65,6 +65,7 @@
     "@solana/web3.js": "^1.98.4",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-opener": "^2.3.0",
+    "@xyflow/react": "^12.10.1",
     "buffer": "^6.0.3",
     "canonicalize": "^2.1.0",
     "d3": "^7.9.0",
@@ -103,7 +104,7 @@
     "@typescript-eslint/eslint-plugin": "^8.38.0",
     "@typescript-eslint/parser": "^8.38.0",
     "@vitejs/plugin-react": "^5.1.4",
-    "@vitest/coverage-v8": "^2.1.0",
+    "@vitest/coverage-v8": "^4.0.6",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.27.0",
     "eslint": "^10.0.2",
@@ -119,7 +120,7 @@
     "typescript": "^5.9.3",
     "vite": "^6.4.1",
     "vite-plugin-node-polyfills": "^0.25.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.0.6"
   },
   "peerDependencies": {
     "@types/react": "^19.2.14",

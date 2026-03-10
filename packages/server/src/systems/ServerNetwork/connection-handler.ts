@@ -1,14 +1,12 @@
 /**
  * Connection Handler Module - WebSocket connection management
  *
- * Handles incoming WebSocket connections including authentication, terrain waiting,
- * spawn position calculation, snapshot creation, and player initialization.
+ * Handles incoming WebSocket connections including authentication,
+ * snapshot creation, and player initialization.
  *
  * This is the most complex module in ServerNetwork as it orchestrates many systems:
  * - Authentication (Privy, JWT)
  * - Character system (loading character list)
- * - Terrain system (waiting for ready, grounding spawn position)
- * - Database system (loading saved player position)
  * - Resource system (sending resource snapshot)
  * - LiveKit (optional video chat integration)
  *
@@ -16,8 +14,6 @@
  * - Validate incoming connections
  * - Check player limit
  * - Authenticate users (URL param or first-message auth)
- * - Wait for terrain system to be ready
- * - Calculate grounded spawn position
  * - Create and send initial snapshot
  * - Register socket in sockets map
  * - Emit player joined event
@@ -38,7 +34,6 @@ import type { World } from "@hyperscape/shared";
 import {
   Socket,
   EventType,
-  TerrainSystem,
   getDuelArenaConfig,
   writePacket,
   readPacket,
@@ -49,12 +44,12 @@ import type {
   ConnectionParams,
   NodeWebSocket,
   ServerSocket,
-  SpawnData,
   ResourceSystem,
   NetworkWithSocket,
   SystemDatabase,
 } from "../../shared/types";
 import { STREAMING_PUBLIC_DELAY_MS } from "../../streaming/streaming-policy.js";
+import { resolveStreamingViewerAccessToken } from "../../streaming/stream-viewer-access-token.js";
 import { authenticateUser, checkUserBan } from "./authentication";
 import { loadCharacterList } from "./character-selection";
 import type { BroadcastManager } from "./broadcast";
@@ -105,9 +100,7 @@ function formatBanMessage(banInfo: {
   return message;
 }
 
-const STREAMING_VIEWER_ACCESS_TOKEN = (
-  process.env.STREAMING_VIEWER_ACCESS_TOKEN || ""
-).trim();
+const STREAMING_VIEWER_ACCESS_TOKEN = resolveStreamingViewerAccessToken();
 const IS_PLAYWRIGHT_TEST = process.env.PLAYWRIGHT_TEST === "true";
 let lastSpectatorTargetMissingWarnAt = 0;
 
@@ -124,14 +117,12 @@ export class ConnectionHandler {
    * @param world - Game world instance
    * @param sockets - Map of active sockets (modified by reference)
    * @param broadcast - Broadcast manager for sending messages
-   * @param getSpawn - Function to get current spawn point
    * @param db - Database instance for authentication
    */
   constructor(
     private world: World,
     private sockets: Map<string, ServerSocket>,
     private broadcast: BroadcastManager,
-    private getSpawn: () => SpawnData,
     private db: SystemDatabase,
   ) {}
 
@@ -261,16 +252,8 @@ export class ConnectionHandler {
       // Create socket
       const socket = this.createSocket(ws, user.id);
 
-      // Wait for terrain system
-      if (!(await this.waitForTerrain(ws))) {
-        return;
-      }
-
       // Load character list
       const characters = await loadCharacterList(user.id, this.world);
-
-      // Calculate spawn position
-      const spawnPosition = await this.calculateSpawnPosition(socket.id);
 
       // Create and send snapshot
       await this.sendSnapshot(socket, {
@@ -279,7 +262,6 @@ export class ConnectionHandler {
         userWithPrivy,
         livekit,
         characters,
-        spawnPosition,
       });
 
       // Send resource snapshot
@@ -551,16 +533,8 @@ export class ConnectionHandler {
           // Create socket
           const socket = this.createSocket(ws, user.id);
 
-          // Wait for terrain system
-          if (!(await this.waitForTerrain(ws))) {
-            return;
-          }
-
           // Load character list
           const characters = await loadCharacterList(user.id, this.world);
-
-          // Calculate spawn position
-          const spawnPosition = await this.calculateSpawnPosition(socket.id);
 
           // Create and send snapshot
           await this.sendSnapshot(socket, {
@@ -569,7 +543,6 @@ export class ConnectionHandler {
             userWithPrivy,
             livekit,
             characters,
-            spawnPosition,
           });
 
           // Send resource snapshot
@@ -639,152 +612,6 @@ export class ConnectionHandler {
   }
 
   /**
-   * Wait for terrain system to be ready
-   *
-   * Terrain must be ready before we can ground spawn positions.
-   * Polls for up to 10 seconds, then fails the connection.
-   *
-   * @param ws - WebSocket to close if terrain not ready
-   * @returns True if terrain ready, false if timed out
-   * @private
-   */
-  private async waitForTerrain(ws: NodeWebSocket): Promise<boolean> {
-    const terrain = this.world.getSystem("terrain") as InstanceType<
-      typeof TerrainSystem
-    > | null;
-
-    if (!terrain) {
-      return true; // No terrain system, proceed anyway
-    }
-
-    let terrainReady = false;
-    for (let i = 0; i < 100; i++) {
-      if (terrain.isReady && terrain.isReady()) {
-        terrainReady = true;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    if (!terrainReady) {
-      console.error(
-        "[ConnectionHandler] ❌ Terrain system not ready after 10 seconds!",
-      );
-      if (ws && typeof ws.close === "function") {
-        ws.close(1001, "Server terrain not ready");
-      }
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Calculate spawn position grounded to terrain
-   *
-   * Tries to load saved position from database, otherwise uses configured
-   * spawn point. Grounds position to terrain height.
-   *
-   * @param socketId - Socket ID (used to lookup saved position)
-   * @returns Grounded spawn position [x, y, z]
-   * @private
-   */
-  private async calculateSpawnPosition(
-    socketId: string,
-  ): Promise<[number, number, number]> {
-    const spawn = this.getSpawn();
-
-    // Start with configured spawn point
-    let spawnPosition: [number, number, number] = Array.isArray(spawn.position)
-      ? [
-          Number(spawn.position[0]) || 0,
-          Number(spawn.position[1] ?? 50),
-          Number(spawn.position[2]) || 0,
-        ]
-      : [0, 50, 0];
-
-    // Try to load saved position from database
-    const databaseSystem = this.world.getSystem("database") as
-      | import("../DatabaseSystem").DatabaseSystem
-      | undefined;
-
-    if (databaseSystem) {
-      try {
-        const playerRow = await databaseSystem.getPlayerAsync(socketId);
-        if (playerRow && playerRow.positionX !== undefined) {
-          const savedY =
-            playerRow.positionY !== undefined && playerRow.positionY !== null
-              ? Number(playerRow.positionY)
-              : 50;
-
-          // Only use saved Y if reasonable
-          if (savedY >= -5 && savedY <= 200) {
-            spawnPosition = [
-              Number(playerRow.positionX) || 0,
-              savedY,
-              Number(playerRow.positionZ) || 0,
-            ];
-          }
-        }
-      } catch {
-        // Failed to load, use default
-      }
-    }
-
-    // Ground to terrain (wait briefly for terrain readiness to avoid below-ground spawns)
-    const terrain = this.world.getSystem("terrain") as InstanceType<
-      typeof TerrainSystem
-    > | null;
-
-    let terrainReadyAtSpawn = false;
-    if (terrain) {
-      const terrainWithPhysics = terrain as InstanceType<
-        typeof TerrainSystem
-      > & {
-        isPhysicsReadyAt?: (x: number, z: number) => boolean;
-      };
-      const maxAttempts = 60; // 3s max
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const ready = terrain.isReady?.() ?? true;
-        const physicsReady = terrainWithPhysics.isPhysicsReadyAt
-          ? terrainWithPhysics.isPhysicsReadyAt(
-              spawnPosition[0],
-              spawnPosition[2],
-            )
-          : true;
-        if (ready && physicsReady) {
-          terrainReadyAtSpawn = true;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    }
-
-    if (terrain && terrainReadyAtSpawn) {
-      const terrainHeight = terrain.getHeightAt(
-        spawnPosition[0],
-        spawnPosition[2],
-      );
-
-      if (
-        Number.isFinite(terrainHeight) &&
-        terrainHeight > -100 &&
-        terrainHeight < 1000
-      ) {
-        // Add 1.0 to terrainHeight to prevent the 2.0-tall capsule from clipping into the ground
-        spawnPosition[1] = terrainHeight + 1.0;
-      } else {
-        spawnPosition[1] = Math.max(spawnPosition[1], 10);
-      }
-    } else {
-      // Terrain not ready yet; fallback to a safe minimum height. Do not use 100 or they may fall through the unready physics floor due to high velocity.
-      spawnPosition[1] = Math.max(spawnPosition[1], 10);
-    }
-
-    return spawnPosition;
-  }
-
-  /**
    * Create and send initial snapshot to client
    *
    * The snapshot contains everything the client needs to render the world:
@@ -802,7 +629,6 @@ export class ConnectionHandler {
       userWithPrivy?: { privyUserId?: string | null };
       livekit?: unknown;
       characters: unknown[];
-      spawnPosition: [number, number, number];
     },
   ): Promise<void> {
     const baseSnapshot = {
@@ -1599,11 +1425,6 @@ export class ConnectionHandler {
       socket.spectatingCharacterId = characterId;
       socket.spectatingDuelParticipantIds = streamingContext.contestants;
 
-      // Wait for terrain system
-      if (!(await this.waitForTerrain(ws))) {
-        return;
-      }
-
       // Send snapshot to spectator (no character list, no auth token)
       await this.sendSpectatorSnapshot(socket, {
         ...params,
@@ -1728,11 +1549,6 @@ export class ConnectionHandler {
         socket as ServerSocket & { isStreamingViewer?: boolean }
       ).isStreamingViewer = true;
 
-      // Wait for terrain system
-      if (!(await this.waitForTerrain(ws))) {
-        return;
-      }
-
       // Send streaming snapshot (similar to spectator but no follow entity)
       await this.sendStreamingSnapshot(socket);
 
@@ -1774,6 +1590,7 @@ export class ConnectionHandler {
     const streamingSnapshot = {
       id: socket.id,
       serverTime: performance.now(),
+      worldTime: this.world.getTime(), // Synced world time for day/night cycle
       assetsUrl: this.world.assetsUrl,
       apiUrl: process.env.PUBLIC_API_URL,
       maxUploadSize: process.env.PUBLIC_MAX_UPLOAD_SIZE,
@@ -1791,6 +1608,7 @@ export class ConnectionHandler {
       spectatorMode: true, // Mark as spectator for client behavior
       streamingMode: true, // Additional flag for streaming-specific behavior
       followEntity,
+      worldMap: this.serializeWorldMap(), // World map data for terrain/navigation
     };
 
     socket.send("snapshot", streamingSnapshot);

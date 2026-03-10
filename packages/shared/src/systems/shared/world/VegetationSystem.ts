@@ -715,6 +715,12 @@ export class VegetationSystem extends System {
           continue;
         }
 
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("text/html")) {
+          lastErrorMessage = "Not Found (HTML SPA fallback)";
+          continue;
+        }
+
         const settings = (await response.json()) as {
           version?: number;
           distanceThresholds?: Record<
@@ -2301,6 +2307,9 @@ export class VegetationSystem extends System {
     const worldY =
       instance.position.y + assetDataRef.modelBaseOffset * instance.scale;
 
+    // Skip instances with invalid height (terrain data not ready yet)
+    if (!Number.isFinite(worldY)) return false;
+
     // Water check
     const waterCutoff = WATER_LEVEL + WATER_EDGE_BUFFER;
     if (worldY < waterCutoff) return false;
@@ -2501,7 +2510,10 @@ export class VegetationSystem extends System {
     // This works because chunk meshes have identity transforms (position=0, no rotation/scale).
     const geometry = chunked.mesh.geometry;
     const centerX = (chunked.minX + chunked.maxX) / 2;
-    const centerY = (chunked.minY + chunked.maxY) / 2;
+    const centerY =
+      Number.isFinite(chunked.minY) && Number.isFinite(chunked.maxY)
+        ? (chunked.minY + chunked.maxY) / 2
+        : 0;
     const centerZ = (chunked.minZ + chunked.maxZ) / 2;
 
     // Radius calculation:

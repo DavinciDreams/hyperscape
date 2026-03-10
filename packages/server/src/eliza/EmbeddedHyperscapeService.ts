@@ -12,6 +12,7 @@ import {
   EventType,
   getDuelArenaConfig,
   getItem,
+  ALL_WORLD_AREAS,
   type World,
 } from "@hyperscape/shared";
 import { errMsg } from "../shared/errMsg.js";
@@ -22,6 +23,44 @@ import type {
   AgentQuestProgress,
   AgentQuestInfo,
 } from "./types.js";
+
+/** World map data shape matching plugin-hyperscape WorldMapData */
+interface EmbeddedWorldMapData {
+  towns: Array<{
+    id: string;
+    name: string;
+    position: { x: number; y: number; z: number };
+    size: string;
+    biome: string;
+    buildings: Array<{ type: string }>;
+  }>;
+  pois: Array<{
+    id: string;
+    name: string;
+    category: string;
+    position: { x: number; y: number; z: number };
+    biome: string;
+  }>;
+  resources: Array<{
+    type: string;
+    resourceId: string;
+    position: { x: number; y: number; z: number };
+    areaId: string;
+  }>;
+  stations: Array<{
+    id: string;
+    type: string;
+    position: { x: number; y: number; z: number };
+    areaId: string;
+  }>;
+  npcs: Array<{
+    id: string;
+    type: string;
+    name?: string;
+    position: { x: number; y: number; z: number };
+    areaId: string;
+  }>;
+}
 
 // Distance threshold for "nearby" entities (in world units)
 const NEARBY_DISTANCE = 50;
@@ -72,6 +111,29 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   private _nearbyCache: NearbyEntityData[] = [];
   private _nearbyCacheTick = -1;
 
+  /** Double-buffer for getNearbyEntities to avoid slice() allocations */
+  private _nearbyBufferA: NearbyEntityData[] = [];
+  private _nearbyBufferB: NearbyEntityData[] = [];
+  private _useBufferA = true;
+
+  /** Pool of reusable NearbyEntityData objects to avoid per-entity allocations */
+  private _nearbyEntityPool: NearbyEntityData[] = [];
+  private _nearbyEntityPoolIndex = 0;
+
+  /** Cached getGameState result to avoid per-tick allocations */
+  private _gameStateCache: EmbeddedGameState | null = null;
+  private _gameStateCacheTick = -1;
+
+  /** Cached inventory/equipment to avoid repeated system lookups */
+  private _inventoryCache: Array<{
+    slot: number;
+    itemId: string;
+    quantity: number;
+  }> = [];
+  private _inventoryCacheTick = -1;
+  private _equipmentCache: Record<string, string | null> = {};
+  private _equipmentCacheTick = -1;
+
   /** Local chat message buffer - stores recent messages from nearby entities */
   private localChatBuffer: LocalChatMessage[] = [];
   private static readonly LOCAL_CHAT_BUFFER_SIZE = 10;
@@ -93,15 +155,12 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
    * Initialize the service and spawn the agent's player entity
    */
   async initialize(): Promise<void> {
-    console.log(
-      `[EmbeddedHyperscapeService] Initializing agent ${this.name} (${this.characterId})`,
-    );
     const traceEnabled = process.env.EMBEDDED_AGENT_INIT_TRACE === "true";
     const startTime = Date.now();
     const trace = (step: string) => {
       if (!traceEnabled) return;
       const elapsed = Date.now() - startTime;
-      console.log(
+      console.debug(
         `[EmbeddedHyperscapeService][Trace] ${this.characterId} ${step} (+${elapsed}ms)`,
       );
     };
@@ -109,9 +168,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     // Check if player entity already exists
     const existingEntity = this.world.entities.get(this.characterId);
     if (existingEntity) {
-      console.log(
-        `[EmbeddedHyperscapeService] Player entity already exists: ${this.characterId}`,
-      );
       this.playerEntityId = this.characterId;
       this.isActive = true;
       this.subscribeToWorldEvents();
@@ -280,11 +336,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     // Calculate health from constitution
     const health = skills.constitution.level;
 
-    // Spawn the player entity
-    console.log(
-      `[EmbeddedHyperscapeService] Spawning agent at position [${position.join(", ")}]`,
-    );
-
     const addedEntity = this.world.entities.add
       ? this.world.entities.add({
           id: this.characterId,
@@ -336,10 +387,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
         addedEntity as unknown as import("@hyperscape/shared").PlayerLocal,
       isEmbeddedAgent: true,
     });
-
-    console.log(
-      `[EmbeddedHyperscapeService] ✅ Agent ${this.name} spawned successfully`,
-    );
 
     // Subscribe to world events
     this.subscribeToWorldEvents();
@@ -493,8 +540,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
    * Stop the service and remove the player entity
    */
   async stop(): Promise<void> {
-    console.log(`[EmbeddedHyperscapeService] Stopping agent ${this.name}`);
-
     this.isActive = false;
 
     // Remove world event listeners to prevent leaks on agent restart
@@ -528,8 +573,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     this.localChatBuffer = [];
 
     this.eventHandlers.clear();
-
-    console.log(`[EmbeddedHyperscapeService] ✅ Agent ${this.name} stopped`);
   }
 
   // ============================================================================
@@ -545,6 +588,12 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
       return null;
     }
 
+    // Return cached result if same tick (avoids per-tick allocations)
+    const currentTick = this.world.currentTick ?? 0;
+    if (currentTick === this._gameStateCacheTick && this._gameStateCache) {
+      return this._gameStateCache;
+    }
+
     const player = this.world.entities.get(this.playerEntityId);
     if (!player) {
       return null;
@@ -558,25 +607,53 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     >;
     const inventory = this.getInventoryItems();
     const equippedRaw = this.getEquippedItems();
-    const equipment: Record<string, { itemId: string }> = {};
+
+    // Reuse equipment object if possible
+    const equipment = this._gameStateCache?.equipment || {};
+    // Clear old keys
+    for (const key in equipment) {
+      delete equipment[key];
+    }
     for (const [slot, itemId] of Object.entries(equippedRaw)) {
       if (itemId) equipment[slot] = { itemId };
     }
 
-    return {
-      playerId: this.playerEntityId,
-      position,
-      health: (data.health as number) || 10,
-      maxHealth: (data.maxHealth as number) || 10,
-      alive: data.alive !== false,
-      skills,
-      inventory,
-      equipment,
-      nearbyEntities: this.getNearbyEntities(),
-      inCombat: !!(data.inCombat || data.combatTarget),
-      currentTarget: (data.combatTarget as string) || null,
-      activePrayers: (data.activePrayers as string[]) || [],
-    };
+    // Reuse or create game state object
+    if (!this._gameStateCache) {
+      this._gameStateCache = {
+        playerId: this.playerEntityId,
+        position,
+        health: (data.health as number) || 10,
+        maxHealth: (data.maxHealth as number) || 10,
+        alive: data.alive !== false,
+        skills,
+        inventory,
+        equipment,
+        nearbyEntities: this.getNearbyEntities(),
+        inCombat: !!(data.inCombat || data.combatTarget),
+        currentTarget: (data.combatTarget as string) || null,
+        activePrayers: (data.activePrayers as string[]) || [],
+      };
+    } else {
+      // Update existing cached object in-place
+      this._gameStateCache.playerId = this.playerEntityId;
+      this._gameStateCache.position = position;
+      this._gameStateCache.health = (data.health as number) || 10;
+      this._gameStateCache.maxHealth = (data.maxHealth as number) || 10;
+      this._gameStateCache.alive = data.alive !== false;
+      this._gameStateCache.skills = skills;
+      this._gameStateCache.inventory = inventory;
+      this._gameStateCache.equipment = equipment;
+      this._gameStateCache.nearbyEntities = this.getNearbyEntities();
+      this._gameStateCache.inCombat = !!(data.inCombat || data.combatTarget);
+      this._gameStateCache.currentTarget =
+        (data.combatTarget as string) || null;
+      this._gameStateCache.activePrayers =
+        (data.activePrayers as string[]) || [];
+    }
+
+    this._gameStateCacheTick = currentTick;
+    return this._gameStateCache;
   }
 
   // ============================================================================
@@ -676,8 +753,10 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
       return [];
     }
 
-    const nearby = this.nearbyBuffer;
+    // Use double-buffering: write to inactive buffer, then swap
+    const nearby = this._useBufferA ? this._nearbyBufferA : this._nearbyBufferB;
     nearby.length = 0;
+    this._nearbyEntityPoolIndex = 0;
 
     // Iterate through all entities — use distance-squared to avoid Math.sqrt
     for (const [id, entity] of this.world.entities.items.entries()) {
@@ -729,27 +808,37 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
         equippedWeapon = equipData.weapon.itemId;
       }
 
-      nearby.push({
-        id,
-        name: (entityData.name as string) || id,
-        type: entityType,
-        position: entityPos,
-        distance,
-        health: entityData.health as number | undefined,
-        maxHealth: entityData.maxHealth as number | undefined,
-        level: entityData.level as number | undefined,
-        mobType: entityData.mobType as string | undefined,
-        itemId: entityData.itemId as string | undefined,
-        resourceType: entityData.resourceType as string | undefined,
-        equippedWeapon,
-      });
+      // Reuse object from pool or create new one (pool grows once, then reuses)
+      let entityObj = this._nearbyEntityPool[this._nearbyEntityPoolIndex];
+      if (!entityObj) {
+        entityObj = {} as NearbyEntityData;
+        this._nearbyEntityPool[this._nearbyEntityPoolIndex] = entityObj;
+      }
+      this._nearbyEntityPoolIndex++;
+
+      // Update object in-place
+      entityObj.id = id;
+      entityObj.name = (entityData.name as string) || id;
+      entityObj.type = entityType;
+      entityObj.position = entityPos;
+      entityObj.distance = distance;
+      entityObj.health = entityData.health as number | undefined;
+      entityObj.maxHealth = entityData.maxHealth as number | undefined;
+      entityObj.level = entityData.level as number | undefined;
+      entityObj.mobType = entityData.mobType as string | undefined;
+      entityObj.itemId = entityData.itemId as string | undefined;
+      entityObj.resourceType = entityData.resourceType as string | undefined;
+      entityObj.equippedWeapon = equippedWeapon;
+
+      nearby.push(entityObj);
     }
 
     // Sort by distance
     nearby.sort((a, b) => a.distance - b.distance);
 
-    // Cache a snapshot — callers must not see mutations from the next scan
-    this._nearbyCache = nearby.slice();
+    // Swap buffers - the inactive buffer becomes the cache
+    this._useBufferA = !this._useBufferA;
+    this._nearbyCache = nearby;
     this._nearbyCacheTick = currentTick;
 
     return this._nearbyCache;
@@ -1650,6 +1739,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
    * Get the agent's actual inventory from InventorySystem (not entity data).
    * Entity data.inventory is often empty — the real inventory lives in
    * InventorySystem's playerInventories Map.
+   * Uses tick-based caching to avoid per-tick allocations.
    */
   getInventoryItems(): Array<{
     slot: number;
@@ -1657,6 +1747,12 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     quantity: number;
   }> {
     if (!this.playerEntityId || !this.isActive) return [];
+
+    // Return cached result if same tick
+    const currentTick = this.world.currentTick ?? 0;
+    if (currentTick === this._inventoryCacheTick) {
+      return this._inventoryCache;
+    }
 
     const inventorySystem = this.world.getSystem("inventory") as {
       getInventory?: (playerId: string) =>
@@ -1676,18 +1772,52 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     const inv = inventorySystem.getInventory(this.playerEntityId);
     if (!inv) return [];
 
-    return inv.items.map((i) => ({
-      slot: i.slot,
-      itemId: i.itemId,
-      quantity: i.quantity,
-    }));
+    // Reuse existing cache array, updating in-place where possible
+    const items = inv.items;
+    this._inventoryCache.length = items.length;
+    for (let i = 0; i < items.length; i++) {
+      const src = items[i];
+      let dst = this._inventoryCache[i];
+      if (!dst) {
+        dst = { slot: 0, itemId: "", quantity: 0 };
+        this._inventoryCache[i] = dst;
+      }
+      dst.slot = src.slot;
+      dst.itemId = src.itemId;
+      dst.quantity = src.quantity;
+    }
+
+    this._inventoryCacheTick = currentTick;
+    return this._inventoryCache;
   }
+
+  /** Slot names for equipment - defined once to avoid per-call array creation */
+  private static readonly EQUIPMENT_SLOT_NAMES = [
+    "weapon",
+    "shield",
+    "helmet",
+    "body",
+    "legs",
+    "boots",
+    "gloves",
+    "cape",
+    "amulet",
+    "ring",
+    "arrows",
+  ] as const;
 
   /**
    * Get the agent's currently equipped items from EquipmentSystem.
+   * Uses tick-based caching to avoid per-tick allocations.
    */
   getEquippedItems(): Record<string, string | null> {
     if (!this.playerEntityId || !this.isActive) return {};
+
+    // Return cached result if same tick
+    const currentTick = this.world.currentTick ?? 0;
+    if (currentTick === this._equipmentCacheTick) {
+      return this._equipmentCache;
+    }
 
     const equipmentSystem = this.world.getSystem("equipment") as {
       getPlayerEquipment?: (
@@ -1700,32 +1830,21 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     const eq = equipmentSystem.getPlayerEquipment(this.playerEntityId);
     if (!eq) return {};
 
-    const result: Record<string, string | null> = {};
-    const slotNames = [
-      "weapon",
-      "shield",
-      "helmet",
-      "body",
-      "legs",
-      "boots",
-      "gloves",
-      "cape",
-      "amulet",
-      "ring",
-      "arrows",
-    ];
-    for (const slot of slotNames) {
+    // Update cached object in-place
+    for (const slot of EmbeddedHyperscapeService.EQUIPMENT_SLOT_NAMES) {
       const slotData = eq[slot] as
         | { itemId?: string | number | null }
         | null
         | undefined;
       if (slotData?.itemId) {
-        result[slot] = String(slotData.itemId);
+        this._equipmentCache[slot] = String(slotData.itemId);
       } else {
-        result[slot] = null;
+        this._equipmentCache[slot] = null;
       }
     }
-    return result;
+
+    this._equipmentCacheTick = currentTick;
+    return this._equipmentCache;
   }
 
   /**
@@ -1801,6 +1920,134 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     }
 
     return npcs;
+  }
+
+  // =========================================================================
+  // World Map Data (for agent navigation)
+  // =========================================================================
+
+  /** Cached world map — built once since map data doesn't change at runtime */
+  private _worldMapCache: EmbeddedWorldMapData | null = null;
+
+  /**
+   * Get world map data including towns, POIs, resources, stations, and NPCs.
+   * Built from ALL_WORLD_AREAS manifest + world systems (TownSystem, POISystem).
+   * Matches the shape returned by HyperscapeService.getWorldMap() on the client.
+   */
+  getWorldMap(): EmbeddedWorldMapData | undefined {
+    if (this._worldMapCache) return this._worldMapCache;
+
+    const result: EmbeddedWorldMapData = {
+      towns: [],
+      pois: [],
+      resources: [],
+      stations: [],
+      npcs: [],
+    };
+
+    try {
+      // Get towns from TownSystem
+      const townSystem = this.world.getSystem("towns") as
+        | {
+            getTowns?: () => Array<{
+              id: string;
+              name: string;
+              position: { x: number; y: number; z: number };
+              size: string;
+              biome: string;
+              buildings: Array<{ type: string }>;
+            }>;
+          }
+        | undefined;
+
+      if (townSystem?.getTowns) {
+        for (const t of townSystem.getTowns()) {
+          result.towns.push({
+            id: t.id,
+            name: t.name,
+            position: { x: t.position.x, y: t.position.y, z: t.position.z },
+            size: t.size,
+            biome: t.biome,
+            buildings: t.buildings.map((b) => ({ type: b.type })),
+          });
+        }
+      }
+
+      // Get POIs from POISystem
+      const poiSystem = this.world.getSystem("pois") as
+        | {
+            getPOIs?: () => Array<{
+              id: string;
+              name: string;
+              category: string;
+              position: { x: number; y: number; z: number };
+              biome: string;
+            }>;
+          }
+        | undefined;
+
+      if (poiSystem?.getPOIs) {
+        for (const p of poiSystem.getPOIs()) {
+          result.pois.push({
+            id: p.id,
+            name: p.name,
+            category: p.category,
+            position: { x: p.position.x, y: p.position.y, z: p.position.z },
+            biome: p.biome,
+          });
+        }
+      }
+
+      // Get resources, stations, and NPCs from ALL_WORLD_AREAS manifest
+      for (const area of Object.values(ALL_WORLD_AREAS)) {
+        for (const resource of area.resources) {
+          result.resources.push({
+            type: resource.type,
+            resourceId: resource.resourceId,
+            position: {
+              x: resource.position.x,
+              y: resource.position.y,
+              z: resource.position.z,
+            },
+            areaId: area.id,
+          });
+        }
+
+        if (area.stations) {
+          for (const station of area.stations) {
+            result.stations.push({
+              id: station.id,
+              type: station.type,
+              position: {
+                x: station.position.x,
+                y: station.position.y,
+                z: station.position.z,
+              },
+              areaId: area.id,
+            });
+          }
+        }
+
+        for (const npc of area.npcs) {
+          result.npcs.push({
+            id: npc.id,
+            type: npc.type,
+            name: npc.name,
+            position: {
+              x: npc.position.x,
+              y: npc.position.y,
+              z: npc.position.z,
+            },
+            areaId: area.id,
+          });
+        }
+      }
+    } catch {
+      // Graceful fallback — map data is optional
+    }
+
+    this._worldMapCache = result;
+    return result;
   }
 
   // =========================================================================

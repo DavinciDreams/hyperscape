@@ -1,13 +1,16 @@
 import path from "path";
+import { createRequire } from "module";
 
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
+  const require = createRequire(import.meta.url);
   const env = loadEnv(mode, process.cwd(), "");
   const uiPort = Number(env.ASSET_FORGE_PORT) || 3400;
   const apiPort = Number(env.ASSET_FORGE_API_PORT) || 3401;
+  const threeRoot = path.dirname(path.dirname(require.resolve("three")));
 
   return {
     plugins: [react()],
@@ -18,6 +21,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       target: "esnext", // Support top-level await
+      chunkSizeWarningLimit: 9000, // Asset tooling intentionally ships large WebGPU/PhysX chunks
     },
     resolve: {
       dedupe: ["react", "react-dom", "react/jsx-runtime", "three"],
@@ -30,21 +34,12 @@ export default defineConfig(({ mode }) => {
           "../../node_modules/react/jsx-runtime",
         ),
         // Three.js WebGPU module
-        "three/webgpu": path.resolve(
-          __dirname,
-          "node_modules/three/build/three.webgpu.js",
-        ),
-        "three/tsl": path.resolve(
-          __dirname,
-          "node_modules/three/build/three.tsl.js",
-        ),
+        "three/webgpu": path.resolve(threeRoot, "build/three.webgpu.js"),
+        "three/tsl": path.resolve(threeRoot, "build/three.tsl.js"),
         // Three.js addons (examples/jsm)
-        "three/addons": path.resolve(
-          __dirname,
-          "node_modules/three/examples/jsm",
-        ),
+        "three/addons": path.resolve(threeRoot, "examples/jsm"),
         // Ensure single Three.js instance across all packages
-        three: path.resolve(__dirname, "node_modules/three"),
+        three: threeRoot,
         // Use client-only build of shared to exclude server-side modules (fs-extra, etc.)
         "@hyperscape/shared": path.resolve(
           __dirname,

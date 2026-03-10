@@ -2120,11 +2120,19 @@ describe("Concurrent Processing", () => {
     async function simulateTileGeneration(
       tile: TileData,
       processingTimeMs: number,
+      tracker?: { active: number; max: number },
     ): Promise<void> {
       tile.startTime = Date.now();
+      if (tracker) {
+        tracker.active += 1;
+        tracker.max = Math.max(tracker.max, tracker.active);
+      }
       await new Promise((resolve) => setTimeout(resolve, processingTimeMs));
       tile.generated = true;
       tile.endTime = Date.now();
+      if (tracker) {
+        tracker.active -= 1;
+      }
     }
 
     it("processes tiles in parallel batches", async () => {
@@ -2137,29 +2145,27 @@ describe("Concurrent Processing", () => {
 
       const BATCH_SIZE = 2;
       const PROCESSING_TIME = 50; // ms
+      const tracker = { active: 0, max: 0 };
 
       // Process in batches of 2
       for (let i = 0; i < tiles.length; i += BATCH_SIZE) {
         const batch = tiles.slice(i, i + BATCH_SIZE);
         await Promise.all(
-          batch.map((tile) => simulateTileGeneration(tile, PROCESSING_TIME)),
+          batch.map((tile) =>
+            simulateTileGeneration(tile, PROCESSING_TIME, tracker),
+          ),
         );
       }
 
       // All should be generated
       expect(tiles.every((t) => t.generated)).toBe(true);
+      expect(tracker.max).toBe(BATCH_SIZE);
 
-      // First batch should have started together (within 10ms)
-      const batch1StartDiff = Math.abs(
-        tiles[0].startTime! - tiles[1].startTime!,
-      );
-      expect(batch1StartDiff).toBeLessThan(10);
-
-      // Second batch should have started together
-      const batch2StartDiff = Math.abs(
-        tiles[2].startTime! - tiles[3].startTime!,
-      );
-      expect(batch2StartDiff).toBeLessThan(10);
+      // Tiles within a batch should overlap in execution.
+      expect(tiles[1].startTime!).toBeLessThan(tiles[0].endTime!);
+      expect(tiles[0].startTime!).toBeLessThan(tiles[1].endTime!);
+      expect(tiles[3].startTime!).toBeLessThan(tiles[2].endTime!);
+      expect(tiles[2].startTime!).toBeLessThan(tiles[3].endTime!);
 
       // Second batch should start after first batch finishes
       expect(tiles[2].startTime!).toBeGreaterThanOrEqual(tiles[0].endTime!);

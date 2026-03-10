@@ -327,6 +327,13 @@ export class EquipmentVisualSystem extends SystemBase {
       const itemData = getItem(itemId);
       let equippedModelPath = itemData?.equippedModelPath;
       let modelPath = itemData?.modelPath;
+
+      // If equippedModelPath is explicitly null (not undefined), the item has no 3D model yet.
+      // Skip visual to avoid convention-based URL fallback producing 404 errors.
+      if (equippedModelPath === null) {
+        return;
+      }
+
       if (!equippedModelPath) {
         const cachedItem = this.getItemFromNetworkCache(playerId, slot);
         if (cachedItem?.equippedModelPath) {
@@ -401,6 +408,13 @@ export class EquipmentVisualSystem extends SystemBase {
           const itemKey = itemParts.join("_"); // e.g., "2h_sword" or "longsword"
           assetId = `${itemParts.join("-")}-${material}`; // e.g., "2h-sword-bronze"
           category = categoryMap[itemKey] || categoryMap[itemParts[0]] || "";
+        }
+
+        // If no matching category was found, this item type has no 3D models
+        // available (e.g., helms, platelegs, boots, gloves, capes).
+        // Skip visual to avoid generating 404 requests.
+        if (!category) {
+          return;
         }
 
         // Try fitted version: flat layout first (swords/long-swords/longsword-bronze-aligned.glb),

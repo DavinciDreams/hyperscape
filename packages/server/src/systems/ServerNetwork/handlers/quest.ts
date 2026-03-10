@@ -54,14 +54,35 @@ export function handleGetQuestList(
   // Get all quest definitions
   const allDefinitions = questSystem.getAllQuestDefinitions();
 
+  // Get active quests for stage info
+  const activeQuests = questSystem.getActiveQuests(playerId);
+
   // Build quest list with status for this player
-  const quests = allDefinitions.map((def) => ({
-    id: def.id,
-    name: def.name,
-    status: questSystem.getQuestStatus(playerId, def.id),
-    difficulty: def.difficulty,
-    questPoints: def.questPoints,
-  }));
+  const quests = allDefinitions.map((def) => {
+    const status = questSystem.getQuestStatus(playerId, def.id);
+    const active = activeQuests.find((aq) => aq.questId === def.id);
+    const currentStage = active
+      ? def.stages.find((s) => s.id === active.currentStage)
+      : undefined;
+
+    return {
+      id: def.id,
+      name: def.name,
+      status,
+      difficulty: def.difficulty,
+      questPoints: def.questPoints,
+      startNpc: def.startNpc,
+      // Include current stage info for in-progress quests
+      ...(active && currentStage
+        ? {
+            stageType: currentStage.type,
+            stageTarget: currentStage.target,
+            stageCount: currentStage.count,
+            stageProgress: active.stageProgress,
+          }
+        : {}),
+    };
+  });
 
   const questPoints = questSystem.getQuestPoints(playerId);
 
