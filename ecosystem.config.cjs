@@ -47,6 +47,18 @@ for (const secretsPath of SECRETS_FILES) {
   } catch { /* ignore missing/unreadable files */ }
 }
 
+// Auto-detect DUEL_DATABASE_MODE from DATABASE_URL so sanitizeRuntimeEnv()
+// doesn't strip it when the mode defaults to "local".
+if (!process.env.DUEL_DATABASE_MODE && process.env.DATABASE_URL) {
+  try {
+    const dbHost = new URL(process.env.DATABASE_URL).hostname;
+    const isLocal = ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(dbHost);
+    process.env.DUEL_DATABASE_MODE = isLocal ? "local" : "remote";
+  } catch {
+    process.env.DUEL_DATABASE_MODE = "remote";
+  }
+}
+
 function isLoopbackHostname(hostname) {
   return (
     hostname === "localhost" ||
