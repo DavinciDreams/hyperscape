@@ -1456,21 +1456,15 @@ async function main() {
   }
 
   const defaultPublicCdnUrl = `${serverHttpUrl}/game-assets`;
-  const explicitPublicCdnUrl = (process.env.PUBLIC_CDN_URL || "").trim();
-  const inheritedPublicCdnUrl = (
-    serverEnv.PUBLIC_CDN_URL || ""
-  ).trim();
   const resolvedPublicCdnUrl = (
-    explicitPublicCdnUrl ||
-    inheritedPublicCdnUrl ||
+    process.env.PUBLIC_CDN_URL ||
+    serverEnv.PUBLIC_CDN_URL ||
     defaultPublicCdnUrl
-  ).replace(/\/$/, "");
+  ).trim().replace(/\/$/, "");
   if (options.verbose) {
-    const cdnSource = explicitPublicCdnUrl
+    const cdnSource = (process.env.PUBLIC_CDN_URL || serverEnv.PUBLIC_CDN_URL)
       ? "PUBLIC_CDN_URL"
-      : inheritedPublicCdnUrl
-        ? "PUBLIC_CDN_URL/server .env"
-        : "duel default (/game-assets)";
+      : "duel default (/game-assets)";
     log(`using PUBLIC_CDN_URL=${resolvedPublicCdnUrl} (${cdnSource})`);
   }
   if (options.fresh === true) {

@@ -153,15 +153,6 @@ module.exports = {
         SOLANA_GOLD_MINT:
           process.env.SOLANA_GOLD_MINT ||
           "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
-        BOT_KEYPAIR:
-          process.env.BOT_KEYPAIR ||
-          "~/.config/solana/oracle-authority.json",
-        ORACLE_AUTHORITY_KEYPAIR:
-          process.env.ORACLE_AUTHORITY_KEYPAIR ||
-          "~/.config/solana/oracle-authority.json",
-        MARKET_MAKER_KEYPAIR:
-          process.env.MARKET_MAKER_KEYPAIR ||
-          "~/.config/solana/oracle-authority.json",
         PUBLIC_CDN_URL: process.env.PUBLIC_CDN_URL || "https://assets.hyperscape.club",
         DISABLE_RATE_LIMIT: "true",
         ALLOW_DESTRUCTIVE_CHANGES: "false",
