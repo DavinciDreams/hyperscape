@@ -100,6 +100,8 @@ const fileMtimes = new Map();
 let queuedRebuildPath = null;
 let warnedCdnFallback = false;
 let autoRestartCount = 0;
+let runtimeDepsChecked = false;
+let cachedPublicCdnUrl = null;
 let autoRestartTimer = null;
 
 const runtimeDeps = [
@@ -125,7 +127,6 @@ const hasProcessExited = (proc) =>
 
 async function stopServer(signal = "SIGTERM") {
   if (!serverProcess) {
-    serverProcess = null;
     stoppingServer = false;
     return;
   }
@@ -330,8 +331,14 @@ async function startServer() {
   const localApiUrl = `http://localhost:${localPort}`;
   const localWsUrl = `ws://localhost:${localPort}/ws`;
   const localAssetsUrl = `${localApiUrl}/game-assets`;
-  const publicCdnUrl = await resolvePublicCdnUrl(localAssetsUrl);
-  await ensureRuntimeDeps();
+
+  if (!cachedPublicCdnUrl) {
+    cachedPublicCdnUrl = await resolvePublicCdnUrl(localAssetsUrl);
+  }
+  if (!runtimeDepsChecked) {
+    await ensureRuntimeDeps();
+    runtimeDepsChecked = true;
+  }
 
   const childEnv = {
     ...process.env,
@@ -339,63 +346,8 @@ async function startServer() {
     PORT: localPort,
     PUBLIC_API_URL: process.env.PUBLIC_API_URL || localApiUrl,
     PUBLIC_WS_URL: process.env.PUBLIC_WS_URL || localWsUrl,
-    PUBLIC_CDN_URL: publicCdnUrl,
+    PUBLIC_CDN_URL: cachedPublicCdnUrl,
   };
-
-  // Lean dev defaults: keep high-memory duel/streaming subsystems off unless
-  // explicitly enabled in the parent shell environment.
-  if (process.env.SERVER_DEV_LEAN_MODE !== "false") {
-    const allowDuelBettingInLeanMode =
-      childEnv.SERVER_DEV_LEAN_ALLOW_DUEL_BETTING === "true";
-    const allowStreamingDuelInLeanMode =
-      childEnv.SERVER_DEV_LEAN_ALLOW_STREAMING_DUEL === "true";
-    const allowStreamingCaptureInLeanMode =
-      childEnv.SERVER_DEV_LEAN_ALLOW_STREAMING_CAPTURE === "true";
-    const allowDuelSchedulerInLeanMode =
-      childEnv.SERVER_DEV_LEAN_ALLOW_DUEL_SCHEDULER === "true";
-    const allowModelAgentsInLeanMode =
-      childEnv.SERVER_DEV_LEAN_ALLOW_MODEL_AGENTS === "true";
-    const allowAutoAgentsInLeanMode =
-      childEnv.SERVER_DEV_LEAN_ALLOW_AUTO_AGENTS === "true";
-    const allowTerrainMeshCollisionInLeanMode =
-      childEnv.SERVER_DEV_LEAN_ALLOW_TERRAIN_MESH_COLLISION === "true";
-    const allowDuelArenaVisualsInLeanMode =
-      childEnv.SERVER_DEV_LEAN_ALLOW_DUEL_ARENA_VISUALS === "true";
-
-    if (!allowStreamingDuelInLeanMode) {
-      childEnv.STREAMING_DUEL_ENABLED = "false";
-    }
-    if (!allowStreamingCaptureInLeanMode) {
-      childEnv.STREAMING_CAPTURE_ENABLED = "false";
-    }
-    if (!allowDuelSchedulerInLeanMode) {
-      childEnv.DUEL_SCHEDULER_ENABLED = "false";
-    }
-    if (!allowDuelBettingInLeanMode) {
-      childEnv.DUEL_MARKET_MAKER_ENABLED = "false";
-      childEnv.DUEL_BETTING_ENABLED = "false";
-    } else if (childEnv.DUEL_MARKET_MAKER_ENABLED === undefined) {
-      childEnv.DUEL_MARKET_MAKER_ENABLED = "false";
-    }
-    if (!allowModelAgentsInLeanMode) {
-      childEnv.SPAWN_MODEL_AGENTS = "false";
-    }
-    if (!allowAutoAgentsInLeanMode) {
-      childEnv.AUTO_START_AGENTS = "false";
-      childEnv.AUTO_START_AGENTS_MAX = "2";
-    } else if (childEnv.AUTO_START_AGENTS_MAX === undefined) {
-      childEnv.AUTO_START_AGENTS_MAX = "2";
-    }
-    if (!allowTerrainMeshCollisionInLeanMode) {
-      childEnv.TERRAIN_SERVER_MESH_COLLISION_ENABLED = "false";
-    }
-    if (!allowDuelArenaVisualsInLeanMode) {
-      childEnv.DUEL_ARENA_VISUALS_ENABLED = "false";
-    }
-    console.log(
-      `${colors.dim}[server-dev] Lean mode enabled (SERVER_DEV_LEAN_MODE=false to opt out). allowFlags: STREAMING_DUEL=${allowStreamingDuelInLeanMode}, STREAMING_CAPTURE=${allowStreamingCaptureInLeanMode}, DUEL_SCHEDULER=${allowDuelSchedulerInLeanMode}, DUEL_BETTING=${allowDuelBettingInLeanMode}, MODEL_AGENTS=${allowModelAgentsInLeanMode}, AUTO_AGENTS=${allowAutoAgentsInLeanMode}, TERRAIN_MESH_COLLISION=${allowTerrainMeshCollisionInLeanMode}, DUEL_ARENA_VISUALS=${allowDuelArenaVisualsInLeanMode}. Effective: STREAMING_DUEL_ENABLED=${childEnv.STREAMING_DUEL_ENABLED}, STREAMING_CAPTURE_ENABLED=${childEnv.STREAMING_CAPTURE_ENABLED}, DUEL_SCHEDULER_ENABLED=${childEnv.DUEL_SCHEDULER_ENABLED}, DUEL_BETTING_ENABLED=${childEnv.DUEL_BETTING_ENABLED}, DUEL_MARKET_MAKER_ENABLED=${childEnv.DUEL_MARKET_MAKER_ENABLED}, SPAWN_MODEL_AGENTS=${childEnv.SPAWN_MODEL_AGENTS}, AUTO_START_AGENTS=${childEnv.AUTO_START_AGENTS}, AUTO_START_AGENTS_MAX=${childEnv.AUTO_START_AGENTS_MAX}, TERRAIN_SERVER_MESH_COLLISION_ENABLED=${childEnv.TERRAIN_SERVER_MESH_COLLISION_ENABLED}, DUEL_ARENA_VISUALS_ENABLED=${childEnv.DUEL_ARENA_VISUALS_ENABLED}${colors.reset}`,
-    );
-  }
 
   console.log(`${colors.green}Starting server...${colors.reset}`);
   const proc = spawn(

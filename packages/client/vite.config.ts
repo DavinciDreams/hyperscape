@@ -183,9 +183,11 @@ export default defineConfig(({ mode }) => {
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
           runtimeCaching: [
             {
-              // Cache JS/CSS files that weren't precached
+              // Cache JS/CSS files that weren't precached.
+              // NetworkFirst prevents stale SW caches from serving HTML for
+              // JS chunks after a rebuild changes content hashes.
               urlPattern: /\.(?:js|css)$/i,
-              handler: "CacheFirst",
+              handler: "NetworkFirst",
               options: {
                 cacheName: "hyperscape-code",
                 expiration: {
@@ -193,7 +195,7 @@ export default defineConfig(({ mode }) => {
                   maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
                 },
                 cacheableResponse: {
-                  statuses: [0, 200],
+                  statuses: [200],
                 },
               },
             },
@@ -233,77 +235,77 @@ export default defineConfig(({ mode }) => {
       ...(disableSharedWatch
         ? []
         : [
-          {
-            name: "watch-shared-package",
-            configureServer(server: any) {
-              const sharedBuildPath = path.resolve(
-                __dirname,
-                "../shared/build",
-              );
-              // Watch only shared build artifacts used by the client alias.
-              // Watching the full shared src tree can flood HMR with events and
-              // drive excessive memory growth in long-lived dev sessions.
-              const sharedClientBuildFile = path.join(
-                sharedBuildPath,
-                "framework.client.js",
-              );
-              const sharedFullBuildFile = path.join(
-                sharedBuildPath,
-                "framework.js",
-              );
-              server.watcher.add(sharedClientBuildFile);
-              server.watcher.add(sharedFullBuildFile);
+            {
+              name: "watch-shared-package",
+              configureServer(server: any) {
+                const sharedBuildPath = path.resolve(
+                  __dirname,
+                  "../shared/build",
+                );
+                // Watch only shared build artifacts used by the client alias.
+                // Watching the full shared src tree can flood HMR with events and
+                // drive excessive memory growth in long-lived dev sessions.
+                const sharedClientBuildFile = path.join(
+                  sharedBuildPath,
+                  "framework.client.js",
+                );
+                const sharedFullBuildFile = path.join(
+                  sharedBuildPath,
+                  "framework.js",
+                );
+                server.watcher.add(sharedClientBuildFile);
+                server.watcher.add(sharedFullBuildFile);
 
-              let reloadTimer: ReturnType<typeof setTimeout> | null = null;
-              let pendingFile = "";
-              const scheduleReload = (file: string) => {
-                pendingFile = file;
-                if (reloadTimer) {
-                  clearTimeout(reloadTimer);
-                }
-                reloadTimer = setTimeout(() => {
-                  reloadTimer = null;
-                  const basename = path.basename(pendingFile);
-                  console.log(
-                    `\n[Vite] 🔄 Shared build changed: ${basename}`,
-                  );
-                  console.log(
-                    "[Vite] ⚡ Triggering debounced full reload...\n",
-                  );
-                  server.ws.send({
-                    type: "full-reload",
-                    path: "*",
-                  });
-                }, 150);
-              };
+                let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+                let pendingFile = "";
+                const scheduleReload = (file: string) => {
+                  pendingFile = file;
+                  if (reloadTimer) {
+                    clearTimeout(reloadTimer);
+                  }
+                  reloadTimer = setTimeout(() => {
+                    reloadTimer = null;
+                    const basename = path.basename(pendingFile);
+                    console.log(
+                      `\n[Vite] 🔄 Shared build changed: ${basename}`,
+                    );
+                    console.log(
+                      "[Vite] ⚡ Triggering debounced full reload...\n",
+                    );
+                    server.ws.send({
+                      type: "full-reload",
+                      path: "*",
+                    });
+                  }, 150);
+                };
 
-              const onSharedBuildChange = (file: string) => {
-                if (!file.includes("packages/shared/build/")) return;
-                if (!file.endsWith(".js") && !file.endsWith(".mjs")) return;
-                if (
-                  !file.includes("framework.client") &&
-                  !file.endsWith("framework.js")
-                )
-                  return;
-                scheduleReload(file);
-              };
+                const onSharedBuildChange = (file: string) => {
+                  if (!file.includes("packages/shared/build/")) return;
+                  if (!file.endsWith(".js") && !file.endsWith(".mjs")) return;
+                  if (
+                    !file.includes("framework.client") &&
+                    !file.endsWith("framework.js")
+                  )
+                    return;
+                  scheduleReload(file);
+                };
 
-              server.watcher.on("change", onSharedBuildChange);
-              server.httpServer?.once("close", () => {
-                server.watcher.off("change", onSharedBuildChange);
-                if (reloadTimer) {
-                  clearTimeout(reloadTimer);
-                  reloadTimer = null;
-                }
-              });
+                server.watcher.on("change", onSharedBuildChange);
+                server.httpServer?.once("close", () => {
+                  server.watcher.off("change", onSharedBuildChange);
+                  if (reloadTimer) {
+                    clearTimeout(reloadTimer);
+                    reloadTimer = null;
+                  }
+                });
 
-              console.log(
-                "[Vite] 👀 Watching shared build artifacts:",
-                sharedBuildPath,
-              );
+                console.log(
+                  "[Vite] 👀 Watching shared build artifacts:",
+                  sharedBuildPath,
+                );
+              },
             },
-          },
-        ]),
+          ]),
       // Plugin to handle Node.js modules in browser was replaced by vite-plugin-node-polyfills
     ],
 
@@ -403,9 +405,9 @@ export default defineConfig(({ mode }) => {
       // In development, default to local CDN if PUBLIC_CDN_URL is not set.
       "process.env.PUBLIC_CDN_URL": JSON.stringify(
         env.PUBLIC_CDN_URL ||
-        (mode === "production"
-          ? "https://assets.hyperscape.club"
-          : "http://localhost:5555/game-assets"),
+          (mode === "production"
+            ? "https://assets.hyperscape.club"
+            : "http://localhost:5555/game-assets"),
       ),
       "process.env.PUBLIC_STARTER_ITEMS": JSON.stringify(
         env.PUBLIC_STARTER_ITEMS || "",
@@ -420,20 +422,12 @@ export default defineConfig(({ mode }) => {
       //
       // Production: Frontend on Cloudflare Pages (hyperscape.club)
       //             Server on Railway (hyperscape-production.up.railway.app)
-      "import.meta.env.PUBLIC_API_URL": JSON.stringify(
-        resolvedPublicApiUrl,
-      ),
-      "import.meta.env.PUBLIC_WS_URL": JSON.stringify(
-        resolvedPublicWsUrl,
-      ),
+      "import.meta.env.PUBLIC_API_URL": JSON.stringify(resolvedPublicApiUrl),
+      "import.meta.env.PUBLIC_WS_URL": JSON.stringify(resolvedPublicWsUrl),
       // CDN URL - Cloudflare R2 with custom domain
       // In development without PUBLIC_CDN_URL, use game server's /game-assets/ endpoint.
-      "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(
-        resolvedPublicCdnUrl,
-      ),
-      "import.meta.env.PUBLIC_APP_URL": JSON.stringify(
-        resolvedPublicAppUrl,
-      ),
+      "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(resolvedPublicCdnUrl),
+      "import.meta.env.PUBLIC_APP_URL": JSON.stringify(resolvedPublicAppUrl),
       "import.meta.env.PUBLIC_ELIZAOS_URL": JSON.stringify(
         resolvedPublicElizaUrl,
       ),
@@ -588,49 +582,49 @@ export default defineConfig(({ mode }) => {
 
     optimizeDeps: disableSharedWatch
       ? {
-        // In Playwright/E2E mode we disable discovery to avoid mid-test
-        // re-optimization/chunk invalidation races.
-        noDiscovery: true,
-        include: [
-          "three",
-          "react",
-          "react-dom",
-          "react-dom/client",
-          "buffer",
-          "eventemitter3",
-          "react-device-detect",
-          "delaunator",
-          "canonicalize",
-          "fetch-retry",
-          "three/examples/jsm/exporters/GLTFExporter.js",
-          ...authOptimizeDeps,
-          ...solanaOptimizeDeps,
-        ],
-        exclude: optimizeDepsExclude,
-        force: forceOptimizeDeps,
-      }
+          // In Playwright/E2E mode we disable discovery to avoid mid-test
+          // re-optimization/chunk invalidation races.
+          noDiscovery: true,
+          include: [
+            "three",
+            "react",
+            "react-dom",
+            "react-dom/client",
+            "buffer",
+            "eventemitter3",
+            "react-device-detect",
+            "delaunator",
+            "canonicalize",
+            "fetch-retry",
+            "three/examples/jsm/exporters/GLTFExporter.js",
+            ...authOptimizeDeps,
+            ...solanaOptimizeDeps,
+          ],
+          exclude: optimizeDepsExclude,
+          force: forceOptimizeDeps,
+        }
       : {
-        include: [
-          "three",
-          "react",
-          "react-dom",
-          "react-dom/client",
-          "eventemitter3",
-          "react-device-detect",
-          "canonicalize",
-          "fetch-retry",
-          ...authOptimizeDeps,
-          ...solanaOptimizeDeps,
-        ],
-        exclude: optimizeDepsExclude,
-        force: forceOptimizeDeps,
-        esbuildOptions: {
-          target: "esnext",
-          define: {
-            global: "globalThis",
+          include: [
+            "three",
+            "react",
+            "react-dom",
+            "react-dom/client",
+            "eventemitter3",
+            "react-device-detect",
+            "canonicalize",
+            "fetch-retry",
+            ...authOptimizeDeps,
+            ...solanaOptimizeDeps,
+          ],
+          exclude: optimizeDepsExclude,
+          force: forceOptimizeDeps,
+          esbuildOptions: {
+            target: "esnext",
+            define: {
+              global: "globalThis",
+            },
           },
         },
-      },
     ssr: {
       noExternal: [],
     },

@@ -60,11 +60,25 @@ function resolveFfmpegCommand(): string {
     return resolvedFfmpegCommand;
   }
 
-  // Prefer the system FFmpeg on Linux. It has proven more stable than
-  // some static builds for long-running tee muxer sessions.
-  if (process.platform === "linux" && fs.existsSync("/usr/bin/ffmpeg")) {
-    resolvedFfmpegCommand = "/usr/bin/ffmpeg";
+  // Prefer PATH-resolved ffmpeg over the ffmpeg-static npm package.
+  // The npm package bundles an older static build (7.0.2) that segfaults
+  // during long-running tee muxer sessions on Linux.
+  for (const candidate of ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg"]) {
+    if (fs.existsSync(candidate)) {
+      resolvedFfmpegCommand = candidate;
+      return resolvedFfmpegCommand;
+    }
+  }
+
+  // Try PATH-resolved ffmpeg (e.g. ~/.local/bin/ffmpeg) before ffmpeg-static.
+  try {
+    const { execFileSync } =
+      require("node:child_process") as typeof import("node:child_process");
+    execFileSync("ffmpeg", ["-version"], { stdio: "ignore", timeout: 5000 });
+    resolvedFfmpegCommand = "ffmpeg";
     return resolvedFfmpegCommand;
+  } catch {
+    // ffmpeg not on PATH; try ffmpeg-static as last resort.
   }
 
   try {
@@ -74,7 +88,7 @@ function resolveFfmpegCommand(): string {
       return resolvedFfmpegCommand;
     }
   } catch {
-    // Optional dependency; fall through to system ffmpeg.
+    // Optional dependency; fall through.
   }
 
   resolvedFfmpegCommand = "ffmpeg";
@@ -334,7 +348,8 @@ export class RTMPBridge {
     const legacyMatch = trimmed.match(legacyKickPattern);
     if (legacyMatch) {
       const embeddedKey = legacyMatch[1]?.trim();
-      const baseUrl = "rtmps://fa723fc1b171.global-contribute.live-video.net/app";
+      const baseUrl =
+        "rtmps://fa723fc1b171.global-contribute.live-video.net/app";
       return embeddedKey ? `${baseUrl}/${embeddedKey}` : baseUrl;
     }
 
@@ -822,15 +837,13 @@ export class RTMPBridge {
       ];
     }
 
-    // Use 'film' tune for better quality and stability (allows B-frames)
-    // Only use 'zerolatency' if STREAM_LOW_LATENCY=true is explicitly set
-    const useLowLatency = /^(1|true|yes)$/i.test(
+    // Default to zerolatency for live streaming — eliminates B-frame buffering
+    // delay and encoder lookahead that cause visible judder. Use film only when
+    // STREAM_LOW_LATENCY=false is explicitly set (e.g. for VOD recording).
+    const useHighLatency = /^(0|false|no)$/i.test(
       process.env.STREAM_LOW_LATENCY || "",
     );
-    const tune = useLowLatency ? "zerolatency" : "film";
-    // Buffer multiplier: 2x for both modes (was 4x for film, caused 18MB buffer)
-    // Lower buffer reduces latency accumulation and backpressure buildup
-    const bufferMultiplier = 2;
+    const tune = useHighLatency ? "film" : "zerolatency";
 
     return [
       "-c:v",
@@ -844,13 +857,13 @@ export class RTMPBridge {
       "-maxrate",
       `${Math.floor(this.config.videoBitrate * 1.2)}k`,
       "-bufsize",
-      `${this.config.videoBitrate * bufferMultiplier}k`,
+      `${this.config.videoBitrate}k`,
       "-pix_fmt",
       "yuv420p",
       "-g",
       String(this.config.gopSize),
-      // Add B-frames for better compression (disabled in zerolatency mode)
-      ...(useLowLatency ? [] : ["-bf", "2"]),
+      // B-frames add latency — only use for VOD/recording mode
+      ...(useHighLatency ? ["-bf", "2"] : []),
     ];
   }
 
@@ -1010,26 +1023,27 @@ export class RTMPBridge {
     const outputString = this.buildOutputString();
     const isNullOutput = outputString === "-f null -";
 
-    // Check if low latency mode is explicitly requested
-    const useLowLatency = /^(1|true|yes)$/i.test(
+    // Default to low-latency for live streaming. Only use high-latency buffered
+    // mode when STREAM_LOW_LATENCY=false is explicitly set.
+    const useHighLatency = /^(0|false|no)$/i.test(
       process.env.STREAM_LOW_LATENCY || "",
     );
 
     // FFmpeg args for JPEG frame piping (mjpeg → H.264)
-    const args: string[] = useLowLatency
+    const args: string[] = useHighLatency
       ? [
-          // Ultra low-latency input flags (may cause buffering on viewers)
+          // Buffered input flags for VOD/recording
+          "-fflags",
+          "+genpts+discardcorrupt",
+          "-thread_queue_size",
+          "512",
+        ]
+      : [
+          // Low-latency input flags for live streaming
           "-fflags",
           "nobuffer",
           "-flags",
           "low_delay",
-        ]
-      : [
-          // Balanced input flags with larger buffer for a/v sync stability
-          "-fflags",
-          "+genpts+discardcorrupt",
-          "-thread_queue_size",
-          "1024",
         ];
 
     // Input: JPEG frames piped via stdin
@@ -1049,10 +1063,7 @@ export class RTMPBridge {
     // Force output frame rate
     args.push("-r", String(this.config.fps));
 
-    args.push(
-      "-vf",
-      this.buildOutputVideoFilter(true),
-    );
+    args.push("-vf", this.buildOutputVideoFilter(true));
 
     // Video encoder
     args.push(...this.buildVideoEncoderArgs());
@@ -1392,11 +1403,11 @@ export class RTMPBridge {
 
     const hlsOutputPath = process.env.HLS_OUTPUT_PATH?.trim();
     if (hlsOutputPath) {
-      const hlsTime = parseEnvInt(process.env.HLS_TIME_SECONDS, 2, 1);
-      const hlsListSize = parseEnvInt(process.env.HLS_LIST_SIZE, 24, 2);
+      const hlsTime = parseEnvInt(process.env.HLS_TIME_SECONDS, 1, 1);
+      const hlsListSize = parseEnvInt(process.env.HLS_LIST_SIZE, 30, 2);
       const hlsDeleteThreshold = parseEnvInt(
         process.env.HLS_DELETE_THRESHOLD,
-        96,
+        120,
         1,
       );
       const hlsStartNumber = parseEnvInt(
@@ -1450,9 +1461,9 @@ export class RTMPBridge {
     // Build FFmpeg arguments
     const args = [
       "-fflags",
-      "+genpts+discardcorrupt",
+      "+genpts+discardcorrupt+nobuffer",
       "-thread_queue_size",
-      "1024",
+      "256",
       // Input: pipe from stdin (WebM from MediaRecorder)
       "-i",
       "pipe:0",
@@ -1469,10 +1480,7 @@ export class RTMPBridge {
       "-r",
       String(this.config.fps),
     ];
-    args.push(
-      "-vf",
-      this.buildOutputVideoFilter(true),
-    );
+    args.push("-vf", this.buildOutputVideoFilter(true));
 
     // Video codec settings
     args.push(...this.buildVideoEncoderArgs());

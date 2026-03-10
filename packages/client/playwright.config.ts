@@ -4,10 +4,11 @@ const CLIENT_PORT = Number(process.env.VITE_PORT ?? 3333);
 const SERVER_PORT = Number(process.env.PORT ?? 5555);
 const IS_LINUX = process.platform === "linux";
 const DEFAULT_LINUX_WEBGPU_ARGS = [
-  "--enable-unsafe-webgpu",
+  "--use-gl=angle",
+  "--use-angle=gl",
   "--ozone-platform=x11",
-  "--use-angle=vulkan",
-  "--enable-features=Vulkan,VulkanFromANGLE",
+  "--enable-features=WebGPU,UnsafeWebGPU,WebGPUDeveloperFeatures",
+  "--ignore-gpu-blocklist",
 ];
 const EXTRA_WEBGPU_ARGS = (process.env.PW_WEBGPU_ARGS ?? "")
   .split(" ")
@@ -49,13 +50,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   reporter: process.env.CI
     ? [
-      ["html", { open: "never", outputFolder: "playwright-report" }],
-      ["github"],
-    ]
+        ["html", { open: "never", outputFolder: "playwright-report" }],
+        ["github"],
+      ]
     : [
-      ["list"],
-      ["html", { open: "never", outputFolder: "playwright-report" }],
-    ],
+        ["list"],
+        ["html", { open: "never", outputFolder: "playwright-report" }],
+      ],
   use: {
     // WebGPU is required; run headed browser sessions for all E2E tests.
     headless: false,

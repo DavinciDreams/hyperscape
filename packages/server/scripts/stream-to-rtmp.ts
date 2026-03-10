@@ -118,10 +118,7 @@ let externalStatusWriteErrored = false;
 
 /** Capture mode: 'cdp' (fast) or 'mediarecorder' (legacy) or 'webcodecs' (holy grail) */
 const STREAM_CAPTURE_HEADLESS = process.env.STREAM_CAPTURE_HEADLESS === "true";
-const DEFAULT_CAPTURE_MODE =
-  process.platform === "linux" && !STREAM_CAPTURE_HEADLESS
-    ? "mediarecorder"
-    : "cdp";
+const DEFAULT_CAPTURE_MODE = "cdp";
 const CAPTURE_MODE = (process.env.STREAM_CAPTURE_MODE?.trim() ||
   DEFAULT_CAPTURE_MODE) as "cdp" | "mediarecorder" | "webcodecs";
 const requestedCaptureChannel =
@@ -136,15 +133,8 @@ const ANGLE_BACKEND =
     ? requestedAngleBackend
     : process.platform === "darwin"
       ? "metal"
-      : "";
-const STREAM_CAPTURE_DISABLE_WEBGPU = /^(1|true|yes|on)$/i.test(
-  process.env.STREAM_CAPTURE_DISABLE_WEBGPU || "",
-);
-if (STREAM_CAPTURE_DISABLE_WEBGPU) {
-  throw new Error(
-    "STREAM_CAPTURE_DISABLE_WEBGPU is not supported. Hyperscape capture is WebGPU-only.",
-  );
-}
+      : "gl";
+
 const CDP_QUALITY = Math.min(
   100,
   Math.max(1, parseInt(process.env.STREAM_CDP_QUALITY || "80", 10)),
@@ -434,17 +424,25 @@ async function launchCaptureBrowser() {
     process.env.DRI_PRIME = "1";
   }
 
-  // Merge Playwright's CDPScreenshotNewSurface with our WebGPU features so
-  // Chrome sees a single --enable-features flag (last one wins in Chromium).
-  const featureFlags =
-    "--enable-features=CDPScreenshotNewSurface,UseSkiaRenderer,WebGPU";
+  // Merge Playwright's CDPScreenshotNewSurface with our WebGPU features in a
+  // single --enable-features flag (last one wins in Chromium). UnsafeWebGPU
+  // ensures navigator.gpu is available on non-HTTPS origins.
+  // NOTE: Do NOT use DefaultANGLEVulkan/Vulkan/VulkanFromANGLE on Linux —
+  // the native Vulkan backend causes black screens and crashes on NVIDIA GPUs.
+  // Use --use-gl=angle --use-angle=gl (OpenGL ES) instead.
+  const featureFlags = [
+    "CDPScreenshotNewSurface",
+    "UseSkiaRenderer",
+    "WebGPU",
+    "UnsafeWebGPU",
+    "WebGPUDeveloperFeatures",
+  ].join(",");
   const launchArgs = [
     // GPU / WebGPU essentials
     "--use-gl=angle",
     ...(ANGLE_BACKEND ? [`--use-angle=${ANGLE_BACKEND}`] : []),
     "--enable-webgl",
-    "--enable-unsafe-webgpu",
-    featureFlags,
+    `--enable-features=${featureFlags}`,
     "--ignore-gpu-blocklist",
     "--enable-gpu-rasterization",
     // Sandbox & stability
@@ -467,6 +465,9 @@ async function launchCaptureBrowser() {
   const ignoreArgs = [
     "--enable-unsafe-swiftshader",
     "--disable-field-trial-config",
+    // Playwright injects --use-gl=disabled which overrides our --use-gl=angle
+    // in the GPU process, preventing WebGPU from initializing.
+    "--use-gl=disabled",
   ];
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,

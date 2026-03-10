@@ -363,14 +363,7 @@ const hlsUrl = serverHlsPublicPath
 const legacyStreamPageUrl = `${clientUrl}/?page=stream`;
 const streamPageUrl = `${clientUrl}/stream.html`;
 const embeddedSpectatorUrl = `${clientUrl}/?embedded=true&mode=spectator`;
-const forceWebglFallback = /^(1|true|yes|on)$/i.test(
-  process.env.DUEL_FORCE_WEBGL_FALLBACK || "",
-);
-const defaultStreamCaptureMode =
-  process.platform === "linux" &&
-    !/^(1|true|yes|on)$/i.test(process.env.STREAM_CAPTURE_HEADLESS || "")
-    ? "mediarecorder"
-    : "cdp";
+const defaultStreamCaptureMode = "cdp";
 const requestedCaptureMode = (
   process.env.STREAM_CAPTURE_MODE || defaultStreamCaptureMode
 ).trim().toLowerCase();
@@ -544,9 +537,6 @@ function withCaptureParams(rawUrl) {
   }
   if (disableBridgeCapture) {
     params.push(["disableBridgeCapture", "1"]);
-  }
-  if (forceWebglFallback) {
-    params.push(["webglFallback", "true"]);
   }
   if (params.length === 0) {
     return rawUrl;
@@ -968,7 +958,7 @@ function prepareHlsOutput(filePath) {
 
   const hlsTargetDuration = Math.max(
     1,
-    Number.parseInt(process.env.HLS_TIME_SECONDS || "2", 10) || 2,
+    Number.parseInt(process.env.HLS_TIME_SECONDS || "1", 10) || 1,
   );
   const hlsStartNumber = Math.max(
     0,
@@ -1609,16 +1599,13 @@ async function main() {
     PUBLIC_CDN_URL: resolvedPublicCdnUrl,
     STREAMING_VIEWER_ACCESS_TOKEN: effectiveStreamingViewerAccessToken,
     STREAMING_DUEL_ENABLED: process.env.STREAMING_DUEL_ENABLED || "true",
-    DUEL_MARKET_MAKER_ENABLED: "false",
     DUEL_BETTING_ENABLED: "false",
-    ARENA_SERVICE_ENABLED: "false",
     DISABLE_RATE_LIMIT: process.env.DISABLE_RATE_LIMIT || "true",
     ALLOW_DESTRUCTIVE_CHANGES:
       process.env.ALLOW_DESTRUCTIVE_CHANGES || "false",
     USE_LOCAL_POSTGRES:
       process.env.USE_LOCAL_POSTGRES ||
       (duelDatabaseMode === "local" ? "true" : "false"),
-    DUEL_DATABASE_MODE: duelDatabaseMode,
     // Keep stream runtime alive through transient remote DB outages.
     DB_WRITE_ERRORS_NON_FATAL:
       process.env.DB_WRITE_ERRORS_NON_FATAL || "true",
@@ -1658,10 +1645,6 @@ async function main() {
       (useExternalAgentPool
         ? "false"
         : serverEnv.SPAWN_MODEL_AGENTS_WITH_EMBEDDED || "false"),
-    // Prevent aggressive local auto-restarts while tuning duel/MM workflows.
-    MEMORY_RESTART_THRESHOLD_MB:
-      process.env.MEMORY_RESTART_THRESHOLD_MB || "12288",
-    // The server watchdog enforces MEMORY_LIMIT_GB, not the legacy MB var above.
     // Duel workflows commonly sit above 12GB RSS on Bun while remaining stable,
     // so give the local stack explicit headroom unless the caller overrides it.
     MEMORY_LIMIT_GB:
@@ -1669,10 +1652,6 @@ async function main() {
       process.env.MEMORY_LIMIT_GB ||
       serverEnv.MEMORY_LIMIT_GB ||
       "16",
-    // Enable autonomous behavior (movement, questing, skilling) outside duels.
-    // StreamingDuelScheduler still owns combat flow inside the arena.
-    EMBEDDED_AGENT_AUTONOMY_ENABLED:
-      process.env.EMBEDDED_AGENT_AUTONOMY_ENABLED || "true",
     // Keep duel CPU predictable on long-running streams; scripted combat
     // strategy avoids piling LLM planning work into fight ticks.
     STREAMING_DUEL_LLM_TACTICS_ENABLED:
@@ -1696,8 +1675,8 @@ async function main() {
     RTMP_STATUS_FILE: rtmpStatusFile,
     // Keep the server DB pool conservative in local duel workflows to avoid
     // exceeding low local Postgres max_connections limits.
-    POSTGRES_POOL_MAX: process.env.POSTGRES_POOL_MAX || "6",
-    POSTGRES_POOL_MIN: process.env.POSTGRES_POOL_MIN || "1",
+    POSTGRES_POOL_MAX: process.env.POSTGRES_POOL_MAX || "1",
+    POSTGRES_POOL_MIN: process.env.POSTGRES_POOL_MIN || "0",
     // Bun on Linux can spend excessive CPU in allocator trim loops under
     // duel load; disabling aggressive trim keeps API latency stable.
     MALLOC_TRIM_THRESHOLD_:
@@ -2012,8 +1991,6 @@ async function main() {
     const captureHeadless = (
       process.env.STREAM_CAPTURE_HEADLESS || defaultCaptureHeadless
     ).toLowerCase() === "true";
-    const preferSoftwareCapture =
-      process.platform === "linux" && captureHeadless;
     const explicitStreamGameUrl = (
       process.env.DUEL_STREAM_GAME_URL ||
       process.env.STREAM_GAME_URL ||
@@ -2041,11 +2018,9 @@ async function main() {
             ? hasChromeDev
               ? "chrome-dev"
               : "chrome-beta"
-            : preferSoftwareCapture
-              ? "chromium"
-              : process.platform === "darwin"
-                ? "chrome"
-                : "chrome");
+            : process.platform === "darwin"
+              ? "chrome"
+              : "chrome");
     const streamEnv = {
       ...serverEnv,
       ...process.env,
@@ -2060,9 +2035,9 @@ async function main() {
       RTMP_BRIDGE_PORT: String(rtmpPort),
       HLS_OUTPUT_PATH: hlsOutputPath,
       HLS_SEGMENT_PATTERN: hlsSegmentPattern,
-      HLS_TIME_SECONDS: process.env.HLS_TIME_SECONDS || "2",
-      HLS_LIST_SIZE: process.env.HLS_LIST_SIZE || "24",
-      HLS_DELETE_THRESHOLD: process.env.HLS_DELETE_THRESHOLD || "96",
+      HLS_TIME_SECONDS: process.env.HLS_TIME_SECONDS || "1",
+      HLS_LIST_SIZE: process.env.HLS_LIST_SIZE || "30",
+      HLS_DELETE_THRESHOLD: process.env.HLS_DELETE_THRESHOLD || "120",
       HLS_START_NUMBER:
         process.env.HLS_START_NUMBER || String(Math.floor(Date.now() / 1000)),
       HLS_FLAGS:
@@ -2077,14 +2052,9 @@ async function main() {
       STREAM_CAPTURE_CHANNEL: effectiveCaptureChannel,
       STREAM_CAPTURE_ANGLE:
         process.env.STREAM_CAPTURE_ANGLE ||
-        (preferSoftwareCapture
-          ? "swiftshader"
-          : process.platform === "darwin"
-            ? "metal"
-            : "default"),
-      STREAM_CAPTURE_DISABLE_WEBGPU:
-        process.env.STREAM_CAPTURE_DISABLE_WEBGPU ||
-        (preferSoftwareCapture ? "true" : "false"),
+        (process.platform === "darwin"
+          ? "metal"
+          : "gl"),
       STREAM_CAPTURE_HEADLESS:
         process.env.STREAM_CAPTURE_HEADLESS || defaultCaptureHeadless,
       RTMP_STATUS_FILE: rtmpStatusFile,
@@ -2099,21 +2069,9 @@ async function main() {
       streamEnv.YOUTUBE_STREAM_KEY || streamEnv.YOUTUBE_RTMP_STREAM_KEY,
     );
     const hasKickDestination = Boolean(streamEnv.KICK_STREAM_KEY);
-    const strictDestinationVerification =
-      process.env.DUEL_VERIFY_REQUIRE_DESTINATIONS === "true";
-    if (strictDestinationVerification) {
-      if (hasTwitchDestination) verifyRequiredDestinations.push("twitch");
-      if (hasYoutubeDestination) verifyRequiredDestinations.push("youtube");
-      if (hasKickDestination) verifyRequiredDestinations.push("kick");
-    } else if (
-      hasTwitchDestination ||
-      hasYoutubeDestination ||
-      hasKickDestination
-    ) {
-      log(
-        "RTMP destination verification is in soft mode; set DUEL_VERIFY_REQUIRE_DESTINATIONS=true for strict destination checks.",
-      );
-    }
+    if (hasTwitchDestination) verifyRequiredDestinations.push("twitch");
+    if (hasYoutubeDestination) verifyRequiredDestinations.push("youtube");
+    if (hasKickDestination) verifyRequiredDestinations.push("kick");
 
     const captureHeadlessForLaunch = (
       streamEnv.STREAM_CAPTURE_HEADLESS || "true"
