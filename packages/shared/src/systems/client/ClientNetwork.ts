@@ -1423,6 +1423,16 @@ export class ClientNetwork extends SystemBase {
     }
   };
 
+  onEntitiesBatchAdded = (batch: EntityData[]) => {
+    if (!Array.isArray(batch)) return;
+    for (const data of batch) {
+      const newEntity = this.world.entities.add(data);
+      if (newEntity) {
+        this.applyPendingModifications(newEntity.id);
+      }
+    }
+  };
+
   onEntityModified = (
     data: { id: string; changes?: Record<string, unknown> } & Record<
       string,

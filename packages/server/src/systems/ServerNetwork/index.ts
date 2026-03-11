@@ -117,6 +117,7 @@ import { ActionQueue } from "./action-queue";
 import { TickSystem, TickPriority } from "../TickSystem";
 import { SocketManager } from "./socket-management";
 import { BroadcastManager } from "./broadcast";
+import { PacketPriority } from "./BandwidthBudget";
 import { SpatialIndex } from "./SpatialIndex";
 import { SaveManager } from "./save-manager";
 import { PositionValidator } from "./position-validator";
@@ -3010,6 +3011,24 @@ export class ServerNetwork extends System implements NetworkWithSocket {
    */
   send<T = unknown>(name: string, data: T, ignoreSocketId?: string): void {
     this.broadcastManager.sendToAll(name, data, ignoreSocketId);
+  }
+
+  /**
+   * Broadcast message with HIGH priority (bypasses bandwidth throttling for
+   * NORMAL-priority traffic). Use for batched entity spawns that must not be
+   * silently dropped by the per-connection bandwidth budget.
+   */
+  sendHighPriority<T = unknown>(
+    name: string,
+    data: T,
+    ignoreSocketId?: string,
+  ): void {
+    this.broadcastManager.sendToAll(
+      name,
+      data,
+      ignoreSocketId,
+      PacketPriority.HIGH,
+    );
   }
 
   /**
