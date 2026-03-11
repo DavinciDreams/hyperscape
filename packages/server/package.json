@@ -60,7 +60,7 @@
     "@ai-sdk/openai": "^3.0.30",
     "@elizaos/core": "alpha",
     "@elizaos/plugin-anthropic": "alpha",
-    "@elizaos/plugin-elizacloud": "^1.8.0",
+    "@elizaos/plugin-elizacloud": "2.0.0-alpha.7",
     "@elizaos/plugin-groq": "alpha",
     "@elizaos/plugin-openai": "alpha",
     "@elizaos/plugin-sql": "alpha",

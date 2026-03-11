@@ -1076,14 +1076,6 @@ export class AutonomousBehaviorManager {
       }
     }
 
-    if (
-      this.dedicatedDuelBot &&
-      !this.duelPrepPhase &&
-      this.duelPhase === null
-    ) {
-      return;
-    }
-
     // Periodic state refresh — catch any missed push events (dropped packet, race condition)
     if (
       Date.now() - this.lastStateRefreshTime >
@@ -5442,17 +5434,6 @@ export class AutonomousBehaviorManager {
       return false;
     }
 
-    if (
-      (player as PlayerEntity & { inStreamingDuel?: boolean }).inStreamingDuel
-    ) {
-      if (this.debug) {
-        logger.debug(
-          "[AutonomousBehavior] Player is in streaming duel, skipping autonomous tick",
-        );
-      }
-      return false;
-    }
-
     // Only skip if explicitly dead - undefined means alive
     if (player.alive === false) {
       if (this.debug)
@@ -7183,13 +7164,6 @@ export class AutonomousBehaviorManager {
     this.duelId = null;
     this.resetDuelCombatState();
 
-    if (this.dedicatedDuelBot) {
-      this.currentGoal = null;
-      this.goalStack.length = 0;
-      this.nextTickFast = true;
-      return;
-    }
-
     // Generate post-duel assessment and adjust strategy
     const assessment = this.assessDuelOutcome(won, opponentName, player);
     logger.info(
@@ -7242,13 +7216,6 @@ export class AutonomousBehaviorManager {
     const player = this.service?.getPlayerEntity();
     if (player) {
       player.inCombat = false;
-    }
-
-    if (this.dedicatedDuelBot) {
-      this.currentGoal = null;
-      this.goalStack.length = 0;
-      this.nextTickFast = true;
-      return;
     }
 
     // Restore saved goal
