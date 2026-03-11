@@ -183,9 +183,11 @@ export default defineConfig(({ mode }) => {
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
           runtimeCaching: [
             {
-              // Cache JS/CSS files that weren't precached
+              // Cache JS/CSS files that weren't precached.
+              // NetworkFirst prevents stale SW caches from serving HTML for
+              // JS chunks after a rebuild changes content hashes.
               urlPattern: /\.(?:js|css)$/i,
-              handler: "CacheFirst",
+              handler: "NetworkFirst",
               options: {
                 cacheName: "hyperscape-code",
                 expiration: {
@@ -193,7 +195,7 @@ export default defineConfig(({ mode }) => {
                   maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
                 },
                 cacheableResponse: {
-                  statuses: [0, 200],
+                  statuses: [200],
                 },
               },
             },

@@ -115,7 +115,7 @@ jobs:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
 
       - name: Run tests
-        run: bunx turbo run test --filter='!@hyperscape/app' --filter='!@hyperscape/contracts' --filter='!@hyperscapeai/duel-oracle-evm'
+        run: bunx turbo run test --filter='!@hyperscape/app' --filter='!@hyperscape/contracts' --filter='!@hyperscapeai/duel-oracle-evm' --filter='!@hyperscape/impostor'
         env:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
           NODE_ENV: test

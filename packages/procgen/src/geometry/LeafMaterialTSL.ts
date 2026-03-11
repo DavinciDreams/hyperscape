@@ -44,7 +44,7 @@ import {
   select,
   sign,
   sqrt,
-  atan2 as atan,
+  atan,
   floor,
   cameraPosition,
   positionWorld,

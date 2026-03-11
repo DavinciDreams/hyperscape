@@ -29,6 +29,7 @@ import {
   Fn,
 } from "../../extras/three/three";
 import { toTHREEVector3 } from "../../extras/three/three";
+import type { TSLNodeVec2 } from "../../extras/three/three";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
 import type { World } from "../../types";
 import {
@@ -167,7 +168,9 @@ export class HealthBars extends SystemBase {
     // Color node with atlas UV lookup
     const colorNode = Fn(() => {
       // Get coords from attribute (set per-instance)
-      const coordsAttr = instancedBufferAttribute(this.coordsAttribute);
+      const coordsAttr = instancedBufferAttribute(
+        this.coordsAttribute,
+      ) as TSLNodeVec2;
 
       // Calculate atlas UV
       const baseUv = uv();

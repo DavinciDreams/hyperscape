@@ -230,8 +230,8 @@ export const CAPTURE_SCRIPT = `
         stopFpsTimer();
       };
 
-      // Start recording with 200ms chunks to minimize end-to-end RTMP streaming latency.
-      recorder.start(200);
+      // Start recording with 100ms chunks for tight frame delivery to FFmpeg.
+      recorder.start(100);
       // Some Chromium builds buffer indefinitely unless requestData() is nudged.
       requestDataTimer = setInterval(() => {
         if (recorder && recorder.state === 'recording') {
@@ -241,7 +241,7 @@ export const CAPTURE_SCRIPT = `
             console.warn('[Capture] requestData failed:', err);
           }
         }
-      }, 200);
+      }, 100);
       lastChunkAt = Date.now();
       captureHealthTimer = setInterval(() => {
         if (!recorder || recorder.state !== 'recording') {

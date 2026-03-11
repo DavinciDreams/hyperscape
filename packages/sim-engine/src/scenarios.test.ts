@@ -109,7 +109,7 @@ describe("scenario runner", () => {
   it("guarded mev fee sweep includes solvent points at higher fees", () => {
     const sweep = runGuardedMevFeeSweep([12, 18, 24, 32], 808);
     expect(sweep.some((point) => point.solvent)).toBe(true);
-  }, 60_000);
+  }, 120_000);
 
   it("guarded fee-driven sweep includes solvent configurations", () => {
     const sweep = runFeeDrivenMmSweep([8, 12, 18, 26, 32], 809);

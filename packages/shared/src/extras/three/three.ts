@@ -212,6 +212,16 @@ import type { Node } from "three/webgpu";
 export type ShaderNode = Node;
 
 /**
+ * Typed TSL node aliases for use as variable types in TSL shader code.
+ * These extract the proper parameterized Node types so that TSL operations
+ * like add(), mul(), mix() accept them without overload errors.
+ */
+export type TSLNodeFloat = ReturnType<typeof THREE_NAMESPACE.TSL.float>;
+export type TSLNodeVec2 = ReturnType<typeof THREE_NAMESPACE.TSL.vec2>;
+export type TSLNodeVec3 = ReturnType<typeof THREE_NAMESPACE.TSL.vec3>;
+export type TSLNodeVec4 = ReturnType<typeof THREE_NAMESPACE.TSL.vec4>;
+
+/**
  * Type for TSL function parameters that accept any shader node.
  * This is more permissive than ShaderNode and allows uniforms, attributes, etc.
  */

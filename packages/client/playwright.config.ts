@@ -4,10 +4,11 @@ const CLIENT_PORT = Number(process.env.VITE_PORT ?? 3333);
 const SERVER_PORT = Number(process.env.PORT ?? 5555);
 const IS_LINUX = process.platform === "linux";
 const DEFAULT_LINUX_WEBGPU_ARGS = [
-  "--enable-unsafe-webgpu",
-  "--ozone-platform=x11",
+  "--use-gl=angle",
   "--use-angle=vulkan",
-  "--enable-features=Vulkan,VulkanFromANGLE",
+  "--ozone-platform=x11",
+  "--enable-features=DefaultANGLEVulkan,Vulkan,VulkanFromANGLE,WebGPU,UnsafeWebGPU,WebGPUDeveloperFeatures",
+  "--ignore-gpu-blocklist",
 ];
 const EXTRA_WEBGPU_ARGS = (process.env.PW_WEBGPU_ARGS ?? "")
   .split(" ")

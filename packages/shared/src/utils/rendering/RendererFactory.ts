@@ -104,9 +104,10 @@ export async function isWebGPUAvailable(): Promise<boolean> {
   if (!gpuApi) return false;
 
   try {
-    // Add timeout to prevent indefinite hangs
+    // Add timeout to prevent indefinite hangs.
+    // Request high-performance adapter to prefer discrete GPU on dual-GPU systems.
     const adapter = await withTimeout(
-      gpuApi.requestAdapter(),
+      gpuApi.requestAdapter({ powerPreference: "high-performance" }),
       WEBGPU_ADAPTER_TIMEOUT_MS,
       "WebGPU requestAdapter",
     );
@@ -133,9 +134,24 @@ export async function detectRenderingCapabilities(): Promise<RenderingCapabiliti
   const supportsWebGPU = await isWebGPUAvailable();
 
   if (!supportsWebGPU) {
+    const isLinux =
+      typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent);
+    const linuxHint = isLinux
+      ? "\n\nOn Linux with dual GPUs (Intel + NVIDIA), launch Chrome with:\n" +
+        "  __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia google-chrome\n" +
+        "Or check chrome://gpu to verify WebGPU status."
+      : "";
     throw new Error(
-      "WebGPU is REQUIRED but not supported in this environment. " +
-        "Please use Chrome 113+, Edge 113+, or Safari 17+.",
+      "WebGPU is REQUIRED but not available in this browser.\n\n" +
+        "Hyperscape requires WebGPU for rendering. Please use a supported browser:\n" +
+        "  - Chrome 113+ (recommended)\n" +
+        "  - Edge 113+\n" +
+        "  - Safari 17+\n\n" +
+        "If you're using a supported browser, ensure:\n" +
+        "  - Hardware acceleration is enabled in browser settings\n" +
+        "  - Your GPU drivers are up to date\n" +
+        "  - You're not running in a WebView that blocks WebGPU" +
+        linuxHint,
     );
   }
 
@@ -234,6 +250,15 @@ export async function createRenderer(
     Logger.warn(
       `[RendererFactory] WebGPU init with extended limits failed (${msg}), retrying with default limits...`,
     );
+    // Dispose the failed renderer to release the canvas WebGPU context
+    // so the retry can acquire a fresh context on the same canvas.
+    if (renderer) {
+      try {
+        renderer.dispose();
+      } catch {
+        // Ignore dispose errors on a partially-initialized renderer
+      }
+    }
     renderer = null;
   }
 

@@ -143,6 +143,10 @@ export class Socket {
   };
 
   onMessage = (packet: ArrayBuffer | Uint8Array): void => {
+    // Receiving any packet is proof of life; keeps connection alive
+    // even if proxies (like Cloudflare) drop protocol-level pongs.
+    this.alive = true;
+
     const result = readPacket(packet);
 
     if (result && result.length === 2) {

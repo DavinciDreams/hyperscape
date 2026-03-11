@@ -219,17 +219,21 @@ pkill -f "socat.*TCP-LISTEN:35144" || true
 sleep 1
 # Game server: internal 5555 -> external 35143
 nohup socat TCP-LISTEN:35143,reuseaddr,fork TCP:127.0.0.1:5555 > /dev/null 2>&1 &
+disown
 # WebSocket: internal 5555 -> external 35079
 nohup socat TCP-LISTEN:35079,reuseaddr,fork TCP:127.0.0.1:5555 > /dev/null 2>&1 &
+disown
 # CDN: internal 8080 -> external 35144
 nohup socat TCP-LISTEN:35144,reuseaddr,fork TCP:127.0.0.1:8080 > /dev/null 2>&1 &
+disown
 echo "[deploy] Port proxies running"
 
 # ── Start Xvfb virtual display for WebGPU streaming ──────────
 echo "[deploy] Starting Xvfb virtual display..."
 pkill -f "Xvfb :99" || true
 sleep 1
-Xvfb :99 -screen 0 1280x720x24 &
+nohup Xvfb :99 -screen 0 1280x720x24 > /dev/null 2>&1 &
+disown
 export DISPLAY=:99
 echo "[deploy] Xvfb started on DISPLAY=$DISPLAY"
 
