@@ -57,8 +57,8 @@ export const DEFAULT_STREAMING_CONFIG: StreamingConfig = {
   videoBitrate: 4500,
   audioBitrate: 128,
   fps: 30,
-  width: 1920,
-  height: 1080,
+  width: 1280, // Match default capture viewport (720p) to avoid unnecessary upscale
+  height: 720,
   preset: "ultrafast", // Use ultrafast for real-time 3D capturing to minimize CPU
   gopSize: 30, // Keyframe every 1 second at 30fps — matches HLS segment boundary
   captureMode: "cdp", // CDP screencast is the default (faster, single-encode)

@@ -196,6 +196,10 @@ let cdpFps = 0;
 let cdpFpsIntervalId: ReturnType<typeof setInterval> | null = null;
 let cdpDroppedFrames = 0;
 
+// Frame pacing: enforce minimum inter-frame interval to match TARGET_FPS
+const FRAME_INTERVAL_MS = 1000 / TARGET_FPS; // 33.3ms at 30fps
+let lastFrameTime = 0;
+
 function startFpsTracking() {
   if (cdpFpsIntervalId) clearInterval(cdpFpsIntervalId);
   cdpFrameCount = 0;
@@ -647,7 +651,7 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
 
   startFpsTracking();
 
-  // Handle incoming frames from CDP
+  // Handle incoming frames from CDP with frame pacing
   cdpSession.on("Page.screencastFrame", (params) => {
     void (async () => {
       try {
@@ -659,6 +663,16 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
         } catch {
           // Session may have been destroyed during page navigation
         }
+
+        // Frame pacing: skip frames that arrive faster than the target interval.
+        // This prevents flooding FFmpeg when the compositor runs above TARGET_FPS.
+        const now = performance.now();
+        if (now - lastFrameTime < FRAME_INTERVAL_MS * 0.85) {
+          // Too soon — drop this frame to maintain cadence
+          cdpDroppedFrames++;
+          return;
+        }
+        lastFrameTime = now;
 
         // Decode base64 JPEG and feed to FFmpeg
         const jpegBuffer = Buffer.from(base64Data, "base64");
@@ -677,14 +691,15 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
     })();
   });
 
-  // Start the screencast
+  // Start the screencast — everyNthFrame: 2 halves compositor rate (~60fps → ~30fps)
+  // Combined with frame pacing above, this ensures FFmpeg receives a steady 30fps cadence.
   await withTimeout(
     cdpSession.send("Page.startScreencast", {
       format: "jpeg",
       quality: CDP_QUALITY,
       maxWidth: VIEWPORT.width,
       maxHeight: VIEWPORT.height,
-      everyNthFrame: 1, // Capture every frame
+      everyNthFrame: 2, // Skip every other compositor frame for ~30fps delivery
     }),
     10_000,
     "Page.startScreencast",

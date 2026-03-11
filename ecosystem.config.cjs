@@ -172,6 +172,8 @@ module.exports = {
         STREAM_CAPTURE_ANGLE: "vulkan",
         STREAM_CAPTURE_WIDTH: "1280",
         STREAM_CAPTURE_HEIGHT: "720",
+        STREAM_OUTPUT_WIDTH: "1280",
+        STREAM_OUTPUT_HEIGHT: "720",
         FFMPEG_PATH: process.env.FFMPEG_PATH || "ffmpeg",
         TWITCH_STREAM_URL:
           process.env.TWITCH_STREAM_URL ||
