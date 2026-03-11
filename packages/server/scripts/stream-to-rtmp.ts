@@ -691,15 +691,17 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
     })();
   });
 
-  // Start the screencast — everyNthFrame: 2 halves compositor rate (~60fps → ~30fps)
-  // Combined with frame pacing above, this ensures FFmpeg receives a steady 30fps cadence.
+  // Start the screencast — capture every compositor frame.
+  // Under Xvfb the compositor runs at the game's native FPS (~30fps), so
+  // everyNthFrame: 1 delivers ~30fps directly. The frame pacing guard above
+  // handles edge cases where the compositor exceeds TARGET_FPS.
   await withTimeout(
     cdpSession.send("Page.startScreencast", {
       format: "jpeg",
       quality: CDP_QUALITY,
       maxWidth: VIEWPORT.width,
       maxHeight: VIEWPORT.height,
-      everyNthFrame: 2, // Skip every other compositor frame for ~30fps delivery
+      everyNthFrame: 1, // Capture every frame; pacing guard handles excess
     }),
     10_000,
     "Page.startScreencast",
