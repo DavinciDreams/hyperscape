@@ -181,9 +181,15 @@ pkill -f "xvfb-run.*packages/server.*stream:rtmp" || true
 pkill -f "turbo.*dev" || true
 pkill -f "chromium" || true
 pkill -f "chrome" || true
-# Kill node processes that might hold DB connections (not bun itself)
+# Kill node processes that might hold DB connections
 pkill -f "node.*packages/server" || true
 pkill -f "drizzle" || true
+# Kill ORPHANED bun child processes that pm2 kill failed to terminate
+# (Specifically avoids killing the bash deployment script's own bun instances)
+pkill -f "bun.*packages/server.*dist/index.js" || true
+pkill -f "bun.*packages/server.*start" || true
+pkill -f "bun.*dev-duel.mjs" || true
+pkill -f "bun.*preview.*3333" || true
 rm -f /root/hyperscape/.runtime-locks/rtmp-status.json || true
 
 DB_DRAIN_WAIT_SECONDS=5
