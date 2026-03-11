@@ -2723,4 +2723,55 @@ export function registerAdminRoutes(
       }
     },
   );
+
+  /**
+   * GET /admin/logs
+   * Fetch recent server logs from the in-memory ring buffer
+   */
+  fastify.get(
+    "/admin/logs",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { Logger } =
+          await import("../../systems/ServerNetwork/services/Logger.js");
+        return reply.send({
+          logs: Logger.getRecentLogs(),
+        });
+      } catch (err) {
+        console.error("[AdminRoutes] Failed to fetch logs:", err);
+        return reply.code(500).send({ error: "Failed to fetch logs" });
+      }
+    },
+  );
+
+  /**
+   * POST /admin/restart
+   * Restart the application (process.exit)
+   * Assumes a process manager like pm2 will automatically restart it.
+   */
+  fastify.post(
+    "/admin/restart",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { Logger } =
+          await import("../../systems/ServerNetwork/services/Logger.js");
+        Logger.warn("Admin", "Manual restart triggered from admin console");
+
+        reply.send({
+          success: true,
+          message: "Restarting server in 2 seconds...",
+        });
+
+        // Delay to allow response to send
+        setTimeout(() => {
+          process.exit(0);
+        }, 2000);
+      } catch (err) {
+        console.error("[AdminRoutes] Failed to trigger restart:", err);
+        return reply.code(500).send({ error: "Failed to trigger restart" });
+      }
+    },
+  );
 }

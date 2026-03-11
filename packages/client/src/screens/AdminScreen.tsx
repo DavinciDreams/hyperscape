@@ -31,6 +31,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { INVENTORY_CONSTANTS } from "@hyperscape/shared";
+import { AdminLiveControls } from "./AdminLiveControls";
 import "./AdminScreen.css";
 
 // Types
@@ -132,9 +133,9 @@ export const AdminScreen: React.FC = () => {
   );
 
   // View state
-  const [activeView, setActiveView] = useState<"users" | "player" | "activity">(
-    "users",
-  );
+  const [activeView, setActiveView] = useState<
+    "users" | "player" | "activity" | "live"
+  >("users");
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
 
@@ -477,6 +478,16 @@ export const AdminScreen: React.FC = () => {
             <History size={18} />
             <span>Activity Log</span>
           </button>
+          <button
+            className={`admin-nav-item ${activeView === "live" ? "active" : ""}`}
+            onClick={() => {
+              setActiveView("live");
+              setCurrentPage(1);
+            }}
+          >
+            <Activity size={18} />
+            <span>Live Controls</span>
+          </button>
         </nav>
       </div>
 
@@ -547,6 +558,9 @@ export const AdminScreen: React.FC = () => {
             onRefresh={() => fetchActivities()}
           />
         )}
+
+        {/* Live Controls View */}
+        {activeView === "live" && <AdminLiveControls adminFetch={adminFetch} />}
       </div>
     </div>
   );

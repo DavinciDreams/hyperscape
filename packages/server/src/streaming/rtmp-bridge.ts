@@ -799,6 +799,9 @@ export class RTMPBridge {
       encoder = "h264_nvenc";
     }
 
+    const maxrate = Math.floor(this.config.videoBitrate * 1.1); // 10% overhead for VBR spikes
+    const bufsize = this.config.videoBitrate * 2; // 2 seconds of buffering to absorb network jitter
+
     if (encoder === "h264_videotoolbox") {
       return [
         "-c:v",
@@ -808,9 +811,9 @@ export class RTMPBridge {
         "-b:v",
         `${this.config.videoBitrate}k`,
         "-maxrate",
-        `${Math.floor(this.config.videoBitrate * 1.1)}k`,
+        `${maxrate}k`,
         "-bufsize",
-        `${this.config.videoBitrate * 2}k`,
+        `${bufsize}k`,
         "-pix_fmt",
         "yuv420p",
         "-g",
@@ -827,9 +830,9 @@ export class RTMPBridge {
         "-b:v",
         `${this.config.videoBitrate}k`,
         "-maxrate",
-        `${Math.floor(this.config.videoBitrate * 1.1)}k`,
+        `${maxrate}k`,
         "-bufsize",
-        `${this.config.videoBitrate * 2}k`,
+        `${bufsize}k`,
         "-pix_fmt",
         "yuv420p",
         "-g",
@@ -855,9 +858,9 @@ export class RTMPBridge {
       "-b:v",
       `${this.config.videoBitrate}k`,
       "-maxrate",
-      `${Math.floor(this.config.videoBitrate * 1.2)}k`,
+      `${maxrate}k`,
       "-bufsize",
-      `${this.config.videoBitrate}k`,
+      `${bufsize}k`,
       "-pix_fmt",
       "yuv420p",
       "-g",
@@ -1397,8 +1400,8 @@ export class RTMPBridge {
     const enabledDests = this.destinations.filter((d) => d.enabled);
     const outputs = enabledDests.map((dest) => {
       const fullUrl = dest.key ? `${dest.url}/${dest.key}` : dest.url;
-      // Add flvflags for better RTMP stability and buffering
-      return `[f=flv:onfail=ignore:flvflags=no_duration_filesize]${fullUrl}`;
+      // Wrap each RTMP endpoint in a fifo muxer to absorb network stalls without blocking the encoder
+      return `[f=fifo:fifo_format=flv:drop_pkts_on_overflow=1:attempt_recovery=1:recovery_wait_time=1]${fullUrl}`;
     });
 
     const hlsOutputPath = process.env.HLS_OUTPUT_PATH?.trim();

@@ -152,6 +152,8 @@ function buildSolanaTarget(
 export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
   const enabled = process.env.DUEL_ARENA_ORACLE_ENABLED === "true";
   const profile = normalizeProfile(process.env.DUEL_ARENA_ORACLE_PROFILE);
+  const rawDelay = process.env.ORACLE_SETTLEMENT_DELAY_MS;
+  const settlementDelayMs = rawDelay ? Number.parseInt(rawDelay, 10) : 7000;
   const evmTargets: DuelArenaOracleEvmTargetConfig[] = [];
   const solanaTargets: DuelArenaOracleSolanaTargetConfig[] = [];
 
@@ -306,5 +308,6 @@ export function getDuelArenaOracleConfig(): DuelArenaOracleConfig {
     storePath: resolveStorePath(),
     evmTargets,
     solanaTargets,
+    settlementDelayMs,
   };
 }

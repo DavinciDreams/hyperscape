@@ -25,6 +25,7 @@ import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
 import { logger } from "./lib/logger";
+import { MaintenanceBanner } from "./components/common/MaintenanceBanner";
 // Loading fallback for lazy-loaded screens
 function ScreenLoadingFallback() {
   return (
@@ -131,7 +132,9 @@ if (typeof window !== "undefined") {
     let resolvedCdn = envCdn;
     // Handle localhost edge case normalization
     if (resolvedCdn.includes("127.0.0.1") || resolvedCdn.includes("0.0.0.0")) {
-      resolvedCdn = resolvedCdn.replace("127.0.0.1", "localhost").replace("0.0.0.0", "localhost");
+      resolvedCdn = resolvedCdn
+        .replace("127.0.0.1", "localhost")
+        .replace("0.0.0.0", "localhost");
     }
     windowWithEnv.__CDN_URL = resolvedCdn;
   }
@@ -225,10 +228,10 @@ if (isEmbedded) {
     followEntity: (params.followEntity as string) || undefined,
     hiddenUI: validHiddenUI.length > 0 ? validHiddenUI : undefined,
     quality: (qualityParam === "potato" ||
-      qualityParam === "low" ||
-      qualityParam === "medium" ||
-      qualityParam === "high" ||
-      qualityParam === "ultra"
+    qualityParam === "low" ||
+    qualityParam === "medium" ||
+    qualityParam === "high" ||
+    qualityParam === "ultra"
       ? qualityParam
       : defaultQuality) as GraphicsQuality,
     sessionToken: (params.sessionToken as string) || "",
@@ -393,10 +396,14 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
     .then((registrations) => {
       for (const registration of registrations) {
         registration.unregister();
-        console.log("[App] 🧹 Unregistered stale service worker in development mode");
+        console.log(
+          "[App] 🧹 Unregistered stale service worker in development mode",
+        );
       }
     })
-    .catch((err) => console.warn("[App] Failed to unregister service worker:", err));
+    .catch((err) =>
+      console.warn("[App] Failed to unregister service worker:", err),
+    );
 }
 
 function App() {
@@ -814,6 +821,7 @@ async function mountApp() {
     // Render embedded game client directly (no auth screens)
     root.render(
       <ErrorBoundary>
+        <MaintenanceBanner />
         <React.Suspense fallback={<ScreenLoadingFallback />}>
           <EmbeddedGameClient />
         </React.Suspense>
@@ -826,6 +834,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <SolanaWalletProvider>
             <PrivyAuthProvider>
               <React.Suspense fallback={<ScreenLoadingFallback />}>
@@ -841,6 +850,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <SolanaWalletProvider>
             <PrivyAuthProvider>
               <React.Suspense fallback={<ScreenLoadingFallback />}>
@@ -854,6 +864,7 @@ async function mountApp() {
       console.log("[Hyperscape] Admin mode detected - rendering AdminScreen");
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <AdminScreen />
           </React.Suspense>
@@ -865,6 +876,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <StreamingMode />
           </React.Suspense>
@@ -876,6 +888,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <LeaderboardScreen />
           </React.Suspense>
@@ -887,6 +900,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <AgentMonitorScreen />
           </React.Suspense>
@@ -896,6 +910,7 @@ async function mountApp() {
       // Normal mode - render full app with auth
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <SolanaWalletProvider>
             <PrivyAuthProvider>
               <App />
