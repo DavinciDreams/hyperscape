@@ -44,11 +44,13 @@ const originalGetItem = itemsModule.getItem;
 vi.spyOn(itemsModule, "getItem").mockImplementation((id: string) => {
   const realItem = originalGetItem(id);
   if (realItem) return realItem;
+  // Partial Item stub — only the fields needed for equipment visual tests.
+  // Full Item type requires many fields irrelevant to model loading.
   return {
     id,
     modelPath: `asset://models/${id}.glb`,
     equippedModelPath: `asset://models/${id}.glb`,
-  } as any;
+  } as unknown as ReturnType<typeof originalGetItem>;
 });
 
 describe("EquipmentVisualSystem", () => {

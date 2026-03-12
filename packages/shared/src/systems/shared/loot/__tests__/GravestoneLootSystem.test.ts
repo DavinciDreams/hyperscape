@@ -190,7 +190,6 @@ describe("GravestoneLootSystem", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    // ITEMS.clear();
     registerStackableItem("grave_coins");
     registerStackableItem("grave_lobster");
     registerNonStackableItem("grave_bronze_shortsword");

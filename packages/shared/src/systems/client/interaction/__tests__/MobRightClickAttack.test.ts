@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventType } from "../../../../types/events/event-types";
 import { ContextMenuController } from "../ContextMenuController";
 import { MobInteractionHandler } from "../handlers/MobInteractionHandler";
@@ -47,8 +47,8 @@ describe("Mob right-click attack flow", () => {
     send.mockClear();
     emit.mockClear();
     addChat.mockClear();
-    (actionQueue.isDebounced as any).mockReset();
-    (actionQueue.isDebounced as any).mockReturnValue(false);
+    vi.mocked(actionQueue.isDebounced).mockReset();
+    vi.mocked(actionQueue.isDebounced).mockReturnValue(false);
   });
 
   it("builds an Attack action for a living mob and sends attackMob when selected", () => {
@@ -147,8 +147,10 @@ describe("Mob right-click attack flow", () => {
       observedDetails.push(custom.detail);
     };
 
-    // Mock window for this test
+    // Mock window for this test — wrapped in try/finally to guarantee
+    // restoration even if assertions throw mid-test.
     const originalWindow = globalThis.window;
+    const originalCustomEvent = globalThis.CustomEvent;
     const listeners = new Map<string, Function[]>();
 
     globalThis.window = {
@@ -175,51 +177,53 @@ describe("Mob right-click attack flow", () => {
         }
         return true;
       }),
-    } as any;
+    } as unknown as typeof globalThis.window;
 
     // Define CustomEvent if it doesn't exist
-    const originalCustomEvent = globalThis.CustomEvent;
     if (typeof globalThis.CustomEvent === "undefined") {
       globalThis.CustomEvent = class CustomEvent extends Event {
-        public detail: any;
-        constructor(type: string, options?: any) {
+        public detail: unknown;
+        constructor(type: string, options?: CustomEventInit) {
           super(type, options);
           this.detail = options?.detail;
         }
-      } as any;
+      } as typeof globalThis.CustomEvent;
     }
 
-    window.addEventListener("contextmenu", onContextMenu);
+    try {
+      window.addEventListener("contextmenu", onContextMenu);
 
-    const target = createMobTarget(12);
-    const actions: ContextMenuAction[] = [
-      {
-        id: "attack",
-        label: "Attack Goblin (Level: 2)",
-        enabled: true,
-        priority: 1,
-        handler: attackHandler,
-      },
-    ];
-
-    controller.showMenu(target, actions, 240, 180);
-    expect(observedDetails.length).toBe(1);
-
-    window.dispatchEvent(
-      new CustomEvent("contextmenu:select", {
-        detail: {
-          actionId: "attack",
-          targetId: "mob-goblin-1",
+      const target = createMobTarget(12);
+      const actions: ContextMenuAction[] = [
+        {
+          id: "attack",
+          label: "Attack Goblin (Level: 2)",
+          enabled: true,
+          priority: 1,
+          handler: attackHandler,
         },
-      }) as any,
-    );
+      ];
 
-    expect(attackHandler).toHaveBeenCalledTimes(1);
+      controller.showMenu(target, actions, 240, 180);
+      expect(observedDetails.length).toBe(1);
 
-    controller.destroy();
-    window.removeEventListener("contextmenu", onContextMenu);
+      window.dispatchEvent(
+        new CustomEvent("contextmenu:select", {
+          detail: {
+            actionId: "attack",
+            targetId: "mob-goblin-1",
+          },
+        }) as Event,
+      );
 
-    // Restore window
-    globalThis.window = originalWindow;
+      expect(attackHandler).toHaveBeenCalledTimes(1);
+
+      controller.destroy();
+      window.removeEventListener("contextmenu", onContextMenu);
+    } finally {
+      // Always restore globalThis.window and CustomEvent
+      globalThis.window = originalWindow;
+      globalThis.CustomEvent = originalCustomEvent;
+    }
   });
 });
