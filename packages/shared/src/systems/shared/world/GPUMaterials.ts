@@ -1027,6 +1027,7 @@ export function createTreeDissolveMaterial(
   const LIGHT_CLAMP_HI = 1.0;
   const LIGHT_AMBIENT_BOOST = 0.15;
   const EDGE_BRIGHT = 1.25;
+  const NIGHT_MIN_BRIGHTNESS = 0.3;
 
   // --- Wind vertex displacement (leaf materials only) ---
   // Displacement is proportional to local Y so it auto-scales to any model
@@ -1093,39 +1094,50 @@ export function createTreeDissolveMaterial(
       mul(max(NdotL, float(0.0)), float(LIGHT_DIFFUSE_STR)),
       sunI,
     );
-    const ambient = mul(float(LIGHT_AMBIENT), dayFactor);
+    const ambient = float(LIGHT_AMBIENT);
     const totalLight = add(ambient, diffuse);
-    const clampLo = max(float(0.08), mul(float(LIGHT_CLAMP_LO), dayFactor));
     const softLight = clamp(
       smoothstep(float(0.9), float(1.1), totalLight),
-      clampLo,
+      float(LIGHT_CLAMP_LO),
       float(LIGHT_CLAMP_HI),
     );
-    const ambientBoost = mul(float(LIGHT_AMBIENT_BOOST), dayFactor);
-    let result: any = mul(baseAlbedo, add(softLight, ambientBoost));
+    const nightDim = mix(float(NIGHT_MIN_BRIGHTNESS), float(1.0), dayFactor);
+    let result: any = mul(
+      baseAlbedo,
+      mul(add(softLight, float(LIGHT_AMBIENT_BOOST)), nightDim),
+    );
 
     // ---- Sun shade (shadow-side sky tint, matches terrain) ----
     result = applyTerrainSunShade(result, N, L, vec3(uShadeColor));
 
-    // ---- SSS + Fresnel edge brightening (leaf only) ----
+    // ---- SSS + Fresnel edge brightening (leaf only, scaled by dayFactor) ----
     if (isLeaf) {
       const V = normalize(sub(cameraPosition, positionWorld));
 
-      // Back-scatter SSS
+      // Back-scatter SSS (fades at night)
       const backL = normalize(sub(vec3(0, 0, 0), L));
       const backSSS = clamp(dot(V, backL), float(0), float(1));
-      const sssFactor = mul(pow(backSSS, float(3.0)), float(0.12));
+      const sssFactor = mul(
+        mul(pow(backSSS, float(3.0)), float(0.12)),
+        dayFactor,
+      );
       result = add(result, mul(vec3(0.95, 1.0, 0.7), sssFactor));
 
-      // Edge brightening (morpho effect)
+      // Edge brightening (fades at night)
       const EDotN = clamp(dot(V, N), float(0.0), float(1.0));
-      result = mix(mul(result, float(EDGE_BRIGHT)), result, EDotN);
+      const edgeBright = mix(
+        float(EDGE_BRIGHT),
+        float(1.0),
+        sub(float(1.0), dayFactor),
+      );
+      result = mix(mul(result, edgeBright), result, EDotN);
     }
 
-    // ---- Saturation boost ----
+    // ---- Saturation boost (scales with dayFactor so night stays muted) ----
+    const satScale = mix(float(1.0), float(SAT_BOOST), dayFactor);
     const luma = dot(result, vec3(0.299, 0.587, 0.114));
     const boosted = add(
-      mul(sub(result, vec3(luma, luma, luma)), float(SAT_BOOST)),
+      mul(sub(result, vec3(luma, luma, luma)), satScale),
       vec3(luma, luma, luma),
     );
 
