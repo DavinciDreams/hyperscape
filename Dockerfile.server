@@ -102,6 +102,11 @@ COPY packages/server/package.json ./packages/server/
 # Reuse installed modules from builder stage for faster deploys.
 COPY --from=builder /app/node_modules ./node_modules
 
+# Restore workspace symlinks that Docker COPY flattened.
+# framework.js externalizes @hyperscape/* packages (decimation, impostors,
+# physx-js-webidl, procgen) so Bun must resolve them via workspace links.
+RUN bun install --production --frozen-lockfile 2>/dev/null || bun install --production
+
 # Runtime artifacts.
 COPY --from=builder /app/packages/physx-js-webidl/dist ./packages/physx-js-webidl/dist
 COPY --from=builder /app/packages/decimation/dist ./packages/decimation/dist
