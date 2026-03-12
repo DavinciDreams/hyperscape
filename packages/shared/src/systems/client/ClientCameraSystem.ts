@@ -2753,7 +2753,6 @@ export class ClientCameraSystem extends SystemBase {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private onStreamingStateHP(_state: StreamingCameraStateUpdate): void {
     // Intentionally empty — all combat-reactive camera effects (punch-in,
     // shake, dramatic low angle) have been removed for a smooth cinematic
