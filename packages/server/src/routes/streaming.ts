@@ -406,6 +406,7 @@ export function registerStreamingRoutes(
   const getPublicStreamingState = (
     scheduler: NonNullable<ReturnType<typeof getStreamingDuelScheduler>>,
   ): {
+    type: "STREAMING_STATE_UPDATE";
     cycle: ReturnType<typeof scheduler.getStreamingState>["cycle"];
     leaderboard: ReturnType<typeof scheduler.getStreamingState>["leaderboard"];
     cameraTarget: ReturnType<
@@ -414,8 +415,8 @@ export function registerStreamingRoutes(
   } | null => {
     if (STREAMING_PUBLIC_DELAY_MS <= 0) {
       return {
-        type: "STREAMING_STATE_UPDATE" as const,
         ...scheduler.getStreamingState(),
+        type: "STREAMING_STATE_UPDATE" as const,
       };
     }
 
