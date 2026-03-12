@@ -58,6 +58,12 @@ export interface TreePlacementRules {
   maxHeight?: number;
 }
 
+/** Spawn weight + placement rules combined — used in per-biome tree configs. */
+export interface TreeSpawnConfig extends TreePlacementRules {
+  /** Relative spawn weight (higher = more likely). */
+  weight: number;
+}
+
 export interface TreeTypeDefinition {
   /** Display name shown in UI (e.g., "Oak Tree") */
   name: string;

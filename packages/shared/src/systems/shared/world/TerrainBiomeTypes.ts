@@ -38,51 +38,36 @@ export function buildBiomeConstantsJS(): string {
 
 const FOREST_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
-  distribution: {
-    [TreeId.Knotwood]: 40,
-    [TreeId.Oak]: 20,
-    [TreeId.Birch]: 20,
-    [TreeId.Maple]: 40,
-    [TreeId.Fir]: 15,
-    [TreeId.Pine]: 15,
-    [TreeId.ChinaPine]: 15,
-    [TreeId.Bamboo]: 15,
+  trees: {
+    [TreeId.Knotwood]: { weight: 40, maxHeight: 25 },
+    [TreeId.Oak]: { weight: 20, maxHeight: 25 },
+    [TreeId.Birch]: { weight: 20, maxHeight: 25 },
+    [TreeId.Maple]: { weight: 40, maxHeight: 25 },
+    [TreeId.Fir]: { weight: 15, maxHeight: 25 },
+    [TreeId.Pine]: { weight: 15, maxHeight: 25 },
+    [TreeId.ChinaPine]: { weight: 15, minHeight: 30, maxHeight: 60 },
+    [TreeId.Bamboo]: { weight: 15, minHeight: 35 },
   },
-  placements: {
-    [TreeId.Bamboo]: { minHeight: 35 },
-    [TreeId.Knotwood]: { maxHeight: 25 },
-    [TreeId.Oak]: { maxHeight: 25 },
-    [TreeId.Birch]: { maxHeight: 25 },
-    [TreeId.Maple]: { maxHeight: 25 },
-    [TreeId.Fir]: { maxHeight: 25 },
-    [TreeId.Pine]: { maxHeight: 25 },
-    [TreeId.ChinaPine]: { minHeight: 30 },
-  },
-  density: 10,
+  density: 15,
   minSpacing: 8,
-  clustering: true,
-  clusterSize: 5,
+  clustering: false,
   scaleVariation: [0.8, 1.2],
   maxSlope: 1.5,
 };
 
 const CANYON_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
-  distribution: {
-    [TreeId.Cactus]: 20,
-    [TreeId.Dead]: 20,
-    [TreeId.Palm]: 20,
-    [TreeId.Coconut]: 10,
-  },
-  placements: {
-    [TreeId.Cactus]: { avoidsWaterBelow: 3 },
-    [TreeId.Dead]: { minHeight: 20 },
+  trees: {
+    [TreeId.Cactus]: { weight: 20, avoidsWaterBelow: 3 },
+    [TreeId.Dead]: { weight: 20, minHeight: 20 },
     [TreeId.Palm]: {
+      weight: 20,
       waterAffinity: 0.3,
       waterProximityHeight: 9,
       maxHeight: 15,
     },
     [TreeId.Coconut]: {
+      weight: 10,
       waterAffinity: 0.6,
       waterProximityHeight: 9,
       maxHeight: 15,
@@ -97,16 +82,11 @@ const CANYON_TREE_CONFIG: BiomeTreeConfig = {
 
 const TUNDRA_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
-  distribution: {
-    [TreeId.WindPine]: 40,
-    [TreeId.Fir]: 30,
-    [TreeId.Pine]: 25,
-    [TreeId.Birch]: 10,
-  },
-  placements: {
-    [TreeId.WindPine]: { minHeight: 15 },
-    [TreeId.Fir]: { minHeight: 10 },
-    [TreeId.Pine]: { minHeight: 8 },
+  trees: {
+    [TreeId.WindPine]: { weight: 40, minHeight: 15 },
+    [TreeId.Fir]: { weight: 30, minHeight: 10 },
+    [TreeId.Pine]: { weight: 25, minHeight: 8 },
+    [TreeId.Birch]: { weight: 10 },
   },
   density: 10,
   minSpacing: 12,

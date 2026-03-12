@@ -92,10 +92,10 @@ describe("BiomeResourceGenerator", () => {
   describe("generateTrees", () => {
     const forestTreeConfig: BiomeTreeConfig = {
       enabled: true,
-      distribution: {
-        tree_normal: 0.5,
-        tree_oak: 0.35,
-        tree_willow: 0.15,
+      trees: {
+        tree_normal: { weight: 0.5 },
+        tree_oak: { weight: 0.35 },
+        tree_willow: { weight: 0.15 },
       },
       density: 8,
       minSpacing: 8,
@@ -142,7 +142,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const mapleConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_maple: 1.0 },
+        trees: { tree_maple: { weight: 1.0 } },
         density: 5,
         minSpacing: 5,
         clustering: false,
@@ -162,7 +162,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const spacedConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 50,
         minSpacing: 20,
         clustering: false,
@@ -537,7 +537,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const emptyConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: {},
+        trees: {},
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -551,7 +551,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const zeroWeightConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 0, tree_oak: 0 },
+        trees: { tree_normal: { weight: 0 }, tree_oak: { weight: 0 } },
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -565,7 +565,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const zeroDensityConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 0,
         minSpacing: 5,
         clustering: false,
@@ -579,7 +579,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(-5, -10);
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 5,
         minSpacing: 5,
         clustering: false,
@@ -597,7 +597,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const noClusterSizeConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 5,
         minSpacing: 5,
         clustering: true,
@@ -613,7 +613,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const highDensityConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 100, // Very high
         minSpacing: 50, // Large spacing limits actual placement
         clustering: false,
@@ -632,7 +632,7 @@ describe("BiomeResourceGenerator", () => {
       });
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -648,7 +648,7 @@ describe("BiomeResourceGenerator", () => {
       });
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -668,7 +668,7 @@ describe("BiomeResourceGenerator", () => {
 
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -692,7 +692,7 @@ describe("BiomeResourceGenerator", () => {
 
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 20,
         minSpacing: 5,
         clustering: false,

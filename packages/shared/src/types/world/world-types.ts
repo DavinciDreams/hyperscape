@@ -253,13 +253,8 @@ export interface ResourceDistribution {
 export interface BiomeTreeConfig {
   /** Whether harvestable trees are enabled for this biome */
   enabled: boolean;
-  /** Distribution weights for tree types keyed by TreeId enum values */
-  distribution: ResourceDistribution;
-  /** Per-tree-type placement rules for this biome (keyed by TreeId) */
-  placements?: Record<
-    string,
-    import("../../constants/TreeTypes").TreePlacementRules
-  >;
+  /** Per-tree spawn weight + placement rules, keyed by TreeId */
+  trees: Record<string, import("../../constants/TreeTypes").TreeSpawnConfig>;
   /** Trees per 64m tile (base density, modified by resourceDensity) */
   density: number;
   /** Minimum spacing between trees in meters */

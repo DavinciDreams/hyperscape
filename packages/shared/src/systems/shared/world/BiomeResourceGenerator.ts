@@ -154,15 +154,14 @@ export function generateTrees(
   // Use deterministic RNG for reproducible placement
   const rng = ctx.createRng("trees");
 
-  // Pre-compute tile-level distribution as fallback (used when no per-position
-  // biome callback is available, or as the default for the tile's biome)
-  const tileDist = treeConfig.distribution;
-  const tileTreeTypes = Object.keys(tileDist);
+  // Pre-compute tile-level distribution from the merged trees map
+  const tileTreeMap = treeConfig.trees;
+  const tileTreeTypes = Object.keys(tileTreeMap);
   if (tileTreeTypes.length === 0) {
     return [];
   }
-  const tileTotalWeight = Object.values(tileDist).reduce(
-    (sum, w) => sum + w,
+  const tileTotalWeight = Object.values(tileTreeMap).reduce(
+    (sum, cfg) => sum + cfg.weight,
     0,
   );
   if (tileTotalWeight === 0) {
@@ -259,24 +258,21 @@ export function generateTrees(
       if (dhdx * dhdx + dhdz * dhdz > maxSlope * maxSlope) continue;
     }
 
-    // Resolve the tree distribution for THIS position. If we have a
-    // per-position biome callback, use it to get the actual biome here
-    // instead of relying on the single tile-center biome.
-    let distribution = tileDist;
+    // Resolve the tree map for THIS position. If we have a per-position
+    // biome callback, use it to get the actual biome here instead of
+    // relying on the single tile-center biome.
+    let activeTreeMap = tileTreeMap;
     let treeTypes = tileTreeTypes;
     let totalWeight = tileTotalWeight;
-    let activePlacements: Record<string, TreePlacementRules> | undefined =
-      treeConfig.placements;
 
     if (ctx.getDominantBiome) {
       const positionBiome = ctx.getDominantBiome(worldX, worldZ);
       const posConfig = getTreeConfigForBiome(positionBiome);
-      if (posConfig && posConfig.distribution !== tileDist) {
-        distribution = posConfig.distribution;
-        activePlacements = posConfig.placements;
-        treeTypes = Object.keys(distribution);
-        totalWeight = Object.values(distribution).reduce(
-          (sum, w) => sum + w,
+      if (posConfig && posConfig.trees !== tileTreeMap) {
+        activeTreeMap = posConfig.trees;
+        treeTypes = Object.keys(activeTreeMap);
+        totalWeight = Object.values(activeTreeMap).reduce(
+          (sum, cfg) => sum + cfg.weight,
           0,
         );
         if (totalWeight === 0 || treeTypes.length === 0) continue;
@@ -284,12 +280,11 @@ export function generateTrees(
     }
 
     // Select tree type based on weighted distribution
-    // treeType is a TreeId value (e.g. "tree_oak")
     let selectedTreeId = treeTypes[0];
     const roll = rng() * totalWeight;
     let cumulative = 0;
     for (const treeType of treeTypes) {
-      cumulative += distribution[treeType];
+      cumulative += activeTreeMap[treeType].weight;
       if (roll < cumulative) {
         selectedTreeId = treeType;
         break;
@@ -297,8 +292,8 @@ export function generateTrees(
     }
     const selectedType = treeIdToSubType(selectedTreeId);
 
-    // Apply per-tree placement rules from the active biome config
-    const rules = activePlacements?.[selectedTreeId];
+    // Apply per-tree placement rules from the merged config
+    const rules: TreePlacementRules | undefined = activeTreeMap[selectedTreeId];
     if (rules) {
       const heightAboveWater = height - ctx.waterThreshold;
 
