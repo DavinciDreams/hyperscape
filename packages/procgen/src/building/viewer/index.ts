@@ -15,6 +15,11 @@ export {
   type TownViewerProps,
   type TownViewerHandle,
 } from "./TownViewer";
+
+export interface TileCoord {
+  x: number;
+  z: number;
+}
 export {
   NavigationVisualizer,
   type NavigationVisualizerOptions,

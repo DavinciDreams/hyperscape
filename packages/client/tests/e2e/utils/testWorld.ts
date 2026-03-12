@@ -36,7 +36,7 @@ export async function waitForGameLoad(
     .catch(() => null);
 
   if (loadedHandle) {
-    await loadedHandle.dispose().catch(() => { });
+    await loadedHandle.dispose().catch(() => {});
     return;
   }
 
@@ -96,7 +96,7 @@ export async function waitForLoadingScreenHidden(
     .catch(() => null);
 
   if (hiddenHandle) {
-    await hiddenHandle.dispose().catch(() => { });
+    await hiddenHandle.dispose().catch(() => {});
     return;
   }
 
@@ -201,7 +201,7 @@ export async function waitForPlayerSpawn(
     .catch(() => null);
 
   if (spawnedHandle) {
-    await spawnedHandle.dispose().catch(() => { });
+    await spawnedHandle.dispose().catch(() => {});
     return;
   }
 
@@ -340,7 +340,7 @@ export async function takeGameScreenshot(
   const maxRetries = options.maxRetries ?? 5;
   const retryDelay = options.retryDelay ?? 500;
 
-  await mkdir("screenshots", { recursive: true }).catch(() => { });
+  await mkdir("screenshots", { recursive: true }).catch(() => {});
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     // Wait for canvas to be ready
@@ -356,7 +356,7 @@ export async function takeGameScreenshot(
         if (!navigator.gpu) return false;
 
         // Try to get a basic 2D context to verify canvas has dimensions and is ready
-        // (Note: WebGPU contexts can't readPixels directly without a staging buffer, 
+        // (Note: WebGPU contexts can't readPixels directly without a staging buffer,
         // so we just rely on dimensions and Context availability here)
         return canvas.width > 0 && canvas.height > 0;
       })
@@ -395,7 +395,7 @@ export async function takeGameScreenshot(
 
       // Check if screenshot is large enough (actual rendered content)
       if (pngBuffer.length >= minSize) {
-        await writeFile(screenshotPath, pngBuffer).catch(() => { });
+        await writeFile(screenshotPath, pngBuffer).catch(() => {});
         console.log(
           `[Screenshot] Captured "${name}": ${pngBuffer.length} bytes (attempt ${attempt + 1})`,
         );
@@ -412,7 +412,7 @@ export async function takeGameScreenshot(
       }
 
       // Last attempt, accept whatever we got
-      await writeFile(screenshotPath, pngBuffer).catch(() => { });
+      await writeFile(screenshotPath, pngBuffer).catch(() => {});
       console.log(
         `[Screenshot] Captured "${name}": ${pngBuffer.length} bytes (fallback)`,
       );
@@ -513,16 +513,16 @@ export function assertScreenshotsDifferent(
   if (comparison.identical) {
     throw new Error(
       `Screenshots "${name1}" and "${name2}" are pixel-identical! ` +
-      `This indicates the game may not be rendering correctly or the scene isn't changing.`,
+        `This indicates the game may not be rendering correctly or the scene isn't changing.`,
     );
   }
 
   if (comparison.diffPercentage < minDiffPercentage) {
     throw new Error(
       `Screenshots "${name1}" and "${name2}" are nearly identical ` +
-      `(only ${comparison.diffPercentage.toFixed(4)}% different, ${comparison.diffPixels} bytes). ` +
-      `Expected at least ${minDiffPercentage}% difference. ` +
-      `This may indicate the game isn't responding to input.`,
+        `(only ${comparison.diffPercentage.toFixed(4)}% different, ${comparison.diffPixels} bytes). ` +
+        `Expected at least ${minDiffPercentage}% difference. ` +
+        `This may indicate the game isn't responding to input.`,
     );
   }
 

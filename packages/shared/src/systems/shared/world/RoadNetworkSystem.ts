@@ -63,14 +63,9 @@ const DEFAULTS = {
 } as const;
 
 const DEFAULT_BIOME_COSTS: Record<string, number> = {
-  plains: 1.0,
-  valley: 1.0,
-  forest: 1.3,
+  forest: 1.0,
   tundra: 1.5,
-  desert: 2.0,
-  swamp: 2.5,
-  mountains: 3.0,
-  lakes: 100,
+  canyon: 2.0,
 };
 
 // Road mask generation settings (shared across terrain/grass/flowers)

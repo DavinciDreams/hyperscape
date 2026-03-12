@@ -52,7 +52,7 @@ struct BiomeColors {
   plains: vec4<f32>,
   forest: vec4<f32>,
   mountains: vec4<f32>,
-  desert: vec4<f32>,
+  canyon: vec4<f32>,
   swamp: vec4<f32>,
   shore: vec4<f32>,
   water: vec4<f32>,

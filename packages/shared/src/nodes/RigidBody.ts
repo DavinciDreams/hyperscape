@@ -169,6 +169,11 @@ export class RigidBody extends Node {
       ) as PxTransform;
     }
 
+    // Guard: physics system may be removed in stream/spectator viewports
+    if (!this.ctx?.physics) {
+      return;
+    }
+
     // Force decompose using temporary plain vectors
     const plainPos = new THREE.Vector3();
     const plainQuat = new THREE.Quaternion();

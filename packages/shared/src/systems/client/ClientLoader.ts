@@ -51,7 +51,7 @@ type HlsInstance = {
 };
 
 type HlsConstructor = {
-  new(): HlsInstance;
+  new (): HlsInstance;
   isSupported: () => boolean;
 };
 
@@ -604,7 +604,9 @@ export class ClientLoader extends SystemBase {
           });
 
           if (!resp.ok) {
-            console.error(`[ClientLoader] Fetch failed for ${url} with status: ${resp.status}`);
+            console.error(
+              `[ClientLoader] Fetch failed for ${url} with status: ${resp.status}`,
+            );
             throw new Error(`HTTP error! status: ${resp.status}`);
           }
 

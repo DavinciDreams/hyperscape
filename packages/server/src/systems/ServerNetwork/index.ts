@@ -117,6 +117,7 @@ import { ActionQueue } from "./action-queue";
 import { TickSystem, TickPriority } from "../TickSystem";
 import { SocketManager } from "./socket-management";
 import { BroadcastManager } from "./broadcast";
+import { PacketPriority } from "./BandwidthBudget";
 import { SpatialIndex } from "./SpatialIndex";
 import { SaveManager } from "./save-manager";
 import { PositionValidator } from "./position-validator";
@@ -413,11 +414,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         urgency: "critical" | "warning" | "safe";
       };
       decisionPath?:
-      | "short-circuit"
-      | "llm"
-      | "scripted"
-      | "planner"
-      | "curiosity";
+        | "short-circuit"
+        | "llm"
+        | "scripted"
+        | "planner"
+        | "curiosity";
       providers?: string[];
     }>
   > = new Map();
@@ -801,7 +802,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
             const spawnTerrainHeight = terrain.getHeightAt(spawnX, spawnZ);
             const safeY =
               typeof spawnTerrainHeight === "number" &&
-                Number.isFinite(spawnTerrainHeight)
+              Number.isFinite(spawnTerrainHeight)
                 ? spawnTerrainHeight + 0.1
                 : baseY;
 
@@ -2805,11 +2806,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         const relevantEntities =
           entity && "position" in entity
             ? collectInitialSyncEntities(
-              this.world,
-              entity.position.x,
-              entity.position.z,
-              reconnectedPlayerId,
-            )
+                this.world,
+                entity.position.x,
+                entity.position.z,
+                reconnectedPlayerId,
+              )
             : [];
         const relevantEntityIds = new Set(
           relevantEntities.map((entry) => entry.id),
@@ -2835,10 +2836,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         // (initial join flow sends this but packets may be lost during socket reconnect)
         const equipSys = this.world.getSystem?.("equipment") as
           | {
-            getPlayerEquipment?: (
-              id: string,
-            ) => Record<string, unknown> | undefined;
-          }
+              getPlayerEquipment?: (
+                id: string,
+              ) => Record<string, unknown> | undefined;
+            }
           | undefined;
         if (equipSys?.getPlayerEquipment && this.world.entities?.items) {
           for (const [entityId, ent] of this.world.entities.items.entries()) {
@@ -3010,6 +3011,24 @@ export class ServerNetwork extends System implements NetworkWithSocket {
    */
   send<T = unknown>(name: string, data: T, ignoreSocketId?: string): void {
     this.broadcastManager.sendToAll(name, data, ignoreSocketId);
+  }
+
+  /**
+   * Broadcast message with HIGH priority (bypasses bandwidth throttling for
+   * NORMAL-priority traffic). Use for batched entity spawns that must not be
+   * silently dropped by the per-connection bandwidth budget.
+   */
+  sendHighPriority<T = unknown>(
+    name: string,
+    data: T,
+    ignoreSocketId?: string,
+  ): void {
+    this.broadcastManager.sendToAll(
+      name,
+      data,
+      ignoreSocketId,
+      PacketPriority.HIGH,
+    );
   }
 
   /**
@@ -3369,16 +3388,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     const equipmentSystem = this.world.getSystem("equipment") as
       | {
-        getPlayerEquipment?: (id: string) => {
-          weapon?: {
-            item?: {
-              attackRange?: number;
-              attackType?: string;
-              id?: string;
+          getPlayerEquipment?: (id: string) => {
+            weapon?: {
+              item?: {
+                attackRange?: number;
+                attackType?: string;
+                id?: string;
+              };
             };
-          };
-        } | null;
-      }
+          } | null;
+        }
       | undefined;
 
     if (equipmentSystem?.getPlayerEquipment) {
@@ -3394,7 +3413,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           String(weaponItem.attackType || "").toLowerCase() === "magic" ||
           (weaponItem.id &&
             String(getItem(weaponItem.id)?.attackType || "").toLowerCase() ===
-            "magic");
+              "magic");
 
         if (!isMagicWeapon) {
           // Non-magic weapons use their attackRange (e.g., bows)
@@ -3437,15 +3456,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     const equipmentSystem = this.world.getSystem("equipment") as
       | {
-        getPlayerEquipment?: (id: string) => {
-          weapon?: {
-            item?: {
-              attackType?: AttackType;
-              weaponType?: WeaponType;
+          getPlayerEquipment?: (id: string) => {
+            weapon?: {
+              item?: {
+                attackType?: AttackType;
+                weaponType?: WeaponType;
+              };
             };
-          };
-        } | null;
-      }
+          } | null;
+        }
       | undefined;
 
     if (equipmentSystem?.getPlayerEquipment) {

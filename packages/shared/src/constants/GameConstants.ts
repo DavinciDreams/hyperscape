@@ -7,6 +7,12 @@
 
 // Import COMBAT_CONSTANTS from dedicated file
 import { COMBAT_CONSTANTS } from "./CombatConstants";
+// Re-export biome enum as the single source of truth
+export {
+  BiomeType,
+  DEFAULT_BIOME,
+  BIOME_LIST,
+} from "../systems/shared/world/TerrainBiomeTypes";
 // Import banking constants - single source of truth for MAX_BANK_SLOTS
 import { BANKING_CONSTANTS } from "./BankingConstants";
 
@@ -56,14 +62,10 @@ export const XP_CONSTANTS = {
   },
 } as const;
 
-// === WORLD AND TERRAIN ===
+// === WORLD AND SPATIAL PARTITIONING ===
 export const WORLD_CONSTANTS = {
+  /** Spatial partition chunk size for entity registry (meters). */
   CHUNK_SIZE: 64,
-  WORLD_SIZE: 512,
-  TERRAIN_HEIGHT_SCALE: 20,
-  SEA_LEVEL: 0,
-  BIOME_TRANSITION_SMOOTHNESS: 0.1,
-  RESOURCE_SPAWN_DENSITY: 0.1,
 } as const;
 
 // === TERRAIN CONSTANTS ===
@@ -79,9 +81,9 @@ export const TERRAIN_CONSTANTS = {
   /**
    * Water threshold in world Y units.
    * Terrain below this height is underwater and impassable.
-   * Used by: TerrainSystem, VegetationSystem, GPUVegetation, RoadNetworkSystem, ResourceSystem
+   * Used by: TerrainSystem, VegetationSystem, DissolveMaterial, RoadNetworkSystem, ResourceSystem
    */
-  WATER_THRESHOLD: 9.0,
+  WATER_THRESHOLD: 8.0,
 
   /**
    * Buffer distance above water where vegetation shouldn't spawn.
@@ -92,14 +94,16 @@ export const TERRAIN_CONSTANTS = {
   /**
    * Maximum slope for walkable terrain (tan of angle).
    * Slopes steeper than this block movement.
-   * 0.7 ≈ 35 degree angle
+   * 1.5 ≈ 56 degree angle.
    */
-  MAX_WALKABLE_SLOPE: 0.7,
+  MAX_WALKABLE_SLOPE: 1.5,
 
   /**
    * Distance to sample for slope calculation (in meters).
+   * Larger values average slope over a wider area, preventing
+   * terraced cliffs and landscape features from blocking movement.
    */
-  SLOPE_CHECK_DISTANCE: 1.0,
+  SLOPE_CHECK_DISTANCE: 4.0,
 
   /**
    * Tile size in meters (1 tile = 1 meter for movement grid).
@@ -385,15 +389,13 @@ export const ITEM_ID_TO_KEY: Record<number, string> = {
 export const MOB_TYPES = {} as const;
 
 // === BIOME TYPES ===
+// Deprecated: use BiomeType enum (re-exported above) instead.
+// Kept for backward compat; maps to the same string values.
+import { BiomeType as _BT } from "../systems/shared/world/TerrainBiomeTypes";
 export const BIOME_TYPES = {
-  PLAINS: "plains",
-  FOREST: "forest",
-  VALLEY: "valley",
-  MOUNTAINS: "mountains",
-  TUNDRA: "tundra",
-  DESERT: "desert",
-  LAKES: "lakes",
-  SWAMP: "swamp",
+  TUNDRA: _BT.Tundra,
+  FOREST: _BT.Forest,
+  CANYON: _BT.Canyon,
 } as const;
 
 // === SKILL NAMES ===

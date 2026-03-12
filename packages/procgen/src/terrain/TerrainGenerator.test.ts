@@ -7,7 +7,38 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { TerrainGenerator, DEFAULT_TERRAIN_CONFIG } from "./TerrainGenerator";
-import { BiomeSystem, DEFAULT_BIOMES } from "./BiomeSystem";
+import { BiomeSystem } from "./BiomeSystem";
+import type { BiomeDefinition } from "./types";
+
+const TEST_BIOMES: Record<string, BiomeDefinition> = {
+  forest: {
+    id: "forest",
+    name: "Forest",
+    color: 0x2f7d32,
+    terrainMultiplier: 1.1,
+    difficultyLevel: 1,
+    heightRange: [0.2, 0.6],
+    resourceDensity: 1.5,
+  },
+  tundra: {
+    id: "tundra",
+    name: "Tundra",
+    color: 0xb0c4de,
+    terrainMultiplier: 1.0,
+    difficultyLevel: 3,
+    heightRange: [0.3, 0.8],
+    resourceDensity: 0.4,
+  },
+  canyon: {
+    id: "canyon",
+    name: "Canyon",
+    color: 0xdaa520,
+    terrainMultiplier: 0.9,
+    difficultyLevel: 2,
+    heightRange: [0.1, 0.4],
+    resourceDensity: 0.3,
+  },
+};
 import { IslandMask } from "./IslandMask";
 import {
   NoiseGenerator,
@@ -20,7 +51,7 @@ describe("TerrainGenerator", () => {
   let generator: TerrainGenerator;
 
   beforeEach(() => {
-    generator = new TerrainGenerator({ seed: 12345 });
+    generator = new TerrainGenerator({ seed: 12345 }, TEST_BIOMES);
   });
 
   describe("initialization", () => {
@@ -174,7 +205,7 @@ describe("TerrainGenerator", () => {
 
     it("should return valid biome names", () => {
       const point = generator.queryPoint(150, 150);
-      const validBiomes = Object.keys(DEFAULT_BIOMES);
+      const validBiomes = Object.keys(TEST_BIOMES);
       expect(validBiomes).toContain(point.biome);
     });
 
@@ -247,7 +278,7 @@ describe("BiomeSystem", () => {
   let biomeSystem: BiomeSystem;
 
   beforeEach(() => {
-    biomeSystem = new BiomeSystem(12345, 10000); // 10km world
+    biomeSystem = new BiomeSystem(12345, 10000, {}, TEST_BIOMES);
   });
 
   it("should create biome centers", () => {
@@ -262,7 +293,7 @@ describe("BiomeSystem", () => {
   });
 
   it("should return valid biome types", () => {
-    const validTypes = Object.keys(DEFAULT_BIOMES);
+    const validTypes = Object.keys(TEST_BIOMES);
     const influences = biomeSystem.getBiomeInfluencesAtPosition(500, 500, 0.3);
 
     for (const influence of influences) {
@@ -272,8 +303,8 @@ describe("BiomeSystem", () => {
 
   it("should blend colors correctly", () => {
     const influences = [
-      { type: "plains", weight: 0.5 },
       { type: "forest", weight: 0.5 },
+      { type: "tundra", weight: 0.5 },
     ];
     const color = biomeSystem.blendBiomeColors(influences);
 

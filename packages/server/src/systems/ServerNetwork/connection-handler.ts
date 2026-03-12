@@ -124,7 +124,7 @@ export class ConnectionHandler {
     private sockets: Map<string, ServerSocket>,
     private broadcast: BroadcastManager,
     private db: SystemDatabase,
-  ) { }
+  ) {}
 
   private isLoopbackWs(ws: NodeWebSocket): boolean {
     const rawAddress =
@@ -713,15 +713,15 @@ export class ConnectionHandler {
       // Get towns from TownSystem
       const townSystem = this.world.getSystem("towns") as
         | {
-          getTowns?: () => Array<{
-            id: string;
-            name: string;
-            position: { x: number; y: number; z: number };
-            size: string;
-            biome: string;
-            buildings: Array<{ type: string }>;
-          }>;
-        }
+            getTowns?: () => Array<{
+              id: string;
+              name: string;
+              position: { x: number; y: number; z: number };
+              size: string;
+              biome: string;
+              buildings: Array<{ type: string }>;
+            }>;
+          }
         | undefined;
 
       if (townSystem?.getTowns) {
@@ -739,14 +739,14 @@ export class ConnectionHandler {
       // Get POIs from POISystem
       const poiSystem = this.world.getSystem("pois") as
         | {
-          getPOIs?: () => Array<{
-            id: string;
-            name: string;
-            category: string;
-            position: { x: number; y: number; z: number };
-            biome: string;
-          }>;
-        }
+            getPOIs?: () => Array<{
+              id: string;
+              name: string;
+              category: string;
+              position: { x: number; y: number; z: number };
+              biome: string;
+            }>;
+          }
         | undefined;
 
       if (poiSystem?.getPOIs) {
@@ -978,19 +978,19 @@ export class ConnectionHandler {
         entity as {
           data?: {
             position?:
-            | [number, number, number]
-            | { x?: number; y?: number; z?: number };
+              | [number, number, number]
+              | { x?: number; y?: number; z?: number };
           };
           position?:
-          | [number, number, number]
-          | { x?: number; y?: number; z?: number };
+            | [number, number, number]
+            | { x?: number; y?: number; z?: number };
         }
       ).data?.position ??
       (
         entity as {
           position?:
-          | [number, number, number]
-          | { x?: number; y?: number; z?: number };
+            | [number, number, number]
+            | { x?: number; y?: number; z?: number };
         }
       ).position;
 
@@ -1135,10 +1135,10 @@ export class ConnectionHandler {
       const state = scheduler?.getStreamingState();
       const cycle = state?.cycle as
         | {
-          phase?: string;
-          agent1?: { id?: string } | null;
-          agent2?: { id?: string } | null;
-        }
+            phase?: string;
+            agent1?: { id?: string } | null;
+            agent2?: { id?: string } | null;
+          }
         | undefined;
 
       const contestants = [
@@ -1458,13 +1458,13 @@ export class ConnectionHandler {
     try {
       const invSystem = this.world.getSystem?.("inventory") as
         | {
-          getInventoryData?: (id: string) => {
-            items: unknown[];
-            coins: number;
-            maxSlots: number;
-          };
-          isInventoryReady?: (id: string) => boolean;
-        }
+            getInventoryData?: (id: string) => {
+              items: unknown[];
+              coins: number;
+              maxSlots: number;
+            };
+            isInventoryReady?: (id: string) => boolean;
+          }
         | undefined;
 
       // Wait a bit for inventory to be ready if loading

@@ -187,7 +187,7 @@ export class Entities extends SystemBase implements IEntities {
   constructor(world: World) {
     super(world, {
       name: "entities",
-      dependencies: { required: [], optional: [] },
+      dependencies: { required: ["physics"], optional: [] },
       autoCleanup: true,
     });
     this.items = new Map();
@@ -724,6 +724,7 @@ export class Entities extends SystemBase implements IEntities {
         depletedModelPath: (data as { depletedModelPath?: string })
           .depletedModelPath,
         procgenPreset: (data as { procgenPreset?: string }).procgenPreset,
+        modelVariants: (data as { modelVariants?: string[] }).modelVariants,
       };
 
       const ResourceEntityClass = getEntityType("resource")!;

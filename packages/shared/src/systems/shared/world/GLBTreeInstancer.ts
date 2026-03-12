@@ -21,11 +21,14 @@ import THREE from "../../../extras/three/three";
 import type { World } from "../../../core/World";
 import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
-  createDissolveMaterial,
-  getLODDistances,
+  createTreeDissolveMaterial,
   GPU_VEG_CONFIG,
   type DissolveMaterial,
-} from "./GPUVegetation";
+  type TreeDissolveMaterial,
+  type TreeMaterialOptions,
+} from "./GPUMaterials";
+import type { Wind } from "./Wind";
+import { getLODDistances, inferLOD1Path, inferLOD2Path } from "./LODConfig";
 
 const MAX_INSTANCES = 512;
 
@@ -47,12 +50,15 @@ interface TreeSlot {
 }
 
 interface LODPool {
-  mesh: THREE.InstancedMesh;
-  material: DissolveMaterial;
-  /** entityId → slot index in this pool's InstancedMesh */
+  /** One InstancedMesh per sub-mesh/primitive in the GLB */
+  meshes: THREE.InstancedMesh[];
+  materials: DissolveMaterial[];
+  /** entityId → slot index (same across all meshes) */
   slots: Map<string, number>;
   activeCount: number;
   dirty: boolean;
+  /** Shared backing array for per-instance highlight intensity (0 or 1) */
+  highlightData: Float32Array;
 }
 
 interface ModelPool {
@@ -64,8 +70,10 @@ interface ModelPool {
   instances: Map<string, TreeSlot>;
   yOffset: number;
   depletedYOffset: number;
-  highlightMesh: THREE.Mesh | null;
-  depletedHighlightMesh: THREE.Mesh | null;
+  /** Unscaled model height from bounding box */
+  modelHeight: number;
+  /** Unscaled model horizontal radius from bounding box */
+  modelRadius: number;
 }
 
 const resourceLOD = getLODDistances("resource");
@@ -76,29 +84,27 @@ let world: World | null = null;
 const pools = new Map<string, ModelPool>();
 const entityToModel = new Map<string, string>();
 
-
-
 // ---- Geometry extraction (portfolio pattern: reference, not clone) ----
 
-function extractGeometryAndMaterial(
-  root: THREE.Object3D,
-): { geometry: THREE.BufferGeometry; material: THREE.Material } | null {
-  let result: {
-    geometry: THREE.BufferGeometry;
-    material: THREE.Material;
-  } | null = null;
+interface MeshPart {
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material;
+}
+
+function extractAllMeshParts(root: THREE.Object3D): MeshPart[] {
+  const parts: MeshPart[] = [];
   root.traverse((child) => {
-    if (result) return;
     if (child instanceof THREE.Mesh && child.geometry) {
-      result = {
-        geometry: child.geometry,
-        material: Array.isArray(child.material)
-          ? child.material[0]
-          : child.material,
-      };
+      if (Array.isArray(child.material)) {
+        for (const mat of child.material) {
+          parts.push({ geometry: child.geometry, material: mat });
+        }
+      } else {
+        parts.push({ geometry: child.geometry, material: child.material });
+      }
     }
   });
-  return result;
+  return parts;
 }
 
 function createSharedGeometry(
@@ -114,44 +120,74 @@ function createSharedGeometry(
       geo.morphAttributes[name] = source.morphAttributes[name];
     }
   }
+  if (source.groups.length > 0) {
+    for (const group of source.groups) {
+      geo.addGroup(group.start, group.count, group.materialIndex);
+    }
+  }
   if (source.boundingBox) geo.boundingBox = source.boundingBox.clone();
   if (source.boundingSphere) geo.boundingSphere = source.boundingSphere.clone();
   return geo;
 }
 
-function computeYOffset(root: THREE.Object3D, scale: number): number {
+function computeModelBounds(
+  root: THREE.Object3D,
+  scale: number,
+): {
+  yOffset: number;
+  height: number;
+  radius: number;
+} {
   const saved = root.scale.clone();
   root.scale.set(scale, scale, scale);
   const bbox = new THREE.Box3().setFromObject(root);
   root.scale.copy(saved);
-  return -bbox.min.y;
+  const height = bbox.max.y - bbox.min.y;
+  const dx = Math.max(Math.abs(bbox.min.x), Math.abs(bbox.max.x));
+  const dz = Math.max(Math.abs(bbox.min.z), Math.abs(bbox.max.z));
+  return { yOffset: -bbox.min.y, height, radius: Math.max(dx, dz) };
 }
 
 // ---- LODPool creation ----
 
 function createLODPool(
-  geometry: THREE.BufferGeometry,
-  material: DissolveMaterial,
+  parts: { geometry: THREE.BufferGeometry; material: DissolveMaterial }[],
 ): LODPool {
-  const geo = createSharedGeometry(geometry);
-  const mesh = new THREE.InstancedMesh(geo, material, MAX_INSTANCES);
-  mesh.count = 0;
-  mesh.frustumCulled = false;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.layers.set(1);
-  scene!.add(mesh);
+  const meshes: THREE.InstancedMesh[] = [];
+  const materials: DissolveMaterial[] = [];
+  const hlData = new Float32Array(MAX_INSTANCES);
+  for (const part of parts) {
+    const geo = createSharedGeometry(part.geometry);
 
-  return { mesh, material, slots: new Map(), activeCount: 0, dirty: false };
+    const hlAttr = new THREE.InstancedBufferAttribute(hlData, 1);
+    hlAttr.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("instanceHighlight", hlAttr);
+
+    const im = new THREE.InstancedMesh(geo, part.material, MAX_INSTANCES);
+    im.count = 0;
+    im.frustumCulled = false;
+    im.castShadow = true;
+    im.receiveShadow = false;
+    im.layers.set(1);
+    scene!.add(im);
+    meshes.push(im);
+    materials.push(part.material);
+  }
+  return {
+    meshes,
+    materials,
+    slots: new Map(),
+    activeCount: 0,
+    dirty: false,
+    highlightData: hlData,
+  };
 }
 
-async function loadLODModel(path: string): Promise<{
-  geometry: THREE.BufferGeometry;
-  material: THREE.Material;
-} | null> {
+async function loadLODParts(path: string): Promise<MeshPart[] | null> {
   try {
     const { scene: lodScene } = await modelCache.loadModel(path, world!);
-    return extractGeometryAndMaterial(lodScene);
+    const parts = extractAllMeshParts(lodScene);
+    return parts.length > 0 ? parts : null;
   } catch {
     return null;
   }
@@ -161,18 +197,26 @@ async function loadLODModel(path: string): Promise<{
 
 const pendingEnsure = new Map<string, Promise<ModelPool>>();
 
-function createHighlightMesh(
-  geometry: THREE.BufferGeometry,
-  material: THREE.Material,
-): THREE.Mesh {
-  const geo = createSharedGeometry(geometry);
-  const mesh = new THREE.Mesh(geo, material);
-  mesh.frustumCulled = false;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  mesh.layers.set(1);
-  mesh.visible = true;
-  return mesh;
+function enableTextureRepeat(mat: DissolveMaterial): void {
+  const texProps = [
+    "map",
+    "normalMap",
+    "roughnessMap",
+    "metalnessMap",
+    "aoMap",
+    "emissiveMap",
+    "alphaMap",
+  ] as const;
+  for (const key of texProps) {
+    const tex = (mat as unknown as Record<string, unknown>)[key] as
+      | THREE.Texture
+      | undefined;
+    if (tex) {
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.needsUpdate = true;
+    }
+  }
 }
 
 async function ensureModelPool(
@@ -193,60 +237,70 @@ async function ensureModelPool(
   if (pending) return pending;
 
   const promise = (async (): Promise<ModelPool> => {
-    // LOD0
-    const { scene: lod0Scene } = await modelCache.loadModel(modelPath, world!);
-    const lod0Data = extractGeometryAndMaterial(lod0Scene);
-    if (!lod0Data) throw new Error(`No mesh found in ${modelPath}`);
-
-    const yOffset = computeYOffset(lod0Scene, 1);
-
-    const lod0Material = createDissolveMaterial(lod0Data.material, {
+    const dissolveOpts = {
       fadeStart: GPU_VEG_CONFIG.FADE_START,
       fadeEnd: GPU_VEG_CONFIG.FADE_END,
       enableNearFade: false,
       enableWaterCulling: false,
       enableOcclusionDissolve: false,
-    });
-    world!.setupMaterial(lod0Material);
-    const lod0Pool = createLODPool(lod0Data.geometry, lod0Material);
+      enableRimHighlight: true,
+    };
 
-    // Preload highlight mesh from LOD0 geometry + original material
-    const highlightMesh = createHighlightMesh(
-      lod0Data.geometry,
-      lod0Data.material,
-    );
+    function buildTreeParts(
+      parts: MeshPart[],
+    ): { geometry: THREE.BufferGeometry; material: DissolveMaterial }[] {
+      return parts.map((p) => {
+        const isLeaf =
+          !!(p.material as any).transparent ||
+          (p.material as any).side === THREE.DoubleSide;
+        const dm = createTreeDissolveMaterial(p.material, {
+          ...dissolveOpts,
+          isLeafMaterial: isLeaf,
+        } as TreeMaterialOptions);
+        dm.side = THREE.DoubleSide;
+        enableTextureRepeat(dm);
+        world!.setupMaterial(dm);
+        return { geometry: p.geometry, material: dm };
+      });
+    }
 
-    // LOD1
+    // LOD0
+    const { scene: lod0Scene } = await modelCache.loadModel(modelPath, world!);
+    const lod0Parts = extractAllMeshParts(lod0Scene);
+    if (lod0Parts.length === 0)
+      throw new Error(`No mesh found in ${modelPath}`);
+
+    const bounds = computeModelBounds(lod0Scene, 1);
+
+    const lod0Pool = createLODPool(buildTreeParts(lod0Parts));
+
+    // LOD1 — explicit path first, fall back to inferred naming convention
     let lod1Pool: LODPool | null = null;
     if (lod1ModelPath) {
-      const lod1Data = await loadLODModel(lod1ModelPath);
-      if (lod1Data) {
-        const lod1Material = createDissolveMaterial(lod1Data.material, {
-          fadeStart: GPU_VEG_CONFIG.FADE_START,
-          fadeEnd: GPU_VEG_CONFIG.FADE_END,
-          enableNearFade: false,
-          enableWaterCulling: false,
-          enableOcclusionDissolve: false,
-        });
-        world!.setupMaterial(lod1Material);
-        lod1Pool = createLODPool(lod1Data.geometry, lod1Material);
+      const lod1Parts = await loadLODParts(lod1ModelPath);
+      if (lod1Parts) {
+        lod1Pool = createLODPool(buildTreeParts(lod1Parts));
+      }
+    }
+    if (!lod1Pool) {
+      const lod1Parts = await loadLODParts(inferLOD1Path(modelPath));
+      if (lod1Parts) {
+        lod1Pool = createLODPool(buildTreeParts(lod1Parts));
       }
     }
 
-    // LOD2
+    // LOD2 — explicit path first, fall back to inferred naming convention
     let lod2Pool: LODPool | null = null;
     if (lod2ModelPath) {
-      const lod2Data = await loadLODModel(lod2ModelPath);
-      if (lod2Data) {
-        const lod2Material = createDissolveMaterial(lod2Data.material, {
-          fadeStart: GPU_VEG_CONFIG.FADE_START,
-          fadeEnd: GPU_VEG_CONFIG.FADE_END,
-          enableNearFade: false,
-          enableWaterCulling: false,
-          enableOcclusionDissolve: false,
-        });
-        world!.setupMaterial(lod2Material);
-        lod2Pool = createLODPool(lod2Data.geometry, lod2Material);
+      const lod2Parts = await loadLODParts(lod2ModelPath);
+      if (lod2Parts) {
+        lod2Pool = createLODPool(buildTreeParts(lod2Parts));
+      }
+    }
+    if (!lod2Pool) {
+      const lod2Parts = await loadLODParts(inferLOD2Path(modelPath));
+      if (lod2Parts) {
+        lod2Pool = createLODPool(buildTreeParts(lod2Parts));
       }
     }
 
@@ -257,10 +311,10 @@ async function ensureModelPool(
       lod2: lod2Pool,
       depleted: null,
       instances: new Map(),
-      yOffset,
+      yOffset: bounds.yOffset,
       depletedYOffset: 0,
-      highlightMesh,
-      depletedHighlightMesh: null,
+      modelHeight: bounds.height,
+      modelRadius: bounds.radius,
     };
     pools.set(modelPath, pool);
 
@@ -284,8 +338,8 @@ async function loadDepletedPool(
   depletedModelPath: string,
 ): Promise<void> {
   if (pool.depleted) return;
-  const depletedData = await loadLODModel(depletedModelPath);
-  if (!depletedData) return;
+  const depletedParts = await loadLODParts(depletedModelPath);
+  if (!depletedParts) return;
 
   let depletedYOffset = 0;
   try {
@@ -293,25 +347,28 @@ async function loadDepletedPool(
       depletedModelPath,
       world!,
     );
-    depletedYOffset = computeYOffset(depScene, 1);
+    depletedYOffset = computeModelBounds(depScene, 1).yOffset;
   } catch {
     /* use 0 */
   }
 
-  const depletedMaterial = createDissolveMaterial(depletedData.material, {
+  const dissolveOpts = {
     fadeStart: GPU_VEG_CONFIG.FADE_START,
     fadeEnd: GPU_VEG_CONFIG.FADE_END,
     enableNearFade: false,
     enableWaterCulling: false,
     enableOcclusionDissolve: false,
+    enableRimHighlight: true,
+  };
+  const depletedDissolveParts = depletedParts.map((p) => {
+    const dm = createTreeDissolveMaterial(p.material, dissolveOpts);
+    dm.side = THREE.DoubleSide;
+    enableTextureRepeat(dm);
+    world!.setupMaterial(dm);
+    return { geometry: p.geometry, material: dm };
   });
-  world!.setupMaterial(depletedMaterial);
-  pool.depleted = createLODPool(depletedData.geometry, depletedMaterial);
+  pool.depleted = createLODPool(depletedDissolveParts);
   pool.depletedYOffset = depletedYOffset;
-  pool.depletedHighlightMesh = createHighlightMesh(
-    depletedData.geometry,
-    depletedData.material,
-  );
 }
 
 // ---- Instance matrix helper ----
@@ -330,10 +387,12 @@ function composeInstanceMatrix(
 
 function addToPool(pool: LODPool, entityId: string, mat: THREE.Matrix4): void {
   const idx = pool.activeCount;
-  pool.mesh.setMatrixAt(idx, mat);
+  for (const im of pool.meshes) {
+    im.setMatrixAt(idx, mat);
+    im.count = idx + 1;
+  }
   pool.slots.set(entityId, idx);
   pool.activeCount++;
-  pool.mesh.count = pool.activeCount;
   pool.dirty = true;
 }
 
@@ -343,11 +402,12 @@ function removeFromPool(pool: LODPool, entityId: string): void {
 
   const lastIdx = pool.activeCount - 1;
   if (idx !== lastIdx) {
-    // Swap last instance into the removed slot
-    pool.mesh.getMatrixAt(lastIdx, _swapMatrix);
-    pool.mesh.setMatrixAt(idx, _swapMatrix);
+    for (const im of pool.meshes) {
+      im.getMatrixAt(lastIdx, _swapMatrix);
+      im.setMatrixAt(idx, _swapMatrix);
+    }
+    pool.highlightData[idx] = pool.highlightData[lastIdx];
 
-    // Find the entity that owned the last slot and update its index
     for (const [eid, eidIdx] of pool.slots) {
       if (eidIdx === lastIdx) {
         pool.slots.set(eid, idx);
@@ -355,10 +415,13 @@ function removeFromPool(pool: LODPool, entityId: string): void {
       }
     }
   }
+  pool.highlightData[lastIdx] = 0;
 
   pool.slots.delete(entityId);
   pool.activeCount--;
-  pool.mesh.count = pool.activeCount;
+  for (const im of pool.meshes) {
+    im.count = pool.activeCount;
+  }
   pool.dirty = true;
 }
 
@@ -373,15 +436,11 @@ export function destroyGLBTreeInstancer(): void {
   for (const pool of pools.values()) {
     for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
       if (!lodPool) continue;
-      scene?.remove(lodPool.mesh);
-      lodPool.mesh.geometry.dispose();
-      lodPool.material.dispose();
-    }
-    if (pool.highlightMesh) {
-      pool.highlightMesh.geometry.dispose();
-    }
-    if (pool.depletedHighlightMesh) {
-      pool.depletedHighlightMesh.geometry.dispose();
+      for (const im of lodPool.meshes) {
+        scene?.remove(im);
+        im.geometry.dispose();
+      }
+      for (const mat of lodPool.materials) mat.dispose();
     }
   }
   pools.clear();
@@ -405,7 +464,12 @@ export async function addInstance(
   if (!scene || !world) return false;
 
   try {
-    const pool = await ensureModelPool(modelPath, depletedModelPath, lod1ModelPath, lod2ModelPath);
+    const pool = await ensureModelPool(
+      modelPath,
+      depletedModelPath,
+      lod1ModelPath,
+      lod2ModelPath,
+    );
 
     if (pool.lod0 && pool.lod0.activeCount >= MAX_INSTANCES) {
       console.warn(
@@ -473,15 +537,6 @@ export function setDepleted(entityId: string, depleted: boolean): void {
   const slot = pool.instances.get(entityId);
   if (!slot || slot.depleted === depleted) return;
 
-  // If the previous highlight mesh is in the scene (entity is hovered), remove it
-  // so the stale model doesn't linger during the state transition.
-  const oldHlMesh = slot.depleted
-    ? pool.depletedHighlightMesh
-    : pool.highlightMesh;
-  if (oldHlMesh?.parent) {
-    oldHlMesh.parent.remove(oldHlMesh);
-  }
-
   slot.depleted = depleted;
 
   if (depleted) {
@@ -532,6 +587,20 @@ export function hasInstance(entityId: string): boolean {
 }
 
 /**
+ * Returns the unscaled model dimensions for an instanced entity.
+ * Used to size collision proxies to match the actual model.
+ */
+export function getModelDimensions(
+  entityId: string,
+): { height: number; radius: number } | null {
+  const modelPath = entityToModel.get(entityId);
+  if (!modelPath) return null;
+  const pool = pools.get(modelPath);
+  if (!pool) return null;
+  return { height: pool.modelHeight, radius: pool.modelRadius };
+}
+
+/**
  * Returns true if the instancer has a depleted pool for this entity's model.
  * When true, ResourceEntity can skip loading an individual depleted model.
  */
@@ -542,35 +611,58 @@ export function hasDepleted(entityId: string): boolean {
   return !!pool?.depleted;
 }
 
+/** Track which entity is currently highlighted so we can clear it */
+let highlightedEntityId: string | null = null;
+
 /**
- * Returns a positioned highlight mesh for outlining an instanced entity.
- * The mesh is temporarily added to the scene by EntityHighlightService.
+ * Set or clear shader-based rim highlight for an instanced tree entity.
+ * Sets the per-instance `instanceHighlight` attribute to 1 or 0.
  */
-export function getHighlightMesh(entityId: string): THREE.Object3D | null {
+export function setHighlight(entityId: string, on: boolean): void {
+  if (on && highlightedEntityId && highlightedEntityId !== entityId) {
+    setHighlight(highlightedEntityId, false);
+  }
+
   const modelPath = entityToModel.get(entityId);
-  if (!modelPath) return null;
+  if (!modelPath) return;
 
   const pool = pools.get(modelPath);
-  if (!pool) return null;
+  if (!pool) return;
 
   const slot = pool.instances.get(entityId);
-  if (!slot) return null;
+  if (!slot) return;
 
-  const mesh = slot.depleted ? pool.depletedHighlightMesh : pool.highlightMesh;
-  if (!mesh) return null;
+  const lodPool = slot.depleted
+    ? pool.depleted
+    : slot.currentLOD === 0
+      ? pool.lod0
+      : slot.currentLOD === 1
+        ? pool.lod1
+        : pool.lod2;
+  if (!lodPool) return;
 
-  const s = slot.depleted ? slot.depletedScale : slot.scale;
-  const yOff = slot.depleted ? pool.depletedYOffset : pool.yOffset;
-  mesh.position.set(
-    slot.position.x,
-    slot.position.y + yOff * s,
-    slot.position.z,
-  );
-  mesh.rotation.set(0, slot.rotation, 0);
-  mesh.scale.set(s, s, s);
-  mesh.updateMatrixWorld(true);
+  const idx = lodPool.slots.get(entityId);
+  if (idx === undefined) return;
 
-  return mesh;
+  const value = on ? 1.0 : 0.0;
+  lodPool.highlightData[idx] = value;
+  for (const im of lodPool.meshes) {
+    const attr = im.geometry.getAttribute("instanceHighlight");
+    if (attr) {
+      (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
+    }
+  }
+
+  highlightedEntityId = on ? entityId : null;
+}
+
+/**
+ * Clear any active shader highlight (e.g. when hover leaves all entities).
+ */
+export function clearHighlight(): void {
+  if (highlightedEntityId) {
+    setHighlight(highlightedEntityId, false);
+  }
 }
 
 let lastUpdateFrame = -1;
@@ -625,6 +717,10 @@ export function updateGLBTreeInstancer(): void {
       const newPool =
         targetLOD === 0 ? pool.lod0 : targetLOD === 1 ? pool.lod1 : pool.lod2;
 
+      const wasHighlighted =
+        oldPool && oldPool.slots.has(slot.entityId)
+          ? oldPool.highlightData[oldPool.slots.get(slot.entityId)!]
+          : 0;
       if (oldPool) removeFromPool(oldPool, slot.entityId);
       if (newPool) {
         const mat = composeInstanceMatrix(
@@ -634,6 +730,17 @@ export function updateGLBTreeInstancer(): void {
           slot.yOffset,
         );
         addToPool(newPool, slot.entityId, mat);
+        if (wasHighlighted > 0) {
+          const newIdx = newPool.slots.get(slot.entityId);
+          if (newIdx !== undefined) {
+            newPool.highlightData[newIdx] = wasHighlighted;
+            for (const im of newPool.meshes) {
+              const attr = im.geometry.getAttribute("instanceHighlight");
+              if (attr)
+                (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
+            }
+          }
+        }
       }
       slot.currentLOD = targetLOD;
     }
@@ -645,25 +752,67 @@ export function updateGLBTreeInstancer(): void {
   const localPlayer = players && players.length > 0 ? players[0] : null;
   const playerPos = localPlayer?.node?.position ?? camPos;
 
+  // Get sun direction from Environment system
+  const env = world.getSystem("environment") as {
+    sunLight?: { intensity: number };
+    lightDirection?: THREE.Vector3;
+    hemisphereLight?: { color: THREE.Color };
+  } | null;
+
+  const wind = world.getSystem("wind") as Wind | null;
+
   for (const pool of pools.values()) {
     for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
       if (!lodPool) continue;
 
       if (lodPool.dirty) {
-        lodPool.mesh.instanceMatrix.needsUpdate = true;
+        for (const im of lodPool.meshes) {
+          im.instanceMatrix.needsUpdate = true;
+        }
         lodPool.dirty = false;
       }
 
-      lodPool.material.dissolveUniforms.cameraPos.value.set(
-        camPos.x,
-        camY,
-        camPos.z,
-      );
-      lodPool.material.dissolveUniforms.playerPos.value.set(
-        playerPos.x,
-        playerPos.y,
-        playerPos.z,
-      );
+      for (const mat of lodPool.materials) {
+        mat.dissolveUniforms.cameraPos.value.set(camPos.x, camY, camPos.z);
+        mat.dissolveUniforms.playerPos.value.set(
+          playerPos.x,
+          playerPos.y,
+          playerPos.z,
+        );
+
+        const treeMat = mat as TreeDissolveMaterial;
+        if (treeMat.treeUniforms) {
+          if (env?.lightDirection) {
+            treeMat.treeUniforms.sunDirection.value
+              .copy(env.lightDirection)
+              .negate();
+          }
+          if (env?.sunLight) {
+            treeMat.treeUniforms.sunIntensity.value = Math.min(
+              env.sunLight.intensity,
+              2.0,
+            );
+          }
+          if (env?.hemisphereLight) {
+            const c = env.hemisphereLight.color;
+            const avg = (c.r + c.g + c.b) / 3;
+            if (avg > 0.01) {
+              treeMat.treeUniforms.shadeColor.value.setRGB(
+                c.r / avg,
+                c.g / avg,
+                c.b / avg,
+              );
+            }
+          }
+          if (wind) {
+            treeMat.treeUniforms.windTime.value = wind.uniforms.time.value;
+            treeMat.treeUniforms.windStrength.value =
+              wind.uniforms.windStrength.value;
+            const wd = wind.uniforms.windDirection.value;
+            treeMat.treeUniforms.windDirection.value.set(wd.x, wd.z);
+          }
+        }
+      }
     }
   }
 }

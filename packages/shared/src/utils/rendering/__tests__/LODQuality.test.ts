@@ -19,7 +19,7 @@ import {
   LOD_REFERENCE_SIZE,
   LOD_MIN_SCALE,
   LOD_MAX_SCALE,
-} from "../../../systems/shared/world/GPUVegetation";
+} from "../../../systems/shared/world/LODConfig";
 import { DISTANCE_CONSTANTS } from "../../../constants/GameConstants";
 
 // ============================================================================

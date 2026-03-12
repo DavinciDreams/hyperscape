@@ -38,12 +38,7 @@ export {
 } from "./NoiseGenerator";
 
 // Biome system
-export {
-  BiomeSystem,
-  BIOME_IDS,
-  DEFAULT_BIOMES,
-  DEFAULT_BIOME_CONFIG,
-} from "./BiomeSystem";
+export { BiomeSystem, DEFAULT_BIOME_CONFIG } from "./BiomeSystem";
 
 // Island mask
 export {

@@ -622,10 +622,10 @@ export class World extends EventEmitter {
 
   /** Action registry for context-based player actions */
   actionRegistry?: {
-    getAll(): Array<{ name: string;[key: string]: unknown }>;
+    getAll(): Array<{ name: string; [key: string]: unknown }>;
     getAvailable(
       context: Record<string, unknown>,
-    ): Array<{ name: string;[key: string]: unknown }>;
+    ): Array<{ name: string; [key: string]: unknown }>;
     execute(
       name: string,
       context: Record<string, unknown>,
@@ -634,7 +634,7 @@ export class World extends EventEmitter {
   };
 
   /** Reference to all registered RPG systems (PlayerSystem, CombatSystem, etc.) */
-  rpgSystems?: Record<string, { name: string;[key: string]: unknown }>;
+  rpgSystems?: Record<string, { name: string; [key: string]: unknown }>;
 
   /** All available RPG actions that can be executed */
   rpgActions?: Record<
@@ -656,7 +656,7 @@ export class World extends EventEmitter {
   /** Get RPG player data by ID */
   getRPGPlayer?(
     playerId: string,
-  ): { id: string;[key: string]: unknown } | undefined;
+  ): { id: string; [key: string]: unknown } | undefined;
 
   /** Save player data to database */
   savePlayer?(playerId: string, data: Record<string, unknown>): unknown;
@@ -721,12 +721,12 @@ export class World extends EventEmitter {
   /** Get player's inventory contents */
   getInventory?(
     playerId: string,
-  ): Array<{ itemId: string; quantity: number;[key: string]: unknown }>;
+  ): Array<{ itemId: string; quantity: number; [key: string]: unknown }>;
 
   /** Get player's equipped items */
   getEquipment?(
     playerId: string,
-  ): Record<string, { itemId: string;[key: string]: unknown }>;
+  ): Record<string, { itemId: string; [key: string]: unknown }>;
 
   /** Check if player has item in inventory */
   hasItem?(

@@ -22,14 +22,9 @@ const DEFAULTS = {
 } as const;
 
 const DEFAULT_BIOME_COSTS: Record<string, number> = {
-  plains: 1.0,
-  valley: 1.0,
-  forest: 1.3,
+  forest: 1.0,
   tundra: 1.5,
-  desert: 2.0,
-  swamp: 2.5,
-  mountains: 3.0,
-  lakes: 100,
+  canyon: 2.0,
 };
 
 function makeConfig(
@@ -112,8 +107,8 @@ describe("RoadNetworkSystem Config Loading", () => {
       expect(config.roadWidth).toBe(DEFAULTS.roadWidth);
       expect(config.pathStepSize).toBe(DEFAULTS.pathStepSize);
       expect(config.costWaterPenalty).toBe(DEFAULTS.costWaterPenalty);
-      expect(config.biomeCosts.plains).toBe(DEFAULT_BIOME_COSTS.plains);
-      expect(config.biomeCosts.lakes).toBe(DEFAULT_BIOME_COSTS.lakes);
+      expect(config.biomeCosts.forest).toBe(DEFAULT_BIOME_COSTS.forest);
+      expect(config.biomeCosts.canyon).toBe(DEFAULT_BIOME_COSTS.canyon);
     });
   });
 
@@ -128,7 +123,7 @@ describe("RoadNetworkSystem Config Loading", () => {
             extraConnectionsRatio: 0.35,
             costBase: 1.5,
             costWaterPenalty: 1500,
-            costBiomeMultipliers: { plains: 0.8, desert: 3.0, swamp: 5.0 },
+            costBiomeMultipliers: { forest: 0.8, canyon: 3.0, tundra: 5.0 },
           },
         }),
       );
@@ -136,9 +131,9 @@ describe("RoadNetworkSystem Config Loading", () => {
 
       expect(config.roadWidth).toBe(6);
       expect(config.pathStepSize).toBe(25);
-      expect(config.biomeCosts.plains).toBe(0.8);
-      expect(config.biomeCosts.desert).toBe(3.0);
-      expect(config.biomeCosts.valley).toBe(DEFAULT_BIOME_COSTS.valley);
+      expect(config.biomeCosts.forest).toBe(0.8);
+      expect(config.biomeCosts.canyon).toBe(3.0);
+      expect(config.biomeCosts.tundra).toBe(5.0);
     });
   });
 
@@ -160,7 +155,7 @@ describe("RoadNetworkSystem Config Loading", () => {
 
       expect(config.roadWidth).toBe(8);
       expect(config.pathStepSize).toBe(DEFAULTS.pathStepSize);
-      expect(config.biomeCosts.plains).toBe(DEFAULT_BIOME_COSTS.plains);
+      expect(config.biomeCosts.forest).toBe(DEFAULT_BIOME_COSTS.forest);
     });
   });
 

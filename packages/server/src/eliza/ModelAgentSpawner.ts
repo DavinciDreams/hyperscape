@@ -47,7 +47,13 @@ function getBunRuntime(): BunRuntime | undefined {
  */
 export interface ModelProviderConfig {
   /** Provider name (openai, anthropic, groq, xai, elizacloud) */
-  provider: "openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud";
+  provider:
+    | "openai"
+    | "anthropic"
+    | "groq"
+    | "xai"
+    | "openrouter"
+    | "elizacloud";
   /** Specific model to use */
   model: string;
   /** Display name for the agent */
@@ -64,111 +70,86 @@ export interface ModelProviderConfig {
  * AI model configurations for agents
  */
 export const MODEL_AGENTS: ModelProviderConfig[] = [
-  // ── Frontier American Models ───────────────────────────────────────────
+  // Interleaved so slice(0, N) always gets a mix of providers
   {
-    provider: "elizacloud",
-    model: "openai/gpt-5",
-    displayName: "GPT-5",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
-  },
-  {
-    provider: "elizacloud",
-    model: "anthropic/claude-sonnet-4.6",
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
     displayName: "Claude Sonnet 4.6",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    pluginModule: "@elizaos/plugin-anthropic",
+    pluginExport: "anthropicPlugin",
   },
   {
-    provider: "elizacloud",
-    model: "anthropic/claude-opus-4.6",
+    provider: "groq",
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    displayName: "Llama 4 Scout",
+    apiKeyEnv: "GROQ_API_KEY",
+    pluginModule: "@elizaos/plugin-groq",
+    pluginExport: "groqPlugin",
+  },
+  {
+    provider: "anthropic",
+    model: "claude-opus-4-6",
     displayName: "Claude Opus 4.6",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    pluginModule: "@elizaos/plugin-anthropic",
+    pluginExport: "anthropicPlugin",
   },
   {
-    provider: "elizacloud",
-    model: "google/gemini-3.1-pro-preview",
-    displayName: "Gemini 3.1 Pro",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
-  },
-  {
-    provider: "elizacloud",
-    model: "xai/grok-4",
-    displayName: "Grok 4",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
-  },
-  {
-    provider: "elizacloud",
-    model: "meta/llama-4-maverick",
+    provider: "groq",
+    model: "meta-llama/llama-4-maverick-17b-128e-instruct",
     displayName: "Llama 4 Maverick",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
+    apiKeyEnv: "GROQ_API_KEY",
+    pluginModule: "@elizaos/plugin-groq",
+    pluginExport: "groqPlugin",
   },
   {
-    provider: "elizacloud",
-    model: "mistral/magistral-medium",
-    displayName: "Magistral Medium",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
-  },
-  // ── Frontier Chinese Models ────────────────────────────────────────────
-  {
-    provider: "elizacloud",
-    model: "deepseek/deepseek-v3.2",
-    displayName: "DeepSeek V3.2",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
+    provider: "anthropic",
+    model: "claude-haiku-4-5-20251001",
+    displayName: "Claude Haiku 4.5",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    pluginModule: "@elizaos/plugin-anthropic",
+    pluginExport: "anthropicPlugin",
   },
   {
-    provider: "elizacloud",
-    model: "alibaba/qwen3-max",
-    displayName: "Qwen 3 Max",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
+    provider: "groq",
+    model: "llama-3.3-70b-versatile",
+    displayName: "Llama 3.3 70B",
+    apiKeyEnv: "GROQ_API_KEY",
+    pluginModule: "@elizaos/plugin-groq",
+    pluginExport: "groqPlugin",
   },
   {
-    provider: "elizacloud",
-    model: "minimax/minimax-m2.5",
-    displayName: "Minimax M2.5",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
+    provider: "anthropic",
+    model: "claude-opus-4-20250514",
+    displayName: "Claude Opus 4",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    pluginModule: "@elizaos/plugin-anthropic",
+    pluginExport: "anthropicPlugin",
   },
   {
-    provider: "elizacloud",
-    model: "zai/glm-5",
-    displayName: "GLM-5",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
+    provider: "groq",
+    model: "moonshotai/kimi-k2-instruct",
+    displayName: "Kimi K2",
+    apiKeyEnv: "GROQ_API_KEY",
+    pluginModule: "@elizaos/plugin-groq",
+    pluginExport: "groqPlugin",
   },
   {
-    provider: "elizacloud",
-    model: "moonshotai/kimi-k2.5",
-    displayName: "Kimi K2.5",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
+    provider: "anthropic",
+    model: "claude-sonnet-4-20250514",
+    displayName: "Claude Sonnet 4",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    pluginModule: "@elizaos/plugin-anthropic",
+    pluginExport: "anthropicPlugin",
   },
   {
-    provider: "elizacloud",
-    model: "bytedance/seed-1.8",
-    displayName: "Seed 1.8",
-    apiKeyEnv: "ELIZAOS_CLOUD_API_KEY",
-    pluginModule: "@elizaos/plugin-elizacloud",
-    pluginExport: "elizaOSCloudPlugin",
+    provider: "groq",
+    model: "qwen/qwen3-32b",
+    displayName: "Qwen 3 30B",
+    apiKeyEnv: "GROQ_API_KEY",
+    pluginModule: "@elizaos/plugin-groq",
+    pluginExport: "groqPlugin",
   },
 ];
 
@@ -233,7 +214,9 @@ export async function spawnModelAgents(
     /** Maximum number of agents to spawn */
     maxAgents?: number;
     /** Specific providers to spawn (if empty, spawns all available) */
-    providers?: Array<"openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud">;
+    providers?: Array<
+      "openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud"
+    >;
   } = {},
 ): Promise<number> {
   const { maxAgents = 10, providers = [] } = options;
@@ -462,7 +445,7 @@ export async function spawnModelAgents(
           while (trackedMemoryIds.length >= MAX_MEMORIES) {
             const oldId = trackedMemoryIds.shift();
             if (oldId) {
-              runtimeInstance.deleteMemory(oldId as UUID).catch(() => { });
+              runtimeInstance.deleteMemory(oldId as UUID).catch(() => {});
             }
           }
           const id = await originalCreateMemory(memory, tableName, unique);
@@ -519,8 +502,8 @@ export async function spawnModelAgents(
           await Promise.race([initPromise, timeoutPromise]);
         } catch (err) {
           if (timedOut) {
-            initPromise.catch(() => { });
-            ri.stop().catch(() => { });
+            initPromise.catch(() => {});
+            ri.stop().catch(() => {});
           }
           throw err;
         }
@@ -543,7 +526,7 @@ export async function spawnModelAgents(
       if (adapterBeforeInit !== adapterAfterInit) {
         console.warn(
           `[ModelAgentSpawner] ${tag} ⚠️  Adapter was SWAPPED during initialize! ` +
-          `${adapterNameBefore} → ${adapterNameAfter}. Re-asserting InMemoryDatabaseAdapter.`,
+            `${adapterNameBefore} → ${adapterNameAfter}. Re-asserting InMemoryDatabaseAdapter.`,
         );
         // Re-register our safe adapter (force override)
         (
@@ -1029,7 +1012,7 @@ async function getOrCreatePlan(
       agentPlans.set(planKey, plan);
       return plan;
     }
-  } catch { }
+  } catch {}
 
   return null;
 }
@@ -1437,7 +1420,7 @@ async function executeBehaviorTick(
 
   try {
     await executeQueuedAction(service, nextAction, gameState, world);
-  } catch { }
+  } catch {}
 
   // If plan is exhausted, clear it so next tick re-plans
   if (plan.actions.length === 0) {

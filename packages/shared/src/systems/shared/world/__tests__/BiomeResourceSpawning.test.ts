@@ -92,10 +92,10 @@ describe("BiomeResourceGenerator", () => {
   describe("generateTrees", () => {
     const forestTreeConfig: BiomeTreeConfig = {
       enabled: true,
-      distribution: {
-        tree_normal: 0.5,
-        tree_oak: 0.35,
-        tree_willow: 0.15,
+      trees: {
+        tree_normal: { weight: 0.5 },
+        tree_oak: { weight: 0.35 },
+        tree_willow: { weight: 0.15 },
       },
       density: 8,
       minSpacing: 8,
@@ -140,29 +140,29 @@ describe("BiomeResourceGenerator", () => {
 
     it("assigns correct level requirements from shared constants", () => {
       const ctx = createTestContext(0, 0);
-      const yewConfig: BiomeTreeConfig = {
+      const mapleConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_yew: 1.0 },
+        trees: { tree_maple: { weight: 1.0 } },
         density: 5,
         minSpacing: 5,
         clustering: false,
       };
 
-      const trees = generateTrees(ctx, yewConfig);
+      const trees = generateTrees(ctx, mapleConfig);
 
       expect(trees.length).toBeGreaterThan(0);
       // Level should come from TREE_LEVEL_REQUIREMENTS constant
       expect(
-        trees.every((r) => r.requiredLevel === TREE_LEVEL_REQUIREMENTS.yew),
+        trees.every((r) => r.requiredLevel === TREE_LEVEL_REQUIREMENTS.maple),
       ).toBe(true);
-      expect(trees.every((r) => r.requiredLevel === 60)).toBe(true);
+      expect(trees.every((r) => r.requiredLevel === 45)).toBe(true);
     });
 
     it("respects minimum spacing between trees", () => {
       const ctx = createTestContext(0, 0);
       const spacedConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 50,
         minSpacing: 20,
         clustering: false,
@@ -394,19 +394,19 @@ describe("BiomeResourceGenerator", () => {
   });
 
   describe("Level Requirements (Single Source of Truth)", () => {
-    it("tree level requirements match OSRS progression", () => {
-      // These should match the exported constants
-      expect(getTreeLevelRequirement("normal")).toBe(1);
+    it("tree level requirements match progression", () => {
+      // These should match the actual TREE_TYPES definitions
+      // Unknown types default to level 1
+      expect(getTreeLevelRequirement("fir")).toBe(1);
+      expect(getTreeLevelRequirement("pine")).toBe(1);
       expect(getTreeLevelRequirement("oak")).toBe(15);
-      expect(getTreeLevelRequirement("willow")).toBe(30);
-      expect(getTreeLevelRequirement("teak")).toBe(35);
+      expect(getTreeLevelRequirement("birch")).toBe(1);
       expect(getTreeLevelRequirement("maple")).toBe(45);
-      expect(getTreeLevelRequirement("mahogany")).toBe(50);
-      expect(getTreeLevelRequirement("yew")).toBe(60);
-      expect(getTreeLevelRequirement("magic")).toBe(75);
 
       // Verify against exported constant
-      expect(getTreeLevelRequirement("yew")).toBe(TREE_LEVEL_REQUIREMENTS.yew);
+      expect(getTreeLevelRequirement("maple")).toBe(
+        TREE_LEVEL_REQUIREMENTS.maple,
+      );
     });
 
     it("ore level requirements match OSRS progression", () => {
@@ -537,7 +537,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const emptyConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: {},
+        trees: {},
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -551,7 +551,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const zeroWeightConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 0, tree_oak: 0 },
+        trees: { tree_normal: { weight: 0 }, tree_oak: { weight: 0 } },
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -565,7 +565,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const zeroDensityConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 0,
         minSpacing: 5,
         clustering: false,
@@ -579,7 +579,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(-5, -10);
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 5,
         minSpacing: 5,
         clustering: false,
@@ -597,7 +597,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const noClusterSizeConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 5,
         minSpacing: 5,
         clustering: true,
@@ -613,7 +613,7 @@ describe("BiomeResourceGenerator", () => {
       const ctx = createTestContext(0, 0);
       const highDensityConfig: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 100, // Very high
         minSpacing: 50, // Large spacing limits actual placement
         clustering: false,
@@ -632,7 +632,7 @@ describe("BiomeResourceGenerator", () => {
       });
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -648,7 +648,7 @@ describe("BiomeResourceGenerator", () => {
       });
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -668,7 +668,7 @@ describe("BiomeResourceGenerator", () => {
 
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 10,
         minSpacing: 5,
         clustering: false,
@@ -692,7 +692,7 @@ describe("BiomeResourceGenerator", () => {
 
       const config: BiomeTreeConfig = {
         enabled: true,
-        distribution: { tree_normal: 1.0 },
+        trees: { tree_normal: { weight: 1.0 } },
         density: 20,
         minSpacing: 5,
         clustering: false,

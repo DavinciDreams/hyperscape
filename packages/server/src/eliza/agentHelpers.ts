@@ -174,9 +174,9 @@ export function buildModelSecrets(
     // Provider-specific overrides
     ...(keys
       ? {
-        [keys.small]: small,
-        [keys.large]: config.model,
-      }
+          [keys.small]: small,
+          [keys.large]: config.model,
+        }
       : {}),
   };
 }

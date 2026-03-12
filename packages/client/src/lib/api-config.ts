@@ -26,15 +26,15 @@ type PublicRuntimeEnv = {
 type WindowWithRuntimeEnv = Window & { env?: PublicRuntimeEnv };
 
 function isLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  return (
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
+  );
 }
 
 function normalizeBaseUrlString(url: URL): string {
   const normalized = url.toString();
   const isRootBase =
-    url.pathname === "/" &&
-    url.search.length === 0 &&
-    url.hash.length === 0;
+    url.pathname === "/" && url.search.length === 0 && url.hash.length === 0;
   if (!isRootBase) {
     return normalized;
   }
@@ -69,9 +69,7 @@ export function normalizeBrowserLoopbackUrl(
   }
 }
 
-function getRuntimeEnvValue(
-  key: keyof PublicRuntimeEnv,
-): string | undefined {
+function getRuntimeEnvValue(key: keyof PublicRuntimeEnv): string | undefined {
   if (typeof window === "undefined") return undefined;
   return normalizeBrowserLoopbackUrl(
     (window as WindowWithRuntimeEnv).env?.[key],

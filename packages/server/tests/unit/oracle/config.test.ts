@@ -1,23 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDuelArenaOracleConfig } from "../../../src/oracle/config.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
-/** Strip ALL oracle-related env vars so tests start from a clean slate. */
-function clearOracleEnvVars(): void {
-  for (const key of Object.keys(process.env)) {
+function clearOracleEnv() {
+  for (const key in process.env) {
     if (key.startsWith("DUEL_ARENA_ORACLE_")) {
-      delete process.env[key];
+      vi.stubEnv(key, "");
     }
   }
 }
 
-beforeEach(() => {
-  clearOracleEnvVars();
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
-afterEach(() => {
-  process.env = { ...ORIGINAL_ENV };
+beforeEach(() => {
+  clearOracleEnv();
 });
 
 describe("getDuelArenaOracleConfig", () => {

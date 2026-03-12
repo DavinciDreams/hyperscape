@@ -123,15 +123,15 @@ export class ResourceEntity extends InteractableEntity {
   }
 
   /**
-   * Returns a temporary highlight mesh positioned at this entity's instanced
-   * location. Used by EntityHighlightService for outline rendering when the
-   * entity is instanced (no individual scene-graph mesh to outline).
+   * Shader-based highlight toggle. Returns true if the strategy handled it,
+   * false if EntityHighlightService should fall back to the outline pass.
    */
-  public getHighlightRoot(): THREE.Object3D | null {
-    if (typeof this.visual.getHighlightMesh === "function") {
-      return this.visual.getHighlightMesh(this.getVisualCtx());
+  public setShaderHighlight(on: boolean): boolean {
+    if (typeof this.visual.setShaderHighlight === "function") {
+      this.visual.setShaderHighlight(this.getVisualCtx(), on);
+      return true;
     }
-    return null;
+    return super.setShaderHighlight(on);
   }
 
   // ===========================================================================
@@ -357,6 +357,7 @@ export class ResourceEntity extends InteractableEntity {
       depletedModelScale: this.config.depletedModelScale,
       depletedModelPath: this.config.depletedModelPath,
       procgenPreset: this.config.procgenPreset,
+      modelVariants: this.config.modelVariants,
     } as EntityData;
   }
 
@@ -376,6 +377,7 @@ export class ResourceEntity extends InteractableEntity {
     buf.depletedModelScale = this.config.depletedModelScale;
     buf.depletedModelPath = this.config.depletedModelPath;
     buf.procgenPreset = this.config.procgenPreset;
+    buf.modelVariants = this.config.modelVariants;
     return buf;
   }
 

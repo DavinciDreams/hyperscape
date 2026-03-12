@@ -198,7 +198,7 @@ export class FurnaceEntity extends InteractableEntity {
           child.layers.set(1);
           if (child instanceof THREE.Mesh) {
             child.castShadow = true;
-            child.receiveShadow = true;
+            child.receiveShadow = false;
           }
         });
 
@@ -245,7 +245,7 @@ export class FurnaceEntity extends InteractableEntity {
     mesh.name = `Furnace_${this.id}`;
     mesh.position.y = 0.7; // Raise so bottom is at ground level
     mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
 
     // Set up userData for interaction detection
     mesh.userData = {

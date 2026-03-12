@@ -18,6 +18,7 @@ import type {
 } from "../../../types/world/world-types";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { Logger } from "../../../utils/Logger";
+import { BiomeType, DEFAULT_BIOME } from "./TerrainBiomeTypes";
 import { DataManager } from "../../../data/DataManager";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 import { dist2D } from "../../../utils/MathUtils";
@@ -50,47 +51,47 @@ const CATEGORY_PROPERTIES: Record<
   dungeon: {
     radius: 30,
     baseImportance: 0.9,
-    preferredBiomes: ["mountains", "forest", "swamp"],
+    preferredBiomes: [BiomeType.Canyon, BiomeType.Tundra],
   },
   shrine: {
     radius: 10,
     baseImportance: 0.6,
-    preferredBiomes: ["forest", "plains", "valley"],
+    preferredBiomes: [BiomeType.Forest, BiomeType.Tundra],
   },
   landmark: {
     radius: 20,
     baseImportance: 0.5,
-    preferredBiomes: ["mountains", "plains", "desert"],
+    preferredBiomes: [BiomeType.Canyon, BiomeType.Tundra],
   },
   resource_area: {
     radius: 25,
     baseImportance: 0.7,
-    preferredBiomes: ["forest", "mountains", "plains"],
+    preferredBiomes: [BiomeType.Forest, BiomeType.Canyon],
   },
   ruin: {
     radius: 35,
     baseImportance: 0.8,
-    preferredBiomes: ["desert", "forest", "swamp"],
+    preferredBiomes: [BiomeType.Canyon, BiomeType.Tundra],
   },
   camp: {
     radius: 20,
     baseImportance: 0.4,
-    preferredBiomes: ["forest", "plains", "mountains"],
+    preferredBiomes: [BiomeType.Forest, BiomeType.Tundra],
   },
   crossing: {
     radius: 15,
     baseImportance: 0.85,
-    preferredBiomes: ["mountains", "swamp", "valley"],
+    preferredBiomes: [BiomeType.Canyon, BiomeType.Tundra],
   },
   waystation: {
     radius: 12,
     baseImportance: 0.3,
-    preferredBiomes: ["plains", "valley", "forest"],
+    preferredBiomes: [BiomeType.Forest, BiomeType.Tundra],
   },
   fishing_spot: {
     radius: 15,
-    baseImportance: 0.75, // High importance to ensure road connections
-    preferredBiomes: ["plains", "forest", "valley"], // Near lakes in temperate areas
+    baseImportance: 0.75,
+    preferredBiomes: [BiomeType.Forest, BiomeType.Tundra],
   },
 };
 
@@ -310,7 +311,7 @@ export class POISystem extends System {
       // Get terrain info
       const y = this.terrainSystem!.getHeightAt(x, z);
       const biome =
-        this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? "plains";
+        this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? DEFAULT_BIOME;
 
       // Skip underwater
       const waterThreshold = 5.4;
@@ -438,7 +439,7 @@ export class POISystem extends System {
       // Get terrain info at the water edge (on land side)
       const y = this.terrainSystem!.getHeightAt(x, z);
       const biome =
-        this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? "plains";
+        this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? DEFAULT_BIOME;
 
       // Calculate importance - fishing spots are important destinations
       let importance = properties.baseImportance;

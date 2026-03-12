@@ -13,6 +13,7 @@ import {
   addPlaceholderInstance,
   removePlaceholderInstance,
   setPlaceholderVisible,
+  setPlaceholderHighlight,
 } from "../../../systems/shared/world/PlaceholderInstancer";
 import type {
   ResourceVisualContext,
@@ -90,6 +91,12 @@ export class PlaceholderVisualStrategy implements ResourceVisualStrategy {
     if (proxy) {
       proxy.userData.depleted = false;
       proxy.userData.interactable = true;
+    }
+  }
+
+  setShaderHighlight(ctx: ResourceVisualContext, on: boolean): void {
+    if (this.instanced) {
+      setPlaceholderHighlight(ctx.id, on);
     }
   }
 

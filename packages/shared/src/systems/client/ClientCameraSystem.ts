@@ -29,8 +29,16 @@ interface StreamingCameraStateUpdate {
   cameraTarget?: string | null;
   cycle?: {
     phase?: "IDLE" | "ANNOUNCEMENT" | "COUNTDOWN" | "FIGHTING" | "RESOLUTION";
-    agent1?: { id?: string | null } | null;
-    agent2?: { id?: string | null } | null;
+    agent1?: {
+      id?: string | null;
+      hp?: number | null;
+      maxHp?: number | null;
+    } | null;
+    agent2?: {
+      id?: string | null;
+      hp?: number | null;
+      maxHp?: number | null;
+    } | null;
     winnerId?: string | null;
   };
 }
@@ -52,6 +60,8 @@ const _cinematicTransitionDir = new THREE.Vector3();
 const _cinematicOrientationMatrix = new THREE.Matrix4();
 const _cinematicOrientationQuat = new THREE.Quaternion();
 const _cinematicOrientationUp = new THREE.Vector3(0, 1, 0);
+const _cinematicShakeOffset = new THREE.Vector3();
+const _cinematicLeadOffset = new THREE.Vector3();
 // Pre-allocated arrays for getCameraInfo to avoid allocations
 const _cameraInfoOffset: number[] = [0, 0, 0];
 const _cameraInfoPosition: number[] = [0, 0, 0];
@@ -124,14 +134,63 @@ export class ClientCameraSystem extends SystemBase {
   private cinematicLookSlerpReady = false;
   private cinematicLastActorSample = new THREE.Vector3();
   private cinematicLastOpponentSample = new THREE.Vector3();
+  // Combat-reactive camera state
+  private cinematicPunchIn = 0;
+  private cinematicDramaticLow = 0;
+  private cinematicLastActorHP: number | null = null;
+  private cinematicLastOpponentHP: number | null = null;
+  // Last known good target position (fallback when entity position unavailable)
+  private lastKnownTargetPosition = new THREE.Vector3();
+  private hasLastKnownPosition = false;
+  // Cached terrain system reference
+  private terrainSystemRef: TerrainSystem | null | undefined = undefined;
+  // Phase-aware camera state
+  private cinematicPhase:
+    | "IDLE"
+    | "ANNOUNCEMENT"
+    | "COUNTDOWN"
+    | "FIGHTING"
+    | "RESOLUTION" = "IDLE";
+  private cinematicPhaseChangedAt = 0;
+  // Smart camera cuts
+  private cinematicHardCutPending = false;
+  private cinematicFastSnapRemaining = 0;
+  // Camera shake
+  private cinematicShakeIntensity = 0;
+  private cinematicShakeTime = 0;
+  // Dynamic FOV
+  private cinematicTargetFov = 55;
+  // Movement lead (velocity tracking)
+  private cinematicPrevActorPos = new THREE.Vector3();
+  private cinematicHasPrevActorPos = false;
+  private cinematicVelocity = new THREE.Vector3();
+  // Smoothed entity Y to filter out frame-to-frame jitter from interpolation/terrain
+  private cinematicSmoothedActorY = 0;
+  private cinematicSmoothedOpponentY = 0;
+  private cinematicHasSmoothedY = false;
+  // Locked Y positions during duel combat — entities are in a flat arena so Y should be constant.
+  // Without this lock, TileInterpolator terrain sampling, InterpolationEngine snapshots,
+  // and ClientNetwork direct writes all compete for entity.position.y, causing frame-to-frame noise.
+  private cinematicLockedActorY: number | null = null;
+  private cinematicLockedOpponentY: number | null = null;
+  // Locked separation during combat — prevents radius and phi from oscillating
+  // as agents reposition. Without this, every 1.2s agent movement causes ~2+ units
+  // of camera height swing via separation-dependent radius and phi calculations.
+  private cinematicLockedSeparation: number | null = null;
+  // Smoothed phase bias to prevent instant Y jumps when duel phase changes
+  private cinematicSmoothedBias = 0.5;
+  private cinematicSmoothedBiasValid = false;
+  // Reverse angle cuts during FIGHTING
+  private cinematicLastReverseAt = 0;
+  private cinematicNextReverseCooldown = 14000;
   private readonly cinematicTuning = {
-    thetaRefreshRate: 1.35,
-    thetaIdleDriftRate: 0.6,
+    thetaRefreshRate: 0.8,
+    thetaIdleDriftRate: 0.25,
     thetaTargetRate: 0.85,
     thetaAppliedRate: 0.8,
-    phiTargetRate: 0.65,
-    phiAppliedRate: 0.6,
-    maxDriftStep: 0.028,
+    phiTargetRate: 0.35,
+    phiAppliedRate: 0.3,
+    maxDriftStep: 0.012,
     flipPenaltyStartRad: 1.45,
     focusBaseSpeed: 8.5,
     focusDistanceSpeedGain: 0.75,
@@ -139,7 +198,7 @@ export class ClientCameraSystem extends SystemBase {
     lookBaseSpeed: 9,
     lookDistanceSpeedGain: 0.85,
     lookMaxSpeed: 220,
-    lookSlerpRate: 4.8,
+    lookSlerpRate: 2.5,
   } as const;
 
   // Mouse state
@@ -245,7 +304,15 @@ export class ClientCameraSystem extends SystemBase {
       (state) => {
         this.latestStreamingState = state;
         this.lastStreamingStateAt = Date.now();
+        // Detect phase changes for camera style transitions
+        const newPhase = state.cycle?.phase ?? "IDLE";
+        if (newPhase !== this.cinematicPhase) {
+          this.onCinematicPhaseChange(this.cinematicPhase, newPhase);
+          this.cinematicPhase = newPhase;
+          this.cinematicPhaseChangedAt = Date.now();
+        }
         this.tryRetargetFromStreamingState();
+        this.onStreamingStateHP(state);
       },
     );
 
@@ -880,6 +947,22 @@ export class ClientCameraSystem extends SystemBase {
     const previousTarget = this.target;
     this.target = event.target;
     this.resetCinematicSamplingState();
+
+    // Smart cut: measure distance to decide transition style
+    if (
+      previousTarget &&
+      this.isCinematicCameraActive() &&
+      this.hasLastKnownPosition &&
+      this.getTargetWorldPosition(_v3_1)
+    ) {
+      const dist = this.lastKnownTargetPosition.distanceTo(_v3_1);
+      if (dist > 20) {
+        this.cinematicHardCutPending = true;
+      } else if (dist > 8) {
+        this.cinematicFastSnapRemaining = 0.3;
+      }
+    }
+
     if (this.getTargetWorldPosition(_v3_1)) {
       this.logger.info("Target set", {
         x: _v3_1.x,
@@ -993,7 +1076,7 @@ export class ClientCameraSystem extends SystemBase {
     }
 
     const hasFreshStreamingSignal =
-      Date.now() - this.lastStreamingStateAt <= 20_000;
+      Date.now() - this.lastStreamingStateAt <= 120_000;
     return hasFreshStreamingSignal;
   }
 
@@ -1050,6 +1133,11 @@ export class ClientCameraSystem extends SystemBase {
 
     const entity = this.resolveEntityById(targetId);
     if (!entity) {
+      if (!this.target) {
+        console.warn(
+          `[ClientCameraSystem] Streaming target "${targetId}" not found in entity store`,
+        );
+      }
       return false;
     }
 
@@ -1409,6 +1497,121 @@ export class ClientCameraSystem extends SystemBase {
     this.cinematicLastHasOpponent = false;
     this.cinematicFacingTheta = this.spherical.theta;
     this.cinematicFacingThetaValid = false;
+    this.cinematicPunchIn = 0;
+    this.cinematicDramaticLow = 0;
+    this.cinematicLastActorHP = null;
+    this.cinematicLastOpponentHP = null;
+    this.cinematicShakeIntensity = 0;
+    this.cinematicHasPrevActorPos = false;
+    this.cinematicHasSmoothedY = false;
+    this.cinematicLockedActorY = null;
+    this.cinematicLockedOpponentY = null;
+    this.cinematicLockedSeparation = null;
+    this.cinematicSmoothedBiasValid = false;
+    this.cinematicVelocity.set(0, 0, 0);
+  }
+
+  private onCinematicPhaseChange(_oldPhase: string, newPhase: string): void {
+    // Phase transitions trigger hard cuts for dramatic effect
+    if (
+      newPhase === "ANNOUNCEMENT" ||
+      newPhase === "FIGHTING" ||
+      newPhase === "RESOLUTION"
+    ) {
+      this.cinematicHardCutPending = true;
+    }
+    this.cinematicLastReverseAt = Date.now();
+    this.cinematicPunchIn = 0;
+    this.cinematicDramaticLow = 0;
+    this.cinematicShakeIntensity = 0;
+    this.cinematicFacingThetaValid = false;
+    // Reset Y and separation locks so they re-capture at the new phase's positions
+    this.cinematicLockedActorY = null;
+    this.cinematicLockedOpponentY = null;
+    this.cinematicLockedSeparation = null;
+  }
+
+  private getCinematicPhaseParams(): {
+    radiusMin: number;
+    radiusMax: number;
+    basePhi: number;
+    driftSpeed: number;
+    targetFov: number;
+    orbitAmplitude: number;
+    focusBias: number;
+  } {
+    switch (this.cinematicPhase) {
+      case "ANNOUNCEMENT":
+        return {
+          radiusMin: 10,
+          radiusMax: 14,
+          basePhi: Math.PI * 0.26,
+          driftSpeed: 0.02,
+          targetFov: 48,
+          orbitAmplitude: 0.08,
+          focusBias: 0.35,
+        };
+      case "COUNTDOWN":
+        return {
+          radiusMin: 4,
+          radiusMax: 6,
+          basePhi: Math.PI * 0.4,
+          driftSpeed: 0.0,
+          targetFov: 42,
+          orbitAmplitude: 0.02,
+          focusBias: 0.85,
+        };
+      case "FIGHTING":
+        return {
+          radiusMin: 5,
+          radiusMax: 9,
+          basePhi: Math.PI * 0.31,
+          driftSpeed: 0.035,
+          targetFov: 55,
+          orbitAmplitude: 0.15,
+          focusBias: 0.58,
+        };
+      case "RESOLUTION":
+        return {
+          radiusMin: 5.5,
+          radiusMax: 8,
+          basePhi: Math.PI * 0.44,
+          driftSpeed: 0.025,
+          targetFov: 45,
+          orbitAmplitude: 0.06,
+          focusBias: 0.5,
+        };
+      default:
+        return {
+          radiusMin: 8,
+          radiusMax: 12,
+          basePhi: Math.PI * 0.28,
+          driftSpeed: 0.015,
+          targetFov: 52,
+          orbitAmplitude: 0.1,
+          focusBias: 0.5,
+        };
+    }
+  }
+
+  private computeCameraShake(dt: number): THREE.Vector3 {
+    if (this.cinematicShakeIntensity < 0.001) {
+      _cinematicShakeOffset.set(0, 0, 0);
+      return _cinematicShakeOffset;
+    }
+    this.cinematicShakeTime += dt;
+    this.cinematicShakeIntensity *= Math.exp(-6.0 * dt);
+    if (this.cinematicShakeIntensity < 0.001) {
+      this.cinematicShakeIntensity = 0;
+    }
+    const t = this.cinematicShakeTime * 60;
+    const i = this.cinematicShakeIntensity;
+    _cinematicShakeOffset.set(
+      Math.sin(t * 1.1) * Math.sin(t * 0.47) * i * 0.12,
+      Math.sin(t * 1.37) * Math.sin(t * 0.63) * i * 0.04,
+      Math.sin(t * 0.93) * Math.sin(t * 0.37) * i * 0.1,
+    );
+    return _cinematicShakeOffset;
   }
 
   private moveAngleToward(
@@ -1497,7 +1700,7 @@ export class ClientCameraSystem extends SystemBase {
       return true;
     }
 
-    if (now - this.cinematicLastLosRefreshAt >= 120) {
+    if (now - this.cinematicLastLosRefreshAt >= 500) {
       return true;
     }
 
@@ -1514,15 +1717,14 @@ export class ClientCameraSystem extends SystemBase {
       return true;
     }
 
-    if (actorPosition.distanceToSquared(this.cinematicLastActorSample) > 0.18) {
+    if (actorPosition.distanceToSquared(this.cinematicLastActorSample) > 0.6) {
       return true;
     }
 
     if (
       hasOpponent &&
       opponentPosition &&
-      opponentPosition.distanceToSquared(this.cinematicLastOpponentSample) >
-        0.28
+      opponentPosition.distanceToSquared(this.cinematicLastOpponentSample) > 0.8
     ) {
       return true;
     }
@@ -1540,6 +1742,40 @@ export class ClientCameraSystem extends SystemBase {
     actorPosition: THREE.Vector3,
     opponentPosition: THREE.Vector3 | null,
   ): { theta: number; phi: number } {
+    // During active duel combat (COUNTDOWN/FIGHTING/RESOLUTION), skip the
+    // periodic LOS grid search entirely. The duel arena is a controlled
+    // environment with clear sightlines. The grid search's 500ms refresh
+    // cycle causes oscillation when it alternates between rating adjacent
+    // angles as "clear" vs "blocked" — the root cause of vertical jitter.
+    // Instead, use smooth continuous exponential damping toward the desired
+    // angles, giving a heavy, deliberate, film-quality camera feel.
+    if (
+      this.cinematicPhase === "COUNTDOWN" ||
+      this.cinematicPhase === "FIGHTING" ||
+      this.cinematicPhase === "RESOLUTION"
+    ) {
+      if (!this.cinematicThetaCacheValid || !this.cinematicPhiCacheValid) {
+        this.cinematicThetaCache = baseTheta;
+        this.cinematicPhiCache = phi;
+        this.cinematicThetaCacheValid = true;
+        this.cinematicPhiCacheValid = true;
+      } else {
+        // Exponential damping: fast when far from target, slow when close.
+        // This is the same approach used by AAA cinematic cameras — no linear
+        // rate caps that create mechanical start/stop movement.
+        const damp = 1 - Math.exp(-1.8 * deltaSeconds);
+        const thetaDelta = this.shortestAngleDelta(
+          this.cinematicThetaCache,
+          baseTheta,
+        );
+        this.cinematicThetaCache += thetaDelta * damp;
+        this.cinematicPhiCache += (phi - this.cinematicPhiCache) * damp;
+      }
+      return { theta: this.cinematicThetaCache, phi: this.cinematicPhiCache };
+    }
+
+    // IDLE / ANNOUNCEMENT: full LOS grid search (agents roaming the world
+    // where buildings and trees can obstruct the view).
     const shouldRefresh = this.shouldRefreshCinematicView(
       now,
       baseTheta,
@@ -1573,7 +1809,7 @@ export class ClientCameraSystem extends SystemBase {
         ? this.moveAngleToward(
             this.cinematicPhiCache,
             selectedView.phi,
-            this.cinematicTuning.phiTargetRate,
+            this.cinematicTuning.phiTargetRate * 0.6,
             refreshDeltaSeconds,
           )
         : selectedView.phi;
@@ -1593,7 +1829,8 @@ export class ClientCameraSystem extends SystemBase {
       };
     }
 
-    // Keep subtle motion even between LOS refreshes.
+    // Between LOS refreshes (IDLE/ANNOUNCEMENT only): subtle theta drift,
+    // phi stays locked to prevent down-blocked-up oscillation.
     const drift = this.shortestAngleDelta(this.cinematicThetaCache, baseTheta);
     this.cinematicThetaCache = this.moveAngleToward(
       this.cinematicThetaCache,
@@ -1605,12 +1842,6 @@ export class ClientCameraSystem extends SystemBase {
       drift * 0.05,
       -this.cinematicTuning.maxDriftStep,
       this.cinematicTuning.maxDriftStep,
-    );
-    this.cinematicPhiCache = this.moveAngleToward(
-      this.cinematicPhiCache,
-      phi,
-      this.cinematicTuning.phiTargetRate * 0.55,
-      deltaSeconds,
     );
     return {
       theta: this.cinematicThetaCache,
@@ -1752,6 +1983,17 @@ export class ClientCameraSystem extends SystemBase {
     }
     score -= Math.abs(candidatePhi - anchorPhi) * 1.05;
 
+    // Hysteresis: bias toward the current cached angle to prevent oscillation.
+    // The camera only switches when a new angle is substantially better.
+    if (this.cinematicThetaCacheValid) {
+      const distFromCurrent =
+        Math.abs(this.shortestAngleDelta(this.cinematicThetaCache, theta)) +
+        Math.abs(this.cinematicPhiCache - candidatePhi);
+      if (distFromCurrent < 0.15) {
+        score += 2.0;
+      }
+    }
+
     const probeDirection = _cinematicProbeDir
       .copy(_cinematicProbePos)
       .sub(focus);
@@ -1875,8 +2117,26 @@ export class ClientCameraSystem extends SystemBase {
       this.copyEntityPosition(actorEntity, _cinematicActorPos) ||
       this.copyEntityPosition(this.target, _cinematicActorPos);
     if (!hasActorPos) {
-      return null;
+      if (this.hasLastKnownPosition) {
+        _cinematicActorPos.copy(this.lastKnownTargetPosition);
+      } else {
+        return null;
+      }
+    } else {
+      this.lastKnownTargetPosition.copy(_cinematicActorPos);
+      this.hasLastKnownPosition = true;
     }
+
+    // Track velocity for movement lead
+    if (this.cinematicHasPrevActorPos) {
+      this.cinematicVelocity.set(
+        _cinematicActorPos.x - this.cinematicPrevActorPos.x,
+        0,
+        _cinematicActorPos.z - this.cinematicPrevActorPos.z,
+      );
+    }
+    this.cinematicPrevActorPos.copy(_cinematicActorPos);
+    this.cinematicHasPrevActorPos = true;
 
     const actorId = this.resolveEntityId(actorEntity);
     const opponentEntity = this.resolveOpponentEntity(actorEntity, actorId);
@@ -1886,20 +2146,120 @@ export class ClientCameraSystem extends SystemBase {
     const now = Date.now();
     const dt = Math.max(0.001, deltaTime || 0.016);
 
-    this.cinematicClock += Math.max(0.001, deltaTime || 0.016);
+    this.cinematicClock += dt;
+
+    // Lock entity Y during duel combat phases. Entities fight in a flat arena
+    // so their Y should be constant. Without locking, TileInterpolator terrain
+    // sampling, InterpolationEngine snapshots, and ClientNetwork direct writes
+    // all compete for entity.position.y causing frame-to-frame noise that no
+    // amount of smoothing can fully eliminate.
+    const inDuelCombat =
+      this.cinematicPhase === "COUNTDOWN" ||
+      this.cinematicPhase === "FIGHTING" ||
+      this.cinematicPhase === "RESOLUTION";
+
+    if (inDuelCombat) {
+      // Lock Y on first frame of duel combat, or if not yet locked
+      if (this.cinematicLockedActorY === null) {
+        this.cinematicLockedActorY = _cinematicActorPos.y;
+      }
+      if (hasOpponent && this.cinematicLockedOpponentY === null) {
+        this.cinematicLockedOpponentY = _cinematicOpponentPos.y;
+      }
+      // Use locked Y — completely ignores noisy terrain/interpolation updates
+      _cinematicActorPos.y = this.cinematicLockedActorY;
+      if (hasOpponent) {
+        _cinematicOpponentPos.y = this.cinematicLockedOpponentY!;
+      }
+    } else {
+      // Outside duel combat, clear locks and use gentle smoothing for idle following
+      this.cinematicLockedActorY = null;
+      this.cinematicLockedOpponentY = null;
+      this.cinematicLockedSeparation = null;
+
+      if (!this.cinematicHasSmoothedY) {
+        this.cinematicSmoothedActorY = _cinematicActorPos.y;
+        this.cinematicSmoothedOpponentY = hasOpponent
+          ? _cinematicOpponentPos.y
+          : _cinematicActorPos.y;
+        this.cinematicHasSmoothedY = true;
+      } else {
+        const ySmooth = 1 - Math.exp(-0.5 * dt);
+        this.cinematicSmoothedActorY +=
+          (_cinematicActorPos.y - this.cinematicSmoothedActorY) * ySmooth;
+        if (hasOpponent) {
+          this.cinematicSmoothedOpponentY +=
+            (_cinematicOpponentPos.y - this.cinematicSmoothedOpponentY) *
+            ySmooth;
+        }
+      }
+      _cinematicActorPos.y = this.cinematicSmoothedActorY;
+      if (hasOpponent) {
+        _cinematicOpponentPos.y = this.cinematicSmoothedOpponentY;
+      }
+    }
+
+    // Phase-aware camera parameters
+    const pp = this.getCinematicPhaseParams();
+    this.cinematicTargetFov = pp.targetFov;
+
+    // Movement lead offset (camera anticipates movement direction)
+    const leadScale = this.cinematicPhase === "IDLE" ? 1.5 : 0.8;
+    const speed = Math.sqrt(
+      this.cinematicVelocity.x * this.cinematicVelocity.x +
+        this.cinematicVelocity.z * this.cinematicVelocity.z,
+    );
+    _cinematicLeadOffset.set(0, 0, 0);
+    if (speed > 0.02) {
+      _cinematicLeadOffset.set(
+        this.cinematicVelocity.x * leadScale,
+        0,
+        this.cinematicVelocity.z * leadScale,
+      );
+    }
 
     if (hasOpponent) {
-      const separation = _cinematicActorPos.distanceTo(_cinematicOpponentPos);
+      const rawSeparation = _cinematicActorPos.distanceTo(
+        _cinematicOpponentPos,
+      );
 
+      // Lock separation during duel combat so radius and phi don't oscillate
+      // when agents reposition. Without this, every 1.2s movement tick causes
+      // separation to fluctuate (e.g., 2→3 units), which swings both the radius
+      // (via separation*1.1) and phi (via closeCombatBlend), producing ~2+ units
+      // of camera height change — the root cause of persistent Y-axis jitter.
+      if (inDuelCombat) {
+        if (this.cinematicLockedSeparation === null) {
+          this.cinematicLockedSeparation = rawSeparation;
+        }
+      } else {
+        this.cinematicLockedSeparation = null;
+      }
+      const separation = this.cinematicLockedSeparation ?? rawSeparation;
+
+      // Focus point: phase-aware bias between actor and opponent.
+      // Smooth the bias transition to prevent Y jumps when phase changes
+      // (e.g., ANNOUNCEMENT bias=0.35 → FIGHTING bias=0.58 would cause
+      // an instant focus-point jump if actor and opponent have different Y).
+      if (!this.cinematicSmoothedBiasValid) {
+        this.cinematicSmoothedBias = pp.focusBias;
+        this.cinematicSmoothedBiasValid = true;
+      } else {
+        const biasSmooth = 1 - Math.exp(-2.0 * dt);
+        this.cinematicSmoothedBias +=
+          (pp.focusBias - this.cinematicSmoothedBias) * biasSmooth;
+      }
+      const bias = this.cinematicSmoothedBias;
       _cinematicFocusPos
         .copy(_cinematicActorPos)
-        .multiplyScalar(0.58)
+        .multiplyScalar(bias)
         .add(
           _cinematicProbeTarget
             .copy(_cinematicOpponentPos)
-            .multiplyScalar(0.42),
+            .multiplyScalar(1 - bias),
         );
       _cinematicFocusPos.y += 1.05;
+      _cinematicFocusPos.add(_cinematicLeadOffset);
 
       _cinematicLookAtPos
         .copy(_cinematicActorPos)
@@ -1907,6 +2267,7 @@ export class ClientCameraSystem extends SystemBase {
         .multiplyScalar(0.5);
       _cinematicLookAtPos.y += 1.12;
 
+      // Facing theta (smoothed toward opponent direction)
       let facingTheta = this.cinematicFacingTheta;
       if (separation > 0.25) {
         const rawFacingTheta = Math.atan2(
@@ -1931,27 +2292,82 @@ export class ClientCameraSystem extends SystemBase {
         facingTheta = this.cinematicFacingTheta;
       }
 
+      const t = this.cinematicClock;
+      // Orbit drift with phase-controlled amplitude
+      const amp = pp.orbitAmplitude;
       const orbitDrift =
-        this.cinematicClock * 0.05 +
-        Math.sin(this.cinematicClock * 0.21) * 0.12 +
-        Math.sin(this.cinematicClock * 0.08 + 1.7) * 0.08;
-      const baseTheta = facingTheta + Math.PI * 0.56 + orbitDrift;
+        t * pp.driftSpeed +
+        Math.sin(t * 0.17) * amp +
+        Math.sin(t * 0.089 + 2.1) * amp * 0.73 +
+        Math.sin(t * 0.31 + 0.7) * amp * 0.4;
+      const bigSwing = Math.sin(t * 0.048) * Math.sin(t * 0.032) * amp * 2.3;
+
+      // Reverse angle cuts during FIGHTING for visual variety
+      let reverseAngleBoost = 0;
+      if (this.cinematicPhase === "FIGHTING") {
+        const timeSinceReverse = now - this.cinematicLastReverseAt;
+        if (timeSinceReverse > this.cinematicNextReverseCooldown) {
+          reverseAngleBoost = Math.PI * 0.7;
+          this.cinematicLastReverseAt = now;
+          this.cinematicNextReverseCooldown = 12000 + Math.random() * 6000;
+          // Reset theta cache so LOS scorer accepts the new angle
+          this.cinematicThetaCacheValid = false;
+          this.cinematicLastLosRefreshAt = 0;
+        }
+      }
+
+      const baseTheta =
+        facingTheta +
+        Math.PI * 0.56 +
+        orbitDrift +
+        bigSwing +
+        reverseAngleBoost;
+
+      // Phase-aware radius — use smoothstep blend instead of hard threshold
+      // to prevent discrete jumps when agents hover near 3 units apart
+      const closeCombatBlend = clamp((3.5 - separation) / 1.5, 0, 1);
+      const combatTightening = closeCombatBlend * 1.2;
       const baseRadius = clamp(
-        6.2 + separation * 1.45,
-        this.settings.minDistance + 2,
-        this.settings.maxDistance,
+        pp.radiusMin + separation * 1.1 - combatTightening,
+        pp.radiusMin,
+        pp.radiusMax,
       );
       const radius = clamp(
-        baseRadius + Math.sin(this.cinematicClock * 0.32) * 0.2,
-        this.settings.minDistance + 2,
-        this.settings.maxDistance,
+        baseRadius + Math.sin(t * 0.32) * 0.2,
+        pp.radiusMin,
+        pp.radiusMax,
       );
-      const phi = clamp(
-        Math.PI * 0.285 +
-          Math.sin(this.cinematicClock * 0.18 + separation * 0.2) * 0.035,
-        this.settings.minPolarAngle + 0.03,
-        this.settings.maxPolarAngle - 0.03,
-      );
+
+      // Phase-aware phi (pitch angle) — smooth blend for close combat
+      let phi: number;
+      if (this.cinematicPhase === "RESOLUTION") {
+        // Low heroic angle for winner
+        phi = clamp(
+          pp.basePhi + Math.sin(t * 0.09) * 0.03,
+          this.settings.minPolarAngle + 0.03,
+          this.settings.maxPolarAngle - 0.01,
+        );
+      } else if (this.cinematicPhase === "COUNTDOWN") {
+        // Tight hero shot, slight variation
+        phi = clamp(
+          pp.basePhi + Math.sin(t * 0.11) * 0.02,
+          this.settings.minPolarAngle + 0.03,
+          this.settings.maxPolarAngle - 0.03,
+        );
+      } else {
+        // FIGHTING / ANNOUNCEMENT / IDLE — blend between base and close-combat phi.
+        // Use only time-based variation (no separation dependency) to prevent
+        // discontinuous phi changes when agents move during combat.
+        const closeCombatPhi =
+          pp.basePhi + closeCombatBlend * (Math.PI * 0.38 - pp.basePhi);
+        const phiVariation =
+          Math.sin(t * 0.13) * 0.015 + Math.sin(t * 0.07) * 0.01;
+        phi = clamp(
+          closeCombatPhi + phiVariation,
+          this.settings.minPolarAngle + 0.03,
+          this.settings.maxPolarAngle - 0.03,
+        );
+      }
 
       const cinematicView = this.resolveCinematicView(
         now,
@@ -1973,22 +2389,32 @@ export class ClientCameraSystem extends SystemBase {
       };
     }
 
+    // Solo (no opponent) — phase-aware
     this.cinematicFacingThetaValid = false;
     _cinematicFocusPos.copy(_cinematicActorPos);
     _cinematicFocusPos.y += 1;
+    _cinematicFocusPos.add(_cinematicLeadOffset);
     _cinematicLookAtPos.copy(_cinematicActorPos);
     _cinematicLookAtPos.y += 1.12;
 
+    const tSolo = this.cinematicClock;
+    const soloAmp = pp.orbitAmplitude;
     const thetaDrift =
-      Math.sin(this.cinematicClock * 0.15) * 0.03 + this.cinematicClock * 0.012;
+      Math.sin(tSolo * 0.15) * soloAmp * 0.5 +
+      Math.sin(tSolo * 0.067 + 1.3) * soloAmp * 0.4 +
+      tSolo * pp.driftSpeed;
     const baseTheta = this.spherical.theta + thetaDrift;
     const radius = clamp(
-      this.targetSpherical.radius + Math.sin(this.cinematicClock * 0.34) * 0.12,
-      this.settings.minDistance + 1.5,
-      this.settings.maxDistance - 0.5,
+      (pp.radiusMin + pp.radiusMax) * 0.5 +
+        Math.sin(tSolo * 0.34) * 0.3 +
+        Math.sin(tSolo * 0.12 + 0.8) * 0.2,
+      pp.radiusMin,
+      pp.radiusMax,
     );
     const phi = clamp(
-      Math.PI * 0.3 + Math.sin(this.cinematicClock * 0.17 + 0.6) * 0.028,
+      pp.basePhi +
+        Math.sin(tSolo * 0.13 + 0.6) * 0.05 +
+        Math.sin(tSolo * 0.07) * 0.03,
       this.settings.minPolarAngle + 0.02,
       this.settings.maxPolarAngle - 0.02,
     );
@@ -2049,39 +2475,60 @@ export class ClientCameraSystem extends SystemBase {
     const cinematicFrame = this.buildCinematicFrame(deltaTime);
     if (cinematicFrame) {
       this.targetPosition.copy(cinematicFrame.focus);
-      this.moveVectorToward(
-        this.smoothedTarget,
-        this.targetPosition,
-        frameDt,
-        this.cinematicTuning.focusBaseSpeed,
-        this.cinematicTuning.focusDistanceSpeedGain,
-        this.cinematicTuning.focusMaxSpeed,
-      );
-      this.targetSpherical.radius += clamp(
-        cinematicFrame.radius - this.targetSpherical.radius,
-        -2.2 * frameDt,
-        2.2 * frameDt,
-      );
-      this.targetSpherical.phi = this.moveAngleToward(
-        this.targetSpherical.phi,
-        cinematicFrame.phi,
-        this.cinematicTuning.phiTargetRate,
-        frameDt,
-      );
-      this.targetSpherical.theta = this.moveAngleToward(
-        this.targetSpherical.theta,
-        cinematicFrame.theta,
-        this.cinematicTuning.thetaTargetRate,
-        frameDt,
-      );
-      this.moveVectorToward(
-        this.lookAtTarget,
-        cinematicFrame.lookAt,
-        frameDt,
-        this.cinematicTuning.lookBaseSpeed,
-        this.cinematicTuning.lookDistanceSpeedGain,
-        this.cinematicTuning.lookMaxSpeed,
-      );
+
+      // Handle hard cuts and fast snaps
+      if (this.cinematicHardCutPending) {
+        // Hard cut: snap everything instantly
+        this.smoothedTarget.copy(this.targetPosition);
+        this.targetSpherical.radius = cinematicFrame.radius;
+        this.targetSpherical.phi = cinematicFrame.phi;
+        this.targetSpherical.theta = cinematicFrame.theta;
+        this.spherical.radius = cinematicFrame.radius;
+        this.spherical.phi = cinematicFrame.phi;
+        this.spherical.theta = cinematicFrame.theta;
+        this.effectiveRadius = cinematicFrame.radius;
+        this.lookAtTarget.copy(cinematicFrame.lookAt);
+        this.cinematicLookSlerpReady = false;
+        this.cinematicHardCutPending = false;
+        this.cinematicFastSnapRemaining = 0;
+      } else {
+        // Single-layer exponential damping for all cinematic smoothing.
+        // Exponential decay (fast when far, slow when close) produces the
+        // heavy, deliberate camera motion of AAA cinematic cameras like RDR2.
+        // This replaces the previous 3-layer pipeline (cinematicCache →
+        // targetSpherical → spherical) which had conflicting linear rate
+        // caps that created mechanical start/stop motion and oscillation.
+        //
+        // Rate 3.5 → half-life ~0.2s, reaches 95% in ~0.6s.
+        // Rate 5.0 for position → half-life ~0.14s, reaches 95% in ~0.4s.
+        const snapM = this.cinematicFastSnapRemaining > 0 ? 3.0 : 1.0;
+        if (this.cinematicFastSnapRemaining > 0) {
+          this.cinematicFastSnapRemaining = Math.max(
+            0,
+            this.cinematicFastSnapRemaining - frameDt,
+          );
+        }
+
+        // Position: exponential damping (unified X/Y/Z — no separate Y rate limit).
+        // Y is locked during duel combat so there's no terrain noise to filter.
+        const posDamp = 1 - Math.exp(-5.0 * snapM * frameDt);
+        this.smoothedTarget.lerp(this.targetPosition, posDamp);
+        this.lookAtTarget.lerp(cinematicFrame.lookAt, posDamp);
+
+        // Angles: single-layer exponential damping directly to cinematicFrame
+        // values. No intermediate targetSpherical — that extra layer added
+        // latency and created phase conflicts between smoothers.
+        const angleDamp = 1 - Math.exp(-3.5 * snapM * frameDt);
+        const thetaDelta = this.shortestAngleDelta(
+          this.targetSpherical.theta,
+          cinematicFrame.theta,
+        );
+        this.targetSpherical.theta += thetaDelta * angleDamp;
+        this.targetSpherical.phi +=
+          (cinematicFrame.phi - this.targetSpherical.phi) * angleDamp;
+        this.targetSpherical.radius +=
+          (cinematicFrame.radius - this.targetSpherical.radius) * angleDamp;
+      }
     } else {
       let hasTargetPosition = this.getTargetWorldPosition(_v3_1);
       if (!hasTargetPosition) {
@@ -2092,9 +2539,17 @@ export class ClientCameraSystem extends SystemBase {
           hasTargetPosition = this.getTargetWorldPosition(_v3_1);
         }
         if (!hasTargetPosition) {
-          return;
+          if (this.hasLastKnownPosition) {
+            _v3_1.copy(this.lastKnownTargetPosition);
+          } else {
+            return;
+          }
         }
       }
+
+      // Save last known good position
+      this.lastKnownTargetPosition.copy(_v3_1);
+      this.hasLastKnownPosition = true;
 
       // For server-authoritative movement, follow target directly without smoothing.
       this.targetPosition.copy(_v3_1);
@@ -2113,18 +2568,12 @@ export class ClientCameraSystem extends SystemBase {
     const shouldSmoothSpherical = isOrbiting || Boolean(cinematicFrame);
     if (shouldSmoothSpherical) {
       if (cinematicFrame) {
-        this.spherical.phi = this.moveAngleToward(
-          this.spherical.phi,
-          this.targetSpherical.phi,
-          this.cinematicTuning.phiAppliedRate,
-          frameDt,
-        );
-        this.spherical.theta = this.moveAngleToward(
-          this.spherical.theta,
-          this.targetSpherical.theta,
-          this.cinematicTuning.thetaAppliedRate,
-          frameDt,
-        );
+        // In cinematic mode, targetSpherical already contains the smoothed
+        // values (single-layer exponential damping applied above). Copy
+        // directly — adding a second smoothing layer creates sluggishness
+        // and can cause oscillation when the two layers have different rates.
+        this.spherical.phi = this.targetSpherical.phi;
+        this.spherical.theta = this.targetSpherical.theta;
       } else {
         const phiDelta = this.targetSpherical.phi - this.spherical.phi;
         const thetaDelta = this.shortestAngleDelta(
@@ -2147,6 +2596,13 @@ export class ClientCameraSystem extends SystemBase {
       this.spherical.theta = this.targetSpherical.theta;
     }
 
+    // In cinematic mode, propagate targetSpherical.radius → spherical.radius
+    // (the cinematic frame sets targetSpherical.radius but the smoothing block
+    // above only handles phi/theta)
+    if (cinematicFrame) {
+      this.spherical.radius = this.targetSpherical.radius;
+    }
+
     // Hard clamp after smoothing to enforce strict RS3-like limits
     this.spherical.radius = clamp(
       this.spherical.radius,
@@ -2154,18 +2610,24 @@ export class ClientCameraSystem extends SystemBase {
       this.settings.maxDistance,
     );
 
-    // Collision-aware effective radius with smoothing to avoid snap on MMB press
-    const desiredDistance = this.spherical.radius;
-    const collidedDistance =
-      this.computeCollisionAdjustedDistance(desiredDistance);
-    const targetEffective = Math.min(desiredDistance, collidedDistance);
-    if (this.zoomDirty || this.orbitingActive) {
-      // When zoom just changed, honor immediate response
-      this.effectiveRadius = targetEffective;
+    // Collision-aware effective radius — skip in cinematic mode because the
+    // LOS scorer already avoids obstructed camera angles. Running the collision
+    // raycast here causes jitter as the ray alternates between hitting and
+    // missing terrain at different orbit angles each frame.
+    if (cinematicFrame) {
+      this.effectiveRadius = this.spherical.radius;
     } else {
-      const radiusDamping = this.settings.radiusDampingFactor ?? 0.18;
-      this.effectiveRadius +=
-        (targetEffective - this.effectiveRadius) * radiusDamping;
+      const desiredDistance = this.spherical.radius;
+      const collidedDistance =
+        this.computeCollisionAdjustedDistance(desiredDistance);
+      const targetEffective = Math.min(desiredDistance, collidedDistance);
+      if (this.zoomDirty || this.orbitingActive) {
+        this.effectiveRadius = targetEffective;
+      } else {
+        const radiusDamping = this.settings.radiusDampingFactor ?? 0.18;
+        this.effectiveRadius +=
+          (targetEffective - this.effectiveRadius) * radiusDamping;
+      }
     }
 
     // Calculate camera position from spherical coordinates using effective radius
@@ -2176,6 +2638,13 @@ export class ClientCameraSystem extends SystemBase {
     );
     this.cameraPosition.setFromSpherical(tempSpherical);
     this.cameraPosition.add(this.smoothedTarget);
+
+    // Prevent camera from going underground — skip in cinematic mode where
+    // the LOS scorer handles obstruction avoidance. The hard Y snap fights
+    // with the smooth spherical orbit and causes vertical jitter.
+    if (!cinematicFrame) {
+      this.clampAboveTerrain(this.cameraPosition, 1.5);
+    }
 
     if (!cinematicFrame) {
       // Calculate look-at target - look at player's chest/torso height
@@ -2219,10 +2688,17 @@ export class ClientCameraSystem extends SystemBase {
       this.cinematicLookSlerpReady = false;
     }
 
+    // Dynamic FOV for cinematic mode
+    if (cinematicFrame && this.camera) {
+      const fovDelta = this.cinematicTargetFov - this.camera.fov;
+      if (Math.abs(fovDelta) > 0.1) {
+        this.camera.fov += clamp(fovDelta, -15 * frameDt, 15 * frameDt);
+        this.camera.updateProjectionMatrix();
+      }
+    }
+
     // Update camera matrices since it has no parent transform to inherit from
     this.camera.updateMatrixWorld(true);
-
-    // Do not clamp camera height to terrain; effective radius collision handles occlusion
   }
 
   private computeCollisionAdjustedDistance(desiredDistance: number): number {
@@ -2260,65 +2736,34 @@ export class ClientCameraSystem extends SystemBase {
     return desiredDistance;
   }
 
+  private getTerrainSystem(): TerrainSystem | null {
+    if (this.terrainSystemRef === undefined) {
+      this.terrainSystemRef =
+        (this.world.getSystem("terrain") as TerrainSystem | null) ?? null;
+    }
+    return this.terrainSystemRef;
+  }
+
+  private clampAboveTerrain(pos: THREE.Vector3, minClearance: number): void {
+    const terrain = this.getTerrainSystem();
+    if (!terrain) return;
+    const height = terrain.getHeightAt(pos.x, pos.z);
+    if (Number.isFinite(height) && pos.y < height + minClearance) {
+      pos.y = height + minClearance;
+    }
+  }
+
+  private onStreamingStateHP(_state: StreamingCameraStateUpdate): void {
+    // Intentionally empty — all combat-reactive camera effects (punch-in,
+    // shake, dramatic low angle) have been removed for a smooth cinematic
+    // experience. HP changes no longer affect the camera.
+  }
+
   private shortestAngleDelta(a: number, b: number): number {
     let delta = (b - a) % (Math.PI * 2);
     if (delta > Math.PI) delta -= Math.PI * 2;
     if (delta < -Math.PI) delta += Math.PI * 2;
     return delta;
-  }
-
-  private validatePlayerOnTerrain(
-    playerPos: THREE.Vector3 | { x: number; y: number; z: number },
-  ): void {
-    // Get terrain system
-    const terrainSystem = this.world.getSystem("terrain");
-    if (!terrainSystem) {
-      // No terrain system available
-      return;
-    }
-
-    // Get player coordinates
-    const px = "x" in playerPos ? playerPos.x : (playerPos as THREE.Vector3).x;
-    const py = "y" in playerPos ? playerPos.y : (playerPos as THREE.Vector3).y;
-    const pz = "z" in playerPos ? playerPos.z : (playerPos as THREE.Vector3).z;
-
-    // Get terrain height at player position
-    const terrainHeight = terrainSystem.getHeightAt(px, pz);
-
-    // Check if terrain height is valid
-    if (!isFinite(terrainHeight) || isNaN(terrainHeight)) {
-      const errorMsg = `[CRITICAL] Invalid terrain height at player position: x=${px}, z=${pz}, terrainHeight=${terrainHeight}`;
-      console.error(errorMsg);
-      throw new Error(errorMsg);
-    }
-
-    // Check if player is properly positioned on terrain
-    // Allow some tolerance for player height above terrain (0.0 to 5.0 units)
-    const heightDifference = py - terrainHeight;
-
-    if (heightDifference < -0.5) {
-      const errorMsg = `[CRITICAL] Player is BELOW terrain! Player Y: ${py}, Terrain Height: ${terrainHeight}, Difference: ${heightDifference}`;
-      console.error(errorMsg);
-      throw new Error(errorMsg);
-    }
-
-    if (heightDifference > 10.0) {
-      const errorMsg = `[CRITICAL] Player is FLOATING above terrain! Player Y: ${py}, Terrain Height: ${terrainHeight}, Difference: ${heightDifference}`;
-      console.error(errorMsg);
-      throw new Error(errorMsg);
-    }
-
-    // Additional check: if player Y is exactly 0 or very close to 0, might indicate spawn issue
-    if (Math.abs(py) < 0.01 && Math.abs(terrainHeight) > 1.0) {
-      const errorMsg = `[CRITICAL] Player Y position is near zero (${py}) but terrain height is ${terrainHeight} - likely spawn failure!`;
-      console.error(errorMsg);
-      throw new Error(errorMsg);
-    }
-
-    // Log successful validation periodically (every 60 frames)
-    if (Math.random() < 0.0167) {
-      // ~1/60 chance
-    }
   }
 
   // Public API methods for testing and external access
@@ -2440,6 +2885,8 @@ export class ClientCameraSystem extends SystemBase {
     this.cinematicLosMask = null;
     this.cinematicCollisionMask = null;
     this.cinematicLookSlerpReady = false;
+    this.terrainSystemRef = undefined;
+    this.hasLastKnownPosition = false;
     this.resetCinematicSamplingState();
   }
 

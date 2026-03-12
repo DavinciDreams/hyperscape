@@ -11,10 +11,10 @@ import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
   createDissolveMaterial,
   isDissolveMaterial,
-  getLODDistances,
   GPU_VEG_CONFIG,
   type DissolveMaterial,
-} from "../../../systems/shared/world/GPUVegetation";
+} from "../../../systems/shared/world/GPUMaterials";
+import { getLODDistances } from "../../../systems/shared/world/LODConfig";
 import { getCameraPosition } from "../../../utils/rendering/AnimationLOD";
 import type {
   ResourceVisualContext,
@@ -27,8 +27,6 @@ import type {
 
 const DEFAULT_RESOURCE_LOD = getLODDistances("resource");
 const SKIP_LOD_TYPES = new Set(["herb", "fishing_spot"]);
-
-
 
 // ---------------------------------------------------------------------------
 // Shared LOD caches (one entry per model path, shared across all entities)

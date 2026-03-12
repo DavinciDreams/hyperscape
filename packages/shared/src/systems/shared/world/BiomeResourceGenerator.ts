@@ -22,6 +22,12 @@ import type {
   ResourceSubType,
 } from "../../../types/world/terrain";
 import type { VegetationInstance } from "../../../types/world/world-types";
+import {
+  getTreeLevelRequired,
+  treeIdToSubType,
+} from "../../../constants/TreeTypes";
+import type { TreePlacementRules } from "../../../constants/TreeTypes";
+import { getTreeConfigForBiome } from "./TerrainBiomeTypes";
 
 /**
  * Context provided by TerrainSystem for resource generation.
@@ -41,24 +47,20 @@ export interface ResourceGenerationContext {
   getHeightAt: (worldX: number, worldZ: number) => number;
   /** Check if position is on a road */
   isOnRoad?: (worldX: number, worldZ: number) => boolean;
+  /** Get the dominant biome at a world position (for per-tree biome selection) */
+  getDominantBiome?: (worldX: number, worldZ: number) => string;
   /** Deterministic RNG seeded for this tile */
   createRng: (salt: string) => () => number;
 }
 
 /**
- * Level requirements for tree types (OSRS woodcutting levels).
- * Single source of truth - used by both generation and tests.
+ * @deprecated Use getTreeLevelRequired() from TreeTypes.ts instead.
+ * Kept for backward compatibility — delegates to the single source of truth.
  */
-export const TREE_LEVEL_REQUIREMENTS: Record<string, number> = {
-  normal: 1,
-  oak: 15,
-  willow: 30,
-  teak: 35,
-  maple: 45,
-  mahogany: 50,
-  yew: 60,
-  magic: 75,
-};
+export const TREE_LEVEL_REQUIREMENTS: Record<string, number> = new Proxy(
+  {} as Record<string, number>,
+  { get: (_target, prop: string) => getTreeLevelRequired(prop) },
+);
 
 /**
  * Mapping from game tree subtypes to @hyperscape/procgen presets.
@@ -109,9 +111,10 @@ export const ORE_LEVEL_REQUIREMENTS: Record<string, number> = {
 
 /**
  * Get the level requirement for a tree type.
+ * @deprecated Use getTreeLevelRequired() from TreeTypes.ts directly.
  */
 export function getTreeLevelRequirement(subType: string): number {
-  return TREE_LEVEL_REQUIREMENTS[subType] ?? 1;
+  return getTreeLevelRequired(subType);
 }
 
 /**
@@ -146,21 +149,22 @@ export function generateTrees(
     return [];
   }
 
+  const maxSlope = treeConfig.maxSlope ?? Infinity;
+
   // Use deterministic RNG for reproducible placement
   const rng = ctx.createRng("trees");
 
-  // Get distribution weights
-  const distribution = treeConfig.distribution;
-  const treeTypes = Object.keys(distribution);
-  if (treeTypes.length === 0) {
+  // Pre-compute tile-level distribution from the merged trees map
+  const tileTreeMap = treeConfig.trees;
+  const tileTreeTypes = Object.keys(tileTreeMap);
+  if (tileTreeTypes.length === 0) {
     return [];
   }
-
-  const totalWeight = Object.values(distribution).reduce(
-    (sum, w) => sum + w,
+  const tileTotalWeight = Object.values(tileTreeMap).reduce(
+    (sum, cfg) => sum + cfg.weight,
     0,
   );
-  if (totalWeight === 0) {
+  if (tileTotalWeight === 0) {
     return [];
   }
 
@@ -240,16 +244,73 @@ export function generateTrees(
       continue;
     }
 
+    // Reject steep slopes — sample 4 neighbors to estimate gradient magnitude
+    if (maxSlope < Infinity) {
+      const sd = 1.0;
+      const dhdx =
+        (ctx.getHeightAt(worldX + sd, worldZ) -
+          ctx.getHeightAt(worldX - sd, worldZ)) /
+        (2 * sd);
+      const dhdz =
+        (ctx.getHeightAt(worldX, worldZ + sd) -
+          ctx.getHeightAt(worldX, worldZ - sd)) /
+        (2 * sd);
+      if (dhdx * dhdx + dhdz * dhdz > maxSlope * maxSlope) continue;
+    }
+
+    // Resolve the tree map for THIS position. If we have a per-position
+    // biome callback, use it to get the actual biome here instead of
+    // relying on the single tile-center biome.
+    let activeTreeMap = tileTreeMap;
+    let treeTypes = tileTreeTypes;
+    let totalWeight = tileTotalWeight;
+
+    if (ctx.getDominantBiome) {
+      const positionBiome = ctx.getDominantBiome(worldX, worldZ);
+      const posConfig = getTreeConfigForBiome(positionBiome);
+      if (posConfig && posConfig.trees !== tileTreeMap) {
+        activeTreeMap = posConfig.trees;
+        treeTypes = Object.keys(activeTreeMap);
+        totalWeight = Object.values(activeTreeMap).reduce(
+          (sum, cfg) => sum + cfg.weight,
+          0,
+        );
+        if (totalWeight === 0 || treeTypes.length === 0) continue;
+      }
+    }
+
     // Select tree type based on weighted distribution
-    let selectedType = "normal";
+    let selectedTreeId = treeTypes[0];
     const roll = rng() * totalWeight;
     let cumulative = 0;
     for (const treeType of treeTypes) {
-      cumulative += distribution[treeType];
+      cumulative += activeTreeMap[treeType].weight;
       if (roll < cumulative) {
-        // Extract subtype: "tree_oak" -> "oak", "tree_normal" -> "normal"
-        selectedType = treeType.replace("tree_", "");
+        selectedTreeId = treeType;
         break;
+      }
+    }
+    const selectedType = treeIdToSubType(selectedTreeId);
+
+    // Apply per-tree placement rules from the merged config
+    const rules: TreePlacementRules | undefined = activeTreeMap[selectedTreeId];
+    if (rules) {
+      const heightAboveWater = height - ctx.waterThreshold;
+
+      if (rules.minHeight !== undefined && height < rules.minHeight) continue;
+      if (rules.maxHeight !== undefined && height > rules.maxHeight) continue;
+
+      if (
+        rules.avoidsWaterBelow !== undefined &&
+        heightAboveWater < rules.avoidsWaterBelow
+      )
+        continue;
+
+      if (rules.waterAffinity && rules.waterAffinity > 0) {
+        const proximityLimit = rules.waterProximityHeight ?? 10;
+        if (heightAboveWater > proximityLimit) {
+          if (rng() < rules.waterAffinity) continue;
+        }
       }
     }
 
@@ -473,45 +534,17 @@ export const ROCK_BIOME_DEFAULTS: Record<
   string,
   { presets: string[]; distribution: Record<string, number> }
 > = {
+  tundra: {
+    presets: ["granite", "basalt", "boulder"],
+    distribution: { granite: 2, basalt: 2, boulder: 2 },
+  },
   forest: {
     presets: ["boulder", "granite", "limestone"],
     distribution: { boulder: 3, granite: 2, limestone: 1 },
   },
-  plains: {
-    presets: ["boulder", "pebble", "sandstone"],
-    distribution: { boulder: 2, pebble: 3, sandstone: 1 },
-  },
-  desert: {
+  canyon: {
     presets: ["sandstone", "limestone", "pebble"],
     distribution: { sandstone: 4, limestone: 2, pebble: 1 },
-  },
-  mountains: {
-    presets: ["granite", "basalt", "cliff"],
-    distribution: { granite: 3, basalt: 2, cliff: 2 },
-  },
-  mountain: {
-    presets: ["granite", "basalt", "cliff"],
-    distribution: { granite: 3, basalt: 2, cliff: 2 },
-  },
-  swamp: {
-    presets: ["limestone", "slate", "pebble"],
-    distribution: { limestone: 2, slate: 2, pebble: 3 },
-  },
-  frozen: {
-    presets: ["granite", "basalt", "boulder"],
-    distribution: { granite: 2, basalt: 2, boulder: 2 },
-  },
-  wastes: {
-    presets: ["basalt", "slate", "asteroid"],
-    distribution: { basalt: 3, slate: 2, asteroid: 1 },
-  },
-  corrupted: {
-    presets: ["obsidian", "basalt", "crystal"],
-    distribution: { obsidian: 3, basalt: 2, crystal: 2 },
-  },
-  lake: {
-    presets: ["pebble", "limestone", "boulder"],
-    distribution: { pebble: 4, limestone: 2, boulder: 1 },
   },
 };
 
@@ -523,7 +556,7 @@ export function getRockPresetsForBiome(biomeType: string): {
   distribution: Record<string, number>;
 } {
   return (
-    ROCK_BIOME_DEFAULTS[biomeType.toLowerCase()] ?? ROCK_BIOME_DEFAULTS.plains
+    ROCK_BIOME_DEFAULTS[biomeType.toLowerCase()] ?? ROCK_BIOME_DEFAULTS.forest
   );
 }
 
@@ -706,6 +739,10 @@ export const PLANT_BIOME_DEFAULTS: Record<
   string,
   { presets: string[]; distribution: Record<string, number> }
 > = {
+  tundra: {
+    presets: ["bergenia", "pulmonaria"],
+    distribution: { bergenia: 2, pulmonaria: 2 },
+  },
   forest: {
     presets: ["monstera", "philodendron", "calathea", "ficus", "hosta"],
     distribution: {
@@ -716,53 +753,9 @@ export const PLANT_BIOME_DEFAULTS: Record<
       hosta: 3,
     },
   },
-  plains: {
-    presets: ["hosta", "heuchera", "bergenia", "maranta"],
-    distribution: { hosta: 3, heuchera: 2, bergenia: 2, maranta: 1 },
-  },
-  desert: {
+  canyon: {
     presets: ["zamioculcas", "aglaonema", "syngonium"],
     distribution: { zamioculcas: 3, aglaonema: 2, syngonium: 1 },
-  },
-  mountains: {
-    presets: ["bergenia", "pulmonaria", "heuchera"],
-    distribution: { bergenia: 2, pulmonaria: 2, heuchera: 2 },
-  },
-  mountain: {
-    presets: ["bergenia", "pulmonaria", "heuchera"],
-    distribution: { bergenia: 2, pulmonaria: 2, heuchera: 2 },
-  },
-  swamp: {
-    presets: [
-      "monstera",
-      "colocasia",
-      "xanthosoma",
-      "alocasia",
-      "spathiphyllum",
-    ],
-    distribution: {
-      monstera: 2,
-      colocasia: 3,
-      xanthosoma: 2,
-      alocasia: 2,
-      spathiphyllum: 2,
-    },
-  },
-  frozen: {
-    presets: ["bergenia", "pulmonaria"],
-    distribution: { bergenia: 2, pulmonaria: 2 },
-  },
-  wastes: {
-    presets: ["zamioculcas", "aglaonema"],
-    distribution: { zamioculcas: 2, aglaonema: 2 },
-  },
-  corrupted: {
-    presets: ["alocasia", "caladium", "anthurium"],
-    distribution: { alocasia: 2, caladium: 2, anthurium: 2 },
-  },
-  lake: {
-    presets: ["colocasia", "calla", "arum", "spathiphyllum"],
-    distribution: { colocasia: 2, calla: 2, arum: 2, spathiphyllum: 2 },
   },
 };
 

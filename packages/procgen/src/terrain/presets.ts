@@ -37,11 +37,6 @@ export const SMALL_ISLAND_PRESET: TerrainPreset = {
       gaussianCoeff: 0.2,
       boundaryNoiseScale: 0.005,
       boundaryNoiseAmount: 0.1,
-      mountainHeightThreshold: 0.5,
-      mountainWeightBoost: 1.5,
-      valleyHeightThreshold: 0.3,
-      valleyWeightBoost: 1.2,
-      mountainHeightBoost: 0.3,
     },
   },
 };
@@ -145,11 +140,6 @@ export const CONTINENT_PRESET: TerrainPreset = {
       gaussianCoeff: 0.12,
       boundaryNoiseScale: 0.002,
       boundaryNoiseAmount: 0.2,
-      mountainHeightThreshold: 0.35,
-      mountainWeightBoost: 2.5,
-      valleyHeightThreshold: 0.4,
-      valleyWeightBoost: 1.8,
-      mountainHeightBoost: 0.6,
     },
     noise: {
       continent: {
@@ -207,11 +197,6 @@ export const MOUNTAIN_RANGE_PRESET: TerrainPreset = {
       gaussianCoeff: 0.1,
       boundaryNoiseScale: 0.003,
       boundaryNoiseAmount: 0.15,
-      mountainHeightThreshold: 0.3,
-      mountainWeightBoost: 3.0, // Strong mountain boost
-      valleyHeightThreshold: 0.5,
-      valleyWeightBoost: 2.0,
-      mountainHeightBoost: 0.8, // Very high mountain boost
     },
     noise: {
       continent: {
@@ -269,11 +254,6 @@ export const FLAT_PLAINS_PRESET: TerrainPreset = {
       gaussianCoeff: 0.18,
       boundaryNoiseScale: 0.002,
       boundaryNoiseAmount: 0.1,
-      mountainHeightThreshold: 0.7, // Mountains rare
-      mountainWeightBoost: 0.5,
-      valleyHeightThreshold: 0.5,
-      valleyWeightBoost: 2.0, // Plains dominant
-      mountainHeightBoost: 0.2,
     },
     noise: {
       continent: {

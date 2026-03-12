@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { BiomeType, BIOME_LIST } from "../TerrainBiomeTypes";
 
 // ============== Constants (must match TownSystem.ts) ==============
 const TOWN_COUNT = 25;
@@ -11,8 +12,8 @@ const WORLD_SIZE = 10000;
 const MIN_TOWN_SPACING = 800;
 const FLATNESS_SAMPLE_RADIUS = 40;
 const FLATNESS_SAMPLE_COUNT = 16;
-// IMPORTANT: This must match TERRAIN_CONSTANTS.WATER_THRESHOLD (9.0)
-const WATER_THRESHOLD = 9.0;
+// IMPORTANT: This must match TERRAIN_CONSTANTS.WATER_THRESHOLD (8.0)
+const WATER_THRESHOLD = 8.0;
 const OPTIMAL_WATER_DISTANCE_MIN = 30;
 const OPTIMAL_WATER_DISTANCE_MAX = 150;
 
@@ -48,14 +49,9 @@ const BUILDING_CONFIG: Record<
 };
 
 const BIOME_SUITABILITY: Record<string, number> = {
-  plains: 1.0,
-  valley: 0.95,
-  forest: 0.7,
+  forest: 0.8,
   tundra: 0.4,
-  desert: 0.3,
-  swamp: 0.2,
-  mountains: 0.15,
-  lakes: 0.0,
+  canyon: 0.3,
 };
 
 const NAME_PREFIXES = [
@@ -533,25 +529,12 @@ describe("TownSystem Algorithms", () => {
   });
 
   describe("Biome Suitability", () => {
-    it("plains is most suitable", () => {
-      expect(BIOME_SUITABILITY.plains).toBe(1.0);
-    });
-
-    it("water is completely unsuitable", () => {
-      expect(BIOME_SUITABILITY.lakes).toBe(0.0);
+    it("forest is most suitable", () => {
+      expect(BIOME_SUITABILITY.forest).toBe(0.8);
     });
 
     it("all biomes have defined suitability", () => {
-      const biomes = [
-        "plains",
-        "valley",
-        "forest",
-        "tundra",
-        "desert",
-        "swamp",
-        "mountains",
-        "lakes",
-      ];
+      const biomes = BIOME_LIST;
       for (const biome of biomes) {
         expect(BIOME_SUITABILITY[biome]).toBeDefined();
         expect(BIOME_SUITABILITY[biome]).toBeGreaterThanOrEqual(0);
@@ -560,14 +543,13 @@ describe("TownSystem Algorithms", () => {
     });
 
     it("suitability reflects logical preferences", () => {
-      // Plains > forest > mountains makes sense for town building
-      expect(BIOME_SUITABILITY.plains).toBeGreaterThan(
-        BIOME_SUITABILITY.forest,
-      );
+      // Forest > tundra > canyon makes sense for town building
       expect(BIOME_SUITABILITY.forest).toBeGreaterThan(
-        BIOME_SUITABILITY.mountains,
+        BIOME_SUITABILITY.tundra,
       );
-      expect(BIOME_SUITABILITY.valley).toBeGreaterThan(BIOME_SUITABILITY.swamp);
+      expect(BIOME_SUITABILITY.tundra).toBeGreaterThan(
+        BIOME_SUITABILITY.canyon,
+      );
     });
   });
 

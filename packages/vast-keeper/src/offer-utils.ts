@@ -56,7 +56,9 @@ function getReliabilityScore(offer: VastOfferLike): number {
 function getWestRegionScore(offer: VastOfferLike): number {
   const location = (offer.geolocation || "").trim().toLowerCase();
   if (!location) return 1;
-  return WEST_REGION_MARKERS.some((marker) => location.includes(marker)) ? 0 : 1;
+  return WEST_REGION_MARKERS.some((marker) => location.includes(marker))
+    ? 0
+    : 1;
 }
 
 function getGpuPreferenceScore(offer: VastOfferLike): number {
@@ -68,7 +70,9 @@ function getGpuPreferenceScore(offer: VastOfferLike): number {
   return preferredIndex === -1 ? PREFERRED_GPU_ORDER.length : preferredIndex;
 }
 
-export function filterOffersForStream<T extends VastOfferLike>(offers: T[]): T[] {
+export function filterOffersForStream<T extends VastOfferLike>(
+  offers: T[],
+): T[] {
   return offers.filter((offer) => {
     return (
       typeof offer.reliability === "number" &&

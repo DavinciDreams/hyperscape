@@ -1807,11 +1807,10 @@ export class DuelOrchestrator {
       return fallback;
     }
 
-    // Keep post-duel restores near the duel lobby area to avoid origin/out-of-map
-    // drift from stale respawn state or invalid legacy coordinates.
-    const lobby = getDuelArenaConfig().lobbySpawnPoint;
-    const distanceFromLobby = Math.hypot(x - lobby.x, z - lobby.z);
-    if (distanceFromLobby > 120) {
+    // Only reject positions that are clearly out-of-world (very far from origin).
+    // Agents should be free to roam the world between duels.
+    const distFromOrigin = Math.hypot(x, z);
+    if (distFromOrigin > 2000) {
       return fallback;
     }
 

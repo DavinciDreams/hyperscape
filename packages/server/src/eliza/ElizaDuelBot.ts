@@ -273,9 +273,11 @@ export class ElizaDuelBot extends EventEmitter {
 
         await this.waitForPlayerSpawnReady(this.config.connectTimeoutMs);
 
+        // Start autonomous behavior so agents mine/chop/fish between duels
         const service = this.getHyperscapeService();
-        service?.setAutonomousBehaviorEnabled?.(false);
-        service?.stopAutonomousBehavior?.();
+        if (service?.startAutonomousBehavior) {
+          service.startAutonomousBehavior();
+        }
 
         this._id = characterId;
         this._connected = true;

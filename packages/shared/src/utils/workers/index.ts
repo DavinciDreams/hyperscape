@@ -110,6 +110,17 @@ export {
   type PhysicsWorkerOutput,
 } from "./PhysicsWorker";
 
+// QuadChunk Worker - Offloads quad-tree terrain chunk computation to web worker
+export {
+  getQuadChunkWorkerPool,
+  generateQuadChunkAsync,
+  terminateQuadChunkWorkerPool,
+  isQuadChunkWorkerAvailable,
+  type QuadChunkWorkerConfig,
+  type QuadChunkWorkerInput,
+  type QuadChunkWorkerOutput,
+} from "./QuadChunkWorker";
+
 // Minimap Worker - 2D canvas-based minimap rendering in web worker
 export {
   MinimapWorkerManager,

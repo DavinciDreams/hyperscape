@@ -5,6 +5,7 @@
 
 import * as THREE from "../../extras/three/three";
 import type { Position3D } from "../core/base-types";
+import type { BiomeType } from "../../systems/shared/world/TerrainBiomeTypes";
 
 // Temporary imports from core.ts - will be updated when those modules are created
 import type { MobData } from "../core/core";
@@ -252,8 +253,8 @@ export interface ResourceDistribution {
 export interface BiomeTreeConfig {
   /** Whether harvestable trees are enabled for this biome */
   enabled: boolean;
-  /** Distribution weights for tree types (IDs from woodcutting.json) */
-  distribution: ResourceDistribution;
+  /** Per-tree spawn weight + placement rules, keyed by TreeId */
+  trees: Record<string, import("../../constants/TreeTypes").TreeSpawnConfig>;
   /** Trees per 64m tile (base density, modified by resourceDensity) */
   density: number;
   /** Minimum spacing between trees in meters */
@@ -264,6 +265,8 @@ export interface BiomeTreeConfig {
   clusterSize?: number;
   /** Scale variation range [min, max] multiplier (default: [0.8, 1.2]) */
   scaleVariation?: [number, number];
+  /** Maximum terrain slope for tree placement (gradient magnitude, default: 1.5) */
+  maxSlope?: number;
 }
 
 /**
@@ -358,17 +361,7 @@ export interface BiomeData {
   name: string;
   description: string;
   difficultyLevel: 0 | 1 | 2 | 3; // 0 = safe zones, 1-3 = mob levels
-  terrain:
-    | "forest"
-    | "wastes"
-    | "plains"
-    | "frozen"
-    | "corrupted"
-    | "lake"
-    | "mountain"
-    | "mountains"
-    | "desert"
-    | "swamp";
+  terrain: BiomeType;
   resources: string[]; // Available resource types
   mobs: string[]; // Mob types that spawn here
   fogIntensity: number; // 0-1 for visual atmosphere
