@@ -345,7 +345,8 @@ export class TerrainQuadTree {
   private allNodes = new Map<number, TerrainQuadNode>();
   private playerX = 0;
   private playerZ = 0;
-  private lastChunkKey: string | null = null;
+  private lastGridX = NaN;
+  private lastGridZ = NaN;
   private listener: QuadTreeListener | null = null;
   private nextNodeId = 0;
   /** Set true whenever the tree structure changes (split/unsplit). Cleared after neighbour resolution. */
@@ -428,8 +429,11 @@ export class TerrainQuadTree {
     this.playerX = playerX;
     this.playerZ = playerZ;
 
-    const chunkKey = `${Math.round((playerX / this.config.minSize) * 2 + 0.5)}_${Math.round((playerZ / this.config.minSize) * 2 + 0.5)}`;
-    if (chunkKey === this.lastChunkKey) {
+    // Use numeric grid coordinates instead of string comparison to avoid
+    // per-frame string allocation / GC pressure.
+    const gridX = Math.round((playerX / this.config.minSize) * 2 + 0.5);
+    const gridZ = Math.round((playerZ / this.config.minSize) * 2 + 0.5);
+    if (gridX === this.lastGridX && gridZ === this.lastGridZ) {
       if (this.structureDirty) {
         this.updateAllNeighbours();
         this.structureDirty = false;
@@ -439,7 +443,8 @@ export class TerrainQuadTree {
       }
       return false;
     }
-    this.lastChunkKey = chunkKey;
+    this.lastGridX = gridX;
+    this.lastGridZ = gridZ;
 
     // Mark all nodes for re-check
     for (const node of this.allNodes.values()) {
@@ -496,7 +501,8 @@ export class TerrainQuadTree {
     }
     this.mainChunks.clear();
     this.allNodes.clear();
-    this.lastChunkKey = null;
+    this.lastGridX = NaN;
+    this.lastGridZ = NaN;
   }
 
   /** Get all leaf nodes that currently have (or need) visual geometry */

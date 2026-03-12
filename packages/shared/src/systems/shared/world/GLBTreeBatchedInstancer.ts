@@ -107,6 +107,8 @@ function extractAllMeshParts(root: THREE.Object3D): MeshPart[] {
   return parts;
 }
 
+let _fingerprintId = 0;
+
 /**
  * Returns a string key that identifies a material's diffuse texture.
  * Used to match the same material slot across different model variants.
@@ -123,7 +125,9 @@ function getTextureFingerprint(mat: THREE.Material): string {
     return `tex:${img.width}x${img.height}:${img.src ?? img.uuid ?? ""}`;
   }
   if (std.name) return `name:${std.name}`;
-  return `idx:${Math.random()}`;
+  // Deterministic fallback — monotonic counter avoids random fingerprints
+  // that would silently prevent variant matching.
+  return `idx:${_fingerprintId++}`;
 }
 
 /**
