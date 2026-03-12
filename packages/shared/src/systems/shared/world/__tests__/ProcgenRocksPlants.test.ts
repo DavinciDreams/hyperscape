@@ -817,12 +817,12 @@ describe("Error Handling - Invalid Inputs", () => {
         minSpacing: 2,
       };
 
-      // Unknown biome should use plains fallback, which has presets
+      // Unknown biome should use forest fallback, which has presets
       const rocks = generateRocks(ctx, rockConfig, "unknown_xyz_biome");
       expect(rocks.length).toBeGreaterThan(0);
 
-      // Should use plains defaults (boulder, pebble, sandstone)
-      const validPresets = ["boulder", "pebble", "sandstone"];
+      // Should use forest defaults (boulder, granite, limestone)
+      const validPresets = ["boulder", "granite", "limestone"];
       for (const rock of rocks) {
         expect(validPresets).toContain(rock.assetId);
       }
@@ -1462,9 +1462,9 @@ describe("ProcgenPlantCache Exports", () => {
       }
     });
 
-    it("includes tropical biome", () => {
-      expect(BIOME_PLANT_PRESETS.tropical).toBeDefined();
-      expect(BIOME_PLANT_PRESETS.tropical.length).toBeGreaterThan(0);
+    it("includes canyon biome", () => {
+      expect(BIOME_PLANT_PRESETS.canyon).toBeDefined();
+      expect(BIOME_PLANT_PRESETS.canyon.length).toBeGreaterThan(0);
     });
   });
 

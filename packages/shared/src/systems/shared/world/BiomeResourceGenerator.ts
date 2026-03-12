@@ -491,7 +491,7 @@ export function getRockPresetsForBiome(biomeType: string): {
   distribution: Record<string, number>;
 } {
   return (
-    ROCK_BIOME_DEFAULTS[biomeType.toLowerCase()] ?? ROCK_BIOME_DEFAULTS.plains
+    ROCK_BIOME_DEFAULTS[biomeType.toLowerCase()] ?? ROCK_BIOME_DEFAULTS.forest
   );
 }
 
