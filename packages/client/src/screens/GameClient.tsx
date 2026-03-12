@@ -327,14 +327,13 @@ export function GameClient({
       event.preventDefault?.();
       console.error(
         "[GameClient] GPU context lost - WebGPU device may have been lost. " +
-        "This indicates GPU resource exhaustion or driver issues.",
+          "This indicates GPU resource exhaustion or driver issues.",
       );
     };
     // Listen for WebGPU context lost events (if supported in future/custom)
     // canvas.addEventListener("webgpucontextlost", handleContextLost);
 
-    return () => {
-    };
+    return () => {};
   }, [world]);
 
   useEffect(() => {

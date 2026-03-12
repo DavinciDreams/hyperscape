@@ -520,7 +520,9 @@ async function registerStaticFiles(
   // Always serve manifests from the dedicated cache directory for compatibility.
   // This guarantees /game-assets/manifests/* works even when game-assets root points
   // at a directory that doesn't contain the full manifest set.
-  console.error(`[HTTP DEBUG] Registering /game-assets/manifests/ with root: ${config.manifestsDir}`);
+  console.error(
+    `[HTTP DEBUG] Registering /game-assets/manifests/ with root: ${config.manifestsDir}`,
+  );
   await fastify.register(statics, {
     root: config.manifestsDir,
     prefix: "/game-assets/manifests/",

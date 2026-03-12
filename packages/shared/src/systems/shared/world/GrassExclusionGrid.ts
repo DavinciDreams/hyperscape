@@ -25,6 +25,7 @@ import { texture, uniform, Fn, float } from "three/tsl";
 import type { World } from "../../../core/World";
 import type { CollisionMatrix } from "../movement/CollisionMatrix";
 import { CollisionFlag, CollisionMask } from "../movement/CollisionFlags";
+import { BiomeType } from "./TerrainBiomeTypes";
 import { BIOMES } from "../../../data/world-structure";
 import { setGridExclusionTexture } from "./ProceduralGrass";
 import type { TownSystem } from "./TownSystem";
@@ -44,9 +45,9 @@ const GRID_CONFIG = {
   /** Distance player must move before re-centering texture */
   RECENTER_THRESHOLD: 64, // Re-center when player moves 64m from texture center
   /** Biomes where grass never grows - matched from biomes.json terrain types */
-  NON_GRASSY_TERRAINS: new Set([
-    "desert",
-    "tundra",
+  NON_GRASSY_TERRAINS: new Set<string>([
+    BiomeType.Canyon,
+    BiomeType.Tundra,
     "mountains",
     "lake",
     "frozen",
@@ -63,7 +64,7 @@ const GRID_CONFIG = {
  */
 type ExclusionReason =
   | "collision" // CollisionMatrix blocked (rock, tree, building, etc.)
-  | "biome" // Non-grassy biome (desert, tundra, etc.)
+  | "biome" // Non-grassy biome (canyon, tundra, etc.)
   | "water" // Below water level
   | "slope"; // Too steep
 

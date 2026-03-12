@@ -128,8 +128,7 @@ export class ZoneVisualsSystem extends SystemBase {
       return cachedTexture;
     }
 
-    const emoji =
-      type === "skull" ? "💀" : type === "home" ? "🏠" : "⚔️";
+    const emoji = type === "skull" ? "💀" : type === "home" ? "🏠" : "⚔️";
     const texture = this.createEmojiTexture(emoji, type);
     this.emojiTextures.set(type, texture);
     return texture;

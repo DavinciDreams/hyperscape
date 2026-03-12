@@ -135,7 +135,8 @@ import {
 import {
   getLODConfig,
   type LODDistancesWithSq,
-} from "../systems/shared/world/GPUVegetation";
+} from "../systems/shared/world/LODConfig";
+import { applyRimHighlight } from "../systems/shared/world/GPUMaterials";
 // Re-export types for external use
 export type { EntityConfig };
 
@@ -218,6 +219,8 @@ export class Entity implements IEntity {
 
   protected config: EntityConfig;
   public mesh: THREE.Mesh | THREE.Group | THREE.Object3D | null = null;
+  /** Cached per-material highlight uniforms (lazy-initialized on first hover) */
+  private _highlightUniforms: Array<{ value: number }> | null = null;
   public nodes: Map<string, THREE.Object3D> = new Map(); // Child nodes by ID
   public worldNodes: Set<THREE.Object3D> = new Set(); // Nodes added to world
   public listeners: Record<string, Set<EventCallback>> = {}; // Event listeners
@@ -1213,6 +1216,45 @@ export class Entity implements IEntity {
   isPlayerInRange(playerPosition: Position3D): boolean {
     const distance = this.getDistanceTo(playerPosition);
     return distance <= (this.config.interactionDistance || 5);
+  }
+
+  // ============================================================================
+  // SHADER HIGHLIGHT (uniform-based, for non-instanced entities)
+  // ============================================================================
+
+  /**
+   * Toggle shader-based Fresnel rim highlight on this entity's mesh.
+   * On first call the highlight shader is lazily injected into every
+   * compatible material found under `this.mesh`. Subsequent calls just
+   * flip the uniform value.
+   *
+   * @returns true if highlight was handled, false if no compatible materials
+   */
+  public setShaderHighlight(on: boolean): boolean {
+    const root = this.mesh ?? this.node;
+    if (!root) return false;
+
+    if (!this._highlightUniforms) {
+      this._highlightUniforms = [];
+      root.traverse((child: THREE.Object3D) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        const materials = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+        for (const mat of materials) {
+          const u = applyRimHighlight(mat);
+          if (u) this._highlightUniforms!.push(u);
+        }
+      });
+    }
+
+    if (this._highlightUniforms.length === 0) return false;
+
+    const val = on ? 1.0 : 0.0;
+    for (const u of this._highlightUniforms) {
+      u.value = val;
+    }
+    return true;
   }
 
   /**

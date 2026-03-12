@@ -11,25 +11,11 @@ describe("ModelCache geometry setup", () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
       "position",
-      new THREE.Float32BufferAttribute(
-        [
-          0, 0, 0,
-          1, 0, 0,
-          0, 1, 0,
-        ],
-        3,
-      ),
+      new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3),
     );
     geometry.setAttribute(
       "color",
-      new THREE.Float32BufferAttribute(
-        [
-          1, 0, 0,
-          0, 1, 0,
-          0, 0, 1,
-        ],
-        3,
-      ),
+      new THREE.Float32BufferAttribute([1, 0, 0, 0, 1, 0, 0, 0, 1], 3),
     );
 
     const mesh = new THREE.Mesh(

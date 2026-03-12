@@ -310,6 +310,12 @@ export interface ResourceEntityConfig extends EntityConfig<ResourceEntityPropert
    */
   procgenPreset?: string;
   /**
+   * Multiple GLB model paths for visual variation.
+   * Each instance deterministically picks one based on entity ID hash.
+   * LOD files follow naming convention: model_lod1.glb, model_lod2.glb
+   */
+  modelVariants?: string[];
+  /**
    * Path to LOD1 (low-poly ~30%) model for medium-distance rendering
    * If not specified, full model is used until LOD2 or imposter distance
    * Recommended for trees and large resources to improve mid-range performance

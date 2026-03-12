@@ -16,9 +16,7 @@ function parseTruthy(value: string | null | undefined): boolean {
   );
 }
 
-function getWindowRef(
-  win?: Window,
-): HyperscapeViewportWindow | undefined {
+function getWindowRef(win?: Window): HyperscapeViewportWindow | undefined {
   if (typeof window === "undefined") return undefined;
   return (win ?? window) as HyperscapeViewportWindow;
 }
@@ -59,8 +57,7 @@ export function isEmbeddedSpectatorViewport(win?: Window): boolean {
     windowRef.__HYPERSCAPE_CONFIG__?.mode === "spectator";
 
   return (
-    (embeddedFromQuery && modeFromQuery === "spectator") ||
-    embeddedFromConfig
+    (embeddedFromQuery && modeFromQuery === "spectator") || embeddedFromConfig
   );
 }
 

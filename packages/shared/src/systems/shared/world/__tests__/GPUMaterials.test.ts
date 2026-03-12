@@ -1,5 +1,5 @@
 /**
- * GPUVegetation Unit Tests
+ * GPUMaterials & LODConfig Unit Tests
  *
  * Tests for GPU-driven dissolve rendering and unified LOD configuration:
  * - LOD distance configuration (getLODDistances, applyLODSettings)
@@ -7,14 +7,11 @@
  * - Imposter material creation and type guards
  * - Boundary conditions and edge cases
  * - Configuration caching and cache invalidation
- *
- * Based on packages/shared/src/systems/shared/world/GPUVegetation.ts
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import THREE from "../../../../extras/three/three";
 import {
-  GPU_VEG_CONFIG,
   LOD_DISTANCES,
   DEFAULT_LOD_DISTANCES,
   LOD_REFERENCE_SIZE,
@@ -26,13 +23,16 @@ import {
   calculateLODScaleFactor,
   clearLODDistanceCache,
   applyLODSettings,
+  type LODDistances,
+} from "../LODConfig";
+import {
+  GPU_VEG_CONFIG,
   isDissolveMaterial,
   isImposterMaterial,
   createDissolveMaterial,
   createGPUVegetationMaterial,
   createImposterMaterial,
-  type LODDistances,
-} from "../GPUVegetation";
+} from "../GPUMaterials";
 
 /**
  * Helper to save and restore LOD_DISTANCES global state.
@@ -114,7 +114,7 @@ describe("GPUVegetation", () => {
       [15, 7, 13, 5],
     ];
 
-    // The shader formula (must match what's in GPUVegetation.ts)
+    // The shader formula (must match what's in GPUMaterials.ts)
     function bayerFormula(x: number, y: number): number {
       const bit0_x = x % 2;
       const bit1_x = Math.floor(x / 2);

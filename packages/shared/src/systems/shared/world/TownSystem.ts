@@ -69,6 +69,7 @@ import {
 } from "../../../types/world/building-collision-types";
 import { BFSPathfinder } from "../movement/BFSPathfinder";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import { DEFAULT_BIOME } from "./TerrainBiomeTypes";
 
 // Default configuration values
 // IMPORTANT: waterThreshold must match TERRAIN_CONSTANTS.WATER_THRESHOLD (9.0)
@@ -95,14 +96,9 @@ const DEFAULT_TOWN_SIZES: Record<TownSize, TownSizeConfig> = {
 };
 
 const DEFAULT_BIOME_SUITABILITY: Record<string, number> = {
-  plains: 1.0,
-  valley: 0.95,
-  forest: 0.7,
+  forest: 0.8,
   tundra: 0.4,
-  desert: 0.3,
-  swamp: 0.2,
-  mountains: 0.15,
-  lakes: 0.0,
+  canyon: 0.3,
 };
 
 function isTruthyEnv(rawValue: string | undefined): boolean {
@@ -320,7 +316,9 @@ export class TownSystem extends System {
         return this.terrainSystem?.getHeightAt(x, z) ?? 10;
       },
       getBiomeAt: (x: number, z: number): string => {
-        return this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? "plains";
+        return (
+          this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? DEFAULT_BIOME
+        );
       },
       getWaterThreshold: (): number => {
         return this.config.waterThreshold;
@@ -494,7 +492,7 @@ export class TownSystem extends System {
       this.terrainSystem?.getBiomeAtWorldPosition?.(
         manifest.position.x,
         manifest.position.z,
-      ) ?? "plains";
+      ) ?? DEFAULT_BIOME;
 
     // Convert buildings - positions are relative in manifest, convert to world coords
     // Also calculate entrance positions for each building

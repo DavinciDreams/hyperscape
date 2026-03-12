@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
+import { BiomeType } from "../TerrainBiomeTypes";
 
 // ============== Constants ==============
 const TOWN_COUNT = 25;
@@ -596,10 +597,9 @@ class MockTerrainSystem {
 
   getBiome(x: number, z: number): string {
     const noise = Math.sin(x * 0.005 + z * 0.003 + this.seed);
-    if (noise > 0.3) return "plains";
-    if (noise > 0) return "forest";
-    if (noise > -0.3) return "valley";
-    return "mountains";
+    if (noise > 0.3) return BiomeType.Forest;
+    if (noise > 0) return BiomeType.Tundra;
+    return BiomeType.Canyon;
   }
 }
 

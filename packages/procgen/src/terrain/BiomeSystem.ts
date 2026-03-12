@@ -14,95 +14,6 @@ import type {
   BiomeDefinition,
 } from "./types";
 
-/** Numeric biome IDs for shader use */
-export const BIOME_IDS: Record<string, number> = {
-  plains: 0,
-  forest: 1,
-  valley: 2,
-  mountains: 3,
-  tundra: 4,
-  desert: 5,
-  lakes: 6,
-  swamp: 7,
-};
-
-/** Default biome definitions (can be overridden) */
-export const DEFAULT_BIOMES: Record<string, BiomeDefinition> = {
-  plains: {
-    id: "plains",
-    name: "Plains",
-    color: 0x7cba5f,
-    terrainMultiplier: 1.0,
-    difficultyLevel: 0,
-    heightRange: [0.1, 0.5],
-    resourceDensity: 1.0,
-  },
-  forest: {
-    id: "forest",
-    name: "Forest",
-    color: 0x2f7d32,
-    terrainMultiplier: 1.1,
-    difficultyLevel: 1,
-    heightRange: [0.2, 0.6],
-    resourceDensity: 1.5,
-  },
-  valley: {
-    id: "valley",
-    name: "Valley",
-    color: 0x6b8e23,
-    terrainMultiplier: 0.8,
-    difficultyLevel: 1,
-    heightRange: [0.05, 0.3],
-    resourceDensity: 1.2,
-  },
-  mountains: {
-    id: "mountains",
-    name: "Mountains",
-    color: 0x808080,
-    terrainMultiplier: 1.5,
-    difficultyLevel: 3,
-    heightRange: [0.5, 1.0],
-    maxSlope: 0.9,
-    resourceDensity: 0.7,
-  },
-  desert: {
-    id: "desert",
-    name: "Desert",
-    color: 0xdaa520,
-    terrainMultiplier: 0.9,
-    difficultyLevel: 2,
-    heightRange: [0.1, 0.4],
-    resourceDensity: 0.3,
-  },
-  swamp: {
-    id: "swamp",
-    name: "Swamp",
-    color: 0x556b2f,
-    terrainMultiplier: 0.7,
-    difficultyLevel: 2,
-    heightRange: [0.0, 0.25],
-    resourceDensity: 0.8,
-  },
-  tundra: {
-    id: "tundra",
-    name: "Tundra",
-    color: 0xb0c4de,
-    terrainMultiplier: 1.0,
-    difficultyLevel: 3,
-    heightRange: [0.3, 0.8],
-    resourceDensity: 0.4,
-  },
-  lakes: {
-    id: "lakes",
-    name: "Lakes",
-    color: 0x4682b4,
-    terrainMultiplier: 0.5,
-    difficultyLevel: 1,
-    heightRange: [0.0, 0.15],
-    resourceDensity: 0.5,
-  },
-};
-
 /**
  * Default biome configuration
  */
@@ -114,30 +25,7 @@ export const DEFAULT_BIOME_CONFIG: BiomeConfig = {
   gaussianCoeff: 0.15,
   boundaryNoiseScale: 0.003,
   boundaryNoiseAmount: 0.15,
-  mountainHeightThreshold: 0.4,
-  mountainWeightBoost: 2.0,
-  valleyHeightThreshold: 0.4,
-  valleyWeightBoost: 1.5,
-  mountainHeightBoost: 0.5,
 };
-
-/**
- * Weighted biome types for random selection
- * Plains is dominant with variety from other biomes
- */
-const BIOME_TYPE_WEIGHTS = [
-  "plains",
-  "plains",
-  "plains",
-  "forest",
-  "forest",
-  "valley",
-  "mountains",
-  "mountains",
-  "desert",
-  "swamp",
-  "tundra",
-];
 
 /**
  * BiomeSystem handles biome placement and influence calculations
@@ -153,7 +41,7 @@ export class BiomeSystem {
     seed: number,
     worldSizeMeters: number,
     config: Partial<BiomeConfig> = {},
-    biomeDefinitions: Record<string, BiomeDefinition> = DEFAULT_BIOMES,
+    biomeDefinitions: Record<string, BiomeDefinition> = {},
   ) {
     this.config = { ...DEFAULT_BIOME_CONFIG, ...config };
     this.biomeDefinitions = biomeDefinitions;
@@ -161,17 +49,54 @@ export class BiomeSystem {
     this.worldSize = worldSizeMeters;
 
     this.initializeBiomeCenters(seed);
+
+    for (const id of Object.keys(this.biomeDefinitions)) {
+      this.biomeIds[id] = this.nextBiomeId++;
+    }
+  }
+
+  /**
+   * Compute biome centers arranged in a regular polygon.
+   * For 3 types = equilateral triangle, 4 = square, etc.
+   * Generalizes the island-style biome placement for any N.
+   */
+  static computePolygonCenters(
+    biomeTypes: string[],
+    radius: number,
+    influence: number,
+  ): BiomeCenter[] {
+    const centers: BiomeCenter[] = [];
+    for (let i = 0; i < biomeTypes.length; i++) {
+      const angle = (i / biomeTypes.length) * Math.PI * 2 - Math.PI / 2;
+      centers.push({
+        x: Math.cos(angle) * radius,
+        z: Math.sin(angle) * radius,
+        type: biomeTypes[i],
+        influence,
+      });
+    }
+    return centers;
   }
 
   /**
    * Initialize biome centers using deterministic grid-jitter placement
    */
   private initializeBiomeCenters(seed: number): void {
+    if (this.config.explicitCenters) {
+      this.biomeCenters = [...this.config.explicitCenters];
+      return;
+    }
+
     const { gridSize, jitter, minInfluence, maxInfluence } = this.config;
     const cellSize = this.worldSize / gridSize;
 
     // Use deterministic PRNG for reproducible biome placement
     const random = createSeededRNG(seed);
+
+    const biomeTypes = Object.keys(this.biomeDefinitions);
+    if (biomeTypes.length === 0) {
+      return;
+    }
 
     this.biomeCenters = [];
 
@@ -189,15 +114,15 @@ export class BiomeSystem {
         const x = baseX + jitterX;
         const z = baseZ + jitterZ;
 
-        // Random biome type and influence
-        const typeIndex = Math.floor(random() * BIOME_TYPE_WEIGHTS.length);
+        // Random biome type from provided definitions and influence
+        const typeIndex = Math.floor(random() * biomeTypes.length);
         const influenceRange = maxInfluence - minInfluence;
         const influence = minInfluence + random() * influenceRange;
 
         this.biomeCenters.push({
           x,
           z,
-          type: BIOME_TYPE_WEIGHTS[typeIndex],
+          type: biomeTypes[typeIndex],
           influence,
         });
       }
@@ -215,14 +140,20 @@ export class BiomeSystem {
    * Get biome definition by ID
    */
   getBiomeDefinition(biomeId: string): BiomeDefinition {
-    return this.biomeDefinitions[biomeId] ?? this.biomeDefinitions["plains"];
-  }
-
-  /**
-   * Get all biome definitions
-   */
-  getAllBiomeDefinitions(): Record<string, BiomeDefinition> {
-    return this.biomeDefinitions;
+    const def = this.biomeDefinitions[biomeId];
+    if (def) return def;
+    const keys = Object.keys(this.biomeDefinitions);
+    return keys.length > 0
+      ? this.biomeDefinitions[keys[0]]
+      : {
+          id: biomeId,
+          name: biomeId,
+          color: 0x808080,
+          terrainMultiplier: 1,
+          difficultyLevel: 0,
+          heightRange: [0, 1],
+          resourceDensity: 1,
+        };
   }
 
   /**
@@ -231,22 +162,15 @@ export class BiomeSystem {
    *
    * @param worldX - World X coordinate
    * @param worldZ - World Z coordinate
-   * @param baseHeight - Normalized base height (0-1) for height-biome coupling
+   * @param _baseHeight - Reserved for future height-biome coupling (currently unused)
    */
   getBiomeInfluencesAtPosition(
     worldX: number,
     worldZ: number,
-    baseHeight: number,
+    _baseHeight: number,
   ): BiomeInfluence[] {
-    const {
-      gaussianCoeff,
-      boundaryNoiseScale,
-      boundaryNoiseAmount,
-      mountainHeightThreshold,
-      mountainWeightBoost,
-      valleyHeightThreshold,
-      valleyWeightBoost,
-    } = this.config;
+    const { gaussianCoeff, boundaryNoiseScale, boundaryNoiseAmount } =
+      this.config;
 
     // Add boundary noise for organic edges
     const boundaryNoise = this.noise.simplex2D(
@@ -270,23 +194,9 @@ export class BiomeSystem {
       // Pure Gaussian falloff - NO hard distance cutoff
       // The gaussian naturally approaches 0 at large distances
       const normalizedDistance = noisyDistance / center.influence;
-      let weight = Math.exp(
+      const weight = Math.exp(
         -normalizedDistance * normalizedDistance * gaussianCoeff,
       );
-
-      // Height-based weight adjustments
-      if (center.type === "mountains" && baseHeight > mountainHeightThreshold) {
-        const heightFactor = baseHeight - mountainHeightThreshold;
-        weight *= 1.0 + heightFactor * mountainWeightBoost;
-      }
-
-      if (
-        (center.type === "valley" || center.type === "plains") &&
-        baseHeight < valleyHeightThreshold
-      ) {
-        const heightFactor = valleyHeightThreshold - baseHeight;
-        weight *= 1.0 + heightFactor * valleyWeightBoost;
-      }
 
       // Merge same-type biomes
       const existing = biomeWeightMap.get(center.type) ?? 0;
@@ -306,8 +216,8 @@ export class BiomeSystem {
         influence.weight /= totalWeight;
       }
     } else {
-      // Fallback to plains if no biome centers are nearby
-      biomeInfluences.push({ type: "plains", weight: 1.0 });
+      const fallback = Object.keys(this.biomeDefinitions)[0] ?? "unknown";
+      biomeInfluences.push({ type: fallback, weight: 1.0 });
     }
 
     // Sort by weight descending
@@ -325,65 +235,30 @@ export class BiomeSystem {
       worldZ,
       baseHeight,
     );
-    return influences.length > 0 ? influences[0].type : "plains";
+    if (influences.length > 0) return influences[0].type;
+    const keys = Object.keys(this.biomeDefinitions);
+    return keys.length > 0 ? keys[0] : "unknown";
   }
 
   /**
    * Get the dominant biome for a terrain tile (at tile center)
    */
   getBiomeForTile(tileX: number, tileZ: number, tileSize: number): string {
-    // Get world coordinates for center of tile
-    const worldX = tileX * tileSize + tileSize / 2;
-    const worldZ = tileZ * tileSize + tileSize / 2;
-
-    // Use mid-range height for tile-level biome query
-    return this.getDominantBiome(worldX, worldZ, 0.5);
+    // Tile geometry is centered at (tileX * tileSize, tileZ * tileSize)
+    const worldX = tileX * tileSize;
+    const worldZ = tileZ * tileSize;
+    return this.getDominantBiome(worldX, worldZ, 0);
   }
 
-  /**
-   * Apply mountain height boost based on biome influence
-   * Call this after getting base height to add mountain elevation
-   */
-  applyMountainHeightBoost(
-    worldX: number,
-    worldZ: number,
-    baseHeightNormalized: number,
-  ): number {
-    const { mountainHeightBoost } = this.config;
-
-    let maxBoost = 0;
-
-    for (const center of this.biomeCenters) {
-      if (center.type === "mountains") {
-        const dx = worldX - center.x;
-        const dz = worldZ - center.z;
-        const distance = Math.sqrt(dx * dx + dz * dz);
-        const normalizedDist = distance / center.influence;
-
-        if (normalizedDist < 2.5) {
-          // Smooth boost that peaks at center and fades out
-          const boost = Math.exp(-normalizedDist * normalizedDist * 0.3);
-          maxBoost = Math.max(maxBoost, boost);
-        }
-      }
-    }
-
-    // Apply mountain height boost
-    const boostedHeight =
-      baseHeightNormalized * (1 + maxBoost * mountainHeightBoost);
-    return Math.min(1, boostedHeight);
-  }
-
-  /** @deprecated Use exported BIOME_IDS constant instead */
-  static readonly BIOME_IDS = BIOME_IDS;
+  private biomeIds: Record<string, number> = {};
+  private nextBiomeId = 0;
 
   /** Get numeric biome ID for shader use */
   getBiomeId(biomeName: string): number {
-    const id = BIOME_IDS[biomeName];
+    const id = this.biomeIds[biomeName];
     if (id === undefined) {
-      throw new Error(
-        `[BiomeSystem] Unknown biome name: ${biomeName}. Add to BIOME_IDS.`,
-      );
+      this.biomeIds[biomeName] = this.nextBiomeId++;
+      return this.biomeIds[biomeName];
     }
     return id;
   }

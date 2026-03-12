@@ -138,7 +138,7 @@ export function createVRMFactory(
   glb.scene.traverse((obj) => {
     if (isMeshLike(obj)) {
       obj.castShadow = true;
-      obj.receiveShadow = true;
+      obj.receiveShadow = false;
 
       // Convert materials to MeshStandardMaterial for proper sun/moon/environment lighting
       const convertMaterial = (

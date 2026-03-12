@@ -47,7 +47,13 @@ function getBunRuntime(): BunRuntime | undefined {
  */
 export interface ModelProviderConfig {
   /** Provider name (openai, anthropic, groq, xai, elizacloud) */
-  provider: "openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud";
+  provider:
+    | "openai"
+    | "anthropic"
+    | "groq"
+    | "xai"
+    | "openrouter"
+    | "elizacloud";
   /** Specific model to use */
   model: string;
   /** Display name for the agent */
@@ -233,7 +239,9 @@ export async function spawnModelAgents(
     /** Maximum number of agents to spawn */
     maxAgents?: number;
     /** Specific providers to spawn (if empty, spawns all available) */
-    providers?: Array<"openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud">;
+    providers?: Array<
+      "openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud"
+    >;
   } = {},
 ): Promise<number> {
   const { maxAgents = 10, providers = [] } = options;
@@ -462,7 +470,7 @@ export async function spawnModelAgents(
           while (trackedMemoryIds.length >= MAX_MEMORIES) {
             const oldId = trackedMemoryIds.shift();
             if (oldId) {
-              runtimeInstance.deleteMemory(oldId as UUID).catch(() => { });
+              runtimeInstance.deleteMemory(oldId as UUID).catch(() => {});
             }
           }
           const id = await originalCreateMemory(memory, tableName, unique);
@@ -519,8 +527,8 @@ export async function spawnModelAgents(
           await Promise.race([initPromise, timeoutPromise]);
         } catch (err) {
           if (timedOut) {
-            initPromise.catch(() => { });
-            ri.stop().catch(() => { });
+            initPromise.catch(() => {});
+            ri.stop().catch(() => {});
           }
           throw err;
         }
@@ -543,7 +551,7 @@ export async function spawnModelAgents(
       if (adapterBeforeInit !== adapterAfterInit) {
         console.warn(
           `[ModelAgentSpawner] ${tag} ⚠️  Adapter was SWAPPED during initialize! ` +
-          `${adapterNameBefore} → ${adapterNameAfter}. Re-asserting InMemoryDatabaseAdapter.`,
+            `${adapterNameBefore} → ${adapterNameAfter}. Re-asserting InMemoryDatabaseAdapter.`,
         );
         // Re-register our safe adapter (force override)
         (
@@ -1029,7 +1037,7 @@ async function getOrCreatePlan(
       agentPlans.set(planKey, plan);
       return plan;
     }
-  } catch { }
+  } catch {}
 
   return null;
 }
@@ -1437,7 +1445,7 @@ async function executeBehaviorTick(
 
   try {
     await executeQueuedAction(service, nextAction, gameState, world);
-  } catch { }
+  } catch {}
 
   // If plan is exhausted, clear it so next tick re-plans
   if (plan.actions.length === 0) {

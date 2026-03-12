@@ -3,7 +3,7 @@
  *
  * Single source of truth for all fog-related constants.
  * Imported by SkySystem (fog render target), TerrainShader, WaterSystem,
- * GPUVegetation, and any other system that needs fog parameters.
+ * DissolveMaterial, and any other system that needs fog parameters.
  *
  * FOG TECHNIQUE:
  * The sky dome is rendered to a low-res offscreen texture each frame.

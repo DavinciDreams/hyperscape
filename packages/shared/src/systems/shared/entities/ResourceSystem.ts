@@ -869,14 +869,11 @@ export class ResourceSystem extends SystemBase {
             `[ResourceSystem] Stored resource in map: id="${resource.id}", rid="${rid}", map size=${this.resources.size}${isManifest ? " (manifest)" : ""}`,
           );
         }
-        // Track variant/subtype for tuning (e.g., 'tree_oak')
-        if (resource.type === "tree") {
-          // Build full key: if subType is "normal", key is "tree_normal"
-          const variant = spawnPoint.subType
-            ? `tree_${spawnPoint.subType}`
-            : "tree_normal";
-          this.resourceVariants.set(rid, variant);
-        }
+        // Track variant/subtype for tuning (e.g., 'tree_oak', 'ore_copper')
+        const variant = spawnPoint.subType
+          ? `${resource.type}_${spawnPoint.subType}`
+          : `${resource.type}_normal`;
+        this.resourceVariants.set(rid, variant);
 
         // OSRS-ACCURACY: Initialize fishing spot movement timer
         if (
@@ -974,6 +971,11 @@ export class ResourceSystem extends SystemBase {
           lod1ModelScale: finalScale, // Same scale variation as main model
           // Procgen preset for runtime procedural tree generation
           procgenPreset: this.getProcgenPresetForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          // Model variants for visual variation (hash-picked per instance)
+          modelVariants: this.getModelVariantsForResource(
             resource.type,
             spawnPoint.subType,
           ),
@@ -1120,6 +1122,20 @@ export class ResourceSystem extends SystemBase {
     }
 
     return manifestData.procgenPreset;
+  }
+
+  /**
+   * Get model variants for resource type from manifest.
+   * Returns undefined if not specified (single model or procgen).
+   */
+  private getModelVariantsForResource(
+    type: string,
+    subType?: string,
+  ): string[] | undefined {
+    const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
+    const manifestData = getExternalResource(variantKey);
+    if (!manifestData?.modelVariants?.length) return undefined;
+    return manifestData.modelVariants;
   }
 
   /**
@@ -1605,8 +1621,14 @@ export class ResourceSystem extends SystemBase {
     const currentTick = this.world.currentTick || 0;
 
     // Compute tick-based cycle interval
-    const variant =
-      this.resourceVariants.get(sessionResourceId) || "tree_normal";
+    const variant = this.resourceVariants.get(sessionResourceId);
+    if (!variant) {
+      console.error(
+        `[ResourceSystem] No variant tracked for resource '${resource.id}' (type: ${resource.type}). ` +
+          `Was the resource registered via spawnResources()?`,
+      );
+      return;
+    }
     const tuned = this.getVariantTuning(variant);
 
     // Get best tool tier using unified tool system
@@ -2931,7 +2953,8 @@ export class ResourceSystem extends SystemBase {
    */
   private getResourceDespawnTicks(resourceId: ResourceID): number {
     // Get the variant key (e.g., "tree_oak", "tree_willow")
-    const variantKey = this.resourceVariants.get(resourceId) || "tree_normal";
+    const variantKey = this.resourceVariants.get(resourceId);
+    if (!variantKey) return 0;
 
     // Extract tree type from variant key (e.g., "tree_oak" -> "oak")
     const parts = variantKey.split("_");

@@ -29,14 +29,9 @@ const DEFAULT_TOWN_SIZES = {
 };
 
 const DEFAULT_BIOME_SUITABILITY: Record<string, number> = {
-  plains: 1.0,
-  valley: 0.95,
-  forest: 0.7,
+  forest: 0.8,
   tundra: 0.4,
-  desert: 0.3,
-  swamp: 0.2,
-  mountains: 0.15,
-  lakes: 0.0,
+  canyon: 0.3,
 };
 
 // Factory for creating test configs with minimal boilerplate
@@ -125,8 +120,8 @@ describe("TownSystem Config Loading", () => {
       expect(config.townSizes.hamlet.buildingCount.min).toBe(
         DEFAULT_TOWN_SIZES.hamlet.buildingCount.min,
       );
-      expect(config.biomeSuitability.plains).toBe(
-        DEFAULT_BIOME_SUITABILITY.plains,
+      expect(config.biomeSuitability.forest).toBe(
+        DEFAULT_BIOME_SUITABILITY.forest,
       );
       expect(config.landmarks).toEqual(DEFAULT_LANDMARK_CONFIG);
     });
@@ -164,7 +159,7 @@ describe("TownSystem Config Loading", () => {
                 safeZoneRadius: 90,
               },
             },
-            biomeSuitability: { plains: 0.9, desert: 0.5, swamp: 0.1 },
+            biomeSuitability: { forest: 0.9, canyon: 0.5, tundra: 0.1 },
             landmarks: {
               fencesEnabled: false,
               fenceDensity: 0.25,
@@ -183,10 +178,8 @@ describe("TownSystem Config Loading", () => {
       expect(config.minTownSpacing).toBe(1000);
       expect(config.townSizes.hamlet.buildingCount.min).toBe(4);
       expect(config.townSizes.town.safeZoneRadius).toBe(90);
-      expect(config.biomeSuitability.plains).toBe(0.9);
-      expect(config.biomeSuitability.valley).toBe(
-        DEFAULT_BIOME_SUITABILITY.valley,
-      );
+      expect(config.biomeSuitability.forest).toBe(0.9);
+      expect(config.biomeSuitability.tundra).toBe(0.1);
       expect(config.landmarks.fencesEnabled).toBe(false);
       expect(config.landmarks.lamppostSpacing).toBe(20);
     });

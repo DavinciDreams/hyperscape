@@ -45,8 +45,15 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { chromium, type Browser, type CDPSession, type Page } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type CDPSession,
+  type Page,
+} from "playwright";
 import {
   getRTMPBridge,
   startRTMPBridge,
@@ -105,13 +112,16 @@ const SPECTATOR_PORT = parseInt(process.env.SPECTATOR_PORT || "4180", 10);
 const EXTERNAL_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
 const ENABLED_STREAM_DESTINATIONS = resolveEnabledStreamDestinations(
   process.env.STREAM_ENABLED_DESTINATIONS ||
-  process.env.DUEL_STREAM_DESTINATIONS,
+    process.env.DUEL_STREAM_DESTINATIONS,
 );
 let externalStatusWriteErrored = false;
 
 /** Capture mode: 'cdp' (fast) or 'mediarecorder' (legacy) or 'webcodecs' (holy grail) */
 const STREAM_CAPTURE_HEADLESS = process.env.STREAM_CAPTURE_HEADLESS === "true";
-const DEFAULT_CAPTURE_MODE = "cdp";
+const DEFAULT_CAPTURE_MODE =
+  process.platform === "linux" && !STREAM_CAPTURE_HEADLESS
+    ? "mediarecorder"
+    : "cdp";
 const CAPTURE_MODE = (process.env.STREAM_CAPTURE_MODE?.trim() ||
   DEFAULT_CAPTURE_MODE) as "cdp" | "mediarecorder" | "webcodecs";
 const requestedCaptureChannel =
@@ -126,8 +136,15 @@ const ANGLE_BACKEND =
     ? requestedAngleBackend
     : process.platform === "darwin"
       ? "metal"
-      : "vulkan";
-
+      : "";
+const STREAM_CAPTURE_DISABLE_WEBGPU = /^(1|true|yes|on)$/i.test(
+  process.env.STREAM_CAPTURE_DISABLE_WEBGPU || "",
+);
+if (STREAM_CAPTURE_DISABLE_WEBGPU) {
+  throw new Error(
+    "STREAM_CAPTURE_DISABLE_WEBGPU is not supported. Hyperscape capture is WebGPU-only.",
+  );
+}
 const CDP_QUALITY = Math.min(
   100,
   Math.max(1, parseInt(process.env.STREAM_CDP_QUALITY || "80", 10)),
@@ -147,7 +164,7 @@ const STREAM_CAPTURE_POST_NAV_DELAY_MS = Math.max(
   0,
   Number.parseInt(
     process.env.STREAM_CAPTURE_POST_NAV_DELAY_MS ||
-    (USE_TIMED_STREAM_WARMUP ? "250" : "5000"),
+      (USE_TIMED_STREAM_WARMUP ? "250" : "5000"),
     10,
   ) || 0,
 );
@@ -169,9 +186,11 @@ const VIEWPORT = {
 };
 
 let browser: Browser | null = null;
+let browserContext: BrowserContext | null = null;
 let page: Page | null = null;
 let cdpSession: CDPSession | null = null;
 let selectedGameUrl: string | null = null;
+let persistentUserDataDir: string | null = null;
 let launchTime = Date.now();
 const BROWSER_RESTART_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 Hour
 const CAPTURE_RECOVERY_TIMEOUT_MS = Math.max(
@@ -195,10 +214,6 @@ let cdpFrameCount = 0;
 let cdpFps = 0;
 let cdpFpsIntervalId: ReturnType<typeof setInterval> | null = null;
 let cdpDroppedFrames = 0;
-
-// Frame pacing: enforce minimum inter-frame interval to match TARGET_FPS
-const FRAME_INTERVAL_MS = 1000 / TARGET_FPS; // 33.3ms at 30fps
-let lastFrameTime = 0;
 
 function startFpsTracking() {
   if (cdpFpsIntervalId) clearInterval(cdpFpsIntervalId);
@@ -408,40 +423,67 @@ async function waitForStreamReadiness(
 // ── Browser Launch ─────────────────────────────────────────────────────────
 
 async function launchCaptureBrowser() {
-  // On Linux dual-GPU laptops (Intel iGPU + NVIDIA dGPU), ensure Chrome uses
-  // the discrete NVIDIA GPU for WebGPU.
-  if (process.platform === "linux") {
-    process.env.__NV_PRIME_RENDER_OFFLOAD = "1";
-    process.env.__NV_PRIME_RENDER_OFFLOAD_PROVIDER = "NVIDIA-G0";
-    process.env.__GLX_VENDOR_LIBRARY_NAME = "nvidia";
-    process.env.__VK_LAYER_NV_optimus = "NVIDIA_only";
-    process.env.DRI_PRIME = "1";
-  }
-
-  const featureFlags = "--enable-features=Vulkan,UseSkiaRenderer,WebGPU";
+  const featureFlags = "--enable-features=UseSkiaRenderer,WebGPU";
+  const launchArgs = [
+    // GPU / WebGPU essentials
+    "--use-gl=angle",
+    ...(ANGLE_BACKEND ? [`--use-angle=${ANGLE_BACKEND}`] : []),
+    "--enable-webgl",
+    "--enable-unsafe-webgpu",
+    featureFlags,
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
+    // Sandbox & stability
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-web-security",
+    "--autoplay-policy=no-user-gesture-required",
+    // Prevent Chromium from throttling rendering/timers
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-hang-monitor",
+  ];
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,
-    args: [
-      "--use-gl=angle",
-      `--use-angle=${ANGLE_BACKEND}`,
-      "--enable-webgl",
-      "--enable-unsafe-webgpu",
-      featureFlags,
-      "--ignore-gpu-blocklist",
-      "--enable-gpu-rasterization",
-      // Sandbox & stability
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-web-security",
-      "--autoplay-policy=no-user-gesture-required",
-      // Prevent Chromium from throttling rendering/timers
-      "--disable-background-timer-throttling",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-renderer-backgrounding",
-      "--disable-hang-monitor",
-    ],
+    args: launchArgs,
     ignoreDefaultArgs: ["--enable-unsafe-swiftshader", "--hide-scrollbars"],
   };
+  const usePersistentContext =
+    process.platform === "linux" && STREAM_CAPTURE_HEADLESS === false;
+
+  if (usePersistentContext) {
+    persistentUserDataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "hyperscape-stream-profile-"),
+    );
+    const persistentLaunchConfig = {
+      ...launchConfig,
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+      serviceWorkers: "block" as const,
+      args: [
+        ...launchArgs,
+        `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
+        "--window-position=0,0",
+      ],
+    };
+
+    console.log(
+      "[Main] Launching persistent browser context for visible X11 window capture...",
+    );
+
+    if (STREAM_CAPTURE_CHANNEL) {
+      return await chromium.launchPersistentContext(persistentUserDataDir, {
+        ...persistentLaunchConfig,
+        channel: STREAM_CAPTURE_CHANNEL,
+      });
+    }
+
+    return await chromium.launchPersistentContext(
+      persistentUserDataDir,
+      persistentLaunchConfig,
+    );
+  }
 
   if (STREAM_CAPTURE_CHANNEL) {
     console.log(
@@ -489,24 +531,32 @@ async function launchCaptureBrowser() {
 }
 
 async function setupBrowser() {
-  if (browser) await cleanup();
+  if (browser || browserContext) await cleanup();
 
   const streamReadyTimeoutMs = Math.max(
     10_000,
     Number.parseInt(process.env.STREAM_READY_TIMEOUT_MS || "30000", 10) ||
-    30_000,
+      30_000,
   );
 
   console.log(
     `[Main] Launching browser (headless=${STREAM_CAPTURE_HEADLESS}, angle=${ANGLE_BACKEND}${STREAM_CAPTURE_CHANNEL ? `, channel=${STREAM_CAPTURE_CHANNEL}` : ""}, mode=${CAPTURE_MODE})...`,
   );
-  browser = await launchCaptureBrowser();
-  const context = await browser.newContext({
-    viewport: VIEWPORT,
-    deviceScaleFactor: 1,
-    serviceWorkers: "block",
-  });
-  page = await context.newPage();
+  const launched = await launchCaptureBrowser();
+
+  if ("newPage" in launched && "pages" in launched) {
+    browserContext = launched as BrowserContext;
+    browser = browserContext.browser();
+    page = browserContext.pages()[0] ?? (await browserContext.newPage());
+  } else {
+    browser = launched as Browser;
+    browserContext = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+      serviceWorkers: "block",
+    });
+    page = await browserContext.newPage();
+  }
 
   // Keep compositor frames flowing for CDP screencast even when the scene is
   // visually static (e.g. waiting overlays), otherwise some Chromium builds
@@ -651,7 +701,7 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
 
   startFpsTracking();
 
-  // Handle incoming frames from CDP with frame pacing
+  // Handle incoming frames from CDP
   cdpSession.on("Page.screencastFrame", (params) => {
     void (async () => {
       try {
@@ -663,16 +713,6 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
         } catch {
           // Session may have been destroyed during page navigation
         }
-
-        // Frame pacing: skip frames that arrive faster than the target interval.
-        // This prevents flooding FFmpeg when the compositor runs above TARGET_FPS.
-        const now = performance.now();
-        if (now - lastFrameTime < FRAME_INTERVAL_MS * 0.85) {
-          // Too soon — drop this frame to maintain cadence
-          cdpDroppedFrames++;
-          return;
-        }
-        lastFrameTime = now;
 
         // Decode base64 JPEG and feed to FFmpeg
         const jpegBuffer = Buffer.from(base64Data, "base64");
@@ -691,17 +731,14 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
     })();
   });
 
-  // Start the screencast — capture every compositor frame.
-  // Under Xvfb the compositor runs at the game's native FPS (~30fps), so
-  // everyNthFrame: 1 delivers ~30fps directly. The frame pacing guard above
-  // handles edge cases where the compositor exceeds TARGET_FPS.
+  // Start the screencast
   await withTimeout(
     cdpSession.send("Page.startScreencast", {
       format: "jpeg",
       quality: CDP_QUALITY,
       maxWidth: VIEWPORT.width,
       maxHeight: VIEWPORT.height,
-      everyNthFrame: 1, // Capture every frame; pacing guard handles excess
+      everyNthFrame: 1, // Capture every frame
     }),
     10_000,
     "Page.startScreencast",
@@ -1346,7 +1383,7 @@ async function main() {
   process.on("SIGTERM", shutdown);
 
   // Keep process alive
-  await new Promise(() => { });
+  await new Promise(() => {});
 }
 
 async function cleanup() {
@@ -1367,14 +1404,33 @@ async function cleanup() {
   const bridge = getRTMPBridge();
   bridge.stopProcessing();
 
-  // Force kill any remaining FFmpeg strings so they don't become zombies 
+  // Force kill any remaining FFmpeg strings so they don't become zombies
   // preventing the next RTMP connection stream from working.
   try {
     spawnSync("pkill", ["-9", "ffmpeg"]);
-  } catch { }
+  } catch {}
 
   if (browser) {
-    await browser.close();
+    if (browserContext) {
+      await browserContext.close();
+      browserContext = null;
+      browser = null;
+    } else {
+      await browser.close();
+      browser = null;
+    }
+  } else if (browserContext) {
+    await browserContext.close();
+    browserContext = null;
+  }
+
+  if (persistentUserDataDir) {
+    try {
+      fs.rmSync(persistentUserDataDir, { recursive: true, force: true });
+    } catch {
+      // Ignore temporary profile cleanup failures.
+    }
+    persistentUserDataDir = null;
     browser = null;
   }
 

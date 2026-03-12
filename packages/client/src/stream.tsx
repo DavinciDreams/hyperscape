@@ -71,7 +71,9 @@ if (typeof window !== "undefined") {
   if (envCdn && typeof envCdn === "string" && envCdn !== "undefined") {
     let resolvedCdn = envCdn;
     if (resolvedCdn.includes("127.0.0.1") || resolvedCdn.includes("0.0.0.0")) {
-      resolvedCdn = resolvedCdn.replace("127.0.0.1", "localhost").replace("0.0.0.0", "localhost");
+      resolvedCdn = resolvedCdn
+        .replace("127.0.0.1", "localhost")
+        .replace("0.0.0.0", "localhost");
     }
     windowWithEnv.__CDN_URL = resolvedCdn;
   }
@@ -105,7 +107,9 @@ async function resetLocalStreamingCaches(): Promise<void> {
   }
 
   const searchParams = new URLSearchParams(window.location.search);
-  const isInternalCapture = isTruthyUrlFlag(searchParams.get("internalCapture"));
+  const isInternalCapture = isTruthyUrlFlag(
+    searchParams.get("internalCapture"),
+  );
   const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(
     window.location.hostname,
   );
@@ -125,7 +129,10 @@ async function resetLocalStreamingCaches(): Promise<void> {
         );
       }
     } catch (error) {
-      console.warn("[StreamEntry] Failed to unregister service workers:", error);
+      console.warn(
+        "[StreamEntry] Failed to unregister service workers:",
+        error,
+      );
     }
   }
 

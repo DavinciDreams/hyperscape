@@ -36,6 +36,26 @@ const _sunDirection = new THREE.Vector3(0, -1, 0);
 // - More cascades = better near/far resolution but more draw calls
 // - CSMShadowNode handles texel snapping internally - don't add extra snapping
 //
+// Set ENABLE_CSM=true to use cascaded shadow maps (heavy GPU cost).
+// Default: false — uses a single 2048 shadow map centered on the player.
+export function isCsmEnabled(): boolean {
+  try {
+    if (
+      typeof import.meta !== "undefined" &&
+      (import.meta as any).env?.ENABLE_CSM
+    )
+      return (import.meta as any).env.ENABLE_CSM === "true";
+    if (typeof process !== "undefined" && process.env?.ENABLE_CSM)
+      return process.env.ENABLE_CSM === "true";
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+const SINGLE_SHADOW_MAP_SIZE = 2048;
+const SINGLE_SHADOW_FRUSTUM = 80;
+
 // IMPORTANT: Vegetation fade distances should be <= maxFar so trees don't appear unshadowed
 export const csmLevels = {
   none: {
@@ -929,10 +949,9 @@ export class Environment extends System {
   }
 
   /**
-   * Build directional light (sun/moon) with CSMShadowNode for cascaded shadows
-   * CSMShadowNode handles cascade splitting internally - we just configure it
-   *
-   * Note: WebGPU is required. CSM shadows only work with WebGPU's TSL pipeline.
+   * Build directional light (sun/moon) with optional CSMShadowNode.
+   * When ENABLE_CSM=true: uses cascaded shadow maps (multiple passes, heavy).
+   * When ENABLE_CSM=false (default): uses a single shadow map centered on the player.
    */
   buildSunLight(): void {
     if (!this.isClientWithGraphics) return;
@@ -941,6 +960,7 @@ export class Environment extends System {
     const shadowsLevel = this.world.prefs?.shadows || "med";
     const csmConfig =
       csmLevels[shadowsLevel as keyof typeof csmLevels] || csmLevels.med;
+    const useCSM = isCsmEnabled() && csmConfig.enabled;
 
     if (!this.world.stage?.scene) {
       console.warn(
@@ -972,74 +992,90 @@ export class Environment extends System {
       return;
     }
 
-    // Create directional light for CSM
+    // Create directional light
     this.sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
-    this.sunLight.name = useWebGPU ? "SunLight_CSM" : "SunLight_WebGL";
     this.sunLight.castShadow = true;
 
-    // Shadow map settings (CSMShadowNode will use this as base resolution per cascade)
-    this.sunLight.shadow.mapSize.width = csmConfig.shadowMapSize;
-    this.sunLight.shadow.mapSize.height = csmConfig.shadowMapSize;
-    this.sunLight.shadow.bias = csmConfig.shadowBias;
-    this.sunLight.shadow.normalBias = csmConfig.shadowNormalBias;
+    if (useCSM) {
+      // ---- CSM PATH ----
+      this.sunLight.name = useWebGPU ? "SunLight_CSM" : "SunLight_WebGL";
+      this.sunLight.shadow.mapSize.width = csmConfig.shadowMapSize;
+      this.sunLight.shadow.mapSize.height = csmConfig.shadowMapSize;
+      this.sunLight.shadow.bias = csmConfig.shadowBias;
+      this.sunLight.shadow.normalBias = csmConfig.shadowNormalBias;
 
-    // Shadow camera settings - CSMShadowNode overrides these per-cascade
-    const shadowCam = this.sunLight.shadow.camera;
-    shadowCam.near = 0.5;
-    shadowCam.far = this.LIGHT_DISTANCE + 200; // Light distance + scene depth
-    // Base frustum - CSMShadowNode will manage actual cascade frustums
-    const baseFrustumSize = 100;
-    shadowCam.left = -baseFrustumSize;
-    shadowCam.right = baseFrustumSize;
-    shadowCam.top = baseFrustumSize;
-    shadowCam.bottom = -baseFrustumSize;
-    shadowCam.updateProjectionMatrix();
+      const shadowCam = this.sunLight.shadow.camera;
+      shadowCam.near = 0.5;
+      shadowCam.far = this.LIGHT_DISTANCE + 200;
+      const baseFrustumSize = 100;
+      shadowCam.left = -baseFrustumSize;
+      shadowCam.right = baseFrustumSize;
+      shadowCam.top = baseFrustumSize;
+      shadowCam.bottom = -baseFrustumSize;
+      shadowCam.updateProjectionMatrix();
 
-    // Initial position
-    this.sunLight.position.set(100, 200, 100);
-    this.sunLight.target.position.set(0, 0, 0);
+      this.sunLight.position.set(100, 200, 100);
+      this.sunLight.target.position.set(0, 0, 0);
 
-    // Create CSMShadowNode for cascaded shadows
-    // Light direction is derived from sunLight.position and sunLight.target.position
-    //
-    // Custom split callback biases toward logarithmic for sharper near shadows:
-    // - Higher lambda (0.7-0.9) = more logarithmic = smaller near cascade = sharper near shadows
-    // - Lower lambda (0.3-0.5) = more uniform = larger near cascade = blurrier near shadows
-    const customSplitCallback = (
-      cascades: number,
-      near: number,
-      far: number,
-      breaks: number[],
-    ) => {
-      const lambda = 0.8; // Bias toward logarithmic for better near-cascade resolution
-      for (let i = 1; i < cascades; i++) {
-        const log = (near * Math.pow(far / near, i / cascades)) / far;
-        const uniform = (near + ((far - near) * i) / cascades) / far;
-        breaks.push(lambda * log + (1 - lambda) * uniform);
-      }
-      breaks.push(1);
-    };
+      const customSplitCallback = (
+        cascades: number,
+        near: number,
+        far: number,
+        breaks: number[],
+      ) => {
+        const lambda = 0.8;
+        for (let i = 1; i < cascades; i++) {
+          const log = (near * Math.pow(far / near, i / cascades)) / far;
+          const uniform = (near + ((far - near) * i) / cascades) / far;
+          breaks.push(lambda * log + (1 - lambda) * uniform);
+        }
+        breaks.push(1);
+      };
 
-    this.csmShadowNode = new CSMShadowNode(this.sunLight, {
-      cascades: csmConfig.cascades,
-      maxFar: csmConfig.maxFar,
-      mode: "custom",
-      customSplitsCallback: customSplitCallback,
-      lightMargin: csmConfig.lightMargin, // Prevents shadow "swimming" artifacts
-    });
-    // Avoid pre-assigning camera so CSMShadowNode can initialize internally.
+      this.csmShadowNode = new CSMShadowNode(this.sunLight, {
+        cascades: csmConfig.cascades,
+        maxFar: csmConfig.maxFar,
+        mode: "custom",
+        customSplitsCallback: customSplitCallback,
+        lightMargin: csmConfig.lightMargin,
+      });
+      this.csmShadowNode.fade = true;
 
-    // Enable smooth cascade transitions (prevents hard seams between cascades)
-    this.csmShadowNode.fade = true;
+      const shadow = this.sunLight.shadow as THREE.DirectionalLightShadow & {
+        shadowNode?: InstanceType<typeof CSMShadowNode>;
+      };
+      shadow.shadowNode = this.csmShadowNode;
+      this.needsFrustumUpdate = true;
 
-    const shadow = this.sunLight.shadow as THREE.DirectionalLightShadow & {
-      shadowNode?: InstanceType<typeof CSMShadowNode>;
-    };
-    shadow.shadowNode = this.csmShadowNode;
+      console.log(
+        `[Environment] CSM shadows enabled (${csmConfig.cascades} cascades, ${csmConfig.shadowMapSize}px)`,
+      );
+    } else {
+      // ---- SINGLE SHADOW MAP PATH (default) ----
+      this.sunLight.name = "SunLight_Single";
+      this.sunLight.shadow.mapSize.width = SINGLE_SHADOW_MAP_SIZE;
+      this.sunLight.shadow.mapSize.height = SINGLE_SHADOW_MAP_SIZE;
+      this.sunLight.shadow.bias = 0.0002;
+      this.sunLight.shadow.normalBias = 0.01;
 
-    // Defer frustum initialization until after the first render when the camera is ready.
-    this.needsFrustumUpdate = true;
-    // Add light to scene
+      const shadowCam = this.sunLight.shadow.camera;
+      shadowCam.near = 0.5;
+      shadowCam.far = this.LIGHT_DISTANCE + 200;
+      shadowCam.left = -SINGLE_SHADOW_FRUSTUM;
+      shadowCam.right = SINGLE_SHADOW_FRUSTUM;
+      shadowCam.top = SINGLE_SHADOW_FRUSTUM;
+      shadowCam.bottom = -SINGLE_SHADOW_FRUSTUM;
+      shadowCam.updateProjectionMatrix();
+
+      this.sunLight.position.set(100, 200, 100);
+      this.sunLight.target.position.set(0, 0, 0);
+      this.csmShadowNode = null;
+
+      console.log(
+        `[Environment] Single shadow map (${SINGLE_SHADOW_MAP_SIZE}px, ${SINGLE_SHADOW_FRUSTUM}m frustum)`,
+      );
+    }
+
     scene.add(this.sunLight);
     scene.add(this.sunLight.target);
   }

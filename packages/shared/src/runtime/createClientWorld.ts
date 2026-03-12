@@ -89,6 +89,10 @@ import {
   destroyGLBTreeInstancer,
 } from "../systems/shared/world/GLBTreeInstancer";
 import {
+  initGLBTreeBatchedInstancer,
+  destroyGLBTreeBatchedInstancer,
+} from "../systems/shared/world/GLBTreeBatchedInstancer";
+import {
   initPlaceholderInstancer,
   destroyPlaceholderInstancer,
 } from "../systems/shared/world/PlaceholderInstancer";
@@ -200,6 +204,7 @@ export function createClientWorld() {
 
   // Clean up any previous instancer state from prior world
   destroyGLBTreeInstancer();
+  destroyGLBTreeBatchedInstancer();
   destroyPlaceholderInstancer();
   destroyGLBResourceInstancer();
 
@@ -301,7 +306,7 @@ export function createClientWorld() {
   // ============================================================================
   // Procedural building mesh rendering for towns
   // Must be registered after towns system as it depends on town data
-  world.register("building-rendering", BuildingRenderingSystem);
+  // world.register("building-rendering", BuildingRenderingSystem);
 
   // ============================================================================
   // TOWN LANDMARKS SYSTEM
@@ -363,6 +368,10 @@ export function createClientWorld() {
     if (stageSystem && stageSystem.scene) {
       stageSystem.THREE = THREE as unknown as StageSystem["THREE"];
       initGLBTreeInstancer(stageSystem.scene as unknown as THREE.Scene, world);
+      initGLBTreeBatchedInstancer(
+        stageSystem.scene as unknown as THREE.Scene,
+        world,
+      );
       initPlaceholderInstancer(stageSystem.scene as unknown as THREE.Scene);
       initGLBResourceInstancer(
         stageSystem.scene as unknown as THREE.Scene,
@@ -427,6 +436,15 @@ export function createClientWorld() {
         console.log(
           "[createClientWorld] Skipping tree cache pre-warm and PhysX for stream/spectator viewport",
         );
+        // CRITICAL: We still need to load PhysX even if we skip tree pre-warming!
+        // In stream mode, there is no local player, so PlayerLocal won't trigger the load either.
+        // We trigger it here in the background so colliders and static actors can initialize.
+        waitForPhysX("StreamInitialization", 120000).catch((err) => {
+          console.warn(
+            "[createClientWorld] Background PhysX load failed:",
+            err,
+          );
+        });
       }
 
       // Pre-warm mob/NPC animated impostors AFTER renderer is ready
