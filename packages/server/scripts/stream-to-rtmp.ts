@@ -102,7 +102,12 @@ const CAPTURE_MODE = (process.env.STREAM_CAPTURE_MODE?.trim() || "cdp") as
   | "mediarecorder"
   | "webcodecs";
 const STREAM_CAPTURE_HEADLESS = process.env.STREAM_CAPTURE_HEADLESS === "true";
-const STREAM_CAPTURE_CHANNEL = process.env.STREAM_CAPTURE_CHANNEL?.trim() || "";
+const requestedCaptureChannel =
+  process.env.STREAM_CAPTURE_CHANNEL?.trim() || "";
+const STREAM_CAPTURE_CHANNEL =
+  process.platform === "darwin" && requestedCaptureChannel === "chromium"
+    ? "chrome"
+    : requestedCaptureChannel;
 const ANGLE_BACKEND =
   process.env.STREAM_CAPTURE_ANGLE?.trim() ||
   (process.platform === "darwin" ? "metal" : "vulkan");

@@ -169,6 +169,13 @@ export class ResourceSystem extends SystemBase {
   // Terrain system reference for height lookups
   private terrainSystem: TerrainSystem | null = null;
 
+  /**
+   * When true, batched entity spawn packets use HIGH priority to bypass
+   * per-connection bandwidth throttling. Set to false to revert to NORMAL
+   * priority (may cause sparse entities during rapid tile generation).
+   */
+  useHighPriorityBatch = true;
+
   // ===== FORESTRY-STYLE RESOURCE TIMERS (OSRS-accurate) =====
   /**
    * Per-resource depletion timer for Forestry-style tree mechanics.
@@ -837,7 +844,10 @@ export class ResourceSystem extends SystemBase {
 
     // Get EntityManager for spawning
     const entityManager = this.world.getSystem("entity-manager") as {
-      spawnEntity?: (config: unknown) => Promise<unknown>;
+      spawnEntity?: (
+        config: unknown,
+        options?: { suppressBroadcast?: boolean },
+      ) => Promise<{ id?: string; serialize?: () => unknown } | null>;
     } | null;
     if (!entityManager?.spawnEntity) {
       console.error(
@@ -847,6 +857,7 @@ export class ResourceSystem extends SystemBase {
     }
 
     let spawned = 0;
+    const batchedEntityData: unknown[] = [];
 
     for (const spawnPoint of spawnPoints) {
       try {
@@ -985,11 +996,15 @@ export class ResourceSystem extends SystemBase {
           occupiedTiles,
         };
 
-        const spawnedEntity = (await entityManager.spawnEntity(
-          resourceConfig,
-        )) as { id?: string } | null;
+        // Suppress individual broadcasts; we batch them below
+        const spawnedEntity = await entityManager.spawnEntity(resourceConfig, {
+          suppressBroadcast: true,
+        });
         if (spawnedEntity) {
           spawned++;
+          if (typeof spawnedEntity.serialize === "function") {
+            batchedEntityData.push(spawnedEntity.serialize());
+          }
         }
       } catch (err) {
         console.error(
@@ -999,9 +1014,29 @@ export class ResourceSystem extends SystemBase {
       }
     }
 
+    // Send all entities for this tile as a single batch packet to avoid
+    // per-entity bandwidth-budget drops during rapid tile generation.
+    // useHighPriorityBatch controls whether HIGH or NORMAL priority is used.
+    if (batchedEntityData.length > 0 && this.world.isServer) {
+      const network = this.world.network as {
+        sendHighPriority?: (name: string, data: unknown) => void;
+        send?: (name: string, data: unknown) => void;
+      } | null;
+      if (network) {
+        if (
+          this.useHighPriorityBatch &&
+          typeof network.sendHighPriority === "function"
+        ) {
+          network.sendHighPriority("entitiesBatchAdded", batchedEntityData);
+        } else if (typeof network.send === "function") {
+          network.send("entitiesBatchAdded", batchedEntityData);
+        }
+      }
+    }
+
     if (spawned > 0) {
       console.log(
-        `[ResourceSystem] Spawned ${spawned}/${spawnPoints.length} resource entities${isManifest ? " (manifest)" : ""}`,
+        `[ResourceSystem] Spawned ${spawned}/${spawnPoints.length} resource entities (batch packet: ${batchedEntityData.length})${isManifest ? " (manifest)" : ""}`,
       );
     }
   }
@@ -1240,12 +1275,18 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Handle terrain tile unloading - remove resources from unloaded tiles
-   * Note: Manifest resources (from world-areas.json) are protected and never deleted
+   * Handle terrain tile unloading - remove resources from unloaded tiles.
+   * Destroys the backing EntityManager entities so they don't leak and can be
+   * re-broadcast when the tile is loaded again later.
+   * Note: Manifest resources (from world-areas.json) are protected and never deleted.
    */
   private onTerrainTileUnloaded(data: { tileId: string }): void {
     // Extract tileX and tileZ from tileId (format: "x,z")
     const [tileX, tileZ] = data.tileId.split(",").map(Number);
+
+    const entityManager = this.world.getSystem("entity-manager") as {
+      destroyEntity?: (id: string) => boolean;
+    } | null;
 
     // Remove resources that belong to this tile (but not manifest resources)
     for (const [resourceId, resource] of this.resources) {
@@ -1259,6 +1300,14 @@ export class ResourceSystem extends SystemBase {
       const resourceTileZ = Math.floor(resource.position.z / 100);
 
       if (resourceTileX === tileX && resourceTileZ === tileZ) {
+        // Destroy the entity in EntityManager so it's removed from the
+        // entities map and broadcast as entityRemoved to clients. Without
+        // this, the entity lingers and the duplicate-ID check in
+        // spawnEntity prevents it from being re-created on tile revisit.
+        if (entityManager?.destroyEntity) {
+          entityManager.destroyEntity(resource.id);
+        }
+
         this.resources.delete(resourceId);
 
         // Clean up any active gathering on this resource

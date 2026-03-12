@@ -72,11 +72,11 @@ export class Socket {
     // If ws is unexpectedly undefined, install a minimal no-op stub to prevent hard crashes
     if (!this.ws) {
       this.ws = {
-        on: () => { },
-        ping: () => { },
-        terminate: () => { },
-        send: () => { },
-        close: () => { },
+        on: () => {},
+        ping: () => {},
+        terminate: () => {},
+        send: () => {},
+        close: () => {},
       } as unknown as NodeWebSocket;
     }
 

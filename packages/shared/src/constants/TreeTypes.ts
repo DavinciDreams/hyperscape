@@ -4,91 +4,93 @@
  * All tree type definitions live here. Every other file that needs tree type
  * information imports from this module instead of defining its own copy.
  *
- * To add a new tree type: add an entry to TREE_TYPES below.
- * To rename a tree type: change the key and update the manifest ID accordingly.
- * To remove a tree type: delete the entry.
+ * To add a new tree type: add an entry to TREE_TYPES and TreeId below.
+ * To rename a tree type: change the key/enum and update the manifest ID.
+ * To remove a tree type: delete the entry from both.
  *
- * The manifest (woodcutting.json) must have a matching "id": "tree_<key>" entry
- * for each tree type listed here. The manifest holds runtime data (drops, XP,
- * model paths) while this file holds the structural/gameplay config.
+ * The manifest (woodcutting.json) must have a matching "id" entry that equals
+ * the TreeId enum value for each tree type listed here.
+ *
+ * Per-biome tree configs (distribution, placement, density) live in
+ * TerrainBiomeTypes.ts alongside the BiomeType enum.
  */
+
+/**
+ * Enum of all tree IDs — values match the manifest resource IDs.
+ * Use this instead of hardcoded "tree_xxx" strings everywhere.
+ */
+export enum TreeId {
+  Fir = "tree_fir",
+  Pine = "tree_pine",
+  Oak = "tree_oak",
+  Birch = "tree_birch",
+  Bamboo = "tree_bamboo",
+  ChinaPine = "tree_chinaPine",
+  Maple = "tree_maple",
+  Coconut = "tree_coconut",
+  Palm = "tree_palm",
+  Dead = "tree_dead",
+  Cactus = "tree_cactus",
+  Knotwood = "tree_knotwood",
+  WindPine = "tree_windPine",
+}
+
+/** Extract the subtype key from a TreeId (e.g. TreeId.Oak → "oak") */
+export function treeIdToSubType(id: string): string {
+  return id.replace("tree_", "");
+}
+
+/** Landscape placement rules for a tree type within a biome. */
+export interface TreePlacementRules {
+  /**
+   * How strongly this tree prefers water-adjacent placement (0–1).
+   * 0 = no preference, 1 = only spawns near water.
+   * At intermediate values, spawn probability scales with water proximity.
+   */
+  waterAffinity?: number;
+  /** If waterAffinity > 0, the max height above water to consider "near water" */
+  waterProximityHeight?: number;
+  /** Reject placement if position is below this height above water threshold */
+  avoidsWaterBelow?: number;
+  /** Minimum terrain height for spawning (world units) */
+  minHeight?: number;
+  /** Maximum terrain height for spawning (world units) */
+  maxHeight?: number;
+}
+
+/** Spawn weight + placement rules combined — used in per-biome tree configs. */
+export interface TreeSpawnConfig extends TreePlacementRules {
+  /** Relative spawn weight (higher = more likely). */
+  weight: number;
+}
 
 export interface TreeTypeDefinition {
   /** Display name shown in UI (e.g., "Oak Tree") */
   name: string;
   /** Woodcutting level required to chop */
   levelRequired: number;
-  /** Spawn weight in default biome (0 = doesn't spawn by default) */
-  spawnWeight: number;
 }
 
 /**
  * Master tree type registry.
  *
- * Keys are subtypes (e.g., "oak"). The manifest ID is "tree_<key>".
- * Add, rename, or remove entries here — everything else derives from this.
+ * Keys are subtypes (e.g., "oak"). Placement rules live in per-biome configs
+ * in TerrainBiomeTypes.ts.
  */
 export const TREE_TYPES = {
-  fir: {
-    name: "Fir Tree",
-    levelRequired: 1,
-    spawnWeight: 10,
-  },
-  pine: {
-    name: "Pine Tree",
-    levelRequired: 1,
-    spawnWeight: 10,
-  },
-  oak: {
-    name: "Oak Tree",
-    levelRequired: 15,
-    spawnWeight: 10,
-  },
-  birch: {
-    name: "Birch Tree",
-    levelRequired: 1,
-    spawnWeight: 10,
-  },
-  bamboo: {
-    name: "Bamboo Tree",
-    levelRequired: 1,
-    spawnWeight: 10,
-  },
-  chinaPine: {
-    name: "China Pine",
-    levelRequired: 1,
-    spawnWeight: 10,
-  },
-  maple: {
-    name: "Maple Tree",
-    levelRequired: 45,
-    spawnWeight: 10,
-  },
-  coconut: {
-    name: "Coconut Palm",
-    levelRequired: 1,
-    spawnWeight: 10,
-  },
-  palm: {
-    name: "Desert Palm",
-    levelRequired: 1,
-    spawnWeight: 10,
-  },
-  dead: {
-    name: "Dead Tree",
-    levelRequired: 1,
-    spawnWeight: 10,
-  },
-  cactus: {
-    name: "Cactus",
-    levelRequired: 1,
-    spawnWeight: 10,
-  },
-  knotwood: {
-    name: "Knotwood Tree",
-    levelRequired: 1,
-    spawnWeight: 80,
-  },
+  fir: { name: "Fir Tree", levelRequired: 1 },
+  pine: { name: "Pine Tree", levelRequired: 1 },
+  oak: { name: "Oak Tree", levelRequired: 15 },
+  birch: { name: "Birch Tree", levelRequired: 1 },
+  bamboo: { name: "Bamboo Tree", levelRequired: 1 },
+  chinaPine: { name: "China Pine", levelRequired: 1 },
+  maple: { name: "Maple Tree", levelRequired: 45 },
+  coconut: { name: "Coconut Palm", levelRequired: 1 },
+  palm: { name: "Desert Palm", levelRequired: 1 },
+  dead: { name: "Dead Tree", levelRequired: 1 },
+  cactus: { name: "Cactus", levelRequired: 1 },
+  knotwood: { name: "Knotwood Tree", levelRequired: 1 },
+  windPine: { name: "Wind Pine", levelRequired: 1 },
 } as const satisfies Record<string, TreeTypeDefinition>;
 
 /** All valid tree subtype keys (e.g., "oak", "willow") */
@@ -106,19 +108,4 @@ export function getTreeLevelRequired(subType: string): number {
     (TREE_TYPES as Record<string, TreeTypeDefinition>)[subType]
       ?.levelRequired ?? 1
   );
-}
-
-/**
- * Build the spawn distribution map for BiomeTreeConfig.
- * Only includes types with spawnWeight > 0.
- * Keys are "tree_<subType>" to match manifest IDs.
- */
-export function getDefaultTreeDistribution(): Record<string, number> {
-  const distribution: Record<string, number> = {};
-  for (const [key, def] of Object.entries(TREE_TYPES)) {
-    if (def.spawnWeight > 0) {
-      distribution[`tree_${key}`] = def.spawnWeight;
-    }
-  }
-  return distribution;
 }

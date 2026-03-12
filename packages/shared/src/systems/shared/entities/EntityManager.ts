@@ -628,7 +628,10 @@ export class EntityManager extends SystemBase {
     }
   }
 
-  async spawnEntity(config: EntityConfig): Promise<Entity | null> {
+  async spawnEntity(
+    config: EntityConfig,
+    options?: { suppressBroadcast?: boolean },
+  ): Promise<Entity | null> {
     // CRITICAL: Only server should spawn entities
     // Clients receive entities via snapshot/network sync
     if (!this.world.isServer) {
@@ -766,8 +769,10 @@ export class EntityManager extends SystemBase {
     }
 
     // Broadcast entityAdded to all clients (server-only)
-    // Single broadcast point to prevent duplicate packets
-    if (this.world.isServer) {
+    // Single broadcast point to prevent duplicate packets.
+    // When suppressBroadcast is true, the caller is responsible for batching
+    // and sending entities (e.g. ResourceSystem batches per-tile).
+    if (this.world.isServer && !options?.suppressBroadcast) {
       const network = this.world.network;
       if (network && typeof network.send === "function") {
         try {
