@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventType } from "../../../../types/events/event-types";
 import { ContextMenuController } from "../ContextMenuController";
 import { MobInteractionHandler } from "../handlers/MobInteractionHandler";
@@ -147,34 +147,83 @@ describe("Mob right-click attack flow", () => {
       observedDetails.push(custom.detail);
     };
 
-    window.addEventListener("contextmenu", onContextMenu);
+    // Mock window for this test — wrapped in try/finally to guarantee
+    // restoration even if assertions throw mid-test.
+    const originalWindow = globalThis.window;
+    const originalCustomEvent = globalThis.CustomEvent;
+    const listeners = new Map<string, Function[]>();
 
-    const target = createMobTarget(12);
-    const actions: ContextMenuAction[] = [
-      {
-        id: "attack",
-        label: "Attack Goblin (Level: 2)",
-        enabled: true,
-        priority: 1,
-        handler: attackHandler,
-      },
-    ];
-
-    controller.showMenu(target, actions, 240, 180);
-    expect(observedDetails.length).toBe(1);
-
-    window.dispatchEvent(
-      new CustomEvent("contextmenu:select", {
-        detail: {
-          actionId: "attack",
-          targetId: "mob-goblin-1",
-        },
+    globalThis.window = {
+      addEventListener: vi.fn((type: string, handler: Function) => {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type)!.push(handler);
       }),
-    );
+      removeEventListener: vi.fn((type: string, handler: Function) => {
+        if (listeners.has(type)) {
+          listeners.set(
+            type,
+            listeners.get(type)!.filter((h) => h !== handler),
+          );
+        }
+      }),
+      dispatchEvent: vi.fn((event: Event) => {
+        const type = event.type;
+        if (listeners.has(type)) {
+          // slice to avoid mutation issues during iteration
+          listeners
+            .get(type)!
+            .slice()
+            .forEach((h) => h(event));
+        }
+        return true;
+      }),
+    } as unknown as typeof globalThis.window;
 
-    expect(attackHandler).toHaveBeenCalledTimes(1);
+    // Define CustomEvent if it doesn't exist
+    if (typeof globalThis.CustomEvent === "undefined") {
+      globalThis.CustomEvent = class CustomEvent extends Event {
+        public detail: unknown;
+        constructor(type: string, options?: any) {
+          super(type, options);
+          this.detail = options?.detail;
+        }
+      } as typeof globalThis.CustomEvent;
+    }
 
-    controller.destroy();
-    window.removeEventListener("contextmenu", onContextMenu);
+    try {
+      window.addEventListener("contextmenu", onContextMenu);
+
+      const target = createMobTarget(12);
+      const actions: ContextMenuAction[] = [
+        {
+          id: "attack",
+          label: "Attack Goblin (Level: 2)",
+          enabled: true,
+          priority: 1,
+          handler: attackHandler,
+        },
+      ];
+
+      controller.showMenu(target, actions, 240, 180);
+      expect(observedDetails.length).toBe(1);
+
+      window.dispatchEvent(
+        new CustomEvent("contextmenu:select", {
+          detail: {
+            actionId: "attack",
+            targetId: "mob-goblin-1",
+          },
+        }) as Event,
+      );
+
+      expect(attackHandler).toHaveBeenCalledTimes(1);
+
+      controller.destroy();
+      window.removeEventListener("contextmenu", onContextMenu);
+    } finally {
+      // Always restore globalThis.window and CustomEvent
+      globalThis.window = originalWindow;
+      globalThis.CustomEvent = originalCustomEvent;
+    }
   });
 });

@@ -793,18 +793,39 @@ export class DuelArenaOraclePublisher {
         updatedAt: nowIso(),
       });
     } catch (error) {
+      let errorMessage = error instanceof Error ? error.message : String(error);
+
+      if (error && typeof error === "object" && "logs" in error) {
+        const logs = (error as any).logs;
+        if (Array.isArray(logs)) {
+          errorMessage = errorMessage
+            .replace(
+              /Catch the `SendTransactionError` and call `getLogs\(\)` on it for full details\./g,
+              "",
+            )
+            .trim();
+
+          const logsStr = logs.join("\n  ");
+          errorMessage = `${errorMessage}\nTransaction Logs:\n  ${logsStr}`;
+
+          if (logsStr.includes("insufficient lamports")) {
+            errorMessage = `Insufficient SOL to pay for transaction rent or fees.\n${errorMessage}`;
+          }
+        }
+      }
+
       this.updateChainState(record.duelId, target.key, {
         target: target.key,
         kind: target instanceof EvmOracleTarget ? "evm" : "solana",
         label: target.label,
         lastAction: action,
         lastTxHash: null,
-        lastError: error instanceof Error ? error.message : String(error),
+        lastError: errorMessage,
         updatedAt: nowIso(),
       });
       Logger.warn(
         "DuelArenaOraclePublisher",
-        `Failed oracle publish on ${target.label} (${action}) for ${record.duelId}: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed oracle publish on ${target.label} (${action}) for ${record.duelId}: ${errorMessage}`,
       );
     }
   }

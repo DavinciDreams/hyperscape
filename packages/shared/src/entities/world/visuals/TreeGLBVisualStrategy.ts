@@ -46,7 +46,13 @@ function createCollisionProxy(
     ? getBatchedDimensions(ctx.id)
     : getInstancedDimensions(ctx.id);
   const height = (dims?.height ?? 8) * scale;
-  const radius = (dims?.radius ?? 1) * scale;
+  const fullRadius = (dims?.radius ?? 1) * scale;
+  // TUNING: Collision proxy uses 40% of the full bounding radius so the
+  // clickable cylinder covers the trunk and inner canopy without catching
+  // clicks on empty air around branch tips. The 0.3 floor prevents very
+  // small trees (e.g. seedlings at scale ~1) from becoming un-clickable.
+  // Tested across Normal, Oak, Willow, Birch, Bamboo, and Yew tree types.
+  const radius = Math.max(fullRadius * 0.4, 0.3);
   const geometry = new THREE.CylinderGeometry(radius, radius, height, 6);
   const material = new MeshBasicNodeMaterial();
   material.visible = false;

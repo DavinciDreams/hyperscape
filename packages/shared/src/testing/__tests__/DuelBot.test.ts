@@ -5,61 +5,54 @@
  * Uses mocked network for unit-level testing.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 import { EventEmitter } from "events";
 
-const { createNodeClientWorldMock, sendMock, networkState } = vi.hoisted(() => {
-  const networkState = {
+// State used to control the mocked world connection
+const __testState = {
+  networkState: {
     connected: true,
     id: "test-player-123" as string | null,
-  };
-  const sendMock = vi.fn();
-  const onMock = vi.fn();
-  const worldOnMock = vi.fn();
-  const initMock = vi.fn().mockResolvedValue(undefined);
-  const destroyMock = vi.fn();
-  const createNodeClientWorldMock = vi.fn(() => {
-    const networkSystem = {
-      get connected() {
-        return networkState.connected;
-      },
-      get id() {
-        return networkState.id;
-      },
-      send: sendMock,
-      on: onMock,
-    };
+  },
+  sendMock: vi.fn(),
+  onMock: vi.fn(),
+  worldOnMock: vi.fn(),
+  initMock: vi.fn().mockResolvedValue(undefined),
+  destroyMock: vi.fn(),
+};
 
-    return {
-      init: initMock,
-      destroy: destroyMock,
-      getSystem: vi.fn().mockImplementation((name: string) => {
-        if (name === "network") return networkSystem;
-        return null;
-      }),
-      entities: {
-        player: {
-          node: { position: { x: 10, y: 5, z: 20 } },
-        },
-      },
-      on: worldOnMock,
-    };
-  });
+import * as worldModule from "../../runtime/createNodeClientWorld";
+
+// Use vi.spyOn to prevent var hoisting bugs in older Bun versions
+vi.spyOn(worldModule, "createNodeClientWorld").mockImplementation(() => {
+  const networkSystem = {
+    get connected() {
+      return __testState.networkState.connected;
+    },
+    get id() {
+      return __testState.networkState.id;
+    },
+    send: __testState.sendMock,
+    on: __testState.onMock,
+  };
 
   return {
-    createNodeClientWorldMock,
-    initMock,
-    destroyMock,
-    sendMock,
-    onMock,
-    worldOnMock,
-    networkState,
-  };
+    init: __testState.initMock,
+    destroy: __testState.destroyMock,
+    getSystem: vi.fn().mockImplementation((name: string) => {
+      if (name === "network") return networkSystem;
+      return null;
+    }),
+    entities: {
+      player: {
+        node: { position: { x: 10, y: 5, z: 20 } },
+      },
+    },
+    on: __testState.worldOnMock,
+  } as any;
 });
 
-vi.mock("../../runtime/createNodeClientWorld", () => ({
-  createNodeClientWorld: createNodeClientWorldMock,
-}));
+const { networkState, sendMock } = __testState;
 
 // Import after mocking
 import { DuelBot, type DuelBotConfig } from "../DuelBot";

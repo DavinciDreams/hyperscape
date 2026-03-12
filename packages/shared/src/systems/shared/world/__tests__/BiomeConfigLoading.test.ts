@@ -42,12 +42,15 @@ describe("Biome Configuration Loading", () => {
       console.warn(
         `Biomes manifest not found, using minimal mock. Error: ${e}`,
       );
+      // Fallback partial BiomeData stubs — only used when biomes.json isn't
+      // available (e.g. CI without server assets). Casts to `as any` are
+      // intentional since these stubs omit fields irrelevant to config tests.
       const mockBiomes: Array<BiomeData> = [
         {
           id: "tundra",
           name: "Tundra",
-          difficultyLevel: 0,
-          terrain: BiomeType.Tundra as any,
+          difficultyLevel: 3,
+          terrain: "frozen" as any,
           vegetation: {
             enabled: true,
             layers: [
@@ -57,12 +60,12 @@ describe("Biome Configuration Loading", () => {
           } as any,
           grass: { enabled: true, densityMultiplier: 1.0 },
           colorScheme: {} as any,
-        },
+        } as any,
         {
           id: "forest",
           name: "Forest",
           difficultyLevel: 1,
-          terrain: BiomeType.Forest as any,
+          terrain: "forest" as any,
           vegetation: {
             enabled: true,
             layers: [
@@ -72,14 +75,14 @@ describe("Biome Configuration Loading", () => {
           } as any,
           grass: { enabled: true, densityMultiplier: 1.0 },
           colorScheme: {} as any,
-        },
+        } as any,
         {
           id: "canyon",
           name: "Canyon",
           difficultyLevel: 2,
-          terrain: BiomeType.Canyon as any,
+          terrain: "mountains" as any,
           colorScheme: {} as any,
-        },
+        } as any,
       ];
       for (const biome of mockBiomes) {
         BIOMES[biome.id] = biome;
@@ -95,9 +98,9 @@ describe("Biome Configuration Loading", () => {
 
     it("contains expected biome IDs", () => {
       // These should exist based on biomes.json
-      expect(BIOMES.plains).toBeDefined();
+      expect(BIOMES.tundra).toBeDefined();
       expect(BIOMES.forest).toBeDefined();
-      expect(BIOMES.mountains).toBeDefined();
+      expect(BIOMES.canyon).toBeDefined();
     });
   });
 
@@ -131,12 +134,12 @@ describe("Biome Configuration Loading", () => {
   });
 
   describe("Vegetation configuration", () => {
-    it("plains biome has vegetation config", () => {
-      const plains = BIOMES.plains;
-      expect(plains).toBeDefined();
-      expect(plains.vegetation).toBeDefined();
-      expect(plains.vegetation.enabled).toBeDefined();
-      expect(Array.isArray(plains.vegetation.layers)).toBe(true);
+    it("tundra biome has vegetation config", () => {
+      const tundra = BIOMES.tundra;
+      expect(tundra).toBeDefined();
+      expect(tundra.vegetation).toBeDefined();
+      expect(tundra.vegetation!.enabled).toBeDefined();
+      expect(Array.isArray(tundra.vegetation!.layers)).toBe(true);
     });
 
     it("vegetation layers have required fields", () => {
@@ -156,23 +159,23 @@ describe("Biome Configuration Loading", () => {
       }
     });
 
-    it("forest has higher tree density than plains", () => {
-      const plains = BIOMES.plains;
+    it("forest has higher tree density than tundra", () => {
+      const tundra = BIOMES.tundra;
       const forest = BIOMES.forest;
 
-      expect(plains.vegetation?.layers).toBeDefined();
+      expect(tundra.vegetation?.layers).toBeDefined();
       expect(forest.vegetation?.layers).toBeDefined();
 
-      const plainsTreeLayer = plains.vegetation?.layers?.find(
+      const tundraTreeLayer = tundra.vegetation?.layers?.find(
         (l) => l.category === "tree",
       );
       const forestTreeLayer = forest.vegetation?.layers?.find(
         (l) => l.category === "tree",
       );
 
-      if (plainsTreeLayer && forestTreeLayer) {
+      if (tundraTreeLayer && forestTreeLayer) {
         expect(forestTreeLayer.density).toBeGreaterThan(
-          plainsTreeLayer.density,
+          tundraTreeLayer.density,
         );
       }
     });
@@ -232,12 +235,12 @@ describe("Biome Configuration Loading", () => {
   });
 
   describe("Biome difficulty progression", () => {
-    it("mountains has higher difficulty than plains", () => {
-      const plains = BIOMES.plains;
-      const mountains = BIOMES.mountains;
+    it("canyon has higher difficulty than forest", () => {
+      const forest = BIOMES.forest;
+      const canyon = BIOMES.canyon;
 
-      expect(mountains.difficultyLevel).toBeGreaterThanOrEqual(
-        plains.difficultyLevel,
+      expect(canyon.difficultyLevel).toBeGreaterThanOrEqual(
+        forest.difficultyLevel,
       );
     });
   });

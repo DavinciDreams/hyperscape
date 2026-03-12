@@ -434,9 +434,9 @@ describe("BiomeResourceGenerator", () => {
     const plainsConfig = {
       trees: {
         enabled: true,
-        distribution: {
-          tree_normal: 0.85,
-          tree_oak: 0.15,
+        trees: {
+          tree_normal: { weight: 0.85 },
+          tree_oak: { weight: 0.15 },
         },
         density: 3,
         minSpacing: 12,
@@ -458,9 +458,9 @@ describe("BiomeResourceGenerator", () => {
     const tundraConfig = {
       trees: {
         enabled: true,
-        distribution: {
-          tree_yew: 0.4,
-          tree_magic: 0.6,
+        trees: {
+          tree_yew: { weight: 0.4 },
+          tree_magic: { weight: 0.6 },
         },
         density: 0.5,
         minSpacing: 30,

@@ -190,11 +190,10 @@ describe("GravestoneLootSystem", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    ITEMS.clear();
-    registerStackableItem("coins");
-    registerStackableItem("lobster");
-    registerNonStackableItem("bronze_shortsword");
-    registerNonStackableItem("iron_shield");
+    registerStackableItem("grave_coins");
+    registerStackableItem("grave_lobster");
+    registerNonStackableItem("grave_bronze_shortsword");
+    registerNonStackableItem("grave_iron_shield");
 
     world = createMockWorld(true);
     system = new GravestoneLootSystem(world as never);
@@ -219,7 +218,7 @@ describe("GravestoneLootSystem", () => {
   describe("single item loot", () => {
     it("owner loots item successfully", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("bronze_shortsword", 1),
+        createTestItem("grave_bronze_shortsword", 1),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -231,7 +230,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "bronze_shortsword",
+        itemId: "grave_bronze_shortsword",
         quantity: 1,
       });
       await tick();
@@ -242,7 +241,7 @@ describe("GravestoneLootSystem", () => {
         expect.objectContaining({
           playerId: "player_1",
           item: expect.objectContaining({
-            itemId: "bronze_shortsword",
+            itemId: "grave_bronze_shortsword",
             quantity: 1,
           }),
         }),
@@ -267,14 +266,14 @@ describe("GravestoneLootSystem", () => {
 
     it("non-owner is blocked from looting", async () => {
       const grave = createMockGravestone("grave_1", "owner_1", [
-        createTestItem("bronze_shortsword", 1),
+        createTestItem("grave_bronze_shortsword", 1),
       ]);
       world.entities.set("grave_1", grave);
 
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "stranger",
-        itemId: "bronze_shortsword",
+        itemId: "grave_bronze_shortsword",
         quantity: 1,
       });
       await tick();
@@ -311,7 +310,7 @@ describe("GravestoneLootSystem", () => {
 
     it("inventory full with non-stackable item returns INVENTORY_FULL", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("bronze_shortsword", 1),
+        createTestItem("grave_bronze_shortsword", 1),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -325,7 +324,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "bronze_shortsword",
+        itemId: "grave_bronze_shortsword",
         quantity: 1,
       });
       await tick();
@@ -348,14 +347,14 @@ describe("GravestoneLootSystem", () => {
 
     it("inventory full + stackable item with existing stack succeeds", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("coins", 50),
+        createTestItem("grave_coins", 50),
       ]);
       world.entities.set("grave_1", grave);
 
       // 28 items, one is coins (stackable)
       const fullInv = [
         ...Array.from({ length: 27 }, (_, i) => ({ itemId: `filler_${i}` })),
-        { itemId: "coins" },
+        { itemId: "grave_coins" },
       ];
       const inv = createMockInventorySystem(new Map([["player_1", fullInv]]));
       world.getSystem.mockReturnValue(inv);
@@ -363,7 +362,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "coins",
+        itemId: "grave_coins",
         quantity: 50,
       });
       await tick();
@@ -377,7 +376,7 @@ describe("GravestoneLootSystem", () => {
 
     it("inventory full + stackable item without existing stack fails", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("coins", 50),
+        createTestItem("grave_coins", 50),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -391,7 +390,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "coins",
+        itemId: "grave_coins",
         quantity: 50,
       });
       await tick();
@@ -405,7 +404,7 @@ describe("GravestoneLootSystem", () => {
 
     it("partial stack loot deducts correct quantity", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("lobster", 10),
+        createTestItem("grave_lobster", 10),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -415,12 +414,12 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "lobster",
+        itemId: "grave_lobster",
         quantity: 3,
       });
       await tick();
 
-      expect(grave.removeItem).toHaveBeenCalledWith("lobster", 3);
+      expect(grave.removeItem).toHaveBeenCalledWith("grave_lobster", 3);
       expect(world.emit).toHaveBeenCalledWith(
         EventType.INVENTORY_ITEM_ADDED,
         expect.objectContaining({
@@ -431,7 +430,7 @@ describe("GravestoneLootSystem", () => {
 
     it("clamps quantity to available amount", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("lobster", 5),
+        createTestItem("grave_lobster", 5),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -442,17 +441,17 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "lobster",
+        itemId: "grave_lobster",
         quantity: 100,
       });
       await tick();
 
-      expect(grave.removeItem).toHaveBeenCalledWith("lobster", 5);
+      expect(grave.removeItem).toHaveBeenCalledWith("grave_lobster", 5);
     });
 
     it("dead player is blocked from looting", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("bronze_shortsword", 1),
+        createTestItem("grave_bronze_shortsword", 1),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -463,7 +462,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "bronze_shortsword",
+        itemId: "grave_bronze_shortsword",
         quantity: 1,
       });
       await tick();
@@ -479,7 +478,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "nonexistent",
         playerId: "player_1",
-        itemId: "bronze_shortsword",
+        itemId: "grave_bronze_shortsword",
         quantity: 1,
       });
       await tick();
@@ -496,8 +495,8 @@ describe("GravestoneLootSystem", () => {
   describe("loot all", () => {
     it("loots all items into empty inventory", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("bronze_shortsword", 1, 0),
-        createTestItem("coins", 100, 1),
+        createTestItem("grave_bronze_shortsword", 1, 0),
+        createTestItem("grave_coins", 100, 1),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -519,8 +518,8 @@ describe("GravestoneLootSystem", () => {
         expect.objectContaining({
           action: "LOOT_ALL_SUCCESS",
           items: expect.arrayContaining([
-            expect.objectContaining({ itemId: "bronze_shortsword" }),
-            expect.objectContaining({ itemId: "coins" }),
+            expect.objectContaining({ itemId: "grave_bronze_shortsword" }),
+            expect.objectContaining({ itemId: "grave_coins" }),
           ]),
         }),
       );
@@ -528,8 +527,8 @@ describe("GravestoneLootSystem", () => {
 
     it("stops when inventory full (non-stackable items)", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("bronze_shortsword", 1, 0),
-        createTestItem("iron_shield", 1, 1),
+        createTestItem("grave_bronze_shortsword", 1, 0),
+        createTestItem("grave_iron_shield", 1, 1),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -550,21 +549,24 @@ describe("GravestoneLootSystem", () => {
 
       // Only first item fits (pre-calculation: 27 used, 1 slot available)
       expect(grave.removeItem).toHaveBeenCalledTimes(1);
-      expect(grave.removeItem).toHaveBeenCalledWith("bronze_shortsword", 1);
+      expect(grave.removeItem).toHaveBeenCalledWith(
+        "grave_bronze_shortsword",
+        1,
+      );
     });
 
     it("stackable items don't consume new slots when stacking", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("coins", 50, 0),
-        createTestItem("lobster", 5, 1),
+        createTestItem("grave_coins", 50, 0),
+        createTestItem("grave_lobster", 5, 1),
       ]);
       world.entities.set("grave_1", grave);
 
       // 28 slots used, but has coins and lobster already
       const fullInv = [
         ...Array.from({ length: 26 }, (_, i) => ({ itemId: `filler_${i}` })),
-        { itemId: "coins" },
-        { itemId: "lobster" },
+        { itemId: "grave_coins" },
+        { itemId: "grave_lobster" },
       ];
       const inv = createMockInventorySystem(new Map([["player_1", fullInv]]));
       world.getSystem.mockReturnValue(inv);
@@ -608,8 +610,8 @@ describe("GravestoneLootSystem", () => {
   describe("rate limiting", () => {
     it("rejects requests within 100ms window", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("bronze_shortsword", 1),
-        createTestItem("coins", 100),
+        createTestItem("grave_bronze_shortsword", 1),
+        createTestItem("grave_coins", 100),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -620,7 +622,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "bronze_shortsword",
+        itemId: "grave_bronze_shortsword",
         quantity: 1,
       });
 
@@ -628,7 +630,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "coins",
+        itemId: "grave_coins",
         quantity: 100,
       });
       await tick();
@@ -748,8 +750,8 @@ describe("GravestoneLootSystem", () => {
       const callOrder: string[] = [];
 
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("bronze_shortsword", 1, 0),
-        createTestItem("coins", 100, 1),
+        createTestItem("grave_bronze_shortsword", 1, 0),
+        createTestItem("grave_coins", 100, 1),
       ]);
       // Track removeItem call order
       grave.removeItem.mockImplementation((itemId: string) => {
@@ -765,7 +767,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "bronze_shortsword",
+        itemId: "grave_bronze_shortsword",
         quantity: 1,
         transactionId: "tx_1",
       });
@@ -776,14 +778,14 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "coins",
+        itemId: "grave_coins",
         quantity: 100,
         transactionId: "tx_2",
       });
       await tick();
 
       // Both processed in order
-      expect(callOrder).toEqual(["bronze_shortsword", "coins"]);
+      expect(callOrder).toEqual(["grave_bronze_shortsword", "grave_coins"]);
 
       vi.restoreAllMocks();
     });
@@ -800,14 +802,14 @@ describe("GravestoneLootSystem", () => {
       await clientSystem.init();
 
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("bronze_shortsword", 1),
+        createTestItem("grave_bronze_shortsword", 1),
       ]);
       clientWorld.entities.set("grave_1", grave);
 
       clientWorld.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "bronze_shortsword",
+        itemId: "grave_bronze_shortsword",
         quantity: 1,
       });
       await tick();
@@ -826,7 +828,7 @@ describe("GravestoneLootSystem", () => {
   describe("memory cleanup", () => {
     it("destroy clears internal state", async () => {
       const grave = createMockGravestone("grave_1", "player_1", [
-        createTestItem("bronze_shortsword", 1),
+        createTestItem("grave_bronze_shortsword", 1),
       ]);
       world.entities.set("grave_1", grave);
 
@@ -837,7 +839,7 @@ describe("GravestoneLootSystem", () => {
       world.emit(EventType.CORPSE_LOOT_REQUEST, {
         corpseId: "grave_1",
         playerId: "player_1",
-        itemId: "bronze_shortsword",
+        itemId: "grave_bronze_shortsword",
         quantity: 1,
       });
       await tick();

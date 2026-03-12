@@ -6,7 +6,8 @@
 
 .admin-screen {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: #0b0a15;
   color: #e8ebf4;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -175,15 +176,23 @@
 .admin-content {
   flex: 1;
   padding: 24px;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
 }
 
 /* Panel */
 .admin-panel {
+  display: flex;
+  flex-direction: column;
   background: #1a1005;
   border: 1px solid #8b4513/30;
   border-radius: 12px;
   padding: 20px;
+  flex: 1;
+  min-height: 0;
 }
 
 .admin-panel-header {
@@ -281,6 +290,9 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .admin-list-item {
@@ -418,14 +430,20 @@
   display: grid;
   grid-template-columns: 1fr 400px;
   gap: 24px;
+  flex: 1;
+  min-height: 0;
 }
 
 .admin-details-panel {
+  display: flex;
+  flex-direction: column;
   background: #1a1005;
   border: 1px solid #8b4513/30;
   border-radius: 12px;
   padding: 20px;
-  height: fit-content;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .admin-user-details {
@@ -524,7 +542,13 @@
 
 /* Player View */
 .admin-player-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   max-width: 1200px;
+  width: 100%;
 }
 
 .admin-player-header {
@@ -848,6 +872,8 @@
 .admin-activity-view {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .admin-activity-filters {
@@ -862,6 +888,9 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .admin-activity-item {
@@ -964,6 +993,9 @@
 .admin-live-controls {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   gap: 20px;
 }
 
