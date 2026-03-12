@@ -17,7 +17,15 @@ jobs:
           key: ${{ secrets.VAST_SSH_KEY }}
           script: |
             export PATH="/root/.bun/bin:$PATH"
-            echo "=== hyperscape-duel logs ==="
-            bunx pm2 logs hyperscape-duel --lines 5000 --nostream | grep -v "\\[rtmp-bridge\\]" | grep -v "\\[CDP\\]" | tail -n 500
+            echo "=== Streaming State ==="
+            curl -s http://127.0.0.1:5555/api/streaming/state 2>&1 | head -c 2000
+            echo ""
+            echo "=== Health ==="
+            curl -s http://127.0.0.1:5555/health 2>&1
+            echo ""
+            echo "=== Recent Agent/Scheduler Logs ==="
+            cat /root/hyperscape/logs/duel-out.log | grep -iE "agent|scheduler|insufficient|spawn|eliza|bot|duel-bot|connect" | tail -n 100
+            echo "=== Game Server Errors ==="
+            cat /root/hyperscape/logs/duel-out.log | grep -iE "error|fail|crash|timeout" | tail -n 30
             echo "=== PM2 list ==="
             bunx pm2 list
