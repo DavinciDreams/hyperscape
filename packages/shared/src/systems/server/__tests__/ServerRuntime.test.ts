@@ -113,7 +113,7 @@ describe("ServerRuntime", () => {
         const runtime = new ServerRuntime(world as never);
 
         runtime.start();
-        await vi.advanceTimersByTimeAsync(35);
+        vi.advanceTimersByTime(35);
         runtime.destroy();
 
         // 120ms behind with MAX_TICKS_PER_FRAME=3 should run exactly 3 catch-up ticks.

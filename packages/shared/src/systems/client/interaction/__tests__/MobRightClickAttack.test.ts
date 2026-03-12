@@ -47,8 +47,8 @@ describe("Mob right-click attack flow", () => {
     send.mockClear();
     emit.mockClear();
     addChat.mockClear();
-    vi.mocked(actionQueue.isDebounced).mockReset();
-    vi.mocked(actionQueue.isDebounced).mockReturnValue(false);
+    (actionQueue.isDebounced as any).mockReset();
+    (actionQueue.isDebounced as any).mockReturnValue(false);
   });
 
   it("builds an Attack action for a living mob and sends attackMob when selected", () => {
@@ -147,6 +147,48 @@ describe("Mob right-click attack flow", () => {
       observedDetails.push(custom.detail);
     };
 
+    // Mock window for this test
+    const originalWindow = globalThis.window;
+    const listeners = new Map<string, Function[]>();
+
+    globalThis.window = {
+      addEventListener: vi.fn((type: string, handler: Function) => {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type)!.push(handler);
+      }),
+      removeEventListener: vi.fn((type: string, handler: Function) => {
+        if (listeners.has(type)) {
+          listeners.set(
+            type,
+            listeners.get(type)!.filter((h) => h !== handler),
+          );
+        }
+      }),
+      dispatchEvent: vi.fn((event: Event) => {
+        const type = event.type;
+        if (listeners.has(type)) {
+          // slice to avoid mutation issues during iteration
+          listeners
+            .get(type)!
+            .slice()
+            .forEach((h) => h(event));
+        }
+        return true;
+      }),
+    } as any;
+
+    // Define CustomEvent if it doesn't exist
+    const originalCustomEvent = globalThis.CustomEvent;
+    if (typeof globalThis.CustomEvent === "undefined") {
+      globalThis.CustomEvent = class CustomEvent extends Event {
+        public detail: any;
+        constructor(type: string, options?: CustomEventInit) {
+          super(type, options);
+          this.detail = options?.detail;
+        }
+      } as any;
+    }
+
     window.addEventListener("contextmenu", onContextMenu);
 
     const target = createMobTarget(12);
@@ -169,12 +211,15 @@ describe("Mob right-click attack flow", () => {
           actionId: "attack",
           targetId: "mob-goblin-1",
         },
-      }),
+      }) as any,
     );
 
     expect(attackHandler).toHaveBeenCalledTimes(1);
 
     controller.destroy();
     window.removeEventListener("contextmenu", onContextMenu);
+
+    // Restore window
+    globalThis.window = originalWindow;
   });
 });
