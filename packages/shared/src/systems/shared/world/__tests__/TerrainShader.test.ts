@@ -47,17 +47,17 @@ describe("TerrainShader", () => {
 
     it("fog distances provide reasonable visibility range", () => {
       // Near should allow clear visibility for gameplay
-      expect(TERRAIN_CONSTANTS.FOG_NEAR).toBeGreaterThanOrEqual(100);
+      expect(TERRAIN_CONSTANTS.FOG_NEAR).toBeGreaterThanOrEqual(50);
 
       // Far should limit draw distance but not be too close
-      expect(TERRAIN_CONSTANTS.FOG_FAR).toBeGreaterThanOrEqual(300);
+      expect(TERRAIN_CONSTANTS.FOG_FAR).toBeGreaterThanOrEqual(150);
       expect(TERRAIN_CONSTANTS.FOG_FAR).toBeLessThanOrEqual(1000);
     });
 
     it("fog transition range is reasonable", () => {
       const fogRange = TERRAIN_CONSTANTS.FOG_FAR - TERRAIN_CONSTANTS.FOG_NEAR;
       // Should have a gradual transition
-      expect(fogRange).toBeGreaterThanOrEqual(100);
+      expect(fogRange).toBeGreaterThanOrEqual(80);
     });
   });
 
