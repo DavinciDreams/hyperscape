@@ -405,18 +405,9 @@ export function registerStreamingRoutes(
 
   const getPublicStreamingState = (
     scheduler: NonNullable<ReturnType<typeof getStreamingDuelScheduler>>,
-  ): {
-    cycle: ReturnType<typeof scheduler.getStreamingState>["cycle"];
-    leaderboard: ReturnType<typeof scheduler.getStreamingState>["leaderboard"];
-    cameraTarget: ReturnType<
-      typeof scheduler.getStreamingState
-    >["cameraTarget"];
-  } | null => {
+  ): ReturnType<typeof scheduler.getStreamingState> | null => {
     if (STREAMING_PUBLIC_DELAY_MS <= 0) {
-      return {
-        type: "STREAMING_STATE_UPDATE" as const,
-        ...scheduler.getStreamingState(),
-      };
+      return scheduler.getStreamingState();
     }
 
     // Keep delayed replay frames fresh for REST polling consumers
