@@ -5,10 +5,10 @@
  * Uses mocked network for unit-level testing.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 import { EventEmitter } from "events";
 
-// Use global variables to avoid vi.mock hoisting issues in bun test
+// State used to control the mocked world connection
 const __testState = {
   networkState: {
     connected: true,
@@ -21,42 +21,35 @@ const __testState = {
   destroyMock: vi.fn(),
 };
 
-(globalThis as any).__duelBotTestState = __testState;
+import * as worldModule from "../../runtime/createNodeClientWorld";
 
-vi.mock("../../runtime/createNodeClientWorld", () => {
-  const state = (globalThis as any).__duelBotTestState;
-
-  const createNodeClientWorldMock = vi.fn(() => {
-    const networkSystem = {
-      get connected() {
-        return state.networkState.connected;
-      },
-      get id() {
-        return state.networkState.id;
-      },
-      send: state.sendMock,
-      on: state.onMock,
-    };
-
-    return {
-      init: state.initMock,
-      destroy: state.destroyMock,
-      getSystem: vi.fn().mockImplementation((name: string) => {
-        if (name === "network") return networkSystem;
-        return null;
-      }),
-      entities: {
-        player: {
-          node: { position: { x: 10, y: 5, z: 20 } },
-        },
-      },
-      on: state.worldOnMock,
-    };
-  });
+// Use vi.spyOn to prevent var hoisting bugs in older Bun versions
+vi.spyOn(worldModule, "createNodeClientWorld").mockImplementation(() => {
+  const networkSystem = {
+    get connected() {
+      return __testState.networkState.connected;
+    },
+    get id() {
+      return __testState.networkState.id;
+    },
+    send: __testState.sendMock,
+    on: __testState.onMock,
+  };
 
   return {
-    createNodeClientWorld: createNodeClientWorldMock,
-  };
+    init: __testState.initMock,
+    destroy: __testState.destroyMock,
+    getSystem: vi.fn().mockImplementation((name: string) => {
+      if (name === "network") return networkSystem;
+      return null;
+    }),
+    entities: {
+      player: {
+        node: { position: { x: 10, y: 5, z: 20 } },
+      },
+    },
+    on: __testState.worldOnMock,
+  } as any;
 });
 
 const { networkState, sendMock } = __testState;
