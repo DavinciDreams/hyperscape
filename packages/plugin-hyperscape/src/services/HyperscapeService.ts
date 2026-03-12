@@ -468,23 +468,9 @@ export class HyperscapeService
   }
 
   private shouldRunOpenWorldAutonomy(): boolean {
-    if (!this.isDuelBotRuntime()) {
-      return true;
-    }
-
-    if (
-      getRuntimeSettingBoolean(
-        this.runtime,
-        "HYPERSCAPE_ENABLE_DUEL_BOT_AUTONOMY",
-      )
-    ) {
-      return true;
-    }
-
-    const envOverride =
-      process.env.HYPERSCAPE_ENABLE_DUEL_BOT_AUTONOMY ||
-      process.env.DUEL_BOT_AUTONOMY_ENABLED;
-    return envOverride ? /^(1|true|yes|on)$/i.test(envOverride.trim()) : false;
+    // Duel bots should perform autonomous activities (mining, chopping, fishing)
+    // between duels to make the world feel alive
+    return true;
   }
 
   private isPlayerInStreamingDuel(): boolean {
@@ -2382,8 +2368,9 @@ Respond with ONLY the action name, nothing else.`;
           // Server needs socket.player to be set (which happens during enterWorld)
           // so this is the earliest safe point to request quests.
           this.requestQuestList();
-          logger.debug(
-            `[HyperscapeService] 📜 Requested quest list after player spawn`,
+          this.requestBankState();
+          logger.info(
+            `[HyperscapeService] 📜 Requested quest list + bank state after player spawn`,
           );
         } else if (data && data.id) {
           // Debug: Log mob entity additions with position info

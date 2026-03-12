@@ -413,7 +413,10 @@ export function registerStreamingRoutes(
     >["cameraTarget"];
   } | null => {
     if (STREAMING_PUBLIC_DELAY_MS <= 0) {
-      return scheduler.getStreamingState();
+      return {
+        type: "STREAMING_STATE_UPDATE" as const,
+        ...scheduler.getStreamingState(),
+      };
     }
 
     // Keep delayed replay frames fresh for REST polling consumers
@@ -430,6 +433,7 @@ export function registerStreamingRoutes(
     if (!delayed) return null;
 
     return {
+      type: "STREAMING_STATE_UPDATE" as const,
       cycle: delayed.cycle as ReturnType<
         typeof scheduler.getStreamingState
       >["cycle"],

@@ -2049,7 +2049,11 @@ export class StreamingDuelScheduler {
 
     switch (phase) {
       case "ANNOUNCEMENT":
-        return phaseStartTime + STREAMING_TIMING.ANNOUNCEMENT_DURATION;
+        // Use MIN_ANNOUNCEMENT_DURATION for the timer since the phase
+        // early-exits as soon as both agents are alive (which is almost
+        // always immediate). ANNOUNCEMENT_DURATION is only a maximum
+        // fallback and would make the timer misleadingly long.
+        return phaseStartTime + STREAMING_TIMING.MIN_ANNOUNCEMENT_DURATION;
       case "COUNTDOWN":
         return (
           this.currentCycle.fightStartTime ??
