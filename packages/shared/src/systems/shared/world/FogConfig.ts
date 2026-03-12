@@ -48,8 +48,8 @@ import {
 // Fog distance parameters
 // smoothstep(NEAR_SQ, FAR_SQ, distSq) gives 0% fog at NEAR, 100% at FAR.
 // ---------------------------------------------------------------------------
-export const FOG_NEAR = 150;
-export const FOG_FAR = 350;
+export const FOG_NEAR = 60;
+export const FOG_FAR = 150;
 
 // Pre-computed squared distances — avoids per-fragment sqrt on the GPU.
 // Shaders compare dot(toCamera, toCamera) directly against these.

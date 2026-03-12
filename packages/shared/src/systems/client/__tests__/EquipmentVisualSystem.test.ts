@@ -38,13 +38,18 @@ vi.mock("../../../libs/gltfloader/GLTFLoader", () => {
   };
 });
 
-vi.mock("../../../data/items", () => ({
-  getItem: vi.fn((id) => ({
+import * as itemsModule from "../../../data/items";
+
+const originalGetItem = itemsModule.getItem;
+vi.spyOn(itemsModule, "getItem").mockImplementation((id: string) => {
+  const realItem = originalGetItem(id);
+  if (realItem) return realItem;
+  return {
     id,
     modelPath: `asset://models/${id}.glb`,
     equippedModelPath: `asset://models/${id}.glb`,
-  })),
-}));
+  } as any;
+});
 
 describe("EquipmentVisualSystem", () => {
   let system: EquipmentVisualSystem;

@@ -44,10 +44,10 @@ describe("Biome Configuration Loading", () => {
       );
       const mockBiomes: Array<BiomeData> = [
         {
-          id: "tundra",
-          name: "Tundra",
+          id: "plains",
+          name: "Plains",
           difficultyLevel: 0,
-          terrain: BiomeType.Tundra as any,
+          terrain: "plains" as any,
           vegetation: {
             enabled: true,
             layers: [
@@ -57,12 +57,12 @@ describe("Biome Configuration Loading", () => {
           } as any,
           grass: { enabled: true, densityMultiplier: 1.0 },
           colorScheme: {} as any,
-        },
+        } as any,
         {
           id: "forest",
           name: "Forest",
           difficultyLevel: 1,
-          terrain: BiomeType.Forest as any,
+          terrain: "forest" as any,
           vegetation: {
             enabled: true,
             layers: [
@@ -72,14 +72,14 @@ describe("Biome Configuration Loading", () => {
           } as any,
           grass: { enabled: true, densityMultiplier: 1.0 },
           colorScheme: {} as any,
-        },
+        } as any,
         {
-          id: "canyon",
-          name: "Canyon",
+          id: "mountains",
+          name: "Mountains",
           difficultyLevel: 2,
-          terrain: BiomeType.Canyon as any,
+          terrain: "mountains" as any,
           colorScheme: {} as any,
-        },
+        } as any,
       ];
       for (const biome of mockBiomes) {
         BIOMES[biome.id] = biome;
