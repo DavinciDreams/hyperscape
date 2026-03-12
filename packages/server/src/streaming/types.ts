@@ -60,7 +60,7 @@ export const DEFAULT_STREAMING_CONFIG: StreamingConfig = {
   width: 1280, // Match default capture viewport (720p) to avoid unnecessary upscale
   height: 720,
   preset: "ultrafast", // Use ultrafast for real-time 3D capturing to minimize CPU
-  gopSize: 30, // Keyframe every 1 second at 30fps — matches HLS segment boundary
+  gopSize: 60, // Keyframe every 2 seconds at 30fps — recommended by Twitch/YouTube for stability
   captureMode: "cdp", // CDP screencast is the default (faster, single-encode)
   jpegQuality: 80, // Good balance of quality vs bandwidth for JPEG frames
 };

@@ -83,9 +83,9 @@ const CAMERA_DIRECTOR = {
     },
     COUNTDOWN: { minHoldMs: 6_000, maxHoldMs: 24_000, idleThresholdMs: 6_000 },
     FIGHTING: {
-      minHoldMs: 28_000,
-      maxHoldMs: 130_000,
-      idleThresholdMs: 18_000,
+      minHoldMs: 12_000,
+      maxHoldMs: 45_000,
+      idleThresholdMs: 12_000,
     },
     RESOLUTION: { minHoldMs: 8_000, maxHoldMs: 45_000, idleThresholdMs: 8_000 },
   } as Record<StreamingPhase, CameraSwitchTiming>,

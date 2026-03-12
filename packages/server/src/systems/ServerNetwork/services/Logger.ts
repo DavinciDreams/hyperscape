@@ -20,6 +20,14 @@ export enum LogLevel {
   ERROR = 3,
 }
 
+export interface LogEntry {
+  timestamp: number;
+  level: string;
+  system: string;
+  message: string;
+  data?: Record<string, unknown>;
+}
+
 const LOG_LEVEL_MAP: Record<string, LogLevel> = {
   debug: LogLevel.DEBUG,
   info: LogLevel.INFO,
@@ -51,6 +59,16 @@ function resolveConfiguredLogLevel(): LogLevel {
  */
 export class Logger {
   private static level: LogLevel = resolveConfiguredLogLevel();
+
+  private static recentLogs: LogEntry[] = [];
+  private static readonly MAX_LOGS = 1000;
+
+  /**
+   * Get the most recent logs (up to MAX_LOGS)
+   */
+  static getRecentLogs(): LogEntry[] {
+    return this.recentLogs;
+  }
 
   /**
    * Set the minimum log level
@@ -150,6 +168,19 @@ export class Logger {
       output(prefix, data);
     } else {
       output(prefix);
+    }
+
+    // Store in ring buffer
+    this.recentLogs.push({
+      timestamp: Date.now(),
+      level,
+      system,
+      message,
+      data,
+    });
+
+    if (this.recentLogs.length > this.MAX_LOGS) {
+      this.recentLogs.shift();
     }
   }
 }

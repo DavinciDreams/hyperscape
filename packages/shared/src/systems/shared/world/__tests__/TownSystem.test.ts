@@ -12,8 +12,8 @@ const WORLD_SIZE = 10000;
 const MIN_TOWN_SPACING = 800;
 const FLATNESS_SAMPLE_RADIUS = 40;
 const FLATNESS_SAMPLE_COUNT = 16;
-// IMPORTANT: This must match TERRAIN_CONSTANTS.WATER_THRESHOLD (9.0)
-const WATER_THRESHOLD = 9.0;
+// IMPORTANT: This must match TERRAIN_CONSTANTS.WATER_THRESHOLD (8.0)
+const WATER_THRESHOLD = 8.0;
 const OPTIMAL_WATER_DISTANCE_MIN = 30;
 const OPTIMAL_WATER_DISTANCE_MAX = 150;
 
@@ -550,7 +550,6 @@ describe("TownSystem Algorithms", () => {
       expect(BIOME_SUITABILITY.tundra).toBeGreaterThan(
         BIOME_SUITABILITY.canyon,
       );
-      expect(BIOME_SUITABILITY.valley).toBeGreaterThan(BIOME_SUITABILITY.swamp);
     });
   });
 

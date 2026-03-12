@@ -1,10 +1,22 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDuelArenaOracleConfig } from "../../../src/oracle/config.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
+function clearOracleEnv() {
+  for (const key in process.env) {
+    if (key.startsWith("DUEL_ARENA_ORACLE_")) {
+      vi.stubEnv(key, "");
+    }
+  }
+}
+
 afterEach(() => {
-  process.env = { ...ORIGINAL_ENV };
+  vi.unstubAllEnvs();
+});
+
+beforeEach(() => {
+  clearOracleEnv();
 });
 
 describe("getDuelArenaOracleConfig", () => {

@@ -36,7 +36,7 @@ import {
   NavigationVisualizer,
   type NavigationVisualizerOptions,
 } from "./NavigationVisualizer";
-import type { TileCoord } from "@hyperscape/shared";
+import type { TileCoord } from "./index";
 
 /** Path info for navigation display */
 export interface PathInfo {

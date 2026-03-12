@@ -722,6 +722,17 @@ export class DuelArenaOraclePublisher {
     existing.updatedAt = nowIso();
     this.records.set(existing.duelId, existing);
     await this.persistRecords();
+
+    if (this.config.settlementDelayMs > 0) {
+      Logger.info(
+        "DuelArenaOraclePublisher",
+        `Delaying oracle publish for ${existing.duelId} by ${this.config.settlementDelayMs}ms to sync with stream`,
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.config.settlementDelayMs),
+      );
+    }
+
     await this.publishAcrossTargets(existing, "RESOLVE");
   }
 

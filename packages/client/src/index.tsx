@@ -25,6 +25,7 @@ import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
 import { logger } from "./lib/logger";
+import { MaintenanceBanner } from "./components/common/MaintenanceBanner";
 // Loading fallback for lazy-loaded screens
 function ScreenLoadingFallback() {
   return (
@@ -820,6 +821,7 @@ async function mountApp() {
     // Render embedded game client directly (no auth screens)
     root.render(
       <ErrorBoundary>
+        <MaintenanceBanner />
         <React.Suspense fallback={<ScreenLoadingFallback />}>
           <EmbeddedGameClient />
         </React.Suspense>
@@ -832,6 +834,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <SolanaWalletProvider>
             <PrivyAuthProvider>
               <React.Suspense fallback={<ScreenLoadingFallback />}>
@@ -847,6 +850,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <SolanaWalletProvider>
             <PrivyAuthProvider>
               <React.Suspense fallback={<ScreenLoadingFallback />}>
@@ -860,6 +864,7 @@ async function mountApp() {
       console.log("[Hyperscape] Admin mode detected - rendering AdminScreen");
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <AdminScreen />
           </React.Suspense>
@@ -871,6 +876,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <StreamingMode />
           </React.Suspense>
@@ -882,6 +888,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <LeaderboardScreen />
           </React.Suspense>
@@ -893,6 +900,7 @@ async function mountApp() {
       );
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <AgentMonitorScreen />
           </React.Suspense>
@@ -902,6 +910,7 @@ async function mountApp() {
       // Normal mode - render full app with auth
       root.render(
         <ErrorBoundary>
+          <MaintenanceBanner />
           <SolanaWalletProvider>
             <PrivyAuthProvider>
               <App />

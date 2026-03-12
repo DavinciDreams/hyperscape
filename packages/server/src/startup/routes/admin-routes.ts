@@ -1508,6 +1508,55 @@ export function registerAdminRoutes(
           }
         }
 
+        // 3. External agents (e.g. duel bots) — connected via WebSocket but
+        //    not tracked by AgentManager or ModelAgentSpawner.  Detect them
+        //    from world entities with the isAgent flag or agent- ID prefix.
+        const detectExternalAgent = (
+          entityId: string,
+          entity: unknown,
+          requirePlayerType: boolean,
+        ) => {
+          if (agentPromises.has(entityId)) return;
+          const typed = entity as {
+            type?: string;
+            name?: string;
+            data?: { isAgent?: boolean | number; name?: string };
+          };
+          if (
+            requirePlayerType &&
+            typed.type !== "player" &&
+            typed.type !== "Player"
+          )
+            return;
+          const isAgentEntity =
+            entityId.startsWith("agent-") ||
+            typed.data?.isAgent === true ||
+            typed.data?.isAgent === 1;
+          if (!isAgentEntity) return;
+          agentPromises.set(
+            entityId,
+            buildAgentData(
+              entityId,
+              typed.name || typed.data?.name || entityId,
+              "running",
+              Date.now(),
+              Date.now(),
+            ),
+          );
+        };
+        // Check players map first (primary)
+        if (world.entities?.players) {
+          for (const [entityId, entity] of world.entities.players) {
+            detectExternalAgent(entityId, entity, false);
+          }
+        }
+        // Fallback: check items map for player-type entities
+        if (world.entities?.items) {
+          for (const [entityId, entity] of world.entities.items) {
+            detectExternalAgent(entityId, entity, true);
+          }
+        }
+
         const agents = await Promise.all(agentPromises.values());
 
         return reply.send({
@@ -2720,6 +2769,57 @@ export function registerAdminRoutes(
       } catch (err) {
         console.error("[AdminRoutes] Heap stats error:", err);
         return reply.code(500).send({ error: "Failed to get heap statistics" });
+      }
+    },
+  );
+
+  /**
+   * GET /admin/logs
+   * Fetch recent server logs from the in-memory ring buffer
+   */
+  fastify.get(
+    "/admin/logs",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { Logger } =
+          await import("../../systems/ServerNetwork/services/Logger.js");
+        return reply.send({
+          logs: Logger.getRecentLogs(),
+        });
+      } catch (err) {
+        console.error("[AdminRoutes] Failed to fetch logs:", err);
+        return reply.code(500).send({ error: "Failed to fetch logs" });
+      }
+    },
+  );
+
+  /**
+   * POST /admin/restart
+   * Restart the application (process.exit)
+   * Assumes a process manager like pm2 will automatically restart it.
+   */
+  fastify.post(
+    "/admin/restart",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { Logger } =
+          await import("../../systems/ServerNetwork/services/Logger.js");
+        Logger.warn("Admin", "Manual restart triggered from admin console");
+
+        reply.send({
+          success: true,
+          message: "Restarting server in 2 seconds...",
+        });
+
+        // Delay to allow response to send
+        setTimeout(() => {
+          process.exit(0);
+        }, 2000);
+      } catch (err) {
+        console.error("[AdminRoutes] Failed to trigger restart:", err);
+        return reply.code(500).send({ error: "Failed to trigger restart" });
       }
     },
   );

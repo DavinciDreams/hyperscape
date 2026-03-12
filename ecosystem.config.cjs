@@ -147,6 +147,7 @@ module.exports = {
         DUEL_BETTING_ENABLED: "false",
         SOLANA_RPC_URL: "https://api.devnet.solana.com",
         SOLANA_WS_URL: "wss://api.devnet.solana.com/",
+        ORACLE_SETTLEMENT_DELAY_MS: "7000",
         SOLANA_ARENA_MARKET_PROGRAM_ID:
           process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
           "9NdidShnVzy1fc1WHWJTvyuXmH47ynfNGA6QFdyfAuSU",

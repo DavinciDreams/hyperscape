@@ -40,7 +40,7 @@ import {
   NavigationVisualizer,
   type NavigationVisualizerOptions,
 } from "./NavigationVisualizer";
-import type { TileCoord } from "@hyperscape/shared";
+import type { TileCoord } from "./index";
 
 /** Available material styles for the viewer */
 const MATERIAL_OPTIONS: {

@@ -157,4 +157,5 @@ export interface DuelArenaOracleConfig {
   storePath: string;
   evmTargets: DuelArenaOracleEvmTargetConfig[];
   solanaTargets: DuelArenaOracleSolanaTargetConfig[];
+  settlementDelayMs: number;
 }

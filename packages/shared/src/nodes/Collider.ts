@@ -167,6 +167,11 @@ export class Collider extends Node {
       return;
     }
 
+    // Guard: physics system may be removed in stream/spectator viewports
+    if (!this.ctx?.physics) {
+      return;
+    }
+
     let geometry;
     let pmesh;
     if (this._type === "box") {

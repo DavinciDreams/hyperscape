@@ -262,6 +262,12 @@ export function createClientWorld() {
   // browser. RigidBody/Collider nodes already guard against missing PHYSX.
   if (!isStreamingLikeViewport()) {
     replaceSystem(world, "physics", Physics);
+  } else {
+    // The World constructor registers a default PhysicsSystem whose init()
+    // calls waitForPhysX() with a 120s timeout.  If we leave it registered
+    // the entire init chain stalls waiting for PhysX WASM that will never
+    // arrive.  Remove it so the init pipeline proceeds immediately.
+    removeSystem(world, "physics");
   }
 
   // Interaction system - handles clicks, raycasting, context menus
@@ -436,6 +442,15 @@ export function createClientWorld() {
         console.log(
           "[createClientWorld] Skipping tree cache pre-warm and PhysX for stream/spectator viewport",
         );
+        // CRITICAL: We still need to load PhysX even if we skip tree pre-warming!
+        // In stream mode, there is no local player, so PlayerLocal won't trigger the load either.
+        // We trigger it here in the background so colliders and static actors can initialize.
+        waitForPhysX("StreamInitialization", 120000).catch((err) => {
+          console.warn(
+            "[createClientWorld] Background PhysX load failed:",
+            err,
+          );
+        });
       }
 
       // Pre-warm mob/NPC animated impostors AFTER renderer is ready

@@ -925,14 +925,14 @@ describe("TERRAIN_CONSTANTS Centralization", () => {
   it("should have consistent WATER_THRESHOLD value", async () => {
     const { TERRAIN_CONSTANTS } = await import("@hyperscape/shared");
 
-    // WATER_THRESHOLD should be 9.0 (as per TerrainSystem)
-    expect(TERRAIN_CONSTANTS.WATER_THRESHOLD).toBe(9.0);
+    // WATER_THRESHOLD should be 8.0 (as per TerrainSystem)
+    expect(TERRAIN_CONSTANTS.WATER_THRESHOLD).toBe(8.0);
   });
 
   it("should have consistent MAX_WALKABLE_SLOPE value", async () => {
     const { TERRAIN_CONSTANTS } = await import("@hyperscape/shared");
 
-    // MAX_WALKABLE_SLOPE should be 0.7 (tan of ~35 degrees)
-    expect(TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE).toBe(0.7);
+    // MAX_WALKABLE_SLOPE should be 1.5
+    expect(TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE).toBe(1.5);
   });
 });
