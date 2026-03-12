@@ -8,31 +8,39 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EventEmitter } from "events";
 
-const { createNodeClientWorldMock, sendMock, networkState } = vi.hoisted(() => {
-  const networkState = {
+// Use global variables to avoid vi.mock hoisting issues in bun test
+const __testState = {
+  networkState: {
     connected: true,
     id: "test-player-123" as string | null,
-  };
-  const sendMock = vi.fn();
-  const onMock = vi.fn();
-  const worldOnMock = vi.fn();
-  const initMock = vi.fn().mockResolvedValue(undefined);
-  const destroyMock = vi.fn();
+  },
+  sendMock: vi.fn(),
+  onMock: vi.fn(),
+  worldOnMock: vi.fn(),
+  initMock: vi.fn().mockResolvedValue(undefined),
+  destroyMock: vi.fn(),
+};
+
+(globalThis as any).__duelBotTestState = __testState;
+
+vi.mock("../../runtime/createNodeClientWorld", () => {
+  const state = (globalThis as any).__duelBotTestState;
+
   const createNodeClientWorldMock = vi.fn(() => {
     const networkSystem = {
       get connected() {
-        return networkState.connected;
+        return state.networkState.connected;
       },
       get id() {
-        return networkState.id;
+        return state.networkState.id;
       },
-      send: sendMock,
-      on: onMock,
+      send: state.sendMock,
+      on: state.onMock,
     };
 
     return {
-      init: initMock,
-      destroy: destroyMock,
+      init: state.initMock,
+      destroy: state.destroyMock,
       getSystem: vi.fn().mockImplementation((name: string) => {
         if (name === "network") return networkSystem;
         return null;
@@ -42,24 +50,16 @@ const { createNodeClientWorldMock, sendMock, networkState } = vi.hoisted(() => {
           node: { position: { x: 10, y: 5, z: 20 } },
         },
       },
-      on: worldOnMock,
+      on: state.worldOnMock,
     };
   });
 
   return {
-    createNodeClientWorldMock,
-    initMock,
-    destroyMock,
-    sendMock,
-    onMock,
-    worldOnMock,
-    networkState,
+    createNodeClientWorld: createNodeClientWorldMock,
   };
 });
 
-vi.mock("../../runtime/createNodeClientWorld", () => ({
-  createNodeClientWorld: createNodeClientWorldMock,
-}));
+const { networkState, sendMock } = __testState;
 
 // Import after mocking
 import { DuelBot, type DuelBotConfig } from "../DuelBot";
