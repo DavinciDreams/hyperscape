@@ -187,7 +187,7 @@ export class Entities extends SystemBase implements IEntities {
   constructor(world: World) {
     super(world, {
       name: "entities",
-      dependencies: { required: [], optional: [] },
+      dependencies: { required: ["physics"], optional: [] },
       autoCleanup: true,
     });
     this.items = new Map();

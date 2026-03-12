@@ -325,7 +325,7 @@ export class ClientNetwork extends SystemBase {
   constructor(world: World) {
     super(world, {
       name: "client-network",
-      dependencies: { required: [], optional: [] },
+      dependencies: { required: ["physics"], optional: [] },
       autoCleanup: true,
     });
     this.ids = -1;
