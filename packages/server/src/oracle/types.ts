@@ -123,7 +123,13 @@ export interface DuelArenaOracleAbortEvent {
 export interface DuelArenaOracleEvmTargetConfig {
   key: Extract<
     DuelArenaOracleChainKey,
-    "anvil" | "baseSepolia" | "bscTestnet" | "avaxFuji" | "base" | "bsc" | "avax"
+    | "anvil"
+    | "baseSepolia"
+    | "bscTestnet"
+    | "avaxFuji"
+    | "base"
+    | "bsc"
+    | "avax"
   >;
   label: string;
   rpcUrl: string;
@@ -151,4 +157,5 @@ export interface DuelArenaOracleConfig {
   storePath: string;
   evmTargets: DuelArenaOracleEvmTargetConfig[];
   solanaTargets: DuelArenaOracleSolanaTargetConfig[];
+  settlementDelayMs: number;
 }
