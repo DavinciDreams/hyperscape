@@ -182,7 +182,7 @@ describe("Mob right-click attack flow", () => {
     if (typeof globalThis.CustomEvent === "undefined") {
       globalThis.CustomEvent = class CustomEvent extends Event {
         public detail: any;
-        constructor(type: string, options?: CustomEventInit) {
+        constructor(type: string, options?: any) {
           super(type, options);
           this.detail = options?.detail;
         }
