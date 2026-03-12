@@ -60,7 +60,6 @@ import {
  */
 
 import type { BiomeData } from "../../../types/core/core";
-import type { BiomeTreeConfig } from "../../../types/world/world-types";
 import type {
   ResourceNode,
   TerrainTile,
@@ -83,7 +82,7 @@ import {
   // generatePlants, // DISABLED - plants not working/looking good yet
   type ResourceGenerationContext,
 } from "./BiomeResourceGenerator";
-import { getDefaultTreeDistribution } from "../../../constants/TreeTypes";
+import { getTreeConfigForBiome } from "./TerrainBiomeTypes";
 import {
   setProcgenRockWorld,
   addRockInstance,
@@ -4658,34 +4657,21 @@ export class TerrainSystem extends System {
   // }
 
   /**
-   * Default tree configuration for biomes without explicit tree config.
-   * Targets ~1 tree per 20m spacing (density 25 = ~10 trees per 64m tile).
-   * Reduced from 100 to prevent exceeding MAX_GLOBAL_LEAVES capacity (100k leaves,
-   * ~2000 leaves per tree = ~50 trees max visible at full detail).
-   */
-  private static readonly DEFAULT_TREE_CONFIG: BiomeTreeConfig = {
-    enabled: true,
-    distribution: getDefaultTreeDistribution(),
-    density: 20, // ~8 trees per 64m tile
-    minSpacing: 18, // Minimum 18m between trees for natural spacing
-    clustering: true,
-    clusterSize: 3,
-    scaleVariation: [0.8, 1.2],
-  };
-
-  /**
    * Generate harvestable trees for a tile based on biome configuration.
    * Uses the extracted BiomeResourceGenerator for the actual algorithm.
-   * Falls back to DEFAULT_TREE_CONFIG if biome has no tree config.
+   * getTreeConfigForBiome always returns a config (falls back to forest).
    */
   private generateTreesForTile(tile: TerrainTile, biomeData: BiomeData): void {
-    // Use biome tree config or fall back to defaults
-    const treeConfig = biomeData.trees ?? TerrainSystem.DEFAULT_TREE_CONFIG;
+    const treeConfig = biomeData.trees ?? getTreeConfigForBiome(tile.biome);
     if (!treeConfig.enabled) {
       return;
     }
 
-    // Create context for resource generation
+    // Create context for resource generation.
+    // getDominantBiome lets generateTrees() resolve the actual biome at each
+    // tree position instead of using the single tile-center biome, which
+    // prevents wrong tree types appearing near biome boundaries.
+    const biomeSystem = this.terrainGenerator.getBiomeSystem();
     const ctx: ResourceGenerationContext = {
       tileX: tile.x,
       tileZ: tile.z,
@@ -4697,6 +4683,8 @@ export class TerrainSystem extends System {
         ? (worldX, worldZ) => this.roadNetworkSystem!.isOnRoad(worldX, worldZ)
         : undefined,
       createRng: (salt) => this.createTileRng(tile.x, tile.z, salt),
+      getDominantBiome: (worldX, worldZ) =>
+        biomeSystem.getDominantBiome(worldX, worldZ, 0),
     };
 
     // Generate trees using the extracted algorithm

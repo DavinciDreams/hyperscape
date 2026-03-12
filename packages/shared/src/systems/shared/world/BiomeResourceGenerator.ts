@@ -22,7 +22,12 @@ import type {
   ResourceSubType,
 } from "../../../types/world/terrain";
 import type { VegetationInstance } from "../../../types/world/world-types";
-import { getTreeLevelRequired } from "../../../constants/TreeTypes";
+import {
+  getTreeLevelRequired,
+  treeIdToSubType,
+} from "../../../constants/TreeTypes";
+import type { TreePlacementRules } from "../../../constants/TreeTypes";
+import { getTreeConfigForBiome } from "./TerrainBiomeTypes";
 
 /**
  * Context provided by TerrainSystem for resource generation.
@@ -42,6 +47,8 @@ export interface ResourceGenerationContext {
   getHeightAt: (worldX: number, worldZ: number) => number;
   /** Check if position is on a road */
   isOnRoad?: (worldX: number, worldZ: number) => boolean;
+  /** Get the dominant biome at a world position (for per-tree biome selection) */
+  getDominantBiome?: (worldX: number, worldZ: number) => string;
   /** Deterministic RNG seeded for this tile */
   createRng: (salt: string) => () => number;
 }
@@ -145,18 +152,18 @@ export function generateTrees(
   // Use deterministic RNG for reproducible placement
   const rng = ctx.createRng("trees");
 
-  // Get distribution weights
-  const distribution = treeConfig.distribution;
-  const treeTypes = Object.keys(distribution);
-  if (treeTypes.length === 0) {
+  // Pre-compute tile-level distribution as fallback (used when no per-position
+  // biome callback is available, or as the default for the tile's biome)
+  const tileDist = treeConfig.distribution;
+  const tileTreeTypes = Object.keys(tileDist);
+  if (tileTreeTypes.length === 0) {
     return [];
   }
-
-  const totalWeight = Object.values(distribution).reduce(
+  const tileTotalWeight = Object.values(tileDist).reduce(
     (sum, w) => sum + w,
     0,
   );
-  if (totalWeight === 0) {
+  if (tileTotalWeight === 0) {
     return [];
   }
 
@@ -236,16 +243,63 @@ export function generateTrees(
       continue;
     }
 
+    // Resolve the tree distribution for THIS position. If we have a
+    // per-position biome callback, use it to get the actual biome here
+    // instead of relying on the single tile-center biome.
+    let distribution = tileDist;
+    let treeTypes = tileTreeTypes;
+    let totalWeight = tileTotalWeight;
+    let activePlacements: Record<string, TreePlacementRules> | undefined =
+      treeConfig.placements;
+
+    if (ctx.getDominantBiome) {
+      const positionBiome = ctx.getDominantBiome(worldX, worldZ);
+      const posConfig = getTreeConfigForBiome(positionBiome);
+      if (posConfig && posConfig.distribution !== tileDist) {
+        distribution = posConfig.distribution;
+        activePlacements = posConfig.placements;
+        treeTypes = Object.keys(distribution);
+        totalWeight = Object.values(distribution).reduce(
+          (sum, w) => sum + w,
+          0,
+        );
+        if (totalWeight === 0 || treeTypes.length === 0) continue;
+      }
+    }
+
     // Select tree type based on weighted distribution
-    let selectedType = "normal";
+    // treeType is a TreeId value (e.g. "tree_oak")
+    let selectedTreeId = treeTypes[0];
     const roll = rng() * totalWeight;
     let cumulative = 0;
     for (const treeType of treeTypes) {
       cumulative += distribution[treeType];
       if (roll < cumulative) {
-        // Extract subtype: "tree_oak" -> "oak", "tree_normal" -> "normal"
-        selectedType = treeType.replace("tree_", "");
+        selectedTreeId = treeType;
         break;
+      }
+    }
+    const selectedType = treeIdToSubType(selectedTreeId);
+
+    // Apply per-tree placement rules from the active biome config
+    const rules = activePlacements?.[selectedTreeId];
+    if (rules) {
+      const heightAboveWater = height - ctx.waterThreshold;
+
+      if (rules.minHeight !== undefined && height < rules.minHeight) continue;
+      if (rules.maxHeight !== undefined && height > rules.maxHeight) continue;
+
+      if (
+        rules.avoidsWaterBelow !== undefined &&
+        heightAboveWater < rules.avoidsWaterBelow
+      )
+        continue;
+
+      if (rules.waterAffinity && rules.waterAffinity > 0) {
+        const proximityLimit = rules.waterProximityHeight ?? 10;
+        if (heightAboveWater > proximityLimit) {
+          if (rng() < rules.waterAffinity) continue;
+        }
       }
     }
 
