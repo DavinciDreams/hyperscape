@@ -149,6 +149,8 @@ export function generateTrees(
     return [];
   }
 
+  const maxSlope = treeConfig.maxSlope ?? Infinity;
+
   // Use deterministic RNG for reproducible placement
   const rng = ctx.createRng("trees");
 
@@ -241,6 +243,20 @@ export function generateTrees(
     // Check if on road
     if (ctx.isOnRoad?.(worldX, worldZ)) {
       continue;
+    }
+
+    // Reject steep slopes — sample 4 neighbors to estimate gradient magnitude
+    if (maxSlope < Infinity) {
+      const sd = 1.0;
+      const dhdx =
+        (ctx.getHeightAt(worldX + sd, worldZ) -
+          ctx.getHeightAt(worldX - sd, worldZ)) /
+        (2 * sd);
+      const dhdz =
+        (ctx.getHeightAt(worldX, worldZ + sd) -
+          ctx.getHeightAt(worldX, worldZ - sd)) /
+        (2 * sd);
+      if (dhdx * dhdx + dhdz * dhdz > maxSlope * maxSlope) continue;
     }
 
     // Resolve the tree distribution for THIS position. If we have a

@@ -39,10 +39,10 @@ export function buildBiomeConstantsJS(): string {
 const FOREST_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
   distribution: {
-    [TreeId.Knotwood]: 80,
+    [TreeId.Knotwood]: 40,
     [TreeId.Oak]: 20,
     [TreeId.Birch]: 20,
-    [TreeId.Maple]: 15,
+    [TreeId.Maple]: 40,
     [TreeId.Fir]: 15,
     [TreeId.Pine]: 15,
     [TreeId.ChinaPine]: 15,
@@ -58,31 +58,41 @@ const FOREST_TREE_CONFIG: BiomeTreeConfig = {
     [TreeId.Pine]: { maxHeight: 25 },
     [TreeId.ChinaPine]: { minHeight: 30 },
   },
-  density: 20,
+  density: 10,
   minSpacing: 8,
   clustering: true,
   clusterSize: 5,
   scaleVariation: [0.8, 1.2],
+  maxSlope: 1.5,
 };
 
 const CANYON_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
   distribution: {
-    [TreeId.Cactus]: 50,
-    [TreeId.Dead]: 30,
-    [TreeId.Palm]: 25,
-    [TreeId.Coconut]: 15,
+    [TreeId.Cactus]: 20,
+    [TreeId.Dead]: 20,
+    [TreeId.Palm]: 20,
+    [TreeId.Coconut]: 10,
   },
   placements: {
     [TreeId.Cactus]: { avoidsWaterBelow: 3 },
     [TreeId.Dead]: { minHeight: 20 },
-    [TreeId.Palm]: { waterAffinity: 0.3, waterProximityHeight: 9 },
-    [TreeId.Coconut]: { waterAffinity: 0.6, waterProximityHeight: 9 },
+    [TreeId.Palm]: {
+      waterAffinity: 0.3,
+      waterProximityHeight: 9,
+      maxHeight: 15,
+    },
+    [TreeId.Coconut]: {
+      waterAffinity: 0.6,
+      waterProximityHeight: 9,
+      maxHeight: 15,
+    },
   },
-  density: 20,
-  minSpacing: 10,
+  density: 15,
+  minSpacing: 18,
   clustering: false,
   scaleVariation: [0.7, 1.3],
+  maxSlope: 2.0,
 };
 
 const TUNDRA_TREE_CONFIG: BiomeTreeConfig = {
@@ -98,10 +108,11 @@ const TUNDRA_TREE_CONFIG: BiomeTreeConfig = {
     [TreeId.Fir]: { minHeight: 10 },
     [TreeId.Pine]: { minHeight: 8 },
   },
-  density: 25,
+  density: 10,
   minSpacing: 12,
   clustering: false,
   scaleVariation: [0.6, 1.0],
+  maxSlope: 1.5,
 };
 
 const BIOME_TREE_CONFIGS: Record<BiomeType, BiomeTreeConfig> = {

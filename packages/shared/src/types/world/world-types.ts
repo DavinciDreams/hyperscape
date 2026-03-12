@@ -270,6 +270,8 @@ export interface BiomeTreeConfig {
   clusterSize?: number;
   /** Scale variation range [min, max] multiplier (default: [0.8, 1.2]) */
   scaleVariation?: [number, number];
+  /** Maximum terrain slope for tree placement (gradient magnitude, default: 1.5) */
+  maxSlope?: number;
 }
 
 /**
