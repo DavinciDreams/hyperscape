@@ -1005,10 +1005,6 @@ export function createTreeDissolveMaterial(
   const hasVertexColors = !!(source as any).vertexColors;
   material.vertexColors = false;
 
-  // Sphere normals are baked into the vertex normal attribute, not a normal map.
-  // Clear any normal map so the TSL pipeline uses the raw vertex normals.
-  material.normalMap = null;
-
   // --- Uniforms ---
   const uSunDir = uniform(new THREE.Vector3(0.5, 0.8, 0.3));
   const uSunIntensity = uniform(1.0);
