@@ -56,6 +56,8 @@ import {
   pow,
   attribute,
   positionView,
+  normalLocal,
+  modelNormalMatrix,
 } from "../../../extras/three/three";
 import { varyingProperty } from "three/tsl";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
@@ -1003,10 +1005,9 @@ export function createTreeDissolveMaterial(
   const hasVertexColors = !!(source as any).vertexColors;
   material.vertexColors = false;
 
-  const srcStd = source as THREE.MeshStandardMaterial;
-  if (srcStd.normalMap) {
-    material.normalScale = new THREE.Vector2(2, 2);
-  }
+  // Sphere normals are baked into the vertex normal attribute, not a normal map.
+  // Clear any normal map so the TSL pipeline uses the raw vertex normals.
+  material.normalMap = null;
 
   // --- Uniforms ---
   const uSunDir = uniform(new THREE.Vector3(0.5, 0.8, 0.3));
@@ -1086,8 +1087,8 @@ export function createTreeDissolveMaterial(
       baseAlbedo = mul(baseAlbedo, aoMul);
     }
 
-    // ---- Custom Lambert lighting (soft clamped, scaled by sun intensity) ----
-    const N = normalize(normalWorld);
+    // ---- Custom Lambert lighting (sphere normals baked into vertex attribute) ----
+    const N = normalize(mul(modelNormalMatrix, normalLocal));
     const L = normalize(vec3(uSunDir));
     const NdotL = dot(N, L);
     const sunI = clamp(uSunIntensity, float(0.0), float(2.0));
