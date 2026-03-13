@@ -58,6 +58,9 @@ COPY packages/server ./packages/server
 # Install with lifecycle scripts trusted (uses env above to skip heavyweight ops).
 RUN bun install --trust
 
+# Fetch manifests to embed in the image, bypassing CDN reliance on boot.
+RUN node scripts/ensure-assets.mjs
+
 # Build in dependency order required by server runtime.
 RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/decimation && bun run build && \
