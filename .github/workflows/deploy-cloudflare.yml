@@ -98,7 +98,8 @@ jobs:
             echo "  → $key"
             wrangler r2 object put "$BUCKET/$key" \
               --file="$file" \
-              --content-type="application/json"
+              --content-type="application/json" \
+              --cache-control="max-age=0, no-cache, no-store, must-revalidate"
           done
           
           echo "✅ Manifests uploaded to R2"
