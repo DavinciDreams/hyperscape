@@ -77,33 +77,7 @@ jobs:
       - name: Install Wrangler
         run: npm install -g wrangler
 
-      - name: Configure R2 CORS
-        run: |
-          BUCKET="${{ steps.target.outputs.bucket }}"
-          echo "🔧 Configuring CORS for R2 bucket: $BUCKET"
 
-          # Create CORS configuration (wrangler R2 API format)
-          # Use wildcard origin - these are public read-only assets (models, textures, audio)
-          cat > /tmp/cors-rules.json << 'EOF'
-          {
-            "rules": [
-              {
-                "allowed": {
-                  "origins": ["*"],
-                  "methods": ["GET", "HEAD", "OPTIONS"],
-                  "headers": ["*"]
-                },
-                "exposed": ["Content-Length", "Content-Type", "Content-Range", "Accept-Ranges", "ETag"],
-                "maxAge": 86400
-              }
-            ]
-          }
-          EOF
-
-          wrangler r2 bucket cors set "$BUCKET" --file /tmp/cors-rules.json
-          echo "✅ CORS configured for $BUCKET"
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Upload manifests to R2
         run: |

@@ -255,14 +255,14 @@ async function fetchManifestsFromCDN(
     );
   }
 
-  // In development, skip CDN fetch only if REQUIRED local manifests already exist.
-  // This preserves local asset editing while preventing partial-cache startup failures.
-  if (nodeEnv === "development") {
+  // Skip CDN fetch only if REQUIRED local manifests already exist.
+  // This preserves local asset editing and prevents downgrading to an outdated CDN version in production.
+  if (process.env.FORCE_FETCH_CDN !== "true") {
     const missingRequired = await getMissingRequiredManifests(manifestsDir);
     if (missingRequired.length === 0) {
       const existingFiles = await fs.readdir(manifestsDir).catch(() => []);
       console.log(
-        `[Config] ⏭️  Skipping CDN fetch in development - required local manifests found (${existingFiles.length} file(s))`,
+        `[Config] ⏭️  Skipping CDN fetch - required local manifests found (${existingFiles.length} file(s))`,
       );
       return;
     }
