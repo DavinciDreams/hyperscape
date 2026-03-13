@@ -128,15 +128,15 @@ echo "[deploy] Installing system build dependencies..."
 apt-get update && apt-get install -y build-essential python3 socat xvfb git-lfs ffmpeg wget gnupg iproute2 lsof postgresql postgresql-client || true
 git lfs install || true
 
-# ── Install Chrome Beta channel (WebGPU + better stability than Dev) ─
-echo "[deploy] Installing Chrome Beta for WebGPU support..."
-if ! command -v google-chrome-beta &> /dev/null; then
+# ── Install Chrome Canary channel (Required for WebGPU on Linux) ─
+echo "[deploy] Installing Chrome Canary for WebGPU support..."
+if ! command -v google-chrome-unstable &> /dev/null; then
     wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - || true
     echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-    apt-get update && apt-get install -y google-chrome-beta || true
-    echo "[deploy] Chrome Beta installed: $(google-chrome-beta --version 2>/dev/null || echo 'install failed')"
+    apt-get update && apt-get install -y google-chrome-unstable || true
+    echo "[deploy] Chrome Canary installed: $(google-chrome-unstable --version 2>/dev/null || echo 'install failed')"
 else
-    echo "[deploy] Chrome Beta already installed: $(google-chrome-beta --version)"
+    echo "[deploy] Chrome Canary already installed: $(google-chrome-unstable --version)"
 fi
 
 # ── Fix any broken apt dependencies (NVIDIA driver conflicts) ─
@@ -263,15 +263,15 @@ for attempt in $(seq 1 30); do
     STREAMING_OK=false
     CDN_OK=true
 
-    if curl -fsS http://127.0.0.1:5555/health > /dev/null 2>&1; then
+    if curl -fsS --max-time 10 http://127.0.0.1:5555/health > /dev/null 2>&1; then
         SERVER_OK=true
     fi
-    if curl -fsS http://127.0.0.1:5555/api/streaming/state > /dev/null 2>&1; then
+    if curl -fsS --max-time 10 http://127.0.0.1:5555/api/streaming/state > /dev/null 2>&1; then
         STREAMING_OK=true
     fi
     if [ "$REQUIRE_LOCAL_CDN" = true ]; then
         CDN_OK=false
-        if curl -fsS http://127.0.0.1:8080/health > /dev/null 2>&1; then
+        if curl -fsS --max-time 10 http://127.0.0.1:8080/health > /dev/null 2>&1; then
             CDN_OK=true
         fi
     fi

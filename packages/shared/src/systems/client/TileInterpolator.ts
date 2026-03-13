@@ -1566,8 +1566,12 @@ export class TileInterpolator {
       this.setEntityState(entityId, state);
     }
 
-    // CHANGED: Apply combat rotation even during movement
-    // In PvP/duels, players should face their opponent while moving
+    // Apply combat rotation ONLY if not currently moving
+    // Movement direction takes priority over combat rotation (OSRS-accurate)
+    if (state.isMoving) {
+      return false; // Ignored while moving
+    }
+
     // The inCombatRotation flag prevents movement code from overwriting this
     state.inCombatRotation = true;
 
