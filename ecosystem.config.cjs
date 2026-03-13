@@ -169,7 +169,7 @@ module.exports = {
         MIMALLOC_PURGE_DELAY: "1000000",
         STREAM_CAPTURE_MODE: "cdp",
         STREAM_CAPTURE_HEADLESS: "false",
-        STREAM_CAPTURE_CHANNEL: "chrome-canary",
+        STREAM_CAPTURE_CHANNEL: "chrome-beta",
         STREAM_CAPTURE_ANGLE: "vulkan",
         STREAM_CAPTURE_WIDTH: "1280",
         STREAM_CAPTURE_HEIGHT: "720",
