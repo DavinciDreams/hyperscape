@@ -105,40 +105,8 @@ jobs:
       # This pauses new duel cycles and waits for current markets to resolve
       - name: Enter Maintenance Mode
         continue-on-error: true
-        env:
-          VAST_HOST: ${{ secrets.VAST_HOST }}
-          VAST_PORT: ${{ secrets.VAST_PORT }}
-          VAST_SSH_KEY: ${{ secrets.VAST_SSH_KEY }}
-          ADMIN_CODE: ${{ secrets.ADMIN_CODE }}
         run: |
-          if [ -z "$VAST_HOST" ] || [ -z "$VAST_PORT" ] || [ -z "$VAST_SSH_KEY" ] || [ -z "$ADMIN_CODE" ]; then
-            echo "Skipping maintenance mode - SSH or admin secrets not configured"
-            exit 0
-          fi
-
-          mkdir -p ~/.ssh
-          echo "$VAST_SSH_KEY" > ~/.ssh/vast_key
-          chmod 600 ~/.ssh/vast_key
-
-          echo "Entering maintenance mode..."
-          RESPONSE=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
-            -i ~/.ssh/vast_key -p "$VAST_PORT" "root@$VAST_HOST" \
-            "curl -s -X POST \
-              'http://127.0.0.1:5555/admin/maintenance/enter' \
-              -H 'Content-Type: application/json' \
-              -H 'x-admin-code: $ADMIN_CODE' \
-              -d '{\"reason\":\"deployment\",\"timeoutMs\":300000}' \
-              --max-time 600" || echo '{"error":"ssh or curl failed"}')
-
-          echo "Maintenance mode response: $RESPONSE"
-
-          SAFE=$(echo "$RESPONSE" | jq -r '.status.safeToDeploy // "unknown"')
-          PHASE=$(echo "$RESPONSE" | jq -r '.status.currentPhase // "unknown"')
-          MARKETS=$(echo "$RESPONSE" | jq -r '.status.pendingMarkets // "unknown"')
-
-          echo "Safe to deploy: $SAFE"
-          echo "Current phase: $PHASE"
-          echo "Pending markets: $MARKETS"
+          echo "Temporarily skipping maintenance mode to prevent SSH hang"
 
       # Step 2: Deploy to Vast.ai
       # First checkout main explicitly to ensure we have the latest deploy script
