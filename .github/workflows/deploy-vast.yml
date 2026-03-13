@@ -17,6 +17,10 @@ on:
         description: 'Force deploy even if GPU display check fails'
         required: false
         default: 'false'
+      dump_logs:
+        description: 'Skip deploy and just dump PM2 logs'
+        required: false
+        default: 'false'
 
 jobs:
   # Pre-flight check: Verify instance has GPU display support for WebGPU
@@ -147,6 +151,18 @@ jobs:
           key: ${{ secrets.VAST_SSH_KEY }}
           command_timeout: 30m
           script: |
+            if [ "${{ github.event.inputs.dump_logs }}" = "true" ]; then
+              echo "DUMP_LOGS IS TRUE - dumping PM2 logs and exiting"
+              export PATH="/root/.bun/bin:$PATH"
+              echo "---- PM2 STATUS ----"
+              bunx pm2 status || true
+              echo "---- ERROR LOGS ----"
+              tail -n 500 /root/hyperscape/packages/server/logs/duel-error.log 2>/dev/null || echo "No error log found"
+              echo "---- OUT LOGS ----"
+              tail -n 200 /root/hyperscape/packages/server/logs/duel-out.log 2>/dev/null || echo "No out log found"
+              exit 0
+            fi
+
             # Install bun if not present (always check first)
             echo "[deploy] Checking for bun..."
             if [ ! -f "/root/.bun/bin/bun" ]; then
