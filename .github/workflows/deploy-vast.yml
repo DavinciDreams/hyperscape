@@ -117,14 +117,14 @@ jobs:
           chmod 600 ~/.ssh/vast_key
 
           echo "Entering maintenance mode..."
-          RESPONSE=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+          RESPONSE=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
             -i ~/.ssh/vast_key -p "$VAST_PORT" "root@$VAST_HOST" \
             "curl -s -X POST \
               'http://127.0.0.1:5555/admin/maintenance/enter' \
               -H 'Content-Type: application/json' \
               -H 'x-admin-code: $ADMIN_CODE' \
-              -d '{\"reason\":\"deployment\",\"timeoutMs\":300000}' \
-              --max-time 600" || echo '{"error":"ssh or curl failed"}')
+              -d '{\"reason\":\"deployment\",\"timeoutMs\":30000}' \
+              --max-time 30" || echo '{"error":"ssh or curl failed"}')
 
           echo "Maintenance mode response: $RESPONSE"
 
