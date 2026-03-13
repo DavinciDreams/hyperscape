@@ -282,11 +282,16 @@ async function fetchManifestsFromCDN(
     let failed = 0;
 
     for (const file of MANIFEST_FILES) {
-      const url = `${baseUrl}manifests/${file}`;
+      const url = `${baseUrl}manifests/${file}?t=${Date.now()}`;
       const localPath = path.join(manifestsDir, file);
 
       try {
-        const response = await fetch(url);
+        const response = await fetch(url, {
+          headers: {
+            "Cache-Control": "no-cache",
+          },
+        });
+
         if (!response.ok) {
           console.warn(`[Config] ⚠️  ${file}: HTTP ${response.status}`);
           failed++;
@@ -314,8 +319,8 @@ async function fetchManifestsFromCDN(
           updated++;
           console.log(`[Config] ✅ ${file} updated`);
         }
-      } catch (err) {
-        const message = errMsg(err);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         console.warn(`[Config] ⚠️  Failed to fetch ${file}: ${message}`);
         failed++;
       }
