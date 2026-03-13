@@ -660,7 +660,8 @@ function parseSolanaSecretRef(raw, Keypair, bs58) {
       // fall through to base64
     }
 
-    const decodedB64 = Buffer.from(trimmed, "base64");
+    const b64Input = trimmed.startsWith("base64:") ? trimmed.slice(7) : trimmed;
+    const decodedB64 = Buffer.from(b64Input.trim(), "base64");
     if (decodedB64.length === 64) {
       return Keypair.fromSecretKey(Uint8Array.from(decodedB64));
     }
@@ -1408,6 +1409,10 @@ async function main() {
     resolvedSolanaAuthority = await resolveUsableSolanaAuthority({
       rpcUrl: duelSolanaRpcUrl,
       candidateRefs: [
+        process.env.DUEL_ARENA_ORACLE_SOLANA_AUTHORITY_SECRET,
+        serverEnv.DUEL_ARENA_ORACLE_SOLANA_AUTHORITY_SECRET,
+        process.env.DUEL_ARENA_ORACLE_SOLANA_REPORTER_SECRET,
+        serverEnv.DUEL_ARENA_ORACLE_SOLANA_REPORTER_SECRET,
         process.env.DUEL_SOLANA_ARENA_AUTHORITY_SECRET,
         process.env.SOLANA_ARENA_AUTHORITY_SECRET,
         serverEnv.SOLANA_ARENA_AUTHORITY_SECRET,

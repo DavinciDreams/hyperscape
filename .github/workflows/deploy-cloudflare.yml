@@ -117,7 +117,7 @@ jobs:
           
           echo "📦 Uploading assets to R2 bucket: $BUCKET"
           
-          find "$ASSETS_DIR" -type f | while read file; do
+          find "$ASSETS_DIR" -type f | grep -v "$ASSETS_DIR/manifests/" | while read file; do
             rel_path="${file#$ASSETS_DIR/}"
             key="$rel_path"
             
