@@ -285,8 +285,9 @@ for attempt in $(seq 1 30); do
         echo "[deploy] ERROR: local services failed health checks after ${attempt} attempts"
         echo "[deploy] pm2 status:"
         bunx pm2 status || true
-        echo "[deploy] tailing duel logs:"
-        bunx pm2 logs hyperscape-duel --lines 10000 --nostream || true
+        echo "[deploy] tailing duel logs directly from OS:"
+        tail -n 10000 /root/.pm2/logs/hyperscape-duel-error.log 2>/dev/null || true
+        tail -n 10000 /root/.pm2/logs/hyperscape-duel-out.log 2>/dev/null || true
         exit 1
     fi
 
