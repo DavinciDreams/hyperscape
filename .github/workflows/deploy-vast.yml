@@ -17,6 +17,10 @@ on:
         description: 'Force deploy even if GPU display check fails'
         required: false
         default: 'false'
+      dump_logs:
+        description: 'Bypass deployment and dump PM2 logs from instance'
+        required: false
+        default: 'false'
 
 jobs:
   # Pre-flight check: Verify instance has GPU display support for WebGPU
