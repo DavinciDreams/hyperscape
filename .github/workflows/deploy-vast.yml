@@ -188,6 +188,7 @@ jobs:
             KICK_RTMP_URL=${{ secrets.KICK_RTMP_URL }}
             YOUTUBE_STREAM_KEY=
             PUBLIC_CDN_URL=https://assets.hyperscape.club
+            FORCE_FETCH_CDN=true
             SOLANA_DEPLOYER_PRIVATE_KEY=${{ secrets.SOLANA_DEPLOYER_PRIVATE_KEY }}
             ENVEOF
             # Clean up any leading whitespace from heredoc
