@@ -578,14 +578,14 @@ async function registerStaticFiles(
     // Otherwise, the public directory already serves /assets/ for the frontend
     if (!hasClientAssets) {
       await fastify.register(statics, {
-        root: config.assetsDir,
+        root: legacyAssetsRoot,
         prefix: "/assets/",
         decorateReply: false,
         setHeaders: (res, filePath) => {
           setAssetHeaders(res, filePath);
         },
       });
-      console.log(`[HTTP] ✅ Registered /assets/ → ${config.assetsDir}`);
+      console.log(`[HTTP] ✅ Registered /assets/ → ${legacyAssetsRoot}`);
     }
   } else {
     console.log(
