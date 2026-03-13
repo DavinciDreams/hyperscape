@@ -96,7 +96,7 @@ jobs:
             rel_path="${file#$MANIFESTS_DIR/}"
             key="manifests/$rel_path"
             echo "  → $key"
-            wrangler r2 object put "$BUCKET/$key" \
+            wrangler r2 object put "$BUCKET/$key" --remote \
               --file="$file" \
               --content-type="application/json" \
               --cache-control="max-age=0, no-cache, no-store, must-revalidate"
@@ -139,7 +139,7 @@ jobs:
             esac
             
             echo "  → $key ($content_type)"
-            wrangler r2 object put "$BUCKET/$key" \
+            wrangler r2 object put "$BUCKET/$key" --remote \
               --file="$file" \
               --content-type="$content_type"
           done
