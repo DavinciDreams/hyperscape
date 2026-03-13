@@ -2003,7 +2003,7 @@ async function main() {
     ).trim();
     const effectiveCaptureChannel =
       process.platform === "linux" && requestedCaptureChannel === "chromium"
-        ? "chrome-beta"
+        ? "chrome-canary"
         : process.platform === "darwin" &&
           requestedCaptureChannel === "chromium"
           ? "chrome"
@@ -2011,7 +2011,7 @@ async function main() {
           (process.platform === "linux"
             ? hasChromeDev
               ? "chrome-dev"
-              : "chrome-beta"
+              : "chrome-canary"
             : process.platform === "darwin"
               ? "chrome"
               : "chrome");
