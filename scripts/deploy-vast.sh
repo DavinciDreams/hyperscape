@@ -159,6 +159,8 @@ fi
 # ── Install dependencies ──────────────────────────────────────
 echo "[deploy] Installing dependencies..."
 export CI=true
+# Clean up assets folder to forcefully redownload the latest biomes manifest over the VM cache.
+rm -rf packages/server/world/assets
 bun install
 
 # ── Tear down existing processes FIRST (to release DB connections) ──
