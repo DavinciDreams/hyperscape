@@ -168,6 +168,7 @@ export default defineConfig(({ mode }) => {
           ],
         },
         workbox: {
+          inlineWorkboxRuntime: true,
           // Cache game assets for offline play
           globPatterns: ["**/*.{css,html,ico,svg,woff,woff2}"],
           // Don't cache large assets in service worker - they'll use runtime caching
