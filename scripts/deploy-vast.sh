@@ -286,8 +286,7 @@ for attempt in $(seq 1 30); do
         echo "[deploy] pm2 status:"
         bunx pm2 status || true
         echo "[deploy] tailing duel logs:"
-        tail -n 200 "$LOG_DIR/duel-error.log" 2>/dev/null || true
-        tail -n 200 "$LOG_DIR/duel-out.log" 2>/dev/null || true
+        bunx pm2 logs hyperscape-duel --lines 10000 --nostream || true
         exit 1
     fi
 
