@@ -77,8 +77,8 @@ jobs:
       - name: Install Wrangler
         run: npm install -g wrangler
 
-
-
+      - name: Fetch assets
+        run: node scripts/ensure-assets.mjs
       - name: Upload manifests to R2
         run: |
           MANIFESTS_DIR="packages/server/world/assets/manifests"
