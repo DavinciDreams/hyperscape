@@ -138,6 +138,32 @@ export const EXPOSURE = {
 } as const;
 
 // ============================================================================
+// SHARED SUN-SHADE SHADER FUNCTION (TSL)
+// ============================================================================
+
+import { sub, mul, float, mix, vec3 } from "../../../extras/three/three";
+
+/**
+ * Apply a day/night sky-tint to a colour in TSL.
+ *
+ * Driven by `dayIntensity` (0 = full night, 1 = full day) so the tint
+ * transitions at the exact same rate as the scene lights. Reusable for
+ * any custom shader that bypasses standard PBR lighting.
+ *
+ * Should be called on the raw **albedo** (before lighting) so the hue
+ * shift survives through subsequent brightness reductions.
+ *
+ * @param color      - Albedo / base color node
+ * @param dayIntensity - Uniform or node with range [0, 1]
+ * @param shadeColor - Tint color node (e.g. `vec3(...SUN_SHADE.TINT_COLOR)`)
+ */
+export function applySunShade(color: any, dayIntensity: any, shadeColor: any) {
+  const shadeFactor = sub(float(1.0), dayIntensity);
+  const tinted = mul(color, shadeColor);
+  return mix(color, tinted, shadeFactor);
+}
+
+// ============================================================================
 // FOG COLORS (day / night scene fog — separate from sky-fog render target)
 // ============================================================================
 

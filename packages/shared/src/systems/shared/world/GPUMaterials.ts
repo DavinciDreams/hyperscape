@@ -62,7 +62,7 @@ import {
 import { varyingProperty } from "three/tsl";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
-import { SUN_SHADE, SUN_LIGHT } from "./LightingConfig";
+import { SUN_SHADE, SUN_LIGHT, applySunShade } from "./LightingConfig";
 
 // ============================================================================
 // CONFIGURATION
@@ -1062,11 +1062,7 @@ export function createTreeDissolveMaterial(
     const dayFactor = div(sunI, float(2.0));
 
     // ---- Sun shade on albedo (driven by dayIntensity to match scene light timing) ----
-    {
-      const shadeFactor = sub(float(1.0), uDayIntensity);
-      const tinted = mul(baseAlbedo, vec3(uShadeColor));
-      baseAlbedo = mix(baseAlbedo, tinted, shadeFactor);
-    }
+    baseAlbedo = applySunShade(baseAlbedo, uDayIntensity, vec3(uShadeColor));
 
     // ---- 3-band toon lighting (hard-edged shadow / mid / bright) ----
     const L = normalize(vec3(uSunDir));
