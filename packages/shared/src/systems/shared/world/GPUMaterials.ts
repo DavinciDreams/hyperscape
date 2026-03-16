@@ -944,7 +944,7 @@ export function applyRimHighlight(
 }
 
 // ============================================================================
-// TREE DISSOLVE MATERIAL (FORTNITE-STYLE FOLIAGE SHADING)
+// TREE DISSOLVE MATERIAL (TOON FOLIAGE SHADING)
 // ============================================================================
 
 /**
@@ -956,10 +956,10 @@ export type TreeMaterialOptions = DissolveMaterialOptions & {
 };
 
 /**
- * Tree-specific dissolve material with soft stylized shading.
+ * Tree-specific dissolve material with toon shading.
  * Extends DissolveMaterial with:
- * - Soft clamped lighting (Lambert compressed to [0.7, 1.0], no harsh shadows)
- * - Fresnel edge brightening on leaves (morpho-style rim glow)
+ * - Quantized 3-band toon lighting (hard-edged shadow / mid / bright)
+ * - Hard-edged Fresnel rim on leaves
  * - Back-SSS translucency for leaves (warm glow when backlit by sun)
  * - Wind vertex animation for leaves
  * - Vertex-color AO (G channel darkens crevices)
@@ -977,13 +977,13 @@ export type TreeDissolveMaterial = DissolveMaterial & {
 };
 
 /**
- * Creates a tree dissolve material with soft clamped lighting, SSS, and wind.
+ * Creates a tree dissolve material with toon lighting, SSS, and wind.
  *
- * 1. **Soft lighting** — Lambert + smoothstep clamped to [0.7, 1.0] (no harsh shadows).
+ * 1. **Toon lighting** — Quantized 3-band Lambert (hard shadow / mid / bright).
  * 2. **AO** — Vertex color G channel as ambient occlusion.
  * 3. **SSS** — Back-scatter translucency on leaf materials (warm glow when backlit).
  * 4. **Wind** — Sine-wave vertex displacement on leaf materials.
- * 5. **Edge brightening** — Fresnel-based rim glow on leaves (morpho effect).
+ * 5. **Rim** — Hard-edged Fresnel rim on leaves.
  * 6. **Saturation** — Subtle boost keeps colors rich.
  * 7. **Rim highlight** — Per-instance Fresnel glow for hover feedback.
  *
@@ -1021,12 +1021,13 @@ export function createTreeDissolveMaterial(
   const HL_BRIGHTEN = 0.08;
   const HL_RIM_POWER = 2.5;
   const HL_RIM_STRENGTH = 0.4;
-  const LIGHT_AMBIENT = 0.3;
-  const LIGHT_DIFFUSE_STR = 2.0;
-  const LIGHT_CLAMP_LO = 0.7;
-  const LIGHT_CLAMP_HI = 1.0;
-  const LIGHT_AMBIENT_BOOST = 0.15;
-  const EDGE_BRIGHT = 1.25;
+  const TOON_DARK = 0.5;
+  const TOON_MID = 0.75;
+  const TOON_BRIGHT = 1.0;
+  const TOON_SHADOW_EDGE = 0.0;
+  const TOON_MID_EDGE = 0.5;
+  const TOON_RIM_THRESHOLD = 0.3;
+  const TOON_RIM_BRIGHT = 1.3;
   const NIGHT_MIN_BRIGHTNESS = 0.3;
 
   // --- Wind vertex displacement (leaf materials only) ---
@@ -1062,7 +1063,7 @@ export function createTreeDissolveMaterial(
   );
   material.fog = false;
 
-  // --- Output: soft clamped lighting (bypass PBR, compute Lambert from scratch) ---
+  // --- Output: toon lighting (bypass PBR, compute Lambert from scratch) ---
   const albedoMap = material.map;
   const matColor = vec3(material.color.r, material.color.g, material.color.b);
 
@@ -1084,33 +1085,28 @@ export function createTreeDissolveMaterial(
       baseAlbedo = mul(baseAlbedo, aoMul);
     }
 
-    // ---- Custom Lambert lighting (sphere normals baked into vertex attribute) ----
+    // ---- 3-band toon lighting (hard-edged shadow / mid / bright) ----
     const N = normalize(mul(modelNormalMatrix, normalLocal));
     const L = normalize(vec3(uSunDir));
     const NdotL = dot(N, L);
     const sunI = clamp(uSunIntensity, float(0.0), float(2.0));
     const dayFactor = div(sunI, float(2.0));
-    const diffuse = mul(
-      mul(max(NdotL, float(0.0)), float(LIGHT_DIFFUSE_STR)),
-      sunI,
-    );
-    const ambient = float(LIGHT_AMBIENT);
-    const totalLight = add(ambient, diffuse);
-    const softLight = clamp(
-      smoothstep(float(0.9), float(1.1), totalLight),
-      float(LIGHT_CLAMP_LO),
-      float(LIGHT_CLAMP_HI),
+    const band1 = step(float(TOON_SHADOW_EDGE), NdotL);
+    const band2 = step(float(TOON_MID_EDGE), NdotL);
+    const toonLight = add(
+      float(TOON_DARK),
+      add(
+        mul(band1, float(TOON_MID - TOON_DARK)),
+        mul(band2, float(TOON_BRIGHT - TOON_MID)),
+      ),
     );
     const nightDim = mix(float(NIGHT_MIN_BRIGHTNESS), float(1.0), dayFactor);
-    let result: any = mul(
-      baseAlbedo,
-      mul(add(softLight, float(LIGHT_AMBIENT_BOOST)), nightDim),
-    );
+    let result: any = mul(baseAlbedo, mul(toonLight, nightDim));
 
     // ---- Sun shade (shadow-side sky tint, matches terrain) ----
     result = applyTerrainSunShade(result, N, L, vec3(uShadeColor));
 
-    // ---- SSS + Fresnel edge brightening (leaf only, scaled by dayFactor) ----
+    // ---- SSS + hard-edged toon rim (leaf only, scaled by dayFactor) ----
     if (isLeaf) {
       const V = normalize(sub(cameraPosition, positionWorld));
 
@@ -1123,14 +1119,15 @@ export function createTreeDissolveMaterial(
       );
       result = add(result, mul(vec3(0.95, 1.0, 0.7), sssFactor));
 
-      // Edge brightening (fades at night)
+      // Hard-edged toon rim (fades at night)
       const EDotN = clamp(dot(V, N), float(0.0), float(1.0));
-      const edgeBright = mix(
-        float(EDGE_BRIGHT),
+      const rimMask = sub(float(1.0), step(float(TOON_RIM_THRESHOLD), EDotN));
+      const rimBright = mix(
         float(1.0),
-        sub(float(1.0), dayFactor),
+        float(TOON_RIM_BRIGHT),
+        mul(rimMask, dayFactor),
       );
-      result = mix(mul(result, edgeBright), result, EDotN);
+      result = mul(result, rimBright);
     }
 
     // ---- Saturation boost (scales with dayFactor so night stays muted) ----
