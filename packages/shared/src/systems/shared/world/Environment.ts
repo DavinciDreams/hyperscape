@@ -8,6 +8,14 @@ import { System } from "../infrastructure/System";
 import { SkySystem } from "./SkySystem";
 import { setLamppostNightMix } from "./LamppostLightMask";
 import { FOG_NEAR, FOG_FAR } from "./FogConfig";
+import {
+  DAY_CYCLE,
+  SUN_LIGHT,
+  HEMISPHERE_LIGHT,
+  AMBIENT_LIGHT,
+  EXPOSURE,
+  FOG_COLORS,
+} from "./LightingConfig";
 import type {
   BaseEnvironment,
   EnvironmentModel,
@@ -154,11 +162,7 @@ export class Environment extends System {
   private lastLightAnchor: THREE.Vector3 = new THREE.Vector3(); // Camera anchor position
   private readonly LIGHT_DISTANCE = 400; // Distance from target to light
 
-  // Auto exposure settings - mimics eye adaptation to different light levels
-  // Higher exposure at night compensates for lower light, keeping things visible
-  private readonly DAY_EXPOSURE = 0.85; // Standard exposure for bright daylight
-  private readonly NIGHT_EXPOSURE = 1.7; // Boosted exposure for night visibility
-  private currentExposure: number = 0.85; // Smoothed current value
+  private currentExposure: number = EXPOSURE.DAY;
 
   // CSMShadowNode for WebGPU cascaded shadows
   private csmShadowNode: InstanceType<typeof CSMShadowNode> | null = null;
@@ -531,24 +535,34 @@ export class Environment extends System {
         // ===================
         // TRANSITION FADE - fade light out during sun/moon swap
         // ===================
-        const DAWN_START = 0.22;
-        const DAWN_MID = 0.25;
-        const DAWN_END = 0.28;
-        const DUSK_START = 0.72;
-        const DUSK_MID = 0.75;
-        const DUSK_END = 0.78;
-
         let transitionFade = 1.0;
-        if (dayPhase >= DAWN_START && dayPhase < DAWN_MID) {
+        if (dayPhase >= DAY_CYCLE.DAWN_START && dayPhase < DAY_CYCLE.DAWN_MID) {
           transitionFade =
-            1.0 - (dayPhase - DAWN_START) / (DAWN_MID - DAWN_START);
-        } else if (dayPhase >= DAWN_MID && dayPhase < DAWN_END) {
-          transitionFade = (dayPhase - DAWN_MID) / (DAWN_END - DAWN_MID);
-        } else if (dayPhase >= DUSK_START && dayPhase < DUSK_MID) {
+            1.0 -
+            (dayPhase - DAY_CYCLE.DAWN_START) /
+              (DAY_CYCLE.DAWN_MID - DAY_CYCLE.DAWN_START);
+        } else if (
+          dayPhase >= DAY_CYCLE.DAWN_MID &&
+          dayPhase < DAY_CYCLE.DAWN_END
+        ) {
           transitionFade =
-            1.0 - (dayPhase - DUSK_START) / (DUSK_MID - DUSK_START);
-        } else if (dayPhase >= DUSK_MID && dayPhase < DUSK_END) {
-          transitionFade = (dayPhase - DUSK_MID) / (DUSK_END - DUSK_MID);
+            (dayPhase - DAY_CYCLE.DAWN_MID) /
+            (DAY_CYCLE.DAWN_END - DAY_CYCLE.DAWN_MID);
+        } else if (
+          dayPhase >= DAY_CYCLE.DUSK_START &&
+          dayPhase < DAY_CYCLE.DUSK_MID
+        ) {
+          transitionFade =
+            1.0 -
+            (dayPhase - DAY_CYCLE.DUSK_START) /
+              (DAY_CYCLE.DUSK_MID - DAY_CYCLE.DUSK_START);
+        } else if (
+          dayPhase >= DAY_CYCLE.DUSK_MID &&
+          dayPhase < DAY_CYCLE.DUSK_END
+        ) {
+          transitionFade =
+            (dayPhase - DAY_CYCLE.DUSK_MID) /
+            (DAY_CYCLE.DUSK_END - DAY_CYCLE.DUSK_MID);
         }
         transitionFade =
           transitionFade * transitionFade * (3 - 2 * transitionFade); // smoothstep
@@ -558,40 +572,40 @@ export class Environment extends System {
         // Use target direction + interpolation to prevent sudden jumps
         // ===================
         if (isDay) {
-          // Daytime: light comes FROM the sun (negate sunDirection which points TO sun)
           this.targetLightDirection.copy(this.skySystem.sunDirection).negate();
         } else {
-          // Nighttime: light comes FROM the moon (at -sunDirection position)
           this.targetLightDirection.copy(this.skySystem.sunDirection);
         }
 
-        // Smooth interpolation to prevent sudden direction changes causing flicker
-        // Lerp factor of 0.02 = ~50 frames to reach target (smooth over ~1 second at 60fps)
-        this.lightDirection.lerp(this.targetLightDirection, 0.02);
+        this.lightDirection.lerp(
+          this.targetLightDirection,
+          SUN_LIGHT.DIRECTION_LERP,
+        );
 
         // ===================
         // LIGHT INTENSITY & COLOR - Single light, simple and correct
         // ===================
         if (isDay) {
-          // Sunlight - warm golden light
-          const sunIntensity = dayIntensity * 1.8 * transitionFade;
+          const sunIntensity =
+            dayIntensity * SUN_LIGHT.DAY_INTENSITY_MULTIPLIER * transitionFade;
           this.sunLight.intensity = sunIntensity;
 
-          // Golden hour coloring near horizon
-          const nearHorizon =
-            (dayPhase >= 0.22 && dayPhase < 0.32) ||
-            (dayPhase >= 0.68 && dayPhase < 0.78);
+          const nearHorizon = SUN_LIGHT.GOLDEN_HOUR_RANGES.some(
+            ([start, end]) => dayPhase >= start && dayPhase < end,
+          );
           if (nearHorizon) {
-            this.sunLight.color.setRGB(1.0, 0.85, 0.6);
+            this.sunLight.color.setRGB(...SUN_LIGHT.GOLDEN_HOUR_COLOR);
           } else {
-            this.sunLight.color.setRGB(1.0, 0.98, 0.92);
+            this.sunLight.color.setRGB(...SUN_LIGHT.DAY_COLOR);
           }
         } else {
-          // Moonlight - cool blue light (stronger for better night visibility)
           const nightIntensity = 1 - dayIntensity;
-          const moonIntensity = nightIntensity * 0.6 * transitionFade;
+          const moonIntensity =
+            nightIntensity *
+            SUN_LIGHT.MOON_INTENSITY_MULTIPLIER *
+            transitionFade;
           this.sunLight.intensity = moonIntensity;
-          this.sunLight.color.setRGB(0.6, 0.7, 0.9);
+          this.sunLight.color.setRGB(...SUN_LIGHT.MOON_COLOR);
         }
 
         // ===================
@@ -744,35 +758,38 @@ export class Environment extends System {
     const nightIntensity = 1 - dayIntensity;
 
     if (this.hemisphereLight) {
-      // Hemisphere light: brighter during day, visible at night
-      // Day: 0.9, Night: 0.4 (auto exposure handles the rest)
-      this.hemisphereLight.intensity = 0.4 + dayIntensity * 0.5;
+      this.hemisphereLight.intensity =
+        HEMISPHERE_LIGHT.INTENSITY_BASE +
+        dayIntensity * HEMISPHERE_LIGHT.INTENSITY_DAY_ADD;
 
-      // Shift sky color from bright blue (day) to blue-silver (night)
+      const [dR, dG, dB] = HEMISPHERE_LIGHT.DAY_SKY_COLOR;
+      const [nR, nG, nB] = HEMISPHERE_LIGHT.NIGHT_SKY_COLOR;
       this.hemisphereLight.color.setRGB(
-        0.53 * dayIntensity + 0.25 * nightIntensity, // R: moonlit sky
-        0.81 * dayIntensity + 0.35 * nightIntensity, // G: moonlit sky
-        0.92 * dayIntensity + 0.5 * nightIntensity, // B: blue tint at night
+        dR * dayIntensity + nR * nightIntensity,
+        dG * dayIntensity + nG * nightIntensity,
+        dB * dayIntensity + nB * nightIntensity,
       );
 
-      // Ground color: warm brown during day, blue-grey at night
+      const [dgR, dgG, dgB] = HEMISPHERE_LIGHT.DAY_GROUND_COLOR;
+      const [ngR, ngG, ngB] = HEMISPHERE_LIGHT.NIGHT_GROUND_COLOR;
       this.hemisphereLight.groundColor.setRGB(
-        0.36 * dayIntensity + 0.15 * nightIntensity,
-        0.27 * dayIntensity + 0.15 * nightIntensity,
-        0.18 * dayIntensity + 0.2 * nightIntensity,
+        dgR * dayIntensity + ngR * nightIntensity,
+        dgG * dayIntensity + ngG * nightIntensity,
+        dgB * dayIntensity + ngB * nightIntensity,
       );
     }
 
     if (this.ambientLight) {
-      // Ambient fill: provides base visibility
-      // Day: 0.5, Night: 0.3 (auto exposure handles the rest)
-      this.ambientLight.intensity = 0.3 + dayIntensity * 0.2;
+      this.ambientLight.intensity =
+        AMBIENT_LIGHT.INTENSITY_BASE +
+        dayIntensity * AMBIENT_LIGHT.INTENSITY_DAY_ADD;
 
-      // Day: warm neutral white, Night: brighter blue moonlight tint
+      const [adR, adG, adB] = AMBIENT_LIGHT.DAY_COLOR;
+      const [anR, anG, anB] = AMBIENT_LIGHT.NIGHT_COLOR;
       this.ambientLight.color.setRGB(
-        0.5 + dayIntensity * 0.5, // R: 0.5 at night, 1.0 at day
-        0.55 + dayIntensity * 0.4, // G: 0.55 at night, 0.95 at day
-        0.7 + dayIntensity * 0.25, // B: 0.7 at night, 0.95 at day (bluer at night)
+        anR + dayIntensity * (adR - anR),
+        anG + dayIntensity * (adG - anG),
+        anB + dayIntensity * (adB - anB),
       );
     }
   }
@@ -788,8 +805,7 @@ export class Environment extends System {
     // Calculate target exposure based on current dayIntensity using same formula as update
     const dayIntensity = this.skySystem.dayIntensity;
     const t = dayIntensity * dayIntensity * (3 - 2 * dayIntensity); // smoothstep
-    this.currentExposure =
-      this.NIGHT_EXPOSURE + (this.DAY_EXPOSURE - this.NIGHT_EXPOSURE) * t;
+    this.currentExposure = EXPOSURE.NIGHT + (EXPOSURE.DAY - EXPOSURE.NIGHT) * t;
 
     // Apply immediately to renderer
     const graphics = this.world.graphics as
@@ -806,31 +822,23 @@ export class Environment extends System {
    * @param dayIntensity 0-1 (0 = night, 1 = day)
    */
   private updateAutoExposure(dayIntensity: number): void {
-    // Get renderer reference
     const graphics = this.world.graphics as
       | { renderer?: { toneMappingExposure?: number } }
       | undefined;
     if (!graphics?.renderer) return;
-
-    // Calculate target exposure: lerp from night (high) to day (low)
     // Using smoothstep for natural-feeling transitions
     const t = dayIntensity * dayIntensity * (3 - 2 * dayIntensity); // smoothstep
-    const targetExposure =
-      this.NIGHT_EXPOSURE + (this.DAY_EXPOSURE - this.NIGHT_EXPOSURE) * t;
+    const targetExposure = EXPOSURE.NIGHT + (EXPOSURE.DAY - EXPOSURE.NIGHT) * t;
 
-    // Smooth interpolation to prevent jarring changes
-    // Lerp factor of 0.03 = gradual adaptation over ~30 frames
-    this.currentExposure += (targetExposure - this.currentExposure) * 0.03;
+    this.currentExposure +=
+      (targetExposure - this.currentExposure) * EXPOSURE.LERP_SPEED;
 
     // Apply to renderer
     graphics.renderer.toneMappingExposure = this.currentExposure;
   }
 
-  // Day fog color: warm beige
-  private readonly dayFogColor = new THREE.Color(0xd4c8b8);
-  // Night fog color: dark blue to blend with night sky (slightly lighter for visibility)
-  private readonly nightFogColor = new THREE.Color(0x2b3445);
-  // Blended fog color (updated each frame)
+  private readonly dayFogColor = new THREE.Color(FOG_COLORS.DAY);
+  private readonly nightFogColor = new THREE.Color(FOG_COLORS.NIGHT);
   private readonly blendedFogColor = new THREE.Color();
 
   /**
@@ -928,21 +936,17 @@ export class Environment extends System {
 
     const scene = this.world.stage.scene;
 
-    // Hemisphere light - sky color from above, ground color from below
-    // Provides natural ambient lighting that varies with direction
     this.hemisphereLight = new THREE.HemisphereLight(
-      0x87ceeb, // Sky color (light blue)
-      0x5d4837, // Ground color (warm brown)
-      0.5, // Higher intensity for better ambient
+      HEMISPHERE_LIGHT.INITIAL_SKY_COLOR,
+      HEMISPHERE_LIGHT.INITIAL_GROUND_COLOR,
+      HEMISPHERE_LIGHT.INITIAL_INTENSITY,
     );
     this.hemisphereLight.name = "EnvironmentHemisphereLight";
     scene.add(this.hemisphereLight);
 
-    // Ambient light - flat fill light for base visibility
-    // Ensures objects are never completely black (especially important without env map)
     this.ambientLight = new THREE.AmbientLight(
-      0x606070, // Neutral with slight cool tint
-      0.5, // Higher intensity since we removed env map
+      AMBIENT_LIGHT.INITIAL_COLOR,
+      AMBIENT_LIGHT.INITIAL_INTENSITY,
     );
     this.ambientLight.name = "EnvironmentAmbientLight";
     scene.add(this.ambientLight);

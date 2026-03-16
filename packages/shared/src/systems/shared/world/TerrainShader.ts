@@ -44,7 +44,7 @@ import {
 import { getRoadInfluenceTextureState } from "./RoadInfluenceMask";
 import { getLamppostLightTextureState } from "./LamppostLightMask";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
-import { applyTerrainSunShade } from "./GPUMaterials";
+import { SUN_LIGHT } from "./LightingConfig";
 
 export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
@@ -631,7 +631,6 @@ export const MAX_VERTEX_LIGHTS = 8;
 export type TerrainUniforms = {
   sunPosition: { value: THREE.Vector3 };
   sunDirection: { value: THREE.Vector3 };
-  shadeColor: { value: THREE.Color };
   time: { value: number };
   fogEnabled: { value: number }; // 1.0 = fog enabled, 0.0 = fog disabled (for minimap)
   // Vertex lighting uniforms (lampposts, etc.)
@@ -688,8 +687,7 @@ export function createTerrainMaterial(): THREE.Material & {
   const noiseTex = generateNoiseTexture();
 
   const sunPositionUniform = uniform(vec3(100, 100, 100));
-  const sunDirectionUniform = uniform(vec3(0.5, 0.8, 0.3));
-  const shadeColorUniform = uniform(vec3(0.7, 1.08, 1.22));
+  const sunDirectionUniform = uniform(vec3(...SUN_LIGHT.DEFAULT_DIRECTION));
   const timeUniform = uniform(float(0));
   const noiseScale = uniform(float(TERRAIN_SHADER_CONSTANTS.NOISE_SCALE));
 
@@ -1095,6 +1093,9 @@ export function createTerrainMaterial(): THREE.Material & {
   const fogColor = fogTexNode.rgb;
 
   // === CREATE MATERIAL ===
+  // No custom sun shade here — terrain is a standard PBR material,
+  // so it gets its night blue tint from the scene lights (moon, hemisphere,
+  // ambient) which are already blue-shifted at night in LightingConfig.
   const material = new MeshStandardNodeMaterial();
   material.colorNode = litTerrain;
   material.roughness = 1.0;
@@ -1102,25 +1103,15 @@ export function createTerrainMaterial(): THREE.Material & {
   material.side = THREE.FrontSide;
   material.fog = false;
 
-  // Apply sun shade + fog AFTER PBR lighting via outputNode
+  // Fog applied AFTER PBR lighting (fog blends with sky, must be post-lit)
   material.outputNode = Fn(() => {
     const litColor = output;
-
-    // Sun shade: shared function (identical to tree shader terrain blend)
-    const shaded = applyTerrainSunShade(
-      litColor.rgb,
-      normalWorld,
-      vec3(sunDirectionUniform),
-      vec3(shadeColorUniform),
-    );
-
-    return vec4(mix(shaded, fogColor, fogFactor), litColor.a);
+    return vec4(mix(litColor.rgb, fogColor, fogFactor), litColor.a);
   })();
 
   const terrainUniforms: TerrainUniforms = {
     sunPosition: sunPositionUniform,
     sunDirection: sunDirectionUniform as unknown as { value: THREE.Vector3 },
-    shadeColor: shadeColorUniform as unknown as { value: THREE.Color },
     time: timeUniform,
     fogEnabled: fogEnabledUniform,
     // Vertex lighting arrays

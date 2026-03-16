@@ -38,7 +38,6 @@ import type {
   ShorelineConfig,
 } from "./TerrainHeightParams";
 import { BiomeType, DEFAULT_BIOME, BIOME_LIST } from "./TerrainBiomeTypes";
-
 // Import terrain generator from procgen package
 import {
   TerrainGenerator,
@@ -5041,26 +5040,14 @@ export class TerrainSystem extends System {
       if (materialWithUniforms) {
         materialWithUniforms.terrainUniforms.time.value = this.terrainTime;
 
-        // Sync sun direction and shade color from Environment system
+        // Sync sun direction from Environment system
         const env = this.world.getSystem("environment") as {
           lightDirection?: THREE.Vector3;
-          hemisphereLight?: { color: THREE.Color };
         } | null;
         if (env?.lightDirection) {
           materialWithUniforms.terrainUniforms.sunDirection.value
             .copy(env.lightDirection)
             .negate();
-        }
-        if (env?.hemisphereLight) {
-          const c = env.hemisphereLight.color;
-          const avg = (c.r + c.g + c.b) / 3;
-          if (avg > 0.01) {
-            (materialWithUniforms.terrainUniforms.shadeColor.value as any).set(
-              c.r / avg,
-              c.g / avg,
-              c.b / avg,
-            );
-          }
         }
 
         // Fog texture is the shared fogRenderTarget from FogConfig — no sync needed

@@ -62,6 +62,7 @@ import {
 import { varyingProperty } from "three/tsl";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import { SUN_SHADE, SUN_LIGHT } from "./LightingConfig";
 
 // ============================================================================
 // CONFIGURATION
@@ -127,37 +128,6 @@ export const GPU_VEG_CONFIG = {
   /** Distance from camera where geometry is fully dissolved (meters) - at near clip */
   NEAR_CAMERA_FADE_END: 0.05,
 } as const;
-
-// ============================================================================
-// SHARED TERRAIN LIGHTING (used by both TerrainShader and tree terrain blend)
-// ============================================================================
-
-/** Sun shade strength — identical in terrain shader and tree shader */
-export const SHADE_STRENGTH = 0.3;
-
-/**
- * Compute sun shade (shadow-side sky tint) on a pre-lit color.
- * Used by both the terrain shader's outputNode and the tree shader's
- * terrain color blend so both produce the exact same result.
- *
- * @param color - Already-lit color (e.g. PBR output or manually-lit albedo)
- * @param normal - Surface normal (world space)
- * @param sunDir - Sun direction uniform (normalised inside)
- * @param shadeColor - Normalised hemisphere sky color for shadow tint
- */
-export function applyTerrainSunShade(
-  color: any,
-  normal: any,
-  sunDir: any,
-  shadeColor: any,
-) {
-  const L = normalize(sunDir);
-  const N = normalize(normal);
-  const NdotL = dot(N, L);
-  const shade = sub(float(0.5), mul(NdotL, float(0.5)));
-  const tinted = mul(color, shadeColor);
-  return mix(color, tinted, mul(shade, float(SHADE_STRENGTH)));
-}
 
 // ============================================================================
 // TYPES
@@ -969,6 +939,7 @@ export type TreeDissolveMaterial = DissolveMaterial & {
   treeUniforms: {
     sunDirection: { value: THREE.Vector3 };
     sunIntensity: { value: number };
+    dayIntensity: { value: number };
     shadeColor: { value: THREE.Color };
     windTime: { value: number };
     windStrength: { value: number };
@@ -1006,9 +977,10 @@ export function createTreeDissolveMaterial(
   material.vertexColors = false;
 
   // --- Uniforms ---
-  const uSunDir = uniform(new THREE.Vector3(0.5, 0.8, 0.3));
+  const uSunDir = uniform(new THREE.Vector3(...SUN_LIGHT.DEFAULT_DIRECTION));
   const uSunIntensity = uniform(1.0);
-  const uShadeColor = uniform(new THREE.Color(0.7, 1.08, 1.22));
+  const uDayIntensity = uniform(1.0);
+  const uShadeColor = uniform(new THREE.Color(...SUN_SHADE.TINT_COLOR));
   const uHighlightColor = uniform(new THREE.Color(0x00ffff));
   const uWindTime = uniform(0.0);
   const uWindStrength = uniform(0.3);
@@ -1085,12 +1057,21 @@ export function createTreeDissolveMaterial(
       baseAlbedo = mul(baseAlbedo, aoMul);
     }
 
-    // ---- 3-band toon lighting (hard-edged shadow / mid / bright) ----
-    const N = normalize(mul(modelNormalMatrix, normalLocal));
-    const L = normalize(vec3(uSunDir));
-    const NdotL = dot(N, L);
+    // ---- dayFactor (used by shade, toon, SSS, saturation) ----
     const sunI = clamp(uSunIntensity, float(0.0), float(2.0));
     const dayFactor = div(sunI, float(2.0));
+
+    // ---- Sun shade on albedo (driven by dayIntensity to match scene light timing) ----
+    {
+      const shadeFactor = sub(float(1.0), uDayIntensity);
+      const tinted = mul(baseAlbedo, vec3(uShadeColor));
+      baseAlbedo = mix(baseAlbedo, tinted, shadeFactor);
+    }
+
+    // ---- 3-band toon lighting (hard-edged shadow / mid / bright) ----
+    const L = normalize(vec3(uSunDir));
+    const N = normalize(mul(modelNormalMatrix, normalLocal));
+    const NdotL = dot(N, L);
     const band1 = step(float(TOON_SHADOW_EDGE), NdotL);
     const band2 = step(float(TOON_MID_EDGE), NdotL);
     const toonLight = add(
@@ -1102,9 +1083,6 @@ export function createTreeDissolveMaterial(
     );
     const nightDim = mix(float(NIGHT_MIN_BRIGHTNESS), float(1.0), dayFactor);
     let result: any = mul(baseAlbedo, mul(toonLight, nightDim));
-
-    // ---- Sun shade (shadow-side sky tint, matches terrain) ----
-    result = applyTerrainSunShade(result, N, L, vec3(uShadeColor));
 
     // ---- SSS + hard-edged toon rim (leaf only, scaled by dayFactor) ----
     if (isLeaf) {
@@ -1174,6 +1152,7 @@ export function createTreeDissolveMaterial(
   treeMat.treeUniforms = {
     sunDirection: uSunDir as unknown as { value: THREE.Vector3 },
     sunIntensity: uSunIntensity as unknown as { value: number },
+    dayIntensity: uDayIntensity as unknown as { value: number },
     shadeColor: uShadeColor as unknown as { value: THREE.Color },
     windTime: uWindTime as unknown as { value: number },
     windStrength: uWindStrength as unknown as { value: number },

@@ -879,6 +879,7 @@ export function updateGLBTreeBatchedInstancer(): void {
     sunLight?: { intensity: number };
     lightDirection?: THREE.Vector3;
     hemisphereLight?: { color: THREE.Color };
+    getDayIntensity?: () => number;
   } | null;
 
   const wind = world.getSystem("wind") as Wind | null;
@@ -908,16 +909,8 @@ export function updateGLBTreeBatchedInstancer(): void {
               2.0,
             );
           }
-          if (env?.hemisphereLight) {
-            const c = env.hemisphereLight.color;
-            const avg = (c.r + c.g + c.b) / 3;
-            if (avg > 0.01) {
-              treeMat.treeUniforms.shadeColor.value.setRGB(
-                c.r / avg,
-                c.g / avg,
-                c.b / avg,
-              );
-            }
+          if (env?.getDayIntensity) {
+            treeMat.treeUniforms.dayIntensity.value = env.getDayIntensity();
           }
           if (wind) {
             treeMat.treeUniforms.windTime.value = wind.uniforms.time.value;

@@ -84,7 +84,7 @@ let world: World | null = null;
 const pools = new Map<string, ModelPool>();
 const entityToModel = new Map<string, string>();
 
-// ---- Geometry extraction (portfolio pattern: reference, not clone) ----
+// ---- Geometry extraction (reference, not clone) ----
 
 interface MeshPart {
   geometry: THREE.BufferGeometry;
@@ -757,6 +757,7 @@ export function updateGLBTreeInstancer(): void {
     sunLight?: { intensity: number };
     lightDirection?: THREE.Vector3;
     hemisphereLight?: { color: THREE.Color };
+    getDayIntensity?: () => number;
   } | null;
 
   const wind = world.getSystem("wind") as Wind | null;
@@ -793,16 +794,8 @@ export function updateGLBTreeInstancer(): void {
               2.0,
             );
           }
-          if (env?.hemisphereLight) {
-            const c = env.hemisphereLight.color;
-            const avg = (c.r + c.g + c.b) / 3;
-            if (avg > 0.01) {
-              treeMat.treeUniforms.shadeColor.value.setRGB(
-                c.r / avg,
-                c.g / avg,
-                c.b / avg,
-              );
-            }
+          if (env?.getDayIntensity) {
+            treeMat.treeUniforms.dayIntensity.value = env.getDayIntensity();
           }
           if (wind) {
             treeMat.treeUniforms.windTime.value = wind.uniforms.time.value;

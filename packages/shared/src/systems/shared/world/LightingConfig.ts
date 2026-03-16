@@ -1,0 +1,147 @@
+/**
+ * LightingConfig - Central lighting & sky settings for the entire app
+ *
+ * Single source of truth for all lighting-related constants:
+ * sun shade, hemisphere/ambient lights, exposure, fog colors, day-night cycle.
+ *
+ * Imported by Environment, SkySystem, TerrainShader, GPUMaterials, and any
+ * other system that needs lighting parameters.
+ *
+ * @module LightingConfig
+ */
+
+// ============================================================================
+// DAY / NIGHT CYCLE
+// ============================================================================
+
+export const DAY_CYCLE = {
+  /** Full day cycle duration in seconds */
+  DURATION_SEC: 240,
+
+  /** dayPhase thresholds — 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset */
+  DAWN_START: 0.22,
+  DAWN_MID: 0.25,
+  DAWN_END: 0.28,
+  DUSK_START: 0.72,
+  DUSK_MID: 0.75,
+  DUSK_END: 0.78,
+
+  /** During full day the intensity oscillates between this floor and 1.0 */
+  NOON_MIN_INTENSITY: 0.85,
+} as const;
+
+// ============================================================================
+// DIRECTIONAL LIGHT (SUN / MOON)
+// ============================================================================
+
+export const SUN_LIGHT = {
+  /** Fallback sun direction before SkySystem takes over */
+  DEFAULT_DIRECTION: [0.5, 0.8, 0.3] as readonly [number, number, number],
+
+  /** Sun intensity = dayIntensity × this × transitionFade */
+  DAY_INTENSITY_MULTIPLIER: 1.8,
+  DAY_COLOR: [1.0, 0.98, 0.92] as readonly [number, number, number],
+
+  /** Golden-hour phase ranges [start, end] (pairs) */
+  GOLDEN_HOUR_RANGES: [
+    [0.22, 0.32],
+    [0.68, 0.78],
+  ] as readonly (readonly [number, number])[],
+  GOLDEN_HOUR_COLOR: [1.0, 0.85, 0.6] as readonly [number, number, number],
+
+  /** Moon intensity = nightIntensity × this × transitionFade */
+  MOON_INTENSITY_MULTIPLIER: 0.25,
+  MOON_COLOR: [0.05, 0.5, 0.7] as readonly [number, number, number],
+
+  /** Z-axis tilt of the sun arc (0 = flat E-W, 1 = full N-S) */
+  TILT: 0.3,
+
+  /** Lerp speed for smooth light-direction interpolation (per frame) */
+  DIRECTION_LERP: 0.02,
+} as const;
+
+// ============================================================================
+// SUN SHADE (shadow-side sky tint applied in shaders)
+// ============================================================================
+
+export const SUN_SHADE = {
+  /**
+   * Mix strength: 0 = no shade, 1 = full shade.
+   * The shade factor is `0.5 − dot(N,L) × 0.5`  (0 on lit side, 1 on shadow side).
+   * Applied on the ALBEDO (before lighting) to avoid double-darkening.
+   */
+  STRENGTH: 1.0,
+
+  /**
+   * Fixed shade tint color: vec3(0.0, 0.5, 0.7).
+   * Applied as: tinted = color × TINT_COLOR, then mixed by shade factor.
+   * Dynamic behavior comes from the shade factor (sun position), not this color.
+   */
+  TINT_COLOR: [0.0, 0.5, 0.7] as readonly [number, number, number],
+} as const;
+
+// ============================================================================
+// HEMISPHERE LIGHT (sky / ground ambient)
+// ============================================================================
+
+export const HEMISPHERE_LIGHT = {
+  INITIAL_SKY_COLOR: 0x87ceeb,
+  INITIAL_GROUND_COLOR: 0x5d4837,
+  INITIAL_INTENSITY: 0.5,
+
+  /**
+   * Runtime intensity = BASE + dayIntensity × DAY_ADD
+   * Night floor = 0.18, Day total = 0.9 (unchanged)
+   */
+  INTENSITY_BASE: 0.18,
+  INTENSITY_DAY_ADD: 0.72,
+
+  /** Sky color lerped between NIGHT → DAY based on dayIntensity */
+  DAY_SKY_COLOR: [0.53, 0.81, 0.92] as readonly [number, number, number],
+  NIGHT_SKY_COLOR: [0.0, 0.15, 0.3] as readonly [number, number, number],
+
+  /** Ground color lerped between NIGHT → DAY */
+  DAY_GROUND_COLOR: [0.36, 0.27, 0.18] as readonly [number, number, number],
+  NIGHT_GROUND_COLOR: [0.02, 0.05, 0.1] as readonly [number, number, number],
+} as const;
+
+// ============================================================================
+// AMBIENT LIGHT (flat fill)
+// ============================================================================
+
+export const AMBIENT_LIGHT = {
+  INITIAL_COLOR: 0x606070,
+  INITIAL_INTENSITY: 0.5,
+
+  /**
+   * Runtime intensity = BASE + dayIntensity × DAY_ADD
+   * Night floor = 0.18, Day total = 0.5 (unchanged)
+   */
+  INTENSITY_BASE: 0.18,
+  INTENSITY_DAY_ADD: 0.32,
+
+  /** Color lerped between NIGHT → DAY */
+  DAY_COLOR: [1.0, 0.95, 0.95] as readonly [number, number, number],
+  NIGHT_COLOR: [0.05, 0.35, 0.5] as readonly [number, number, number],
+} as const;
+
+// ============================================================================
+// AUTO EXPOSURE (eye adaptation)
+// ============================================================================
+
+export const EXPOSURE = {
+  DAY: 0.85,
+  /** Slight boost at night */
+  NIGHT: 1.0,
+  /** Per-frame lerp speed toward target exposure */
+  LERP_SPEED: 0.03,
+} as const;
+
+// ============================================================================
+// FOG COLORS (day / night scene fog — separate from sky-fog render target)
+// ============================================================================
+
+export const FOG_COLORS = {
+  DAY: 0xd4c8b8,
+  NIGHT: 0x2b3445,
+} as const;
