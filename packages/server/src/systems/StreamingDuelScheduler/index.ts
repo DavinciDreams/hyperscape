@@ -37,6 +37,8 @@ import {
 import { MatchmakingManager } from "./managers/MatchmakingManager.js";
 import { CameraDirector } from "./managers/CameraDirector.js";
 import { DuelOrchestrator } from "./managers/DuelOrchestrator.js";
+import { DuelGearManager } from "./managers/DuelGearManager.js";
+import { DuelCombatController } from "./managers/DuelCombatController.js";
 import { CycleStateMachine } from "./managers/CycleStateMachine.js";
 
 // ============================================================================
@@ -258,6 +260,15 @@ export class StreamingDuelScheduler {
       },
     );
 
+    const gearManager = new DuelGearManager(world);
+    const combatController = new DuelCombatController(
+      world,
+      () => this.currentCycle,
+      (characterId) => gearManager.getCombatRole(characterId),
+      (agent1Id, agent2Id, suppressEffect) =>
+        this.orchestrator.teleportToArena(agent1Id, agent2Id, suppressEffect),
+    );
+
     this.orchestrator = new DuelOrchestrator(
       world,
       () => this.currentCycle,
@@ -274,6 +285,8 @@ export class StreamingDuelScheduler {
         this.handleResolution(winnerId, loserId, winReason),
       () => this.matchmaking.getLeaderboard(),
       () => this.matchmaking.getRecentDuels(),
+      gearManager,
+      combatController,
     );
 
     // -- Wire matchmaking callbacks --
