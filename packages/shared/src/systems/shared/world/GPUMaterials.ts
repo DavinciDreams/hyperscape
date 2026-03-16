@@ -63,7 +63,7 @@ import {
 import { varyingProperty } from "three/tsl";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
-import { SUN_SHADE, SUN_LIGHT, applySunShade } from "./LightingConfig";
+import { SUN_SHADE, SUN_LIGHT, NIGHT, applySunShade } from "./LightingConfig";
 
 // ============================================================================
 // CONFIGURATION
@@ -1001,7 +1001,7 @@ export function createTreeDissolveMaterial(
   const TOON_MID_EDGE = 0.5;
   const TOON_RIM_THRESHOLD = 0.3;
   const TOON_RIM_BRIGHT = 1.3;
-  const NIGHT_MIN_BRIGHTNESS = 0.3;
+  const NIGHT_MIN_BRIGHTNESS = NIGHT.BRIGHTNESS;
 
   // --- Wind vertex displacement (leaf materials only) ---
   // Displacement is proportional to local Y so it auto-scales to any model

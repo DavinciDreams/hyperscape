@@ -50,7 +50,7 @@ export const SUN_LIGHT = {
   GOLDEN_HOUR_COLOR: [1.0, 0.85, 0.6] as readonly [number, number, number],
 
   /** Moon intensity = nightIntensity × this × transitionFade */
-  MOON_INTENSITY_MULTIPLIER: 0.25,
+  MOON_INTENSITY_MULTIPLIER: 0.35,
   MOON_COLOR: [0.05, 0.5, 0.7] as readonly [number, number, number],
 
   /** Z-axis tilt of the sun arc (0 = flat E-W, 1 = full N-S) */
@@ -81,20 +81,29 @@ export const SUN_SHADE = {
 } as const;
 
 // ============================================================================
+// NIGHT BRIGHTNESS (master knob for tree + terrain)
+// ============================================================================
+
+export const NIGHT = {
+  /** Master night brightness (0 = pitch black, 1 = full day brightness).
+   *  Controls both the tree shader nightDim floor and scene light intensity bases. */
+  BRIGHTNESS: 0.5,
+} as const;
+
+// ============================================================================
 // HEMISPHERE LIGHT (sky / ground ambient)
 // ============================================================================
+
+const HEMISPHERE_DAY_TOTAL = 0.9;
 
 export const HEMISPHERE_LIGHT = {
   INITIAL_SKY_COLOR: 0x87ceeb,
   INITIAL_GROUND_COLOR: 0x5d4837,
   INITIAL_INTENSITY: 0.5,
 
-  /**
-   * Runtime intensity = BASE + dayIntensity × DAY_ADD
-   * Night floor = 0.18, Day total = 0.9 (unchanged)
-   */
-  INTENSITY_BASE: 0.18,
-  INTENSITY_DAY_ADD: 0.72,
+  /** Runtime intensity = NIGHT.BRIGHTNESS + dayIntensity × DAY_ADD */
+  INTENSITY_BASE: NIGHT.BRIGHTNESS,
+  INTENSITY_DAY_ADD: HEMISPHERE_DAY_TOTAL - NIGHT.BRIGHTNESS,
 
   /** Sky color lerped between NIGHT → DAY based on dayIntensity */
   DAY_SKY_COLOR: [0.53, 0.81, 0.92] as readonly [number, number, number],
@@ -109,16 +118,15 @@ export const HEMISPHERE_LIGHT = {
 // AMBIENT LIGHT (flat fill)
 // ============================================================================
 
+const AMBIENT_DAY_TOTAL = 0.5;
+
 export const AMBIENT_LIGHT = {
   INITIAL_COLOR: 0x606070,
   INITIAL_INTENSITY: 0.5,
 
-  /**
-   * Runtime intensity = BASE + dayIntensity × DAY_ADD
-   * Night floor = 0.18, Day total = 0.5 (unchanged)
-   */
-  INTENSITY_BASE: 0.18,
-  INTENSITY_DAY_ADD: 0.32,
+  /** Runtime intensity = NIGHT.BRIGHTNESS + dayIntensity × DAY_ADD */
+  INTENSITY_BASE: NIGHT.BRIGHTNESS,
+  INTENSITY_DAY_ADD: AMBIENT_DAY_TOTAL - NIGHT.BRIGHTNESS,
 
   /** Color lerped between NIGHT → DAY */
   DAY_COLOR: [1.0, 0.95, 0.95] as readonly [number, number, number],
@@ -132,7 +140,7 @@ export const AMBIENT_LIGHT = {
 export const EXPOSURE = {
   DAY: 0.85,
   /** Slight boost at night */
-  NIGHT: 1.0,
+  NIGHT: 1.1,
   /** Per-frame lerp speed toward target exposure */
   LERP_SPEED: 0.03,
 } as const;
