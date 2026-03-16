@@ -506,7 +506,7 @@ async function startPollingFallback() {
         void rebuild(changedPath);
       }
     });
-  }, 1000);
+  }, 5000);
 }
 
 const forcePolling = process.env.SERVER_DEV_USE_POLLING === "true";
@@ -517,10 +517,6 @@ const watcher = chokidar.watch(watchRoots, {
   interval: forcePolling ? 250 : undefined,
   binaryInterval: forcePolling ? 500 : undefined,
   ignoreInitial: true,
-  awaitWriteFinish: {
-    stabilityThreshold: 300,
-    pollInterval: 100,
-  },
 });
 
 let rebuildTimeout = null;
