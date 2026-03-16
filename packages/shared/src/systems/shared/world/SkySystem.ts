@@ -38,6 +38,7 @@ import {
 } from "../../../extras/three/three";
 import type { World, WorldOptions } from "../../../types";
 import { fogRenderTarget } from "./FogConfig";
+import { DAY_CYCLE, SUN_LIGHT } from "./LightingConfig";
 
 // -----------------------------
 // Utility: Procedural noise textures (avoids external deps)
@@ -160,7 +161,7 @@ export class SkySystem extends System {
   private galaxyTextureUniform: { value: THREE.Texture | null } | null = null;
 
   private elapsed = 0;
-  private dayDurationSec = 240; // full day cycle in seconds
+  private dayDurationSec = DAY_CYCLE.DURATION_SEC;
   // Pre-allocated vector for sun direction to avoid per-frame allocation
   private _sunDir = new THREE.Vector3();
   private _dayPhase = 0;
@@ -1065,31 +1066,28 @@ export class SkySystem extends System {
     // Calculate day intensity with SHARP transitions at sunrise/sunset
     // Night stays truly dark until sunrise, then rapid transition
     // This creates the feeling of "darkest before dawn" then sudden light
-    const DAWN_START = 0.22; // Start brightening just before sunrise
-    const DAWN_END = 0.28; // Full brightness shortly after sunrise
-    const DUSK_START = 0.72; // Start darkening just before sunset
-    const DUSK_END = 0.78; // Full darkness shortly after sunset
-
-    // Smoothstep helper for smooth but sharp transitions
     const smoothstep = (edge0: number, edge1: number, x: number) => {
       const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
       return t * t * (3 - 2 * t);
     };
 
     let dayIntensity: number;
-    if (dayPhase < DAWN_START || dayPhase >= DUSK_END) {
-      // Deep night - completely dark
+    if (dayPhase < DAY_CYCLE.DAWN_START || dayPhase >= DAY_CYCLE.DUSK_END) {
       dayIntensity = 0;
-    } else if (dayPhase < DAWN_END) {
-      // Dawn transition - rapid brightening
-      dayIntensity = smoothstep(DAWN_START, DAWN_END, dayPhase);
-    } else if (dayPhase < DUSK_START) {
-      // Full day - slight variation with noon being brightest
-      const noonFactor = 1 - Math.abs(dayPhase - 0.5) * 2; // 0 at edges, 1 at noon
-      dayIntensity = 0.85 + noonFactor * 0.15; // 0.85 to 1.0
+    } else if (dayPhase < DAY_CYCLE.DAWN_END) {
+      dayIntensity = smoothstep(
+        DAY_CYCLE.DAWN_START,
+        DAY_CYCLE.DAWN_END,
+        dayPhase,
+      );
+    } else if (dayPhase < DAY_CYCLE.DUSK_START) {
+      const noonFactor = 1 - Math.abs(dayPhase - 0.5) * 2;
+      dayIntensity =
+        DAY_CYCLE.NOON_MIN_INTENSITY +
+        noonFactor * (1 - DAY_CYCLE.NOON_MIN_INTENSITY);
     } else {
-      // Dusk transition - rapid darkening
-      dayIntensity = 1 - smoothstep(DUSK_START, DUSK_END, dayPhase);
+      dayIntensity =
+        1 - smoothstep(DAY_CYCLE.DUSK_START, DAY_CYCLE.DUSK_END, dayPhase);
     }
 
     this._dayIntensity = dayIntensity;
@@ -1107,8 +1105,7 @@ export class SkySystem extends System {
     const sunElevation = Math.sin(sunArcAngle); // -1 to 1, peaks at noon
     const sunAzimuth = Math.cos(sunArcAngle); // 1 at sunrise, -1 at sunset
 
-    // Add slight Z offset for sun path tilt (makes shadows more interesting)
-    const sunTilt = 0.3; // 30% tilt toward/away from camera
+    const sunTilt = SUN_LIGHT.TILT;
 
     this._sunDir
       .set(
