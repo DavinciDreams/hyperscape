@@ -52,6 +52,7 @@ import {
   viewportCoordinate,
   normalView,
   normalWorld,
+  normalWorldGeometry,
   normalize,
   pow,
   attribute,
@@ -1066,7 +1067,7 @@ export function createTreeDissolveMaterial(
 
     // ---- 3-band toon lighting (hard-edged shadow / mid / bright) ----
     const L = normalize(vec3(uSunDir));
-    const N = normalize(mul(modelNormalMatrix, normalLocal));
+    const N = normalize(normalWorldGeometry);
     const NdotL = dot(N, L);
     const band1 = step(float(TOON_SHADOW_EDGE), NdotL);
     const band2 = step(float(TOON_MID_EDGE), NdotL);
