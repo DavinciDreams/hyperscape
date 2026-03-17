@@ -62,9 +62,16 @@ const CANYON_TREE_CONFIG: BiomeTreeConfig = {
     [TreeId.Dead]: { weight: 20, minHeight: 20 },
     [TreeId.Palm]: {
       weight: 20,
+      waterAffinity: 0.5,
+      waterProximityHeight: 9,
+      maxHeight: 9,
+    },
+    [TreeId.Banana]: {
+      weight: 15,
       waterAffinity: 0.3,
       waterProximityHeight: 9,
-      maxHeight: 15,
+      minHeight: 9,
+      maxHeight: 13,
     },
   },
   density: 15,
