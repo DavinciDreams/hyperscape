@@ -34,6 +34,7 @@ export enum TreeId {
   Cactus = "tree_cactus",
   Knotwood = "tree_knotwood",
   WindPine = "tree_windPine",
+  WindSwept = "tree_windSwept",
 }
 
 /** Extract the subtype key from a TreeId (e.g. TreeId.Oak → "oak") */
@@ -93,6 +94,7 @@ export const TREE_TYPES = {
   cactus: { name: "Cactus", levelRequired: 1 },
   knotwood: { name: "Knotwood Tree", levelRequired: 1 },
   windPine: { name: "Wind Pine", levelRequired: 1 },
+  windSwept: { name: "Windswept Tree", levelRequired: 1 },
 } as const satisfies Record<string, TreeTypeDefinition>;
 
 /** All valid tree subtype keys (e.g., "oak", "willow") */

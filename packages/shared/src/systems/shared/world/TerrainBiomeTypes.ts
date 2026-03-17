@@ -74,6 +74,7 @@ const CANYON_TREE_CONFIG: BiomeTreeConfig = {
       maxHeight: 13,
     },
     [TreeId.Yucca]: { weight: 15, avoidsWaterBelow: 3 },
+    [TreeId.WindSwept]: { weight: 25, minHeight: 15 },
   },
   density: 15,
   minSpacing: 18,
