@@ -66,12 +66,6 @@ const CANYON_TREE_CONFIG: BiomeTreeConfig = {
       waterProximityHeight: 9,
       maxHeight: 15,
     },
-    [TreeId.Coconut]: {
-      weight: 10,
-      waterAffinity: 0.6,
-      waterProximityHeight: 9,
-      maxHeight: 15,
-    },
   },
   density: 15,
   minSpacing: 18,
