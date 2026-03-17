@@ -45,6 +45,8 @@ import {
   type EventMap,
   writePacket,
   TERRAIN_CONSTANTS,
+  TICK_DURATION_MS,
+  MobEntity,
 } from "@hyperscape/shared";
 
 // Payload types (extracted to types.ts)
@@ -740,7 +742,22 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       },
     );
 
+    // OSRS-ACCURATE: Process mob AI BEFORE mob movement each tick
+    // AI state machine (IDLE → WANDER → CHASE → ATTACK → RETURN) decides movement targets,
+    // then mob tile movement executes the path on the same tick.
+    // Without this, mobs stand idle forever because MobEntity.serverUpdate() defers
+    // AI ticking to the tick system for deterministic OSRS ordering.
+    const MOB_AI_DELTA_SECONDS = TICK_DURATION_MS / 1000;
+    this.tickSystem.onTick(() => {
+      for (const entity of this.world.entities.values()) {
+        if (!(entity instanceof MobEntity)) continue;
+        if (entity.getHealth() <= 0) continue;
+        entity.runAITick(MOB_AI_DELTA_SECONDS);
+      }
+    }, TickPriority.MOVEMENT);
+
     // Register mob tile movement to run on each tick (same priority as player movement)
+    // Runs AFTER mob AI so paths set by AI are executed this tick
     this.tickSystem.onTick((tickNumber) => {
       this.mobTileMovementManager.onTick(tickNumber);
     }, TickPriority.MOVEMENT);
