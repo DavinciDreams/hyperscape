@@ -1284,8 +1284,6 @@ export class DuelArenaVisualsSystem extends System {
     const clothMats = uniqueColors.map((c) => {
       const m = new MeshStandardNodeMaterial({
         color: c,
-        emissive: c,
-        emissiveIntensity: 0.3,
         side: THREE.DoubleSide,
       });
       this.materials.push(m);
@@ -1348,8 +1346,6 @@ export class DuelArenaVisualsSystem extends System {
       const material = new MeshStandardNodeMaterial({
         color: LOBBY_FLOOR_COLOR,
         map: tileTexture,
-        emissive: LOBBY_FLOOR_COLOR,
-        emissiveIntensity: 0.3,
       });
 
       const floor = new THREE.Mesh(geometry, material);
@@ -1457,8 +1453,6 @@ export class DuelArenaVisualsSystem extends System {
 
       const material = new MeshStandardNodeMaterial({
         color: HOSPITAL_FLOOR_COLOR,
-        emissive: HOSPITAL_FLOOR_COLOR,
-        emissiveIntensity: 0.3,
       });
 
       const floor = new THREE.Mesh(geometry, material);
@@ -1495,8 +1489,6 @@ export class DuelArenaVisualsSystem extends System {
 
     const crossMaterial = new MeshStandardNodeMaterial({
       color: 0xff0000,
-      emissive: 0xff0000,
-      emissiveIntensity: 0.5,
     });
     this.materials.push(crossMaterial);
 
