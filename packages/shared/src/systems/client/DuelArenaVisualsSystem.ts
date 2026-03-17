@@ -79,8 +79,8 @@ const LOBBY_LENGTH = 25;
 
 const HOSPITAL_CENTER_X = 65;
 const HOSPITAL_CENTER_Z = 62;
-const HOSPITAL_WIDTH = 30;
-const HOSPITAL_LENGTH = 25;
+const HOSPITAL_WIDTH = 28;
+const HOSPITAL_LENGTH = 23;
 
 const LOBBY_FLOOR_COLOR = 0xc9b896;
 const HOSPITAL_FLOOR_COLOR = 0xffffff;
@@ -919,9 +919,9 @@ export class DuelArenaVisualsSystem extends System {
       );
     }
 
-    // Lobby corner pillars (4)
-    const lobbyHW = LOBBY_WIDTH / 2;
-    const lobbyHL = LOBBY_LENGTH / 2;
+    // Lobby corner pillars (4) — inset by half the pillar base so they sit exactly at the floor corner
+    const lobbyHW = LOBBY_WIDTH / 2 - PILLAR_BASE_SIZE / 2;
+    const lobbyHL = LOBBY_LENGTH / 2 - PILLAR_BASE_SIZE / 2;
     for (const c of [
       { x: LOBBY_CENTER_X - lobbyHW, z: LOBBY_CENTER_Z - lobbyHL },
       { x: LOBBY_CENTER_X + lobbyHW, z: LOBBY_CENTER_Z - lobbyHL },
@@ -934,9 +934,9 @@ export class DuelArenaVisualsSystem extends System {
       });
     }
 
-    // Hospital corner pillars (4)
-    const hospHW = HOSPITAL_WIDTH / 2;
-    const hospHL = HOSPITAL_LENGTH / 2;
+    // Hospital corner pillars (4) — same inset as lobby
+    const hospHW = HOSPITAL_WIDTH / 2 - PILLAR_BASE_SIZE / 2;
+    const hospHL = HOSPITAL_LENGTH / 2 - PILLAR_BASE_SIZE / 2;
     for (const c of [
       { x: HOSPITAL_CENTER_X - hospHW, z: HOSPITAL_CENTER_Z - hospHL },
       { x: HOSPITAL_CENTER_X + hospHW, z: HOSPITAL_CENTER_Z - hospHL },
