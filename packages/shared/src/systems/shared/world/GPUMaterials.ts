@@ -1025,6 +1025,18 @@ export function createTreeDissolveMaterial(
     })();
   }
 
+  // --- Alpha cutout sharpening for leaf materials ---
+  // Sharpen texture alpha to binary (0 or 1) so semi-transparent edge pixels
+  // are cleanly discarded instead of rendering as opaque fringe that flickers
+  // with wind animation.
+  if (isLeaf && material.map) {
+    const leafCutoutMap = material.map;
+    material.opacityNode = Fn(() => {
+      const uv = attribute("uv", "vec2");
+      return step(float(0.5), texture(leafCutoutMap, uv).a);
+    })();
+  }
+
   // --- Sky-color fog (same as terrain/vegetation) ---
   const treeFogTex = texture(fogRenderTarget.texture, screenUV);
   const treeToCam = sub(cameraPosition, positionWorld);
