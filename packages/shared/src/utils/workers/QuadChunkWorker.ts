@@ -83,6 +83,12 @@ var BIOME_IDS = {};
 BIOME_IDS[BT_TUNDRA] = 0;
 BIOME_IDS[BT_FOREST] = 1;
 BIOME_IDS[BT_CANYON] = 2;
+BIOME_IDS[BT_PLAINS] = 3;
+BIOME_IDS[BT_VALLEY] = 4;
+BIOME_IDS[BT_MOUNTAINS] = 5;
+BIOME_IDS[BT_DESERT] = 6;
+BIOME_IDS[BT_LAKES] = 7;
+BIOME_IDS[BT_SWAMP] = 8;
 
 function generateQuadChunk(input) {
   const { centerX, centerZ, size, resolution, config, seed, biomeCenters, biomes } = input;

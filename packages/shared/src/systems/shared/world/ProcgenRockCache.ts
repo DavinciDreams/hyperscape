@@ -730,6 +730,12 @@ export const BIOME_ROCK_PRESETS: Record<string, string[]> = {
   tundra: ["granite", "basalt", "boulder"],
   forest: ["boulder", "granite", "limestone"],
   canyon: ["sandstone", "limestone", "pebble"],
+  plains: ["boulder", "pebble", "limestone"],
+  valley: ["boulder", "granite", "limestone"],
+  mountains: ["granite", "basalt", "boulder"],
+  desert: ["sandstone", "pebble", "limestone"],
+  lakes: ["boulder", "pebble", "granite"],
+  swamp: ["boulder", "limestone", "pebble"],
 };
 
 /**

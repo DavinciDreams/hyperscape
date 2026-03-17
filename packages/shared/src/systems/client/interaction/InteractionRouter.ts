@@ -1102,22 +1102,16 @@ export class InteractionRouter extends System {
       z: snappedPos.z,
     });
 
-    // M1 — Optimistic pivot: immediately rotate the character toward the new
-    // destination without waiting for the server round-trip. Only updates the
-    // target quaternion so the existing path and catch-up state are untouched.
+    // M1 — Optimistic movement: run BFS locally and start walking IMMEDIATELY,
+    // before the server round-trip completes. The server's tileMovementStart will
+    // replace the predicted path via onMovementStart() when it arrives.
     const localPlayer = this.world.getPlayer();
     if (localPlayer) {
-      const networkWithInterpolator = this.world.network as {
-        tileInterpolator?: {
-          setOptimisticTarget: (
-            entityId: string,
-            worldPos: { x: number; z: number },
-          ) => void;
-        };
-      } | null;
-      networkWithInterpolator?.tileInterpolator?.setOptimisticTarget(
-        localPlayer.id,
+      this._startOptimisticMovement(
+        localPlayer,
+        tile,
         snappedPos,
+        terrainPos.y,
       );
     }
 
@@ -1179,6 +1173,202 @@ export class InteractionRouter extends System {
   }): void {
     this._lastMoveSentAt = Date.now();
     this.world.network?.send(MESSAGE_TYPES.MOVE_REQUEST, payload);
+  }
+
+  // === Optimistic Movement Prediction ===
+
+  /**
+   * Build a walkability checker matching the server's tile-movement.ts logic.
+   * Shared between path visualization and optimistic movement prediction.
+   */
+  private _buildWalkabilityChecker():
+    | ((tile: TileCoord, fromTile?: TileCoord) => boolean)
+    | null {
+    const terrain = this.world.getSystem("terrain") as {
+      getHeightAt?: (x: number, z: number) => number | null;
+      isPositionWalkable?: (
+        x: number,
+        z: number,
+      ) => { walkable: boolean; reason?: string };
+    } | null;
+
+    const collision = this.world.collision as {
+      hasFlags?: (x: number, z: number, flags: number) => boolean;
+      isBlocked?: (
+        fromX: number,
+        fromZ: number,
+        toX: number,
+        toZ: number,
+      ) => boolean;
+    } | null;
+
+    const collisionService = this.getBuildingCollisionService();
+    const hasTerrainWalkability = terrain?.isPositionWalkable !== undefined;
+    const hasCollisionMatrix = collision?.hasFlags !== undefined;
+    const hasBuildingCollision = collisionService !== null;
+
+    // Need at least collision matrix for meaningful prediction
+    if (!hasCollisionMatrix) return null;
+
+    const player = this.world.getPlayer();
+    let playerFloor = 0;
+    let playerBuildingId: string | null = null;
+
+    if (player && collisionService) {
+      const playerTile = worldToTile(player.position.x, player.position.z);
+      playerBuildingId = collisionService.isTileInBuildingFootprint(
+        playerTile.x,
+        playerTile.z,
+      );
+      const playerCollision = collisionService.queryCollision(
+        playerTile.x,
+        playerTile.z,
+        0,
+      );
+      if (
+        playerCollision.isInsideBuilding &&
+        playerCollision.floorIndex !== null
+      ) {
+        playerFloor = playerCollision.floorIndex;
+      }
+    }
+
+    return (tile: TileCoord, fromTile?: TileCoord): boolean => {
+      let isTargetInBuilding = false;
+
+      if (hasBuildingCollision) {
+        const buildingCheck = collisionService!.checkBuildingMovement(
+          fromTile ?? null,
+          tile,
+          playerFloor,
+          playerBuildingId,
+        );
+        if (!buildingCheck.buildingAllowsMovement) return false;
+        isTargetInBuilding = buildingCheck.targetInBuildingFootprint;
+      }
+
+      if (
+        hasCollisionMatrix &&
+        fromTile &&
+        collision!.isBlocked &&
+        collision!.isBlocked(fromTile.x, fromTile.z, tile.x, tile.z)
+      ) {
+        return false;
+      }
+
+      if (
+        hasCollisionMatrix &&
+        collision!.hasFlags!(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
+      ) {
+        return false;
+      }
+
+      if (isTargetInBuilding) return true;
+
+      if (hasTerrainWalkability) {
+        const result = terrain!.isPositionWalkable!(tile.x + 0.5, tile.z + 0.5);
+        if (!result.walkable) return false;
+      }
+
+      return true;
+    };
+  }
+
+  /**
+   * Start optimistic movement: run BFS locally and begin walking before
+   * the server round-trip completes. The server's tileMovementStart will
+   * replace this path via onMovementStart() when it arrives (~50-150ms later).
+   *
+   * This eliminates the perceived input lag where the character stands still
+   * until the server confirms the path.
+   */
+  private _startOptimisticMovement(
+    localPlayer: {
+      id: string;
+      position: { x: number; y: number; z: number };
+      runMode?: boolean;
+    },
+    destTile: TileCoord,
+    snappedPos: { x: number; z: number },
+    _groundY: number,
+  ): void {
+    const isWalkable = this._buildWalkabilityChecker();
+    if (!isWalkable) {
+      // No collision data — fall back to rotation-only optimistic pivot
+      this._optimisticPivotOnly(localPlayer.id, snappedPos);
+      return;
+    }
+
+    const playerTile = worldToTile(
+      localPlayer.position.x,
+      localPlayer.position.z,
+    );
+
+    // Already at destination
+    if (playerTile.x === destTile.x && playerTile.z === destTile.z) return;
+
+    // Run local BFS (same pathfinder instance used for path preview)
+    const path = this.pathfinder.findPath(playerTile, destTile, isWalkable);
+    if (path.length === 0) {
+      // No path — just pivot toward destination
+      this._optimisticPivotOnly(localPlayer.id, snappedPos);
+      return;
+    }
+
+    // Start walking immediately via TileInterpolator
+    const networkWithInterpolator = this.world.network as {
+      tileInterpolator?: {
+        onMovementStart: (
+          entityId: string,
+          path: TileCoord[],
+          running: boolean,
+          currentPosition?: { x: number; y: number; z: number },
+          startTile?: TileCoord,
+          destinationTile?: TileCoord,
+          moveSeq?: number,
+        ) => void;
+        setOptimisticTarget: (
+          entityId: string,
+          worldPos: { x: number; z: number },
+        ) => void;
+      };
+    } | null;
+
+    if (networkWithInterpolator?.tileInterpolator) {
+      const running =
+        typeof localPlayer.runMode === "boolean" ? localPlayer.runMode : false;
+      // Pass moveSeq=undefined so the prediction ALWAYS applies (bypasses the
+      // stale-packet check in TileInterpolator). The server's response carries a
+      // real moveSeq which will overwrite this prediction on arrival.
+      networkWithInterpolator.tileInterpolator.onMovementStart(
+        localPlayer.id,
+        path,
+        running,
+        localPlayer.position,
+        playerTile,
+        destTile,
+        undefined, // no moveSeq = prediction, server overwrites with real seq
+      );
+    }
+  }
+
+  /** Rotation-only fallback when optimistic pathfinding isn't available */
+  private _optimisticPivotOnly(
+    entityId: string,
+    worldPos: { x: number; z: number },
+  ): void {
+    const networkWithInterpolator = this.world.network as {
+      tileInterpolator?: {
+        setOptimisticTarget: (
+          entityId: string,
+          worldPos: { x: number; z: number },
+        ) => void;
+      };
+    } | null;
+    networkWithInterpolator?.tileInterpolator?.setOptimisticTarget(
+      entityId,
+      worldPos,
+    );
   }
 
   /**

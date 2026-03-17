@@ -162,10 +162,94 @@ export const CANYON_PROFILE: BiomeNoiseProfile = {
   terraceSlope: 0.35,
 };
 
+export const PLAINS_PROFILE: BiomeNoiseProfile = {
+  continentWeight: 0.08,
+  ridgeWeight: 0.03,
+  hillWeight: 0.06,
+  erosionWeight: 0.02,
+  detailWeight: 0.03,
+  powerCurve: 0.9,
+  terraceStrength: 0,
+  terraceSharpness: 0,
+  terraceHeightScale: 1,
+  terraceSlope: 0,
+};
+
+export const VALLEY_PROFILE: BiomeNoiseProfile = {
+  continentWeight: 0.12,
+  ridgeWeight: 0.06,
+  hillWeight: 0.1,
+  erosionWeight: 0.04,
+  detailWeight: 0.05,
+  powerCurve: 0.95,
+  terraceStrength: 0,
+  terraceSharpness: 0,
+  terraceHeightScale: 1,
+  terraceSlope: 0,
+};
+
+export const MOUNTAINS_PROFILE: BiomeNoiseProfile = {
+  continentWeight: 0.4,
+  ridgeWeight: 0.3,
+  hillWeight: 0.25,
+  erosionWeight: 0.15,
+  detailWeight: 0.08,
+  powerCurve: 1.3,
+  terraceStrength: 0.5,
+  terraceSharpness: 0.75,
+  terraceHeightScale: 5,
+  terraceSlope: 0.3,
+};
+
+export const DESERT_PROFILE: BiomeNoiseProfile = {
+  continentWeight: 0.12,
+  ridgeWeight: 0.05,
+  hillWeight: 0.08,
+  erosionWeight: 0.03,
+  detailWeight: 0.04,
+  powerCurve: 1.0,
+  terraceStrength: 0.1,
+  terraceSharpness: 0.3,
+  terraceHeightScale: 2,
+  terraceSlope: 0.15,
+};
+
+export const LAKES_PROFILE: BiomeNoiseProfile = {
+  continentWeight: 0.06,
+  ridgeWeight: 0.02,
+  hillWeight: 0.04,
+  erosionWeight: 0.02,
+  detailWeight: 0.02,
+  powerCurve: 0.85,
+  terraceStrength: 0,
+  terraceSharpness: 0,
+  terraceHeightScale: 1,
+  terraceSlope: 0,
+};
+
+export const SWAMP_PROFILE: BiomeNoiseProfile = {
+  continentWeight: 0.07,
+  ridgeWeight: 0.02,
+  hillWeight: 0.05,
+  erosionWeight: 0.02,
+  detailWeight: 0.03,
+  powerCurve: 0.85,
+  terraceStrength: 0,
+  terraceSharpness: 0,
+  terraceHeightScale: 1,
+  terraceSlope: 0,
+};
+
 export const BIOME_PROFILES: Record<string, BiomeNoiseProfile> = {
   [BiomeType.Tundra]: TUNDRA_PROFILE,
   [BiomeType.Forest]: FOREST_PROFILE,
   [BiomeType.Canyon]: CANYON_PROFILE,
+  [BiomeType.Plains]: PLAINS_PROFILE,
+  [BiomeType.Valley]: VALLEY_PROFILE,
+  [BiomeType.Mountains]: MOUNTAINS_PROFILE,
+  [BiomeType.Desert]: DESERT_PROFILE,
+  [BiomeType.Lakes]: LAKES_PROFILE,
+  [BiomeType.Swamp]: SWAMP_PROFILE,
 };
 
 // ---------------------------------------------------------------------------
@@ -688,11 +772,20 @@ export function buildApplyLandscapeFeaturesJS(): string {
 }
 
 // Biome profile constants baked into JS for workers
+function buildProfileEntry(name: string, p: BiomeNoiseProfile): string {
+  return `  BIOME_PROFILES[${name}] = { cW: ${p.continentWeight}, rW: ${p.ridgeWeight}, hW: ${p.hillWeight}, eW: ${p.erosionWeight}, dW: ${p.detailWeight}, pC: ${p.powerCurve}, tS: ${p.terraceStrength}, tSh: ${p.terraceSharpness}, tHS: ${p.terraceHeightScale}, tSl: ${p.terraceSlope} };`;
+}
 const PROFILES_JS = `
   var BIOME_PROFILES = {};
-  BIOME_PROFILES[BT_TUNDRA]  = { cW: ${TUNDRA_PROFILE.continentWeight}, rW: ${TUNDRA_PROFILE.ridgeWeight}, hW: ${TUNDRA_PROFILE.hillWeight}, eW: ${TUNDRA_PROFILE.erosionWeight}, dW: ${TUNDRA_PROFILE.detailWeight}, pC: ${TUNDRA_PROFILE.powerCurve}, tS: ${TUNDRA_PROFILE.terraceStrength}, tSh: ${TUNDRA_PROFILE.terraceSharpness}, tHS: ${TUNDRA_PROFILE.terraceHeightScale}, tSl: ${TUNDRA_PROFILE.terraceSlope} };
-  BIOME_PROFILES[BT_FOREST]  = { cW: ${FOREST_PROFILE.continentWeight}, rW: ${FOREST_PROFILE.ridgeWeight}, hW: ${FOREST_PROFILE.hillWeight}, eW: ${FOREST_PROFILE.erosionWeight}, dW: ${FOREST_PROFILE.detailWeight}, pC: ${FOREST_PROFILE.powerCurve}, tS: ${FOREST_PROFILE.terraceStrength}, tSh: ${FOREST_PROFILE.terraceSharpness}, tHS: ${FOREST_PROFILE.terraceHeightScale}, tSl: ${FOREST_PROFILE.terraceSlope} };
-  BIOME_PROFILES[BT_CANYON]  = { cW: ${CANYON_PROFILE.continentWeight}, rW: ${CANYON_PROFILE.ridgeWeight}, hW: ${CANYON_PROFILE.hillWeight}, eW: ${CANYON_PROFILE.erosionWeight}, dW: ${CANYON_PROFILE.detailWeight}, pC: ${CANYON_PROFILE.powerCurve}, tS: ${CANYON_PROFILE.terraceStrength}, tSh: ${CANYON_PROFILE.terraceSharpness}, tHS: ${CANYON_PROFILE.terraceHeightScale}, tSl: ${CANYON_PROFILE.terraceSlope} };
+${buildProfileEntry("BT_TUNDRA", TUNDRA_PROFILE)}
+${buildProfileEntry("BT_FOREST", FOREST_PROFILE)}
+${buildProfileEntry("BT_CANYON", CANYON_PROFILE)}
+${buildProfileEntry("BT_PLAINS", PLAINS_PROFILE)}
+${buildProfileEntry("BT_VALLEY", VALLEY_PROFILE)}
+${buildProfileEntry("BT_MOUNTAINS", MOUNTAINS_PROFILE)}
+${buildProfileEntry("BT_DESERT", DESERT_PROFILE)}
+${buildProfileEntry("BT_LAKES", LAKES_PROFILE)}
+${buildProfileEntry("BT_SWAMP", SWAMP_PROFILE)}
 `;
 
 /**

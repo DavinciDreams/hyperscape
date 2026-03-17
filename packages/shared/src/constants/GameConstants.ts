@@ -100,10 +100,11 @@ export const TERRAIN_CONSTANTS = {
 
   /**
    * Distance to sample for slope calculation (in meters).
-   * Larger values average slope over a wider area, preventing
-   * terraced cliffs and landscape features from blocking movement.
+   * Should be close to TILE_SIZE so slope reflects the ground
+   * you're actually walking on, not distant terrain features.
+   * At 1.5m with desert maxSlope 0.6, blocks at ~31° angles.
    */
-  SLOPE_CHECK_DISTANCE: 4.0,
+  SLOPE_CHECK_DISTANCE: 1.5,
 
   /**
    * Tile size in meters (1 tile = 1 meter for movement grid).

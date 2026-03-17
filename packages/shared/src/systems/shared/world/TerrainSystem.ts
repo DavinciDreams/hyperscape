@@ -179,6 +179,13 @@ export class TerrainSystem extends System {
   >();
   private _tileRegenerationFlushId?: ReturnType<typeof setTimeout>;
   public instancedMeshManager!: InstancedMeshManager;
+
+  // Slope walkability cache: keyed by packed tile coords → walkable boolean.
+  // Lazily populated on first access per tile, cleared when terrain tiles unload.
+  // Eliminates 64K getHeightAt() calls per BFS pathfind (8 samples × 8000 iterations).
+  private _slopeWalkableCache = new Map<number, boolean>();
+  private static readonly _SLOPE_CACHE_PACK_OFFSET = 1048576; // 2^20, supports ±1M tiles
+
   private _terrainInitialized = false;
   private _initialTilesReady = false; // Track when initial tiles are loaded
   private lastPlayerTile = { x: 0, z: 0 };
@@ -3220,6 +3227,12 @@ export class TerrainSystem extends System {
       tundra: 0,
       forest: 1,
       canyon: 2,
+      plains: 3,
+      valley: 4,
+      mountains: 5,
+      desert: 6,
+      lakes: 7,
+      swamp: 8,
     };
     return biomeIds[biomeName] ?? 0;
   }
@@ -5369,6 +5382,11 @@ export class TerrainSystem extends System {
     const biome = this.getBiomeAt(tileX, tileZ);
     const biomeData = BIOMES[biome];
 
+    // Special case for lakes biome - always impassable (check before height)
+    if (biome === "lakes") {
+      return { walkable: false, reason: "Lake water is impassable" };
+    }
+
     // Get height at position
     const height = this.getHeightAt(worldX, worldZ);
 
@@ -5377,18 +5395,34 @@ export class TerrainSystem extends System {
       return { walkable: false, reason: "Water bodies are impassable" };
     }
 
-    // Check slope constraints
+    // Check slope constraints using lazy cache to avoid 8 getHeightAt() calls
+    // per tile during BFS pathfinding (which explores up to 8000 tiles).
+    const cacheKey =
+      (tileX + TerrainSystem._SLOPE_CACHE_PACK_OFFSET) * 2097152 +
+      (tileZ + TerrainSystem._SLOPE_CACHE_PACK_OFFSET);
+    const cached = this._slopeWalkableCache.get(cacheKey);
+    if (cached !== undefined) {
+      if (!cached) {
+        return {
+          walkable: false,
+          reason: "Steep mountain slopes block movement",
+        };
+      }
+      return { walkable: true };
+    }
+
+    // Cache miss: compute slope (8 height samples) and store result
     const slope = this.calculateSlope(worldX, worldZ);
-    if (slope > biomeData.maxSlope) {
+    const slopeWalkable = biomeData
+      ? slope <= biomeData.maxSlope
+      : slope <= 0.8;
+    this._slopeWalkableCache.set(cacheKey, slopeWalkable);
+
+    if (!slopeWalkable) {
       return {
         walkable: false,
         reason: "Steep mountain slopes block movement",
       };
-    }
-
-    // Special case for lakes biome - always impassable
-    if (biome === "lakes") {
-      return { walkable: false, reason: "Lake water is impassable" };
     }
 
     return { walkable: true };
@@ -6291,6 +6325,20 @@ export class TerrainSystem extends System {
   }
 
   private emitTileUnloaded(tileId: string, tileX: number, tileZ: number): void {
+    // Clear slope walkability cache for tiles in this terrain tile (100x100m = 100x100 tiles)
+    const tileSize = this.CONFIG.TILE_SIZE;
+    const baseTileX = tileX * tileSize;
+    const baseTileZ = tileZ * tileSize;
+    for (let dx = 0; dx < tileSize; dx++) {
+      for (let dz = 0; dz < tileSize; dz++) {
+        const tx = baseTileX + dx;
+        const tz = baseTileZ + dz;
+        const key =
+          (tx + TerrainSystem._SLOPE_CACHE_PACK_OFFSET) * 2097152 +
+          (tz + TerrainSystem._SLOPE_CACHE_PACK_OFFSET);
+        this._slopeWalkableCache.delete(key);
+      }
+    }
     this.world.emit(EventType.TERRAIN_TILE_UNLOADED, { tileId, tileX, tileZ });
   }
 

@@ -62,6 +62,7 @@ export const DEFAULT_BIOME_SUITABILITY: Record<string, number> = {
   swamp: 0.2,
   mountains: 0.15,
   lakes: 0.0,
+  canyon: 0.25,
 };
 
 // ============================================================
