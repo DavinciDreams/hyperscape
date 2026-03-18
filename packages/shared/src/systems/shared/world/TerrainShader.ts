@@ -56,7 +56,7 @@ export const TERRAIN_SHADER_CONSTANTS = {
   WATER_LEVEL: 5.0,
 };
 
-const TERRAIN_TEX_TILE = 0.0125;
+const TERRAIN_TEX_TILE = 0.1;
 const TERRAIN_TEX_DIR = "textures/terrain-biomes";
 
 const TERRAIN_BIOME_TEXTURES = {
@@ -763,11 +763,18 @@ export function createTerrainMaterial(): THREE.Material & {
   const tSnowDirt = loadBiomeTex("snowDirt");
   const tSnowCliff = loadBiomeTex("snowCliff");
 
-  // UV projections (top-down for grass/dirt, triplanar for cliffs)
+  // UV projections — dual-scale blend to break visible texture tiling.
+  // Sample at primary scale and a non-harmonic secondary scale (×0.27),
+  // blend 50/50 with noise so the two grids never visually align.
   const tileScale = float(TERRAIN_TEX_TILE);
+  const tileScale2 = float(TERRAIN_TEX_TILE * 0.13);
   const uvFlat = mul(vec2(worldPos.x, worldPos.z), tileScale);
   const uvFront = mul(vec2(worldPos.x, worldPos.y), tileScale);
   const uvSide = mul(vec2(worldPos.z, worldPos.y), tileScale);
+  const uvFlat2 = mul(vec2(worldPos.x, worldPos.z), tileScale2);
+  const uvFront2 = mul(vec2(worldPos.x, worldPos.y), tileScale2);
+  const uvSide2 = mul(vec2(worldPos.z, worldPos.y), tileScale2);
+  const tileBlend = smoothstep(float(0.2), float(0.8), noiseValue);
 
   // Triplanar blend weights for cliff textures (^4 sharpening)
   const tnx = abs(worldNormal.x);
@@ -781,20 +788,28 @@ export function createTerrainMaterial(): THREE.Material & {
   const twY = div(tw4y, twSum);
   const twZ = div(tw4z, twSum);
 
-  // Flat textures sampled top-down (grass/dirt on mostly-flat surfaces)
-  const sGrass = texture(tGrass, uvFlat).rgb;
-  const sDirt = texture(tDirt, uvFlat).rgb;
-  const sDesertGrass = texture(tDesertGrass, uvFlat).rgb;
-  const sDesertDirt = texture(tDesertDirt, uvFlat).rgb;
-  const sSnowGrass = texture(tSnowGrass, uvFlat).rgb;
-  const sSnowDirt = texture(tSnowDirt, uvFlat).rgb;
+  // Flat textures — blend two scales per biome texture
+  const dualFlat = (t: THREE.Texture) =>
+    mix(texture(t, uvFlat).rgb, texture(t, uvFlat2).rgb, tileBlend);
+  const sGrass = dualFlat(tGrass);
+  const sDirt = dualFlat(tDirt);
+  const sDesertGrass = dualFlat(tDesertGrass);
+  const sDesertDirt = dualFlat(tDesertDirt);
+  const sSnowGrass = dualFlat(tSnowGrass);
+  const sSnowDirt = dualFlat(tSnowDirt);
 
-  // Cliff textures sampled triplanarly (avoids stretching on steep faces)
-  const triCliff = (t: THREE.Texture) =>
-    add(
+  // Cliff textures — triplanar with dual-scale blend
+  const triCliff = (t: THREE.Texture) => {
+    const s1 = add(
       add(mul(texture(t, uvFlat).rgb, twY), mul(texture(t, uvSide).rgb, twX)),
       mul(texture(t, uvFront).rgb, twZ),
     );
+    const s2 = add(
+      add(mul(texture(t, uvFlat2).rgb, twY), mul(texture(t, uvSide2).rgb, twX)),
+      mul(texture(t, uvFront2).rgb, twZ),
+    );
+    return mix(s1, s2, tileBlend);
+  };
   const sCliff = triCliff(tCliff);
   const sDesertCliff = triCliff(tDesertCliff);
   const sSnowCliff = triCliff(tSnowCliff);
