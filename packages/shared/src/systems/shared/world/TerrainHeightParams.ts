@@ -99,6 +99,13 @@ export const HEIGHT_POWER_CURVE = 1.1;
 /** Global terrace step count — shared across all biomes to prevent boundary artifacts. */
 export const TERRACE_STEPS = 10;
 
+/** Base height bias added after scaling to world units (in world units). */
+export const ELEVATION_OFFSET = 8;
+/** Amplitude of large-scale elevation noise (in world units). */
+export const ELEVATION_NOISE_AMOUNT = 50;
+/** Frequency of large-scale elevation noise. */
+export const ELEVATION_NOISE_SCALE = 0.0015;
+
 export interface BiomeNoiseProfile {
   continentWeight: number;
   ridgeWeight: number;
@@ -125,41 +132,41 @@ export interface BiomeNoiseProfile {
 
 export const TUNDRA_PROFILE: BiomeNoiseProfile = {
   continentWeight: 0.32,
-  ridgeWeight: 0.15,
-  hillWeight: 0.28,
-  erosionWeight: 0.1,
-  detailWeight: 0.1,
-  powerCurve: 1.1,
-  terraceStrength: 0.4,
-  terraceSharpness: 0.7,
-  terraceHeightScale: 2.5,
-  terraceSlope: 0.25,
+  ridgeWeight: 0.29,
+  hillWeight: 0.02,
+  erosionWeight: 0.2,
+  detailWeight: 0.02,
+  powerCurve: 1.42,
+  terraceStrength: 2,
+  terraceSharpness: 0.19,
+  terraceHeightScale: 11.4,
+  terraceSlope: 1.9,
 };
 
 export const FOREST_PROFILE: BiomeNoiseProfile = {
-  continentWeight: 0.15,
-  ridgeWeight: 0.08,
-  hillWeight: 0.1,
-  erosionWeight: 0.05,
-  detailWeight: 0.05,
-  powerCurve: 1,
-  terraceStrength: 0,
-  terraceSharpness: 0,
-  terraceHeightScale: 1,
-  terraceSlope: 0,
+  continentWeight: 0.32,
+  ridgeWeight: 0.29,
+  hillWeight: 0,
+  erosionWeight: 0.2,
+  detailWeight: 0,
+  powerCurve: 1.42,
+  terraceStrength: 2,
+  terraceSharpness: 0.19,
+  terraceHeightScale: 9.1,
+  terraceSlope: 0.98,
 };
 
 export const CANYON_PROFILE: BiomeNoiseProfile = {
   continentWeight: 0.32,
-  ridgeWeight: 0.25,
-  hillWeight: 0.18,
+  ridgeWeight: 0.29,
+  hillWeight: 0,
   erosionWeight: 0.2,
-  detailWeight: 0.05,
-  powerCurve: 1.45,
-  terraceStrength: 0.6,
-  terraceSharpness: 0.8,
-  terraceHeightScale: 7,
-  terraceSlope: 0.35,
+  detailWeight: 0,
+  powerCurve: 1.42,
+  terraceStrength: 2,
+  terraceSharpness: 0.82,
+  terraceHeightScale: 7.8,
+  terraceSlope: 0.48,
 };
 
 export const BIOME_PROFILES: Record<string, BiomeNoiseProfile> = {
@@ -172,7 +179,7 @@ export const BIOME_PROFILES: Record<string, BiomeNoiseProfile> = {
 // Island configuration
 // ---------------------------------------------------------------------------
 
-export const ISLAND_RADIUS = 788;
+export const ISLAND_RADIUS = 2000;
 export const ISLAND_FALLOFF = 450;
 export const ISLAND_DEEP_OCEAN_BUFFER = 113;
 export const BASE_ELEVATION = 0.42;
@@ -235,8 +242,8 @@ export interface LandscapeFeatureDef {
 export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
   {
     type: LandscapeType.Mountain,
-    x: -168.5,
-    z: -352.5,
+    x: -195.5,
+    z: -520.5,
     radius: 250,
     strength: 5.5,
     layers: 5,
@@ -247,30 +254,17 @@ export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
     noiseAmount: 0.6,
   },
   {
-    type: LandscapeType.Mountain,
-    x: 265.5,
-    z: 322.5,
-    radius: 130,
-    strength: 2.5,
-    layers: 5,
-    shapePower: 1.3,
-    edgeSharpness: 0.3,
-    layerSlope: 0.55,
-    noiseScale: 0.025,
-    noiseAmount: 0.55,
-  },
-  {
     type: LandscapeType.Pond,
-    x: -28.5,
-    z: 327.5,
-    radius: 90,
-    strength: 1.5,
-    layers: 1,
-    shapePower: 3.5,
-    edgeSharpness: 0.1,
-    layerSlope: 0.8,
+    x: 198.5,
+    z: 917.5,
+    radius: 455,
+    strength: 4.5,
+    layers: 6,
+    shapePower: 3.7,
+    edgeSharpness: 0.75,
+    layerSlope: 0.71,
     noiseScale: 0.015,
-    noiseAmount: 0.06,
+    noiseAmount: 0.26,
   },
 ];
 
@@ -472,21 +466,22 @@ export function computeBaseHeight(
   height = Math.max(0, Math.min(1, height));
   height = Math.pow(height, pC);
 
-  // ── 4. Terracing — floor-quantize into flat shelves with cliff edges ─
-  // tHS stretches shelf positions around 0.5 so cliffs are taller per biome.
-  // tSl blends natural slope back onto shelves (0 = flat, 1 = full natural slope).
+  // ── 4. Terracing — ceil-based (raises terrain to plateaus, never lowers) ─
   const steps = TERRACE_STEPS;
   const ths = Math.max(1, tHS);
   if (tS > 0.01 && steps >= 2) {
-    const stepped = Math.floor(height * steps) / steps;
-    const nextStep = Math.min(1, stepped + 1 / steps);
-    const frac = (height - stepped) * steps;
-    const edgeBlend = frac < tSh ? 0 : (frac - tSh) / (1 - tSh + 0.001);
-    const flatStep = stepped + edgeBlend * (nextStep - stepped);
-    const slopedStep = stepped + frac * (nextStep - stepped);
+    const ceilStep = Math.ceil(height * steps) / steps;
+    const floorStep = Math.max(0, ceilStep - 1 / steps);
+    const frac = (height - floorStep) * steps;
+
+    const flatThreshold = 1 - tSh;
+    const edgeBlend = frac > flatThreshold ? 1 : frac / (flatThreshold + 0.001);
+    const flatStep = floorStep + edgeBlend * (ceilStep - floorStep);
+
+    const slopedStep = floorStep + frac * (ceilStep - floorStep);
     const terraced = flatStep + tSl * (slopedStep - flatStep);
     const scaled = Math.max(0, Math.min(1, 0.5 + (terraced - 0.5) * ths));
-    height = height + (scaled - height) * tS;
+    height = Math.max(height, height + (scaled - height) * tS);
   }
 
   // ── 5. Coastline noise → island mask ────────────────────────────────
@@ -537,7 +532,23 @@ export function computeBaseHeight(
     height = OCEAN_FLOOR_HEIGHT;
   }
 
-  return height * maxHeight;
+  // ── 7. Scale to world units + global elevation offset ──────────────
+  height = height * maxHeight;
+  if (islandMask > 0) {
+    const eOff: number = ELEVATION_OFFSET;
+    const eNA: number = ELEVATION_NOISE_AMOUNT;
+    if (eNA > 0 || eOff !== 0) {
+      const elevNoise =
+        (noise.simplex2D(
+          worldX * ELEVATION_NOISE_SCALE,
+          worldZ * ELEVATION_NOISE_SCALE,
+        ) +
+          1) *
+        0.5;
+      height += (eOff + elevNoise * eNA) * islandMask;
+    }
+  }
+  return height;
 }
 
 export interface ShorelineConfig {
@@ -729,15 +740,16 @@ export function buildGetBaseHeightAtJS(): string {
     var gSteps = ${TERRACE_STEPS};
     var ths = Math.max(1, tHS);
     if (tS > 0.01 && gSteps >= 2) {
-      var gStepped = Math.floor(height * gSteps) / gSteps;
-      var gNextStep = Math.min(1, gStepped + 1 / gSteps);
-      var gFrac = (height - gStepped) * gSteps;
-      var gEdgeBlend = gFrac < tSh ? 0 : (gFrac - tSh) / (1 - tSh + 0.001);
-      var gFlatStep = gStepped + gEdgeBlend * (gNextStep - gStepped);
-      var gSlopedStep = gStepped + gFrac * (gNextStep - gStepped);
+      var ceilStep = Math.ceil(height * gSteps) / gSteps;
+      var floorStep = Math.max(0, ceilStep - 1 / gSteps);
+      var gFrac = (height - floorStep) * gSteps;
+      var flatThreshold = 1 - tSh;
+      var gEdgeBlend = gFrac > flatThreshold ? 1 : gFrac / (flatThreshold + 0.001);
+      var gFlatStep = floorStep + gEdgeBlend * (ceilStep - floorStep);
+      var gSlopedStep = floorStep + gFrac * (ceilStep - floorStep);
       var gTerraced = gFlatStep + tSl * (gSlopedStep - gFlatStep);
       var gScaled = Math.max(0, Math.min(1, 0.5 + (gTerraced - 0.5) * ths));
-      height = height + (gScaled - height) * tS;
+      height = Math.max(height, height + (gScaled - height) * tS);
     }
 
     var distFromCenter = Math.sqrt(worldX * worldX + worldZ * worldZ);
@@ -764,6 +776,11 @@ export function buildGetBaseHeightAtJS(): string {
     height = applyLandscapeFeatures(height, worldX, worldZ);
 
     if (islandMask === 0) { height = ${OCEAN_FLOOR_HEIGHT}; }
-    return height * MAX_HEIGHT;
+    height = height * MAX_HEIGHT;
+    if (islandMask > 0 && (${ELEVATION_NOISE_AMOUNT} > 0 || ${ELEVATION_OFFSET} !== 0)) {
+      var elevNoise = (noise.simplex2D(worldX * ${ELEVATION_NOISE_SCALE}, worldZ * ${ELEVATION_NOISE_SCALE}) + 1) * 0.5;
+      height += (${ELEVATION_OFFSET} + elevNoise * ${ELEVATION_NOISE_AMOUNT}) * islandMask;
+    }
+    return height;
   }`;
 }
