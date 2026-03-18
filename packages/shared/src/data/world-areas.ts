@@ -21,6 +21,12 @@ import type {
   StationLocation,
   WorldArea,
 } from "../types/core/core";
+import {
+  ZONE_BOUNDS_MIN_X,
+  ZONE_BOUNDS_MAX_X,
+  ZONE_BOUNDS_MIN_Z,
+  ZONE_BOUNDS_MAX_Z,
+} from "./arena-layout";
 
 // Re-export types from core
 export type {
@@ -99,11 +105,10 @@ export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
       "A gladiatorial arena where players can engage in honorable combat. Stake items and fight!",
     difficultyLevel: 0,
     bounds: {
-      // Encompasses all arenas, lobby, and hospital
-      minX: 35, // Hospital left edge (65 - 15)
-      maxX: 145, // Lobby right edge (105 + 20 + some margin)
-      minZ: 37, // Lobby/hospital bottom edge (62 - 12.5)
-      maxZ: 140, // Arena 6 top edge
+      minX: ZONE_BOUNDS_MIN_X,
+      maxX: ZONE_BOUNDS_MAX_X,
+      minZ: ZONE_BOUNDS_MIN_Z,
+      maxZ: ZONE_BOUNDS_MAX_Z,
     },
     biomeType: "plains",
     safeZone: true, // Lobby area is safe

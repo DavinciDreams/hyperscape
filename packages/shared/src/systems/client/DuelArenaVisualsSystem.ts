@@ -18,7 +18,7 @@
  * - 6 rectangular arenas in a 2x3 grid
  * - Each arena is 20m wide x 24m long
  * - 4m gap between arenas
- * - Base coordinates: x=60, z=80 (near spawn)
+ * - Base coordinates: see arena-layout.ts (single source of truth)
  */
 
 import THREE, {
@@ -51,17 +51,26 @@ import type { Physics } from "../shared/interaction/Physics";
 import type { PxRigidStatic } from "../../types/systems/physics";
 import type { ParticleSystem } from "../shared/presentation/ParticleSystem";
 import type { FlatZone } from "../../types/world/terrain";
+import {
+  ARENA_BASE_X,
+  ARENA_BASE_Z,
+  ARENA_WIDTH,
+  ARENA_LENGTH,
+  ARENA_GAP,
+  ARENA_COUNT,
+  LOBBY_CENTER_X,
+  LOBBY_CENTER_Z,
+  LOBBY_WIDTH,
+  LOBBY_LENGTH,
+  HOSPITAL_CENTER_X,
+  HOSPITAL_CENTER_Z,
+  HOSPITAL_WIDTH,
+  HOSPITAL_LENGTH,
+} from "../../data/arena-layout";
 
 // ============================================================================
-// Arena Configuration (matches ArenaPoolManager)
+// Arena Configuration (layout from arena-layout.ts)
 // ============================================================================
-
-const ARENA_BASE_X = 60;
-const ARENA_BASE_Z = 80;
-const ARENA_WIDTH = 20;
-const ARENA_LENGTH = 24;
-const ARENA_GAP = 4;
-const ARENA_COUNT = 6;
 
 const FENCE_HEIGHT = 1.5;
 const FENCE_POST_SPACING = 2.0;
@@ -71,16 +80,6 @@ const FENCE_RAIL_DEPTH = 0.08;
 const FENCE_RAIL_HEIGHTS = [0.3, 0.75, 1.2];
 const FLOOR_THICKNESS = 0.3;
 const FLOOR_HEIGHT_OFFSET = 0.27;
-
-const LOBBY_CENTER_X = 105;
-const LOBBY_CENTER_Z = 62;
-const LOBBY_WIDTH = 40;
-const LOBBY_LENGTH = 25;
-
-const HOSPITAL_CENTER_X = 65;
-const HOSPITAL_CENTER_Z = 62;
-const HOSPITAL_WIDTH = 28;
-const HOSPITAL_LENGTH = 23;
 
 const LOBBY_FLOOR_COLOR = 0xc9b896;
 const HOSPITAL_FLOOR_COLOR = 0xffffff;
