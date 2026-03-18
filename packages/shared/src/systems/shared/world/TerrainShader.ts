@@ -48,15 +48,15 @@ import { SUN_LIGHT } from "./LightingConfig";
 
 export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
-  SNOW_HEIGHT: 50.0,
-  NOISE_SCALE: 0.0008,
+  SNOW_HEIGHT: 90.0,
+  NOISE_SCALE: 0.0003,
   DIRT_THRESHOLD: 0.5,
   LOD_FULL_DETAIL: 100.0,
   LOD_MEDIUM_DETAIL: 200.0,
   WATER_LEVEL: 5.0,
 };
 
-const TERRAIN_TEX_TILE = 0.08;
+const TERRAIN_TEX_TILE = 0.0125;
 const TERRAIN_TEX_DIR = "textures/terrain-biomes";
 
 const TERRAIN_BIOME_TEXTURES = {
@@ -270,7 +270,7 @@ export function computeTerrainBaseColor(
 
   // Sand near water (flat areas, stronger in canyon)
   const sandBlend = mul(
-    smoothstep(float(10.0), float(6.0), height),
+    smoothstep(float(18.0), float(12.0), height),
     smoothstep(float(0.25), float(0.0), slope),
   );
   const sandStrength = mix(float(0.6), float(0.9), dW);
@@ -280,17 +280,17 @@ export function computeTerrainBaseColor(
   c = mix(
     c,
     DIRT_DARK,
-    mul(smoothstep(float(14.0), float(8.0), height), float(0.4)),
+    mul(smoothstep(float(22.0), float(14.0), height), float(0.4)),
   );
   c = mix(
     c,
     MUD_BROWN,
-    mul(smoothstep(float(9.0), float(6.0), height), float(0.7)),
+    mul(smoothstep(float(15.0), float(10.0), height), float(0.7)),
   );
   c = mix(
     c,
     WATER_EDGE,
-    mul(smoothstep(float(6.5), float(5.0), height), float(0.9)),
+    mul(smoothstep(float(11.0), float(7.0), height), float(0.9)),
   );
 
   return c;
@@ -860,7 +860,7 @@ export function createTerrainMaterial(): THREE.Material & {
 
   // Sand near water (keep flat color - no sand texture)
   const sandBlend = mul(
-    smoothstep(float(10.0), float(6.0), height),
+    smoothstep(float(18.0), float(12.0), height),
     smoothstep(float(0.25), float(0.0), slope),
   );
   const sandStrength = mix(float(0.6), float(0.9), dW);
@@ -870,17 +870,17 @@ export function createTerrainMaterial(): THREE.Material & {
   baseColor = mix(
     baseColor,
     DIRT_DARK,
-    mul(smoothstep(float(14.0), float(8.0), height), float(0.4)),
+    mul(smoothstep(float(22.0), float(14.0), height), float(0.4)),
   );
   baseColor = mix(
     baseColor,
     MUD_BROWN,
-    mul(smoothstep(float(9.0), float(6.0), height), float(0.7)),
+    mul(smoothstep(float(15.0), float(10.0), height), float(0.7)),
   );
   baseColor = mix(
     baseColor,
     WATER_EDGE,
-    mul(smoothstep(float(6.5), float(5.0), height), float(0.9)),
+    mul(smoothstep(float(11.0), float(7.0), height), float(0.9)),
   );
 
   // Anti-dithering noise variation (±4% brightness, ±2% color shift)
