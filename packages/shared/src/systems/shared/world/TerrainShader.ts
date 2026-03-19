@@ -81,7 +81,7 @@ const TERRAIN_BIOME_TEXTURES = {
     fallback: [0.62, 0.28, 0.15] as [number, number, number],
   },
   desertCliff: {
-    file: "desertCliff.png",
+    file: "desertDirt.png",
     fallback: [0.72, 0.38, 0.18] as [number, number, number],
   },
   snowGrass: {
@@ -265,7 +265,7 @@ export function computeTerrainBaseColor(
   c = mix(c, dirtColor, mul(nDirtFactor, float(0.4)));
 
   // Slopes: dirt at low elevation, cliff at high elevation
-  const sF = smoothstep(float(0.02), float(0.12), slope);
+  const sF = smoothstep(float(0.05), float(0.2), slope);
   const hB = smoothstep(float(20.0), float(40.0), height);
   c = mix(c, mix(dirtColor, cliffColor, hB), sF);
 
@@ -869,7 +869,7 @@ export function createTerrainMaterial(): THREE.Material & {
   );
 
   // Slopes: dirt at low elevation, cliff at high elevation
-  const slopeFactor = smoothstep(float(0.02), float(0.12), slope);
+  const slopeFactor = smoothstep(float(0.01), float(0.06), slope);
   const heightBlend = smoothstep(float(20.0), float(40.0), height);
   const slopeColor = mix(dirtColor, cliffColor, heightBlend);
   baseColor = mix(baseColor, slopeColor, slopeFactor);
