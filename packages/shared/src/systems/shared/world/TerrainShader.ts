@@ -234,12 +234,6 @@ export function computeTerrainBaseColor(
   );
 
   // Biome-blended dirt
-  const dirtPatchFactor = smoothstep(
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
-    noiseVal,
-  );
-  const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
   const dirtVariation = smoothstep(float(0.3), float(0.7), noiseVal2);
   const tundraDirt = mix(TUNDRA_DIRT, TUNDRA_DIRT_DARK, dirtVariation);
   const forestDirt = mix(FOREST_DIRT, FOREST_DIRT_DARK, dirtVariation);
@@ -248,16 +242,8 @@ export function computeTerrainBaseColor(
     add(mul(tundraDirt, tW), mul(forestDirt, fW)),
     mul(canyonDirt, dW),
   );
-  c = mix(c, dirtColor, mul(dirtPatchFactor, flatnessFactor));
 
-  // Slope-based dirt — fades out at steep slopes where cliff color takes over
-  const dirtSlopeFactor = mul(
-    smoothstep(float(0.15), float(0.4), slope),
-    smoothstep(float(0.6), float(0.3), slope),
-  );
-  c = mix(c, dirtColor, mul(dirtSlopeFactor, float(0.6)));
-
-  // Per-biome cliff color on steep slopes (terrace sides, rock faces)
+  // Per-biome cliff color
   const cliffVariation = smoothstep(float(0.3), float(0.7), noiseVal);
   const tundraCliff = mix(TUNDRA_CLIFF, TUNDRA_CLIFF_DARK, cliffVariation);
   const forestCliff = mix(FOREST_CLIFF, FOREST_CLIFF_DARK, cliffVariation);
@@ -266,7 +252,22 @@ export function computeTerrainBaseColor(
     add(mul(tundraCliff, tW), mul(forestCliff, fW)),
     mul(canyonCliff, dW),
   );
-  c = mix(c, cliffColor, smoothstep(float(0.3), float(0.55), slope));
+
+  // Noise-driven dirt patches on flat areas (subtle)
+  const nDirtFactor = mul(
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.05),
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.25),
+      noiseVal,
+    ),
+    smoothstep(float(0.1), float(0.01), slope),
+  );
+  c = mix(c, dirtColor, mul(nDirtFactor, float(0.4)));
+
+  // Slopes: dirt at low elevation, cliff at high elevation
+  const sF = smoothstep(float(0.02), float(0.12), slope);
+  const hB = smoothstep(float(20.0), float(40.0), height);
+  c = mix(c, mix(dirtColor, cliffColor, hB), sF);
 
   // Sand near water (flat areas, stronger in canyon)
   const sandBlend = mul(
@@ -830,13 +831,7 @@ export function createTerrainMaterial(): THREE.Material & {
     mul(canyonGrassC, dW),
   );
 
-  // Biome-blended dirt patches
-  const dirtPatchFactor = smoothstep(
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
-    noiseValue,
-  );
-  const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
+  // Biome-blended dirt
   const dirtVar = smoothstep(float(0.3), float(0.7), noiseValue2);
   const tundraDirtC = mix(sSnowDirt, mul(sSnowDirt, TEX_DARKEN), dirtVar);
   const forestDirtC = mix(sDirt, mul(sDirt, TEX_DARKEN), dirtVar);
@@ -845,16 +840,8 @@ export function createTerrainMaterial(): THREE.Material & {
     add(mul(tundraDirtC, tW), mul(forestDirtC, fW)),
     mul(canyonDirtC, dW),
   );
-  baseColor = mix(baseColor, dirtColor, mul(dirtPatchFactor, flatnessFactor));
 
-  // Slope-based dirt
-  const dirtSlopeFactor = mul(
-    smoothstep(float(0.15), float(0.4), slope),
-    smoothstep(float(0.6), float(0.3), slope),
-  );
-  baseColor = mix(baseColor, dirtColor, mul(dirtSlopeFactor, float(0.6)));
-
-  // Per-biome cliff on steep slopes (triplanar textured)
+  // Per-biome cliff
   const cliffVar = smoothstep(float(0.3), float(0.7), noiseValue);
   const tundraCliffC = mix(sSnowCliff, mul(sSnowCliff, TEX_DARKEN), cliffVar);
   const forestCliffC = mix(sCliff, mul(sCliff, TEX_DARKEN), cliffVar);
@@ -867,11 +854,25 @@ export function createTerrainMaterial(): THREE.Material & {
     add(mul(tundraCliffC, tW), mul(forestCliffC, fW)),
     mul(canyonCliffC, dW),
   );
+
+  // Noise-driven dirt patches on flat areas (subtle)
+  const dirtPatchFactor = smoothstep(
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.05),
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.25),
+    noiseValue,
+  );
+  const flatnessFactor = smoothstep(float(0.1), float(0.01), slope);
   baseColor = mix(
     baseColor,
-    cliffColor,
-    smoothstep(float(0.3), float(0.55), slope),
+    dirtColor,
+    mul(mul(dirtPatchFactor, flatnessFactor), float(0.4)),
   );
+
+  // Slopes: dirt at low elevation, cliff at high elevation
+  const slopeFactor = smoothstep(float(0.02), float(0.12), slope);
+  const heightBlend = smoothstep(float(20.0), float(40.0), height);
+  const slopeColor = mix(dirtColor, cliffColor, heightBlend);
+  baseColor = mix(baseColor, slopeColor, slopeFactor);
 
   // Sand near water (keep flat color - no sand texture)
   const sandBlend = mul(
@@ -910,55 +911,11 @@ export function createTerrainMaterial(): THREE.Material & {
     ),
   );
 
-  // === ROAD OVERLAY ===
-  // Roads are compacted dirt paths - reuse existing dirt colors for consistency
-  // Use shared road mask when available, fall back to per-vertex attribute
-  const roadInfluenceAttr = attribute("roadInfluence", "float");
-  const roadMaskState = getRoadInfluenceTextureState();
-  const roadHalfWorld = roadMaskState.uWorldSize.mul(0.5);
-  const roadUvX = worldPos.x
-    .sub(roadMaskState.uCenterX)
-    .add(roadHalfWorld)
-    .div(roadMaskState.uWorldSize);
-  const roadUvZ = worldPos.z
-    .sub(roadMaskState.uCenterZ)
-    .add(roadHalfWorld)
-    .div(roadMaskState.uWorldSize);
-  const roadUV = vec2(roadUvX.clamp(0.001, 0.999), roadUvZ.clamp(0.001, 0.999));
-  const roadMask = roadMaskState.textureNode.sample(roadUV).r;
-  const hasRoadMask = smoothstep(
-    float(1.0),
-    float(2.0),
-    roadMaskState.uWorldSize,
-  );
-  const dx = abs(worldPos.x.sub(roadMaskState.uCenterX));
-  const dz = abs(worldPos.z.sub(roadMaskState.uCenterZ));
-  const insideMask = step(dx, roadHalfWorld).mul(step(dz, roadHalfWorld));
-  const useMask = hasRoadMask.mul(insideMask);
-  const roadInfluence = mix(roadInfluenceAttr, roadMask, useMask);
-
-  // Reuse existing dirt colors with natural noise variation
-  const roadNoiseVar = mul(noiseValue2, float(0.5)); // Natural dirt variation
-  const roadBaseColor = mix(DIRT_BROWN, DIRT_DARK, roadNoiseVar);
-
-  // Gravel/Cobblestone effect: High frequency noise for texture
-  // Use fineNoise (highest freq) to create small stones
-  const stoneNoise = smoothstep(float(0.4), float(0.7), fineNoise);
-  const stoneColor = mix(ROCK_GRAY, ROCK_DARK, float(0.5));
-
-  // Mix stones into dirt base - more stones in center of road
-  const roadDetailColor = mix(
-    roadBaseColor,
-    stoneColor,
-    mul(stoneNoise, float(0.6)),
-  );
-
-  // Road center is slightly worn/darker from foot traffic
-  const roadCenterDarken = mul(roadInfluence, float(0.08));
-  const compactedRoadColor = sub(roadDetailColor, vec3(roadCenterDarken));
-
-  // Blend road color with terrain based on influence
-  const baseWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
+  // === ROAD OVERLAY (disabled) ===
+  // const roadInfluenceAttr = attribute("roadInfluence", "float");
+  // const roadMaskState = getRoadInfluenceTextureState();
+  // ... road rendering commented out for now
+  const baseWithRoads = variedColor;
 
   // ============================================================================
   // VERTEX LIGHTING (lampposts, torches, etc.)

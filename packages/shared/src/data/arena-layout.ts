@@ -9,8 +9,8 @@
 // ---------------------------------------------------------------------------
 // Arena Grid
 // ---------------------------------------------------------------------------
-export const ARENA_BASE_X = 60;
-export const ARENA_BASE_Z = 130;
+export const ARENA_BASE_X = 340;
+export const ARENA_BASE_Z = 394;
 export const ARENA_BASE_Y = 0.42;
 export const ARENA_WIDTH = 20;
 export const ARENA_LENGTH = 24;
@@ -23,25 +23,25 @@ export const ARENA_SPAWN_OFFSET = 8;
 // ---------------------------------------------------------------------------
 // Lobby (south of arenas, right side)
 // ---------------------------------------------------------------------------
-export const LOBBY_CENTER_X = 105;
-export const LOBBY_CENTER_Z = 112;
+export const LOBBY_CENTER_X = 385;
+export const LOBBY_CENTER_Z = 376;
 export const LOBBY_WIDTH = 40;
 export const LOBBY_LENGTH = 25;
 
 // ---------------------------------------------------------------------------
 // Hospital (south of arenas, left side)
 // ---------------------------------------------------------------------------
-export const HOSPITAL_CENTER_X = 65;
-export const HOSPITAL_CENTER_Z = 112;
+export const HOSPITAL_CENTER_X = 345;
+export const HOSPITAL_CENTER_Z = 376;
 export const HOSPITAL_WIDTH = 28;
 export const HOSPITAL_LENGTH = 23;
 
 // ---------------------------------------------------------------------------
 // Lobby Spawn Point (where players appear in the lobby)
 // ---------------------------------------------------------------------------
-export const LOBBY_SPAWN_X = 105;
+export const LOBBY_SPAWN_X = 385;
 export const LOBBY_SPAWN_Y = 0.42;
-export const LOBBY_SPAWN_Z = 110;
+export const LOBBY_SPAWN_Z = 374;
 
 // ---------------------------------------------------------------------------
 // Derived: overall zone bounds (encompasses arenas + lobby + hospital + margin)
