@@ -30,6 +30,7 @@ import THREE, {
   max,
   smoothstep,
   clamp,
+  saturate,
   Fn,
   output,
   attribute,
@@ -94,15 +95,16 @@ const WATER = {
   // Detail normals blending
   DETAIL_NORMAL_STRENGTH: 0.5, // Detail normal contribution to final normal
 
-  // Opacity
+  // Opacity (portfolio-style: op = 1 - pow(saturate(1 - depth/scale), falloff))
   EDGE_FADE_DISTANCE: 0.4, // Shoreline edge transparency ramp (metres)
-  DEPTH_FADE_NEAR: 0.4, // Depth opacity ramp start (metres)
-  DEPTH_FADE_FAR: 6.0, // Depth opacity ramp end (metres)
-  OPACITY_MIN: 0.2, // Opacity at shoreline
-  OPACITY_MAX: 0.7, // Opacity at full depth
+  OP_DEPTH_SCALE: 3.0, // Depth scale for opacity curve (metres)
+  OP_DEPTH_FALLOFF: 15.0, // Power exponent — higher = sharper opaque transition
   FRESNEL_OPACITY_MIN: 0.85, // Fresnel opacity at normal incidence
   FRESNEL_OPACITY_MAX: 1.0, // Fresnel opacity at glancing angles
   FRESNEL_OPACITY_POWER: 3, // Fresnel opacity falloff exponent
+
+  // Distance fade — reflection fades out beyond this range
+  REFLECTION_FADE_DISTANCE: 500.0, // Reflection fully gone at this distance (metres)
 
   // Vertex wave damping
   WAVE_DAMP_DISTANCE: 6, // Waves fully active beyond this shore distance (metres)
@@ -846,9 +848,16 @@ export class WaterSystem {
       );
     })();
 
+    // Fade reflection to zero beyond REFLECTION_FADE_DISTANCE
+    const reflDistFade = clamp(
+      sub(float(1), div(length(toCam), float(WATER.REFLECTION_FADE_DISTANCE))),
+      float(0),
+      float(1),
+    );
+
     const reflectionEmissive = mul(
       reflectionNode,
-      mul(fresnelNode, uReflectionIntensity),
+      mul(mul(fresnelNode, uReflectionIntensity), reflDistFade),
     );
 
     material.emissiveNode = reflectionEmissive;
@@ -876,17 +885,16 @@ export class WaterSystem {
         float(WATER.EDGE_FADE_DISTANCE),
         shoreDist,
       );
-      // Depth fade - more transparent overall to see bottom
-      const depthFade = smoothstep(
-        float(WATER.DEPTH_FADE_NEAR),
-        float(WATER.DEPTH_FADE_FAR),
-        shoreDist,
+
+      // Portfolio-style depth opacity: pow(saturate(1 - depth/scale), falloff)
+      // Shallow → opDepth ≈ 1 → op ≈ 0 (transparent, see bottom)
+      // Deep    → opDepth ≈ 0 → op ≈ 1 (fully opaque, hides terrain)
+      const opDepth = pow(
+        saturate(sub(float(1), div(shoreDist, float(WATER.OP_DEPTH_SCALE)))),
+        float(WATER.OP_DEPTH_FALLOFF),
       );
-      const depthOpacity = mix(
-        float(WATER.OPACITY_MIN),
-        float(WATER.OPACITY_MAX),
-        depthFade,
-      );
+      const depthOpacity = sub(float(1), opDepth);
+
       // Fresnel - more opaque at glancing angles
       const NdotV = max(dot(vec3(0, 1, 0), V), float(0));
       const fresnelOpacity = mix(

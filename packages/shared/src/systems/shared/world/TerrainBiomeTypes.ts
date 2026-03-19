@@ -44,9 +44,6 @@ const FOREST_TREE_CONFIG: BiomeTreeConfig = {
     [TreeId.Pine]: { weight: 20, minHeight: 60 },
     [TreeId.Knotwood]: { weight: 5, minHeight: 35, maxHeight: 60 },
     [TreeId.Maple]: { weight: 5, minHeight: 35, maxHeight: 60 },
-    // [TreeId.Fir]: { weight: 20, minHeight: 48, maxHeight: 80 },
-    // [TreeId.Bamboo]: { weight: 15, minHeight: 31, maxHeight: 42 },
-    // [TreeId.ChinaPine]: { weight: 10, minHeight: 58, maxHeight: 85 },
     [TreeId.Palm]: {
       weight: 25,
       waterAffinity: 0.8,

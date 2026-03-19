@@ -56,7 +56,7 @@ export const TERRAIN_SHADER_CONSTANTS = {
   WATER_LEVEL: 5.0,
 };
 
-const TERRAIN_TEX_TILE = 0.1;
+const TERRAIN_TEX_TILE = 0.3;
 const TERRAIN_TEX_DIR = "textures/terrain-biomes";
 
 const TERRAIN_BIOME_TEXTURES = {
@@ -265,7 +265,7 @@ export function computeTerrainBaseColor(
   c = mix(c, dirtColor, mul(nDirtFactor, float(0.4)));
 
   // Slopes: dirt at low elevation, cliff at high elevation
-  const sF = smoothstep(float(0.05), float(0.2), slope);
+  const sF = smoothstep(float(0.01), float(0.06), slope);
   const hB = smoothstep(float(20.0), float(40.0), height);
   c = mix(c, mix(dirtColor, cliffColor, hB), sF);
 
