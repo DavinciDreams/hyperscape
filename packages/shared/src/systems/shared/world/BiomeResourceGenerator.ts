@@ -29,6 +29,88 @@ import {
 import type { TreePlacementRules } from "../../../constants/TreeTypes";
 import { getTreeConfigForBiome } from "./TerrainBiomeTypes";
 
+// ---------------------------------------------------------------------------
+// Species zoning — smooth 2D value noise so nearby trees tend to be the same type
+// ---------------------------------------------------------------------------
+
+const SPECIES_ZONE_SCALE = 0.012; // ~80m species zones
+const SPECIES_ZONE_BOOST = 10.0; // preferred species gets 10x weight
+const WATER_PROXIMITY_BOOST = 20.0; // water-affinity trees get 20x weight near water
+const WATER_HEIGHT_PRECHECK = 35; // only run expensive water search within this height above water
+
+const DENSITY_NOISE_SCALE = 0.006; // ~170m dense/sparse zones
+const DENSITY_NOISE_MIN = 0.15; // sparse zones still get 15% of trees
+const DENSITY_NOISE_POWER = 1.5; // push noise toward extremes
+
+function intHash2D(ix: number, iz: number): number {
+  let h = (ix * 374761393 + iz * 668265263) | 0;
+  h = ((h ^ (h >>> 13)) * 1274126177) | 0;
+  h = (h ^ (h >>> 16)) | 0;
+  return (h & 0x7fffffff) / 0x7fffffff;
+}
+
+function speciesNoise2D(x: number, z: number): number {
+  const ix = Math.floor(x);
+  const iz = Math.floor(z);
+  const fx = x - ix;
+  const fz = z - iz;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uz = fz * fz * (3 - 2 * fz);
+  const h00 = intHash2D(ix, iz);
+  const h10 = intHash2D(ix + 1, iz);
+  const h01 = intHash2D(ix, iz + 1);
+  const h11 = intHash2D(ix + 1, iz + 1);
+  return (
+    h00 * (1 - ux) * (1 - uz) +
+    h10 * ux * (1 - uz) +
+    h01 * (1 - ux) * uz +
+    h11 * ux * uz
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Distance-to-water sampling — 8-direction radial search for nearest shoreline
+// ---------------------------------------------------------------------------
+
+const WATER_SEARCH_DIRECTIONS = 8;
+const WATER_SEARCH_STEP = 5; // meters between samples
+
+/**
+ * Find the horizontal distance from (worldX, worldZ) to the nearest water cell.
+ * Casts rays in 8 directions, stepping every WATER_SEARCH_STEP meters.
+ * Returns the distance in meters, or Infinity if no water found within searchRadius.
+ */
+function distanceToWater(
+  worldX: number,
+  worldZ: number,
+  getHeightAt: (x: number, z: number) => number,
+  waterThreshold: number,
+  searchRadius: number,
+): number {
+  let nearest = Infinity;
+  const angleStep = (Math.PI * 2) / WATER_SEARCH_DIRECTIONS;
+  const maxSteps = Math.ceil(searchRadius / WATER_SEARCH_STEP);
+
+  for (let dir = 0; dir < WATER_SEARCH_DIRECTIONS; dir++) {
+    const angle = dir * angleStep;
+    const dx = Math.cos(angle) * WATER_SEARCH_STEP;
+    const dz = Math.sin(angle) * WATER_SEARCH_STEP;
+
+    for (let step = 1; step <= maxSteps; step++) {
+      const dist = step * WATER_SEARCH_STEP;
+      if (dist >= nearest) break; // can't beat current best
+      const sx = worldX + dx * step;
+      const sz = worldZ + dz * step;
+      if (getHeightAt(sx, sz) < waterThreshold) {
+        nearest = dist;
+        break; // this direction found water, move to next
+      }
+    }
+  }
+
+  return nearest;
+}
+
 /**
  * Context provided by TerrainSystem for resource generation.
  */
@@ -258,6 +340,17 @@ export function generateTrees(
       if (dhdx * dhdx + dhdz * dhdz > maxSlope * maxSlope) continue;
     }
 
+    // Density noise — creates natural dense groves and sparse clearings.
+    // Uses a different noise offset (+500) to decouple from species zoning.
+    const rawDensity = speciesNoise2D(
+      (worldX + 500) * DENSITY_NOISE_SCALE,
+      (worldZ + 500) * DENSITY_NOISE_SCALE,
+    );
+    const densityChance =
+      DENSITY_NOISE_MIN +
+      (1 - DENSITY_NOISE_MIN) * Math.pow(rawDensity, DENSITY_NOISE_POWER);
+    if (rng() > densityChance) continue;
+
     // Resolve the tree map for THIS position. If we have a per-position
     // biome callback, use it to get the actual biome here instead of
     // relying on the single tile-center biome.
@@ -279,12 +372,64 @@ export function generateTrees(
       }
     }
 
-    // Select tree type based on weighted distribution
+    // Water proximity check — cheap height pre-check then expensive radial scan.
+    // Cached per-position so the post-selection water rejection can reuse it.
+    const heightAboveWater = height - ctx.waterThreshold;
+    let posDistToWater = Infinity;
+    let waterChecked = false;
+
+    if (heightAboveWater <= WATER_HEIGHT_PRECHECK) {
+      // Find the max search radius among all water-affinity trees in this map
+      let maxSearch = 0;
+      for (const treeType of treeTypes) {
+        const cfg = activeTreeMap[treeType];
+        if (cfg.waterAffinity && cfg.waterAffinity > 0) {
+          maxSearch = Math.max(maxSearch, cfg.waterSearchRadius ?? 40);
+        }
+      }
+      if (maxSearch > 0) {
+        posDistToWater = distanceToWater(
+          worldX,
+          worldZ,
+          ctx.getHeightAt,
+          ctx.waterThreshold,
+          maxSearch,
+        );
+        waterChecked = true;
+      }
+    }
+
+    const nearWater = waterChecked && posDistToWater < Infinity;
+
+    // Select tree type — species zoning + water proximity boost
+    const zoneVal = speciesNoise2D(
+      worldX * SPECIES_ZONE_SCALE,
+      worldZ * SPECIES_ZONE_SCALE,
+    );
+    const preferredIdx =
+      Math.floor(zoneVal * treeTypes.length) % treeTypes.length;
+    const preferredSpecies = treeTypes[preferredIdx];
+
+    let boostedTotal = 0;
+    for (const treeType of treeTypes) {
+      let w = activeTreeMap[treeType].weight;
+      if (treeType === preferredSpecies) w *= SPECIES_ZONE_BOOST;
+      if (nearWater && activeTreeMap[treeType].waterAffinity) {
+        w *= WATER_PROXIMITY_BOOST;
+      }
+      boostedTotal += w;
+    }
+
     let selectedTreeId = treeTypes[0];
-    const roll = rng() * totalWeight;
+    const roll = rng() * boostedTotal;
     let cumulative = 0;
     for (const treeType of treeTypes) {
-      cumulative += activeTreeMap[treeType].weight;
+      let w = activeTreeMap[treeType].weight;
+      if (treeType === preferredSpecies) w *= SPECIES_ZONE_BOOST;
+      if (nearWater && activeTreeMap[treeType].waterAffinity) {
+        w *= WATER_PROXIMITY_BOOST;
+      }
+      cumulative += w;
       if (roll < cumulative) {
         selectedTreeId = treeType;
         break;
@@ -295,8 +440,6 @@ export function generateTrees(
     // Apply per-tree placement rules from the merged config
     const rules: TreePlacementRules | undefined = activeTreeMap[selectedTreeId];
     if (rules) {
-      const heightAboveWater = height - ctx.waterThreshold;
-
       if (rules.minHeight !== undefined && height < rules.minHeight) continue;
       if (rules.maxHeight !== undefined && height > rules.maxHeight) continue;
 
@@ -307,9 +450,23 @@ export function generateTrees(
         continue;
 
       if (rules.waterAffinity && rules.waterAffinity > 0) {
-        const proximityLimit = rules.waterProximityHeight ?? 10;
-        if (heightAboveWater > proximityLimit) {
-          if (rng() < rules.waterAffinity) continue;
+        // Reuse cached distance if available, otherwise compute fresh
+        const maxDist = rules.waterMaxDistance ?? 30;
+        let dist = posDistToWater;
+        if (!waterChecked) {
+          const searchRadius = rules.waterSearchRadius ?? 40;
+          dist = distanceToWater(
+            worldX,
+            worldZ,
+            ctx.getHeightAt,
+            ctx.waterThreshold,
+            searchRadius,
+          );
+        }
+        if (dist === Infinity) continue;
+        if (dist > maxDist) {
+          if (rules.waterAffinity >= 0.5 || rng() < rules.waterAffinity)
+            continue;
         }
       }
     }

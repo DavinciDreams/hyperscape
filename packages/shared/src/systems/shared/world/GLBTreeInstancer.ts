@@ -478,6 +478,20 @@ export async function addInstance(
       return false;
     }
 
+    // Pick initial LOD based on camera distance to avoid LOD0 pop-in at range
+    let initialLOD: 0 | 1 | 2 = 0;
+    if (world?.camera) {
+      const cp = world.camera.position;
+      const dx = cp.x - position.x;
+      const dz = cp.z - position.z;
+      const distSq = dx * dx + dz * dz;
+      if (distSq >= resourceLOD.lod2DistanceSq) {
+        initialLOD = pool.lod2 ? 2 : pool.lod1 ? 1 : 0;
+      } else if (distSq >= resourceLOD.lod1DistanceSq) {
+        initialLOD = pool.lod1 ? 1 : 0;
+      }
+    }
+
     const slot: TreeSlot = {
       entityId,
       position: position.clone(),
@@ -485,7 +499,7 @@ export async function addInstance(
       scale,
       depletedScale: depletedScale ?? scale,
       yOffset: pool.yOffset,
-      currentLOD: 0,
+      currentLOD: initialLOD,
       depleted: false,
     };
 
@@ -493,7 +507,9 @@ export async function addInstance(
     entityToModel.set(entityId, modelPath);
 
     const mat = composeInstanceMatrix(position, rotation, scale, pool.yOffset);
-    addToPool(pool.lod0!, entityId, mat);
+    const initialPool =
+      initialLOD === 0 ? pool.lod0 : initialLOD === 1 ? pool.lod1 : pool.lod2;
+    if (initialPool) addToPool(initialPool, entityId, mat);
 
     return true;
   } catch (error) {
