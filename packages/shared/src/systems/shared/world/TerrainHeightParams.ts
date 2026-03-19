@@ -104,7 +104,7 @@ export const ELEVATION_OFFSET = 8;
 /** Amplitude of large-scale elevation noise (in world units). */
 export const ELEVATION_NOISE_AMOUNT = 50;
 /** Frequency of large-scale elevation noise. */
-export const ELEVATION_NOISE_SCALE = 0.0015;
+export const ELEVATION_NOISE_SCALE = 0.0005;
 
 export interface BiomeNoiseProfile {
   continentWeight: number;
