@@ -47,10 +47,15 @@ export interface TreePlacementRules {
   /**
    * How strongly this tree prefers water-adjacent placement (0–1).
    * 0 = no preference, 1 = only spawns near water.
-   * At intermediate values, spawn probability scales with water proximity.
+   * When > 0, a radial distance-to-water search is performed and trees
+   * beyond waterMaxDistance are rejected with probability waterAffinity.
    */
   waterAffinity?: number;
-  /** If waterAffinity > 0, the max height above water to consider "near water" */
+  /** Horizontal search radius (meters) when looking for nearby water. Default 40. */
+  waterSearchRadius?: number;
+  /** Max horizontal distance from shore (meters) before rejection kicks in. Default 30. */
+  waterMaxDistance?: number;
+  /** @deprecated Use waterMaxDistance instead. Kept for backward compat. */
   waterProximityHeight?: number;
   /** Reject placement if position is below this height above water threshold */
   avoidsWaterBelow?: number;

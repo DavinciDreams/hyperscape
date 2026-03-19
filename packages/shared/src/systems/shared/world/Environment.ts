@@ -61,8 +61,8 @@ export function isCsmEnabled(): boolean {
   return false;
 }
 
-const SINGLE_SHADOW_MAP_SIZE = 2048;
-const SINGLE_SHADOW_FRUSTUM = 80;
+const SINGLE_SHADOW_MAP_SIZE = 4096;
+const SINGLE_SHADOW_FRUSTUM = 200;
 
 // IMPORTANT: Vegetation fade distances should be <= maxFar so trees don't appear unshadowed
 export const csmLevels = {

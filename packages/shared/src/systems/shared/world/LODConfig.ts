@@ -65,74 +65,74 @@ export interface LODDistancesWithSq extends LODDistances {
 export const LOD_DISTANCES: Record<string, LODDistances> = {
   // Large vegetation
   tree: {
-    lod1Distance: 250,
-    lod2Distance: 500,
-    imposterDistance: 800,
-    fadeDistance: 1200,
+    lod1Distance: 800,
+    lod2Distance: 1000,
+    imposterDistance: 1200,
+    fadeDistance: 1800,
   },
 
   // Medium vegetation
   bush: {
-    lod1Distance: 200,
-    lod2Distance: 400,
+    lod1Distance: 350,
+    lod2Distance: 500,
     imposterDistance: 650,
     fadeDistance: 1000,
   },
   fern: {
-    lod1Distance: 150,
-    lod2Distance: 300,
+    lod1Distance: 250,
+    lod2Distance: 400,
     imposterDistance: 500,
     fadeDistance: 800,
   },
   rock: {
-    lod1Distance: 250,
-    lod2Distance: 500,
+    lod1Distance: 400,
+    lod2Distance: 600,
     imposterDistance: 800,
     fadeDistance: 1200,
   },
   fallen_tree: {
-    lod1Distance: 200,
-    lod2Distance: 400,
+    lod1Distance: 350,
+    lod2Distance: 500,
     imposterDistance: 650,
     fadeDistance: 1000,
   },
 
   // Small vegetation
   flower: {
-    lod1Distance: 120,
-    lod2Distance: 250,
+    lod1Distance: 200,
+    lod2Distance: 300,
     imposterDistance: 400,
     fadeDistance: 650,
   },
   mushroom: {
-    lod1Distance: 100,
-    lod2Distance: 200,
+    lod1Distance: 180,
+    lod2Distance: 280,
     imposterDistance: 350,
     fadeDistance: 550,
   },
   grass: {
-    lod1Distance: 80,
-    lod2Distance: 160,
+    lod1Distance: 150,
+    lod2Distance: 220,
     imposterDistance: 280,
     fadeDistance: 450,
   },
 
   // Resources (harvestable objects)
   resource: {
-    lod1Distance: 220,
-    lod2Distance: 450,
+    lod1Distance: 380,
+    lod2Distance: 550,
     imposterDistance: 700,
     fadeDistance: 1100,
   },
   tree_resource: {
-    lod1Distance: 200,
-    lod2Distance: 400,
-    imposterDistance: 650,
+    lod1Distance: 400,
+    lod2Distance: 550,
+    imposterDistance: 700,
     fadeDistance: 1000,
   },
   rock_resource: {
-    lod1Distance: 250,
-    lod2Distance: 500,
+    lod1Distance: 400,
+    lod2Distance: 600,
     imposterDistance: 800,
     fadeDistance: 1200,
   },
