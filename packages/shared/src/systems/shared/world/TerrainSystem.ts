@@ -1356,11 +1356,11 @@ export class TerrainSystem extends System {
     WATER_THRESHOLD: TERRAIN_CONSTANTS.WATER_THRESHOLD,
 
     // LOD (Level of Detail) - Resolution tiers based on distance
-    LOD_DISTANCES: [100, 200, 350], // Distance thresholds
+    LOD_DISTANCES: [200, 400, 700], // Distance thresholds
     LOD_RESOLUTIONS: [64, 32, 16, 8], // Resolution at each LOD level
 
-    // Chunking - Only adjacent tiles
-    VIEW_DISTANCE: 1, // Load only 1 tile in each direction (3x3 = 9 tiles)
+    // Chunking
+    VIEW_DISTANCE: 5, // Load 5 tiles in each direction (11x11 = 121 tiles, ~1100m)
     UPDATE_INTERVAL: 0.5, // Check player movement every 0.5 seconds
 
     // Movement Constraints
@@ -6413,13 +6413,13 @@ export class TerrainSystem extends System {
 
     // Embedded spectator prioritizes first-frame time over long-range preload.
     if (isServerRuntime) {
-      // Server does not render horizon terrain, so keep chunk windows tight to
-      // avoid runaway memory when many autonomous agents are active.
-      this.coreChunkRange = 1; // 3x3 core grid
-      this.ringChunkRange = 1; // No extra preload ring
-      this.terrainOnlyChunkRange = 0; // Never load render-only distant tiles
-      this.maxTilesPerFrame = 2;
-      this.generationBudgetMsPerFrame = 4;
+      // Server generates resource entities for tiles within ringChunkRange.
+      // Must be large enough so clients see trees before reaching them.
+      this.coreChunkRange = 3; // 7x7 core grid (full simulation)
+      this.ringChunkRange = 5; // 11x11 ring — resource content generated here
+      this.terrainOnlyChunkRange = 0; // No render-only tiles on server
+      this.maxTilesPerFrame = 4;
+      this.generationBudgetMsPerFrame = 6;
     } else if (isEmbeddedSpectator) {
       this.coreChunkRange = 1; // 3x3 core grid
       this.ringChunkRange = 2; // Preload ring up to 5x5
@@ -6427,12 +6427,12 @@ export class TerrainSystem extends System {
       this.maxTilesPerFrame = 4; // Catch up faster after camera retargets
       this.generationBudgetMsPerFrame = 10;
     } else {
-      // Balanced load radius to reduce generation spikes when moving
-      this.coreChunkRange = 2; // 5x5 core grid
-      this.ringChunkRange = 3; // Preload ring up to ~7x7
-      this.terrainOnlyChunkRange = 5;
-      this.maxTilesPerFrame = 2;
-      this.generationBudgetMsPerFrame = 6;
+      // Client: load tiles out to match LOD fade distances (~1000m)
+      this.coreChunkRange = 3; // 7x7 core grid
+      this.ringChunkRange = 5; // 11x11 ring — content generated here (~1100m)
+      this.terrainOnlyChunkRange = 7; // Terrain mesh horizon (~1500m)
+      this.maxTilesPerFrame = 3;
+      this.generationBudgetMsPerFrame = 8;
     }
 
     // Initialize tracking maps

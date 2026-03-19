@@ -63,78 +63,78 @@ export interface LODDistancesWithSq extends LODDistances {
  * Categories can be customized based on object size and visual importance.
  */
 export const LOD_DISTANCES: Record<string, LODDistances> = {
-  // Large vegetation - aggressive LOD for performance
+  // Large vegetation
   tree: {
-    lod1Distance: 30,
-    lod2Distance: 60,
-    imposterDistance: 100,
-    fadeDistance: 180,
+    lod1Distance: 250,
+    lod2Distance: 500,
+    imposterDistance: 800,
+    fadeDistance: 1200,
   },
 
   // Medium vegetation
   bush: {
-    lod1Distance: 40,
-    lod2Distance: 80,
-    imposterDistance: 120,
-    fadeDistance: 200,
+    lod1Distance: 200,
+    lod2Distance: 400,
+    imposterDistance: 650,
+    fadeDistance: 1000,
   },
   fern: {
-    lod1Distance: 30,
-    lod2Distance: 55,
-    imposterDistance: 80,
-    fadeDistance: 120,
+    lod1Distance: 150,
+    lod2Distance: 300,
+    imposterDistance: 500,
+    fadeDistance: 800,
   },
   rock: {
-    lod1Distance: 50,
-    lod2Distance: 100,
-    imposterDistance: 150,
-    fadeDistance: 250,
+    lod1Distance: 250,
+    lod2Distance: 500,
+    imposterDistance: 800,
+    fadeDistance: 1200,
   },
   fallen_tree: {
-    lod1Distance: 45,
-    lod2Distance: 90,
-    imposterDistance: 130,
-    fadeDistance: 200,
+    lod1Distance: 200,
+    lod2Distance: 400,
+    imposterDistance: 650,
+    fadeDistance: 1000,
   },
 
-  // Small vegetation (aggressive culling - skip LOD2, go straight to impostor)
+  // Small vegetation
   flower: {
-    lod1Distance: 25,
-    lod2Distance: 45, // Same as imposter - skip LOD2
-    imposterDistance: 60,
-    fadeDistance: 100,
+    lod1Distance: 120,
+    lod2Distance: 250,
+    imposterDistance: 400,
+    fadeDistance: 650,
   },
   mushroom: {
-    lod1Distance: 15,
-    lod2Distance: 30, // Same as imposter - skip LOD2
-    imposterDistance: 40,
-    fadeDistance: 80,
+    lod1Distance: 100,
+    lod2Distance: 200,
+    imposterDistance: 350,
+    fadeDistance: 550,
   },
   grass: {
-    lod1Distance: 10,
-    lod2Distance: 20, // Same as imposter - skip LOD2
-    imposterDistance: 30,
-    fadeDistance: 60,
+    lod1Distance: 80,
+    lod2Distance: 160,
+    imposterDistance: 280,
+    fadeDistance: 450,
   },
 
   // Resources (harvestable objects)
   resource: {
-    lod1Distance: 45,
-    lod2Distance: 85,
-    imposterDistance: 120,
-    fadeDistance: 200,
+    lod1Distance: 220,
+    lod2Distance: 450,
+    imposterDistance: 700,
+    fadeDistance: 1100,
   },
   tree_resource: {
-    lod1Distance: 25, // Switch to LOD1 very early
-    lod2Distance: 50,
-    imposterDistance: 80, // Switch to impostor ASAP
-    fadeDistance: 150, // Fade out earlier
+    lod1Distance: 200,
+    lod2Distance: 400,
+    imposterDistance: 650,
+    fadeDistance: 1000,
   },
   rock_resource: {
-    lod1Distance: 50,
-    lod2Distance: 100,
-    imposterDistance: 150,
-    fadeDistance: 250,
+    lod1Distance: 250,
+    lod2Distance: 500,
+    imposterDistance: 800,
+    fadeDistance: 1200,
   },
 
   // Buildings - simple geometry, skip intermediate LODs and go directly to impostor

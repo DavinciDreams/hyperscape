@@ -117,10 +117,9 @@ const SKIP_LOD1_CATEGORIES = new Set([
 const VEGETATION_CHUNK_SIZE = 64; // meters per chunk
 const MAX_INSTANCES_PER_CHUNK = 256;
 
-// Default fade distances - overridden by shadow quality settings in start()
-let FADE_START = 180; // Shader fade begins (fully opaque inside)
-let FADE_END = 200; // Shader fully culls (invisible beyond)
-let CHUNK_RENDER_DISTANCE = 300; // CPU hides chunks (buffer zone for loading)
+let FADE_START = 1000; // Shader fade begins (fully opaque inside)
+let FADE_END = 1200; // Shader fully culls (invisible beyond)
+let CHUNK_RENDER_DISTANCE = 1400; // CPU hides chunks (buffer zone for loading)
 
 // NOTE: Per-category LOD distances are defined in LODConfig.ts LOD_DISTANCES
 // Access via getLODDistances(category) for actual LOD decisions.
@@ -264,8 +263,7 @@ function getAssetLODConfig(category: string, boundingSize?: number) {
 }
 
 /** Max tile distance from player to generate vegetation (in tiles, not world units) */
-// PERFORMANCE: Reduced from 3 to 2 tiles - vegetation fades before this distance anyway
-const MAX_VEGETATION_TILE_RADIUS = 2;
+const MAX_VEGETATION_TILE_RADIUS = 5;
 
 /** Water threshold from centralized constants */
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
@@ -772,11 +770,11 @@ export class VegetationSystem extends System {
       csmLevels[shadowsLevel as keyof typeof csmLevels] || csmLevels.med;
     const shadowMaxFar = csmConfig.maxFar;
 
-    // Sync fade distances with shadow range
-    // Vegetation fully dissolves AT shadow maxFar so we never see unshadowed trees
-    FADE_END = shadowMaxFar; // Fully dissolved at shadow cutoff
-    FADE_START = shadowMaxFar * 0.9; // Start dissolving at 90% of shadow range
-    CHUNK_RENDER_DISTANCE = shadowMaxFar * 1.2; // Chunks visible 20% beyond shadow range
+    // Fade distances are independent of shadow range — distant trees render
+    // without shadows rather than disappearing at the shadow cutoff.
+    FADE_START = 1000;
+    FADE_END = 1200;
+    CHUNK_RENDER_DISTANCE = 1400;
 
     // Imposter distances - switch to billboard before dissolve zone
     // LOD transition: 3D mesh -> Billboard imposter -> Dissolve -> Cull

@@ -75,10 +75,10 @@ import { SUN_SHADE, SUN_LIGHT, NIGHT, applySunShade } from "./LightingConfig";
  */
 export const GPU_VEG_CONFIG = {
   /** Distance where far fade begins (fully opaque inside) - default for generic dissolve */
-  FADE_START: 270,
+  FADE_START: 1000,
 
   /** Distance where fully invisible (far) - default for generic dissolve */
-  FADE_END: 300,
+  FADE_END: 1200,
 
   /** Distance where near fade ends (fully opaque outside) */
   NEAR_FADE_END: 3,
