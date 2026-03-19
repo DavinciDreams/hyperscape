@@ -695,9 +695,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // FIRST: Update world.currentTick on each tick so all systems can read it
     // This must run before any other tick processing (INPUT is earliest priority)
     // Mobs use this to run AI only once per tick instead of every frame
-    this.tickSystem.onTick((tickNumber) => {
-      this.world.currentTick = tickNumber;
-    }, TickPriority.INPUT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.world.currentTick = tickNumber;
+      },
+      TickPriority.INPUT,
+      "currentTick",
+    );
 
     // SECOND: Process duel state transitions BEFORE action queue
     // CRITICAL: Must run before ActionQueue so COUNTDOWN→FIGHTING transition
@@ -705,19 +709,38 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Without this ordering, there's a race condition where movement requests
     // are rejected because they see COUNTDOWN state, but state changes to
     // FIGHTING later in the same tick
-    this.tickSystem.onTick(() => {
-      this.duelSystem.processTick();
-    }, TickPriority.INPUT);
+    this.tickSystem.onTick(
+      () => {
+        this.duelSystem.processTick();
+      },
+      TickPriority.INPUT,
+      "duelSystem",
+    );
 
     // Register action queue to process inputs at INPUT priority
-    this.tickSystem.onTick((tickNumber) => {
-      this.actionQueue.processTick(tickNumber);
-    }, TickPriority.INPUT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.actionQueue.processTick(tickNumber);
+      },
+      TickPriority.INPUT,
+      "actionQueue",
+    );
 
     // Register tile movement to run on each tick (after inputs)
-    this.tickSystem.onTick((tickNumber) => {
-      this.tileMovementManager.onTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const t0 = Date.now();
+        this.tileMovementManager.onTick(tickNumber);
+        const elapsed = Date.now() - t0;
+        if (elapsed > 50) {
+          console.warn(
+            `[Tick] playerMovement: ${elapsed}ms for ${this.tileMovementManager.getPlayerCount()} players`,
+          );
+        }
+      },
+      TickPriority.MOVEMENT,
+      "playerMovement",
+    );
 
     // Mob tile-based movement manager (same tick system as players)
     // Use sendToNearby for mob movement broadcasts
@@ -748,19 +771,49 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Without this, mobs stand idle forever because MobEntity.serverUpdate() defers
     // AI ticking to the tick system for deterministic OSRS ordering.
     const MOB_AI_DELTA_SECONDS = TICK_DURATION_MS / 1000;
-    this.tickSystem.onTick(() => {
-      for (const entity of this.world.entities.values()) {
-        if (!(entity instanceof MobEntity)) continue;
-        if (entity.getHealth() <= 0) continue;
-        entity.runAITick(MOB_AI_DELTA_SECONDS);
-      }
-    }, TickPriority.MOVEMENT);
+
+    // Use type-indexed entity lookup instead of iterating all 221+ entities
+    const getEntityManager = () =>
+      this.world.getSystem("entity-manager") as
+        | { getEntitiesByType?: (type: string) => Array<{ id: string }> }
+        | undefined;
+
+    this.tickSystem.onTick(
+      () => {
+        const t0 = Date.now();
+        const em = getEntityManager();
+        const mobs = em?.getEntitiesByType?.("mob") ?? [];
+        let mobCount = 0;
+        for (const entry of mobs) {
+          const entity = this.world.entities.get(entry.id);
+          if (!entity || !(entity instanceof MobEntity)) continue;
+          // Run for ALL mobs including dead ones — runAITick handles death state
+          // (position locking, respawn timer) since mobs are no longer in the hot set
+          entity.runAITick(MOB_AI_DELTA_SECONDS);
+          mobCount++;
+        }
+        const mobAIMs = Date.now() - t0;
+        (this as { _lastMobAITime?: number })._lastMobAITime = mobAIMs;
+        if (mobAIMs > 30) {
+          console.warn(`[Tick] MobAI: ${mobAIMs}ms for ${mobCount} mobs`);
+        }
+      },
+      TickPriority.MOVEMENT,
+      "mobAI",
+    );
 
     // Register mob tile movement to run on each tick (same priority as player movement)
     // Runs AFTER mob AI so paths set by AI are executed this tick
-    this.tickSystem.onTick((tickNumber) => {
-      this.mobTileMovementManager.onTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const t0 = Date.now();
+        this.mobTileMovementManager.onTick(tickNumber);
+        (this as { _lastMobMoveTime?: number })._lastMobMoveTime =
+          Date.now() - t0;
+      },
+      TickPriority.MOVEMENT,
+      "mobMovement",
+    );
 
     // Pending attack manager - server-authoritative tracking of "walk to mob and attack" actions
     // This replaces unreliable client-side tracking with 100% reliable server-side logic
@@ -784,54 +837,62 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending attack processing BEFORE combat (so attacks can initiate combat this tick)
-    this.tickSystem.onTick((tickNumber) => {
-      this.pendingAttackManager.processTick(tickNumber);
-    }, TickPriority.MOVEMENT); // Same priority as movement, runs after player moves
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.pendingAttackManager.processTick(tickNumber);
+      },
+      TickPriority.MOVEMENT,
+      "pendingAttack",
+    );
 
     // Water hazard recovery - automatically teleport agents out of water
-    this.tickSystem.onTick(() => {
-      const terrain = this.world.getSystem("terrain") as {
-        getHeightAt?: (x: number, z: number) => number;
-      } | null;
+    this.tickSystem.onTick(
+      () => {
+        const terrain = this.world.getSystem("terrain") as {
+          getHeightAt?: (x: number, z: number) => number;
+        } | null;
 
-      if (!terrain?.getHeightAt) return;
+        if (!terrain?.getHeightAt) return;
 
-      for (const entity of this.world.entities.values()) {
-        if (
-          entity.type === "player" &&
-          entity.data?.isAgent &&
-          entity.position
-        ) {
-          const { x, z } = entity.position;
-          const y = terrain.getHeightAt(x, z);
+        // Only check agent players, not all 221+ entities
+        const em = getEntityManager();
+        const players = em?.getEntitiesByType?.("player") ?? [];
+        for (const entry of players) {
+          const entity = this.world.entities.get(entry.id);
+          if (entity && entity.data?.isAgent && entity.position) {
+            const { x, z } = entity.position;
+            const y = terrain.getHeightAt(x, z);
 
-          if (
-            typeof y === "number" &&
-            Number.isFinite(y) &&
-            y < TERRAIN_CONSTANTS.WATER_THRESHOLD
-          ) {
-            console.warn(
-              `[WaterRecovery] Agent ${entity.id} is in water (y=${y}), teleporting home.`,
-            );
+            if (
+              typeof y === "number" &&
+              Number.isFinite(y) &&
+              y < TERRAIN_CONSTANTS.WATER_THRESHOLD
+            ) {
+              console.warn(
+                `[WaterRecovery] Agent ${entity.id} is in water (y=${y}), teleporting home.`,
+              );
 
-            // Get safe spawn position
-            const [spawnX, baseY, spawnZ] = this.spawn.position;
-            const spawnTerrainHeight = terrain.getHeightAt(spawnX, spawnZ);
-            const safeY =
-              typeof spawnTerrainHeight === "number" &&
-              Number.isFinite(spawnTerrainHeight)
-                ? spawnTerrainHeight + 0.1
-                : baseY;
+              // Get safe spawn position
+              const [spawnX, baseY, spawnZ] = this.spawn.position;
+              const spawnTerrainHeight = terrain.getHeightAt(spawnX, spawnZ);
+              const safeY =
+                typeof spawnTerrainHeight === "number" &&
+                Number.isFinite(spawnTerrainHeight)
+                  ? spawnTerrainHeight + 0.1
+                  : baseY;
 
-            this.world.emit("player:teleport", {
-              playerId: entity.id,
-              position: { x: spawnX, y: safeY, z: spawnZ },
-              rotation: 0,
-            });
+              this.world.emit("player:teleport", {
+                playerId: entity.id,
+                position: { x: spawnX, y: safeY, z: spawnZ },
+                rotation: 0,
+              });
+            }
           }
         }
-      }
-    }, TickPriority.MOVEMENT);
+      },
+      TickPriority.MOVEMENT,
+      "waterRecovery",
+    );
 
     // Pending gather manager - server-authoritative tracking of "walk to resource and gather" actions
     // Uses same approach as PendingAttackManager: movePlayerToward with meleeRange=1 for cardinal-only
@@ -842,9 +903,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending gather processing (same priority as movement)
-    this.tickSystem.onTick((tickNumber) => {
-      this.pendingGatherManager.processTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.pendingGatherManager.processTick(tickNumber);
+      },
+      TickPriority.MOVEMENT,
+      "pendingGather",
+    );
 
     // Pending cook manager - server-authoritative tracking of "walk to fire and cook" actions
     // Uses same approach as PendingGatherManager: movePlayerToward with meleeRange=1 for cardinal-only
@@ -870,9 +935,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending cook processing (same priority as movement)
-    this.tickSystem.onTick((tickNumber) => {
-      this.pendingCookManager.processTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.pendingCookManager.processTick(tickNumber);
+      },
+      TickPriority.MOVEMENT,
+      "pendingCook",
+    );
 
     // Follow manager - server-authoritative tracking of players following other players
     // OSRS-style: follower walks behind leader, re-paths when leader moves
@@ -883,9 +952,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Register follow processing (same priority as movement)
     // Pass tick number for OSRS-accurate 1-tick delay tracking
-    this.tickSystem.onTick((tickNumber) => {
-      this.followManager.processTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.followManager.processTick(tickNumber);
+      },
+      TickPriority.MOVEMENT,
+      "followManager",
+    );
 
     // Pending trade manager - server-authoritative "walk to player and trade" system
     // OSRS-style: if player clicks to trade someone far away, walk up first
@@ -895,9 +968,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending trade processing (same priority as movement)
-    this.tickSystem.onTick(() => {
-      this.pendingTradeManager.processTick();
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      () => {
+        this.pendingTradeManager.processTick();
+      },
+      TickPriority.MOVEMENT,
+      "pendingTrade",
+    );
 
     // Store pending trade manager on world so trade handlers can access it
     (
@@ -912,9 +989,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending duel challenge processing (same priority as movement)
-    this.tickSystem.onTick(() => {
-      this.pendingDuelChallengeManager.processTick();
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      () => {
+        this.pendingDuelChallengeManager.processTick();
+      },
+      TickPriority.MOVEMENT,
+      "pendingDuel",
+    );
 
     // Store pending duel challenge manager on world so handlers can access it
     (
@@ -1106,30 +1187,38 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Register face direction processing - runs AFTER all movement at COMBAT priority
     // OSRS: Face direction mask is processed at end of tick if entity didn't move
-    this.tickSystem.onTick(() => {
-      // Get all player IDs from the players map (not items)
-      const entitiesSystem = this.world.entities as {
-        players?: Map<string, { id: string }>;
-      } | null;
+    this.tickSystem.onTick(
+      () => {
+        // Get all player IDs from the players map (not items)
+        const entitiesSystem = this.world.entities as {
+          players?: Map<string, { id: string }>;
+        } | null;
 
-      if (!entitiesSystem?.players) {
-        return;
-      }
+        if (!entitiesSystem?.players) {
+          return;
+        }
 
-      const playerIds: string[] = [];
-      for (const [playerId] of entitiesSystem.players) {
-        playerIds.push(playerId);
-      }
+        const playerIds: string[] = [];
+        for (const [playerId] of entitiesSystem.players) {
+          playerIds.push(playerId);
+        }
 
-      if (playerIds.length > 0) {
-        this.faceDirectionManager.processFaceDirection(playerIds);
-      }
-    }, TickPriority.COMBAT);
+        if (playerIds.length > 0) {
+          this.faceDirectionManager.processFaceDirection(playerIds);
+        }
+      },
+      TickPriority.COMBAT,
+      "faceDirection",
+    );
 
     // Reset movement flags at the START of each tick (INPUT priority)
-    this.tickSystem.onTick(() => {
-      this.faceDirectionManager.resetMovementFlags();
-    }, TickPriority.INPUT);
+    this.tickSystem.onTick(
+      () => {
+        this.faceDirectionManager.resetMovementFlags();
+      },
+      TickPriority.INPUT,
+      "resetMoveFlags",
+    );
 
     // Store face direction manager on world so ResourceSystem can access it
     (
@@ -1138,64 +1227,138 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Register combat system to process on each tick (after movement, before AI)
     // This is OSRS-accurate: combat runs on the game tick, not per-frame
-    this.tickSystem.onTick((tickNumber) => {
-      const combatSystem = this.world.getSystem(
-        "combat",
-      ) as CombatSystem | null;
-      if (combatSystem) {
-        combatSystem.processCombatTick(tickNumber);
-      }
-    }, TickPriority.COMBAT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const t0 = Date.now();
+        const combatSystem = this.world.getSystem(
+          "combat",
+        ) as CombatSystem | null;
+        if (combatSystem) {
+          combatSystem.processCombatTick(tickNumber);
+        }
+        (this as { _lastCombatTime?: number })._lastCombatTime =
+          Date.now() - t0;
+      },
+      TickPriority.COMBAT,
+      "combat",
+    );
 
     // Register death system to process on each tick (after combat)
     // Handles gravestone expiration and ground item despawn (OSRS-accurate tick-based timing)
-    this.tickSystem.onTick((tickNumber) => {
-      const playerDeathSystem = this.world.getSystem(
-        "player-death",
-      ) as unknown as PlayerDeathSystemWithTick | undefined;
-      if (
-        playerDeathSystem &&
-        typeof playerDeathSystem.processTick === "function"
-      ) {
-        playerDeathSystem.processTick(tickNumber);
-      }
-    }, TickPriority.COMBAT); // Same priority as combat (after movement)
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const playerDeathSystem = this.world.getSystem(
+          "player-death",
+        ) as unknown as PlayerDeathSystemWithTick | undefined;
+        if (
+          playerDeathSystem &&
+          typeof playerDeathSystem.processTick === "function"
+        ) {
+          playerDeathSystem.processTick(tickNumber);
+        }
+      },
+      TickPriority.COMBAT,
+      "playerDeath",
+    );
 
     // Register loot system to process on each tick (after combat)
     // Handles mob corpse despawn (OSRS-accurate tick-based timing)
-    this.tickSystem.onTick((tickNumber) => {
-      const lootSystem = this.world.getSystem("loot") as unknown as
-        | PlayerDeathSystemWithTick
-        | undefined;
-      if (lootSystem && typeof lootSystem.processTick === "function") {
-        lootSystem.processTick(tickNumber);
-      }
-    }, TickPriority.COMBAT); // Same priority as combat (after movement)
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const lootSystem = this.world.getSystem("loot") as unknown as
+          | PlayerDeathSystemWithTick
+          | undefined;
+        if (lootSystem && typeof lootSystem.processTick === "function") {
+          lootSystem.processTick(tickNumber);
+        }
+      },
+      TickPriority.COMBAT,
+      "loot",
+    );
 
     // Register resource gathering system to process on each tick (after combat)
     // OSRS-accurate: Woodcutting attempts every 4 ticks (2.4 seconds)
-    this.tickSystem.onTick((tickNumber) => {
-      const resourceSystem = this.world.getSystem(
-        "resource",
-      ) as ResourceSystem | null;
-      if (
-        resourceSystem &&
-        typeof resourceSystem.processGatheringTick === "function"
-      ) {
-        resourceSystem.processGatheringTick(tickNumber);
-      }
-    }, TickPriority.RESOURCES);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const resourceSystem = this.world.getSystem(
+          "resource",
+        ) as ResourceSystem | null;
+        if (
+          resourceSystem &&
+          typeof resourceSystem.processGatheringTick === "function"
+        ) {
+          resourceSystem.processGatheringTick(tickNumber);
+        }
+      },
+      TickPriority.RESOURCES,
+      "resources",
+    );
 
     // Register home teleport system to process on each tick
     // Handles cast completion and combat interruption checks
-    this.tickSystem.onTick((tickNumber) => {
-      const manager = getHomeTeleportManager();
-      if (manager) {
-        manager.processTick(tickNumber, (playerId: string) => {
-          return this.broadcastManager.getPlayerSocket(playerId);
-        });
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const manager = getHomeTeleportManager();
+        if (manager) {
+          manager.processTick(tickNumber, (playerId: string) => {
+            return this.broadcastManager.getPlayerSocket(playerId);
+          });
+        }
+      },
+      TickPriority.RESOURCES,
+      "homeTeleport",
+    );
+
+    // Event loop lag detector — measures max time the event loop was blocked
+    // between ticks using a high-frequency setTimeout probe
+    let _maxEventLoopLag = 0;
+    let _lagProbeExpected = Date.now();
+    const lagProbe = () => {
+      const now = Date.now();
+      const lag = now - _lagProbeExpected - 50; // Subtract expected 50ms interval
+      if (lag > 0) {
+        if (lag > _maxEventLoopLag) {
+          _maxEventLoopLag = lag;
+        }
+        // Log significant blocks to server console to help identify the source
+        if (lag > 200) {
+          console.warn(
+            `[EventLoop] ⚠️ Blocked for ${lag}ms at tick ${this.world.currentTick}`,
+          );
+        }
       }
-    }, TickPriority.RESOURCES);
+      _lagProbeExpected = now + 50;
+      setTimeout(lagProbe, 50);
+    };
+    setTimeout(lagProbe, 50);
+
+    // Broadcast tick health stats to clients for DevStats panel (every 5th tick = 3s)
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        if (tickNumber % 5 !== 0) return;
+        const stats = this.tickSystem.getTickHealthStats();
+        // Include per-phase timing breakdown so DevStats can show WHERE time goes
+        const phaseTimings = {
+          mobAI: (this as { _lastMobAITime?: number })._lastMobAITime ?? 0,
+          mobMove:
+            (this as { _lastMobMoveTime?: number })._lastMobMoveTime ?? 0,
+          combat: (this as { _lastCombatTime?: number })._lastCombatTime ?? 0,
+        };
+        const eventLoopLag = _maxEventLoopLag;
+        _maxEventLoopLag = 0; // Reset after reporting
+        this.broadcastManager.sendToAll("tickHealth", {
+          ...stats,
+          phaseTimings,
+          eventLoopLag,
+        });
+      },
+      TickPriority.BROADCAST,
+      "tickHealthBroadcast",
+    );
+
+    // NOTE: Explicit GC scheduling removed — Bun.gc(false) callbacks piled up
+    // when ticks fell behind, creating a death spiral of competing GC passes.
+    // Let the runtime handle GC naturally.
 
     // Socket manager
     this.socketManager = new SocketManager(
@@ -3004,7 +3167,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   override preFixedUpdate(): void {
+    const qLen = this.queue.length;
+    const t0 = Date.now();
     this.flush();
+    const elapsed = Date.now() - t0;
+    if (elapsed > 50) {
+      console.warn(
+        `[ServerNetwork] flush() took ${elapsed}ms for ${qLen} queued messages`,
+      );
+    }
   }
 
   override update(dt: number): void {

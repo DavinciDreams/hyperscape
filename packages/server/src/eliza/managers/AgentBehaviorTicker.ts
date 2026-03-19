@@ -29,6 +29,13 @@ import type {
 import type { EmbeddedHyperscapeService } from "../EmbeddedHyperscapeService.js";
 
 /**
+ * Yield to the event loop so game ticks and I/O can process.
+ * Used between heavy synchronous sub-tasks in agent behavior ticks.
+ */
+const yieldToEventLoop = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
  * Active goal for an embedded agent (visible on dashboard)
  */
 export interface AgentGoal {
@@ -100,6 +107,13 @@ export type EmbeddedBehaviorAction =
 /** Autonomous behavior tick interval for embedded agents */
 export const EMBEDDED_BEHAVIOR_TICK_INTERVAL = 8000;
 
+/**
+ * Stagger offset between agents to prevent all agents from ticking on the same
+ * event loop turn. With 10 agents at 800ms stagger, they spread across 8 seconds
+ * so at most ~1 agent resolves per event loop turn instead of all 10 at once.
+ */
+export const AGENT_STAGGER_OFFSET_MS = 800;
+
 /** Agent autonomy is always enabled — agents always move and act autonomously. */
 export const EMBEDDED_AGENT_AUTONOMY_ENABLED = true;
 
@@ -131,6 +145,9 @@ export function setAgentAutonomyIfSupported(
  * for embedded agents.
  */
 export class AgentBehaviorTicker {
+  /** Counter used to stagger agent start times so they don't all tick at once */
+  private agentStartIndex = 0;
+
   constructor(
     private readonly world: World,
     private readonly getAgent: (
@@ -174,18 +191,26 @@ export class AgentBehaviorTicker {
     };
 
     let tickInProgress = false;
-    instance.behaviorInterval = setInterval(() => {
-      if (tickInProgress) return;
-      tickInProgress = true;
-      void runTick();
-    }, EMBEDDED_BEHAVIOR_TICK_INTERVAL);
+
+    // Stagger each agent's interval start so they don't all fire on the same
+    // event loop turn. Agent 0 starts at 3000ms, agent 1 at 3800ms, etc.
+    const staggerDelay = this.agentStartIndex * AGENT_STAGGER_OFFSET_MS;
+    this.agentStartIndex++;
 
     // Delay the first tick so PLAYER_REGISTERED has time to fire and
     // QuestSystem can load the player's quest state from the database.
+    // Additional stagger offset prevents simultaneous first ticks.
     instance.behaviorStartTimeout = setTimeout(() => {
       instance.behaviorStartTimeout = null;
       void runTick();
-    }, 3000);
+
+      // Start the recurring interval AFTER the first tick completes its stagger
+      instance.behaviorInterval = setInterval(() => {
+        if (tickInProgress) return;
+        tickInProgress = true;
+        void runTick();
+      }, EMBEDDED_BEHAVIOR_TICK_INTERVAL);
+    }, 3000 + staggerDelay);
   }
 
   /**
@@ -265,6 +290,10 @@ export class AgentBehaviorTicker {
     // === QUEST MANAGEMENT ===
     await this.manageQuests(instance);
 
+    // Yield to event loop between heavy synchronous sub-tasks so game ticks
+    // can fire instead of being starved by back-to-back agent CPU work.
+    await yieldToEventLoop();
+
     // === INVENTORY MANAGEMENT ===
     this.manageInventory(instance);
 
@@ -273,6 +302,8 @@ export class AgentBehaviorTicker {
 
     // === EQUIPMENT MANAGEMENT ===
     this.manageEquipment(instance, gameState);
+
+    await yieldToEventLoop();
 
     // === SURVIVAL: EAT FOOD IF NEEDED ===
     if (this.assessAndEat(instance, gameState)) {

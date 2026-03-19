@@ -6337,10 +6337,30 @@ export class AutonomousBehaviorManager {
 
     // Summarize equipment
     const eq = player.equipment;
-    const weapon = eq?.weapon || "fists";
+    const weaponSlot = eq?.weapon;
+    const weapon = weaponSlot
+      ? typeof weaponSlot === "string"
+        ? weaponSlot
+        : String(
+            (weaponSlot as Record<string, unknown>).itemId ||
+              (weaponSlot as Record<string, unknown>).name ||
+              "fists",
+          )
+      : "fists";
+    const extractSlotName = (slot: unknown): string => {
+      if (!slot) return "";
+      if (typeof slot === "string") return slot;
+      return String(
+        (slot as Record<string, unknown>).itemId ||
+          (slot as Record<string, unknown>).name ||
+          "",
+      );
+    };
     const armor =
-      [eq?.helmet, eq?.body, eq?.legs, eq?.shield].filter(Boolean).join(", ") ||
-      "none";
+      [eq?.helmet, eq?.body, eq?.legs, eq?.shield]
+        .map(extractSlotName)
+        .filter(Boolean)
+        .join(", ") || "none";
 
     // Summarize skills
     const skills = player.skills;
@@ -6457,7 +6477,17 @@ export class AutonomousBehaviorManager {
 
   /** Detect combat role from player's equipped weapon */
   private detectCombatRole(player: PlayerEntity): "melee" | "ranged" | "mage" {
-    const weapon = (player.equipment?.weapon || "").toLowerCase();
+    const weaponSlot = player.equipment?.weapon;
+    const weapon = weaponSlot
+      ? (typeof weaponSlot === "string"
+          ? weaponSlot
+          : String(
+              (weaponSlot as Record<string, unknown>).itemId ||
+                (weaponSlot as Record<string, unknown>).name ||
+                "",
+            )
+        ).toLowerCase()
+      : "";
     const arrows = player.equipment?.arrows;
 
     if (
@@ -7255,10 +7285,16 @@ export class AutonomousBehaviorManager {
     }
 
     // Lost — assess what went wrong
-    const weaponName =
-      typeof player?.equipment?.weapon === "string"
-        ? player.equipment.weapon
-        : "";
+    const weaponSlotData = player?.equipment?.weapon;
+    const weaponName = weaponSlotData
+      ? typeof weaponSlotData === "string"
+        ? weaponSlotData
+        : String(
+            (weaponSlotData as Record<string, unknown>).itemId ||
+              (weaponSlotData as Record<string, unknown>).name ||
+              "",
+          )
+      : "";
     const hasEquippedWeapon = weaponName.length > 0;
     const isBronze = weaponName.toLowerCase().includes("bronze");
 

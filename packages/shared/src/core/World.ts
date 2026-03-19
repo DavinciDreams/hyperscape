@@ -1386,6 +1386,8 @@ export class World extends EventEmitter {
    * @param time - Current time in milliseconds (from requestAnimationFrame)
    */
   tick = (time: number): void => {
+    const _tickT0 = this.isServer ? performance.now() : 0;
+
     // Begin frame budget tracking (client only)
     if (this.frameBudget) {
       this.frameBudget.beginFrame();
@@ -1420,6 +1422,8 @@ export class World extends EventEmitter {
 
     // Run fixed-timestep physics updates
     // May run 0, 1, or multiple times depending on accumulated time
+    const _fixedT0 = this.isServer ? performance.now() : 0;
+    let _fixedSteps = 0;
     while (this.accumulator >= this.fixedDeltaTime) {
       // Update game state at fixed intervals
       this.fixedUpdate(this.fixedDeltaTime);
@@ -1427,6 +1431,13 @@ export class World extends EventEmitter {
       this.postFixedUpdate(this.fixedDeltaTime);
       // Consume fixed timestep from accumulator
       this.accumulator -= this.fixedDeltaTime;
+      _fixedSteps++;
+    }
+    const _fixedMs = this.isServer ? performance.now() - _fixedT0 : 0;
+    if (_fixedMs > 20) {
+      console.warn(
+        `[World.tick] fixedUpdate took ${_fixedMs.toFixed(0)}ms (${_fixedSteps} steps)`,
+      );
     }
 
     // Calculate interpolation alpha for smooth rendering
@@ -1434,9 +1445,15 @@ export class World extends EventEmitter {
     const alpha = this.accumulator / this.fixedDeltaTime;
     this.preUpdate(alpha);
 
+    // Phase timing for server-side diagnostics
+    const _phaseT = this.isServer ? performance.now() : 0;
+
     // Run frame-rate dependent updates using ANIMATION delta (real-time)
     // This ensures animations and movement play at correct speed regardless of FPS
     this.update(animationDelta, alpha);
+
+    const _updateMs = this.isServer ? performance.now() - _phaseT : 0;
+    const _phaseT2 = this.isServer ? performance.now() : 0;
 
     // Clean up transforms after updates
     this.postUpdate(animationDelta);
@@ -1447,8 +1464,22 @@ export class World extends EventEmitter {
     // Final transform cleanup before rendering
     this.postLateUpdate(animationDelta);
 
+    const _lateMs = this.isServer ? performance.now() - _phaseT2 : 0;
+    const _phaseT3 = this.isServer ? performance.now() : 0;
+
     // Commit changes (render on client, send network updates on server)
     this.commit();
+
+    if (this.isServer) {
+      const _commitMs = performance.now() - _phaseT3;
+      const _totalTickMs = performance.now() - _tickT0;
+      const _measuredMs = _fixedMs + _updateMs + _lateMs + _commitMs;
+      if (_totalTickMs > 50) {
+        console.warn(
+          `[World.tick] TOTAL=${_totalTickMs.toFixed(0)}ms fixed=${_fixedMs.toFixed(0)}ms(${_fixedSteps}st) update=${_updateMs.toFixed(0)}ms late=${_lateMs.toFixed(0)}ms commit=${_commitMs.toFixed(0)}ms unmeasured=${(_totalTickMs - _measuredMs).toFixed(0)}ms`,
+        );
+      }
+    }
 
     // Process deferred work if we have budget remaining
     // This runs low-priority work that was deferred from previous frames
@@ -1676,7 +1707,18 @@ export class World extends EventEmitter {
     }
 
     for (const system of this.systems) {
-      system.preTick();
+      if (this.isServer) {
+        const _t = performance.now();
+        system.preTick();
+        const _e = performance.now() - _t;
+        if (_e > 20) {
+          console.warn(
+            `[World.tick] system.preTick "${this._getSystemName(system)}" took ${_e.toFixed(0)}ms`,
+          );
+        }
+      } else {
+        system.preTick();
+      }
     }
   }
 
@@ -1686,7 +1728,18 @@ export class World extends EventEmitter {
    */
   private preFixedUpdate(willFixedStep: boolean): void {
     for (const system of this.systems) {
-      system.preFixedUpdate(willFixedStep);
+      if (this.isServer) {
+        const _t = performance.now();
+        system.preFixedUpdate(willFixedStep);
+        const _e = performance.now() - _t;
+        if (_e > 20) {
+          console.warn(
+            `[World.tick] system.preFixedUpdate "${this._getSystemName(system)}" took ${_e.toFixed(0)}ms`,
+          );
+        }
+      } else {
+        system.preFixedUpdate(willFixedStep);
+      }
     }
   }
 
@@ -1722,8 +1775,25 @@ export class World extends EventEmitter {
         const name = this._getSystemName(system);
         this.recordSystemTiming(name, "fixedUpdate", elapsed);
       }
+    } else if (this.isServer) {
+      // Server path: lightweight per-system timing to catch blockers
+      for (const system of this.systems) {
+        const _t = performance.now();
+        const result = system.fixedUpdate(delta);
+        this.trackAsyncTickResult(
+          "fixedUpdate",
+          this._getSystemName(system),
+          result,
+        );
+        const _elapsed = performance.now() - _t;
+        if (_elapsed > 20) {
+          console.warn(
+            `[World.tick] system.fixedUpdate "${this._getSystemName(system)}" took ${_elapsed.toFixed(0)}ms`,
+          );
+        }
+      }
     } else {
-      // Fast path: no timing
+      // Client fast path: no timing
       for (const system of this.systems) {
         const result = system.fixedUpdate(delta);
         this.trackAsyncTickResult(
@@ -1751,7 +1821,18 @@ export class World extends EventEmitter {
    */
   private preUpdate(alpha: number): void {
     for (const system of this.systems) {
-      system.preUpdate(alpha);
+      if (this.isServer) {
+        const _t = performance.now();
+        system.preUpdate(alpha);
+        const _e = performance.now() - _t;
+        if (_e > 20) {
+          console.warn(
+            `[World.tick] system.preUpdate "${this._getSystemName(system)}" took ${_e.toFixed(0)}ms`,
+          );
+        }
+      } else {
+        system.preUpdate(alpha);
+      }
     }
   }
 
@@ -1786,8 +1867,25 @@ export class World extends EventEmitter {
         const name = this._getSystemName(system);
         this.recordSystemTiming(name, "update", elapsed);
       }
+    } else if (this.isServer) {
+      // Server path: lightweight per-system timing to catch blockers
+      for (const system of this.systems) {
+        const _t = performance.now();
+        const result = system.update(delta);
+        this.trackAsyncTickResult(
+          "update",
+          this._getSystemName(system),
+          result,
+        );
+        const _elapsed = performance.now() - _t;
+        if (_elapsed > 20) {
+          console.warn(
+            `[World.tick] system.update "${this._getSystemName(system)}" took ${_elapsed.toFixed(0)}ms`,
+          );
+        }
+      }
     } else {
-      // Fast path: no timing
+      // Client fast path: no timing
       for (const system of this.systems) {
         const result = system.update(delta);
         this.trackAsyncTickResult(
@@ -1895,8 +1993,21 @@ export class World extends EventEmitter {
 
   /** Commit phase: Render on client, send network updates on server */
   private commit(): void {
-    for (const system of this.systems) {
-      system.commit();
+    if (this.isServer) {
+      for (const system of this.systems) {
+        const _t = performance.now();
+        system.commit();
+        const _elapsed = performance.now() - _t;
+        if (_elapsed > 20) {
+          console.warn(
+            `[World.tick] system.commit "${this._getSystemName(system)}" took ${_elapsed.toFixed(0)}ms`,
+          );
+        }
+      }
+    } else {
+      for (const system of this.systems) {
+        system.commit();
+      }
     }
   }
 

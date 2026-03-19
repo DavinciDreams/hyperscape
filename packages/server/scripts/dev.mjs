@@ -68,6 +68,31 @@ await esbuild.build({
   logLevel: 'error',
 })
 
+// Build agent behavior worker as separate file (loaded by worker_threads)
+await esbuild.build({
+  entryPoints: ['src/eliza/worker/agentBehaviorWorker.ts'],
+  outfile: 'build/agentBehaviorWorker.js',
+  platform: 'node',
+  format: 'esm',
+  bundle: true,
+  treeShaking: true,
+  minify: false,
+  sourcemap: true,
+  packages: 'external',
+  external: ['vitest'],
+  target: 'node22',
+  define: {
+    'process.env.CLIENT': 'false',
+    'process.env.SERVER': 'true',
+  },
+  loader: {
+    '.ts': 'ts',
+    '.tsx': 'tsx',
+  },
+  plugins: [excludeTestsPlugin],
+  logLevel: 'error',
+})
+
 console.log('✅ Server build complete')
 `;
 
@@ -350,9 +375,13 @@ async function startServer() {
   };
 
   console.log(`${colors.green}Starting server...${colors.reset}`);
+  // Use Node.js instead of Bun for the server runtime.
+  // Bun's JSC has stop-the-world old-generation GC that causes 500-1200ms pauses,
+  // which destroys the 600ms game tick. V8 (Node.js) has incremental/concurrent GC
+  // that keeps pauses <10ms. Polyfills are bundled via import in index.ts.
   const proc = spawn(
-    "bun",
-    ["--preload", "./src/shared/polyfills.ts", "build/index.js"],
+    "node",
+    ["--import", "./scripts/register-hooks.mjs", "build/index.js"],
     {
       stdio: "inherit",
       cwd: rootDir,

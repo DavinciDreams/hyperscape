@@ -486,15 +486,8 @@ function startMemoryMonitor(world: unknown): void {
   let softWarningLogged = false;
 
   const bunGcHint = (): void => {
-    try {
-      (
-        globalThis as typeof globalThis & {
-          Bun?: { gc?: (force?: boolean) => void };
-        }
-      ).Bun?.gc?.(true);
-    } catch {
-      // Best-effort GC hint only.
-    }
+    // Disabled: Even Bun.gc(false) can block the event loop for 1-2 seconds
+    // on heaps >2GB, causing missed game ticks. Let the runtime GC naturally.
   };
 
   const timer = setInterval(() => {
