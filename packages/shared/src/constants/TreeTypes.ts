@@ -24,17 +24,12 @@ export enum TreeId {
   Pine = "tree_pine",
   Oak = "tree_oak",
   Birch = "tree_birch",
-  Bamboo = "tree_bamboo",
-  ChinaPine = "tree_chinaPine",
   Maple = "tree_maple",
   Palm = "tree_palm",
   Banana = "tree_banana",
-  Yucca = "tree_yucca",
   Dead = "tree_dead",
-  Cactus = "tree_cactus",
   Knotwood = "tree_knotwood",
   WindPine = "tree_windPine",
-  WindSwept = "tree_windSwept",
 }
 
 /** Extract the subtype key from a TreeId (e.g. TreeId.Oak → "oak") */
@@ -89,17 +84,12 @@ export const TREE_TYPES = {
   pine: { name: "Pine Tree", levelRequired: 1 },
   oak: { name: "Oak Tree", levelRequired: 15 },
   birch: { name: "Birch Tree", levelRequired: 1 },
-  bamboo: { name: "Bamboo Tree", levelRequired: 1 },
-  chinaPine: { name: "China Pine", levelRequired: 1 },
   maple: { name: "Maple Tree", levelRequired: 45 },
   palm: { name: "Desert Palm", levelRequired: 1 },
   banana: { name: "Banana Tree", levelRequired: 1 },
-  yucca: { name: "Yucca Tree", levelRequired: 1 },
   dead: { name: "Dead Tree", levelRequired: 1 },
-  cactus: { name: "Cactus", levelRequired: 1 },
   knotwood: { name: "Knotwood Tree", levelRequired: 1 },
   windPine: { name: "Wind Pine", levelRequired: 1 },
-  windSwept: { name: "Windswept Tree", levelRequired: 1 },
 } as const satisfies Record<string, TreeTypeDefinition>;
 
 /** All valid tree subtype keys (e.g., "oak", "willow") */
