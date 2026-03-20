@@ -9,7 +9,13 @@
  * - No standard UI (inventory, chat, etc.)
  */
 
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { GameClient } from "./GameClient";
 import { LoadingScreen } from "./LoadingScreen";
 import { StreamingOverlay } from "../components/streaming/StreamingOverlay";
@@ -75,6 +81,108 @@ export interface LeaderboardEntry {
   currentStreak: number;
 }
 
+export interface StreamingRendererHealth {
+  ready: boolean;
+  degradedReason: string | null;
+  updatedAt: number;
+  phase: StreamingState["cycle"]["phase"] | null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isActiveStreamingPhase(
+  phase: StreamingState["cycle"]["phase"] | null,
+): boolean {
+  return Boolean(phase && phase !== "IDLE");
+}
+
+function requiresArenaPositions(
+  phase: StreamingState["cycle"]["phase"] | null,
+): boolean {
+  return phase === "COUNTDOWN" || phase === "FIGHTING" || phase === "RESOLUTION";
+}
+
+function hasValidAgentSnapshot(agent: AgentInfo | null): boolean {
+  if (!agent) return false;
+  if (!agent.id?.trim() || !agent.name?.trim()) return false;
+  if (!isFiniteNumber(agent.maxHp) || agent.maxHp <= 0) return false;
+  if (!isFiniteNumber(agent.hp) || agent.hp < 0 || agent.hp > agent.maxHp) {
+    return false;
+  }
+  return true;
+}
+
+function hasValidArenaPositions(
+  arenaPositions: StreamingState["cycle"]["arenaPositions"] | null | undefined,
+): boolean {
+  if (!arenaPositions) return false;
+  const { agent1, agent2 } = arenaPositions;
+  if (!Array.isArray(agent1) || !Array.isArray(agent2)) return false;
+  if (agent1.length !== 3 || agent2.length !== 3) return false;
+  if (![...agent1, ...agent2].every((value) => isFiniteNumber(value))) {
+    return false;
+  }
+  return agent1.some((value, index) => value !== agent2[index]);
+}
+
+export function deriveStreamingRendererHealth(params: {
+  connected: boolean;
+  worldReady: boolean;
+  terrainReady: boolean;
+  hasStreamingState: boolean;
+  initError: string | null;
+  needsCameraLock: boolean;
+  cameraLocked: boolean;
+  loadingDismissed: boolean;
+  phase: StreamingState["cycle"]["phase"] | null;
+  agent1: AgentInfo | null;
+  agent2: AgentInfo | null;
+  arenaPositions: StreamingState["cycle"]["arenaPositions"] | null | undefined;
+}): StreamingRendererHealth {
+  const activePhase = isActiveStreamingPhase(params.phase);
+  let degradedReason: string | null = null;
+
+  if (params.initError?.trim()) {
+    degradedReason = "initialization_failed";
+  } else if (!params.connected) {
+    degradedReason = "socket_disconnected";
+  } else if (!params.hasStreamingState) {
+    degradedReason = activePhase
+      ? "stream_state_missing"
+      : "waiting_for_duel_data";
+  } else if (!params.worldReady) {
+    degradedReason = "world_not_ready";
+  } else if (!params.terrainReady) {
+    degradedReason = "terrain_not_ready";
+  } else if (params.needsCameraLock && !params.cameraLocked) {
+    degradedReason = "camera_target_unresolved";
+  } else if (activePhase && (!params.agent1 || !params.agent2)) {
+    degradedReason = "agents_missing";
+  } else if (
+    activePhase &&
+    (!hasValidAgentSnapshot(params.agent1) ||
+      !hasValidAgentSnapshot(params.agent2))
+  ) {
+    degradedReason = "invalid_agent_hp";
+  } else if (
+    requiresArenaPositions(params.phase) &&
+    !hasValidArenaPositions(params.arenaPositions)
+  ) {
+    degradedReason = "arena_positions_invalid";
+  } else if (!params.loadingDismissed) {
+    degradedReason = activePhase ? "loading_overlay_active" : "initializing";
+  }
+
+  return {
+    ready: degradedReason === null,
+    degradedReason,
+    updatedAt: Date.now(),
+    phase: params.phase,
+  };
+}
+
 export function shouldDismissStreamingLoading(params: {
   connected: boolean;
   worldReady: boolean;
@@ -99,6 +207,7 @@ export function StreamingMode() {
   const [worldReady, setWorldReady] = useState(false);
   const [terrainReady, setTerrainReady] = useState(false);
   const [cameraLocked, setCameraLocked] = useState(false);
+  const [clientInitError, setClientInitError] = useState<string | null>(null);
   // Once true, loading screen never returns — camera switches are seamless
   const [loadingDismissed, setLoadingDismissed] = useState(false);
   // Fade-out animation: true while the loading overlay is fading away
@@ -152,9 +261,12 @@ export function StreamingMode() {
       worldListenerCleanupRef.current = null;
       worldRef.current = world;
       setConnected(true);
-      (
-        window as unknown as { __HYPERSCAPE_STREAM_READY__?: boolean }
-      ).__HYPERSCAPE_STREAM_READY__ = false;
+      const win = window as unknown as {
+        __HYPERSCAPE_STREAM_READY__?: boolean;
+        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingRendererHealth | null;
+      };
+      win.__HYPERSCAPE_STREAM_READY__ = false;
+      win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
 
       // Force potato-mode graphics tuned for stable 720p streaming output.
       // Keep DPR at 1 so capture canvas stays at target resolution.
@@ -783,9 +895,12 @@ export function StreamingMode() {
 
   useEffect(() => {
     return () => {
-      (
-        window as unknown as { __HYPERSCAPE_STREAM_READY__?: boolean }
-      ).__HYPERSCAPE_STREAM_READY__ = false;
+      const win = window as unknown as {
+        __HYPERSCAPE_STREAM_READY__?: boolean;
+        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingRendererHealth | null;
+      };
+      win.__HYPERSCAPE_STREAM_READY__ = false;
+      win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
       if (worldReadyTimeoutRef.current) {
         clearTimeout(worldReadyTimeoutRef.current);
         worldReadyTimeoutRef.current = null;
@@ -810,27 +925,65 @@ export function StreamingMode() {
     needsCameraLock,
     cameraLocked,
   });
+  const rendererHealth = useMemo(
+    () =>
+      deriveStreamingRendererHealth({
+        connected,
+        worldReady,
+        terrainReady,
+        hasStreamingState: streamingState !== null,
+        initError: clientInitError,
+        needsCameraLock,
+        cameraLocked,
+        loadingDismissed,
+        phase: streamingState?.cycle.phase ?? null,
+        agent1: streamingState?.cycle.agent1 ?? null,
+        agent2: streamingState?.cycle.agent2 ?? null,
+        arenaPositions: streamingState?.cycle.arenaPositions,
+      }),
+    [
+      cameraLocked,
+      clientInitError,
+      connected,
+      loadingDismissed,
+      needsCameraLock,
+      streamingState,
+      terrainReady,
+      worldReady,
+    ],
+  );
 
   useEffect(() => {
-    (
-      window as unknown as { __HYPERSCAPE_STREAM_READY__?: boolean }
-    ).__HYPERSCAPE_STREAM_READY__ = isInitiallyReady;
-  }, [isInitiallyReady]);
+    const win = window as unknown as {
+      __HYPERSCAPE_STREAM_READY__?: boolean;
+      __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingRendererHealth | null;
+    };
+    win.__HYPERSCAPE_STREAM_READY__ = rendererHealth.ready;
+    win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = rendererHealth;
+  }, [rendererHealth]);
 
-  // Trigger fade-out once, then permanently dismiss
+  // Trigger fade-out once when the stream is first ready.
   useEffect(() => {
-    if (isInitiallyReady && !loadingDismissed && !fadingOut) {
-      setFadingOut(true);
-      const timer = setTimeout(() => {
-        setFadingOut(false);
-        setLoadingDismissed(true);
-      }, 600);
-      return () => clearTimeout(timer);
+    if (!isInitiallyReady || loadingDismissed || fadingOut) {
+      return;
     }
-  }, [isInitiallyReady, loadingDismissed, fadingOut]);
+    setFadingOut(true);
+  }, [fadingOut, isInitiallyReady, loadingDismissed]);
+
+  // Complete the fade-out without clearing our own dismissal timer.
+  useEffect(() => {
+    if (!fadingOut || loadingDismissed) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setLoadingDismissed(true);
+      setFadingOut(false);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [fadingOut, loadingDismissed]);
 
   // Show loading overlay only during initial load or fade-out
-  const showLoading = !loadingDismissed;
+  const showLoading = !loadingDismissed && !clientInitError;
 
   const loadingHeadline = !connected
     ? "Connecting to Hyperscape..."
@@ -851,7 +1004,12 @@ export function StreamingMode() {
       }}
     >
       {/* Game client (fullscreen, no UI) */}
-      <GameClient wsUrl={wsUrl} onSetup={handleSetup} hideUI={true} />
+      <GameClient
+        wsUrl={wsUrl}
+        onSetup={handleSetup}
+        onInitError={setClientInitError}
+        hideUI={true}
+      />
 
       {/* Streaming overlay (on top of game) */}
       <StreamingOverlay state={streamingState} />

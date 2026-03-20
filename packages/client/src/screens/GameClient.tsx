@@ -20,6 +20,7 @@ export { System };
 interface GameClientProps {
   wsUrl?: string;
   onSetup?: (world: InstanceType<typeof World>, config: unknown) => void;
+  onInitError?: (error: string | null) => void;
   /** Hide standard game UI (for streaming/spectator modes) */
   hideUI?: boolean;
 }
@@ -196,6 +197,7 @@ function CriticalErrorScreen({ error }: { error: string }) {
 export function GameClient({
   wsUrl,
   onSetup,
+  onInitError,
   hideUI = false,
 }: GameClientProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -367,9 +369,12 @@ export function GameClient({
       }
 
       const baseEnvironment = {
-        // model removed - base-environment.glb doesn't exist
-        bg: "asset://world/day2-2k.jpg",
-        hdr: "asset://world/day2.hdr",
+        ...(hideUI
+          ? {}
+          : {
+              bg: "asset://world/day2-2k.jpg",
+              hdr: "asset://world/day2.hdr",
+            }),
         sunDirection: new THREE.Vector3(-1, -2, -2).normalize(),
         sunIntensity: 1,
         sunColor: 0xffffff,
@@ -410,6 +415,7 @@ export function GameClient({
       await world.systemsLoadedPromise;
 
       try {
+        onInitError?.(null);
         await world.init(config);
       } catch (error) {
         const message =
@@ -417,6 +423,27 @@ export function GameClient({
             ? error.message
             : "Unknown initialization error";
         console.error("[GameClient] World initialization failed:", message);
+        const normalizedMessage = message.toLowerCase();
+        const degradedReason = normalizedMessage.includes("webgpu")
+          ? "renderer_unavailable"
+          : "initialization_failed";
+        const win = window as WindowWithEnv & {
+          __HYPERSCAPE_STREAM_READY__?: boolean;
+          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
+            ready: boolean;
+            degradedReason: string | null;
+            updatedAt: number;
+            phase: string | null;
+          } | null;
+        };
+        win.__HYPERSCAPE_STREAM_READY__ = false;
+        win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = {
+          ready: false,
+          degradedReason,
+          updatedAt: Date.now(),
+          phase: null,
+        };
+        onInitError?.(message);
         setInitError(message);
       }
 
@@ -447,7 +474,7 @@ export function GameClient({
         }
       }
     };
-  }, [world, wsUrl, onSetup]);
+  }, [hideUI, onInitError, onSetup, world, wsUrl]);
 
   // Show full-screen error for critical initialization failures (WebGPU, etc.)
   if (initError) {
