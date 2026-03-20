@@ -254,15 +254,25 @@ export class TileMovementManager {
       // Building floor is walkable, overrides terrain
       walkable = true;
     } else {
+      // Terrain walkability (water, slope) is pre-baked into CollisionMatrix
+      // as WATER and STEEP_SLOPE flags. The hasFlags(BLOCKS_WALK) check above
+      // already caught unwalkable terrain — if we reach here, it's walkable.
+      // Fall back to runtime check only for tiles in ungenerated terrain.
       const terrain = this.getTerrain();
-      if (!terrain) {
-        walkable = true;
-      } else {
+      if (terrain) {
         tileToWorldInto(tile, this._walkableWorldPos);
-        walkable = terrain.isPositionWalkableFast(
-          this._walkableWorldPos.x,
-          this._walkableWorldPos.z,
-        );
+        const terrainTileX = Math.floor(this._walkableWorldPos.x / 100);
+        const terrainTileZ = Math.floor(this._walkableWorldPos.z / 100);
+        if (!terrain.isTerrainTileGenerated(terrainTileX, terrainTileZ)) {
+          walkable = terrain.isPositionWalkableFast(
+            this._walkableWorldPos.x,
+            this._walkableWorldPos.z,
+          );
+        } else {
+          walkable = true;
+        }
+      } else {
+        walkable = true;
       }
     }
 

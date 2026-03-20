@@ -9,7 +9,7 @@ import { System } from "../infrastructure/System";
 import { EventType } from "../../../types/events";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { InstancedMeshManager } from "../../../utils/rendering/InstancedMeshManager";
-import { CollisionMask } from "../movement/CollisionFlags";
+import { CollisionFlag, CollisionMask } from "../movement/CollisionFlags";
 import { worldToTile } from "../movement/TileSystem";
 import {
   generateTerrainTilesBatch,
@@ -2511,6 +2511,13 @@ export class TerrainSystem extends System {
     // Store tile
     this.terrainTiles.set(key, tile);
     this.activeChunks.add(key);
+
+    // Bake terrain walkability into CollisionMatrix (server-only).
+    // Pre-computes WATER and STEEP_SLOPE flags so BFS pathfinding
+    // becomes a single bitwise AND instead of runtime terrain queries.
+    if (isServer) {
+      this.bakeWalkabilityFlags(tileX, tileZ);
+    }
 
     return tile;
   }
@@ -5311,6 +5318,22 @@ export class TerrainSystem extends System {
   }
 
   private unloadTile(tile: TerrainTile): void {
+    // Clear baked terrain walkability flags (server-only)
+    if (this.runtimeIsServer && this.world?.collision) {
+      const tileSize = this.CONFIG.TILE_SIZE;
+      const originX = tile.x * tileSize;
+      const originZ = tile.z * tileSize;
+      const tilesPerSide = Math.floor(tileSize / 1.0);
+      const terrainFlagsMask = CollisionFlag.WATER | CollisionFlag.STEEP_SLOPE;
+      for (let lx = 0; lx < tilesPerSide; lx++) {
+        const mx = Math.floor(originX + lx + 0.5);
+        for (let lz = 0; lz < tilesPerSide; lz++) {
+          const mz = Math.floor(originZ + lz + 0.5);
+          this.world.collision.removeFlags(mx, mz, terrainFlagsMask);
+        }
+      }
+    }
+
     // Clean up road meshes
     for (const road of tile.roads) {
       if (road.mesh && road.mesh.parent) {
@@ -5516,6 +5539,82 @@ export class TerrainSystem extends System {
     s = Math.abs(this.getHeightAt(worldX - d, worldZ - d) - c) * invDiag;
     if (s > maxSlope) maxSlope = s;
     return maxSlope;
+  }
+
+  /**
+   * Check if a terrain tile has been generated.
+   * Used by pathfinding to determine if walkability flags have been baked.
+   */
+  isTerrainTileGenerated(terrainTileX: number, terrainTileZ: number): boolean {
+    return this.terrainTiles.has(`${terrainTileX}_${terrainTileZ}`);
+  }
+
+  /**
+   * Pre-compute WATER and STEEP_SLOPE collision flags for all movement tiles
+   * within a terrain tile. Called once when terrain is generated.
+   *
+   * This eliminates runtime terrain queries during BFS pathfinding —
+   * walkability becomes a single bitwise AND against the CollisionMatrix.
+   */
+  private bakeWalkabilityFlags(
+    terrainTileX: number,
+    terrainTileZ: number,
+  ): void {
+    const collision = this.world?.collision;
+    if (!collision) return;
+
+    const tileSize = this.CONFIG.TILE_SIZE; // 100m terrain tile
+    const tilesPerSide = Math.floor(tileSize / 1.0); // 100 movement tiles per side
+
+    // World origin of this terrain tile
+    const originX = terrainTileX * tileSize;
+    const originZ = terrainTileZ * tileSize;
+
+    // Clear stale terrain flags first (handles re-baking after flat zone regeneration)
+    const terrainFlagsMask = CollisionFlag.WATER | CollisionFlag.STEEP_SLOPE;
+
+    for (let lx = 0; lx < tilesPerSide; lx++) {
+      const worldX = originX + lx + 0.5; // center of movement tile
+      for (let lz = 0; lz < tilesPerSide; lz++) {
+        const worldZ = originZ + lz + 0.5;
+
+        // Movement tile coordinates
+        const moveTileX = Math.floor(worldX);
+        const moveTileZ = Math.floor(worldZ);
+
+        // Clear any previous terrain flags on this tile
+        collision.removeFlags(moveTileX, moveTileZ, terrainFlagsMask);
+
+        let flags = 0;
+
+        // 1. Biome check — "lakes" biome is always impassable
+        const biomeTerrainTileX = Math.floor(worldX / tileSize);
+        const biomeTerrainTileZ = Math.floor(worldZ / tileSize);
+        const biome = this.getBiomeAt(biomeTerrainTileX, biomeTerrainTileZ);
+        if (biome === "lakes") {
+          flags = CollisionFlag.WATER;
+        } else {
+          // 2. Water check — height below WATER_THRESHOLD
+          const height = this.getHeightAt(worldX, worldZ);
+          if (height < this.CONFIG.WATER_THRESHOLD) {
+            flags = CollisionFlag.WATER;
+          } else {
+            // 3. Slope check — slope exceeds biome's maxSlope
+            const biomeData = BIOMES[biome];
+            if (biomeData) {
+              const slope = this.calculateSlope(worldX, worldZ);
+              if (slope > biomeData.maxSlope) {
+                flags = CollisionFlag.STEEP_SLOPE;
+              }
+            }
+          }
+        }
+
+        if (flags !== 0) {
+          collision.addFlags(moveTileX, moveTileZ, flags);
+        }
+      }
+    }
   }
 
   /**
