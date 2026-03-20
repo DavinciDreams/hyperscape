@@ -80,6 +80,11 @@ function createFrame(seq: number): BettingFeedFrame {
       sourceEpoch: 9_999,
       seq,
       emittedAt: 10_000 + seq,
+      rendererHealth: {
+        ready: seq % 2 === 0,
+        degradedReason: seq % 2 === 0 ? null : "loading_overlay_active",
+        updatedAt: 10_500 + seq,
+      },
       cycle: createCycle({
         phaseVersion: seq,
         winnerId: seq % 2 === 0 ? "agent-a" : "agent-b",
@@ -97,6 +102,11 @@ describe("streaming-betting-feed", () => {
       sourceEpoch: 42,
       seq: 7,
       emittedAt: 123_456,
+      rendererHealth: {
+        ready: false,
+        degradedReason: "loading_overlay_active",
+        updatedAt: 123_500,
+      },
       cycle: createCycle({
         phase: "FIGHTING",
         phaseVersion: 9,
@@ -124,6 +134,11 @@ describe("streaming-betting-feed", () => {
       arenaPositions: {
         agent1: [10, 11, 12],
         agent2: [20, 21, 22],
+      },
+      rendererHealth: {
+        ready: false,
+        degradedReason: "loading_overlay_active",
+        updatedAt: 123_500,
       },
     });
 

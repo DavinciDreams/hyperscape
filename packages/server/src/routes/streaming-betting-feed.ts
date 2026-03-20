@@ -19,6 +19,12 @@ export type BettingFeedAgent = {
   headToHeadLosses: number;
 };
 
+export type BettingFeedRendererHealth = {
+  ready: boolean;
+  degradedReason: string | null;
+  updatedAt: number | null;
+};
+
 export type BettingFeedPayload = {
   schemaVersion: number;
   sourceEpoch: number;
@@ -38,6 +44,7 @@ export type BettingFeedPayload = {
   agent1: BettingFeedAgent | null;
   agent2: BettingFeedAgent | null;
   arenaPositions: StreamingDuelCycle["arenaPositions"];
+  rendererHealth: BettingFeedRendererHealth | null;
 };
 
 export type BettingFeedFrame = {
@@ -94,6 +101,7 @@ export function buildBettingFeedPayload(params: {
   seq: number;
   emittedAt: number;
   cycle: StreamingDuelCycle | null;
+  rendererHealth?: BettingFeedRendererHealth | null;
 }): BettingFeedPayload {
   const cycle = params.cycle;
   return {
@@ -119,6 +127,7 @@ export function buildBettingFeedPayload(params: {
     agent1: toAgentSnapshot(cycle?.agent1 ?? null),
     agent2: toAgentSnapshot(cycle?.agent2 ?? null),
     arenaPositions: cycle?.arenaPositions ?? null,
+    rendererHealth: params.rendererHealth ?? null,
   };
 }
 
@@ -173,4 +182,3 @@ export function selectReplayDelivery(
     oldestSeq,
   };
 }
-

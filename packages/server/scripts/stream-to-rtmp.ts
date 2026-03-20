@@ -213,6 +213,27 @@ function stopFpsTracking() {
 
 type ActiveCaptureMode = "cdp" | "webcodecs" | "mediarecorder";
 
+type RendererHealthSnapshot = {
+  ready: boolean;
+  degradedReason: string | null;
+  updatedAt: number | null;
+  phase: string | null;
+  diagnostics: {
+    hasCanvas: boolean;
+    hasStreamingBootUi: boolean;
+    hasCriticalErrorUi: boolean;
+    readyFlag: boolean;
+  } | null;
+};
+
+let latestRendererHealth: RendererHealthSnapshot = {
+  ready: false,
+  degradedReason: "capture_not_initialized",
+  updatedAt: null,
+  phase: null,
+  diagnostics: null,
+};
+
 function writeExternalStatusSnapshot(
   bridge: ReturnType<typeof getRTMPBridge>,
   captureMode: ActiveCaptureMode,
@@ -237,6 +258,7 @@ function writeExternalStatusSnapshot(
     },
     captureMode,
     processRssBytes: processMemory.rss,
+    rendererHealth: latestRendererHealth,
     updatedAt: Date.now(),
     source: "external-rtmp-bridge",
   };
@@ -317,6 +339,158 @@ function hasConfiguredOutput(): boolean {
   );
 }
 
+async function probeRendererHealth(
+  pageRef: Page,
+): Promise<RendererHealthSnapshot> {
+  const probedAt = Date.now();
+  const probe = await pageRef.evaluate(() => {
+    const win = window as unknown as {
+      __HYPERSCAPE_STREAM_READY__?: boolean;
+      __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
+        ready?: boolean;
+        degradedReason?: string | null;
+        updatedAt?: number | null;
+        phase?: string | null;
+      } | null;
+    };
+    const text = (document.body?.innerText || "").slice(0, 1024);
+    const normalizedText = text.toLowerCase();
+    const hasStreamingBootUi =
+      normalizedText.includes("waiting for duel data") ||
+      normalizedText.includes("initializing world systems") ||
+      normalizedText.includes("initializing") ||
+      normalizedText.includes("loading assets") ||
+      normalizedText.includes("finalizing");
+    const hasCriticalErrorUi =
+      normalizedText.includes("initialization failed") ||
+      normalizedText.includes("webgpu required") ||
+      normalizedText.includes("http error! status");
+    return {
+      explicitHealth:
+        win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ &&
+        typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ === "object"
+          ? {
+              ready: win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.ready === true,
+              degradedReason:
+                typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__
+                  .degradedReason === "string"
+                  ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.degradedReason
+                  : null,
+              updatedAt:
+                typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt ===
+                  "number" &&
+                Number.isFinite(
+                  win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt,
+                )
+                  ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt
+                  : null,
+              phase:
+                typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.phase ===
+                "string"
+                  ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.phase
+                  : null,
+            }
+          : null,
+      hasCanvas: document.querySelector("canvas") !== null,
+      readyFlag: win.__HYPERSCAPE_STREAM_READY__ === true,
+      hasStreamingBootUi,
+      hasCriticalErrorUi,
+    };
+  });
+
+  const explicitHealth =
+    probe.explicitHealth &&
+    typeof probe.explicitHealth === "object"
+      ? probe.explicitHealth
+      : null;
+
+  if (explicitHealth) {
+    const criticalUiVisible = probe.hasCriticalErrorUi === true;
+    return {
+      ready: criticalUiVisible ? false : explicitHealth.ready === true,
+      degradedReason:
+        criticalUiVisible
+          ? normalizedCriticalErrorReason(probe)
+          : typeof explicitHealth.degradedReason === "string"
+            ? explicitHealth.degradedReason
+            : null,
+      updatedAt:
+        typeof explicitHealth.updatedAt === "number"
+          ? explicitHealth.updatedAt
+          : probedAt,
+      phase:
+        typeof explicitHealth.phase === "string" ? explicitHealth.phase : null,
+      diagnostics: {
+        hasCanvas: probe.hasCanvas === true,
+        hasStreamingBootUi: probe.hasStreamingBootUi === true,
+        hasCriticalErrorUi: criticalUiVisible,
+        readyFlag: probe.readyFlag === true,
+      },
+    };
+  }
+
+  return {
+    ready:
+      !probe.hasCriticalErrorUi &&
+      (probe.readyFlag === true || (probe.hasCanvas && !probe.hasStreamingBootUi)),
+    degradedReason:
+      !probe.hasCriticalErrorUi &&
+      (probe.readyFlag === true || (probe.hasCanvas && !probe.hasStreamingBootUi))
+        ? null
+        : probe.hasCriticalErrorUi
+          ? normalizedCriticalErrorReason(probe)
+        : probe.hasStreamingBootUi
+          ? "loading_overlay_active"
+          : "canvas_missing",
+    updatedAt: probedAt,
+    phase: null,
+    diagnostics: {
+      hasCanvas: probe.hasCanvas === true,
+      hasStreamingBootUi: probe.hasStreamingBootUi === true,
+      hasCriticalErrorUi: probe.hasCriticalErrorUi === true,
+      readyFlag: probe.readyFlag === true,
+    },
+  };
+}
+
+function normalizedCriticalErrorReason(probe: {
+  hasCriticalErrorUi?: boolean;
+  explicitHealth?: { degradedReason?: string | null } | null;
+}): string {
+  const explicitReason = probe.explicitHealth?.degradedReason;
+  if (typeof explicitReason === "string" && explicitReason.trim().length > 0) {
+    return explicitReason;
+  }
+  return probe.hasCriticalErrorUi ? "initialization_failed" : "canvas_missing";
+}
+
+async function refreshRendererHealthSnapshot(
+  pageRef: Page | null,
+): Promise<void> {
+  if (!pageRef) {
+    latestRendererHealth = {
+      ready: false,
+      degradedReason: "capture_page_missing",
+      updatedAt: Date.now(),
+      phase: null,
+      diagnostics: null,
+    };
+    return;
+  }
+
+  try {
+    latestRendererHealth = await probeRendererHealth(pageRef);
+  } catch (err) {
+    latestRendererHealth = {
+      ready: false,
+      degradedReason: `probe_failed:${errMsg(err)}`.slice(0, 180),
+      updatedAt: Date.now(),
+      phase: null,
+      diagnostics: null,
+    };
+  }
+}
+
 async function waitForStreamReadiness(
   pageRef: Page,
   timeoutMs: number,
@@ -326,37 +500,24 @@ async function waitForStreamReadiness(
 
   while (Date.now() < deadline) {
     try {
-      const probe = await pageRef.evaluate(() => {
-        const win = window as unknown as {
-          __HYPERSCAPE_STREAM_READY__?: boolean;
-        };
-        const text = (document.body?.innerText || "").slice(0, 512);
-        const normalizedText = text.toLowerCase();
-        const hasStreamingBootUi =
-          normalizedText.includes("waiting for duel data") ||
-          normalizedText.includes("initializing world systems") ||
-          normalizedText.includes("initializing") ||
-          normalizedText.includes("loading assets") ||
-          normalizedText.includes("finalizing");
-        return {
-          hasCanvas: document.querySelector("canvas") !== null,
-          readyFlag: win.__HYPERSCAPE_STREAM_READY__ === true,
-          hasStreamingBootUi,
-        };
-      });
+      const probe = await probeRendererHealth(pageRef);
+      latestRendererHealth = probe;
 
-      if (probe.readyFlag) {
+      if (probe.ready) {
         return true;
       }
 
       // Allow capture once we have a canvas and the stream boot/loading UI has
       // cleared (the old gate accepted any canvas, which could lock us at 3%).
-      if (probe.hasCanvas && !probe.hasStreamingBootUi) {
+      if (probe.diagnostics?.hasCanvas && !probe.diagnostics?.hasStreamingBootUi) {
         return true;
       }
 
       // Hard fallback after sustained boot-screen presence to avoid deadlock.
-      if (probe.hasStreamingBootUi && Date.now() - startedAt >= 180_000) {
+      if (
+        probe.diagnostics?.hasStreamingBootUi &&
+        Date.now() - startedAt >= 180_000
+      ) {
         return true;
       }
     } catch (err) {
@@ -986,9 +1147,14 @@ async function main() {
   console.log("=".repeat(60));
   console.log("");
 
+  await refreshRendererHealthSnapshot(page);
   writeExternalStatusSnapshot(bridge, activeCaptureMode);
   const statusSnapshotInterval = setInterval(() => {
-    writeExternalStatusSnapshot(bridge, activeCaptureMode);
+    void refreshRendererHealthSnapshot(page)
+      .catch(() => undefined)
+      .finally(() => {
+        writeExternalStatusSnapshot(bridge, activeCaptureMode);
+      });
   }, 2000);
 
   // Status updates every 30 seconds
@@ -996,6 +1162,7 @@ async function main() {
     const bridgeStatus = bridge.getStatus();
     const stats = bridge.getStats();
     const processMemory = process.memoryUsage();
+    await refreshRendererHealthSnapshot(page).catch(() => undefined);
 
     console.log("[Status] Active:", bridgeStatus.active);
     console.log(
@@ -1018,6 +1185,11 @@ async function main() {
         .map((d) => `${d.name}: ${d.connected ? "OK" : "ERROR"}`)
         .join(", ") || "(none configured)",
     );
+    if (!latestRendererHealth.ready) {
+      console.warn(
+        `[Stream Health] Renderer degraded: ${latestRendererHealth.degradedReason || "unknown"}`,
+      );
+    }
 
     if (activeCaptureMode === "cdp") {
       console.log(

@@ -13,7 +13,11 @@ import type { World } from "@hyperscape/shared";
 import fs from "node:fs";
 import { eq } from "drizzle-orm";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
-import { STREAMING_TIMING } from "../systems/StreamingDuelScheduler/types.js";
+import {
+  STREAMING_TIMING,
+  type StreamingDuelCycle,
+  type StreamingPhase,
+} from "../systems/StreamingDuelScheduler/types.js";
 import { peekRTMPBridge } from "../streaming/index.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
 import { storage } from "../database/schema.js";
@@ -28,6 +32,7 @@ import {
   BETTING_SOURCE_EPOCH_STORAGE_KEY,
   buildBettingFeedPayload,
   selectReplayDelivery,
+  type BettingFeedRendererHealth,
   type BettingFeedFrame,
 } from "./streaming-betting-feed.js";
 
@@ -88,6 +93,94 @@ const EXTERNAL_RTMP_STATUS_MAX_AGE_MS = Math.max(
   Number.parseInt(process.env.RTMP_STATUS_MAX_AGE_MS || "15000", 10),
 );
 
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function normalizeRendererHealthSnapshot(
+  value: unknown,
+): BettingFeedRendererHealth | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Record<string, unknown>;
+  return {
+    ready: candidate.ready === true,
+    degradedReason: asString(candidate.degradedReason),
+    updatedAt: asFiniteNumber(candidate.updatedAt),
+  };
+}
+
+function isFinitePositionTriplet(value: unknown): value is [number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((entry) => typeof entry === "number" && Number.isFinite(entry))
+  );
+}
+
+function isActiveStreamingPhase(
+  phase: StreamingPhase | null | undefined,
+): boolean {
+  return Boolean(phase && phase !== "IDLE");
+}
+
+function requiresArenaPositions(
+  phase: StreamingPhase | null | undefined,
+): boolean {
+  return phase === "COUNTDOWN" || phase === "FIGHTING" || phase === "RESOLUTION";
+}
+
+function deriveCycleGuardrailReason(
+  cycle: StreamingDuelCycle | null,
+): string | null {
+  if (!cycle || !isActiveStreamingPhase(cycle.phase)) {
+    return null;
+  }
+
+  if (!cycle.agent1 || !cycle.agent2) {
+    return "agents_missing";
+  }
+
+  const agents = [cycle.agent1, cycle.agent2];
+  for (const agent of agents) {
+    if (!agent.characterId?.trim() || !agent.name?.trim()) {
+      return "agents_missing";
+    }
+    if (
+      !Number.isFinite(agent.maxHp) ||
+      agent.maxHp <= 0 ||
+      !Number.isFinite(agent.currentHp) ||
+      agent.currentHp < 0 ||
+      agent.currentHp > agent.maxHp
+    ) {
+      return "invalid_agent_hp";
+    }
+  }
+
+  if (requiresArenaPositions(cycle.phase)) {
+    const positions = cycle.arenaPositions;
+    if (
+      !positions ||
+      !isFinitePositionTriplet(positions.agent1) ||
+      !isFinitePositionTriplet(positions.agent2)
+    ) {
+      return "arena_positions_invalid";
+    }
+    if (
+      positions.agent1.every((value, index) => value === positions.agent2[index])
+    ) {
+      return "arena_positions_invalid";
+    }
+  }
+
+  return null;
+}
+
 function readExternalRtmpStatusSnapshot(): Record<string, unknown> | null {
   if (!EXTERNAL_RTMP_STATUS_FILE) return null;
   try {
@@ -110,6 +203,67 @@ function readExternalRtmpStatusSnapshot(): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function deriveBettingRendererHealth(
+  cycle: StreamingDuelCycle | null,
+): BettingFeedRendererHealth {
+  const updatedAt = Date.now();
+  const guardrailReason = deriveCycleGuardrailReason(cycle);
+  if (guardrailReason) {
+    return {
+      ready: false,
+      degradedReason: guardrailReason,
+      updatedAt,
+    };
+  }
+
+  const externalSnapshot = readExternalRtmpStatusSnapshot();
+  const externalRendererHealth = normalizeRendererHealthSnapshot(
+    externalSnapshot?.rendererHealth,
+  );
+  if (externalRendererHealth) {
+    const ageMs =
+      externalRendererHealth.updatedAt != null
+        ? Math.max(0, updatedAt - externalRendererHealth.updatedAt)
+        : null;
+    if (
+      externalRendererHealth.updatedAt != null &&
+      ageMs != null &&
+      ageMs > EXTERNAL_RTMP_STATUS_MAX_AGE_MS * 2
+    ) {
+      return {
+        ready: false,
+        degradedReason: "renderer_health_stale",
+        updatedAt,
+      };
+    }
+    return externalRendererHealth;
+  }
+
+  const captureStats = getStreamCapture().getStats();
+  if (isActiveStreamingPhase(cycle?.phase)) {
+    if (!captureStats.clientConnected) {
+      return {
+        ready: false,
+        degradedReason: "capture_client_disconnected",
+        updatedAt,
+      };
+    }
+    if (!captureStats.ffmpegRunning) {
+      return {
+        ready: false,
+        degradedReason: "capture_pipeline_inactive",
+        updatedAt,
+      };
+    }
+  }
+
+  return {
+    ready: true,
+    degradedReason: null,
+    updatedAt,
+  };
 }
 
 function getInventorySnapshot(
@@ -669,6 +823,7 @@ export function registerStreamingRoutes(
       seq: bettingSequence + 1,
       emittedAt,
       cycle,
+      rendererHealth: deriveBettingRendererHealth(cycle),
     });
     const serialized = JSON.stringify(payload);
 
@@ -787,6 +942,7 @@ export function registerStreamingRoutes(
         seq: bettingSequence,
         emittedAt: Date.now(),
         cycle: null,
+        rendererHealth: deriveBettingRendererHealth(null),
       })),
     schemaVersion: BETTING_FEED_SCHEMA_VERSION,
     sourceEpoch: bettingSourceEpoch,
@@ -1459,6 +1615,9 @@ export function registerStreamingRoutes(
             spectators: stats.spectators,
             processMemory: stats.processMemory,
           },
+          rendererHealth: deriveBettingRendererHealth(
+            getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+          ),
         });
       } catch {
         return reply.status(503).send({
@@ -1478,7 +1637,12 @@ export function registerStreamingRoutes(
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
         const capture = getStreamCapture();
-        return reply.send(capture.getStats());
+        return reply.send({
+          ...capture.getStats(),
+          rendererHealth: deriveBettingRendererHealth(
+            getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+          ),
+        });
       } catch {
         return reply.status(503).send({
           error: "Stream capture not initialized",
