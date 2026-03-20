@@ -354,7 +354,11 @@ async function startServer() {
 
   const localPort = process.env.PORT || "5555";
   const localApiUrl = `http://localhost:${localPort}`;
-  const localWsUrl = `ws://localhost:${localPort}/ws`;
+  // uWS game WebSocket runs on UWS_PORT (default 5556), not the HTTP port
+  const uwsPort = process.env.UWS_PORT || "5556";
+  const localWsUrl = process.env.UWS_ENABLED === "false"
+    ? `ws://localhost:${localPort}/ws`
+    : `ws://localhost:${uwsPort}/ws`;
   const localAssetsUrl = `${localApiUrl}/game-assets`;
 
   if (!cachedPublicCdnUrl) {

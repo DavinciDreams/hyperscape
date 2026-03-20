@@ -182,21 +182,21 @@ function getModelAgentKey(config: { provider: string; model: string }): string {
 
 function resolveModelAgentServerUrls(): { wsUrl: string; apiUrl: string } {
   const explicitServerUrl = process.env.HYPERSCAPE_SERVER_URL?.trim();
-  const portFromEnv = process.env.PORT ? Number(process.env.PORT) : NaN;
+
+  // uWS game WebSocket runs on UWS_PORT (default 5556), not the HTTP port.
+  // Fall back to PORT (Fastify) only when uWS is disabled.
+  const uwsEnabled = process.env.UWS_ENABLED !== "false";
+  const uwsPort = parseInt(process.env.UWS_PORT || "5556", 10);
+  const httpPort = parseInt(process.env.PORT || "5555", 10);
+  const wsPort = uwsEnabled ? uwsPort : httpPort;
 
   const wsUrl =
     explicitServerUrl && explicitServerUrl.length > 0
       ? explicitServerUrl
-      : Number.isFinite(portFromEnv) && portFromEnv > 0
-        ? `ws://127.0.0.1:${portFromEnv}/ws`
-        : process.env.PUBLIC_WS_URL || "ws://127.0.0.1:5555/ws";
+      : process.env.PUBLIC_WS_URL || `ws://127.0.0.1:${wsPort}/ws`;
 
   const apiUrl =
-    process.env.HYPERSCAPE_API_URL ||
-    wsUrl
-      .replace(/^wss:/, "https:")
-      .replace(/^ws:/, "http:")
-      .replace(/\/ws$/, "");
+    process.env.HYPERSCAPE_API_URL || `http://127.0.0.1:${httpPort}`;
 
   return { wsUrl, apiUrl };
 }
@@ -515,6 +515,19 @@ export async function spawnModelAgents(
             adapter: unknown;
           }
         ).adapter = adapterBeforeInit;
+      }
+
+      // ElizaOS v2 lazy-starts services — explicitly kick off HyperscapeService
+      // so the WebSocket connection + player spawn begins immediately.
+      if (
+        typeof (runtimeInstance as Record<string, unknown>)
+          ._ensureServiceStarted === "function"
+      ) {
+        await (
+          runtimeInstance as unknown as {
+            _ensureServiceStarted: (t: string) => Promise<unknown>;
+          }
+        )._ensureServiceStarted("hyperscapeService");
       }
 
       runningAgents.set(agentKey, {

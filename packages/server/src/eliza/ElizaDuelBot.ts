@@ -273,6 +273,20 @@ export class ElizaDuelBot extends EventEmitter {
           }
         }
 
+        // ElizaOS v2 lazy-starts services — they aren't started during
+        // runtime.initialize().  Explicitly ensure HyperscapeService is
+        // started so the WebSocket connection + player spawn can proceed.
+        if (
+          typeof (this.runtime as Record<string, unknown>)
+            ._ensureServiceStarted === "function"
+        ) {
+          await (
+            this.runtime as unknown as {
+              _ensureServiceStarted: (t: string) => Promise<unknown>;
+            }
+          )._ensureServiceStarted("hyperscapeService");
+        }
+
         await this.waitForPlayerSpawnReady(this.config.connectTimeoutMs);
 
         // Start autonomous behavior so agents mine/chop/fish between duels
