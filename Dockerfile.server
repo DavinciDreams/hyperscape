@@ -1,26 +1,26 @@
-# Multi-stage Dockerfile for Hyperscape game server (Railway deployment)
-# Run from repo root: docker build -f Dockerfile.server .
+# Hyperscape — full-stack Docker image (game server + web client)
+#
+# Build from repo root:
+#   docker build --platform linux/amd64 -f Dockerfile.server -t ghcr.io/alternatefutures/hyperscape:v12 .
+#
+# Issues this Dockerfile works around:
+#   1. better-sqlite3 — node-gyp fails under QEMU (stripped before install)
+#   2. Bun 1.3 workspace links — Docker COPY flattens symlinks; recreated manually
+#   3. Bun 1.3 per-package node_modules — not hoisted to root; copied explicitly
+#   4. procgen tsc — type errors cause partial emit; build continues with || true
 
-FROM oven/bun:1.1.38-debian AS builder
+# ─── Builder ────────────────────────────────────────────────────────────────
 
-# Native deps used by canvas / sqlite / image pipelines during install + build.
+FROM oven/bun:1.3.10-debian AS builder
+
 RUN apt-get update && apt-get install -y \
-    python3 \
-    make \
-    g++ \
-    pkg-config \
-    libcairo2-dev \
-    libpango1.0-dev \
-    libjpeg-dev \
-    libgif-dev \
-    librsvg2-dev \
-    ca-certificates \
-    git \
+    python3 make g++ pkg-config \
+    libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
+    ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Prevent local-dev asset/bootstrap flows during CI image build.
 ENV CI=true \
     SKIP_ASSETS=true \
     HYPERSCAPE_SKIP_BROWSER_INSTALL=true
@@ -28,41 +28,50 @@ ENV CI=true \
 # Root manifests.
 COPY package.json bun.lock turbo.json tsconfig.json ./
 
-# Workspace manifests required to resolve server dependency graph.
+# Workspace package manifests (determines dependency graph).
 COPY packages/physx-js-webidl/package.json ./packages/physx-js-webidl/
-COPY packages/decimation/package.json ./packages/decimation/
-COPY packages/impostors/package.json ./packages/impostors/
-COPY packages/procgen/package.json ./packages/procgen/
-COPY packages/shared/package.json ./packages/shared/
+COPY packages/decimation/package.json      ./packages/decimation/
+COPY packages/impostors/package.json       ./packages/impostors/
+COPY packages/procgen/package.json         ./packages/procgen/
+COPY packages/shared/package.json          ./packages/shared/
 COPY packages/plugin-hyperscape/package.json ./packages/plugin-hyperscape/
-COPY packages/web3/package.json ./packages/web3/
-COPY packages/server/package.json ./packages/server/
+COPY packages/web3/package.json            ./packages/web3/
+COPY packages/server/package.json          ./packages/server/
+COPY packages/client/package.json          ./packages/client/
 
-# Scripts referenced by install/postinstall hooks.
+# Install hook scripts + PhysX WASM prebuilts.
 COPY scripts ./scripts
-
-# PhysX prebuild script reads these prebuilt artifacts from client/public/web.
-COPY packages/client/public/web/physx-js-webidl.js ./packages/client/public/web/
+COPY packages/client/public/web/physx-js-webidl.js  ./packages/client/public/web/
 COPY packages/client/public/web/physx-js-webidl.wasm ./packages/client/public/web/
 
 # Workspace sources.
-COPY packages/physx-js-webidl ./packages/physx-js-webidl
-COPY packages/decimation ./packages/decimation
-COPY packages/impostors ./packages/impostors
-COPY packages/procgen ./packages/procgen
-COPY packages/shared ./packages/shared
-COPY packages/plugin-hyperscape ./packages/plugin-hyperscape
-COPY packages/web3 ./packages/web3
-COPY packages/server ./packages/server
+COPY packages/physx-js-webidl    ./packages/physx-js-webidl
+COPY packages/decimation         ./packages/decimation
+COPY packages/impostors          ./packages/impostors
+COPY packages/procgen            ./packages/procgen
+COPY packages/shared             ./packages/shared
+COPY packages/plugin-hyperscape  ./packages/plugin-hyperscape
+COPY packages/web3               ./packages/web3
+COPY packages/server             ./packages/server
+COPY packages/client             ./packages/client
 
-# Install with lifecycle scripts trusted (uses env above to skip heavyweight ops).
+# better-sqlite3's node-gyp build segfaults under QEMU cross-compilation.
+# The project uses bun:sqlite / PostgreSQL, so it's safe to remove.
+RUN bun -e " \
+  const fs = require('fs'); \
+  for (const f of ['packages/shared/package.json', 'package.json']) { \
+    const p = JSON.parse(fs.readFileSync(f)); \
+    delete p.dependencies?.['better-sqlite3']; \
+    delete p.devDependencies?.['better-sqlite3']; \
+    fs.writeFileSync(f, JSON.stringify(p, null, 2)); \
+  }"
+
 RUN bun install --trust
 
-# Fetch manifests to embed in the image, bypassing CDN reliance on boot.
-# We first remove the assets directory to prevent bun postinstall cache from keeping stale manifests.
-RUN rm -rf packages/server/world/assets && node scripts/ensure-assets.mjs
+# Download game asset manifests (bypass CDN reliance on boot).
+RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
 
-# Build in dependency order required by server runtime.
+# Build workspace packages in dependency order.
 RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/decimation && bun run build && \
     cd /app/packages/impostors && bun run build && \
@@ -70,19 +79,17 @@ RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/shared && bun run build && \
     cd /app/packages/plugin-hyperscape && bun run build && \
     cd /app/packages/web3 && bun run build && \
-    cd /app/packages/server && bun run build
+    cd /app/packages/server && bun run build && \
+    cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' bun run build:cf
 
-FROM oven/bun:1.1.38-debian AS runtime
+# ─── Runtime ────────────────────────────────────────────────────────────────
+
+FROM oven/bun:1.3.10-debian AS runtime
 
 RUN apt-get update && apt-get install -y \
-    libcairo2 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libjpeg62-turbo \
-    libgif7 \
-    librsvg2-2 \
-    ca-certificates \
-    curl \
+    libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
+    libjpeg62-turbo libgif7 librsvg2-2 \
+    ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -92,38 +99,58 @@ ENV NODE_ENV=production \
     SKIP_ASSETS=true \
     HYPERSCAPE_SKIP_BROWSER_INSTALL=true
 
-# Keep workspace package manifests so Bun workspace links resolve correctly.
-COPY package.json bun.lock ./
-COPY packages/physx-js-webidl/package.json ./packages/physx-js-webidl/
-COPY packages/decimation/package.json ./packages/decimation/
-COPY packages/impostors/package.json ./packages/impostors/
-COPY packages/procgen/package.json ./packages/procgen/
-COPY packages/shared/package.json ./packages/shared/
-COPY packages/plugin-hyperscape/package.json ./packages/plugin-hyperscape/
-COPY packages/web3/package.json ./packages/web3/
-COPY packages/server/package.json ./packages/server/
+# Package manifests from builder (has better-sqlite3 stripped).
+COPY --from=builder /app/package.json /app/bun.lock ./
+COPY --from=builder /app/packages/physx-js-webidl/package.json ./packages/physx-js-webidl/
+COPY --from=builder /app/packages/decimation/package.json      ./packages/decimation/
+COPY --from=builder /app/packages/impostors/package.json       ./packages/impostors/
+COPY --from=builder /app/packages/procgen/package.json         ./packages/procgen/
+COPY --from=builder /app/packages/shared/package.json          ./packages/shared/
+COPY --from=builder /app/packages/plugin-hyperscape/package.json ./packages/plugin-hyperscape/
+COPY --from=builder /app/packages/web3/package.json            ./packages/web3/
+COPY --from=builder /app/packages/server/package.json          ./packages/server/
+COPY --from=builder /app/packages/client/package.json          ./packages/client/
 
-# Reuse installed modules from builder stage for faster deploys.
+# ── node_modules ──
+# Bun 1.3 uses per-package node_modules (not flat hoisting). Docker COPY
+# also destroys workspace symlinks. We need three things:
+#   1. Root node_modules (with .bun cache containing all resolved packages)
+#   2. Manual workspace symlinks (@hyperscape/* -> packages/*)
+#   3. Per-package node_modules for every workspace member used at runtime
 COPY --from=builder /app/node_modules ./node_modules
 
-# Restore workspace symlinks that Docker COPY flattened.
-# framework.js externalizes @hyperscape/* packages (decimation, impostors,
-# physx-js-webidl, procgen) so Bun must resolve them via workspace links.
-RUN bun install --production --frozen-lockfile 2>/dev/null || bun install --production
+RUN mkdir -p node_modules/@hyperscape && \
+    ln -s ../../packages/physx-js-webidl    node_modules/@hyperscape/physx-js-webidl && \
+    ln -s ../../packages/decimation         node_modules/@hyperscape/decimation && \
+    ln -s ../../packages/impostors          node_modules/@hyperscape/impostor && \
+    ln -s ../../packages/procgen            node_modules/@hyperscape/procgen && \
+    ln -s ../../packages/shared             node_modules/@hyperscape/shared && \
+    ln -s ../../packages/plugin-hyperscape  node_modules/@hyperscape/plugin-hyperscape && \
+    ln -s ../../packages/web3              node_modules/@hyperscape/web3 && \
+    ln -s ../../packages/server            node_modules/@hyperscape/server && \
+    ln -s ../../packages/client            node_modules/@hyperscape/client
 
-# Runtime artifacts.
-COPY --from=builder /app/packages/physx-js-webidl/dist ./packages/physx-js-webidl/dist
-COPY --from=builder /app/packages/decimation/dist ./packages/decimation/dist
-COPY --from=builder /app/packages/impostors/dist ./packages/impostors/dist
-COPY --from=builder /app/packages/procgen/dist ./packages/procgen/dist
-COPY --from=builder /app/packages/shared/build ./packages/shared/build
+COPY --from=builder /app/packages/server/node_modules            ./packages/server/node_modules
+COPY --from=builder /app/packages/shared/node_modules            ./packages/shared/node_modules
+COPY --from=builder /app/packages/procgen/node_modules           ./packages/procgen/node_modules
+COPY --from=builder /app/packages/impostors/node_modules         ./packages/impostors/node_modules
+COPY --from=builder /app/packages/plugin-hyperscape/node_modules ./packages/plugin-hyperscape/node_modules
+COPY --from=builder /app/packages/web3/node_modules              ./packages/web3/node_modules
+COPY --from=builder /app/packages/client/node_modules            ./packages/client/node_modules
+
+# ── Build artifacts ──
+COPY --from=builder /app/packages/physx-js-webidl/dist  ./packages/physx-js-webidl/dist
+COPY --from=builder /app/packages/decimation/dist       ./packages/decimation/dist
+COPY --from=builder /app/packages/impostors/dist        ./packages/impostors/dist
+COPY --from=builder /app/packages/procgen/dist          ./packages/procgen/dist
+COPY --from=builder /app/packages/shared/build          ./packages/shared/build
 COPY --from=builder /app/packages/plugin-hyperscape/dist ./packages/plugin-hyperscape/dist
-COPY --from=builder /app/packages/web3/dist ./packages/web3/dist
-COPY --from=builder /app/packages/server/dist ./packages/server/dist
-COPY --from=builder /app/packages/server/src ./packages/server/src
-COPY --from=builder /app/packages/server/world ./packages/server/world
+COPY --from=builder /app/packages/web3/dist             ./packages/web3/dist
+COPY --from=builder /app/packages/server/dist           ./packages/server/dist
+COPY --from=builder /app/packages/server/src            ./packages/server/src
+COPY --from=builder /app/packages/server/world          ./packages/server/world
+COPY --from=builder /app/packages/client/dist           ./packages/client/dist
 
-# HLS output path (created at runtime if stream pipeline is enabled).
 RUN mkdir -p ./packages/server/public/live
 
 EXPOSE 5555
