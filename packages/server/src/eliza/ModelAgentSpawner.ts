@@ -368,38 +368,19 @@ export async function spawnModelAgents(
         const MAX_CACHE = 100;
 
         // --- Cap logs (stores full LLM prompts + responses per call) ---
-        const origLog = adapter.log.bind(adapter);
-        adapter.log = async (params: Parameters<typeof origLog>[0]) => {
-          await origLog(params);
+        const origCreateLogs = adapter.createLogs.bind(adapter);
+        adapter.createLogs = async (
+          params: Parameters<typeof origCreateLogs>[0],
+        ) => {
+          await origCreateLogs(params);
           const logs = (adapter as unknown as { logs: unknown[] }).logs;
           if (logs && logs.length > MAX_LOGS) {
             logs.splice(0, logs.length - MAX_LOGS);
           }
         };
 
-        // --- Fix deleteMemory to also clean memoriesByRoom ---
-        const origDeleteMemory = adapter.deleteMemory.bind(adapter);
-        adapter.deleteMemory = async (memoryId: UUID) => {
-          // Remove from memoriesByRoom lists (stock impl misses this)
-          const byRoom = (
-            adapter as unknown as {
-              memoriesByRoom: Map<string, Array<{ id: unknown }>>;
-            }
-          ).memoriesByRoom;
-          if (byRoom) {
-            for (const [key, list] of byRoom) {
-              const idx = list.findIndex(
-                (m) => String(m.id) === String(memoryId),
-              );
-              if (idx !== -1) {
-                list.splice(idx, 1);
-                if (list.length === 0) byRoom.delete(key);
-                break;
-              }
-            }
-          }
-          await origDeleteMemory(memoryId);
-        };
+        // deleteMemories in current ElizaOS already cleans memoriesByRoom,
+        // so no monkey-patch needed.
 
         // --- Cap cache Map ---
         const cacheMap = (
