@@ -1428,7 +1428,9 @@ export class ConnectionHandler {
       }) as ServerSocket;
 
       // Mark as spectator (accountId may be undefined for anonymous agent spectating)
-      socket.accountId = isAgentCharacter ? undefined : undefined; // Will be set by auth flow above if applicable
+      socket.accountId = isAgentCharacter
+        ? undefined
+        : (verifiedUserId ?? undefined);
       socket.createdAt = Date.now();
       socket.isSpectator = true;
       socket.spectatingCharacterId = characterId;

@@ -110,13 +110,19 @@ export function createUwsServer(
       // Feed into the same onConnection handler as the legacy Fastify route.
       // handleConnection is async — catch errors to avoid unhandled rejections
       // that silently drop the connection (no snapshot sent, client hangs).
-      world.network.onConnection!(
-        adapter as unknown as NodeWebSocket,
-        userData.query,
-      ).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[uWS] onConnection error for ${userData.wsId}: ${msg}`);
-      });
+      if (!world.network.onConnection) {
+        console.error("[uWS] onConnection not set — closing socket");
+        ws.close();
+        return;
+      }
+      world.network
+        .onConnection(adapter as unknown as NodeWebSocket, userData.query)
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(
+            `[uWS] onConnection error for ${userData.wsId}: ${msg}`,
+          );
+        });
     },
 
     message: (ws, message, _isBinary) => {
