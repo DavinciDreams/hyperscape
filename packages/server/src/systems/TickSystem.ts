@@ -37,6 +37,7 @@ export enum TickPriority {
 interface TickListener {
   callback: (tickNumber: number, deltaMs: number) => void;
   priority: TickPriority;
+  name: string;
 }
 
 /**
@@ -55,11 +56,13 @@ export class TickSystem {
   private listeners: TickListener[] = [];
   private isRunning = false;
   /**
-   * If false, never skip ticks when behind schedule (attempts immediate catch-up instead).
-   * Useful for diagnosing desync without schedule resets.
+   * When true, skip missed ticks and reset schedule when falling behind (>1 tick).
+   * This is the correct RuneScape behavior: ticks stretch under load, they don't
+   * replay in a burst. Actions stay responsive on the next clean tick.
+   * Set TICK_ALLOW_SKIP=false to disable (useful for diagnosing desync).
    */
   private readonly allowTickSkipping =
-    String(process.env.TICK_ALLOW_SKIP ?? "false").toLowerCase() !== "false";
+    String(process.env.TICK_ALLOW_SKIP ?? "true").toLowerCase() !== "false";
 
   // ============================================================================
   // PRE-ALLOCATED BUFFERS (Zero-allocation hot path support)
@@ -256,7 +259,7 @@ export class TickSystem {
               ? ` (suppressed ${suppressed} similar warnings)`
               : "";
           console.warn(
-            `[TickSystem] Slow handler (priority ${listener.priority}): ${handlerDuration}ms${suffix}`,
+            `[TickSystem] Slow handler "${listener.name}" (priority ${listener.priority}): ${handlerDuration}ms${suffix}`,
           );
         } else {
           this.suppressedSlowHandlerWarnings++;
@@ -302,8 +305,9 @@ export class TickSystem {
   onTick(
     callback: (tickNumber: number, deltaMs: number) => void,
     priority: TickPriority = TickPriority.MOVEMENT,
+    name = "anonymous",
   ): () => void {
-    const listener: TickListener = { callback, priority };
+    const listener: TickListener = { callback, priority, name };
     this.listeners.push(listener);
     this.listenersDirty = true; // Mark for re-sort
 

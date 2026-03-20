@@ -4483,6 +4483,27 @@ export class ClientNetwork extends SystemBase {
   };
 
   /**
+   * Handle server tick health stats for DevStats panel.
+   */
+  onTickHealth = (data: {
+    currentTick: number;
+    missedTicks: number;
+    lateTicks: number;
+    maxLateness: number;
+    lastResetTick: number;
+    lastTickDuration: number;
+    isHealthy: boolean;
+    phaseTimings?: { mobAI: number; mobMove: number; combat: number };
+    eventLoopLag?: number;
+    transport?: string;
+    connections?: number;
+    broadcastMs?: number;
+    pubsubPublishes?: number;
+  }) => {
+    (this.world as { tickHealth?: typeof data }).tickHealth = data;
+  };
+
+  /**
    * Handle server acknowledgment of a successful session reconnection.
    */
   onReconnected = (data: { characterId: string }) => {

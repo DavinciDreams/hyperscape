@@ -1355,43 +1355,61 @@ export function registerStreamingRoutes(
     startBettingLoopsIfNeeded();
   };
 
-  for (const route of [
+  fastify.get(
     "/api/streaming/betting/bootstrap",
-    "/api/internal/bet-sync/state",
-  ]) {
-    fastify.get(
-      route,
-      {
-        config: {
-          rateLimit: {
-            max: 240,
-            timeWindow: "1 minute",
-          },
+    {
+      config: {
+        rateLimit: {
+          max: 240,
+          timeWindow: "1 minute",
         },
       },
-      handleBettingBootstrap,
-    );
-  }
+    },
+    handleBettingBootstrap,
+  );
 
-  for (const route of [
-    "/api/streaming/betting/events",
-    "/api/internal/bet-sync/events",
-  ]) {
-    fastify.get<{
-      Querystring: { since?: string };
-    }>(
-      route,
-      {
-        config: {
-          rateLimit: {
-            max: 60,
-            timeWindow: "1 minute",
-          },
+  fastify.get(
+    "/api/internal/bet-sync/state",
+    {
+      config: {
+        rateLimit: {
+          max: 240,
+          timeWindow: "1 minute",
         },
       },
-      handleBettingEvents,
-    );
-  }
+    },
+    handleBettingBootstrap,
+  );
+
+  fastify.get<{
+    Querystring: { since?: string };
+  }>(
+    "/api/streaming/betting/events",
+    {
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    handleBettingEvents,
+  );
+
+  fastify.get<{
+    Querystring: { since?: string };
+  }>(
+    "/api/internal/bet-sync/events",
+    {
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    handleBettingEvents,
+  );
 
   // Get enriched duel context (state + inventories + internal monologues)
   fastify.get(

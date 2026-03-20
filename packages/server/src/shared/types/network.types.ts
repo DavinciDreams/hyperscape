@@ -30,6 +30,7 @@ import type { PlayerEntity } from "./game.types.js";
 export type NodeWebSocket = WebSocket & {
   on: (event: string, listener: Function) => void;
   removeListener?: (event: string, listener: Function) => void;
+  removeAllListeners?: () => void;
   listenerCount?: (event: string) => number;
   ping: () => void;
   terminate: () => void;

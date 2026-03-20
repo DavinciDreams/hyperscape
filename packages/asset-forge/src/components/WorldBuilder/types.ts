@@ -1164,11 +1164,6 @@ export const DEFAULT_BIOME_CONFIG: BiomeConfig = {
   gaussianCoeff: 0.15,
   boundaryNoiseScale: 0.003,
   boundaryNoiseAmount: 0.15,
-  mountainHeightThreshold: 0.4,
-  mountainWeightBoost: 2.0,
-  valleyHeightThreshold: 0.4,
-  valleyWeightBoost: 1.5,
-  mountainHeightBoost: 0.5,
 };
 
 /**

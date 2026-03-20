@@ -420,6 +420,8 @@ const names = [
   'keepalive',          // Client -> Server: periodic heartbeat to keep proxy connection alive
   // Batched entity spawn (reduces per-entity bandwidth overhead for tile generation)
   'entitiesBatchAdded', // Server -> Client: batch of newly spawned entities for a tile
+  // Dev diagnostics
+  'tickHealth',         // Server -> Client: tick system health stats for DevStats panel
 ]
 
 const byName: Record<string, PacketInfo> = {};

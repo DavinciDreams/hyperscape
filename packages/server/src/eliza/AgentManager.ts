@@ -8,7 +8,7 @@
  * - Managing agent lifecycle
  *
  * Behavior loop, action selection, and command dispatch are delegated to:
- * - AgentBehaviorTicker (autonomous behavior, quest management, combat chat)
+ * - AgentBehaviorBridge (worker thread for autonomous behavior decisions)
  * - AgentCommandDispatcher (routing string-based commands to service methods)
  *
  * Unlike external ElizaOS processes, these agents run directly in the
@@ -237,6 +237,7 @@ import type {
   EmbeddedAgentInfo,
   AgentState,
 } from "./types.js";
+import { AgentBehaviorBridge } from "./managers/AgentBehaviorBridge.js";
 import {
   AgentBehaviorTicker,
   EMBEDDED_AGENT_AUTONOMY_ENABLED,
@@ -248,13 +249,14 @@ import { AgentCommandDispatcher } from "./managers/AgentCommandDispatcher.js";
 /**
  * AgentManager manages the lifecycle of embedded ElizaOS agents.
  *
- * Behavior loop and action selection are handled by AgentBehaviorTicker.
+ * Behavior loop and action selection are handled by AgentBehaviorBridge (worker thread).
  * Command dispatch is handled by AgentCommandDispatcher.
  */
 export class AgentManager {
   private world: World;
   private agents: Map<string, AgentInstance> = new Map();
   private isShuttingDown: boolean = false;
+  private readonly behaviorBridge: AgentBehaviorBridge;
   private readonly behaviorTicker: AgentBehaviorTicker;
   private readonly commandDispatcher: AgentCommandDispatcher;
   private readonly combatDamageListener: (data: unknown) => void;
@@ -262,6 +264,11 @@ export class AgentManager {
 
   constructor(world: World) {
     this.world = world;
+    this.behaviorBridge = new AgentBehaviorBridge(
+      world,
+      (id) => this.agents.get(id),
+      () => Array.from(this.agents.keys()),
+    );
     this.behaviorTicker = new AgentBehaviorTicker(
       world,
       (id) => this.agents.get(id),
@@ -272,8 +279,16 @@ export class AgentManager {
     );
 
     this.combatDamageListener = (data: unknown) => {
-      this.behaviorTicker.handleCombatDamageDealt(data);
+      this.behaviorBridge.handleCombatDamageDealt(data);
     };
+
+    // Start the worker thread bridge
+    void this.behaviorBridge.start().catch((err) => {
+      console.error(
+        "[AgentManager] Failed to start behavior bridge:",
+        errMsg(err),
+      );
+    });
     this.world.on(EventType.COMBAT_DAMAGE_DEALT, this.combatDamageListener);
     this.worldListenerActive = true;
   }
@@ -286,6 +301,7 @@ export class AgentManager {
     if (!this.worldListenerActive) return;
     this.world.off(EventType.COMBAT_DAMAGE_DEALT, this.combatDamageListener);
     this.worldListenerActive = false;
+    this.behaviorBridge.stop();
   }
 
   // ─── LIFECYCLE ──────────────────────────────────────────────────────
@@ -380,8 +396,8 @@ export class AgentManager {
       instance.lastActivity = Date.now();
       instance.error = undefined;
 
-      // Always start autonomous behavior loop for embedded agents
-      this.behaviorTicker.startBehaviorLoop(characterId);
+      // Register agent with the worker-based behavior bridge
+      this.behaviorBridge.startAgent(characterId);
     } catch (err) {
       instance.state = "error";
       instance.error = errMsg(err);
@@ -406,7 +422,7 @@ export class AgentManager {
 
     try {
       // Stop autonomous behavior first.
-      this.behaviorTicker.stopBehaviorLoop(characterId);
+      this.behaviorBridge.stopAgent(characterId);
 
       await instance.service.stop();
       instance.state = "stopped";
@@ -416,6 +432,14 @@ export class AgentManager {
       instance.error = errMsg(err);
       throw err;
     }
+  }
+
+  /**
+   * Run one immediate autonomous behavior tick for an agent.
+   * Used by tests and diagnostics without waiting for the worker scheduler.
+   */
+  async executeBehaviorTick(characterId: string): Promise<void> {
+    await this.behaviorTicker.executeBehaviorTick(characterId);
   }
 
   /**
@@ -434,7 +458,7 @@ export class AgentManager {
     }
 
     // Stop autonomous behavior without removing the entity.
-    this.behaviorTicker.stopBehaviorLoop(characterId);
+    this.behaviorBridge.stopAgent(characterId);
     instance.state = "paused";
     instance.lastActivity = Date.now();
   }
@@ -456,8 +480,8 @@ export class AgentManager {
 
     instance.state = "running";
     instance.lastActivity = Date.now();
-    // Always start autonomous behavior loop
-    this.behaviorTicker.startBehaviorLoop(characterId);
+    // Resume autonomous behavior via worker bridge
+    this.behaviorBridge.startAgent(characterId);
   }
 
   /**

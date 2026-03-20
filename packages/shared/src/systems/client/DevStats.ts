@@ -68,6 +68,7 @@ export class DevStats extends System {
   private treeElement: HTMLDivElement | null = null;
   private cullingElement: HTMLDivElement | null = null;
   private cullingDetailElement: HTMLDivElement | null = null;
+  private tickHealthElement: HTMLDivElement | null = null;
   private showCullingDetails = false;
 
   // State
@@ -297,6 +298,17 @@ export class DevStats extends System {
     `;
     this.container.appendChild(this.treeElement);
 
+    // Server tick health section
+    this.tickHealthElement = document.createElement("div");
+    this.tickHealthElement.style.cssText = `
+      margin-bottom: 6px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(100, 200, 255, 0.1);
+      color: #94a3b8;
+      font-size: 10px;
+    `;
+    this.container.appendChild(this.tickHealthElement);
+
     // Frustum culling section
     this.cullingElement = document.createElement("div");
     this.cullingElement.style.cssText = `
@@ -333,18 +345,52 @@ export class DevStats extends System {
     `;
     this.container.appendChild(this.systemsElement);
 
-    // Add toggle hint at bottom
-    const toggleHint = document.createElement("div");
-    toggleHint.style.cssText = `
+    // Add copy button + toggle hint at bottom
+    const footer = document.createElement("div");
+    footer.style.cssText = `
       margin-top: 6px;
       padding-top: 4px;
       border-top: 1px solid rgba(100, 200, 255, 0.1);
       color: #666;
       font-size: 9px;
       text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     `;
-    toggleHint.textContent = "F5/\\ toggle • S systems • C culling";
-    this.container.appendChild(toggleHint);
+
+    const copyBtn = document.createElement("button");
+    copyBtn.textContent = "Copy";
+    copyBtn.style.cssText = `
+      background: rgba(100, 200, 255, 0.15);
+      border: 1px solid rgba(100, 200, 255, 0.3);
+      border-radius: 4px;
+      color: #94a3b8;
+      font-family: inherit;
+      font-size: 9px;
+      padding: 2px 8px;
+      cursor: pointer;
+      pointer-events: auto;
+    `;
+    copyBtn.addEventListener("click", () => {
+      const text = this.getPlainTextStats();
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.textContent = "Copied!";
+        copyBtn.style.color = "#4ade80";
+        setTimeout(() => {
+          copyBtn.textContent = "Copy";
+          copyBtn.style.color = "#94a3b8";
+        }, 1500);
+      });
+    });
+    footer.appendChild(copyBtn);
+
+    const hintText = document.createElement("span");
+    hintText.textContent = "F5/\\ toggle • S systems • C culling";
+    footer.appendChild(hintText);
+
+    this.container.appendChild(footer);
 
     document.body.appendChild(this.container);
   }
@@ -919,6 +965,139 @@ export class DevStats extends System {
       }
     }
 
+    // Server tick health
+    if (this.tickHealthElement) {
+      const tickHealth = (
+        this.world as {
+          tickHealth?: {
+            currentTick: number;
+            missedTicks: number;
+            lateTicks: number;
+            maxLateness: number;
+            lastTickDuration: number;
+            isHealthy: boolean;
+            phaseTimings?: { mobAI: number; mobMove: number; combat: number };
+            eventLoopLag?: number;
+            transport?: string;
+            connections?: number;
+            broadcastMs?: number;
+            pubsubPublishes?: number;
+          };
+        }
+      ).tickHealth;
+      if (tickHealth) {
+        const healthColor = tickHealth.isHealthy ? "#4ade80" : "#ef4444";
+        const healthLabel = tickHealth.isHealthy ? "OK" : "DEGRADED";
+        // Color tick duration: green < 300ms, yellow 300-500ms, red > 500ms
+        const durationColor =
+          tickHealth.lastTickDuration < 300
+            ? "#4ade80"
+            : tickHealth.lastTickDuration < 500
+              ? "#fbbf24"
+              : "#ef4444";
+        const pt = tickHealth.phaseTimings;
+        const phaseColor = (ms: number) =>
+          ms < 50 ? "#4ade80" : ms < 150 ? "#fbbf24" : "#ef4444";
+        const phaseRows = pt
+          ? `
+          <div style="display: flex; justify-content: space-between; margin-top: 4px; font-weight: 600;">
+            <span>Phase Breakdown</span>
+            <span></span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>  Mob AI:</span>
+            <span style="color: ${phaseColor(pt.mobAI)};">${pt.mobAI}ms</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>  Mob Move:</span>
+            <span style="color: ${phaseColor(pt.mobMove)};">${pt.mobMove}ms</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>  Combat:</span>
+            <span style="color: ${phaseColor(pt.combat)};">${pt.combat}ms</span>
+          </div>
+        `
+          : "";
+        const transportLabel =
+          tickHealth.transport === "uws"
+            ? "uWS"
+            : tickHealth.transport === "ws"
+              ? "ws"
+              : "—";
+        const transportColor =
+          tickHealth.transport === "uws" ? "#4ade80" : "#94a3b8";
+        const broadcastColor =
+          (tickHealth.broadcastMs ?? 0) < 5
+            ? "#4ade80"
+            : (tickHealth.broadcastMs ?? 0) < 20
+              ? "#fbbf24"
+              : "#ef4444";
+        this.tickHealthElement.innerHTML = `
+          <div style="display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 4px;">
+            <span>Server Tick</span>
+            <span style="color: ${healthColor};">${healthLabel}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Transport:</span>
+            <span style="color: ${transportColor}; font-weight: 600;">${transportLabel}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Connections:</span>
+            <span style="color: #e0e0e0;">${tickHealth.connections ?? "—"}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Tick #:</span>
+            <span style="color: #e0e0e0;">${tickHealth.currentTick}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Tick Duration:</span>
+            <span style="color: ${durationColor};">${tickHealth.lastTickDuration}ms / 600ms</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Late Ticks:</span>
+            <span style="color: ${tickHealth.lateTicks > 0 ? "#fbbf24" : "#e0e0e0"};">${tickHealth.lateTicks}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Missed Ticks:</span>
+            <span style="color: ${tickHealth.missedTicks > 0 ? "#ef4444" : "#e0e0e0"};">${tickHealth.missedTicks}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Max Lateness:</span>
+            <span style="color: #e0e0e0;">${tickHealth.maxLateness}ms</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Broadcast:</span>
+            <span style="color: ${broadcastColor};">${tickHealth.broadcastMs ?? "—"}ms</span>
+          </div>
+          ${
+            tickHealth.pubsubPublishes !== undefined &&
+            tickHealth.pubsubPublishes > 0
+              ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span>Publishes:</span>
+            <span style="color: #4ade80;">${tickHealth.pubsubPublishes}</span>
+          </div>
+          `
+              : ""
+          }
+          ${phaseRows}
+          ${
+            tickHealth.eventLoopLag !== undefined
+              ? `
+          <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+            <span>Event Loop Lag:</span>
+            <span style="color: ${tickHealth.eventLoopLag < 50 ? "#4ade80" : tickHealth.eventLoopLag < 200 ? "#fbbf24" : "#ef4444"};">${tickHealth.eventLoopLag}ms</span>
+          </div>
+          `
+              : ""
+          }
+        `;
+        this.tickHealthElement.style.display = "block";
+      } else {
+        this.tickHealthElement.style.display = "none";
+      }
+    }
+
     // Frustum culling stats
     if (this.cullingElement) {
       const cullingInfo = this.getCullingInfo();
@@ -999,6 +1178,100 @@ export class DevStats extends System {
     if (this.renderTimeSamples.length === 0) return 0;
     const sum = this.renderTimeSamples.reduce((a, b) => a + b, 0);
     return sum / this.renderTimeSamples.length;
+  }
+
+  /**
+   * Build a plain-text snapshot of all visible stats for clipboard copy.
+   */
+  private getPlainTextStats(): string {
+    const lines: string[] = [];
+    lines.push(`=== Hyperscape DevStats ===`);
+    lines.push(
+      `FPS: ${this.currentFps}  Frame: ${this.getAverageFrameTime().toFixed(1)}ms`,
+    );
+    lines.push(
+      `CPU: ${this.getAverageCpuTime().toFixed(1)}ms  Render: ${this.getAverageRenderTime().toFixed(1)}ms`,
+    );
+
+    const mem = this.getMemoryInfo();
+    if (mem)
+      lines.push(
+        `Memory: ${mem.usedMB.toFixed(0)} / ${mem.totalMB.toFixed(0)} MB`,
+      );
+
+    const info = this.getRendererInfo();
+    if (info) {
+      lines.push(
+        `Draw Calls: ${info.drawCalls}  Tris: ${info.triangles.toLocaleString()}`,
+      );
+      lines.push(`Textures: ${info.textures}  Geometries: ${info.geometries}`);
+    }
+
+    const scene = this.getSceneInfo();
+    if (scene) {
+      lines.push(
+        `Objects: ${scene.totalObjects}  Lights: ${scene.lightCount}  Entities: ${scene.entityCount}  Systems: ${scene.systemCount}`,
+      );
+    }
+
+    const player = this.world.getPlayer();
+    if (player) {
+      const pos = player.position;
+      lines.push(
+        `Position: ${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}`,
+      );
+    }
+
+    const tickHealth = (
+      this.world as {
+        tickHealth?: {
+          currentTick: number;
+          missedTicks: number;
+          lateTicks: number;
+          maxLateness: number;
+          lastTickDuration: number;
+          isHealthy: boolean;
+          phaseTimings?: { mobAI: number; mobMove: number; combat: number };
+          eventLoopLag?: number;
+          transport?: string;
+          connections?: number;
+          broadcastMs?: number;
+          pubsubPublishes?: number;
+        };
+      }
+    ).tickHealth;
+    if (tickHealth) {
+      lines.push(`--- Server Tick ---`);
+      lines.push(
+        `Health: ${tickHealth.isHealthy ? "OK" : "DEGRADED"}  Transport: ${tickHealth.transport ?? "—"}  Conns: ${tickHealth.connections ?? "—"}`,
+      );
+      lines.push(
+        `Tick #${tickHealth.currentTick}  Duration: ${tickHealth.lastTickDuration}ms/600ms`,
+      );
+      lines.push(
+        `Late: ${tickHealth.lateTicks}  Missed: ${tickHealth.missedTicks}  Max Lateness: ${tickHealth.maxLateness}ms`,
+      );
+      if (tickHealth.broadcastMs !== undefined) {
+        lines.push(`Broadcast: ${tickHealth.broadcastMs}ms`);
+      }
+      if (
+        tickHealth.pubsubPublishes !== undefined &&
+        tickHealth.pubsubPublishes > 0
+      ) {
+        lines.push(`Publishes: ${tickHealth.pubsubPublishes}`);
+      }
+      if (tickHealth.phaseTimings) {
+        const pt = tickHealth.phaseTimings;
+        lines.push(
+          `Phases: MobAI=${pt.mobAI}ms  MobMove=${pt.mobMove}ms  Combat=${pt.combat}ms`,
+        );
+      }
+      if (tickHealth.eventLoopLag !== undefined) {
+        lines.push(`Event Loop Lag: ${tickHealth.eventLoopLag}ms`);
+      }
+    }
+
+    return lines.join("\n");
   }
 
   /**

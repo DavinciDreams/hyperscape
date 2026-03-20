@@ -42,6 +42,15 @@ export function registerWebSocket(
   fastify: FastifyInstance,
   world: World,
 ): void {
+  // When uWS handles game WebSocket traffic (default), skip the Fastify /ws route.
+  // @fastify/websocket stays registered in http-server.ts for proxy-routes.ts.
+  if (process.env.UWS_ENABLED !== "false") {
+    fastify.log.info(
+      "[WebSocket] Game WS handled by uWebSockets.js, skipping Fastify /ws route",
+    );
+    return;
+  }
+
   // In @fastify/websocket v11+, the first parameter IS the WebSocket directly
   fastify.get("/ws", { websocket: true }, (socket, req: FastifyRequest) => {
     const ws = socket as unknown as NodeWebSocket;

@@ -174,6 +174,9 @@ export interface ServerConfig {
   /** Server HTTP port */
   port: number;
 
+  /** uWebSockets.js game WebSocket port */
+  uwsPort: number;
+
   /** World data directory path */
   worldDir: string;
 
@@ -415,6 +418,7 @@ export async function loadConfig(): Promise<ServerConfig> {
   // Environment variables with defaults
   const WORLD = process.env["WORLD"] || "world";
   const PORT = parseInt(process.env["PORT"] || "5555", 10);
+  const UWS_PORT = parseInt(process.env["UWS_PORT"] || "5556", 10);
   const NODE_ENV = process.env["NODE_ENV"] || "development";
   const DATABASE_URL = process.env["DATABASE_URL"];
 
@@ -468,6 +472,7 @@ export async function loadConfig(): Promise<ServerConfig> {
 
   return {
     port: PORT,
+    uwsPort: UWS_PORT,
     worldDir,
     assetsDir,
     manifestsDir,
