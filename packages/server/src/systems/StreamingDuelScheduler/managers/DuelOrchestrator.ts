@@ -1938,6 +1938,7 @@ export class DuelOrchestrator {
       cycleId: cycle.cycleId,
       duelId: cycle.duelId ?? `streaming-${cycle.cycleId}`,
       duelKeyHex: cycle.duelKeyHex,
+      betCloseTime: cycle.betCloseTime ?? now,
       fightStartTime: now,
       agent1Id: agent1?.characterId,
       agent2Id: agent2?.characterId,

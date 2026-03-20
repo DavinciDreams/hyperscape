@@ -195,4 +195,37 @@ describe("DuelBettingBridge streaming reconciliation", () => {
     expect(bridge.getMarket("duel-123")).toBeNull();
     expect(bridge.getMarketHistory()).toHaveLength(1);
   });
+
+  it("does not recreate a resolved market while the live cycle remains in resolution", async () => {
+    const cycle = makeCycle();
+    getStreamingDuelSchedulerMock.mockReturnValue({
+      getCurrentCycle: () => cycle,
+    });
+
+    await (bridge as any).reconcileLiveCycle();
+
+    cycle.phase = "FIGHTING";
+    cycle.phaseStartTime = 2_500;
+    cycle.fightStartTime = 2_500;
+    await (bridge as any).reconcileLiveCycle();
+
+    cycle.phase = "RESOLUTION";
+    cycle.winnerId = "agent-a";
+    cycle.loserId = "agent-b";
+    cycle.winnerName = "Agent A";
+    cycle.loserName = "Agent B";
+    cycle.duelEndTime = 9_000;
+    cycle.seed = "12345";
+    cycle.replayHash = "deadbeef";
+
+    await (bridge as any).reconcileLiveCycle();
+
+    expect(bridge.getMarket("duel-123")).toBeNull();
+    expect(bridge.getMarketHistory()).toHaveLength(1);
+
+    await (bridge as any).reconcileLiveCycle();
+
+    expect(bridge.getMarket("duel-123")).toBeNull();
+    expect(bridge.getMarketHistory()).toHaveLength(1);
+  });
 });

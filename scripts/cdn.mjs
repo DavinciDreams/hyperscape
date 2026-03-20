@@ -15,12 +15,14 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.join(__dirname, '..')
 const serverDir = path.join(rootDir, 'packages/server')
 // CDN serves from packages/server/world/assets by default (docker-compose.yml)
 const assetsDir = path.join(serverDir, 'world', 'assets')
+const DOCKER_BIN = resolveDockerBinary()
 
 const args = process.argv.slice(2)
 const forceRestart = args.includes('--force') || args.includes('-f')
@@ -37,17 +39,40 @@ const colors = {
 
 function isDockerAvailable() {
   try {
-    execSync('docker info', { stdio: 'ignore' })
+    execSync(`${DOCKER_BIN} info`, { stdio: 'ignore' })
     return true
   } catch {
     return false
   }
 }
 
+function resolveDockerBinary() {
+  const candidates = [
+    process.env.DOCKER_BIN,
+    '/usr/local/bin/docker',
+    '/opt/homebrew/bin/docker',
+    '/Applications/Docker.app/Contents/Resources/bin/docker',
+    `${os.homedir()}/.docker/bin/docker`,
+    'docker',
+  ].filter(Boolean)
+
+  for (const candidate of candidates) {
+    if (candidate === 'docker') return candidate
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK)
+      return candidate
+    } catch {
+      // keep searching
+    }
+  }
+
+  return 'docker'
+}
+
 function getDockerComposeCommand() {
   // Try docker compose (newer Docker versions) first
   try {
-    execSync('docker compose version', { stdio: 'ignore' })
+    execSync(`${DOCKER_BIN} compose version`, { stdio: 'ignore' })
     return 'docker compose'
   } catch {
     // Fall back to docker-compose (older versions or standalone)
@@ -62,7 +87,7 @@ function getDockerComposeCommand() {
 
 function isCDNRunning() {
   try {
-    const status = execSync('docker ps --filter "name=^/hyperscape-cdn$" --format "{{.Status}}"', {
+    const status = execSync(`${DOCKER_BIN} ps --filter "name=^/hyperscape-cdn$" --format "{{.Status}}"`, {
       encoding: 'utf8',
       cwd: serverDir
     }).trim()
@@ -75,14 +100,14 @@ function isCDNRunning() {
 function removeExistingCDNContainer() {
   try {
     const existing = execSync(
-      'docker ps -a --filter "name=^/hyperscape-cdn$" --format "{{.ID}}"',
+      `${DOCKER_BIN} ps -a --filter "name=^/hyperscape-cdn$" --format "{{.ID}}"`,
       { encoding: 'utf8', cwd: serverDir },
     ).trim()
 
     if (!existing) return false
 
     console.log(`${colors.yellow}Removing existing hyperscape-cdn container...${colors.reset}`)
-    execSync('docker rm -f hyperscape-cdn', {
+    execSync(`${DOCKER_BIN} rm -f hyperscape-cdn`, {
       stdio: 'inherit',
       cwd: serverDir,
     })

@@ -13,9 +13,11 @@ import { EventType } from "@hyperscape/shared";
 export function LoadingScreen({
   world,
   message,
+  completionStage = "Finalizing...",
 }: {
   world: World;
   message?: string;
+  completionStage?: string;
 }) {
   const theme = useThemeStore((s) => s.theme);
   const [progress, setProgress] = useState(3); // Start at 3% to show immediate feedback
@@ -68,7 +70,7 @@ export function LoadingScreen({
               `Loading assets... (${Math.floor(progressData.progress)}%)`,
             );
           } else {
-            setLoadingStage("Finalizing...");
+            setLoadingStage(completionStage);
           }
         }
       } else {
@@ -85,7 +87,7 @@ export function LoadingScreen({
     return () => {
       world.off(EventType.ASSETS_LOADING_PROGRESS, handleProgress);
     };
-  }, []);
+  }, [world, completionStage]);
 
   return (
     <div className="loading-screen absolute inset-0 bg-black flex pointer-events-auto">

@@ -48,10 +48,35 @@
 
 import { spawn, exec } from "child_process";
 import { promisify } from "util";
+import { existsSync } from "fs";
+import os from "os";
 
 const execAsync = promisify(exec);
+const DOCKER_BIN = resolveDockerBinary();
 
 export const DEFAULT_DEV_POSTGRES_PASSWORD = "hyperscape_dev_password";
+
+function resolveDockerBinary(): string {
+  const candidates = [
+    process.env.DOCKER_BIN,
+    "/usr/local/bin/docker",
+    "/opt/homebrew/bin/docker",
+    "/Applications/Docker.app/Contents/Resources/bin/docker",
+    `${os.homedir()}/.docker/bin/docker`,
+    "docker",
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (candidate === "docker") {
+      return candidate;
+    }
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "docker";
+}
 
 /**
  * Docker container configuration
@@ -94,7 +119,7 @@ export class DockerManager {
    * @public
    */
   async checkDockerRunning(): Promise<void> {
-    await execAsync("docker info");
+    await execAsync(`${DOCKER_BIN} info`);
   }
 
   /**
@@ -108,7 +133,7 @@ export class DockerManager {
    */
   async checkPostgresRunning(): Promise<boolean> {
     const { stdout: existsOut } = await execAsync(
-      `docker ps -a --filter "name=^/${this.config.containerName}$" --format "{{.Names}}"`,
+      `${DOCKER_BIN} ps -a --filter "name=^/${this.config.containerName}$" --format "{{.Names}}"`,
     );
     const exists = existsOut.trim() === this.config.containerName;
     if (!exists) {
@@ -116,7 +141,7 @@ export class DockerManager {
     }
 
     const { stdout } = await execAsync(
-      `docker inspect -f '{{.State.Running}}' ${this.config.containerName}`,
+      `${DOCKER_BIN} inspect -f '{{.State.Running}}' ${this.config.containerName}`,
     );
     const isRunning = stdout.trim() === "true";
     return isRunning;
@@ -134,11 +159,11 @@ export class DockerManager {
    */
   async startPostgres(): Promise<void> {
     const { stdout } = await execAsync(
-      `docker ps -a --filter "name=^/${this.config.containerName}$" --format "{{.Names}}"`,
+      `${DOCKER_BIN} ps -a --filter "name=^/${this.config.containerName}$" --format "{{.Names}}"`,
     );
     if (stdout.trim() === this.config.containerName) {
       // Container exists, just start it
-      await execAsync(`docker start ${this.config.containerName}`);
+      await execAsync(`${DOCKER_BIN} start ${this.config.containerName}`);
       this.containerStartedByUs = true;
     } else {
       // Create new container
@@ -170,7 +195,7 @@ export class DockerManager {
     ];
 
     return new Promise((resolve, reject) => {
-      const process = spawn("docker", dockerArgs, { stdio: "inherit" });
+      const process = spawn(DOCKER_BIN, dockerArgs, { stdio: "inherit" });
 
       process.on("exit", (code) => {
         if (code === 0) {
@@ -190,7 +215,7 @@ export class DockerManager {
     for (let i = 0; i < maxAttempts; i++) {
       try {
         const { stdout } = await execAsync(
-          `docker exec ${this.config.containerName} pg_isready -U ${this.config.postgresUser}`,
+          `${DOCKER_BIN} exec ${this.config.containerName} pg_isready -U ${this.config.postgresUser}`,
         );
 
         if (stdout.includes("accepting connections")) {
@@ -219,7 +244,7 @@ export class DockerManager {
       return;
     }
 
-    await execAsync(`docker stop ${this.config.containerName}`);
+    await execAsync(`${DOCKER_BIN} stop ${this.config.containerName}`);
   }
 
   /**

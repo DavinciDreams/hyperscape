@@ -66,6 +66,12 @@ interface DuelMarket {
   winnerSide?: "A" | "B";
 }
 
+function canCreateMarketForStreamingPhase(phase: unknown): boolean {
+  return (
+    phase === "ANNOUNCEMENT" || phase === "COUNTDOWN" || phase === "FIGHTING"
+  );
+}
+
 interface SolanaArenaOperatorInterface {
   isEnabled(): boolean;
   initRound(
@@ -379,16 +385,20 @@ export class DuelBettingBridge {
       if (!cycle || cycle.duelId !== data.duelId) {
         return;
       }
-      await this.createOrSyncMarket({
-        duelId: cycle.duelId,
-        duelKeyHex: cycle.duelKeyHex ?? data.duelKeyHex,
-        agent1Id: cycle.agent1?.characterId ?? data.winnerId ?? "",
-        agent2Id: cycle.agent2?.characterId ?? data.loserId ?? "",
-        agent1Name: cycle.agent1?.name ?? data.winnerName ?? "Unknown",
-        agent2Name: cycle.agent2?.name ?? data.loserName ?? "Unknown",
-        bettingClosesAt: cycle.betCloseTime ?? Date.now(),
-        source: "streaming",
-      });
+      if (!canCreateMarketForStreamingPhase(cycle.phase)) {
+        Logger.warn(
+          "DuelBettingBridge",
+          "Skipping streaming resolution because no active market exists for the resolved duel",
+          {
+            duelId: data.duelId,
+            cycleId: cycle.cycleId ?? null,
+            phase: cycle.phase ?? null,
+          },
+        );
+        return;
+      }
+
+      await this.reconcileLiveCycle();
     }
 
     const resolvedMarket = this.activeMarkets.get(data.duelId);
@@ -675,6 +685,9 @@ export class DuelBettingBridge {
 
       const market = this.activeMarkets.get(cycle.duelId);
       if (!market) {
+        if (!canCreateMarketForStreamingPhase(cycle.phase)) {
+          return;
+        }
         await this.createOrSyncMarket({
           duelId: cycle.duelId,
           duelKeyHex: cycle.duelKeyHex ?? undefined,

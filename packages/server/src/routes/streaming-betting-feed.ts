@@ -1,0 +1,176 @@
+import type { StreamingDuelCycle, StreamingPhase } from "../systems/StreamingDuelScheduler/types.js";
+
+export const BETTING_FEED_SCHEMA_VERSION = 1;
+export const BETTING_SOURCE_EPOCH_STORAGE_KEY = "streaming:betting-source-epoch";
+
+export type BettingFeedAgent = {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  hp: number;
+  maxHp: number;
+  combatLevel: number;
+  wins: number;
+  losses: number;
+  damageDealtThisFight: number;
+  rank: number;
+  headToHeadWins: number;
+  headToHeadLosses: number;
+};
+
+export type BettingFeedPayload = {
+  schemaVersion: number;
+  sourceEpoch: number;
+  seq: number;
+  emittedAt: number;
+  duelId: string | null;
+  duelKey: string | null;
+  phase: StreamingPhase | null;
+  phaseVersion: number;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  winnerId: string | null;
+  winnerName: string | null;
+  winReason: StreamingDuelCycle["winReason"];
+  agent1: BettingFeedAgent | null;
+  agent2: BettingFeedAgent | null;
+  arenaPositions: StreamingDuelCycle["arenaPositions"];
+};
+
+export type BettingFeedFrame = {
+  seq: number;
+  emittedAt: number;
+  payload: BettingFeedPayload;
+  payloadBytes: number;
+};
+
+export type ReplayDelivery =
+  | {
+      mode: "bootstrap";
+      frames: [];
+      latestFrame: BettingFeedFrame | null;
+      oldestSeq: number | null;
+    }
+  | {
+      mode: "replay";
+      frames: BettingFeedFrame[];
+      latestFrame: BettingFeedFrame | null;
+      oldestSeq: number | null;
+    }
+  | {
+      mode: "reset";
+      frames: [];
+      latestFrame: BettingFeedFrame;
+      oldestSeq: number;
+    };
+
+function toAgentSnapshot(
+  agent: StreamingDuelCycle["agent1"],
+): BettingFeedAgent | null {
+  if (!agent) return null;
+
+  return {
+    id: agent.characterId,
+    name: agent.name,
+    provider: agent.provider,
+    model: agent.model,
+    hp: agent.currentHp,
+    maxHp: agent.maxHp,
+    combatLevel: agent.combatLevel,
+    wins: agent.wins,
+    losses: agent.losses,
+    damageDealtThisFight: agent.damageDealtThisFight,
+    rank: agent.rank,
+    headToHeadWins: agent.headToHeadWins,
+    headToHeadLosses: agent.headToHeadLosses,
+  };
+}
+
+export function buildBettingFeedPayload(params: {
+  sourceEpoch: number;
+  seq: number;
+  emittedAt: number;
+  cycle: StreamingDuelCycle | null;
+}): BettingFeedPayload {
+  const cycle = params.cycle;
+  return {
+    schemaVersion: BETTING_FEED_SCHEMA_VERSION,
+    sourceEpoch: params.sourceEpoch,
+    seq: params.seq,
+    emittedAt: params.emittedAt,
+    duelId: cycle?.duelId ?? null,
+    duelKey: cycle?.duelKeyHex ?? null,
+    phase: cycle?.phase ?? null,
+    phaseVersion: cycle?.phaseVersion ?? 0,
+    betOpenTime: cycle?.betOpenTime ?? null,
+    betCloseTime: cycle?.betCloseTime ?? null,
+    fightStartTime: cycle?.fightStartTime ?? null,
+    duelEndTime: cycle?.duelEndTime ?? null,
+    winnerId: cycle?.winnerId ?? null,
+    winnerName: cycle?.winnerId
+      ? cycle.agent1?.characterId === cycle.winnerId
+        ? cycle.agent1?.name ?? null
+        : cycle.agent2?.name ?? null
+      : null,
+    winReason: cycle?.winReason ?? null,
+    agent1: toAgentSnapshot(cycle?.agent1 ?? null),
+    agent2: toAgentSnapshot(cycle?.agent2 ?? null),
+    arenaPositions: cycle?.arenaPositions ?? null,
+  };
+}
+
+export function selectReplayDelivery(
+  frames: BettingFeedFrame[],
+  sinceSeq: number,
+): ReplayDelivery {
+  if (frames.length === 0) {
+    return {
+      mode: "bootstrap",
+      frames: [],
+      latestFrame: null,
+      oldestSeq: null,
+    };
+  }
+
+  const oldestSeq = frames[0]?.seq ?? null;
+  const latestFrame = frames[frames.length - 1] ?? null;
+
+  if (sinceSeq <= 0 || latestFrame === null) {
+    return {
+      mode: "bootstrap",
+      frames: [],
+      latestFrame,
+      oldestSeq,
+    };
+  }
+
+  if (oldestSeq !== null && sinceSeq < oldestSeq) {
+    return {
+      mode: "reset",
+      frames: [],
+      latestFrame,
+      oldestSeq,
+    };
+  }
+
+  const startIndex = frames.findIndex((frame) => frame.seq > sinceSeq);
+  if (startIndex < 0) {
+    return {
+      mode: "bootstrap",
+      frames: [],
+      latestFrame,
+      oldestSeq,
+    };
+  }
+
+  return {
+    mode: "replay",
+    frames: frames.slice(startIndex),
+    latestFrame,
+    oldestSeq,
+  };
+}
+

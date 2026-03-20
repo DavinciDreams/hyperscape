@@ -11,16 +11,25 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { World } from "@hyperscape/shared";
 import fs from "node:fs";
+import { eq } from "drizzle-orm";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import { STREAMING_TIMING } from "../systems/StreamingDuelScheduler/types.js";
 import { peekRTMPBridge } from "../streaming/index.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
+import { storage } from "../database/schema.js";
 import {
   STREAMING_CANONICAL_PLATFORM,
   STREAMING_PUBLIC_DELAY_DEFAULT_MS,
   STREAMING_PUBLIC_DELAY_MS,
   STREAMING_PUBLIC_DELAY_OVERRIDDEN,
 } from "../streaming/streaming-policy.js";
+import {
+  BETTING_FEED_SCHEMA_VERSION,
+  BETTING_SOURCE_EPOCH_STORAGE_KEY,
+  buildBettingFeedPayload,
+  selectReplayDelivery,
+  type BettingFeedFrame,
+} from "./streaming-betting-feed.js";
 
 type InventorySnapshotItem = {
   slot: number;
@@ -194,6 +203,17 @@ export function registerStreamingRoutes(
   let lastBroadcastSeq = 0;
   let statePushInterval: ReturnType<typeof setInterval> | null = null;
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  const bettingClients = new Map<number, FastifyReply>();
+  const bettingReplayFrames: BettingFeedFrame[] = [];
+  let bettingReplayFramesTotalBytes = 0;
+  let bettingSequence = 0;
+  let lastSerializedBettingState = "";
+  let lastBettingBroadcastSeq = 0;
+  let bettingPushInterval: ReturnType<typeof setInterval> | null = null;
+  let bettingHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  let bettingSourceEpoch = Date.now();
+  let bettingSourceEpochInit: Promise<number> | null = null;
+  let bettingSourceEpochReady = false;
 
   const formatSseEvent = (event: string, data: string, id?: number): string => {
     const normalizedData = data.replace(/\n/g, "\ndata: ");
@@ -527,6 +547,261 @@ export function registerStreamingRoutes(
     }, STREAMING_SSE_HEARTBEAT_MS);
   };
 
+  const clearBettingLoops = (): void => {
+    if (bettingPushInterval) {
+      clearInterval(bettingPushInterval);
+      bettingPushInterval = null;
+    }
+    if (bettingHeartbeatInterval) {
+      clearInterval(bettingHeartbeatInterval);
+      bettingHeartbeatInterval = null;
+    }
+  };
+
+  const removeBettingClient = (clientId: number): void => {
+    const clientReply = bettingClients.get(clientId);
+    if (!clientReply) return;
+
+    bettingClients.delete(clientId);
+    try {
+      if (!clientReply.raw.writableEnded) {
+        clientReply.raw.end();
+      }
+    } catch {
+      // ignore socket close errors
+    }
+
+    if (bettingClients.size === 0) {
+      clearBettingLoops();
+    }
+  };
+
+  const getDatabaseSystem = (): {
+    getDb?: () => any;
+  } | null => world.getSystem("database") as { getDb?: () => any } | null;
+
+  const persistBettingSourceEpoch = async (epoch: number): Promise<void> => {
+    const db = getDatabaseSystem()?.getDb?.();
+    if (!db) return;
+
+    const value = JSON.stringify({
+      sourceEpoch: epoch,
+      updatedAt: Date.now(),
+    });
+    try {
+      await db
+        .insert(storage)
+        .values({
+          key: BETTING_SOURCE_EPOCH_STORAGE_KEY,
+          value,
+          updatedAt: Date.now(),
+        })
+        .onConflictDoUpdate({
+          target: storage.key,
+          set: {
+            value,
+            updatedAt: Date.now(),
+          },
+        });
+    } catch {
+      // Best-effort durability only.
+    }
+  };
+
+  const ensureBettingSourceEpoch = async (): Promise<number> => {
+    if (bettingSourceEpochReady) {
+      return bettingSourceEpoch;
+    }
+    if (bettingSourceEpochInit) {
+      return bettingSourceEpochInit;
+    }
+
+    bettingSourceEpochInit = (async () => {
+      const db = getDatabaseSystem()?.getDb?.();
+      if (!db) {
+        return bettingSourceEpoch;
+      }
+
+      try {
+        const rows = await db
+          .select()
+          .from(storage)
+          .where(eq(storage.key, BETTING_SOURCE_EPOCH_STORAGE_KEY))
+          .limit(1);
+        const rawValue = rows[0]?.value ?? "";
+        let parsedEpoch = Number.parseInt(rawValue, 10);
+        if (!Number.isFinite(parsedEpoch)) {
+          try {
+            const parsed = JSON.parse(rawValue) as {
+              sourceEpoch?: number;
+              updatedAt?: number;
+            };
+            parsedEpoch = Number(parsed?.sourceEpoch);
+          } catch {
+            parsedEpoch = Number.NaN;
+          }
+        }
+
+        bettingSourceEpoch = Number.isFinite(parsedEpoch)
+          ? Math.max(parsedEpoch + 1, Date.now())
+          : Date.now();
+        await persistBettingSourceEpoch(bettingSourceEpoch);
+      } catch {
+        bettingSourceEpoch = Date.now();
+      }
+
+      bettingSourceEpochReady = true;
+
+      return bettingSourceEpoch;
+    })();
+
+    return bettingSourceEpochInit;
+  };
+
+  const captureBettingFrame = (
+    forceNewFrame = false,
+  ): BettingFeedFrame | null => {
+    const scheduler = getStreamingDuelScheduler();
+    const cycle = scheduler?.getCurrentCycle() ?? null;
+    const emittedAt = Date.now();
+    const payload = buildBettingFeedPayload({
+      sourceEpoch: bettingSourceEpoch,
+      seq: bettingSequence + 1,
+      emittedAt,
+      cycle,
+    });
+    const serialized = JSON.stringify(payload);
+
+    if (
+      !forceNewFrame &&
+      serialized === lastSerializedBettingState &&
+      bettingReplayFrames.length > 0
+    ) {
+      return null;
+    }
+
+    lastSerializedBettingState = serialized;
+    bettingSequence += 1;
+
+    const frame: BettingFeedFrame = {
+      seq: bettingSequence,
+      emittedAt,
+      payload: {
+        ...payload,
+        seq: bettingSequence,
+      },
+      payloadBytes: Buffer.byteLength(serialized, "utf8"),
+    };
+
+    bettingReplayFrames.push(frame);
+    bettingReplayFramesTotalBytes += frame.payloadBytes;
+    while (
+      bettingReplayFrames.length > STREAMING_SSE_REPLAY_BUFFER ||
+      bettingReplayFramesTotalBytes > STREAMING_SSE_REPLAY_MAX_BYTES
+    ) {
+      const removed = bettingReplayFrames.shift();
+      if (!removed) break;
+      bettingReplayFramesTotalBytes = Math.max(
+        0,
+        bettingReplayFramesTotalBytes - removed.payloadBytes,
+      );
+    }
+
+    return frame;
+  };
+
+  const startBettingLoopsIfNeeded = (): void => {
+    if (bettingPushInterval) return;
+
+    lastBettingBroadcastSeq =
+      bettingReplayFrames[bettingReplayFrames.length - 1]?.seq ?? 0;
+
+    bettingPushInterval = setInterval(() => {
+      const frame = captureBettingFrame(false);
+      if (!frame) return;
+
+      for (const [clientId, clientReply] of bettingClients.entries()) {
+        const status = writeSseEvent(
+          clientReply,
+          "betting",
+          JSON.stringify(frame.payload),
+          frame.seq,
+        );
+        if (status !== "ok") {
+          removeBettingClient(clientId);
+          continue;
+        }
+      }
+      lastBettingBroadcastSeq = frame.seq;
+    }, STREAMING_SSE_PUSH_INTERVAL_MS);
+
+    bettingHeartbeatInterval = setInterval(() => {
+      const heartbeatMessage = `:hb ${Date.now()}\n\n`;
+      for (const [clientId, clientReply] of bettingClients.entries()) {
+        const status = writeSseMessage(clientReply, heartbeatMessage);
+        if (status === "ok") {
+          continue;
+        }
+        removeBettingClient(clientId);
+      }
+    }, STREAMING_SSE_HEARTBEAT_MS);
+  };
+
+  const assertBettingAuth = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<boolean> => {
+    const requiredToken = process.env.STREAMING_VIEWER_ACCESS_TOKEN?.trim();
+    if (!requiredToken) {
+      return true;
+    }
+
+    const headerToken = (() => {
+      const authHeader = request.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+      return authHeader.slice(7).trim();
+    })();
+    const requestQuery = request.query as {
+      token?: string;
+      streamToken?: string;
+    };
+    const queryToken =
+      requestQuery.token?.trim() || requestQuery.streamToken?.trim() || null;
+    const token = headerToken || queryToken;
+
+    if (token === requiredToken) {
+      return true;
+    }
+
+    reply.status(401).send({
+      error: "Unauthorized",
+      message: "Missing or invalid betting feed token",
+    });
+    return false;
+  };
+
+  const buildBettingBootstrapResponse = (frame: BettingFeedFrame | null) => ({
+    ...(frame?.payload ??
+      buildBettingFeedPayload({
+        sourceEpoch: bettingSourceEpoch,
+        seq: bettingSequence,
+        emittedAt: Date.now(),
+        cycle: null,
+      })),
+    schemaVersion: BETTING_FEED_SCHEMA_VERSION,
+    sourceEpoch: bettingSourceEpoch,
+    seq: frame?.seq ?? bettingSequence,
+    emittedAt: frame?.emittedAt ?? Date.now(),
+    replay: {
+      sourceEpoch: bettingSourceEpoch,
+      latestSeq: bettingReplayFrames[bettingReplayFrames.length - 1]?.seq ?? null,
+      oldestSeq: bettingReplayFrames[0]?.seq ?? null,
+      bufferedFrames: bettingReplayFrames.length,
+      bufferedBytes: bettingReplayFramesTotalBytes,
+      lastBroadcastSeq: lastBettingBroadcastSeq,
+    },
+  });
+
   fastify.addHook("onClose", (_instance, done) => {
     if (statePushInterval) {
       clearInterval(statePushInterval);
@@ -536,8 +811,12 @@ export function registerStreamingRoutes(
       clearInterval(heartbeatInterval);
       heartbeatInterval = null;
     }
+    clearBettingLoops();
     for (const clientId of [...sseClients.keys()]) {
       removeSseClient(clientId, "shutdown");
+    }
+    for (const clientId of [...bettingClients.keys()]) {
+      removeBettingClient(clientId);
     }
     done();
   });
@@ -625,6 +904,21 @@ export function registerStreamingRoutes(
             maxDurationMs: sseMetrics.maxFanoutDurationMs,
             batchesOver50Ms: sseMetrics.fanoutOver50Ms,
             batchesOver100Ms: sseMetrics.fanoutOver100Ms,
+          },
+        },
+        betting: {
+          schemaVersion: BETTING_FEED_SCHEMA_VERSION,
+          sourceEpoch: bettingSourceEpoch,
+          clients: {
+            connected: bettingClients.size,
+          },
+          replay: {
+            size: bettingReplayFrames.length,
+            totalBytes: bettingReplayFramesTotalBytes,
+            oldestSeq: bettingReplayFrames[0]?.seq ?? null,
+            latestSeq:
+              bettingReplayFrames[bettingReplayFrames.length - 1]?.seq ?? null,
+            lastBroadcastSeq: lastBettingBroadcastSeq,
           },
         },
       });
@@ -755,6 +1049,156 @@ export function registerStreamingRoutes(
       startSseLoopsIfNeeded();
     },
   );
+
+  const handleBettingBootstrap = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    if (!(await assertBettingAuth(request, reply))) {
+      return;
+    }
+
+    const scheduler = getStreamingDuelScheduler();
+    if (!scheduler) {
+      return reply.status(503).send({
+        error: "Streaming mode not active",
+        message: "The streaming duel scheduler is not running",
+      });
+    }
+
+    await ensureBettingSourceEpoch();
+    if (bettingReplayFrames.length === 0) {
+      captureBettingFrame(true);
+    }
+
+    return reply.send(
+      buildBettingBootstrapResponse(
+        bettingReplayFrames[bettingReplayFrames.length - 1] ?? null,
+      ),
+    );
+  };
+
+  const handleBettingEvents = async (
+    request: FastifyRequest<{ Querystring: { since?: string } }>,
+    reply: FastifyReply,
+  ) => {
+    if (!(await assertBettingAuth(request, reply))) {
+      return;
+    }
+
+    const scheduler = getStreamingDuelScheduler();
+    if (!scheduler) {
+      return reply.status(503).send({
+        error: "Streaming mode not active",
+        message: "The streaming duel scheduler is not running",
+      });
+    }
+
+    await ensureBettingSourceEpoch();
+    if (bettingReplayFrames.length === 0) {
+      captureBettingFrame(true);
+    }
+
+    const raw = reply.raw;
+    reply.hijack();
+
+    raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    raw.setHeader("Cache-Control", "no-cache, no-transform");
+    raw.setHeader("Connection", "keep-alive");
+    raw.setHeader("X-Accel-Buffering", "no");
+    raw.setHeader("Access-Control-Allow-Origin", "*");
+    raw.socket?.setNoDelay?.(true);
+    raw.socket?.setKeepAlive?.(true, STREAMING_SSE_HEARTBEAT_MS * 2);
+    raw.flushHeaders?.();
+    raw.write("retry: 2000\n\n");
+
+    const clientId = nextClientId++;
+    bettingClients.set(clientId, reply);
+
+    const headerLastEventId = request.headers["last-event-id"];
+    const normalizedHeaderId = Array.isArray(headerLastEventId)
+      ? headerLastEventId[0]
+      : headerLastEventId;
+    const querySince = Number.parseInt(request.query.since || "", 10);
+    const headerSince = Number.parseInt(normalizedHeaderId || "", 10);
+    const lastSeenSeq = Number.isFinite(querySince)
+      ? querySince
+      : Number.isFinite(headerSince)
+        ? headerSince
+        : 0;
+
+    const delivery = selectReplayDelivery(bettingReplayFrames, lastSeenSeq);
+    if (delivery.mode === "reset") {
+      const status = writeSseEvent(
+        reply,
+        "reset",
+        JSON.stringify(delivery.latestFrame.payload),
+        delivery.latestFrame.seq,
+      );
+      if (status !== "ok") {
+        removeBettingClient(clientId);
+        return;
+      }
+    } else if (delivery.frames.length > 0) {
+      for (const frame of delivery.frames) {
+        const status = writeSseEvent(
+          reply,
+          "betting",
+          JSON.stringify(frame.payload),
+          frame.seq,
+        );
+        if (status !== "ok") {
+          removeBettingClient(clientId);
+          return;
+        }
+      }
+    } else if (delivery.latestFrame) {
+      const status = writeSseEvent(
+        reply,
+        "betting",
+        JSON.stringify(delivery.latestFrame.payload),
+        delivery.latestFrame.seq,
+      );
+      if (status !== "ok") {
+        removeBettingClient(clientId);
+        return;
+      }
+    }
+
+    request.raw.on("close", () => {
+      removeBettingClient(clientId);
+    });
+
+    startBettingLoopsIfNeeded();
+  };
+
+  for (const route of [
+    "/api/streaming/betting/bootstrap",
+    "/api/internal/bet-sync/state",
+  ]) {
+    fastify.get(
+      route,
+      {
+        config: { rateLimit: false },
+      },
+      handleBettingBootstrap,
+    );
+  }
+
+  for (const route of [
+    "/api/streaming/betting/events",
+    "/api/internal/bet-sync/events",
+  ]) {
+    fastify.get<{
+      Querystring: { since?: string };
+    }>(
+      route,
+      {
+        config: { rateLimit: false },
+      },
+      handleBettingEvents,
+    );
+  }
 
   // Get enriched duel context (state + inventories + internal monologues)
   fastify.get(

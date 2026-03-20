@@ -75,6 +75,22 @@ export interface LeaderboardEntry {
   currentStreak: number;
 }
 
+export function shouldDismissStreamingLoading(params: {
+  connected: boolean;
+  worldReady: boolean;
+  terrainReady: boolean;
+  hasStreamingState: boolean;
+  needsCameraLock: boolean;
+  cameraLocked: boolean;
+}): boolean {
+  return (
+    params.connected &&
+    params.terrainReady &&
+    (params.worldReady || params.hasStreamingState) &&
+    (!params.needsCameraLock || params.cameraLocked)
+  );
+}
+
 export function StreamingMode() {
   const [streamingState, setStreamingState] = useState<StreamingState | null>(
     null,
@@ -210,6 +226,13 @@ export function StreamingMode() {
         // the loading screen can dismiss.  After that, ClientCameraSystem
         // handles all target switches via its own streaming:state:update
         // subscription with smooth cinematic transitions — no loading screen.
+        if (!worldReady) {
+          setWorldReady(true);
+          if (worldReadyTimeoutRef.current) {
+            clearTimeout(worldReadyTimeoutRef.current);
+            worldReadyTimeoutRef.current = null;
+          }
+        }
         if (
           state.cameraTarget &&
           state.cameraTarget !== lastCameraTargetRef.current
@@ -779,11 +802,14 @@ export function StreamingMode() {
   // ready for the first time, we fade out and never show it again — camera
   // target switches are handled seamlessly by ClientCameraSystem.
   const needsCameraLock = Boolean(streamingState?.cameraTarget);
-  const isInitiallyReady =
-    connected &&
-    worldReady &&
-    terrainReady &&
-    (!needsCameraLock || cameraLocked);
+  const isInitiallyReady = shouldDismissStreamingLoading({
+    connected,
+    worldReady,
+    terrainReady,
+    hasStreamingState: streamingState !== null,
+    needsCameraLock,
+    cameraLocked,
+  });
 
   useEffect(() => {
     (
@@ -842,7 +868,13 @@ export function StreamingMode() {
             pointerEvents: fadingOut ? "none" : "auto",
           }}
         >
-          <LoadingScreen world={worldRef.current} message={loadingHeadline} />
+          {/* Stream mode uses a friendlier completion stage so hidden loading text
+              does not linger on "Finalizing..." during the fade-out window. */}
+          <LoadingScreen
+            world={worldRef.current}
+            message={loadingHeadline}
+            completionStage="Ready to stream..."
+          />
         </div>
       )}
       {showLoading && !worldRef.current && (
