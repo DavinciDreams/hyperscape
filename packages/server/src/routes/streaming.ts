@@ -36,7 +36,15 @@ import {
   type BettingFeedRendererHealth,
   type BettingFeedFrame,
 } from "./streaming-betting-feed.js";
-import { hasValidBettingFeedToken } from "./streaming-betting-auth.js";
+import {
+  extractBettingFeedToken,
+  hasValidBettingFeedToken,
+} from "./streaming-betting-auth.js";
+import {
+  deriveStreamingGuardrailReason,
+  isActiveStreamingGuardrailPhase,
+  type StreamingGuardrailPhase,
+} from "../../../shared/src/utils/rendering/streamingGuardrails";
 
 type InventorySnapshotItem = {
   slot: number;
@@ -68,7 +76,10 @@ type SseDropReason =
 
 const STREAMING_SSE_REPLAY_BUFFER = Math.max(
   128,
-  Number.parseInt(process.env.STREAMING_SSE_REPLAY_BUFFER || "2048", 10),
+  Math.min(
+    8192,
+    Number.parseInt(process.env.STREAMING_SSE_REPLAY_BUFFER || "2048", 10),
+  ),
 );
 const STREAMING_SSE_PUSH_INTERVAL_MS = Math.max(
   250,
@@ -80,13 +91,33 @@ const STREAMING_SSE_HEARTBEAT_MS = Math.max(
 );
 const STREAMING_SSE_MAX_PENDING_BYTES = Math.max(
   128 * 1024,
-  Number.parseInt(process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576", 10),
+  Math.min(
+    16 * 1024 * 1024,
+    Number.parseInt(process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576", 10),
+  ),
 );
 const STREAMING_SSE_REPLAY_MAX_BYTES = Math.max(
   512 * 1024,
-  Number.parseInt(
-    process.env.STREAMING_SSE_REPLAY_MAX_BYTES || `${32 * 1024 * 1024}`,
-    10,
+  Math.min(
+    64 * 1024 * 1024,
+    Number.parseInt(
+      process.env.STREAMING_SSE_REPLAY_MAX_BYTES || `${32 * 1024 * 1024}`,
+      10,
+    ),
+  ),
+);
+const STREAMING_SSE_MAX_CLIENTS = Math.max(
+  4,
+  Math.min(
+    256,
+    Number.parseInt(process.env.STREAMING_SSE_MAX_CLIENTS || "64", 10),
+  ),
+);
+const BETTING_SSE_MAX_CLIENTS = Math.max(
+  4,
+  Math.min(
+    128,
+    Number.parseInt(process.env.BETTING_SSE_MAX_CLIENTS || "32", 10),
   ),
 );
 const EXTERNAL_RTMP_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
@@ -119,70 +150,32 @@ function normalizeRendererHealthSnapshot(
   };
 }
 
-function isFinitePositionTriplet(value: unknown): value is [number, number, number] {
-  return (
-    Array.isArray(value) &&
-    value.length === 3 &&
-    value.every((entry) => typeof entry === "number" && Number.isFinite(entry))
-  );
-}
-
-function isActiveStreamingPhase(
-  phase: StreamingPhase | null | undefined,
-): boolean {
-  return Boolean(phase && phase !== "IDLE");
-}
-
-function requiresArenaPositions(
-  phase: StreamingPhase | null | undefined,
-): boolean {
-  return phase === "COUNTDOWN" || phase === "FIGHTING" || phase === "RESOLUTION";
-}
-
 function deriveCycleGuardrailReason(
   cycle: StreamingDuelCycle | null,
 ): string | null {
-  if (!cycle || !isActiveStreamingPhase(cycle.phase)) {
+  if (!cycle) {
     return null;
   }
-
-  if (!cycle.agent1 || !cycle.agent2) {
-    return "agents_missing";
-  }
-
-  const agents = [cycle.agent1, cycle.agent2];
-  for (const agent of agents) {
-    if (!agent.characterId?.trim() || !agent.name?.trim()) {
-      return "agents_missing";
-    }
-    if (
-      !Number.isFinite(agent.maxHp) ||
-      agent.maxHp <= 0 ||
-      !Number.isFinite(agent.currentHp) ||
-      agent.currentHp < 0 ||
-      agent.currentHp > agent.maxHp
-    ) {
-      return "invalid_agent_hp";
-    }
-  }
-
-  if (requiresArenaPositions(cycle.phase)) {
-    const positions = cycle.arenaPositions;
-    if (
-      !positions ||
-      !isFinitePositionTriplet(positions.agent1) ||
-      !isFinitePositionTriplet(positions.agent2)
-    ) {
-      return "arena_positions_invalid";
-    }
-    if (
-      positions.agent1.every((value, index) => value === positions.agent2[index])
-    ) {
-      return "arena_positions_invalid";
-    }
-  }
-
-  return null;
+  return deriveStreamingGuardrailReason({
+    phase: cycle.phase as StreamingGuardrailPhase | null | undefined,
+    agent1: cycle.agent1
+      ? {
+          id: cycle.agent1.characterId,
+          name: cycle.agent1.name,
+          hp: cycle.agent1.currentHp,
+          maxHp: cycle.agent1.maxHp,
+        }
+      : null,
+    agent2: cycle.agent2
+      ? {
+          id: cycle.agent2.characterId,
+          name: cycle.agent2.name,
+          hp: cycle.agent2.currentHp,
+          maxHp: cycle.agent2.maxHp,
+        }
+      : null,
+    arenaPositions: cycle.arenaPositions,
+  });
 }
 
 function readExternalRtmpStatusSnapshot(): Record<string, unknown> | null {
@@ -246,7 +239,7 @@ function deriveBettingRendererHealth(
   }
 
   const captureStats = getStreamCapture().getStats();
-  if (isActiveStreamingPhase(cycle?.phase)) {
+  if (isActiveStreamingGuardrailPhase(cycle?.phase as StreamingGuardrailPhase)) {
     if (!captureStats.clientConnected) {
       return {
         ready: false,
@@ -329,6 +322,14 @@ export function registerStreamingRoutes(
   fastify: FastifyInstance,
   world: World,
 ): void {
+  if (
+    process.env.NODE_ENV === "production" &&
+    !process.env.STREAMING_VIEWER_ACCESS_TOKEN?.trim()
+  ) {
+    fastify.log.warn(
+      "STREAMING_VIEWER_ACCESS_TOKEN is unset in production; internal betting feed auth is disabled",
+    );
+  }
   const sseClients = new Map<number, FastifyReply>();
   const replayFrames: StreamingSseFrame[] = [];
   let replayFramesTotalBytes = 0;
@@ -473,6 +474,29 @@ export function registerStreamingRoutes(
           batches;
     if (durationMs >= 50) sseMetrics.fanoutOver50Ms += 1;
     if (durationMs >= 100) sseMetrics.fanoutOver100Ms += 1;
+  };
+
+  const trimReplayFrames = <T extends { payloadBytes: number }>(
+    frames: T[],
+    totalBytes: number,
+  ): number => {
+    let removeCount = 0;
+    let removedBytes = 0;
+    while (
+      frames.length - removeCount > STREAMING_SSE_REPLAY_BUFFER ||
+      totalBytes - removedBytes > STREAMING_SSE_REPLAY_MAX_BYTES
+    ) {
+      const frame = frames[removeCount];
+      if (!frame) break;
+      removedBytes += frame.payloadBytes;
+      removeCount += 1;
+    }
+
+    if (removeCount > 0) {
+      frames.splice(0, removeCount);
+    }
+
+    return Math.max(0, totalBytes - removedBytes);
   };
 
   const pushFrame = (event: string, frame: StreamingSseFrame): void => {
@@ -654,17 +678,10 @@ export function registerStreamingRoutes(
     replayFramesTotalBytes += frame.payloadBytes;
     sseMetrics.generatedFrames += 1;
 
-    while (
-      replayFrames.length > STREAMING_SSE_REPLAY_BUFFER ||
-      replayFramesTotalBytes > STREAMING_SSE_REPLAY_MAX_BYTES
-    ) {
-      const removed = replayFrames.shift();
-      if (!removed) break;
-      replayFramesTotalBytes = Math.max(
-        0,
-        replayFramesTotalBytes - removed.payloadBytes,
-      );
-    }
+    replayFramesTotalBytes = trimReplayFrames(
+      replayFrames,
+      replayFramesTotalBytes,
+    );
 
     return frame;
   };
@@ -853,17 +870,10 @@ export function registerStreamingRoutes(
 
     bettingReplayFrames.push(frame);
     bettingReplayFramesTotalBytes += frame.payloadBytes;
-    while (
-      bettingReplayFrames.length > STREAMING_SSE_REPLAY_BUFFER ||
-      bettingReplayFramesTotalBytes > STREAMING_SSE_REPLAY_MAX_BYTES
-    ) {
-      const removed = bettingReplayFrames.shift();
-      if (!removed) break;
-      bettingReplayFramesTotalBytes = Math.max(
-        0,
-        bettingReplayFramesTotalBytes - removed.payloadBytes,
-      );
-    }
+    bettingReplayFramesTotalBytes = trimReplayFrames(
+      bettingReplayFrames,
+      bettingReplayFramesTotalBytes,
+    );
 
     return frame;
   };
@@ -908,24 +918,21 @@ export function registerStreamingRoutes(
   const assertBettingAuth = async (
     request: FastifyRequest,
     reply: FastifyReply,
+    options?: { allowQueryToken?: boolean },
   ): Promise<boolean> => {
     const requiredToken = process.env.STREAMING_VIEWER_ACCESS_TOKEN?.trim();
     if (!requiredToken) {
       return true;
     }
 
-    const headerToken = (() => {
-      const authHeader = request.headers.authorization;
-      if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-      return authHeader.slice(7).trim();
-    })();
     const requestQuery = request.query as {
-      token?: string;
       streamToken?: string;
     };
-    const queryToken =
-      requestQuery.token?.trim() || requestQuery.streamToken?.trim() || null;
-    const token = headerToken || queryToken;
+    const token = extractBettingFeedToken({
+      authorizationHeader: request.headers.authorization,
+      streamToken: requestQuery.streamToken?.trim() || null,
+      allowQueryToken: options?.allowQueryToken,
+    });
 
     if (hasValidBettingFeedToken(requiredToken, token)) {
       return true;
@@ -1093,6 +1100,13 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (request, reply) => {
+      if (sseClients.size >= STREAMING_SSE_MAX_CLIENTS) {
+        return reply.status(503).send({
+          error: "Streaming SSE capacity reached",
+          message: "Too many concurrent streaming SSE clients",
+        });
+      }
+
       const raw = reply.raw;
       reply.hijack();
 
@@ -1213,7 +1227,7 @@ export function registerStreamingRoutes(
     request: FastifyRequest,
     reply: FastifyReply,
   ) => {
-    if (!(await assertBettingAuth(request, reply))) {
+    if (!(await assertBettingAuth(request, reply, { allowQueryToken: false }))) {
       return;
     }
 
@@ -1241,7 +1255,7 @@ export function registerStreamingRoutes(
     request: FastifyRequest<{ Querystring: { since?: string } }>,
     reply: FastifyReply,
   ) => {
-    if (!(await assertBettingAuth(request, reply))) {
+    if (!(await assertBettingAuth(request, reply, { allowQueryToken: true }))) {
       return;
     }
 
@@ -1256,6 +1270,13 @@ export function registerStreamingRoutes(
     await ensureBettingSourceEpoch();
     if (bettingReplayFrames.length === 0) {
       captureBettingFrame(true);
+    }
+
+    if (bettingClients.size >= BETTING_SSE_MAX_CLIENTS) {
+      return reply.status(503).send({
+        error: "Bet sync SSE capacity reached",
+        message: "Too many concurrent betting SSE clients",
+      });
     }
 
     const raw = reply.raw;

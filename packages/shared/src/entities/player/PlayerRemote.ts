@@ -135,6 +135,13 @@ const FALLBACK_PLAYER_PALETTE = [
 
 const fallbackHeadGeometry = new THREE.SphereGeometry(0.28, 16, 16);
 const fallbackBeaconGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1.1, 8);
+const OWNED_FALLBACK_GEOMETRY_KEY = "__hyperscapeOwnedFallbackGeometry";
+
+function cloneFallbackGeometry<T extends THREE.BufferGeometry>(geometry: T): T {
+  const clone = geometry.clone();
+  clone.userData[OWNED_FALLBACK_GEOMETRY_KEY] = true;
+  return clone;
+}
 
 function fallbackPlayerColorSeed(id: string): number {
   let seed = 0;
@@ -658,7 +665,9 @@ export class PlayerRemote extends Entity implements HotReloadable {
       if (!(child instanceof THREE.Mesh)) {
         return;
       }
-      child.geometry.dispose();
+      if (child.geometry.userData[OWNED_FALLBACK_GEOMETRY_KEY] === true) {
+        child.geometry.dispose();
+      }
       if (Array.isArray(child.material)) {
         child.material.forEach((material) => material.dispose());
         return;
@@ -689,17 +698,20 @@ export class PlayerRemote extends Entity implements HotReloadable {
     const headMaterial = new MeshBasicNodeMaterial();
     headMaterial.color = accentColor;
 
-    const body = new THREE.Mesh(capsuleGeometry.clone(), bodyMaterial);
+    const body = new THREE.Mesh(cloneFallbackGeometry(capsuleGeometry), bodyMaterial);
     body.name = `PlayerRemoteFallbackBody_${this.id}`;
     body.scale.setScalar(1.45);
 
-    const head = new THREE.Mesh(fallbackHeadGeometry.clone(), headMaterial);
+    const head = new THREE.Mesh(cloneFallbackGeometry(fallbackHeadGeometry), headMaterial);
     head.name = `PlayerRemoteFallbackHead_${this.id}`;
     head.position.y = 2.15;
 
     const beaconMaterial = new MeshBasicNodeMaterial();
     beaconMaterial.color = accentColor;
-    const beacon = new THREE.Mesh(fallbackBeaconGeometry.clone(), beaconMaterial);
+    const beacon = new THREE.Mesh(
+      cloneFallbackGeometry(fallbackBeaconGeometry),
+      beaconMaterial,
+    );
     beacon.name = `PlayerRemoteFallbackBeacon_${this.id}`;
     beacon.position.y = 3.05;
 

@@ -228,4 +228,23 @@ describe("DuelBettingBridge streaming reconciliation", () => {
     expect(bridge.getMarket("duel-123")).toBeNull();
     expect(bridge.getMarketHistory()).toHaveLength(1);
   });
+
+  it("resets reconcileInFlight even when a reconcile pass throws", async () => {
+    const cycle = makeCycle();
+    getStreamingDuelSchedulerMock.mockReturnValue({
+      getCurrentCycle: () => cycle,
+    });
+
+    const createOrSyncMarket = vi
+      .spyOn(bridge as never, "createOrSyncMarket" as never)
+      .mockRejectedValueOnce(new Error("boom"));
+
+    await expect((bridge as any).reconcileLiveCycle()).rejects.toThrow("boom");
+    expect((bridge as any).reconcileInFlight).toBe(false);
+
+    createOrSyncMarket.mockRestore();
+
+    await (bridge as any).reconcileLiveCycle();
+    expect(bridge.getMarket("duel-123")).not.toBeNull();
+  });
 });

@@ -1,4 +1,35 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
+
+type BettingFeedTokenParams = {
+  authorizationHeader?: string | string[];
+  streamToken?: string | null;
+  allowQueryToken?: boolean;
+};
+
+function digestToken(token: string): Buffer {
+  return createHash("sha256").update(token, "utf8").digest();
+}
+
+export function extractBettingFeedToken(
+  params: BettingFeedTokenParams,
+): string | null {
+  const authHeader = Array.isArray(params.authorizationHeader)
+    ? params.authorizationHeader[0]
+    : params.authorizationHeader;
+  const headerToken =
+    authHeader && /^Bearer\s+/i.test(authHeader)
+      ? authHeader.replace(/^Bearer\s+/i, "").trim()
+      : null;
+  if (headerToken) {
+    return headerToken;
+  }
+
+  if (!params.allowQueryToken) {
+    return null;
+  }
+
+  return params.streamToken?.trim() || null;
+}
 
 export function hasValidBettingFeedToken(
   requiredToken: string,
@@ -10,11 +41,5 @@ export function hasValidBettingFeedToken(
     return false;
   }
 
-  const expectedBytes = Buffer.from(expected, "utf8");
-  const presentedBytes = Buffer.from(presented, "utf8");
-  if (expectedBytes.length !== presentedBytes.length) {
-    return false;
-  }
-
-  return timingSafeEqual(expectedBytes, presentedBytes);
+  return timingSafeEqual(digestToken(expected), digestToken(presented));
 }

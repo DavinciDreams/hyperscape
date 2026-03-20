@@ -23,6 +23,8 @@ interface GameClientProps {
   onInitError?: (error: string | null) => void;
   /** Hide standard game UI (for streaming/spectator modes) */
   hideUI?: boolean;
+  /** Use streaming-mode environment simplifications */
+  streamingMode?: boolean;
 }
 
 type PublicRuntimeEnv = {
@@ -199,6 +201,7 @@ export function GameClient({
   onSetup,
   onInitError,
   hideUI = false,
+  streamingMode = false,
 }: GameClientProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const uiRef = useRef<HTMLDivElement>(null);
@@ -369,7 +372,7 @@ export function GameClient({
       }
 
       const baseEnvironment = {
-        ...(hideUI
+        ...(streamingMode
           ? {}
           : {
               bg: "asset://world/day2-2k.jpg",
@@ -415,8 +418,8 @@ export function GameClient({
       await world.systemsLoadedPromise;
 
       try {
-        onInitError?.(null);
         await world.init(config);
+        onInitError?.(null);
       } catch (error) {
         const message =
           error instanceof Error
@@ -474,7 +477,7 @@ export function GameClient({
         }
       }
     };
-  }, [hideUI, onInitError, onSetup, world, wsUrl]);
+  }, [hideUI, onInitError, onSetup, streamingMode, world, wsUrl]);
 
   // Show full-screen error for critical initialization failures (WebGPU, etc.)
   if (initError) {

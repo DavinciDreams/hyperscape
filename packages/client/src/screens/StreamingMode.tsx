@@ -19,10 +19,14 @@ import React, {
 import { GameClient } from "./GameClient";
 import { LoadingScreen } from "./LoadingScreen";
 import { StreamingOverlay } from "../components/streaming/StreamingOverlay";
-import type { World } from "@hyperscape/shared";
-import type { Entity } from "@hyperscape/shared";
+import type { World, Entity } from "@hyperscape/shared";
 import { EventType } from "@hyperscape/shared";
 import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
+import {
+  deriveStreamingGuardrailReason,
+  type StreamingGuardrailAgentSnapshot,
+  type StreamingGuardrailPhase,
+} from "../../../shared/src/utils/rendering/streamingGuardrails";
 
 /** Streaming state from server */
 export interface StreamingState {
@@ -88,43 +92,43 @@ export interface StreamingRendererHealth {
   phase: StreamingState["cycle"]["phase"] | null;
 }
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+function toGuardrailAgent(
+  agent: AgentInfo | null,
+): StreamingGuardrailAgentSnapshot | null {
+  if (!agent) return null;
+  return {
+    id: agent.id,
+    name: agent.name,
+    hp: agent.hp,
+    maxHp: agent.maxHp,
+  };
 }
 
-function isActiveStreamingPhase(
-  phase: StreamingState["cycle"]["phase"] | null,
-): boolean {
-  return Boolean(phase && phase !== "IDLE");
+function getStreamingAccessToken(): string | null {
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return (
+    hashParams.get("streamToken")?.trim() ||
+    searchParams.get("streamToken")?.trim() ||
+    null
+  );
 }
 
-function requiresArenaPositions(
-  phase: StreamingState["cycle"]["phase"] | null,
-): boolean {
-  return phase === "COUNTDOWN" || phase === "FIGHTING" || phase === "RESOLUTION";
-}
+function scrubStreamingAccessTokenFromUrl(): void {
+  const currentUrl = new URL(window.location.href);
+  const searchHadToken = currentUrl.searchParams.has("streamToken");
+  const hashParams = new URLSearchParams(currentUrl.hash.replace(/^#/, ""));
+  const hashHadToken = hashParams.has("streamToken");
 
-function hasValidAgentSnapshot(agent: AgentInfo | null): boolean {
-  if (!agent) return false;
-  if (!agent.id?.trim() || !agent.name?.trim()) return false;
-  if (!isFiniteNumber(agent.maxHp) || agent.maxHp <= 0) return false;
-  if (!isFiniteNumber(agent.hp) || agent.hp < 0 || agent.hp > agent.maxHp) {
-    return false;
+  if (!searchHadToken && !hashHadToken) {
+    return;
   }
-  return true;
-}
 
-function hasValidArenaPositions(
-  arenaPositions: StreamingState["cycle"]["arenaPositions"] | null | undefined,
-): boolean {
-  if (!arenaPositions) return false;
-  const { agent1, agent2 } = arenaPositions;
-  if (!Array.isArray(agent1) || !Array.isArray(agent2)) return false;
-  if (agent1.length !== 3 || agent2.length !== 3) return false;
-  if (![...agent1, ...agent2].every((value) => isFiniteNumber(value))) {
-    return false;
-  }
-  return agent1.some((value, index) => value !== agent2[index]);
+  currentUrl.searchParams.delete("streamToken");
+  hashParams.delete("streamToken");
+  const nextHash = hashParams.toString();
+  const nextUrl = `${currentUrl.pathname}${currentUrl.search}${nextHash ? `#${nextHash}` : ""}`;
+  window.history.replaceState(window.history.state, "", nextUrl);
 }
 
 export function deriveStreamingRendererHealth(params: {
@@ -141,7 +145,7 @@ export function deriveStreamingRendererHealth(params: {
   agent2: AgentInfo | null;
   arenaPositions: StreamingState["cycle"]["arenaPositions"] | null | undefined;
 }): StreamingRendererHealth {
-  const activePhase = isActiveStreamingPhase(params.phase);
+  const activePhase = Boolean(params.phase && params.phase !== "IDLE");
   let degradedReason: string | null = null;
 
   if (params.initError?.trim()) {
@@ -158,20 +162,16 @@ export function deriveStreamingRendererHealth(params: {
     degradedReason = "terrain_not_ready";
   } else if (params.needsCameraLock && !params.cameraLocked) {
     degradedReason = "camera_target_unresolved";
-  } else if (activePhase && (!params.agent1 || !params.agent2)) {
-    degradedReason = "agents_missing";
-  } else if (
-    activePhase &&
-    (!hasValidAgentSnapshot(params.agent1) ||
-      !hasValidAgentSnapshot(params.agent2))
-  ) {
-    degradedReason = "invalid_agent_hp";
-  } else if (
-    requiresArenaPositions(params.phase) &&
-    !hasValidArenaPositions(params.arenaPositions)
-  ) {
-    degradedReason = "arena_positions_invalid";
-  } else if (!params.loadingDismissed) {
+  } else {
+    degradedReason = deriveStreamingGuardrailReason({
+      phase: params.phase as StreamingGuardrailPhase | null,
+      agent1: toGuardrailAgent(params.agent1),
+      agent2: toGuardrailAgent(params.agent2),
+      arenaPositions: params.arenaPositions,
+    });
+  }
+
+  if (!degradedReason && !params.loadingDismissed) {
     degradedReason = activePhase ? "loading_overlay_active" : "initializing";
   }
 
@@ -221,20 +221,24 @@ export function StreamingMode() {
   );
   const cameraRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const worldListenerCleanupRef = useRef<(() => void) | null>(null);
+  const [streamAccessToken] = useState<string | null>(() =>
+    getStreamingAccessToken(),
+  );
 
   // WebSocket URL for streaming mode (supports optional streamToken gate)
-  const wsUrl = (() => {
-    const streamToken = new URLSearchParams(window.location.search).get(
-      "streamToken",
-    );
+  const wsUrl = useMemo(() => {
     const baseWsUrl = GAME_WS_URL || "ws://localhost:5555/ws";
     const url = new URL(baseWsUrl, window.location.href);
     url.searchParams.set("mode", "streaming");
-    if (streamToken) {
-      url.searchParams.set("streamToken", streamToken);
+    if (streamAccessToken) {
+      url.searchParams.set("streamToken", streamAccessToken);
     }
     return url.toString();
-  })();
+  }, [streamAccessToken]);
+
+  useEffect(() => {
+    scrubStreamingAccessTokenFromUrl();
+  }, []);
 
   const clearTerrainPolling = useCallback(() => {
     if (terrainPollRef.current) {
@@ -562,9 +566,6 @@ export function StreamingMode() {
     ).toLowerCase();
     const disableBridgeCapture = ["1", "true", "yes", "on"].includes(
       disableBridgeCaptureValue,
-    );
-    const hasExternalStreamToken = Boolean(
-      (searchParams.get("streamToken") || "").trim(),
     );
     const internalCaptureValue = (
       searchParams.get("internalCapture") || ""
@@ -1009,6 +1010,7 @@ export function StreamingMode() {
         onSetup={handleSetup}
         onInitError={setClientInitError}
         hideUI={true}
+        streamingMode={true}
       />
 
       {/* Streaming overlay (on top of game) */}

@@ -37,7 +37,7 @@
  *   PUMPFUN_RTMP_URL         - Pump.fun RTMP URL
  *   X_RTMP_URL               - X/Twitter RTMP URL
  *   RTMP_DESTINATIONS_JSON   - JSON array fanout config
- *   STREAMING_VIEWER_ACCESS_TOKEN - Optional token appended as streamToken for gated viewer WS
+ *   STREAMING_VIEWER_ACCESS_TOKEN - Optional token appended as #streamToken for gated viewer WS bootstrap
  *   GAME_URL                 - URL to Hyperscape (default: http://localhost:3333/?page=stream)
  *   GAME_FALLBACK_URLS       - Comma-separated fallback URLs
  *   RTMP_BRIDGE_PORT         - WebSocket port for legacy bridge (default: 8765)
@@ -78,10 +78,12 @@ function withViewerAccessToken(rawUrl: string): string {
   if (!STREAMING_VIEWER_ACCESS_TOKEN) return rawUrl;
   try {
     const url = new URL(rawUrl);
-    url.searchParams.set("streamToken", STREAMING_VIEWER_ACCESS_TOKEN);
+    const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
+    hashParams.set("streamToken", STREAMING_VIEWER_ACCESS_TOKEN);
+    url.hash = hashParams.toString();
     return url.toString();
   } catch {
-    const separator = rawUrl.includes("?") ? "&" : "?";
+    const separator = rawUrl.includes("#") ? "&" : "#";
     return `${rawUrl}${separator}streamToken=${encodeURIComponent(STREAMING_VIEWER_ACCESS_TOKEN)}`;
   }
 }

@@ -31,6 +31,32 @@ describe("shouldDismissStreamingLoading", () => {
     ).toBe(false);
   });
 
+  it("keeps the overlay up while disconnected", () => {
+    expect(
+      shouldDismissStreamingLoading({
+        connected: false,
+        worldReady: true,
+        terrainReady: true,
+        hasStreamingState: true,
+        needsCameraLock: false,
+        cameraLocked: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the overlay up until terrain is ready", () => {
+    expect(
+      shouldDismissStreamingLoading({
+        connected: true,
+        worldReady: true,
+        terrainReady: false,
+        hasStreamingState: true,
+        needsCameraLock: false,
+        cameraLocked: false,
+      }),
+    ).toBe(false);
+  });
+
   it("marks a live duel as degraded while the loading overlay is still visible", () => {
     expect(
       deriveStreamingRendererHealth({

@@ -1012,6 +1012,7 @@ export function EmbeddedGameClient() {
         wsUrl={wsUrl}
         onSetup={handleSetup}
         hideUI={config.mode === "spectator"}
+        streamingMode={config.mode === "spectator"}
       />
       {showLoading && worldRef.current && (
         <div style={{ zIndex: 100, position: "absolute", inset: 0 }}>

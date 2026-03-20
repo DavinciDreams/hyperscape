@@ -783,14 +783,16 @@ export class DuelBettingBridge {
     if (!data.winnerId || !data.loserId) {
       return;
     }
+    const winnerId = data.winnerId;
+    const loserId = data.loserId;
 
     // Find the market by matching winner/loser to agents
     let market: DuelMarket | null = null;
 
     for (const m of this.activeMarkets.values()) {
       if (
-        (m.agent1Id === data.winnerId && m.agent2Id === data.loserId) ||
-        (m.agent1Id === data.loserId && m.agent2Id === data.winnerId)
+        (m.agent1Id === winnerId && m.agent2Id === loserId) ||
+        (m.agent1Id === loserId && m.agent2Id === winnerId)
       ) {
         market = m;
         break;
@@ -803,8 +805,8 @@ export class DuelBettingBridge {
     }
 
     void this.resolveMarket(market, {
-      winnerId: data.winnerId!,
-      loserId: data.loserId!,
+      winnerId,
+      loserId,
       winnerName: data.winnerName || "Unknown",
       loserName: data.loserName || "Unknown",
       duration: data.duration,

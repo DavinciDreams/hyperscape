@@ -180,6 +180,18 @@ export {
 
 // Export ID generation utilities (for transaction tracking, etc.)
 export { generateTransactionId } from "./utils/IdGenerator";
+export {
+  deriveStreamingGuardrailReason,
+  hasValidStreamingGuardrailAgentSnapshot,
+  hasValidStreamingGuardrailArenaPositions,
+  isActiveStreamingGuardrailPhase,
+  requiresStreamingArenaPositions,
+} from "./utils/rendering/streamingGuardrails";
+export type {
+  StreamingGuardrailAgentSnapshot,
+  StreamingGuardrailArenaPositions,
+  StreamingGuardrailPhase,
+} from "./utils/rendering/streamingGuardrails";
 
 // Export SeededRandom and game RNG utilities (OSRS-accurate deterministic RNG)
 export {
