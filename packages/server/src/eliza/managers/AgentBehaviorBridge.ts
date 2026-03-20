@@ -309,6 +309,7 @@ export class AgentBehaviorBridge {
     return new Promise<void>((resolve) => {
       const onReady = (msg: WorkerToMainMessage) => {
         if (msg.type === "ready") {
+          this.worker?.off("message", onReady);
           this.workerReady = true;
           resolve();
         }
@@ -320,6 +321,7 @@ export class AgentBehaviorBridge {
       // Timeout after 5s
       setTimeout(() => {
         if (!this.workerReady) {
+          this.worker?.off("message", onReady);
           console.error(
             "[AgentBehaviorBridge] Worker did not send ready in 5s",
           );
@@ -563,6 +565,15 @@ export class AgentBehaviorBridge {
       console.warn(
         `[AgentBridge] Worker round-trip took ${workerMs}ms for ${dueAgents.length} agents`,
       );
+    }
+
+    // If worker timed out (empty results), clear tickInProgress for all
+    // agents that were in this batch so they aren't permanently stuck.
+    if (results.length === 0 && dueAgents.length > 0) {
+      for (const agent of dueAgents) {
+        const schedule = this.schedules.get(agent.characterId);
+        if (schedule) schedule.tickInProgress = false;
+      }
     }
 
     // Apply results on main thread — yield between each to avoid blocking

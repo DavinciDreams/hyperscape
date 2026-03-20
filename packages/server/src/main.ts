@@ -163,7 +163,10 @@ async function startServer() {
     try {
       const { createUwsServer, getUwsApp } =
         await import("./startup/uws-server.js");
-      await createUwsServer(world, config.uwsPort);
+      const listenSocket = await createUwsServer(world, config.uwsPort);
+      if (!listenSocket) {
+        throw new Error(`uWS failed to bind to port ${config.uwsPort}`);
+      }
       // Wire uWS pub/sub to BroadcastManager for native C++ fan-out
       const uwsApp = getUwsApp();
       const net = world.network as unknown as {

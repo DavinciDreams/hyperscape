@@ -80,6 +80,14 @@ export const MODEL_AGENTS: ModelProviderConfig[] = [
     pluginExport: "anthropicPlugin",
   },
   {
+    provider: "openai",
+    model: "gpt-4o",
+    displayName: "GPT-4o",
+    apiKeyEnv: "OPENAI_API_KEY",
+    pluginModule: "@elizaos/plugin-openai",
+    pluginExport: "openaiPlugin",
+  },
+  {
     provider: "groq",
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
     displayName: "Llama 4 Scout",
@@ -94,6 +102,14 @@ export const MODEL_AGENTS: ModelProviderConfig[] = [
     apiKeyEnv: "ANTHROPIC_API_KEY",
     pluginModule: "@elizaos/plugin-anthropic",
     pluginExport: "anthropicPlugin",
+  },
+  {
+    provider: "openai",
+    model: "gpt-4.1",
+    displayName: "GPT-4.1",
+    apiKeyEnv: "OPENAI_API_KEY",
+    pluginModule: "@elizaos/plugin-openai",
+    pluginExport: "openaiPlugin",
   },
   {
     provider: "groq",
@@ -112,6 +128,14 @@ export const MODEL_AGENTS: ModelProviderConfig[] = [
     pluginExport: "anthropicPlugin",
   },
   {
+    provider: "openai",
+    model: "gpt-4o-mini",
+    displayName: "GPT-4o Mini",
+    apiKeyEnv: "OPENAI_API_KEY",
+    pluginModule: "@elizaos/plugin-openai",
+    pluginExport: "openaiPlugin",
+  },
+  {
     provider: "groq",
     model: "llama-3.3-70b-versatile",
     displayName: "Llama 3.3 70B",
@@ -126,6 +150,14 @@ export const MODEL_AGENTS: ModelProviderConfig[] = [
     apiKeyEnv: "ANTHROPIC_API_KEY",
     pluginModule: "@elizaos/plugin-anthropic",
     pluginExport: "anthropicPlugin",
+  },
+  {
+    provider: "openai",
+    model: "o4-mini",
+    displayName: "o4-mini",
+    apiKeyEnv: "OPENAI_API_KEY",
+    pluginModule: "@elizaos/plugin-openai",
+    pluginExport: "openaiPlugin",
   },
   {
     provider: "groq",

@@ -41,13 +41,17 @@ function parseQueryString(qs: string): Record<string, string> {
   if (!qs) return result;
   const pairs = qs.split("&");
   for (const pair of pairs) {
-    const eqIdx = pair.indexOf("=");
-    if (eqIdx === -1) {
-      result[decodeURIComponent(pair)] = "";
-    } else {
-      const key = decodeURIComponent(pair.slice(0, eqIdx));
-      const value = decodeURIComponent(pair.slice(eqIdx + 1));
-      result[key] = value;
+    try {
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx === -1) {
+        result[decodeURIComponent(pair)] = "";
+      } else {
+        const key = decodeURIComponent(pair.slice(0, eqIdx));
+        const value = decodeURIComponent(pair.slice(eqIdx + 1));
+        result[key] = value;
+      }
+    } catch {
+      // Skip malformed percent-encoded pairs (e.g. %ZZ)
     }
   }
   return result;

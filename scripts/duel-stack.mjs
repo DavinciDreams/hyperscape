@@ -19,7 +19,7 @@ import { parseArgs } from "node:util";
 const options = parseArgs({
   options: {
     help: { type: "boolean", short: "h" },
-    bots: { type: "string", short: "b", default: "4" },
+    bots: { type: "string", short: "b", default: "10" },
     "betting-port": { type: "string", default: "4179" },
     "rtmp-port": { type: "string", default: "8765" },
     "server-url": { type: "string", default: "http://localhost:5555" },
@@ -71,7 +71,7 @@ Usage:
 
 Options:
   -h, --help              Show this help
-  -b, --bots <n>          Duel bot count (default: 4)
+  -b, --bots <n>          Duel bot count (default: 10)
   --betting-port <n>      Hyperbet app dev port (default: 4179)
   --rtmp-port <n>         RTMP bridge websocket port (default: 8765)
   --server-url <url>      Game HTTP base URL (default: http://localhost:5555)

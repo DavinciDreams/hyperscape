@@ -136,7 +136,7 @@ if (!globalThis.GPUShaderStage) {
 const opts = parseArgs({
   options: {
     help: { type: "boolean", short: "h" },
-    bots: { type: "string", short: "b", default: "4" },
+    bots: { type: "string", short: "b", default: "10" },
     "skip-dev": { type: "boolean" },
     "connect-only": { type: "boolean" },
     "match-interval": { type: "string", default: "5000" },
@@ -195,7 +195,7 @@ Usage: bun run dev:duel [options]
 
 Options:
   -h, --help               Show help
-  -b, --bots <n>           Number of bots (default: 4, min: 2)
+  -b, --bots <n>           Number of bots (default: 10, min: 2)
   --skip-dev               Don't start dev server (assume already running)
   --connect-only           Connect bots only; let the server schedule duels
   --match-interval <ms>    Time between match scheduling (default: 5000)

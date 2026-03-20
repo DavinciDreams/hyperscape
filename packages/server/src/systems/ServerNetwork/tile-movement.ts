@@ -212,12 +212,15 @@ export class TileMovementManager {
 
     // Directional block from collision matrix (direction-dependent, cached separately)
     if (floorIndex === 0 && fromTile) {
-      // Encode from→to direction into a single numeric key
+      // Encode from→to direction into a single numeric key.
+      // Direction (dx+1, dz+1) each ∈ [0,2], so direction occupies 4 bits (3×3=9 values).
+      // fromTile coords are offset to positive, then z gets 21 bits before x.
+      const dir =
+        ((tile.x - fromTile.x + 1) | 0) * 3 + ((tile.z - fromTile.z + 1) | 0);
       const dirKey =
-        ((fromTile.x + 1048576) | 0) * 8388608 +
-        ((fromTile.z + 1048576) | 0) * 4 +
-        ((tile.x - fromTile.x + 1) | 0) * 2 +
-        ((tile.z - fromTile.z + 1) | 0);
+        ((fromTile.x + 1048576) | 0) * 18874368 +
+        ((fromTile.z + 1048576) | 0) * 9 +
+        dir;
       const cachedDir = this._directionalBlockCache.get(dirKey);
       if (cachedDir !== undefined) {
         if (cachedDir) return false;
