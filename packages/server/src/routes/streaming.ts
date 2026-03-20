@@ -9,7 +9,11 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import type { World } from "@hyperscape/shared";
+import type { World, StreamingGuardrailPhase } from "@hyperscape/shared";
+import {
+  deriveStreamingGuardrailReason,
+  isActiveStreamingGuardrailPhase,
+} from "@hyperscape/shared";
 import fs from "node:fs";
 import { eq } from "drizzle-orm";
 import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
@@ -40,12 +44,6 @@ import {
   extractBettingFeedToken,
   hasValidBettingFeedToken,
 } from "./streaming-betting-auth.js";
-import {
-  deriveStreamingGuardrailReason,
-  isActiveStreamingGuardrailPhase,
-  type StreamingGuardrailPhase,
-} from "../../../shared/src/utils/rendering/streamingGuardrails";
-
 type InventorySnapshotItem = {
   slot: number;
   itemId: string;

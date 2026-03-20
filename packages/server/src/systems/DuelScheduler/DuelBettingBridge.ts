@@ -690,6 +690,20 @@ export class DuelBettingBridge {
   private async runScheduledReconciliation(): Promise<void> {
     try {
       await this.reconcileLiveCycle();
+    } catch (error) {
+      const scheduler = getStreamingDuelScheduler();
+      const cycle = scheduler?.getCurrentCycle();
+      Logger.error(
+        "DuelBettingBridge",
+        "Streaming market reconciliation failed",
+        error instanceof Error ? error : null,
+        {
+          duelId: cycle?.duelId ?? null,
+          cycleId: cycle?.cycleId ?? null,
+          phase: cycle?.phase ?? null,
+          activeMarkets: this.activeMarkets.size,
+        },
+      );
     } finally {
       const scheduler = getStreamingDuelScheduler();
       const nextDelayMs = scheduler

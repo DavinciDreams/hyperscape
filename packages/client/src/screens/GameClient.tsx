@@ -3,6 +3,7 @@ import {
   CDN_URL,
   normalizeBrowserLoopbackUrl,
 } from "@/lib/api-config";
+import type { PublicRuntimeEnv, StreamingWindow } from "@/lib/streamingWindow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   THREE,
@@ -27,18 +28,9 @@ interface GameClientProps {
   streamingMode?: boolean;
 }
 
-type PublicRuntimeEnv = {
-  PUBLIC_CDN_URL?: string;
-  PUBLIC_WS_URL?: string;
-  PUBLIC_API_URL?: string;
-  PUBLIC_DISABLE_WEBGPU?: string;
-};
-
-type WindowWithEnv = Window & { env?: PublicRuntimeEnv; __CDN_URL?: string };
-
 const getRuntimeEnv = (): PublicRuntimeEnv | undefined => {
   if (typeof window === "undefined") return undefined;
-  return (window as WindowWithEnv).env;
+  return (window as StreamingWindow).env;
 };
 
 const normalizeEnvValue = (value?: string): string | undefined => {
@@ -399,7 +391,7 @@ export function GameClient({
         : `${resolvedCdnUrl}/`;
 
       // Make CDN URL available globally for PhysX loading
-      (window as WindowWithEnv).__CDN_URL = resolvedCdnUrl;
+      (window as StreamingWindow).__CDN_URL = resolvedCdnUrl;
 
       const config = {
         viewport,
@@ -430,15 +422,7 @@ export function GameClient({
         const degradedReason = normalizedMessage.includes("webgpu")
           ? "renderer_unavailable"
           : "initialization_failed";
-        const win = window as WindowWithEnv & {
-          __HYPERSCAPE_STREAM_READY__?: boolean;
-          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
-            ready: boolean;
-            degradedReason: string | null;
-            updatedAt: number;
-            phase: string | null;
-          } | null;
-        };
+        const win = window as StreamingWindow;
         win.__HYPERSCAPE_STREAM_READY__ = false;
         win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = {
           ready: false,

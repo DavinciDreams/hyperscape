@@ -5,7 +5,7 @@ import {
 } from "../../../src/screens/StreamingMode";
 
 describe("shouldDismissStreamingLoading", () => {
-  it("allows dismissal once the server state is ready even before worldReady flips", () => {
+  it("keeps the overlay up until the world is ready", () => {
     expect(
       shouldDismissStreamingLoading({
         connected: true,
@@ -15,7 +15,7 @@ describe("shouldDismissStreamingLoading", () => {
         needsCameraLock: false,
         cameraLocked: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("keeps the overlay up until the camera is locked when required", () => {

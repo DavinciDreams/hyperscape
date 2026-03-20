@@ -19,14 +19,15 @@ import React, {
 import { GameClient } from "./GameClient";
 import { LoadingScreen } from "./LoadingScreen";
 import { StreamingOverlay } from "../components/streaming/StreamingOverlay";
-import type { World, Entity } from "@hyperscape/shared";
-import { EventType } from "@hyperscape/shared";
+import type {
+  World,
+  Entity,
+  StreamingGuardrailAgentSnapshot,
+  StreamingGuardrailPhase,
+} from "@hyperscape/shared";
+import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
+import type { StreamingWindow } from "@/lib/streamingWindow";
 import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
-import {
-  deriveStreamingGuardrailReason,
-  type StreamingGuardrailAgentSnapshot,
-  type StreamingGuardrailPhase,
-} from "../../../shared/src/utils/rendering/streamingGuardrails";
 
 /** Streaming state from server */
 export interface StreamingState {
@@ -194,7 +195,8 @@ export function shouldDismissStreamingLoading(params: {
   return (
     params.connected &&
     params.terrainReady &&
-    (params.worldReady || params.hasStreamingState) &&
+    params.worldReady &&
+    params.hasStreamingState &&
     (!params.needsCameraLock || params.cameraLocked)
   );
 }
@@ -265,10 +267,7 @@ export function StreamingMode() {
       worldListenerCleanupRef.current = null;
       worldRef.current = world;
       setConnected(true);
-      const win = window as unknown as {
-        __HYPERSCAPE_STREAM_READY__?: boolean;
-        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingRendererHealth | null;
-      };
+      const win = window as StreamingWindow;
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
 
@@ -896,10 +895,7 @@ export function StreamingMode() {
 
   useEffect(() => {
     return () => {
-      const win = window as unknown as {
-        __HYPERSCAPE_STREAM_READY__?: boolean;
-        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingRendererHealth | null;
-      };
+      const win = window as StreamingWindow;
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
       if (worldReadyTimeoutRef.current) {
@@ -955,10 +951,7 @@ export function StreamingMode() {
   );
 
   useEffect(() => {
-    const win = window as unknown as {
-      __HYPERSCAPE_STREAM_READY__?: boolean;
-      __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingRendererHealth | null;
-    };
+    const win = window as StreamingWindow;
     win.__HYPERSCAPE_STREAM_READY__ = rendererHealth.ready;
     win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = rendererHealth;
   }, [rendererHealth]);
