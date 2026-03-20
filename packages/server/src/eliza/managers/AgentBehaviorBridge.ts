@@ -375,6 +375,18 @@ export class AgentBehaviorBridge {
     }
     this.workerReady = false;
 
+    // Clear tickInProgress for all agents so they aren't permanently stuck
+    // after the worker crash (same fix as timeout path).
+    for (const schedule of this.schedules.values()) {
+      schedule.tickInProgress = false;
+    }
+
+    // Reject any pending tick promise so sendTickAndWait doesn't hang
+    if (this.pendingResolve) {
+      this.pendingResolve([]);
+      this.pendingResolve = null;
+    }
+
     // Re-spawn after short delay
     setTimeout(() => {
       void this.start().catch((err) => {
