@@ -377,6 +377,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   /** Agent available goals storage (characterId -> available goals) for dashboard selection */
   static agentAvailableGoals: Map<string, unknown[]> = new Map();
 
+  /** Per-phase timing (ms) for tickHealth diagnostics */
+  private _lastMobAITime = 0;
+  private _lastMobMoveTime = 0;
+  private _lastCombatTime = 0;
+
   /** Agent goals paused state (characterId -> boolean) for dashboard display */
   static agentGoalsPaused: Map<string, boolean> = new Map();
 
@@ -805,7 +810,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           mobCount++;
         }
         const mobAIMs = Date.now() - t0;
-        (this as { _lastMobAITime?: number })._lastMobAITime = mobAIMs;
+        this._lastMobAITime = mobAIMs;
         if (mobAIMs > 30) {
           console.warn(`[Tick] MobAI: ${mobAIMs}ms for ${mobCount} mobs`);
         }
@@ -820,8 +825,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       (tickNumber) => {
         const t0 = Date.now();
         this.mobTileMovementManager.onTick(tickNumber);
-        (this as { _lastMobMoveTime?: number })._lastMobMoveTime =
-          Date.now() - t0;
+        this._lastMobMoveTime = Date.now() - t0;
       },
       TickPriority.MOVEMENT,
       "mobMovement",
@@ -1261,8 +1265,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         if (combatSystem) {
           combatSystem.processCombatTick(tickNumber);
         }
-        (this as { _lastCombatTime?: number })._lastCombatTime =
-          Date.now() - t0;
+        this._lastCombatTime = Date.now() - t0;
       },
       TickPriority.COMBAT,
       "combat",
@@ -1374,24 +1377,28 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         const stats = this.tickSystem.getTickHealthStats();
         // Include per-phase timing breakdown so DevStats can show WHERE time goes
         const phaseTimings = {
-          mobAI: (this as { _lastMobAITime?: number })._lastMobAITime ?? 0,
-          mobMove:
-            (this as { _lastMobMoveTime?: number })._lastMobMoveTime ?? 0,
-          combat: (this as { _lastCombatTime?: number })._lastCombatTime ?? 0,
+          mobAI: this._lastMobAITime,
+          mobMove: this._lastMobMoveTime,
+          combat: this._lastCombatTime,
         };
         const eventLoopLag = _maxEventLoopLag;
         _maxEventLoopLag = 0; // Reset after reporting
         const broadcastMs = this.broadcastManager.drainSendTimeMs();
         const pubsubPublishes = this.broadcastManager.drainPubsubStats();
-        this.broadcastManager.sendToAll("tickHealth", {
+        const payload: Record<string, unknown> = {
           ...stats,
           phaseTimings,
           eventLoopLag,
-          transport: process.env.UWS_ENABLED !== "false" ? "uws" : "ws",
-          connections: this.sockets.size,
           broadcastMs,
           pubsubPublishes,
-        });
+        };
+        // Only expose internal server state in non-production environments
+        if (process.env.NODE_ENV !== "production") {
+          payload.transport =
+            process.env.UWS_ENABLED !== "false" ? "uws" : "ws";
+          payload.connections = this.sockets.size;
+        }
+        this.broadcastManager.sendToAll("tickHealth", payload);
       },
       TickPriority.BROADCAST,
       "tickHealthBroadcast",

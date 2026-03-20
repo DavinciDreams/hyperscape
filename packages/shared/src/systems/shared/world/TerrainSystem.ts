@@ -2181,25 +2181,12 @@ export class TerrainSystem extends System {
     const players = this.world.getPlayers() || [];
     const centers: Array<{ id: string; position: THREE.Vector3 }> = [];
 
-    if (this.runtimeIsServer) {
-      // Server tiles are lightweight (heights + normals only, no visual attributes)
-      // so all players including agents can have terrain for resource interaction.
-      for (const player of players) {
-        if (!player?.node?.position) continue;
-        centers.push({
-          id: player.id || "player",
-          position: player.node.position,
-        });
-      }
-    } else {
-      // Client: all players
-      for (const player of players) {
-        if (!player?.node?.position) continue;
-        centers.push({
-          id: player.id || "player",
-          position: player.node.position,
-        });
-      }
+    for (const player of players) {
+      if (!player?.node?.position) continue;
+      centers.push({
+        id: player.id || "player",
+        position: player.node.position,
+      });
     }
 
     // If no players at all (spectator on server, or empty world), use arena lobby.

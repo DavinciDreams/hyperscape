@@ -83,9 +83,14 @@ interface EntitySnapshot {
   data: Record<string, unknown>;
   entity: unknown; // raw entity ref for isDead/isAlive checks
 }
-let _sharedEntitySnapshot: EntitySnapshot[] = [];
-let _sharedSnapshotTime = 0;
 const SHARED_SNAPSHOT_TTL_MS = 1000;
+
+/** Per-world snapshot cache. Keyed by world reference to prevent cross-contamination
+ *  when multiple World instances coexist (e.g. in tests). */
+const _snapshotCache = new WeakMap<
+  object,
+  { snapshot: EntitySnapshot[]; time: number }
+>();
 
 function getSharedEntitySnapshot(
   world: {
@@ -94,11 +99,13 @@ function getSharedEntitySnapshot(
   getPos: (entity: unknown) => [number, number, number] | null,
 ): EntitySnapshot[] {
   const now = Date.now();
+  const cached = _snapshotCache.get(world);
   if (
-    now - _sharedSnapshotTime < SHARED_SNAPSHOT_TTL_MS &&
-    _sharedEntitySnapshot.length > 0
+    cached &&
+    now - cached.time < SHARED_SNAPSHOT_TTL_MS &&
+    cached.snapshot.length > 0
   ) {
-    return _sharedEntitySnapshot;
+    return cached.snapshot;
   }
   const snapshot: EntitySnapshot[] = [];
   for (const [id, entity] of world.entities.items.entries()) {
@@ -108,8 +115,7 @@ function getSharedEntitySnapshot(
     if (!pos) continue;
     snapshot.push({ id, position: pos, data, entity });
   }
-  _sharedEntitySnapshot = snapshot;
-  _sharedSnapshotTime = now;
+  _snapshotCache.set(world, { snapshot, time: now });
   return snapshot;
 }
 
