@@ -17,6 +17,7 @@
 import type { World } from "@hyperscape/shared";
 import { createHash } from "node:crypto";
 import { Logger } from "../ServerNetwork/services";
+import { getStreamingDuelScheduler } from "../StreamingDuelScheduler/index.js";
 
 // ============================================================================
 // Configuration
@@ -29,6 +30,18 @@ const config = {
   /** Betting window duration after duel is scheduled (ms) */
   bettingWindowMs: parseInt(process.env.DUEL_BETTING_WINDOW_MS || "30000", 10),
 
+  /** Reconciliation cadence for streaming mode market sync (ms) */
+  reconcileIntervalMs: Math.max(
+    250,
+    parseInt(process.env.DUEL_BETTING_RECONCILE_MS || "1000", 10),
+  ),
+
+  /** Delay before on-chain resolution/public market finalization (ms) */
+  resolutionDelayMs: Math.max(
+    0,
+    parseInt(process.env.DUEL_BETTING_RESOLUTION_DELAY_MS || "15000", 10),
+  ),
+
   /** Base URL for duel metadata */
   metadataBaseUrl:
     process.env.DUEL_METADATA_BASE_URL || "https://hyperscape.game/api/duels",
@@ -40,6 +53,7 @@ const config = {
 
 interface DuelMarket {
   duelId: string;
+  duelKeyHex: string;
   roundSeedHex: string;
   agent1Id: string;
   agent2Id: string;
@@ -97,6 +111,12 @@ export class DuelBettingBridge {
   /** Tracked pending timeouts so they can be cancelled on destroy */
   private pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
 
+  /** Reconciliation timer used to keep market state aligned with the live duel */
+  private reconcileInterval: ReturnType<typeof setInterval> | null = null;
+
+  /** Prevent overlapping reconcile passes */
+  private reconcileInFlight = false;
+
   constructor(world: World) {
     this.world = world;
   }
@@ -140,6 +160,42 @@ export class DuelBettingBridge {
       fn: onDuelScheduled,
     });
 
+    const onStreamingAnnouncement = (payload: unknown) => {
+      void this.handleStreamingAnnouncement(payload);
+    };
+    this.world.on("streaming:announcement:start", onStreamingAnnouncement);
+    this.eventListeners.push({
+      event: "streaming:announcement:start",
+      fn: onStreamingAnnouncement,
+    });
+
+    const onStreamingFightStart = (payload: unknown) => {
+      void this.handleStreamingFightStart(payload);
+    };
+    this.world.on("streaming:fight:start", onStreamingFightStart);
+    this.eventListeners.push({
+      event: "streaming:fight:start",
+      fn: onStreamingFightStart,
+    });
+
+    const onStreamingResolution = (payload: unknown) => {
+      void this.handleStreamingResolution(payload);
+    };
+    this.world.on("streaming:resolution:start", onStreamingResolution);
+    this.eventListeners.push({
+      event: "streaming:resolution:start",
+      fn: onStreamingResolution,
+    });
+
+    const onStreamingAbort = (payload: unknown) => {
+      void this.handleStreamingAbort(payload);
+    };
+    this.world.on("streaming:cycle:aborted", onStreamingAbort);
+    this.eventListeners.push({
+      event: "streaming:cycle:aborted",
+      fn: onStreamingAbort,
+    });
+
     // Listen for duel result events
     const onDuelResult = (payload: unknown) => {
       this.handleDuelResult(payload);
@@ -160,6 +216,8 @@ export class DuelBettingBridge {
       fn: onDuelCompleted,
     });
 
+    this.startReconciliationLoop();
+
     Logger.info("DuelBettingBridge", "Duel betting bridge initialized");
   }
 
@@ -177,6 +235,11 @@ export class DuelBettingBridge {
       clearTimeout(timer);
     }
     this.pendingTimeouts.clear();
+
+    if (this.reconcileInterval) {
+      clearInterval(this.reconcileInterval);
+      this.reconcileInterval = null;
+    }
 
     // Clear retained market data
     this.activeMarkets.clear();
@@ -211,6 +274,7 @@ export class DuelBettingBridge {
   private async handleDuelScheduled(payload: unknown): Promise<void> {
     const data = payload as {
       duelId?: string;
+      duelKeyHex?: string;
       agent1Id?: string;
       agent2Id?: string;
       agent1Name?: string;
@@ -223,70 +287,150 @@ export class DuelBettingBridge {
       return;
     }
 
-    // Generate round seed from duel ID
-    const roundSeedHex = this.generateRoundSeed(data.duelId);
-    const bettingClosesAt = Date.now() + config.bettingWindowMs;
-
-    const market: DuelMarket = {
+    await this.createOrSyncMarket({
       duelId: data.duelId,
-      roundSeedHex,
+      duelKeyHex: data.duelKeyHex,
       agent1Id: data.agent1Id,
       agent2Id: data.agent2Id,
       agent1Name: data.agent1Name || data.agent1Id,
       agent2Name: data.agent2Name || data.agent2Id,
-      createdAt: Date.now(),
-      bettingClosesAt,
-      status: "betting",
+      bettingClosesAt: Date.now() + config.bettingWindowMs,
+      source: "legacy",
+    });
+  }
+
+  private async handleStreamingAnnouncement(payload: unknown): Promise<void> {
+    const data = payload as {
+      duelId?: string;
+      duelKeyHex?: string;
+      cycleId?: string;
+      betOpenTime?: number;
+      betCloseTime?: number;
+      agent1?: { id?: string; name?: string };
+      agent2?: { id?: string; name?: string };
     };
 
-    this.activeMarkets.set(data.duelId, market);
-
-    Logger.info("DuelBettingBridge", "Creating betting market for duel", {
-      duelId: data.duelId,
-      agent1: market.agent1Name,
-      agent2: market.agent2Name,
-      roundSeedHex,
-      bettingClosesAt: new Date(bettingClosesAt).toISOString(),
-    });
-
-    // Create on-chain market if Solana operator is available
-    if (this.solanaOperator?.isEnabled()) {
-      try {
-        const result = await this.solanaOperator.initRound(
-          roundSeedHex,
-          bettingClosesAt,
-        );
-
-        if (result) {
-          Logger.info("DuelBettingBridge", "On-chain market created", {
-            duelId: data.duelId,
-            closeSlot: result.closeSlot,
-            oracleSig: result.initOracleSignature,
-            marketSig: result.initMarketSignature,
-          });
-        }
-      } catch (error) {
-        Logger.error(
-          "DuelBettingBridge",
-          "Failed to create on-chain market",
-          error instanceof Error ? error : null,
-          { duelId: data.duelId },
-        );
-      }
+    if (
+      !data.duelId ||
+      !data.duelKeyHex ||
+      !data.agent1?.id ||
+      !data.agent2?.id
+    ) {
+      return;
     }
 
-    // Emit market created event for UI
-    this.world.emit("betting:market:created", {
+    await this.createOrSyncMarket({
       duelId: data.duelId,
-      market,
+      duelKeyHex: data.duelKeyHex,
+      agent1Id: data.agent1.id,
+      agent2Id: data.agent2.id,
+      agent1Name: data.agent1.name || data.agent1.id,
+      agent2Name: data.agent2.name || data.agent2.id,
+      bettingClosesAt: data.betCloseTime ?? Date.now() + config.bettingWindowMs,
+      source: "streaming",
     });
+  }
 
-    // Schedule market lock when betting window closes
-    const lockTimer = setTimeout(() => {
-      this.pendingTimeouts.delete(lockTimer);
-      this.lockMarket(data.duelId!);
-    }, config.bettingWindowMs);
-    this.pendingTimeouts.add(lockTimer);
+  private async handleStreamingFightStart(payload: unknown): Promise<void> {
+    const data = payload as {
+      duelId?: string;
+      duelKeyHex?: string;
+      fightStartTime?: number;
+    };
+
+    if (!data.duelId) {
+      return;
+    }
+
+    const market = this.activeMarkets.get(data.duelId);
+    if (!market) {
+      await this.reconcileLiveCycle();
+      return;
+    }
+
+    if (market.status === "betting") {
+      await this.lockMarket(data.duelId);
+    }
+  }
+
+  private async handleStreamingResolution(payload: unknown): Promise<void> {
+    const data = payload as {
+      duelId?: string;
+      duelKeyHex?: string;
+      duelEndTime?: number;
+      winnerId?: string;
+      loserId?: string;
+      winnerName?: string;
+      loserName?: string;
+      winReason?: "kill" | "hp_advantage" | "damage_advantage" | "draw";
+      seed?: string | null;
+      replayHash?: string | null;
+      duration?: number;
+    };
+
+    if (!data.duelId) {
+      return;
+    }
+
+    const market = this.activeMarkets.get(data.duelId);
+    if (!market) {
+      const scheduler = getStreamingDuelScheduler();
+      const cycle = scheduler?.getCurrentCycle();
+      if (!cycle || cycle.duelId !== data.duelId) {
+        return;
+      }
+      await this.createOrSyncMarket({
+        duelId: cycle.duelId,
+        duelKeyHex: cycle.duelKeyHex ?? data.duelKeyHex,
+        agent1Id: cycle.agent1?.characterId ?? data.winnerId ?? "",
+        agent2Id: cycle.agent2?.characterId ?? data.loserId ?? "",
+        agent1Name: cycle.agent1?.name ?? data.winnerName ?? "Unknown",
+        agent2Name: cycle.agent2?.name ?? data.loserName ?? "Unknown",
+        bettingClosesAt: cycle.betCloseTime ?? Date.now(),
+        source: "streaming",
+      });
+    }
+
+    const resolvedMarket = this.activeMarkets.get(data.duelId);
+    if (!resolvedMarket) {
+      return;
+    }
+
+    if (!data.winnerId || !data.loserId) {
+      return;
+    }
+
+    await this.resolveMarket(resolvedMarket, {
+      winnerId: data.winnerId,
+      loserId: data.loserId,
+      winnerName: data.winnerName || "Unknown",
+      loserName: data.loserName || "Unknown",
+      duration: data.duration,
+      seed: data.seed ?? null,
+      replayHash: data.replayHash ?? null,
+    });
+  }
+
+  private async handleStreamingAbort(payload: unknown): Promise<void> {
+    const data = payload as {
+      duelId?: string;
+      reason?: string;
+    };
+
+    if (!data.duelId) {
+      return;
+    }
+
+    const market = this.activeMarkets.get(data.duelId);
+    if (!market) {
+      return;
+    }
+
+    Logger.warn("DuelBettingBridge", "Removing aborted betting market", {
+      duelId: data.duelId,
+      reason: data.reason || "streaming abort",
+    });
+    this.activeMarkets.delete(data.duelId);
   }
 
   /**
@@ -330,6 +474,258 @@ export class DuelBettingBridge {
     });
   }
 
+  private async createOrSyncMarket(params: {
+    duelId: string;
+    duelKeyHex?: string;
+    agent1Id: string;
+    agent2Id: string;
+    agent1Name: string;
+    agent2Name: string;
+    bettingClosesAt: number;
+    source: "legacy" | "streaming";
+  }): Promise<void> {
+    const roundSeedHex =
+      params.duelKeyHex || this.generateRoundSeed(params.duelId);
+    const existing = this.activeMarkets.get(params.duelId);
+    const createdAt = existing?.createdAt ?? Date.now();
+    const market: DuelMarket = {
+      duelId: params.duelId,
+      duelKeyHex: roundSeedHex,
+      roundSeedHex,
+      agent1Id: params.agent1Id,
+      agent2Id: params.agent2Id,
+      agent1Name: params.agent1Name || params.agent1Id,
+      agent2Name: params.agent2Name || params.agent2Id,
+      createdAt,
+      bettingClosesAt: params.bettingClosesAt,
+      status: existing?.status ?? "betting",
+      winnerId: existing?.winnerId,
+      winnerSide: existing?.winnerSide,
+    };
+
+    this.activeMarkets.set(params.duelId, market);
+
+    Logger.info("DuelBettingBridge", "Creating betting market for duel", {
+      duelId: params.duelId,
+      duelKeyHex: market.duelKeyHex,
+      agent1: market.agent1Name,
+      agent2: market.agent2Name,
+      roundSeedHex,
+      bettingClosesAt: new Date(params.bettingClosesAt).toISOString(),
+      source: params.source,
+    });
+
+    if (!existing && this.solanaOperator?.isEnabled()) {
+      try {
+        const result = await this.solanaOperator.initRound(
+          roundSeedHex,
+          params.bettingClosesAt,
+        );
+
+        if (result) {
+          Logger.info("DuelBettingBridge", "On-chain market created", {
+            duelId: params.duelId,
+            closeSlot: result.closeSlot,
+            oracleSig: result.initOracleSignature,
+            marketSig: result.initMarketSignature,
+          });
+        }
+      } catch (error) {
+        Logger.error(
+          "DuelBettingBridge",
+          "Failed to create on-chain market",
+          error instanceof Error ? error : null,
+          { duelId: params.duelId },
+        );
+      }
+    }
+
+    this.world.emit("betting:market:created", {
+      duelId: params.duelId,
+      market,
+      source: params.source,
+    });
+
+    const remainingMs = Math.max(0, params.bettingClosesAt - Date.now());
+    const lockTimer = setTimeout(() => {
+      this.pendingTimeouts.delete(lockTimer);
+      void this.lockMarket(params.duelId);
+    }, remainingMs);
+    this.pendingTimeouts.add(lockTimer);
+  }
+
+  private async resolveMarket(
+    market: DuelMarket,
+    outcome: {
+      winnerId: string;
+      loserId: string;
+      winnerName: string;
+      loserName: string;
+      duration?: number;
+      seed: string | null;
+      replayHash: string | null;
+    },
+  ): Promise<void> {
+    if (market.status === "resolved") {
+      return;
+    }
+
+    const winnerSide: "A" | "B" =
+      outcome.winnerId === market.agent1Id ? "A" : "B";
+
+    market.status = "resolved";
+    market.winnerId = outcome.winnerId;
+    market.winnerSide = winnerSide;
+
+    Logger.info("DuelBettingBridge", "Resolving betting market", {
+      duelId: market.duelId,
+      duelKeyHex: market.duelKeyHex,
+      winnerId: outcome.winnerId,
+      winnerSide,
+      winnerName: outcome.winnerName,
+      loserName: outcome.loserName,
+    });
+
+    this.marketHistory.push({ ...market });
+    this.activeMarkets.delete(market.duelId);
+
+    if (this.marketHistory.length > 100) {
+      this.marketHistory.shift();
+    }
+
+    const resolveMarketDuelId = market.duelId;
+    const resolveRoundSeedHex = market.roundSeedHex;
+    const resolveWinnerId = outcome.winnerId;
+    const resolveLoserId = outcome.loserId;
+    const resolveWinnerName = outcome.winnerName;
+    const resolveLoserName = outcome.loserName;
+    const resolveDuration = outcome.duration;
+
+    const resolveTimer = setTimeout(async () => {
+      this.pendingTimeouts.delete(resolveTimer);
+
+      if (this.solanaOperator?.isEnabled()) {
+        try {
+          const resultHashHex = this.generateResultHash(
+            resolveMarketDuelId,
+            resolveWinnerId,
+            resolveLoserId,
+          );
+
+          const metadataUri = `${config.metadataBaseUrl}/${resolveMarketDuelId}`;
+
+          const result = await this.solanaOperator.reportAndResolve({
+            roundSeedHex: resolveRoundSeedHex,
+            winnerSide,
+            resultHashHex,
+            metadataUri,
+          });
+
+          if (result) {
+            Logger.info("DuelBettingBridge", "On-chain market resolved", {
+              duelId: resolveMarketDuelId,
+              reportSig: result.reportSignature,
+              resolveSig: result.resolveSignature,
+            });
+          }
+        } catch (error) {
+          Logger.error(
+            "DuelBettingBridge",
+            "Failed to resolve on-chain market",
+            error instanceof Error ? error : null,
+            { duelId: resolveMarketDuelId },
+          );
+        }
+      }
+
+      this.world.emit("betting:market:resolved", {
+        duelId: resolveMarketDuelId,
+        market,
+        winnerId: resolveWinnerId,
+        winnerSide,
+        winnerName: resolveWinnerName,
+        loserName: resolveLoserName,
+        duration: resolveDuration,
+      });
+    }, config.resolutionDelayMs);
+    this.pendingTimeouts.add(resolveTimer);
+  }
+
+  private startReconciliationLoop(): void {
+    if (this.reconcileInterval) {
+      clearInterval(this.reconcileInterval);
+    }
+    this.reconcileInterval = setInterval(() => {
+      void this.reconcileLiveCycle();
+    }, config.reconcileIntervalMs);
+    void this.reconcileLiveCycle();
+  }
+
+  private async reconcileLiveCycle(): Promise<void> {
+    if (this.reconcileInFlight) {
+      return;
+    }
+    this.reconcileInFlight = true;
+    try {
+      const scheduler = getStreamingDuelScheduler();
+      const cycle = scheduler?.getCurrentCycle();
+      if (!cycle?.duelId || !cycle.agent1 || !cycle.agent2) {
+        return;
+      }
+
+      const market = this.activeMarkets.get(cycle.duelId);
+      if (!market) {
+        await this.createOrSyncMarket({
+          duelId: cycle.duelId,
+          duelKeyHex: cycle.duelKeyHex ?? undefined,
+          agent1Id: cycle.agent1.characterId,
+          agent2Id: cycle.agent2.characterId,
+          agent1Name: cycle.agent1.name,
+          agent2Name: cycle.agent2.name,
+          bettingClosesAt: cycle.betCloseTime ?? Date.now(),
+          source: "streaming",
+        });
+        return;
+      }
+
+      if (
+        (cycle.phase === "COUNTDOWN" || cycle.phase === "FIGHTING") &&
+        market.status === "betting"
+      ) {
+        await this.lockMarket(cycle.duelId);
+        return;
+      }
+
+      if (
+        cycle.phase === "RESOLUTION" &&
+        cycle.winnerId &&
+        cycle.loserId &&
+        market.status !== "resolved"
+      ) {
+        await this.resolveMarket(market, {
+          winnerId: cycle.winnerId,
+          loserId: cycle.loserId,
+          winnerName:
+            cycle.agent1?.characterId === cycle.winnerId
+              ? cycle.agent1.name
+              : cycle.agent2?.name || "Unknown",
+          loserName:
+            cycle.agent1?.characterId === cycle.loserId
+              ? cycle.agent1.name
+              : cycle.agent2?.name || "Unknown",
+          duration:
+            cycle.duelEndTime && cycle.cycleStartTime
+              ? cycle.duelEndTime - cycle.cycleStartTime
+              : undefined,
+          seed: cycle.seed,
+          replayHash: cycle.replayHash,
+        });
+      }
+    } finally {
+      this.reconcileInFlight = false;
+    }
+  }
+
   /**
    * Handle duel result event - resolve betting market
    */
@@ -365,94 +761,15 @@ export class DuelBettingBridge {
       return;
     }
 
-    // Determine winner side (A = agent1, B = agent2)
-    const winnerSide: "A" | "B" = data.winnerId === market.agent1Id ? "A" : "B";
-
-    market.status = "resolved";
-    market.winnerId = data.winnerId;
-    market.winnerSide = winnerSide;
-
-    Logger.info(
-      "DuelBettingBridge",
-      "Resolving betting market in 15s (stream delay sync)",
-      {
-        duelId: market.duelId,
-        winnerId: data.winnerId,
-        winnerSide,
-        winnerName: data.winnerName,
-      },
-    );
-
-    // Move to history immediately to prevent duplicate triggers
-    this.marketHistory.push({ ...market });
-    this.activeMarkets.delete(market.duelId);
-
-    // Keep history limited
-    if (this.marketHistory.length > 100) {
-      this.marketHistory.shift();
-    }
-
-    // Delay on-chain posting and public websocket event by 15.5 seconds to sync with YouTube stream.
-    // Capture values for the closure so it doesn't retain the full payload.
-    const resolveMarketDuelId = market.duelId;
-    const resolveRoundSeedHex = market.roundSeedHex;
-    const resolveWinnerId = data.winnerId;
-    const resolveLoserId = data.loserId;
-    const resolveWinnerName = data.winnerName;
-    const resolveLoserName = data.loserName;
-    const resolveDuration = data.duration;
-
-    const resolveTimer = setTimeout(async () => {
-      this.pendingTimeouts.delete(resolveTimer);
-
-      // Report and resolve on-chain
-      if (this.solanaOperator?.isEnabled()) {
-        try {
-          // Generate result hash from duel outcome
-          const resultHashHex = this.generateResultHash(
-            resolveMarketDuelId,
-            resolveWinnerId!,
-            resolveLoserId!,
-          );
-
-          const metadataUri = `${config.metadataBaseUrl}/${resolveMarketDuelId}`;
-
-          const result = await this.solanaOperator.reportAndResolve({
-            roundSeedHex: resolveRoundSeedHex,
-            winnerSide,
-            resultHashHex,
-            metadataUri,
-          });
-
-          if (result) {
-            Logger.info("DuelBettingBridge", "On-chain market resolved", {
-              duelId: resolveMarketDuelId,
-              reportSig: result.reportSignature,
-              resolveSig: result.resolveSignature,
-            });
-          }
-        } catch (error) {
-          Logger.error(
-            "DuelBettingBridge",
-            "Failed to resolve on-chain market",
-            error instanceof Error ? error : null,
-            { duelId: resolveMarketDuelId },
-          );
-        }
-      }
-
-      // Emit market resolved event for UI
-      this.world.emit("betting:market:resolved", {
-        duelId: resolveMarketDuelId,
-        market,
-        winnerId: resolveWinnerId,
-        winnerSide,
-        winnerName: resolveWinnerName,
-        loserName: resolveLoserName,
-        duration: resolveDuration,
-      });
-    }, 15000);
-    this.pendingTimeouts.add(resolveTimer);
+    void this.resolveMarket(market, {
+      winnerId: data.winnerId!,
+      loserId: data.loserId!,
+      winnerName: data.winnerName || "Unknown",
+      loserName: data.loserName || "Unknown",
+      duration: data.duration,
+      seed: null,
+      replayHash: null,
+    });
   }
 
   /**
