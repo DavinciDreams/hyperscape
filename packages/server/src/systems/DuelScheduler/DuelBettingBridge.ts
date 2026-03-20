@@ -118,7 +118,7 @@ export class DuelBettingBridge {
   private pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
 
   /** Reconciliation timer used to keep market state aligned with the live duel */
-  private reconcileInterval: ReturnType<typeof setInterval> | null = null;
+  private reconcileTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Prevent overlapping reconcile passes */
   private reconcileInFlight = false;
@@ -242,9 +242,9 @@ export class DuelBettingBridge {
     }
     this.pendingTimeouts.clear();
 
-    if (this.reconcileInterval) {
-      clearInterval(this.reconcileInterval);
-      this.reconcileInterval = null;
+    if (this.reconcileTimer) {
+      clearTimeout(this.reconcileTimer);
+      this.reconcileTimer = null;
     }
 
     // Clear retained market data
@@ -378,30 +378,7 @@ export class DuelBettingBridge {
       return;
     }
 
-    const market = this.activeMarkets.get(data.duelId);
-    if (!market) {
-      const scheduler = getStreamingDuelScheduler();
-      const cycle = scheduler?.getCurrentCycle();
-      if (!cycle || cycle.duelId !== data.duelId) {
-        return;
-      }
-      if (!canCreateMarketForStreamingPhase(cycle.phase)) {
-        Logger.warn(
-          "DuelBettingBridge",
-          "Skipping streaming resolution because no active market exists for the resolved duel",
-          {
-            duelId: data.duelId,
-            cycleId: cycle.cycleId ?? null,
-            phase: cycle.phase ?? null,
-          },
-        );
-        return;
-      }
-
-      await this.reconcileLiveCycle();
-    }
-
-    const resolvedMarket = this.activeMarkets.get(data.duelId);
+    const resolvedMarket = await this.getResolvableStreamingMarket(data.duelId);
     if (!resolvedMarket) {
       return;
     }
@@ -419,6 +396,37 @@ export class DuelBettingBridge {
       seed: data.seed ?? null,
       replayHash: data.replayHash ?? null,
     });
+  }
+
+  private async getResolvableStreamingMarket(
+    duelId: string,
+  ): Promise<DuelMarket | null> {
+    const existing = this.activeMarkets.get(duelId);
+    if (existing) {
+      return existing;
+    }
+
+    const scheduler = getStreamingDuelScheduler();
+    const cycle = scheduler?.getCurrentCycle();
+    if (!cycle || cycle.duelId !== duelId) {
+      return null;
+    }
+
+    if (!canCreateMarketForStreamingPhase(cycle.phase)) {
+      Logger.warn(
+        "DuelBettingBridge",
+        "Skipping streaming resolution because no active market exists for the resolved duel",
+        {
+          duelId,
+          cycleId: cycle.cycleId ?? null,
+          phase: cycle.phase ?? null,
+        },
+      );
+      return null;
+    }
+
+    await this.reconcileLiveCycle();
+    return this.activeMarkets.get(duelId) ?? null;
   }
 
   private async handleStreamingAbort(payload: unknown): Promise<void> {
@@ -662,13 +670,33 @@ export class DuelBettingBridge {
   }
 
   private startReconciliationLoop(): void {
-    if (this.reconcileInterval) {
-      clearInterval(this.reconcileInterval);
+    if (this.reconcileTimer) {
+      clearTimeout(this.reconcileTimer);
+      this.reconcileTimer = null;
     }
-    this.reconcileInterval = setInterval(() => {
-      void this.reconcileLiveCycle();
-    }, config.reconcileIntervalMs);
-    void this.reconcileLiveCycle();
+    this.scheduleNextReconciliation(0);
+  }
+
+  private scheduleNextReconciliation(delayMs: number): void {
+    if (this.reconcileTimer) {
+      clearTimeout(this.reconcileTimer);
+    }
+
+    this.reconcileTimer = setTimeout(() => {
+      void this.runScheduledReconciliation();
+    }, delayMs);
+  }
+
+  private async runScheduledReconciliation(): Promise<void> {
+    try {
+      await this.reconcileLiveCycle();
+    } finally {
+      const scheduler = getStreamingDuelScheduler();
+      const nextDelayMs = scheduler
+        ? config.reconcileIntervalMs
+        : Math.max(config.reconcileIntervalMs * 5, 5000);
+      this.scheduleNextReconciliation(nextDelayMs);
+    }
   }
 
   private async reconcileLiveCycle(): Promise<void> {

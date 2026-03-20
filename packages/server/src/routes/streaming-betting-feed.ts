@@ -165,8 +165,27 @@ export function selectReplayDelivery(
     };
   }
 
-  const startIndex = frames.findIndex((frame) => frame.seq > sinceSeq);
-  if (startIndex < 0) {
+  if (latestFrame && sinceSeq > latestFrame.seq) {
+    return {
+      mode: "reset",
+      frames: [],
+      latestFrame,
+      oldestSeq: oldestSeq ?? latestFrame.seq,
+    };
+  }
+
+  let low = 0;
+  let high = frames.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((frames[mid]?.seq ?? 0) <= sinceSeq) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+
+  if (low >= frames.length) {
     return {
       mode: "bootstrap",
       frames: [],
@@ -177,7 +196,7 @@ export function selectReplayDelivery(
 
   return {
     mode: "replay",
-    frames: frames.slice(startIndex),
+    frames: frames.slice(low),
     latestFrame,
     oldestSeq,
   };

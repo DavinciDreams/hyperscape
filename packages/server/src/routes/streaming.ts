@@ -12,6 +12,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { World } from "@hyperscape/shared";
 import fs from "node:fs";
 import { eq } from "drizzle-orm";
+import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import {
   STREAMING_TIMING,
@@ -35,6 +36,7 @@ import {
   type BettingFeedRendererHealth,
   type BettingFeedFrame,
 } from "./streaming-betting-feed.js";
+import { hasValidBettingFeedToken } from "./streaming-betting-auth.js";
 
 type InventorySnapshotItem = {
   slot: number;
@@ -92,6 +94,8 @@ const EXTERNAL_RTMP_STATUS_MAX_AGE_MS = Math.max(
   5000,
   Number.parseInt(process.env.RTMP_STATUS_MAX_AGE_MS || "15000", 10),
 );
+const INTERNAL_BET_SYNC_ALLOWED_ORIGIN =
+  process.env.INTERNAL_BET_SYNC_ALLOWED_ORIGIN?.trim() || null;
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -730,9 +734,10 @@ export function registerStreamingRoutes(
     }
   };
 
-  const getDatabaseSystem = (): {
-    getDb?: () => any;
-  } | null => world.getSystem("database") as { getDb?: () => any } | null;
+  type DatabaseSystemLike = Pick<DatabaseSystem, "getDb">;
+
+  const getDatabaseSystem = (): DatabaseSystemLike | null =>
+    (world.getSystem("database") as unknown as DatabaseSystemLike | null);
 
   const persistBettingSourceEpoch = async (epoch: number): Promise<void> => {
     const db = getDatabaseSystem()?.getDb?.();
@@ -818,9 +823,10 @@ export function registerStreamingRoutes(
     const scheduler = getStreamingDuelScheduler();
     const cycle = scheduler?.getCurrentCycle() ?? null;
     const emittedAt = Date.now();
+    const nextSeq = bettingSequence + 1;
     const payload = buildBettingFeedPayload({
       sourceEpoch: bettingSourceEpoch,
-      seq: bettingSequence + 1,
+      seq: nextSeq,
       emittedAt,
       cycle,
       rendererHealth: deriveBettingRendererHealth(cycle),
@@ -836,15 +842,12 @@ export function registerStreamingRoutes(
     }
 
     lastSerializedBettingState = serialized;
-    bettingSequence += 1;
+    bettingSequence = nextSeq;
 
     const frame: BettingFeedFrame = {
-      seq: bettingSequence,
+      seq: nextSeq,
       emittedAt,
-      payload: {
-        ...payload,
-        seq: bettingSequence,
-      },
+      payload,
       payloadBytes: Buffer.byteLength(serialized, "utf8"),
     };
 
@@ -924,7 +927,7 @@ export function registerStreamingRoutes(
       requestQuery.token?.trim() || requestQuery.streamToken?.trim() || null;
     const token = headerToken || queryToken;
 
-    if (token === requiredToken) {
+    if (hasValidBettingFeedToken(requiredToken, token)) {
       return true;
     }
 
@@ -1262,7 +1265,12 @@ export function registerStreamingRoutes(
     raw.setHeader("Cache-Control", "no-cache, no-transform");
     raw.setHeader("Connection", "keep-alive");
     raw.setHeader("X-Accel-Buffering", "no");
-    raw.setHeader("Access-Control-Allow-Origin", "*");
+    if (INTERNAL_BET_SYNC_ALLOWED_ORIGIN) {
+      raw.setHeader(
+        "Access-Control-Allow-Origin",
+        INTERNAL_BET_SYNC_ALLOWED_ORIGIN,
+      );
+    }
     raw.socket?.setNoDelay?.(true);
     raw.socket?.setKeepAlive?.(true, STREAMING_SSE_HEARTBEAT_MS * 2);
     raw.flushHeaders?.();
@@ -1335,7 +1343,12 @@ export function registerStreamingRoutes(
     fastify.get(
       route,
       {
-        config: { rateLimit: false },
+        config: {
+          rateLimit: {
+            max: 240,
+            timeWindow: "1 minute",
+          },
+        },
       },
       handleBettingBootstrap,
     );
@@ -1350,7 +1363,12 @@ export function registerStreamingRoutes(
     }>(
       route,
       {
-        config: { rateLimit: false },
+        config: {
+          rateLimit: {
+            max: 60,
+            timeWindow: "1 minute",
+          },
+        },
       },
       handleBettingEvents,
     );

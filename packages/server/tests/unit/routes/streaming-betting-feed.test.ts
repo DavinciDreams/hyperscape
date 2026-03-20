@@ -162,8 +162,14 @@ describe("streaming-betting-feed", () => {
       oldestSeq: 1,
     });
 
-    expect(selectReplayDelivery(frames, 99)).toMatchObject({
+    expect(selectReplayDelivery(frames, 3)).toMatchObject({
       mode: "bootstrap",
+      latestFrame: frames[2],
+      oldestSeq: 1,
+    });
+
+    expect(selectReplayDelivery(frames, 99)).toMatchObject({
+      mode: "reset",
       latestFrame: frames[2],
       oldestSeq: 1,
     });

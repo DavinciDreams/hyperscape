@@ -73,7 +73,7 @@ function getDockerComposeCommand() {
   // Try docker compose (newer Docker versions) first
   try {
     execSync(`${DOCKER_BIN} compose version`, { stdio: 'ignore' })
-    return 'docker compose'
+    return `${DOCKER_BIN} compose`
   } catch {
     // Fall back to docker-compose (older versions or standalone)
     try {
