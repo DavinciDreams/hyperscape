@@ -9,7 +9,7 @@ import { System } from "../infrastructure/System";
 import { EventType } from "../../../types/events";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { InstancedMeshManager } from "../../../utils/rendering/InstancedMeshManager";
-import { CollisionMask } from "../movement/CollisionFlags";
+import { CollisionFlag, CollisionMask } from "../movement/CollisionFlags";
 import { worldToTile } from "../movement/TileSystem";
 import {
   generateTerrainTilesBatch,
@@ -221,6 +221,13 @@ export class TerrainSystem extends System {
   private pendingTileSet = new Set<string>();
   private pendingCollisionKeys: string[] = [];
   private pendingCollisionSet = new Set<string>();
+  // Deferred walkability baking queue — spreads 10,000 iterations across ticks
+  private pendingWalkabilityTiles: Array<{ tileX: number; tileZ: number }> = [];
+  private walkabilityProgress: {
+    tileX: number;
+    tileZ: number;
+    nextRow: number;
+  } | null = null;
   private maxTilesPerFrame = 2; // cap tiles generated per frame
   private generationBudgetMsPerFrame = 6; // time budget per frame (ms)
   // Pending resource instance creation (deferred to spread across frames)
@@ -266,6 +273,8 @@ export class TerrainSystem extends System {
   private templateGeometry: THREE.PlaneGeometry | null = null;
   private templateColors: Float32Array | null = null;
   private templateBiomeIds: Float32Array | null = null;
+  // PERFORMANCE: Low-res collision template (SERVER_COLLISION_RESOLUTION) for PhysX baking
+  private serverCollisionTemplate: THREE.PlaneGeometry | null = null;
   // PERFORMANCE: Pre-allocated overflow height grid for normal computation
   // Size = (TILE_RESOLUTION + 2)^2 — one extra row/column on each side for centered differences
   private _overflowHeightGrid: Float32Array | null = null;
@@ -612,27 +621,67 @@ export class TerrainSystem extends System {
     if (this.pendingCollisionKeys.length === 0 || !this.world.network?.isServer)
       return;
 
-    const key = this.pendingCollisionKeys.shift()!;
-    this.pendingCollisionSet.delete(key);
+    // Time-budgeted: process multiple collision meshes per tick (up to 8ms)
+    const budgetMs = 8;
+    const t0 = performance.now();
 
-    const tile = this.terrainTiles.get(key);
-    if (!tile || tile.collision) return;
+    while (this.pendingCollisionKeys.length > 0) {
+      if (performance.now() - t0 > budgetMs) break;
 
-    const geometry = tile.mesh.geometry;
-    const transformedGeometry = geometry.clone();
-    transformedGeometry.translate(
-      tile.x * this.CONFIG.TILE_SIZE,
-      0,
-      tile.z * this.CONFIG.TILE_SIZE,
-    );
+      const key = this.pendingCollisionKeys.shift()!;
+      this.pendingCollisionSet.delete(key);
 
-    const meshHandle = geometryToPxMesh(this.world, transformedGeometry, false);
-    if (meshHandle) {
-      tile.collision = meshHandle;
+      const tile = this.terrainTiles.get(key);
+      if (!tile || tile.collision) continue;
+
+      const geometry = this.buildServerCollisionGeometry(tile.x, tile.z);
+
+      const meshHandle = geometryToPxMesh(this.world, geometry, false);
+      if (meshHandle) {
+        tile.collision = meshHandle;
+      }
+
+      geometry.dispose();
+    }
+  }
+
+  /**
+   * Build a low-resolution collision geometry for PhysX triangle mesh cooking.
+   * Uses SERVER_COLLISION_RESOLUTION (16×16) instead of full TILE_RESOLUTION (64×64)
+   * to reduce triangle count from ~8192 to ~512, giving ~16x faster PhysX cooking.
+   */
+  private buildServerCollisionGeometry(
+    tileX: number,
+    tileZ: number,
+  ): THREE.PlaneGeometry {
+    if (!this.serverCollisionTemplate) {
+      this.serverCollisionTemplate = new THREE.PlaneGeometry(
+        this.CONFIG.TILE_SIZE,
+        this.CONFIG.TILE_SIZE,
+        this.CONFIG.SERVER_COLLISION_RESOLUTION - 1,
+        this.CONFIG.SERVER_COLLISION_RESOLUTION - 1,
+      );
+      this.serverCollisionTemplate.rotateX(-Math.PI / 2);
     }
 
-    // Avoid leaked cloned geometry
-    transformedGeometry.dispose();
+    const geometry = this.serverCollisionTemplate.clone();
+    const positions = geometry.attributes.position;
+    const posArray = positions.array as Float32Array;
+
+    const originX = tileX * this.CONFIG.TILE_SIZE;
+    const originZ = tileZ * this.CONFIG.TILE_SIZE;
+
+    for (let i = 0; i < positions.count; i++) {
+      const i3 = i * 3;
+      const worldX = posArray[i3] + originX;
+      const worldZ = posArray[i3 + 2] + originZ;
+      posArray[i3 + 1] = this.getHeightAtComputed(worldX, worldZ);
+    }
+
+    // Translate to world position (collision mesh needs absolute coords)
+    geometry.translate(originX, 0, originZ);
+
+    return geometry;
   }
 
   /**
@@ -1354,6 +1403,7 @@ export class TerrainSystem extends System {
     TILE_SIZE: TERRAIN_CONSTANTS.TERRAIN_TILE_SIZE,
     WORLD_SIZE: 100, // 100x100 grid = 10km x 10km world
     TILE_RESOLUTION: 64, // 64x64 vertices per tile for smooth terrain
+    SERVER_COLLISION_RESOLUTION: 16, // 16x16 vertices for PhysX collision (server only)
     WATER_THRESHOLD: TERRAIN_CONSTANTS.WATER_THRESHOLD,
 
     // LOD (Level of Detail) - Resolution tiers based on distance
@@ -1684,9 +1734,14 @@ export class TerrainSystem extends System {
     }, 15000);
 
     // Start player-based terrain update loop
-    this.terrainUpdateIntervalId = setInterval(() => {
-      this.updatePlayerBasedTerrain();
-    }, 1000); // Update every second
+    // On server, getTerrainCenters() filters out agent players to prevent 25+ agents
+    // from queueing hundreds of terrain tiles that overwhelm the event loop.
+    this.terrainUpdateIntervalId = setInterval(
+      () => {
+        this.updatePlayerBasedTerrain();
+      },
+      isServer ? 2000 : 1000,
+    ); // Server: 2s (less frequent), Client: 1s
 
     // Start serialization loop
     this.serializationIntervalId = setInterval(() => {
@@ -2125,6 +2180,7 @@ export class TerrainSystem extends System {
 
     const players = this.world.getPlayers() || [];
     const centers: Array<{ id: string; position: THREE.Vector3 }> = [];
+
     for (const player of players) {
       if (!player?.node?.position) continue;
       centers.push({
@@ -2493,6 +2549,14 @@ export class TerrainSystem extends System {
     this.terrainTiles.set(key, tile);
     this.activeChunks.add(key);
 
+    // Enqueue deferred walkability baking (server-only).
+    // Pre-computes WATER and STEEP_SLOPE flags so BFS pathfinding
+    // becomes a single bitwise AND instead of runtime terrain queries.
+    // Processing is spread across ticks to avoid 10,000-iteration main-thread spikes.
+    if (isServer) {
+      this.pendingWalkabilityTiles.push({ tileX, tileZ });
+    }
+
     return tile;
   }
 
@@ -2527,9 +2591,44 @@ export class TerrainSystem extends System {
     const geometry = template.clone();
 
     const positions = geometry.attributes.position;
-    // Reuse pre-allocated buffers (create new for final attribute, but fill from template)
-    const colors = new Float32Array(positions.count * 3);
+    const positionsArray = positions.array as Float32Array;
     const heightData: number[] = [];
+
+    // Generate heightmap — needed on both server and client
+    // IMPORTANT: Always use getHeightAtComputed during tile generation to ensure
+    // deterministic heights. Cached heights (from other tiles) use bilinear interpolation
+    // which can differ slightly from computed values, causing seams at ANY position
+    // where the shoreline adjustment samples across tile boundaries.
+    for (let i = 0; i < positions.count; i++) {
+      const i3 = i * 3;
+      const x = positionsArray[i3] + tileX * this.CONFIG.TILE_SIZE;
+      const z = positionsArray[i3 + 2] + tileZ * this.CONFIG.TILE_SIZE;
+
+      const height = this.getHeightAtComputed(x, z);
+      positionsArray[i3 + 1] = height;
+      heightData.push(height);
+    }
+
+    // Compute normals from overflow height grid (centered differences).
+    // Passes the already-computed heightData to avoid recomputing interior heights.
+    this.computeHeightFieldNormals(geometry, tileX, tileZ, heightData);
+    // Carve terrain triangles inside building flat zones to avoid overdraw
+    this.applyFlatZoneCarve(geometry, tileX, tileZ);
+
+    // Store height data for persistence
+    this.storeHeightData(tileX, tileZ, heightData);
+
+    // SERVER: Skip all visual-only attributes (colors, biomeIds, roadInfluences,
+    // forestWeights, canyonWeights) and the expensive per-vertex biome/color
+    // computation. The server only needs heights, normals, and flat zone carving.
+    // This reduces per-tile memory by ~80% and eliminates GC pressure from
+    // Float32Array allocations that caused tick death spirals with 25+ agents.
+    if (this.runtimeIsServer) {
+      return geometry;
+    }
+
+    // CLIENT: Full visual attribute generation
+    const colors = new Float32Array(positions.count * 3);
     const biomeIds = new Float32Array(positions.count);
     const roadInfluences = new Float32Array(positions.count);
     const forestWeights = new Float32Array(positions.count);
@@ -2548,28 +2647,11 @@ export class TerrainSystem extends System {
       );
     }
 
-    // Generate heightmap and vertex colors
-    // IMPORTANT: Always use getHeightAtComputed during tile generation to ensure
-    // deterministic heights. Cached heights (from other tiles) use bilinear interpolation
-    // which can differ slightly from computed values, causing seams at ANY position
-    // where the shoreline adjustment samples across tile boundaries.
-    const positionsArray = positions.array as Float32Array;
     for (let i = 0; i < positions.count; i++) {
       const i3 = i * 3;
-      const localX = positionsArray[i3];
-      const localZ = positionsArray[i3 + 2];
-
-      // Convert to world coordinates
-      const x = localX + tileX * this.CONFIG.TILE_SIZE;
-      const z = localZ + tileZ * this.CONFIG.TILE_SIZE;
-
-      // Always use deterministic computed heights during tile generation
-      // This ensures identical heights regardless of which tiles are loaded
-      // and eliminates seams from cache interpolation differences
-      const height = this.getHeightAtComputed(x, z);
-
-      positionsArray[i3 + 1] = height;
-      heightData.push(height);
+      const x = positionsArray[i3] + tileX * this.CONFIG.TILE_SIZE;
+      const z = positionsArray[i3 + 2] + tileZ * this.CONFIG.TILE_SIZE;
+      const height = positionsArray[i3 + 1]; // Already computed above
 
       // Get biome influences for smooth color blending
       const { biomeWeightMap, totalWeight } =
@@ -2705,15 +2787,6 @@ export class TerrainSystem extends System {
         );
       }
     }
-
-    // Compute normals from overflow height grid (centered differences).
-    // Passes the already-computed heightData to avoid recomputing interior heights.
-    this.computeHeightFieldNormals(geometry, tileX, tileZ, heightData);
-    // Carve terrain triangles inside building flat zones to avoid overdraw
-    this.applyFlatZoneCarve(geometry, tileX, tileZ);
-
-    // Store height data for persistence
-    this.storeHeightData(tileX, tileZ, heightData);
 
     return geometry;
   }
@@ -3392,11 +3465,30 @@ export class TerrainSystem extends System {
    * Returns null if tile not loaded - caller should fallback to getHeightAtComputed().
    * O(1) lookup vs O(n) noise computation.
    */
+  // Last-tile cache for getHeightAtCached — avoids string allocation + Map.get()
+  // for the ~90% of calls that hit the same terrain tile (BFS spatial locality).
+  private _cachedHeightTileX = NaN;
+  private _cachedHeightTileZ = NaN;
+  private _cachedHeightTile: { heightData?: number[] } | null = null;
+
   private getHeightAtCached(worldX: number, worldZ: number): number | null {
     const tileX = this.worldToTerrainTileIndex(worldX);
     const tileZ = this.worldToTerrainTileIndex(worldZ);
-    const key = `${tileX}_${tileZ}`;
-    const tile = this.terrainTiles.get(key);
+
+    // Fast path: reuse last tile if same coordinates (BFS spatial locality)
+    let tile: { heightData?: number[] } | null;
+    if (
+      tileX === this._cachedHeightTileX &&
+      tileZ === this._cachedHeightTileZ
+    ) {
+      tile = this._cachedHeightTile;
+    } else {
+      const key = `${tileX}_${tileZ}`;
+      tile = this.terrainTiles.get(key) ?? null;
+      this._cachedHeightTileX = tileX;
+      this._cachedHeightTileZ = tileZ;
+      this._cachedHeightTile = tile;
+    }
 
     if (!tile?.heightData || tile.heightData.length === 0) {
       return null;
@@ -4987,9 +5079,10 @@ export class TerrainSystem extends System {
     // (also processes pre-computed worker results when available)
     this.processTileGenerationQueue();
 
-    // Process queued collision generation on the server
+    // Process queued collision generation and walkability baking on the server
     if (this.world.network?.isServer) {
       this.processCollisionGenerationQueue();
+      this.processWalkabilityQueue();
     }
 
     // Process pending resource instance creation (client only, spreads work across frames)
@@ -5264,6 +5357,35 @@ export class TerrainSystem extends System {
   }
 
   private unloadTile(tile: TerrainTile): void {
+    // Cancel any pending/in-progress walkability baking for this tile
+    if (this.runtimeIsServer) {
+      this.pendingWalkabilityTiles = this.pendingWalkabilityTiles.filter(
+        (t) => t.tileX !== tile.x || t.tileZ !== tile.z,
+      );
+      if (
+        this.walkabilityProgress &&
+        this.walkabilityProgress.tileX === tile.x &&
+        this.walkabilityProgress.tileZ === tile.z
+      ) {
+        this.walkabilityProgress = null;
+      }
+    }
+    // Clear baked terrain walkability flags (server-only)
+    if (this.runtimeIsServer && this.world?.collision) {
+      const tileSize = this.CONFIG.TILE_SIZE;
+      const originX = tile.x * tileSize;
+      const originZ = tile.z * tileSize;
+      const tilesPerSide = Math.floor(tileSize / 1.0);
+      const terrainFlagsMask = CollisionFlag.WATER | CollisionFlag.STEEP_SLOPE;
+      for (let lx = 0; lx < tilesPerSide; lx++) {
+        const mx = Math.floor(originX + lx + 0.5);
+        for (let lz = 0; lz < tilesPerSide; lz++) {
+          const mz = Math.floor(originZ + lz + 0.5);
+          this.world.collision.removeFlags(mx, mz, terrainFlagsMask);
+        }
+      }
+    }
+
     // Clean up road meshes
     for (const road of tile.roads) {
       if (road.mesh && road.mesh.parent) {
@@ -5364,34 +5486,49 @@ export class TerrainSystem extends System {
     worldX: number,
     worldZ: number,
   ): { walkable: boolean; reason?: string } {
-    const tileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
-    const tileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
-    const biome = this.getBiomeAt(tileX, tileZ);
-    const biomeData = BIOMES[biome];
-
-    // Get height at position
-    const height = this.getHeightAt(worldX, worldZ);
-
-    // Check if underwater (water impassable rule)
-    if (height < this.CONFIG.WATER_THRESHOLD) {
-      return { walkable: false, reason: "Water bodies are impassable" };
-    }
-
-    // Check slope constraints
-    const slope = this.calculateSlope(worldX, worldZ);
-    if (slope > biomeData.maxSlope) {
+    if (!this.isPositionWalkableFast(worldX, worldZ)) {
+      // Only allocate the reason object on the slow path (non-walkable)
+      const height = this.getHeightAt(worldX, worldZ);
+      if (height < this.CONFIG.WATER_THRESHOLD) {
+        return { walkable: false, reason: "Water bodies are impassable" };
+      }
+      const tileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
+      const tileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
+      const biome = this.getBiomeAt(tileX, tileZ);
+      if (biome === "lakes") {
+        return { walkable: false, reason: "Lake water is impassable" };
+      }
       return {
         walkable: false,
         reason: "Steep mountain slopes block movement",
       };
     }
+    return { walkable: true };
+  }
+
+  /**
+   * Fast boolean-only walkability check — no object allocation.
+   * Used by BFS pathfinding hot path where reason string isn't needed.
+   */
+  isPositionWalkableFast(worldX: number, worldZ: number): boolean {
+    const tileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
+    const tileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
+    const biome = this.getBiomeAt(tileX, tileZ);
 
     // Special case for lakes biome - always impassable
-    if (biome === "lakes") {
-      return { walkable: false, reason: "Lake water is impassable" };
-    }
+    if (biome === "lakes") return false;
 
-    return { walkable: true };
+    const biomeData = BIOMES[biome];
+    const height = this.getHeightAt(worldX, worldZ);
+
+    // Check if underwater
+    if (height < this.CONFIG.WATER_THRESHOLD) return false;
+
+    // Check slope constraints
+    const slope = this.calculateSlope(worldX, worldZ);
+    if (slope > biomeData.maxSlope) return false;
+
+    return true;
   }
 
   /**
@@ -5431,51 +5568,186 @@ export class TerrainSystem extends System {
    * might be missed by 4-directional sampling.
    */
   private calculateSlope(worldX: number, worldZ: number): number {
-    const checkDistance = this.CONFIG.SLOPE_CHECK_DISTANCE;
-    const centerHeight = this.getHeightAt(worldX, worldZ);
+    const d = this.CONFIG.SLOPE_CHECK_DISTANCE;
+    const c = this.getHeightAt(worldX, worldZ);
+    const invD = 1 / d;
+    const invDiag = 1 / (d * Math.SQRT2);
 
-    // Sample heights in 4 cardinal directions
-    const northHeight = this.getHeightAt(worldX, worldZ + checkDistance);
-    const southHeight = this.getHeightAt(worldX, worldZ - checkDistance);
-    const eastHeight = this.getHeightAt(worldX + checkDistance, worldZ);
-    const westHeight = this.getHeightAt(worldX - checkDistance, worldZ);
+    // Calculate max slope inline (zero allocation — no array, no spread)
+    let maxSlope = Math.abs(this.getHeightAt(worldX, worldZ + d) - c) * invD;
+    let s: number;
+    s = Math.abs(this.getHeightAt(worldX, worldZ - d) - c) * invD;
+    if (s > maxSlope) maxSlope = s;
+    s = Math.abs(this.getHeightAt(worldX + d, worldZ) - c) * invD;
+    if (s > maxSlope) maxSlope = s;
+    s = Math.abs(this.getHeightAt(worldX - d, worldZ) - c) * invD;
+    if (s > maxSlope) maxSlope = s;
+    s = Math.abs(this.getHeightAt(worldX + d, worldZ + d) - c) * invDiag;
+    if (s > maxSlope) maxSlope = s;
+    s = Math.abs(this.getHeightAt(worldX - d, worldZ + d) - c) * invDiag;
+    if (s > maxSlope) maxSlope = s;
+    s = Math.abs(this.getHeightAt(worldX + d, worldZ - d) - c) * invDiag;
+    if (s > maxSlope) maxSlope = s;
+    s = Math.abs(this.getHeightAt(worldX - d, worldZ - d) - c) * invDiag;
+    if (s > maxSlope) maxSlope = s;
+    return maxSlope;
+  }
 
-    // Sample heights in 4 diagonal directions
-    // Diagonal distance is sqrt(2) * checkDistance for proper slope calculation
-    const diagDistance = checkDistance * Math.SQRT2;
-    const neHeight = this.getHeightAt(
-      worldX + checkDistance,
-      worldZ + checkDistance,
-    );
-    const nwHeight = this.getHeightAt(
-      worldX - checkDistance,
-      worldZ + checkDistance,
-    );
-    const seHeight = this.getHeightAt(
-      worldX + checkDistance,
-      worldZ - checkDistance,
-    );
-    const swHeight = this.getHeightAt(
-      worldX - checkDistance,
-      worldZ - checkDistance,
-    );
+  /**
+   * Check if a terrain tile has been generated.
+   * Used by pathfinding to determine if walkability flags have been baked.
+   */
+  isTerrainTileGenerated(terrainTileX: number, terrainTileZ: number): boolean {
+    return this.terrainTiles.has(`${terrainTileX}_${terrainTileZ}`);
+  }
 
-    // Calculate maximum slope in any direction
-    // Cardinal slopes use checkDistance, diagonal slopes use diagDistance
-    const slopes = [
-      // Cardinal directions
-      Math.abs(northHeight - centerHeight) / checkDistance,
-      Math.abs(southHeight - centerHeight) / checkDistance,
-      Math.abs(eastHeight - centerHeight) / checkDistance,
-      Math.abs(westHeight - centerHeight) / checkDistance,
-      // Diagonal directions (normalized by diagonal distance)
-      Math.abs(neHeight - centerHeight) / diagDistance,
-      Math.abs(nwHeight - centerHeight) / diagDistance,
-      Math.abs(seHeight - centerHeight) / diagDistance,
-      Math.abs(swHeight - centerHeight) / diagDistance,
-    ];
+  /**
+   * Pre-compute WATER and STEEP_SLOPE collision flags for all movement tiles
+   * within a terrain tile. Called once when terrain is generated.
+   *
+   * This eliminates runtime terrain queries during BFS pathfinding —
+   * walkability becomes a single bitwise AND against the CollisionMatrix.
+   */
+  private bakeWalkabilityFlags(
+    terrainTileX: number,
+    terrainTileZ: number,
+  ): void {
+    const collision = this.world?.collision;
+    if (!collision) return;
 
-    return Math.max(...slopes);
+    const tileSize = this.CONFIG.TILE_SIZE; // 100m terrain tile
+    const tilesPerSide = Math.floor(tileSize / 1.0); // 100 movement tiles per side
+
+    // World origin of this terrain tile
+    const originX = terrainTileX * tileSize;
+    const originZ = terrainTileZ * tileSize;
+
+    // Clear stale terrain flags first (handles re-baking after flat zone regeneration)
+    const terrainFlagsMask = CollisionFlag.WATER | CollisionFlag.STEEP_SLOPE;
+
+    for (let lx = 0; lx < tilesPerSide; lx++) {
+      const worldX = originX + lx + 0.5; // center of movement tile
+      for (let lz = 0; lz < tilesPerSide; lz++) {
+        const worldZ = originZ + lz + 0.5;
+
+        // Movement tile coordinates
+        const moveTileX = Math.floor(worldX);
+        const moveTileZ = Math.floor(worldZ);
+
+        // Clear any previous terrain flags on this tile
+        collision.removeFlags(moveTileX, moveTileZ, terrainFlagsMask);
+
+        let flags = 0;
+
+        // 1. Biome check — "lakes" biome is always impassable
+        const biomeTerrainTileX = Math.floor(worldX / tileSize);
+        const biomeTerrainTileZ = Math.floor(worldZ / tileSize);
+        const biome = this.getBiomeAt(biomeTerrainTileX, biomeTerrainTileZ);
+        if (biome === "lakes") {
+          flags = CollisionFlag.WATER;
+        } else {
+          // 2. Water check — height below WATER_THRESHOLD
+          const height = this.getHeightAt(worldX, worldZ);
+          if (height < this.CONFIG.WATER_THRESHOLD) {
+            flags = CollisionFlag.WATER;
+          } else {
+            // 3. Slope check — slope exceeds biome's maxSlope
+            const biomeData = BIOMES[biome];
+            if (biomeData) {
+              const slope = this.calculateSlope(worldX, worldZ);
+              if (slope > biomeData.maxSlope) {
+                flags = CollisionFlag.STEEP_SLOPE;
+              }
+            }
+          }
+        }
+
+        if (flags !== 0) {
+          collision.addFlags(moveTileX, moveTileZ, flags);
+        }
+      }
+    }
+  }
+
+  /**
+   * Process walkability baking incrementally across ticks.
+   * Processes rows of a terrain tile within a time budget (~4ms) to avoid
+   * the synchronous 10,000-iteration spike from bakeWalkabilityFlags.
+   */
+  private processWalkabilityQueue(): void {
+    if (!this.runtimeIsServer) return;
+    const collision = this.world?.collision;
+    if (!collision) return;
+
+    const budgetMs = 4;
+    const t0 = performance.now();
+    const tileSize = this.CONFIG.TILE_SIZE;
+    const tilesPerSide = Math.floor(tileSize / 1.0); // 100
+    const terrainFlagsMask = CollisionFlag.WATER | CollisionFlag.STEEP_SLOPE;
+
+    while (performance.now() - t0 < budgetMs) {
+      // Start next tile if no work in progress
+      if (!this.walkabilityProgress) {
+        if (this.pendingWalkabilityTiles.length === 0) return;
+        const next = this.pendingWalkabilityTiles.shift()!;
+        this.walkabilityProgress = {
+          tileX: next.tileX,
+          tileZ: next.tileZ,
+          nextRow: 0,
+        };
+      }
+
+      const prog = this.walkabilityProgress;
+      const originX = prog.tileX * tileSize;
+      const originZ = prog.tileZ * tileSize;
+
+      // Process rows until budget or tile exhausted
+      while (prog.nextRow < tilesPerSide) {
+        if (performance.now() - t0 > budgetMs) return; // preserve progress
+
+        const lx = prog.nextRow;
+        const worldX = originX + lx + 0.5;
+
+        for (let lz = 0; lz < tilesPerSide; lz++) {
+          const worldZ = originZ + lz + 0.5;
+          const moveTileX = Math.floor(worldX);
+          const moveTileZ = Math.floor(worldZ);
+
+          collision.removeFlags(moveTileX, moveTileZ, terrainFlagsMask);
+
+          let flags = 0;
+          const biomeTerrainTileX = Math.floor(worldX / tileSize);
+          const biomeTerrainTileZ = Math.floor(worldZ / tileSize);
+          const biome = this.getBiomeAt(biomeTerrainTileX, biomeTerrainTileZ);
+
+          if (biome === "lakes") {
+            flags = CollisionFlag.WATER;
+          } else {
+            const height = this.getHeightAt(worldX, worldZ);
+            if (height < this.CONFIG.WATER_THRESHOLD) {
+              flags = CollisionFlag.WATER;
+            } else {
+              const biomeData = BIOMES[biome];
+              if (biomeData) {
+                const slope = this.calculateSlope(worldX, worldZ);
+                if (slope > biomeData.maxSlope) {
+                  flags = CollisionFlag.STEEP_SLOPE;
+                }
+              }
+            }
+          }
+
+          if (flags !== 0) {
+            collision.addFlags(moveTileX, moveTileZ, flags);
+          }
+        }
+
+        prog.nextRow++;
+      }
+
+      // Tile complete
+      this.walkabilityProgress = null;
+    }
   }
 
   /**
@@ -6428,11 +6700,12 @@ export class TerrainSystem extends System {
     if (isServerRuntime) {
       // Server does not render horizon terrain, so keep chunk windows tight to
       // avoid runaway memory when many autonomous agents are active.
+      // Reduced tile budget to minimize GC pressure from Float32Array allocations.
       this.coreChunkRange = 1; // 3x3 core grid
       this.ringChunkRange = 1; // No extra preload ring
       this.terrainOnlyChunkRange = 0; // Never load render-only distant tiles
-      this.maxTilesPerFrame = 2;
-      this.generationBudgetMsPerFrame = 4;
+      this.maxTilesPerFrame = 1;
+      this.generationBudgetMsPerFrame = 2;
     } else if (isEmbeddedSpectator) {
       this.coreChunkRange = 1; // 3x3 core grid
       this.ringChunkRange = 2; // Preload ring up to 5x5

@@ -19,11 +19,11 @@ import { parseArgs } from "node:util";
 const options = parseArgs({
   options: {
     help: { type: "boolean", short: "h" },
-    bots: { type: "string", short: "b", default: "4" },
+    bots: { type: "string", short: "b", default: "10" },
     "betting-port": { type: "string", default: "4179" },
     "rtmp-port": { type: "string", default: "8765" },
     "server-url": { type: "string", default: "http://localhost:5555" },
-    "ws-url": { type: "string", default: "ws://localhost:5555/ws" },
+    "ws-url": { type: "string", default: "ws://localhost:5556/ws" },
     "client-url": { type: "string", default: "http://localhost:3333" },
     "remote-betting": { type: "boolean" },
     "skip-chain-setup": { type: "boolean" },
@@ -71,11 +71,11 @@ Usage:
 
 Options:
   -h, --help              Show this help
-  -b, --bots <n>          Duel bot count (default: 4)
+  -b, --bots <n>          Duel bot count (default: 10)
   --betting-port <n>      Hyperbet app dev port (default: 4179)
   --rtmp-port <n>         RTMP bridge websocket port (default: 8765)
   --server-url <url>      Game HTTP base URL (default: http://localhost:5555)
-  --ws-url <url>          Game WS URL (default: ws://localhost:5555/ws)
+  --ws-url <url>          Game WS URL (default: ws://localhost:5556/ws)
   --client-url <url>      Game client URL (default: http://localhost:3333)
   --remote-betting        Do not start the sibling Hyperbet app (external platform mode)
   --skip-chain-setup      Start server without setup-chain/anvil bootstrap
@@ -1517,6 +1517,12 @@ async function main() {
     ...serverEnv,
     ...process.env,
     NODE_ENV: duelNodeEnv,
+    // ElizaOS requires SECRET_SALT in production mode; generate a random one
+    // for local duel runs so agents don't crash on startup.
+    SECRET_SALT: process.env.SECRET_SALT || randomBytes(32).toString("hex"),
+    // HyperscapePlugin reads HYPERSCAPE_SERVER_URL at import time for its
+    // static config.  Point it at the uWS game WebSocket port, not Fastify.
+    HYPERSCAPE_SERVER_URL: process.env.HYPERSCAPE_SERVER_URL || serverWsUrl,
     LOG_LEVEL: duelRuntimeLogLevel,
     DEFAULT_LOG_LEVEL:
       process.env.DUEL_DEFAULT_LOG_LEVEL ||
@@ -1778,10 +1784,14 @@ async function main() {
           : madviseShimPath;
         log("enabled madvise EAGAIN stability shim for game server");
       }
+      // Use Node.js runtime (not Bun) for the game server.
+      // uWebSockets.js native bindings only support Node.js NAPI,
+      // and V8's incremental GC avoids the 500-1200ms stop-the-world
+      // pauses that Bun's JSC causes during game ticks.
       const gameServerCommand = skipChainSetup
         ? {
-          command: "bun",
-          args: ["--preload", "./src/shared/polyfills.ts", "./dist/index.js"],
+          command: "node",
+          args: ["--import", "./scripts/register-hooks.mjs", "dist/index.js"],
           opts: {
             cwd: path.join(ROOT, "packages/server"),
             env: gameServerEnv,
@@ -1901,6 +1911,7 @@ async function main() {
         "--skip-dev",
         `--bots=${bots}`,
         `--url=${serverWsUrl}`,
+        `--api-url=${serverHttpUrl}`,
         `--client-url=${clientUrl}`,
         "--connect-only",
       ],

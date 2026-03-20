@@ -158,6 +158,36 @@ async function startServer() {
   // Step 7: Start listening
   await fastify.listen({ port: config.port, host: "0.0.0.0" });
 
+  // Step 7b: Start uWS game WebSocket server (unless disabled)
+  if (process.env.UWS_ENABLED !== "false") {
+    try {
+      const { createUwsServer, getUwsApp } =
+        await import("./startup/uws-server.js");
+      const listenSocket = await createUwsServer(world, config.uwsPort);
+      if (!listenSocket) {
+        throw new Error(`uWS failed to bind to port ${config.uwsPort}`);
+      }
+      // Wire uWS pub/sub to BroadcastManager for native C++ fan-out
+      const uwsApp = getUwsApp();
+      const net = world.network as unknown as {
+        enablePubSub?: (app: unknown) => void;
+      };
+      if (uwsApp && net?.enablePubSub) {
+        net.enablePubSub(uwsApp);
+      }
+    } catch (err) {
+      console.warn(
+        `[Server] ⚠️ uWebSockets.js failed to load, falling back to Fastify /ws transport:`,
+        errMsg(err),
+      );
+      // Re-register the Fastify /ws route as fallback
+      const { registerWebSocket: registerFallbackWs } =
+        await import("./startup/websocket.js");
+      process.env.UWS_ENABLED = "false";
+      registerFallbackWs(fastify, world);
+    }
+  }
+
   // Step 8: Initialize streaming duel scheduler (BEFORE agents so it can track their spawns)
   if (streamingDuelEnabled) {
     try {
@@ -486,15 +516,8 @@ function startMemoryMonitor(world: unknown): void {
   let softWarningLogged = false;
 
   const bunGcHint = (): void => {
-    try {
-      (
-        globalThis as typeof globalThis & {
-          Bun?: { gc?: (force?: boolean) => void };
-        }
-      ).Bun?.gc?.(true);
-    } catch {
-      // Best-effort GC hint only.
-    }
+    // Disabled: Even Bun.gc(false) can block the event loop for 1-2 seconds
+    // on heaps >2GB, causing missed game ticks. Let the runtime GC naturally.
   };
 
   const timer = setInterval(() => {

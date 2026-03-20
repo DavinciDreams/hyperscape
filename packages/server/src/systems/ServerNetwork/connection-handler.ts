@@ -53,6 +53,8 @@ import { resolveStreamingViewerAccessToken } from "../../streaming/stream-viewer
 import { authenticateUser, checkUserBan } from "./authentication";
 import { loadCharacterList } from "./character-selection";
 import type { BroadcastManager } from "./broadcast";
+import type { UwsWebSocketAdapter } from "../../startup/UwsWebSocketAdapter";
+import type { SpatialIndex } from "./SpatialIndex";
 import { errMsg } from "../../shared/errMsg.js";
 
 /**
@@ -111,6 +113,8 @@ let lastSpectatorTargetMissingWarnAt = 0;
  * to fully-initialized player.
  */
 export class ConnectionHandler {
+  private spatialIndex: SpatialIndex | null = null;
+
   /**
    * Create a ConnectionHandler
    *
@@ -125,6 +129,11 @@ export class ConnectionHandler {
     private broadcast: BroadcastManager,
     private db: SystemDatabase,
   ) {}
+
+  /** Set spatial index for spectator region topic subscriptions. */
+  setSpatialIndex(index: SpatialIndex): void {
+    this.spatialIndex = index;
+  }
 
   private isLoopbackWs(ws: NodeWebSocket): boolean {
     const rawAddress =
@@ -1419,7 +1428,9 @@ export class ConnectionHandler {
       }) as ServerSocket;
 
       // Mark as spectator (accountId may be undefined for anonymous agent spectating)
-      socket.accountId = isAgentCharacter ? undefined : undefined; // Will be set by auth flow above if applicable
+      socket.accountId = isAgentCharacter
+        ? undefined
+        : (verifiedUserId ?? undefined);
       socket.createdAt = Date.now();
       socket.isSpectator = true;
       socket.spectatingCharacterId = characterId;
@@ -1437,6 +1448,9 @@ export class ConnectionHandler {
 
       // Register spectator socket
       this.sockets.set(socket.id, socket);
+
+      // Subscribe to pub/sub topics for spectator broadcasting
+      this.subscribeSpectatorTopics(socket, characterId);
 
       // Send inventory of spectated character to spectator
       await this.sendSpectatorInventory(socket, characterId);
@@ -1558,6 +1572,18 @@ export class ConnectionHandler {
       // Register streaming viewer socket
       this.sockets.set(socket.id, socket);
 
+      // Subscribe to pub/sub topics for spectator broadcasting
+      const followCharId = socket.spectatingCharacterId;
+      if (followCharId) {
+        this.subscribeSpectatorTopics(socket, followCharId);
+      } else {
+        // Streaming viewer with no specific follow target — just subscribe spectator topic
+        const adapter = this.getUwsAdapter(socket);
+        if (adapter) {
+          adapter.subscribe("spectator");
+        }
+      }
+
       console.log(
         `[ConnectionHandler] 📺 Streaming viewer connected: ${socketId}`,
       );
@@ -1612,6 +1638,50 @@ export class ConnectionHandler {
     };
 
     socket.send("snapshot", streamingSnapshot);
+  }
+
+  /**
+   * Get the UwsWebSocketAdapter from a socket's ws (duck-typed check).
+   */
+  private getUwsAdapter(socket: ServerSocket): UwsWebSocketAdapter | null {
+    const ws = socket.ws as unknown as UwsWebSocketAdapter | undefined;
+    if (
+      ws &&
+      typeof ws.subscribe === "function" &&
+      typeof ws.publish === "function"
+    ) {
+      return ws;
+    }
+    return null;
+  }
+
+  /**
+   * Subscribe a spectator socket to pub/sub topics:
+   * - "spectator" (all spectator broadcasts)
+   * - "spectator:<charId>" (player-specific spectator broadcasts)
+   * - 9 region topics around the followed player's position
+   */
+  private subscribeSpectatorTopics(
+    socket: ServerSocket,
+    characterId: string,
+  ): void {
+    const adapter = this.getUwsAdapter(socket);
+    if (!adapter) return;
+
+    adapter.subscribe("spectator");
+    adapter.subscribe(`spectator:${characterId}`);
+
+    // Subscribe to followed player's region topics
+    const followedEntity = this.world.entities?.get(characterId);
+    if (followedEntity?.position && this.spatialIndex) {
+      const regionKeys = this.spatialIndex.getAdjacentRegionKeys(
+        followedEntity.position.x,
+        followedEntity.position.z,
+      );
+      for (let i = 0; i < 9; i++) {
+        adapter.subscribe(this.spatialIndex.getRegionTopic(regionKeys[i]));
+      }
+    }
   }
 
   /**

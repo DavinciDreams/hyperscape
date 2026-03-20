@@ -273,6 +273,7 @@ import {
 } from "./handlers/duel";
 import { getDatabase } from "./handlers/common";
 import { registerDuelEventListeners } from "./duel-events";
+import type { UwsWebSocketAdapter } from "../../startup/UwsWebSocketAdapter";
 
 const DEBUG_ATTACK_MOB =
   process.env.DEBUG_ATTACK_MOB === "true" ||
@@ -376,6 +377,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   /** Agent available goals storage (characterId -> available goals) for dashboard selection */
   static agentAvailableGoals: Map<string, unknown[]> = new Map();
 
+  /** Per-phase timing (ms) for tickHealth diagnostics */
+  private _lastMobAITime = 0;
+  private _lastMobMoveTime = 0;
+  private _lastCombatTime = 0;
+
   /** Agent goals paused state (characterId -> boolean) for dashboard display */
   static agentGoalsPaused: Map<string, boolean> = new Map();
 
@@ -477,6 +483,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
   /** Cleanup function for duel event listeners */
   private cleanupDuelEventListeners: (() => void) | null = null;
+  private _lagProbeTimer: ReturnType<typeof setTimeout> | null = null;
+  private _stopLagProbe: (() => void) | null = null;
   private readonly messageMetrics = new Map<string, NetworkMessageMetric>();
 
   constructor(world: World) {
@@ -576,6 +584,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.spatialIndex = new SpatialIndex();
     this.broadcastManager.setSpatialIndex(this.spatialIndex);
 
+    // Note: uWS pub/sub is wired later via enablePubSub() after uWS server starts
+
     // Tick system for RuneScape-style 600ms ticks
     this.tickSystem = new TickSystem();
 
@@ -593,11 +603,18 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           // Keep SpatialIndex in sync with tile movement so the player
           // stays within their own broadcast radius
           if (payload.id) {
-            this.spatialIndex.updatePlayerPosition(
+            const moveRegionChange = this.spatialIndex.updatePlayerPosition(
               payload.id,
               entity.position.x,
               entity.position.z,
             );
+            if (moveRegionChange) {
+              this.updatePlayerRegionSubscriptions(
+                payload.id,
+                moveRegionChange.oldKey,
+                moveRegionChange.newKey,
+              );
+            }
           }
           this.broadcastManager.sendToNearby(
             name,
@@ -695,9 +712,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // FIRST: Update world.currentTick on each tick so all systems can read it
     // This must run before any other tick processing (INPUT is earliest priority)
     // Mobs use this to run AI only once per tick instead of every frame
-    this.tickSystem.onTick((tickNumber) => {
-      this.world.currentTick = tickNumber;
-    }, TickPriority.INPUT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.world.currentTick = tickNumber;
+      },
+      TickPriority.INPUT,
+      "currentTick",
+    );
 
     // SECOND: Process duel state transitions BEFORE action queue
     // CRITICAL: Must run before ActionQueue so COUNTDOWN→FIGHTING transition
@@ -705,19 +726,38 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Without this ordering, there's a race condition where movement requests
     // are rejected because they see COUNTDOWN state, but state changes to
     // FIGHTING later in the same tick
-    this.tickSystem.onTick(() => {
-      this.duelSystem.processTick();
-    }, TickPriority.INPUT);
+    this.tickSystem.onTick(
+      () => {
+        this.duelSystem.processTick();
+      },
+      TickPriority.INPUT,
+      "duelSystem",
+    );
 
     // Register action queue to process inputs at INPUT priority
-    this.tickSystem.onTick((tickNumber) => {
-      this.actionQueue.processTick(tickNumber);
-    }, TickPriority.INPUT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.actionQueue.processTick(tickNumber);
+      },
+      TickPriority.INPUT,
+      "actionQueue",
+    );
 
     // Register tile movement to run on each tick (after inputs)
-    this.tickSystem.onTick((tickNumber) => {
-      this.tileMovementManager.onTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const t0 = Date.now();
+        this.tileMovementManager.onTick(tickNumber);
+        const elapsed = Date.now() - t0;
+        if (elapsed > 50) {
+          console.warn(
+            `[Tick] playerMovement: ${elapsed}ms for ${this.tileMovementManager.getPlayerCount()} players`,
+          );
+        }
+      },
+      TickPriority.MOVEMENT,
+      "playerMovement",
+    );
 
     // Mob tile-based movement manager (same tick system as players)
     // Use sendToNearby for mob movement broadcasts
@@ -748,19 +788,48 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Without this, mobs stand idle forever because MobEntity.serverUpdate() defers
     // AI ticking to the tick system for deterministic OSRS ordering.
     const MOB_AI_DELTA_SECONDS = TICK_DURATION_MS / 1000;
-    this.tickSystem.onTick(() => {
-      for (const entity of this.world.entities.values()) {
-        if (!(entity instanceof MobEntity)) continue;
-        if (entity.getHealth() <= 0) continue;
-        entity.runAITick(MOB_AI_DELTA_SECONDS);
-      }
-    }, TickPriority.MOVEMENT);
+
+    // Use type-indexed entity lookup instead of iterating all 221+ entities
+    const getEntityManager = () =>
+      this.world.getSystem("entity-manager") as
+        | { getEntitiesByType?: (type: string) => Array<{ id: string }> }
+        | undefined;
+
+    this.tickSystem.onTick(
+      () => {
+        const t0 = Date.now();
+        const em = getEntityManager();
+        const mobs = em?.getEntitiesByType?.("mob") ?? [];
+        let mobCount = 0;
+        for (const entry of mobs) {
+          const entity = this.world.entities.get(entry.id);
+          if (!entity || !(entity instanceof MobEntity)) continue;
+          // Run for ALL mobs including dead ones — runAITick handles death state
+          // (position locking, respawn timer) since mobs are no longer in the hot set
+          entity.runAITick(MOB_AI_DELTA_SECONDS);
+          mobCount++;
+        }
+        const mobAIMs = Date.now() - t0;
+        this._lastMobAITime = mobAIMs;
+        if (mobAIMs > 30) {
+          console.warn(`[Tick] MobAI: ${mobAIMs}ms for ${mobCount} mobs`);
+        }
+      },
+      TickPriority.MOVEMENT,
+      "mobAI",
+    );
 
     // Register mob tile movement to run on each tick (same priority as player movement)
     // Runs AFTER mob AI so paths set by AI are executed this tick
-    this.tickSystem.onTick((tickNumber) => {
-      this.mobTileMovementManager.onTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const t0 = Date.now();
+        this.mobTileMovementManager.onTick(tickNumber);
+        this._lastMobMoveTime = Date.now() - t0;
+      },
+      TickPriority.MOVEMENT,
+      "mobMovement",
+    );
 
     // Pending attack manager - server-authoritative tracking of "walk to mob and attack" actions
     // This replaces unreliable client-side tracking with 100% reliable server-side logic
@@ -784,54 +853,62 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending attack processing BEFORE combat (so attacks can initiate combat this tick)
-    this.tickSystem.onTick((tickNumber) => {
-      this.pendingAttackManager.processTick(tickNumber);
-    }, TickPriority.MOVEMENT); // Same priority as movement, runs after player moves
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.pendingAttackManager.processTick(tickNumber);
+      },
+      TickPriority.MOVEMENT,
+      "pendingAttack",
+    );
 
     // Water hazard recovery - automatically teleport agents out of water
-    this.tickSystem.onTick(() => {
-      const terrain = this.world.getSystem("terrain") as {
-        getHeightAt?: (x: number, z: number) => number;
-      } | null;
+    this.tickSystem.onTick(
+      () => {
+        const terrain = this.world.getSystem("terrain") as {
+          getHeightAt?: (x: number, z: number) => number;
+        } | null;
 
-      if (!terrain?.getHeightAt) return;
+        if (!terrain?.getHeightAt) return;
 
-      for (const entity of this.world.entities.values()) {
-        if (
-          entity.type === "player" &&
-          entity.data?.isAgent &&
-          entity.position
-        ) {
-          const { x, z } = entity.position;
-          const y = terrain.getHeightAt(x, z);
+        // Only check agent players, not all 221+ entities
+        const em = getEntityManager();
+        const players = em?.getEntitiesByType?.("player") ?? [];
+        for (const entry of players) {
+          const entity = this.world.entities.get(entry.id);
+          if (entity && entity.data?.isAgent && entity.position) {
+            const { x, z } = entity.position;
+            const y = terrain.getHeightAt(x, z);
 
-          if (
-            typeof y === "number" &&
-            Number.isFinite(y) &&
-            y < TERRAIN_CONSTANTS.WATER_THRESHOLD
-          ) {
-            console.warn(
-              `[WaterRecovery] Agent ${entity.id} is in water (y=${y}), teleporting home.`,
-            );
+            if (
+              typeof y === "number" &&
+              Number.isFinite(y) &&
+              y < TERRAIN_CONSTANTS.WATER_THRESHOLD
+            ) {
+              console.warn(
+                `[WaterRecovery] Agent ${entity.id} is in water (y=${y}), teleporting home.`,
+              );
 
-            // Get safe spawn position
-            const [spawnX, baseY, spawnZ] = this.spawn.position;
-            const spawnTerrainHeight = terrain.getHeightAt(spawnX, spawnZ);
-            const safeY =
-              typeof spawnTerrainHeight === "number" &&
-              Number.isFinite(spawnTerrainHeight)
-                ? spawnTerrainHeight + 0.1
-                : baseY;
+              // Get safe spawn position
+              const [spawnX, baseY, spawnZ] = this.spawn.position;
+              const spawnTerrainHeight = terrain.getHeightAt(spawnX, spawnZ);
+              const safeY =
+                typeof spawnTerrainHeight === "number" &&
+                Number.isFinite(spawnTerrainHeight)
+                  ? spawnTerrainHeight + 0.1
+                  : baseY;
 
-            this.world.emit("player:teleport", {
-              playerId: entity.id,
-              position: { x: spawnX, y: safeY, z: spawnZ },
-              rotation: 0,
-            });
+              this.world.emit("player:teleport", {
+                playerId: entity.id,
+                position: { x: spawnX, y: safeY, z: spawnZ },
+                rotation: 0,
+              });
+            }
           }
         }
-      }
-    }, TickPriority.MOVEMENT);
+      },
+      TickPriority.MOVEMENT,
+      "waterRecovery",
+    );
 
     // Pending gather manager - server-authoritative tracking of "walk to resource and gather" actions
     // Uses same approach as PendingAttackManager: movePlayerToward with meleeRange=1 for cardinal-only
@@ -842,9 +919,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending gather processing (same priority as movement)
-    this.tickSystem.onTick((tickNumber) => {
-      this.pendingGatherManager.processTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.pendingGatherManager.processTick(tickNumber);
+      },
+      TickPriority.MOVEMENT,
+      "pendingGather",
+    );
 
     // Pending cook manager - server-authoritative tracking of "walk to fire and cook" actions
     // Uses same approach as PendingGatherManager: movePlayerToward with meleeRange=1 for cardinal-only
@@ -870,9 +951,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending cook processing (same priority as movement)
-    this.tickSystem.onTick((tickNumber) => {
-      this.pendingCookManager.processTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.pendingCookManager.processTick(tickNumber);
+      },
+      TickPriority.MOVEMENT,
+      "pendingCook",
+    );
 
     // Follow manager - server-authoritative tracking of players following other players
     // OSRS-style: follower walks behind leader, re-paths when leader moves
@@ -883,9 +968,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Register follow processing (same priority as movement)
     // Pass tick number for OSRS-accurate 1-tick delay tracking
-    this.tickSystem.onTick((tickNumber) => {
-      this.followManager.processTick(tickNumber);
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        this.followManager.processTick(tickNumber);
+      },
+      TickPriority.MOVEMENT,
+      "followManager",
+    );
 
     // Pending trade manager - server-authoritative "walk to player and trade" system
     // OSRS-style: if player clicks to trade someone far away, walk up first
@@ -895,9 +984,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending trade processing (same priority as movement)
-    this.tickSystem.onTick(() => {
-      this.pendingTradeManager.processTick();
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      () => {
+        this.pendingTradeManager.processTick();
+      },
+      TickPriority.MOVEMENT,
+      "pendingTrade",
+    );
 
     // Store pending trade manager on world so trade handlers can access it
     (
@@ -912,9 +1005,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register pending duel challenge processing (same priority as movement)
-    this.tickSystem.onTick(() => {
-      this.pendingDuelChallengeManager.processTick();
-    }, TickPriority.MOVEMENT);
+    this.tickSystem.onTick(
+      () => {
+        this.pendingDuelChallengeManager.processTick();
+      },
+      TickPriority.MOVEMENT,
+      "pendingDuel",
+    );
 
     // Store pending duel challenge manager on world so handlers can access it
     (
@@ -1026,7 +1123,20 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       // CRITICAL: Update spatial index so sendToNearby() finds players at new location.
       // Without this, post-teleport tile movement broadcasts (e.g., combat follow)
       // won't reach players whose spatial index is still at their pre-teleport position.
-      this.spatialIndex.updatePlayerPosition(playerId, position.x, position.z);
+      const teleportRegionChange = this.spatialIndex.updatePlayerPosition(
+        playerId,
+        position.x,
+        position.z,
+      );
+      // Full region resubscription on teleport (may jump many regions)
+      if (teleportRegionChange) {
+        this.resubscribePlayerRegionTopics(
+          playerId,
+          teleportRegionChange.oldKey,
+          position.x,
+          position.z,
+        );
+      }
 
       // Clear any in-progress movement by cleaning up the player's movement state
       this.tileMovementManager.cleanup(playerId);
@@ -1106,30 +1216,38 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Register face direction processing - runs AFTER all movement at COMBAT priority
     // OSRS: Face direction mask is processed at end of tick if entity didn't move
-    this.tickSystem.onTick(() => {
-      // Get all player IDs from the players map (not items)
-      const entitiesSystem = this.world.entities as {
-        players?: Map<string, { id: string }>;
-      } | null;
+    this.tickSystem.onTick(
+      () => {
+        // Get all player IDs from the players map (not items)
+        const entitiesSystem = this.world.entities as {
+          players?: Map<string, { id: string }>;
+        } | null;
 
-      if (!entitiesSystem?.players) {
-        return;
-      }
+        if (!entitiesSystem?.players) {
+          return;
+        }
 
-      const playerIds: string[] = [];
-      for (const [playerId] of entitiesSystem.players) {
-        playerIds.push(playerId);
-      }
+        const playerIds: string[] = [];
+        for (const [playerId] of entitiesSystem.players) {
+          playerIds.push(playerId);
+        }
 
-      if (playerIds.length > 0) {
-        this.faceDirectionManager.processFaceDirection(playerIds);
-      }
-    }, TickPriority.COMBAT);
+        if (playerIds.length > 0) {
+          this.faceDirectionManager.processFaceDirection(playerIds);
+        }
+      },
+      TickPriority.COMBAT,
+      "faceDirection",
+    );
 
     // Reset movement flags at the START of each tick (INPUT priority)
-    this.tickSystem.onTick(() => {
-      this.faceDirectionManager.resetMovementFlags();
-    }, TickPriority.INPUT);
+    this.tickSystem.onTick(
+      () => {
+        this.faceDirectionManager.resetMovementFlags();
+      },
+      TickPriority.INPUT,
+      "resetMoveFlags",
+    );
 
     // Store face direction manager on world so ResourceSystem can access it
     (
@@ -1138,64 +1256,157 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Register combat system to process on each tick (after movement, before AI)
     // This is OSRS-accurate: combat runs on the game tick, not per-frame
-    this.tickSystem.onTick((tickNumber) => {
-      const combatSystem = this.world.getSystem(
-        "combat",
-      ) as CombatSystem | null;
-      if (combatSystem) {
-        combatSystem.processCombatTick(tickNumber);
-      }
-    }, TickPriority.COMBAT);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const t0 = Date.now();
+        const combatSystem = this.world.getSystem(
+          "combat",
+        ) as CombatSystem | null;
+        if (combatSystem) {
+          combatSystem.processCombatTick(tickNumber);
+        }
+        this._lastCombatTime = Date.now() - t0;
+      },
+      TickPriority.COMBAT,
+      "combat",
+    );
 
     // Register death system to process on each tick (after combat)
     // Handles gravestone expiration and ground item despawn (OSRS-accurate tick-based timing)
-    this.tickSystem.onTick((tickNumber) => {
-      const playerDeathSystem = this.world.getSystem(
-        "player-death",
-      ) as unknown as PlayerDeathSystemWithTick | undefined;
-      if (
-        playerDeathSystem &&
-        typeof playerDeathSystem.processTick === "function"
-      ) {
-        playerDeathSystem.processTick(tickNumber);
-      }
-    }, TickPriority.COMBAT); // Same priority as combat (after movement)
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const playerDeathSystem = this.world.getSystem(
+          "player-death",
+        ) as unknown as PlayerDeathSystemWithTick | undefined;
+        if (
+          playerDeathSystem &&
+          typeof playerDeathSystem.processTick === "function"
+        ) {
+          playerDeathSystem.processTick(tickNumber);
+        }
+      },
+      TickPriority.COMBAT,
+      "playerDeath",
+    );
 
     // Register loot system to process on each tick (after combat)
     // Handles mob corpse despawn (OSRS-accurate tick-based timing)
-    this.tickSystem.onTick((tickNumber) => {
-      const lootSystem = this.world.getSystem("loot") as unknown as
-        | PlayerDeathSystemWithTick
-        | undefined;
-      if (lootSystem && typeof lootSystem.processTick === "function") {
-        lootSystem.processTick(tickNumber);
-      }
-    }, TickPriority.COMBAT); // Same priority as combat (after movement)
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const lootSystem = this.world.getSystem("loot") as unknown as
+          | PlayerDeathSystemWithTick
+          | undefined;
+        if (lootSystem && typeof lootSystem.processTick === "function") {
+          lootSystem.processTick(tickNumber);
+        }
+      },
+      TickPriority.COMBAT,
+      "loot",
+    );
 
     // Register resource gathering system to process on each tick (after combat)
     // OSRS-accurate: Woodcutting attempts every 4 ticks (2.4 seconds)
-    this.tickSystem.onTick((tickNumber) => {
-      const resourceSystem = this.world.getSystem(
-        "resource",
-      ) as ResourceSystem | null;
-      if (
-        resourceSystem &&
-        typeof resourceSystem.processGatheringTick === "function"
-      ) {
-        resourceSystem.processGatheringTick(tickNumber);
-      }
-    }, TickPriority.RESOURCES);
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const resourceSystem = this.world.getSystem(
+          "resource",
+        ) as ResourceSystem | null;
+        if (
+          resourceSystem &&
+          typeof resourceSystem.processGatheringTick === "function"
+        ) {
+          resourceSystem.processGatheringTick(tickNumber);
+        }
+      },
+      TickPriority.RESOURCES,
+      "resources",
+    );
 
     // Register home teleport system to process on each tick
     // Handles cast completion and combat interruption checks
-    this.tickSystem.onTick((tickNumber) => {
-      const manager = getHomeTeleportManager();
-      if (manager) {
-        manager.processTick(tickNumber, (playerId: string) => {
-          return this.broadcastManager.getPlayerSocket(playerId);
-        });
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        const manager = getHomeTeleportManager();
+        if (manager) {
+          manager.processTick(tickNumber, (playerId: string) => {
+            return this.broadcastManager.getPlayerSocket(playerId);
+          });
+        }
+      },
+      TickPriority.RESOURCES,
+      "homeTeleport",
+    );
+
+    // Event loop lag detector — measures max time the event loop was blocked
+    // between ticks using a high-frequency setTimeout probe
+    let _maxEventLoopLag = 0;
+    let _lagProbeExpected = Date.now();
+    let _lagProbeStopped = false;
+    const lagProbe = () => {
+      if (_lagProbeStopped) return;
+      const now = Date.now();
+      const lag = now - _lagProbeExpected - 50; // Subtract expected 50ms interval
+      if (lag > 0) {
+        if (lag > _maxEventLoopLag) {
+          _maxEventLoopLag = lag;
+        }
+        // Log significant blocks to server console to help identify the source
+        if (lag > 200) {
+          console.warn(
+            `[EventLoop] ⚠️ Blocked for ${lag}ms at tick ${this.world.currentTick}`,
+          );
+        }
       }
-    }, TickPriority.RESOURCES);
+      _lagProbeExpected = now + 50;
+      this._lagProbeTimer = setTimeout(lagProbe, 50);
+    };
+    this._lagProbeTimer = setTimeout(lagProbe, 50);
+    // Expose stop function for destroy() cleanup
+    this._stopLagProbe = () => {
+      _lagProbeStopped = true;
+      if (this._lagProbeTimer) {
+        clearTimeout(this._lagProbeTimer);
+        this._lagProbeTimer = null;
+      }
+    };
+
+    // Broadcast tick health stats to clients for DevStats panel (every 5th tick = 3s)
+    this.tickSystem.onTick(
+      (tickNumber) => {
+        if (tickNumber % 5 !== 0) return;
+        const stats = this.tickSystem.getTickHealthStats();
+        // Include per-phase timing breakdown so DevStats can show WHERE time goes
+        const phaseTimings = {
+          mobAI: this._lastMobAITime,
+          mobMove: this._lastMobMoveTime,
+          combat: this._lastCombatTime,
+        };
+        const eventLoopLag = _maxEventLoopLag;
+        _maxEventLoopLag = 0; // Reset after reporting
+        const broadcastMs = this.broadcastManager.drainSendTimeMs();
+        const pubsubPublishes = this.broadcastManager.drainPubsubStats();
+        const payload: Record<string, unknown> = {
+          ...stats,
+          phaseTimings,
+          eventLoopLag,
+          broadcastMs,
+          pubsubPublishes,
+        };
+        // Only expose internal server state in non-production environments
+        if (process.env.NODE_ENV !== "production") {
+          payload.transport =
+            process.env.UWS_ENABLED !== "false" ? "uws" : "ws";
+          payload.connections = this.sockets.size;
+        }
+        this.broadcastManager.sendToAll("tickHealth", payload);
+      },
+      TickPriority.BROADCAST,
+      "tickHealthBroadcast",
+    );
+
+    // NOTE: Explicit GC scheduling removed — Bun.gc(false) callbacks piled up
+    // when ticks fell behind, creating a death spiral of competing GC passes.
+    // Let the runtime handle GC naturally.
 
     // Socket manager
     this.socketManager = new SocketManager(
@@ -1226,6 +1437,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     });
 
     // Seed spatial index on initial join so sendToNearby() works from first tick
+    // Also subscribe the socket to its 9 region topics for pub/sub
     this.onWorld(EventType.PLAYER_JOINED, (payload: unknown) => {
       const event = payload as {
         playerId: string;
@@ -1237,20 +1449,35 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           event.player.position.x,
           event.player.position.z,
         );
+        // Subscribe to region topics for pub/sub
+        this.subscribePlayerRegionTopics(
+          event.playerId,
+          event.player.position.x,
+          event.player.position.z,
+        );
       }
     });
 
     // Keep spatial index updated so sendToNearby() works
+    // Also update pub/sub region subscriptions on region change
     this.onWorld(EventType.PLAYER_POSITION_UPDATED, (payload: unknown) => {
       const event = payload as {
         playerId: string;
         position: { x: number; z: number };
       };
-      this.spatialIndex.updatePlayerPosition(
+      const regionChange = this.spatialIndex.updatePlayerPosition(
         event.playerId,
         event.position.x,
         event.position.z,
       );
+      // Update pub/sub subscriptions on region change
+      if (regionChange) {
+        this.updatePlayerRegionSubscriptions(
+          event.playerId,
+          regionChange.oldKey,
+          regionChange.newKey,
+        );
+      }
     });
 
     // Reset agility progress on death (small penalty - lose accumulated tiles toward next XP grant)
@@ -1279,11 +1506,20 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           return;
         }
         this.tileMovementManager.syncPlayerPosition(event.playerId, position);
-        this.spatialIndex.updatePlayerPosition(
+        const respawnRegionChange = this.spatialIndex.updatePlayerPosition(
           event.playerId,
           position.x,
           position.z,
         );
+        // Full region resubscription on respawn
+        if (respawnRegionChange) {
+          this.resubscribePlayerRegionTopics(
+            event.playerId,
+            respawnRegionChange.oldKey,
+            position.x,
+            position.z,
+          );
+        }
         // Also clear any pending actions from before death
         this.actionQueue.cleanup(event.playerId);
         console.log(
@@ -1513,6 +1749,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.broadcastManager,
       this.db,
     );
+    this.connectionHandler.setSpatialIndex(this.spatialIndex);
 
     // Register handlers
     this.registerHandlers();
@@ -2997,6 +3234,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.messageMetrics.clear();
     this.tickSystem.stop();
 
+    // Stop event loop lag probe to prevent leaked setTimeout loop
+    if (this._stopLagProbe) {
+      this._stopLagProbe();
+      this._stopLagProbe = null;
+    }
+
     for (const [_id, socket] of this.sockets) {
       socket.close?.();
     }
@@ -3004,7 +3247,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   override preFixedUpdate(): void {
+    const qLen = this.queue.length;
+    const t0 = Date.now();
     this.flush();
+    const elapsed = Date.now() - t0;
+    if (elapsed > 50) {
+      console.warn(
+        `[ServerNetwork] flush() took ${elapsed}ms for ${qLen} queued messages`,
+      );
+    }
   }
 
   override update(dt: number): void {
@@ -3028,6 +3279,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
    */
   send<T = unknown>(name: string, data: T, ignoreSocketId?: string): void {
     this.broadcastManager.sendToAll(name, data, ignoreSocketId);
+  }
+
+  /**
+   * Enable uWS native pub/sub broadcasting.
+   * Called from main.ts after the uWS server is created.
+   */
+  enablePubSub(uwsApp: unknown): void {
+    this.broadcastManager.setUwsApp(
+      uwsApp as import("uWebSockets.js").TemplatedApp,
+    );
+    console.log("[ServerNetwork] uWS pub/sub broadcasting enabled");
   }
 
   /**
@@ -3089,6 +3351,111 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     }
     return undefined;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pub/Sub subscription helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get the UwsWebSocketAdapter for a player's socket.
+   * Returns undefined if player not connected or not on uWS transport.
+   */
+  private getUwsAdapterForPlayer(
+    playerId: string,
+  ): UwsWebSocketAdapter | undefined {
+    const socket = this.getSocketByPlayerId(playerId);
+    if (!socket) return undefined;
+    return this.broadcastManager.getAdapter(socket.id);
+  }
+
+  /**
+   * Subscribe a player's socket to 9 region topics around a position.
+   * Called on PLAYER_JOINED.
+   */
+  private subscribePlayerRegionTopics(
+    playerId: string,
+    worldX: number,
+    worldZ: number,
+  ): void {
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (!adapter) return;
+    const regionKeys = this.spatialIndex.getAdjacentRegionKeys(worldX, worldZ);
+    for (let i = 0; i < 9; i++) {
+      adapter.subscribe(this.spatialIndex.getRegionTopic(regionKeys[i]));
+    }
+  }
+
+  /**
+   * Compute diff of old vs new 3×3 region grids and update subscriptions.
+   * Called on position updates that cross a region boundary.
+   */
+  private updatePlayerRegionSubscriptions(
+    playerId: string,
+    oldKey: number,
+    newKey: number,
+  ): void {
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (!adapter) return;
+    const diff = this.spatialIndex.getRegionSubscriptionDiff(oldKey, newKey);
+    for (const key of diff.unsubscribe) {
+      adapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
+    }
+    for (const key of diff.subscribe) {
+      adapter.subscribe(this.spatialIndex.getRegionTopic(key));
+    }
+
+    // Also update any spectators following this player
+    this.updateSpectatorRegionSubscriptions(playerId, diff);
+  }
+
+  /**
+   * Full region resubscription — unsub all old 9, sub all new 9.
+   * Called on teleport/respawn where the player may jump many regions.
+   */
+  private resubscribePlayerRegionTopics(
+    playerId: string,
+    oldKey: number,
+    worldX: number,
+    worldZ: number,
+  ): void {
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (!adapter) return;
+    // Unsub old 9 regions
+    const oldKeys = this.spatialIndex.getAdjacentRegionKeysFromKey(oldKey);
+    for (let i = 0; i < 9; i++) {
+      adapter.unsubscribe(this.spatialIndex.getRegionTopic(oldKeys[i]));
+    }
+    // Sub new 9 regions
+    const newKeys = this.spatialIndex.getAdjacentRegionKeys(worldX, worldZ);
+    for (let i = 0; i < 9; i++) {
+      adapter.subscribe(this.spatialIndex.getRegionTopic(newKeys[i]));
+    }
+  }
+
+  /**
+   * Update spectator region subscriptions when a followed player changes region.
+   * Typically 0-2 spectators per player.
+   */
+  private updateSpectatorRegionSubscriptions(
+    followedPlayerId: string,
+    diff: { subscribe: number[]; unsubscribe: number[] },
+  ): void {
+    for (const socket of this.sockets.values()) {
+      if (!socket.isSpectator) continue;
+      const spectSocket = socket as ServerSocket & {
+        spectatingCharacterId?: string;
+      };
+      if (spectSocket.spectatingCharacterId !== followedPlayerId) continue;
+      const spectAdapter = this.broadcastManager.getAdapter(socket.id);
+      if (!spectAdapter) continue;
+      for (const key of diff.unsubscribe) {
+        spectAdapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
+      }
+      for (const key of diff.subscribe) {
+        spectAdapter.subscribe(this.spatialIndex.getRegionTopic(key));
+      }
+    }
   }
 
   /**

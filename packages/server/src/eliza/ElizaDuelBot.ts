@@ -228,12 +228,14 @@ export class ElizaDuelBot extends EventEmitter {
         // Build plugins (no SQL plugin — InMemoryDatabaseAdapter replaces PGLite WASM)
         const plugins: Plugin[] = [modelPlugin, hyperscapePlugin];
 
-        // Create a memory-safe adapter (cap logs + fix memoriesByRoom leak)
+        // Create a memory-safe adapter (cap logs)
         const adapter = new InMemoryDatabaseAdapter();
         const MAX_LOGS = 20;
-        const origLog = adapter.log.bind(adapter);
-        adapter.log = async (params: Parameters<typeof origLog>[0]) => {
-          await origLog(params);
+        const origCreateLogs = adapter.createLogs.bind(adapter);
+        adapter.createLogs = async (
+          params: Parameters<typeof origCreateLogs>[0],
+        ) => {
+          await origCreateLogs(params);
           const logs = (adapter as unknown as { logs: unknown[] }).logs;
           if (logs && logs.length > MAX_LOGS) {
             logs.splice(0, logs.length - MAX_LOGS);
@@ -269,6 +271,20 @@ export class ElizaDuelBot extends EventEmitter {
             clearTimeout(timeoutId);
             timeoutId = null;
           }
+        }
+
+        // ElizaOS v2 lazy-starts services — they aren't started during
+        // runtime.initialize().  Explicitly ensure HyperscapeService is
+        // started so the WebSocket connection + player spawn can proceed.
+        if (
+          typeof (this.runtime as Record<string, unknown>)
+            ._ensureServiceStarted === "function"
+        ) {
+          await (
+            this.runtime as unknown as {
+              _ensureServiceStarted: (t: string) => Promise<unknown>;
+            }
+          )._ensureServiceStarted("hyperscapeService");
         }
 
         await this.waitForPlayerSpawnReady(this.config.connectTimeoutMs);

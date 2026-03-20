@@ -956,10 +956,9 @@ export function InterfaceModalsRenderer({
           requirements={questStartData.requirements}
           rewards={questStartData.rewards}
           onAccept={() => {
-            const localPlayer = world.getPlayer?.();
-            if (localPlayer) {
-              world.emit(EventType.QUEST_START_ACCEPTED, {
-                playerId: localPlayer.id,
+            // Send quest accept to server (must go over network, not local event)
+            if (world.network?.send) {
+              world.network.send("questAccept", {
                 questId: questStartData.questId,
               });
             }

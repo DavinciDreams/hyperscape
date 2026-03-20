@@ -17,4 +17,8 @@ export const SlowBuffer = resolved.SlowBuffer ?? Buffer;
 export const INSPECT_MAX_BYTES = resolved.INSPECT_MAX_BYTES ?? 50;
 export const kMaxLength = resolved.kMaxLength ?? Number.MAX_SAFE_INTEGER;
 
+// Inject Buffer global for libraries that expect it (Solana, crypto, bn.js).
+// Previously handled by vite-plugin-node-polyfills, which is incompatible with vite 8.
+(globalThis as Record<string, unknown>).Buffer = Buffer;
+
 export default resolved;

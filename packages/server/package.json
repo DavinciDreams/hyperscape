@@ -23,7 +23,7 @@
     "extract-bounds": "bun scripts/extract-model-bounds.ts",
     "build": "bun scripts/build-server.mjs",
     "prestart": "bun scripts/setup-chain.mjs",
-    "start": "bun --preload ./src/shared/polyfills.ts ./dist/index.js",
+    "start": "node --import ./scripts/register-hooks.mjs dist/index.js",
     "test": "bun run --cwd ../impostors build && vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -91,6 +91,7 @@
     "source-map-support": "^0.5.21",
     "uuid": "^13.0.0",
     "viem": "^2.46.2",
+    "uWebSockets.js": "uNetworking/uWebSockets.js#v20.60.0",
     "ws": "^8.18.0",
     "zod": "^4.1.11"
   },

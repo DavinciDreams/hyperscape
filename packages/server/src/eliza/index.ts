@@ -128,20 +128,12 @@ export async function initializeAgents(
     process.env.NODE_ENV === "production" || streamingDuelEnabled;
   const spawnRequested =
     config?.spawnModelAgents ?? spawnRequestedByEnv ?? defaultSpawnModelAgents;
-  const embeddedAgentCount = manager.getAllAgents().length;
-  const allowSpawnWithEmbeddedAgents =
-    process.env.SPAWN_MODEL_AGENTS_WITH_EMBEDDED === "true";
-  const shouldSpawnAgents =
-    spawnRequested &&
-    (embeddedAgentCount === 0 || allowSpawnWithEmbeddedAgents);
-
-  if (
-    spawnRequested &&
-    embeddedAgentCount > 0 &&
-    !allowSpawnWithEmbeddedAgents
-  ) {
-    return manager;
-  }
+  // Model agents (spawned via spawnModelAgents) are a separate system from
+  // embedded agents (loaded from database via AgentManager). Previously,
+  // stale isAgent=1 records from prior runs would set embeddedAgentCount > 0,
+  // silently blocking model agent spawning. Model agents manage their own
+  // deduplication via runningAgents Map, so this gate is unnecessary.
+  const shouldSpawnAgents = spawnRequested;
 
   if (shouldSpawnAgents) {
     const availableModels = getAvailableModels();

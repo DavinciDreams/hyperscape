@@ -136,12 +136,13 @@ if (!globalThis.GPUShaderStage) {
 const opts = parseArgs({
   options: {
     help: { type: "boolean", short: "h" },
-    bots: { type: "string", short: "b", default: "4" },
+    bots: { type: "string", short: "b", default: "10" },
     "skip-dev": { type: "boolean" },
     "connect-only": { type: "boolean" },
     "match-interval": { type: "string", default: "5000" },
     "ramp-delay": { type: "string", default: "500" },
-    url: { type: "string", default: "ws://localhost:5555/ws" },
+    url: { type: "string", default: "ws://localhost:5556/ws" },
+    "api-url": { type: "string" },
     "client-url": { type: "string", default: "http://localhost:3333" },
     verbose: { type: "boolean", short: "v" },
     duration: { type: "string", short: "d" },
@@ -194,12 +195,13 @@ Usage: bun run dev:duel [options]
 
 Options:
   -h, --help               Show help
-  -b, --bots <n>           Number of bots (default: 4, min: 2)
+  -b, --bots <n>           Number of bots (default: 10, min: 2)
   --skip-dev               Don't start dev server (assume already running)
   --connect-only           Connect bots only; let the server schedule duels
   --match-interval <ms>    Time between match scheduling (default: 5000)
   --ramp-delay <ms>        Delay between bot connections (default: 500)
-  --url <ws>               Server WebSocket URL (default: ws://localhost:5555/ws)
+  --url <ws>               Server WebSocket URL (default: ws://localhost:5556/ws)
+  --api-url <http>         Server HTTP URL for health checks (default: http://localhost:5555)
   --client-url <http>      Client URL for spectator links (default: http://localhost:3333)
   --show-spectator-urls    Print spectator URLs for each match
   -v, --verbose            Show detailed logging
@@ -224,20 +226,35 @@ Spectator Mode:
 
 const releaseRunLock = acquireSingletonLock("dev-duel");
 
-function resolveHealthUrl(rawWsUrl) {
+function resolveHealthUrl(apiUrl, rawWsUrl) {
+  // Prefer explicit API URL — the WS URL may point to the uWS port which has
+  // no HTTP /health endpoint.  The health route lives on the Fastify HTTP port.
+  if (apiUrl) {
+    try {
+      const parsed = new URL(apiUrl);
+      parsed.pathname = "/health";
+      parsed.search = "";
+      parsed.hash = "";
+      return parsed.toString();
+    } catch { /* fall through */ }
+  }
+
+  // Derive from PORT env var (Fastify HTTP port, default 5555)
+  const httpPort = process.env.PORT || "5555";
   try {
     const parsed = new URL(rawWsUrl);
     parsed.protocol = parsed.protocol === "wss:" ? "https:" : "http:";
+    parsed.port = httpPort;
     parsed.pathname = "/health";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
   } catch {
-    return "http://localhost:5555/health";
+    return `http://localhost:${httpPort}/health`;
   }
 }
 
-const HEALTH_URL = resolveHealthUrl(opts.url);
+const HEALTH_URL = resolveHealthUrl(opts["api-url"], opts.url);
 const MAX_WAIT = 120000; // 2 minutes
 
 async function waitForServer() {
@@ -359,6 +376,12 @@ function formatTime(ms) {
 }
 
 async function runMatchmaker() {
+  // Set HYPERSCAPE_SERVER_URL before importing the plugin so its static config
+  // picks up the uWS port instead of defaulting to the Fastify HTTP port.
+  if (!process.env.HYPERSCAPE_SERVER_URL) {
+    process.env.HYPERSCAPE_SERVER_URL = opts.url;
+  }
+
   const { ElizaDuelMatchmaker } = await loadMatchmaker();
 
   const botCount = Math.max(2, parseInt(opts.bots, 10));

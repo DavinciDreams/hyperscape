@@ -525,6 +525,8 @@ export class MobEntity extends CombatantEntity {
 
   // AI runs once per server tick (600ms), not every frame (~16ms)
   private _lastAITick: number = -1;
+  /** Cached AI context — closures capture `this`, so safe to reuse across ticks */
+  private _cachedAIContext: AIStateContext | null = null;
 
   private _healthBarHandle: HealthBarHandle | null = null; // Handle to HealthBars system
   private _healthBarVisibleUntil: number = 0; // Timestamp when health bar should hide
@@ -533,11 +535,14 @@ export class MobEntity extends CombatantEntity {
   async init(): Promise<void> {
     await super.init();
 
-    // Register for update loop (both client and server)
+    // Register for update loop (CLIENT ONLY)
     // Client: VRM animations via clientUpdate()
-    // Server: per-frame housekeeping via serverUpdate()
-    // NPC AI itself is tick-driven by GameTickProcessor via runAITick()
-    this.world.setHot(this, true);
+    // Server: mobs are NOT in the hot set — serverUpdate() logic (death state,
+    // target validation) is handled per-tick via runAITick() to reduce GC pressure.
+    // With 98+ mobs, per-frame updates at 10Hz generated excessive garbage.
+    if (!this.world.isServer) {
+      this.world.setHot(this, true);
+    }
 
     // Register with HealthBars system (client-side only)
     // Uses atlas-based instanced mesh for performance instead of sprite per mob
@@ -1369,6 +1374,12 @@ export class MobEntity extends CombatantEntity {
    * Create AI State Context for the state machine
    * This provides all the methods the AI states need to interact with the mob
    */
+  private getAIContext(): AIStateContext {
+    if (this._cachedAIContext) return this._cachedAIContext;
+    this._cachedAIContext = this.createAIContext();
+    return this._cachedAIContext;
+  }
+
   private createAIContext(): AIStateContext {
     return {
       // Position & Movement
@@ -1644,7 +1655,7 @@ export class MobEntity extends CombatantEntity {
     this._deathPositionTerrainSnapped = false;
 
     // CRITICAL: Force AI state machine to IDLE state after respawn
-    this.aiStateMachine.forceState(MobAIState.IDLE, this.createAIContext());
+    this.aiStateMachine.forceState(MobAIState.IDLE, this.getAIContext());
 
     // Clear combat state
     this.combatManager.exitCombat();
@@ -1718,75 +1729,66 @@ export class MobEntity extends CombatantEntity {
   /**
    * Tick-driven AI update entry point (called by GameTickProcessor).
    * Guarded to avoid duplicate AI updates within the same server tick.
+   *
+   * Also handles death state management and target validation that previously
+   * ran per-frame in serverUpdate(). Moved here because mobs are no longer in
+   * the server hot set (reducing GC pressure from 98+ mob × 10Hz updates).
    */
   public runAITick(deltaTime: number): void {
     const currentTick = this.world.currentTick;
     if (currentTick === this._lastAITick) {
       return;
     }
-
     this._lastAITick = currentTick;
-    this.aiStateMachine.update(this.createAIContext(), deltaTime);
-    this.config.aiState = this.aiStateMachine.getCurrentState();
-  }
 
-  /**
-   * SERVER-SIDE UPDATE
-   * Handles AI logic, pathfinding, combat, and state management
-   * Changes are synced to clients via getNetworkData() and markNetworkDirty()
-   */
-  private serverUpdateCalls = 0;
-
-  protected serverUpdate(deltaTime: number): void {
-    super.serverUpdate(deltaTime);
-    this.serverUpdateCalls++;
-
-    // Handle death state (position locking during death animation)
+    // Handle death state (position locking, respawn timer)
     if (this.deathManager.isCurrentlyDead()) {
-      // Use Date.now() for consistent millisecond timing (world.getTime() has inconsistent units)
       const currentTime = Date.now();
 
-      // Lock position to death location (prevent any movement)
+      // Lock position to death location
       const lockedPos = this.deathManager.getLockedPosition();
       if (lockedPos) {
-        // Forcefully lock position every frame (defense in depth)
         if (
           this.position.x !== lockedPos.x ||
           this.position.y !== lockedPos.y ||
           this.position.z !== lockedPos.z
         ) {
-          console.warn(
-            `[MobEntity] ⚠️ Server position moved while dead! Restoring lock.`,
-          );
           this.position.copy(lockedPos);
           this.node.position.copy(lockedPos);
         }
       }
 
-      // Update death manager (handles death animation timing only, not respawn)
+      // Update death animation timing
       this.deathManager.update(deltaTime, currentTime);
 
-      // Update respawn manager (TICK-BASED - handles respawn timer and location)
-      // Uses server tick for OSRS-accurate timing instead of Date.now()
+      // Update respawn timer (tick-based)
       if (this.respawnManager.isRespawnTimerActive()) {
-        this.respawnManager.update(this.world.currentTick);
+        this.respawnManager.update(currentTick);
       }
 
       return; // Don't run AI when dead
     }
 
-    // Validate target is still alive before running AI (RuneScape-style: instant disengage on target death)
+    // Validate target is still alive (RuneScape-style: instant disengage on target death)
     if (this.config.targetPlayerId) {
       const targetPlayer = this.world.getPlayer(this.config.targetPlayerId);
-
-      // Target is dead or gone - immediately disengage
       if (!targetPlayer || targetPlayer.health.current <= 0) {
         this.clearTargetAndExitCombat();
       }
     }
 
-    // AI updates are handled by GameTickProcessor.runAITick()
-    // to preserve deterministic OSRS tick ordering.
+    // Run AI state machine
+    this.aiStateMachine.update(this.getAIContext(), deltaTime);
+    this.config.aiState = this.aiStateMachine.getCurrentState();
+  }
+
+  /**
+   * SERVER-SIDE UPDATE
+   * No-op on server — mobs are not in the hot set to reduce GC pressure.
+   * Death state management and target validation moved to runAITick().
+   */
+  protected serverUpdate(_deltaTime: number): void {
+    // All server-side mob logic runs in runAITick() (tick-driven, not frame-driven)
   }
 
   /**
@@ -2405,10 +2407,7 @@ export class MobEntity extends CombatantEntity {
       if (attackerId && !this.config.targetPlayerId && this.config.retaliates) {
         this.config.targetPlayerId = attackerId;
         this.aggroManager.setTargetIfNone(attackerId);
-        this.aiStateMachine.forceState(
-          MobAIState.CHASE,
-          this.createAIContext(),
-        );
+        this.aiStateMachine.forceState(MobAIState.CHASE, this.getAIContext());
       }
     }
 
@@ -2748,7 +2747,7 @@ export class MobEntity extends CombatantEntity {
     this.combatManager.exitCombat();
 
     // Force AI state based on movement type
-    const context = this.createAIContext();
+    const context = this.getAIContext();
     if (this.config.movementType === "stationary") {
       // Stationary mobs go directly to IDLE
       this.aiStateMachine.forceState(MobAIState.IDLE, context);

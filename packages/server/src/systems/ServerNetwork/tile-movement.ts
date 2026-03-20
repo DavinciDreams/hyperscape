@@ -75,6 +75,8 @@ export class TileMovementManager {
   // Y-axis for stable yaw rotation calculation
   private _up = new THREE.Vector3(0, 1, 0);
   private _tempQuat = new THREE.Quaternion();
+  /** Pre-allocated world position for walkability checks (zero allocation in BFS) */
+  private _walkableWorldPos = { x: 0, y: 0, z: 0 };
 
   /**
    * Arrival emotes: When a player arrives at destination, use this emote instead of "idle"
@@ -173,9 +175,13 @@ export class TileMovementManager {
   }
 
   /**
-   * Check if a tile is walkable based on collision and terrain constraints
-   * Checks CollisionMatrix for static objects (trees, rocks, stations)
-   * and TerrainSystem for water level, slope, and biome rules
+   * Check if a tile is walkable based on collision and terrain constraints.
+   * Uses per-tick walkability cache: terrain/slope/biome results are cached
+   * by tile key since they don't change within a tick. Directional collision
+   * (from→to) is cached separately since it depends on movement direction.
+   *
+   * With 25 agents pathfinding in the same area, the cache makes subsequent
+   * BFS calls nearly free for previously-checked tiles.
    */
   private isTileWalkable(
     tile: TileCoord,
@@ -204,42 +210,77 @@ export class TileMovementManager {
       isTargetInBuilding = buildingCheck.targetInBuildingFootprint;
     }
 
-    // Directional block from collision matrix
+    // Directional block from collision matrix (direction-dependent, cached separately)
     if (floorIndex === 0 && fromTile) {
-      if (
-        this.world.collision.isBlocked(fromTile.x, fromTile.z, tile.x, tile.z)
-      ) {
-        return false;
+      // Encode from→to direction into a single numeric key.
+      // Direction (dx+1, dz+1) each ∈ [0,2], so direction occupies 4 bits (3×3=9 values).
+      // fromTile coords are offset to positive, then z gets 21 bits before x.
+      const dir =
+        ((tile.x - fromTile.x + 1) | 0) * 3 + ((tile.z - fromTile.z + 1) | 0);
+      const dirKey =
+        ((fromTile.x + 1048576) | 0) * 18874368 +
+        ((fromTile.z + 1048576) | 0) * 9 +
+        dir;
+      const cachedDir = this._directionalBlockCache.get(dirKey);
+      if (cachedDir !== undefined) {
+        if (cachedDir) return false;
+      } else {
+        const blocked = this.world.collision.isBlocked(
+          fromTile.x,
+          fromTile.z,
+          tile.x,
+          tile.z,
+        );
+        this._directionalBlockCache.set(dirKey, blocked);
+        if (blocked) return false;
       }
     }
 
-    // If on ground floor, check global collision matrix (trees, rocks, etc. AND furniture/anvils inside buildings)
-    if (floorIndex === 0) {
-      if (
-        this.world.collision.hasFlags(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
-      ) {
-        return false;
+    // Static walkability check (tile-only, cached per tile)
+    const tileKey =
+      ((tile.x + 1048576) | 0) * 2097152 + ((tile.z + 1048576) | 0);
+    const cached = this._walkabilityCache.get(tileKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    // Compute and cache
+    let walkable: boolean;
+
+    // If on ground floor, check global collision matrix (trees, rocks, etc.)
+    if (
+      floorIndex === 0 &&
+      this.world.collision.hasFlags(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
+    ) {
+      walkable = false;
+    } else if (isTargetInBuilding) {
+      // Building floor is walkable, overrides terrain
+      walkable = true;
+    } else {
+      // Terrain walkability (water, slope) is pre-baked into CollisionMatrix
+      // as WATER and STEEP_SLOPE flags. The hasFlags(BLOCKS_WALK) check above
+      // already caught unwalkable terrain — if we reach here, it's walkable.
+      // Fall back to runtime check only for tiles in ungenerated terrain.
+      const terrain = this.getTerrain();
+      if (terrain) {
+        tileToWorldInto(tile, this._walkableWorldPos);
+        const terrainTileX = Math.floor(this._walkableWorldPos.x / 100);
+        const terrainTileZ = Math.floor(this._walkableWorldPos.z / 100);
+        if (!terrain.isTerrainTileGenerated(terrainTileX, terrainTileZ)) {
+          walkable = terrain.isPositionWalkableFast(
+            this._walkableWorldPos.x,
+            this._walkableWorldPos.z,
+          );
+        } else {
+          walkable = true;
+        }
+      } else {
+        walkable = true;
       }
     }
 
-    // If target is inside a building footprint, skip terrain checks
-    // (building floor is walkable and overrides terrain)
-    if (isTargetInBuilding) {
-      return true;
-    }
-
-    const terrain = this.getTerrain();
-    if (!terrain) {
-      // Fallback: walkable if no terrain system available
-      return true;
-    }
-
-    // Convert tile to world coordinates (center of tile)
-    const worldPos = tileToWorld(tile);
-
-    // Use TerrainSystem's walkability check (water, slope, lakes biome)
-    const result = terrain.isPositionWalkable(worldPos.x, worldPos.z);
-    return result.walkable;
+    this._walkabilityCache.set(tileKey, walkable);
+    return walkable;
   }
 
   /**
@@ -439,12 +480,18 @@ export class TileMovementManager {
       : null;
 
     // Calculate BFS path from current tile to target
+    // Player clicks always pathfind (rate-limited above) but respect iteration budget
+    const remainingBudget =
+      TileMovementManager.MAX_BFS_ITERATIONS_PER_TICK -
+      this._bfsIterationsThisTick;
     const path = this.pathfinder.findPath(
       state.currentTile,
       payload.targetTile,
       (tile, fromTile) =>
         this.isTileWalkable(tile, currentFloor, fromTile, currentBuildingId),
+      remainingBudget > 0 ? remainingBudget : undefined,
     );
+    this._bfsIterationsThisTick += this.pathfinder.getLastIterationsUsed();
 
     // Store path and update state
     state.path = path;
@@ -573,9 +620,45 @@ export class TileMovementManager {
   }
 
   /**
+   * Max BFS path continuations per tick to prevent 25+ agents all pathfinding
+   * simultaneously (each BFS = 4000 iterations × walkability checks).
+   * Remaining continuations will happen on the next tick.
+   */
+  private static readonly MAX_PATH_CONTINUATIONS_PER_TICK = 5;
+
+  /**
+   * Global BFS iteration budget per tick. ALL BFS callers share this budget.
+   * Each BFS iteration costs 1 unit. Short paths (50 iterations) barely dent
+   * the budget while max-distance paths (4000 iterations) cost proportionally.
+   * At 12000 total: 3 full-length paths or 60+ short paths can coexist per tick.
+   */
+  private static readonly MAX_BFS_ITERATIONS_PER_TICK = 12000;
+  private _bfsIterationsThisTick = 0;
+
+  /**
+   * Per-tick walkability cache. Walkability depends on terrain height, slope,
+   * biome, and collision — all stable within a single tick. Multiple BFS calls
+   * in the same tick (25 agents in combat) re-check the same tiles repeatedly.
+   * This cache makes the 2nd+ check O(1) instead of 10+ getHeightAt() calls.
+   *
+   * Key: numeric tile key (same as BFS visited set)
+   * Value: boolean walkability result
+   *
+   * Cleared at the start of each tick.
+   */
+  private _walkabilityCache = new Map<number, boolean>();
+  /** Separate cache for directional blocking (from→to collision checks) */
+  private _directionalBlockCache = new Map<number, boolean>();
+
+  /**
    * Called every server tick (600ms) - advance all players along their paths
    */
   onTick(tickNumber: number): void {
+    // Reset global BFS iteration budget and walkability cache for this tick
+    this._bfsIterationsThisTick = 0;
+    this._walkabilityCache.clear();
+    this._directionalBlockCache.clear();
+
     // OSRS-ACCURATE: Capture tick-start positions for ALL players FIRST
     // This happens BEFORE any movement, so FollowManager can see where
     // players were at the START of this tick (creating 1-tick delay effect)
@@ -616,6 +699,7 @@ export class TileMovementManager {
 
     const terrain = this.getTerrain();
     const buildingService = this.getBuildingCollision();
+    let pathContinuationsThisTick = 0;
 
     for (const [playerId, state] of this.playerStates) {
       // Skip if no path or at end
@@ -789,12 +873,15 @@ export class TileMovementManager {
       // Look-ahead: pre-compute the next path segment 1 tick before the current
       // one ends so the client can append it seamlessly (no idle gap between segments).
       // Fires when exactly 1 tick of path is left and there is more ground to cover.
+      // Capped per tick to prevent 25+ agents all BFS-pathfinding simultaneously.
       {
         const tilesPerTick = state.isRunning
           ? TILES_PER_TICK_RUN
           : TILES_PER_TICK_WALK;
         const tilesRemaining = state.path.length - state.pathIndex;
         if (
+          pathContinuationsThisTick <
+            TileMovementManager.MAX_PATH_CONTINUATIONS_PER_TICK &&
           tilesRemaining > 0 &&
           tilesRemaining <= tilesPerTick &&
           state.lastPathPartial &&
@@ -814,6 +901,7 @@ export class TileMovementManager {
             state,
           );
           state.nextSegmentPrecomputed = true;
+          pathContinuationsThisTick++;
         }
       }
 
@@ -833,12 +921,16 @@ export class TileMovementManager {
             state.requestedDestination = null;
             state.lastPathPartial = false;
             state.nextSegmentPrecomputed = false;
-          } else {
+          } else if (
+            pathContinuationsThisTick <
+            TileMovementManager.MAX_PATH_CONTINUATIONS_PER_TICK
+          ) {
             const dest = state.requestedDestination;
             // Clear before re-pathfind so an unreachable tile cannot loop forever
             state.requestedDestination = null;
             state.lastPathPartial = false;
             this._continuePathToDestination(playerId, dest, state.isRunning);
+            pathContinuationsThisTick++;
             // If continuation found a new path, skip tileMovementEnd to keep animation continuous
             if (state.path.length > 0) {
               continue;
@@ -1164,6 +1256,14 @@ export class TileMovementManager {
       return;
     }
 
+    // Global BFS iteration budget check
+    if (
+      this._bfsIterationsThisTick >=
+      TileMovementManager.MAX_BFS_ITERATIONS_PER_TICK
+    ) {
+      return; // Will retry next tick
+    }
+
     const buildingService = this.getBuildingCollision();
     const currentFloor = buildingService
       ? buildingService.getPlayerFloor(playerId as EntityID)
@@ -1172,12 +1272,17 @@ export class TileMovementManager {
       ? buildingService.getBuildingAt(state.currentTile.x, state.currentTile.z)
       : null;
 
+    const remainingBudget =
+      TileMovementManager.MAX_BFS_ITERATIONS_PER_TICK -
+      this._bfsIterationsThisTick;
     const path = this.pathfinder.findPath(
       state.currentTile,
       destination,
       (tile, fromTile) =>
         this.isTileWalkable(tile, currentFloor, fromTile, currentBuildingId),
+      remainingBudget,
     );
+    this._bfsIterationsThisTick += this.pathfinder.getLastIterationsUsed();
 
     // Empty path means destination is unreachable — stop here
     if (path.length === 0) return;
@@ -1255,6 +1360,14 @@ export class TileMovementManager {
       return;
     }
 
+    // Global BFS iteration budget check
+    if (
+      this._bfsIterationsThisTick >=
+      TileMovementManager.MAX_BFS_ITERATIONS_PER_TICK
+    ) {
+      return; // Will be picked up by continuation on next tick
+    }
+
     const buildingService = this.getBuildingCollision();
     const currentFloor = buildingService
       ? buildingService.getPlayerFloor(playerId as EntityID)
@@ -1265,12 +1378,17 @@ export class TileMovementManager {
 
     // BFS from the last tile of the current path (the player hasn't stepped on
     // it yet — keeps the segment boundary invisible to the client)
+    const remainingBudget =
+      TileMovementManager.MAX_BFS_ITERATIONS_PER_TICK -
+      this._bfsIterationsThisTick;
     const path = this.pathfinder.findPath(
       fromTile,
       destination,
       (tile, prevTile) =>
         this.isTileWalkable(tile, currentFloor, prevTile, currentBuildingId),
+      remainingBudget,
     );
+    this._bfsIterationsThisTick += this.pathfinder.getLastIterationsUsed();
 
     if (path.length === 0) {
       // Destination is unreachable from the path-end tile; let normal end-of-path
@@ -1480,6 +1598,10 @@ export class TileMovementManager {
     return this.tickStartTiles.get(playerId) ?? null;
   }
 
+  getPlayerCount(): number {
+    return this.playerStates.size;
+  }
+
   /**
    * Stop a player's current movement immediately.
    * Clears their path and sends tileMovementEnd so the client's TileInterpolator
@@ -1621,6 +1743,14 @@ export class TileMovementManager {
         }
       }
 
+      // BFS iteration budget check — skip pathfinding this tick, manager retries next tick
+      if (
+        this._bfsIterationsThisTick >=
+        TileMovementManager.MAX_BFS_ITERATIONS_PER_TICK
+      ) {
+        return;
+      }
+
       // Generate ALL valid destination tiles
       let validTiles: TileCoord[];
       if (attackType === AttackType.RANGED || attackType === AttackType.MAGIC) {
@@ -1648,25 +1778,43 @@ export class TileMovementManager {
       }
 
       // Multi-destination BFS: finds shortest path to ANY valid tile
+      const remainingBudget =
+        TileMovementManager.MAX_BFS_ITERATIONS_PER_TICK -
+        this._bfsIterationsThisTick;
       path = this.pathfinder.findPathToAny(
         state.currentTile,
         validTiles,
         (tile: TileCoord, fromTile?: TileCoord) =>
           this.isTileWalkable(tile, currentFloor, fromTile, currentBuildingId),
+        remainingBudget,
       );
+      this._bfsIterationsThisTick += this.pathfinder.getLastIterationsUsed();
     } else {
       // NON-COMBAT MOVEMENT: Go directly to target tile
       if (tilesEqual(this._targetTile, state.currentTile)) {
         return; // Already at target
       }
 
+      // BFS iteration budget check — skip pathfinding this tick, caller retries next tick
+      if (
+        this._bfsIterationsThisTick >=
+        TileMovementManager.MAX_BFS_ITERATIONS_PER_TICK
+      ) {
+        return;
+      }
+
       // Calculate BFS path to the target tile
+      const remainingBudget =
+        TileMovementManager.MAX_BFS_ITERATIONS_PER_TICK -
+        this._bfsIterationsThisTick;
       path = this.pathfinder.findPath(
         state.currentTile,
         this._targetTile,
         (tile, fromTile) =>
           this.isTileWalkable(tile, currentFloor, fromTile, currentBuildingId),
+        remainingBudget,
       );
+      this._bfsIterationsThisTick += this.pathfinder.getLastIterationsUsed();
     }
 
     if (path.length === 0) {

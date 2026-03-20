@@ -80,6 +80,14 @@ export const MODEL_AGENTS: ModelProviderConfig[] = [
     pluginExport: "anthropicPlugin",
   },
   {
+    provider: "openai",
+    model: "gpt-4o",
+    displayName: "GPT-4o",
+    apiKeyEnv: "OPENAI_API_KEY",
+    pluginModule: "@elizaos/plugin-openai",
+    pluginExport: "openaiPlugin",
+  },
+  {
     provider: "groq",
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
     displayName: "Llama 4 Scout",
@@ -94,6 +102,14 @@ export const MODEL_AGENTS: ModelProviderConfig[] = [
     apiKeyEnv: "ANTHROPIC_API_KEY",
     pluginModule: "@elizaos/plugin-anthropic",
     pluginExport: "anthropicPlugin",
+  },
+  {
+    provider: "openai",
+    model: "gpt-4.1",
+    displayName: "GPT-4.1",
+    apiKeyEnv: "OPENAI_API_KEY",
+    pluginModule: "@elizaos/plugin-openai",
+    pluginExport: "openaiPlugin",
   },
   {
     provider: "groq",
@@ -112,6 +128,14 @@ export const MODEL_AGENTS: ModelProviderConfig[] = [
     pluginExport: "anthropicPlugin",
   },
   {
+    provider: "openai",
+    model: "gpt-4o-mini",
+    displayName: "GPT-4o Mini",
+    apiKeyEnv: "OPENAI_API_KEY",
+    pluginModule: "@elizaos/plugin-openai",
+    pluginExport: "openaiPlugin",
+  },
+  {
     provider: "groq",
     model: "llama-3.3-70b-versatile",
     displayName: "Llama 3.3 70B",
@@ -126,6 +150,14 @@ export const MODEL_AGENTS: ModelProviderConfig[] = [
     apiKeyEnv: "ANTHROPIC_API_KEY",
     pluginModule: "@elizaos/plugin-anthropic",
     pluginExport: "anthropicPlugin",
+  },
+  {
+    provider: "openai",
+    model: "o4-mini",
+    displayName: "o4-mini",
+    apiKeyEnv: "OPENAI_API_KEY",
+    pluginModule: "@elizaos/plugin-openai",
+    pluginExport: "openaiPlugin",
   },
   {
     provider: "groq",
@@ -182,21 +214,21 @@ function getModelAgentKey(config: { provider: string; model: string }): string {
 
 function resolveModelAgentServerUrls(): { wsUrl: string; apiUrl: string } {
   const explicitServerUrl = process.env.HYPERSCAPE_SERVER_URL?.trim();
-  const portFromEnv = process.env.PORT ? Number(process.env.PORT) : NaN;
+
+  // uWS game WebSocket runs on UWS_PORT (default 5556), not the HTTP port.
+  // Fall back to PORT (Fastify) only when uWS is disabled.
+  const uwsEnabled = process.env.UWS_ENABLED !== "false";
+  const uwsPort = parseInt(process.env.UWS_PORT || "5556", 10);
+  const httpPort = parseInt(process.env.PORT || "5555", 10);
+  const wsPort = uwsEnabled ? uwsPort : httpPort;
 
   const wsUrl =
     explicitServerUrl && explicitServerUrl.length > 0
       ? explicitServerUrl
-      : Number.isFinite(portFromEnv) && portFromEnv > 0
-        ? `ws://127.0.0.1:${portFromEnv}/ws`
-        : process.env.PUBLIC_WS_URL || "ws://127.0.0.1:5555/ws";
+      : process.env.PUBLIC_WS_URL || `ws://127.0.0.1:${wsPort}/ws`;
 
   const apiUrl =
-    process.env.HYPERSCAPE_API_URL ||
-    wsUrl
-      .replace(/^wss:/, "https:")
-      .replace(/^ws:/, "http:")
-      .replace(/\/ws$/, "");
+    process.env.HYPERSCAPE_API_URL || `http://127.0.0.1:${httpPort}`;
 
   return { wsUrl, apiUrl };
 }
@@ -368,38 +400,19 @@ export async function spawnModelAgents(
         const MAX_CACHE = 100;
 
         // --- Cap logs (stores full LLM prompts + responses per call) ---
-        const origLog = adapter.log.bind(adapter);
-        adapter.log = async (params: Parameters<typeof origLog>[0]) => {
-          await origLog(params);
+        const origCreateLogs = adapter.createLogs.bind(adapter);
+        adapter.createLogs = async (
+          params: Parameters<typeof origCreateLogs>[0],
+        ) => {
+          await origCreateLogs(params);
           const logs = (adapter as unknown as { logs: unknown[] }).logs;
           if (logs && logs.length > MAX_LOGS) {
             logs.splice(0, logs.length - MAX_LOGS);
           }
         };
 
-        // --- Fix deleteMemory to also clean memoriesByRoom ---
-        const origDeleteMemory = adapter.deleteMemory.bind(adapter);
-        adapter.deleteMemory = async (memoryId: UUID) => {
-          // Remove from memoriesByRoom lists (stock impl misses this)
-          const byRoom = (
-            adapter as unknown as {
-              memoriesByRoom: Map<string, Array<{ id: unknown }>>;
-            }
-          ).memoriesByRoom;
-          if (byRoom) {
-            for (const [key, list] of byRoom) {
-              const idx = list.findIndex(
-                (m) => String(m.id) === String(memoryId),
-              );
-              if (idx !== -1) {
-                list.splice(idx, 1);
-                if (list.length === 0) byRoom.delete(key);
-                break;
-              }
-            }
-          }
-          await origDeleteMemory(memoryId);
-        };
+        // deleteMemories in current ElizaOS already cleans memoriesByRoom,
+        // so no monkey-patch needed.
 
         // --- Cap cache Map ---
         const cacheMap = (
@@ -534,6 +547,19 @@ export async function spawnModelAgents(
             adapter: unknown;
           }
         ).adapter = adapterBeforeInit;
+      }
+
+      // ElizaOS v2 lazy-starts services — explicitly kick off HyperscapeService
+      // so the WebSocket connection + player spawn begins immediately.
+      if (
+        typeof (runtimeInstance as Record<string, unknown>)
+          ._ensureServiceStarted === "function"
+      ) {
+        await (
+          runtimeInstance as unknown as {
+            _ensureServiceStarted: (t: string) => Promise<unknown>;
+          }
+        )._ensureServiceStarted("hyperscapeService");
       }
 
       runningAgents.set(agentKey, {

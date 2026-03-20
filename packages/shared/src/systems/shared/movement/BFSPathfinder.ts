@@ -67,6 +67,19 @@ export class BFSPathfinder {
   private _lastRequestedDestination: TileCoord | null = null;
 
   /**
+   * How many BFS iterations the last findPath/findPathToAny call consumed.
+   * Used by callers to track global iteration budgets across multiple calls.
+   */
+  private _lastIterationsUsed = 0;
+
+  /** Pre-allocated scratch tile for BFS neighbor checks (zero allocation) */
+  private _scratchNeighbor: TileCoord = { x: 0, z: 0 };
+
+  /** Pre-allocated scratch tiles for diagonal corner clipping checks */
+  private _scratchCardinalX: TileCoord = { x: 0, z: 0 };
+  private _scratchCardinalZ: TileCoord = { x: 0, z: 0 };
+
+  /**
    * Check if the last path returned by findPath() was partial.
    * A partial path means the destination wasn't reached due to:
    * - BFS iteration limit (MAX_BFS_ITERATIONS)
@@ -89,19 +102,33 @@ export class BFSPathfinder {
   }
 
   /**
+   * How many BFS iterations the last findPath/findPathToAny consumed.
+   * Callers use this to maintain a global iteration budget across multiple
+   * pathfinding calls in a single tick.
+   */
+  getLastIterationsUsed(): number {
+    return this._lastIterationsUsed;
+  }
+
+  /**
    * Find a path from start to end using BFS (OSRS "smartpathing").
    * BFS is the primary pathfinder for all player movement.
    *
    * After calling, check `wasLastPathPartial()` to see if the path
    * reaches the actual destination or just a partial point.
+   *
+   * @param maxIterations - Optional iteration cap (defaults to internal MAX_BFS_ITERATIONS).
+   *   Callers can pass a lower value when a global budget is running low.
    */
   findPath(
     start: TileCoord,
     end: TileCoord,
     isWalkable: WalkabilityChecker,
+    maxIterations?: number,
   ): TileCoord[] {
     // Reset per-request metadata so callers can trust path status from this call.
     this._lastPathWasPartial = false;
+    this._lastIterationsUsed = 0;
     this._lastRequestedDestination = { x: end.x, z: end.z };
 
     // Validate inputs
@@ -152,7 +179,7 @@ export class BFSPathfinder {
 
     // BFS is the primary pathfinder (OSRS "smartpathing")
     // Note: BFS may also set _lastPathWasPartial if iteration limit is reached
-    return this.findBFSPath(start, end, isWalkable);
+    return this.findBFSPath(start, end, isWalkable, maxIterations);
   }
 
   /**
@@ -171,12 +198,19 @@ export class BFSPathfinder {
     start: TileCoord,
     destinations: TileCoord[],
     isWalkable: WalkabilityChecker,
+    maxIterations?: number,
   ): TileCoord[] {
-    if (destinations.length === 0) return [];
+    if (destinations.length === 0) {
+      this._lastIterationsUsed = 0;
+      return [];
+    }
 
     // Check if already at any destination
     for (const dest of destinations) {
-      if (tilesEqual(start, dest)) return [];
+      if (tilesEqual(start, dest)) {
+        this._lastIterationsUsed = 0;
+        return [];
+      }
     }
 
     // Build destination lookup set for O(1) checks
@@ -184,6 +218,11 @@ export class BFSPathfinder {
     for (const dest of destinations) {
       destSet.add(tileKeyNumeric(dest));
     }
+
+    const iterLimit =
+      maxIterations !== undefined
+        ? Math.min(maxIterations, this.MAX_BFS_ITERATIONS)
+        : this.MAX_BFS_ITERATIONS;
 
     // Standard BFS from start, terminate at first destination hit
     const pooledData = bfsPool.acquire();
@@ -198,27 +237,49 @@ export class BFSPathfinder {
       const minZ = start.z - PATHFIND_RADIUS;
       const maxZ = start.z + PATHFIND_RADIUS;
       let front = 0;
+      let iterations = 0;
 
       while (front < queue.length) {
+        if (iterations >= iterLimit) {
+          this._lastPathWasPartial = true;
+          this._lastIterationsUsed = iterations;
+          return this.findPartialPathToAny(
+            start,
+            destinations,
+            visited,
+            parent,
+          );
+        }
+        iterations++;
+
         const current = queue[front++];
 
-        // Check if we reached ANY destination
-        if (destSet.has(tileKeyNumeric(current))) {
+        // Check if we reached ANY destination (inline tileKeyNumeric)
+        const currentKey =
+          ((current.x + 1048576) | 0) * 2097152 + ((current.z + 1048576) | 0);
+        if (destSet.has(currentKey)) {
+          this._lastIterationsUsed = iterations;
           return this.reconstructPath(start, current, parent);
         }
 
-        // Expand neighbors in OSRS order
+        // Expand neighbors in OSRS order (zero-allocation scratch tile for checks)
         for (const dir of TILE_DIRECTIONS) {
           const nx = current.x + dir.x;
           const nz = current.z + dir.z;
           if (nx < minX || nx > maxX || nz < minZ || nz > maxZ) continue;
 
-          const neighborKey = tileKeyNumeric({ x: nx, z: nz });
+          const neighborKey =
+            ((nx + 1048576) | 0) * 2097152 + ((nz + 1048576) | 0);
           if (visited.has(neighborKey)) continue;
 
-          const neighbor: TileCoord = { x: nx, z: nz };
-          if (!this.canMoveTo(current, neighbor, isWalkable)) continue;
+          // Use scratch tile for walkability check (zero allocation)
+          this._scratchNeighbor.x = nx;
+          this._scratchNeighbor.z = nz;
+          if (!this.canMoveTo(current, this._scratchNeighbor, isWalkable))
+            continue;
 
+          // Only allocate when actually enqueuing
+          const neighbor: TileCoord = { x: nx, z: nz };
           visited.add(neighborKey);
           parent.set(neighborKey, current);
           queue.push(neighbor);
@@ -226,6 +287,7 @@ export class BFSPathfinder {
       }
 
       // No destination reachable — partial path to closest destination
+      this._lastIterationsUsed = iterations;
       return this.findPartialPathToAny(start, destinations, visited, parent);
     } finally {
       bfsPool.release(pooledData);
@@ -322,16 +384,17 @@ export class BFSPathfinder {
    *
    * OPTIMIZATION: Uses read index instead of queue.shift() for O(1) dequeue.
    */
-  // 8000 iterations gives ~44-tile reliable radius in open terrain (4n² ≈ 8000 → n ≈ 44).
-  // Raised from 2000 (~22 tiles) to cover the majority of practical click distances
-  // without risking main-thread frame drops. Path continuation handles the rest.
-  private readonly MAX_BFS_ITERATIONS = 8000;
+  // 4000 iterations gives ~31-tile reliable radius in open terrain (4n² ≈ 4000 → n ≈ 31).
+  // Reduced from 8000 to limit event loop blocking when multiple players path simultaneously.
+  // Path continuation seamlessly extends partial paths so players still reach distant targets.
+  private readonly MAX_BFS_ITERATIONS = 4000;
   private _bfsIterationWarnings = 0;
 
   private findBFSPath(
     start: TileCoord,
     end: TileCoord,
     isWalkable: WalkabilityChecker,
+    maxIterationsOverride?: number,
   ): TileCoord[] {
     // Acquire pooled data structures to avoid per-call allocations
     const pooledData = bfsPool.acquire();
@@ -351,19 +414,24 @@ export class BFSPathfinder {
 
       // PERFORMANCE: Track iterations to prevent blocking
       let iterations = 0;
+      const iterLimit =
+        maxIterationsOverride !== undefined
+          ? Math.min(maxIterationsOverride, this.MAX_BFS_ITERATIONS)
+          : this.MAX_BFS_ITERATIONS;
 
       // OPTIMIZATION: Use read index instead of shift() - O(1) vs O(n)
       let queueReadIndex = 0;
 
       while (queueReadIndex < queue.length) {
         // PERFORMANCE: Check iteration limit to prevent frame drops
-        if (iterations >= this.MAX_BFS_ITERATIONS) {
+        if (iterations >= iterLimit) {
           // Mark path as partial due to iteration limit
           this._lastPathWasPartial = true;
+          this._lastIterationsUsed = iterations;
           // Log warning periodically (not every path to avoid spam)
           if (this._bfsIterationWarnings % 100 === 0) {
             console.warn(
-              `[BFSPathfinder] Iteration limit (${this.MAX_BFS_ITERATIONS}) reached at tile (${start.x},${start.z}), returning partial path to (${end.x},${end.z})`,
+              `[BFSPathfinder] Iteration limit (${iterLimit}) reached at tile (${start.x},${start.z}), returning partial path to (${end.x},${end.z})`,
             );
           }
           this._bfsIterationWarnings++;
@@ -377,40 +445,42 @@ export class BFSPathfinder {
 
         // Found the destination
         if (tilesEqual(current, end)) {
+          this._lastIterationsUsed = iterations;
           return this.reconstructPath(start, end, parent);
         }
 
         // Check all 8 directions in OSRS order: W, E, S, N, SW, SE, NW, NE
+        // OPTIMIZATION: Use scratch tile for checks, only allocate when enqueuing.
+        // Reduces allocations from 8 per iteration to ~1-2 (only walkable neighbors).
         for (const dir of TILE_DIRECTIONS) {
-          const neighbor: TileCoord = {
-            x: current.x + dir.x,
-            z: current.z + dir.z,
-          };
+          const nx = current.x + dir.x;
+          const nz = current.z + dir.z;
 
           // Skip if out of search bounds
-          if (
-            neighbor.x < minX ||
-            neighbor.x > maxX ||
-            neighbor.z < minZ ||
-            neighbor.z > maxZ
-          ) {
+          if (nx < minX || nx > maxX || nz < minZ || nz > maxZ) {
             continue;
           }
 
-          // OPTIMIZATION: Use numeric key instead of string to avoid allocation
-          const neighborKey = tileKeyNumeric(neighbor);
+          // OPTIMIZATION: Inline tileKeyNumeric to avoid TileCoord allocation
+          const neighborKey =
+            ((nx + 1048576) | 0) * 2097152 + ((nz + 1048576) | 0);
 
           // Skip if already visited
           if (visited.has(neighborKey)) {
             continue;
           }
 
+          // Use scratch tile for walkability check (zero allocation)
+          this._scratchNeighbor.x = nx;
+          this._scratchNeighbor.z = nz;
+
           // Check walkability (including diagonal corner checks)
-          if (!this.canMoveTo(current, neighbor, isWalkable)) {
+          if (!this.canMoveTo(current, this._scratchNeighbor, isWalkable)) {
             continue;
           }
 
-          // Add to queue
+          // Only allocate a new tile when actually adding to queue
+          const neighbor: TileCoord = { x: nx, z: nz };
           visited.add(neighborKey);
           parent.set(neighborKey, current);
           queue.push(neighbor);
@@ -419,6 +489,7 @@ export class BFSPathfinder {
 
       // No path found - return partial path to closest point
       this._lastPathWasPartial = true;
+      this._lastIterationsUsed = iterations;
       return this.findPartialPath(start, end, visited, parent);
     } finally {
       // Always release back to pool
@@ -443,14 +514,18 @@ export class BFSPathfinder {
     const dx = to.x - from.x;
     const dz = to.z - from.z;
 
-    // For diagonal movement, check corner clipping
+    // For diagonal movement, check corner clipping (zero allocation using scratch tiles)
     if (isDiagonal(dx, dz)) {
-      // Check both adjacent cardinal tiles
-      const cardinalX: TileCoord = { x: from.x + dx, z: from.z };
-      const cardinalZ: TileCoord = { x: from.x, z: from.z + dz };
+      this._scratchCardinalX.x = from.x + dx;
+      this._scratchCardinalX.z = from.z;
+      this._scratchCardinalZ.x = from.x;
+      this._scratchCardinalZ.z = from.z + dz;
 
       // Both adjacent tiles must be walkable to prevent corner clipping
-      if (!isWalkable(cardinalX, from) || !isWalkable(cardinalZ, from)) {
+      if (
+        !isWalkable(this._scratchCardinalX, from) ||
+        !isWalkable(this._scratchCardinalZ, from)
+      ) {
         return false;
       }
     }

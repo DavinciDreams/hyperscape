@@ -1068,6 +1068,9 @@ function MinimapInner({
     };
 
     world.network?.on("questList", onQuestList);
+    world.network?.on("questStarted", onQuestEvent);
+    world.network?.on("questProgressed", onQuestEvent);
+    world.network?.on("questCompleted", onQuestEvent);
     world.on(EventType.QUEST_STARTED, onQuestEvent);
     world.on(EventType.QUEST_PROGRESSED, onQuestEvent);
     world.on(EventType.QUEST_COMPLETED, onQuestEvent);
@@ -1077,6 +1080,9 @@ function MinimapInner({
 
     return () => {
       world.network?.off("questList", onQuestList);
+      world.network?.off("questStarted", onQuestEvent);
+      world.network?.off("questProgressed", onQuestEvent);
+      world.network?.off("questCompleted", onQuestEvent);
       world.off(EventType.QUEST_STARTED, onQuestEvent);
       world.off(EventType.QUEST_PROGRESSED, onQuestEvent);
       world.off(EventType.QUEST_COMPLETED, onQuestEvent);

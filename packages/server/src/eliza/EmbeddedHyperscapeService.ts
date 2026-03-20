@@ -66,8 +66,58 @@ interface EmbeddedWorldMapData {
 const NEARBY_DISTANCE = 50;
 /** Pre-computed squared distance for comparison without Math.sqrt */
 const NEARBY_DISTANCE_SQ = NEARBY_DISTANCE * NEARBY_DISTANCE;
-/** How many ticks a cached getNearbyEntities result is valid */
+/** How many ticks a cached getNearbyEntities result is valid (for game-tick callers) */
 const NEARBY_CACHE_TTL_TICKS = 2;
+/** Time-based cache TTL for agent bridge callers (ms) — entities don't move
+ *  fast enough to warrant scanning more than once per second */
+const NEARBY_CACHE_TTL_MS = 1000;
+
+/**
+ * Shared entity snapshot across all EmbeddedHyperscapeService instances.
+ * Instead of each agent scanning all 300+ entities independently, we scan once
+ * per second and share the raw data. Each agent then filters by its own position.
+ */
+interface EntitySnapshot {
+  id: string;
+  position: [number, number, number];
+  data: Record<string, unknown>;
+  entity: unknown; // raw entity ref for isDead/isAlive checks
+}
+const SHARED_SNAPSHOT_TTL_MS = 1000;
+
+/** Per-world snapshot cache. Keyed by world reference to prevent cross-contamination
+ *  when multiple World instances coexist (e.g. in tests). */
+const _snapshotCache = new WeakMap<
+  object,
+  { snapshot: EntitySnapshot[]; time: number }
+>();
+
+function getSharedEntitySnapshot(
+  world: {
+    entities: { items: { entries: () => IterableIterator<[string, unknown]> } };
+  },
+  getPos: (entity: unknown) => [number, number, number] | null,
+): EntitySnapshot[] {
+  const now = Date.now();
+  const cached = _snapshotCache.get(world);
+  if (
+    cached &&
+    now - cached.time < SHARED_SNAPSHOT_TTL_MS &&
+    cached.snapshot.length > 0
+  ) {
+    return cached.snapshot;
+  }
+  const snapshot: EntitySnapshot[] = [];
+  for (const [id, entity] of world.entities.items.entries()) {
+    const data = (entity as { data?: Record<string, unknown> }).data;
+    if (!data) continue;
+    const pos = getPos(entity);
+    if (!pos) continue;
+    snapshot.push({ id, position: pos, data, entity });
+  }
+  _snapshotCache.set(world, { snapshot, time: now });
+  return snapshot;
+}
 
 // Event handler type
 type EventHandler = (data: unknown) => void;
@@ -110,6 +160,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   /** Cached getNearbyEntities result to avoid full world scan every tick */
   private _nearbyCache: NearbyEntityData[] = [];
   private _nearbyCacheTick = -1;
+  private _nearbyCacheTime = 0;
 
   /** Double-buffer for getNearbyEntities to avoid slice() allocations */
   private _nearbyBufferA: NearbyEntityData[] = [];
@@ -119,6 +170,16 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   /** Pool of reusable NearbyEntityData objects to avoid per-entity allocations */
   private _nearbyEntityPool: NearbyEntityData[] = [];
   private _nearbyEntityPoolIndex = 0;
+
+  /** Cached getAllNPCPositions result — NPCs don't move, cache for 10s */
+  private _npcPositionsCache: Array<{
+    id: string;
+    name: string;
+    npcId: string;
+    position: [number, number, number];
+  }> = [];
+  private _npcPositionsCacheTime = 0;
+  private static readonly NPC_CACHE_TTL_MS = 10_000;
 
   /** Cached getGameState result to avoid per-tick allocations */
   private _gameStateCache: EmbeddedGameState | null = null;
@@ -736,9 +797,11 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
 
     // Return cached result if still fresh (avoids full world scan every tick)
     const currentTick = this.world.currentTick ?? 0;
+    const now = Date.now();
     if (
-      currentTick - this._nearbyCacheTick < NEARBY_CACHE_TTL_TICKS &&
-      this._nearbyCacheTick >= 0
+      this._nearbyCacheTick >= 0 &&
+      (currentTick - this._nearbyCacheTick < NEARBY_CACHE_TTL_TICKS ||
+        now - this._nearbyCacheTime < NEARBY_CACHE_TTL_MS)
     ) {
       return this._nearbyCache;
     }
@@ -758,18 +821,23 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     nearby.length = 0;
     this._nearbyEntityPoolIndex = 0;
 
-    // Iterate through all entities — use distance-squared to avoid Math.sqrt
-    for (const [id, entity] of this.world.entities.items.entries()) {
-      if (id === this.playerEntityId) continue; // Skip self
+    // Use shared entity snapshot (scanned once per second across ALL agent instances)
+    // instead of each agent independently iterating all 300+ world entities
+    const snapshot = getSharedEntitySnapshot(
+      this.world as unknown as Parameters<typeof getSharedEntitySnapshot>[0],
+      (e) =>
+        this.getEntityPosition(
+          e as Parameters<typeof this.getEntityPosition>[0],
+        ),
+    );
 
-      const entityData = entity.data as Record<string, unknown>;
-      const entityPos = this.getEntityPosition(entity);
-      if (!entityPos) continue;
+    for (const entry of snapshot) {
+      if (entry.id === this.playerEntityId) continue; // Skip self
 
       // Distance-squared comparison (avoids expensive Math.sqrt per entity)
-      const dx = entityPos[0] - playerPos[0];
-      const dy = entityPos[1] - playerPos[1];
-      const dz = entityPos[2] - playerPos[2];
+      const dx = entry.position[0] - playerPos[0];
+      const dy = entry.position[1] - playerPos[1];
+      const dz = entry.position[2] - playerPos[2];
       const distSq = dx * dx + dy * dy + dz * dz;
 
       if (distSq > NEARBY_DISTANCE_SQ) continue;
@@ -777,12 +845,14 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
       // Only compute sqrt for entities that pass the filter
       const distance = Math.sqrt(distSq);
 
+      const entityData = entry.data;
+
       // Determine entity type
       const entityType = this.categorizeEntity(entityData);
 
       // Skip dead mobs — prevents agents from attacking corpses
       if (entityType === "mob") {
-        const ent = entity as unknown as {
+        const ent = entry.entity as {
           isDead?: () => boolean;
           isAlive?: () => boolean;
         };
@@ -817,10 +887,10 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
       this._nearbyEntityPoolIndex++;
 
       // Update object in-place
-      entityObj.id = id;
-      entityObj.name = (entityData.name as string) || id;
+      entityObj.id = entry.id;
+      entityObj.name = (entityData.name as string) || entry.id;
       entityObj.type = entityType;
-      entityObj.position = entityPos;
+      entityObj.position = entry.position;
       entityObj.distance = distance;
       entityObj.health = entityData.health as number | undefined;
       entityObj.maxHealth = entityData.maxHealth as number | undefined;
@@ -840,6 +910,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     this._useBufferA = !this._useBufferA;
     this._nearbyCache = nearby;
     this._nearbyCacheTick = currentTick;
+    this._nearbyCacheTime = Date.now();
 
     return this._nearbyCache;
   }
@@ -1894,6 +1965,25 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   }> {
     if (!this.isActive) return [];
 
+    // NPCs are stationary — cache for 10 seconds to avoid full entity scan per agent
+    const now = Date.now();
+    if (
+      this._npcPositionsCache.length > 0 &&
+      now - this._npcPositionsCacheTime <
+        EmbeddedHyperscapeService.NPC_CACHE_TTL_MS
+    ) {
+      return this._npcPositionsCache;
+    }
+
+    // Use shared entity snapshot (scanned once per second across ALL agent instances)
+    const snapshot = getSharedEntitySnapshot(
+      this.world as unknown as Parameters<typeof getSharedEntitySnapshot>[0],
+      (e) =>
+        this.getEntityPosition(
+          e as Parameters<typeof this.getEntityPosition>[0],
+        ),
+    );
+
     const npcs: Array<{
       id: string;
       name: string;
@@ -1901,24 +1991,24 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
       position: [number, number, number];
     }> = [];
 
-    for (const [id, entity] of this.world.entities.items.entries()) {
-      const entityData = entity.data as Record<string, unknown>;
-      if (!entityData.npcType && entityData.type !== "npc") continue;
-
-      const pos = this.getEntityPosition(entity);
-      if (!pos) continue;
+    for (const entry of snapshot) {
+      if (!entry.data.npcType && entry.data.type !== "npc") continue;
 
       const npcId =
-        (entityData.npcId as string) || (entityData.customId as string) || id;
+        (entry.data.npcId as string) ||
+        (entry.data.customId as string) ||
+        entry.id;
 
       npcs.push({
-        id,
-        name: (entityData.name as string) || npcId,
+        id: entry.id,
+        name: (entry.data.name as string) || npcId,
         npcId,
-        position: pos,
+        position: entry.position,
       });
     }
 
+    this._npcPositionsCache = npcs;
+    this._npcPositionsCacheTime = now;
     return npcs;
   }
 

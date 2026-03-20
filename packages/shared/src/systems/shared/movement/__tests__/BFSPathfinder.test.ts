@@ -385,6 +385,135 @@ describe("BFSPathfinder", () => {
     });
   });
 
+  describe("BFS Iteration Budget", () => {
+    it("respects maxIterations parameter", () => {
+      const start = { x: 0, z: 0 };
+      const end = { x: 100, z: 100 }; // Far destination
+      // Very low budget forces partial path
+      const path = pathfinder.findPath(start, end, () => true, 50);
+
+      expect(pathfinder.wasLastPathPartial()).toBe(true);
+      expect(pathfinder.getLastIterationsUsed()).toBeLessThanOrEqual(50);
+      expect(path.length).toBeGreaterThan(0);
+    });
+
+    it("tracks iterations used across calls", () => {
+      const start = { x: 0, z: 0 };
+      const end = { x: 5, z: 0 };
+      pathfinder.findPath(start, end, () => true);
+
+      expect(pathfinder.getLastIterationsUsed()).toBeGreaterThan(0);
+      expect(pathfinder.wasLastPathPartial()).toBe(false);
+    });
+
+    it("resets iterations to 0 on early exit (same tile)", () => {
+      // First call uses iterations
+      pathfinder.findPath({ x: 0, z: 0 }, { x: 5, z: 0 }, () => true);
+      expect(pathfinder.getLastIterationsUsed()).toBeGreaterThan(0);
+
+      // Same-tile call should reset to 0, not return stale value
+      pathfinder.findPath({ x: 3, z: 3 }, { x: 3, z: 3 }, () => true);
+      expect(pathfinder.getLastIterationsUsed()).toBe(0);
+    });
+
+    it("returns complete path when budget is sufficient", () => {
+      const start = { x: 0, z: 0 };
+      const end = { x: 10, z: 10 };
+      const path = pathfinder.findPath(start, end, () => true, 4000);
+
+      expect(pathfinder.wasLastPathPartial()).toBe(false);
+      expect(path[path.length - 1]).toEqual(end);
+    });
+
+    it("partial path gets closer to destination than start", () => {
+      const start = { x: 0, z: 0 };
+      const end = { x: 100, z: 0 };
+      const path = pathfinder.findPath(start, end, () => true, 30);
+
+      expect(pathfinder.wasLastPathPartial()).toBe(true);
+      if (path.length > 0) {
+        const lastTile = path[path.length - 1];
+        const startDist = Math.abs(end.x - start.x);
+        const endDist = Math.abs(end.x - lastTile.x);
+        expect(endDist).toBeLessThan(startDist);
+      }
+    });
+
+    it("resets partial flag on each call", () => {
+      // First call: partial
+      pathfinder.findPath({ x: 0, z: 0 }, { x: 100, z: 100 }, () => true, 10);
+      expect(pathfinder.wasLastPathPartial()).toBe(true);
+
+      // Second call: complete
+      pathfinder.findPath({ x: 0, z: 0 }, { x: 2, z: 0 }, () => true);
+      expect(pathfinder.wasLastPathPartial()).toBe(false);
+    });
+  });
+
+  describe("Multi-Destination BFS (findPathToAny)", () => {
+    it("finds path to nearest destination", () => {
+      const start = { x: 0, z: 0 };
+      const destinations = [
+        { x: 10, z: 0 }, // Far
+        { x: 3, z: 0 }, // Close
+        { x: 20, z: 0 }, // Very far
+      ];
+
+      const path = pathfinder.findPathToAny(start, destinations, () => true);
+
+      expect(path.length).toBe(3); // Nearest is 3 tiles away
+      expect(path[path.length - 1]).toEqual({ x: 3, z: 0 });
+    });
+
+    it("returns empty when already at a destination", () => {
+      const start = { x: 5, z: 5 };
+      const destinations = [
+        { x: 10, z: 10 },
+        { x: 5, z: 5 }, // Same as start
+      ];
+
+      const path = pathfinder.findPathToAny(start, destinations, () => true);
+      expect(path).toEqual([]);
+    });
+
+    it("returns empty for empty destinations array", () => {
+      const path = pathfinder.findPathToAny({ x: 0, z: 0 }, [], () => true);
+      expect(path).toEqual([]);
+    });
+
+    it("respects maxIterations budget", () => {
+      const start = { x: 0, z: 0 };
+      const destinations = [{ x: 100, z: 100 }];
+
+      pathfinder.findPathToAny(start, destinations, () => true, 30);
+
+      expect(pathfinder.wasLastPathPartial()).toBe(true);
+      expect(pathfinder.getLastIterationsUsed()).toBeLessThanOrEqual(30);
+    });
+
+    it("skips unreachable destinations and finds reachable ones", () => {
+      const start = { x: 0, z: 0 };
+      // Destination at (5,0) is behind a wall, but (3,3) is reachable
+      const blocked: TileCoord[] = [];
+      for (let z = -10; z <= 10; z++) {
+        blocked.push({ x: 4, z });
+      }
+      const destinations = [
+        { x: 5, z: 0 }, // Behind wall
+        { x: 3, z: 3 }, // Reachable
+      ];
+
+      const path = pathfinder.findPathToAny(
+        start,
+        destinations,
+        createWalkabilityChecker(blocked),
+      );
+
+      expect(path.length).toBeGreaterThan(0);
+      expect(path[path.length - 1]).toEqual({ x: 3, z: 3 });
+    });
+  });
+
   describe("Directional Wall Blocking", () => {
     // These tests verify the pathfinder correctly handles directional blocking
     // (like building walls that block movement in specific directions)
