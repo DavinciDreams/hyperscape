@@ -158,6 +158,33 @@ async function startServer() {
   // Step 7: Start listening
   await fastify.listen({ port: config.port, host: "0.0.0.0" });
 
+  // Step 7b: Start uWS game WebSocket server (unless disabled)
+  if (process.env.UWS_ENABLED !== "false") {
+    try {
+      const { createUwsServer, getUwsApp } =
+        await import("./startup/uws-server.js");
+      await createUwsServer(world, config.uwsPort);
+      // Wire uWS pub/sub to BroadcastManager for native C++ fan-out
+      const uwsApp = getUwsApp();
+      const net = world.network as unknown as {
+        enablePubSub?: (app: unknown) => void;
+      };
+      if (uwsApp && net?.enablePubSub) {
+        net.enablePubSub(uwsApp);
+      }
+    } catch (err) {
+      console.warn(
+        `[Server] ⚠️ uWebSockets.js failed to load, falling back to Fastify /ws transport:`,
+        errMsg(err),
+      );
+      // Re-register the Fastify /ws route as fallback
+      const { registerWebSocket: registerFallbackWs } =
+        await import("./startup/websocket.js");
+      process.env.UWS_ENABLED = "false";
+      registerFallbackWs(fastify, world);
+    }
+  }
+
   // Step 8: Initialize streaming duel scheduler (BEFORE agents so it can track their spawns)
   if (streamingDuelEnabled) {
     try {

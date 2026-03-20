@@ -273,6 +273,7 @@ import {
 } from "./handlers/duel";
 import { getDatabase } from "./handlers/common";
 import { registerDuelEventListeners } from "./duel-events";
+import type { UwsWebSocketAdapter } from "../../startup/UwsWebSocketAdapter";
 
 const DEBUG_ATTACK_MOB =
   process.env.DEBUG_ATTACK_MOB === "true" ||
@@ -578,6 +579,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.spatialIndex = new SpatialIndex();
     this.broadcastManager.setSpatialIndex(this.spatialIndex);
 
+    // Note: uWS pub/sub is wired later via enablePubSub() after uWS server starts
+
     // Tick system for RuneScape-style 600ms ticks
     this.tickSystem = new TickSystem();
 
@@ -595,11 +598,18 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           // Keep SpatialIndex in sync with tile movement so the player
           // stays within their own broadcast radius
           if (payload.id) {
-            this.spatialIndex.updatePlayerPosition(
+            const moveRegionChange = this.spatialIndex.updatePlayerPosition(
               payload.id,
               entity.position.x,
               entity.position.z,
             );
+            if (moveRegionChange) {
+              this.updatePlayerRegionSubscriptions(
+                payload.id,
+                moveRegionChange.oldKey,
+                moveRegionChange.newKey,
+              );
+            }
           }
           this.broadcastManager.sendToNearby(
             name,
@@ -1109,7 +1119,20 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       // CRITICAL: Update spatial index so sendToNearby() finds players at new location.
       // Without this, post-teleport tile movement broadcasts (e.g., combat follow)
       // won't reach players whose spatial index is still at their pre-teleport position.
-      this.spatialIndex.updatePlayerPosition(playerId, position.x, position.z);
+      const teleportRegionChange = this.spatialIndex.updatePlayerPosition(
+        playerId,
+        position.x,
+        position.z,
+      );
+      // Full region resubscription on teleport (may jump many regions)
+      if (teleportRegionChange) {
+        this.resubscribePlayerRegionTopics(
+          playerId,
+          teleportRegionChange.oldKey,
+          position.x,
+          position.z,
+        );
+      }
 
       // Clear any in-progress movement by cleaning up the player's movement state
       this.tileMovementManager.cleanup(playerId);
@@ -1358,10 +1381,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         };
         const eventLoopLag = _maxEventLoopLag;
         _maxEventLoopLag = 0; // Reset after reporting
+        const broadcastMs = this.broadcastManager.drainSendTimeMs();
+        const pubsubPublishes = this.broadcastManager.drainPubsubStats();
         this.broadcastManager.sendToAll("tickHealth", {
           ...stats,
           phaseTimings,
           eventLoopLag,
+          transport: process.env.UWS_ENABLED !== "false" ? "uws" : "ws",
+          connections: this.sockets.size,
+          broadcastMs,
+          pubsubPublishes,
         });
       },
       TickPriority.BROADCAST,
@@ -1401,6 +1430,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     });
 
     // Seed spatial index on initial join so sendToNearby() works from first tick
+    // Also subscribe the socket to its 9 region topics for pub/sub
     this.onWorld(EventType.PLAYER_JOINED, (payload: unknown) => {
       const event = payload as {
         playerId: string;
@@ -1412,20 +1442,35 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           event.player.position.x,
           event.player.position.z,
         );
+        // Subscribe to region topics for pub/sub
+        this.subscribePlayerRegionTopics(
+          event.playerId,
+          event.player.position.x,
+          event.player.position.z,
+        );
       }
     });
 
     // Keep spatial index updated so sendToNearby() works
+    // Also update pub/sub region subscriptions on region change
     this.onWorld(EventType.PLAYER_POSITION_UPDATED, (payload: unknown) => {
       const event = payload as {
         playerId: string;
         position: { x: number; z: number };
       };
-      this.spatialIndex.updatePlayerPosition(
+      const regionChange = this.spatialIndex.updatePlayerPosition(
         event.playerId,
         event.position.x,
         event.position.z,
       );
+      // Update pub/sub subscriptions on region change
+      if (regionChange) {
+        this.updatePlayerRegionSubscriptions(
+          event.playerId,
+          regionChange.oldKey,
+          regionChange.newKey,
+        );
+      }
     });
 
     // Reset agility progress on death (small penalty - lose accumulated tiles toward next XP grant)
@@ -1454,11 +1499,20 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           return;
         }
         this.tileMovementManager.syncPlayerPosition(event.playerId, position);
-        this.spatialIndex.updatePlayerPosition(
+        const respawnRegionChange = this.spatialIndex.updatePlayerPosition(
           event.playerId,
           position.x,
           position.z,
         );
+        // Full region resubscription on respawn
+        if (respawnRegionChange) {
+          this.resubscribePlayerRegionTopics(
+            event.playerId,
+            respawnRegionChange.oldKey,
+            position.x,
+            position.z,
+          );
+        }
         // Also clear any pending actions from before death
         this.actionQueue.cleanup(event.playerId);
         console.log(
@@ -1688,6 +1742,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.broadcastManager,
       this.db,
     );
+    this.connectionHandler.setSpatialIndex(this.spatialIndex);
 
     // Register handlers
     this.registerHandlers();
@@ -3220,6 +3275,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   /**
+   * Enable uWS native pub/sub broadcasting.
+   * Called from main.ts after the uWS server is created.
+   */
+  enablePubSub(uwsApp: unknown): void {
+    this.broadcastManager.setUwsApp(
+      uwsApp as import("uWebSockets.js").TemplatedApp,
+    );
+    console.log("[ServerNetwork] uWS pub/sub broadcasting enabled");
+  }
+
+  /**
    * Broadcast message with HIGH priority (bypasses bandwidth throttling for
    * NORMAL-priority traffic). Use for batched entity spawns that must not be
    * silently dropped by the per-connection bandwidth budget.
@@ -3278,6 +3344,111 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     }
     return undefined;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pub/Sub subscription helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get the UwsWebSocketAdapter for a player's socket.
+   * Returns undefined if player not connected or not on uWS transport.
+   */
+  private getUwsAdapterForPlayer(
+    playerId: string,
+  ): UwsWebSocketAdapter | undefined {
+    const socket = this.getSocketByPlayerId(playerId);
+    if (!socket) return undefined;
+    return this.broadcastManager.getAdapter(socket.id);
+  }
+
+  /**
+   * Subscribe a player's socket to 9 region topics around a position.
+   * Called on PLAYER_JOINED.
+   */
+  private subscribePlayerRegionTopics(
+    playerId: string,
+    worldX: number,
+    worldZ: number,
+  ): void {
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (!adapter) return;
+    const regionKeys = this.spatialIndex.getAdjacentRegionKeys(worldX, worldZ);
+    for (let i = 0; i < 9; i++) {
+      adapter.subscribe(this.spatialIndex.getRegionTopic(regionKeys[i]));
+    }
+  }
+
+  /**
+   * Compute diff of old vs new 3×3 region grids and update subscriptions.
+   * Called on position updates that cross a region boundary.
+   */
+  private updatePlayerRegionSubscriptions(
+    playerId: string,
+    oldKey: number,
+    newKey: number,
+  ): void {
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (!adapter) return;
+    const diff = this.spatialIndex.getRegionSubscriptionDiff(oldKey, newKey);
+    for (const key of diff.unsubscribe) {
+      adapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
+    }
+    for (const key of diff.subscribe) {
+      adapter.subscribe(this.spatialIndex.getRegionTopic(key));
+    }
+
+    // Also update any spectators following this player
+    this.updateSpectatorRegionSubscriptions(playerId, diff);
+  }
+
+  /**
+   * Full region resubscription — unsub all old 9, sub all new 9.
+   * Called on teleport/respawn where the player may jump many regions.
+   */
+  private resubscribePlayerRegionTopics(
+    playerId: string,
+    oldKey: number,
+    worldX: number,
+    worldZ: number,
+  ): void {
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (!adapter) return;
+    // Unsub old 9 regions
+    const oldKeys = this.spatialIndex.getAdjacentRegionKeysFromKey(oldKey);
+    for (let i = 0; i < 9; i++) {
+      adapter.unsubscribe(this.spatialIndex.getRegionTopic(oldKeys[i]));
+    }
+    // Sub new 9 regions
+    const newKeys = this.spatialIndex.getAdjacentRegionKeys(worldX, worldZ);
+    for (let i = 0; i < 9; i++) {
+      adapter.subscribe(this.spatialIndex.getRegionTopic(newKeys[i]));
+    }
+  }
+
+  /**
+   * Update spectator region subscriptions when a followed player changes region.
+   * Typically 0-2 spectators per player.
+   */
+  private updateSpectatorRegionSubscriptions(
+    followedPlayerId: string,
+    diff: { subscribe: number[]; unsubscribe: number[] },
+  ): void {
+    for (const socket of this.sockets.values()) {
+      if (!socket.isSpectator) continue;
+      const spectSocket = socket as ServerSocket & {
+        spectatingCharacterId?: string;
+      };
+      if (spectSocket.spectatingCharacterId !== followedPlayerId) continue;
+      const spectAdapter = this.broadcastManager.getAdapter(socket.id);
+      if (!spectAdapter) continue;
+      for (const key of diff.unsubscribe) {
+        spectAdapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
+      }
+      for (const key of diff.subscribe) {
+        spectAdapter.subscribe(this.spatialIndex.getRegionTopic(key));
+      }
+    }
   }
 
   /**

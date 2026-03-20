@@ -159,6 +159,14 @@ export function registerShutdownHandlers(
     // Step 2: Close HTTP server
     await closeHttpServer(context);
 
+    // Step 2a: Close uWS game WebSocket server (stop accepting new WS connections)
+    try {
+      const { closeUwsServer } = await import("./uws-server.js");
+      closeUwsServer();
+    } catch {
+      // uWS may not have been started (UWS_ENABLED=false)
+    }
+
     // Step 3: Shutdown embedded agents
     await shutdownAgents();
 

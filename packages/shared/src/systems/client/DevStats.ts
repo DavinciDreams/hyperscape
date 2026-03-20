@@ -978,6 +978,10 @@ export class DevStats extends System {
             isHealthy: boolean;
             phaseTimings?: { mobAI: number; mobMove: number; combat: number };
             eventLoopLag?: number;
+            transport?: string;
+            connections?: number;
+            broadcastMs?: number;
+            pubsubPublishes?: number;
           };
         }
       ).tickHealth;
@@ -1014,10 +1018,32 @@ export class DevStats extends System {
           </div>
         `
           : "";
+        const transportLabel =
+          tickHealth.transport === "uws"
+            ? "uWS"
+            : tickHealth.transport === "ws"
+              ? "ws"
+              : "—";
+        const transportColor =
+          tickHealth.transport === "uws" ? "#4ade80" : "#94a3b8";
+        const broadcastColor =
+          (tickHealth.broadcastMs ?? 0) < 5
+            ? "#4ade80"
+            : (tickHealth.broadcastMs ?? 0) < 20
+              ? "#fbbf24"
+              : "#ef4444";
         this.tickHealthElement.innerHTML = `
           <div style="display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 4px;">
             <span>Server Tick</span>
             <span style="color: ${healthColor};">${healthLabel}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Transport:</span>
+            <span style="color: ${transportColor}; font-weight: 600;">${transportLabel}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Connections:</span>
+            <span style="color: #e0e0e0;">${tickHealth.connections ?? "—"}</span>
           </div>
           <div style="display: flex; justify-content: space-between;">
             <span>Tick #:</span>
@@ -1039,6 +1065,21 @@ export class DevStats extends System {
             <span>Max Lateness:</span>
             <span style="color: #e0e0e0;">${tickHealth.maxLateness}ms</span>
           </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Broadcast:</span>
+            <span style="color: ${broadcastColor};">${tickHealth.broadcastMs ?? "—"}ms</span>
+          </div>
+          ${
+            tickHealth.pubsubPublishes !== undefined &&
+            tickHealth.pubsubPublishes > 0
+              ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span>Publishes:</span>
+            <span style="color: #4ade80;">${tickHealth.pubsubPublishes}</span>
+          </div>
+          `
+              : ""
+          }
           ${phaseRows}
           ${
             tickHealth.eventLoopLag !== undefined
@@ -1192,18 +1233,33 @@ export class DevStats extends System {
           isHealthy: boolean;
           phaseTimings?: { mobAI: number; mobMove: number; combat: number };
           eventLoopLag?: number;
+          transport?: string;
+          connections?: number;
+          broadcastMs?: number;
+          pubsubPublishes?: number;
         };
       }
     ).tickHealth;
     if (tickHealth) {
       lines.push(`--- Server Tick ---`);
-      lines.push(`Health: ${tickHealth.isHealthy ? "OK" : "DEGRADED"}`);
+      lines.push(
+        `Health: ${tickHealth.isHealthy ? "OK" : "DEGRADED"}  Transport: ${tickHealth.transport ?? "—"}  Conns: ${tickHealth.connections ?? "—"}`,
+      );
       lines.push(
         `Tick #${tickHealth.currentTick}  Duration: ${tickHealth.lastTickDuration}ms/600ms`,
       );
       lines.push(
         `Late: ${tickHealth.lateTicks}  Missed: ${tickHealth.missedTicks}  Max Lateness: ${tickHealth.maxLateness}ms`,
       );
+      if (tickHealth.broadcastMs !== undefined) {
+        lines.push(`Broadcast: ${tickHealth.broadcastMs}ms`);
+      }
+      if (
+        tickHealth.pubsubPublishes !== undefined &&
+        tickHealth.pubsubPublishes > 0
+      ) {
+        lines.push(`Publishes: ${tickHealth.pubsubPublishes}`);
+      }
       if (tickHealth.phaseTimings) {
         const pt = tickHealth.phaseTimings;
         lines.push(

@@ -190,7 +190,7 @@
     "lodash": ">=4.17.23",
     "lodash-es": ">=4.17.23",
     "@elizaos/prompts": "alpha",
-    "vite": ">=6.4.1",
+    "vite": ">=8.0.0",
     "@trpc/server": ">=10.45.3 <11",
     "minimatch": ">=10.2.1",
     "cookie": ">=0.7.0",

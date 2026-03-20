@@ -4495,6 +4495,10 @@ export class ClientNetwork extends SystemBase {
     isHealthy: boolean;
     phaseTimings?: { mobAI: number; mobMove: number; combat: number };
     eventLoopLag?: number;
+    transport?: string;
+    connections?: number;
+    broadcastMs?: number;
+    pubsubPublishes?: number;
   }) => {
     (this.world as { tickHealth?: typeof data }).tickHealth = data;
   };
