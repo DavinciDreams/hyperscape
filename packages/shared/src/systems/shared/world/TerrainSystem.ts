@@ -221,6 +221,13 @@ export class TerrainSystem extends System {
   private pendingTileSet = new Set<string>();
   private pendingCollisionKeys: string[] = [];
   private pendingCollisionSet = new Set<string>();
+  // Deferred walkability baking queue — spreads 10,000 iterations across ticks
+  private pendingWalkabilityTiles: Array<{ tileX: number; tileZ: number }> = [];
+  private walkabilityProgress: {
+    tileX: number;
+    tileZ: number;
+    nextRow: number;
+  } | null = null;
   private maxTilesPerFrame = 2; // cap tiles generated per frame
   private generationBudgetMsPerFrame = 6; // time budget per frame (ms)
   // Pending resource instance creation (deferred to spread across frames)
@@ -266,6 +273,8 @@ export class TerrainSystem extends System {
   private templateGeometry: THREE.PlaneGeometry | null = null;
   private templateColors: Float32Array | null = null;
   private templateBiomeIds: Float32Array | null = null;
+  // PERFORMANCE: Low-res collision template (SERVER_COLLISION_RESOLUTION) for PhysX baking
+  private serverCollisionTemplate: THREE.PlaneGeometry | null = null;
   // PERFORMANCE: Pre-allocated overflow height grid for normal computation
   // Size = (TILE_RESOLUTION + 2)^2 — one extra row/column on each side for centered differences
   private _overflowHeightGrid: Float32Array | null = null;
@@ -612,27 +621,67 @@ export class TerrainSystem extends System {
     if (this.pendingCollisionKeys.length === 0 || !this.world.network?.isServer)
       return;
 
-    const key = this.pendingCollisionKeys.shift()!;
-    this.pendingCollisionSet.delete(key);
+    // Time-budgeted: process multiple collision meshes per tick (up to 8ms)
+    const budgetMs = 8;
+    const t0 = performance.now();
 
-    const tile = this.terrainTiles.get(key);
-    if (!tile || tile.collision) return;
+    while (this.pendingCollisionKeys.length > 0) {
+      if (performance.now() - t0 > budgetMs) break;
 
-    const geometry = tile.mesh.geometry;
-    const transformedGeometry = geometry.clone();
-    transformedGeometry.translate(
-      tile.x * this.CONFIG.TILE_SIZE,
-      0,
-      tile.z * this.CONFIG.TILE_SIZE,
-    );
+      const key = this.pendingCollisionKeys.shift()!;
+      this.pendingCollisionSet.delete(key);
 
-    const meshHandle = geometryToPxMesh(this.world, transformedGeometry, false);
-    if (meshHandle) {
-      tile.collision = meshHandle;
+      const tile = this.terrainTiles.get(key);
+      if (!tile || tile.collision) continue;
+
+      const geometry = this.buildServerCollisionGeometry(tile.x, tile.z);
+
+      const meshHandle = geometryToPxMesh(this.world, geometry, false);
+      if (meshHandle) {
+        tile.collision = meshHandle;
+      }
+
+      geometry.dispose();
+    }
+  }
+
+  /**
+   * Build a low-resolution collision geometry for PhysX triangle mesh cooking.
+   * Uses SERVER_COLLISION_RESOLUTION (16×16) instead of full TILE_RESOLUTION (64×64)
+   * to reduce triangle count from ~8192 to ~512, giving ~16x faster PhysX cooking.
+   */
+  private buildServerCollisionGeometry(
+    tileX: number,
+    tileZ: number,
+  ): THREE.PlaneGeometry {
+    if (!this.serverCollisionTemplate) {
+      this.serverCollisionTemplate = new THREE.PlaneGeometry(
+        this.CONFIG.TILE_SIZE,
+        this.CONFIG.TILE_SIZE,
+        this.CONFIG.SERVER_COLLISION_RESOLUTION - 1,
+        this.CONFIG.SERVER_COLLISION_RESOLUTION - 1,
+      );
+      this.serverCollisionTemplate.rotateX(-Math.PI / 2);
     }
 
-    // Avoid leaked cloned geometry
-    transformedGeometry.dispose();
+    const geometry = this.serverCollisionTemplate.clone();
+    const positions = geometry.attributes.position;
+    const posArray = positions.array as Float32Array;
+
+    const originX = tileX * this.CONFIG.TILE_SIZE;
+    const originZ = tileZ * this.CONFIG.TILE_SIZE;
+
+    for (let i = 0; i < positions.count; i++) {
+      const i3 = i * 3;
+      const worldX = posArray[i3] + originX;
+      const worldZ = posArray[i3 + 2] + originZ;
+      posArray[i3 + 1] = this.getHeightAtComputed(worldX, worldZ);
+    }
+
+    // Translate to world position (collision mesh needs absolute coords)
+    geometry.translate(originX, 0, originZ);
+
+    return geometry;
   }
 
   /**
@@ -1354,6 +1403,7 @@ export class TerrainSystem extends System {
     TILE_SIZE: TERRAIN_CONSTANTS.TERRAIN_TILE_SIZE,
     WORLD_SIZE: 100, // 100x100 grid = 10km x 10km world
     TILE_RESOLUTION: 64, // 64x64 vertices per tile for smooth terrain
+    SERVER_COLLISION_RESOLUTION: 16, // 16x16 vertices for PhysX collision (server only)
     WATER_THRESHOLD: TERRAIN_CONSTANTS.WATER_THRESHOLD,
 
     // LOD (Level of Detail) - Resolution tiers based on distance
@@ -2512,11 +2562,12 @@ export class TerrainSystem extends System {
     this.terrainTiles.set(key, tile);
     this.activeChunks.add(key);
 
-    // Bake terrain walkability into CollisionMatrix (server-only).
+    // Enqueue deferred walkability baking (server-only).
     // Pre-computes WATER and STEEP_SLOPE flags so BFS pathfinding
     // becomes a single bitwise AND instead of runtime terrain queries.
+    // Processing is spread across ticks to avoid 10,000-iteration main-thread spikes.
     if (isServer) {
-      this.bakeWalkabilityFlags(tileX, tileZ);
+      this.pendingWalkabilityTiles.push({ tileX, tileZ });
     }
 
     return tile;
@@ -5041,9 +5092,10 @@ export class TerrainSystem extends System {
     // (also processes pre-computed worker results when available)
     this.processTileGenerationQueue();
 
-    // Process queued collision generation on the server
+    // Process queued collision generation and walkability baking on the server
     if (this.world.network?.isServer) {
       this.processCollisionGenerationQueue();
+      this.processWalkabilityQueue();
     }
 
     // Process pending resource instance creation (client only, spreads work across frames)
@@ -5318,6 +5370,19 @@ export class TerrainSystem extends System {
   }
 
   private unloadTile(tile: TerrainTile): void {
+    // Cancel any pending/in-progress walkability baking for this tile
+    if (this.runtimeIsServer) {
+      this.pendingWalkabilityTiles = this.pendingWalkabilityTiles.filter(
+        (t) => t.tileX !== tile.x || t.tileZ !== tile.z,
+      );
+      if (
+        this.walkabilityProgress &&
+        this.walkabilityProgress.tileX === tile.x &&
+        this.walkabilityProgress.tileZ === tile.z
+      ) {
+        this.walkabilityProgress = null;
+      }
+    }
     // Clear baked terrain walkability flags (server-only)
     if (this.runtimeIsServer && this.world?.collision) {
       const tileSize = this.CONFIG.TILE_SIZE;
@@ -5614,6 +5679,87 @@ export class TerrainSystem extends System {
           collision.addFlags(moveTileX, moveTileZ, flags);
         }
       }
+    }
+  }
+
+  /**
+   * Process walkability baking incrementally across ticks.
+   * Processes rows of a terrain tile within a time budget (~4ms) to avoid
+   * the synchronous 10,000-iteration spike from bakeWalkabilityFlags.
+   */
+  private processWalkabilityQueue(): void {
+    if (!this.runtimeIsServer) return;
+    const collision = this.world?.collision;
+    if (!collision) return;
+
+    const budgetMs = 4;
+    const t0 = performance.now();
+    const tileSize = this.CONFIG.TILE_SIZE;
+    const tilesPerSide = Math.floor(tileSize / 1.0); // 100
+    const terrainFlagsMask = CollisionFlag.WATER | CollisionFlag.STEEP_SLOPE;
+
+    while (performance.now() - t0 < budgetMs) {
+      // Start next tile if no work in progress
+      if (!this.walkabilityProgress) {
+        if (this.pendingWalkabilityTiles.length === 0) return;
+        const next = this.pendingWalkabilityTiles.shift()!;
+        this.walkabilityProgress = {
+          tileX: next.tileX,
+          tileZ: next.tileZ,
+          nextRow: 0,
+        };
+      }
+
+      const prog = this.walkabilityProgress;
+      const originX = prog.tileX * tileSize;
+      const originZ = prog.tileZ * tileSize;
+
+      // Process rows until budget or tile exhausted
+      while (prog.nextRow < tilesPerSide) {
+        if (performance.now() - t0 > budgetMs) return; // preserve progress
+
+        const lx = prog.nextRow;
+        const worldX = originX + lx + 0.5;
+
+        for (let lz = 0; lz < tilesPerSide; lz++) {
+          const worldZ = originZ + lz + 0.5;
+          const moveTileX = Math.floor(worldX);
+          const moveTileZ = Math.floor(worldZ);
+
+          collision.removeFlags(moveTileX, moveTileZ, terrainFlagsMask);
+
+          let flags = 0;
+          const biomeTerrainTileX = Math.floor(worldX / tileSize);
+          const biomeTerrainTileZ = Math.floor(worldZ / tileSize);
+          const biome = this.getBiomeAt(biomeTerrainTileX, biomeTerrainTileZ);
+
+          if (biome === "lakes") {
+            flags = CollisionFlag.WATER;
+          } else {
+            const height = this.getHeightAt(worldX, worldZ);
+            if (height < this.CONFIG.WATER_THRESHOLD) {
+              flags = CollisionFlag.WATER;
+            } else {
+              const biomeData = BIOMES[biome];
+              if (biomeData) {
+                const slope = this.calculateSlope(worldX, worldZ);
+                if (slope > biomeData.maxSlope) {
+                  flags = CollisionFlag.STEEP_SLOPE;
+                }
+              }
+            }
+          }
+
+          if (flags !== 0) {
+            collision.addFlags(moveTileX, moveTileZ, flags);
+          }
+        }
+
+        prog.nextRow++;
+      }
+
+      // Tile complete
+      this.walkabilityProgress = null;
     }
   }
 
