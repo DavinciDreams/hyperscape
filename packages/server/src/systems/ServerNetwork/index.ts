@@ -477,6 +477,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
   /** Cleanup function for duel event listeners */
   private cleanupDuelEventListeners: (() => void) | null = null;
+  private _lagProbeTimer: ReturnType<typeof setTimeout> | null = null;
+  private _stopLagProbe: (() => void) | null = null;
   private readonly messageMetrics = new Map<string, NetworkMessageMetric>();
 
   constructor(world: World) {
@@ -1313,7 +1315,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // between ticks using a high-frequency setTimeout probe
     let _maxEventLoopLag = 0;
     let _lagProbeExpected = Date.now();
+    let _lagProbeStopped = false;
     const lagProbe = () => {
+      if (_lagProbeStopped) return;
       const now = Date.now();
       const lag = now - _lagProbeExpected - 50; // Subtract expected 50ms interval
       if (lag > 0) {
@@ -1328,9 +1332,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         }
       }
       _lagProbeExpected = now + 50;
-      setTimeout(lagProbe, 50);
+      this._lagProbeTimer = setTimeout(lagProbe, 50);
     };
-    setTimeout(lagProbe, 50);
+    this._lagProbeTimer = setTimeout(lagProbe, 50);
+    // Expose stop function for destroy() cleanup
+    this._stopLagProbe = () => {
+      _lagProbeStopped = true;
+      if (this._lagProbeTimer) {
+        clearTimeout(this._lagProbeTimer);
+        this._lagProbeTimer = null;
+      }
+    };
 
     // Broadcast tick health stats to clients for DevStats panel (every 5th tick = 3s)
     this.tickSystem.onTick(
@@ -3159,6 +3171,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     destroyAllRateLimiters();
     this.messageMetrics.clear();
     this.tickSystem.stop();
+
+    // Stop event loop lag probe to prevent leaked setTimeout loop
+    if (this._stopLagProbe) {
+      this._stopLagProbe();
+      this._stopLagProbe = null;
+    }
 
     for (const [_id, socket] of this.sockets) {
       socket.close?.();

@@ -154,6 +154,7 @@ export class AgentBehaviorBridge {
 
     if (this.worker) {
       this.sendToWorker({ type: "shutdown" });
+      this.worker.terminate();
       this.worker = null;
       this.workerReady = false;
     }
