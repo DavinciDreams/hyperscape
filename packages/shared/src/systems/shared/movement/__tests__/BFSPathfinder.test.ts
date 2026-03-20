@@ -406,6 +406,16 @@ describe("BFSPathfinder", () => {
       expect(pathfinder.wasLastPathPartial()).toBe(false);
     });
 
+    it("resets iterations to 0 on early exit (same tile)", () => {
+      // First call uses iterations
+      pathfinder.findPath({ x: 0, z: 0 }, { x: 5, z: 0 }, () => true);
+      expect(pathfinder.getLastIterationsUsed()).toBeGreaterThan(0);
+
+      // Same-tile call should reset to 0, not return stale value
+      pathfinder.findPath({ x: 3, z: 3 }, { x: 3, z: 3 }, () => true);
+      expect(pathfinder.getLastIterationsUsed()).toBe(0);
+    });
+
     it("returns complete path when budget is sufficient", () => {
       const start = { x: 0, z: 0 };
       const end = { x: 10, z: 10 };

@@ -128,6 +128,7 @@ export class BFSPathfinder {
   ): TileCoord[] {
     // Reset per-request metadata so callers can trust path status from this call.
     this._lastPathWasPartial = false;
+    this._lastIterationsUsed = 0;
     this._lastRequestedDestination = { x: end.x, z: end.z };
 
     // Validate inputs
