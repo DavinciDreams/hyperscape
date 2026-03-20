@@ -128,6 +128,10 @@ export function QuestJournalPanel({
       }
     };
 
+    // Bridge server→client quest packets to trigger re-fetch
+    world.network?.on("questStarted", onQuestEvent);
+    world.network?.on("questProgressed", onQuestProgressed);
+    world.network?.on("questCompleted", onQuestEvent);
     world.on(EventType.QUEST_STARTED, onQuestEvent);
     world.on(EventType.QUEST_PROGRESSED, onQuestProgressed);
     world.on(EventType.QUEST_COMPLETED, onQuestEvent);
@@ -135,6 +139,9 @@ export function QuestJournalPanel({
     return () => {
       world.network?.off("questList", onQuestListUpdate);
       world.network?.off("questDetail", onQuestDetailUpdate);
+      world.network?.off("questStarted", onQuestEvent);
+      world.network?.off("questProgressed", onQuestProgressed);
+      world.network?.off("questCompleted", onQuestEvent);
       world.off(EventType.QUEST_STARTED, onQuestEvent);
       world.off(EventType.QUEST_PROGRESSED, onQuestProgressed);
       world.off(EventType.QUEST_COMPLETED, onQuestEvent);
