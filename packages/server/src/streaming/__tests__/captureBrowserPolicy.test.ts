@@ -14,6 +14,17 @@ describe("captureBrowserPolicy", () => {
     });
 
     expect(args).not.toContain("--disable-web-security");
+    expect(args).not.toContain("--no-sandbox");
+  });
+
+  it("only includes no-sandbox when capture sandboxing is explicitly disabled", () => {
+    const args = buildDefaultCaptureLaunchArgs({
+      angleBackend: "metal",
+      featureFlags: "--enable-features=Vulkan,UseSkiaRenderer,WebGPU",
+      disableSandbox: true,
+    });
+
+    expect(args).toContain("--no-sandbox");
   });
 
   it("derives one allowed origin per configured game URL", () => {

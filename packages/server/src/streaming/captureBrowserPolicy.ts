@@ -14,6 +14,7 @@ export type CaptureRendererHealthSnapshot = {
 export function buildDefaultCaptureLaunchArgs(params: {
   angleBackend: string;
   featureFlags: string;
+  disableSandbox?: boolean;
 }): string[] {
   return [
     "--use-gl=angle",
@@ -23,7 +24,7 @@ export function buildDefaultCaptureLaunchArgs(params: {
     params.featureFlags,
     "--ignore-gpu-blocklist",
     "--enable-gpu-rasterization",
-    "--no-sandbox",
+    ...(params.disableSandbox ? ["--no-sandbox"] : []),
     "--disable-dev-shm-usage",
     "--autoplay-policy=no-user-gesture-required",
     "--disable-background-timer-throttling",

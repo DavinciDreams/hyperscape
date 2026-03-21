@@ -27,6 +27,7 @@
  *   STREAM_CAPTURE_HEADLESS  - 'true' for headless (default: false for better GPU rendering)
  *   STREAM_CAPTURE_CHANNEL   - Browser channel ('chrome', 'msedge', etc.)
  *   STREAM_CAPTURE_ANGLE     - ANGLE backend (default: metal on macOS, vulkan elsewhere)
+ *   CAPTURE_DISABLE_SANDBOX  - 'true' to launch Chromium with --no-sandbox
  *   STREAM_CDP_QUALITY       - JPEG quality for CDP screencast (1-100, default: 80)
  *   STREAM_FPS               - Target frames per second (default: 30)
  *   TWITCH_STREAM_KEY / TWITCH_RTMP_STREAM_KEY - Twitch stream key
@@ -124,6 +125,9 @@ const STREAM_CAPTURE_CHANNEL =
 const ANGLE_BACKEND =
   process.env.STREAM_CAPTURE_ANGLE?.trim() ||
   (process.platform === "darwin" ? "metal" : "vulkan");
+const CAPTURE_DISABLE_SANDBOX = /^(1|true|yes|on)$/i.test(
+  process.env.CAPTURE_DISABLE_SANDBOX || "",
+);
 const STREAM_CAPTURE_DISABLE_WEBGPU = /^(1|true|yes|on)$/i.test(
   process.env.STREAM_CAPTURE_DISABLE_WEBGPU || "",
 );
@@ -590,8 +594,15 @@ async function launchCaptureBrowser() {
     args: buildDefaultCaptureLaunchArgs({
       angleBackend: ANGLE_BACKEND,
       featureFlags,
+      disableSandbox: CAPTURE_DISABLE_SANDBOX,
     }),
   };
+
+  if (CAPTURE_DISABLE_SANDBOX) {
+    console.warn(
+      "[Main] CAPTURE_DISABLE_SANDBOX=true: Chromium sandboxing is disabled for this capture session.",
+    );
+  }
 
   if (STREAM_CAPTURE_CHANNEL) {
     console.log(
