@@ -348,7 +348,36 @@ function formatSseEvent(event: string, data: string, id?: number): string {
   return `${idLine}event: ${event}\ndata: ${normalizedData}\n\n`;
 }
 
-function parseReplayCursor(
+export function normalizeInternalAllowedOrigin(
+  value: string | null | undefined,
+): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed === "*" || trimmed === "null") {
+    return null;
+  }
+  if (trimmed.includes(",")) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    if (
+      parsed.pathname !== "/" ||
+      parsed.search.length > 0 ||
+      parsed.hash.length > 0
+    ) {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+export function parseReplayCursor(
   request: FastifyRequest<{ Querystring: { since?: string } }>,
 ): number {
   const headerLastEventId = request.headers["last-event-id"];
@@ -357,10 +386,10 @@ function parseReplayCursor(
     : headerLastEventId;
   const querySince = Number.parseInt(request.query.since || "", 10);
   const headerSince = Number.parseInt(normalizedHeaderId || "", 10);
-  return Number.isFinite(querySince)
-    ? querySince
-    : Number.isFinite(headerSince)
-      ? headerSince
+  return Number.isFinite(headerSince)
+    ? headerSince
+    : Number.isFinite(querySince)
+      ? querySince
       : 0;
 }
 
@@ -390,6 +419,7 @@ export function registerStreamingBettingRoutes(
 
   const tokenResolution = resolveBettingFeedAccessToken(process.env);
   const skipAuth = shouldSkipBettingFeedAuth(process.env);
+  const allowedOrigin = normalizeInternalAllowedOrigin(internalAllowedOrigin);
   const viewerTokenConfigured = Boolean(
     process.env.STREAMING_VIEWER_ACCESS_TOKEN?.trim(),
   );
@@ -418,6 +448,14 @@ export function registerStreamingBettingRoutes(
   } else if (viewerTokenConfigured) {
     fastify.log.info(
       "STREAMING_VIEWER_ACCESS_TOKEN remains separate from internal betting feed auth; BETTING_FEED_ACCESS_TOKEN is the canonical betting secret",
+    );
+  }
+  if (internalAllowedOrigin && !allowedOrigin) {
+    fastify.log.warn(
+      {
+        configuredOrigin: internalAllowedOrigin,
+      },
+      "Ignoring invalid INTERNAL_BET_SYNC_ALLOWED_ORIGIN; expected one explicit http(s) origin with no path, query, or hash",
     );
   }
 
@@ -690,7 +728,8 @@ export function registerStreamingBettingRoutes(
       authorizationHeader: request.headers.authorization,
       streamToken: requestQuery.streamToken?.trim() || null,
       // EventSource cannot set Authorization headers, so the query-token path
-      // is retained only for the long-lived SSE event stream.
+      // is retained only for the long-lived SSE event stream. Production
+      // access logs and reverse proxies must redact streamToken from URLs.
       allowQueryToken: authOptions?.allowQueryToken,
     });
 
@@ -806,8 +845,8 @@ export function registerStreamingBettingRoutes(
     raw.setHeader("Cache-Control", "no-cache, no-transform");
     raw.setHeader("Connection", "keep-alive");
     raw.setHeader("X-Accel-Buffering", "no");
-    if (internalAllowedOrigin) {
-      raw.setHeader("Access-Control-Allow-Origin", internalAllowedOrigin);
+    if (allowedOrigin) {
+      raw.setHeader("Access-Control-Allow-Origin", allowedOrigin);
     }
     raw.socket?.setNoDelay?.(true);
     raw.socket?.setKeepAlive?.(true, heartbeatMs * 2);

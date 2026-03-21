@@ -1412,7 +1412,7 @@ export class StreamingDuelScheduler {
       winnerName,
       loserId,
       loserName,
-      reason: winReason === "kill" ? "death" : "death",
+      reason: "death",
       seed: oracleProof.seed,
       replayHash: oracleProof.replayHash,
       forfeit: false,

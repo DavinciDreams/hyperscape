@@ -61,7 +61,8 @@ interface DuelMarket {
   agent2Name: string;
   createdAt: number;
   bettingClosesAt: number;
-  status: "betting" | "locked" | "resolved";
+  status: "betting" | "locked" | "resolved" | "aborted";
+  onChainInitialized: boolean;
   winnerId?: string;
   winnerSide?: "A" | "B";
 }
@@ -292,6 +293,9 @@ export class DuelBettingBridge {
   /** Historical markets for stats */
   private marketHistory: DuelMarket[] = [];
 
+  /** Serializes market creation per duel to avoid duplicate initRound calls */
+  private readonly createOrSyncInFlight = new Map<string, Promise<void>>();
+
   /** Registered event listeners */
   private readonly eventListeners: Array<{
     event: string;
@@ -471,6 +475,7 @@ export class DuelBettingBridge {
 
     // Clear retained market data
     this.activeMarkets.clear();
+    this.createOrSyncInFlight.clear();
 
     Logger.info("DuelBettingBridge", "Duel betting bridge destroyed");
   }
@@ -656,7 +661,29 @@ export class DuelBettingBridge {
       duelId: data.duelId,
       reason: data.reason || "streaming abort",
     });
+    if (market.onChainInitialized) {
+      Logger.warn(
+        "DuelBettingBridge",
+        "Streaming duel aborted after on-chain market initialization; operator does not yet support cancellation, so the round is now locally terminal only",
+        {
+          duelId: data.duelId,
+          roundSeedHex: market.roundSeedHex,
+          reason: data.reason || "streaming abort",
+        },
+      );
+    }
+    const abortedMarket: DuelMarket = {
+      ...market,
+      status: "aborted",
+    };
     this.activeMarkets.delete(data.duelId);
+    this.pushMarketHistory(abortedMarket);
+    this.world.emit("betting:market:aborted", {
+      duelId: data.duelId,
+      market: abortedMarket,
+      reason: data.reason || "streaming abort",
+      onChainInitialized: market.onChainInitialized,
+    });
   }
 
   /**
@@ -710,10 +737,40 @@ export class DuelBettingBridge {
     bettingClosesAt: number;
     source: "legacy" | "streaming";
   }): Promise<void> {
-    if (!this.activeMarkets.has(params.duelId) && this.hasResolvedMarket(params.duelId)) {
+    const prior =
+      this.createOrSyncInFlight.get(params.duelId) ?? Promise.resolve();
+    let current: Promise<void>;
+    current = prior
+      .catch(() => {
+        // A previous create/sync failure should not block subsequent retries.
+      })
+      .then(() => this.createOrSyncMarketInternal(params))
+      .finally(() => {
+        if (this.createOrSyncInFlight.get(params.duelId) === current) {
+          this.createOrSyncInFlight.delete(params.duelId);
+        }
+      });
+    this.createOrSyncInFlight.set(params.duelId, current);
+    return current;
+  }
+
+  private async createOrSyncMarketInternal(params: {
+    duelId: string;
+    duelKeyHex?: string;
+    agent1Id: string;
+    agent2Id: string;
+    agent1Name: string;
+    agent2Name: string;
+    bettingClosesAt: number;
+    source: "legacy" | "streaming";
+  }): Promise<void> {
+    if (
+      !this.activeMarkets.has(params.duelId) &&
+      this.hasTerminalMarket(params.duelId)
+    ) {
       Logger.info(
         "DuelBettingBridge",
-        "Skipping market recreation for an already-resolved duel",
+        "Skipping market recreation for a terminal duel market",
         {
           duelId: params.duelId,
           source: params.source,
@@ -726,7 +783,7 @@ export class DuelBettingBridge {
       params.duelKeyHex || this.generateRoundSeed(params.duelId);
     const existing = this.activeMarkets.get(params.duelId);
     const createdAt = existing?.createdAt ?? Date.now();
-    const market: DuelMarket = {
+    const market: DuelMarket = existing ?? {
       duelId: params.duelId,
       duelKeyHex: roundSeedHex,
       roundSeedHex,
@@ -736,22 +793,37 @@ export class DuelBettingBridge {
       agent2Name: params.agent2Name || params.agent2Id,
       createdAt,
       bettingClosesAt: params.bettingClosesAt,
-      status: existing?.status ?? "betting",
-      winnerId: existing?.winnerId,
-      winnerSide: existing?.winnerSide,
+      status: "betting",
+      onChainInitialized: false,
+      winnerId: undefined,
+      winnerSide: undefined,
     };
+
+    market.duelKeyHex = roundSeedHex;
+    market.roundSeedHex = roundSeedHex;
+    market.agent1Id = params.agent1Id;
+    market.agent2Id = params.agent2Id;
+    market.agent1Name = params.agent1Name || params.agent1Id;
+    market.agent2Name = params.agent2Name || params.agent2Id;
+    market.bettingClosesAt = params.bettingClosesAt;
 
     this.activeMarkets.set(params.duelId, market);
 
-    Logger.info("DuelBettingBridge", "Creating betting market for duel", {
-      duelId: params.duelId,
-      duelKeyHex: market.duelKeyHex,
-      agent1: market.agent1Name,
-      agent2: market.agent2Name,
-      roundSeedHex,
-      bettingClosesAt: new Date(params.bettingClosesAt).toISOString(),
-      source: params.source,
-    });
+    Logger.info(
+      "DuelBettingBridge",
+      existing
+        ? "Synchronizing betting market for duel"
+        : "Creating betting market for duel",
+      {
+        duelId: params.duelId,
+        duelKeyHex: market.duelKeyHex,
+        agent1: market.agent1Name,
+        agent2: market.agent2Name,
+        roundSeedHex,
+        bettingClosesAt: new Date(params.bettingClosesAt).toISOString(),
+        source: params.source,
+      },
+    );
 
     if (!existing && this.solanaOperator?.isEnabled()) {
       try {
@@ -761,6 +833,7 @@ export class DuelBettingBridge {
         );
 
         if (result) {
+          market.onChainInitialized = true;
           Logger.info("DuelBettingBridge", "On-chain market created", {
             duelId: params.duelId,
             closeSlot: result.closeSlot,
@@ -776,6 +849,10 @@ export class DuelBettingBridge {
           { duelId: params.duelId },
         );
       }
+    }
+
+    if (existing) {
+      return;
     }
 
     this.world.emit("betting:market:created", {
@@ -804,7 +881,7 @@ export class DuelBettingBridge {
       replayHash: string | null;
     },
   ): Promise<void> {
-    if (market.status === "resolved") {
+    if (market.status === "resolved" || market.status === "aborted") {
       return;
     }
 
@@ -824,12 +901,8 @@ export class DuelBettingBridge {
       loserName: outcome.loserName,
     });
 
-    this.marketHistory.push({ ...market });
+    this.pushMarketHistory({ ...market });
     this.activeMarkets.delete(market.duelId);
-
-    if (this.marketHistory.length > 100) {
-      this.marketHistory.shift();
-    }
 
     const resolveMarketDuelId = market.duelId;
     const resolveRoundSeedHex = market.roundSeedHex;
@@ -1081,9 +1154,18 @@ export class DuelBettingBridge {
     });
   }
 
-  private hasResolvedMarket(duelId: string): boolean {
+  private pushMarketHistory(market: DuelMarket): void {
+    this.marketHistory.push(market);
+    if (this.marketHistory.length > 100) {
+      this.marketHistory.shift();
+    }
+  }
+
+  private hasTerminalMarket(duelId: string): boolean {
     return this.marketHistory.some(
-      (market) => market.duelId === duelId && market.status === "resolved",
+      (market) =>
+        market.duelId === duelId &&
+        (market.status === "resolved" || market.status === "aborted"),
     );
   }
 

@@ -53,6 +53,7 @@ import {
   generateCaptureScript,
   generateWebCodecsCaptureScript,
 } from "../src/streaming/index.js";
+import { redactStreamingSecretsFromUrl } from "../src/streaming/redactStreamingUrl.js";
 import { errMsg } from "../src/shared/errMsg.ts";
 import { getStreamLeakDiagnostics } from "../src/streaming/stream-leak-diagnostics.js";
 
@@ -576,6 +577,8 @@ async function launchCaptureBrowser() {
       // Sandbox & stability
       "--no-sandbox",
       "--disable-dev-shm-usage",
+      // Capture-only tradeoff: the browser runs a trusted local page and does
+      // not act as a general-purpose browser session.
       "--disable-web-security",
       "--autoplay-policy=no-user-gesture-required",
       // Prevent Chromium from throttling rendering/timers
@@ -702,34 +705,37 @@ async function setupBrowser() {
 
   if (!selectedGameUrl) {
     for (const candidateUrl of GAME_URL_CANDIDATES) {
-      console.log(`[Main] Navigating to ${candidateUrl}...`);
+      const redactedCandidateUrl = redactStreamingSecretsFromUrl(candidateUrl);
+      console.log(`[Main] Navigating to ${redactedCandidateUrl}...`);
       try {
         await page.goto(candidateUrl, {
           timeout: 120_000,
           waitUntil: "domcontentloaded",
         });
       } catch (err) {
-        console.warn(`[Main] Failed to load ${candidateUrl}:`, err);
+        console.warn(`[Main] Failed to load ${redactedCandidateUrl}:`, err);
         continue;
       }
 
       if (USE_TIMED_STREAM_WARMUP) {
         console.log(
-          `[Main] Using timed warmup (${STREAM_CAPTURE_WARMUP_MS}ms) for ${candidateUrl}; skipping in-page readiness probe on headed Linux CDP capture.`,
+          `[Main] Using timed warmup (${STREAM_CAPTURE_WARMUP_MS}ms) for ${redactedCandidateUrl}; skipping in-page readiness probe on headed Linux CDP capture.`,
         );
         await page.waitForTimeout(STREAM_CAPTURE_WARMUP_MS);
         selectedGameUrl = candidateUrl;
         break;
       }
 
-      console.log(`[Main] Waiting for stream readiness on ${candidateUrl}...`);
+      console.log(
+        `[Main] Waiting for stream readiness on ${redactedCandidateUrl}...`,
+      );
       const isReady = await waitForStreamReadiness(page, 90_000);
       if (isReady) {
         selectedGameUrl = candidateUrl;
         break;
       }
       console.warn(
-        `[Main] Stream readiness not detected on ${candidateUrl}, trying fallback...`,
+        `[Main] Stream readiness not detected on ${redactedCandidateUrl}, trying fallback...`,
       );
     }
   } else {
@@ -740,7 +746,7 @@ async function setupBrowser() {
       });
     } catch (err) {
       console.error(
-        `[Main] Failed to reload configured URL ${selectedGameUrl}`,
+        `[Main] Failed to reload configured URL ${redactStreamingSecretsFromUrl(selectedGameUrl)}`,
         err,
       );
     }
@@ -748,7 +754,7 @@ async function setupBrowser() {
 
   if (!selectedGameUrl) {
     console.error(
-      `[Main] Could not find a game canvas on any candidate URL: ${GAME_URL_CANDIDATES.join(", ")}`,
+      `[Main] Could not find a game canvas on any candidate URL: ${GAME_URL_CANDIDATES.map(redactStreamingSecretsFromUrl).join(", ")}`,
     );
     console.error(
       "[Main] Make sure the game client is running and supports stream/spectator mode.",
@@ -757,7 +763,9 @@ async function setupBrowser() {
     process.exit(1);
   }
 
-  console.log(`[Main] Using game page: ${selectedGameUrl}`);
+  console.log(
+    `[Main] Using game page: ${redactStreamingSecretsFromUrl(selectedGameUrl)}`,
+  );
   if (STREAM_CAPTURE_POST_NAV_DELAY_MS > 0) {
     console.log(
       `[Main] Waiting ${STREAM_CAPTURE_POST_NAV_DELAY_MS}ms before starting capture...`,

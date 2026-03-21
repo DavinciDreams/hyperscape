@@ -55,6 +55,13 @@ const DOCKER_BIN = resolveDockerBinary();
 
 export const DEFAULT_DEV_POSTGRES_PASSWORD = "hyperscape_dev_password";
 
+export function shouldInspectContainerPassword(
+  password: string,
+  envPassword?: string | null,
+): boolean {
+  return password === DEFAULT_DEV_POSTGRES_PASSWORD && !envPassword;
+}
+
 async function execDocker(
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
@@ -261,10 +268,11 @@ export class DockerManager {
   async getConnectionString(): Promise<string> {
     let pwd = this.config.postgresPassword;
 
-    // If the developer didn't provide a .env password and we fell back to "hyperscape",
-    // the running container might have been created with a different password.
+    // If the developer didn't provide a .env password and we fell back to the
+    // default development password, the running container might have been
+    // created with a different password.
     // Let's try to query the container to ensure we match it perfectly.
-    if (pwd === "hyperscape" && !process.env.POSTGRES_PASSWORD) {
+    if (shouldInspectContainerPassword(pwd, process.env.POSTGRES_PASSWORD)) {
       try {
         const { stdout } = await execDocker([
           "inspect",

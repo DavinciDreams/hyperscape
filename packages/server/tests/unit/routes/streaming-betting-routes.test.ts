@@ -1,8 +1,14 @@
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { registerStreamingBettingRoutes } from "../../../src/routes/streaming-betting-routes.js";
+import {
+  normalizeInternalAllowedOrigin,
+  parseReplayCursor,
+  registerStreamingBettingRoutes,
+} from "../../../src/routes/streaming-betting-routes.js";
 
-function createRouteOptions(overrides: Partial<Parameters<typeof registerStreamingBettingRoutes>[0]> = {}) {
+function createRouteOptions(
+  overrides: Partial<Parameters<typeof registerStreamingBettingRoutes>[0]> = {},
+) {
   return {
     fastify: Fastify(),
     world: {
@@ -207,5 +213,34 @@ describe("streaming-betting-routes", () => {
     secondRoutes.close();
     await secondOptions.fastify.close();
     expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts only one explicit internal betting CORS origin", () => {
+    expect(
+      normalizeInternalAllowedOrigin("https://bets.example.com"),
+    ).toBe("https://bets.example.com");
+    expect(normalizeInternalAllowedOrigin("*")).toBeNull();
+    expect(normalizeInternalAllowedOrigin("null")).toBeNull();
+    expect(
+      normalizeInternalAllowedOrigin(
+        "https://bets.example.com,https://other.example.com",
+      ),
+    ).toBeNull();
+    expect(
+      normalizeInternalAllowedOrigin("https://bets.example.com/path"),
+    ).toBeNull();
+  });
+
+  it("prefers Last-Event-Id over the initial since query parameter", () => {
+    const request = {
+      headers: {
+        "last-event-id": "55",
+      },
+      query: {
+        since: "12",
+      },
+    } as never;
+
+    expect(parseReplayCursor(request)).toBe(55);
   });
 });
