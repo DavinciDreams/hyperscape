@@ -247,7 +247,9 @@ export class TileMovementManager {
     // Compute and cache
     let walkable: boolean;
 
-    // If on ground floor, check global collision matrix (trees, rocks, etc.)
+    // If on ground floor, check global collision matrix (trees, rocks, water, slopes)
+    // WATER and STEEP_SLOPE flags are baked synchronously when terrain tiles generate,
+    // so they are always present before any movement query can reach the tile.
     if (
       floorIndex === 0 &&
       this.world.collision.hasFlags(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
@@ -257,23 +259,15 @@ export class TileMovementManager {
       // Building floor is walkable, overrides terrain
       walkable = true;
     } else {
-      // Terrain walkability (water, slope) is pre-baked into CollisionMatrix
-      // as WATER and STEEP_SLOPE flags. The hasFlags(BLOCKS_WALK) check above
-      // already caught unwalkable terrain — if we reach here, it's walkable.
-      // Fall back to runtime check only for tiles in ungenerated terrain.
+      // Collision flags (WATER, STEEP_SLOPE) are baked when terrain generates.
+      // Runtime fallback catches any unbaked underwater tiles via height checks.
       const terrain = this.getTerrain();
       if (terrain) {
         tileToWorldInto(tile, this._walkableWorldPos);
-        const terrainTileX = Math.floor(this._walkableWorldPos.x / 100);
-        const terrainTileZ = Math.floor(this._walkableWorldPos.z / 100);
-        if (!terrain.isTerrainTileGenerated(terrainTileX, terrainTileZ)) {
-          walkable = terrain.isPositionWalkableFast(
-            this._walkableWorldPos.x,
-            this._walkableWorldPos.z,
-          );
-        } else {
-          walkable = true;
-        }
+        walkable = terrain.isPositionWalkableFast(
+          this._walkableWorldPos.x,
+          this._walkableWorldPos.z,
+        );
       } else {
         walkable = true;
       }

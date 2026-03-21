@@ -93,9 +93,9 @@ const MINIMAP_TERRAIN_COLORS: Array<{
   g: number;
   b: number;
 }> = [
-  { maxHeight: TERRAIN_CONSTANTS.WATER_THRESHOLD, r: 30, g: 60, b: 130 }, // deep water
-  { maxHeight: TERRAIN_CONSTANTS.WATER_THRESHOLD + 1, r: 50, g: 100, b: 160 }, // shallow water
-  { maxHeight: 15, r: 70, g: 110, b: 70 }, // swamp/wetland
+  { maxHeight: TERRAIN_CONSTANTS.WATER_THRESHOLD - 2, r: 30, g: 60, b: 130 }, // deep water
+  { maxHeight: TERRAIN_CONSTANTS.WATER_THRESHOLD - 0.5, r: 50, g: 100, b: 160 }, // shallow water (tightened to match visual terrain mesh)
+  { maxHeight: 15, r: 70, g: 110, b: 70 }, // near-shore land
   { maxHeight: 22, r: 80, g: 140, b: 60 }, // low grassland
   { maxHeight: 30, r: 90, g: 130, b: 50 }, // grassland
   { maxHeight: 36, r: 110, g: 120, b: 55 }, // forest / rolling hills
@@ -117,7 +117,12 @@ const MINIMAP_TERRAIN_COLORS: Array<{
  * increments the version token to cancel an in-flight generation).
  */
 async function generateTerrainChunked(
-  terrainSystem: { getHeightAt: (x: number, z: number) => number },
+  terrainSystem: {
+    getHeightAt: (x: number, z: number) => number;
+    getWaterBodyRegistry?: () => {
+      getWaterSurfaceAt: (x: number, z: number) => number;
+    };
+  },
   centerX: number,
   centerZ: number,
   extent: number,
@@ -135,35 +140,96 @@ async function generateTerrainChunked(
   // right = cross(view, up) for camera looking down -Y: (-upZ, upX) in XZ
   const rightX = -upZ;
   const rightZ = upX;
+  // Cache registry for elevated water body checks
+  const registry = terrainSystem.getWaterBodyRegistry?.();
+
+  // --- Two-pass approach for consistent water boundary ---
+  // The 3D water shader uses a shore-distance-based opacity ramp that makes
+  // the first ~2m of water near shore fully transparent. A simple depth
+  // threshold can't match this because depth ≠ shore distance on steep terrain.
+  //
+  // Instead: Pass 1 builds a raw water mask using the same threshold as the
+  // water mesh (h < waterSurface). Pass 2 erodes the mask by 1 pixel — any
+  // water pixel adjacent to land becomes land. This removes the transparent
+  // shore fringe from the minimap, matching what the player actually sees.
+
+  // Pass 1: Sample heights and build raw water mask
+  const heights = new Float32Array(S * S);
+  const waterMask = new Uint8Array(S * S);
+  const waterSurfaces = new Float32Array(S * S);
 
   for (let sy = 0; sy < S; sy++) {
-    // Check cancellation before each row — exits quickly if superseded
     if (isCancelled()) return null;
-
     for (let sx = 0; sx < S; sx++) {
       const px = (sx + 0.5) / S;
       const py = (sy + 0.5) / S;
       const ndcX = px * 2 - 1;
-      // ndcY: top of image = forward (center+up), bottom = behind (center-up)
       const ndcY = py * 2 - 1;
       const worldX = centerX + ndcX * rightX * extent - ndcY * upX * extent;
       const worldZ = centerZ + ndcX * rightZ * extent - ndcY * upZ * extent;
 
+      const i = sy * S + sx;
       const h = terrainSystem.getHeightAt(worldX, worldZ);
+      const ws = registry
+        ? registry.getWaterSurfaceAt(worldX, worldZ)
+        : TERRAIN_CONSTANTS.WATER_THRESHOLD;
+      heights[i] = h;
+      waterSurfaces[i] = ws;
+      waterMask[i] = h < ws ? 1 : 0;
+    }
+    if (sy % 10 === 9) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (isCancelled()) return null;
+    }
+  }
 
-      let r = 30,
-        g = 60,
-        b = 130;
-      for (let ci = 0; ci < MINIMAP_TERRAIN_COLORS.length; ci++) {
-        const entry = MINIMAP_TERRAIN_COLORS[ci];
-        if (h <= entry.maxHeight) {
-          r = entry.r;
-          g = entry.g;
-          b = entry.b;
-          break;
-        }
+  // Pass 2: Render with eroded water mask
+  // A water pixel is only shown as water if ALL 4 cardinal neighbors are also
+  // water. This pulls the minimap shore inward by ~1 pixel, matching the 3D
+  // water's edge-fade transparency zone.
+  for (let sy = 0; sy < S; sy++) {
+    for (let sx = 0; sx < S; sx++) {
+      const i = sy * S + sx;
+      const h = heights[i];
+      const ws = waterSurfaces[i];
+
+      // Eroded water check: water only if this pixel AND all 4 neighbors are water
+      let isWater = waterMask[i] === 1;
+      if (isWater) {
+        if (sx > 0 && !waterMask[i - 1]) isWater = false;
+        else if (sx < S - 1 && !waterMask[i + 1]) isWater = false;
+        else if (sy > 0 && !waterMask[i - S]) isWater = false;
+        else if (sy < S - 1 && !waterMask[i + S]) isWater = false;
       }
-      if (h > TERRAIN_CONSTANTS.WATER_THRESHOLD) {
+
+      let r: number, g: number, b: number;
+      if (isWater) {
+        // Water pixel — depth relative to effective water surface
+        const depth = ws - h;
+        if (depth > 2) {
+          r = 30;
+          g = 60;
+          b = 130; // deep water
+        } else {
+          r = 50;
+          g = 100;
+          b = 160; // shallow water
+        }
+      } else {
+        // Land pixel — use terrain color table (skip water entries)
+        r = 70;
+        g = 110;
+        b = 70; // default: near-shore land
+        for (let ci = 2; ci < MINIMAP_TERRAIN_COLORS.length; ci++) {
+          const entry = MINIMAP_TERRAIN_COLORS[ci];
+          if (h < entry.maxHeight) {
+            r = entry.r;
+            g = entry.g;
+            b = entry.b;
+            break;
+          }
+        }
+        // Elevation-based brightness lift
         const lift =
           Math.min(30, ((h - TERRAIN_CONSTANTS.WATER_THRESHOLD) / 40) * 30) | 0;
         r = Math.min(255, r + lift);
@@ -171,20 +237,11 @@ async function generateTerrainChunked(
         b = Math.min(255, b + lift);
       }
 
-      const idx = (sy * S + sx) * 4;
+      const idx = i * 4;
       data[idx] = r;
       data[idx + 1] = g;
       data[idx + 2] = b;
       data[idx + 3] = 255;
-    }
-
-    // Yield every 10 rows (5 yields per full generation).
-    // Each chunk = 10 × TERRAIN_SAMPLE_SIZE samples ≈ 500 calls.
-    // The setTimeout(0) posts the continuation as a new macrotask, allowing
-    // the browser to run its rendering pipeline between chunks.
-    if (sy % 10 === 9) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      if (isCancelled()) return null;
     }
   }
 
@@ -886,6 +943,9 @@ function _drawIconGlyph(
 /** Terrain system interface used for height sampling and click-to-move */
 interface TerrainSystemLike {
   getHeightAt: (x: number, z: number) => number;
+  getWaterBodyRegistry?: () => {
+    getWaterSurfaceAt: (x: number, z: number) => number;
+  };
 }
 
 /**

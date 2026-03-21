@@ -454,6 +454,10 @@ export class VegetationSystem extends System {
 
   // Road network system for road avoidance
   private roadNetworkSystem: RoadNetworkSystem | null = null;
+  // Cached water body registry for elevated water checks
+  private _waterBodyRegistry: {
+    getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+  } | null = null;
 
   // Temp objects to avoid allocations
   private _tempMatrix = new THREE.Matrix4();
@@ -527,6 +531,17 @@ export class VegetationSystem extends System {
     this.roadNetworkSystem = this.world.getSystem(
       "roads",
     ) as RoadNetworkSystem | null;
+
+    // Cache water body registry for elevated water checks in addInstanceToChunk
+    const terrainForRegistry = this.world.getSystem("terrain") as
+      | {
+          getWaterBodyRegistry?: () => {
+            getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+          };
+        }
+      | undefined;
+    this._waterBodyRegistry =
+      terrainForRegistry?.getWaterBodyRegistry?.() ?? null;
 
     // Initialize spatial quadtree for O(log N) frustum culling
     // World bounds: 8192m half-size = 16km total (covers most game worlds)
@@ -1265,6 +1280,9 @@ export class VegetationSystem extends System {
       getHeightAt: (x: number, z: number) => number;
       getNormalAt?: (x: number, z: number) => THREE.Vector3;
       getTileSize: () => number;
+      getWaterBodyRegistry?: () => {
+        getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+      };
     };
 
     if (!terrainSystem.getHeightAt) {
@@ -1320,6 +1338,9 @@ export class VegetationSystem extends System {
     terrainSystem: {
       getHeightAt: (x: number, z: number) => number;
       getNormalAt?: (x: number, z: number) => THREE.Vector3;
+      getWaterBodyRegistry?: () => {
+        getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+      };
     },
     tileData: TileVegetationData,
   ): Promise<void> {
@@ -1406,6 +1427,7 @@ export class VegetationSystem extends System {
     const PLACEMENT_BATCH_SIZE = 50;
     const getHeight = terrainSystem.getHeightAt.bind(terrainSystem);
     const waterThreshold = WATER_LEVEL + WATER_EDGE_BUFFER;
+    const bodyRegistry = terrainSystem.getWaterBodyRegistry?.();
     let placedCount = 0;
     let index = 0;
     const placements = result.placements;
@@ -1423,8 +1445,14 @@ export class VegetationSystem extends System {
         // Get terrain height at position
         const height = getHeight(placement.x, placement.z);
 
-        // Check water avoidance
+        // Check water avoidance (ocean)
         if (height < waterThreshold) continue;
+
+        // Check elevated water body avoidance (mountain ponds, highland lakes)
+        if (bodyRegistry) {
+          const body = bodyRegistry.getBodyAt(placement.x, placement.z);
+          if (body && height < body.surfaceY + WATER_EDGE_BUFFER) continue;
+        }
 
         // Check road avoidance
         if (this.roadNetworkSystem?.isOnRoad(placement.x, placement.z))
@@ -1515,6 +1543,9 @@ export class VegetationSystem extends System {
     terrainSystem: {
       getHeightAt: (x: number, z: number) => number;
       getNormalAt?: (x: number, z: number) => THREE.Vector3;
+      getWaterBodyRegistry?: () => {
+        getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+      };
     },
   ): Promise<void> {
     const tileData = this.tileVegetation.get(tileKey);
@@ -1565,6 +1596,7 @@ export class VegetationSystem extends System {
 
     // Bind getHeightAt to preserve context (needed for internal state access)
     const getHeight = terrainSystem.getHeightAt.bind(terrainSystem);
+    const bodyRegistryLayer = terrainSystem.getWaterBodyRegistry?.();
 
     // PHASE 2: Place instances in yielding batches (prevents main thread blocking)
     const BATCH_SIZE = 50;
@@ -1587,9 +1619,15 @@ export class VegetationSystem extends System {
 
         // Check water avoidance - ALWAYS avoid water unless explicitly disabled
         const shouldAvoidWater = layer.avoidWater !== false;
-        const waterThreshold = WATER_LEVEL + WATER_EDGE_BUFFER;
-        if (shouldAvoidWater && height < waterThreshold) {
+        const waterThresholdLayer = WATER_LEVEL + WATER_EDGE_BUFFER;
+        if (shouldAvoidWater && height < waterThresholdLayer) {
           continue;
+        }
+
+        // Check elevated water body avoidance (mountain ponds, highland lakes)
+        if (shouldAvoidWater && bodyRegistryLayer) {
+          const body = bodyRegistryLayer.getBodyAt(pos.x, pos.z);
+          if (body && height < body.surfaceY + WATER_EDGE_BUFFER) continue;
         }
 
         // Check road avoidance - never place vegetation on roads
@@ -2310,9 +2348,16 @@ export class VegetationSystem extends System {
     // Skip instances with invalid height (terrain data not ready yet)
     if (!Number.isFinite(worldY)) return false;
 
-    // Water check
+    // Water check — ocean level
     const waterCutoff = WATER_LEVEL + WATER_EDGE_BUFFER;
     if (worldY < waterCutoff) return false;
+
+    // Elevated water body check (mountain ponds, highland lakes)
+    if (this._waterBodyRegistry) {
+      const body = this._waterBodyRegistry.getBodyAt(x, z);
+      if (body && instance.position.y < body.surfaceY + WATER_EDGE_BUFFER)
+        return false;
+    }
 
     // Get or create chunk mesh (LOD0 - full detail)
     const chunked = this.getOrCreateChunkedMesh(

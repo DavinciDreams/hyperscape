@@ -38,6 +38,9 @@ import type {
   ShorelineConfig,
 } from "./TerrainHeightParams";
 import { BiomeType, DEFAULT_BIOME, BIOME_LIST } from "./TerrainBiomeTypes";
+import { LandscapeType } from "./TerrainHeightParams";
+import { WaterBodyRegistry } from "./WaterBodyRegistry";
+import { getGrassExclusionManager } from "./GrassExclusionManager";
 
 // Import terrain generator from procgen package
 import {
@@ -251,6 +254,7 @@ export class TerrainSystem extends System {
   private lamppostLightIndices: number[] = [];
   private lamppostLightDistances: number[] = [];
   private waterSystem?: WaterSystem;
+  private waterBodyRegistry!: WaterBodyRegistry;
   private roadNetworkSystem?: RoadNetworkSystem;
   private _cachedRoadTileX = Number.NaN;
   private _cachedRoadTileZ = Number.NaN;
@@ -1504,6 +1508,42 @@ export class TerrainSystem extends System {
     // This provides a standalone, testable height generation system
     this.initializeTerrainGenerator();
 
+    // Build water body registry — register elevated ponds whose rim is above ocean level
+    this.waterBodyRegistry = new WaterBodyRegistry(this.CONFIG.WATER_THRESHOLD);
+    for (const feat of this.landscapeFeatures) {
+      if (feat.type === LandscapeType.Pond) {
+        const rimHeight = WaterBodyRegistry.computeRimHeight(feat, (x, z) =>
+          this.getHeightAt(x, z),
+        );
+        if (rimHeight > this.CONFIG.WATER_THRESHOLD) {
+          this.waterBodyRegistry.register({
+            id: `pond_${feat.x}_${feat.z}`,
+            centerX: feat.x,
+            centerZ: feat.z,
+            radius: feat.radius,
+            radiusSq: feat.radius * feat.radius,
+            surfaceY: rimHeight,
+            sourceType: "landscape_pond",
+          });
+        }
+      }
+    }
+
+    // Register elevated water bodies as grass exclusion zones so the GPU grass
+    // shader doesn't render blades inside mountain ponds / highland lakes.
+    if (this.runtimeIsClient) {
+      const grassExclusion = getGrassExclusionManager();
+      for (const body of this.waterBodyRegistry.getAllBodies()) {
+        grassExclusion.addCircularBlocker(
+          `water_body_${body.id}`,
+          body.centerX,
+          body.centerZ,
+          body.radius,
+          2.0, // 2m fade at edge
+        );
+      }
+    }
+
     // Cache optional TownSystem for difficulty falloff and boss placement
     this.townSystem = this.world.getSystem<TownSystem>("towns") ?? null;
 
@@ -2549,12 +2589,12 @@ export class TerrainSystem extends System {
     this.terrainTiles.set(key, tile);
     this.activeChunks.add(key);
 
-    // Enqueue deferred walkability baking (server-only).
-    // Pre-computes WATER and STEEP_SLOPE flags so BFS pathfinding
-    // becomes a single bitwise AND instead of runtime terrain queries.
-    // Processing is spread across ticks to avoid 10,000-iteration main-thread spikes.
+    // Synchronously bake WATER and STEEP_SLOPE collision flags (server-only).
+    // Must complete before any movement query can reach this tile, otherwise
+    // players can walk into water during the gap between tile generation and
+    // flag baking. ~1-2ms per tile (10K height lookups with cached data).
     if (isServer) {
-      this.pendingWalkabilityTiles.push({ tileX, tileZ });
+      this.bakeWalkabilityFlags(tileX, tileZ);
     }
 
     return tile;
@@ -3595,6 +3635,11 @@ export class TerrainSystem extends System {
     // Fallback to expensive noise computation
     // PERF: skip flat zone check inside getHeightAtComputed — we already checked above
     return this.getHeightAtComputedSkipFlatZone(worldX, worldZ);
+  }
+
+  /** Get the water body registry for elevated water queries. */
+  getWaterBodyRegistry(): WaterBodyRegistry {
+    return this.waterBodyRegistry;
   }
 
   // ============================================================================
@@ -4826,10 +4871,11 @@ export class TerrainSystem extends System {
         const worldX = tile.x * this.CONFIG.TILE_SIZE + localX;
         const worldZ = tile.z * this.CONFIG.TILE_SIZE + localZ;
 
-        // For fishing spots, place in water only
+        // For fishing spots, place in water only (ocean or elevated body)
         if (resourceType === "fish" || resourceType === "fishing_spots") {
           const height = this.getHeightAt(worldX, worldZ);
-          if (height >= this.CONFIG.WATER_THRESHOLD) continue;
+          if (!this.waterBodyRegistry.isUnderwater(worldX, worldZ, height))
+            continue;
         }
 
         const height = this.getHeightAt(worldX, worldZ);
@@ -5488,8 +5534,20 @@ export class TerrainSystem extends System {
   ): { walkable: boolean; reason?: string } {
     if (!this.isPositionWalkableFast(worldX, worldZ)) {
       // Only allocate the reason object on the slow path (non-walkable)
-      const height = this.getHeightAt(worldX, worldZ);
-      if (height < this.CONFIG.WATER_THRESHOLD) {
+      // Check center and corners for water (ocean or elevated body)
+      const waterSurface = this.waterBodyRegistry.getWaterSurfaceAt(
+        worldX,
+        worldZ,
+      );
+      const tx = Math.floor(worldX);
+      const tz = Math.floor(worldZ);
+      if (
+        this.getHeightAt(worldX, worldZ) < waterSurface ||
+        this.getHeightAt(tx, tz) < waterSurface ||
+        this.getHeightAt(tx + 1, tz) < waterSurface ||
+        this.getHeightAt(tx, tz + 1) < waterSurface ||
+        this.getHeightAt(tx + 1, tz + 1) < waterSurface
+      ) {
         return { walkable: false, reason: "Water bodies are impassable" };
       }
       const tileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
@@ -5519,10 +5577,22 @@ export class TerrainSystem extends System {
     if (biome === "lakes") return false;
 
     const biomeData = BIOMES[biome];
-    const height = this.getHeightAt(worldX, worldZ);
 
-    // Check if underwater
-    if (height < this.CONFIG.WATER_THRESHOLD) return false;
+    // Check if center or any corner of this tile is underwater (ocean or elevated body)
+    const waterSurface = this.waterBodyRegistry.getWaterSurfaceAt(
+      worldX,
+      worldZ,
+    );
+    const tx = Math.floor(worldX);
+    const tz = Math.floor(worldZ);
+    if (
+      this.getHeightAt(worldX, worldZ) < waterSurface ||
+      this.getHeightAt(tx, tz) < waterSurface ||
+      this.getHeightAt(tx + 1, tz) < waterSurface ||
+      this.getHeightAt(tx, tz + 1) < waterSurface ||
+      this.getHeightAt(tx + 1, tz + 1) < waterSurface
+    )
+      return false;
 
     // Check slope constraints
     const slope = this.calculateSlope(worldX, worldZ);
@@ -5607,6 +5677,17 @@ export class TerrainSystem extends System {
    *
    * This eliminates runtime terrain queries during BFS pathfinding —
    * walkability becomes a single bitwise AND against the CollisionMatrix.
+   *
+   * WATER flags use a forward approach that replicates the WaterSystem's
+   * generateWaterMesh() quad-inclusion logic: heights are sampled at the same
+   * 1.5625m spacing (100m / 64 quads) the water mesh uses, and any quad with
+   * at least one corner below WATER_THRESHOLD blocks the movement tiles whose
+   * CENTER falls inside that quad. The grid is extended one cell beyond the
+   * movement tile range in each direction so that water quads originating from
+   * adjacent terrain tiles (which may not be loaded yet) are still caught.
+   *
+   * Grid positions align with the water mesh grid modulo 1.5625m, so the
+   * quad-inclusion decisions are identical to what the client renders.
    */
   private bakeWalkabilityFlags(
     terrainTileX: number,
@@ -5617,53 +5698,199 @@ export class TerrainSystem extends System {
 
     const tileSize = this.CONFIG.TILE_SIZE; // 100m terrain tile
     const tilesPerSide = Math.floor(tileSize / 1.0); // 100 movement tiles per side
+    const wt = this.CONFIG.WATER_THRESHOLD;
 
-    // World origin of this terrain tile
+    // World origin of this terrain tile's movement tiles
     const originX = terrainTileX * tileSize;
     const originZ = terrainTileZ * tileSize;
+    const originXInt = Math.floor(originX);
+    const originZInt = Math.floor(originZ);
 
     // Clear stale terrain flags first (handles re-baking after flat zone regeneration)
     const terrainFlagsMask = CollisionFlag.WATER | CollisionFlag.STEEP_SLOPE;
-
     for (let lx = 0; lx < tilesPerSide; lx++) {
-      const worldX = originX + lx + 0.5; // center of movement tile
+      const moveTileX = originXInt + lx;
       for (let lz = 0; lz < tilesPerSide; lz++) {
-        const worldZ = originZ + lz + 0.5;
+        collision.removeFlags(moveTileX, originZInt + lz, terrainFlagsMask);
+      }
+    }
 
-        // Movement tile coordinates
-        const moveTileX = Math.floor(worldX);
-        const moveTileZ = Math.floor(worldZ);
+    // ---- PASS 1: Water flags (aligned with visual water mesh) ----
+    //
+    // The water mesh samples at 64 quads per terrain tile = 1.5625m cell size.
+    // To cover ALL movement tiles [originX, originX+100) we need a grid that
+    // extends from originX-cellSize to originX+tileSize (one extra cell of
+    // margin so water quads starting just before the tile range are caught).
+    //
+    // Grid samples: waterRes+2 = 66 points per axis → 65 quads per axis.
+    // Grid aligns with the water mesh grid (offset is a multiple of cellSize).
+    // Total height lookups: 66×66 = 4356.
+    const waterRes = 64;
+    const cellSize = tileSize / waterRes; // 1.5625m
+    const gridPoints = waterRes + 2; // 66 sample points per axis
+    const gridQuads = waterRes + 1; // 65 quads per axis
+    const gridStartX = originX - cellSize;
+    const gridStartZ = originZ - cellSize;
 
-        // Clear any previous terrain flags on this tile
-        collision.removeFlags(moveTileX, moveTileZ, terrainFlagsMask);
+    const heights = new Float64Array(gridPoints * gridPoints);
 
-        let flags = 0;
+    for (let i = 0; i < gridPoints; i++) {
+      const wx = gridStartX + i * cellSize;
+      const iStride = i * gridPoints;
+      for (let j = 0; j < gridPoints; j++) {
+        const wz = gridStartZ + j * cellSize;
+        heights[iStride + j] = this.getHeightAt(wx, wz);
+      }
+    }
 
-        // 1. Biome check — "lakes" biome is always impassable
-        const biomeTerrainTileX = Math.floor(worldX / tileSize);
-        const biomeTerrainTileZ = Math.floor(worldZ / tileSize);
-        const biome = this.getBiomeAt(biomeTerrainTileX, biomeTerrainTileZ);
-        if (biome === "lakes") {
-          flags = CollisionFlag.WATER;
-        } else {
-          // 2. Water check — height below WATER_THRESHOLD
-          const height = this.getHeightAt(worldX, worldZ);
-          if (height < this.CONFIG.WATER_THRESHOLD) {
-            flags = CollisionFlag.WATER;
-          } else {
-            // 3. Slope check — slope exceeds biome's maxSlope
-            const biomeData = BIOMES[biome];
-            if (biomeData) {
-              const slope = this.calculateSlope(worldX, worldZ);
-              if (slope > biomeData.maxSlope) {
-                flags = CollisionFlag.STEEP_SLOPE;
+    // Track which movement tiles are flagged as water (avoids double-flagging)
+    const waterTileFlags = new Uint8Array(tilesPerSide * tilesPerSide);
+
+    // For each water quad, if ANY corner < threshold, mark ALL movement tiles
+    // that overlap the quad (not just tiles whose center is inside). This ensures
+    // the walkability boundary matches the visual water mesh — water quads at the
+    // shore extend ~1.5m past the height<threshold line, and players must not be
+    // able to walk onto any tile covered by the water mesh.
+    for (let i = 0; i < gridQuads; i++) {
+      const iStride = i * gridPoints;
+      const i1Stride = (i + 1) * gridPoints;
+      for (let j = 0; j < gridQuads; j++) {
+        if (
+          heights[iStride + j] >= wt &&
+          heights[i1Stride + j] >= wt &&
+          heights[iStride + j + 1] >= wt &&
+          heights[i1Stride + j + 1] >= wt
+        )
+          continue; // No water in this quad
+
+        // Quad spans X: [qMinX, qMaxX], tile lx spans [originXInt+lx, originXInt+lx+1].
+        // Any-overlap: tile overlaps quad when lx < qMaxX-originXInt AND lx+1 > qMinX-originXInt.
+        const qMinX = gridStartX + i * cellSize;
+        const qMaxX = qMinX + cellSize;
+        const qMinZ = gridStartZ + j * cellSize;
+        const qMaxZ = qMinZ + cellSize;
+
+        const tMinX = Math.max(0, Math.floor(qMinX - originXInt));
+        const tMaxX = Math.min(
+          tilesPerSide - 1,
+          Math.ceil(qMaxX - originXInt) - 1,
+        );
+        const tMinZ = Math.max(0, Math.floor(qMinZ - originZInt));
+        const tMaxZ = Math.min(
+          tilesPerSide - 1,
+          Math.ceil(qMaxZ - originZInt) - 1,
+        );
+
+        for (let tx = tMinX; tx <= tMaxX; tx++) {
+          const flagRow = tx * tilesPerSide;
+          for (let tz = tMinZ; tz <= tMaxZ; tz++) {
+            const flagIdx = flagRow + tz;
+            if (!waterTileFlags[flagIdx]) {
+              waterTileFlags[flagIdx] = 1;
+              collision.addFlags(
+                originXInt + tx,
+                originZInt + tz,
+                CollisionFlag.WATER,
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // ---- PASS 1b: Elevated water body flags ----
+    const elevatedBodies = this.waterBodyRegistry.getBodiesInTile(
+      terrainTileX,
+      terrainTileZ,
+      tileSize,
+    );
+    for (const body of elevatedBodies) {
+      const bodySurfaceY = body.surfaceY;
+      for (let i = 0; i < gridQuads; i++) {
+        const iStride = i * gridPoints;
+        const i1Stride = (i + 1) * gridPoints;
+        for (let j = 0; j < gridQuads; j++) {
+          // Skip if no corner is below this body's surface
+          if (
+            heights[iStride + j] >= bodySurfaceY &&
+            heights[i1Stride + j] >= bodySurfaceY &&
+            heights[iStride + j + 1] >= bodySurfaceY &&
+            heights[i1Stride + j + 1] >= bodySurfaceY
+          )
+            continue;
+
+          // Check quad center is within body radius
+          const qCenterX = gridStartX + (i + 0.5) * cellSize;
+          const qCenterZ = gridStartZ + (j + 0.5) * cellSize;
+          const dx = qCenterX - body.centerX;
+          const dz = qCenterZ - body.centerZ;
+          if (dx * dx + dz * dz > body.radiusSq) continue;
+
+          const qMinX = gridStartX + i * cellSize;
+          const qMaxX = qMinX + cellSize;
+          const qMinZ = gridStartZ + j * cellSize;
+          const qMaxZ = qMinZ + cellSize;
+
+          const tMinX = Math.max(0, Math.floor(qMinX - originXInt));
+          const tMaxX = Math.min(
+            tilesPerSide - 1,
+            Math.ceil(qMaxX - originXInt) - 1,
+          );
+          const tMinZ = Math.max(0, Math.floor(qMinZ - originZInt));
+          const tMaxZ = Math.min(
+            tilesPerSide - 1,
+            Math.ceil(qMaxZ - originZInt) - 1,
+          );
+
+          for (let tx = tMinX; tx <= tMaxX; tx++) {
+            const flagRow = tx * tilesPerSide;
+            for (let tz = tMinZ; tz <= tMaxZ; tz++) {
+              const flagIdx = flagRow + tz;
+              if (!waterTileFlags[flagIdx]) {
+                waterTileFlags[flagIdx] = 1;
+                collision.addFlags(
+                  originXInt + tx,
+                  originZInt + tz,
+                  CollisionFlag.WATER,
+                );
               }
             }
           }
         }
+      }
+    }
 
-        if (flags !== 0) {
-          collision.addFlags(moveTileX, moveTileZ, flags);
+    // ---- PASS 2: Biome + slope flags (non-water tiles only) ----
+    for (let lx = 0; lx < tilesPerSide; lx++) {
+      const worldX = originX + lx + 0.5;
+      const moveTileX = originXInt + lx;
+      const flagRow = lx * tilesPerSide;
+
+      for (let lz = 0; lz < tilesPerSide; lz++) {
+        if (waterTileFlags[flagRow + lz]) continue; // Already water
+
+        const worldZ = originZ + lz + 0.5;
+
+        // Biome check — "lakes" biome is always impassable
+        const biomeTerrainTileX = Math.floor(worldX / tileSize);
+        const biomeTerrainTileZ = Math.floor(worldZ / tileSize);
+        const biome = this.getBiomeAt(biomeTerrainTileX, biomeTerrainTileZ);
+
+        if (biome === "lakes") {
+          collision.addFlags(moveTileX, originZInt + lz, CollisionFlag.WATER);
+        } else {
+          // Slope check — slope exceeds biome's maxSlope
+          const biomeData = BIOMES[biome];
+          if (biomeData) {
+            const slope = this.calculateSlope(worldX, worldZ);
+            if (slope > biomeData.maxSlope) {
+              collision.addFlags(
+                moveTileX,
+                originZInt + lz,
+                CollisionFlag.STEEP_SLOPE,
+              );
+            }
+          }
         }
       }
     }
@@ -5674,80 +5901,29 @@ export class TerrainSystem extends System {
    * Processes rows of a terrain tile within a time budget (~4ms) to avoid
    * the synchronous 10,000-iteration spike from bakeWalkabilityFlags.
    */
+  /**
+   * Process queued walkability baking incrementally. Delegates to
+   * bakeWalkabilityFlags() which uses the water-mesh-aligned approach.
+   * Note: Since baking is now synchronous during terrain generation,
+   * this queue is only used for deferred re-baking (e.g. flat zone changes).
+   */
   private processWalkabilityQueue(): void {
     if (!this.runtimeIsServer) return;
-    const collision = this.world?.collision;
-    if (!collision) return;
+    if (this.pendingWalkabilityTiles.length === 0) return;
 
     const budgetMs = 4;
     const t0 = performance.now();
-    const tileSize = this.CONFIG.TILE_SIZE;
-    const tilesPerSide = Math.floor(tileSize / 1.0); // 100
-    const terrainFlagsMask = CollisionFlag.WATER | CollisionFlag.STEEP_SLOPE;
 
-    while (performance.now() - t0 < budgetMs) {
-      // Start next tile if no work in progress
-      if (!this.walkabilityProgress) {
-        if (this.pendingWalkabilityTiles.length === 0) return;
-        const next = this.pendingWalkabilityTiles.shift()!;
-        this.walkabilityProgress = {
-          tileX: next.tileX,
-          tileZ: next.tileZ,
-          nextRow: 0,
-        };
-      }
-
-      const prog = this.walkabilityProgress;
-      const originX = prog.tileX * tileSize;
-      const originZ = prog.tileZ * tileSize;
-
-      // Process rows until budget or tile exhausted
-      while (prog.nextRow < tilesPerSide) {
-        if (performance.now() - t0 > budgetMs) return; // preserve progress
-
-        const lx = prog.nextRow;
-        const worldX = originX + lx + 0.5;
-
-        for (let lz = 0; lz < tilesPerSide; lz++) {
-          const worldZ = originZ + lz + 0.5;
-          const moveTileX = Math.floor(worldX);
-          const moveTileZ = Math.floor(worldZ);
-
-          collision.removeFlags(moveTileX, moveTileZ, terrainFlagsMask);
-
-          let flags = 0;
-          const biomeTerrainTileX = Math.floor(worldX / tileSize);
-          const biomeTerrainTileZ = Math.floor(worldZ / tileSize);
-          const biome = this.getBiomeAt(biomeTerrainTileX, biomeTerrainTileZ);
-
-          if (biome === "lakes") {
-            flags = CollisionFlag.WATER;
-          } else {
-            const height = this.getHeightAt(worldX, worldZ);
-            if (height < this.CONFIG.WATER_THRESHOLD) {
-              flags = CollisionFlag.WATER;
-            } else {
-              const biomeData = BIOMES[biome];
-              if (biomeData) {
-                const slope = this.calculateSlope(worldX, worldZ);
-                if (slope > biomeData.maxSlope) {
-                  flags = CollisionFlag.STEEP_SLOPE;
-                }
-              }
-            }
-          }
-
-          if (flags !== 0) {
-            collision.addFlags(moveTileX, moveTileZ, flags);
-          }
-        }
-
-        prog.nextRow++;
-      }
-
-      // Tile complete
-      this.walkabilityProgress = null;
+    while (
+      this.pendingWalkabilityTiles.length > 0 &&
+      performance.now() - t0 < budgetMs
+    ) {
+      const next = this.pendingWalkabilityTiles.shift()!;
+      this.bakeWalkabilityFlags(next.tileX, next.tileZ);
     }
+
+    // Clear stale progress state (no longer used for row-by-row processing)
+    this.walkabilityProgress = null;
   }
 
   /**
@@ -5807,7 +5983,7 @@ export class TerrainSystem extends System {
       biome,
       walkable: walkableCheck.walkable,
       slope,
-      underwater: height < this.CONFIG.WATER_THRESHOLD,
+      underwater: this.waterBodyRegistry.isUnderwater(worldX, worldZ, height),
     };
   }
 
@@ -5865,6 +6041,47 @@ export class TerrainSystem extends System {
         tile.mesh.add(waterMesh);
       }
       tile.waterMeshes.push(waterMesh);
+    }
+
+    // Elevated water body meshes (mountain ponds, highland lakes)
+    // Height function is clipped to body radius: positions outside the circle
+    // report height = surfaceY so no water quad is emitted there. This ensures
+    // the visual mesh boundary matches collision and minimap exactly.
+    const tileSize = this.CONFIG.TILE_SIZE;
+    const bodies = this.waterBodyRegistry.getBodiesInTile(
+      tile.x,
+      tile.z,
+      tileSize,
+    );
+    for (const body of bodies) {
+      const cx = body.centerX;
+      const cz = body.centerZ;
+      const rSq = body.radiusSq;
+      const sy = body.surfaceY;
+      const baseGetHeight = (wx: number, wz: number) =>
+        this.getHeightAt(wx, wz);
+      const clippedHeightFn = (wx: number, wz: number) => {
+        const dx = wx - cx;
+        const dz = wz - cz;
+        return dx * dx + dz * dz > rSq ? sy : baseGetHeight(wx, wz);
+      };
+      const bodyMesh = this.waterSystem.generateWaterMesh(
+        tile,
+        body.surfaceY,
+        tileSize,
+        clippedHeightFn,
+        "lake",
+      );
+      if (bodyMesh && tile.mesh) {
+        if (this.CONFIG.USE_QUADTREE_LOD && this.terrainContainer) {
+          bodyMesh.position.x = tile.x * tileSize;
+          bodyMesh.position.z = tile.z * tileSize;
+          this.terrainContainer.add(bodyMesh);
+        } else {
+          tile.mesh.add(bodyMesh);
+        }
+        tile.waterMeshes.push(bodyMesh);
+      }
     }
   }
 
@@ -5952,7 +6169,11 @@ export class TerrainSystem extends System {
           samples.push({
             x,
             z,
-            underwater: height < this.CONFIG.WATER_THRESHOLD,
+            underwater: this.waterBodyRegistry.isUnderwater(
+              worldX,
+              worldZ,
+              height,
+            ),
           });
         }
       }
@@ -6339,7 +6560,7 @@ export class TerrainSystem extends System {
         if (sample.isSafe || sample.scalar < minScalar) continue;
 
         const height = this.getHeightAt(x, z);
-        if (height < this.CONFIG.WATER_THRESHOLD) continue;
+        if (this.waterBodyRegistry.isUnderwater(x, z, height)) continue;
 
         const slope = this.calculateSlope(x, z);
         if (slope > this.CONFIG.MAX_WALKABLE_SLOPE) continue;
