@@ -24,9 +24,11 @@ type DuelBettingBridgeTestHarness = DuelBettingBridge & {
   handleStreamingAnnouncement(payload: unknown): Promise<void>;
   handleStreamingFightStart(payload: unknown): Promise<void>;
   handleStreamingResolution(payload: unknown): Promise<void>;
+  handleDuelResult(payload: unknown): Promise<void>;
   reconcileLiveCycle(): Promise<void>;
   runScheduledReconciliation(): Promise<void>;
   createOrSyncMarket(payload: unknown): Promise<void>;
+  resolveMarket(...args: unknown[]): Promise<void>;
   reconcileTimer: ReturnType<typeof setTimeout> | null;
   reconcileInFlight: boolean;
 };
@@ -279,6 +281,31 @@ describe("DuelBettingBridge streaming reconciliation", () => {
     ).resolves.toBeUndefined();
 
     reconcileLiveCycle.mockRestore();
+  });
+
+  it("awaits duel-result resolution instead of fire-and-forgetting it", async () => {
+    await bridgeHarness.handleStreamingAnnouncement({
+      duelId: "duel-123",
+      duelKeyHex:
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      agent1: { id: "agent-a", name: "Agent A" },
+      agent2: { id: "agent-b", name: "Agent B" },
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+    });
+
+    const resolveMarket = vi
+      .spyOn(bridgeHarness, "resolveMarket")
+      .mockRejectedValueOnce(new Error("boom"));
+
+    await expect(
+      bridgeHarness.handleDuelResult({
+        winnerId: "agent-a",
+        loserId: "agent-b",
+      }),
+    ).rejects.toThrow("boom");
+
+    resolveMarket.mockRestore();
   });
 
   it("stops the scheduled reconciliation loop when streaming is inactive and there are no markets", async () => {

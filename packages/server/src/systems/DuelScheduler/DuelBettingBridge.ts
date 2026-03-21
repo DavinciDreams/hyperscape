@@ -228,7 +228,13 @@ export class DuelBettingBridge {
 
     // Listen for duel result events
     const onDuelResult = (payload: unknown) => {
-      this.handleDuelResult(payload);
+      void this.handleDuelResult(payload).catch((error) => {
+        Logger.error(
+          "DuelBettingBridge",
+          "Failed to handle duel result",
+          error instanceof Error ? error : null,
+        );
+      });
     };
     this.world.on("duel:result", onDuelResult);
     this.eventListeners.push({
@@ -238,7 +244,13 @@ export class DuelBettingBridge {
 
     // Also listen to direct duel completion events
     const onDuelCompleted = (payload: unknown) => {
-      this.handleDuelResult(payload);
+      void this.handleDuelResult(payload).catch((error) => {
+        Logger.error(
+          "DuelBettingBridge",
+          "Failed to handle duel completion",
+          error instanceof Error ? error : null,
+        );
+      });
     };
     this.world.on("duel:completed", onDuelCompleted);
     this.eventListeners.push({
@@ -541,6 +553,18 @@ export class DuelBettingBridge {
     bettingClosesAt: number;
     source: "legacy" | "streaming";
   }): Promise<void> {
+    if (!this.activeMarkets.has(params.duelId) && this.hasResolvedMarket(params.duelId)) {
+      Logger.info(
+        "DuelBettingBridge",
+        "Skipping market recreation for an already-resolved duel",
+        {
+          duelId: params.duelId,
+          source: params.source,
+        },
+      );
+      return;
+    }
+
     const roundSeedHex =
       params.duelKeyHex || this.generateRoundSeed(params.duelId);
     const existing = this.activeMarkets.get(params.duelId);
@@ -896,7 +920,7 @@ export class DuelBettingBridge {
       return;
     }
 
-    void this.resolveMarket(market, {
+    await this.resolveMarket(market, {
       winnerId,
       loserId,
       winnerName: data.winnerName || "Unknown",
@@ -905,6 +929,12 @@ export class DuelBettingBridge {
       seed: null,
       replayHash: null,
     });
+  }
+
+  private hasResolvedMarket(duelId: string): boolean {
+    return this.marketHistory.some(
+      (market) => market.duelId === duelId && market.status === "resolved",
+    );
   }
 
   /**
