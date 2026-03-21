@@ -35,10 +35,30 @@ describe("ServerRuntime", () => {
       expect(expectedTickInterval).toBe(500);
     });
 
-    it("should have MAX_TICKS_PER_FRAME of 1 (no catch-up)", () => {
-      // The server runtime intentionally avoids catch-up storms and runs at most
-      // one lifecycle tick per frame.
-      expect(true).toBe(true); // Placeholder - verified via behavior
+    it("runs at most one tick even after a long scheduling stall", async () => {
+      vi.useFakeTimers();
+      const nowSpy = vi.spyOn(performance, "now");
+
+      try {
+        // start() call
+        nowSpy.mockReturnValueOnce(0);
+        // first scheduled callback: simulate a 2s stall, which would normally
+        // imply multiple missed frames without the accumulator cap.
+        nowSpy.mockReturnValueOnce(2_000);
+
+        const world = createMockWorld();
+        const runtime = new ServerRuntime(world as never);
+
+        runtime.start();
+        vi.advanceTimersByTime(500);
+        runtime.destroy();
+
+        expect(world.tick).toHaveBeenCalledTimes(1);
+        expect(world.tick.mock.calls[0]?.[0]).toBe(2_000);
+      } finally {
+        nowSpy.mockRestore();
+        vi.useRealTimers();
+      }
     });
 
     it("caps the accumulator to a single frame", () => {

@@ -2,7 +2,6 @@ export type PublicRuntimeEnv = {
   PUBLIC_CDN_URL?: string;
   PUBLIC_WS_URL?: string;
   PUBLIC_API_URL?: string;
-  PUBLIC_DISABLE_WEBGPU?: string;
 };
 
 export type StreamingWindowRendererHealth = {

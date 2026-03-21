@@ -235,6 +235,7 @@ let latestRendererHealth: RendererHealthSnapshot = {
   phase: null,
   diagnostics: null,
 };
+let rendererHealthProbeInFlight: Promise<RendererHealthSnapshot> | null = null;
 
 function writeExternalStatusSnapshot(
   bridge: ReturnType<typeof getRTMPBridge>,
@@ -492,18 +493,28 @@ async function refreshRendererHealthSnapshot(
     return latestRendererHealth;
   }
 
-  try {
-    latestRendererHealth = await probeRendererHealth(pageRef);
-  } catch (err) {
-    latestRendererHealth = {
-      ready: false,
-      degradedReason: `probe_failed:${errMsg(err)}`.slice(0, 180),
-      updatedAt: Date.now(),
-      phase: null,
-      diagnostics: null,
-    };
+  if (rendererHealthProbeInFlight) {
+    return rendererHealthProbeInFlight;
   }
-  return latestRendererHealth;
+
+  rendererHealthProbeInFlight = (async () => {
+    try {
+      latestRendererHealth = await probeRendererHealth(pageRef);
+    } catch (err) {
+      latestRendererHealth = {
+        ready: false,
+        degradedReason: `probe_failed:${errMsg(err)}`.slice(0, 180),
+        updatedAt: Date.now(),
+        phase: null,
+        diagnostics: null,
+      };
+    }
+    return latestRendererHealth;
+  })().finally(() => {
+    rendererHealthProbeInFlight = null;
+  });
+
+  return rendererHealthProbeInFlight;
 }
 
 async function waitForStreamReadiness(

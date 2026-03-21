@@ -94,12 +94,196 @@ interface SolanaArenaOperatorInterface {
   } | null>;
 }
 
+type DuelBettingBridgeDeps = {
+  getStreamingDuelScheduler?: typeof getStreamingDuelScheduler;
+};
+
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord | null {
+  return value && typeof value === "object"
+    ? (value as UnknownRecord)
+    : null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function payloadKeys(payload: unknown): string[] {
+  return Object.keys(asRecord(payload) ?? {});
+}
+
+function warnInvalidBridgePayload(
+  eventName: string,
+  payload: unknown,
+  reason: string,
+): void {
+  Logger.warn("DuelBettingBridge", `Ignoring malformed ${eventName} payload`, {
+    reason,
+    keys: payloadKeys(payload),
+  });
+}
+
+function parseStreamingAgentRef(
+  value: unknown,
+): { id: string; name: string | null } | null {
+  const record = asRecord(value);
+  const id = asNonEmptyString(record?.id);
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    name: asNonEmptyString(record?.name),
+  };
+}
+
+function parseDuelScheduledPayload(payload: unknown): {
+  duelId: string;
+  duelKeyHex: string | undefined;
+  agent1Id: string;
+  agent2Id: string;
+  agent1Name: string;
+  agent2Name: string;
+} | null {
+  const record = asRecord(payload);
+  const duelId = asNonEmptyString(record?.duelId);
+  const agent1Id = asNonEmptyString(record?.agent1Id);
+  const agent2Id = asNonEmptyString(record?.agent2Id);
+  if (!duelId || !agent1Id || !agent2Id) {
+    return null;
+  }
+  return {
+    duelId,
+    duelKeyHex: asNonEmptyString(record?.duelKeyHex) ?? undefined,
+    agent1Id,
+    agent2Id,
+    agent1Name: asNonEmptyString(record?.agent1Name) ?? agent1Id,
+    agent2Name: asNonEmptyString(record?.agent2Name) ?? agent2Id,
+  };
+}
+
+function parseStreamingAnnouncementPayload(payload: unknown): {
+  duelId: string;
+  duelKeyHex: string;
+  betCloseTime: number | undefined;
+  agent1: { id: string; name: string | null };
+  agent2: { id: string; name: string | null };
+} | null {
+  const record = asRecord(payload);
+  const duelId = asNonEmptyString(record?.duelId);
+  const duelKeyHex = asNonEmptyString(record?.duelKeyHex);
+  const agent1 = parseStreamingAgentRef(record?.agent1);
+  const agent2 = parseStreamingAgentRef(record?.agent2);
+  if (!duelId || !duelKeyHex || !agent1 || !agent2) {
+    return null;
+  }
+  return {
+    duelId,
+    duelKeyHex,
+    betCloseTime: asFiniteNumber(record?.betCloseTime),
+    agent1,
+    agent2,
+  };
+}
+
+function parseStreamingFightStartPayload(payload: unknown): {
+  duelId: string;
+  duelKeyHex: string | null;
+} | null {
+  const record = asRecord(payload);
+  const duelId = asNonEmptyString(record?.duelId);
+  if (!duelId) {
+    return null;
+  }
+  return {
+    duelId,
+    duelKeyHex: asNonEmptyString(record?.duelKeyHex),
+  };
+}
+
+function parseStreamingResolutionPayload(payload: unknown): {
+  duelId: string;
+  winnerId: string;
+  loserId: string;
+  winnerName: string | null;
+  loserName: string | null;
+  duration: number | undefined;
+  seed: string | null;
+  replayHash: string | null;
+} | null {
+  const record = asRecord(payload);
+  const duelId = asNonEmptyString(record?.duelId);
+  const winnerId = asNonEmptyString(record?.winnerId);
+  const loserId = asNonEmptyString(record?.loserId);
+  if (!duelId || !winnerId || !loserId) {
+    return null;
+  }
+  return {
+    duelId,
+    winnerId,
+    loserId,
+    winnerName: asNonEmptyString(record?.winnerName),
+    loserName: asNonEmptyString(record?.loserName),
+    duration: asFiniteNumber(record?.duration),
+    seed: asNonEmptyString(record?.seed),
+    replayHash: asNonEmptyString(record?.replayHash),
+  };
+}
+
+function parseStreamingAbortPayload(payload: unknown): {
+  duelId: string;
+  reason: string | null;
+} | null {
+  const record = asRecord(payload);
+  const duelId = asNonEmptyString(record?.duelId);
+  if (!duelId) {
+    return null;
+  }
+  return {
+    duelId,
+    reason: asNonEmptyString(record?.reason),
+  };
+}
+
+function parseDuelResultPayload(payload: unknown): {
+  winnerId: string;
+  loserId: string;
+  winnerName: string | null;
+  loserName: string | null;
+  duration: number | undefined;
+} | null {
+  const record = asRecord(payload);
+  const winnerId = asNonEmptyString(record?.winnerId);
+  const loserId = asNonEmptyString(record?.loserId);
+  if (!winnerId || !loserId) {
+    return null;
+  }
+  return {
+    winnerId,
+    loserId,
+    winnerName: asNonEmptyString(record?.winnerName),
+    loserName: asNonEmptyString(record?.loserName),
+    duration: asFiniteNumber(record?.duration),
+  };
+}
+
 // ============================================================================
 // DuelBettingBridge Class
 // ============================================================================
 
 export class DuelBettingBridge {
   private readonly world: World;
+  private readonly getStreamingDuelSchedulerFn: typeof getStreamingDuelScheduler;
   private solanaOperator: SolanaArenaOperatorInterface | null = null;
 
   /** Active duel markets */
@@ -123,8 +307,10 @@ export class DuelBettingBridge {
   /** Prevent overlapping reconcile passes */
   private reconcileInFlight = false;
 
-  constructor(world: World) {
+  constructor(world: World, deps: DuelBettingBridgeDeps = {}) {
     this.world = world;
+    this.getStreamingDuelSchedulerFn =
+      deps.getStreamingDuelScheduler ?? getStreamingDuelScheduler;
   }
 
   /**
@@ -139,7 +325,7 @@ export class DuelBettingBridge {
     // Try to get the Solana operator from the world
     this.solanaOperator =
       (
-        this.world as unknown as {
+        this.world as World & {
           solanaArenaOperator?: SolanaArenaOperatorInterface;
         }
       ).solanaArenaOperator ?? null;
@@ -314,18 +500,9 @@ export class DuelBettingBridge {
    * Handle duel scheduled event - create betting market
    */
   private async handleDuelScheduled(payload: unknown): Promise<void> {
-    const data = payload as {
-      duelId?: string;
-      duelKeyHex?: string;
-      agent1Id?: string;
-      agent2Id?: string;
-      agent1Name?: string;
-      agent2Name?: string;
-      startTime?: number;
-    };
-
-    if (!data.duelId || !data.agent1Id || !data.agent2Id) {
-      Logger.warn("DuelBettingBridge", "Invalid duel:scheduled payload", data);
+    const data = parseDuelScheduledPayload(payload);
+    if (!data) {
+      warnInvalidBridgePayload("duel:scheduled", payload, "missing_required_fields");
       return;
     }
 
@@ -342,22 +519,13 @@ export class DuelBettingBridge {
   }
 
   private async handleStreamingAnnouncement(payload: unknown): Promise<void> {
-    const data = payload as {
-      duelId?: string;
-      duelKeyHex?: string;
-      cycleId?: string;
-      betOpenTime?: number;
-      betCloseTime?: number;
-      agent1?: { id?: string; name?: string };
-      agent2?: { id?: string; name?: string };
-    };
-
-    if (
-      !data.duelId ||
-      !data.duelKeyHex ||
-      !data.agent1?.id ||
-      !data.agent2?.id
-    ) {
+    const data = parseStreamingAnnouncementPayload(payload);
+    if (!data) {
+      warnInvalidBridgePayload(
+        "streaming:announcement:start",
+        payload,
+        "missing_required_fields",
+      );
       return;
     }
 
@@ -376,13 +544,13 @@ export class DuelBettingBridge {
   }
 
   private async handleStreamingFightStart(payload: unknown): Promise<void> {
-    const data = payload as {
-      duelId?: string;
-      duelKeyHex?: string;
-      fightStartTime?: number;
-    };
-
-    if (!data.duelId) {
+    const data = parseStreamingFightStartPayload(payload);
+    if (!data) {
+      warnInvalidBridgePayload(
+        "streaming:fight:start",
+        payload,
+        "missing_required_fields",
+      );
       return;
     }
 
@@ -403,21 +571,13 @@ export class DuelBettingBridge {
   }
 
   private async handleStreamingResolution(payload: unknown): Promise<void> {
-    const data = payload as {
-      duelId?: string;
-      duelKeyHex?: string;
-      duelEndTime?: number;
-      winnerId?: string;
-      loserId?: string;
-      winnerName?: string;
-      loserName?: string;
-      winReason?: "kill" | "hp_advantage" | "damage_advantage" | "draw";
-      seed?: string | null;
-      replayHash?: string | null;
-      duration?: number;
-    };
-
-    if (!data.duelId) {
+    const data = parseStreamingResolutionPayload(payload);
+    if (!data) {
+      warnInvalidBridgePayload(
+        "streaming:resolution:start",
+        payload,
+        "missing_required_fields",
+      );
       return;
     }
 
@@ -425,10 +585,6 @@ export class DuelBettingBridge {
 
     const resolvedMarket = await this.getResolvableStreamingMarket(data.duelId);
     if (!resolvedMarket) {
-      return;
-    }
-
-    if (!data.winnerId || !data.loserId) {
       return;
     }
 
@@ -451,7 +607,7 @@ export class DuelBettingBridge {
       return existing;
     }
 
-    const scheduler = getStreamingDuelScheduler();
+    const scheduler = this.getStreamingDuelSchedulerFn();
     const cycle = scheduler?.getCurrentCycle();
     if (!cycle || cycle.duelId !== duelId) {
       return null;
@@ -479,12 +635,13 @@ export class DuelBettingBridge {
   }
 
   private async handleStreamingAbort(payload: unknown): Promise<void> {
-    const data = payload as {
-      duelId?: string;
-      reason?: string;
-    };
-
-    if (!data.duelId) {
+    const data = parseStreamingAbortPayload(payload);
+    if (!data) {
+      warnInvalidBridgePayload(
+        "streaming:cycle:aborted",
+        payload,
+        "missing_required_fields",
+      );
       return;
     }
 
@@ -764,7 +921,7 @@ export class DuelBettingBridge {
     try {
       await this.reconcileLiveCycle();
     } catch (error) {
-      const scheduler = getStreamingDuelScheduler();
+      const scheduler = this.getStreamingDuelSchedulerFn();
       const cycle = scheduler?.getCurrentCycle();
       Logger.error(
         "DuelBettingBridge",
@@ -778,7 +935,7 @@ export class DuelBettingBridge {
         },
       );
     } finally {
-      const scheduler = getStreamingDuelScheduler();
+      const scheduler = this.getStreamingDuelSchedulerFn();
       if (!scheduler && this.activeMarkets.size === 0) {
         shouldScheduleNext = false;
       } else {
@@ -821,7 +978,7 @@ export class DuelBettingBridge {
     }
     this.reconcileInFlight = true;
     try {
-      const scheduler = getStreamingDuelScheduler();
+      const scheduler = this.getStreamingDuelSchedulerFn();
       const cycle = scheduler?.getCurrentCycle();
       if (!cycle?.duelId || !cycle.agent1 || !cycle.agent2) {
         return;
@@ -887,16 +1044,9 @@ export class DuelBettingBridge {
    * Handle duel result event - resolve betting market
    */
   private async handleDuelResult(payload: unknown): Promise<void> {
-    const data = payload as {
-      duelId?: string;
-      winnerId?: string;
-      loserId?: string;
-      winnerName?: string;
-      loserName?: string;
-      duration?: number;
-    };
-
-    if (!data.winnerId || !data.loserId) {
+    const data = parseDuelResultPayload(payload);
+    if (!data) {
+      warnInvalidBridgePayload("duel:result", payload, "missing_required_fields");
       return;
     }
     const winnerId = data.winnerId;
