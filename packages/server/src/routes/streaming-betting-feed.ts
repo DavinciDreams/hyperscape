@@ -131,6 +131,15 @@ export function buildBettingFeedPayload(params: {
   };
 }
 
+export function buildBettingFeedDedupKey(
+  payload: BettingFeedPayload,
+): string {
+  return JSON.stringify({
+    ...payload,
+    emittedAt: 0,
+  });
+}
+
 export function selectReplayDelivery(
   frames: BettingFeedFrame[],
   sinceSeq: number,

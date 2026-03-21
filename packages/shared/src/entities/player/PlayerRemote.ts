@@ -139,6 +139,8 @@ const OWNED_FALLBACK_GEOMETRY_KEY = "__hyperscapeOwnedFallbackGeometry";
 
 function cloneFallbackGeometry<T extends THREE.BufferGeometry>(geometry: T): T {
   const clone = geometry.clone();
+  // Only dispose geometries that were explicitly cloned for one fallback
+  // avatar instance; shared source geometries must remain alive.
   clone.userData[OWNED_FALLBACK_GEOMETRY_KEY] = true;
   return clone;
 }

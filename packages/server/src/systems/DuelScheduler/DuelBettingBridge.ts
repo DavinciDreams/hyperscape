@@ -349,6 +349,8 @@ export class DuelBettingBridge {
       return;
     }
 
+    this.ensureReconciliationLoop();
+
     await this.createOrSyncMarket({
       duelId: data.duelId,
       duelKeyHex: data.duelKeyHex,
@@ -372,9 +374,14 @@ export class DuelBettingBridge {
       return;
     }
 
+    this.ensureReconciliationLoop();
+
     const market = this.activeMarkets.get(data.duelId);
     if (!market) {
-      await this.reconcileLiveCycle();
+      await this.reconcileLiveCycleFrom("streaming:fight:start", {
+        duelId: data.duelId,
+        duelKeyHex: data.duelKeyHex ?? null,
+      });
       return;
     }
 
@@ -401,6 +408,8 @@ export class DuelBettingBridge {
     if (!data.duelId) {
       return;
     }
+
+    this.ensureReconciliationLoop();
 
     const resolvedMarket = await this.getResolvableStreamingMarket(data.duelId);
     if (!resolvedMarket) {
@@ -449,7 +458,11 @@ export class DuelBettingBridge {
       return null;
     }
 
-    await this.reconcileLiveCycle();
+    await this.reconcileLiveCycleFrom("streaming:resolution:lookup", {
+      duelId,
+      cycleId: cycle.cycleId ?? null,
+      phase: cycle.phase ?? null,
+    });
     return this.activeMarkets.get(duelId) ?? null;
   }
 
@@ -462,6 +475,8 @@ export class DuelBettingBridge {
     if (!data.duelId) {
       return;
     }
+
+    this.ensureReconciliationLoop();
 
     const market = this.activeMarkets.get(data.duelId);
     if (!market) {
@@ -701,17 +716,27 @@ export class DuelBettingBridge {
     this.scheduleNextReconciliation(0);
   }
 
+  private ensureReconciliationLoop(): void {
+    if (this.reconcileTimer) {
+      return;
+    }
+    this.scheduleNextReconciliation(0);
+  }
+
   private scheduleNextReconciliation(delayMs: number): void {
     if (this.reconcileTimer) {
       clearTimeout(this.reconcileTimer);
     }
 
     this.reconcileTimer = setTimeout(() => {
+      this.reconcileTimer = null;
       void this.runScheduledReconciliation();
     }, delayMs);
   }
 
   private async runScheduledReconciliation(): Promise<void> {
+    let shouldScheduleNext = true;
+    let nextDelayMs = Math.max(config.reconcileIntervalMs * 5, 5000);
     try {
       await this.reconcileLiveCycle();
     } catch (error) {
@@ -730,10 +755,39 @@ export class DuelBettingBridge {
       );
     } finally {
       const scheduler = getStreamingDuelScheduler();
-      const nextDelayMs = scheduler
-        ? config.reconcileIntervalMs
-        : Math.max(config.reconcileIntervalMs * 5, 5000);
-      this.scheduleNextReconciliation(nextDelayMs);
+      if (!scheduler && this.activeMarkets.size === 0) {
+        shouldScheduleNext = false;
+      } else {
+        nextDelayMs = scheduler
+          ? config.reconcileIntervalMs
+          : Math.max(config.reconcileIntervalMs * 5, 5000);
+      }
+    }
+
+    if (!shouldScheduleNext) {
+      return;
+    }
+
+    this.scheduleNextReconciliation(nextDelayMs);
+  }
+
+  private async reconcileLiveCycleFrom(
+    source: string,
+    context: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.reconcileLiveCycle();
+    } catch (error) {
+      Logger.error(
+        "DuelBettingBridge",
+        "Streaming market reconciliation failed outside the scheduled loop",
+        error instanceof Error ? error : null,
+        {
+          source,
+          activeMarkets: this.activeMarkets.size,
+          ...context,
+        },
+      );
     }
   }
 

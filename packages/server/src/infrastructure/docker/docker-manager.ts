@@ -46,36 +46,19 @@
  * **Referenced by**: index.ts (server startup and shutdown)
  */
 
-import { spawn, exec } from "child_process";
+import { spawn, execFile } from "child_process";
 import { promisify } from "util";
-import { existsSync } from "fs";
-import os from "os";
+import { resolveDockerBinary } from "./resolveDockerBinary.js";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const DOCKER_BIN = resolveDockerBinary();
 
 export const DEFAULT_DEV_POSTGRES_PASSWORD = "hyperscape_dev_password";
 
-function resolveDockerBinary(): string {
-  const candidates = [
-    process.env.DOCKER_BIN,
-    "/usr/local/bin/docker",
-    "/opt/homebrew/bin/docker",
-    "/Applications/Docker.app/Contents/Resources/bin/docker",
-    `${os.homedir()}/.docker/bin/docker`,
-    "docker",
-  ].filter((candidate): candidate is string => Boolean(candidate));
-
-  for (const candidate of candidates) {
-    if (candidate === "docker") {
-      return candidate;
-    }
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return "docker";
+async function execDocker(
+  args: string[],
+): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync(DOCKER_BIN, args);
 }
 
 /**
@@ -119,7 +102,7 @@ export class DockerManager {
    * @public
    */
   async checkDockerRunning(): Promise<void> {
-    await execAsync(`${DOCKER_BIN} info`);
+    await execDocker(["info"]);
   }
 
   /**
@@ -132,17 +115,25 @@ export class DockerManager {
    * @public
    */
   async checkPostgresRunning(): Promise<boolean> {
-    const { stdout: existsOut } = await execAsync(
-      `${DOCKER_BIN} ps -a --filter "name=^/${this.config.containerName}$" --format "{{.Names}}"`,
-    );
+    const { stdout: existsOut } = await execDocker([
+      "ps",
+      "-a",
+      "--filter",
+      `name=^/${this.config.containerName}$`,
+      "--format",
+      "{{.Names}}",
+    ]);
     const exists = existsOut.trim() === this.config.containerName;
     if (!exists) {
       return false;
     }
 
-    const { stdout } = await execAsync(
-      `${DOCKER_BIN} inspect -f '{{.State.Running}}' ${this.config.containerName}`,
-    );
+    const { stdout } = await execDocker([
+      "inspect",
+      "-f",
+      "{{.State.Running}}",
+      this.config.containerName,
+    ]);
     const isRunning = stdout.trim() === "true";
     return isRunning;
   }
@@ -158,12 +149,17 @@ export class DockerManager {
    * @public
    */
   async startPostgres(): Promise<void> {
-    const { stdout } = await execAsync(
-      `${DOCKER_BIN} ps -a --filter "name=^/${this.config.containerName}$" --format "{{.Names}}"`,
-    );
+    const { stdout } = await execDocker([
+      "ps",
+      "-a",
+      "--filter",
+      `name=^/${this.config.containerName}$`,
+      "--format",
+      "{{.Names}}",
+    ]);
     if (stdout.trim() === this.config.containerName) {
       // Container exists, just start it
-      await execAsync(`${DOCKER_BIN} start ${this.config.containerName}`);
+      await execDocker(["start", this.config.containerName]);
       this.containerStartedByUs = true;
     } else {
       // Create new container
@@ -214,9 +210,13 @@ export class DockerManager {
   private async waitForPostgres(maxAttempts: number = 30): Promise<void> {
     for (let i = 0; i < maxAttempts; i++) {
       try {
-        const { stdout } = await execAsync(
-          `${DOCKER_BIN} exec ${this.config.containerName} pg_isready -U ${this.config.postgresUser}`,
-        );
+        const { stdout } = await execDocker([
+          "exec",
+          this.config.containerName,
+          "pg_isready",
+          "-U",
+          this.config.postgresUser,
+        ]);
 
         if (stdout.includes("accepting connections")) {
           return;
@@ -244,7 +244,7 @@ export class DockerManager {
       return;
     }
 
-    await execAsync(`${DOCKER_BIN} stop ${this.config.containerName}`);
+    await execDocker(["stop", this.config.containerName]);
   }
 
   /**
@@ -266,9 +266,12 @@ export class DockerManager {
     // Let's try to query the container to ensure we match it perfectly.
     if (pwd === "hyperscape" && !process.env.POSTGRES_PASSWORD) {
       try {
-        const { stdout } = await execAsync(
-          `docker inspect -f '{{json .Config.Env}}' ${this.config.containerName}`,
-        );
+        const { stdout } = await execDocker([
+          "inspect",
+          "-f",
+          "{{json .Config.Env}}",
+          this.config.containerName,
+        ]);
         const envs = JSON.parse(stdout);
         const passEnv = envs.find((e: string) =>
           e.startsWith("POSTGRES_PASSWORD="),

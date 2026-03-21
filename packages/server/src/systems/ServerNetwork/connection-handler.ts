@@ -1348,6 +1348,8 @@ export class ConnectionHandler {
       const shouldRequireAuthForAgent =
         isAgentCharacter && requiresRestrictedAccess && !canBypassAgentAuth;
 
+      // Keep verifiedUserId in the outer scope because the authenticated
+      // account id is reused later when the spectator socket is registered.
       let verifiedUserId: string | null = null;
 
       if (isAgentCharacter && !shouldRequireAuthForAgent) {

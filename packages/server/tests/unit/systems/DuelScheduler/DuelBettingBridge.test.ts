@@ -20,6 +20,23 @@ function createMockWorld() {
   } as unknown as Parameters<typeof DuelBettingBridge>[0];
 }
 
+type DuelBettingBridgeTestHarness = DuelBettingBridge & {
+  handleStreamingAnnouncement(payload: unknown): Promise<void>;
+  handleStreamingFightStart(payload: unknown): Promise<void>;
+  handleStreamingResolution(payload: unknown): Promise<void>;
+  reconcileLiveCycle(): Promise<void>;
+  runScheduledReconciliation(): Promise<void>;
+  createOrSyncMarket(payload: unknown): Promise<void>;
+  reconcileTimer: ReturnType<typeof setTimeout> | null;
+  reconcileInFlight: boolean;
+};
+
+function asTestHarness(
+  bridge: DuelBettingBridge,
+): DuelBettingBridgeTestHarness {
+  return bridge as unknown as DuelBettingBridgeTestHarness;
+}
+
 function makeCycle(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     cycleId: "cycle-123",
@@ -55,11 +72,13 @@ function makeCycle(overrides: Partial<Record<string, unknown>> = {}) {
 describe("DuelBettingBridge streaming reconciliation", () => {
   let world: ReturnType<typeof createMockWorld>;
   let bridge: DuelBettingBridge;
+  let bridgeHarness: DuelBettingBridgeTestHarness;
 
   beforeEach(() => {
     vi.useFakeTimers();
     world = createMockWorld();
     bridge = new DuelBettingBridge(world as never);
+    bridgeHarness = asTestHarness(bridge);
     getStreamingDuelSchedulerMock.mockReset();
   });
 
@@ -69,7 +88,7 @@ describe("DuelBettingBridge streaming reconciliation", () => {
   });
 
   it("creates a market from streaming announcement data using the live duel key", async () => {
-    await (bridge as any).handleStreamingAnnouncement({
+    await bridgeHarness.handleStreamingAnnouncement({
       duelId: "duel-123",
       duelKeyHex:
         "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -100,7 +119,7 @@ describe("DuelBettingBridge streaming reconciliation", () => {
   });
 
   it("locks and resolves a market when the live duel advances phases", async () => {
-    await (bridge as any).handleStreamingAnnouncement({
+    await bridgeHarness.handleStreamingAnnouncement({
       duelId: "duel-123",
       duelKeyHex:
         "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -110,7 +129,7 @@ describe("DuelBettingBridge streaming reconciliation", () => {
       betCloseTime: 2_000,
     });
 
-    await (bridge as any).handleStreamingFightStart({
+    await bridgeHarness.handleStreamingFightStart({
       duelId: "duel-123",
       duelKeyHex:
         "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -125,7 +144,7 @@ describe("DuelBettingBridge streaming reconciliation", () => {
       }),
     );
 
-    await (bridge as any).handleStreamingResolution({
+    await bridgeHarness.handleStreamingResolution({
       duelId: "duel-123",
       duelKeyHex:
         "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -161,7 +180,7 @@ describe("DuelBettingBridge streaming reconciliation", () => {
       getCurrentCycle: () => cycle,
     });
 
-    await (bridge as any).reconcileLiveCycle();
+    await bridgeHarness.reconcileLiveCycle();
 
     const created = bridge.getMarket("duel-123");
     expect(created).not.toBeNull();
@@ -174,7 +193,7 @@ describe("DuelBettingBridge streaming reconciliation", () => {
       getCurrentCycle: () => cycle,
     });
 
-    await (bridge as any).reconcileLiveCycle();
+    await bridgeHarness.reconcileLiveCycle();
     expect(bridge.getMarket("duel-123")?.status).toBe("locked");
 
     cycle.phase = "RESOLUTION";
@@ -189,7 +208,7 @@ describe("DuelBettingBridge streaming reconciliation", () => {
       getCurrentCycle: () => cycle,
     });
 
-    await (bridge as any).reconcileLiveCycle();
+    await bridgeHarness.reconcileLiveCycle();
     await vi.advanceTimersByTimeAsync(15_000);
 
     expect(bridge.getMarket("duel-123")).toBeNull();
@@ -202,12 +221,12 @@ describe("DuelBettingBridge streaming reconciliation", () => {
       getCurrentCycle: () => cycle,
     });
 
-    await (bridge as any).reconcileLiveCycle();
+    await bridgeHarness.reconcileLiveCycle();
 
     cycle.phase = "FIGHTING";
     cycle.phaseStartTime = 2_500;
     cycle.fightStartTime = 2_500;
-    await (bridge as any).reconcileLiveCycle();
+    await bridgeHarness.reconcileLiveCycle();
 
     cycle.phase = "RESOLUTION";
     cycle.winnerId = "agent-a";
@@ -218,12 +237,12 @@ describe("DuelBettingBridge streaming reconciliation", () => {
     cycle.seed = "12345";
     cycle.replayHash = "deadbeef";
 
-    await (bridge as any).reconcileLiveCycle();
+    await bridgeHarness.reconcileLiveCycle();
 
     expect(bridge.getMarket("duel-123")).toBeNull();
     expect(bridge.getMarketHistory()).toHaveLength(1);
 
-    await (bridge as any).reconcileLiveCycle();
+    await bridgeHarness.reconcileLiveCycle();
 
     expect(bridge.getMarket("duel-123")).toBeNull();
     expect(bridge.getMarketHistory()).toHaveLength(1);
@@ -236,15 +255,37 @@ describe("DuelBettingBridge streaming reconciliation", () => {
     });
 
     const createOrSyncMarket = vi
-      .spyOn(bridge as never, "createOrSyncMarket" as never)
+      .spyOn(bridgeHarness, "createOrSyncMarket")
       .mockRejectedValueOnce(new Error("boom"));
 
-    await expect((bridge as any).reconcileLiveCycle()).rejects.toThrow("boom");
-    expect((bridge as any).reconcileInFlight).toBe(false);
+    await expect(bridgeHarness.reconcileLiveCycle()).rejects.toThrow("boom");
+    expect(bridgeHarness.reconcileInFlight).toBe(false);
 
     createOrSyncMarket.mockRestore();
 
-    await (bridge as any).reconcileLiveCycle();
+    await bridgeHarness.reconcileLiveCycle();
     expect(bridge.getMarket("duel-123")).not.toBeNull();
+  });
+
+  it("swallows and logs direct reconcile failures from fight-start recovery", async () => {
+    const reconcileLiveCycle = vi
+      .spyOn(bridgeHarness, "reconcileLiveCycle")
+      .mockRejectedValueOnce(new Error("boom"));
+
+    await expect(
+      bridgeHarness.handleStreamingFightStart({
+        duelId: "duel-123",
+      }),
+    ).resolves.toBeUndefined();
+
+    reconcileLiveCycle.mockRestore();
+  });
+
+  it("stops the scheduled reconciliation loop when streaming is inactive and there are no markets", async () => {
+    getStreamingDuelSchedulerMock.mockReturnValue(null);
+
+    await bridgeHarness.runScheduledReconciliation();
+
+    expect(bridgeHarness.reconcileTimer).toBeNull();
   });
 });

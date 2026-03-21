@@ -12,8 +12,10 @@ describe("shouldDismissStreamingLoading", () => {
         worldReady: false,
         terrainReady: true,
         hasStreamingState: true,
+        initError: null,
         needsCameraLock: false,
         cameraLocked: false,
+        phase: "ANNOUNCEMENT",
       }),
     ).toBe(false);
   });
@@ -25,8 +27,10 @@ describe("shouldDismissStreamingLoading", () => {
         worldReady: true,
         terrainReady: true,
         hasStreamingState: true,
+        initError: null,
         needsCameraLock: true,
         cameraLocked: false,
+        phase: "FIGHTING",
       }),
     ).toBe(false);
   });
@@ -38,8 +42,10 @@ describe("shouldDismissStreamingLoading", () => {
         worldReady: true,
         terrainReady: true,
         hasStreamingState: true,
+        initError: null,
         needsCameraLock: false,
         cameraLocked: false,
+        phase: "COUNTDOWN",
       }),
     ).toBe(false);
   });
@@ -51,8 +57,25 @@ describe("shouldDismissStreamingLoading", () => {
         worldReady: true,
         terrainReady: false,
         hasStreamingState: true,
+        initError: null,
         needsCameraLock: false,
         cameraLocked: false,
+        phase: "COUNTDOWN",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the overlay up when the client is in an active duel without streaming state", () => {
+    expect(
+      shouldDismissStreamingLoading({
+        connected: true,
+        worldReady: true,
+        terrainReady: true,
+        hasStreamingState: false,
+        initError: null,
+        needsCameraLock: false,
+        cameraLocked: false,
+        phase: "FIGHTING",
       }),
     ).toBe(false);
   });
@@ -218,6 +241,26 @@ describe("shouldDismissStreamingLoading", () => {
 
     expect(health.ready).toBe(true);
     expect(health.degradedReason).toBeNull();
+  });
+
+  it("does not report ready during idle when streaming state is still absent", () => {
+    const health = deriveStreamingRendererHealth({
+      connected: true,
+      worldReady: true,
+      terrainReady: true,
+      hasStreamingState: false,
+      initError: null,
+      needsCameraLock: false,
+      cameraLocked: false,
+      loadingDismissed: true,
+      phase: "IDLE",
+      agent1: null,
+      agent2: null,
+      arenaPositions: null,
+    });
+
+    expect(health.ready).toBe(false);
+    expect(health.degradedReason).toBe("waiting_for_duel_data");
   });
 
   it("marks the stream as unhealthy when the game client reports an init error", () => {

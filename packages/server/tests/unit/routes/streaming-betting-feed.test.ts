@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildBettingFeedDedupKey,
   buildBettingFeedPayload,
   selectReplayDelivery,
 } from "../../../src/routes/streaming-betting-feed.js";
@@ -180,6 +181,47 @@ describe("streaming-betting-feed", () => {
 
     expect(selectReplayDelivery(frames, 2)).toMatchObject({
       mode: "reset",
+      latestFrame: frames[2],
+      oldestSeq: 10,
+    });
+  });
+
+  it("deduplicates independently of emittedAt", () => {
+    const basePayload = buildBettingFeedPayload({
+      sourceEpoch: 42,
+      seq: 7,
+      emittedAt: 123_456,
+      cycle: createCycle(),
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 123_400,
+      },
+    });
+    const laterPayload = {
+      ...basePayload,
+      emittedAt: 999_999,
+    };
+
+    expect(buildBettingFeedDedupKey(basePayload)).toBe(
+      buildBettingFeedDedupKey(laterPayload),
+    );
+  });
+
+  it("handles empty replay buffers cleanly", () => {
+    expect(selectReplayDelivery([], 0)).toMatchObject({
+      mode: "bootstrap",
+      latestFrame: null,
+      oldestSeq: null,
+    });
+  });
+
+  it("replays all buffered frames when the caller is exactly at the oldest boundary", () => {
+    const frames = [createFrame(10), createFrame(11), createFrame(12)];
+
+    expect(selectReplayDelivery(frames, 10)).toMatchObject({
+      mode: "replay",
+      frames: [frames[1], frames[2]],
       latestFrame: frames[2],
       oldestSeq: 10,
     });

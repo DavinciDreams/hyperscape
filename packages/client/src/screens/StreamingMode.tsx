@@ -28,6 +28,7 @@ import type {
 import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
 import type { StreamingWindow } from "@/lib/streamingWindow";
 import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
+import { getStreamingAccessToken } from "../lib/streamingAccessToken";
 
 /** Streaming state from server */
 export interface StreamingState {
@@ -105,31 +106,37 @@ function toGuardrailAgent(
   };
 }
 
-function getStreamingAccessToken(): string | null {
-  const searchParams = new URLSearchParams(window.location.search);
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  return (
-    hashParams.get("streamToken")?.trim() ||
-    searchParams.get("streamToken")?.trim() ||
-    null
-  );
-}
+function deriveStreamingSurfaceBlockReason(params: {
+  connected: boolean;
+  worldReady: boolean;
+  terrainReady: boolean;
+  hasStreamingState: boolean;
+  initError: string | null;
+  needsCameraLock: boolean;
+  cameraLocked: boolean;
+  phase: StreamingState["cycle"]["phase"] | null;
+}): string | null {
+  const activePhase = Boolean(params.phase && params.phase !== "IDLE");
 
-function scrubStreamingAccessTokenFromUrl(): void {
-  const currentUrl = new URL(window.location.href);
-  const searchHadToken = currentUrl.searchParams.has("streamToken");
-  const hashParams = new URLSearchParams(currentUrl.hash.replace(/^#/, ""));
-  const hashHadToken = hashParams.has("streamToken");
-
-  if (!searchHadToken && !hashHadToken) {
-    return;
+  if (params.initError?.trim()) {
+    return "initialization_failed";
   }
-
-  currentUrl.searchParams.delete("streamToken");
-  hashParams.delete("streamToken");
-  const nextHash = hashParams.toString();
-  const nextUrl = `${currentUrl.pathname}${currentUrl.search}${nextHash ? `#${nextHash}` : ""}`;
-  window.history.replaceState(window.history.state, "", nextUrl);
+  if (!params.connected) {
+    return "socket_disconnected";
+  }
+  if (!params.hasStreamingState) {
+    return activePhase ? "stream_state_missing" : "waiting_for_duel_data";
+  }
+  if (!params.worldReady) {
+    return "world_not_ready";
+  }
+  if (!params.terrainReady) {
+    return "terrain_not_ready";
+  }
+  if (params.needsCameraLock && !params.cameraLocked) {
+    return "camera_target_unresolved";
+  }
+  return null;
 }
 
 export function deriveStreamingRendererHealth(params: {
@@ -147,30 +154,24 @@ export function deriveStreamingRendererHealth(params: {
   arenaPositions: StreamingState["cycle"]["arenaPositions"] | null | undefined;
 }): StreamingRendererHealth {
   const activePhase = Boolean(params.phase && params.phase !== "IDLE");
-  let degradedReason: string | null = null;
-
-  if (params.initError?.trim()) {
-    degradedReason = "initialization_failed";
-  } else if (!params.connected) {
-    degradedReason = "socket_disconnected";
-  } else if (!params.hasStreamingState) {
-    degradedReason = activePhase
-      ? "stream_state_missing"
-      : "waiting_for_duel_data";
-  } else if (!params.worldReady) {
-    degradedReason = "world_not_ready";
-  } else if (!params.terrainReady) {
-    degradedReason = "terrain_not_ready";
-  } else if (params.needsCameraLock && !params.cameraLocked) {
-    degradedReason = "camera_target_unresolved";
-  } else {
-    degradedReason = deriveStreamingGuardrailReason({
+  const blockingReason = deriveStreamingSurfaceBlockReason({
+    connected: params.connected,
+    worldReady: params.worldReady,
+    terrainReady: params.terrainReady,
+    hasStreamingState: params.hasStreamingState,
+    initError: params.initError,
+    needsCameraLock: params.needsCameraLock,
+    cameraLocked: params.cameraLocked,
+    phase: params.phase,
+  });
+  let degradedReason =
+    blockingReason ??
+    deriveStreamingGuardrailReason({
       phase: params.phase as StreamingGuardrailPhase | null,
       agent1: toGuardrailAgent(params.agent1),
       agent2: toGuardrailAgent(params.agent2),
       arenaPositions: params.arenaPositions,
     });
-  }
 
   if (!degradedReason && !params.loadingDismissed) {
     degradedReason = activePhase ? "loading_overlay_active" : "initializing";
@@ -189,15 +190,22 @@ export function shouldDismissStreamingLoading(params: {
   worldReady: boolean;
   terrainReady: boolean;
   hasStreamingState: boolean;
+  initError?: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  phase?: StreamingState["cycle"]["phase"] | null;
 }): boolean {
   return (
-    params.connected &&
-    params.terrainReady &&
-    params.worldReady &&
-    params.hasStreamingState &&
-    (!params.needsCameraLock || params.cameraLocked)
+    deriveStreamingSurfaceBlockReason({
+      connected: params.connected,
+      worldReady: params.worldReady,
+      terrainReady: params.terrainReady,
+      hasStreamingState: params.hasStreamingState,
+      initError: params.initError ?? null,
+      needsCameraLock: params.needsCameraLock,
+      cameraLocked: params.cameraLocked,
+      phase: params.phase ?? null,
+    }) === null
   );
 }
 
@@ -237,10 +245,6 @@ export function StreamingMode() {
     }
     return url.toString();
   }, [streamAccessToken]);
-
-  useEffect(() => {
-    scrubStreamingAccessTokenFromUrl();
-  }, []);
 
   const clearTerrainPolling = useCallback(() => {
     if (terrainPollRef.current) {
@@ -919,8 +923,10 @@ export function StreamingMode() {
     worldReady,
     terrainReady,
     hasStreamingState: streamingState !== null,
+    initError: clientInitError,
     needsCameraLock,
     cameraLocked,
+    phase: streamingState?.cycle.phase ?? null,
   });
   const rendererHealth = useMemo(
     () =>

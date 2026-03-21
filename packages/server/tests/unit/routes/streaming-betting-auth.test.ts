@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractBettingFeedToken,
   hasValidBettingFeedToken,
+  resolveBettingFeedAccessToken,
 } from "../../../src/routes/streaming-betting-auth.js";
 
 describe("streaming-betting-auth", () => {
@@ -47,5 +48,36 @@ describe("streaming-betting-auth", () => {
         allowQueryToken: true,
       }),
     ).toBe("secret-token");
+  });
+
+  it("prefers BETTING_FEED_ACCESS_TOKEN over the viewer token", () => {
+    expect(
+      resolveBettingFeedAccessToken({
+        BETTING_FEED_ACCESS_TOKEN: "bet-secret",
+        STREAMING_VIEWER_ACCESS_TOKEN: "viewer-secret",
+      }),
+    ).toEqual({
+      token: "bet-secret",
+      source: "betting-feed",
+    });
+  });
+
+  it("falls back to STREAMING_VIEWER_ACCESS_TOKEN when needed", () => {
+    expect(
+      resolveBettingFeedAccessToken({
+        BETTING_FEED_ACCESS_TOKEN: "",
+        STREAMING_VIEWER_ACCESS_TOKEN: "viewer-secret",
+      }),
+    ).toEqual({
+      token: "viewer-secret",
+      source: "viewer-fallback",
+    });
+  });
+
+  it("reports missing auth when neither token is configured", () => {
+    expect(resolveBettingFeedAccessToken({})).toEqual({
+      token: null,
+      source: null,
+    });
   });
 });

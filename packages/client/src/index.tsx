@@ -25,6 +25,7 @@ import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
 import { logger } from "./lib/logger";
+import { primeStreamingAccessTokenFromWindow } from "./lib/streamingAccessToken";
 import { MaintenanceBanner } from "./components/common/MaintenanceBanner";
 // Loading fallback for lazy-loaded screens
 function ScreenLoadingFallback() {
@@ -126,6 +127,9 @@ if (typeof window !== "undefined") {
     env?: { PUBLIC_CDN_URL?: string };
     __CDN_URL?: string;
   };
+  // Scrub streaming viewer secrets before React or telemetry code can observe
+  // them in the address bar. Hash takes precedence over query for compatibility.
+  primeStreamingAccessTokenFromWindow(window);
   // Normalize the CDN URL if provided via env.js
   const envCdn = windowWithEnv.env?.PUBLIC_CDN_URL;
   if (envCdn && typeof envCdn === "string" && envCdn !== "undefined") {

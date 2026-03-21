@@ -346,6 +346,9 @@ async function probeRendererHealth(
 ): Promise<RendererHealthSnapshot> {
   const probedAt = Date.now();
   const probe = await pageRef.evaluate(() => {
+    // This shape mirrors StreamingWindowRendererHealth from the client bundle.
+    // Playwright evaluate runs in the browser context, so runtime imports are
+    // intentionally avoided here.
     const win = window as unknown as {
       __HYPERSCAPE_STREAM_READY__?: boolean;
       __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
@@ -355,44 +358,53 @@ async function probeRendererHealth(
         phase?: string | null;
       } | null;
     };
-    const text = (document.body?.innerText || "").slice(0, 1024);
-    const normalizedText = text.toLowerCase();
+    const explicitHealth =
+      win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ &&
+      typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ === "object"
+        ? {
+            ready: win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.ready === true,
+            degradedReason:
+              typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.degradedReason ===
+              "string"
+                ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.degradedReason
+                : null,
+            updatedAt:
+              typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt ===
+                "number" &&
+              Number.isFinite(
+                win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt,
+              )
+                ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt
+                : null,
+            phase:
+              typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.phase ===
+              "string"
+                ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.phase
+                : null,
+          }
+        : null;
+
+    let normalizedText = "";
+    if (!explicitHealth) {
+      normalizedText = (document.body?.textContent || "")
+        .slice(0, 1024)
+        .toLowerCase();
+    }
+
     const hasStreamingBootUi =
-      normalizedText.includes("waiting for duel data") ||
-      normalizedText.includes("initializing world systems") ||
-      normalizedText.includes("initializing") ||
-      normalizedText.includes("loading assets") ||
-      normalizedText.includes("finalizing");
+      !explicitHealth &&
+      (normalizedText.includes("waiting for duel data") ||
+        normalizedText.includes("initializing world systems") ||
+        normalizedText.includes("initializing") ||
+        normalizedText.includes("loading assets") ||
+        normalizedText.includes("finalizing"));
     const hasCriticalErrorUi =
-      normalizedText.includes("initialization failed") ||
-      normalizedText.includes("webgpu required") ||
-      normalizedText.includes("http error! status");
+      !explicitHealth &&
+      (normalizedText.includes("initialization failed") ||
+        normalizedText.includes("webgpu required") ||
+        normalizedText.includes("http error! status"));
     return {
-      explicitHealth:
-        win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ &&
-        typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ === "object"
-          ? {
-              ready: win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.ready === true,
-              degradedReason:
-                typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__
-                  .degradedReason === "string"
-                  ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.degradedReason
-                  : null,
-              updatedAt:
-                typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt ===
-                  "number" &&
-                Number.isFinite(
-                  win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt,
-                )
-                  ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt
-                  : null,
-              phase:
-                typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.phase ===
-                "string"
-                  ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.phase
-                  : null,
-            }
-          : null,
+      explicitHealth,
       hasCanvas: document.querySelector("canvas") !== null,
       readyFlag: win.__HYPERSCAPE_STREAM_READY__ === true,
       hasStreamingBootUi,
@@ -468,7 +480,7 @@ function normalizedCriticalErrorReason(probe: {
 
 async function refreshRendererHealthSnapshot(
   pageRef: Page | null,
-): Promise<void> {
+): Promise<RendererHealthSnapshot> {
   if (!pageRef) {
     latestRendererHealth = {
       ready: false,
@@ -477,7 +489,7 @@ async function refreshRendererHealthSnapshot(
       phase: null,
       diagnostics: null,
     };
-    return;
+    return latestRendererHealth;
   }
 
   try {
@@ -491,6 +503,7 @@ async function refreshRendererHealthSnapshot(
       diagnostics: null,
     };
   }
+  return latestRendererHealth;
 }
 
 async function waitForStreamReadiness(
@@ -1164,7 +1177,6 @@ async function main() {
     const bridgeStatus = bridge.getStatus();
     const stats = bridge.getStats();
     const processMemory = process.memoryUsage();
-    await refreshRendererHealthSnapshot(page).catch(() => undefined);
 
     console.log("[Status] Active:", bridgeStatus.active);
     console.log(

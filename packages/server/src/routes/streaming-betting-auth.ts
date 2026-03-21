@@ -6,6 +6,11 @@ type BettingFeedTokenParams = {
   allowQueryToken?: boolean;
 };
 
+export type BettingFeedAccessTokenResolution = {
+  token: string | null;
+  source: "betting-feed" | "viewer-fallback" | null;
+};
+
 function digestToken(token: string): Buffer {
   return createHash("sha256").update(token, "utf8").digest();
 }
@@ -42,4 +47,29 @@ export function hasValidBettingFeedToken(
   }
 
   return timingSafeEqual(digestToken(expected), digestToken(presented));
+}
+
+export function resolveBettingFeedAccessToken(
+  env: Record<string, string | undefined>,
+): BettingFeedAccessTokenResolution {
+  const bettingFeedToken = env.BETTING_FEED_ACCESS_TOKEN?.trim() || null;
+  if (bettingFeedToken) {
+    return {
+      token: bettingFeedToken,
+      source: "betting-feed",
+    };
+  }
+
+  const viewerToken = env.STREAMING_VIEWER_ACCESS_TOKEN?.trim() || null;
+  if (viewerToken) {
+    return {
+      token: viewerToken,
+      source: "viewer-fallback",
+    };
+  }
+
+  return {
+    token: null,
+    source: null,
+  };
 }

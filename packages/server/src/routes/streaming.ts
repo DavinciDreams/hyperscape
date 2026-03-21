@@ -10,23 +10,14 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { RateLimitOptions } from "@fastify/rate-limit";
-import type { World, StreamingGuardrailPhase } from "@hyperscape/shared";
-import {
-  deriveStreamingGuardrailReason,
-  isActiveStreamingGuardrailPhase,
-} from "@hyperscape/shared";
-import fs from "node:fs";
-import { eq } from "drizzle-orm";
-import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
+import type { World } from "@hyperscape/shared";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import {
   STREAMING_TIMING,
-  type StreamingDuelCycle,
   type StreamingPhase,
 } from "../systems/StreamingDuelScheduler/types.js";
 import { peekRTMPBridge } from "../streaming/index.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
-import { storage } from "../database/schema.js";
 import {
   STREAMING_CANONICAL_PLATFORM,
   STREAMING_PUBLIC_DELAY_DEFAULT_MS,
@@ -34,17 +25,11 @@ import {
   STREAMING_PUBLIC_DELAY_OVERRIDDEN,
 } from "../streaming/streaming-policy.js";
 import {
-  BETTING_FEED_SCHEMA_VERSION,
-  BETTING_SOURCE_EPOCH_STORAGE_KEY,
-  buildBettingFeedPayload,
-  selectReplayDelivery,
-  type BettingFeedRendererHealth,
-  type BettingFeedFrame,
-} from "./streaming-betting-feed.js";
-import {
-  extractBettingFeedToken,
-  hasValidBettingFeedToken,
-} from "./streaming-betting-auth.js";
+  deriveBettingRendererHealth,
+  readExternalRtmpStatusSnapshot,
+  registerStreamingBettingRoutes,
+} from "./streaming-betting-routes.js";
+import { trimReplayFrames } from "./streaming-sse-buffer.js";
 type InventorySnapshotItem = {
   slot: number;
   itemId: string;
@@ -112,20 +97,11 @@ const STREAMING_SSE_MAX_CLIENTS = Math.max(
     Number.parseInt(process.env.STREAMING_SSE_MAX_CLIENTS || "64", 10),
   ),
 );
-const BETTING_SSE_MAX_CLIENTS = Math.max(
-  4,
-  Math.min(
-    128,
-    Number.parseInt(process.env.BETTING_SSE_MAX_CLIENTS || "32", 10),
-  ),
-);
 const EXTERNAL_RTMP_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
 const EXTERNAL_RTMP_STATUS_MAX_AGE_MS = Math.max(
   5000,
   Number.parseInt(process.env.RTMP_STATUS_MAX_AGE_MS || "15000", 10),
 );
-const INTERNAL_BET_SYNC_ALLOWED_ORIGIN =
-  process.env.INTERNAL_BET_SYNC_ALLOWED_ORIGIN?.trim() || null;
 const BETTING_BOOTSTRAP_RATE_LIMIT: RateLimitOptions = {
   max: 240,
   timeWindow: "1 minute",
@@ -134,141 +110,6 @@ const BETTING_EVENTS_RATE_LIMIT: RateLimitOptions = {
   max: 60,
   timeWindow: "1 minute",
 };
-
-function asFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
-}
-
-function normalizeRendererHealthSnapshot(
-  value: unknown,
-): BettingFeedRendererHealth | null {
-  if (!value || typeof value !== "object") return null;
-  const candidate = value as Record<string, unknown>;
-  return {
-    ready: candidate.ready === true,
-    degradedReason: asString(candidate.degradedReason),
-    updatedAt: asFiniteNumber(candidate.updatedAt),
-  };
-}
-
-function deriveCycleGuardrailReason(
-  cycle: StreamingDuelCycle | null,
-): string | null {
-  if (!cycle) {
-    return null;
-  }
-  return deriveStreamingGuardrailReason({
-    phase: cycle.phase as StreamingGuardrailPhase | null | undefined,
-    agent1: cycle.agent1
-      ? {
-          id: cycle.agent1.characterId,
-          name: cycle.agent1.name,
-          hp: cycle.agent1.currentHp,
-          maxHp: cycle.agent1.maxHp,
-        }
-      : null,
-    agent2: cycle.agent2
-      ? {
-          id: cycle.agent2.characterId,
-          name: cycle.agent2.name,
-          hp: cycle.agent2.currentHp,
-          maxHp: cycle.agent2.maxHp,
-        }
-      : null,
-    arenaPositions: cycle.arenaPositions,
-  });
-}
-
-function readExternalRtmpStatusSnapshot(): Record<string, unknown> | null {
-  if (!EXTERNAL_RTMP_STATUS_FILE) return null;
-  try {
-    const raw = fs.readFileSync(EXTERNAL_RTMP_STATUS_FILE, "utf8").trim();
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (!Array.isArray(parsed.destinations)) return null;
-    if (typeof parsed.stats !== "object" || parsed.stats == null) return null;
-
-    const updatedAt = Number(parsed.updatedAt || 0);
-    if (
-      Number.isFinite(updatedAt) &&
-      updatedAt > 0 &&
-      Date.now() - updatedAt > EXTERNAL_RTMP_STATUS_MAX_AGE_MS
-    ) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function deriveBettingRendererHealth(
-  cycle: StreamingDuelCycle | null,
-): BettingFeedRendererHealth {
-  const updatedAt = Date.now();
-  const guardrailReason = deriveCycleGuardrailReason(cycle);
-  if (guardrailReason) {
-    return {
-      ready: false,
-      degradedReason: guardrailReason,
-      updatedAt,
-    };
-  }
-
-  const externalSnapshot = readExternalRtmpStatusSnapshot();
-  const externalRendererHealth = normalizeRendererHealthSnapshot(
-    externalSnapshot?.rendererHealth,
-  );
-  if (externalRendererHealth) {
-    const ageMs =
-      externalRendererHealth.updatedAt != null
-        ? Math.max(0, updatedAt - externalRendererHealth.updatedAt)
-        : null;
-    if (
-      externalRendererHealth.updatedAt != null &&
-      ageMs != null &&
-      ageMs > EXTERNAL_RTMP_STATUS_MAX_AGE_MS * 2
-    ) {
-      return {
-        ready: false,
-        degradedReason: "renderer_health_stale",
-        updatedAt,
-      };
-    }
-    return externalRendererHealth;
-  }
-
-  const captureStats = getStreamCapture().getStats();
-  if (isActiveStreamingGuardrailPhase(cycle?.phase as StreamingGuardrailPhase)) {
-    if (!captureStats.clientConnected) {
-      return {
-        ready: false,
-        degradedReason: "capture_client_disconnected",
-        updatedAt,
-      };
-    }
-    if (!captureStats.ffmpegRunning) {
-      return {
-        ready: false,
-        degradedReason: "capture_pipeline_inactive",
-        updatedAt,
-      };
-    }
-  }
-
-  return {
-    ready: true,
-    degradedReason: null,
-    updatedAt,
-  };
-}
 
 function getInventorySnapshot(
   world: World,
@@ -329,14 +170,6 @@ export function registerStreamingRoutes(
   fastify: FastifyInstance,
   world: World,
 ): void {
-  if (
-    process.env.NODE_ENV === "production" &&
-    !process.env.STREAMING_VIEWER_ACCESS_TOKEN?.trim()
-  ) {
-    fastify.log.warn(
-      "STREAMING_VIEWER_ACCESS_TOKEN is unset in production; internal betting feed auth is disabled",
-    );
-  }
   const sseClients = new Map<number, FastifyReply>();
   const replayFrames: StreamingSseFrame[] = [];
   let replayFramesTotalBytes = 0;
@@ -369,17 +202,28 @@ export function registerStreamingRoutes(
   let lastBroadcastSeq = 0;
   let statePushInterval: ReturnType<typeof setInterval> | null = null;
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-  const bettingClients = new Map<number, FastifyReply>();
-  const bettingReplayFrames: BettingFeedFrame[] = [];
-  let bettingReplayFramesTotalBytes = 0;
-  let bettingSequence = 0;
-  let lastSerializedBettingState = "";
-  let lastBettingBroadcastSeq = 0;
-  let bettingPushInterval: ReturnType<typeof setInterval> | null = null;
-  let bettingHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
-  let bettingSourceEpoch = Date.now();
-  let bettingSourceEpochInit: Promise<number> | null = null;
-  let bettingSourceEpochReady = false;
+  const bettingRoutes = registerStreamingBettingRoutes({
+    fastify,
+    world,
+    replayBuffer: STREAMING_SSE_REPLAY_BUFFER,
+    replayMaxBytes: STREAMING_SSE_REPLAY_MAX_BYTES,
+    pushIntervalMs: STREAMING_SSE_PUSH_INTERVAL_MS,
+    heartbeatMs: STREAMING_SSE_HEARTBEAT_MS,
+    maxPendingBytes: STREAMING_SSE_MAX_PENDING_BYTES,
+    maxClients: Math.max(
+      4,
+      Math.min(
+        128,
+        Number.parseInt(process.env.BETTING_SSE_MAX_CLIENTS || "32", 10),
+      ),
+    ),
+    bootstrapRateLimit: BETTING_BOOTSTRAP_RATE_LIMIT,
+    eventsRateLimit: BETTING_EVENTS_RATE_LIMIT,
+    internalAllowedOrigin:
+      process.env.INTERNAL_BET_SYNC_ALLOWED_ORIGIN?.trim() || null,
+    externalStatusFile: EXTERNAL_RTMP_STATUS_FILE || null,
+    externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+  });
 
   const formatSseEvent = (event: string, data: string, id?: number): string => {
     const normalizedData = data.replace(/\n/g, "\ndata: ");
@@ -481,29 +325,6 @@ export function registerStreamingRoutes(
           batches;
     if (durationMs >= 50) sseMetrics.fanoutOver50Ms += 1;
     if (durationMs >= 100) sseMetrics.fanoutOver100Ms += 1;
-  };
-
-  const trimReplayFrames = <T extends { payloadBytes: number }>(
-    frames: T[],
-    totalBytes: number,
-  ): number => {
-    let removeCount = 0;
-    let removedBytes = 0;
-    while (
-      frames.length - removeCount > STREAMING_SSE_REPLAY_BUFFER ||
-      totalBytes - removedBytes > STREAMING_SSE_REPLAY_MAX_BYTES
-    ) {
-      const frame = frames[removeCount];
-      if (!frame) break;
-      removedBytes += frame.payloadBytes;
-      removeCount += 1;
-    }
-
-    if (removeCount > 0) {
-      frames.splice(0, removeCount);
-    }
-
-    return Math.max(0, totalBytes - removedBytes);
   };
 
   const pushFrame = (event: string, frame: StreamingSseFrame): void => {
@@ -688,6 +509,10 @@ export function registerStreamingRoutes(
     replayFramesTotalBytes = trimReplayFrames(
       replayFrames,
       replayFramesTotalBytes,
+      {
+        maxFrames: STREAMING_SSE_REPLAY_BUFFER,
+        maxBytes: STREAMING_SSE_REPLAY_MAX_BYTES,
+      },
     );
 
     return frame;
@@ -729,302 +554,6 @@ export function registerStreamingRoutes(
     }, STREAMING_SSE_HEARTBEAT_MS);
   };
 
-  const clearBettingLoops = (): void => {
-    if (bettingPushInterval) {
-      clearInterval(bettingPushInterval);
-      bettingPushInterval = null;
-    }
-    if (bettingHeartbeatInterval) {
-      clearInterval(bettingHeartbeatInterval);
-      bettingHeartbeatInterval = null;
-    }
-  };
-
-  const removeBettingClient = (clientId: number): void => {
-    const clientReply = bettingClients.get(clientId);
-    if (!clientReply) return;
-
-    bettingClients.delete(clientId);
-    try {
-      if (!clientReply.raw.writableEnded) {
-        clientReply.raw.end();
-      }
-    } catch {
-      // ignore socket close errors
-    }
-
-    if (bettingClients.size === 0) {
-      clearBettingLoops();
-    }
-  };
-
-  type DatabaseSystemLike = Pick<DatabaseSystem, "getDb">;
-
-  const getDatabaseSystem = (): DatabaseSystemLike | null =>
-    (world.getSystem("database") as unknown as DatabaseSystemLike | null);
-
-  const persistBettingSourceEpoch = async (epoch: number): Promise<void> => {
-    const db = getDatabaseSystem()?.getDb?.();
-    if (!db) return;
-
-    const value = JSON.stringify({
-      sourceEpoch: epoch,
-      updatedAt: Date.now(),
-    });
-    try {
-      await db
-        .insert(storage)
-        .values({
-          key: BETTING_SOURCE_EPOCH_STORAGE_KEY,
-          value,
-          updatedAt: Date.now(),
-        })
-        .onConflictDoUpdate({
-          target: storage.key,
-          set: {
-            value,
-            updatedAt: Date.now(),
-          },
-        });
-    } catch {
-      // Best-effort durability only.
-    }
-  };
-
-  const ensureBettingSourceEpoch = async (): Promise<number> => {
-    if (bettingSourceEpochReady) {
-      return bettingSourceEpoch;
-    }
-    if (bettingSourceEpochInit) {
-      return bettingSourceEpochInit;
-    }
-
-    bettingSourceEpochInit = (async () => {
-      const db = getDatabaseSystem()?.getDb?.();
-      if (!db) {
-        return bettingSourceEpoch;
-      }
-
-      try {
-        const rows = await db
-          .select()
-          .from(storage)
-          .where(eq(storage.key, BETTING_SOURCE_EPOCH_STORAGE_KEY))
-          .limit(1);
-        const rawValue = rows[0]?.value ?? "";
-        let parsedEpoch = Number.parseInt(rawValue, 10);
-        if (!Number.isFinite(parsedEpoch)) {
-          try {
-            const parsed = JSON.parse(rawValue) as {
-              sourceEpoch?: number;
-              updatedAt?: number;
-            };
-            parsedEpoch = Number(parsed?.sourceEpoch);
-          } catch {
-            parsedEpoch = Number.NaN;
-          }
-        }
-
-        bettingSourceEpoch = Number.isFinite(parsedEpoch)
-          ? Math.max(parsedEpoch + 1, Date.now())
-          : Date.now();
-        await persistBettingSourceEpoch(bettingSourceEpoch);
-      } catch {
-        bettingSourceEpoch = Date.now();
-      }
-
-      bettingSourceEpochReady = true;
-
-      return bettingSourceEpoch;
-    })();
-
-    return bettingSourceEpochInit;
-  };
-
-  const captureBettingFrame = (
-    forceNewFrame = false,
-  ): BettingFeedFrame | null => {
-    const scheduler = getStreamingDuelScheduler();
-    const cycle = scheduler?.getCurrentCycle() ?? null;
-    const nextSeq = bettingSequence + 1;
-    const dedupePayload = buildBettingFeedPayload({
-      sourceEpoch: bettingSourceEpoch,
-      seq: nextSeq,
-      emittedAt: 0,
-      cycle,
-      rendererHealth: deriveBettingRendererHealth(cycle),
-    });
-    const serializedForDedup = JSON.stringify(dedupePayload);
-
-    if (
-      !forceNewFrame &&
-      serializedForDedup === lastSerializedBettingState &&
-      bettingReplayFrames.length > 0
-    ) {
-      return null;
-    }
-
-    const emittedAt = Date.now();
-    const payload = buildBettingFeedPayload({
-      sourceEpoch: bettingSourceEpoch,
-      seq: nextSeq,
-      emittedAt,
-      cycle,
-      rendererHealth: deriveBettingRendererHealth(cycle),
-    });
-    const serialized = JSON.stringify(payload);
-
-    lastSerializedBettingState = serializedForDedup;
-    bettingSequence = nextSeq;
-
-    const frame: BettingFeedFrame = {
-      seq: nextSeq,
-      emittedAt,
-      payload,
-      payloadBytes: Buffer.byteLength(serialized, "utf8"),
-    };
-
-    bettingReplayFrames.push(frame);
-    bettingReplayFramesTotalBytes += frame.payloadBytes;
-    bettingReplayFramesTotalBytes = trimReplayFrames(
-      bettingReplayFrames,
-      bettingReplayFramesTotalBytes,
-    );
-
-    return frame;
-  };
-
-  const startBettingLoopsIfNeeded = (): void => {
-    if (bettingPushInterval) return;
-
-    lastBettingBroadcastSeq =
-      bettingReplayFrames[bettingReplayFrames.length - 1]?.seq ?? 0;
-
-    bettingPushInterval = setInterval(() => {
-      const frame = captureBettingFrame(false);
-      if (!frame) return;
-
-      for (const [clientId, clientReply] of bettingClients.entries()) {
-        const status = writeSseEvent(
-          clientReply,
-          "betting",
-          JSON.stringify(frame.payload),
-          frame.seq,
-        );
-        if (status !== "ok") {
-          removeBettingClient(clientId);
-          continue;
-        }
-      }
-      lastBettingBroadcastSeq = frame.seq;
-    }, STREAMING_SSE_PUSH_INTERVAL_MS);
-
-    bettingHeartbeatInterval = setInterval(() => {
-      const heartbeatMessage = `:hb ${Date.now()}\n\n`;
-      for (const [clientId, clientReply] of bettingClients.entries()) {
-        const status = writeSseMessage(clientReply, heartbeatMessage);
-        if (status === "ok") {
-          continue;
-        }
-        removeBettingClient(clientId);
-      }
-    }, STREAMING_SSE_HEARTBEAT_MS);
-  };
-
-  const assertBettingAuth = async (
-    request: FastifyRequest,
-    reply: FastifyReply,
-    options?: { allowQueryToken?: boolean },
-  ): Promise<boolean> => {
-    const requiredToken = process.env.STREAMING_VIEWER_ACCESS_TOKEN?.trim();
-    if (!requiredToken) {
-      if (process.env.NODE_ENV === "production") {
-        reply.status(503).send({
-          error: "Service unavailable",
-          message: "Betting feed auth token is not configured",
-        });
-        return false;
-      }
-      return true;
-    }
-
-    const requestQuery = request.query as {
-      streamToken?: string;
-    };
-    const token = extractBettingFeedToken({
-      authorizationHeader: request.headers.authorization,
-      streamToken: requestQuery.streamToken?.trim() || null,
-      allowQueryToken: options?.allowQueryToken,
-    });
-
-    if (hasValidBettingFeedToken(requiredToken, token)) {
-      return true;
-    }
-
-    reply.status(401).send({
-      error: "Unauthorized",
-      message: "Missing or invalid betting feed token",
-    });
-    return false;
-  };
-
-  const buildBettingBootstrapResponse = (frame: BettingFeedFrame | null) => ({
-    ...(frame?.payload ??
-      buildBettingFeedPayload({
-        sourceEpoch: bettingSourceEpoch,
-        seq: bettingSequence,
-        emittedAt: Date.now(),
-        cycle: null,
-        rendererHealth: deriveBettingRendererHealth(null),
-      })),
-    schemaVersion: BETTING_FEED_SCHEMA_VERSION,
-    sourceEpoch: bettingSourceEpoch,
-    seq: frame?.seq ?? bettingSequence,
-    emittedAt: frame?.emittedAt ?? Date.now(),
-    replay: {
-      sourceEpoch: bettingSourceEpoch,
-      latestSeq: bettingReplayFrames[bettingReplayFrames.length - 1]?.seq ?? null,
-      oldestSeq: bettingReplayFrames[0]?.seq ?? null,
-      bufferedFrames: bettingReplayFrames.length,
-      bufferedBytes: bettingReplayFramesTotalBytes,
-      lastBroadcastSeq: lastBettingBroadcastSeq,
-    },
-  });
-
-  const bettingBootstrapAuthPreHandler = async (
-    request: FastifyRequest,
-    reply: FastifyReply,
-  ): Promise<void> => {
-    if (!(await assertBettingAuth(request, reply, { allowQueryToken: false }))) {
-      return reply;
-    }
-  };
-
-  const bettingEventsAuthPreHandler = async (
-    request: FastifyRequest,
-    reply: FastifyReply,
-  ): Promise<void> => {
-    if (!(await assertBettingAuth(request, reply, { allowQueryToken: true }))) {
-      return reply;
-    }
-  };
-
-  const bettingBootstrapPreHandlers =
-    typeof fastify.rateLimit === "function"
-      ? [
-          fastify.rateLimit(BETTING_BOOTSTRAP_RATE_LIMIT),
-          bettingBootstrapAuthPreHandler,
-        ]
-      : [bettingBootstrapAuthPreHandler];
-
-  const bettingEventsPreHandlers =
-    typeof fastify.rateLimit === "function"
-      ? [
-          fastify.rateLimit(BETTING_EVENTS_RATE_LIMIT),
-          bettingEventsAuthPreHandler,
-        ]
-      : [bettingEventsAuthPreHandler];
-
   fastify.addHook("onClose", (_instance, done) => {
     if (statePushInterval) {
       clearInterval(statePushInterval);
@@ -1034,13 +563,10 @@ export function registerStreamingRoutes(
       clearInterval(heartbeatInterval);
       heartbeatInterval = null;
     }
-    clearBettingLoops();
     for (const clientId of [...sseClients.keys()]) {
       removeSseClient(clientId, "shutdown");
     }
-    for (const clientId of [...bettingClients.keys()]) {
-      removeBettingClient(clientId);
-    }
+    bettingRoutes.close();
     done();
   });
 
@@ -1077,6 +603,7 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      const bettingMetrics = bettingRoutes.getMetrics();
       return reply.send({
         type: "STREAMING_METRICS",
         emittedAt: Date.now(),
@@ -1130,19 +657,10 @@ export function registerStreamingRoutes(
           },
         },
         betting: {
-          schemaVersion: BETTING_FEED_SCHEMA_VERSION,
-          sourceEpoch: bettingSourceEpoch,
-          clients: {
-            connected: bettingClients.size,
-          },
-          replay: {
-            size: bettingReplayFrames.length,
-            totalBytes: bettingReplayFramesTotalBytes,
-            oldestSeq: bettingReplayFrames[0]?.seq ?? null,
-            latestSeq:
-              bettingReplayFrames[bettingReplayFrames.length - 1]?.seq ?? null,
-            lastBroadcastSeq: lastBettingBroadcastSeq,
-          },
+          schemaVersion: bettingMetrics.schemaVersion,
+          sourceEpoch: bettingMetrics.sourceEpoch,
+          clients: bettingMetrics.clients,
+          replay: bettingMetrics.replay,
         },
       });
     },
@@ -1278,168 +796,6 @@ export function registerStreamingRoutes(
 
       startSseLoopsIfNeeded();
     },
-  );
-
-  const handleBettingBootstrap = async (
-    _request: FastifyRequest,
-    reply: FastifyReply,
-  ) => {
-    const scheduler = getStreamingDuelScheduler();
-    if (!scheduler) {
-      return reply.status(503).send({
-        error: "Streaming mode not active",
-        message: "The streaming duel scheduler is not running",
-      });
-    }
-
-    await ensureBettingSourceEpoch();
-    if (bettingReplayFrames.length === 0) {
-      captureBettingFrame(true);
-    }
-
-    return reply.send(
-      buildBettingBootstrapResponse(
-        bettingReplayFrames[bettingReplayFrames.length - 1] ?? null,
-      ),
-    );
-  };
-
-  const handleBettingEvents = async (
-    request: FastifyRequest<{ Querystring: { since?: string } }>,
-    reply: FastifyReply,
-  ) => {
-    const scheduler = getStreamingDuelScheduler();
-    if (!scheduler) {
-      return reply.status(503).send({
-        error: "Streaming mode not active",
-        message: "The streaming duel scheduler is not running",
-      });
-    }
-
-    await ensureBettingSourceEpoch();
-    if (bettingReplayFrames.length === 0) {
-      captureBettingFrame(true);
-    }
-
-    if (bettingClients.size >= BETTING_SSE_MAX_CLIENTS) {
-      return reply.status(503).send({
-        error: "Bet sync SSE capacity reached",
-        message: "Too many concurrent betting SSE clients",
-      });
-    }
-
-    const raw = reply.raw;
-    reply.hijack();
-
-    raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    raw.setHeader("Cache-Control", "no-cache, no-transform");
-    raw.setHeader("Connection", "keep-alive");
-    raw.setHeader("X-Accel-Buffering", "no");
-    if (INTERNAL_BET_SYNC_ALLOWED_ORIGIN) {
-      raw.setHeader(
-        "Access-Control-Allow-Origin",
-        INTERNAL_BET_SYNC_ALLOWED_ORIGIN,
-      );
-    }
-    raw.socket?.setNoDelay?.(true);
-    raw.socket?.setKeepAlive?.(true, STREAMING_SSE_HEARTBEAT_MS * 2);
-    raw.flushHeaders?.();
-    raw.write("retry: 2000\n\n");
-
-    const clientId = nextClientId++;
-    bettingClients.set(clientId, reply);
-
-    const headerLastEventId = request.headers["last-event-id"];
-    const normalizedHeaderId = Array.isArray(headerLastEventId)
-      ? headerLastEventId[0]
-      : headerLastEventId;
-    const querySince = Number.parseInt(request.query.since || "", 10);
-    const headerSince = Number.parseInt(normalizedHeaderId || "", 10);
-    const lastSeenSeq = Number.isFinite(querySince)
-      ? querySince
-      : Number.isFinite(headerSince)
-        ? headerSince
-        : 0;
-
-    const delivery = selectReplayDelivery(bettingReplayFrames, lastSeenSeq);
-    if (delivery.mode === "reset") {
-      const status = writeSseEvent(
-        reply,
-        "reset",
-        JSON.stringify(delivery.latestFrame.payload),
-        delivery.latestFrame.seq,
-      );
-      if (status !== "ok") {
-        removeBettingClient(clientId);
-        return;
-      }
-    } else if (delivery.frames.length > 0) {
-      for (const frame of delivery.frames) {
-        const status = writeSseEvent(
-          reply,
-          "betting",
-          JSON.stringify(frame.payload),
-          frame.seq,
-        );
-        if (status !== "ok") {
-          removeBettingClient(clientId);
-          return;
-        }
-      }
-    } else if (delivery.latestFrame) {
-      const status = writeSseEvent(
-        reply,
-        "betting",
-        JSON.stringify(delivery.latestFrame.payload),
-        delivery.latestFrame.seq,
-      );
-      if (status !== "ok") {
-        removeBettingClient(clientId);
-        return;
-      }
-    }
-
-    request.raw.on("close", () => {
-      removeBettingClient(clientId);
-    });
-
-    startBettingLoopsIfNeeded();
-  };
-
-  fastify.get(
-    "/api/streaming/betting/bootstrap",
-    {
-      preHandler: bettingBootstrapPreHandlers,
-    },
-    handleBettingBootstrap,
-  );
-
-  fastify.get(
-    "/api/internal/bet-sync/state",
-    {
-      preHandler: bettingBootstrapPreHandlers,
-    },
-    handleBettingBootstrap,
-  );
-
-  fastify.get<{
-    Querystring: { since?: string };
-  }>(
-    "/api/streaming/betting/events",
-    {
-      preHandler: bettingEventsPreHandlers,
-    },
-    handleBettingEvents,
-  );
-
-  fastify.get<{
-    Querystring: { since?: string };
-  }>(
-    "/api/internal/bet-sync/events",
-    {
-      preHandler: bettingEventsPreHandlers,
-    },
-    handleBettingEvents,
   );
 
   // Get enriched duel context (state + inventories + internal monologues)
@@ -1672,7 +1028,10 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const externalSnapshot = readExternalRtmpStatusSnapshot();
+      const externalSnapshot = readExternalRtmpStatusSnapshot(
+        EXTERNAL_RTMP_STATUS_FILE || null,
+        EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+      );
       if (externalSnapshot) {
         return reply.send(externalSnapshot);
       }
@@ -1703,6 +1062,10 @@ export function registerStreamingRoutes(
           },
           rendererHealth: deriveBettingRendererHealth(
             getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+            {
+              externalStatusFile: EXTERNAL_RTMP_STATUS_FILE || null,
+              externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            },
           ),
         });
       } catch {
@@ -1727,6 +1090,10 @@ export function registerStreamingRoutes(
           ...capture.getStats(),
           rendererHealth: deriveBettingRendererHealth(
             getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+            {
+              externalStatusFile: EXTERNAL_RTMP_STATUS_FILE || null,
+              externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            },
           ),
         });
       } catch {

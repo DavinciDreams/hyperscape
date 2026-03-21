@@ -15,7 +15,7 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import fs from 'fs'
-import os from 'os'
+import { resolveDockerBinary } from '../packages/server/src/infrastructure/docker/resolveDockerBinary.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.join(__dirname, '..')
@@ -44,29 +44,6 @@ function isDockerAvailable() {
   } catch {
     return false
   }
-}
-
-function resolveDockerBinary() {
-  const candidates = [
-    process.env.DOCKER_BIN,
-    '/usr/local/bin/docker',
-    '/opt/homebrew/bin/docker',
-    '/Applications/Docker.app/Contents/Resources/bin/docker',
-    `${os.homedir()}/.docker/bin/docker`,
-    'docker',
-  ].filter(Boolean)
-
-  for (const candidate of candidates) {
-    if (candidate === 'docker') return candidate
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK)
-      return candidate
-    } catch {
-      // keep searching
-    }
-  }
-
-  return 'docker'
 }
 
 function getDockerComposeCommand() {
