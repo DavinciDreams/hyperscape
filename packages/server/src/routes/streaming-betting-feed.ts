@@ -137,6 +137,12 @@ export function buildBettingFeedDedupKey(
   return JSON.stringify({
     ...payload,
     emittedAt: 0,
+    rendererHealth: payload.rendererHealth
+      ? {
+          ...payload.rendererHealth,
+          updatedAt: 0,
+        }
+      : null,
   });
 }
 

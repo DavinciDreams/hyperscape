@@ -186,7 +186,7 @@ describe("streaming-betting-feed", () => {
     });
   });
 
-  it("deduplicates independently of emittedAt", () => {
+  it("deduplicates independently of emittedAt and renderer health timestamps", () => {
     const basePayload = buildBettingFeedPayload({
       sourceEpoch: 42,
       seq: 7,
@@ -201,6 +201,12 @@ describe("streaming-betting-feed", () => {
     const laterPayload = {
       ...basePayload,
       emittedAt: 999_999,
+      rendererHealth: basePayload.rendererHealth
+        ? {
+            ...basePayload.rendererHealth,
+            updatedAt: 555_555,
+          }
+        : null,
     };
 
     expect(buildBettingFeedDedupKey(basePayload)).toBe(

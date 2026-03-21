@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { RateLimitOptions } from "@fastify/rate-limit";
@@ -28,6 +28,7 @@ import {
   extractBettingFeedToken,
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
+  shouldSkipBettingFeedAuth,
 } from "./streaming-betting-auth.js";
 import { trimReplayFrames } from "./streaming-sse-buffer.js";
 
@@ -65,6 +66,7 @@ type BettingRouteMetrics = {
 type SseSendStatus = "ok" | "closed" | "slow" | "error";
 
 type DatabaseSystemLike = Pick<DatabaseSystem, "getDb">;
+type ExternalRtmpStatusSnapshot = Record<string, unknown>;
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -116,16 +118,15 @@ function deriveCycleGuardrailReason(
   });
 }
 
-export function readExternalRtmpStatusSnapshot(
-  externalStatusFile: string | null,
+export function parseExternalRtmpStatusSnapshot(
+  raw: string,
   externalStatusMaxAgeMs: number,
   options?: { allowStale?: boolean },
-): Record<string, unknown> | null {
-  if (!externalStatusFile) return null;
+): ExternalRtmpStatusSnapshot | null {
   try {
-    const raw = fs.readFileSync(externalStatusFile, "utf8").trim();
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const normalized = raw.trim();
+    if (!normalized) return null;
+    const parsed = JSON.parse(normalized) as ExternalRtmpStatusSnapshot;
     if (!parsed || typeof parsed !== "object") return null;
     if (!Array.isArray(parsed.destinations)) return null;
     if (typeof parsed.stats !== "object" || parsed.stats == null) return null;
@@ -145,10 +146,28 @@ export function readExternalRtmpStatusSnapshot(
   }
 }
 
+export async function loadExternalRtmpStatusSnapshot(
+  externalStatusFile: string | null,
+  externalStatusMaxAgeMs: number,
+  options?: { allowStale?: boolean },
+): Promise<ExternalRtmpStatusSnapshot | null> {
+  if (!externalStatusFile) return null;
+  try {
+    const raw = await fs.readFile(externalStatusFile, "utf8");
+    return parseExternalRtmpStatusSnapshot(
+      raw,
+      externalStatusMaxAgeMs,
+      options,
+    );
+  } catch {
+    return null;
+  }
+}
+
 export function deriveBettingRendererHealth(
   cycle: StreamingDuelCycle | null,
   options?: {
-    externalStatusFile?: string | null;
+    externalStatusSnapshot?: ExternalRtmpStatusSnapshot | null;
     externalStatusMaxAgeMs?: number;
     nowMs?: number;
   },
@@ -163,11 +182,7 @@ export function deriveBettingRendererHealth(
     };
   }
 
-  const externalSnapshot = readExternalRtmpStatusSnapshot(
-    options?.externalStatusFile ?? null,
-    options?.externalStatusMaxAgeMs ?? 15_000,
-    { allowStale: true },
-  );
+  const externalSnapshot = options?.externalStatusSnapshot ?? null;
   const externalRendererHealth = normalizeRendererHealthSnapshot(
     externalSnapshot?.rendererHealth,
   );
@@ -260,9 +275,18 @@ export function registerStreamingBettingRoutes(
   } = options;
 
   const tokenResolution = resolveBettingFeedAccessToken(process.env);
+  const skipAuth = shouldSkipBettingFeedAuth(process.env);
   if (!tokenResolution.token && process.env.NODE_ENV === "production") {
     fastify.log.warn(
       "BETTING_FEED_ACCESS_TOKEN and STREAMING_VIEWER_ACCESS_TOKEN are unset in production; internal betting feed will fail closed",
+    );
+  } else if (!tokenResolution.token && skipAuth) {
+    fastify.log.warn(
+      "BETTING_FEED_SKIP_AUTH=true with no betting-feed token configured; internal betting feed auth bypass is enabled for non-production use only",
+    );
+  } else if (!tokenResolution.token) {
+    fastify.log.warn(
+      "BETTING_FEED_ACCESS_TOKEN and STREAMING_VIEWER_ACCESS_TOKEN are unset; internal betting feed will fail closed unless BETTING_FEED_SKIP_AUTH=true is set outside production",
     );
   } else if (tokenResolution.source === "viewer-fallback") {
     fastify.log.warn(
@@ -278,10 +302,13 @@ export function registerStreamingBettingRoutes(
   let lastBettingBroadcastSeq = 0;
   let bettingPushInterval: ReturnType<typeof setInterval> | null = null;
   let bettingHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  let externalStatusRefreshInterval: ReturnType<typeof setInterval> | null = null;
   let bettingSourceEpoch = Date.now();
   let bettingSourceEpochInit: Promise<number> | null = null;
   let bettingSourceEpochReady = false;
   let nextBettingClientId = 1;
+  let externalStatusSnapshot: ExternalRtmpStatusSnapshot | null = null;
+  let externalStatusRefreshPromise: Promise<void> | null = null;
 
   const writeSseMessage = (
     reply: FastifyReply,
@@ -309,6 +336,29 @@ export function registerStreamingBettingRoutes(
     data: string,
     id?: number,
   ): SseSendStatus => writeSseMessage(reply, formatSseEvent(event, data, id));
+
+  const refreshExternalStatusSnapshot = async (): Promise<void> => {
+    if (!externalStatusFile) {
+      externalStatusSnapshot = null;
+      return;
+    }
+    if (externalStatusRefreshPromise) {
+      return externalStatusRefreshPromise;
+    }
+    externalStatusRefreshPromise = (async () => {
+      const nextSnapshot = await loadExternalRtmpStatusSnapshot(
+        externalStatusFile,
+        externalStatusMaxAgeMs,
+        { allowStale: true },
+      );
+      if (nextSnapshot) {
+        externalStatusSnapshot = nextSnapshot;
+      }
+    })().finally(() => {
+      externalStatusRefreshPromise = null;
+    });
+    return externalStatusRefreshPromise;
+  };
 
   const clearBettingLoops = (): void => {
     if (bettingPushInterval) {
@@ -418,20 +468,39 @@ export function registerStreamingBettingRoutes(
     return bettingSourceEpochInit;
   };
 
+  const currentRendererHealthSnapshot = (
+    cycle: StreamingDuelCycle | null,
+    nowMs?: number,
+  ): BettingFeedRendererHealth =>
+    deriveBettingRendererHealth(cycle, {
+      externalStatusSnapshot,
+      externalStatusMaxAgeMs,
+      nowMs,
+    });
+
+  if (externalStatusFile && !externalStatusRefreshInterval) {
+    const refreshIntervalMs = Math.max(
+      1_000,
+      Math.min(externalStatusMaxAgeMs, 5_000),
+    );
+    void refreshExternalStatusSnapshot();
+    externalStatusRefreshInterval = setInterval(() => {
+      void refreshExternalStatusSnapshot();
+    }, refreshIntervalMs);
+  }
+
   const captureBettingFrame = (
     forceNewFrame = false,
   ): BettingFeedFrame | null => {
     const scheduler = getStreamingDuelScheduler();
     const cycle = scheduler?.getCurrentCycle() ?? null;
     const nextSeq = bettingSequence + 1;
-    const rendererHealth = deriveBettingRendererHealth(cycle, {
-      externalStatusFile,
-      externalStatusMaxAgeMs,
-    });
+    const emittedAt = Date.now();
+    const rendererHealth = currentRendererHealthSnapshot(cycle, emittedAt);
     const payload = buildBettingFeedPayload({
       sourceEpoch: bettingSourceEpoch,
       seq: nextSeq,
-      emittedAt: Date.now(),
+      emittedAt,
       cycle,
       rendererHealth,
     });
@@ -513,7 +582,7 @@ export function registerStreamingBettingRoutes(
   ): Promise<boolean> => {
     const requiredToken = resolveBettingFeedAccessToken(process.env).token;
     if (!requiredToken) {
-      if (process.env.NODE_ENV === "production") {
+      if (process.env.NODE_ENV === "production" || !skipAuth) {
         reply.status(503).send({
           error: "Service unavailable",
           message: "Betting feed auth token is not configured",
@@ -550,10 +619,7 @@ export function registerStreamingBettingRoutes(
       seq: bettingSequence,
       emittedAt: fallbackEmittedAt,
       cycle: null,
-      rendererHealth: deriveBettingRendererHealth(null, {
-        externalStatusFile,
-        externalStatusMaxAgeMs,
-      }),
+      rendererHealth: currentRendererHealthSnapshot(null, fallbackEmittedAt),
     });
 
     return {
@@ -706,16 +772,21 @@ export function registerStreamingBettingRoutes(
     startBettingLoopsIfNeeded();
   };
 
+  // Legacy compatibility alias. Canonical internal betting bootstrap route:
+  // /api/internal/bet-sync/state
   fastify.get("/api/streaming/betting/bootstrap", {
     config: { rateLimit: bootstrapRateLimit },
     preHandler: bettingBootstrapAuthPreHandler,
   }, handleBettingBootstrap);
 
+  // Canonical internal betting bootstrap route.
   fastify.get("/api/internal/bet-sync/state", {
     config: { rateLimit: bootstrapRateLimit },
     preHandler: bettingBootstrapAuthPreHandler,
   }, handleBettingBootstrap);
 
+  // Legacy compatibility alias. Canonical internal betting SSE route:
+  // /api/internal/bet-sync/events
   fastify.get<{
     Querystring: { since?: string };
   }>("/api/streaming/betting/events", {
@@ -723,6 +794,7 @@ export function registerStreamingBettingRoutes(
     preHandler: bettingEventsAuthPreHandler,
   }, handleBettingEvents);
 
+  // Canonical internal betting SSE route.
   fastify.get<{
     Querystring: { since?: string };
   }>("/api/internal/bet-sync/events", {
@@ -733,6 +805,10 @@ export function registerStreamingBettingRoutes(
   return {
     close(): void {
       clearBettingLoops();
+      if (externalStatusRefreshInterval) {
+        clearInterval(externalStatusRefreshInterval);
+        externalStatusRefreshInterval = null;
+      }
       for (const clientId of [...bettingClients.keys()]) {
         removeBettingClient(clientId);
       }

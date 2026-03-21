@@ -26,7 +26,7 @@ import {
 } from "../streaming/streaming-policy.js";
 import {
   deriveBettingRendererHealth,
-  readExternalRtmpStatusSnapshot,
+  loadExternalRtmpStatusSnapshot,
   registerStreamingBettingRoutes,
 } from "./streaming-betting-routes.js";
 import { trimReplayFrames } from "./streaming-sse-buffer.js";
@@ -1028,7 +1028,7 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const externalSnapshot = readExternalRtmpStatusSnapshot(
+      const externalSnapshot = await loadExternalRtmpStatusSnapshot(
         EXTERNAL_RTMP_STATUS_FILE || null,
         EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
       );
@@ -1063,7 +1063,7 @@ export function registerStreamingRoutes(
           rendererHealth: deriveBettingRendererHealth(
             getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
             {
-              externalStatusFile: EXTERNAL_RTMP_STATUS_FILE || null,
+              externalStatusSnapshot: externalSnapshot,
               externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
             },
           ),
@@ -1086,12 +1086,17 @@ export function registerStreamingRoutes(
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
         const capture = getStreamCapture();
+        const externalSnapshot = await loadExternalRtmpStatusSnapshot(
+          EXTERNAL_RTMP_STATUS_FILE || null,
+          EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+          { allowStale: true },
+        );
         return reply.send({
           ...capture.getStats(),
           rendererHealth: deriveBettingRendererHealth(
             getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
             {
-              externalStatusFile: EXTERNAL_RTMP_STATUS_FILE || null,
+              externalStatusSnapshot: externalSnapshot,
               externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
             },
           ),

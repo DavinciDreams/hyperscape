@@ -1,8 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { deriveBettingRendererHealth } from "../../../src/routes/streaming-betting-routes.js";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  deriveBettingRendererHealth,
+  loadExternalRtmpStatusSnapshot,
+} from "../../../src/routes/streaming-betting-routes.js";
 import type { StreamingDuelCycle } from "../../../src/systems/StreamingDuelScheduler/types.js";
 
 const { getStreamCaptureMock } = vi.hoisted(() => ({
@@ -90,6 +93,32 @@ describe("deriveBettingRendererHealth", () => {
     vi.restoreAllMocks();
   });
 
+  it("loads external RTMP snapshots asynchronously for cache refresh", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "betting-renderer-health-"));
+    const statusFile = join(tempDir, "status.json");
+    writeFileSync(
+      statusFile,
+      JSON.stringify({
+        destinations: [],
+        stats: {},
+        updatedAt: Date.now() - 1_000,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: Date.now() - 1_000,
+        },
+      }),
+    );
+
+    await expect(
+      loadExternalRtmpStatusSnapshot(statusFile, 15_000),
+    ).resolves.toMatchObject({
+      rendererHealth: {
+        ready: true,
+      },
+    });
+  });
+
   it("returns guardrail failures for invalid live duel agent state", () => {
     getStreamCaptureMock.mockReturnValue({
       getStats: () => ({
@@ -120,11 +149,8 @@ describe("deriveBettingRendererHealth", () => {
       }),
     });
 
-    tempDir = mkdtempSync(join(tmpdir(), "betting-renderer-health-"));
-    const statusFile = join(tempDir, "status.json");
-    writeFileSync(
-      statusFile,
-      JSON.stringify({
+    const health = deriveBettingRendererHealth(createCycle(), {
+      externalStatusSnapshot: {
         destinations: [],
         stats: {},
         updatedAt: Date.now() - 1_000,
@@ -133,11 +159,7 @@ describe("deriveBettingRendererHealth", () => {
           degradedReason: "loading_overlay_active",
           updatedAt: Date.now() - 1_000,
         },
-      }),
-    );
-
-    const health = deriveBettingRendererHealth(createCycle(), {
-      externalStatusFile: statusFile,
+      },
       externalStatusMaxAgeMs: 15_000,
     });
 
@@ -155,11 +177,8 @@ describe("deriveBettingRendererHealth", () => {
       }),
     });
 
-    tempDir = mkdtempSync(join(tmpdir(), "betting-renderer-health-"));
-    const statusFile = join(tempDir, "status.json");
-    writeFileSync(
-      statusFile,
-      JSON.stringify({
+    const health = deriveBettingRendererHealth(createCycle(), {
+      externalStatusSnapshot: {
         destinations: [],
         stats: {},
         updatedAt: Date.now() - 20_000,
@@ -168,11 +187,7 @@ describe("deriveBettingRendererHealth", () => {
           degradedReason: null,
           updatedAt: Date.now() - 20_000,
         },
-      }),
-    );
-
-    const health = deriveBettingRendererHealth(createCycle(), {
-      externalStatusFile: statusFile,
+      },
       externalStatusMaxAgeMs: 15_000,
     });
 

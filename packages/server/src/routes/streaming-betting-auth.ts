@@ -11,6 +11,15 @@ export type BettingFeedAccessTokenResolution = {
   source: "betting-feed" | "viewer-fallback" | null;
 };
 
+export function shouldSkipBettingFeedAuth(
+  env: Record<string, string | undefined>,
+): boolean {
+  return (
+    env.NODE_ENV !== "production" &&
+    (env.BETTING_FEED_SKIP_AUTH || "").trim().toLowerCase() === "true"
+  );
+}
+
 function digestToken(token: string): Buffer {
   return createHash("sha256").update(token, "utf8").digest();
 }
