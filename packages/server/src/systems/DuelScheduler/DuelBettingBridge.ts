@@ -167,7 +167,13 @@ export class DuelBettingBridge {
     });
 
     const onStreamingAnnouncement = (payload: unknown) => {
-      void this.handleStreamingAnnouncement(payload);
+      void this.handleStreamingAnnouncement(payload).catch((error) => {
+        Logger.error(
+          "DuelBettingBridge",
+          "Failed to handle streaming announcement",
+          error instanceof Error ? error : null,
+        );
+      });
     };
     this.world.on("streaming:announcement:start", onStreamingAnnouncement);
     this.eventListeners.push({
@@ -176,7 +182,13 @@ export class DuelBettingBridge {
     });
 
     const onStreamingFightStart = (payload: unknown) => {
-      void this.handleStreamingFightStart(payload);
+      void this.handleStreamingFightStart(payload).catch((error) => {
+        Logger.error(
+          "DuelBettingBridge",
+          "Failed to handle streaming fight start",
+          error instanceof Error ? error : null,
+        );
+      });
     };
     this.world.on("streaming:fight:start", onStreamingFightStart);
     this.eventListeners.push({
@@ -185,7 +197,13 @@ export class DuelBettingBridge {
     });
 
     const onStreamingResolution = (payload: unknown) => {
-      void this.handleStreamingResolution(payload);
+      void this.handleStreamingResolution(payload).catch((error) => {
+        Logger.error(
+          "DuelBettingBridge",
+          "Failed to handle streaming resolution",
+          error instanceof Error ? error : null,
+        );
+      });
     };
     this.world.on("streaming:resolution:start", onStreamingResolution);
     this.eventListeners.push({
@@ -194,7 +212,13 @@ export class DuelBettingBridge {
     });
 
     const onStreamingAbort = (payload: unknown) => {
-      void this.handleStreamingAbort(payload);
+      void this.handleStreamingAbort(payload).catch((error) => {
+        Logger.error(
+          "DuelBettingBridge",
+          "Failed to handle streaming abort",
+          error instanceof Error ? error : null,
+        );
+      });
     };
     this.world.on("streaming:cycle:aborted", onStreamingAbort);
     this.eventListeners.push({

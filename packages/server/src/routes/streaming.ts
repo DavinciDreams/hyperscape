@@ -9,6 +9,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import type { RateLimitOptions } from "@fastify/rate-limit";
 import type { World, StreamingGuardrailPhase } from "@hyperscape/shared";
 import {
   deriveStreamingGuardrailReason,
@@ -125,6 +126,14 @@ const EXTERNAL_RTMP_STATUS_MAX_AGE_MS = Math.max(
 );
 const INTERNAL_BET_SYNC_ALLOWED_ORIGIN =
   process.env.INTERNAL_BET_SYNC_ALLOWED_ORIGIN?.trim() || null;
+const BETTING_BOOTSTRAP_RATE_LIMIT: RateLimitOptions = {
+  max: 240,
+  timeWindow: "1 minute",
+};
+const BETTING_EVENTS_RATE_LIMIT: RateLimitOptions = {
+  max: 60,
+  timeWindow: "1 minute",
+};
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -837,8 +846,25 @@ export function registerStreamingRoutes(
   ): BettingFeedFrame | null => {
     const scheduler = getStreamingDuelScheduler();
     const cycle = scheduler?.getCurrentCycle() ?? null;
-    const emittedAt = Date.now();
     const nextSeq = bettingSequence + 1;
+    const dedupePayload = buildBettingFeedPayload({
+      sourceEpoch: bettingSourceEpoch,
+      seq: nextSeq,
+      emittedAt: 0,
+      cycle,
+      rendererHealth: deriveBettingRendererHealth(cycle),
+    });
+    const serializedForDedup = JSON.stringify(dedupePayload);
+
+    if (
+      !forceNewFrame &&
+      serializedForDedup === lastSerializedBettingState &&
+      bettingReplayFrames.length > 0
+    ) {
+      return null;
+    }
+
+    const emittedAt = Date.now();
     const payload = buildBettingFeedPayload({
       sourceEpoch: bettingSourceEpoch,
       seq: nextSeq,
@@ -848,15 +874,7 @@ export function registerStreamingRoutes(
     });
     const serialized = JSON.stringify(payload);
 
-    if (
-      !forceNewFrame &&
-      serialized === lastSerializedBettingState &&
-      bettingReplayFrames.length > 0
-    ) {
-      return null;
-    }
-
-    lastSerializedBettingState = serialized;
+    lastSerializedBettingState = serializedForDedup;
     bettingSequence = nextSeq;
 
     const frame: BettingFeedFrame = {
@@ -920,6 +938,13 @@ export function registerStreamingRoutes(
   ): Promise<boolean> => {
     const requiredToken = process.env.STREAMING_VIEWER_ACCESS_TOKEN?.trim();
     if (!requiredToken) {
+      if (process.env.NODE_ENV === "production") {
+        reply.status(503).send({
+          error: "Service unavailable",
+          message: "Betting feed auth token is not configured",
+        });
+        return false;
+      }
       return true;
     }
 
@@ -965,6 +990,40 @@ export function registerStreamingRoutes(
       lastBroadcastSeq: lastBettingBroadcastSeq,
     },
   });
+
+  const bettingBootstrapAuthPreHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    if (!(await assertBettingAuth(request, reply, { allowQueryToken: false }))) {
+      return reply;
+    }
+  };
+
+  const bettingEventsAuthPreHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    if (!(await assertBettingAuth(request, reply, { allowQueryToken: true }))) {
+      return reply;
+    }
+  };
+
+  const bettingBootstrapPreHandlers =
+    typeof fastify.rateLimit === "function"
+      ? [
+          fastify.rateLimit(BETTING_BOOTSTRAP_RATE_LIMIT),
+          bettingBootstrapAuthPreHandler,
+        ]
+      : [bettingBootstrapAuthPreHandler];
+
+  const bettingEventsPreHandlers =
+    typeof fastify.rateLimit === "function"
+      ? [
+          fastify.rateLimit(BETTING_EVENTS_RATE_LIMIT),
+          bettingEventsAuthPreHandler,
+        ]
+      : [bettingEventsAuthPreHandler];
 
   fastify.addHook("onClose", (_instance, done) => {
     if (statePushInterval) {
@@ -1222,13 +1281,9 @@ export function registerStreamingRoutes(
   );
 
   const handleBettingBootstrap = async (
-    request: FastifyRequest,
+    _request: FastifyRequest,
     reply: FastifyReply,
   ) => {
-    if (!(await assertBettingAuth(request, reply, { allowQueryToken: false }))) {
-      return;
-    }
-
     const scheduler = getStreamingDuelScheduler();
     if (!scheduler) {
       return reply.status(503).send({
@@ -1253,10 +1308,6 @@ export function registerStreamingRoutes(
     request: FastifyRequest<{ Querystring: { since?: string } }>,
     reply: FastifyReply,
   ) => {
-    if (!(await assertBettingAuth(request, reply, { allowQueryToken: true }))) {
-      return;
-    }
-
     const scheduler = getStreamingDuelScheduler();
     if (!scheduler) {
       return reply.status(503).send({
@@ -1358,12 +1409,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/betting/bootstrap",
     {
-      config: {
-        rateLimit: {
-          max: 240,
-          timeWindow: "1 minute",
-        },
-      },
+      preHandler: bettingBootstrapPreHandlers,
     },
     handleBettingBootstrap,
   );
@@ -1371,12 +1417,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/internal/bet-sync/state",
     {
-      config: {
-        rateLimit: {
-          max: 240,
-          timeWindow: "1 minute",
-        },
-      },
+      preHandler: bettingBootstrapPreHandlers,
     },
     handleBettingBootstrap,
   );
@@ -1386,12 +1427,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/betting/events",
     {
-      config: {
-        rateLimit: {
-          max: 60,
-          timeWindow: "1 minute",
-        },
-      },
+      preHandler: bettingEventsPreHandlers,
     },
     handleBettingEvents,
   );
@@ -1401,12 +1437,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/internal/bet-sync/events",
     {
-      config: {
-        rateLimit: {
-          max: 60,
-          timeWindow: "1 minute",
-        },
-      },
+      preHandler: bettingEventsPreHandlers,
     },
     handleBettingEvents,
   );

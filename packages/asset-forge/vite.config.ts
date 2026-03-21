@@ -54,11 +54,6 @@ export default defineConfig(({ mode }) => {
           __dirname,
           "../impostors/dist/index.js",
         ),
-        // The package's ESM entry imports a non-ESM MediaPipe bundle and fails under Rolldown.
-        "@tensorflow-models/hand-pose-detection": path.resolve(
-          __dirname,
-          "../../node_modules/.bun/@tensorflow-models+hand-pose-detection@2.0.1+22b7e0607138aecf/node_modules/@tensorflow-models/hand-pose-detection/dist/index.js",
-        ),
         // Procgen package aliases for terrain, vegetation, etc.
         // NOTE: More specific paths must come BEFORE less specific paths
         "@hyperscape/procgen/terrain": path.resolve(
