@@ -36,19 +36,8 @@ describe("streaming-betting-auth", () => {
   it("does not accept query tokens unless the route explicitly allows them", () => {
     expect(
       extractBettingFeedToken({
-        streamToken: "secret-token",
-        allowQueryToken: false,
       }),
     ).toBeNull();
-  });
-
-  it("accepts streamToken query params for SSE-style callers when allowed", () => {
-    expect(
-      extractBettingFeedToken({
-        streamToken: "secret-token",
-        allowQueryToken: true,
-      }),
-    ).toBe("secret-token");
   });
 
   it("prefers BETTING_FEED_ACCESS_TOKEN over the viewer token", () => {
@@ -82,16 +71,10 @@ describe("streaming-betting-auth", () => {
     });
   });
 
-  it("allows skip-auth only in development and test", () => {
+  it("allows skip-auth only in development", () => {
     expect(
       shouldSkipBettingFeedAuth({
         NODE_ENV: "development",
-        BETTING_FEED_SKIP_AUTH: "true",
-      }),
-    ).toBe(true);
-    expect(
-      shouldSkipBettingFeedAuth({
-        NODE_ENV: "test",
         BETTING_FEED_SKIP_AUTH: "true",
       }),
     ).toBe(true);

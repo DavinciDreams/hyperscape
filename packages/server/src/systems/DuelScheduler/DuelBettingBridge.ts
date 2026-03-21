@@ -864,7 +864,14 @@ export class DuelBettingBridge {
     const remainingMs = Math.max(0, params.bettingClosesAt - Date.now());
     const lockTimer = setTimeout(() => {
       this.pendingTimeouts.delete(lockTimer);
-      void this.lockMarket(params.duelId);
+      void this.lockMarket(params.duelId).catch((error) => {
+        Logger.error(
+          "DuelBettingBridge",
+          "Unexpected error in scheduled market lock",
+          error instanceof Error ? error : null,
+          { duelId: params.duelId },
+        );
+      });
     }, remainingMs);
     this.pendingTimeouts.add(lockTimer);
   }

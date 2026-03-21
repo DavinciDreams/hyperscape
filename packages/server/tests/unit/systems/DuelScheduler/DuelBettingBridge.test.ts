@@ -168,6 +168,32 @@ describe("DuelBettingBridge streaming reconciliation", () => {
     expect(bridge.getMarket("duel-123")?.onChainInitialized).toBe(true);
   });
 
+  it("logs unexpected scheduled lock failures", async () => {
+    const errorSpy = vi.spyOn(Logger, "error").mockImplementation(() => {});
+    vi.spyOn(bridgeHarness, "lockMarket").mockRejectedValue(new Error("boom"));
+
+    await bridgeHarness.createOrSyncMarket({
+      duelId: "duel-123",
+      duelKeyHex:
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      agent1Id: "agent-a",
+      agent2Id: "agent-b",
+      agent1Name: "Agent A",
+      agent2Name: "Agent B",
+      bettingClosesAt: Date.now() + 1_000,
+      source: "streaming",
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "DuelBettingBridge",
+      "Unexpected error in scheduled market lock",
+      expect.any(Error),
+      { duelId: "duel-123" },
+    );
+  });
+
   it("locks and resolves a market when the live duel advances phases", async () => {
     await bridgeHarness.handleStreamingAnnouncement({
       duelId: "duel-123",

@@ -2,8 +2,6 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 type BettingFeedTokenParams = {
   authorizationHeader?: string | string[];
-  streamToken?: string | null;
-  allowQueryToken?: boolean;
 };
 
 export type BettingFeedAccessTokenResolution = {
@@ -15,7 +13,7 @@ export function shouldSkipBettingFeedAuth(
   env: Record<string, string | undefined>,
 ): boolean {
   return (
-    (env.NODE_ENV === "development" || env.NODE_ENV === "test") &&
+    env.NODE_ENV === "development" &&
     (env.BETTING_FEED_SKIP_AUTH || "").trim().toLowerCase() === "true"
   );
 }
@@ -37,12 +35,7 @@ export function extractBettingFeedToken(
   if (headerToken) {
     return headerToken;
   }
-
-  if (!params.allowQueryToken) {
-    return null;
-  }
-
-  return params.streamToken?.trim() || null;
+  return null;
 }
 
 export function hasValidBettingFeedToken(

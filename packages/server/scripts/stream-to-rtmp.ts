@@ -53,6 +53,13 @@ import {
   generateCaptureScript,
   generateWebCodecsCaptureScript,
 } from "../src/streaming/index.js";
+import {
+  buildDefaultCaptureLaunchArgs,
+  resolveAllowedCaptureOrigins,
+  resolveUnexpectedCaptureOrigin,
+  shouldAcceptCaptureReadiness,
+  type CaptureRendererHealthSnapshot,
+} from "../src/streaming/captureBrowserPolicy.js";
 import { redactStreamingSecretsFromUrl } from "../src/streaming/redactStreamingUrl.js";
 import { errMsg } from "../src/shared/errMsg.ts";
 import { getStreamLeakDiagnostics } from "../src/streaming/stream-leak-diagnostics.js";
@@ -91,6 +98,9 @@ function withViewerAccessToken(rawUrl: string): string {
 
 const GAME_URL_CANDIDATES = Array.from(
   new Set([GAME_URL, ...GAME_FALLBACK_URLS].map(withViewerAccessToken)),
+);
+const ALLOWED_CAPTURE_ORIGINS = resolveAllowedCaptureOrigins(
+  GAME_URL_CANDIDATES,
 );
 
 const BRIDGE_PORT = parseInt(process.env.RTMP_BRIDGE_PORT || "8765", 10);
@@ -216,17 +226,9 @@ function stopFpsTracking() {
 
 type ActiveCaptureMode = "cdp" | "webcodecs" | "mediarecorder";
 
-type RendererHealthSnapshot = {
-  ready: boolean;
-  degradedReason: string | null;
+type RendererHealthSnapshot = CaptureRendererHealthSnapshot & {
   updatedAt: number | null;
   phase: string | null;
-  diagnostics: {
-    hasCanvas: boolean;
-    hasStreamingBootUi: boolean;
-    hasCriticalErrorUi: boolean;
-    readyFlag: boolean;
-  } | null;
 };
 
 let latestRendererHealth: RendererHealthSnapshot = {
@@ -237,6 +239,7 @@ let latestRendererHealth: RendererHealthSnapshot = {
   diagnostics: null,
 };
 let rendererHealthProbeInFlight: Promise<RendererHealthSnapshot> | null = null;
+let captureNavigationAbortInFlight = false;
 
 function writeExternalStatusSnapshot(
   bridge: ReturnType<typeof getRTMPBridge>,
@@ -480,6 +483,35 @@ function normalizedCriticalErrorReason(probe: {
   return probe.hasCriticalErrorUi ? "initialization_failed" : "canvas_missing";
 }
 
+function assertAllowedCaptureNavigation(rawUrl: string): void {
+  const unexpectedOrigin = resolveUnexpectedCaptureOrigin(
+    rawUrl,
+    ALLOWED_CAPTURE_ORIGINS,
+  );
+  if (!unexpectedOrigin) {
+    return;
+  }
+
+  throw new Error(
+    `Capture browser navigated outside the allowed origin set (${ALLOWED_CAPTURE_ORIGINS.join(", ")}): ${unexpectedOrigin}`,
+  );
+}
+
+async function abortCaptureForUnexpectedNavigation(rawUrl: string): Promise<void> {
+  if (captureNavigationAbortInFlight) {
+    return;
+  }
+  captureNavigationAbortInFlight = true;
+  console.error(
+    `[Main] Refusing to capture unexpected navigation target ${redactStreamingSecretsFromUrl(rawUrl)}. Allowed origins: ${ALLOWED_CAPTURE_ORIGINS.join(", ")}`,
+  );
+  try {
+    await cleanup();
+  } finally {
+    process.exit(1);
+  }
+}
+
 async function refreshRendererHealthSnapshot(
   pageRef: Page | null,
 ): Promise<RendererHealthSnapshot> {
@@ -527,23 +559,13 @@ async function waitForStreamReadiness(
 
   while (Date.now() < deadline) {
     try {
-      const probe = await probeRendererHealth(pageRef);
-      latestRendererHealth = probe;
-
-      if (probe.ready) {
-        return true;
-      }
-
-      // Allow capture once we have a canvas and the stream boot/loading UI has
-      // cleared (the old gate accepted any canvas, which could lock us at 3%).
-      if (probe.diagnostics?.hasCanvas && !probe.diagnostics?.hasStreamingBootUi) {
-        return true;
-      }
-
-      // Hard fallback after sustained boot-screen presence to avoid deadlock.
+      const probe = await refreshRendererHealthSnapshot(pageRef);
       if (
-        probe.diagnostics?.hasStreamingBootUi &&
-        Date.now() - startedAt >= 180_000
+        shouldAcceptCaptureReadiness({
+          snapshot: probe,
+          startedAt,
+          nowMs: Date.now(),
+        })
       ) {
         return true;
       }
@@ -565,28 +587,10 @@ async function launchCaptureBrowser() {
   const featureFlags = "--enable-features=Vulkan,UseSkiaRenderer,WebGPU";
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,
-    args: [
-      // GPU / WebGPU essentials
-      "--use-gl=angle",
-      `--use-angle=${ANGLE_BACKEND}`,
-      "--enable-webgl",
-      "--enable-unsafe-webgpu",
+    args: buildDefaultCaptureLaunchArgs({
+      angleBackend: ANGLE_BACKEND,
       featureFlags,
-      "--ignore-gpu-blocklist",
-      "--enable-gpu-rasterization",
-      // Sandbox & stability
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      // Capture-only tradeoff: the browser runs a trusted local page and does
-      // not act as a general-purpose browser session.
-      "--disable-web-security",
-      "--autoplay-policy=no-user-gesture-required",
-      // Prevent Chromium from throttling rendering/timers
-      "--disable-background-timer-throttling",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-renderer-backgrounding",
-      "--disable-hang-monitor",
-    ],
+    }),
   };
 
   if (STREAM_CAPTURE_CHANNEL) {
@@ -703,6 +707,24 @@ async function setupBrowser() {
     }
   });
 
+  page.on("framenavigated", (frame) => {
+    if (frame !== page?.mainFrame()) {
+      return;
+    }
+    const navigatedUrl = frame.url();
+    if (!navigatedUrl || navigatedUrl === "about:blank") {
+      return;
+    }
+    const unexpectedOrigin = resolveUnexpectedCaptureOrigin(
+      navigatedUrl,
+      ALLOWED_CAPTURE_ORIGINS,
+    );
+    if (!unexpectedOrigin) {
+      return;
+    }
+    void abortCaptureForUnexpectedNavigation(navigatedUrl);
+  });
+
   if (!selectedGameUrl) {
     for (const candidateUrl of GAME_URL_CANDIDATES) {
       const redactedCandidateUrl = redactStreamingSecretsFromUrl(candidateUrl);
@@ -712,6 +734,7 @@ async function setupBrowser() {
           timeout: 120_000,
           waitUntil: "domcontentloaded",
         });
+        assertAllowedCaptureNavigation(page.url());
       } catch (err) {
         console.warn(`[Main] Failed to load ${redactedCandidateUrl}:`, err);
         continue;
@@ -744,6 +767,7 @@ async function setupBrowser() {
         timeout: 120_000,
         waitUntil: "domcontentloaded",
       });
+      assertAllowedCaptureNavigation(page.url());
     } catch (err) {
       console.error(
         `[Main] Failed to reload configured URL ${redactStreamingSecretsFromUrl(selectedGameUrl)}`,

@@ -198,7 +198,14 @@ export function GameClient({
 }: GameClientProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const uiRef = useRef<HTMLDivElement>(null);
+  const initialWsUrlRef = useRef(wsUrl);
+  const initialStreamingModeRef = useRef(streamingMode);
+  const onSetupRef = useRef(onSetup);
+  const onInitErrorRef = useRef(onInitError);
   const [initError, setInitError] = useState<string | null>(null);
+
+  onSetupRef.current = onSetup;
+  onInitErrorRef.current = onInitError;
 
   // Detect HMR and force full page reload instead of hot reload
   useEffect(() => {
@@ -339,7 +346,7 @@ export function GameClient({
       }
 
       const baseEnvironment = {
-        ...(streamingMode
+        ...(initialStreamingModeRef.current
           ? {}
           : {
               bg: "asset://world/day2-2k.jpg",
@@ -357,7 +364,8 @@ export function GameClient({
       // Default to game server on 5555, CDN on 8080
       const runtimeEnv = await loadRuntimeEnv();
       const runtimeWsUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_WS_URL);
-      const finalWsUrl = wsUrl || runtimeWsUrl || GAME_WS_URL;
+      const finalWsUrl =
+        initialWsUrlRef.current || runtimeWsUrl || GAME_WS_URL;
       const runtimeCdnUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_CDN_URL);
       const buildCdnUrl = normalizeEnvValue(CDN_URL);
       const resolvedCdnUrl = resolveCdnUrlForClient(runtimeCdnUrl, buildCdnUrl);
@@ -377,8 +385,8 @@ export function GameClient({
       };
 
       // Call onSetup if provided
-      if (onSetup) {
-        onSetup(world, config);
+      if (onSetupRef.current) {
+        onSetupRef.current(world, config);
       }
 
       // Ensure RPG systems are registered before initializing the world
@@ -386,7 +394,7 @@ export function GameClient({
 
       try {
         await world.init(config);
-        onInitError?.(null);
+        onInitErrorRef.current?.(null);
       } catch (error) {
         const message =
           error instanceof Error
@@ -405,7 +413,7 @@ export function GameClient({
           updatedAt: Date.now(),
           phase: null,
         };
-        onInitError?.(message);
+        onInitErrorRef.current?.(message);
         setInitError(message);
       }
 
@@ -436,7 +444,7 @@ export function GameClient({
         }
       }
     };
-  }, [hideUI, onInitError, onSetup, streamingMode, world, wsUrl]);
+  }, [world]);
 
   // Show full-screen error for critical initialization failures (WebGPU, etc.)
   if (initError) {

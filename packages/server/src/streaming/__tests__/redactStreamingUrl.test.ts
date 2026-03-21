@@ -17,4 +17,13 @@ describe("redactStreamingSecretsFromUrl", () => {
       ),
     ).toBe("https://example.com/stream?page=1#mode=stream");
   });
+
+  it("removes dangling separators when the raw URL is malformed", () => {
+    expect(
+      redactStreamingSecretsFromUrl("/stream?streamToken=query-secret"),
+    ).toBe("/stream");
+    expect(
+      redactStreamingSecretsFromUrl("/stream#streamToken=hash-secret"),
+    ).toBe("/stream");
+  });
 });

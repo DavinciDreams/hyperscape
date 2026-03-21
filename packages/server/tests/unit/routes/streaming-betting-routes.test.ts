@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  allocateNextBettingClientId,
   normalizeInternalAllowedOrigin,
   parseReplayCursor,
   registerStreamingBettingRoutes,
@@ -101,7 +102,10 @@ describe("streaming-betting-routes", () => {
 
     const response = await options.fastify.inject({
       method: "GET",
-      url: "/api/internal/bet-sync/events?streamToken=bet-secret",
+      url: "/api/internal/bet-sync/events",
+      headers: {
+        authorization: "Bearer bet-secret",
+      },
     });
 
     expect(response.statusCode).toBe(503);
@@ -147,6 +151,24 @@ describe("streaming-betting-routes", () => {
     });
 
     expect(response.statusCode).toBe(200);
+    routes.close();
+    await options.fastify.close();
+  });
+
+  it("ignores skip-auth in test environments", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "");
+    vi.stubEnv("BETTING_FEED_SKIP_AUTH", "true");
+
+    const options = createRouteOptions();
+    const routes = registerStreamingBettingRoutes(options);
+
+    const response = await options.fastify.inject({
+      method: "GET",
+      url: "/api/internal/bet-sync/state",
+    });
+
+    expect(response.statusCode).toBe(503);
     routes.close();
     await options.fastify.close();
   });
@@ -215,6 +237,20 @@ describe("streaming-betting-routes", () => {
     expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("releases the external status poller when Fastify closes even without manual route cleanup", async () => {
+    vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+
+    const options = createRouteOptions({
+      externalStatusFile: "/tmp/nonexistent-betting-status.json",
+    });
+
+    registerStreamingBettingRoutes(options);
+    await options.fastify.close();
+
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts only one explicit internal betting CORS origin", () => {
     expect(
       normalizeInternalAllowedOrigin("https://bets.example.com"),
@@ -242,5 +278,38 @@ describe("streaming-betting-routes", () => {
     } as never;
 
     expect(parseReplayCursor(request)).toBe(55);
+  });
+
+  it("rejects query-token auth on the events route", async () => {
+    vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
+
+    const options = createRouteOptions();
+    const routes = registerStreamingBettingRoutes(options);
+
+    const response = await options.fastify.inject({
+      method: "GET",
+      url: "/api/internal/bet-sync/events?streamToken=bet-secret",
+    });
+
+    expect(response.statusCode).toBe(401);
+    routes.close();
+    await options.fastify.close();
+  });
+
+  it("allocates betting client ids without colliding after wraparound", () => {
+    const allocation = allocateNextBettingClientId(Number.MAX_SAFE_INTEGER - 1, [
+      1,
+    ]);
+
+    expect(allocation).toEqual({
+      clientId: Number.MAX_SAFE_INTEGER - 1,
+      nextCursor: 1,
+    });
+
+    const wrapped = allocateNextBettingClientId(allocation.nextCursor, [1, 2]);
+    expect(wrapped).toEqual({
+      clientId: 3,
+      nextCursor: 4,
+    });
   });
 });

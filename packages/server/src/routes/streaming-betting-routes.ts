@@ -79,6 +79,11 @@ type ExternalStatusPoller = {
   refCount: number;
 };
 
+type BettingClientIdAllocation = {
+  clientId: number;
+  nextCursor: number;
+};
+
 const externalStatusPollers = new Map<string, ExternalStatusPoller>();
 
 function asFiniteNumber(value: unknown): number | null {
@@ -393,6 +398,33 @@ export function parseReplayCursor(
       : 0;
 }
 
+export function allocateNextBettingClientId(
+  nextCursor: number,
+  activeClientIds: Iterable<number>,
+): BettingClientIdAllocation {
+  const activeIds = new Set(activeClientIds);
+  const maxClientId = Number.MAX_SAFE_INTEGER - 1;
+  let clientId = nextCursor;
+  let wrapped = false;
+
+  while (activeIds.has(clientId)) {
+    clientId += 1;
+    if (clientId > maxClientId) {
+      clientId = 1;
+      wrapped = true;
+    }
+    if (wrapped && clientId === nextCursor) {
+      throw new Error("No betting SSE client ids available");
+    }
+  }
+
+  const nextId = clientId >= maxClientId ? 1 : clientId + 1;
+  return {
+    clientId,
+    nextCursor: nextId,
+  };
+}
+
 export function registerStreamingBettingRoutes(
   options: RegisterStreamingBettingRoutesOptions,
 ): {
@@ -435,7 +467,7 @@ export function registerStreamingBettingRoutes(
     );
   } else if (!tokenResolution.token && skipAuth) {
     fastify.log.warn(
-      "BETTING_FEED_SKIP_AUTH=true with no betting-feed token configured; internal betting feed auth bypass is enabled for development/test use only",
+      "BETTING_FEED_SKIP_AUTH=true with no betting-feed token configured; internal betting feed auth bypass is enabled for development use only",
     );
   } else if (!tokenResolution.token && viewerTokenConfigured) {
     fastify.log.warn(
@@ -443,7 +475,7 @@ export function registerStreamingBettingRoutes(
     );
   } else if (!tokenResolution.token) {
     fastify.log.warn(
-      "BETTING_FEED_ACCESS_TOKEN is unset; internal betting feed will fail closed unless BETTING_FEED_SKIP_AUTH=true is set in development/test",
+      "BETTING_FEED_ACCESS_TOKEN is unset; internal betting feed will fail closed unless BETTING_FEED_SKIP_AUTH=true is set in development",
     );
   } else if (viewerTokenConfigured) {
     fastify.log.info(
@@ -471,6 +503,7 @@ export function registerStreamingBettingRoutes(
   let bettingSourceEpochInit: Promise<number> | null = null;
   let bettingSourceEpochReady = false;
   let nextBettingClientId = 1;
+  let closed = false;
 
   const writeSseMessage = (
     reply: FastifyReply,
@@ -507,6 +540,18 @@ export function registerStreamingBettingRoutes(
     if (bettingHeartbeatInterval) {
       clearInterval(bettingHeartbeatInterval);
       bettingHeartbeatInterval = null;
+    }
+  };
+
+  const closeRoutes = (): void => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    clearBettingLoops();
+    externalStatusPoller?.release();
+    for (const clientId of [...bettingClients.keys()]) {
+      removeBettingClient(clientId);
     }
   };
 
@@ -709,7 +754,6 @@ export function registerStreamingBettingRoutes(
   const assertBettingAuth = async (
     request: FastifyRequest,
     reply: FastifyReply,
-    authOptions?: { allowQueryToken?: boolean },
   ): Promise<boolean> => {
     const requiredToken = resolveBettingFeedAccessToken(process.env).token;
     if (!requiredToken) {
@@ -723,14 +767,8 @@ export function registerStreamingBettingRoutes(
       return true;
     }
 
-    const requestQuery = request.query as { streamToken?: string };
     const token = extractBettingFeedToken({
       authorizationHeader: request.headers.authorization,
-      streamToken: requestQuery.streamToken?.trim() || null,
-      // EventSource cannot set Authorization headers, so the query-token path
-      // is retained only for the long-lived SSE event stream. Production
-      // access logs and reverse proxies must redact streamToken from URLs.
-      allowQueryToken: authOptions?.allowQueryToken,
     });
 
     if (hasValidBettingFeedToken(requiredToken, token)) {
@@ -776,7 +814,7 @@ export function registerStreamingBettingRoutes(
     request: FastifyRequest,
     reply: FastifyReply,
   ): Promise<void> => {
-    if (!(await assertBettingAuth(request, reply, { allowQueryToken: false }))) {
+    if (!(await assertBettingAuth(request, reply))) {
       return;
     }
   };
@@ -785,7 +823,7 @@ export function registerStreamingBettingRoutes(
     request: FastifyRequest,
     reply: FastifyReply,
   ): Promise<void> => {
-    if (!(await assertBettingAuth(request, reply, { allowQueryToken: true }))) {
+    if (!(await assertBettingAuth(request, reply))) {
       return;
     }
   };
@@ -853,7 +891,12 @@ export function registerStreamingBettingRoutes(
     raw.flushHeaders?.();
     raw.write("retry: 2000\n\n");
 
-    const clientId = nextBettingClientId++;
+    const allocation = allocateNextBettingClientId(
+      nextBettingClientId,
+      bettingClients.keys(),
+    );
+    nextBettingClientId = allocation.nextCursor;
+    const clientId = allocation.clientId;
     bettingClients.set(clientId, reply);
 
     const delivery = selectReplayDelivery(
@@ -934,13 +977,13 @@ export function registerStreamingBettingRoutes(
     preHandler: bettingEventsAuthPreHandler,
   }, handleBettingEvents);
 
+  fastify.addHook("onClose", async () => {
+    closeRoutes();
+  });
+
   return {
     close(): void {
-      clearBettingLoops();
-      externalStatusPoller?.release();
-      for (const clientId of [...bettingClients.keys()]) {
-        removeBettingClient(clientId);
-      }
+      closeRoutes();
     },
     getMetrics(): BettingRouteMetrics {
       return {
