@@ -531,11 +531,9 @@ export class SkySystem extends System {
   private createSkyDome(): void {
     if (!this.group) return;
 
-    // Use high segment count to prevent color banding
-    // Sky sphere sized to fit within camera far plane (600)
-    // Sky follows camera so this creates infinite sky illusion
-    // Sky sphere must fit inside camera far plane (600) - use 500
-    const skyGeom = new THREE.SphereGeometry(500, 128, 64);
+    // High segment count prevents color banding. Large radius ensures the
+    // water reflection camera (mirrored below water level) stays inside the dome.
+    const skyGeom = new THREE.SphereGeometry(5000, 128, 64);
 
     // Create TSL uniforms
     const uTime = uniform(float(0));

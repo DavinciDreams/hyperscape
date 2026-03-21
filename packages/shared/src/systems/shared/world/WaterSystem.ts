@@ -10,6 +10,7 @@ import THREE, {
   texture,
   positionWorld,
   positionLocal,
+  reflector,
   screenUV,
   cameraPosition,
   uniform,
@@ -36,7 +37,6 @@ import THREE, {
   attribute,
   exp,
   length,
-  reflector,
   viewportDepthTexture,
   linearDepth,
   cameraNear,
@@ -68,10 +68,14 @@ const WATER = {
   // Reflection
   REFLECTION_INTENSITY: 0.4, // Planar reflection strength (fresnel-weighted)
 
-  // Colour / absorption (Beer-Lambert)
+  // Depth-based colour: pow(saturate(1 - depth/scale), falloff)
   SHALLOW_COLOR: { r: 0.15, g: 0.42, b: 0.48 }, // Colour near shore
-  DEEP_COLOR: { r: 0.02, g: 0.08, b: 0.12 }, // Colour far from shore
-  ABSORPTION: { r: 0.45, g: 0.09, b: 0.06 }, // Per-channel absorption rate
+  DEEP_COLOR: { r: 0.12, g: 0.28, b: 0.38 }, // Colour far from shore (brighter than before)
+  COLOR_DEPTH_SCALE: 50, // Depth scale for colour gradient (metres)
+  COLOR_DEPTH_FALLOFF: 3, // Power exponent for colour depth curve
+  COLOR_DIST_FADE: 200, // Camera distance where depth colour effect fades out (metres)
+  // Ocean/general absorption (still used by ocean material and depth clamping)
+  ABSORPTION: { r: 0.45, g: 0.09, b: 0.06 }, // Per-channel absorption rate (ocean)
   MAX_DEPTH: 30, // Clamp depth for absorption calc (metres)
 
   // Subsurface scattering
@@ -95,16 +99,13 @@ const WATER = {
   // Detail normals blending
   DETAIL_NORMAL_STRENGTH: 0.5, // Detail normal contribution to final normal
 
-  // Opacity (portfolio-style: op = 1 - pow(saturate(1 - depth/scale), falloff))
+  // Opacity: op = 1 - pow(saturate(1 - depth/scale), falloff)
   EDGE_FADE_DISTANCE: 0.4, // Shoreline edge transparency ramp (metres)
-  OP_DEPTH_SCALE: 3.0, // Depth scale for opacity curve (metres)
-  OP_DEPTH_FALLOFF: 15.0, // Power exponent — higher = sharper opaque transition
+  OP_DEPTH_SCALE: 15.0, // Depth scale for opacity curve (metres)
+  OP_DEPTH_FALLOFF: 3.0, // Power exponent for opacity depth curve
   FRESNEL_OPACITY_MIN: 0.85, // Fresnel opacity at normal incidence
   FRESNEL_OPACITY_MAX: 1.0, // Fresnel opacity at glancing angles
   FRESNEL_OPACITY_POWER: 3, // Fresnel opacity falloff exponent
-
-  // Distance fade — reflection fades out beyond this range
-  REFLECTION_FADE_DISTANCE: 500.0, // Reflection fully gone at this distance (metres)
 
   // Vertex wave damping
   WAVE_DAMP_DISTANCE: 6, // Waves fully active beyond this shore distance (metres)
@@ -125,9 +126,6 @@ const WATER_LOD = {
   HIGH_DISTANCE: 100, // Distance threshold for high->medium LOD
   MEDIUM_DISTANCE: 200, // Distance threshold for medium->low LOD
 };
-
-// Maximum distance for reflection camera to be active (only for lakes within this range)
-const REFLECTION_MAX_DISTANCE = 200;
 
 type WaveParams = {
   w: number;
@@ -185,12 +183,6 @@ export type WaterUniforms = {
   reflectionIntensity: UniformFloat;
 };
 
-// Reflector node type from TSL
-type ReflectorNode = ReturnType<typeof reflector> & {
-  target: THREE.Object3D;
-  uvNode: ReturnType<typeof vec2>;
-};
-
 /**
  * Water body type - determines shader and visual characteristics
  * - lake: Inland water bodies with planar reflections (when enabled)
@@ -213,17 +205,11 @@ export class WaterSystem {
   private normalTex2?: THREE.Texture;
   private foamTex?: THREE.Texture;
 
-  // Planar reflection using TSL reflector
-  private reflection?: ReflectorNode;
+  // TSL planar reflection (Three.js ReflectorNode handles camera, RT, clipping)
+  private reflection?: ReturnType<typeof reflector>;
   private waterLevel = 5;
   private waterMeshes: THREE.Mesh[] = [];
 
-  // Frustum culling for reflection optimization
-  private frustum = new THREE.Frustum();
-  private projScreenMatrix = new THREE.Matrix4();
-  private tempSphere = new THREE.Sphere();
-
-  // Reflection state tracking for DevStats
   private reflectionActive = false;
 
   // User preference for reflections (can be toggled)
@@ -252,17 +238,13 @@ export class WaterSystem {
 
     // Update reflection intensity uniform - this actually disables reflections in the shader
     if (this.uniforms) {
-      this.uniforms.reflectionIntensity.value = enabled ? 0.4 : 0.0;
+      this.uniforms.reflectionIntensity.value = enabled
+        ? WATER.REFLECTION_INTENSITY
+        : 0.0;
     }
 
-    // Update reflector visibility based on setting
-    if (this.reflection?.target) {
-      // When disabled, hide the reflector to save GPU resources
-      if (!enabled) {
-        this.reflection.target.visible = false;
-        this.reflectionActive = false;
-      }
-      // When enabled, visibility will be controlled by frustum culling in update()
+    if (!enabled) {
+      this.reflectionActive = false;
     }
 
     console.log(
@@ -297,6 +279,31 @@ export class WaterSystem {
   }
 
   /**
+   * Set the Y level used for the reflection mirror plane.
+   */
+  setWaterLevel(y: number): void {
+    this.waterLevel = y;
+    if (this.reflection?.target) {
+      this.reflection.target.position.y = y;
+    }
+  }
+
+  /**
+   * Register an externally-created water mesh for reflection visibility tracking.
+   */
+  registerWaterMesh(mesh: THREE.Mesh): void {
+    this.waterMeshes.push(mesh);
+  }
+
+  /**
+   * Unregister an externally-created water mesh from reflection tracking.
+   */
+  unregisterWaterMesh(mesh: THREE.Mesh): void {
+    const idx = this.waterMeshes.indexOf(mesh);
+    if (idx !== -1) this.waterMeshes.splice(idx, 1);
+  }
+
+  /**
    * Returns the total number of water meshes being tracked
    */
   get waterMeshCount(): number {
@@ -325,14 +332,11 @@ export class WaterSystem {
     this.normalTex2 = await this.createNormalMap(128, 2.0, 137);
     this.foamTex = await this.createFoamTexture(128);
 
-    // Create TSL reflector for planar reflections (lake water only)
-    // This handles all the reflection camera, render target, and UV calculation automatically
-    this.reflection = reflector({ resolutionScale: 0.45 }) as ReflectorNode;
-    // Rotate to face upward (water is horizontal plane)
+    // TSL reflector: handles render target, camera mirroring, oblique clipping
+    this.reflection = reflector({ resolutionScale: 0.5 });
     this.reflection.target.rotateX(-Math.PI / 2);
-    this.reflection.target.name = "WaterReflector";
+    this.reflection.target.position.y = this.waterLevel;
 
-    // Create lake material with reflections AFTER reflector is set up
     this.lakeMaterial = this.createLakeMaterial();
 
     // Create ocean material without reflections (different visual style)
@@ -344,40 +348,11 @@ export class WaterSystem {
   }
 
   /**
-   * Add reflector target to scene - must be called after init
+   * Add water system to scene — adds the reflector target so the mirror plane is active.
    */
   addToScene(scene: THREE.Scene): void {
     if (this.reflection?.target) {
       scene.add(this.reflection.target);
-
-      // Configure reflector's virtual camera to only see layer 0 (terrain)
-      // This excludes grass (layer 1), flowers, and other vegetation from reflections
-      // The reflector internally creates a camera we need to configure
-      const reflectorObj = this.reflection.target as THREE.Object3D & {
-        camera?: THREE.Camera;
-      };
-      if (reflectorObj.camera) {
-        reflectorObj.camera.layers.set(0); // Only see layer 0 (terrain, buildings)
-        reflectorObj.camera.layers.enable(2); // Also see floors
-        console.log(
-          "[WaterSystem] Reflector camera configured to ignore grass (layer 1)",
-        );
-      }
-
-      // Set up callbacks to track when reflection camera is rendering
-      // This allows LOD systems to force impostor mode during reflection passes
-      const world = this.world;
-      this.reflection.target.onBeforeRender = () => {
-        world.isRenderingReflection = true;
-      };
-      this.reflection.target.onAfterRender = () => {
-        world.isRenderingReflection = false;
-      };
-
-      console.log(
-        "[WaterSystem] Added reflector target to scene at y=",
-        this.reflection.target.position.y,
-      );
     }
   }
 
@@ -542,10 +517,8 @@ export class WaterSystem {
     const uSunDir = uniform(vec3(0.4, 0.8, 0.4));
     const uWind = uniform(float(1.0));
     const fogTexNode = texture(fogRenderTarget.texture, screenUV);
-    // Reflection intensity uniform - allows disabling reflections via settings
-    // Default 0.4 matches the hardcoded value we had before
     const uReflectionIntensity = uniform(
-      float(this._reflectionsEnabled ? 0.4 : 0.0),
+      float(this._reflectionsEnabled ? WATER.REFLECTION_INTENSITY : 0.0),
     );
 
     this.uniforms = {
@@ -571,18 +544,14 @@ export class WaterSystem {
     const normalTex2 = this.normalTex2!;
     const foamTex = this.foamTex!;
 
-    // Get the TSL reflector - use directly like in the example
-    const reflectionNode = this.reflection!;
-
-    // Add normal-based UV distortion to reflection for ripple effect
-    // Like in the example: reflection.uvNode = reflection.uvNode.add( floorNormalOffset );
+    // Reflection: TSL reflector handles camera mirroring, RT, oblique clipping.
+    // Add normal-based distortion to the reflector's screen-UV for ripple effect.
+    const reflNode = this.reflection!;
     const worldUV = vec2(positionWorld.x, positionWorld.z);
     const normalOffset = texture(normalTex1, mul(worldUV, float(0.02))).xy;
     const normalDistortion = sub(mul(normalOffset, float(2)), float(1));
-    (reflectionNode as { uvNode: ShaderNode }).uvNode = add(
-      reflectionNode.uvNode,
-      mul(normalDistortion, float(0.015)),
-    );
+    reflNode.uvNode = reflNode.uvNode!.add(mul(normalDistortion, float(0.015)));
+    const reflectionNode = reflNode;
 
     const wavePhase = (
       wp: ShaderNodeInput,
@@ -636,11 +605,19 @@ export class WaterSystem {
     const gpuShoreDist = Fn(() => {
       const sceneDepth = linearDepth(viewportDepthTexture());
       const waterDepth = linearDepth();
-      // Depth difference in [0,1], convert to world units
       const depthDiff = sub(sceneDepth, waterDepth);
       const worldDist = mul(depthDiff, sub(cameraFar, cameraNear));
       return clamp(worldDist, float(0), float(WATER.MAX_DEPTH));
     })();
+
+    // Distance fade: beyond COLOR_DIST_FADE the depth-based colour effect
+    // fades out, giving a uniform deep-water look at distance.
+    const distToCam = length(sub(cameraPosition, positionWorld));
+    const waterOpColorLerp = clamp(
+      sub(float(1), div(distToCam, float(WATER.COLOR_DIST_FADE))),
+      float(0.01),
+      float(1.0),
+    );
 
     // ========================================================================
     // FRAGMENT: Use reflection in emissiveNode like the example
@@ -709,8 +686,13 @@ export class WaterSystem {
       const NdotH = max(dot(N, H), float(0));
       const VdotH = max(dot(V, H), float(0));
 
-      // Beer-Lambert absorption for water depth color
-      const depth = clamp(shoreDist, float(0), float(WATER.MAX_DEPTH));
+      // Depth-based colour: colorDepth=1 at shore (shallow), colorDepth→0 in deep water
+      const colorDepth = pow(
+        saturate(sub(float(1), div(shoreDist, float(WATER.COLOR_DEPTH_SCALE)))),
+        float(WATER.COLOR_DEPTH_FALLOFF),
+      );
+      // At distance, fade to uniform deep colour
+      const colorLerp = mul(colorDepth, waterOpColorLerp);
       const shallowColor = vec3(
         WATER.SHALLOW_COLOR.r,
         WATER.SHALLOW_COLOR.g,
@@ -721,23 +703,7 @@ export class WaterSystem {
         WATER.DEEP_COLOR.g,
         WATER.DEEP_COLOR.b,
       );
-      const waterColor = vec3(
-        mix(
-          deepColor.x,
-          shallowColor.x,
-          exp(mul(float(-WATER.ABSORPTION.r), depth)),
-        ),
-        mix(
-          deepColor.y,
-          shallowColor.y,
-          exp(mul(float(-WATER.ABSORPTION.g), depth)),
-        ),
-        mix(
-          deepColor.z,
-          shallowColor.z,
-          exp(mul(float(-WATER.ABSORPTION.b), depth)),
-        ),
-      );
+      const waterColor = mix(deepColor, shallowColor, colorLerp);
 
       // Subsurface scattering approximation
       const sssView = pow(
@@ -848,16 +814,9 @@ export class WaterSystem {
       );
     })();
 
-    // Fade reflection to zero beyond REFLECTION_FADE_DISTANCE
-    const reflDistFade = clamp(
-      sub(float(1), div(length(toCam), float(WATER.REFLECTION_FADE_DISTANCE))),
-      float(0),
-      float(1),
-    );
-
     const reflectionEmissive = mul(
       reflectionNode,
-      mul(mul(fresnelNode, uReflectionIntensity), reflDistFade),
+      mul(fresnelNode, uReflectionIntensity),
     );
 
     material.emissiveNode = reflectionEmissive;
@@ -886,7 +845,7 @@ export class WaterSystem {
         shoreDist,
       );
 
-      // Portfolio-style depth opacity: pow(saturate(1 - depth/scale), falloff)
+      // Depth opacity: pow(saturate(1 - depth/scale), falloff)
       // Shallow → opDepth ≈ 1 → op ≈ 0 (transparent, see bottom)
       // Deep    → opDepth ≈ 0 → op ≈ 1 (fully opaque, hides terrain)
       const opDepth = pow(
@@ -956,7 +915,7 @@ export class WaterSystem {
       time: uTime,
       sunDirection: uSunDir as unknown as UniformVec3,
       windStrength: uWind,
-      reflectionIntensity: uReflectionIntensity, // Always 0 for ocean
+      reflectionIntensity: uReflectionIntensity,
     };
 
     const material = new MeshStandardNodeMaterial();
@@ -1240,11 +1199,6 @@ export class WaterSystem {
   ): THREE.Mesh | null {
     this.waterLevel = waterThreshold;
 
-    // Position the reflector at water level (only needed for lake water)
-    if (waterType === "lake" && this.reflection?.target) {
-      this.reflection.target.position.y = waterThreshold;
-    }
-
     if (!getHeightAt) {
       const mesh = this.createFallbackMesh(
         tile,
@@ -1523,105 +1477,14 @@ export class WaterSystem {
   }
 
   /**
-   * Check if any lake water meshes are in the camera frustum, within range,
-   * and enable/disable the reflection render pass accordingly. This saves a
-   * full scene render when no lake water is visible or nearby.
-   * Ocean water NEVER uses reflections regardless of distance.
+   * Check if reflections should be active this frame.
    */
   private updateReflectionVisibility(): void {
-    if (!this.reflection?.target) {
+    if (!this._reflectionsEnabled || !this.reflection) {
       this.reflectionActive = false;
       return;
     }
-
-    // If reflections are disabled by user preference, hide the reflector
-    if (!this._reflectionsEnabled) {
-      this.reflection.target.visible = false;
-      this.reflectionActive = false;
-      return;
-    }
-
-    const camera = this.world.camera;
-    if (!camera) {
-      // No camera, assume water might be visible
-      this.reflection.target.visible = true;
-      this.reflectionActive = true;
-      return;
-    }
-
-    // If no water meshes exist, disable reflection
-    if (this.waterMeshes.length === 0) {
-      this.reflection.target.visible = false;
-      this.reflectionActive = false;
-      return;
-    }
-
-    // Build frustum from camera
-    // IMPORTANT: updateMatrixWorld() updates matrixWorld but NOT matrixWorldInverse
-    // We must explicitly compute matrixWorldInverse from matrixWorld
-    camera.updateMatrixWorld();
-    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
-    this.projScreenMatrix.multiplyMatrices(
-      camera.projectionMatrix,
-      camera.matrixWorldInverse,
-    );
-    this.frustum.setFromProjectionMatrix(this.projScreenMatrix);
-
-    // Get camera position for distance checks
-    const cameraPos = camera.position;
-
-    // Check if any LAKE water mesh is visible, in frustum, AND within range
-    // Ocean water NEVER uses reflections regardless of distance
-    // OPTIMIZATION: Cap meshes checked per frame to prevent frame drops with many tiles
-    const MAX_MESH_CHECKS = 20;
-    let anyLakeWaterVisible = false;
-    let checked = 0;
-
-    for (const mesh of this.waterMeshes) {
-      if (checked >= MAX_MESH_CHECKS) {
-        // Over budget - assume visible to be safe (avoids reflection popping)
-        anyLakeWaterVisible = this.reflectionActive; // Maintain last state
-        break;
-      }
-
-      // Skip meshes that have been removed from scene or are hidden
-      if (!mesh.parent || !mesh.visible) continue;
-
-      // Skip ocean water - it NEVER uses reflections
-      if (mesh.userData.waterType === "ocean") continue;
-
-      checked++;
-
-      // Ensure bounding sphere exists (computeBoundingSphere can be expensive)
-      if (!mesh.geometry.boundingSphere) {
-        mesh.geometry.computeBoundingSphere();
-      }
-
-      const boundingSphere = mesh.geometry.boundingSphere;
-      if (!boundingSphere) continue;
-
-      // Transform bounding sphere to world space
-      this.tempSphere.copy(boundingSphere);
-      this.tempSphere.applyMatrix4(mesh.matrixWorld);
-
-      // Check distance from camera to lake water (use sphere center)
-      // Only enable reflections for lakes within REFLECTION_MAX_DISTANCE (200m)
-      const distanceToLake = cameraPos.distanceTo(this.tempSphere.center);
-      if (distanceToLake > REFLECTION_MAX_DISTANCE + this.tempSphere.radius) {
-        // Lake is too far away - skip it
-        continue;
-      }
-
-      // Check if in frustum
-      if (this.frustum.intersectsSphere(this.tempSphere)) {
-        anyLakeWaterVisible = true;
-        break;
-      }
-    }
-
-    // Enable/disable reflector based on lake water visibility
-    this.reflection.target.visible = anyLakeWaterVisible;
-    this.reflectionActive = anyLakeWaterVisible;
+    this.reflectionActive = this.waterMeshes.length > 0;
   }
 
   destroy(): void {

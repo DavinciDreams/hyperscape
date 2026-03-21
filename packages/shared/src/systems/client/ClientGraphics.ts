@@ -358,10 +358,8 @@ export class ClientGraphics extends System {
 
   render() {
     if (!this.usePostprocessing || !this.composer) {
-      // Direct rendering without post-processing
       this.renderer.render(this.world.stage.scene, this.world.camera);
     } else {
-      // Render with post-processing (bloom via TSL)
       this.composer.render();
     }
     this.hasRendered = true;
