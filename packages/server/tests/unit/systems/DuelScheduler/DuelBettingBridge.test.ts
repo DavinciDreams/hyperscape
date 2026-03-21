@@ -317,7 +317,7 @@ describe("DuelBettingBridge streaming reconciliation", () => {
   });
 
   it("marks aborted markets as terminal and does not recreate them during reconciliation", async () => {
-    const warnSpy = vi.spyOn(Logger, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(Logger, "error").mockImplementation(() => {});
     const solanaOperator = {
       isEnabled: () => true,
       initRound: vi.fn().mockResolvedValue({
@@ -361,9 +361,19 @@ describe("DuelBettingBridge streaming reconciliation", () => {
         onChainInitialized: true,
       }),
     );
-    expect(warnSpy).toHaveBeenCalledWith(
+    expect(world.emit).toHaveBeenCalledWith(
+      "betting:market:orphaned",
+      expect.objectContaining({
+        duelId: "duel-123",
+        roundSeedHex:
+          "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        manualInterventionRequired: true,
+      }),
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
       "DuelBettingBridge",
-      expect.stringContaining("operator does not yet support cancellation"),
+      expect.stringContaining("manual intervention is required"),
+      null,
       expect.objectContaining({
         duelId: "duel-123",
       }),
@@ -375,6 +385,57 @@ describe("DuelBettingBridge streaming reconciliation", () => {
     await bridgeHarness.reconcileLiveCycle();
 
     expect(bridge.getMarket("duel-123")).toBeNull();
+  });
+
+  it("does not emit delayed resolution events after the bridge is destroyed", async () => {
+    const solanaOperator = {
+      isEnabled: () => true,
+      initRound: vi.fn().mockResolvedValue({
+        closeSlot: 123,
+        initOracleSignature: "oracle-sig",
+        initMarketSignature: "market-sig",
+      }),
+      lockMarket: vi.fn().mockResolvedValue(null),
+      reportAndResolve: vi.fn().mockResolvedValue({
+        reportSignature: "report-sig",
+        resolveSignature: "resolve-sig",
+      }),
+    };
+    bridgeHarness.solanaOperator = solanaOperator;
+
+    await bridgeHarness.handleStreamingAnnouncement({
+      duelId: "duel-123",
+      duelKeyHex:
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      agent1: { id: "agent-a", name: "Agent A" },
+      agent2: { id: "agent-b", name: "Agent B" },
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+    });
+
+    await bridgeHarness.handleStreamingResolution({
+      duelId: "duel-123",
+      duelKeyHex:
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      duelEndTime: 9_000,
+      winnerId: "agent-a",
+      loserId: "agent-b",
+      winnerName: "Agent A",
+      loserName: "Agent B",
+      winReason: "kill",
+      seed: "12345",
+      replayHash: "deadbeef",
+      duration: 6_500,
+    });
+
+    bridge.destroy();
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(solanaOperator.reportAndResolve).not.toHaveBeenCalled();
+    expect(world.emit).not.toHaveBeenCalledWith(
+      "betting:market:resolved",
+      expect.anything(),
+    );
   });
 
   it("resets reconcileInFlight even when a reconcile pass throws", async () => {

@@ -311,6 +311,9 @@ export class DuelBettingBridge {
   /** Prevent overlapping reconcile passes */
   private reconcileInFlight = false;
 
+  /** Set once destroy() starts so delayed callbacks can bail out safely */
+  private destroyed = false;
+
   constructor(world: World, deps: DuelBettingBridgeDeps = {}) {
     this.world = world;
     this.getStreamingDuelSchedulerFn =
@@ -321,6 +324,7 @@ export class DuelBettingBridge {
    * Initialize the betting bridge
    */
   async init(): Promise<void> {
+    this.destroyed = false;
     if (!config.enabled) {
       Logger.info("DuelBettingBridge", "Duel betting is disabled");
       return;
@@ -457,6 +461,7 @@ export class DuelBettingBridge {
    * Destroy the bridge and clean up
    */
   destroy(): void {
+    this.destroyed = true;
     for (const { event, fn } of this.eventListeners) {
       this.world.off(event, fn);
     }
@@ -662,15 +667,23 @@ export class DuelBettingBridge {
       reason: data.reason || "streaming abort",
     });
     if (market.onChainInitialized) {
-      Logger.warn(
+      Logger.error(
         "DuelBettingBridge",
-        "Streaming duel aborted after on-chain market initialization; operator does not yet support cancellation, so the round is now locally terminal only",
+        "Streaming duel aborted after on-chain market initialization; manual intervention is required because the operator does not yet support cancellation",
+        null,
         {
           duelId: data.duelId,
           roundSeedHex: market.roundSeedHex,
           reason: data.reason || "streaming abort",
         },
       );
+      this.world.emit("betting:market:orphaned", {
+        duelId: data.duelId,
+        market,
+        roundSeedHex: market.roundSeedHex,
+        reason: data.reason || "streaming abort",
+        manualInterventionRequired: true,
+      });
     }
     const abortedMarket: DuelMarket = {
       ...market,
@@ -864,6 +877,9 @@ export class DuelBettingBridge {
     const remainingMs = Math.max(0, params.bettingClosesAt - Date.now());
     const lockTimer = setTimeout(() => {
       this.pendingTimeouts.delete(lockTimer);
+      if (this.destroyed) {
+        return;
+      }
       void this.lockMarket(params.duelId).catch((error) => {
         Logger.error(
           "DuelBettingBridge",
@@ -921,6 +937,9 @@ export class DuelBettingBridge {
 
     const resolveTimer = setTimeout(async () => {
       this.pendingTimeouts.delete(resolveTimer);
+      if (this.destroyed) {
+        return;
+      }
 
       if (this.solanaOperator?.isEnabled()) {
         try {
