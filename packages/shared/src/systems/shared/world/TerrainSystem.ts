@@ -120,6 +120,8 @@ import {
   TerrainVisualManager,
   type VisualManagerTerrainProvider,
 } from "./TerrainVisualManager";
+import { WaterVisualManager } from "./WaterVisualManager";
+import { CompositeQuadTreeListener } from "./TerrainQuadTree";
 import type { QuadChunkWorkerConfig } from "../../../utils/workers/QuadChunkWorker";
 import { terminateQuadChunkWorkerPool } from "../../../utils/workers/QuadChunkWorker";
 
@@ -242,7 +244,7 @@ export class TerrainSystem extends System {
   private lamppostActiveLights: VertexLight[] = [];
   private lamppostLightIndices: number[] = [];
   private lamppostLightDistances: number[] = [];
-  private waterSystem?: WaterSystem;
+  waterSystem?: WaterSystem;
   private roadNetworkSystem?: RoadNetworkSystem;
   private _cachedRoadTileX = Number.NaN;
   private _cachedRoadTileZ = Number.NaN;
@@ -256,6 +258,7 @@ export class TerrainSystem extends System {
 
   // Quad-tree LOD visual manager (client-only, when CONFIG.USE_QUADTREE_LOD is true)
   private quadTreeVisualManager: TerrainVisualManager | null = null;
+  private waterVisualManager: WaterVisualManager | null = null;
 
   // Unified terrain generator from @hyperscape/procgen
   // Provides deterministic height/biome calculation independent of rendering
@@ -1137,7 +1140,9 @@ export class TerrainSystem extends System {
         this.generateTileResources(tile);
       }
       this.generateVisualFeatures(tile);
-      this.generateWaterMeshes(tile);
+      if (!this.CONFIG.USE_QUADTREE_LOD) {
+        this.generateWaterMeshes(tile);
+      }
 
       // Queue resource instances for deferred creation (spreads work across frames)
       if (tile.resources.length > 0 && tile.mesh) {
@@ -1891,6 +1896,31 @@ export class TerrainSystem extends System {
       this.CONFIG.QUADTREE_MAX_ASSEMBLIES_PER_FRAME,
     );
 
+    // Water quad-tree visual manager — flat water meshes aligned with terrain chunks
+    if (this.waterSystem) {
+      const waterContainer = new THREE.Group();
+      waterContainer.name = "QuadTreeWaterContainer";
+      if (this.terrainContainer) {
+        this.terrainContainer.parent?.add(waterContainer);
+      }
+
+      this.waterSystem.setWaterLevel(this.CONFIG.WATER_THRESHOLD);
+
+      this.waterVisualManager = new WaterVisualManager(
+        waterContainer,
+        this.waterSystem,
+        (x: number, z: number) => this.getHeightAt(x, z),
+        (x: number, z: number) => this.getIslandMask(x, z),
+        this.CONFIG.WATER_THRESHOLD,
+      );
+
+      // Wire both terrain and water managers to the same quad-tree via composite
+      const composite = new CompositeQuadTreeListener();
+      composite.add(this.quadTreeVisualManager);
+      composite.add(this.waterVisualManager);
+      this.quadTreeVisualManager.getQuadTree().setListener(composite);
+    }
+
     console.log(
       "[TerrainSystem] Quad-tree LOD visual manager initialized " +
         `(minSize=${this.CONFIG.QUADTREE_MIN_SIZE}, maxDepth=${this.CONFIG.QUADTREE_MAX_DEPTH}, ` +
@@ -2408,7 +2438,9 @@ export class TerrainSystem extends System {
 
         // Generate visual features and water meshes
         this.generateVisualFeatures(tile);
-        this.generateWaterMeshes(tile);
+        if (!this.CONFIG.USE_QUADTREE_LOD) {
+          this.generateWaterMeshes(tile);
+        }
         // NOTE: Grass rendering is handled by ProceduralGrassSystem
 
         // Queue resource instances for deferred creation (spreads work across frames)
@@ -6204,6 +6236,11 @@ export class TerrainSystem extends System {
     if (this.quadTreeVisualManager) {
       this.quadTreeVisualManager.dispose();
       this.quadTreeVisualManager = null;
+    }
+
+    if (this.waterVisualManager) {
+      this.waterVisualManager.destroy();
+      this.waterVisualManager = null;
     }
 
     // Terminate worker pools to free resources
