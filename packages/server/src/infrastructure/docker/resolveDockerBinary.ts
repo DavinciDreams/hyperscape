@@ -4,10 +4,8 @@ import os from "node:os";
 /**
  * Resolve the docker binary path once so server code and maintenance scripts
  * do not drift on macOS versus Linux installations.
- *
- * @returns {string}
  */
-export function resolveDockerBinary() {
+export function resolveDockerBinary(): string {
   const candidates = [
     process.env.DOCKER_BIN,
     "/usr/local/bin/docker",
@@ -15,7 +13,7 @@ export function resolveDockerBinary() {
     "/Applications/Docker.app/Contents/Resources/bin/docker",
     `${os.homedir()}/.docker/bin/docker`,
     "docker",
-  ].filter(Boolean);
+  ].filter((candidate): candidate is string => Boolean(candidate));
 
   for (const candidate of candidates) {
     if (candidate === "docker") {
