@@ -3,6 +3,7 @@ import {
   CDN_URL,
   normalizeBrowserLoopbackUrl,
 } from "@/lib/api-config";
+import { resolveGameClientUiDisplay } from "@/lib/gameClientUi";
 import type { PublicRuntimeEnv, StreamingWindow } from "@/lib/streamingWindow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -307,32 +308,6 @@ export function GameClient({
     };
   }, [world]);
 
-  // Handle GPU device lost (WebGPU equivalent of context lost)
-  // This can happen when GPU resources are exhausted or driver issues occur
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-
-    // Find the canvas element (created by Three.js renderer)
-    const canvas = viewport.querySelector("canvas");
-    if (!canvas) return;
-
-    // WebGPU handles device lost events internally via the Three.js renderer.
-    // Note: webglcontextlost won't fire for WebGPU, but we keep this for debugging
-    // in case the renderer falls back (which shouldn't happen - WebGPU is required).
-    const handleContextLost = (event: Event) => {
-      event.preventDefault?.();
-      console.error(
-        "[GameClient] GPU context lost - WebGPU device may have been lost. " +
-          "This indicates GPU resource exhaustion or driver issues.",
-      );
-    };
-    // Listen for WebGPU context lost events (if supported in future/custom)
-    // canvas.addEventListener("webgpucontextlost", handleContextLost);
-
-    return () => {};
-  }, [world]);
-
   useEffect(() => {
     let cleanedUp = false;
     // Guards against the race where the cleanup callback fires while world.init()
@@ -483,7 +458,7 @@ export function GameClient({
           inset: 0;
           pointer-events: none;
           user-select: none;
-          display: ${ui.visible ? "block" : "block"};
+          display: ${resolveGameClientUiDisplay(ui.visible)};
           overflow: hidden;
           z-index: 10;
         }

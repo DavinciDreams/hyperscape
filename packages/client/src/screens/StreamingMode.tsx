@@ -223,6 +223,7 @@ export function StreamingMode() {
   // Fade-out animation: true while the loading overlay is fading away
   const [fadingOut, setFadingOut] = useState(false);
   const worldRef = useRef<World | null>(null);
+  const worldReadyRef = useRef(false);
   const lastCameraTargetRef = useRef<string | null>(null);
   const terrainPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const terrainTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -299,6 +300,7 @@ export function StreamingMode() {
       }
 
       const onWorldReady = () => {
+        worldReadyRef.current = true;
         setWorldReady(true);
         if (worldReadyTimeoutRef.current) {
           clearTimeout(worldReadyTimeoutRef.current);
@@ -345,7 +347,8 @@ export function StreamingMode() {
         // the loading screen can dismiss.  After that, ClientCameraSystem
         // handles all target switches via its own streaming:state:update
         // subscription with smooth cinematic transitions — no loading screen.
-        if (!worldReady) {
+        if (!worldReadyRef.current) {
+          worldReadyRef.current = true;
           setWorldReady(true);
           if (worldReadyTimeoutRef.current) {
             clearTimeout(worldReadyTimeoutRef.current);

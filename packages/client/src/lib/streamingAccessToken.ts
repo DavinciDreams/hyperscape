@@ -17,7 +17,13 @@ export function resolveStreamingAccessTokenFromHref(
     searchParams.get("streamToken")?.trim() ||
     null;
 
-  if (!searchParams.has("streamToken") && !hashParams.has("streamToken")) {
+  const shouldScrubSecrets =
+    searchParams.has("streamToken") ||
+    hashParams.has("streamToken") ||
+    searchParams.has("sessionToken") ||
+    hashParams.has("sessionToken");
+
+  if (!shouldScrubSecrets) {
     return {
       token,
       nextUrl: null,
@@ -26,6 +32,8 @@ export function resolveStreamingAccessTokenFromHref(
 
   searchParams.delete("streamToken");
   hashParams.delete("streamToken");
+  searchParams.delete("sessionToken");
+  hashParams.delete("sessionToken");
 
   const nextSearch = searchParams.toString();
   const nextHash = hashParams.toString();

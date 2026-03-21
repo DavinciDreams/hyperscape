@@ -29,6 +29,15 @@ describe("streamingAccessToken", () => {
     expect(resolved.nextUrl).toBe("/stream?foo=bar");
   });
 
+  it("scrubs sessionToken from the URL without treating it as a streaming token", () => {
+    const resolved = resolveStreamingAccessTokenFromHref(
+      "https://example.com/stream?sessionToken=session-secret&foo=bar#mode=stream",
+    );
+
+    expect(resolved.token).toBeNull();
+    expect(resolved.nextUrl).toBe("/stream?foo=bar#mode=stream");
+  });
+
   it("does nothing when no token is present", () => {
     const resolved = resolveStreamingAccessTokenFromHref(
       "https://example.com/stream?foo=bar#mode=stream",

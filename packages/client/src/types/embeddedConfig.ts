@@ -33,14 +33,14 @@ export type HideableUIElement =
  * Embedded viewport configuration injected via window.__HYPERSCAPE_CONFIG__
  *
  * @security
- * SECURITY NOTE: The authToken should NEVER be passed via URL parameters.
+ * SECURITY NOTE: authToken and sessionToken should NEVER be passed via URL parameters.
  * URL parameters are exposed in:
  * - Browser history
  * - Server logs
  * - Referrer headers
  * - Browser extensions
  *
- * Instead, authToken should be passed via:
+ * Instead, authToken/sessionToken should be passed via:
  * 1. postMessage from the parent window after the iframe loads
  * 2. Session-based authentication with the server
  *
@@ -64,7 +64,7 @@ export interface EmbeddedViewportConfig {
   followEntity?: string;
   hiddenUI?: HideableUIElement[];
   quality?: GraphicsQuality;
-  /** Session token for additional verification */
+  /** Session token for additional verification, sourced from the trusted parent bootstrap path */
   sessionToken: string;
   /** Privy user ID for authentication verification */
   privyUserId?: string;
