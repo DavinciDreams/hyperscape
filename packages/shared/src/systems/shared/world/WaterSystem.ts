@@ -69,8 +69,8 @@ const WATER = {
   REFLECTION_INTENSITY: 0.4, // Planar reflection strength (fresnel-weighted)
 
   // Depth-based colour: pow(saturate(1 - depth/scale), falloff)
-  SHALLOW_COLOR: { r: 0.15, g: 0.42, b: 0.48 }, // Colour near shore
-  DEEP_COLOR: { r: 0.12, g: 0.28, b: 0.38 }, // Colour far from shore (brighter than before)
+  SHALLOW_COLOR: { r: 0.1, g: 0.5, b: 0.36 }, // Colour near shore (turquoise-green)
+  DEEP_COLOR: { r: 0.08, g: 0.3, b: 0.44 }, // Colour far from shore (ocean blue)
   COLOR_DEPTH_SCALE: 50, // Depth scale for colour gradient (metres)
   COLOR_DEPTH_FALLOFF: 3, // Power exponent for colour depth curve
   COLOR_DIST_FADE: 200, // Camera distance where depth colour effect fades out (metres)
