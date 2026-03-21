@@ -2,21 +2,6 @@ import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerStreamingBettingRoutes } from "../../../src/routes/streaming-betting-routes.js";
 
-const { getStreamingDuelSchedulerMock, getStreamCaptureMock } = vi.hoisted(
-  () => ({
-    getStreamingDuelSchedulerMock: vi.fn(),
-    getStreamCaptureMock: vi.fn(),
-  }),
-);
-
-vi.mock("../../../src/systems/StreamingDuelScheduler/index.js", () => ({
-  getStreamingDuelScheduler: getStreamingDuelSchedulerMock,
-}));
-
-vi.mock("../../../src/streaming/stream-capture.js", () => ({
-  getStreamCapture: getStreamCaptureMock,
-}));
-
 function createRouteOptions(overrides: Partial<Parameters<typeof registerStreamingBettingRoutes>[0]> = {}) {
   return {
     fastify: Fastify(),
@@ -40,20 +25,15 @@ function createRouteOptions(overrides: Partial<Parameters<typeof registerStreami
     internalAllowedOrigin: null,
     externalStatusFile: null,
     externalStatusMaxAgeMs: 15_000,
-    ...overrides,
-  };
-}
-
-function primeHealthyStreamingMocks() {
-  getStreamingDuelSchedulerMock.mockReturnValue({
-    getCurrentCycle: () => null,
-  });
-  getStreamCaptureMock.mockReturnValue({
-    getStats: () => ({
+    getStreamingDuelScheduler: () => ({
+      getCurrentCycle: () => null,
+    }),
+    getStreamCaptureStats: () => ({
       clientConnected: true,
       ffmpegRunning: true,
     }),
-  });
+    ...overrides,
+  };
 }
 
 describe("streaming-betting-routes", () => {
@@ -64,7 +44,6 @@ describe("streaming-betting-routes", () => {
 
   it("returns bootstrap state for valid authenticated requests", async () => {
     vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
-    primeHealthyStreamingMocks();
 
     const options = createRouteOptions();
     const routes = registerStreamingBettingRoutes(options);
@@ -92,7 +71,6 @@ describe("streaming-betting-routes", () => {
 
   it("rejects query-token auth on the bootstrap route", async () => {
     vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
-    primeHealthyStreamingMocks();
 
     const options = createRouteOptions();
     const routes = registerStreamingBettingRoutes(options);
@@ -109,7 +87,6 @@ describe("streaming-betting-routes", () => {
 
   it("returns 503 once betting SSE capacity is exhausted after auth succeeds", async () => {
     vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
-    primeHealthyStreamingMocks();
 
     const options = createRouteOptions({
       maxClients: 0,
@@ -133,8 +110,6 @@ describe("streaming-betting-routes", () => {
   it("fails closed in production when betting-feed auth is not configured", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "");
-    vi.stubEnv("STREAMING_VIEWER_ACCESS_TOKEN", "");
-    primeHealthyStreamingMocks();
 
     const options = createRouteOptions();
     const routes = registerStreamingBettingRoutes(options);
@@ -152,12 +127,10 @@ describe("streaming-betting-routes", () => {
     await options.fastify.close();
   });
 
-  it("allows explicit skip-auth only outside production", async () => {
+  it("allows explicit skip-auth only in development", async () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "");
-    vi.stubEnv("STREAMING_VIEWER_ACCESS_TOKEN", "");
     vi.stubEnv("BETTING_FEED_SKIP_AUTH", "true");
-    primeHealthyStreamingMocks();
 
     const options = createRouteOptions();
     const routes = registerStreamingBettingRoutes(options);
@@ -175,9 +148,7 @@ describe("streaming-betting-routes", () => {
   it("ignores skip-auth in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "");
-    vi.stubEnv("STREAMING_VIEWER_ACCESS_TOKEN", "");
     vi.stubEnv("BETTING_FEED_SKIP_AUTH", "true");
-    primeHealthyStreamingMocks();
 
     const options = createRouteOptions();
     const routes = registerStreamingBettingRoutes(options);
@@ -190,5 +161,51 @@ describe("streaming-betting-routes", () => {
     expect(response.statusCode).toBe(503);
     routes.close();
     await options.fastify.close();
+  });
+
+  it("does not treat the viewer token as a betting-feed fallback", async () => {
+    vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "");
+    vi.stubEnv("STREAMING_VIEWER_ACCESS_TOKEN", "viewer-secret");
+
+    const options = createRouteOptions();
+    const routes = registerStreamingBettingRoutes(options);
+
+    const response = await options.fastify.inject({
+      method: "GET",
+      url: "/api/internal/bet-sync/state",
+      headers: {
+        authorization: "Bearer viewer-secret",
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    routes.close();
+    await options.fastify.close();
+  });
+
+  it("reuses and releases the external status poller across repeated route registration", async () => {
+    vi.stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+
+    const firstOptions = createRouteOptions({
+      externalStatusFile: "/tmp/nonexistent-betting-status.json",
+    });
+    const secondOptions = createRouteOptions({
+      externalStatusFile: "/tmp/nonexistent-betting-status.json",
+    });
+
+    const firstRoutes = registerStreamingBettingRoutes(firstOptions);
+    const secondRoutes = registerStreamingBettingRoutes(secondOptions);
+
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+
+    firstRoutes.close();
+    await firstOptions.fastify.close();
+    expect(clearIntervalSpy).not.toHaveBeenCalled();
+
+    secondRoutes.close();
+    await secondOptions.fastify.close();
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
   });
 });

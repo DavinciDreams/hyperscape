@@ -3,6 +3,7 @@ import {
   extractBettingFeedToken,
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
+  shouldSkipBettingFeedAuth,
 } from "../../../src/routes/streaming-betting-auth.js";
 
 describe("streaming-betting-auth", () => {
@@ -62,15 +63,15 @@ describe("streaming-betting-auth", () => {
     });
   });
 
-  it("falls back to STREAMING_VIEWER_ACCESS_TOKEN when needed", () => {
+  it("does not fall back to STREAMING_VIEWER_ACCESS_TOKEN when needed", () => {
     expect(
       resolveBettingFeedAccessToken({
         BETTING_FEED_ACCESS_TOKEN: "",
         STREAMING_VIEWER_ACCESS_TOKEN: "viewer-secret",
       }),
     ).toEqual({
-      token: "viewer-secret",
-      source: "viewer-fallback",
+      token: null,
+      source: null,
     });
   });
 
@@ -79,5 +80,26 @@ describe("streaming-betting-auth", () => {
       token: null,
       source: null,
     });
+  });
+
+  it("allows skip-auth only in development and test", () => {
+    expect(
+      shouldSkipBettingFeedAuth({
+        NODE_ENV: "development",
+        BETTING_FEED_SKIP_AUTH: "true",
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipBettingFeedAuth({
+        NODE_ENV: "test",
+        BETTING_FEED_SKIP_AUTH: "true",
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipBettingFeedAuth({
+        NODE_ENV: "staging",
+        BETTING_FEED_SKIP_AUTH: "true",
+      }),
+    ).toBe(false);
   });
 });

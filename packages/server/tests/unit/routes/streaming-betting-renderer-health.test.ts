@@ -1,20 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  deriveBettingRendererHealth,
-  loadExternalRtmpStatusSnapshot,
-} from "../../../src/routes/streaming-betting-routes.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { deriveBettingRendererHealth, loadExternalRtmpStatusSnapshot } from "../../../src/routes/streaming-betting-routes.js";
 import type { StreamingDuelCycle } from "../../../src/systems/StreamingDuelScheduler/types.js";
-
-const { getStreamCaptureMock } = vi.hoisted(() => ({
-  getStreamCaptureMock: vi.fn(),
-}));
-
-vi.mock("../../../src/streaming/stream-capture.js", () => ({
-  getStreamCapture: getStreamCaptureMock,
-}));
 
 function createCycle(
   overrides: Partial<StreamingDuelCycle> = {},
@@ -90,7 +79,6 @@ describe("deriveBettingRendererHealth", () => {
       rmSync(tempDir, { recursive: true, force: true });
       tempDir = null;
     }
-    vi.restoreAllMocks();
   });
 
   it("loads external RTMP snapshots asynchronously for cache refresh", async () => {
@@ -120,13 +108,6 @@ describe("deriveBettingRendererHealth", () => {
   });
 
   it("returns guardrail failures for invalid live duel agent state", () => {
-    getStreamCaptureMock.mockReturnValue({
-      getStats: () => ({
-        clientConnected: true,
-        ffmpegRunning: true,
-      }),
-    });
-
     const health = deriveBettingRendererHealth(
       createCycle({
         agent1: {
@@ -135,6 +116,12 @@ describe("deriveBettingRendererHealth", () => {
           maxHp: 30,
         },
       }),
+      {
+        captureStats: {
+          clientConnected: true,
+          ffmpegRunning: true,
+        },
+      },
     );
 
     expect(health.ready).toBe(false);
@@ -142,13 +129,6 @@ describe("deriveBettingRendererHealth", () => {
   });
 
   it("uses a fresh external RTMP renderer snapshot when available", () => {
-    getStreamCaptureMock.mockReturnValue({
-      getStats: () => ({
-        clientConnected: false,
-        ffmpegRunning: false,
-      }),
-    });
-
     const health = deriveBettingRendererHealth(createCycle(), {
       externalStatusSnapshot: {
         destinations: [],
@@ -161,6 +141,10 @@ describe("deriveBettingRendererHealth", () => {
         },
       },
       externalStatusMaxAgeMs: 15_000,
+      captureStats: {
+        clientConnected: false,
+        ffmpegRunning: false,
+      },
     });
 
     expect(health).toMatchObject({
@@ -170,13 +154,6 @@ describe("deriveBettingRendererHealth", () => {
   });
 
   it("degrades stale external RTMP renderer snapshots", () => {
-    getStreamCaptureMock.mockReturnValue({
-      getStats: () => ({
-        clientConnected: true,
-        ffmpegRunning: true,
-      }),
-    });
-
     const health = deriveBettingRendererHealth(createCycle(), {
       externalStatusSnapshot: {
         destinations: [],
@@ -189,6 +166,10 @@ describe("deriveBettingRendererHealth", () => {
         },
       },
       externalStatusMaxAgeMs: 15_000,
+      captureStats: {
+        clientConnected: true,
+        ffmpegRunning: true,
+      },
     });
 
     expect(health).toMatchObject({
@@ -198,14 +179,12 @@ describe("deriveBettingRendererHealth", () => {
   });
 
   it("reports disconnected capture clients during active duel phases", () => {
-    getStreamCaptureMock.mockReturnValue({
-      getStats: () => ({
+    const health = deriveBettingRendererHealth(createCycle(), {
+      captureStats: {
         clientConnected: false,
         ffmpegRunning: true,
-      }),
+      },
     });
-
-    const health = deriveBettingRendererHealth(createCycle());
 
     expect(health).toMatchObject({
       ready: false,
@@ -214,14 +193,12 @@ describe("deriveBettingRendererHealth", () => {
   });
 
   it("reports inactive capture pipelines during active duel phases", () => {
-    getStreamCaptureMock.mockReturnValue({
-      getStats: () => ({
+    const health = deriveBettingRendererHealth(createCycle(), {
+      captureStats: {
         clientConnected: true,
         ffmpegRunning: false,
-      }),
+      },
     });
-
-    const health = deriveBettingRendererHealth(createCycle());
 
     expect(health).toMatchObject({
       ready: false,
@@ -230,13 +207,6 @@ describe("deriveBettingRendererHealth", () => {
   });
 
   it("returns healthy for idle phases when no degraded source exists", () => {
-    getStreamCaptureMock.mockReturnValue({
-      getStats: () => ({
-        clientConnected: false,
-        ffmpegRunning: false,
-      }),
-    });
-
     const health = deriveBettingRendererHealth(
       createCycle({
         phase: "IDLE",
@@ -244,6 +214,12 @@ describe("deriveBettingRendererHealth", () => {
         agent2: null,
         arenaPositions: null,
       }),
+      {
+        captureStats: {
+          clientConnected: false,
+          ffmpegRunning: false,
+        },
+      },
     );
 
     expect(health).toMatchObject({

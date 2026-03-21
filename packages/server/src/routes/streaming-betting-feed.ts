@@ -51,6 +51,7 @@ export type BettingFeedFrame = {
   seq: number;
   emittedAt: number;
   payload: BettingFeedPayload;
+  payloadJson: string;
   payloadBytes: number;
 };
 
@@ -66,6 +67,12 @@ export type ReplayDelivery =
       frames: BettingFeedFrame[];
       latestFrame: BettingFeedFrame | null;
       oldestSeq: number | null;
+    }
+  | {
+      mode: "live";
+      frames: [];
+      latestFrame: BettingFeedFrame;
+      oldestSeq: number;
     }
   | {
       mode: "reset";
@@ -202,10 +209,10 @@ export function selectReplayDelivery(
 
   if (low >= frames.length) {
     return {
-      mode: "bootstrap",
+      mode: "live",
       frames: [],
       latestFrame,
-      oldestSeq,
+      oldestSeq: oldestSeq ?? latestFrame.seq,
     };
   }
 

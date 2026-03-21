@@ -74,25 +74,27 @@ function createCycle(
 }
 
 function createFrame(seq: number): BettingFeedFrame {
+  const payload = buildBettingFeedPayload({
+    sourceEpoch: 9_999,
+    seq,
+    emittedAt: 10_000 + seq,
+    rendererHealth: {
+      ready: seq % 2 === 0,
+      degradedReason: seq % 2 === 0 ? null : "loading_overlay_active",
+      updatedAt: 10_500 + seq,
+    },
+    cycle: createCycle({
+      phaseVersion: seq,
+      winnerId: seq % 2 === 0 ? "agent-a" : "agent-b",
+      duelEndTime: seq % 2 === 0 ? 20_000 : 21_000,
+      winReason: seq % 2 === 0 ? "kill" : "hp_advantage",
+    }),
+  });
   return {
     seq,
     emittedAt: 10_000 + seq,
-    payload: buildBettingFeedPayload({
-      sourceEpoch: 9_999,
-      seq,
-      emittedAt: 10_000 + seq,
-      rendererHealth: {
-        ready: seq % 2 === 0,
-        degradedReason: seq % 2 === 0 ? null : "loading_overlay_active",
-        updatedAt: 10_500 + seq,
-      },
-      cycle: createCycle({
-        phaseVersion: seq,
-        winnerId: seq % 2 === 0 ? "agent-a" : "agent-b",
-        duelEndTime: seq % 2 === 0 ? 20_000 : 21_000,
-        winReason: seq % 2 === 0 ? "kill" : "hp_advantage",
-      }),
-    }),
+    payload,
+    payloadJson: JSON.stringify(payload),
     payloadBytes: 0,
   };
 }
@@ -164,7 +166,7 @@ describe("streaming-betting-feed", () => {
     });
 
     expect(selectReplayDelivery(frames, 3)).toMatchObject({
-      mode: "bootstrap",
+      mode: "live",
       latestFrame: frames[2],
       oldestSeq: 1,
     });

@@ -8,14 +8,14 @@ type BettingFeedTokenParams = {
 
 export type BettingFeedAccessTokenResolution = {
   token: string | null;
-  source: "betting-feed" | "viewer-fallback" | null;
+  source: "betting-feed" | null;
 };
 
 export function shouldSkipBettingFeedAuth(
   env: Record<string, string | undefined>,
 ): boolean {
   return (
-    env.NODE_ENV !== "production" &&
+    (env.NODE_ENV === "development" || env.NODE_ENV === "test") &&
     (env.BETTING_FEED_SKIP_AUTH || "").trim().toLowerCase() === "true"
   );
 }
@@ -66,14 +66,6 @@ export function resolveBettingFeedAccessToken(
     return {
       token: bettingFeedToken,
       source: "betting-feed",
-    };
-  }
-
-  const viewerToken = env.STREAMING_VIEWER_ACCESS_TOKEN?.trim() || null;
-  if (viewerToken) {
-    return {
-      token: viewerToken,
-      source: "viewer-fallback",
     };
   }
 
