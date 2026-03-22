@@ -1,19 +1,10 @@
-import fs from "node:fs/promises";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { RateLimitOptions } from "@fastify/rate-limit";
 import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
-import type {
-  World,
-  StreamingGuardrailPhase,
-} from "@hyperscape/shared";
-import {
-  deriveStreamingGuardrailReason,
-  isActiveStreamingGuardrailPhase,
-} from "@hyperscape/shared";
+import type { World } from "@hyperscape/shared";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import type { StreamingDuelCycle } from "../systems/StreamingDuelScheduler/types.js";
-import { getStreamCapture } from "../streaming/stream-capture.js";
 import { storage } from "../database/schema.js";
 import {
   BETTING_FEED_SCHEMA_VERSION,
@@ -31,6 +22,15 @@ import {
   shouldSkipBettingFeedAuth,
 } from "./streaming-betting-auth.js";
 import { trimReplayFrames } from "./streaming-sse-buffer.js";
+import { deriveBettingRendererHealth } from "./streaming-betting-health.js";
+import { acquireExternalStatusPoller } from "./streaming-external-status.js";
+
+// Re-exports so existing consumers (streaming.ts, tests) don't need import changes.
+export { deriveBettingRendererHealth } from "./streaming-betting-health.js";
+export {
+  loadExternalRtmpStatusSnapshot,
+  parseExternalRtmpStatusSnapshot,
+} from "./streaming-external-status.js";
 
 type RegisterStreamingBettingRoutesOptions = {
   fastify: FastifyInstance;
@@ -71,281 +71,11 @@ type BettingRouteMetrics = {
 type SseSendStatus = "ok" | "closed" | "slow" | "error";
 
 type DatabaseSystemLike = Pick<DatabaseSystem, "getDb">;
-type ExternalRtmpStatusSnapshot = Record<string, unknown>;
-type ExternalStatusPoller = {
-  snapshot: ExternalRtmpStatusSnapshot | null;
-  refreshPromise: Promise<void> | null;
-  interval: ReturnType<typeof setInterval>;
-  refCount: number;
-};
 
 type BettingClientIdAllocation = {
   clientId: number;
   nextCursor: number;
 };
-
-const externalStatusPollers = new Map<string, ExternalStatusPoller>();
-
-function asFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
-}
-
-function normalizeRendererHealthSnapshot(
-  value: unknown,
-): BettingFeedRendererHealth | null {
-  if (!value || typeof value !== "object") return null;
-  const candidate = value as Record<string, unknown>;
-  return {
-    ready: candidate.ready === true,
-    degradedReason: asString(candidate.degradedReason),
-    updatedAt: asFiniteNumber(candidate.updatedAt),
-  };
-}
-
-function deriveCycleGuardrailReason(
-  cycle: StreamingDuelCycle | null,
-): string | null {
-  if (!cycle) {
-    return null;
-  }
-  return deriveStreamingGuardrailReason({
-    phase: cycle.phase as StreamingGuardrailPhase | null | undefined,
-    agent1: cycle.agent1
-      ? {
-          id: cycle.agent1.characterId,
-          name: cycle.agent1.name,
-          hp: cycle.agent1.currentHp,
-          maxHp: cycle.agent1.maxHp,
-        }
-      : null,
-    agent2: cycle.agent2
-      ? {
-          id: cycle.agent2.characterId,
-          name: cycle.agent2.name,
-          hp: cycle.agent2.currentHp,
-          maxHp: cycle.agent2.maxHp,
-        }
-      : null,
-    arenaPositions: cycle.arenaPositions,
-  });
-}
-
-export function parseExternalRtmpStatusSnapshot(
-  raw: string,
-  externalStatusMaxAgeMs: number,
-  options?: { allowStale?: boolean },
-): ExternalRtmpStatusSnapshot | null {
-  try {
-    const normalized = raw.trim();
-    if (!normalized) return null;
-    const parsed = JSON.parse(normalized) as ExternalRtmpStatusSnapshot;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (!Array.isArray(parsed.destinations)) return null;
-    if (typeof parsed.stats !== "object" || parsed.stats == null) return null;
-
-    const updatedAt = Number(parsed.updatedAt || 0);
-    if (
-      !options?.allowStale &&
-      Number.isFinite(updatedAt) &&
-      updatedAt > 0 &&
-      Date.now() - updatedAt > externalStatusMaxAgeMs
-    ) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export async function loadExternalRtmpStatusSnapshot(
-  externalStatusFile: string | null,
-  externalStatusMaxAgeMs: number,
-  options?: { allowStale?: boolean },
-): Promise<ExternalRtmpStatusSnapshot | null> {
-  if (!externalStatusFile) return null;
-  try {
-    const raw = await fs.readFile(externalStatusFile, "utf8");
-    return parseExternalRtmpStatusSnapshot(
-      raw,
-      externalStatusMaxAgeMs,
-      options,
-    );
-  } catch {
-    return null;
-  }
-}
-
-export function deriveBettingRendererHealth(
-  cycle: StreamingDuelCycle | null,
-  options?: {
-    externalStatusSnapshot?: ExternalRtmpStatusSnapshot | null;
-    externalStatusMaxAgeMs?: number;
-    nowMs?: number;
-    captureStats?: {
-      clientConnected: boolean;
-      ffmpegRunning: boolean;
-    };
-  },
-): BettingFeedRendererHealth {
-  const updatedAt = options?.nowMs ?? Date.now();
-  const guardrailReason = deriveCycleGuardrailReason(cycle);
-  if (guardrailReason) {
-    return {
-      ready: false,
-      degradedReason: guardrailReason,
-      updatedAt,
-    };
-  }
-
-  const externalSnapshot = options?.externalStatusSnapshot ?? null;
-  const externalRendererHealth = normalizeRendererHealthSnapshot(
-    externalSnapshot?.rendererHealth,
-  );
-  if (externalRendererHealth) {
-    const ageMs =
-      externalRendererHealth.updatedAt != null
-        ? Math.max(0, updatedAt - externalRendererHealth.updatedAt)
-        : null;
-    if (
-      externalRendererHealth.updatedAt != null &&
-      ageMs != null &&
-      ageMs > (options?.externalStatusMaxAgeMs ?? 15_000)
-    ) {
-      return {
-        ready: false,
-        degradedReason: "renderer_health_stale",
-        updatedAt,
-      };
-    }
-    return externalRendererHealth;
-  }
-
-  const captureStats = options?.captureStats ?? getStreamCapture().getStats();
-  if (isActiveStreamingGuardrailPhase(cycle?.phase as StreamingGuardrailPhase)) {
-    if (!captureStats.clientConnected) {
-      return {
-        ready: false,
-        degradedReason: "capture_client_disconnected",
-        updatedAt,
-      };
-    }
-    if (!captureStats.ffmpegRunning) {
-      return {
-        ready: false,
-        degradedReason: "capture_pipeline_inactive",
-        updatedAt,
-      };
-    }
-  }
-
-  return {
-    ready: true,
-    degradedReason: null,
-    updatedAt,
-  };
-}
-
-function getExternalStatusPollerKey(
-  externalStatusFile: string,
-  externalStatusMaxAgeMs: number,
-): string {
-  return `${externalStatusFile}::${externalStatusMaxAgeMs}`;
-}
-
-async function refreshExternalStatusPoller(
-  poller: ExternalStatusPoller,
-  externalStatusFile: string,
-  externalStatusMaxAgeMs: number,
-): Promise<void> {
-  if (poller.refreshPromise) {
-    return poller.refreshPromise;
-  }
-  poller.refreshPromise = (async () => {
-    const nextSnapshot = await loadExternalRtmpStatusSnapshot(
-      externalStatusFile,
-      externalStatusMaxAgeMs,
-      { allowStale: true },
-    );
-    if (nextSnapshot) {
-      poller.snapshot = nextSnapshot;
-    }
-  })().finally(() => {
-    poller.refreshPromise = null;
-  });
-  return poller.refreshPromise;
-}
-
-function acquireExternalStatusPoller(
-  externalStatusFile: string | null,
-  externalStatusMaxAgeMs: number,
-): {
-  getSnapshot(): ExternalRtmpStatusSnapshot | null;
-  refresh(): Promise<void>;
-  release(): void;
-} | null {
-  if (!externalStatusFile) {
-    return null;
-  }
-
-  const key = getExternalStatusPollerKey(
-    externalStatusFile,
-    externalStatusMaxAgeMs,
-  );
-  let poller = externalStatusPollers.get(key);
-  if (!poller) {
-    const refreshIntervalMs = Math.max(
-      1_000,
-      Math.min(externalStatusMaxAgeMs, 5_000),
-    );
-    poller = {
-      snapshot: null,
-      refreshPromise: null,
-      interval: setInterval(() => {
-        void refreshExternalStatusPoller(
-          poller!,
-          externalStatusFile,
-          externalStatusMaxAgeMs,
-        );
-      }, refreshIntervalMs),
-      refCount: 0,
-    };
-    externalStatusPollers.set(key, poller);
-    void refreshExternalStatusPoller(
-      poller,
-      externalStatusFile,
-      externalStatusMaxAgeMs,
-    );
-  }
-
-  poller.refCount += 1;
-  return {
-    getSnapshot: () => poller?.snapshot ?? null,
-    refresh: () =>
-      refreshExternalStatusPoller(
-        poller!,
-        externalStatusFile,
-        externalStatusMaxAgeMs,
-      ),
-    release: () => {
-      if (!poller) {
-        return;
-      }
-      poller.refCount = Math.max(0, poller.refCount - 1);
-      if (poller.refCount > 0) {
-        return;
-      }
-      clearInterval(poller.interval);
-      externalStatusPollers.delete(key);
-    },
-  };
-}
 
 function formatSseEvent(event: string, data: string, id?: number): string {
   const normalizedData = data.replace(/\n/g, "\ndata: ");
@@ -574,7 +304,7 @@ export function registerStreamingBettingRoutes(
   };
 
   const getDatabaseSystem = (): DatabaseSystemLike | null =>
-    (world.getSystem("database") as unknown as DatabaseSystemLike | null);
+    world.getSystem("database") as unknown as DatabaseSystemLike | null;
 
   const persistBettingSourceEpoch = async (epoch: number): Promise<void> => {
     const db = getDatabaseSystem()?.getDb?.();
@@ -949,33 +679,49 @@ export function registerStreamingBettingRoutes(
 
   // Legacy compatibility alias. Canonical internal betting bootstrap route:
   // /api/internal/bet-sync/state
-  fastify.get("/api/streaming/betting/bootstrap", {
-    config: { rateLimit: bootstrapRateLimit },
-    preHandler: bettingBootstrapAuthPreHandler,
-  }, handleBettingBootstrap);
+  fastify.get(
+    "/api/streaming/betting/bootstrap",
+    {
+      config: { rateLimit: bootstrapRateLimit },
+      preHandler: bettingBootstrapAuthPreHandler,
+    },
+    handleBettingBootstrap,
+  );
 
   // Canonical internal betting bootstrap route.
-  fastify.get("/api/internal/bet-sync/state", {
-    config: { rateLimit: bootstrapRateLimit },
-    preHandler: bettingBootstrapAuthPreHandler,
-  }, handleBettingBootstrap);
+  fastify.get(
+    "/api/internal/bet-sync/state",
+    {
+      config: { rateLimit: bootstrapRateLimit },
+      preHandler: bettingBootstrapAuthPreHandler,
+    },
+    handleBettingBootstrap,
+  );
 
   // Legacy compatibility alias. Canonical internal betting SSE route:
   // /api/internal/bet-sync/events
   fastify.get<{
     Querystring: { since?: string };
-  }>("/api/streaming/betting/events", {
-    config: { rateLimit: eventsRateLimit },
-    preHandler: bettingEventsAuthPreHandler,
-  }, handleBettingEvents);
+  }>(
+    "/api/streaming/betting/events",
+    {
+      config: { rateLimit: eventsRateLimit },
+      preHandler: bettingEventsAuthPreHandler,
+    },
+    handleBettingEvents,
+  );
 
   // Canonical internal betting SSE route.
   fastify.get<{
     Querystring: { since?: string };
-  }>("/api/internal/bet-sync/events", {
-    config: { rateLimit: eventsRateLimit },
-    preHandler: bettingEventsAuthPreHandler,
-  }, handleBettingEvents);
+  }>(
+    "/api/internal/bet-sync/events",
+    {
+      config: { rateLimit: eventsRateLimit },
+      preHandler: bettingEventsAuthPreHandler,
+    },
+    handleBettingEvents,
+  );
 
   fastify.addHook("onClose", async () => {
     closeRoutes();

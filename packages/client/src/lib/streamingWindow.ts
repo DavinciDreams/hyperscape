@@ -18,4 +18,13 @@ export type StreamingWindow = Window & {
   __CDN_URL?: string;
   __HYPERSCAPE_STREAM_READY__?: boolean;
   __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingWindowRendererHealth | null;
+  /**
+   * Boot/loading phase indicator read by the capture pipeline's renderer
+   * health probe. Set during the loading overlay lifecycle and cleared once
+   * the stream is fully ready. Values match the probe's detection categories:
+   * - "connecting" | "initializing" | "loading_assets" | "finalizing"
+   * - "error:webgpu_required" | "error:init_failed" | "error:http"
+   * - null when boot is complete
+   */
+  __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
 };

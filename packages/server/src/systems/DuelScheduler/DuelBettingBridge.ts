@@ -102,9 +102,7 @@ type DuelBettingBridgeDeps = {
 type UnknownRecord = Record<string, unknown>;
 
 function asRecord(value: unknown): UnknownRecord | null {
-  return value && typeof value === "object"
-    ? (value as UnknownRecord)
-    : null;
+  return value && typeof value === "object" ? (value as UnknownRecord) : null;
 }
 
 function asNonEmptyString(value: unknown): string | null {
@@ -512,7 +510,11 @@ export class DuelBettingBridge {
   private async handleDuelScheduled(payload: unknown): Promise<void> {
     const data = parseDuelScheduledPayload(payload);
     if (!data) {
-      warnInvalidBridgePayload("duel:scheduled", payload, "missing_required_fields");
+      warnInvalidBridgePayload(
+        "duel:scheduled",
+        payload,
+        "missing_required_fields",
+      );
       return;
     }
 
@@ -1072,6 +1074,10 @@ export class DuelBettingBridge {
   }
 
   private async reconcileLiveCycle(): Promise<void> {
+    // Dropping concurrent reconcile calls is safe: each invocation reads the
+    // full current cycle state fresh from the scheduler, and the periodic
+    // reconcileTimer ensures regular re-checks regardless of dropped
+    // event-driven hints from streaming:fight:start or resolution lookups.
     if (this.reconcileInFlight) {
       return;
     }
@@ -1145,7 +1151,11 @@ export class DuelBettingBridge {
   private async handleDuelResult(payload: unknown): Promise<void> {
     const data = parseDuelResultPayload(payload);
     if (!data) {
-      warnInvalidBridgePayload("duel:result", payload, "missing_required_fields");
+      warnInvalidBridgePayload(
+        "duel:result",
+        payload,
+        "missing_required_fields",
+      );
       return;
     }
     const winnerId = data.winnerId;

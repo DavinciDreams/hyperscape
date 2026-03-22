@@ -366,6 +366,7 @@ async function probeRendererHealth(
         updatedAt?: number | null;
         phase?: string | null;
       } | null;
+      __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
     };
     const explicitHealth =
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ &&
@@ -373,8 +374,8 @@ async function probeRendererHealth(
         ? {
             ready: win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.ready === true,
             degradedReason:
-              typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.degradedReason ===
-              "string"
+              typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__
+                .degradedReason === "string"
                 ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.degradedReason
                 : null,
             updatedAt:
@@ -393,25 +394,20 @@ async function probeRendererHealth(
           }
         : null;
 
-    let normalizedText = "";
-    if (!explicitHealth) {
-      normalizedText = (document.body?.textContent || "")
-        .slice(0, 1024)
-        .toLowerCase();
-    }
+    // Read boot status from a lightweight window global instead of
+    // document.body.textContent which forces full text computation of
+    // the game DOM every probe interval and can cause layout thrashing.
+    const bootStatus =
+      typeof win.__HYPERSCAPE_STREAM_BOOT_STATUS__ === "string"
+        ? win.__HYPERSCAPE_STREAM_BOOT_STATUS__
+        : null;
 
     const hasStreamingBootUi =
       !explicitHealth &&
-      (normalizedText.includes("waiting for duel data") ||
-        normalizedText.includes("initializing world systems") ||
-        normalizedText.includes("initializing") ||
-        normalizedText.includes("loading assets") ||
-        normalizedText.includes("finalizing"));
+      bootStatus !== null &&
+      !bootStatus.startsWith("error:");
     const hasCriticalErrorUi =
-      !explicitHealth &&
-      (normalizedText.includes("initialization failed") ||
-        normalizedText.includes("webgpu required") ||
-        normalizedText.includes("http error! status"));
+      !explicitHealth && bootStatus !== null && bootStatus.startsWith("error:");
     return {
       explicitHealth,
       hasCanvas: document.querySelector("canvas") !== null,
@@ -422,8 +418,7 @@ async function probeRendererHealth(
   });
 
   const explicitHealth =
-    probe.explicitHealth &&
-    typeof probe.explicitHealth === "object"
+    probe.explicitHealth && typeof probe.explicitHealth === "object"
       ? probe.explicitHealth
       : null;
 
@@ -431,12 +426,11 @@ async function probeRendererHealth(
     const criticalUiVisible = probe.hasCriticalErrorUi === true;
     return {
       ready: criticalUiVisible ? false : explicitHealth.ready === true,
-      degradedReason:
-        criticalUiVisible
-          ? normalizedCriticalErrorReason(probe)
-          : typeof explicitHealth.degradedReason === "string"
-            ? explicitHealth.degradedReason
-            : null,
+      degradedReason: criticalUiVisible
+        ? normalizedCriticalErrorReason(probe)
+        : typeof explicitHealth.degradedReason === "string"
+          ? explicitHealth.degradedReason
+          : null,
       updatedAt:
         typeof explicitHealth.updatedAt === "number"
           ? explicitHealth.updatedAt
@@ -455,16 +449,18 @@ async function probeRendererHealth(
   return {
     ready:
       !probe.hasCriticalErrorUi &&
-      (probe.readyFlag === true || (probe.hasCanvas && !probe.hasStreamingBootUi)),
+      (probe.readyFlag === true ||
+        (probe.hasCanvas && !probe.hasStreamingBootUi)),
     degradedReason:
       !probe.hasCriticalErrorUi &&
-      (probe.readyFlag === true || (probe.hasCanvas && !probe.hasStreamingBootUi))
+      (probe.readyFlag === true ||
+        (probe.hasCanvas && !probe.hasStreamingBootUi))
         ? null
         : probe.hasCriticalErrorUi
           ? normalizedCriticalErrorReason(probe)
-        : probe.hasStreamingBootUi
-          ? "loading_overlay_active"
-          : "canvas_missing",
+          : probe.hasStreamingBootUi
+            ? "loading_overlay_active"
+            : "canvas_missing",
     updatedAt: probedAt,
     phase: null,
     diagnostics: {

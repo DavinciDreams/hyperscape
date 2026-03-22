@@ -275,6 +275,7 @@ export function StreamingMode() {
       const win = window as StreamingWindow;
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
 
       // Force potato-mode graphics tuned for stable 720p streaming output.
       // Keep DPR at 1 so capture canvas stays at target resolution.
@@ -299,7 +300,8 @@ export function StreamingMode() {
         prefs.setEntityHighlighting?.(false);
       }
 
-      const onWorldReady = () => {
+      const markWorldReady = () => {
+        if (worldReadyRef.current) return;
         worldReadyRef.current = true;
         setWorldReady(true);
         if (worldReadyTimeoutRef.current) {
@@ -307,7 +309,8 @@ export function StreamingMode() {
           worldReadyTimeoutRef.current = null;
         }
       };
-      world.on(EventType.READY, onWorldReady);
+
+      world.on(EventType.READY, markWorldReady);
 
       // Safety net logging only: do not force world-ready state. Forcing
       // readiness can hide renderer/bootstrap failures and lock streams at 3%.
@@ -347,14 +350,7 @@ export function StreamingMode() {
         // the loading screen can dismiss.  After that, ClientCameraSystem
         // handles all target switches via its own streaming:state:update
         // subscription with smooth cinematic transitions — no loading screen.
-        if (!worldReadyRef.current) {
-          worldReadyRef.current = true;
-          setWorldReady(true);
-          if (worldReadyTimeoutRef.current) {
-            clearTimeout(worldReadyTimeoutRef.current);
-            worldReadyTimeoutRef.current = null;
-          }
-        }
+        markWorldReady();
         if (
           state.cameraTarget &&
           state.cameraTarget !== lastCameraTargetRef.current
@@ -393,7 +389,7 @@ export function StreamingMode() {
       };
       world.on("streaming:state:update", onStreamingStateUpdate);
       worldListenerCleanupRef.current = () => {
-        world.off(EventType.READY, onWorldReady);
+        world.off(EventType.READY, markWorldReady);
         world.off("streaming:state:update", onStreamingStateUpdate);
       };
 
@@ -905,6 +901,7 @@ export function StreamingMode() {
       const win = window as StreamingWindow;
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = null;
       if (worldReadyTimeoutRef.current) {
         clearTimeout(worldReadyTimeoutRef.current);
         worldReadyTimeoutRef.current = null;
@@ -964,6 +961,32 @@ export function StreamingMode() {
     win.__HYPERSCAPE_STREAM_READY__ = rendererHealth.ready;
     win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = rendererHealth;
   }, [rendererHealth]);
+
+  // Write boot status to a window global so the capture pipeline's renderer
+  // health probe can detect loading/error state without reading DOM textContent.
+  useEffect(() => {
+    const win = window as StreamingWindow;
+    if (loadingDismissed) {
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = null;
+    } else if (clientInitError) {
+      const lower = clientInitError.toLowerCase();
+      if (lower.includes("webgpu")) {
+        win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:webgpu_required";
+      } else if (lower.includes("http error")) {
+        win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:http";
+      } else {
+        win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:init_failed";
+      }
+    } else if (!connected) {
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "connecting";
+    } else if (!worldReady) {
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
+    } else if (!terrainReady) {
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_assets";
+    } else {
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "finalizing";
+    }
+  }, [clientInitError, connected, loadingDismissed, terrainReady, worldReady]);
 
   // Trigger fade-out once when the stream is first ready.
   useEffect(() => {
