@@ -240,7 +240,7 @@ export function registerStreamingBettingRoutes(
     message: string,
   ): SseSendStatus => {
     const raw = reply.raw;
-    if (raw.destroyed || raw.writableEnded) {
+    if (raw.destroyed || raw.writableEnded || !raw.writable) {
       return "closed";
     }
     if (raw.writableLength > maxPendingBytes) {
@@ -355,16 +355,14 @@ export function registerStreamingBettingRoutes(
           .where(eq(storage.key, BETTING_SOURCE_EPOCH_STORAGE_KEY))
           .limit(1);
         const rawValue = rows[0]?.value ?? "";
-        let parsedEpoch = Number.parseInt(rawValue, 10);
-        if (!Number.isFinite(parsedEpoch)) {
-          try {
-            const parsed = JSON.parse(rawValue) as {
-              sourceEpoch?: number;
-            };
-            parsedEpoch = Number(parsed?.sourceEpoch);
-          } catch {
-            parsedEpoch = Number.NaN;
-          }
+        let parsedEpoch = Number.NaN;
+        try {
+          const parsed = JSON.parse(rawValue) as {
+            sourceEpoch?: number;
+          };
+          parsedEpoch = Number(parsed?.sourceEpoch);
+        } catch {
+          // Stored value is not valid JSON — fall through to Date.now().
         }
 
         bettingSourceEpoch = Number.isFinite(parsedEpoch)

@@ -42,7 +42,8 @@ export function parseExternalRtmpStatusSnapshot(
     const normalized = raw.trim();
     if (!normalized) return null;
     const parsed = JSON.parse(normalized) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== "object") return null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return null;
     if (!Array.isArray(parsed.destinations)) return null;
     if (typeof parsed.stats !== "object" || parsed.stats == null) return null;
 

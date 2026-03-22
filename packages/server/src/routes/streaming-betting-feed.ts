@@ -1,7 +1,11 @@
-import type { StreamingDuelCycle, StreamingPhase } from "../systems/StreamingDuelScheduler/types.js";
+import type {
+  StreamingDuelCycle,
+  StreamingPhase,
+} from "../systems/StreamingDuelScheduler/types.js";
 
 export const BETTING_FEED_SCHEMA_VERSION = 1;
-export const BETTING_SOURCE_EPOCH_STORAGE_KEY = "streaming:betting-source-epoch";
+export const BETTING_SOURCE_EPOCH_STORAGE_KEY =
+  "streaming:betting-source-epoch";
 
 export type BettingFeedAgent = {
   id: string;
@@ -127,8 +131,10 @@ export function buildBettingFeedPayload(params: {
     winnerId: cycle?.winnerId ?? null,
     winnerName: cycle?.winnerId
       ? cycle.agent1?.characterId === cycle.winnerId
-        ? cycle.agent1?.name ?? null
-        : cycle.agent2?.name ?? null
+        ? (cycle.agent1?.name ?? null)
+        : cycle.agent2?.characterId === cycle.winnerId
+          ? (cycle.agent2?.name ?? null)
+          : null
       : null,
     winReason: cycle?.winReason ?? null,
     agent1: toAgentSnapshot(cycle?.agent1 ?? null),
@@ -138,9 +144,7 @@ export function buildBettingFeedPayload(params: {
   };
 }
 
-export function buildBettingFeedDedupKey(
-  payload: BettingFeedPayload,
-): string {
+export function buildBettingFeedDedupKey(payload: BettingFeedPayload): string {
   return JSON.stringify({
     ...payload,
     emittedAt: 0,
