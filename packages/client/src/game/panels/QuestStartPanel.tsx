@@ -9,6 +9,11 @@
  */
 
 import React, { useEffect } from "react";
+import { useThemeStore } from "@/ui";
+import {
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
 
 interface QuestRequirements {
   quests: string[];
@@ -49,6 +54,7 @@ export function QuestStartPanel({
   onAccept,
   onDecline,
 }: QuestStartPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   // Inject themed scrollbar styles
   useEffect(() => {
     const styleId = "quest-start-scrollbar-styles";
@@ -83,6 +89,7 @@ export function QuestStartPanel({
     requirements.quests.length === 0 &&
     Object.keys(requirements.skills).length === 0 &&
     requirements.items.length === 0;
+  const declineButtonStyle = getShellControlButtonStyle(theme, "danger");
 
   return (
     <div
@@ -99,12 +106,10 @@ export function QuestStartPanel({
           maxWidth: "90vw",
           maxHeight: "85vh",
           padding: "1.5rem 2rem",
-          background:
-            "linear-gradient(to bottom, #d4c4a8 0%, #c9b896 50%, #bfae84 100%)",
-          border: "4px solid #8b7355",
-          borderRadius: "8px",
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
           boxShadow:
-            "0 0 40px rgba(201, 162, 39, 0.5), inset 0 0 20px rgba(139, 115, 85, 0.3)",
+            "0 0 40px rgba(201, 162, 39, 0.35), inset 0 0 20px rgba(139, 115, 85, 0.18)",
           overflowY: "auto",
         }}
         onClick={(e) => e.stopPropagation()}
@@ -127,8 +132,8 @@ export function QuestStartPanel({
           <h2
             className="m-0 text-xl font-bold"
             style={{
-              color: "#4a3f2f",
-              textShadow: "1px 1px 2px rgba(255, 255, 255, 0.5)",
+              color: theme.colors.text.accent,
+              textShadow: "0 1px 2px rgba(0, 0, 0, 0.35)",
               fontFamily: "serif",
             }}
           >
@@ -140,17 +145,24 @@ export function QuestStartPanel({
         <div
           className="text-center mb-3 py-2"
           style={{
-            backgroundColor: "rgba(139, 115, 85, 0.2)",
-            borderRadius: "4px",
+            backgroundColor:
+              theme.name === "hyperscape"
+                ? "rgba(255, 255, 255, 0.05)"
+                : `${theme.colors.background.tertiary}55`,
+            borderRadius: `${theme.borderRadius.md}px`,
+            border: `1px solid ${theme.colors.border.default}40`,
           }}
         >
           <h3
             className="m-0 text-lg font-bold"
-            style={{ color: "#3a2f1f", fontFamily: "serif" }}
+            style={{ color: theme.colors.text.primary, fontFamily: "serif" }}
           >
             {questName}
           </h3>
-          <span className="text-sm" style={{ color: "#5a4f3f" }}>
+          <span
+            className="text-sm"
+            style={{ color: theme.colors.text.secondary }}
+          >
             Difficulty: {difficulty}
           </span>
         </div>
@@ -275,19 +287,26 @@ export function QuestStartPanel({
             onClick={onDecline}
             className="px-6 py-2 rounded cursor-pointer transition-all font-bold"
             style={{
-              background:
-                "linear-gradient(to bottom, #8f4a4a 0%, #7f3a3a 100%)",
-              border: "2px solid #5f2a2a",
-              color: "#ffffff",
+              ...declineButtonStyle,
+              width: "auto",
+              height: "auto",
+              padding: "0.5rem 1.5rem",
+              fontSize: theme.typography.fontSize.base,
               textShadow: "1px 1px 2px rgba(0, 0, 0, 0.5)",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(to bottom, #9f5a5a 0%, #8f4a4a 100%)";
+              e.currentTarget.style.backgroundColor = String(
+                declineButtonStyle["--shell-button-hover-bg"],
+              );
+              e.currentTarget.style.color = String(
+                declineButtonStyle["--shell-button-hover-fg"],
+              );
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(to bottom, #8f4a4a 0%, #7f3a3a 100%)";
+              e.currentTarget.style.backgroundColor = String(
+                declineButtonStyle.background,
+              );
+              e.currentTarget.style.color = String(declineButtonStyle.color);
             }}
           >
             Not Now

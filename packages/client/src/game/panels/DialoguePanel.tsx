@@ -17,6 +17,12 @@
 
 import React from "react";
 import type { World } from "@hyperscape/shared";
+import { useThemeStore } from "@/ui";
+import {
+  getPanelHeaderStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
 
 interface DialogueResponse {
   text: string;
@@ -47,6 +53,9 @@ export function DialoguePanel({
   onClose,
   world,
 }: DialoguePanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
+
   // NOTE: Distance validation is handled server-side by InteractionSessionManager.
   // The server sends 'dialogueClose' packets when the player moves too far away.
   // This prevents race conditions between client and server position sync under lag.
@@ -68,7 +77,7 @@ export function DialoguePanel({
 
   const handleContinue = () => {
     // Terminal node - send continue packet to server so it can execute any pending effects
-    // Server will then send dialogueEnd which triggers onClose via Sidebar
+    // Server will then send dialogueEnd which clears the active modal state
     if (world.network?.send) {
       world.network.send("dialogueContinue", {
         npcId,
@@ -84,11 +93,9 @@ export function DialoguePanel({
       style={{
         width: "40rem",
         maxWidth: "90vw",
-        background: "rgba(11, 10, 21, 0.85)",
-        border: "2px solid #c9a227",
-        borderRadius: "0.5rem",
+        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+        borderRadius: theme.borderRadius.xl,
         padding: "1.5rem",
-        backdropFilter: "blur(10px)",
         boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
       }}
       onClick={(e) => e.stopPropagation()}
@@ -96,16 +103,38 @@ export function DialoguePanel({
       {/* NPC Name Header */}
       <div
         className="flex justify-between items-center mb-3 pb-2"
-        style={{ borderBottom: "1px solid #c9a227" }}
+        style={{
+          ...getPanelHeaderStyle(theme),
+          margin: "-1.5rem -1.5rem 0.75rem",
+          padding: "0.75rem 1rem",
+        }}
       >
-        <h3 className="m-0 text-lg font-bold" style={{ color: "#c9a227" }}>
+        <h3
+          className="m-0 text-lg font-bold"
+          style={{ color: theme.colors.text.accent }}
+        >
           {npcName}
         </h3>
         <button
           onClick={onClose}
-          className="bg-transparent border-none text-gray-400 hover:text-white cursor-pointer text-xl leading-none"
+          className="cursor-pointer text-xl leading-none"
+          style={{ ...closeButtonStyle, width: 28, height: 28, fontSize: 18 }}
           title="Close dialogue"
           aria-label="Close dialogue"
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = String(
+              closeButtonStyle["--shell-button-hover-bg"],
+            );
+            e.currentTarget.style.color = String(
+              closeButtonStyle["--shell-button-hover-fg"],
+            );
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = String(
+              closeButtonStyle.background,
+            );
+            e.currentTarget.style.color = String(closeButtonStyle.color);
+          }}
         >
           x
         </button>
@@ -117,6 +146,7 @@ export function DialoguePanel({
         style={{
           fontSize: "1rem",
           minHeight: "3rem",
+          color: theme.colors.text.primary,
         }}
       >
         {text}
@@ -132,17 +162,27 @@ export function DialoguePanel({
               className="w-full text-left py-2 px-4 rounded cursor-pointer transition-all"
               aria-label={`Response ${index + 1}: ${response.text}`}
               style={{
-                background: "rgba(201, 162, 39, 0.1)",
-                border: "1px solid rgba(201, 162, 39, 0.3)",
-                color: "#e0d6c0",
+                background:
+                  theme.name === "hyperscape"
+                    ? "linear-gradient(180deg, rgba(240, 208, 96, 0.12) 0%, rgba(54, 42, 18, 0.16) 100%)"
+                    : `${theme.colors.accent.primary}12`,
+                border: `1px solid ${theme.colors.accent.primary}40`,
+                color: theme.colors.text.secondary,
+                borderRadius: theme.borderRadius.md,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(201, 162, 39, 0.2)";
-                e.currentTarget.style.borderColor = "#c9a227";
+                e.currentTarget.style.background =
+                  theme.name === "hyperscape"
+                    ? "linear-gradient(180deg, rgba(240, 208, 96, 0.18) 0%, rgba(54, 42, 18, 0.22) 100%)"
+                    : `${theme.colors.accent.primary}18`;
+                e.currentTarget.style.borderColor = `${theme.colors.accent.primary}80`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(201, 162, 39, 0.1)";
-                e.currentTarget.style.borderColor = "rgba(201, 162, 39, 0.3)";
+                e.currentTarget.style.background =
+                  theme.name === "hyperscape"
+                    ? "linear-gradient(180deg, rgba(240, 208, 96, 0.12) 0%, rgba(54, 42, 18, 0.16) 100%)"
+                    : `${theme.colors.accent.primary}12`;
+                e.currentTarget.style.borderColor = `${theme.colors.accent.primary}40`;
               }}
             >
               {index + 1}. {response.text}
@@ -154,15 +194,25 @@ export function DialoguePanel({
             className="w-full py-2 px-4 rounded cursor-pointer transition-all"
             aria-label="Continue dialogue"
             style={{
-              background: "rgba(201, 162, 39, 0.2)",
-              border: "1px solid #c9a227",
-              color: "#c9a227",
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(240, 208, 96, 0.2) 0%, rgba(67, 51, 18, 0.24) 100%)"
+                  : `${theme.colors.accent.primary}20`,
+              border: `1px solid ${theme.colors.accent.primary}70`,
+              color: theme.colors.text.accent,
+              borderRadius: theme.borderRadius.md,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(201, 162, 39, 0.3)";
+              e.currentTarget.style.background =
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(240, 208, 96, 0.28) 0%, rgba(67, 51, 18, 0.32) 100%)"
+                  : `${theme.colors.accent.primary}28`;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(201, 162, 39, 0.2)";
+              e.currentTarget.style.background =
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(240, 208, 96, 0.2) 0%, rgba(67, 51, 18, 0.24) 100%)"
+                  : `${theme.colors.accent.primary}20`;
             }}
           >
             Click to continue...

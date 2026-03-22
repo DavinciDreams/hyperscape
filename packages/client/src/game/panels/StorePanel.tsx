@@ -21,6 +21,7 @@ import type { ClientWorld, InventorySlotItem } from "../../types";
 import { COLORS } from "../../constants";
 import { InventoryPanel } from "./InventoryPanel";
 import { useWindowStore, useThemeStore, useMobileLayout } from "@/ui";
+import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { getItem } from "@hyperscape/shared";
 import { formatItemName, formatPrice } from "@/utils";
 import { ItemIcon } from "@/ui/components/ItemIcon";
@@ -131,10 +132,9 @@ function ContextMenu({
   ];
 
   const menuContainerStyle: CSSProperties = {
-    background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-    border: `1px solid ${theme.colors.border.default}`,
-    borderRadius: theme.borderRadius.md,
-    boxShadow: theme.shadows.lg,
+    ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+    borderRadius: theme.borderRadius.lg,
+    boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255, 255, 255, 0.04)`,
     padding: `${theme.spacing.xs}px 0`,
     display: "inline-block",
   };
@@ -169,11 +169,11 @@ function ContextMenu({
         {/* Item name header */}
         <div
           style={{
+            ...getPanelHeaderStyle(theme),
             padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
             fontSize: theme.typography.fontSize.xs,
             fontWeight: theme.typography.fontWeight.bold,
             color: theme.colors.accent.primary,
-            borderBottom: `1px solid ${theme.colors.border.default}`,
           }}
         >
           {menu.itemName}
@@ -184,7 +184,7 @@ function ContextMenu({
             padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
             fontSize: theme.typography.fontSize.xs,
             color: theme.colors.state.warning,
-            borderBottom: `1px solid ${theme.colors.border.default}`,
+            borderBottom: `1px solid ${theme.colors.border.default}40`,
           }}
         >
           {menu.type === "store" ? "Price" : "Sell"}: {formatPrice(menu.price)}{" "}
@@ -208,8 +208,11 @@ function ContextMenu({
                 padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                 fontSize: theme.typography.fontSize.sm,
                 borderRadius: theme.borderRadius.sm,
-                background: theme.colors.background.tertiary,
-                border: `1px solid ${theme.colors.border.default}`,
+                background:
+                  theme.name === "hyperscape"
+                    ? "rgba(255, 255, 255, 0.04)"
+                    : theme.colors.background.tertiary,
+                border: `1px solid ${theme.colors.border.default}50`,
                 color: theme.colors.text.primary,
                 outline: "none",
               }}
@@ -301,6 +304,8 @@ export function StorePanel({
   npcEntityId: _npcEntityId,
   onClose: _onClose, // Handled by ModalWindow wrapper, kept for interface compatibility
 }: StorePanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+
   // Cleanup: Remove any orphaned store windows from previous UI system
   // Store is now rendered as a modal, not a window
   useEffect(() => {
@@ -479,11 +484,9 @@ export function StorePanel({
         <div
           className="rounded-lg shadow-xl flex-1"
           style={{
-            background:
-              "linear-gradient(135deg, rgba(20, 15, 10, 0.98) 0%, rgba(15, 10, 5, 0.98) 100%)",
-            border: "2px solid rgba(139, 69, 19, 0.7)",
-            boxShadow:
-              "0 10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 4px rgba(242, 208, 138, 0.1)",
+            ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+            borderRadius: theme.borderRadius.xl,
+            boxShadow: `${theme.shadows.xl}, inset 0 2px 4px rgba(255, 255, 255, 0.05)`,
             maxWidth: "100%",
           }}
         >
@@ -494,6 +497,10 @@ export function StorePanel({
               maxHeight: shouldUseMobileUI
                 ? `${4 * (responsiveSlotSize + 8)}px`
                 : `${STORE_SCROLL_HEIGHT}px`,
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.12) 100%)"
+                  : "transparent",
             }}
           >
             <div
@@ -511,23 +518,29 @@ export function StorePanel({
                     width: `${responsiveSlotSize}px`,
                     height: `${responsiveSlotSize}px`,
                     background:
-                      "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(242, 208, 138, 0.05) 100%)",
-                    border: "1px solid rgba(242, 208, 138, 0.3)",
+                      theme.name === "hyperscape"
+                        ? "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(36, 26, 16, 0.28) 100%)"
+                        : `${theme.colors.accent.primary}10`,
+                    border: `1px solid ${theme.colors.accent.primary}40`,
+                    borderRadius: theme.borderRadius.md,
+                    boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
                   }}
                   title={`${item.name} - ${item.price} gp${item.stockQuantity !== -1 ? ` (${item.stockQuantity} in stock)` : ""}`}
                   onClick={() => handleBuy(item.itemId, 1)}
                   onContextMenu={(e) => openStoreContextMenu(e, item)}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background =
-                      "linear-gradient(135deg, rgba(242, 208, 138, 0.2) 0%, rgba(242, 208, 138, 0.1) 100%)";
-                    e.currentTarget.style.borderColor =
-                      "rgba(242, 208, 138, 0.5)";
+                      theme.name === "hyperscape"
+                        ? "linear-gradient(135deg, rgba(242, 208, 138, 0.18) 0%, rgba(54, 38, 20, 0.34) 100%)"
+                        : `${theme.colors.accent.primary}20`;
+                    e.currentTarget.style.borderColor = `${theme.colors.accent.primary}66`;
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background =
-                      "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(242, 208, 138, 0.05) 100%)";
-                    e.currentTarget.style.borderColor =
-                      "rgba(242, 208, 138, 0.3)";
+                      theme.name === "hyperscape"
+                        ? "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(36, 26, 16, 0.28) 100%)"
+                        : `${theme.colors.accent.primary}10`;
+                    e.currentTarget.style.borderColor = `${theme.colors.accent.primary}40`;
                   }}
                 >
                   <span className="select-none">
@@ -537,7 +550,7 @@ export function StorePanel({
                   <span
                     className="absolute bottom-0 right-0.5 text-[9px] font-bold"
                     style={{
-                      color: "#fbbf24",
+                      color: theme.colors.accent.gold,
                       textShadow: "1px 1px 1px black, -1px -1px 1px black",
                     }}
                   >
@@ -548,7 +561,10 @@ export function StorePanel({
                     <span
                       className="absolute top-0 left-0.5 text-[8px] font-bold"
                       style={{
-                        color: item.stockQuantity === 0 ? "#ff6666" : "#ffffff",
+                        color:
+                          item.stockQuantity === 0
+                            ? theme.colors.state.danger
+                            : theme.colors.text.primary,
                         textShadow: "1px 1px 1px black",
                       }}
                     >
@@ -564,13 +580,14 @@ export function StorePanel({
           <div
             className="px-4 py-2 rounded-b-lg"
             style={{
-              background: "rgba(0, 0, 0, 0.3)",
-              borderTop: "1px solid rgba(139, 69, 19, 0.3)",
+              ...getPanelHeaderStyle(theme),
+              borderTop: `1px solid ${theme.colors.border.default}40`,
+              borderBottom: "none",
             }}
           >
             <div
               className="flex justify-between items-center text-xs"
-              style={{ color: "rgba(242, 208, 138, 0.6)" }}
+              style={{ color: theme.colors.text.secondary }}
             >
               <span>Sells at {Math.floor(buybackRate * 100)}% value</span>
               <span>Left: Buy 1 | Right: Options</span>
@@ -582,11 +599,9 @@ export function StorePanel({
         <div
           className="rounded-lg shadow-xl overflow-hidden"
           style={{
-            background:
-              "linear-gradient(135deg, rgba(20, 15, 10, 0.98) 0%, rgba(15, 10, 5, 0.98) 100%)",
-            border: "2px solid rgba(139, 69, 19, 0.7)",
-            boxShadow:
-              "0 10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 4px rgba(242, 208, 138, 0.1)",
+            ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+            borderRadius: theme.borderRadius.xl,
+            boxShadow: `${theme.shadows.xl}, inset 0 2px 4px rgba(255, 255, 255, 0.05)`,
             width: shouldUseMobileUI ? "100%" : "200px",
             minWidth: shouldUseMobileUI ? undefined : "180px",
           }}
@@ -595,9 +610,7 @@ export function StorePanel({
           <div
             className="flex justify-between items-center px-3 py-1.5"
             style={{
-              background:
-                "linear-gradient(180deg, rgba(139, 69, 19, 0.4) 0%, rgba(139, 69, 19, 0.2) 100%)",
-              borderBottom: "1px solid rgba(139, 69, 19, 0.5)",
+              ...getPanelHeaderStyle(theme),
             }}
           >
             <h2

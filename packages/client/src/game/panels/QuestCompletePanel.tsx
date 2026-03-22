@@ -10,6 +10,8 @@
  */
 
 import React, { useEffect, useCallback } from "react";
+import { useThemeStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import type { ClientWorld } from "../../types";
 
 interface QuestRewards {
@@ -40,6 +42,7 @@ export function QuestCompletePanel({
   world,
   onClose,
 }: QuestCompletePanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   // Handle keyboard dismiss
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -92,21 +95,19 @@ export function QuestCompletePanel({
           width: "24rem",
           maxWidth: "90vw",
           padding: "2rem 2.5rem",
-          background:
-            "linear-gradient(to bottom, #d4c4a8 0%, #c9b896 50%, #bfae84 100%)",
-          border: "4px solid #8b7355",
-          borderRadius: "8px",
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
           boxShadow:
-            "0 0 40px rgba(201, 162, 39, 0.5), inset 0 0 20px rgba(139, 115, 85, 0.3)",
+            "0 0 40px rgba(201, 162, 39, 0.35), inset 0 0 20px rgba(139, 115, 85, 0.18)",
           // Parchment texture effect via gradient
           backgroundImage: `
-            linear-gradient(to bottom, #d4c4a8 0%, #c9b896 50%, #bfae84 100%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%),
             repeating-linear-gradient(
               0deg,
               transparent,
               transparent 2px,
-              rgba(139, 115, 85, 0.03) 2px,
-              rgba(139, 115, 85, 0.03) 4px
+              rgba(255, 255, 255, 0.02) 2px,
+              rgba(255, 255, 255, 0.02) 4px
             )
           `,
         }}
@@ -129,8 +130,8 @@ export function QuestCompletePanel({
         <h2
           className="m-0 mb-4 text-2xl font-bold"
           style={{
-            color: "#4a3f2f",
-            textShadow: "1px 1px 2px rgba(255, 255, 255, 0.5)",
+            color: theme.colors.text.accent,
+            textShadow: "0 1px 2px rgba(0, 0, 0, 0.35)",
             fontFamily: "serif",
           }}
         >
@@ -193,7 +194,10 @@ export function QuestCompletePanel({
         </div>
 
         {/* Dismiss Hint */}
-        <p className="m-0 mt-6 text-sm" style={{ color: "#7a6f5f" }}>
+        <p
+          className="m-0 mt-6 text-sm"
+          style={{ color: theme.colors.text.muted }}
+        >
           Click anywhere to continue
         </p>
 

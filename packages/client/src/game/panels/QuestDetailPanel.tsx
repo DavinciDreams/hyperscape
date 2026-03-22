@@ -10,6 +10,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useQuestSelectionStore, useTheme } from "@/ui";
 import {
+  getPanelHeaderStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
+import {
   type Quest,
   calculateQuestProgress,
   CATEGORY_CONFIG,
@@ -168,13 +173,14 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
   const categoryConfig = CATEGORY_CONFIG[selectedQuest.category];
   const canAccept = selectedQuest.state === "available";
   const canComplete = selectedQuest.state === "active" && progress === 100;
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
 
   // Styles
   const containerStyle: React.CSSProperties = {
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    background: theme.colors.background.panelSecondary,
+    ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
     overflow: "hidden",
   };
 
@@ -185,8 +191,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     padding: isMobile
       ? `${spacing.sm} ${spacing.sm}`
       : `${spacing.sm} ${spacing.md}`,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    background: theme.colors.background.panelSecondary,
+    ...getPanelHeaderStyle(theme),
     minHeight: isMobile ? "48px" : "44px",
   };
 
@@ -234,9 +239,12 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     gap: isMobile ? spacing.sm : spacing.md,
     marginBottom: isMobile ? spacing.sm : spacing.md,
     padding: spacing.sm,
-    background: theme.colors.background.tertiary,
-    borderRadius: "6px",
-    border: `1px solid ${theme.colors.border.default}`,
+    background:
+      theme.name === "hyperscape"
+        ? "linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(0,0,0,0.14) 100%)"
+        : theme.colors.background.tertiary,
+    borderRadius: `${theme.borderRadius.md}px`,
+    border: `1px solid ${theme.colors.border.default}40`,
     fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
   };
 
@@ -290,7 +298,10 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     gap: spacing.sm,
     padding: isMobile ? spacing.sm : spacing.md,
     borderTop: `1px solid ${theme.colors.border.default}`,
-    background: theme.colors.background.panelSecondary,
+    background:
+      theme.name === "hyperscape"
+        ? "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.16) 100%)"
+        : theme.colors.background.panelSecondary,
   };
 
   const buttonBaseStyle: React.CSSProperties = {
@@ -338,15 +349,26 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
         <button
           onClick={handleClose}
           style={{
-            background: "transparent",
-            border: "none",
-            color: COLORS.TEXT_MUTED,
+            ...closeButtonStyle,
             fontSize: typography.fontSize.lg,
-            cursor: "pointer",
             padding: spacing.xs,
             lineHeight: 1,
           }}
           title="Close"
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = String(
+              closeButtonStyle["--shell-button-hover-bg"],
+            );
+            e.currentTarget.style.color = String(
+              closeButtonStyle["--shell-button-hover-fg"],
+            );
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = String(
+              closeButtonStyle.background,
+            );
+            e.currentTarget.style.color = String(closeButtonStyle.color);
+          }}
         >
           ✕
         </button>

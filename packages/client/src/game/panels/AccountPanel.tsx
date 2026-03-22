@@ -6,6 +6,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useThemeStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { privyAuthManager } from "../../auth/PrivyAuthManager";
@@ -83,17 +84,24 @@ export function AccountPanel({ world }: AccountPanelProps) {
   return (
     <div
       className="h-full overflow-y-auto noscrollbar"
-      style={{ padding: "4px" }}
+      style={{
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+        padding: "4px",
+      }}
     >
       <div className="flex flex-col gap-3">
         {/* Profile Summary Card */}
         <div
           className="rounded-lg relative overflow-hidden"
           style={{
-            background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                : `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
             border: authenticated
               ? `1px solid ${theme.colors.state.success}40`
               : `1px solid ${theme.colors.border.decorative}`,
+            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
           }}
         >
           {/* Status glow */}
@@ -169,8 +177,12 @@ export function AccountPanel({ world }: AccountPanelProps) {
               <div
                 className="p-2 rounded space-y-1"
                 style={{
-                  background: theme.colors.background.panelSecondary,
-                  border: `1px solid ${theme.colors.border.default}`,
+                  background:
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(0, 0, 0, 0.12) 100%)"
+                      : theme.colors.background.panelSecondary,
+                  border: `1px solid ${theme.colors.border.default}40`,
+                  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
                 }}
               >
                 <div className="flex items-center justify-between">
@@ -226,8 +238,12 @@ export function AccountPanel({ world }: AccountPanelProps) {
         <div
           className="rounded-lg p-3"
           style={{
-            background: theme.colors.background.panelSecondary,
-            border: `1px solid ${theme.colors.border.default}`,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                : theme.colors.background.panelSecondary,
+            border: `1px solid ${theme.colors.border.default}40`,
+            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
           }}
         >
           <div className="flex items-center justify-between mb-2">
@@ -365,8 +381,12 @@ export function AccountPanel({ world }: AccountPanelProps) {
         <div
           className="rounded-lg p-2.5 flex items-center justify-between cursor-pointer transition-all hover:opacity-90"
           style={{
-            background: theme.colors.background.panelSecondary,
-            border: `1px solid ${theme.colors.border.default}`,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                : theme.colors.background.panelSecondary,
+            border: `1px solid ${theme.colors.border.default}40`,
+            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
           }}
           onClick={() => {
             // Set pending tab for SettingsPanel to pick up

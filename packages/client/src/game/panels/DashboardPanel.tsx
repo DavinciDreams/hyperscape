@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useThemeStore } from "@/ui";
+import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import type {
   ClientWorld,
   PlayerStats,
@@ -133,8 +134,8 @@ export function DashboardPanel({
         <div
           className="flex-1 flex flex-col overflow-hidden"
           style={{
-            background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-            borderRadius: "8px",
+            ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+            borderRadius: theme.borderRadius.lg,
             border: `1px solid ${theme.colors.accent.primary}35`,
             boxShadow: "0 2px 4px rgba(0, 0, 0, 0.5)",
             minHeight: "350px",
@@ -145,10 +146,10 @@ export function DashboardPanel({
           <div
             className="flex items-center justify-between border-b px-2 py-1.5"
             style={{
+              ...getPanelHeaderStyle(theme),
               borderBottom: `1px solid ${theme.colors.accent.primary}20`,
-              background: `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-              borderTopLeftRadius: "8px",
-              borderTopRightRadius: "8px",
+              borderTopLeftRadius: `${theme.borderRadius.lg}px`,
+              borderTopRightRadius: `${theme.borderRadius.lg}px`,
             }}
           >
             <div className="flex items-center gap-1.5">

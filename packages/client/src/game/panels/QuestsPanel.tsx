@@ -18,6 +18,7 @@ import {
   useMobileLayout,
   useTheme,
 } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { QuestLog } from "@/game/components/quest";
 import {
   type Quest,
@@ -950,7 +951,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
   // Container style using theme colors for consistency
   const containerStyle: React.CSSProperties = {
     height: "100%",
-    background: theme.colors.background.panelSecondary,
+    ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
     display: "flex",
     flexDirection: "column",
   };
@@ -1028,6 +1029,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
         style={{
           height: "100%",
           border: "none",
+          background: "transparent",
         }}
       />
     </div>

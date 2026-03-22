@@ -9,6 +9,12 @@
  */
 
 import React from "react";
+import { useThemeStore } from "@/ui";
+import {
+  getPanelHeaderStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
 import type { ClientWorld, PlayerStats } from "../../types";
 import { EventType } from "@hyperscape/shared";
 
@@ -57,7 +63,9 @@ export function XpLampPanel({
   slot,
   onClose,
 }: XpLampPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   if (!visible) return null;
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
 
   const handleSkillSelect = (skillId: string) => {
     const localPlayer = world.getPlayer();
@@ -104,11 +112,9 @@ export function XpLampPanel({
         style={{
           width: "24rem",
           maxWidth: "90vw",
-          background: "rgba(11, 10, 21, 0.98)",
-          border: "2px solid #c9a227",
-          borderRadius: "0.5rem",
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
           padding: "1.5rem",
-          backdropFilter: "blur(10px)",
           boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
         }}
         onClick={(e) => e.stopPropagation()}
@@ -118,15 +124,37 @@ export function XpLampPanel({
         {/* Header */}
         <div
           className="flex justify-between items-center mb-4 pb-2"
-          style={{ borderBottom: "1px solid #c9a227" }}
+          style={{
+            ...getPanelHeaderStyle(theme),
+            margin: "-1.5rem -1.5rem 1rem",
+            padding: "0.75rem 1rem",
+          }}
         >
-          <h3 className="m-0 text-lg font-bold" style={{ color: "#c9a227" }}>
+          <h3
+            className="m-0 text-lg font-bold"
+            style={{ color: theme.colors.text.accent }}
+          >
             Choose a Skill
           </h3>
           <button
             onClick={onClose}
-            className="bg-transparent border-none text-gray-400 hover:text-white cursor-pointer text-xl leading-none"
+            className="cursor-pointer text-xl leading-none"
+            style={{ ...closeButtonStyle, width: 28, height: 28, fontSize: 18 }}
             title="Close"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = String(
+                closeButtonStyle["--shell-button-hover-bg"],
+              );
+              e.currentTarget.style.color = String(
+                closeButtonStyle["--shell-button-hover-fg"],
+              );
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = String(
+                closeButtonStyle.background,
+              );
+              e.currentTarget.style.color = String(closeButtonStyle.color);
+            }}
           >
             ×
           </button>
@@ -136,9 +164,10 @@ export function XpLampPanel({
         <div
           className="text-center mb-4 py-2"
           style={{
-            color: "#4ade80",
-            backgroundColor: "rgba(74, 222, 128, 0.1)",
-            borderRadius: "4px",
+            color: theme.colors.state.success,
+            backgroundColor: `${theme.colors.state.success}12`,
+            borderRadius: `${theme.borderRadius.md}px`,
+            border: `1px solid ${theme.colors.state.success}24`,
           }}
         >
           Grant <strong>{xpAmount.toLocaleString()} XP</strong> to:
@@ -160,31 +189,37 @@ export function XpLampPanel({
                 className="flex flex-col items-center p-2 transition-all duration-150"
                 style={{
                   background:
-                    "linear-gradient(to bottom, rgba(45, 35, 25, 0.95) 0%, rgba(30, 25, 20, 0.95) 100%)",
-                  border: "1px solid #5c4a3a",
-                  borderRadius: "4px",
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(0, 0, 0, 0.16) 100%)"
+                      : theme.colors.background.panelSecondary,
+                  border: `1px solid ${theme.colors.border.default}40`,
+                  borderRadius: `${theme.borderRadius.md}px`,
                   cursor: "pointer",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = "#c9a227";
+                  e.currentTarget.style.borderColor =
+                    theme.colors.accent.primary;
                   e.currentTarget.style.transform = "scale(1.02)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = "#5c4a3a";
+                  e.currentTarget.style.borderColor = `${theme.colors.border.default}40`;
                   e.currentTarget.style.transform = "scale(1)";
                 }}
               >
                 <span className="text-xl mb-1">{skill.icon}</span>
                 <span
                   className="text-xs font-medium"
-                  style={{ color: "#c9b386" }}
+                  style={{ color: theme.colors.text.secondary }}
                 >
                   {skill.label}
                 </span>
                 <span
                   className="text-xs font-bold"
                   style={{
-                    color: level >= 99 ? "#ffcc00" : "#ffff00",
+                    color:
+                      level >= 99
+                        ? theme.colors.state.warning
+                        : theme.colors.text.accent,
                   }}
                 >
                   Lv. {level}
@@ -200,17 +235,26 @@ export function XpLampPanel({
             onClick={onClose}
             className="px-4 py-2 text-sm transition-colors"
             style={{
-              background: "rgba(100, 100, 100, 0.3)",
-              border: "1px solid #666",
-              borderRadius: "4px",
-              color: "#ccc",
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.16) 100%)"
+                  : theme.colors.background.tertiary,
+              border: `1px solid ${theme.colors.border.default}40`,
+              borderRadius: `${theme.borderRadius.md}px`,
+              color: theme.colors.text.secondary,
               cursor: "pointer",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(100, 100, 100, 0.5)";
+              e.currentTarget.style.background =
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.2) 100%)"
+                  : theme.colors.background.hover;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(100, 100, 100, 0.3)";
+              e.currentTarget.style.background =
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.16) 100%)"
+                  : theme.colors.background.tertiary;
             }}
           >
             Cancel

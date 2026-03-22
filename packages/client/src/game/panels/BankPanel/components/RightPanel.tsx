@@ -7,6 +7,7 @@
 
 import React, { useCallback } from "react";
 import { useThemeStore, useMobileLayout } from "@/ui";
+import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import type { PlayerEquipmentItems } from "@hyperscape/shared";
 import { INV_SLOTS_PER_ROW, INV_SLOT_SIZE } from "../constants";
 import { formatItemName } from "../utils";
@@ -166,9 +167,8 @@ export function RightPanel({
     <div
       className="flex flex-col rounded-lg"
       style={{
-        background: theme.colors.background.panelPrimary,
-        border: `2px solid ${theme.colors.border.decorative}`,
-        boxShadow: `0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 ${theme.colors.border.default}`,
+        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+        boxShadow: `0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.04)`,
         width: shouldUseMobileUI
           ? "100%"
           : `${INV_SLOTS_PER_ROW * (responsiveSlotSize + 4) + 24}px`,
@@ -179,7 +179,7 @@ export function RightPanel({
       <div
         className="flex justify-between items-center px-2 py-1.5 rounded-t-lg"
         style={{
-          background: `linear-gradient(180deg, ${theme.colors.border.decorative}66 0%, ${theme.colors.border.decorative}33 100%)`,
+          ...getPanelHeaderStyle(theme),
           borderBottom: `1px solid ${theme.colors.border.decorative}`,
         }}
       >
@@ -191,7 +191,7 @@ export function RightPanel({
             style={{
               background:
                 mode === "inventory"
-                  ? theme.colors.border.decorative
+                  ? `${theme.colors.accent.primary}20`
                   : theme.colors.background.overlay,
               color:
                 mode === "inventory"
@@ -199,7 +199,7 @@ export function RightPanel({
                   : theme.colors.text.muted,
               border:
                 mode === "inventory"
-                  ? `1px solid ${theme.colors.border.default}`
+                  ? `1px solid ${theme.colors.accent.primary}50`
                   : "1px solid transparent",
             }}
             title="View Backpack"
@@ -212,7 +212,7 @@ export function RightPanel({
             style={{
               background:
                 mode === "equipment"
-                  ? theme.colors.border.decorative
+                  ? `${theme.colors.accent.primary}20`
                   : theme.colors.background.overlay,
               color:
                 mode === "equipment"
@@ -220,7 +220,7 @@ export function RightPanel({
                   : theme.colors.text.muted,
               border:
                 mode === "equipment"
-                  ? `1px solid ${theme.colors.border.default}`
+                  ? `1px solid ${theme.colors.accent.primary}50`
                   : "1px solid transparent",
             }}
             title="View Worn Equipment"
@@ -261,8 +261,11 @@ export function RightPanel({
           <div
             className="mx-2 mb-2 p-2 rounded flex items-center justify-between"
             style={{
-              background: theme.colors.background.overlay,
-              border: `1px solid ${theme.colors.border.decorative}`,
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.14) 100%)"
+                  : theme.colors.background.overlay,
+              border: `1px solid ${theme.colors.border.decorative}66`,
             }}
           >
             <div className="flex items-center gap-2">
@@ -279,7 +282,7 @@ export function RightPanel({
               disabled={coins <= 0}
               className="px-2 py-1 rounded text-xs font-bold transition-colors disabled:opacity-30"
               style={{
-                background: `${theme.colors.state.success}99`,
+                background: `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
                 color: theme.colors.text.primary,
                 border: `1px solid ${theme.colors.border.decorative}`,
               }}
@@ -301,7 +304,7 @@ export function RightPanel({
               onClick={onDepositAll}
               className="w-full py-2 rounded text-sm font-bold transition-colors"
               style={{
-                background: `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`,
+                background: `linear-gradient(180deg, ${theme.colors.accent.primary}33 0%, ${theme.colors.border.decorative}80 100%)`,
                 color: theme.colors.accent.primary,
                 border: `1px solid ${theme.colors.border.decorative}`,
               }}

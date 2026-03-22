@@ -20,6 +20,7 @@ import React, {
   type CSSProperties,
 } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
+import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 
 // ============================================================================
 // Types
@@ -324,6 +325,42 @@ export function BettingPanel({
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
   const [selectedSide, setSelectedSide] = useState<"A" | "B" | null>(null);
 
+  const shellStyle: CSSProperties = {
+    ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+    minWidth: "500px",
+  };
+
+  const marketCardStyle: CSSProperties = {
+    background:
+      theme.name === "hyperscape"
+        ? "linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(0,0,0,0.14) 100%)"
+        : theme.colors.background.panelSecondary,
+    border: `1px solid ${theme.colors.border.default}40`,
+    borderRadius: `${theme.borderRadius.lg}px`,
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+  };
+
+  const betInputStyle: CSSProperties = {
+    ...styles.input,
+    background: theme.colors.background.panelPrimary,
+    border: `1px solid ${theme.colors.border.default}66`,
+    borderRadius: `${theme.borderRadius.md}px`,
+    color: theme.colors.text.primary,
+  };
+
+  const actionButtonStyle: CSSProperties = {
+    ...styles.button,
+    borderRadius: `${theme.borderRadius.md}px`,
+    background: `linear-gradient(135deg, ${theme.colors.accent.primary}CC 0%, ${theme.colors.accent.secondary}AA 100%)`,
+    border: `1px solid ${theme.colors.accent.primary}70`,
+  };
+
+  const claimButtonStyle: CSSProperties = {
+    ...actionButtonStyle,
+    background: `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
+    border: `1px solid ${theme.colors.state.success}70`,
+  };
+
   const handleMarketClick = useCallback((marketId: string) => {
     setSelectedMarket((prev) => (prev === marketId ? null : marketId));
     setSelectedSide(null);
@@ -365,11 +402,22 @@ export function BettingPanel({
       width={550}
       closeOnBackdropClick
     >
-      <div style={styles.container}>
+      <div style={{ ...styles.container, ...shellStyle }}>
         {/* Header */}
-        <div style={styles.header}>
-          <span style={styles.title}>Active Markets</span>
-          <span style={styles.balance}>
+        <div
+          style={{
+            ...styles.header,
+            ...getPanelHeaderStyle(theme),
+            margin: "-16px -16px 8px",
+            padding: "12px 16px",
+          }}
+        >
+          <span style={{ ...styles.title, color: theme.colors.text.accent }}>
+            Active Markets
+          </span>
+          <span
+            style={{ ...styles.balance, color: theme.colors.text.secondary }}
+          >
             Balance: {state.userBalance.toLocaleString()} GOLD
           </span>
         </div>
@@ -399,7 +447,11 @@ export function BettingPanel({
                   key={market.duelId}
                   style={{
                     ...styles.market,
+                    ...marketCardStyle,
                     ...(isSelected ? styles.marketSelected : {}),
+                    borderColor: isSelected
+                      ? theme.colors.text.accent
+                      : `${theme.colors.border.default}40`,
                   }}
                   onClick={() => handleMarketClick(market.duelId)}
                 >
@@ -441,7 +493,7 @@ export function BettingPanel({
                       <div
                         style={{
                           ...styles.agentName,
-                          color: "#6699FF",
+                          color: theme.colors.state.info,
                         }}
                       >
                         {market.agent1Name}
@@ -474,7 +526,7 @@ export function BettingPanel({
                       <div
                         style={{
                           ...styles.agentName,
-                          color: "#FF6666",
+                          color: theme.colors.state.danger,
                         }}
                       >
                         {market.agent2Name}
@@ -528,14 +580,14 @@ export function BettingPanel({
                         placeholder="Amount"
                         value={betAmount}
                         onChange={(e) => setBetAmount(e.target.value)}
-                        style={styles.input}
+                        style={betInputStyle}
                         min="1"
                         max={state.userBalance}
                         onClick={(e) => e.stopPropagation()}
                       />
                       <button
                         style={{
-                          ...styles.button,
+                          ...actionButtonStyle,
                           ...(parseFloat(betAmount) > 0
                             ? {}
                             : styles.buttonDisabled),
@@ -552,7 +604,7 @@ export function BettingPanel({
                   {isResolved && userWon && (
                     <div style={styles.betSection}>
                       <button
-                        style={{ ...styles.button, ...styles.claimButton }}
+                        style={claimButtonStyle}
                         onClick={(e) => handleClaimClick(market.duelId, e)}
                       >
                         Claim {position?.potentialPayout.toLocaleString()} GOLD

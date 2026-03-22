@@ -7,6 +7,12 @@ import type {
 } from "@hyperscape/shared";
 import { EventType, generateTransactionId, getItem } from "@hyperscape/shared";
 import { ErrorBoundary } from "../../lib/ErrorBoundary";
+import { useThemeStore } from "@/ui";
+import {
+  getPanelHeaderStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
 
 // Timeout for pending loot transactions (3 seconds for better UX)
 const LOOT_TRANSACTION_TIMEOUT_MS = 3000;
@@ -31,6 +37,8 @@ function LootWindowPanelContent({
   onClose,
   world,
 }: LootWindowPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const closeButtonStyle = getShellControlButtonStyle(theme, "neutral");
   const [items, setItems] = useState<InventoryItem[]>(lootItems);
 
   // Close confirmation state
@@ -443,29 +451,44 @@ function LootWindowPanelContent({
       className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[1000] pointer-events-auto"
       style={{
         width: "32rem",
-        background: "rgba(11, 10, 21, 0.98)",
-        border: "1px solid #2a2b39",
-        borderRadius: "0.5rem",
+        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+        borderRadius: theme.borderRadius.xl,
         padding: "1.5rem",
-        backdropFilter: "blur(10px)",
         boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
       }}
       onClick={(e) => e.stopPropagation()}
     >
       {/* Header */}
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="m-0 text-lg font-bold text-white">{corpseName}</h3>
+      <div
+        className="flex justify-between items-center mb-4"
+        style={{
+          ...getPanelHeaderStyle(theme),
+          margin: "-1.5rem -1.5rem 1rem",
+          padding: "0.75rem 1rem",
+        }}
+      >
+        <h3
+          className="m-0 text-lg font-bold"
+          style={{ color: theme.colors.text.primary }}
+        >
+          {corpseName}
+        </h3>
         <div className="flex gap-2">
           <button
             onClick={handleTakeAll}
-            className="bg-emerald-600 hover:bg-emerald-700 border-none rounded text-white py-1.5 px-3 cursor-pointer text-sm transition-colors"
+            className="border-none rounded text-white py-1.5 px-3 cursor-pointer text-sm transition-colors"
+            style={{
+              background: `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
+              color: theme.colors.text.primary,
+            }}
             disabled={items.length === 0}
           >
             Take All
           </button>
           <button
             onClick={handleCloseClick}
-            className="bg-gray-600 hover:bg-gray-700 border-none rounded text-white py-1.5 px-3 cursor-pointer text-sm transition-colors"
+            className="py-1.5 px-3 cursor-pointer text-sm transition-colors"
+            style={closeButtonStyle}
           >
             Close
           </button>
@@ -474,7 +497,10 @@ function LootWindowPanelContent({
 
       {/* Loot Items */}
       {items.length === 0 ? (
-        <div className="text-center text-gray-400 py-8">
+        <div
+          className="text-center py-8"
+          style={{ color: theme.colors.text.secondary }}
+        >
           <p className="text-sm">This corpse has been looted</p>
         </div>
       ) : (
@@ -487,20 +513,42 @@ function LootWindowPanelContent({
             return (
               <div
                 key={`${item.id}-${index}`}
-                className="bg-black/40 border border-white/10 rounded p-2 cursor-pointer hover:bg-black/60 hover:border-white/30 transition-all"
+                className="rounded p-2 cursor-pointer transition-all"
+                style={{
+                  background:
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.16) 100%)"
+                      : theme.colors.background.panelSecondary,
+                  border: `1px solid ${theme.colors.border.default}30`,
+                }}
                 onClick={() => handleTakeItem(item, index)}
                 title={`Click to take ${displayName} (${item.quantity})`}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = `${theme.colors.border.hover}80`;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = `${theme.colors.border.default}30`;
+                }}
               >
                 <div className="text-center">
-                  <div className="text-xs font-bold text-white mb-1 truncate">
+                  <div
+                    className="text-xs font-bold mb-1 truncate"
+                    style={{ color: theme.colors.text.primary }}
+                  >
                     {displayName.substring(0, 12)}
                   </div>
                   {item.quantity > 1 && (
-                    <div className="text-xs text-yellow-400 font-bold">
+                    <div
+                      className="text-xs font-bold"
+                      style={{ color: theme.colors.text.accent }}
+                    >
                       ×{item.quantity}
                     </div>
                   )}
-                  <div className="text-[10px] text-gray-500 mt-1 capitalize">
+                  <div
+                    className="text-[10px] mt-1 capitalize"
+                    style={{ color: theme.colors.text.muted }}
+                  >
                     {itemType}
                   </div>
                 </div>
@@ -512,7 +560,10 @@ function LootWindowPanelContent({
 
       {/* Instructions */}
       <div className="mt-4 pt-3 border-t border-white/10">
-        <p className="text-xs text-gray-400 text-center">
+        <p
+          className="text-xs text-center"
+          style={{ color: theme.colors.text.secondary }}
+        >
           Click an item to take it • Take All to loot everything
         </p>
       </div>
@@ -520,24 +571,47 @@ function LootWindowPanelContent({
       {/* Close Confirmation Dialog */}
       {showCloseConfirm && (
         <div className="absolute inset-0 bg-black/80 flex items-center justify-center rounded-lg z-10">
-          <div className="bg-gray-800 border border-yellow-600 rounded-lg p-4 max-w-xs text-center">
-            <p className="text-yellow-400 font-bold mb-2">
+          <div
+            className="rounded-lg p-4 max-w-xs text-center"
+            style={{
+              ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+              borderRadius: theme.borderRadius.lg,
+            }}
+          >
+            <p
+              className="font-bold mb-2"
+              style={{ color: theme.colors.state.warning }}
+            >
               Leave items behind?
             </p>
-            <p className="text-gray-300 text-sm mb-4">
+            <p
+              className="text-sm mb-4"
+              style={{ color: theme.colors.text.secondary }}
+            >
               There are still {items.length} item{items.length > 1 ? "s" : ""}{" "}
               in this corpse. They may despawn if you leave them.
             </p>
             <div className="flex gap-2 justify-center">
               <button
                 onClick={handleConfirmClose}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm"
+                className="text-white px-4 py-2 rounded text-sm"
+                style={{
+                  background: `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`,
+                }}
               >
                 Leave Items
               </button>
               <button
                 onClick={handleCancelClose}
-                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm"
+                className="text-white px-4 py-2 rounded text-sm"
+                style={{
+                  background:
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.16) 100%)"
+                      : theme.colors.background.tertiary,
+                  border: `1px solid ${theme.colors.border.default}40`,
+                  color: theme.colors.text.primary,
+                }}
               >
                 Keep Looting
               </button>
@@ -556,16 +630,39 @@ function LootWindowPanelContent({
  * the entire game UI from failing. Shows a fallback with close button.
  */
 export function LootWindowPanel(props: LootWindowPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   const fallback = (
     <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50">
-      <div className="bg-gray-800 border-2 border-red-500 rounded-lg p-4 text-center max-w-sm">
-        <p className="text-red-400 font-bold mb-2">⚠️ Loot Window Error</p>
-        <p className="text-gray-300 text-sm mb-4">
+      <div
+        className="rounded-lg p-4 text-center max-w-sm"
+        style={{
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          border: `2px solid ${theme.colors.state.danger}`,
+        }}
+      >
+        <p
+          className="font-bold mb-2"
+          style={{ color: theme.colors.state.danger }}
+        >
+          ⚠️ Loot Window Error
+        </p>
+        <p
+          className="text-sm mb-4"
+          style={{ color: theme.colors.text.secondary }}
+        >
           Something went wrong displaying the loot. Your items are still safe.
         </p>
         <button
           onClick={props.onClose}
-          className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm"
+          className="text-white px-4 py-2 rounded text-sm"
+          style={{
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.16) 100%)"
+                : theme.colors.background.tertiary,
+            border: `1px solid ${theme.colors.border.default}40`,
+            color: theme.colors.text.primary,
+          }}
         >
           Close
         </button>

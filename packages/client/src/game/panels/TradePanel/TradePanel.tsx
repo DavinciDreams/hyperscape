@@ -22,6 +22,11 @@
 import { useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useThemeStore } from "@/ui";
+import {
+  getPanelHeaderStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
 import type { TradeOfferItem } from "@hyperscape/shared";
 
 // Import from split modules
@@ -51,6 +56,7 @@ export function TradePanel({
   onValueItem,
 }: TradePanelProps) {
   const theme = useThemeStore((s) => s.theme);
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
@@ -183,8 +189,8 @@ export function TradePanel({
       <div
         className="rounded-lg shadow-xl"
         style={{
-          background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-          border: `2px solid ${theme.colors.border.decorative}`,
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
           // OSRS layout: wider to fit inventory on right side
           width: state.screen === "offer" ? "680px" : "480px",
         }}
@@ -193,8 +199,7 @@ export function TradePanel({
         <div
           className="px-4 py-3 rounded-t-lg flex items-center justify-between"
           style={{
-            background: theme.colors.background.panelSecondary,
-            borderBottom: `1px solid ${theme.colors.border.decorative}`,
+            ...getPanelHeaderStyle(theme),
           }}
         >
           <h2
@@ -223,12 +228,20 @@ export function TradePanel({
           <button
             onClick={onCancel}
             className="text-xl font-bold px-2 rounded transition-colors"
-            style={{ color: theme.colors.text.muted }}
+            style={{ ...closeButtonStyle, width: 28, height: 28, fontSize: 18 }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = theme.colors.text.primary;
+              e.currentTarget.style.backgroundColor = String(
+                closeButtonStyle["--shell-button-hover-bg"],
+              );
+              e.currentTarget.style.color = String(
+                closeButtonStyle["--shell-button-hover-fg"],
+              );
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = theme.colors.text.muted;
+              e.currentTarget.style.backgroundColor = String(
+                closeButtonStyle.background,
+              );
+              e.currentTarget.style.color = String(closeButtonStyle.color);
             }}
           >
             ×
@@ -267,8 +280,12 @@ export function TradePanel({
                     className="grid gap-1 p-2 rounded"
                     style={{
                       gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                      background: theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}`,
+                      background:
+                        theme.name === "hyperscape"
+                          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                          : theme.colors.background.panelSecondary,
+                      border: `1px solid ${theme.colors.border.default}40`,
+                      boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
                     }}
                   >
                     {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
@@ -291,8 +308,11 @@ export function TradePanel({
                   <div
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
-                      background: theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}`,
+                      background:
+                        theme.name === "hyperscape"
+                          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                          : theme.colors.background.panelSecondary,
+                      border: `1px solid ${theme.colors.border.default}40`,
                       color: theme.colors.text.secondary,
                     }}
                   >
@@ -335,8 +355,12 @@ export function TradePanel({
                     className="grid gap-1 p-2 rounded"
                     style={{
                       gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                      background: theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}`,
+                      background:
+                        theme.name === "hyperscape"
+                          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                          : theme.colors.background.panelSecondary,
+                      border: `1px solid ${theme.colors.border.default}40`,
+                      boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
                     }}
                   >
                     {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
@@ -354,8 +378,11 @@ export function TradePanel({
                   <div
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
-                      background: theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}`,
+                      background:
+                        theme.name === "hyperscape"
+                          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                          : theme.colors.background.panelSecondary,
+                      border: `1px solid ${theme.colors.border.default}40`,
                       color: theme.colors.text.secondary,
                     }}
                   >
@@ -371,8 +398,12 @@ export function TradePanel({
               <div
                 className="mt-3 px-3 py-2 rounded text-sm flex items-center justify-between"
                 style={{
-                  background: theme.colors.background.panelSecondary,
+                  background:
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                      : theme.colors.background.panelSecondary,
                   border: `1px solid ${theme.colors.border.decorative}`,
+                  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
                 }}
               >
                 {/* Partner free slots indicator (OSRS-style) */}

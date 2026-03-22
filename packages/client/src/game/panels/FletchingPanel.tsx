@@ -13,6 +13,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { formatItemName } from "@/utils";
 
 interface FletchingRecipe {
@@ -174,8 +175,7 @@ export function FletchingPanel({
     <div
       className="rounded-lg shadow-2xl border"
       style={{
-        background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-        borderColor: theme.colors.border.decorative,
+        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
         minWidth: "380px",
         maxWidth: "480px",
         maxHeight: "80vh",
@@ -184,7 +184,13 @@ export function FletchingPanel({
       {/* Content */}
       <div
         className="p-3 overflow-y-auto"
-        style={{ maxHeight: "calc(80vh - 100px)" }}
+        style={{
+          maxHeight: "calc(80vh - 100px)",
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.12) 100%)"
+              : "transparent",
+        }}
       >
         {availableRecipes.length === 0 ? (
           <div

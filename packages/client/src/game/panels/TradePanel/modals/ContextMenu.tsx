@@ -8,13 +8,14 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
+import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import type { TradeContextMenuProps } from "../types";
 
 export function TradeContextMenu({
   x,
   y,
   item,
-  theme: _theme,
+  theme,
   onOffer,
   onClose,
 }: TradeContextMenuProps) {
@@ -62,22 +63,21 @@ export function TradeContextMenu({
         left: adjustedX,
         top: adjustedY,
         zIndex: 99999,
-        background: "rgba(0, 0, 0, 0.95)",
-        border: "1px solid rgba(100, 80, 60, 0.8)",
-        borderRadius: "2px",
+        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+        borderRadius: theme.borderRadius.md,
         padding: "2px 0",
         minWidth: "150px",
-        boxShadow: "2px 2px 8px rgba(0, 0, 0, 0.5)",
+        boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
       }}
     >
       {/* Header with item name */}
       <div
         style={{
+          ...getPanelHeaderStyle(theme),
           padding: "4px 8px",
-          color: "#ff9900",
+          color: theme.colors.text.accent,
           fontWeight: "bold",
           fontSize: "12px",
-          borderBottom: "1px solid rgba(100, 80, 60, 0.5)",
         }}
       >
         {itemName}
@@ -91,12 +91,13 @@ export function TradeContextMenu({
           }}
           style={{
             padding: "4px 8px",
-            color: i === 0 ? "#ffff00" : "#ffffff",
+            color:
+              i === 0 ? theme.colors.text.accent : theme.colors.text.primary,
             fontSize: "12px",
             cursor: "pointer",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+            e.currentTarget.style.background = `${theme.colors.background.hover}`;
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = "transparent";

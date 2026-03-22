@@ -13,6 +13,11 @@ import React, { useMemo } from "react";
 import { EventType, getItem } from "@hyperscape/shared";
 import type { PlayerStats, PlayerID, StakedItem } from "@hyperscape/shared";
 import { ModalWindow, useThemeStore } from "@/ui";
+import {
+  getPanelHeaderStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
 import type { ClientWorld, PlayerEquipmentItems } from "../../types";
 import type { InventorySlotViewItem } from "../types";
 import type {
@@ -70,6 +75,7 @@ export function FullscreenWorldMap({
   onClose: () => void;
 }): React.ReactElement {
   const theme = useThemeStore((s) => s.theme);
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
 
   // Get player position for header display
   const player = world?.getPlayer?.();
@@ -165,9 +171,8 @@ export function FullscreenWorldMap({
         style={{
           display: "flex",
           flexDirection: "column",
-          background: `linear-gradient(135deg, ${theme.colors.background.primary}fa 0%, ${theme.colors.background.secondary}fa 100%)`,
-          border: `2px solid ${theme.colors.border.decorative}`,
-          borderRadius: theme.borderRadius.lg,
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
           boxShadow: "0 20px 60px rgba(0, 0, 0, 0.8)",
           overflow: "hidden",
           animation: "worldMapSlideIn 0.2s ease-out",
@@ -179,9 +184,8 @@ export function FullscreenWorldMap({
         {/* Header */}
         <div
           style={{
+            ...getPanelHeaderStyle(theme),
             padding: "12px 20px",
-            background: theme.colors.background.secondary,
-            borderBottom: `1px solid ${theme.colors.border.default}`,
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -222,30 +226,27 @@ export function FullscreenWorldMap({
             <button
               onClick={onClose}
               style={{
+                ...closeButtonStyle,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 width: 32,
                 height: 32,
-                borderRadius: theme.borderRadius.md,
-                border: `1px solid ${theme.colors.border.default}`,
-                backgroundColor: theme.colors.background.tertiary,
-                color: theme.colors.text.secondary,
-                cursor: "pointer",
                 fontSize: 18,
-                transition: "all 0.15s ease",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor =
-                  theme.colors.state.danger;
-                e.currentTarget.style.color = theme.colors.text.primary;
-                e.currentTarget.style.borderColor = theme.colors.state.danger;
+                e.currentTarget.style.backgroundColor = String(
+                  closeButtonStyle["--shell-button-hover-bg"],
+                );
+                e.currentTarget.style.color = String(
+                  closeButtonStyle["--shell-button-hover-fg"],
+                );
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor =
-                  theme.colors.background.tertiary;
-                e.currentTarget.style.color = theme.colors.text.secondary;
-                e.currentTarget.style.borderColor = theme.colors.border.default;
+                e.currentTarget.style.backgroundColor = String(
+                  closeButtonStyle.background,
+                );
+                e.currentTarget.style.color = String(closeButtonStyle.color);
               }}
               aria-label="Close map (ESC)"
               title="Close (ESC)"
@@ -263,7 +264,10 @@ export function FullscreenWorldMap({
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
-            background: theme.colors.background.primary,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                : "transparent",
             overflow: "visible",
           }}
         >
@@ -295,8 +299,9 @@ export function FullscreenWorldMap({
         {/* Footer with legend and controls hint */}
         <div
           style={{
+            ...getPanelHeaderStyle(theme),
             padding: "10px 20px",
-            background: theme.colors.background.secondary,
+            borderBottom: "none",
             borderTop: `1px solid ${theme.colors.border.default}`,
             display: "flex",
             justifyContent: "space-between",
@@ -377,9 +382,13 @@ export function FullscreenWorldMap({
             <span
               style={{
                 padding: "2px 8px",
-                background: theme.colors.background.tertiary,
+                background:
+                  theme.name === "hyperscape"
+                    ? "rgba(255, 255, 255, 0.06)"
+                    : theme.colors.background.tertiary,
                 borderRadius: theme.borderRadius.sm,
                 color: theme.colors.text.secondary,
+                border: `1px solid ${theme.colors.border.default}40`,
               }}
             >
               ESC or M to close
@@ -403,6 +412,7 @@ export function ItemsKeptOnDeathPanel({
   equipment: PlayerEquipmentItems | null;
   onClose: () => void;
 }): React.ReactElement {
+  const theme = useThemeStore((s) => s.theme);
   // Get inventory items from network cache
   const playerId = world?.entities?.player?.id;
   const cachedInventory = playerId
@@ -469,23 +479,35 @@ export function ItemsKeptOnDeathPanel({
         display: "flex",
         flexDirection: "column",
         gap: "16px",
-        color: "rgba(242, 208, 138, 0.9)",
+        color: theme.colors.text.secondary,
         fontSize: 13,
       }}
     >
       {/* Info header */}
       <div
         style={{
-          background: "rgba(0, 0, 0, 0.3)",
-          borderRadius: 6,
+          ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+          borderRadius: theme.borderRadius.md,
           padding: "12px",
-          border: "1px solid rgba(139, 69, 19, 0.4)",
         }}
       >
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        <div
+          style={{
+            color: theme.colors.text.primary,
+            fontWeight: 600,
+            marginBottom: 4,
+          }}
+        >
           Standard Death Mechanics
         </div>
-        <div style={{ fontSize: 11, opacity: 0.8, lineHeight: 1.4 }}>
+        <div
+          style={{
+            fontSize: 11,
+            opacity: 0.8,
+            lineHeight: 1.4,
+            color: theme.colors.text.secondary,
+          }}
+        >
           On death, you will keep your <strong>3 most valuable</strong> items.
           All other items will remain on your gravestone for 15 minutes.
         </div>
@@ -495,7 +517,7 @@ export function ItemsKeptOnDeathPanel({
       <div>
         <div
           style={{
-            color: "#22c55e",
+            color: theme.colors.state.success,
             fontWeight: 600,
             marginBottom: 8,
             fontSize: 12,
@@ -517,13 +539,21 @@ export function ItemsKeptOnDeathPanel({
                   justifyContent: "space-between",
                   alignItems: "center",
                   padding: "6px 10px",
-                  background: "rgba(34, 197, 94, 0.1)",
-                  borderRadius: 4,
-                  border: "1px solid rgba(34, 197, 94, 0.3)",
+                  background: `${theme.colors.state.success}14`,
+                  borderRadius: theme.borderRadius.sm,
+                  border: `1px solid ${theme.colors.state.success}40`,
                 }}
               >
-                <span>{item.name}</span>
-                <span style={{ fontSize: 11, opacity: 0.7 }}>
+                <span style={{ color: theme.colors.text.primary }}>
+                  {item.name}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    opacity: 0.7,
+                    color: theme.colors.text.secondary,
+                  }}
+                >
                   {item.value.toLocaleString()} gp
                 </span>
               </div>
@@ -536,7 +566,7 @@ export function ItemsKeptOnDeathPanel({
       <div>
         <div
           style={{
-            color: "#ef4444",
+            color: theme.colors.state.danger,
             fontWeight: 600,
             marginBottom: 8,
             fontSize: 12,
@@ -568,13 +598,21 @@ export function ItemsKeptOnDeathPanel({
                   justifyContent: "space-between",
                   alignItems: "center",
                   padding: "6px 10px",
-                  background: "rgba(239, 68, 68, 0.1)",
-                  borderRadius: 4,
-                  border: "1px solid rgba(239, 68, 68, 0.3)",
+                  background: `${theme.colors.state.danger}14`,
+                  borderRadius: theme.borderRadius.sm,
+                  border: `1px solid ${theme.colors.state.danger}40`,
                 }}
               >
-                <span>{item.name}</span>
-                <span style={{ fontSize: 11, opacity: 0.7 }}>
+                <span style={{ color: theme.colors.text.primary }}>
+                  {item.name}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    opacity: 0.7,
+                    color: theme.colors.text.secondary,
+                  }}
+                >
                   {item.value.toLocaleString()} gp
                 </span>
               </div>
@@ -586,15 +624,17 @@ export function ItemsKeptOnDeathPanel({
       {/* Total value footer */}
       <div
         style={{
-          borderTop: "1px solid rgba(139, 69, 19, 0.4)",
+          borderTop: `1px solid ${theme.colors.border.default}40`,
           paddingTop: 12,
           display: "flex",
           justifyContent: "space-between",
           fontSize: 12,
         }}
       >
-        <span style={{ opacity: 0.7 }}>Total Risked Value:</span>
-        <span style={{ color: "#ef4444", fontWeight: 600 }}>
+        <span style={{ opacity: 0.7, color: theme.colors.text.secondary }}>
+          Total Risked Value:
+        </span>
+        <span style={{ color: theme.colors.state.danger, fontWeight: 600 }}>
           {lostItems
             .reduce((sum, item) => sum + item.value, 0)
             .toLocaleString()}{" "}

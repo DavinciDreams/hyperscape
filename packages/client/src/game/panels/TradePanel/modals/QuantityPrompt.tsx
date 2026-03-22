@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
+import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { parseQuantityInput } from "../utils";
 import type { QuantityPromptProps } from "../types";
 
@@ -43,18 +44,20 @@ export function QuantityPrompt({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: theme.colors.background.panelSecondary,
-          border: `2px solid ${theme.colors.border.decorative}`,
-          borderRadius: "8px",
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
           padding: "16px",
           minWidth: "280px",
         }}
       >
         <h3
           style={{
+            ...getPanelHeaderStyle(theme),
             color: theme.colors.text.accent,
             fontWeight: "bold",
+            margin: "-16px -16px 12px",
             marginBottom: "12px",
+            padding: "12px 16px",
             fontSize: "14px",
           }}
         >
@@ -83,8 +86,8 @@ export function QuantityPrompt({
             width: "100%",
             padding: "8px",
             background: theme.colors.background.panelPrimary,
-            border: `1px solid ${theme.colors.border.default}`,
-            borderRadius: "4px",
+            border: `1px solid ${theme.colors.border.default}66`,
+            borderRadius: `${theme.borderRadius.md}px`,
             color: theme.colors.text.primary,
             fontSize: "14px",
             marginBottom: "12px",
@@ -96,10 +99,10 @@ export function QuantityPrompt({
             style={{
               flex: 1,
               padding: "8px",
-              background: theme.colors.state.success,
+              background: `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
               color: "white",
               border: "none",
-              borderRadius: "4px",
+              borderRadius: `${theme.borderRadius.md}px`,
               cursor: "pointer",
               fontWeight: "bold",
             }}
@@ -111,10 +114,10 @@ export function QuantityPrompt({
             style={{
               flex: 1,
               padding: "8px",
-              background: theme.colors.state.danger,
+              background: `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`,
               color: "white",
               border: "none",
-              borderRadius: "4px",
+              borderRadius: `${theme.borderRadius.md}px`,
               cursor: "pointer",
               fontWeight: "bold",
             }}

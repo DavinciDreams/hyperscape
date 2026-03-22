@@ -13,6 +13,7 @@
 
 import { useCallback, useMemo, type CSSProperties } from "react";
 import { useThemeStore, type Theme } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import {
   type DuelRules,
   type DuelEquipmentSlot,
@@ -56,8 +57,7 @@ function useRulesScreenStyles(theme: Theme, myAccepted: boolean) {
     };
 
     const sectionStyle: CSSProperties = {
-      background: theme.colors.background.tertiary,
-      border: `1px solid ${theme.colors.border.default}`,
+      ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
       borderRadius: theme.borderRadius.md,
       padding: theme.spacing.md,
     };
@@ -82,9 +82,13 @@ function useRulesScreenStyles(theme: Theme, myAccepted: boolean) {
       justifyContent: "space-between",
       alignItems: "center",
       padding: theme.spacing.sm,
-      background: theme.colors.background.secondary,
+      background:
+        theme.name === "hyperscape"
+          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
+          : theme.colors.background.secondary,
       borderRadius: theme.borderRadius.sm,
       fontSize: theme.typography.fontSize.sm,
+      border: `1px solid ${theme.colors.border.default}40`,
     };
 
     const buttonContainerStyle: CSSProperties = {
@@ -107,8 +111,8 @@ function useRulesScreenStyles(theme: Theme, myAccepted: boolean) {
     const acceptButtonStyle: CSSProperties = {
       ...baseButtonStyle,
       background: myAccepted
-        ? `${theme.colors.state.success}88`
-        : theme.colors.state.success,
+        ? `linear-gradient(135deg, ${theme.colors.state.success}88 0%, ${theme.colors.state.success}66 100%)`
+        : `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
       color: "#fff",
       border: `1px solid ${theme.colors.state.success}`,
       opacity: myAccepted ? 0.7 : 1,
@@ -116,7 +120,7 @@ function useRulesScreenStyles(theme: Theme, myAccepted: boolean) {
 
     const cancelButtonStyle: CSSProperties = {
       ...baseButtonStyle,
-      background: theme.colors.state.danger,
+      background: `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`,
       color: "#fff",
       border: `1px solid ${theme.colors.state.danger}`,
     };
