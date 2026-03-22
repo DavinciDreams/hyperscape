@@ -156,7 +156,6 @@ export function applyRiverCarvingPure(
   river: RiverDefinition,
   aabbs: RiverSegmentAABB[],
   maxHeight: number,
-  _waterLevelNormalized: number,
 ): number {
   const proj = projectOntoRiver(worldX, worldZ, river, aabbs);
   if (!proj) return height;
@@ -252,7 +251,8 @@ export function findRiverCenterAtX(
  */
 export function buildApplyRiverCarvingJS(
   maxHeight: number,
-  _waterLevelNormalized: number,
+  valleyMultiplier: number = 2.5,
+  bermWidth: number = 4,
 ): string {
   return `
   function projectOntoRiverJS(worldX, worldZ) {
@@ -295,8 +295,8 @@ export function buildApplyRiverCarvingJS(
     var surfaceY = proj.surfaceY;
     if (surfaceY !== surfaceY) return height; // NaN check
 
-    var valleyMul = ${2.5}; // river.valleyMultiplier baked in
-    var bermW = ${4}; // river.bermWidth baked in
+    var valleyMul = ${valleyMultiplier};
+    var bermW = ${bermWidth};
     var bankWidth = halfWidth * (valleyMul - 1);
     var totalWidth = halfWidth + bankWidth;
     if (dist > totalWidth + bermW) return height;

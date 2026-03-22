@@ -166,7 +166,7 @@ function generateHeightmap(input) {
   var riverAABBs = (config.riverAABBs || []);
 
   ${buildComputeBiomeWeightsJS()}
-  ${buildApplyRiverCarvingJS(MAX_HEIGHT, WATER_LEVEL_NORMALIZED)}
+  ${buildApplyRiverCarvingJS(MAX_HEIGHT)}
   ${buildApplyLandscapeFeaturesJS()}
 
   ${buildGetBaseHeightAtJS()}

@@ -460,20 +460,7 @@ export function createClientWorld() {
         });
       }
 
-      // Pre-warm mob/NPC animated impostors AFTER renderer is ready
-      // DISABLED: Currently using VRM mobs which need the full avatar system.
-      // Animated impostors will be baked on-demand when mobs spawn.
-      // TODO: Enable this when mobs migrate to GLB format for pre-baking support.
-      // (async () => {
-      //   try {
-      //     await waitForPhysX("MobImpostorPrewarm", 120000);
-      //     await new Promise((resolve) => setTimeout(resolve, 1000));
-      //     console.log("[createClientWorld] Starting mob impostor pre-baking...");
-      //     await prewarmMobImpostors(world);
-      //   } catch (err) {
-      //     console.warn("[createClientWorld] Mob impostor pre-warm failed:", err);
-      //   }
-      // })();
+      // Mob impostor pre-warming disabled — VRM mobs use on-demand baking.
 
       // CRITICAL: Initialize newly registered systems
       const worldOptions = {

@@ -18,10 +18,6 @@ import {
   type TerrainWorkerOutput,
 } from "../../../utils/workers";
 import {
-  POND_RADIUS,
-  POND_DEPTH,
-  POND_CENTER_X,
-  POND_CENTER_Z,
   LANDSCAPE_FEATURES,
   ISLAND_RADIUS,
   computeBaseHeight,

@@ -1458,37 +1458,8 @@ export class ProceduralDocks extends System {
     return this.dockDeckHeights.has(dockTileKey(tileX, tileZ));
   }
 
-  /** Get dock at a specific tile */
-  getDockAtTile(tileX: number, tileZ: number): DockInstance | null {
-    for (const instance of this.docks.values()) {
-      for (const tile of instance.dock.collision.walkableTiles) {
-        if (tile.x === tileX && tile.z === tileZ) {
-          return instance;
-        }
-      }
-    }
-    return null;
-  }
-
-  /** Check if movement to a tile is blocked by dock edge */
-  isDockEdgeBlocked(
-    tileX: number,
-    tileZ: number,
-    direction: "north" | "south" | "east" | "west",
-  ): boolean {
-    for (const instance of this.docks.values()) {
-      for (const edge of instance.dock.collision.blockedEdges) {
-        if (
-          edge.tileX === tileX &&
-          edge.tileZ === tileZ &&
-          edge.direction === direction
-        ) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
+  // getDockAtTile and isDockEdgeBlocked removed — unused, and collision
+  // flags are the authoritative source for tile walkability and edge blocking.
 
   // ---------------------------------------------------------------------------
   // Lifecycle

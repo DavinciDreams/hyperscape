@@ -213,7 +213,7 @@ export class WaterfallVisualsSystem extends SystemBase {
     return stage?.scene ?? null;
   }
 
-  destroy(): void {
+  override destroy(): void {
     for (const handle of this.waterfallMeshes) {
       handle.mesh.removeFromParent();
       handle.mesh.geometry.dispose();
@@ -224,5 +224,6 @@ export class WaterfallVisualsSystem extends SystemBase {
       this.material = null;
     }
     this.waterfallsReady = false;
+    super.destroy();
   }
 }

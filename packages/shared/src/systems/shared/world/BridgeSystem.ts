@@ -495,7 +495,6 @@ export class BridgeSystem extends SystemBase {
       if (bMaxX < originX || bMinX > originX + tileSize) continue;
       if (bMaxZ < originZ || bMinZ > originZ + tileSize) continue;
 
-      const prevSize = this.deckHeights.size;
       this.registerSingleBridge(
         bridge,
         originX,
@@ -504,12 +503,6 @@ export class BridgeSystem extends SystemBase {
         terrain,
         collision,
       );
-      const newTiles = this.deckHeights.size - prevSize;
-      if (newTiles > 0) {
-        // Sample one deck height for debugging
-        const sampleKey = [...this.deckHeights.keys()].pop()!;
-        const sampleH = this.deckHeights.get(sampleKey);
-      }
     }
   }
 

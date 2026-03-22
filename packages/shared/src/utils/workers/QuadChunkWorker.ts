@@ -130,7 +130,7 @@ function generateQuadChunk(input) {
   var riverFeatures = (config.riverFeatures || []);
   var riverAABBs = (config.riverAABBs || []);
   ${buildComputeBiomeWeightsJS()}
-  ${buildApplyRiverCarvingJS(MAX_HEIGHT, WATER_LEVEL_NORMALIZED)}
+  ${buildApplyRiverCarvingJS(MAX_HEIGHT)}
   ${buildApplyLandscapeFeaturesJS()}
   ${buildGetBaseHeightAtJS()}
   ${buildHeightHelpersJS()}

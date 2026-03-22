@@ -302,11 +302,10 @@ export class BFSPathDebugSystem extends System {
     }
 
     this.pathMesh?.dispose();
-    this.nextTileMesh?.geometry?.dispose();
-    this.destMesh?.geometry?.dispose();
     this.pathMaterial?.dispose();
     this.nextTileMaterial?.dispose();
     this.destMaterial?.dispose();
+    // markerGeometry is shared by nextTileMesh and destMesh — dispose once
     this.markerGeometry?.dispose();
 
     this.pathMesh = null;

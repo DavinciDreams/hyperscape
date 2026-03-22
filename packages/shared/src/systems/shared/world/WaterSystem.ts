@@ -266,9 +266,7 @@ export class WaterSystem {
       // When enabled, visibility will be controlled by frustum culling in update()
     }
 
-    console.log(
-      `[WaterSystem] Realtime water reflections ${enabled ? "enabled" : "disabled"}`,
-    );
+    // Reflection state toggled
   }
 
   get waterUniforms(): WaterUniforms | null {
@@ -339,9 +337,7 @@ export class WaterSystem {
     // Create ocean material without reflections (different visual style)
     this.oceanMaterial = this.createOceanMaterial();
 
-    console.log(
-      "[WaterSystem] Initialized with lake (reflective) and ocean (non-reflective) shaders",
-    );
+    // Lake (reflective) and ocean (non-reflective) shaders initialized
   }
 
   /**
@@ -360,9 +356,7 @@ export class WaterSystem {
       if (reflectorObj.camera) {
         reflectorObj.camera.layers.set(0); // Only see layer 0 (terrain, buildings)
         reflectorObj.camera.layers.enable(2); // Also see floors
-        console.log(
-          "[WaterSystem] Reflector camera configured to ignore grass (layer 1)",
-        );
+        // Reflector camera configured to exclude grass (layer 1)
       }
 
       // Set up callbacks to track when reflection camera is rendering
@@ -375,10 +369,7 @@ export class WaterSystem {
         world.isRenderingReflection = false;
       };
 
-      console.log(
-        "[WaterSystem] Added reflector target to scene at y=",
-        this.reflection.target.position.y,
-      );
+      // Reflector target added to scene
     }
   }
 
@@ -1330,7 +1321,8 @@ export class WaterSystem {
     const uvs: number[] = [];
     const shores: number[] = [];
     const indices: number[] = [];
-    const vertMap = new Map<string, number>();
+    const stride = resolution + 1;
+    const vertMap = new Map<number, number>();
     let idx = 0;
 
     for (let i = 0; i < resolution; i++) {
@@ -1352,7 +1344,7 @@ export class WaterSystem {
         const quad: number[] = [];
 
         for (const [ci, cj] of corners) {
-          const key = `${ci},${cj}`;
+          const key = ci * stride + cj;
           if (!vertMap.has(key)) {
             verts.push(
               (ci / resolution - 0.5) * tileSize,
@@ -1792,6 +1784,34 @@ export class WaterSystem {
   }
 
   destroy(): void {
+    // Dispose all water meshes (geometry + remove from scene)
+    for (const mesh of this.waterMeshes) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+    }
     this.waterMeshes = [];
+
+    // Dispose materials
+    this.lakeMaterial?.dispose();
+    this.lakeMaterial = undefined;
+    this.oceanMaterial?.dispose();
+    this.oceanMaterial = undefined;
+
+    // Dispose procedural textures
+    this.normalTex1?.dispose();
+    this.normalTex1 = undefined;
+    this.normalTex2?.dispose();
+    this.normalTex2 = undefined;
+    this.foamTex?.dispose();
+    this.foamTex = undefined;
+
+    // Dispose reflector render target + remove from scene
+    if (this.reflection?.target) {
+      this.reflection.target.removeFromParent();
+    }
+    this.reflection = undefined;
+
+    this.uniforms = null;
+    this.oceanUniforms = null;
   }
 }

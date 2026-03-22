@@ -322,14 +322,7 @@ export const COAST_SMALL = {
 // Legacy exports — kept for backward compatibility with TerrainWorker.ts
 // ---------------------------------------------------------------------------
 
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_RADIUS = 50;
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_DEPTH = 0.55;
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_CENTER_X = -80;
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_CENTER_Z = 60;
+// Legacy POND_ constants removed — landscape features replaced the hardcoded pond.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SINGLE SOURCE OF TRUTH — pure TypeScript functions
@@ -440,7 +433,6 @@ export function applyLandscapeFeaturesPure(
       riverDef,
       riverAABBs,
       MAX_HEIGHT,
-      WATER_LEVEL_NORMALIZED,
     );
   }
 

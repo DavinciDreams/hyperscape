@@ -339,10 +339,11 @@ export function findShorePoints(
       }
       if (!waterDir) continue;
 
-      // Check minimum spacing from existing points
+      // Check minimum spacing from existing points (squared distance avoids sqrt)
+      const minSpacingSq = minSpacing * minSpacing;
       const tooClose = results.some((p) => {
-        const dist = Math.sqrt((p.x - x) ** 2 + (p.z - z) ** 2);
-        return dist < minSpacing;
+        const distSq = (p.x - x) ** 2 + (p.z - z) ** 2;
+        return distSq < minSpacingSq;
       });
       if (tooClose) continue;
 
@@ -429,10 +430,11 @@ export function findWaterEdgePoints(
       );
       if (cornerMinH < waterThreshold - 2) continue;
 
-      // Check minimum spacing from existing points
+      // Check minimum spacing from existing points (squared distance avoids sqrt)
+      const minSpacingSq = minSpacing * minSpacing;
       const tooClose = results.some((p) => {
-        const dist = Math.sqrt((p.x - x) ** 2 + (p.z - z) ** 2);
-        return dist < minSpacing;
+        const distSq = (p.x - x) ** 2 + (p.z - z) ** 2;
+        return distSq < minSpacingSq;
       });
       if (tooClose) continue;
 

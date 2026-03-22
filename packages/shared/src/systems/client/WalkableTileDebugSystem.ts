@@ -94,6 +94,8 @@ export class WalkableTileDebugSystem extends System {
   private _pos = new THREE.Vector3();
   private _quat = new THREE.Quaternion();
   private _scale = new THREE.Vector3(1, 1, 1);
+  private _flatQuat = new THREE.Quaternion();
+  private _flatAxis = new THREE.Vector3();
 
   // Info overlay
   private infoDiv: HTMLDivElement | null = null;
@@ -272,7 +274,8 @@ export class WalkableTileDebugSystem extends System {
 
     const collision = this.world.collision as {
       getFlags: (x: number, z: number) => number;
-    };
+    } | null;
+    if (!collision) return;
     const terrain = this.world.getSystem("terrain") as TerrainSystem | null;
     const bridge = this.world.getSystem("bridge") as BridgeSystem | null;
 
@@ -364,11 +367,8 @@ export class WalkableTileDebugSystem extends System {
     // Wall strips lie flat on XZ, rotated around Y for east/west edges
     this._quat.setFromAxisAngle(this._pos.set(0, 1, 0), rotY);
     // Also rotate to lie flat (plane default is XY, we need XZ)
-    const flatQuat = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(1, 0, 0),
-      -Math.PI / 2,
-    );
-    this._quat.multiply(flatQuat);
+    this._flatQuat.setFromAxisAngle(this._flatAxis.set(1, 0, 0), -Math.PI / 2);
+    this._quat.multiply(this._flatQuat);
 
     this._mat.compose(this._pos.set(x, y, z), this._quat, this._scale);
     this.wallMesh.setMatrixAt(this.wallCount, this._mat);
