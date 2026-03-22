@@ -367,9 +367,8 @@ export function createClientWorld() {
   // ============================================================================
   // DOCK SYSTEM
   // ============================================================================
-  // Procedural docks for ponds and lakes
-  // TEMPORARILY DISABLED
-  // world.register("docks", ProceduralDocks);
+  // Procedural docks for ponds and lakes — collision + mesh on client
+  world.register("docks", ProceduralDocks);
 
   // ============================================================================
   // THREE.JS SETUP

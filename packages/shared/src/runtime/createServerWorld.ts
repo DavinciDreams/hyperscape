@@ -48,6 +48,7 @@ import { TownSystem } from "../systems/shared";
 import { POISystem } from "../systems/shared";
 import { RoadNetworkSystem } from "../systems/shared";
 import { BridgeSystem } from "../systems/shared/world/BridgeSystem";
+import { ProceduralDocks } from "../systems/shared/world/ProceduralDocks";
 
 // RPG systems are registered via SystemLoader to keep them modular
 import { registerSystems } from "../systems/shared";
@@ -89,6 +90,7 @@ export async function createServerWorld(): Promise<World> {
 
   world.register("terrain", TerrainSystem);
   world.register("bridges", BridgeSystem);
+  world.register("docks", ProceduralDocks);
 
   // ============================================================================
   // TOWN AND ROAD SYSTEMS

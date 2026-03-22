@@ -3822,6 +3822,15 @@ export class TerrainSystem extends System {
       if (deckH !== null) return deckH;
     }
 
+    // Dock deck height — same pattern as bridges.
+    const dockSys = this.world?.getSystem("docks") as {
+      getDeckHeightAtSmooth?(wx: number, wz: number): number | null;
+    } | null;
+    if (dockSys?.getDeckHeightAtSmooth) {
+      const dockH = dockSys.getDeckHeightAtSmooth(worldX, worldZ);
+      if (dockH !== null) return dockH;
+    }
+
     // CRITICAL: Check flat zones FIRST - they may be registered after terrain generation
     // This ensures buildings and other structures have correct floor heights even when
     // terrain tiles were generated before their flat zones were registered.
@@ -6142,6 +6151,24 @@ export class TerrainSystem extends System {
         terrainTileZ,
         tileSize,
         this as TerrainSystem,
+      );
+    }
+
+    // ---- PASS 4: Dock collision (overrides WATER → walkable) ----
+    // Re-apply dock flags after terrain baking, same pattern as bridges.
+    // Without this, bakeWalkabilityFlags would overwrite DOCK with WATER.
+    const dockSystem = this.world.getSystem("docks") as {
+      reapplyCollisionForTile?(
+        originX: number,
+        originZ: number,
+        tileSize: number,
+      ): void;
+    } | null;
+    if (dockSystem?.reapplyCollisionForTile) {
+      dockSystem.reapplyCollisionForTile(
+        terrainTileX * tileSize,
+        terrainTileZ * tileSize,
+        tileSize,
       );
     }
   }

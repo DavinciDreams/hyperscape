@@ -207,6 +207,31 @@ export class TileMovementManager {
   }
 
   /**
+   * Get dock system for deck height lookups (cached after first lookup).
+   */
+  private _dockSystemRef: {
+    getDeckHeightAt(x: number, z: number): number | null;
+  } | null = null;
+  private _dockSystemChecked = false;
+
+  private getDockSystem(): {
+    getDeckHeightAt(x: number, z: number): number | null;
+  } | null {
+    if (!this._dockSystemChecked) {
+      this._dockSystemChecked = true;
+      const sys = this.world.getSystem("docks");
+      if (sys) {
+        this._dockSystemRef = sys as unknown as {
+          getDeckHeightAt(x: number, z: number): number | null;
+        };
+      } else {
+        this._dockSystemRef = null;
+      }
+    }
+    return this._dockSystemRef;
+  }
+
+  /**
    * Get building collision service
    */
   private getBuildingCollision(): BuildingCollisionService | null {
@@ -312,6 +337,12 @@ export class TileMovementManager {
     if (floorIndex === 0) {
       const bridgeSysWalk = this.getBridgeSystem();
       if (bridgeSysWalk?.getDeckHeightAt(tile.x, tile.z) != null) {
+        walkable = true;
+        this._walkabilityCache.set(tileKey, walkable);
+        return walkable;
+      }
+      const dockSysWalk = this.getDockSystem();
+      if (dockSysWalk?.getDeckHeightAt(tile.x, tile.z) != null) {
         walkable = true;
         this._walkabilityCache.set(tileKey, walkable);
         return walkable;
@@ -525,14 +556,18 @@ export class TileMovementManager {
       return;
     }
 
-    // Bridge constraint: if player is on a bridge and clicks a water tile,
-    // reject the movement. Otherwise BFS reroutes through endpoints to the bank,
-    // making the player walk off the bridge — not what the user intends.
+    // Bridge/dock constraint: if player is on a bridge or dock and clicks a
+    // water tile, reject the movement. Otherwise BFS reroutes through
+    // endpoints to the bank, making the player walk off — not what the user intends.
     const bridgeSys = this.getBridgeSystem();
-    if (
+    const dockSys = this.getDockSystem();
+    const onBridge =
       bridgeSys?.getDeckHeightAt(state.currentTile.x, state.currentTile.z) !==
-      null
-    ) {
+      null;
+    const onDock =
+      dockSys?.getDeckHeightAt(state.currentTile.x, state.currentTile.z) !==
+      null;
+    if (onBridge || onDock) {
       if (
         this.world.collision.hasFlags(
           payload.targetTile.x,
@@ -540,7 +575,7 @@ export class TileMovementManager {
           CollisionFlag.WATER,
         )
       ) {
-        return; // On bridge, clicked water — ignore
+        return; // On bridge/dock, clicked water — ignore
       }
     }
 
