@@ -823,9 +823,6 @@ export class TileMovementManager {
             nextTile.z,
           )
         ) {
-          console.warn(
-            `[BridgeSystem] RUNTIME GUARD: blocked step (${state.currentTile.x},${state.currentTile.z})→(${nextTile.x},${nextTile.z}) for ${playerId}`,
-          );
           state.pathIndex = state.path.length; // Cancel remaining path
           break;
         }
@@ -1143,9 +1140,6 @@ export class TileMovementManager {
           nextTile.z,
         )
       ) {
-        console.warn(
-          `[BridgeSystem] RUNTIME GUARD (processPlayerTick): blocked step (${state.currentTile.x},${state.currentTile.z})→(${nextTile.x},${nextTile.z}) for ${playerId}`,
-        );
         state.pathIndex = state.path.length;
         break;
       }

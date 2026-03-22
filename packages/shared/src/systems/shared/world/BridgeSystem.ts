@@ -228,9 +228,6 @@ export class BridgeSystem extends SystemBase {
   }
 
   async init(): Promise<void> {
-    console.warn(
-      `[BridgeSystem] init() called, isServer=${this.world.isServer}, deckHeights.size=${this.deckHeights.size}, entryTiles.size=${this.bridgeEntryTiles.size}`,
-    );
     // Pre-compute deck heights for ALL bridge tiles eagerly at init.
     // This ensures getDeckHeightAt() returns values immediately, before
     // any terrain tile has been generated — matching the BuildingCollisionService
@@ -238,8 +235,6 @@ export class BridgeSystem extends SystemBase {
     const terrain = this.world.getSystem("terrain") as TerrainSystem | null;
     if (terrain) {
       this.precomputeAllDeckHeights(terrain);
-    } else {
-      console.warn("[BridgeSystem] No terrain system found in init()");
     }
   }
 
@@ -419,10 +414,6 @@ export class BridgeSystem extends SystemBase {
           entryCount++;
         }
       }
-
-      console.warn(
-        `[BridgeSystem] ${bridge.id}: pre-computed ${tileMap.size} deck tiles (${entryCount} entry tiles), deckY range ${startY.toFixed(1)}-${(endY + bridge.archHeight).toFixed(1)}, collision=${collision?.addFlags ? "SET" : "DEFERRED"}`,
-      );
     }
   }
 
@@ -467,21 +458,13 @@ export class BridgeSystem extends SystemBase {
     if (this.world.isServer) return;
 
     const terrain = this.world.getSystem("terrain") as TerrainSystem | null;
-    if (!terrain) {
-      console.warn(
-        "[BridgeSystem] No terrain system found, skipping mesh creation",
-      );
-      return;
-    }
+    if (!terrain) return;
 
     const stage = this.world.getSystem("stage") as {
       scene?: THREE.Scene;
     } | null;
     const scene = stage?.scene;
-    if (!scene) {
-      console.warn("[BridgeSystem] No scene found, skipping mesh creation");
-      return;
-    }
+    if (!scene) return;
 
     this.createBridgeMeshes(terrain, scene);
   }
@@ -555,9 +538,6 @@ export class BridgeSystem extends SystemBase {
     // getHeightAt by sampling terrain directly.
     let cached = this.endpointCache.get(bridge.id);
     if (!cached) {
-      console.warn(
-        `[BridgeSystem] endpointCache MISS for ${bridge.id}, computing inline from terrain`,
-      );
       const startY = terrain.getHeightAt(bridge.startX, bridge.startZ);
       const endY = terrain.getHeightAt(bridge.endX, bridge.endZ);
       const waterY = this.getRiverSurfaceYAtX(bridge.startX);
@@ -718,35 +698,6 @@ export class BridgeSystem extends SystemBase {
         });
       }
     }
-
-    // Collect entry tile coords and wall edge counts for diagnostic logging
-    const entryCoords: string[] = [];
-    let wallEdgeCount = 0;
-    for (const tile of tileMap.values()) {
-      const isEp = tile.minS === 0 || tile.maxS === steps;
-      if (isEp) {
-        entryCoords.push(`(${tile.x},${tile.z})`);
-      }
-      // Count exposed edges (where wall flags were added)
-      for (const [dx, dz] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-        [1, -1],
-        [-1, -1],
-        [1, 1],
-        [-1, 1],
-      ]) {
-        if (this.getDeckHeightAt(tile.x + dx, tile.z + dz) === null) {
-          wallEdgeCount++;
-        }
-      }
-    }
-
-    console.warn(
-      `[BridgeSystem] ${bridge.id}: registered ${tileMap.size} unique tiles, ${entryCoords.length} entry tiles at [${entryCoords.join(",")}], ${wallEdgeCount} wall edges, ${this.deckHeights.size} total deck tiles`,
-    );
   }
 
   /**
@@ -838,8 +789,6 @@ export class BridgeSystem extends SystemBase {
    * This enforces: players can ONLY enter/exit bridges at their endpoints.
    * All bridge↔non-bridge transitions at interior (railing) tiles are blocked.
    */
-  /** Track whether we've logged the first bridge transition block (diagnostic) */
-  private _loggedFirstBlock = false;
 
   isBridgeTransitionBlocked(
     fromX: number,
@@ -861,12 +810,6 @@ export class BridgeSystem extends SystemBase {
     const entryDir = this.bridgeEntryTiles.get(key);
 
     if (!entryDir) {
-      if (!this._loggedFirstBlock) {
-        this._loggedFirstBlock = true;
-        console.warn(
-          `[BridgeSystem] isBridgeTransitionBlocked: BLOCKED (${fromX},${fromZ})→(${toX},${toZ}), bridge tile=(${bridgeTileX},${bridgeTileZ}), entryTiles.size=${this.bridgeEntryTiles.size}, deckHeights.size=${this.deckHeights.size}`,
-        );
-      }
       return true; // Not an endpoint tile — block
     }
 
@@ -904,10 +847,6 @@ export class BridgeSystem extends SystemBase {
         this.bridgeMeshes.push(group);
       }
     }
-
-    console.warn(
-      `[BridgeSystem] Created ${this.bridgeMeshes.length} bridge meshes`,
-    );
   }
 
   /**
