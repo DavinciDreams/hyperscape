@@ -28,9 +28,7 @@ import {
   type DockRecipe,
 } from "@hyperscape/procgen/items/dock";
 import type { WaterBodyRegistry } from "./WaterBodyRegistry";
-import { projectOntoRiver } from "./RiverUtils";
 import { CollisionFlag, getOppositeWallFlag } from "../movement/CollisionFlags";
-import { LANDSCAPE_FEATURES, LandscapeType } from "./TerrainHeightParams";
 
 // TSL imports for dock material (client-only, same pattern as BridgeSystem)
 import { MeshStandardNodeMaterial } from "three/webgpu";
@@ -132,6 +130,13 @@ const dockWoodUV = Fn(() => {
 const SHORELINE_SAMPLES = 64;
 const MAX_SLOPE_FOR_DOCK = 0.4;
 const MIN_WATER_DEPTH = 1.5;
+
+/** Pre-allocated test points for isTerrainReady() — avoids per-tick allocation. */
+const TERRAIN_READY_TEST_POINTS: ReadonlyArray<{ x: number; z: number }> = [
+  { x: 0, z: 0 },
+  { x: 50, z: 50 },
+  { x: -50, z: -50 },
+];
 
 /** Pack tile coordinates into a single 32-bit key (matches bridge pattern). */
 function dockTileKey(tx: number, tz: number): number {
@@ -345,6 +350,13 @@ export class ProceduralDocks extends System {
   /** World-space meshes added to scene (for cleanup). */
   private dockMeshes: THREE.Mesh[] = [];
 
+  /** Pending dock generation queue — processed one per tick to avoid spikes. */
+  private pendingDockQueue: Array<{
+    waterBody: WaterBody;
+    seed: string;
+    waterSurfaceY: number;
+  }> = [];
+
   constructor(world: World) {
     super(world);
     this.generator = new DockGenerator();
@@ -369,13 +381,7 @@ export class ProceduralDocks extends System {
   private isTerrainReady(): boolean {
     if (!this.terrainSystem) return false;
 
-    const testPoints = [
-      { x: 0, z: 0 },
-      { x: 50, z: 50 },
-      { x: -50, z: -50 },
-    ];
-
-    for (const point of testPoints) {
+    for (const point of TERRAIN_READY_TEST_POINTS) {
       const height = this.terrainSystem.getHeightAt(point.x, point.z);
       if (height === 0 || isNaN(height)) {
         return false;
@@ -404,107 +410,32 @@ export class ProceduralDocks extends System {
   }
 
   /**
-   * Generate docks for all water bodies (ponds + river banks).
-   * Called automatically when terrain is ready.
+   * Enqueue docks for all water bodies (ponds + river banks).
+   * Builds a queue that update() drains one dock per tick to avoid spikes.
    */
-  generateDocks(seed: string = "island-docks"): void {
+  private enqueueDocks(seed: string = "island-docks"): void {
     if (!this.terrainSystem) return;
-    if (this.docksGenerated) return;
 
-    let dockCount = 0;
     const registry = this.terrainSystem.getWaterBodyRegistry();
+    if (!registry) return;
 
-    if (registry) {
-      // Generate docks for all registered water bodies (elevated ponds, lakes)
-      for (const body of registry.getAllBodies()) {
-        // Skip river segments — those get river bank docks below
-        if (body.sourceType === "river_segment") continue;
+    // Elevated ponds/lakes from WaterBodyRegistry
+    for (const body of registry.getAllBodies()) {
+      if (body.sourceType === "river_segment") continue;
 
-        const waterBody: WaterBody = {
+      this.pendingDockQueue.push({
+        waterBody: {
           id: body.id,
           type: "pond",
           center: { x: body.centerX, z: body.centerZ },
           radius: body.radius,
-        };
-        const dock = this.generateDockForWaterBody(
-          waterBody,
-          `${seed}-${body.id}`,
-          body.surfaceY,
-        );
-        if (dock) dockCount++;
-      }
-
-      // Generate docks for ocean-level ponds from LANDSCAPE_FEATURES
-      // that are NOT in the WaterBodyRegistry (rimHeight <= WATER_THRESHOLD)
-      const registeredBodies = registry.getAllBodies();
-      for (const feat of LANDSCAPE_FEATURES) {
-        if (feat.type !== LandscapeType.Pond) continue;
-
-        // Check if already in registry (elevated pond)
-        const inRegistry = registeredBodies.some(
-          (b) =>
-            Math.abs(b.centerX - feat.x) < 1 &&
-            Math.abs(b.centerZ - feat.z) < 1,
-        );
-        if (inRegistry) continue;
-
-        const waterBody: WaterBody = {
-          id: `ocean-pond-${feat.x}-${feat.z}`,
-          type: "pond",
-          center: { x: feat.x, z: feat.z },
-          radius: feat.radius,
-        };
-        const dock = this.generateDockForWaterBody(
-          waterBody,
-          `${seed}-${waterBody.id}`,
-          WATER_THRESHOLD,
-        );
-        if (dock) dockCount++;
-      }
-
-      // Generate docks at river banks
-      const riverDef = registry.getRiverDef();
-      if (riverDef) {
-        const riverWps = riverDef.waypoints;
-        let riverDockIdx = 0;
-        for (let i = 0; i < riverWps.length - 1; i += 2) {
-          const wp = riverWps[i];
-          if (wp.surfaceY == null) continue;
-          if (wp.surfaceY <= WATER_THRESHOLD + 1) continue;
-
-          const nextWp = riverWps[Math.min(i + 1, riverWps.length - 1)];
-          const dirX = nextWp.x - wp.x;
-          const dirZ = nextWp.z - wp.z;
-          const len = Math.sqrt(dirX * dirX + dirZ * dirZ);
-          if (len < 1) continue;
-
-          const perpX = -dirZ / len;
-          const perpZ = dirX / len;
-          const bankX = wp.x + perpX * (wp.halfWidth + 2);
-          const bankZ = wp.z + perpZ * (wp.halfWidth + 2);
-
-          const bankH = this.terrainSystem!.getHeightAt(bankX, bankZ);
-          if (bankH < WATER_THRESHOLD) continue;
-
-          const riverBank: WaterBody = {
-            id: `river-bank-${riverDockIdx}`,
-            type: "pond",
-            center: { x: wp.x, z: wp.z },
-            radius: wp.halfWidth + 5,
-          };
-
-          const dock = this.generateDockForWaterBody(
-            riverBank,
-            `${seed}-river-${riverDockIdx}`,
-            wp.surfaceY,
-          );
-          if (dock) dockCount++;
-          riverDockIdx++;
-        }
-      }
+        },
+        seed: `${seed}-${body.id}`,
+        waterSurfaceY: body.surfaceY,
+      });
     }
 
-    this.docksGenerated = true;
+    // Docks are only placed at elevated ponds/lakes — no rivers or ocean.
   }
 
   /**
@@ -624,13 +555,18 @@ export class ProceduralDocks extends System {
     const waterFloorDepth = 3.0;
     const waterFloorY = waterLevel - waterFloorDepth;
 
+    // Skip geometry+material creation when there's no scene (server).
+    // On server we only need layout + collision data from DockGenerator.
+    const isServer = !this.scene;
     const dock = this.generator.generate(recipe, adjustedPoint, {
       seed,
       waterLevel,
       waterFloorDepth,
+      skipMesh: isServer,
     });
 
-    // Dispose the DockGenerator's local-space mesh (we build world-space mesh)
+    // Dispose the DockGenerator's local-space mesh (we build world-space mesh).
+    // On server with skipMesh, the mesh is an empty Group — dispose is a no-op.
     dock.mesh.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
@@ -1587,11 +1523,32 @@ export class ProceduralDocks extends System {
   }
 
   update(_deltaTime: number): void {
-    if (!this.docksGenerated && this.isTerrainReady()) {
+    if (this.docksGenerated) return;
+
+    // First ready tick: build the queue (cheap — just enqueues work items)
+    if (this.pendingDockQueue.length === 0 && this.isTerrainReady()) {
+      this.enqueueDocks();
+      if (this.pendingDockQueue.length === 0) {
+        this.docksGenerated = true;
+        return;
+      }
+    }
+
+    // Process one dock per tick to avoid synchronous spikes
+    if (this.pendingDockQueue.length > 0) {
+      const item = this.pendingDockQueue.shift()!;
       try {
-        this.generateDocks();
+        this.generateDockForWaterBody(
+          item.waterBody,
+          item.seed,
+          item.waterSurfaceY,
+        );
       } catch (err) {
-        console.error("[ProceduralDocks] Error generating docks:", err);
+        console.error("[ProceduralDocks] Error generating dock:", err);
+      }
+
+      if (this.pendingDockQueue.length === 0) {
+        this.docksGenerated = true;
       }
     }
   }

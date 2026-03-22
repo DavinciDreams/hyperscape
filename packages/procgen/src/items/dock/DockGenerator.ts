@@ -136,6 +136,31 @@ export class DockGenerator {
       waterFloorY,
     );
 
+    // Generate collision data (needed on both client and server)
+    const collision = this.generateCollisionData(layout, shorelinePoint);
+
+    // Skip geometry + mesh on server — only layout + collision are needed
+    if (options.skipMesh) {
+      const emptyArrays: DockGeometryArrays = {
+        planks: [],
+        posts: [],
+        railingPosts: [],
+        railingRails: [],
+        moorings: [],
+      };
+      const emptyGroup = new THREE.Group();
+      emptyGroup.name = "Dock";
+      return {
+        mesh: emptyGroup,
+        position: layout.position,
+        layout,
+        recipe,
+        collision,
+        stats: this.calculateStats(emptyArrays, startTime),
+        geometryArrays: emptyArrays,
+      };
+    }
+
     // Build geometry
     const geometryArrays = this.buildDock(layout, recipe);
 
@@ -146,9 +171,6 @@ export class DockGenerator {
       recipe.woodType,
       waterLevel,
     );
-
-    // Generate collision data
-    const collision = this.generateCollisionData(layout, shorelinePoint);
 
     // Calculate stats
     const stats = this.calculateStats(geometryArrays, startTime);
