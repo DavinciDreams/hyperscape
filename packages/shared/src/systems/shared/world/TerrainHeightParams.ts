@@ -11,6 +11,9 @@
 
 import { BiomeType, DEFAULT_BIOME } from "./TerrainBiomeTypes";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import type { RiverDefinition } from "./RiverDefinition";
+import type { RiverSegmentAABB } from "./RiverUtils";
+import { applyRiverCarvingPure, buildApplyRiverCarvingJS } from "./RiverUtils";
 
 // ---------------------------------------------------------------------------
 // Core terrain generation constants
@@ -200,6 +203,7 @@ export const BIOME_CONFIG = {
 export enum LandscapeType {
   Mountain = "mountain",
   Pond = "pond",
+  River = "river",
 }
 
 export interface LandscapeFeatureDef {
@@ -356,6 +360,8 @@ export function applyLandscapeFeaturesPure(
   worldZ: number,
   features: ReadonlyArray<LandscapeFeatureDef>,
   noise: TerrainNoiseAdapter,
+  riverDef?: RiverDefinition,
+  riverAABBs?: RiverSegmentAABB[],
 ): number {
   for (let i = 0; i < features.length; i++) {
     const feat = features[i];
@@ -423,6 +429,21 @@ export function applyLandscapeFeaturesPure(
       height += influence * feat.strength;
     }
   }
+
+  // River carving — applied after landscape features so the channel
+  // cuts through mountains/ponds cleanly.
+  if (riverDef && riverAABBs) {
+    height = applyRiverCarvingPure(
+      height,
+      worldX,
+      worldZ,
+      riverDef,
+      riverAABBs,
+      MAX_HEIGHT,
+      WATER_LEVEL_NORMALIZED,
+    );
+  }
+
   return height;
 }
 
@@ -438,6 +459,8 @@ export function computeBaseHeight(
   biomeWeights: Record<string, number>,
   features: ReadonlyArray<LandscapeFeatureDef>,
   maxHeight: number,
+  riverDef?: RiverDefinition,
+  riverAABBs?: RiverSegmentAABB[],
 ): number {
   // ── 1. Sample noise layers ──────────────────────────────────────────
   const cN = noise.fractal2D(
@@ -562,7 +585,15 @@ export function computeBaseHeight(
 
   // ── 6. Island mask + landscape features ─────────────────────────────
   height = height * islandMask;
-  height = applyLandscapeFeaturesPure(height, worldX, worldZ, features, noise);
+  height = applyLandscapeFeaturesPure(
+    height,
+    worldX,
+    worldZ,
+    features,
+    noise,
+    riverDef,
+    riverAABBs,
+  );
 
   if (islandMask === 0) {
     height = OCEAN_FLOOR_HEIGHT;
@@ -723,6 +754,9 @@ export function buildApplyLandscapeFeaturesJS(): string {
       } else {
         height += influence * feat.strength;
       }
+    }
+    if (typeof applyRiverCarving === 'function') {
+      height = applyRiverCarving(height, worldX, worldZ);
     }
     return height;
   }`;

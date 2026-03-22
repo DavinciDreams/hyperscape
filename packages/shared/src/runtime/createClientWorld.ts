@@ -53,6 +53,8 @@ import { ClientAudio } from "../systems/client/ClientAudio";
 import { ClientCameraSystem } from "../systems/client/ClientCameraSystem";
 import { DevStats } from "../systems/client/DevStats";
 import { PathfindingDebugSystem } from "../systems/client/PathfindingDebugSystem";
+import { BFSPathDebugSystem } from "../systems/client/BFSPathDebugSystem";
+import { WalkableTileDebugSystem } from "../systems/client/WalkableTileDebugSystem";
 import { Environment } from "../systems/shared";
 import { ClientGraphics } from "../systems/client/ClientGraphics";
 import { ClientInput } from "../systems/client/ClientInput";
@@ -117,6 +119,8 @@ import { LODs } from "../systems/shared";
 import { HealthBars } from "../systems/client/HealthBars";
 import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
 import { ZoneVisualsSystem } from "../systems/client/ZoneVisualsSystem";
+import { WaterfallVisualsSystem } from "../systems/client/WaterfallVisualsSystem";
+import { BridgeSystem } from "../systems/shared/world/BridgeSystem";
 // ResourceTileDebugSystem available for debugging: import { ResourceTileDebugSystem } from "../systems/client/ResourceTileDebugSystem";
 import { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
 import { InteractionRouter } from "../systems/client/interaction";
@@ -244,6 +248,8 @@ export function createClientWorld() {
   // Dev tools (only active in dev mode)
   world.register("devStats", DevStats); // FPS counter and performance telemetry
   world.register("pathfindingDebug", PathfindingDebugSystem); // Press 'P' to toggle
+  world.register("bfsPathDebug", BFSPathDebugSystem); // Press 'B' (with F5 open) to toggle
+  world.register("walkableDebug", WalkableTileDebugSystem); // Press 'W' (with F5 open) to toggle
 
   // Audio systems
   world.register("audio", ClientAudio); // 3D spatial audio
@@ -283,6 +289,7 @@ export function createClientWorld() {
   // Renders heightmap-based terrain with LOD
 
   world.register("terrain", TerrainSystem);
+  world.register("bridges", BridgeSystem);
 
   // ============================================================================
   // VEGETATION SYSTEM
@@ -333,6 +340,7 @@ export function createClientWorld() {
   world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
   world.register("zone-detection", ZoneDetectionSystem); // Zone type detection (safe/pvp/wilderness)
   world.register("zone-visuals", ZoneVisualsSystem); // PvP zone ground overlays and warnings
+  world.register("waterfall-visuals", WaterfallVisualsSystem); // River waterfall rendering
   // TEMPORARILY DISABLED - debugging terrain rendering
   // world.register("resource-tile-debug", ResourceTileDebugSystem); // Debug: shows resource tile occupancy
   world.register("particles", Particles); // Particle effects system

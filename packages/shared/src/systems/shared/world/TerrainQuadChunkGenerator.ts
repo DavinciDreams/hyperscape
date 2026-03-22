@@ -91,6 +91,7 @@ export function assembleQuadChunkGeometry(
     biomeData,
     biomeForestWeight,
     biomeCanyonWeight,
+    riverProximity: riverProximityData,
   } = workerData;
   const segments = resolution;
   const halfSize = size * 0.5;
@@ -105,6 +106,7 @@ export function assembleQuadChunkGeometry(
   const forestWeights = new Float32Array(totalVertices);
   const canyonWeights = new Float32Array(totalVertices);
   const roadInfluences = new Float32Array(totalVertices);
+  const riverProximities = new Float32Array(totalVertices);
 
   let flatZoneModified = false;
 
@@ -141,6 +143,7 @@ export function assembleQuadChunkGeometry(
       biomeIds[idx] = biomeData[idx];
       forestWeights[idx] = biomeForestWeight[idx];
       canyonWeights[idx] = biomeCanyonWeight[idx];
+      riverProximities[idx] = riverProximityData?.[idx] ?? 0;
 
       const roadTileX = Math.floor(worldX / provider.TILE_SIZE);
       const roadTileZ = Math.floor(worldZ / provider.TILE_SIZE);
@@ -178,6 +181,7 @@ export function assembleQuadChunkGeometry(
     forestWeights[skirtIdx] = forestWeights[mainIdx];
     canyonWeights[skirtIdx] = canyonWeights[mainIdx];
     roadInfluences[skirtIdx] = roadInfluences[mainIdx];
+    riverProximities[skirtIdx] = riverProximities[mainIdx];
     skirtIdx++;
   };
 
@@ -290,6 +294,10 @@ export function assembleQuadChunkGeometry(
   geometry.setAttribute(
     "roadInfluence",
     new THREE.BufferAttribute(roadInfluences, 1),
+  );
+  geometry.setAttribute(
+    "riverProximity",
+    new THREE.BufferAttribute(riverProximities, 1),
   );
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeBoundingBox();
@@ -483,6 +491,9 @@ export function generateQuadChunkDataSync(
     }
   }
 
+  // River proximity not computed in sync fallback — zeros (shader uses attribute default)
+  const riverProximity = new Float32Array(vertexCount);
+
   return {
     type: "quadChunkResult",
     centerX,
@@ -495,5 +506,6 @@ export function generateQuadChunkDataSync(
     biomeData,
     biomeForestWeight,
     biomeCanyonWeight,
+    riverProximity,
   };
 }

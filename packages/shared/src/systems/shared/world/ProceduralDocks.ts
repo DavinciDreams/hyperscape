@@ -27,6 +27,8 @@ import {
   type GeneratedDock,
   type DockRecipe,
 } from "@hyperscape/procgen/items/dock";
+import type { WaterBodyRegistry } from "./WaterBodyRegistry";
+import { projectOntoRiver } from "./RiverUtils";
 
 // Constants
 const WATER_THRESHOLD = TERRAIN_CONSTANTS.WATER_THRESHOLD;
@@ -247,6 +249,7 @@ interface DockInstance {
 
 interface TerrainSystemInterface {
   getHeightAt(x: number, z: number): number;
+  getWaterBodyRegistry(): WaterBodyRegistry | null;
 }
 
 interface StageSystemInterface {
@@ -314,8 +317,8 @@ export class ProceduralDocks extends System {
   }
 
   /**
-   * Generate docks for the island pond
-   * Called automatically when terrain is ready
+   * Generate docks for all water bodies (ponds + river banks).
+   * Called automatically when terrain is ready.
    */
   generateDocks(seed: string = "island-docks"): void {
     if (!this.terrainSystem || !this.scene) {
@@ -330,27 +333,107 @@ export class ProceduralDocks extends System {
       return;
     }
 
-    console.log("[ProceduralDocks] Generating docks for island pond...");
+    console.log("[ProceduralDocks] Generating docks for water bodies...");
 
-    // Generate dock for the main island pond
-    const dock = this.generateDockForWaterBody(ISLAND_POND, seed);
+    let dockCount = 0;
 
-    if (dock) {
-      console.log(
-        `[ProceduralDocks] Generated dock at (${dock.position.x.toFixed(1)}, ${dock.position.z.toFixed(1)})`,
-      );
-      this.docksGenerated = true;
+    // Get water body registry from terrain system
+    const registry =
+      this.terrainSystem.getWaterBodyRegistry() as WaterBodyRegistry | null;
+
+    if (registry) {
+      // Generate docks for all registered water bodies (ponds, lakes)
+      for (const body of registry.getAllBodies()) {
+        const waterBody: WaterBody = {
+          id: body.id,
+          type: "pond",
+          center: { x: body.centerX, z: body.centerZ },
+          radius: body.radius,
+        };
+        const dock = this.generateDockForWaterBody(
+          waterBody,
+          `${seed}-${body.id}`,
+          body.surfaceY,
+        );
+        if (dock) {
+          dockCount++;
+          console.log(
+            `[ProceduralDocks] Dock at ${body.id}: (${dock.position.x.toFixed(1)}, ${dock.position.z.toFixed(1)})`,
+          );
+        }
+      }
+
+      // Generate docks at river banks
+      const riverDef = registry.getRiverDef();
+      if (riverDef) {
+        const rAABBs = registry.getRiverAABBs();
+        const riverWps = riverDef.waypoints;
+        // Sample every ~100m along the river, pick bank positions
+        let riverDockIdx = 0;
+        for (let i = 0; i < riverWps.length - 1; i += 2) {
+          const wp = riverWps[i];
+          if (wp.surfaceY == null) continue;
+          // Skip waypoints near ocean level
+          if (wp.surfaceY <= WATER_THRESHOLD + 1) continue;
+
+          const nextWp = riverWps[Math.min(i + 1, riverWps.length - 1)];
+          const dirX = nextWp.x - wp.x;
+          const dirZ = nextWp.z - wp.z;
+          const len = Math.sqrt(dirX * dirX + dirZ * dirZ);
+          if (len < 1) continue;
+
+          // Perpendicular — dock on the right bank
+          const perpX = -dirZ / len;
+          const perpZ = dirX / len;
+          const bankX = wp.x + perpX * (wp.halfWidth + 2);
+          const bankZ = wp.z + perpZ * (wp.halfWidth + 2);
+
+          // Check terrain is above water at this bank position
+          const bankH = this.terrainSystem!.getHeightAt(bankX, bankZ);
+          if (bankH < WATER_THRESHOLD) continue;
+
+          // Create a virtual water body for the dock scoring
+          const riverBank: WaterBody = {
+            id: `river-bank-${riverDockIdx}`,
+            type: "pond",
+            center: { x: wp.x, z: wp.z },
+            radius: wp.halfWidth + 5,
+          };
+
+          const dock = this.generateDockForWaterBody(
+            riverBank,
+            `${seed}-river-${riverDockIdx}`,
+            wp.surfaceY,
+          );
+          if (dock) {
+            dockCount++;
+            console.log(
+              `[ProceduralDocks] River dock ${riverDockIdx}: (${dock.position.x.toFixed(1)}, ${dock.position.z.toFixed(1)})`,
+            );
+          }
+          riverDockIdx++;
+        }
+      }
     } else {
-      console.warn("[ProceduralDocks] Failed to find suitable dock location");
+      // Fallback: use legacy ISLAND_POND
+      const dock = this.generateDockForWaterBody(ISLAND_POND, seed);
+      if (dock) dockCount++;
     }
+
+    console.log(`[ProceduralDocks] Generated ${dockCount} docks total`);
+    this.docksGenerated = true;
   }
 
   /**
    * Generate a dock for a specific water body
+   * @param waterBody     Water body to place the dock on
+   * @param seed          Deterministic seed for placement
+   * @param waterSurfaceY Optional water surface Y (uses WATER_LEVEL if not provided)
    */
   generateDockForWaterBody(
     waterBody: WaterBody,
     seed: string,
+    waterSurfaceY?: number,
   ): GeneratedDock | null {
     if (!this.terrainSystem || !this.scene) return null;
 
@@ -436,7 +519,7 @@ export class ProceduralDocks extends System {
 
     const dock = this.generator.generate(recipe, selected.point, {
       seed,
-      waterLevel: WATER_LEVEL,
+      waterLevel: waterSurfaceY ?? WATER_LEVEL,
       waterFloorDepth: 3.0,
     });
 

@@ -9,8 +9,14 @@
  */
 
 import type { LandscapeFeatureDef } from "./TerrainHeightParams";
+import type { RiverDefinition } from "./RiverDefinition";
+import type { RiverSegmentAABB } from "./RiverUtils";
+import { projectOntoRiver, computeRiverSegmentAABBs } from "./RiverUtils";
 
-export type WaterBodySourceType = "landscape_pond" | "explicit";
+export type WaterBodySourceType =
+  | "landscape_pond"
+  | "explicit"
+  | "river_segment";
 
 export class ElevatedWaterBody {
   id: string;
@@ -50,6 +56,8 @@ export class WaterBodyRegistry {
   private gridCellSize: number;
   private grid: Map<number, number[]> = new Map();
   private oceanLevel: number;
+  private riverDef: RiverDefinition | null = null;
+  private riverAABBs: RiverSegmentAABB[] = [];
 
   constructor(oceanLevel: number, gridCellSize = 50) {
     this.oceanLevel = oceanLevel;
@@ -112,10 +120,41 @@ export class WaterBodyRegistry {
     return best;
   }
 
-  /** Get effective water surface at a world position: body surfaceY if inside one, else ocean level. */
+  /** Register a river definition. Computes AABBs and enables river lookups. */
+  registerRiver(river: RiverDefinition): void {
+    this.riverDef = river;
+    this.riverAABBs = computeRiverSegmentAABBs(river);
+  }
+
+  /** Get the registered river definition, or null. */
+  getRiverDef(): RiverDefinition | null {
+    return this.riverDef;
+  }
+
+  /** Get the pre-computed river segment AABBs. */
+  getRiverAABBs(): RiverSegmentAABB[] {
+    return this.riverAABBs;
+  }
+
+  /** Get effective water surface at a world position: body surfaceY if inside one, river surfaceY if in river, else ocean level. */
   getWaterSurfaceAt(worldX: number, worldZ: number): number {
     const body = this.getBodyAt(worldX, worldZ);
-    return body ? body.surfaceY : this.oceanLevel;
+    if (body) return body.surfaceY;
+
+    // Check river
+    if (this.riverDef) {
+      const proj = projectOntoRiver(
+        worldX,
+        worldZ,
+        this.riverDef,
+        this.riverAABBs,
+      );
+      if (proj && proj.dist < proj.halfWidth && !isNaN(proj.surfaceY)) {
+        return proj.surfaceY;
+      }
+    }
+
+    return this.oceanLevel;
   }
 
   /** Check if terrain at this position is underwater (below effective water surface). */
@@ -166,6 +205,24 @@ export class WaterBodyRegistry {
       }
     }
     return result;
+  }
+
+  /**
+   * Check if a point is inside the river channel.
+   * Returns the interpolated surfaceY if inside, or null if outside.
+   */
+  getRiverSurfaceAt(worldX: number, worldZ: number): number | null {
+    if (!this.riverDef) return null;
+    const proj = projectOntoRiver(
+      worldX,
+      worldZ,
+      this.riverDef,
+      this.riverAABBs,
+    );
+    if (proj && proj.dist < proj.halfWidth && !isNaN(proj.surfaceY)) {
+      return proj.surfaceY;
+    }
+    return null;
   }
 
   /** Get all registered water bodies. */

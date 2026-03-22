@@ -14,6 +14,8 @@ import {
   buildGetBaseHeightAtJS,
   buildComputeBiomeWeightsJS,
   buildApplyLandscapeFeaturesJS,
+  MAX_HEIGHT,
+  WATER_LEVEL_NORMALIZED,
 } from "../../systems/shared/world/TerrainHeightParams";
 import { buildBiomeConstantsJS } from "../../systems/shared/world/TerrainBiomeTypes";
 import {
@@ -21,6 +23,7 @@ import {
   buildHeightHelpersJS,
   buildBiomeInfluencesJS,
 } from "./TerrainWorkerShared";
+import { buildApplyRiverCarvingJS } from "../../systems/shared/world/RiverUtils";
 
 // Types for terrain generation
 // MUST match TerrainSystem.CONFIG exactly for height and biome calculation
@@ -56,6 +59,19 @@ export interface TerrainWorkerConfig {
     layerSlope: number;
     noiseScale: number;
     noiseAmount: number;
+  }>;
+  riverFeatures?: Array<{
+    x: number;
+    z: number;
+    halfWidth: number;
+    depth: number;
+    surfaceY?: number;
+  }>;
+  riverAABBs?: Array<{
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
   }>;
 }
 
@@ -93,6 +109,8 @@ export interface TerrainWorkerOutput {
   biomeData: Uint8Array;
   /** Per-vertex normals as Float32Array (resolution * resolution * 3) — computed from overflow grid */
   normalData: Float32Array;
+  /** River proximity: 1.0 = in channel, smoothstep to 0.0 at bank edge */
+  riverProximity: Float32Array;
 }
 
 /**
@@ -144,8 +162,11 @@ function generateHeightmap(input) {
   // ============================================
 
   var landscapeFeatures = (config.landscapeFeatures || []);
+  var riverFeatures = (config.riverFeatures || []);
+  var riverAABBs = (config.riverAABBs || []);
 
   ${buildComputeBiomeWeightsJS()}
+  ${buildApplyRiverCarvingJS(MAX_HEIGHT, WATER_LEVEL_NORMALIZED)}
   ${buildApplyLandscapeFeaturesJS()}
 
   ${buildGetBaseHeightAtJS()}
@@ -214,6 +235,7 @@ function generateHeightmap(input) {
 
   const colorData = new Float32Array(vertexCount * 3);
   const biomeData = new Uint8Array(vertexCount);
+  const riverProximity = new Float32Array(vertexCount);
 
   for (let iz = 0; iz < resolution; iz++) {
     for (let ix = 0; ix < resolution; ix++) {
@@ -246,6 +268,21 @@ function generateHeightmap(input) {
         colorB = colorB + (0.333 - colorB) * shoreFactor;
       }
 
+      // River proximity: 1.0 = in channel, smoothstep to 0.0 at bank edge
+      var rProj = projectOntoRiverJS(worldX, worldZ);
+      if (rProj && rProj.surfaceY === rProj.surfaceY) { // NaN check
+        var rDist = rProj.dist;
+        var rHW = rProj.halfWidth;
+        var rBankWidth = rHW * 2; // bank zone = halfWidth * (valleyMultiplier - 1)
+
+        if (rDist < rHW) {
+          riverProximity[idx] = 1.0; // in channel
+        } else if (rDist < rHW + rBankWidth) {
+          var rBankT = (rDist - rHW) / rBankWidth;
+          riverProximity[idx] = 1.0 - rBankT * rBankT * (3.0 - 2.0 * rBankT); // smoothstep falloff
+        }
+      }
+
       colorData[idx * 3] = colorR;
       colorData[idx * 3 + 1] = colorG;
       colorData[idx * 3 + 2] = colorB;
@@ -260,7 +297,8 @@ function generateHeightmap(input) {
     heightData,
     colorData,
     biomeData,
-    normalData
+    normalData,
+    riverProximity
   };
 }
 
@@ -274,7 +312,8 @@ self.onmessage = function(e) {
         result.heightData.buffer,
         result.colorData.buffer,
         result.biomeData.buffer,
-        result.normalData.buffer
+        result.normalData.buffer,
+        result.riverProximity.buffer
       ]);
     } catch (error) {
       self.postMessage({ error: error.message || 'Unknown error' });

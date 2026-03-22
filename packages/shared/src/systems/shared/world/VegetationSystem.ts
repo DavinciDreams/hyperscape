@@ -457,6 +457,7 @@ export class VegetationSystem extends System {
   // Cached water body registry for elevated water checks
   private _waterBodyRegistry: {
     getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+    getWaterSurfaceAt?: (x: number, z: number) => number;
   } | null = null;
 
   // Temp objects to avoid allocations
@@ -537,6 +538,7 @@ export class VegetationSystem extends System {
       | {
           getWaterBodyRegistry?: () => {
             getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+            getWaterSurfaceAt?: (x: number, z: number) => number;
           };
         }
       | undefined;
@@ -1282,6 +1284,7 @@ export class VegetationSystem extends System {
       getTileSize: () => number;
       getWaterBodyRegistry?: () => {
         getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+        getWaterSurfaceAt?: (x: number, z: number) => number;
       };
     };
 
@@ -1340,6 +1343,7 @@ export class VegetationSystem extends System {
       getNormalAt?: (x: number, z: number) => THREE.Vector3;
       getWaterBodyRegistry?: () => {
         getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+        getWaterSurfaceAt?: (x: number, z: number) => number;
       };
     },
     tileData: TileVegetationData,
@@ -1448,10 +1452,19 @@ export class VegetationSystem extends System {
         // Check water avoidance (ocean)
         if (height < waterThreshold) continue;
 
-        // Check elevated water body avoidance (mountain ponds, highland lakes)
+        // Check elevated water body avoidance (mountain ponds, highland lakes, rivers)
         if (bodyRegistry) {
-          const body = bodyRegistry.getBodyAt(placement.x, placement.z);
-          if (body && height < body.surfaceY + WATER_EDGE_BUFFER) continue;
+          // Unified check: getWaterSurfaceAt covers ponds, rivers, and ocean
+          if (bodyRegistry.getWaterSurfaceAt) {
+            const waterY = bodyRegistry.getWaterSurfaceAt(
+              placement.x,
+              placement.z,
+            );
+            if (height < waterY + WATER_EDGE_BUFFER) continue;
+          } else {
+            const body = bodyRegistry.getBodyAt(placement.x, placement.z);
+            if (body && height < body.surfaceY + WATER_EDGE_BUFFER) continue;
+          }
         }
 
         // Check road avoidance
@@ -1545,6 +1558,7 @@ export class VegetationSystem extends System {
       getNormalAt?: (x: number, z: number) => THREE.Vector3;
       getWaterBodyRegistry?: () => {
         getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+        getWaterSurfaceAt?: (x: number, z: number) => number;
       };
     },
   ): Promise<void> {
@@ -1624,10 +1638,15 @@ export class VegetationSystem extends System {
           continue;
         }
 
-        // Check elevated water body avoidance (mountain ponds, highland lakes)
+        // Check elevated water body avoidance (mountain ponds, highland lakes, rivers)
         if (shouldAvoidWater && bodyRegistryLayer) {
-          const body = bodyRegistryLayer.getBodyAt(pos.x, pos.z);
-          if (body && height < body.surfaceY + WATER_EDGE_BUFFER) continue;
+          if (bodyRegistryLayer.getWaterSurfaceAt) {
+            const waterY = bodyRegistryLayer.getWaterSurfaceAt(pos.x, pos.z);
+            if (height < waterY + WATER_EDGE_BUFFER) continue;
+          } else {
+            const body = bodyRegistryLayer.getBodyAt(pos.x, pos.z);
+            if (body && height < body.surfaceY + WATER_EDGE_BUFFER) continue;
+          }
         }
 
         // Check road avoidance - never place vegetation on roads
@@ -2352,11 +2371,16 @@ export class VegetationSystem extends System {
     const waterCutoff = WATER_LEVEL + WATER_EDGE_BUFFER;
     if (worldY < waterCutoff) return false;
 
-    // Elevated water body check (mountain ponds, highland lakes)
+    // Elevated water body check (mountain ponds, highland lakes, rivers)
     if (this._waterBodyRegistry) {
-      const body = this._waterBodyRegistry.getBodyAt(x, z);
-      if (body && instance.position.y < body.surfaceY + WATER_EDGE_BUFFER)
-        return false;
+      if (this._waterBodyRegistry.getWaterSurfaceAt) {
+        const waterY = this._waterBodyRegistry.getWaterSurfaceAt(x, z);
+        if (instance.position.y < waterY + WATER_EDGE_BUFFER) return false;
+      } else {
+        const body = this._waterBodyRegistry.getBodyAt(x, z);
+        if (body && instance.position.y < body.surfaceY + WATER_EDGE_BUFFER)
+          return false;
+      }
     }
 
     // Get or create chunk mesh (LOD0 - full detail)
