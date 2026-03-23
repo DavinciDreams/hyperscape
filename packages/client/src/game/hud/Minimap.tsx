@@ -21,6 +21,7 @@ import {
   INPUT,
 } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
+import { useQuestStatusSync } from "./useQuestStatusSync";
 // Terrain sample grid size per axis.  50×50 = 2,500 getHeightAt calls vs the
 // previous per-pixel approach which was W×H (up to 40,000+ calls).  The low-res
 // ImageData is drawn to an OffscreenCanvas and then scaled up via drawImage with
@@ -911,27 +912,6 @@ interface CSSStylable {
   style: { transform: string };
 }
 
-type ServerQuestStatus =
-  | "not_started"
-  | "in_progress"
-  | "ready_to_complete"
-  | "completed";
-type ClientQuestState = "available" | "active" | "completed";
-
-function mapQuestStatus(status: ServerQuestStatus): ClientQuestState {
-  switch (status) {
-    case "not_started":
-      return "available";
-    case "in_progress":
-    case "ready_to_complete":
-      return "active";
-    case "completed":
-      return "completed";
-    default:
-      return "available";
-  }
-}
-
 /** Drag handle props passed from Window component for edit mode dragging */
 interface DragHandleProps {
   onPointerDown: (e: React.PointerEvent) => void;
@@ -1037,57 +1017,7 @@ function MinimapInner({
   const questStatusesRef = useRef<Map<string, string>>(new Map());
   const setQuestStatuses = useQuestSelectionStore((s) => s.setQuestStatuses);
 
-  // Fetch quest statuses from server for minimap quest icons
-  useEffect(() => {
-    const fetchQuestList = () => {
-      world.network?.send?.("getQuestList", {});
-    };
-
-    const onQuestList = (data: unknown) => {
-      if (typeof data !== "object" || data === null) return;
-      const payload = data as {
-        quests?: Array<{ id: string; status: ServerQuestStatus }>;
-      };
-      if (!Array.isArray(payload.quests)) return;
-
-      // Single pass: build both the fast-lookup Map (for entity interval)
-      // and the mapped array (for the quest selection store).
-      const map = new Map<string, string>();
-      const mapped: Array<{ id: string; state: ClientQuestState }> = [];
-      for (const q of payload.quests) {
-        const state = mapQuestStatus(q.status);
-        map.set(q.id, state);
-        mapped.push({ id: q.id, state });
-      }
-      questStatusesRef.current = map;
-      setQuestStatuses(mapped);
-    };
-
-    const onQuestEvent = () => {
-      fetchQuestList();
-    };
-
-    world.network?.on("questList", onQuestList);
-    world.network?.on("questStarted", onQuestEvent);
-    world.network?.on("questProgressed", onQuestEvent);
-    world.network?.on("questCompleted", onQuestEvent);
-    world.on(EventType.QUEST_STARTED, onQuestEvent);
-    world.on(EventType.QUEST_PROGRESSED, onQuestEvent);
-    world.on(EventType.QUEST_COMPLETED, onQuestEvent);
-
-    // Initial fetch
-    fetchQuestList();
-
-    return () => {
-      world.network?.off("questList", onQuestList);
-      world.network?.off("questStarted", onQuestEvent);
-      world.network?.off("questProgressed", onQuestEvent);
-      world.network?.off("questCompleted", onQuestEvent);
-      world.off(EventType.QUEST_STARTED, onQuestEvent);
-      world.off(EventType.QUEST_PROGRESSED, onQuestEvent);
-      world.off(EventType.QUEST_COMPLETED, onQuestEvent);
-    };
-  }, [world, setQuestStatuses]);
+  useQuestStatusSync({ world, questStatusesRef, setQuestStatuses });
 
   // Collapsed state for collapsible minimap
   const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);

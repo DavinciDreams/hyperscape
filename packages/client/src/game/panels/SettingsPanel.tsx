@@ -17,6 +17,7 @@ import { isTouch } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { useFullscreen } from "../../hooks/useFullscreen";
 import { ToggleSwitch, Slider } from "@/ui";
+import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { NAME_SANITIZE_REGEX } from "../../utils/validation";
 import {
   useComplexityStore,
@@ -25,7 +26,11 @@ import {
   useThemeStore,
   type ComplexityMode,
 } from "@/ui";
-import type { StatusBarsConfig } from "../hud/StatusBars";
+import {
+  type StatusBarsConfig,
+  STATUSBAR_CONFIG_CHANGED_EVENT,
+  STATUSBAR_CONFIG_STORAGE_KEY,
+} from "../hud/StatusBars";
 import { privyAuthManager } from "../../auth/PrivyAuthManager";
 import { useSolanaWallet } from "../../hooks/useSolanaWallet";
 import {
@@ -680,7 +685,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
   const [statusBarsConfig, setStatusBarsConfig] = useState<StatusBarsConfig>(
     () => {
       if (typeof window !== "undefined") {
-        const saved = localStorage.getItem("statusbar-config");
+        const saved = localStorage.getItem(STATUSBAR_CONFIG_STORAGE_KEY);
         if (saved) {
           try {
             return JSON.parse(saved) as StatusBarsConfig;
@@ -704,7 +709,15 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       setStatusBarsConfig((prev) => {
         const newConfig = { ...prev, ...updates };
         if (typeof window !== "undefined") {
-          localStorage.setItem("statusbar-config", JSON.stringify(newConfig));
+          localStorage.setItem(
+            STATUSBAR_CONFIG_STORAGE_KEY,
+            JSON.stringify(newConfig),
+          );
+          window.dispatchEvent(
+            new CustomEvent<StatusBarsConfig>(STATUSBAR_CONFIG_CHANGED_EVENT, {
+              detail: { config: newConfig },
+            }),
+          );
         }
         return newConfig;
       });
@@ -831,15 +844,17 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
   return (
     <div
       className="flex flex-col h-full overflow-hidden"
-      style={{ padding: "4px" }}
+      style={{
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+        padding: "4px",
+      }}
     >
       {/* Horizontal Tab Navigation (Top) - Icon only */}
       <div
         className="flex gap-1 mb-2 flex-shrink-0"
         style={{
-          background: theme.colors.background.panelPrimary,
-          border: `1px solid ${theme.colors.border.default}66`,
-          borderRadius: "6px",
+          ...getPanelHeaderStyle(theme),
+          borderRadius: theme.borderRadius.md,
           padding: "4px",
         }}
       >
@@ -858,7 +873,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                 border: isActive
                   ? `1px solid ${theme.colors.accent.secondary}66`
                   : "1px solid transparent",
-                borderRadius: "4px",
+                borderRadius: theme.borderRadius.sm,
                 cursor: "pointer",
                 color: isActive
                   ? theme.colors.text.accent
@@ -884,9 +899,12 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       <div
         className="flex-1 overflow-y-auto noscrollbar"
         style={{
-          background: theme.colors.background.panelSecondary,
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(0, 0, 0, 0.12) 100%)"
+              : theme.colors.background.panelSecondary,
           border: `1px solid ${theme.colors.border.default}66`,
-          borderRadius: "6px",
+          borderRadius: theme.borderRadius.md,
           padding: "8px",
         }}
       >

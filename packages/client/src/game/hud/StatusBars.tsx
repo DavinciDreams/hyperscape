@@ -30,6 +30,10 @@ import {
 } from "@/ui";
 import type { PlayerStats } from "../../types";
 
+export const STATUSBAR_CONFIG_STORAGE_KEY = "statusbar-config";
+export const STATUSBAR_CONFIG_CHANGED_EVENT =
+  "hyperscape:statusbar-config:changed";
+
 /** Display mode type */
 export type DisplayMode = "bars" | "orbs";
 
@@ -51,7 +55,7 @@ export interface StatusBarsConfig {
 const STORAGE_KEYS = {
   position: "statusbar-position",
   size: "statusbar-size",
-  config: "statusbar-config",
+  config: STATUSBAR_CONFIG_STORAGE_KEY,
 } as const;
 
 /** Default configuration */
@@ -81,6 +85,27 @@ const ORB_SIZE_PRESETS: Record<SizePreset, number> = {
 const MIN_SIZE = { width: 100, height: 32 };
 const MAX_SIZE = { width: 350, height: 100 };
 
+const parseConfig = (value: string | null): StatusBarsConfig | null => {
+  if (!value) return null;
+  try {
+    return {
+      ...DEFAULT_CONFIG,
+      ...JSON.parse(value),
+    } as StatusBarsConfig;
+  } catch {
+    return null;
+  }
+};
+
+const isStatusBarsConfigEqual = (
+  a: StatusBarsConfig,
+  b: StatusBarsConfig,
+): boolean =>
+  a.displayMode === b.displayMode &&
+  a.orientation === b.orientation &&
+  a.sizePreset === b.sizePreset &&
+  a.showLabels === b.showLabels;
+
 interface StatusBarsProps {
   /** Player stats containing health and prayerPoints */
   stats: PlayerStats | null;
@@ -101,16 +126,11 @@ export function StatusBars({
   // Configuration with localStorage persistence
   const [config, setConfig] = useState<StatusBarsConfig>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(STORAGE_KEYS.config);
-      if (saved) {
-        try {
-          return {
-            ...DEFAULT_CONFIG,
-            ...JSON.parse(saved),
-          } as StatusBarsConfig;
-        } catch {
-          // Use default
-        }
+      const savedConfig = parseConfig(
+        localStorage.getItem(STORAGE_KEYS.config),
+      );
+      if (savedConfig) {
+        return savedConfig;
       }
     }
     return DEFAULT_CONFIG;
@@ -175,46 +195,39 @@ export function StatusBars({
 
   // Listen for config changes from Settings panel
   useEffect(() => {
-    const handleStorageChange = (e: globalThis.StorageEvent) => {
-      if (e.key === STORAGE_KEYS.config && e.newValue) {
-        try {
-          const newConfig = JSON.parse(e.newValue) as StatusBarsConfig;
-          setConfig(newConfig);
-        } catch {
-          // Ignore parse errors
-        }
-      }
+    const applyConfig = (next: StatusBarsConfig | null) => {
+      if (!next) return;
+      setConfig((current) =>
+        isStatusBarsConfigEqual(current, next) ? current : next,
+      );
     };
 
-    // Also poll for changes since storage events don't fire in same window
-    const checkForChanges = () => {
-      const saved = localStorage.getItem(STORAGE_KEYS.config);
-      if (saved) {
-        try {
-          const savedConfig = JSON.parse(saved) as StatusBarsConfig;
-          // Check if any values differ
-          if (
-            savedConfig.displayMode !== config.displayMode ||
-            savedConfig.orientation !== config.orientation ||
-            savedConfig.sizePreset !== config.sizePreset ||
-            savedConfig.showLabels !== config.showLabels
-          ) {
-            setConfig(savedConfig);
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
+    const handleStorageChange = (e: globalThis.StorageEvent) => {
+      if (e.key !== STORAGE_KEYS.config) return;
+      if (e.newValue === null) return;
+      applyConfig(parseConfig(e.newValue));
+    };
+
+    const handleInternalConfigChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ config: StatusBarsConfig }>).detail
+        ?.config;
+      applyConfig(detail ?? null);
     };
 
     window.addEventListener("storage", handleStorageChange);
-    const intervalId = setInterval(checkForChanges, 500);
+    window.addEventListener(
+      STATUSBAR_CONFIG_CHANGED_EVENT,
+      handleInternalConfigChange,
+    );
 
     return () => {
       window.removeEventListener("storage", handleStorageChange);
-      clearInterval(intervalId);
+      window.removeEventListener(
+        STATUSBAR_CONFIG_CHANGED_EVENT,
+        handleInternalConfigChange,
+      );
     };
-  }, [config]);
+  }, []);
 
   // Persist position
   useEffect(() => {

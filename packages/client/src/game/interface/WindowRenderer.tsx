@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import React from "react";
+import React, { memo, useMemo } from "react";
 import { Window, TabBar, type WindowState } from "@/ui";
 import type { ClientWorld } from "../../types";
 import {
@@ -49,7 +49,10 @@ export function WindowRenderer({
   windowCombiningEnabled,
   renderPanel,
 }: WindowRendererProps): React.ReactElement {
-  const visibleWindows = windows.filter((w) => w.visible);
+  const visibleWindows = useMemo(
+    () => windows.filter((w) => w.visible),
+    [windows],
+  );
   const isEditMode = isUnlocked && editModeEnabled;
 
   return (
@@ -87,7 +90,7 @@ interface WindowItemProps {
 /**
  * Renders a single window with the appropriate content wrapper
  */
-function WindowItem({
+const WindowItem = memo(function WindowItem({
   windowState,
   world,
   isEditMode,
@@ -152,4 +155,4 @@ function WindowItem({
       </Window>
     </div>
   );
-}
+});

@@ -90,6 +90,34 @@ type ChatWorld = ClientWorld & {
   };
 };
 
+function isInventoryEqual(
+  current: InventorySlotItem[],
+  next: InventorySlotItem[],
+): boolean {
+  if (current === next) {
+    return true;
+  }
+
+  if (current.length !== next.length) {
+    return false;
+  }
+
+  for (let index = 0; index < current.length; index += 1) {
+    const currentItem = current[index];
+    const nextItem = next[index];
+
+    if (
+      currentItem.slot !== nextItem.slot ||
+      currentItem.itemId !== nextItem.itemId ||
+      currentItem.quantity !== nextItem.quantity
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export function Chat({ world }: { world: ChatWorld }) {
   const theme = useThemeStore((s) => s.theme);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -154,20 +182,19 @@ export function Chat({ world }: { world: ChatWorld }) {
         playerId: string;
         coins: number;
       };
-      console.log("[Chat] INVENTORY_UPDATED event received:", {
-        playerId: data.playerId,
-        itemCount: data.items?.length || 0,
-        localPlayerId,
-      });
       // Only update if this inventory belongs to the local player (prevents cross-tab updates)
       if (localPlayerId && data.playerId && data.playerId !== localPlayerId) {
         return;
       }
-      setInventory(data.items);
+
+      const nextItems = Array.isArray(data.items) ? data.items : [];
+      setInventory((currentItems) =>
+        isInventoryEqual(currentItems, nextItems) ? currentItems : nextItems,
+      );
     };
     world.on(EventType.INVENTORY_UPDATED, onInventory);
 
-    // Request initial inventory data (same pattern as Sidebar.tsx)
+    // Request initial inventory data using the client-side cache/bootstrap pattern
     const requestInitial = () => {
       // For spectator/embedded mode, use characterId from config
       let playerId = world.entities?.player?.id;
@@ -177,21 +204,15 @@ export function Chat({ world }: { world: ChatWorld }) {
           playerId = embeddedConfig.characterId;
         }
       }
-      console.log("[Chat] requestInitial called:", {
-        playerId,
-        hasNetwork: !!world.network,
-        cacheKeys: Object.keys(world.network?.lastInventoryByPlayerId || {}),
-      });
       if (playerId) {
         // Check cached inventory first for instant load
         const cached = world.network?.lastInventoryByPlayerId?.[playerId];
-        console.log("[Chat] Cache lookup:", {
-          playerId,
-          hasCached: !!cached,
-          cachedItemCount: cached?.items?.length || 0,
-        });
         if (cached && Array.isArray(cached.items)) {
-          setInventory(cached.items);
+          setInventory((currentItems) =>
+            isInventoryEqual(currentItems, cached.items)
+              ? currentItems
+              : cached.items,
+          );
         }
         // Request fresh data from server
         world.emit(EventType.INVENTORY_REQUEST, { playerId });
@@ -203,7 +224,6 @@ export function Chat({ world }: { world: ChatWorld }) {
     // Try immediately, retry after delay if player not ready
     let timeoutId: number | null = null;
     if (!requestInitial()) {
-      console.log("[Chat] Player not ready, scheduling retry in 400ms");
       timeoutId = window.setTimeout(() => requestInitial(), 400);
     }
 

@@ -19,7 +19,6 @@ import type {
 } from "../../types";
 import type { PlayerStats } from "@hyperscape/shared";
 import { MenuButton, type MenuIconName } from "@/ui";
-import { ChatPanel } from "../../game/panels/ChatPanel";
 import {
   ActionBarPanel,
   ACTION_BAR_DIMENSIONS,
@@ -862,6 +861,11 @@ function MenuBarPanel({
 }
 
 // Lazy load panels for better code splitting
+const ChatPanel = lazy(() =>
+  import("../../game/panels/ChatPanel").then((m) => ({
+    default: m.ChatPanel,
+  })),
+);
 const EquipmentPanel = lazy(() =>
   import("../../game/panels/EquipmentPanel").then((m) => ({
     default: m.EquipmentPanel,
@@ -995,6 +999,11 @@ export interface PanelRenderContext {
   onPanelClick?: (panelId: string) => void;
   /** Whether edit mode is unlocked (for action bar +/- controls) */
   isEditMode?: boolean;
+  /** Optional getter for current player-facing panel data */
+  getPanelData?: () => Pick<
+    PanelRenderContext,
+    "inventoryItems" | "coins" | "stats" | "equipment"
+  >;
 }
 
 /**
@@ -1030,12 +1039,13 @@ export function createPanelRenderer(
 ): (panelId: string, world?: ClientWorld, windowId?: string) => ReactNode {
   const {
     world,
-    inventoryItems = [],
-    coins = 0,
-    stats = null,
-    equipment = null,
+    inventoryItems: initialInventoryItems = [],
+    coins: initialCoins = 0,
+    stats: initialStats = null,
+    equipment: initialEquipment = null,
     onPanelClick,
     isEditMode = false,
+    getPanelData,
   } = context;
 
   return (
@@ -1054,6 +1064,12 @@ export function createPanelRenderer(
 
     // Get panel config for scrollability
     const config = getPanelConfig(panelId);
+    const livePanelData = getPanelData?.();
+    const inventoryItems =
+      livePanelData?.inventoryItems ?? initialInventoryItems;
+    const coins = livePanelData?.coins ?? initialCoins;
+    const stats = livePanelData?.stats ?? initialStats;
+    const equipment = livePanelData?.equipment ?? initialEquipment;
 
     switch (panelId) {
       case "inventory":
@@ -1155,7 +1171,9 @@ export function createPanelRenderer(
       case "chat":
         return (
           <ScrollablePanelWrapper scrollable={config.scrollable}>
-            <ChatPanel world={world} />
+            <Suspense fallback={<PanelLoadingFallback />}>
+              <ChatPanel world={world} />
+            </Suspense>
           </ScrollablePanelWrapper>
         );
 
