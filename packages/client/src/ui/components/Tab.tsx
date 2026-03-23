@@ -146,6 +146,18 @@ export const Tab = memo(function Tab({
     flexShrink: 0,
   };
 
+  const applyInactiveHighlight = (element: HTMLDivElement) => {
+    if (isActive) return;
+    element.style.background = `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.tertiary} 100%)`;
+    element.style.borderBottomColor = theme.colors.border.hover;
+  };
+
+  const clearInactiveHighlight = (element: HTMLDivElement) => {
+    if (isActive) return;
+    element.style.background = "transparent";
+    element.style.borderBottomColor = "transparent";
+  };
+
   return (
     <div
       className={className}
@@ -159,24 +171,28 @@ export const Tab = memo(function Tab({
         }
       }}
       onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
-        if (!isActive) {
-          e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.tertiary} 100%)`;
-          e.currentTarget.style.borderBottomColor = theme.colors.border.hover;
-        }
+        applyInactiveHighlight(e.currentTarget);
         const closeBtn = e.currentTarget.querySelector(
           "[data-close-btn]",
         ) as HTMLElement;
         if (closeBtn) closeBtn.style.opacity = "1";
       }}
       onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
-        if (!isActive) {
-          e.currentTarget.style.background = "transparent";
-          e.currentTarget.style.borderBottomColor = "transparent";
-        }
+        clearInactiveHighlight(e.currentTarget);
         const closeBtn = e.currentTarget.querySelector(
           "[data-close-btn]",
         ) as HTMLElement;
         if (closeBtn && !isActive) closeBtn.style.opacity = "0";
+      }}
+      onFocus={(e: React.FocusEvent<HTMLDivElement>) => {
+        applyInactiveHighlight(e.currentTarget);
+        e.currentTarget.style.boxShadow = `inset 0 0 0 1px ${theme.colors.border.focus}`;
+      }}
+      onBlur={(e: React.FocusEvent<HTMLDivElement>) => {
+        clearInactiveHighlight(e.currentTarget);
+        e.currentTarget.style.boxShadow = isActive
+          ? "inset 0 1px 0 rgba(255, 255, 255, 0.08)"
+          : "none";
       }}
       {...(isUnlocked ? { onPointerDown: dragHandleProps.onPointerDown } : {})}
       role="tab"

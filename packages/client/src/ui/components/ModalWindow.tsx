@@ -97,6 +97,9 @@ export const ModalWindow = memo(function ModalWindow({
 }: ModalWindowProps): React.ReactElement | null {
   const theme = useTheme();
   const modalRef = useRef<HTMLDivElement>(null);
+  const reduceMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
   // Handle escape key
   useEffect(() => {
@@ -154,11 +157,13 @@ export const ModalWindow = memo(function ModalWindow({
     right: 0,
     bottom: 0,
     backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backgroundImage:
+      "radial-gradient(circle at top, rgba(255, 255, 255, 0.04), transparent 42%)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     zIndex,
-    animation: "modalFadeIn 0.2s ease-out",
+    animation: reduceMotion ? undefined : "modalFadeIn 0.2s ease-out",
     // CRITICAL: Enable pointer events to block clicks from reaching the game canvas
     // CoreUI parent has pointer-events: none, so we must explicitly enable them here
     pointerEvents: "auto",
@@ -176,7 +181,7 @@ export const ModalWindow = memo(function ModalWindow({
     borderRadius: theme.borderRadius.xl,
     boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 255, 255, 0.08)`,
     overflow: "hidden",
-    animation: "modalSlideIn 0.2s ease-out",
+    animation: reduceMotion ? undefined : "modalSlideIn 0.22s ease-out",
     outline: "none",
     ...style,
   };
@@ -275,7 +280,7 @@ export const ModalWindow = memo(function ModalWindow({
           className={className}
           role="dialog"
           aria-modal="true"
-          aria-labelledby="modal-title"
+          aria-label={title}
           tabIndex={-1}
           onMouseDown={(e) => {
             (e.nativeEvent as PointerEvent & { isCoreUI?: boolean }).isCoreUI =

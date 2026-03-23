@@ -47,7 +47,9 @@ export function CoreUI({ world }: { world: ClientWorld }) {
 function CoreUIContent({ world }: { world: ClientWorld }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const readyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const loadingOverlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [ready, setReady] = useState(false);
+  const [loadingOverlayVisible, setLoadingOverlayVisible] = useState(true);
   const [loadingComplete, setLoadingComplete] = useState(false);
   // Track system and asset progress separately to gate presentation on assets
   const [systemsComplete, setSystemsComplete] = useState(false);
@@ -200,6 +202,10 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
         clearTimeout(readyTimeoutRef.current);
         readyTimeoutRef.current = null;
       }
+      if (loadingOverlayTimeoutRef.current) {
+        clearTimeout(loadingOverlayTimeoutRef.current);
+        loadingOverlayTimeoutRef.current = null;
+      }
       world.off(EventType.READY, handleReady);
       world.off(EventType.ASSETS_LOADING_PROGRESS, handleLoadingProgress);
       world.off(EventType.PLAYER_SPAWNED, handlePlayerSpawned);
@@ -293,6 +299,29 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     };
   }, [playerReady, physReady, isSpectatorMode, terrainReady]);
 
+  useEffect(() => {
+    if (!ready) {
+      setLoadingOverlayVisible(true);
+      if (loadingOverlayTimeoutRef.current) {
+        clearTimeout(loadingOverlayTimeoutRef.current);
+        loadingOverlayTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    loadingOverlayTimeoutRef.current = setTimeout(() => {
+      setLoadingOverlayVisible(false);
+      loadingOverlayTimeoutRef.current = null;
+    }, 220);
+
+    return () => {
+      if (loadingOverlayTimeoutRef.current) {
+        clearTimeout(loadingOverlayTimeoutRef.current);
+        loadingOverlayTimeoutRef.current = null;
+      }
+    };
+  }, [ready]);
+
   // Expose loading state for debugging and analytics
   useEffect(() => {
     const loadingState = {
@@ -346,12 +375,13 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
           <div id="core-ui-portal" />
         </div>
         {/* Non-scaled overlays - full screen elements */}
-        {!ready && (
+        {loadingOverlayVisible && (
           <LoadingScreen
             world={world}
             message={
               characterFlowActive ? "Entering world..." : "Loading world..."
             }
+            fadingOut={ready}
           />
         )}
         {kicked && <KickedOverlay code={kicked} />}

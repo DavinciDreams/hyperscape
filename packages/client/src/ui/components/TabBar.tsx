@@ -261,6 +261,22 @@ export const TabBar = memo(function TabBar({
     fontSize: 14,
   };
 
+  const applyShellButtonHover = (button: HTMLButtonElement) => {
+    button.style.color = String(
+      button.style.getPropertyValue("--shell-button-hover-fg"),
+    );
+    button.style.backgroundColor = String(
+      button.style.getPropertyValue("--shell-button-hover-bg"),
+    );
+    button.style.borderColor = theme.colors.border.hover;
+  };
+
+  const clearShellButtonHover = (button: HTMLButtonElement) => {
+    button.style.color = theme.colors.text.muted;
+    button.style.backgroundColor = "transparent";
+    button.style.borderColor = "transparent";
+  };
+
   const buttonGroupStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -321,17 +337,17 @@ export const TabBar = memo(function TabBar({
             e.stopPropagation()
           }
           onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.currentTarget.style.color = String(
-              e.currentTarget.style.getPropertyValue("--shell-button-hover-fg"),
-            );
-            e.currentTarget.style.backgroundColor = String(
-              e.currentTarget.style.getPropertyValue("--shell-button-hover-bg"),
-            );
+            applyShellButtonHover(e.currentTarget);
           }}
           onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.currentTarget.style.color = theme.colors.text.muted;
-            e.currentTarget.style.backgroundColor = "transparent";
+            clearShellButtonHover(e.currentTarget);
           }}
+          onFocus={(e: React.FocusEvent<HTMLButtonElement>) =>
+            applyShellButtonHover(e.currentTarget)
+          }
+          onBlur={(e: React.FocusEvent<HTMLButtonElement>) =>
+            clearShellButtonHover(e.currentTarget)
+          }
           aria-label="Scroll tabs left"
         >
           ◀
@@ -382,17 +398,17 @@ export const TabBar = memo(function TabBar({
             e.stopPropagation()
           }
           onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.currentTarget.style.color = String(
-              e.currentTarget.style.getPropertyValue("--shell-button-hover-fg"),
-            );
-            e.currentTarget.style.backgroundColor = String(
-              e.currentTarget.style.getPropertyValue("--shell-button-hover-bg"),
-            );
+            applyShellButtonHover(e.currentTarget);
           }}
           onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.currentTarget.style.color = theme.colors.text.muted;
-            e.currentTarget.style.backgroundColor = "transparent";
+            clearShellButtonHover(e.currentTarget);
           }}
+          onFocus={(e: React.FocusEvent<HTMLButtonElement>) =>
+            applyShellButtonHover(e.currentTarget)
+          }
+          onBlur={(e: React.FocusEvent<HTMLButtonElement>) =>
+            clearShellButtonHover(e.currentTarget)
+          }
           aria-label="Scroll tabs right"
         >
           ▶
@@ -411,21 +427,17 @@ export const TabBar = memo(function TabBar({
             title="Add tab"
             aria-label="Add new tab"
             onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.currentTarget.style.color = String(
-                e.currentTarget.style.getPropertyValue(
-                  "--shell-button-hover-fg",
-                ),
-              );
-              e.currentTarget.style.backgroundColor = String(
-                e.currentTarget.style.getPropertyValue(
-                  "--shell-button-hover-bg",
-                ),
-              );
+              applyShellButtonHover(e.currentTarget);
             }}
             onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.currentTarget.style.color = theme.colors.text.muted;
-              e.currentTarget.style.backgroundColor = "transparent";
+              clearShellButtonHover(e.currentTarget);
             }}
+            onFocus={(e: React.FocusEvent<HTMLButtonElement>) =>
+              applyShellButtonHover(e.currentTarget)
+            }
+            onBlur={(e: React.FocusEvent<HTMLButtonElement>) =>
+              clearShellButtonHover(e.currentTarget)
+            }
           >
             +
           </button>
@@ -447,21 +459,17 @@ export const TabBar = memo(function TabBar({
             title="Close window"
             aria-label="Close window"
             onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.currentTarget.style.color = String(
-                e.currentTarget.style.getPropertyValue(
-                  "--shell-button-hover-fg",
-                ),
-              );
-              e.currentTarget.style.backgroundColor = String(
-                e.currentTarget.style.getPropertyValue(
-                  "--shell-button-hover-bg",
-                ),
-              );
+              applyShellButtonHover(e.currentTarget);
             }}
             onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.currentTarget.style.color = theme.colors.text.muted;
-              e.currentTarget.style.backgroundColor = "transparent";
+              clearShellButtonHover(e.currentTarget);
             }}
+            onFocus={(e: React.FocusEvent<HTMLButtonElement>) =>
+              applyShellButtonHover(e.currentTarget)
+            }
+            onBlur={(e: React.FocusEvent<HTMLButtonElement>) =>
+              clearShellButtonHover(e.currentTarget)
+            }
           >
             ×
           </button>

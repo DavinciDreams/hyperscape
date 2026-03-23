@@ -466,9 +466,11 @@ export const Window = memo(function Window({
     borderRadius: theme.borderRadius.md,
     overflow: "hidden",
     opacity: isDragging ? 0.95 : 1,
+    transform: isDragging ? "scale(1.01)" : "translateZ(0)",
     transition: isDragging
       ? "none"
-      : `box-shadow ${theme.transitions.fast}, ${sizeTransition}`,
+      : `box-shadow ${theme.transitions.fast}, transform ${theme.transitions.fast}, opacity ${theme.transitions.fast}, ${sizeTransition}`,
+    willChange: isDragging ? "transform, left, top" : "auto",
     ...windowSurfaceStyle,
     ...tabCombineStyle, // Apply tab combine visual feedback
     ...style,
