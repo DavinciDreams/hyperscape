@@ -74,7 +74,7 @@ export interface ModalWindowProps {
   maxWidth?: number | string;
   /** Modal max height (default: 90vh) */
   maxHeight?: number | string;
-  /** Custom z-index (default: 10000) */
+  /** Custom z-index (defaults to theme modal layer) */
   zIndex?: number;
   /** Show close button in header (default: true) */
   showCloseButton?: boolean;
@@ -115,12 +115,13 @@ export const ModalWindow = memo(function ModalWindow({
   width,
   maxWidth = "90vw",
   maxHeight = "90vh",
-  zIndex = 10000,
+  zIndex,
   showCloseButton = true,
   className,
   style,
 }: ModalWindowProps): React.ReactElement | null {
   const theme = useTheme();
+  const resolvedZIndex = zIndex ?? theme.zIndex.modal;
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -245,7 +246,7 @@ export const ModalWindow = memo(function ModalWindow({
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    zIndex,
+    zIndex: resolvedZIndex,
     animation: reduceMotion ? undefined : "modalFadeIn 0.2s ease-out",
     overscrollBehavior: "contain",
     // CRITICAL: Enable pointer events to block clicks from reaching the game canvas

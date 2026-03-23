@@ -131,6 +131,25 @@ export const Window = memo(function Window({
     guideWindows,
     isGuideTrackingActive ? windowId : null,
   );
+  const topWindowId = useWindowStore(
+    useMemo(
+      () => (state) => {
+        let highestZ = Number.NEGATIVE_INFINITY;
+        let highestId: string | null = null;
+
+        for (const [id, win] of state.windows) {
+          if (win.visible === false) continue;
+          if (win.zIndex >= highestZ) {
+            highestZ = win.zIndex;
+            highestId = id;
+          }
+        }
+
+        return highestId;
+      },
+      [],
+    ),
+  );
 
   // Get viewport restriction settings from edit store
   const restrictToViewport = useEditStore((s) => s.restrictToViewport);
@@ -457,13 +476,14 @@ export const Window = memo(function Window({
     hasMultipleTabs && activeTab
       ? `window-panel-${windowId}-${activeTab.id}`
       : undefined;
+  const isFocusedWindow = topWindowId === windowId;
   const windowShadow = getThemedWindowShadow(
     theme,
-    isDragging ? "dragging" : "normal",
+    isDragging ? "dragging" : isFocusedWindow ? "focused" : "normal",
   );
   const windowSurfaceStyle = getWindowSurfaceStyle(theme, {
     transparency: windowState.transparency,
-    state: isDragging ? "dragging" : "normal",
+    state: isDragging ? "dragging" : isFocusedWindow ? "focused" : "normal",
   });
 
   // Smooth transitions for size changes, disabled during active drag/resize
@@ -499,12 +519,13 @@ export const Window = memo(function Window({
     flexDirection: "column",
     borderRadius: theme.borderRadius.md,
     overflow: "hidden",
-    opacity: isDragging ? 0.95 : 1,
+    opacity: isDragging ? 0.97 : isFocusedWindow ? 1 : 0.965,
     transform: isDragging ? "scale(1.01)" : "translateZ(0)",
     transition: isDragging
       ? "none"
-      : `box-shadow ${theme.transitions.fast}, transform ${theme.transitions.fast}, opacity ${theme.transitions.fast}, ${sizeTransition}`,
+      : `box-shadow ${theme.transitions.fast}, transform ${theme.transitions.fast}, opacity ${theme.transitions.fast}, filter ${theme.transitions.fast}, ${sizeTransition}`,
     willChange: isDragging ? "transform, left, top" : "auto",
+    filter: isFocusedWindow ? "none" : "saturate(0.92) brightness(0.97)",
     ...windowSurfaceStyle,
     ...tabCombineStyle, // Apply tab combine visual feedback
     ...style,
@@ -659,6 +680,7 @@ export const Window = memo(function Window({
             theme.name === "hyperscape"
               ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 14%, transparent 78%, rgba(0, 0, 0, 0.1) 100%), radial-gradient(circle at top right, rgba(240, 208, 96, 0.08), transparent 32%)"
               : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 16%, transparent 84%, rgba(0, 0, 0, 0.06) 100%)",
+          opacity: isFocusedWindow ? 1 : 0.7,
           zIndex: 0,
         }}
       />
