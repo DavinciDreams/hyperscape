@@ -56,6 +56,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
   const [systemsComplete, setSystemsComplete] = useState(false);
   const [assetsProgress, setAssetsProgress] = useState(0);
   const [readinessError, setReadinessError] = useState<string | null>(null);
+  const [terrainTimedOut, setTerrainTimedOut] = useState(false);
 
   // Check if this is spectator mode (from embedded config)
   const isSpectatorMode = (() => {
@@ -236,6 +237,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     }
 
     setTerrainReady(false);
+    setTerrainTimedOut(false);
     setReadinessError(null);
 
     const isTerrainReady = (): boolean => {
@@ -268,9 +270,18 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
         if (updateTerrainReady()) return;
 
         if (performance.now() - startTime >= 20000) {
-          setReadinessError(
-            "Timed out waiting for terrain to initialize. Refresh to retry.",
+          if (isSpectatorMode) {
+            setReadinessError(
+              "Timed out waiting for terrain to initialize. Refresh to retry.",
+            );
+            return;
+          }
+
+          console.warn(
+            "[CoreUI] Terrain readiness timeout after 20s; continuing startup for player mode",
           );
+          setTerrainTimedOut(true);
+          setTerrainReady(true);
           return;
         }
 
@@ -303,7 +314,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     const canPresent =
       playerReady &&
       physReady &&
-      terrainReady &&
+      (terrainReady || terrainTimedOut) &&
       (loadingComplete || systemsComplete || assetsProgress >= 100);
     if (canPresent) {
       // Clear any existing timeout
@@ -329,6 +340,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     playerReady,
     physReady,
     terrainReady,
+    terrainTimedOut,
     loadingComplete,
     systemsComplete,
     assetsProgress,
@@ -367,6 +379,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
       playerReady,
       physReady,
       terrainReady,
+      terrainTimedOut,
       playerId: player?.id || null,
     };
     (
@@ -380,6 +393,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     playerReady,
     physReady,
     terrainReady,
+    terrainTimedOut,
     player,
   ]);
 
