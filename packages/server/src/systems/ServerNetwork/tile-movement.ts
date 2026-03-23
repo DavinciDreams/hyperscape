@@ -187,7 +187,6 @@ export class TileMovementManager {
     ): boolean;
   } | null {
     if (!this._bridgeSystemChecked) {
-      this._bridgeSystemChecked = true;
       const sys = this.world.getSystem("bridges");
       if (sys) {
         this._bridgeSystemRef = sys as unknown as {
@@ -199,8 +198,7 @@ export class TileMovementManager {
             tZ: number,
           ): boolean;
         };
-      } else {
-        this._bridgeSystemRef = null;
+        this._bridgeSystemChecked = true;
       }
     }
     return this._bridgeSystemRef;
@@ -218,14 +216,12 @@ export class TileMovementManager {
     getDeckHeightAt(x: number, z: number): number | null;
   } | null {
     if (!this._dockSystemChecked) {
-      this._dockSystemChecked = true;
       const sys = this.world.getSystem("docks");
       if (sys) {
         this._dockSystemRef = sys as unknown as {
           getDeckHeightAt(x: number, z: number): number | null;
         };
-      } else {
-        this._dockSystemRef = null;
+        this._dockSystemChecked = true;
       }
     }
     return this._dockSystemRef;
@@ -562,10 +558,10 @@ export class TileMovementManager {
     const bridgeSys = this.getBridgeSystem();
     const dockSys = this.getDockSystem();
     const onBridge =
-      bridgeSys?.getDeckHeightAt(state.currentTile.x, state.currentTile.z) !==
+      bridgeSys?.getDeckHeightAt(state.currentTile.x, state.currentTile.z) !=
       null;
     const onDock =
-      dockSys?.getDeckHeightAt(state.currentTile.x, state.currentTile.z) !==
+      dockSys?.getDeckHeightAt(state.currentTile.x, state.currentTile.z) !=
       null;
     if (onBridge || onDock) {
       if (

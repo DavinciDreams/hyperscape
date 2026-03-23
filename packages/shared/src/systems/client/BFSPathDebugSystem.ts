@@ -193,7 +193,7 @@ export class BFSPathDebugSystem extends System {
 
     // Get terrain + bridge systems for Y positioning
     const terrain = this.world.getSystem("terrain") as TerrainSystem | null;
-    const bridge = this.world.getSystem("bridge") as BridgeSystem | null;
+    const bridge = this.world.getSystem("bridges") as BridgeSystem | null;
 
     const getY = (wx: number, wz: number): number => {
       // Bridge deck takes priority

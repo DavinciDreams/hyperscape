@@ -1806,8 +1806,15 @@ export class WaterSystem {
     this.foamTex = undefined;
 
     // Dispose reflector render target + remove from scene
-    if (this.reflection?.target) {
-      this.reflection.target.removeFromParent();
+    if (this.reflection) {
+      if (this.reflection.target) {
+        this.reflection.target.removeFromParent();
+      }
+      // Dispose the reflector's internal WebGPU render target (GPU framebuffer)
+      const reflectorNode = this.reflection as unknown as {
+        renderTarget?: { dispose(): void };
+      };
+      reflectorNode.renderTarget?.dispose();
     }
     this.reflection = undefined;
 

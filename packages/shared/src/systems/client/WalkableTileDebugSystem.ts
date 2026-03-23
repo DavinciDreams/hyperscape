@@ -277,7 +277,7 @@ export class WalkableTileDebugSystem extends System {
     } | null;
     if (!collision) return;
     const terrain = this.world.getSystem("terrain") as TerrainSystem | null;
-    const bridge = this.world.getSystem("bridge") as BridgeSystem | null;
+    const bridge = this.world.getSystem("bridges") as BridgeSystem | null;
 
     const r = this.radius;
     for (let dx = -r; dx <= r; dx++) {

@@ -74,6 +74,13 @@ export class WaterBodyRegistry {
     surfaceY: number;
     sourceType: WaterBodySourceType;
   }): void {
+    // Guard against duplicate registrations
+    if (this.bodies.some((b) => b.id === data.id)) {
+      console.warn(
+        `[WaterBodyRegistry] Duplicate water body ID "${data.id}" — skipping`,
+      );
+      return;
+    }
     const body = new ElevatedWaterBody(data);
     const idx = this.bodies.length;
     this.bodies.push(body);
@@ -252,8 +259,8 @@ export class WaterBodyRegistry {
       const sx = feature.x + Math.cos(angle) * feature.radius;
       const sz = feature.z + Math.sin(angle) * feature.radius;
       const h = getHeightAt(sx, sz);
-      if (h < minHeight) minHeight = h;
+      if (Number.isFinite(h) && h < minHeight) minHeight = h;
     }
-    return minHeight;
+    return Number.isFinite(minHeight) ? minHeight : 0;
   }
 }

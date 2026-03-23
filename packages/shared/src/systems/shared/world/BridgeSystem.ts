@@ -480,7 +480,12 @@ export class BridgeSystem extends SystemBase {
     terrain: TerrainSystem,
   ): void {
     const collision = this.world?.collision;
-    if (!collision) return;
+    if (!collision) {
+      console.warn(
+        "[BridgeSystem] registerBridgeCollision skipped — collision matrix not available",
+      );
+      return;
+    }
 
     const originX = terrainTileX * tileSize;
     const originZ = terrainTileZ * tileSize;

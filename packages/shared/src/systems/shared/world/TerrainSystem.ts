@@ -1678,17 +1678,18 @@ export class TerrainSystem extends System {
       wp.surfaceY = Math.max(Math.min(wp.surfaceY!, minH - 0.1), oceanLevel);
     }
 
-    // Replace river waypoints with dense terrain-following set
-    ISLAND_RIVER.waypoints = subdivided;
+    // Create local river definition with dense terrain-following waypoints
+    // (do NOT mutate the shared ISLAND_RIVER constant)
+    const subdividedRiver = { ...ISLAND_RIVER, waypoints: subdivided };
 
     // Compute AABBs from the dense waypoints
-    this.riverAABBs = computeRiverSegmentAABBs(ISLAND_RIVER);
+    this.riverAABBs = computeRiverSegmentAABBs(subdividedRiver);
     console.log(
       `[TerrainSystem] River: ${subdivided.length} waypoints (subdivided from ${origWps.length}), ` +
         `${this.riverAABBs.length} segments`,
     );
 
-    this.waterBodyRegistry.registerRiver(ISLAND_RIVER);
+    this.waterBodyRegistry.registerRiver(subdividedRiver);
 
     // Register elevated water bodies as grass exclusion zones so the GPU grass
     // shader doesn't render blades inside mountain ponds / highland lakes.
@@ -1704,14 +1705,14 @@ export class TerrainSystem extends System {
         );
       }
       // River grass exclusion — use subdivided waypoints (already dense, ~20m apart)
-      const riverSubWps = ISLAND_RIVER.waypoints;
+      const riverSubWps = subdividedRiver.waypoints;
       for (let i = 0; i < riverSubWps.length; i++) {
         const wp = riverSubWps[i];
         grassExclusion.addCircularBlocker(
           `river_${i}`,
           wp.x,
           wp.z,
-          wp.halfWidth * ISLAND_RIVER.valleyMultiplier + 2,
+          wp.halfWidth * subdividedRiver.valleyMultiplier + 2,
           3.0,
         );
       }
