@@ -1,5 +1,5 @@
 import { GAME_API_URL } from "@/lib/api-config";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Agent } from "../../screens/DashboardScreen";
 import {
   ChevronDown,
@@ -142,6 +142,8 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
   const [isNewThought, setIsNewThought] = useState(false);
   const lastTimestampRef = useRef<number>(0);
   const lastThoughtIdRef = useRef<string | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
   // Flash effect when new thought arrives
   useEffect(() => {
@@ -151,18 +153,9 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
     }
   }, [isNewThought]);
 
-  useEffect(() => {
-    if (agent.status !== "active") {
-      setThoughts([]);
-      return;
-    }
-
-    fetchThoughts();
-    const interval = setInterval(fetchThoughts, THOUGHTS_POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [agent.id, agent.status]);
-
-  const fetchThoughts = async () => {
+  const fetchThoughts = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const sinceParam =
         lastTimestampRef.current > 0
@@ -213,9 +206,55 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
     } catch (err) {
       console.error("[AgentThoughtsOverlay] Error fetching thoughts:", err);
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
-  };
+  }, [agent.id, thoughts.length]);
+
+  useEffect(() => {
+    if (agent.status !== "active") {
+      setThoughts([]);
+      return;
+    }
+
+    let cancelled = false;
+    const schedule = (delay: number) => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+      }
+      pollTimeoutRef.current = window.setTimeout(run, delay);
+    };
+    const run = async () => {
+      await fetchThoughts();
+      if (!cancelled) {
+        schedule(
+          document.visibilityState === "visible"
+            ? THOUGHTS_POLL_INTERVAL_MS
+            : THOUGHTS_POLL_INTERVAL_MS * 2,
+        );
+      }
+    };
+    const onVisibilityChange = () => {
+      if (!cancelled) {
+        schedule(
+          document.visibilityState === "visible"
+            ? 1000
+            : THOUGHTS_POLL_INTERVAL_MS * 2,
+        );
+      }
+    };
+
+    void run();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+  }, [agent.status, fetchThoughts]);
 
   // Don't show if agent is inactive
   if (agent.status !== "active") {
