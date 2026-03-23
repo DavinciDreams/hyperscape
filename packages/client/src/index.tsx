@@ -364,7 +364,9 @@ function cleanupCorruptedPrivyData(): void {
             errorStr.includes("setImmedia") ||
             errorStr.includes("Unexpected token")
           ) {
-            console.warn(`[App] 🧹 Found corrupted localStorage key: ${key}`);
+            if (import.meta.env.DEV) {
+              console.warn(`[App] Found corrupted localStorage key: ${key}`);
+            }
             corruptedKeys.push(key);
           }
         }
@@ -377,7 +379,9 @@ function cleanupCorruptedPrivyData(): void {
         try {
           localStorage.removeItem(key);
         } catch (e) {
-          console.warn(`[App] Failed to remove corrupted key ${key}:`, e);
+          if (import.meta.env.DEV) {
+            console.warn(`[App] Failed to remove corrupted key ${key}:`, e);
+          }
         }
       });
     }
@@ -452,10 +456,8 @@ function App() {
       }
 
       // Use PrivyAuthManager with localStorage fallback
-      const accountId =
-        privyAuthManager.getUserId() || localStorage.getItem("privy_user_id");
+      const accountId = authState.privyUserId || privyAuthManager.getUserId();
       if (!accountId) {
-        console.warn("[App] No privy_user_id found");
         // Don't immediately assume no username - Privy may still be writing
         // Stay in loading state briefly, then check again
         setHasUsername(null);
@@ -480,18 +482,8 @@ function App() {
             setHasUsername(data.exists);
             setIsCheckingUsername(false);
             return;
-          } else {
-            console.warn(
-              `[App] Username check failed (attempt ${attempt + 1}/${maxRetries}):`,
-              response.statusText,
-            );
           }
-        } catch (error) {
-          console.warn(
-            `[App] Username check error (attempt ${attempt + 1}/${maxRetries}):`,
-            error,
-          );
-        }
+        } catch {}
 
         // Wait before retry (unless last attempt)
         if (attempt < maxRetries - 1) {
@@ -502,15 +494,16 @@ function App() {
       }
 
       // All retries failed - stay in loading state rather than showing wrong screen
-      console.error(
-        "[App] Username check failed after all retries, staying in loading state",
-      );
       setHasUsername(null);
       setIsCheckingUsername(false);
     };
 
     checkUsername();
-  }, [authState.isAuthenticated, authState.privySdkReady]);
+  }, [
+    authState.isAuthenticated,
+    authState.privySdkReady,
+    authState.privyUserId,
+  ]);
 
   // Show character page when authenticated and has username
   React.useEffect(() => {
@@ -594,20 +587,22 @@ function App() {
   const handleSetup = React.useCallback(
     (world: InstanceType<typeof World>, _config: unknown) => {
       // Extend window with debug utilities
-      window.world = world;
-      window.THREE = THREE;
-      window.Hyperscape = {
-        CircularSpawnArea,
-      };
+      if (import.meta.env.DEV) {
+        window.world = world;
+        window.THREE = THREE;
+        window.Hyperscape = {
+          CircularSpawnArea,
+        };
 
-      window.testChat = () => {
-        const chat = world.getSystem("chat") as {
-          send?: (msg: string) => void;
-        } | null;
-        chat?.send?.(
-          "Test message from console at " + new Date().toLocaleTimeString(),
-        );
-      };
+        window.testChat = () => {
+          const chat = world.getSystem("chat") as {
+            send?: (msg: string) => void;
+          } | null;
+          chat?.send?.(
+            "Test message from console at " + new Date().toLocaleTimeString(),
+          );
+        };
+      }
     },
     [],
   );

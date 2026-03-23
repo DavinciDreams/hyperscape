@@ -102,6 +102,37 @@ export class PrivyAuthManager {
     }
   }
 
+  private getValueFromKnownStorages(key: string): string | null {
+    const storages: Storage[] = [];
+    const configuredStorage = this.getStorage();
+    if (configuredStorage) {
+      storages.push(configuredStorage);
+    }
+    if (
+      typeof sessionStorage !== "undefined" &&
+      !storages.includes(sessionStorage)
+    ) {
+      storages.push(sessionStorage);
+    }
+    if (
+      typeof localStorage !== "undefined" &&
+      !storages.includes(localStorage)
+    ) {
+      storages.push(localStorage);
+    }
+
+    for (const storage of storages) {
+      try {
+        const value = storage.getItem(key);
+        if (value) return value;
+      } catch {
+        // Ignore unavailable storage
+      }
+    }
+
+    return null;
+  }
+
   /**
    * Sets the storage type for auth tokens
    * Must be called before authentication to take effect
@@ -368,16 +399,10 @@ export class PrivyAuthManager {
    * @public
    */
   restoreFromStorage(): { token: string | null; userId: string | null } {
-    const storage = this.getStorage();
-    if (!storage) {
-      // Memory-only storage doesn't persist across page loads
-      return { token: null, userId: null };
-    }
-
     try {
-      const token = storage.getItem("privy_auth_token");
-      const userId = storage.getItem("privy_user_id");
-      const fid = storage.getItem("farcaster_fid");
+      const token = this.getValueFromKnownStorages("privy_auth_token");
+      const userId = this.getValueFromKnownStorages("privy_user_id");
+      const fid = this.getValueFromKnownStorages("farcaster_fid");
 
       if (token || userId || fid) {
         this.updateState({
