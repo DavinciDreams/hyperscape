@@ -222,28 +222,6 @@ interface CombatStyleInfo {
   label: string;
   xp: string;
   color: string;
-  bgColor: string;
-}
-
-function getStyleVerb(styleId: string): string {
-  switch (styleId) {
-    case "accurate":
-      return "Precise";
-    case "aggressive":
-      return "Power";
-    case "defensive":
-      return "Guard";
-    case "controlled":
-      return "Balanced";
-    case "rapid":
-      return "Fast";
-    case "longrange":
-      return "Reach";
-    case "autocast":
-      return "Spell";
-    default:
-      return "Combat";
-  }
 }
 
 /** Draggable combat style button component */
@@ -281,50 +259,39 @@ const DraggableCombatStyleButton = ({
       ref={setNodeRef}
       style={{
         minWidth: 0,
-        minHeight: isMobile ? 54 : 52,
-        padding: isMobile ? "7px 7px" : "7px 7px",
-        transition: "all 0.15s ease",
+        padding: isMobile ? "5px 6px" : "4px 6px",
+        transition: "all 0.12s ease",
         ...getInteractiveTileStyle(theme, {
           active: isActive,
           disabled,
           dragging: isDragging,
-          radius: 6,
+          radius: 5,
           accentColor: styleInfo.color,
         }),
-        borderRadius: "5px",
         display: "flex",
-        flexDirection: "column",
-        alignItems: "stretch",
-        justifyContent: "space-between",
+        alignItems: "center",
         gap: "6px",
         opacity: disabled ? 0.5 : isDragging ? 0.7 : 1,
         transform: isDragging ? "scale(1.01)" : "scale(1)",
-        boxShadow: isActive
-          ? `inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px ${styleInfo.color}33`
-          : "inset 0 1px 0 rgba(255,255,255,0.03)",
+        width: "100%",
         position: "relative",
       }}
     >
       <button
         type="button"
         onClick={(e) => {
-          e.preventDefault();
           e.stopPropagation();
-          if (!disabled) {
-            onClick();
-          }
+          if (!disabled) onClick();
         }}
         disabled={disabled}
         aria-pressed={isActive}
         className="style-btn focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
         style={{
-          width: "100%",
-          minWidth: 0,
           display: "flex",
-          flexDirection: "column",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: "5px",
+          alignItems: "center",
+          gap: "6px",
+          flex: 1,
+          minWidth: 0,
           background: "transparent",
           border: "none",
           padding: 0,
@@ -337,97 +304,60 @@ const DraggableCombatStyleButton = ({
       >
         <StyleIcon
           style={styleInfo.id}
-          size={isMobile ? 16 : 15}
+          size={isMobile ? 14 : 13}
           color={isActive ? styleInfo.color : theme.colors.text.muted}
         />
         <span
           style={{
-            display: "flex",
-            flexDirection: "column",
-            minWidth: 0,
-            gap: "2px",
+            fontWeight: 600,
+            lineHeight: 1,
+            fontSize: isMobile ? "11px" : "10px",
+            color: isActive
+              ? theme.colors.text.primary
+              : theme.colors.text.secondary,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
             flex: 1,
-            width: "100%",
           }}
         >
-          <span
-            style={{
-              fontWeight: 700,
-              lineHeight: 1.05,
-              fontSize: isMobile ? "11px" : "10px",
-              color: isActive
-                ? theme.colors.text.primary
-                : theme.colors.text.secondary,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {styleInfo.label}
-          </span>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "4px",
-              width: "fit-content",
-              padding: "2px 6px",
-              borderRadius: "999px",
-              fontSize: isMobile ? "9px" : "8px",
-              opacity: 0.92,
-              color: isActive ? styleInfo.color : theme.colors.text.muted,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              lineHeight: 1,
-              background: isActive
-                ? `${styleInfo.color}18`
-                : "rgba(255,255,255,0.04)",
-              border: `1px solid ${
-                isActive
-                  ? `${styleInfo.color}33`
-                  : `${theme.colors.border.default}30`
-              }`,
-            }}
-          >
-            {getStyleVerb(styleInfo.id)}
-            <span
-              style={{
-                color: theme.colors.text.muted,
-                opacity: 0.9,
-              }}
-            >
-              {styleInfo.xp}
-            </span>
-          </span>
+          {styleInfo.label}
+        </span>
+        <span
+          style={{
+            fontSize: isMobile ? "9px" : "8px",
+            color: isActive ? styleInfo.color : theme.colors.text.muted,
+            fontWeight: 600,
+            opacity: 0.8,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {styleInfo.xp}
         </span>
       </button>
+      {/* Separate drag handle so dnd-kit doesn't intercept clicks */}
       <div
         {...attributes}
         {...listeners}
         aria-label={`Drag ${styleInfo.label} style to action bar`}
-        title="Drag to action bar"
         style={{
-          position: "absolute",
-          right: "5px",
-          top: "5px",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          width: isMobile ? "16px" : "15px",
-          height: isMobile ? "16px" : "15px",
+          width: "14px",
+          height: "14px",
           cursor: disabled ? "not-allowed" : isDragging ? "grabbing" : "grab",
           color: theme.colors.text.muted,
-          opacity: disabled ? 0.35 : 0.58,
-          borderRadius: "4px",
+          opacity: disabled ? 0.35 : 0.5,
+          flexShrink: 0,
           touchAction: "none",
         }}
       >
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
-          <circle cx="3" cy="3" r="0.8" />
-          <circle cx="7" cy="3" r="0.8" />
-          <circle cx="3" cy="7" r="0.8" />
-          <circle cx="7" cy="7" r="0.8" />
+        <svg width="8" height="8" viewBox="0 0 10 10" fill="currentColor">
+          <circle cx="3" cy="3" r="0.9" />
+          <circle cx="7" cy="3" r="0.9" />
+          <circle cx="3" cy="7" r="0.9" />
+          <circle cx="7" cy="7" r="0.9" />
         </svg>
       </div>
     </div>
@@ -459,29 +389,34 @@ const CombatStatsRow = React.memo(function CombatStatsRow({
 
   return (
     <div
-      className="grid grid-cols-3 items-center gap-2"
       style={{
-        padding: isMobile ? "6px 8px" : "5px 8px",
-        background:
-          theme.name === "hyperscape"
-            ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
-            : theme.colors.slot.filled,
-        borderRadius: theme.borderRadius.md,
-        border: `1px solid ${theme.colors.border.default}40`,
-        boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "8px",
+        padding: "2px 0",
       }}
     >
       {stats.map((stat, index) => (
         <React.Fragment key={stat.key}>
-          <div className="flex items-center justify-center gap-1.5">
+          {index > 0 && (
+            <div
+              style={{
+                width: "1px",
+                height: "10px",
+                background: `${theme.colors.border.default}25`,
+              }}
+            />
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: "3px" }}>
             <StatIcon
               stat={stat.key}
-              size={isMobile ? 13 : 12}
+              size={isMobile ? 11 : 10}
               color={stat.color}
             />
             <span
               style={{
-                fontSize: isMobile ? "13px" : "12px",
+                fontSize: isMobile ? "11px" : "10px",
                 color: stat.color,
                 fontWeight: 700,
                 fontFamily: "var(--font-mono, monospace)",
@@ -490,16 +425,6 @@ const CombatStatsRow = React.memo(function CombatStatsRow({
               {stat.value}
             </span>
           </div>
-          {index < stats.length - 1 && (
-            <div
-              style={{
-                width: "1px",
-                height: "14px",
-                background: `${theme.colors.border.default}30`,
-                justifySelf: "end",
-              }}
-            />
-          )}
         </React.Fragment>
       ))}
     </div>
@@ -853,7 +778,6 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     label: string;
     xp: string;
     color: string;
-    bgColor: string;
   }> = [
     // Melee styles
     {
@@ -861,28 +785,24 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       label: "Accurate",
       xp: "Attack",
       color: "#ef4444",
-      bgColor: "rgba(239, 68, 68, 0.12)",
     },
     {
       id: "aggressive",
       label: "Aggressive",
       xp: "Strength",
       color: "#22c55e",
-      bgColor: "rgba(34, 197, 94, 0.12)",
     },
     {
       id: "defensive",
       label: "Defensive",
       xp: "Defense",
       color: "#3b82f6",
-      bgColor: "rgba(59, 130, 246, 0.12)",
     },
     {
       id: "controlled",
       label: "Controlled",
       xp: "All",
       color: "#a855f7",
-      bgColor: "rgba(168, 85, 247, 0.12)",
     },
     // Ranged styles
     {
@@ -890,14 +810,12 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       label: "Rapid",
       xp: "Ranged",
       color: "#f59e0b",
-      bgColor: "rgba(245, 158, 11, 0.12)",
     },
     {
       id: "longrange",
       label: "Longrange",
       xp: "Rng+Def",
       color: "#06b6d4",
-      bgColor: "rgba(6, 182, 212, 0.12)",
     },
     // Magic styles
     {
@@ -905,7 +823,6 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       label: "Autocast",
       xp: "Magic",
       color: "#8b5cf6",
-      bgColor: "rgba(139, 92, 246, 0.12)",
     },
   ];
 
@@ -949,12 +866,6 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
   const p = compactPanel
     ? { outer: 3, inner: 4, gap: 3 }
     : { outer: 4, inner: 6, gap: 4 };
-  const styleColumns = styles.length >= 2 ? 2 : 1;
-  const currentStyleInfo =
-    styles.find((entry) => entry.id === style) ??
-    allStyles.find((entry) => entry.id === style) ??
-    allStyles[0];
-
   return (
     <div
       ref={panelRef}
@@ -973,176 +884,130 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         .style-btn:active:not(:disabled) { transform: translateY(0); }
       `}</style>
 
-      {/* Header Summary */}
+      {/* HP + Combat Level — single compact row */}
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns:
-            targetName && !ultraCompactPanel ? "1.2fr 0.8fr" : "1fr",
-          gap: `${p.gap}px`,
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: `${p.inner}px`,
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.12) 100%)"
+              : theme.colors.slot.filled,
+          border: inCombat
+            ? `1px solid ${theme.colors.state.danger}50`
+            : `1px solid ${theme.colors.border.default}35`,
+          borderRadius: theme.borderRadius.md,
           flexShrink: 0,
         }}
       >
-        <div
-          style={{
-            background:
-              theme.name === "hyperscape"
-                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.16) 100%)"
-                : theme.colors.slot.filled,
-            border: inCombat
-              ? `1px solid ${theme.colors.state.danger}55`
-              : `1px solid ${theme.colors.border.default}40`,
-            borderRadius: theme.borderRadius.md,
-            padding: `${p.inner}px`,
-            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.05)",
-          }}
-        >
-          {/* HP Header Row */}
-          <div
-            className="flex items-center justify-between"
-            style={{ marginBottom: compactPanel ? "3px" : "4px" }}
-          >
-            <div className="flex items-center gap-1.5">
-              <svg
-                width={shouldUseMobileUI ? 14 : 12}
-                height={shouldUseMobileUI ? 14 : 12}
-                viewBox="0 0 24 24"
-                fill="#ef4444"
-              >
-                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-              </svg>
-              <span
-                style={{
-                  fontSize: compactPanel ? "11px" : "11px",
-                  color: theme.colors.text.secondary,
-                  fontWeight: 600,
-                }}
-              >
-                HP
-              </span>
-              {inCombat && (
-                <span
-                  className="combat-pulse"
-                  style={{
-                    fontSize: "8px",
-                    color: theme.colors.state.danger,
-                    fontWeight: 600,
-                  }}
-                >
-                  ⚔
-                </span>
-              )}
-            </div>
-            <span
-              style={{
-                fontSize: compactPanel ? "13px" : "13px",
-                color: theme.colors.text.primary,
-                fontWeight: 700,
-                fontFamily: "var(--font-mono, monospace)",
-              }}
-            >
-              {health.current}/{health.max}
-            </span>
-          </div>
-
-          {/* HP Bar - Always red like OSRS */}
+        <svg width={12} height={12} viewBox="0 0 24 24" fill="#ef4444">
+          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+        </svg>
+        {/* HP bar inline */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
               width: "100%",
-              height: compactPanel ? "5px" : "6px",
+              height: "5px",
               background: theme.colors.background.panelPrimary,
-              borderRadius: theme.borderRadius.sm,
+              borderRadius: 3,
               overflow: "hidden",
-              border: `1px solid ${theme.colors.border.default}35`,
+              border: `1px solid ${theme.colors.border.default}30`,
             }}
           >
             <div
               style={{
                 height: "100%",
                 width: `${healthPercent}%`,
-                borderRadius: theme.borderRadius.sm,
+                borderRadius: 3,
                 transition: "width 0.2s ease",
                 background: "linear-gradient(180deg, #f87171, #dc2626)",
               }}
             />
           </div>
-
-          {/* Combat Level - inline below HP */}
-          <div
-            className="flex items-center justify-between"
-            style={{
-              marginTop: compactPanel ? "5px" : "6px",
-              paddingTop: compactPanel ? "5px" : "6px",
-              borderTop: `1px solid ${theme.colors.border.default}20`,
-            }}
-          >
-            <span
-              style={{
-                fontSize: compactPanel ? "11px" : "10px",
-                lineHeight: 1,
-                color: theme.colors.text.muted,
-              }}
-            >
-              Combat Lvl
-            </span>
-            <span
-              style={{
-                fontSize: compactPanel ? "15px" : "14px",
-                color: "#f59e0b",
-                fontWeight: 700,
-                fontFamily: "var(--font-mono, monospace)",
-              }}
-            >
-              {combatLevel}
-            </span>
-          </div>
         </div>
-        {targetName && targetHealth && !ultraCompactPanel && (
-          <div
+        <span
+          style={{
+            fontSize: "11px",
+            color: theme.colors.text.primary,
+            fontWeight: 700,
+            fontFamily: "var(--font-mono, monospace)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {health.current}/{health.max}
+        </span>
+        {inCombat && (
+          <span
+            className="combat-pulse"
             style={{
-              background:
-                theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(127, 29, 29, 0.18) 0%, rgba(32, 12, 12, 0.28) 100%)"
-                  : `${theme.colors.state.danger}08`,
-              border: `1px solid ${theme.colors.state.danger}35`,
-              borderRadius: theme.borderRadius.lg,
-              padding: `${p.inner}px`,
-              boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+              fontSize: "9px",
+              color: theme.colors.state.danger,
+              fontWeight: 600,
             }}
           >
-            <div
-              className="flex items-center justify-between"
-              style={{ marginBottom: "4px" }}
-            >
-              <span
-                style={{
-                  fontSize: compactPanel ? "11px" : "11px",
-                  color: theme.colors.state.danger,
-                  fontWeight: 600,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                🎯 {targetName}
-              </span>
-              <span
-                style={{
-                  fontSize: compactPanel ? "12px" : "12px",
-                  color: theme.colors.state.danger,
-                  fontWeight: 700,
-                  fontFamily: "var(--font-mono, monospace)",
-                }}
-              >
-                {targetHealth.current}/{targetHealth.max}
-              </span>
-            </div>
+            ⚔
+          </span>
+        )}
+        <span
+          style={{
+            borderLeft: `1px solid ${theme.colors.border.default}25`,
+            paddingLeft: "6px",
+            fontSize: "10px",
+            color: theme.colors.text.muted,
+            whiteSpace: "nowrap",
+          }}
+        >
+          Lvl{" "}
+          <span
+            style={{
+              color: "#f59e0b",
+              fontWeight: 700,
+              fontFamily: "var(--font-mono, monospace)",
+              fontSize: "12px",
+            }}
+          >
+            {combatLevel}
+          </span>
+        </span>
+      </div>
+
+      {/* Target health — only when in combat */}
+      {targetName && targetHealth && !ultraCompactPanel && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: `${p.inner - 1}px ${p.inner}px`,
+            background: `${theme.colors.state.danger}08`,
+            border: `1px solid ${theme.colors.state.danger}30`,
+            borderRadius: theme.borderRadius.sm,
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              fontSize: "10px",
+              color: theme.colors.state.danger,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: "80px",
+            }}
+          >
+            🎯 {targetName}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
                 width: "100%",
-                height: compactPanel ? "5px" : "6px",
+                height: "4px",
                 background: theme.colors.background.panelPrimary,
-                borderRadius: theme.borderRadius.sm,
+                borderRadius: 2,
                 overflow: "hidden",
               }}
             >
@@ -1150,14 +1015,25 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
                 style={{
                   height: "100%",
                   width: `${targetHealthPercent}%`,
-                  borderRadius: theme.borderRadius.sm,
+                  borderRadius: 2,
                   background: "linear-gradient(180deg, #f87171, #dc2626)",
                 }}
               />
             </div>
           </div>
-        )}
-      </div>
+          <span
+            style={{
+              fontSize: "10px",
+              color: theme.colors.state.danger,
+              fontWeight: 700,
+              fontFamily: "var(--font-mono, monospace)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {targetHealth.current}/{targetHealth.max}
+          </span>
+        </div>
+      )}
 
       {/* Stats Row */}
       <CombatStatsRow
@@ -1166,89 +1042,6 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         defenseLevel={defenseLevel}
         isMobile={shouldUseMobileUI}
       />
-
-      {/* Current combat mode */}
-      <div
-        style={{
-          ...getPanelInsetStyle(theme, {
-            emphasis: "normal",
-            radius: theme.borderRadius.md,
-            padding: compactPanel ? "7px 8px" : "8px 9px",
-          }),
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "10px",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <div
-            style={{
-              width: compactPanel ? "30px" : "32px",
-              height: compactPanel ? "30px" : "32px",
-              borderRadius: "8px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: `${currentStyleInfo.color}18`,
-              border: `1px solid ${currentStyleInfo.color}33`,
-              color: currentStyleInfo.color,
-              flexShrink: 0,
-            }}
-          >
-            <StyleIcon
-              style={currentStyleInfo.id}
-              size={compactPanel ? 15 : 16}
-              color={currentStyleInfo.color}
-            />
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: compactPanel ? "10px" : "10px",
-                color: theme.colors.text.muted,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                fontWeight: 700,
-                lineHeight: 1,
-                marginBottom: "4px",
-              }}
-            >
-              Current Style
-            </div>
-            <div
-              style={{
-                fontSize: compactPanel ? "13px" : "13px",
-                color: theme.colors.text.primary,
-                fontWeight: 700,
-                lineHeight: 1.05,
-              }}
-            >
-              {currentStyleInfo.label}
-            </div>
-          </div>
-        </div>
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            padding: compactPanel ? "5px 7px" : "5px 8px",
-            borderRadius: "999px",
-            background: `${currentStyleInfo.color}12`,
-            border: `1px solid ${currentStyleInfo.color}30`,
-            color: currentStyleInfo.color,
-            fontSize: compactPanel ? "10px" : "10px",
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-          }}
-        >
-          {currentStyleInfo.xp}
-        </div>
-      </div>
 
       {/* Attack Styles */}
       <div
@@ -1262,6 +1055,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           minHeight: 0,
           display: "flex",
           flexDirection: "column",
+          overflow: "hidden",
         }}
       >
         <div
@@ -1269,66 +1063,49 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            marginBottom: compactPanel ? 4 : 6,
+            marginBottom: 2,
+            flexShrink: 0,
           }}
         >
-          <div>
-            <div
+          <span
+            style={{
+              fontSize: "9px",
+              lineHeight: 1,
+              color: theme.colors.text.muted,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+              fontWeight: 700,
+            }}
+          >
+            Combat Styles
+          </span>
+          {style === "autocast" && (
+            <span
               style={{
-                fontSize: compactPanel ? "10px" : "10px",
-                lineHeight: 1,
-                color: theme.colors.text.muted,
-                textTransform: "uppercase",
-                letterSpacing: "0.12em",
-                fontWeight: 700,
-              }}
-            >
-              Combat Styles
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {style === "autocast" && (
-              <div
-                style={{
-                  ...getInteractiveTileStyle(theme, {
-                    active: true,
-                    radius: theme.borderRadius.sm,
-                    accentColor: "#8b5cf6",
-                  }),
-                  padding: "3px 7px",
-                  fontSize: compactPanel ? "9px" : "9px",
-                  fontWeight: 700,
-                  color: "#c4b5fd",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
-                Autocast
-              </div>
-            )}
-            <div
-              style={{
-                padding: "2px 7px",
+                padding: "2px 5px",
                 borderRadius: theme.borderRadius.sm,
-                border: `1px solid ${theme.colors.border.default}45`,
-                background: "rgba(255,255,255,0.03)",
-                fontSize: compactPanel ? "10px" : "10px",
-                color: currentStyleInfo.color,
+                background: "#8b5cf618",
+                border: "1px solid #8b5cf633",
+                fontSize: "8px",
                 fontWeight: 700,
-                whiteSpace: "nowrap",
+                color: "#c4b5fd",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
               }}
             >
-              {getStyleVerb(currentStyleInfo.id)}
-            </div>
-          </div>
+              Autocast
+            </span>
+          )}
         </div>
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${styleColumns}, minmax(0, 1fr))`,
-            gap: compactPanel ? "5px" : "5px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "2px",
             width: "100%",
-            alignContent: "start",
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
           }}
         >
           {styles.map((s) => (
@@ -1349,35 +1126,31 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         <div
           style={{
             textAlign: "center",
-            fontSize: compactPanel ? "10px" : "10px",
+            fontSize: "9px",
             color: theme.colors.state.warning,
-            background:
-              theme.name === "hyperscape"
-                ? "linear-gradient(180deg, rgba(245, 158, 11, 0.16) 0%, rgba(51, 24, 8, 0.22) 100%)"
-                : `${theme.colors.state.warning}10`,
-            padding: compactPanel ? "2px 5px" : "3px 6px",
+            background: `${theme.colors.state.warning}10`,
+            padding: "2px 5px",
             borderRadius: theme.borderRadius.sm,
-            border: `1px solid ${theme.colors.state.warning}30`,
+            border: `1px solid ${theme.colors.state.warning}25`,
             flexShrink: 0,
           }}
         >
-          Style change ready in {Math.ceil(cooldown / 1000)}s
+          Style change in {Math.ceil(cooldown / 1000)}s
         </div>
       )}
 
-      {/* Auto Retaliate */}
+      {/* Auto Retaliate — compact single row */}
       <button
         onClick={toggleAutoRetaliate}
         aria-pressed={autoRetaliate}
         className="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
         style={{
-          padding: compactPanel ? "7px 8px" : "8px 9px",
+          padding: "4px 6px",
           cursor: "pointer",
           transition: "all 0.1s ease",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          fontSize: compactPanel ? "10px" : "10px",
           touchAction: "manipulation",
           borderRadius: theme.borderRadius.sm,
           ...getInteractiveTileStyle(theme, {
@@ -1390,12 +1163,13 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           color: autoRetaliate
             ? theme.colors.state.success
             : theme.colors.text.muted,
+          flexShrink: 0,
         }}
       >
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <svg
-            width={compactPanel ? 14 : 14}
-            height={compactPanel ? 14 : 14}
+            width={12}
+            height={12}
             viewBox="0 0 24 24"
             fill="none"
             stroke={autoRetaliate ? "#22c55e" : theme.colors.text.muted}
@@ -1415,47 +1189,34 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
               </>
             )}
           </svg>
-          <div style={{ textAlign: "left" }}>
-            <div
-              style={{
-                fontWeight: 700,
-                color: theme.colors.text.primary,
-                fontSize: compactPanel ? "12px" : "12px",
-                lineHeight: 1.05,
-              }}
-            >
-              Auto-retaliate
-            </div>
-            <div
-              style={{
-                fontSize: compactPanel ? "9px" : "9px",
-                color: theme.colors.text.muted,
-                lineHeight: 1.1,
-              }}
-            >
-              {autoRetaliate
-                ? "Counters enemies automatically"
-                : "Manual combat only"}
-            </div>
-          </div>
+          <span
+            style={{
+              fontWeight: 600,
+              color: theme.colors.text.primary,
+              fontSize: "10px",
+              lineHeight: 1,
+            }}
+          >
+            Auto-retaliate
+          </span>
         </div>
         <span
           style={{
             display: "inline-flex",
             alignItems: "center",
-            gap: "2px",
-            padding: "2px",
-            borderRadius: theme.borderRadius.sm,
-            fontSize: compactPanel ? "10px" : "10px",
+            gap: "1px",
+            padding: "1px",
+            borderRadius: "4px",
+            fontSize: "9px",
             fontWeight: 700,
             background: "rgba(0,0,0,0.18)",
-            border: `1px solid ${theme.colors.border.default}35`,
+            border: `1px solid ${theme.colors.border.default}30`,
           }}
         >
           <span
             style={{
-              padding: "3px 8px",
-              borderRadius: "4px",
+              padding: "2px 6px",
+              borderRadius: "3px",
               background: autoRetaliate
                 ? "rgba(34, 197, 94, 0.18)"
                 : "transparent",
@@ -1466,8 +1227,8 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           </span>
           <span
             style={{
-              padding: "3px 8px",
-              borderRadius: "4px",
+              padding: "2px 6px",
+              borderRadius: "3px",
               background: !autoRetaliate
                 ? "rgba(239, 68, 68, 0.12)"
                 : "transparent",

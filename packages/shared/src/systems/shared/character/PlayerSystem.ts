@@ -274,7 +274,12 @@ export class PlayerSystem extends SystemBase {
       this.onPlayerLeave(data as PlayerLeaveEvent);
     });
     this.subscribe(EventType.PLAYER_REGISTERED, (data) => {
-      this.onPlayerRegister(data as { playerId: string });
+      this.onPlayerRegister(data as { playerId: string }).catch((err) => {
+        console.error(
+          `[PlayerSystem] CRITICAL: onPlayerRegister failed for ${(data as { playerId: string })?.playerId}`,
+          err,
+        );
+      });
     });
     this.subscribe(EventType.COMBAT_LEVEL_CHANGED, (data) => {
       const combatData = data as {
@@ -516,12 +521,19 @@ export class PlayerSystem extends SystemBase {
     let savedAttackStyle: string | undefined;
     let savedAutoRetaliate = true; // Default ON (OSRS behavior)
     if (this.databaseSystem) {
-      const databaseId = PlayerIdMapper.getDatabaseId(data.playerId);
-      const dbData = await this.databaseSystem.getPlayerAsync(databaseId);
-      savedAttackStyle = (dbData as { attackStyle?: string })?.attackStyle;
-      // Defensive: treat null/undefined as default (1 = true)
-      savedAutoRetaliate =
-        ((dbData as { autoRetaliate?: number })?.autoRetaliate ?? 1) === 1;
+      try {
+        const databaseId = PlayerIdMapper.getDatabaseId(data.playerId);
+        const dbData = await this.databaseSystem.getPlayerAsync(databaseId);
+        savedAttackStyle = (dbData as { attackStyle?: string })?.attackStyle;
+        // Defensive: treat null/undefined as default (1 = true)
+        savedAutoRetaliate =
+          ((dbData as { autoRetaliate?: number })?.autoRetaliate ?? 1) === 1;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to load combat preferences for ${data.playerId}, using defaults`,
+          err,
+        );
+      }
     }
     this.initializePlayerAttackStyle(data.playerId, savedAttackStyle);
     this.initializePlayerAutoRetaliate(data.playerId, savedAutoRetaliate);
