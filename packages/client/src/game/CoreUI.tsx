@@ -72,7 +72,13 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
           (world.entities.player as { avatar?: unknown } | undefined)?.avatar,
         ),
   );
-  const [physReady, setPhysReady] = useState(false);
+  const [physReady, setPhysReady] = useState(() =>
+    Boolean(
+      (
+        world.physics as { isInitialized?: () => boolean } | undefined
+      )?.isInitialized?.(),
+    ),
+  );
   const [terrainReady, setTerrainReady] = useState(false);
   const [player, setPlayer] = useState(() => world.entities.player);
   const [targetAvatarLoaded, setTargetAvatarLoaded] = useState(false);
@@ -199,6 +205,22 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     // If the packet arrived before UI mounted, consult network cache
     const network = world.network as { lastCharacterList?: unknown[] };
     if (network.lastCharacterList) setCharacterFlowActive(true);
+
+    if (
+      (
+        world.physics as { isInitialized?: () => boolean } | undefined
+      )?.isInitialized?.()
+    ) {
+      setPhysReady(true);
+    }
+
+    const playerEntity = world.entities?.player;
+    if (playerEntity) {
+      setPlayer(playerEntity);
+      if (!isSpectatorMode && (playerEntity as { avatar?: unknown }).avatar) {
+        setPlayerReady(true);
+      }
+    }
 
     return () => {
       if (terrainPollTimeoutRef.current) {
