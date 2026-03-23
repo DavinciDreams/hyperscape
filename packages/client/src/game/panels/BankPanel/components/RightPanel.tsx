@@ -88,19 +88,19 @@ export function RightPanel({
               accentColor: theme.colors.state.success,
             }),
             boxShadow: hasItem
-              ? `0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 ${theme.colors.border.default}1a`
-              : "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
+              ? `0 4px 12px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 248, 236, 0.06), inset 0 -8px 14px rgba(0, 0, 0, 0.14)`
+              : "inset 0 1px 0 rgba(255, 248, 236, 0.04), inset 0 -8px 12px rgba(0, 0, 0, 0.12)",
           }}
           onMouseEnter={(e) => {
             if (hasItem) {
               e.currentTarget.style.borderColor = theme.colors.state.success;
-              e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.success}33 0%, ${theme.colors.state.success}1a 100%)`;
+              e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.08) 0%, ${theme.colors.state.success}22 18%, rgba(38, 31, 25, 0.98) 100%)`;
             }
           }}
           onMouseLeave={(e) => {
             if (hasItem) {
               e.currentTarget.style.borderColor = theme.colors.border.hover;
-              e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`;
+              e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 248, 236, 0.03) 0%, rgba(255, 244, 229, 0.012) 18%, rgba(35, 29, 24, 0.99) 100%)`;
             }
           }}
           title={
@@ -170,7 +170,7 @@ export function RightPanel({
       className="flex flex-col rounded-lg"
       style={{
         ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
-        boxShadow: `0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.04)`,
+        boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255,248,236,0.06), inset 0 -14px 22px rgba(0,0,0,0.1)`,
         width: shouldUseMobileUI
           ? "100%"
           : `${INV_SLOTS_PER_ROW * (responsiveSlotSize + 4) + 24}px`,
@@ -207,7 +207,7 @@ export function RightPanel({
               color:
                 mode === "inventory"
                   ? theme.colors.accent.primary
-                  : theme.colors.text.muted,
+                  : theme.colors.text.secondary,
               border:
                 mode === "inventory"
                   ? `1px solid ${theme.colors.accent.primary}50`
@@ -237,7 +237,7 @@ export function RightPanel({
               color:
                 mode === "equipment"
                   ? theme.colors.accent.primary
-                  : theme.colors.text.muted,
+                  : theme.colors.text.secondary,
               border:
                 mode === "equipment"
                   ? `1px solid ${theme.colors.accent.primary}50`
@@ -281,11 +281,11 @@ export function RightPanel({
           <div
             className="mx-2 mb-2 p-2 rounded flex items-center justify-between"
             style={{
-              background:
-                theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.14) 100%)"
-                  : theme.colors.background.overlay,
-              border: `1px solid ${theme.colors.border.decorative}66`,
+              ...getPanelInsetStyle(theme, {
+                emphasis: "normal",
+                radius: theme.borderRadius.md,
+                padding: 0,
+              }),
             }}
           >
             <div className="flex items-center gap-2">
@@ -302,16 +302,19 @@ export function RightPanel({
               disabled={coins <= 0}
               className="px-2 py-1 rounded text-xs font-bold transition-colors disabled:opacity-30"
               style={{
-                background: `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  accentColor: theme.colors.state.success,
+                  radius: theme.borderRadius.sm,
+                }),
                 color: theme.colors.text.primary,
-                border: `1px solid ${theme.colors.border.decorative}`,
               }}
               onMouseEnter={(e) => {
                 if (coins > 0)
-                  e.currentTarget.style.background = `${theme.colors.state.success}cc`;
+                  e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.08) 0%, ${theme.colors.state.success}26 22%, rgba(20, 42, 24, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `${theme.colors.state.success}99`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.06) 0%, ${theme.colors.state.success}1c 20%, rgba(22, 36, 25, 0.98) 100%)`;
               }}
             >
               Deposit
@@ -324,15 +327,18 @@ export function RightPanel({
               onClick={onDepositAll}
               className="w-full py-2 rounded text-sm font-bold transition-colors"
               style={{
-                background: `linear-gradient(180deg, ${theme.colors.accent.primary}33 0%, ${theme.colors.border.decorative}80 100%)`,
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  accentColor: theme.colors.accent.primary,
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.accent.primary,
-                border: `1px solid ${theme.colors.border.decorative}`,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative}e6 0%, ${theme.colors.border.decorative}b3 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 249, 239, 0.07) 0%, ${theme.colors.accent.primary}20 20%, rgba(51, 39, 28, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 250, 241, 0.06) 0%, ${theme.colors.accent.primary}18 20%, rgba(39, 33, 27, 0.98) 100%)`;
               }}
             >
               Deposit Inventory
@@ -345,7 +351,11 @@ export function RightPanel({
           <div
             className="p-2 flex-1"
             style={{
-              background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+              ...getPanelInsetStyle(theme, {
+                emphasis: "strong",
+                radius: theme.borderRadius.md,
+                padding: 0,
+              }),
               borderRadius: "4px",
               margin: "4px",
             }}
@@ -385,15 +395,18 @@ export function RightPanel({
               }
               className="w-full py-2 rounded text-sm font-bold transition-colors disabled:opacity-30"
               style={{
-                background: `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`,
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  accentColor: theme.colors.accent.primary,
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.accent.primary,
-                border: `1px solid ${theme.colors.border.decorative}`,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative}e6 0%, ${theme.colors.border.decorative}b3 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 249, 239, 0.07) 0%, ${theme.colors.accent.primary}20 20%, rgba(51, 39, 28, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 250, 241, 0.06) 0%, ${theme.colors.accent.primary}18 20%, rgba(39, 33, 27, 0.98) 100%)`;
               }}
             >
               Deposit Worn Items

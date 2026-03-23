@@ -70,16 +70,16 @@ export function QuestStartPanel({
         width: 10px;
       }
       .quest-parchment-scroll::-webkit-scrollbar-track {
-        background: rgba(139, 115, 85, 0.3);
+        background: rgba(95, 74, 50, 0.26);
         border-radius: 4px;
       }
       .quest-parchment-scroll::-webkit-scrollbar-thumb {
-        background: linear-gradient(to bottom, #8b7355, #6b5545);
+        background: linear-gradient(to bottom, #8a6943, #644b34);
         border-radius: 4px;
-        border: 1px solid rgba(74, 63, 47, 0.3);
+        border: 1px solid rgba(74, 58, 41, 0.28);
       }
       .quest-parchment-scroll::-webkit-scrollbar-thumb:hover {
-        background: linear-gradient(to bottom, #9b8365, #7b6555);
+        background: linear-gradient(to bottom, #9a7952, #73553b);
       }
     `;
     document.head.appendChild(style);
@@ -98,7 +98,7 @@ export function QuestStartPanel({
     <div
       className="fixed inset-0 flex items-center justify-center pointer-events-auto"
       style={{
-        backgroundColor: "rgba(0, 0, 0, 0.85)",
+        backgroundColor: "rgba(11, 9, 7, 0.82)",
         zIndex: UI.Z_INDEX.MODAL,
       }}
       onMouseDown={(e) => e.stopPropagation()}
@@ -114,8 +114,7 @@ export function QuestStartPanel({
           padding: "1.5rem 2rem",
           ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
           borderRadius: theme.borderRadius.xl,
-          boxShadow:
-            "0 0 40px rgba(201, 162, 39, 0.35), inset 0 0 20px rgba(139, 115, 85, 0.18)",
+          boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 248, 236, 0.08), inset 0 0 28px rgba(121, 86, 47, 0.12)`,
           overflowY: "auto",
         }}
         onClick={(e) => e.stopPropagation()}
@@ -128,8 +127,7 @@ export function QuestStartPanel({
           style={{
             width: "60%",
             height: "4px",
-            background:
-              "linear-gradient(to right, transparent, #c9a227, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.accent.gold}, transparent)`,
           }}
         />
 
@@ -140,7 +138,8 @@ export function QuestStartPanel({
             style={{
               color: theme.colors.text.accent,
               textShadow: "0 1px 2px rgba(0, 0, 0, 0.35)",
-              fontFamily: "serif",
+              fontFamily: theme.typography.fontFamily.heading,
+              letterSpacing: "0.02em",
             }}
           >
             New Quest
@@ -176,7 +175,15 @@ export function QuestStartPanel({
         <div className="mb-4">
           <p
             className="m-0 text-sm leading-relaxed"
-            style={{ color: "#4a3f2f", fontFamily: "serif" }}
+            style={{
+              color: theme.colors.text.secondary,
+              fontFamily: theme.typography.fontFamily.body,
+              ...getPanelInsetStyle(theme, {
+                emphasis: "normal",
+                radius: theme.borderRadius.md,
+                padding: "0.85rem 1rem",
+              }),
+            }}
           >
             {description}
           </p>
@@ -188,8 +195,7 @@ export function QuestStartPanel({
           style={{
             width: "80%",
             height: "2px",
-            background:
-              "linear-gradient(to right, transparent, #8b7355, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.border.decorative}, transparent)`,
           }}
         />
 
@@ -198,13 +204,26 @@ export function QuestStartPanel({
           <div className="mb-4">
             <h4
               className="m-0 mb-2 text-sm font-bold"
-              style={{ color: "#4a3f2f" }}
+              style={{ color: theme.colors.text.accent }}
             >
               Requirements:
             </h4>
-            <div className="space-y-1 pl-2">
+            <div
+              className="space-y-1 pl-2"
+              style={{
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "normal",
+                  radius: theme.borderRadius.md,
+                  padding: "0.75rem 0.9rem",
+                }),
+              }}
+            >
               {requirements.quests.map((quest, i) => (
-                <div key={i} className="text-sm" style={{ color: "#5a4f3f" }}>
+                <div
+                  key={i}
+                  className="text-sm"
+                  style={{ color: theme.colors.text.secondary }}
+                >
                   • Complete: {quest}
                 </div>
               ))}
@@ -212,13 +231,17 @@ export function QuestStartPanel({
                 <div
                   key={skill}
                   className="text-sm"
-                  style={{ color: "#5a4f3f" }}
+                  style={{ color: theme.colors.text.secondary }}
                 >
                   • {formatSkillName(skill)} Level {level}
                 </div>
               ))}
               {requirements.items.map((item, i) => (
-                <div key={i} className="text-sm" style={{ color: "#5a4f3f" }}>
+                <div
+                  key={i}
+                  className="text-sm"
+                  style={{ color: theme.colors.text.secondary }}
+                >
                   • Bring: {item}
                 </div>
               ))}
@@ -230,24 +253,42 @@ export function QuestStartPanel({
         <div className="mb-4">
           <h4
             className="m-0 mb-2 text-sm font-bold"
-            style={{ color: "#4a3f2f" }}
+            style={{ color: theme.colors.text.accent }}
           >
             Rewards:
           </h4>
-          <div className="space-y-1 pl-2">
+          <div
+            className="space-y-1 pl-2"
+            style={{
+              ...getPanelInsetStyle(theme, {
+                emphasis: "normal",
+                radius: theme.borderRadius.md,
+                padding: "0.75rem 0.9rem",
+              }),
+            }}
+          >
             {rewards.questPoints > 0 && (
-              <div className="text-sm font-medium" style={{ color: "#3a6f3a" }}>
+              <div
+                className="text-sm font-medium"
+                style={{ color: theme.colors.state.success }}
+              >
                 • {rewards.questPoints} Quest Point
                 {rewards.questPoints !== 1 ? "s" : ""}
               </div>
             )}
             {rewards.items.length > 0 && (
-              <div className="text-sm" style={{ color: "#5a4f3f" }}>
+              <div
+                className="text-sm"
+                style={{ color: theme.colors.text.secondary }}
+              >
                 • Item rewards
               </div>
             )}
             {Object.keys(rewards.xp).length > 0 && (
-              <div className="text-sm" style={{ color: "#5a4f3f" }}>
+              <div
+                className="text-sm"
+                style={{ color: theme.colors.text.secondary }}
+              >
                 • XP rewards
               </div>
             )}
@@ -260,8 +301,7 @@ export function QuestStartPanel({
           style={{
             width: "80%",
             height: "2px",
-            background:
-              "linear-gradient(to right, transparent, #8b7355, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.border.decorative}, transparent)`,
           }}
         />
 
@@ -276,16 +316,14 @@ export function QuestStartPanel({
                 accentColor: theme.colors.state.success,
                 radius: theme.borderRadius.md,
               }),
-              color: "#ffffff",
-              textShadow: "1px 1px 2px rgba(0, 0, 0, 0.5)",
+              color: theme.colors.text.primary,
+              textShadow: "0 1px 2px rgba(0, 0, 0, 0.35)",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(to bottom, #5a9f5a 0%, #4a8f4a 100%)";
+              e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.08) 0%, ${theme.colors.state.success}26 22%, rgba(20, 42, 24, 0.98) 100%)`;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(to bottom, #4a8f4a 0%, #3a7f3a 100%)";
+              e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.06) 0%, ${theme.colors.state.success}1c 20%, rgba(22, 36, 25, 0.98) 100%)`;
             }}
           >
             Accept Quest
@@ -299,7 +337,7 @@ export function QuestStartPanel({
               height: "auto",
               padding: "0.5rem 1.5rem",
               fontSize: theme.typography.fontSize.base,
-              textShadow: "1px 1px 2px rgba(0, 0, 0, 0.5)",
+              textShadow: "0 1px 2px rgba(0, 0, 0, 0.35)",
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.backgroundColor = String(
@@ -326,8 +364,7 @@ export function QuestStartPanel({
           style={{
             width: "60%",
             height: "4px",
-            background:
-              "linear-gradient(to right, transparent, #c9a227, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.accent.gold}, transparent)`,
           }}
         />
       </div>

@@ -521,7 +521,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
                 : "rgba(10, 10, 12, 0.5)", // Dark border for embossed filled slots
         borderWidth: isSourceItem ? "2px" : "1px",
         background: isOver
-          ? "rgba(242, 208, 138, 0.15)" // Gold tint when dragging over
+          ? "rgba(183, 140, 76, 0.14)" // Bronze tint when dragging over
           : isEmpty
             ? "var(--color-slot-empty)" // Use theme slot.empty color
             : isItemNoted
@@ -530,12 +530,12 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
         boxShadow: isSourceItem
           ? "0 0 8px rgba(255, 255, 255, 0.6)" // OSRS: White glow on source item
           : isOver
-            ? "inset 0 0 8px rgba(242, 208, 138, 0.3)"
+            ? "inset 0 0 8px rgba(183, 140, 76, 0.24), 0 0 0 1px rgba(183, 140, 76, 0.12)"
             : isEmpty
-              ? "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(40, 40, 45, 0.15)" // Strong emboss for empty
+              ? "inset 2px 2px 4px rgba(0, 0, 0, 0.42), inset -1px -1px 2px rgba(88, 74, 56, 0.12)" // Strong emboss for empty
               : isItemNoted
                 ? "inset 1px 1px 3px rgba(0, 0, 0, 0.25), inset -1px -1px 1px rgba(255, 255, 255, 0.4)" // Subtle paper emboss
-                : "inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 2px rgba(50, 50, 55, 0.12)", // Emboss for filled
+                : "inset 2px 2px 4px rgba(0, 0, 0, 0.34), inset -1px -1px 2px rgba(98, 82, 60, 0.1)", // Emboss for filled
         // OSRS-style cursor changes during targeting mode
         cursor: isTargetingActive
           ? isSourceItem
@@ -616,8 +616,8 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
           className="absolute inset-0 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none"
           style={{
             background:
-              "radial-gradient(ellipse at center, rgba(242, 208, 138, 0.15) 0%, transparent 70%)",
-            boxShadow: "inset 0 0 4px rgba(242, 208, 138, 0.2)",
+              "radial-gradient(ellipse at center, rgba(183, 140, 76, 0.14) 0%, transparent 70%)",
+            boxShadow: "inset 0 0 4px rgba(183, 140, 76, 0.16)",
           }}
         />
       )}
@@ -1376,7 +1376,11 @@ export function InventoryPanel({
         <div
           className="px-2 py-1 text-center"
           style={{
-            background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "normal",
+              radius: theme.borderRadius.sm,
+              padding: 0,
+            }),
             borderTop: `1px solid ${theme.colors.border.default}55`,
             borderRadius: `${theme.borderRadius.sm}px`,
           }}
@@ -1404,7 +1408,7 @@ export function InventoryPanel({
                     width: dragSlotSize ?? 40, // Use captured slot size, fallback to 40px
                     height: dragSlotSize ?? 40,
                     borderColor: `${theme.colors.accent.secondary}99`,
-                    background: `linear-gradient(135deg, ${theme.colors.accent.secondary}33 0%, ${theme.colors.accent.secondary}1A 100%)`,
+                    background: `linear-gradient(180deg, rgba(255, 249, 239, 0.07) 0%, ${theme.colors.accent.secondary}20 22%, rgba(49, 39, 29, 0.98) 100%)`,
                     fontSize: dragSlotSize ? `${dragSlotSize * 0.4}px` : "1rem", // Scale icon with slot
                     color: theme.colors.text.accent,
                     boxShadow: theme.shadows.lg,

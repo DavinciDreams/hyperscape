@@ -85,7 +85,7 @@ export function QuestCompletePanel({
     <div
       className="fixed inset-0 flex items-center justify-center pointer-events-auto"
       style={{
-        backgroundColor: "rgba(0, 0, 0, 0.85)",
+        backgroundColor: "rgba(11, 9, 7, 0.82)",
         zIndex: UI.Z_INDEX.MODAL,
       }}
       onClick={onClose}
@@ -101,17 +101,16 @@ export function QuestCompletePanel({
           padding: "2rem 2.5rem",
           ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
           borderRadius: theme.borderRadius.xl,
-          boxShadow:
-            "0 0 40px rgba(201, 162, 39, 0.35), inset 0 0 20px rgba(139, 115, 85, 0.18)",
+          boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 248, 236, 0.08), inset 0 0 28px rgba(121, 86, 47, 0.12)`,
           // Parchment texture effect via gradient
           backgroundImage: `
-            linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%),
+            linear-gradient(180deg, rgba(255, 249, 239, 0.055) 0%, rgba(0, 0, 0, 0.1) 100%),
             repeating-linear-gradient(
               0deg,
               transparent,
               transparent 2px,
-              rgba(255, 255, 255, 0.02) 2px,
-              rgba(255, 255, 255, 0.02) 4px
+              rgba(255, 248, 236, 0.015) 2px,
+              rgba(255, 248, 236, 0.015) 4px
             )
           `,
         }}
@@ -125,8 +124,7 @@ export function QuestCompletePanel({
           style={{
             width: "60%",
             height: "4px",
-            background:
-              "linear-gradient(to right, transparent, #c9a227, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.accent.gold}, transparent)`,
           }}
         />
 
@@ -136,7 +134,8 @@ export function QuestCompletePanel({
           style={{
             color: theme.colors.text.accent,
             textShadow: "0 1px 2px rgba(0, 0, 0, 0.35)",
-            fontFamily: "serif",
+            fontFamily: theme.typography.fontFamily.heading,
+            letterSpacing: "0.02em",
           }}
         >
           Congratulations!
@@ -146,13 +145,18 @@ export function QuestCompletePanel({
         <p
           className="m-0 mb-6 text-lg"
           style={{
-            color: "#5a4f3f",
-            fontFamily: "serif",
+            color: theme.colors.text.secondary,
+            fontFamily: theme.typography.fontFamily.body,
           }}
         >
           You have completed the
           <br />
-          <strong style={{ color: "#3a2f1f", fontSize: "1.25rem" }}>
+          <strong
+            style={{
+              color: theme.colors.text.primary,
+              fontSize: "1.25rem",
+            }}
+          >
             {questName}
           </strong>
           <br />
@@ -165,8 +169,7 @@ export function QuestCompletePanel({
           style={{
             width: "60%",
             height: "2px",
-            background:
-              "linear-gradient(to right, transparent, #8b7355, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.border.decorative}, transparent)`,
           }}
         />
 
@@ -241,8 +244,7 @@ export function QuestCompletePanel({
           style={{
             width: "60%",
             height: "4px",
-            background:
-              "linear-gradient(to right, transparent, #c9a227, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.accent.gold}, transparent)`,
           }}
         />
       </div>
