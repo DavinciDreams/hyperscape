@@ -919,11 +919,12 @@ function MinimapInner({
   }, [width, height, zoom]);
 
   // Minimap zoom state (orthographic half-extent in world units)
-  const [extent, setExtent] = useState<number>(sizeBasedExtent);
-  const extentRef = useRef<number>(extent); // Ref for synchronous access in render loop
+  const [targetExtent, setTargetExtent] = useState<number>(sizeBasedExtent);
+  const targetExtentRef = useRef<number>(targetExtent);
+  const extentRef = useRef<number>(targetExtent); // Live displayed extent for render loop
   // Update extent when size changes (reveals more map)
   useEffect(() => {
-    setExtent(sizeBasedExtent);
+    setTargetExtent(sizeBasedExtent);
   }, [sizeBasedExtent]);
 
   // Always rotate with the main camera (RS3-style).
@@ -947,10 +948,10 @@ function MinimapInner({
 
     // Create orthographic camera for overhead view
     const camera = new THREE.OrthographicCamera(
-      -extent,
-      extent,
-      extent,
-      -extent,
+      -targetExtentRef.current,
+      targetExtentRef.current,
+      targetExtentRef.current,
+      -targetExtentRef.current,
       0.1,
       2000,
     );
@@ -1015,8 +1016,8 @@ function MinimapInner({
 
   // Keep extent ref in sync with state for render loop access
   useEffect(() => {
-    extentRef.current = extent;
-  }, [extent]);
+    targetExtentRef.current = targetExtent;
+  }, [targetExtent]);
 
   useMinimapEntityPips({
     world,
@@ -1127,11 +1128,24 @@ function MinimapInner({
       // --- Camera Frustum Update (for zoom) ---
       if (cam) {
         const currentExtent = extentRef.current;
-        if (cam.right !== currentExtent) {
-          cam.left = -currentExtent;
-          cam.right = currentExtent;
-          cam.top = currentExtent;
-          cam.bottom = -currentExtent;
+        const desiredExtent = targetExtentRef.current;
+        if (Math.abs(desiredExtent - currentExtent) > 0.01) {
+          const zoomDelta = desiredExtent - currentExtent;
+          const zoomStep =
+            Math.sign(zoomDelta) *
+            Math.min(60, Math.max(2, Math.abs(zoomDelta) * 0.24));
+          const nextExtent =
+            Math.abs(zoomDelta) <= Math.abs(zoomStep)
+              ? desiredExtent
+              : currentExtent + zoomStep;
+          extentRef.current = nextExtent;
+        }
+        const liveExtent = extentRef.current;
+        if (cam.right !== liveExtent) {
+          cam.left = -liveExtent;
+          cam.right = liveExtent;
+          cam.top = liveExtent;
+          cam.bottom = -liveExtent;
           cam.updateProjectionMatrix();
         }
       }
@@ -1555,7 +1569,7 @@ function MinimapInner({
         Math.min(5, Math.round(Math.abs(e.deltaY) / 100)),
       );
       // Use functional update to always have the latest extent value
-      setExtent((prev) =>
+      setTargetExtent((prev) =>
         THREE.MathUtils.clamp(
           prev + sign * steps * STEP_EXTENT,
           MIN_EXTENT,

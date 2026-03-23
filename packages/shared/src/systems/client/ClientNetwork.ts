@@ -2280,10 +2280,16 @@ export class ClientNetwork extends SystemBase {
     maxSlots: number;
   }) => {
     // Debug log removed — fires per food eat / item change during combat
+    const snapshot = {
+      ...data,
+      items: Array.isArray(data.items)
+        ? data.items.map((item) => ({ ...item }))
+        : [],
+    };
     // Cache latest snapshot for late-mounting UI
-    this.lastInventoryByPlayerId[data.playerId] = data;
+    this.lastInventoryByPlayerId[data.playerId] = snapshot;
     // Re-emit with typed event so UI updates without waiting for local add
-    this.world.emit(EventType.INVENTORY_UPDATED, data);
+    this.world.emit(EventType.INVENTORY_UPDATED, snapshot);
   };
 
   onCoinsUpdated = (data: { playerId: string; coins: number }) => {

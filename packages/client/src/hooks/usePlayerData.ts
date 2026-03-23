@@ -46,6 +46,13 @@ function areInventoryItemsEqual(
   return true;
 }
 
+function cloneInventoryItems(
+  items: InventorySlotViewItem[] | undefined | null,
+): InventorySlotViewItem[] {
+  if (!items || items.length === 0) return [];
+  return items.map((item) => ({ ...item }));
+}
+
 function areEquipmentItemsEqual(
   left: PlayerEquipmentItems | null,
   right: PlayerEquipmentItems | null,
@@ -221,7 +228,7 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       setInventory((prev) =>
         areInventoryItemsEqual(prev, invData.items || [])
           ? prev
-          : invData.items || [],
+          : cloneInventoryItems(invData.items),
       );
       if (typeof invData.coins === "number") {
         setCoins((prev) => (prev === invData.coins ? prev : invData.coins));
@@ -276,6 +283,26 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
             : (newData as PlayerStats);
           return arePlayerStatsEqual(prev, merged) ? prev : merged;
         });
+        return;
+      }
+
+      if (data.component === "inventory" && isObject(data.data)) {
+        const inventoryPayload = data.data as {
+          items?: InventorySlotViewItem[];
+          coins?: number;
+        };
+        if (Array.isArray(inventoryPayload.items)) {
+          setInventory((prev) =>
+            areInventoryItemsEqual(prev, inventoryPayload.items ?? [])
+              ? prev
+              : cloneInventoryItems(inventoryPayload.items),
+          );
+        }
+        if (typeof inventoryPayload.coins === "number") {
+          setCoins((prev) =>
+            prev === inventoryPayload.coins ? prev : inventoryPayload.coins,
+          );
+        }
         return;
       }
 
@@ -407,7 +434,9 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       if (cachedInv && Array.isArray(cachedInv.items)) {
         const cachedItems = cachedInv.items as InventorySlotViewItem[];
         setInventory((prev) =>
-          areInventoryItemsEqual(prev, cachedItems) ? prev : cachedItems,
+          areInventoryItemsEqual(prev, cachedItems)
+            ? prev
+            : cloneInventoryItems(cachedItems),
         );
         setCoins((prev) =>
           prev === (cachedInv.coins || 0) ? prev : cachedInv.coins || 0,
