@@ -41,6 +41,7 @@ import {
   clamp,
   max,
   floor,
+  normalize,
   Fn,
   output,
   type ShaderNode,
@@ -48,7 +49,7 @@ import {
 import { getRoadInfluenceTextureState } from "./RoadInfluenceMask";
 import { getLamppostLightTextureState } from "./LamppostLightMask";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
-import { SUN_LIGHT } from "./LightingConfig";
+import { SUN_LIGHT, SUN_SHADE } from "./LightingConfig";
 
 export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
@@ -63,6 +64,18 @@ export const TERRAIN_SHADER_CONSTANTS = {
   ROCK_DISTORT_STRENGTH: 0.5,
   HEIGHT_DISTORT_STRENGTH: 8.0,
   SATURATION_BOOST: 1.35,
+};
+
+/**
+ * Half-lambert anime shade: wraps N·L to [0,1] for soft fill, then
+ * tints the shadow side with a cool blue-teal hue shift (Genshin-style).
+ * Applied to albedo before PBR so the colour shift survives lighting.
+ */
+export const TERRAIN_SHADE = {
+  TINT_COLOR: SUN_SHADE.TINT_COLOR,
+  STRENGTH: 0.7,
+  FRESNEL_POWER: 3.0,
+  FRESNEL_INTENSITY: 0.2,
 };
 
 const TERRAIN_TEX_TILE = 0.3;
@@ -1055,6 +1068,37 @@ export function createTerrainMaterial(): THREE.Material & {
   const baseWithRoads = variedColor;
 
   // ============================================================================
+  // HALF-LAMBERT ANIME SHADE (cool shadow tint — Genshin-style)
+  // Wraps N·L to [0,1] for soft wrapped lighting, then tints shadow side
+  // with cool blue-teal hue. Applied to albedo before PBR so the hue shift
+  // survives through subsequent lighting calculations.
+  // ============================================================================
+  const sunDir = normalize(vec3(sunDirectionUniform));
+  const NdotL = dot(worldNormal, sunDir);
+  const halfLambert = add(mul(NdotL, float(0.5)), float(0.5));
+  const shadeFactor = sub(float(1.0), halfLambert);
+  const coolTint = vec3(...TERRAIN_SHADE.TINT_COLOR);
+  const tintedBase = mul(baseWithRoads, coolTint);
+  const shadedBase = mix(
+    baseWithRoads,
+    tintedBase,
+    mul(shadeFactor, float(TERRAIN_SHADE.STRENGTH)),
+  );
+
+  // Fresnel rim highlight at grazing angles (subtle painterly edge glow)
+  const viewDir = normalize(sub(worldPos, cameraPosition));
+  const rim = clamp(
+    add(float(1.0), dot(viewDir, worldNormal)),
+    float(0.0),
+    float(1.0),
+  );
+  const fresnelRim = mul(
+    pow(rim, float(TERRAIN_SHADE.FRESNEL_POWER)),
+    float(TERRAIN_SHADE.FRESNEL_INTENSITY),
+  );
+  const animeBase = add(shadedBase, vec3(fresnelRim, fresnelRim, fresnelRim));
+
+  // ============================================================================
   // VERTEX LIGHTING (lampposts, torches, etc.)
   // Simple additive point lights with smooth attenuation
   // ============================================================================
@@ -1190,7 +1234,7 @@ export function createTerrainMaterial(): THREE.Material & {
 
   // Apply vertex lighting additively (multiply base by (1 + lightAccum))
   // This brightens terrain near lights without washing out colors
-  const litTerrain = mul(baseWithRoads, add(vec3(1, 1, 1), lightAccum));
+  const litTerrain = mul(animeBase, add(vec3(1, 1, 1), lightAccum));
 
   // === DISTANCE FOG (smoothstep with squared distances — avoids per-fragment sqrt) ===
   const baseFogFactor = smoothstep(
@@ -1202,9 +1246,10 @@ export function createTerrainMaterial(): THREE.Material & {
   const fogColor = fogTexNode.rgb;
 
   // === CREATE MATERIAL ===
-  // No custom sun shade here — terrain is a standard PBR material,
-  // so it gets its night blue tint from the scene lights (moon, hemisphere,
-  // ambient) which are already blue-shifted at night in LightingConfig.
+  // Half-lambert anime shade (cool shadow tint + fresnel rim) is baked into
+  // the albedo above.  PBR still applies Lambertian diffuse on top, which
+  // darkens the shadow side further — the hue shift in the albedo is what
+  // gives the Genshin-style warm-lit / cool-shadow look.
   const material = new MeshStandardNodeMaterial();
   material.colorNode = litTerrain;
   material.roughness = 1.0;
