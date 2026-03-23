@@ -58,25 +58,39 @@ export function useMinimapWorldCaches({
   townsCacheRef,
 }: UseMinimapWorldCachesOptions): void {
   useEffect(() => {
-    if (!roadsCacheRef.current) {
+    const hydrateRoads = () => {
       const roadSystem = world.getSystem("roads") as {
         getRoads?: () => MinimapRoad[];
       } | null;
       const roads = roadSystem?.getRoads?.();
-      if (roads?.length) {
+      if (roads) {
         roadsCacheRef.current = roads;
         roadsWithAABBRef.current = buildRoadsWithAABB(roads);
       }
-    }
+    };
 
-    if (!townsCacheRef.current) {
+    const hydrateTowns = () => {
       const townSystem = world.getSystem("towns") as {
         getTowns?: () => MinimapTown[];
       } | null;
       const towns = townSystem?.getTowns?.();
-      if (towns?.length) {
+      if (towns) {
         townsCacheRef.current = towns;
       }
-    }
+    };
+
+    hydrateRoads();
+    hydrateTowns();
+
+    const refreshCaches = () => {
+      hydrateRoads();
+      hydrateTowns();
+    };
+
+    world.on("roads:generated", refreshCaches);
+
+    return () => {
+      world.off("roads:generated", refreshCaches);
+    };
   }, [roadsCacheRef, roadsWithAABBRef, townsCacheRef, world]);
 }

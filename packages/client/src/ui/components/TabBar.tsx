@@ -236,6 +236,37 @@ export const TabBar = memo(function TabBar({
       ? Math.min(Math.floor(relativePosition.x / 100), tabs.length)
       : -1;
 
+  const dropIndicatorLeft = React.useMemo(() => {
+    if (!(isOver && canDrop) || !relativePosition) {
+      return -1;
+    }
+
+    const container = tabsContainerRef.current;
+    if (!container) {
+      return dropIndicatorIndex >= 0 ? dropIndicatorIndex * 40 : -1;
+    }
+
+    const tabElements = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-tab]"),
+    );
+    const relativeX = relativePosition.x + container.scrollLeft;
+    if (tabElements.length === 0) {
+      return 0;
+    }
+
+    let accumulatedWidth = 0;
+    for (let i = 0; i < tabElements.length; i += 1) {
+      const tabWidth = tabElements[i].getBoundingClientRect().width;
+      const midpoint = accumulatedWidth + tabWidth / 2;
+      if (relativeX < midpoint) {
+        return accumulatedWidth - container.scrollLeft;
+      }
+      accumulatedWidth += tabWidth;
+    }
+
+    return accumulatedWidth - container.scrollLeft;
+  }, [canDrop, dropIndicatorIndex, isOver, relativePosition, tabs.length]);
+
   const containerStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -371,7 +402,7 @@ export const TabBar = memo(function TabBar({
         <div
           style={{
             ...dropIndicatorStyle,
-            left: dropIndicatorIndex * 100, // Approximate tab width
+            left: Math.max(0, dropIndicatorLeft),
           }}
         />
       )}
