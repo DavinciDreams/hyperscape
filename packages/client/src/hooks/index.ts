@@ -50,6 +50,7 @@ export {
   PlayerDataProvider,
   usePlayerData,
   usePlayerDataContext,
+  usePlayerStatsContext,
   usePlayerDataState,
   type PlayerDataState,
 } from "./usePlayerData";

@@ -175,6 +175,7 @@ interface PlayerDataProviderProps {
 }
 
 const PlayerDataContext = createContext<PlayerDataState | null>(null);
+const PlayerStatsContext = createContext<PlayerStats | null>(null);
 
 /**
  * usePlayerData - Subscribe to player data events
@@ -567,7 +568,15 @@ export function PlayerDataProvider({
   children,
 }: PlayerDataProviderProps): React.ReactElement {
   const value = usePlayerDataState(world);
-  return React.createElement(PlayerDataContext.Provider, { value }, children);
+  return React.createElement(
+    PlayerDataContext.Provider,
+    { value },
+    React.createElement(
+      PlayerStatsContext.Provider,
+      { value: value.playerStats },
+      children,
+    ),
+  );
 }
 
 export function usePlayerDataContext(): PlayerDataState {
@@ -580,6 +589,10 @@ export function usePlayerDataContext(): PlayerDataState {
   }
 
   return context;
+}
+
+export function usePlayerStatsContext(): PlayerStats | null {
+  return useContext(PlayerStatsContext);
 }
 
 export function usePlayerData(world: ClientWorld | null): PlayerDataState {

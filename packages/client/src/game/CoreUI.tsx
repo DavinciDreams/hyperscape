@@ -10,7 +10,7 @@ import {
   propToLabel,
 } from "@hyperscape/shared";
 import type { ClientWorld } from "../types";
-import { PlayerDataProvider, usePlayerDataContext } from "../hooks";
+import { PlayerDataProvider, usePlayerStatsContext } from "../hooks";
 import { ActionProgressBar } from "./hud/ActionProgressBar";
 import { ChatProvider } from "./chat/ChatContext";
 import { EntityContextMenu } from "./hud/EntityContextMenu";
@@ -81,7 +81,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     respawnTime: number;
   } | null>(null);
 
-  const { playerStats } = usePlayerDataContext();
+  const playerStats = usePlayerStatsContext();
 
   useEffect(() => {
     // Get the target entity ID for spectators
