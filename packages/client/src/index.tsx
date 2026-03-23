@@ -172,7 +172,14 @@ if (!globalThis.setImmediate) {
   ) => setTimeout(callback, 0, ...args)) as unknown as typeof setImmediate;
 }
 
-devValidateManifest();
+try {
+  devValidateManifest();
+} catch (error) {
+  console.warn(
+    "[index] Development manifest validation failed:",
+    error instanceof Error ? error.message : String(error),
+  );
+}
 
 // Parse URL parameters for embedded configuration
 const urlParams = new URLSearchParams(window.location.search);
@@ -309,7 +316,10 @@ if (isEmbedded) {
       allowWildcardFallback: allowWildcardEmbedFallback,
     });
     if (readyTargetOrigin) {
-      window.parent.postMessage({ type: "HYPERSCAPE_READY" }, readyTargetOrigin);
+      window.parent.postMessage(
+        { type: "HYPERSCAPE_READY" },
+        readyTargetOrigin,
+      );
     } else {
       console.warn(
         "[Hyperscape] Could not determine a trusted origin for HYPERSCAPE_READY; skipping parent bootstrap message",

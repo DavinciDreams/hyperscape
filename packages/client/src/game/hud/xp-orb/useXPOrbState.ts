@@ -245,6 +245,8 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
       if (!Number.isFinite(nextDelay)) return;
       activeSkillsTimeoutRef.current = setTimeout(
         () => {
+          let needsReschedule = false;
+          let nextSkillsSnapshot: ActiveSkill[] | null = null;
           setActiveSkills((prev) => {
             if (prev.length === 0) return prev;
 
@@ -263,7 +265,11 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
               if (elapsed >= removeThreshold) hasRemovals = true;
             }
 
-            if (!hasChanges && !hasRemovals) return prev;
+            if (!hasChanges && !hasRemovals) {
+              needsReschedule = true;
+              nextSkillsSnapshot = prev;
+              return prev;
+            }
 
             const result: ActiveSkill[] = [];
             for (let i = 0; i < prev.length; i++) {
@@ -287,8 +293,12 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
 
             return result;
           });
+
+          if (needsReschedule && nextSkillsSnapshot) {
+            scheduleNextUpdate(nextSkillsSnapshot);
+          }
         },
-        Math.max(16, Math.min(nextDelay, GAME_TICK_MS)),
+        Math.max(16, nextDelay),
       );
     };
 

@@ -59,7 +59,7 @@ export function handlePrayerToggle(
   // Rate limiting using shared infrastructure
   const rateLimiter = getPrayerRateLimiter();
   if (!rateLimiter.check(playerId)) {
-    // Silently drop rate-limited requests (no error spam to client)
+    sendPrayerError(socket, "You are toggling prayers too quickly.");
     return;
   }
 
@@ -145,6 +145,7 @@ export function handleAltarPray(
   // Rate limiting
   const rateLimiter = getPrayerRateLimiter();
   if (!rateLimiter.check(playerId)) {
+    sendPrayerError(socket, "You are using the altar too quickly.");
     return;
   }
 
@@ -215,6 +216,7 @@ export function handlePrayerDeactivateAll(
   // Rate limiting
   const rateLimiter = getPrayerRateLimiter();
   if (!rateLimiter.check(playerId)) {
+    sendPrayerError(socket, "You are changing prayers too quickly.");
     return;
   }
 

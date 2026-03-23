@@ -81,13 +81,14 @@ interface MinimapDrawContext {
  * Stores (x, y) pairs for all visible road points in a single contiguous block.
  * Grows by doubling when capacity is exceeded; never shrinks.
  */
-let _roadPixelBuf = new Float32Array(4096 * 2);
-
-function ensureRoadPixelBufCapacity(needed: number): void {
-  if (_roadPixelBuf.length >= needed * 2) return;
-  let n = _roadPixelBuf.length;
+function ensureRoadPixelBufCapacity(
+  roadPixelBufRef: React.MutableRefObject<Float32Array>,
+  needed: number,
+): void {
+  if (roadPixelBufRef.current.length >= needed * 2) return;
+  let n = roadPixelBufRef.current.length;
   while (n < needed * 2) n *= 2;
-  _roadPixelBuf = new Float32Array(n);
+  roadPixelBufRef.current = new Float32Array(n);
 }
 
 /** Per-road projected data — populated once per frame, two-pass rendered */
@@ -97,9 +98,6 @@ type ProjectedRoad = {
   fill: number;
   outline: number;
 };
-/** Module-level reusable array — cleared with .length = 0 each draw call (zero allocation) */
-const _projectedRoads: ProjectedRoad[] = [];
-
 /**
  * Project a world XZ point to canvas pixel coordinates using the camera's
  * projection-view matrix — the same transform used for entity pips.
@@ -137,6 +135,8 @@ function drawRoadsAndBuildingsOverlay(
   ctx: CanvasRenderingContext2D,
   roads: MinimapRoadWithAABB[] | null,
   towns: MinimapTown[] | null,
+  roadPixelBufRef: React.MutableRefObject<Float32Array>,
+  projectedRoadsRef: React.MutableRefObject<ProjectedRoad[]>,
   projectionViewMatrix: THREE.Matrix4,
   scratchVec: THREE.Vector3,
   camX: number,
@@ -168,11 +168,13 @@ function drawRoadsAndBuildingsOverlay(
         continue;
       totalVisiblePts += road.path.length;
     }
-    ensureRoadPixelBufCapacity(totalVisiblePts);
+    ensureRoadPixelBufCapacity(roadPixelBufRef, totalVisiblePts);
+    const roadPixelBuf = roadPixelBufRef.current;
+    const projectedRoads = projectedRoadsRef.current;
 
     // Pass 1 (projection) — write XY pairs into _roadPixelBuf, store subarray
     // views in _projectedRoads.  Zero Float32Array allocations per frame.
-    _projectedRoads.length = 0;
+    projectedRoads.length = 0;
     let _bufOffset = 0;
 
     for (const road of roads) {
@@ -202,25 +204,25 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
-        _roadPixelBuf[_bufOffset++] = scratchVec.x;
-        _roadPixelBuf[_bufOffset++] = scratchVec.y;
+        roadPixelBuf[_bufOffset++] = scratchVec.x;
+        roadPixelBuf[_bufOffset++] = scratchVec.y;
       }
-      _projectedRoads.push({
-        pts: _roadPixelBuf.subarray(ptsBase, _bufOffset),
+      projectedRoads.push({
+        pts: roadPixelBuf.subarray(ptsBase, _bufOffset),
         len: road.path.length,
         fill: scaledFill,
         outline: scaledOutline,
       });
     }
 
-    if (_projectedRoads.length > 0) {
+    if (projectedRoads.length > 0) {
       ctx.save();
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
 
       // Pass 2 — outlines only (all roads)
       ctx.strokeStyle = ROAD_OUTLINE_COLOR;
-      for (const r of _projectedRoads) {
+      for (const r of projectedRoads) {
         ctx.lineWidth = r.outline;
         ctx.beginPath();
         ctx.moveTo(r.pts[0], r.pts[1]);
@@ -231,7 +233,7 @@ function drawRoadsAndBuildingsOverlay(
 
       // Pass 3 — fills only (all roads)
       ctx.strokeStyle = ROAD_FILL_COLOR;
-      for (const r of _projectedRoads) {
+      for (const r of projectedRoads) {
         ctx.lineWidth = r.fill;
         ctx.beginPath();
         ctx.moveTo(r.pts[0], r.pts[1]);
@@ -844,6 +846,8 @@ function MinimapInner({
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const entityPipsRefForRender = useRef<EntityPip[]>([]);
   const entityCacheRef = useRef<Map<string, EntityPip>>(new Map());
+  const roadPixelBufRef = useRef(new Float32Array(4096 * 2));
+  const projectedRoadsRef = useRef<ProjectedRoad[]>([]);
   // Per-instance render state — isolated from other Minimap instances
   const renderStateRef = useRef<MinimapRenderState>(createRenderState());
 
@@ -1289,6 +1293,8 @@ function MinimapInner({
             ctx,
             roadsWithAABBRef.current,
             townsCacheRef.current,
+            roadPixelBufRef,
+            projectedRoadsRef,
             _cachedProjectionViewMatrix,
             _tempProjectVec,
             cam.position.x,

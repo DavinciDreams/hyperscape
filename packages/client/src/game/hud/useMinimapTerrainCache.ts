@@ -73,7 +73,24 @@ const DEFAULT_BIOME_COLOR: CachedBiomeColor = {
   g: 126,
   b: 86,
 };
+const BIOME_COLOR_CACHE_LIMIT = 128;
 const biomeColorCache = new Map<string, CachedBiomeColor | null>();
+
+function setBiomeColorCacheEntry(
+  biomeId: string,
+  color: CachedBiomeColor | null,
+): void {
+  if (biomeColorCache.has(biomeId)) {
+    biomeColorCache.delete(biomeId);
+  }
+  biomeColorCache.set(biomeId, color);
+  if (biomeColorCache.size > BIOME_COLOR_CACHE_LIMIT) {
+    const oldestKey = biomeColorCache.keys().next().value;
+    if (oldestKey) {
+      biomeColorCache.delete(oldestKey);
+    }
+  }
+}
 
 export interface MinimapTerrainCacheRefs {
   terrainOffscreenRef: MutableRefObject<OffscreenCanvas | null>;
@@ -181,7 +198,7 @@ function getBiomeBaseColor(
     biomeColor = DEFAULT_BIOME_COLOR;
   }
 
-  biomeColorCache.set(biomeId, biomeColor);
+  setBiomeColorCacheEntry(biomeId, biomeColor);
   return biomeColor;
 }
 
@@ -310,6 +327,7 @@ export function useMinimapTerrainCache(
   const terrainGenVersionRef = useRef(0);
   const terrainIsGeneratingRef = useRef(false);
   const pendingTerrainRequestRef = useRef<EnsureTerrainCacheArgs | null>(null);
+  const isMountedRef = useRef(true);
 
   const invalidateTerrainCache = useCallback(() => {
     terrainOffscreenRef.current = null;
@@ -384,8 +402,12 @@ export function useMinimapTerrainCache(
         upX,
         upZ,
         viewportPixels,
-        () => terrainGenVersionRef.current !== version,
+        () => !isMountedRef.current || terrainGenVersionRef.current !== version,
       ).then((offscreen) => {
+        if (!isMountedRef.current) {
+          terrainIsGeneratingRef.current = false;
+          return;
+        }
         const wasCancelled = terrainGenVersionRef.current !== version;
         terrainIsGeneratingRef.current = false;
         if (!wasCancelled && offscreen) {
@@ -420,7 +442,9 @@ export function useMinimapTerrainCache(
   );
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       clearTerrainCache();
     };
   }, [clearTerrainCache]);

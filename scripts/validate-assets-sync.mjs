@@ -78,7 +78,15 @@ function visitJson(value, location) {
 
 function resolveAssetPath(assetUrl) {
   const relativePath = assetUrl.replace("asset://", "");
-  return path.join(assetsDir, relativePath);
+  const resolvedPath = path.resolve(path.join(assetsDir, relativePath));
+  const resolvedAssetsDir = path.resolve(assetsDir);
+  if (
+    resolvedPath !== resolvedAssetsDir &&
+    !resolvedPath.startsWith(`${resolvedAssetsDir}${path.sep}`)
+  ) {
+    throw new Error(`Asset path escapes assets directory: ${relativePath}`);
+  }
+  return resolvedPath;
 }
 
 function validateBuildingsManifest() {
@@ -120,9 +128,15 @@ function scanJsonFiles() {
 
 function validateAssetReferences() {
   for (const reference of assetReferences) {
-    const fullPath = resolveAssetPath(reference.value);
-    if (!existsSync(fullPath) || !statSync(fullPath).isFile()) {
-      missingAssets.push(reference);
+    try {
+      const fullPath = resolveAssetPath(reference.value);
+      if (!existsSync(fullPath) || !statSync(fullPath).isFile()) {
+        missingAssets.push(reference);
+      }
+    } catch (error) {
+      errors.push(
+        `${reference.location} -> ${reference.value}: ${error instanceof Error ? error.message : "unknown error"}`,
+      );
     }
   }
 }

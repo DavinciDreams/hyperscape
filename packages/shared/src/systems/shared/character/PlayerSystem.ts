@@ -954,7 +954,8 @@ export class PlayerSystem extends SystemBase {
   }
 
   private updateCombatLevel(data: PlayerLevelUpEvent): void {
-    const player = this.players.get(data.playerId)!;
+    const player = this.players.get(data.playerId);
+    if (!player) return;
 
     // Recalculate combat level based on current stats
     player.combat.combatLevel = this.calculateCombatLevel(player.skills);
@@ -962,7 +963,8 @@ export class PlayerSystem extends SystemBase {
   }
 
   private emitPlayerUpdate(playerId: string): void {
-    const player = this.players.get(playerId)!;
+    const player = this.players.get(playerId);
+    if (!player) return;
 
     // OPTIMIZATION: Reuse pre-allocated payload object instead of creating new one
     const playerData = this._playerUpdatePayload;
@@ -1311,10 +1313,19 @@ export class PlayerSystem extends SystemBase {
     playerId: string,
     stats: Partial<Player["skills"]>,
   ): Promise<void> {
-    const player = this.players.get(playerId)!;
+    const player = this.players.get(playerId);
+    if (!player) return;
 
     // Update stats
-    Object.assign(player.skills, stats);
+    for (const [skillName, skillValue] of Object.entries(stats)) {
+      if (!skillValue) continue;
+      const key = skillName as keyof Player["skills"];
+      if (!player.skills[key]) continue;
+      player.skills[key] = {
+        ...player.skills[key],
+        ...skillValue,
+      };
+    }
 
     // Recalculate combat level
     player.combat.combatLevel = this.calculateCombatLevel(player.skills);
@@ -1341,10 +1352,14 @@ export class PlayerSystem extends SystemBase {
     playerId: string,
     equipment: Partial<Player["equipment"]>,
   ): Promise<void> {
-    const player = this.players.get(playerId)!;
+    const player = this.players.get(playerId);
+    if (!player) return;
 
     // Update equipment
-    Object.assign(player.equipment, equipment);
+    player.equipment = {
+      ...player.equipment,
+      ...equipment,
+    };
 
     this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_UPDATED, {
       playerId,

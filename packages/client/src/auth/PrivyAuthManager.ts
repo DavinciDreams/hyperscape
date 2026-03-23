@@ -404,7 +404,7 @@ export class PrivyAuthManager {
       const userId = this.getValueFromKnownStorages("privy_user_id");
       const fid = this.getValueFromKnownStorages("farcaster_fid");
 
-      if (token || userId || fid) {
+      if (token || userId) {
         this.updateState({
           privyUserId: userId,
           privyToken: token,

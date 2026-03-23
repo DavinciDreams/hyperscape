@@ -497,6 +497,7 @@ interface CombatPanelProps {
 // This enables instant display when reopening panel (RuneScape pattern)
 const combatStyleCache = new Map<string, string>();
 const autoRetaliateCache = new Map<string, boolean>();
+const VALID_WEAPON_TYPES = new Set<string>(Object.values(WeaponType));
 
 export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
   const theme = useThemeStore((s) => s.theme);
@@ -542,6 +543,8 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     }
     return true; // OSRS default: ON
   });
+  const playerId = world.entities?.player?.id ?? null;
+  const previousPlayerIdRef = useRef<string | null>(null);
 
   // Calculate combat level using OSRS formula (melee-only MVP)
   const combatLevel = stats?.skills
@@ -561,7 +564,6 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
   const defenseLevel = stats?.skills?.defense?.level || 1;
 
   useEffect(() => {
-    const playerId = world.entities?.player?.id;
     if (!playerId) return;
 
     // Immediately sync from network cache (handles fresh page loads)
@@ -702,7 +704,16 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         undefined,
       );
     };
-  }, [world, targetName]);
+  }, [playerId, targetName, world]);
+
+  useEffect(() => {
+    const previousPlayerId = previousPlayerIdRef.current;
+    if (previousPlayerId && previousPlayerId !== playerId) {
+      combatStyleCache.delete(previousPlayerId);
+      autoRetaliateCache.delete(previousPlayerId);
+    }
+    previousPlayerIdRef.current = playerId;
+  }, [playerId]);
 
   const changeStyle = (next: string) => {
     const playerId = world.entities?.player?.id;
@@ -828,8 +839,11 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
 
   // Filter styles based on equipped weapon (OSRS-accurate restrictions)
   const styles = useMemo(() => {
-    const weaponType = equipment?.weapon?.weaponType
-      ? (equipment.weapon.weaponType.toLowerCase() as WeaponType)
+    const normalizedWeaponType = equipment?.weapon?.weaponType?.toLowerCase();
+    const weaponType = normalizedWeaponType
+      ? VALID_WEAPON_TYPES.has(normalizedWeaponType)
+        ? (normalizedWeaponType as WeaponType)
+        : WeaponType.NONE
       : WeaponType.NONE;
     const availableStyleIds = getAvailableStyles(weaponType);
     return allStyles.filter((s) =>

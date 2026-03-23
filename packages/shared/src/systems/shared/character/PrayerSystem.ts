@@ -510,7 +510,14 @@ export class PrayerSystem extends SystemBase {
     playerId: string,
   ): Promise<PlayerPrayerState | undefined> {
     const playerIdKey = toPlayerID(playerId);
-    if (!playerIdKey) return undefined;
+    if (!playerIdKey) {
+      Logger.systemError(
+        "PrayerSystem",
+        `Cannot initialize prayer for invalid player id: ${playerId}`,
+        new Error("Invalid player id"),
+      );
+      return undefined;
+    }
 
     const existingState = this.playerStates.get(playerIdKey);
     if (existingState) {
@@ -715,10 +722,9 @@ export class PrayerSystem extends SystemBase {
   ): PrayerToggleResult {
     // Get player's prayer level
     const player = this.getPlayerEntity(playerId);
-    const prayerLevel = Math.max(
-      state.maxPoints,
-      getPlayerPrayerLevel(player as PlayerWithPrayerStats),
-    );
+    const prayerLevel = player
+      ? getPlayerPrayerLevel(player as PlayerWithPrayerStats)
+      : Math.max(1, Math.floor(state.maxPoints));
 
     // Check level requirement
     if (prayerLevel < prayer.level) {

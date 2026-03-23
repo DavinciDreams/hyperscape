@@ -38,8 +38,20 @@ export function useQuestStatusSync({
   setQuestStatuses,
 }: UseQuestStatusSyncOptions): void {
   useEffect(() => {
+    let fetchTimeout: ReturnType<typeof setTimeout> | null = null;
+
     const fetchQuestList = () => {
       world.network?.send?.("getQuestList", {});
+    };
+
+    const scheduleQuestListRefresh = (delayMs = 120) => {
+      if (fetchTimeout) {
+        clearTimeout(fetchTimeout);
+      }
+      fetchTimeout = setTimeout(() => {
+        fetchTimeout = null;
+        fetchQuestList();
+      }, delayMs);
     };
 
     const onQuestList = (data: unknown) => {
@@ -62,7 +74,7 @@ export function useQuestStatusSync({
     };
 
     const onQuestEvent = () => {
-      fetchQuestList();
+      scheduleQuestListRefresh();
     };
 
     world.network?.on("questList", onQuestList);
@@ -76,6 +88,9 @@ export function useQuestStatusSync({
     fetchQuestList();
 
     return () => {
+      if (fetchTimeout) {
+        clearTimeout(fetchTimeout);
+      }
       world.network?.off("questList", onQuestList);
       world.network?.off("questStarted", onQuestEvent);
       world.network?.off("questProgressed", onQuestEvent);

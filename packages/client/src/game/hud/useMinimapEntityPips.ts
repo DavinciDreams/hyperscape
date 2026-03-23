@@ -106,14 +106,22 @@ export function useMinimapEntityPips({
           playerPip = {
             id: "local-player",
             type: "player",
-            position: player.node.position,
+            position: new THREE.Vector3(
+              player.node.position.x,
+              0,
+              player.node.position.z,
+            ),
             color: "#ffffff",
             isLocalPlayer: true,
             lastSeenTick: currentTick,
           };
           entityCacheRef.current.set("local-player", playerPip);
         } else {
-          playerPip.position = player.node.position;
+          playerPip.position.set(
+            player.node.position.x,
+            0,
+            player.node.position.z,
+          );
           playerPip.color = "#ffffff";
           playerPip.isLocalPlayer = true;
           playerPip.lastSeenTick = currentTick;
@@ -242,16 +250,13 @@ export function useMinimapEntityPips({
                 if (questIds && questIds.length > 0 && statuses.size > 0) {
                   let hasAvailable = false;
                   let hasActive = false;
-                  let allCompleted = true;
                   for (const questId of questIds) {
                     const state = statuses.get(questId);
                     if (state === "available") hasAvailable = true;
                     else if (state === "active") hasActive = true;
-                    if (state !== "completed") allCompleted = false;
                   }
                   if (hasAvailable) subType = "quest_available";
                   else if (hasActive) subType = "quest_in_progress";
-                  else if (!allCompleted) subType = "quest_available";
                 } else {
                   subType = "quest_available";
                 }
