@@ -27,6 +27,7 @@ import {
   getPanelHeaderStyle,
   getPanelSurfaceStyle,
   getShellControlButtonStyle,
+  type ShellControlButtonStyle,
 } from "../theme/themes";
 import { useTheme } from "../stores/themeStore";
 
@@ -290,7 +291,7 @@ export const ModalWindow = memo(function ModalWindow({
   };
 
   // Close button styles
-  const closeButtonStyle: CSSProperties = {
+  const closeButtonStyle: ShellControlButtonStyle = {
     ...getShellControlButtonStyle(theme, "danger"),
     display: "flex",
     alignItems: "center",

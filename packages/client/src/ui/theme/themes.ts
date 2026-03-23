@@ -12,6 +12,11 @@
 
 import type React from "react";
 
+export type ShellControlButtonStyle = React.CSSProperties & {
+  "--shell-button-hover-bg": string;
+  "--shell-button-hover-fg": string;
+};
+
 /** Complete theme interface */
 export interface Theme {
   /** Theme identifier */
@@ -790,7 +795,7 @@ export function getTabChromeStyle(
 export function getShellControlButtonStyle(
   theme: Theme,
   variant: ShellButtonVariant = "neutral",
-): React.CSSProperties {
+): ShellControlButtonStyle {
   const palette =
     variant === "danger"
       ? {
@@ -827,8 +832,8 @@ export function getShellControlButtonStyle(
     fontSize: 12,
     flexShrink: 0,
     transition: `color ${theme.transitions.fast}, background-color ${theme.transitions.fast}, border-color ${theme.transitions.fast}`,
-    ["--shell-button-hover-bg" as string]: palette.hoverBg,
-    ["--shell-button-hover-fg" as string]: palette.hoverFg,
+    "--shell-button-hover-bg": palette.hoverBg,
+    "--shell-button-hover-fg": palette.hoverFg,
   };
 }
 

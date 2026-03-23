@@ -28,6 +28,26 @@ interface LegacyUIUpdatePayload {
   data: Record<string, unknown>;
 }
 
+interface DuelCompletedPayload {
+  won?: boolean;
+  opponentName?: string;
+  itemsReceived?: InventoryItem[];
+  itemsLost?: InventoryItem[];
+  totalValueWon?: number;
+  totalValueLost?: number;
+  forfeit?: boolean;
+}
+
+function normalizeDuelResultItems(
+  items: InventoryItem[] | undefined,
+): DuelResultData["itemsReceived"] {
+  return (items ?? []).map((item) => ({
+    itemId: item.itemId,
+    quantity: item.quantity,
+    value: 0,
+  }));
+}
+
 interface ModalPanelSetters {
   setBankData: React.Dispatch<React.SetStateAction<BankData | null>>;
   setStoreData: React.Dispatch<React.SetStateAction<StoreData | null>>;
@@ -788,16 +808,14 @@ function handleLegacyDuelUIUpdate(
   }
 
   if (payload.component === "duelCompleted") {
-    const completedData = payload.data as DuelResultData & {
-      opponentName: string;
-    };
+    const completedData = payload.data as unknown as DuelCompletedPayload;
     setDuelData(null);
     setDuelResultData({
       visible: true,
-      won: completedData.won,
+      won: completedData.won ?? false,
       opponentName: completedData.opponentName || "Unknown",
-      itemsReceived: completedData.itemsReceived || [],
-      itemsLost: completedData.itemsLost || [],
+      itemsReceived: normalizeDuelResultItems(completedData.itemsReceived),
+      itemsLost: normalizeDuelResultItems(completedData.itemsLost),
       totalValueWon: completedData.totalValueWon || 0,
       totalValueLost: completedData.totalValueLost || 0,
       forfeit: completedData.forfeit || false,

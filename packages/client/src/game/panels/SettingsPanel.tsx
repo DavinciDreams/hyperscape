@@ -714,9 +714,12 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
             JSON.stringify(newConfig),
           );
           window.dispatchEvent(
-            new CustomEvent<StatusBarsConfig>(STATUSBAR_CONFIG_CHANGED_EVENT, {
-              detail: { config: newConfig },
-            }),
+            new CustomEvent<{ config: StatusBarsConfig }>(
+              STATUSBAR_CONFIG_CHANGED_EVENT,
+              {
+                detail: { config: newConfig },
+              },
+            ),
           );
         }
         return newConfig;

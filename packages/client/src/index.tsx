@@ -396,7 +396,7 @@ if (typeof window !== "undefined") {
   if ("requestIdleCallback" in window) {
     window.requestIdleCallback(schedulePrivyCleanup, { timeout: 1500 });
   } else {
-    window.setTimeout(schedulePrivyCleanup, 0);
+    globalThis.setTimeout(schedulePrivyCleanup, 0);
   }
 }
 
