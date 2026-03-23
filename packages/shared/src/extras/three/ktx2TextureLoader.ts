@@ -22,6 +22,15 @@ const cachedTextureLoader = new THREE.TextureLoader();
 // Track which files we know don't have KTX2 versions (to avoid repeated 404s)
 const noKtx2Cache = new Set<string>();
 
+function shouldTraceKTX2(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return new URLSearchParams(window.location.search).get("traceKTX2") === "1";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Initialize the KTX2 loader with basis transcoder
  * Must be called once with a renderer before using loadTextureWithKTX2Fallback
@@ -51,7 +60,9 @@ export function initKTX2Loader(
     loader.detectSupport(renderer);
 
     ktx2Loader = loader;
-    console.log("[KTX2Loader] Initialized with basis transcoder");
+    if (shouldTraceKTX2()) {
+      console.debug("[KTX2Loader] Initialized with basis transcoder");
+    }
     resolve(loader);
   });
 
@@ -116,12 +127,16 @@ export async function loadTextureWithKTX2Fallback(
       texture.colorSpace = colorSpace;
       texture.flipY = flipY;
       texture.needsUpdate = true;
-      console.log(`[KTX2] Loaded: ${ktx2Path}`);
+      if (shouldTraceKTX2()) {
+        console.debug(`[KTX2] Loaded: ${ktx2Path}`);
+      }
       return texture;
     } catch {
       // KTX2 not available, cache this and fall back
       noKtx2Cache.add(ktx2Path);
-      console.log(`[KTX2] Not found, falling back: ${path}`);
+      if (shouldTraceKTX2()) {
+        console.debug(`[KTX2] Not found, falling back: ${path}`);
+      }
     }
   }
 
