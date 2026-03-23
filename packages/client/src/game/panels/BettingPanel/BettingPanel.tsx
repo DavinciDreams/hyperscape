@@ -20,7 +20,12 @@ import React, {
   type CSSProperties,
 } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
-import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 
 // ============================================================================
 // Types
@@ -331,34 +336,38 @@ export function BettingPanel({
   };
 
   const marketCardStyle: CSSProperties = {
-    background:
-      theme.name === "hyperscape"
-        ? "linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(0,0,0,0.14) 100%)"
-        : theme.colors.background.panelSecondary,
-    border: `1px solid ${theme.colors.border.default}40`,
-    borderRadius: `${theme.borderRadius.lg}px`,
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+    ...getPanelInsetStyle(theme, {
+      emphasis: "strong",
+      radius: theme.borderRadius.lg,
+      padding: "12px",
+    }),
   };
 
   const betInputStyle: CSSProperties = {
     ...styles.input,
-    background: theme.colors.background.panelPrimary,
-    border: `1px solid ${theme.colors.border.default}66`,
-    borderRadius: `${theme.borderRadius.md}px`,
+    ...getPanelInsetStyle(theme, {
+      emphasis: "strong",
+      radius: theme.borderRadius.md,
+    }),
     color: theme.colors.text.primary,
   };
 
   const actionButtonStyle: CSSProperties = {
     ...styles.button,
-    borderRadius: `${theme.borderRadius.md}px`,
-    background: `linear-gradient(135deg, ${theme.colors.accent.primary}CC 0%, ${theme.colors.accent.secondary}AA 100%)`,
-    border: `1px solid ${theme.colors.accent.primary}70`,
+    ...getInteractiveTileStyle(theme, {
+      active: true,
+      accentColor: theme.colors.accent.primary,
+      radius: theme.borderRadius.md,
+    }),
   };
 
   const claimButtonStyle: CSSProperties = {
     ...actionButtonStyle,
-    background: `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
-    border: `1px solid ${theme.colors.state.success}70`,
+    ...getInteractiveTileStyle(theme, {
+      active: true,
+      accentColor: theme.colors.state.success,
+      radius: theme.borderRadius.md,
+    }),
   };
 
   const handleMarketClick = useCallback((marketId: string) => {
@@ -481,6 +490,11 @@ export function BettingPanel({
                     <div
                       style={{
                         ...styles.agentBox,
+                        ...getInteractiveTileStyle(theme, {
+                          radius: theme.borderRadius.md,
+                          active: isSelected && selectedSide === "A",
+                          accentColor: theme.colors.state.info,
+                        }),
                         ...styles.agentBoxA,
                         ...(isSelected && selectedSide === "A"
                           ? styles.agentBoxSelected
@@ -514,6 +528,11 @@ export function BettingPanel({
                     <div
                       style={{
                         ...styles.agentBox,
+                        ...getInteractiveTileStyle(theme, {
+                          radius: theme.borderRadius.md,
+                          active: isSelected && selectedSide === "B",
+                          accentColor: theme.colors.state.danger,
+                        }),
                         ...styles.agentBoxB,
                         ...(isSelected && selectedSide === "B"
                           ? styles.agentBoxSelected

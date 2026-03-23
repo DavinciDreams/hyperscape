@@ -11,12 +11,15 @@
 import React from "react";
 import { useThemeStore } from "@/ui";
 import {
+  getInteractiveTileStyle,
   getPanelHeaderStyle,
+  getPanelInsetStyle,
   getPanelSurfaceStyle,
   getShellControlButtonStyle,
 } from "@/ui/theme/themes";
 import type { ClientWorld, PlayerStats } from "../../types";
 import { EventType } from "@hyperscape/shared";
+import { UI } from "@/ui/core";
 
 interface XpLampPanelProps {
   visible: boolean;
@@ -101,8 +104,11 @@ export function XpLampPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[10001] flex items-center justify-center pointer-events-auto"
-      style={{ backgroundColor: "rgba(0, 0, 0, 0.7)" }}
+      className="fixed inset-0 flex items-center justify-center pointer-events-auto"
+      style={{
+        backgroundColor: "rgba(0, 0, 0, 0.7)",
+        zIndex: UI.Z_INDEX.MODAL,
+      }}
       onClick={onClose}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
@@ -165,9 +171,11 @@ export function XpLampPanel({
           className="text-center mb-4 py-2"
           style={{
             color: theme.colors.state.success,
-            backgroundColor: `${theme.colors.state.success}12`,
-            borderRadius: `${theme.borderRadius.md}px`,
-            border: `1px solid ${theme.colors.state.success}24`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: theme.borderRadius.md,
+              padding: "0.5rem 0.75rem",
+            }),
           }}
         >
           Grant <strong>{xpAmount.toLocaleString()} XP</strong> to:
@@ -188,12 +196,10 @@ export function XpLampPanel({
                 onClick={() => handleSkillSelect(skill.id)}
                 className="flex flex-col items-center p-2 transition-all duration-150"
                 style={{
-                  background:
-                    theme.name === "hyperscape"
-                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(0, 0, 0, 0.16) 100%)"
-                      : theme.colors.background.panelSecondary,
-                  border: `1px solid ${theme.colors.border.default}40`,
-                  borderRadius: `${theme.borderRadius.md}px`,
+                  ...getInteractiveTileStyle(theme, {
+                    radius: theme.borderRadius.md,
+                    accentColor: theme.colors.accent.primary,
+                  }),
                   cursor: "pointer",
                 }}
                 onMouseEnter={(e) => {
@@ -235,12 +241,9 @@ export function XpLampPanel({
             onClick={onClose}
             className="px-4 py-2 text-sm transition-colors"
             style={{
-              background:
-                theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.16) 100%)"
-                  : theme.colors.background.tertiary,
-              border: `1px solid ${theme.colors.border.default}40`,
-              borderRadius: `${theme.borderRadius.md}px`,
+              ...getInteractiveTileStyle(theme, {
+                radius: theme.borderRadius.md,
+              }),
               color: theme.colors.text.secondary,
               cursor: "pointer",
             }}

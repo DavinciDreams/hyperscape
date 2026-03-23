@@ -13,10 +13,13 @@ import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
 import {
+  getInteractiveTileStyle,
   getPanelHeaderStyle,
+  getPanelInsetStyle,
   getPanelSurfaceStyle,
   getShellControlButtonStyle,
 } from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 
 interface QuestJournalPanelProps {
   world: ClientWorld;
@@ -172,8 +175,11 @@ export function QuestJournalPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-auto"
-      style={{ backgroundColor: theme.colors.background.overlay }}
+      className="fixed inset-0 flex items-center justify-center pointer-events-auto"
+      style={{
+        backgroundColor: theme.colors.background.overlay,
+        zIndex: UI.Z_INDEX.MODAL,
+      }}
       onClick={onClose}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
@@ -251,9 +257,11 @@ export function QuestJournalPanel({
             className="text-center mb-4 py-2"
             style={{
               color: theme.colors.text.accent,
-              backgroundColor: `${theme.colors.text.accent}12`,
-              borderRadius: `${theme.borderRadius.md}px`,
-              border: `1px solid ${theme.colors.text.accent}35`,
+              ...getPanelInsetStyle(theme, {
+                emphasis: "strong",
+                radius: theme.borderRadius.md,
+                padding: "0.5rem 0.75rem",
+              }),
             }}
           >
             Quest Points: <strong>{questPoints}</strong>
@@ -330,12 +338,10 @@ function QuestListView({
           onClick={() => onSelectQuest(quest.id)}
           className="w-full text-left p-2 transition-colors"
           style={{
-            background:
-              theme.name === "hyperscape"
-                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.14) 100%)"
-                : theme.colors.background.panelSecondary,
-            border: `1px solid ${theme.colors.border.default}40`,
-            borderRadius: `${theme.borderRadius.md}px`,
+            ...getInteractiveTileStyle(theme, {
+              radius: theme.borderRadius.md,
+              accentColor: theme.colors.accent.primary,
+            }),
             cursor: "pointer",
           }}
           onMouseEnter={(e) => {
@@ -421,12 +427,11 @@ function QuestDetailView({
       <div
         className="p-3 rounded"
         style={{
-          background:
-            theme.name === "hyperscape"
-              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.14) 100%)"
-              : theme.colors.background.panelSecondary,
-          border: `1px solid ${theme.colors.border.default}40`,
-          borderRadius: `${theme.borderRadius.md}px`,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: theme.borderRadius.md,
+            padding: "0.75rem",
+          }),
         }}
       >
         <div className="flex justify-between items-center mb-2">
@@ -456,6 +461,10 @@ function QuestDetailView({
                 ? `${theme.colors.state.danger}12`
                 : `${theme.colors.state.warning}12`,
           color: STATUS_COLORS[quest.status],
+          ...getPanelInsetStyle(theme, {
+            radius: theme.borderRadius.md,
+            padding: "0.5rem 0.75rem",
+          }),
         }}
       >
         {quest.status === "completed"
@@ -486,6 +495,10 @@ function QuestDetailView({
               key={stage.id}
               className="text-sm flex justify-between items-center"
               style={{
+                ...getPanelInsetStyle(theme, {
+                  radius: theme.borderRadius.sm,
+                  padding: "0.45rem 0.6rem",
+                }),
                 color:
                   status === "completed"
                     ? theme.colors.text.disabled

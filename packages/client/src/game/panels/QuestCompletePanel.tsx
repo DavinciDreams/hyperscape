@@ -11,7 +11,8 @@
 
 import React, { useEffect, useCallback } from "react";
 import { useThemeStore } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
+import { getPanelInsetStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 import type { ClientWorld } from "../../types";
 
 interface QuestRewards {
@@ -82,8 +83,11 @@ export function QuestCompletePanel({
 
   return (
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center pointer-events-auto"
-      style={{ backgroundColor: "rgba(0, 0, 0, 0.85)" }}
+      className="fixed inset-0 flex items-center justify-center pointer-events-auto"
+      style={{
+        backgroundColor: "rgba(0, 0, 0, 0.85)",
+        zIndex: UI.Z_INDEX.MODAL,
+      }}
       onClick={onClose}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
@@ -170,7 +174,17 @@ export function QuestCompletePanel({
         <div className="space-y-2">
           {/* Quest Points */}
           {rewards.questPoints > 0 && (
-            <div className="text-lg font-bold" style={{ color: "#3a6f3a" }}>
+            <div
+              className="text-lg font-bold"
+              style={{
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "strong",
+                  radius: theme.borderRadius.md,
+                  padding: "0.5rem 0.75rem",
+                }),
+                color: theme.colors.state.success,
+              }}
+            >
               {rewards.questPoints} Quest Point
               {rewards.questPoints !== 1 ? "s" : ""}
             </div>
@@ -178,7 +192,17 @@ export function QuestCompletePanel({
 
           {/* Items */}
           {rewards.items.map((item, index) => (
-            <div key={index} className="text-base" style={{ color: "#4a3f2f" }}>
+            <div
+              key={index}
+              className="text-base"
+              style={{
+                ...getPanelInsetStyle(theme, {
+                  radius: theme.borderRadius.md,
+                  padding: "0.45rem 0.75rem",
+                }),
+                color: theme.colors.text.secondary,
+              }}
+            >
               {item.quantity > 1 ? `${item.quantity}x ` : ""}
               {ITEM_NAMES[item.itemId] || item.itemId}
             </div>
@@ -186,7 +210,17 @@ export function QuestCompletePanel({
 
           {/* XP Rewards */}
           {Object.entries(rewards.xp).map(([skill, amount]) => (
-            <div key={skill} className="text-base" style={{ color: "#4a3f2f" }}>
+            <div
+              key={skill}
+              className="text-base"
+              style={{
+                ...getPanelInsetStyle(theme, {
+                  radius: theme.borderRadius.md,
+                  padding: "0.45rem 0.75rem",
+                }),
+                color: theme.colors.text.secondary,
+              }}
+            >
               {amount.toLocaleString()}{" "}
               {skill.charAt(0).toUpperCase() + skill.slice(1)} XP
             </div>
