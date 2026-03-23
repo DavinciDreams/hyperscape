@@ -24,6 +24,127 @@ import {
   isObject,
 } from "../types/guards";
 
+function areInventoryItemsEqual(
+  left: InventorySlotViewItem[],
+  right: InventorySlotViewItem[],
+): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (
+      a.slot !== b.slot ||
+      a.itemId !== b.itemId ||
+      a.quantity !== b.quantity
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function areEquipmentItemsEqual(
+  left: PlayerEquipmentItems | null,
+  right: PlayerEquipmentItems | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return left === right;
+
+  const slots = Object.keys(left) as Array<keyof PlayerEquipmentItems>;
+  for (const slot of slots) {
+    const leftItem = left[slot];
+    const rightItem = right[slot];
+    if (!leftItem || !rightItem) {
+      if (leftItem !== rightItem) return false;
+      continue;
+    }
+
+    if (
+      leftItem.id !== rightItem.id ||
+      leftItem.quantity !== rightItem.quantity ||
+      leftItem.name !== rightItem.name
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function areStatusValuesEqual(
+  left?: { current?: number; max?: number },
+  right?: { current?: number; max?: number },
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return left === right;
+  return left.current === right.current && left.max === right.max;
+}
+
+function areSkillsEqual(
+  left: PlayerStats["skills"],
+  right: PlayerStats["skills"],
+): boolean {
+  if (left === right) return true;
+
+  const skillNames = Object.keys(left) as Array<keyof PlayerStats["skills"]>;
+  for (const skillName of skillNames) {
+    const leftSkill = left[skillName];
+    const rightSkill = right[skillName];
+    if (
+      !rightSkill ||
+      leftSkill.level !== rightSkill.level ||
+      leftSkill.xp !== rightSkill.xp
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function mergePlayerStats(
+  previous: PlayerStats | null,
+  updates: Partial<PlayerStats>,
+): PlayerStats {
+  if (!previous) {
+    return updates as PlayerStats;
+  }
+
+  const next = { ...previous, ...updates } as PlayerStats;
+  if (updates.health) {
+    next.health = updates.health;
+  }
+  if (updates.skills) {
+    next.skills = updates.skills;
+  }
+  if (updates.prayerPoints) {
+    next.prayerPoints = updates.prayerPoints;
+  }
+
+  return next;
+}
+
+function arePlayerStatsEqual(
+  left: PlayerStats | null,
+  right: PlayerStats | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return left === right;
+
+  return (
+    left.level === right.level &&
+    left.combatLevel === right.combatLevel &&
+    left.inCombat === right.inCombat &&
+    areStatusValuesEqual(left.health, right.health) &&
+    areStatusValuesEqual(left.prayerPoints, right.prayerPoints) &&
+    areSkillsEqual(left.skills, right.skills) &&
+    areEquipmentItemsEqual(left.equipment, right.equipment)
+  );
+}
+
 /**
  * Hook return type for player data
  */
@@ -96,15 +217,19 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       if (playerId && invData.playerId && invData.playerId !== playerId) {
         return;
       }
-      setInventory(invData.items || []);
+      setInventory((prev) =>
+        areInventoryItemsEqual(prev, invData.items || [])
+          ? prev
+          : invData.items || [],
+      );
       if (typeof invData.coins === "number") {
-        setCoins(invData.coins);
+        setCoins((prev) => (prev === invData.coins ? prev : invData.coins));
       } else {
         // Calculate coins from inventory items
         const totalCoins = (data.items || [])
           .filter((item) => item.itemId === "coins")
           .reduce((sum, item) => sum + item.quantity, 0);
-        setCoins(totalCoins);
+        setCoins((prev) => (prev === totalCoins ? prev : totalCoins));
       }
     };
 
@@ -115,7 +240,7 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
         return;
       }
       if (!playerId || data.playerId === playerId) {
-        setCoins(data.coins);
+        setCoins((prev) => (prev === data.coins ? prev : data.coins));
       }
     };
 
@@ -125,7 +250,10 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
         console.warn("[usePlayerData] Invalid equipment update event:", data);
         return;
       }
-      setEquipment(processRawEquipment(data as RawEquipmentData));
+      const nextEquipment = processRawEquipment(data as RawEquipmentData);
+      setEquipment((prev) =>
+        areEquipmentItemsEqual(prev, nextEquipment) ? prev : nextEquipment,
+      );
     };
 
     // UI_UPDATE is the primary source for player stats
@@ -138,15 +266,15 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       if (data.component === "player" && isPlayerStatsData(data.data)) {
         // PlayerStatsData is a partial type - safe to cast since we merge with existing state
         const newData = data.data as unknown as Partial<PlayerStats>;
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, {
                 ...newData,
                 prayerPoints: newData.prayerPoints || prev.prayerPoints,
-              }
-            : (newData as PlayerStats),
-        );
+              })
+            : (newData as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
     };
 
@@ -158,15 +286,15 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       }
       // PlayerStatsData is a partial type - safe to cast since we merge with existing state
       const newData = data as unknown as Partial<PlayerStats>;
-      setPlayerStats((prev) =>
-        prev
-          ? {
-              ...prev,
+      setPlayerStats((prev) => {
+        const merged = prev
+          ? mergePlayerStats(prev, {
               ...newData,
               prayerPoints: newData.prayerPoints || prev.prayerPoints,
-            }
-          : (newData as PlayerStats),
-      );
+            })
+          : (newData as PlayerStats);
+        return arePlayerStatsEqual(prev, merged) ? prev : merged;
+      });
     };
 
     // Skills updates - with type guard validation
@@ -178,11 +306,12 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       if (!playerId || data.playerId === playerId) {
         // Skills event only has skills data - merge with existing state
         const updatedSkills = data.skills as unknown as PlayerStats["skills"];
-        setPlayerStats((prev) =>
-          prev
-            ? { ...prev, skills: updatedSkills }
-            : ({ skills: updatedSkills } as unknown as PlayerStats),
-        );
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, { skills: updatedSkills })
+            : ({ skills: updatedSkills } as unknown as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
     };
 
@@ -193,22 +322,22 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
         return;
       }
       if (!playerId || data.playerId === playerId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, {
                 prayerPoints: {
                   current: data.points,
                   max: data.maxPoints,
                 },
-              }
+              })
             : ({
                 prayerPoints: {
                   current: data.points,
                   max: data.maxPoints,
                 },
-              } as PlayerStats),
-        );
+              } as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
     };
 
@@ -222,22 +351,22 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
         return;
       }
       if (!playerId || data.playerId === playerId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, {
                 prayerPoints: {
                   current: data.points,
                   max: data.maxPoints,
                 },
-              }
+              })
             : ({
                 prayerPoints: {
                   current: data.points,
                   max: data.maxPoints,
                 },
-              } as PlayerStats),
-        );
+              } as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
     };
 
@@ -262,8 +391,13 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       // Get cached inventory
       const cachedInv = world.network?.lastInventoryByPlayerId?.[playerId];
       if (cachedInv && Array.isArray(cachedInv.items)) {
-        setInventory(cachedInv.items as InventorySlotViewItem[]);
-        setCoins(cachedInv.coins || 0);
+        const cachedItems = cachedInv.items as InventorySlotViewItem[];
+        setInventory((prev) =>
+          areInventoryItemsEqual(prev, cachedItems) ? prev : cachedItems,
+        );
+        setCoins((prev) =>
+          prev === (cachedInv.coins || 0) ? prev : cachedInv.coins || 0,
+        );
       }
 
       // Get cached skills
@@ -274,37 +408,45 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       if (cachedSkills) {
         // Runtime: cachedSkills has skill-specific keys (attack, strength, etc.)
         const skills = cachedSkills as unknown as PlayerStats["skills"];
-        setPlayerStats((prev) =>
-          prev ? { ...prev, skills } : ({ skills } as PlayerStats),
-        );
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, { skills })
+            : ({ skills } as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
 
       // Get cached equipment
       const cachedEquipment =
         world.network?.lastEquipmentByPlayerId?.[playerId];
       if (cachedEquipment) {
-        setEquipment(processRawEquipment(cachedEquipment as RawEquipmentData));
+        const nextEquipment = processRawEquipment(
+          cachedEquipment as RawEquipmentData,
+        );
+        setEquipment((prev) =>
+          areEquipmentItemsEqual(prev, nextEquipment) ? prev : nextEquipment,
+        );
       }
 
       // Get cached prayer state
       const cachedPrayer = world.network?.lastPrayerStateByPlayerId?.[playerId];
       if (cachedPrayer) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, {
                 prayerPoints: {
                   current: cachedPrayer.points,
                   max: cachedPrayer.maxPoints,
                 },
-              }
+              })
             : ({
                 prayerPoints: {
                   current: cachedPrayer.points,
                   max: cachedPrayer.maxPoints,
                 },
-              } as PlayerStats),
-        );
+              } as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
 
       // Get player entity for health/prayer
@@ -331,14 +473,13 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
         const maxPrayerPoints = entityData.data?.maxPrayerPoints ?? 1;
 
         if (typeof health === "number") {
-          setPlayerStats(
-            (prev) =>
-              ({
-                ...prev,
-                health: { current: health, max: maxHealth },
-                prayerPoints: { current: prayerPoints, max: maxPrayerPoints },
-              }) as PlayerStats,
-          );
+          setPlayerStats((prev) => {
+            const merged = mergePlayerStats(prev, {
+              health: { current: health, max: maxHealth },
+              prayerPoints: { current: prayerPoints, max: maxPrayerPoints },
+            });
+            return arePlayerStatsEqual(prev, merged) ? prev : merged;
+          });
         }
       }
 

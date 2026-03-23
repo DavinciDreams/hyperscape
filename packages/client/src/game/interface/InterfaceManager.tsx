@@ -258,7 +258,10 @@ function DesktopInterfaceManager({
         return;
       }
 
-      const existingWindow = windows.find((w) =>
+      const currentWindows = Array.from(
+        useWindowStore.getState().windows.values(),
+      );
+      const existingWindow = currentWindows.find((w) =>
         w.tabs.some((t) => t.content === panelId),
       );
 
@@ -273,11 +276,10 @@ function DesktopInterfaceManager({
           });
         }
       } else {
-        createPanelWindow(panelId, windows, createWindow);
+        createPanelWindow(panelId, currentWindows.length, createWindow);
       }
     },
     [
-      windows,
       windowStoreUpdate,
       createWindow,
       setWorldMapOpen,
@@ -305,6 +307,11 @@ function DesktopInterfaceManager({
     };
   }, [inventory, coins, playerStats, equipment]);
 
+  const inventoryRef = useRef(inventory);
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+
   // Create panel renderer
   const renderPanel = useMemo(
     () =>
@@ -329,7 +336,7 @@ function DesktopInterfaceManager({
     handleDndKitDragEnd,
     dndKitSensors,
     dndKitActiveItem,
-  } = useDragDropCoordinator({ world, inventory });
+  } = useDragDropCoordinator({ world, inventoryRef });
 
   if (!enabled) {
     return <>{children}</>;
@@ -460,7 +467,7 @@ function handleModalOpen(
 
 function createPanelWindow(
   panelId: string,
-  windows: WindowConfig[],
+  windowCount: number,
   createWindow: (config: WindowConfig) => WindowConfig | null,
 ): void {
   const viewport =
@@ -469,7 +476,7 @@ function createPanelWindow(
       : { width: 1920, height: 1080 };
 
   const panelSizing = getResponsivePanelSizing(panelId, viewport);
-  const offset = snapToGrid(windows.length * 30);
+  const offset = snapToGrid(windowCount * 30);
 
   createWindow({
     id: `panel-${panelId}-${Date.now()}`,
