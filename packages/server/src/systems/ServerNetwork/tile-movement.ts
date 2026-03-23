@@ -37,6 +37,7 @@ import {
   getValidMeleeTiles,
   // Collision system
   CollisionMask,
+  CollisionFlag,
   BuildingCollisionService,
   type EntityID,
 } from "@hyperscape/shared";
@@ -163,6 +164,70 @@ export class TileMovementManager {
   }
 
   /**
+   * Get bridge system for railing collision checks (cached after first lookup).
+   */
+  private _bridgeSystemRef: {
+    getDeckHeightAt(x: number, z: number): number | null;
+    isBridgeTransitionBlocked(
+      fX: number,
+      fZ: number,
+      tX: number,
+      tZ: number,
+    ): boolean;
+  } | null = null;
+  private _bridgeSystemChecked = false;
+
+  private getBridgeSystem(): {
+    getDeckHeightAt(x: number, z: number): number | null;
+    isBridgeTransitionBlocked(
+      fX: number,
+      fZ: number,
+      tX: number,
+      tZ: number,
+    ): boolean;
+  } | null {
+    if (!this._bridgeSystemChecked) {
+      const sys = this.world.getSystem("bridges");
+      if (sys) {
+        this._bridgeSystemRef = sys as unknown as {
+          getDeckHeightAt(x: number, z: number): number | null;
+          isBridgeTransitionBlocked(
+            fX: number,
+            fZ: number,
+            tX: number,
+            tZ: number,
+          ): boolean;
+        };
+        this._bridgeSystemChecked = true;
+      }
+    }
+    return this._bridgeSystemRef;
+  }
+
+  /**
+   * Get dock system for deck height lookups (cached after first lookup).
+   */
+  private _dockSystemRef: {
+    getDeckHeightAt(x: number, z: number): number | null;
+  } | null = null;
+  private _dockSystemChecked = false;
+
+  private getDockSystem(): {
+    getDeckHeightAt(x: number, z: number): number | null;
+  } | null {
+    if (!this._dockSystemChecked) {
+      const sys = this.world.getSystem("docks");
+      if (sys) {
+        this._dockSystemRef = sys as unknown as {
+          getDeckHeightAt(x: number, z: number): number | null;
+        };
+        this._dockSystemChecked = true;
+      }
+    }
+    return this._dockSystemRef;
+  }
+
+  /**
    * Get building collision service
    */
   private getBuildingCollision(): BuildingCollisionService | null {
@@ -234,6 +299,21 @@ export class TileMovementManager {
         this._directionalBlockCache.set(dirKey, blocked);
         if (blocked) return false;
       }
+
+      // Bridge railing enforcement: block all bridge↔non-bridge transitions
+      // except at bridge endpoint tiles aligned with the bridge direction.
+      // Wall flags provide defense-in-depth (set at init + terrain bake).
+      const bridgeSys = this.getBridgeSystem();
+      if (
+        bridgeSys?.isBridgeTransitionBlocked(
+          fromTile.x,
+          fromTile.z,
+          tile.x,
+          tile.z,
+        )
+      ) {
+        return false;
+      }
     }
 
     // Static walkability check (tile-only, cached per tile)
@@ -247,33 +327,41 @@ export class TileMovementManager {
     // Compute and cache
     let walkable: boolean;
 
-    // If on ground floor, check global collision matrix (trees, rocks, etc.)
-    if (
+    // Bridge/dock tiles override water — check deck height lookup directly
+    // (same pattern as BuildingCollisionService) rather than relying on collision
+    // flags which may not be baked yet if the terrain tile was just generated.
+    if (floorIndex === 0) {
+      const bridgeSysWalk = this.getBridgeSystem();
+      if (bridgeSysWalk?.getDeckHeightAt(tile.x, tile.z) != null) {
+        walkable = true;
+        this._walkabilityCache.set(tileKey, walkable);
+        return walkable;
+      }
+      const dockSysWalk = this.getDockSystem();
+      if (dockSysWalk?.getDeckHeightAt(tile.x, tile.z) != null) {
+        walkable = true;
+        this._walkabilityCache.set(tileKey, walkable);
+        return walkable;
+      }
+    }
+    if (isTargetInBuilding) {
+      // Building floor is walkable, overrides terrain
+      walkable = true;
+    } else if (
       floorIndex === 0 &&
       this.world.collision.hasFlags(tile.x, tile.z, CollisionMask.BLOCKS_WALK)
     ) {
       walkable = false;
-    } else if (isTargetInBuilding) {
-      // Building floor is walkable, overrides terrain
-      walkable = true;
     } else {
-      // Terrain walkability (water, slope) is pre-baked into CollisionMatrix
-      // as WATER and STEEP_SLOPE flags. The hasFlags(BLOCKS_WALK) check above
-      // already caught unwalkable terrain — if we reach here, it's walkable.
-      // Fall back to runtime check only for tiles in ungenerated terrain.
+      // Collision flags (WATER, STEEP_SLOPE) are baked when terrain generates.
+      // Runtime fallback catches any unbaked underwater tiles via height checks.
       const terrain = this.getTerrain();
       if (terrain) {
         tileToWorldInto(tile, this._walkableWorldPos);
-        const terrainTileX = Math.floor(this._walkableWorldPos.x / 100);
-        const terrainTileZ = Math.floor(this._walkableWorldPos.z / 100);
-        if (!terrain.isTerrainTileGenerated(terrainTileX, terrainTileZ)) {
-          walkable = terrain.isPositionWalkableFast(
-            this._walkableWorldPos.x,
-            this._walkableWorldPos.z,
-          );
-        } else {
-          walkable = true;
-        }
+        walkable = terrain.isPositionWalkableFast(
+          this._walkableWorldPos.x,
+          this._walkableWorldPos.z,
+        );
       } else {
         walkable = true;
       }
@@ -462,6 +550,29 @@ export class TileMovementManager {
         changes: { e: payload.runMode ? "run" : "walk" },
       });
       return;
+    }
+
+    // Bridge/dock constraint: if player is on a bridge or dock and clicks a
+    // water tile, reject the movement. Otherwise BFS reroutes through
+    // endpoints to the bank, making the player walk off — not what the user intends.
+    const bridgeSys = this.getBridgeSystem();
+    const dockSys = this.getDockSystem();
+    const onBridge =
+      bridgeSys?.getDeckHeightAt(state.currentTile.x, state.currentTile.z) !=
+      null;
+    const onDock =
+      dockSys?.getDeckHeightAt(state.currentTile.x, state.currentTile.z) !=
+      null;
+    if (onBridge || onDock) {
+      if (
+        this.world.collision.hasFlags(
+          payload.targetTile.x,
+          payload.targetTile.z,
+          CollisionFlag.WATER,
+        )
+      ) {
+        return; // On bridge/dock, clicked water — ignore
+      }
     }
 
     // Rate limit pathfinding separately (CPU-expensive operation)
@@ -733,6 +844,20 @@ export class TileMovementManager {
 
         const nextTile = state.path[state.pathIndex];
 
+        // Bridge railing guard: block any step that crosses a bridge railing
+        const bridgeGuard = this.getBridgeSystem();
+        if (
+          bridgeGuard?.isBridgeTransitionBlocked(
+            state.currentTile.x,
+            state.currentTile.z,
+            nextTile.x,
+            nextTile.z,
+          )
+        ) {
+          state.pathIndex = state.path.length; // Cancel remaining path
+          break;
+        }
+
         // Handle stair transitions if building service is available
         if (buildingService) {
           buildingService.handleStairTransition(
@@ -780,40 +905,47 @@ export class TileMovementManager {
       // Convert tile to world position (zero-allocation)
       tileToWorldInto(state.currentTile, this._worldPos);
 
-      // determine Y elevation
-      if (buildingService) {
-        const currentFloor = buildingService.getPlayerFloor(
-          playerId as EntityID,
-        );
-        const buildingId = buildingService.getBuildingAt(
-          this._worldPos.x,
-          this._worldPos.z,
-        );
-
-        let floorHeight: number | null = null;
-        if (buildingId) {
-          floorHeight = buildingService.getFloorHeight(
-            buildingId,
-            currentFloor,
+      // determine Y elevation — building floor > terrain (bridge-aware)
+      // getHeightAt() returns bridge deck height on bridge tiles (single source of truth),
+      // so no explicit bridge check is needed here.
+      {
+        if (buildingService) {
+          const currentFloor = buildingService.getPlayerFloor(
+            playerId as EntityID,
           );
-        }
+          const buildingId = buildingService.getBuildingAt(
+            this._worldPos.x,
+            this._worldPos.z,
+          );
 
-        if (floorHeight !== null) {
-          this._worldPos.y = floorHeight + 0.1;
-        } else if (terrain) {
-          const h = terrain.getHeightAt(this._worldPos.x, this._worldPos.z);
-          if (h !== null && Number.isFinite(h)) {
-            this._worldPos.y = h! + 0.1;
-          } else {
-            this._worldPos.y = 0.1;
+          let floorHeight: number | null = null;
+          if (buildingId) {
+            floorHeight = buildingService.getFloorHeight(
+              buildingId,
+              currentFloor,
+            );
           }
-        } else {
-          this._worldPos.y = 0.1;
-        }
-      } else if (terrain) {
-        const height = terrain.getHeightAt(this._worldPos.x, this._worldPos.z);
-        if (height !== null && Number.isFinite(height)) {
-          this._worldPos.y = (height as number) + 0.1;
+
+          if (floorHeight !== null) {
+            this._worldPos.y = floorHeight + 0.01;
+          } else if (terrain) {
+            const h = terrain.getHeightAt(this._worldPos.x, this._worldPos.z);
+            if (h !== null && Number.isFinite(h)) {
+              this._worldPos.y = h! + 0.01;
+            } else {
+              this._worldPos.y = 0.01;
+            }
+          } else {
+            this._worldPos.y = 0.01;
+          }
+        } else if (terrain) {
+          const height = terrain.getHeightAt(
+            this._worldPos.x,
+            this._worldPos.z,
+          );
+          if (height !== null && Number.isFinite(height)) {
+            this._worldPos.y = (height as number) + 0.01;
+          }
         }
       }
 
@@ -1029,6 +1161,20 @@ export class TileMovementManager {
 
       const nextTile = state.path[state.pathIndex];
 
+      // Bridge railing guard: block any step that crosses a bridge railing
+      const bridgeGuardPT = this.getBridgeSystem();
+      if (
+        bridgeGuardPT?.isBridgeTransitionBlocked(
+          state.currentTile.x,
+          state.currentTile.z,
+          nextTile.x,
+          nextTile.z,
+        )
+      ) {
+        state.pathIndex = state.path.length;
+        break;
+      }
+
       // Handle stair transitions if building service is available
       if (buildingService) {
         buildingService.handleStairTransition(
@@ -1047,7 +1193,9 @@ export class TileMovementManager {
     // Convert tile to world position (zero-allocation)
     tileToWorldInto(state.currentTile, this._worldPos);
 
-    // determine Y elevation
+    // determine Y elevation — building floor > terrain (bridge-aware)
+    // getHeightAt() returns bridge deck height on bridge tiles (single source of truth),
+    // so no explicit bridge check is needed here.
     if (buildingService) {
       const currentFloor = buildingService.getPlayerFloor(playerId as EntityID);
       const buildingId = buildingService.getBuildingAt(
@@ -1061,21 +1209,21 @@ export class TileMovementManager {
       }
 
       if (floorHeight !== null) {
-        this._worldPos.y = floorHeight + 0.1;
+        this._worldPos.y = floorHeight + 0.01;
       } else if (terrain) {
         const h = terrain.getHeightAt(this._worldPos.x, this._worldPos.z);
         if (h !== null && Number.isFinite(h)) {
-          this._worldPos.y = h! + 0.1;
+          this._worldPos.y = h! + 0.01;
         } else {
-          this._worldPos.y = 0.1;
+          this._worldPos.y = 0.01;
         }
       } else {
-        this._worldPos.y = 0.1;
+        this._worldPos.y = 0.01;
       }
     } else if (terrain) {
       const height = terrain.getHeightAt(this._worldPos.x, this._worldPos.z);
       if (height !== null && Number.isFinite(height)) {
-        this._worldPos.y = (height as number) + 0.1;
+        this._worldPos.y = (height as number) + 0.01;
       }
     }
 

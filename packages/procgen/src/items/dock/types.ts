@@ -188,4 +188,6 @@ export interface DockGenerationOptions {
   waterLevel?: number;
   /** Water floor depth (for post calculation) */
   waterFloorDepth?: number;
+  /** Skip mesh/material creation (server-only: only layout + collision needed) */
+  skipMesh?: boolean;
 }

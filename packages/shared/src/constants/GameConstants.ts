@@ -92,6 +92,14 @@ export const TERRAIN_CONSTANTS = {
   WATER_EDGE_BUFFER: 1.5,
 
   /**
+   * Minimum depth below water surface for terrain to be considered
+   * visibly submerged. Terrain within this depth of the surface looks
+   * like wet beach, not water. Used by minimap and fishing spot placement
+   * to align visual shoreline with the 3D water mesh appearance.
+   */
+  MIN_VISIBLE_WATER_DEPTH: 1.5,
+
+  /**
    * Maximum slope for walkable terrain (tan of angle).
    * Slopes steeper than this block movement.
    * 1.5 ≈ 56 degree angle.

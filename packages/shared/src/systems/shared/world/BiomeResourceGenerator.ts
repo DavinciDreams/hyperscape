@@ -47,6 +47,8 @@ export interface ResourceGenerationContext {
   getHeightAt: (worldX: number, worldZ: number) => number;
   /** Check if position is on a road */
   isOnRoad?: (worldX: number, worldZ: number) => boolean;
+  /** Get water surface Y at world position (river + ponds + ocean) */
+  getWaterSurfaceAt?: (worldX: number, worldZ: number) => number;
   /** Get the dominant biome at a world position (for per-tree biome selection) */
   getDominantBiome?: (worldX: number, worldZ: number) => string;
   /** Deterministic RNG seeded for this tile */
@@ -222,9 +224,13 @@ export function generateTrees(
     const worldZ = ctx.tileZ * ctx.tileSize + localZ;
     const height = ctx.getHeightAt(worldX, worldZ);
 
-    // Skip if underwater
+    // Skip if underwater (ocean or river/pond)
     if (height < ctx.waterThreshold) {
       continue;
+    }
+    if (ctx.getWaterSurfaceAt) {
+      const waterY = ctx.getWaterSurfaceAt(worldX, worldZ);
+      if (height <= waterY + 1.0) continue; // 1m buffer above water surface
     }
 
     // Check minimum spacing
@@ -466,9 +472,13 @@ export function generateOres(
     const worldZ = ctx.tileZ * ctx.tileSize + localZ;
     const height = ctx.getHeightAt(worldX, worldZ);
 
-    // Skip if underwater
+    // Skip if underwater (ocean or river/pond)
     if (height < ctx.waterThreshold) {
       continue;
+    }
+    if (ctx.getWaterSurfaceAt) {
+      const waterY = ctx.getWaterSurfaceAt(worldX, worldZ);
+      if (height <= waterY + 1.0) continue; // 1m buffer above water surface
     }
 
     // Check minimum spacing
@@ -668,9 +678,13 @@ export function generateRocks(
     const worldZ = ctx.tileZ * ctx.tileSize + localZ;
     const height = ctx.getHeightAt(worldX, worldZ);
 
-    // Skip if underwater
+    // Skip if underwater (ocean or river/pond)
     if (height < ctx.waterThreshold) {
       continue;
+    }
+    if (ctx.getWaterSurfaceAt) {
+      const waterY = ctx.getWaterSurfaceAt(worldX, worldZ);
+      if (height <= waterY + 1.0) continue; // 1m buffer above water surface
     }
 
     // Check minimum spacing
@@ -874,9 +888,13 @@ export function generatePlants(
     const worldZ = ctx.tileZ * ctx.tileSize + localZ;
     const height = ctx.getHeightAt(worldX, worldZ);
 
-    // Skip if underwater
+    // Skip if underwater (ocean or river/pond)
     if (height < ctx.waterThreshold) {
       continue;
+    }
+    if (ctx.getWaterSurfaceAt) {
+      const waterY = ctx.getWaterSurfaceAt(worldX, worldZ);
+      if (height <= waterY + 1.0) continue; // 1m buffer above water surface
     }
 
     // Check minimum spacing

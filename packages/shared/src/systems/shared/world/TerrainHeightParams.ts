@@ -11,6 +11,9 @@
 
 import { BiomeType, DEFAULT_BIOME } from "./TerrainBiomeTypes";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import type { RiverDefinition } from "./RiverDefinition";
+import type { RiverSegmentAABB } from "./RiverUtils";
+import { applyRiverCarvingPure, buildApplyRiverCarvingJS } from "./RiverUtils";
 
 // ---------------------------------------------------------------------------
 // Core terrain generation constants
@@ -200,6 +203,7 @@ export const BIOME_CONFIG = {
 export enum LandscapeType {
   Mountain = "mountain",
   Pond = "pond",
+  River = "river",
 }
 
 export interface LandscapeFeatureDef {
@@ -272,6 +276,20 @@ export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
     noiseScale: 0.015,
     noiseAmount: 0.06,
   },
+  // Elevated mountain pond — tests per-body water at elevations above sea level
+  {
+    type: LandscapeType.Pond,
+    x: -120,
+    z: -290,
+    radius: 35,
+    strength: 1.8,
+    layers: 1,
+    shapePower: 3.0,
+    edgeSharpness: 0.1,
+    layerSlope: 0.8,
+    noiseScale: 0.015,
+    noiseAmount: 0.06,
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -304,14 +322,7 @@ export const COAST_SMALL = {
 // Legacy exports — kept for backward compatibility with TerrainWorker.ts
 // ---------------------------------------------------------------------------
 
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_RADIUS = 50;
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_DEPTH = 0.55;
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_CENTER_X = -80;
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_CENTER_Z = 60;
+// Legacy POND_ constants removed — landscape features replaced the hardcoded pond.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SINGLE SOURCE OF TRUTH — pure TypeScript functions
@@ -342,12 +353,31 @@ export function applyLandscapeFeaturesPure(
   worldZ: number,
   features: ReadonlyArray<LandscapeFeatureDef>,
   noise: TerrainNoiseAdapter,
+  riverDef?: RiverDefinition,
+  riverAABBs?: RiverSegmentAABB[],
 ): number {
   for (let i = 0; i < features.length; i++) {
     const feat = features[i];
     const dx = worldX - feat.x;
     const dz = worldZ - feat.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
+
+    // Pond berm: raise terrain in a 5m ring outside the pond radius to
+    // prevent small puddles forming from natural terrain noise dipping
+    // below water level. Smoothly tapers off to avoid visible seams.
+    if (
+      feat.type === LandscapeType.Pond &&
+      dist >= feat.radius &&
+      dist < feat.radius + 5
+    ) {
+      const bermT = 1 - (dist - feat.radius) / 5;
+      const minH = WATER_LEVEL_NORMALIZED + 0.005; // ~0.5m above water in world units
+      if (height < minH) {
+        height += (minH - height) * bermT;
+      }
+      continue;
+    }
+
     if (dist >= feat.radius) continue;
 
     const t = Math.max(0, 1 - dist / feat.radius);
@@ -392,6 +422,20 @@ export function applyLandscapeFeaturesPure(
       height += influence * feat.strength;
     }
   }
+
+  // River carving — applied after landscape features so the channel
+  // cuts through mountains/ponds cleanly.
+  if (riverDef && riverAABBs) {
+    height = applyRiverCarvingPure(
+      height,
+      worldX,
+      worldZ,
+      riverDef,
+      riverAABBs,
+      MAX_HEIGHT,
+    );
+  }
+
   return height;
 }
 
@@ -407,6 +451,8 @@ export function computeBaseHeight(
   biomeWeights: Record<string, number>,
   features: ReadonlyArray<LandscapeFeatureDef>,
   maxHeight: number,
+  riverDef?: RiverDefinition,
+  riverAABBs?: RiverSegmentAABB[],
 ): number {
   // ── 1. Sample noise layers ──────────────────────────────────────────
   const cN = noise.fractal2D(
@@ -531,7 +577,15 @@ export function computeBaseHeight(
 
   // ── 6. Island mask + landscape features ─────────────────────────────
   height = height * islandMask;
-  height = applyLandscapeFeaturesPure(height, worldX, worldZ, features, noise);
+  height = applyLandscapeFeaturesPure(
+    height,
+    worldX,
+    worldZ,
+    features,
+    noise,
+    riverDef,
+    riverAABBs,
+  );
 
   if (islandMask === 0) {
     height = OCEAN_FLOOR_HEIGHT;
@@ -643,6 +697,16 @@ export function buildApplyLandscapeFeaturesJS(): string {
       var dx = worldX - feat.x;
       var dz = worldZ - feat.z;
       var dist = Math.sqrt(dx * dx + dz * dz);
+
+      if (feat.type === '${LandscapeType.Pond}' && dist >= feat.radius && dist < feat.radius + 5) {
+        var bermT = 1 - (dist - feat.radius) / 5;
+        var minH = ${WATER_LEVEL_NORMALIZED} + 0.005;
+        if (height < minH) {
+          height += (minH - height) * bermT;
+        }
+        continue;
+      }
+
       if (dist >= feat.radius) continue;
 
       var t = Math.max(0, 1 - dist / feat.radius);
@@ -682,6 +746,9 @@ export function buildApplyLandscapeFeaturesJS(): string {
       } else {
         height += influence * feat.strength;
       }
+    }
+    if (typeof applyRiverCarving === 'function') {
+      height = applyRiverCarving(height, worldX, worldZ);
     }
     return height;
   }`;
