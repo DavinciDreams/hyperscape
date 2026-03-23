@@ -37,6 +37,7 @@ export interface StreamingDuelCycle {
   // Timing (all in milliseconds)
   cycleStartTime: number;
   phaseStartTime: number;
+  phaseVersion: number;
 
   // Contestants (null during IDLE)
   agent1: AgentContestant | null;
@@ -131,6 +132,7 @@ export interface StreamingStateUpdate {
     cycleStartTime: number;
     phaseStartTime: number;
     phaseEndTime: number;
+    phaseVersion: number;
     timeRemaining: number;
 
     agent1: StreamingCycleAgent | null;

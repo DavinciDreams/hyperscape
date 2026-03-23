@@ -102,11 +102,10 @@ function getCdnUrl(): string {
   if (typeof window !== "undefined") {
     const w = window as Window & { __CDN_URL?: string };
     if (w.__CDN_URL) return w.__CDN_URL;
-    if (
-      typeof import.meta !== "undefined" &&
-      (import.meta as any).env?.PUBLIC_CDN_URL
-    )
-      return (import.meta as any).env.PUBLIC_CDN_URL;
+    const meta = import.meta as ImportMeta & {
+      env?: Record<string, string>;
+    };
+    if (meta.env?.PUBLIC_CDN_URL) return meta.env.PUBLIC_CDN_URL;
   }
   return "http://localhost:5555/game-assets";
 }
@@ -212,12 +211,12 @@ const WATER_EDGE = vec3(0.08, 0.06, 0.04);
  * @param canyonWeight - biome weight for canyon [0..1]
  */
 export function computeTerrainBaseColor(
-  height: any,
-  slope: any,
-  noiseVal: any,
-  noiseVal2: any,
-  forestWeight?: any,
-  canyonWeight?: any,
+  height: ShaderNode,
+  slope: ShaderNode,
+  noiseVal: ShaderNode,
+  noiseVal2: ShaderNode,
+  forestWeight?: ShaderNode,
+  canyonWeight?: ShaderNode,
 ) {
   const fW = forestWeight ?? float(0.0);
   const dW = canyonWeight ?? float(0.0);
@@ -228,7 +227,7 @@ export function computeTerrainBaseColor(
   const tundraGrass = mix(TUNDRA_GRASS, TUNDRA_GRASS_DARK, grassVariation);
   const forestGrass = mix(FOREST_GRASS, FOREST_GRASS_DARK, grassVariation);
   const canyonGrass = mix(CANYON_SAND, CANYON_SAND_DARK, grassVariation);
-  let c: any = add(
+  let c: ShaderNode = add(
     add(mul(tundraGrass, tW), mul(forestGrass, fW)),
     mul(canyonGrass, dW),
   );
@@ -812,7 +811,7 @@ export function createTerrainMaterial(): THREE.Material & {
     mul(sDesertGrass, TEX_DARKEN),
     grassVar,
   );
-  let baseColor: any = add(
+  let baseColor: ShaderNode = add(
     add(mul(tundraGrassC, tW), mul(forestGrassC, fW)),
     mul(canyonGrassC, dW),
   );
@@ -884,6 +883,16 @@ export function createTerrainMaterial(): THREE.Material & {
     WATER_EDGE,
     mul(smoothstep(float(6.5), float(5.0), height), float(0.9)),
   );
+
+  // === RIVER BED / BANK COLORING ===
+  // riverProximity: 1.0 = in channel (muddy brown), smoothstep to 0.0 at bank edge
+  const riverProx = attribute("riverProximity", "float");
+  const riverbedColor = vec3(0.32, 0.22, 0.12); // dark muddy brown
+  const riverBankColor = vec3(0.45, 0.35, 0.22); // sandy bank brown
+  // In channel (proximity > 0.7): full riverbed, bank zone: blend sandy brown → natural
+  const riverBedBlend = smoothstep(float(0.5), float(0.8), riverProx);
+  const riverColor = mix(riverBankColor, riverbedColor, riverBedBlend);
+  baseColor = mix(baseColor, riverColor, riverProx);
 
   // Anti-dithering noise variation (±4% brightness, ±2% color shift)
   const brightnessVar = mul(sub(fineNoise, float(0.5)), float(0.08));

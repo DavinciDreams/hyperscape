@@ -91,7 +91,7 @@ describe("TileMovementManager - Building Integration", () => {
 
     manager.processPlayerTick(playerId, 1);
 
-    expect(mockSetPosition).toHaveBeenCalledWith(11.5, 5.1, 10.5);
+    expect(mockSetPosition).toHaveBeenCalledWith(11.5, 5.01, 10.5);
   });
 
   it("should use terrain height when not in building", () => {
@@ -123,6 +123,6 @@ describe("TileMovementManager - Building Integration", () => {
 
     manager.processPlayerTick(playerId, 1);
 
-    expect(mockSetPosition).toHaveBeenCalledWith(11.5, 2.1, 10.5);
+    expect(mockSetPosition).toHaveBeenCalledWith(11.5, 2.01, 10.5);
   });
 });

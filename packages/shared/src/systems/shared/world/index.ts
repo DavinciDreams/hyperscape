@@ -8,6 +8,7 @@ export * from "./TerrainSystem";
 export * from "./TerrainShader";
 export * from "./SkySystem";
 export * from "./WaterSystem";
+export * from "./WaterBodyRegistry";
 export * from "./Wind";
 export * from "./VegetationSsboUtils";
 export * from "./VegetationSystem";

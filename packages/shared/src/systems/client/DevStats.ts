@@ -157,8 +157,10 @@ export class DevStats extends System {
     this.container.id = "hyperscape-dev-stats";
     this.container.style.cssText = `
       position: fixed;
-      top: 200px;
+      top: 12px;
       left: 12px;
+      max-height: calc(100vh - 24px);
+      overflow-y: auto;
       z-index: 99999;
       font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Monaco', monospace;
       font-size: 11px;
@@ -345,23 +347,84 @@ export class DevStats extends System {
     `;
     this.container.appendChild(this.systemsElement);
 
-    // Add copy button + toggle hint at bottom
+    // Keybinds reference section
+    const keybindsSection = document.createElement("div");
+    keybindsSection.style.cssText = `
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(100, 200, 255, 0.15);
+      font-size: 9px;
+      line-height: 1.6;
+    `;
+
+    const keybindsHeader = document.createElement("div");
+    keybindsHeader.style.cssText = `
+      color: rgba(100, 200, 255, 0.7);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    `;
+    keybindsHeader.textContent = "Debug Keybinds";
+    keybindsSection.appendChild(keybindsHeader);
+
+    const keybinds: Array<[string, string, string]> = [
+      // [key, description, scope]
+      ["F5 / \\", "Toggle this panel", "global"],
+      ["S", "System timing breakdown", "panel"],
+      ["C", "Culling details list", "panel"],
+      ["B", "BFS path overlay", "panel"],
+      ["W", "Walkable tile overlay", "panel"],
+      ["P", "Pathfinding debug (buildings)", "global"],
+      ["T", "Log triangle breakdown (console)", "global"],
+      ["Delete", "Teleport to origin", "global"],
+    ];
+
+    for (const [key, desc, scope] of keybinds) {
+      const row = document.createElement("div");
+      row.style.cssText = `display: flex; justify-content: space-between; gap: 8px;`;
+
+      const keySpan = document.createElement("span");
+      keySpan.style.cssText = `
+        color: #e2e8f0;
+        background: rgba(100, 200, 255, 0.1);
+        border: 1px solid rgba(100, 200, 255, 0.2);
+        border-radius: 3px;
+        padding: 0 4px;
+        font-size: 9px;
+        min-width: 36px;
+        text-align: center;
+        flex-shrink: 0;
+      `;
+      keySpan.textContent = key;
+
+      const descSpan = document.createElement("span");
+      descSpan.style.cssText = `color: #94a3b8; flex: 1;`;
+      descSpan.textContent = desc;
+
+      const scopeSpan = document.createElement("span");
+      scopeSpan.style.cssText = `color: ${scope === "panel" ? "rgba(100, 200, 255, 0.4)" : "#555"}; font-size: 8px; flex-shrink: 0;`;
+      scopeSpan.textContent = scope === "panel" ? "(panel)" : "";
+
+      row.appendChild(keySpan);
+      row.appendChild(descSpan);
+      row.appendChild(scopeSpan);
+      keybindsSection.appendChild(row);
+    }
+
+    this.container.appendChild(keybindsSection);
+
+    // Copy button at the very bottom
     const footer = document.createElement("div");
     footer.style.cssText = `
       margin-top: 6px;
       padding-top: 4px;
       border-top: 1px solid rgba(100, 200, 255, 0.1);
-      color: #666;
-      font-size: 9px;
       text-align: center;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
     `;
 
     const copyBtn = document.createElement("button");
-    copyBtn.textContent = "Copy";
+    copyBtn.textContent = "Copy Stats";
     copyBtn.style.cssText = `
       background: rgba(100, 200, 255, 0.15);
       border: 1px solid rgba(100, 200, 255, 0.3);
@@ -379,18 +442,23 @@ export class DevStats extends System {
         copyBtn.textContent = "Copied!";
         copyBtn.style.color = "#4ade80";
         setTimeout(() => {
-          copyBtn.textContent = "Copy";
+          copyBtn.textContent = "Copy Stats";
           copyBtn.style.color = "#94a3b8";
         }, 1500);
       });
     });
     footer.appendChild(copyBtn);
 
-    const hintText = document.createElement("span");
-    hintText.textContent = "F5/\\ toggle • S systems • C culling";
-    footer.appendChild(hintText);
-
     this.container.appendChild(footer);
+
+    // Enable pointer-events on hover so the panel can be scrolled,
+    // but otherwise let clicks pass through to the game canvas.
+    this.container.addEventListener("mouseenter", () => {
+      if (this.container) this.container.style.pointerEvents = "auto";
+    });
+    this.container.addEventListener("mouseleave", () => {
+      if (this.container) this.container.style.pointerEvents = "none";
+    });
 
     document.body.appendChild(this.container);
   }

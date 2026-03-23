@@ -9,6 +9,7 @@ import type {
   HandDetector,
   MediaPipeHandsMediaPipeModelConfig,
 } from "@tensorflow-models/hand-pose-detection";
+import * as handPoseDetection from "@tensorflow-models/hand-pose-detection/dist/index.js";
 
 import "@tensorflow/tfjs-backend-webgpu";
 

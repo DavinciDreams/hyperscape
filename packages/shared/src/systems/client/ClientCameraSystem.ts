@@ -2747,6 +2747,7 @@ export class ClientCameraSystem extends SystemBase {
   private clampAboveTerrain(pos: THREE.Vector3, minClearance: number): void {
     const terrain = this.getTerrainSystem();
     if (!terrain) return;
+    // getHeightAt() is bridge-aware — returns deck height on bridge tiles
     const height = terrain.getHeightAt(pos.x, pos.z);
     if (Number.isFinite(height) && pos.y < height + minClearance) {
       pos.y = height + minClearance;

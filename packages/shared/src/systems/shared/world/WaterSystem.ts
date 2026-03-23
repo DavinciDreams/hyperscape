@@ -47,6 +47,9 @@ import type { World } from "../../../types";
 import type { TerrainTile } from "../../../types/world/terrain";
 import type { Wind } from "./Wind";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
+import type { RiverDefinition } from "./RiverDefinition";
+import type { RiverSegmentAABB } from "./RiverUtils";
+import { projectOntoRiver } from "./RiverUtils";
 
 // ============================================================================
 // CONFIGURATION
@@ -263,9 +266,7 @@ export class WaterSystem {
       // When enabled, visibility will be controlled by frustum culling in update()
     }
 
-    console.log(
-      `[WaterSystem] Realtime water reflections ${enabled ? "enabled" : "disabled"}`,
-    );
+    // Reflection state toggled
   }
 
   get waterUniforms(): WaterUniforms | null {
@@ -336,9 +337,7 @@ export class WaterSystem {
     // Create ocean material without reflections (different visual style)
     this.oceanMaterial = this.createOceanMaterial();
 
-    console.log(
-      "[WaterSystem] Initialized with lake (reflective) and ocean (non-reflective) shaders",
-    );
+    // Lake (reflective) and ocean (non-reflective) shaders initialized
   }
 
   /**
@@ -357,9 +356,7 @@ export class WaterSystem {
       if (reflectorObj.camera) {
         reflectorObj.camera.layers.set(0); // Only see layer 0 (terrain, buildings)
         reflectorObj.camera.layers.enable(2); // Also see floors
-        console.log(
-          "[WaterSystem] Reflector camera configured to ignore grass (layer 1)",
-        );
+        // Reflector camera configured to exclude grass (layer 1)
       }
 
       // Set up callbacks to track when reflection camera is rendering
@@ -372,10 +369,7 @@ export class WaterSystem {
         world.isRenderingReflection = false;
       };
 
-      console.log(
-        "[WaterSystem] Added reflector target to scene at y=",
-        this.reflection.target.position.y,
-      );
+      // Reflector target added to scene
     }
   }
 
@@ -1327,7 +1321,8 @@ export class WaterSystem {
     const uvs: number[] = [];
     const shores: number[] = [];
     const indices: number[] = [];
-    const vertMap = new Map<string, number>();
+    const stride = resolution + 1;
+    const vertMap = new Map<number, number>();
     let idx = 0;
 
     for (let i = 0; i < resolution; i++) {
@@ -1349,7 +1344,7 @@ export class WaterSystem {
         const quad: number[] = [];
 
         for (const [ci, cj] of corners) {
-          const key = `${ci},${cj}`;
+          const key = ci * stride + cj;
           if (!vertMap.has(key)) {
             verts.push(
               (ci / resolution - 0.5) * tileSize,
@@ -1466,6 +1461,178 @@ export class WaterSystem {
     // This prevents expensive water shader from rendering in minimap
     mesh.layers.set(1);
 
+    return mesh;
+  }
+
+  /**
+   * Generate river water mesh with per-vertex Y following interpolated surfaceY.
+   * Unlike generateWaterMesh (flat plane at a single threshold), this creates
+   * a mesh that slopes naturally from highland to ocean along the river path.
+   */
+  generateRiverWaterMesh(
+    tile: TerrainTile,
+    tileSize: number,
+    river: RiverDefinition,
+    aabbs: RiverSegmentAABB[],
+  ): THREE.Mesh | null {
+    const originX = tile.x * tileSize;
+    const originZ = tile.z * tileSize;
+
+    // Fixed resolution for river water — do NOT use LOD.
+    // Rivers are narrow features; low LOD (cell=6.25m) misses thin sections
+    // and creates patchy, inconsistent coverage across tiles. River meshes
+    // have very few quads (only where the river is), so cost is negligible.
+    const resolution = WATER_LOD.HIGH_RESOLUTION;
+
+    // Sample grid — project each point onto river for channel test + surfaceY
+    const cellSize = tileSize / resolution;
+    const inRiver: boolean[][] = [];
+    const surfaceYGrid: number[][] = [];
+    for (let i = 0; i <= resolution; i++) {
+      inRiver[i] = [];
+      surfaceYGrid[i] = [];
+      for (let j = 0; j <= resolution; j++) {
+        const wx = originX + (i / resolution - 0.5) * tileSize;
+        const wz = originZ + (j / resolution - 0.5) * tileSize;
+        const proj = projectOntoRiver(wx, wz, river, aabbs);
+        if (proj && !isNaN(proj.surfaceY)) {
+          // Include a half-cell margin beyond the channel boundary to prevent
+          // discretization gaps at the water's edge.
+          inRiver[i][j] = proj.dist < proj.halfWidth + cellSize * 0.5;
+          surfaceYGrid[i][j] = proj.surfaceY;
+        } else {
+          inRiver[i][j] = false;
+          surfaceYGrid[i][j] = 0;
+        }
+      }
+    }
+
+    // Shore distance via Chamfer distance transform (same as generateWaterMesh)
+    const DIAG = cellSize * 1.414;
+    const shoreDist: number[][] = [];
+    for (let i = 0; i <= resolution; i++) {
+      shoreDist[i] = [];
+      for (let j = 0; j <= resolution; j++) {
+        shoreDist[i][j] = inRiver[i][j] ? WATER.MAX_DEPTH : 0;
+      }
+    }
+    for (let i = 0; i <= resolution; i++) {
+      for (let j = 0; j <= resolution; j++) {
+        const d = shoreDist[i];
+        if (i > 0) d[j] = Math.min(d[j], shoreDist[i - 1][j] + cellSize);
+        if (j > 0) d[j] = Math.min(d[j], d[j - 1] + cellSize);
+        if (i > 0 && j > 0)
+          d[j] = Math.min(d[j], shoreDist[i - 1][j - 1] + DIAG);
+        if (i > 0 && j < resolution)
+          d[j] = Math.min(d[j], shoreDist[i - 1][j + 1] + DIAG);
+      }
+    }
+    for (let i = resolution; i >= 0; i--) {
+      for (let j = resolution; j >= 0; j--) {
+        const d = shoreDist[i];
+        if (i < resolution)
+          d[j] = Math.min(d[j], shoreDist[i + 1][j] + cellSize);
+        if (j < resolution) d[j] = Math.min(d[j], d[j + 1] + cellSize);
+        if (i < resolution && j < resolution)
+          d[j] = Math.min(d[j], shoreDist[i + 1][j + 1] + DIAG);
+        if (i < resolution && j > 0)
+          d[j] = Math.min(d[j], shoreDist[i + 1][j - 1] + DIAG);
+      }
+    }
+
+    // Build geometry — quads where at least one corner is in the river
+    const verts: number[] = [];
+    const uvs: number[] = [];
+    const shores: number[] = [];
+    const indices: number[] = [];
+    const vertMap = new Map<string, number>();
+    let idx = 0;
+
+    for (let i = 0; i < resolution; i++) {
+      for (let j = 0; j < resolution; j++) {
+        if (
+          !inRiver[i][j] &&
+          !inRiver[i + 1][j] &&
+          !inRiver[i][j + 1] &&
+          !inRiver[i + 1][j + 1]
+        )
+          continue;
+
+        const corners: [number, number][] = [
+          [i, j],
+          [i + 1, j],
+          [i, j + 1],
+          [i + 1, j + 1],
+        ];
+        const quad: number[] = [];
+
+        for (const [ci, cj] of corners) {
+          const key = `${ci},${cj}`;
+          if (!vertMap.has(key)) {
+            const localX = (ci / resolution - 0.5) * tileSize;
+            const localZ = (cj / resolution - 0.5) * tileSize;
+
+            // Per-vertex Y = interpolated surfaceY at this position.
+            // For corners outside the channel, use the projected surfaceY
+            // (which is still valid — just from the nearest segment).
+            let vertY = surfaceYGrid[ci][cj];
+            if (!inRiver[ci][cj] && vertY === 0) {
+              // Corner has no projection — borrow from nearest in-river neighbor
+              for (const [ni, nj] of corners) {
+                if (inRiver[ni][nj]) {
+                  vertY = surfaceYGrid[ni][nj];
+                  break;
+                }
+              }
+            }
+
+            verts.push(localX, vertY, localZ);
+            uvs.push(ci / resolution, cj / resolution);
+            shores.push(shoreDist[ci][cj]);
+            vertMap.set(key, idx++);
+          }
+          quad.push(vertMap.get(key)!);
+        }
+        indices.push(quad[0], quad[2], quad[1], quad[1], quad[2], quad[3]);
+      }
+    }
+
+    if (verts.length === 0) return null;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geom.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geom.setAttribute(
+      "shoreDistance",
+      new THREE.Float32BufferAttribute(shores, 1),
+    );
+    geom.setIndex(indices);
+
+    const normals = new Float32Array(verts.length);
+    for (let ni = 0; ni < normals.length; ni += 3) {
+      normals[ni] = 0;
+      normals[ni + 1] = 1;
+      normals[ni + 2] = 0;
+    }
+    geom.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+
+    // Mesh at Y=0 — vertex Y values are already absolute world heights
+    const material = this.lakeMaterial;
+    if (!material) {
+      return null;
+    }
+    const mesh = new THREE.Mesh(geom, material);
+    mesh.position.y = 0;
+    mesh.name = `Water_river_${tile.key}`;
+    mesh.renderOrder = 100;
+    mesh.userData = {
+      type: "water",
+      waterType: "lake",
+      walkable: false,
+      clickable: false,
+    };
+    mesh.layers.set(1);
+    this.waterMeshes.push(mesh);
     return mesh;
   }
 
@@ -1617,6 +1784,41 @@ export class WaterSystem {
   }
 
   destroy(): void {
+    // Dispose all water meshes (geometry + remove from scene)
+    for (const mesh of this.waterMeshes) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+    }
     this.waterMeshes = [];
+
+    // Dispose materials
+    this.lakeMaterial?.dispose();
+    this.lakeMaterial = undefined;
+    this.oceanMaterial?.dispose();
+    this.oceanMaterial = undefined;
+
+    // Dispose procedural textures
+    this.normalTex1?.dispose();
+    this.normalTex1 = undefined;
+    this.normalTex2?.dispose();
+    this.normalTex2 = undefined;
+    this.foamTex?.dispose();
+    this.foamTex = undefined;
+
+    // Dispose reflector render target + remove from scene
+    if (this.reflection) {
+      if (this.reflection.target) {
+        this.reflection.target.removeFromParent();
+      }
+      // Dispose the reflector's internal WebGPU render target (GPU framebuffer)
+      const reflectorNode = this.reflection as unknown as {
+        renderTarget?: { dispose(): void };
+      };
+      reflectorNode.renderTarget?.dispose();
+    }
+    this.reflection = undefined;
+
+    this.uniforms = null;
+    this.oceanUniforms = null;
   }
 }

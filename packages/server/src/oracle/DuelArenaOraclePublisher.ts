@@ -685,6 +685,7 @@ export class DuelArenaOraclePublisher {
     }
 
     existing.status = "LOCKED";
+    existing.betCloseTime = Math.min(existing.betCloseTime, event.betCloseTime);
     existing.fightStartTime = event.fightStartTime;
     existing.updatedAt = nowIso();
     this.records.set(existing.duelId, existing);

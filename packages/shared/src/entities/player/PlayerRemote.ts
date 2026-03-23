@@ -137,6 +137,34 @@ function isRemoteDeathTraceEnabled(): boolean {
   }
 }
 
+const FALLBACK_AVATAR_RETRY_DELAY_MS = 15_000;
+const FALLBACK_PLAYER_PALETTE = [
+  0x27f5d2,
+  0xff5b6d,
+  0xf7c948,
+  0x7dd3fc,
+] as const;
+
+const fallbackHeadGeometry = new THREE.SphereGeometry(0.28, 16, 16);
+const fallbackBeaconGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1.1, 8);
+const OWNED_FALLBACK_GEOMETRY_KEY = "__hyperscapeOwnedFallbackGeometry";
+
+function cloneFallbackGeometry<T extends THREE.BufferGeometry>(geometry: T): T {
+  const clone = geometry.clone();
+  // Only dispose geometries that were explicitly cloned for one fallback
+  // avatar instance; shared source geometries must remain alive.
+  clone.userData[OWNED_FALLBACK_GEOMETRY_KEY] = true;
+  return clone;
+}
+
+function fallbackPlayerColorSeed(id: string): number {
+  let seed = 0;
+  for (let index = 0; index < id.length; index += 1) {
+    seed = (seed * 31 + id.charCodeAt(index)) >>> 0;
+  }
+  return seed;
+}
+
 export class PlayerRemote extends Entity implements HotReloadable {
   isPlayer: boolean;
   // Explicit non-local flag for tests
@@ -198,6 +226,8 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
   /** Distance fade controller - dissolve effect for entities near render distance */
   private _distanceFade: DistanceFadeController | null = null;
+  private _fallbackAvatarRoot: THREE.Group | null = null;
+  private _nextAvatarRetryAt = 0;
 
   /** GPU instancing for batched rendering of player avatars */
   private _instancedRenderer: MobInstancedRenderer | null = null;
@@ -399,6 +429,8 @@ export class PlayerRemote extends Entity implements HotReloadable {
         throw new Error("Avatar load returned null after retries");
       }
 
+      this.clearFallbackAvatar();
+
       // Clean up previous avatar
       if (this.avatar) {
         this.avatar.deactivate();
@@ -587,6 +619,7 @@ export class PlayerRemote extends Entity implements HotReloadable {
       // Avatar loaded successfully
       loadSuccess = true;
       this.avatarUrl = avatarUrl;
+      this._nextAvatarRetryAt = 0;
 
       // CRITICAL: Sync base transform and position the avatar BEFORE making it visible.
       // Without this, the avatar appears at (0,0,0) in T-pose for one frame because
@@ -621,6 +654,8 @@ export class PlayerRemote extends Entity implements HotReloadable {
     } catch (error) {
       console.error("[PlayerRemote] Avatar load failed:", error);
       loadSuccess = false;
+      this.ensureFallbackAvatar();
+      this._nextAvatarRetryAt = Date.now() + FALLBACK_AVATAR_RETRY_DELAY_MS;
     } finally {
       // Clear loading flag
       this.isLoadingAvatar = false;
@@ -630,6 +665,84 @@ export class PlayerRemote extends Entity implements HotReloadable {
         success: loadSuccess,
       });
     }
+  }
+
+  private clearFallbackAvatar(): void {
+    if (!this._fallbackAvatarRoot) {
+      return;
+    }
+
+    const fallbackRoot = this._fallbackAvatarRoot;
+    this._fallbackAvatarRoot = null;
+    fallbackRoot.removeFromParent();
+    fallbackRoot.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) {
+        return;
+      }
+      if (child.geometry.userData[OWNED_FALLBACK_GEOMETRY_KEY] === true) {
+        child.geometry.dispose();
+      }
+      if (Array.isArray(child.material)) {
+        child.material.forEach((material) => material.dispose());
+        return;
+      }
+      child.material.dispose();
+    });
+    if (this.mesh === fallbackRoot) {
+      this.mesh = null;
+    }
+  }
+
+  private ensureFallbackAvatar(): void {
+    if (this._fallbackAvatarRoot) {
+      return;
+    }
+
+    const colorSeed =
+      fallbackPlayerColorSeed(this.id) % FALLBACK_PLAYER_PALETTE.length;
+    const primaryColor = new THREE.Color(FALLBACK_PLAYER_PALETTE[colorSeed]);
+    const accentColor = new THREE.Color(
+      FALLBACK_PLAYER_PALETTE[
+        (colorSeed + 1) % FALLBACK_PLAYER_PALETTE.length
+      ],
+    );
+
+    const bodyMaterial = new MeshBasicNodeMaterial();
+    bodyMaterial.color = primaryColor;
+    const headMaterial = new MeshBasicNodeMaterial();
+    headMaterial.color = accentColor;
+
+    const body = new THREE.Mesh(cloneFallbackGeometry(capsuleGeometry), bodyMaterial);
+    body.name = `PlayerRemoteFallbackBody_${this.id}`;
+    body.scale.setScalar(1.45);
+
+    const head = new THREE.Mesh(cloneFallbackGeometry(fallbackHeadGeometry), headMaterial);
+    head.name = `PlayerRemoteFallbackHead_${this.id}`;
+    head.position.y = 2.15;
+
+    const beaconMaterial = new MeshBasicNodeMaterial();
+    beaconMaterial.color = accentColor;
+    const beacon = new THREE.Mesh(
+      cloneFallbackGeometry(fallbackBeaconGeometry),
+      beaconMaterial,
+    );
+    beacon.name = `PlayerRemoteFallbackBeacon_${this.id}`;
+    beacon.position.y = 3.05;
+
+    const fallbackRoot = new THREE.Group();
+    fallbackRoot.name = `PlayerRemoteFallback_${this.id}`;
+    fallbackRoot.add(body);
+    fallbackRoot.add(head);
+    fallbackRoot.add(beacon);
+
+    const scene = this.world.stage?.scene;
+    if (scene) {
+      scene.add(fallbackRoot);
+    } else {
+      this.node.add(fallbackRoot);
+    }
+    this._fallbackAvatarRoot = fallbackRoot;
+    this.mesh = fallbackRoot;
   }
 
   getAnchorMatrix() {
@@ -840,7 +953,12 @@ export class PlayerRemote extends Entity implements HotReloadable {
     // fails (e.g., large VRM under memory pressure or concurrent loads),
     // the entity stays invisible with no retry. This safety net re-triggers
     // the load on the next frame.
-    if (!this.avatar && !this.isLoadingAvatar && !this.destroyed) {
+    if (
+      !this.avatar &&
+      !this.isLoadingAvatar &&
+      !this.destroyed &&
+      Date.now() >= this._nextAvatarRetryAt
+    ) {
       this.applyAvatar();
     }
 
@@ -941,6 +1059,13 @@ export class PlayerRemote extends Entity implements HotReloadable {
           this.mesh.visible = true;
         }
       }
+    }
+
+    if (this._fallbackAvatarRoot) {
+      this._fallbackAvatarRoot.position.copy(this.node.position);
+      this._fallbackAvatarRoot.quaternion.copy(this.node.quaternion);
+      this._fallbackAvatarRoot.updateMatrix();
+      this._fallbackAvatarRoot.updateMatrixWorld(true);
     }
 
     // Use server-provided emote state directly - no inference
@@ -1333,6 +1458,7 @@ export class PlayerRemote extends Entity implements HotReloadable {
       }
       this.avatar = undefined;
     }
+    this.clearFallbackAvatar();
 
     // 5. Deactivate visual components
     this.base.deactivate();

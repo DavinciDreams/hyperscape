@@ -765,6 +765,9 @@ function _drawIconGlyph(
 /** Terrain system interface used for height sampling and click-to-move */
 interface TerrainSystemLike {
   getHeightAt: (x: number, z: number) => number;
+  getWaterBodyRegistry?: () => {
+    getWaterSurfaceAt: (x: number, z: number) => number;
+  };
 }
 
 /** Network send interface needed for server-authoritative move requests */

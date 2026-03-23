@@ -11,16 +11,18 @@
  *   bun run cdn:up --force  - Force restart CDN container
  */
 
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import fs from 'fs'
+import { resolveDockerBinary } from '../packages/server/src/infrastructure/docker/resolveDockerBinary.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.join(__dirname, '..')
 const serverDir = path.join(rootDir, 'packages/server')
 // CDN serves from packages/server/world/assets by default (docker-compose.yml)
 const assetsDir = path.join(serverDir, 'world', 'assets')
+const DOCKER_BIN = resolveDockerBinary()
 
 const args = process.argv.slice(2)
 const forceRestart = args.includes('--force') || args.includes('-f')
@@ -35,9 +37,22 @@ const colors = {
   dim: '\x1b[2m',
 }
 
+function runCommand(command, args, options = {}) {
+  return execFileSync(command, args, options)
+}
+
+function runDocker(args, options = {}) {
+  return runCommand(DOCKER_BIN, args, options)
+}
+
+function runDockerCompose(args, options = {}) {
+  const compose = getDockerComposeCommand()
+  return runCommand(compose.command, [...compose.args, ...args], options)
+}
+
 function isDockerAvailable() {
   try {
-    execSync('docker info', { stdio: 'ignore' })
+    runDocker(['info'], { stdio: 'ignore' })
     return true
   } catch {
     return false
@@ -47,13 +62,19 @@ function isDockerAvailable() {
 function getDockerComposeCommand() {
   // Try docker compose (newer Docker versions) first
   try {
-    execSync('docker compose version', { stdio: 'ignore' })
-    return 'docker compose'
+    runDocker(['compose', 'version'], { stdio: 'ignore' })
+    return {
+      command: DOCKER_BIN,
+      args: ['compose'],
+    }
   } catch {
     // Fall back to docker-compose (older versions or standalone)
     try {
-      execSync('docker-compose version', { stdio: 'ignore' })
-      return 'docker-compose'
+      runCommand('docker-compose', ['version'], { stdio: 'ignore' })
+      return {
+        command: 'docker-compose',
+        args: [],
+      }
     } catch {
       throw new Error('Neither "docker compose" nor "docker-compose" is available')
     }
@@ -62,7 +83,7 @@ function getDockerComposeCommand() {
 
 function isCDNRunning() {
   try {
-    const status = execSync('docker ps --filter "name=^/hyperscape-cdn$" --format "{{.Status}}"', {
+    const status = runDocker(['ps', '--filter', 'name=^/hyperscape-cdn$', '--format', '{{.Status}}'], {
       encoding: 'utf8',
       cwd: serverDir
     }).trim()
@@ -74,15 +95,15 @@ function isCDNRunning() {
 
 function removeExistingCDNContainer() {
   try {
-    const existing = execSync(
-      'docker ps -a --filter "name=^/hyperscape-cdn$" --format "{{.ID}}"',
+    const existing = runDocker(
+      ['ps', '-a', '--filter', 'name=^/hyperscape-cdn$', '--format', '{{.ID}}'],
       { encoding: 'utf8', cwd: serverDir },
     ).trim()
 
     if (!existing) return false
 
     console.log(`${colors.yellow}Removing existing hyperscape-cdn container...${colors.reset}`)
-    execSync('docker rm -f hyperscape-cdn', {
+    runDocker(['rm', '-f', 'hyperscape-cdn'], {
       stdio: 'inherit',
       cwd: serverDir,
     })
@@ -103,12 +124,11 @@ async function isCDNHealthy() {
 
 function restartCDN() {
   console.log(`${colors.blue}Restarting CDN container...${colors.reset}`)
-  const dockerComposeCmd = getDockerComposeCommand()
   // If another stack created a container with the same name but different port mapping,
   // remove it first so this compose file can recreate it with the expected localhost:8080 binding.
   removeExistingCDNContainer()
   // Use force-recreate so volume mounts refresh (important if assets dir was replaced)
-  execSync(`${dockerComposeCmd} up -d --force-recreate cdn`, {
+  runDockerCompose(['up', '-d', '--force-recreate', 'cdn'], {
     stdio: 'inherit',
     cwd: serverDir
   })
@@ -192,16 +212,15 @@ async function ensureCDNRunning() {
     // Start CDN
     console.log(`${colors.blue}Starting CDN container...${colors.reset}`)
     console.log(`${colors.dim}Serving assets from: ${assetsDir}${colors.reset}`)
-    const dockerComposeCmd = getDockerComposeCommand()
     try {
-      execSync(`${dockerComposeCmd} up -d cdn`, {
+      runDockerCompose(['up', '-d', 'cdn'], {
         stdio: 'inherit',
         cwd: serverDir
       })
     } catch {
       // Recover from stale name collisions created by other docker-compose files.
       removeExistingCDNContainer()
-      execSync(`${dockerComposeCmd} up -d cdn`, {
+      runDockerCompose(['up', '-d', 'cdn'], {
         stdio: 'inherit',
         cwd: serverDir
       })

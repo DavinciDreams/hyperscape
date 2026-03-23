@@ -3721,7 +3721,9 @@ export class ClientNetwork extends SystemBase {
           modify: (data: Record<string, unknown>) => entity.modify(data),
         };
       },
-      // Pass terrain height function for smooth Y updates
+      // Pass terrain height function for smooth Y updates.
+      // getHeightAt() is bridge-aware (returns deck height on bridge tiles),
+      // so no per-caller bridge check is needed.
       terrain?.getHeightAt
         ? (x: number, z: number) => terrain.getHeightAt!(x, z)
         : undefined,

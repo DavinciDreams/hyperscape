@@ -38,7 +38,7 @@ import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
 import { GATHERING_CONSTANTS } from "../../../constants/GatheringConstants";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
-import { findWaterEdgePoints, shuffleArray } from "../../../utils/ShoreUtils";
+import { findFishingSpotTiles, shuffleArray } from "../../../utils/ShoreUtils";
 import type { WorldArea } from "../../../types/world/world-types";
 // Note: quaternionPool no longer used here - face rotation is deferred to FaceDirectionManager
 
@@ -240,6 +240,10 @@ export class ResourceSystem extends SystemBase {
   private readonly _completedSessionsBuffer: PlayerID[] = [];
   private readonly _respawnedResourcesBuffer: ResourceID[] = [];
   private readonly _spotsToMoveBuffer: ResourceID[] = [];
+
+  /** Areas where fishing spots couldn't spawn because collision WATER flags
+   *  weren't baked yet. Retried each tick until flags are available. */
+  private pendingFishingAreas = new Map<string, WorldArea>();
 
   // =============================================================================
   // TOOL DATA - Now loaded from tools.json manifest
@@ -624,10 +628,12 @@ export class ResourceSystem extends SystemBase {
     }
 
     for (const [areaId, area] of Object.entries(ALL_WORLD_AREAS)) {
-      if (!area.resources || area.resources.length === 0) continue;
+      const hasResources = area.resources && area.resources.length > 0;
+      const hasFishing = area.fishing?.enabled;
+      if (!hasResources && !hasFishing) continue;
       if (DEBUG_GATHERING) {
         console.log(
-          `[ResourceSystem] Processing area "${areaId}" with ${area.resources.length} resources`,
+          `[ResourceSystem] Processing area "${areaId}" with ${area.resources?.length ?? 0} resources${hasFishing ? " + fishing" : ""}`,
         );
       }
 
@@ -733,8 +739,8 @@ export class ResourceSystem extends SystemBase {
           lowestPoint = { x, z, h };
         }
         if (h > maxHeight) maxHeight = h;
-        if (h < 5.4) waterCount++;
-        if (h >= 5.4 && h <= 20.0) shoreCount++;
+        if (h < TERRAIN_CONSTANTS.WATER_THRESHOLD) waterCount++;
+        if (h >= TERRAIN_CONSTANTS.WATER_THRESHOLD && h <= 20.0) shoreCount++;
       }
     }
 
@@ -748,51 +754,69 @@ export class ResourceSystem extends SystemBase {
         `[ResourceSystem] 🎣 Lowest point: (${lowestPoint.x},${lowestPoint.z})=${lowestPoint.h.toFixed(2)}m`,
       );
       console.log(
-        `[ResourceSystem] 🎣 Looking for: water < 5.4m adjacent to shore 5.4-20.0m`,
+        `[ResourceSystem] 🎣 Looking for: water < ${TERRAIN_CONSTANTS.WATER_THRESHOLD}m adjacent to shore ${TERRAIN_CONSTANTS.WATER_THRESHOLD}-20.0m`,
       );
     }
 
     const fishing = area.fishing!;
 
-    // Find water edge points (IN the water, adjacent to walkable land)
-    // sampleInterval=1 matches tile size for tile-accurate adjacency checks
-    const waterEdgePoints = findWaterEdgePoints(
+    // Find spots at the visible water's edge using collision flags + terrain probing.
+    // Walks from walkable land into water direction to find where terrain drops
+    // below water surface — the exact point where water becomes visible.
+    const getHeight = this.terrainSystem.getHeightAt.bind(this.terrainSystem);
+    const registry = this.terrainSystem.getWaterBodyRegistry();
+    const getWaterSurface = registry.getWaterSurfaceAt.bind(registry);
+    let shorePoints = findFishingSpotTiles(
+      this.world.collision,
       area.bounds,
-      this.terrainSystem.getHeightAt.bind(this.terrainSystem),
-      {
-        sampleInterval: 1, // 1m = 1 tile for tile-accurate detection
-        waterThreshold: TERRAIN_CONSTANTS.WATER_THRESHOLD,
-        shoreMaxHeight: 20.0, // Higher to accommodate elevated island terrain
-        minSpacing: 8, // Increased spacing to spread spots out more
-      },
+      getHeight,
+      getWaterSurface,
+      8, // minSpacing — spread spots out
     );
+
+    // If collision flags returned nothing, terrain tiles aren't baked yet
+    // (called at server startup before tiles load). Queue for retry — the
+    // collision-flag approach is the only one that guarantees alignment with
+    // the water mesh, so we never fall back to height sampling.
+    if (shorePoints.length === 0) {
+      if (DEBUG_GATHERING) {
+        console.log(
+          `[ResourceSystem] 🎣 No collision WATER flags in ${areaId} — tiles not baked yet, deferring fishing spot spawn`,
+        );
+      }
+      this.pendingFishingAreas.set(areaId, area);
+      return;
+    }
+
+    // Collision flags were available and returned results — remove from pending
+    this.pendingFishingAreas.delete(areaId);
 
     if (DEBUG_GATHERING) {
       console.log(
-        `[ResourceSystem] 🎣 findWaterEdgePoints found ${waterEdgePoints.length} water edge points in ${areaId}`,
+        `[ResourceSystem] 🎣 Found ${shorePoints.length} shore points in ${areaId}`,
       );
     }
 
-    if (waterEdgePoints.length === 0) {
+    if (shorePoints.length === 0) {
       console.warn(
-        `[ResourceSystem] ⚠️ No water edge points found in ${areaId} - no dynamic fishing spots spawned. ` +
-          `Area may not have shallow water near walkable shore.`,
+        `[ResourceSystem] ⚠️ No shore points found in ${areaId} - no dynamic fishing spots spawned. ` +
+          `Area may not have walkable land adjacent to water.`,
       );
       return;
     }
 
     // Randomize order for variety
-    shuffleArray(waterEdgePoints);
+    shuffleArray(shorePoints);
 
     // Determine how many spots to spawn (at least one of each type if possible)
-    const spotsToSpawn = Math.min(fishing.spotCount, waterEdgePoints.length);
+    const spotsToSpawn = Math.min(fishing.spotCount, shorePoints.length);
 
     // Build spawn points (round-robin through spot types to ensure variety)
     const spawnPoints: TerrainResourceSpawnPoint[] = [];
     const spawnedTypes: string[] = [];
 
     for (let i = 0; i < spotsToSpawn; i++) {
-      const point = waterEdgePoints[i];
+      const point = shorePoints[i];
       const spotTypeId = fishing.spotTypes[i % fishing.spotTypes.length];
 
       // Extract subType: "fishing_spot_net" -> "net"
@@ -817,7 +841,7 @@ export class ResourceSystem extends SystemBase {
       if (DEBUG_GATHERING) {
         console.log(
           `[ResourceSystem] Spawning ${spawnPoints.length} dynamic fishing spots in ${areaId} ` +
-            `(found ${waterEdgePoints.length} water edge points)`,
+            `(found ${shorePoints.length} shore points)`,
         );
       }
       this.registerTerrainResources({ spawnPoints, isManifest: true });
@@ -2377,18 +2401,17 @@ export class ResourceSystem extends SystemBase {
       maxZ: oldPos.z + searchRadius,
     };
 
-    const nearbyWaterEdges = findWaterEdgePoints(
+    const registry = this.terrainSystem.getWaterBodyRegistry();
+    const nearbyShorePoints = findFishingSpotTiles(
+      this.world.collision,
       searchBounds,
       this.terrainSystem.getHeightAt.bind(this.terrainSystem),
-      {
-        waterThreshold: TERRAIN_CONSTANTS.WATER_THRESHOLD,
-        shoreMaxHeight: 20.0, // Higher to accommodate elevated island terrain
-        minSpacing: 3, // Smaller spacing for relocation candidates
-      },
+      registry.getWaterSurfaceAt.bind(registry),
+      3, // Smaller spacing for relocation candidates
     );
 
     // Filter out positions too close to current location (must move at least 5m)
-    const candidates = nearbyWaterEdges.filter((p) => {
+    const candidates = nearbyShorePoints.filter((p) => {
       const dist = Math.sqrt((p.x - oldPos.x) ** 2 + (p.z - oldPos.z) ** 2);
       return dist >= 5;
     });
@@ -2481,6 +2504,30 @@ export class ResourceSystem extends SystemBase {
 
     // OSRS-ACCURACY: Process fishing spot movement
     this.processFishingSpotMovement(tickNumber);
+
+    // Retry deferred fishing spot spawns (waiting for collision flags to bake).
+    // Only check every 10 ticks (~6s) to avoid pointless iteration.
+    if (this.pendingFishingAreas.size > 0 && tickNumber % 10 === 0) {
+      for (const [areaId, area] of this.pendingFishingAreas) {
+        // Quick probe: check if ANY water flag exists in the area bounds.
+        // If not, tiles aren't baked yet — skip the full spawn attempt.
+        const cx = Math.floor((area.bounds.minX + area.bounds.maxX) / 2);
+        const cz = Math.floor((area.bounds.minZ + area.bounds.maxZ) / 2);
+        const hasAnyFlags =
+          this.world.collision.getFlags(cx, cz) !== 0 ||
+          this.world.collision.getFlags(
+            Math.floor(area.bounds.minX),
+            Math.floor(area.bounds.minZ),
+          ) !== 0 ||
+          this.world.collision.getFlags(
+            Math.floor(area.bounds.maxX),
+            Math.floor(area.bounds.maxZ),
+          ) !== 0;
+        if (hasAnyFlags) {
+          this.spawnDynamicFishingSpots(areaId, area);
+        }
+      }
+    }
 
     // FORESTRY: Process resource timers (depletion/regeneration)
     this.processResourceTimers(tickNumber);

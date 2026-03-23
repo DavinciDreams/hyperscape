@@ -20,7 +20,7 @@ import { writePacket } from "@hyperscape/shared";
 import type { SpatialIndex } from "./SpatialIndex";
 import { BandwidthBudget, PacketPriority } from "./BandwidthBudget";
 import type { UwsWebSocketAdapter } from "../../startup/UwsWebSocketAdapter";
-import type uWS from "uWebSockets.js";
+import type * as uWS from "uWebSockets.js";
 
 /**
  * BroadcastManager - Manages network message broadcasting
