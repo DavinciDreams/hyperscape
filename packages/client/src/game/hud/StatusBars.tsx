@@ -553,13 +553,13 @@ export function StatusBars({
         padding: config.displayMode === "bars" ? "4px 6px" : compactPadding,
         background:
           theme.name === "hyperscape"
-            ? "linear-gradient(180deg, rgba(255, 250, 241, 0.07) 0%, rgba(255, 244, 228, 0.022) 22%, rgba(0, 0, 0, 0.1) 100%), linear-gradient(180deg, rgba(58, 49, 39, 0.94) 0%, rgba(30, 24, 19, 0.96) 100%)"
+            ? "linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(0, 0, 0, 0.1) 100%), linear-gradient(180deg, rgba(34, 39, 46, 0.94) 0%, rgba(18, 21, 26, 0.96) 100%)"
             : theme.colors.slot.filled,
         borderRadius: 10,
         border: `1px solid ${theme.colors.border.decorative}4d`,
         boxShadow: isUnlocked
-          ? `${theme.shadows.md}, 0 0 0 1px ${theme.colors.accent.primary}28, inset 0 1px 0 rgba(255,248,236,0.06)`
-          : `${theme.shadows.sm}, inset 0 1px 0 rgba(255,248,236,0.05)`,
+          ? `${theme.shadows.md}, 0 0 0 1px ${theme.colors.accent.primary}24, inset 0 1px 0 rgba(255,255,255,0.06)`
+          : `${theme.shadows.sm}, inset 0 1px 0 rgba(255,255,255,0.05)`,
         cursor: isUnlocked ? "move" : "default",
         userSelect: "none",
         pointerEvents: "auto",

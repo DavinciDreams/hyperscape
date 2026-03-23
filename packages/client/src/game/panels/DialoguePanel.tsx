@@ -182,14 +182,14 @@ export function DialoguePanel({
               onMouseEnter={(e) => {
                 e.currentTarget.style.background =
                   theme.name === "hyperscape"
-                    ? "linear-gradient(180deg, rgba(255, 248, 236, 0.065) 0%, rgba(183, 140, 76, 0.16) 22%, rgba(51, 39, 28, 0.98) 100%)"
+                    ? "linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(190, 165, 123, 0.12) 22%, rgba(25, 29, 35, 0.98) 100%)"
                     : `${theme.colors.accent.primary}18`;
                 e.currentTarget.style.borderColor = `${theme.colors.accent.primary}80`;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background =
                   theme.name === "hyperscape"
-                    ? "linear-gradient(180deg, rgba(255, 248, 236, 0.03) 0%, rgba(255, 242, 226, 0.012) 18%, rgba(35, 29, 24, 0.99) 100%)"
+                    ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.012) 18%, rgba(22, 26, 31, 0.99) 100%)"
                     : `${theme.colors.accent.primary}12`;
                 e.currentTarget.style.borderColor = `${theme.colors.border.default}80`;
               }}
@@ -215,13 +215,13 @@ export function DialoguePanel({
             onMouseEnter={(e) => {
               e.currentTarget.style.background =
                 theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(255, 249, 239, 0.075) 0%, rgba(183, 140, 76, 0.2) 22%, rgba(55, 42, 29, 0.98) 100%)"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(190, 165, 123, 0.14) 22%, rgba(27, 31, 37, 0.98) 100%)"
                   : `${theme.colors.accent.primary}28`;
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background =
                 theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(255, 250, 241, 0.06) 0%, rgba(183, 140, 76, 0.18) 20%, rgba(39, 33, 27, 0.98) 100%)"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(190, 165, 123, 0.12) 20%, rgba(25, 29, 35, 0.98) 100%)"
                   : `${theme.colors.accent.primary}20`;
             }}
           >
