@@ -13,6 +13,18 @@ export type StreamingWindowRendererHealth = {
   phase: string | null;
 };
 
+export type CaptureControlStatus = {
+  recording?: boolean;
+  wsConnected?: boolean;
+  chunkCount?: number;
+  bytesSent?: number;
+  uptime?: number;
+  lastChunkMs?: number | null;
+  wsBufferedAmount?: number;
+  heapUsedBytes?: number | null;
+  heapLimitBytes?: number | null;
+};
+
 export type StreamingWindow = Window & {
   env?: PublicRuntimeEnv;
   __CDN_URL?: string;
@@ -27,4 +39,10 @@ export type StreamingWindow = Window & {
    * - null when boot is complete
    */
   __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
+  /** In-page capture control exposed for deduplication and status queries. */
+  __captureControl__?: {
+    stop?: () => void;
+    getStatus?: () => CaptureControlStatus;
+  };
+  __captureStatus__?: CaptureControlStatus;
 };

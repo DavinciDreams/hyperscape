@@ -304,7 +304,7 @@ export function registerStreamingBettingRoutes(
   };
 
   const getDatabaseSystem = (): DatabaseSystemLike | null =>
-    world.getSystem("database") as unknown as DatabaseSystemLike | null;
+    (world.getSystem("database") ?? null) as DatabaseSystemLike | null;
 
   const persistBettingSourceEpoch = async (epoch: number): Promise<void> => {
     const db = getDatabaseSystem()?.getDb?.();

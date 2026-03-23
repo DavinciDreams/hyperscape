@@ -431,7 +431,7 @@ export function StreamingMode() {
             playerAny.data?.id === targetId ||
             playerAny.data?.characterId === targetId
           ) {
-            entity = player as unknown as Entity | null;
+            entity = player as Entity;
             break;
           }
         }
@@ -540,11 +540,9 @@ export function StreamingMode() {
   useEffect(() => {
     if (!worldReady || !worldRef.current) return;
 
-    const musicSystem = worldRef.current.getSystem(
-      "music-system",
-    ) as unknown as {
+    const musicSystem = worldRef.current.getSystem("music-system") as {
       setCategoryLock?: (category: "normal" | "combat" | null) => void;
-    };
+    } | null;
 
     if (musicSystem?.setCategoryLock) {
       musicSystem.setCategoryLock("combat");
@@ -588,23 +586,7 @@ export function StreamingMode() {
       return;
     }
 
-    const win = window as unknown as {
-      __captureControl__?: {
-        stop?: () => void;
-        getStatus?: () => {
-          recording?: boolean;
-          wsConnected?: boolean;
-          chunkCount?: number;
-          bytesSent?: number;
-          uptime?: number;
-          lastChunkMs?: number | null;
-          wsBufferedAmount?: number;
-          heapUsedBytes?: number | null;
-          heapLimitBytes?: number | null;
-        };
-      };
-      __captureStatus__?: unknown;
-    };
+    const win = window as StreamingWindow;
     if (win.__captureControl__) {
       try {
         const status = win.__captureControl__.getStatus?.();
@@ -909,6 +891,7 @@ export function StreamingMode() {
       worldListenerCleanupRef.current?.();
       worldListenerCleanupRef.current = null;
       worldRef.current = null;
+      worldReadyRef.current = false;
       clearTerrainPolling();
       clearCameraRetryTimeouts();
     };

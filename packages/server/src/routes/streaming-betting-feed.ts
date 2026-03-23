@@ -85,6 +85,15 @@ export type ReplayDelivery =
       oldestSeq: number;
     };
 
+function resolveWinnerName(cycle: StreamingDuelCycle): string | null {
+  if (!cycle.winnerId) return null;
+  if (cycle.agent1?.characterId === cycle.winnerId)
+    return cycle.agent1?.name ?? null;
+  if (cycle.agent2?.characterId === cycle.winnerId)
+    return cycle.agent2?.name ?? null;
+  return null;
+}
+
 function toAgentSnapshot(
   agent: StreamingDuelCycle["agent1"],
 ): BettingFeedAgent | null {
@@ -129,13 +138,7 @@ export function buildBettingFeedPayload(params: {
     fightStartTime: cycle?.fightStartTime ?? null,
     duelEndTime: cycle?.duelEndTime ?? null,
     winnerId: cycle?.winnerId ?? null,
-    winnerName: cycle?.winnerId
-      ? cycle.agent1?.characterId === cycle.winnerId
-        ? (cycle.agent1?.name ?? null)
-        : cycle.agent2?.characterId === cycle.winnerId
-          ? (cycle.agent2?.name ?? null)
-          : null
-      : null,
+    winnerName: cycle ? resolveWinnerName(cycle) : null,
     winReason: cycle?.winReason ?? null,
     agent1: toAgentSnapshot(cycle?.agent1 ?? null),
     agent2: toAgentSnapshot(cycle?.agent2 ?? null),

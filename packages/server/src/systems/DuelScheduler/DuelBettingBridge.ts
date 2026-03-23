@@ -1012,6 +1012,7 @@ export class DuelBettingBridge {
 
     this.reconcileTimer = setTimeout(() => {
       this.reconcileTimer = null;
+      if (this.destroyed) return;
       void this.runScheduledReconciliation();
     }, delayMs);
   }

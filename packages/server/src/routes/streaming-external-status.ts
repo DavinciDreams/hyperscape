@@ -1,16 +1,44 @@
 import fs from "node:fs/promises";
 
+/** A single RTMP destination entry from the external status file. */
+export interface ExternalRtmpDestination {
+  url?: string;
+  status?: string;
+  connected?: boolean;
+  /** External encoders may include additional fields. */
+  [key: string]: unknown;
+}
+
+/** Aggregate stream statistics from the external RTMP encoder. */
+export interface ExternalRtmpStreamStats {
+  bitrate?: number;
+  fps?: number;
+  uptime?: number;
+  bytesReceived?: number;
+  droppedFrames?: number;
+  healthy?: boolean;
+  /** External encoders may include additional fields. */
+  [key: string]: unknown;
+}
+
+/** Renderer health blob written by the capture pipeline. */
+export interface ExternalRendererHealthBlob {
+  ready?: boolean;
+  degradedReason?: string | null;
+  updatedAt?: number | null;
+  phase?: string | null;
+}
+
 /**
  * Typed snapshot from the external RTMP status file. Only allowlisted fields
  * are preserved after parsing — unknown keys in the source JSON are stripped
  * to prevent arbitrary data from being forwarded to API consumers.
  */
 export interface ExternalRtmpStatusSnapshot {
-  destinations: Array<Record<string, unknown>>;
-  stats: Record<string, unknown>;
+  destinations: ExternalRtmpDestination[];
+  stats: ExternalRtmpStreamStats;
   updatedAt: number;
-  /** Renderer health blob written by the capture pipeline. */
-  rendererHealth?: Record<string, unknown>;
+  rendererHealth?: ExternalRendererHealthBlob;
 }
 
 type ExternalStatusPoller = {
@@ -58,16 +86,14 @@ export function parseExternalRtmpStatusSnapshot(
 
     // Allowlist: only forward known fields.
     const snapshot: ExternalRtmpStatusSnapshot = {
-      destinations: parsed.destinations as Array<Record<string, unknown>>,
-      stats: parsed.stats as Record<string, unknown>,
+      destinations: parsed.destinations as ExternalRtmpDestination[],
+      stats: parsed.stats as ExternalRtmpStreamStats,
       updatedAt,
     };
 
     if (parsed.rendererHealth && typeof parsed.rendererHealth === "object") {
-      snapshot.rendererHealth = parsed.rendererHealth as Record<
-        string,
-        unknown
-      >;
+      snapshot.rendererHealth =
+        parsed.rendererHealth as ExternalRendererHealthBlob;
     }
 
     return snapshot;
@@ -89,7 +115,11 @@ export async function loadExternalRtmpStatusSnapshot(
       externalStatusMaxAgeMs,
       options,
     );
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[ExternalRtmpStatus] Failed to read status file "${externalStatusFile}":`,
+      error instanceof Error ? error.message : error,
+    );
     return null;
   }
 }

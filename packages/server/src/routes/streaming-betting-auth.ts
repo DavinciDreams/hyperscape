@@ -44,6 +44,9 @@ export function hasValidBettingFeedToken(
 ): boolean {
   const expected = requiredToken.trim();
   const presented = providedToken?.trim() ?? "";
+  // Early return for missing/empty tokens is intentional: whether a token was
+  // provided is already observable from the request headers and is not a secret.
+  // Timing-safe comparison only matters when comparing two non-empty values.
   if (!expected || !presented) {
     return false;
   }
