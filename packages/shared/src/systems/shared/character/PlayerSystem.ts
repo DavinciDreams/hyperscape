@@ -528,10 +528,10 @@ export class PlayerSystem extends SystemBase {
         // Defensive: treat null/undefined as default (1 = true)
         savedAutoRetaliate =
           ((dbData as { autoRetaliate?: number })?.autoRetaliate ?? 1) === 1;
-      } catch (err) {
+      } catch (err: unknown) {
         this.logger.warn(
           `Failed to load combat preferences for ${data.playerId}, using defaults`,
-          err,
+          err instanceof Error ? { error: err.message } : undefined,
         );
       }
     }

@@ -62,9 +62,9 @@ export function DeathScreen({
     return () => clearTimeout(timeoutId);
   }, [isRespawning]);
 
-  // Update countdown every second
+  // Update countdown every second using a stable interval
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
+    const intervalId = window.setInterval(() => {
       const remaining = Math.max(
         0,
         Math.floor((data.respawnTime - Date.now()) / 1000),
@@ -72,8 +72,8 @@ export function DeathScreen({
       setCountdown(remaining);
     }, 1000);
 
-    return () => window.clearTimeout(timeoutId);
-  }, [countdown, data.respawnTime]);
+    return () => window.clearInterval(intervalId);
+  }, [data.respawnTime]);
 
   // Format countdown as mm:ss
   const formatCountdown = (seconds: number): string => {

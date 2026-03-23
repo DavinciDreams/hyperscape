@@ -299,9 +299,8 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
           );
         }
         if (typeof inventoryPayload.coins === "number") {
-          setCoins((prev) =>
-            prev === inventoryPayload.coins ? prev : inventoryPayload.coins,
-          );
+          const nextCoins = inventoryPayload.coins;
+          setCoins((prev) => (prev === nextCoins ? prev : nextCoins));
         }
         return;
       }

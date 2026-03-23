@@ -29,6 +29,13 @@ export function LoadingScreen({
   );
   const animationFrameRef = useRef<number | null>(null);
 
+  // Keep loadingStage in sync when the message prop changes externally
+  useEffect(() => {
+    if (message) {
+      setLoadingStage(message);
+    }
+  }, [message]);
+
   useEffect(() => {
     let systemsComplete = false;
     let lastProgress = 3; // Match initial state

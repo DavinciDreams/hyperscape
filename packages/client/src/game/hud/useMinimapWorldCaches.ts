@@ -88,9 +88,11 @@ export function useMinimapWorldCaches({
     };
 
     world.on("roads:generated", refreshCaches);
+    world.on("towns:generated", refreshCaches);
 
     return () => {
       world.off("roads:generated", refreshCaches);
+      world.off("towns:generated", refreshCaches);
     };
   }, [roadsCacheRef, roadsWithAABBRef, townsCacheRef, world]);
 }

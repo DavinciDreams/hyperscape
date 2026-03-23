@@ -36,6 +36,7 @@ export const UI = {
     OVERLAY: zIndex.overlay,
     MODAL: zIndex.modal,
     TOOLTIP: zIndex.tooltip,
+    TOAST: zIndex.toast,
     CONTEXT_MENU: zIndex.contextMenu,
     CRITICAL: zIndex.critical,
   },

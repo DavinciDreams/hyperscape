@@ -403,40 +403,45 @@ export function useMinimapTerrainCache(
         upZ,
         viewportPixels,
         () => !isMountedRef.current || terrainGenVersionRef.current !== version,
-      ).then((offscreen) => {
-        if (!isMountedRef.current) {
+      )
+        .then((offscreen) => {
+          if (!isMountedRef.current) {
+            terrainIsGeneratingRef.current = false;
+            return;
+          }
+          const wasCancelled = terrainGenVersionRef.current !== version;
           terrainIsGeneratingRef.current = false;
-          return;
-        }
-        const wasCancelled = terrainGenVersionRef.current !== version;
-        terrainIsGeneratingRef.current = false;
-        if (!wasCancelled && offscreen) {
-          terrainOffscreenRef.current = offscreen;
-          terrainCacheCenterRef.current.x = centerX;
-          terrainCacheCenterRef.current.z = centerZ;
-          terrainCacheExtentRef.current = currentExtent;
-          terrainCacheUpRef.current.x = upX;
-          terrainCacheUpRef.current.z = upZ;
-        }
+          if (!wasCancelled && offscreen) {
+            terrainOffscreenRef.current = offscreen;
+            terrainCacheCenterRef.current.x = centerX;
+            terrainCacheCenterRef.current.z = centerZ;
+            terrainCacheExtentRef.current = currentExtent;
+            terrainCacheUpRef.current.x = upX;
+            terrainCacheUpRef.current.z = upZ;
+          }
 
-        const pendingRequest = pendingTerrainRequestRef.current;
-        if (
-          pendingRequest &&
-          (!offscreen ||
-            pendingRequest.centerX !== centerX ||
-            pendingRequest.centerZ !== centerZ ||
-            pendingRequest.currentExtent !== currentExtent ||
-            pendingRequest.upX !== upX ||
-            pendingRequest.upZ !== upZ)
-        ) {
-          Promise.resolve().then(() => {
-            ensureTerrainCache(pendingRequest);
-          });
-          return;
-        }
+          const pendingRequest = pendingTerrainRequestRef.current;
+          if (
+            pendingRequest &&
+            (!offscreen ||
+              pendingRequest.centerX !== centerX ||
+              pendingRequest.centerZ !== centerZ ||
+              pendingRequest.currentExtent !== currentExtent ||
+              pendingRequest.upX !== upX ||
+              pendingRequest.upZ !== upZ)
+          ) {
+            Promise.resolve().then(() => {
+              ensureTerrainCache(pendingRequest);
+            });
+            return;
+          }
 
-        pendingTerrainRequestRef.current = null;
-      });
+          pendingTerrainRequestRef.current = null;
+        })
+        .catch((err: unknown) => {
+          terrainIsGeneratingRef.current = false;
+          console.warn("[Minimap] Terrain generation failed:", err);
+        });
     },
     [world],
   );

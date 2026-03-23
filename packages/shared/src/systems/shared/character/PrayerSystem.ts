@@ -556,6 +556,7 @@ export class PrayerSystem extends SystemBase {
     this.playerStates.delete(playerIdKey);
     this.loadingPlayers.delete(playerId);
     this.initializedPlayers.delete(playerId);
+    this.initializationPromises.delete(playerIdKey);
 
     // Clear any pending persist timer
     const timer = this.persistTimers.get(playerId);

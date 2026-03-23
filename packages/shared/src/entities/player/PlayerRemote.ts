@@ -125,24 +125,26 @@ const PLAYER_IMPOSTOR_DISTANCES = {
   hysteresis: 5,
 } as const;
 
+let _remoteDeathTraceCache: boolean | undefined;
 function isRemoteDeathTraceEnabled(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return (
-      new URLSearchParams(window.location.search).get("traceRemoteDeath") ===
-      "1"
-    );
-  } catch {
+  if (_remoteDeathTraceCache !== undefined) return _remoteDeathTraceCache;
+  if (typeof window === "undefined") {
+    _remoteDeathTraceCache = false;
     return false;
   }
+  try {
+    _remoteDeathTraceCache =
+      new URLSearchParams(window.location.search).get("traceRemoteDeath") ===
+      "1";
+  } catch {
+    _remoteDeathTraceCache = false;
+  }
+  return _remoteDeathTraceCache;
 }
 
 const FALLBACK_AVATAR_RETRY_DELAY_MS = 15_000;
 const FALLBACK_PLAYER_PALETTE = [
-  0x27f5d2,
-  0xff5b6d,
-  0xf7c948,
-  0x7dd3fc,
+  0x27f5d2, 0xff5b6d, 0xf7c948, 0x7dd3fc,
 ] as const;
 
 const fallbackHeadGeometry = new THREE.SphereGeometry(0.28, 16, 16);
@@ -702,9 +704,7 @@ export class PlayerRemote extends Entity implements HotReloadable {
       fallbackPlayerColorSeed(this.id) % FALLBACK_PLAYER_PALETTE.length;
     const primaryColor = new THREE.Color(FALLBACK_PLAYER_PALETTE[colorSeed]);
     const accentColor = new THREE.Color(
-      FALLBACK_PLAYER_PALETTE[
-        (colorSeed + 1) % FALLBACK_PLAYER_PALETTE.length
-      ],
+      FALLBACK_PLAYER_PALETTE[(colorSeed + 1) % FALLBACK_PLAYER_PALETTE.length],
     );
 
     const bodyMaterial = new MeshBasicNodeMaterial();
@@ -712,11 +712,17 @@ export class PlayerRemote extends Entity implements HotReloadable {
     const headMaterial = new MeshBasicNodeMaterial();
     headMaterial.color = accentColor;
 
-    const body = new THREE.Mesh(cloneFallbackGeometry(capsuleGeometry), bodyMaterial);
+    const body = new THREE.Mesh(
+      cloneFallbackGeometry(capsuleGeometry),
+      bodyMaterial,
+    );
     body.name = `PlayerRemoteFallbackBody_${this.id}`;
     body.scale.setScalar(1.45);
 
-    const head = new THREE.Mesh(cloneFallbackGeometry(fallbackHeadGeometry), headMaterial);
+    const head = new THREE.Mesh(
+      cloneFallbackGeometry(fallbackHeadGeometry),
+      headMaterial,
+    );
     head.name = `PlayerRemoteFallbackHead_${this.id}`;
     head.position.y = 2.15;
 

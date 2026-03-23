@@ -177,7 +177,7 @@ export function NotificationContainer(): React.ReactElement | null {
         position: "fixed",
         top: `calc(${UI.SAFE_AREAS.TOP} + 16px)`,
         right: `calc(${UI.SAFE_AREAS.RIGHT} + 16px)`,
-        zIndex: UI.Z_INDEX.TOOLTIP,
+        zIndex: UI.Z_INDEX.TOAST,
         display: "flex",
         flexDirection: "column",
         gap: 8,
