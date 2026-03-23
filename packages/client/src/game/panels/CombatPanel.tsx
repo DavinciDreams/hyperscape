@@ -271,8 +271,8 @@ const DraggableCombatStyleButton = ({
       className="style-btn focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
       style={{
         minWidth: 0,
-        minHeight: isMobile ? 76 : 70,
-        padding: isMobile ? "10px 8px" : "10px 8px",
+        minHeight: isMobile ? 64 : 58,
+        padding: isMobile ? "8px 7px" : "7px 6px",
         cursor: disabled ? "not-allowed" : isDragging ? "grabbing" : "pointer",
         transition: "all 0.15s ease",
         fontSize: isMobile ? "10px" : "10px",
@@ -281,41 +281,63 @@ const DraggableCombatStyleButton = ({
           active: isActive,
           disabled,
           dragging: isDragging,
-          radius: 8,
+          radius: 6,
           accentColor: styleInfo.color,
         }),
-        borderRadius: "6px",
+        borderRadius: "5px",
         color: isActive ? styleInfo.color : theme.colors.text.secondary,
         display: "flex",
-        flexDirection: "column",
+        flexDirection: "row",
         alignItems: "center",
-        justifyContent: "center",
-        gap: "4px",
+        justifyContent: "flex-start",
+        gap: "7px",
         touchAction: "manipulation",
         opacity: disabled ? 0.5 : isDragging ? 0.7 : 1,
-        transform: isDragging ? "scale(1.03)" : "scale(1)",
+        transform: isDragging ? "scale(1.01)" : "scale(1)",
         boxShadow: isActive
-          ? `0 2px 8px ${styleInfo.color}20`
-          : "0 1px 3px rgba(0,0,0,0.1)",
+          ? `inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px ${styleInfo.color}33`
+          : "inset 0 1px 0 rgba(255,255,255,0.03)",
+        textAlign: "left",
       }}
     >
       <StyleIcon
         style={styleInfo.id}
-        size={isMobile ? 18 : 16}
+        size={isMobile ? 16 : 15}
         color={isActive ? styleInfo.color : theme.colors.text.muted}
       />
-      <span style={{ fontWeight: 600, lineHeight: 1, textAlign: "center" }}>
-        {styleInfo.label}
-      </span>
       <span
         style={{
-          fontSize: isMobile ? "8px" : "7px",
-          opacity: 0.7,
-          color: isActive ? styleInfo.color : theme.colors.text.muted,
-          fontWeight: 500,
+          display: "flex",
+          flexDirection: "column",
+          minWidth: 0,
+          gap: "2px",
+          flex: 1,
         }}
       >
-        +{styleInfo.xp}
+        <span
+          style={{
+            fontWeight: 700,
+            lineHeight: 1.1,
+            color: isActive
+              ? theme.colors.text.primary
+              : theme.colors.text.secondary,
+          }}
+        >
+          {styleInfo.label}
+        </span>
+        <span
+          style={{
+            fontSize: isMobile ? "8px" : "7px",
+            opacity: 0.78,
+            color: theme.colors.text.muted,
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+            lineHeight: 1,
+          }}
+        >
+          {styleInfo.xp}
+        </span>
       </span>
     </button>
   );
@@ -813,7 +835,12 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
   const p = shouldUseMobileUI
     ? { outer: 4, inner: 5, gap: 4 }
     : { outer: 4, inner: 6, gap: 4 };
-  const styleColumns = styles.length >= 4 ? 2 : Math.min(2, styles.length || 1);
+  const styleColumns =
+    styles.length >= 4
+      ? 2
+      : styles.length === 3
+        ? 3
+        : Math.min(2, styles.length || 1);
 
   return (
     <div
@@ -1039,47 +1066,51 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
                 color: theme.colors.text.muted,
                 textTransform: "uppercase",
                 letterSpacing: "0.12em",
-                marginBottom: 2,
               }}
             >
-              Combat Stance
+              Stance
             </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {style === "autocast" && (
+              <div
+                style={{
+                  ...getInteractiveTileStyle(theme, {
+                    active: true,
+                    radius: theme.borderRadius.sm,
+                    accentColor: "#8b5cf6",
+                  }),
+                  padding: "2px 6px",
+                  fontSize: "8px",
+                  fontWeight: 700,
+                  color: "#c4b5fd",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                Autocast
+              </div>
+            )}
             <div
               style={{
-                fontSize: shouldUseMobileUI ? "12px" : "11px",
+                padding: "2px 7px",
+                borderRadius: theme.borderRadius.sm,
+                border: `1px solid ${theme.colors.border.default}45`,
+                background: "rgba(255,255,255,0.03)",
+                fontSize: shouldUseMobileUI ? "10px" : "9px",
                 color: theme.colors.text.primary,
                 fontWeight: 700,
               }}
             >
-              {styles.find((entry) => entry.id === style)?.label ??
-                "Select style"}
+              {styles.find((entry) => entry.id === style)?.label ?? "Select"}
             </div>
           </div>
-          {style === "autocast" && (
-            <div
-              style={{
-                ...getInteractiveTileStyle(theme, {
-                  active: true,
-                  radius: theme.borderRadius.sm,
-                  accentColor: "#8b5cf6",
-                }),
-                padding: "4px 8px",
-                fontSize: "9px",
-                fontWeight: 700,
-                color: "#c4b5fd",
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-              }}
-            >
-              Spell Auto
-            </div>
-          )}
         </div>
         <div
           style={{
             display: "grid",
             gridTemplateColumns: `repeat(${styleColumns}, minmax(0, 1fr))`,
-            gap: shouldUseMobileUI ? "6px" : "5px",
+            gap: shouldUseMobileUI ? "5px" : "4px",
             width: "100%",
           }}
         >
@@ -1119,20 +1150,21 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       {/* Auto Retaliate */}
       <button
         onClick={toggleAutoRetaliate}
+        aria-pressed={autoRetaliate}
         className="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
         style={{
-          padding: shouldUseMobileUI ? "8px 10px" : "8px 10px",
+          padding: shouldUseMobileUI ? "7px 9px" : "7px 9px",
           cursor: "pointer",
           transition: "all 0.1s ease",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          fontSize: shouldUseMobileUI ? "10px" : "10px",
+          fontSize: shouldUseMobileUI ? "10px" : "9px",
           touchAction: "manipulation",
-          borderRadius: theme.borderRadius.md,
+          borderRadius: theme.borderRadius.sm,
           ...getInteractiveTileStyle(theme, {
             active: autoRetaliate,
-            radius: theme.borderRadius.md,
+            radius: theme.borderRadius.sm,
             accentColor: autoRetaliate
               ? theme.colors.state.success
               : theme.colors.accent.secondary,
@@ -1142,7 +1174,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             : theme.colors.text.muted,
         }}
       >
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <svg
             width={shouldUseMobileUI ? 12 : 10}
             height={shouldUseMobileUI ? 12 : 10}
@@ -1170,10 +1202,9 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
               style={{
                 fontWeight: 700,
                 color: theme.colors.text.primary,
-                marginBottom: 1,
               }}
             >
-              Auto Retaliate
+              Auto-retaliate
             </div>
             <div
               style={{
@@ -1183,23 +1214,47 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
                 letterSpacing: "0.08em",
               }}
             >
-              Counterattack when struck
+              Counterattack
             </div>
           </div>
         </div>
         <span
           style={{
-            padding: shouldUseMobileUI ? "1px 5px" : "1px 5px",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "2px",
+            padding: shouldUseMobileUI ? "2px" : "2px",
             borderRadius: theme.borderRadius.sm,
             fontSize: shouldUseMobileUI ? "8px" : "8px",
             fontWeight: 700,
-            background: autoRetaliate
-              ? "rgba(34, 197, 94, 0.2)"
-              : "rgba(239, 68, 68, 0.12)",
-            color: autoRetaliate ? "#22c55e" : "#ef4444",
+            background: "rgba(0,0,0,0.18)",
+            border: `1px solid ${theme.colors.border.default}35`,
           }}
         >
-          {autoRetaliate ? "ON" : "OFF"}
+          <span
+            style={{
+              padding: "1px 5px",
+              borderRadius: "4px",
+              background: autoRetaliate
+                ? "rgba(34, 197, 94, 0.18)"
+                : "transparent",
+              color: autoRetaliate ? "#22c55e" : theme.colors.text.muted,
+            }}
+          >
+            On
+          </span>
+          <span
+            style={{
+              padding: "1px 5px",
+              borderRadius: "4px",
+              background: !autoRetaliate
+                ? "rgba(239, 68, 68, 0.12)"
+                : "transparent",
+              color: !autoRetaliate ? "#ef4444" : theme.colors.text.muted,
+            }}
+          >
+            Off
+          </span>
         </span>
       </button>
     </div>
