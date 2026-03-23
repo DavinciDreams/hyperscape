@@ -9,9 +9,9 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
 import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
   getPanelHeaderStyle,
-  getPanelInsetStyle,
-  getPanelSurfaceStyle,
 } from "@/ui/theme/themes";
 import { UI } from "@/ui/core";
 import type { TradeContextMenuProps } from "../types";
@@ -68,11 +68,11 @@ export function TradeContextMenu({
         left: adjustedX,
         top: adjustedY,
         zIndex: UI.Z_INDEX.CONTEXT_MENU,
-        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
-        borderRadius: theme.borderRadius.md,
+        ...getContextMenuSurfaceStyle(theme, {
+          minWidth: 160,
+          radius: theme.borderRadius.md,
+        }),
         padding: "2px 0",
-        minWidth: "150px",
-        boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
       }}
     >
       {/* Header with item name */}
@@ -95,9 +95,9 @@ export function TradeContextMenu({
             onClose();
           }}
           style={{
-            padding: "4px 8px",
-            ...getPanelInsetStyle(theme, {
+            ...getContextMenuItemStyle(theme, {
               radius: theme.borderRadius.sm,
+              padding: "4px 8px",
             }),
             color:
               i === 0 ? theme.colors.text.accent : theme.colors.text.primary,
@@ -105,10 +105,8 @@ export function TradeContextMenu({
             cursor: "pointer",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = String(
-              getPanelInsetStyle(theme, { radius: theme.borderRadius.sm })
-                .background,
-            );
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(214, 197, 160, 0.12) 24%, rgba(21, 25, 31, 0.98) 100%)";
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = "transparent";

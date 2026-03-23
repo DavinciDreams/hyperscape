@@ -6,7 +6,10 @@ import React, { memo, useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/ui";
 import { UI } from "@/ui/core";
-import { getPanelInsetStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
+} from "@/ui/theme/themes";
 import { CONTEXT_MENU_COLORS } from "@hyperscape/shared";
 import type {
   ActionBarSlotContent,
@@ -240,11 +243,10 @@ export const ContextMenuPortal = memo(function ContextMenuPortal({
     >
       <div
         style={{
-          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
-          borderRadius: 0,
-          boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
-          overflow: "hidden",
-          minWidth: 100,
+          ...getContextMenuSurfaceStyle(theme, {
+            minWidth: 124,
+            radius: theme.borderRadius.sm,
+          }),
         }}
       >
         {items.map((menuItem, idx) => (
@@ -253,7 +255,7 @@ export const ContextMenuPortal = memo(function ContextMenuPortal({
             onClick={() => onItemClick(menuItem)}
             className="w-full text-left transition-colors duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/60"
             style={{
-              ...getPanelInsetStyle(theme, {
+              ...getContextMenuItemStyle(theme, {
                 radius: 0,
                 padding: "4px 8px",
               }),
@@ -265,7 +267,8 @@ export const ContextMenuPortal = memo(function ContextMenuPortal({
               display: "block",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = `${theme.colors.accent.secondary}1F`;
+              e.currentTarget.style.background =
+                "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(214, 197, 160, 0.12) 24%, rgba(21, 25, 31, 0.98) 100%)";
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = "transparent";

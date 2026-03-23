@@ -2,7 +2,10 @@ import React, { useState, useEffect, useRef } from "react";
 import type { World, LabelSegment } from "@hyperscape/shared";
 import { useThemeStore } from "@/ui";
 import { UI } from "@/ui/core";
-import { getPanelInsetStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
+} from "@/ui/theme/themes";
 
 export interface ContextMenuAction {
   id: string;
@@ -222,7 +225,10 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
       className="context-menu fixed rounded pointer-events-auto"
       style={{
         ...menuStyle,
-        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+        ...getContextMenuSurfaceStyle(theme, {
+          minWidth: 180,
+          radius: theme.borderRadius.md,
+        }),
         zIndex: UI.Z_INDEX.CONTEXT_MENU,
       }}
       onClick={(e) => {
@@ -235,11 +241,11 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
             key={action.id}
             className={`px-3 py-1.5 text-sm text-white transition-colors ${
               action.enabled
-                ? "cursor-pointer hover:bg-[#2a2a2a] hover:text-white"
+                ? "cursor-pointer"
                 : "cursor-not-allowed opacity-50"
             }`}
             style={{
-              ...getPanelInsetStyle(theme, {
+              ...getContextMenuItemStyle(theme, {
                 radius: 0,
                 padding: "6px 12px",
               }),

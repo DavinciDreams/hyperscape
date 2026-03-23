@@ -263,12 +263,20 @@ export function TradePanel({
                 {/* My offer */}
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-2">
-                    <h3
-                      className="text-sm font-bold"
-                      style={{ color: theme.colors.text.accent }}
-                    >
-                      Your Offer
-                    </h3>
+                    <div>
+                      <div
+                        className="text-[10px] uppercase tracking-[0.14em] mb-1"
+                        style={{ color: theme.colors.text.muted }}
+                      >
+                        Contract Tray
+                      </div>
+                      <h3
+                        className="text-sm font-bold"
+                        style={{ color: theme.colors.text.accent }}
+                      >
+                        Your Offer
+                      </h3>
+                    </div>
                     {state.myAccepted && (
                       <span
                         className="text-xs px-2 py-0.5 rounded"
@@ -313,6 +321,7 @@ export function TradePanel({
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
                       ...getPanelInsetStyle(theme, {
+                        emphasis: "strong",
                         radius: theme.borderRadius.md,
                       }),
                       color: theme.colors.text.secondary,
@@ -339,12 +348,20 @@ export function TradePanel({
                 {/* Their offer */}
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-2">
-                    <h3
-                      className="text-sm font-bold"
-                      style={{ color: theme.colors.text.accent }}
-                    >
-                      {state.partner.name}'s Offer
-                    </h3>
+                    <div>
+                      <div
+                        className="text-[10px] uppercase tracking-[0.14em] mb-1"
+                        style={{ color: theme.colors.text.muted }}
+                      >
+                        Counterparty Tray
+                      </div>
+                      <h3
+                        className="text-sm font-bold"
+                        style={{ color: theme.colors.text.accent }}
+                      >
+                        {state.partner.name}'s Offer
+                      </h3>
+                    </div>
                     {state.theirAccepted && (
                       <span
                         className="text-xs px-2 py-0.5 rounded"
@@ -384,6 +401,7 @@ export function TradePanel({
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
                       ...getPanelInsetStyle(theme, {
+                        emphasis: "strong",
                         radius: theme.borderRadius.md,
                       }),
                       color: theme.colors.text.secondary,
@@ -414,6 +432,12 @@ export function TradePanel({
               >
                 {/* Partner free slots indicator (OSRS-style) */}
                 <span style={{ color: theme.colors.text.secondary }}>
+                  <span
+                    className="mr-2 uppercase tracking-[0.14em] text-[10px]"
+                    style={{ color: theme.colors.text.muted }}
+                  >
+                    Capacity
+                  </span>
                   Partner's free slots:{" "}
                   <span
                     style={{

@@ -22,6 +22,8 @@ import { COLORS } from "../../constants";
 import { InventoryPanel } from "./InventoryPanel";
 import { useWindowStore, useThemeStore, useMobileLayout } from "@/ui";
 import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
   getInteractiveTileStyle,
   getPanelHeaderStyle,
   getPanelInsetStyle,
@@ -138,9 +140,10 @@ function ContextMenu({
   ];
 
   const menuContainerStyle: CSSProperties = {
-    ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
-    borderRadius: theme.borderRadius.lg,
-    boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255, 255, 255, 0.04)`,
+    ...getContextMenuSurfaceStyle(theme, {
+      minWidth: 188,
+      radius: theme.borderRadius.md,
+    }),
     padding: `${theme.spacing.xs}px 0`,
     display: "inline-block",
   };
@@ -152,9 +155,11 @@ function ContextMenu({
     textAlign: "left",
     fontSize: theme.typography.fontSize.xs,
     color: isHovered ? theme.colors.text.primary : theme.colors.text.secondary,
-    background: isHovered
-      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.055) 0%, rgba(190, 165, 123, 0.1) 20%, rgba(24, 28, 34, 0.98) 100%)"
-      : "transparent",
+    ...getContextMenuItemStyle(theme, {
+      hovered: isHovered,
+      radius: 0,
+      padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
+    }),
     borderBottom: `1px solid ${isHovered ? `${theme.colors.border.hover}55` : "transparent"}`,
     border: "none",
     cursor: "pointer",

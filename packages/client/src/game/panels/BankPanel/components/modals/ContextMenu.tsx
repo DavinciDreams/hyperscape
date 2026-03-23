@@ -11,9 +11,10 @@ import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
 import { useThemeStore } from "@/ui";
 import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
   getInteractiveTileStyle,
   getPanelInsetStyle,
-  getPanelSurfaceStyle,
 } from "@/ui/theme/themes";
 import { UI } from "@/ui/core";
 import type { ContextMenuState } from "../../types";
@@ -94,9 +95,10 @@ export function ContextMenu({
   adjustedY = Math.max(padding, adjustedY);
 
   const menuContainerStyle: CSSProperties = {
-    ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
-    borderRadius: theme.borderRadius.md,
-    boxShadow: theme.shadows.lg,
+    ...getContextMenuSurfaceStyle(theme, {
+      minWidth: 196,
+      radius: theme.borderRadius.md,
+    }),
     padding: `${theme.spacing.xs}px 0`,
     display: "inline-block",
   };
@@ -108,7 +110,11 @@ export function ContextMenu({
     textAlign: "left",
     fontSize: theme.typography.fontSize.xs,
     color: isHovered ? theme.colors.text.primary : theme.colors.text.secondary,
-    background: isHovered ? theme.colors.background.tertiary : "transparent",
+    ...getContextMenuItemStyle(theme, {
+      hovered: isHovered,
+      radius: 0,
+      padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
+    }),
     border: "none",
     cursor: "pointer",
     transition: "all 0.15s ease",

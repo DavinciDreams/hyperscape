@@ -188,11 +188,12 @@ export function QuestJournalPanel({
         className="relative"
         style={{
           ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
-          width: "28rem",
+          width: "32rem",
           maxWidth: "90vw",
           maxHeight: "80vh",
           padding: "1.5rem",
-          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
+          boxShadow:
+            "0 18px 40px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255,255,255,0.05)",
           display: "flex",
           flexDirection: "column",
         }}
@@ -254,17 +255,28 @@ export function QuestJournalPanel({
         {/* Quest Points (list view only) */}
         {!selectedQuest && (
           <div
-            className="text-center mb-4 py-2"
+            className="mb-4"
             style={{
-              color: theme.colors.text.accent,
               ...getPanelInsetStyle(theme, {
                 emphasis: "strong",
                 radius: theme.borderRadius.md,
-                padding: "0.5rem 0.75rem",
+                padding: "0.75rem 0.9rem",
               }),
             }}
           >
-            Quest Points: <strong>{questPoints}</strong>
+            <div
+              className="text-[10px] uppercase tracking-[0.18em] mb-1"
+              style={{ color: theme.colors.text.muted }}
+            >
+              Adventurer's Chronicle
+            </div>
+            <div
+              className="flex items-center justify-between"
+              style={{ color: theme.colors.text.accent }}
+            >
+              <span className="text-sm font-semibold">Quest Points</span>
+              <strong className="text-lg">{questPoints}</strong>
+            </div>
           </div>
         )}
 
@@ -351,16 +363,30 @@ function QuestListView({
             e.currentTarget.style.borderColor = `${theme.colors.border.default}40`;
           }}
         >
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div
+                className="text-[10px] uppercase tracking-[0.14em] mb-1"
+                style={{ color: theme.colors.text.muted }}
+              >
+                {quest.status.replaceAll("_", " ")}
+              </div>
+              <span
+                className="font-medium block"
+                style={{ color: STATUS_COLORS[quest.status] }}
+              >
+                {quest.name}
+              </span>
+            </div>
             <span
-              className="font-medium"
-              style={{ color: STATUS_COLORS[quest.status] }}
-            >
-              {quest.name}
-            </span>
-            <span
-              className="text-xs"
-              style={{ color: theme.colors.text.muted }}
+              className="text-[10px] px-2 py-1"
+              style={{
+                ...getPanelInsetStyle(theme, {
+                  radius: theme.borderRadius.sm,
+                  padding: "0.25rem 0.5rem",
+                }),
+                color: theme.colors.text.secondary,
+              }}
             >
               {quest.difficulty}
             </span>

@@ -95,12 +95,13 @@ export function DialoguePanel({
       className="fixed bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto"
       style={{
         zIndex: UI.Z_INDEX.MODAL,
-        width: "40rem",
+        width: "42rem",
         maxWidth: "90vw",
         ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
         borderRadius: theme.borderRadius.xl,
         padding: "1.5rem",
-        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
+        boxShadow:
+          "0 18px 38px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255,255,255,0.05)",
       }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -117,6 +118,12 @@ export function DialoguePanel({
           className="m-0 text-lg font-bold"
           style={{ color: theme.colors.text.accent }}
         >
+          <span
+            className="block text-[10px] uppercase tracking-[0.18em] mb-1"
+            style={{ color: theme.colors.text.muted }}
+          >
+            Encounter
+          </span>
           {npcName}
         </h3>
         <button
@@ -178,6 +185,9 @@ export function DialoguePanel({
                 color: theme.colors.text.primary,
                 padding: `${theme.spacing.sm + 2}px ${theme.spacing.md}px`,
                 fontWeight: theme.typography.fontWeight.medium,
+                display: "flex",
+                alignItems: "flex-start",
+                gap: theme.spacing.sm,
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background =
@@ -194,7 +204,16 @@ export function DialoguePanel({
                 e.currentTarget.style.borderColor = `${theme.colors.border.default}80`;
               }}
             >
-              {index + 1}. {response.text}
+              <span
+                style={{
+                  color: theme.colors.text.muted,
+                  fontSize: "11px",
+                  minWidth: 16,
+                }}
+              >
+                {index + 1}.
+              </span>
+              <span>{response.text}</span>
             </button>
           ))
         ) : (

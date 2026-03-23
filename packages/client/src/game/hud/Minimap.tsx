@@ -35,9 +35,9 @@ import { useMinimapTerrainCache } from "./useMinimapTerrainCache";
 // corners at any camera rotation angle without clipping.
 const TERRAIN_OVERSHOOT = Math.SQRT2 * 1.1;
 
-// Throttle terrain background redraw to ~15fps (every 4th frame).
-// Pip overlay still renders every frame for smooth entity movement.
-const RENDER_EVERY_N_FRAMES = 4;
+// Terrain draw is just a transformed drawImage() pass, so keep it in sync with
+// live overlay motion instead of throttling it behind the player.
+const RENDER_EVERY_N_FRAMES = 1;
 
 // Zoom bounds and step size — kept at module scope for stability across re-renders
 const MIN_EXTENT = 20;
@@ -52,10 +52,10 @@ const MINIMAP_BASE_SIZE_PX = 200;
 const ROAD_LINE_WIDTH_PX = 5;
 const ROAD_OUTLINE_WIDTH_PX = 7;
 const BUILDING_LINE_WIDTH_PX = 0.5;
-const ROAD_OUTLINE_COLOR = "rgb(96, 72, 44)";
-const ROAD_FILL_COLOR = "rgb(214, 188, 132)";
-const BUILDING_FILL_COLOR = "rgba(154, 126, 96, 0.92)";
-const BUILDING_STROKE_COLOR = "rgb(62, 46, 28)";
+const ROAD_OUTLINE_COLOR = "rgb(56, 60, 68)";
+const ROAD_FILL_COLOR = "rgb(164, 151, 128)";
+const BUILDING_FILL_COLOR = "rgba(84, 92, 104, 0.92)";
+const BUILDING_STROKE_COLOR = "rgb(34, 39, 46)";
 
 /** 2D context interface for minimap drawing — satisfied by both CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D */
 interface MinimapDrawContext {
@@ -1205,20 +1205,33 @@ function MinimapInner({
               mainCtx.imageSmoothingQuality = "high";
               const cachedExt = terrainCacheExtentRef.current;
               const extentScale = cachedExt > 0 ? cachedExt / currentExtent : 1;
-              const drawW = cw * TERRAIN_OVERSHOOT * extentScale;
-              const drawH = ch * TERRAIN_OVERSHOOT * extentScale;
-              mainCtx.fillStyle = "#1a1a2e";
+              const drawScale = Math.max(1, extentScale);
+              const drawW = cw * TERRAIN_OVERSHOOT * drawScale;
+              const drawH = ch * TERRAIN_OVERSHOOT * drawScale;
+              const rightX = -upZ;
+              const rightZ = upX;
+              const cachedCenterX = terrainCacheCenterRef.current.x;
+              const cachedCenterZ = terrainCacheCenterRef.current.z;
+              const centerDeltaX = centerX - cachedCenterX;
+              const centerDeltaZ = centerZ - cachedCenterZ;
+              const offsetRight = centerDeltaX * rightX + centerDeltaZ * rightZ;
+              const offsetUp = centerDeltaX * upX + centerDeltaZ * upZ;
+              const pixelsPerWorldX = cw / (2 * currentExtent);
+              const pixelsPerWorldY = ch / (2 * currentExtent);
+              const offsetX = -offsetRight * pixelsPerWorldX;
+              const offsetY = offsetUp * pixelsPerWorldY;
+              mainCtx.fillStyle = "#11161c";
               mainCtx.fillRect(0, 0, cw, ch);
               mainCtx.drawImage(
                 terrainOffscreenRef.current,
-                cw / 2 - drawW / 2,
-                ch / 2 - drawH / 2,
+                cw / 2 - drawW / 2 + offsetX,
+                ch / 2 - drawH / 2 + offsetY,
                 drawW,
                 drawH,
               );
             } else {
               // Fallback: dark background until terrain system is ready
-              mainCtx.fillStyle = "#1a1a2e";
+              mainCtx.fillStyle = "#11161c";
               mainCtx.fillRect(0, 0, cw, ch);
             }
 

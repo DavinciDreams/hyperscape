@@ -28,6 +28,7 @@ import {
   useMobileLayout,
   StatusOrb,
 } from "@/ui";
+import { getHudClusterSurfaceStyle } from "@/ui/theme/themes";
 import type { PlayerStats } from "../../types";
 import { HUD_FRAME, HUD_LAYERS } from "./layout";
 
@@ -551,15 +552,10 @@ export function StatusBars({
         justifyContent: config.displayMode === "bars" ? "center" : "flex-start",
         gap: config.displayMode === "bars" ? 0 : compactGap,
         padding: config.displayMode === "bars" ? "4px 6px" : compactPadding,
-        background:
-          theme.name === "hyperscape"
-            ? "linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(0, 0, 0, 0.1) 100%), linear-gradient(180deg, rgba(34, 39, 46, 0.94) 0%, rgba(18, 21, 26, 0.96) 100%)"
-            : theme.colors.slot.filled,
-        borderRadius: 10,
-        border: `1px solid ${theme.colors.border.decorative}4d`,
-        boxShadow: isUnlocked
-          ? `${theme.shadows.md}, 0 0 0 1px ${theme.colors.accent.primary}24, inset 0 1px 0 rgba(255,255,255,0.06)`
-          : `${theme.shadows.sm}, inset 0 1px 0 rgba(255,255,255,0.05)`,
+        ...getHudClusterSurfaceStyle(theme, {
+          active: isUnlocked,
+          radius: config.displayMode === "bars" ? 6 : 8,
+        }),
         cursor: isUnlocked ? "move" : "default",
         userSelect: "none",
         pointerEvents: "auto",
@@ -647,15 +643,18 @@ export function StatusBars({
             right: 1,
             width: 14,
             height: 14,
-            borderRadius: 3,
-            backgroundColor: theme.colors.slot.filled,
-            border: `1px solid ${theme.colors.border.default}30`,
+            borderRadius: theme.borderRadius.sm,
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(18,22,28,0.94) 100%)",
+            border: `1px solid ${theme.colors.border.default}55`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             fontSize: 8,
             cursor: "pointer",
             zIndex: 20,
+            color: theme.colors.text.secondary,
+            backdropFilter: `blur(${Math.max(4, theme.glass.blur - 3)}px)`,
           }}
           onClick={(e) => {
             e.stopPropagation();
@@ -684,7 +683,7 @@ export function StatusBars({
               zIndex: 10,
               background:
                 isResizing && resizeDir === dir
-                  ? "rgba(242, 208, 138, 0.3)"
+                  ? `${theme.colors.accent.secondary}26`
                   : "transparent",
             }}
             onPointerDown={(e) => {

@@ -17,7 +17,12 @@ import { isTouch } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { useFullscreen } from "../../hooks/useFullscreen";
 import { ToggleSwitch, Slider } from "@/ui";
-import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { NAME_SANITIZE_REGEX } from "../../utils/validation";
 import {
   useComplexityStore,
@@ -869,23 +874,25 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
               onClick={() => setActiveTab(tab.id)}
               className="flex items-center justify-center transition-all flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
               style={{
+                ...getInteractiveTileStyle(theme, {
+                  active: isActive,
+                  radius: theme.borderRadius.sm,
+                }),
                 padding: "8px",
-                background: isActive
-                  ? `linear-gradient(180deg, ${theme.colors.accent.secondary}33 0%, ${theme.colors.border.decorative}40 100%)`
-                  : "transparent",
-                border: isActive
-                  ? `1px solid ${theme.colors.accent.secondary}66`
-                  : "1px solid transparent",
-                borderRadius: theme.borderRadius.sm,
                 cursor: "pointer",
                 color: isActive
                   ? theme.colors.text.accent
                   : theme.colors.text.muted,
+                flexDirection: "column",
+                gap: 3,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                fontSize: 9,
               }}
               title={tab.label}
             >
               <tab.Icon
-                size={18}
+                size={16}
                 strokeWidth={isActive ? 2 : 1.5}
                 style={{
                   filter: isActive
@@ -893,6 +900,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                     : "none",
                 }}
               />
+              <span>{tab.label}</span>
             </button>
           );
         })}
@@ -902,13 +910,11 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       <div
         className="flex-1 overflow-y-auto noscrollbar"
         style={{
-          background:
-            theme.name === "hyperscape"
-              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(0, 0, 0, 0.12) 100%)"
-              : theme.colors.background.panelSecondary,
-          border: `1px solid ${theme.colors.border.default}66`,
-          borderRadius: theme.borderRadius.md,
-          padding: "8px",
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: theme.borderRadius.md,
+            padding: "8px",
+          }),
         }}
       >
         {/* Account Tab */}

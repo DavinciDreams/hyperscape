@@ -33,6 +33,21 @@ interface EnsureTerrainCacheArgs {
   upZ: number;
 }
 
+function sameTerrainRequest(
+  left: EnsureTerrainCacheArgs | null,
+  right: EnsureTerrainCacheArgs,
+): boolean {
+  if (!left) return false;
+
+  return (
+    left.centerX === right.centerX &&
+    left.centerZ === right.centerZ &&
+    left.currentExtent === right.currentExtent &&
+    left.upX === right.upX &&
+    left.upZ === right.upZ
+  );
+}
+
 const DEFAULT_BIOME_COLOR: CachedBiomeColor = {
   r: 86,
   g: 126,
@@ -175,6 +190,17 @@ async function generateTerrainChunked(
         r = clampColorChannel(biomeColor.r + lift + slopeShade + warmth);
         g = clampColorChannel(biomeColor.g + lift + slopeShade);
         b = clampColorChannel(biomeColor.b + lift + slopeShade - (warmth >> 1));
+
+        const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
+        if (luminance > 196) {
+          const contrastDrop = Math.min(
+            54,
+            (luminance - 196) * 0.72 + slope * 28,
+          );
+          r = clampColorChannel(r - contrastDrop);
+          g = clampColorChannel(g - contrastDrop * 0.82);
+          b = clampColorChannel(b - contrastDrop * 0.4 + 10);
+        }
       } else {
         const waterDepth =
           Math.min(
@@ -220,6 +246,7 @@ export function useMinimapTerrainCache(
   const terrainCacheUpRef = useRef<{ x: number; z: number }>({ x: 0, z: -1 });
   const terrainGenVersionRef = useRef(0);
   const terrainIsGeneratingRef = useRef(false);
+  const pendingTerrainRequestRef = useRef<EnsureTerrainCacheArgs | null>(null);
 
   const invalidateTerrainCache = useCallback(() => {
     terrainOffscreenRef.current = null;
@@ -234,18 +261,25 @@ export function useMinimapTerrainCache(
     terrainCacheExtentRef.current = 0;
     terrainCacheUpRef.current.x = 0;
     terrainCacheUpRef.current.z = -1;
+    pendingTerrainRequestRef.current = null;
   }, []);
 
   const ensureTerrainCache = useCallback(
     ({ centerX, centerZ, currentExtent, upX, upZ }: EnsureTerrainCacheArgs) => {
+      const request = { centerX, centerZ, currentExtent, upX, upZ };
+      pendingTerrainRequestRef.current = request;
+
       const cachedCenter = terrainCacheCenterRef.current;
       const deltaX = centerX - cachedCenter.x;
       const deltaZ = centerZ - cachedCenter.z;
-      const moved = deltaX * deltaX + deltaZ * deltaZ > 400;
+      const moved = deltaX * deltaX + deltaZ * deltaZ > 64;
       const extentChanged = terrainCacheExtentRef.current !== currentExtent;
       const needsRegen = !terrainOffscreenRef.current || moved || extentChanged;
 
-      if (!needsRegen || terrainIsGeneratingRef.current) {
+      if (!needsRegen) {
+        if (sameTerrainRequest(pendingTerrainRequestRef.current, request)) {
+          pendingTerrainRequestRef.current = null;
+        }
         return;
       }
 
@@ -254,6 +288,11 @@ export function useMinimapTerrainCache(
         | null
         | undefined;
       if (!terrainSystem?.getHeightAt) {
+        return;
+      }
+
+      if (terrainIsGeneratingRef.current) {
+        terrainGenVersionRef.current += 1;
         return;
       }
 
@@ -270,15 +309,34 @@ export function useMinimapTerrainCache(
         upZ,
         () => terrainGenVersionRef.current !== version,
       ).then((offscreen) => {
+        const wasCancelled = terrainGenVersionRef.current !== version;
         terrainIsGeneratingRef.current = false;
-        if (terrainGenVersionRef.current !== version || !offscreen) return;
+        if (!wasCancelled && offscreen) {
+          terrainOffscreenRef.current = offscreen;
+          terrainCacheCenterRef.current.x = centerX;
+          terrainCacheCenterRef.current.z = centerZ;
+          terrainCacheExtentRef.current = currentExtent;
+          terrainCacheUpRef.current.x = upX;
+          terrainCacheUpRef.current.z = upZ;
+        }
 
-        terrainOffscreenRef.current = offscreen;
-        terrainCacheCenterRef.current.x = centerX;
-        terrainCacheCenterRef.current.z = centerZ;
-        terrainCacheExtentRef.current = currentExtent;
-        terrainCacheUpRef.current.x = upX;
-        terrainCacheUpRef.current.z = upZ;
+        const pendingRequest = pendingTerrainRequestRef.current;
+        if (
+          pendingRequest &&
+          (!offscreen ||
+            pendingRequest.centerX !== centerX ||
+            pendingRequest.centerZ !== centerZ ||
+            pendingRequest.currentExtent !== currentExtent ||
+            pendingRequest.upX !== upX ||
+            pendingRequest.upZ !== upZ)
+        ) {
+          Promise.resolve().then(() => {
+            ensureTerrainCache(pendingRequest);
+          });
+          return;
+        }
+
+        pendingTerrainRequestRef.current = null;
       });
     },
     [world],

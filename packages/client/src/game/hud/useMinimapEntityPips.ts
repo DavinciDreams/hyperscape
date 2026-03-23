@@ -339,7 +339,7 @@ export function useMinimapEntityPips({
     };
 
     const tick = (now: number) => {
-      if (now - lastUpdateMs >= 200) {
+      if (now - lastUpdateMs >= 90) {
         update();
         lastUpdateMs = now;
       }

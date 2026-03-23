@@ -902,6 +902,93 @@ export function getPanelInsetStyle(
   };
 }
 
+export function getHudClusterSurfaceStyle(
+  theme: Theme,
+  options?: {
+    active?: boolean;
+    radius?: number;
+    padding?: number | string;
+  },
+): React.CSSProperties {
+  const active = options?.active ?? false;
+
+  return {
+    background:
+      theme.name === "hyperscape"
+        ? active
+          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.026) 18%, rgba(0, 0, 0, 0.18) 100%), radial-gradient(circle at top center, rgba(226, 213, 184, 0.08), transparent 44%), linear-gradient(180deg, rgba(34, 39, 47, 0.9) 0%, rgba(17, 20, 25, 0.92) 100%)"
+          : "linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(255, 255, 255, 0.02) 20%, rgba(0, 0, 0, 0.16) 100%), radial-gradient(circle at top center, rgba(226, 213, 184, 0.055), transparent 42%), linear-gradient(180deg, rgba(32, 37, 45, 0.86) 0%, rgba(16, 19, 24, 0.88) 100%)"
+        : theme.colors.background.panelPrimary,
+    border: `1px solid ${active ? theme.colors.border.hover : `${theme.colors.border.default}72`}`,
+    borderRadius: options?.radius ?? theme.borderRadius.md,
+    boxShadow: active
+      ? `${theme.shadows.md}, inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -12px 18px rgba(0,0,0,0.16)`
+      : `${theme.shadows.sm}, inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -10px 16px rgba(0,0,0,0.14)`,
+    backdropFilter: `blur(${Math.max(6, theme.glass.blur - 2)}px)`,
+    padding: options?.padding,
+  };
+}
+
+export function getContextMenuSurfaceStyle(
+  theme: Theme,
+  options?: {
+    minWidth?: number | string;
+    radius?: number;
+  },
+): React.CSSProperties {
+  return {
+    ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+    background:
+      theme.name === "hyperscape"
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.022) 18%, rgba(0, 0, 0, 0.18) 100%), radial-gradient(circle at top right, rgba(226, 213, 184, 0.08), transparent 34%), linear-gradient(180deg, rgba(37, 43, 52, 0.95) 0%, rgba(18, 22, 28, 0.97) 100%)"
+        : theme.colors.background.panelPrimary,
+    border: `1px solid ${theme.colors.border.hover}`,
+    borderRadius: options?.radius ?? theme.borderRadius.md,
+    boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -16px 24px rgba(0,0,0,0.18)`,
+    backdropFilter: `blur(${Math.max(8, theme.glass.blur)}px)`,
+    overflow: "hidden",
+    minWidth: options?.minWidth,
+  };
+}
+
+export function getContextMenuItemStyle(
+  theme: Theme,
+  options?: {
+    hovered?: boolean;
+    active?: boolean;
+    danger?: boolean;
+    radius?: number;
+    padding?: number | string;
+  },
+): React.CSSProperties {
+  const hovered = options?.hovered ?? false;
+  const active = options?.active ?? false;
+  const danger = options?.danger ?? false;
+  const accent = danger
+    ? theme.colors.state.danger
+    : theme.colors.accent.secondary;
+
+  return {
+    ...getPanelInsetStyle(theme, {
+      emphasis: hovered || active ? "strong" : "normal",
+      radius: options?.radius ?? 0,
+      padding: options?.padding,
+    }),
+    background:
+      hovered || active
+        ? `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, ${accent}18 24%, rgba(21, 25, 31, 0.98) 100%)`
+        : "transparent",
+    border: "none",
+    boxShadow:
+      hovered || active
+        ? `inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -10px 14px rgba(0,0,0,0.12)`
+        : "none",
+    color: danger ? theme.colors.state.danger : theme.colors.text.primary,
+    transition:
+      "background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease",
+  };
+}
+
 export function getInteractiveTileStyle(
   theme: Theme,
   options?: {

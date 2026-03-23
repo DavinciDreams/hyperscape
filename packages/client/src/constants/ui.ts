@@ -33,8 +33,11 @@ export const UI = {
      */
     CHAT_COLLAPSED: 35,
     CHAT_EXPANDED: zIndex.chat,
+    OVERLAY: zIndex.overlay,
     MODAL: zIndex.modal,
     TOOLTIP: zIndex.tooltip,
+    CONTEXT_MENU: zIndex.contextMenu,
+    CRITICAL: zIndex.critical,
   },
 
   /**
