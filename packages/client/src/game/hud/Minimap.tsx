@@ -21,12 +21,15 @@ import {
   INPUT,
 } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
+import { type EntityPip, useMinimapEntityPips } from "./useMinimapEntityPips";
 import { useQuestStatusSync } from "./useQuestStatusSync";
-// Terrain sample grid size per axis.  50×50 = 2,500 getHeightAt calls vs the
-// previous per-pixel approach which was W×H (up to 40,000+ calls).  The low-res
-// ImageData is drawn to an OffscreenCanvas and then scaled up via drawImage with
-// bilinear filtering — visually indistinguishable at minimap scale, 16× cheaper.
-const TERRAIN_SAMPLE_SIZE = 50;
+import {
+  type MinimapRoad,
+  type MinimapRoadWithAABB,
+  type MinimapTown,
+  useMinimapWorldCaches,
+} from "./useMinimapWorldCaches";
+import { useMinimapTerrainCache } from "./useMinimapTerrainCache";
 // Over-sample factor relative to the visible extent.
 // sqrt(2) × 1.1 ≈ 1.555 ensures the offscreen canvas always covers the canvas
 // corners at any camera rotation angle without clipping.
@@ -50,24 +53,6 @@ const ROAD_LINE_WIDTH_PX = 5;
 const ROAD_OUTLINE_WIDTH_PX = 7;
 const BUILDING_LINE_WIDTH_PX = 0.5;
 
-/** Road shape for minimap baking */
-type MinimapRoad = { path: Array<{ x: number; z: number }>; width: number };
-/** Road enriched with a pre-computed world-space AABB for O(1) visibility culling */
-type MinimapRoadWithAABB = MinimapRoad & {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-};
-/** Town shape for minimap baking */
-type MinimapTown = {
-  buildings: Array<{
-    position: { x: number; z: number };
-    size: { width: number; depth: number };
-    rotation: number;
-  }>;
-};
-
 /** 2D context interface for minimap drawing — satisfied by both CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D */
 interface MinimapDrawContext {
   save(): void;
@@ -83,114 +68,6 @@ interface MinimapDrawContext {
   lineWidth: number;
   lineCap: "butt" | "round" | "square";
   lineJoin: "bevel" | "round" | "miter";
-}
-
-// Height-based color palette for Canvas 2D terrain background.
-// Colors map to height ranges after the water threshold.
-// These approximate the visual terrain biome colors seen in the 3D view.
-const MINIMAP_TERRAIN_COLORS: Array<{
-  maxHeight: number;
-  r: number;
-  g: number;
-  b: number;
-}> = [
-  { maxHeight: TERRAIN_CONSTANTS.WATER_THRESHOLD, r: 30, g: 60, b: 130 }, // deep water
-  { maxHeight: TERRAIN_CONSTANTS.WATER_THRESHOLD + 1, r: 50, g: 100, b: 160 }, // shallow water
-  { maxHeight: 15, r: 70, g: 110, b: 70 }, // swamp/wetland
-  { maxHeight: 22, r: 80, g: 140, b: 60 }, // low grassland
-  { maxHeight: 30, r: 90, g: 130, b: 50 }, // grassland
-  { maxHeight: 36, r: 110, g: 120, b: 55 }, // forest / rolling hills
-  { maxHeight: 42, r: 130, g: 110, b: 80 }, // highland
-  { maxHeight: 48, r: 140, g: 120, b: 95 }, // mountain
-  { maxHeight: Infinity, r: 160, g: 155, b: 155 }, // snow peak
-];
-
-/**
- * Async terrain background generator.
- *
- * Samples the terrain height grid at TERRAIN_SAMPLE_SIZE² points, yielding to
- * the browser between row-groups so the main thread is never blocked.  Each
- * yield costs ~0 frames but allows the GPU to present the next 3-D frame
- * before we resume — this is the correct fix for in-game choppiness caused by
- * synchronous noise calls inside requestAnimationFrame callbacks.
- *
- * Returns an OffscreenCanvas on success, or null if cancelled (the caller
- * increments the version token to cancel an in-flight generation).
- */
-async function generateTerrainChunked(
-  terrainSystem: { getHeightAt: (x: number, z: number) => number },
-  centerX: number,
-  centerZ: number,
-  extent: number,
-  upX: number,
-  upZ: number,
-  isCancelled: () => boolean,
-): Promise<OffscreenCanvas | null> {
-  const S = TERRAIN_SAMPLE_SIZE;
-  const offscreen = new OffscreenCanvas(S, S);
-  const osCtx = offscreen.getContext("2d");
-  if (!osCtx) return null;
-
-  const imageData = osCtx.createImageData(S, S);
-  const data = imageData.data;
-  // right = cross(view, up) for camera looking down -Y: (-upZ, upX) in XZ
-  const rightX = -upZ;
-  const rightZ = upX;
-
-  for (let sy = 0; sy < S; sy++) {
-    // Check cancellation before each row — exits quickly if superseded
-    if (isCancelled()) return null;
-
-    for (let sx = 0; sx < S; sx++) {
-      const px = (sx + 0.5) / S;
-      const py = (sy + 0.5) / S;
-      const ndcX = px * 2 - 1;
-      // ndcY: top of image = forward (center+up), bottom = behind (center-up)
-      const ndcY = py * 2 - 1;
-      const worldX = centerX + ndcX * rightX * extent - ndcY * upX * extent;
-      const worldZ = centerZ + ndcX * rightZ * extent - ndcY * upZ * extent;
-
-      const h = terrainSystem.getHeightAt(worldX, worldZ);
-
-      let r = 30,
-        g = 60,
-        b = 130;
-      for (let ci = 0; ci < MINIMAP_TERRAIN_COLORS.length; ci++) {
-        const entry = MINIMAP_TERRAIN_COLORS[ci];
-        if (h <= entry.maxHeight) {
-          r = entry.r;
-          g = entry.g;
-          b = entry.b;
-          break;
-        }
-      }
-      if (h > TERRAIN_CONSTANTS.WATER_THRESHOLD) {
-        const lift =
-          Math.min(30, ((h - TERRAIN_CONSTANTS.WATER_THRESHOLD) / 40) * 30) | 0;
-        r = Math.min(255, r + lift);
-        g = Math.min(255, g + lift);
-        b = Math.min(255, b + lift);
-      }
-
-      const idx = (sy * S + sx) * 4;
-      data[idx] = r;
-      data[idx + 1] = g;
-      data[idx + 2] = b;
-      data[idx + 3] = 255;
-    }
-
-    // Yield every 10 rows (5 yields per full generation).
-    // Each chunk = 10 × TERRAIN_SAMPLE_SIZE samples ≈ 500 calls.
-    // The setTimeout(0) posts the continuation as a new macrotask, allowing
-    // the browser to run its rendering pipeline between chunks.
-    if (sy % 10 === 9) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      if (isCancelled()) return null;
-    }
-  }
-
-  osCtx.putImageData(imageData, 0, 0);
-  return offscreen;
 }
 
 /**
@@ -465,23 +342,6 @@ function createRenderState(): MinimapRenderState {
     projectionViewMatrix: new THREE.Matrix4(),
     hasCachedMatrix: false,
   };
-}
-
-interface EntityPip {
-  id: string;
-  type: "player" | "enemy" | "building" | "item" | "resource" | "quest";
-  position: THREE.Vector3;
-  color: string;
-  /** Whether this pip is actively selected/tracked (for pulse animation) */
-  isActive?: boolean;
-  /** Shape variant for special rendering */
-  icon?: "star" | "circle" | "diamond";
-  /** Group member index for color assignment (-1 or undefined = not in group) */
-  groupIndex?: number;
-  /** Whether this is the local player (renders as square) */
-  isLocalPlayer?: boolean;
-  /** Location subtype for minimap icons (bank, shop, altar, etc.) */
-  subType?: string;
 }
 
 /** Augmented window type covering all Hyperscape globals written to window */
@@ -889,19 +749,6 @@ interface TerrainSystemLike {
   getHeightAt: (x: number, z: number) => number;
 }
 
-/**
- * Config properties read from entity data for minimap icon detection.
- * Used by both NPC (services/questIds) and resource (resourceType/harvestSkill) entities.
- * The entity system doesn't expose typed config yet — this documents the expected shape
- * until ECS types land.
- */
-interface MinimapEntityConfig {
-  services?: string[];
-  questIds?: string[];
-  resourceType?: string;
-  harvestSkill?: string;
-}
-
 /** Network send interface needed for server-authoritative move requests */
 interface WorldNetworkSend {
   network: { send: (method: string, data: unknown) => void };
@@ -979,28 +826,15 @@ function MinimapInner({
   // Per-instance render state — isolated from other Minimap instances
   const renderStateRef = useRef<MinimapRenderState>(createRenderState());
 
-  // Low-res (TERRAIN_SAMPLE_SIZE²) OffscreenCanvas used as terrain background cache.
-  // Drawing with mainCtx.drawImage scales it up with bilinear filtering — smooth and
-  // 16× cheaper than per-pixel sampling directly into the full-size canvas.
-  const terrainOffscreenRef = useRef<OffscreenCanvas | null>(null);
-  // World-space center when the cache was last generated (reused object — no per-frame allocation)
-  const terrainCacheCenterRef = useRef<{ x: number; z: number }>({
-    x: Infinity,
-    z: Infinity,
-  });
-  // Extent (half-width in world units) when the cache was last generated
-  const terrainCacheExtentRef = useRef<number>(0);
-  // Camera up vector when the cache was last generated (reused object)
-  const terrainCacheUpRef = useRef<{ x: number; z: number }>({ x: 0, z: -1 });
-  // Monotonically incrementing generation token.  Incrementing it cancels any
-  // in-flight generateTerrainChunked call (they check isCancelled() each row).
-  // Only the generation whose version still matches when it completes is accepted.
-  const terrainGenVersionRef = useRef(0);
-  // Mutex: true while an async terrain generation is running.
-  // Prevents overlapping generations — only one runs at a time.
-  // Without this gate, the version-increment cancel system would restart generation
-  // every 4 frames during rotation so no generation ever completes.
-  const terrainIsGeneratingRef = useRef(false);
+  const {
+    terrainOffscreenRef,
+    terrainCacheCenterRef,
+    terrainCacheExtentRef,
+    terrainCacheUpRef,
+    invalidateTerrainCache,
+    clearTerrainCache,
+    ensureTerrainCache,
+  } = useMinimapTerrainCache(world);
 
   // Cached 2D rendering contexts — avoids DOM query every frame
   const mainCtxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -1135,7 +969,7 @@ function MinimapInner({
     overlayCtxRef.current = overlayCanvas.getContext("2d");
 
     // Invalidate terrain cache when canvas dimensions change
-    terrainOffscreenRef.current = null;
+    invalidateTerrainCache();
 
     // Note: extent intentionally omitted - changes handled via extentRef in render loop
   }, [width, height, world]);
@@ -1149,12 +983,7 @@ function MinimapInner({
         cameraRef.current = null;
       }
 
-      // Cancel any in-flight async terrain generation and clear caches
-      terrainGenVersionRef.current++;
-      terrainIsGeneratingRef.current = false;
-      terrainOffscreenRef.current = null;
-      terrainCacheCenterRef.current.x = Infinity;
-      terrainCacheCenterRef.current.z = Infinity;
+      clearTerrainCache();
       roadsCacheRef.current = null;
       roadsWithAABBRef.current = null;
       townsCacheRef.current = null;
@@ -1164,315 +993,27 @@ function MinimapInner({
       // Clear icon flyweight cache so OffscreenCanvas objects can be GC'd
       _iconCache.clear();
     };
-  }, []);
+  }, [clearTerrainCache]);
 
   // Keep extent ref in sync with state for render loop access
   useEffect(() => {
     extentRef.current = extent;
   }, [extent]);
 
-  // Collect entity data for pips (update at a moderate cadence, only when visible)
-  useEffect(() => {
-    if (!world.entities || !isVisible) return;
-
-    let intervalId: number | null = null;
-
-    // Single mutable array written directly to the render ref each interval.
-    // Cleared with .length = 0 and repopulated — no allocations between ticks.
-    const workingPips: EntityPip[] = [];
-    const seenIds = new Set<string>();
-
-    const update = () => {
-      // Clear working arrays (reuse allocation)
-      workingPips.length = 0;
-      seenIds.clear();
-
-      const player = world.entities?.player as Entity | undefined;
-      let playerPipId: string | null = null;
-
-      // World-space cull origin: player position (or spectator target).
-      // Entities beyond 1.5× the current view extent are skipped in the build
-      // loop so we never allocate/update pips for things off the minimap.
-      // 1.5× gives a comfortable margin so pips near the edge are never clipped.
-      const buildCullExtent = extentRef.current * 1.5;
-      let buildOriginX = 0;
-      let buildOriginZ = 0;
-      let hasBuildOrigin = false;
-
-      if (player?.node?.position) {
-        // Normal mode: local player is the green pip
-        // Reuse cached pip if available
-        let playerPip = entityCacheRef.current.get("local-player");
-        if (!playerPip) {
-          playerPip = {
-            id: "local-player",
-            type: "player",
-            position: player.node.position,
-            color: "#ffffff",
-            isLocalPlayer: true,
-          };
-          entityCacheRef.current.set("local-player", playerPip);
-        } else {
-          playerPip.position = player.node.position;
-          playerPip.color = "#ffffff";
-          playerPip.isLocalPlayer = true;
-        }
-        workingPips.push(playerPip);
-        seenIds.add("local-player");
-        playerPipId = player.id;
-        buildOriginX = player.node.position.x;
-        buildOriginZ = player.node.position.z;
-        hasBuildOrigin = true;
-      } else {
-        // Spectator mode: get spectated entity from camera system as green pip
-        const spectatorTarget = getSpectatorTarget(world);
-        if (spectatorTarget) {
-          let spectatedPip = entityCacheRef.current.get("spectated-player");
-          if (!spectatedPip) {
-            spectatedPip = {
-              id: "spectated-player",
-              type: "player",
-              position: new THREE.Vector3(
-                spectatorTarget.position.x,
-                0,
-                spectatorTarget.position.z,
-              ),
-              color: "#ffffff",
-              isLocalPlayer: true,
-            };
-            entityCacheRef.current.set("spectated-player", spectatedPip);
-          } else {
-            spectatedPip.position.set(
-              spectatorTarget.position.x,
-              0,
-              spectatorTarget.position.z,
-            );
-            spectatedPip.color = "#ffffff";
-            spectatedPip.isLocalPlayer = true;
-          }
-          workingPips.push(spectatedPip);
-          seenIds.add("spectated-player");
-          playerPipId = spectatorTarget.id ?? null;
-          buildOriginX = spectatorTarget.position.x;
-          buildOriginZ = spectatorTarget.position.z;
-          hasBuildOrigin = true;
-        }
-      }
-
-      // Add other players using entities system for reliable positions
-      if (world.entities) {
-        const players = world.entities.getAllPlayers();
-        for (let i = 0; i < players.length; i++) {
-          const otherPlayer = players[i];
-          // Skip local player or spectated entity (already shown as green pip)
-          if (
-            (player && otherPlayer.id === player.id) ||
-            (playerPipId && otherPlayer.id === playerPipId)
-          ) {
-            continue;
-          }
-          const otherEntity = world.entities.get(otherPlayer.id);
-          if (otherEntity && otherEntity.node && otherEntity.node.position) {
-            // Reuse existing pip from cache if available to avoid GC pressure
-            let playerPip = entityCacheRef.current.get(otherPlayer.id);
-            if (playerPip) {
-              // Reuse existing Vector3, just update coordinates
-              playerPip.position.set(
-                otherEntity.node.position.x,
-                0,
-                otherEntity.node.position.z,
-              );
-              playerPip.color = "#ffffff";
-            } else {
-              // New entity, create a new Vector3
-              playerPip = {
-                id: otherPlayer.id,
-                type: "player",
-                position: new THREE.Vector3(
-                  otherEntity.node.position.x,
-                  0,
-                  otherEntity.node.position.z,
-                ),
-                color: "#ffffff",
-              };
-              entityCacheRef.current.set(otherPlayer.id, playerPip);
-            }
-            workingPips.push(playerPip);
-            seenIds.add(otherPlayer.id);
-          }
-        }
-      }
-
-      // Add pips for all known entities safely (cached)
-      // Note: We use the entity system exclusively for detecting mobs/buildings.
-      // Scene traversal was removed as it caused stale dots (matched static objects by name)
-      if (world.entities) {
-        const allEntities = world.entities.getAll();
-        for (let i = 0; i < allEntities.length; i++) {
-          const entity = allEntities[i];
-          // Skip if no valid position
-          const pos = entity?.position;
-          if (!pos) continue;
-
-          // Build-loop world-space pre-cull: skip entities far outside the
-          // minimap view so we never allocate/update pips for invisible entities.
-          if (
-            hasBuildOrigin &&
-            (Math.abs(pos.x - buildOriginX) > buildCullExtent ||
-              Math.abs(pos.z - buildOriginZ) > buildCullExtent)
-          )
-            continue;
-
-          let color = "#ffffff";
-          let type: EntityPip["type"] = "item";
-          let subType: string | undefined;
-
-          switch (entity.type) {
-            case "player":
-              // Already handled above; skip to avoid duplicates
-              continue;
-            case "mob":
-            case "enemy":
-              color = "#ffff00"; // OSRS: yellow for NPCs/mobs
-              type = "enemy";
-              break;
-            case "npc": {
-              color = "#ffff00"; // OSRS: yellow for NPCs
-              type = "enemy"; // NPCs show as yellow dots like mobs
-              // Detect NPC service type for minimap icons
-              const npcConfig = (
-                entity as unknown as { config?: MinimapEntityConfig }
-              ).config;
-              const serviceTypes = npcConfig?.services;
-              if (serviceTypes?.includes("bank")) {
-                subType = "bank";
-              } else if (serviceTypes?.includes("shop")) {
-                subType = "shop";
-              }
-              // Quest icon with state awareness (overrides shop for quest+shop NPCs)
-              if (serviceTypes?.includes("quest")) {
-                const questIds = npcConfig?.questIds;
-                const statuses = questStatusesRef.current;
-                if (questIds && questIds.length > 0 && statuses.size > 0) {
-                  let hasAvailable = false;
-                  let hasActive = false;
-                  let allCompleted = true;
-                  for (const qid of questIds) {
-                    const state = statuses.get(qid);
-                    if (state === "available") hasAvailable = true;
-                    else if (state === "active") hasActive = true;
-                    if (state !== "completed") allCompleted = false;
-                  }
-                  if (hasAvailable) {
-                    subType = "quest_available";
-                  } else if (hasActive) {
-                    subType = "quest_in_progress";
-                  } else if (!allCompleted) {
-                    // No status data yet, show generic quest icon
-                    subType = "quest_available";
-                  }
-                  // If all completed, don't override subType (keep bank/shop or nothing)
-                } else {
-                  // No quest status data loaded yet, show generic quest icon
-                  subType = "quest_available";
-                }
-              }
-              break;
-            }
-            // All static building types with dedicated icons: the entity.type
-            // string is the same key used by drawMinimapIcon, so subType = entity.type.
-            case "bank":
-            case "furnace":
-            case "anvil":
-            case "range":
-            case "altar":
-            case "runecrafting_altar":
-              color = "#ffff00";
-              type = "building";
-              subType = entity.type;
-              break;
-            case "building":
-            case "structure":
-              color = "#ffff00"; // OSRS: yellow (same as NPCs)
-              type = "building";
-              break;
-            case "item":
-            case "loot":
-              color = "#ff0000"; // OSRS: red for ground items
-              type = "item";
-              break;
-            case "resource": {
-              color = "#ffff00"; // OSRS: yellow (same as NPCs)
-              type = "resource";
-              // Detect resource subtype for minimap icons
-              const resConfig = (
-                entity as unknown as { config?: MinimapEntityConfig }
-              ).config;
-              if (
-                resConfig?.resourceType === "fishing_spot" ||
-                resConfig?.harvestSkill === "fishing"
-              ) {
-                subType = "fishing";
-              } else if (
-                resConfig?.resourceType === "mining_rock" ||
-                resConfig?.harvestSkill === "mining"
-              ) {
-                subType = "mining";
-              } else if (
-                resConfig?.resourceType === "tree" ||
-                resConfig?.harvestSkill === "woodcutting"
-              ) {
-                subType = "tree";
-              }
-              break;
-            }
-            default:
-              color = "#cccccc";
-              type = "item";
-          }
-
-          // Reuse existing pip from cache if available to avoid GC pressure
-          let entityPip = entityCacheRef.current.get(entity.id);
-          if (entityPip) {
-            // Reuse existing Vector3, just update coordinates
-            entityPip.position.set(pos.x, 0, pos.z);
-            entityPip.type = type;
-            entityPip.color = color;
-            entityPip.subType = subType;
-          } else {
-            // New entity, create a new Vector3
-            entityPip = {
-              id: entity.id,
-              type,
-              position: new THREE.Vector3(pos.x, 0, pos.z),
-              color,
-              subType,
-            };
-            entityCacheRef.current.set(entity.id, entityPip);
-          }
-          workingPips.push(entityPip);
-          seenIds.add(entity.id);
-        }
-      }
-
-      // Clean up cache: remove entities that are no longer present
-      // This prevents stale pips from entities that despawned
-      const cacheKeys = entityCacheRef.current.keys();
-      for (const id of cacheKeys) {
-        if (!seenIds.has(id)) {
-          entityCacheRef.current.delete(id);
-        }
-      }
-
-      entityPipsRefForRender.current = workingPips;
-    };
-
-    update();
-    intervalId = window.setInterval(update, 200);
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [world, isVisible]);
+  useMinimapEntityPips({
+    world,
+    isVisible,
+    extentRef,
+    questStatusesRef,
+    entityPipsRefForRender,
+    entityCacheRef,
+  });
+  useMinimapWorldCaches({
+    world,
+    roadsCacheRef,
+    roadsWithAABBRef,
+    townsCacheRef,
+  });
 
   // Single unified render loop - handles camera position, frustum, and rendering
   // Uses refs for all state access to avoid restarting the RAF loop
@@ -1626,58 +1167,13 @@ function MinimapInner({
             // This eliminates the restart-cancel deadlock: previously, every 4-frame
             // terrain check during rotation would increment the version token and cancel
             // the in-flight generation before it could finish, freezing the minimap.
-            const cacheCtr = terrainCacheCenterRef.current;
-            const ddx = centerX - cacheCtr.x;
-            const ddz = centerZ - cacheCtr.z;
-            const moved = ddx * ddx + ddz * ddz > 400; // 20² world units
-            const extentChanged =
-              terrainCacheExtentRef.current !== currentExtent;
-            const needsRegen =
-              !terrainOffscreenRef.current || moved || extentChanged;
-
-            if (needsRegen && !terrainIsGeneratingRef.current) {
-              // Terrain generation runs OUTSIDE the RAF callback as an async
-              // task chain that yields every 10 rows.  The current (possibly
-              // stale) offscreen canvas is drawn below while generation runs.
-              const terrainSystem = world.getSystem("terrain") as
-                | TerrainSystemLike
-                | null
-                | undefined;
-              if (terrainSystem?.getHeightAt) {
-                const version = ++terrainGenVersionRef.current;
-                terrainIsGeneratingRef.current = true;
-                const snapCX = centerX;
-                const snapCZ = centerZ;
-                // Store visible extent for overlay coordinate math (worldToPx scale).
-                const snapVisExt = currentExtent;
-                // Generate at TERRAIN_OVERSHOOT × the visible extent so the corners of
-                // the canvas are always covered regardless of camera rotation angle.
-                const snapExt = currentExtent * TERRAIN_OVERSHOOT;
-                const snapUpX = upX;
-                const snapUpZ = upZ;
-
-                void generateTerrainChunked(
-                  terrainSystem,
-                  snapCX,
-                  snapCZ,
-                  snapExt,
-                  snapUpX,
-                  snapUpZ,
-                  () => terrainGenVersionRef.current !== version,
-                ).then((offscreen) => {
-                  terrainIsGeneratingRef.current = false;
-                  if (terrainGenVersionRef.current !== version || !offscreen)
-                    return;
-                  terrainOffscreenRef.current = offscreen;
-                  // Cache visible extent (not generation extent) so overlay worldToPx is scaled correctly
-                  terrainCacheCenterRef.current.x = snapCX;
-                  terrainCacheCenterRef.current.z = snapCZ;
-                  terrainCacheExtentRef.current = snapVisExt;
-                  terrainCacheUpRef.current.x = snapUpX;
-                  terrainCacheUpRef.current.z = snapUpZ;
-                });
-              }
-            }
+            ensureTerrainCache({
+              centerX,
+              centerZ,
+              currentExtent,
+              upX,
+              upZ,
+            });
 
             // Apply a single canvas rotation transform so terrain + all vector overlays
             // rotate to the live camera orientation in one GPU operation.
@@ -1759,41 +1255,6 @@ function MinimapInner({
 
             // Restore canvas transform — terrain only, no overlays here
             mainCtx.restore();
-
-            // Populate road/town caches (cheap system queries, done once per session)
-            if (!roadsCacheRef.current) {
-              const roadSys = world.getSystem("roads") as {
-                getRoads?: () => MinimapRoad[];
-              } | null;
-              const roads = roadSys?.getRoads?.();
-              if (roads?.length) {
-                roadsCacheRef.current = roads;
-                // Pre-compute AABBs once — O(total_points) upfront, O(1) per road per frame
-                roadsWithAABBRef.current = roads.map((road) => {
-                  if (!road.path.length)
-                    return { ...road, minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
-                  let minX = road.path[0].x,
-                    maxX = road.path[0].x;
-                  let minZ = road.path[0].z,
-                    maxZ = road.path[0].z;
-                  for (let i = 1; i < road.path.length; i++) {
-                    const p = road.path[i];
-                    if (p.x < minX) minX = p.x;
-                    if (p.x > maxX) maxX = p.x;
-                    if (p.z < minZ) minZ = p.z;
-                    if (p.z > maxZ) maxZ = p.z;
-                  }
-                  return { ...road, minX, maxX, minZ, maxZ };
-                });
-              }
-            }
-            if (!townsCacheRef.current) {
-              const townSys = world.getSystem("towns") as {
-                getTowns?: () => MinimapTown[];
-              } | null;
-              const towns = townSys?.getTowns?.();
-              if (towns?.length) townsCacheRef.current = towns;
-            }
           }
         }
       }
