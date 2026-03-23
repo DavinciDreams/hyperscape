@@ -1097,68 +1097,66 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             </span>
           </div>
         </div>
-        <div
-          style={{
-            display:
-              targetName && targetHealth && !ultraCompactPanel
-                ? "block"
-                : "none",
-            background:
-              theme.name === "hyperscape"
-                ? "linear-gradient(180deg, rgba(127, 29, 29, 0.18) 0%, rgba(32, 12, 12, 0.28) 100%)"
-                : `${theme.colors.state.danger}08`,
-            border: `1px solid ${theme.colors.state.danger}35`,
-            borderRadius: theme.borderRadius.lg,
-            padding: `${p.inner}px`,
-            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
-          }}
-        >
-          <div
-            className="flex items-center justify-between"
-            style={{ marginBottom: "4px" }}
-          >
-            <span
-              style={{
-                fontSize: compactPanel ? "11px" : "11px",
-                color: theme.colors.state.danger,
-                fontWeight: 600,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              🎯 {targetName}
-            </span>
-            <span
-              style={{
-                fontSize: compactPanel ? "12px" : "12px",
-                color: theme.colors.state.danger,
-                fontWeight: 700,
-                fontFamily: "var(--font-mono, monospace)",
-              }}
-            >
-              {targetHealth.current}/{targetHealth.max}
-            </span>
-          </div>
+        {targetName && targetHealth && !ultraCompactPanel && (
           <div
             style={{
-              width: "100%",
-              height: compactPanel ? "5px" : "6px",
-              background: theme.colors.background.panelPrimary,
-              borderRadius: theme.borderRadius.sm,
-              overflow: "hidden",
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(127, 29, 29, 0.18) 0%, rgba(32, 12, 12, 0.28) 100%)"
+                  : `${theme.colors.state.danger}08`,
+              border: `1px solid ${theme.colors.state.danger}35`,
+              borderRadius: theme.borderRadius.lg,
+              padding: `${p.inner}px`,
+              boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
             }}
           >
             <div
+              className="flex items-center justify-between"
+              style={{ marginBottom: "4px" }}
+            >
+              <span
+                style={{
+                  fontSize: compactPanel ? "11px" : "11px",
+                  color: theme.colors.state.danger,
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                🎯 {targetName}
+              </span>
+              <span
+                style={{
+                  fontSize: compactPanel ? "12px" : "12px",
+                  color: theme.colors.state.danger,
+                  fontWeight: 700,
+                  fontFamily: "var(--font-mono, monospace)",
+                }}
+              >
+                {targetHealth.current}/{targetHealth.max}
+              </span>
+            </div>
+            <div
               style={{
-                height: "100%",
-                width: `${targetHealthPercent}%`,
+                width: "100%",
+                height: compactPanel ? "5px" : "6px",
+                background: theme.colors.background.panelPrimary,
                 borderRadius: theme.borderRadius.sm,
-                background: "linear-gradient(180deg, #f87171, #dc2626)",
+                overflow: "hidden",
               }}
-            />
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${targetHealthPercent}%`,
+                  borderRadius: theme.borderRadius.sm,
+                  background: "linear-gradient(180deg, #f87171, #dc2626)",
+                }}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Stats Row */}
