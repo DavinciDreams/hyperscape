@@ -203,8 +203,8 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
       }
 
       setError(null);
-    } catch (err) {
-      console.error("[AgentThoughtsOverlay] Error fetching thoughts:", err);
+    } catch {
+      setError((prev) => prev ?? "Unable to refresh thoughts");
     } finally {
       inFlightRef.current = false;
       setLoading(false);

@@ -2636,7 +2636,7 @@ export const AgentMonitorScreen: React.FC = () => {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
   const fetchInFlightRef = useRef(false);
   const adminCodeRef = useRef(adminCode);
   adminCodeRef.current = adminCode;
@@ -2747,15 +2747,40 @@ export const AgentMonitorScreen: React.FC = () => {
   }, [isAuthed, fetchData]);
 
   useEffect(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    const clearPollTimeout = () => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+
+    if (!isAuthed) {
+      clearPollTimeout();
+      return clearPollTimeout;
     }
-    if (isAuthed && autoRefresh) {
-      intervalRef.current = setInterval(fetchData, POLL_INTERVAL_MS);
-    }
+
+    const scheduleNextPoll = () => {
+      clearPollTimeout();
+      if (!autoRefresh) return;
+      const delay =
+        document.visibilityState === "visible"
+          ? POLL_INTERVAL_MS
+          : POLL_INTERVAL_MS * 4;
+      pollTimeoutRef.current = window.setTimeout(() => {
+        pollTimeoutRef.current = null;
+        void fetchData().finally(scheduleNextPoll);
+      }, delay);
+    };
+
+    scheduleNextPoll();
+    const onVisibilityChange = () => {
+      if (!autoRefresh) return;
+      scheduleNextPoll();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearPollTimeout();
     };
   }, [isAuthed, autoRefresh, fetchData]);
 

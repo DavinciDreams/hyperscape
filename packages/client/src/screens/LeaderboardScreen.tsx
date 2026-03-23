@@ -148,6 +148,7 @@ export function LeaderboardScreen() {
   React.useEffect(() => {
     let mounted = true;
     let inFlight: AbortController | null = null;
+    let pollTimeoutId: number | null = null;
 
     const poll = async () => {
       inFlight?.abort();
@@ -189,14 +190,36 @@ export function LeaderboardScreen() {
       }
     };
 
-    void poll();
-    const intervalId = setInterval(() => {
-      void poll();
-    }, POLL_INTERVAL_MS);
+    const clearPollTimeout = () => {
+      if (pollTimeoutId !== null) {
+        window.clearTimeout(pollTimeoutId);
+        pollTimeoutId = null;
+      }
+    };
+
+    const scheduleNextPoll = () => {
+      clearPollTimeout();
+      const delay =
+        document.visibilityState === "visible"
+          ? POLL_INTERVAL_MS
+          : POLL_INTERVAL_MS * 3;
+      pollTimeoutId = window.setTimeout(() => {
+        pollTimeoutId = null;
+        void poll().finally(scheduleNextPoll);
+      }, delay);
+    };
+
+    void poll().finally(scheduleNextPoll);
+    const onVisibilityChange = () => {
+      if (!mounted) return;
+      scheduleNextPoll();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       mounted = false;
-      clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearPollTimeout();
       inFlight?.abort();
     };
   }, []);

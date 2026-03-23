@@ -90,7 +90,7 @@ export function LevelUpNotification({
 
   // Cleanup old timestamps periodically to prevent memory leak
   useEffect(() => {
-    const cleanup = setInterval(() => {
+    const cleanup = window.setTimeout(() => {
       const now = Date.now();
       const threshold = 60000; // 1 minute
       processedRef.current.forEach((timestamp) => {
@@ -98,10 +98,10 @@ export function LevelUpNotification({
           processedRef.current.delete(timestamp);
         }
       });
-    }, 30000); // Every 30 seconds
+    }, 30000); // Every 30 seconds while mounted
 
-    return () => clearInterval(cleanup);
-  }, []);
+    return () => window.clearTimeout(cleanup);
+  }, [currentLevelUp]);
 
   // Don't render if no level-up to display
   if (!currentLevelUp) {
