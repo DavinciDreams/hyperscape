@@ -228,7 +228,7 @@ if (isEmbedded) {
     // It will be set via postMessage from parent window or from session storage
     authToken: "", // Will be populated via secure postMessage
     characterId: (params.characterId as string) || undefined,
-    wsUrl: (params.wsUrl as string) || GAME_WS_URL || "ws://localhost:5555/ws",
+    wsUrl: (params.wsUrl as string) || GAME_WS_URL || "ws://localhost:5556/ws",
     mode,
     followEntity: (params.followEntity as string) || undefined,
     hiddenUI: validHiddenUI.length > 0 ? validHiddenUI : undefined,
@@ -529,7 +529,7 @@ function App() {
     };
   }, []);
 
-  const wsUrl: string = GAME_WS_URL || "ws://localhost:5555/ws";
+  const wsUrl: string = GAME_WS_URL || "ws://localhost:5556/ws";
   const appRef = React.useRef<HTMLDivElement>(null);
 
   const handleUsernameSelected = React.useCallback((_username: string) => {

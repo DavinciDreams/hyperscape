@@ -12,7 +12,7 @@
  *
  * In development (vite dev):
  *   - GAME_API_URL = http://localhost:5555
- *   - GAME_WS_URL = ws://localhost:5555/ws
+ *   - GAME_WS_URL = ws://localhost:5556/ws
  *   - CDN_URL = http://localhost:8080
  */
 
@@ -149,9 +149,9 @@ export const GAME_WS_URL: string =
   normalizeBrowserLoopbackUrl(
     import.meta.env.PROD
       ? "wss://hyperscape-production.up.railway.app/ws"
-      : "ws://localhost:5555/ws",
+      : "ws://localhost:5556/ws",
   ) ??
-  "ws://localhost:5555/ws";
+  "ws://localhost:5556/ws";
 
 // =============================================================================
 // CDN for Static Assets
