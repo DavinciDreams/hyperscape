@@ -1082,11 +1082,6 @@ export function InventoryPanel({
       if (targetingState.active && targetingState.sourceItem) {
         const localPlayer = world?.getPlayer();
         if (localPlayer) {
-          console.log("[InventoryPanel] 🎯 Emitting TARGETING_SELECT:", {
-            sourceItem: targetingState.sourceItem,
-            targetItem: clickedItem.itemId,
-            targetSlot: slotIndex,
-          });
           // Clear hover tooltip before action
           setTargetHover(null);
           world?.emit(EventType.TARGETING_SELECT, {

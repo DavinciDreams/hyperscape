@@ -274,7 +274,9 @@ export function StreamingMode() {
         inputSystem.setEnabled(false);
       }
 
-      console.log("[StreamingMode] World setup complete");
+      if (import.meta.env.DEV) {
+        console.log("[StreamingMode] World setup complete");
+      }
     },
     [clearTerrainPolling, clearCameraRetryTimeouts],
   );
@@ -317,7 +319,7 @@ export function StreamingMode() {
 
       if (!entity) {
         if (attempt < maxRetries) {
-          if (attempt === 0 || attempt % 10 === 0) {
+          if (import.meta.env.DEV && (attempt === 0 || attempt % 10 === 0)) {
             console.log(
               `[StreamingMode] Waiting for initial camera target "${targetId}" (attempt ${attempt}/${maxRetries})`,
             );
@@ -337,9 +339,11 @@ export function StreamingMode() {
       }
 
       setCameraLocked(true);
-      console.log(
-        `[StreamingMode] Initial camera target acquired: ${targetId}`,
-      );
+      if (import.meta.env.DEV) {
+        console.log(
+          `[StreamingMode] Initial camera target acquired: ${targetId}`,
+        );
+      }
     };
 
     attemptLock(0);
@@ -417,7 +421,9 @@ export function StreamingMode() {
 
     if (musicSystem?.setCategoryLock) {
       musicSystem.setCategoryLock("combat");
-      console.log("[StreamingMode] Locked MusicSystem to combat tracks");
+      if (import.meta.env.DEV) {
+        console.log("[StreamingMode] Locked MusicSystem to combat tracks");
+      }
     }
 
     return () => {
@@ -451,12 +457,15 @@ export function StreamingMode() {
       searchParams.get("captureDebug") || ""
     ).toLowerCase();
     const captureDebug = ["1", "true", "yes", "on"].includes(captureDebugValue);
+    const captureVerbose = captureDebug || import.meta.env.DEV;
     if (disableBridgeCapture || !internalCapture) {
-      console.log(
-        disableBridgeCapture
-          ? "[StreamingMode] Bridge capture disabled by URL param, skipping in-page capture"
-          : "[StreamingMode] Bridge capture disabled: 'internalCapture=1' is required to enable in-page capture",
-      );
+      if (captureVerbose) {
+        console.log(
+          disableBridgeCapture
+            ? "[StreamingMode] Bridge capture disabled by URL param, skipping in-page capture"
+            : "[StreamingMode] Bridge capture disabled: 'internalCapture=1' is required to enable in-page capture",
+        );
+      }
       return;
     }
 
@@ -481,7 +490,7 @@ export function StreamingMode() {
       try {
         const status = win.__captureControl__.getStatus?.();
         if (status?.recording && status.wsConnected) {
-          if (captureDebug) {
+          if (captureVerbose) {
             console.log(
               "[Capture] Existing capture is healthy; skipping re-init",
             );
@@ -497,7 +506,9 @@ export function StreamingMode() {
 
     const bridgeUrl = searchParams.get("bridgeUrl") || "ws://127.0.0.1:8765";
 
-    console.log("[StreamingMode] Starting canvas capture to", bridgeUrl);
+    if (captureVerbose) {
+      console.log("[StreamingMode] Starting canvas capture to", bridgeUrl);
+    }
 
     const canvas = document.querySelector("canvas") as HTMLCanvasElement | null;
     if (!canvas) {
@@ -621,7 +632,7 @@ export function StreamingMode() {
           chunkCount++;
           bytesSent += event.data.size;
           lastChunkAt = Date.now();
-          if (chunkCount <= 3 || chunkCount % 60 === 0) {
+          if (captureVerbose && (chunkCount <= 3 || chunkCount % 60 === 0)) {
             console.log(
               `[Capture] Chunk #${chunkCount}: ${event.data.size} bytes`,
             );
@@ -670,14 +681,16 @@ export function StreamingMode() {
           } catch {}
         }, frameIntervalMs);
       }
-      if (captureDebug) {
+      if (captureVerbose) {
         statusTimer = setInterval(() => {
           logCaptureStatus("[Capture] Status");
         }, 10000);
       }
       startedAt = Date.now();
       lastChunkAt = startedAt;
-      console.log("[Capture] Recording started:", mimeType);
+      if (captureVerbose) {
+        console.log("[Capture] Recording started:", mimeType);
+      }
     }
 
     function stopRecording() {
@@ -721,12 +734,16 @@ export function StreamingMode() {
       }
       ws = new WebSocket(bridgeUrl);
       ws.onopen = () => {
-        console.log("[Capture] Connected to RTMPBridge");
+        if (captureVerbose) {
+          console.log("[Capture] Connected to RTMPBridge");
+        }
         reconnectAttempts = 0;
         startRecording();
       };
       ws.onclose = () => {
-        console.log("[Capture] Disconnected from RTMPBridge");
+        if (captureVerbose) {
+          console.log("[Capture] Disconnected from RTMPBridge");
+        }
         stopRecording();
         if (!stopped && reconnectAttempts < MAX_RECONNECT) {
           reconnectAttempts++;

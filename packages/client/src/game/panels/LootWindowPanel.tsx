@@ -210,9 +210,6 @@ function LootWindowPanelContent({
 
       // If gravestone entity no longer exists (despawned), close window
       if (!gravestoneEntity) {
-        console.log(
-          "[LootWindow] Gravestone despawned, closing window immediately...",
-        );
         onClose();
         return false;
       }
