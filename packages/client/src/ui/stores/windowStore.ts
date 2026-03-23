@@ -117,6 +117,17 @@ function clampToViewport(
   };
 }
 
+function windowUpdatesAreNoOp(
+  window: WindowState,
+  updates: Partial<WindowState>,
+): boolean {
+  const entries = Object.entries(updates) as Array<
+    [keyof WindowState, WindowState[keyof WindowState]]
+  >;
+
+  return entries.every(([key, value]) => Object.is(window[key], value));
+}
+
 /** Window store state and actions */
 export interface WindowStoreState {
   /** Map of window ID to window state */
@@ -686,6 +697,7 @@ export const useWindowStore = create<WindowStoreState>()(
         set((state) => {
           const window = state.windows.get(id);
           if (!window) return state;
+          if (windowUpdatesAreNoOp(window, updates)) return state;
 
           const newWindows = new Map(state.windows);
           newWindows.set(id, { ...window, ...updates });
@@ -894,6 +906,9 @@ export const useWindowStore = create<WindowStoreState>()(
             0,
             Math.min(index, window.tabs.length - 1),
           );
+          if (clampedIndex === window.activeTabIndex) {
+            return state;
+          }
 
           const newWindows = new Map(state.windows);
           newWindows.set(windowId, { ...window, activeTabIndex: clampedIndex });
@@ -905,6 +920,7 @@ export const useWindowStore = create<WindowStoreState>()(
         set((state) => {
           const window = state.windows.get(windowId);
           if (!window) return state;
+          if (fromIndex === toIndex) return state;
 
           if (
             fromIndex < 0 ||
