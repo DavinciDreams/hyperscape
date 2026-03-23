@@ -39,6 +39,7 @@ import {
   mix,
   dot,
   sub,
+  mul,
   smoothstep,
   Fn,
   output,
@@ -106,5 +107,22 @@ export function applySkyFog(material: {
   material.outputNode = Fn(() => {
     const litColor = output;
     return vec4(mix(litColor.rgb, fogTex.rgb, fogFactor), litColor.a);
+  })();
+}
+
+// ---------------------------------------------------------------------------
+// HELPER: Apply elevation-based fade to cloud materials.
+// Reduces cloud opacity based on elevation angle so lower clouds
+// gradually dissolve into the sky at the horizon.
+// fadeAmount: 0 = fully visible, 1 = fully transparent
+// ---------------------------------------------------------------------------
+export function applyCloudFog(
+  material: { fog: boolean; outputNode: unknown },
+  fadeAmount: number,
+): void {
+  material.fog = false;
+  material.outputNode = Fn(() => {
+    const litColor = output;
+    return vec4(litColor.rgb, mul(litColor.a, float(1.0 - fadeAmount)));
   })();
 }

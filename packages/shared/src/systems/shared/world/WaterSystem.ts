@@ -57,13 +57,13 @@ const GRAVITY = 9.81;
 const PI = Math.PI;
 const TWO_PI = PI * 2;
 
-// ---- Water visual tuning (portfolio-style) ----
+// ---- Water visual tuning ----
 const WATER = {
   REFLECTION_INTENSITY: 0.4,
   WAVE_DAMP_DISTANCE: 6,
   MAX_DEPTH: 30,
 
-  // Fresnel (Schlick, rf0 = 0.3 matches portfolio)
+  // Fresnel (Schlick approximation, rf0 = 0.3)
   RF0: 0.3,
 
   // Phong sun lighting
@@ -80,7 +80,7 @@ const WATER = {
   COLOR_DEPTH_FALLOFF: 3,
   COLOR_DIST_FADE: 200,
 
-  // Cosine gradient colour parameters (portfolio values)
+  // Cosine gradient colour parameters
   COS_PHASES: [0.28, 0.5, 0.07] as const,
   COS_AMPLITUDES: [4.02, 0.34, 0.65] as const,
   COS_FREQUENCIES: [0.0, 0.48, 0.08] as const,
@@ -343,10 +343,10 @@ export class WaterSystem {
    */
   /**
    * Generate a seamless water normal map using FBM value noise + finite
-   * differences. Produces organic ripple patterns similar to the portfolio's
-   * waterNormal.png (510×511 tangent-space normal map).
+   * differences. Produces organic ripple patterns matching a tangent-space
+   * normal map (510x511).
    *
-   * Target channel statistics (matching portfolio texture):
+   * Target channel statistics:
    *   R: mean ~128, range ~48–206  (X derivative)
    *   G: mean ~128, range ~52–193  (Y derivative)
    *   B: mean ~250, range ~226–254 (up component)
@@ -847,7 +847,7 @@ export class WaterSystem {
   }
 
   /**
-   * Create ocean water material — same portfolio style but no planar reflections,
+   * Create ocean water material — no planar reflections,
    * deeper blue tint, and larger wave amplitude for world boundary water.
    * Uses MeshBasicNodeMaterial with ALL computation in outputNode (no PBR).
    */

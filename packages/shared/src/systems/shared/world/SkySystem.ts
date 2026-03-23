@@ -16,16 +16,23 @@ import {
   add,
   clamp,
   cos,
+  distance,
+  div,
   dot,
   float,
   Fn,
   length,
+  max,
+  min,
   MeshBasicNodeMaterial,
   mix,
   mul,
   normalize,
   positionLocal,
+  positionWorld,
   pow,
+  screenUV,
+  sin,
   smoothstep,
   sub,
   texture,
@@ -37,7 +44,7 @@ import {
   type ShaderNode,
 } from "../../../extras/three/three";
 import type { World, WorldOptions } from "../../../types";
-import { fogRenderTarget } from "./FogConfig";
+import { applyCloudFog, fogRenderTarget } from "./FogConfig";
 import { DAY_CYCLE, SUN_LIGHT } from "./LightingConfig";
 
 const SKY_DOME_RADIUS = 5000;
@@ -63,24 +70,304 @@ function createNoiseTexture(size = 128): THREE.DataTexture {
 }
 
 // -----------------------------
-// Cloud configuration with texture atlas sampling
-// The cloud textures are 2x4 sprite sheets (8 clouds per texture)
-// UV offset selects which cloud sprite to use
-// PERFORMANCE: Reduced from 6 to 4 clouds (barely noticeable, saves draw calls + GPU)
+// Cloud configuration — 28 clouds on a sky-dome ring, 2x4 sprite atlas per texture.
+// Each entry specifies (az, el) spherical coordinates on SKY_DOME_RADIUS.
 // -----------------------------
 type CloudDef = {
-  az: number; // azimuth in degrees
-  el: number; // elevation in degrees
-  tex: number; // which texture (1-4)
-  sprite: number; // which sprite in atlas (0-7)
-  scale: number; // size multiplier
+  az: number;
+  el: number;
+  tex: number; // 1-4 (cloud1.png through cloud4.png)
+  sprite: number; // 0-7 within 2x4 atlas
+  w: number; // width in world units
+  h: number; // height in world units
+  dSpeed: number; // distortion speed
+  dRange: number; // distortion range
 };
 
 const CLOUD_DEFS: CloudDef[] = [
-  { az: 30, el: 25, tex: 1, sprite: 0, scale: 1.3 },
-  { az: 120, el: 32, tex: 2, sprite: 2, scale: 1.1 },
-  { az: 210, el: 28, tex: 1, sprite: 4, scale: 1.4 },
-  { az: 300, el: 35, tex: 2, sprite: 5, scale: 1.0 },
+  // --- Texture 3 (cloud3) — 12 low-altitude horizon clouds ---
+  {
+    az: 14.4,
+    el: 4.1,
+    tex: 3,
+    sprite: 0,
+    w: 300,
+    h: 200,
+    dSpeed: 0.12,
+    dRange: 0.1,
+  },
+  {
+    az: 0,
+    el: 4.1,
+    tex: 3,
+    sprite: 6,
+    w: 300,
+    h: 200,
+    dSpeed: 0.11,
+    dRange: 0.05,
+  },
+  {
+    az: 50.4,
+    el: 4.1,
+    tex: 3,
+    sprite: 1,
+    w: 300,
+    h: 180,
+    dSpeed: 0.12,
+    dRange: 0.1,
+  },
+  {
+    az: 28.8,
+    el: 4.1,
+    tex: 3,
+    sprite: 6,
+    w: 300,
+    h: 180,
+    dSpeed: 0.1,
+    dRange: 0.0,
+  },
+  {
+    az: 100.8,
+    el: 4.1,
+    tex: 3,
+    sprite: 2,
+    w: 400,
+    h: 200,
+    dSpeed: 0.12,
+    dRange: 0.1,
+  },
+  {
+    az: 108,
+    el: 4.1,
+    tex: 3,
+    sprite: 6,
+    w: 400,
+    h: 200,
+    dSpeed: 0.12,
+    dRange: 0.05,
+  },
+  {
+    az: 162,
+    el: 4.1,
+    tex: 3,
+    sprite: 3,
+    w: 400,
+    h: 200,
+    dSpeed: 0.12,
+    dRange: 0.1,
+  },
+  {
+    az: 180,
+    el: 4.1,
+    tex: 3,
+    sprite: 7,
+    w: 400,
+    h: 200,
+    dSpeed: 0.1,
+    dRange: 0.1,
+  },
+  {
+    az: 248.4,
+    el: 4.1,
+    tex: 3,
+    sprite: 4,
+    w: 350,
+    h: 175,
+    dSpeed: 0.12,
+    dRange: 0.1,
+  },
+  {
+    az: 270,
+    el: 4.1,
+    tex: 3,
+    sprite: 6,
+    w: 350,
+    h: 175,
+    dSpeed: 0.12,
+    dRange: 0.0,
+  },
+  {
+    az: 288,
+    el: 4.1,
+    tex: 3,
+    sprite: 5,
+    w: 350,
+    h: 175,
+    dSpeed: 0.12,
+    dRange: 0.1,
+  },
+  {
+    az: 306,
+    el: 4.1,
+    tex: 3,
+    sprite: 7,
+    w: 500,
+    h: 200,
+    dSpeed: 0.1,
+    dRange: 0.05,
+  },
+  // --- Texture 1 (cloud1) — 8 mid/high altitude clouds ---
+  {
+    az: 0,
+    el: 20.2,
+    tex: 1,
+    sprite: 0,
+    w: 230,
+    h: 115,
+    dSpeed: 0.1,
+    dRange: 0.5,
+  },
+  {
+    az: 54,
+    el: 29.9,
+    tex: 1,
+    sprite: 1,
+    w: 180,
+    h: 90,
+    dSpeed: 0.12,
+    dRange: 0.4,
+  },
+  {
+    az: 82.8,
+    el: 37.9,
+    tex: 1,
+    sprite: 2,
+    w: 210,
+    h: 105,
+    dSpeed: 0.13,
+    dRange: 0.35,
+  },
+  {
+    az: 122.4,
+    el: 7.9,
+    tex: 1,
+    sprite: 3,
+    w: 250,
+    h: 125,
+    dSpeed: 0.15,
+    dRange: 0.4,
+  },
+  {
+    az: 165.6,
+    el: 20.7,
+    tex: 1,
+    sprite: 4,
+    w: 230,
+    h: 115,
+    dSpeed: 0.16,
+    dRange: 0.35,
+  },
+  {
+    az: 208.8,
+    el: 30.3,
+    tex: 1,
+    sprite: 5,
+    w: 290,
+    h: 145,
+    dSpeed: 0.12,
+    dRange: 0.4,
+  },
+  {
+    az: 270,
+    el: 21.2,
+    tex: 1,
+    sprite: 6,
+    w: 150,
+    h: 75,
+    dSpeed: 0.2,
+    dRange: 0.45,
+  },
+  {
+    az: 324,
+    el: 20.5,
+    tex: 1,
+    sprite: 7,
+    w: 240,
+    h: 120,
+    dSpeed: 0.17,
+    dRange: 0.5,
+  },
+  // --- Texture 4 (cloud4) — 8 mid/high altitude clouds ---
+  {
+    az: 216,
+    el: 5.8,
+    tex: 4,
+    sprite: 7,
+    w: 300,
+    h: 150,
+    dSpeed: 0.1,
+    dRange: 0.5,
+  },
+  {
+    az: 72,
+    el: 5.8,
+    tex: 4,
+    sprite: 6,
+    w: 200,
+    h: 100,
+    dSpeed: 0.12,
+    dRange: 0.4,
+  },
+  {
+    az: 129.6,
+    el: 30.4,
+    tex: 4,
+    sprite: 5,
+    w: 250,
+    h: 120,
+    dSpeed: 0.13,
+    dRange: 0.35,
+  },
+  {
+    az: 180,
+    el: 36.6,
+    tex: 4,
+    sprite: 4,
+    w: 280,
+    h: 170,
+    dSpeed: 0.15,
+    dRange: 0.4,
+  },
+  {
+    az: 248.4,
+    el: 30.3,
+    tex: 4,
+    sprite: 3,
+    w: 350,
+    h: 200,
+    dSpeed: 0.16,
+    dRange: 0.35,
+  },
+  {
+    az: 284.4,
+    el: 40.8,
+    tex: 4,
+    sprite: 2,
+    w: 390,
+    h: 200,
+    dSpeed: 0.12,
+    dRange: 0.4,
+  },
+  {
+    az: 306,
+    el: 29.3,
+    tex: 4,
+    sprite: 1,
+    w: 380,
+    h: 190,
+    dSpeed: 0.2,
+    dRange: 0.45,
+  },
+  {
+    az: 342,
+    el: 38.9,
+    tex: 4,
+    sprite: 0,
+    w: 150,
+    h: 100,
+    dSpeed: 0.17,
+    dRange: 0.5,
+  },
 ];
 
 // -----------------------------
@@ -107,7 +394,7 @@ type SkyMaterialUniforms = {
 type CloudMaterialUniforms = {
   uTime: TSLUniformFloat;
   uSunPosition: TSLUniformVec3;
-  uDayIntensity: TSLUniformFloat;
+  uCloudRadius: TSLUniformFloat;
 };
 
 type SunMaterialUniforms = {
@@ -888,147 +1175,172 @@ export class SkySystem extends System {
   private cloudGroup: THREE.Group | null = null;
 
   /**
-   * Create cloud billboards using cloud textures
-   * Each cloud samples from a sprite atlas (2 columns x 4 rows = 8 sprites per texture)
-   * Clouds dissolve at night using noise-based alpha erosion
+   * Create cloud billboards with custom shader:
+   * - noise UV distortion for organic movement
+   * - B-channel alpha with sin-based oscillation
+   * - Day/night coloring from sun height
+   * - Sun proximity brightness boost + G-channel additive glow
+   * - R-channel dark/bright color interpolation
    */
   private createClouds(): void {
     if (!this.group) return;
 
-    const SKY_RADIUS = SKY_DOME_RADIUS;
-    const BASE_SIZE = 160;
+    const R = SKY_DOME_RADIUS;
 
-    // Create a group to hold all cloud meshes (for rotation)
     this.cloudGroup = new THREE.Group();
     this.cloudGroup.name = "CloudGroup";
-    this.cloudGroup.layers.set(1); // Main camera only, not minimap
+    this.cloudGroup.layers.set(1);
 
-    // Get textures array for easy lookup
     const textures = [this.cloud1, this.cloud2, this.cloud3, this.cloud4];
+    const noiseTex = this.noiseB; // noise2.png for UV distortion
 
-    // Reference noise texture for dissolve effect
-    const noiseRef = this.noiseA;
-
-    // Shared uniforms for all clouds
+    // Shared uniforms
     const uTime = uniform(float(0));
-    const uSunDir = uniform(vec3(0, 1, 0));
-    const uDayIntensity = uniform(float(1.0)); // For dissolve effect at night
+    const uSunPos = uniform(vec3(0, R, 0));
+    const uCloudRadius = uniform(float(R));
 
-    // Store uniforms at class level for updates
     this.cloudMaterialUniforms = {
       uTime,
-      uSunPosition: uSunDir,
-      uDayIntensity,
+      uSunPosition: uSunPos,
+      uCloudRadius,
     } as CloudMaterialUniforms;
 
     for (let i = 0; i < CLOUD_DEFS.length; i++) {
       const def = CLOUD_DEFS[i];
-      const tex = textures[def.tex - 1]; // tex is 1-indexed
-
+      const tex = textures[def.tex - 1];
       if (!tex) continue;
 
-      // Calculate UV offset for sprite in atlas (2 cols x 4 rows)
+      // Sprite atlas UV offset (2 cols x 4 rows)
       const col = def.sprite % 2;
       const row = Math.floor(def.sprite / 2);
-      const uOffset = col * 0.5;
-      const vOffset = 0.75 - row * 0.25; // rows go from top
+      const uOff = col * 0.5;
+      const vOff = 0.75 - row * 0.25;
 
-      // Create geometry with adjusted UVs for this sprite
       const geom = new THREE.PlaneGeometry(1, 1);
       const uvAttr = geom.attributes.uv;
       for (let j = 0; j < uvAttr.count; j++) {
-        const u = uvAttr.getX(j) * 0.5 + uOffset;
-        const v = uvAttr.getY(j) * 0.25 + vOffset;
-        uvAttr.setXY(j, u, v);
+        uvAttr.setXY(
+          j,
+          uvAttr.getX(j) * 0.5 + uOff,
+          uvAttr.getY(j) * 0.25 + vOff,
+        );
       }
       uvAttr.needsUpdate = true;
 
-      // Create material with perlin noise dissolve fade in/out
-      // Each cloud gets a unique phase offset based on its index
-      const cloudIndex = float(i);
+      // Compute cloud world position on the sky sphere (group-local)
+      const azRad = (def.az * Math.PI) / 180;
+      const elRad = (def.el * Math.PI) / 180;
+      const cx = R * Math.cos(elRad) * Math.sin(azRad);
+      const cy = R * Math.sin(elRad);
+      const cz = R * Math.cos(elRad) * Math.cos(azRad);
 
-      // PERFORMANCE: Simplified cloud shader - removed UV swirl animation
-      // Keeps day/night fade and simple dissolve, removes expensive per-fragment cos/sin
-      const cloudColorNode = Fn(() => {
+      // Per-cloud uniforms
+      const uDistSpeed = float(def.dSpeed);
+      const uDistRange = float((1 - def.dRange) * 2);
+      const uCloudPos = vec3(cx, cy, cz);
+
+      // ---- Cloud shader (TSL) ----
+      const cloudOutputNode = Fn(() => {
         const uvCoord = uv();
-        const cloudTex = texture(tex, uvCoord);
 
-        // Day/night color - clouds are bright during day
-        const dayColor = vec3(1.0, 1.0, 1.0);
-        const nightColor = vec3(0.3, 0.35, 0.45);
-        const cloudColor = mix(nightColor, dayColor, uDayIntensity);
-
-        // Simple drifting noise UVs (no swirl rotation)
-        const noiseUV = add(
-          mul(uvCoord, float(2.0)),
-          mul(vec2(uTime, mul(uTime, float(0.6))), float(0.03)),
+        // Noise UV distortion for organic cloud morphing
+        const noiseUV = vec2(
+          add(uvCoord.x, mul(uTime, mul(uDistSpeed, float(0.1)))),
+          add(uvCoord.y, mul(uTime, mul(uDistSpeed, float(0.2)))),
         );
-        const noiseSample = noiseRef
-          ? texture(noiseRef, noiseUV)
+        const noiseSample = noiseTex
+          ? texture(noiseTex, noiseUV)
           : vec4(0.5, 0.5, 0.5, 1.0);
-        const noiseValue = noiseSample.r;
-
-        // Simple fade cycle (uses cos but only once per cloud, not per-pixel)
-        const fadeSpeed = float(0.025);
-        const cloudPhase = mul(cloudIndex, float(2.5));
-        const fadeCycle = add(mul(uTime, fadeSpeed), cloudPhase);
-        const fadeProgress = mul(add(cos(fadeCycle), float(1.0)), float(0.5));
-
-        // Combined dissolve (day/night and cycle in one pass)
-        const nightFade = mul(sub(float(1.0), uDayIntensity), float(0.7));
-        const dissolveThreshold = add(sub(float(1.0), fadeProgress), nightFade);
-        const dissolveMask = smoothstep(
-          dissolveThreshold,
-          add(dissolveThreshold, float(0.2)),
-          noiseValue,
+        const distortedUV = add(
+          uvCoord,
+          mul(vec2(noiseSample.r, noiseSample.b), float(0.01)),
         );
 
-        const finalAlpha = mul(cloudTex.a, dissolveMask);
-        return vec4(cloudColor, finalAlpha);
+        const cloud = texture(tex, distortedUV);
+
+        // B-channel alpha dissolve — sin-based oscillation morphs the cloud shape over time
+        const alphaLerp = mix(
+          add(
+            mul(sin(mul(uTime, uDistSpeed)), float(0.78)),
+            mul(float(0.78), uDistRange),
+          ),
+          float(1.0),
+          float(0.1),
+        );
+        const cloudStep = sub(float(1.0), alphaLerp);
+        const cloudLerp = smoothstep(float(0.95), float(1.0), alphaLerp);
+        const alphaBase = smoothstep(
+          clamp(sub(cloudStep, float(0.1)), float(0.0), float(1.0)),
+          cloudStep,
+          cloud.b,
+        );
+        const cloudAlpha = clamp(
+          mix(alphaBase, cloud.a, cloudLerp),
+          float(0.0),
+          cloud.a,
+        );
+
+        // Day/night color from sun height
+        const sunNightStep = smoothstep(
+          float(-0.3),
+          float(0.25),
+          div(uSunPos.y, uCloudRadius),
+        );
+        const brightColor = mix(
+          vec3(0.141, 0.607, 0.94),
+          vec3(1.0, 1.0, 1.0),
+          sunNightStep,
+        );
+        const darkColor = mix(
+          vec3(0.024, 0.32, 0.59),
+          vec3(0.141, 0.807, 0.94),
+          sunNightStep,
+        );
+
+        // Sun proximity brightness
+        const sunDist = distance(uCloudPos, uSunPos);
+        const brightLerp = smoothstep(float(0.0), uCloudRadius, sunDist);
+        const bright = mix(float(2.0), float(1.0), brightLerp);
+
+        // R-channel color interpolation + G-channel additive sun glow
+        const cloudColor = add(
+          mul(mix(darkColor, brightColor, cloud.r), bright),
+          mul(cloud.g, sub(float(1.0), brightLerp)),
+        );
+
+        // Per-fragment horizon fog: sample sky fog texture, blend by world Y
+        const fogTex = texture(fogRenderTarget.texture, screenUV);
+        const worldElev = clamp(
+          div(positionWorld.y, float(5000.0)),
+          float(0.0),
+          float(1.0),
+        );
+        const fogStr = smoothstep(float(0.6), float(0.0), worldElev);
+        const finalColor = mix(cloudColor, fogTex.rgb, fogStr);
+
+        return vec4(finalColor, cloudAlpha);
       })();
 
       const mat = new MeshBasicNodeMaterial();
-      mat.colorNode = cloudColorNode;
+      mat.colorNode = cloudOutputNode;
       mat.side = THREE.DoubleSide;
       mat.transparent = true;
       mat.depthWrite = false;
-      mat.depthTest = true; // Check depth buffer - don't render over closer objects
+      mat.depthTest = true;
       mat.toneMapped = false;
-      mat.fog = false; // Don't let scene fog affect clouds
+      mat.fog = false;
 
-      // Create mesh
       const mesh = new THREE.Mesh(geom, mat);
       mesh.frustumCulled = false;
-      mesh.renderOrder = -995; // Render after sky dome but before scene objects
-
-      // Position on sky dome
-      const azRad = (def.az * Math.PI) / 180;
-      const elRad = (def.el * Math.PI) / 180;
-
-      const x = SKY_RADIUS * Math.cos(elRad) * Math.sin(azRad);
-      const y = SKY_RADIUS * Math.sin(elRad);
-      const z = SKY_RADIUS * Math.cos(elRad) * Math.cos(azRad);
-
-      mesh.position.set(x, y, z);
-
-      // Rotate to face center (billboard)
+      mesh.renderOrder = -995;
+      mesh.position.set(cx, cy, cz);
       mesh.rotation.y = azRad + Math.PI;
-
-      // Scale
-      const w = BASE_SIZE * def.scale * 1.5;
-      const h = BASE_SIZE * def.scale * 0.7;
-      mesh.scale.set(w, h, 1);
-
-      // Store base scale for animation
-      mesh.userData.baseScale = new THREE.Vector3(w, h, 1);
-
-      // Main camera only, not minimap
+      mesh.scale.set(def.w * 10, def.h * 10, 1);
       mesh.layers.set(1);
 
       this.cloudGroup.add(mesh);
     }
 
-    // Store reference (use first mesh for uniform updates)
     this.clouds = this.cloudGroup.children[0] as THREE.InstancedMesh;
     this.group.add(this.cloudGroup);
   }
@@ -1186,42 +1498,22 @@ export class SkySystem extends System {
       this.skyTSLUniforms.uDayIntensity.value = this._dayIntensity; // Sharp transition value
     }
 
-    // Update cloud material uniforms via class-level reference
+    // Update cloud material uniforms — sun position as world-space point on sky sphere
     if (this.cloudMaterialUniforms) {
       this.cloudMaterialUniforms.uTime.value = this.elapsed;
-      this.cloudMaterialUniforms.uSunPosition.value.copy(this._sunDir);
-      this.cloudMaterialUniforms.uDayIntensity.value = this._dayIntensity;
+      this.cloudMaterialUniforms.uSunPosition.value.set(
+        this._sunDir.x * SKY_DOME_RADIUS,
+        this._sunDir.y * SKY_DOME_RADIUS,
+        this._sunDir.z * SKY_DOME_RADIUS,
+      );
     }
 
     // Ensure render order - render AFTER terrain so depth test works (terrain occludes celestials)
     if (this.sun) this.sun.renderOrder = 1000;
     if (this.moon) this.moon.renderOrder = 1000;
 
-    // Gently rotate cloud cover and animate scale
-    if (this.cloudGroup) {
-      // ~1 full rotation per 20 minutes (0.005 radians/sec) - subtle movement
-      this.cloudGroup.rotation.y += delta * 0.005;
-
-      // Animate each cloud's scale for gentle breathing effect
-      this.cloudGroup.children.forEach((mesh, i) => {
-        if (mesh instanceof THREE.Mesh) {
-          const baseScale = mesh.userData.baseScale as
-            | THREE.Vector3
-            | undefined;
-          if (baseScale) {
-            // Each cloud has different phase
-            const phase = this.elapsed * 0.3 + i * 1.5;
-            // Scale oscillates between 95% and 105%
-            const scaleMod = 1.0 + Math.sin(phase) * 0.05;
-            mesh.scale.set(
-              baseScale.x * scaleMod,
-              baseScale.y * scaleMod,
-              baseScale.z,
-            );
-          }
-        }
-      });
-    }
+    // Clouds are static on the ring — movement comes from the shader's
+    // noise UV distortion and alpha oscillation.
   }
 
   override lateUpdate(_delta: number): void {
