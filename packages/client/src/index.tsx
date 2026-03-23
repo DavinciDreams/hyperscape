@@ -373,9 +373,6 @@ function cleanupCorruptedPrivyData(): void {
 
     // Remove corrupted keys
     if (corruptedKeys.length > 0) {
-      console.log(
-        `[App] 🧹 Cleaning up ${corruptedKeys.length} corrupted Privy keys`,
-      );
       corruptedKeys.forEach((key) => {
         try {
           localStorage.removeItem(key);
@@ -389,8 +386,15 @@ function cleanupCorruptedPrivyData(): void {
   }
 }
 
-// Run cleanup on app load
-cleanupCorruptedPrivyData();
+// Defer cleanup so app boot is not blocked on a full localStorage scan.
+if (typeof window !== "undefined") {
+  const schedulePrivyCleanup = () => cleanupCorruptedPrivyData();
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(schedulePrivyCleanup, { timeout: 1500 });
+  } else {
+    window.setTimeout(schedulePrivyCleanup, 0);
+  }
+}
 
 // In development, aggressively unregister any stale service workers.
 // Devs occasionally run production builds locally ('vite preview'), which installs
@@ -401,9 +405,6 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
     .then((registrations) => {
       for (const registration of registrations) {
         registration.unregister();
-        console.log(
-          "[App] 🧹 Unregistered stale service worker in development mode",
-        );
       }
     })
     .catch((err) =>
@@ -478,9 +479,6 @@ function App() {
           if (response.ok) {
             const data = await response.json();
             setHasUsername(data.exists);
-            console.log(
-              `[App] User ${accountId} ${data.exists ? "has" : "does not have"} username`,
-            );
             setIsCheckingUsername(false);
             return;
           } else {
@@ -540,14 +538,11 @@ function App() {
   }, []);
 
   const handleUsernameSelected = React.useCallback((username: string) => {
-    console.log(`[App] Username selected: ${username}`);
     setHasUsername(true);
     setShowCharacterPage(true);
   }, []);
 
   const handleLogout = React.useCallback(() => {
-    console.log("[App] 🚪 Logging out...");
-
     try {
       // Clear Privy auth manager first
       privyAuthManager.clearAuth();
@@ -568,9 +563,6 @@ function App() {
         }
       }
 
-      console.log(
-        `[App] 🧹 Clearing ${keysToRemove.length} Privy localStorage keys`,
-      );
       keysToRemove.forEach((key) => {
         try {
           localStorage.removeItem(key);
@@ -593,8 +585,6 @@ function App() {
           privyError,
         );
       }
-
-      console.log("[App] ✅ Logout complete - reloading page for clean state");
 
       // Force reload to ensure completely clean state
       setTimeout(() => {
@@ -764,11 +754,7 @@ import {
 async function setupTauriDeepLinks(): Promise<void> {
   if (!isTauriApp()) return;
 
-  console.log("[Hyperscape] Running in Tauri app, setting up deep links");
-
   const unlisten = await onDeepLink((url) => {
-    console.log("[Hyperscape] OAuth callback received:", url);
-
     const { code, state, error } = parseOAuthCallback(url);
 
     if (error) {
@@ -779,7 +765,6 @@ async function setupTauriDeepLinks(): Promise<void> {
     if (code) {
       // Store the auth code for Privy to pick up
       // Privy will handle the token exchange
-      console.log("[Hyperscape] OAuth code received, state:", state);
 
       // Dispatch custom event for auth handling
       window.dispatchEvent(
@@ -819,10 +804,6 @@ async function mountApp() {
 
   // Check if running in embedded viewport mode
   if (isEmbeddedMode()) {
-    console.log(
-      "[Hyperscape] Embedded mode detected - rendering EmbeddedGameClient",
-    );
-
     // Render embedded game client directly (no auth screens)
     root.render(
       <ErrorBoundary>
@@ -834,9 +815,6 @@ async function mountApp() {
     );
   } else {
     if (page === "dashboard") {
-      console.log(
-        "[Hyperscape] Dashboard mode detected - rendering DashboardScreen",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -850,9 +828,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "character-editor") {
-      console.log(
-        "[Hyperscape] Character editor mode detected - rendering CharacterEditorScreen",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -866,7 +841,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "admin") {
-      console.log("[Hyperscape] Admin mode detected - rendering AdminScreen");
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -876,9 +850,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "stream") {
-      console.log(
-        "[Hyperscape] Streaming mode detected - rendering StreamingMode",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -888,9 +859,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "leaderboard") {
-      console.log(
-        "[Hyperscape] Leaderboard mode detected - rendering LeaderboardScreen",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -900,9 +868,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "agent-monitor") {
-      console.log(
-        "[Hyperscape] Agent monitor mode detected - rendering AgentMonitorScreen",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />

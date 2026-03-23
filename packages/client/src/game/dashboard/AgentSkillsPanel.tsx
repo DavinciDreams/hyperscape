@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, Swords, TrendingUp } from "lucide-react";
 
 // Configuration constants
 const SKILLS_POLL_INTERVAL_MS = 10000; // Poll every 10 seconds to avoid rate limiting
+const SKILLS_BACKGROUND_POLL_INTERVAL_MS = 30000;
 const MAX_SKILL_LEVEL = 99; // Maximum level for skill progress calculation
 const MAX_RETRY_ATTEMPTS = 3; // Maximum retry attempts for failed requests
 const RETRY_DELAY_MS = 1000; // Base delay between retries (exponential backoff)
@@ -191,6 +192,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
   const [sessionXpGains, setSessionXpGains] = useState<Record<string, number>>(
     {},
   );
+  const pollTimeoutRef = useRef<number | null>(null);
 
   // Fetch character ID once when agent changes
   useEffect(() => {
@@ -202,16 +204,31 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
     fetchCharacterId();
   }, [agent.id, agent.status]);
 
-  // Poll for skills updates regardless of viewport state
   useEffect(() => {
+    const clearPollTimeout = () => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+
     if (agent.status !== "active" || !characterId) return;
 
-    // Fetch immediately
-    fetchSkills();
+    const scheduleNextPoll = () => {
+      clearPollTimeout();
+      const isVisible = document.visibilityState === "visible";
+      const delay =
+        isViewportActive && isVisible
+          ? SKILLS_POLL_INTERVAL_MS
+          : SKILLS_BACKGROUND_POLL_INTERVAL_MS;
+      pollTimeoutRef.current = window.setTimeout(() => {
+        pollTimeoutRef.current = null;
+        void fetchSkills().finally(scheduleNextPoll);
+      }, delay);
+    };
 
-    // Poll at configured interval to avoid rate limiting
-    const interval = setInterval(fetchSkills, SKILLS_POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    void fetchSkills().finally(scheduleNextPoll);
+    return clearPollTimeout;
   }, [isViewportActive, agent.id, agent.status, characterId]);
 
   const fetchCharacterId = async () => {

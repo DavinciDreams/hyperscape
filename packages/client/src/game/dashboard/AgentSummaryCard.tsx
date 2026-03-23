@@ -1,5 +1,5 @@
 import { GAME_API_URL } from "@/lib/api-config";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { Agent } from "./types";
 import { Swords, Activity, Target, Coins, Clock, Heart } from "lucide-react";
 
@@ -36,6 +36,8 @@ interface AgentSummaryCardProps {
   agent: Agent;
   isViewportActive: boolean;
 }
+const SUMMARY_POLL_INTERVAL_MS = 10000;
+const SUMMARY_BACKGROUND_POLL_INTERVAL_MS = 30000;
 
 // Format time duration
 function formatDuration(ms: number): string {
@@ -115,6 +117,7 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
   });
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [sessionStartTime] = useState<number>(Date.now());
+  const pollTimeoutRef = useRef<number | null>(null);
 
   // Fetch character ID once
   useEffect(() => {
@@ -227,11 +230,29 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
       }
     };
 
-    fetchSummary();
-    // Poll every 10 seconds to avoid rate limiting (reduced from 2s)
-    const interval = setInterval(fetchSummary, 10000);
-    return () => clearInterval(interval);
-  }, [agent.id, agent.status, characterId, sessionStartTime]);
+    const clearPollTimeout = () => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+
+    const scheduleNextPoll = () => {
+      clearPollTimeout();
+      const isVisible = document.visibilityState === "visible";
+      const delay =
+        isViewportActive && isVisible
+          ? SUMMARY_POLL_INTERVAL_MS
+          : SUMMARY_BACKGROUND_POLL_INTERVAL_MS;
+      pollTimeoutRef.current = window.setTimeout(() => {
+        pollTimeoutRef.current = null;
+        void fetchSummary().finally(scheduleNextPoll);
+      }, delay);
+    };
+
+    void fetchSummary().finally(scheduleNextPoll);
+    return clearPollTimeout;
+  }, [agent.id, agent.status, characterId, sessionStartTime, isViewportActive]);
 
   // Don't show if agent is inactive
   if (agent.status !== "active") {

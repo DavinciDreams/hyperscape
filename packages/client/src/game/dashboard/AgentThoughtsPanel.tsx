@@ -7,6 +7,7 @@ import { ChevronDown, ChevronUp, Scroll, Clock, RefreshCw } from "lucide-react";
 const THOUGHTS_POLL_INTERVAL_MS = 3000;
 const MAX_THOUGHTS_DISPLAYED = 100;
 const FLASH_DURATION_MS = 1500; // How long the "new thought" flash lasts
+const THOUGHTS_BACKGROUND_POLL_INTERVAL_MS = 12000;
 
 interface AgentThought {
   id: string;
@@ -135,18 +136,38 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
   const [isNewThought, setIsNewThought] = useState(false);
   const lastTimestampRef = useRef<number>(0);
   const lastThoughtIdRef = useRef<string | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
 
-  // Poll for thought updates
   useEffect(() => {
+    const clearPollTimeout = () => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+
     if (agent.status !== "active") {
       setThoughts([]);
+      clearPollTimeout();
       return;
     }
 
-    fetchThoughts();
-    const interval = setInterval(fetchThoughts, THOUGHTS_POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [agent.id, agent.status]);
+    const scheduleNextPoll = () => {
+      clearPollTimeout();
+      const isVisible = document.visibilityState === "visible";
+      const delay =
+        isViewportActive && isVisible
+          ? THOUGHTS_POLL_INTERVAL_MS
+          : THOUGHTS_BACKGROUND_POLL_INTERVAL_MS;
+      pollTimeoutRef.current = window.setTimeout(() => {
+        pollTimeoutRef.current = null;
+        void fetchThoughts().finally(scheduleNextPoll);
+      }, delay);
+    };
+
+    void fetchThoughts().finally(scheduleNextPoll);
+    return clearPollTimeout;
+  }, [agent.id, agent.status, isViewportActive]);
 
   // Flash effect when new thought arrives
   useEffect(() => {
