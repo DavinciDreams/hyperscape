@@ -40,6 +40,8 @@ import type { World, WorldOptions } from "../../../types";
 import { fogRenderTarget } from "./FogConfig";
 import { DAY_CYCLE, SUN_LIGHT } from "./LightingConfig";
 
+const SKY_DOME_RADIUS = 5000;
+
 // -----------------------------
 // Utility: Procedural noise textures (avoids external deps)
 // -----------------------------
@@ -317,9 +319,7 @@ export class SkySystem extends System {
   private createSun(): void {
     if (!this.group) return;
 
-    // Sun disc geometry - bright core (scaled for 600 far plane)
-    // Sun disc sized to fit within 600 far plane
-    const sunGeom = new THREE.CircleGeometry(15, 32);
+    const sunGeom = new THREE.CircleGeometry(SKY_DOME_RADIUS * 0.03, 32);
 
     // TSL uniform for opacity control
     const uOpacity = uniform(float(1.0));
@@ -365,9 +365,7 @@ export class SkySystem extends System {
     this.sun.layers.set(1); // Main camera only, not minimap
     this.group.add(this.sun);
 
-    // Inner glow - medium sized, intense (scaled for 600 far plane)
-    // Inner glow sized to fit within 600 far plane
-    const innerGlowGeom = new THREE.CircleGeometry(50, 32);
+    const innerGlowGeom = new THREE.CircleGeometry(SKY_DOME_RADIUS * 0.1, 32);
     const innerGlowColorNode = Fn(() => {
       const uvCoord = uv();
       const center = vec3(0.5, 0.5, 0.0);
@@ -404,9 +402,7 @@ export class SkySystem extends System {
     (this.group as THREE.Group & { sunInnerGlow?: THREE.Mesh }).sunInnerGlow =
       innerGlow;
 
-    // Outer glow - large, soft halo for atmosphere effect (scaled for 600 far plane)
-    // Outer glow sized to fit within 600 far plane
-    const outerGlowGeom = new THREE.CircleGeometry(100, 32);
+    const outerGlowGeom = new THREE.CircleGeometry(SKY_DOME_RADIUS * 0.2, 32);
     const outerGlowColorNode = Fn(() => {
       const uvCoord = uv();
       const center = vec3(0.5, 0.5, 0.0);
@@ -451,8 +447,10 @@ export class SkySystem extends System {
   private createMoon(): void {
     if (!this.group) return;
 
-    // Moon sized for 600 far plane
-    const moonGeom = new THREE.PlaneGeometry(35, 35);
+    const moonGeom = new THREE.PlaneGeometry(
+      SKY_DOME_RADIUS * 0.07,
+      SKY_DOME_RADIUS * 0.07,
+    );
 
     // TSL uniform for opacity control
     const uOpacity = uniform(float(1.0));
@@ -486,8 +484,7 @@ export class SkySystem extends System {
     this.moon.layers.set(1); // Main camera only, not minimap
     this.group.add(this.moon);
 
-    // Moon glow effect - soft halo around moon (scaled for 600 far plane)
-    const moonGlowGeom = new THREE.CircleGeometry(50, 32);
+    const moonGlowGeom = new THREE.CircleGeometry(SKY_DOME_RADIUS * 0.1, 32);
 
     const moonGlowColorNode = Fn(() => {
       const uvCoord = uv();
@@ -531,9 +528,7 @@ export class SkySystem extends System {
   private createSkyDome(): void {
     if (!this.group) return;
 
-    // High segment count prevents color banding. Large radius ensures the
-    // water reflection camera (mirrored below water level) stays inside the dome.
-    const skyGeom = new THREE.SphereGeometry(5000, 128, 64);
+    const skyGeom = new THREE.SphereGeometry(SKY_DOME_RADIUS, 128, 64);
 
     // Create TSL uniforms
     const uTime = uniform(float(0));
@@ -787,7 +782,7 @@ export class SkySystem extends System {
     this.fogScene = new THREE.Scene();
     this.fogCamera = this.world.camera.clone() as THREE.PerspectiveCamera;
 
-    const fogSkyGeom = new THREE.SphereGeometry(500, 64, 32);
+    const fogSkyGeom = new THREE.SphereGeometry(SKY_DOME_RADIUS, 64, 32);
 
     const uSunPosition = uniform(vec3(0, 1, 0));
     const uDayCycleProgress = uniform(float(0));
@@ -900,9 +895,7 @@ export class SkySystem extends System {
   private createClouds(): void {
     if (!this.group) return;
 
-    // Cloud distances scaled for 600 far plane
-    // Sky must fit inside camera far plane (600) - use 500 to leave some margin
-    const SKY_RADIUS = 500;
+    const SKY_RADIUS = SKY_DOME_RADIUS;
     const BASE_SIZE = 160;
 
     // Create a group to hold all cloud meshes (for rotation)
@@ -1118,9 +1111,7 @@ export class SkySystem extends System {
     this.skyUniforms.sunPosition.value.copy(this._sunDir);
     this.skyUniforms.dayCycleProgress.value = dayPhase;
 
-    // Position sun/moon (scaled for 600 far plane)
-    // Position celestial bodies inside sky dome (must fit in camera far plane)
-    const radius = 450;
+    const radius = SKY_DOME_RADIUS * 0.9;
     if (this.sun) {
       this.sun.position.set(
         this._sunDir.x * radius,
