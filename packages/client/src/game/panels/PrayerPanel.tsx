@@ -26,6 +26,7 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { zIndex, MOBILE_PRAYER } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, ClientWorld } from "../../types";
@@ -657,7 +658,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       ref={containerRef}
       className="flex flex-col h-full"
       style={{
-        background: "transparent",
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
         padding: shouldUseMobileUI ? 4 : 3,
       }}
     >
@@ -669,9 +670,13 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
           justifyContent: "space-between",
           padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
           marginBottom: 4,
-          background: theme.colors.slot.filled,
-          borderRadius: 3,
-          border: `1px solid ${theme.colors.border.default}30`,
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.14) 100%)"
+              : theme.colors.slot.filled,
+          borderRadius: theme.borderRadius.md,
+          border: `1px solid ${theme.colors.border.default}40`,
+          boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -730,10 +735,12 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         style={{
           height: shouldUseMobileUI ? 10 : 4,
           background: theme.colors.slot.empty,
-          borderRadius: shouldUseMobileUI ? 5 : 2,
+          borderRadius: shouldUseMobileUI
+            ? theme.borderRadius.md
+            : theme.borderRadius.sm,
           marginBottom: 4,
           overflow: "hidden",
-          border: `1px solid ${theme.colors.border.default}30`,
+          border: `1px solid ${theme.colors.border.default}35`,
         }}
       >
         <div
@@ -741,7 +748,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             height: "100%",
             width: `${prayerPct}%`,
             background: `linear-gradient(90deg, ${theme.colors.status.prayer} 0%, ${theme.colors.state.info} 100%)`,
-            borderRadius: 2,
+            borderRadius: theme.borderRadius.sm,
             transition: "width 0.3s ease",
             boxShadow:
               totalDrain > 0
@@ -770,9 +777,12 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               : `repeat(${gridColumns}, ${PRAYER_ICON_SIZE}px)`,
             gap: shouldUseMobileUI ? MOBILE_PRAYER.gap : PRAYER_GAP,
             padding: GRID_PADDING,
-            background: theme.colors.slot.empty,
-            borderRadius: 3,
-            border: `1px solid ${theme.colors.border.default}30`,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(0, 0, 0, 0.08) 100%)"
+                : theme.colors.slot.empty,
+            borderRadius: theme.borderRadius.md,
+            border: `1px solid ${theme.colors.border.default}35`,
             justifyContent: "center",
           }}
         >
@@ -800,12 +810,16 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         style={{
           marginTop: 4,
           padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
-          background: theme.colors.slot.filled,
-          borderRadius: 3,
-          border: `1px solid ${theme.colors.border.default}30`,
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
+              : theme.colors.slot.filled,
+          borderRadius: theme.borderRadius.md,
+          border: `1px solid ${theme.colors.border.default}40`,
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
         }}
       >
         <span
@@ -825,10 +839,10 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             fontSize: shouldUseMobileUI ? 10 : 9,
             background:
               activePrayers.size > 0
-                ? `${theme.colors.state.danger}20`
+                ? `linear-gradient(180deg, ${theme.colors.state.danger}26 0%, rgba(39, 15, 15, 0.28) 100%)`
                 : theme.colors.slot.disabled,
             border: `1px solid ${activePrayers.size > 0 ? theme.colors.state.danger : theme.colors.border.default}40`,
-            borderRadius: 3,
+            borderRadius: theme.borderRadius.sm,
             color:
               activePrayers.size > 0
                 ? theme.colors.state.danger
@@ -863,11 +877,14 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                   left,
                   top,
                   zIndex: zIndex.tooltip,
-                  background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+                  background:
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
+                      : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
                   border: `1px solid ${getCategoryColor(hoveredPrayer.category)}50`,
-                  borderRadius: 4,
+                  borderRadius: theme.borderRadius.md,
                   padding: "10px 12px",
-                  boxShadow: theme.shadows.lg,
+                  boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
                   minWidth: 180,
                 }}
               >
@@ -938,7 +955,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                       marginTop: 8,
                       padding: "4px 8px",
                       background: `${theme.colors.state.danger}26`,
-                      borderRadius: 3,
+                      borderRadius: theme.borderRadius.sm,
                       fontSize: 10,
                       color: theme.colors.state.danger,
                       textAlign: "center",
@@ -953,7 +970,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                       marginTop: 8,
                       padding: "4px 8px",
                       background: `${theme.colors.state.success}26`,
-                      borderRadius: 3,
+                      borderRadius: theme.borderRadius.sm,
                       fontSize: 10,
                       color: theme.colors.state.success,
                       textAlign: "center",
@@ -996,10 +1013,13 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               >
                 <div
                   style={{
-                    background: theme.colors.background.secondary,
+                    background:
+                      theme.name === "hyperscape"
+                        ? "linear-gradient(180deg, rgba(44, 36, 24, 0.98) 0%, rgba(18, 15, 11, 0.98) 100%)"
+                        : theme.colors.background.secondary,
                     border: `1px solid ${theme.colors.border.default}`,
-                    borderRadius: 4,
-                    boxShadow: theme.shadows.lg,
+                    borderRadius: theme.borderRadius.md,
+                    boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
                     overflow: "hidden",
                     minWidth: 100,
                   }}

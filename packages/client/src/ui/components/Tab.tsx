@@ -30,6 +30,7 @@ import {
 import { useDrag } from "../core/drag/useDrag";
 import { useEditMode } from "../core/edit/useEditMode";
 import { useTheme } from "../stores/themeStore";
+import { getShellControlButtonStyle, getTabStyle } from "../theme/themes";
 import type { TabProps } from "../types";
 
 /** Map icon identifiers to Lucide components */
@@ -98,25 +99,14 @@ export const Tab = memo(function Tab({
   const contentId = typeof tab.content === "string" ? tab.content : "";
   const LucideIcon =
     LUCIDE_ICON_MAP[contentId] || LUCIDE_ICON_MAP[tab.id] || null;
+  const hasVisualIcon = hasIcon || Boolean(LucideIcon);
 
   // Merge styles properly to avoid overwriting
   const containerStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: theme.spacing.xs,
-    padding: hasIcon
-      ? `${theme.spacing.xs}px ${theme.spacing.sm}px`
-      : `${theme.spacing.xs}px ${theme.spacing.sm}px`,
-    backgroundColor: isActive
-      ? theme.colors.background.secondary
-      : "transparent",
-    borderRight: `1px solid ${theme.colors.border.default}`,
-    opacity: isDragging ? 0.5 : 1,
-    transition: `background-color ${theme.transitions.fast}`,
-    userSelect: "none",
-    minWidth: hasIcon ? 32 : 60,
-    maxWidth: hasIcon ? 40 : 120,
+    ...getTabStyle(theme, { active: isActive, dragging: isDragging }),
+    justifyContent: hasVisualIcon ? "flex-start" : "center",
+    minWidth: hasVisualIcon ? 44 : 72,
+    maxWidth: 160,
     ...style,
     ...(isUnlocked ? dragHandleProps.style : { cursor: "pointer" }),
   };
@@ -124,12 +114,13 @@ export const Tab = memo(function Tab({
   const iconStyle: React.CSSProperties = {
     fontSize: 16,
     lineHeight: 1,
-    filter: isActive ? "none" : "grayscale(30%)",
-    opacity: isActive ? 1 : 0.8,
+    filter: isActive ? "none" : "grayscale(18%)",
+    opacity: isActive ? 1 : 0.85,
     color: isActive ? theme.colors.accent.primary : theme.colors.text.secondary,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   };
 
   const labelStyle: React.CSSProperties = {
@@ -139,23 +130,20 @@ export const Tab = memo(function Tab({
     whiteSpace: "nowrap",
     color: isActive ? theme.colors.text.primary : theme.colors.text.secondary,
     fontSize: theme.typography.fontSize.sm,
+    fontWeight: isActive
+      ? theme.typography.fontWeight.semibold
+      : theme.typography.fontWeight.medium,
   };
 
   const closeButtonStyle: React.CSSProperties = {
-    width: 16,
-    height: 16,
-    border: "none",
-    background: "transparent",
-    color: theme.colors.text.muted,
-    cursor: "pointer",
-    borderRadius: theme.borderRadius.sm,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    ...getShellControlButtonStyle(theme, "danger"),
+    width: 18,
+    height: 18,
     fontSize: theme.typography.fontSize.sm,
     padding: 0,
     opacity: isActive ? 1 : 0,
     transition: `opacity ${theme.transitions.fast}`,
+    flexShrink: 0,
   };
 
   return (
@@ -172,8 +160,8 @@ export const Tab = memo(function Tab({
       }}
       onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
         if (!isActive) {
-          e.currentTarget.style.backgroundColor =
-            theme.colors.background.tertiary;
+          e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.tertiary} 100%)`;
+          e.currentTarget.style.borderBottomColor = theme.colors.border.hover;
         }
         const closeBtn = e.currentTarget.querySelector(
           "[data-close-btn]",
@@ -182,7 +170,8 @@ export const Tab = memo(function Tab({
       }}
       onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
         if (!isActive) {
-          e.currentTarget.style.backgroundColor = "transparent";
+          e.currentTarget.style.background = "transparent";
+          e.currentTarget.style.borderBottomColor = "transparent";
         }
         const closeBtn = e.currentTarget.querySelector(
           "[data-close-btn]",
@@ -196,13 +185,12 @@ export const Tab = memo(function Tab({
       aria-label={tab.label}
       title={tab.label}
     >
-      {hasIcon || LucideIcon ? (
+      {hasVisualIcon && (
         <span style={iconStyle}>
           {LucideIcon ? <LucideIcon size={16} strokeWidth={1.75} /> : tab.icon}
         </span>
-      ) : (
-        <span style={labelStyle}>{tab.label}</span>
       )}
+      <span style={labelStyle}>{tab.label}</span>
       {/* Only show close button when in edit mode (isUnlocked) */}
       {onClose && isActive && isUnlocked && (
         <button
@@ -213,8 +201,12 @@ export const Tab = memo(function Tab({
             onClose();
           }}
           onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.currentTarget.style.backgroundColor = theme.colors.state.danger;
-            e.currentTarget.style.color = theme.colors.text.primary;
+            e.currentTarget.style.backgroundColor = String(
+              e.currentTarget.style.getPropertyValue("--shell-button-hover-bg"),
+            );
+            e.currentTarget.style.color = String(
+              e.currentTarget.style.getPropertyValue("--shell-button-hover-fg"),
+            );
           }}
           onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
             e.currentTarget.style.backgroundColor = "transparent";

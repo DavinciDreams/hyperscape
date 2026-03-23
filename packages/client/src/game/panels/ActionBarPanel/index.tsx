@@ -19,6 +19,7 @@
 import React, { useCallback } from "react";
 import { DndContext, DragOverlay } from "@dnd-kit/core";
 import { useTheme } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 
 // Types
 export type {
@@ -153,7 +154,7 @@ export function ActionBarPanel({
     border: isDisabled
       ? `1px solid ${theme.colors.border.default}33`
       : `1px solid ${theme.colors.border.default}`,
-    borderRadius: 0,
+    borderRadius: theme.borderRadius.sm,
     color: isDisabled
       ? `${theme.colors.text.secondary}4D`
       : theme.colors.text.secondary,
@@ -164,7 +165,7 @@ export function ActionBarPanel({
     alignItems: "center",
     justifyContent: "center",
     transition: "all 0.15s ease",
-    boxShadow: `inset 0 2px 4px rgba(0, 0, 0, 0.4)`,
+    boxShadow: `${theme.shadows.sm}, inset 0 2px 4px rgba(0, 0, 0, 0.4)`,
   });
 
   // Render slot with current state
@@ -258,10 +259,9 @@ export function ActionBarPanel({
             gap: SLOT_GAP,
             padding: PADDING,
             justifyContent: "center",
-            background: `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-            border: `1px solid ${theme.colors.border.default}`,
-            borderRadius: 0,
-            boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
+            ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+            borderRadius: theme.borderRadius.md,
+            boxShadow: `${theme.shadows.sm}, inset 0 2px 8px rgba(0, 0, 0, 0.5)`,
           }}
         >
           {slots.map((slot, index) => renderSlot(slot, index))}
@@ -341,7 +341,7 @@ export function ActionBarPanel({
                 height: SLOT_SIZE,
                 background: `linear-gradient(180deg, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.background.panelSecondary} 100%)`,
                 border: `2px solid ${theme.colors.accent.primary}CC`,
-                borderRadius: 0,
+                borderRadius: theme.borderRadius.sm,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",

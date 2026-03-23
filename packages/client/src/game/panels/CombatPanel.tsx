@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { useThemeStore, useMobileLayout, useWindowStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
 import type {
   ClientWorld,
@@ -379,9 +380,13 @@ const CombatStatsRow = React.memo(function CombatStatsRow({
       className="flex items-center justify-center gap-2"
       style={{
         padding: isMobile ? "4px 6px" : "4px 6px",
-        background: theme.colors.slot.filled,
-        borderRadius: "4px",
-        border: `1px solid ${theme.colors.border.default}30`,
+        background:
+          theme.name === "hyperscape"
+            ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
+            : theme.colors.slot.filled,
+        borderRadius: theme.borderRadius.md,
+        border: `1px solid ${theme.colors.border.default}40`,
+        boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
       }}
     >
       {stats.map((stat, index) => (
@@ -843,7 +848,11 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
   return (
     <div
       className="flex flex-col h-full overflow-auto"
-      style={{ padding: `${p.outer}px`, gap: `${p.gap}px` }}
+      style={{
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+        padding: `${p.outer}px`,
+        gap: `${p.gap}px`,
+      }}
     >
       {/* Inline CSS animations */}
       <style>{`
@@ -856,12 +865,16 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       {/* HP + Combat Level Row */}
       <div
         style={{
-          background: theme.colors.slot.filled,
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.16) 100%)"
+              : theme.colors.slot.filled,
           border: inCombat
-            ? `1px solid ${theme.colors.state.danger}40`
-            : `1px solid ${theme.colors.border.default}30`,
-          borderRadius: "4px",
+            ? `1px solid ${theme.colors.state.danger}55`
+            : `1px solid ${theme.colors.border.default}40`,
+          borderRadius: theme.borderRadius.md,
           padding: `${p.inner}px`,
+          boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.05)",
         }}
       >
         {/* HP Header Row */}
@@ -918,16 +931,16 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             width: "100%",
             height: shouldUseMobileUI ? "6px" : "6px",
             background: theme.colors.background.panelPrimary,
-            borderRadius: "3px",
+            borderRadius: theme.borderRadius.sm,
             overflow: "hidden",
-            border: `1px solid ${theme.colors.border.default}30`,
+            border: `1px solid ${theme.colors.border.default}35`,
           }}
         >
           <div
             style={{
               height: "100%",
               width: `${healthPercent}%`,
-              borderRadius: "2px",
+              borderRadius: theme.borderRadius.sm,
               transition: "width 0.2s ease",
               background: "linear-gradient(180deg, #f87171, #dc2626)",
             }}
@@ -968,10 +981,14 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       {targetName && targetHealth && (
         <div
           style={{
-            background: `${theme.colors.state.danger}08`,
-            border: `1px solid ${theme.colors.state.danger}25`,
-            borderRadius: "8px",
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(127, 29, 29, 0.24) 0%, rgba(32, 12, 12, 0.32) 100%)"
+                : `${theme.colors.state.danger}08`,
+            border: `1px solid ${theme.colors.state.danger}35`,
+            borderRadius: theme.borderRadius.lg,
             padding: `${p.inner}px`,
+            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
           }}
         >
           <div
@@ -1003,7 +1020,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
               width: "100%",
               height: shouldUseMobileUI ? "6px" : "6px",
               background: theme.colors.background.panelPrimary,
-              borderRadius: "3px",
+              borderRadius: theme.borderRadius.sm,
               overflow: "hidden",
             }}
           >
@@ -1011,7 +1028,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
               style={{
                 height: "100%",
                 width: `${targetHealthPercent}%`,
-                borderRadius: "3px",
+                borderRadius: theme.borderRadius.sm,
                 background: "linear-gradient(180deg, #f87171, #dc2626)",
               }}
             />
@@ -1062,9 +1079,13 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             textAlign: "center",
             fontSize: "9px",
             color: theme.colors.state.warning,
-            background: `${theme.colors.state.warning}10`,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(245, 158, 11, 0.16) 0%, rgba(51, 24, 8, 0.22) 100%)"
+                : `${theme.colors.state.warning}10`,
             padding: "3px 6px",
-            borderRadius: "3px",
+            borderRadius: theme.borderRadius.sm,
+            border: `1px solid ${theme.colors.state.warning}30`,
           }}
         >
           ⏱️ {Math.ceil(cooldown / 1000)}s
@@ -1084,16 +1105,19 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           justifyContent: "space-between",
           fontSize: shouldUseMobileUI ? "9px" : "9px",
           touchAction: "manipulation",
-          borderRadius: "4px",
+          borderRadius: theme.borderRadius.md,
           background: autoRetaliate
-            ? "rgba(34, 197, 94, 0.08)"
-            : theme.colors.slot.filled,
+            ? "linear-gradient(180deg, rgba(34, 197, 94, 0.14) 0%, rgba(12, 36, 16, 0.22) 100%)"
+            : theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
+              : theme.colors.slot.filled,
           border: autoRetaliate
-            ? "1px solid rgba(34, 197, 94, 0.25)"
-            : `1px solid ${theme.colors.border.default}30`,
+            ? "1px solid rgba(34, 197, 94, 0.3)"
+            : `1px solid ${theme.colors.border.default}40`,
           color: autoRetaliate
             ? theme.colors.state.success
             : theme.colors.text.muted,
+          boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
         }}
       >
         <div className="flex items-center gap-1.5">
@@ -1124,7 +1148,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         <span
           style={{
             padding: shouldUseMobileUI ? "1px 5px" : "1px 5px",
-            borderRadius: "3px",
+            borderRadius: theme.borderRadius.sm,
             fontSize: shouldUseMobileUI ? "8px" : "8px",
             fontWeight: 700,
             background: autoRetaliate

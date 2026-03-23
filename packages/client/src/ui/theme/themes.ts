@@ -586,6 +586,253 @@ export function getThemedWindowShadow(
 }
 
 /**
+ * Shared elevated surface style for premium HUD panels and windows.
+ * Keeps panel treatments consistent across the live game UI.
+ */
+export function getPanelSurfaceStyle(
+  theme: Theme,
+  options?: {
+    transparency?: number;
+    emphasis?: "normal" | "strong";
+    interactive?: boolean;
+  },
+): React.CSSProperties {
+  const transparency = options?.transparency ?? 0;
+  const emphasis = options?.emphasis ?? "normal";
+  const interactive = options?.interactive ?? false;
+  const glassStyle = getThemedGlassmorphismStyle(theme, transparency);
+  const borderColor =
+    emphasis === "strong"
+      ? theme.colors.border.decorative
+      : theme.colors.border.default;
+
+  return {
+    ...glassStyle,
+    position: "relative",
+    border: `1px solid ${borderColor}`,
+    borderRadius: theme.borderRadius.lg,
+    backgroundImage:
+      theme.name === "hyperscape"
+        ? `linear-gradient(180deg, ${theme.colors.background.panelSecondary}cc 0%, ${theme.colors.background.panelPrimary}f2 100%)`
+        : `linear-gradient(180deg, ${theme.colors.background.panelSecondary}cc 0%, ${theme.colors.background.panelPrimary}f0 100%)`,
+    boxShadow:
+      emphasis === "strong"
+        ? `${theme.shadows.window}, inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 0 1px rgba(255, 255, 255, 0.03)`
+        : `${theme.shadows.md}, inset 0 1px 0 rgba(255, 255, 255, 0.06)`,
+    transition: interactive ? theme.transitions.fast : undefined,
+  };
+}
+
+/**
+ * Shared header chrome used by tabs and modal/window shells.
+ */
+export function getPanelHeaderStyle(theme: Theme): React.CSSProperties {
+  return {
+    background:
+      theme.name === "hyperscape"
+        ? `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.tertiary} 100%)`
+        : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+    borderBottom: `1px solid ${theme.colors.border.default}`,
+    boxShadow: "inset 0 -1px 0 rgba(0, 0, 0, 0.28)",
+  };
+}
+
+/**
+ * Shared tab style to keep window tabs readable and consistent.
+ */
+export function getTabStyle(
+  theme: Theme,
+  options: {
+    active: boolean;
+    dragging?: boolean;
+  },
+): React.CSSProperties {
+  const active = options.active;
+  const dragging = options.dragging ?? false;
+
+  return {
+    display: "flex",
+    alignItems: "center",
+    gap: theme.spacing.xs,
+    minHeight: 30,
+    padding: `0 ${theme.spacing.sm}px`,
+    ...getTabChromeStyle(theme, {
+      isActive: active,
+      isDragging: dragging,
+    }),
+    color: active ? theme.colors.text.primary : theme.colors.text.secondary,
+    transition: theme.transitions.fast,
+    userSelect: "none",
+  };
+}
+
+export interface WindowSurfaceOptions {
+  transparency?: number;
+  state?: "normal" | "focused" | "dragging";
+}
+
+export interface TabBarChromeOptions {
+  isDropTarget?: boolean;
+  isPotentialDropTarget?: boolean;
+  isSourceDragging?: boolean;
+}
+
+export interface TabChromeOptions {
+  isActive: boolean;
+  isDragging?: boolean;
+}
+
+type ShellButtonVariant = "neutral" | "danger" | "accent";
+
+/**
+ * Get the premium window surface style used by desktop shell windows.
+ */
+export function getWindowSurfaceStyle(
+  theme: Theme,
+  options: WindowSurfaceOptions = {},
+): React.CSSProperties {
+  const transparency = options.transparency ?? 0;
+  const state = options.state ?? "normal";
+  const baseOpacity = theme.glass.opacity;
+  const alpha = baseOpacity * (1 - transparency / 100);
+  const borderColor =
+    state === "focused"
+      ? theme.colors.border.focus
+      : theme.colors.border.default;
+  const shadow = getThemedWindowShadow(theme, state);
+  const accentGlow =
+    theme.name === "hyperscape"
+      ? `0 0 0 1px rgba(240, 208, 96, ${state === "dragging" ? 0.16 : 0.1})`
+      : "none";
+
+  return {
+    backgroundColor: theme.colors.background.glass.replace(
+      /(\d+(?:\.\d+)?)\)$/,
+      `${alpha})`,
+    ),
+    backgroundImage:
+      theme.name === "hyperscape"
+        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 42%, rgba(0, 0, 0, 0.08) 100%),
+           radial-gradient(circle at top, rgba(240, 208, 96, 0.12), transparent 40%)`
+        : "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 42%, rgba(0, 0, 0, 0.08) 100%)",
+    backdropFilter: `blur(${theme.glass.blur}px) saturate(1.05)`,
+    WebkitBackdropFilter: `blur(${theme.glass.blur}px) saturate(1.05)`,
+    border: `1px solid ${borderColor}`,
+    borderRadius: theme.borderRadius.md,
+    boxShadow: `${shadow}, inset 0 1px 0 rgba(255, 255, 255, 0.08), ${accentGlow}`,
+  };
+}
+
+/**
+ * Get the desktop tab bar chrome style used across the premium shell.
+ */
+export function getTabBarChromeStyle(
+  theme: Theme,
+  options: TabBarChromeOptions = {},
+): React.CSSProperties {
+  const {
+    isDropTarget = false,
+    isPotentialDropTarget = false,
+    isSourceDragging = false,
+  } = options;
+
+  let borderBottomColor = theme.colors.border.default;
+  let shadow = "inset 0 -1px 0 rgba(0, 0, 0, 0.18)";
+
+  if (isDropTarget) {
+    borderBottomColor = theme.colors.accent.primary;
+    shadow = `inset 0 -1px 0 ${theme.colors.accent.primary}, inset 0 1px 0 rgba(255, 255, 255, 0.08)`;
+  } else if (isPotentialDropTarget) {
+    borderBottomColor = theme.colors.border.hover;
+  }
+
+  return {
+    backgroundColor: theme.colors.background.secondary,
+    backgroundImage:
+      theme.name === "hyperscape"
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 28%, rgba(0, 0, 0, 0.12) 100%)"
+        : "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 100%)",
+    borderBottom: `1px solid ${borderBottomColor}`,
+    boxShadow: shadow,
+    minHeight: 32,
+    opacity: isSourceDragging ? 0.72 : 1,
+  };
+}
+
+/**
+ * Get the chrome style for an individual tab.
+ */
+export function getTabChromeStyle(
+  theme: Theme,
+  options: TabChromeOptions,
+): React.CSSProperties {
+  const { isActive, isDragging = false } = options;
+
+  return {
+    backgroundColor: isActive
+      ? theme.colors.background.secondary
+      : "transparent",
+    backgroundImage: isActive
+      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.015) 100%)"
+      : "none",
+    borderRight: `1px solid ${theme.colors.border.default}`,
+    borderBottom: isActive
+      ? `1px solid ${theme.colors.accent.primary}`
+      : "1px solid transparent",
+    boxShadow: isActive ? "inset 0 1px 0 rgba(255, 255, 255, 0.08)" : "none",
+    opacity: isDragging ? 0.5 : 1,
+  };
+}
+
+/**
+ * Get shell button style for tab bars and other window controls.
+ */
+export function getShellControlButtonStyle(
+  theme: Theme,
+  variant: ShellButtonVariant = "neutral",
+): React.CSSProperties {
+  const palette =
+    variant === "danger"
+      ? {
+          fg: theme.colors.text.muted,
+          bg: "transparent",
+          hoverBg: theme.colors.state.danger,
+          hoverFg: theme.colors.text.primary,
+        }
+      : variant === "accent"
+        ? {
+            fg: theme.colors.text.secondary,
+            bg: "transparent",
+            hoverBg: theme.colors.background.tertiary,
+            hoverFg: theme.colors.accent.primary,
+          }
+        : {
+            fg: theme.colors.text.muted,
+            bg: "transparent",
+            hoverBg: theme.colors.background.tertiary,
+            hoverFg: theme.colors.text.primary,
+          };
+
+  return {
+    width: 22,
+    height: 22,
+    border: `1px solid transparent`,
+    background: palette.bg,
+    color: palette.fg,
+    cursor: "pointer",
+    borderRadius: theme.borderRadius.sm,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 12,
+    flexShrink: 0,
+    transition: `color ${theme.transitions.fast}, background-color ${theme.transitions.fast}, border-color ${theme.transitions.fast}`,
+    ["--shell-button-hover-bg" as string]: palette.hoverBg,
+    ["--shell-button-hover-fg" as string]: palette.hoverFg,
+  };
+}
+
+/**
  * Get slot style for inventory/action bar items
  */
 export function getSlotStyle(

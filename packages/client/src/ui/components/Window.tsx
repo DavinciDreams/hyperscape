@@ -17,11 +17,7 @@ import {
   getViewportSize,
   type WindowPositionModifier,
 } from "../core/drag/modifiers";
-import {
-  getThemedGlassmorphismStyle,
-  getThemedWindowShadow,
-  getDecorativeBorderStyle,
-} from "../theme/themes";
+import { getThemedWindowShadow, getWindowSurfaceStyle } from "../theme/themes";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
 import type { WindowProps } from "../types";
 
@@ -410,15 +406,14 @@ export const Window = memo(function Window({
   }
 
   // Get themed styles
-  const decorativeBorder = getDecorativeBorderStyle(theme);
-  const glassStyle = getThemedGlassmorphismStyle(
-    theme,
-    windowState.transparency,
-  );
   const windowShadow = getThemedWindowShadow(
     theme,
     isDragging ? "dragging" : "normal",
   );
+  const windowSurfaceStyle = getWindowSurfaceStyle(theme, {
+    transparency: windowState.transparency,
+    state: isDragging ? "dragging" : "normal",
+  });
 
   // Smooth transitions for size changes, disabled during active drag/resize
   const shouldAnimateSize = !isDragging && !isThisWindowResizing;
@@ -451,15 +446,13 @@ export const Window = memo(function Window({
     zIndex: windowState.zIndex,
     display: "flex",
     flexDirection: "column",
-    borderRadius: 2, // Square corners with slight rounding
-    ...decorativeBorder,
-    boxShadow: windowShadow,
+    borderRadius: theme.borderRadius.md,
     overflow: "hidden",
     opacity: isDragging ? 0.95 : 1,
     transition: isDragging
       ? "none"
       : `box-shadow ${theme.transitions.fast}, ${sizeTransition}`,
-    ...glassStyle,
+    ...windowSurfaceStyle,
     ...tabCombineStyle, // Apply tab combine visual feedback
     ...style,
   };
@@ -476,6 +469,7 @@ export const Window = memo(function Window({
     minHeight: 0, // Allow flex shrinking
     overflow: "hidden", // Clip overflow, panels handle their own scroll
     position: "relative", // Allow absolute positioning of children
+    zIndex: 1,
   };
 
   // Check if window is resizable (minSize !== maxSize)
@@ -595,6 +589,19 @@ export const Window = memo(function Window({
       role="dialog"
       aria-label={`Window: ${windowId}`}
     >
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 18%, transparent 82%, rgba(0, 0, 0, 0.08) 100%)"
+              : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 16%, transparent 84%, rgba(0, 0, 0, 0.06) 100%)",
+          zIndex: 0,
+        }}
+      />
       {/* No title bar - TabBar serves as the header with drag functionality */}
       <div style={contentStyle}>
         <WindowErrorBoundary

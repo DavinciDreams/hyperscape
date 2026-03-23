@@ -20,6 +20,7 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { zIndex } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, ClientWorld } from "../../types";
@@ -375,7 +376,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
       ref={containerRef}
       className="flex flex-col h-full"
       style={{
-        background: "transparent",
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
         padding: PANEL_PADDING,
       }}
     >
@@ -387,9 +388,13 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
           justifyContent: "space-between",
           padding: shouldUseMobileUI ? "6px 8px" : "4px 8px",
           marginBottom: 6,
-          background: theme.colors.slot.filled,
-          borderRadius: 4,
-          border: `1px solid ${theme.colors.border.default}30`,
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
+              : theme.colors.slot.filled,
+          borderRadius: theme.borderRadius.md,
+          border: `1px solid ${theme.colors.border.default}40`,
+          boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -425,7 +430,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
             padding: shouldUseMobileUI ? "6px 8px" : "4px 8px",
             marginBottom: 6,
             background: `${getElementColor(spells.find((s) => s.id === selectedSpellId)?.element || "air")}20`,
-            borderRadius: 4,
+            borderRadius: theme.borderRadius.md,
             border: `1px solid ${getElementColor(spells.find((s) => s.id === selectedSpellId)?.element || "air")}40`,
             fontSize: shouldUseMobileUI ? 11 : 10,
             color: theme.colors.text.secondary,
@@ -472,10 +477,14 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
             gridTemplateColumns: `repeat(${gridColumns}, ${iconSize}px)`,
             gap: gap,
             padding: GRID_PADDING,
-            background: theme.colors.slot.empty,
-            borderRadius: 4,
-            border: `1px solid ${theme.colors.border.default}30`,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(0, 0, 0, 0.08) 100%)"
+                : theme.colors.slot.empty,
+            borderRadius: theme.borderRadius.md,
+            border: `1px solid ${theme.colors.border.default}35`,
             justifyContent: "center",
+            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.03)",
           }}
         >
           {spells.map((spell) => (
@@ -525,11 +534,14 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
                   left,
                   top,
                   zIndex: zIndex.tooltip,
-                  background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+                  background:
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
+                      : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
                   border: `1px solid ${getElementColor(hoveredSpell.element)}50`,
-                  borderRadius: 6,
+                  borderRadius: theme.borderRadius.md,
                   padding: "12px 14px",
-                  boxShadow: theme.shadows.lg,
+                  boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
                   minWidth: 200,
                 }}
               >
@@ -608,7 +620,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
                         style={{
                           background: theme.colors.slot.filled,
                           padding: "2px 6px",
-                          borderRadius: 3,
+                          borderRadius: theme.borderRadius.sm,
                           color: theme.colors.text.secondary,
                         }}
                       >
@@ -625,7 +637,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
                     style={{
                       padding: "5px 10px",
                       background: `${theme.colors.state.danger}26`,
-                      borderRadius: 4,
+                      borderRadius: theme.borderRadius.sm,
                       fontSize: 11,
                       color: theme.colors.state.danger,
                       textAlign: "center",
@@ -639,7 +651,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
                     style={{
                       padding: "5px 10px",
                       background: `${theme.colors.state.success}26`,
-                      borderRadius: 4,
+                      borderRadius: theme.borderRadius.sm,
                       fontSize: 11,
                       color: theme.colors.state.success,
                       textAlign: "center",
@@ -666,10 +678,13 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
               left: contextMenu.x,
               top: contextMenu.y,
               zIndex: zIndex.contextMenu,
-              background: `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(44, 36, 24, 0.98) 0%, rgba(18, 15, 11, 0.98) 100%)"
+                  : `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
               border: `1px solid ${theme.colors.border.default}`,
-              borderRadius: 4,
-              boxShadow: theme.shadows.lg,
+              borderRadius: theme.borderRadius.md,
+              boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
               minWidth: 140,
               overflow: "hidden",
             }}

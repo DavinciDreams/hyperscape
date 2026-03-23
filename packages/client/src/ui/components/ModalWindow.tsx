@@ -22,6 +22,11 @@ import React, {
   type ReactNode,
   type CSSProperties,
 } from "react";
+import {
+  getPanelHeaderStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "../theme/themes";
 import { useTheme } from "../stores/themeStore";
 
 /** Modal window props */
@@ -167,10 +172,9 @@ export const ModalWindow = memo(function ModalWindow({
     maxHeight,
     display: "flex",
     flexDirection: "column",
-    backgroundColor: theme.colors.background.primary,
-    borderRadius: theme.borderRadius.lg,
-    border: `1px solid ${theme.colors.border.decorative}`,
-    boxShadow: theme.shadows.xl,
+    ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+    borderRadius: theme.borderRadius.xl,
+    boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 255, 255, 0.08)`,
     overflow: "hidden",
     animation: "modalSlideIn 0.2s ease-out",
     outline: "none",
@@ -179,12 +183,11 @@ export const ModalWindow = memo(function ModalWindow({
 
   // Header styles
   const headerStyle: CSSProperties = {
+    ...getPanelHeaderStyle(theme),
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    backgroundColor: theme.colors.background.secondary,
     userSelect: "none",
     position: "relative",
     zIndex: 5,
@@ -201,18 +204,13 @@ export const ModalWindow = memo(function ModalWindow({
 
   // Close button styles
   const closeButtonStyle: CSSProperties = {
+    ...getShellControlButtonStyle(theme, "danger"),
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     width: 28,
     height: 28,
-    borderRadius: theme.borderRadius.sm,
-    border: "none",
-    backgroundColor: "transparent",
-    color: theme.colors.text.secondary,
-    cursor: "pointer",
     fontSize: 18,
-    transition: `all ${theme.transitions.fast}`,
     position: "relative",
     zIndex: 10,
     pointerEvents: "auto",
@@ -223,7 +221,10 @@ export const ModalWindow = memo(function ModalWindow({
     flex: 1,
     overflow: "auto",
     padding: theme.spacing.md,
-    backgroundColor: theme.colors.background.primary,
+    background:
+      theme.name === "hyperscape"
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.12) 100%)"
+        : "transparent",
     pointerEvents: "auto",
   };
 
@@ -308,13 +309,18 @@ export const ModalWindow = memo(function ModalWindow({
                   e.stopPropagation();
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor =
-                    theme.colors.background.tertiary;
-                  e.currentTarget.style.color = theme.colors.text.primary;
+                  e.currentTarget.style.backgroundColor = String(
+                    closeButtonStyle["--shell-button-hover-bg"],
+                  );
+                  e.currentTarget.style.color = String(
+                    closeButtonStyle["--shell-button-hover-fg"],
+                  );
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "transparent";
-                  e.currentTarget.style.color = theme.colors.text.secondary;
+                  e.currentTarget.style.backgroundColor = String(
+                    closeButtonStyle.background,
+                  );
+                  e.currentTarget.style.color = String(closeButtonStyle.color);
                 }}
                 aria-label="Close modal"
                 type="button"

@@ -25,6 +25,7 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { useContextMenuState } from "../../hooks";
 import {
   EventType,
@@ -1282,7 +1283,14 @@ export function InventoryPanel({
   const inventoryContent = (
     <div
       className="flex flex-col h-full overflow-hidden gap-1"
-      style={{ minHeight: 0 }}
+      style={{
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+        minHeight: 0,
+        padding: shouldUseMobileUI ? "4px" : `${theme.spacing.xs}px`,
+        border: "none",
+        borderRadius: 0,
+        boxShadow: "none",
+      }}
     >
       {/* OSRS-style "Use X → Y" tooltip - rendered via portal to avoid transform issues */}
       {targetingState.active &&
@@ -1321,10 +1329,11 @@ export function InventoryPanel({
       <div
         className="border rounded overflow-hidden flex-1"
         style={{
-          background: theme.colors.background.panelSecondary,
-          borderColor: "rgba(10, 10, 12, 0.6)",
+          background: `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+          borderColor: `${theme.colors.border.default}66`,
+          borderRadius: `${theme.borderRadius.md}px`,
           // Embossed container: dark top-left edge, subtle light bottom-right
-          boxShadow: `inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(40, 40, 45, 0.08)`,
+          boxShadow: `${theme.shadows.sm}, inset 2px 2px 4px rgba(0, 0, 0, 0.42), inset -1px -1px 3px rgba(60, 60, 68, 0.1)`,
           // Container query support for responsive slot sizing
           containerType: "size",
           minHeight: 0,
@@ -1380,8 +1389,9 @@ export function InventoryPanel({
         <div
           className="px-2 py-1 text-center"
           style={{
-            background: theme.colors.background.overlay,
-            borderTop: `1px solid ${theme.colors.border.default}33`,
+            background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+            borderTop: `1px solid ${theme.colors.border.default}55`,
+            borderRadius: `${theme.borderRadius.sm}px`,
           }}
         >
           <span

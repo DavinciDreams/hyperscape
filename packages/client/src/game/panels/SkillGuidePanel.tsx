@@ -7,6 +7,7 @@
 
 import React, { useMemo } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import type { SkillUnlock } from "@hyperscape/shared";
 import type { CSSProperties } from "react";
 
@@ -34,6 +35,7 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
       return {
         background: `${theme.colors.state.success}15`,
         border: `1px solid ${theme.colors.state.success}50`,
+        boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
         opacity: 1,
       };
     }
@@ -41,12 +43,16 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
       return {
         background: `${theme.colors.state.warning}25`,
         border: `1px solid ${theme.colors.state.warning}80`,
+        boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
         opacity: 1,
       };
     }
     return {
-      background: theme.colors.background.panelSecondary,
-      border: "1px solid transparent",
+      background:
+        theme.name === "hyperscape"
+          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(0, 0, 0, 0.08) 100%)"
+          : theme.colors.background.panelSecondary,
+      border: `1px solid ${theme.colors.border.default}2a`,
       opacity: 0.6,
     };
   }, [isUnlocked, isNext, theme]);
@@ -58,8 +64,8 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
         alignItems: "center",
         gap: theme.spacing.sm,
         padding: theme.spacing.sm,
-        borderRadius: theme.borderRadius.sm,
-        transition: "all 0.2s ease",
+        borderRadius: theme.borderRadius.md,
+        transition: `all ${theme.transitions.fast}`,
         ...rowStyle,
       }}
     >
@@ -119,7 +125,7 @@ function UnlockRow({ unlock, isUnlocked, isNext }: UnlockRowProps) {
             padding: "2px 4px",
             borderRadius: theme.borderRadius.sm,
             background: `${theme.colors.state.warning}40`,
-            color: theme.colors.state.warning,
+            color: theme.colors.text.primary,
             fontWeight: theme.typography.fontWeight.bold,
           }}
         >
@@ -186,14 +192,21 @@ export function SkillGuidePanel({
       width={400}
       maxHeight="500px"
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      <div
+        style={{
+          ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+          display: "flex",
+          flexDirection: "column",
+          gap: 0,
+        }}
+      >
         {/* Current Level */}
         <div
           style={{
             padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
             fontSize: theme.typography.fontSize.xs,
             color: theme.colors.text.secondary,
-            borderBottom: `1px solid ${theme.colors.border.default}`,
+            borderBottom: `1px solid ${theme.colors.border.default}40`,
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -221,8 +234,8 @@ export function SkillGuidePanel({
             style={{
               padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
               fontSize: 11,
-              background: `${theme.colors.state.warning}15`,
-              borderBottom: `1px solid ${theme.colors.border.default}`,
+              background: `${theme.colors.state.warning}12`,
+              borderBottom: `1px solid ${theme.colors.border.default}40`,
               color: theme.colors.state.warning,
               display: "flex",
               alignItems: "center",
@@ -249,6 +262,10 @@ export function SkillGuidePanel({
             display: "flex",
             flexDirection: "column",
             gap: theme.spacing.xs,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.12) 100%)"
+                : "transparent",
           }}
         >
           {isLoading ? (

@@ -14,6 +14,7 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { zIndex, MOBILE_SKILLS } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, Skills } from "../../types";
@@ -266,7 +267,10 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
   return (
     <div
       className="flex flex-col h-full overflow-hidden"
-      style={{ padding: shouldUseMobileUI ? "4px" : "3px" }}
+      style={{
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+        padding: shouldUseMobileUI ? "4px" : "3px",
+      }}
     >
       {/* Content */}
       <div
@@ -280,6 +284,13 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
         <div
           className="grid flex-1"
           style={{
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(0, 0, 0, 0.08) 100%)"
+                : "rgba(255, 255, 255, 0.02)",
+            border: `1px solid ${theme.colors.border.default}40`,
+            borderRadius: theme.borderRadius.md,
+            padding: shouldUseMobileUI ? "4px" : "3px",
             gridTemplateColumns: shouldUseMobileUI
               ? `repeat(${MOBILE_SKILLS.columns}, 1fr)`
               : "repeat(3, 1fr)",
@@ -310,11 +321,15 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
           className="flex justify-between"
           style={{
             marginTop: shouldUseMobileUI ? "4px" : "3px",
-            background: theme.colors.slot.filled,
-            border: `1px solid ${theme.colors.border.default}30`,
-            borderRadius: "3px",
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                : theme.colors.slot.filled,
+            border: `1px solid ${theme.colors.border.default}40`,
+            borderRadius: theme.borderRadius.md,
             padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
             flexShrink: 0,
+            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
           }}
         >
           <div
@@ -411,12 +426,15 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                   left,
                   top,
                   zIndex: zIndex.tooltip,
-                  background: theme.colors.slot.filled,
-                  border: `1px solid ${theme.colors.border.default}40`,
-                  borderRadius: "3px",
+                  background:
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
+                      : theme.colors.slot.filled,
+                  border: `1px solid ${theme.colors.border.default}50`,
+                  borderRadius: theme.borderRadius.md,
                   padding: "6px 8px",
                   minWidth: "140px",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                  boxShadow: `${theme.shadows.md}, inset 0 1px 0 rgba(255,255,255,0.04)`,
                 }}
               >
                 {/* Header */}
@@ -474,7 +492,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                     style={{
                       height: "3px",
                       background: theme.colors.slot.empty,
-                      borderRadius: "1px",
+                      borderRadius: theme.borderRadius.sm,
                       overflow: "hidden",
                     }}
                   >
@@ -483,7 +501,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                         height: "100%",
                         width: `${progress}%`,
                         background: theme.colors.accent.secondary,
-                        borderRadius: "1px",
+                        borderRadius: theme.borderRadius.sm,
                       }}
                     />
                   </div>
@@ -515,12 +533,15 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                   left,
                   top,
                   zIndex: zIndex.tooltip,
-                  background: theme.colors.slot.filled,
-                  border: `1px solid ${theme.colors.border.default}40`,
-                  borderRadius: "3px",
+                  background:
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
+                      : theme.colors.slot.filled,
+                  border: `1px solid ${theme.colors.border.default}50`,
+                  borderRadius: theme.borderRadius.md,
                   padding: "6px 8px",
                   minWidth: "120px",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                  boxShadow: `${theme.shadows.md}, inset 0 1px 0 rgba(255,255,255,0.04)`,
                 }}
               >
                 <div
