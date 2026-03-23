@@ -1198,67 +1198,20 @@ function MinimapInner({
 
             if (terrainOffscreenRef.current) {
               mainCtx.imageSmoothingEnabled = true;
-              mainCtx.imageSmoothingQuality = "medium";
-              const drawW = cw * TERRAIN_OVERSHOOT;
-              const drawH = ch * TERRAIN_OVERSHOOT;
+              mainCtx.imageSmoothingQuality = "high";
               const cachedExt = terrainCacheExtentRef.current;
-              const inZoomTransition =
-                cachedExt > 0 && cachedExt !== currentExtent;
-
-              if (inZoomTransition) {
-                // Scale terrain draw during zoom transition so it matches the new extent
-                // and stays aligned with roads, buildings, and pips.
-                // Terrain image covers cachedExt*TERRAIN_OVERSHOOT world units; canvas shows currentExtent.
-                if (currentExtent < cachedExt) {
-                  // Zoom in: crop center of terrain to show currentExtent, draw at canvas size
-                  // so 1 world unit = cw/(2*currentExtent) pixels (matches worldToPx).
-                  const frac = currentExtent / (cachedExt * TERRAIN_OVERSHOOT);
-                  const srcSize = Math.max(1, Math.floor(50 * frac));
-                  const srcX = (50 - srcSize) / 2;
-                  const srcY = (50 - srcSize) / 2;
-                  mainCtx.drawImage(
-                    terrainOffscreenRef.current,
-                    srcX,
-                    srcY,
-                    srcSize,
-                    srcSize,
-                    0,
-                    0,
-                    cw,
-                    ch,
-                  );
-                } else {
-                  // Zoom out: scale terrain so it fills canvas at currentExtent.
-                  // Terrain = 2*cachedExt*TERRAIN_OVERSHOOT world units; need cw pixels = 2*currentExtent.
-                  // So draw at scaledW = cw * (cachedExt*TERRAIN_OVERSHOOT) / currentExtent.
-                  const scaledW =
-                    (cw * cachedExt * TERRAIN_OVERSHOOT) / currentExtent;
-                  const scaledH =
-                    (ch * cachedExt * TERRAIN_OVERSHOOT) / currentExtent;
-                  mainCtx.fillStyle = "#1a1a2e";
-                  mainCtx.fillRect(0, 0, cw, ch);
-                  mainCtx.drawImage(
-                    terrainOffscreenRef.current,
-                    0,
-                    0,
-                    50,
-                    50,
-                    cw / 2 - scaledW / 2,
-                    ch / 2 - scaledH / 2,
-                    scaledW,
-                    scaledH,
-                  );
-                }
-              } else {
-                // Normal: draw at TERRAIN_OVERSHOOT × canvas size, centered
-                mainCtx.drawImage(
-                  terrainOffscreenRef.current,
-                  cw / 2 - drawW / 2,
-                  ch / 2 - drawH / 2,
-                  drawW,
-                  drawH,
-                );
-              }
+              const extentScale = cachedExt > 0 ? cachedExt / currentExtent : 1;
+              const drawW = cw * TERRAIN_OVERSHOOT * extentScale;
+              const drawH = ch * TERRAIN_OVERSHOOT * extentScale;
+              mainCtx.fillStyle = "#1a1a2e";
+              mainCtx.fillRect(0, 0, cw, ch);
+              mainCtx.drawImage(
+                terrainOffscreenRef.current,
+                cw / 2 - drawW / 2,
+                ch / 2 - drawH / 2,
+                drawW,
+                drawH,
+              );
             } else {
               // Fallback: dark background until terrain system is ready
               mainCtx.fillStyle = "#1a1a2e";

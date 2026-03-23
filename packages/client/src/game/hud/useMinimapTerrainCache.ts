@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { TERRAIN_CONSTANTS } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 
-const TERRAIN_SAMPLE_SIZE = 50;
+const TERRAIN_BASE_SAMPLE_SIZE = 96;
 const TERRAIN_OVERSHOOT = Math.SQRT2 * 1.1;
 
 interface BiomeDataLike {
@@ -123,32 +123,39 @@ async function generateTerrainChunked(
   upZ: number,
   isCancelled: () => boolean,
 ): Promise<OffscreenCanvas | null> {
-  const offscreen = new OffscreenCanvas(
-    TERRAIN_SAMPLE_SIZE,
-    TERRAIN_SAMPLE_SIZE,
-  );
+  const sampleSize = TERRAIN_BASE_SAMPLE_SIZE;
+  const offscreen = new OffscreenCanvas(sampleSize, sampleSize);
   const context = offscreen.getContext("2d");
   if (!context) return null;
 
-  const imageData = context.createImageData(
-    TERRAIN_SAMPLE_SIZE,
-    TERRAIN_SAMPLE_SIZE,
-  );
+  const imageData = context.createImageData(sampleSize, sampleSize);
   const data = imageData.data;
   const rightX = -upZ;
   const rightZ = upX;
+  const sampleStep = (extent * 2) / sampleSize;
 
-  for (let sy = 0; sy < TERRAIN_SAMPLE_SIZE; sy += 1) {
+  for (let sy = 0; sy < sampleSize; sy += 1) {
     if (isCancelled()) return null;
 
-    for (let sx = 0; sx < TERRAIN_SAMPLE_SIZE; sx += 1) {
-      const px = (sx + 0.5) / TERRAIN_SAMPLE_SIZE;
-      const py = (sy + 0.5) / TERRAIN_SAMPLE_SIZE;
+    for (let sx = 0; sx < sampleSize; sx += 1) {
+      const px = (sx + 0.5) / sampleSize;
+      const py = (sy + 0.5) / sampleSize;
       const ndcX = px * 2 - 1;
       const ndcY = py * 2 - 1;
       const worldX = centerX + ndcX * rightX * extent - ndcY * upX * extent;
       const worldZ = centerZ + ndcX * rightZ * extent - ndcY * upZ * extent;
       const height = terrainSystem.getHeightAt(worldX, worldZ);
+      const eastHeight = terrainSystem.getHeightAt(worldX + sampleStep, worldZ);
+      const northHeight = terrainSystem.getHeightAt(
+        worldX,
+        worldZ - sampleStep,
+      );
+      const slope =
+        Math.min(
+          1,
+          Math.hypot(eastHeight - height, northHeight - height) /
+            Math.max(1, sampleStep * 0.8),
+        ) || 0;
 
       let r = 30;
       let g = 60;
@@ -158,22 +165,33 @@ async function generateTerrainChunked(
         const biomeColor = getBiomeBaseColor(terrainSystem, worldX, worldZ);
         const lift =
           Math.min(
-            26,
-            ((height - TERRAIN_CONSTANTS.WATER_THRESHOLD) / 40) * 26,
+            30,
+            ((height - TERRAIN_CONSTANTS.WATER_THRESHOLD) / 36) * 30,
           ) | 0;
-        r = clampColorChannel(biomeColor.r + lift);
-        g = clampColorChannel(biomeColor.g + lift);
-        b = clampColorChannel(biomeColor.b + lift);
+        const slopeShade = Math.max(-18, Math.min(14, 8 - slope * 24)) | 0;
+        r = clampColorChannel(biomeColor.r + lift + slopeShade);
+        g = clampColorChannel(biomeColor.g + lift + slopeShade);
+        b = clampColorChannel(biomeColor.b + lift + slopeShade);
+      } else {
+        const waterDepth =
+          Math.min(
+            1,
+            (TERRAIN_CONSTANTS.WATER_THRESHOLD - height) /
+              Math.max(1, TERRAIN_CONSTANTS.WATER_THRESHOLD + 8),
+          ) || 0;
+        r = clampColorChannel(24 - waterDepth * 8);
+        g = clampColorChannel(58 + waterDepth * 10);
+        b = clampColorChannel(118 + waterDepth * 28);
       }
 
-      const pixelIndex = (sy * TERRAIN_SAMPLE_SIZE + sx) * 4;
+      const pixelIndex = (sy * sampleSize + sx) * 4;
       data[pixelIndex] = r;
       data[pixelIndex + 1] = g;
       data[pixelIndex + 2] = b;
       data[pixelIndex + 3] = 255;
     }
 
-    if (sy % 10 === 9) {
+    if (sy % 12 === 11) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       if (isCancelled()) return null;
     }
