@@ -80,14 +80,11 @@ const WATER = {
   COLOR_DEPTH_FALLOFF: 3,
   COLOR_DIST_FADE: 200,
 
-  // Cosine gradient colour parameters
+  // Cosine gradient colour parameters (based on reference, darkened offsets)
   COS_PHASES: [0.28, 0.5, 0.07] as const,
   COS_AMPLITUDES: [4.02, 0.34, 0.65] as const,
   COS_FREQUENCIES: [0.0, 0.48, 0.08] as const,
-  COS_OFFSETS: [0.0, 0.25, 0.0] as const,
-
-  // Multiplier applied to the cosine gradient to darken overall water color
-  COLOR_DARKEN: 0.18,
+  COS_OFFSETS: [-0.25, 0.0, -0.15] as const,
 
   // Normal noise strength (xz multiplier for surface normal)
   NORMAL_STRENGTH: 1.5,
@@ -695,25 +692,25 @@ export class WaterSystem {
         float(0),
         float(1),
       );
-      const waterColor = mul(vec3(cosR, cosG, cosB), float(WATER.COLOR_DARKEN));
+      const waterColor = vec3(cosR, cosG, cosB);
 
-      // --- 4-layer scrolling normal noise (speeds matched to Gerstner phase) ---
+      // --- 4-layer scrolling normal noise (matches reference scroll speeds) ---
       const baseUV = mul(wUV, float(5));
       const nUV0 = add(
         div(baseUV, float(103)),
-        vec2(mul(uTime, float(0.012)), mul(uTime, float(0.008))),
+        vec2(div(uTime, float(17)), div(uTime, float(29))),
       );
       const nUV1 = add(
         div(baseUV, float(107)),
-        vec2(mul(uTime, float(0.01)), mul(uTime, float(-0.007))),
+        vec2(div(uTime, float(19)), mul(div(uTime, float(31)), float(-1))),
       );
       const nUV2 = add(
         vec2(div(baseUV.x, float(8907)), div(baseUV.y, float(9803))),
-        vec2(mul(uTime, float(0.003)), mul(uTime, float(0.004))),
+        vec2(div(uTime, float(101)), div(uTime, float(97))),
       );
       const nUV3 = add(
         vec2(div(baseUV.x, float(1091)), div(baseUV.y, float(1027))),
-        vec2(mul(uTime, float(-0.004)), mul(uTime, float(0.003))),
+        vec2(mul(div(uTime, float(109)), float(-1)), div(uTime, float(113))),
       );
       const n0 = texture(nTex, nUV0);
       const n1 = texture(nTex, nUV1);
@@ -1001,25 +998,25 @@ export class WaterSystem {
         float(0),
         float(1),
       );
-      const waterColor = mul(vec3(cosR, cosG, cosB), float(WATER.COLOR_DARKEN));
+      const waterColor = vec3(cosR, cosG, cosB);
 
-      // --- 4-layer normal noise (speeds matched to Gerstner phase) ---
+      // --- 4-layer normal noise (matches reference scroll speeds) ---
       const baseUV = mul(wUV, float(5));
       const nUV0 = add(
         div(baseUV, float(103)),
-        vec2(mul(uTime, float(0.012)), mul(uTime, float(0.008))),
+        vec2(div(uTime, float(17)), div(uTime, float(29))),
       );
       const nUV1 = add(
         div(baseUV, float(107)),
-        vec2(mul(uTime, float(0.01)), mul(uTime, float(-0.007))),
+        vec2(div(uTime, float(19)), mul(div(uTime, float(31)), float(-1))),
       );
       const nUV2 = add(
         vec2(div(baseUV.x, float(8907)), div(baseUV.y, float(9803))),
-        vec2(mul(uTime, float(0.003)), mul(uTime, float(0.004))),
+        vec2(div(uTime, float(101)), div(uTime, float(97))),
       );
       const nUV3 = add(
         vec2(div(baseUV.x, float(1091)), div(baseUV.y, float(1027))),
-        vec2(mul(uTime, float(-0.004)), mul(uTime, float(0.003))),
+        vec2(mul(div(uTime, float(109)), float(-1)), div(uTime, float(113))),
       );
       const noiseSum = add(
         add(add(texture(nTex, nUV0), texture(nTex, nUV1)), texture(nTex, nUV2)),
