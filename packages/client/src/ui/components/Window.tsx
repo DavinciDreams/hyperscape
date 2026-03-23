@@ -93,8 +93,15 @@ export const Window = memo(function Window({
   // This bypasses the store lookup issue when stores are in different bundles
   const isUnlocked = passedIsUnlocked ?? hookIsUnlocked;
   const { snapEnabled } = useSnap();
+  const isGuideTrackingActive = useEditStore(
+    (s) => s.draggingWindowId === windowId,
+  );
   const guideWindowsMap = useWindowStore(
-    useMemo(() => (state) => (isUnlocked ? state.windows : null), [isUnlocked]),
+    useMemo(
+      () => (state) =>
+        isUnlocked && isGuideTrackingActive ? state.windows : null,
+      [isUnlocked, isGuideTrackingActive],
+    ),
   );
   const guideWindows = useMemo(() => {
     if (!guideWindowsMap) {
@@ -105,7 +112,7 @@ export const Window = memo(function Window({
   }, [guideWindowsMap]);
   const { snapToGuide, calculateGuides } = useAlignmentGuides(
     guideWindows,
-    windowId,
+    isGuideTrackingActive ? windowId : null,
   );
 
   // Get viewport restriction settings from edit store
