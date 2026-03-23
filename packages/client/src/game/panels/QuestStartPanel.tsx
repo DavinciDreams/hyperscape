@@ -11,9 +11,12 @@
 import React, { useEffect } from "react";
 import { useThemeStore } from "@/ui";
 import {
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
   getPanelSurfaceStyle,
   getShellControlButtonStyle,
 } from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 
 interface QuestRequirements {
   quests: string[];
@@ -93,8 +96,11 @@ export function QuestStartPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[10001] flex items-center justify-center pointer-events-auto"
-      style={{ backgroundColor: "rgba(0, 0, 0, 0.85)" }}
+      className="fixed inset-0 flex items-center justify-center pointer-events-auto"
+      style={{
+        backgroundColor: "rgba(0, 0, 0, 0.85)",
+        zIndex: UI.Z_INDEX.MODAL,
+      }}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
@@ -145,12 +151,11 @@ export function QuestStartPanel({
         <div
           className="text-center mb-3 py-2"
           style={{
-            backgroundColor:
-              theme.name === "hyperscape"
-                ? "rgba(255, 255, 255, 0.05)"
-                : `${theme.colors.background.tertiary}55`,
-            borderRadius: `${theme.borderRadius.md}px`,
-            border: `1px solid ${theme.colors.border.default}40`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: theme.borderRadius.md,
+              padding: "0.5rem 0.75rem",
+            }),
           }}
         >
           <h3
@@ -266,9 +271,11 @@ export function QuestStartPanel({
             onClick={onAccept}
             className="px-6 py-2 rounded cursor-pointer transition-all font-bold"
             style={{
-              background:
-                "linear-gradient(to bottom, #4a8f4a 0%, #3a7f3a 100%)",
-              border: "2px solid #2a5f2a",
+              ...getInteractiveTileStyle(theme, {
+                active: true,
+                accentColor: theme.colors.state.success,
+                radius: theme.borderRadius.md,
+              }),
               color: "#ffffff",
               textShadow: "1px 1px 2px rgba(0, 0, 0, 0.5)",
             }}
