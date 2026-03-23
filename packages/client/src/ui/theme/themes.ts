@@ -618,12 +618,15 @@ export function getPanelSurfaceStyle(
     borderRadius: theme.borderRadius.lg,
     backgroundImage:
       theme.name === "hyperscape"
-        ? `linear-gradient(180deg, ${theme.colors.background.panelSecondary}cc 0%, ${theme.colors.background.panelPrimary}f2 100%)`
-        : `linear-gradient(180deg, ${theme.colors.background.panelSecondary}cc 0%, ${theme.colors.background.panelPrimary}f0 100%)`,
+        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.018) 18%, rgba(0, 0, 0, 0.08) 100%),
+           radial-gradient(circle at top right, rgba(240, 208, 96, 0.14), transparent 34%),
+           linear-gradient(180deg, ${theme.colors.background.panelSecondary}e6 0%, ${theme.colors.background.panelPrimary}f5 100%)`
+        : `linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 24%, rgba(0, 0, 0, 0.06) 100%),
+           linear-gradient(180deg, ${theme.colors.background.panelSecondary}d9 0%, ${theme.colors.background.panelPrimary}f2 100%)`,
     boxShadow:
       emphasis === "strong"
-        ? `${theme.shadows.window}, inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 0 1px rgba(255, 255, 255, 0.03)`
-        : `${theme.shadows.md}, inset 0 1px 0 rgba(255, 255, 255, 0.06)`,
+        ? `${theme.shadows.window}, inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 0 0 1px rgba(255, 255, 255, 0.035), inset 0 -20px 32px rgba(0, 0, 0, 0.12)`
+        : `${theme.shadows.md}, inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -10px 18px rgba(0, 0, 0, 0.08)`,
     transition: interactive ? theme.transitions.fast : undefined,
   };
 }
@@ -635,10 +638,14 @@ export function getPanelHeaderStyle(theme: Theme): React.CSSProperties {
   return {
     background:
       theme.name === "hyperscape"
-        ? `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.tertiary} 100%)`
-        : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 58%),
+           radial-gradient(circle at top right, rgba(240, 208, 96, 0.18), transparent 36%),
+           linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.tertiary} 100%)`
+        : `linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 56%),
+           linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
     borderBottom: `1px solid ${theme.colors.border.default}`,
-    boxShadow: "inset 0 -1px 0 rgba(0, 0, 0, 0.28)",
+    boxShadow:
+      "inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(0, 0, 0, 0.32)",
   };
 }
 
@@ -659,8 +666,8 @@ export function getTabStyle(
     display: "flex",
     alignItems: "center",
     gap: theme.spacing.xs,
-    minHeight: 30,
-    padding: `0 ${theme.spacing.sm}px`,
+    minHeight: 34,
+    padding: `0 ${theme.spacing.sm + 1}px`,
     ...getTabChromeStyle(theme, {
       isActive: active,
       isDragging: dragging,
@@ -717,14 +724,15 @@ export function getWindowSurfaceStyle(
     ),
     backgroundImage:
       theme.name === "hyperscape"
-        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 42%, rgba(0, 0, 0, 0.08) 100%),
-           radial-gradient(circle at top, rgba(240, 208, 96, 0.12), transparent 40%)`
-        : "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 42%, rgba(0, 0, 0, 0.08) 100%)",
-    backdropFilter: `blur(${theme.glass.blur}px) saturate(1.05)`,
-    WebkitBackdropFilter: `blur(${theme.glass.blur}px) saturate(1.05)`,
+        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.02) 28%, rgba(0, 0, 0, 0.11) 100%),
+           radial-gradient(circle at top right, rgba(240, 208, 96, 0.14), transparent 36%),
+           radial-gradient(circle at bottom left, rgba(36, 92, 132, 0.12), transparent 34%)`
+        : "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 42%, rgba(0, 0, 0, 0.08) 100%)",
+    backdropFilter: `blur(${theme.glass.blur}px) saturate(1.08)`,
+    WebkitBackdropFilter: `blur(${theme.glass.blur}px) saturate(1.08)`,
     border: `1px solid ${borderColor}`,
     borderRadius: theme.borderRadius.md,
-    boxShadow: `${shadow}, inset 0 1px 0 rgba(255, 255, 255, 0.08), ${accentGlow}`,
+    boxShadow: `${shadow}, inset 0 1px 0 rgba(255, 255, 255, 0.09), inset 0 -18px 32px rgba(0, 0, 0, 0.12), ${accentGlow}`,
   };
 }
 
@@ -755,11 +763,11 @@ export function getTabBarChromeStyle(
     backgroundColor: theme.colors.background.secondary,
     backgroundImage:
       theme.name === "hyperscape"
-        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 28%, rgba(0, 0, 0, 0.12) 100%)"
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(0, 0, 0, 0.1) 100%), radial-gradient(circle at top right, rgba(240, 208, 96, 0.14), transparent 32%)"
         : "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 100%)",
     borderBottom: `1px solid ${borderBottomColor}`,
-    boxShadow: shadow,
-    minHeight: 32,
+    boxShadow: `${shadow}, inset 0 1px 0 rgba(255, 255, 255, 0.06)`,
+    minHeight: 36,
     opacity: isSourceDragging ? 0.72 : 1,
   };
 }
@@ -776,15 +784,20 @@ export function getTabChromeStyle(
   return {
     backgroundColor: isActive
       ? theme.colors.background.secondary
-      : "transparent",
+      : "rgba(255, 255, 255, 0.01)",
     backgroundImage: isActive
-      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.015) 100%)"
-      : "none",
-    borderRight: `1px solid ${theme.colors.border.default}`,
+      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.025) 38%, rgba(0, 0, 0, 0.08) 100%)"
+      : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.008) 100%)",
+    borderRight: `1px solid ${isActive ? theme.colors.border.hover : theme.colors.border.default}`,
     borderBottom: isActive
       ? `1px solid ${theme.colors.accent.primary}`
       : "1px solid transparent",
-    boxShadow: isActive ? "inset 0 1px 0 rgba(255, 255, 255, 0.08)" : "none",
+    borderTop: `1px solid ${isActive ? "rgba(255, 255, 255, 0.14)" : "transparent"}`,
+    borderTopLeftRadius: theme.borderRadius.sm,
+    borderTopRightRadius: theme.borderRadius.sm,
+    boxShadow: isActive
+      ? "inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 -1px 0 rgba(0, 0, 0, 0.08)"
+      : "inset 0 1px 0 rgba(255, 255, 255, 0.025)",
     opacity: isDragging ? 0.5 : 1,
   };
 }
@@ -819,9 +832,9 @@ export function getShellControlButtonStyle(
           };
 
   return {
-    width: 22,
-    height: 22,
-    border: `1px solid transparent`,
+    width: 24,
+    height: 24,
+    border: `1px solid rgba(255, 255, 255, 0.04)`,
     background: palette.bg,
     color: palette.fg,
     cursor: "pointer",
@@ -831,7 +844,8 @@ export function getShellControlButtonStyle(
     justifyContent: "center",
     fontSize: 12,
     flexShrink: 0,
-    transition: `color ${theme.transitions.fast}, background-color ${theme.transitions.fast}, border-color ${theme.transitions.fast}`,
+    boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+    transition: `color ${theme.transitions.fast}, background-color ${theme.transitions.fast}, border-color ${theme.transitions.fast}, transform ${theme.transitions.fast}`,
     "--shell-button-hover-bg": palette.hoverBg,
     "--shell-button-hover-fg": palette.hoverFg,
   };

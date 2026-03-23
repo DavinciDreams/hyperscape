@@ -115,9 +115,9 @@ export const Tab = memo(function Tab({
   // Merge styles properly to avoid overwriting
   const containerStyle: React.CSSProperties = {
     ...getTabStyle(theme, { active: isActive, dragging: isDragging }),
-    justifyContent: hasVisualIcon ? "center" : "center",
-    minWidth: hasVisualIcon ? 40 : 72,
-    maxWidth: hasVisualIcon ? 40 : 160,
+    justifyContent: "center",
+    minWidth: hasVisualIcon ? 42 : 76,
+    maxWidth: hasVisualIcon ? 42 : 168,
     ...style,
     ...(isUnlocked ? dragHandleProps.style : { cursor: "pointer" }),
   };
@@ -126,12 +126,13 @@ export const Tab = memo(function Tab({
     fontSize: 16,
     lineHeight: 1,
     filter: isActive ? "none" : "grayscale(18%)",
-    opacity: isActive ? 1 : 0.85,
+    opacity: isActive ? 1 : 0.82,
     color: isActive ? theme.colors.accent.primary : theme.colors.text.secondary,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
+    textShadow: isActive ? "0 0 16px rgba(240, 208, 96, 0.18)" : "none",
   };
 
   const labelStyle: React.CSSProperties = {
@@ -159,14 +160,20 @@ export const Tab = memo(function Tab({
 
   const applyInactiveHighlight = (element: HTMLDivElement) => {
     if (isActive) return;
-    element.style.background = `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.tertiary} 100%)`;
+    element.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.02) 36%, rgba(0, 0, 0, 0.05) 100%)`;
     element.style.borderBottomColor = theme.colors.border.hover;
+    element.style.borderTopColor = "rgba(255, 255, 255, 0.08)";
+    element.style.boxShadow =
+      "inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 -1px 0 rgba(0, 0, 0, 0.04)";
   };
 
   const clearInactiveHighlight = (element: HTMLDivElement) => {
     if (isActive) return;
-    element.style.background = "transparent";
+    element.style.background =
+      "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.008) 100%)";
     element.style.borderBottomColor = "transparent";
+    element.style.borderTopColor = "transparent";
+    element.style.boxShadow = "inset 0 1px 0 rgba(255, 255, 255, 0.025)";
   };
 
   return (
@@ -217,13 +224,13 @@ export const Tab = memo(function Tab({
       }}
       onFocus={(e: React.FocusEvent<HTMLDivElement>) => {
         applyInactiveHighlight(e.currentTarget);
-        e.currentTarget.style.boxShadow = `inset 0 0 0 1px ${theme.colors.border.focus}`;
+        e.currentTarget.style.boxShadow = `inset 0 0 0 1px ${theme.colors.border.focus}, inset 0 1px 0 rgba(255, 255, 255, 0.05)`;
       }}
       onBlur={(e: React.FocusEvent<HTMLDivElement>) => {
         clearInactiveHighlight(e.currentTarget);
         e.currentTarget.style.boxShadow = isActive
-          ? "inset 0 1px 0 rgba(255, 255, 255, 0.08)"
-          : "none";
+          ? "inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 -1px 0 rgba(0, 0, 0, 0.08)"
+          : "inset 0 1px 0 rgba(255, 255, 255, 0.025)";
       }}
       {...(isUnlocked ? { onPointerDown: dragHandleProps.onPointerDown } : {})}
       id={tabId}

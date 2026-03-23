@@ -237,9 +237,11 @@ export const ModalWindow = memo(function ModalWindow({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backgroundColor: "rgba(5, 8, 14, 0.76)",
     backgroundImage:
-      "radial-gradient(circle at top, rgba(255, 255, 255, 0.04), transparent 42%)",
+      theme.name === "hyperscape"
+        ? "radial-gradient(circle at top, rgba(240, 208, 96, 0.12), transparent 30%), radial-gradient(circle at center, rgba(255, 255, 255, 0.035), transparent 44%)"
+        : "radial-gradient(circle at top, rgba(255, 255, 255, 0.04), transparent 42%)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -261,7 +263,7 @@ export const ModalWindow = memo(function ModalWindow({
     flexDirection: "column",
     ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
     borderRadius: theme.borderRadius.xl,
-    boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 255, 255, 0.08)`,
+    boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -24px 36px rgba(0, 0, 0, 0.14)`,
     overflow: "hidden",
     animation: reduceMotion ? undefined : "modalSlideIn 0.22s ease-out",
     outline: "none",
@@ -280,6 +282,7 @@ export const ModalWindow = memo(function ModalWindow({
     position: "relative",
     zIndex: 5,
     pointerEvents: "auto",
+    minHeight: 52,
   };
 
   // Title styles
@@ -287,6 +290,7 @@ export const ModalWindow = memo(function ModalWindow({
     fontSize: theme.typography.fontSize.lg,
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.primary,
+    letterSpacing: "0.01em",
     margin: 0,
   };
 
@@ -312,7 +316,7 @@ export const ModalWindow = memo(function ModalWindow({
     overscrollBehavior: "contain",
     background:
       theme.name === "hyperscape"
-        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.12) 100%)"
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.008) 18%, rgba(0, 0, 0, 0.12) 100%)"
         : "transparent",
     pointerEvents: "auto",
   };
@@ -380,6 +384,19 @@ export const ModalWindow = memo(function ModalWindow({
             e.stopPropagation();
           }}
         >
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, transparent 14%, transparent 82%, rgba(0, 0, 0, 0.08) 100%)"
+                  : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 16%, transparent 84%, rgba(0, 0, 0, 0.06) 100%)",
+              zIndex: 0,
+            }}
+          />
           {/* Header */}
           <div style={headerStyle}>
             <h2 id={titleId} style={titleStyle}>

@@ -657,7 +657,7 @@ export const Window = memo(function Window({
           pointerEvents: "none",
           background:
             theme.name === "hyperscape"
-              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 18%, transparent 82%, rgba(0, 0, 0, 0.08) 100%)"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 14%, transparent 78%, rgba(0, 0, 0, 0.1) 100%), radial-gradient(circle at top right, rgba(240, 208, 96, 0.08), transparent 32%)"
               : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 16%, transparent 84%, rgba(0, 0, 0, 0.06) 100%)",
           zIndex: 0,
         }}

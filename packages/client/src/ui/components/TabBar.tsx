@@ -275,7 +275,7 @@ export const TabBar = memo(function TabBar({
     userSelect: "none",
     touchAction: dragHandleProps?.style.touchAction || "none",
     cursor: isUnlocked ? dragHandleProps?.style.cursor || "move" : "default",
-    padding: "0 6px",
+    padding: "0 8px",
     gap: 6,
     ...getTabBarChromeStyle(theme, {
       isDropTarget: isOver && canDrop,
@@ -287,13 +287,13 @@ export const TabBar = memo(function TabBar({
 
   const dropIndicatorStyle: React.CSSProperties = {
     position: "absolute",
-    width: 2,
-    top: 5,
-    bottom: 5,
+    width: 3,
+    top: 6,
+    bottom: 6,
     backgroundColor: theme.colors.accent.primary,
-    borderRadius: 1,
+    borderRadius: 999,
     transition: "left 100ms ease-out",
-    boxShadow: `0 0 8px ${theme.colors.accent.primary}`,
+    boxShadow: `0 0 14px ${theme.colors.accent.primary}`,
   };
 
   const tabsContainerStyle: React.CSSProperties = {
@@ -302,16 +302,17 @@ export const TabBar = memo(function TabBar({
     overflow: "auto",
     scrollbarWidth: "none",
     minWidth: 0,
+    paddingBlock: 3,
   };
 
   const scrollButtonStyle: React.CSSProperties = {
     ...getShellControlButtonStyle(theme),
-    marginBlock: 4,
+    marginBlock: 5,
   };
 
   const actionButtonStyle: React.CSSProperties = {
     ...getShellControlButtonStyle(theme),
-    marginBlock: 4,
+    marginBlock: 5,
     fontSize: 14,
   };
 
