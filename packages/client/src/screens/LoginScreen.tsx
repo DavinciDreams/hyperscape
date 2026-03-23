@@ -9,11 +9,7 @@ import { useLoginToMiniApp } from "@privy-io/react-auth/farcaster";
 import miniappSdk from "@farcaster/miniapp-sdk";
 import { useThemeStore } from "@/ui";
 
-interface LoginScreenProps {
-  onAuthenticated: () => void;
-}
-
-export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
+export function LoginScreen() {
   const theme = useThemeStore((s) => s.theme);
   const { ready, authenticated, login } = usePrivy();
   const { initLoginToMiniApp, loginToMiniApp } = useLoginToMiniApp();
@@ -61,13 +57,6 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
     initLoginToMiniApp,
     loginToMiniApp,
   ]);
-
-  // Once authenticated, notify parent
-  useEffect(() => {
-    if (ready && authenticated) {
-      onAuthenticated();
-    }
-  }, [ready, authenticated, onAuthenticated]);
 
   // Show loading state while Privy initializes
   if (!ready) {

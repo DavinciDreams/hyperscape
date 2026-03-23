@@ -356,10 +356,12 @@ export class PrivyAuthManager {
   }
 
   /**
-   * Restores authentication from localStorage
+   * Hydrates cached auth metadata from storage without asserting a real session.
    *
-   * Attempts to restore auth state from localStorage on page load.
-   * This allows the user to stay logged in across page refreshes.
+   * Cached tokens/user IDs are helpful for transitional UI and legacy sync paths,
+   * but the actual authenticated session must come from the Privy SDK itself.
+   * Marking the app authenticated from storage alone can leave startup stuck in an
+   * invalid "loading" state until the SDK later corrects it.
    *
    * @returns Object with restored token and userId (or null if not found)
    *
@@ -377,9 +379,8 @@ export class PrivyAuthManager {
       const userId = storage.getItem("privy_user_id");
       const fid = storage.getItem("farcaster_fid");
 
-      if (token && userId) {
+      if (token || userId || fid) {
         this.updateState({
-          isAuthenticated: true,
           privyUserId: userId,
           privyToken: token,
           farcasterFid: fid,

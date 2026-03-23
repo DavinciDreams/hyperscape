@@ -417,7 +417,6 @@ function App() {
   const appId = import.meta.env.PUBLIC_PRIVY_APP_ID || "";
   const privyEnabled = appId.length > 0 && !appId.includes("your-privy-app-id");
 
-  const [isAuthenticated, setIsAuthenticated] = React.useState(false);
   const [authState, setAuthState] = React.useState(privyAuthManager.getState());
   const [showCharacterPage, setShowCharacterPage] =
     React.useState<boolean>(privyEnabled);
@@ -533,11 +532,7 @@ function App() {
   const wsUrl: string = GAME_WS_URL || "ws://localhost:5555/ws";
   const appRef = React.useRef<HTMLDivElement>(null);
 
-  const handleAuthenticated = React.useCallback(() => {
-    setIsAuthenticated(true);
-  }, []);
-
-  const handleUsernameSelected = React.useCallback((username: string) => {
+  const handleUsernameSelected = React.useCallback((_username: string) => {
     setHasUsername(true);
     setShowCharacterPage(true);
   }, []);
@@ -572,7 +567,6 @@ function App() {
       });
 
       // Update React state
-      setIsAuthenticated(false);
       setShowCharacterPage(false);
       setHasUsername(null);
 
@@ -633,12 +627,12 @@ function App() {
   }
 
   // Show login screen if Privy enabled and not authenticated
-  if (privyEnabled && !isAuthenticated && !authState.isAuthenticated) {
+  if (privyEnabled && !authState.isAuthenticated) {
     return (
       <div ref={appRef} data-component="app-root">
         <ErrorBoundary>
           <React.Suspense fallback={<ScreenLoadingFallback />}>
-            <LoginScreen onAuthenticated={handleAuthenticated} />
+            <LoginScreen />
           </React.Suspense>
         </ErrorBoundary>
       </div>
