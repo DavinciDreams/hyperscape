@@ -359,7 +359,7 @@ export function createClientWorld() {
   // ============================================================================
   // DOCK SYSTEM
   // ============================================================================
-  // Procedural docks for ponds and lakes
+  // Procedural docks for lakes
   // TEMPORARILY DISABLED
   // world.register("docks", ProceduralDocks);
 

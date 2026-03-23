@@ -18,10 +18,10 @@ import {
   type TerrainWorkerOutput,
 } from "../../../utils/workers";
 import {
-  POND_RADIUS,
-  POND_DEPTH,
-  POND_CENTER_X,
-  POND_CENTER_Z,
+  LAKE_RADIUS,
+  LAKE_DEPTH,
+  LAKE_CENTER_X,
+  LAKE_CENTER_Z,
   LANDSCAPE_FEATURES,
   ISLAND_RADIUS,
   computeBaseHeight,
@@ -784,12 +784,11 @@ export class TerrainSystem extends System {
           z: f.z,
           radius: f.radius,
           strength: f.strength,
-          layers: f.layers,
           shapePower: f.shapePower,
-          edgeSharpness: f.edgeSharpness,
-          layerSlope: f.layerSlope,
           noiseScale: f.noiseScale,
           noiseAmount: f.noiseAmount,
+          lakes: f.lakes,
+          lakesFalloff: f.lakesFalloff,
         })),
       };
 

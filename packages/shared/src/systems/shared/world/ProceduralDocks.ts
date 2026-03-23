@@ -1,10 +1,10 @@
 /**
  * ProceduralDocks.ts - Dock Generation System
  *
- * System for generating procedural docks on water bodies (ponds, lakes).
+ * System for generating procedural docks on water bodies (lakes).
  *
  * Architecture:
- * - Detects pond shorelines using terrain height sampling
+ * - Detects lake shorelines using terrain height sampling
  * - Scores potential dock placement locations
  * - Generates dock geometry using DockGenerator
  * - Integrates with collision system for walkable surfaces
@@ -35,10 +35,10 @@ const SHORELINE_SAMPLES = 64;
 const MAX_SLOPE_FOR_DOCK = 0.4;
 const MIN_WATER_DEPTH = 1.5;
 
-/** Known pond on the island */
-const ISLAND_POND: WaterBody = {
-  id: "island-pond",
-  type: "pond",
+/** Known lake on the island */
+const ISLAND_LAKE: WaterBody = {
+  id: "island-lake",
+  type: "lake",
   center: { x: -80, z: 60 },
   radius: 50,
 };
@@ -51,7 +51,7 @@ function findShorelinePoints(
 ): ShorelinePoint[] {
   const shorelinePoints: ShorelinePoint[] = [];
 
-  // Sample points in concentric rings around the pond center
+  // Sample points in concentric rings around the lake center
   // We're looking for where terrain crosses from below to above water threshold
   const { center, radius } = waterBody;
 
@@ -62,7 +62,7 @@ function findShorelinePoints(
     const dirZ = Math.sin(angle);
 
     // Binary search along the radial line to find shoreline
-    let minDist = radius * 0.3; // Start from inner pond
+    let minDist = radius * 0.3; // Start from inner lake
     let maxDist = radius * 1.5; // Extend beyond nominal radius
     let foundShoreline = false;
 
@@ -292,8 +292,8 @@ export class ProceduralDocks extends System {
   private isTerrainReady(): boolean {
     if (!this.terrainSystem) return false;
 
-    // Test multiple points around the pond to ensure terrain is fully loaded
-    const { center, radius } = ISLAND_POND;
+    // Test multiple points around the lake to ensure terrain is fully loaded
+    const { center, radius } = ISLAND_LAKE;
     const testPoints = [
       { x: center.x, z: center.z }, // Center
       { x: center.x + radius * 0.5, z: center.z }, // East
@@ -314,7 +314,7 @@ export class ProceduralDocks extends System {
   }
 
   /**
-   * Generate docks for the island pond
+   * Generate docks for the island lake
    * Called automatically when terrain is ready
    */
   generateDocks(seed: string = "island-docks"): void {
@@ -330,10 +330,10 @@ export class ProceduralDocks extends System {
       return;
     }
 
-    console.log("[ProceduralDocks] Generating docks for island pond...");
+    console.log("[ProceduralDocks] Generating docks for island lake...");
 
-    // Generate dock for the main island pond
-    const dock = this.generateDockForWaterBody(ISLAND_POND, seed);
+    // Generate dock for the main island lake
+    const dock = this.generateDockForWaterBody(ISLAND_LAKE, seed);
 
     if (dock) {
       console.log(
@@ -431,7 +431,7 @@ export class ProceduralDocks extends System {
     // Generate the dock
     const recipe: DockRecipe = {
       ...DEFAULT_DOCK_PARAMS,
-      label: "Pond Dock",
+      label: "Lake Dock",
     };
 
     const dock = this.generator.generate(recipe, selected.point, {
@@ -558,4 +558,4 @@ export class ProceduralDocks extends System {
 }
 
 export type { ShorelinePoint, WaterBody, ItemCollisionData };
-export { ISLAND_POND, WATER_THRESHOLD, WATER_LEVEL };
+export { ISLAND_LAKE, WATER_THRESHOLD, WATER_LEVEL };

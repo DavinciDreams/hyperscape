@@ -126,10 +126,10 @@ export const FOREST_CONFIG: BiomeTerrainConfig = {
   altitudeVariation: 1.4,
   erosion: 0.6,
   erosionSoftness: 0.3,
-  rivers: 0,
+  rivers: 0.11,
   riverWidth: 0,
-  lakes: 0,
-  lakesFalloff: 0,
+  lakes: 0.34,
+  lakesFalloff: 0.27,
   heightScale: 2.8,
   powerCurve: 1.0,
   smoothLowerPlanes: 0,
@@ -236,12 +236,11 @@ export const BIOME_CONFIG = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Landscape features — mountains & ponds, independent of biomes
+// Landscape features — positioned lakes, independent of biomes
 // ---------------------------------------------------------------------------
 
 export enum LandscapeType {
-  Mountain = "mountain",
-  Pond = "pond",
+  Lake = "lake",
 }
 
 export interface LandscapeFeatureDef {
@@ -250,18 +249,13 @@ export interface LandscapeFeatureDef {
   z: number;
   radius: number;
   strength: number;
-  layers: number;
   shapePower: number;
-  edgeSharpness: number;
-  layerSlope: number;
   noiseScale: number;
   noiseAmount: number;
+  lakes: number;
+  lakesFalloff: number;
 }
 
-/**
- * Predefined landscape features — currently disabled while per-biome terrain
- * is being tuned. Re-enable by adding entries back to this array.
- */
 export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [];
 
 // ---------------------------------------------------------------------------
@@ -294,14 +288,14 @@ export const COAST_SMALL = {
 // Legacy exports — kept for backward compatibility with TerrainWorker.ts
 // ---------------------------------------------------------------------------
 
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_RADIUS = 50;
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_DEPTH = 0.55;
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_CENTER_X = -80;
-/** @deprecated Landscape features replace hardcoded pond */
-export const POND_CENTER_Z = 60;
+/** @deprecated Landscape features replace hardcoded lake */
+export const LAKE_RADIUS = 50;
+/** @deprecated Landscape features replace hardcoded lake */
+export const LAKE_DEPTH = 0.55;
+/** @deprecated Landscape features replace hardcoded lake */
+export const LAKE_CENTER_X = -80;
+/** @deprecated Landscape features replace hardcoded lake */
+export const LAKE_CENTER_Z = 60;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SINGLE SOURCE OF TRUTH — pure TypeScript functions
@@ -343,44 +337,23 @@ export function applyLandscapeFeaturesPure(
     const t = Math.max(0, 1 - dist / feat.radius);
     const envelope = Math.pow(t, feat.shapePower);
 
-    const warpScale = feat.noiseScale * 0.4;
-    const warpStr = feat.radius * feat.noiseAmount * 0.3;
-    const warpX =
-      noise.simplex2D(worldX * warpScale, worldZ * warpScale) * warpStr;
-    const warpZ =
-      noise.simplex2D(worldX * warpScale + 31.7, worldZ * warpScale + 47.3) *
-      warpStr;
+    const sx = worldX * feat.noiseScale;
+    const sz = worldZ * feat.noiseScale;
+    const n = noise.fractal2D(sx, sz, 3, 0.5, 2.0);
 
-    const sx = (worldX + warpX) * feat.noiseScale;
-    const sz = (worldZ + warpZ) * feat.noiseScale;
+    const localTerrain = -(
+      envelope * (1 - feat.noiseAmount) +
+      n * feat.noiseAmount
+    );
+    const water = mapRangeSmooth(
+      localTerrain,
+      -(1 - feat.lakes),
+      -(1 - feat.lakes) + feat.lakesFalloff,
+      1,
+      0,
+    );
 
-    const ridgeN = noise.ridgeNoise2D(sx, sz);
-    const detailN = noise.fractal2D(sx * 2.3, sz * 2.3, 3, 0.5, 2.0);
-    const mNoise = (ridgeN * 0.6 + detailN * 0.4 + 1) * 0.5;
-
-    let rawH = envelope * (1 - feat.noiseAmount + feat.noiseAmount * mNoise);
-    rawH = Math.max(0, Math.min(1, rawH));
-
-    let influence: number;
-    if (feat.layers >= 1) {
-      const stepped = Math.floor(rawH * feat.layers) / feat.layers;
-      const nextStep = Math.min(1, stepped + 1 / feat.layers);
-      const frac = (rawH - stepped) * feat.layers;
-      const blendStart = 1 - feat.edgeSharpness;
-      const edgeBlend =
-        frac <= blendStart ? 0 : (frac - blendStart) / (1 - blendStart);
-      const flatStep = stepped + edgeBlend * (nextStep - stepped);
-      const slopedStep = stepped + frac * (nextStep - stepped);
-      influence = flatStep + feat.layerSlope * (slopedStep - flatStep);
-    } else {
-      influence = rawH;
-    }
-
-    if (feat.type === LandscapeType.Pond) {
-      height -= influence * feat.strength;
-    } else {
-      height += influence * feat.strength;
-    }
+    height -= water * envelope * feat.strength;
   }
   return height;
 }
@@ -717,40 +690,14 @@ export function buildApplyLandscapeFeaturesJS(): string {
       var t = Math.max(0, 1 - dist / feat.radius);
       var envelope = Math.pow(t, feat.shapePower);
 
-      var warpScale = feat.noiseScale * 0.4;
-      var warpStr = feat.radius * feat.noiseAmount * 0.3;
-      var warpX = noise.simplex2D(worldX * warpScale, worldZ * warpScale) * warpStr;
-      var warpZ = noise.simplex2D(worldX * warpScale + 31.7, worldZ * warpScale + 47.3) * warpStr;
+      var sx = worldX * feat.noiseScale;
+      var sz = worldZ * feat.noiseScale;
+      var n = noise.fractal2D(sx, sz, 3, 0.5, 2.0);
 
-      var sx = (worldX + warpX) * feat.noiseScale;
-      var sz = (worldZ + warpZ) * feat.noiseScale;
+      var localTerrain = -(envelope * (1 - feat.noiseAmount) + n * feat.noiseAmount);
+      var water = _mapRangeSmooth(localTerrain, -(1 - feat.lakes), -(1 - feat.lakes) + feat.lakesFalloff, 1, 0);
 
-      var ridgeN = noise.ridgeNoise2D(sx, sz);
-      var detailN = noise.fractal2D(sx * 2.3, sz * 2.3, 3, 0.5, 2.0);
-      var mNoise = (ridgeN * 0.6 + detailN * 0.4 + 1) * 0.5;
-
-      var rawH = envelope * (1 - feat.noiseAmount + feat.noiseAmount * mNoise);
-      rawH = Math.max(0, Math.min(1, rawH));
-
-      var influence;
-      if (feat.layers >= 1) {
-        var stepped = Math.floor(rawH * feat.layers) / feat.layers;
-        var nextStep = Math.min(1, stepped + 1 / feat.layers);
-        var frac = (rawH - stepped) * feat.layers;
-        var blendStart = 1 - feat.edgeSharpness;
-        var edgeBlend = frac <= blendStart ? 0 : (frac - blendStart) / (1 - blendStart);
-        var flatStep = stepped + edgeBlend * (nextStep - stepped);
-        var slopedStep = stepped + frac * (nextStep - stepped);
-        influence = flatStep + feat.layerSlope * (slopedStep - flatStep);
-      } else {
-        influence = rawH;
-      }
-
-      if (feat.type === '${LandscapeType.Pond}') {
-        height -= influence * feat.strength;
-      } else {
-        height += influence * feat.strength;
-      }
+      height -= water * envelope * feat.strength;
     }
     return height;
   }`;

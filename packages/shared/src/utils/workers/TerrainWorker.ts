@@ -51,12 +51,11 @@ export interface TerrainWorkerConfig {
     z: number;
     radius: number;
     strength: number;
-    layers: number;
     shapePower: number;
-    edgeSharpness: number;
-    layerSlope: number;
     noiseScale: number;
     noiseAmount: number;
+    lakes: number;
+    lakesFalloff: number;
   }>;
 }
 
