@@ -5,6 +5,7 @@
 import React, { memo, useMemo, useCallback, useRef, useEffect } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { useTheme } from "@/ui";
+import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
 import type { ActionBarSlotContent } from "./types";
 import { getSlotIcon, SLOT_SIZE } from "./utils";
 
@@ -249,27 +250,22 @@ export const ActionBarSlot = memo(function ActionBarSlot({
     (): React.CSSProperties => ({
       width: slotSize,
       height: slotSize,
+      ...getInteractiveTileStyle(theme, {
+        active: hasActiveState && isActive,
+        hovered: isHovered,
+        dragging: isDragging,
+        disabled: isUnavailable,
+        dropTarget: isOver,
+        radius: 4,
+      }),
       background: isEmpty
-        ? theme.colors.background.primary
-        : hasActiveState && isActive
-          ? `radial-gradient(ellipse at center, ${theme.colors.accent.primary}4D 0%, ${theme.colors.background.secondary} 70%)`
-          : isOver
-            ? `linear-gradient(180deg, ${theme.colors.accent.secondary}33 0%, ${theme.colors.background.primary} 100%)`
-            : isHovered
-              ? `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.panelPrimary} 100%)`
-              : `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+        ? getPanelInsetStyle(theme, { radius: 4 }).background
+        : undefined,
       border: isEmpty
         ? `1px solid ${theme.colors.border.default}66`
         : isUnavailable
           ? `1px solid ${theme.colors.state.danger}40`
-          : hasActiveState && isActive
-            ? `1px solid ${theme.colors.accent.primary}B3`
-            : isOver
-              ? `2px solid ${theme.colors.accent.primary}B3`
-              : isHovered
-                ? `1px solid ${theme.colors.accent.primary}80`
-                : `1px solid ${theme.colors.border.default}`,
-      borderRadius: 0,
+          : undefined,
       cursor:
         isEmpty || isLocked ? "default" : isDragging ? "grabbing" : "grab",
       // RS3 behavior: dim unavailable items
@@ -279,8 +275,6 @@ export const ActionBarSlot = memo(function ActionBarSlot({
         : isDragging
           ? "scale(0.95)"
           : "scale(1)",
-      transition:
-        "transform 0.15s ease, opacity 0.15s ease, background 0.15s ease, border 0.15s ease",
       touchAction: "none",
       boxShadow:
         hasActiveState && isActive
@@ -416,21 +410,21 @@ export const RubbishBin = memo(function RubbishBin({
       style={{
         width: SLOT_SIZE,
         height: SLOT_SIZE,
-        background: isOver
-          ? `radial-gradient(ellipse at center, ${theme.colors.state.danger}4D 0%, ${theme.colors.background.panelSecondary} 70%)`
-          : isDragging
-            ? `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`
-            : `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+        ...getInteractiveTileStyle(theme, {
+          active: false,
+          hovered: isDragging,
+          dropTarget: isOver,
+          radius: 4,
+          accentColor: theme.colors.state.danger,
+        }),
         border: isOver
           ? `2px solid ${theme.colors.state.danger}B3`
           : isDragging
             ? `1px dashed ${theme.colors.state.warning}80`
             : `1px solid ${theme.colors.border.default}66`,
-        borderRadius: 0,
         cursor: "default",
         opacity: isDragging ? 1 : 0.6,
         transform: isOver ? "scale(1.1)" : "scale(1)",
-        transition: "all 0.15s ease",
         boxShadow: isOver
           ? `0 0 12px ${theme.colors.state.danger}80, inset 0 0 15px ${theme.colors.state.danger}33`
           : `inset 0 2px 4px rgba(0, 0, 0, 0.4)`,

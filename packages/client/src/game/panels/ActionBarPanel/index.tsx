@@ -19,7 +19,7 @@
 import React, { useCallback } from "react";
 import { DndContext, DragOverlay } from "@dnd-kit/core";
 import { useTheme } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
+import { getPanelInsetStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 
 // Types
 export type {
@@ -260,6 +260,7 @@ export function ActionBarPanel({
             padding: PADDING,
             justifyContent: "center",
             ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+            ...getPanelInsetStyle(theme, { emphasis: "strong", radius: 8 }),
             borderRadius: theme.borderRadius.md,
             boxShadow: `${theme.shadows.sm}, inset 0 2px 8px rgba(0, 0, 0, 0.5)`,
           }}

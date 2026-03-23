@@ -25,7 +25,11 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { useContextMenuState } from "../../hooks";
 import {
   EventType,
@@ -166,6 +170,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
   onEmbeddedClick,
   onEmbeddedContextMenu,
 }: DraggableItemProps) {
+  const theme = useThemeStore((s) => s.theme);
   // In embedded mode, disable drag-drop
   const isDragDisabled = !!embeddedMode || !item;
 
@@ -221,6 +226,19 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
   const isItemNoted = useMemo(() => {
     return isNotedItem(itemData);
   }, [itemData]);
+
+  const slotChrome = useMemo(
+    () =>
+      getInteractiveTileStyle(theme, {
+        active: isSourceItem,
+        hovered: !isEmpty && !isTargetingActive,
+        dragging: isDragging,
+        dropTarget: isOver,
+        radius: 4,
+        accentColor: theme.colors.accent.secondary,
+      }),
+    [theme, isSourceItem, isEmpty, isTargetingActive, isDragging, isOver],
+  );
 
   return (
     <button
@@ -486,11 +504,12 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
       style={{
         // Use 'size' for 2D container queries (cqw/cqh) in responsive grid
         containerType: "size",
-        opacity: isDragging ? 0.3 : 1,
         // OSRS-style targeting:
         // - Source item: WHITE border (the item being used)
         // - Valid targets: normal appearance, cursor indicates validity
         // - Invalid targets: normal appearance, cursor shows not-allowed
+        ...slotChrome,
+        opacity: isDragging ? 0.3 : slotChrome.opacity,
         borderColor: isSourceItem
           ? "rgba(255, 255, 255, 0.95)" // OSRS: White border on source item
           : isOver
@@ -501,8 +520,6 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
                 ? "rgba(140, 120, 80, 0.5)" // Subtle tan border for notes
                 : "rgba(10, 10, 12, 0.5)", // Dark border for embossed filled slots
         borderWidth: isSourceItem ? "2px" : "1px",
-        borderStyle: "solid",
-        // Embossed style: darker, inset appearance - uses theme colors
         background: isOver
           ? "rgba(242, 208, 138, 0.15)" // Gold tint when dragging over
           : isEmpty
@@ -510,7 +527,6 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             : isItemNoted
               ? "linear-gradient(180deg, rgba(215, 200, 165, 0.95) 0%, rgba(235, 225, 195, 0.95) 100%)" // Parchment - lighter at bottom for emboss
               : "var(--color-slot-filled)", // Use theme slot.filled color
-        // Embossed shadows: dark on top/left, subtle light on bottom/right
         boxShadow: isSourceItem
           ? "0 0 8px rgba(255, 255, 255, 0.6)" // OSRS: White glow on source item
           : isOver
@@ -532,6 +548,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             : isDragging
               ? "grabbing"
               : "grab",
+        borderRadius: 4,
       }}
     >
       {/* Item Icon - Centered and scaled to fit slot */}
@@ -1275,7 +1292,7 @@ export function InventoryPanel({
               // Position tooltip close to cursor (4px offset)
               left: targetHover.position.x + 4,
               top: targetHover.position.y + 4,
-              zIndex: 99999,
+              zIndex: zIndex.tooltip,
               background: "rgba(0, 0, 0, 0.85)",
               border: "1px solid rgba(180, 160, 100, 0.8)",
               borderRadius: "2px",
@@ -1300,11 +1317,10 @@ export function InventoryPanel({
       <div
         className="border rounded overflow-hidden flex-1"
         style={{
-          background: `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-          borderColor: `${theme.colors.border.default}66`,
-          borderRadius: `${theme.borderRadius.md}px`,
-          // Embossed container: dark top-left edge, subtle light bottom-right
-          boxShadow: `${theme.shadows.sm}, inset 2px 2px 4px rgba(0, 0, 0, 0.42), inset -1px -1px 3px rgba(60, 60, 68, 0.1)`,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: theme.borderRadius.md,
+          }),
           // Container query support for responsive slot sizing
           containerType: "size",
           minHeight: 0,

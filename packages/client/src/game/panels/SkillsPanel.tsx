@@ -14,7 +14,11 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { zIndex, MOBILE_SKILLS } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, Skills } from "../../types";
@@ -116,15 +120,13 @@ const DraggableSkillCard = memo(function DraggableSkillCard({
   // Memoize card style to prevent recreation on every render - compact styling
   const cardStyle = useMemo(
     (): React.CSSProperties => ({
-      background: isHovered
-        ? theme.colors.slot.hover
-        : theme.colors.slot.filled,
-      border: `1px solid ${isHovered ? theme.colors.border.hover : theme.colors.border.default}`,
-      borderRadius: "3px",
+      ...getInteractiveTileStyle(theme, {
+        hovered: isHovered,
+        radius: 4,
+      }),
       padding: isMobile ? "4px 6px" : "3px 6px",
       minHeight: isMobile ? MOBILE_SKILLS.cardHeight : 28,
       cursor: isDragging ? "grabbing" : "grab",
-      transition: "all 0.1s ease",
       display: "flex",
       alignItems: "center",
       flexDirection: "row" as const,
@@ -284,12 +286,10 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
         <div
           className="grid flex-1"
           style={{
-            background:
-              theme.name === "hyperscape"
-                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(0, 0, 0, 0.08) 100%)"
-                : "rgba(255, 255, 255, 0.02)",
-            border: `1px solid ${theme.colors.border.default}40`,
-            borderRadius: theme.borderRadius.md,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: theme.borderRadius.md,
+            }),
             padding: shouldUseMobileUI ? "4px" : "3px",
             gridTemplateColumns: shouldUseMobileUI
               ? `repeat(${MOBILE_SKILLS.columns}, 1fr)`
@@ -321,15 +321,12 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
           className="flex justify-between"
           style={{
             marginTop: shouldUseMobileUI ? "4px" : "3px",
-            background:
-              theme.name === "hyperscape"
-                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
-                : theme.colors.slot.filled,
-            border: `1px solid ${theme.colors.border.default}40`,
-            borderRadius: theme.borderRadius.md,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "normal",
+              radius: theme.borderRadius.md,
+            }),
             padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
             flexShrink: 0,
-            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
           }}
         >
           <div

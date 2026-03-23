@@ -868,6 +868,81 @@ export function getSlotStyle(
   };
 }
 
+export function getPanelInsetStyle(
+  theme: Theme,
+  options?: {
+    emphasis?: "normal" | "strong";
+    padding?: number | string;
+    radius?: number;
+  },
+): React.CSSProperties {
+  const emphasis = options?.emphasis ?? "normal";
+
+  return {
+    background:
+      theme.name === "hyperscape"
+        ? emphasis === "strong"
+          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 16%, rgba(0, 0, 0, 0.14) 100%), linear-gradient(180deg, rgba(38, 42, 52, 0.96) 0%, rgba(17, 19, 24, 0.98) 100%)"
+          : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 18%, rgba(0, 0, 0, 0.1) 100%), linear-gradient(180deg, rgba(34, 38, 46, 0.94) 0%, rgba(18, 20, 26, 0.96) 100%)"
+        : theme.colors.background.panelPrimary,
+    border: `1px solid ${emphasis === "strong" ? theme.colors.border.decorative : `${theme.colors.border.default}66`}`,
+    borderRadius: options?.radius ?? theme.borderRadius.md,
+    boxShadow:
+      emphasis === "strong"
+        ? `${theme.shadows.md}, inset 0 1px 0 rgba(255, 255, 255, 0.05), inset 0 -12px 18px rgba(0, 0, 0, 0.14)`
+        : `${theme.shadows.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -10px 16px rgba(0, 0, 0, 0.1)`,
+    padding: options?.padding,
+  };
+}
+
+export function getInteractiveTileStyle(
+  theme: Theme,
+  options?: {
+    active?: boolean;
+    hovered?: boolean;
+    dragging?: boolean;
+    disabled?: boolean;
+    dropTarget?: boolean;
+    radius?: number;
+    accentColor?: string;
+  },
+): React.CSSProperties {
+  const active = options?.active ?? false;
+  const hovered = options?.hovered ?? false;
+  const dragging = options?.dragging ?? false;
+  const disabled = options?.disabled ?? false;
+  const dropTarget = options?.dropTarget ?? false;
+  const accentColor = options?.accentColor ?? theme.colors.accent.primary;
+
+  const background = dropTarget
+    ? `linear-gradient(180deg, ${accentColor}33 0%, rgba(20, 24, 30, 0.96) 100%)`
+    : active
+      ? `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${accentColor}26 20%, rgba(18, 20, 26, 0.96) 100%)`
+      : hovered
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 20%, rgba(16, 18, 24, 0.98) 100%)"
+        : "linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.01) 18%, rgba(16, 18, 24, 0.98) 100%)";
+
+  return {
+    background,
+    border: active
+      ? `1px solid ${accentColor}B3`
+      : dropTarget
+        ? `2px solid ${accentColor}B3`
+        : hovered
+          ? `1px solid ${theme.colors.border.hover}`
+          : `1px solid ${theme.colors.border.default}80`,
+    borderRadius: options?.radius ?? theme.borderRadius.sm,
+    boxShadow: active
+      ? `0 0 14px ${accentColor}30, inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -8px 12px rgba(0, 0, 0, 0.12)`
+      : dropTarget
+        ? `0 0 12px ${accentColor}2E, inset 0 1px 0 rgba(255, 255, 255, 0.06)`
+        : "inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -8px 12px rgba(0, 0, 0, 0.12)",
+    opacity: dragging ? 0.45 : disabled ? 0.5 : 1,
+    transition:
+      "transform 0.15s ease, opacity 0.15s ease, background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease",
+  };
+}
+
 /**
  * Get status bar gradient for HP, prayer, etc.
  */

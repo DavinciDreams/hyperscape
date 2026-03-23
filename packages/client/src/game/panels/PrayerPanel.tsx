@@ -26,7 +26,11 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { zIndex, MOBILE_PRAYER } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, ClientWorld } from "../../types";
@@ -293,12 +297,13 @@ function PrayerIcon({
       width: iconSize,
       height: iconSize,
       padding: 0,
-      background: isActive
-        ? `radial-gradient(ellipse at center, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.slot.selected} 70%)`
-        : theme.colors.slot.filled,
-      border: isActive
-        ? `1px solid ${theme.colors.accent.secondary}B3`
-        : `1px solid ${theme.colors.border.default}40`,
+      ...getInteractiveTileStyle(theme, {
+        active: isActive,
+        dragging: isDragging,
+        disabled: !isUnlocked,
+        radius: isMobile ? 6 : 4,
+        accentColor: theme.colors.accent.secondary,
+      }),
       borderRadius: isMobile ? 4 : 2,
       cursor: isUnlocked ? (isDragging ? "grabbing" : "grab") : "not-allowed",
       display: "flex",
@@ -306,7 +311,6 @@ function PrayerIcon({
       justifyContent: "center",
       position: "relative",
       overflow: "hidden",
-      transition: "all 0.15s ease",
       boxShadow: isActive
         ? `0 0 ${isMobile ? 12 : 8}px ${theme.colors.accent.secondary}80, inset 0 0 ${isMobile ? 16 : 10}px ${theme.colors.accent.secondary}33`
         : "inset 0 1px 2px rgba(0, 0, 0, 0.4)",
@@ -695,13 +699,10 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
           justifyContent: "space-between",
           padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
           marginBottom: 4,
-          background:
-            theme.name === "hyperscape"
-              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.14) 100%)"
-              : theme.colors.slot.filled,
-          borderRadius: theme.borderRadius.md,
-          border: `1px solid ${theme.colors.border.default}40`,
-          boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+          ...getPanelInsetStyle(theme, {
+            emphasis: "normal",
+            radius: theme.borderRadius.md,
+          }),
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -802,12 +803,10 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               : `repeat(${gridColumns}, ${PRAYER_ICON_SIZE}px)`,
             gap: shouldUseMobileUI ? MOBILE_PRAYER.gap : PRAYER_GAP,
             padding: GRID_PADDING,
-            background:
-              theme.name === "hyperscape"
-                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(0, 0, 0, 0.08) 100%)"
-                : theme.colors.slot.empty,
-            borderRadius: theme.borderRadius.md,
-            border: `1px solid ${theme.colors.border.default}35`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: theme.borderRadius.md,
+            }),
             justifyContent: "center",
           }}
         >
@@ -835,16 +834,13 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         style={{
           marginTop: 4,
           padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
-          background:
-            theme.name === "hyperscape"
-              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
-              : theme.colors.slot.filled,
-          borderRadius: theme.borderRadius.md,
-          border: `1px solid ${theme.colors.border.default}40`,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "normal",
+            radius: theme.borderRadius.md,
+          }),
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
         }}
       >
         <span
@@ -1033,8 +1029,8 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             return (
               <div
                 ref={contextMenuRef}
-                className="fixed z-[9999]"
-                style={{ left, top }}
+                className="fixed"
+                style={{ left, top, zIndex: zIndex.contextMenu }}
               >
                 <div
                   style={{
