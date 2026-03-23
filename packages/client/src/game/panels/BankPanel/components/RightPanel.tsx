@@ -88,19 +88,19 @@ export function RightPanel({
               accentColor: theme.colors.state.success,
             }),
             boxShadow: hasItem
-              ? `0 4px 12px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 248, 236, 0.06), inset 0 -8px 14px rgba(0, 0, 0, 0.14)`
-              : "inset 0 1px 0 rgba(255, 248, 236, 0.04), inset 0 -8px 12px rgba(0, 0, 0, 0.12)",
+              ? `0 4px 12px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -8px 14px rgba(0, 0, 0, 0.14)`
+              : "inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -8px 12px rgba(0, 0, 0, 0.12)",
           }}
           onMouseEnter={(e) => {
             if (hasItem) {
               e.currentTarget.style.borderColor = theme.colors.state.success;
-              e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.08) 0%, ${theme.colors.state.success}22 18%, rgba(38, 31, 25, 0.98) 100%)`;
+              e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.state.success}1f 18%, rgba(24, 28, 34, 0.98) 100%)`;
             }
           }}
           onMouseLeave={(e) => {
             if (hasItem) {
               e.currentTarget.style.borderColor = theme.colors.border.hover;
-              e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 248, 236, 0.03) 0%, rgba(255, 244, 229, 0.012) 18%, rgba(35, 29, 24, 0.99) 100%)`;
+              e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.012) 18%, rgba(22, 26, 31, 0.99) 100%)`;
             }
           }}
           title={
@@ -311,10 +311,10 @@ export function RightPanel({
               }}
               onMouseEnter={(e) => {
                 if (coins > 0)
-                  e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.08) 0%, ${theme.colors.state.success}26 22%, rgba(20, 42, 24, 0.98) 100%)`;
+                  e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, ${theme.colors.state.success}22 22%, rgba(20, 36, 25, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.06) 0%, ${theme.colors.state.success}1c 20%, rgba(22, 36, 25, 0.98) 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, ${theme.colors.state.success}18 20%, rgba(20, 31, 24, 0.98) 100%)`;
               }}
             >
               Deposit
@@ -335,10 +335,10 @@ export function RightPanel({
                 color: theme.colors.accent.primary,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 249, 239, 0.07) 0%, ${theme.colors.accent.primary}20 20%, rgba(51, 39, 28, 0.98) 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.accent.primary}18 20%, rgba(25, 29, 35, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 250, 241, 0.06) 0%, ${theme.colors.accent.primary}18 20%, rgba(39, 33, 27, 0.98) 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, ${theme.colors.accent.primary}14 20%, rgba(22, 26, 31, 0.98) 100%)`;
               }}
             >
               Deposit Inventory
@@ -403,10 +403,10 @@ export function RightPanel({
                 color: theme.colors.accent.primary,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 249, 239, 0.07) 0%, ${theme.colors.accent.primary}20 20%, rgba(51, 39, 28, 0.98) 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.accent.primary}18 20%, rgba(25, 29, 35, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 250, 241, 0.06) 0%, ${theme.colors.accent.primary}18 20%, rgba(39, 33, 27, 0.98) 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, ${theme.colors.accent.primary}14 20%, rgba(22, 26, 31, 0.98) 100%)`;
               }}
             >
               Deposit Worn Items

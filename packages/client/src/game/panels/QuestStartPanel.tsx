@@ -70,16 +70,16 @@ export function QuestStartPanel({
         width: 10px;
       }
       .quest-parchment-scroll::-webkit-scrollbar-track {
-        background: rgba(95, 74, 50, 0.26);
+        background: rgba(36, 41, 49, 0.3);
         border-radius: 4px;
       }
       .quest-parchment-scroll::-webkit-scrollbar-thumb {
-        background: linear-gradient(to bottom, #8a6943, #644b34);
+        background: linear-gradient(to bottom, #5d6672, #434b56);
         border-radius: 4px;
-        border: 1px solid rgba(74, 58, 41, 0.28);
+        border: 1px solid rgba(56, 63, 73, 0.32);
       }
       .quest-parchment-scroll::-webkit-scrollbar-thumb:hover {
-        background: linear-gradient(to bottom, #9a7952, #73553b);
+        background: linear-gradient(to bottom, #6b7581, #4f5965);
       }
     `;
     document.head.appendChild(style);
@@ -98,7 +98,7 @@ export function QuestStartPanel({
     <div
       className="fixed inset-0 flex items-center justify-center pointer-events-auto"
       style={{
-        backgroundColor: "rgba(11, 9, 7, 0.82)",
+        backgroundColor: "rgba(7, 9, 12, 0.8)",
         zIndex: UI.Z_INDEX.MODAL,
       }}
       onMouseDown={(e) => e.stopPropagation()}
@@ -114,7 +114,7 @@ export function QuestStartPanel({
           padding: "1.5rem 2rem",
           ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
           borderRadius: theme.borderRadius.xl,
-          boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 248, 236, 0.08), inset 0 0 28px rgba(121, 86, 47, 0.12)`,
+          boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 28px rgba(92, 103, 118, 0.08)`,
           overflowY: "auto",
         }}
         onClick={(e) => e.stopPropagation()}
@@ -159,7 +159,10 @@ export function QuestStartPanel({
         >
           <h3
             className="m-0 text-lg font-bold"
-            style={{ color: theme.colors.text.primary, fontFamily: "serif" }}
+            style={{
+              color: theme.colors.text.primary,
+              fontFamily: theme.typography.fontFamily.heading,
+            }}
           >
             {questName}
           </h3>
@@ -195,7 +198,7 @@ export function QuestStartPanel({
           style={{
             width: "80%",
             height: "2px",
-            background: `linear-gradient(to right, transparent, ${theme.colors.border.decorative}, transparent)`,
+            background: `linear-gradient(to right, transparent, ${theme.colors.border.hover}, transparent)`,
           }}
         />
 
@@ -301,7 +304,7 @@ export function QuestStartPanel({
           style={{
             width: "80%",
             height: "2px",
-            background: `linear-gradient(to right, transparent, ${theme.colors.border.decorative}, transparent)`,
+            background: `linear-gradient(to right, transparent, ${theme.colors.border.hover}, transparent)`,
           }}
         />
 

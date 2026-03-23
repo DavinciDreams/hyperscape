@@ -1408,7 +1408,7 @@ export function InventoryPanel({
                     width: dragSlotSize ?? 40, // Use captured slot size, fallback to 40px
                     height: dragSlotSize ?? 40,
                     borderColor: `${theme.colors.accent.secondary}99`,
-                    background: `linear-gradient(180deg, rgba(255, 249, 239, 0.07) 0%, ${theme.colors.accent.secondary}20 22%, rgba(49, 39, 29, 0.98) 100%)`,
+                    background: `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.accent.secondary}18 22%, rgba(24, 28, 34, 0.98) 100%)`,
                     fontSize: dragSlotSize ? `${dragSlotSize * 0.4}px` : "1rem", // Scale icon with slot
                     color: theme.colors.text.accent,
                     boxShadow: theme.shadows.lg,

@@ -85,7 +85,7 @@ export function QuestCompletePanel({
     <div
       className="fixed inset-0 flex items-center justify-center pointer-events-auto"
       style={{
-        backgroundColor: "rgba(11, 9, 7, 0.82)",
+        backgroundColor: "rgba(7, 9, 12, 0.8)",
         zIndex: UI.Z_INDEX.MODAL,
       }}
       onClick={onClose}
@@ -101,7 +101,7 @@ export function QuestCompletePanel({
           padding: "2rem 2.5rem",
           ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
           borderRadius: theme.borderRadius.xl,
-          boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 248, 236, 0.08), inset 0 0 28px rgba(121, 86, 47, 0.12)`,
+          boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 28px rgba(92, 103, 118, 0.08)`,
           // Parchment texture effect via gradient
           backgroundImage: `
             linear-gradient(180deg, rgba(255, 249, 239, 0.055) 0%, rgba(0, 0, 0, 0.1) 100%),
@@ -169,7 +169,7 @@ export function QuestCompletePanel({
           style={{
             width: "60%",
             height: "2px",
-            background: `linear-gradient(to right, transparent, ${theme.colors.border.decorative}, transparent)`,
+            background: `linear-gradient(to right, transparent, ${theme.colors.border.hover}, transparent)`,
           }}
         />
 
