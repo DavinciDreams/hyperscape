@@ -3,7 +3,6 @@ import {
   CDN_URL,
   normalizeBrowserLoopbackUrl,
 } from "@/lib/api-config";
-import { resolveGameClientUiDisplay } from "@/lib/gameClientUi";
 import type { PublicRuntimeEnv, StreamingWindow } from "@/lib/streamingWindow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { THREE, createClientWorld, System } from "@hyperscape/shared";
@@ -278,6 +277,10 @@ export function GameClient({
 
     return w;
   }, []);
+  // The UI overlay container is always visible. Per-component visibility
+  // (HUD, sidebar, etc.) is controlled by the `hideUI` prop below.
+  // Component-scoped UI_UPDATE events are handled by CoreUI, Sidebar,
+  // and useInterfaceEvents — not at this level.
   // Handle window resize to update Three.js canvas
   useEffect(() => {
     const handleResize = () => {
@@ -450,7 +453,7 @@ export function GameClient({
           inset: 0;
           pointer-events: none;
           user-select: none;
-          display: ${resolveGameClientUiDisplay(ui.visible)};
+          display: block;
           overflow: hidden;
           z-index: 10;
         }
