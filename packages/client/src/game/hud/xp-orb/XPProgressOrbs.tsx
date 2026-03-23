@@ -16,6 +16,7 @@ import React, { useMemo } from "react";
 import { useThemeStore } from "@/ui";
 import { ORB_FADE_DURATION_MS } from "./useXPOrbState";
 import type { SkillWithProgress } from "./useXPOrbState";
+import { HUD_FRAME, HUD_LAYERS } from "../layout";
 
 // Animation keyframes as CSS string for injection
 const keyframesStyle = `
@@ -63,15 +64,28 @@ export function XPProgressOrbs({
     () => ({
       orbsRow: {
         position: "fixed" as const,
-        top: theme.spacing.lg,
+        top: HUD_FRAME.topCenterOffset,
         left: "50%",
         transform: "translateX(-50%)",
-        zIndex: theme.zIndex.overlay,
+        zIndex: HUD_LAYERS.floating,
         display: "flex",
         flexDirection: "row" as const,
         alignItems: "flex-start",
-        gap: theme.spacing.sm,
+        gap: theme.spacing.md,
         pointerEvents: "none" as const,
+        padding: "6px 12px",
+        borderRadius: theme.borderRadius.full,
+        background:
+          theme.name === "hyperscape"
+            ? "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.012) 28%, rgba(0,0,0,0.1) 100%), rgba(15, 18, 24, 0.44)"
+            : "transparent",
+        boxShadow:
+          theme.name === "hyperscape"
+            ? "0 8px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+            : "none",
+        backdropFilter: theme.name === "hyperscape" ? "blur(6px)" : undefined,
+        WebkitBackdropFilter:
+          theme.name === "hyperscape" ? "blur(6px)" : undefined,
       },
       singleOrbContainer: {
         display: "flex",

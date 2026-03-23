@@ -29,6 +29,7 @@ import {
   StatusOrb,
 } from "@/ui";
 import type { PlayerStats } from "../../types";
+import { HUD_FRAME, HUD_LAYERS } from "./layout";
 
 export const STATUSBAR_CONFIG_STORAGE_KEY = "statusbar-config";
 export const STATUSBAR_CONFIG_CHANGED_EVENT =
@@ -539,23 +540,26 @@ export function StatusBars({
     <div
       style={{
         position: "fixed",
-        left: position.x,
-        top: position.y,
+        left: `calc(${HUD_FRAME.left} + ${position.x}px)`,
+        top: `calc(${HUD_FRAME.top} + ${position.y}px)`,
         width: containerWidth,
         height: containerHeight,
-        zIndex: 100,
+        zIndex: HUD_LAYERS.cluster,
         display: "flex",
         flexDirection: config.displayMode === "bars" ? "column" : "row",
         alignItems: config.displayMode === "bars" ? "stretch" : "center",
         justifyContent: config.displayMode === "bars" ? "center" : "flex-start",
         gap: config.displayMode === "bars" ? 0 : compactGap,
         padding: config.displayMode === "bars" ? "4px 6px" : compactPadding,
-        background: theme.colors.slot.filled,
-        borderRadius: 0,
-        border: `1px solid ${theme.colors.border.default}30`,
+        background:
+          theme.name === "hyperscape"
+            ? "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 22%, rgba(0, 0, 0, 0.14) 100%), linear-gradient(180deg, rgba(34, 40, 48, 0.94) 0%, rgba(18, 20, 26, 0.96) 100%)"
+            : theme.colors.slot.filled,
+        borderRadius: 10,
+        border: `1px solid ${theme.colors.border.decorative}55`,
         boxShadow: isUnlocked
-          ? `0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px ${theme.colors.accent.primary}40`
-          : "0 1px 3px rgba(0,0,0,0.3)",
+          ? `${theme.shadows.md}, 0 0 0 1px ${theme.colors.accent.primary}35, inset 0 1px 0 rgba(255,255,255,0.05)`
+          : `${theme.shadows.sm}, inset 0 1px 0 rgba(255,255,255,0.04)`,
         cursor: isUnlocked ? "move" : "default",
         userSelect: "none",
         pointerEvents: "auto",

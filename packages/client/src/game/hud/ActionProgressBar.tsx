@@ -7,6 +7,7 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useThemeStore } from "@/ui";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
+import { HUD_FRAME, HUD_LAYERS } from "./layout";
 
 interface ActionProgress {
   action: string;
@@ -145,9 +146,9 @@ export function ActionProgressBar({ world }: { world: ClientWorld }) {
         position: "fixed" as const,
         left: "50%",
         transform: "translateX(-50%)",
-        bottom: "calc(15% + env(safe-area-inset-bottom))",
+        bottom: HUD_FRAME.progressBottomOffset,
         pointerEvents: "none" as const,
-        zIndex: theme.zIndex.overlay,
+        zIndex: HUD_LAYERS.cluster,
       },
       label: {
         textAlign: "center" as const,

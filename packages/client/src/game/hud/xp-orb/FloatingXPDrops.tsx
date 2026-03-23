@@ -13,20 +13,21 @@ import React, { useMemo } from "react";
 import { useThemeStore } from "@/ui";
 import { SKILL_ICONS } from "@hyperscape/shared";
 import type { GroupedXPDrop } from "./useXPOrbState";
+import { HUD_FRAME, HUD_LAYERS } from "../layout";
 
 // Animation keyframes as CSS string for injection
 const keyframesStyle = `
 @keyframes floatUpAnimation {
   0% {
-    top: 33vh;
     opacity: 1;
+    transform: translate(-50%, 132px) scale(0.98);
   }
   80% {
     opacity: 1;
   }
   100% {
-    top: 80px;
     opacity: 0;
+    transform: translate(-50%, 0) scale(1);
   }
 }
 `;
@@ -55,8 +56,9 @@ export function FloatingXPDrops({ drops }: FloatingXPDropsProps) {
       floatingXP: {
         position: "fixed" as const,
         left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 999,
+        top: HUD_FRAME.topCenterSecondaryOffset,
+        transform: "translate(-50%, 132px)",
+        zIndex: HUD_LAYERS.floating,
         pointerEvents: "none" as const,
         animation: "floatUpAnimation 1.5s ease-out forwards",
         display: "flex",
