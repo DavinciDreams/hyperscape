@@ -5,10 +5,12 @@
  */
 
 import * as tf from "@tensorflow/tfjs";
-import * as handPoseDetection from "@tensorflow-models/hand-pose-detection";
+import type {
+  HandDetector,
+  MediaPipeHandsMediaPipeModelConfig,
+} from "@tensorflow-models/hand-pose-detection";
 
 import "@tensorflow/tfjs-backend-webgpu";
-import "@mediapipe/hands";
 
 import { HAND_LANDMARKS, FINGER_JOINTS } from "../../constants";
 import { TensorFlowHand, TensorFlowKeypoint } from "../../types/service-types";
@@ -46,8 +48,11 @@ export interface FingerJoints {
   pinky: number[];
 }
 
+const MEDIAPIPE_HANDS_MODULE = "@mediapipe/hands";
+const HAND_POSE_DETECTION_MODULE = "@tensorflow-models/hand-pose-detection";
+
 export class HandPoseDetectionService {
-  private detector: handPoseDetection.HandDetector | null = null;
+  private detector: HandDetector | null = null;
   private isInitialized = false;
 
   /**
@@ -59,6 +64,11 @@ export class HandPoseDetectionService {
     console.log("🤖 Initializing hand pose detection...");
 
     try {
+      const [{ default: _unused }, handPoseDetection] = await Promise.all([
+        import(/* @vite-ignore */ MEDIAPIPE_HANDS_MODULE),
+        import(/* @vite-ignore */ HAND_POSE_DETECTION_MODULE),
+      ]);
+
       // Set WebGPU as preferred backend
       await tf.setBackend("webgpu");
       await tf.ready();
@@ -66,13 +76,12 @@ export class HandPoseDetectionService {
 
       // Create the detector with MediaPipe Hands
       const model = handPoseDetection.SupportedModels.MediaPipeHands;
-      const detectorConfig: handPoseDetection.MediaPipeHandsMediaPipeModelConfig =
-        {
-          runtime: "mediapipe",
-          solutionPath: "https://cdn.jsdelivr.net/npm/@mediapipe/hands",
-          modelType: "full",
-          maxHands: 2,
-        };
+      const detectorConfig: MediaPipeHandsMediaPipeModelConfig = {
+        runtime: "mediapipe",
+        solutionPath: "https://cdn.jsdelivr.net/npm/@mediapipe/hands",
+        modelType: "full",
+        maxHands: 2,
+      };
 
       this.detector = await handPoseDetection.createDetector(
         model,
