@@ -20,8 +20,6 @@ import { getResponsivePanelSizing } from "./DefaultLayoutFactory";
 
 /** Props for EditModeOverlayManager */
 interface EditModeOverlayManagerProps {
-  /** Current number of action bar windows */
-  actionBarCount: number;
   /** Whether multiple action bars feature is enabled */
   multipleActionBarsEnabled: boolean;
   /** Function to create a new window */
@@ -32,10 +30,16 @@ interface EditModeOverlayManagerProps {
  * Manages the edit mode overlay with action bar creation
  */
 export const EditModeOverlayManager = memo(function EditModeOverlayManager({
-  actionBarCount,
   multipleActionBarsEnabled,
   createWindow,
 }: EditModeOverlayManagerProps): React.ReactElement {
+  const actionBarCount = useWindowStore(
+    (s) =>
+      Array.from(s.windows.values()).filter(
+        (w) => w.id?.startsWith("actionbar-") && w.id?.endsWith("-window"),
+      ).length,
+  );
+
   const handleAddActionBar = useCallback(() => {
     const windows = Array.from(useWindowStore.getState().windows.values());
     const existingIds = new Set(

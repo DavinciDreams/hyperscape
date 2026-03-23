@@ -12,6 +12,7 @@ export interface EntityPip {
   groupIndex?: number;
   isLocalPlayer?: boolean;
   subType?: string;
+  lastSeenTick?: number;
 }
 
 interface MinimapEntityConfig {
@@ -83,13 +84,14 @@ export function useMinimapEntityPips({
     const entities = world.entities as EntityCollectionsLike | undefined;
     if (!entities || !isVisible) return;
 
-    let intervalId: number | null = null;
+    let frameId = 0;
+    let lastUpdateMs = 0;
     const workingPips: EntityPip[] = [];
-    const seenIds = new Set<string>();
+    let updateTick = 0;
 
     const update = () => {
+      const currentTick = ++updateTick;
       workingPips.length = 0;
-      seenIds.clear();
 
       const player = entities.player;
       let playerPipId: string | null = null;
@@ -107,15 +109,16 @@ export function useMinimapEntityPips({
             position: player.node.position,
             color: "#ffffff",
             isLocalPlayer: true,
+            lastSeenTick: currentTick,
           };
           entityCacheRef.current.set("local-player", playerPip);
         } else {
           playerPip.position = player.node.position;
           playerPip.color = "#ffffff";
           playerPip.isLocalPlayer = true;
+          playerPip.lastSeenTick = currentTick;
         }
         workingPips.push(playerPip);
-        seenIds.add("local-player");
         playerPipId = player.id;
         buildOriginX = player.node.position.x;
         buildOriginZ = player.node.position.z;
@@ -135,6 +138,7 @@ export function useMinimapEntityPips({
               ),
               color: "#ffffff",
               isLocalPlayer: true,
+              lastSeenTick: currentTick,
             };
             entityCacheRef.current.set("spectated-player", spectatedPip);
           } else {
@@ -145,9 +149,9 @@ export function useMinimapEntityPips({
             );
             spectatedPip.color = "#ffffff";
             spectatedPip.isLocalPlayer = true;
+            spectatedPip.lastSeenTick = currentTick;
           }
           workingPips.push(spectatedPip);
-          seenIds.add("spectated-player");
           playerPipId = spectatorTarget.id ?? null;
           buildOriginX = spectatorTarget.position.x;
           buildOriginZ = spectatorTarget.position.z;
@@ -175,6 +179,7 @@ export function useMinimapEntityPips({
               otherEntity.node.position.z,
             );
             playerPip.color = "#ffffff";
+            playerPip.lastSeenTick = currentTick;
           } else {
             playerPip = {
               id: otherPlayerId,
@@ -185,11 +190,11 @@ export function useMinimapEntityPips({
                 otherEntity.node.position.z,
               ),
               color: "#ffffff",
+              lastSeenTick: currentTick,
             };
             entityCacheRef.current.set(otherPlayerId, playerPip);
           }
           workingPips.push(playerPip);
-          seenIds.add(otherPlayerId);
         }
       }
 
@@ -308,6 +313,7 @@ export function useMinimapEntityPips({
             entityPip.type = type;
             entityPip.color = color;
             entityPip.subType = subType;
+            entityPip.lastSeenTick = currentTick;
           } else {
             entityPip = {
               id: entity.id,
@@ -315,16 +321,16 @@ export function useMinimapEntityPips({
               position: new THREE.Vector3(position.x, 0, position.z),
               color,
               subType,
+              lastSeenTick: currentTick,
             };
             entityCacheRef.current.set(entity.id, entityPip);
           }
           workingPips.push(entityPip);
-          seenIds.add(entity.id);
         }
       }
 
-      for (const id of entityCacheRef.current.keys()) {
-        if (!seenIds.has(id)) {
+      for (const [id, cachedPip] of entityCacheRef.current) {
+        if (cachedPip.lastSeenTick !== currentTick) {
           entityCacheRef.current.delete(id);
         }
       }
@@ -332,11 +338,21 @@ export function useMinimapEntityPips({
       entityPipsRefForRender.current = workingPips;
     };
 
+    const tick = (now: number) => {
+      if (now - lastUpdateMs >= 200) {
+        update();
+        lastUpdateMs = now;
+      }
+      frameId = requestAnimationFrame(tick);
+    };
+
     update();
-    intervalId = window.setInterval(update, 200);
+    frameId = requestAnimationFrame(tick);
 
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+      }
     };
   }, [
     entityCacheRef,

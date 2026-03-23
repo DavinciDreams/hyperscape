@@ -167,7 +167,7 @@ export function EditModeToolbar({
 
   // Preset store for quick save
   const savePreset = usePresetStore((s) => s.savePreset);
-  const presets = usePresetStore((s) => s.presets);
+  const presetCount = usePresetStore((s) => s.presets.length);
 
   // Lock/unlock all windows
   const handleLockAll = () => {
@@ -186,7 +186,7 @@ export function EditModeToolbar({
 
   // Quick save to next available slot
   const handleQuickSave = async () => {
-    const nextSlot = presets.length;
+    const nextSlot = presetCount;
     if (nextSlot < 4) {
       const windows = Array.from(useWindowStore.getState().windows.values());
       const resolution = {
@@ -284,7 +284,7 @@ export function EditModeToolbar({
             icon="💾"
             label="Quick Save"
             onClick={handleQuickSave}
-            disabled={presets.length >= 4}
+            disabled={presetCount >= 4}
           />
         </>
       )}

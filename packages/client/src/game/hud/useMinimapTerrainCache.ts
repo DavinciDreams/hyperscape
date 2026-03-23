@@ -12,6 +12,12 @@ interface BiomeDataLike {
   };
 }
 
+interface CachedBiomeColor {
+  r: number;
+  g: number;
+  b: number;
+}
+
 interface TerrainSystemLike {
   getHeightAt: (x: number, z: number) => number;
   getBiomeAtPosition?: (x: number, z: number) => string;
@@ -26,6 +32,13 @@ interface EnsureTerrainCacheArgs {
   upZ: number;
 }
 
+const DEFAULT_BIOME_COLOR: CachedBiomeColor = {
+  r: 86,
+  g: 126,
+  b: 86,
+};
+const biomeColorCache = new Map<string, CachedBiomeColor | null>();
+
 export interface MinimapTerrainCacheRefs {
   terrainOffscreenRef: MutableRefObject<OffscreenCanvas | null>;
   terrainCacheCenterRef: MutableRefObject<{ x: number; z: number }>;
@@ -37,23 +50,26 @@ function clampColorChannel(value: number): number {
   return Math.max(0, Math.min(255, value | 0));
 }
 
-function parseHexColor(
-  color: string,
-): { r: number; g: number; b: number } | null {
+function parseHexColor(color: string): CachedBiomeColor | null {
   const trimmed = color.trim();
   const hex = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
-  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
+  if (hex.length !== 6) {
+    return null;
+  }
+
+  const numeric = Number.parseInt(hex, 16);
+  if (Number.isNaN(numeric)) {
     return null;
   }
 
   return {
-    r: Number.parseInt(hex.slice(0, 2), 16),
-    g: Number.parseInt(hex.slice(2, 4), 16),
-    b: Number.parseInt(hex.slice(4, 6), 16),
+    r: (numeric >> 16) & 0xff,
+    g: (numeric >> 8) & 0xff,
+    b: numeric & 0xff,
   };
 }
 
-function numberToColor(value: number): { r: number; g: number; b: number } {
+function numberToColor(value: number): CachedBiomeColor {
   return {
     r: (value >> 16) & 0xff,
     g: (value >> 8) & 0xff,
@@ -65,22 +81,37 @@ function getBiomeBaseColor(
   terrainSystem: TerrainSystemLike,
   worldX: number,
   worldZ: number,
-): { r: number; g: number; b: number } {
+): CachedBiomeColor {
   const biomeId = terrainSystem.getBiomeAtPosition?.(worldX, worldZ);
+  if (!biomeId) {
+    return DEFAULT_BIOME_COLOR;
+  }
+
+  const cachedBiome = biomeColorCache.get(biomeId);
+  if (cachedBiome !== undefined) {
+    return cachedBiome ?? DEFAULT_BIOME_COLOR;
+  }
+
   const biomeData = biomeId ? terrainSystem.getBiomeData?.(biomeId) : null;
+  let biomeColor: CachedBiomeColor | null = null;
 
   if (biomeData?.colorScheme?.primary) {
     const parsed = parseHexColor(biomeData.colorScheme.primary);
     if (parsed) {
-      return parsed;
+      biomeColor = parsed;
     }
   }
 
   if (typeof biomeData?.color === "number") {
-    return numberToColor(biomeData.color);
+    biomeColor = numberToColor(biomeData.color);
   }
 
-  return { r: 86, g: 126, b: 86 };
+  if (!biomeColor) {
+    biomeColor = DEFAULT_BIOME_COLOR;
+  }
+
+  biomeColorCache.set(biomeId, biomeColor);
+  return biomeColor;
 }
 
 async function generateTerrainChunked(

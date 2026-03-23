@@ -218,44 +218,39 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
   // Poll terrain readiness until ready
   useEffect(() => {
     let terrainInterval: NodeJS.Timeout | null = null;
-    function startPolling() {
-      if (terrainInterval) return;
-      terrainInterval = setInterval(() => {
-        // CRITICAL: For spectators, check terrain directly without requiring local player
-        if (isSpectatorMode) {
-          const terrain = world.getSystem?.("terrain") as
-            | { isReady?: () => boolean }
-            | undefined;
-          if (terrain && terrain.isReady && terrain.isReady()) {
-            setTerrainReady(true);
-            if (terrainInterval) {
-              clearInterval(terrainInterval);
-              terrainInterval = null;
-            }
-          }
-          return;
-        }
 
-        // For normal players: require player entity before checking terrain
-        const player = world.entities?.player as
-          | { position?: { x: number; z: number } }
-          | undefined;
-        if (!player || !player.position) return;
-        const terrain = world.getSystem?.("terrain") as
-          | { isReady?: () => boolean }
-          | undefined;
-        if (terrain && terrain.isReady) {
-          if (terrain.isReady()) {
-            setTerrainReady(true);
-            if (terrainInterval) {
-              clearInterval(terrainInterval);
-              terrainInterval = null;
-            }
-          }
-        }
-      }, 100);
+    const isTerrainReady = (): boolean => {
+      const terrain = world.getSystem?.("terrain") as
+        | { isReady?: () => boolean }
+        | undefined;
+      if (!terrain?.isReady) return false;
+
+      if (isSpectatorMode) {
+        return terrain.isReady();
+      }
+
+      const player = world.entities?.player as
+        | { position?: { x: number; z: number } }
+        | undefined;
+      if (!player?.position) return false;
+
+      return terrain.isReady();
+    };
+
+    const updateTerrainReady = () => {
+      if (!isTerrainReady()) return false;
+      setTerrainReady(true);
+      return true;
+    };
+
+    if (!updateTerrainReady()) {
+      terrainInterval = setInterval(() => {
+        if (!updateTerrainReady() || !terrainInterval) return;
+        clearInterval(terrainInterval);
+        terrainInterval = null;
+      }, 250);
     }
-    startPolling();
+
     return () => {
       if (terrainInterval) clearInterval(terrainInterval);
     };

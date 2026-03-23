@@ -123,12 +123,6 @@ function DesktopInterfaceManager({
   const { loadFromStorage } = usePresetStore();
   const createWindow = useWindowStore((s) => s.createWindow);
   const windowCount = useWindowStore((s) => s.windows.size);
-  const actionBarCount = useWindowStore(
-    (s) =>
-      Array.from(s.windows.values()).filter(
-        (w) => w.id?.startsWith("actionbar-") && w.id?.endsWith("-window"),
-      ).length,
-  );
   const windowStoreUpdate = useWindowStore((s) => s.updateWindow);
   const normalizeZIndices = useWindowStore((s) => s.normalizeZIndices);
 
@@ -397,7 +391,6 @@ function DesktopInterfaceManager({
         {/* Edit mode overlay */}
         {isUnlocked && editModeEnabled && (
           <EditModeOverlayManager
-            actionBarCount={actionBarCount}
             multipleActionBarsEnabled={multipleActionBarsEnabled}
             createWindow={createWindow}
           />

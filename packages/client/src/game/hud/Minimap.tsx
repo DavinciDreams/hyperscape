@@ -109,10 +109,11 @@ function worldToPx(
   scratchVec: THREE.Vector3,
   cw: number,
   ch: number,
-): [number, number] {
+): void {
   scratchVec.set(wx, 0, wz);
   scratchVec.applyMatrix4(projectionViewMatrix);
-  return [(scratchVec.x * 0.5 + 0.5) * cw, (scratchVec.y * -0.5 + 0.5) * ch];
+  scratchVec.x = (scratchVec.x * 0.5 + 0.5) * cw;
+  scratchVec.y = (scratchVec.y * -0.5 + 0.5) * ch;
 }
 
 /**
@@ -187,7 +188,7 @@ function drawRoadsAndBuildingsOverlay(
 
       const ptsBase = _bufOffset;
       for (let ri = 0; ri < road.path.length; ri++) {
-        const [px, py] = worldToPx(
+        worldToPx(
           road.path[ri].x,
           road.path[ri].z,
           projectionViewMatrix,
@@ -195,8 +196,8 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
-        _roadPixelBuf[_bufOffset++] = px;
-        _roadPixelBuf[_bufOffset++] = py;
+        _roadPixelBuf[_bufOffset++] = scratchVec.x;
+        _roadPixelBuf[_bufOffset++] = scratchVec.y;
       }
       _projectedRoads.push({
         pts: _roadPixelBuf.subarray(ptsBase, _bufOffset),
@@ -259,7 +260,7 @@ function drawRoadsAndBuildingsOverlay(
         const sin = Math.sin(building.rotation);
 
         // Project 4 rotated corners through the camera matrix
-        const [p0x, p0y] = worldToPx(
+        worldToPx(
           bx + cos * hw - sin * hd,
           bz + sin * hw + cos * hd,
           projectionViewMatrix,
@@ -267,7 +268,10 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
-        const [p1x, p1y] = worldToPx(
+        const p0x = scratchVec.x;
+        const p0y = scratchVec.y;
+
+        worldToPx(
           bx - cos * hw - sin * hd,
           bz - sin * hw + cos * hd,
           projectionViewMatrix,
@@ -275,7 +279,10 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
-        const [p2x, p2y] = worldToPx(
+        const p1x = scratchVec.x;
+        const p1y = scratchVec.y;
+
+        worldToPx(
           bx - cos * hw + sin * hd,
           bz - sin * hw - cos * hd,
           projectionViewMatrix,
@@ -283,7 +290,10 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
-        const [p3x, p3y] = worldToPx(
+        const p2x = scratchVec.x;
+        const p2y = scratchVec.y;
+
+        worldToPx(
           bx + cos * hw + sin * hd,
           bz + sin * hw - cos * hd,
           projectionViewMatrix,
@@ -291,6 +301,8 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
+        const p3x = scratchVec.x;
+        const p3y = scratchVec.y;
 
         ctx.beginPath();
         ctx.moveTo(p0x, p0y);
@@ -1092,7 +1104,7 @@ function MinimapInner({
         if (destWorld) {
           const dx = destWorld.x - _tempTargetPos.x;
           const dz = destWorld.z - _tempTargetPos.z;
-          if (Math.hypot(dx, dz) < 0.6) {
+          if (dx * dx + dz * dz < 0.36) {
             lastDestinationWorldRef.current = null;
           }
         }
@@ -1102,7 +1114,7 @@ function MinimapInner({
         if (hw.__lastRaycastTarget) {
           const dx = hw.__lastRaycastTarget.x - _tempTargetPos.x;
           const dz = hw.__lastRaycastTarget.z - _tempTargetPos.z;
-          if (Math.hypot(dx, dz) < 0.6) delete hw.__lastRaycastTarget;
+          if (dx * dx + dz * dz < 0.36) delete hw.__lastRaycastTarget;
         }
       }
 
@@ -1264,6 +1276,8 @@ function MinimapInner({
       if (ctx) {
         const cw = overlayCanvas.width;
         const ch = overlayCanvas.height;
+        const viewportW = widthRef.current;
+        const viewportH = heightRef.current;
         ctx.clearRect(0, 0, cw, ch);
 
         // ── Roads & buildings ─────────────────────────────────────────────────
@@ -1315,16 +1329,11 @@ function MinimapInner({
             _tempProjectVec.applyMatrix4(_cachedProjectionViewMatrix);
 
             // Use refs for width/height to avoid stale closure values during resize
-            const x = (_tempProjectVec.x * 0.5 + 0.5) * widthRef.current;
-            const y = (_tempProjectVec.y * -0.5 + 0.5) * heightRef.current;
+            const x = (_tempProjectVec.x * 0.5 + 0.5) * viewportW;
+            const y = (_tempProjectVec.y * -0.5 + 0.5) * viewportH;
 
             // Only draw if within bounds (use refs for current dimensions)
-            if (
-              x >= 0 &&
-              x <= widthRef.current &&
-              y >= 0 &&
-              y <= heightRef.current
-            ) {
+            if (x >= 0 && x <= viewportW && y >= 0 && y <= viewportH) {
               // Pip radius — default 3px; player and quest are the only exceptions
               let radius = 3;
               const borderColor = "#000000";
@@ -1407,22 +1416,25 @@ function MinimapInner({
         // Draw destination like world clicks: project world target to minimap
         const lastTarget = (window as HyperscapeWindow).__lastRaycastTarget;
         const destWorldRef = lastDestinationWorldRef.current;
-        const target =
+        const hasLastTarget =
           lastTarget &&
           Number.isFinite(lastTarget.x) &&
-          Number.isFinite(lastTarget.z)
-            ? { x: lastTarget.x, z: lastTarget.z }
-            : destWorldRef
-              ? { x: destWorldRef.x, z: destWorldRef.z }
-              : null;
-        if (target && rs.hasCachedMatrix) {
+          Number.isFinite(lastTarget.z);
+        const targetX = hasLastTarget ? lastTarget.x : destWorldRef?.x;
+        const targetZ = hasLastTarget ? lastTarget.z : destWorldRef?.z;
+
+        if (
+          rs.hasCachedMatrix &&
+          targetX !== undefined &&
+          targetZ !== undefined
+        ) {
           // Reuse pre-allocated vector instead of creating new one
-          _tempDestVec.set(target.x, 0, target.z);
+          _tempDestVec.set(targetX, 0, targetZ);
           // Apply cached projection-view matrix to stay synced with throttled 3D render
           _tempDestVec.applyMatrix4(_cachedProjectionViewMatrix);
           // Use refs for width/height to avoid stale closure values during resize
-          const sx = (_tempDestVec.x * 0.5 + 0.5) * widthRef.current;
-          const sy = (_tempDestVec.y * -0.5 + 0.5) * heightRef.current;
+          const sx = (_tempDestVec.x * 0.5 + 0.5) * viewportW;
+          const sy = (_tempDestVec.y * -0.5 + 0.5) * viewportH;
           // RS3-style red flag destination marker
           drawFlag(ctx, sx, sy);
         }
