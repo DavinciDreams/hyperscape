@@ -195,7 +195,7 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
       border: `1px solid ${theme.colors.border.default}`,
       borderRadius: theme.borderRadius.md,
       padding: theme.spacing.xs,
-      zIndex: 10001,
+      zIndex: theme.zIndex.popover,
       boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
     };
 

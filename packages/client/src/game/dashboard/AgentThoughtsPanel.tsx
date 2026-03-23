@@ -50,7 +50,7 @@ const renderThoughtContent = (content: string): React.ReactNode => {
       {lines.map((line, idx) => {
         if (!line.trim()) return null;
         return (
-          <p key={idx} className="text-[11px] text-[#e8dcc8] leading-relaxed">
+          <p key={idx} className="text-[11px] text-[#ddd7ce] leading-relaxed">
             {line}
           </p>
         );
@@ -247,17 +247,17 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
   const olderThoughts = thoughts.filter((t) => t.id !== latestThinking?.id);
 
   return (
-    <div className="border-t border-[#8b4513]/40">
+    <div className="border-t border-white/10">
       {/* Header - RuneScape scroll style */}
-      <div className="flex items-center justify-between px-3 py-2 bg-gradient-to-r from-[#2a1f0f] to-[#1a150a]">
+      <div className="flex items-center justify-between px-3 py-2 bg-gradient-to-r from-[#1c2128] to-[#12161c]">
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Scroll size={16} className="text-[#c9a227]" />
+            <Scroll size={16} className="text-[#c6b18d]" />
             {isViewportActive && thoughts.length > 0 && (
               <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#4ade80] animate-pulse" />
             )}
           </div>
-          <span className="text-xs font-semibold text-[#f2d08a] tracking-wide">
+          <span className="text-xs font-semibold text-[#ddd7ce] tracking-wide">
             Agent's Mind
           </span>
           {isNewThought && (
@@ -268,21 +268,21 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
         </div>
         <button
           onClick={fetchThoughts}
-          className="p-1 rounded hover:bg-[#f2d08a]/10 transition-colors"
+          className="p-1 rounded hover:bg-white/5 transition-colors"
           title="Refresh"
         >
           <RefreshCw
             size={12}
-            className={`text-[#c9a227]/60 hover:text-[#c9a227] ${loading ? "animate-spin" : ""}`}
+            className={`text-[#c6b18d]/60 hover:text-[#ddd7ce] ${loading ? "animate-spin" : ""}`}
           />
         </button>
       </div>
 
       {/* Main Content */}
-      <div className="p-3 bg-[#0f0d08]">
+      <div className="p-3 bg-[#11151b]">
         {loading && thoughts.length === 0 ? (
           <div className="flex items-center justify-center py-4">
-            <div className="flex items-center gap-2 text-[#c9a227]/60">
+            <div className="flex items-center gap-2 text-[#c6b18d]/60">
               <Scroll size={14} className="animate-pulse" />
               <span className="text-[11px]">Reading the scrolls...</span>
             </div>
@@ -293,11 +293,11 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
           </div>
         ) : !latestThinking ? (
           <div className="text-center py-4">
-            <Scroll size={24} className="mx-auto mb-2 text-[#c9a227]/30" />
-            <p className="text-[11px] text-[#c9a227]/50">
+            <Scroll size={24} className="mx-auto mb-2 text-[#c6b18d]/30" />
+            <p className="text-[11px] text-[#c6b18d]/50">
               The mind is quiet...
             </p>
-            <p className="text-[10px] text-[#c9a227]/30 mt-1">
+            <p className="text-[10px] text-[#c6b18d]/30 mt-1">
               Thoughts will appear here
             </p>
           </div>
@@ -308,13 +308,13 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
               {/* Header */}
               <div className="flex items-center gap-1.5 mb-2">
                 <div
-                  className={`w-2 h-2 rounded-full ${isNewThought ? "bg-[#4ade80] animate-ping" : "bg-[#c9a227]/60"}`}
+                  className={`w-2 h-2 rounded-full ${isNewThought ? "bg-[#4ade80] animate-ping" : "bg-[#c6b18d]/60"}`}
                 />
-                <span className="text-[10px] font-medium text-[#c9a227] uppercase tracking-wider">
+                <span className="text-[10px] font-medium text-[#c6b18d] uppercase tracking-wider">
                   Current Thought
                 </span>
                 <DecisionPathBadge path={latestThinking.decisionPath} />
-                <span className="text-[9px] text-[#8b7355] ml-auto">
+                <span className="text-[9px] text-[#8f98a3] ml-auto">
                   {formatTimeAgo(latestThinking.timestamp)}
                 </span>
               </div>
@@ -325,14 +325,14 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
                   relative rounded border p-3 transition-all duration-300
                   ${
                     isNewThought
-                      ? "bg-[#3d2f1a] border-[#c9a227]/60 shadow-[0_0_12px_rgba(201,162,39,0.3)]"
-                      : "bg-[#1f1a10] border-[#8b4513]/40"
+                      ? "bg-[#222933] border-[#c6b18d]/45 shadow-[0_0_12px_rgba(198,177,141,0.18)]"
+                      : "bg-[#171c23] border-[#3c444f]"
                   }
                 `}
               >
                 {/* Decorative corner */}
-                <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-[#8b4513]/60 rounded-tl" />
-                <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-[#8b4513]/60 rounded-br" />
+                <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-[#57616d]/60 rounded-tl" />
+                <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-[#57616d]/60 rounded-br" />
 
                 {/* Content */}
                 <div className="px-1">
@@ -347,10 +347,10 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
 
             {/* History Section (collapsible) */}
             {olderThoughts.length > 0 && (
-              <div className="pt-2 border-t border-[#8b4513]/30">
+              <div className="pt-2 border-t border-white/8">
                 <button
                   onClick={() => setShowHistory(!showHistory)}
-                  className="flex items-center gap-1.5 text-[10px] text-[#8b7355] hover:text-[#c9a227] transition-colors w-full"
+                  className="flex items-center gap-1.5 text-[10px] text-[#8f98a3] hover:text-[#ddd7ce] transition-colors w-full"
                 >
                   <Clock size={10} />
                   <span>Past thoughts ({olderThoughts.length})</span>
@@ -369,20 +369,20 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
                     {olderThoughts.map((thought) => (
                       <div
                         key={thought.id}
-                        className="bg-[#151208] border border-[#8b4513]/20 rounded p-2"
+                        className="bg-[#13181f] border border-[#313943] rounded p-2"
                       >
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] text-[#8b7355] uppercase">
+                            <span className="text-[9px] text-[#8f98a3] uppercase">
                               {thought.type}
                             </span>
                             <DecisionPathBadge path={thought.decisionPath} />
                           </div>
-                          <span className="text-[8px] text-[#8b7355]/60">
+                          <span className="text-[8px] text-[#8f98a3]/60">
                             {formatTimeAgo(thought.timestamp)}
                           </span>
                         </div>
-                        <p className="text-[10px] text-[#c9b896]/70">
+                        <p className="text-[10px] text-[#c7cfd8]/72">
                           {cleanThoughtContent(thought.content)}
                         </p>
                         <ProviderChips

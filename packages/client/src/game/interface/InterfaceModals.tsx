@@ -13,6 +13,7 @@ import React, { memo, useMemo } from "react";
 import { EventType, getItem } from "@hyperscape/shared";
 import type { PlayerStats, PlayerID, StakedItem } from "@hyperscape/shared";
 import { ModalWindow, useThemeStore } from "@/ui";
+import { UI } from "@/ui/core";
 import {
   getPanelHeaderStyle,
   getPanelSurfaceStyle,
@@ -211,7 +212,7 @@ export function FullscreenWorldMap({
         left: 0,
         right: 0,
         bottom: 0,
-        zIndex: 10000,
+        zIndex: UI.Z_INDEX.MODAL,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
