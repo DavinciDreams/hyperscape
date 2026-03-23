@@ -60,7 +60,13 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
   })();
 
   // Presentation gating flags
-  const [playerReady, setPlayerReady] = useState(() => !!world.entities.player);
+  const [playerReady, setPlayerReady] = useState(() =>
+    isSpectatorMode
+      ? false
+      : Boolean(
+          (world.entities.player as { avatar?: unknown } | undefined)?.avatar,
+        ),
+  );
   const [physReady, setPhysReady] = useState(false);
   const [terrainReady, setTerrainReady] = useState(false);
   const [player, setPlayer] = useState(() => world.entities.player);
@@ -113,7 +119,9 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
         const playerEntity = world.entities?.player;
         if (playerEntity) {
           setPlayer(playerEntity);
-          setPlayerReady(true);
+          if ((playerEntity as { avatar?: unknown }).avatar) {
+            setPlayerReady(true);
+          }
         }
       }
     };
@@ -129,8 +137,17 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
           setTargetAvatarLoaded(true);
         }
       } else {
-        // For normal players: any avatar complete means player is ready
-        setPlayerReady(true);
+        const localPlayer = world.entities?.player as
+          | { id?: string; avatar?: unknown }
+          | undefined;
+        if (
+          data.success &&
+          localPlayer?.id &&
+          data.playerId === localPlayer.id
+        ) {
+          setPlayer(localPlayer as typeof world.entities.player);
+          setPlayerReady(true);
+        }
       }
     };
 

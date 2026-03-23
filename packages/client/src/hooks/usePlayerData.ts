@@ -275,6 +275,19 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
             : (newData as PlayerStats);
           return arePlayerStatsEqual(prev, merged) ? prev : merged;
         });
+        return;
+      }
+
+      if (data.component === "equipment" && isObject(data.data)) {
+        const equipmentPayload = data.data as { equipment?: RawEquipmentData };
+        if (!equipmentPayload.equipment) {
+          return;
+        }
+
+        const nextEquipment = processRawEquipment(equipmentPayload.equipment);
+        setEquipment((prev) =>
+          areEquipmentItemsEqual(prev, nextEquipment) ? prev : nextEquipment,
+        );
       }
     };
 

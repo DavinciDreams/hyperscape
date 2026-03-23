@@ -9,7 +9,7 @@
  * @packageDocumentation
  */
 
-import React, { useMemo } from "react";
+import React, { memo, useMemo } from "react";
 import { EventType, getItem } from "@hyperscape/shared";
 import type { PlayerStats, PlayerID, StakedItem } from "@hyperscape/shared";
 import { ModalWindow, useThemeStore } from "@/ui";
@@ -710,7 +710,7 @@ export interface InterfaceModalsRendererProps {
  * This component renders all modal panels based on their visibility state.
  * It is extracted from InterfaceManager to reduce file size.
  */
-export function InterfaceModalsRenderer({
+export const InterfaceModalsRenderer = memo(function InterfaceModalsRenderer({
   world,
   inventory,
   equipment,
@@ -760,6 +760,15 @@ export function InterfaceModalsRenderer({
   const opponentStakeValue = useMemo(
     () => duelData?.opponentStakes.reduce((sum, s) => sum + s.value, 0) ?? 0,
     [duelData?.opponentStakes],
+  );
+  const compactInventory = useMemo(
+    () =>
+      inventory.map((item) => ({
+        slot: item.slot,
+        itemId: item.itemId,
+        quantity: item.quantity,
+      })),
+    [inventory],
   );
 
   return (
@@ -1061,11 +1070,7 @@ export function InterfaceModalsRenderer({
             opponentStakeValue,
             opponentModifiedStakes: duelData.opponentModifiedStakes,
           }}
-          inventory={inventory.map((item) => ({
-            slot: item.slot,
-            itemId: item.itemId,
-            quantity: item.quantity,
-          }))}
+          inventory={compactInventory}
           onToggleRule={(rule) => {
             world?.network?.send?.("duel:toggle:rule", {
               duelId: duelData.duelId,
@@ -1135,11 +1140,7 @@ export function InterfaceModalsRenderer({
             theirOfferValue: tradeData.theirOfferValue,
             partnerFreeSlots: tradeData.partnerFreeSlots,
           }}
-          inventory={inventory.map((item) => ({
-            slot: item.slot,
-            itemId: item.itemId,
-            quantity: item.quantity,
-          }))}
+          inventory={compactInventory}
           onAddItem={(slot, qty) =>
             world?.network?.send?.("tradeAddItem", {
               tradeId: tradeData.tradeId,
@@ -1185,4 +1186,4 @@ export function InterfaceModalsRenderer({
       )}
     </>
   );
-}
+});
