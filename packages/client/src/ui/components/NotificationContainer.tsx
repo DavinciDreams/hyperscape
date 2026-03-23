@@ -21,6 +21,7 @@ import {
   type Notification,
   type NotificationType,
 } from "../stores/notificationStore";
+import { UI } from "../../constants/ui";
 
 /** Type-based colors */
 const TYPE_COLORS: Record<
@@ -174,9 +175,9 @@ export function NotificationContainer(): React.ReactElement | null {
       aria-label="Notifications"
       style={{
         position: "fixed",
-        top: 16,
-        right: 16,
-        zIndex: 10001,
+        top: `calc(${UI.SAFE_AREAS.TOP} + 16px)`,
+        right: `calc(${UI.SAFE_AREAS.RIGHT} + 16px)`,
+        zIndex: UI.Z_INDEX.TOOLTIP,
         display: "flex",
         flexDirection: "column",
         gap: 8,

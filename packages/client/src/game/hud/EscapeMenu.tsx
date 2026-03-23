@@ -12,6 +12,8 @@ import { createPortal } from "react-dom";
 import { useThemeStore } from "@/ui";
 import { usePrivy } from "@privy-io/react-auth";
 import type { ClientWorld } from "../../types";
+import { UI } from "../../constants/ui";
+import { zIndex } from "../../constants/tokens";
 import {
   Settings,
   LogOut,
@@ -203,8 +205,12 @@ export function EscapeMenu({ world }: EscapeMenuProps) {
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      zIndex: 100000,
+      zIndex: zIndex.critical,
       animation: "fadeIn 0.15s ease",
+      paddingTop: `calc(${UI.SAFE_AREAS.TOP} + 16px)`,
+      paddingRight: `calc(${UI.SAFE_AREAS.RIGHT} + 16px)`,
+      paddingBottom: `calc(${UI.SAFE_AREAS.BOTTOM} + 16px)`,
+      paddingLeft: `calc(${UI.SAFE_AREAS.LEFT} + 16px)`,
     }),
     [],
   );

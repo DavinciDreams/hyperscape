@@ -48,6 +48,7 @@ import { dispatchInventoryAction } from "../systems/InventoryActionDispatcher";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { CoinAmountModal } from "./BankPanel/components/modals/CoinAmountModal";
 import { CoinPouch } from "./inventory";
+import { zIndex } from "../../constants/tokens";
 
 /**
  * Maximum inventory slots (OSRS-style: 28 slots)
@@ -681,7 +682,7 @@ function renderItemHoverTooltip(
         position: "fixed",
         left,
         top,
-        zIndex: 99999,
+        zIndex: zIndex.tooltip,
         background: `linear-gradient(135deg, ${theme.colors.background.primary} 0%, ${theme.colors.background.secondary} 100%)`,
         border: `2px solid ${theme.colors.accent.secondary}80`,
         borderRadius: "4px",

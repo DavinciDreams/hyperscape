@@ -326,11 +326,11 @@ export const baseTheme: Theme = {
     base: 0,
     dropdown: 100,
     sticky: 200,
-    window: 1000,
-    overlay: 2000,
-    modal: 3000,
-    popover: 4000,
-    tooltip: 9999,
+    window: 400,
+    overlay: 800,
+    modal: 1000,
+    popover: 1300,
+    tooltip: 1100,
   },
 
   transitions: {
@@ -493,11 +493,11 @@ export const hyperscapeTheme: Theme = {
     base: 0,
     dropdown: 100,
     sticky: 200,
-    window: 1000,
-    overlay: 2000,
-    modal: 3000,
-    popover: 4000,
-    tooltip: 9999,
+    window: 400,
+    overlay: 800,
+    modal: 1000,
+    popover: 1300,
+    tooltip: 1100,
   },
 
   transitions: {
