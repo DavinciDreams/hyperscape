@@ -9,6 +9,11 @@
 
 import React, { useEffect, useState } from "react";
 import { useThemeStore } from "@/ui";
+import { UI } from "@/ui/core";
+import {
+  getInteractiveTileStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import type { ClientWorld } from "@/types";
 
 /**
@@ -115,13 +120,16 @@ export function DeathScreen({
 
   return (
     <div
-      className="absolute inset-0 flex items-center justify-center pointer-events-auto z-[10000]"
-      style={{ backgroundColor: theme.colors.background.overlay }}
+      className="absolute inset-0 flex items-center justify-center pointer-events-auto"
+      style={{
+        backgroundColor: theme.colors.background.overlay,
+        zIndex: UI.Z_INDEX.CRITICAL,
+      }}
     >
       <div
         className="flex flex-col items-center gap-6 max-w-md p-8 rounded-2xl backdrop-blur-md"
         style={{
-          backgroundColor: theme.colors.background.secondary,
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
           border: `2px solid ${theme.colors.state.danger}`,
         }}
       >
@@ -151,12 +159,12 @@ export function DeathScreen({
             disabled={isRespawning}
             className="px-8 py-3 text-lg font-bold rounded-lg transition-colors border-2"
             style={{
-              backgroundColor: isRespawning
-                ? theme.colors.text.disabled
-                : theme.colors.state.info,
-              borderColor: isRespawning
-                ? theme.colors.text.disabled
-                : theme.colors.state.info,
+              ...getInteractiveTileStyle(theme, {
+                active: !isRespawning,
+                disabled: isRespawning,
+                accentColor: theme.colors.state.info,
+                radius: theme.borderRadius.lg,
+              }),
               color: theme.colors.text.primary,
               cursor: isRespawning ? "not-allowed" : "pointer",
               opacity: isRespawning ? 0.6 : 1,

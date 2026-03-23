@@ -9,10 +9,12 @@ import { EventType, generateTransactionId, getItem } from "@hyperscape/shared";
 import { ErrorBoundary } from "../../lib/ErrorBoundary";
 import { useThemeStore } from "@/ui";
 import {
+  getInteractiveTileStyle,
   getPanelHeaderStyle,
   getPanelSurfaceStyle,
   getShellControlButtonStyle,
 } from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 
 // Timeout for pending loot transactions (3 seconds for better UX)
 const LOOT_TRANSACTION_TIMEOUT_MS = 3000;
@@ -436,8 +438,9 @@ function LootWindowPanelContent({
 
   return (
     <div
-      className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[1000] pointer-events-auto"
+      className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-auto"
       style={{
+        zIndex: UI.Z_INDEX.MODAL,
         width: "32rem",
         ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
         borderRadius: theme.borderRadius.xl,
@@ -466,7 +469,11 @@ function LootWindowPanelContent({
             onClick={handleTakeAll}
             className="border-none rounded text-white py-1.5 px-3 cursor-pointer text-sm transition-colors"
             style={{
-              background: `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
+              ...getInteractiveTileStyle(theme, {
+                active: true,
+                accentColor: theme.colors.state.success,
+                radius: theme.borderRadius.md,
+              }),
               color: theme.colors.text.primary,
             }}
             disabled={items.length === 0}
@@ -503,11 +510,10 @@ function LootWindowPanelContent({
                 key={`${item.id}-${index}`}
                 className="rounded p-2 cursor-pointer transition-all"
                 style={{
-                  background:
-                    theme.name === "hyperscape"
-                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.16) 100%)"
-                      : theme.colors.background.panelSecondary,
-                  border: `1px solid ${theme.colors.border.default}30`,
+                  ...getInteractiveTileStyle(theme, {
+                    radius: theme.borderRadius.md,
+                    accentColor: theme.colors.accent.primary,
+                  }),
                 }}
                 onClick={() => handleTakeItem(item, index)}
                 title={`Click to take ${displayName} (${item.quantity})`}

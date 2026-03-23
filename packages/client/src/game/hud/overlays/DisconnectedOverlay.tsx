@@ -10,6 +10,11 @@
 import React, { useEffect, useState } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { useThemeStore } from "@/ui";
+import { UI } from "@/ui/core";
+import {
+  getInteractiveTileStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 
 /**
  * Disconnected overlay component
@@ -46,7 +51,10 @@ export function Disconnected(): React.ReactElement {
 
   return (
     <>
-      <div className="fixed top-0 left-0 w-full h-full backdrop-grayscale pointer-events-none z-[9999] opacity-0 animate-[fadeIn_3s_ease-in-out_forwards]" />
+      <div
+        className="fixed top-0 left-0 w-full h-full backdrop-grayscale pointer-events-none opacity-0 animate-[fadeIn_3s_ease-in-out_forwards]"
+        style={{ zIndex: UI.Z_INDEX.CRITICAL }}
+      />
       <style>{`
         @keyframes fadeIn {
           from { opacity: 0; }
@@ -60,10 +68,10 @@ export function Disconnected(): React.ReactElement {
       <div
         className="pointer-events-auto absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 backdrop-blur-md rounded-2xl p-4 flex flex-col items-center gap-3"
         style={{
-          backgroundColor: theme.colors.background.secondary,
-          border: `1px solid ${theme.colors.border.default}`,
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
           color: theme.colors.text.primary,
           minWidth: "240px",
+          zIndex: UI.Z_INDEX.CRITICAL,
         }}
       >
         <div className="flex items-center gap-2">
@@ -88,8 +96,13 @@ export function Disconnected(): React.ReactElement {
               <button
                 className="px-3 py-1.5 rounded-lg flex items-center gap-2 cursor-pointer transition-colors"
                 style={{
-                  backgroundColor:
-                    theme.colors.accent?.primary || theme.colors.border.default,
+                  ...getInteractiveTileStyle(theme, {
+                    active: true,
+                    accentColor:
+                      theme.colors.accent?.primary ||
+                      theme.colors.border.default,
+                    radius: theme.borderRadius.lg,
+                  }),
                   color: theme.colors.text.primary,
                 }}
                 onClick={handleManualReconnect}
@@ -100,8 +113,9 @@ export function Disconnected(): React.ReactElement {
               <button
                 className="px-3 py-1.5 rounded-lg cursor-pointer transition-opacity hover:opacity-80"
                 style={{
-                  backgroundColor: "transparent",
-                  border: `1px solid ${theme.colors.border.default}`,
+                  ...getInteractiveTileStyle(theme, {
+                    radius: theme.borderRadius.lg,
+                  }),
                   color: theme.colors.text.secondary,
                 }}
                 onClick={handleCancelAutoReconnect}
@@ -116,8 +130,12 @@ export function Disconnected(): React.ReactElement {
             <button
               className="px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer transition-colors"
               style={{
-                backgroundColor:
-                  theme.colors.accent?.primary || theme.colors.border.default,
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  accentColor:
+                    theme.colors.accent?.primary || theme.colors.border.default,
+                  radius: theme.borderRadius.lg,
+                }),
                 color: theme.colors.text.primary,
               }}
               onClick={handleManualReconnect}

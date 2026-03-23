@@ -5,6 +5,8 @@
 import React, { memo, useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/ui";
+import { UI } from "@/ui/core";
+import { getPanelInsetStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { CONTEXT_MENU_COLORS } from "@hyperscape/shared";
 import type {
   ActionBarSlotContent,
@@ -227,18 +229,18 @@ export const ContextMenuPortal = memo(function ContextMenuPortal({
   return (
     <div
       ref={menuRef}
-      className="fixed z-[9999]"
+      className="fixed"
       style={{
         left: position.left,
         top: position.top,
+        zIndex: UI.Z_INDEX.CONTEXT_MENU,
         opacity: isPositioned ? 1 : 0,
         visibility: isPositioned ? "visible" : "hidden",
       }}
     >
       <div
         style={{
-          background: theme.colors.background.panelSecondary,
-          border: `1px solid ${theme.colors.border.default}`,
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
           borderRadius: 0,
           boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
           overflow: "hidden",
@@ -251,9 +253,11 @@ export const ContextMenuPortal = memo(function ContextMenuPortal({
             onClick={() => onItemClick(menuItem)}
             className="w-full text-left transition-colors duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/60"
             style={{
-              padding: "4px 8px",
+              ...getPanelInsetStyle(theme, {
+                radius: 0,
+                padding: "4px 8px",
+              }),
               fontSize: 10,
-              background: "transparent",
               border: "none",
               cursor: "pointer",
               borderTop:
