@@ -153,7 +153,6 @@ export const Window = memo(function Window({
 
   // Get viewport restriction settings from edit store
   const restrictToViewport = useEditStore((s) => s.restrictToViewport);
-  const viewportEdgeMargin = useEditStore((s) => s.viewportEdgeMargin);
   const gridSize = useEditStore((s) => s.gridSize);
 
   // Get guide state setters from edit store
@@ -196,7 +195,7 @@ export const Window = memo(function Window({
     }
 
     return modifiers.length > 0 ? composeWindowModifiers(modifiers) : null;
-  }, [snapEnabled, gridSize, restrictToViewport, viewportEdgeMargin]);
+  }, [snapEnabled, gridSize, restrictToViewport]);
 
   // Ref to capture position at drag start (avoids closure issues)
   const dragStartPositionRef = useRef({ x: 0, y: 0 });

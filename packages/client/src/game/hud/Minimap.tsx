@@ -914,6 +914,7 @@ function MinimapInner({
     w: number;
     h: number;
   } | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
   // Tracks the latest clamped size so handleUp always reads the post-drag value,
   // not the stale closure-captured size from when the pointerdown fired.
   const latestSizeRef = useRef({ w: initialWidth, h: initialHeight });
@@ -1018,6 +1019,8 @@ function MinimapInner({
       entityCacheRef.current.clear();
       // Clear icon flyweight cache so OffscreenCanvas objects can be GC'd
       _iconCache.clear();
+      // Remove any dangling resize listeners if unmounted mid-drag
+      resizeCleanupRef.current?.();
     };
   }, [clearTerrainCache]);
 
@@ -1642,17 +1645,23 @@ function MinimapInner({
         latestSizeRef.current = { w: clampedW, h: clampedH };
       };
 
+      const cleanupResize = () => {
+        window.removeEventListener("pointermove", handleMove);
+        window.removeEventListener("pointerup", handleUp);
+        resizeCleanupRef.current = null;
+      };
+
       const handleUp = () => {
         setIsResizing(false);
         resizeStartRef.current = null;
         // Read from ref — immune to stale closure over currentWidth/currentHeight
         onSizeChange?.(latestSizeRef.current.w, latestSizeRef.current.h);
-        window.removeEventListener("pointermove", handleMove);
-        window.removeEventListener("pointerup", handleUp);
+        cleanupResize();
       };
 
       window.addEventListener("pointermove", handleMove);
       window.addEventListener("pointerup", handleUp);
+      resizeCleanupRef.current = cleanupResize;
     },
     [resizable, width, height, minSize, maxSize, onSizeChange],
   );

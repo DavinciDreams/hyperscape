@@ -31,6 +31,8 @@ import {
 } from "../theme/themes";
 import { useTheme } from "../stores/themeStore";
 
+let _modalOverflowCount = 0;
+
 const FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
   "[href]",
@@ -216,13 +218,19 @@ export const ModalWindow = memo(function ModalWindow({
     [closeOnBackdropClick, onClose],
   );
 
-  // Prevent body scroll when modal is open
+  // Prevent body scroll when modal is open (ref-counted for stacked modals)
   useEffect(() => {
     if (visible) {
-      const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
+      _modalOverflowCount += 1;
+      if (_modalOverflowCount === 1) {
+        document.body.style.overflow = "hidden";
+      }
       return () => {
-        document.body.style.overflow = originalOverflow;
+        _modalOverflowCount -= 1;
+        if (_modalOverflowCount <= 0) {
+          _modalOverflowCount = 0;
+          document.body.style.overflow = "";
+        }
       };
     }
   }, [visible]);

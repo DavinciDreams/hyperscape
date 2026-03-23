@@ -39,15 +39,20 @@ export function LoginScreen() {
     if (ready && !authenticated && isFarcasterContext && !isLoggingIn) {
       const autoLogin = async () => {
         setIsLoggingIn(true);
-        // Initialize a new login attempt to get a nonce
-        const { nonce } = await initLoginToMiniApp();
-        // Request a signature from Farcaster
-        const result = await miniappSdk.actions.signIn({ nonce });
-        // Send the signature to Privy for authentication
-        await loginToMiniApp({
-          message: result.message,
-          signature: result.signature,
-        });
+        try {
+          // Initialize a new login attempt to get a nonce
+          const { nonce } = await initLoginToMiniApp();
+          // Request a signature from Farcaster
+          const result = await miniappSdk.actions.signIn({ nonce });
+          // Send the signature to Privy for authentication
+          await loginToMiniApp({
+            message: result.message,
+            signature: result.signature,
+          });
+        } catch (err: unknown) {
+          console.error("[LoginScreen] Farcaster auto-login failed:", err);
+          setIsLoggingIn(false);
+        }
       };
 
       autoLogin();
