@@ -18,6 +18,7 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useId,
   useRef,
   type ReactNode,
   type CSSProperties,
@@ -28,6 +29,29 @@ import {
   getShellControlButtonStyle,
 } from "../theme/themes";
 import { useTheme } from "../stores/themeStore";
+
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter((element) => {
+    if (element.hasAttribute("disabled")) {
+      return false;
+    }
+    if (element.getAttribute("aria-hidden") === "true") {
+      return false;
+    }
+    return element.offsetParent !== null;
+  });
+}
 
 /** Modal window props */
 export interface ModalWindowProps {
@@ -97,24 +121,86 @@ export const ModalWindow = memo(function ModalWindow({
 }: ModalWindowProps): React.ReactElement | null {
   const theme = useTheme();
   const modalRef = useRef<HTMLDivElement>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
   const reduceMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-  // Handle escape key
   useEffect(() => {
-    if (!visible || !closeOnEscape) return;
+    if (!visible) {
+      return;
+    }
+
+    previousActiveElementRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const container = modalRef.current;
+    if (!container) {
+      return;
+    }
+
+    const focusableElements = getFocusableElements(container);
+    const initialFocusTarget = focusableElements[0] ?? container;
+    initialFocusTarget.focus();
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && closeOnEscape) {
         e.preventDefault();
         e.stopPropagation();
         onClose();
+        return;
+      }
+
+      if (e.key !== "Tab") {
+        return;
+      }
+
+      const liveContainer = modalRef.current;
+      if (!liveContainer) {
+        return;
+      }
+
+      const liveFocusableElements = getFocusableElements(liveContainer);
+      if (liveFocusableElements.length === 0) {
+        e.preventDefault();
+        liveContainer.focus();
+        return;
+      }
+
+      const firstElement = liveFocusableElements[0];
+      const lastElement =
+        liveFocusableElements[liveFocusableElements.length - 1];
+      const activeElement =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+
+      if (!activeElement || !liveContainer.contains(activeElement)) {
+        e.preventDefault();
+        firstElement.focus();
+        return;
+      }
+
+      if (e.shiftKey && activeElement === firstElement) {
+        e.preventDefault();
+        lastElement.focus();
+      } else if (!e.shiftKey && activeElement === lastElement) {
+        e.preventDefault();
+        firstElement.focus();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      const previousActiveElement = previousActiveElementRef.current;
+      if (previousActiveElement?.isConnected) {
+        previousActiveElement.focus();
+      }
+    };
   }, [visible, closeOnEscape, onClose]);
 
   // Handle backdrop click
@@ -135,13 +221,6 @@ export const ModalWindow = memo(function ModalWindow({
       return () => {
         document.body.style.overflow = originalOverflow;
       };
-    }
-  }, [visible]);
-
-  // Focus trap - focus modal when opened
-  useEffect(() => {
-    if (visible && modalRef.current) {
-      modalRef.current.focus();
     }
   }, [visible]);
 
@@ -280,7 +359,7 @@ export const ModalWindow = memo(function ModalWindow({
           className={className}
           role="dialog"
           aria-modal="true"
-          aria-label={title}
+          aria-labelledby={titleId}
           tabIndex={-1}
           onMouseDown={(e) => {
             (e.nativeEvent as PointerEvent & { isCoreUI?: boolean }).isCoreUI =
@@ -297,7 +376,7 @@ export const ModalWindow = memo(function ModalWindow({
         >
           {/* Header */}
           <div style={headerStyle}>
-            <h2 id="modal-title" style={titleStyle}>
+            <h2 id={titleId} style={titleStyle}>
               {title}
             </h2>
             {showCloseButton && (

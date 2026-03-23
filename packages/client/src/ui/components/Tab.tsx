@@ -33,6 +33,14 @@ import { useTheme } from "../stores/themeStore";
 import { getShellControlButtonStyle, getTabStyle } from "../theme/themes";
 import type { TabProps } from "../types";
 
+type TabNavigationDirection = "previous" | "next" | "first" | "last";
+
+interface SharedShellTabProps extends TabProps {
+  tabId?: string;
+  panelId?: string;
+  onNavigate?: (direction: TabNavigationDirection) => void;
+}
+
 /** Map icon identifiers to Lucide components */
 const LUCIDE_ICON_MAP: Record<string, LucideIcon> = {
   // Panel icons
@@ -77,11 +85,14 @@ const LUCIDE_ICON_MAP: Record<string, LucideIcon> = {
 export const Tab = memo(function Tab({
   tab,
   isActive,
+  tabId,
+  panelId,
   onActivate,
+  onNavigate,
   onClose,
   className,
   style,
-}: TabProps): React.ReactElement {
+}: SharedShellTabProps): React.ReactElement {
   const theme = useTheme();
   const { isUnlocked } = useEditMode();
 
@@ -168,6 +179,26 @@ export const Tab = memo(function Tab({
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onActivate();
+          return;
+        }
+        if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+          e.preventDefault();
+          onNavigate?.("previous");
+          return;
+        }
+        if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+          e.preventDefault();
+          onNavigate?.("next");
+          return;
+        }
+        if (e.key === "Home") {
+          e.preventDefault();
+          onNavigate?.("first");
+          return;
+        }
+        if (e.key === "End") {
+          e.preventDefault();
+          onNavigate?.("last");
         }
       }}
       onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
@@ -195,9 +226,11 @@ export const Tab = memo(function Tab({
           : "none";
       }}
       {...(isUnlocked ? { onPointerDown: dragHandleProps.onPointerDown } : {})}
+      id={tabId}
       role="tab"
       tabIndex={isActive ? 0 : -1}
       aria-selected={isActive}
+      aria-controls={panelId}
       aria-label={tab.label}
       title={tab.label}
     >

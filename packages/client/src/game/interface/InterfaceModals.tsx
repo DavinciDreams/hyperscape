@@ -56,6 +56,29 @@ import { TradePanel } from "../panels/TradePanel";
 import { Minimap } from "../hud/Minimap";
 import { MinimapOverlayControls } from "../hud/MinimapOverlayControls";
 
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter((element) => {
+    if (element.hasAttribute("disabled")) {
+      return false;
+    }
+    if (element.getAttribute("aria-hidden") === "true") {
+      return false;
+    }
+    return element.offsetParent !== null;
+  });
+}
+
 /**
  * FullscreenWorldMap - RuneScape-style fullscreen world map overlay
  *
@@ -76,6 +99,9 @@ export function FullscreenWorldMap({
 }): React.ReactElement {
   const theme = useThemeStore((s) => s.theme);
   const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
+  const modalRef = React.useRef<HTMLDivElement>(null);
+  const previousActiveElementRef = React.useRef<HTMLElement | null>(null);
+  const titleId = React.useId();
 
   // Get player position for header display
   const player = world?.getPlayer?.();
@@ -89,16 +115,75 @@ export function FullscreenWorldMap({
 
   // Handle ESC key to close
   React.useEffect(() => {
+    previousActiveElementRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const container = modalRef.current;
+    if (!container) {
+      return;
+    }
+
+    const focusableElements = getFocusableElements(container);
+    const initialFocusTarget = focusableElements[0] ?? container;
+    initialFocusTarget.focus();
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         onClose();
+        return;
+      }
+
+      if (e.key !== "Tab") {
+        return;
+      }
+
+      const liveContainer = modalRef.current;
+      if (!liveContainer) {
+        return;
+      }
+
+      const liveFocusableElements = getFocusableElements(liveContainer);
+      if (liveFocusableElements.length === 0) {
+        e.preventDefault();
+        liveContainer.focus();
+        return;
+      }
+
+      const firstElement = liveFocusableElements[0];
+      const lastElement =
+        liveFocusableElements[liveFocusableElements.length - 1];
+      const activeElement =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+
+      if (!activeElement || !liveContainer.contains(activeElement)) {
+        e.preventDefault();
+        firstElement.focus();
+        return;
+      }
+
+      if (e.shiftKey && activeElement === firstElement) {
+        e.preventDefault();
+        lastElement.focus();
+      } else if (!e.shiftKey && activeElement === lastElement) {
+        e.preventDefault();
+        firstElement.focus();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      const previousActiveElement = previousActiveElementRef.current;
+      if (previousActiveElement?.isConnected) {
+        previousActiveElement.focus();
+      }
+    };
   }, [onClose]);
 
   // Update map dimensions on window resize
@@ -118,6 +203,7 @@ export function FullscreenWorldMap({
     <div
       role="dialog"
       aria-modal="true"
+      aria-labelledby={titleId}
       data-modal="true"
       style={{
         position: "fixed",
@@ -168,6 +254,8 @@ export function FullscreenWorldMap({
 
       {/* Map Container */}
       <div
+        ref={modalRef}
+        tabIndex={-1}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -193,6 +281,7 @@ export function FullscreenWorldMap({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <span
+              id={titleId}
               style={{
                 color: theme.colors.text.primary,
                 fontSize: theme.typography.fontSize.lg,

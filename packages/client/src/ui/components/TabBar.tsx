@@ -38,6 +38,7 @@ interface ExtendedTabBarProps extends TabBarProps {
  */
 export const TabBar = memo(function TabBar({
   windowId,
+  panelId,
   className,
   style,
   dragHandleProps,
@@ -66,6 +67,28 @@ export const TabBar = memo(function TabBar({
       );
     }
   };
+
+  const focusTabAtIndex = React.useCallback(
+    (index: number) => {
+      const nextIndex = Math.min(Math.max(index, 0), tabs.length - 1);
+      const nextTab = tabs[nextIndex];
+      if (!nextTab) return;
+      setActiveTab(nextIndex);
+      requestAnimationFrame(() => {
+        const tabElement = document.getElementById(
+          `window-tab-${windowId}-${nextTab.id}`,
+        );
+        if (tabElement instanceof HTMLElement) {
+          tabElement.focus();
+          tabElement.scrollIntoView({
+            block: "nearest",
+            inline: "nearest",
+          });
+        }
+      });
+    },
+    [setActiveTab, tabs, windowId],
+  );
 
   useEffect(() => {
     updateScrollState();
@@ -299,6 +322,30 @@ export const TabBar = memo(function TabBar({
     dragHandleProps?.onPointerDown(e);
   };
 
+  const handleTabNavigate = React.useCallback(
+    (direction: "previous" | "next" | "first" | "last") => {
+      if (tabs.length === 0) return;
+      switch (direction) {
+        case "first":
+          focusTabAtIndex(0);
+          return;
+        case "last":
+          focusTabAtIndex(tabs.length - 1);
+          return;
+        case "previous":
+          focusTabAtIndex(
+            activeTabIndex <= 0 ? tabs.length - 1 : activeTabIndex - 1,
+          );
+          return;
+        case "next":
+          focusTabAtIndex(
+            activeTabIndex >= tabs.length - 1 ? 0 : activeTabIndex + 1,
+          );
+      }
+    },
+    [activeTabIndex, focusTabAtIndex, tabs.length],
+  );
+
   // Combine refs: dropProps.ref for drop target registration, tabBarRef for position calculations
   const setTabBarRef = (node: HTMLDivElement | null) => {
     tabBarRef.current = node;
@@ -315,6 +362,7 @@ export const TabBar = memo(function TabBar({
       style={containerStyle}
       onPointerDown={handlePointerDown}
       role="tablist"
+      aria-orientation="horizontal"
       aria-label="Window tabs"
       data-drop-id={dropProps["data-drop-id"]}
     >
@@ -361,7 +409,10 @@ export const TabBar = memo(function TabBar({
             key={tab.id}
             tab={tab}
             isActive={index === activeTabIndex}
+            tabId={`window-tab-${windowId}-${tab.id}`}
+            panelId={panelId}
             onActivate={() => setActiveTab(index)}
+            onNavigate={handleTabNavigate}
             onClose={tab.closeable ? () => removeTab(tab.id) : undefined}
             // Dim the tab if it's the one being dragged
             style={draggingTabId === tab.id ? { opacity: 0.4 } : undefined}

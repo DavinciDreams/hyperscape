@@ -423,6 +423,16 @@ export const Window = memo(function Window({
   }
 
   // Get themed styles
+  const activeTab = windowState.tabs[windowState.activeTabIndex];
+  const hasMultipleTabs = windowState.tabs.length > 1;
+  const activeTabElementId =
+    hasMultipleTabs && activeTab
+      ? `window-tab-${windowId}-${activeTab.id}`
+      : undefined;
+  const activePanelId =
+    hasMultipleTabs && activeTab
+      ? `window-panel-${windowId}-${activeTab.id}`
+      : undefined;
   const windowShadow = getThemedWindowShadow(
     theme,
     isDragging ? "dragging" : "normal",
@@ -585,16 +595,22 @@ export const Window = memo(function Window({
           dragHandleProps?: typeof dragHandleProps;
           onCloseWindow?: () => void;
           isUnlocked?: boolean;
+          panelId?: string;
         }>,
         {
           dragHandleProps,
           onCloseWindow: close,
           isUnlocked,
+          panelId: activePanelId,
         },
       );
     }
     return child;
   });
+  const childrenArray = React.Children.toArray(childrenWithProps);
+  const hasTabList = hasMultipleTabs && childrenArray.length > 1;
+  const shellHeader = hasTabList ? childrenArray[0] : null;
+  const shellBody = hasTabList ? childrenArray.slice(1) : childrenArray;
 
   // Error handler wrapper for the error boundary
 
@@ -605,8 +621,9 @@ export const Window = memo(function Window({
       onMouseDown={isUnlocked ? bringToFront : undefined}
       data-window-id={windowId}
       data-panel={windowId}
-      role="dialog"
-      aria-label={`Window: ${windowId}`}
+      role="group"
+      aria-label={activeTab?.label || windowId}
+      aria-labelledby={activeTabElementId}
     >
       <div
         aria-hidden="true"
@@ -629,7 +646,19 @@ export const Window = memo(function Window({
           showErrorUI={showErrorUI}
           onError={(error) => handleWindowError(error)}
         >
-          {childrenWithProps}
+          {shellHeader}
+          {hasTabList ? (
+            <div
+              id={activePanelId}
+              style={contentStyle}
+              role="tabpanel"
+              aria-labelledby={activeTabElementId}
+            >
+              {shellBody}
+            </div>
+          ) : (
+            shellBody
+          )}
         </WindowErrorBoundary>
       </div>
       {renderResizeHandles()}
