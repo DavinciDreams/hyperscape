@@ -312,6 +312,14 @@ function DesktopInterfaceManager({
     inventoryRef.current = inventory;
   }, [inventory]);
 
+  const actionBarCount = useMemo(
+    () =>
+      windows.filter(
+        (w) => w.id?.startsWith("actionbar-") && w.id?.endsWith("-window"),
+      ).length,
+    [windows],
+  );
+
   // Create panel renderer
   const renderPanel = useMemo(
     () =>
@@ -363,7 +371,7 @@ function DesktopInterfaceManager({
         {/* Edit mode overlay */}
         {isUnlocked && editModeEnabled && (
           <EditModeOverlayManager
-            windows={windows}
+            actionBarCount={actionBarCount}
             multipleActionBarsEnabled={multipleActionBarsEnabled}
             createWindow={createWindow}
           />

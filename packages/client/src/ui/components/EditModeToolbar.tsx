@@ -163,7 +163,6 @@ export function EditModeToolbar({
   const setShowGuides = useEditStore((s) => s.setShowGuides);
 
   // Window store for lock/unlock all
-  const windows = useWindowStore((s) => Array.from(s.windows.values()));
   const updateWindow = useWindowStore((s) => s.updateWindow);
 
   // Preset store for quick save
@@ -172,12 +171,14 @@ export function EditModeToolbar({
 
   // Lock/unlock all windows
   const handleLockAll = () => {
+    const windows = Array.from(useWindowStore.getState().windows.values());
     windows.forEach((w) => {
       updateWindow(w.id, { locked: true });
     });
   };
 
   const handleUnlockAll = () => {
+    const windows = Array.from(useWindowStore.getState().windows.values());
     windows.forEach((w) => {
       updateWindow(w.id, { locked: false });
     });
@@ -187,6 +188,7 @@ export function EditModeToolbar({
   const handleQuickSave = async () => {
     const nextSlot = presets.length;
     if (nextSlot < 4) {
+      const windows = Array.from(useWindowStore.getState().windows.values());
       const resolution = {
         width: window.innerWidth,
         height: window.innerHeight,

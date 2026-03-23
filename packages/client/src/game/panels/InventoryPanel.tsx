@@ -242,18 +242,10 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
           e.preventDefault();
           e.stopPropagation();
           if (isValidTarget && item && onTargetClick) {
-            console.log("[InventorySlot] 🎯 Target clicked:", {
-              itemId: item.itemId,
-              slot: index,
-            });
             onTargetClick(item, index);
           } else if (item && !isValidTarget && onInvalidTargetClick) {
             // OSRS: Clicking an invalid item shows "Nothing interesting happens."
             // (Empty slots don't trigger this - only actual items)
-            console.log("[InventorySlot] ❌ Invalid target clicked:", {
-              itemId: item.itemId,
-              slot: index,
-            });
             onInvalidTargetClick();
           }
           // Clicking empty slot does nothing (OSRS behavior)
@@ -884,17 +876,7 @@ export function InventoryPanel({
       validTargetIds: string[];
       actionType: "firemaking" | "cooking" | "none";
     }) => {
-      console.log("[InventoryPanel] 🎯 TARGETING_START received:", {
-        sourceItem: data.sourceItem,
-        validTargetTypes: data.validTargetTypes,
-        validTargetIds: data.validTargetIds,
-        actionType: data.actionType,
-      });
       const validIds = new Set(data.validTargetIds);
-      console.log(
-        "[InventoryPanel] 🎯 Valid target IDs:",
-        Array.from(validIds),
-      );
       setTargetingState({
         active: true,
         sourceItem: data.sourceItem,
@@ -904,17 +886,11 @@ export function InventoryPanel({
     };
 
     const onTargetingComplete = () => {
-      console.log(
-        "[InventoryPanel] ✅ TARGETING_COMPLETE - exiting targeting mode",
-      );
       setTargetingState(initialTargetingState);
       setTargetHover(null); // Clear tooltip
     };
 
     const onTargetingCancel = () => {
-      console.log(
-        "[InventoryPanel] ❌ TARGETING_CANCEL - exiting targeting mode",
-      );
       setTargetingState(initialTargetingState);
       setTargetHover(null); // Clear tooltip
     };
@@ -922,7 +898,6 @@ export function InventoryPanel({
     // Escape key to cancel targeting mode
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && targetingState.active) {
-        console.log("[InventoryPanel] ⎋ Escape pressed - cancelling targeting");
         const localPlayer = world.getPlayer();
         if (localPlayer) {
           world.emit(EventType.TARGETING_CANCEL, { playerId: localPlayer.id });

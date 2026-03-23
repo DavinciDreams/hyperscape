@@ -232,9 +232,7 @@ export function NavigationRibbon({
           },
         ],
       };
-
-      const newWindow = createWindow(config);
-      console.log("[NavigationRibbon] Created new window:", newWindow?.id);
+      createWindow(config);
       setExpandedCategory(null);
     },
     [createWindow, windowStoreUpdate, bringToFront],

@@ -310,10 +310,6 @@ export function StorePanel({
   // Store is now rendered as a modal, not a window
   useEffect(() => {
     const { windows, destroyWindow } = useWindowStore.getState();
-    console.log(
-      "[StorePanel] Checking for orphaned windows, found:",
-      Array.from(windows.keys()),
-    );
     windows.forEach((win) => {
       const winIdLower = win.id.toLowerCase();
       const isStoreWindow =
@@ -337,9 +333,6 @@ export function StorePanel({
           );
         });
       if (isStoreWindow) {
-        console.log("[StorePanel] Removing orphaned store window:", win.id, {
-          tabs: win.tabs.map((t) => ({ id: t.id, label: t.label })),
-        });
         destroyWindow(win.id);
       }
     });

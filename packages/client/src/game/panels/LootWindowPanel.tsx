@@ -79,10 +79,6 @@ function LootWindowPanelContent({
         return newItems;
       });
 
-      console.log(
-        `[LootWindow] Rolling back transaction ${transactionId} - restoring ${transaction.itemId} x${transaction.quantity}`,
-      );
-
       // Remove from pending
       const newPending = new Map(prev);
       newPending.delete(transactionId);
@@ -130,7 +126,6 @@ function LootWindowPanelContent({
           }
           return newPending;
         });
-        console.log(`[LootWindow] Loot confirmed: ${transactionId}`);
       } else {
         // Transaction failed - rollback
         console.warn(`[LootWindow] Loot failed: ${transactionId} - ${reason}`);
