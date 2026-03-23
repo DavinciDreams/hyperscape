@@ -29,3 +29,6 @@ export * from "./drag";
 
 // Settings
 export * from "./settings";
+
+// Shared UI constants/tokens used by core consumers
+export { UI } from "../../constants/ui";
