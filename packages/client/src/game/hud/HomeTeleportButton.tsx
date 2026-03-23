@@ -35,8 +35,20 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
   // Use ref to track state in event handlers (avoids stale closure)
   const stateRef = useRef(state);
   stateRef.current = state;
+  const castStartTimeRef = useRef<number | null>(null);
+  const cooldownEndTimeRef = useRef<number | null>(null);
+  const cooldownSecondRef = useRef(-1);
+  const tickerRef = useRef<number | null>(null);
 
   // Resize handler
+  useEffect(() => {
+    castStartTimeRef.current = castStartTime;
+  }, [castStartTime]);
+
+  useEffect(() => {
+    cooldownEndTimeRef.current = cooldownEndTime;
+  }, [cooldownEndTime]);
+
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener("resize", onResize);
@@ -47,7 +59,7 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
   useEffect(() => {
     const onCastStart = () => {
       setState("casting");
-      setCastStartTime(Date.now());
+      setCastStartTime(performance.now());
       setCastProgress(0);
     };
 
@@ -69,7 +81,9 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
       // Use ref to get current state (avoids stale closure)
       if (stateRef.current === "casting") {
         setState("cooldown");
-        setCooldownEndTime(Date.now() + HOME_TELEPORT_CONSTANTS.COOLDOWN_MS);
+        setCooldownEndTime(
+          performance.now() + HOME_TELEPORT_CONSTANTS.COOLDOWN_MS,
+        );
         setCooldownRemaining(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS);
         setCastStartTime(null);
         setCastProgress(0);
@@ -89,32 +103,61 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
     };
   }, [world]);
 
-  // Cast progress timer
+  // Animation-driven progress/cooldown ticker keeps timing aligned with the
+  // newer minimap orb without relying on multiple intervals.
   useEffect(() => {
-    if (state !== "casting" || !castStartTime) return;
-    const interval = setInterval(() => {
-      const progress = Math.min(
-        100,
-        ((Date.now() - castStartTime) / HOME_TELEPORT_CONSTANTS.CAST_TIME_MS) *
-          100,
-      );
-      setCastProgress(progress);
-    }, 50);
-    return () => clearInterval(interval);
-  }, [state, castStartTime]);
-
-  // Cooldown timer - uses end time to avoid drift over 15 minutes
-  useEffect(() => {
-    if (state !== "cooldown" || !cooldownEndTime) return;
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, cooldownEndTime - Date.now());
-      setCooldownRemaining(remaining);
-      if (remaining <= 0) {
-        setState("ready");
-        setCooldownEndTime(null);
+    const clearTicker = () => {
+      if (tickerRef.current !== null) {
+        cancelAnimationFrame(tickerRef.current);
+        tickerRef.current = null;
       }
-    }, 1000);
-    return () => clearInterval(interval);
+    };
+
+    if (state === "ready") {
+      clearTicker();
+      cooldownSecondRef.current = -1;
+      setCooldownRemaining(0);
+      setCastProgress(0);
+      return undefined;
+    }
+
+    cooldownSecondRef.current = -1;
+
+    const tick = () => {
+      const now = performance.now();
+
+      if (state === "casting" && castStartTimeRef.current !== null) {
+        const progress = Math.min(
+          100,
+          ((now - castStartTimeRef.current) /
+            HOME_TELEPORT_CONSTANTS.CAST_TIME_MS) *
+            100,
+        );
+        setCastProgress(progress);
+      } else if (state === "cooldown" && cooldownEndTimeRef.current !== null) {
+        const remaining = Math.max(0, cooldownEndTimeRef.current - now);
+        const remainingSeconds = Math.floor(remaining / 1000);
+        if (remainingSeconds !== cooldownSecondRef.current) {
+          cooldownSecondRef.current = remainingSeconds;
+          setCooldownRemaining(remaining);
+        }
+        if (remaining <= 0) {
+          setCooldownRemaining(0);
+          setState("ready");
+          setCooldownEndTime(null);
+          clearTicker();
+          return;
+        }
+      } else {
+        clearTicker();
+        return;
+      }
+
+      tickerRef.current = requestAnimationFrame(tick);
+    };
+
+    tickerRef.current = requestAnimationFrame(tick);
+    return clearTicker;
   }, [state, cooldownEndTime]);
 
   const handleClick = useCallback(() => {

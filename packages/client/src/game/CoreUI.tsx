@@ -48,12 +48,14 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const readyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadingOverlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const terrainPollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [ready, setReady] = useState(false);
   const [loadingOverlayVisible, setLoadingOverlayVisible] = useState(true);
   const [loadingComplete, setLoadingComplete] = useState(false);
   // Track system and asset progress separately to gate presentation on assets
   const [systemsComplete, setSystemsComplete] = useState(false);
   const [assetsProgress, setAssetsProgress] = useState(0);
+  const [readinessError, setReadinessError] = useState<string | null>(null);
 
   // Check if this is spectator mode (from embedded config)
   const isSpectatorMode = (() => {
@@ -95,6 +97,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     // Create handlers with proper types
     const handleReady = () => {
       // A READY signal indicates a major subsystem finished; mark loading as potentially complete
+      setReadinessError(null);
       setLoadingComplete(true);
     };
 
@@ -197,6 +200,10 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     if (network.lastCharacterList) setCharacterFlowActive(true);
 
     return () => {
+      if (terrainPollTimeoutRef.current) {
+        clearTimeout(terrainPollTimeoutRef.current);
+        terrainPollTimeoutRef.current = null;
+      }
       // Clean up the ready timeout if it exists
       if (readyTimeoutRef.current) {
         clearTimeout(readyTimeoutRef.current);
@@ -223,7 +230,13 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
 
   // Poll terrain readiness until ready
   useEffect(() => {
-    let terrainInterval: NodeJS.Timeout | null = null;
+    if (terrainPollTimeoutRef.current) {
+      clearTimeout(terrainPollTimeoutRef.current);
+      terrainPollTimeoutRef.current = null;
+    }
+
+    setTerrainReady(false);
+    setReadinessError(null);
 
     const isTerrainReady = (): boolean => {
       const terrain = world.getSystem?.("terrain") as
@@ -250,15 +263,28 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     };
 
     if (!updateTerrainReady()) {
-      terrainInterval = setInterval(() => {
-        if (!updateTerrainReady() || !terrainInterval) return;
-        clearInterval(terrainInterval);
-        terrainInterval = null;
-      }, 250);
+      const startTime = performance.now();
+      const checkTerrainReady = () => {
+        if (updateTerrainReady()) return;
+
+        if (performance.now() - startTime >= 20000) {
+          setReadinessError(
+            "Timed out waiting for terrain to initialize. Refresh to retry.",
+          );
+          return;
+        }
+
+        terrainPollTimeoutRef.current = setTimeout(checkTerrainReady, 250);
+      };
+
+      terrainPollTimeoutRef.current = setTimeout(checkTerrainReady, 250);
     }
 
     return () => {
-      if (terrainInterval) clearInterval(terrainInterval);
+      if (terrainPollTimeoutRef.current) {
+        clearTimeout(terrainPollTimeoutRef.current);
+        terrainPollTimeoutRef.current = null;
+      }
     };
   }, [world, isSpectatorMode]);
 
@@ -274,9 +300,11 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
   useEffect(() => {
     // Show game once player's avatar is ready and physics system is initialized
     // For spectators: also require terrain and target avatar to be ready
-    const canPresent = isSpectatorMode
-      ? playerReady && terrainReady && physReady
-      : playerReady && physReady;
+    const canPresent =
+      playerReady &&
+      physReady &&
+      terrainReady &&
+      (loadingComplete || systemsComplete || assetsProgress >= 100);
     if (canPresent) {
       // Clear any existing timeout
       if (readyTimeoutRef.current) {
@@ -297,7 +325,14 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
         readyTimeoutRef.current = null;
       }
     };
-  }, [playerReady, physReady, isSpectatorMode, terrainReady]);
+  }, [
+    playerReady,
+    physReady,
+    terrainReady,
+    loadingComplete,
+    systemsComplete,
+    assetsProgress,
+  ]);
 
   useEffect(() => {
     if (!ready) {
@@ -375,15 +410,30 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
           <div id="core-ui-portal" />
         </div>
         {/* Non-scaled overlays - full screen elements */}
-        {loadingOverlayVisible && (
-          <LoadingScreen
-            world={world}
-            message={
-              characterFlowActive ? "Entering world..." : "Loading world..."
-            }
-            fadingOut={ready}
-          />
-        )}
+        {loadingOverlayVisible &&
+          (readinessError ? (
+            <div className="absolute inset-0 bg-black/90 flex items-center justify-center z-20">
+              <div className="text-center text-[#f2d08a] px-8">
+                <p className="text-2xl mb-3">Unable to enter world</p>
+                <p className="max-w-md mb-4">{readinessError}</p>
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded bg-[#f2d08a] text-black font-bold"
+                  onClick={() => window.location.reload()}
+                >
+                  Reload
+                </button>
+              </div>
+            </div>
+          ) : (
+            <LoadingScreen
+              world={world}
+              message={
+                characterFlowActive ? "Entering world..." : "Loading world..."
+              }
+              fadingOut={ready}
+            />
+          ))}
         {kicked && <KickedOverlay code={kicked} />}
         {deathScreen && <DeathScreen data={deathScreen} world={world} />}
       </main>

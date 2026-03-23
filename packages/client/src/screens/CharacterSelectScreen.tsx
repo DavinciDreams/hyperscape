@@ -432,11 +432,30 @@ export function CharacterSelectScreen({
     privyAuthManager.getUserId() || localStorage.getItem("privy_user_id") || "",
   );
 
+  const syncPrivyAuthState = React.useCallback(() => {
+    const nextToken =
+      privyAuthManager.getToken() ||
+      localStorage.getItem("privy_auth_token") ||
+      "";
+    const nextUserId =
+      privyAuthManager.getUserId() ||
+      userRef.current?.id ||
+      localStorage.getItem("privy_user_id") ||
+      "";
+
+    if (nextToken && nextToken !== authToken) {
+      setAuthToken(nextToken);
+    }
+    if (nextUserId && nextUserId !== privyUserId) {
+      setPrivyUserId(nextUserId);
+    }
+  }, [authToken, privyUserId]);
+
   // Subscribe to PrivyAuthManager state changes
   React.useEffect(() => {
     const unsubscribe = privyAuthManager.subscribe((state) => {
       const newToken = state.privyToken || "";
-      const newUserId = state.privyUserId || "";
+      const newUserId = state.privyUserId || userRef.current?.id || "";
       if (newToken && newToken !== authToken) setAuthToken(newToken);
       if (newUserId && newUserId !== privyUserId) setPrivyUserId(newUserId);
     });
@@ -449,48 +468,20 @@ export function CharacterSelectScreen({
       const storageEvent = e as { key?: string | null };
       if (!storageEvent.key) return;
       if (storageEvent.key === "privy_auth_token") {
-        const token =
-          privyAuthManager.getToken() ||
-          localStorage.getItem("privy_auth_token") ||
-          "";
-        if (token !== authToken) setAuthToken(token);
+        syncPrivyAuthState();
       }
       if (storageEvent.key === "privy_user_id") {
-        const userId =
-          privyAuthManager.getUserId() ||
-          localStorage.getItem("privy_user_id") ||
-          "";
-        if (userId !== privyUserId) setPrivyUserId(userId);
+        syncPrivyAuthState();
       }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [authToken, privyUserId]);
+  }, [syncPrivyAuthState]);
 
   React.useEffect(() => {
-    if (authToken && privyUserId) return;
-    let attempts = 0;
-    const id = window.setInterval(() => {
-      // Check PrivyAuthManager first, then localStorage as fallback
-      const token =
-        privyAuthManager.getToken() ||
-        localStorage.getItem("privy_auth_token") ||
-        "";
-      const userId =
-        privyAuthManager.getUserId() ||
-        localStorage.getItem("privy_user_id") ||
-        "";
-      if (token && userId) {
-        // Only update if different (prevents unnecessary re-renders)
-        if (token !== authToken) setAuthToken(token);
-        if (userId !== privyUserId) setPrivyUserId(userId);
-        window.clearInterval(id);
-      } else if (++attempts > 50) {
-        window.clearInterval(id);
-      }
-    }, 200);
-    return () => window.clearInterval(id);
-  }, [authToken, privyUserId]);
+    if (!ready || !authenticated) return;
+    syncPrivyAuthState();
+  }, [ready, authenticated, syncPrivyAuthState]);
 
   // Debug logging for state changes
   React.useEffect(() => {}, [wsReady, showCreate, characters]);
@@ -498,9 +489,6 @@ export function CharacterSelectScreen({
   React.useEffect(() => {
     // Wait for Privy to finish initializing and authenticating
     if (!ready || !authenticated) {
-      console.log(
-        `[CharacterSelect] ⏳ Waiting for Privy: ready=${ready}, authenticated=${authenticated}`,
-      );
       setWsReady(false);
       setConnectionState("disconnected");
       return; // Don't create websocket until Privy is ready
@@ -510,19 +498,19 @@ export function CharacterSelectScreen({
     // This prevents race conditions where `authenticated=true` but user data isn't loaded yet
     const currentUser = userRef.current;
     if (!currentUser || !currentUser.id) {
-      console.log(
-        "[CharacterSelect] ⏳ Waiting for Privy user data to load...",
-      );
       setWsReady(false);
       setConnectionState("disconnected");
       return;
     }
 
-    // Wait until Privy auth values are present in localStorage
+    // Use the SDK user id as the source of truth and allow the token to arrive
+    // through either the auth manager or localStorage.
+    if (!privyUserId) {
+      setPrivyUserId(currentUser.id);
+    }
+
     if (!authToken || !privyUserId) {
-      console.log(
-        "[CharacterSelect] ⏳ Waiting for localStorage auth tokens...",
-      );
+      syncPrivyAuthState();
       setWsReady(false);
       setConnectionState("disconnected");
       return; // Don't create websocket without auth
@@ -534,7 +522,6 @@ export function CharacterSelectScreen({
       console.warn(
         `[CharacterSelect] ⚠️ Privy user ID mismatch! Hook: ${currentUser.id}, localStorage: ${privyUserId}`,
       );
-      console.log("[CharacterSelect] 🔄 Clearing stale auth tokens...");
       localStorage.removeItem("privy_auth_token");
       localStorage.removeItem("privy_user_id");
       setAuthToken("");
@@ -543,11 +530,6 @@ export function CharacterSelectScreen({
       setConnectionState("disconnected");
       return;
     }
-
-    console.log(
-      "[CharacterSelect] ✅ Privy ready and authenticated, connecting...",
-      { userId: currentUser.id, privyUserId },
-    );
 
     // Reset reconnection state for fresh connection
     intentionalDisconnectRef.current = false;
@@ -573,11 +555,6 @@ export function CharacterSelectScreen({
         urlWithAuth = `${wsUrl}${separator}${queryParts.join("&")}`;
       }
 
-      console.log(
-        "[CharacterSelect] 🔌 Creating WebSocket connection to:",
-        wsUrl,
-        "(with authToken in URL)",
-      );
       setConnectionState(
         reconnectAttemptsRef.current > 0 ? "reconnecting" : "connecting",
       );
@@ -591,9 +568,7 @@ export function CharacterSelectScreen({
       let authCompleted = false;
 
       // Define named handlers for proper cleanup
-      const handleOpen = (): void => {
-        console.log("[CharacterSelect] 🔐 WebSocket connected (auth via URL)");
-      };
+      const handleOpen = (): void => {};
 
       // Handle auth result messages - need to intercept authResult before wsReady
       const handleAuthMessage = (event: MessageEvent): void => {
@@ -612,9 +587,6 @@ export function CharacterSelectScreen({
           ws.removeEventListener("message", handleAuthMessage);
 
           if (result.success) {
-            console.log(
-              "[CharacterSelect] ✅ Authentication successful (first-message)",
-            );
             authCompleted = true;
 
             // Reset reconnection state on successful auth
