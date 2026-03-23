@@ -123,6 +123,7 @@ export const ModalWindow = memo(function ModalWindow({
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
+  const contentId = useId();
   const reduceMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -243,6 +244,7 @@ export const ModalWindow = memo(function ModalWindow({
     justifyContent: "center",
     zIndex,
     animation: reduceMotion ? undefined : "modalFadeIn 0.2s ease-out",
+    overscrollBehavior: "contain",
     // CRITICAL: Enable pointer events to block clicks from reaching the game canvas
     // CoreUI parent has pointer-events: none, so we must explicitly enable them here
     pointerEvents: "auto",
@@ -262,6 +264,7 @@ export const ModalWindow = memo(function ModalWindow({
     overflow: "hidden",
     animation: reduceMotion ? undefined : "modalSlideIn 0.22s ease-out",
     outline: "none",
+    willChange: reduceMotion ? "auto" : "transform, opacity",
     ...style,
   };
 
@@ -305,6 +308,7 @@ export const ModalWindow = memo(function ModalWindow({
     flex: 1,
     overflow: "auto",
     padding: theme.spacing.md,
+    overscrollBehavior: "contain",
     background:
       theme.name === "hyperscape"
         ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.12) 100%)"
@@ -360,6 +364,7 @@ export const ModalWindow = memo(function ModalWindow({
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
+          aria-describedby={contentId}
           tabIndex={-1}
           onMouseDown={(e) => {
             (e.nativeEvent as PointerEvent & { isCoreUI?: boolean }).isCoreUI =
@@ -415,7 +420,9 @@ export const ModalWindow = memo(function ModalWindow({
           </div>
 
           {/* Content */}
-          <div style={contentStyle}>{children}</div>
+          <div id={contentId} style={contentStyle}>
+            {children}
+          </div>
         </div>
       </div>
     </>

@@ -52,6 +52,10 @@ const MINIMAP_BASE_SIZE_PX = 200;
 const ROAD_LINE_WIDTH_PX = 5;
 const ROAD_OUTLINE_WIDTH_PX = 7;
 const BUILDING_LINE_WIDTH_PX = 0.5;
+const ROAD_OUTLINE_COLOR = "rgb(96, 72, 44)";
+const ROAD_FILL_COLOR = "rgb(214, 188, 132)";
+const BUILDING_FILL_COLOR = "rgba(154, 126, 96, 0.92)";
+const BUILDING_STROKE_COLOR = "rgb(62, 46, 28)";
 
 /** 2D context interface for minimap drawing — satisfied by both CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D */
 interface MinimapDrawContext {
@@ -213,7 +217,7 @@ function drawRoadsAndBuildingsOverlay(
       ctx.lineJoin = "round";
 
       // Pass 2 — outlines only (all roads)
-      ctx.strokeStyle = "rgb(140, 110, 65)";
+      ctx.strokeStyle = ROAD_OUTLINE_COLOR;
       for (const r of _projectedRoads) {
         ctx.lineWidth = r.outline;
         ctx.beginPath();
@@ -224,7 +228,7 @@ function drawRoadsAndBuildingsOverlay(
       }
 
       // Pass 3 — fills only (all roads)
-      ctx.strokeStyle = "rgb(200, 175, 125)";
+      ctx.strokeStyle = ROAD_FILL_COLOR;
       for (const r of _projectedRoads) {
         ctx.lineWidth = r.fill;
         ctx.beginPath();
@@ -241,8 +245,8 @@ function drawRoadsAndBuildingsOverlay(
     ctx.save();
     // Building stroke scales with zoom but clamped to a thin line
     ctx.lineWidth = Math.max(
-      BUILDING_LINE_WIDTH_PX,
-      Math.min(3, worldToPixel * 0.3),
+      BUILDING_LINE_WIDTH_PX + 0.25,
+      Math.min(3.25, worldToPixel * 0.35),
     );
     for (const town of towns) {
       for (const building of town.buildings) {
@@ -310,9 +314,9 @@ function drawRoadsAndBuildingsOverlay(
         ctx.lineTo(p2x, p2y);
         ctx.lineTo(p3x, p3y);
         ctx.closePath();
-        ctx.fillStyle = "rgb(130, 110, 85)";
+        ctx.fillStyle = BUILDING_FILL_COLOR;
         ctx.fill();
-        ctx.strokeStyle = "rgb(70, 55, 35)";
+        ctx.strokeStyle = BUILDING_STROKE_COLOR;
         ctx.stroke();
       }
     }

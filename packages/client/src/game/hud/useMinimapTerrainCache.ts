@@ -3,6 +3,7 @@ import { TERRAIN_CONSTANTS } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 
 const TERRAIN_BASE_SAMPLE_SIZE = 96;
+const TERRAIN_CLOSE_SAMPLE_SIZE = 128;
 const TERRAIN_OVERSHOOT = Math.SQRT2 * 1.1;
 
 interface BiomeDataLike {
@@ -123,7 +124,8 @@ async function generateTerrainChunked(
   upZ: number,
   isCancelled: () => boolean,
 ): Promise<OffscreenCanvas | null> {
-  const sampleSize = TERRAIN_BASE_SAMPLE_SIZE;
+  const sampleSize =
+    extent <= 140 ? TERRAIN_CLOSE_SAMPLE_SIZE : TERRAIN_BASE_SAMPLE_SIZE;
   const offscreen = new OffscreenCanvas(sampleSize, sampleSize);
   const context = offscreen.getContext("2d");
   if (!context) return null;
@@ -169,9 +171,10 @@ async function generateTerrainChunked(
             ((height - TERRAIN_CONSTANTS.WATER_THRESHOLD) / 36) * 30,
           ) | 0;
         const slopeShade = Math.max(-18, Math.min(14, 8 - slope * 24)) | 0;
-        r = clampColorChannel(biomeColor.r + lift + slopeShade);
+        const warmth = Math.max(-6, Math.min(10, (height - 18) * 0.18)) | 0;
+        r = clampColorChannel(biomeColor.r + lift + slopeShade + warmth);
         g = clampColorChannel(biomeColor.g + lift + slopeShade);
-        b = clampColorChannel(biomeColor.b + lift + slopeShade);
+        b = clampColorChannel(biomeColor.b + lift + slopeShade - (warmth >> 1));
       } else {
         const waterDepth =
           Math.min(
@@ -191,7 +194,7 @@ async function generateTerrainChunked(
       data[pixelIndex + 3] = 255;
     }
 
-    if (sy % 12 === 11) {
+    if (sy % 16 === 15) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       if (isCancelled()) return null;
     }
