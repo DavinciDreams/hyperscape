@@ -564,10 +564,11 @@ export class WaterSystem {
     reflNode.uvNode = reflNode.uvNode!.add(mul(normalDistortion, float(0.015)));
     const reflectionNode = reflNode;
 
+    // Wind affects amplitude only — phase speed is purely from dispersion relation
     const wavePhase = (
       wp: ShaderNodeInput,
       t: ShaderNodeInput,
-      w: ShaderNodeInput,
+      _w: ShaderNodeInput,
       wave: WaveParams,
     ) => {
       const wpNode = wp as ShaderNode;
@@ -575,7 +576,7 @@ export class WaterSystem {
         mul(wpNode.x, float(wave.Dx)),
         mul(wpNode.z, float(wave.Dz)),
       );
-      return add(mul(float(wave.w), dotDP), mul(mul(float(wave.phi), t), w));
+      return add(mul(float(wave.w), dotDP), mul(float(wave.phi), t));
     };
 
     // VERTEX: Gerstner Displacement
@@ -596,7 +597,7 @@ export class WaterSystem {
         const c = cos(phase),
           s = sin(phase);
         dx = add(dx, mul(float(wave.QADx), c));
-        dy = add(dy, mul(float(wave.A), s));
+        dy = add(dy, mul(mul(float(wave.A), uWind), s));
         dz = add(dz, mul(float(wave.QADz), c));
       }
 
@@ -696,23 +697,23 @@ export class WaterSystem {
       );
       const waterColor = mul(vec3(cosR, cosG, cosB), float(WATER.COLOR_DARKEN));
 
-      // --- 4-layer scrolling normal noise ---
+      // --- 4-layer scrolling normal noise (speeds matched to Gerstner phase) ---
       const baseUV = mul(wUV, float(5));
       const nUV0 = add(
         div(baseUV, float(103)),
-        vec2(div(uTime, float(17)), div(uTime, float(29))),
+        vec2(mul(uTime, float(0.012)), mul(uTime, float(0.008))),
       );
       const nUV1 = add(
         div(baseUV, float(107)),
-        vec2(div(uTime, float(19)), mul(div(uTime, float(31)), float(-1))),
+        vec2(mul(uTime, float(0.01)), mul(uTime, float(-0.007))),
       );
       const nUV2 = add(
         vec2(div(baseUV.x, float(8907)), div(baseUV.y, float(9803))),
-        vec2(div(uTime, float(101)), div(uTime, float(97))),
+        vec2(mul(uTime, float(0.003)), mul(uTime, float(0.004))),
       );
       const nUV3 = add(
         vec2(div(baseUV.x, float(1091)), div(baseUV.y, float(1027))),
-        vec2(mul(div(uTime, float(109)), float(-1)), div(uTime, float(113))),
+        vec2(mul(uTime, float(-0.004)), mul(uTime, float(0.003))),
       );
       const n0 = texture(nTex, nUV0);
       const n1 = texture(nTex, nUV1);
@@ -884,7 +885,7 @@ export class WaterSystem {
     const wavePhase = (
       wp: ShaderNodeInput,
       t: ShaderNodeInput,
-      w: ShaderNodeInput,
+      _w: ShaderNodeInput,
       wave: WaveParams,
     ) => {
       const wpNode = wp as ShaderNode;
@@ -892,7 +893,7 @@ export class WaterSystem {
         mul(wpNode.x, float(wave.Dx)),
         mul(wpNode.z, float(wave.Dz)),
       );
-      return add(mul(float(wave.w), dotDP), mul(mul(float(wave.phi), t), w));
+      return add(mul(float(wave.w), dotDP), mul(float(wave.phi), t));
     };
 
     // VERTEX: Gerstner Displacement (1.3x larger for ocean)
@@ -913,7 +914,7 @@ export class WaterSystem {
         const c = cos(phase),
           s = sin(phase);
         dx = add(dx, mul(float(wave.QADx * 1.3), c));
-        dy = add(dy, mul(float(wave.A * 1.3), s));
+        dy = add(dy, mul(mul(float(wave.A * 1.3), uWind), s));
         dz = add(dz, mul(float(wave.QADz * 1.3), c));
       }
 
@@ -1002,23 +1003,23 @@ export class WaterSystem {
       );
       const waterColor = mul(vec3(cosR, cosG, cosB), float(WATER.COLOR_DARKEN));
 
-      // --- 4-layer normal noise ---
+      // --- 4-layer normal noise (speeds matched to Gerstner phase) ---
       const baseUV = mul(wUV, float(5));
       const nUV0 = add(
         div(baseUV, float(103)),
-        vec2(div(uTime, float(17)), div(uTime, float(29))),
+        vec2(mul(uTime, float(0.012)), mul(uTime, float(0.008))),
       );
       const nUV1 = add(
         div(baseUV, float(107)),
-        vec2(div(uTime, float(19)), mul(div(uTime, float(31)), float(-1))),
+        vec2(mul(uTime, float(0.01)), mul(uTime, float(-0.007))),
       );
       const nUV2 = add(
         vec2(div(baseUV.x, float(8907)), div(baseUV.y, float(9803))),
-        vec2(div(uTime, float(101)), div(uTime, float(97))),
+        vec2(mul(uTime, float(0.003)), mul(uTime, float(0.004))),
       );
       const nUV3 = add(
         vec2(div(baseUV.x, float(1091)), div(baseUV.y, float(1027))),
-        vec2(mul(div(uTime, float(109)), float(-1)), div(uTime, float(113))),
+        vec2(mul(uTime, float(-0.004)), mul(uTime, float(0.003))),
       );
       const noiseSum = add(
         add(add(texture(nTex, nUV0), texture(nTex, nUV1)), texture(nTex, nUV2)),
@@ -1402,8 +1403,8 @@ export class WaterSystem {
 
     const baseWindStrength =
       this.windSystem?.uniforms.windStrength.value ?? 1.0;
-    const waveOscillation = Math.sin(this.waterTime * 0.1) * 0.1;
-    const windStrength = baseWindStrength * (0.9 + waveOscillation);
+    const waveOscillation = Math.sin(this.waterTime * 0.03) * 0.08;
+    const windStrength = baseWindStrength * (0.95 + waveOscillation);
 
     const dayIntensity = env?.getDayIntensity?.() ?? 1;
     const sunIntensity = env?.sunLight
