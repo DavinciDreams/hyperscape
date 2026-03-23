@@ -238,10 +238,10 @@ export const ModalWindow = memo(function ModalWindow({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(5, 8, 14, 0.76)",
+    backgroundColor: "rgba(8, 7, 6, 0.72)",
     backgroundImage:
       theme.name === "hyperscape"
-        ? "radial-gradient(circle at top, rgba(240, 208, 96, 0.12), transparent 30%), radial-gradient(circle at center, rgba(255, 255, 255, 0.035), transparent 44%)"
+        ? "radial-gradient(circle at top, rgba(183, 140, 76, 0.1), transparent 30%), radial-gradient(circle at center, rgba(255, 248, 236, 0.03), transparent 44%)"
         : "radial-gradient(circle at top, rgba(255, 255, 255, 0.04), transparent 42%)",
     display: "flex",
     alignItems: "center",
@@ -317,7 +317,7 @@ export const ModalWindow = memo(function ModalWindow({
     overscrollBehavior: "contain",
     background:
       theme.name === "hyperscape"
-        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.008) 18%, rgba(0, 0, 0, 0.12) 100%)"
+        ? "linear-gradient(180deg, rgba(255, 250, 242, 0.028) 0%, rgba(255, 245, 231, 0.014) 18%, rgba(0, 0, 0, 0.08) 100%)"
         : "transparent",
     pointerEvents: "auto",
   };
@@ -393,7 +393,7 @@ export const ModalWindow = memo(function ModalWindow({
               pointerEvents: "none",
               background:
                 theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, transparent 14%, transparent 82%, rgba(0, 0, 0, 0.08) 100%)"
+                  ? "linear-gradient(180deg, rgba(255, 249, 239, 0.05) 0%, transparent 14%, transparent 82%, rgba(0, 0, 0, 0.055) 100%)"
                   : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 16%, transparent 84%, rgba(0, 0, 0, 0.06) 100%)",
               zIndex: 0,
             }}

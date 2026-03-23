@@ -152,7 +152,10 @@ function ContextMenu({
     textAlign: "left",
     fontSize: theme.typography.fontSize.xs,
     color: isHovered ? theme.colors.text.primary : theme.colors.text.secondary,
-    background: isHovered ? theme.colors.background.tertiary : "transparent",
+    background: isHovered
+      ? "linear-gradient(180deg, rgba(255, 249, 239, 0.055) 0%, rgba(183, 140, 76, 0.12) 20%, rgba(45, 36, 28, 0.98) 100%)"
+      : "transparent",
+    borderBottom: `1px solid ${isHovered ? `${theme.colors.border.hover}55` : "transparent"}`,
     border: "none",
     cursor: "pointer",
     transition: "all 0.15s ease",
@@ -491,7 +494,7 @@ export function StorePanel({
           style={{
             ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
             borderRadius: theme.borderRadius.xl,
-            boxShadow: `${theme.shadows.xl}, inset 0 2px 4px rgba(255, 255, 255, 0.05)`,
+            boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 248, 236, 0.06), inset 0 -16px 24px rgba(0, 0, 0, 0.08)`,
             maxWidth: "100%",
           }}
         >

@@ -319,7 +319,12 @@ export function TradePanel({
                     }}
                   >
                     Value:{" "}
-                    <span style={{ color: "#ffd700", fontWeight: "bold" }}>
+                    <span
+                      style={{
+                        color: theme.colors.accent.gold,
+                        fontWeight: "bold",
+                      }}
+                    >
                       {formatGoldValue(state.myOfferValue)} gp
                     </span>
                   </div>
@@ -385,7 +390,12 @@ export function TradePanel({
                     }}
                   >
                     Value:{" "}
-                    <span style={{ color: "#ffd700", fontWeight: "bold" }}>
+                    <span
+                      style={{
+                        color: theme.colors.accent.gold,
+                        fontWeight: "bold",
+                      }}
+                    >
                       {formatGoldValue(state.theirOfferValue)} gp
                     </span>
                   </div>
@@ -520,18 +530,18 @@ export function TradePanel({
                   radius: theme.borderRadius.md,
                 }),
                 color: theme.colors.text.primary,
-                textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+                textShadow: "0 1px 2px rgba(0,0,0,0.35)",
                 opacity: state.myAccepted ? 0.7 : 1,
                 cursor: state.myAccepted ? "default" : "pointer",
               }}
               onMouseEnter={(e) => {
                 if (!state.myAccepted) {
-                  e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.success} 0%, ${theme.colors.state.success}CC 100%)`;
+                  e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.08) 0%, ${theme.colors.state.success}26 22%, rgba(20, 42, 24, 0.98) 100%)`;
                 }
               }}
               onMouseLeave={(e) => {
                 if (!state.myAccepted) {
-                  e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`;
+                  e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.06) 0%, ${theme.colors.state.success}1c 20%, rgba(22, 36, 25, 0.98) 100%)`;
                 }
               }}
             >
@@ -551,13 +561,13 @@ export function TradePanel({
                   radius: theme.borderRadius.md,
                 }),
                 color: theme.colors.text.primary,
-                textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+                textShadow: "0 1px 2px rgba(0,0,0,0.35)",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.danger} 0%, ${theme.colors.state.danger}CC 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 246, 246, 0.08) 0%, ${theme.colors.state.danger}24 22%, rgba(53, 24, 24, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 246, 246, 0.06) 0%, ${theme.colors.state.danger}1a 20%, rgba(40, 24, 24, 0.98) 100%)`;
               }}
             >
               Cancel

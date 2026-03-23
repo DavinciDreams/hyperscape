@@ -217,10 +217,15 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
 
   const sectionStyle: React.CSSProperties = {
     marginBottom: isMobile ? spacing.sm : spacing.md,
+    ...getPanelInsetStyle(theme, {
+      emphasis: "normal",
+      radius: theme.borderRadius.md,
+      padding: isMobile ? spacing.sm : spacing.md,
+    }),
   };
 
   const sectionTitleStyle: React.CSSProperties = {
-    color: COLORS.ACCENT,
+    color: theme.colors.text.accent,
     fontSize: isMobile ? typography.fontSize.sm : typography.fontSize.xs,
     fontWeight: typography.fontWeight.semibold,
     textTransform: "uppercase",
@@ -229,7 +234,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
   };
 
   const descriptionStyle: React.CSSProperties = {
-    color: COLORS.TEXT_SECONDARY,
+    color: theme.colors.text.secondary,
     fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
     lineHeight: "1.5",
     margin: 0,
@@ -256,13 +261,13 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
   };
 
   const metaLabelStyle: React.CSSProperties = {
-    color: COLORS.TEXT_MUTED,
+    color: theme.colors.text.muted,
     fontSize: isMobile ? typography.fontSize.sm : typography.fontSize.xs,
     textTransform: "uppercase",
   };
 
   const metaValueStyle: React.CSSProperties = {
-    color: COLORS.TEXT_PRIMARY,
+    color: theme.colors.text.primary,
     fontWeight: typography.fontWeight.medium,
   };
 
@@ -279,7 +284,10 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
   const progressBarFillStyle: React.CSSProperties = {
     height: "100%",
     width: `${progress}%`,
-    backgroundColor: progress === 100 ? COLORS.SUCCESS : COLORS.ACCENT,
+    backgroundColor:
+      progress === 100
+        ? theme.colors.state.success
+        : theme.colors.accent.primary,
     transition: "width 0.3s ease",
   };
 
@@ -288,7 +296,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     alignItems: "flex-start",
     gap: spacing.xs,
     padding: `${spacing.xs} 0`,
-    color: completed ? COLORS.SUCCESS : COLORS.TEXT_SECONDARY,
+    color: completed ? theme.colors.state.success : theme.colors.text.secondary,
     fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
     textDecoration: completed ? "line-through" : "none",
     opacity: completed ? 0.7 : 1,
@@ -327,7 +335,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
       accentColor: theme.colors.accent.primary,
       radius: theme.borderRadius.md,
     }),
-    color: COLORS.BG_PRIMARY,
+    color: theme.colors.text.primary,
   };
 
   const secondaryButtonStyle: React.CSSProperties = {
@@ -335,7 +343,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     ...getInteractiveTileStyle(theme, {
       radius: theme.borderRadius.md,
     }),
-    color: COLORS.TEXT_PRIMARY,
+    color: theme.colors.text.primary,
   };
 
   return (
@@ -345,7 +353,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
         <h3 style={titleStyle}>
           {selectedQuest.pinned && (
             <span
-              style={{ color: "#ffd700", marginRight: "6px" }}
+              style={{ color: theme.colors.accent.gold, marginRight: "6px" }}
               title="Pinned"
             >
               ★
@@ -459,7 +467,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
                   alignItems: "center",
                   gap: spacing.xs,
                   padding: `${spacing.xs} 0`,
-                  color: COLORS.TEXT_SECONDARY,
+                  color: theme.colors.text.secondary,
                   fontSize: isMobile
                     ? typography.fontSize.base
                     : typography.fontSize.sm,
@@ -482,7 +490,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
             <div style={descriptionStyle}>
               {selectedQuest.questGiver}
               {selectedQuest.questGiverLocation && (
-                <span style={{ color: COLORS.TEXT_MUTED }}>
+                <span style={{ color: theme.colors.text.muted }}>
                   {" "}
                   - {selectedQuest.questGiverLocation}
                 </span>

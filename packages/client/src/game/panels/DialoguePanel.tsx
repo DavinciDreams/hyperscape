@@ -175,21 +175,23 @@ export function DialoguePanel({
                   radius: theme.borderRadius.md,
                   accentColor: theme.colors.accent.primary,
                 }),
-                color: theme.colors.text.secondary,
+                color: theme.colors.text.primary,
+                padding: `${theme.spacing.sm + 2}px ${theme.spacing.md}px`,
+                fontWeight: theme.typography.fontWeight.medium,
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background =
                   theme.name === "hyperscape"
-                    ? "linear-gradient(180deg, rgba(240, 208, 96, 0.18) 0%, rgba(54, 42, 18, 0.22) 100%)"
+                    ? "linear-gradient(180deg, rgba(255, 248, 236, 0.065) 0%, rgba(183, 140, 76, 0.16) 22%, rgba(51, 39, 28, 0.98) 100%)"
                     : `${theme.colors.accent.primary}18`;
                 e.currentTarget.style.borderColor = `${theme.colors.accent.primary}80`;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background =
                   theme.name === "hyperscape"
-                    ? "linear-gradient(180deg, rgba(240, 208, 96, 0.12) 0%, rgba(54, 42, 18, 0.16) 100%)"
+                    ? "linear-gradient(180deg, rgba(255, 248, 236, 0.03) 0%, rgba(255, 242, 226, 0.012) 18%, rgba(35, 29, 24, 0.99) 100%)"
                     : `${theme.colors.accent.primary}12`;
-                e.currentTarget.style.borderColor = `${theme.colors.accent.primary}40`;
+                e.currentTarget.style.borderColor = `${theme.colors.border.default}80`;
               }}
             >
               {index + 1}. {response.text}
@@ -206,18 +208,20 @@ export function DialoguePanel({
                 radius: theme.borderRadius.md,
                 accentColor: theme.colors.accent.primary,
               }),
-              color: theme.colors.text.accent,
+              color: theme.colors.text.primary,
+              padding: `${theme.spacing.sm + 2}px ${theme.spacing.md}px`,
+              fontWeight: theme.typography.fontWeight.semibold,
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background =
                 theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(240, 208, 96, 0.28) 0%, rgba(67, 51, 18, 0.32) 100%)"
+                  ? "linear-gradient(180deg, rgba(255, 249, 239, 0.075) 0%, rgba(183, 140, 76, 0.2) 22%, rgba(55, 42, 29, 0.98) 100%)"
                   : `${theme.colors.accent.primary}28`;
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background =
                 theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(240, 208, 96, 0.2) 0%, rgba(67, 51, 18, 0.24) 100%)"
+                  ? "linear-gradient(180deg, rgba(255, 250, 241, 0.06) 0%, rgba(183, 140, 76, 0.18) 20%, rgba(39, 33, 27, 0.98) 100%)"
                   : `${theme.colors.accent.primary}20`;
             }}
           >

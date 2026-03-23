@@ -132,7 +132,7 @@ export const Tab = memo(function Tab({
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-    textShadow: isActive ? "0 0 16px rgba(240, 208, 96, 0.18)" : "none",
+    textShadow: isActive ? "0 0 12px rgba(183, 140, 76, 0.14)" : "none",
   };
 
   const labelStyle: React.CSSProperties = {
@@ -160,20 +160,20 @@ export const Tab = memo(function Tab({
 
   const applyInactiveHighlight = (element: HTMLDivElement) => {
     if (isActive) return;
-    element.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.02) 36%, rgba(0, 0, 0, 0.05) 100%)`;
+    element.style.background = `linear-gradient(180deg, rgba(255, 250, 241, 0.06) 0%, rgba(255, 243, 225, 0.018) 36%, rgba(0, 0, 0, 0.04) 100%)`;
     element.style.borderBottomColor = theme.colors.border.hover;
-    element.style.borderTopColor = "rgba(255, 255, 255, 0.08)";
+    element.style.borderTopColor = "rgba(255, 248, 236, 0.075)";
     element.style.boxShadow =
-      "inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 -1px 0 rgba(0, 0, 0, 0.04)";
+      "inset 0 1px 0 rgba(255, 248, 236, 0.05), 0 -1px 0 rgba(0, 0, 0, 0.035)";
   };
 
   const clearInactiveHighlight = (element: HTMLDivElement) => {
     if (isActive) return;
     element.style.background =
-      "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.008) 100%)";
+      "linear-gradient(180deg, rgba(255, 248, 236, 0.028) 0%, rgba(255, 244, 229, 0.01) 100%)";
     element.style.borderBottomColor = "transparent";
     element.style.borderTopColor = "transparent";
-    element.style.boxShadow = "inset 0 1px 0 rgba(255, 255, 255, 0.025)";
+    element.style.boxShadow = "inset 0 1px 0 rgba(255, 248, 236, 0.022)";
   };
 
   return (
