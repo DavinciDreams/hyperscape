@@ -65,6 +65,12 @@ interface UseMinimapEntityPipsOptions {
   entityCacheRef: MutableRefObject<Map<string, EntityPip>>;
 }
 
+interface EntityCollectionsLike {
+  player?: Entity;
+  items?: Map<string, Entity>;
+  players?: Map<string, Entity>;
+}
+
 export function useMinimapEntityPips({
   world,
   isVisible,
@@ -74,7 +80,8 @@ export function useMinimapEntityPips({
   entityCacheRef,
 }: UseMinimapEntityPipsOptions): void {
   useEffect(() => {
-    if (!world.entities || !isVisible) return;
+    const entities = world.entities as EntityCollectionsLike | undefined;
+    if (!entities || !isVisible) return;
 
     let intervalId: number | null = null;
     const workingPips: EntityPip[] = [];
@@ -84,7 +91,7 @@ export function useMinimapEntityPips({
       workingPips.length = 0;
       seenIds.clear();
 
-      const player = world.entities?.player as Entity | undefined;
+      const player = entities.player;
       let playerPipId: string | null = null;
       const buildCullExtent = extentRef.current * 1.5;
       let buildOriginX = 0;
@@ -148,171 +155,172 @@ export function useMinimapEntityPips({
         }
       }
 
-      const players = world.entities?.getAllPlayers() ?? [];
-      for (let index = 0; index < players.length; index += 1) {
-        const otherPlayer = players[index];
-        if (
-          (player && otherPlayer.id === player.id) ||
-          (playerPipId && otherPlayer.id === playerPipId)
-        ) {
-          continue;
-        }
+      const players = entities.players;
+      if (players) {
+        for (const [otherPlayerId, otherEntity] of players) {
+          if (
+            (player && otherPlayerId === player.id) ||
+            (playerPipId && otherPlayerId === playerPipId)
+          ) {
+            continue;
+          }
 
-        const otherEntity = world.entities?.get(otherPlayer.id);
-        if (!otherEntity?.node?.position) continue;
+          if (!otherEntity?.node?.position) continue;
 
-        let playerPip = entityCacheRef.current.get(otherPlayer.id);
-        if (playerPip) {
-          playerPip.position.set(
-            otherEntity.node.position.x,
-            0,
-            otherEntity.node.position.z,
-          );
-          playerPip.color = "#ffffff";
-        } else {
-          playerPip = {
-            id: otherPlayer.id,
-            type: "player",
-            position: new THREE.Vector3(
+          let playerPip = entityCacheRef.current.get(otherPlayerId);
+          if (playerPip) {
+            playerPip.position.set(
               otherEntity.node.position.x,
               0,
               otherEntity.node.position.z,
-            ),
-            color: "#ffffff",
-          };
-          entityCacheRef.current.set(otherPlayer.id, playerPip);
+            );
+            playerPip.color = "#ffffff";
+          } else {
+            playerPip = {
+              id: otherPlayerId,
+              type: "player",
+              position: new THREE.Vector3(
+                otherEntity.node.position.x,
+                0,
+                otherEntity.node.position.z,
+              ),
+              color: "#ffffff",
+            };
+            entityCacheRef.current.set(otherPlayerId, playerPip);
+          }
+          workingPips.push(playerPip);
+          seenIds.add(otherPlayerId);
         }
-        workingPips.push(playerPip);
-        seenIds.add(otherPlayer.id);
       }
 
-      const allEntities = world.entities?.getAll() ?? [];
-      for (let index = 0; index < allEntities.length; index += 1) {
-        const entity = allEntities[index];
-        const position = entity?.position;
-        if (!position) continue;
+      const allEntities = entities.items;
+      if (allEntities) {
+        for (const entity of allEntities.values()) {
+          const position = entity?.position;
+          if (!position) continue;
 
-        if (
-          hasBuildOrigin &&
-          (Math.abs(position.x - buildOriginX) > buildCullExtent ||
-            Math.abs(position.z - buildOriginZ) > buildCullExtent)
-        ) {
-          continue;
-        }
-
-        let color = "#ffffff";
-        let type: EntityPip["type"] = "item";
-        let subType: string | undefined;
-
-        switch (entity.type) {
-          case "player":
+          if (
+            hasBuildOrigin &&
+            (Math.abs(position.x - buildOriginX) > buildCullExtent ||
+              Math.abs(position.z - buildOriginZ) > buildCullExtent)
+          ) {
             continue;
-          case "mob":
-          case "enemy":
-            color = "#ffff00";
-            type = "enemy";
-            break;
-          case "npc": {
-            color = "#ffff00";
-            type = "enemy";
-            const npcConfig = (
-              entity as unknown as { config?: MinimapEntityConfig }
-            ).config;
-            const serviceTypes = npcConfig?.services;
-            if (serviceTypes?.includes("bank")) {
-              subType = "bank";
-            } else if (serviceTypes?.includes("shop")) {
-              subType = "shop";
-            }
-            if (serviceTypes?.includes("quest")) {
-              const questIds = npcConfig?.questIds;
-              const statuses = questStatusesRef.current;
-              if (questIds && questIds.length > 0 && statuses.size > 0) {
-                let hasAvailable = false;
-                let hasActive = false;
-                let allCompleted = true;
-                for (const questId of questIds) {
-                  const state = statuses.get(questId);
-                  if (state === "available") hasAvailable = true;
-                  else if (state === "active") hasActive = true;
-                  if (state !== "completed") allCompleted = false;
-                }
-                if (hasAvailable) subType = "quest_available";
-                else if (hasActive) subType = "quest_in_progress";
-                else if (!allCompleted) subType = "quest_available";
-              } else {
-                subType = "quest_available";
-              }
-            }
-            break;
           }
-          case "bank":
-          case "furnace":
-          case "anvil":
-          case "range":
-          case "altar":
-          case "runecrafting_altar":
-            color = "#ffff00";
-            type = "building";
-            subType = entity.type;
-            break;
-          case "building":
-          case "structure":
-            color = "#ffff00";
-            type = "building";
-            break;
-          case "item":
-          case "loot":
-            color = "#ff0000";
-            type = "item";
-            break;
-          case "resource": {
-            color = "#ffff00";
-            type = "resource";
-            const resourceConfig = (
-              entity as unknown as { config?: MinimapEntityConfig }
-            ).config;
-            if (
-              resourceConfig?.resourceType === "fishing_spot" ||
-              resourceConfig?.harvestSkill === "fishing"
-            ) {
-              subType = "fishing";
-            } else if (
-              resourceConfig?.resourceType === "mining_rock" ||
-              resourceConfig?.harvestSkill === "mining"
-            ) {
-              subType = "mining";
-            } else if (
-              resourceConfig?.resourceType === "tree" ||
-              resourceConfig?.harvestSkill === "woodcutting"
-            ) {
-              subType = "tree";
-            }
-            break;
-          }
-          default:
-            color = "#cccccc";
-            type = "item";
-        }
 
-        let entityPip = entityCacheRef.current.get(entity.id);
-        if (entityPip) {
-          entityPip.position.set(position.x, 0, position.z);
-          entityPip.type = type;
-          entityPip.color = color;
-          entityPip.subType = subType;
-        } else {
-          entityPip = {
-            id: entity.id,
-            type,
-            position: new THREE.Vector3(position.x, 0, position.z),
-            color,
-            subType,
-          };
-          entityCacheRef.current.set(entity.id, entityPip);
+          let color = "#ffffff";
+          let type: EntityPip["type"] = "item";
+          let subType: string | undefined;
+
+          switch (entity.type) {
+            case "player":
+              continue;
+            case "mob":
+            case "enemy":
+              color = "#ffff00";
+              type = "enemy";
+              break;
+            case "npc": {
+              color = "#ffff00";
+              type = "enemy";
+              const npcConfig = (
+                entity as unknown as { config?: MinimapEntityConfig }
+              ).config;
+              const serviceTypes = npcConfig?.services;
+              if (serviceTypes?.includes("bank")) {
+                subType = "bank";
+              } else if (serviceTypes?.includes("shop")) {
+                subType = "shop";
+              }
+              if (serviceTypes?.includes("quest")) {
+                const questIds = npcConfig?.questIds;
+                const statuses = questStatusesRef.current;
+                if (questIds && questIds.length > 0 && statuses.size > 0) {
+                  let hasAvailable = false;
+                  let hasActive = false;
+                  let allCompleted = true;
+                  for (const questId of questIds) {
+                    const state = statuses.get(questId);
+                    if (state === "available") hasAvailable = true;
+                    else if (state === "active") hasActive = true;
+                    if (state !== "completed") allCompleted = false;
+                  }
+                  if (hasAvailable) subType = "quest_available";
+                  else if (hasActive) subType = "quest_in_progress";
+                  else if (!allCompleted) subType = "quest_available";
+                } else {
+                  subType = "quest_available";
+                }
+              }
+              break;
+            }
+            case "bank":
+            case "furnace":
+            case "anvil":
+            case "range":
+            case "altar":
+            case "runecrafting_altar":
+              color = "#ffff00";
+              type = "building";
+              subType = entity.type;
+              break;
+            case "building":
+            case "structure":
+              color = "#ffff00";
+              type = "building";
+              break;
+            case "item":
+            case "loot":
+              color = "#ff0000";
+              type = "item";
+              break;
+            case "resource": {
+              color = "#ffff00";
+              type = "resource";
+              const resourceConfig = (
+                entity as unknown as { config?: MinimapEntityConfig }
+              ).config;
+              if (
+                resourceConfig?.resourceType === "fishing_spot" ||
+                resourceConfig?.harvestSkill === "fishing"
+              ) {
+                subType = "fishing";
+              } else if (
+                resourceConfig?.resourceType === "mining_rock" ||
+                resourceConfig?.harvestSkill === "mining"
+              ) {
+                subType = "mining";
+              } else if (
+                resourceConfig?.resourceType === "tree" ||
+                resourceConfig?.harvestSkill === "woodcutting"
+              ) {
+                subType = "tree";
+              }
+              break;
+            }
+            default:
+              color = "#cccccc";
+              type = "item";
+          }
+
+          let entityPip = entityCacheRef.current.get(entity.id);
+          if (entityPip) {
+            entityPip.position.set(position.x, 0, position.z);
+            entityPip.type = type;
+            entityPip.color = color;
+            entityPip.subType = subType;
+          } else {
+            entityPip = {
+              id: entity.id,
+              type,
+              position: new THREE.Vector3(position.x, 0, position.z),
+              color,
+              subType,
+            };
+            entityCacheRef.current.set(entity.id, entityPip);
+          }
+          workingPips.push(entityPip);
+          seenIds.add(entity.id);
         }
-        workingPips.push(entityPip);
-        seenIds.add(entity.id);
       }
 
       for (const id of entityCacheRef.current.keys()) {
