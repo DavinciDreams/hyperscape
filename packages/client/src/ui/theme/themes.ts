@@ -377,36 +377,36 @@ export const hyperscapeTheme: Theme = {
 
   colors: {
     background: {
-      primary: "#0f0f12", // Slightly lighter base
-      secondary: "#22222a", // Much lighter for contrast
-      tertiary: "#363640", // Significantly lighter for clear separation
+      primary: "#0c0d10",
+      secondary: "#191b20",
+      tertiary: "#262a31",
       overlay: "rgba(0, 0, 0, 0.75)",
-      glass: "rgba(18, 18, 22, 0.82)", // Lighter glass
-      panelPrimary: "rgba(25, 25, 32, 0.78)", // Lighter panel background
-      panelSecondary: "rgba(45, 45, 56, 0.82)", // Much more visible panel section
-      hover: "#2a2a32", // Hover state background
+      glass: "rgba(15, 17, 22, 0.84)",
+      panelPrimary: "rgba(18, 21, 27, 0.84)",
+      panelSecondary: "rgba(29, 34, 42, 0.88)",
+      hover: "#232830",
     },
     text: {
-      primary: "#f8f4ec", // Brighter warm white
-      secondary: "#d4c8a6", // Brighter muted gold
-      muted: "#9a8d78", // Lighter subtle brown
+      primary: "#efe9dd",
+      secondary: "#c0b29a",
+      muted: "#897c68",
       disabled: "#555555",
-      link: "#f0d060", // Brighter gold link
-      accent: "#ffe080", // Brighter vibrant gold accent
+      link: "#d5b46f",
+      accent: "#dbc088",
     },
     border: {
-      default: "#4d4540", // Much lighter for visibility
-      hover: "#6a5f50", // Lighter hover
-      active: "#8b7a60", // Lighter active state
-      focus: "#f0d060", // Brighter gold focus ring
-      decorative: "#b88828", // Much brighter bronze decorative
+      default: "#484238",
+      hover: "#6b6253",
+      active: "#87765b",
+      focus: "#c3a05d",
+      decorative: "#8f6630",
     },
     accent: {
-      primary: "#d4a84b", // Rich classic gold
-      secondary: "#ffd866", // Bright gold highlight
-      hover: "#e8be5a", // Lighter on hover
-      active: "#c49530", // Deeper on press
-      gold: "#d4a84b", // Gold accent
+      primary: "#b78c4c",
+      secondary: "#d4b177",
+      hover: "#c79b59",
+      active: "#9f763d",
+      gold: "#c19b5a",
     },
     state: {
       success: "#4ade80", // Modern green
@@ -425,11 +425,11 @@ export const hyperscapeTheme: Theme = {
       energyBackground: "#0d2d0d",
     },
     slot: {
-      empty: "#1a1a20", // Lighter for visibility
-      filled: "#2a2a32", // Much lighter for contrast
-      hover: "#3a3844", // Lighter hover state
-      selected: "#5a5248", // Lighter selected state
-      disabled: "#101012", // Darker disabled
+      empty: "#15181d",
+      filled: "#242931",
+      hover: "#303743",
+      selected: "#53483a",
+      disabled: "#0d0f13",
     },
   },
 
@@ -482,11 +482,12 @@ export const hyperscapeTheme: Theme = {
   shadows: {
     none: "none",
     sm: "0 1px 2px rgba(0, 0, 0, 0.4)",
-    md: "0 4px 8px rgba(0, 0, 0, 0.5)",
-    lg: "0 8px 16px rgba(0, 0, 0, 0.6)",
-    xl: "0 16px 32px rgba(0, 0, 0, 0.7)",
-    window: "0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(139, 90, 43, 0.3)",
-    glow: "0 0 20px rgba(201, 165, 74, 0.4)",
+    md: "0 6px 12px rgba(0, 0, 0, 0.54)",
+    lg: "0 12px 24px rgba(0, 0, 0, 0.64)",
+    xl: "0 22px 44px rgba(0, 0, 0, 0.74)",
+    window:
+      "0 18px 42px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(108, 82, 44, 0.28)",
+    glow: "0 0 18px rgba(183, 140, 76, 0.22)",
   },
 
   zIndex: {
@@ -618,15 +619,17 @@ export function getPanelSurfaceStyle(
     borderRadius: theme.borderRadius.lg,
     backgroundImage:
       theme.name === "hyperscape"
-        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.018) 18%, rgba(0, 0, 0, 0.08) 100%),
-           radial-gradient(circle at top right, rgba(240, 208, 96, 0.14), transparent 34%),
-           linear-gradient(180deg, ${theme.colors.background.panelSecondary}e6 0%, ${theme.colors.background.panelPrimary}f5 100%)`
+        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.015) 18%, rgba(0, 0, 0, 0.12) 100%),
+           radial-gradient(circle at top right, rgba(183, 140, 76, 0.08), transparent 28%),
+           radial-gradient(circle at bottom left, rgba(58, 74, 98, 0.1), transparent 32%),
+           repeating-linear-gradient(135deg, rgba(255,255,255,0.012) 0, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 6px),
+           linear-gradient(180deg, ${theme.colors.background.panelSecondary}ee 0%, ${theme.colors.background.panelPrimary}fb 100%)`
         : `linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 24%, rgba(0, 0, 0, 0.06) 100%),
            linear-gradient(180deg, ${theme.colors.background.panelSecondary}d9 0%, ${theme.colors.background.panelPrimary}f2 100%)`,
     boxShadow:
       emphasis === "strong"
-        ? `${theme.shadows.window}, inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 0 0 1px rgba(255, 255, 255, 0.035), inset 0 -20px 32px rgba(0, 0, 0, 0.12)`
-        : `${theme.shadows.md}, inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -10px 18px rgba(0, 0, 0, 0.08)`,
+        ? `${theme.shadows.window}, inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 0 1px rgba(255, 255, 255, 0.024), inset 0 -22px 36px rgba(0, 0, 0, 0.2)`
+        : `${theme.shadows.md}, inset 0 1px 0 rgba(255, 255, 255, 0.055), inset 0 -12px 20px rgba(0, 0, 0, 0.12)`,
     transition: interactive ? theme.transitions.fast : undefined,
   };
 }
@@ -638,14 +641,15 @@ export function getPanelHeaderStyle(theme: Theme): React.CSSProperties {
   return {
     background:
       theme.name === "hyperscape"
-        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 58%),
-           radial-gradient(circle at top right, rgba(240, 208, 96, 0.18), transparent 36%),
+        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, transparent 48%),
+           radial-gradient(circle at top right, rgba(183, 140, 76, 0.12), transparent 34%),
+           linear-gradient(90deg, rgba(255,255,255,0.016) 0%, transparent 12%, transparent 88%, rgba(255,255,255,0.012) 100%),
            linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.tertiary} 100%)`
         : `linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 56%),
            linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
     borderBottom: `1px solid ${theme.colors.border.default}`,
     boxShadow:
-      "inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(0, 0, 0, 0.32)",
+      "inset 0 1px 0 rgba(255, 255, 255, 0.065), inset 0 -1px 0 rgba(0, 0, 0, 0.36)",
   };
 }
 
@@ -714,7 +718,7 @@ export function getWindowSurfaceStyle(
   const shadow = getThemedWindowShadow(theme, state);
   const accentGlow =
     theme.name === "hyperscape"
-      ? `0 0 0 1px rgba(240, 208, 96, ${state === "dragging" ? 0.16 : 0.1})`
+      ? `0 0 0 1px rgba(183, 140, 76, ${state === "dragging" ? 0.14 : 0.08})`
       : "none";
 
   return {
@@ -724,9 +728,10 @@ export function getWindowSurfaceStyle(
     ),
     backgroundImage:
       theme.name === "hyperscape"
-        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.02) 28%, rgba(0, 0, 0, 0.11) 100%),
-           radial-gradient(circle at top right, rgba(240, 208, 96, 0.14), transparent 36%),
-           radial-gradient(circle at bottom left, rgba(36, 92, 132, 0.12), transparent 34%)`
+        ? `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.018) 28%, rgba(0, 0, 0, 0.14) 100%),
+           radial-gradient(circle at top right, rgba(183, 140, 76, 0.08), transparent 34%),
+           radial-gradient(circle at bottom left, rgba(36, 92, 132, 0.08), transparent 32%),
+           repeating-linear-gradient(135deg, rgba(255,255,255,0.01) 0, rgba(255,255,255,0.01) 1px, transparent 1px, transparent 7px)`
         : "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 42%, rgba(0, 0, 0, 0.08) 100%)",
     backdropFilter: `blur(${theme.glass.blur}px) saturate(1.08)`,
     WebkitBackdropFilter: `blur(${theme.glass.blur}px) saturate(1.08)`,
@@ -763,7 +768,7 @@ export function getTabBarChromeStyle(
     backgroundColor: theme.colors.background.secondary,
     backgroundImage:
       theme.name === "hyperscape"
-        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(0, 0, 0, 0.1) 100%), radial-gradient(circle at top right, rgba(240, 208, 96, 0.14), transparent 32%)"
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.018) 22%, rgba(0, 0, 0, 0.13) 100%), radial-gradient(circle at top right, rgba(183, 140, 76, 0.08), transparent 28%), repeating-linear-gradient(90deg, rgba(255,255,255,0.012) 0, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 18px)"
         : "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 100%)",
     borderBottom: `1px solid ${borderBottomColor}`,
     boxShadow: `${shadow}, inset 0 1px 0 rgba(255, 255, 255, 0.06)`,
@@ -786,8 +791,8 @@ export function getTabChromeStyle(
       ? theme.colors.background.secondary
       : "rgba(255, 255, 255, 0.01)",
     backgroundImage: isActive
-      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.025) 38%, rgba(0, 0, 0, 0.08) 100%)"
-      : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.008) 100%)",
+      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.085) 0%, rgba(255, 255, 255, 0.02) 38%, rgba(0, 0, 0, 0.11) 100%)"
+      : "linear-gradient(180deg, rgba(255, 255, 255, 0.022) 0%, rgba(255, 255, 255, 0.006) 100%)",
     borderRight: `1px solid ${isActive ? theme.colors.border.hover : theme.colors.border.default}`,
     borderBottom: isActive
       ? `1px solid ${theme.colors.accent.primary}`
@@ -813,20 +818,20 @@ export function getShellControlButtonStyle(
     variant === "danger"
       ? {
           fg: theme.colors.text.muted,
-          bg: "transparent",
+          bg: "rgba(255, 255, 255, 0.025)",
           hoverBg: theme.colors.state.danger,
           hoverFg: theme.colors.text.primary,
         }
       : variant === "accent"
         ? {
             fg: theme.colors.text.secondary,
-            bg: "transparent",
-            hoverBg: theme.colors.background.tertiary,
+            bg: "rgba(255, 255, 255, 0.025)",
+            hoverBg: `${theme.colors.accent.primary}2A`,
             hoverFg: theme.colors.accent.primary,
           }
         : {
             fg: theme.colors.text.muted,
-            bg: "transparent",
+            bg: "rgba(255, 255, 255, 0.02)",
             hoverBg: theme.colors.background.tertiary,
             hoverFg: theme.colors.text.primary,
           };
@@ -834,7 +839,7 @@ export function getShellControlButtonStyle(
   return {
     width: 24,
     height: 24,
-    border: `1px solid rgba(255, 255, 255, 0.04)`,
+    border: `1px solid rgba(255, 255, 255, 0.05)`,
     background: palette.bg,
     color: palette.fg,
     cursor: "pointer",
@@ -844,7 +849,8 @@ export function getShellControlButtonStyle(
     justifyContent: "center",
     fontSize: 12,
     flexShrink: 0,
-    boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+    boxShadow:
+      "inset 0 1px 0 rgba(255, 255, 255, 0.05), inset 0 -8px 12px rgba(0, 0, 0, 0.18)",
     transition: `color ${theme.transitions.fast}, background-color ${theme.transitions.fast}, border-color ${theme.transitions.fast}, transform ${theme.transitions.fast}`,
     "--shell-button-hover-bg": palette.hoverBg,
     "--shell-button-hover-fg": palette.hoverFg,
@@ -882,8 +888,8 @@ export function getPanelInsetStyle(
     background:
       theme.name === "hyperscape"
         ? emphasis === "strong"
-          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 16%, rgba(0, 0, 0, 0.14) 100%), linear-gradient(180deg, rgba(38, 42, 52, 0.96) 0%, rgba(17, 19, 24, 0.98) 100%)"
-          : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 18%, rgba(0, 0, 0, 0.1) 100%), linear-gradient(180deg, rgba(34, 38, 46, 0.94) 0%, rgba(18, 20, 26, 0.96) 100%)"
+          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.038) 0%, rgba(255, 255, 255, 0.012) 16%, rgba(0, 0, 0, 0.18) 100%), radial-gradient(circle at top right, rgba(183, 140, 76, 0.06), transparent 26%), repeating-linear-gradient(135deg, rgba(255,255,255,0.01) 0, rgba(255,255,255,0.01) 1px, transparent 1px, transparent 8px), linear-gradient(180deg, rgba(30, 34, 41, 0.98) 0%, rgba(13, 16, 21, 0.99) 100%)"
+          : "linear-gradient(180deg, rgba(255, 255, 255, 0.026) 0%, rgba(255, 255, 255, 0.01) 18%, rgba(0, 0, 0, 0.14) 100%), repeating-linear-gradient(135deg, rgba(255,255,255,0.008) 0, rgba(255,255,255,0.008) 1px, transparent 1px, transparent 9px), linear-gradient(180deg, rgba(24, 28, 34, 0.96) 0%, rgba(14, 17, 22, 0.98) 100%)"
         : theme.colors.background.panelPrimary,
     border: `1px solid ${emphasis === "strong" ? theme.colors.border.decorative : `${theme.colors.border.default}66`}`,
     borderRadius: options?.radius ?? theme.borderRadius.md,
@@ -915,12 +921,12 @@ export function getInteractiveTileStyle(
   const accentColor = options?.accentColor ?? theme.colors.accent.primary;
 
   const background = dropTarget
-    ? `linear-gradient(180deg, ${accentColor}33 0%, rgba(20, 24, 30, 0.96) 100%)`
+    ? `linear-gradient(180deg, ${accentColor}22 0%, rgba(20, 24, 30, 0.98) 100%)`
     : active
-      ? `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${accentColor}26 20%, rgba(18, 20, 26, 0.96) 100%)`
+      ? `linear-gradient(180deg, rgba(255, 255, 255, 0.055) 0%, ${accentColor}18 20%, rgba(15, 18, 24, 0.98) 100%)`
       : hovered
-        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 20%, rgba(16, 18, 24, 0.98) 100%)"
-        : "linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.01) 18%, rgba(16, 18, 24, 0.98) 100%)";
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 20%, rgba(16, 18, 24, 0.99) 100%)"
+        : "linear-gradient(180deg, rgba(255, 255, 255, 0.028) 0%, rgba(255, 255, 255, 0.01) 18%, rgba(16, 18, 24, 0.99) 100%)";
 
   return {
     background,
@@ -933,10 +939,10 @@ export function getInteractiveTileStyle(
           : `1px solid ${theme.colors.border.default}80`,
     borderRadius: options?.radius ?? theme.borderRadius.sm,
     boxShadow: active
-      ? `0 0 14px ${accentColor}30, inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -8px 12px rgba(0, 0, 0, 0.12)`
+      ? `0 0 12px ${accentColor}1F, inset 0 1px 0 rgba(255, 255, 255, 0.055), inset 0 -10px 14px rgba(0, 0, 0, 0.16)`
       : dropTarget
-        ? `0 0 12px ${accentColor}2E, inset 0 1px 0 rgba(255, 255, 255, 0.06)`
-        : "inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -8px 12px rgba(0, 0, 0, 0.12)",
+        ? `0 0 10px ${accentColor}24, inset 0 1px 0 rgba(255, 255, 255, 0.05)`
+        : "inset 0 1px 0 rgba(255, 255, 255, 0.035), inset 0 -10px 14px rgba(0, 0, 0, 0.16)",
     opacity: dragging ? 0.45 : disabled ? 0.5 : 1,
     transition:
       "transform 0.15s ease, opacity 0.15s ease, background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease",
