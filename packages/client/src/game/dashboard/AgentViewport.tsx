@@ -82,10 +82,6 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
             clearInterval(pollingIntervalRef.current);
             pollingIntervalRef.current = null;
           }
-          console.log(
-            "[AgentViewport] Got permanent spectator token for:",
-            tokenData.agentName,
-          );
         } else if (tokenResponse.status === 401) {
           // Privy token expired - user needs to re-authenticate
           console.warn("[AgentViewport] Privy token expired, need to re-login");
@@ -98,16 +94,12 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
           setWaitingForAgent(false);
         } else if (tokenResponse.status === 404) {
           // Agent not yet registered - start polling to wait for it
-          console.log(
-            "[AgentViewport] Agent not yet registered, waiting for connection...",
-          );
           setWaitingForAgent(true);
           setLoading(false);
 
           // Start polling if not already polling
           if (!pollingIntervalRef.current) {
             pollingIntervalRef.current = setInterval(() => {
-              console.log("[AgentViewport] Polling for agent registration...");
               fetchSpectatorData(true);
             }, 3000); // Poll every 3 seconds
           }

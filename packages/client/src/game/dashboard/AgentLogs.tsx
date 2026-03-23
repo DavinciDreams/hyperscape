@@ -46,7 +46,6 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
       if (response.ok) {
         // Remove log from local state immediately
         setLogs((prev) => prev.filter((log) => log.id !== logId));
-        console.log(`[AgentLogs] ✅ Log ${logId} deleted`);
       } else {
         console.error(
           `[AgentLogs] Failed to delete log: HTTP ${response.status}`,
@@ -66,10 +65,7 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
 
       // Only fetch logs for active agents
       if (agent.status !== "active") {
-        console.log(
-          `[AgentLogs] Agent ${agent.name} is ${agent.status} - skipping log fetch`,
-        );
-        setLogs([]);
+        setLogs((prev) => (prev.length > 0 ? [] : prev));
         return;
       }
 
@@ -79,13 +75,8 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
         const response = await fetch(
           `${ELIZAOS_API}/agents/${agent.id}/logs?limit=200&level=info`,
         );
-        console.log(
-          "[AgentLogs] Fetching logs from:",
-          `${ELIZAOS_API}/agents/${agent.id}/logs`,
-        );
         if (response.ok) {
           const result = await response.json();
-          console.log("[AgentLogs] Raw response:", result);
 
           // ElizaOS returns { success, data: [...] } where data is the logs array
           if (!result.success || !result.data || !Array.isArray(result.data)) {
@@ -95,8 +86,6 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
           }
 
           const logs = result.data;
-          console.log("[AgentLogs] Logs count from API:", logs.length);
-          console.log("[AgentLogs] First log sample:", logs[0]);
 
           // Extract log level from type (e.g., "useModel:TEXT_EMBEDDING" -> "info")
           const extractLevel = (log: ElizaOSLog): string => {
@@ -136,10 +125,6 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
             source: agent.name,
           }));
 
-          console.log(
-            "[AgentLogs] Formatted logs count:",
-            formattedLogs.length,
-          );
           setLogs(formattedLogs);
         } else {
           console.error(

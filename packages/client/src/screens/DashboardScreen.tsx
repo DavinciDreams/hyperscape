@@ -73,9 +73,7 @@ export const DashboardScreen: React.FC = () => {
 
   // Log account ID on mount (already read from localStorage in useState initializer)
   useEffect(() => {
-    if (userAccountId) {
-      console.log("[Dashboard] User account ID:", userAccountId);
-    } else {
+    if (!userAccountId) {
       console.warn(
         "[Dashboard] No user account ID found - dashboard may show all agents",
       );
@@ -96,10 +94,6 @@ export const DashboardScreen: React.FC = () => {
 
           if (mappingResult.ok && mappingResult.data) {
             userAgentIds = mappingResult.data.agentIds || [];
-            console.log(
-              `[Dashboard] Found ${userAgentIds.length} agent mapping(s) for user ${userAccountId}`,
-              userAgentIds,
-            );
           } else {
             console.warn(
               "[Dashboard] Failed to fetch agent mappings from Hyperscape:",
@@ -124,24 +118,9 @@ export const DashboardScreen: React.FC = () => {
         // Filter agents using Hyperscape database mappings
         if (userAccountId && userAgentIds.length > 0) {
           filteredAgents = data.data.agents.filter((agent: Agent) => {
-            const match = userAgentIds.includes(agent.id);
-
-            if (match) {
-              console.log(
-                `[Dashboard] ✅ Agent ${agent.name} (${agent.id}) belongs to user ${userAccountId}`,
-              );
-            }
-
-            return match;
+            return userAgentIds.includes(agent.id);
           });
-
-          console.log(
-            `[Dashboard] Filtered ${filteredAgents.length} agents out of ${data.data.agents.length} for user ${userAccountId}`,
-          );
         } else if (userAccountId && !mappingFetchFailed) {
-          console.log(
-            "[Dashboard] No agent mappings found - showing empty list",
-          );
           filteredAgents = [];
         } else if (mappingFetchFailed) {
           console.warn(
@@ -171,8 +150,6 @@ export const DashboardScreen: React.FC = () => {
 
   const startAgent = async (agentId: string) => {
     try {
-      console.log(`[Dashboard] Starting agent ${agentId}...`);
-
       // Check if user wants to auto-start viewport
       const autoStartViewport =
         localStorage.getItem(VIEWPORT_AUTO_START_KEY) === "true";
@@ -183,8 +160,7 @@ export const DashboardScreen: React.FC = () => {
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      const result = await response.json();
-      console.log(`[Dashboard] Agent started:`, result);
+      await response.json();
 
       // Refresh agent list to update status
       await fetchAgents();
@@ -195,9 +171,6 @@ export const DashboardScreen: React.FC = () => {
         setShowViewportModal(true);
       } else {
         // Auto-start viewport
-        console.log(
-          `[Dashboard] Auto-starting viewport for ${agentId} (preference enabled)`,
-        );
         setViewportAgentId(agentId);
         // Switch to chat view to show the viewport
         if (selectedAgentId === agentId) {
@@ -211,14 +184,10 @@ export const DashboardScreen: React.FC = () => {
 
   const handleViewportConfirm = (dontAskAgain: boolean) => {
     if (dontAskAgain) {
-      console.log(
-        "[Dashboard] Saving viewport auto-start preference to localStorage",
-      );
       localStorage.setItem(VIEWPORT_AUTO_START_KEY, "true");
     }
 
     if (pendingStartAgentId) {
-      console.log(`[Dashboard] Starting viewport for ${pendingStartAgentId}`);
       setViewportAgentId(pendingStartAgentId);
       // Switch to chat view to show the viewport
       if (selectedAgentId === pendingStartAgentId) {
@@ -231,29 +200,21 @@ export const DashboardScreen: React.FC = () => {
   };
 
   const handleViewportCancel = () => {
-    console.log(
-      "[Dashboard] User declined viewport start - agent running without viewport",
-    );
     setShowViewportModal(false);
     setPendingStartAgentId(null);
   };
 
   const stopAgent = async (agentId: string) => {
     try {
-      console.log(`[Dashboard] Stopping agent ${agentId}...`);
       const response = await fetch(`${ELIZAOS_API}/agents/${agentId}/stop`, {
         method: "POST",
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      const result = await response.json();
-      console.log(`[Dashboard] Agent stopped:`, result);
+      await response.json();
 
       // Clear viewport if this agent's viewport is showing
       if (viewportAgentId === agentId) {
-        console.log(
-          `[Dashboard] Clearing viewport for stopped agent ${agentId}`,
-        );
         setViewportAgentId(null);
       }
 
@@ -265,10 +226,6 @@ export const DashboardScreen: React.FC = () => {
   };
 
   const deleteAgent = async (agentId: string) => {
-    console.log(
-      `[Dashboard] 🗑️  Starting atomic deletion for agent ${agentId}...`,
-    );
-
     // Store mapping data for potential rollback
     let deletedMapping: {
       agentId: string;
@@ -279,9 +236,6 @@ export const DashboardScreen: React.FC = () => {
 
     try {
       // STEP 1: Fetch mapping data before deletion (for rollback)
-      console.log(
-        `[Dashboard] 📋 Fetching mapping data for rollback protection...`,
-      );
       try {
         const getMappingResult = await apiClient.get<{
           agentId?: string;
@@ -297,10 +251,6 @@ export const DashboardScreen: React.FC = () => {
             characterId: getMappingResult.data.characterId || "",
             agentName: getMappingResult.data.agentName || "Unknown Agent",
           };
-          console.log(
-            `[Dashboard] ✅ Mapping data cached for rollback:`,
-            deletedMapping,
-          );
         } else {
           console.warn(
             `[Dashboard] ⚠️  Could not fetch mapping data (${getMappingResult.error || getMappingResult.status}) - proceeding without rollback protection`,
@@ -315,9 +265,6 @@ export const DashboardScreen: React.FC = () => {
       }
 
       // STEP 2: Delete mapping FIRST (cheap operation, fast)
-      console.log(
-        `[Dashboard] 🗑️  Step 1/2: Deleting mapping from Hyperscape database...`,
-      );
       const mappingDeleteResult = await apiClient.delete(
         `/api/agents/mappings/${agentId}`,
       );
@@ -328,10 +275,7 @@ export const DashboardScreen: React.FC = () => {
         );
       }
 
-      console.log(`[Dashboard] ✅ Mapping deleted from Hyperscape database`);
-
       // STEP 3: Delete from ElizaOS SECOND (expensive operation, slow)
-      console.log(`[Dashboard] 🗑️  Step 2/2: Deleting agent from ElizaOS...`);
       const elizaResponse = await fetch(`${ELIZAOS_API}/agents/${agentId}`, {
         method: "DELETE",
       });
@@ -340,13 +284,8 @@ export const DashboardScreen: React.FC = () => {
         throw new Error(`ElizaOS DELETE failed: HTTP ${elizaResponse.status}`);
       }
 
-      console.log(`[Dashboard] ✅ Agent deleted from ElizaOS`);
-
       // STEP 4: Clear viewport if this agent's viewport is showing
       if (viewportAgentId === agentId) {
-        console.log(
-          `[Dashboard] Clearing viewport for deleted agent ${agentId}`,
-        );
         setViewportAgentId(null);
       }
 
@@ -357,28 +296,18 @@ export const DashboardScreen: React.FC = () => {
 
       // STEP 6: Refresh agent list
       await fetchAgents();
-
-      console.log(`[Dashboard] ✅ Atomic deletion completed successfully`);
     } catch (error) {
       console.error(`[Dashboard] ❌ Agent deletion failed:`, error);
 
       // ROLLBACK: Restore mapping if ElizaOS deletion failed
       if (deletedMapping) {
-        console.log(
-          `[Dashboard] 🔄 ElizaOS deletion failed, attempting rollback of mapping deletion...`,
-        );
-
         try {
           const rollbackResult = await apiClient.post(
             "/api/agents/mappings",
             deletedMapping,
           );
 
-          if (rollbackResult.ok) {
-            console.log(
-              `[Dashboard] ✅ Mapping rollback successful - agent restored in dashboard`,
-            );
-          } else {
+          if (!rollbackResult.ok) {
             console.error(
               `[Dashboard] ❌ Mapping rollback failed: ${rollbackResult.error || rollbackResult.status} - ghost agent may appear`,
             );
@@ -413,7 +342,6 @@ export const DashboardScreen: React.FC = () => {
   const fetchAgentPanels = async (agentId: string) => {
     setLoadingPanels(true);
     try {
-      console.log(`[Dashboard] Fetching panels for agent ${agentId}...`);
       const response = await fetch(`${ELIZAOS_API}/agents/${agentId}/panels`);
 
       if (!response.ok) {
@@ -428,10 +356,6 @@ export const DashboardScreen: React.FC = () => {
       }
 
       const data = await response.json();
-      console.log(
-        `[Dashboard] ✅ Fetched ${data.panels?.length || 0} panel(s):`,
-        data,
-      );
 
       // Transform panel data to our format
       interface PanelData {
