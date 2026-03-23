@@ -1,7 +1,11 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { useThemeStore, useMobileLayout, useWindowStore } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
 import type {
   ClientWorld,
@@ -228,22 +232,15 @@ const DraggableCombatStyleButton = ({
   disabled,
   isMobile,
   onClick,
-  themeColors,
+  theme,
 }: {
   style: CombatStyleInfo;
   isActive: boolean;
   disabled: boolean;
   isMobile: boolean;
   onClick: () => void;
-  themeColors: {
-    slot: { filled: string };
-    border: { default: string };
-    text: { secondary: string; muted: string };
-  };
+  theme: ReturnType<typeof useThemeStore.getState>["theme"];
 }) => {
-  // Track pointer position to distinguish clicks from drags
-  const pointerStartPosRef = useRef<{ x: number; y: number } | null>(null);
-
   // Make combat style draggable for action bar
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `combatstyle-${styleInfo.id}`,
@@ -258,65 +255,37 @@ const DraggableCombatStyleButton = ({
     disabled,
   });
 
-  // Wrap drag listeners to track pointer start position for click vs drag detection
-  const wrappedListeners = useMemo(() => {
-    if (!listeners) return {};
-    const originalPointerDown = listeners.onPointerDown;
-    return {
-      ...listeners,
-      onPointerDown: (e: React.PointerEvent) => {
-        pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
-        originalPointerDown?.(e);
-      },
-    };
-  }, [listeners]);
-
-  // Handle pointer up - only trigger click if it wasn't a drag
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (disabled) return;
-
-    const startPos = pointerStartPosRef.current;
-    if (!startPos) {
-      onClick();
-      return;
-    }
-
-    // Calculate distance moved
-    const dx = e.clientX - startPos.x;
-    const dy = e.clientY - startPos.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-
-    // Only trigger click if we didn't drag (threshold of 8px matches dnd-kit)
-    if (distance < 8) {
-      onClick();
-    }
-
-    pointerStartPosRef.current = null;
-  };
-
   return (
     <button
       ref={setNodeRef}
       {...attributes}
-      {...wrappedListeners}
-      onPointerUp={handlePointerUp}
+      {...listeners}
+      onClick={(e) => {
+        e.preventDefault();
+        if (!disabled) {
+          onClick();
+        }
+      }}
       disabled={disabled}
       aria-pressed={isActive}
       className="style-btn focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
       style={{
-        flex: 1,
         minWidth: 0,
-        padding: isMobile ? "8px 4px" : "8px 4px",
-        cursor: disabled ? "not-allowed" : isDragging ? "grabbing" : "grab",
+        minHeight: isMobile ? 76 : 70,
+        padding: isMobile ? "10px 8px" : "10px 8px",
+        cursor: disabled ? "not-allowed" : isDragging ? "grabbing" : "pointer",
         transition: "all 0.15s ease",
-        fontSize: isMobile ? "10px" : "9px",
+        fontSize: isMobile ? "10px" : "10px",
         fontWeight: isActive ? 600 : 500,
-        background: isActive ? styleInfo.bgColor : themeColors.slot.filled,
-        border: isActive
-          ? `1px solid ${styleInfo.color}60`
-          : `1px solid ${themeColors.border.default}25`,
+        ...getInteractiveTileStyle(theme, {
+          active: isActive,
+          disabled,
+          dragging: isDragging,
+          radius: 8,
+          accentColor: styleInfo.color,
+        }),
         borderRadius: "6px",
-        color: isActive ? styleInfo.color : themeColors.text.secondary,
+        color: isActive ? styleInfo.color : theme.colors.text.secondary,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -333,7 +302,7 @@ const DraggableCombatStyleButton = ({
       <StyleIcon
         style={styleInfo.id}
         size={isMobile ? 18 : 16}
-        color={isActive ? styleInfo.color : themeColors.text.muted}
+        color={isActive ? styleInfo.color : theme.colors.text.muted}
       />
       <span style={{ fontWeight: 600, lineHeight: 1, textAlign: "center" }}>
         {styleInfo.label}
@@ -342,7 +311,7 @@ const DraggableCombatStyleButton = ({
         style={{
           fontSize: isMobile ? "8px" : "7px",
           opacity: 0.7,
-          color: isActive ? styleInfo.color : themeColors.text.muted,
+          color: isActive ? styleInfo.color : theme.colors.text.muted,
           fontWeight: 500,
         }}
       >
@@ -844,6 +813,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
   const p = shouldUseMobileUI
     ? { outer: 4, inner: 5, gap: 4 }
     : { outer: 4, inner: 6, gap: 4 };
+  const styleColumns = styles.length >= 4 ? 2 : Math.min(2, styles.length || 1);
 
   return (
     <div
@@ -1044,33 +1014,87 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         isMobile={shouldUseMobileUI}
       />
 
-      {/* Attack Styles - 1x3 row layout, draggable to action bar */}
+      {/* Attack Styles */}
       <div
         style={{
-          display: "flex",
-          flexDirection: "row",
-          gap: shouldUseMobileUI ? "6px" : "4px",
-          width: "100%",
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: theme.borderRadius.md,
+            padding: `${p.inner}px`,
+          }),
         }}
       >
-        {styles.map((s) => (
-          <DraggableCombatStyleButton
-            key={s.id}
-            style={s}
-            isActive={style === s.id}
-            disabled={cooldown > 0}
-            isMobile={shouldUseMobileUI}
-            onClick={() => changeStyle(s.id)}
-            themeColors={{
-              slot: { filled: theme.colors.slot.filled },
-              border: { default: theme.colors.border.default },
-              text: {
-                secondary: theme.colors.text.secondary,
-                muted: theme.colors.text.muted,
-              },
-            }}
-          />
-        ))}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 6,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: "9px",
+                color: theme.colors.text.muted,
+                textTransform: "uppercase",
+                letterSpacing: "0.12em",
+                marginBottom: 2,
+              }}
+            >
+              Combat Stance
+            </div>
+            <div
+              style={{
+                fontSize: shouldUseMobileUI ? "12px" : "11px",
+                color: theme.colors.text.primary,
+                fontWeight: 700,
+              }}
+            >
+              {styles.find((entry) => entry.id === style)?.label ??
+                "Select style"}
+            </div>
+          </div>
+          {style === "autocast" && (
+            <div
+              style={{
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  radius: theme.borderRadius.sm,
+                  accentColor: "#8b5cf6",
+                }),
+                padding: "4px 8px",
+                fontSize: "9px",
+                fontWeight: 700,
+                color: "#c4b5fd",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Spell Auto
+            </div>
+          )}
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${styleColumns}, minmax(0, 1fr))`,
+            gap: shouldUseMobileUI ? "6px" : "5px",
+            width: "100%",
+          }}
+        >
+          {styles.map((s) => (
+            <DraggableCombatStyleButton
+              key={s.id}
+              style={s}
+              isActive={style === s.id}
+              disabled={cooldown > 0}
+              isMobile={shouldUseMobileUI}
+              onClick={() => changeStyle(s.id)}
+              theme={theme}
+            />
+          ))}
+        </div>
       </div>
 
       {cooldown > 0 && (
@@ -1092,32 +1116,30 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
         </div>
       )}
 
-      {/* Auto Retaliate - Compact toggle */}
+      {/* Auto Retaliate */}
       <button
         onClick={toggleAutoRetaliate}
         className="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
         style={{
-          padding: shouldUseMobileUI ? "4px 6px" : "5px 6px",
+          padding: shouldUseMobileUI ? "8px 10px" : "8px 10px",
           cursor: "pointer",
           transition: "all 0.1s ease",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          fontSize: shouldUseMobileUI ? "9px" : "9px",
+          fontSize: shouldUseMobileUI ? "10px" : "10px",
           touchAction: "manipulation",
           borderRadius: theme.borderRadius.md,
-          background: autoRetaliate
-            ? "linear-gradient(180deg, rgba(34, 197, 94, 0.14) 0%, rgba(12, 36, 16, 0.22) 100%)"
-            : theme.name === "hyperscape"
-              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0.14) 100%)"
-              : theme.colors.slot.filled,
-          border: autoRetaliate
-            ? "1px solid rgba(34, 197, 94, 0.3)"
-            : `1px solid ${theme.colors.border.default}40`,
+          ...getInteractiveTileStyle(theme, {
+            active: autoRetaliate,
+            radius: theme.borderRadius.md,
+            accentColor: autoRetaliate
+              ? theme.colors.state.success
+              : theme.colors.accent.secondary,
+          }),
           color: autoRetaliate
             ? theme.colors.state.success
             : theme.colors.text.muted,
-          boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
         }}
       >
         <div className="flex items-center gap-1.5">
@@ -1143,7 +1165,27 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
               </>
             )}
           </svg>
-          <span style={{ fontWeight: 500 }}>Auto Retaliate</span>
+          <div style={{ textAlign: "left" }}>
+            <div
+              style={{
+                fontWeight: 700,
+                color: theme.colors.text.primary,
+                marginBottom: 1,
+              }}
+            >
+              Auto Retaliate
+            </div>
+            <div
+              style={{
+                fontSize: "8px",
+                color: theme.colors.text.muted,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Counterattack when struck
+            </div>
+          </div>
         </div>
         <span
           style={{

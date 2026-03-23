@@ -670,7 +670,10 @@ export class PrayerSystem extends SystemBase {
   ): PrayerToggleResult {
     // Get player's prayer level
     const player = this.getPlayerEntity(playerId);
-    const prayerLevel = getPlayerPrayerLevel(player as PlayerWithPrayerStats);
+    const prayerLevel = Math.max(
+      state.maxPoints,
+      getPlayerPrayerLevel(player as PlayerWithPrayerStats),
+    );
 
     // Check level requirement
     if (prayerLevel < prayer.level) {
