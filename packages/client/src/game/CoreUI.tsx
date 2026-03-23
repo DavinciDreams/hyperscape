@@ -93,6 +93,27 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
   } | null>(null);
 
   const playerStats = usePlayerStatsContext();
+  const livePlayerReady =
+    playerReady ||
+    (!isSpectatorMode &&
+      Boolean(
+        (world.entities.player as { avatar?: unknown } | undefined)?.avatar,
+      ));
+  const livePhysReady =
+    physReady ||
+    Boolean(
+      (
+        world.physics as { isInitialized?: () => boolean } | undefined
+      )?.isInitialized?.(),
+    );
+  const liveTerrainReady =
+    terrainReady ||
+    terrainTimedOut ||
+    Boolean(
+      (
+        world.getSystem?.("terrain") as { isReady?: () => boolean } | undefined
+      )?.isReady?.(),
+    );
 
   useEffect(() => {
     // Get the target entity ID for spectators
@@ -334,9 +355,9 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     // Show game once player's avatar is ready and physics system is initialized
     // For spectators: also require terrain and target avatar to be ready
     const canPresent =
-      playerReady &&
-      physReady &&
-      (terrainReady || terrainTimedOut) &&
+      livePlayerReady &&
+      livePhysReady &&
+      liveTerrainReady &&
       (loadingComplete || systemsComplete || assetsProgress >= 100);
     if (canPresent) {
       // Clear any existing timeout
@@ -359,10 +380,9 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
       }
     };
   }, [
-    playerReady,
-    physReady,
-    terrainReady,
-    terrainTimedOut,
+    livePlayerReady,
+    livePhysReady,
+    liveTerrainReady,
     loadingComplete,
     systemsComplete,
     assetsProgress,
@@ -398,9 +418,9 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
       loadingComplete,
       systemsComplete,
       assetsProgress,
-      playerReady,
-      physReady,
-      terrainReady,
+      playerReady: livePlayerReady,
+      physReady: livePhysReady,
+      terrainReady: liveTerrainReady,
       terrainTimedOut,
       playerId: player?.id || null,
     };
@@ -412,9 +432,9 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
     loadingComplete,
     systemsComplete,
     assetsProgress,
-    playerReady,
-    physReady,
-    terrainReady,
+    livePlayerReady,
+    livePhysReady,
+    liveTerrainReady,
     terrainTimedOut,
     player,
   ]);
