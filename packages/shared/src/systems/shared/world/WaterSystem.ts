@@ -84,7 +84,7 @@ const WATER = {
   COS_PHASES: [0.28, 0.5, 0.07] as const,
   COS_AMPLITUDES: [4.02, 0.34, 0.65] as const,
   COS_FREQUENCIES: [0.0, 0.48, 0.08] as const,
-  COS_OFFSETS: [-0.25, 0.0, -0.15] as const,
+  COS_OFFSETS: [-0.3, -0.05, -0.2] as const,
 
   // Normal noise strength (xz multiplier for surface normal)
   NORMAL_STRENGTH: 1.5,

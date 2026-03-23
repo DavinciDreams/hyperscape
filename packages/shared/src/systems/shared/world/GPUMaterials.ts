@@ -994,11 +994,9 @@ export function createTreeDissolveMaterial(
   const HL_BRIGHTEN = 0.08;
   const HL_RIM_POWER = 2.5;
   const HL_RIM_STRENGTH = 0.4;
-  const TOON_DARK = 0.5;
-  const TOON_MID = 0.75;
-  const TOON_BRIGHT = 1.0;
+  const TOON_BRIGHT_EDGE = 0.7;
+  const TOON_MID_EDGE = 0.35;
   const TOON_SHADOW_EDGE = 0.0;
-  const TOON_MID_EDGE = 0.5;
   const TOON_RIM_THRESHOLD = 0.3;
   const TOON_RIM_BRIGHT = 1.3;
   const NIGHT_MIN_BRIGHTNESS = NIGHT.BRIGHTNESS;
@@ -1077,21 +1075,28 @@ export function createTreeDissolveMaterial(
     // ---- Sun shade on albedo (driven by dayIntensity to match scene light timing) ----
     baseAlbedo = applySunShade(baseAlbedo, uDayIntensity, vec3(uShadeColor));
 
-    // ---- 3-band toon lighting (hard-edged shadow / mid / bright) ----
+    // ---- 4-band Ghibli toon lighting (warm highlights → cool shadows) ----
+    // Derive 4 hue-shifted color variants from sampled texture albedo.
+    // Highlights shift warm (golden), shadows shift cool (teal).
     const L = normalize(vec3(uSunDir));
     const N = normalize(normalWorldGeometry);
     const NdotL = dot(N, L);
-    const band1 = step(float(TOON_SHADOW_EDGE), NdotL);
-    const band2 = step(float(TOON_MID_EDGE), NdotL);
-    const toonLight = add(
-      float(TOON_DARK),
-      add(
-        mul(band1, float(TOON_MID - TOON_DARK)),
-        mul(band2, float(TOON_BRIGHT - TOON_MID)),
-      ),
-    );
+
+    const band0Color = mul(baseAlbedo, vec3(1.35, 1.08, 0.82));
+    const band1Color = baseAlbedo;
+    const band2Color = mul(baseAlbedo, vec3(0.65, 0.78, 0.82));
+    const band3Color = mul(baseAlbedo, vec3(0.38, 0.52, 0.68));
+
+    const s0 = step(float(TOON_BRIGHT_EDGE), NdotL);
+    const s1 = step(float(TOON_MID_EDGE), NdotL);
+    const s2 = step(float(TOON_SHADOW_EDGE), NdotL);
+
+    const toonStep0 = mix(band3Color, band2Color, s2);
+    const toonStep1 = mix(toonStep0, band1Color, s1);
+    const toonColor = mix(toonStep1, band0Color, s0);
+
     const nightDim = mix(float(NIGHT_MIN_BRIGHTNESS), float(1.0), dayFactor);
-    let result: any = mul(baseAlbedo, mul(toonLight, nightDim));
+    let result: any = mul(toonColor, nightDim);
 
     // ---- SSS + hard-edged toon rim (leaf only, scaled by dayFactor) ----
     if (isLeaf) {
