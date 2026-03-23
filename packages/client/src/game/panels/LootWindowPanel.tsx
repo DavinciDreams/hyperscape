@@ -255,9 +255,6 @@ function LootWindowPanelContent({
           entityData?.lootItemCount === 0) &&
         items.length > 0
       ) {
-        console.log(
-          "[LootWindow] Gravestone empty, closing window in 500ms...",
-        );
         setTimeout(() => {
           onClose();
         }, 500);
@@ -282,7 +279,6 @@ function LootWindowPanelContent({
     const handleHeadstoneExpired = (...args: unknown[]) => {
       const data = args[0] as { gravestoneId?: string };
       if (data.gravestoneId === corpseId) {
-        console.log("[LootWindow] Headstone expired event received");
         onClose();
       }
     };

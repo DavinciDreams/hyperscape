@@ -644,13 +644,7 @@ export function MobileInterfaceManager({
           text={dialogueData.text}
           responses={dialogueData.responses}
           npcEntityId={dialogueData.npcEntityId}
-          onSelectResponse={(index, response) => {
-            // Send response to server - the panel handles this internally,
-            // but we can also track it here if needed
-            console.log(
-              `[MobileUI] Dialogue response selected: ${index} - ${response.text}`,
-            );
-          }}
+          onSelectResponse={() => {}}
           onClose={() => setDialogueData(null)}
         />
       )}

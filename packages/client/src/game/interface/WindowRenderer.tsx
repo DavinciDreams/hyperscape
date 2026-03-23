@@ -8,7 +8,7 @@
  */
 
 import React, { memo, useMemo } from "react";
-import { Window, TabBar, type WindowState } from "@/ui";
+import { Window, TabBar, useWindowStore, type WindowState } from "@/ui";
 import type { ClientWorld } from "../../types";
 import {
   WindowContent,
@@ -20,8 +20,6 @@ import {
 
 /** Props for WindowRenderer component */
 interface WindowRendererProps {
-  /** All window configurations */
-  windows: WindowState[];
   /** The game world instance */
   world: ClientWorld | null;
   /** Whether edit mode is active */
@@ -41,17 +39,21 @@ interface WindowRendererProps {
 /**
  * Renders all visible windows with appropriate wrappers
  */
-export function WindowRenderer({
-  windows,
+export const WindowRenderer = memo(function WindowRenderer({
   world,
   isUnlocked,
   editModeEnabled,
   windowCombiningEnabled,
   renderPanel,
 }: WindowRendererProps): React.ReactElement {
+  const windowsMap = useWindowStore((s) => s.windows);
   const visibleWindows = useMemo(
-    () => windows.filter((w) => w.visible),
-    [windows],
+    () =>
+      Array.from(windowsMap.values())
+        .filter((w) => w.visible)
+        .sort((a, b) => a.zIndex - b.zIndex)
+        .map((w) => w.id),
+    [windowsMap],
   );
   const isEditMode = isUnlocked && editModeEnabled;
 
@@ -60,10 +62,10 @@ export function WindowRenderer({
       className="fixed inset-0 pointer-events-none"
       style={{ zIndex: isEditMode ? 600 : 300 }}
     >
-      {visibleWindows.map((windowState) => (
+      {visibleWindows.map((windowId) => (
         <WindowItem
-          key={windowState.id}
-          windowState={windowState}
+          key={windowId}
+          windowId={windowId}
           world={world}
           isEditMode={isEditMode}
           windowCombiningEnabled={windowCombiningEnabled}
@@ -72,11 +74,11 @@ export function WindowRenderer({
       ))}
     </div>
   );
-}
+});
 
 /** Props for individual window item */
 interface WindowItemProps {
-  windowState: WindowState;
+  windowId: string;
   world: ClientWorld | null;
   isEditMode: boolean;
   windowCombiningEnabled: boolean;
@@ -91,12 +93,23 @@ interface WindowItemProps {
  * Renders a single window with the appropriate content wrapper
  */
 const WindowItem = memo(function WindowItem({
-  windowState,
+  windowId,
   world,
   isEditMode,
   windowCombiningEnabled,
   renderPanel,
 }: WindowItemProps): React.ReactElement {
+  const windowState = useWindowStore(
+    useMemo(
+      () => (state) => state.windows.get(windowId) as WindowState | undefined,
+      [windowId],
+    ),
+  );
+
+  if (!windowState || !windowState.visible) {
+    return <></>;
+  }
+
   const isActionBar = windowState.id.startsWith("actionbar-");
   const isMenuBar = windowState.id === "menubar-window";
   const isMinimap = windowState.id === "minimap-window";

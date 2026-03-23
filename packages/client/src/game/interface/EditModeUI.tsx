@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 
-import React, { useCallback } from "react";
+import React, { memo, useCallback } from "react";
 import {
   EditModeOverlay,
   useWindowStore,
@@ -31,7 +31,7 @@ interface EditModeOverlayManagerProps {
 /**
  * Manages the edit mode overlay with action bar creation
  */
-export function EditModeOverlayManager({
+export const EditModeOverlayManager = memo(function EditModeOverlayManager({
   actionBarCount,
   multipleActionBarsEnabled,
   createWindow,
@@ -92,7 +92,7 @@ export function EditModeOverlayManager({
       }
     />
   );
-}
+});
 
 /** Props for HoldToEditIndicator */
 interface HoldToEditIndicatorProps {
@@ -109,7 +109,7 @@ interface HoldToEditIndicatorProps {
 /**
  * Visual indicator shown while holding L key to toggle edit mode
  */
-export function HoldToEditIndicator({
+export const HoldToEditIndicator = memo(function HoldToEditIndicator({
   isHolding,
   holdProgress,
   isUnlocked,
@@ -258,4 +258,4 @@ export function HoldToEditIndicator({
       </div>
     </div>
   );
-}
+});

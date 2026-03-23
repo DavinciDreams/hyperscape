@@ -27,7 +27,6 @@ import React, {
 import { DndContext as DndKitContext } from "@dnd-kit/core";
 import {
   DndProvider,
-  useWindowManager,
   useEditMode,
   useEditModeKeyboard,
   usePresetStore,
@@ -69,6 +68,18 @@ import { WindowRenderer } from "./WindowRenderer";
 import { EditModeOverlayManager, HoldToEditIndicator } from "./EditModeUI";
 import { DndKitDragOverlayRenderer } from "./DndKitOverlay";
 
+interface WindowStorePersistApi {
+  hasHydrated: () => boolean;
+  onFinishHydration: (listener: () => void) => () => void;
+}
+
+function getWindowStorePersistApi(): WindowStorePersistApi | null {
+  const store = useWindowStore as typeof useWindowStore & {
+    persist?: WindowStorePersistApi;
+  };
+  return store.persist ?? null;
+}
+
 /**
  * Main interface manager component
  *
@@ -108,10 +119,16 @@ function DesktopInterfaceManager({
   // Initialize edit mode keyboard handling
   useEditModeKeyboard();
 
-  // Window management hooks
-  const { windows, createWindow } = useWindowManager();
   const { isUnlocked, isHolding, holdProgress } = useEditMode();
   const { loadFromStorage } = usePresetStore();
+  const createWindow = useWindowStore((s) => s.createWindow);
+  const windowCount = useWindowStore((s) => s.windows.size);
+  const actionBarCount = useWindowStore(
+    (s) =>
+      Array.from(s.windows.values()).filter(
+        (w) => w.id?.startsWith("actionbar-") && w.id?.endsWith("-window"),
+      ).length,
+  );
   const windowStoreUpdate = useWindowStore((s) => s.updateWindow);
   const normalizeZIndices = useWindowStore((s) => s.normalizeZIndices);
 
@@ -196,12 +213,29 @@ function DesktopInterfaceManager({
 
   // Hydration and initialization state
   const initializedRef = React.useRef(false);
-  const [isHydrated, setIsHydrated] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(() => {
+    const persistApi = getWindowStorePersistApi();
+    return persistApi ? persistApi.hasHydrated() : true;
+  });
   const prevWindowsCountRef = React.useRef<number>(-1);
 
-  // Wait for window store to hydrate
+  // Wait for window store persistence to finish hydrating before mounting windows
   useEffect(() => {
-    setTimeout(() => setIsHydrated(true), 50);
+    const persistApi = getWindowStorePersistApi();
+
+    if (!persistApi) {
+      setIsHydrated(true);
+      return;
+    }
+
+    if (persistApi.hasHydrated()) {
+      setIsHydrated(true);
+      return;
+    }
+
+    return persistApi.onFinishHydration(() => {
+      setIsHydrated(true);
+    });
   }, []);
 
   // Detect reset and recreate defaults
@@ -209,7 +243,7 @@ function DesktopInterfaceManager({
     if (!enabled || !isHydrated) return;
 
     const prevCount = prevWindowsCountRef.current;
-    const currentCount = windows.length;
+    const currentCount = windowCount;
     prevWindowsCountRef.current = currentCount;
 
     if (prevCount > 0 && currentCount === 0) {
@@ -222,7 +256,7 @@ function DesktopInterfaceManager({
         window.dispatchEvent(new Event("resize"));
       });
     }
-  }, [windows.length, enabled, isHydrated, createWindow]);
+  }, [windowCount, enabled, isHydrated, createWindow]);
 
   // Initialize default windows on mount
   useEffect(() => {
@@ -312,14 +346,6 @@ function DesktopInterfaceManager({
     inventoryRef.current = inventory;
   }, [inventory]);
 
-  const actionBarCount = useMemo(
-    () =>
-      windows.filter(
-        (w) => w.id?.startsWith("actionbar-") && w.id?.endsWith("-window"),
-      ).length,
-    [windows],
-  );
-
   // Create panel renderer
   const renderPanel = useMemo(
     () =>
@@ -388,7 +414,6 @@ function DesktopInterfaceManager({
         >
           {/* Windows */}
           <WindowRenderer
-            windows={windows}
             world={world}
             isUnlocked={isUnlocked}
             editModeEnabled={editModeEnabled}
