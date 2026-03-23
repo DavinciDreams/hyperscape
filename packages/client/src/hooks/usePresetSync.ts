@@ -96,9 +96,7 @@ export function usePresetSync(): PresetSyncResult {
       // Delay slightly to ensure component is mounted
       const timer = setTimeout(() => {
         cloudSync.pullFromCloud().then((success) => {
-          if (success) {
-            console.log("[PresetSync] ✅ Presets loaded from server");
-          } else if (cloudSync.error) {
+          if (!success && cloudSync.error) {
             console.warn(
               "[PresetSync] ⚠️ Failed to load presets:",
               cloudSync.error,

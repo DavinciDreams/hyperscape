@@ -214,64 +214,62 @@ export function GameClient({
   const world = useMemo(() => {
     const w = createClientWorld();
 
-    // Expose world for browser debugging
-    (window as { world: InstanceType<typeof World> }).world = w;
+    if (import.meta.env.DEV) {
+      // Expose world for browser debugging in development only.
+      (window as { world?: InstanceType<typeof World> }).world = w;
 
-    // Install simple debug commands
-    const debugCommands = {
-      // Teleport camera to see mobs at Y=40+
-      seeHighEntities: () => {
-        if (w.camera) {
-          w.camera.position.set(10, 50, 10);
-          w.camera.lookAt(0, 40, 0);
-        }
-      },
-      // Teleport to ground level
-      seeGround: () => {
-        if (w.camera) {
-          w.camera.position.set(10, 5, 10);
-          w.camera.lookAt(0, 0, 0);
-        }
-      },
-      // List all mobs with positions
-      mobs: () => {
-        type EntityWithNode = {
-          type: string;
-          name: string;
-          node: { position: { toArray: () => number[] } };
-          mesh?: { visible: boolean };
-        };
-        type EntityManagerType = {
-          getAllEntities?: () => Map<string, EntityWithNode>;
-        };
+      const debugCommands = {
+        seeHighEntities: () => {
+          if (w.camera) {
+            w.camera.position.set(10, 50, 10);
+            w.camera.lookAt(0, 40, 0);
+          }
+        },
+        seeGround: () => {
+          if (w.camera) {
+            w.camera.position.set(10, 5, 10);
+            w.camera.lookAt(0, 0, 0);
+          }
+        },
+        mobs: () => {
+          type EntityWithNode = {
+            type: string;
+            name: string;
+            node: { position: { toArray: () => number[] } };
+            mesh?: { visible: boolean };
+          };
+          type EntityManagerType = {
+            getAllEntities?: () => Map<string, EntityWithNode>;
+          };
 
-        const entityManager = w.getSystem(
-          "entity-manager",
-        ) as EntityManagerType | null;
-        const mobs: Array<{
-          name: string;
-          position: number[];
-          hasMesh: boolean;
-          meshVisible: boolean;
-        }> = [];
+          const entityManager = w.getSystem(
+            "entity-manager",
+          ) as EntityManagerType | null;
+          const mobs: Array<{
+            name: string;
+            position: number[];
+            hasMesh: boolean;
+            meshVisible: boolean;
+          }> = [];
 
-        if (entityManager?.getAllEntities) {
-          for (const [_id, entity] of entityManager.getAllEntities()) {
-            if (entity.type === "mob") {
-              mobs.push({
-                name: entity.name,
-                position: entity.node.position.toArray(),
-                hasMesh: !!entity.mesh,
-                meshVisible: entity.mesh?.visible ?? false,
-              });
+          if (entityManager?.getAllEntities) {
+            for (const [_id, entity] of entityManager.getAllEntities()) {
+              if (entity.type === "mob") {
+                mobs.push({
+                  name: entity.name,
+                  position: entity.node.position.toArray(),
+                  hasMesh: !!entity.mesh,
+                  meshVisible: entity.mesh?.visible ?? false,
+                });
+              }
             }
           }
-        }
-        console.table(mobs);
-        return mobs;
-      },
-    };
-    (window as unknown as Record<string, unknown>).debug = debugCommands;
+          console.table(mobs);
+          return mobs;
+        },
+      };
+      (window as unknown as Record<string, unknown>).debug = debugCommands;
+    }
 
     return w;
   }, []);

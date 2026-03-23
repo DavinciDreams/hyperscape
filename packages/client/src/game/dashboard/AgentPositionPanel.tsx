@@ -1,5 +1,5 @@
 import { GAME_API_URL } from "@/lib/api-config";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import type { Agent } from "./types";
 import {
   ChevronDown,
@@ -112,6 +112,8 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [zoneName, setZoneName] = useState<string>("Unknown");
   const [nearbyPOIs, setNearbyPOIs] = useState<NearbyLocation[]>([]);
+  const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
   // Fetch character ID once when agent changes
   useEffect(() => {
@@ -125,21 +127,6 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
     }
     fetchCharacterId();
   }, [agent.id, agent.status]);
-
-  // Poll for position updates - always active, faster when viewport is active
-  useEffect(() => {
-    if (agent.status !== "active" || !characterId) return;
-
-    // Fetch immediately
-    fetchPosition();
-
-    // Poll every 5-10 seconds to avoid rate limiting (reduced from 1-3s)
-    const interval = setInterval(
-      fetchPosition,
-      isViewportActive ? 5000 : 10000,
-    );
-    return () => clearInterval(interval);
-  }, [isViewportActive, agent.id, agent.status, characterId]);
 
   const fetchCharacterId = async () => {
     try {
@@ -175,8 +162,10 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
     }
   };
 
-  const fetchPosition = async () => {
+  const fetchPosition = useCallback(async () => {
     if (!characterId) return;
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
 
     try {
       const positionResponse = await fetch(
@@ -202,8 +191,38 @@ export const AgentPositionPanel: React.FC<AgentPositionPanelProps> = ({
     } catch (err) {
       console.error("[AgentPositionPanel] Error fetching position:", err);
       // Don't set error state on position fetch failure - just keep last known position
+    } finally {
+      inFlightRef.current = false;
     }
-  };
+  }, [characterId]);
+
+  // Poll for position updates - always active, faster when viewport is active
+  useEffect(() => {
+    if (agent.status !== "active" || !characterId) return;
+
+    let cancelled = false;
+    const schedule = (delay: number) => {
+      if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = window.setTimeout(run, delay);
+    };
+    const run = async () => {
+      await fetchPosition();
+      if (!cancelled) {
+        schedule(!document.hidden && isViewportActive ? 5000 : 10000);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (!cancelled) schedule(document.hidden ? 10000 : 1000);
+    };
+
+    void run();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+    };
+  }, [agent.status, characterId, fetchPosition, isViewportActive]);
 
   // Don't show if agent is inactive
   if (agent.status !== "active") {
