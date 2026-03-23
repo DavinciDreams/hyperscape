@@ -32,12 +32,8 @@ import type { WindowResult, Point, Size } from "../../types";
  * ```
  */
 export function useWindow(windowId: string): WindowResult {
-  // Subscribe to the entire windows Map to ensure proper reactivity
-  // Then extract our specific window in useMemo
-  const windowsMap = useWindowStore((state) => state.windows);
-  const window = useMemo(
-    () => windowsMap.get(windowId),
-    [windowsMap, windowId],
+  const window = useWindowStore(
+    useMemo(() => (state) => state.windows.get(windowId), [windowId]),
   );
 
   const updateWindowStore = useWindowStore((s) => s.updateWindow);

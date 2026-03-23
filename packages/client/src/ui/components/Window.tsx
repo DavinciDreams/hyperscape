@@ -4,12 +4,12 @@ import { useResize } from "../core/window/useResize";
 import { useDrag } from "../core/drag/useDrag";
 import { useEditMode } from "../core/edit/useEditMode";
 import { useSnap } from "../core/window/useSnap";
-import { useWindowManager } from "../core/window/useWindowManager";
 import { useAlignmentGuides } from "../core/edit/useAlignmentGuides";
 import { useTabDrag } from "../core/tabs/useTabDrag";
 import { useTheme } from "../stores/themeStore";
 import { useEditStore } from "../stores/editStore";
 import { useDragStore } from "../stores/dragStore";
+import { useWindowStore } from "../stores/windowStore";
 import {
   restrictToWindowEdgesFully,
   snapToGridModifier,
@@ -24,6 +24,7 @@ import type { WindowProps } from "../types";
 /** Resize handle size in pixels - can be overridden via theme */
 const DEFAULT_HANDLE_SIZE = 8;
 const DEFAULT_CORNER_SIZE = 12;
+const EMPTY_WINDOWS: never[] = [];
 
 /**
  * Styled draggable window component
@@ -92,9 +93,18 @@ export const Window = memo(function Window({
   // This bypasses the store lookup issue when stores are in different bundles
   const isUnlocked = passedIsUnlocked ?? hookIsUnlocked;
   const { snapEnabled } = useSnap();
-  const { windows } = useWindowManager();
+  const guideWindowsMap = useWindowStore(
+    useMemo(() => (state) => (isUnlocked ? state.windows : null), [isUnlocked]),
+  );
+  const guideWindows = useMemo(() => {
+    if (!guideWindowsMap) {
+      return EMPTY_WINDOWS;
+    }
+
+    return Array.from(guideWindowsMap.values());
+  }, [guideWindowsMap]);
   const { snapToGuide, calculateGuides } = useAlignmentGuides(
-    windows,
+    guideWindows,
     windowId,
   );
 
