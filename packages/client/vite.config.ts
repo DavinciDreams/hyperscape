@@ -46,6 +46,10 @@ export default defineConfig(({ mode }) => {
     process.env.PUBLIC_ELIZAOS_URL ||
     env.PUBLIC_ELIZAOS_URL ||
     resolvedPublicApiUrl;
+  const resolvedPublicEmbedAllowedOrigins =
+    process.env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
+    env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
+    "";
 
   console.log("[Vite Config] Build mode:", mode);
   console.log("[Vite Config] Loaded env from:", clientDir);
@@ -426,6 +430,9 @@ export default defineConfig(({ mode }) => {
       // In development without PUBLIC_CDN_URL, use game server's /game-assets/ endpoint.
       "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(resolvedPublicCdnUrl),
       "import.meta.env.PUBLIC_APP_URL": JSON.stringify(resolvedPublicAppUrl),
+      "import.meta.env.PUBLIC_EMBED_ALLOWED_ORIGINS": JSON.stringify(
+        resolvedPublicEmbedAllowedOrigins,
+      ),
       "import.meta.env.PUBLIC_ELIZAOS_URL": JSON.stringify(
         resolvedPublicElizaUrl,
       ),

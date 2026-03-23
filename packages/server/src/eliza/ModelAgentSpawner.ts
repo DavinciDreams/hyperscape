@@ -395,21 +395,25 @@ export async function spawnModelAgents(
         //  2. `memoriesByRoom` — deleteMemory only removes from memoriesById
         //  3. `cache` Map — no eviction policy
         const adapter = new InMemoryDatabaseAdapter();
+        const adapterWithLogs = adapter as unknown as {
+          log?: (params: unknown) => Promise<unknown>;
+          logs?: unknown[];
+        };
         const MAX_LOGS = 20;
         const MAX_MEMORIES = 50;
         const MAX_CACHE = 100;
 
         // --- Cap logs (stores full LLM prompts + responses per call) ---
-        const origCreateLogs = adapter.createLogs.bind(adapter);
-        adapter.createLogs = async (
-          params: Parameters<typeof origCreateLogs>[0],
-        ) => {
-          await origCreateLogs(params);
-          const logs = (adapter as unknown as { logs: unknown[] }).logs;
-          if (logs && logs.length > MAX_LOGS) {
-            logs.splice(0, logs.length - MAX_LOGS);
-          }
-        };
+        const origLog = adapterWithLogs.log?.bind(adapter);
+        if (origLog) {
+          adapterWithLogs.log = async (params: unknown) => {
+            await origLog(params);
+            const logs = adapterWithLogs.logs;
+            if (Array.isArray(logs) && logs.length > MAX_LOGS) {
+              logs.splice(0, logs.length - MAX_LOGS);
+            }
+          };
+        }
 
         // deleteMemories in current ElizaOS already cleans memoriesByRoom,
         // so no monkey-patch needed.
@@ -551,15 +555,11 @@ export async function spawnModelAgents(
 
       // ElizaOS v2 lazy-starts services — explicitly kick off HyperscapeService
       // so the WebSocket connection + player spawn begins immediately.
-      if (
-        typeof (runtimeInstance as Record<string, unknown>)
-          ._ensureServiceStarted === "function"
-      ) {
-        await (
-          runtimeInstance as unknown as {
-            _ensureServiceStarted: (t: string) => Promise<unknown>;
-          }
-        )._ensureServiceStarted("hyperscapeService");
+      const runtimeWithService = runtimeInstance as unknown as {
+        _ensureServiceStarted?: (serviceName: string) => Promise<unknown>;
+      };
+      if (typeof runtimeWithService._ensureServiceStarted === "function") {
+        await runtimeWithService._ensureServiceStarted("hyperscapeService");
       }
 
       runningAgents.set(agentKey, {

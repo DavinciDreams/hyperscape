@@ -1348,6 +1348,10 @@ export class ConnectionHandler {
       const shouldRequireAuthForAgent =
         isAgentCharacter && requiresRestrictedAccess && !canBypassAgentAuth;
 
+      // Keep verifiedUserId in the outer scope because the authenticated
+      // account id is reused later when the spectator socket is registered.
+      let verifiedUserId: string | null = null;
+
       if (isAgentCharacter && !shouldRequireAuthForAgent) {
         console.log(
           `[ConnectionHandler] 🤖 Anonymous spectator watching agent ${characterId} (trusted viewer path)`,
@@ -1365,8 +1369,6 @@ export class ConnectionHandler {
         }
 
         // SECURITY: Authenticate the user via the same flow as regular connections.
-        let verifiedUserId: string | null = null;
-
         try {
           const { user } = await authenticateUser(params, this.db);
           verifiedUserId = user.id;

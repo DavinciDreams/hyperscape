@@ -239,6 +239,7 @@ import type {
 } from "./types.js";
 import { AgentBehaviorBridge } from "./managers/AgentBehaviorBridge.js";
 import {
+  AgentBehaviorTicker,
   EMBEDDED_AGENT_AUTONOMY_ENABLED,
   setAgentAutonomyIfSupported,
   type AgentInstance,
@@ -256,6 +257,7 @@ export class AgentManager {
   private agents: Map<string, AgentInstance> = new Map();
   private isShuttingDown: boolean = false;
   private readonly behaviorBridge: AgentBehaviorBridge;
+  private readonly behaviorTicker: AgentBehaviorTicker;
   private readonly commandDispatcher: AgentCommandDispatcher;
   private readonly combatDamageListener: (data: unknown) => void;
   private worldListenerActive: boolean = false;
@@ -263,6 +265,11 @@ export class AgentManager {
   constructor(world: World) {
     this.world = world;
     this.behaviorBridge = new AgentBehaviorBridge(
+      world,
+      (id) => this.agents.get(id),
+      () => Array.from(this.agents.keys()),
+    );
+    this.behaviorTicker = new AgentBehaviorTicker(
       world,
       (id) => this.agents.get(id),
       () => Array.from(this.agents.keys()),
@@ -425,6 +432,14 @@ export class AgentManager {
       instance.error = errMsg(err);
       throw err;
     }
+  }
+
+  /**
+   * Run one immediate autonomous behavior tick for an agent.
+   * Used by tests and diagnostics without waiting for the worker scheduler.
+   */
+  async executeBehaviorTick(characterId: string): Promise<void> {
+    await this.behaviorTicker.executeBehaviorTick(characterId);
   }
 
   /**

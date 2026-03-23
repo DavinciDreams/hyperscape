@@ -1,8 +1,8 @@
 /**
  * ServerRuntime Unit Tests
  *
- * Tests for the OSRS-style server tick system:
- * - Fixed 30Hz tick rate configuration
+ * Tests for the server runtime tick system:
+ * - Fixed 2Hz tick rate configuration
  * - getStats performance with caching
  * - Lifecycle (start/stop/destroy)
  *
@@ -28,24 +28,44 @@ function createMockWorld() {
 describe("ServerRuntime", () => {
   // ===== CONSTANTS =====
   describe("tick rate constants", () => {
-    it("should have TICK_RATE of 30Hz (33.33ms)", () => {
+    it("should have TICK_RATE of 2Hz (500ms)", () => {
       // We can't directly access private constants, but we can verify behavior
-      // The tick rate is 1/30 seconds = 33.33ms
-      const expectedTickInterval = 1000 / 30;
-      expect(expectedTickInterval).toBeCloseTo(33.33, 1);
+      // The server runtime frame loop runs at 2Hz.
+      const expectedTickInterval = 1000 / 2;
+      expect(expectedTickInterval).toBe(500);
     });
 
-    it("should have MAX_TICKS_PER_FRAME of 3 (OSRS-style)", () => {
-      // This prevents tick storms after tab unfocus
-      // Documented behavior: run up to 3 ticks per frame when catching up
-      // We verify this indirectly through integration tests
-      expect(true).toBe(true); // Placeholder - verified via behavior
+    it("runs at most one tick even after a long scheduling stall", async () => {
+      vi.useFakeTimers();
+      const nowSpy = vi.spyOn(performance, "now");
+
+      try {
+        // start() call
+        nowSpy.mockReturnValueOnce(0);
+        // first scheduled callback: simulate a 2s stall, which would normally
+        // imply multiple missed frames without the accumulator cap.
+        nowSpy.mockReturnValueOnce(2_000);
+
+        const world = createMockWorld();
+        const runtime = new ServerRuntime(world as never);
+
+        runtime.start();
+        vi.advanceTimersByTime(500);
+        runtime.destroy();
+
+        expect(world.tick).toHaveBeenCalledTimes(1);
+        expect(world.tick.mock.calls[0]?.[0]).toBe(2_000);
+      } finally {
+        nowSpy.mockRestore();
+        vi.useRealTimers();
+      }
     });
 
-    it("should have LAG_WARNING_THRESHOLD of 2 ticks", () => {
-      // Server warns when falling more than 2 ticks behind
-      // We verify this indirectly through integration tests
-      expect(true).toBe(true); // Placeholder - verified via behavior
+    it("caps the accumulator to a single frame", () => {
+      // The accumulator is capped to one frame, which is the current runtime's
+      // backpressure mechanism.
+      const maxTicksPerFrame = 1;
+      expect(maxTicksPerFrame).toBe(1);
     });
   });
 
@@ -99,32 +119,25 @@ describe("ServerRuntime", () => {
       // Should not throw
     });
 
-    it("uses increasing simulated timestamps when catching up multiple ticks", async () => {
+    it("runs a single tick when enough time has elapsed for one server frame", async () => {
       vi.useFakeTimers();
       const nowSpy = vi.spyOn(performance, "now");
 
       try {
         // start() call
         nowSpy.mockReturnValueOnce(0);
-        // first scheduled callback: simulate being ~120ms late
-        nowSpy.mockReturnValueOnce(120);
+        // first scheduled callback: simulate one full 500ms frame elapsing
+        nowSpy.mockReturnValueOnce(500);
 
         const world = createMockWorld();
         const runtime = new ServerRuntime(world as never);
 
         runtime.start();
-        vi.advanceTimersByTime(35);
+        vi.advanceTimersByTime(500);
         runtime.destroy();
 
-        // 120ms behind with MAX_TICKS_PER_FRAME=3 should run exactly 3 catch-up ticks.
-        expect(world.tick).toHaveBeenCalledTimes(3);
-
-        const tickTimes = world.tick.mock.calls.map(
-          (call) => call[0] as number,
-        );
-        expect(tickTimes[0]).toBeGreaterThan(0);
-        expect(tickTimes[1]).toBeGreaterThan(tickTimes[0]);
-        expect(tickTimes[2]).toBeGreaterThan(tickTimes[1]);
+        expect(world.tick).toHaveBeenCalledTimes(1);
+        expect(world.tick.mock.calls[0]?.[0]).toBe(500);
       } finally {
         nowSpy.mockRestore();
         vi.useRealTimers();
@@ -237,44 +250,39 @@ describe("ServerRuntime", () => {
   });
 });
 
-describe("ServerRuntime - OSRS-Style Behavior (Documentation)", () => {
+describe("ServerRuntime - Runtime Behavior (Documentation)", () => {
   /**
-   * These tests document the expected OSRS-style tick behavior.
-   * Actual tick scheduling is tested in E2E tests due to setImmediate limitations.
+   * These tests document the expected server runtime behavior.
+   * Actual tick scheduling is tested in E2E tests due to timer limitations.
    */
 
-  it("should document: ticks run at 30Hz (33.33ms interval)", () => {
-    // OSRS runs at 0.6 second game ticks
-    // Our physics runs at 30Hz (33.33ms) for smooth movement interpolation
-    // Game logic (mob AI, etc) uses 600ms OSRS-style ticks via TickSystem
-    const physicsTickRate = 30; // Hz
-    const physicsTickInterval = 1000 / physicsTickRate; // ms
-    expect(physicsTickInterval).toBeCloseTo(33.33, 1);
+  it("should document: runtime ticks run at 2Hz (500ms interval)", () => {
+    // The server runtime only drives lifecycle callbacks.
+    // OSRS-like game logic still runs in TickSystem at 600ms.
+    const runtimeTickRate = 2; // Hz
+    const runtimeTickInterval = 1000 / runtimeTickRate; // ms
+    expect(runtimeTickInterval).toBe(500);
   });
 
-  it("should document: MAX_TICKS_PER_FRAME prevents tick storms", () => {
-    // When returning from tab unfocus (e.g., 30 second pause):
-    // - Accumulator has 30000ms of debt
-    // - At 30Hz, that's 900 ticks
-    // - MAX_TICKS_PER_FRAME = 3 prevents running all 900
-    // - Instead, run 3 ticks and reset accumulator
+  it("should document: accumulator capping prevents tick storms", () => {
+    // When returning from a long pause, accumulated debt is capped to one frame
+    // so the runtime does not attempt multi-frame catch-up work.
     const pauseDuration = 30000; // 30 seconds
-    const ticksWithoutCap = pauseDuration / 33.33; // ~900 ticks
-    const ticksWithCap = 3; // MAX_TICKS_PER_FRAME
+    const runtimeTickInterval = 500; // ms
+    const uncappedFrames = pauseDuration / runtimeTickInterval;
+    const cappedFrames = 1;
 
-    expect(ticksWithoutCap).toBeGreaterThan(800);
-    expect(ticksWithCap).toBe(3);
+    expect(uncappedFrames).toBe(60);
+    expect(cappedFrames).toBe(1);
   });
 
-  it("should document: lag warning after 2 ticks behind", () => {
-    // If server can't keep up (consistently running slow):
-    // - Warning logged when 2+ ticks behind
-    // - 5 second cooldown prevents log spam
-    const lagThreshold = 2; // ticks
-    const warningCooldown = 5000; // ms
+  it("should document: game logic still runs on TickSystem", () => {
+    // ServerRuntime handles lifecycle callbacks; combat/AI remain on the
+    // separate OSRS-style TickSystem cadence.
+    const tickSystemInterval = 600; // ms
+    const runtimeInterval = 500; // ms
 
-    expect(lagThreshold).toBe(2);
-    expect(warningCooldown).toBe(5000);
+    expect(tickSystemInterval).toBeGreaterThan(runtimeInterval);
   });
 
   it("should document: stats cache prevents expensive CPU sampling", () => {

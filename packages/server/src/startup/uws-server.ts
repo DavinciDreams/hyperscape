@@ -10,7 +10,7 @@
  * EventEmitter-like NodeWebSocket interface that Socket/ConnectionHandler expect.
  */
 
-import uWS from "uWebSockets.js";
+import * as uWS from "uWebSockets.js";
 import type { World } from "@hyperscape/shared";
 import {
   UwsWebSocketAdapter,
@@ -115,9 +115,12 @@ export function createUwsServer(
         ws.close();
         return;
       }
-      world.network
-        .onConnection(adapter as unknown as NodeWebSocket, userData.query)
-        .catch((err: unknown) => {
+      Promise.resolve(
+        world.network.onConnection(
+          adapter as unknown as NodeWebSocket,
+          userData.query,
+        ),
+      ).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(
             `[uWS] onConnection error for ${userData.wsId}: ${msg}`,

@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 1,
   "workspaces": {
     "": {
       "name": "@hyperscape/hyperscape",
@@ -361,6 +360,7 @@
       "version": "1.0.0",
       "dependencies": {
         "@hyperscape/impostor": "workspace:*",
+        "@hyperscape/shared": "workspace:*",
         "delaunator": "^5.0.1",
       },
       "devDependencies": {

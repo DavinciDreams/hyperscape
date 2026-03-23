@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { decimateToFaceCount } from "../src/decimation/decimate.js";
 import {
   MeshData,
   decimate,
@@ -14,6 +15,8 @@ import {
   computeHalfEdgeQSlim5D,
   checkNoFoldover,
   costAndPlacement5D,
+  fromBufferGeometry,
+  toBufferGeometry,
 } from "../src/index.js";
 import {
   twoPointsOnSameSide,
@@ -1491,10 +1494,6 @@ describe("Algorithm correctness", () => {
 // ============================================================================
 // LARP FIX: Tests for previously untested code paths
 // ============================================================================
-
-import { decimateToFaceCount } from "../src/decimation/decimate.js";
-import { fromBufferGeometry, toBufferGeometry } from "../src/index.js";
-import { cholesky } from "../src/math/matrix.js";
 
 describe("decimateToFaceCount (LARP fix)", () => {
   it("decimates to approximate target face count", () => {

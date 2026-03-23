@@ -230,17 +230,21 @@ export class ElizaDuelBot extends EventEmitter {
 
         // Create a memory-safe adapter (cap logs)
         const adapter = new InMemoryDatabaseAdapter();
-        const MAX_LOGS = 20;
-        const origCreateLogs = adapter.createLogs.bind(adapter);
-        adapter.createLogs = async (
-          params: Parameters<typeof origCreateLogs>[0],
-        ) => {
-          await origCreateLogs(params);
-          const logs = (adapter as unknown as { logs: unknown[] }).logs;
-          if (logs && logs.length > MAX_LOGS) {
-            logs.splice(0, logs.length - MAX_LOGS);
-          }
+        const adapterWithLogs = adapter as unknown as {
+          log?: (params: unknown) => Promise<unknown>;
+          logs?: unknown[];
         };
+        const MAX_LOGS = 20;
+        const origLog = adapterWithLogs.log?.bind(adapter);
+        if (origLog) {
+          adapterWithLogs.log = async (params: unknown) => {
+            await origLog(params);
+            const logs = adapterWithLogs.logs;
+            if (Array.isArray(logs) && logs.length > MAX_LOGS) {
+              logs.splice(0, logs.length - MAX_LOGS);
+            }
+          };
+        }
 
         // Create runtime with lightweight in-memory adapter (no PGLite WASM overhead)
         this.runtime = new AgentRuntime({
@@ -276,15 +280,11 @@ export class ElizaDuelBot extends EventEmitter {
         // ElizaOS v2 lazy-starts services — they aren't started during
         // runtime.initialize().  Explicitly ensure HyperscapeService is
         // started so the WebSocket connection + player spawn can proceed.
-        if (
-          typeof (this.runtime as Record<string, unknown>)
-            ._ensureServiceStarted === "function"
-        ) {
-          await (
-            this.runtime as unknown as {
-              _ensureServiceStarted: (t: string) => Promise<unknown>;
-            }
-          )._ensureServiceStarted("hyperscapeService");
+        const runtimeWithService = this.runtime as unknown as {
+          _ensureServiceStarted?: (serviceName: string) => Promise<unknown>;
+        };
+        if (typeof runtimeWithService._ensureServiceStarted === "function") {
+          await runtimeWithService._ensureServiceStarted("hyperscapeService");
         }
 
         await this.waitForPlayerSpawnReady(this.config.connectTimeoutMs);

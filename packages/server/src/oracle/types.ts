@@ -89,6 +89,7 @@ export interface DuelArenaOracleFightStartEvent {
   cycleId: string;
   duelId: string;
   duelKeyHex: string;
+  betCloseTime: number;
   fightStartTime: number;
   agent1Id: string | null;
   agent2Id: string | null;

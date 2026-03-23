@@ -394,11 +394,6 @@ export const TerrainPreview: React.FC<TerrainPreviewProps> = ({
         gaussianCoeff: 0.00001,
         boundaryNoiseScale: config.biomeNoiseScale,
         boundaryNoiseAmount: 0.2,
-        mountainHeightThreshold: 0.7,
-        mountainWeightBoost: 1.5,
-        valleyHeightThreshold: 0.3,
-        valleyWeightBoost: 1.3,
-        mountainHeightBoost: 1.2,
       },
     };
 

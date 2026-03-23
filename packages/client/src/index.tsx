@@ -25,6 +25,15 @@ import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
 import { logger } from "./lib/logger";
+import { primeStreamingAccessTokenFromWindow } from "./lib/streamingAccessToken";
+import {
+  applyHyperscapeAuthMessage,
+  isTrustedEmbedOrigin,
+  parseHyperscapeAuthMessage,
+  resolveEmbedReadyTargetOrigin,
+  resolveTrustedEmbedOrigins,
+} from "./lib/embeddedAuth";
+import type { StreamingWindow } from "./lib/streamingWindow";
 import { MaintenanceBanner } from "./components/common/MaintenanceBanner";
 // Loading fallback for lazy-loaded screens
 function ScreenLoadingFallback() {
@@ -126,6 +135,9 @@ if (typeof window !== "undefined") {
     env?: { PUBLIC_CDN_URL?: string };
     __CDN_URL?: string;
   };
+  // Scrub streaming viewer secrets before React or telemetry code can observe
+  // them in the address bar. Hash takes precedence over query for compatibility.
+  primeStreamingAccessTokenFromWindow(window);
   // Normalize the CDN URL if provided via env.js
   const envCdn = windowWithEnv.env?.PUBLIC_CDN_URL;
   if (envCdn && typeof envCdn === "string" && envCdn !== "undefined") {
@@ -178,8 +190,6 @@ const embeddedParamSchema: URLParamValidation[] = [
   { name: "wsUrl", type: "url" },
   { name: "hiddenUI", type: "string", maxLength: 128 },
   { name: "privyUserId", type: "id", maxLength: 64 },
-  // sessionToken validated but NOT authToken - see security note above
-  { name: "sessionToken", type: "id", maxLength: 256 },
 ];
 
 if (isEmbedded) {
@@ -234,46 +244,72 @@ if (isEmbedded) {
     qualityParam === "ultra"
       ? qualityParam
       : defaultQuality) as GraphicsQuality,
-    sessionToken: (params.sessionToken as string) || "",
+    sessionToken: "",
     privyUserId: (params.privyUserId as string) || undefined,
   };
 
   window.__HYPERSCAPE_CONFIG__ = config;
 
+  const runtimeWindow = window as StreamingWindow;
+  const trustedOrigins = resolveTrustedEmbedOrigins({
+    currentOrigin: window.location.origin,
+    publicAppUrl:
+      runtimeWindow.env?.PUBLIC_APP_URL || import.meta.env.PUBLIC_APP_URL,
+    embedAllowedOrigins:
+      runtimeWindow.env?.PUBLIC_EMBED_ALLOWED_ORIGINS ||
+      import.meta.env.PUBLIC_EMBED_ALLOWED_ORIGINS,
+  });
+  const allowWildcardEmbedFallback =
+    import.meta.env.DEV ||
+    import.meta.env.PLAYWRIGHT_TEST === true ||
+    import.meta.env.PLAYWRIGHT_TEST === "true";
+
   // Setup secure postMessage listener for receiving auth token from parent window
   // This is the secure alternative to passing tokens via URL parameters
   const handleAuthMessage = (event: MessageEvent) => {
-    // Validate origin - in production, should check against allowed origins
-    if (event.data?.type === "HYPERSCAPE_AUTH" && event.data?.authToken) {
-      const currentConfig = window.__HYPERSCAPE_CONFIG__;
-      if (currentConfig) {
-        currentConfig.authToken = event.data.authToken;
-        // Also set agentId, characterId, and followEntity from auth message if provided
-        if (event.data.agentId) {
-          currentConfig.agentId = event.data.agentId;
-        }
-        if (event.data.characterId) {
-          currentConfig.characterId = event.data.characterId;
-          // If followEntity not set, use characterId as the entity to follow
-          if (!currentConfig.followEntity) {
-            currentConfig.followEntity = event.data.characterId;
-          }
-        }
-        if (event.data.followEntity) {
-          currentConfig.followEntity = event.data.followEntity;
-        }
-        // Notify that auth is ready
-        window.dispatchEvent(new CustomEvent("hyperscape:auth-ready"));
-      }
-      // Remove listener after receiving token
-      window.removeEventListener("message", handleAuthMessage);
+    if (event.source !== window.parent) {
+      return;
     }
+
+    if (!isTrustedEmbedOrigin(event.origin, trustedOrigins)) {
+      console.warn(
+        "[Hyperscape] Ignoring HYPERSCAPE_AUTH from untrusted origin:",
+        event.origin,
+      );
+      return;
+    }
+
+    const message = parseHyperscapeAuthMessage(event.data);
+    if (!message) {
+      return;
+    }
+
+    const currentConfig = window.__HYPERSCAPE_CONFIG__;
+    if (!currentConfig) {
+      return;
+    }
+
+    applyHyperscapeAuthMessage(currentConfig, message);
+    window.dispatchEvent(new CustomEvent("hyperscape:auth-ready"));
+    window.removeEventListener("message", handleAuthMessage);
   };
   window.addEventListener("message", handleAuthMessage);
 
   // Notify parent window that embedded viewport is ready to receive auth
   if (window.parent !== window) {
-    window.parent.postMessage({ type: "HYPERSCAPE_READY" }, "*");
+    const readyTargetOrigin = resolveEmbedReadyTargetOrigin({
+      currentOrigin: window.location.origin,
+      trustedOrigins,
+      referrer: document.referrer || null,
+      allowWildcardFallback: allowWildcardEmbedFallback,
+    });
+    if (readyTargetOrigin) {
+      window.parent.postMessage({ type: "HYPERSCAPE_READY" }, readyTargetOrigin);
+    } else {
+      console.warn(
+        "[Hyperscape] Could not determine a trusted origin for HYPERSCAPE_READY; skipping parent bootstrap message",
+      );
+    }
   }
 
   logger.config("[Hyperscape] Configured from validated URL params:", {
@@ -313,6 +349,7 @@ declare global {
     readonly PUBLIC_CDN_URL?: string;
     readonly PUBLIC_ENABLE_FARCASTER?: string;
     readonly PUBLIC_APP_URL?: string;
+    readonly PUBLIC_EMBED_ALLOWED_ORIGINS?: string;
     readonly PUBLIC_API_URL?: string;
     readonly PUBLIC_ELIZAOS_URL?: string;
   }

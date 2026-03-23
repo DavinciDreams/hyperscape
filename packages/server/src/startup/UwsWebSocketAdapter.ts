@@ -13,7 +13,7 @@
  *   (connection-handler removes temp auth listener, then Socket adds permanent one)
  */
 
-import type uWS from "uWebSockets.js";
+import type * as uWS from "uWebSockets.js";
 
 /** Per-connection data stored on the uWS WebSocket via upgrade */
 export interface UwsUserData {
