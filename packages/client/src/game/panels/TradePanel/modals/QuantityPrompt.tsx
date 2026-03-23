@@ -8,7 +8,13 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
-import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 import { parseQuantityInput } from "../utils";
 import type { QuantityPromptProps } from "../types";
 
@@ -38,7 +44,7 @@ export function QuantityPrompt({
   return createPortal(
     <div
       className="fixed inset-0 flex items-center justify-center"
-      style={{ zIndex: 100000, background: "rgba(0, 0, 0, 0.5)" }}
+      style={{ zIndex: UI.Z_INDEX.MODAL, background: "rgba(0, 0, 0, 0.5)" }}
       onClick={onCancel}
     >
       <div
@@ -85,9 +91,10 @@ export function QuantityPrompt({
           style={{
             width: "100%",
             padding: "8px",
-            background: theme.colors.background.panelPrimary,
-            border: `1px solid ${theme.colors.border.default}66`,
-            borderRadius: `${theme.borderRadius.md}px`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: theme.borderRadius.md,
+            }),
             color: theme.colors.text.primary,
             fontSize: "14px",
             marginBottom: "12px",
@@ -99,10 +106,12 @@ export function QuantityPrompt({
             style={{
               flex: 1,
               padding: "8px",
-              background: `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
+              ...getInteractiveTileStyle(theme, {
+                active: true,
+                accentColor: theme.colors.state.success,
+                radius: theme.borderRadius.md,
+              }),
               color: "white",
-              border: "none",
-              borderRadius: `${theme.borderRadius.md}px`,
               cursor: "pointer",
               fontWeight: "bold",
             }}
@@ -114,10 +123,12 @@ export function QuantityPrompt({
             style={{
               flex: 1,
               padding: "8px",
-              background: `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`,
+              ...getInteractiveTileStyle(theme, {
+                active: true,
+                accentColor: theme.colors.state.danger,
+                radius: theme.borderRadius.md,
+              }),
               color: "white",
-              border: "none",
-              borderRadius: `${theme.borderRadius.md}px`,
               cursor: "pointer",
               fontWeight: "bold",
             }}

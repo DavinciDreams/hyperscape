@@ -23,11 +23,14 @@ import { useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useThemeStore } from "@/ui";
 import {
+  getInteractiveTileStyle,
   getPanelHeaderStyle,
+  getPanelInsetStyle,
   getPanelSurfaceStyle,
   getShellControlButtonStyle,
 } from "@/ui/theme/themes";
 import type { TradeOfferItem } from "@hyperscape/shared";
+import { UI } from "@/ui/core";
 
 // Import from split modules
 import type {
@@ -153,8 +156,11 @@ export function TradePanel({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center"
-      style={{ background: theme.colors.background.overlay }}
+      className="fixed inset-0 flex items-center justify-center"
+      style={{
+        background: theme.colors.background.overlay,
+        zIndex: UI.Z_INDEX.MODAL,
+      }}
     >
       {/* CSS Animation for pulse effect */}
       <style>{`
@@ -280,12 +286,10 @@ export function TradePanel({
                     className="grid gap-1 p-2 rounded"
                     style={{
                       gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                      background:
-                        theme.name === "hyperscape"
-                          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.14) 100%)"
-                          : theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}40`,
-                      boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+                      ...getPanelInsetStyle(theme, {
+                        emphasis: "strong",
+                        radius: theme.borderRadius.md,
+                      }),
                     }}
                   >
                     {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
@@ -308,11 +312,9 @@ export function TradePanel({
                   <div
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
-                      background:
-                        theme.name === "hyperscape"
-                          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
-                          : theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}40`,
+                      ...getPanelInsetStyle(theme, {
+                        radius: theme.borderRadius.md,
+                      }),
                       color: theme.colors.text.secondary,
                     }}
                   >
@@ -355,12 +357,10 @@ export function TradePanel({
                     className="grid gap-1 p-2 rounded"
                     style={{
                       gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                      background:
-                        theme.name === "hyperscape"
-                          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.14) 100%)"
-                          : theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}40`,
-                      boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+                      ...getPanelInsetStyle(theme, {
+                        emphasis: "strong",
+                        radius: theme.borderRadius.md,
+                      }),
                     }}
                   >
                     {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
@@ -378,11 +378,9 @@ export function TradePanel({
                   <div
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
-                      background:
-                        theme.name === "hyperscape"
-                          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
-                          : theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}40`,
+                      ...getPanelInsetStyle(theme, {
+                        radius: theme.borderRadius.md,
+                      }),
                       color: theme.colors.text.secondary,
                     }}
                   >
@@ -398,12 +396,10 @@ export function TradePanel({
               <div
                 className="mt-3 px-3 py-2 rounded text-sm flex items-center justify-between"
                 style={{
-                  background:
-                    theme.name === "hyperscape"
-                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
-                      : theme.colors.background.panelSecondary,
-                  border: `1px solid ${theme.colors.border.decorative}`,
-                  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+                  ...getPanelInsetStyle(theme, {
+                    emphasis: "strong",
+                    radius: theme.borderRadius.md,
+                  }),
                 }}
               >
                 {/* Partner free slots indicator (OSRS-style) */}
@@ -483,8 +479,10 @@ export function TradePanel({
             <div
               className="mt-3 px-3 py-2 rounded text-sm text-center"
               style={{
-                background: `${theme.colors.state.warning}20`,
-                border: `1px solid ${theme.colors.state.warning}50`,
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "strong",
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.state.warning,
               }}
             >
@@ -497,9 +495,11 @@ export function TradePanel({
             <div
               className="mt-3 px-3 py-2 rounded text-sm text-center"
               style={{
-                background: "rgba(239, 68, 68, 0.2)",
-                border: "1px solid rgba(239, 68, 68, 0.5)",
-                color: "#ef4444",
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "strong",
+                  radius: theme.borderRadius.md,
+                }),
+                color: theme.colors.state.danger,
               }}
             >
               ⚠️ Items have been removed from the trade!
@@ -513,13 +513,13 @@ export function TradePanel({
               disabled={state.myAccepted}
               className="flex-1 py-2.5 rounded text-sm font-bold transition-all"
               style={{
-                background: state.myAccepted
-                  ? theme.colors.background.tertiary
-                  : `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
+                ...getInteractiveTileStyle(theme, {
+                  active: !state.myAccepted,
+                  disabled: state.myAccepted,
+                  accentColor: theme.colors.state.success,
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.text.primary,
-                border: state.myAccepted
-                  ? `1px solid ${theme.colors.border.default}`
-                  : `1px solid ${theme.colors.state.success}`,
                 textShadow: "0 1px 2px rgba(0,0,0,0.5)",
                 opacity: state.myAccepted ? 0.7 : 1,
                 cursor: state.myAccepted ? "default" : "pointer",
@@ -545,9 +545,12 @@ export function TradePanel({
               onClick={onCancel}
               className="flex-1 py-2.5 rounded text-sm font-bold transition-all"
               style={{
-                background: `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`,
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  accentColor: theme.colors.state.danger,
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.text.primary,
-                border: `1px solid ${theme.colors.state.danger}`,
                 textShadow: "0 1px 2px rgba(0,0,0,0.5)",
               }}
               onMouseEnter={(e) => {

@@ -13,6 +13,7 @@
 
 import React, { memo } from "react";
 import { useThemeStore } from "@/ui";
+import { getInteractiveTileStyle } from "@/ui/theme/themes";
 import type { BankItem } from "../types";
 import { formatItemName, formatQuantity, getQuantityColor } from "../utils";
 import { ItemIcon } from "@/ui/components/ItemIcon";
@@ -76,16 +77,14 @@ export const BankSlotItem = memo(function BankSlotItem({
       style={{
         width: slotSize,
         height: slotSize,
-        background: showSwapHighlight
-          ? `linear-gradient(135deg, rgba(${dropColor}, 0.35) 0%, rgba(${dropColor}, 0.2) 100%)`
-          : isPlaceholder
-            ? `linear-gradient(135deg, ${theme.colors.background.panelSecondary}66 0%, ${theme.colors.background.panelPrimary}66 100%)`
-            : `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`,
-        border: showSwapHighlight
-          ? `2px solid rgba(${dropColor}, 0.9)`
-          : isPlaceholder
-            ? `1px dashed ${theme.colors.border.default}33`
-            : `1px solid ${theme.colors.border.hover}`,
+        ...getInteractiveTileStyle(theme, {
+          active: !isPlaceholder,
+          dragging: isDragging,
+          dropTarget: showSwapHighlight,
+          disabled: isPlaceholder,
+          radius: theme.borderRadius.sm,
+          accentColor: theme.colors.accent.primary,
+        }),
         transform: isDragging ? "scale(0.9)" : "scale(1)",
         opacity: isDragging ? 0.4 : isPlaceholder ? 0.6 : 1,
         transition:

@@ -8,7 +8,12 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
-import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 import type { TradeContextMenuProps } from "../types";
 
 export function TradeContextMenu({
@@ -62,7 +67,7 @@ export function TradeContextMenu({
         position: "fixed",
         left: adjustedX,
         top: adjustedY,
-        zIndex: 99999,
+        zIndex: UI.Z_INDEX.CONTEXT_MENU,
         ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
         borderRadius: theme.borderRadius.md,
         padding: "2px 0",
@@ -91,13 +96,19 @@ export function TradeContextMenu({
           }}
           style={{
             padding: "4px 8px",
+            ...getPanelInsetStyle(theme, {
+              radius: theme.borderRadius.sm,
+            }),
             color:
               i === 0 ? theme.colors.text.accent : theme.colors.text.primary,
             fontSize: "12px",
             cursor: "pointer",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = `${theme.colors.background.hover}`;
+            e.currentTarget.style.background = String(
+              getPanelInsetStyle(theme, { radius: theme.borderRadius.sm })
+                .background,
+            );
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = "transparent";

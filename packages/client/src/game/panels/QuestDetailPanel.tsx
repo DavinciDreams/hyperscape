@@ -10,7 +10,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useQuestSelectionStore, useTheme } from "@/ui";
 import {
+  getInteractiveTileStyle,
   getPanelHeaderStyle,
+  getPanelInsetStyle,
   getPanelSurfaceStyle,
   getShellControlButtonStyle,
 } from "@/ui/theme/themes";
@@ -238,13 +240,11 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     flexWrap: isMobile ? "wrap" : "nowrap",
     gap: isMobile ? spacing.sm : spacing.md,
     marginBottom: isMobile ? spacing.sm : spacing.md,
-    padding: spacing.sm,
-    background:
-      theme.name === "hyperscape"
-        ? "linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(0,0,0,0.14) 100%)"
-        : theme.colors.background.tertiary,
-    borderRadius: `${theme.borderRadius.md}px`,
-    border: `1px solid ${theme.colors.border.default}40`,
+    ...getPanelInsetStyle(theme, {
+      emphasis: "strong",
+      radius: theme.borderRadius.md,
+      padding: spacing.sm,
+    }),
     fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
   };
 
@@ -268,10 +268,12 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
 
   const progressBarContainerStyle: React.CSSProperties = {
     height: isMobile ? "6px" : "4px",
-    backgroundColor: COLORS.BG_TERTIARY,
-    borderRadius: "2px",
+    ...getPanelInsetStyle(theme, {
+      radius: 999,
+    }),
     overflow: "hidden",
     marginTop: spacing.xs,
+    padding: 0,
   };
 
   const progressBarFillStyle: React.CSSProperties = {
@@ -298,10 +300,10 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     gap: spacing.sm,
     padding: isMobile ? spacing.sm : spacing.md,
     borderTop: `1px solid ${theme.colors.border.default}`,
-    background:
-      theme.name === "hyperscape"
-        ? "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.16) 100%)"
-        : theme.colors.background.panelSecondary,
+    ...getPanelInsetStyle(theme, {
+      emphasis: "normal",
+      radius: 0,
+    }),
   };
 
   const buttonBaseStyle: React.CSSProperties = {
@@ -320,15 +322,20 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
 
   const primaryButtonStyle: React.CSSProperties = {
     ...buttonBaseStyle,
-    background: COLORS.ACCENT,
+    ...getInteractiveTileStyle(theme, {
+      active: true,
+      accentColor: theme.colors.accent.primary,
+      radius: theme.borderRadius.md,
+    }),
     color: COLORS.BG_PRIMARY,
   };
 
   const secondaryButtonStyle: React.CSSProperties = {
     ...buttonBaseStyle,
-    background: COLORS.BG_TERTIARY,
+    ...getInteractiveTileStyle(theme, {
+      radius: theme.borderRadius.md,
+    }),
     color: COLORS.TEXT_PRIMARY,
-    border: `1px solid ${COLORS.BORDER_PRIMARY}`,
   };
 
   return (

@@ -19,10 +19,13 @@ import React from "react";
 import type { World } from "@hyperscape/shared";
 import { useThemeStore } from "@/ui";
 import {
+  getInteractiveTileStyle,
   getPanelHeaderStyle,
+  getPanelInsetStyle,
   getPanelSurfaceStyle,
   getShellControlButtonStyle,
 } from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 
 interface DialogueResponse {
   text: string;
@@ -89,8 +92,9 @@ export function DialoguePanel({
 
   return (
     <div
-      className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto"
+      className="fixed bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto"
       style={{
+        zIndex: UI.Z_INDEX.MODAL,
         width: "40rem",
         maxWidth: "90vw",
         ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
@@ -147,6 +151,11 @@ export function DialoguePanel({
           fontSize: "1rem",
           minHeight: "3rem",
           color: theme.colors.text.primary,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "normal",
+            radius: theme.borderRadius.lg,
+            padding: `${theme.spacing.md}px`,
+          }),
         }}
       >
         {text}
@@ -162,13 +171,11 @@ export function DialoguePanel({
               className="w-full text-left py-2 px-4 rounded cursor-pointer transition-all"
               aria-label={`Response ${index + 1}: ${response.text}`}
               style={{
-                background:
-                  theme.name === "hyperscape"
-                    ? "linear-gradient(180deg, rgba(240, 208, 96, 0.12) 0%, rgba(54, 42, 18, 0.16) 100%)"
-                    : `${theme.colors.accent.primary}12`,
-                border: `1px solid ${theme.colors.accent.primary}40`,
+                ...getInteractiveTileStyle(theme, {
+                  radius: theme.borderRadius.md,
+                  accentColor: theme.colors.accent.primary,
+                }),
                 color: theme.colors.text.secondary,
-                borderRadius: theme.borderRadius.md,
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background =
@@ -194,13 +201,12 @@ export function DialoguePanel({
             className="w-full py-2 px-4 rounded cursor-pointer transition-all"
             aria-label="Continue dialogue"
             style={{
-              background:
-                theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(240, 208, 96, 0.2) 0%, rgba(67, 51, 18, 0.24) 100%)"
-                  : `${theme.colors.accent.primary}20`,
-              border: `1px solid ${theme.colors.accent.primary}70`,
+              ...getInteractiveTileStyle(theme, {
+                active: true,
+                radius: theme.borderRadius.md,
+                accentColor: theme.colors.accent.primary,
+              }),
               color: theme.colors.text.accent,
-              borderRadius: theme.borderRadius.md,
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background =

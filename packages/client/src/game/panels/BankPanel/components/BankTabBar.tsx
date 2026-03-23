@@ -11,6 +11,7 @@
  */
 
 import { useThemeStore } from "@/ui";
+import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
 import type { BankItem, BankTab, ConfirmModalState } from "../types";
 import type { DragState } from "../hooks";
 import { TAB_INDEX_ALL, TAB_INDEX_NEW_TAB_HOVER } from "../constants";
@@ -90,8 +91,16 @@ export function BankTabBar({
         style={{
           background:
             selectedTab === TAB_INDEX_ALL
-              ? `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.background.tertiary} 100%)`
-              : theme.colors.background.secondary,
+              ? String(
+                  getInteractiveTileStyle(theme, {
+                    active: true,
+                    radius: theme.borderRadius.sm,
+                  }).background,
+                )
+              : String(
+                  getPanelInsetStyle(theme, { radius: theme.borderRadius.sm })
+                    .background,
+                ),
           color:
             selectedTab === TAB_INDEX_ALL
               ? theme.colors.text.primary
@@ -192,10 +201,17 @@ export function BankTabBar({
                 background: isHovered
                   ? `${theme.colors.accent.primary}4d` // 30% opacity
                   : isSelected
-                    ? `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.background.tertiary} 100%)`
-                    : isPlaceholderIcon
-                      ? theme.colors.background.tertiary
-                      : theme.colors.background.secondary,
+                    ? String(
+                        getInteractiveTileStyle(theme, {
+                          active: true,
+                          radius: theme.borderRadius.sm,
+                        }).background,
+                      )
+                    : String(
+                        getPanelInsetStyle(theme, {
+                          radius: theme.borderRadius.sm,
+                        }).background,
+                      ),
                 color: isSelected
                   ? theme.colors.text.primary
                   : theme.colors.text.secondary,
@@ -248,7 +264,11 @@ export function BankTabBar({
             background:
               hoveredTabIndex === TAB_INDEX_NEW_TAB_HOVER
                 ? `${theme.colors.state.success}4d` // 30% opacity
-                : theme.colors.background.tertiary,
+                : String(
+                    getPanelInsetStyle(theme, {
+                      radius: theme.borderRadius.sm,
+                    }).background,
+                  ),
             color: theme.colors.state.success,
             borderTop:
               hoveredTabIndex === TAB_INDEX_NEW_TAB_HOVER

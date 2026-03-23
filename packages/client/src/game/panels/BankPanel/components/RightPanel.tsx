@@ -7,7 +7,12 @@
 
 import React, { useCallback } from "react";
 import { useThemeStore, useMobileLayout } from "@/ui";
-import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import type { PlayerEquipmentItems } from "@hyperscape/shared";
 import { INV_SLOTS_PER_ROW, INV_SLOT_SIZE } from "../constants";
 import { formatItemName } from "../utils";
@@ -77,14 +82,11 @@ export function RightPanel({
           onClick={() => hasItem && onDepositEquipment(key)}
           className="w-full h-full rounded transition-all duration-200 cursor-pointer group relative"
           style={{
-            background: hasItem
-              ? `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`
-              : theme.colors.background.overlay,
-            borderWidth: "2px",
-            borderStyle: "solid",
-            borderColor: hasItem
-              ? theme.colors.border.hover
-              : theme.colors.border.default,
+            ...getInteractiveTileStyle(theme, {
+              active: hasItem,
+              radius: theme.borderRadius.md,
+              accentColor: theme.colors.state.success,
+            }),
             boxShadow: hasItem
               ? `0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 ${theme.colors.border.default}1a`
               : "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
@@ -191,8 +193,17 @@ export function RightPanel({
             style={{
               background:
                 mode === "inventory"
-                  ? `${theme.colors.accent.primary}20`
-                  : theme.colors.background.overlay,
+                  ? String(
+                      getInteractiveTileStyle(theme, {
+                        active: true,
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    )
+                  : String(
+                      getPanelInsetStyle(theme, {
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    ),
               color:
                 mode === "inventory"
                   ? theme.colors.accent.primary
@@ -200,7 +211,7 @@ export function RightPanel({
               border:
                 mode === "inventory"
                   ? `1px solid ${theme.colors.accent.primary}50`
-                  : "1px solid transparent",
+                  : `1px solid ${theme.colors.border.default}50`,
             }}
             title="View Backpack"
           >
@@ -212,8 +223,17 @@ export function RightPanel({
             style={{
               background:
                 mode === "equipment"
-                  ? `${theme.colors.accent.primary}20`
-                  : theme.colors.background.overlay,
+                  ? String(
+                      getInteractiveTileStyle(theme, {
+                        active: true,
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    )
+                  : String(
+                      getPanelInsetStyle(theme, {
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    ),
               color:
                 mode === "equipment"
                   ? theme.colors.accent.primary
@@ -221,7 +241,7 @@ export function RightPanel({
               border:
                 mode === "equipment"
                   ? `1px solid ${theme.colors.accent.primary}50`
-                  : "1px solid transparent",
+                  : `1px solid ${theme.colors.border.default}50`,
             }}
             title="View Worn Equipment"
           >

@@ -21,10 +21,16 @@ import type { ClientWorld, InventorySlotItem } from "../../types";
 import { COLORS } from "../../constants";
 import { InventoryPanel } from "./InventoryPanel";
 import { useWindowStore, useThemeStore, useMobileLayout } from "@/ui";
-import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { getItem } from "@hyperscape/shared";
 import { formatItemName, formatPrice } from "@/utils";
 import { ItemIcon } from "@/ui/components/ItemIcon";
+import { UI } from "@/ui/core";
 
 interface StoreItem {
   id: string;
@@ -161,7 +167,7 @@ function ContextMenu({
         left: menu.x,
         top: menu.y,
         width: "auto",
-        zIndex: 10000,
+        zIndex: UI.Z_INDEX.CONTEXT_MENU,
         pointerEvents: "auto",
       }}
     >
@@ -184,6 +190,10 @@ function ContextMenu({
             padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
             fontSize: theme.typography.fontSize.xs,
             color: theme.colors.state.warning,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "normal",
+              radius: theme.borderRadius.sm,
+            }),
             borderBottom: `1px solid ${theme.colors.border.default}40`,
           }}
         >
@@ -207,12 +217,10 @@ function ContextMenu({
                 width: "100%",
                 padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                 fontSize: theme.typography.fontSize.sm,
-                borderRadius: theme.borderRadius.sm,
-                background:
-                  theme.name === "hyperscape"
-                    ? "rgba(255, 255, 255, 0.04)"
-                    : theme.colors.background.tertiary,
-                border: `1px solid ${theme.colors.border.default}50`,
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "normal",
+                  radius: theme.borderRadius.sm,
+                }),
                 color: theme.colors.text.primary,
                 outline: "none",
               }}
@@ -231,10 +239,12 @@ function ContextMenu({
                   flex: 1,
                   padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                   fontSize: theme.typography.fontSize.xs,
-                  borderRadius: theme.borderRadius.sm,
-                  background: `${theme.colors.state.success}99`,
+                  ...getInteractiveTileStyle(theme, {
+                    active: true,
+                    accentColor: theme.colors.state.success,
+                    radius: theme.borderRadius.sm,
+                  }),
                   color: theme.colors.text.primary,
-                  border: "none",
                   cursor: "pointer",
                 }}
               >
@@ -246,10 +256,12 @@ function ContextMenu({
                   flex: 1,
                   padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                   fontSize: theme.typography.fontSize.xs,
-                  borderRadius: theme.borderRadius.sm,
-                  background: `${theme.colors.state.danger}99`,
+                  ...getInteractiveTileStyle(theme, {
+                    active: true,
+                    accentColor: theme.colors.state.danger,
+                    radius: theme.borderRadius.sm,
+                  }),
                   color: theme.colors.text.primary,
-                  border: "none",
                   cursor: "pointer",
                 }}
               >
@@ -490,10 +502,10 @@ export function StorePanel({
               maxHeight: shouldUseMobileUI
                 ? `${4 * (responsiveSlotSize + 8)}px`
                 : `${STORE_SCROLL_HEIGHT}px`,
-              background:
-                theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.12) 100%)"
-                  : "transparent",
+              ...getPanelInsetStyle(theme, {
+                emphasis: "strong",
+                radius: theme.borderRadius.lg,
+              }),
             }}
           >
             <div
@@ -510,13 +522,10 @@ export function StorePanel({
                   style={{
                     width: `${responsiveSlotSize}px`,
                     height: `${responsiveSlotSize}px`,
-                    background:
-                      theme.name === "hyperscape"
-                        ? "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(36, 26, 16, 0.28) 100%)"
-                        : `${theme.colors.accent.primary}10`,
-                    border: `1px solid ${theme.colors.accent.primary}40`,
-                    borderRadius: theme.borderRadius.md,
-                    boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+                    ...getInteractiveTileStyle(theme, {
+                      radius: theme.borderRadius.md,
+                      accentColor: theme.colors.accent.primary,
+                    }),
                   }}
                   title={`${item.name} - ${item.price} gp${item.stockQuantity !== -1 ? ` (${item.stockQuantity} in stock)` : ""}`}
                   onClick={() => handleBuy(item.itemId, 1)}
