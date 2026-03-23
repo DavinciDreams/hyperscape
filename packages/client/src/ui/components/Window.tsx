@@ -26,6 +26,23 @@ const DEFAULT_HANDLE_SIZE = 8;
 const DEFAULT_CORNER_SIZE = 12;
 const EMPTY_WINDOWS: never[] = [];
 
+function getGuideSignature(
+  guides: Array<{
+    type: string;
+    edge: string;
+    position: number;
+    targetWindowId: string;
+  }>,
+): string {
+  if (guides.length === 0) return "";
+  return guides
+    .map(
+      (guide) =>
+        `${guide.type}:${guide.edge}:${guide.position}:${guide.targetWindowId}`,
+    )
+    .join("|");
+}
+
 /**
  * Styled draggable window component
  *
@@ -168,6 +185,7 @@ export const Window = memo(function Window({
   const committedPositionRef = useRef<{ x: number; y: number } | null>(null);
   // Track if we were dragging in the previous render
   const wasDraggingRef = useRef(false);
+  const guideSignatureRef = useRef("");
 
   const handleDragStart = useCallback(() => {
     // Capture the current position when drag starts
@@ -386,7 +404,13 @@ export const Window = memo(function Window({
   React.useEffect(() => {
     if (isDragging) {
       const guides = calculateGuides(displayPosition, windowState.size);
-      setActiveGuides(guides);
+      const nextSignature = getGuideSignature(guides);
+      if (nextSignature !== guideSignatureRef.current) {
+        guideSignatureRef.current = nextSignature;
+        setActiveGuides(guides);
+      }
+    } else if (guideSignatureRef.current) {
+      guideSignatureRef.current = "";
     }
   }, [
     isDragging,

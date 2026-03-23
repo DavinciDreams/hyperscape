@@ -3,7 +3,7 @@
  * Shows gathering/action progress to the player
  */
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useThemeStore } from "@/ui";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
@@ -21,6 +21,7 @@ export function ActionProgressBar({ world }: { world: ClientWorld }) {
   const [currentAction, setCurrentAction] = useState<ActionProgress | null>(
     null,
   );
+  const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     const handleGatheringStart = (data: unknown) => {
@@ -99,8 +100,7 @@ export function ActionProgressBar({ world }: { world: ClientWorld }) {
 
     // Cache the values we need for progress calculation to avoid re-reads
     const { startTime, duration } = currentAction;
-
-    const interval = setInterval(() => {
+    const updateProgress = () => {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
 
@@ -120,12 +120,20 @@ export function ActionProgressBar({ world }: { world: ClientWorld }) {
         };
       });
 
-      if (progress >= 1) {
-        clearInterval(interval);
+      if (progress < 1) {
+        animationFrameRef.current =
+          window.requestAnimationFrame(updateProgress);
       }
-    }, 50); // Update every 50ms for smooth animation
+    };
 
-    return () => clearInterval(interval);
+    animationFrameRef.current = window.requestAnimationFrame(updateProgress);
+
+    return () => {
+      if (animationFrameRef.current !== null) {
+        window.cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
   }, [currentAction?.startTime]);
 
   // Memoize styles to avoid recalculating on every render

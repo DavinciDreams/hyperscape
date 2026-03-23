@@ -23,10 +23,9 @@ export function Disconnected(): React.ReactElement {
   useEffect(() => {
     if (!isAutoReconnecting || countdown <= 0) return;
 
-    const timer = setInterval(() => {
+    const timer = window.setTimeout(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
-          clearInterval(timer);
           window.location.reload();
           return 0;
         }
@@ -34,7 +33,7 @@ export function Disconnected(): React.ReactElement {
       });
     }, 1000);
 
-    return () => clearInterval(timer);
+    return () => window.clearTimeout(timer);
   }, [isAutoReconnecting, countdown]);
 
   const handleManualReconnect = (): void => {
