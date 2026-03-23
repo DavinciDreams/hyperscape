@@ -23,7 +23,11 @@ type PublicRuntimeEnv = {
   PUBLIC_CDN_URL?: string;
 };
 
-type WindowWithRuntimeEnv = Window & { env?: PublicRuntimeEnv };
+type WindowWithRuntimeEnv = Window & {
+  env?: PublicRuntimeEnv;
+  __CDN_URL?: string;
+  __ASSETS_URL?: string;
+};
 
 function isLoopbackHost(hostname: string): boolean {
   return (
@@ -74,6 +78,34 @@ function getRuntimeEnvValue(key: keyof PublicRuntimeEnv): string | undefined {
   return normalizeBrowserLoopbackUrl(
     (window as WindowWithRuntimeEnv).env?.[key],
   );
+}
+
+export function getRuntimeAssetBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    const windowWithEnv = window as WindowWithRuntimeEnv;
+    const authoritativeAssetsUrl = normalizeBrowserLoopbackUrl(
+      windowWithEnv.__ASSETS_URL,
+    );
+    if (authoritativeAssetsUrl) {
+      return authoritativeAssetsUrl;
+    }
+
+    const runtimeCdnUrl = normalizeBrowserLoopbackUrl(windowWithEnv.__CDN_URL);
+    if (runtimeCdnUrl) {
+      return runtimeCdnUrl;
+    }
+  }
+
+  return CDN_URL;
+}
+
+export function resolveRuntimeAssetUrl(assetPath: string): string {
+  if (!assetPath.startsWith("asset://")) {
+    return assetPath;
+  }
+
+  const baseUrl = getRuntimeAssetBaseUrl().replace(/\/$/, "");
+  return assetPath.replace("asset://", `${baseUrl}/`);
 }
 
 // =============================================================================

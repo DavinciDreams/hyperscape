@@ -85,6 +85,92 @@ function warnOptionalData(message: string): void {
   console.warn(message);
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBuildingsManifest(value: unknown): value is BuildingsManifest {
+  if (!isObjectRecord(value)) return false;
+
+  return (
+    typeof value.version === "number" &&
+    Array.isArray(value.towns) &&
+    isObjectRecord(value.buildingTypes) &&
+    isObjectRecord(value.sizeDefinitions)
+  );
+}
+
+type BrowserDataWindow = Window & {
+  __CDN_URL?: string;
+  __ASSETS_URL?: string;
+};
+
+function getClientAssetsBaseUrl(): string {
+  let cdnUrl =
+    process.env.PUBLIC_CDN_URL || "http://localhost:5555/game-assets";
+
+  if (typeof window !== "undefined") {
+    const windowWithCdn = window as BrowserDataWindow;
+    if (windowWithCdn.__ASSETS_URL) {
+      cdnUrl = windowWithCdn.__ASSETS_URL;
+    } else if (windowWithCdn.__CDN_URL) {
+      cdnUrl = windowWithCdn.__CDN_URL;
+    } else if (
+      typeof import.meta !== "undefined" &&
+      import.meta.env?.PUBLIC_CDN_URL
+    ) {
+      cdnUrl =
+        import.meta.env.PUBLIC_CDN_URL || "http://localhost:5555/game-assets";
+    }
+  }
+
+  if (
+    typeof process !== "undefined" &&
+    typeof process.env !== "undefined" &&
+    process.env.PUBLIC_CDN_URL &&
+    !cdnUrl.includes("localhost")
+  ) {
+    cdnUrl = process.env.PUBLIC_CDN_URL;
+  }
+
+  return cdnUrl;
+}
+
+async function fetchRequiredJson<T>(url: string, label: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`${label} failed with HTTP ${response.status}`);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      `${label} returned unexpected content-type: ${contentType}`,
+    );
+  }
+
+  return (await response.json()) as T;
+}
+
+async function fetchOptionalJson<T>(
+  url: string,
+  label: string,
+): Promise<T | null> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    return null;
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      `${label} returned unexpected content-type: ${contentType}`,
+    );
+  }
+
+  return (await response.json()) as T;
+}
+
 const NPC_MODEL_ARCHETYPES: Record<NPCModelArchetype, string> = {
   // Use GLB version (323KB) instead of VRM (8.7MB) to avoid base64 buffer parsing issues
   goblin: "asset://models/goblin/goblin_rigged.glb",
@@ -298,29 +384,7 @@ export class DataManager {
     }
 
     // Client: Load from CDN (localhost:5555/game-assets in dev, R2/S3 in prod)
-    let cdnUrl =
-      process.env.PUBLIC_CDN_URL || "http://localhost:5555/game-assets";
-    // Check for CDN URL in multiple places (browser env vars, window global, process.env)
-    if (typeof window !== "undefined") {
-      const windowWithCdn = window as Window & { __CDN_URL?: string };
-      if (windowWithCdn.__CDN_URL) {
-        cdnUrl = windowWithCdn.__CDN_URL;
-      } else if (
-        typeof import.meta !== "undefined" &&
-        import.meta.env?.PUBLIC_CDN_URL
-      ) {
-        cdnUrl =
-          import.meta.env.PUBLIC_CDN_URL || "http://localhost:5555/game-assets";
-      }
-    }
-    if (
-      typeof process !== "undefined" &&
-      typeof process.env !== "undefined" &&
-      process.env.PUBLIC_CDN_URL &&
-      !cdnUrl.includes("localhost")
-    ) {
-      cdnUrl = process.env.PUBLIC_CDN_URL;
-    }
+    const cdnUrl = getClientAssetsBaseUrl();
     const baseUrl = `${cdnUrl}/manifests`;
 
     // In test/CI environments, CDN might not be available - make loading non-fatal
@@ -333,9 +397,11 @@ export class DataManager {
       // ── PHASE 1: Load tier-requirements + items (sequential dependency) ──
       // tier-requirements must load first because normalizeItem() uses tier data
       try {
-        const tierReqRes = await fetch(`${baseUrl}/tier-requirements.json`);
         const tierReqManifest =
-          (await tierReqRes.json()) as TierRequirementsManifest;
+          await fetchRequiredJson<TierRequirementsManifest>(
+            `${baseUrl}/tier-requirements.json`,
+            "tier-requirements.json",
+          );
         loadTierRequirements(tierReqManifest);
       } catch {
         console.warn(
@@ -429,8 +495,10 @@ export class DataManager {
       await Promise.allSettled([
         // NPCs
         (async () => {
-          const npcsRes = await fetch(`${baseUrl}/npcs.json`);
-          const npcList = (await npcsRes.json()) as Array<NPCDataInput>;
+          const npcList = await fetchRequiredJson<Array<NPCDataInput>>(
+            `${baseUrl}/npcs.json`,
+            "npcs.json",
+          );
           for (const npc of npcList) {
             const normalized = this.normalizeNPC(npc);
             (ALL_NPCS as Map<string, NPCData>).set(normalized.id, normalized);
@@ -439,14 +507,13 @@ export class DataManager {
 
         // World areas
         (async () => {
-          const worldAreasRes = await fetch(`${baseUrl}/world-areas.json`);
-          const worldAreasData = (await worldAreasRes.json()) as {
+          const worldAreasData = await fetchRequiredJson<{
             starterTowns: Record<string, WorldArea>;
             level1Areas: Record<string, WorldArea>;
             level2Areas: Record<string, WorldArea>;
             level3Areas: Record<string, WorldArea>;
             specialAreas?: Record<string, WorldArea>;
-          };
+          }>(`${baseUrl}/world-areas.json`, "world-areas.json");
           Object.assign(
             ALL_WORLD_AREAS,
             worldAreasData.starterTowns,
@@ -460,8 +527,10 @@ export class DataManager {
 
         // Biomes
         (async () => {
-          const biomesRes = await fetch(`${baseUrl}/biomes.json`);
-          const biomeList = (await biomesRes.json()) as Array<BiomeData>;
+          const biomeList = await fetchRequiredJson<Array<BiomeData>>(
+            `${baseUrl}/biomes.json`,
+            "biomes.json",
+          );
           for (const biome of biomeList) {
             BIOMES[biome.id] = biome;
           }
@@ -470,10 +539,12 @@ export class DataManager {
         // World config
         (async () => {
           try {
-            const worldConfigRes = await fetch(`${baseUrl}/world-config.json`);
-            if (worldConfigRes.ok) {
-              const worldConfigData =
-                (await worldConfigRes.json()) as WorldConfigManifest;
+            const worldConfigData =
+              await fetchOptionalJson<WorldConfigManifest>(
+                `${baseUrl}/world-config.json`,
+                "world-config.json",
+              );
+            if (worldConfigData) {
               DataManager.worldConfig = worldConfigData;
             }
           } catch {
@@ -485,27 +556,34 @@ export class DataManager {
 
         // Buildings
         (async () => {
+          DataManager.buildingsManifest = null;
           try {
-            const buildingsRes = await fetch(`${baseUrl}/buildings.json`);
-            if (buildingsRes.ok) {
-              const buildingsData =
-                (await buildingsRes.json()) as BuildingsManifest;
+            const buildingsData = await fetchOptionalJson<unknown>(
+              `${baseUrl}/buildings.json`,
+              "buildings.json",
+            );
+            if (buildingsData) {
+              if (!isBuildingsManifest(buildingsData)) {
+                throw new Error("Invalid buildings manifest shape");
+              }
               DataManager.buildingsManifest = buildingsData;
               console.log(
                 `[DataManager] Loaded buildings manifest: ${buildingsData.towns?.length ?? 0} pre-defined towns`,
               );
             }
-          } catch {
-            console.warn(
-              "[DataManager] buildings.json not found, no pre-defined towns",
+          } catch (error) {
+            warnOptionalData(
+              `[DataManager] buildings.json missing or invalid, skipping pre-defined towns (${error instanceof Error ? error.message : "unknown error"})`,
             );
           }
         })(),
 
         // Stores
         (async () => {
-          const storesRes = await fetch(`${baseUrl}/stores.json`);
-          const storeList = (await storesRes.json()) as Array<StoreData>;
+          const storeList = await fetchRequiredJson<Array<StoreData>>(
+            `${baseUrl}/stores.json`,
+            "stores.json",
+          );
           for (const store of storeList) {
             GENERAL_STORES[store.id] = store;
           }
@@ -514,11 +592,11 @@ export class DataManager {
         // Skill unlocks
         (async () => {
           try {
-            const skillUnlocksRes = await fetch(
-              `${baseUrl}/skill-unlocks.json`,
-            );
             const skillUnlocksManifest =
-              (await skillUnlocksRes.json()) as SkillUnlocksManifest;
+              await fetchRequiredJson<SkillUnlocksManifest>(
+                `${baseUrl}/skill-unlocks.json`,
+                "skill-unlocks.json",
+              );
             loadSkillUnlocks(skillUnlocksManifest);
           } catch {
             console.warn(
@@ -759,18 +837,20 @@ export class DataManager {
 
       // Load buildings manifest for pre-defined towns
       const buildingsPath = path.join(manifestsDir, "buildings.json");
+      DataManager.buildingsManifest = null;
       try {
         const buildingsData = await fs.readFile(buildingsPath, "utf-8");
-        const buildingsManifest = JSON.parse(
-          buildingsData,
-        ) as BuildingsManifest;
+        const buildingsManifest = JSON.parse(buildingsData) as unknown;
+        if (!isBuildingsManifest(buildingsManifest)) {
+          throw new Error("Invalid buildings manifest shape");
+        }
         DataManager.buildingsManifest = buildingsManifest;
         console.log(
           `[DataManager] Loaded buildings manifest: ${buildingsManifest.towns?.length ?? 0} pre-defined towns`,
         );
-      } catch {
-        console.warn(
-          "[DataManager] buildings.json not found, no pre-defined towns",
+      } catch (error) {
+        warnOptionalData(
+          `[DataManager] buildings.json missing or invalid, skipping pre-defined towns (${error instanceof Error ? error.message : "unknown error"})`,
         );
       }
 

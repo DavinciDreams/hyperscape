@@ -66,6 +66,7 @@ if (typeof window !== "undefined") {
   const windowWithEnv = window as Window & {
     env?: { PUBLIC_CDN_URL?: string };
     __CDN_URL?: string;
+    __ASSETS_URL?: string;
   };
   const envCdn = windowWithEnv.env?.PUBLIC_CDN_URL;
   if (envCdn && typeof envCdn === "string" && envCdn !== "undefined") {
@@ -76,6 +77,7 @@ if (typeof window !== "undefined") {
         .replace("0.0.0.0", "localhost");
     }
     windowWithEnv.__CDN_URL = resolvedCdn;
+    windowWithEnv.__ASSETS_URL = resolvedCdn;
   }
 }
 

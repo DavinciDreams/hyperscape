@@ -26,7 +26,11 @@ type PublicRuntimeEnv = {
   PUBLIC_DISABLE_WEBGPU?: string;
 };
 
-type WindowWithEnv = Window & { env?: PublicRuntimeEnv; __CDN_URL?: string };
+type WindowWithEnv = Window & {
+  env?: PublicRuntimeEnv;
+  __CDN_URL?: string;
+  __ASSETS_URL?: string;
+};
 
 const getRuntimeEnv = (): PublicRuntimeEnv | undefined => {
   if (typeof window === "undefined") return undefined;
@@ -371,8 +375,9 @@ export function GameClient({
         ? resolvedCdnUrl
         : `${resolvedCdnUrl}/`;
 
-      // Make CDN URL available globally for PhysX loading
+      // Expose the initial asset base globally for early loaders and manifest fetches.
       (window as WindowWithEnv).__CDN_URL = resolvedCdnUrl;
+      (window as WindowWithEnv).__ASSETS_URL = resolvedCdnUrl;
 
       const config = {
         viewport,

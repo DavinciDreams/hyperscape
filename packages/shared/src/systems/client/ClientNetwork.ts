@@ -1042,6 +1042,16 @@ export class ClientNetwork extends SystemBase {
 
     // Use assetsUrl from server (always absolute URL to CDN)
     this.world.assetsUrl = data.assetsUrl || "/";
+    if (typeof window !== "undefined") {
+      const windowWithAssets = window as Window & {
+        __CDN_URL?: string;
+        __ASSETS_URL?: string;
+      };
+      if (data.assetsUrl) {
+        windowWithAssets.__ASSETS_URL = data.assetsUrl;
+        windowWithAssets.__CDN_URL = data.assetsUrl;
+      }
+    }
 
     const loader = this.world.loader!;
     // Assume preload and execPreload methods exist on loader
