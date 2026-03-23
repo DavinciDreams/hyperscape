@@ -33,6 +33,7 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
   const [isPaused, setIsPaused] = React.useState(false);
   const [deletingLogId, setDeletingLogId] = React.useState<string | null>(null);
   const logsEndRef = React.useRef<HTMLDivElement>(null);
+  const retryTimeoutRef = React.useRef<number | null>(null);
 
   // Delete individual log entry
   const deleteLog = async (logId: string) => {
@@ -60,6 +61,13 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
 
   // Fetch logs from API
   React.useEffect(() => {
+    const clearRetryTimeout = () => {
+      if (retryTimeoutRef.current !== null) {
+        window.clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+    };
+
     const fetchLogs = async () => {
       if (isPaused) return;
 
@@ -138,9 +146,17 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
       }
     };
 
-    fetchLogs();
-    const interval = setInterval(fetchLogs, 2000); // Poll every 2 seconds
-    return () => clearInterval(interval);
+    const scheduleNextFetch = () => {
+      clearRetryTimeout();
+      const delay = document.visibilityState === "visible" ? 5000 : 15000;
+      retryTimeoutRef.current = window.setTimeout(() => {
+        retryTimeoutRef.current = null;
+        void fetchLogs().finally(scheduleNextFetch);
+      }, delay);
+    };
+
+    void fetchLogs().finally(scheduleNextFetch);
+    return clearRetryTimeout;
   }, [agent.id, agent.status, isPaused]);
 
   // Auto-scroll to bottom

@@ -59,7 +59,6 @@ export const AgentRuns: React.FC<AgentRunsProps> = ({ agent }) => {
       }
 
       const data = await response.json();
-      console.log("[AgentRuns] Fetched runs:", data);
 
       setRuns(data.runs || []);
       setTotal(data.total || 0);

@@ -69,6 +69,8 @@ const PANEL_PADDING = 3; // Minimal container padding
 const GRID_PADDING = 3; // Minimal grid padding
 const HEADER_HEIGHT = 44; // Compact prayer points header + bar
 const FOOTER_HEIGHT = 28; // Compact active prayers footer
+const PRAYER_DATA_POLL_INTERVAL_MS = 250;
+const PRAYER_DATA_POLL_TIMEOUT_MS = 5000;
 
 /**
  * Calculate number of columns based on available width
@@ -465,16 +467,39 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       return;
     }
 
-    // Poll until prayers are loaded (manifest loading is async)
-    const interval = setInterval(() => {
+    const startedAt = performance.now();
+    let timeoutId: number | null = null;
+
+    // Poll until prayers are loaded, but stop after a bounded wait so the panel
+    // doesn't keep a 100ms interval alive for the full session if manifests fail.
+    const pollForPrayerData = () => {
       const loaded = prayerDataProvider.getAllPrayers();
       if (loaded.length > 0) {
         setPrayerDataVersion((v) => v + 1);
-        clearInterval(interval);
+        return;
       }
-    }, 100);
 
-    return () => clearInterval(interval);
+      if (performance.now() - startedAt >= PRAYER_DATA_POLL_TIMEOUT_MS) {
+        console.warn("[PrayerPanel] Prayer manifest data did not become ready");
+        return;
+      }
+
+      timeoutId = window.setTimeout(
+        pollForPrayerData,
+        PRAYER_DATA_POLL_INTERVAL_MS,
+      );
+    };
+
+    timeoutId = window.setTimeout(
+      pollForPrayerData,
+      PRAYER_DATA_POLL_INTERVAL_MS,
+    );
+
+    return () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, []);
 
   // Get prayer definitions from manifest-loaded provider (includes proper conflict data)

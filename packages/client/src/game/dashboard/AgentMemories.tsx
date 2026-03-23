@@ -44,7 +44,6 @@ export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
       }
 
       const data = await response.json();
-      console.log("[AgentMemories] Fetched memories:", data);
 
       // Extract memories array from response
       const memoriesArray = Array.isArray(data)
