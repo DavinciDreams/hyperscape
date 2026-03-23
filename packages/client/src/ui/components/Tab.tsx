@@ -115,9 +115,9 @@ export const Tab = memo(function Tab({
   // Merge styles properly to avoid overwriting
   const containerStyle: React.CSSProperties = {
     ...getTabStyle(theme, { active: isActive, dragging: isDragging }),
-    justifyContent: hasVisualIcon ? "flex-start" : "center",
-    minWidth: hasVisualIcon ? 44 : 72,
-    maxWidth: 160,
+    justifyContent: hasVisualIcon ? "center" : "center",
+    minWidth: hasVisualIcon ? 40 : 72,
+    maxWidth: hasVisualIcon ? 40 : 160,
     ...style,
     ...(isUnlocked ? dragHandleProps.style : { cursor: "pointer" }),
   };
@@ -239,7 +239,7 @@ export const Tab = memo(function Tab({
           {LucideIcon ? <LucideIcon size={16} strokeWidth={1.75} /> : tab.icon}
         </span>
       )}
-      <span style={labelStyle}>{tab.label}</span>
+      {!hasVisualIcon && <span style={labelStyle}>{tab.label}</span>}
       {/* Only show close button when in edit mode (isUnlocked) */}
       {onClose && isActive && isUnlocked && (
         <button
