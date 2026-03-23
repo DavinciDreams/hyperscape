@@ -20,6 +20,7 @@ import {
   buildNoiseGeneratorJS,
   buildHeightHelpersJS,
   buildBiomeInfluencesJS,
+  buildCreateBiomeNoiseSetsJS,
 } from "./TerrainWorkerShared";
 
 // Types for terrain generation
@@ -149,6 +150,9 @@ function generateHeightmap(input) {
   ${buildApplyLandscapeFeaturesJS()}
 
   ${buildGetBaseHeightAtJS()}
+  ${buildCreateBiomeNoiseSetsJS()}
+  var biomeNoiseSets = createBiomeNoiseSets(seed);
+
   ${buildHeightHelpersJS()}
   ${buildBiomeInfluencesJS()}
 

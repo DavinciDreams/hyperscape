@@ -11,6 +11,12 @@
 
 import { BiomeType, DEFAULT_BIOME } from "./TerrainBiomeTypes";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import {
+  smoothstep,
+  mapRangeSmooth,
+  normalizeFbmRange,
+  pingpong,
+} from "../../../utils/NoiseGenerator";
 
 // ---------------------------------------------------------------------------
 // Core terrain generation constants
@@ -41,151 +47,180 @@ export const SHORELINE_CONFIG = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Noise layer definitions — drive getBaseHeightAt()
+// Per-biome terrain config — each biome is a complete height function
 // ---------------------------------------------------------------------------
 
-export interface NoiseLayerDef {
-  scale: number;
-  weight: number;
-  octaves?: number;
-  persistence?: number;
-  lacunarity?: number;
-  /** Only for erosion noise */
-  iterations?: number;
-}
-
-export const CONTINENT_LAYER: NoiseLayerDef = {
-  scale: 0.0004,
-  octaves: 5,
-  persistence: 0.7,
-  lacunarity: 2.0,
-  weight: 0.35,
-};
-
-export const RIDGE_LAYER: NoiseLayerDef = {
-  scale: 0.0015,
-  weight: 0.15,
-};
-
-export const HILL_LAYER: NoiseLayerDef = {
-  scale: 0.008,
-  octaves: 4,
-  persistence: 0.6,
-  lacunarity: 2.2,
-  weight: 0.25,
-};
-
-export const EROSION_LAYER: NoiseLayerDef = {
-  scale: 0.0025,
-  iterations: 3,
-  weight: 0.1,
-};
-
-export const DETAIL_LAYER: NoiseLayerDef = {
-  scale: 0.02,
-  octaves: 2,
-  persistence: 0.3,
-  lacunarity: 2.5,
-  weight: 0.08,
-};
-
-/** Power curve applied after blending noise layers and normalizing to [0,1] */
-export const HEIGHT_POWER_CURVE = 1.1;
-
-// ---------------------------------------------------------------------------
-// Biome noise profiles — per-biome noise weight blending (Option A)
-// ---------------------------------------------------------------------------
-
-/** Global terrace step count — shared across all biomes to prevent boundary artifacts. */
-export const TERRACE_STEPS = 10;
-
-/** Base height bias added after scaling to world units (in world units). */
-export const ELEVATION_OFFSET = 8;
-/** Amplitude of large-scale elevation noise (in world units). */
-export const ELEVATION_NOISE_AMOUNT = 50;
-/** Frequency of large-scale elevation noise. */
-export const ELEVATION_NOISE_SCALE = 0.0005;
-
-export interface BiomeNoiseProfile {
-  continentWeight: number;
-  ridgeWeight: number;
-  hillWeight: number;
-  erosionWeight: number;
-  detailWeight: number;
+export interface BiomeTerrainConfig {
+  seedOffset: number;
+  frequency: number;
+  amplitude: number;
+  octaves: number;
+  gain: number;
+  lacunarity: number;
+  noiseOffset: number;
+  altitude: number;
+  altitudeVariation: number;
+  erosion: number;
+  erosionSoftness: number;
+  rivers: number;
+  riverWidth: number;
+  lakes: number;
+  lakesFalloff: number;
+  heightScale: number;
   powerCurve: number;
-  /** 0–1 blend from smooth to terraced (0 = disabled, higher = more visible) */
+  smoothLowerPlanes: number;
+  canyonMode: boolean;
+  canyonFreqScale: number;
+  canyonAmpScale: number;
+  cliffLow: number;
+  cliffHigh: number;
+  terraceSteps: number;
   terraceStrength: number;
-  /** 0–1 flat zone per step (0.8 = 80% flat shelf, 20% cliff transition) */
   terraceSharpness: number;
-  /**
-   * Stretches shelf positions around the midpoint to make cliffs taller.
-   * 1 = normal (5m cliffs at MAX_HEIGHT=50, TERRACE_STEPS=10)
-   * 3 = 3x taller cliffs (~15m). Vary per biome for visual diversity.
-   */
   terraceHeightScale: number;
-  /**
-   * 0–1 how much natural terrain slope is preserved on each shelf.
-   * 0 = perfectly flat shelves, 0.3 = 30% of natural slope, 1 = no flattening.
-   */
   terraceSlope: number;
 }
 
-export const TUNDRA_PROFILE: BiomeNoiseProfile = {
-  continentWeight: 0.32,
-  ridgeWeight: 0.29,
-  hillWeight: 0.02,
-  erosionWeight: 0.2,
-  detailWeight: 0.02,
-  powerCurve: 1.42,
-  terraceStrength: 2,
-  terraceSharpness: 0.19,
-  terraceHeightScale: 11.4,
-  terraceSlope: 1.9,
+export interface BiomeNoiseAdapter {
+  simplexFbm2D(
+    x: number,
+    y: number,
+    octaves: number,
+    amplitude: number,
+    frequency: number,
+    gain: number,
+    lacunarity: number,
+    offset: number,
+  ): number;
+}
+
+export interface BiomeNoiseSet {
+  main: BiomeNoiseAdapter;
+  variation: BiomeNoiseAdapter;
+  erosion: BiomeNoiseAdapter;
+}
+
+// ---------------------------------------------------------------------------
+// Global terrain shaping constants
+// ---------------------------------------------------------------------------
+
+export const TERRAIN_SCALE = 32;
+export const BASE_OFFSET = 22;
+export const FEATURE_SCALE = 1.4;
+
+const NOISE_COORD_SCALE = 55 / 2450;
+
+// ---------------------------------------------------------------------------
+// Per-biome config defaults
+// ---------------------------------------------------------------------------
+
+export const FOREST_CONFIG: BiomeTerrainConfig = {
+  seedOffset: 0,
+  frequency: 0.07,
+  amplitude: 0.5,
+  octaves: 10,
+  gain: 0.5,
+  lacunarity: 2.0,
+  noiseOffset: 0.25,
+  altitude: 0.1,
+  altitudeVariation: 1.4,
+  erosion: 0.6,
+  erosionSoftness: 0.3,
+  rivers: 0,
+  riverWidth: 0,
+  lakes: 0,
+  lakesFalloff: 0,
+  heightScale: 2.8,
+  powerCurve: 1.0,
+  smoothLowerPlanes: 0,
+  canyonMode: false,
+  canyonFreqScale: 0.3,
+  canyonAmpScale: 1.5,
+  cliffLow: 0.5,
+  cliffHigh: 0.8,
+  terraceSteps: 10,
+  terraceStrength: 0,
+  terraceSharpness: 0,
+  terraceHeightScale: 1,
+  terraceSlope: 0,
 };
 
-export const FOREST_PROFILE: BiomeNoiseProfile = {
-  continentWeight: 0.32,
-  ridgeWeight: 0.29,
-  hillWeight: 0,
-  erosionWeight: 0.2,
-  detailWeight: 0,
-  powerCurve: 1.42,
-  terraceStrength: 2,
-  terraceSharpness: 0.19,
-  terraceHeightScale: 9.1,
-  terraceSlope: 0.98,
+export const TUNDRA_CONFIG: BiomeTerrainConfig = {
+  seedOffset: 100,
+  frequency: 0.07,
+  amplitude: 0.5,
+  octaves: 10,
+  gain: 0.5,
+  lacunarity: 2.0,
+  noiseOffset: 0.25,
+  altitude: 0.1,
+  altitudeVariation: 1.4,
+  erosion: 0.6,
+  erosionSoftness: 0.3,
+  rivers: 0,
+  riverWidth: 0,
+  lakes: 0,
+  lakesFalloff: 0,
+  heightScale: 2.8,
+  powerCurve: 1.0,
+  smoothLowerPlanes: 0,
+  canyonMode: false,
+  canyonFreqScale: 0.3,
+  canyonAmpScale: 1.5,
+  cliffLow: 0.5,
+  cliffHigh: 0.8,
+  terraceSteps: 10,
+  terraceStrength: 0,
+  terraceSharpness: 0,
+  terraceHeightScale: 1,
+  terraceSlope: 0,
 };
 
-export const CANYON_PROFILE: BiomeNoiseProfile = {
-  continentWeight: 0.32,
-  ridgeWeight: 0.29,
-  hillWeight: 0,
-  erosionWeight: 0.2,
-  detailWeight: 0,
-  powerCurve: 1.42,
-  terraceStrength: 2,
-  terraceSharpness: 0.82,
-  terraceHeightScale: 7.8,
-  terraceSlope: 0.48,
+export const CANYON_CONFIG: BiomeTerrainConfig = {
+  seedOffset: 200,
+  frequency: 0.07,
+  amplitude: 0.5,
+  octaves: 10,
+  gain: 0.5,
+  lacunarity: 2.0,
+  noiseOffset: 0.25,
+  altitude: 0.0,
+  altitudeVariation: 0.8,
+  erosion: 0.0,
+  erosionSoftness: 0.3,
+  rivers: 0,
+  riverWidth: 0,
+  lakes: 0,
+  lakesFalloff: 0,
+  heightScale: 2.8,
+  powerCurve: 1.0,
+  smoothLowerPlanes: 0,
+  canyonMode: true,
+  canyonFreqScale: 0.3,
+  canyonAmpScale: 1.5,
+  cliffLow: 0.5,
+  cliffHigh: 0.8,
+  terraceSteps: 10,
+  terraceStrength: 0,
+  terraceSharpness: 0,
+  terraceHeightScale: 1,
+  terraceSlope: 0,
 };
 
-export const BIOME_PROFILES: Record<string, BiomeNoiseProfile> = {
-  [BiomeType.Tundra]: TUNDRA_PROFILE,
-  [BiomeType.Forest]: FOREST_PROFILE,
-  [BiomeType.Canyon]: CANYON_PROFILE,
+export const BIOME_CONFIGS: Record<string, BiomeTerrainConfig> = {
+  [BiomeType.Tundra]: TUNDRA_CONFIG,
+  [BiomeType.Forest]: FOREST_CONFIG,
+  [BiomeType.Canyon]: CANYON_CONFIG,
 };
 
 // ---------------------------------------------------------------------------
 // Island configuration
 // ---------------------------------------------------------------------------
 
-export const ISLAND_RADIUS = 2000;
+export const ISLAND_RADIUS = 2419;
 export const ISLAND_FALLOFF = 450;
 export const ISLAND_DEEP_OCEAN_BUFFER = 113;
-export const BASE_ELEVATION = 0.42;
-export const OCEAN_FLOOR_HEIGHT = 0.05;
-/** height = terrain * HEIGHT_TERRAIN_MIX + BASE_ELEVATION * islandMask */
-export const HEIGHT_TERRAIN_MIX = 0.2;
+export const OCEAN_FLOOR_HEIGHT = 2.5;
 export const BEACH_PROFILE_POWER = 3.0;
 
 // ---------------------------------------------------------------------------
@@ -224,49 +259,10 @@ export interface LandscapeFeatureDef {
 }
 
 /**
- * Predefined landscape features — add/remove entries here to control
- * exactly where mountains, ponds, and plateaus appear on the island.
- *
- * Algorithm: radial envelope × domain-warped noise → terrace quantization.
- * The envelope defines the feature's footprint; noise drives internal terrain.
- * Terracing follows noise contours, producing organic (non-circular) layers.
- *
- * Parameter guide:
- *   layers        - number of terrace levels (1 = single plateau, 6+ = tiered mountain)
- *   shapePower    - envelope falloff (0.3 = dome, 1 = cone, 4+ = flat-topped mesa)
- *   edgeSharpness - terrace cliff sharpness (0 = smooth ramp, 1 = hard cliff)
- *   layerSlope    - incline within each shelf (0 = flat, 0.5 = gentle slope, 1 = full slope)
- *   noiseScale    - frequency of internal terrain (0.02 = broad ridges, 0.05 = fine detail)
- *   noiseAmount   - noise vs envelope blend (0 = smooth dome, 0.6 = organic ridges)
+ * Predefined landscape features — currently disabled while per-biome terrain
+ * is being tuned. Re-enable by adding entries back to this array.
  */
-export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [
-  {
-    type: LandscapeType.Mountain,
-    x: -195.5,
-    z: -520.5,
-    radius: 250,
-    strength: 5.5,
-    layers: 5,
-    shapePower: 2.0,
-    edgeSharpness: 0.2,
-    layerSlope: 0.9,
-    noiseScale: 0.025,
-    noiseAmount: 0.6,
-  },
-  {
-    type: LandscapeType.Pond,
-    x: 198.5,
-    z: 917.5,
-    radius: 455,
-    strength: 4.5,
-    layers: 6,
-    shapePower: 3.7,
-    edgeSharpness: 0.75,
-    layerSlope: 0.71,
-    noiseScale: 0.015,
-    noiseAmount: 0.26,
-  },
-];
+export const LANDSCAPE_FEATURES: LandscapeFeatureDef[] = [];
 
 // ---------------------------------------------------------------------------
 // Coastline noise — varies the island radius for irregular shoreline
@@ -389,6 +385,144 @@ export function applyLandscapeFeaturesPure(
   return height;
 }
 
+// ---------------------------------------------------------------------------
+// Per-biome height functions — normal mode (reference defaultTerrain)
+// ---------------------------------------------------------------------------
+
+function computeNormalHeight(
+  x: number,
+  z: number,
+  cfg: BiomeTerrainConfig,
+  ns: BiomeNoiseSet,
+  coordScale: number,
+): { y: number; water: number } {
+  const { main, variation, erosion } = ns;
+  const nx = x * coordScale;
+  const nz = z * coordScale;
+
+  let terrainNoise = main.simplexFbm2D(
+    nx,
+    nz,
+    cfg.octaves,
+    cfg.amplitude,
+    cfg.frequency,
+    cfg.gain,
+    cfg.lacunarity,
+    cfg.noiseOffset,
+  );
+
+  const erosionVariation =
+    variation.simplexFbm2D(nx + 500, nz + 500, 1, 1.0, 0.012, 0.5, 2.0, 0) *
+      0.6 -
+    0.1;
+  const erosionSoft = erosionVariation + cfg.erosionSoftness;
+  let ero = erosion.simplexFbm2D(nx, nz, 3, 0.2, cfg.frequency, 0.5, 1.8, 0.3);
+  ero = smoothstep(ero, 0, 1);
+  ero = Math.pow(ero, 1 + erosionSoft);
+  ero = Math.max(0, pingpong(ero * 2, 1) - 0.3);
+  terrainNoise *= 1 - cfg.erosion + cfg.erosion * ero;
+
+  const altitudeNoise =
+    variation.simplexFbm2D(nx, nz, 1, 1.0, 0.012, 0.5, 2.0, 0) *
+      cfg.altitudeVariation -
+    0.75;
+  terrainNoise += cfg.altitude + altitudeNoise;
+
+  const water =
+    mapRangeSmooth(
+      terrainNoise,
+      -(1 - cfg.lakes),
+      -(1 - cfg.lakes) + cfg.lakesFalloff,
+      3,
+      0,
+    ) * 0.2;
+
+  terrainNoise =
+    terrainNoise * terrainNoise * (1 - cfg.smoothLowerPlanes) +
+    terrainNoise * terrainNoise * terrainNoise * cfg.smoothLowerPlanes;
+
+  const y =
+    terrainNoise * (1 - Math.max(0, Math.min(1, water * cfg.rivers * 3))) +
+    -3 * Math.max(0, Math.min(1, water * cfg.rivers * 3));
+
+  return { y, water };
+}
+
+// ---------------------------------------------------------------------------
+// Per-biome height: canyon mode (reference desertTerrain)
+// ---------------------------------------------------------------------------
+
+function computeCanyonHeight(
+  x: number,
+  z: number,
+  cfg: BiomeTerrainConfig,
+  ns: BiomeNoiseSet,
+  coordScale: number,
+): { y: number; water: number } {
+  const { main, variation } = ns;
+  const nx = x * coordScale;
+  const nz = z * coordScale;
+
+  const canyonFbm = main.simplexFbm2D(
+    nx,
+    nz,
+    cfg.octaves,
+    cfg.amplitude * cfg.canyonAmpScale,
+    cfg.frequency * cfg.canyonFreqScale,
+    cfg.gain,
+    cfg.lacunarity,
+    cfg.noiseOffset,
+  );
+  let terrainNoise = normalizeFbmRange(Math.abs(canyonFbm - cfg.noiseOffset));
+
+  const riverWidthVar = normalizeFbmRange(
+    variation.simplexFbm2D(nx + 1000, nz + 1000, 1, 1.0, 0.012, 0.5, 2.0, 0),
+  );
+  const rw = cfg.riverWidth;
+  const edge1 = (0.2 + rw * 0.25) * (0.75 + riverWidthVar * 0.4);
+  const edge2 = (0.3 + rw * 0.25) * (0.75 + riverWidthVar * 0.4);
+  const water = mapRangeSmooth(terrainNoise, edge1, edge2, 1, 0) * 0.2;
+
+  const cliffs = mapRangeSmooth(
+    terrainNoise,
+    cfg.cliffLow,
+    cfg.cliffHigh,
+    0,
+    1,
+  );
+  const y = cliffs - water;
+
+  return { y, water: water * 5 };
+}
+
+// ---------------------------------------------------------------------------
+// Per-biome height dispatcher + power curve
+// ---------------------------------------------------------------------------
+
+function computeBiomeHeight(
+  x: number,
+  z: number,
+  cfg: BiomeTerrainConfig,
+  ns: BiomeNoiseSet,
+  coordScale: number,
+): { y: number; water: number } {
+  const raw = cfg.canyonMode
+    ? computeCanyonHeight(x, z, cfg, ns, coordScale)
+    : computeNormalHeight(x, z, cfg, ns, coordScale);
+
+  let y = raw.y * cfg.heightScale;
+
+  if (cfg.powerCurve !== 1.0) {
+    y = Math.sign(y) * Math.pow(Math.abs(y), cfg.powerCurve);
+  }
+
+  return { y, water: raw.water };
+}
+
+// ---------------------------------------------------------------------------
+// Main: computeBaseHeight — blends independent per-biome heights
+// ---------------------------------------------------------------------------
+
 /**
  * THE height generation algorithm. Main thread calls this directly.
  * Workers use the JS-string mirror (buildGetBaseHeightAtJS) which
@@ -397,114 +531,45 @@ export function applyLandscapeFeaturesPure(
 export function computeBaseHeight(
   worldX: number,
   worldZ: number,
-  noise: TerrainNoiseAdapter,
+  sharedNoise: TerrainNoiseAdapter,
+  biomeNoiseSets: Record<string, BiomeNoiseSet>,
   biomeWeights: Record<string, number>,
   features: ReadonlyArray<LandscapeFeatureDef>,
-  maxHeight: number,
 ): number {
-  // ── 1. Sample noise layers ──────────────────────────────────────────
-  const cN = noise.fractal2D(
-    worldX * CONTINENT_LAYER.scale,
-    worldZ * CONTINENT_LAYER.scale,
-    CONTINENT_LAYER.octaves!,
-    CONTINENT_LAYER.persistence!,
-    CONTINENT_LAYER.lacunarity!,
-  );
-  const rN = noise.ridgeNoise2D(
-    worldX * RIDGE_LAYER.scale,
-    worldZ * RIDGE_LAYER.scale,
-  );
-  const hN = noise.fractal2D(
-    worldX * HILL_LAYER.scale,
-    worldZ * HILL_LAYER.scale,
-    HILL_LAYER.octaves!,
-    HILL_LAYER.persistence!,
-    HILL_LAYER.lacunarity!,
-  );
-  const eN = noise.erosionNoise2D(
-    worldX * EROSION_LAYER.scale,
-    worldZ * EROSION_LAYER.scale,
-    EROSION_LAYER.iterations!,
-  );
-  const dN = noise.fractal2D(
-    worldX * DETAIL_LAYER.scale,
-    worldZ * DETAIL_LAYER.scale,
-    DETAIL_LAYER.octaves!,
-    DETAIL_LAYER.persistence!,
-    DETAIL_LAYER.lacunarity!,
-  );
-
-  // ── 2. Blend noise using biome-weighted profiles ────────────────────
-  let cW = 0,
-    rW = 0,
-    hW = 0,
-    eW = 0,
-    dW = 0,
-    pC = 0,
-    tS = 0,
-    tSh = 0,
-    tHS = 0,
-    tSl = 0;
+  // ── 1. Blend per-biome heights ──────────────────────────────────────
+  const coordScale = NOISE_COORD_SCALE * FEATURE_SCALE;
+  let height = 0;
   for (const key of Object.keys(biomeWeights)) {
     const w = biomeWeights[key];
-    const p = BIOME_PROFILES[key] ?? BIOME_PROFILES[DEFAULT_BIOME];
-    cW += p.continentWeight * w;
-    rW += p.ridgeWeight * w;
-    hW += p.hillWeight * w;
-    eW += p.erosionWeight * w;
-    dW += p.detailWeight * w;
-    pC += p.powerCurve * w;
-    tS += p.terraceStrength * w;
-    tSh += p.terraceSharpness * w;
-    tHS += p.terraceHeightScale * w;
-    tSl += p.terraceSlope * w;
+    if (w < 0.01) continue;
+    const biomeCfg = BIOME_CONFIGS[key] ?? BIOME_CONFIGS[DEFAULT_BIOME];
+    const ns = biomeNoiseSets[key];
+    if (!ns) continue;
+    const result = computeBiomeHeight(worldX, worldZ, biomeCfg, ns, coordScale);
+    height += result.y * w;
   }
 
-  // ── 3. Combine, normalize, power curve ──────────────────────────────
-  let height = cN * cW + rN * rW + hN * hW + eN * eW + dN * dW;
-  height = (height + 1) * 0.5;
-  height = Math.max(0, Math.min(1, height));
-  height = Math.pow(height, pC);
-
-  // ── 4. Terracing — ceil-based (raises terrain to plateaus, never lowers) ─
-  const steps = TERRACE_STEPS;
-  const ths = Math.max(1, tHS);
-  if (tS > 0.01 && steps >= 2) {
-    const ceilStep = Math.ceil(height * steps) / steps;
-    const floorStep = Math.max(0, ceilStep - 1 / steps);
-    const frac = (height - floorStep) * steps;
-
-    const flatThreshold = 1 - tSh;
-    const edgeBlend = frac > flatThreshold ? 1 : frac / (flatThreshold + 0.001);
-    const flatStep = floorStep + edgeBlend * (ceilStep - floorStep);
-
-    const slopedStep = floorStep + frac * (ceilStep - floorStep);
-    const terraced = flatStep + tSl * (slopedStep - flatStep);
-    const scaled = Math.max(0, Math.min(1, 0.5 + (terraced - 0.5) * ths));
-    height = Math.max(height, height + (scaled - height) * tS);
-  }
-
-  // ── 5. Coastline noise → island mask ────────────────────────────────
+  // ── 2. Coastline noise → island mask ────────────────────────────────
   const distFromCenter = Math.sqrt(worldX * worldX + worldZ * worldZ);
   const angle = Math.atan2(worldZ, worldX);
   const cnx = Math.cos(angle) * COASTLINE_CIRCLE_SAMPLE_RADIUS;
   const cnz = Math.sin(angle) * COASTLINE_CIRCLE_SAMPLE_RADIUS;
 
-  const cst1 = noise.fractal2D(
+  const cst1 = sharedNoise.fractal2D(
     cnx,
     cnz,
     COAST_LARGE.octaves,
     COAST_LARGE.persistence,
     COAST_LARGE.lacunarity,
   );
-  const cst2 = noise.fractal2D(
+  const cst2 = sharedNoise.fractal2D(
     cnx * COAST_MEDIUM.freqMultiplier,
     cnz * COAST_MEDIUM.freqMultiplier,
     COAST_MEDIUM.octaves,
     COAST_MEDIUM.persistence,
     COAST_MEDIUM.lacunarity,
   );
-  const cst3 = noise.simplex2D(
+  const cst3 = sharedNoise.simplex2D(
     cnx * COAST_SMALL.freqMultiplier,
     cnz * COAST_SMALL.freqMultiplier,
   );
@@ -524,30 +589,23 @@ export function computeBaseHeight(
     islandMask = 0;
   }
 
-  // ── 6. Island mask + landscape features ─────────────────────────────
-  height = height * islandMask;
-  height = applyLandscapeFeaturesPure(height, worldX, worldZ, features, noise);
+  // ── 3. Island mask → scale → offset → landscape features ───────────
+  height *= islandMask;
+  height *= TERRAIN_SCALE;
+  height += BASE_OFFSET * islandMask;
+
+  height = applyLandscapeFeaturesPure(
+    height,
+    worldX,
+    worldZ,
+    features,
+    sharedNoise,
+  );
 
   if (islandMask === 0) {
     height = OCEAN_FLOOR_HEIGHT;
   }
 
-  // ── 7. Scale to world units + global elevation offset ──────────────
-  height = height * maxHeight;
-  if (islandMask > 0) {
-    const eOff: number = ELEVATION_OFFSET;
-    const eNA: number = ELEVATION_NOISE_AMOUNT;
-    if (eNA > 0 || eOff !== 0) {
-      const elevNoise =
-        (noise.simplex2D(
-          worldX * ELEVATION_NOISE_SCALE,
-          worldZ * ELEVATION_NOISE_SCALE,
-        ) +
-          1) *
-        0.5;
-      height += (eOff + elevNoise * eNA) * islandMask;
-    }
-  }
   return height;
 }
 
@@ -698,58 +756,121 @@ export function buildApplyLandscapeFeaturesJS(): string {
   }`;
 }
 
-// Biome profile constants baked into JS for workers
-const PROFILES_JS = `
-  var BIOME_PROFILES = {};
-  BIOME_PROFILES[BT_TUNDRA]  = { cW: ${TUNDRA_PROFILE.continentWeight}, rW: ${TUNDRA_PROFILE.ridgeWeight}, hW: ${TUNDRA_PROFILE.hillWeight}, eW: ${TUNDRA_PROFILE.erosionWeight}, dW: ${TUNDRA_PROFILE.detailWeight}, pC: ${TUNDRA_PROFILE.powerCurve}, tS: ${TUNDRA_PROFILE.terraceStrength}, tSh: ${TUNDRA_PROFILE.terraceSharpness}, tHS: ${TUNDRA_PROFILE.terraceHeightScale}, tSl: ${TUNDRA_PROFILE.terraceSlope} };
-  BIOME_PROFILES[BT_FOREST]  = { cW: ${FOREST_PROFILE.continentWeight}, rW: ${FOREST_PROFILE.ridgeWeight}, hW: ${FOREST_PROFILE.hillWeight}, eW: ${FOREST_PROFILE.erosionWeight}, dW: ${FOREST_PROFILE.detailWeight}, pC: ${FOREST_PROFILE.powerCurve}, tS: ${FOREST_PROFILE.terraceStrength}, tSh: ${FOREST_PROFILE.terraceSharpness}, tHS: ${FOREST_PROFILE.terraceHeightScale}, tSl: ${FOREST_PROFILE.terraceSlope} };
-  BIOME_PROFILES[BT_CANYON]  = { cW: ${CANYON_PROFILE.continentWeight}, rW: ${CANYON_PROFILE.ridgeWeight}, hW: ${CANYON_PROFILE.hillWeight}, eW: ${CANYON_PROFILE.erosionWeight}, dW: ${CANYON_PROFILE.detailWeight}, pC: ${CANYON_PROFILE.powerCurve}, tS: ${CANYON_PROFILE.terraceStrength}, tSh: ${CANYON_PROFILE.terraceSharpness}, tHS: ${CANYON_PROFILE.terraceHeightScale}, tSl: ${CANYON_PROFILE.terraceSlope} };
+/**
+ * Bake BiomeTerrainConfig per-biome into worker JS.
+ */
+function biomeConfigToJS(name: string, cfg: BiomeTerrainConfig): string {
+  return `BIOME_CONFIGS[${name}] = {
+    seedOffset:${cfg.seedOffset}, frequency:${cfg.frequency}, amplitude:${cfg.amplitude},
+    octaves:${cfg.octaves}, gain:${cfg.gain}, lacunarity:${cfg.lacunarity}, noiseOffset:${cfg.noiseOffset},
+    altitude:${cfg.altitude}, altitudeVariation:${cfg.altitudeVariation},
+    erosion:${cfg.erosion}, erosionSoftness:${cfg.erosionSoftness},
+    rivers:${cfg.rivers}, riverWidth:${cfg.riverWidth}, lakes:${cfg.lakes}, lakesFalloff:${cfg.lakesFalloff},
+    heightScale:${cfg.heightScale}, powerCurve:${cfg.powerCurve}, smoothLowerPlanes:${cfg.smoothLowerPlanes},
+    canyonMode:${cfg.canyonMode}, canyonFreqScale:${cfg.canyonFreqScale}, canyonAmpScale:${cfg.canyonAmpScale},
+    cliffLow:${cfg.cliffLow}, cliffHigh:${cfg.cliffHigh},
+    terraceSteps:${cfg.terraceSteps}, terraceStrength:${cfg.terraceStrength},
+    terraceSharpness:${cfg.terraceSharpness}, terraceHeightScale:${cfg.terraceHeightScale}, terraceSlope:${cfg.terraceSlope}
+  };`;
+}
+
+const BIOME_CONFIGS_JS = `
+  var BIOME_CONFIGS = {};
+  ${biomeConfigToJS("BT_TUNDRA", TUNDRA_CONFIG)}
+  ${biomeConfigToJS("BT_FOREST", FOREST_CONFIG)}
+  ${biomeConfigToJS("BT_CANYON", CANYON_CONFIG)}
 `;
 
 /**
- * JS source — worker mirror of computeBaseHeight().
- * Accepts biome weights and blends noise per-biome.
- * MUST stay in sync with computeBaseHeight() above.
+ * JS source — worker mirror of computeBaseHeight() and per-biome height functions.
+ * MUST stay in sync with the TS functions above.
+ *
+ * Expects in worker scope: noise, biomeNoiseSets, BIOME_CONFIGS, BT_DEFAULT,
+ * computeBiomeWeightsByPosition, applyLandscapeFeatures, landscapeFeatures.
  */
 export function buildGetBaseHeightAtJS(): string {
   return `
-  ${PROFILES_JS}
+  ${BIOME_CONFIGS_JS}
+
+  var NOISE_COORD_SCALE = ${NOISE_COORD_SCALE};
+  var TERRAIN_SCALE_VAL = ${TERRAIN_SCALE};
+  var BASE_OFFSET_VAL = ${BASE_OFFSET};
+  var FEATURE_SCALE_VAL = ${FEATURE_SCALE};
+
+  function _smoothstep(x, edge0, edge1) {
+    var t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+  }
+  function _mapRangeSmooth(val, a1, a2, b1, b2) {
+    return b1 + _smoothstep(val, a1, a2) * (b2 - b1);
+  }
+  function _normalizeFbmRange(fbmNoise) {
+    return Math.min(1, Math.max(0, (fbmNoise + 0.4) / 1.3));
+  }
+  function _pingpong(x, length) {
+    var t = x % (length * 2);
+    return length - Math.abs(t - length);
+  }
+
+  function computeNormalHeight(x, z, cfg, ns, coordScale) {
+    var nx = x * coordScale;
+    var nz = z * coordScale;
+    var terrainNoise = ns.main.simplexFbm2D(nx, nz, cfg.octaves, cfg.amplitude, cfg.frequency, cfg.gain, cfg.lacunarity, cfg.noiseOffset);
+
+    var erosionVariation = ns.variation.simplexFbm2D(nx + 500, nz + 500, 1, 1.0, 0.012, 0.5, 2.0, 0) * 0.6 - 0.1;
+    var erosionSoft = erosionVariation + cfg.erosionSoftness;
+    var ero = ns.erosion.simplexFbm2D(nx, nz, 3, 0.2, cfg.frequency, 0.5, 1.8, 0.3);
+    ero = _smoothstep(ero, 0, 1);
+    ero = Math.pow(ero, 1 + erosionSoft);
+    ero = Math.max(0, _pingpong(ero * 2, 1) - 0.3);
+    terrainNoise *= (1 - cfg.erosion) + cfg.erosion * ero;
+
+    var altitudeNoise = ns.variation.simplexFbm2D(nx, nz, 1, 1.0, 0.012, 0.5, 2.0, 0) * cfg.altitudeVariation - 0.75;
+    terrainNoise += cfg.altitude + altitudeNoise;
+
+    var water = _mapRangeSmooth(terrainNoise, -(1 - cfg.lakes), -(1 - cfg.lakes) + cfg.lakesFalloff, 3, 0) * 0.2;
+    terrainNoise = terrainNoise * terrainNoise * (1 - cfg.smoothLowerPlanes) + terrainNoise * terrainNoise * terrainNoise * cfg.smoothLowerPlanes;
+    var y = terrainNoise * (1 - Math.max(0, Math.min(1, water * cfg.rivers * 3))) + (-3) * Math.max(0, Math.min(1, water * cfg.rivers * 3));
+    return { y: y, water: water };
+  }
+
+  function computeCanyonHeight(x, z, cfg, ns, coordScale) {
+    var nx = x * coordScale;
+    var nz = z * coordScale;
+    var canyonFbm = ns.main.simplexFbm2D(nx, nz, cfg.octaves, cfg.amplitude * cfg.canyonAmpScale, cfg.frequency * cfg.canyonFreqScale, cfg.gain, cfg.lacunarity, cfg.noiseOffset);
+    var terrainNoise = _normalizeFbmRange(Math.abs(canyonFbm - cfg.noiseOffset));
+
+    var riverWidthVar = _normalizeFbmRange(ns.variation.simplexFbm2D(nx + 1000, nz + 1000, 1, 1.0, 0.012, 0.5, 2.0, 0));
+    var rw = cfg.riverWidth;
+    var edge1 = (0.2 + rw * 0.25) * (0.75 + riverWidthVar * 0.4);
+    var edge2 = (0.3 + rw * 0.25) * (0.75 + riverWidthVar * 0.4);
+    var water = _mapRangeSmooth(terrainNoise, edge1, edge2, 1, 0) * 0.2;
+    var cliffs = _mapRangeSmooth(terrainNoise, cfg.cliffLow, cfg.cliffHigh, 0, 1);
+    var y = cliffs - water;
+    return { y: y, water: water * 5 };
+  }
+
+  function computeBiomeHeight(x, z, cfg, ns, coordScale) {
+    var raw = cfg.canyonMode ? computeCanyonHeight(x, z, cfg, ns, coordScale) : computeNormalHeight(x, z, cfg, ns, coordScale);
+    var y = raw.y * cfg.heightScale;
+    if (cfg.powerCurve !== 1.0) {
+      y = (y >= 0 ? 1 : -1) * Math.pow(Math.abs(y), cfg.powerCurve);
+    }
+    return { y: y, water: raw.water };
+  }
 
   function getBaseHeightAt(worldX, worldZ, biomeWeights) {
     var bw = biomeWeights || computeBiomeWeightsByPosition(worldX, worldZ);
-
-    var cN = noise.fractal2D(worldX * ${CONTINENT_LAYER.scale}, worldZ * ${CONTINENT_LAYER.scale}, ${CONTINENT_LAYER.octaves}, ${CONTINENT_LAYER.persistence}, ${CONTINENT_LAYER.lacunarity});
-    var rN = noise.ridgeNoise2D(worldX * ${RIDGE_LAYER.scale}, worldZ * ${RIDGE_LAYER.scale});
-    var hN = noise.fractal2D(worldX * ${HILL_LAYER.scale}, worldZ * ${HILL_LAYER.scale}, ${HILL_LAYER.octaves}, ${HILL_LAYER.persistence}, ${HILL_LAYER.lacunarity});
-    var eN = noise.erosionNoise2D(worldX * ${EROSION_LAYER.scale}, worldZ * ${EROSION_LAYER.scale}, ${EROSION_LAYER.iterations});
-    var dN = noise.fractal2D(worldX * ${DETAIL_LAYER.scale}, worldZ * ${DETAIL_LAYER.scale}, ${DETAIL_LAYER.octaves}, ${DETAIL_LAYER.persistence}, ${DETAIL_LAYER.lacunarity});
-
-    var cW = 0, rW = 0, hW = 0, eW = 0, dW = 0, pC = 0, tS = 0, tSh = 0, tHS = 0, tSl = 0;
+    var coordScale = NOISE_COORD_SCALE * FEATURE_SCALE_VAL;
+    var height = 0;
     for (var key in bw) {
       var w = bw[key];
-      var p = BIOME_PROFILES[key] || BIOME_PROFILES[BT_DEFAULT];
-      cW += p.cW * w; rW += p.rW * w; hW += p.hW * w; eW += p.eW * w; dW += p.dW * w;
-      pC += p.pC * w; tS += p.tS * w; tSh += p.tSh * w; tHS += p.tHS * w; tSl += p.tSl * w;
-    }
-
-    var height = cN * cW + rN * rW + hN * hW + eN * eW + dN * dW;
-    height = (height + 1) * 0.5;
-    height = Math.max(0, Math.min(1, height));
-    height = Math.pow(height, pC);
-
-    var gSteps = ${TERRACE_STEPS};
-    var ths = Math.max(1, tHS);
-    if (tS > 0.01 && gSteps >= 2) {
-      var ceilStep = Math.ceil(height * gSteps) / gSteps;
-      var floorStep = Math.max(0, ceilStep - 1 / gSteps);
-      var gFrac = (height - floorStep) * gSteps;
-      var flatThreshold = 1 - tSh;
-      var gEdgeBlend = gFrac > flatThreshold ? 1 : gFrac / (flatThreshold + 0.001);
-      var gFlatStep = floorStep + gEdgeBlend * (ceilStep - floorStep);
-      var gSlopedStep = floorStep + gFrac * (ceilStep - floorStep);
-      var gTerraced = gFlatStep + tSl * (gSlopedStep - gFlatStep);
-      var gScaled = Math.max(0, Math.min(1, 0.5 + (gTerraced - 0.5) * ths));
-      height = Math.max(height, height + (gScaled - height) * tS);
+      if (w < 0.01) continue;
+      var biomeCfg = BIOME_CONFIGS[key] || BIOME_CONFIGS[BT_DEFAULT];
+      var ns = biomeNoiseSets[key];
+      if (!ns) continue;
+      var result = computeBiomeHeight(worldX, worldZ, biomeCfg, ns, coordScale);
+      height += result.y * w;
     }
 
     var distFromCenter = Math.sqrt(worldX * worldX + worldZ * worldZ);
@@ -772,15 +893,12 @@ export function buildGetBaseHeightAtJS(): string {
       islandMask = 0;
     }
 
-    height = height * islandMask;
+    height *= islandMask;
+    height *= TERRAIN_SCALE_VAL;
+    height += BASE_OFFSET_VAL * islandMask;
     height = applyLandscapeFeatures(height, worldX, worldZ);
 
     if (islandMask === 0) { height = ${OCEAN_FLOOR_HEIGHT}; }
-    height = height * MAX_HEIGHT;
-    if (islandMask > 0 && (${ELEVATION_NOISE_AMOUNT} > 0 || ${ELEVATION_OFFSET} !== 0)) {
-      var elevNoise = (noise.simplex2D(worldX * ${ELEVATION_NOISE_SCALE}, worldZ * ${ELEVATION_NOISE_SCALE}) + 1) * 0.5;
-      height += (${ELEVATION_OFFSET} + elevNoise * ${ELEVATION_NOISE_AMOUNT}) * islandMask;
-    }
     return height;
   }`;
 }

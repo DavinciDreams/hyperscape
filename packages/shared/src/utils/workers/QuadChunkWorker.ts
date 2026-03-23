@@ -24,6 +24,7 @@ import {
   buildNoiseGeneratorJS,
   buildHeightHelpersJS,
   buildBiomeInfluencesJS,
+  buildCreateBiomeNoiseSetsJS,
 } from "./TerrainWorkerShared";
 
 export interface QuadChunkWorkerConfig {
@@ -113,6 +114,8 @@ function generateQuadChunk(input) {
   ${buildComputeBiomeWeightsJS()}
   ${buildApplyLandscapeFeaturesJS()}
   ${buildGetBaseHeightAtJS()}
+  ${buildCreateBiomeNoiseSetsJS()}
+  var biomeNoiseSets = createBiomeNoiseSets(seed);
   ${buildHeightHelpersJS()}
   ${buildBiomeInfluencesJS()}
 

@@ -32,10 +32,12 @@ import {
   WATER_LEVEL_NORMALIZED,
   SHORELINE_CONFIG,
   BIOME_CONFIG,
+  BIOME_CONFIGS,
 } from "./TerrainHeightParams";
 import type {
   LandscapeFeatureDef,
   ShorelineConfig,
+  BiomeNoiseSet,
 } from "./TerrainHeightParams";
 import { BiomeType, DEFAULT_BIOME, BIOME_LIST } from "./TerrainBiomeTypes";
 // Import terrain generator from procgen package
@@ -186,6 +188,7 @@ export class TerrainSystem extends System {
   private updateTimer = 0;
   private terrainTime = 0; // For animated caustics
   private noise!: NoiseGenerator;
+  private biomeNoiseSets: Record<string, BiomeNoiseSet> = {};
   private landscapeFeatures: LandscapeFeatureDef[] = [];
   private _loggedWorkerTileBiome = 0;
   private _loggedSyncTileBiome = 0;
@@ -1449,8 +1452,8 @@ export class TerrainSystem extends System {
     this.runtimeIsServer = runtimeRole.isServer;
     this.runtimeIsClient = runtimeRole.isClient;
 
-    // Initialize deterministic noise from world id
-    this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
+    // Initialize deterministic noise from world id + per-biome noise sets
+    this.ensureNoiseInitialized();
 
     this.initializeLandscapeFeatures();
 
@@ -1559,11 +1562,8 @@ export class TerrainSystem extends System {
   }
 
   async start(): Promise<void> {
-    // Initialize noise generator if not already initialized (failsafe)
-    if (!this.noise) {
-      this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
-      this.initializeLandscapeFeatures();
-    }
+    this.ensureNoiseInitialized();
+    this.initializeLandscapeFeatures();
 
     // CRITICAL: Wait for DataManager to initialize BIOMES data before generating terrain
     // DataManager is initialized in registerSystems() which happens asynchronously
@@ -3291,14 +3291,27 @@ export class TerrainSystem extends System {
    * Get base terrain height WITHOUT mountain biome boost.
    * Delegates to the single source of truth in TerrainHeightParams.
    */
+  private ensureNoiseInitialized(): void {
+    if (!this.noise) {
+      const seed = this.computeSeedFromWorldId();
+      this.noise = new NoiseGenerator(seed);
+      for (const [key, cfg] of Object.entries(BIOME_CONFIGS)) {
+        const base = seed + cfg.seedOffset;
+        this.biomeNoiseSets[key] = {
+          main: new NoiseGenerator(base),
+          variation: new NoiseGenerator(base + 4),
+          erosion: new NoiseGenerator(base + 1),
+        };
+      }
+    }
+  }
+
   private getBaseHeightAt(
     worldX: number,
     worldZ: number,
     biomeWeights?: Record<string, number>,
   ): number {
-    if (!this.noise) {
-      this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
-    }
+    this.ensureNoiseInitialized();
 
     const weights =
       biomeWeights ?? this.computeBiomeWeightsByPosition(worldX, worldZ);
@@ -3306,16 +3319,14 @@ export class TerrainSystem extends System {
       worldX,
       worldZ,
       this.noise,
+      this.biomeNoiseSets,
       weights,
       this.landscapeFeatures,
-      MAX_HEIGHT,
     );
   }
 
   private getHeightAtWithoutShore(worldX: number, worldZ: number): number {
-    if (!this.noise) {
-      this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
-    }
+    this.ensureNoiseInitialized();
 
     const flatHeight = this.getFlatZoneHeight(worldX, worldZ);
     if (flatHeight !== null) {
@@ -5898,9 +5909,7 @@ export class TerrainSystem extends System {
     worldZ: number,
     overrideDifficultyLevel?: number,
   ): DifficultySample {
-    if (!this.noise) {
-      this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
-    }
+    this.ensureNoiseInitialized();
 
     const biome = this.getBiomeAtWorldPosition(worldX, worldZ);
     const biomeData = BIOMES[biome];
@@ -6062,9 +6071,7 @@ export class TerrainSystem extends System {
   private generateBossHotspots(): void {
     if (this.bossHotspots.length > 0) return;
 
-    if (!this.noise) {
-      this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
-    }
+    this.ensureNoiseInitialized();
 
     const worldSizeMeters = this.getActiveWorldSizeMeters();
     const halfWorld = worldSizeMeters / 2;
