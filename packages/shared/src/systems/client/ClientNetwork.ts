@@ -2350,7 +2350,7 @@ export class ClientNetwork extends SystemBase {
       }
     }
 
-    // Re-emit as UI update event for Sidebar to handle
+    // Re-emit as UI update event for the active client UI hooks to handle
     this.world.emit(EventType.UI_UPDATE, {
       component: "equipment",
       data: {
@@ -2827,7 +2827,7 @@ export class ClientNetwork extends SystemBase {
       xp: Record<string, number>;
     };
   }) => {
-    // Emit QUEST_START_CONFIRM event for Sidebar to show QuestStartScreen
+    // Emit QUEST_START_CONFIRM event for the active client UI to show QuestStartScreen
     // Add playerId since server doesn't send it (packet is already routed to this player)
     const playerId = this.world?.entities?.player?.id || "";
     this.world.emit(EventType.QUEST_START_CONFIRM, { ...data, playerId });
@@ -2853,7 +2853,7 @@ export class ClientNetwork extends SystemBase {
       xp: Record<string, number>;
     };
   }) => {
-    // Emit QUEST_COMPLETED event for Sidebar to show completion screen
+    // Emit QUEST_COMPLETED event for the active client UI to show completion screen
     const playerId = this.world?.entities?.player?.id || "";
     this.world.emit(EventType.QUEST_COMPLETED, { ...data, playerId });
   };

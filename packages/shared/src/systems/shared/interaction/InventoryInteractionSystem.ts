@@ -1378,7 +1378,7 @@ export class InventoryInteractionSystem extends SystemBase {
   }
 
   /**
-   * Handle corpse/gravestone click - opens loot UI (handled by client Sidebar.tsx)
+   * Handle corpse/gravestone click - opens loot UI in the active client interface
    * This handler is kept for logging/debugging purposes
    */
   private handleCorpseClick(event: {
@@ -1391,7 +1391,7 @@ export class InventoryInteractionSystem extends SystemBase {
       "InventoryInteractionSystem",
       `CORPSE_CLICK event received for ${event.corpseId} with ${event.lootItems?.length || 0} items - LootWindow should open in client UI`,
     );
-    // Note: The actual loot UI (LootWindow) is rendered in the client's Sidebar.tsx
+    // Note: The actual loot UI (LootWindow) is rendered by the active client interface
     // which listens to this event and displays the loot interface
   }
 

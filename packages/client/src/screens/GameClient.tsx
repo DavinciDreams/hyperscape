@@ -4,12 +4,7 @@ import {
   normalizeBrowserLoopbackUrl,
 } from "@/lib/api-config";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  THREE,
-  createClientWorld,
-  EventType,
-  System,
-} from "@hyperscape/shared";
+import { THREE, createClientWorld, System } from "@hyperscape/shared";
 import { World } from "@hyperscape/shared";
 import { CoreUI } from "../game/CoreUI";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
@@ -276,20 +271,6 @@ export function GameClient({
 
     return w;
   }, []);
-  const defaultUI = { visible: true, active: false, app: null, pane: null };
-  const [ui, setUI] = useState(defaultUI);
-  useEffect(() => {
-    const handleUI = (data: unknown) => {
-      setUI(
-        data as { visible: boolean; active: boolean; app: null; pane: null },
-      );
-    };
-    world.on(EventType.UI_UPDATE, handleUI, undefined);
-    return () => {
-      world.off(EventType.UI_UPDATE, handleUI, undefined, undefined);
-    };
-  }, [world]);
-
   // Handle window resize to update Three.js canvas
   useEffect(() => {
     const handleResize = () => {
@@ -469,7 +450,7 @@ export function GameClient({
           inset: 0;
           pointer-events: none;
           user-select: none;
-          display: ${ui.visible ? "block" : "block"};
+          display: block;
           overflow: hidden;
           z-index: 10;
         }

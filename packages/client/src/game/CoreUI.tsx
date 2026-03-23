@@ -9,14 +9,8 @@ import {
   isTouch,
   propToLabel,
 } from "@hyperscape/shared";
-import type { ClientWorld, PlayerStats } from "../types";
-import {
-  isUIUpdateEvent,
-  isPlayerStatsData,
-  isSkillsUpdateEvent,
-  isPrayerPointsChangedEvent,
-  isPrayerStateSyncEvent,
-} from "../types/guards";
+import type { ClientWorld } from "../types";
+import { PlayerDataProvider, usePlayerDataContext } from "../hooks";
 import { ActionProgressBar } from "./hud/ActionProgressBar";
 import { ChatProvider } from "./chat/ChatContext";
 import { EntityContextMenu } from "./hud/EntityContextMenu";
@@ -43,6 +37,14 @@ import {
 type IconComponent = React.ComponentType<{ size?: number | string }>;
 
 export function CoreUI({ world }: { world: ClientWorld }) {
+  return (
+    <PlayerDataProvider world={world}>
+      <CoreUIContent world={world} />
+    </PlayerDataProvider>
+  );
+}
+
+function CoreUIContent({ world }: { world: ClientWorld }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const readyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [ready, setReady] = useState(false);
@@ -73,8 +75,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     respawnTime: number;
   } | null>(null);
 
-  // Player stats for StatusBars (same pattern as InterfaceManager)
-  const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
+  const { playerStats } = usePlayerDataContext();
 
   useEffect(() => {
     // Get the target entity ID for spectators
@@ -305,100 +306,6 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     terrainReady,
     player,
   ]);
-
-  // Extract playerId for dependency tracking - prevents stale closures
-  const localPlayerId = world.entities?.player?.id;
-
-  // Subscribe to player stats updates (for StatusBars)
-  useEffect(() => {
-    const onUIUpdate = (raw: unknown) => {
-      if (!isUIUpdateEvent(raw)) {
-        console.warn("[CoreUI] Invalid UI update event:", raw);
-        return;
-      }
-      if (raw.component === "player" && isPlayerStatsData(raw.data)) {
-        // PlayerStatsData is a partial type - safe to cast since we merge with existing state
-        const newData = raw.data as unknown as Partial<PlayerStats>;
-        // Merge with existing state to preserve prayer data
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                ...newData,
-                prayerPoints: newData.prayerPoints || prev.prayerPoints,
-              }
-            : (newData as PlayerStats),
-        );
-      }
-    };
-
-    const onSkillsUpdate = (raw: unknown) => {
-      if (!isSkillsUpdateEvent(raw)) {
-        console.warn("[CoreUI] Invalid skills update event:", raw);
-        return;
-      }
-      if (!localPlayerId || raw.playerId === localPlayerId) {
-        // Skills event only has skills data - merge with existing state
-        const updatedSkills = raw.skills as unknown as PlayerStats["skills"];
-        setPlayerStats((prev) =>
-          prev
-            ? { ...prev, skills: updatedSkills }
-            : ({ skills: updatedSkills } as unknown as PlayerStats),
-        );
-      }
-    };
-
-    const onPrayerPointsChanged = (raw: unknown) => {
-      if (!isPrayerPointsChangedEvent(raw)) {
-        console.warn("[CoreUI] Invalid prayer points changed event:", raw);
-        return;
-      }
-      if (!localPlayerId || raw.playerId === localPlayerId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                prayerPoints: { current: raw.points, max: raw.maxPoints },
-              }
-            : ({
-                prayerPoints: { current: raw.points, max: raw.maxPoints },
-              } as PlayerStats),
-        );
-      }
-    };
-
-    // Handle full prayer state sync (initial load, altar pray, etc.)
-    const onPrayerStateSync = (raw: unknown) => {
-      if (!isPrayerStateSyncEvent(raw)) {
-        console.warn("[CoreUI] Invalid prayer state sync event:", raw);
-        return;
-      }
-      if (!localPlayerId || raw.playerId === localPlayerId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                prayerPoints: { current: raw.points, max: raw.maxPoints },
-              }
-            : ({
-                prayerPoints: { current: raw.points, max: raw.maxPoints },
-              } as PlayerStats),
-        );
-      }
-    };
-
-    world.on(EventType.UI_UPDATE, onUIUpdate);
-    world.on(EventType.SKILLS_UPDATED, onSkillsUpdate);
-    world.on(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
-    world.on(EventType.PRAYER_STATE_SYNC, onPrayerStateSync);
-
-    return () => {
-      world.off(EventType.UI_UPDATE, onUIUpdate);
-      world.off(EventType.SKILLS_UPDATED, onSkillsUpdate);
-      world.off(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
-      world.off(EventType.PRAYER_STATE_SYNC, onPrayerStateSync);
-    };
-  }, [world, localPlayerId]);
 
   return (
     <ChatProvider>

@@ -41,7 +41,7 @@ import {
   DragOverlay,
 } from "@/ui";
 import { HintProvider } from "@/ui";
-import { usePlayerData, useModalPanels } from "@/hooks";
+import { useModalPanels, usePlayerDataContext } from "@/hooks";
 
 // Local modules
 import { MobileInterfaceManager } from "./MobileInterfaceManager";
@@ -52,7 +52,6 @@ import {
 } from "./PanelRegistry";
 import {
   useWorldMapHotkey,
-  useUIUpdateEvents,
   useOpenPaneEvent,
   useInterfaceUIState,
 } from "./useInterfaceEvents";
@@ -130,14 +129,7 @@ function DesktopInterfaceManager({
   const { isMobile } = useViewportResize();
 
   // Player data from shared hook
-  const {
-    inventory,
-    equipment,
-    playerStats,
-    coins,
-    setPlayerStats,
-    setEquipment,
-  } = usePlayerData(world);
+  const { inventory, equipment, playerStats, coins } = usePlayerDataContext();
 
   // Modal panel data from shared hook
   const {
@@ -186,21 +178,6 @@ function DesktopInterfaceManager({
 
   // World map hotkey (M key)
   useWorldMapHotkey(toggleWorldMap);
-
-  // UI_UPDATE event routing
-  useUIUpdateEvents(
-    world,
-    { setPlayerStats, setEquipment },
-    {
-      setBankData,
-      setStoreData,
-      setDialogueData,
-      setSmeltingData,
-      setSmithingData,
-      setCraftingData,
-      setTanningData,
-    },
-  );
 
   // Feature gating based on complexity mode
   const presetHotkeysEnabled = useFeatureEnabled("presetHotkeys");
@@ -312,28 +289,37 @@ function DesktopInterfaceManager({
   // Listen for UI_OPEN_PANE events
   useOpenPaneEvent(world, handleMenuClick);
 
+  const panelDataRef = useRef({
+    inventory,
+    coins,
+    playerStats,
+    equipment,
+  });
+
+  useEffect(() => {
+    panelDataRef.current = {
+      inventory,
+      coins,
+      playerStats,
+      equipment,
+    };
+  }, [inventory, coins, playerStats, equipment]);
+
   // Create panel renderer
   const renderPanel = useMemo(
     () =>
       createPanelRenderer({
         world,
-        inventoryItems: inventory as never[],
-        coins,
-        stats: playerStats,
-        equipment,
         onPanelClick: handleMenuClick,
         isEditMode: isUnlocked && editModeEnabled,
+        getPanelData: () => ({
+          inventoryItems: panelDataRef.current.inventory as never[],
+          coins: panelDataRef.current.coins,
+          stats: panelDataRef.current.playerStats,
+          equipment: panelDataRef.current.equipment,
+        }),
       }),
-    [
-      world,
-      inventory,
-      coins,
-      playerStats,
-      equipment,
-      handleMenuClick,
-      isUnlocked,
-      editModeEnabled,
-    ],
+    [world, handleMenuClick, isUnlocked, editModeEnabled],
   );
 
   // Drag-drop coordination (delegated to hook)

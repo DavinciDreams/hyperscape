@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import { useState, useEffect } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { EventType } from "@hyperscape/shared";
 import type { PlayerStats } from "@hyperscape/shared";
 import type { ClientWorld, PlayerEquipmentItems } from "../types";
@@ -48,6 +48,13 @@ export interface PlayerDataState {
   setCoins: React.Dispatch<React.SetStateAction<number>>;
 }
 
+interface PlayerDataProviderProps {
+  world: ClientWorld | null;
+  children: React.ReactNode;
+}
+
+const PlayerDataContext = createContext<PlayerDataState | null>(null);
+
 /**
  * usePlayerData - Subscribe to player data events
  *
@@ -62,7 +69,7 @@ export interface PlayerDataState {
  * @param world - The game world instance
  * @returns Player data state and setters
  */
-export function usePlayerData(world: ClientWorld | null): PlayerDataState {
+export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
   const [inventory, setInventory] = useState<InventorySlotViewItem[]>([]);
   const [equipment, setEquipment] = useState<PlayerEquipmentItems | null>(null);
   const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
@@ -399,4 +406,28 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
     setPlayerStats,
     setCoins,
   };
+}
+
+export function PlayerDataProvider({
+  world,
+  children,
+}: PlayerDataProviderProps): React.ReactElement {
+  const value = usePlayerDataState(world);
+  return React.createElement(PlayerDataContext.Provider, { value }, children);
+}
+
+export function usePlayerDataContext(): PlayerDataState {
+  const context = useContext(PlayerDataContext);
+
+  if (!context) {
+    throw new Error(
+      "usePlayerDataContext must be used within PlayerDataProvider",
+    );
+  }
+
+  return context;
+}
+
+export function usePlayerData(world: ClientWorld | null): PlayerDataState {
+  return usePlayerDataState(world);
 }

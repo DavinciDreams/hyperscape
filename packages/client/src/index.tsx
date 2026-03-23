@@ -25,6 +25,7 @@ import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
 import { logger } from "./lib/logger";
+import { devValidateManifest } from "./lib/manifestValidator";
 import { MaintenanceBanner } from "./components/common/MaintenanceBanner";
 // Loading fallback for lazy-loaded screens
 function ScreenLoadingFallback() {
@@ -156,6 +157,8 @@ if (!globalThis.setImmediate) {
     ...args: unknown[]
   ) => setTimeout(callback, 0, ...args)) as unknown as typeof setImmediate;
 }
+
+devValidateManifest();
 
 // Parse URL parameters for embedded configuration
 const urlParams = new URLSearchParams(window.location.search);
