@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
 import {
-  useWindowManager,
   useWindowStore,
   useAutoCollapse,
   useBadge,
@@ -172,7 +171,7 @@ export function NavigationRibbon({
   onVisibilityChange,
 }: NavigationRibbonProps): React.ReactElement | null {
   const theme = useThemeStore((s) => s.theme);
-  const { createWindow, windows } = useWindowManager();
+  const createWindow = useWindowStore((s) => s.createWindow);
   const windowStoreUpdate = useWindowStore((s) => s.updateWindow);
   const bringToFront = useWindowStore((s) => s.bringToFront);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
@@ -192,6 +191,8 @@ export function NavigationRibbon({
 
   const handleOpenPanel = useCallback(
     (item: RibbonItem) => {
+      const windows = Array.from(useWindowStore.getState().windows.values());
+
       // Check if panel is already open in a window
       const existingWindow = windows.find((w) =>
         w.tabs.some((t) => t.content === item.panelId),
@@ -236,7 +237,7 @@ export function NavigationRibbon({
       console.log("[NavigationRibbon] Created new window:", newWindow?.id);
       setExpandedCategory(null);
     },
-    [windows, createWindow, windowStoreUpdate, bringToFront],
+    [createWindow, windowStoreUpdate, bringToFront],
   );
 
   if (!visible) {
