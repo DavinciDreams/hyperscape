@@ -196,6 +196,7 @@ const useIntroMusic = (enabled: boolean) => {
 // Music Toggle Button Component
 const MusicToggleButton = () => {
   const [enabled, setEnabled] = React.useState(getMusicEnabled());
+  const entryGold = "#d4b06a";
 
   useIntroMusic(enabled);
 
@@ -210,6 +211,10 @@ const MusicToggleButton = () => {
       onClick={toggleMusic}
       className="fixed top-4 left-4 z-50 bg-black/60 hover:bg-black/80 text-white rounded-lg px-4 py-2 border border-white/20 transition-all flex items-center gap-2 backdrop-blur-sm"
       title={enabled ? "Disable music" : "Enable music"}
+      style={{
+        color: entryGold,
+        border: `1px solid ${entryGold}4d`,
+      }}
     >
       <span className="text-xl">{enabled ? "🔊" : "🔇"}</span>
       <span className="text-sm font-medium">
@@ -221,7 +226,7 @@ const MusicToggleButton = () => {
 
 // Agent Dashboard Button Component
 const AgentDashboardButton = () => {
-  const theme = useThemeStore((s) => s.theme);
+  const entryGold = "#d4b06a";
   return (
     <a
       href={`${window.location.origin}/?page=dashboard`}
@@ -229,8 +234,8 @@ const AgentDashboardButton = () => {
       rel="noopener noreferrer"
       className="fixed bottom-4 right-4 z-50 bg-black/60 hover:bg-black/80 rounded-lg px-4 py-2 transition-all flex items-center gap-2 backdrop-blur-sm shadow-lg"
       style={{
-        color: theme.colors.text.accent,
-        border: `1px solid ${theme.colors.text.accent}4d`,
+        color: entryGold,
+        border: `1px solid ${entryGold}4d`,
       }}
       title="Open Agent Dashboard"
     >
@@ -242,7 +247,7 @@ const AgentDashboardButton = () => {
 
 // Public leaderboard button
 const LeaderboardButton = () => {
-  const theme = useThemeStore((s) => s.theme);
+  const entryGold = "#d4b06a";
   return (
     <a
       href={`${window.location.origin}/?page=leaderboard`}
@@ -250,8 +255,8 @@ const LeaderboardButton = () => {
       rel="noopener noreferrer"
       className="fixed bottom-20 right-4 z-50 bg-black/60 hover:bg-black/80 rounded-lg px-4 py-2 transition-all flex items-center gap-2 backdrop-blur-sm shadow-lg"
       style={{
-        color: theme.colors.text.accent,
-        border: `1px solid ${theme.colors.text.accent}4d`,
+        color: entryGold,
+        border: `1px solid ${entryGold}4d`,
       }}
       title="Open Leaderboard"
     >
@@ -270,6 +275,9 @@ export function CharacterSelectScreen({
   onLogout: () => void;
 }) {
   const theme = useThemeStore((s) => s.theme);
+  const entryGold = "#d4b06a";
+  const entryGoldBright = "#f0d59a";
+  const entryGoldSoft = "#b89354";
   const [characters, setCharacters] = React.useState<Character[]>([]);
   // Sort characters alphabetically by name for display
   const sortedCharacters = React.useMemo(
@@ -1370,7 +1378,7 @@ export function CharacterSelectScreen({
     <div
       className={`${thick ? "h-[2px]" : "h-px"} w-full ${className}`}
       style={{
-        background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+        background: `linear-gradient(to right, transparent, ${entryGold}e6, transparent)`,
       }}
     />
   );
@@ -1438,8 +1446,8 @@ export function CharacterSelectScreen({
                         onClick={() => selectCharacter(c.id)}
                         className="w-full px-4 py-3 text-center bg-black/40 hover:bg-black/50 focus:outline-none focus:ring-1 rounded-sm"
                         style={{
-                          color: theme.colors.text.accent,
-                          boxShadow: `0 0 0 1px ${theme.colors.accent.secondary}99`,
+                          color: entryGold,
+                          boxShadow: `0 0 0 1px ${entryGoldSoft}99`,
                         }}
                       >
                         <div className="flex items-center gap-2">
@@ -1553,12 +1561,12 @@ export function CharacterSelectScreen({
                         <div
                           className="w-full rounded bg-black/60 p-3"
                           style={{
-                            border: `1px solid ${theme.colors.text.accent}4d`,
+                            border: `1px solid ${entryGold}4d`,
                           }}
                         >
                           <div
                             className="text-sm font-semibold mb-2"
-                            style={{ color: theme.colors.text.accent }}
+                            style={{ color: entryGold }}
                           >
                             Character Type
                           </div>
@@ -1566,13 +1574,13 @@ export function CharacterSelectScreen({
                             <label
                               className="flex-1 flex items-center gap-2 p-2 rounded-lg border-2 bg-black/40 cursor-pointer transition-all hover:bg-black/60"
                               style={{
-                                borderColor: `${theme.colors.text.accent}4d`,
+                                borderColor: `${entryGold}4d`,
                               }}
                               onMouseEnter={(e) =>
-                                (e.currentTarget.style.borderColor = `${theme.colors.text.accent}99`)
+                                (e.currentTarget.style.borderColor = `${entryGold}99`)
                               }
                               onMouseLeave={(e) =>
-                                (e.currentTarget.style.borderColor = `${theme.colors.text.accent}4d`)
+                                (e.currentTarget.style.borderColor = `${entryGold}4d`)
                               }
                             >
                               <input
@@ -1587,13 +1595,13 @@ export function CharacterSelectScreen({
                                 }
                                 className="w-4 h-4"
                                 style={{
-                                  accentColor: theme.colors.text.accent,
+                                  accentColor: entryGold,
                                 }}
                               />
                               <div className="flex-1">
                                 <div
                                   className="font-medium text-sm"
-                                  style={{ color: theme.colors.text.accent }}
+                                  style={{ color: entryGold }}
                                 >
                                   🎮 Human
                                 </div>
@@ -1603,13 +1611,13 @@ export function CharacterSelectScreen({
                               <label
                                 className="flex-1 flex items-center gap-2 p-2 rounded-lg border-2 bg-black/40 cursor-pointer transition-all hover:bg-black/60"
                                 style={{
-                                  borderColor: `${theme.colors.text.accent}4d`,
+                                  borderColor: `${entryGold}4d`,
                                 }}
                                 onMouseEnter={(e) =>
-                                  (e.currentTarget.style.borderColor = `${theme.colors.text.accent}99`)
+                                  (e.currentTarget.style.borderColor = `${entryGold}99`)
                                 }
                                 onMouseLeave={(e) =>
-                                  (e.currentTarget.style.borderColor = `${theme.colors.text.accent}4d`)
+                                  (e.currentTarget.style.borderColor = `${entryGold}4d`)
                                 }
                               >
                                 <input
@@ -1624,13 +1632,13 @@ export function CharacterSelectScreen({
                                   }
                                   className="w-4 h-4"
                                   style={{
-                                    accentColor: theme.colors.text.accent,
+                                    accentColor: entryGold,
                                   }}
                                 />
                                 <div className="flex-1">
                                   <div
                                     className="font-medium text-sm"
-                                    style={{ color: theme.colors.text.accent }}
+                                    style={{ color: entryGold }}
                                   >
                                     🤖 AI Agent
                                   </div>
@@ -1673,7 +1681,7 @@ export function CharacterSelectScreen({
                       <div
                         className="relative w-full h-48 bg-black/60 rounded-lg overflow-hidden"
                         style={{
-                          border: `1px solid ${theme.colors.text.accent}4d`,
+                          border: `1px solid ${entryGold}4d`,
                         }}
                       >
                         <CharacterPreview
@@ -1693,15 +1701,15 @@ export function CharacterSelectScreen({
                             }
                             className="px-2 py-0.5 rounded transition-colors text-sm"
                             style={{
-                              backgroundColor: `${theme.colors.text.accent}33`,
-                              color: theme.colors.text.accent,
+                              backgroundColor: `${entryGold}33`,
+                              color: entryGold,
                             }}
                           >
                             ‹
                           </button>
                           <span
                             className="text-xs font-medium min-w-[100px] text-center"
-                            style={{ color: theme.colors.text.accent }}
+                            style={{ color: entryGold }}
                           >
                             {AVATAR_OPTIONS[selectedAvatarIndex].name}
                           </span>
@@ -1713,8 +1721,8 @@ export function CharacterSelectScreen({
                             }
                             className="px-2 py-0.5 rounded transition-colors text-sm"
                             style={{
-                              backgroundColor: `${theme.colors.text.accent}33`,
-                              color: theme.colors.text.accent,
+                              backgroundColor: `${entryGold}33`,
+                              color: entryGold,
                             }}
                           >
                             ›
@@ -1726,8 +1734,8 @@ export function CharacterSelectScreen({
                       <button
                         className="w-full px-4 py-2 bg-black/40 hover:bg-black/50 rounded transition-colors text-sm"
                         style={{
-                          color: theme.colors.text.accent,
-                          border: `1px solid ${theme.colors.text.accent}4d`,
+                          color: entryGold,
+                          border: `1px solid ${entryGold}4d`,
                         }}
                         onClick={() => {
                           setShowCreate(false);
@@ -1747,12 +1755,12 @@ export function CharacterSelectScreen({
                         <div
                           className="w-1/2 rounded bg-black/60 p-3 h-fit"
                           style={{
-                            border: `1px solid ${theme.colors.text.accent}4d`,
+                            border: `1px solid ${entryGold}4d`,
                           }}
                         >
                           <div
                             className="text-sm font-semibold mb-2"
-                            style={{ color: theme.colors.text.accent }}
+                            style={{ color: entryGold }}
                           >
                             Agent Archetype
                           </div>
@@ -1773,11 +1781,11 @@ export function CharacterSelectScreen({
                                   style={{
                                     borderColor:
                                       selectedTemplate?.id === template.id
-                                        ? theme.colors.text.accent
-                                        : `${theme.colors.text.accent}4d`,
+                                        ? entryGold
+                                        : `${entryGold}4d`,
                                     backgroundColor:
                                       selectedTemplate?.id === template.id
-                                        ? `${theme.colors.text.accent}1a`
+                                        ? `${entryGold}1a`
                                         : "rgba(0,0,0,0.4)",
                                   }}
                                 >
@@ -1788,7 +1796,7 @@ export function CharacterSelectScreen({
                                     <div
                                       className="font-medium text-sm"
                                       style={{
-                                        color: theme.colors.text.accent,
+                                        color: entryGold,
                                       }}
                                     >
                                       {template.name}
@@ -1854,15 +1862,15 @@ export function CharacterSelectScreen({
                   <div
                     className="h-[1px] w-full mb-2"
                     style={{
-                      background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+                      background: `linear-gradient(to right, transparent, ${entryGold}e6, transparent)`,
                     }}
                   />
                   <button
                     className="w-full px-6 py-3 text-center bg-transparent hover:bg-black/20 focus:outline-none transition-all rounded-sm"
                     onClick={onLogout}
                     style={{
-                      color: theme.colors.text.accent,
-                      textShadow: `0 0 12px ${theme.colors.accent.secondary}80, 0 0 25px ${theme.colors.accent.secondary}4d`,
+                      color: entryGold,
+                      textShadow: `0 0 12px ${entryGoldSoft}80, 0 0 25px ${entryGoldSoft}4d`,
                       filter:
                         "drop-shadow(0 8px 20px rgba(0, 0, 0, 0.8)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6))",
                     }}
@@ -1874,7 +1882,7 @@ export function CharacterSelectScreen({
                   <div
                     className="h-[1px] w-full mt-2"
                     style={{
-                      background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+                      background: `linear-gradient(to right, transparent, ${entryGold}e6, transparent)`,
                     }}
                   />
                 </div>
@@ -1901,16 +1909,13 @@ export function CharacterSelectScreen({
                     <div className="flex items-center justify-between px-5 py-4 bg-black/50 backdrop-blur">
                       <div
                         className="font-semibold text-xl"
-                        style={{ color: theme.colors.text.accent }}
+                        style={{ color: entryGold }}
                       >
                         {characters.find((c) => c.id === selectedCharacterId)
                           ?.name || "Unnamed"}
                       </div>
                       <div className="flex items-center gap-2">
-                        <div
-                          className="text-xl"
-                          style={{ color: theme.colors.text.accent }}
-                        >
+                        <div className="text-xl" style={{ color: entryGold }}>
                           ✓
                         </div>
                       </div>
@@ -1930,7 +1935,7 @@ export function CharacterSelectScreen({
                   <div
                     className="h-[1px] w-full mb-1"
                     style={{
-                      background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+                      background: `linear-gradient(to right, transparent, ${entryGold}e6, transparent)`,
                     }}
                   />
                   <button
@@ -1938,8 +1943,8 @@ export function CharacterSelectScreen({
                     disabled={!selectedCharacterId || enteringWorld}
                     onClick={enterWorld}
                     style={{
-                      color: theme.colors.text.accent,
-                      textShadow: `0 0 12px ${theme.colors.accent.secondary}80, 0 0 25px ${theme.colors.accent.secondary}4d`,
+                      color: entryGold,
+                      textShadow: `0 0 12px ${entryGoldSoft}80, 0 0 25px ${entryGoldSoft}4d`,
                       filter:
                         "drop-shadow(0 8px 20px rgba(0, 0, 0, 0.8)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6))",
                       opacity: selectedCharacterId && !enteringWorld ? 1 : 0.5,
@@ -1956,7 +1961,7 @@ export function CharacterSelectScreen({
                   <div
                     className="h-[1px] w-full mt-1"
                     style={{
-                      background: `linear-gradient(to right, transparent, ${theme.colors.text.accent}e6, transparent)`,
+                      background: `linear-gradient(to right, transparent, ${entryGold}e6, transparent)`,
                     }}
                   />
                 </div>
@@ -1966,9 +1971,9 @@ export function CharacterSelectScreen({
                   className="px-6 py-2 bg-transparent hover:bg-black/20 focus:outline-none transition-all rounded-sm"
                   onClick={() => setView("select")}
                   style={{
-                    color: theme.colors.text.accent,
-                    textShadow: `0 0 8px ${theme.colors.accent.secondary}66`,
-                    border: `1px solid ${theme.colors.text.accent}4d`,
+                    color: entryGold,
+                    textShadow: `0 0 8px ${entryGoldSoft}66`,
+                    border: `1px solid ${entryGold}4d`,
                   }}
                 >
                   <span className="font-medium text-sm uppercase tracking-[0.15em]">

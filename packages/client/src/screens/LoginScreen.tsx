@@ -11,6 +11,9 @@ import { useThemeStore } from "@/ui";
 
 export function LoginScreen() {
   const theme = useThemeStore((s) => s.theme);
+  const loginGold = "#d4b06a";
+  const loginGoldBright = "#f0d59a";
+  const loginGoldSoft = "#b89354";
   const { ready, authenticated, login } = usePrivy();
   const { initLoginToMiniApp, loginToMiniApp } = useLoginToMiniApp();
   const [isFarcasterContext, setIsFarcasterContext] = useState(false);
@@ -88,8 +91,8 @@ export function LoginScreen() {
             width: 350px;
             height: auto;
             margin: 2rem auto 0;
-            filter: drop-shadow(0 0 30px ${theme.colors.accent.primary}99)
-                    drop-shadow(0 0 60px ${theme.colors.accent.primary}66);
+            filter: drop-shadow(0 0 30px ${loginGold}99)
+                    drop-shadow(0 0 60px ${loginGold}66);
           }
           .login-bottom {
             margin-bottom: 4rem;
@@ -103,8 +106,8 @@ export function LoginScreen() {
           .loading-spinner {
             width: 40px;
             height: 40px;
-            border: 4px solid ${theme.colors.accent.primary}33;
-            border-top-color: ${theme.colors.accent.primary};
+            border: 4px solid ${loginGold}33;
+            border-top-color: ${loginGold};
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto;
@@ -154,17 +157,17 @@ export function LoginScreen() {
             width: 400px;
             height: auto;
             margin: 2rem auto 1.5rem;
-            filter: drop-shadow(0 0 35px ${theme.colors.accent.primary}b3)
-                    drop-shadow(0 0 70px ${theme.colors.accent.primary}80);
+            filter: drop-shadow(0 0 35px ${loginGold}b3)
+                    drop-shadow(0 0 70px ${loginGold}80);
           }
           .login-tagline {
             font-size: 1.2rem;
-            color: ${theme.colors.text.accent};
+            color: ${loginGoldBright};
             letter-spacing: 0.15em;
             font-weight: 300;
             text-transform: uppercase;
-            text-shadow: 0 0 10px ${theme.colors.accent.secondary}4d,
-                         0 0 20px ${theme.colors.accent.secondary}33;
+            text-shadow: 0 0 10px ${loginGoldSoft}4d,
+                         0 0 20px ${loginGoldSoft}33;
             margin-bottom: 0;
           }
           .login-bottom {
@@ -191,14 +194,14 @@ export function LoginScreen() {
             height: 1px;
             background: linear-gradient(90deg,
               transparent 0%,
-              ${theme.colors.accent.secondary}1a 5%,
-              ${theme.colors.accent.secondary}99 30%,
-              ${theme.colors.accent.secondary}e6 50%,
-              ${theme.colors.accent.secondary}99 70%,
-              ${theme.colors.accent.secondary}1a 95%,
+              ${loginGoldSoft}1a 5%,
+              ${loginGoldSoft}99 30%,
+              ${loginGoldBright}e6 50%,
+              ${loginGoldSoft}99 70%,
+              ${loginGoldSoft}1a 95%,
               transparent 100%);
-            box-shadow: 0 0 8px ${theme.colors.accent.secondary}66,
-                        0 0 15px ${theme.colors.accent.secondary}33;
+            box-shadow: 0 0 8px ${loginGoldSoft}66,
+                        0 0 15px ${loginGoldSoft}33;
             transition: all 0.3s ease;
             pointer-events: none;
           }
@@ -232,9 +235,9 @@ export function LoginScreen() {
             transform: translateY(-50%) translateX(-100%);
             background: linear-gradient(90deg,
               transparent 0%,
-              ${theme.colors.accent.secondary}00 30%,
-              ${theme.colors.accent.secondary}26 50%,
-              ${theme.colors.accent.secondary}00 70%,
+              ${loginGoldSoft}00 30%,
+              ${loginGoldSoft}26 50%,
+              ${loginGoldSoft}00 70%,
               transparent 100%);
             opacity: 0;
             transition: all 0.6s ease;
@@ -244,7 +247,7 @@ export function LoginScreen() {
           .login-button {
             background: transparent;
             border: none;
-            color: ${theme.colors.text.accent};
+            color: ${loginGoldBright};
             padding: 0.75rem 2rem;
             font-size: 1.4rem;
             font-weight: 400;
@@ -254,37 +257,37 @@ export function LoginScreen() {
             text-transform: capitalize;
             position: relative;
             font-family: 'Cinzel', serif, system-ui, -apple-system, sans-serif;
-            text-shadow: 0 0 12px ${theme.colors.accent.secondary}80,
-                         0 0 25px ${theme.colors.accent.secondary}4d;
+            text-shadow: 0 0 12px ${loginGoldSoft}80,
+                         0 0 25px ${loginGoldSoft}4d;
             z-index: 3;
             filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.8))
                     drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6));
             min-width: 350px;
           }
           .login-button:hover {
-            color: ${theme.colors.accent.hover};
-            text-shadow: 0 0 18px ${theme.colors.accent.secondary}b3,
-                         0 0 35px ${theme.colors.accent.secondary}80;
+            color: ${loginGoldBright};
+            text-shadow: 0 0 18px ${loginGoldBright}b3,
+                         0 0 35px ${loginGoldSoft}80;
             transform: scale(1.03);
           }
           .login-button:active {
             transform: scale(0.98);
-            color: ${theme.colors.accent.secondary};
-            text-shadow: 0 0 25px ${theme.colors.accent.secondary}e6,
-                         0 0 50px ${theme.colors.accent.secondary}99;
+            color: ${loginGold};
+            text-shadow: 0 0 25px ${loginGoldBright}e6,
+                         0 0 50px ${loginGoldSoft}99;
           }
           .login-button-wrapper:hover::before,
           .login-button-wrapper:hover::after {
             background: linear-gradient(90deg,
               transparent 0%,
-              ${theme.colors.accent.secondary}26 5%,
-              ${theme.colors.accent.secondary}b3 30%,
-              ${theme.colors.accent.secondary} 50%,
-              ${theme.colors.accent.secondary}b3 70%,
-              ${theme.colors.accent.secondary}26 95%,
+              ${loginGoldSoft}26 5%,
+              ${loginGoldBright}b3 30%,
+              ${loginGoldBright} 50%,
+              ${loginGoldBright}b3 70%,
+              ${loginGoldSoft}26 95%,
               transparent 100%);
-            box-shadow: 0 0 12px ${theme.colors.accent.secondary}80,
-                        0 0 20px ${theme.colors.accent.secondary}4d;
+            box-shadow: 0 0 12px ${loginGoldBright}80,
+                        0 0 20px ${loginGoldSoft}4d;
           }
           .login-button-wrapper:hover .login-button-highlight {
             opacity: 1;
@@ -294,8 +297,8 @@ export function LoginScreen() {
             opacity: 1;
             transform: translateY(-50%) translateX(0);
             background: radial-gradient(ellipse at center,
-              ${theme.colors.accent.secondary}4d 0%,
-              ${theme.colors.accent.secondary}26 50%,
+              ${loginGoldSoft}4d 0%,
+              ${loginGoldSoft}26 50%,
               transparent 100%);
           }
           .farcaster-badge {

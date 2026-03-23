@@ -4,7 +4,8 @@ import type { ClientWorld } from "../../types";
 
 const TERRAIN_BASE_SAMPLE_SIZE = 96;
 const TERRAIN_CLOSE_SAMPLE_SIZE = 128;
-const TERRAIN_OVERSHOOT = Math.SQRT2 * 1.1;
+const TERRAIN_MAX_SAMPLE_SIZE = 192;
+export const MINIMAP_TERRAIN_OVERSHOOT = 1.75;
 
 interface BiomeDataLike {
   color?: number;
@@ -19,6 +20,23 @@ interface CachedBiomeColor {
   b: number;
 }
 
+const MINIMAP_BIOME_OVERRIDES: Record<string, CachedBiomeColor> = {
+  plains: { r: 92, g: 134, b: 86 },
+  forest: { r: 56, g: 96, b: 70 },
+  woodland: { r: 68, g: 108, b: 78 },
+  swamp: { r: 74, g: 94, b: 72 },
+  desert: { r: 166, g: 138, b: 92 },
+  canyon: { r: 132, g: 94, b: 78 },
+  mountains: { r: 104, g: 112, b: 124 },
+  mountain: { r: 104, g: 112, b: 124 },
+  rocky: { r: 112, g: 118, b: 126 },
+  tundra: { r: 156, g: 170, b: 178 },
+  snow: { r: 162, g: 176, b: 186 },
+  frozen: { r: 152, g: 168, b: 180 },
+  ice: { r: 144, g: 166, b: 184 },
+  beach: { r: 170, g: 152, b: 110 },
+};
+
 interface TerrainSystemLike {
   getHeightAt: (x: number, z: number) => number;
   getBiomeAtPosition?: (x: number, z: number) => string;
@@ -31,6 +49,7 @@ interface EnsureTerrainCacheArgs {
   currentExtent: number;
   upX: number;
   upZ: number;
+  viewportPixels: number;
 }
 
 function sameTerrainRequest(
@@ -44,7 +63,8 @@ function sameTerrainRequest(
     left.centerZ === right.centerZ &&
     left.currentExtent === right.currentExtent &&
     left.upX === right.upX &&
-    left.upZ === right.upZ
+    left.upZ === right.upZ &&
+    left.viewportPixels === right.viewportPixels
   );
 }
 
@@ -93,6 +113,34 @@ function numberToColor(value: number): CachedBiomeColor {
   };
 }
 
+function getBiomeOverride(biomeId: string): CachedBiomeColor | null {
+  const normalized = biomeId.toLowerCase();
+  const direct = MINIMAP_BIOME_OVERRIDES[normalized];
+  if (direct) return direct;
+
+  for (const [key, color] of Object.entries(MINIMAP_BIOME_OVERRIDES)) {
+    if (normalized.includes(key)) {
+      return color;
+    }
+  }
+
+  return null;
+}
+
+function blendColors(
+  base: CachedBiomeColor,
+  overlay: CachedBiomeColor,
+  weight: number,
+): CachedBiomeColor {
+  const clampedWeight = Math.max(0, Math.min(1, weight));
+  const inverse = 1 - clampedWeight;
+  return {
+    r: clampColorChannel(base.r * inverse + overlay.r * clampedWeight),
+    g: clampColorChannel(base.g * inverse + overlay.g * clampedWeight),
+    b: clampColorChannel(base.b * inverse + overlay.b * clampedWeight),
+  };
+}
+
 function getBiomeBaseColor(
   terrainSystem: TerrainSystemLike,
   worldX: number,
@@ -122,6 +170,13 @@ function getBiomeBaseColor(
     biomeColor = numberToColor(biomeData.color);
   }
 
+  const overrideColor = getBiomeOverride(biomeId);
+  if (overrideColor) {
+    biomeColor = biomeColor
+      ? blendColors(biomeColor, overrideColor, 0.72)
+      : overrideColor;
+  }
+
   if (!biomeColor) {
     biomeColor = DEFAULT_BIOME_COLOR;
   }
@@ -137,10 +192,18 @@ async function generateTerrainChunked(
   extent: number,
   upX: number,
   upZ: number,
+  viewportPixels: number,
   isCancelled: () => boolean,
 ): Promise<OffscreenCanvas | null> {
-  const sampleSize =
+  const viewportDrivenSize = Math.round(
+    Math.max(
+      TERRAIN_BASE_SAMPLE_SIZE,
+      Math.min(TERRAIN_MAX_SAMPLE_SIZE, viewportPixels * 0.72),
+    ),
+  );
+  const extentDrivenFloor =
     extent <= 140 ? TERRAIN_CLOSE_SAMPLE_SIZE : TERRAIN_BASE_SAMPLE_SIZE;
+  const sampleSize = Math.max(extentDrivenFloor, viewportDrivenSize);
   const offscreen = new OffscreenCanvas(sampleSize, sampleSize);
   const context = offscreen.getContext("2d");
   if (!context) return null;
@@ -192,14 +255,14 @@ async function generateTerrainChunked(
         b = clampColorChannel(biomeColor.b + lift + slopeShade - (warmth >> 1));
 
         const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
-        if (luminance > 196) {
+        if (luminance > 176) {
           const contrastDrop = Math.min(
-            54,
-            (luminance - 196) * 0.72 + slope * 28,
+            72,
+            (luminance - 176) * 0.9 + slope * 34,
           );
-          r = clampColorChannel(r - contrastDrop);
-          g = clampColorChannel(g - contrastDrop * 0.82);
-          b = clampColorChannel(b - contrastDrop * 0.4 + 10);
+          r = clampColorChannel(r - contrastDrop * 0.95);
+          g = clampColorChannel(g - contrastDrop * 0.88);
+          b = clampColorChannel(b - contrastDrop * 0.52 + 8);
         }
       } else {
         const waterDepth =
@@ -265,8 +328,22 @@ export function useMinimapTerrainCache(
   }, []);
 
   const ensureTerrainCache = useCallback(
-    ({ centerX, centerZ, currentExtent, upX, upZ }: EnsureTerrainCacheArgs) => {
-      const request = { centerX, centerZ, currentExtent, upX, upZ };
+    ({
+      centerX,
+      centerZ,
+      currentExtent,
+      upX,
+      upZ,
+      viewportPixels,
+    }: EnsureTerrainCacheArgs) => {
+      const request = {
+        centerX,
+        centerZ,
+        currentExtent,
+        upX,
+        upZ,
+        viewportPixels,
+      };
       pendingTerrainRequestRef.current = request;
 
       const cachedCenter = terrainCacheCenterRef.current;
@@ -292,13 +369,12 @@ export function useMinimapTerrainCache(
       }
 
       if (terrainIsGeneratingRef.current) {
-        terrainGenVersionRef.current += 1;
         return;
       }
 
       const version = ++terrainGenVersionRef.current;
       terrainIsGeneratingRef.current = true;
-      const snapshotExtent = currentExtent * TERRAIN_OVERSHOOT;
+      const snapshotExtent = currentExtent * MINIMAP_TERRAIN_OVERSHOOT;
 
       void generateTerrainChunked(
         terrainSystem,
@@ -307,6 +383,7 @@ export function useMinimapTerrainCache(
         snapshotExtent,
         upX,
         upZ,
+        viewportPixels,
         () => terrainGenVersionRef.current !== version,
       ).then((offscreen) => {
         const wasCancelled = terrainGenVersionRef.current !== version;

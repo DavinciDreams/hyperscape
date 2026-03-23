@@ -29,11 +29,13 @@ import {
   type MinimapTown,
   useMinimapWorldCaches,
 } from "./useMinimapWorldCaches";
-import { useMinimapTerrainCache } from "./useMinimapTerrainCache";
-// Over-sample factor relative to the visible extent.
-// sqrt(2) × 1.1 ≈ 1.555 ensures the offscreen canvas always covers the canvas
-// corners at any camera rotation angle without clipping.
-const TERRAIN_OVERSHOOT = Math.SQRT2 * 1.1;
+import {
+  MINIMAP_TERRAIN_OVERSHOOT,
+  useMinimapTerrainCache,
+} from "./useMinimapTerrainCache";
+// Shared with terrain-cache generation so draw-time coverage matches the
+// cached snapshot's real world footprint.
+const TERRAIN_OVERSHOOT = MINIMAP_TERRAIN_OVERSHOOT;
 
 // Terrain draw is just a transformed drawImage() pass, so keep it in sync with
 // live overlay motion instead of throttling it behind the player.
@@ -1189,6 +1191,7 @@ function MinimapInner({
               currentExtent,
               upX,
               upZ,
+              viewportPixels: Math.max(cw, ch),
             });
 
             // Apply a single canvas rotation transform so terrain + all vector overlays
@@ -1205,17 +1208,27 @@ function MinimapInner({
               mainCtx.imageSmoothingQuality = "high";
               const cachedExt = terrainCacheExtentRef.current;
               const extentScale = cachedExt > 0 ? cachedExt / currentExtent : 1;
-              const drawScale = Math.max(1, extentScale);
+              // Draw stale snapshots at their true world scale. When rapidly
+              // zooming out, keep at least viewport coverage so we never expose
+              // a hard black box while the replacement cache is generated.
+              const drawScale = Math.max(1 / TERRAIN_OVERSHOOT, extentScale);
               const drawW = cw * TERRAIN_OVERSHOOT * drawScale;
               const drawH = ch * TERRAIN_OVERSHOOT * drawScale;
-              const rightX = -upZ;
-              const rightZ = upX;
+              const cachedUpX = terrainCacheUpRef.current.x;
+              const cachedUpZ = terrainCacheUpRef.current.z;
+              const cachedRightX = -cachedUpZ;
+              const cachedRightZ = cachedUpX;
               const cachedCenterX = terrainCacheCenterRef.current.x;
               const cachedCenterZ = terrainCacheCenterRef.current.z;
               const centerDeltaX = centerX - cachedCenterX;
               const centerDeltaZ = centerZ - cachedCenterZ;
-              const offsetRight = centerDeltaX * rightX + centerDeltaZ * rightZ;
-              const offsetUp = centerDeltaX * upX + centerDeltaZ * upZ;
+              // Project center deltas into the cached terrain basis, not the
+              // live camera basis. The cached image is authored in that older
+              // orientation and then globally rotated above via deltaYaw.
+              const offsetRight =
+                centerDeltaX * cachedRightX + centerDeltaZ * cachedRightZ;
+              const offsetUp =
+                centerDeltaX * cachedUpX + centerDeltaZ * cachedUpZ;
               const pixelsPerWorldX = cw / (2 * currentExtent);
               const pixelsPerWorldY = ch / (2 * currentExtent);
               const offsetX = -offsetRight * pixelsPerWorldX;
