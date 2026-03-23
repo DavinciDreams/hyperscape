@@ -83,6 +83,8 @@ export function StreamingMode() {
   const [worldReady, setWorldReady] = useState(false);
   const [terrainReady, setTerrainReady] = useState(false);
   const [cameraLocked, setCameraLocked] = useState(false);
+  const [terrainStalled, setTerrainStalled] = useState(false);
+  const [readyEventDelayed, setReadyEventDelayed] = useState(false);
   // Once true, loading screen never returns — camera switches are seamless
   const [loadingDismissed, setLoadingDismissed] = useState(false);
   // Fade-out animation: true while the loading overlay is fading away
@@ -139,6 +141,10 @@ export function StreamingMode() {
       (
         window as unknown as { __HYPERSCAPE_STREAM_READY__?: boolean }
       ).__HYPERSCAPE_STREAM_READY__ = false;
+      setWorldReady(false);
+      setTerrainReady(false);
+      setTerrainStalled(false);
+      setReadyEventDelayed(false);
 
       // Force potato-mode graphics tuned for stable 720p streaming output.
       // Keep DPR at 1 so capture canvas stays at target resolution.
@@ -165,6 +171,7 @@ export function StreamingMode() {
 
       const onWorldReady = () => {
         setWorldReady(true);
+        setReadyEventDelayed(false);
         if (worldReadyTimeoutRef.current) {
           clearTimeout(worldReadyTimeoutRef.current);
           worldReadyTimeoutRef.current = null;
@@ -178,6 +185,7 @@ export function StreamingMode() {
         clearTimeout(worldReadyTimeoutRef.current);
       }
       worldReadyTimeoutRef.current = setTimeout(() => {
+        setReadyEventDelayed(true);
         console.warn(
           "[StreamingMode] READY event timeout reached; waiting for READY event instead of forcing world-ready",
         );
@@ -192,14 +200,16 @@ export function StreamingMode() {
         } | null;
         if (terrain?.isReady?.()) {
           setTerrainReady(true);
+          setTerrainStalled(false);
           clearTerrainPolling();
         }
       }, 100);
 
       terrainTimeoutRef.current = setTimeout(() => {
-        // Failsafe: don't block forever if terrain readiness signal is missing.
-        setTerrainReady(true);
-        clearTerrainPolling();
+        setTerrainStalled(true);
+        console.warn(
+          "[StreamingMode] Terrain readiness timeout reached; continuing to wait for terrain instead of forcing ready",
+        );
       }, 30000);
 
       // Subscribe to streaming state updates (forwarded from server via WebSocket)
@@ -813,6 +823,19 @@ export function StreamingMode() {
       : !terrainReady
         ? "Generating terrain..."
         : "Preparing stream view...";
+  const loadingDetail = !connected
+    ? "Opening duel stream connection"
+    : !worldReady
+      ? readyEventDelayed
+        ? "Still waiting for the READY event from the live world"
+        : "Bootstrapping stream world"
+      : !terrainReady
+        ? terrainStalled
+          ? "Terrain is taking longer than expected; waiting for a real ready signal"
+          : "Waiting for terrain and arena visuals"
+        : needsCameraLock && !cameraLocked
+          ? "Locking the initial camera target"
+          : "Finalizing spectator presentation";
 
   return (
     <div
@@ -842,7 +865,10 @@ export function StreamingMode() {
             pointerEvents: fadingOut ? "none" : "auto",
           }}
         >
-          <LoadingScreen world={worldRef.current} message={loadingHeadline} />
+          <LoadingScreen
+            world={worldRef.current}
+            message={`${loadingHeadline} ${loadingDetail}`}
+          />
         </div>
       )}
       {showLoading && !worldRef.current && (
