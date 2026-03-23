@@ -137,6 +137,7 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
   const lastTimestampRef = useRef<number>(0);
   const lastThoughtIdRef = useRef<string | null>(null);
   const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     const clearPollTimeout = () => {
@@ -178,6 +179,8 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
   }, [isNewThought]);
 
   const fetchThoughts = async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const sinceParam =
         lastTimestampRef.current > 0
@@ -225,9 +228,10 @@ export const AgentThoughtsPanel: React.FC<AgentThoughtsPanelProps> = ({
       }
 
       setError(null);
-    } catch (err) {
-      console.error("[AgentThoughtsPanel] Error fetching thoughts:", err);
+    } catch {
+      setError((prev) => prev ?? "Unable to refresh thoughts");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   };

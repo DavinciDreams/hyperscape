@@ -33,6 +33,7 @@ export const AgentRuns: React.FC<AgentRunsProps> = ({ agent }) => {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchRuns();
@@ -53,8 +54,8 @@ export const AgentRuns: React.FC<AgentRunsProps> = ({ agent }) => {
       );
 
       if (!response.ok) {
-        console.warn("[AgentRuns] Failed to fetch runs");
         setRuns([]);
+        setError("Runs unavailable right now");
         return;
       }
 
@@ -63,9 +64,10 @@ export const AgentRuns: React.FC<AgentRunsProps> = ({ agent }) => {
       setRuns(data.runs || []);
       setTotal(data.total || 0);
       setHasMore(data.hasMore || false);
-    } catch (error) {
-      console.error("[AgentRuns] Error fetching runs:", error);
+      setError(null);
+    } catch {
       setRuns([]);
+      setError("Runs unavailable right now");
     } finally {
       setLoading(false);
     }
@@ -195,6 +197,11 @@ export const AgentRuns: React.FC<AgentRunsProps> = ({ agent }) => {
             Timeout
           </button>
         </div>
+        {error && (
+          <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            {error}
+          </div>
+        )}
       </div>
 
       {/* Runs List */}

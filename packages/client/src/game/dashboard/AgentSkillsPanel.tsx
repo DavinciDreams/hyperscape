@@ -193,6 +193,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
     {},
   );
   const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
   // Fetch character ID once when agent changes
   useEffect(() => {
@@ -266,7 +267,8 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
   };
 
   const fetchSkills = async () => {
-    if (!characterId) return;
+    if (!characterId || inFlightRef.current) return;
+    inFlightRef.current = true;
 
     try {
       const skillsResponse = await fetchWithRetry(
@@ -317,8 +319,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
 
       setSkills(newSkills);
       setError(null);
-    } catch (err) {
-      console.error("[AgentSkillsPanel] Error fetching skills:", err);
+    } catch {
       // Set default skills on error but don't spam error state
       if (!skills) {
         setSkills({
@@ -333,6 +334,8 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({
           agility: { level: 1, xp: 0 },
         });
       }
+    } finally {
+      inFlightRef.current = false;
     }
   };
 

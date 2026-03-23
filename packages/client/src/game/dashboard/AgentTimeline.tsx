@@ -38,6 +38,7 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTimeline();
@@ -52,8 +53,8 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
       );
 
       if (!response.ok) {
-        console.warn("[AgentTimeline] Failed to fetch timeline");
         setEvents([]);
+        setError("Timeline unavailable right now");
         return;
       }
 
@@ -89,9 +90,10 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
       );
 
       setEvents(timelineEvents);
-    } catch (error) {
-      console.error("[AgentTimeline] Error fetching timeline:", error);
+      setError(null);
+    } catch {
       setEvents([]);
+      setError("Timeline unavailable right now");
     } finally {
       setLoading(false);
     }
@@ -177,6 +179,11 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
             Errors
           </button>
         </div>
+        {error && (
+          <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            {error}
+          </div>
+        )}
       </div>
 
       {/* Timeline */}
