@@ -49,7 +49,7 @@ import { SUN_LIGHT } from "./LightingConfig";
 export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
   SNOW_HEIGHT: 90.0,
-  NOISE_SCALE: 0.0003,
+  NOISE_SCALE: 0.0008,
   DIRT_THRESHOLD: 0.5,
   LOD_FULL_DETAIL: 100.0,
   LOD_MEDIUM_DETAIL: 200.0,
@@ -253,21 +253,26 @@ export function computeTerrainBaseColor(
     mul(canyonCliff, dW),
   );
 
-  // Noise-driven dirt patches on flat areas (subtle)
+  // Noise-driven dirt patches on flat areas
   const nDirtFactor = mul(
     smoothstep(
-      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.05),
-      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.25),
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
       noiseVal,
     ),
-    smoothstep(float(0.1), float(0.01), slope),
+    smoothstep(float(0.3), float(0.05), slope),
   );
-  c = mix(c, dirtColor, mul(nDirtFactor, float(0.4)));
+  c = mix(c, dirtColor, nDirtFactor);
 
-  // Slopes: dirt at low elevation, cliff at high elevation
-  const sF = smoothstep(float(0.01), float(0.06), slope);
-  const hB = smoothstep(float(20.0), float(40.0), height);
-  c = mix(c, mix(dirtColor, cliffColor, hB), sF);
+  // Dirt on moderate slopes (bell curve peaking ~0.15–0.6)
+  const dirtSlopeF = mul(
+    smoothstep(float(0.15), float(0.4), slope),
+    smoothstep(float(0.6), float(0.3), slope),
+  );
+  c = mix(c, dirtColor, mul(dirtSlopeF, float(0.6)));
+
+  // Cliff on steep slopes
+  c = mix(c, cliffColor, smoothstep(float(0.3), float(0.55), slope));
 
   // Sand near water (flat areas, stronger in canyon)
   const sandBlend = mul(
@@ -855,24 +860,28 @@ export function createTerrainMaterial(): THREE.Material & {
     mul(canyonCliffC, dW),
   );
 
-  // Noise-driven dirt patches on flat areas (subtle)
+  // Noise-driven dirt patches on flat areas
   const dirtPatchFactor = smoothstep(
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.05),
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.25),
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
     noiseValue,
   );
-  const flatnessFactor = smoothstep(float(0.1), float(0.01), slope);
+  const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
+  baseColor = mix(baseColor, dirtColor, mul(dirtPatchFactor, flatnessFactor));
+
+  // Dirt on moderate slopes (bell curve peaking ~0.15–0.6)
+  const dirtSlopeFactor = mul(
+    smoothstep(float(0.15), float(0.4), slope),
+    smoothstep(float(0.6), float(0.3), slope),
+  );
+  baseColor = mix(baseColor, dirtColor, mul(dirtSlopeFactor, float(0.6)));
+
+  // Cliff on steep slopes
   baseColor = mix(
     baseColor,
-    dirtColor,
-    mul(mul(dirtPatchFactor, flatnessFactor), float(0.4)),
+    cliffColor,
+    smoothstep(float(0.3), float(0.55), slope),
   );
-
-  // Slopes: dirt at low elevation, cliff at high elevation
-  const slopeFactor = smoothstep(float(0.01), float(0.06), slope);
-  const heightBlend = smoothstep(float(20.0), float(40.0), height);
-  const slopeColor = mix(dirtColor, cliffColor, heightBlend);
-  baseColor = mix(baseColor, slopeColor, slopeFactor);
 
   // Sand near water (keep flat color - no sand texture)
   const sandBlend = mul(
