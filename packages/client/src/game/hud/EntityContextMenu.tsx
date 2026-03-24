@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import type { World, LabelSegment } from "@hyperscape/shared";
+import { useThemeStore } from "@/ui";
+import { UI } from "@/ui/core";
+import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
+} from "@/ui/theme/themes";
 
 export interface ContextMenuAction {
   id: string;
@@ -67,6 +73,7 @@ interface EntityContextMenuProps {
 }
 
 export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [menu, setMenu] = useState<ContextMenuState>({
     visible: false,
     position: { x: 0, y: 0 },
@@ -215,8 +222,15 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
 
   return (
     <div
-      className="context-menu fixed bg-[rgba(20,20,20,0.95)] border border-[#555] rounded pointer-events-auto z-[99999]"
-      style={menuStyle}
+      className="context-menu fixed rounded pointer-events-auto"
+      style={{
+        ...menuStyle,
+        ...getContextMenuSurfaceStyle(theme, {
+          minWidth: 180,
+          radius: theme.borderRadius.md,
+        }),
+        zIndex: UI.Z_INDEX.CONTEXT_MENU,
+      }}
       onClick={(e) => {
         e.stopPropagation();
       }}
@@ -227,12 +241,16 @@ export function EntityContextMenu({ world: _world }: EntityContextMenuProps) {
             key={action.id}
             className={`px-3 py-1.5 text-sm text-white transition-colors ${
               action.enabled
-                ? "cursor-pointer hover:bg-[#2a2a2a] hover:text-white"
+                ? "cursor-pointer"
                 : "cursor-not-allowed opacity-50"
             }`}
             style={{
+              ...getContextMenuItemStyle(theme, {
+                radius: 0,
+                padding: "6px 12px",
+              }),
               pointerEvents: "auto",
-              color: "#fff", // Explicit white text
+              color: theme.colors.text.primary,
             }}
             onClick={(e) => {
               e.preventDefault();

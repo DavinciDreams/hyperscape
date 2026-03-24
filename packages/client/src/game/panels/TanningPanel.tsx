@@ -11,6 +11,7 @@
 import React, { useState } from "react";
 import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { formatItemName } from "@/utils";
 
 interface TanningRecipe {
@@ -97,14 +98,21 @@ export function TanningPanel({
     <div
       className="rounded-lg shadow-2xl border"
       style={{
-        background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-        borderColor: theme.colors.border.decorative,
+        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
         minWidth: "320px",
         maxWidth: "400px",
       }}
     >
       {/* Content */}
-      <div className="p-3">
+      <div
+        className="p-3"
+        style={{
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.12) 100%)"
+              : "transparent",
+        }}
+      >
         {availableRecipes.length === 0 ? (
           <div
             className="text-center py-4 text-sm"

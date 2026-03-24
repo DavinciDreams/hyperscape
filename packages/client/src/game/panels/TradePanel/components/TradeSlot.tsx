@@ -7,6 +7,7 @@
 
 import { getItem } from "@hyperscape/shared";
 import { ItemIcon } from "@/ui/components/ItemIcon";
+import { getInteractiveTileStyle } from "@/ui/theme/themes";
 import { formatQuantity } from "../utils";
 import type { TradeSlotProps } from "../types";
 
@@ -28,13 +29,13 @@ export function TradeSlot({
       style={{
         width: "36px",
         height: "36px",
-        background: isRemoved
-          ? "rgba(239, 68, 68, 0.3)"
-          : theme.colors.background.tertiary,
-        border: isRemoved
-          ? "2px solid #ef4444"
-          : `1px solid ${theme.colors.border.default}`,
-        borderRadius: "4px",
+        ...getInteractiveTileStyle(theme, {
+          radius: 4,
+          accentColor: isRemoved
+            ? theme.colors.state.danger
+            : theme.colors.accent.primary,
+          active: Boolean(item),
+        }),
         cursor: item && side === "my" ? "pointer" : "default",
         transition: "background 0.15s, border-color 0.15s",
         animation: isRemoved ? "pulse 0.5s ease-in-out infinite" : "none",

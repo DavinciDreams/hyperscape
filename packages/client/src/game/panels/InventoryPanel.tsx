@@ -25,6 +25,11 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { useContextMenuState } from "../../hooks";
 import {
   EventType,
@@ -47,6 +52,7 @@ import { dispatchInventoryAction } from "../systems/InventoryActionDispatcher";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { CoinAmountModal } from "./BankPanel/components/modals/CoinAmountModal";
 import { CoinPouch } from "./inventory";
+import { zIndex } from "../../constants/tokens";
 
 /**
  * Maximum inventory slots (OSRS-style: 28 slots)
@@ -164,6 +170,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
   onEmbeddedClick,
   onEmbeddedContextMenu,
 }: DraggableItemProps) {
+  const theme = useThemeStore((s) => s.theme);
   // In embedded mode, disable drag-drop
   const isDragDisabled = !!embeddedMode || !item;
 
@@ -220,6 +227,19 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
     return isNotedItem(itemData);
   }, [itemData]);
 
+  const slotChrome = useMemo(
+    () =>
+      getInteractiveTileStyle(theme, {
+        active: isSourceItem,
+        hovered: !isEmpty && !isTargetingActive,
+        dragging: isDragging,
+        dropTarget: isOver,
+        radius: 4,
+        accentColor: theme.colors.accent.secondary,
+      }),
+    [theme, isSourceItem, isEmpty, isTargetingActive, isDragging, isOver],
+  );
+
   return (
     <button
       ref={setNodeRef}
@@ -241,18 +261,10 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
           e.preventDefault();
           e.stopPropagation();
           if (isValidTarget && item && onTargetClick) {
-            console.log("[InventorySlot] 🎯 Target clicked:", {
-              itemId: item.itemId,
-              slot: index,
-            });
             onTargetClick(item, index);
           } else if (item && !isValidTarget && onInvalidTargetClick) {
             // OSRS: Clicking an invalid item shows "Nothing interesting happens."
             // (Empty slots don't trigger this - only actual items)
-            console.log("[InventorySlot] ❌ Invalid target clicked:", {
-              itemId: item.itemId,
-              slot: index,
-            });
             onInvalidTargetClick();
           }
           // Clicking empty slot does nothing (OSRS behavior)
@@ -492,11 +504,12 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
       style={{
         // Use 'size' for 2D container queries (cqw/cqh) in responsive grid
         containerType: "size",
-        opacity: isDragging ? 0.3 : 1,
         // OSRS-style targeting:
         // - Source item: WHITE border (the item being used)
         // - Valid targets: normal appearance, cursor indicates validity
         // - Invalid targets: normal appearance, cursor shows not-allowed
+        ...slotChrome,
+        opacity: isDragging ? 0.3 : slotChrome.opacity,
         borderColor: isSourceItem
           ? "rgba(255, 255, 255, 0.95)" // OSRS: White border on source item
           : isOver
@@ -507,25 +520,22 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
                 ? "rgba(140, 120, 80, 0.5)" // Subtle tan border for notes
                 : "rgba(10, 10, 12, 0.5)", // Dark border for embossed filled slots
         borderWidth: isSourceItem ? "2px" : "1px",
-        borderStyle: "solid",
-        // Embossed style: darker, inset appearance - uses theme colors
         background: isOver
-          ? "rgba(242, 208, 138, 0.15)" // Gold tint when dragging over
+          ? "rgba(183, 140, 76, 0.14)" // Bronze tint when dragging over
           : isEmpty
             ? "var(--color-slot-empty)" // Use theme slot.empty color
             : isItemNoted
               ? "linear-gradient(180deg, rgba(215, 200, 165, 0.95) 0%, rgba(235, 225, 195, 0.95) 100%)" // Parchment - lighter at bottom for emboss
               : "var(--color-slot-filled)", // Use theme slot.filled color
-        // Embossed shadows: dark on top/left, subtle light on bottom/right
         boxShadow: isSourceItem
           ? "0 0 8px rgba(255, 255, 255, 0.6)" // OSRS: White glow on source item
           : isOver
-            ? "inset 0 0 8px rgba(242, 208, 138, 0.3)"
+            ? "inset 0 0 8px rgba(183, 140, 76, 0.24), 0 0 0 1px rgba(183, 140, 76, 0.12)"
             : isEmpty
-              ? "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(40, 40, 45, 0.15)" // Strong emboss for empty
+              ? "inset 2px 2px 4px rgba(0, 0, 0, 0.42), inset -1px -1px 2px rgba(88, 74, 56, 0.12)" // Strong emboss for empty
               : isItemNoted
                 ? "inset 1px 1px 3px rgba(0, 0, 0, 0.25), inset -1px -1px 1px rgba(255, 255, 255, 0.4)" // Subtle paper emboss
-                : "inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 2px rgba(50, 50, 55, 0.12)", // Emboss for filled
+                : "inset 2px 2px 4px rgba(0, 0, 0, 0.34), inset -1px -1px 2px rgba(98, 82, 60, 0.1)", // Emboss for filled
         // OSRS-style cursor changes during targeting mode
         cursor: isTargetingActive
           ? isSourceItem
@@ -538,6 +548,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             : isDragging
               ? "grabbing"
               : "grab",
+        borderRadius: 4,
       }}
     >
       {/* Item Icon - Centered and scaled to fit slot */}
@@ -605,8 +616,8 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
           className="absolute inset-0 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none"
           style={{
             background:
-              "radial-gradient(ellipse at center, rgba(242, 208, 138, 0.15) 0%, transparent 70%)",
-            boxShadow: "inset 0 0 4px rgba(242, 208, 138, 0.2)",
+              "radial-gradient(ellipse at center, rgba(183, 140, 76, 0.14) 0%, transparent 70%)",
+            boxShadow: "inset 0 0 4px rgba(183, 140, 76, 0.16)",
           }}
         />
       )}
@@ -688,7 +699,7 @@ function renderItemHoverTooltip(
         position: "fixed",
         left,
         top,
-        zIndex: 99999,
+        zIndex: zIndex.tooltip,
         background: `linear-gradient(135deg, ${theme.colors.background.primary} 0%, ${theme.colors.background.secondary} 100%)`,
         border: `2px solid ${theme.colors.accent.secondary}80`,
         borderRadius: "4px",
@@ -883,17 +894,7 @@ export function InventoryPanel({
       validTargetIds: string[];
       actionType: "firemaking" | "cooking" | "none";
     }) => {
-      console.log("[InventoryPanel] 🎯 TARGETING_START received:", {
-        sourceItem: data.sourceItem,
-        validTargetTypes: data.validTargetTypes,
-        validTargetIds: data.validTargetIds,
-        actionType: data.actionType,
-      });
       const validIds = new Set(data.validTargetIds);
-      console.log(
-        "[InventoryPanel] 🎯 Valid target IDs:",
-        Array.from(validIds),
-      );
       setTargetingState({
         active: true,
         sourceItem: data.sourceItem,
@@ -903,17 +904,11 @@ export function InventoryPanel({
     };
 
     const onTargetingComplete = () => {
-      console.log(
-        "[InventoryPanel] ✅ TARGETING_COMPLETE - exiting targeting mode",
-      );
       setTargetingState(initialTargetingState);
       setTargetHover(null); // Clear tooltip
     };
 
     const onTargetingCancel = () => {
-      console.log(
-        "[InventoryPanel] ❌ TARGETING_CANCEL - exiting targeting mode",
-      );
       setTargetingState(initialTargetingState);
       setTargetHover(null); // Clear tooltip
     };
@@ -921,7 +916,6 @@ export function InventoryPanel({
     // Escape key to cancel targeting mode
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && targetingState.active) {
-        console.log("[InventoryPanel] ⎋ Escape pressed - cancelling targeting");
         const localPlayer = world.getPlayer();
         if (localPlayer) {
           world.emit(EventType.TARGETING_CANCEL, { playerId: localPlayer.id });
@@ -1106,11 +1100,6 @@ export function InventoryPanel({
       if (targetingState.active && targetingState.sourceItem) {
         const localPlayer = world?.getPlayer();
         if (localPlayer) {
-          console.log("[InventoryPanel] 🎯 Emitting TARGETING_SELECT:", {
-            sourceItem: targetingState.sourceItem,
-            targetItem: clickedItem.itemId,
-            targetSlot: slotIndex,
-          });
           // Clear hover tooltip before action
           setTargetHover(null);
           world?.emit(EventType.TARGETING_SELECT, {
@@ -1282,7 +1271,14 @@ export function InventoryPanel({
   const inventoryContent = (
     <div
       className="flex flex-col h-full overflow-hidden gap-1"
-      style={{ minHeight: 0 }}
+      style={{
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+        minHeight: 0,
+        padding: shouldUseMobileUI ? "4px" : `${theme.spacing.xs}px`,
+        border: "none",
+        borderRadius: 0,
+        boxShadow: "none",
+      }}
     >
       {/* OSRS-style "Use X → Y" tooltip - rendered via portal to avoid transform issues */}
       {targetingState.active &&
@@ -1296,7 +1292,7 @@ export function InventoryPanel({
               // Position tooltip close to cursor (4px offset)
               left: targetHover.position.x + 4,
               top: targetHover.position.y + 4,
-              zIndex: 99999,
+              zIndex: zIndex.tooltip,
               background: "rgba(0, 0, 0, 0.85)",
               border: "1px solid rgba(180, 160, 100, 0.8)",
               borderRadius: "2px",
@@ -1321,10 +1317,10 @@ export function InventoryPanel({
       <div
         className="border rounded overflow-hidden flex-1"
         style={{
-          background: theme.colors.background.panelSecondary,
-          borderColor: "rgba(10, 10, 12, 0.6)",
-          // Embossed container: dark top-left edge, subtle light bottom-right
-          boxShadow: `inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(40, 40, 45, 0.08)`,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: theme.borderRadius.md,
+          }),
           // Container query support for responsive slot sizing
           containerType: "size",
           minHeight: 0,
@@ -1380,8 +1376,13 @@ export function InventoryPanel({
         <div
           className="px-2 py-1 text-center"
           style={{
-            background: theme.colors.background.overlay,
-            borderTop: `1px solid ${theme.colors.border.default}33`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "normal",
+              radius: theme.borderRadius.sm,
+              padding: 0,
+            }),
+            borderTop: `1px solid ${theme.colors.border.default}55`,
+            borderRadius: `${theme.borderRadius.sm}px`,
           }}
         >
           <span
@@ -1407,7 +1408,7 @@ export function InventoryPanel({
                     width: dragSlotSize ?? 40, // Use captured slot size, fallback to 40px
                     height: dragSlotSize ?? 40,
                     borderColor: `${theme.colors.accent.secondary}99`,
-                    background: `linear-gradient(135deg, ${theme.colors.accent.secondary}33 0%, ${theme.colors.accent.secondary}1A 100%)`,
+                    background: `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.accent.secondary}18 22%, rgba(24, 28, 34, 0.98) 100%)`,
                     fontSize: dragSlotSize ? `${dragSlotSize * 0.4}px` : "1rem", // Scale icon with slot
                     color: theme.colors.text.accent,
                     boxShadow: theme.shadows.lg,

@@ -26,7 +26,7 @@ import { createPanelRenderer, MODAL_PANEL_IDS } from "./PanelRegistry";
 import { RadialMinimapMenu } from "../../game/hud/RadialMinimapMenu";
 import { CompactStatusHUD } from "./CompactStatusHUD";
 import { getMobileUISizes } from "./mobileUISizes";
-import { usePlayerData, useModalPanels } from "@/hooks";
+import { useModalPanels, usePlayerDataContext } from "@/hooks";
 import { zIndex } from "../../constants";
 import { BankPanel } from "../../game/panels/BankPanel";
 import { StorePanel } from "../../game/panels/StorePanel";
@@ -92,7 +92,7 @@ export function MobileInterfaceManager({
   const [chatVisible, setChatVisible] = useState(false);
 
   // Player state from shared hook
-  const { inventory, equipment, playerStats, coins } = usePlayerData(world);
+  const { inventory, equipment, playerStats, coins } = usePlayerDataContext();
 
   // Modal panel states from shared hook
   const {
@@ -172,19 +172,37 @@ export function MobileInterfaceManager({
   // Handle viewport size changes - recalculate UI sizes
   const mobileUISizes = useMemo(() => getMobileUISizes(layout), [layout]);
 
+  const panelDataRef = React.useRef({
+    inventory,
+    coins,
+    playerStats,
+    equipment,
+  });
+
+  useEffect(() => {
+    panelDataRef.current = {
+      inventory,
+      coins,
+      playerStats,
+      equipment,
+    };
+  }, [inventory, coins, playerStats, equipment]);
+
   // Create panel renderer
   const renderPanel = useMemo(
     () =>
       createPanelRenderer({
         world,
-        inventoryItems: inventory as never[],
-        coins,
-        stats: playerStats,
-        equipment,
         onPanelClick: handleMenuClick,
         isEditMode: false,
+        getPanelData: () => ({
+          inventoryItems: panelDataRef.current.inventory as never[],
+          coins: panelDataRef.current.coins,
+          stats: panelDataRef.current.playerStats,
+          equipment: panelDataRef.current.equipment,
+        }),
       }),
-    [world, inventory, coins, playerStats, equipment, handleMenuClick],
+    [world, handleMenuClick],
   );
 
   // Event subscriptions are now handled by usePlayerData and useModalPanels hooks
@@ -626,13 +644,7 @@ export function MobileInterfaceManager({
           text={dialogueData.text}
           responses={dialogueData.responses}
           npcEntityId={dialogueData.npcEntityId}
-          onSelectResponse={(index, response) => {
-            // Send response to server - the panel handles this internally,
-            // but we can also track it here if needed
-            console.log(
-              `[MobileUI] Dialogue response selected: ${index} - ${response.text}`,
-            );
-          }}
+          onSelectResponse={() => {}}
           onClose={() => setDialogueData(null)}
         />
       )}

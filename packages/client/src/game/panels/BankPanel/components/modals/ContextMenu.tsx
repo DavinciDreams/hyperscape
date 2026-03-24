@@ -10,6 +10,13 @@ import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
 import { useThemeStore } from "@/ui";
+import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
+} from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 import type { ContextMenuState } from "../../types";
 import type { RightPanelMode } from "../../types";
 
@@ -88,10 +95,10 @@ export function ContextMenu({
   adjustedY = Math.max(padding, adjustedY);
 
   const menuContainerStyle: CSSProperties = {
-    background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-    border: `1px solid ${theme.colors.border.default}`,
-    borderRadius: theme.borderRadius.md,
-    boxShadow: theme.shadows.lg,
+    ...getContextMenuSurfaceStyle(theme, {
+      minWidth: 196,
+      radius: theme.borderRadius.md,
+    }),
     padding: `${theme.spacing.xs}px 0`,
     display: "inline-block",
   };
@@ -103,7 +110,11 @@ export function ContextMenu({
     textAlign: "left",
     fontSize: theme.typography.fontSize.xs,
     color: isHovered ? theme.colors.text.primary : theme.colors.text.secondary,
-    background: isHovered ? theme.colors.background.tertiary : "transparent",
+    ...getContextMenuItemStyle(theme, {
+      hovered: isHovered,
+      radius: 0,
+      padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
+    }),
     border: "none",
     cursor: "pointer",
     transition: "all 0.15s ease",
@@ -120,7 +131,7 @@ export function ContextMenu({
           left: adjustedX,
           top: adjustedY,
           width: "auto",
-          zIndex: 10000,
+          zIndex: UI.Z_INDEX.CONTEXT_MENU,
           pointerEvents: "auto",
         }}
       >
@@ -202,7 +213,7 @@ export function ContextMenu({
         left: adjustedX,
         top: adjustedY,
         width: "auto",
-        zIndex: 10000,
+        zIndex: UI.Z_INDEX.CONTEXT_MENU,
         pointerEvents: "auto",
       }}
     >
@@ -224,9 +235,10 @@ export function ContextMenu({
                 width: "100%",
                 padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                 fontSize: theme.typography.fontSize.sm,
-                borderRadius: theme.borderRadius.sm,
-                background: theme.colors.background.tertiary,
-                border: `1px solid ${theme.colors.border.default}`,
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "strong",
+                  radius: theme.borderRadius.sm,
+                }),
                 color: theme.colors.text.primary,
                 outline: "none",
               }}
@@ -245,10 +257,12 @@ export function ContextMenu({
                   flex: 1,
                   padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                   fontSize: theme.typography.fontSize.xs,
-                  borderRadius: theme.borderRadius.sm,
-                  background: `${theme.colors.state.success}99`,
+                  ...getInteractiveTileStyle(theme, {
+                    active: true,
+                    accentColor: theme.colors.state.success,
+                    radius: theme.borderRadius.sm,
+                  }),
                   color: theme.colors.text.primary,
-                  border: "none",
                   cursor: "pointer",
                 }}
               >
@@ -260,10 +274,12 @@ export function ContextMenu({
                   flex: 1,
                   padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                   fontSize: theme.typography.fontSize.xs,
-                  borderRadius: theme.borderRadius.sm,
-                  background: `${theme.colors.state.danger}99`,
+                  ...getInteractiveTileStyle(theme, {
+                    active: true,
+                    accentColor: theme.colors.state.danger,
+                    radius: theme.borderRadius.sm,
+                  }),
                   color: theme.colors.text.primary,
-                  border: "none",
                   cursor: "pointer",
                 }}
               >

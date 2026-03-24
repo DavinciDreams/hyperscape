@@ -202,6 +202,9 @@ export class PrayerSystem extends SystemBase {
   /** Players currently loading from database */
   private loadingPlayers = new Set<string>();
 
+  /** In-flight initialization promises keyed by player id */
+  private initializationPromises = new Map<string, Promise<void>>();
+
   /** Players whose prayer state has been initialized */
   private initializedPlayers = new Set<string>();
 
@@ -270,7 +273,7 @@ export class PrayerSystem extends SystemBase {
    * Handler for PRAYER_TOGGLE events
    * Validates payload including prayer ID format before processing.
    */
-  private readonly onPrayerToggle = (event: unknown): void => {
+  private readonly onPrayerToggle = async (event: unknown): Promise<void> => {
     if (!isPrayerToggleEventPayload(event)) {
       Logger.systemError(
         "PrayerSystem",
@@ -279,6 +282,7 @@ export class PrayerSystem extends SystemBase {
       );
       return;
     }
+    await this.ensurePlayerPrayerInitialized(event.playerId);
     this.handlePrayerToggle(event.playerId, event.prayerId);
   };
 
@@ -286,7 +290,7 @@ export class PrayerSystem extends SystemBase {
    * Handler for ALTAR_PRAY events
    * Validates payload including altar ID before processing.
    */
-  private readonly onAltarPray = (event: unknown): void => {
+  private readonly onAltarPray = async (event: unknown): Promise<void> => {
     if (!isAltarPrayPayload(event)) {
       Logger.systemError(
         "PrayerSystem",
@@ -295,6 +299,7 @@ export class PrayerSystem extends SystemBase {
       );
       return;
     }
+    await this.ensurePlayerPrayerInitialized(event.playerId);
     this.handleAltarPray(event.playerId, event.altarId);
   };
 
@@ -390,6 +395,7 @@ export class PrayerSystem extends SystemBase {
     if (this.world.isServer) {
       this.startDrainProcessing();
       this.startAutoSave();
+      this.backfillExistingPlayers();
       Logger.system("PrayerSystem", "Started drain processing and auto-save");
     }
   }
@@ -412,80 +418,126 @@ export class PrayerSystem extends SystemBase {
     }
 
     // Prevent race conditions during load
-    if (this.loadingPlayers.has(playerId)) {
+    const existingInit = this.initializationPromises.get(playerId);
+    if (existingInit) {
+      await existingInit;
       return;
     }
 
-    this.loadingPlayers.add(playerId);
+    const initPromise = (async () => {
+      this.loadingPlayers.add(playerId);
 
-    try {
-      const db = this.getDatabase();
-      let points = DEFAULT_PRAYER_POINTS;
-      let maxPoints = DEFAULT_PRAYER_POINTS;
-      let activePrayers: string[] = [];
+      try {
+        const db = this.getDatabase();
+        let points = DEFAULT_PRAYER_POINTS;
+        let maxPoints = DEFAULT_PRAYER_POINTS;
+        let activePrayers: string[] = [];
 
-      if (db) {
-        try {
-          const playerRow = await db.getPlayerAsync(playerId);
-          if (playerRow) {
-            // Load prayer level to calculate max points (with bounds checking)
-            const rawPrayerLevel = (playerRow as { prayerLevel?: number })
-              .prayerLevel;
-            maxPoints = clampPrayerLevel(rawPrayerLevel ?? 1);
+        if (db) {
+          try {
+            const playerRow = await db.getPlayerAsync(playerId);
+            if (playerRow) {
+              // Load prayer level to calculate max points (with bounds checking)
+              const rawPrayerLevel = (playerRow as { prayerLevel?: number })
+                .prayerLevel;
+              maxPoints = clampPrayerLevel(rawPrayerLevel ?? 1);
 
-            // Load current points (with bounds checking, default to max if not set)
-            const rawPoints = (playerRow as { prayerPoints?: number })
-              .prayerPoints;
-            points = clampPrayerPoints(rawPoints ?? maxPoints, maxPoints);
+              // Load current points (with bounds checking, default to max if not set)
+              const rawPoints = (playerRow as { prayerPoints?: number })
+                .prayerPoints;
+              points = clampPrayerPoints(rawPoints ?? maxPoints, maxPoints);
 
-            // Load active prayers from DB (supports legacy JSON string + JSONB array)
-            const rawActivePrayers = (playerRow as { activePrayers?: unknown })
-              .activePrayers;
-            const parsedActivePrayers = parsePersistedActivePrayers(
-              rawActivePrayers,
-              playerId,
-            );
-            activePrayers = parsedActivePrayers.activePrayers;
+              // Load active prayers from DB (supports legacy JSON string + JSONB array)
+              const rawActivePrayers = (
+                playerRow as {
+                  activePrayers?: unknown;
+                }
+              ).activePrayers;
+              const parsedActivePrayers = parsePersistedActivePrayers(
+                rawActivePrayers,
+                playerId,
+              );
+              activePrayers = parsedActivePrayers.activePrayers;
 
-            if (parsedActivePrayers.shouldRepair) {
-              db.savePlayer(playerId, {
-                activePrayers,
-              } as Record<string, unknown>);
+              if (parsedActivePrayers.shouldRepair) {
+                db.savePlayer(playerId, {
+                  activePrayers,
+                } as Record<string, unknown>);
+              }
             }
+          } catch (dbError) {
+            // Log database error but continue with defaults
+            Logger.systemError(
+              "PrayerSystem",
+              `Database error loading prayer state for ${playerId}`,
+              dbError instanceof Error ? dbError : new Error(String(dbError)),
+            );
           }
-        } catch (dbError) {
-          // Log database error but continue with defaults
-          Logger.systemError(
-            "PrayerSystem",
-            `Database error loading prayer state for ${playerId}`,
-            dbError instanceof Error ? dbError : new Error(String(dbError)),
-          );
         }
+
+        const playerIdKey = createPlayerID(playerId);
+        const state: PlayerPrayerState = {
+          points: Math.min(points, maxPoints),
+          maxPoints,
+          active: new Set(activePrayers),
+          lastToggleTime: 0,
+          toggleCount: 0,
+          rateLimitWindowStart: 0,
+          dirty: false,
+        };
+
+        this.playerStates.set(playerIdKey, state);
+        this.initializedPlayers.add(playerId);
+
+        // Emit state sync event
+        this.emitPrayerStateSync(playerId, state);
+
+        Logger.system(
+          "PrayerSystem",
+          `Initialized prayer for ${playerId}: ${state.points}/${state.maxPoints} points, ${state.active.size} active`,
+        );
+      } finally {
+        this.loadingPlayers.delete(playerId);
+        this.initializationPromises.delete(playerId);
       }
+    })();
 
-      const playerIdKey = createPlayerID(playerId);
-      const state: PlayerPrayerState = {
-        points: Math.min(points, maxPoints),
-        maxPoints,
-        active: new Set(activePrayers),
-        lastToggleTime: 0,
-        toggleCount: 0,
-        rateLimitWindowStart: 0,
-        dirty: false,
-      };
+    this.initializationPromises.set(playerId, initPromise);
+    await initPromise;
+  }
 
-      this.playerStates.set(playerIdKey, state);
-      this.initializedPlayers.add(playerId);
-
-      // Emit state sync event
-      this.emitPrayerStateSync(playerId, state);
-
-      Logger.system(
+  private async ensurePlayerPrayerInitialized(
+    playerId: string,
+  ): Promise<PlayerPrayerState | undefined> {
+    const playerIdKey = toPlayerID(playerId);
+    if (!playerIdKey) {
+      Logger.systemError(
         "PrayerSystem",
-        `Initialized prayer for ${playerId}: ${state.points}/${state.maxPoints} points, ${state.active.size} active`,
+        `Cannot initialize prayer for invalid player id: ${playerId}`,
+        new Error("Invalid player id"),
       );
-    } finally {
-      this.loadingPlayers.delete(playerId);
+      return undefined;
+    }
+
+    const existingState = this.playerStates.get(playerIdKey);
+    if (existingState) {
+      return existingState;
+    }
+
+    await this.initializePlayerPrayer(playerId);
+    return this.playerStates.get(playerIdKey);
+  }
+
+  private backfillExistingPlayers(): void {
+    for (const player of this.world.getPlayers()) {
+      if (!player?.id) continue;
+      if (
+        this.initializedPlayers.has(player.id) ||
+        this.loadingPlayers.has(player.id)
+      ) {
+        continue;
+      }
+      void this.initializePlayerPrayer(player.id);
     }
   }
 
@@ -504,6 +556,7 @@ export class PrayerSystem extends SystemBase {
     this.playerStates.delete(playerIdKey);
     this.loadingPlayers.delete(playerId);
     this.initializedPlayers.delete(playerId);
+    this.initializationPromises.delete(playerIdKey);
 
     // Clear any pending persist timer
     const timer = this.persistTimers.get(playerId);
@@ -670,7 +723,9 @@ export class PrayerSystem extends SystemBase {
   ): PrayerToggleResult {
     // Get player's prayer level
     const player = this.getPlayerEntity(playerId);
-    const prayerLevel = getPlayerPrayerLevel(player as PlayerWithPrayerStats);
+    const prayerLevel = player
+      ? getPlayerPrayerLevel(player as PlayerWithPrayerStats)
+      : Math.max(1, Math.floor(state.maxPoints));
 
     // Check level requirement
     if (prayerLevel < prayer.level) {

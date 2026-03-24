@@ -26,6 +26,11 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { zIndex, MOBILE_PRAYER } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, ClientWorld } from "../../types";
@@ -68,6 +73,8 @@ const PANEL_PADDING = 3; // Minimal container padding
 const GRID_PADDING = 3; // Minimal grid padding
 const HEADER_HEIGHT = 44; // Compact prayer points header + bar
 const FOOTER_HEIGHT = 28; // Compact active prayers footer
+const PRAYER_DATA_POLL_INTERVAL_MS = 250;
+const PRAYER_DATA_POLL_TIMEOUT_MS = 5000;
 
 /**
  * Calculate number of columns based on available width
@@ -290,12 +297,13 @@ function PrayerIcon({
       width: iconSize,
       height: iconSize,
       padding: 0,
-      background: isActive
-        ? `radial-gradient(ellipse at center, ${theme.colors.accent.secondary}4D 0%, ${theme.colors.slot.selected} 70%)`
-        : theme.colors.slot.filled,
-      border: isActive
-        ? `1px solid ${theme.colors.accent.secondary}B3`
-        : `1px solid ${theme.colors.border.default}40`,
+      ...getInteractiveTileStyle(theme, {
+        active: isActive,
+        dragging: isDragging,
+        disabled: !isUnlocked,
+        radius: isMobile ? 6 : 4,
+        accentColor: theme.colors.accent.secondary,
+      }),
       borderRadius: isMobile ? 4 : 2,
       cursor: isUnlocked ? (isDragging ? "grabbing" : "grab") : "not-allowed",
       display: "flex",
@@ -303,7 +311,6 @@ function PrayerIcon({
       justifyContent: "center",
       position: "relative",
       overflow: "hidden",
-      transition: "all 0.15s ease",
       boxShadow: isActive
         ? `0 0 ${isMobile ? 12 : 8}px ${theme.colors.accent.secondary}80, inset 0 0 ${isMobile ? 16 : 10}px ${theme.colors.accent.secondary}33`
         : "inset 0 1px 2px rgba(0, 0, 0, 0.4)",
@@ -464,16 +471,39 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       return;
     }
 
-    // Poll until prayers are loaded (manifest loading is async)
-    const interval = setInterval(() => {
+    const startedAt = performance.now();
+    let timeoutId: number | null = null;
+
+    // Poll until prayers are loaded, but stop after a bounded wait so the panel
+    // doesn't keep a 100ms interval alive for the full session if manifests fail.
+    const pollForPrayerData = () => {
       const loaded = prayerDataProvider.getAllPrayers();
       if (loaded.length > 0) {
         setPrayerDataVersion((v) => v + 1);
-        clearInterval(interval);
+        return;
       }
-    }, 100);
 
-    return () => clearInterval(interval);
+      if (performance.now() - startedAt >= PRAYER_DATA_POLL_TIMEOUT_MS) {
+        console.warn("[PrayerPanel] Prayer manifest data did not become ready");
+        return;
+      }
+
+      timeoutId = window.setTimeout(
+        pollForPrayerData,
+        PRAYER_DATA_POLL_INTERVAL_MS,
+      );
+    };
+
+    timeoutId = window.setTimeout(
+      pollForPrayerData,
+      PRAYER_DATA_POLL_INTERVAL_MS,
+    );
+
+    return () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, []);
 
   // Get prayer definitions from manifest-loaded provider (includes proper conflict data)
@@ -657,7 +687,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       ref={containerRef}
       className="flex flex-col h-full"
       style={{
-        background: "transparent",
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
         padding: shouldUseMobileUI ? 4 : 3,
       }}
     >
@@ -669,9 +699,10 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
           justifyContent: "space-between",
           padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
           marginBottom: 4,
-          background: theme.colors.slot.filled,
-          borderRadius: 3,
-          border: `1px solid ${theme.colors.border.default}30`,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "normal",
+            radius: theme.borderRadius.md,
+          }),
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -730,10 +761,12 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         style={{
           height: shouldUseMobileUI ? 10 : 4,
           background: theme.colors.slot.empty,
-          borderRadius: shouldUseMobileUI ? 5 : 2,
+          borderRadius: shouldUseMobileUI
+            ? theme.borderRadius.md
+            : theme.borderRadius.sm,
           marginBottom: 4,
           overflow: "hidden",
-          border: `1px solid ${theme.colors.border.default}30`,
+          border: `1px solid ${theme.colors.border.default}35`,
         }}
       >
         <div
@@ -741,7 +774,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             height: "100%",
             width: `${prayerPct}%`,
             background: `linear-gradient(90deg, ${theme.colors.status.prayer} 0%, ${theme.colors.state.info} 100%)`,
-            borderRadius: 2,
+            borderRadius: theme.borderRadius.sm,
             transition: "width 0.3s ease",
             boxShadow:
               totalDrain > 0
@@ -770,9 +803,10 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               : `repeat(${gridColumns}, ${PRAYER_ICON_SIZE}px)`,
             gap: shouldUseMobileUI ? MOBILE_PRAYER.gap : PRAYER_GAP,
             padding: GRID_PADDING,
-            background: theme.colors.slot.empty,
-            borderRadius: 3,
-            border: `1px solid ${theme.colors.border.default}30`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: theme.borderRadius.md,
+            }),
             justifyContent: "center",
           }}
         >
@@ -800,9 +834,10 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
         style={{
           marginTop: 4,
           padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
-          background: theme.colors.slot.filled,
-          borderRadius: 3,
-          border: `1px solid ${theme.colors.border.default}30`,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "normal",
+            radius: theme.borderRadius.md,
+          }),
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -825,10 +860,10 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             fontSize: shouldUseMobileUI ? 10 : 9,
             background:
               activePrayers.size > 0
-                ? `${theme.colors.state.danger}20`
+                ? `linear-gradient(180deg, ${theme.colors.state.danger}26 0%, rgba(39, 15, 15, 0.28) 100%)`
                 : theme.colors.slot.disabled,
             border: `1px solid ${activePrayers.size > 0 ? theme.colors.state.danger : theme.colors.border.default}40`,
-            borderRadius: 3,
+            borderRadius: theme.borderRadius.sm,
             color:
               activePrayers.size > 0
                 ? theme.colors.state.danger
@@ -863,11 +898,14 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                   left,
                   top,
                   zIndex: zIndex.tooltip,
-                  background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+                  background:
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
+                      : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
                   border: `1px solid ${getCategoryColor(hoveredPrayer.category)}50`,
-                  borderRadius: 4,
+                  borderRadius: theme.borderRadius.md,
                   padding: "10px 12px",
-                  boxShadow: theme.shadows.lg,
+                  boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
                   minWidth: 180,
                 }}
               >
@@ -938,7 +976,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                       marginTop: 8,
                       padding: "4px 8px",
                       background: `${theme.colors.state.danger}26`,
-                      borderRadius: 3,
+                      borderRadius: theme.borderRadius.sm,
                       fontSize: 10,
                       color: theme.colors.state.danger,
                       textAlign: "center",
@@ -953,7 +991,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                       marginTop: 8,
                       padding: "4px 8px",
                       background: `${theme.colors.state.success}26`,
-                      borderRadius: 3,
+                      borderRadius: theme.borderRadius.sm,
                       fontSize: 10,
                       color: theme.colors.state.success,
                       textAlign: "center",
@@ -991,15 +1029,18 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             return (
               <div
                 ref={contextMenuRef}
-                className="fixed z-[9999]"
-                style={{ left, top }}
+                className="fixed"
+                style={{ left, top, zIndex: zIndex.contextMenu }}
               >
                 <div
                   style={{
-                    background: theme.colors.background.secondary,
+                    background:
+                      theme.name === "hyperscape"
+                        ? "linear-gradient(180deg, rgba(44, 36, 24, 0.98) 0%, rgba(18, 15, 11, 0.98) 100%)"
+                        : theme.colors.background.secondary,
                     border: `1px solid ${theme.colors.border.default}`,
-                    borderRadius: 4,
-                    boxShadow: theme.shadows.lg,
+                    borderRadius: theme.borderRadius.md,
+                    boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
                     overflow: "hidden",
                     minWidth: 100,
                   }}

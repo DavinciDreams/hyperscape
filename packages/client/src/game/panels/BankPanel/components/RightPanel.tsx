@@ -7,6 +7,12 @@
 
 import React, { useCallback } from "react";
 import { useThemeStore, useMobileLayout } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import type { PlayerEquipmentItems } from "@hyperscape/shared";
 import { INV_SLOTS_PER_ROW, INV_SLOT_SIZE } from "../constants";
 import { formatItemName } from "../utils";
@@ -76,28 +82,25 @@ export function RightPanel({
           onClick={() => hasItem && onDepositEquipment(key)}
           className="w-full h-full rounded transition-all duration-200 cursor-pointer group relative"
           style={{
-            background: hasItem
-              ? `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`
-              : theme.colors.background.overlay,
-            borderWidth: "2px",
-            borderStyle: "solid",
-            borderColor: hasItem
-              ? theme.colors.border.hover
-              : theme.colors.border.default,
+            ...getInteractiveTileStyle(theme, {
+              active: hasItem,
+              radius: theme.borderRadius.md,
+              accentColor: theme.colors.state.success,
+            }),
             boxShadow: hasItem
-              ? `0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 ${theme.colors.border.default}1a`
-              : "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
+              ? `0 4px 12px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -8px 14px rgba(0, 0, 0, 0.14)`
+              : "inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -8px 12px rgba(0, 0, 0, 0.12)",
           }}
           onMouseEnter={(e) => {
             if (hasItem) {
               e.currentTarget.style.borderColor = theme.colors.state.success;
-              e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.success}33 0%, ${theme.colors.state.success}1a 100%)`;
+              e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.state.success}1f 18%, rgba(24, 28, 34, 0.98) 100%)`;
             }
           }}
           onMouseLeave={(e) => {
             if (hasItem) {
               e.currentTarget.style.borderColor = theme.colors.border.hover;
-              e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`;
+              e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.012) 18%, rgba(22, 26, 31, 0.99) 100%)`;
             }
           }}
           title={
@@ -166,9 +169,8 @@ export function RightPanel({
     <div
       className="flex flex-col rounded-lg"
       style={{
-        background: theme.colors.background.panelPrimary,
-        border: `2px solid ${theme.colors.border.decorative}`,
-        boxShadow: `0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 ${theme.colors.border.default}`,
+        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+        boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255,248,236,0.06), inset 0 -14px 22px rgba(0,0,0,0.1)`,
         width: shouldUseMobileUI
           ? "100%"
           : `${INV_SLOTS_PER_ROW * (responsiveSlotSize + 4) + 24}px`,
@@ -179,7 +181,7 @@ export function RightPanel({
       <div
         className="flex justify-between items-center px-2 py-1.5 rounded-t-lg"
         style={{
-          background: `linear-gradient(180deg, ${theme.colors.border.decorative}66 0%, ${theme.colors.border.decorative}33 100%)`,
+          ...getPanelHeaderStyle(theme),
           borderBottom: `1px solid ${theme.colors.border.decorative}`,
         }}
       >
@@ -191,16 +193,25 @@ export function RightPanel({
             style={{
               background:
                 mode === "inventory"
-                  ? theme.colors.border.decorative
-                  : theme.colors.background.overlay,
+                  ? String(
+                      getInteractiveTileStyle(theme, {
+                        active: true,
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    )
+                  : String(
+                      getPanelInsetStyle(theme, {
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    ),
               color:
                 mode === "inventory"
                   ? theme.colors.accent.primary
-                  : theme.colors.text.muted,
+                  : theme.colors.text.secondary,
               border:
                 mode === "inventory"
-                  ? `1px solid ${theme.colors.border.default}`
-                  : "1px solid transparent",
+                  ? `1px solid ${theme.colors.accent.primary}50`
+                  : `1px solid ${theme.colors.border.default}50`,
             }}
             title="View Backpack"
           >
@@ -212,16 +223,25 @@ export function RightPanel({
             style={{
               background:
                 mode === "equipment"
-                  ? theme.colors.border.decorative
-                  : theme.colors.background.overlay,
+                  ? String(
+                      getInteractiveTileStyle(theme, {
+                        active: true,
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    )
+                  : String(
+                      getPanelInsetStyle(theme, {
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    ),
               color:
                 mode === "equipment"
                   ? theme.colors.accent.primary
-                  : theme.colors.text.muted,
+                  : theme.colors.text.secondary,
               border:
                 mode === "equipment"
-                  ? `1px solid ${theme.colors.border.default}`
-                  : "1px solid transparent",
+                  ? `1px solid ${theme.colors.accent.primary}50`
+                  : `1px solid ${theme.colors.border.default}50`,
             }}
             title="View Worn Equipment"
           >
@@ -261,8 +281,11 @@ export function RightPanel({
           <div
             className="mx-2 mb-2 p-2 rounded flex items-center justify-between"
             style={{
-              background: theme.colors.background.overlay,
-              border: `1px solid ${theme.colors.border.decorative}`,
+              ...getPanelInsetStyle(theme, {
+                emphasis: "normal",
+                radius: theme.borderRadius.md,
+                padding: 0,
+              }),
             }}
           >
             <div className="flex items-center gap-2">
@@ -279,16 +302,19 @@ export function RightPanel({
               disabled={coins <= 0}
               className="px-2 py-1 rounded text-xs font-bold transition-colors disabled:opacity-30"
               style={{
-                background: `${theme.colors.state.success}99`,
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  accentColor: theme.colors.state.success,
+                  radius: theme.borderRadius.sm,
+                }),
                 color: theme.colors.text.primary,
-                border: `1px solid ${theme.colors.border.decorative}`,
               }}
               onMouseEnter={(e) => {
                 if (coins > 0)
-                  e.currentTarget.style.background = `${theme.colors.state.success}cc`;
+                  e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, ${theme.colors.state.success}22 22%, rgba(20, 36, 25, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `${theme.colors.state.success}99`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, ${theme.colors.state.success}18 20%, rgba(20, 31, 24, 0.98) 100%)`;
               }}
             >
               Deposit
@@ -301,15 +327,18 @@ export function RightPanel({
               onClick={onDepositAll}
               className="w-full py-2 rounded text-sm font-bold transition-colors"
               style={{
-                background: `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`,
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  accentColor: theme.colors.accent.primary,
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.accent.primary,
-                border: `1px solid ${theme.colors.border.decorative}`,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative}e6 0%, ${theme.colors.border.decorative}b3 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.accent.primary}18 20%, rgba(25, 29, 35, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, ${theme.colors.accent.primary}14 20%, rgba(22, 26, 31, 0.98) 100%)`;
               }}
             >
               Deposit Inventory
@@ -322,7 +351,11 @@ export function RightPanel({
           <div
             className="p-2 flex-1"
             style={{
-              background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+              ...getPanelInsetStyle(theme, {
+                emphasis: "strong",
+                radius: theme.borderRadius.md,
+                padding: 0,
+              }),
               borderRadius: "4px",
               margin: "4px",
             }}
@@ -362,15 +395,18 @@ export function RightPanel({
               }
               className="w-full py-2 rounded text-sm font-bold transition-colors disabled:opacity-30"
               style={{
-                background: `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`,
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  accentColor: theme.colors.accent.primary,
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.accent.primary,
-                border: `1px solid ${theme.colors.border.decorative}`,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative}e6 0%, ${theme.colors.border.decorative}b3 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.accent.primary}18 20%, rgba(25, 29, 35, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, ${theme.colors.border.decorative} 0%, ${theme.colors.border.decorative}80 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, ${theme.colors.accent.primary}14 20%, rgba(22, 26, 31, 0.98) 100%)`;
               }}
             >
               Deposit Worn Items

@@ -5,6 +5,7 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { MOBILE_EQUIPMENT } from "../../constants";
 import { useContextMenuState } from "../../hooks";
 import {
@@ -607,21 +608,24 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
       <div
         className="flex flex-col h-full overflow-hidden"
         style={{
+          ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
           padding: shouldUseMobileUI ? "6px" : `${theme.spacing.xs}px`,
           gap: shouldUseMobileUI ? "6px" : `${theme.spacing.xs}px`,
+          border: "none",
+          borderRadius: 0,
+          boxShadow: "none",
         }}
       >
         {/* Equipment Grid Container */}
         <div
           className="flex-1 relative overflow-hidden"
           style={{
-            background: theme.colors.background.panelSecondary,
-            border: "1px solid rgba(10, 10, 12, 0.6)",
+            background: `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+            border: `1px solid ${theme.colors.border.default}66`,
             borderRadius: `${theme.borderRadius.md}px`,
             padding: shouldUseMobileUI ? 0 : `${theme.spacing.sm}px`,
             // Embossed container
-            boxShadow:
-              "inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(40, 40, 45, 0.08)",
+            boxShadow: `${theme.shadows.sm}, inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(60, 60, 68, 0.1)`,
           }}
         >
           {renderEquipmentGrid(shouldUseMobileUI)}
@@ -632,10 +636,10 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           <div
             className="flex items-center justify-center gap-2 px-3 py-1.5"
             style={{
-              background: theme.colors.background.panelSecondary,
+              background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
               borderRadius: `${theme.borderRadius.sm}px`,
-              border: "1px solid rgba(10, 10, 12, 0.6)",
-              boxShadow: "inset 1px 1px 3px rgba(0, 0, 0, 0.3)",
+              border: `1px solid ${theme.colors.border.default}66`,
+              boxShadow: `${theme.shadows.sm}, inset 1px 1px 3px rgba(0, 0, 0, 0.3)`,
             }}
           >
             <UtilityButton
@@ -655,10 +659,11 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
             <div
               className="flex justify-center gap-4 py-1"
               style={{
-                background: `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
+                background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
                 borderRadius: `${theme.borderRadius.md}px`,
-                border: `1px solid ${theme.colors.border.default}`,
+                border: `1px solid ${theme.colors.border.default}66`,
                 fontSize: "11px",
+                boxShadow: theme.shadows.sm,
               }}
             >
               <span style={{ color: theme.colors.state.danger }}>
@@ -676,9 +681,10 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
             <div
               className="flex justify-between px-1 py-1.5"
               style={{
-                background: `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
+                background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
                 borderRadius: `${theme.borderRadius.md}px`,
-                border: `1px solid ${theme.colors.border.default}`,
+                border: `1px solid ${theme.colors.border.default}66`,
+                boxShadow: theme.shadows.sm,
               }}
             >
               <UtilityButton

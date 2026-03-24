@@ -22,6 +22,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { getItem } from "@hyperscape/shared";
 import { useThemeStore, useMobileLayout } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 
 // Types
 import type {
@@ -405,9 +406,9 @@ export function BankPanel({
         <div
           className="flex flex-col rounded-lg flex-1"
           style={{
-            background: `linear-gradient(135deg, ${theme.colors.background.panelPrimary} 0%, ${theme.colors.background.panelSecondary} 100%)`,
-            border: `2px solid ${theme.colors.border.decorative}`,
-            boxShadow: `0 10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 4px ${theme.colors.border.default}`,
+            ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+            borderRadius: theme.borderRadius.xl,
+            boxShadow: `${theme.shadows.xl}, inset 0 2px 4px rgba(255, 255, 255, 0.05)`,
             minHeight: shouldUseMobileUI
               ? undefined
               : `${BANK_SCROLL_HEIGHT + 120}px`,
@@ -440,8 +441,13 @@ export function BankPanel({
               maxHeight: shouldUseMobileUI
                 ? `${responsiveScrollHeight}px`
                 : `${BANK_SCROLL_HEIGHT}px`,
-              background: theme.colors.background.overlay,
-              border: `1px solid ${theme.colors.border.decorative}`,
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.12) 100%)"
+                  : theme.colors.background.overlay,
+              border: `1px solid ${theme.colors.border.default}40`,
+              borderRadius: theme.borderRadius.md,
+              boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
             }}
           >
             {/* "All" tab view with grouped headers */}
@@ -475,9 +481,13 @@ export function BankPanel({
                         className="flex items-center gap-2 mb-1 pb-0.5 transition-colors"
                         style={{
                           background: isHeaderDropTarget
-                            ? `${theme.colors.accent.primary}26`
+                            ? `${theme.colors.accent.primary}20`
                             : "transparent",
-                          padding: "1px 2px",
+                          padding: "2px 4px",
+                          borderRadius: theme.borderRadius.sm,
+                          border: isHeaderDropTarget
+                            ? `1px solid ${theme.colors.accent.primary}50`
+                            : "1px solid transparent",
                         }}
                         onDragOver={(e) => {
                           e.preventDefault();
@@ -645,7 +655,8 @@ export function BankPanel({
                                 hoveredSlot === SLOT_INDEX_APPEND_ZONE &&
                                 hoveredTabIndex === tabIdx
                                   ? `0 0 12px ${draggedTabIndex !== tabIdx ? theme.colors.state.success : theme.colors.accent.primary}80`
-                                  : "none",
+                                  : "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+                              borderRadius: theme.borderRadius.sm,
                             }}
                             onDragOver={(e) => {
                               e.preventDefault();

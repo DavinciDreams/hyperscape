@@ -10,6 +10,7 @@
 
 import { useCallback, useState, type CSSProperties } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 
 interface DuelChallengeModalState {
   visible: boolean;
@@ -45,8 +46,7 @@ export function DuelChallengeModal({
   const { name, level } = state.fromPlayer;
 
   const playerInfoStyle: CSSProperties = {
-    background: theme.colors.background.tertiary,
-    border: `1px solid ${theme.colors.border.default}`,
+    ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
     borderRadius: theme.borderRadius.md,
     padding: theme.spacing.md,
     textAlign: "center",
@@ -67,8 +67,8 @@ export function DuelChallengeModal({
   const acceptButtonStyle: CSSProperties = {
     ...baseButtonStyle,
     background: acceptHover
-      ? theme.colors.state.success
-      : `${theme.colors.state.success}cc`,
+      ? `linear-gradient(135deg, ${theme.colors.state.success} 0%, ${theme.colors.state.success}CC 100%)`
+      : `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
     color: "#fff",
     border: `1px solid ${theme.colors.state.success}`,
     transform: acceptHover ? "translateY(-1px)" : "none",
@@ -77,8 +77,8 @@ export function DuelChallengeModal({
   const declineButtonStyle: CSSProperties = {
     ...baseButtonStyle,
     background: declineHover
-      ? theme.colors.state.danger
-      : `${theme.colors.state.danger}cc`,
+      ? `linear-gradient(135deg, ${theme.colors.state.danger} 0%, ${theme.colors.state.danger}CC 100%)`
+      : `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`,
     color: "#fff",
     border: `1px solid ${theme.colors.state.danger}`,
     transform: declineHover ? "translateY(-1px)" : "none",
@@ -99,7 +99,12 @@ export function DuelChallengeModal({
       width={360}
       showCloseButton={false}
     >
-      <div style={{ padding: theme.spacing.sm }}>
+      <div
+        style={{
+          ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+          padding: theme.spacing.sm,
+        }}
+      >
         {/* Duel icon/header */}
         <div
           style={{
@@ -159,6 +164,7 @@ export function DuelChallengeModal({
             padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
             background: `${theme.colors.state.warning}22`,
             borderRadius: theme.borderRadius.sm,
+            border: `1px solid ${theme.colors.state.warning}33`,
           }}
         >
           You will negotiate rules and stakes before the duel begins.

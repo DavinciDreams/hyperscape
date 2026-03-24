@@ -11,6 +11,7 @@
 import React, { useState } from "react";
 import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
+import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { formatItemName } from "@/utils";
 
 interface SmeltingBar {
@@ -113,8 +114,7 @@ export function SmeltingPanel({
       <div
         className="rounded-lg shadow-2xl border"
         style={{
-          background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-          borderColor: theme.colors.border.decorative,
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
           minWidth: "320px",
           maxWidth: "400px",
         }}
@@ -123,7 +123,7 @@ export function SmeltingPanel({
         <div
           className="flex items-center justify-between px-3 py-2 border-b"
           style={{
-            background: `linear-gradient(to bottom, ${theme.colors.border.decorative}30, ${theme.colors.border.decorative}20)`,
+            ...getPanelHeaderStyle(theme),
             borderColor: theme.colors.border.decorative,
           }}
         >

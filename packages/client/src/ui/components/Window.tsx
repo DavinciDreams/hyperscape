@@ -4,12 +4,12 @@ import { useResize } from "../core/window/useResize";
 import { useDrag } from "../core/drag/useDrag";
 import { useEditMode } from "../core/edit/useEditMode";
 import { useSnap } from "../core/window/useSnap";
-import { useWindowManager } from "../core/window/useWindowManager";
 import { useAlignmentGuides } from "../core/edit/useAlignmentGuides";
 import { useTabDrag } from "../core/tabs/useTabDrag";
 import { useTheme } from "../stores/themeStore";
 import { useEditStore } from "../stores/editStore";
 import { useDragStore } from "../stores/dragStore";
+import { useWindowStore } from "../stores/windowStore";
 import {
   restrictToWindowEdgesFully,
   snapToGridModifier,
@@ -17,17 +17,31 @@ import {
   getViewportSize,
   type WindowPositionModifier,
 } from "../core/drag/modifiers";
-import {
-  getThemedGlassmorphismStyle,
-  getThemedWindowShadow,
-  getDecorativeBorderStyle,
-} from "../theme/themes";
+import { getThemedWindowShadow, getWindowSurfaceStyle } from "../theme/themes";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
 import type { WindowProps } from "../types";
 
 /** Resize handle size in pixels - can be overridden via theme */
 const DEFAULT_HANDLE_SIZE = 8;
 const DEFAULT_CORNER_SIZE = 12;
+const EMPTY_WINDOWS: never[] = [];
+
+function getGuideSignature(
+  guides: Array<{
+    type: string;
+    edge: string;
+    position: number;
+    targetWindowId: string;
+  }>,
+): string {
+  if (guides.length === 0) return "";
+  return guides
+    .map(
+      (guide) =>
+        `${guide.type}:${guide.edge}:${guide.position}:${guide.targetWindowId}`,
+    )
+    .join("|");
+}
 
 /**
  * Styled draggable window component
@@ -96,15 +110,49 @@ export const Window = memo(function Window({
   // This bypasses the store lookup issue when stores are in different bundles
   const isUnlocked = passedIsUnlocked ?? hookIsUnlocked;
   const { snapEnabled } = useSnap();
-  const { windows } = useWindowManager();
+  const isGuideTrackingActive = useEditStore(
+    (s) => s.draggingWindowId === windowId,
+  );
+  const guideWindowsMap = useWindowStore(
+    useMemo(
+      () => (state) =>
+        isUnlocked && isGuideTrackingActive ? state.windows : null,
+      [isUnlocked, isGuideTrackingActive],
+    ),
+  );
+  const guideWindows = useMemo(() => {
+    if (!guideWindowsMap) {
+      return EMPTY_WINDOWS;
+    }
+
+    return Array.from(guideWindowsMap.values());
+  }, [guideWindowsMap]);
   const { snapToGuide, calculateGuides } = useAlignmentGuides(
-    windows,
-    windowId,
+    guideWindows,
+    isGuideTrackingActive ? windowId : null,
+  );
+  const topWindowId = useWindowStore(
+    useMemo(
+      () => (state) => {
+        let highestZ = Number.NEGATIVE_INFINITY;
+        let highestId: string | null = null;
+
+        for (const [id, win] of state.windows) {
+          if (win.visible === false) continue;
+          if (win.zIndex >= highestZ) {
+            highestZ = win.zIndex;
+            highestId = id;
+          }
+        }
+
+        return highestId;
+      },
+      [],
+    ),
   );
 
   // Get viewport restriction settings from edit store
   const restrictToViewport = useEditStore((s) => s.restrictToViewport);
-  const viewportEdgeMargin = useEditStore((s) => s.viewportEdgeMargin);
   const gridSize = useEditStore((s) => s.gridSize);
 
   // Get guide state setters from edit store
@@ -147,7 +195,7 @@ export const Window = memo(function Window({
     }
 
     return modifiers.length > 0 ? composeWindowModifiers(modifiers) : null;
-  }, [snapEnabled, gridSize, restrictToViewport, viewportEdgeMargin]);
+  }, [snapEnabled, gridSize, restrictToViewport]);
 
   // Ref to capture position at drag start (avoids closure issues)
   const dragStartPositionRef = useRef({ x: 0, y: 0 });
@@ -155,6 +203,7 @@ export const Window = memo(function Window({
   const committedPositionRef = useRef<{ x: number; y: number } | null>(null);
   // Track if we were dragging in the previous render
   const wasDraggingRef = useRef(false);
+  const guideSignatureRef = useRef("");
 
   const handleDragStart = useCallback(() => {
     // Capture the current position when drag starts
@@ -373,7 +422,13 @@ export const Window = memo(function Window({
   React.useEffect(() => {
     if (isDragging) {
       const guides = calculateGuides(displayPosition, windowState.size);
-      setActiveGuides(guides);
+      const nextSignature = getGuideSignature(guides);
+      if (nextSignature !== guideSignatureRef.current) {
+        guideSignatureRef.current = nextSignature;
+        setActiveGuides(guides);
+      }
+    } else if (guideSignatureRef.current) {
+      guideSignatureRef.current = "";
     }
   }, [
     isDragging,
@@ -410,15 +465,25 @@ export const Window = memo(function Window({
   }
 
   // Get themed styles
-  const decorativeBorder = getDecorativeBorderStyle(theme);
-  const glassStyle = getThemedGlassmorphismStyle(
-    theme,
-    windowState.transparency,
-  );
+  const activeTab = windowState.tabs[windowState.activeTabIndex];
+  const hasMultipleTabs = windowState.tabs.length > 1;
+  const activeTabElementId =
+    hasMultipleTabs && activeTab
+      ? `window-tab-${windowId}-${activeTab.id}`
+      : undefined;
+  const activePanelId =
+    hasMultipleTabs && activeTab
+      ? `window-panel-${windowId}-${activeTab.id}`
+      : undefined;
+  const isFocusedWindow = topWindowId === windowId;
   const windowShadow = getThemedWindowShadow(
     theme,
-    isDragging ? "dragging" : "normal",
+    isDragging ? "dragging" : isFocusedWindow ? "focused" : "normal",
   );
+  const windowSurfaceStyle = getWindowSurfaceStyle(theme, {
+    transparency: windowState.transparency,
+    state: isDragging ? "dragging" : isFocusedWindow ? "focused" : "normal",
+  });
 
   // Smooth transitions for size changes, disabled during active drag/resize
   const shouldAnimateSize = !isDragging && !isThisWindowResizing;
@@ -451,15 +516,16 @@ export const Window = memo(function Window({
     zIndex: windowState.zIndex,
     display: "flex",
     flexDirection: "column",
-    borderRadius: 2, // Square corners with slight rounding
-    ...decorativeBorder,
-    boxShadow: windowShadow,
+    borderRadius: theme.borderRadius.md,
     overflow: "hidden",
-    opacity: isDragging ? 0.95 : 1,
+    opacity: isDragging ? 0.97 : isFocusedWindow ? 1 : 0.965,
+    transform: isDragging ? "scale(1.01)" : "translateZ(0)",
     transition: isDragging
       ? "none"
-      : `box-shadow ${theme.transitions.fast}, ${sizeTransition}`,
-    ...glassStyle,
+      : `box-shadow ${theme.transitions.fast}, transform ${theme.transitions.fast}, opacity ${theme.transitions.fast}, filter ${theme.transitions.fast}, ${sizeTransition}`,
+    willChange: isDragging ? "transform, left, top" : "auto",
+    filter: isFocusedWindow ? "none" : "saturate(0.92) brightness(0.97)",
+    ...windowSurfaceStyle,
     ...tabCombineStyle, // Apply tab combine visual feedback
     ...style,
   };
@@ -476,6 +542,7 @@ export const Window = memo(function Window({
     minHeight: 0, // Allow flex shrinking
     overflow: "hidden", // Clip overflow, panels handle their own scroll
     position: "relative", // Allow absolute positioning of children
+    zIndex: 1,
   };
 
   // Check if window is resizable (minSize !== maxSize)
@@ -572,16 +639,22 @@ export const Window = memo(function Window({
           dragHandleProps?: typeof dragHandleProps;
           onCloseWindow?: () => void;
           isUnlocked?: boolean;
+          panelId?: string;
         }>,
         {
           dragHandleProps,
           onCloseWindow: close,
           isUnlocked,
+          panelId: activePanelId,
         },
       );
     }
     return child;
   });
+  const childrenArray = React.Children.toArray(childrenWithProps);
+  const hasTabList = hasMultipleTabs && childrenArray.length > 1;
+  const shellHeader = hasTabList ? childrenArray[0] : null;
+  const shellBody = hasTabList ? childrenArray.slice(1) : childrenArray;
 
   // Error handler wrapper for the error boundary
 
@@ -592,9 +665,24 @@ export const Window = memo(function Window({
       onMouseDown={isUnlocked ? bringToFront : undefined}
       data-window-id={windowId}
       data-panel={windowId}
-      role="dialog"
-      aria-label={`Window: ${windowId}`}
+      role="group"
+      aria-label={activeTab?.label || windowId}
+      aria-labelledby={activeTabElementId}
     >
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background:
+            theme.name === "hyperscape"
+              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 14%, transparent 78%, rgba(0, 0, 0, 0.075) 100%), radial-gradient(circle at top right, rgba(190, 165, 123, 0.04), transparent 32%)"
+              : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 16%, transparent 84%, rgba(0, 0, 0, 0.06) 100%)",
+          opacity: isFocusedWindow ? 1 : 0.7,
+          zIndex: 0,
+        }}
+      />
       {/* No title bar - TabBar serves as the header with drag functionality */}
       <div style={contentStyle}>
         <WindowErrorBoundary
@@ -603,7 +691,19 @@ export const Window = memo(function Window({
           showErrorUI={showErrorUI}
           onError={(error) => handleWindowError(error)}
         >
-          {childrenWithProps}
+          {shellHeader}
+          {hasTabList ? (
+            <div
+              id={activePanelId}
+              style={contentStyle}
+              role="tabpanel"
+              aria-labelledby={activeTabElementId}
+            >
+              {shellBody}
+            </div>
+          ) : (
+            shellBody
+          )}
         </WindowErrorBoundary>
       </div>
       {renderResizeHandles()}

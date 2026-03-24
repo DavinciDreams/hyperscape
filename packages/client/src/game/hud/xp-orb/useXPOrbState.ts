@@ -151,6 +151,9 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
   const pendingDropRef = useRef<GroupedXPDrop | null>(null);
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousLevelsRef = useRef<Record<string, number>>({});
+  const activeSkillsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Initialize previousLevelsRef from player's current skills on mount
   // This ensures level-up detection works even for first XP gain in a skill
@@ -209,59 +212,100 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
     });
   }, [activeSkills, calculateProgress, getXPToNextLevel]);
 
-  // Game tick timer - each orb fades independently based on its own lastGainTime
-  // Optimized to minimize array allocations in hot path
   useEffect(() => {
-    const tickInterval = setInterval(() => {
+    const clearActiveSkillsTimeout = () => {
+      if (activeSkillsTimeoutRef.current) {
+        clearTimeout(activeSkillsTimeoutRef.current);
+        activeSkillsTimeoutRef.current = null;
+      }
+    };
+
+    const scheduleNextUpdate = (skills: ActiveSkill[]) => {
+      clearActiveSkillsTimeout();
+      if (skills.length === 0) return;
+
       const now = Date.now();
-      const fadeThreshold = ORB_VISIBLE_DURATION_MS;
-      const removeThreshold = ORB_VISIBLE_DURATION_MS + ORB_FADE_DURATION_MS;
+      let nextDelay = Number.POSITIVE_INFINITY;
 
-      setActiveSkills((prev) => {
-        if (prev.length === 0) return prev;
-
-        let hasChanges = false;
-        let hasRemovals = false;
-
-        for (let i = 0; i < prev.length; i++) {
-          const elapsed = now - prev[i].lastGainTime;
-          if (!prev[i].isFading && elapsed >= fadeThreshold) hasChanges = true;
-          if (elapsed >= removeThreshold) hasRemovals = true;
+      for (let i = 0; i < skills.length; i++) {
+        const skill = skills[i];
+        const fadeIn = ORB_VISIBLE_DURATION_MS - (now - skill.lastGainTime);
+        const removeIn =
+          ORB_VISIBLE_DURATION_MS +
+          ORB_FADE_DURATION_MS -
+          (now - skill.lastGainTime);
+        if (!skill.isFading && fadeIn > 0) {
+          nextDelay = Math.min(nextDelay, fadeIn);
         }
+        if (removeIn > 0) {
+          nextDelay = Math.min(nextDelay, removeIn);
+        }
+      }
 
-        if (!hasChanges && !hasRemovals) return prev;
+      if (!Number.isFinite(nextDelay)) return;
+      activeSkillsTimeoutRef.current = setTimeout(
+        () => {
+          let needsReschedule = false;
+          let nextSkillsSnapshot: ActiveSkill[] | null = null;
+          setActiveSkills((prev) => {
+            if (prev.length === 0) return prev;
 
-        // Build result array only when needed, avoiding chained filter().map()
-        const result: ActiveSkill[] = [];
-        for (let i = 0; i < prev.length; i++) {
-          const skill = prev[i];
-          const elapsed = now - skill.lastGainTime;
+            const currentNow = Date.now();
+            const fadeThreshold = ORB_VISIBLE_DURATION_MS;
+            const removeThreshold =
+              ORB_VISIBLE_DURATION_MS + ORB_FADE_DURATION_MS;
 
-          // Skip removed items
-          if (hasRemovals && elapsed >= removeThreshold) continue;
+            let hasChanges = false;
+            let hasRemovals = false;
 
-          // Check if we need to mark as fading
-          if (!skill.isFading && elapsed >= fadeThreshold) {
-            // Only create new object when isFading changes
-            result.push({
-              skill: skill.skill,
-              level: skill.level,
-              xp: skill.xp,
-              lastGainTime: skill.lastGainTime,
-              isFading: true,
-            });
-          } else {
-            // Reuse existing object reference
-            result.push(skill);
+            for (let i = 0; i < prev.length; i++) {
+              const elapsed = currentNow - prev[i].lastGainTime;
+              if (!prev[i].isFading && elapsed >= fadeThreshold)
+                hasChanges = true;
+              if (elapsed >= removeThreshold) hasRemovals = true;
+            }
+
+            if (!hasChanges && !hasRemovals) {
+              needsReschedule = true;
+              nextSkillsSnapshot = prev;
+              return prev;
+            }
+
+            const result: ActiveSkill[] = [];
+            for (let i = 0; i < prev.length; i++) {
+              const skill = prev[i];
+              const elapsed = currentNow - skill.lastGainTime;
+
+              if (hasRemovals && elapsed >= removeThreshold) continue;
+
+              if (!skill.isFading && elapsed >= fadeThreshold) {
+                result.push({
+                  skill: skill.skill,
+                  level: skill.level,
+                  xp: skill.xp,
+                  lastGainTime: skill.lastGainTime,
+                  isFading: true,
+                });
+              } else {
+                result.push(skill);
+              }
+            }
+
+            return result;
+          });
+
+          if (needsReschedule && nextSkillsSnapshot) {
+            scheduleNextUpdate(nextSkillsSnapshot);
           }
-        }
+        },
+        Math.max(16, nextDelay),
+      );
+    };
 
-        return result;
-      });
-    }, GAME_TICK_MS);
+    scheduleNextUpdate(activeSkills);
 
-    return () => clearInterval(tickInterval);
-  }, []);
+    return clearActiveSkillsTimeout;
+  }, [activeSkills]);
 
   // Function to finalize and display a grouped drop
   const finalizeGroupedDrop = useCallback((drop: GroupedXPDrop) => {

@@ -102,6 +102,37 @@ export class PrivyAuthManager {
     }
   }
 
+  private getValueFromKnownStorages(key: string): string | null {
+    const storages: Storage[] = [];
+    const configuredStorage = this.getStorage();
+    if (configuredStorage) {
+      storages.push(configuredStorage);
+    }
+    if (
+      typeof sessionStorage !== "undefined" &&
+      !storages.includes(sessionStorage)
+    ) {
+      storages.push(sessionStorage);
+    }
+    if (
+      typeof localStorage !== "undefined" &&
+      !storages.includes(localStorage)
+    ) {
+      storages.push(localStorage);
+    }
+
+    for (const storage of storages) {
+      try {
+        const value = storage.getItem(key);
+        if (value) return value;
+      } catch {
+        // Ignore unavailable storage
+      }
+    }
+
+    return null;
+  }
+
   /**
    * Sets the storage type for auth tokens
    * Must be called before authentication to take effect
@@ -356,30 +387,25 @@ export class PrivyAuthManager {
   }
 
   /**
-   * Restores authentication from localStorage
+   * Hydrates cached auth metadata from storage without asserting a real session.
    *
-   * Attempts to restore auth state from localStorage on page load.
-   * This allows the user to stay logged in across page refreshes.
+   * Cached tokens/user IDs are helpful for transitional UI and legacy sync paths,
+   * but the actual authenticated session must come from the Privy SDK itself.
+   * Marking the app authenticated from storage alone can leave startup stuck in an
+   * invalid "loading" state until the SDK later corrects it.
    *
    * @returns Object with restored token and userId (or null if not found)
    *
    * @public
    */
   restoreFromStorage(): { token: string | null; userId: string | null } {
-    const storage = this.getStorage();
-    if (!storage) {
-      // Memory-only storage doesn't persist across page loads
-      return { token: null, userId: null };
-    }
-
     try {
-      const token = storage.getItem("privy_auth_token");
-      const userId = storage.getItem("privy_user_id");
-      const fid = storage.getItem("farcaster_fid");
+      const token = this.getValueFromKnownStorages("privy_auth_token");
+      const userId = this.getValueFromKnownStorages("privy_user_id");
+      const fid = this.getValueFromKnownStorages("farcaster_fid");
 
-      if (token && userId) {
+      if (token || userId) {
         this.updateState({
-          isAuthenticated: true,
           privyUserId: userId,
           privyToken: token,
           farcasterFid: fid,

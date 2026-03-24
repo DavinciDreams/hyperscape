@@ -1042,6 +1042,16 @@ export class ClientNetwork extends SystemBase {
 
     // Use assetsUrl from server (always absolute URL to CDN)
     this.world.assetsUrl = data.assetsUrl || "/";
+    if (typeof window !== "undefined") {
+      const windowWithAssets = window as Window & {
+        __CDN_URL?: string;
+        __ASSETS_URL?: string;
+      };
+      if (data.assetsUrl) {
+        windowWithAssets.__ASSETS_URL = data.assetsUrl;
+        windowWithAssets.__CDN_URL = data.assetsUrl;
+      }
+    }
 
     const loader = this.world.loader!;
     // Assume preload and execPreload methods exist on loader
@@ -2270,10 +2280,16 @@ export class ClientNetwork extends SystemBase {
     maxSlots: number;
   }) => {
     // Debug log removed — fires per food eat / item change during combat
+    const snapshot = {
+      ...data,
+      items: Array.isArray(data.items)
+        ? data.items.map((item) => ({ ...item }))
+        : [],
+    };
     // Cache latest snapshot for late-mounting UI
-    this.lastInventoryByPlayerId[data.playerId] = data;
+    this.lastInventoryByPlayerId[data.playerId] = snapshot;
     // Re-emit with typed event so UI updates without waiting for local add
-    this.world.emit(EventType.INVENTORY_UPDATED, data);
+    this.world.emit(EventType.INVENTORY_UPDATED, snapshot);
   };
 
   onCoinsUpdated = (data: { playerId: string; coins: number }) => {
@@ -2350,7 +2366,7 @@ export class ClientNetwork extends SystemBase {
       }
     }
 
-    // Re-emit as UI update event for Sidebar to handle
+    // Re-emit as UI update event for the active client UI hooks to handle
     this.world.emit(EventType.UI_UPDATE, {
       component: "equipment",
       data: {
@@ -2827,7 +2843,7 @@ export class ClientNetwork extends SystemBase {
       xp: Record<string, number>;
     };
   }) => {
-    // Emit QUEST_START_CONFIRM event for Sidebar to show QuestStartScreen
+    // Emit QUEST_START_CONFIRM event for the active client UI to show QuestStartScreen
     // Add playerId since server doesn't send it (packet is already routed to this player)
     const playerId = this.world?.entities?.player?.id || "";
     this.world.emit(EventType.QUEST_START_CONFIRM, { ...data, playerId });
@@ -2853,7 +2869,7 @@ export class ClientNetwork extends SystemBase {
       xp: Record<string, number>;
     };
   }) => {
-    // Emit QUEST_COMPLETED event for Sidebar to show completion screen
+    // Emit QUEST_COMPLETED event for the active client UI to show completion screen
     const playerId = this.world?.entities?.player?.id || "";
     this.world.emit(EventType.QUEST_COMPLETED, { ...data, playerId });
   };

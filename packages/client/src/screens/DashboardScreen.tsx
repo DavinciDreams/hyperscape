@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import { apiClient } from "@/lib/api-client";
 import { DashboardLayout } from "../game/dashboard/DashboardLayout";
 import { AgentChat } from "../game/dashboard/AgentChat";
@@ -49,11 +49,12 @@ export const DashboardScreen: React.FC = () => {
     | string
   >("chat");
   const [loading, setLoading] = useState(true);
-  const [userAccountId, setUserAccountId] = useState<string | null>(() =>
+  const [userAccountId, _setUserAccountId] = useState<string | null>(() =>
     localStorage.getItem("privy_user_id"),
   );
   const [agentPanels, setAgentPanels] = useState<AgentPanel[]>([]);
   const [_loadingPanels, setLoadingPanels] = useState(false);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   // Viewport confirmation state
   const [showViewportModal, setShowViewportModal] = useState(false);
@@ -64,6 +65,8 @@ export const DashboardScreen: React.FC = () => {
 
   // Ref to track if component is mounted (prevents state updates after unmount)
   const isMountedRef = useRef(true);
+  const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pollInFlightRef = useRef(false);
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -73,106 +76,109 @@ export const DashboardScreen: React.FC = () => {
 
   // Log account ID on mount (already read from localStorage in useState initializer)
   useEffect(() => {
-    if (userAccountId) {
-      console.log("[Dashboard] User account ID:", userAccountId);
-    } else {
+    if (!userAccountId) {
       console.warn(
         "[Dashboard] No user account ID found - dashboard may show all agents",
       );
     }
   }, []);
 
-  const fetchAgents = async () => {
-    try {
-      // First, fetch user's agent IDs from Hyperscape database
-      let userAgentIds: string[] = [];
+  const fetchAgents = useCallback(
+    async (isPoll = false) => {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
 
-      let mappingFetchFailed = false;
-      if (userAccountId) {
-        try {
-          const mappingResult = await apiClient.get<{ agentIds?: string[] }>(
-            `/api/agents/mappings/${userAccountId}`,
-          );
+      if (!isPoll) {
+        setDashboardError(null);
+      }
 
-          if (mappingResult.ok && mappingResult.data) {
-            userAgentIds = mappingResult.data.agentIds || [];
-            console.log(
-              `[Dashboard] Found ${userAgentIds.length} agent mapping(s) for user ${userAccountId}`,
-              userAgentIds,
+      try {
+        // First, fetch user's agent IDs from Hyperscape database
+        let userAgentIds: string[] = [];
+
+        let mappingFetchFailed = false;
+        if (userAccountId) {
+          try {
+            const mappingResult = await apiClient.get<{ agentIds?: string[] }>(
+              `/api/agents/mappings/${userAccountId}`,
             );
-          } else {
-            console.warn(
-              "[Dashboard] Failed to fetch agent mappings from Hyperscape:",
-              mappingResult.error,
-            );
+
+            if (mappingResult.ok && mappingResult.data) {
+              userAgentIds = mappingResult.data.agentIds || [];
+            } else {
+              console.warn(
+                "[Dashboard] Failed to fetch agent mappings from Hyperscape:",
+                mappingResult.error,
+              );
+              mappingFetchFailed = true;
+            }
+          } catch (err) {
+            console.error("[Dashboard] Error fetching agent mappings:", err);
             mappingFetchFailed = true;
           }
-        } catch (err) {
-          console.error("[Dashboard] Error fetching agent mappings:", err);
-          mappingFetchFailed = true;
         }
-      }
 
-      // Then fetch all agents from ElizaOS
-      const response = await fetch(`${ELIZAOS_API}/agents`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        // Then fetch all agents from ElizaOS
+        const response = await fetch(`${ELIZAOS_API}/agents`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      const data = await response.json();
-      if (data.success && data.data && data.data.agents) {
-        let filteredAgents = data.data.agents;
+        const data = await response.json();
+        if (data.success && data.data && data.data.agents) {
+          let filteredAgents = data.data.agents;
 
-        // Filter agents using Hyperscape database mappings
-        if (userAccountId && userAgentIds.length > 0) {
-          filteredAgents = data.data.agents.filter((agent: Agent) => {
-            const match = userAgentIds.includes(agent.id);
+          // Filter agents using Hyperscape database mappings
+          if (userAccountId && userAgentIds.length > 0) {
+            filteredAgents = data.data.agents.filter((agent: Agent) => {
+              return userAgentIds.includes(agent.id);
+            });
+          } else if (userAccountId && !mappingFetchFailed) {
+            filteredAgents = [];
+          } else if (mappingFetchFailed) {
+            console.warn(
+              "[Dashboard] Mapping fetch failed - showing all agents as fallback",
+            );
+          } else {
+            console.warn("[Dashboard] No userAccountId - showing all agents");
+          }
 
-            if (match) {
-              console.log(
-                `[Dashboard] ✅ Agent ${agent.name} (${agent.id}) belongs to user ${userAccountId}`,
-              );
+          // Only update state if component is still mounted
+          if (isMountedRef.current) {
+            setAgents(filteredAgents);
+            if (!isPoll) {
+              setDashboardError(null);
             }
-
-            return match;
-          });
-
-          console.log(
-            `[Dashboard] Filtered ${filteredAgents.length} agents out of ${data.data.agents.length} for user ${userAccountId}`,
-          );
-        } else if (userAccountId && !mappingFetchFailed) {
-          console.log(
-            "[Dashboard] No agent mappings found - showing empty list",
-          );
-          filteredAgents = [];
-        } else if (mappingFetchFailed) {
-          console.warn(
-            "[Dashboard] Mapping fetch failed - showing all agents as fallback",
-          );
-        } else {
-          console.warn("[Dashboard] No userAccountId - showing all agents");
-        }
-
-        // Only update state if component is still mounted
-        if (isMountedRef.current) {
-          setAgents(filteredAgents);
-          // Select first agent if none selected
-          if (!selectedAgentId && filteredAgents.length > 0) {
-            setSelectedAgentId(filteredAgents[0].id);
+            // Select first agent if none selected
+            if (!selectedAgentId && filteredAgents.length > 0) {
+              setSelectedAgentId(filteredAgents[0].id);
+            }
           }
         }
+      } catch (err) {
+        console.error("Failed to load agents:", err);
+        if (isMountedRef.current) {
+          setDashboardError("Failed to refresh agents. Will retry shortly.");
+        }
+      } finally {
+        pollInFlightRef.current = false;
+        if (!isPoll && isMountedRef.current) {
+          setLoading(false);
+        }
+        if (isMountedRef.current) {
+          if (pollTimeoutRef.current) {
+            clearTimeout(pollTimeoutRef.current);
+          }
+          pollTimeoutRef.current = setTimeout(() => {
+            void fetchAgents(true);
+          }, 30000);
+        }
       }
-    } catch (err) {
-      console.error("Failed to load agents:", err);
-    } finally {
-      if (isMountedRef.current) {
-        setLoading(false);
-      }
-    }
-  };
+    },
+    [selectedAgentId, userAccountId],
+  );
 
   const startAgent = async (agentId: string) => {
     try {
-      console.log(`[Dashboard] Starting agent ${agentId}...`);
-
+      setDashboardError(null);
       // Check if user wants to auto-start viewport
       const autoStartViewport =
         localStorage.getItem(VIEWPORT_AUTO_START_KEY) === "true";
@@ -183,8 +189,7 @@ export const DashboardScreen: React.FC = () => {
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      const result = await response.json();
-      console.log(`[Dashboard] Agent started:`, result);
+      await response.json();
 
       // Refresh agent list to update status
       await fetchAgents();
@@ -195,9 +200,6 @@ export const DashboardScreen: React.FC = () => {
         setShowViewportModal(true);
       } else {
         // Auto-start viewport
-        console.log(
-          `[Dashboard] Auto-starting viewport for ${agentId} (preference enabled)`,
-        );
         setViewportAgentId(agentId);
         // Switch to chat view to show the viewport
         if (selectedAgentId === agentId) {
@@ -206,19 +208,18 @@ export const DashboardScreen: React.FC = () => {
       }
     } catch (error) {
       console.error(`[Dashboard] Failed to start agent:`, error);
+      setDashboardError(
+        `Failed to start agent "${agentId}". ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   };
 
   const handleViewportConfirm = (dontAskAgain: boolean) => {
     if (dontAskAgain) {
-      console.log(
-        "[Dashboard] Saving viewport auto-start preference to localStorage",
-      );
       localStorage.setItem(VIEWPORT_AUTO_START_KEY, "true");
     }
 
     if (pendingStartAgentId) {
-      console.log(`[Dashboard] Starting viewport for ${pendingStartAgentId}`);
       setViewportAgentId(pendingStartAgentId);
       // Switch to chat view to show the viewport
       if (selectedAgentId === pendingStartAgentId) {
@@ -231,29 +232,22 @@ export const DashboardScreen: React.FC = () => {
   };
 
   const handleViewportCancel = () => {
-    console.log(
-      "[Dashboard] User declined viewport start - agent running without viewport",
-    );
     setShowViewportModal(false);
     setPendingStartAgentId(null);
   };
 
   const stopAgent = async (agentId: string) => {
     try {
-      console.log(`[Dashboard] Stopping agent ${agentId}...`);
+      setDashboardError(null);
       const response = await fetch(`${ELIZAOS_API}/agents/${agentId}/stop`, {
         method: "POST",
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      const result = await response.json();
-      console.log(`[Dashboard] Agent stopped:`, result);
+      await response.json();
 
       // Clear viewport if this agent's viewport is showing
       if (viewportAgentId === agentId) {
-        console.log(
-          `[Dashboard] Clearing viewport for stopped agent ${agentId}`,
-        );
         setViewportAgentId(null);
       }
 
@@ -261,14 +255,13 @@ export const DashboardScreen: React.FC = () => {
       await fetchAgents();
     } catch (error) {
       console.error(`[Dashboard] Failed to stop agent:`, error);
+      setDashboardError(
+        `Failed to stop agent "${agentId}". ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   };
 
   const deleteAgent = async (agentId: string) => {
-    console.log(
-      `[Dashboard] 🗑️  Starting atomic deletion for agent ${agentId}...`,
-    );
-
     // Store mapping data for potential rollback
     let deletedMapping: {
       agentId: string;
@@ -278,10 +271,8 @@ export const DashboardScreen: React.FC = () => {
     } | null = null;
 
     try {
+      setDashboardError(null);
       // STEP 1: Fetch mapping data before deletion (for rollback)
-      console.log(
-        `[Dashboard] 📋 Fetching mapping data for rollback protection...`,
-      );
       try {
         const getMappingResult = await apiClient.get<{
           agentId?: string;
@@ -297,10 +288,6 @@ export const DashboardScreen: React.FC = () => {
             characterId: getMappingResult.data.characterId || "",
             agentName: getMappingResult.data.agentName || "Unknown Agent",
           };
-          console.log(
-            `[Dashboard] ✅ Mapping data cached for rollback:`,
-            deletedMapping,
-          );
         } else {
           console.warn(
             `[Dashboard] ⚠️  Could not fetch mapping data (${getMappingResult.error || getMappingResult.status}) - proceeding without rollback protection`,
@@ -315,9 +302,6 @@ export const DashboardScreen: React.FC = () => {
       }
 
       // STEP 2: Delete mapping FIRST (cheap operation, fast)
-      console.log(
-        `[Dashboard] 🗑️  Step 1/2: Deleting mapping from Hyperscape database...`,
-      );
       const mappingDeleteResult = await apiClient.delete(
         `/api/agents/mappings/${agentId}`,
       );
@@ -328,10 +312,7 @@ export const DashboardScreen: React.FC = () => {
         );
       }
 
-      console.log(`[Dashboard] ✅ Mapping deleted from Hyperscape database`);
-
       // STEP 3: Delete from ElizaOS SECOND (expensive operation, slow)
-      console.log(`[Dashboard] 🗑️  Step 2/2: Deleting agent from ElizaOS...`);
       const elizaResponse = await fetch(`${ELIZAOS_API}/agents/${agentId}`, {
         method: "DELETE",
       });
@@ -340,13 +321,8 @@ export const DashboardScreen: React.FC = () => {
         throw new Error(`ElizaOS DELETE failed: HTTP ${elizaResponse.status}`);
       }
 
-      console.log(`[Dashboard] ✅ Agent deleted from ElizaOS`);
-
       // STEP 4: Clear viewport if this agent's viewport is showing
       if (viewportAgentId === agentId) {
-        console.log(
-          `[Dashboard] Clearing viewport for deleted agent ${agentId}`,
-        );
         setViewportAgentId(null);
       }
 
@@ -357,28 +333,18 @@ export const DashboardScreen: React.FC = () => {
 
       // STEP 6: Refresh agent list
       await fetchAgents();
-
-      console.log(`[Dashboard] ✅ Atomic deletion completed successfully`);
     } catch (error) {
       console.error(`[Dashboard] ❌ Agent deletion failed:`, error);
 
       // ROLLBACK: Restore mapping if ElizaOS deletion failed
       if (deletedMapping) {
-        console.log(
-          `[Dashboard] 🔄 ElizaOS deletion failed, attempting rollback of mapping deletion...`,
-        );
-
         try {
           const rollbackResult = await apiClient.post(
             "/api/agents/mappings",
             deletedMapping,
           );
 
-          if (rollbackResult.ok) {
-            console.log(
-              `[Dashboard] ✅ Mapping rollback successful - agent restored in dashboard`,
-            );
-          } else {
+          if (!rollbackResult.ok) {
             console.error(
               `[Dashboard] ❌ Mapping rollback failed: ${rollbackResult.error || rollbackResult.status} - ghost agent may appear`,
             );
@@ -400,20 +366,19 @@ export const DashboardScreen: React.FC = () => {
       }
 
       // Re-throw with clear error message
-      throw new Error(
-        `Failed to delete agent: ${error instanceof Error ? error.message : String(error)}. ${
-          deletedMapping
-            ? "Mapping has been restored."
-            : "Please refresh the page to see current state."
-        }`,
-      );
+      const message = `Failed to delete agent: ${error instanceof Error ? error.message : String(error)}. ${
+        deletedMapping
+          ? "Mapping has been restored."
+          : "Please refresh the page to see current state."
+      }`;
+      setDashboardError(message);
+      throw new Error(message);
     }
   };
 
   const fetchAgentPanels = async (agentId: string) => {
     setLoadingPanels(true);
     try {
-      console.log(`[Dashboard] Fetching panels for agent ${agentId}...`);
       const response = await fetch(`${ELIZAOS_API}/agents/${agentId}/panels`);
 
       if (!response.ok) {
@@ -423,15 +388,13 @@ export const DashboardScreen: React.FC = () => {
             `[Dashboard] Failed to fetch panels: HTTP ${response.status}`,
           );
         }
-        setAgentPanels([]);
+        if (isMountedRef.current) {
+          setAgentPanels([]);
+        }
         return;
       }
 
       const data = await response.json();
-      console.log(
-        `[Dashboard] ✅ Fetched ${data.panels?.length || 0} panel(s):`,
-        data,
-      );
 
       // Transform panel data to our format
       interface PanelData {
@@ -450,12 +413,18 @@ export const DashboardScreen: React.FC = () => {
         }),
       );
 
-      setAgentPanels(panels);
+      if (isMountedRef.current) {
+        setAgentPanels(panels);
+      }
     } catch (error) {
       console.error(`[Dashboard] Failed to fetch agent panels:`, error);
-      setAgentPanels([]);
+      if (isMountedRef.current) {
+        setAgentPanels([]);
+      }
     } finally {
-      setLoadingPanels(false);
+      if (isMountedRef.current) {
+        setLoadingPanels(false);
+      }
     }
   };
 
@@ -469,10 +438,18 @@ export const DashboardScreen: React.FC = () => {
   }, [selectedAgentId]);
 
   useEffect(() => {
-    fetchAgents();
-    const interval = setInterval(fetchAgents, 30000);
-    return () => clearInterval(interval);
-  }, [userAccountId]);
+    if (isMountedRef.current) {
+      pollInFlightRef.current = false;
+      void fetchAgents();
+    }
+
+    return () => {
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+  }, [userAccountId, fetchAgents]);
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
 
@@ -497,6 +474,27 @@ export const DashboardScreen: React.FC = () => {
     >
       {selectedAgent ? (
         <div className="flex flex-col h-full">
+          {dashboardError && (
+            <div className="px-4 py-2 text-sm bg-[#5c1b1b]/70 text-[#ffd7d7] border-b border-[#ffb4b4]/20 flex items-center justify-between gap-2">
+              <span>{dashboardError}</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="shrink-0 px-2 py-1 rounded bg-[#ffb4b4]/20 hover:bg-[#ffb4b4]/30"
+                  onClick={() => setDashboardError(null)}
+                >
+                  Dismiss
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 px-2 py-1 rounded bg-[#f2d08a] text-[#0b0a15] font-semibold"
+                  onClick={() => void fetchAgents()}
+                >
+                  Retry Now
+                </button>
+              </div>
+            </div>
+          )}
           {/* Top Navigation Bar */}
           <div className="h-14 border-b border-[#8b4513]/30 bg-[#0b0a15]/80 flex items-center px-4 gap-1 overflow-x-auto">
             <NavButton
@@ -592,6 +590,11 @@ export const DashboardScreen: React.FC = () => {
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center h-full text-[#f2d08a]/40">
+          {dashboardError && (
+            <p className="mb-3 text-sm text-[#ffb4b4] max-w-md text-center px-4">
+              {dashboardError}
+            </p>
+          )}
           <div className="w-20 h-20 rounded-full bg-[#1a1005] border border-[#f2d08a]/20 flex items-center justify-center mb-4">
             <Monitor size={40} />
           </div>

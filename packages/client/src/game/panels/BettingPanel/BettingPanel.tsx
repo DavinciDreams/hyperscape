@@ -20,6 +20,12 @@ import React, {
   type CSSProperties,
 } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 
 // ============================================================================
 // Types
@@ -324,6 +330,46 @@ export function BettingPanel({
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
   const [selectedSide, setSelectedSide] = useState<"A" | "B" | null>(null);
 
+  const shellStyle: CSSProperties = {
+    ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+    minWidth: "500px",
+  };
+
+  const marketCardStyle: CSSProperties = {
+    ...getPanelInsetStyle(theme, {
+      emphasis: "strong",
+      radius: theme.borderRadius.lg,
+      padding: "12px",
+    }),
+  };
+
+  const betInputStyle: CSSProperties = {
+    ...styles.input,
+    ...getPanelInsetStyle(theme, {
+      emphasis: "strong",
+      radius: theme.borderRadius.md,
+    }),
+    color: theme.colors.text.primary,
+  };
+
+  const actionButtonStyle: CSSProperties = {
+    ...styles.button,
+    ...getInteractiveTileStyle(theme, {
+      active: true,
+      accentColor: theme.colors.accent.primary,
+      radius: theme.borderRadius.md,
+    }),
+  };
+
+  const claimButtonStyle: CSSProperties = {
+    ...actionButtonStyle,
+    ...getInteractiveTileStyle(theme, {
+      active: true,
+      accentColor: theme.colors.state.success,
+      radius: theme.borderRadius.md,
+    }),
+  };
+
   const handleMarketClick = useCallback((marketId: string) => {
     setSelectedMarket((prev) => (prev === marketId ? null : marketId));
     setSelectedSide(null);
@@ -365,11 +411,22 @@ export function BettingPanel({
       width={550}
       closeOnBackdropClick
     >
-      <div style={styles.container}>
+      <div style={{ ...styles.container, ...shellStyle }}>
         {/* Header */}
-        <div style={styles.header}>
-          <span style={styles.title}>Active Markets</span>
-          <span style={styles.balance}>
+        <div
+          style={{
+            ...styles.header,
+            ...getPanelHeaderStyle(theme),
+            margin: "-16px -16px 8px",
+            padding: "12px 16px",
+          }}
+        >
+          <span style={{ ...styles.title, color: theme.colors.text.accent }}>
+            Active Markets
+          </span>
+          <span
+            style={{ ...styles.balance, color: theme.colors.text.secondary }}
+          >
             Balance: {state.userBalance.toLocaleString()} GOLD
           </span>
         </div>
@@ -399,7 +456,11 @@ export function BettingPanel({
                   key={market.duelId}
                   style={{
                     ...styles.market,
+                    ...marketCardStyle,
                     ...(isSelected ? styles.marketSelected : {}),
+                    borderColor: isSelected
+                      ? theme.colors.text.accent
+                      : `${theme.colors.border.default}40`,
                   }}
                   onClick={() => handleMarketClick(market.duelId)}
                 >
@@ -429,6 +490,11 @@ export function BettingPanel({
                     <div
                       style={{
                         ...styles.agentBox,
+                        ...getInteractiveTileStyle(theme, {
+                          radius: theme.borderRadius.md,
+                          active: isSelected && selectedSide === "A",
+                          accentColor: theme.colors.state.info,
+                        }),
                         ...styles.agentBoxA,
                         ...(isSelected && selectedSide === "A"
                           ? styles.agentBoxSelected
@@ -441,7 +507,7 @@ export function BettingPanel({
                       <div
                         style={{
                           ...styles.agentName,
-                          color: "#6699FF",
+                          color: theme.colors.state.info,
                         }}
                       >
                         {market.agent1Name}
@@ -462,6 +528,11 @@ export function BettingPanel({
                     <div
                       style={{
                         ...styles.agentBox,
+                        ...getInteractiveTileStyle(theme, {
+                          radius: theme.borderRadius.md,
+                          active: isSelected && selectedSide === "B",
+                          accentColor: theme.colors.state.danger,
+                        }),
                         ...styles.agentBoxB,
                         ...(isSelected && selectedSide === "B"
                           ? styles.agentBoxSelected
@@ -474,7 +545,7 @@ export function BettingPanel({
                       <div
                         style={{
                           ...styles.agentName,
-                          color: "#FF6666",
+                          color: theme.colors.state.danger,
                         }}
                       >
                         {market.agent2Name}
@@ -528,14 +599,14 @@ export function BettingPanel({
                         placeholder="Amount"
                         value={betAmount}
                         onChange={(e) => setBetAmount(e.target.value)}
-                        style={styles.input}
+                        style={betInputStyle}
                         min="1"
                         max={state.userBalance}
                         onClick={(e) => e.stopPropagation()}
                       />
                       <button
                         style={{
-                          ...styles.button,
+                          ...actionButtonStyle,
                           ...(parseFloat(betAmount) > 0
                             ? {}
                             : styles.buttonDisabled),
@@ -552,7 +623,7 @@ export function BettingPanel({
                   {isResolved && userWon && (
                     <div style={styles.betSection}>
                       <button
-                        style={{ ...styles.button, ...styles.claimButton }}
+                        style={claimButtonStyle}
                         onClick={(e) => handleClaimClick(market.duelId, e)}
                       >
                         Claim {position?.potentialPayout.toLocaleString()} GOLD

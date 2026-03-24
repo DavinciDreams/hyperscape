@@ -12,7 +12,7 @@
  *
  * In development (vite dev):
  *   - GAME_API_URL = http://localhost:5555
- *   - GAME_WS_URL = ws://localhost:5555/ws
+ *   - GAME_WS_URL = ws://localhost:5556/ws
  *   - CDN_URL = http://localhost:8080
  */
 
@@ -23,7 +23,11 @@ type PublicRuntimeEnv = {
   PUBLIC_CDN_URL?: string;
 };
 
-type WindowWithRuntimeEnv = Window & { env?: PublicRuntimeEnv };
+type WindowWithRuntimeEnv = Window & {
+  env?: PublicRuntimeEnv;
+  __CDN_URL?: string;
+  __ASSETS_URL?: string;
+};
 
 function isLoopbackHost(hostname: string): boolean {
   return (
@@ -76,6 +80,34 @@ function getRuntimeEnvValue(key: keyof PublicRuntimeEnv): string | undefined {
   );
 }
 
+export function getRuntimeAssetBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    const windowWithEnv = window as WindowWithRuntimeEnv;
+    const authoritativeAssetsUrl = normalizeBrowserLoopbackUrl(
+      windowWithEnv.__ASSETS_URL,
+    );
+    if (authoritativeAssetsUrl) {
+      return authoritativeAssetsUrl;
+    }
+
+    const runtimeCdnUrl = normalizeBrowserLoopbackUrl(windowWithEnv.__CDN_URL);
+    if (runtimeCdnUrl) {
+      return runtimeCdnUrl;
+    }
+  }
+
+  return CDN_URL;
+}
+
+export function resolveRuntimeAssetUrl(assetPath: string): string {
+  if (!assetPath.startsWith("asset://")) {
+    return assetPath;
+  }
+
+  const baseUrl = getRuntimeAssetBaseUrl().replace(/\/$/, "");
+  return assetPath.replace("asset://", `${baseUrl}/`);
+}
+
 // =============================================================================
 // ElizaOS AI Agent Server (embedded in Hyperscape server)
 // =============================================================================
@@ -117,9 +149,9 @@ export const GAME_WS_URL: string =
   normalizeBrowserLoopbackUrl(
     import.meta.env.PROD
       ? "wss://hyperscape-production.up.railway.app/ws"
-      : "ws://localhost:5555/ws",
+      : "ws://localhost:5556/ws",
   ) ??
-  "ws://localhost:5555/ws";
+  "ws://localhost:5556/ws";
 
 // =============================================================================
 // CDN for Static Assets

@@ -11,6 +11,7 @@
 
 import { useMemo } from "react";
 import { useThemeStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import type { PlayerEquipmentItems, PlayerStats } from "../../types";
 
 // ============================================================================
@@ -196,15 +197,22 @@ export function StatsPanel({
   }, [stats]);
 
   const panelStyle = {
-    background: theme.colors.background.panelSecondary,
+    background:
+      theme.name === "hyperscape"
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
+        : theme.colors.background.panelSecondary,
     borderRadius: `${theme.borderRadius.md}px`,
-    border: `1px solid ${theme.colors.border.default}`,
+    border: `1px solid ${theme.colors.border.default}40`,
     padding: `${theme.spacing.xs}px`,
+    boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.04)",
   };
 
   const content = (
     <div
       style={{
+        ...(!showSilhouette
+          ? getPanelSurfaceStyle(theme, { emphasis: "normal" })
+          : {}),
         display: "flex",
         flexDirection: "column" as const,
         gap: "6px",

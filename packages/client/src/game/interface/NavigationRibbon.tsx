@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
 import {
-  useWindowManager,
   useWindowStore,
   useAutoCollapse,
   useBadge,
@@ -172,9 +171,6 @@ export function NavigationRibbon({
   onVisibilityChange,
 }: NavigationRibbonProps): React.ReactElement | null {
   const theme = useThemeStore((s) => s.theme);
-  const { createWindow, windows } = useWindowManager();
-  const windowStoreUpdate = useWindowStore((s) => s.updateWindow);
-  const bringToFront = useWindowStore((s) => s.bringToFront);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
   // Auto-collapse the ribbon after inactivity using auto-collapse hook
@@ -190,54 +186,52 @@ export function NavigationRibbon({
     onVisibilityChange?.(visible && !isCollapsed);
   }, [visible, isCollapsed, onVisibilityChange]);
 
-  const handleOpenPanel = useCallback(
-    (item: RibbonItem) => {
-      // Check if panel is already open in a window
-      const existingWindow = windows.find((w) =>
-        w.tabs.some((t) => t.content === item.panelId),
+  const handleOpenPanel = useCallback((item: RibbonItem) => {
+    const store = useWindowStore.getState();
+    const windows = Array.from(store.windows.values());
+
+    // Check if panel is already open in a window
+    const existingWindow = windows.find((w) =>
+      w.tabs.some((t) => t.content === item.panelId),
+    );
+
+    if (existingWindow) {
+      // Bring window to front and activate the tab
+      const tabIndex = existingWindow.tabs.findIndex(
+        (t) => t.content === item.panelId,
       );
-
-      if (existingWindow) {
-        // Bring window to front and activate the tab
-        const tabIndex = existingWindow.tabs.findIndex(
-          (t) => t.content === item.panelId,
-        );
-        if (tabIndex >= 0) {
-          windowStoreUpdate(existingWindow.id, {
-            activeTabIndex: tabIndex,
-            visible: true,
-          });
-          bringToFront(existingWindow.id);
-        }
-        setExpandedCategory(null);
-        return;
+      if (tabIndex >= 0) {
+        store.updateWindow(existingWindow.id, {
+          activeTabIndex: tabIndex,
+          visible: true,
+        });
+        store.bringToFront(existingWindow.id);
       }
-
-      // Create new window with this panel
-      const config: WindowConfig = {
-        id: `panel-${item.panelId}-${Date.now()}`,
-        position: {
-          x: Math.max(100, window.innerWidth / 2 - 200),
-          y: Math.max(100, window.innerHeight / 2 - 150),
-        },
-        size: { width: 400, height: 350 },
-        minSize: { width: 250, height: 200 },
-        tabs: [
-          {
-            id: item.panelId,
-            label: item.label,
-            content: item.panelId,
-            closeable: true,
-          },
-        ],
-      };
-
-      const newWindow = createWindow(config);
-      console.log("[NavigationRibbon] Created new window:", newWindow?.id);
       setExpandedCategory(null);
-    },
-    [windows, createWindow, windowStoreUpdate, bringToFront],
-  );
+      return;
+    }
+
+    // Create new window with this panel
+    const config: WindowConfig = {
+      id: `panel-${item.panelId}-${Date.now()}`,
+      position: {
+        x: Math.max(100, window.innerWidth / 2 - 200),
+        y: Math.max(100, window.innerHeight / 2 - 150),
+      },
+      size: { width: 400, height: 350 },
+      minSize: { width: 250, height: 200 },
+      tabs: [
+        {
+          id: item.panelId,
+          label: item.label,
+          content: item.panelId,
+          closeable: true,
+        },
+      ],
+    };
+    store.createWindow(config);
+    setExpandedCategory(null);
+  }, []);
 
   if (!visible) {
     return null;

@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
+import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
 import type { CoinModalState } from "../../types";
 import { formatQuantity } from "../../utils";
 
@@ -69,12 +70,18 @@ export function CoinAmountModal({
 
   const activeButtonStyle: CSSProperties = {
     ...buttonStyle,
-    background: `${actionColor}cc`,
+    ...getInteractiveTileStyle(theme, {
+      active: true,
+      accentColor: actionColor,
+      radius: theme.borderRadius.md,
+    }),
   };
 
   const disabledButtonStyle: CSSProperties = {
     ...buttonStyle,
-    background: theme.colors.background.panelSecondary,
+    ...getPanelInsetStyle(theme, {
+      radius: theme.borderRadius.md,
+    }),
     opacity: 0.3,
     cursor: "not-allowed",
   };
@@ -165,10 +172,11 @@ export function CoinAmountModal({
             style={{
               width: "100%",
               padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
-              borderRadius: theme.borderRadius.md,
+              ...getPanelInsetStyle(theme, {
+                emphasis: "strong",
+                radius: theme.borderRadius.md,
+              }),
               fontSize: theme.typography.fontSize.sm,
-              background: theme.colors.background.panelSecondary,
-              border: `1px solid ${theme.colors.border.default}`,
               color: theme.colors.text.primary,
               outline: "none",
             }}
@@ -188,12 +196,17 @@ export function CoinAmountModal({
             style={{
               ...buttonStyle,
               flex: 1,
-              background:
-                amount &&
-                parseInt(amount, 10) > 0 &&
-                parseInt(amount, 10) <= modal.maxAmount
-                  ? `${actionColor}cc`
-                  : theme.colors.background.tertiary,
+              ...(amount &&
+              parseInt(amount, 10) > 0 &&
+              parseInt(amount, 10) <= modal.maxAmount
+                ? getInteractiveTileStyle(theme, {
+                    active: true,
+                    accentColor: actionColor,
+                    radius: theme.borderRadius.md,
+                  })
+                : getPanelInsetStyle(theme, {
+                    radius: theme.borderRadius.md,
+                  })),
               opacity:
                 amount &&
                 parseInt(amount, 10) > 0 &&
@@ -209,7 +222,9 @@ export function CoinAmountModal({
             style={{
               ...buttonStyle,
               flex: 1,
-              background: theme.colors.background.panelSecondary,
+              ...getPanelInsetStyle(theme, {
+                radius: theme.borderRadius.md,
+              }),
             }}
           >
             Cancel

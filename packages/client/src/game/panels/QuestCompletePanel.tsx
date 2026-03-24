@@ -10,6 +10,9 @@
  */
 
 import React, { useEffect, useCallback } from "react";
+import { useThemeStore } from "@/ui";
+import { getPanelInsetStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 import type { ClientWorld } from "../../types";
 
 interface QuestRewards {
@@ -40,6 +43,7 @@ export function QuestCompletePanel({
   world,
   onClose,
 }: QuestCompletePanelProps) {
+  const theme = useThemeStore((s) => s.theme);
   // Handle keyboard dismiss
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -79,8 +83,11 @@ export function QuestCompletePanel({
 
   return (
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center pointer-events-auto"
-      style={{ backgroundColor: "rgba(0, 0, 0, 0.85)" }}
+      className="fixed inset-0 flex items-center justify-center pointer-events-auto"
+      style={{
+        backgroundColor: "rgba(7, 9, 12, 0.8)",
+        zIndex: UI.Z_INDEX.MODAL,
+      }}
       onClick={onClose}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
@@ -92,21 +99,18 @@ export function QuestCompletePanel({
           width: "24rem",
           maxWidth: "90vw",
           padding: "2rem 2.5rem",
-          background:
-            "linear-gradient(to bottom, #d4c4a8 0%, #c9b896 50%, #bfae84 100%)",
-          border: "4px solid #8b7355",
-          borderRadius: "8px",
-          boxShadow:
-            "0 0 40px rgba(201, 162, 39, 0.5), inset 0 0 20px rgba(139, 115, 85, 0.3)",
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
+          boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 28px rgba(92, 103, 118, 0.08)`,
           // Parchment texture effect via gradient
           backgroundImage: `
-            linear-gradient(to bottom, #d4c4a8 0%, #c9b896 50%, #bfae84 100%),
+            linear-gradient(180deg, rgba(255, 249, 239, 0.055) 0%, rgba(0, 0, 0, 0.1) 100%),
             repeating-linear-gradient(
               0deg,
               transparent,
               transparent 2px,
-              rgba(139, 115, 85, 0.03) 2px,
-              rgba(139, 115, 85, 0.03) 4px
+              rgba(255, 248, 236, 0.015) 2px,
+              rgba(255, 248, 236, 0.015) 4px
             )
           `,
         }}
@@ -120,8 +124,7 @@ export function QuestCompletePanel({
           style={{
             width: "60%",
             height: "4px",
-            background:
-              "linear-gradient(to right, transparent, #c9a227, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.accent.gold}, transparent)`,
           }}
         />
 
@@ -129,9 +132,10 @@ export function QuestCompletePanel({
         <h2
           className="m-0 mb-4 text-2xl font-bold"
           style={{
-            color: "#4a3f2f",
-            textShadow: "1px 1px 2px rgba(255, 255, 255, 0.5)",
-            fontFamily: "serif",
+            color: theme.colors.text.accent,
+            textShadow: "0 1px 2px rgba(0, 0, 0, 0.35)",
+            fontFamily: theme.typography.fontFamily.heading,
+            letterSpacing: "0.02em",
           }}
         >
           Congratulations!
@@ -141,13 +145,18 @@ export function QuestCompletePanel({
         <p
           className="m-0 mb-6 text-lg"
           style={{
-            color: "#5a4f3f",
-            fontFamily: "serif",
+            color: theme.colors.text.secondary,
+            fontFamily: theme.typography.fontFamily.body,
           }}
         >
           You have completed the
           <br />
-          <strong style={{ color: "#3a2f1f", fontSize: "1.25rem" }}>
+          <strong
+            style={{
+              color: theme.colors.text.primary,
+              fontSize: "1.25rem",
+            }}
+          >
             {questName}
           </strong>
           <br />
@@ -160,8 +169,7 @@ export function QuestCompletePanel({
           style={{
             width: "60%",
             height: "2px",
-            background:
-              "linear-gradient(to right, transparent, #8b7355, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.border.hover}, transparent)`,
           }}
         />
 
@@ -169,7 +177,17 @@ export function QuestCompletePanel({
         <div className="space-y-2">
           {/* Quest Points */}
           {rewards.questPoints > 0 && (
-            <div className="text-lg font-bold" style={{ color: "#3a6f3a" }}>
+            <div
+              className="text-lg font-bold"
+              style={{
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "strong",
+                  radius: theme.borderRadius.md,
+                  padding: "0.5rem 0.75rem",
+                }),
+                color: theme.colors.state.success,
+              }}
+            >
               {rewards.questPoints} Quest Point
               {rewards.questPoints !== 1 ? "s" : ""}
             </div>
@@ -177,7 +195,17 @@ export function QuestCompletePanel({
 
           {/* Items */}
           {rewards.items.map((item, index) => (
-            <div key={index} className="text-base" style={{ color: "#4a3f2f" }}>
+            <div
+              key={index}
+              className="text-base"
+              style={{
+                ...getPanelInsetStyle(theme, {
+                  radius: theme.borderRadius.md,
+                  padding: "0.45rem 0.75rem",
+                }),
+                color: theme.colors.text.secondary,
+              }}
+            >
               {item.quantity > 1 ? `${item.quantity}x ` : ""}
               {ITEM_NAMES[item.itemId] || item.itemId}
             </div>
@@ -185,7 +213,17 @@ export function QuestCompletePanel({
 
           {/* XP Rewards */}
           {Object.entries(rewards.xp).map(([skill, amount]) => (
-            <div key={skill} className="text-base" style={{ color: "#4a3f2f" }}>
+            <div
+              key={skill}
+              className="text-base"
+              style={{
+                ...getPanelInsetStyle(theme, {
+                  radius: theme.borderRadius.md,
+                  padding: "0.45rem 0.75rem",
+                }),
+                color: theme.colors.text.secondary,
+              }}
+            >
               {amount.toLocaleString()}{" "}
               {skill.charAt(0).toUpperCase() + skill.slice(1)} XP
             </div>
@@ -193,7 +231,10 @@ export function QuestCompletePanel({
         </div>
 
         {/* Dismiss Hint */}
-        <p className="m-0 mt-6 text-sm" style={{ color: "#7a6f5f" }}>
+        <p
+          className="m-0 mt-6 text-sm"
+          style={{ color: theme.colors.text.muted }}
+        >
           Click anywhere to continue
         </p>
 
@@ -203,8 +244,7 @@ export function QuestCompletePanel({
           style={{
             width: "60%",
             height: "4px",
-            background:
-              "linear-gradient(to right, transparent, #c9a227, transparent)",
+            background: `linear-gradient(to right, transparent, ${theme.colors.accent.gold}, transparent)`,
           }}
         />
       </div>

@@ -179,7 +179,7 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
   const overlayStyle: CSSProperties = {
     position: "fixed",
     inset: 0,
-    zIndex: 9999,
+    zIndex: theme.zIndex.modal,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",

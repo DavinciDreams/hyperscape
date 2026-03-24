@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Server,
   Heart,
@@ -31,14 +31,12 @@ export const SystemStatus: React.FC = () => {
   const [version, setVersion] = useState<ServerVersion>({});
   const [loading, setLoading] = useState(true);
   const [lastCheck, setLastCheck] = useState<Date>(new Date());
+  const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 10000); // Check every 10 seconds
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       // Fetch health status from ElizaOS API
       const healthResponse = await fetch(`${ELIZAOS_API}/server/health`);
@@ -65,13 +63,45 @@ export const SystemStatus: React.FC = () => {
       }
 
       setLastCheck(new Date());
-    } catch (error) {
-      console.error("[SystemStatus] Error fetching status:", error);
+    } catch {
       setHealth({ status: "unhealthy" });
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const schedule = (delay: number) => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+      }
+      pollTimeoutRef.current = window.setTimeout(run, delay);
+    };
+    const run = async () => {
+      await fetchStatus();
+      if (!cancelled) {
+        schedule(document.visibilityState === "visible" ? 10000 : 20000);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (!cancelled) {
+        schedule(document.visibilityState === "visible" ? 1000 : 20000);
+      }
+    };
+
+    void run();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+  }, [fetchStatus]);
 
   const formatUptime = (seconds?: number) => {
     if (!seconds) return "N/A";

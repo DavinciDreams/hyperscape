@@ -1,5 +1,5 @@
 import { GAME_API_URL } from "@/lib/api-config";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import type { Agent } from "./types";
 import { Swords, Activity, Target, Coins, Clock, Heart } from "lucide-react";
 
@@ -36,6 +36,8 @@ interface AgentSummaryCardProps {
   agent: Agent;
   isViewportActive: boolean;
 }
+const SUMMARY_POLL_INTERVAL_MS = 10000;
+const SUMMARY_BACKGROUND_POLL_INTERVAL_MS = 30000;
 
 // Format time duration
 function formatDuration(ms: number): string {
@@ -115,6 +117,8 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
   });
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [sessionStartTime] = useState<number>(Date.now());
+  const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
   // Fetch character ID once
   useEffect(() => {
@@ -141,97 +145,128 @@ export const AgentSummaryCard: React.FC<AgentSummaryCardProps> = ({
   }, [agent.id, agent.status]);
 
   // Poll for summary data
+  const fetchSummary = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    try {
+      // Fetch goal data (includes personality)
+      const goalResponse = await fetch(
+        `${GAME_API_URL}/api/agents/${agent.id}/goal`,
+      );
+      let goalData: {
+        goal?: { description?: string; progressPercent?: number };
+        personality?: PersonalityData;
+      } | null = null;
+      if (goalResponse.ok) {
+        goalData = await goalResponse.json();
+      }
+
+      // Fetch latest thought for health data
+      let healthData: HealthData | null = null;
+      try {
+        const thoughtsResponse = await fetch(
+          `${GAME_API_URL}/api/agents/${agent.id}/thoughts?limit=1`,
+        );
+        if (thoughtsResponse.ok) {
+          const thoughtsData = await thoughtsResponse.json();
+          const latestThought = thoughtsData.thoughts?.[0];
+          if (latestThought?.health) {
+            healthData = latestThought.health;
+          }
+        }
+      } catch {
+        // Non-critical
+      }
+
+      // Fetch skills if we have characterId
+      let skills: Record<string, { level: number; xp: number }> | null = null;
+      if (characterId) {
+        const skillsResponse = await fetch(
+          `${GAME_API_URL}/api/characters/${characterId}/skills`,
+        );
+        if (skillsResponse.ok) {
+          const skillsData = await skillsResponse.json();
+          skills = skillsData.skills || skillsData;
+        }
+
+        // Fetch position to check online status
+        const posResponse = await fetch(
+          `${GAME_API_URL}/api/characters/${characterId}/position`,
+        );
+        if (posResponse.ok) {
+          const posData = await posResponse.json();
+          setSummary((prev) => ({
+            ...prev,
+            online: posData.online !== false,
+            uptimeMs: Date.now() - sessionStartTime,
+            combatLevel: calculateCombatLevel(skills),
+            totalLevel: calculateTotalLevel(skills),
+            currentGoal: goalData?.goal?.description || null,
+            goalProgress: goalData?.goal?.progressPercent || 0,
+            health: healthData,
+            personality: goalData?.personality || prev.personality,
+          }));
+          return;
+        }
+      }
+
+      // Update with whatever data we have
+      setSummary((prev) => ({
+        ...prev,
+        online: agent.status === "active",
+        uptimeMs: Date.now() - sessionStartTime,
+        combatLevel: calculateCombatLevel(skills),
+        totalLevel: calculateTotalLevel(skills),
+        currentGoal: goalData?.goal?.description || null,
+        goalProgress: goalData?.goal?.progressPercent || 0,
+        health: healthData,
+        personality: goalData?.personality || prev.personality,
+      }));
+    } catch {
+      // Silently fail - keep last known state
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, [agent.id, agent.status, characterId, sessionStartTime]);
+
   useEffect(() => {
     if (agent.status !== "active") {
       setSummary((prev) => ({ ...prev, online: false }));
       return;
     }
 
-    const fetchSummary = async () => {
-      try {
-        // Fetch goal data (includes personality)
-        const goalResponse = await fetch(
-          `${GAME_API_URL}/api/agents/${agent.id}/goal`,
-        );
-        let goalData: {
-          goal?: { description?: string; progressPercent?: number };
-          personality?: PersonalityData;
-        } | null = null;
-        if (goalResponse.ok) {
-          goalData = await goalResponse.json();
-        }
-
-        // Fetch latest thought for health data
-        let healthData: HealthData | null = null;
-        try {
-          const thoughtsResponse = await fetch(
-            `${GAME_API_URL}/api/agents/${agent.id}/thoughts?limit=1`,
-          );
-          if (thoughtsResponse.ok) {
-            const thoughtsData = await thoughtsResponse.json();
-            const latestThought = thoughtsData.thoughts?.[0];
-            if (latestThought?.health) {
-              healthData = latestThought.health;
-            }
-          }
-        } catch {
-          // Non-critical
-        }
-
-        // Fetch skills if we have characterId
-        let skills: Record<string, { level: number; xp: number }> | null = null;
-        if (characterId) {
-          const skillsResponse = await fetch(
-            `${GAME_API_URL}/api/characters/${characterId}/skills`,
-          );
-          if (skillsResponse.ok) {
-            const skillsData = await skillsResponse.json();
-            skills = skillsData.skills || skillsData;
-          }
-
-          // Fetch position to check online status
-          const posResponse = await fetch(
-            `${GAME_API_URL}/api/characters/${characterId}/position`,
-          );
-          if (posResponse.ok) {
-            const posData = await posResponse.json();
-            setSummary((prev) => ({
-              ...prev,
-              online: posData.online !== false,
-              uptimeMs: Date.now() - sessionStartTime,
-              combatLevel: calculateCombatLevel(skills),
-              totalLevel: calculateTotalLevel(skills),
-              currentGoal: goalData?.goal?.description || null,
-              goalProgress: goalData?.goal?.progressPercent || 0,
-              health: healthData,
-              personality: goalData?.personality || prev.personality,
-            }));
-            return;
-          }
-        }
-
-        // Update with whatever data we have
-        setSummary((prev) => ({
-          ...prev,
-          online: agent.status === "active",
-          uptimeMs: Date.now() - sessionStartTime,
-          combatLevel: calculateCombatLevel(skills),
-          totalLevel: calculateTotalLevel(skills),
-          currentGoal: goalData?.goal?.description || null,
-          goalProgress: goalData?.goal?.progressPercent || 0,
-          health: healthData,
-          personality: goalData?.personality || prev.personality,
-        }));
-      } catch {
-        // Silently fail - keep last known state
+    const clearPollTimeout = () => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
       }
     };
 
-    fetchSummary();
-    // Poll every 10 seconds to avoid rate limiting (reduced from 2s)
-    const interval = setInterval(fetchSummary, 10000);
-    return () => clearInterval(interval);
-  }, [agent.id, agent.status, characterId, sessionStartTime]);
+    const scheduleNextPoll = () => {
+      clearPollTimeout();
+      const isVisible = document.visibilityState === "visible";
+      const delay =
+        isViewportActive && isVisible
+          ? SUMMARY_POLL_INTERVAL_MS
+          : SUMMARY_BACKGROUND_POLL_INTERVAL_MS;
+      pollTimeoutRef.current = window.setTimeout(() => {
+        pollTimeoutRef.current = null;
+        void fetchSummary().finally(scheduleNextPoll);
+      }, delay);
+    };
+
+    const handleVisibilityChange = () => {
+      clearPollTimeout();
+      scheduleNextPoll();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void fetchSummary().finally(scheduleNextPoll);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearPollTimeout();
+    };
+  }, [agent.status, fetchSummary, isViewportActive]);
 
   // Don't show if agent is inactive
   if (agent.status !== "active") {

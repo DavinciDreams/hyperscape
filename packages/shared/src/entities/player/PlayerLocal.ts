@@ -1464,20 +1464,17 @@ export class PlayerLocal extends Entity implements HotReloadable {
       (this.data.avatar as string) ||
       "asset://avatars/avatar-male-01.vrm";
 
-    // TEMP DEBUG: Force non-optimized VRM to test humanoid.update
-    if (url.includes("_optimized.vrm")) {
+    const useRawAvatar =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("rawAvatar") === "1";
+    if (useRawAvatar && url.includes("_optimized.vrm")) {
       const nonOptimized = url.replace("_optimized.vrm", ".vrm");
       console.warn(
-        `[PlayerLocal] ⚠️ Forcing non-optimized VRM: ${url} -> ${nonOptimized}`,
+        `[PlayerLocal] Forcing non-optimized VRM via ?rawAvatar=1: ${url} -> ${nonOptimized}`,
       );
       url = nonOptimized;
     }
 
-    console.log(`[PlayerLocal] getAvatarUrl:`, {
-      sessionAvatar: this.data.sessionAvatar,
-      avatar: this.data.avatar,
-      resolved: url,
-    });
     return url;
   }
 

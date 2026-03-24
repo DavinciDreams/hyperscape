@@ -12,6 +12,8 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
+import { UI } from "../../constants/ui";
+import { zIndex } from "../../constants/tokens";
 
 /** Connection status states */
 type ConnectionStatus =
@@ -130,10 +132,10 @@ export function ConnectionIndicator({
     <div
       style={{
         position: "fixed",
-        top: 16,
+        top: `calc(${UI.SAFE_AREAS.TOP} + 16px)`,
         left: "50%",
         transform: "translateX(-50%)",
-        zIndex: 10000,
+        zIndex: zIndex.toast,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",

@@ -50,7 +50,6 @@ export {
 // Interface event hooks
 export {
   useWorldMapHotkey,
-  useUIUpdateEvents,
   useOpenPaneEvent,
   useInterfaceUIState,
 } from "./useInterfaceEvents";

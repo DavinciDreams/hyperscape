@@ -17,6 +17,15 @@
 
 import React from "react";
 import type { World } from "@hyperscape/shared";
+import { useThemeStore } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 
 interface DialogueResponse {
   text: string;
@@ -47,6 +56,9 @@ export function DialoguePanel({
   onClose,
   world,
 }: DialoguePanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
+
   // NOTE: Distance validation is handled server-side by InteractionSessionManager.
   // The server sends 'dialogueClose' packets when the player moves too far away.
   // This prevents race conditions between client and server position sync under lag.
@@ -68,7 +80,7 @@ export function DialoguePanel({
 
   const handleContinue = () => {
     // Terminal node - send continue packet to server so it can execute any pending effects
-    // Server will then send dialogueEnd which triggers onClose via Sidebar
+    // Server will then send dialogueEnd which clears the active modal state
     if (world.network?.send) {
       world.network.send("dialogueContinue", {
         npcId,
@@ -80,32 +92,60 @@ export function DialoguePanel({
 
   return (
     <div
-      className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto"
+      className="fixed bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto"
       style={{
-        width: "40rem",
+        zIndex: UI.Z_INDEX.MODAL,
+        width: "42rem",
         maxWidth: "90vw",
-        background: "rgba(11, 10, 21, 0.85)",
-        border: "2px solid #c9a227",
-        borderRadius: "0.5rem",
+        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+        borderRadius: theme.borderRadius.xl,
         padding: "1.5rem",
-        backdropFilter: "blur(10px)",
-        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
+        boxShadow:
+          "0 18px 38px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255,255,255,0.05)",
       }}
       onClick={(e) => e.stopPropagation()}
     >
       {/* NPC Name Header */}
       <div
         className="flex justify-between items-center mb-3 pb-2"
-        style={{ borderBottom: "1px solid #c9a227" }}
+        style={{
+          ...getPanelHeaderStyle(theme),
+          margin: "-1.5rem -1.5rem 0.75rem",
+          padding: "0.75rem 1rem",
+        }}
       >
-        <h3 className="m-0 text-lg font-bold" style={{ color: "#c9a227" }}>
+        <h3
+          className="m-0 text-lg font-bold"
+          style={{ color: theme.colors.text.accent }}
+        >
+          <span
+            className="block text-[10px] uppercase tracking-[0.18em] mb-1"
+            style={{ color: theme.colors.text.muted }}
+          >
+            Encounter
+          </span>
           {npcName}
         </h3>
         <button
           onClick={onClose}
-          className="bg-transparent border-none text-gray-400 hover:text-white cursor-pointer text-xl leading-none"
+          className="cursor-pointer text-xl leading-none"
+          style={{ ...closeButtonStyle, width: 28, height: 28, fontSize: 18 }}
           title="Close dialogue"
           aria-label="Close dialogue"
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = String(
+              closeButtonStyle["--shell-button-hover-bg"],
+            );
+            e.currentTarget.style.color = String(
+              closeButtonStyle["--shell-button-hover-fg"],
+            );
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = String(
+              closeButtonStyle.background,
+            );
+            e.currentTarget.style.color = String(closeButtonStyle.color);
+          }}
         >
           x
         </button>
@@ -117,6 +157,12 @@ export function DialoguePanel({
         style={{
           fontSize: "1rem",
           minHeight: "3rem",
+          color: theme.colors.text.primary,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "normal",
+            radius: theme.borderRadius.lg,
+            padding: `${theme.spacing.md}px`,
+          }),
         }}
       >
         {text}
@@ -132,20 +178,42 @@ export function DialoguePanel({
               className="w-full text-left py-2 px-4 rounded cursor-pointer transition-all"
               aria-label={`Response ${index + 1}: ${response.text}`}
               style={{
-                background: "rgba(201, 162, 39, 0.1)",
-                border: "1px solid rgba(201, 162, 39, 0.3)",
-                color: "#e0d6c0",
+                ...getInteractiveTileStyle(theme, {
+                  radius: theme.borderRadius.md,
+                  accentColor: theme.colors.accent.primary,
+                }),
+                color: theme.colors.text.primary,
+                padding: `${theme.spacing.sm + 2}px ${theme.spacing.md}px`,
+                fontWeight: theme.typography.fontWeight.medium,
+                display: "flex",
+                alignItems: "flex-start",
+                gap: theme.spacing.sm,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(201, 162, 39, 0.2)";
-                e.currentTarget.style.borderColor = "#c9a227";
+                e.currentTarget.style.background =
+                  theme.name === "hyperscape"
+                    ? "linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(190, 165, 123, 0.12) 22%, rgba(25, 29, 35, 0.98) 100%)"
+                    : `${theme.colors.accent.primary}18`;
+                e.currentTarget.style.borderColor = `${theme.colors.accent.primary}80`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(201, 162, 39, 0.1)";
-                e.currentTarget.style.borderColor = "rgba(201, 162, 39, 0.3)";
+                e.currentTarget.style.background =
+                  theme.name === "hyperscape"
+                    ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.012) 18%, rgba(22, 26, 31, 0.99) 100%)"
+                    : `${theme.colors.accent.primary}12`;
+                e.currentTarget.style.borderColor = `${theme.colors.border.default}80`;
               }}
             >
-              {index + 1}. {response.text}
+              <span
+                style={{
+                  color: theme.colors.text.muted,
+                  fontSize: "11px",
+                  minWidth: 16,
+                }}
+              >
+                {index + 1}.
+              </span>
+              <span>{response.text}</span>
             </button>
           ))
         ) : (
@@ -154,15 +222,26 @@ export function DialoguePanel({
             className="w-full py-2 px-4 rounded cursor-pointer transition-all"
             aria-label="Continue dialogue"
             style={{
-              background: "rgba(201, 162, 39, 0.2)",
-              border: "1px solid #c9a227",
-              color: "#c9a227",
+              ...getInteractiveTileStyle(theme, {
+                active: true,
+                radius: theme.borderRadius.md,
+                accentColor: theme.colors.accent.primary,
+              }),
+              color: theme.colors.text.primary,
+              padding: `${theme.spacing.sm + 2}px ${theme.spacing.md}px`,
+              fontWeight: theme.typography.fontWeight.semibold,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(201, 162, 39, 0.3)";
+              e.currentTarget.style.background =
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(190, 165, 123, 0.14) 22%, rgba(27, 31, 37, 0.98) 100%)"
+                  : `${theme.colors.accent.primary}28`;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(201, 162, 39, 0.2)";
+              e.currentTarget.style.background =
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(190, 165, 123, 0.12) 20%, rgba(25, 29, 35, 0.98) 100%)"
+                  : `${theme.colors.accent.primary}20`;
             }}
           >
             Click to continue...

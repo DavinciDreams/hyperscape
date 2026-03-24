@@ -21,19 +21,25 @@ import {
   INPUT,
 } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
-// Terrain sample grid size per axis.  50×50 = 2,500 getHeightAt calls vs the
-// previous per-pixel approach which was W×H (up to 40,000+ calls).  The low-res
-// ImageData is drawn to an OffscreenCanvas and then scaled up via drawImage with
-// bilinear filtering — visually indistinguishable at minimap scale, 16× cheaper.
-const TERRAIN_SAMPLE_SIZE = 50;
-// Over-sample factor relative to the visible extent.
-// sqrt(2) × 1.1 ≈ 1.555 ensures the offscreen canvas always covers the canvas
-// corners at any camera rotation angle without clipping.
-const TERRAIN_OVERSHOOT = Math.SQRT2 * 1.1;
+import { type EntityPip, useMinimapEntityPips } from "./useMinimapEntityPips";
+import { useQuestStatusSync } from "./useQuestStatusSync";
+import {
+  type MinimapRoad,
+  type MinimapRoadWithAABB,
+  type MinimapTown,
+  useMinimapWorldCaches,
+} from "./useMinimapWorldCaches";
+import {
+  MINIMAP_TERRAIN_OVERSHOOT,
+  useMinimapTerrainCache,
+} from "./useMinimapTerrainCache";
+// Shared with terrain-cache generation so draw-time coverage matches the
+// cached snapshot's real world footprint.
+const TERRAIN_OVERSHOOT = MINIMAP_TERRAIN_OVERSHOOT;
 
-// Throttle terrain background redraw to ~15fps (every 4th frame).
-// Pip overlay still renders every frame for smooth entity movement.
-const RENDER_EVERY_N_FRAMES = 4;
+// Terrain draw is just a transformed drawImage() pass, so keep it in sync with
+// live overlay motion instead of throttling it behind the player.
+const RENDER_EVERY_N_FRAMES = 1;
 
 // Zoom bounds and step size — kept at module scope for stability across re-renders
 const MIN_EXTENT = 20;
@@ -48,24 +54,10 @@ const MINIMAP_BASE_SIZE_PX = 200;
 const ROAD_LINE_WIDTH_PX = 5;
 const ROAD_OUTLINE_WIDTH_PX = 7;
 const BUILDING_LINE_WIDTH_PX = 0.5;
-
-/** Road shape for minimap baking */
-type MinimapRoad = { path: Array<{ x: number; z: number }>; width: number };
-/** Road enriched with a pre-computed world-space AABB for O(1) visibility culling */
-type MinimapRoadWithAABB = MinimapRoad & {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-};
-/** Town shape for minimap baking */
-type MinimapTown = {
-  buildings: Array<{
-    position: { x: number; z: number };
-    size: { width: number; depth: number };
-    rotation: number;
-  }>;
-};
+const ROAD_OUTLINE_COLOR = "rgb(56, 60, 68)";
+const ROAD_FILL_COLOR = "rgb(164, 151, 128)";
+const BUILDING_FILL_COLOR = "rgba(84, 92, 104, 0.92)";
+const BUILDING_STROKE_COLOR = "rgb(34, 39, 46)";
 
 /** 2D context interface for minimap drawing — satisfied by both CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D */
 interface MinimapDrawContext {
@@ -84,183 +76,19 @@ interface MinimapDrawContext {
   lineJoin: "bevel" | "round" | "miter";
 }
 
-// Height-based color palette for Canvas 2D terrain background.
-// Colors map to height ranges after the water threshold.
-// These approximate the visual terrain biome colors seen in the 3D view.
-const MINIMAP_TERRAIN_COLORS: Array<{
-  maxHeight: number;
-  r: number;
-  g: number;
-  b: number;
-}> = [
-  { maxHeight: TERRAIN_CONSTANTS.WATER_THRESHOLD - 2, r: 30, g: 60, b: 130 }, // deep water
-  { maxHeight: TERRAIN_CONSTANTS.WATER_THRESHOLD - 0.5, r: 50, g: 100, b: 160 }, // shallow water (tightened to match visual terrain mesh)
-  { maxHeight: 15, r: 70, g: 110, b: 70 }, // near-shore land
-  { maxHeight: 22, r: 80, g: 140, b: 60 }, // low grassland
-  { maxHeight: 30, r: 90, g: 130, b: 50 }, // grassland
-  { maxHeight: 36, r: 110, g: 120, b: 55 }, // forest / rolling hills
-  { maxHeight: 42, r: 130, g: 110, b: 80 }, // highland
-  { maxHeight: 48, r: 140, g: 120, b: 95 }, // mountain
-  { maxHeight: Infinity, r: 160, g: 155, b: 155 }, // snow peak
-];
-
-/**
- * Async terrain background generator.
- *
- * Samples the terrain height grid at TERRAIN_SAMPLE_SIZE² points, yielding to
- * the browser between row-groups so the main thread is never blocked.  Each
- * yield costs ~0 frames but allows the GPU to present the next 3-D frame
- * before we resume — this is the correct fix for in-game choppiness caused by
- * synchronous noise calls inside requestAnimationFrame callbacks.
- *
- * Returns an OffscreenCanvas on success, or null if cancelled (the caller
- * increments the version token to cancel an in-flight generation).
- */
-async function generateTerrainChunked(
-  terrainSystem: {
-    getHeightAt: (x: number, z: number) => number;
-    getWaterBodyRegistry?: () => {
-      getWaterSurfaceAt: (x: number, z: number) => number;
-    };
-  },
-  centerX: number,
-  centerZ: number,
-  extent: number,
-  upX: number,
-  upZ: number,
-  isCancelled: () => boolean,
-): Promise<OffscreenCanvas | null> {
-  const S = TERRAIN_SAMPLE_SIZE;
-  const offscreen = new OffscreenCanvas(S, S);
-  const osCtx = offscreen.getContext("2d");
-  if (!osCtx) return null;
-
-  const imageData = osCtx.createImageData(S, S);
-  const data = imageData.data;
-  // right = cross(view, up) for camera looking down -Y: (-upZ, upX) in XZ
-  const rightX = -upZ;
-  const rightZ = upX;
-  // Cache registry for elevated water body checks
-  const registry = terrainSystem.getWaterBodyRegistry?.();
-
-  // --- Two-pass approach for consistent water boundary ---
-  // The 3D water shader uses a shore-distance-based opacity ramp that makes
-  // the first ~2m of water near shore fully transparent. A simple depth
-  // threshold can't match this because depth ≠ shore distance on steep terrain.
-  //
-  // Instead: Pass 1 builds a raw water mask using the same threshold as the
-  // water mesh (h < waterSurface). Pass 2 erodes the mask by 1 pixel — any
-  // water pixel adjacent to land becomes land. This removes the transparent
-  // shore fringe from the minimap, matching what the player actually sees.
-
-  // Pass 1: Sample heights and build raw water mask
-  const heights = new Float32Array(S * S);
-  const waterMask = new Uint8Array(S * S);
-  const waterSurfaces = new Float32Array(S * S);
-
-  for (let sy = 0; sy < S; sy++) {
-    if (isCancelled()) return null;
-    for (let sx = 0; sx < S; sx++) {
-      const px = (sx + 0.5) / S;
-      const py = (sy + 0.5) / S;
-      const ndcX = px * 2 - 1;
-      const ndcY = py * 2 - 1;
-      const worldX = centerX + ndcX * rightX * extent - ndcY * upX * extent;
-      const worldZ = centerZ + ndcX * rightZ * extent - ndcY * upZ * extent;
-
-      const i = sy * S + sx;
-      const h = terrainSystem.getHeightAt(worldX, worldZ);
-      const ws = registry
-        ? registry.getWaterSurfaceAt(worldX, worldZ)
-        : TERRAIN_CONSTANTS.WATER_THRESHOLD;
-      heights[i] = h;
-      waterSurfaces[i] = ws;
-      waterMask[i] = h < ws ? 1 : 0;
-    }
-    if (sy % 10 === 9) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      if (isCancelled()) return null;
-    }
-  }
-
-  // Pass 2: Render with eroded water mask
-  // A water pixel is only shown as water if ALL 4 cardinal neighbors are also
-  // water. This pulls the minimap shore inward by ~1 pixel, matching the 3D
-  // water's edge-fade transparency zone.
-  for (let sy = 0; sy < S; sy++) {
-    for (let sx = 0; sx < S; sx++) {
-      const i = sy * S + sx;
-      const h = heights[i];
-      const ws = waterSurfaces[i];
-
-      // Eroded water check: water only if this pixel AND all 4 neighbors are water
-      let isWater = waterMask[i] === 1;
-      if (isWater) {
-        if (sx > 0 && !waterMask[i - 1]) isWater = false;
-        else if (sx < S - 1 && !waterMask[i + 1]) isWater = false;
-        else if (sy > 0 && !waterMask[i - S]) isWater = false;
-        else if (sy < S - 1 && !waterMask[i + S]) isWater = false;
-      }
-
-      let r: number, g: number, b: number;
-      if (isWater) {
-        // Water pixel — depth relative to effective water surface
-        const depth = ws - h;
-        if (depth > 2) {
-          r = 30;
-          g = 60;
-          b = 130; // deep water
-        } else {
-          r = 50;
-          g = 100;
-          b = 160; // shallow water
-        }
-      } else {
-        // Land pixel — use terrain color table (skip water entries)
-        r = 70;
-        g = 110;
-        b = 70; // default: near-shore land
-        for (let ci = 2; ci < MINIMAP_TERRAIN_COLORS.length; ci++) {
-          const entry = MINIMAP_TERRAIN_COLORS[ci];
-          if (h < entry.maxHeight) {
-            r = entry.r;
-            g = entry.g;
-            b = entry.b;
-            break;
-          }
-        }
-        // Elevation-based brightness lift
-        const lift =
-          Math.min(30, ((h - TERRAIN_CONSTANTS.WATER_THRESHOLD) / 40) * 30) | 0;
-        r = Math.min(255, r + lift);
-        g = Math.min(255, g + lift);
-        b = Math.min(255, b + lift);
-      }
-
-      const idx = i * 4;
-      data[idx] = r;
-      data[idx + 1] = g;
-      data[idx + 2] = b;
-      data[idx + 3] = 255;
-    }
-  }
-
-  osCtx.putImageData(imageData, 0, 0);
-  return offscreen;
-}
-
 /**
  * Pre-allocated flat pixel-path buffer — zero heap allocation per road per frame.
  * Stores (x, y) pairs for all visible road points in a single contiguous block.
  * Grows by doubling when capacity is exceeded; never shrinks.
  */
-let _roadPixelBuf = new Float32Array(4096 * 2);
-
-function ensureRoadPixelBufCapacity(needed: number): void {
-  if (_roadPixelBuf.length >= needed * 2) return;
-  let n = _roadPixelBuf.length;
+function ensureRoadPixelBufCapacity(
+  roadPixelBufRef: React.MutableRefObject<Float32Array>,
+  needed: number,
+): void {
+  if (roadPixelBufRef.current.length >= needed * 2) return;
+  let n = roadPixelBufRef.current.length;
   while (n < needed * 2) n *= 2;
-  _roadPixelBuf = new Float32Array(n);
+  roadPixelBufRef.current = new Float32Array(n);
 }
 
 /** Per-road projected data — populated once per frame, two-pass rendered */
@@ -270,9 +98,6 @@ type ProjectedRoad = {
   fill: number;
   outline: number;
 };
-/** Module-level reusable array — cleared with .length = 0 each draw call (zero allocation) */
-const _projectedRoads: ProjectedRoad[] = [];
-
 /**
  * Project a world XZ point to canvas pixel coordinates using the camera's
  * projection-view matrix — the same transform used for entity pips.
@@ -288,10 +113,11 @@ function worldToPx(
   scratchVec: THREE.Vector3,
   cw: number,
   ch: number,
-): [number, number] {
+): void {
   scratchVec.set(wx, 0, wz);
   scratchVec.applyMatrix4(projectionViewMatrix);
-  return [(scratchVec.x * 0.5 + 0.5) * cw, (scratchVec.y * -0.5 + 0.5) * ch];
+  scratchVec.x = (scratchVec.x * 0.5 + 0.5) * cw;
+  scratchVec.y = (scratchVec.y * -0.5 + 0.5) * ch;
 }
 
 /**
@@ -309,6 +135,8 @@ function drawRoadsAndBuildingsOverlay(
   ctx: CanvasRenderingContext2D,
   roads: MinimapRoadWithAABB[] | null,
   towns: MinimapTown[] | null,
+  roadPixelBufRef: React.MutableRefObject<Float32Array>,
+  projectedRoadsRef: React.MutableRefObject<ProjectedRoad[]>,
   projectionViewMatrix: THREE.Matrix4,
   scratchVec: THREE.Vector3,
   camX: number,
@@ -340,11 +168,13 @@ function drawRoadsAndBuildingsOverlay(
         continue;
       totalVisiblePts += road.path.length;
     }
-    ensureRoadPixelBufCapacity(totalVisiblePts);
+    ensureRoadPixelBufCapacity(roadPixelBufRef, totalVisiblePts);
+    const roadPixelBuf = roadPixelBufRef.current;
+    const projectedRoads = projectedRoadsRef.current;
 
     // Pass 1 (projection) — write XY pairs into _roadPixelBuf, store subarray
     // views in _projectedRoads.  Zero Float32Array allocations per frame.
-    _projectedRoads.length = 0;
+    projectedRoads.length = 0;
     let _bufOffset = 0;
 
     for (const road of roads) {
@@ -366,7 +196,7 @@ function drawRoadsAndBuildingsOverlay(
 
       const ptsBase = _bufOffset;
       for (let ri = 0; ri < road.path.length; ri++) {
-        const [px, py] = worldToPx(
+        worldToPx(
           road.path[ri].x,
           road.path[ri].z,
           projectionViewMatrix,
@@ -374,25 +204,25 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
-        _roadPixelBuf[_bufOffset++] = px;
-        _roadPixelBuf[_bufOffset++] = py;
+        roadPixelBuf[_bufOffset++] = scratchVec.x;
+        roadPixelBuf[_bufOffset++] = scratchVec.y;
       }
-      _projectedRoads.push({
-        pts: _roadPixelBuf.subarray(ptsBase, _bufOffset),
+      projectedRoads.push({
+        pts: roadPixelBuf.subarray(ptsBase, _bufOffset),
         len: road.path.length,
         fill: scaledFill,
         outline: scaledOutline,
       });
     }
 
-    if (_projectedRoads.length > 0) {
+    if (projectedRoads.length > 0) {
       ctx.save();
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
 
       // Pass 2 — outlines only (all roads)
-      ctx.strokeStyle = "rgb(140, 110, 65)";
-      for (const r of _projectedRoads) {
+      ctx.strokeStyle = ROAD_OUTLINE_COLOR;
+      for (const r of projectedRoads) {
         ctx.lineWidth = r.outline;
         ctx.beginPath();
         ctx.moveTo(r.pts[0], r.pts[1]);
@@ -402,8 +232,8 @@ function drawRoadsAndBuildingsOverlay(
       }
 
       // Pass 3 — fills only (all roads)
-      ctx.strokeStyle = "rgb(200, 175, 125)";
-      for (const r of _projectedRoads) {
+      ctx.strokeStyle = ROAD_FILL_COLOR;
+      for (const r of projectedRoads) {
         ctx.lineWidth = r.fill;
         ctx.beginPath();
         ctx.moveTo(r.pts[0], r.pts[1]);
@@ -419,8 +249,8 @@ function drawRoadsAndBuildingsOverlay(
     ctx.save();
     // Building stroke scales with zoom but clamped to a thin line
     ctx.lineWidth = Math.max(
-      BUILDING_LINE_WIDTH_PX,
-      Math.min(3, worldToPixel * 0.3),
+      BUILDING_LINE_WIDTH_PX + 0.25,
+      Math.min(3.25, worldToPixel * 0.35),
     );
     for (const town of towns) {
       for (const building of town.buildings) {
@@ -438,7 +268,7 @@ function drawRoadsAndBuildingsOverlay(
         const sin = Math.sin(building.rotation);
 
         // Project 4 rotated corners through the camera matrix
-        const [p0x, p0y] = worldToPx(
+        worldToPx(
           bx + cos * hw - sin * hd,
           bz + sin * hw + cos * hd,
           projectionViewMatrix,
@@ -446,7 +276,10 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
-        const [p1x, p1y] = worldToPx(
+        const p0x = scratchVec.x;
+        const p0y = scratchVec.y;
+
+        worldToPx(
           bx - cos * hw - sin * hd,
           bz - sin * hw + cos * hd,
           projectionViewMatrix,
@@ -454,7 +287,10 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
-        const [p2x, p2y] = worldToPx(
+        const p1x = scratchVec.x;
+        const p1y = scratchVec.y;
+
+        worldToPx(
           bx - cos * hw + sin * hd,
           bz - sin * hw - cos * hd,
           projectionViewMatrix,
@@ -462,7 +298,10 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
-        const [p3x, p3y] = worldToPx(
+        const p2x = scratchVec.x;
+        const p2y = scratchVec.y;
+
+        worldToPx(
           bx + cos * hw + sin * hd,
           bz + sin * hw - cos * hd,
           projectionViewMatrix,
@@ -470,6 +309,8 @@ function drawRoadsAndBuildingsOverlay(
           cw,
           ch,
         );
+        const p3x = scratchVec.x;
+        const p3y = scratchVec.y;
 
         ctx.beginPath();
         ctx.moveTo(p0x, p0y);
@@ -477,9 +318,9 @@ function drawRoadsAndBuildingsOverlay(
         ctx.lineTo(p2x, p2y);
         ctx.lineTo(p3x, p3y);
         ctx.closePath();
-        ctx.fillStyle = "rgb(130, 110, 85)";
+        ctx.fillStyle = BUILDING_FILL_COLOR;
         ctx.fill();
-        ctx.strokeStyle = "rgb(70, 55, 35)";
+        ctx.strokeStyle = BUILDING_STROKE_COLOR;
         ctx.stroke();
       }
     }
@@ -521,23 +362,6 @@ function createRenderState(): MinimapRenderState {
     projectionViewMatrix: new THREE.Matrix4(),
     hasCachedMatrix: false,
   };
-}
-
-interface EntityPip {
-  id: string;
-  type: "player" | "enemy" | "building" | "item" | "resource" | "quest";
-  position: THREE.Vector3;
-  color: string;
-  /** Whether this pip is actively selected/tracked (for pulse animation) */
-  isActive?: boolean;
-  /** Shape variant for special rendering */
-  icon?: "star" | "circle" | "diamond";
-  /** Group member index for color assignment (-1 or undefined = not in group) */
-  groupIndex?: number;
-  /** Whether this is the local player (renders as square) */
-  isLocalPlayer?: boolean;
-  /** Location subtype for minimap icons (bank, shop, altar, etc.) */
-  subType?: string;
 }
 
 /** Augmented window type covering all Hyperscape globals written to window */
@@ -948,19 +772,6 @@ interface TerrainSystemLike {
   };
 }
 
-/**
- * Config properties read from entity data for minimap icon detection.
- * Used by both NPC (services/questIds) and resource (resourceType/harvestSkill) entities.
- * The entity system doesn't expose typed config yet — this documents the expected shape
- * until ECS types land.
- */
-interface MinimapEntityConfig {
-  services?: string[];
-  questIds?: string[];
-  resourceType?: string;
-  harvestSkill?: string;
-}
-
 /** Network send interface needed for server-authoritative move requests */
 interface WorldNetworkSend {
   network: { send: (method: string, data: unknown) => void };
@@ -969,27 +780,6 @@ interface WorldNetworkSend {
 /** Minimal structural interface for elements that can be rotated via inline style */
 interface CSSStylable {
   style: { transform: string };
-}
-
-type ServerQuestStatus =
-  | "not_started"
-  | "in_progress"
-  | "ready_to_complete"
-  | "completed";
-type ClientQuestState = "available" | "active" | "completed";
-
-function mapQuestStatus(status: ServerQuestStatus): ClientQuestState {
-  switch (status) {
-    case "not_started":
-      return "available";
-    case "in_progress":
-    case "ready_to_complete":
-      return "active";
-    case "completed":
-      return "completed";
-    default:
-      return "available";
-  }
 }
 
 /** Drag handle props passed from Window component for edit mode dragging */
@@ -1056,31 +846,20 @@ function MinimapInner({
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const entityPipsRefForRender = useRef<EntityPip[]>([]);
   const entityCacheRef = useRef<Map<string, EntityPip>>(new Map());
+  const roadPixelBufRef = useRef(new Float32Array(4096 * 2));
+  const projectedRoadsRef = useRef<ProjectedRoad[]>([]);
   // Per-instance render state — isolated from other Minimap instances
   const renderStateRef = useRef<MinimapRenderState>(createRenderState());
 
-  // Low-res (TERRAIN_SAMPLE_SIZE²) OffscreenCanvas used as terrain background cache.
-  // Drawing with mainCtx.drawImage scales it up with bilinear filtering — smooth and
-  // 16× cheaper than per-pixel sampling directly into the full-size canvas.
-  const terrainOffscreenRef = useRef<OffscreenCanvas | null>(null);
-  // World-space center when the cache was last generated (reused object — no per-frame allocation)
-  const terrainCacheCenterRef = useRef<{ x: number; z: number }>({
-    x: Infinity,
-    z: Infinity,
-  });
-  // Extent (half-width in world units) when the cache was last generated
-  const terrainCacheExtentRef = useRef<number>(0);
-  // Camera up vector when the cache was last generated (reused object)
-  const terrainCacheUpRef = useRef<{ x: number; z: number }>({ x: 0, z: -1 });
-  // Monotonically incrementing generation token.  Incrementing it cancels any
-  // in-flight generateTerrainChunked call (they check isCancelled() each row).
-  // Only the generation whose version still matches when it completes is accepted.
-  const terrainGenVersionRef = useRef(0);
-  // Mutex: true while an async terrain generation is running.
-  // Prevents overlapping generations — only one runs at a time.
-  // Without this gate, the version-increment cancel system would restart generation
-  // every 4 frames during rotation so no generation ever completes.
-  const terrainIsGeneratingRef = useRef(false);
+  const {
+    terrainOffscreenRef,
+    terrainCacheCenterRef,
+    terrainCacheExtentRef,
+    terrainCacheUpRef,
+    invalidateTerrainCache,
+    clearTerrainCache,
+    ensureTerrainCache,
+  } = useMinimapTerrainCache(world);
 
   // Cached 2D rendering contexts — avoids DOM query every frame
   const mainCtxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -1097,57 +876,7 @@ function MinimapInner({
   const questStatusesRef = useRef<Map<string, string>>(new Map());
   const setQuestStatuses = useQuestSelectionStore((s) => s.setQuestStatuses);
 
-  // Fetch quest statuses from server for minimap quest icons
-  useEffect(() => {
-    const fetchQuestList = () => {
-      world.network?.send?.("getQuestList", {});
-    };
-
-    const onQuestList = (data: unknown) => {
-      if (typeof data !== "object" || data === null) return;
-      const payload = data as {
-        quests?: Array<{ id: string; status: ServerQuestStatus }>;
-      };
-      if (!Array.isArray(payload.quests)) return;
-
-      // Single pass: build both the fast-lookup Map (for entity interval)
-      // and the mapped array (for the quest selection store).
-      const map = new Map<string, string>();
-      const mapped: Array<{ id: string; state: ClientQuestState }> = [];
-      for (const q of payload.quests) {
-        const state = mapQuestStatus(q.status);
-        map.set(q.id, state);
-        mapped.push({ id: q.id, state });
-      }
-      questStatusesRef.current = map;
-      setQuestStatuses(mapped);
-    };
-
-    const onQuestEvent = () => {
-      fetchQuestList();
-    };
-
-    world.network?.on("questList", onQuestList);
-    world.network?.on("questStarted", onQuestEvent);
-    world.network?.on("questProgressed", onQuestEvent);
-    world.network?.on("questCompleted", onQuestEvent);
-    world.on(EventType.QUEST_STARTED, onQuestEvent);
-    world.on(EventType.QUEST_PROGRESSED, onQuestEvent);
-    world.on(EventType.QUEST_COMPLETED, onQuestEvent);
-
-    // Initial fetch
-    fetchQuestList();
-
-    return () => {
-      world.network?.off("questList", onQuestList);
-      world.network?.off("questStarted", onQuestEvent);
-      world.network?.off("questProgressed", onQuestEvent);
-      world.network?.off("questCompleted", onQuestEvent);
-      world.off(EventType.QUEST_STARTED, onQuestEvent);
-      world.off(EventType.QUEST_PROGRESSED, onQuestEvent);
-      world.off(EventType.QUEST_COMPLETED, onQuestEvent);
-    };
-  }, [world, setQuestStatuses]);
+  useQuestStatusSync({ world, questStatusesRef, setQuestStatuses });
 
   // Collapsed state for collapsible minimap
   const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
@@ -1185,6 +914,7 @@ function MinimapInner({
     w: number;
     h: number;
   } | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
   // Tracks the latest clamped size so handleUp always reads the post-drag value,
   // not the stale closure-captured size from when the pointerdown fired.
   const latestSizeRef = useRef({ w: initialWidth, h: initialHeight });
@@ -1197,11 +927,12 @@ function MinimapInner({
   }, [width, height, zoom]);
 
   // Minimap zoom state (orthographic half-extent in world units)
-  const [extent, setExtent] = useState<number>(sizeBasedExtent);
-  const extentRef = useRef<number>(extent); // Ref for synchronous access in render loop
+  const [targetExtent, setTargetExtent] = useState<number>(sizeBasedExtent);
+  const targetExtentRef = useRef<number>(targetExtent);
+  const extentRef = useRef<number>(targetExtent); // Live displayed extent for render loop
   // Update extent when size changes (reveals more map)
   useEffect(() => {
-    setExtent(sizeBasedExtent);
+    setTargetExtent(sizeBasedExtent);
   }, [sizeBasedExtent]);
 
   // Always rotate with the main camera (RS3-style).
@@ -1225,10 +956,10 @@ function MinimapInner({
 
     // Create orthographic camera for overhead view
     const camera = new THREE.OrthographicCamera(
-      -extent,
-      extent,
-      extent,
-      -extent,
+      -targetExtentRef.current,
+      targetExtentRef.current,
+      targetExtentRef.current,
+      -targetExtentRef.current,
       0.1,
       2000,
     );
@@ -1265,7 +996,7 @@ function MinimapInner({
     overlayCtxRef.current = overlayCanvas.getContext("2d");
 
     // Invalidate terrain cache when canvas dimensions change
-    terrainOffscreenRef.current = null;
+    invalidateTerrainCache();
 
     // Note: extent intentionally omitted - changes handled via extentRef in render loop
   }, [width, height, world]);
@@ -1279,12 +1010,7 @@ function MinimapInner({
         cameraRef.current = null;
       }
 
-      // Cancel any in-flight async terrain generation and clear caches
-      terrainGenVersionRef.current++;
-      terrainIsGeneratingRef.current = false;
-      terrainOffscreenRef.current = null;
-      terrainCacheCenterRef.current.x = Infinity;
-      terrainCacheCenterRef.current.z = Infinity;
+      clearTerrainCache();
       roadsCacheRef.current = null;
       roadsWithAABBRef.current = null;
       townsCacheRef.current = null;
@@ -1293,316 +1019,30 @@ function MinimapInner({
       entityCacheRef.current.clear();
       // Clear icon flyweight cache so OffscreenCanvas objects can be GC'd
       _iconCache.clear();
+      // Remove any dangling resize listeners if unmounted mid-drag
+      resizeCleanupRef.current?.();
     };
-  }, []);
+  }, [clearTerrainCache]);
 
   // Keep extent ref in sync with state for render loop access
   useEffect(() => {
-    extentRef.current = extent;
-  }, [extent]);
+    targetExtentRef.current = targetExtent;
+  }, [targetExtent]);
 
-  // Collect entity data for pips (update at a moderate cadence, only when visible)
-  useEffect(() => {
-    if (!world.entities || !isVisible) return;
-
-    let intervalId: number | null = null;
-
-    // Single mutable array written directly to the render ref each interval.
-    // Cleared with .length = 0 and repopulated — no allocations between ticks.
-    const workingPips: EntityPip[] = [];
-    const seenIds = new Set<string>();
-
-    const update = () => {
-      // Clear working arrays (reuse allocation)
-      workingPips.length = 0;
-      seenIds.clear();
-
-      const player = world.entities?.player as Entity | undefined;
-      let playerPipId: string | null = null;
-
-      // World-space cull origin: player position (or spectator target).
-      // Entities beyond 1.5× the current view extent are skipped in the build
-      // loop so we never allocate/update pips for things off the minimap.
-      // 1.5× gives a comfortable margin so pips near the edge are never clipped.
-      const buildCullExtent = extentRef.current * 1.5;
-      let buildOriginX = 0;
-      let buildOriginZ = 0;
-      let hasBuildOrigin = false;
-
-      if (player?.node?.position) {
-        // Normal mode: local player is the green pip
-        // Reuse cached pip if available
-        let playerPip = entityCacheRef.current.get("local-player");
-        if (!playerPip) {
-          playerPip = {
-            id: "local-player",
-            type: "player",
-            position: player.node.position,
-            color: "#ffffff",
-            isLocalPlayer: true,
-          };
-          entityCacheRef.current.set("local-player", playerPip);
-        } else {
-          playerPip.position = player.node.position;
-          playerPip.color = "#ffffff";
-          playerPip.isLocalPlayer = true;
-        }
-        workingPips.push(playerPip);
-        seenIds.add("local-player");
-        playerPipId = player.id;
-        buildOriginX = player.node.position.x;
-        buildOriginZ = player.node.position.z;
-        hasBuildOrigin = true;
-      } else {
-        // Spectator mode: get spectated entity from camera system as green pip
-        const spectatorTarget = getSpectatorTarget(world);
-        if (spectatorTarget) {
-          let spectatedPip = entityCacheRef.current.get("spectated-player");
-          if (!spectatedPip) {
-            spectatedPip = {
-              id: "spectated-player",
-              type: "player",
-              position: new THREE.Vector3(
-                spectatorTarget.position.x,
-                0,
-                spectatorTarget.position.z,
-              ),
-              color: "#ffffff",
-              isLocalPlayer: true,
-            };
-            entityCacheRef.current.set("spectated-player", spectatedPip);
-          } else {
-            spectatedPip.position.set(
-              spectatorTarget.position.x,
-              0,
-              spectatorTarget.position.z,
-            );
-            spectatedPip.color = "#ffffff";
-            spectatedPip.isLocalPlayer = true;
-          }
-          workingPips.push(spectatedPip);
-          seenIds.add("spectated-player");
-          playerPipId = spectatorTarget.id ?? null;
-          buildOriginX = spectatorTarget.position.x;
-          buildOriginZ = spectatorTarget.position.z;
-          hasBuildOrigin = true;
-        }
-      }
-
-      // Add other players using entities system for reliable positions
-      if (world.entities) {
-        const players = world.entities.getAllPlayers();
-        for (let i = 0; i < players.length; i++) {
-          const otherPlayer = players[i];
-          // Skip local player or spectated entity (already shown as green pip)
-          if (
-            (player && otherPlayer.id === player.id) ||
-            (playerPipId && otherPlayer.id === playerPipId)
-          ) {
-            continue;
-          }
-          const otherEntity = world.entities.get(otherPlayer.id);
-          if (otherEntity && otherEntity.node && otherEntity.node.position) {
-            // Reuse existing pip from cache if available to avoid GC pressure
-            let playerPip = entityCacheRef.current.get(otherPlayer.id);
-            if (playerPip) {
-              // Reuse existing Vector3, just update coordinates
-              playerPip.position.set(
-                otherEntity.node.position.x,
-                0,
-                otherEntity.node.position.z,
-              );
-              playerPip.color = "#ffffff";
-            } else {
-              // New entity, create a new Vector3
-              playerPip = {
-                id: otherPlayer.id,
-                type: "player",
-                position: new THREE.Vector3(
-                  otherEntity.node.position.x,
-                  0,
-                  otherEntity.node.position.z,
-                ),
-                color: "#ffffff",
-              };
-              entityCacheRef.current.set(otherPlayer.id, playerPip);
-            }
-            workingPips.push(playerPip);
-            seenIds.add(otherPlayer.id);
-          }
-        }
-      }
-
-      // Add pips for all known entities safely (cached)
-      // Note: We use the entity system exclusively for detecting mobs/buildings.
-      // Scene traversal was removed as it caused stale dots (matched static objects by name)
-      if (world.entities) {
-        const allEntities = world.entities.getAll();
-        for (let i = 0; i < allEntities.length; i++) {
-          const entity = allEntities[i];
-          // Skip if no valid position
-          const pos = entity?.position;
-          if (!pos) continue;
-
-          // Build-loop world-space pre-cull: skip entities far outside the
-          // minimap view so we never allocate/update pips for invisible entities.
-          if (
-            hasBuildOrigin &&
-            (Math.abs(pos.x - buildOriginX) > buildCullExtent ||
-              Math.abs(pos.z - buildOriginZ) > buildCullExtent)
-          )
-            continue;
-
-          let color = "#ffffff";
-          let type: EntityPip["type"] = "item";
-          let subType: string | undefined;
-
-          switch (entity.type) {
-            case "player":
-              // Already handled above; skip to avoid duplicates
-              continue;
-            case "mob":
-            case "enemy":
-              color = "#ffff00"; // OSRS: yellow for NPCs/mobs
-              type = "enemy";
-              break;
-            case "npc": {
-              color = "#ffff00"; // OSRS: yellow for NPCs
-              type = "enemy"; // NPCs show as yellow dots like mobs
-              // Detect NPC service type for minimap icons
-              const npcConfig = (
-                entity as unknown as { config?: MinimapEntityConfig }
-              ).config;
-              const serviceTypes = npcConfig?.services;
-              if (serviceTypes?.includes("bank")) {
-                subType = "bank";
-              } else if (serviceTypes?.includes("shop")) {
-                subType = "shop";
-              }
-              // Quest icon with state awareness (overrides shop for quest+shop NPCs)
-              if (serviceTypes?.includes("quest")) {
-                const questIds = npcConfig?.questIds;
-                const statuses = questStatusesRef.current;
-                if (questIds && questIds.length > 0 && statuses.size > 0) {
-                  let hasAvailable = false;
-                  let hasActive = false;
-                  let allCompleted = true;
-                  for (const qid of questIds) {
-                    const state = statuses.get(qid);
-                    if (state === "available") hasAvailable = true;
-                    else if (state === "active") hasActive = true;
-                    if (state !== "completed") allCompleted = false;
-                  }
-                  if (hasAvailable) {
-                    subType = "quest_available";
-                  } else if (hasActive) {
-                    subType = "quest_in_progress";
-                  } else if (!allCompleted) {
-                    // No status data yet, show generic quest icon
-                    subType = "quest_available";
-                  }
-                  // If all completed, don't override subType (keep bank/shop or nothing)
-                } else {
-                  // No quest status data loaded yet, show generic quest icon
-                  subType = "quest_available";
-                }
-              }
-              break;
-            }
-            // All static building types with dedicated icons: the entity.type
-            // string is the same key used by drawMinimapIcon, so subType = entity.type.
-            case "bank":
-            case "furnace":
-            case "anvil":
-            case "range":
-            case "altar":
-            case "runecrafting_altar":
-              color = "#ffff00";
-              type = "building";
-              subType = entity.type;
-              break;
-            case "building":
-            case "structure":
-              color = "#ffff00"; // OSRS: yellow (same as NPCs)
-              type = "building";
-              break;
-            case "item":
-            case "loot":
-              color = "#ff0000"; // OSRS: red for ground items
-              type = "item";
-              break;
-            case "resource": {
-              color = "#ffff00"; // OSRS: yellow (same as NPCs)
-              type = "resource";
-              // Detect resource subtype for minimap icons
-              const resConfig = (
-                entity as unknown as { config?: MinimapEntityConfig }
-              ).config;
-              if (
-                resConfig?.resourceType === "fishing_spot" ||
-                resConfig?.harvestSkill === "fishing"
-              ) {
-                subType = "fishing";
-              } else if (
-                resConfig?.resourceType === "mining_rock" ||
-                resConfig?.harvestSkill === "mining"
-              ) {
-                subType = "mining";
-              } else if (
-                resConfig?.resourceType === "tree" ||
-                resConfig?.harvestSkill === "woodcutting"
-              ) {
-                subType = "tree";
-              }
-              break;
-            }
-            default:
-              color = "#cccccc";
-              type = "item";
-          }
-
-          // Reuse existing pip from cache if available to avoid GC pressure
-          let entityPip = entityCacheRef.current.get(entity.id);
-          if (entityPip) {
-            // Reuse existing Vector3, just update coordinates
-            entityPip.position.set(pos.x, 0, pos.z);
-            entityPip.type = type;
-            entityPip.color = color;
-            entityPip.subType = subType;
-          } else {
-            // New entity, create a new Vector3
-            entityPip = {
-              id: entity.id,
-              type,
-              position: new THREE.Vector3(pos.x, 0, pos.z),
-              color,
-              subType,
-            };
-            entityCacheRef.current.set(entity.id, entityPip);
-          }
-          workingPips.push(entityPip);
-          seenIds.add(entity.id);
-        }
-      }
-
-      // Clean up cache: remove entities that are no longer present
-      // This prevents stale pips from entities that despawned
-      const cacheKeys = entityCacheRef.current.keys();
-      for (const id of cacheKeys) {
-        if (!seenIds.has(id)) {
-          entityCacheRef.current.delete(id);
-        }
-      }
-
-      entityPipsRefForRender.current = workingPips;
-    };
-
-    update();
-    intervalId = window.setInterval(update, 200);
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [world, isVisible]);
+  useMinimapEntityPips({
+    world,
+    isVisible,
+    extentRef,
+    questStatusesRef,
+    entityPipsRefForRender,
+    entityCacheRef,
+  });
+  useMinimapWorldCaches({
+    world,
+    roadsCacheRef,
+    roadsWithAABBRef,
+    townsCacheRef,
+  });
 
   // Single unified render loop - handles camera position, frustum, and rendering
   // Uses refs for all state access to avoid restarting the RAF loop
@@ -1681,7 +1121,7 @@ function MinimapInner({
         if (destWorld) {
           const dx = destWorld.x - _tempTargetPos.x;
           const dz = destWorld.z - _tempTargetPos.z;
-          if (Math.hypot(dx, dz) < 0.6) {
+          if (dx * dx + dz * dz < 0.36) {
             lastDestinationWorldRef.current = null;
           }
         }
@@ -1691,18 +1131,31 @@ function MinimapInner({
         if (hw.__lastRaycastTarget) {
           const dx = hw.__lastRaycastTarget.x - _tempTargetPos.x;
           const dz = hw.__lastRaycastTarget.z - _tempTargetPos.z;
-          if (Math.hypot(dx, dz) < 0.6) delete hw.__lastRaycastTarget;
+          if (dx * dx + dz * dz < 0.36) delete hw.__lastRaycastTarget;
         }
       }
 
       // --- Camera Frustum Update (for zoom) ---
       if (cam) {
         const currentExtent = extentRef.current;
-        if (cam.right !== currentExtent) {
-          cam.left = -currentExtent;
-          cam.right = currentExtent;
-          cam.top = currentExtent;
-          cam.bottom = -currentExtent;
+        const desiredExtent = targetExtentRef.current;
+        if (Math.abs(desiredExtent - currentExtent) > 0.01) {
+          const zoomDelta = desiredExtent - currentExtent;
+          const zoomStep =
+            Math.sign(zoomDelta) *
+            Math.min(60, Math.max(2, Math.abs(zoomDelta) * 0.24));
+          const nextExtent =
+            Math.abs(zoomDelta) <= Math.abs(zoomStep)
+              ? desiredExtent
+              : currentExtent + zoomStep;
+          extentRef.current = nextExtent;
+        }
+        const liveExtent = extentRef.current;
+        if (cam.right !== liveExtent) {
+          cam.left = -liveExtent;
+          cam.right = liveExtent;
+          cam.top = liveExtent;
+          cam.bottom = -liveExtent;
           cam.updateProjectionMatrix();
         }
       }
@@ -1756,58 +1209,14 @@ function MinimapInner({
             // This eliminates the restart-cancel deadlock: previously, every 4-frame
             // terrain check during rotation would increment the version token and cancel
             // the in-flight generation before it could finish, freezing the minimap.
-            const cacheCtr = terrainCacheCenterRef.current;
-            const ddx = centerX - cacheCtr.x;
-            const ddz = centerZ - cacheCtr.z;
-            const moved = ddx * ddx + ddz * ddz > 400; // 20² world units
-            const extentChanged =
-              terrainCacheExtentRef.current !== currentExtent;
-            const needsRegen =
-              !terrainOffscreenRef.current || moved || extentChanged;
-
-            if (needsRegen && !terrainIsGeneratingRef.current) {
-              // Terrain generation runs OUTSIDE the RAF callback as an async
-              // task chain that yields every 10 rows.  The current (possibly
-              // stale) offscreen canvas is drawn below while generation runs.
-              const terrainSystem = world.getSystem("terrain") as
-                | TerrainSystemLike
-                | null
-                | undefined;
-              if (terrainSystem?.getHeightAt) {
-                const version = ++terrainGenVersionRef.current;
-                terrainIsGeneratingRef.current = true;
-                const snapCX = centerX;
-                const snapCZ = centerZ;
-                // Store visible extent for overlay coordinate math (worldToPx scale).
-                const snapVisExt = currentExtent;
-                // Generate at TERRAIN_OVERSHOOT × the visible extent so the corners of
-                // the canvas are always covered regardless of camera rotation angle.
-                const snapExt = currentExtent * TERRAIN_OVERSHOOT;
-                const snapUpX = upX;
-                const snapUpZ = upZ;
-
-                void generateTerrainChunked(
-                  terrainSystem,
-                  snapCX,
-                  snapCZ,
-                  snapExt,
-                  snapUpX,
-                  snapUpZ,
-                  () => terrainGenVersionRef.current !== version,
-                ).then((offscreen) => {
-                  terrainIsGeneratingRef.current = false;
-                  if (terrainGenVersionRef.current !== version || !offscreen)
-                    return;
-                  terrainOffscreenRef.current = offscreen;
-                  // Cache visible extent (not generation extent) so overlay worldToPx is scaled correctly
-                  terrainCacheCenterRef.current.x = snapCX;
-                  terrainCacheCenterRef.current.z = snapCZ;
-                  terrainCacheExtentRef.current = snapVisExt;
-                  terrainCacheUpRef.current.x = snapUpX;
-                  terrainCacheUpRef.current.z = snapUpZ;
-                });
-              }
-            }
+            ensureTerrainCache({
+              centerX,
+              centerZ,
+              currentExtent,
+              upX,
+              upZ,
+              viewportPixels: Math.max(cw, ch),
+            });
 
             // Apply a single canvas rotation transform so terrain + all vector overlays
             // rotate to the live camera orientation in one GPU operation.
@@ -1820,110 +1229,51 @@ function MinimapInner({
 
             if (terrainOffscreenRef.current) {
               mainCtx.imageSmoothingEnabled = true;
-              mainCtx.imageSmoothingQuality = "medium";
-              const drawW = cw * TERRAIN_OVERSHOOT;
-              const drawH = ch * TERRAIN_OVERSHOOT;
+              mainCtx.imageSmoothingQuality = "high";
               const cachedExt = terrainCacheExtentRef.current;
-              const inZoomTransition =
-                cachedExt > 0 && cachedExt !== currentExtent;
-
-              if (inZoomTransition) {
-                // Scale terrain draw during zoom transition so it matches the new extent
-                // and stays aligned with roads, buildings, and pips.
-                // Terrain image covers cachedExt*TERRAIN_OVERSHOOT world units; canvas shows currentExtent.
-                if (currentExtent < cachedExt) {
-                  // Zoom in: crop center of terrain to show currentExtent, draw at canvas size
-                  // so 1 world unit = cw/(2*currentExtent) pixels (matches worldToPx).
-                  const frac = currentExtent / (cachedExt * TERRAIN_OVERSHOOT);
-                  const srcSize = Math.max(1, Math.floor(50 * frac));
-                  const srcX = (50 - srcSize) / 2;
-                  const srcY = (50 - srcSize) / 2;
-                  mainCtx.drawImage(
-                    terrainOffscreenRef.current,
-                    srcX,
-                    srcY,
-                    srcSize,
-                    srcSize,
-                    0,
-                    0,
-                    cw,
-                    ch,
-                  );
-                } else {
-                  // Zoom out: scale terrain so it fills canvas at currentExtent.
-                  // Terrain = 2*cachedExt*TERRAIN_OVERSHOOT world units; need cw pixels = 2*currentExtent.
-                  // So draw at scaledW = cw * (cachedExt*TERRAIN_OVERSHOOT) / currentExtent.
-                  const scaledW =
-                    (cw * cachedExt * TERRAIN_OVERSHOOT) / currentExtent;
-                  const scaledH =
-                    (ch * cachedExt * TERRAIN_OVERSHOOT) / currentExtent;
-                  mainCtx.fillStyle = "#1a1a2e";
-                  mainCtx.fillRect(0, 0, cw, ch);
-                  mainCtx.drawImage(
-                    terrainOffscreenRef.current,
-                    0,
-                    0,
-                    50,
-                    50,
-                    cw / 2 - scaledW / 2,
-                    ch / 2 - scaledH / 2,
-                    scaledW,
-                    scaledH,
-                  );
-                }
-              } else {
-                // Normal: draw at TERRAIN_OVERSHOOT × canvas size, centered
-                mainCtx.drawImage(
-                  terrainOffscreenRef.current,
-                  cw / 2 - drawW / 2,
-                  ch / 2 - drawH / 2,
-                  drawW,
-                  drawH,
-                );
-              }
+              const extentScale = cachedExt > 0 ? cachedExt / currentExtent : 1;
+              // Draw stale snapshots at their true world scale. When rapidly
+              // zooming out, keep at least viewport coverage so we never expose
+              // a hard black box while the replacement cache is generated.
+              const drawScale = Math.max(1 / TERRAIN_OVERSHOOT, extentScale);
+              const drawW = cw * TERRAIN_OVERSHOOT * drawScale;
+              const drawH = ch * TERRAIN_OVERSHOOT * drawScale;
+              const cachedUpX = terrainCacheUpRef.current.x;
+              const cachedUpZ = terrainCacheUpRef.current.z;
+              const cachedRightX = -cachedUpZ;
+              const cachedRightZ = cachedUpX;
+              const cachedCenterX = terrainCacheCenterRef.current.x;
+              const cachedCenterZ = terrainCacheCenterRef.current.z;
+              const centerDeltaX = centerX - cachedCenterX;
+              const centerDeltaZ = centerZ - cachedCenterZ;
+              // Project center deltas into the cached terrain basis, not the
+              // live camera basis. The cached image is authored in that older
+              // orientation and then globally rotated above via deltaYaw.
+              const offsetRight =
+                centerDeltaX * cachedRightX + centerDeltaZ * cachedRightZ;
+              const offsetUp =
+                centerDeltaX * cachedUpX + centerDeltaZ * cachedUpZ;
+              const pixelsPerWorldX = cw / (2 * currentExtent);
+              const pixelsPerWorldY = ch / (2 * currentExtent);
+              const offsetX = -offsetRight * pixelsPerWorldX;
+              const offsetY = offsetUp * pixelsPerWorldY;
+              mainCtx.fillStyle = "#11161c";
+              mainCtx.fillRect(0, 0, cw, ch);
+              mainCtx.drawImage(
+                terrainOffscreenRef.current,
+                cw / 2 - drawW / 2 + offsetX,
+                ch / 2 - drawH / 2 + offsetY,
+                drawW,
+                drawH,
+              );
             } else {
               // Fallback: dark background until terrain system is ready
-              mainCtx.fillStyle = "#1a1a2e";
+              mainCtx.fillStyle = "#11161c";
               mainCtx.fillRect(0, 0, cw, ch);
             }
 
             // Restore canvas transform — terrain only, no overlays here
             mainCtx.restore();
-
-            // Populate road/town caches (cheap system queries, done once per session)
-            if (!roadsCacheRef.current) {
-              const roadSys = world.getSystem("roads") as {
-                getRoads?: () => MinimapRoad[];
-              } | null;
-              const roads = roadSys?.getRoads?.();
-              if (roads?.length) {
-                roadsCacheRef.current = roads;
-                // Pre-compute AABBs once — O(total_points) upfront, O(1) per road per frame
-                roadsWithAABBRef.current = roads.map((road) => {
-                  if (!road.path.length)
-                    return { ...road, minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
-                  let minX = road.path[0].x,
-                    maxX = road.path[0].x;
-                  let minZ = road.path[0].z,
-                    maxZ = road.path[0].z;
-                  for (let i = 1; i < road.path.length; i++) {
-                    const p = road.path[i];
-                    if (p.x < minX) minX = p.x;
-                    if (p.x > maxX) maxX = p.x;
-                    if (p.z < minZ) minZ = p.z;
-                    if (p.z > maxZ) maxZ = p.z;
-                  }
-                  return { ...road, minX, maxX, minZ, maxZ };
-                });
-              }
-            }
-            if (!townsCacheRef.current) {
-              const townSys = world.getSystem("towns") as {
-                getTowns?: () => MinimapTown[];
-              } | null;
-              const towns = townSys?.getTowns?.();
-              if (towns?.length) townsCacheRef.current = towns;
-            }
           }
         }
       }
@@ -1933,6 +1283,8 @@ function MinimapInner({
       if (ctx) {
         const cw = overlayCanvas.width;
         const ch = overlayCanvas.height;
+        const viewportW = widthRef.current;
+        const viewportH = heightRef.current;
         ctx.clearRect(0, 0, cw, ch);
 
         // ── Roads & buildings ─────────────────────────────────────────────────
@@ -1944,6 +1296,8 @@ function MinimapInner({
             ctx,
             roadsWithAABBRef.current,
             townsCacheRef.current,
+            roadPixelBufRef,
+            projectedRoadsRef,
             _cachedProjectionViewMatrix,
             _tempProjectVec,
             cam.position.x,
@@ -1984,16 +1338,11 @@ function MinimapInner({
             _tempProjectVec.applyMatrix4(_cachedProjectionViewMatrix);
 
             // Use refs for width/height to avoid stale closure values during resize
-            const x = (_tempProjectVec.x * 0.5 + 0.5) * widthRef.current;
-            const y = (_tempProjectVec.y * -0.5 + 0.5) * heightRef.current;
+            const x = (_tempProjectVec.x * 0.5 + 0.5) * viewportW;
+            const y = (_tempProjectVec.y * -0.5 + 0.5) * viewportH;
 
             // Only draw if within bounds (use refs for current dimensions)
-            if (
-              x >= 0 &&
-              x <= widthRef.current &&
-              y >= 0 &&
-              y <= heightRef.current
-            ) {
+            if (x >= 0 && x <= viewportW && y >= 0 && y <= viewportH) {
               // Pip radius — default 3px; player and quest are the only exceptions
               let radius = 3;
               const borderColor = "#000000";
@@ -2076,22 +1425,25 @@ function MinimapInner({
         // Draw destination like world clicks: project world target to minimap
         const lastTarget = (window as HyperscapeWindow).__lastRaycastTarget;
         const destWorldRef = lastDestinationWorldRef.current;
-        const target =
+        const hasLastTarget =
           lastTarget &&
           Number.isFinite(lastTarget.x) &&
-          Number.isFinite(lastTarget.z)
-            ? { x: lastTarget.x, z: lastTarget.z }
-            : destWorldRef
-              ? { x: destWorldRef.x, z: destWorldRef.z }
-              : null;
-        if (target && rs.hasCachedMatrix) {
+          Number.isFinite(lastTarget.z);
+        const targetX = hasLastTarget ? lastTarget.x : destWorldRef?.x;
+        const targetZ = hasLastTarget ? lastTarget.z : destWorldRef?.z;
+
+        if (
+          rs.hasCachedMatrix &&
+          targetX !== undefined &&
+          targetZ !== undefined
+        ) {
           // Reuse pre-allocated vector instead of creating new one
-          _tempDestVec.set(target.x, 0, target.z);
+          _tempDestVec.set(targetX, 0, targetZ);
           // Apply cached projection-view matrix to stay synced with throttled 3D render
           _tempDestVec.applyMatrix4(_cachedProjectionViewMatrix);
           // Use refs for width/height to avoid stale closure values during resize
-          const sx = (_tempDestVec.x * 0.5 + 0.5) * widthRef.current;
-          const sy = (_tempDestVec.y * -0.5 + 0.5) * heightRef.current;
+          const sx = (_tempDestVec.x * 0.5 + 0.5) * viewportW;
+          const sy = (_tempDestVec.y * -0.5 + 0.5) * viewportH;
           // RS3-style red flag destination marker
           drawFlag(ctx, sx, sy);
         }
@@ -2229,7 +1581,7 @@ function MinimapInner({
         Math.min(5, Math.round(Math.abs(e.deltaY) / 100)),
       );
       // Use functional update to always have the latest extent value
-      setExtent((prev) =>
+      setTargetExtent((prev) =>
         THREE.MathUtils.clamp(
           prev + sign * steps * STEP_EXTENT,
           MIN_EXTENT,
@@ -2293,17 +1645,23 @@ function MinimapInner({
         latestSizeRef.current = { w: clampedW, h: clampedH };
       };
 
+      const cleanupResize = () => {
+        window.removeEventListener("pointermove", handleMove);
+        window.removeEventListener("pointerup", handleUp);
+        resizeCleanupRef.current = null;
+      };
+
       const handleUp = () => {
         setIsResizing(false);
         resizeStartRef.current = null;
         // Read from ref — immune to stale closure over currentWidth/currentHeight
         onSizeChange?.(latestSizeRef.current.w, latestSizeRef.current.h);
-        window.removeEventListener("pointermove", handleMove);
-        window.removeEventListener("pointerup", handleUp);
+        cleanupResize();
       };
 
       window.addEventListener("pointermove", handleMove);
       window.addEventListener("pointerup", handleUp);
+      resizeCleanupRef.current = cleanupResize;
     },
     [resizable, width, height, minSize, maxSize, onSizeChange],
   );

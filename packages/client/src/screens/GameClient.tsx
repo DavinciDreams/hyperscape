@@ -3,15 +3,9 @@ import {
   CDN_URL,
   normalizeBrowserLoopbackUrl,
 } from "@/lib/api-config";
-import { resolveGameClientUiDisplay } from "@/lib/gameClientUi";
 import type { PublicRuntimeEnv, StreamingWindow } from "@/lib/streamingWindow";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  THREE,
-  createClientWorld,
-  EventType,
-  System,
-} from "@hyperscape/shared";
+import { THREE, createClientWorld, System } from "@hyperscape/shared";
 import { World } from "@hyperscape/shared";
 import { CoreUI } from "../game/CoreUI";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
@@ -29,6 +23,10 @@ interface GameClientProps {
   streamingMode?: boolean;
 }
 
+type WindowWithEnv = StreamingWindow & {
+  __CDN_URL?: string;
+  __ASSETS_URL?: string;
+};
 const getRuntimeEnv = (): PublicRuntimeEnv | undefined => {
   if (typeof window === "undefined") return undefined;
   return (window as StreamingWindow).env;
@@ -220,81 +218,69 @@ export function GameClient({
   const world = useMemo(() => {
     const w = createClientWorld();
 
-    // Expose world for browser debugging
-    (window as { world: InstanceType<typeof World> }).world = w;
+    if (import.meta.env.DEV) {
+      // Expose world for browser debugging in development only.
+      (window as { world?: InstanceType<typeof World> }).world = w;
 
-    // Install simple debug commands
-    const debugCommands = {
-      // Teleport camera to see mobs at Y=40+
-      seeHighEntities: () => {
-        if (w.camera) {
-          w.camera.position.set(10, 50, 10);
-          w.camera.lookAt(0, 40, 0);
-        }
-      },
-      // Teleport to ground level
-      seeGround: () => {
-        if (w.camera) {
-          w.camera.position.set(10, 5, 10);
-          w.camera.lookAt(0, 0, 0);
-        }
-      },
-      // List all mobs with positions
-      mobs: () => {
-        type EntityWithNode = {
-          type: string;
-          name: string;
-          node: { position: { toArray: () => number[] } };
-          mesh?: { visible: boolean };
-        };
-        type EntityManagerType = {
-          getAllEntities?: () => Map<string, EntityWithNode>;
-        };
+      const debugCommands = {
+        seeHighEntities: () => {
+          if (w.camera) {
+            w.camera.position.set(10, 50, 10);
+            w.camera.lookAt(0, 40, 0);
+          }
+        },
+        seeGround: () => {
+          if (w.camera) {
+            w.camera.position.set(10, 5, 10);
+            w.camera.lookAt(0, 0, 0);
+          }
+        },
+        mobs: () => {
+          type EntityWithNode = {
+            type: string;
+            name: string;
+            node: { position: { toArray: () => number[] } };
+            mesh?: { visible: boolean };
+          };
+          type EntityManagerType = {
+            getAllEntities?: () => Map<string, EntityWithNode>;
+          };
 
-        const entityManager = w.getSystem(
-          "entity-manager",
-        ) as EntityManagerType | null;
-        const mobs: Array<{
-          name: string;
-          position: number[];
-          hasMesh: boolean;
-          meshVisible: boolean;
-        }> = [];
+          const entityManager = w.getSystem(
+            "entity-manager",
+          ) as EntityManagerType | null;
+          const mobs: Array<{
+            name: string;
+            position: number[];
+            hasMesh: boolean;
+            meshVisible: boolean;
+          }> = [];
 
-        if (entityManager?.getAllEntities) {
-          for (const [_id, entity] of entityManager.getAllEntities()) {
-            if (entity.type === "mob") {
-              mobs.push({
-                name: entity.name,
-                position: entity.node.position.toArray(),
-                hasMesh: !!entity.mesh,
-                meshVisible: entity.mesh?.visible ?? false,
-              });
+          if (entityManager?.getAllEntities) {
+            for (const [_id, entity] of entityManager.getAllEntities()) {
+              if (entity.type === "mob") {
+                mobs.push({
+                  name: entity.name,
+                  position: entity.node.position.toArray(),
+                  hasMesh: !!entity.mesh,
+                  meshVisible: entity.mesh?.visible ?? false,
+                });
+              }
             }
           }
-        }
-        console.table(mobs);
-        return mobs;
-      },
-    };
-    (window as unknown as Record<string, unknown>).debug = debugCommands;
+          console.table(mobs);
+          return mobs;
+        },
+      };
+      (window as unknown as Record<string, unknown>).debug = debugCommands;
+    }
 
     return w;
   }, []);
-  const defaultUI = { visible: true, active: false, app: null, pane: null };
-  const [ui, setUI] = useState(defaultUI);
-  useEffect(() => {
-    const handleUI = (data: unknown) => {
-      setUI(
-        data as { visible: boolean; active: boolean; app: null; pane: null },
-      );
-    };
-    world.on(EventType.UI_UPDATE, handleUI, undefined);
-    return () => {
-      world.off(EventType.UI_UPDATE, handleUI, undefined, undefined);
-    };
-  }, [world]);
-
+  // The UI overlay container is always visible. Per-component visibility
+  // (HUD, sidebar, etc.) is controlled by the `hideUI` prop below.
+  // Component-scoped UI_UPDATE events are handled by CoreUI, Sidebar,
+  // and useInterfaceEvents — not at this level.
   // Handle window resize to update Three.js canvas
   useEffect(() => {
     const handleResize = () => {
@@ -373,8 +359,9 @@ export function GameClient({
         ? resolvedCdnUrl
         : `${resolvedCdnUrl}/`;
 
-      // Make CDN URL available globally for PhysX loading
-      (window as StreamingWindow).__CDN_URL = resolvedCdnUrl;
+      // Expose the initial asset base globally for early loaders and manifest fetches.
+      (window as WindowWithEnv).__CDN_URL = resolvedCdnUrl;
+      (window as WindowWithEnv).__ASSETS_URL = resolvedCdnUrl;
 
       const config = {
         viewport,
@@ -466,7 +453,7 @@ export function GameClient({
           inset: 0;
           pointer-events: none;
           user-select: none;
-          display: ${resolveGameClientUiDisplay(ui.visible)};
+          display: block;
           overflow: hidden;
           z-index: 10;
         }

@@ -146,6 +146,8 @@ function getSystemDebugName(
   return systemNameMap.get(system) || system.constructor.name || "Unknown";
 }
 
+let hasLoggedMissingAssetBase = false;
+
 interface AsyncTickCallMetric {
   label: string;
   phase: "fixedUpdate" | "update" | "lateUpdate";
@@ -2159,7 +2161,10 @@ export class World extends EventEmitter {
         }
         return resolved;
       } else {
-        console.error("resolveURL: no assetsUrl or assetsDir defined");
+        if (!hasLoggedMissingAssetBase) {
+          hasLoggedMissingAssetBase = true;
+          console.error("resolveURL: no assetsUrl or assetsDir defined");
+        }
         return url;
       }
     }

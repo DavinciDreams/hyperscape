@@ -8,13 +8,19 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
+import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
+  getPanelHeaderStyle,
+} from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 import type { TradeContextMenuProps } from "../types";
 
 export function TradeContextMenu({
   x,
   y,
   item,
-  theme: _theme,
+  theme,
   onOffer,
   onClose,
 }: TradeContextMenuProps) {
@@ -61,23 +67,22 @@ export function TradeContextMenu({
         position: "fixed",
         left: adjustedX,
         top: adjustedY,
-        zIndex: 99999,
-        background: "rgba(0, 0, 0, 0.95)",
-        border: "1px solid rgba(100, 80, 60, 0.8)",
-        borderRadius: "2px",
+        zIndex: UI.Z_INDEX.CONTEXT_MENU,
+        ...getContextMenuSurfaceStyle(theme, {
+          minWidth: 160,
+          radius: theme.borderRadius.md,
+        }),
         padding: "2px 0",
-        minWidth: "150px",
-        boxShadow: "2px 2px 8px rgba(0, 0, 0, 0.5)",
       }}
     >
       {/* Header with item name */}
       <div
         style={{
+          ...getPanelHeaderStyle(theme),
           padding: "4px 8px",
-          color: "#ff9900",
+          color: theme.colors.text.accent,
           fontWeight: "bold",
           fontSize: "12px",
-          borderBottom: "1px solid rgba(100, 80, 60, 0.5)",
         }}
       >
         {itemName}
@@ -90,13 +95,18 @@ export function TradeContextMenu({
             onClose();
           }}
           style={{
-            padding: "4px 8px",
-            color: i === 0 ? "#ffff00" : "#ffffff",
+            ...getContextMenuItemStyle(theme, {
+              radius: theme.borderRadius.sm,
+              padding: "4px 8px",
+            }),
+            color:
+              i === 0 ? theme.colors.text.accent : theme.colors.text.primary,
             fontSize: "12px",
             cursor: "pointer",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(214, 197, 160, 0.12) 24%, rgba(21, 25, 31, 0.98) 100%)";
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = "transparent";

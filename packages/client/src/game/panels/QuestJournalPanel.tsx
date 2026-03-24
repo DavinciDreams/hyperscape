@@ -11,6 +11,15 @@
 import React, { useState, useEffect } from "react";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
+import { useThemeStore } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 
 interface QuestJournalPanelProps {
   world: ClientWorld;
@@ -57,6 +66,8 @@ export function QuestJournalPanel({
   visible,
   onClose,
 }: QuestJournalPanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
   const [quests, setQuests] = useState<QuestListItem[]>([]);
   const [selectedQuest, setSelectedQuest] = useState<QuestDetail | null>(null);
   const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
@@ -164,8 +175,11 @@ export function QuestJournalPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-auto"
-      style={{ backgroundColor: "rgba(0, 0, 0, 0.7)" }}
+      className="fixed inset-0 flex items-center justify-center pointer-events-auto"
+      style={{
+        backgroundColor: theme.colors.background.overlay,
+        zIndex: UI.Z_INDEX.MODAL,
+      }}
       onClick={onClose}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
@@ -173,15 +187,13 @@ export function QuestJournalPanel({
       <div
         className="relative"
         style={{
-          width: "28rem",
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          width: "32rem",
           maxWidth: "90vw",
           maxHeight: "80vh",
-          background: "rgba(11, 10, 21, 0.98)",
-          border: "2px solid #c9a227",
-          borderRadius: "0.5rem",
           padding: "1.5rem",
-          backdropFilter: "blur(10px)",
-          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
+          boxShadow:
+            "0 18px 40px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255,255,255,0.05)",
           display: "flex",
           flexDirection: "column",
         }}
@@ -192,26 +204,49 @@ export function QuestJournalPanel({
         {/* Header */}
         <div
           className="flex justify-between items-center mb-4 pb-2"
-          style={{ borderBottom: "1px solid #c9a227" }}
+          style={{
+            ...getPanelHeaderStyle(theme),
+            margin: "-1.5rem -1.5rem 1rem",
+            padding: "0.75rem 1rem",
+          }}
         >
           <div className="flex items-center gap-3">
             {selectedQuest && (
               <button
                 onClick={handleBackToList}
-                className="text-gray-400 hover:text-white cursor-pointer"
+                className="cursor-pointer"
+                style={{ color: theme.colors.text.muted }}
                 title="Back to list"
               >
                 ←
               </button>
             )}
-            <h3 className="m-0 text-lg font-bold" style={{ color: "#c9a227" }}>
+            <h3
+              className="m-0 text-lg font-bold"
+              style={{ color: theme.colors.text.accent }}
+            >
               {selectedQuest ? selectedQuest.name : "Quest Journal"}
             </h3>
           </div>
           <button
             onClick={onClose}
-            className="bg-transparent border-none text-gray-400 hover:text-white cursor-pointer text-xl leading-none"
+            className="cursor-pointer text-xl leading-none"
+            style={{ ...closeButtonStyle, width: 28, height: 28, fontSize: 18 }}
             title="Close"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = String(
+                closeButtonStyle["--shell-button-hover-bg"],
+              );
+              e.currentTarget.style.color = String(
+                closeButtonStyle["--shell-button-hover-fg"],
+              );
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = String(
+                closeButtonStyle.background,
+              );
+              e.currentTarget.style.color = String(closeButtonStyle.color);
+            }}
           >
             ×
           </button>
@@ -220,14 +255,28 @@ export function QuestJournalPanel({
         {/* Quest Points (list view only) */}
         {!selectedQuest && (
           <div
-            className="text-center mb-4 py-2"
+            className="mb-4"
             style={{
-              color: "#c9a227",
-              backgroundColor: "rgba(201, 162, 39, 0.1)",
-              borderRadius: "4px",
+              ...getPanelInsetStyle(theme, {
+                emphasis: "strong",
+                radius: theme.borderRadius.md,
+                padding: "0.75rem 0.9rem",
+              }),
             }}
           >
-            Quest Points: <strong>{questPoints}</strong>
+            <div
+              className="text-[10px] uppercase tracking-[0.18em] mb-1"
+              style={{ color: theme.colors.text.muted }}
+            >
+              Adventurer's Chronicle
+            </div>
+            <div
+              className="flex items-center justify-between"
+              style={{ color: theme.colors.text.accent }}
+            >
+              <span className="text-sm font-semibold">Quest Points</span>
+              <strong className="text-lg">{questPoints}</strong>
+            </div>
           </div>
         )}
 
@@ -240,13 +289,20 @@ export function QuestJournalPanel({
           }}
         >
           {loading ? (
-            <div className="text-center py-8" style={{ color: "#888" }}>
+            <div
+              className="text-center py-8"
+              style={{ color: theme.colors.text.muted }}
+            >
               Loading quests...
             </div>
           ) : selectedQuest ? (
-            <QuestDetailView quest={selectedQuest} />
+            <QuestDetailView quest={selectedQuest} theme={theme} />
           ) : (
-            <QuestListView quests={quests} onSelectQuest={handleSelectQuest} />
+            <QuestListView
+              quests={quests}
+              onSelectQuest={handleSelectQuest}
+              theme={theme}
+            />
           )}
         </div>
       </div>
@@ -258,13 +314,18 @@ export function QuestJournalPanel({
 function QuestListView({
   quests,
   onSelectQuest,
+  theme,
 }: {
   quests: QuestListItem[];
   onSelectQuest: (questId: string) => void;
+  theme: ReturnType<typeof useThemeStore.getState>["theme"];
 }) {
   if (quests.length === 0) {
     return (
-      <div className="text-center py-8" style={{ color: "#888" }}>
+      <div
+        className="text-center py-8"
+        style={{ color: theme.colors.text.muted }}
+      >
         No quests available yet.
       </div>
     );
@@ -289,26 +350,44 @@ function QuestListView({
           onClick={() => onSelectQuest(quest.id)}
           className="w-full text-left p-2 transition-colors"
           style={{
-            background: "rgba(45, 35, 25, 0.5)",
-            border: "1px solid #5c4a3a",
-            borderRadius: "4px",
+            ...getInteractiveTileStyle(theme, {
+              radius: theme.borderRadius.md,
+              accentColor: theme.colors.accent.primary,
+            }),
             cursor: "pointer",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "#c9a227";
+            e.currentTarget.style.borderColor = `${theme.colors.text.accent}`;
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "#5c4a3a";
+            e.currentTarget.style.borderColor = `${theme.colors.border.default}40`;
           }}
         >
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div
+                className="text-[10px] uppercase tracking-[0.14em] mb-1"
+                style={{ color: theme.colors.text.muted }}
+              >
+                {quest.status.replaceAll("_", " ")}
+              </div>
+              <span
+                className="font-medium block"
+                style={{ color: STATUS_COLORS[quest.status] }}
+              >
+                {quest.name}
+              </span>
+            </div>
             <span
-              className="font-medium"
-              style={{ color: STATUS_COLORS[quest.status] }}
+              className="text-[10px] px-2 py-1"
+              style={{
+                ...getPanelInsetStyle(theme, {
+                  radius: theme.borderRadius.sm,
+                  padding: "0.25rem 0.5rem",
+                }),
+                color: theme.colors.text.secondary,
+              }}
             >
-              {quest.name}
-            </span>
-            <span className="text-xs" style={{ color: "#888" }}>
               {quest.difficulty}
             </span>
           </div>
@@ -319,7 +398,13 @@ function QuestListView({
 }
 
 // Quest Detail View Component
-function QuestDetailView({ quest }: { quest: QuestDetail }) {
+function QuestDetailView({
+  quest,
+  theme,
+}: {
+  quest: QuestDetail;
+  theme: ReturnType<typeof useThemeStore.getState>["theme"];
+}) {
   // Determine which stages are completed
   const getStageStatus = (
     stageIndex: number,
@@ -367,17 +452,26 @@ function QuestDetailView({ quest }: { quest: QuestDetail }) {
       {/* Quest Info */}
       <div
         className="p-3 rounded"
-        style={{ backgroundColor: "rgba(45, 35, 25, 0.5)" }}
+        style={{
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: theme.borderRadius.md,
+            padding: "0.75rem",
+          }),
+        }}
       >
         <div className="flex justify-between items-center mb-2">
-          <span className="text-sm" style={{ color: "#888" }}>
+          <span className="text-sm" style={{ color: theme.colors.text.muted }}>
             Difficulty: {quest.difficulty}
           </span>
-          <span className="text-sm" style={{ color: "#c9a227" }}>
+          <span className="text-sm" style={{ color: theme.colors.text.accent }}>
             {quest.questPoints} Quest Point{quest.questPoints !== 1 ? "s" : ""}
           </span>
         </div>
-        <p className="text-sm m-0" style={{ color: "#ccc" }}>
+        <p
+          className="text-sm m-0"
+          style={{ color: theme.colors.text.secondary }}
+        >
           {quest.description}
         </p>
       </div>
@@ -388,11 +482,15 @@ function QuestDetailView({ quest }: { quest: QuestDetail }) {
         style={{
           backgroundColor:
             quest.status === "completed"
-              ? "rgba(0, 255, 0, 0.1)"
+              ? `${theme.colors.state.success}12`
               : quest.status === "not_started"
-                ? "rgba(255, 68, 68, 0.1)"
-                : "rgba(255, 255, 0, 0.1)",
+                ? `${theme.colors.state.danger}12`
+                : `${theme.colors.state.warning}12`,
           color: STATUS_COLORS[quest.status],
+          ...getPanelInsetStyle(theme, {
+            radius: theme.borderRadius.md,
+            padding: "0.5rem 0.75rem",
+          }),
         }}
       >
         {quest.status === "completed"
@@ -406,7 +504,10 @@ function QuestDetailView({ quest }: { quest: QuestDetail }) {
 
       {/* Quest Steps with Strikethrough */}
       <div className="space-y-2">
-        <h4 className="text-sm font-bold m-0 mb-2" style={{ color: "#c9a227" }}>
+        <h4
+          className="text-sm font-bold m-0 mb-2"
+          style={{ color: theme.colors.text.accent }}
+        >
           Quest Progress:
         </h4>
         {quest.stages.map((stage, index) => {
@@ -420,19 +521,28 @@ function QuestDetailView({ quest }: { quest: QuestDetail }) {
               key={stage.id}
               className="text-sm flex justify-between items-center"
               style={{
+                ...getPanelInsetStyle(theme, {
+                  radius: theme.borderRadius.sm,
+                  padding: "0.45rem 0.6rem",
+                }),
                 color:
                   status === "completed"
-                    ? "#666"
+                    ? theme.colors.text.disabled
                     : status === "current"
-                      ? "#fff"
-                      : "#444",
+                      ? theme.colors.text.primary
+                      : theme.colors.text.muted,
                 textDecoration:
                   status === "completed" ? "line-through" : "none",
               }}
             >
               <span>• {stage.description}</span>
               {showProgress && (
-                <span style={{ color: "#c9a227", marginLeft: "0.5rem" }}>
+                <span
+                  style={{
+                    color: theme.colors.text.accent,
+                    marginLeft: "0.5rem",
+                  }}
+                >
                   {progress}
                 </span>
               )}

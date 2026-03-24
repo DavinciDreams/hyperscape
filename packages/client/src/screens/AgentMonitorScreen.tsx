@@ -2323,10 +2323,33 @@ function AgentDetailPanel({
     coins: number;
     inventoryUsed: number;
   } | null>(null);
+  const statusTimeoutRef = useRef<number | null>(null);
+  const refreshTimeoutRef = useRef<number | null>(null);
+
+  const clearTimeoutRef = useCallback(
+    (timeoutRef: React.MutableRefObject<number | null>) => {
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      clearTimeoutRef(statusTimeoutRef);
+      clearTimeoutRef(refreshTimeoutRef);
+    };
+  }, [clearTimeoutRef]);
 
   const showStatus = (msg: string, duration = 3000) => {
     setActionStatus(msg);
-    setTimeout(() => setActionStatus(null), duration);
+    clearTimeoutRef(statusTimeoutRef);
+    statusTimeoutRef.current = window.setTimeout(() => {
+      statusTimeoutRef.current = null;
+      setActionStatus(null);
+    }, duration);
   };
 
   const adminPost = async (path: string) => {
@@ -2429,7 +2452,11 @@ function AgentDetailPanel({
     try {
       await adminPost(`/admin/agents/${agent.characterId}/${action}`);
       showStatus(action === "pause" ? "Paused" : "Resumed");
-      setTimeout(onRefresh, 300);
+      clearTimeoutRef(refreshTimeoutRef);
+      refreshTimeoutRef.current = window.setTimeout(() => {
+        refreshTimeoutRef.current = null;
+        onRefresh();
+      }, 300);
     } catch (err) {
       showStatus(
         `Failed: ${err instanceof Error ? err.message : "error"}`,
@@ -2452,7 +2479,11 @@ function AgentDetailPanel({
         try {
           await adminPost(`/admin/agents/${agent.characterId}/stop`);
           showStatus("Stopped");
-          setTimeout(onRefresh, 500);
+          clearTimeoutRef(refreshTimeoutRef);
+          refreshTimeoutRef.current = window.setTimeout(() => {
+            refreshTimeoutRef.current = null;
+            onRefresh();
+          }, 500);
         } catch (err) {
           showStatus(
             `Failed: ${err instanceof Error ? err.message : "error"}`,
@@ -2605,7 +2636,8 @@ export const AgentMonitorScreen: React.FC = () => {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+  const fetchInFlightRef = useRef(false);
   const adminCodeRef = useRef(adminCode);
   adminCodeRef.current = adminCode;
 
@@ -2681,6 +2713,8 @@ export const AgentMonitorScreen: React.FC = () => {
 
   // Fetch dashboard data
   const fetchData = useCallback(async () => {
+    if (fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
     setLoading(true);
     try {
       const [monitorResult, duelResult] = await Promise.all([
@@ -2701,6 +2735,7 @@ export const AgentMonitorScreen: React.FC = () => {
         setFetchError(err.message);
       }
     } finally {
+      fetchInFlightRef.current = false;
       setLoading(false);
     }
   }, [adminFetch]);
@@ -2712,15 +2747,40 @@ export const AgentMonitorScreen: React.FC = () => {
   }, [isAuthed, fetchData]);
 
   useEffect(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    const clearPollTimeout = () => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+
+    if (!isAuthed) {
+      clearPollTimeout();
+      return clearPollTimeout;
     }
-    if (isAuthed && autoRefresh) {
-      intervalRef.current = setInterval(fetchData, POLL_INTERVAL_MS);
-    }
+
+    const scheduleNextPoll = () => {
+      clearPollTimeout();
+      if (!autoRefresh) return;
+      const delay =
+        document.visibilityState === "visible"
+          ? POLL_INTERVAL_MS
+          : POLL_INTERVAL_MS * 4;
+      pollTimeoutRef.current = window.setTimeout(() => {
+        pollTimeoutRef.current = null;
+        void fetchData().finally(scheduleNextPoll);
+      }, delay);
+    };
+
+    scheduleNextPoll();
+    const onVisibilityChange = () => {
+      if (!autoRefresh) return;
+      scheduleNextPoll();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearPollTimeout();
     };
   }, [isAuthed, autoRefresh, fetchData]);
 

@@ -1,6 +1,8 @@
-import React, { useEffect, useState, useId } from "react";
+import React, { useCallback, useEffect, useState, useId, useRef } from "react";
 import { useThemeStore } from "@/ui";
 import type { ClientWorld } from "../../types";
+
+const STAMINA_POLL_INTERVAL_MS = 200;
 
 interface MinimapStaminaOrbProps {
   world: ClientWorld;
@@ -74,21 +76,48 @@ export function MinimapStaminaOrb({
   const [stamina, setStamina] = useState<number>(100);
   const [isHovered, setIsHovered] = useState(false);
   const uniqueId = useId();
+  const pollingFrameRef = useRef<number | null>(null);
+  const lastPollRef = useRef<number>(0);
 
   useEffect(() => {
-    const update = () => {
+    const readPlayer = () => {
       const player = world.entities?.player;
-      if (player) {
-        setRunMode(player.runMode ?? true);
-        setStamina(player.stamina ?? 100);
+      if (!player) return;
+
+      const nextRunMode = player.runMode ?? true;
+      const nextStamina = player.stamina ?? 100;
+
+      setRunMode((current) =>
+        current === nextRunMode ? current : nextRunMode,
+      );
+      setStamina((current) =>
+        current === nextStamina ? current : nextStamina,
+      );
+    };
+
+    const tick = (now: number) => {
+      if (now - lastPollRef.current >= STAMINA_POLL_INTERVAL_MS) {
+        readPlayer();
+
+        lastPollRef.current = now;
+      }
+
+      pollingFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    readPlayer();
+    lastPollRef.current = performance.now();
+    pollingFrameRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (pollingFrameRef.current) {
+        cancelAnimationFrame(pollingFrameRef.current);
+        pollingFrameRef.current = null;
       }
     };
-    const id = setInterval(update, 200);
-    update();
-    return () => clearInterval(id);
   }, [world]);
 
-  const toggleRunMode = () => {
+  const toggleRunMode = useCallback(() => {
     const player = world.entities?.player;
     if (player) {
       const newRunMode = !runMode;
@@ -96,7 +125,7 @@ export function MinimapStaminaOrb({
       setRunMode(newRunMode);
       world.network?.send?.("moveRequest", { runMode: newRunMode });
     }
-  };
+  }, [runMode, world]);
 
   const staminaPercent = Math.max(0, Math.min(100, stamina));
 

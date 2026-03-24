@@ -8,6 +8,13 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getItem } from "@hyperscape/shared";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 import { parseQuantityInput } from "../utils";
 import type { QuantityPromptProps } from "../types";
 
@@ -37,24 +44,26 @@ export function QuantityPrompt({
   return createPortal(
     <div
       className="fixed inset-0 flex items-center justify-center"
-      style={{ zIndex: 100000, background: "rgba(0, 0, 0, 0.5)" }}
+      style={{ zIndex: UI.Z_INDEX.MODAL, background: "rgba(0, 0, 0, 0.5)" }}
       onClick={onCancel}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: theme.colors.background.panelSecondary,
-          border: `2px solid ${theme.colors.border.decorative}`,
-          borderRadius: "8px",
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
           padding: "16px",
           minWidth: "280px",
         }}
       >
         <h3
           style={{
+            ...getPanelHeaderStyle(theme),
             color: theme.colors.text.accent,
             fontWeight: "bold",
+            margin: "-16px -16px 12px",
             marginBottom: "12px",
+            padding: "12px 16px",
             fontSize: "14px",
           }}
         >
@@ -82,9 +91,10 @@ export function QuantityPrompt({
           style={{
             width: "100%",
             padding: "8px",
-            background: theme.colors.background.panelPrimary,
-            border: `1px solid ${theme.colors.border.default}`,
-            borderRadius: "4px",
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: theme.borderRadius.md,
+            }),
             color: theme.colors.text.primary,
             fontSize: "14px",
             marginBottom: "12px",
@@ -96,10 +106,12 @@ export function QuantityPrompt({
             style={{
               flex: 1,
               padding: "8px",
-              background: theme.colors.state.success,
+              ...getInteractiveTileStyle(theme, {
+                active: true,
+                accentColor: theme.colors.state.success,
+                radius: theme.borderRadius.md,
+              }),
               color: "white",
-              border: "none",
-              borderRadius: "4px",
               cursor: "pointer",
               fontWeight: "bold",
             }}
@@ -111,10 +123,12 @@ export function QuantityPrompt({
             style={{
               flex: 1,
               padding: "8px",
-              background: theme.colors.state.danger,
+              ...getInteractiveTileStyle(theme, {
+                active: true,
+                accentColor: theme.colors.state.danger,
+                radius: theme.borderRadius.md,
+              }),
               color: "white",
-              border: "none",
-              borderRadius: "4px",
               cursor: "pointer",
               fontWeight: "bold",
             }}

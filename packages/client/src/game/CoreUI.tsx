@@ -9,14 +9,8 @@ import {
   isTouch,
   propToLabel,
 } from "@hyperscape/shared";
-import type { ClientWorld, PlayerStats } from "../types";
-import {
-  isUIUpdateEvent,
-  isPlayerStatsData,
-  isSkillsUpdateEvent,
-  isPrayerPointsChangedEvent,
-  isPrayerStateSyncEvent,
-} from "../types/guards";
+import type { ClientWorld } from "../types";
+import { PlayerDataProvider, usePlayerStatsContext } from "../hooks";
 import { ActionProgressBar } from "./hud/ActionProgressBar";
 import { ChatProvider } from "./chat/ChatContext";
 import { EntityContextMenu } from "./hud/EntityContextMenu";
@@ -43,13 +37,26 @@ import {
 type IconComponent = React.ComponentType<{ size?: number | string }>;
 
 export function CoreUI({ world }: { world: ClientWorld }) {
+  return (
+    <PlayerDataProvider world={world}>
+      <CoreUIContent world={world} />
+    </PlayerDataProvider>
+  );
+}
+
+function CoreUIContent({ world }: { world: ClientWorld }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const readyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const loadingOverlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const terrainPollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [ready, setReady] = useState(false);
+  const [loadingOverlayVisible, setLoadingOverlayVisible] = useState(true);
   const [loadingComplete, setLoadingComplete] = useState(false);
   // Track system and asset progress separately to gate presentation on assets
   const [systemsComplete, setSystemsComplete] = useState(false);
   const [assetsProgress, setAssetsProgress] = useState(0);
+  const [readinessError, setReadinessError] = useState<string | null>(null);
+  const [terrainTimedOut, setTerrainTimedOut] = useState(false);
 
   // Check if this is spectator mode (from embedded config)
   const isSpectatorMode = (() => {
@@ -58,8 +65,20 @@ export function CoreUI({ world }: { world: ClientWorld }) {
   })();
 
   // Presentation gating flags
-  const [playerReady, setPlayerReady] = useState(() => !!world.entities.player);
-  const [physReady, setPhysReady] = useState(false);
+  const [playerReady, setPlayerReady] = useState(() =>
+    isSpectatorMode
+      ? false
+      : Boolean(
+          (world.entities.player as { avatar?: unknown } | undefined)?.avatar,
+        ),
+  );
+  const [physReady, setPhysReady] = useState(() =>
+    Boolean(
+      (
+        world.physics as { isInitialized?: () => boolean } | undefined
+      )?.isInitialized?.(),
+    ),
+  );
   const [terrainReady, setTerrainReady] = useState(false);
   const [player, setPlayer] = useState(() => world.entities.player);
   const [targetAvatarLoaded, setTargetAvatarLoaded] = useState(false);
@@ -73,8 +92,28 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     respawnTime: number;
   } | null>(null);
 
-  // Player stats for StatusBars (same pattern as InterfaceManager)
-  const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
+  const playerStats = usePlayerStatsContext();
+  const livePlayerReady =
+    playerReady ||
+    (!isSpectatorMode &&
+      Boolean(
+        (world.entities.player as { avatar?: unknown } | undefined)?.avatar,
+      ));
+  const livePhysReady =
+    physReady ||
+    Boolean(
+      (
+        world.physics as { isInitialized?: () => boolean } | undefined
+      )?.isInitialized?.(),
+    );
+  const liveTerrainReady =
+    terrainReady ||
+    terrainTimedOut ||
+    Boolean(
+      (
+        world.getSystem?.("terrain") as { isReady?: () => boolean } | undefined
+      )?.isReady?.(),
+    );
 
   useEffect(() => {
     // Get the target entity ID for spectators
@@ -86,6 +125,7 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     // Create handlers with proper types
     const handleReady = () => {
       // A READY signal indicates a major subsystem finished; mark loading as potentially complete
+      setReadinessError(null);
       setLoadingComplete(true);
     };
 
@@ -112,7 +152,9 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         const playerEntity = world.entities?.player;
         if (playerEntity) {
           setPlayer(playerEntity);
-          setPlayerReady(true);
+          if ((playerEntity as { avatar?: unknown }).avatar) {
+            setPlayerReady(true);
+          }
         }
       }
     };
@@ -128,8 +170,17 @@ export function CoreUI({ world }: { world: ClientWorld }) {
           setTargetAvatarLoaded(true);
         }
       } else {
-        // For normal players: any avatar complete means player is ready
-        setPlayerReady(true);
+        const localPlayer = world.entities?.player as
+          | { id?: string; avatar?: unknown }
+          | undefined;
+        if (
+          data.success &&
+          localPlayer?.id &&
+          data.playerId === localPlayer.id
+        ) {
+          setPlayer(localPlayer as typeof world.entities.player);
+          setPlayerReady(true);
+        }
       }
     };
 
@@ -176,11 +227,35 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     const network = world.network as { lastCharacterList?: unknown[] };
     if (network.lastCharacterList) setCharacterFlowActive(true);
 
+    if (
+      (
+        world.physics as { isInitialized?: () => boolean } | undefined
+      )?.isInitialized?.()
+    ) {
+      setPhysReady(true);
+    }
+
+    const playerEntity = world.entities?.player;
+    if (playerEntity) {
+      setPlayer(playerEntity);
+      if (!isSpectatorMode && (playerEntity as { avatar?: unknown }).avatar) {
+        setPlayerReady(true);
+      }
+    }
+
     return () => {
+      if (terrainPollTimeoutRef.current) {
+        clearTimeout(terrainPollTimeoutRef.current);
+        terrainPollTimeoutRef.current = null;
+      }
       // Clean up the ready timeout if it exists
       if (readyTimeoutRef.current) {
         clearTimeout(readyTimeoutRef.current);
         readyTimeoutRef.current = null;
+      }
+      if (loadingOverlayTimeoutRef.current) {
+        clearTimeout(loadingOverlayTimeoutRef.current);
+        loadingOverlayTimeoutRef.current = null;
       }
       world.off(EventType.READY, handleReady);
       world.off(EventType.ASSETS_LOADING_PROGRESS, handleLoadingProgress);
@@ -199,47 +274,71 @@ export function CoreUI({ world }: { world: ClientWorld }) {
 
   // Poll terrain readiness until ready
   useEffect(() => {
-    let terrainInterval: NodeJS.Timeout | null = null;
-    function startPolling() {
-      if (terrainInterval) return;
-      terrainInterval = setInterval(() => {
-        // CRITICAL: For spectators, check terrain directly without requiring local player
-        if (isSpectatorMode) {
-          const terrain = world.getSystem?.("terrain") as
-            | { isReady?: () => boolean }
-            | undefined;
-          if (terrain && terrain.isReady && terrain.isReady()) {
-            setTerrainReady(true);
-            if (terrainInterval) {
-              clearInterval(terrainInterval);
-              terrainInterval = null;
-            }
+    if (terrainPollTimeoutRef.current) {
+      clearTimeout(terrainPollTimeoutRef.current);
+      terrainPollTimeoutRef.current = null;
+    }
+
+    setTerrainReady(false);
+    setTerrainTimedOut(false);
+    setReadinessError(null);
+
+    const isTerrainReady = (): boolean => {
+      const terrain = world.getSystem?.("terrain") as
+        | { isReady?: () => boolean }
+        | undefined;
+      if (!terrain?.isReady) return false;
+
+      if (isSpectatorMode) {
+        return terrain.isReady();
+      }
+
+      const player = world.entities?.player as
+        | { position?: { x: number; z: number } }
+        | undefined;
+      if (!player?.position) return false;
+
+      return terrain.isReady();
+    };
+
+    const updateTerrainReady = () => {
+      if (!isTerrainReady()) return false;
+      setTerrainReady(true);
+      return true;
+    };
+
+    if (!updateTerrainReady()) {
+      const startTime = performance.now();
+      const checkTerrainReady = () => {
+        if (updateTerrainReady()) return;
+
+        if (performance.now() - startTime >= 20000) {
+          if (isSpectatorMode) {
+            setReadinessError(
+              "Timed out waiting for terrain to initialize. Refresh to retry.",
+            );
+            return;
           }
+
+          console.warn(
+            "[CoreUI] Terrain readiness timeout after 20s; continuing startup for player mode",
+          );
+          setTerrainTimedOut(true);
+          setTerrainReady(true);
           return;
         }
 
-        // For normal players: require player entity before checking terrain
-        const player = world.entities?.player as
-          | { position?: { x: number; z: number } }
-          | undefined;
-        if (!player || !player.position) return;
-        const terrain = world.getSystem?.("terrain") as
-          | { isReady?: () => boolean }
-          | undefined;
-        if (terrain && terrain.isReady) {
-          if (terrain.isReady()) {
-            setTerrainReady(true);
-            if (terrainInterval) {
-              clearInterval(terrainInterval);
-              terrainInterval = null;
-            }
-          }
-        }
-      }, 100);
+        terrainPollTimeoutRef.current = setTimeout(checkTerrainReady, 250);
+      };
+
+      terrainPollTimeoutRef.current = setTimeout(checkTerrainReady, 250);
     }
-    startPolling();
+
     return () => {
-      if (terrainInterval) clearInterval(terrainInterval);
+      if (terrainPollTimeoutRef.current) {
+        clearTimeout(terrainPollTimeoutRef.current);
+        terrainPollTimeoutRef.current = null;
+      }
     };
   }, [world, isSpectatorMode]);
 
@@ -255,9 +354,11 @@ export function CoreUI({ world }: { world: ClientWorld }) {
   useEffect(() => {
     // Show game once player's avatar is ready and physics system is initialized
     // For spectators: also require terrain and target avatar to be ready
-    const canPresent = isSpectatorMode
-      ? playerReady && terrainReady && physReady
-      : playerReady && physReady;
+    const canPresent =
+      livePlayerReady &&
+      livePhysReady &&
+      liveTerrainReady &&
+      (loadingComplete || systemsComplete || assetsProgress >= 100);
     if (canPresent) {
       // Clear any existing timeout
       if (readyTimeoutRef.current) {
@@ -278,7 +379,37 @@ export function CoreUI({ world }: { world: ClientWorld }) {
         readyTimeoutRef.current = null;
       }
     };
-  }, [playerReady, physReady, isSpectatorMode, terrainReady]);
+  }, [
+    livePlayerReady,
+    livePhysReady,
+    liveTerrainReady,
+    loadingComplete,
+    systemsComplete,
+    assetsProgress,
+  ]);
+
+  useEffect(() => {
+    if (!ready) {
+      setLoadingOverlayVisible(true);
+      if (loadingOverlayTimeoutRef.current) {
+        clearTimeout(loadingOverlayTimeoutRef.current);
+        loadingOverlayTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    loadingOverlayTimeoutRef.current = setTimeout(() => {
+      setLoadingOverlayVisible(false);
+      loadingOverlayTimeoutRef.current = null;
+    }, 220);
+
+    return () => {
+      if (loadingOverlayTimeoutRef.current) {
+        clearTimeout(loadingOverlayTimeoutRef.current);
+        loadingOverlayTimeoutRef.current = null;
+      }
+    };
+  }, [ready]);
 
   // Expose loading state for debugging and analytics
   useEffect(() => {
@@ -287,9 +418,10 @@ export function CoreUI({ world }: { world: ClientWorld }) {
       loadingComplete,
       systemsComplete,
       assetsProgress,
-      playerReady,
-      physReady,
-      terrainReady,
+      playerReady: livePlayerReady,
+      physReady: livePhysReady,
+      terrainReady: liveTerrainReady,
+      terrainTimedOut,
       playerId: player?.id || null,
     };
     (
@@ -300,105 +432,12 @@ export function CoreUI({ world }: { world: ClientWorld }) {
     loadingComplete,
     systemsComplete,
     assetsProgress,
-    playerReady,
-    physReady,
-    terrainReady,
+    livePlayerReady,
+    livePhysReady,
+    liveTerrainReady,
+    terrainTimedOut,
     player,
   ]);
-
-  // Extract playerId for dependency tracking - prevents stale closures
-  const localPlayerId = world.entities?.player?.id;
-
-  // Subscribe to player stats updates (for StatusBars)
-  useEffect(() => {
-    const onUIUpdate = (raw: unknown) => {
-      if (!isUIUpdateEvent(raw)) {
-        console.warn("[CoreUI] Invalid UI update event:", raw);
-        return;
-      }
-      if (raw.component === "player" && isPlayerStatsData(raw.data)) {
-        // PlayerStatsData is a partial type - safe to cast since we merge with existing state
-        const newData = raw.data as unknown as Partial<PlayerStats>;
-        // Merge with existing state to preserve prayer data
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                ...newData,
-                prayerPoints: newData.prayerPoints || prev.prayerPoints,
-              }
-            : (newData as PlayerStats),
-        );
-      }
-    };
-
-    const onSkillsUpdate = (raw: unknown) => {
-      if (!isSkillsUpdateEvent(raw)) {
-        console.warn("[CoreUI] Invalid skills update event:", raw);
-        return;
-      }
-      if (!localPlayerId || raw.playerId === localPlayerId) {
-        // Skills event only has skills data - merge with existing state
-        const updatedSkills = raw.skills as unknown as PlayerStats["skills"];
-        setPlayerStats((prev) =>
-          prev
-            ? { ...prev, skills: updatedSkills }
-            : ({ skills: updatedSkills } as unknown as PlayerStats),
-        );
-      }
-    };
-
-    const onPrayerPointsChanged = (raw: unknown) => {
-      if (!isPrayerPointsChangedEvent(raw)) {
-        console.warn("[CoreUI] Invalid prayer points changed event:", raw);
-        return;
-      }
-      if (!localPlayerId || raw.playerId === localPlayerId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                prayerPoints: { current: raw.points, max: raw.maxPoints },
-              }
-            : ({
-                prayerPoints: { current: raw.points, max: raw.maxPoints },
-              } as PlayerStats),
-        );
-      }
-    };
-
-    // Handle full prayer state sync (initial load, altar pray, etc.)
-    const onPrayerStateSync = (raw: unknown) => {
-      if (!isPrayerStateSyncEvent(raw)) {
-        console.warn("[CoreUI] Invalid prayer state sync event:", raw);
-        return;
-      }
-      if (!localPlayerId || raw.playerId === localPlayerId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                prayerPoints: { current: raw.points, max: raw.maxPoints },
-              }
-            : ({
-                prayerPoints: { current: raw.points, max: raw.maxPoints },
-              } as PlayerStats),
-        );
-      }
-    };
-
-    world.on(EventType.UI_UPDATE, onUIUpdate);
-    world.on(EventType.SKILLS_UPDATED, onSkillsUpdate);
-    world.on(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
-    world.on(EventType.PRAYER_STATE_SYNC, onPrayerStateSync);
-
-    return () => {
-      world.off(EventType.UI_UPDATE, onUIUpdate);
-      world.off(EventType.SKILLS_UPDATED, onSkillsUpdate);
-      world.off(EventType.PRAYER_POINTS_CHANGED, onPrayerPointsChanged);
-      world.off(EventType.PRAYER_STATE_SYNC, onPrayerStateSync);
-    };
-  }, [world, localPlayerId]);
 
   return (
     <ChatProvider>
@@ -427,14 +466,30 @@ export function CoreUI({ world }: { world: ClientWorld }) {
           <div id="core-ui-portal" />
         </div>
         {/* Non-scaled overlays - full screen elements */}
-        {!ready && (
-          <LoadingScreen
-            world={world}
-            message={
-              characterFlowActive ? "Entering world..." : "Loading world..."
-            }
-          />
-        )}
+        {loadingOverlayVisible &&
+          (readinessError ? (
+            <div className="absolute inset-0 bg-black/90 flex items-center justify-center z-20">
+              <div className="text-center text-[#f2d08a] px-8">
+                <p className="text-2xl mb-3">Unable to enter world</p>
+                <p className="max-w-md mb-4">{readinessError}</p>
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded bg-[#f2d08a] text-black font-bold"
+                  onClick={() => window.location.reload()}
+                >
+                  Reload
+                </button>
+              </div>
+            </div>
+          ) : (
+            <LoadingScreen
+              world={world}
+              message={
+                characterFlowActive ? "Entering world..." : "Loading world..."
+              }
+              fadingOut={ready}
+            />
+          ))}
         {kicked && <KickedOverlay code={kicked} />}
         {deathScreen && <DeathScreen data={deathScreen} world={world} />}
       </main>

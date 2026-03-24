@@ -13,6 +13,7 @@
 
 import { useState, useCallback, useMemo, type CSSProperties } from "react";
 import { useThemeStore, type Theme } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import type { StakedItem, SlotNumber } from "@hyperscape/shared";
 import { formatGoldValue, calculateTotalValue } from "./utils";
 import { StakeGrid, StakeInventoryPanel, StakeContextMenu } from "./components";
@@ -67,8 +68,7 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
     const panelStyle: CSSProperties = {
       flex: 1,
       minWidth: 0,
-      background: theme.colors.background.tertiary,
-      border: `1px solid ${theme.colors.border.default}`,
+      ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
       borderRadius: theme.borderRadius.md,
       padding: theme.spacing.sm,
       display: "flex",
@@ -116,10 +116,14 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
       justifyContent: "space-between",
       alignItems: "center",
       padding: theme.spacing.sm,
-      background: theme.colors.background.secondary,
+      background:
+        theme.name === "hyperscape"
+          ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.14) 100%)"
+          : theme.colors.background.secondary,
       borderRadius: theme.borderRadius.sm,
       fontSize: theme.typography.fontSize.sm,
       marginTop: theme.spacing.sm,
+      border: `1px solid ${theme.colors.border.default}40`,
     };
 
     const buttonContainerStyle: CSSProperties = {
@@ -141,8 +145,8 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
     const acceptButtonStyle: CSSProperties = {
       ...baseButtonStyle,
       background: myAccepted
-        ? `${theme.colors.state.success}88`
-        : theme.colors.state.success,
+        ? `linear-gradient(135deg, ${theme.colors.state.success}88 0%, ${theme.colors.state.success}66 100%)`
+        : `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
       color: "#fff",
       border: `1px solid ${theme.colors.state.success}`,
       opacity: myAccepted ? 0.7 : 1,
@@ -150,7 +154,7 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
 
     const cancelButtonStyle: CSSProperties = {
       ...baseButtonStyle,
-      background: theme.colors.state.danger,
+      background: `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`,
       color: "#fff",
       border: `1px solid ${theme.colors.state.danger}`,
     };
@@ -184,12 +188,15 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
     };
 
     const contextMenuStyle: CSSProperties = {
-      background: theme.colors.background.secondary,
+      background:
+        theme.name === "hyperscape"
+          ? "linear-gradient(180deg, rgba(44, 36, 24, 0.98) 0%, rgba(18, 15, 11, 0.98) 100%)"
+          : theme.colors.background.secondary,
       border: `1px solid ${theme.colors.border.default}`,
       borderRadius: theme.borderRadius.md,
       padding: theme.spacing.xs,
-      zIndex: 10001,
-      boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+      zIndex: theme.zIndex.popover,
+      boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
     };
 
     const contextMenuItemStyle: CSSProperties = {

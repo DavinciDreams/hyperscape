@@ -18,6 +18,7 @@ import {
   useMobileLayout,
   useTheme,
 } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { QuestLog } from "@/game/components/quest";
 import {
   type Quest,
@@ -876,7 +877,6 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
   const selectedQuest = useQuestSelectionStore((s) => s.selectedQuest);
   const setSelectedQuest = useQuestSelectionStore((s) => s.setSelectedQuest);
   const createWindow = useWindowStore((s) => s.createWindow);
-  const windows = useWindowStore((s) => s.windows);
 
   // Handle quest click - fetch details and show inline (mobile) or open window (desktop)
   const handleQuestClick = useCallback(
@@ -899,6 +899,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
 
       // Desktop: Open quest detail in separate window
       // Check if quest-detail window already exists
+      const windows = useWindowStore.getState().windows;
       const existingWindow = windows.get("quest-detail-window");
 
       if (existingWindow) {
@@ -930,14 +931,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
         });
       }
     },
-    [
-      setSelectedQuest,
-      createWindow,
-      windows,
-      world,
-      questDetails,
-      shouldUseMobileUI,
-    ],
+    [setSelectedQuest, createWindow, world, questDetails, shouldUseMobileUI],
   );
 
   // Handle back button on mobile - return to quest list
@@ -950,7 +944,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
   // Container style using theme colors for consistency
   const containerStyle: React.CSSProperties = {
     height: "100%",
-    background: theme.colors.background.panelSecondary,
+    ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
     display: "flex",
     flexDirection: "column",
   };
@@ -1028,6 +1022,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
         style={{
           height: "100%",
           border: "none",
+          background: "transparent",
         }}
       />
     </div>

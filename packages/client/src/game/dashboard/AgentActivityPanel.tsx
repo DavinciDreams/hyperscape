@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
 import type { Agent } from "./types";
 import {
@@ -70,28 +70,12 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
   const [expanded, setExpanded] = useState(true);
   const [_error, setError] = useState<string | null>(null);
   const activityIdCounter = useRef(0);
+  const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
-  // Listen for activity events via WebSocket or polling
-  useEffect(() => {
-    if (agent.status !== "active") {
-      setActivities([]);
-      setSessionStats({
-        kills: 0,
-        deaths: 0,
-        totalXpGained: 0,
-        goldEarned: 0,
-        resourcesGathered: {},
-      });
-      return;
-    }
-
-    // Poll every 10 seconds to avoid rate limiting (reduced from 3s)
-    // In a full implementation, this would use WebSocket events from the game server.
-    const interval = setInterval(fetchActivity, 10000);
-    return () => clearInterval(interval);
-  }, [agent.id, agent.status]);
-
-  const fetchActivity = async () => {
+  const fetchActivity = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       // Try to fetch activity from the server
       const result = await apiClient.get<{
@@ -124,12 +108,50 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
     } catch (err) {
       // Activity endpoint might not exist yet - that's okay
       // We'll track local activities instead
-      console.debug(
-        "[AgentActivityPanel] Activity endpoint not available:",
-        err,
-      );
+    } finally {
+      inFlightRef.current = false;
     }
-  };
+  }, [agent.id]);
+
+  useEffect(() => {
+    if (agent.status !== "active") {
+      setActivities([]);
+      setSessionStats({
+        kills: 0,
+        deaths: 0,
+        totalXpGained: 0,
+        goldEarned: 0,
+        resourcesGathered: {},
+      });
+      return;
+    }
+
+    let cancelled = false;
+    const schedule = (delay: number) => {
+      if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = window.setTimeout(run, delay);
+    };
+    const run = async () => {
+      await fetchActivity();
+      if (cancelled) return;
+      const nextDelay = !document.hidden && isViewportActive ? 10000 : 20000;
+      schedule(nextDelay);
+    };
+    const onVisibilityChange = () => {
+      if (!cancelled) schedule(document.hidden ? 20000 : 1000);
+    };
+
+    void run();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pollTimeoutRef.current) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+  }, [agent.status, fetchActivity, isViewportActive]);
 
   // Add a local activity event (can be called from parent components)
   const addActivity = (

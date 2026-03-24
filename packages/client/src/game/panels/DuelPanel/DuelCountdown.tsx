@@ -14,6 +14,7 @@
 
 import { useState, useEffect, type CSSProperties } from "react";
 import { useThemeStore } from "@/ui";
+import { UI } from "@/ui/core";
 
 // ============================================================================
 // Types
@@ -121,7 +122,7 @@ export function DuelCountdown({ state }: DuelCountdownProps) {
     alignItems: "center",
     justifyContent: "center",
     background: "rgba(0, 0, 0, 0.7)",
-    zIndex: 10000,
+    zIndex: UI.Z_INDEX.CRITICAL,
     pointerEvents: "none",
   };
 

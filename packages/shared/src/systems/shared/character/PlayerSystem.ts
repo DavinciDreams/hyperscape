@@ -274,7 +274,12 @@ export class PlayerSystem extends SystemBase {
       this.onPlayerLeave(data as PlayerLeaveEvent);
     });
     this.subscribe(EventType.PLAYER_REGISTERED, (data) => {
-      this.onPlayerRegister(data as { playerId: string });
+      this.onPlayerRegister(data as { playerId: string }).catch((err) => {
+        console.error(
+          `[PlayerSystem] CRITICAL: onPlayerRegister failed for ${(data as { playerId: string })?.playerId}`,
+          err,
+        );
+      });
     });
     this.subscribe(EventType.COMBAT_LEVEL_CHANGED, (data) => {
       const combatData = data as {
@@ -516,12 +521,19 @@ export class PlayerSystem extends SystemBase {
     let savedAttackStyle: string | undefined;
     let savedAutoRetaliate = true; // Default ON (OSRS behavior)
     if (this.databaseSystem) {
-      const databaseId = PlayerIdMapper.getDatabaseId(data.playerId);
-      const dbData = await this.databaseSystem.getPlayerAsync(databaseId);
-      savedAttackStyle = (dbData as { attackStyle?: string })?.attackStyle;
-      // Defensive: treat null/undefined as default (1 = true)
-      savedAutoRetaliate =
-        ((dbData as { autoRetaliate?: number })?.autoRetaliate ?? 1) === 1;
+      try {
+        const databaseId = PlayerIdMapper.getDatabaseId(data.playerId);
+        const dbData = await this.databaseSystem.getPlayerAsync(databaseId);
+        savedAttackStyle = (dbData as { attackStyle?: string })?.attackStyle;
+        // Defensive: treat null/undefined as default (1 = true)
+        savedAutoRetaliate =
+          ((dbData as { autoRetaliate?: number })?.autoRetaliate ?? 1) === 1;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Failed to load combat preferences for ${data.playerId}, using defaults`,
+          err instanceof Error ? { error: err.message } : undefined,
+        );
+      }
     }
     this.initializePlayerAttackStyle(data.playerId, savedAttackStyle);
     this.initializePlayerAutoRetaliate(data.playerId, savedAutoRetaliate);
@@ -942,7 +954,8 @@ export class PlayerSystem extends SystemBase {
   }
 
   private updateCombatLevel(data: PlayerLevelUpEvent): void {
-    const player = this.players.get(data.playerId)!;
+    const player = this.players.get(data.playerId);
+    if (!player) return;
 
     // Recalculate combat level based on current stats
     player.combat.combatLevel = this.calculateCombatLevel(player.skills);
@@ -950,7 +963,8 @@ export class PlayerSystem extends SystemBase {
   }
 
   private emitPlayerUpdate(playerId: string): void {
-    const player = this.players.get(playerId)!;
+    const player = this.players.get(playerId);
+    if (!player) return;
 
     // OPTIMIZATION: Reuse pre-allocated payload object instead of creating new one
     const playerData = this._playerUpdatePayload;
@@ -1299,10 +1313,19 @@ export class PlayerSystem extends SystemBase {
     playerId: string,
     stats: Partial<Player["skills"]>,
   ): Promise<void> {
-    const player = this.players.get(playerId)!;
+    const player = this.players.get(playerId);
+    if (!player) return;
 
     // Update stats
-    Object.assign(player.skills, stats);
+    for (const [skillName, skillValue] of Object.entries(stats)) {
+      if (!skillValue) continue;
+      const key = skillName as keyof Player["skills"];
+      if (!player.skills[key]) continue;
+      player.skills[key] = {
+        ...player.skills[key],
+        ...skillValue,
+      };
+    }
 
     // Recalculate combat level
     player.combat.combatLevel = this.calculateCombatLevel(player.skills);
@@ -1329,10 +1352,14 @@ export class PlayerSystem extends SystemBase {
     playerId: string,
     equipment: Partial<Player["equipment"]>,
   ): Promise<void> {
-    const player = this.players.get(playerId)!;
+    const player = this.players.get(playerId);
+    if (!player) return;
 
     // Update equipment
-    Object.assign(player.equipment, equipment);
+    player.equipment = {
+      ...player.equipment,
+      ...equipment,
+    };
 
     this.emitTypedEvent(EventType.PLAYER_EQUIPMENT_UPDATED, {
       playerId,

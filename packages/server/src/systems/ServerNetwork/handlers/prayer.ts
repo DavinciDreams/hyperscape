@@ -59,7 +59,7 @@ export function handlePrayerToggle(
   // Rate limiting using shared infrastructure
   const rateLimiter = getPrayerRateLimiter();
   if (!rateLimiter.check(playerId)) {
-    // Silently drop rate-limited requests (no error spam to client)
+    sendPrayerError(socket, "You are toggling prayers too quickly.");
     return;
   }
 
@@ -145,6 +145,7 @@ export function handleAltarPray(
   // Rate limiting
   const rateLimiter = getPrayerRateLimiter();
   if (!rateLimiter.check(playerId)) {
+    sendPrayerError(socket, "You are using the altar too quickly.");
     return;
   }
 
@@ -170,7 +171,16 @@ export function handleAltarPray(
   }
 
   // Verify altar exists
-  const altar = world.entities.get(payload.altarId);
+  const altar =
+    world.entities.get(payload.altarId) ??
+    Array.from(world.entities.values()).find((entity) => {
+      if (entity?.type !== "altar") return false;
+      return (
+        (entity as { altarId?: string }).altarId === payload.altarId ||
+        (entity as { userData?: { altarId?: string } }).userData?.altarId ===
+          payload.altarId
+      );
+    });
   if (!altar || altar.type !== "altar") {
     sendPrayerError(socket, "Altar not found");
     return;
@@ -206,6 +216,7 @@ export function handlePrayerDeactivateAll(
   // Rate limiting
   const rateLimiter = getPrayerRateLimiter();
   if (!rateLimiter.check(playerId)) {
+    sendPrayerError(socket, "You are changing prayers too quickly.");
     return;
   }
 

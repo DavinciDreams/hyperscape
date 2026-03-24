@@ -1,18 +1,7 @@
 import React, { useState, memo } from "react";
 import { getItem } from "@hyperscape/shared";
-import { CDN_URL } from "../../lib/api-config";
+import { resolveRuntimeAssetUrl } from "../../lib/api-config";
 import { getItemIcon, isNotedItem } from "../../utils/itemUtils";
-
-/**
- * Resolve an asset:// URL to a full HTTP URL using the CDN base.
- */
-function resolveAssetUrl(assetPath: string): string {
-  if (assetPath.startsWith("asset://")) {
-    const cdnBase = (CDN_URL || "").replace(/\/$/, "");
-    return assetPath.replace("asset://", `${cdnBase}/`);
-  }
-  return assetPath;
-}
 
 interface ItemIconProps {
   itemId: string;
@@ -41,7 +30,7 @@ export const ItemIcon = memo(function ItemIcon({
   const iconPath = item?.iconPath;
 
   if (iconPath && !imgError) {
-    const url = resolveAssetUrl(iconPath);
+    const url = resolveRuntimeAssetUrl(iconPath);
     return (
       <img
         src={url}

@@ -40,10 +40,6 @@ async function generateJWTWithRetry(
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(
-        `[CharacterEditor] JWT generation attempt ${attempt}/${maxRetries}...`,
-      );
-
       const credResult = await apiClient.post<{ authToken: string }>(
         "/api/agents/credentials",
         {
@@ -61,10 +57,6 @@ async function generateJWTWithRetry(
       if (!credResult.data.authToken) {
         throw new Error("JWT generation failed: No token in response");
       }
-
-      console.log(
-        `[CharacterEditor] ✅ JWT generated successfully on attempt ${attempt}`,
-      );
       return credResult.data.authToken;
     } catch (error) {
       lastError = error as Error;
@@ -73,7 +65,6 @@ async function generateJWTWithRetry(
       );
 
       if (attempt < maxRetries) {
-        console.log(`[CharacterEditor] Retrying in ${retryDelay / 1000}s...`);
         await new Promise((resolve) => setTimeout(resolve, retryDelay));
       }
     }
@@ -123,7 +114,6 @@ export const CharacterEditorScreen: React.FC = () => {
       }, 1500);
       return;
     }
-    console.log("[CharacterEditor] ✅ Authentication verified:", accountId);
     setAuthChecked(true);
   }, []);
 
@@ -178,9 +168,6 @@ export const CharacterEditorScreen: React.FC = () => {
       }
 
       try {
-        console.log(
-          "[CharacterEditor] Fetching existing agent from ElizaOS...",
-        );
         const response = await fetch(`${ELIZAOS_API}/agents`, {
           signal: abortController.signal,
         });
@@ -202,10 +189,6 @@ export const CharacterEditorScreen: React.FC = () => {
           );
 
           if (existingAgent) {
-            console.log(
-              "[CharacterEditor] ✅ Found existing agent, loading data...",
-            );
-
             // Store the agent's UUID for updates
             if (existingAgent.id) {
               setAgentId(existingAgent.id as string);
@@ -297,9 +280,6 @@ export const CharacterEditorScreen: React.FC = () => {
               loadedAgent.settings.avatar = avatar;
             }
 
-            console.log(
-              "[CharacterEditor] ✅ Merged agent with template defaults",
-            );
             // Only set state if not aborted
             if (!abortController.signal.aborted) {
               setCharacter(loadedAgent);
@@ -307,10 +287,6 @@ export const CharacterEditorScreen: React.FC = () => {
             return;
           }
         }
-
-        console.log(
-          "[CharacterEditor] No existing agent found, creating new template...",
-        );
       } catch (error) {
         console.error(
           "[CharacterEditor] Failed to fetch existing agent:",
@@ -378,10 +354,6 @@ export const CharacterEditorScreen: React.FC = () => {
 
       // Ensure all required secrets are present (with retry logic)
       if (!character.settings?.secrets?.HYPERSCAPE_AUTH_TOKEN) {
-        console.log(
-          "[CharacterEditor] Missing JWT, generating credentials with retry logic...",
-        );
-
         // Generate permanent Hyperscape JWT for agent with retry logic
         const authToken = await generateJWTWithRetry(characterId, accountId);
         character.settings.secrets.HYPERSCAPE_AUTH_TOKEN = authToken;
@@ -412,15 +384,8 @@ export const CharacterEditorScreen: React.FC = () => {
         );
 
       if (!agentId || !isValidUUID) {
-        console.log(
-          "[CharacterEditor] No valid agent ID found, creating new agent...",
-        );
-
         // Strip 'id' field - let ElizaOS generate UUID (it expects valid UUID, we have Privy ID)
         const { id, ...characterWithoutId } = updatedCharacter;
-        console.log(
-          "[CharacterEditor] Removed id field from character payload (ElizaOS will generate UUID)",
-        );
 
         // Create new agent with POST
         const createResponse = await fetch(`${ELIZAOS_API}/agents`, {
@@ -450,16 +415,10 @@ export const CharacterEditorScreen: React.FC = () => {
         }
 
         const result = await createResponse.json();
-        console.log("[CharacterEditor] ✅ ElizaOS agent created:", result);
 
         // Extract agent ID from response - OpenAPI spec: data.character.id
         const newAgentId = result.data?.character?.id;
         if (newAgentId) {
-          console.log(
-            "[CharacterEditor] Saving agent mapping for:",
-            newAgentId,
-          );
-
           // Save agent mapping to Hyperscape database (CRITICAL - rollback if fails)
           try {
             const mappingResult = await apiClient.post("/api/agents/mappings", {
@@ -474,10 +433,6 @@ export const CharacterEditorScreen: React.FC = () => {
                 `Failed to save agent mapping: ${mappingResult.error || mappingResult.status}`,
               );
             }
-
-            console.log(
-              "[CharacterEditor] ✅ Agent mapping saved successfully",
-            );
           } catch (mappingError) {
             console.error(
               "[CharacterEditor] ❌ Agent mapping save failed, rolling back agent creation:",
@@ -489,7 +444,6 @@ export const CharacterEditorScreen: React.FC = () => {
               await fetch(`${ELIZAOS_API}/agents/${newAgentId}`, {
                 method: "DELETE",
               });
-              console.log("[CharacterEditor] ✅ Rolled back agent creation");
             } catch (rollbackError) {
               console.error(
                 "[CharacterEditor] ❌ Rollback failed:",
@@ -504,12 +458,9 @@ export const CharacterEditorScreen: React.FC = () => {
         }
 
         // Redirect to dashboard
-        console.log("[CharacterEditor] Redirecting to agent dashboard...");
         window.location.href = "/?page=dashboard";
         return;
       }
-
-      console.log("[CharacterEditor] Updating existing agent:", agentId);
 
       const updateResponse = await fetch(`${ELIZAOS_API}/agents/${agentId}`, {
         method: "PATCH",
@@ -551,12 +502,9 @@ export const CharacterEditorScreen: React.FC = () => {
       }
 
       const result = await updateResponse.json();
-      console.log("[CharacterEditor] ✅ ElizaOS agent updated:", result);
 
       // Update agent mapping in Hyperscape database (CRITICAL)
       if (agentId) {
-        console.log("[CharacterEditor] Updating agent mapping for:", agentId);
-
         try {
           const mappingResult = await apiClient.post("/api/agents/mappings", {
             agentId,
@@ -570,10 +518,6 @@ export const CharacterEditorScreen: React.FC = () => {
               `Failed to update agent mapping: ${mappingResult.error || mappingResult.status}`,
             );
           }
-
-          console.log(
-            "[CharacterEditor] ✅ Agent mapping updated successfully",
-          );
         } catch (mappingError) {
           console.error(
             "[CharacterEditor] ❌ Agent mapping update failed:",
@@ -587,7 +531,6 @@ export const CharacterEditorScreen: React.FC = () => {
       }
 
       // Redirect to dashboard
-      console.log("[CharacterEditor] Redirecting to agent dashboard...");
       window.location.href = "/?page=dashboard";
     } catch (error) {
       console.error("[CharacterEditor] ❌ Failed to save agent:", error);
@@ -632,7 +575,6 @@ export const CharacterEditorScreen: React.FC = () => {
     if (!characterId) return;
 
     setCancelAction("deleting");
-    console.log("[CharacterEditor] 🗑️  Deleting character:", characterId);
 
     try {
       const result = await apiClient.delete(`/api/characters/${characterId}`);
@@ -643,7 +585,6 @@ export const CharacterEditorScreen: React.FC = () => {
         );
       }
 
-      console.log("[CharacterEditor] ✅ Character deleted successfully");
       window.location.href = "/";
     } catch (error) {
       console.error("[CharacterEditor] ❌ Failed to delete character:", error);
@@ -659,10 +600,6 @@ export const CharacterEditorScreen: React.FC = () => {
     if (!characterId) return;
 
     setCancelAction("converting");
-    console.log(
-      "[CharacterEditor] 🔄 Converting character to human player:",
-      characterId,
-    );
 
     try {
       const result = await apiClient.patch(`/api/characters/${characterId}`, {
@@ -675,7 +612,6 @@ export const CharacterEditorScreen: React.FC = () => {
         );
       }
 
-      console.log("[CharacterEditor] ✅ Character converted to human player");
       // Redirect to character select with success message
       window.location.href = "/?converted=true";
     } catch (error) {

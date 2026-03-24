@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
 import type { Agent } from "./types";
 import {
@@ -89,24 +89,12 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
   const [lastGoalType, setLastGoalType] = useState<string | null>(null);
   const [goalsPaused, setGoalsPaused] = useState(false);
   const [desireScores, setDesireScores] = useState<DesireScore[]>([]);
+  const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
-  // Poll for goal updates when viewport is active
-  useEffect(() => {
-    if (agent.status !== "active") {
-      setGoal(null);
-      setAvailableGoals([]);
-      return;
-    }
-
-    // Fetch immediately
-    fetchGoal();
-
-    // Poll at configured interval to avoid rate limiting
-    const interval = setInterval(fetchGoal, GOAL_POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [agent.id, agent.status]);
-
-  const fetchGoal = async () => {
+  const fetchGoal = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       // Call Hyperscape server API
       const result = await apiClient.get<{
@@ -153,9 +141,46 @@ export const AgentGoalPanel: React.FC<AgentGoalPanelProps> = ({
       console.error("[AgentGoalPanel] Error fetching goal:", err);
       // Don't show error on fetch failure - just keep last known state
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
-  };
+  }, [agent.id, goal?.description, goal?.progressPercent, lastGoalType]);
+
+  useEffect(() => {
+    if (agent.status !== "active") {
+      setGoal(null);
+      setAvailableGoals([]);
+      return;
+    }
+
+    let cancelled = false;
+    const schedule = (delay: number) => {
+      if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = window.setTimeout(run, delay);
+    };
+    const run = async () => {
+      await fetchGoal();
+      if (!cancelled) {
+        schedule(
+          !document.hidden && isViewportActive
+            ? GOAL_POLL_INTERVAL_MS
+            : GOAL_POLL_INTERVAL_MS * 2,
+        );
+      }
+    };
+    const onVisibilityChange = () => {
+      if (!cancelled)
+        schedule(document.hidden ? GOAL_POLL_INTERVAL_MS * 2 : 1000);
+    };
+
+    void run();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+    };
+  }, [agent.status, fetchGoal, isViewportActive]);
 
   const handleSetGoal = async () => {
     if (!selectedGoalId) return;

@@ -59,6 +59,8 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -103,6 +105,8 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
   }, []);
 
   const fetchData = async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const [logsData, maintData, duelData] = await Promise.all([
         adminFetch("/admin/logs"),
@@ -113,17 +117,41 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
       setMaintenance(maintData);
       setDuelStatus(duelData);
       setActionError(null);
-    } catch (err) {
-      console.error("Failed to fetch dashboard data:", err);
+    } catch {
+      setActionError((prev) => prev ?? "Live data temporarily unavailable");
+    } finally {
+      inFlightRef.current = false;
     }
   };
 
   useEffect(() => {
-    fetchData();
-    if (autoRefresh) {
-      const interval = setInterval(fetchData, 3000);
-      return () => clearInterval(interval);
-    }
+    const clearPollTimeout = () => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+
+    const scheduleNextPoll = () => {
+      clearPollTimeout();
+      if (!autoRefresh) return;
+      const delay = document.visibilityState === "visible" ? 3000 : 12000;
+      pollTimeoutRef.current = window.setTimeout(() => {
+        pollTimeoutRef.current = null;
+        void fetchData().finally(scheduleNextPoll);
+      }, delay);
+    };
+
+    void fetchData().finally(scheduleNextPoll);
+    const onVisibilityChange = () => {
+      if (!autoRefresh) return;
+      scheduleNextPoll();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearPollTimeout();
+    };
   }, [autoRefresh, adminFetch]);
 
   const handleMaintenanceToggle = async () => {

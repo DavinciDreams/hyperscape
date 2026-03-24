@@ -15,6 +15,7 @@
 
 import { useCallback, type CSSProperties } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { RulesScreen } from "./RulesScreen";
 import { StakesScreen } from "./StakesScreen";
 import { ConfirmScreen } from "./ConfirmScreen";
@@ -112,6 +113,7 @@ export function DuelPanel({
   };
 
   const contentStyle: CSSProperties = {
+    ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
     padding: theme.spacing.sm,
     minHeight: 400,
     display: "flex",

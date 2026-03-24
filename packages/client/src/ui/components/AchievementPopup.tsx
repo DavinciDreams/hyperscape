@@ -25,6 +25,7 @@ import React, {
 } from "react";
 import { useTheme } from "../stores/themeStore";
 import { FireworksEffect } from "./FireworksEffect";
+import { zIndex as layerTokens } from "../../constants/tokens";
 
 /** Popup variant determining color scheme */
 export type AchievementVariant =
@@ -65,7 +66,7 @@ export interface AchievementPopupProps {
   showCelebration?: boolean;
   /** Type of celebration effect: "simple" (particles), "fireworks" (elaborate), "none" */
   celebrationType?: CelebrationEffectType;
-  /** Custom z-index (default: 10001) */
+  /** Custom z-index (default: critical overlay layer) */
   zIndex?: number;
   /** Additional style for popup container */
   style?: CSSProperties;
@@ -262,7 +263,7 @@ export const AchievementPopup = memo(function AchievementPopup({
   dismissHintText = "Click anywhere to continue",
   showCelebration,
   celebrationType = "simple",
-  zIndex = 10001,
+  zIndex = layerTokens.critical,
   style,
 }: AchievementPopupProps): React.ReactElement | null {
   const theme = useTheme();

@@ -1,4 +1,5 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
+import { zIndex } from "../../constants/tokens";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -57,7 +58,7 @@ export class ErrorBoundary extends Component<
             color: "#fff",
             fontFamily: "system-ui, sans-serif",
             padding: "24px",
-            zIndex: 9999,
+            zIndex: zIndex.critical,
           }}
         >
           <h2 style={{ margin: "0 0 16px", fontSize: "24px" }}>

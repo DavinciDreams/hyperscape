@@ -208,8 +208,6 @@ export class TerrainSystem extends System {
   private terrainUpdateIntervalId?: NodeJS.Timeout;
   private serializationIntervalId?: NodeJS.Timeout;
   private boundingBoxIntervalId?: NodeJS.Timeout;
-  /** Timeout ID for fallback terrain generation if ROADS_GENERATED event is delayed */
-  private roadsTimeoutId?: NodeJS.Timeout;
   private activeChunks = new Set<string>();
 
   private coreChunkRange = 2; // 9 core chunks (5x5 grid)
@@ -1887,9 +1885,14 @@ export class TerrainSystem extends System {
       );
     }
 
-    // OPTIMIZATION: Wait for roads before generating visual tiles
-    // This avoids generating tiles twice (once without roads, once with)
-    // getHeightAt() works without tiles, so RoadNetworkSystem can still query heights
+    // Generate initial terrain as soon as terrain data/materials are ready.
+    // Road influence can be refreshed later when the road network finishes.
+    // This keeps first entry into the world off the critical path for roads/towns.
+    if (!this._initialTilesReady) {
+      this.loadInitialTiles();
+    }
+
+    // Refresh road influence after the road network becomes available.
     this.world.on(EventType.ROADS_GENERATED, (...args: unknown[]) => {
       // Extract road data from event args
       const data = (args[0] ?? {}) as {
@@ -1900,52 +1903,19 @@ export class TerrainSystem extends System {
         `[TerrainSystem] ROADS_GENERATED event received: ${data.roadCount ?? 0} roads, ${data.townCount ?? 0} towns`,
       );
 
-      // Clear the fallback timeout since we received the event
-      if (this.roadsTimeoutId) {
-        clearTimeout(this.roadsTimeoutId);
-        this.roadsTimeoutId = undefined;
-      }
-
       this.roadNetworkSystem = this.world.getSystem("roads") as
         | RoadNetworkSystem
         | undefined;
 
-      // Now that roads are ready, ensure all tiles have road influence data
-      if (!this._initialTilesReady) {
+      // Tiles already exist by this point in normal client flow. Refresh them
+      // so roads appear without making road generation block first terrain.
+      if (this.terrainTiles.size > 0) {
         console.log(
-          "[TerrainSystem] Roads ready, generating initial tiles with road data",
-        );
-        this.loadInitialTiles();
-        // IMPORTANT: Also refresh road influence on any tiles that were created
-        // before roads were ready (e.g., by updatePlayerBasedTerrain or flat zone regeneration)
-        if (this.terrainTiles.size > 0) {
-          console.log(
-            "[TerrainSystem] Refreshing road influence on pre-existing tiles...",
-          );
-          this.refreshRoadInfluence();
-        }
-      } else {
-        // Tiles already exist - refresh road influence on existing tiles
-        console.log(
-          "[TerrainSystem] Tiles already exist, refreshing road influence...",
+          "[TerrainSystem] Roads ready, refreshing road influence on loaded tiles...",
         );
         this.refreshRoadInfluence();
       }
     });
-
-    // Fallback: If no roads event within 15 seconds, generate tiles anyway
-    // This is a safety net - normally ROADS_GENERATED should always fire
-    // NOTE: Timeout increased from 2s to 15s because TownSystem.start() can take
-    // significant time evaluating town candidates (each requires multiple terrain height lookups).
-    // With a 15x15 candidate grid and ~136 height lookups per candidate, this can take 5-10 seconds.
-    this.roadsTimeoutId = setTimeout(() => {
-      if (!this._initialTilesReady) {
-        console.warn(
-          "[TerrainSystem] Timeout: No roads event received after 15s, generating initial tiles without road data",
-        );
-        this.loadInitialTiles();
-      }
-    }, 15000);
 
     // Start player-based terrain update loop
     // On server, getTerrainCenters() filters out agent players to prevent 25+ agents
@@ -2429,10 +2399,7 @@ export class TerrainSystem extends System {
   }
 
   private loadInitialTiles(): void {
-    const _startTime = performance.now();
     let _tilesGenerated = 0;
-    let minHeight = Infinity;
-    let maxHeight = -Infinity;
 
     // Generate initial grid around the active terrain center.
     const centers = this.getTerrainCenters();
@@ -2463,25 +2430,8 @@ export class TerrainSystem extends System {
         _tilesGenerated++;
         if (generateContent) fullTiles++;
         else terrainOnlyTiles++;
-
-        // Sample heights to check variation (core tiles only)
-        if (generateContent) {
-          for (let i = 0; i < 10; i++) {
-            const testX =
-              tile.x * this.CONFIG.TILE_SIZE +
-              (Math.random() - 0.5) * this.CONFIG.TILE_SIZE;
-            const testZ =
-              tile.z * this.CONFIG.TILE_SIZE +
-              (Math.random() - 0.5) * this.CONFIG.TILE_SIZE;
-            const height = this.getHeightAt(testX, testZ);
-            minHeight = Math.min(minHeight, height);
-            maxHeight = Math.max(maxHeight, height);
-          }
-        }
       }
     }
-
-    const _endTime = performance.now();
 
     // Debug: Log flat zone statistics
     console.log(
@@ -7065,9 +7015,6 @@ export class TerrainSystem extends System {
     }
     if (this.boundingBoxIntervalId) {
       clearInterval(this.boundingBoxIntervalId);
-    }
-    if (this.roadsTimeoutId) {
-      clearTimeout(this.roadsTimeoutId);
     }
     if (this._tileRegenerationFlushId) {
       clearTimeout(this._tileRegenerationFlushId);

@@ -6,6 +6,7 @@
  */
 
 import { useThemeStore } from "@/ui";
+import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
 import { TAB_INDEX_ALL } from "../constants";
 import type { BankItem } from "../types";
 
@@ -41,8 +42,10 @@ export function BankFooter({
     <div
       className="mx-3 mb-2 mt-1 px-3 py-1.5 flex justify-between items-center text-xs rounded"
       style={{
-        background: theme.colors.background.panelSecondary,
-        border: `1px solid ${theme.colors.border.decorative}`,
+        ...getPanelInsetStyle(theme, {
+          emphasis: "strong",
+          radius: theme.borderRadius.md,
+        }),
         color: theme.colors.text.secondary,
       }}
     >
@@ -67,6 +70,10 @@ export function BankFooter({
           className="flex rounded overflow-hidden"
           style={{
             border: `1px solid ${theme.colors.border.decorative}`,
+            background: String(
+              getPanelInsetStyle(theme, { radius: theme.borderRadius.sm })
+                .background,
+            ),
           }}
         >
           <button
@@ -74,8 +81,13 @@ export function BankFooter({
             className="px-2 py-0.5 text-[10px] font-bold transition-all"
             style={{
               background: !withdrawAsNote
-                ? theme.colors.border.decorative
-                : theme.colors.background.overlay,
+                ? String(
+                    getInteractiveTileStyle(theme, {
+                      active: true,
+                      radius: theme.borderRadius.sm,
+                    }).background,
+                  )
+                : "transparent",
               color: !withdrawAsNote
                 ? theme.colors.accent.primary
                 : theme.colors.text.muted,
@@ -90,8 +102,13 @@ export function BankFooter({
             className="px-2 py-0.5 text-[10px] font-bold transition-all"
             style={{
               background: withdrawAsNote
-                ? theme.colors.border.decorative
-                : theme.colors.background.overlay,
+                ? String(
+                    getInteractiveTileStyle(theme, {
+                      active: true,
+                      radius: theme.borderRadius.sm,
+                    }).background,
+                  )
+                : "transparent",
               color: withdrawAsNote
                 ? theme.colors.accent.primary
                 : theme.colors.text.muted,
@@ -136,9 +153,12 @@ export function BankFooter({
             onClick={onReleaseAllPlaceholders}
             className="px-2 py-0.5 rounded text-[10px] font-medium transition-all"
             style={{
-              background: `${theme.colors.state.danger}80`,
+              ...getInteractiveTileStyle(theme, {
+                active: true,
+                accentColor: theme.colors.state.danger,
+                radius: theme.borderRadius.sm,
+              }),
               color: theme.colors.text.primary,
-              border: `1px solid ${theme.colors.state.danger}99`,
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = `${theme.colors.state.danger}b3`;
