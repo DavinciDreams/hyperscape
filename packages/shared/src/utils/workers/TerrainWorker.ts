@@ -13,7 +13,8 @@ import { WorkerPool } from "./WorkerPool";
 import {
   buildGetBaseHeightAtJS,
   buildComputeBiomeWeightsJS,
-  buildApplyLandscapeFeaturesJS,
+  MAX_HEIGHT,
+  WATER_LEVEL_NORMALIZED,
 } from "../../systems/shared/world/TerrainHeightParams";
 import { buildBiomeConstantsJS } from "../../systems/shared/world/TerrainBiomeTypes";
 import {
@@ -45,18 +46,6 @@ export interface TerrainWorkerConfig {
   SHORELINE_LAND_MAX_MULTIPLIER: number;
   SHORELINE_UNDERWATER_BAND: number;
   UNDERWATER_DEPTH_MULTIPLIER: number;
-  landscapeFeatures?: Array<{
-    type: string;
-    x: number;
-    z: number;
-    radius: number;
-    strength: number;
-    shapePower: number;
-    noiseScale: number;
-    noiseAmount: number;
-    lakes: number;
-    lakesFalloff: number;
-  }>;
 }
 
 export interface TerrainWorkerInput {
@@ -93,6 +82,8 @@ export interface TerrainWorkerOutput {
   biomeData: Uint8Array;
   /** Per-vertex normals as Float32Array (resolution * resolution * 3) — computed from overflow grid */
   normalData: Float32Array;
+  /** River proximity: 1.0 = in channel, smoothstep to 0.0 at bank edge */
+  riverProximity: Float32Array;
 }
 
 /**
@@ -143,10 +134,7 @@ function generateHeightmap(input) {
   // HEIGHT FUNCTIONS — generated from TerrainHeightParams.ts (single source of truth)
   // ============================================
 
-  var landscapeFeatures = (config.landscapeFeatures || []);
-
   ${buildComputeBiomeWeightsJS()}
-  ${buildApplyLandscapeFeaturesJS()}
 
   ${buildGetBaseHeightAtJS()}
   ${buildCreateBiomeNoiseSetsJS()}
@@ -217,6 +205,7 @@ function generateHeightmap(input) {
 
   const colorData = new Float32Array(vertexCount * 3);
   const biomeData = new Uint8Array(vertexCount);
+  const riverProximity = new Float32Array(vertexCount);
 
   for (let iz = 0; iz < resolution; iz++) {
     for (let ix = 0; ix < resolution; ix++) {
@@ -263,7 +252,8 @@ function generateHeightmap(input) {
     heightData,
     colorData,
     biomeData,
-    normalData
+    normalData,
+    riverProximity
   };
 }
 
@@ -277,7 +267,8 @@ self.onmessage = function(e) {
         result.heightData.buffer,
         result.colorData.buffer,
         result.biomeData.buffer,
-        result.normalData.buffer
+        result.normalData.buffer,
+        result.riverProximity.buffer
       ]);
     } catch (error) {
       self.postMessage({ error: error.message || 'Unknown error' });

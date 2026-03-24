@@ -13,6 +13,7 @@ import { getEmbeddedConfig, getQualityPreset } from "../types/embeddedConfig";
 import type { World } from "@hyperscape/shared";
 import { EventType } from "@hyperscape/shared";
 import { logger } from "../lib/logger";
+import { getStreamingAccessToken } from "../lib/streamingAccessToken";
 
 /** API base URL derived from WebSocket URL */
 function getApiBaseUrl(wsUrl: string): string {
@@ -975,9 +976,7 @@ export function EmbeddedGameClient() {
         config.followEntity || config.characterId || "",
       );
       url.searchParams.set("characterId", config.characterId || "");
-      const streamToken = new URLSearchParams(window.location.search).get(
-        "streamToken",
-      );
+      const streamToken = getStreamingAccessToken();
       if (streamToken) {
         url.searchParams.set("streamToken", streamToken);
       }
@@ -1012,6 +1011,7 @@ export function EmbeddedGameClient() {
         wsUrl={wsUrl}
         onSetup={handleSetup}
         hideUI={config.mode === "spectator"}
+        streamingMode={config.mode === "spectator"}
       />
       {showLoading && worldRef.current && (
         <div style={{ zIndex: 100, position: "absolute", inset: 0 }}>

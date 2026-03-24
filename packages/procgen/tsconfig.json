@@ -13,6 +13,10 @@
     "sourceMap": true,
     "outDir": "dist",
     "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@hyperscape/shared": ["../shared/build/framework.d.ts"]
+    },
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,

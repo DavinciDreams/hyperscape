@@ -27,6 +27,7 @@
  *   STREAM_CAPTURE_HEADLESS  - 'true' for headless (default: false for better GPU rendering)
  *   STREAM_CAPTURE_CHANNEL   - Browser channel ('chrome', 'msedge', etc.)
  *   STREAM_CAPTURE_ANGLE     - ANGLE backend (default: metal on macOS, vulkan elsewhere)
+ *   CAPTURE_DISABLE_SANDBOX  - 'true' to launch Chromium with --no-sandbox
  *   STREAM_CDP_QUALITY       - JPEG quality for CDP screencast (1-100, default: 80)
  *   STREAM_FPS               - Target frames per second (default: 30)
  *   TWITCH_STREAM_KEY / TWITCH_RTMP_STREAM_KEY - Twitch stream key
@@ -37,7 +38,7 @@
  *   PUMPFUN_RTMP_URL         - Pump.fun RTMP URL
  *   X_RTMP_URL               - X/Twitter RTMP URL
  *   RTMP_DESTINATIONS_JSON   - JSON array fanout config
- *   STREAMING_VIEWER_ACCESS_TOKEN - Optional token appended as streamToken for gated viewer WS
+ *   STREAMING_VIEWER_ACCESS_TOKEN - Optional token appended as #streamToken for gated viewer WS bootstrap
  *   GAME_URL                 - URL to Hyperscape (default: http://localhost:3333/?page=stream)
  *   GAME_FALLBACK_URLS       - Comma-separated fallback URLs
  *   RTMP_BRIDGE_PORT         - WebSocket port for legacy bridge (default: 8765)
@@ -53,6 +54,14 @@ import {
   generateCaptureScript,
   generateWebCodecsCaptureScript,
 } from "../src/streaming/index.js";
+import {
+  buildDefaultCaptureLaunchArgs,
+  resolveAllowedCaptureOrigins,
+  resolveUnexpectedCaptureOrigin,
+  shouldAcceptCaptureReadiness,
+  type CaptureRendererHealthSnapshot,
+} from "../src/streaming/captureBrowserPolicy.js";
+import { redactStreamingSecretsFromUrl } from "../src/streaming/redactStreamingUrl.js";
 import { errMsg } from "../src/shared/errMsg.ts";
 import { getStreamLeakDiagnostics } from "../src/streaming/stream-leak-diagnostics.js";
 
@@ -78,10 +87,12 @@ function withViewerAccessToken(rawUrl: string): string {
   if (!STREAMING_VIEWER_ACCESS_TOKEN) return rawUrl;
   try {
     const url = new URL(rawUrl);
-    url.searchParams.set("streamToken", STREAMING_VIEWER_ACCESS_TOKEN);
+    const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
+    hashParams.set("streamToken", STREAMING_VIEWER_ACCESS_TOKEN);
+    url.hash = hashParams.toString();
     return url.toString();
   } catch {
-    const separator = rawUrl.includes("?") ? "&" : "?";
+    const separator = rawUrl.includes("#") ? "&" : "#";
     return `${rawUrl}${separator}streamToken=${encodeURIComponent(STREAMING_VIEWER_ACCESS_TOKEN)}`;
   }
 }
@@ -89,6 +100,8 @@ function withViewerAccessToken(rawUrl: string): string {
 const GAME_URL_CANDIDATES = Array.from(
   new Set([GAME_URL, ...GAME_FALLBACK_URLS].map(withViewerAccessToken)),
 );
+const ALLOWED_CAPTURE_ORIGINS =
+  resolveAllowedCaptureOrigins(GAME_URL_CANDIDATES);
 
 const BRIDGE_PORT = parseInt(process.env.RTMP_BRIDGE_PORT || "8765", 10);
 const BRIDGE_URL = `ws://localhost:${BRIDGE_PORT}`;
@@ -111,6 +124,9 @@ const STREAM_CAPTURE_CHANNEL =
 const ANGLE_BACKEND =
   process.env.STREAM_CAPTURE_ANGLE?.trim() ||
   (process.platform === "darwin" ? "metal" : "vulkan");
+const CAPTURE_DISABLE_SANDBOX = /^(1|true|yes|on)$/i.test(
+  process.env.CAPTURE_DISABLE_SANDBOX || "",
+);
 const STREAM_CAPTURE_DISABLE_WEBGPU = /^(1|true|yes|on)$/i.test(
   process.env.STREAM_CAPTURE_DISABLE_WEBGPU || "",
 );
@@ -213,6 +229,21 @@ function stopFpsTracking() {
 
 type ActiveCaptureMode = "cdp" | "webcodecs" | "mediarecorder";
 
+type RendererHealthSnapshot = CaptureRendererHealthSnapshot & {
+  updatedAt: number | null;
+  phase: string | null;
+};
+
+let latestRendererHealth: RendererHealthSnapshot = {
+  ready: false,
+  degradedReason: "capture_not_initialized",
+  updatedAt: null,
+  phase: null,
+  diagnostics: null,
+};
+let rendererHealthProbeInFlight: Promise<RendererHealthSnapshot> | null = null;
+let captureNavigationAbortInFlight = false;
+
 function writeExternalStatusSnapshot(
   bridge: ReturnType<typeof getRTMPBridge>,
   captureMode: ActiveCaptureMode,
@@ -237,6 +268,7 @@ function writeExternalStatusSnapshot(
     },
     captureMode,
     processRssBytes: processMemory.rss,
+    rendererHealth: latestRendererHealth,
     updatedAt: Date.now(),
     source: "external-rtmp-bridge",
   };
@@ -317,6 +349,208 @@ function hasConfiguredOutput(): boolean {
   );
 }
 
+async function probeRendererHealth(
+  pageRef: Page,
+): Promise<RendererHealthSnapshot> {
+  const probedAt = Date.now();
+  const probe = await pageRef.evaluate(() => {
+    // This shape mirrors StreamingWindowRendererHealth from the client bundle.
+    // Playwright evaluate runs in the browser context, so runtime imports are
+    // intentionally avoided here.
+    const win = window as unknown as {
+      __HYPERSCAPE_STREAM_READY__?: boolean;
+      __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
+        ready?: boolean;
+        degradedReason?: string | null;
+        updatedAt?: number | null;
+        phase?: string | null;
+      } | null;
+      __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
+    };
+    const explicitHealth =
+      win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ &&
+      typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ === "object"
+        ? {
+            ready: win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.ready === true,
+            degradedReason:
+              typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__
+                .degradedReason === "string"
+                ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.degradedReason
+                : null,
+            updatedAt:
+              typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt ===
+                "number" &&
+              Number.isFinite(
+                win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt,
+              )
+                ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.updatedAt
+                : null,
+            phase:
+              typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.phase ===
+              "string"
+                ? win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__.phase
+                : null,
+          }
+        : null;
+
+    // Read boot status from a lightweight window global instead of
+    // document.body.textContent which forces full text computation of
+    // the game DOM every probe interval and can cause layout thrashing.
+    const bootStatus =
+      typeof win.__HYPERSCAPE_STREAM_BOOT_STATUS__ === "string"
+        ? win.__HYPERSCAPE_STREAM_BOOT_STATUS__
+        : null;
+
+    const hasStreamingBootUi =
+      !explicitHealth &&
+      bootStatus !== null &&
+      !bootStatus.startsWith("error:");
+    const hasCriticalErrorUi =
+      !explicitHealth && bootStatus !== null && bootStatus.startsWith("error:");
+    return {
+      explicitHealth,
+      hasCanvas: document.querySelector("canvas") !== null,
+      readyFlag: win.__HYPERSCAPE_STREAM_READY__ === true,
+      hasStreamingBootUi,
+      hasCriticalErrorUi,
+    };
+  });
+
+  const explicitHealth =
+    probe.explicitHealth && typeof probe.explicitHealth === "object"
+      ? probe.explicitHealth
+      : null;
+
+  if (explicitHealth) {
+    const criticalUiVisible = probe.hasCriticalErrorUi === true;
+    return {
+      ready: criticalUiVisible ? false : explicitHealth.ready === true,
+      degradedReason: criticalUiVisible
+        ? normalizedCriticalErrorReason(probe)
+        : typeof explicitHealth.degradedReason === "string"
+          ? explicitHealth.degradedReason
+          : null,
+      updatedAt:
+        typeof explicitHealth.updatedAt === "number"
+          ? explicitHealth.updatedAt
+          : probedAt,
+      phase:
+        typeof explicitHealth.phase === "string" ? explicitHealth.phase : null,
+      diagnostics: {
+        hasCanvas: probe.hasCanvas === true,
+        hasStreamingBootUi: probe.hasStreamingBootUi === true,
+        hasCriticalErrorUi: criticalUiVisible,
+        readyFlag: probe.readyFlag === true,
+      },
+    };
+  }
+
+  return {
+    ready:
+      !probe.hasCriticalErrorUi &&
+      (probe.readyFlag === true ||
+        (probe.hasCanvas && !probe.hasStreamingBootUi)),
+    degradedReason:
+      !probe.hasCriticalErrorUi &&
+      (probe.readyFlag === true ||
+        (probe.hasCanvas && !probe.hasStreamingBootUi))
+        ? null
+        : probe.hasCriticalErrorUi
+          ? normalizedCriticalErrorReason(probe)
+          : probe.hasStreamingBootUi
+            ? "loading_overlay_active"
+            : "canvas_missing",
+    updatedAt: probedAt,
+    phase: null,
+    diagnostics: {
+      hasCanvas: probe.hasCanvas === true,
+      hasStreamingBootUi: probe.hasStreamingBootUi === true,
+      hasCriticalErrorUi: probe.hasCriticalErrorUi === true,
+      readyFlag: probe.readyFlag === true,
+    },
+  };
+}
+
+function normalizedCriticalErrorReason(probe: {
+  hasCriticalErrorUi?: boolean;
+  explicitHealth?: { degradedReason?: string | null } | null;
+}): string {
+  const explicitReason = probe.explicitHealth?.degradedReason;
+  if (typeof explicitReason === "string" && explicitReason.trim().length > 0) {
+    return explicitReason;
+  }
+  return probe.hasCriticalErrorUi ? "initialization_failed" : "canvas_missing";
+}
+
+function assertAllowedCaptureNavigation(rawUrl: string): void {
+  const unexpectedOrigin = resolveUnexpectedCaptureOrigin(
+    rawUrl,
+    ALLOWED_CAPTURE_ORIGINS,
+  );
+  if (!unexpectedOrigin) {
+    return;
+  }
+
+  throw new Error(
+    `Capture browser navigated outside the allowed origin set (${ALLOWED_CAPTURE_ORIGINS.join(", ")}): ${unexpectedOrigin}`,
+  );
+}
+
+async function abortCaptureForUnexpectedNavigation(
+  rawUrl: string,
+): Promise<void> {
+  if (captureNavigationAbortInFlight) {
+    return;
+  }
+  captureNavigationAbortInFlight = true;
+  console.error(
+    `[Main] Refusing to capture unexpected navigation target ${redactStreamingSecretsFromUrl(rawUrl)}. Allowed origins: ${ALLOWED_CAPTURE_ORIGINS.join(", ")}`,
+  );
+  try {
+    await cleanup();
+  } finally {
+    process.exit(1);
+  }
+}
+
+async function refreshRendererHealthSnapshot(
+  pageRef: Page | null,
+): Promise<RendererHealthSnapshot> {
+  if (!pageRef) {
+    latestRendererHealth = {
+      ready: false,
+      degradedReason: "capture_page_missing",
+      updatedAt: Date.now(),
+      phase: null,
+      diagnostics: null,
+    };
+    return latestRendererHealth;
+  }
+
+  if (rendererHealthProbeInFlight) {
+    return rendererHealthProbeInFlight;
+  }
+
+  rendererHealthProbeInFlight = (async () => {
+    try {
+      latestRendererHealth = await probeRendererHealth(pageRef);
+    } catch (err) {
+      latestRendererHealth = {
+        ready: false,
+        degradedReason: `probe_failed:${errMsg(err)}`.slice(0, 180),
+        updatedAt: Date.now(),
+        phase: null,
+        diagnostics: null,
+      };
+    }
+    return latestRendererHealth;
+  })().finally(() => {
+    rendererHealthProbeInFlight = null;
+  });
+
+  return rendererHealthProbeInFlight;
+}
+
 async function waitForStreamReadiness(
   pageRef: Page,
   timeoutMs: number,
@@ -326,37 +560,14 @@ async function waitForStreamReadiness(
 
   while (Date.now() < deadline) {
     try {
-      const probe = await pageRef.evaluate(() => {
-        const win = window as unknown as {
-          __HYPERSCAPE_STREAM_READY__?: boolean;
-        };
-        const text = (document.body?.innerText || "").slice(0, 512);
-        const normalizedText = text.toLowerCase();
-        const hasStreamingBootUi =
-          normalizedText.includes("waiting for duel data") ||
-          normalizedText.includes("initializing world systems") ||
-          normalizedText.includes("initializing") ||
-          normalizedText.includes("loading assets") ||
-          normalizedText.includes("finalizing");
-        return {
-          hasCanvas: document.querySelector("canvas") !== null,
-          readyFlag: win.__HYPERSCAPE_STREAM_READY__ === true,
-          hasStreamingBootUi,
-        };
-      });
-
-      if (probe.readyFlag) {
-        return true;
-      }
-
-      // Allow capture once we have a canvas and the stream boot/loading UI has
-      // cleared (the old gate accepted any canvas, which could lock us at 3%).
-      if (probe.hasCanvas && !probe.hasStreamingBootUi) {
-        return true;
-      }
-
-      // Hard fallback after sustained boot-screen presence to avoid deadlock.
-      if (probe.hasStreamingBootUi && Date.now() - startedAt >= 180_000) {
+      const probe = await refreshRendererHealthSnapshot(pageRef);
+      if (
+        shouldAcceptCaptureReadiness({
+          snapshot: probe,
+          startedAt,
+          nowMs: Date.now(),
+        })
+      ) {
         return true;
       }
     } catch (err) {
@@ -377,27 +588,18 @@ async function launchCaptureBrowser() {
   const featureFlags = "--enable-features=Vulkan,UseSkiaRenderer,WebGPU";
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,
-    args: [
-      // GPU / WebGPU essentials
-      "--use-gl=angle",
-      `--use-angle=${ANGLE_BACKEND}`,
-      "--enable-webgl",
-      "--enable-unsafe-webgpu",
+    args: buildDefaultCaptureLaunchArgs({
+      angleBackend: ANGLE_BACKEND,
       featureFlags,
-      "--ignore-gpu-blocklist",
-      "--enable-gpu-rasterization",
-      // Sandbox & stability
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-web-security",
-      "--autoplay-policy=no-user-gesture-required",
-      // Prevent Chromium from throttling rendering/timers
-      "--disable-background-timer-throttling",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-renderer-backgrounding",
-      "--disable-hang-monitor",
-    ],
+      disableSandbox: CAPTURE_DISABLE_SANDBOX,
+    }),
   };
+
+  if (CAPTURE_DISABLE_SANDBOX) {
+    console.warn(
+      "[Main] CAPTURE_DISABLE_SANDBOX=true: Chromium sandboxing is disabled for this capture session.",
+    );
+  }
 
   if (STREAM_CAPTURE_CHANNEL) {
     console.log(
@@ -513,36 +715,58 @@ async function setupBrowser() {
     }
   });
 
+  page.on("framenavigated", (frame) => {
+    if (frame !== page?.mainFrame()) {
+      return;
+    }
+    const navigatedUrl = frame.url();
+    if (!navigatedUrl || navigatedUrl === "about:blank") {
+      return;
+    }
+    const unexpectedOrigin = resolveUnexpectedCaptureOrigin(
+      navigatedUrl,
+      ALLOWED_CAPTURE_ORIGINS,
+    );
+    if (!unexpectedOrigin) {
+      return;
+    }
+    void abortCaptureForUnexpectedNavigation(navigatedUrl);
+  });
+
   if (!selectedGameUrl) {
     for (const candidateUrl of GAME_URL_CANDIDATES) {
-      console.log(`[Main] Navigating to ${candidateUrl}...`);
+      const redactedCandidateUrl = redactStreamingSecretsFromUrl(candidateUrl);
+      console.log(`[Main] Navigating to ${redactedCandidateUrl}...`);
       try {
         await page.goto(candidateUrl, {
           timeout: 120_000,
           waitUntil: "domcontentloaded",
         });
+        assertAllowedCaptureNavigation(page.url());
       } catch (err) {
-        console.warn(`[Main] Failed to load ${candidateUrl}:`, err);
+        console.warn(`[Main] Failed to load ${redactedCandidateUrl}:`, err);
         continue;
       }
 
       if (USE_TIMED_STREAM_WARMUP) {
         console.log(
-          `[Main] Using timed warmup (${STREAM_CAPTURE_WARMUP_MS}ms) for ${candidateUrl}; skipping in-page readiness probe on headed Linux CDP capture.`,
+          `[Main] Using timed warmup (${STREAM_CAPTURE_WARMUP_MS}ms) for ${redactedCandidateUrl}; skipping in-page readiness probe on headed Linux CDP capture.`,
         );
         await page.waitForTimeout(STREAM_CAPTURE_WARMUP_MS);
         selectedGameUrl = candidateUrl;
         break;
       }
 
-      console.log(`[Main] Waiting for stream readiness on ${candidateUrl}...`);
+      console.log(
+        `[Main] Waiting for stream readiness on ${redactedCandidateUrl}...`,
+      );
       const isReady = await waitForStreamReadiness(page, 90_000);
       if (isReady) {
         selectedGameUrl = candidateUrl;
         break;
       }
       console.warn(
-        `[Main] Stream readiness not detected on ${candidateUrl}, trying fallback...`,
+        `[Main] Stream readiness not detected on ${redactedCandidateUrl}, trying fallback...`,
       );
     }
   } else {
@@ -551,9 +775,10 @@ async function setupBrowser() {
         timeout: 120_000,
         waitUntil: "domcontentloaded",
       });
+      assertAllowedCaptureNavigation(page.url());
     } catch (err) {
       console.error(
-        `[Main] Failed to reload configured URL ${selectedGameUrl}`,
+        `[Main] Failed to reload configured URL ${redactStreamingSecretsFromUrl(selectedGameUrl)}`,
         err,
       );
     }
@@ -561,7 +786,7 @@ async function setupBrowser() {
 
   if (!selectedGameUrl) {
     console.error(
-      `[Main] Could not find a game canvas on any candidate URL: ${GAME_URL_CANDIDATES.join(", ")}`,
+      `[Main] Could not find a game canvas on any candidate URL: ${GAME_URL_CANDIDATES.map(redactStreamingSecretsFromUrl).join(", ")}`,
     );
     console.error(
       "[Main] Make sure the game client is running and supports stream/spectator mode.",
@@ -570,7 +795,9 @@ async function setupBrowser() {
     process.exit(1);
   }
 
-  console.log(`[Main] Using game page: ${selectedGameUrl}`);
+  console.log(
+    `[Main] Using game page: ${redactStreamingSecretsFromUrl(selectedGameUrl)}`,
+  );
   if (STREAM_CAPTURE_POST_NAV_DELAY_MS > 0) {
     console.log(
       `[Main] Waiting ${STREAM_CAPTURE_POST_NAV_DELAY_MS}ms before starting capture...`,
@@ -986,9 +1213,14 @@ async function main() {
   console.log("=".repeat(60));
   console.log("");
 
+  await refreshRendererHealthSnapshot(page);
   writeExternalStatusSnapshot(bridge, activeCaptureMode);
   const statusSnapshotInterval = setInterval(() => {
-    writeExternalStatusSnapshot(bridge, activeCaptureMode);
+    void refreshRendererHealthSnapshot(page)
+      .catch(() => undefined)
+      .finally(() => {
+        writeExternalStatusSnapshot(bridge, activeCaptureMode);
+      });
   }, 2000);
 
   // Status updates every 30 seconds
@@ -1018,6 +1250,11 @@ async function main() {
         .map((d) => `${d.name}: ${d.connected ? "OK" : "ERROR"}`)
         .join(", ") || "(none configured)",
     );
+    if (!latestRendererHealth.ready) {
+      console.warn(
+        `[Stream Health] Renderer degraded: ${latestRendererHealth.degradedReason || "unknown"}`,
+      );
+    }
 
     if (activeCaptureMode === "cdp") {
       console.log(

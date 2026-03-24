@@ -5,7 +5,7 @@
  */
 
 import * as tf from "@tensorflow/tfjs";
-import * as handPoseDetection from "@tensorflow-models/hand-pose-detection";
+import * as handPoseDetection from "@tensorflow-models/hand-pose-detection/dist/index.js";
 
 import "@tensorflow/tfjs-backend-webgpu";
 import "@mediapipe/hands";

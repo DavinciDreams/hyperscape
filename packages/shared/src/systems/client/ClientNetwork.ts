@@ -3705,7 +3705,9 @@ export class ClientNetwork extends SystemBase {
           modify: (data: Record<string, unknown>) => entity.modify(data),
         };
       },
-      // Pass terrain height function for smooth Y updates
+      // Pass terrain height function for smooth Y updates.
+      // getHeightAt() is bridge-aware (returns deck height on bridge tiles),
+      // so no per-caller bridge check is needed.
       terrain?.getHeightAt
         ? (x: number, z: number) => terrain.getHeightAt!(x, z)
         : undefined,
@@ -4480,6 +4482,27 @@ export class ClientNetwork extends SystemBase {
     if (this.world.stats) {
       this.world.stats.onServerRTT(data.rtt);
     }
+  };
+
+  /**
+   * Handle server tick health stats for DevStats panel.
+   */
+  onTickHealth = (data: {
+    currentTick: number;
+    missedTicks: number;
+    lateTicks: number;
+    maxLateness: number;
+    lastResetTick: number;
+    lastTickDuration: number;
+    isHealthy: boolean;
+    phaseTimings?: { mobAI: number; mobMove: number; combat: number };
+    eventLoopLag?: number;
+    transport?: string;
+    connections?: number;
+    broadcastMs?: number;
+    pubsubPublishes?: number;
+  }) => {
+    (this.world as { tickHealth?: typeof data }).tickHealth = data;
   };
 
   /**

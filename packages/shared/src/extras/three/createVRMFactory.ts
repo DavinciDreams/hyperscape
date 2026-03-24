@@ -904,6 +904,42 @@ function cloneGLB(glb: GLBData): GLBData {
   clonedScene.scale.copy(glb.scene.scale);
   clonedScene.updateMatrixWorld(true);
 
+  // CRITICAL: Create fresh material instances per clone.
+  // SkeletonUtils.clone() shares material references across all clones,
+  // which causes highlight bleed (hovering one mob highlights all of same type).
+  // We create brand-new MeshStandardNodeMaterial instances here, copying visual
+  // properties but NOT using material.clone() (which may not isolate TSL node
+  // graph internals). Textures are shared by reference — negligible memory cost.
+  clonedScene.traverse((child) => {
+    if (!isMeshLike(child)) return;
+    const mesh = child as MeshLike;
+    const makeFresh = (src: THREE.Material): MeshStandardNodeMaterial => {
+      const s = src as MeshStandardNodeMaterial;
+      const m = new MeshStandardNodeMaterial();
+      m.color = s.color?.clone() ?? new THREE.Color(0xffffff);
+      m.emissive = s.emissive?.clone() ?? new THREE.Color(0x000000);
+      m.emissiveIntensity = s.emissiveIntensity ?? 0;
+      m.roughness = s.roughness ?? 1;
+      m.metalness = s.metalness ?? 0;
+      m.envMapIntensity = s.envMapIntensity ?? 1;
+      m.opacity = s.opacity ?? 1;
+      m.transparent = s.transparent ?? false;
+      m.alphaTest = s.alphaTest ?? 0;
+      m.side = s.side ?? THREE.FrontSide;
+      m.shadowSide = s.shadowSide;
+      if (s.map) m.map = s.map;
+      if (s.normalMap) m.normalMap = s.normalMap;
+      if (s.emissiveMap) m.emissiveMap = s.emissiveMap;
+      m.name = s.name;
+      return m;
+    };
+    if (Array.isArray(mesh.material)) {
+      mesh.material = (mesh.material as THREE.Material[]).map(makeFresh);
+    } else {
+      mesh.material = makeFresh(mesh.material);
+    }
+  });
+
   const originalVRM = glb.userData?.vrm;
 
   // If no VRM or no humanoid, just return cloned scene

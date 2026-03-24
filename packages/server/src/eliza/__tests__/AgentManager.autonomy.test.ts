@@ -268,7 +268,7 @@ describe("AgentManager autonomous loop", () => {
       agent!.data.inStreamingDuel = true;
       agent!.data.preventRespawn = true;
 
-      await (manager as any).behaviorTicker.executeBehaviorTick("agent-loop");
+      await manager.executeBehaviorTick("agent-loop");
 
       expect(agent!.data.health).toBe(agent!.data.maxHealth);
       expect(agent!.data.deathState).toBe(DeathState.ALIVE);
@@ -313,7 +313,7 @@ describe("AgentManager autonomous loop", () => {
       agent!.data.inStreamingDuel = false;
       agent!.data.preventRespawn = false;
 
-      await (manager as any).behaviorTicker.executeBehaviorTick("agent-out");
+      await manager.executeBehaviorTick("agent-out");
 
       expect(
         isPositionInsideCombatArena(

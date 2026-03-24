@@ -21,7 +21,7 @@ export interface PlayerDisconnectPayload {
  */
 export interface EntityDeathPayload {
   entityId: string;
-  entityType?: "player" | "mob";
+  entityType?: string;
   killedBy?: string;
 }
 
@@ -60,11 +60,10 @@ export function isEntityDeathPayload(
     return false;
   }
 
-  // entityType is optional but must be 'player' or 'mob' if present
+  // entityType is optional but must be a string if present
   if (
     payload.entityType !== undefined &&
-    payload.entityType !== "player" &&
-    payload.entityType !== "mob"
+    typeof payload.entityType !== "string"
   ) {
     return false;
   }

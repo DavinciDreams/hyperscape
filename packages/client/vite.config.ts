@@ -2,21 +2,15 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
-import { createRequire } from "module";
 import { fileURLToPath } from "url";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   // Load env from both workspace root and client directory
   const workspaceRoot = path.resolve(__dirname, "../..");
   const clientDir = __dirname;
-  const nodePolyfillsRoot = path.dirname(
-    path.dirname(require.resolve("vite-plugin-node-polyfills")),
-  );
 
   // Load from both locations - client dir takes precedence
   const workspaceEnv = loadEnv(mode, workspaceRoot, ["PUBLIC_", "VITE_"]);
@@ -28,12 +22,14 @@ export default defineConfig(({ mode }) => {
     (mode === "production"
       ? "https://hyperscape-production.up.railway.app"
       : "http://127.0.0.1:5555");
+  // Default WS port: 5556 (uWS game WebSocket), or 5555 (Fastify) when UWS_ENABLED=false
+  const defaultWsPort = process.env.UWS_ENABLED === "false" ? 5555 : 5556;
   const resolvedPublicWsUrl =
     process.env.PUBLIC_WS_URL ||
     env.PUBLIC_WS_URL ||
     (mode === "production"
       ? "wss://hyperscape-production.up.railway.app/ws"
-      : "ws://127.0.0.1:5555/ws");
+      : `ws://127.0.0.1:${defaultWsPort}/ws`);
   const resolvedPublicCdnUrl =
     process.env.PUBLIC_CDN_URL ||
     env.PUBLIC_CDN_URL ||
@@ -50,6 +46,10 @@ export default defineConfig(({ mode }) => {
     process.env.PUBLIC_ELIZAOS_URL ||
     env.PUBLIC_ELIZAOS_URL ||
     resolvedPublicApiUrl;
+  const resolvedPublicEmbedAllowedOrigins =
+    process.env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
+    env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
+    "";
 
   console.log("[Vite Config] Build mode:", mode);
   console.log("[Vite Config] Loaded env from:", clientDir);
@@ -110,14 +110,6 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
-      nodePolyfills({
-        // Include only buffer - we'll handle process via define
-        include: ["buffer"],
-        // Enable globals injection for buffer only
-        globals: { global: true, Buffer: true },
-        // Disable protocol imports to avoid unresolved shim imports in production
-        protocolImports: false,
-      }),
       // PWA plugin for installable web app on Saga and Android devices
       VitePWA({
         registerType: "autoUpdate",
@@ -307,7 +299,6 @@ export default defineConfig(({ mode }) => {
               },
             },
           ]),
-      // Plugin to handle Node.js modules in browser was replaced by vite-plugin-node-polyfills
     ],
 
     // Tell Vite to look for .env files in the client directory
@@ -343,10 +334,20 @@ export default defineConfig(({ mode }) => {
             crypto: "{}",
           },
           // Manual chunk splitting to reduce memory pressure during build
-          manualChunks: {
-            "vendor-react": ["react", "react-dom"],
-            "vendor-three": ["three"],
-            "vendor-ui": ["lucide-react"],
+          // Rolldown (vite 8) requires a function, not an object
+          manualChunks(id: string) {
+            if (
+              id.includes("node_modules/react-dom") ||
+              id.includes("node_modules/react/")
+            ) {
+              return "vendor-react";
+            }
+            if (id.includes("node_modules/three/")) {
+              return "vendor-three";
+            }
+            if (id.includes("node_modules/lucide-react")) {
+              return "vendor-ui";
+            }
           },
         },
         onwarn(warning, warn) {
@@ -429,6 +430,9 @@ export default defineConfig(({ mode }) => {
       // In development without PUBLIC_CDN_URL, use game server's /game-assets/ endpoint.
       "import.meta.env.PUBLIC_CDN_URL": JSON.stringify(resolvedPublicCdnUrl),
       "import.meta.env.PUBLIC_APP_URL": JSON.stringify(resolvedPublicAppUrl),
+      "import.meta.env.PUBLIC_EMBED_ALLOWED_ORIGINS": JSON.stringify(
+        resolvedPublicEmbedAllowedOrigins,
+      ),
       "import.meta.env.PUBLIC_ELIZAOS_URL": JSON.stringify(
         resolvedPublicElizaUrl,
       ),
@@ -469,29 +473,6 @@ export default defineConfig(({ mode }) => {
       // More specific paths (e.g., @hyperscape/procgen/items/dock) must be listed
       // BEFORE less specific ones (e.g., @hyperscape/procgen) to prevent incorrect resolution
       alias: [
-        // Fix vite-plugin-node-polyfills shims not being resolved in production build
-        // These need to resolve to the actual shim modules in node_modules
-        {
-          find: "vite-plugin-node-polyfills/shims/process",
-          replacement: path.resolve(
-            nodePolyfillsRoot,
-            "shims/process/dist/index.js",
-          ),
-        },
-        {
-          find: "vite-plugin-node-polyfills/shims/buffer",
-          replacement: path.resolve(
-            nodePolyfillsRoot,
-            "shims/buffer/dist/index.js",
-          ),
-        },
-        {
-          find: "vite-plugin-node-polyfills/shims/global",
-          replacement: path.resolve(
-            nodePolyfillsRoot,
-            "shims/global/dist/index.js",
-          ),
-        },
         // Use client-only build of shared package to avoid Node.js module leakage
         {
           find: "@hyperscape/shared",
@@ -619,12 +600,6 @@ export default defineConfig(({ mode }) => {
           ],
           exclude: optimizeDepsExclude,
           force: forceOptimizeDeps,
-          esbuildOptions: {
-            target: "esnext",
-            define: {
-              global: "globalThis",
-            },
-          },
         },
     ssr: {
       noExternal: [],

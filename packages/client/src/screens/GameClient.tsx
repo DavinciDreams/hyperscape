@@ -3,6 +3,8 @@ import {
   CDN_URL,
   normalizeBrowserLoopbackUrl,
 } from "@/lib/api-config";
+import { resolveGameClientUiDisplay } from "@/lib/gameClientUi";
+import type { PublicRuntimeEnv, StreamingWindow } from "@/lib/streamingWindow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   THREE,
@@ -20,22 +22,16 @@ export { System };
 interface GameClientProps {
   wsUrl?: string;
   onSetup?: (world: InstanceType<typeof World>, config: unknown) => void;
+  onInitError?: (error: string | null) => void;
   /** Hide standard game UI (for streaming/spectator modes) */
   hideUI?: boolean;
+  /** Use streaming-mode environment simplifications */
+  streamingMode?: boolean;
 }
-
-type PublicRuntimeEnv = {
-  PUBLIC_CDN_URL?: string;
-  PUBLIC_WS_URL?: string;
-  PUBLIC_API_URL?: string;
-  PUBLIC_DISABLE_WEBGPU?: string;
-};
-
-type WindowWithEnv = Window & { env?: PublicRuntimeEnv; __CDN_URL?: string };
 
 const getRuntimeEnv = (): PublicRuntimeEnv | undefined => {
   if (typeof window === "undefined") return undefined;
-  return (window as WindowWithEnv).env;
+  return (window as StreamingWindow).env;
 };
 
 const normalizeEnvValue = (value?: string): string | undefined => {
@@ -196,11 +192,20 @@ function CriticalErrorScreen({ error }: { error: string }) {
 export function GameClient({
   wsUrl,
   onSetup,
+  onInitError,
   hideUI = false,
+  streamingMode = false,
 }: GameClientProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const uiRef = useRef<HTMLDivElement>(null);
+  const initialWsUrlRef = useRef(wsUrl);
+  const initialStreamingModeRef = useRef(streamingMode);
+  const onSetupRef = useRef(onSetup);
+  const onInitErrorRef = useRef(onInitError);
   const [initError, setInitError] = useState<string | null>(null);
+
+  onSetupRef.current = onSetup;
+  onInitErrorRef.current = onInitError;
 
   // Detect HMR and force full page reload instead of hot reload
   useEffect(() => {
@@ -310,32 +315,6 @@ export function GameClient({
     };
   }, [world]);
 
-  // Handle GPU device lost (WebGPU equivalent of context lost)
-  // This can happen when GPU resources are exhausted or driver issues occur
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-
-    // Find the canvas element (created by Three.js renderer)
-    const canvas = viewport.querySelector("canvas");
-    if (!canvas) return;
-
-    // WebGPU handles device lost events internally via the Three.js renderer.
-    // Note: webglcontextlost won't fire for WebGPU, but we keep this for debugging
-    // in case the renderer falls back (which shouldn't happen - WebGPU is required).
-    const handleContextLost = (event: Event) => {
-      event.preventDefault?.();
-      console.error(
-        "[GameClient] GPU context lost - WebGPU device may have been lost. " +
-          "This indicates GPU resource exhaustion or driver issues.",
-      );
-    };
-    // Listen for WebGPU context lost events (if supported in future/custom)
-    // canvas.addEventListener("webgpucontextlost", handleContextLost);
-
-    return () => {};
-  }, [world]);
-
   useEffect(() => {
     let cleanedUp = false;
     // Guards against the race where the cleanup callback fires while world.init()
@@ -367,9 +346,12 @@ export function GameClient({
       }
 
       const baseEnvironment = {
-        // model removed - base-environment.glb doesn't exist
-        bg: "asset://world/day2-2k.jpg",
-        hdr: "asset://world/day2.hdr",
+        ...(initialStreamingModeRef.current
+          ? {}
+          : {
+              bg: "asset://world/day2-2k.jpg",
+              hdr: "asset://world/day2.hdr",
+            }),
         sunDirection: new THREE.Vector3(-1, -2, -2).normalize(),
         sunIntensity: 1,
         sunColor: 0xffffff,
@@ -382,7 +364,7 @@ export function GameClient({
       // Default to game server on 5555, CDN on 8080
       const runtimeEnv = await loadRuntimeEnv();
       const runtimeWsUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_WS_URL);
-      const finalWsUrl = wsUrl || runtimeWsUrl || GAME_WS_URL;
+      const finalWsUrl = initialWsUrlRef.current || runtimeWsUrl || GAME_WS_URL;
       const runtimeCdnUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_CDN_URL);
       const buildCdnUrl = normalizeEnvValue(CDN_URL);
       const resolvedCdnUrl = resolveCdnUrlForClient(runtimeCdnUrl, buildCdnUrl);
@@ -391,7 +373,7 @@ export function GameClient({
         : `${resolvedCdnUrl}/`;
 
       // Make CDN URL available globally for PhysX loading
-      (window as WindowWithEnv).__CDN_URL = resolvedCdnUrl;
+      (window as StreamingWindow).__CDN_URL = resolvedCdnUrl;
 
       const config = {
         viewport,
@@ -402,8 +384,8 @@ export function GameClient({
       };
 
       // Call onSetup if provided
-      if (onSetup) {
-        onSetup(world, config);
+      if (onSetupRef.current) {
+        onSetupRef.current(world, config);
       }
 
       // Ensure RPG systems are registered before initializing the world
@@ -411,12 +393,26 @@ export function GameClient({
 
       try {
         await world.init(config);
+        onInitErrorRef.current?.(null);
       } catch (error) {
         const message =
           error instanceof Error
             ? error.message
             : "Unknown initialization error";
         console.error("[GameClient] World initialization failed:", message);
+        const normalizedMessage = message.toLowerCase();
+        const degradedReason = normalizedMessage.includes("webgpu")
+          ? "renderer_unavailable"
+          : "initialization_failed";
+        const win = window as StreamingWindow;
+        win.__HYPERSCAPE_STREAM_READY__ = false;
+        win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = {
+          ready: false,
+          degradedReason,
+          updatedAt: Date.now(),
+          phase: null,
+        };
+        onInitErrorRef.current?.(message);
         setInitError(message);
       }
 
@@ -447,7 +443,7 @@ export function GameClient({
         }
       }
     };
-  }, [world, wsUrl, onSetup]);
+  }, [world]);
 
   // Show full-screen error for critical initialization failures (WebGPU, etc.)
   if (initError) {
@@ -469,7 +465,7 @@ export function GameClient({
           inset: 0;
           pointer-events: none;
           user-select: none;
-          display: ${ui.visible ? "block" : "block"};
+          display: ${resolveGameClientUiDisplay(ui.visible)};
           overflow: hidden;
           z-index: 10;
         }

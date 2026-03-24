@@ -112,6 +112,18 @@ export {
 
 // Export ID generation utilities (for transaction tracking, etc.)
 export { generateTransactionId } from "./utils/IdGenerator";
+export {
+  deriveStreamingGuardrailReason,
+  hasValidStreamingGuardrailAgentSnapshot,
+  hasValidStreamingGuardrailArenaPositions,
+  isActiveStreamingGuardrailPhase,
+  requiresStreamingArenaPositions,
+} from "./utils/rendering/streamingGuardrails";
+export type {
+  StreamingGuardrailAgentSnapshot,
+  StreamingGuardrailArenaPositions,
+  StreamingGuardrailPhase,
+} from "./utils/rendering/streamingGuardrails";
 
 // Export death/loot types for shadow state and transaction tracking
 export type {

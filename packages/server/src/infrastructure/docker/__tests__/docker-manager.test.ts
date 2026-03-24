@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDefaultDockerManager,
   DEFAULT_DEV_POSTGRES_PASSWORD,
+  shouldInspectContainerPassword,
 } from "../docker-manager";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -52,5 +53,15 @@ describe("createDefaultDockerManager", () => {
     expect(() => createDefaultDockerManager()).toThrow(
       "POSTGRES_PASSWORD is required in production when using local PostgreSQL.",
     );
+  });
+
+  it("only probes the container when using the default development password fallback", () => {
+    expect(
+      shouldInspectContainerPassword(DEFAULT_DEV_POSTGRES_PASSWORD, undefined),
+    ).toBe(true);
+    expect(
+      shouldInspectContainerPassword(DEFAULT_DEV_POSTGRES_PASSWORD, "custom"),
+    ).toBe(false);
+    expect(shouldInspectContainerPassword("custom", undefined)).toBe(false);
   });
 });

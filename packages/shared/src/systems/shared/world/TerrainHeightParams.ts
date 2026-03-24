@@ -288,14 +288,7 @@ export const COAST_SMALL = {
 // Legacy exports — kept for backward compatibility with TerrainWorker.ts
 // ---------------------------------------------------------------------------
 
-/** @deprecated Landscape features replace hardcoded lake */
-export const LAKE_RADIUS = 50;
-/** @deprecated Landscape features replace hardcoded lake */
-export const LAKE_DEPTH = 0.55;
-/** @deprecated Landscape features replace hardcoded lake */
-export const LAKE_CENTER_X = -80;
-/** @deprecated Landscape features replace hardcoded lake */
-export const LAKE_CENTER_Z = 60;
+// Legacy lake/pond constants removed — terrain is fully procedural.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SINGLE SOURCE OF TRUTH — pure TypeScript functions
@@ -318,44 +311,6 @@ export interface TerrainNoiseAdapter {
   ridgeNoise2D(x: number, z: number): number;
   erosionNoise2D(x: number, z: number, iterations: number): number;
   simplex2D(x: number, z: number): number;
-}
-
-export function applyLandscapeFeaturesPure(
-  height: number,
-  worldX: number,
-  worldZ: number,
-  features: ReadonlyArray<LandscapeFeatureDef>,
-  noise: TerrainNoiseAdapter,
-): number {
-  for (let i = 0; i < features.length; i++) {
-    const feat = features[i];
-    const dx = worldX - feat.x;
-    const dz = worldZ - feat.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist >= feat.radius) continue;
-
-    const t = Math.max(0, 1 - dist / feat.radius);
-    const envelope = Math.pow(t, feat.shapePower);
-
-    const sx = worldX * feat.noiseScale;
-    const sz = worldZ * feat.noiseScale;
-    const n = noise.fractal2D(sx, sz, 3, 0.5, 2.0);
-
-    const localTerrain = -(
-      envelope * (1 - feat.noiseAmount) +
-      n * feat.noiseAmount
-    );
-    const water = mapRangeSmooth(
-      localTerrain,
-      -(1 - feat.lakes),
-      -(1 - feat.lakes) + feat.lakesFalloff,
-      1,
-      0,
-    );
-
-    height -= water * envelope * feat.strength;
-  }
-  return height;
 }
 
 // ---------------------------------------------------------------------------
@@ -507,7 +462,6 @@ export function computeBaseHeight(
   sharedNoise: TerrainNoiseAdapter,
   biomeNoiseSets: Record<string, BiomeNoiseSet>,
   biomeWeights: Record<string, number>,
-  features: ReadonlyArray<LandscapeFeatureDef>,
 ): number {
   // ── 1. Blend per-biome heights ──────────────────────────────────────
   const coordScale = NOISE_COORD_SCALE * FEATURE_SCALE;
@@ -562,18 +516,9 @@ export function computeBaseHeight(
     islandMask = 0;
   }
 
-  // ── 3. Island mask → scale → offset → landscape features ───────────
   height *= islandMask;
   height *= TERRAIN_SCALE;
   height += BASE_OFFSET * islandMask;
-
-  height = applyLandscapeFeaturesPure(
-    height,
-    worldX,
-    worldZ,
-    features,
-    sharedNoise,
-  );
 
   if (islandMask === 0) {
     height = OCEAN_FLOOR_HEIGHT;
@@ -670,36 +615,6 @@ export function buildComputeBiomeWeightsJS(): string {
       weights[BT_DEFAULT] = 1.0;
     }
     return weights;
-  }`;
-}
-
-/**
- * JS source — worker mirror of applyLandscapeFeaturesPure().
- * Depends on: landscapeFeatures array injected into worker scope, noise object.
- */
-export function buildApplyLandscapeFeaturesJS(): string {
-  return `
-  function applyLandscapeFeatures(height, worldX, worldZ) {
-    for (var i = 0; i < landscapeFeatures.length; i++) {
-      var feat = landscapeFeatures[i];
-      var dx = worldX - feat.x;
-      var dz = worldZ - feat.z;
-      var dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist >= feat.radius) continue;
-
-      var t = Math.max(0, 1 - dist / feat.radius);
-      var envelope = Math.pow(t, feat.shapePower);
-
-      var sx = worldX * feat.noiseScale;
-      var sz = worldZ * feat.noiseScale;
-      var n = noise.fractal2D(sx, sz, 3, 0.5, 2.0);
-
-      var localTerrain = -(envelope * (1 - feat.noiseAmount) + n * feat.noiseAmount);
-      var water = _mapRangeSmooth(localTerrain, -(1 - feat.lakes), -(1 - feat.lakes) + feat.lakesFalloff, 1, 0);
-
-      height -= water * envelope * feat.strength;
-    }
-    return height;
   }`;
 }
 
@@ -843,7 +758,6 @@ export function buildGetBaseHeightAtJS(): string {
     height *= islandMask;
     height *= TERRAIN_SCALE_VAL;
     height += BASE_OFFSET_VAL * islandMask;
-    height = applyLandscapeFeatures(height, worldX, worldZ);
 
     if (islandMask === 0) { height = ${OCEAN_FLOOR_HEIGHT}; }
     return height;

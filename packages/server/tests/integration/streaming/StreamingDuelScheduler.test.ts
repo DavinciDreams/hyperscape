@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { StreamingDuelScheduler } from "../../../src/systems/StreamingDuelScheduler";
+import { STREAMING_TIMING } from "../../../src/systems/StreamingDuelScheduler/types";
 
 // Mock World type
 type MockWorld = {
@@ -240,6 +241,36 @@ describe("StreamingDuelScheduler", () => {
     it("starts with null current cycle", () => {
       scheduler = new StreamingDuelScheduler(world as unknown as never);
       expect(scheduler.getCurrentCycle()).toBeNull();
+    });
+
+    it("increments phaseVersion as the live cycle advances", async () => {
+      scheduler = new StreamingDuelScheduler(world as unknown as never);
+
+      world.entities.players.set(
+        "agent-1",
+        createMockAgent("agent-1", "Agent 1", 50),
+      );
+      world.entities.players.set(
+        "agent-2",
+        createMockAgent("agent-2", "Agent 2", 55),
+      );
+      scheduler.registerAgent("agent-1");
+      scheduler.registerAgent("agent-2");
+
+      scheduler.start();
+      vi.advanceTimersByTime(1000);
+
+      const announcement = scheduler.getCurrentCycle()!;
+      expect(announcement.phase).toBe("ANNOUNCEMENT");
+      expect(announcement.phaseVersion).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(
+        STREAMING_TIMING.ANNOUNCEMENT_DURATION + 1000,
+      );
+
+      const countdown = scheduler.getCurrentCycle()!;
+      expect(countdown.phase).toBe("COUNTDOWN");
+      expect(countdown.phaseVersion).toBe(2);
     });
 
     it("creates a cycle when starting with enough agents", () => {

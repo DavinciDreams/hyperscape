@@ -88,6 +88,7 @@ import THREE, {
 import { MeshBasicNodeMaterial, SpriteNodeMaterial } from "three/webgpu";
 import { System } from "../infrastructure/System";
 import type { World } from "../../../types";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 import { tslUtils } from "../../../utils/TSLUtils";
 import { windManager } from "./Wind";
 import { VegetationSsboUtils } from "./VegetationSsboUtils";
@@ -551,7 +552,7 @@ export function setUseGridExclusion(use: boolean): void {
  */
 const WATER_CONFIG = {
   /** Water level in world Y units (from TERRAIN_CONSTANTS) */
-  WATER_LEVEL: 9.0, // TERRAIN_CONSTANTS.WATER_THRESHOLD
+  WATER_LEVEL: TERRAIN_CONSTANTS.WATER_THRESHOLD,
   /** Hard cutoff - no grass below this height (right at water's edge) */
   HARD_CUTOFF: 1.0, // 1m above water level
   /** Fade zone start - full density above this */

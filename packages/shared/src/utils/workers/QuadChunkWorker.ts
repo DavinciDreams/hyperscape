@@ -16,9 +16,9 @@ import { WorkerPool } from "./WorkerPool";
 import {
   buildGetBaseHeightAtJS,
   buildComputeBiomeWeightsJS,
-  buildApplyLandscapeFeaturesJS,
+  MAX_HEIGHT,
+  WATER_LEVEL_NORMALIZED,
 } from "../../systems/shared/world/TerrainHeightParams";
-import type { LandscapeFeatureDef } from "../../systems/shared/world/TerrainHeightParams";
 import { buildBiomeConstantsJS } from "../../systems/shared/world/TerrainBiomeTypes";
 import {
   buildNoiseGeneratorJS,
@@ -42,7 +42,6 @@ export interface QuadChunkWorkerConfig {
   SHORELINE_LAND_MAX_MULTIPLIER: number;
   SHORELINE_UNDERWATER_BAND: number;
   UNDERWATER_DEPTH_MULTIPLIER: number;
-  landscapeFeatures?: LandscapeFeatureDef[];
 }
 
 export interface QuadChunkWorkerInput {
@@ -74,6 +73,7 @@ export interface QuadChunkWorkerOutput {
   biomeData: Uint8Array;
   biomeForestWeight: Float32Array;
   biomeCanyonWeight: Float32Array;
+  riverProximity: Float32Array;
 }
 
 const QUAD_CHUNK_WORKER_CODE = `
@@ -110,9 +110,7 @@ function generateQuadChunk(input) {
   const halfSize = size * 0.5;
   const gridStep = size / (segments - 1);
 
-  var landscapeFeatures = config.landscapeFeatures || [];
   ${buildComputeBiomeWeightsJS()}
-  ${buildApplyLandscapeFeaturesJS()}
   ${buildGetBaseHeightAtJS()}
   ${buildCreateBiomeNoiseSetsJS()}
   var biomeNoiseSets = createBiomeNoiseSets(seed);
@@ -171,6 +169,7 @@ function generateQuadChunk(input) {
   const biomeData = new Uint8Array(vertexCount);
   const biomeForestWeight = new Float32Array(vertexCount);
   const biomeCanyonWeight = new Float32Array(vertexCount);
+  const riverProximity = new Float32Array(vertexCount);
 
   for (let iz = 0; iz < segments; iz++) {
     for (let ix = 0; ix < segments; ix++) {
@@ -231,7 +230,8 @@ function generateQuadChunk(input) {
     colorData,
     biomeData,
     biomeForestWeight,
-    biomeCanyonWeight
+    biomeCanyonWeight,
+    riverProximity
   };
 }
 
@@ -246,7 +246,8 @@ self.onmessage = function(e) {
         result.colorData.buffer,
         result.biomeData.buffer,
         result.biomeForestWeight.buffer,
-        result.biomeCanyonWeight.buffer
+        result.biomeCanyonWeight.buffer,
+        result.riverProximity.buffer
       ]);
     } catch (error) {
       self.postMessage({ error: error.message || 'Unknown error' });

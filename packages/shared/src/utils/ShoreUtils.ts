@@ -2,15 +2,23 @@
  * Shore Discovery Utilities
  *
  * Provides functions for detecting valid shore positions where fishing spots
- * can spawn. Uses terrain height sampling to find water edges.
+ * can spawn. Two approaches are available:
  *
- * A valid shore point is:
- * - On land (height >= water threshold)
- * - Near water level (height <= shore max height)
- * - Adjacent to water (at least one neighbor below water threshold)
+ * 1. findFishingSpotTiles (PREFERRED) — Uses collision WATER flags as the
+ *    single source of truth. These flags are computed by bakeWalkabilityFlags
+ *    using the same grid (64×64 per 100m tile) and same logic as the water
+ *    mesh generator. A tile NOT flagged WATER is guaranteed to have no water
+ *    mesh geometry over it. This eliminates all grid-alignment edge cases.
+ *
+ * 2. findShorePoints (LEGACY) — Independently samples terrain heights.
+ *    Kept for non-fishing uses and as fallback when collision data is unavailable.
  *
  * @see https://oldschool.runescape.wiki/w/Fishing - OSRS fishing spots appear at water edges
  */
+
+import { TERRAIN_CONSTANTS } from "../constants/GameConstants";
+import { CollisionFlag } from "../systems/shared/movement/CollisionFlags";
+import type { ICollisionMatrix } from "../systems/shared/movement/CollisionMatrix";
 
 /**
  * Represents a valid shore point where a fishing spot can spawn
@@ -22,15 +30,151 @@ export interface ShorePoint {
   waterDirection: "N" | "S" | "E" | "W" | "NE" | "NW" | "SE" | "SW";
 }
 
+/** Cardinal directions only — fishing interaction requires cardinal adjacency */
+const CARDINAL_DIRS: ReadonlyArray<{
+  dx: number;
+  dz: number;
+  name: ShorePoint["waterDirection"];
+}> = [
+  { dx: 0, dz: -1, name: "N" },
+  { dx: 0, dz: 1, name: "S" },
+  { dx: 1, dz: 0, name: "E" },
+  { dx: -1, dz: 0, name: "W" },
+];
+
+/**
+ * Find valid fishing spot positions at the visible water's edge.
+ *
+ * The water mesh is a flat plane at waterSurface Y. It extends UNDER
+ * terrain on the land side — the visible shore edge is where terrain
+ * height crosses the water surface, NOT at the WATER flag tile boundary
+ * (which is wider due to conservative any-corner flagging).
+ *
+ * Algorithm:
+ *   1. Find walkable land tiles with a cardinal WATER neighbor
+ *   2. From the land tile boundary, walk into the water direction
+ *      sampling terrain every 0.25m
+ *   3. Find where terrain drops below water surface (visible shore edge)
+ *   4. Place the spot 0.3m past that crossing — just inside visible water
+ *   5. Y = waterSurface so the entity sits on the water plane
+ *
+ * @param collision - The collision matrix with baked WATER/STEEP_SLOPE flags
+ * @param bounds - Rectangle to search within (world coordinates)
+ * @param getHeightAt - Function to sample terrain height at (x, z)
+ * @param getWaterSurfaceAt - Returns the water surface Y at (x, z).
+ *        For ocean this is WATER_THRESHOLD; for elevated bodies it's body.surfaceY.
+ * @param minSpacing - Minimum distance between returned points (default: 6m)
+ * @returns Array of shore-edge water points where fishing spots can spawn
+ */
+export function findFishingSpotTiles(
+  collision: ICollisionMatrix,
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+  getHeightAt: (x: number, z: number) => number,
+  getWaterSurfaceAt: (x: number, z: number) => number,
+  minSpacing = 6,
+): ShorePoint[] {
+  const results: ShorePoint[] = [];
+
+  const startX = Math.floor(bounds.minX);
+  const startZ = Math.floor(bounds.minZ);
+  const endX = Math.floor(bounds.maxX);
+  const endZ = Math.floor(bounds.maxZ);
+
+  for (let tx = startX; tx <= endX; tx++) {
+    for (let tz = startZ; tz <= endZ; tz++) {
+      // Start from walkable LAND tiles
+      if (
+        collision.hasFlags(
+          tx,
+          tz,
+          CollisionFlag.WATER |
+            CollisionFlag.STEEP_SLOPE |
+            CollisionFlag.BLOCKED,
+        )
+      )
+        continue;
+
+      // Must have a cardinal neighbor that IS water
+      let waterDx = 0;
+      let waterDz = 0;
+      let waterDir: ShorePoint["waterDirection"] | null = null;
+      for (const dir of CARDINAL_DIRS) {
+        if (collision.hasFlags(tx + dir.dx, tz + dir.dz, CollisionFlag.WATER)) {
+          waterDx = dir.dx;
+          waterDz = dir.dz;
+          waterDir = dir.name;
+          break;
+        }
+      }
+      if (!waterDir) continue;
+
+      // Walk from land tile center into the water direction to find the
+      // visible shore edge (where terrain drops below water surface).
+      // The water mesh is flat at waterSurface — terrain above it hides the mesh.
+      const landCX = tx + 0.5;
+      const landCZ = tz + 0.5;
+      const waterSurface = getWaterSurfaceAt(
+        landCX + waterDx,
+        landCZ + waterDz,
+      );
+
+      let spotX = 0;
+      let spotZ = 0;
+      let found = false;
+
+      // Search from 0.5m (tile boundary) to 3m into water, stepping 0.25m.
+      // Once terrain drops below water, push 0.75m further in so the spot
+      // is clearly in the water, not straddling the shore edge.
+      const WATER_INSET = 0.75;
+      for (let d = 0.5; d <= 3.0; d += 0.25) {
+        const sx = landCX + waterDx * d;
+        const sz = landCZ + waterDz * d;
+        if (getHeightAt(sx, sz) < waterSurface) {
+          spotX = landCX + waterDx * (d + WATER_INSET);
+          spotZ = landCZ + waterDz * (d + WATER_INSET);
+          found = true;
+          break;
+        }
+      }
+      if (!found) continue;
+
+      // Check minimum spacing from existing points
+      let tooClose = false;
+      for (let i = 0; i < results.length; i++) {
+        const dx = results[i].x - spotX;
+        const dz = results[i].z - spotZ;
+        if (dx * dx + dz * dz < minSpacing * minSpacing) {
+          tooClose = true;
+          break;
+        }
+      }
+      if (tooClose) continue;
+
+      results.push({
+        x: spotX,
+        y: waterSurface, // Spot sits on the water surface plane
+        z: spotZ,
+        waterDirection: waterDir,
+      });
+    }
+  }
+
+  return results;
+}
+
 export interface FindShorePointsOptions {
   /** Grid sampling distance in meters (default: 1m to match tile size) */
   sampleInterval?: number;
-  /** Height below which is considered water (default: 5.4m from TerrainSystem) */
+  /** Height below which is considered water (default: TERRAIN_CONSTANTS.WATER_THRESHOLD = 8.0m) */
   waterThreshold?: number;
   /** Maximum height for valid shore positions (default: 20.0m for elevated terrain) */
   shoreMaxHeight?: number;
   /** Minimum distance between shore points in meters (default: 6m) */
   minSpacing?: number;
+  /** Maximum slope (tan of angle) for adjacent land to be considered walkable.
+   *  Fishing spots won't spawn next to steep cliffs players can't reach.
+   *  (default: TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE = 1.5) */
+  maxSlope?: number;
 }
 
 /**
@@ -49,6 +193,74 @@ const DIRECTIONS = [
   { dx: 1, dz: 1, name: "SE" as const },
   { dx: -1, dz: 1, name: "SW" as const },
 ];
+
+/**
+ * Calculate the maximum LAND slope at a position using 8-direction sampling.
+ * Matches TerrainSystem.calculateSlope but skips samples that land in water,
+ * since shore positions are by definition next to water — the underwater
+ * terrain drop-off would otherwise register as an unwalkable cliff.
+ */
+function calculateLandSlopeAt(
+  x: number,
+  z: number,
+  getHeightAt: (x: number, z: number) => number,
+  waterThreshold: number,
+): number {
+  const d = TERRAIN_CONSTANTS.SLOPE_CHECK_DISTANCE;
+  const c = getHeightAt(x, z);
+  const invD = 1 / d;
+  const invDiag = 1 / (d * Math.SQRT2);
+
+  let maxSlope = 0;
+  let h: number;
+  let s: number;
+
+  // Cardinal directions
+  h = getHeightAt(x, z + d);
+  if (h >= waterThreshold) {
+    s = Math.abs(h - c) * invD;
+    if (s > maxSlope) maxSlope = s;
+  }
+  h = getHeightAt(x, z - d);
+  if (h >= waterThreshold) {
+    s = Math.abs(h - c) * invD;
+    if (s > maxSlope) maxSlope = s;
+  }
+  h = getHeightAt(x + d, z);
+  if (h >= waterThreshold) {
+    s = Math.abs(h - c) * invD;
+    if (s > maxSlope) maxSlope = s;
+  }
+  h = getHeightAt(x - d, z);
+  if (h >= waterThreshold) {
+    s = Math.abs(h - c) * invD;
+    if (s > maxSlope) maxSlope = s;
+  }
+
+  // Diagonal directions
+  h = getHeightAt(x + d, z + d);
+  if (h >= waterThreshold) {
+    s = Math.abs(h - c) * invDiag;
+    if (s > maxSlope) maxSlope = s;
+  }
+  h = getHeightAt(x - d, z + d);
+  if (h >= waterThreshold) {
+    s = Math.abs(h - c) * invDiag;
+    if (s > maxSlope) maxSlope = s;
+  }
+  h = getHeightAt(x + d, z - d);
+  if (h >= waterThreshold) {
+    s = Math.abs(h - c) * invDiag;
+    if (s > maxSlope) maxSlope = s;
+  }
+  h = getHeightAt(x - d, z - d);
+  if (h >= waterThreshold) {
+    s = Math.abs(h - c) * invDiag;
+    if (s > maxSlope) maxSlope = s;
+  }
+
+  return maxSlope;
+}
 
 /**
  * Scans an area and returns valid shore points where fishing spots can spawn.
@@ -72,15 +284,26 @@ export function findShorePoints(
 ): ShorePoint[] {
   const {
     sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
-    waterThreshold = 9.0,
+    waterThreshold = TERRAIN_CONSTANTS.WATER_THRESHOLD,
     shoreMaxHeight = 20.0,
     minSpacing = 6,
+    maxSlope = TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE,
   } = options;
 
   const results: ShorePoint[] = [];
 
-  for (let x = bounds.minX; x <= bounds.maxX; x += sampleInterval) {
-    for (let z = bounds.minZ; z <= bounds.maxZ; z += sampleInterval) {
+  // Sample directly at tile centers (x.5, z.5) so the height check
+  // position exactly matches where the entity will be placed. The old
+  // approach sampled at integer positions then snapped to tile centers,
+  // creating a 0.5m offset that caused spots to land in shallow water
+  // on steep shorelines.
+  const startX = Math.floor(bounds.minX) + 0.5;
+  const startZ = Math.floor(bounds.minZ) + 0.5;
+  const endX = bounds.maxX;
+  const endZ = bounds.maxZ;
+
+  for (let x = startX; x <= endX; x += sampleInterval) {
+    for (let z = startZ; z <= endZ; z += sampleInterval) {
       const height = getHeightAt(x, z);
 
       // Must be on land (not underwater)
@@ -89,7 +312,23 @@ export function findShorePoints(
       // Must be near water level (shore zone)
       if (height > shoreMaxHeight) continue;
 
-      // Must have adjacent water - check all directions
+      // Verify all 4 tile corners are above water threshold.
+      // This guarantees the entire 1m tile is dry. On steep shores
+      // this provides an implicit ~0.5m height buffer since the
+      // downhill corner must also clear the threshold.
+      if (
+        getHeightAt(x - 0.5, z - 0.5) < waterThreshold ||
+        getHeightAt(x + 0.5, z - 0.5) < waterThreshold ||
+        getHeightAt(x - 0.5, z + 0.5) < waterThreshold ||
+        getHeightAt(x + 0.5, z + 0.5) < waterThreshold
+      )
+        continue;
+
+      // Shore point must be walkable (not on a steep slope)
+      if (calculateLandSlopeAt(x, z, getHeightAt, waterThreshold) > maxSlope)
+        continue;
+
+      // Must have adjacent water - check all 8 directions at 1 tile distance
       let waterDir: ShorePoint["waterDirection"] | null = null;
       for (const dir of DIRECTIONS) {
         const neighborHeight = getHeightAt(x + dir.dx, z + dir.dz);
@@ -100,21 +339,18 @@ export function findShorePoints(
       }
       if (!waterDir) continue;
 
-      // Snap to tile center for proper tile alignment (tile center = floor + 0.5)
-      const tileX = Math.floor(x) + 0.5;
-      const tileZ = Math.floor(z) + 0.5;
-
-      // Check minimum spacing from existing points (using snapped positions)
+      // Check minimum spacing from existing points (squared distance avoids sqrt)
+      const minSpacingSq = minSpacing * minSpacing;
       const tooClose = results.some((p) => {
-        const dist = Math.sqrt((p.x - tileX) ** 2 + (p.z - tileZ) ** 2);
-        return dist < minSpacing;
+        const distSq = (p.x - x) ** 2 + (p.z - z) ** 2;
+        return distSq < minSpacingSq;
       });
       if (tooClose) continue;
 
       results.push({
-        x: tileX,
+        x,
         y: height,
-        z: tileZ,
+        z,
         waterDirection: waterDir,
       });
     }
@@ -140,31 +376,43 @@ export function findWaterEdgePoints(
 ): ShorePoint[] {
   const {
     sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
-    waterThreshold = 9.0,
+    waterThreshold = TERRAIN_CONSTANTS.WATER_THRESHOLD,
     shoreMaxHeight = 20.0,
     minSpacing = 6,
+    maxSlope = TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE,
   } = options;
 
   const results: ShorePoint[] = [];
 
-  for (let x = bounds.minX; x <= bounds.maxX; x += sampleInterval) {
-    for (let z = bounds.minZ; z <= bounds.maxZ; z += sampleInterval) {
+  // Sample at tile centers for consistency with entity placement
+  const startX = Math.floor(bounds.minX) + 0.5;
+  const startZ = Math.floor(bounds.minZ) + 0.5;
+  const endX = bounds.maxX;
+  const endZ = bounds.maxZ;
+
+  for (let x = startX; x <= endX; x += sampleInterval) {
+    for (let z = startZ; z <= endZ; z += sampleInterval) {
       const height = getHeightAt(x, z);
 
-      // Must be IN water (underwater)
-      if (height >= waterThreshold) continue;
+      // Must be visibly submerged (at least MIN_VISIBLE_WATER_DEPTH below surface).
+      // Terrain barely below threshold looks like beach, not water.
+      if (height >= waterThreshold - TERRAIN_CONSTANTS.MIN_VISIBLE_WATER_DEPTH)
+        continue;
 
       // Must not be too deep (within 2m of water surface for visibility)
       if (height < waterThreshold - 2) continue;
 
-      // Must have adjacent LAND - check all directions
+      // Must have adjacent LAND that is walkable - check all directions
       let landDir: ShorePoint["waterDirection"] | null = null;
       for (const dir of DIRECTIONS) {
-        const neighborHeight = getHeightAt(x + dir.dx, z + dir.dz);
-        // Adjacent land should be walkable (above water but not too steep)
+        const nx = x + dir.dx;
+        const nz = z + dir.dz;
+        const neighborHeight = getHeightAt(nx, nz);
+        // Adjacent land must be above water, below max height, AND not too steep
         if (
           neighborHeight >= waterThreshold &&
-          neighborHeight <= shoreMaxHeight
+          neighborHeight <= shoreMaxHeight &&
+          calculateLandSlopeAt(nx, nz, getHeightAt, waterThreshold) <= maxSlope
         ) {
           landDir = dir.name;
           break;
@@ -172,22 +420,28 @@ export function findWaterEdgePoints(
       }
       if (!landDir) continue;
 
-      // Snap to tile center for proper tile alignment (tile center = floor + 0.5)
-      // Use water threshold as the Y position (water surface level)
-      const tileX = Math.floor(x) + 0.5;
-      const tileZ = Math.floor(z) + 0.5;
+      // Check all 4 corners of the tile — reject if any is too deep
+      // (prevents spots floating on cliff faces into water)
+      const cornerMinH = Math.min(
+        getHeightAt(x - 0.5, z - 0.5),
+        getHeightAt(x + 0.5, z - 0.5),
+        getHeightAt(x - 0.5, z + 0.5),
+        getHeightAt(x + 0.5, z + 0.5),
+      );
+      if (cornerMinH < waterThreshold - 2) continue;
 
-      // Check minimum spacing from existing points (using snapped positions)
+      // Check minimum spacing from existing points (squared distance avoids sqrt)
+      const minSpacingSq = minSpacing * minSpacing;
       const tooClose = results.some((p) => {
-        const dist = Math.sqrt((p.x - tileX) ** 2 + (p.z - tileZ) ** 2);
-        return dist < minSpacing;
+        const distSq = (p.x - x) ** 2 + (p.z - z) ** 2;
+        return distSq < minSpacingSq;
       });
       if (tooClose) continue;
 
       results.push({
-        x: tileX,
-        y: waterThreshold,
-        z: tileZ,
+        x,
+        y: waterThreshold, // Water surface level — spots sit on top of the water
+        z,
         waterDirection: landDir,
       });
     }
@@ -209,4 +463,63 @@ export function shuffleArray<T>(array: T[]): T[] {
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
+}
+
+/**
+ * Find water edge points scoped to an elevated water body.
+ * Convenience wrapper around findWaterEdgePoints that uses the body's
+ * surfaceY as the water threshold and limits the search to the body's bounds.
+ *
+ * shoreMaxHeight is set relative to the body's surface (surfaceY + 12m)
+ * so that land adjacent to elevated ponds passes the height check.
+ * The ocean default of 20.0m is absolute (8.0 + 12 = 20), so this
+ * preserves the same 12m band above water for all bodies.
+ */
+export function findWaterEdgePointsForBody(
+  body: { centerX: number; centerZ: number; radius: number; surfaceY: number },
+  getHeightAt: (x: number, z: number) => number,
+  options?: Omit<FindShorePointsOptions, "waterThreshold" | "shoreMaxHeight">,
+): ShorePoint[] {
+  const margin = 5;
+  return findWaterEdgePoints(
+    {
+      minX: body.centerX - body.radius - margin,
+      maxX: body.centerX + body.radius + margin,
+      minZ: body.centerZ - body.radius - margin,
+      maxZ: body.centerZ + body.radius + margin,
+    },
+    getHeightAt,
+    {
+      ...options,
+      waterThreshold: body.surfaceY,
+      shoreMaxHeight: body.surfaceY + 12,
+    },
+  );
+}
+
+/**
+ * Find shore points (ON LAND) scoped to an elevated water body.
+ * Convenience wrapper around findShorePoints that uses the body's
+ * surfaceY as the water threshold and limits the search to the body's bounds.
+ */
+export function findShorePointsForBody(
+  body: { centerX: number; centerZ: number; radius: number; surfaceY: number },
+  getHeightAt: (x: number, z: number) => number,
+  options?: Omit<FindShorePointsOptions, "waterThreshold" | "shoreMaxHeight">,
+): ShorePoint[] {
+  const margin = 5;
+  return findShorePoints(
+    {
+      minX: body.centerX - body.radius - margin,
+      maxX: body.centerX + body.radius + margin,
+      minZ: body.centerZ - body.radius - margin,
+      maxZ: body.centerZ + body.radius + margin,
+    },
+    getHeightAt,
+    {
+      ...options,
+      waterThreshold: body.surfaceY,
+      shoreMaxHeight: body.surfaceY + 12,
+    },
+  );
 }

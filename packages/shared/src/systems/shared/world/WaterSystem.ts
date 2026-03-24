@@ -224,9 +224,7 @@ export class WaterSystem {
       this.reflectionActive = false;
     }
 
-    console.log(
-      `[WaterSystem] Realtime water reflections ${enabled ? "enabled" : "disabled"}`,
-    );
+    // Reflection state toggled
   }
 
   get waterUniforms(): WaterUniforms | null {
@@ -316,9 +314,7 @@ export class WaterSystem {
     // Create ocean material without reflections (different visual style)
     this.oceanMaterial = this.createOceanMaterial();
 
-    console.log(
-      "[WaterSystem] Initialized with lake (reflective) and ocean (non-reflective) shaders",
-    );
+    // Lake (reflective) and ocean (non-reflective) shaders initialized
   }
 
   /**
@@ -327,6 +323,22 @@ export class WaterSystem {
   addToScene(scene: THREE.Scene): void {
     if (this.reflection?.target) {
       scene.add(this.reflection.target);
+
+      const reflectorObj = this.reflection.target as THREE.Object3D & {
+        camera?: THREE.Camera;
+      };
+      if (reflectorObj.camera) {
+        reflectorObj.camera.layers.set(0);
+        reflectorObj.camera.layers.enable(2);
+      }
+
+      const world = this.world;
+      this.reflection.target.onBeforeRender = () => {
+        world.isRenderingReflection = true;
+      };
+      this.reflection.target.onAfterRender = () => {
+        world.isRenderingReflection = false;
+      };
     }
   }
 
@@ -1235,7 +1247,8 @@ export class WaterSystem {
     const uvs: number[] = [];
     const shores: number[] = [];
     const indices: number[] = [];
-    const vertMap = new Map<string, number>();
+    const stride = resolution + 1;
+    const vertMap = new Map<number, number>();
     let idx = 0;
 
     for (let i = 0; i < resolution; i++) {
@@ -1257,7 +1270,7 @@ export class WaterSystem {
         const quad: number[] = [];
 
         for (const [ci, cj] of corners) {
-          const key = `${ci},${cj}`;
+          const key = ci * stride + cj;
           if (!vertMap.has(key)) {
             verts.push(
               (ci / resolution - 0.5) * tileSize,
@@ -1438,6 +1451,39 @@ export class WaterSystem {
   }
 
   destroy(): void {
+    // Dispose all water meshes (geometry + remove from scene)
+    for (const mesh of this.waterMeshes) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+    }
     this.waterMeshes = [];
+
+    // Dispose materials
+    this.lakeMaterial?.dispose();
+    this.lakeMaterial = undefined;
+    this.oceanMaterial?.dispose();
+    this.oceanMaterial = undefined;
+
+    // Dispose procedural textures
+    this.normalTex?.dispose();
+    this.normalTex = undefined;
+    this.foamTex?.dispose();
+    this.foamTex = undefined;
+
+    // Dispose reflector render target + remove from scene
+    if (this.reflection) {
+      if (this.reflection.target) {
+        this.reflection.target.removeFromParent();
+      }
+      // Dispose the reflector's internal WebGPU render target (GPU framebuffer)
+      const reflectorNode = this.reflection as unknown as {
+        renderTarget?: { dispose(): void };
+      };
+      reflectorNode.renderTarget?.dispose();
+    }
+    this.reflection = undefined;
+
+    this.uniforms = null;
+    this.oceanUniforms = null;
   }
 }

@@ -99,6 +99,8 @@ const STREAMING_COMBAT_STALL_NUDGE_MS = Math.max(
   5_000,
   Number.parseInt(process.env.STREAMING_COMBAT_STALL_NUDGE_MS || "15000", 10),
 );
+const STREAMING_ALLOW_READY_SKIP =
+  process.env.STREAMING_ALLOW_READY_SKIP === "true";
 
 const clampNumber = (value: number, min: number, max: number): number => {
   if (value < min) return min;
@@ -175,6 +177,7 @@ export class StreamingDuelScheduler {
     cycleStartTime: 0,
     phaseStartTime: 0,
     phaseEndTime: 0,
+    phaseVersion: 0,
     timeRemaining: 0,
     agent1: null,
     agent2: null,
@@ -199,6 +202,7 @@ export class StreamingDuelScheduler {
     cycleStartTime: 0,
     phaseStartTime: 0,
     phaseEndTime: 0,
+    phaseVersion: 0,
     timeRemaining: 0,
     agent1: null,
     agent2: null,
@@ -265,6 +269,7 @@ export class StreamingDuelScheduler {
         if (this.currentCycle) {
           if (fields.phase && fields.phase !== this.currentCycle.phase) {
             this.phaseStateMachine.transition(fields.phase as StreamingPhase);
+            this.currentCycle.phaseVersion += 1;
           }
           Object.assign(this.currentCycle, fields);
         }
@@ -861,6 +866,7 @@ export class StreamingDuelScheduler {
       phase: "ANNOUNCEMENT",
       cycleStartTime: now,
       phaseStartTime: now,
+      phaseVersion: 1,
       agent1,
       agent2,
       duelId,
@@ -967,8 +973,12 @@ export class StreamingDuelScheduler {
       return;
     }
 
-    // Early-exit: after min time, if both agents are ready, skip to countdown (#21)
-    if (elapsed >= STREAMING_TIMING.MIN_ANNOUNCEMENT_DURATION) {
+    // Early-ready skipping shortens the advertised betting window and breaks
+    // immutable oracle timing. Keep it opt-in only.
+    if (
+      STREAMING_ALLOW_READY_SKIP &&
+      elapsed >= STREAMING_TIMING.MIN_ANNOUNCEMENT_DURATION
+    ) {
       const { agent1, agent2 } = this.currentCycle;
       if (agent1 && agent2) {
         const entity1 = this.world.entities.get(agent1.characterId);
@@ -1122,6 +1132,11 @@ export class StreamingDuelScheduler {
       this.phaseStateMachine.transition("COUNTDOWN");
       this.currentCycle.phase = "COUNTDOWN";
       this.currentCycle.phaseStartTime = now;
+      this.currentCycle.phaseVersion += 1;
+      this.currentCycle.betCloseTime = Math.min(
+        this.currentCycle.betCloseTime ?? fightStartTime,
+        fightStartTime,
+      );
       this.currentCycle.fightStartTime = fightStartTime;
       this.currentCycle.countdownValue = null;
       this.camera.setCameraTarget(
@@ -1317,6 +1332,7 @@ export class StreamingDuelScheduler {
     this.phaseStateMachine.transition("RESOLUTION");
     this.currentCycle.phase = "RESOLUTION";
     this.currentCycle.phaseStartTime = now;
+    this.currentCycle.phaseVersion += 1;
     this.currentCycle.duelEndTime = now;
     this.currentCycle.winnerId = winnerId;
     this.currentCycle.loserId = loserId;
@@ -1396,7 +1412,7 @@ export class StreamingDuelScheduler {
       winnerName,
       loserId,
       loserName,
-      reason: winReason === "kill" ? "death" : "death",
+      reason: "death",
       seed: oracleProof.seed,
       replayHash: oracleProof.replayHash,
       forfeit: false,
@@ -1872,6 +1888,7 @@ export class StreamingDuelScheduler {
       this._idleCycleObject.cycleStartTime = now;
       this._idleCycleObject.phaseStartTime = now;
       this._idleCycleObject.phaseEndTime = now;
+      this._idleCycleObject.phaseVersion = 0;
       this._idleCycleObject.agent1 = this._cachedAgent1;
       this._idleCycleObject.agent2 = this._cachedAgent2;
 
@@ -1937,6 +1954,7 @@ export class StreamingDuelScheduler {
     this._activeCycleObject.cycleStartTime = this.currentCycle.cycleStartTime;
     this._activeCycleObject.phaseStartTime = this.currentCycle.phaseStartTime;
     this._activeCycleObject.phaseEndTime = phaseEndTime;
+    this._activeCycleObject.phaseVersion = this.currentCycle.phaseVersion;
     this._activeCycleObject.timeRemaining = timeRemaining;
     this._activeCycleObject.agent1 = this._cachedAgent1;
     this._activeCycleObject.agent2 = this._cachedAgent2;

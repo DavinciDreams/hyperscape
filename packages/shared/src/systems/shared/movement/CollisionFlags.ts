@@ -89,6 +89,12 @@ export const CollisionFlag = {
 
   /** Steep slope - impassable terrain */
   STEEP_SLOPE: 0x01000000,
+
+  /** Bridge deck tile - walkable over water, uses bridge deck height for Y */
+  BRIDGE: 0x02000000,
+
+  /** Dock tile - walkable over water, uses dock deck height for Y */
+  DOCK: 0x04000000,
 } as const;
 
 /**

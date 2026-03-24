@@ -761,6 +761,10 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
     // Register handlers
     world.network?.on("questList", onQuestListUpdate);
     world.network?.on("questDetail", onQuestDetailUpdate);
+    // Bridge server→client quest packets to trigger re-fetch
+    world.network?.on("questStarted", onQuestEvent);
+    world.network?.on("questProgressed", onQuestEvent);
+    world.network?.on("questCompleted", onQuestEvent);
     world.on(EventType.QUEST_STARTED, onQuestEvent);
     world.on(EventType.QUEST_PROGRESSED, onQuestEvent);
     world.on(EventType.QUEST_COMPLETED, onQuestEvent);
@@ -771,6 +775,9 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
     return () => {
       world.network?.off("questList", onQuestListUpdate);
       world.network?.off("questDetail", onQuestDetailUpdate);
+      world.network?.off("questStarted", onQuestEvent);
+      world.network?.off("questProgressed", onQuestEvent);
+      world.network?.off("questCompleted", onQuestEvent);
       world.off(EventType.QUEST_STARTED, onQuestEvent);
       world.off(EventType.QUEST_PROGRESSED, onQuestEvent);
       world.off(EventType.QUEST_COMPLETED, onQuestEvent);

@@ -246,6 +246,16 @@ export class TileInterpolator {
     );
   }
 
+  /**
+   * Get the remaining path tiles for an entity (from current target index onward).
+   * Used by BFS path debug visualization.
+   */
+  getEntityPath(entityId: string): TileCoord[] | null {
+    const state = this.entityStates.get(entityId);
+    if (!state || !state.isMoving || state.fullPath.length === 0) return null;
+    return state.fullPath.slice(state.targetTileIndex);
+  }
+
   /** Helper to set entity state and mark cache dirty */
   private setEntityState(entityId: string, state: EntityMovementState): void {
     this.entityStates.set(entityId, state);
@@ -1208,7 +1218,13 @@ export class TileInterpolator {
 
         // Skip tiles that are BEHIND the visual position (prevents backward movement)
         // This happens when server's path starts from a position behind the client's visual position
-        // due to network latency during spam clicking
+        // due to network latency during spam clicking.
+        //
+        // IMPORTANT: Only skip when the path is locally straight. On paths that turn
+        // (e.g. bridge endpoint routing), intermediate tiles are in the "wrong" direction
+        // relative to the final destination but MUST be walked through. We verify that
+        // the NEXT tile after the skip candidate is in roughly the same direction as the
+        // destination — if not, the path is turning and we must not skip.
         if (
           state.destinationTile &&
           state.targetTileIndex < state.fullPath.length - 1
@@ -1227,8 +1243,31 @@ export class TileInterpolator {
 
           // Skip if target is behind us AND not very close (avoid skipping near-destination tiles)
           if (dot < 0 && distToTargetSq > TILE_SKIP_THRESHOLD_SQ) {
-            state.targetTileIndex++;
-            continue; // Re-evaluate with next tile
+            // Safety: only skip if the NEXT tile in the path continues toward the
+            // destination (path is locally straight). If the next tile is in a
+            // different direction, the path is turning and we must not skip.
+            const nextIdx = state.targetTileIndex + 1;
+            if (nextIdx < state.fullPath.length) {
+              const nextTile = state.fullPath[nextIdx];
+              const nextWorld = tileToWorld(nextTile);
+              const nextToDestX = this._destWorldPos.x - nextWorld.x;
+              const nextToDestZ = this._destWorldPos.z - nextWorld.z;
+              // Direction from current target to next tile
+              const segDx = nextWorld.x - state.targetWorldPos.x;
+              const segDz = nextWorld.z - state.targetWorldPos.z;
+              // If the segment from target→next doesn't point toward the destination,
+              // the path is turning — don't skip
+              const segDot = segDx * nextToDestX + segDz * nextToDestZ;
+              if (segDot <= 0) {
+                // Path turns here — do NOT skip this tile
+              } else {
+                state.targetTileIndex++;
+                continue; // Re-evaluate with next tile
+              }
+            } else {
+              state.targetTileIndex++;
+              continue; // Re-evaluate with next tile
+            }
           }
         }
 

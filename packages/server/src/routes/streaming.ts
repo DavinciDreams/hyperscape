@@ -9,10 +9,13 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import type { RateLimitOptions } from "@fastify/rate-limit";
 import type { World } from "@hyperscape/shared";
-import fs from "node:fs";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
-import { STREAMING_TIMING } from "../systems/StreamingDuelScheduler/types.js";
+import {
+  STREAMING_TIMING,
+  type StreamingPhase,
+} from "../systems/StreamingDuelScheduler/types.js";
 import { peekRTMPBridge } from "../streaming/index.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
 import {
@@ -21,7 +24,12 @@ import {
   STREAMING_PUBLIC_DELAY_MS,
   STREAMING_PUBLIC_DELAY_OVERRIDDEN,
 } from "../streaming/streaming-policy.js";
-
+import {
+  deriveBettingRendererHealth,
+  loadExternalRtmpStatusSnapshot,
+  registerStreamingBettingRoutes,
+} from "./streaming-betting-routes.js";
+import { trimReplayFrames } from "./streaming-sse-buffer.js";
 type InventorySnapshotItem = {
   slot: number;
   itemId: string;
@@ -52,7 +60,10 @@ type SseDropReason =
 
 const STREAMING_SSE_REPLAY_BUFFER = Math.max(
   128,
-  Number.parseInt(process.env.STREAMING_SSE_REPLAY_BUFFER || "2048", 10),
+  Math.min(
+    8192,
+    Number.parseInt(process.env.STREAMING_SSE_REPLAY_BUFFER || "2048", 10),
+  ),
 );
 const STREAMING_SSE_PUSH_INTERVAL_MS = Math.max(
   250,
@@ -64,13 +75,29 @@ const STREAMING_SSE_HEARTBEAT_MS = Math.max(
 );
 const STREAMING_SSE_MAX_PENDING_BYTES = Math.max(
   128 * 1024,
-  Number.parseInt(process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576", 10),
+  Math.min(
+    16 * 1024 * 1024,
+    Number.parseInt(
+      process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576",
+      10,
+    ),
+  ),
 );
 const STREAMING_SSE_REPLAY_MAX_BYTES = Math.max(
   512 * 1024,
-  Number.parseInt(
-    process.env.STREAMING_SSE_REPLAY_MAX_BYTES || `${32 * 1024 * 1024}`,
-    10,
+  Math.min(
+    64 * 1024 * 1024,
+    Number.parseInt(
+      process.env.STREAMING_SSE_REPLAY_MAX_BYTES || `${32 * 1024 * 1024}`,
+      10,
+    ),
+  ),
+);
+const STREAMING_SSE_MAX_CLIENTS = Math.max(
+  4,
+  Math.min(
+    256,
+    Number.parseInt(process.env.STREAMING_SSE_MAX_CLIENTS || "64", 10),
   ),
 );
 const EXTERNAL_RTMP_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
@@ -78,30 +105,14 @@ const EXTERNAL_RTMP_STATUS_MAX_AGE_MS = Math.max(
   5000,
   Number.parseInt(process.env.RTMP_STATUS_MAX_AGE_MS || "15000", 10),
 );
-
-function readExternalRtmpStatusSnapshot(): Record<string, unknown> | null {
-  if (!EXTERNAL_RTMP_STATUS_FILE) return null;
-  try {
-    const raw = fs.readFileSync(EXTERNAL_RTMP_STATUS_FILE, "utf8").trim();
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (!Array.isArray(parsed.destinations)) return null;
-    if (typeof parsed.stats !== "object" || parsed.stats == null) return null;
-
-    const updatedAt = Number(parsed.updatedAt || 0);
-    if (
-      Number.isFinite(updatedAt) &&
-      updatedAt > 0 &&
-      Date.now() - updatedAt > EXTERNAL_RTMP_STATUS_MAX_AGE_MS
-    ) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
+const BETTING_BOOTSTRAP_RATE_LIMIT: RateLimitOptions = {
+  max: 240,
+  timeWindow: "1 minute",
+};
+const BETTING_EVENTS_RATE_LIMIT: RateLimitOptions = {
+  max: 60,
+  timeWindow: "1 minute",
+};
 
 function getInventorySnapshot(
   world: World,
@@ -194,6 +205,28 @@ export function registerStreamingRoutes(
   let lastBroadcastSeq = 0;
   let statePushInterval: ReturnType<typeof setInterval> | null = null;
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  const bettingRoutes = registerStreamingBettingRoutes({
+    fastify,
+    world,
+    replayBuffer: STREAMING_SSE_REPLAY_BUFFER,
+    replayMaxBytes: STREAMING_SSE_REPLAY_MAX_BYTES,
+    pushIntervalMs: STREAMING_SSE_PUSH_INTERVAL_MS,
+    heartbeatMs: STREAMING_SSE_HEARTBEAT_MS,
+    maxPendingBytes: STREAMING_SSE_MAX_PENDING_BYTES,
+    maxClients: Math.max(
+      4,
+      Math.min(
+        128,
+        Number.parseInt(process.env.BETTING_SSE_MAX_CLIENTS || "32", 10),
+      ),
+    ),
+    bootstrapRateLimit: BETTING_BOOTSTRAP_RATE_LIMIT,
+    eventsRateLimit: BETTING_EVENTS_RATE_LIMIT,
+    internalAllowedOrigin:
+      process.env.INTERNAL_BET_SYNC_ALLOWED_ORIGIN?.trim() || null,
+    externalStatusFile: EXTERNAL_RTMP_STATUS_FILE || null,
+    externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+  });
 
   const formatSseEvent = (event: string, data: string, id?: number): string => {
     const normalizedData = data.replace(/\n/g, "\ndata: ");
@@ -476,17 +509,14 @@ export function registerStreamingRoutes(
     replayFramesTotalBytes += frame.payloadBytes;
     sseMetrics.generatedFrames += 1;
 
-    while (
-      replayFrames.length > STREAMING_SSE_REPLAY_BUFFER ||
-      replayFramesTotalBytes > STREAMING_SSE_REPLAY_MAX_BYTES
-    ) {
-      const removed = replayFrames.shift();
-      if (!removed) break;
-      replayFramesTotalBytes = Math.max(
-        0,
-        replayFramesTotalBytes - removed.payloadBytes,
-      );
-    }
+    replayFramesTotalBytes = trimReplayFrames(
+      replayFrames,
+      replayFramesTotalBytes,
+      {
+        maxFrames: STREAMING_SSE_REPLAY_BUFFER,
+        maxBytes: STREAMING_SSE_REPLAY_MAX_BYTES,
+      },
+    );
 
     return frame;
   };
@@ -539,6 +569,7 @@ export function registerStreamingRoutes(
     for (const clientId of [...sseClients.keys()]) {
       removeSseClient(clientId, "shutdown");
     }
+    bettingRoutes.close();
     done();
   });
 
@@ -575,6 +606,7 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      const bettingMetrics = bettingRoutes.getMetrics();
       return reply.send({
         type: "STREAMING_METRICS",
         emittedAt: Date.now(),
@@ -627,6 +659,12 @@ export function registerStreamingRoutes(
             batchesOver100Ms: sseMetrics.fanoutOver100Ms,
           },
         },
+        betting: {
+          schemaVersion: bettingMetrics.schemaVersion,
+          sourceEpoch: bettingMetrics.sourceEpoch,
+          clients: bettingMetrics.clients,
+          replay: bettingMetrics.replay,
+        },
       });
     },
   );
@@ -640,6 +678,13 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (request, reply) => {
+      if (sseClients.size >= STREAMING_SSE_MAX_CLIENTS) {
+        return reply.status(503).send({
+          error: "Streaming SSE capacity reached",
+          message: "Too many concurrent streaming SSE clients",
+        });
+      }
+
       const raw = reply.raw;
       reply.hijack();
 
@@ -986,7 +1031,10 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const externalSnapshot = readExternalRtmpStatusSnapshot();
+      const externalSnapshot = await loadExternalRtmpStatusSnapshot(
+        EXTERNAL_RTMP_STATUS_FILE || null,
+        EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+      );
       if (externalSnapshot) {
         return reply.send(externalSnapshot);
       }
@@ -1015,6 +1063,13 @@ export function registerStreamingRoutes(
             spectators: stats.spectators,
             processMemory: stats.processMemory,
           },
+          rendererHealth: deriveBettingRendererHealth(
+            getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+            {
+              externalStatusSnapshot: externalSnapshot,
+              externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            },
+          ),
         });
       } catch {
         return reply.status(503).send({
@@ -1034,7 +1089,21 @@ export function registerStreamingRoutes(
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
         const capture = getStreamCapture();
-        return reply.send(capture.getStats());
+        const externalSnapshot = await loadExternalRtmpStatusSnapshot(
+          EXTERNAL_RTMP_STATUS_FILE || null,
+          EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+          { allowStale: true },
+        );
+        return reply.send({
+          ...capture.getStats(),
+          rendererHealth: deriveBettingRendererHealth(
+            getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+            {
+              externalStatusSnapshot: externalSnapshot,
+              externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            },
+          ),
+        });
       } catch {
         return reply.status(503).send({
           error: "Stream capture not initialized",

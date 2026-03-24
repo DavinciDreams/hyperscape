@@ -161,6 +161,9 @@ export class POISystem extends System {
   private terrainSystem?: {
     getHeightAt(x: number, z: number): number;
     getBiomeAtWorldPosition?(x: number, z: number): string;
+    getWaterBodyRegistry?(): {
+      getWaterSurfaceAt(x: number, z: number): number;
+    };
   };
 
   constructor(world: World) {
@@ -183,6 +186,9 @@ export class POISystem extends System {
       | {
           getHeightAt(x: number, z: number): number;
           getBiomeAtWorldPosition?(x: number, z: number): string;
+          getWaterBodyRegistry?(): {
+            getWaterSurfaceAt(x: number, z: number): number;
+          };
         }
       | undefined;
 
@@ -313,9 +319,12 @@ export class POISystem extends System {
       const biome =
         this.terrainSystem?.getBiomeAtWorldPosition?.(x, z) ?? DEFAULT_BIOME;
 
-      // Skip underwater
-      const waterThreshold = 5.4;
-      if (y < waterThreshold && category !== "crossing") continue;
+      // Skip underwater (ocean or elevated body)
+      const registry = this.terrainSystem?.getWaterBodyRegistry?.();
+      const waterSurface = registry
+        ? registry.getWaterSurfaceAt(x, z)
+        : TERRAIN_CONSTANTS.WATER_THRESHOLD;
+      if (y < waterSurface && category !== "crossing") continue;
 
       // Calculate importance based on biome suitability and noise
       let importance = properties.baseImportance;
@@ -365,7 +374,7 @@ export class POISystem extends System {
     const pois: PointOfInterest[] = [];
     const properties = CATEGORY_PROPERTIES["fishing_spot"];
     const towns = this.townSystem?.getTowns() ?? [];
-    const waterThreshold = TERRAIN_CONSTANTS.WATER_THRESHOLD; // 9.0 - no fallback, use actual constant
+    const waterThreshold = TERRAIN_CONSTANTS.WATER_THRESHOLD;
     const maxAttempts = targetCount * 50; // More attempts needed for water edge finding
     const searchRadius = 300; // Increased search radius for better water finding
     const searchStepSize = 8; // Smaller steps for more precise edge detection

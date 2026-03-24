@@ -53,8 +53,8 @@ const DEFAULT_WATER_LEVEL = 5.0;
 /** Default water floor depth below water level */
 const DEFAULT_WATER_FLOOR_DEPTH = 3.0;
 
-/** Plank thickness */
-const PLANK_THICKNESS = 0.04;
+/** Deck thickness — solid platform visible from all angles */
+const DECK_THICKNESS = 0.15;
 
 /** Tile size for collision (matches game tile grid) */
 const TILE_SIZE = 1.0;
@@ -136,6 +136,31 @@ export class DockGenerator {
       waterFloorY,
     );
 
+    // Generate collision data (needed on both client and server)
+    const collision = this.generateCollisionData(layout, shorelinePoint);
+
+    // Skip geometry + mesh on server — only layout + collision are needed
+    if (options.skipMesh) {
+      const emptyArrays: DockGeometryArrays = {
+        planks: [],
+        posts: [],
+        railingPosts: [],
+        railingRails: [],
+        moorings: [],
+      };
+      const emptyGroup = new THREE.Group();
+      emptyGroup.name = "Dock";
+      return {
+        mesh: emptyGroup,
+        position: layout.position,
+        layout,
+        recipe,
+        collision,
+        stats: this.calculateStats(emptyArrays, startTime),
+        geometryArrays: emptyArrays,
+      };
+    }
+
     // Build geometry
     const geometryArrays = this.buildDock(layout, recipe);
 
@@ -146,9 +171,6 @@ export class DockGenerator {
       recipe.woodType,
       waterLevel,
     );
-
-    // Generate collision data
-    const collision = this.generateCollisionData(layout, shorelinePoint);
 
     // Calculate stats
     const stats = this.calculateStats(geometryArrays, startTime);
@@ -294,52 +316,34 @@ export class DockGenerator {
   }
 
   /**
-   * Generate plank data for the deck surface
+   * Generate deck surface as a single solid platform.
+   * The TSL material provides wood grain; individual planks are not needed.
    */
   private generatePlanks(
-    recipe: DockRecipe,
+    _recipe: DockRecipe,
     length: number,
     width: number,
     direction: { x: number; z: number },
     rng: RNG,
   ): PlankData[] {
-    const planks: PlankData[] = [];
-
-    // Calculate number of planks
-    const plankSpacing = recipe.plankWidth + recipe.plankGap;
-    const numPlanks = Math.ceil(length / plankSpacing);
-
-    // Perpendicular direction for plank orientation
     const perpX = -direction.z;
     const perpZ = direction.x;
 
-    for (let i = 0; i < numPlanks; i++) {
-      // Position along the dock length
-      const t = (i + 0.5) / numPlanks;
-      const distAlongDock = t * length;
-
-      // Plank center position (relative to dock origin)
-      const posX = direction.x * distAlongDock;
-      const posZ = direction.z * distAlongDock;
-
-      // Random weathering variation
-      const weathering = rng.next() * 0.4;
-
-      // Slight random rotation for natural look
-      const rotationVariation = (rng.next() - 0.5) * 0.02;
-      const plankRotation = Math.atan2(perpX, perpZ) + rotationVariation;
-
-      planks.push({
-        position: { x: posX, y: 0, z: posZ },
-        rotation: plankRotation,
-        width: recipe.plankWidth,
-        length: width,
-        thickness: PLANK_THICKNESS,
-        weathering,
-      });
-    }
-
-    return planks;
+    // Single solid deck spanning the entire dock
+    return [
+      {
+        position: {
+          x: direction.x * (length / 2),
+          y: 0,
+          z: direction.z * (length / 2),
+        },
+        rotation: Math.atan2(perpX, perpZ),
+        width: length, // spans full dock length (Z axis after rotation)
+        length: width, // spans full dock width (X axis after rotation)
+        thickness: DECK_THICKNESS,
+        weathering: rng.next() * 0.3,
+      },
+    ];
   }
 
   /**
@@ -591,34 +595,18 @@ export class DockGenerator {
     const centerX = direction.x * mainLength;
     const centerZ = direction.z * mainLength;
 
-    // Generate planks for T-section
-    // T-section planks run parallel to main dock (their length extends in perpendicular direction)
-    // They are positioned along the perpendicular axis to span tWidth
-    const planks: PlankData[] = [];
-    const plankSpacing = recipe.plankWidth + recipe.plankGap;
-    const halfTWidth = tWidth / 2;
-    const numPlanks = Math.ceil(tWidth / plankSpacing);
-
-    for (let i = 0; i < numPlanks; i++) {
-      const t = (i + 0.5) / numPlanks;
-      // Position along T-section's span (perpendicular to main dock)
-      const distAlongT = (t - 0.5) * tWidth;
-
-      planks.push({
-        position: {
-          // Offset in perpendicular direction to span tWidth
-          x: centerX + perpX * distAlongT,
-          y: deckY,
-          z: centerZ + perpZ * distAlongT,
-        },
-        // Plank's length runs parallel to main direction (perpendicular to T's extension)
+    // Single solid deck for T-section
+    const planks: PlankData[] = [
+      {
+        position: { x: centerX, y: deckY, z: centerZ },
         rotation: Math.atan2(direction.x, direction.z),
-        width: recipe.plankWidth,
-        length: mainWidth, // Spans the main dock's width
-        thickness: PLANK_THICKNESS,
-        weathering: rng.next() * 0.4,
-      });
-    }
+        width: tWidth, // spans T-section width (perpendicular)
+        length: mainWidth, // spans main dock width
+        thickness: DECK_THICKNESS,
+        weathering: rng.next() * 0.3,
+      },
+    ];
+    const halfTWidth = tWidth / 2;
 
     // Generate posts for T-section corners
     const posts: PostData[] = [];

@@ -1,0 +1,6 @@
+name: Hyperscapes CodeQL
+
+paths-ignore:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "packages/**/tests/**"

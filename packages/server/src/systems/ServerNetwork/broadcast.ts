@@ -5,25 +5,22 @@
  * Provides methods for broadcasting to all clients, specific clients,
  * or clients by player ID.
  *
- * Responsibilities:
- * - Broadcast to all connected clients (with optional exclusion)
- * - Send to specific socket by socket ID
- * - Send to specific player by player ID
- * - Packet serialization and delivery
+ * Supports two broadcast paths:
+ * 1. **Pub/Sub (uWS native)**: When a uWS app is available, uses native
+ *    C++ fan-out via ws.publish(topic). One publish call replaces the
+ *    entire JS iteration loop for sendToAll/sendToNearby/sendToSpectators.
+ * 2. **Legacy JS iteration**: Falls back to per-socket iteration when
+ *    uWS is not available (UWS_ENABLED=false).
  *
- * Usage:
- * ```typescript
- * const broadcast = new BroadcastManager(sockets);
- * broadcast.sendToAll('chat', { message: 'Hello' }, excludeSocketId);
- * broadcast.sendToSocket(socketId, 'update', data);
- * broadcast.sendToPlayer(playerId, 'inventory', items);
- * ```
+ * Unicast methods (sendToSocket, sendToPlayer) are unchanged.
  */
 
 import type { ServerSocket } from "../../shared/types";
 import { writePacket } from "@hyperscape/shared";
 import type { SpatialIndex } from "./SpatialIndex";
 import { BandwidthBudget, PacketPriority } from "./BandwidthBudget";
+import type { UwsWebSocketAdapter } from "../../startup/UwsWebSocketAdapter";
+import type * as uWS from "uWebSockets.js";
 
 /**
  * BroadcastManager - Manages network message broadcasting
@@ -37,6 +34,15 @@ export class BroadcastManager {
   private readonly playerSocketIds = new Map<string, string>();
   private readonly socketPlayerIds = new Map<string, string>();
 
+  /** Cumulative time (ms) spent in sendBufferedPacket since last reset */
+  private _sendTimeAccumMs = 0;
+
+  /** uWS app reference for pub/sub broadcasting (null = legacy JS path) */
+  private uwsApp: uWS.TemplatedApp | null = null;
+
+  /** Cumulative pub/sub publish count since last drain */
+  private _pubsubPublishCount = 0;
+
   /**
    * Create a BroadcastManager
    *
@@ -47,6 +53,31 @@ export class BroadcastManager {
   /** Attach a spatial index for interest-managed broadcasts. */
   setSpatialIndex(index: SpatialIndex): void {
     this.spatialIndex = index;
+  }
+
+  /** Set the uWS app reference for native pub/sub broadcasting. */
+  setUwsApp(app: uWS.TemplatedApp | null): void {
+    this.uwsApp = app;
+  }
+
+  /**
+   * Get the UwsWebSocketAdapter for a socket ID.
+   * Derives it from the socket's underlying ws property (duck-typed).
+   */
+  getAdapter(socketId: string): UwsWebSocketAdapter | undefined {
+    const socket = this.sockets.get(socketId);
+    if (!socket) return undefined;
+    // The socket's ws property is the NodeWebSocket — if it's a uWS adapter,
+    // it will have subscribe/unsubscribe/publish methods
+    const ws = socket.ws as unknown as UwsWebSocketAdapter | undefined;
+    if (
+      ws &&
+      typeof ws.subscribe === "function" &&
+      typeof ws.publish === "function"
+    ) {
+      return ws;
+    }
+    return undefined;
   }
 
   /**
@@ -67,8 +98,26 @@ export class BroadcastManager {
     priority: PacketPriority = PacketPriority.NORMAL,
   ): number {
     const packet = writePacket(name, data);
-    let sentCount = 0;
 
+    // Pub/sub fast path: single publish to "global" topic
+    if (this.uwsApp) {
+      if (ignoreSocketId) {
+        // ws.publish() excludes self — publish from the ignored socket's adapter
+        const adapter = this.getAdapter(ignoreSocketId);
+        if (adapter) {
+          adapter.publish("global", packet, true);
+          this._pubsubPublishCount++;
+          return this.sockets.size - 1; // estimate
+        }
+      }
+      // No exclusion or adapter not found — use app-level publish (includes everyone)
+      this.uwsApp.publish("global", packet, true);
+      this._pubsubPublishCount++;
+      return this.sockets.size;
+    }
+
+    // Legacy JS iteration path
+    let sentCount = 0;
     this.sockets.forEach((socket) => {
       if (socket.id === ignoreSocketId) {
         return;
@@ -86,6 +135,9 @@ export class BroadcastManager {
    *
    * Uses the spatial index to find players within a 3×3 region grid
    * (~63×63 tiles). Falls back to sendToAll if no spatial index is set.
+   *
+   * When pub/sub is active, publishes to 9 region topics + spectator topic
+   * instead of iterating individual sockets.
    *
    * @param name - Message type/name
    * @param data - Message payload
@@ -106,10 +158,48 @@ export class BroadcastManager {
       return this.sendToAll(name, data, ignoreSocketId, priority);
     }
 
+    // Pub/sub fast path: publish to 9 region topics + spectator topic
+    if (this.uwsApp) {
+      const packet = writePacket(name, data);
+      const regionKeys = this.spatialIndex.getAdjacentRegionKeys(
+        worldX,
+        worldZ,
+      );
+
+      if (ignoreSocketId) {
+        const adapter = this.getAdapter(ignoreSocketId);
+        if (adapter) {
+          // ws.publish() excludes self — perfect for ignoreSocketId
+          for (let i = 0; i < 9; i++) {
+            adapter.publish(
+              this.spatialIndex.getRegionTopic(regionKeys[i]),
+              packet,
+              true,
+            );
+          }
+          // Also publish to spectator topic so spectators get nearby events
+          adapter.publish("spectator", packet, true);
+          this._pubsubPublishCount += 10;
+          return -1; // exact count not available with pub/sub
+        }
+      }
+
+      // No exclusion — use app-level publish
+      for (let i = 0; i < 9; i++) {
+        this.uwsApp.publish(
+          this.spatialIndex.getRegionTopic(regionKeys[i]),
+          packet,
+          true,
+        );
+      }
+      this.uwsApp.publish("spectator", packet, true);
+      this._pubsubPublishCount += 10;
+      return -1; // exact count not available with pub/sub
+    }
+
+    // Legacy JS iteration path
     const nearbyPlayerIds = this.spatialIndex.getPlayersNear(worldX, worldZ);
 
-    // Lazily create packet only when there is at least one recipient
-    // (nearby players OR spectator sockets).
     let packet: ArrayBuffer | null = null;
     let sentCount = 0;
 
@@ -237,9 +327,16 @@ export class BroadcastManager {
       sentCount++;
     }
 
+    // Pub/sub path: publish to spectator:<playerId> topic
+    if (this.uwsApp) {
+      const packet = writePacket(name, data);
+      this.uwsApp.publish(`spectator:${playerId}`, packet, true);
+      this._pubsubPublishCount++;
+      return sentCount + 1; // estimate spectators
+    }
+
+    // Legacy JS iteration path
     for (const socket of this.sockets.values()) {
-      // Send to any spectators watching this player
-      // spectatingCharacterId is set when a spectator connects to follow a character
       const socketWithSpectator = socket as ServerSocket & {
         isSpectator?: boolean;
         spectatingCharacterId?: string;
@@ -275,6 +372,15 @@ export class BroadcastManager {
     data: T,
     priority: PacketPriority = PacketPriority.NORMAL,
   ): number {
+    // Pub/sub fast path
+    if (this.uwsApp) {
+      const packet = writePacket(name, data);
+      this.uwsApp.publish("spectator", packet, true);
+      this._pubsubPublishCount++;
+      return -1; // exact count not available
+    }
+
+    // Legacy JS iteration path
     let packet: ArrayBuffer | null = null;
     let sentCount = 0;
 
@@ -316,6 +422,26 @@ export class BroadcastManager {
     this.socketPlayerIds.set(socket.id, playerId);
   }
 
+  /**
+   * Read and reset accumulated send time (ms).
+   * Called by tickHealth broadcast to report broadcast overhead.
+   */
+  drainSendTimeMs(): number {
+    const ms = this._sendTimeAccumMs;
+    this._sendTimeAccumMs = 0;
+    return Math.round(ms * 100) / 100; // 2 decimal places
+  }
+
+  /**
+   * Read and reset accumulated pub/sub publish count.
+   * Called by tickHealth broadcast to report pub/sub throughput.
+   */
+  drainPubsubStats(): number {
+    const count = this._pubsubPublishCount;
+    this._pubsubPublishCount = 0;
+    return count;
+  }
+
   private sendBufferedPacket(
     socket: ServerSocket,
     packet: ArrayBuffer,
@@ -326,6 +452,7 @@ export class BroadcastManager {
       return false;
     }
 
+    const t0 = performance.now();
     try {
       socket.sendPacket(packet);
       this.bandwidthBudget.recordSend(socket.id, packetBytes);
@@ -333,8 +460,10 @@ export class BroadcastManager {
       if (trackedPlayerId) {
         this.trackPlayerSocket(socket, trackedPlayerId);
       }
+      this._sendTimeAccumMs += performance.now() - t0;
       return true;
     } catch {
+      this._sendTimeAccumMs += performance.now() - t0;
       this.onSocketDisconnected(socket.id);
       return false;
     }
