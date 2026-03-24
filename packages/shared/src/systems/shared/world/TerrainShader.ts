@@ -48,6 +48,7 @@ import {
 } from "../../../extras/three/three";
 import { getRoadInfluenceTextureState } from "./RoadInfluenceMask";
 import { getLamppostLightTextureState } from "./LamppostLightMask";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { SUN_LIGHT, SUN_SHADE } from "./LightingConfig";
 
@@ -58,7 +59,7 @@ export const TERRAIN_SHADER_CONSTANTS = {
   DIRT_THRESHOLD: 0.5,
   LOD_FULL_DETAIL: 100.0,
   LOD_MEDIUM_DETAIL: 200.0,
-  WATER_LEVEL: 5.0,
+  WATER_LEVEL: TERRAIN_CONSTANTS.WATER_THRESHOLD,
   DISTORT_NOISE_SCALE: 0.067,
   VARIATION_NOISE_SCALE: 0.0015,
   ROCK_DISTORT_STRENGTH: 0.5,

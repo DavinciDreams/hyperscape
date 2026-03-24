@@ -11,6 +11,7 @@
 import { NoiseGenerator, createTileRNG } from "./NoiseGenerator";
 import { BiomeSystem } from "./BiomeSystem";
 import { IslandMask, DEFAULT_ISLAND_CONFIG } from "./IslandMask";
+import { DEFAULT_MAX_HEIGHT, DEFAULT_WATER_THRESHOLD } from "./constants";
 import type {
   TerrainConfig,
   TerrainNoiseConfig,
@@ -76,8 +77,8 @@ export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = {
   tileSize: 100,
   worldSize: 100,
   tileResolution: 64,
-  maxHeight: 30,
-  waterThreshold: 5.4,
+  maxHeight: DEFAULT_MAX_HEIGHT,
+  waterThreshold: DEFAULT_WATER_THRESHOLD,
   seed: 0,
   noise: DEFAULT_NOISE_CONFIG,
   biomes: {

@@ -48,6 +48,7 @@ import type { TerrainTile } from "../../../types/world/terrain";
 import type { Wind } from "./Wind";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { SUN_SHADE, NIGHT, applySunShade } from "./LightingConfig";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 
 // ============================================================================
 // CONFIGURATION
@@ -184,7 +185,7 @@ export class WaterSystem {
 
   // TSL planar reflection (Three.js ReflectorNode handles camera, RT, clipping)
   private reflection?: ReturnType<typeof reflector>;
-  private waterLevel = 5;
+  private waterLevel: number = TERRAIN_CONSTANTS.WATER_THRESHOLD;
   private waterMeshes: THREE.Mesh[] = [];
 
   private reflectionActive = false;

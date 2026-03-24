@@ -27,7 +27,7 @@ import {
   type GeneratedDock,
   type DockRecipe,
 } from "@hyperscape/procgen/items/dock";
-import type { WaterBodyRegistry } from "./WaterBodyRegistry";
+import { ISLAND_DOCKS, type DockDefinition } from "./DockDefinition";
 import { CollisionFlag, getOppositeWallFlag } from "../movement/CollisionFlags";
 
 // TSL imports for dock material (client-only, same pattern as BridgeSystem)
@@ -50,9 +50,9 @@ import {
   min as tslMin,
 } from "three/tsl";
 
-// Constants
+// Constants — single source of truth from GameConstants
 const WATER_THRESHOLD = TERRAIN_CONSTANTS.WATER_THRESHOLD;
-const WATER_LEVEL = 5.0;
+const WATER_LEVEL = TERRAIN_CONSTANTS.WATER_THRESHOLD;
 
 // ── Dock geometry constants (matching BridgeSystem visual quality) ──
 const DOCK_POST_CAP_OVERHANG = 0.05;
@@ -127,10 +127,6 @@ const dockWoodUV = Fn(() => {
   return mix(vertUV, deckUV, horiz);
 });
 
-const SHORELINE_SAMPLES = 64;
-const MAX_SLOPE_FOR_DOCK = 0.4;
-const MIN_WATER_DEPTH = 1.5;
-
 /** Pre-allocated test points for isTerrainReady(). */
 const TERRAIN_READY_TEST_POINTS: ReadonlyArray<{ x: number; z: number }> = [
   { x: 0, z: 0 },
@@ -142,179 +138,6 @@ function dockTileKey(tx: number, tz: number): number {
   return ((tx + 32768) << 16) | (tz + 32768);
 }
 
-function snapToCardinal(dx: number, dz: number): { x: number; z: number } {
-  if (Math.abs(dx) >= Math.abs(dz)) {
-    return { x: dx >= 0 ? 1 : -1, z: 0 };
-  }
-  return { x: 0, z: dz >= 0 ? 1 : -1 };
-}
-
-/** Find shoreline points around a water body using binary search */
-function findShorelinePoints(
-  waterBody: WaterBody,
-  getTerrainHeight: (x: number, z: number) => number,
-  samples: number = SHORELINE_SAMPLES,
-  waterLevel: number = WATER_THRESHOLD,
-): ShorelinePoint[] {
-  const shorelinePoints: ShorelinePoint[] = [];
-  const { center, radius } = waterBody;
-
-  for (let i = 0; i < samples; i++) {
-    const angle = (i / samples) * Math.PI * 2;
-    const dirX = Math.cos(angle);
-    const dirZ = Math.sin(angle);
-
-    let minDist = radius * 0.3;
-    let maxDist = radius * 1.5;
-    let foundShoreline = false;
-
-    for (let step = 0; step < 20; step++) {
-      const midDist = (minDist + maxDist) / 2;
-      const x = center.x + dirX * midDist;
-      const z = center.z + dirZ * midDist;
-      const height = getTerrainHeight(x, z);
-
-      if (height < waterLevel) {
-        minDist = midDist;
-      } else {
-        maxDist = midDist;
-        foundShoreline = true;
-      }
-
-      if (maxDist - minDist < 0.5) break;
-    }
-
-    if (!foundShoreline) continue;
-
-    const shorelineDist = (minDist + maxDist) / 2;
-    const shoreX = center.x + dirX * shorelineDist;
-    const shoreZ = center.z + dirZ * shorelineDist;
-    const height = getTerrainHeight(shoreX, shoreZ);
-
-    const sampleDist = 1.0;
-    const heightInward = getTerrainHeight(
-      shoreX - dirX * sampleDist,
-      shoreZ - dirZ * sampleDist,
-    );
-    const heightOutward = getTerrainHeight(
-      shoreX + dirX * sampleDist,
-      shoreZ + dirZ * sampleDist,
-    );
-    const slope = Math.abs(heightOutward - heightInward) / (sampleDist * 2);
-
-    shorelinePoints.push({
-      position: { x: shoreX, y: height, z: shoreZ },
-      landwardNormal: { x: dirX, z: dirZ },
-      waterwardNormal: { x: -dirX, z: -dirZ },
-      height,
-      slope,
-      distanceFromCenter: shorelineDist,
-    });
-  }
-
-  return shorelinePoints;
-}
-
-interface PlacementCandidate {
-  point: ShorelinePoint;
-  score: number;
-  components: {
-    flatness: number;
-    waterDepth: number;
-    clearance: number;
-    orientation: number;
-  };
-}
-
-/** Score a shoreline point for dock placement */
-function scorePlacementPoint(
-  point: ShorelinePoint,
-  getTerrainHeight: (x: number, z: number) => number,
-  checkObstacle: (x: number, z: number) => boolean,
-  dockLength: number,
-  waterLevel: number = WATER_THRESHOLD,
-): PlacementCandidate {
-  const components = {
-    flatness: 0,
-    waterDepth: 0,
-    clearance: 0,
-    orientation: 0,
-  };
-
-  components.flatness = Math.max(0, 1 - point.slope / MAX_SLOPE_FOR_DOCK);
-
-  const endX = point.position.x + point.waterwardNormal.x * dockLength;
-  const endZ = point.position.z + point.waterwardNormal.z * dockLength;
-  const endHeight = getTerrainHeight(endX, endZ);
-  const waterDepth = waterLevel - endHeight;
-
-  if (waterDepth < MIN_WATER_DEPTH) {
-    components.waterDepth = 0;
-  } else {
-    components.waterDepth = Math.min(1, waterDepth / (MIN_WATER_DEPTH * 2));
-  }
-
-  let obstacleCount = 0;
-  for (let d = 1; d <= 5; d++) {
-    const checkX = point.position.x + point.landwardNormal.x * d;
-    const checkZ = point.position.z + point.landwardNormal.z * d;
-    if (checkObstacle(checkX, checkZ)) {
-      obstacleCount++;
-    }
-  }
-  components.clearance = Math.max(0, 1 - obstacleCount / 3);
-
-  const facingSouth = point.waterwardNormal.z;
-  components.orientation = 0.5 + facingSouth * 0.5;
-
-  const weights = {
-    flatness: 0.35,
-    waterDepth: 0.3,
-    clearance: 0.2,
-    orientation: 0.15,
-  };
-
-  const score =
-    components.flatness * weights.flatness +
-    components.waterDepth * weights.waterDepth +
-    components.clearance * weights.clearance +
-    components.orientation * weights.orientation;
-
-  return { point, score, components };
-}
-
-/** Select the best dock placement from candidates using weighted random */
-function selectBestPlacement(
-  candidates: PlacementCandidate[],
-  seed: number,
-): PlacementCandidate | null {
-  if (candidates.length === 0) return null;
-
-  const viableCandidates = candidates.filter((c) => c.score > 0.4);
-  if (viableCandidates.length === 0) {
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0];
-  }
-
-  viableCandidates.sort((a, b) => b.score - a.score);
-
-  const topCandidates = viableCandidates.slice(0, 3);
-  const totalScore = topCandidates.reduce((sum, c) => sum + c.score, 0);
-
-  const seededRandom = (seed * 9301 + 49297) % 233280;
-  const threshold = (seededRandom / 233280) * totalScore;
-
-  let accumulated = 0;
-  for (const candidate of topCandidates) {
-    accumulated += candidate.score;
-    if (accumulated >= threshold) {
-      return candidate;
-    }
-  }
-
-  return topCandidates[0];
-}
-
 interface DockInstance {
   id: string;
   waterBodyId: string;
@@ -324,7 +147,6 @@ interface DockInstance {
 
 interface TerrainSystemInterface {
   getHeightAt(x: number, z: number): number;
-  getWaterBodyRegistry(): WaterBodyRegistry | null;
 }
 
 interface StageSystemInterface {
@@ -349,11 +171,7 @@ export class ProceduralDocks extends System {
   private dockMeshes: THREE.Mesh[] = [];
 
   /** Pending dock generation queue — processed one per tick to avoid spikes. */
-  private pendingDockQueue: Array<{
-    waterBody: WaterBody;
-    seed: string;
-    waterSurfaceY: number;
-  }> = [];
+  private pendingDockQueue: DockDefinition[] = [];
 
   constructor(world: World) {
     super(world);
@@ -408,142 +226,62 @@ export class ProceduralDocks extends System {
   }
 
   /**
-   * Enqueue docks for all water bodies (ponds + river banks).
+   * Enqueue docks from ISLAND_DOCKS definitions.
    * Builds a queue that update() drains one dock per tick to avoid spikes.
    */
-  private enqueueDocks(seed: string = "island-docks"): void {
-    if (!this.terrainSystem) return;
-
-    const registry = this.terrainSystem.getWaterBodyRegistry();
-    if (!registry) return;
-
-    // Elevated ponds/lakes from WaterBodyRegistry
-    for (const body of registry.getAllBodies()) {
-      this.pendingDockQueue.push({
-        waterBody: {
-          id: body.id,
-          type: "pond",
-          center: { x: body.centerX, z: body.centerZ },
-          radius: body.radius,
-        },
-        seed: `${seed}-${body.id}`,
-        waterSurfaceY: body.surfaceY,
-      });
+  private enqueueDocks(): void {
+    for (const def of ISLAND_DOCKS) {
+      this.pendingDockQueue.push(def);
     }
-
-    // Docks are only placed at elevated ponds/lakes — no rivers or ocean.
   }
 
   /**
-   * Generate a dock for a specific water body.
+   * Generate a dock from a developer-assigned DockDefinition.
    * Works on both client (mesh + collision) and server (collision only).
    */
-  generateDockForWaterBody(
-    waterBody: WaterBody,
-    seed: string,
-    waterSurfaceY?: number,
-  ): GeneratedDock | null {
+  generateDockFromDefinition(def: DockDefinition): GeneratedDock | null {
     if (!this.terrainSystem) return null;
 
-    const waterLevel = waterSurfaceY ?? WATER_LEVEL;
+    const waterLevel = WATER_LEVEL;
 
-    const getTerrainHeight = (x: number, z: number): number => {
-      return this.terrainSystem!.getHeightAt(x, z);
+    // Direction vector from definition
+    const dirMap: Record<string, { x: number; z: number }> = {
+      north: { x: 0, z: -1 },
+      south: { x: 0, z: 1 },
+      east: { x: 1, z: 0 },
+      west: { x: -1, z: 0 },
     };
+    const waterwardDir = dirMap[def.direction];
+    const landwardDir = { x: -waterwardDir.x, z: -waterwardDir.z };
 
-    const checkObstacle = (x: number, z: number): boolean => {
-      const height = getTerrainHeight(x, z);
-      if (height < waterLevel) return true;
-
-      const sampleDist = 0.5;
-      const heightN = getTerrainHeight(x, z + sampleDist);
-      const heightS = getTerrainHeight(x, z - sampleDist);
-      const heightE = getTerrainHeight(x + sampleDist, z);
-      const heightW = getTerrainHeight(x - sampleDist, z);
-
-      const slopeNS = Math.abs(heightN - heightS) / (sampleDist * 2);
-      const slopeEW = Math.abs(heightE - heightW) / (sampleDist * 2);
-      const maxSlope = Math.max(slopeNS, slopeEW);
-      return maxSlope > 0.5;
-    };
-
-    // Use per-body water level for shoreline detection
-    const shorelinePoints = findShorelinePoints(
-      waterBody,
-      getTerrainHeight,
-      SHORELINE_SAMPLES,
-      waterLevel,
-    );
-
-    if (shorelinePoints.length === 0) return null;
-
-    const estimatedLength =
-      (DEFAULT_DOCK_PARAMS.lengthRange[0] +
-        DEFAULT_DOCK_PARAMS.lengthRange[1]) /
-      2;
-
-    const candidates = shorelinePoints.map((point) =>
-      scorePlacementPoint(
-        point,
-        getTerrainHeight,
-        checkObstacle,
-        estimatedLength,
-        waterLevel,
-      ),
-    );
-
-    const seedNum = this.hashString(seed);
-    const selected = selectBestPlacement(candidates, seedNum);
-    if (!selected) return null;
-
-    // ── Tile-alignment: snap direction to nearest cardinal ──
-    // This ensures the dock is axis-aligned with the 1m tile grid.
-    const rawDir = selected.point.waterwardNormal;
-    const snappedDir = snapToCardinal(rawDir.x, rawDir.z);
-    const snappedLand = { x: -snappedDir.x, z: -snappedDir.z };
-
-    // ── Tile-alignment: snap position to tile grid ──
-    // Extend 3m landward from shoreline, then snap:
-    //   - Along dock direction: start at tile boundary (integer)
-    //   - Perpendicular: centerline at tile center (integer + 0.5)
-    const landwardOffset = 3;
-    const rawX = selected.point.position.x + snappedLand.x * landwardOffset;
-    const rawZ = selected.point.position.z + snappedLand.z * landwardOffset;
-
-    // Dock runs along direction axis. Snap start to tile edge (integer)
-    // along that axis, and center to tile center (N+0.5) across it.
+    // Snap anchor to tile grid
     let snappedX: number;
     let snappedZ: number;
-    if (Math.abs(snappedDir.x) > Math.abs(snappedDir.z)) {
-      // Dock runs along X axis → snap X to integer, Z to N+0.5
-      snappedX = Math.round(rawX);
-      snappedZ = Math.floor(rawZ) + 0.5;
+    if (Math.abs(waterwardDir.x) > Math.abs(waterwardDir.z)) {
+      snappedX = Math.round(def.x);
+      snappedZ = Math.floor(def.z) + 0.5;
     } else {
-      // Dock runs along Z axis → snap Z to integer, X to N+0.5
-      snappedX = Math.floor(rawX) + 0.5;
-      snappedZ = Math.round(rawZ);
+      snappedX = Math.floor(def.x) + 0.5;
+      snappedZ = Math.round(def.z);
     }
 
+    const anchorY = this.terrainSystem.getHeightAt(def.x, def.z);
+
     const adjustedPoint: ShorelinePoint = {
-      ...selected.point,
-      position: {
-        x: snappedX,
-        y: selected.point.position.y,
-        z: snappedZ,
-      },
-      waterwardNormal: snappedDir,
-      landwardNormal: snappedLand,
+      position: { x: snappedX, y: anchorY, z: snappedZ },
+      waterwardNormal: waterwardDir,
+      landwardNormal: landwardDir,
+      height: anchorY,
+      slope: 0,
+      distanceFromCenter: 0,
     };
 
-    // ── Tile-alignment: force width = 3 tiles, integer length ──
-    const dockWidth = 3.0;
-    const dockLength = Math.round(
-      DEFAULT_DOCK_PARAMS.lengthRange[0] + landwardOffset + 4 + (seedNum % 5), // deterministic variation 0-4 extra tiles
-    );
+    const dockWidth = def.width ?? 3.0;
+    const dockLength = def.length ?? 12;
 
     const recipe: DockRecipe = {
       ...DEFAULT_DOCK_PARAMS,
-      label: "Dock",
+      label: def.label ?? "Dock",
       widthRange: [dockWidth, dockWidth],
       lengthRange: [dockLength, dockLength],
     };
@@ -551,18 +289,14 @@ export class ProceduralDocks extends System {
     const waterFloorDepth = 3.0;
     const waterFloorY = waterLevel - waterFloorDepth;
 
-    // Skip geometry+material creation when there's no scene (server).
-    // On server we only need layout + collision data from DockGenerator.
     const isServer = !this.scene;
     const dock = this.generator.generate(recipe, adjustedPoint, {
-      seed,
+      seed: def.id,
       waterLevel,
       waterFloorDepth,
       skipMesh: isServer,
     });
 
-    // Dispose the DockGenerator's local-space mesh (we build world-space mesh).
-    // On server with skipMesh, the mesh is an empty Group — dispose is a no-op.
     dock.mesh.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
@@ -572,7 +306,6 @@ export class ProceduralDocks extends System {
       }
     });
 
-    // Build world-space mesh (client only — server has no scene)
     let worldMesh: THREE.Mesh | null = null;
     if (this.scene) {
       worldMesh = this.buildDockMeshWorldSpace(
@@ -587,13 +320,11 @@ export class ProceduralDocks extends System {
       }
     }
 
-    // Register collision flags and deck heights
     this.registerDockCollision(dock);
 
-    // Store instance
     const instance: DockInstance = {
-      id: `dock-${waterBody.id}`,
-      waterBodyId: waterBody.id,
+      id: `dock-${def.id}`,
+      waterBodyId: def.id,
       dock,
       mesh: worldMesh,
     };
@@ -1479,16 +1210,6 @@ export class ProceduralDocks extends System {
     this.dockDeckHeights.clear();
   }
 
-  private hashString(str: string): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash = hash & hash;
-    }
-    return Math.abs(hash);
-  }
-
   update(_deltaTime: number): void {
     if (this.docksGenerated) return;
 
@@ -1503,13 +1224,9 @@ export class ProceduralDocks extends System {
 
     // Process one dock per tick to avoid synchronous spikes
     if (this.pendingDockQueue.length > 0) {
-      const item = this.pendingDockQueue.shift()!;
+      const def = this.pendingDockQueue.shift()!;
       try {
-        this.generateDockForWaterBody(
-          item.waterBody,
-          item.seed,
-          item.waterSurfaceY,
-        );
+        this.generateDockFromDefinition(def);
       } catch (err) {
         console.error("[ProceduralDocks] Error generating dock:", err);
       }
