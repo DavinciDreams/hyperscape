@@ -244,26 +244,14 @@ export class ProceduralDocks extends System {
 
     const waterLevel = WATER_LEVEL;
 
-    // Direction vector from definition
-    const dirMap: Record<string, { x: number; z: number }> = {
-      north: { x: 0, z: -1 },
-      south: { x: 0, z: 1 },
-      east: { x: 1, z: 0 },
-      west: { x: -1, z: 0 },
-    };
-    const waterwardDir = dirMap[def.direction];
+    // Convert compass bearing (degrees) to direction vector
+    // 0° = north (−Z), 90° = east (+X), 180° = south (+Z), 270° = west (−X)
+    const rad = (def.rotation * Math.PI) / 180;
+    const waterwardDir = { x: Math.sin(rad), z: Math.cos(rad) };
     const landwardDir = { x: -waterwardDir.x, z: -waterwardDir.z };
 
-    // Snap anchor to tile grid
-    let snappedX: number;
-    let snappedZ: number;
-    if (Math.abs(waterwardDir.x) > Math.abs(waterwardDir.z)) {
-      snappedX = Math.round(def.x);
-      snappedZ = Math.floor(def.z) + 0.5;
-    } else {
-      snappedX = Math.floor(def.x) + 0.5;
-      snappedZ = Math.round(def.z);
-    }
+    const snappedX = def.x;
+    const snappedZ = def.z;
 
     const anchorY = this.terrainSystem.getHeightAt(def.x, def.z);
 

@@ -1,14 +1,12 @@
 /**
  * DockDefinition — data for dock placements.
  *
- * Each dock specifies a position, direction, and dimensions.
+ * Each dock specifies a position, rotation, and dimensions.
  * Devs assign exact positions — no automatic shoreline detection.
  *
- * The direction is a cardinal: "north" | "south" | "east" | "west",
- * indicating which way the dock extends out over water.
+ * `rotation` is degrees (compass bearing) for the direction the dock
+ * extends over water: 0° = north (−Z), 90° = east (+X), 180° = south (+Z), 270° = west (−X).
  */
-
-export type DockDirection = "north" | "south" | "east" | "west";
 
 export interface DockDefinition {
   id: string;
@@ -16,8 +14,8 @@ export interface DockDefinition {
   x: number;
   /** Shore-side anchor Z */
   z: number;
-  /** Cardinal direction the dock extends over water */
-  direction: DockDirection;
+  /** Compass bearing in degrees — direction the dock extends over water */
+  rotation: number;
   /** Deck width in meters (tiles across, default 3) */
   width?: number;
   /** Deck length in meters (tiles into water, default 12) */
@@ -31,14 +29,13 @@ export interface DockDefinition {
  * Add entries here to place docks anywhere on the map.
  */
 export const ISLAND_DOCKS: DockDefinition[] = [
-  // Example placements — update coordinates to match your terrain:
-  // {
-  //   id: "dock_harbor",
-  //   x: 100,
-  //   z: -200,
-  //   direction: "south",
-  //   width: 3,
-  //   length: 14,
-  //   label: "Harbor Dock",
-  // },
+  {
+    id: "dock_test",
+    x: 1075.5,
+    z: 1172.5,
+    rotation: 180, // south
+    width: 3,
+    length: 12,
+    label: "Dock",
+  },
 ];
