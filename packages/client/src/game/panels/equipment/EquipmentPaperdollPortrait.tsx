@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { EventType, THREE, createRenderer } from "@hyperscape/shared";
 import type { WebGPURenderer } from "@hyperscape/shared";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
+import { MeshStandardNodeMaterial } from "three/webgpu";
 import { useThemeStore } from "@/ui";
+import { getPanelInsetStyle } from "@/ui/theme/themes";
 import type { ClientWorld } from "../../../types";
 
 type PortraitMode = "loading" | "live" | "fallback";
@@ -23,6 +25,7 @@ interface AvatarCarrier {
 }
 
 interface PlayerWithLiveAvatar {
+  id?: string;
   _avatar?: AvatarCarrier;
   avatar?: AvatarCarrier;
 }
@@ -32,25 +35,111 @@ type MaterialCarrier = THREE.Object3D & {
   frustumCulled?: boolean;
 };
 
+type StandardLikeMaterial = THREE.Material & {
+  color?: THREE.Color;
+  emissive?: THREE.Color;
+  emissiveIntensity?: number;
+  roughness?: number;
+  metalness?: number;
+  envMapIntensity?: number;
+  opacity?: number;
+  transparent?: boolean;
+  alphaTest?: number;
+  side?: THREE.Side;
+  shadowSide?: THREE.Side | null;
+  map?: THREE.Texture | null;
+  normalMap?: THREE.Texture | null;
+  emissiveMap?: THREE.Texture | null;
+  aoMap?: THREE.Texture | null;
+  roughnessMap?: THREE.Texture | null;
+  metalnessMap?: THREE.Texture | null;
+  alphaMap?: THREE.Texture | null;
+  depthTest?: boolean;
+  depthWrite?: boolean;
+  toneMapped?: boolean;
+  vertexColors?: boolean;
+  wireframe?: boolean;
+  fog?: boolean;
+};
+
 function getLiveAvatarScene(world?: ClientWorld): THREE.Object3D | null {
-  const player = world?.getPlayer() as PlayerWithLiveAvatar | null;
+  const scenePlayer = world?.entities?.player as PlayerWithLiveAvatar | null;
+  const player = (scenePlayer ??
+    world?.getPlayer()) as PlayerWithLiveAvatar | null;
   if (!player) return null;
 
+  const localEntity = (
+    player.id ? world?.entities?.get?.(player.id) : null
+  ) as PlayerWithLiveAvatar | null;
+
+  const candidate = localEntity ?? player;
+
   return (
+    candidate._avatar?.instance?.raw?.scene ??
+    candidate.avatar?.instance?.raw?.scene ??
     player._avatar?.instance?.raw?.scene ??
     player.avatar?.instance?.raw?.scene ??
     null
   );
 }
 
-function cloneMaterial(
+function createFreshPortraitMaterial(source: THREE.Material): THREE.Material {
+  const standardSource = source as StandardLikeMaterial;
+  const material = new MeshStandardNodeMaterial();
+
+  material.color = standardSource.color?.clone() ?? new THREE.Color(0xffffff);
+  material.emissive =
+    standardSource.emissive?.clone() ?? new THREE.Color(0x000000);
+  material.emissiveIntensity = standardSource.emissiveIntensity ?? 0;
+  material.roughness = standardSource.roughness ?? 1;
+  material.metalness = standardSource.metalness ?? 0;
+  material.envMapIntensity = standardSource.envMapIntensity ?? 1;
+  material.opacity = standardSource.opacity ?? 1;
+  material.transparent = standardSource.transparent ?? false;
+  material.alphaTest = standardSource.alphaTest ?? 0;
+  material.side = standardSource.side ?? THREE.FrontSide;
+  material.shadowSide = standardSource.shadowSide;
+  material.depthTest = standardSource.depthTest ?? true;
+  material.depthWrite = standardSource.depthWrite ?? true;
+  material.toneMapped = standardSource.toneMapped ?? true;
+  material.vertexColors = standardSource.vertexColors ?? false;
+  material.wireframe = standardSource.wireframe ?? false;
+  material.fog = standardSource.fog ?? true;
+
+  if (standardSource.map) material.map = standardSource.map;
+  if (standardSource.normalMap) material.normalMap = standardSource.normalMap;
+  if (standardSource.emissiveMap) {
+    material.emissiveMap = standardSource.emissiveMap;
+  }
+  if (standardSource.aoMap) material.aoMap = standardSource.aoMap;
+  if (standardSource.roughnessMap) {
+    material.roughnessMap = standardSource.roughnessMap;
+  }
+  if (standardSource.metalnessMap) {
+    material.metalnessMap = standardSource.metalnessMap;
+  }
+  if (standardSource.alphaMap) material.alphaMap = standardSource.alphaMap;
+
+  material.name = source.name;
+  material.blending = source.blending;
+  material.blendSrc = source.blendSrc;
+  material.blendDst = source.blendDst;
+  material.blendEquation = source.blendEquation;
+  material.premultipliedAlpha = source.premultipliedAlpha;
+  material.visible = source.visible;
+  material.userData = { ...source.userData };
+
+  return material;
+}
+
+function clonePortraitMaterial(
   material: THREE.Material | THREE.Material[],
 ): THREE.Material | THREE.Material[] {
   if (Array.isArray(material)) {
-    return material.map((entry) => entry.clone());
+    return material.map((entry) => createFreshPortraitMaterial(entry));
   }
 
-  return material.clone();
+  return createFreshPortraitMaterial(material);
 }
 
 function disposePortraitClone(root: THREE.Object3D | null): void {
@@ -72,6 +161,8 @@ function disposePortraitClone(root: THREE.Object3D | null): void {
 
 function buildPortraitClone(sourceScene: THREE.Object3D): THREE.Object3D {
   const clone = SkeletonUtils.clone(sourceScene) as THREE.Object3D;
+  clone.scale.copy(sourceScene.scale);
+  clone.visible = true;
   const silhouettes: THREE.Object3D[] = [];
 
   clone.traverse((child) => {
@@ -84,9 +175,17 @@ function buildPortraitClone(sourceScene: THREE.Object3D): THREE.Object3D {
 
     const materialCarrier = child as MaterialCarrier;
     if (materialCarrier.material) {
-      materialCarrier.material = cloneMaterial(materialCarrier.material);
+      materialCarrier.material = clonePortraitMaterial(
+        materialCarrier.material,
+      );
       materialCarrier.frustumCulled = false;
     }
+
+    if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
+      child.visible = true;
+    }
+
+    child.layers.enableAll();
   });
 
   silhouettes.forEach((node) => node.parent?.remove(node));
@@ -145,6 +244,7 @@ function PortraitFallback({
   mode: PortraitMode;
 }) {
   const theme = useThemeStore((s) => s.theme);
+  const isLoading = mode === "loading";
 
   return (
     <div
@@ -161,8 +261,15 @@ function PortraitFallback({
           width: compact ? "86%" : "82%",
           height: compact ? "92%" : "94%",
           borderRadius: compact ? 16 : 20,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: compact ? 16 : 20,
+          }),
+          padding: 0,
           background:
-            "radial-gradient(circle at 50% 18%, rgba(223, 186, 112, 0.16), rgba(22, 18, 17, 0.02) 52%, rgba(0, 0, 0, 0) 74%)",
+            theme.name === "hyperscape"
+              ? "radial-gradient(circle at 50% 16%, rgba(190, 165, 123, 0.12), transparent 58%), linear-gradient(180deg, rgba(30, 35, 42, 0.95) 0%, rgba(18, 21, 26, 0.98) 100%)"
+              : undefined,
         }}
       >
         <div
@@ -170,98 +277,119 @@ function PortraitFallback({
           style={{
             borderRadius: compact ? 16 : 22,
             border: `1px solid ${theme.colors.border.default}55`,
-            background:
-              "linear-gradient(180deg, rgba(34, 28, 26, 0.14) 0%, rgba(14, 11, 10, 0.04) 100%)",
+            background: isLoading
+              ? "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.08) 100%)"
+              : "linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(0,0,0,0.12) 100%)",
             boxShadow:
               "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -16px 24px rgba(0,0,0,0.18)",
           }}
         />
 
-        <div
-          className="absolute rounded-full"
-          style={{
-            width: compact ? 34 : 42,
-            height: compact ? 34 : 42,
-            top: compact ? "10%" : "8%",
-            background:
-              "linear-gradient(180deg, rgba(224, 197, 143, 0.95), rgba(154, 118, 71, 0.95))",
-            boxShadow: "0 10px 18px rgba(0,0,0,0.22)",
-          }}
-        />
+        {isLoading ? (
+          <>
+            <div
+              className="absolute inset-x-[24%] top-[18%] h-[18%] rounded-full"
+              style={{
+                background: `radial-gradient(circle at center, ${theme.colors.accent.primary}18 0%, transparent 72%)`,
+              }}
+            />
+            <div
+              className="absolute inset-x-[18%] bottom-[16%] top-[28%] rounded-[22px]"
+              style={{
+                border: `1px dashed ${theme.colors.border.hover}`,
+                opacity: 0.55,
+              }}
+            />
+          </>
+        ) : (
+          <>
+            <div
+              className="absolute rounded-full"
+              style={{
+                width: compact ? 34 : 42,
+                height: compact ? 34 : 42,
+                top: compact ? "10%" : "8%",
+                background:
+                  "linear-gradient(180deg, rgba(224, 197, 143, 0.95), rgba(154, 118, 71, 0.95))",
+                boxShadow: "0 10px 18px rgba(0,0,0,0.22)",
+              }}
+            />
 
-        <div
-          className="absolute rounded-[24px]"
-          style={{
-            width: compact ? 46 : 56,
-            height: compact ? 78 : 98,
-            top: compact ? "24%" : "22%",
-            background:
-              "linear-gradient(180deg, rgba(72, 105, 63, 0.95), rgba(44, 68, 42, 0.98))",
-            boxShadow: "0 12px 20px rgba(0,0,0,0.22)",
-          }}
-        />
+            <div
+              className="absolute rounded-[24px]"
+              style={{
+                width: compact ? 46 : 56,
+                height: compact ? 78 : 98,
+                top: compact ? "24%" : "22%",
+                background:
+                  "linear-gradient(180deg, rgba(72, 105, 63, 0.95), rgba(44, 68, 42, 0.98))",
+                boxShadow: "0 12px 20px rgba(0,0,0,0.22)",
+              }}
+            />
 
-        <div
-          className="absolute rounded-[14px]"
-          style={{
-            width: compact ? 82 : 102,
-            height: compact ? 16 : 18,
-            top: compact ? "39%" : "38%",
-            background:
-              "linear-gradient(90deg, rgba(213, 171, 97, 0) 0%, rgba(213, 171, 97, 0.75) 24%, rgba(213, 171, 97, 0.75) 76%, rgba(213, 171, 97, 0) 100%)",
-            opacity: 0.32,
-          }}
-        />
+            <div
+              className="absolute rounded-[14px]"
+              style={{
+                width: compact ? 82 : 102,
+                height: compact ? 16 : 18,
+                top: compact ? "39%" : "38%",
+                background:
+                  "linear-gradient(90deg, rgba(213, 171, 97, 0) 0%, rgba(213, 171, 97, 0.75) 24%, rgba(213, 171, 97, 0.75) 76%, rgba(213, 171, 97, 0) 100%)",
+                opacity: 0.32,
+              }}
+            />
 
-        <div
-          className="absolute rounded-full"
-          style={{
-            width: compact ? 14 : 18,
-            height: compact ? 62 : 78,
-            left: compact ? "26%" : "24%",
-            top: compact ? "28%" : "27%",
-            transform: "rotate(10deg)",
-            background:
-              "linear-gradient(180deg, rgba(210, 171, 130, 0.9), rgba(154, 112, 83, 0.96))",
-          }}
-        />
+            <div
+              className="absolute rounded-full"
+              style={{
+                width: compact ? 14 : 18,
+                height: compact ? 62 : 78,
+                left: compact ? "26%" : "24%",
+                top: compact ? "28%" : "27%",
+                transform: "rotate(10deg)",
+                background:
+                  "linear-gradient(180deg, rgba(210, 171, 130, 0.9), rgba(154, 112, 83, 0.96))",
+              }}
+            />
 
-        <div
-          className="absolute rounded-full"
-          style={{
-            width: compact ? 14 : 18,
-            height: compact ? 62 : 78,
-            right: compact ? "26%" : "24%",
-            top: compact ? "28%" : "27%",
-            transform: "rotate(-10deg)",
-            background:
-              "linear-gradient(180deg, rgba(210, 171, 130, 0.9), rgba(154, 112, 83, 0.96))",
-          }}
-        />
+            <div
+              className="absolute rounded-full"
+              style={{
+                width: compact ? 14 : 18,
+                height: compact ? 62 : 78,
+                right: compact ? "26%" : "24%",
+                top: compact ? "28%" : "27%",
+                transform: "rotate(-10deg)",
+                background:
+                  "linear-gradient(180deg, rgba(210, 171, 130, 0.9), rgba(154, 112, 83, 0.96))",
+              }}
+            />
 
-        <div
-          className="absolute rounded-full"
-          style={{
-            width: compact ? 16 : 20,
-            height: compact ? 90 : 112,
-            left: compact ? "41%" : "40%",
-            bottom: compact ? "8%" : "6%",
-            background:
-              "linear-gradient(180deg, rgba(44, 59, 85, 0.95), rgba(24, 34, 52, 0.98))",
-          }}
-        />
+            <div
+              className="absolute rounded-full"
+              style={{
+                width: compact ? 16 : 20,
+                height: compact ? 90 : 112,
+                left: compact ? "41%" : "40%",
+                bottom: compact ? "8%" : "6%",
+                background:
+                  "linear-gradient(180deg, rgba(44, 59, 85, 0.95), rgba(24, 34, 52, 0.98))",
+              }}
+            />
 
-        <div
-          className="absolute rounded-full"
-          style={{
-            width: compact ? 16 : 20,
-            height: compact ? 90 : 112,
-            right: compact ? "41%" : "40%",
-            bottom: compact ? "8%" : "6%",
-            background:
-              "linear-gradient(180deg, rgba(44, 59, 85, 0.95), rgba(24, 34, 52, 0.98))",
-          }}
-        />
+            <div
+              className="absolute rounded-full"
+              style={{
+                width: compact ? 16 : 20,
+                height: compact ? 90 : 112,
+                right: compact ? "41%" : "40%",
+                bottom: compact ? "8%" : "6%",
+                background:
+                  "linear-gradient(180deg, rgba(44, 59, 85, 0.95), rgba(24, 34, 52, 0.98))",
+              }}
+            />
+          </>
+        )}
 
         <div
           className="absolute"
@@ -342,6 +470,7 @@ export const EquipmentPaperdollPortrait = React.memo(
       sceneRef.current = scene;
 
       const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
+      camera.layers.enableAll();
       cameraRef.current = camera;
 
       const ambient = new THREE.AmbientLight(0xf5e8cf, 1.35);
@@ -453,6 +582,12 @@ export const EquipmentPaperdollPortrait = React.memo(
 
       try {
         const portraitClone = buildPortraitClone(sourceScene);
+        const bounds = new THREE.Box3().setFromObject(portraitClone);
+        if (bounds.isEmpty()) {
+          setMode("loading");
+          return;
+        }
+
         sceneRef.current.add(portraitClone);
         avatarRootRef.current = portraitClone;
         framePortraitAvatar(portraitClone, cameraRef.current);
@@ -474,8 +609,15 @@ export const EquipmentPaperdollPortrait = React.memo(
         className={`relative overflow-hidden ${className}`}
         style={{
           borderRadius: compact ? 14 : 18,
-          border: `1px solid ${theme.colors.border.default}66`,
-          background: `radial-gradient(circle at 50% 10%, ${theme.colors.accent.primary}18 0%, rgba(24, 18, 15, 0.08) 38%, rgba(10, 9, 10, 0.16) 100%)`,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: compact ? 14 : 18,
+          }),
+          padding: 0,
+          background:
+            theme.name === "hyperscape"
+              ? `radial-gradient(circle at 50% 8%, ${theme.colors.accent.primary}14 0%, rgba(15, 18, 22, 0) 42%), linear-gradient(180deg, rgba(31, 35, 42, 0.98) 0%, rgba(18, 21, 26, 0.99) 100%)`
+              : undefined,
           boxShadow:
             "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -14px 20px rgba(0,0,0,0.16)",
         }}

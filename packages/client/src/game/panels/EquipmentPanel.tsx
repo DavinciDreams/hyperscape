@@ -5,8 +5,11 @@ import {
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
-import { MOBILE_EQUIPMENT } from "../../constants";
+import {
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { useContextMenuState } from "../../hooks";
 import {
   EquipmentSlotName,
@@ -71,16 +74,14 @@ function UtilityButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center justify-center rounded-[9px] transition-all duration-150 hover:scale-[1.03] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none"
+      className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none"
       title={label}
       style={{
-        width: compact ? 36 : 40,
-        height: compact ? 36 : 40,
-        background:
-          "linear-gradient(180deg, rgba(73, 62, 54, 0.92) 0%, rgba(45, 37, 34, 0.96) 100%)",
-        border: `1px solid ${theme.colors.border.default}66`,
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -10px 12px rgba(0,0,0,0.18)",
+        width: compact ? 30 : 32,
+        height: compact ? 30 : 32,
+        ...getInteractiveTileStyle(theme, {
+          radius: compact ? 8 : 9,
+        }),
       }}
     >
       <div
@@ -119,6 +120,7 @@ function DroppableEquipmentSlot({
 }: DroppableEquipmentSlotProps) {
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
+  const [isHovered, setIsHovered] = useState(false);
   const { isOver, setNodeRef } = useDroppable({
     id: `equipment-${slot.key}`,
     data: { slot: slot.key },
@@ -157,6 +159,14 @@ function DroppableEquipmentSlot({
   const slotTitle = slot.item
     ? `${slot.item.name} (${slot.label})`
     : `${slot.label} (empty)`;
+  const invalidDrop = isOver && !isValidDrop;
+  const validDrop = isOver && isValidDrop;
+  const baseTileStyle = getInteractiveTileStyle(theme, {
+    hovered: isHovered && !validDrop && !invalidDrop,
+    dropTarget: validDrop,
+    radius: shouldUseMobileUI ? 10 : 12,
+    accentColor: theme.colors.accent.primary,
+  });
 
   return (
     <button
@@ -172,6 +182,7 @@ function DroppableEquipmentSlot({
       }
       onClick={() => onSlotClick(slot)}
       onMouseEnter={(e) => {
+        setIsHovered(true);
         if (slot.item) {
           onHoverStart(slot, { x: e.clientX, y: e.clientY });
         }
@@ -181,7 +192,11 @@ function DroppableEquipmentSlot({
           onHoverMove({ x: e.clientX, y: e.clientY });
         }
       }}
-      onMouseLeave={() => onHoverEnd()}
+      onBlur={() => setIsHovered(false)}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        onHoverEnd();
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -231,38 +246,39 @@ function DroppableEquipmentSlot({
       }}
       className="w-full h-full rounded-[14px] transition-all duration-150 cursor-pointer group relative overflow-hidden focus-visible:outline-none"
       style={{
-        background:
-          isOver && isValidDrop
-            ? "rgba(242, 208, 138, 0.18)"
-            : isOver && !isValidDrop
-              ? "rgba(220, 80, 80, 0.18)"
-              : isDraggingInventoryItem && isValidDrop
-                ? "rgba(242, 208, 138, 0.1)"
-                : isEmpty
-                  ? "linear-gradient(180deg, rgba(21, 19, 21, 0.96) 0%, rgba(12, 11, 13, 0.98) 100%)"
-                  : "linear-gradient(180deg, rgba(29, 25, 23, 0.98) 0%, rgba(17, 15, 16, 0.98) 100%)",
-        borderWidth: "1px",
-        borderStyle: isOver
-          ? "solid"
-          : isDraggingInventoryItem && isValidDrop
-            ? "dashed"
-            : "solid",
-        borderColor:
-          isOver && isValidDrop
-            ? "rgba(100, 180, 100, 0.7)"
-            : isOver && !isValidDrop
-              ? "rgba(180, 80, 80, 0.7)"
-              : isDraggingInventoryItem && isValidDrop
-                ? "rgba(180, 160, 100, 0.5)"
-                : "rgba(112, 88, 56, 0.34)",
-        boxShadow:
-          isOver && isValidDrop
-            ? "inset 0 0 8px rgba(100, 180, 100, 0.3)"
-            : isOver && !isValidDrop
-              ? "inset 0 0 8px rgba(180, 80, 80, 0.3)"
+        ...baseTileStyle,
+        background: invalidDrop
+          ? `linear-gradient(180deg, ${theme.colors.state.danger}20 0%, rgba(22, 26, 31, 0.98) 100%)`
+          : validDrop
+            ? baseTileStyle.background
+            : isDraggingInventoryItem && isValidDrop
+              ? `linear-gradient(180deg, ${theme.colors.accent.primary}14 0%, rgba(22, 26, 31, 0.99) 100%)`
               : isEmpty
-                ? "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -10px 18px rgba(0,0,0,0.25), 0 6px 12px rgba(0,0,0,0.14)"
-                : "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -10px 18px rgba(0,0,0,0.2), 0 8px 14px rgba(0,0,0,0.18)",
+                ? "linear-gradient(180deg, rgba(255,255,255,0.022) 0%, rgba(22,26,31,0.99) 100%)"
+                : "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(26,30,36,0.99) 100%)",
+        borderWidth: "1px",
+        borderStyle:
+          validDrop || invalidDrop
+            ? "solid"
+            : isDraggingInventoryItem && isValidDrop
+              ? "dashed"
+              : "solid",
+        borderColor: invalidDrop
+          ? `${theme.colors.state.danger}99`
+          : validDrop
+            ? theme.colors.border.hover
+            : isDraggingInventoryItem && isValidDrop
+              ? `${theme.colors.accent.primary}7a`
+              : isEmpty
+                ? `${theme.colors.border.default}55`
+                : `${theme.colors.border.default}80`,
+        boxShadow: invalidDrop
+          ? `inset 0 0 8px ${theme.colors.state.danger}26`
+          : validDrop
+            ? `0 0 10px ${theme.colors.accent.primary}12, inset 0 1px 0 rgba(255,255,255,0.05)`
+            : isEmpty
+              ? "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -8px 12px rgba(0,0,0,0.14)"
+              : "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -10px 14px rgba(0,0,0,0.16)",
         outline: "none",
       }}
     >
@@ -277,8 +293,8 @@ function DroppableEquipmentSlot({
       <div
         className="absolute inset-x-[16%] top-[10%] bottom-[12%] rounded-[12px] pointer-events-none"
         style={{
-          border: `1px solid ${isEmpty ? "rgba(152, 124, 78, 0.18)" : "rgba(202, 168, 108, 0.22)"}`,
-          opacity: isEmpty ? 0.45 : 0.82,
+          border: `1px solid ${isEmpty ? `${theme.colors.border.default}2e` : `${theme.colors.border.hover}44`}`,
+          opacity: isEmpty ? 0.3 : 0.55,
         }}
       />
 
@@ -293,9 +309,9 @@ function DroppableEquipmentSlot({
           <div
             className="transition-all duration-150 group-hover:scale-105 group-hover:opacity-40"
             style={{
-              width: shouldUseMobileUI ? "18px" : "22px",
-              height: shouldUseMobileUI ? "18px" : "22px",
-              color: "rgba(190, 164, 111, 0.34)",
+              width: shouldUseMobileUI ? "14px" : "16px",
+              height: shouldUseMobileUI ? "14px" : "16px",
+              color: `${theme.colors.text.muted}aa`,
             }}
           >
             {slot.icon}
@@ -304,14 +320,14 @@ function DroppableEquipmentSlot({
           <div
             className="transition-transform duration-150 group-hover:scale-105"
             style={{
-              width: shouldUseMobileUI ? "20px" : "24px",
-              height: shouldUseMobileUI ? "20px" : "24px",
+              width: shouldUseMobileUI ? "18px" : "20px",
+              height: shouldUseMobileUI ? "18px" : "20px",
               filter: "drop-shadow(0 3px 6px rgba(0, 0, 0, 0.55))",
             }}
           >
             <ItemIcon
               itemId={slot.item!.id}
-              size={shouldUseMobileUI ? 20 : 24}
+              size={shouldUseMobileUI ? 18 : 20}
             />
           </div>
         )}
@@ -331,9 +347,9 @@ function DroppableEquipmentSlot({
           className="absolute bottom-1.5 right-1.5 min-w-[18px] rounded-full px-1 text-center font-bold"
           style={{
             fontSize: shouldUseMobileUI ? "8px" : "9px",
-            color: "#f2d08a",
-            background: "rgba(15, 12, 11, 0.78)",
-            border: "1px solid rgba(181, 145, 85, 0.4)",
+            color: theme.colors.text.primary,
+            background: "rgba(17, 20, 25, 0.86)",
+            border: `1px solid ${theme.colors.border.hover}`,
             textShadow: "0 1px 2px rgba(0, 0, 0, 0.9)",
             lineHeight: shouldUseMobileUI ? "14px" : "15px",
           }}
@@ -594,6 +610,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   const renderSlotCell = (
     slotName: string,
     isMobile: boolean,
+    slotSize: number,
     area?: string,
   ) => (
     <div
@@ -601,7 +618,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
       className={isMobile ? undefined : "w-full h-full"}
       style={{
         gridArea: area,
-        height: isMobile ? MOBILE_EQUIPMENT.slotHeight : undefined,
+        height: isMobile ? slotSize : undefined,
         containerType: "size",
       }}
     >
@@ -617,10 +634,10 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   );
 
   const renderEquipmentGrid = (isMobile: boolean) => {
-    const slotSize = isMobile ? 36 : 38;
-    const centerMin = isMobile ? 20 : 28;
-    const gap = 4;
-    const padding = 4;
+    const slotSize = isMobile ? 30 : 32;
+    const centerMin = isMobile ? 52 : 60;
+    const gap = isMobile ? 3 : 4;
+    const padding = isMobile ? 3 : 4;
 
     return (
       <div
@@ -647,7 +664,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           style={{
             gridArea: "portrait",
             minWidth: 0,
-            minHeight: slotSize * 4 + gap * 3 + (isMobile ? 4 : 8),
+            minHeight: slotSize * 4 + gap * 3 + (isMobile ? 2 : 4),
           }}
         >
           <EquipmentPaperdollPortrait
@@ -659,7 +676,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         </div>
 
         {PAPERDOLL_PLACEMENTS.map((placement) =>
-          renderSlotCell(placement.key, isMobile, placement.area),
+          renderSlotCell(placement.key, isMobile, slotSize, placement.area),
         )}
 
         <div style={{ gridArea: "empty" }} />
@@ -683,38 +700,45 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         <div
           className="flex-1 relative overflow-hidden"
           style={{
-            background:
-              "linear-gradient(180deg, rgba(38, 31, 29, 0.98) 0%, rgba(20, 17, 18, 0.99) 100%)",
-            border: `1px solid ${theme.colors.border.default}70`,
-            borderRadius: `${theme.borderRadius.lg}px`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: theme.borderRadius.lg,
+            }),
             padding: shouldUseMobileUI ? 0 : "4px",
             boxShadow:
-              "0 12px 30px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -18px 26px rgba(0,0,0,0.24)",
+              "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -18px 26px rgba(0,0,0,0.18)",
           }}
         >
           {renderEquipmentGrid(shouldUseMobileUI)}
         </div>
 
         <div
-          className="flex justify-center gap-4 py-1"
+          className="flex justify-center gap-3"
           style={{
-            background:
-              "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
-            borderRadius: `${theme.borderRadius.md}px`,
-            border: `1px solid ${theme.colors.border.default}66`,
-            fontSize: "9px",
-            boxShadow: theme.shadows.sm,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "normal",
+              radius: theme.borderRadius.md,
+            }),
+            padding: shouldUseMobileUI ? "3px 6px" : "4px 8px",
+            fontSize: shouldUseMobileUI ? "9px" : "10px",
+            lineHeight: 1,
           }}
         >
-          <span style={{ color: "#cb6c67" }}>{totalBonuses.attack}</span>
-          <span style={{ color: "#5ca97f" }}>{totalBonuses.defense}</span>
-          <span style={{ color: "#5d8fcb" }}>{totalBonuses.strength}</span>
+          <span style={{ color: theme.colors.status.hp }}>
+            {totalBonuses.attack}
+          </span>
+          <span style={{ color: theme.colors.status.energy }}>
+            {totalBonuses.defense}
+          </span>
+          <span style={{ color: theme.colors.status.prayer }}>
+            {totalBonuses.strength}
+          </span>
         </div>
 
         <div
-          className="flex items-center gap-2 px-1"
+          className="flex items-center gap-1.5 px-0.5"
           style={{
-            minHeight: shouldUseMobileUI ? 36 : 40,
+            minHeight: shouldUseMobileUI ? 30 : 32,
           }}
         >
           <UtilityButton
