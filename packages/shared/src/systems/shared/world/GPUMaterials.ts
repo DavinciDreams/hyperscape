@@ -924,6 +924,10 @@ export function applyRimHighlight(
 export type TreeMaterialOptions = DissolveMaterialOptions & {
   /** Whether this material covers leaf geometry (enables wind + SSS) */
   isLeafMaterial?: boolean;
+  /** Enable snow blending driven by per-instance biome weight */
+  enableSnow?: boolean;
+  /** Model has explicit snow mask in vertex-color R channel (skip normal fallback) */
+  snowVertexData?: boolean;
 };
 
 /**
@@ -981,7 +985,7 @@ export function createTreeDissolveMaterial(
   const hasVertexColors =
     !!srcMat.vertexColors ||
     !!(srcMat._geometry ?? srcMat.geometry)?.attributes?.color;
-  material.vertexColors = false;
+  material.vertexColors = hasVertexColors;
 
   // --- Uniforms ---
   const uSunDir = uniform(new THREE.Vector3(...SUN_LIGHT.DEFAULT_DIRECTION));
@@ -993,11 +997,25 @@ export function createTreeDissolveMaterial(
   const uWindStrength = uniform(0.3);
   const uWindDir = uniform(new THREE.Vector2(1, 0));
 
+  const enableSnow = options.enableSnow ?? false;
+  const snowVertexData = options.snowVertexData ?? false;
+
   // --- Tuning ---
-  // Vertex color channels: R = bark/leaf mask (1=bark, 0=leaf), G = AO, B = unused
-  const AO_POWER = 1.4;
-  const AO_DARK = 0.45;
-  const AO_BARK_DARK = 0.55;
+  // Vertex color channels (non-snow): R = bark/leaf mask (1=bark, 0=leaf), G = AO, B = unused
+  // Vertex color channels (snow vtx): R = snow mask (0=no snow, 1=full snow), G = AO, B = unused
+  const AO_POWER = 1.6;
+  const AO_DARK = 0.35;
+  const AO_BARK_DARK = 0.45;
+
+  // Snow tuning — R-channel path (models with explicit snow vertex data)
+  const SNOW_COLOR: [number, number, number] = [0.92, 0.95, 0.98];
+  const SNOW_AO_TINT: [number, number, number] = [0.55, 0.6, 0.72];
+  const SNOW_SMOOTH_LO = 0.05;
+  const SNOW_SMOOTH_HI = 0.15;
+  // Normal-based fallback (models WITHOUT R-channel snow data)
+  const SNOW_NORMAL_LO = 0.05;
+  const SNOW_NORMAL_HI = 0.35;
+  const SNOW_NORMAL_STRENGTH = 3.5;
   const SAT_BOOST = 1.15;
   const HL_BRIGHTEN = 0.08;
   const HL_RIM_POWER = 2.5;
@@ -1068,18 +1086,55 @@ export function createTreeDissolveMaterial(
       : vec4(1, 1, 1, 1);
     let baseAlbedo: any = mul(albedoSample.rgb, matColor);
 
-    // ---- Vertex-color AO ----
-    // R = bark/leaf mask (1 = bark, 0 = leaf), G = ambient occlusion (0 = occluded, 1 = exposed)
-    // Bark gets a lighter AO floor (AO_BARK_DARK) because deep crevice darkening
-    // looks wrong on solid trunk geometry; leaves use the stronger AO_DARK.
+    // ---- Vertex-color AO (+ optional snow) ----
     if (hasVertexColors) {
       const vtxColor = attribute("color", "vec3");
       const aoRaw = vtxColor.y;
-      const barkMask = vtxColor.x;
-      const aoFactor = pow(aoRaw, float(AO_POWER));
-      const aoDarkFloor = mix(float(AO_DARK), float(AO_BARK_DARK), barkMask);
-      const aoMul = mix(aoDarkFloor, float(1.0), aoFactor);
-      baseAlbedo = mul(baseAlbedo, aoMul);
+
+      if (enableSnow) {
+        const aoFactor = pow(aoRaw, float(AO_POWER));
+        const aoMul = mix(float(AO_BARK_DARK), float(1.0), aoFactor);
+        baseAlbedo = mul(baseAlbedo, aoMul);
+
+        let snowMask: any;
+        if (snowVertexData) {
+          // Explicit R-channel snow mask (pineSnow models)
+          const rawSnowMask = vtxColor.x;
+          snowMask = smoothstep(
+            float(SNOW_SMOOTH_LO),
+            float(SNOW_SMOOTH_HI),
+            rawSnowMask,
+          );
+        } else {
+          // Normal-based fallback (pine, pineDead — no R-channel snow data)
+          const upFacing = smoothstep(
+            float(SNOW_NORMAL_LO),
+            float(SNOW_NORMAL_HI),
+            normalWorldGeometry.y,
+          );
+          snowMask = clamp(
+            mul(mul(upFacing, aoRaw), float(SNOW_NORMAL_STRENGTH)),
+            float(0.0),
+            float(1.0),
+          );
+        }
+
+        const batchColor = varyingProperty("vec3", "vBatchColor");
+        const biomeSnowStrength = clamp(batchColor.z, float(0.0), float(1.0));
+        const snowBase = vec3(...SNOW_COLOR);
+        const snowAO = vec3(...SNOW_AO_TINT);
+        const snowCol = mix(snowAO, snowBase, aoFactor);
+        const rawWeight = mul(snowMask, biomeSnowStrength);
+        const snowWeight = smoothstep(float(0.15), float(0.35), rawWeight);
+        baseAlbedo = mix(baseAlbedo, snowCol, snowWeight);
+      } else {
+        // Standard path: R = bark/leaf mask, G = AO
+        const barkMask = vtxColor.x;
+        const aoFactor = pow(aoRaw, float(AO_POWER));
+        const aoDarkFloor = mix(float(AO_DARK), float(AO_BARK_DARK), barkMask);
+        const aoMul = mix(aoDarkFloor, float(1.0), aoFactor);
+        baseAlbedo = mul(baseAlbedo, aoMul);
+      }
     }
 
     // ---- dayFactor (used by shade, toon, SSS, saturation) ----

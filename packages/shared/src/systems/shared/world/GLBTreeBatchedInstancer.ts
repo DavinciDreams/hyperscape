@@ -16,6 +16,8 @@
 
 import THREE from "../../../extras/three/three";
 import type { World } from "../../../core/World";
+import { TREE_TYPES, treeIdToSubType } from "../../../constants/TreeTypes";
+import type { TreeTypeDefinition } from "../../../constants/TreeTypes";
 import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
   createTreeDissolveMaterial,
@@ -36,6 +38,8 @@ const _scale = new THREE.Vector3();
 
 const _defaultColor = new THREE.Color(1, 1, 1);
 const _hlColor = new THREE.Color(1.15, 1.15, 1.15);
+const _snowColor = new THREE.Color();
+const _snowHlColor = new THREE.Color();
 
 interface TreeSlot {
   entityId: string;
@@ -47,6 +51,7 @@ interface TreeSlot {
   currentLOD: 0 | 1 | 2;
   depleted: boolean;
   variantIndex: number;
+  snowWeight: number;
 }
 
 interface BatchedLODPool {
@@ -74,6 +79,7 @@ interface TreeTypePool {
   depletedYOffset: number;
   modelHeight: number;
   modelRadius: number;
+  snowCapable: boolean;
 }
 
 const resourceLOD = getLODDistances("resource");
@@ -326,6 +332,12 @@ async function ensureTreeTypePool(
   if (pending) return pending;
 
   const promise = (async (): Promise<TreeTypePool> => {
+    const treeDef = (TREE_TYPES as Record<string, TreeTypeDefinition>)[
+      treeType
+    ];
+    const isSnowCapable = !!treeDef?.snowCapable;
+    const hasSnowVertexData = !!treeDef?.snowVertexData;
+
     const dissolveOpts = {
       fadeStart: GPU_VEG_CONFIG.FADE_START,
       fadeEnd: GPU_VEG_CONFIG.FADE_END,
@@ -343,6 +355,8 @@ async function ensureTreeTypePool(
         ...dissolveOpts,
         batched: true,
         isLeafMaterial: isLeaf,
+        enableSnow: isSnowCapable,
+        snowVertexData: hasSnowVertexData,
       } as TreeMaterialOptions);
       dm.side = THREE.DoubleSide;
       enableTextureRepeat(dm);
@@ -469,6 +483,7 @@ async function ensureTreeTypePool(
       depletedYOffset: 0,
       modelHeight: bounds.height,
       modelRadius: bounds.radius,
+      snowCapable: isSnowCapable,
     };
     pools.set(treeType, pool);
 
@@ -561,7 +576,10 @@ function addToPool(
   entityId: string,
   mat: THREE.Matrix4,
   variantIndex: number,
+  snowWeight = 0,
 ): void {
+  const color =
+    snowWeight > 0 ? _snowColor.setRGB(1, 1, snowWeight) : _defaultColor;
   const ids: number[] = [];
   for (let i = 0; i < pool.batches.length; i++) {
     const numVariants = pool.geometryIds[i].length;
@@ -575,7 +593,7 @@ function addToPool(
     }
     const instId = pool.batches[i].addInstance(geoId);
     pool.batches[i].setMatrixAt(instId, mat);
-    pool.batches[i].setColorAt(instId, _defaultColor);
+    pool.batches[i].setColorAt(instId, color);
     ids.push(instId);
   }
   pool.instanceIds.set(entityId, ids);
@@ -603,10 +621,18 @@ function applyHighlightColor(
   pool: BatchedLODPool,
   entityId: string,
   on: boolean,
+  snowWeight = 0,
 ): void {
   const ids = pool.instanceIds.get(entityId);
   if (!ids) return;
-  const color = on ? _hlColor : _defaultColor;
+  let color: THREE.Color;
+  if (snowWeight > 0) {
+    color = on
+      ? _snowHlColor.setRGB(1.15, 1.15, snowWeight)
+      : _snowColor.setRGB(1, 1, snowWeight);
+  } else {
+    color = on ? _hlColor : _defaultColor;
+  }
   for (let i = 0; i < pool.batches.length; i++) {
     pool.batches[i].setColorAt(ids[i], color);
   }
@@ -671,6 +697,25 @@ export async function addInstance(
       }
     }
 
+    let snowWeight = 0;
+    if (pool.snowCapable) {
+      const terrain = world!.getSystem<any>("terrain");
+      if (terrain?.computeBiomeWeightsByPosition) {
+        const weights = terrain.computeBiomeWeightsByPosition(
+          position.x,
+          position.z,
+        ) as Record<string, number>;
+        const totalWeight = Object.values(weights).reduce(
+          (a: number, b: number) => a + b,
+          0,
+        );
+        snowWeight =
+          totalWeight > 0 ? (weights["tundra"] ?? 0) / totalWeight : 0;
+      } else {
+        snowWeight = 1.0;
+      }
+    }
+
     const slot: TreeSlot = {
       entityId,
       position: position.clone(),
@@ -681,6 +726,7 @@ export async function addInstance(
       currentLOD: initialLOD,
       depleted: false,
       variantIndex,
+      snowWeight,
     };
 
     pool.instances.set(entityId, slot);
@@ -689,7 +735,8 @@ export async function addInstance(
     const mat = composeInstanceMatrix(position, rotation, scale, pool.yOffset);
     const initialPool =
       initialLOD === 0 ? pool.lod0 : initialLOD === 1 ? pool.lod1 : pool.lod2;
-    if (initialPool) addToPool(initialPool, entityId, mat, variantIndex);
+    if (initialPool)
+      addToPool(initialPool, entityId, mat, variantIndex, snowWeight);
 
     return true;
   } catch (error) {
@@ -769,7 +816,8 @@ export function setDepleted(entityId: string, depleted: boolean): void {
         : slot.currentLOD === 1
           ? pool.lod1
           : pool.lod2;
-    if (lodPool) addToPool(lodPool, entityId, mat, slot.variantIndex);
+    if (lodPool)
+      addToPool(lodPool, entityId, mat, slot.variantIndex, slot.snowWeight);
   }
 }
 
@@ -813,7 +861,7 @@ export function setHighlight(entityId: string, on: boolean): void {
   const lodPool = getLodPool(pool, slot);
   if (!lodPool) return;
 
-  applyHighlightColor(lodPool, entityId, on);
+  applyHighlightColor(lodPool, entityId, on, slot.snowWeight);
   highlightedEntityId = on ? entityId : null;
 }
 
@@ -879,8 +927,15 @@ export function updateGLBTreeBatchedInstancer(): void {
           slot.scale,
           slot.yOffset,
         );
-        addToPool(newPool, slot.entityId, mat, slot.variantIndex);
-        if (wasHl) applyHighlightColor(newPool, slot.entityId, true);
+        addToPool(
+          newPool,
+          slot.entityId,
+          mat,
+          slot.variantIndex,
+          slot.snowWeight,
+        );
+        if (wasHl)
+          applyHighlightColor(newPool, slot.entityId, true, slot.snowWeight);
       }
     }
   }

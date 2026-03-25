@@ -80,8 +80,9 @@ const CANYON_TREE_CONFIG: BiomeTreeConfig = {
 const TUNDRA_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
   trees: {
-    [TreeId.PineDead]: { weight: 40, minHeight: 38 },
-    [TreeId.Pine]: { weight: 20, minHeight: 35 },
+    [TreeId.PineSnow]: { weight: 40, minHeight: 38 },
+    [TreeId.PineDead]: { weight: 20, minHeight: 38 },
+    [TreeId.Pine]: { weight: 15, minHeight: 35 },
   },
   density: 3,
   minSpacing: 150,
