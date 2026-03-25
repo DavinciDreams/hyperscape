@@ -374,13 +374,13 @@ export class ClientNetwork extends SystemBase {
     const cached = this.lastInventoryByPlayerId[playerId];
     if (!cached) return;
 
+    const itemIndex = cached.items.findIndex((i) => i.slot === slot);
+    if (itemIndex === -1) return;
+
     // Snapshot before mutation for rollback on timeout
     const snapshot = this.snapshotInventory(playerId);
     if (snapshot) this.inventoryTracker.add(snapshot);
     this.ensureInventoryPruner();
-
-    const itemIndex = cached.items.findIndex((i) => i.slot === slot);
-    if (itemIndex === -1) return;
 
     const item = cached.items[itemIndex];
     if (item.quantity <= quantity) {

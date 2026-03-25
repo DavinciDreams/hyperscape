@@ -34,6 +34,8 @@ interface WindowRendererProps {
     world?: ClientWorld,
     windowId?: string,
   ) => React.ReactNode;
+  /** Changes when panel data updates, breaking through memo barriers */
+  panelDataVersion?: number;
 }
 
 /**
@@ -45,6 +47,7 @@ export const WindowRenderer = memo(function WindowRenderer({
   editModeEnabled,
   windowCombiningEnabled,
   renderPanel,
+  panelDataVersion,
 }: WindowRendererProps): React.ReactElement {
   const windowsMap = useWindowStore((s) => s.windows);
   const visibleWindows = useMemo(
@@ -70,6 +73,7 @@ export const WindowRenderer = memo(function WindowRenderer({
           isEditMode={isEditMode}
           windowCombiningEnabled={windowCombiningEnabled}
           renderPanel={renderPanel}
+          panelDataVersion={panelDataVersion}
         />
       ))}
     </div>
@@ -87,6 +91,7 @@ interface WindowItemProps {
     world?: ClientWorld,
     windowId?: string,
   ) => React.ReactNode;
+  panelDataVersion?: number;
 }
 
 /**

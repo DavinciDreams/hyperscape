@@ -324,9 +324,18 @@ function DesktopInterfaceManager({
     inventoryRef.current = inventory;
   }, [inventory]);
 
-  // Create panel renderer — deps include inventory/equipment/stats so that
-  // the renderPanel reference changes when data updates, breaking through
-  // the React.memo barriers in WindowRenderer/WindowItem.
+  // Ref-based late binding: renderPanel captures panelDataRef and reads
+  // fresh data each time it's called. The function itself stays stable.
+  const panelDataRef = useRef({
+    inventory,
+    coins,
+    playerStats,
+    equipment,
+  });
+  useEffect(() => {
+    panelDataRef.current = { inventory, coins, playerStats, equipment };
+  }, [inventory, coins, playerStats, equipment]);
+
   const renderPanel = useMemo(
     () =>
       createPanelRenderer({
@@ -334,22 +343,21 @@ function DesktopInterfaceManager({
         onPanelClick: handleMenuClick,
         isEditMode: isUnlocked && editModeEnabled,
         getPanelData: () => ({
-          inventoryItems: inventory as never[],
-          coins,
-          stats: playerStats,
-          equipment,
+          inventoryItems: panelDataRef.current.inventory as never[],
+          coins: panelDataRef.current.coins,
+          stats: panelDataRef.current.playerStats,
+          equipment: panelDataRef.current.equipment,
         }),
       }),
-    [
-      world,
-      handleMenuClick,
-      isUnlocked,
-      editModeEnabled,
-      inventory,
-      coins,
-      playerStats,
-      equipment,
-    ],
+    [world, handleMenuClick, isUnlocked, editModeEnabled],
+  );
+
+  // Lightweight counter that changes when panel data updates, breaking
+  // through React.memo barriers in WindowRenderer/WindowItem without
+  // recreating renderPanel (which would re-mount all panels).
+  const panelDataVersion = useMemo(
+    () => Math.random(),
+    [inventory, coins, playerStats, equipment],
   );
 
   // Drag-drop coordination (delegated to hook)
@@ -407,6 +415,7 @@ function DesktopInterfaceManager({
             editModeEnabled={editModeEnabled}
             windowCombiningEnabled={windowCombiningEnabled}
             renderPanel={renderPanel}
+            panelDataVersion={panelDataVersion}
           />
 
           {/* @dnd-kit drag overlay */}
