@@ -1020,47 +1020,6 @@ export function InventoryPanel({
     setSlotItems(newSlots);
   }, [items, world]);
 
-  // TODO: This direct event subscription is a workaround for a React.memo
-  // barrier in WindowRenderer/WindowItem. The real fix is to ensure the
-  // `items` prop reference changes when inventory updates (e.g., by adding
-  // inventory to WindowRenderer's memo deps or fixing panelDataRef to
-  // trigger re-renders). Until then, this creates a dual data path —
-  // slotItems is set both from the `items` prop (above) and from this
-  // event subscription. The event path is the one that actually fires for
-  // ECS-originated changes (e.g., firemaking log consumption).
-  useEffect(() => {
-    if (!world) return;
-
-    const handleDirectInventoryUpdate = (data: unknown) => {
-      const invData = data as {
-        items?: Array<{ slot: number; itemId: string; quantity: number }>;
-      };
-      if (!invData?.items || !Array.isArray(invData.items)) return;
-
-      const newSlots: (InventorySlotViewItem | null)[] =
-        Array(MAX_SLOTS).fill(null);
-      for (const item of invData.items) {
-        const s = item.slot;
-        if (typeof s === "number" && s >= 0 && s < MAX_SLOTS) {
-          newSlots[s] = item;
-        }
-      }
-      setSlotItems(newSlots);
-    };
-
-    world.on(
-      EventType.INVENTORY_UPDATED,
-      handleDirectInventoryUpdate as (...args: unknown[]) => void,
-    );
-
-    return () => {
-      world.off(
-        EventType.INVENTORY_UPDATED,
-        handleDirectInventoryUpdate as (...args: unknown[]) => void,
-      );
-    };
-  }, [world]);
-
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id as string);
     // Capture the original slot size so DragOverlay matches exactly
