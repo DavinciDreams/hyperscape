@@ -1829,12 +1829,19 @@ export class PlayerSystem extends SystemBase {
   }): void {
     const { playerId, newStyle } = data;
 
-    const playerState = this.playerAttackStyles.get(playerId);
+    let playerState = this.playerAttackStyles.get(playerId);
     if (!playerState) {
-      this.logger.warn(
-        `Attack style change rejected: no state for player ${playerId}`,
-      );
-      return;
+      // Auto-initialize if player exists but wasn't registered yet (event ordering)
+      if (this.players.has(playerId) || this.world.entities?.get(playerId)) {
+        this.initializePlayerAttackStyle(playerId);
+        playerState = this.playerAttackStyles.get(playerId);
+      }
+      if (!playerState) {
+        this.logger.warn(
+          `Attack style change rejected: no state for player ${playerId}`,
+        );
+        return;
+      }
     }
 
     // Validate new style exists
@@ -2106,12 +2113,18 @@ export class PlayerSystem extends SystemBase {
     const { playerId, enabled } = data;
 
     // === INPUT VALIDATION (OWASP) ===
-    // 1. Validate playerId exists in our system
+    // 1. Validate playerId exists in our system — auto-initialize if missing
+    // (onPlayerRegister may not have fired yet due to event ordering)
     if (!this.playerAutoRetaliate.has(playerId)) {
-      this.logger.warn(
-        `Auto-retaliate toggle rejected: unknown player ${playerId}`,
-      );
-      return;
+      // Only auto-initialize for players we actually know about
+      if (this.players.has(playerId) || this.world.entities?.get(playerId)) {
+        this.playerAutoRetaliate.set(playerId, true); // default ON
+      } else {
+        this.logger.warn(
+          `Auto-retaliate toggle rejected: unknown player ${playerId}`,
+        );
+        return;
+      }
     }
 
     // 2. Validate enabled is actually a boolean (prevent type coercion attacks)

@@ -278,6 +278,10 @@ export class ClientNetwork extends SystemBase {
   }> | null = null;
   // Cache latest inventory per player so UI can hydrate even if it mounted late
   lastInventoryByPlayerId: Record<string, InventorySnapshot> = {};
+
+  // Deduplication for combat damage packets — sendToNearby publishes to 9 region
+  // topics, so players near region boundaries receive the same packet multiple times.
+  private readonly _recentDamageKeys = new Set<string>();
   // Single tracker for all optimistic inventory mutations (shared by all callers).
   // Snapshots the cache before mutation; rolls back after 5s if no server confirmation.
   private inventoryTracker = new PendingActionTracker<InventorySnapshot>(5000);
@@ -4287,6 +4291,16 @@ export class ClientNetwork extends SystemBase {
     targetType: "player" | "mob";
     position: { x: number; y: number; z: number };
   }) => {
+    // Deduplicate: sendToNearby publishes to 9 region topics, so players near
+    // region boundaries receive the same packet 2-3x. Use a short-lived key
+    // to drop duplicates within the same server tick window.
+    const dedupKey = `${data.attackerId}-${data.targetId}-${data.damage}`;
+    if (this._recentDamageKeys.has(dedupKey)) {
+      return; // Already processed this damage event
+    }
+    this._recentDamageKeys.add(dedupKey);
+    setTimeout(() => this._recentDamageKeys.delete(dedupKey), 200);
+
     // Forward to local event system so DamageSplatSystem can show visual feedback
     this.world.emit(EventType.COMBAT_DAMAGE_DEALT, data);
   };
