@@ -77,18 +77,18 @@ function UtilityButton({
       className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none"
       title={label}
       style={{
-        width: compact ? 30 : 32,
-        height: compact ? 30 : 32,
+        width: compact ? 34 : 38,
+        height: compact ? 34 : 38,
         ...getInteractiveTileStyle(theme, {
-          radius: compact ? 8 : 9,
+          radius: compact ? 9 : 10,
         }),
       }}
     >
       <div
         className="flex items-center justify-center"
         style={{
-          width: compact ? 18 : 20,
-          height: compact ? 18 : 20,
+          width: compact ? 18 : 22,
+          height: compact ? 18 : 22,
           color: theme.colors.accent.primary,
         }}
       >
@@ -291,7 +291,7 @@ function DroppableEquipmentSlot({
       />
 
       <div
-        className="absolute inset-x-[16%] top-[10%] bottom-[12%] rounded-[12px] pointer-events-none"
+        className="absolute inset-x-[14%] top-[10%] bottom-[24%] rounded-[12px] pointer-events-none"
         style={{
           border: `1px solid ${isEmpty ? `${theme.colors.border.default}2e` : `${theme.colors.border.hover}44`}`,
           opacity: isEmpty ? 0.3 : 0.55,
@@ -299,38 +299,60 @@ function DroppableEquipmentSlot({
       />
 
       <div
-        className="flex h-full w-full items-center justify-center"
+        className="flex h-full w-full flex-col items-center justify-between"
         style={{
-          paddingTop: shouldUseMobileUI ? 4 : 6,
-          paddingBottom: shouldUseMobileUI ? 4 : 6,
+          paddingTop: shouldUseMobileUI ? 5 : 6,
+          paddingBottom: shouldUseMobileUI ? 4 : 5,
         }}
       >
-        {isEmpty ? (
-          <div
-            className="transition-all duration-150 group-hover:scale-105 group-hover:opacity-40"
-            style={{
-              width: shouldUseMobileUI ? "14px" : "16px",
-              height: shouldUseMobileUI ? "14px" : "16px",
-              color: `${theme.colors.text.muted}aa`,
-            }}
-          >
-            {slot.icon}
-          </div>
-        ) : (
-          <div
-            className="transition-transform duration-150 group-hover:scale-105"
-            style={{
-              width: shouldUseMobileUI ? "18px" : "20px",
-              height: shouldUseMobileUI ? "18px" : "20px",
-              filter: "drop-shadow(0 3px 6px rgba(0, 0, 0, 0.55))",
-            }}
-          >
-            <ItemIcon
-              itemId={slot.item!.id}
-              size={shouldUseMobileUI ? 18 : 20}
-            />
-          </div>
-        )}
+        <div
+          className="flex flex-1 items-center justify-center"
+          style={{
+            minHeight: 0,
+          }}
+        >
+          {isEmpty ? (
+            <div
+              className="transition-all duration-150 group-hover:scale-105 group-hover:opacity-40"
+              style={{
+                width: shouldUseMobileUI ? "14px" : "16px",
+                height: shouldUseMobileUI ? "14px" : "16px",
+                color: `${theme.colors.text.muted}aa`,
+              }}
+            >
+              {slot.icon}
+            </div>
+          ) : (
+            <div
+              className="transition-transform duration-150 group-hover:scale-105"
+              style={{
+                width: shouldUseMobileUI ? "18px" : "20px",
+                height: shouldUseMobileUI ? "18px" : "20px",
+                filter: "drop-shadow(0 3px 6px rgba(0, 0, 0, 0.55))",
+              }}
+            >
+              <ItemIcon
+                itemId={slot.item!.id}
+                size={shouldUseMobileUI ? 18 : 20}
+              />
+            </div>
+          )}
+        </div>
+
+        <div
+          className="w-full truncate text-center font-semibold uppercase tracking-[0.14em]"
+          style={{
+            fontSize: shouldUseMobileUI ? "6px" : "7px",
+            lineHeight: 1.1,
+            color: isEmpty
+              ? `${theme.colors.text.muted}bf`
+              : theme.colors.text.secondary,
+            textShadow: "0 1px 1px rgba(0,0,0,0.7)",
+            paddingInline: shouldUseMobileUI ? 3 : 4,
+          }}
+        >
+          {slot.label}
+        </div>
       </div>
 
       {!isEmpty && (
@@ -634,24 +656,26 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   );
 
   const renderEquipmentGrid = (isMobile: boolean) => {
-    const slotSize = isMobile ? 28 : 30;
-    const portraitWidth = isMobile ? 74 : 84;
-    const gap = isMobile ? 2 : 3;
-    const padding = isMobile ? 2 : 3;
+    const slotWidth = isMobile ? 36 : 40;
+    const slotHeight = isMobile ? 42 : 46;
+    const portraitWidth = isMobile ? 44 : 50;
+    const gap = isMobile ? 3 : 4;
+    const padding = isMobile ? 3 : 4;
 
     return (
       <div
         data-equipment-grid="paperdoll"
         className="grid h-full"
         style={{
-          gridTemplateColumns: `${slotSize}px ${slotSize}px minmax(${portraitWidth}px, 1fr) ${slotSize}px ${slotSize}px`,
-          gridTemplateRows: `repeat(5, ${slotSize}px)`,
+          gridTemplateColumns: `${slotWidth}px minmax(${portraitWidth}px, 1fr) minmax(${portraitWidth}px, 1fr) ${slotWidth}px`,
+          gridTemplateRows: `repeat(5, ${slotHeight}px) ${slotHeight}px`,
           gridTemplateAreas: `
-          "cape . portrait . ammo"
-          "head . portrait . amulet"
-          "body . portrait . ring"
-          "legs . portrait . gloves"
-          "boots weapon portrait shield empty"
+          "cape portrait portrait ammo"
+          "head portrait portrait amulet"
+          "body portrait portrait ring"
+          "legs portrait portrait gloves"
+          "boots portrait portrait empty"
+          ". weapon shield ."
         `,
           gap,
           padding,
@@ -664,7 +688,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           style={{
             gridArea: "portrait",
             minWidth: 0,
-            minHeight: slotSize * 5 + gap * 4,
+            minHeight: slotHeight * 5 + gap * 4,
           }}
         >
           <EquipmentPaperdollPortrait
@@ -677,7 +701,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         </div>
 
         {PAPERDOLL_PLACEMENTS.map((placement) =>
-          renderSlotCell(placement.key, isMobile, slotSize, placement.area),
+          renderSlotCell(placement.key, isMobile, slotHeight, placement.area),
         )}
 
         <div style={{ gridArea: "empty" }} />

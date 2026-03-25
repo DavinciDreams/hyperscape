@@ -106,7 +106,7 @@ describe("EquipmentPanel", () => {
     );
   });
 
-  it("renders the paperdoll slots and fallback portrait when no world is available", () => {
+  it("renders the paperdoll slots and keeps the portrait in a loading state before world data is available", () => {
     const { container } = render(<EquipmentPanel equipment={emptyEquipment} />);
 
     expect(container.querySelectorAll("[data-equipment-slot]")).toHaveLength(
@@ -117,16 +117,15 @@ describe("EquipmentPanel", () => {
       '[data-equipment-portrait="true"]',
     );
     expect(portrait).toBeInTheDocument();
-    expect(portrait).toHaveAttribute("data-portrait-mode", "fallback");
-    expect(
-      container.querySelector('[data-portrait-fallback="true"]'),
-    ).toBeInTheDocument();
+    expect(portrait).toHaveAttribute("data-portrait-mode", "loading");
 
     expect(screen.getByTitle("Head (empty)")).toBeInTheDocument();
     expect(screen.getByTitle("Weapon (empty)")).toBeInTheDocument();
+    expect(screen.getByText("Head")).toBeInTheDocument();
+    expect(screen.getByText("Weapon")).toBeInTheDocument();
   });
 
-  it("shows equipped item icons without visible item-name labels in slot tiles", () => {
+  it("shows equipped item icons with slot labels and without visible item-name labels in slot tiles", () => {
     const equipment: PlayerEquipmentItems = {
       ...emptyEquipment,
       helmet: createMockItem(

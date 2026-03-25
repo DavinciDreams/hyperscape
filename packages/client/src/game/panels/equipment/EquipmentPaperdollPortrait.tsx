@@ -156,10 +156,10 @@ function framePortraitAvatar(
   const height = Math.max(size.y, 1.6);
   const width = Math.max(size.x, 0.7);
   const distance = Math.max(1.85, height * 0.9, width * 1.45);
-  const lookY = center.y + height * 0.05;
+  const lookY = center.y + height * 0.04;
 
-  camera.position.set(0, lookY, distance);
-  camera.lookAt(0, lookY, 0);
+  camera.position.set(center.x, lookY, distance);
+  camera.lookAt(center.x, lookY, center.z);
   camera.near = 0.1;
   camera.far = Math.max(12, distance + height * 3);
   camera.updateProjectionMatrix();
@@ -395,7 +395,7 @@ export const EquipmentPaperdollPortrait = React.memo(
     const avatarSceneRef = useRef<THREE.Object3D | null>(null);
     const previewVisualsRef = useRef<EquipmentVisualStore>({});
     const [rendererReady, setRendererReady] = useState(false);
-    const [mode, setMode] = useState<PortraitMode>("fallback");
+    const [mode, setMode] = useState<PortraitMode>("loading");
     const [refreshNonce, setRefreshNonce] = useState(0);
 
     const avatarUrl = useMemo(
@@ -492,7 +492,7 @@ export const EquipmentPaperdollPortrait = React.memo(
 
     useEffect(() => {
       if (!world) {
-        setMode("fallback");
+        setMode("loading");
         return;
       }
 
@@ -523,8 +523,13 @@ export const EquipmentPaperdollPortrait = React.memo(
         setMode("loading");
         clearPreviewAvatar();
 
-        if (!world.loader || !avatarUrl || !viewport) {
+        if (!avatarUrl) {
           setMode("fallback");
+          return;
+        }
+
+        if (!world.loader || !viewport) {
+          setMode("loading");
           return;
         }
 
@@ -580,6 +585,7 @@ export const EquipmentPaperdollPortrait = React.memo(
 
           avatarNode.visible = false;
           avatarScene.visible = false;
+          avatarScene.rotation.y = Math.PI;
 
           if (avatarInstance.setEmoteAndWait) {
             await avatarInstance.setEmoteAndWait(Emotes.IDLE, 3000);
