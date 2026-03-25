@@ -44,36 +44,6 @@ export type {
  * DEFAULT: If JSON is empty, use this hardcoded starter area
  */
 export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
-  starter_area: {
-    id: "starter_area",
-    name: "Starter Area",
-    description: "A peaceful area for new adventurers",
-    difficultyLevel: 0,
-    bounds: {
-      minX: 294,
-      maxX: 594,
-      minZ: 180,
-      maxZ: 480,
-    },
-    biomeType: "plains",
-    safeZone: true,
-    npcs: [
-      {
-        id: "bank_clerk",
-        type: "bank",
-        position: { x: 5, y: 0, z: -5 },
-        // All other NPC data (name, services, model, description) comes from npcs.json
-      },
-    ],
-    resources: [
-      // Resources are now defined in world-areas.json manifest only
-      // Do not add hardcoded resources here
-    ],
-    mobSpawns: [
-      // Starter area is a safe zone - no mob spawns
-      // The default test goblin is spawned by MobNPCSpawnerSystem near origin
-    ],
-  },
   // Wilderness test zone - PvP enabled area for testing player vs player combat
   wilderness_test: {
     id: "wilderness_test",
@@ -123,9 +93,7 @@ export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
 /**
  * Starter Towns - Populated by DataManager from world-areas.json
  */
-export const STARTER_TOWNS: Record<string, WorldArea> = {
-  starter_area: ALL_WORLD_AREAS["starter_area"],
-};
+export const STARTER_TOWNS: Record<string, WorldArea> = {};
 
 /**
  * Helper Functions
