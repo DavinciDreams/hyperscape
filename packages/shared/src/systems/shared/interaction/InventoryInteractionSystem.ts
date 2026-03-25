@@ -1067,6 +1067,42 @@ export class InventoryInteractionSystem extends SystemBase {
     };
   }
 
+  /**
+   * Optimistically remove an item from the client inventory cache so the UI
+   * updates immediately, without waiting for the server round-trip.
+   */
+  private applyOptimisticRemoval(
+    playerId: string,
+    slot: number,
+    quantity: number,
+  ): void {
+    const network = this.world.network as {
+      lastInventoryByPlayerId?: Record<
+        string,
+        {
+          playerId: string;
+          items: Array<{ slot: number; itemId: string; quantity: number }>;
+          coins: number;
+          maxSlots: number;
+        }
+      >;
+    };
+    const cached = network.lastInventoryByPlayerId?.[playerId];
+    if (!cached) return;
+
+    const itemIndex = cached.items.findIndex((i) => i.slot === slot);
+    if (itemIndex === -1) return;
+
+    const item = cached.items[itemIndex];
+    if (item.quantity <= quantity) {
+      cached.items.splice(itemIndex, 1);
+    } else {
+      item.quantity -= quantity;
+    }
+
+    this.world.emit(EventType.INVENTORY_UPDATED, { ...cached });
+  }
+
   destroy(): void {
     this.cleanupInteractions();
     this.currentDrag = undefined;
@@ -1655,6 +1691,12 @@ export class InventoryInteractionSystem extends SystemBase {
           logsSlot,
           tinderboxSlot,
         });
+
+        // Optimistic removal: remove the logs from the client inventory cache
+        // so the UI updates immediately (same pattern as eat/drop/bury in
+        // InventoryActionDispatcher). The server's authoritative inventoryUpdated
+        // packet will replace this cache within ~100-200ms.
+        this.applyOptimisticRemoval(playerId, logsSlot, 1);
       } else {
         // Fallback: emit local event (for single-player/testing)
         this.emitTypedEvent(EventType.PROCESSING_FIREMAKING_REQUEST, {

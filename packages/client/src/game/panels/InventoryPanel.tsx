@@ -231,13 +231,13 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
     () =>
       getInteractiveTileStyle(theme, {
         active: isSourceItem,
-        hovered: !isEmpty && !isTargetingActive,
+        hovered: !isEmpty,
         dragging: isDragging,
         dropTarget: isOver,
         radius: 4,
         accentColor: theme.colors.accent.secondary,
       }),
-    [theme, isSourceItem, isEmpty, isTargetingActive, isDragging, isOver],
+    [theme, isSourceItem, isEmpty, isDragging, isOver],
   );
 
   return (
@@ -1020,6 +1020,43 @@ export function InventoryPanel({
     setSlotItems(newSlots);
   }, [items, world]);
 
+  // Direct subscription to INVENTORY_UPDATED events from the world.
+  // This bypasses the React.memo barrier in WindowRenderer/WindowItem that
+  // prevents InventoryPanel from receiving updated `items` props when inventory
+  // changes originate from ECS events (e.g., firemaking log consumption).
+  useEffect(() => {
+    if (!world) return;
+
+    const handleDirectInventoryUpdate = (data: unknown) => {
+      const invData = data as {
+        items?: Array<{ slot: number; itemId: string; quantity: number }>;
+      };
+      if (!invData?.items || !Array.isArray(invData.items)) return;
+
+      const newSlots: (InventorySlotViewItem | null)[] =
+        Array(MAX_SLOTS).fill(null);
+      for (const item of invData.items) {
+        const s = item.slot;
+        if (typeof s === "number" && s >= 0 && s < MAX_SLOTS) {
+          newSlots[s] = item;
+        }
+      }
+      setSlotItems(newSlots);
+    };
+
+    world.on(
+      EventType.INVENTORY_UPDATED,
+      handleDirectInventoryUpdate as (...args: unknown[]) => void,
+    );
+
+    return () => {
+      world.off(
+        EventType.INVENTORY_UPDATED,
+        handleDirectInventoryUpdate as (...args: unknown[]) => void,
+      );
+    };
+  }, [world]);
+
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id as string);
     // Capture the original slot size so DragOverlay matches exactly
@@ -1110,6 +1147,8 @@ export function InventoryPanel({
             targetType: "inventory_item",
             targetSlot: slotIndex,
           });
+          // Clear targeting immediately — action is committed
+          setTargetingState(initialTargetingState);
         }
       }
     },
