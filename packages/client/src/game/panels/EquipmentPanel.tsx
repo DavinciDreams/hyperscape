@@ -62,6 +62,7 @@ function UtilityButton({
   label,
   onClick,
   disabled,
+  compact = false,
 }: UtilityButtonProps & { compact?: boolean }) {
   const theme = useThemeStore((s) => s.theme);
 
@@ -70,9 +71,11 @@ function UtilityButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex h-10 w-10 items-center justify-center rounded-[10px] transition-all duration-150 hover:scale-[1.03] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none"
+      className="flex items-center justify-center rounded-[9px] transition-all duration-150 hover:scale-[1.03] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none"
       title={label}
       style={{
+        width: compact ? 36 : 40,
+        height: compact ? 36 : 40,
         background:
           "linear-gradient(180deg, rgba(73, 62, 54, 0.92) 0%, rgba(45, 37, 34, 0.96) 100%)",
         border: `1px solid ${theme.colors.border.default}66`,
@@ -80,7 +83,14 @@ function UtilityButton({
           "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -10px 12px rgba(0,0,0,0.18)",
       }}
     >
-      <div className="h-5 w-5" style={{ color: theme.colors.accent.primary }}>
+      <div
+        className="flex items-center justify-center"
+        style={{
+          width: compact ? 18 : 20,
+          height: compact ? 18 : 20,
+          color: theme.colors.accent.primary,
+        }}
+      >
         {icon}
       </div>
     </button>
@@ -283,8 +293,8 @@ function DroppableEquipmentSlot({
           <div
             className="transition-all duration-150 group-hover:scale-105 group-hover:opacity-40"
             style={{
-              width: shouldUseMobileUI ? "22px" : "28px",
-              height: shouldUseMobileUI ? "22px" : "28px",
+              width: shouldUseMobileUI ? "18px" : "22px",
+              height: shouldUseMobileUI ? "18px" : "22px",
               color: "rgba(190, 164, 111, 0.34)",
             }}
           >
@@ -294,14 +304,14 @@ function DroppableEquipmentSlot({
           <div
             className="transition-transform duration-150 group-hover:scale-105"
             style={{
-              width: shouldUseMobileUI ? "24px" : "32px",
-              height: shouldUseMobileUI ? "24px" : "32px",
+              width: shouldUseMobileUI ? "20px" : "24px",
+              height: shouldUseMobileUI ? "20px" : "24px",
               filter: "drop-shadow(0 3px 6px rgba(0, 0, 0, 0.55))",
             }}
           >
             <ItemIcon
               itemId={slot.item!.id}
-              size={shouldUseMobileUI ? 24 : 32}
+              size={shouldUseMobileUI ? 20 : 24}
             />
           </div>
         )}
@@ -607,10 +617,10 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   );
 
   const renderEquipmentGrid = (isMobile: boolean) => {
-    const slotSize = isMobile ? 42 : 46;
-    const centerMin = isMobile ? 24 : 32;
-    const gap = isMobile ? 4 : 5;
-    const padding = isMobile ? 5 : 6;
+    const slotSize = isMobile ? 36 : 38;
+    const centerMin = isMobile ? 20 : 28;
+    const gap = 4;
+    const padding = 4;
 
     return (
       <div
@@ -629,6 +639,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           gap,
           padding,
           alignItems: "stretch",
+          justifyItems: "stretch",
         }}
       >
         <div
@@ -636,9 +647,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           style={{
             gridArea: "portrait",
             minWidth: 0,
-            minHeight: isMobile
-              ? slotSize * 4 + gap * 3
-              : slotSize * 4 + gap * 3,
+            minHeight: slotSize * 4 + gap * 3 + (isMobile ? 4 : 8),
           }}
         >
           <EquipmentPaperdollPortrait
@@ -664,8 +673,8 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         className="flex flex-col h-full overflow-hidden"
         style={{
           ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
-          padding: shouldUseMobileUI ? "5px" : "6px",
-          gap: shouldUseMobileUI ? "5px" : "6px",
+          padding: "4px",
+          gap: "4px",
           border: "none",
           borderRadius: 0,
           boxShadow: "none",
@@ -678,7 +687,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
               "linear-gradient(180deg, rgba(38, 31, 29, 0.98) 0%, rgba(20, 17, 18, 0.99) 100%)",
             border: `1px solid ${theme.colors.border.default}70`,
             borderRadius: `${theme.borderRadius.lg}px`,
-            padding: shouldUseMobileUI ? 0 : "6px",
+            padding: shouldUseMobileUI ? 0 : "4px",
             boxShadow:
               "0 12px 30px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -18px 26px rgba(0,0,0,0.24)",
           }}
@@ -695,7 +704,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
                   "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
                 borderRadius: `${theme.borderRadius.md}px`,
                 border: `1px solid ${theme.colors.border.default}66`,
-                fontSize: "10px",
+                fontSize: "9px",
                 boxShadow: theme.shadows.sm,
               }}
             >
@@ -711,7 +720,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
             </div>
 
             <div
-              className="flex items-center gap-2 px-3 py-1.5"
+              className="flex items-center gap-2 px-2 py-1"
               style={{
                 background:
                   "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
@@ -724,11 +733,13 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
                 icon={<StatsIcon className="w-full h-full" />}
                 label="Stats"
                 onClick={handleOpenStats}
+                compact
               />
               <UtilityButton
                 icon={<DeathIcon className="w-full h-full" />}
                 label="Death"
                 onClick={handleOpenDeath}
+                compact
               />
             </div>
           </>
@@ -741,7 +752,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
                   "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
                 borderRadius: `${theme.borderRadius.md}px`,
                 border: `1px solid ${theme.colors.border.default}66`,
-                fontSize: "10px",
+                fontSize: "9px",
                 boxShadow: theme.shadows.sm,
               }}
             >
@@ -757,7 +768,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
             </div>
 
             <div
-              className="flex items-center gap-2 px-3 py-1.5"
+              className="flex items-center gap-2 px-2 py-1"
               style={{
                 background:
                   "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",

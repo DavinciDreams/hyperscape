@@ -89,8 +89,8 @@ function framePortraitAvatar(
   const center = box.getCenter(new THREE.Vector3());
   const height = Math.max(size.y, 1.5);
   const width = Math.max(size.x, 0.8);
-  const distance = Math.max(2.2, height * 1.08, width * 1.9);
-  const lookY = center.y + height * 0.08;
+  const distance = Math.max(1.9, height * 0.94, width * 1.6);
+  const lookY = center.y + height * 0.03;
 
   camera.position.set(0, lookY, distance);
   camera.lookAt(0, lookY, 0);
@@ -120,9 +120,9 @@ function PortraitFallback({
       <div
         className="relative flex items-center justify-center"
         style={{
-          width: compact ? "84%" : "78%",
-          height: compact ? "90%" : "92%",
-          borderRadius: compact ? 18 : 26,
+          width: compact ? "86%" : "82%",
+          height: compact ? "92%" : "94%",
+          borderRadius: compact ? 16 : 20,
           background:
             "radial-gradient(circle at 50% 18%, rgba(223, 186, 112, 0.16), rgba(22, 18, 17, 0.02) 52%, rgba(0, 0, 0, 0) 74%)",
         }}
@@ -431,11 +431,11 @@ export const EquipmentPaperdollPortrait = React.memo(
         data-portrait-mode={mode}
         className={`relative overflow-hidden ${className}`}
         style={{
-          borderRadius: compact ? 18 : 24,
+          borderRadius: compact ? 14 : 18,
           border: `1px solid ${theme.colors.border.default}66`,
-          background: `radial-gradient(circle at 50% 12%, ${theme.colors.accent.primary}22 0%, rgba(24, 18, 15, 0.1) 42%, rgba(10, 9, 10, 0.18) 100%)`,
+          background: `radial-gradient(circle at 50% 10%, ${theme.colors.accent.primary}18 0%, rgba(24, 18, 15, 0.08) 38%, rgba(10, 9, 10, 0.16) 100%)`,
           boxShadow:
-            "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -18px 28px rgba(0,0,0,0.18)",
+            "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -14px 20px rgba(0,0,0,0.16)",
         }}
       >
         <div
