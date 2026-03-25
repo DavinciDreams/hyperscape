@@ -363,16 +363,19 @@ export class PlayerSystem extends SystemBase {
     );
 
     // OSRS-accurate: auto-switch style when weapon changes and current style is invalid
-    this.subscribe(EventType.PLAYER_EQUIPMENT_CHANGED, (data) => {
-      const eqData = data as {
-        playerId: string;
-        slot: string;
-        itemId: string | null;
-      };
-      if (eqData.slot === "weapon" && this.world.isServer) {
-        this.handleWeaponChange(eqData.playerId);
-      }
-    });
+    // Only subscribe on server — style changes are server-authoritative
+    if (this.world.isServer) {
+      this.subscribe(EventType.PLAYER_EQUIPMENT_CHANGED, (data) => {
+        const eqData = data as {
+          playerId: string;
+          slot: string;
+          itemId: string | null;
+        };
+        if (eqData.slot === "weapon") {
+          this.handleWeaponChange(eqData.playerId);
+        }
+      });
+    }
 
     // Auto-retaliate events
     this.subscribe(EventType.UI_AUTO_RETALIATE_GET, (data) =>
@@ -1833,6 +1836,9 @@ export class PlayerSystem extends SystemBase {
     if (!playerState) {
       // Auto-initialize if player exists but wasn't registered yet (event ordering)
       if (this.players.has(playerId) || this.world.entities?.get(playerId)) {
+        this.logger.debug(
+          `Auto-initializing attack style for ${playerId} (event ordering race)`,
+        );
         this.initializePlayerAttackStyle(playerId);
         playerState = this.playerAttackStyles.get(playerId);
       }
@@ -2118,6 +2124,9 @@ export class PlayerSystem extends SystemBase {
     if (!this.playerAutoRetaliate.has(playerId)) {
       // Only auto-initialize for players we actually know about
       if (this.players.has(playerId) || this.world.entities?.get(playerId)) {
+        this.logger.debug(
+          `Auto-initializing auto-retaliate for ${playerId} (event ordering race)`,
+        );
         this.playerAutoRetaliate.set(playerId, true); // default ON
       } else {
         this.logger.warn(

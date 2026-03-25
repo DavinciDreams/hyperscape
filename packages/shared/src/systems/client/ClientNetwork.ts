@@ -281,7 +281,8 @@ export class ClientNetwork extends SystemBase {
 
   // Deduplication for combat damage packets — sendToNearby publishes to 9 region
   // topics, so players near region boundaries receive the same packet multiple times.
-  private readonly _recentDamageKeys = new Set<string>();
+  // Map key → timestamp for periodic sweep (no per-key setTimeout).
+  private readonly _recentDamageKeys = new Map<string, number>();
   // Single tracker for all optimistic inventory mutations (shared by all callers).
   // Snapshots the cache before mutation; rolls back after 5s if no server confirmation.
   private inventoryTracker = new PendingActionTracker<InventorySnapshot>(5000);
@@ -4290,16 +4291,25 @@ export class ClientNetwork extends SystemBase {
     damage: number;
     targetType: "player" | "mob";
     position: { x: number; y: number; z: number };
+    tick?: number;
   }) => {
     // Deduplicate: sendToNearby publishes to 9 region topics, so players near
-    // region boundaries receive the same packet 2-3x. Use a short-lived key
-    // to drop duplicates within the same server tick window.
-    const dedupKey = `${data.attackerId}-${data.targetId}-${data.damage}`;
+    // region boundaries receive the same packet 2-3x. Include the server tick
+    // so same-damage rapid hits on different ticks are NOT dropped.
+    const dedupKey = `${data.attackerId}-${data.targetId}-${data.damage}-${data.tick ?? 0}`;
     if (this._recentDamageKeys.has(dedupKey)) {
       return; // Already processed this damage event
     }
-    this._recentDamageKeys.add(dedupKey);
-    setTimeout(() => this._recentDamageKeys.delete(dedupKey), 200);
+
+    // Periodic sweep: clear stale entries (>500ms old) when map grows
+    const now = performance.now();
+    if (this._recentDamageKeys.size > 50) {
+      for (const [key, ts] of this._recentDamageKeys) {
+        if (now - ts > 500) this._recentDamageKeys.delete(key);
+      }
+    }
+
+    this._recentDamageKeys.set(dedupKey, now);
 
     // Forward to local event system so DamageSplatSystem can show visual feedback
     this.world.emit(EventType.COMBAT_DAMAGE_DEALT, data);

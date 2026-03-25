@@ -683,6 +683,7 @@ export class EventBridge {
             damage: data.damage,
             targetType: data.targetType,
             position: { x: pos.x, y: pos.y, z: pos.z },
+            tick: currentTick,
           };
           this.broadcast.sendToNearby(
             "combatDamageDealt",
