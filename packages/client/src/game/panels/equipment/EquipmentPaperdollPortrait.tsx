@@ -155,8 +155,8 @@ function framePortraitAvatar(
   const center = box.getCenter(new THREE.Vector3());
   const height = Math.max(size.y, 1.6);
   const width = Math.max(size.x, 0.7);
-  const distance = Math.max(1.85, height * 0.9, width * 1.45);
-  const lookY = center.y + height * 0.04;
+  const distance = Math.max(2.05, height * 1.02, width * 1.7);
+  const lookY = center.y + height * 0.03;
 
   camera.position.set(center.x, lookY, distance);
   camera.lookAt(center.x, lookY, center.z);
@@ -585,7 +585,7 @@ export const EquipmentPaperdollPortrait = React.memo(
 
           avatarNode.visible = false;
           avatarScene.visible = false;
-          avatarScene.rotation.y = Math.PI;
+          avatarScene.rotation.y = 0;
 
           if (avatarInstance.setEmoteAndWait) {
             await avatarInstance.setEmoteAndWait(Emotes.IDLE, 3000);

@@ -77,8 +77,8 @@ function UtilityButton({
       className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none"
       title={label}
       style={{
-        width: compact ? 34 : 38,
-        height: compact ? 34 : 38,
+        width: compact ? 32 : 36,
+        height: compact ? 32 : 36,
         ...getInteractiveTileStyle(theme, {
           radius: compact ? 9 : 10,
         }),
@@ -87,8 +87,8 @@ function UtilityButton({
       <div
         className="flex items-center justify-center"
         style={{
-          width: compact ? 18 : 22,
-          height: compact ? 18 : 22,
+          width: compact ? 17 : 20,
+          height: compact ? 17 : 20,
           color: theme.colors.accent.primary,
         }}
       >
@@ -656,26 +656,26 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   );
 
   const renderEquipmentGrid = (isMobile: boolean) => {
-    const slotWidth = isMobile ? 36 : 40;
-    const slotHeight = isMobile ? 42 : 46;
-    const portraitWidth = isMobile ? 44 : 50;
-    const gap = isMobile ? 3 : 4;
-    const padding = isMobile ? 3 : 4;
+    const slotWidth = isMobile ? 34 : 38;
+    const slotHeight = isMobile ? 38 : 42;
+    const portraitWidth = isMobile ? 72 : 84;
+    const gap = isMobile ? 2 : 3;
+    const padding = isMobile ? 2 : 3;
 
     return (
       <div
         data-equipment-grid="paperdoll"
         className="grid h-full"
         style={{
-          gridTemplateColumns: `${slotWidth}px minmax(${portraitWidth}px, 1fr) minmax(${portraitWidth}px, 1fr) ${slotWidth}px`,
+          gridTemplateColumns: `${slotWidth}px ${isMobile ? 4 : 6}px minmax(${portraitWidth}px, 1fr) ${isMobile ? 4 : 6}px ${slotWidth}px`,
           gridTemplateRows: `repeat(5, ${slotHeight}px) ${slotHeight}px`,
           gridTemplateAreas: `
-          "cape portrait portrait ammo"
-          "head portrait portrait amulet"
-          "body portrait portrait ring"
-          "legs portrait portrait gloves"
-          "boots portrait portrait empty"
-          ". weapon shield ."
+          "cape . portrait . ammo"
+          "head . portrait . amulet"
+          "body . portrait . ring"
+          "legs . portrait . gloves"
+          "boots . portrait . empty"
+          ". weapon portrait shield ."
         `,
           gap,
           padding,
@@ -688,7 +688,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           style={{
             gridArea: "portrait",
             minWidth: 0,
-            minHeight: slotHeight * 5 + gap * 4,
+            minHeight: slotHeight * 6 + gap * 5,
           }}
         >
           <EquipmentPaperdollPortrait
@@ -715,8 +715,8 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         className="flex flex-col h-full overflow-hidden"
         style={{
           ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
-          padding: "4px",
-          gap: "4px",
+          padding: shouldUseMobileUI ? "3px" : "4px",
+          gap: shouldUseMobileUI ? "3px" : "4px",
           border: "none",
           borderRadius: 0,
           boxShadow: "none",
@@ -729,7 +729,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
               emphasis: "strong",
               radius: theme.borderRadius.lg,
             }),
-            padding: shouldUseMobileUI ? 0 : "4px",
+            padding: shouldUseMobileUI ? 0 : "3px",
             boxShadow:
               "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -18px 26px rgba(0,0,0,0.18)",
           }}
@@ -744,8 +744,8 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
               emphasis: "normal",
               radius: theme.borderRadius.md,
             }),
-            padding: shouldUseMobileUI ? "3px 6px" : "4px 8px",
-            fontSize: shouldUseMobileUI ? "9px" : "10px",
+            padding: shouldUseMobileUI ? "2px 6px" : "4px 8px",
+            fontSize: shouldUseMobileUI ? "8px" : "10px",
             lineHeight: 1,
           }}
         >
@@ -763,7 +763,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         <div
           className="flex items-center gap-1.5 px-0.5"
           style={{
-            minHeight: shouldUseMobileUI ? 30 : 32,
+            minHeight: shouldUseMobileUI ? 28 : 32,
           }}
         >
           <UtilityButton
