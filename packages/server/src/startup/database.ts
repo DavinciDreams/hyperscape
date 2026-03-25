@@ -198,6 +198,15 @@ export async function initializeDatabase(
     );
   }
 
+  // Propagate the resolved connection string so embedded Eliza agents
+  // (plugin-sql) can discover it without explicit per-agent config.
+  if (!process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = connectionString;
+  }
+  if (!process.env.POSTGRES_URL) {
+    process.env.POSTGRES_URL = connectionString;
+  }
+
   // Initialize Drizzle database
   const { initializeDatabase: initDrizzle } =
     await import("../database/client.js");

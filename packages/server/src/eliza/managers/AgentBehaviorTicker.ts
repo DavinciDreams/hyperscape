@@ -83,6 +83,16 @@ export interface AgentInstance {
   pendingChatReaction: PendingChatReaction | null;
   /** Timestamp of last combat chat to prevent spam */
   lastCombatChatAt: number;
+  /**
+   * Optional reference to the Eliza AgentRuntime for this agent.
+   * Set by ModelAgentSpawner after spawn so the behavior ticker can
+   * log planner traces through the trajectory logger service.
+   */
+  elizaRuntime?: {
+    agentId: string;
+    getService(serviceType: string): unknown;
+    getServicesByType?(serviceType: string): unknown[];
+  };
 }
 
 export type EmbeddedBehaviorAction =
@@ -130,14 +140,38 @@ export function setAgentAutonomyIfSupported(
  * AgentBehaviorTicker manages the autonomous behavior loop and action selection
  * for embedded agents.
  */
+/**
+ * Callback for writing a behavior tick to an external trajectory store
+ * (e.g. Postgres) when no Eliza runtime / trajectory logger is available.
+ */
+export type BehaviorTickTraceWriter = (record: {
+  characterId: string;
+  agentName: string;
+  actionType: string;
+  action: Record<string, unknown>;
+  gameState: Record<string, unknown>;
+  goal: AgentGoal | null;
+  timestamp: number;
+}) => Promise<void>;
+
 export class AgentBehaviorTicker {
+  private traceWriter: BehaviorTickTraceWriter | null = null;
+
   constructor(
     private readonly world: World,
     private readonly getAgent: (
       characterId: string,
     ) => AgentInstance | undefined,
     private readonly getAllAgentIds: () => string[],
-  ) { }
+  ) {}
+
+  /**
+   * Set an external trace writer for behavior ticks.
+   * Used as fallback when Eliza trajectory logger is not available.
+   */
+  public setTraceWriter(writer: BehaviorTickTraceWriter): void {
+    this.traceWriter = writer;
+  }
 
   // ─── BEHAVIOR LOOP ───────────────────────────────────────────────────
 
@@ -207,13 +241,15 @@ export class AgentBehaviorTicker {
     }
 
     // Best-effort stop so paused/stopped agents don't keep pathing or attacking.
-    void instance.service.executeStop().catch(() => { });
+    void instance.service.executeStop().catch(() => {});
   }
 
   /**
    * Execute one autonomous behavior tick.
    *
    * Quest-aware: agents auto-accept quests, track objectives, and complete them.
+   * If the agent has an attached Eliza runtime with a trajectory logger,
+   * each tick is recorded as a planner trajectory row in SQL.
    */
   public async executeBehaviorTick(characterId: string): Promise<void> {
     const instance = this.getAgent(characterId);
@@ -238,6 +274,23 @@ export class AgentBehaviorTicker {
         ?.inStreamingDuel === true;
 
     if (inStreamingDuel) {
+      // Log streaming duel ticks via fallback trace writer
+      if (this.traceWriter) {
+        const duelGameState = instance.service.getGameState();
+        this.traceWriter({
+          characterId,
+          agentName: instance.config.name,
+          actionType: "streaming_duel",
+          action: { actionType: "streaming_duel" },
+          gameState: duelGameState
+            ? this.serializeGameState(duelGameState)
+            : {},
+          goal: instance.goal,
+          timestamp: Date.now(),
+        }).catch(() => {
+          /* best-effort */
+        });
+      }
       return;
     }
 
@@ -281,7 +334,17 @@ export class AgentBehaviorTicker {
 
     // === PICK ACTION ===
     const action = this.pickBehaviorAction(instance, gameState);
-    // PERF: Removed per-tick logging - this creates strings every 33ms per agent
+
+    // === TRAJECTORY LOGGING ===
+    // If this agent has an Eliza runtime with trajectory logger, record
+    // the tick as a planner trajectory row so the export pipeline can
+    // extract it for training.
+    const trajectoryId = await this.startTickTrajectory(
+      instance,
+      characterId,
+      gameState,
+      action,
+    );
 
     switch (action.type) {
       case "attack":
@@ -354,6 +417,208 @@ export class AgentBehaviorTicker {
       case "idle":
       default:
         break;
+    }
+
+    // End the trajectory after action execution
+    await this.endTickTrajectory(trajectoryId, instance);
+  }
+
+  // ─── TRAJECTORY LOGGING HELPERS ──────────────────────────────────────
+
+  /**
+   * The trajectory logger service type used by plugin-trajectory-logger.
+   */
+  private static readonly TRAJECTORY_SERVICE_TYPE = "trajectory_logger";
+
+  /**
+   * Get the trajectory logger from an agent's Eliza runtime, if available.
+   */
+  private getTrajectoryLogger(instance: AgentInstance): {
+    startTrajectory(
+      agentId: string,
+      opts: Record<string, unknown>,
+    ): Promise<string>;
+    startStep(trajectoryId: string, envState: Record<string, unknown>): string;
+    endTrajectory(
+      trajectoryId: string,
+      status: string,
+      metrics?: Record<string, unknown>,
+    ): Promise<void>;
+    logAction?(stepId: string, action: Record<string, unknown>): void;
+    getCurrentStepId?(trajectoryId: string): string | null;
+  } | null {
+    if (!instance.elizaRuntime) return null;
+    const rt = instance.elizaRuntime;
+
+    // Fast path — getService returns the real one directly.
+    const first = rt.getService(AgentBehaviorTicker.TRAJECTORY_SERVICE_TYPE);
+    if (
+      first &&
+      typeof (first as Record<string, unknown>).startTrajectory === "function"
+    ) {
+      return first as ReturnType<typeof this.getTrajectoryLogger>;
+    }
+
+    // Slow path — core stub won; scan all services for the real one.
+    if (typeof rt.getServicesByType === "function") {
+      for (const svc of rt.getServicesByType(
+        AgentBehaviorTicker.TRAJECTORY_SERVICE_TYPE,
+      )) {
+        if (
+          typeof (svc as Record<string, unknown>).startTrajectory === "function"
+        ) {
+          return svc as ReturnType<typeof this.getTrajectoryLogger>;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Serialize a behavior action into a flat metadata object for the trajectory.
+   */
+  private serializeAction(
+    action: EmbeddedBehaviorAction,
+  ): Record<string, string | number | boolean | null> {
+    const base: Record<string, string | number | boolean | null> = {
+      actionType: action.type,
+    };
+    if ("targetId" in action) base.targetId = action.targetId;
+    if ("gravestoneId" in action) base.gravestoneId = action.gravestoneId;
+    if ("target" in action) base.targetPosition = JSON.stringify(action.target);
+    if ("questId" in action) base.questId = action.questId;
+    if ("logsItemId" in action) base.logsItemId = action.logsItemId;
+    if ("runMode" in action) base.runMode = action.runMode ?? false;
+    return base;
+  }
+
+  /**
+   * Serialize relevant game state for trajectory metadata.
+   */
+  private serializeGameState(
+    gameState: EmbeddedGameState,
+  ): Record<string, unknown> {
+    return {
+      position: gameState.position,
+      health: gameState.health,
+      maxHealth: gameState.maxHealth,
+      inCombat: gameState.inCombat,
+      nearbyEntityCount: gameState.nearbyEntities?.length ?? 0,
+      nearbyEntities: (gameState.nearbyEntities ?? [])
+        .slice(0, 10)
+        .map((e) => ({
+          id: e.id,
+          type: e.type,
+          name: e.name,
+          distance: e.distance,
+          health: e.health,
+        })),
+    };
+  }
+
+  /**
+   * Start a trajectory for one behavior tick if a logger is available.
+   * Returns the trajectory ID or null.
+   */
+  private async startTickTrajectory(
+    instance: AgentInstance,
+    characterId: string,
+    gameState: EmbeddedGameState,
+    action: EmbeddedBehaviorAction,
+  ): Promise<string | null> {
+    // Try Eliza runtime trajectory logger first
+    const logger = this.getTrajectoryLogger(instance);
+    if (logger) {
+      try {
+        const traceId = `tick-${characterId}-${Date.now()}`;
+        const plannerStepId = `step-${characterId}-${Date.now()}`;
+
+        const trajectoryId = await logger.startTrajectory(
+          instance.elizaRuntime!.agentId,
+          {
+            source: "embedded-behavior-tick",
+            metadata: {
+              characterId,
+              agentName: instance.config.name,
+              traceId,
+              plannerStepId,
+              decisionPath: "deterministic",
+              actionType: action.type,
+              goalType: instance.goal?.type ?? null,
+              goalQuestId: instance.goal?.questId ?? null,
+              goalDescription: instance.goal?.description ?? null,
+              gameState: this.serializeGameState(gameState),
+              action: this.serializeAction(action),
+            },
+          },
+        );
+
+        logger.startStep(trajectoryId, {
+          timestamp: Date.now(),
+          agentBalance: 0,
+          agentPoints: 0,
+          agentPnL: 0,
+          openPositions: 0,
+          custom: {
+            traceId,
+            plannerStepId,
+            actionType: action.type,
+            position: gameState.position,
+            health: gameState.health,
+            inCombat: gameState.inCombat,
+          },
+        });
+
+        return trajectoryId;
+      } catch (err) {
+        console.warn(
+          `[AgentBehaviorTicker] Trajectory logging failed for ${characterId}: ${errMsg(err)}`,
+        );
+        return null;
+      }
+    }
+
+    // Fallback: use external trace writer if available
+    if (this.traceWriter) {
+      try {
+        await this.traceWriter({
+          characterId,
+          agentName: instance.config.name,
+          actionType: action.type,
+          action: this.serializeAction(action),
+          gameState: this.serializeGameState(gameState),
+          goal: instance.goal,
+          timestamp: Date.now(),
+        });
+        return `fallback-${characterId}-${Date.now()}`;
+      } catch (err) {
+        console.warn(
+          `[AgentBehaviorTicker] Fallback trace writer failed for ${characterId}: ${errMsg(err)}`,
+        );
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * End the trajectory for a completed behavior tick.
+   */
+  private async endTickTrajectory(
+    trajectoryId: string | null,
+    instance: AgentInstance,
+  ): Promise<void> {
+    if (!trajectoryId) return;
+
+    const logger = this.getTrajectoryLogger(instance);
+    if (!logger) return;
+
+    try {
+      await logger.endTrajectory(trajectoryId, "completed");
+    } catch (err) {
+      console.warn(
+        `[AgentBehaviorTicker] End trajectory failed: ${errMsg(err)}`,
+      );
     }
   }
 
@@ -598,8 +863,8 @@ export class AgentBehaviorTicker {
       const itemData = getItem(slot.itemId);
       const healAmount = itemData
         ? ((itemData as unknown as Record<string, unknown>).healAmount as
-          | number
-          | undefined)
+            | number
+            | undefined)
         : undefined;
       const isFood = healAmount && healAmount > 0;
       const isWeapon =

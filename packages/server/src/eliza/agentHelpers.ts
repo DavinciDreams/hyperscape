@@ -4,14 +4,7 @@
  * (external matchmaker agents).
  */
 
-import {
-  AgentRuntime,
-  stringToUuid,
-  type Plugin,
-  type Character,
-} from "@elizaos/core";
-import path from "path";
-import fs from "fs";
+import { stringToUuid, type Plugin, type Character } from "@elizaos/core";
 import { errMsg } from "../shared/errMsg.js";
 
 import type { ModelProviderConfig } from "./ModelAgentSpawner.js";
@@ -149,6 +142,41 @@ export async function loadSqlPlugin(tag = "Agent"): Promise<Plugin | null> {
   }
 }
 
+/**
+ * Load trajectory logger (persists to SQL via runtime adapter; depends on plugin-sql).
+ */
+export async function loadTrajectoryLoggerPlugin(
+  tag = "Agent",
+): Promise<Plugin | null> {
+  try {
+    const mod = await import("@elizaos/plugin-trajectory-logger");
+    const trajectoryPlugin = mod.trajectoryLoggerPlugin ?? mod.default;
+    if (trajectoryPlugin) {
+      return trajectoryPlugin as Plugin;
+    }
+    console.warn(
+      `[${tag}] ⚠️ Trajectory logger module loaded but no export found`,
+    );
+    return null;
+  } catch (err) {
+    console.error(
+      `[${tag}] ❌ Failed to load trajectory logger plugin:`,
+      errMsg(err),
+    );
+    return null;
+  }
+}
+
+/** Secrets so plugin-sql init can read POSTGRES_URL from character settings. */
+export function elizaDatabaseSecretsFromUrl(
+  postgresUrl: string,
+): Record<string, string> {
+  return {
+    POSTGRES_URL: postgresUrl,
+    DATABASE_URL: process.env.DATABASE_URL || postgresUrl,
+  };
+}
+
 // ============================================================================
 // CHARACTER CREATION
 // ============================================================================
@@ -174,16 +202,15 @@ export function buildModelSecrets(
     // Provider-specific overrides
     ...(keys
       ? {
-        [keys.small]: small,
-        [keys.large]: config.model,
-      }
+          [keys.small]: small,
+          [keys.large]: config.model,
+        }
       : {}),
   };
 }
 
 /**
- * @deprecated PGLite has been replaced by InMemoryDatabaseAdapter.
- * Kept for backward compatibility with external callers.
+ * @deprecated Legacy PGLite path; embedded agents use Postgres via plugin-sql.
  */
 export function ensurePgliteDataDir(agentId: string): string {
   return `memory://${agentId}`;
@@ -234,11 +261,10 @@ export function createAgentCharacter(
     settings: {
       model: config.model,
       secrets: {
-        // Disable memory accumulation: agents use live world state, not persistent memories.
-        // InMemoryDatabaseAdapter is passed directly to AgentRuntime — no PGLite/Postgres needed.
-        MEMORY_LONG_TERM_ENABLED: "false",
+        // Durable memory via Postgres (plugin-sql); vector search off by default (cost).
+        MEMORY_LONG_TERM_ENABLED: "true",
         MEMORY_LONG_TERM_VECTOR_SEARCH_ENABLED: "false",
-        MEMORY_SUMMARIZATION_THRESHOLD: "9999",
+        MEMORY_SUMMARIZATION_THRESHOLD: "32",
         // Disable action embedding index to avoid OpenAI embedding calls on startup
         ACTION_FILTER_ENABLED: "false",
         ...modelSecrets,

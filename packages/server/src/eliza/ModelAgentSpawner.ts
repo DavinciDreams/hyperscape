@@ -17,10 +17,7 @@ import {
   ModelType,
   type Plugin,
   type Character,
-  type Memory,
   type UUID,
-  // @ts-ignore — InMemoryDatabaseAdapter is exported at runtime but not in .d.ts
-  InMemoryDatabaseAdapter,
 } from "@elizaos/core";
 import { EventType, getDuelArenaConfig, type World } from "@hyperscape/shared";
 import { createJWT } from "../shared/utils.js";
@@ -32,7 +29,17 @@ import {
   recoverAgentFromDeathLoop,
 } from "./agentRecovery.js";
 import { getAgentManager } from "./AgentManager.js";
-import { loadModelPlugin, createAgentCharacter } from "./agentHelpers.js";
+import {
+  loadModelPlugin,
+  createAgentCharacter,
+  loadSqlPlugin,
+  loadTrajectoryLoggerPlugin,
+  elizaDatabaseSecretsFromUrl,
+} from "./agentHelpers.js";
+import {
+  createSqlAdapterForAgent,
+  ensureElizaPostgresEnv,
+} from "./sharedElizaDatabase.js";
 
 type BunRuntime = {
   gc?: (force?: boolean) => void;
@@ -47,7 +54,13 @@ function getBunRuntime(): BunRuntime | undefined {
  */
 export interface ModelProviderConfig {
   /** Provider name (openai, anthropic, groq, xai, elizacloud) */
-  provider: "openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud";
+  provider:
+    | "openai"
+    | "anthropic"
+    | "groq"
+    | "xai"
+    | "openrouter"
+    | "elizacloud";
   /** Specific model to use */
   model: string;
   /** Display name for the agent */
@@ -170,6 +183,32 @@ export const MODEL_AGENTS: ModelProviderConfig[] = [
     pluginModule: "@elizaos/plugin-elizacloud",
     pluginExport: "elizaOSCloudPlugin",
   },
+  // ── Direct-provider fallbacks (use native API keys) ──────────────────────
+  // Groq first: fastest inference for training data collection
+  {
+    provider: "groq",
+    model: "qwen-qwq-32b",
+    displayName: "Groq QwQ-32B (direct)",
+    apiKeyEnv: "GROQ_API_KEY",
+    pluginModule: "@elizaos/plugin-groq",
+    pluginExport: "groqPlugin",
+  },
+  {
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    displayName: "Claude Sonnet (direct)",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    pluginModule: "@elizaos/plugin-anthropic",
+    pluginExport: "anthropicPlugin",
+  },
+  {
+    provider: "openai",
+    model: "gpt-4o-mini",
+    displayName: "GPT-4o Mini (direct)",
+    apiKeyEnv: "OPENAI_API_KEY",
+    pluginModule: "@elizaos/plugin-openai",
+    pluginExport: "openaiPlugin",
+  },
 ];
 
 // System prompt, character creation, plugin loaders — all in agentHelpers.ts
@@ -233,29 +272,50 @@ export async function spawnModelAgents(
     /** Maximum number of agents to spawn */
     maxAgents?: number;
     /** Specific providers to spawn (if empty, spawns all available) */
-    providers?: Array<"openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud">;
+    providers?: Array<
+      "openai" | "anthropic" | "groq" | "xai" | "openrouter" | "elizacloud"
+    >;
   } = {},
 ): Promise<number> {
   const { maxAgents = 10, providers = [] } = options;
 
-  // PERF: Yield control to the event loop so tick system setTimeout callbacks
-  // can fire between heavy synchronous operations (PGlite init, plugin loading).
+  // Yield control to the event loop so tick system setTimeout callbacks
+  // can fire between heavy synchronous operations (plugin loading, DB init).
   const yieldToEventLoop = () =>
     new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-  // Filter agents by provider if specified
+  // Filter agents by provider if specified, then by available API key, then cap
   let agentsToSpawn = MODEL_AGENTS;
   if (providers.length > 0) {
     agentsToSpawn = agentsToSpawn.filter((a) => providers.includes(a.provider));
   }
+  // Pre-filter by API key availability so the maxAgents cap picks reachable agents
+  agentsToSpawn = agentsToSpawn.filter((a) => process.env[a.apiKeyEnv]);
   agentsToSpawn = agentsToSpawn.slice(0, maxAgents);
 
-  // Use lightweight InMemoryDatabaseAdapter instead of PGLite WASM.
-  // PGLite allocates ~2-4GB WASM heap per instance; with 19 agents that's 38-76GB.
-  // Agents don't persist data (all memory flags disabled), so InMemoryDatabaseAdapter
-  // provides the required IDatabaseAdapter surface with zero WASM overhead.
-  // Trajectory logger and local embedding plugin are intentionally omitted:
-  // both cause unbounded memory growth (WASM heap + in-memory log accumulation).
+  // Shared Postgres via plugin-sql (pooled connections); trajectories persisted to same DB.
+
+  let postgresUrl: string;
+  try {
+    postgresUrl = ensureElizaPostgresEnv();
+  } catch (err) {
+    console.error(
+      `[ModelAgentSpawner] ${errMsg(err)} — cannot spawn embedded agents`,
+    );
+    return 0;
+  }
+
+  const sqlPlugin = await loadSqlPlugin("ModelAgentSpawner");
+  const trajectoryPlugin =
+    await loadTrajectoryLoggerPlugin("ModelAgentSpawner");
+  if (!sqlPlugin || !trajectoryPlugin) {
+    console.error(
+      "[ModelAgentSpawner] @elizaos/plugin-sql and @elizaos/plugin-trajectory-logger are required",
+    );
+    return 0;
+  }
+
+  const dbSecrets = elizaDatabaseSecretsFromUrl(postgresUrl);
 
   // Get database system for character creation
   // @ts-ignore - Dynamic import to avoid circular dependency
@@ -318,7 +378,7 @@ export async function spawnModelAgents(
   }
 
   const embeddedAgentManager = getAgentManager();
-  const MODEL_AGENT_INIT_TIMEOUT_MS = 45_000;
+  const MODEL_AGENT_INIT_TIMEOUT_MS = 120_000; // 2 minutes — SQL + trajectory init can be slow
 
   // ---- Spawn a single agent (self-contained, safe for concurrent use) ----
   const spawnOne = async (
@@ -334,22 +394,22 @@ export async function spawnModelAgents(
 
     try {
       const authToken = await createJWT({ userId: accountId });
+      // Pre-compute characterId so it's available in secrets before runtime init
+      const expectedCharacterId = `agent-${agentConfig.provider}-${agentConfig.model
+        .replace(/[^a-z0-9]/gi, "-")
+        .toLowerCase()}`;
       const perAgentSecrets: Record<string, string> = {
+        ...dbSecrets,
         HYPERSCAPE_SERVER_URL: hyperscapeServerUrl,
         HYPERSCAPE_API_URL: hyperscapeApiUrl,
         HYPERSCAPE_AUTH_TOKEN: authToken,
         HYPERSCAPE_PRIVY_USER_ID: accountId,
-        HYPERSCAPE_CHARACTER_ID: "",
+        HYPERSCAPE_CHARACTER_ID: expectedCharacterId,
       };
 
       const { character, characterId } = createAgentCharacter(agentConfig, {
         secrets: perAgentSecrets,
       });
-      if (character.settings?.secrets) {
-        (
-          character.settings.secrets as Record<string, string>
-        ).HYPERSCAPE_CHARACTER_ID = characterId;
-      }
 
       // Ensure character exists in database
       const existingChars = (await db
@@ -358,82 +418,36 @@ export async function spawnModelAgents(
         .where(eq(characters.id, characterId))) as Array<{ id: string }>;
 
       if (existingChars.length === 0) {
+        // isAgent: 0 — model agents get their behavior from the hyperscapePlugin's
+        // AutonomousBehaviorManager, NOT from AgentManager's AgentBehaviorTicker.
+        // Setting isAgent=1 would cause AgentManager.loadAgentsFromDatabase() to
+        // also manage this agent with scripted behavior, preventing the LLM path.
         await db.insert(characters).values({
           id: characterId,
           accountId,
           name: agentConfig.displayName,
-          isAgent: 1,
+          isAgent: 0,
           createdAt: Date.now(),
         });
       }
 
-      if (embeddedAgentManager?.hasAgent(characterId)) {
-        return false;
-      }
+      // Even if the embedded agent already exists, we still create the Eliza
+      // runtime so the behavior ticker can use TrajectoryLoggerService for
+      // rich trajectory data (trace_id, LLM calls, planner context) instead
+      // of the thin fallback Postgres writer.
+      const agentAlreadyEmbedded =
+        embeddedAgentManager?.hasAgent(characterId) ?? false;
 
-      const runtimePlugins: Plugin[] = [modelPlugin, hyperscapePlugin];
+      const runtimePlugins: Plugin[] = [
+        sqlPlugin,
+        trajectoryPlugin,
+        modelPlugin,
+        hyperscapePlugin,
+      ];
 
       const createRuntimeInstance = (): AgentRuntime => {
-        // Create a memory-safe InMemoryDatabaseAdapter that caps internal
-        // data structures. The stock adapter has several unbounded growth paths:
-        //  1. `logs` array — every useModel/action/evaluator call appends here
-        //  2. `memoriesByRoom` — deleteMemory only removes from memoriesById
-        //  3. `cache` Map — no eviction policy
-        const adapter = new InMemoryDatabaseAdapter();
-        const MAX_LOGS = 20;
-        const MAX_MEMORIES = 50;
-        const MAX_CACHE = 100;
-
-        // --- Cap logs (stores full LLM prompts + responses per call) ---
-        const origLog = adapter.log.bind(adapter);
-        adapter.log = async (params: Parameters<typeof origLog>[0]) => {
-          await origLog(params);
-          const logs = (adapter as unknown as { logs: unknown[] }).logs;
-          if (logs && logs.length > MAX_LOGS) {
-            logs.splice(0, logs.length - MAX_LOGS);
-          }
-        };
-
-        // --- Fix deleteMemory to also clean memoriesByRoom ---
-        const origDeleteMemory = adapter.deleteMemory.bind(adapter);
-        adapter.deleteMemory = async (memoryId: UUID) => {
-          // Remove from memoriesByRoom lists (stock impl misses this)
-          const byRoom = (
-            adapter as unknown as {
-              memoriesByRoom: Map<string, Array<{ id: unknown }>>;
-            }
-          ).memoriesByRoom;
-          if (byRoom) {
-            for (const [key, list] of byRoom) {
-              const idx = list.findIndex(
-                (m) => String(m.id) === String(memoryId),
-              );
-              if (idx !== -1) {
-                list.splice(idx, 1);
-                if (list.length === 0) byRoom.delete(key);
-                break;
-              }
-            }
-          }
-          await origDeleteMemory(memoryId);
-        };
-
-        // --- Cap cache Map ---
-        const cacheMap = (
-          adapter as unknown as { cache?: Map<string, unknown> }
-        ).cache;
-        if (cacheMap) {
-          const origSet = cacheMap.set.bind(cacheMap);
-          cacheMap.set = (key: string, value: unknown) => {
-            const result = origSet(key, value);
-            if (cacheMap.size > MAX_CACHE) {
-              const iter = cacheMap.keys();
-              const oldest = iter.next();
-              if (!oldest.done) cacheMap.delete(oldest.value);
-            }
-            return result;
-          };
-        }
+        const agentUuid = character.id as UUID;
+        const adapter = createSqlAdapterForAgent(agentUuid, postgresUrl);
 
         const runtimeInstance = new AgentRuntime({
           character,
@@ -448,27 +462,6 @@ export async function spawnModelAgents(
             modelType as Parameters<AgentRuntime["getModel"]>[0],
           );
         }) as AgentRuntime["getModel"];
-
-        // Cap memory accumulation via createMemory ring buffer.
-        // Even with the adapter fixes above, cap at runtime level too.
-        const trackedMemoryIds: string[] = [];
-        const originalCreateMemory =
-          runtimeInstance.createMemory.bind(runtimeInstance);
-        runtimeInstance.createMemory = async (
-          memory: Memory,
-          tableName: string,
-          unique?: boolean,
-        ): Promise<UUID> => {
-          while (trackedMemoryIds.length >= MAX_MEMORIES) {
-            const oldId = trackedMemoryIds.shift();
-            if (oldId) {
-              runtimeInstance.deleteMemory(oldId as UUID).catch(() => { });
-            }
-          }
-          const id = await originalCreateMemory(memory, tableName, unique);
-          trackedMemoryIds.push(id);
-          return id;
-        };
 
         runtimeInstance.ensureEmbeddingDimension = async () => {
           try {
@@ -503,7 +496,7 @@ export async function spawnModelAgents(
       const initializeRuntimeInstance = async (
         ri: AgentRuntime,
       ): Promise<void> => {
-        const initPromise = ri.initialize();
+        const initPromise = ri.initialize({ skipMigrations: true });
         let timedOut = false;
         const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => {
@@ -519,8 +512,15 @@ export async function spawnModelAgents(
           await Promise.race([initPromise, timeoutPromise]);
         } catch (err) {
           if (timedOut) {
-            initPromise.catch(() => { });
-            ri.stop().catch(() => { });
+            console.error(
+              `[ModelAgentSpawner] runtime.initialize() TIMED OUT after ${MODEL_AGENT_INIT_TIMEOUT_MS / 1000}s — stopping runtime`,
+            );
+            initPromise.catch(() => {});
+            ri.stop().catch(() => {});
+          } else {
+            console.error(
+              `[ModelAgentSpawner] runtime.initialize() FAILED: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
           throw err;
         }
@@ -529,28 +529,20 @@ export async function spawnModelAgents(
       const runtimeInstance = createRuntimeInstance();
       runtime = runtimeInstance;
 
-      // Verify adapter BEFORE initialize
       const adapterBeforeInit = runtimeInstance.adapter;
       const adapterNameBefore =
         adapterBeforeInit?.constructor?.name || "unknown";
 
       await initializeRuntimeInstance(runtimeInstance);
 
-      // Verify adapter AFTER initialize (detect if plugin overrode it)
       const adapterAfterInit = runtimeInstance.adapter;
       const adapterNameAfter = adapterAfterInit?.constructor?.name || "unknown";
 
       if (adapterBeforeInit !== adapterAfterInit) {
         console.warn(
-          `[ModelAgentSpawner] ${tag} ⚠️  Adapter was SWAPPED during initialize! ` +
-          `${adapterNameBefore} → ${adapterNameAfter}. Re-asserting InMemoryDatabaseAdapter.`,
+          `[ModelAgentSpawner] ${tag} ⚠️  Adapter reference changed during initialize` +
+            ` (${adapterNameBefore} → ${adapterNameAfter})`,
         );
-        // Re-register our safe adapter (force override)
-        (
-          runtimeInstance as unknown as {
-            adapter: unknown;
-          }
-        ).adapter = adapterBeforeInit;
       }
 
       runningAgents.set(agentKey, {
@@ -559,6 +551,18 @@ export async function spawnModelAgents(
         characterId,
         accountId,
       });
+
+      // Link the Eliza runtime to the embedded agent so the behavior
+      // ticker can log planner traces through the trajectory logger.
+      if (embeddedAgentManager) {
+        embeddedAgentManager.setAgentRuntime(characterId, runtimeInstance);
+        if (agentAlreadyEmbedded) {
+          console.log(
+            `[ModelAgentSpawner] ${tag} Attached Eliza runtime to existing embedded agent ${characterId}`,
+          );
+        }
+      }
+
       return true;
     } catch (error) {
       stopAgentBehaviorLoop(agentKey);
@@ -631,55 +635,9 @@ export async function spawnModelAgents(
   void startTime;
   void totalFailures;
 
-  // Start periodic adapter health monitor + flush + GC (every 60s)
+  // Bounded process-local state only (Postgres holds durable agent + trajectory data)
   if (spawnedCount > 0 && !adapterHealthInterval) {
     adapterHealthInterval = setInterval(() => {
-      let totalLogs = 0;
-      let totalMemories = 0;
-      let totalCache = 0;
-      let totalEntities = 0;
-      for (const agent of runningAgents.values()) {
-        const a = agent.runtime.adapter as unknown as {
-          logs?: unknown[];
-          memoriesById?: Map<unknown, unknown>;
-          memoriesByRoom?: Map<string, unknown[]>;
-          cache?: Map<unknown, unknown>;
-          entities?: Map<unknown, unknown>;
-          rooms?: Map<unknown, unknown>;
-          worlds?: Map<unknown, unknown>;
-          tasks?: Map<unknown, unknown>;
-        } | null;
-        if (!a) continue;
-
-        totalLogs += a.logs?.length ?? 0;
-        totalMemories += a.memoriesById?.size ?? 0;
-        totalCache += a.cache?.size ?? 0;
-        totalEntities += a.entities?.size ?? 0;
-
-        // Flush stale adapter data to prevent unbounded growth.
-        // Agents don't use persistent data — they use live world state.
-        // Logs: already capped by our log() override, but flush old ones
-        if (a.logs && a.logs.length > 10) {
-          a.logs.splice(0, a.logs.length - 10);
-        }
-        // Entities/rooms/worlds/tasks: agents don't use these, clear if any accumulate
-        if (a.entities && a.entities.size > 50) a.entities.clear();
-        if (a.rooms && a.rooms.size > 50) a.rooms.clear();
-        if (a.worlds && a.worlds.size > 10) a.worlds.clear();
-        if (a.tasks && a.tasks.size > 50) a.tasks.clear();
-        // Cache: evict if over threshold
-        if (a.cache && a.cache.size > 100) {
-          const excess = a.cache.size - 50;
-          const iter = a.cache.keys();
-          for (let i = 0; i < excess; i++) {
-            const k = iter.next();
-            if (k.done) break;
-            a.cache.delete(k.value);
-          }
-        }
-      }
-
-      // Also flush runtime stateCache for each agent
       for (const agent of runningAgents.values()) {
         const sc = (
           agent.runtime as unknown as {
@@ -697,7 +655,6 @@ export async function spawnModelAgents(
         }
       }
 
-      // Periodic GC hint
       getBunRuntime()?.gc?.(false);
     }, 60_000);
   }
@@ -1029,7 +986,7 @@ async function getOrCreatePlan(
       agentPlans.set(planKey, plan);
       return plan;
     }
-  } catch { }
+  } catch {}
 
   return null;
 }
@@ -1437,7 +1394,7 @@ async function executeBehaviorTick(
 
   try {
     await executeQueuedAction(service, nextAction, gameState, world);
-  } catch { }
+  } catch {}
 
   // If plan is exhausted, clear it so next tick re-plans
   if (plan.actions.length === 0) {

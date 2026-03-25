@@ -302,6 +302,113 @@ export interface GameStateCache {
   inventoryUpdatedAt?: number;
 }
 
+export interface HyperscapeEntitySnapshot {
+  id: string;
+  name: string;
+  entityType: string;
+  position: [number, number, number];
+  rotation: [number, number, number, number] | null;
+  alive: boolean | null;
+  level: number | null;
+  mobType: string | null;
+  resourceType: string | null;
+  resourceId: string | null;
+  requiredLevel: number | null;
+  harvestSkill:
+    | "woodcutting"
+    | "fishing"
+    | "mining"
+    | "firemaking"
+    | "cooking"
+    | null;
+  depleted: boolean | null;
+  itemId: string | null;
+  playerId: string | null;
+  playerName: string | null;
+  npcType: string | null;
+}
+
+export interface HyperscapePlayerSnapshot {
+  id: string;
+  playerId: string;
+  playerName: string;
+  position: [number, number, number];
+  rotation: [number, number, number, number] | null;
+  healthCurrent: number;
+  healthMax: number;
+  staminaCurrent: number;
+  staminaMax: number;
+  alive: boolean;
+  inCombat: boolean;
+  combatTarget: string | null;
+  coins: number;
+  skills: Skills;
+  inventory: InventoryItem[];
+  equipment: Equipment;
+}
+
+export interface HyperscapeLocalChatSnapshot {
+  from: string;
+  fromId: string;
+  text: string;
+  timestamp: number;
+  distance: number;
+}
+
+export interface HyperscapeWorldSnapshot {
+  schemaVersion: "hyperscape-world-snapshot-v1";
+  capturedAt: number;
+  worldId: string | null;
+  currentRoomId: string | null;
+  player: HyperscapePlayerSnapshot | null;
+  nearbyEntities: HyperscapeEntitySnapshot[];
+  localChat: HyperscapeLocalChatSnapshot[];
+  quests: QuestData[];
+  bankItems: BankItem[];
+  worldMap: WorldMapData | null;
+  availableGoalTypes: AvailableGoalType[];
+}
+
+export type HyperscapeDecisionPath =
+  | "short-circuit"
+  | "llm"
+  | "scripted"
+  | "planner"
+  | "curiosity"
+  | "duel-combat";
+
+export type HyperscapeDecisionTraceKind =
+  | "selection"
+  | "validation"
+  | "fallback"
+  | "execution";
+
+export interface HyperscapeDecisionTrace {
+  id: string;
+  timestamp: number;
+  traceId: string | null;
+  plannerStepId: string | null;
+  kind: HyperscapeDecisionTraceKind;
+  actionName: string;
+  decisionPath: HyperscapeDecisionPath;
+  providerScope: string[];
+  valid: boolean | null;
+  fallbackActionName: string | null;
+  note: string | null;
+}
+
+export interface HyperscapeDecisionTraceInput {
+  traceId?: string | null;
+  plannerStepId?: string | null;
+  kind: HyperscapeDecisionTraceKind;
+  actionName: string;
+  decisionPath: HyperscapeDecisionPath;
+  providerScope?: string[];
+  valid?: boolean | null;
+  fallbackActionName?: string | null;
+  note?: string | null;
+}
+
 /**
  * WebSocket connection state
  */
@@ -522,6 +629,11 @@ export interface HyperscapeServiceInterface {
   requestQuestList(): void;
   sendQuestAccept(questId: string): void;
   sendQuestComplete(questId: string): void;
+  getWorldSnapshot(): HyperscapeWorldSnapshot | null;
+  getRecentDecisionTrace(limit?: number): HyperscapeDecisionTrace[];
+  recordDecisionTrace(
+    trace: HyperscapeDecisionTraceInput,
+  ): HyperscapeDecisionTrace | null;
 }
 
 /**

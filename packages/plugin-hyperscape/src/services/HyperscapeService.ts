@@ -21,6 +21,7 @@ import {
 import WebSocket from "ws";
 import { Packr, Unpackr } from "msgpackr";
 import type {
+  AvailableGoalType,
   PlayerEntity,
   Entity,
   EventType,
@@ -37,6 +38,13 @@ import type {
   BankItem,
   PendingDuelChallenge,
   HyperscapeServiceInterface,
+  HyperscapeDecisionPath,
+  HyperscapeDecisionTrace,
+  HyperscapeDecisionTraceInput,
+  HyperscapeEntitySnapshot,
+  HyperscapeLocalChatSnapshot,
+  HyperscapePlayerSnapshot,
+  HyperscapeWorldSnapshot,
   WorldMapData,
 } from "../types.js";
 import { AutonomousBehaviorManager } from "../managers/autonomous-behavior-manager.js";
@@ -75,38 +83,40 @@ type TaggedWebSocket = WebSocket & { __wsId?: string };
  * and movement loops from failing hard.
  */
 const FALLBACK_PACKET_IDS: Record<string, number> = {
+  // Verified against packages/shared/src/platform/shared/packets.ts (0-based array index)
+  // Run: grep -oP "'\\K[a-zA-Z_:]+(?=')" packets.ts | nl -v 0  to re-verify
   snapshot: 0,
   chatAdded: 2,
-  entityAdded: 4,
-  entityModified: 5,
-  moveRequest: 6,
-  entityEvent: 7,
-  entityRemoved: 8,
-  playerState: 20,
-  resourceDepleted: 27,
-  resourceRespawned: 28,
-  resourceInteract: 30,
-  resourceGather: 31,
-  attackMob: 64,
-  changeAttackStyle: 67,
-  pickupItem: 70,
-  dropItem: 71,
-  useItem: 73,
-  equipItem: 75,
-  inventoryUpdated: 77,
-  equipmentUpdated: 80,
-  skillsUpdated: 81,
-  combatDamageDealt: 93,
-  playerUpdated: 97,
-  characterSelected: 106,
-  enterWorld: 107,
-  enterWorldApproved: 108,
-  enterWorldRejected: 109,
-  syncGoal: 110,
-  goalOverride: 111,
-  syncAgentThought: 112,
-  entityInteract: 139,
-  entityTileUpdate: 146,
+  entityAdded: 8,
+  entityModified: 9,
+  moveRequest: 10,
+  entityEvent: 11,
+  entityRemoved: 12,
+  playerState: 24,
+  resourceDepleted: 31,
+  resourceRespawned: 32,
+  resourceInteract: 34,
+  resourceGather: 35,
+  attackMob: 74,
+  changeAttackStyle: 77,
+  pickupItem: 80,
+  dropItem: 81,
+  useItem: 83,
+  equipItem: 85,
+  inventoryUpdated: 87,
+  equipmentUpdated: 90,
+  skillsUpdated: 91,
+  combatDamageDealt: 104,
+  playerUpdated: 108,
+  characterSelected: 117,
+  enterWorld: 118,
+  enterWorldApproved: 119,
+  enterWorldRejected: 120,
+  syncGoal: 121,
+  goalOverride: 122,
+  syncAgentThought: 123,
+  entityInteract: 150,
+  entityTileUpdate: 157,
   tileMovementStart: 147,
   tileMovementEnd: 148,
   "duel:challenge": 198,
@@ -373,6 +383,7 @@ export class HyperscapeService
   private static readonly THOUGHT_SYNC_MIN_INTERVAL_MS = 1_500;
   private static readonly THOUGHT_DUPLICATE_WINDOW_MS = 10_000;
   private static readonly MAX_THOUGHT_SYNC_CHARS = 400;
+  private static readonly MAX_DECISION_TRACE = 50;
 
   private lastQuestListRequestAt = 0;
   private questListRequestInFlight = false;
@@ -383,6 +394,7 @@ export class HyperscapeService
   private lastThoughtSyncAt = 0;
   private lastThoughtSyncSignature: string | null = null;
   private thoughtSequence = 0;
+  private decisionTraceSequence = 0;
   private clientReadySent = false;
 
   constructor(runtime?: IAgentRuntime) {
@@ -547,6 +559,7 @@ export class HyperscapeService
   }
 
   private logBuffer: Array<{ timestamp: number; type: string; data: unknown }>;
+  private decisionTraceBuffer: HyperscapeDecisionTrace[] = [];
 
   static async start(runtime: IAgentRuntime): Promise<Service> {
     // Per-runtime singleton - each agent gets its own service instance
@@ -2015,6 +2028,82 @@ Respond with ONLY the action name, nothing else.`;
     return null;
   }
 
+  private normalizeRotation(
+    rotation: [number, number, number, number] | null | undefined,
+  ): [number, number, number, number] | null {
+    if (!rotation || rotation.length < 4) {
+      return null;
+    }
+    return [rotation[0], rotation[1], rotation[2], rotation[3]];
+  }
+
+  private toEntitySnapshot(entity: Entity): HyperscapeEntitySnapshot | null {
+    const position = this.normalizePosition(entity.position);
+    if (!position) {
+      return null;
+    }
+
+    return {
+      id: entity.id,
+      name: entity.name || "Unknown",
+      entityType: entity.type || entity.entityType || "unknown",
+      position,
+      rotation: this.normalizeRotation(entity.rotation),
+      alive: typeof entity.alive === "boolean" ? entity.alive : null,
+      level: typeof entity.level === "number" ? entity.level : null,
+      mobType: entity.mobType || null,
+      resourceType: entity.resourceType || null,
+      resourceId: entity.resourceId || null,
+      requiredLevel:
+        typeof entity.requiredLevel === "number" ? entity.requiredLevel : null,
+      harvestSkill: entity.harvestSkill || null,
+      depleted: typeof entity.depleted === "boolean" ? entity.depleted : null,
+      itemId: entity.itemId || null,
+      playerId: entity.playerId || null,
+      playerName: entity.playerName || null,
+      npcType: entity.npcType || null,
+    };
+  }
+
+  private buildPlayerSnapshot(
+    playerEntity: PlayerEntity | null,
+  ): HyperscapePlayerSnapshot | null {
+    if (!playerEntity) {
+      return null;
+    }
+
+    const position = this.normalizePosition(playerEntity.position);
+    if (!position) {
+      return null;
+    }
+
+    return {
+      id: playerEntity.id,
+      playerId: playerEntity.playerId,
+      playerName: playerEntity.playerName,
+      position,
+      rotation: this.normalizeRotation(playerEntity.rotation),
+      healthCurrent: playerEntity.health?.current ?? 0,
+      healthMax: playerEntity.health?.max ?? 0,
+      staminaCurrent: playerEntity.stamina?.current ?? 0,
+      staminaMax: playerEntity.stamina?.max ?? 0,
+      alive: playerEntity.alive !== false,
+      inCombat: playerEntity.inCombat === true,
+      combatTarget: playerEntity.combatTarget || null,
+      coins: typeof playerEntity.coins === "number" ? playerEntity.coins : 0,
+      skills: playerEntity.skills,
+      inventory: [...playerEntity.items],
+      equipment: { ...playerEntity.equipment },
+    };
+  }
+
+  private getAvailableGoalTypes(): AvailableGoalType[] {
+    if (!this.runtime || !this.runtime.getService) {
+      return [];
+    }
+    return getAvailableGoals(this).map((goal) => goal.type);
+  }
+
   /**
    * Normalize position IN PLACE using pre-allocated temp array
    * Use this for hot paths to avoid GC pressure
@@ -2193,6 +2282,9 @@ Respond with ONLY the action name, nothing else.`;
       // Don't wait for snapshot to include the character - the server JWT auth already
       // verified our identity, we just need to tell it which character to spawn
       if (this.characterId) {
+        console.error(
+          `[HyperscapeService] enterWorld flow starting for ${this.characterId}`,
+        );
         logger.info(
           `[HyperscapeService] ✅ Using characterId from settings: ${this.characterId}`,
         );
@@ -2208,6 +2300,9 @@ Respond with ONLY the action name, nothing else.`;
         this.sendBinaryPacket("characterSelected", {
           characterId: this.characterId,
         });
+        console.error(
+          `[HyperscapeService] Sent characterSelected: ${this.characterId}`,
+        );
         logger.info(
           `[HyperscapeService] 📤 Sent characterSelected: ${this.characterId}`,
         );
@@ -2222,6 +2317,10 @@ Respond with ONLY the action name, nothing else.`;
             ? { duelBot: true, botName: botName || this.characterId }
             : {}),
         });
+        const actualEnterWorldId = this.getPacketId("enterWorld");
+        console.error(
+          `[HyperscapeService] Sent enterWorld: ${this.characterId} isDuelBot=${isDuelBot} packetId=${actualEnterWorldId} wsReady=${this.ws?.readyState}`,
+        );
         logger.info(
           `[HyperscapeService] 🚪 Sent enterWorld: ${this.characterId}${isDuelBot ? " (duelBot)" : ""}`,
         );
@@ -2298,6 +2397,11 @@ Respond with ONLY the action name, nothing else.`;
     switch (packetName) {
       case "entityAdded":
         // Check if this is the agent's player entity
+        if (String(data?.id || "").includes("groq")) {
+          console.error(
+            `[HyperscapeService] entityAdded for groq: entityId=${data?.id} characterId=${this.characterId} match=${data?.id === this.characterId}`,
+          );
+        }
         logger.debug(
           `[HyperscapeService] 📦 entityAdded - entityId: ${data?.id}, characterId: ${this.characterId}, match: ${data?.id === this.characterId}`,
         );
@@ -3867,6 +3971,69 @@ Respond with ONLY the action name, nothing else.`;
     return [...this.logBuffer];
   }
 
+  getWorldSnapshot(): HyperscapeWorldSnapshot | null {
+    const player = this.buildPlayerSnapshot(this.getPlayerEntity());
+    const nearbyEntities = this.getNearbyEntities()
+      .map((entity) => this.toEntitySnapshot(entity))
+      .filter((entity): entity is HyperscapeEntitySnapshot => entity !== null);
+    const localChat: HyperscapeLocalChatSnapshot[] =
+      this.getLocalChatMessages().map((message) => ({
+        from: message.from,
+        fromId: message.fromId,
+        text: message.text,
+        timestamp: message.timestamp,
+        distance: message.distance,
+      }));
+
+    return {
+      schemaVersion: "hyperscape-world-snapshot-v1",
+      capturedAt: Date.now(),
+      worldId: this.gameState.worldId,
+      currentRoomId: this.gameState.currentRoomId,
+      player,
+      nearbyEntities,
+      localChat,
+      quests: [...this.gameState.quests],
+      bankItems: [...this.gameState.bankItems],
+      worldMap: this.gameState.worldMap ?? null,
+      availableGoalTypes: this.getAvailableGoalTypes(),
+    };
+  }
+
+  getRecentDecisionTrace(limit = 10): HyperscapeDecisionTrace[] {
+    const normalizedLimit = Math.max(0, Math.floor(limit));
+    return this.decisionTraceBuffer.slice(0, normalizedLimit);
+  }
+
+  recordDecisionTrace(
+    trace: HyperscapeDecisionTraceInput,
+  ): HyperscapeDecisionTrace | null {
+    const record: HyperscapeDecisionTrace = {
+      id: `decision-${++this.decisionTraceSequence}`,
+      timestamp: Date.now(),
+      traceId: trace.traceId ?? null,
+      plannerStepId: trace.plannerStepId ?? null,
+      kind: trace.kind,
+      actionName: trace.actionName,
+      decisionPath: trace.decisionPath,
+      providerScope: trace.providerScope
+        ? trace.providerScope.filter((provider) => provider.trim().length > 0)
+        : [],
+      valid: trace.valid ?? null,
+      fallbackActionName: trace.fallbackActionName ?? null,
+      note: trace.note ?? null,
+    };
+
+    this.decisionTraceBuffer.unshift(record);
+    if (
+      this.decisionTraceBuffer.length > HyperscapeService.MAX_DECISION_TRACE
+    ) {
+      this.decisionTraceBuffer.length = HyperscapeService.MAX_DECISION_TRACE;
+    }
+
+    return record;
+  }
+
   /**
    * Send binary packet to server using msgpackr protocol
    */
@@ -4813,14 +4980,9 @@ Respond with ONLY the action name, nothing else.`;
         percent: number;
         urgency: "critical" | "warning" | "safe";
       };
-      decisionPath?:
-        | "short-circuit"
-        | "llm"
-        | "scripted"
-        | "planner"
-        | "curiosity"
-        | "duel-combat";
+      decisionPath?: HyperscapeDecisionPath;
       providers?: string[];
+      decisionTrace?: HyperscapeDecisionTrace;
     },
   ): void {
     if (!this.characterId || !this.isConnected()) {
@@ -4846,6 +5008,7 @@ Respond with ONLY the action name, nothing else.`;
       health: meta?.health,
       decisionPath: meta?.decisionPath,
       providers,
+      decisionTraceId: meta?.decisionTrace?.id,
     });
     if (
       thoughtSignature === this.lastThoughtSyncSignature &&
@@ -4871,6 +5034,7 @@ Respond with ONLY the action name, nothing else.`;
     if (meta?.health) thought.health = meta.health;
     if (meta?.decisionPath) thought.decisionPath = meta.decisionPath;
     if (providers) thought.providers = providers;
+    if (meta?.decisionTrace) thought.decisionTrace = meta.decisionTrace;
 
     this.sendCommand("syncAgentThought", {
       characterId: this.characterId,
@@ -4899,14 +5063,9 @@ Respond with ONLY the action name, nothing else.`;
         percent: number;
         urgency: "critical" | "warning" | "safe";
       };
-      decisionPath?:
-        | "short-circuit"
-        | "llm"
-        | "scripted"
-        | "planner"
-        | "curiosity"
-        | "duel-combat";
+      decisionPath?: HyperscapeDecisionPath;
       providers?: string[];
+      decisionTrace?: HyperscapeDecisionTrace;
     },
   ): void {
     if (!thinking || !thinking.trim()) return;

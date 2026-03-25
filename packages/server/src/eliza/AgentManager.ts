@@ -54,28 +54,6 @@ async function getHyperscapePlugin(): Promise<Plugin | null> {
 }
 
 /**
- * Dynamically import the SQL plugin required for ElizaOS database operations.
- * Returns the plugin or null if not available.
- */
-async function getSqlPlugin(): Promise<Plugin | null> {
-  try {
-    const mod = await import("@elizaos/plugin-sql");
-    const sqlPlugin = mod.plugin ?? mod.default;
-    if (sqlPlugin) {
-      return sqlPlugin;
-    }
-    console.warn(
-      "[AgentManager] SQL plugin module loaded but no plugin export found. Exports:",
-      Object.keys(mod),
-    );
-    return null;
-  } catch (err) {
-    console.warn("[AgentManager] Failed to load SQL plugin:", errMsg(err));
-    return null;
-  }
-}
-
-/**
  * Dynamically import the appropriate model provider plugin based on available API keys.
  * Returns the plugin or null if no API key is configured.
  *
@@ -83,7 +61,31 @@ async function getSqlPlugin(): Promise<Plugin | null> {
  * type definitions due to nested node_modules. The runtime handles this correctly.
  */
 async function getModelProviderPlugin(): Promise<Plugin | null> {
-  // Check for OpenAI API key first (most common)
+  // PREFERRED_MODEL_PROVIDER env var overrides auto-detection order.
+  // Useful for forcing fast providers like Groq during data collection.
+  const preferred = (process.env.PREFERRED_MODEL_PROVIDER || "")
+    .trim()
+    .toLowerCase();
+
+  // Check for Groq first (fastest inference for data collection)
+  if (
+    preferred === "groq" ||
+    (!preferred && process.env.GROQ_API_KEY && !process.env.OPENAI_API_KEY)
+  ) {
+    if (process.env.GROQ_API_KEY) {
+      try {
+        const mod = await import("@elizaos/plugin-groq");
+        console.log(
+          "[AgentManager] Using Groq model provider (fast inference)",
+        );
+        return mod.groqPlugin ?? mod.default;
+      } catch (err) {
+        console.warn("[AgentManager] Failed to load Groq plugin:", errMsg(err));
+      }
+    }
+  }
+
+  // Check for OpenAI API key
   if (process.env.OPENAI_API_KEY) {
     try {
       const mod = await import("@elizaos/plugin-openai");
@@ -103,6 +105,16 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
         "[AgentManager] Failed to load Anthropic plugin:",
         errMsg(err),
       );
+    }
+  }
+
+  // Check for Groq (fallback position if not preferred)
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const mod = await import("@elizaos/plugin-groq");
+      return mod.groqPlugin ?? mod.default;
+    } catch (err) {
+      console.warn("[AgentManager] Failed to load Groq plugin:", errMsg(err));
     }
   }
 
@@ -128,7 +140,7 @@ async function getModelProviderPlugin(): Promise<Plugin | null> {
   }
 
   console.warn(
-    "[AgentManager] No model provider available! Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY",
+    "[AgentManager] No model provider available! Set GROQ_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY",
   );
   return null;
 }
@@ -185,11 +197,11 @@ export interface HyperscapeService {
   getNearbyEntities(): Array<{
     id: string;
     harvestSkill?:
-    | "woodcutting"
-    | "fishing"
-    | "mining"
-    | "firemaking"
-    | "cooking";
+      | "woodcutting"
+      | "fishing"
+      | "mining"
+      | "firemaking"
+      | "cooking";
     resourceType?: string;
   }>;
 
@@ -242,6 +254,7 @@ import {
   EMBEDDED_AGENT_AUTONOMY_ENABLED,
   setAgentAutonomyIfSupported,
   type AgentInstance,
+  type BehaviorTickTraceWriter,
 } from "./managers/AgentBehaviorTicker.js";
 import { AgentCommandDispatcher } from "./managers/AgentCommandDispatcher.js";
 
@@ -560,6 +573,42 @@ export class AgentManager {
     return this.agents.get(characterId)?.service || null;
   }
 
+  /**
+   * Set a trace writer on the behavior ticker for direct trajectory logging
+   * when Eliza runtimes are not available on embedded agents.
+   */
+  setBehaviorTraceWriter(writer: BehaviorTickTraceWriter): void {
+    this.behaviorTicker.setTraceWriter(writer);
+  }
+
+  /**
+   * Attach an Eliza AgentRuntime to an embedded agent so the behavior
+   * ticker can log planner traces through the trajectory logger service.
+   * Called by ModelAgentSpawner after the runtime has been initialized.
+   */
+  setAgentRuntime(
+    characterId: string,
+    runtime: {
+      agentId: string;
+      getService(serviceType: string): unknown;
+      getServicesByType?(serviceType: string): unknown[];
+    },
+  ): void {
+    const instance = this.agents.get(characterId);
+    if (instance) {
+      instance.elizaRuntime = runtime;
+    }
+  }
+
+  /**
+   * Check if an embedded agent already has an Eliza runtime attached.
+   */
+  getAgentRuntime(
+    characterId: string,
+  ): { agentId: string; getService(serviceType: string): unknown } | undefined {
+    return this.agents.get(characterId)?.elizaRuntime;
+  }
+
   // ─── COMMAND DISPATCH ───────────────────────────────────────────────
 
   /**
@@ -586,21 +635,21 @@ export class AgentManager {
   async loadAgentsFromDatabase(): Promise<void> {
     const databaseSystem = this.world.getSystem("database") as
       | {
-        db: {
-          select: () => {
-            from: (table: unknown) => {
-              where: (condition: unknown) => Promise<
-                Array<{
-                  id: string;
-                  accountId: string;
-                  name: string;
-                  isAgent: boolean;
-                }>
-              >;
+          db: {
+            select: () => {
+              from: (table: unknown) => {
+                where: (condition: unknown) => Promise<
+                  Array<{
+                    id: string;
+                    accountId: string;
+                    name: string;
+                    isAgent: boolean;
+                  }>
+                >;
+              };
             };
           };
-        };
-      }
+        }
       | undefined;
 
     if (!databaseSystem?.db) {

@@ -25,10 +25,20 @@ import {
   type Action,
   type State,
 } from "@elizaos/core";
+import {
+  TrajectoryLoggerService,
+  endAutonomousTick,
+  loggedLLMCall,
+  startAutonomousTick,
+} from "@elizaos/plugin-trajectory-logger";
+import { buildCanonicalPlannerContext } from "../contracts/plannerContract.js";
 import type { HyperscapeService } from "../services/HyperscapeService.js";
 import type {
   Entity,
   GoalType,
+  HyperscapeDecisionPath,
+  HyperscapeDecisionTrace,
+  HyperscapeDecisionTraceInput,
   InventoryItem,
   PlayerEntity,
 } from "../types.js";
@@ -131,7 +141,11 @@ function isCookableTarget(target: string): boolean {
 const DEFAULT_TICK_INTERVAL = 5000; // 5 seconds between decisions
 const MIN_TICK_INTERVAL = 2000; // Minimum 2 seconds (fast-tick mode)
 const MAX_TICK_INTERVAL = 15000; // Maximum 15 seconds
-const LLM_TIMEOUT_MS = 2000; // Abort LLM call if no response within 2s
+const LLM_TIMEOUT_MS = /^(1|true|yes|on)$/i.test(
+  String(process.env.FORCE_LLM_PATH || "").trim(),
+)
+  ? 30000 // 30s timeout in data collection mode — allows warm-up and full responses
+  : 2000; // 2s in normal mode
 const COMBAT_TICK_INTERVAL = 1000; // 1s ticks during active combat
 
 /** Combat phase for duel fights — mirrors server DuelCombatAI phases */
@@ -242,6 +256,13 @@ export interface AutonomousBehaviorConfig {
   allowedActions?: string[];
   /** Autonomy mode (LLM or scripted) */
   autonomyMode?: AutonomyMode;
+  /**
+   * Force every tick through the full LLM path, bypassing short-circuit logic.
+   * Useful for training data collection — every tick produces an autonomous_llm_selection
+   * trajectory with canonical planner context and LLM reasoning.
+   * Can also be enabled via FORCE_LLM_PATH=true env var.
+   */
+  forceFullLLMPath?: boolean;
 }
 
 /** Simple goal structure stored in memory */
@@ -303,6 +324,7 @@ export class AutonomousBehaviorManager {
   private allowedActions: Set<string>;
   private autonomyMode: AutonomyMode;
   private readonly dedicatedDuelBot: boolean;
+  private readonly forceFullLLMPath: boolean;
   private scriptedRole: ScriptedRole | null = null;
   private actionContext: { messageText?: string } | null = null;
   private lastTickTime = 0;
@@ -522,6 +544,15 @@ export class AutonomousBehaviorManager {
       ),
     );
     this.debug = config?.debug ?? false;
+    this.forceFullLLMPath =
+      config?.forceFullLLMPath ??
+      /^(1|true|yes|on)$/i.test(
+        String(
+          runtime.getSetting("FORCE_LLM_PATH") ||
+            process.env.FORCE_LLM_PATH ||
+            "",
+        ).trim(),
+      );
 
     const rawMode =
       config?.autonomyMode ||
@@ -631,6 +662,11 @@ export class AutonomousBehaviorManager {
 
     logger.info("[AutonomousBehavior] Starting autonomous behavior...");
     logger.info(`[AutonomousBehavior] Tick interval: ${this.tickInterval}ms`);
+    if (this.forceFullLLMPath) {
+      logger.info(
+        "[AutonomousBehavior] FORCE_LLM_PATH=true — all ticks will use LLM (training data collection mode)",
+      );
+    }
     logger.info(
       `[AutonomousBehavior] Allowed actions: ${Array.from(this.allowedActions).join(", ")}`,
     );
@@ -1369,6 +1405,17 @@ export class AutonomousBehaviorManager {
       state,
     );
     if (!isValid) {
+      this.recordDecisionBoundary(
+        {
+          kind: "validation",
+          actionName: selectedAction.name,
+          decisionPath: this.lastDecisionPath,
+          providerScope: this.lastProviderScope,
+          valid: false,
+          note: "Primary action failed validation",
+        },
+        `Validation failed for ${selectedAction.name}`,
+      );
       logger.warn(
         `[AutonomousBehavior] Action ${selectedAction.name} failed validation`,
       );
@@ -1385,6 +1432,18 @@ export class AutonomousBehaviorManager {
           state,
         );
         if (fallbackValid) {
+          this.recordDecisionBoundary(
+            {
+              kind: "fallback",
+              actionName: selectedAction.name,
+              decisionPath: this.lastDecisionPath,
+              providerScope: this.lastProviderScope,
+              valid: true,
+              fallbackActionName: fallback.name,
+              note: "Fallback action selected after validation failure",
+            },
+            `Fallback ${fallback.name} selected after ${selectedAction.name} failed validation`,
+          );
           await this.executeAction(fallback, tickMessage, state);
           return;
         }
@@ -1433,6 +1492,10 @@ export class AutonomousBehaviorManager {
 
   /** Last LLM reasoning - synced to dashboard as agent thoughts */
   private lastThinking: string = "";
+  private activePlannerTraceId: string | null = null;
+  private activePlannerStepId: string | null = null;
+  private lastDecisionPath: HyperscapeDecisionPath = "planner";
+  private lastProviderScope: string[] = [];
 
   /**
    * Select an action using the LLM based on current state.
@@ -1445,11 +1508,27 @@ export class AutonomousBehaviorManager {
     if (this.autonomyMode === "scripted") {
       const state = await this.runtime.composeState(message);
       const action = this.selectActionScripted(state);
+      if (action) {
+        this.lastDecisionPath = "scripted";
+        this.lastProviderScope = ["*"];
+        this.recordDecisionBoundary(
+          {
+            kind: "selection",
+            actionName: action.name,
+            decisionPath: "scripted",
+            providerScope: this.lastProviderScope,
+            note: "Selected via scripted autonomy path",
+          },
+          `Selected ${action.name} via scripted autonomy`,
+        );
+      }
       return action ? { action, state } : null;
     }
 
     // --- SHORT-CIRCUIT: Skip LLM for obvious decisions ---
-    const shortCircuit = this.tryShortCircuit();
+    // When forceFullLLMPath is enabled, skip short-circuit so every tick produces
+    // an autonomous_llm_selection trajectory with full planner context.
+    const shortCircuit = this.forceFullLLMPath ? null : this.tryShortCircuit();
     if (shortCircuit) {
       logger.info(`[AutonomousBehavior] Short-circuit: ${shortCircuit.name}`);
 
@@ -1470,6 +1549,18 @@ export class AutonomousBehaviorManager {
         message,
         ["gameState", "nearbyEntities"],
         true, // onlyInclude
+      );
+      this.lastDecisionPath = "short-circuit";
+      this.lastProviderScope = ["gameState", "nearbyEntities"];
+      this.recordDecisionBoundary(
+        {
+          kind: "selection",
+          actionName: shortCircuit.name,
+          decisionPath: "short-circuit",
+          providerScope: this.lastProviderScope,
+          note: "Selected via short-circuit autonomy path",
+        },
+        `Selected ${shortCircuit.name} via short-circuit path`,
       );
       return { action: shortCircuit, state };
     }
@@ -1601,10 +1692,111 @@ export class AutonomousBehaviorManager {
       recentMemorySummaries,
     );
 
+    let trajectoryId: string | null = null;
+    const plannerTraceId = `planner-trace-${crypto.randomUUID()}`;
+    const plannerStepId = `planner-step-${crypto.randomUUID()}`;
+    this.activePlannerTraceId = plannerTraceId;
+    this.activePlannerStepId = plannerStepId;
+    const trajectoryLogger = TrajectoryLoggerService.resolveFromRuntime(
+      this.runtime,
+    );
+    if (trajectoryLogger) {
+      try {
+        const currentSnapshot = this.service?.getWorldSnapshot() ?? null;
+        const currentDecisionTrace =
+          this.service?.getRecentDecisionTrace(20) ?? [];
+        const canonicalPlannerContext = currentSnapshot
+          ? buildCanonicalPlannerContext(currentSnapshot, currentDecisionTrace)
+          : null;
+        trajectoryId = await startAutonomousTick(trajectoryLogger, {
+          agentId: this.runtime.agentId,
+          source: "autonomous_llm_selection",
+          scenarioId: "hyperscape-autonomous-llm",
+          metadata: {
+            tick: this.tickCount,
+            traceId: plannerTraceId,
+            plannerStepId,
+            canonicalPlannerContext,
+            currentGoalType: this.currentGoal?.type ?? null,
+            currentGoalDescription: this.currentGoal?.description ?? null,
+          },
+        });
+        const trajectoryStepId =
+          trajectoryLogger.getCurrentStepId(trajectoryId);
+        if (trajectoryStepId) {
+          const metadataRecord =
+            typeof message.metadata === "object" && message.metadata !== null
+              ? { ...(message.metadata as Record<string, unknown>) }
+              : {};
+          metadataRecord.trajectoryStepId = trajectoryStepId;
+          metadataRecord.traceId = plannerTraceId;
+          metadataRecord.plannerStepId = plannerStepId;
+          message.metadata = metadataRecord as Memory["metadata"];
+        }
+      } catch (trajErr) {
+        logger.warn(
+          "[AutonomousBehavior] Trajectory start failed, retrying once:",
+          trajErr instanceof Error ? trajErr.message : String(trajErr),
+        );
+        // Retry once — the first call may fail due to DB warm-up or table creation
+        try {
+          trajectoryId = await startAutonomousTick(trajectoryLogger, {
+            agentId: this.runtime.agentId,
+            source: "autonomous_llm_selection",
+            scenarioId: "hyperscape-autonomous-llm",
+            metadata: {
+              tick: this.tickCount,
+              traceId: plannerTraceId,
+              plannerStepId,
+              currentGoalType: this.currentGoal?.type ?? null,
+              currentGoalDescription: this.currentGoal?.description ?? null,
+            },
+          });
+        } catch {
+          // Give up — the LLM call will still run, just not trajectory-linked
+        }
+      }
+    }
+
     try {
       // Use the LLM to select an action — abort if it takes longer than LLM_TIMEOUT_MS
+      const hasTrajectory = !!(trajectoryId && trajectoryLogger);
+      if (!hasTrajectory) {
+        process.stderr.write(
+          `[AutonomousBehavior] LLM path WITHOUT trajectory: trajectoryId=${trajectoryId} logger=${!!trajectoryLogger}\n`,
+        );
+      } else {
+        const stepId = trajectoryLogger!.getCurrentStepId(trajectoryId!);
+        process.stderr.write(
+          `[AutonomousBehavior] LLM path WITH trajectory: id=${trajectoryId} stepId=${stepId}\n`,
+        );
+      }
       const response = await Promise.race([
-        this.runtime.useModel(ModelType.TEXT_SMALL, { prompt }),
+        hasTrajectory
+          ? loggedLLMCall(
+              trajectoryLogger,
+              trajectoryId,
+              {
+                model: ModelType.TEXT_SMALL,
+                systemPrompt: "autonomous_llm_selection",
+                userPrompt: prompt,
+                purpose: "action",
+                actionType: "AUTONOMOUS_SELECT_ACTION",
+              },
+              async () => {
+                const llmResponse = await this.runtime.useModel(
+                  ModelType.TEXT_SMALL,
+                  { prompt },
+                );
+                return {
+                  text:
+                    typeof llmResponse === "string"
+                      ? llmResponse
+                      : String(llmResponse),
+                };
+              },
+            )
+          : this.runtime.useModel(ModelType.TEXT_SMALL, { prompt }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("LLM timeout")), LLM_TIMEOUT_MS),
         ),
@@ -1652,6 +1844,22 @@ export class AutonomousBehaviorManager {
             decisionPath: "llm",
             providers: providerFilter || undefined,
           });
+          if (trajectoryId && trajectoryLogger) {
+            trajectoryLogger.completeStep(trajectoryId, {
+              actionType: "AUTONOMOUS_SELECT_ACTION",
+              actionName: "RETRY_GOAL",
+              parameters: {
+                traceId: plannerTraceId,
+                plannerStepId,
+                providerScope: providerFilter ?? ["*"],
+              },
+              success: false,
+              result: {
+                reason: "llm_action_unparsed_retry_goal",
+              },
+              reasoning: this.lastThinking,
+            });
+          }
           this.nextTickFast = true;
           return null;
         }
@@ -1664,6 +1872,22 @@ export class AutonomousBehaviorManager {
           decisionPath: "llm",
           providers: providerFilter || undefined,
         });
+        if (trajectoryId && trajectoryLogger) {
+          trajectoryLogger.completeStep(trajectoryId, {
+            actionType: "AUTONOMOUS_SELECT_ACTION",
+            actionName: exploreAction.name,
+            parameters: {
+              traceId: plannerTraceId,
+              plannerStepId,
+              providerScope: providerFilter ?? ["*"],
+            },
+            success: true,
+            result: {
+              fallbackReason: "llm_action_unparsed_default_explore",
+            },
+            reasoning: this.lastThinking,
+          });
+        }
         return { action: exploreAction, state };
       }
 
@@ -1687,8 +1911,69 @@ export class AutonomousBehaviorManager {
       const foundAction = availableActions.find(
         (a) => a.name === selectedActionName,
       );
-      return { action: foundAction || exploreAction, state };
+      const executedAction = foundAction || exploreAction;
+      const providerScope = providerFilter ?? ["*"];
+      this.lastDecisionPath = "llm";
+      this.lastProviderScope = providerScope;
+      this.recordDecisionBoundary(
+        {
+          traceId: plannerTraceId,
+          plannerStepId,
+          kind: "selection",
+          actionName: executedAction.name,
+          decisionPath: "llm",
+          providerScope,
+          note:
+            foundAction === undefined
+              ? `LLM proposed ${selectedActionName}, fell back to ${executedAction.name}`
+              : thinking || "Selected from LLM response",
+        },
+        `Selected ${executedAction.name} via LLM path`,
+      );
+      if (trajectoryId && trajectoryLogger) {
+        trajectoryLogger.completeStep(trajectoryId, {
+          actionType: "AUTONOMOUS_SELECT_ACTION",
+          actionName: executedAction.name,
+          parameters: {
+            traceId: plannerTraceId,
+            plannerStepId,
+            providerScope,
+          },
+          success: true,
+          result: {
+            selectedActionName,
+            fallbackApplied: foundAction === undefined,
+          },
+          reasoning: thinking,
+        });
+      }
+      return { action: executedAction, state };
     } catch (error) {
+      if (trajectoryId && trajectoryLogger) {
+        trajectoryLogger.completeStep(trajectoryId, {
+          actionType: "AUTONOMOUS_SELECT_ACTION",
+          actionName: "ERROR",
+          parameters: {
+            traceId: plannerTraceId,
+            plannerStepId,
+            providerScope: providerFilter ?? ["*"],
+          },
+          success: false,
+          result: {
+            error: error instanceof Error ? error.message : String(error),
+          },
+          reasoning: "llm_selection_error",
+        });
+      }
+      if (trajectoryId && trajectoryLogger) {
+        try {
+          await endAutonomousTick(trajectoryLogger, trajectoryId, "error");
+        } catch {
+          /* best-effort */
+        }
+        trajectoryId = null;
+      }
+
       logger.error(
         "[AutonomousBehavior] Error selecting action:",
         error instanceof Error ? error.message : String(error),
@@ -1711,6 +1996,20 @@ export class AutonomousBehaviorManager {
         decisionPath: "llm",
       });
       return { action: exploreAction, state };
+    } finally {
+      if (trajectoryId && trajectoryLogger) {
+        try {
+          await endAutonomousTick(trajectoryLogger, trajectoryId, "completed", {
+            stepCount: 1,
+            traceId: plannerTraceId,
+            plannerStepId,
+          });
+        } catch {
+          /* best-effort */
+        }
+      }
+      this.activePlannerTraceId = null;
+      this.activePlannerStepId = null;
     }
   }
 
@@ -2145,14 +2444,9 @@ export class AutonomousBehaviorManager {
   private syncThinkingToDashboard(
     thinking: string,
     meta?: {
-      decisionPath?:
-        | "short-circuit"
-        | "llm"
-        | "scripted"
-        | "planner"
-        | "curiosity"
-        | "duel-combat";
+      decisionPath?: HyperscapeDecisionPath;
       providers?: string[];
+      decisionTrace?: HyperscapeDecisionTrace;
     },
   ): void {
     if (!this.service) return;
@@ -2183,12 +2477,45 @@ export class AutonomousBehaviorManager {
         health: healthMeta,
         decisionPath: meta?.decisionPath,
         providers: meta?.providers,
+        decisionTrace: meta?.decisionTrace,
       });
     } catch (error) {
       // Non-critical but worth logging so we can see which agents can't
       // reach the server (typically "Not connected to Hyperscape server").
       logger.warn(
         "[AutonomousBehavior] Could not sync thinking to dashboard:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  private recordDecisionBoundary(
+    trace: HyperscapeDecisionTraceInput,
+    content?: string,
+  ): void {
+    if (!this.service) {
+      return;
+    }
+
+    const traceWithIds: HyperscapeDecisionTraceInput = {
+      ...trace,
+      traceId: trace.traceId ?? this.activePlannerTraceId,
+      plannerStepId: trace.plannerStepId ?? this.activePlannerStepId,
+    };
+    const decisionTrace = this.service.recordDecisionTrace(traceWithIds);
+    if (!decisionTrace || !content || content.trim().length === 0) {
+      return;
+    }
+
+    try {
+      this.service.syncAgentThought("decision", content, {
+        decisionPath: decisionTrace.decisionPath,
+        providers: decisionTrace.providerScope,
+        decisionTrace,
+      });
+    } catch (error) {
+      logger.warn(
+        "[AutonomousBehavior] Could not sync decision boundary:",
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -5225,33 +5552,7 @@ export class AutonomousBehaviorManager {
           if (this.debug)
             logger.debug(`[AutonomousBehavior] Action output: ${content.text}`);
 
-          // Store in memory for learning - use ElizaOS pattern (no manual id/createdAt)
-          try {
-            await this.runtime.createMemory(
-              {
-                entityId: this.runtime.agentId,
-                agentId: this.runtime.agentId,
-                roomId: this.runtime.agentId, // Use agentId as roomId (standard pattern)
-                content: {
-                  text: content.text || "Autonomous action taken",
-                  action: content.action,
-                  source: "autonomous_behavior",
-                },
-              },
-              "messages",
-              false, // not unique
-            );
-
-            if (this.debug) {
-              logger.debug("[AutonomousBehavior] Stored action memory");
-            }
-          } catch (error) {
-            // Memory storage is optional, don't fail the action
-            logger.warn(
-              "[AutonomousBehavior] Could not store memory:",
-              error instanceof Error ? error.message : String(error),
-            );
-          }
+          // Durable traces: Postgres + trajectory logger; dashboard via syncAgentThought below.
 
           // Return empty array - the callback return value is not critical
           return [];
@@ -5281,17 +5582,29 @@ export class AutonomousBehaviorManager {
       }
 
       if (result && typeof result === "object" && "success" in result) {
+        const err = result.error;
+        const resultText =
+          result.text ||
+          (err instanceof Error
+            ? err.message
+            : typeof err === "string"
+              ? err
+              : "") ||
+          "";
+        this.recordDecisionBoundary(
+          {
+            kind: "execution",
+            actionName: action.name,
+            decisionPath: this.lastDecisionPath,
+            providerScope: this.lastProviderScope,
+            valid: result.success,
+            note: resultText || "Action execution completed",
+          },
+          `${action.name} execution ${result.success ? "succeeded" : "failed"}${resultText ? `: ${resultText}` : ""}`,
+        );
+
         // Sync action to server dashboard
         try {
-          const err = result.error;
-          const resultText =
-            result.text ||
-            (err instanceof Error
-              ? err.message
-              : typeof err === "string"
-                ? err
-                : "") ||
-            "";
           const status = result.success ? "OK" : "FAIL";
           this.service?.syncAgentThought(
             "action",

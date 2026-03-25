@@ -51,9 +51,13 @@ declare module "@elizaos/plugin-ollama" {
 }
 
 declare module "@elizaos/plugin-sql" {
-  import type { Plugin } from "@elizaos/core";
+  import type { IDatabaseAdapter, Plugin, UUID } from "@elizaos/core";
 
   export const plugin: Plugin;
+  export function createDatabaseAdapter(
+    config: { dataDir?: string; postgresUrl?: string },
+    agentId: UUID,
+  ): IDatabaseAdapter;
   const _default: Plugin;
   export default _default;
 }
@@ -70,7 +74,39 @@ declare module "@elizaos/plugin-trajectory-logger" {
   import type { Plugin, IAgentRuntime } from "@elizaos/core";
 
   export class TrajectoryLoggerService {
-    startTrajectory(contextId: string): string;
+    static serviceType: string;
+    static resolveFromRuntime(
+      runtime: IAgentRuntime,
+    ): TrajectoryLoggerService | null;
+    static waitForService(
+      runtime: IAgentRuntime,
+      timeoutMs?: number,
+    ): Promise<TrajectoryLoggerService | null>;
+    startTrajectory(
+      agentIdOrStepId: string,
+      options?: Record<string, unknown>,
+    ): Promise<string>;
+    startStep(trajectoryId: string, envState: Record<string, unknown>): string;
+    getCurrentStepId(trajectoryId: string): string | null;
+    completeStep(
+      trajectoryId: string,
+      action: Record<string, unknown>,
+      rewardInfo?: Record<string, unknown>,
+    ): void;
+    endTrajectory(
+      trajectoryId: string,
+      status: string,
+      finalMetrics?: Record<string, unknown>,
+    ): Promise<void>;
+    listTrajectories(options?: Record<string, unknown>): Promise<{
+      trajectories: Array<{ id: string }>;
+      total: number;
+      offset: number;
+      limit: number;
+    }>;
+    getTrajectoryDetail(
+      trajectoryId: string,
+    ): Promise<Record<string, unknown> | null>;
     wrapPlugin(plugin: Plugin): Plugin;
   }
 
@@ -98,20 +134,47 @@ declare module "@elizaos/plugin-trajectory-logger" {
 
   export function clearTrajectoryContext(runtime: IAgentRuntime): void;
 
+  export function startAutonomousTick(
+    trajectoryLogger: TrajectoryLoggerService,
+    context: {
+      agentId: string;
+      source?: string;
+      scenarioId?: string;
+      episodeId?: string;
+      batchId?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<string>;
+
+  export function endAutonomousTick(
+    trajectoryLogger: TrajectoryLoggerService,
+    trajectoryId: string,
+    status?: "completed" | "terminated" | "error" | "timeout",
+    finalMetrics?: Record<string, unknown>,
+  ): Promise<void>;
+
+  export function loggedLLMCall(
+    trajectoryLogger: TrajectoryLoggerService,
+    trajectoryId: string,
+    options: {
+      model: string;
+      modelVersion?: string;
+      systemPrompt: string;
+      userPrompt: string;
+      temperature?: number;
+      maxTokens?: number;
+      purpose?: "action" | "reasoning" | "evaluation" | "response" | "other";
+      actionType?: string;
+    },
+    llmCallFn: () => Promise<{
+      text: string;
+      reasoning?: string;
+      tokens?: { prompt?: number; completion?: number };
+      latencyMs?: number;
+    }>,
+  ): Promise<string>;
+
   export const trajectoryLoggerPlugin: Plugin;
-  const _default: Plugin;
-  export default _default;
-}
-
-declare module "@elizaos/plugin-trajectory-logger" {
-  import type { Plugin } from "@elizaos/core";
-
-  export class TrajectoryLoggerService {
-    wrapPlugin(plugin: Plugin): Plugin;
-  }
-  export class RewardService {}
-
-  export const trajectoryLoggerPlugin: Plugin | undefined;
   const _default: Plugin;
   export default _default;
 }
