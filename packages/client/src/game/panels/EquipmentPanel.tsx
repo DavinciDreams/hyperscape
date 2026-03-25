@@ -657,8 +657,8 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
 
   const renderEquipmentGrid = (isMobile: boolean) => {
     const slotWidth = isMobile ? 34 : 38;
-    const slotHeight = isMobile ? 38 : 42;
-    const portraitWidth = isMobile ? 72 : 84;
+    const slotHeight = isMobile ? 36 : 40;
+    const portraitWidth = isMobile ? 68 : 80;
     const gap = isMobile ? 2 : 3;
     const padding = isMobile ? 2 : 3;
 
@@ -675,7 +675,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           "body . portrait . ring"
           "legs . portrait . gloves"
           "boots . portrait . empty"
-          ". weapon portrait shield ."
+          ". weapon . shield ."
         `,
           gap,
           padding,
@@ -688,7 +688,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           style={{
             gridArea: "portrait",
             minWidth: 0,
-            minHeight: slotHeight * 6 + gap * 5,
+            minHeight: slotHeight * 5 + gap * 4,
           }}
         >
           <EquipmentPaperdollPortrait
