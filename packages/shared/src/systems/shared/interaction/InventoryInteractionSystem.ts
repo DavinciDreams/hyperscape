@@ -88,9 +88,18 @@ export class InventoryInteractionSystem extends SystemBase {
   private elementAbortControllers: Map<HTMLElement, AbortController> =
     new Map();
 
-  // Optimistic inventory rollback (matches InventoryActionDispatcher pattern)
+  // Optimistic inventory rollback (matches InventoryActionDispatcher pattern).
+  // Uses the same "clear all on any INVENTORY_UPDATED" strategy as
+  // InventoryActionDispatcher — the server's inventory packet is a full
+  // snapshot that replaces the client cache entirely, so all pending
+  // rollbacks become moot regardless of which action triggered the update.
   private inventoryTracker = new PendingActionTracker<InventorySnapshot>(5000);
   private prunerInterval: ReturnType<typeof setInterval> | null = null;
+
+  /** Typed accessor for ClientNetwork (this system is client-only). */
+  private get clientNetwork(): ClientNetwork | null {
+    return (this.world.network as ClientNetwork) ?? null;
+  }
 
   constructor(world: World) {
     super(world, {
@@ -124,10 +133,9 @@ export class InventoryInteractionSystem extends SystemBase {
     // Start periodic rollback pruner (same pattern as InventoryActionDispatcher)
     this.prunerInterval = setInterval(() => {
       const rollbacks = this.inventoryTracker.pruneStale();
-      const network = this.world.network as ClientNetwork | null;
       for (const snapshot of rollbacks) {
-        if (!network) continue;
-        network.restoreInventorySnapshot(snapshot);
+        if (!this.clientNetwork) continue;
+        this.clientNetwork.restoreInventorySnapshot(snapshot);
         console.warn(
           "[InventoryInteractionSystem] Optimistic action timed out, rolling back inventory",
         );
@@ -1103,8 +1111,8 @@ export class InventoryInteractionSystem extends SystemBase {
     slot: number,
     quantity: number,
   ): void {
-    const network = this.world.network as ClientNetwork | null;
-    if (!network?.snapshotInventory) return;
+    const network = this.clientNetwork;
+    if (!network) return;
 
     const snapshot = network.snapshotInventory(playerId);
     if (snapshot) this.inventoryTracker.add(snapshot);

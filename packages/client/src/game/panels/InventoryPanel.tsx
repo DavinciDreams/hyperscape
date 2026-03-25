@@ -1020,10 +1020,14 @@ export function InventoryPanel({
     setSlotItems(newSlots);
   }, [items, world]);
 
-  // Direct subscription to INVENTORY_UPDATED events from the world.
-  // This bypasses the React.memo barrier in WindowRenderer/WindowItem that
-  // prevents InventoryPanel from receiving updated `items` props when inventory
-  // changes originate from ECS events (e.g., firemaking log consumption).
+  // TODO: This direct event subscription is a workaround for a React.memo
+  // barrier in WindowRenderer/WindowItem. The real fix is to ensure the
+  // `items` prop reference changes when inventory updates (e.g., by adding
+  // inventory to WindowRenderer's memo deps or fixing panelDataRef to
+  // trigger re-renders). Until then, this creates a dual data path —
+  // slotItems is set both from the `items` prop (above) and from this
+  // event subscription. The event path is the one that actually fires for
+  // ECS-originated changes (e.g., firemaking log consumption).
   useEffect(() => {
     if (!world) return;
 
