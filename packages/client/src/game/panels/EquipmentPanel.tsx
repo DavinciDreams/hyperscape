@@ -634,24 +634,24 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   );
 
   const renderEquipmentGrid = (isMobile: boolean) => {
-    const slotSize = isMobile ? 30 : 32;
-    const centerMin = isMobile ? 52 : 60;
-    const gap = isMobile ? 3 : 4;
-    const padding = isMobile ? 3 : 4;
+    const slotSize = isMobile ? 28 : 30;
+    const portraitWidth = isMobile ? 74 : 84;
+    const gap = isMobile ? 2 : 3;
+    const padding = isMobile ? 2 : 3;
 
     return (
       <div
         data-equipment-grid="paperdoll"
         className="grid h-full"
         style={{
-          gridTemplateColumns: `${slotSize}px minmax(${centerMin}px, 1fr) minmax(${centerMin}px, 1fr) ${slotSize}px`,
+          gridTemplateColumns: `${slotSize}px ${slotSize}px minmax(${portraitWidth}px, 1fr) ${slotSize}px ${slotSize}px`,
           gridTemplateRows: `repeat(5, ${slotSize}px)`,
           gridTemplateAreas: `
-          "cape portrait portrait ammo"
-          "head portrait portrait amulet"
-          "body portrait portrait ring"
-          "legs portrait portrait gloves"
-          "boots weapon shield empty"
+          "cape . portrait . ammo"
+          "head . portrait . amulet"
+          "body . portrait . ring"
+          "legs . portrait . gloves"
+          "boots weapon portrait shield empty"
         `,
           gap,
           padding,
@@ -664,11 +664,12 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           style={{
             gridArea: "portrait",
             minWidth: 0,
-            minHeight: slotSize * 4 + gap * 3 + (isMobile ? 2 : 4),
+            minHeight: slotSize * 5 + gap * 4,
           }}
         >
           <EquipmentPaperdollPortrait
             world={world}
+            equipment={equipment}
             equipmentSignature={equipmentSignature}
             compact={isMobile}
             className="h-full w-full"

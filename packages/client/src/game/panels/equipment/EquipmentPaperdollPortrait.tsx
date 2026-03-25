@@ -1,212 +1,141 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { EventType, THREE, createRenderer } from "@hyperscape/shared";
-import type { WebGPURenderer } from "@hyperscape/shared";
-import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
-import { MeshStandardNodeMaterial } from "three/webgpu";
+import {
+  attachEquipmentVisualToVRM,
+  Emotes,
+  EventType,
+  resolveEquipmentVisualData,
+  resolveEquipmentVisualUrls,
+  removeEquipmentVisual,
+  type EquipmentVisualStore,
+  THREE,
+} from "@hyperscape/shared";
+import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+import type { VRM } from "@pixiv/three-vrm";
 import { useThemeStore } from "@/ui";
 import { getPanelInsetStyle } from "@/ui/theme/themes";
-import type { ClientWorld } from "../../../types";
+import { ThreeResourceManager } from "@/lib/ThreeResourceManager";
+import { createAvatarPreviewViewport } from "@/game/character/avatarPreviewViewport";
+import type { ClientWorld, PlayerEquipmentItems } from "../../../types";
 
 type PortraitMode = "loading" | "live" | "fallback";
 
 interface EquipmentPaperdollPortraitProps {
   world?: ClientWorld;
+  equipment?: PlayerEquipmentItems | null;
   className?: string;
   equipmentSignature?: string;
   compact?: boolean;
 }
 
-interface AvatarCarrier {
-  instance?: {
-    raw?: {
-      scene?: THREE.Object3D;
+interface PreviewAvatarScene {
+  scene?: THREE.Object3D & {
+    visible?: boolean;
+    userData?: {
+      vrm?: VRM;
     };
-  } | null;
+  };
+  userData?: {
+    vrm?: VRM;
+  };
 }
 
-interface PlayerWithLiveAvatar {
-  id?: string;
-  _avatar?: AvatarCarrier;
-  avatar?: AvatarCarrier;
+interface PreviewAvatarInstance {
+  destroy(): void;
+  update(delta: number): void;
+  raw: PreviewAvatarScene;
+  disableRateCheck?: () => void;
+  setEmote?: (emote: string) => void;
+  setEmoteAndWait?: (emote: string, timeoutMs?: number) => Promise<void>;
 }
 
-type MaterialCarrier = THREE.Object3D & {
-  material?: THREE.Material | THREE.Material[];
-  frustumCulled?: boolean;
-};
-
-type StandardLikeMaterial = THREE.Material & {
-  color?: THREE.Color;
-  emissive?: THREE.Color;
-  emissiveIntensity?: number;
-  roughness?: number;
-  metalness?: number;
-  envMapIntensity?: number;
-  opacity?: number;
-  transparent?: boolean;
-  alphaTest?: number;
-  side?: THREE.Side;
-  shadowSide?: THREE.Side | null;
-  map?: THREE.Texture | null;
-  normalMap?: THREE.Texture | null;
-  emissiveMap?: THREE.Texture | null;
-  aoMap?: THREE.Texture | null;
-  roughnessMap?: THREE.Texture | null;
-  metalnessMap?: THREE.Texture | null;
-  alphaMap?: THREE.Texture | null;
-  depthTest?: boolean;
-  depthWrite?: boolean;
-  toneMapped?: boolean;
-  vertexColors?: boolean;
-  wireframe?: boolean;
-  fog?: boolean;
-};
-
-function getLiveAvatarScene(world?: ClientWorld): THREE.Object3D | null {
-  const scenePlayer = world?.entities?.player as PlayerWithLiveAvatar | null;
-  const player = (scenePlayer ??
-    world?.getPlayer()) as PlayerWithLiveAvatar | null;
-  if (!player) return null;
-
-  const localEntity = (
-    player.id ? world?.entities?.get?.(player.id) : null
-  ) as PlayerWithLiveAvatar | null;
-
-  const candidate = localEntity ?? player;
-
-  return (
-    candidate._avatar?.instance?.raw?.scene ??
-    candidate.avatar?.instance?.raw?.scene ??
-    player._avatar?.instance?.raw?.scene ??
-    player.avatar?.instance?.raw?.scene ??
-    null
-  );
+interface PreviewAvatarNode {
+  instance: PreviewAvatarInstance | null;
+  mount?: () => Promise<void>;
+  position: THREE.Vector3;
+  visible: boolean;
+  parent: { matrixWorld: THREE.Matrix4 };
+  activate(ctx: ClientWorld): void;
+  deactivate?: () => void;
 }
 
-function createFreshPortraitMaterial(source: THREE.Material): THREE.Material {
-  const standardSource = source as StandardLikeMaterial;
-  const material = new MeshStandardNodeMaterial();
-
-  material.color = standardSource.color?.clone() ?? new THREE.Color(0xffffff);
-  material.emissive =
-    standardSource.emissive?.clone() ?? new THREE.Color(0x000000);
-  material.emissiveIntensity = standardSource.emissiveIntensity ?? 0;
-  material.roughness = standardSource.roughness ?? 1;
-  material.metalness = standardSource.metalness ?? 0;
-  material.envMapIntensity = standardSource.envMapIntensity ?? 1;
-  material.opacity = standardSource.opacity ?? 1;
-  material.transparent = standardSource.transparent ?? false;
-  material.alphaTest = standardSource.alphaTest ?? 0;
-  material.side = standardSource.side ?? THREE.FrontSide;
-  material.shadowSide = standardSource.shadowSide;
-  material.depthTest = standardSource.depthTest ?? true;
-  material.depthWrite = standardSource.depthWrite ?? true;
-  material.toneMapped = standardSource.toneMapped ?? true;
-  material.vertexColors = standardSource.vertexColors ?? false;
-  material.wireframe = standardSource.wireframe ?? false;
-  material.fog = standardSource.fog ?? true;
-
-  if (standardSource.map) material.map = standardSource.map;
-  if (standardSource.normalMap) material.normalMap = standardSource.normalMap;
-  if (standardSource.emissiveMap) {
-    material.emissiveMap = standardSource.emissiveMap;
-  }
-  if (standardSource.aoMap) material.aoMap = standardSource.aoMap;
-  if (standardSource.roughnessMap) {
-    material.roughnessMap = standardSource.roughnessMap;
-  }
-  if (standardSource.metalnessMap) {
-    material.metalnessMap = standardSource.metalnessMap;
-  }
-  if (standardSource.alphaMap) material.alphaMap = standardSource.alphaMap;
-
-  material.name = source.name;
-  material.blending = source.blending;
-  material.blendSrc = source.blendSrc;
-  material.blendDst = source.blendDst;
-  material.blendEquation = source.blendEquation;
-  material.premultipliedAlpha = source.premultipliedAlpha;
-  material.visible = source.visible;
-  material.userData = { ...source.userData };
-
-  return material;
+interface PlayerWithAvatarUrl {
+  getAvatarUrl?: () => string;
+  data?: {
+    sessionAvatar?: unknown;
+    avatar?: unknown;
+  };
 }
 
-function clonePortraitMaterial(
-  material: THREE.Material | THREE.Material[],
-): THREE.Material | THREE.Material[] {
-  if (Array.isArray(material)) {
-    return material.map((entry) => createFreshPortraitMaterial(entry));
+const previewEquipmentParser = new GLTFLoader();
+previewEquipmentParser.setMeshoptDecoder(MeshoptDecoder);
+
+const previewEquipmentCache = new Map<string, GLTF>();
+
+const PREVIEW_EQUIPMENT_SLOTS: Array<{
+  slot: string;
+  item: keyof PlayerEquipmentItems;
+}> = [
+  { slot: "helmet", item: "helmet" },
+  { slot: "body", item: "body" },
+  { slot: "legs", item: "legs" },
+  { slot: "boots", item: "boots" },
+  { slot: "gloves", item: "gloves" },
+  { slot: "cape", item: "cape" },
+  { slot: "amulet", item: "amulet" },
+  { slot: "ring", item: "ring" },
+  { slot: "weapon", item: "weapon" },
+  { slot: "shield", item: "shield" },
+  { slot: "arrows", item: "arrows" },
+];
+
+function resolvePlayerAvatarUrl(world?: ClientWorld): string | null {
+  const player = (world?.entities?.player ??
+    world?.getPlayer?.()) as PlayerWithAvatarUrl | null;
+
+  if (!player) {
+    return null;
   }
 
-  return createFreshPortraitMaterial(material);
-}
-
-function disposePortraitClone(root: THREE.Object3D | null): void {
-  if (!root) return;
-
-  root.traverse((child) => {
-    const materialCarrier = child as MaterialCarrier;
-    const material = materialCarrier.material;
-    if (!material) return;
-
-    if (Array.isArray(material)) {
-      material.forEach((entry) => entry.dispose());
-      return;
-    }
-
-    material.dispose();
-  });
-}
-
-function buildPortraitClone(sourceScene: THREE.Object3D): THREE.Object3D {
-  const clone = SkeletonUtils.clone(sourceScene) as THREE.Object3D;
-  clone.scale.copy(sourceScene.scale);
-  clone.visible = true;
-  const silhouettes: THREE.Object3D[] = [];
-
-  clone.traverse((child) => {
-    if (child.name.startsWith("Silhouette_")) {
-      silhouettes.push(child);
-    }
-
-    child.castShadow = false;
-    child.receiveShadow = false;
-
-    const materialCarrier = child as MaterialCarrier;
-    if (materialCarrier.material) {
-      materialCarrier.material = clonePortraitMaterial(
-        materialCarrier.material,
-      );
-      materialCarrier.frustumCulled = false;
-    }
-
-    if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
-      child.visible = true;
-    }
-
-    child.layers.enableAll();
-  });
-
-  silhouettes.forEach((node) => node.parent?.remove(node));
-
-  clone.position.set(0, 0, 0);
-  clone.quaternion.identity();
-  clone.rotation.set(0, 0, 0);
-  clone.updateMatrixWorld(true);
-
-  const initialBox = new THREE.Box3().setFromObject(clone);
-  if (initialBox.isEmpty()) {
-    return clone;
+  if (typeof player.getAvatarUrl === "function") {
+    return player.getAvatarUrl();
   }
 
-  const center = initialBox.getCenter(new THREE.Vector3());
-  clone.position.x -= center.x;
-  clone.position.z -= center.z;
-  clone.position.y -= initialBox.min.y;
-  clone.updateMatrixWorld(true);
+  const sessionAvatar = player.data?.sessionAvatar;
+  if (typeof sessionAvatar === "string" && sessionAvatar.length > 0) {
+    return sessionAvatar;
+  }
 
-  return clone;
+  const avatar = player.data?.avatar;
+  if (typeof avatar === "string" && avatar.length > 0) {
+    return avatar;
+  }
+
+  return null;
+}
+
+function getPreviewVRM(instance: PreviewAvatarInstance | null): VRM | null {
+  if (!instance?.raw) {
+    return null;
+  }
+
+  const rawScene = instance.raw.scene;
+  const fromUserData = rawScene?.userData?.vrm ?? instance.raw.userData?.vrm;
+  if (fromUserData?.scene && fromUserData.humanoid) {
+    return fromUserData;
+  }
+
+  const rawCandidate = instance.raw as unknown as VRM;
+  if (rawCandidate.scene && rawCandidate.humanoid) {
+    return rawCandidate;
+  }
+
+  return null;
+}
+
+function clearPreviewVisuals(visuals: EquipmentVisualStore): void {
+  Object.keys(visuals).forEach((slot) => removeEquipmentVisual(visuals, slot));
 }
 
 function framePortraitAvatar(
@@ -217,23 +146,94 @@ function framePortraitAvatar(
 
   const box = new THREE.Box3().setFromObject(avatarRoot);
   if (box.isEmpty()) {
-    camera.position.set(0, 1.25, 2.8);
-    camera.lookAt(0, 1.1, 0);
+    camera.position.set(0, 1.15, 2.7);
+    camera.lookAt(0, 1.05, 0);
     return;
   }
 
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
-  const height = Math.max(size.y, 1.5);
-  const width = Math.max(size.x, 0.8);
-  const distance = Math.max(1.9, height * 0.94, width * 1.6);
-  const lookY = center.y + height * 0.03;
+  const height = Math.max(size.y, 1.6);
+  const width = Math.max(size.x, 0.7);
+  const distance = Math.max(1.85, height * 0.9, width * 1.45);
+  const lookY = center.y + height * 0.05;
 
   camera.position.set(0, lookY, distance);
   camera.lookAt(0, lookY, 0);
   camera.near = 0.1;
   camera.far = Math.max(12, distance + height * 3);
   camera.updateProjectionMatrix();
+}
+
+async function loadPreviewEquipmentVisuals(options: {
+  world: ClientWorld;
+  equipment: PlayerEquipmentItems | null | undefined;
+  vrm: VRM;
+  avatarRoot: THREE.Object3D;
+  visuals: EquipmentVisualStore;
+}): Promise<void> {
+  const { world, equipment, vrm, avatarRoot, visuals } = options;
+  const assetsUrl = world.assetsUrl?.replace(/\/$/, "") || "";
+
+  for (const entry of PREVIEW_EQUIPMENT_SLOTS) {
+    const equippedItem = equipment?.[entry.item];
+    if (!equippedItem?.id) {
+      continue;
+    }
+
+    const itemData = resolveEquipmentVisualData({
+      itemId: equippedItem.id,
+    });
+    const urls = resolveEquipmentVisualUrls({
+      assetsUrl,
+      itemId: equippedItem.id,
+      slot: entry.slot,
+      itemData,
+    });
+
+    if (!urls) {
+      continue;
+    }
+
+    let gltf = previewEquipmentCache.get(equippedItem.id);
+    if (!gltf) {
+      let file: File | undefined;
+
+      try {
+        file = world.loader
+          ? await world.loader.loadFile(urls.primaryUrl)
+          : undefined;
+      } catch (error) {
+        if (urls.fallbackUrl) {
+          file = world.loader
+            ? await world.loader.loadFile(urls.fallbackUrl)
+            : undefined;
+        } else {
+          throw error;
+        }
+      }
+
+      if (!file) {
+        continue;
+      }
+
+      const buffer = await file.arrayBuffer();
+      gltf = (await previewEquipmentParser.parseAsync(
+        buffer,
+        urls.primaryUrl,
+      )) as GLTF;
+      previewEquipmentCache.set(equippedItem.id, gltf);
+    }
+
+    const modelRoot = gltf.scene.clone(true);
+    attachEquipmentVisualToVRM({
+      slot: entry.slot,
+      modelRoot,
+      visuals,
+      vrm,
+      avatarRoot,
+    });
+  }
 }
 
 function PortraitFallback({
@@ -251,15 +251,15 @@ function PortraitFallback({
       data-portrait-fallback="true"
       className="absolute inset-0 flex items-center justify-center"
       style={{
-        opacity: mode === "loading" ? 0.7 : 1,
+        opacity: isLoading ? 0.9 : 1,
         transition: "opacity 160ms ease",
       }}
     >
       <div
         className="relative flex items-center justify-center"
         style={{
-          width: compact ? "86%" : "82%",
-          height: compact ? "92%" : "94%",
+          width: compact ? "84%" : "82%",
+          height: compact ? "96%" : "97%",
           borderRadius: compact ? 16 : 20,
           ...getPanelInsetStyle(theme, {
             emphasis: "strong",
@@ -268,18 +268,17 @@ function PortraitFallback({
           padding: 0,
           background:
             theme.name === "hyperscape"
-              ? "radial-gradient(circle at 50% 16%, rgba(190, 165, 123, 0.12), transparent 58%), linear-gradient(180deg, rgba(30, 35, 42, 0.95) 0%, rgba(18, 21, 26, 0.98) 100%)"
+              ? "radial-gradient(circle at 50% 12%, rgba(190, 165, 123, 0.12), transparent 54%), linear-gradient(180deg, rgba(30, 35, 42, 0.95) 0%, rgba(18, 21, 26, 0.98) 100%)"
               : undefined,
         }}
       >
         <div
-          className="absolute inset-x-[12%] bottom-[10%] top-[7%]"
+          className="absolute inset-x-[10%] bottom-[6%] top-[5%]"
           style={{
             borderRadius: compact ? 16 : 22,
             border: `1px solid ${theme.colors.border.default}55`,
-            background: isLoading
-              ? "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.08) 100%)"
-              : "linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(0,0,0,0.12) 100%)",
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.12) 100%)",
             boxShadow:
               "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -16px 24px rgba(0,0,0,0.18)",
           }}
@@ -288,16 +287,16 @@ function PortraitFallback({
         {isLoading ? (
           <>
             <div
-              className="absolute inset-x-[24%] top-[18%] h-[18%] rounded-full"
+              className="absolute inset-x-[22%] top-[16%] h-[20%] rounded-full"
               style={{
-                background: `radial-gradient(circle at center, ${theme.colors.accent.primary}18 0%, transparent 72%)`,
+                background: `radial-gradient(circle at center, ${theme.colors.accent.primary}18 0%, transparent 74%)`,
               }}
             />
             <div
-              className="absolute inset-x-[18%] bottom-[16%] top-[28%] rounded-[22px]"
+              className="absolute inset-x-[18%] bottom-[12%] top-[24%] rounded-[20px]"
               style={{
                 border: `1px dashed ${theme.colors.border.hover}`,
-                opacity: 0.55,
+                opacity: 0.5,
               }}
             />
           </>
@@ -308,81 +307,64 @@ function PortraitFallback({
               style={{
                 width: compact ? 34 : 42,
                 height: compact ? 34 : 42,
-                top: compact ? "10%" : "8%",
+                top: compact ? "8%" : "7%",
                 background:
                   "linear-gradient(180deg, rgba(224, 197, 143, 0.95), rgba(154, 118, 71, 0.95))",
                 boxShadow: "0 10px 18px rgba(0,0,0,0.22)",
               }}
             />
-
             <div
               className="absolute rounded-[24px]"
               style={{
                 width: compact ? 46 : 56,
-                height: compact ? 78 : 98,
-                top: compact ? "24%" : "22%",
+                height: compact ? 82 : 106,
+                top: compact ? "20%" : "19%",
                 background:
                   "linear-gradient(180deg, rgba(72, 105, 63, 0.95), rgba(44, 68, 42, 0.98))",
                 boxShadow: "0 12px 20px rgba(0,0,0,0.22)",
               }}
             />
-
-            <div
-              className="absolute rounded-[14px]"
-              style={{
-                width: compact ? 82 : 102,
-                height: compact ? 16 : 18,
-                top: compact ? "39%" : "38%",
-                background:
-                  "linear-gradient(90deg, rgba(213, 171, 97, 0) 0%, rgba(213, 171, 97, 0.75) 24%, rgba(213, 171, 97, 0.75) 76%, rgba(213, 171, 97, 0) 100%)",
-                opacity: 0.32,
-              }}
-            />
-
             <div
               className="absolute rounded-full"
               style={{
                 width: compact ? 14 : 18,
-                height: compact ? 62 : 78,
-                left: compact ? "26%" : "24%",
-                top: compact ? "28%" : "27%",
+                height: compact ? 72 : 88,
+                left: compact ? "25%" : "24%",
+                top: compact ? "25%" : "24%",
                 transform: "rotate(10deg)",
                 background:
                   "linear-gradient(180deg, rgba(210, 171, 130, 0.9), rgba(154, 112, 83, 0.96))",
               }}
             />
-
             <div
               className="absolute rounded-full"
               style={{
                 width: compact ? 14 : 18,
-                height: compact ? 62 : 78,
-                right: compact ? "26%" : "24%",
-                top: compact ? "28%" : "27%",
+                height: compact ? 72 : 88,
+                right: compact ? "25%" : "24%",
+                top: compact ? "25%" : "24%",
                 transform: "rotate(-10deg)",
                 background:
                   "linear-gradient(180deg, rgba(210, 171, 130, 0.9), rgba(154, 112, 83, 0.96))",
               }}
             />
-
             <div
               className="absolute rounded-full"
               style={{
                 width: compact ? 16 : 20,
-                height: compact ? 90 : 112,
-                left: compact ? "41%" : "40%",
+                height: compact ? 96 : 118,
+                left: compact ? "40%" : "39%",
                 bottom: compact ? "8%" : "6%",
                 background:
                   "linear-gradient(180deg, rgba(44, 59, 85, 0.95), rgba(24, 34, 52, 0.98))",
               }}
             />
-
             <div
               className="absolute rounded-full"
               style={{
                 width: compact ? 16 : 20,
-                height: compact ? 90 : 112,
-                right: compact ? "41%" : "40%",
+                height: compact ? 96 : 118,
+                right: compact ? "40%" : "39%",
                 bottom: compact ? "8%" : "6%",
                 background:
                   "linear-gradient(180deg, rgba(44, 59, 85, 0.95), rgba(24, 34, 52, 0.98))",
@@ -390,17 +372,6 @@ function PortraitFallback({
             />
           </>
         )}
-
-        <div
-          className="absolute"
-          style={{
-            inset: 0,
-            borderRadius: compact ? 18 : 26,
-            background:
-              "radial-gradient(circle at 50% 12%, rgba(255,255,255,0.16), rgba(255,255,255,0) 34%)",
-            pointerEvents: "none",
-          }}
-        />
       </div>
     </div>
   );
@@ -409,6 +380,7 @@ function PortraitFallback({
 export const EquipmentPaperdollPortrait = React.memo(
   function EquipmentPaperdollPortrait({
     world,
+    equipment,
     className = "",
     equipmentSignature = "",
     compact = false,
@@ -416,19 +388,107 @@ export const EquipmentPaperdollPortrait = React.memo(
     const theme = useThemeStore((s) => s.theme);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    const rendererRef = useRef<WebGPURenderer | null>(null);
-    const sceneRef = useRef<THREE.Scene | null>(null);
-    const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-    const avatarRootRef = useRef<THREE.Object3D | null>(null);
-    const frameRef = useRef<number>(0);
+    const viewportRef = useRef<Awaited<
+      ReturnType<typeof createAvatarPreviewViewport>
+    > | null>(null);
+    const avatarNodeRef = useRef<PreviewAvatarNode | null>(null);
+    const avatarSceneRef = useRef<THREE.Object3D | null>(null);
+    const previewVisualsRef = useRef<EquipmentVisualStore>({});
     const [rendererReady, setRendererReady] = useState(false);
     const [mode, setMode] = useState<PortraitMode>("fallback");
     const [refreshNonce, setRefreshNonce] = useState(0);
 
-    const signature = useMemo(
-      () => `${equipmentSignature}|${compact ? "compact" : "full"}`,
-      [compact, equipmentSignature],
+    const avatarUrl = useMemo(
+      () => resolvePlayerAvatarUrl(world),
+      [world, refreshNonce],
     );
+
+    const signature = useMemo(
+      () =>
+        `${avatarUrl ?? "no-avatar"}|${equipmentSignature}|${compact ? "compact" : "full"}`,
+      [avatarUrl, compact, equipmentSignature],
+    );
+
+    const clearPreviewAvatar = () => {
+      clearPreviewVisuals(previewVisualsRef.current);
+      previewVisualsRef.current = {};
+
+      const avatarScene = avatarSceneRef.current;
+      const avatarNode = avatarNodeRef.current;
+
+      avatarNode?.deactivate?.();
+
+      if (avatarScene) {
+        ThreeResourceManager.disposeObject(avatarScene, {
+          disposeGeometry: false,
+          disposeTextures: false,
+          disposeMaterial: true,
+          removeFromParent: false,
+        });
+      }
+
+      avatarSceneRef.current = null;
+      avatarNodeRef.current = null;
+    };
+
+    useEffect(() => {
+      const container = containerRef.current;
+      const canvas = canvasRef.current;
+
+      if (!container || !canvas) {
+        return;
+      }
+
+      let cancelled = false;
+      let resizeObserver: ResizeObserver | null = null;
+
+      createAvatarPreviewViewport({
+        container,
+        canvas,
+        cameraPosition: new THREE.Vector3(0, 1.32, 2.95),
+      })
+        .then((viewport) => {
+          if (cancelled) {
+            viewport.dispose();
+            return;
+          }
+
+          viewportRef.current = viewport;
+          viewport.start((delta) => {
+            avatarNodeRef.current?.instance?.update(delta);
+          });
+          setRendererReady(true);
+
+          if (typeof ResizeObserver !== "undefined") {
+            resizeObserver = new ResizeObserver(() => viewport.resize());
+            resizeObserver.observe(container);
+          } else {
+            window.addEventListener("resize", viewport.resize);
+          }
+        })
+        .catch((error) => {
+          console.error(
+            "[EquipmentPaperdollPortrait] Failed to initialize preview viewport:",
+            error,
+          );
+          if (!cancelled) {
+            setMode("fallback");
+            setRendererReady(false);
+          }
+        });
+
+      return () => {
+        cancelled = true;
+        resizeObserver?.disconnect();
+        if (viewportRef.current) {
+          window.removeEventListener("resize", viewportRef.current.resize);
+        }
+        clearPreviewAvatar();
+        viewportRef.current?.dispose();
+        viewportRef.current = null;
+        setRendererReady(false);
+      };
+    }, []);
 
     useEffect(() => {
       if (!world) {
@@ -436,170 +496,136 @@ export const EquipmentPaperdollPortrait = React.memo(
         return;
       }
 
-      setMode("loading");
       const triggerRefresh = () => setRefreshNonce((current) => current + 1);
       triggerRefresh();
 
-      const timers = [120, 420, 1100].map((delay) =>
-        window.setTimeout(triggerRefresh, delay),
-      );
-
-      const handleAvatarReady = () => triggerRefresh();
-
-      world.on(EventType.AVATAR_LOAD_COMPLETE, handleAvatarReady, undefined);
+      world.on(EventType.AVATAR_LOAD_COMPLETE, triggerRefresh, undefined);
 
       return () => {
-        timers.forEach((timerId) => window.clearTimeout(timerId));
         world.off(
           EventType.AVATAR_LOAD_COMPLETE,
-          handleAvatarReady,
+          triggerRefresh,
           undefined,
           undefined,
         );
       };
-    }, [signature, world]);
+    }, [equipmentSignature, world]);
 
     useEffect(() => {
-      if (!world || !canvasRef.current || !containerRef.current) {
+      if (!world || !rendererReady || !viewportRef.current) {
         return;
       }
 
       let cancelled = false;
 
-      const scene = new THREE.Scene();
-      sceneRef.current = scene;
+      const buildPortrait = async () => {
+        const viewport = viewportRef.current;
+        setMode("loading");
+        clearPreviewAvatar();
 
-      const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
-      camera.layers.enableAll();
-      cameraRef.current = camera;
-
-      const ambient = new THREE.AmbientLight(0xf5e8cf, 1.35);
-      const key = new THREE.DirectionalLight(0xfff2d1, 1.45);
-      key.position.set(1.3, 2.2, 3.2);
-      const fill = new THREE.DirectionalLight(0x9ab7ff, 0.35);
-      fill.position.set(-1.8, 1.4, 2.4);
-      const rim = new THREE.DirectionalLight(0xf0c98b, 0.6);
-      rim.position.set(0.5, 2.6, -1.8);
-
-      scene.add(ambient, key, fill, rim);
-
-      const resize = () => {
-        if (
-          !containerRef.current ||
-          !rendererRef.current ||
-          !cameraRef.current
-        ) {
+        if (!world.loader || !avatarUrl || !viewport) {
+          setMode("fallback");
           return;
         }
 
-        const bounds = containerRef.current.getBoundingClientRect();
-        const width = Math.max(1, Math.floor(bounds.width));
-        const height = Math.max(1, Math.floor(bounds.height));
+        try {
+          const loadedAvatar = (await world.loader.load(
+            "avatar",
+            avatarUrl,
+          )) as {
+            toNodes: (
+              customHooks?: Record<string, unknown>,
+            ) => Map<string, unknown>;
+          };
 
-        rendererRef.current.setSize(width, height);
-        cameraRef.current.aspect = width / height;
-        cameraRef.current.updateProjectionMatrix();
-      };
-
-      const renderFrame = () => {
-        if (!rendererRef.current || !sceneRef.current || !cameraRef.current) {
-          return;
-        }
-
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-        frameRef.current = window.requestAnimationFrame(renderFrame);
-      };
-
-      createRenderer({
-        canvas: canvasRef.current,
-        alpha: true,
-        antialias: true,
-      })
-        .then((renderer) => {
           if (cancelled) {
-            renderer.dispose();
             return;
           }
 
-          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-          rendererRef.current = renderer;
-          setRendererReady(true);
-          resize();
-          frameRef.current = window.requestAnimationFrame(renderFrame);
-        })
-        .catch((error) => {
+          const avatarNode = loadedAvatar
+            .toNodes({
+              scene: viewport.scene,
+              loader: world.loader,
+            })
+            .get("avatar") as PreviewAvatarNode | undefined;
+
+          if (!avatarNode) {
+            setMode("fallback");
+            return;
+          }
+
+          avatarNode.parent = { matrixWorld: new THREE.Matrix4() };
+          avatarNode.position.set(0, 0, 0);
+          avatarNode.activate(world);
+          await avatarNode.mount?.();
+
+          if (cancelled) {
+            avatarNode.deactivate?.();
+            return;
+          }
+
+          const avatarInstance = avatarNode.instance;
+          const avatarScene = avatarInstance?.raw?.scene;
+          const vrm = getPreviewVRM(avatarInstance ?? null);
+
+          if (!avatarInstance || !avatarScene || !vrm) {
+            avatarNode.deactivate?.();
+            setMode("fallback");
+            return;
+          }
+
+          avatarNodeRef.current = avatarNode;
+          avatarSceneRef.current = avatarScene;
+          avatarInstance.disableRateCheck?.();
+
+          avatarNode.visible = false;
+          avatarScene.visible = false;
+
+          if (avatarInstance.setEmoteAndWait) {
+            await avatarInstance.setEmoteAndWait(Emotes.IDLE, 3000);
+          } else {
+            avatarInstance.setEmote?.(Emotes.IDLE);
+          }
+
+          if (cancelled) {
+            return;
+          }
+
+          await loadPreviewEquipmentVisuals({
+            world,
+            equipment,
+            vrm,
+            avatarRoot: avatarScene,
+            visuals: previewVisualsRef.current,
+          });
+
+          if (cancelled) {
+            return;
+          }
+
+          avatarNode.visible = true;
+          avatarScene.visible = true;
+          framePortraitAvatar(avatarScene, viewport.camera);
+          viewport.resize();
+          setMode("live");
+        } catch (error) {
           console.error(
-            "[EquipmentPaperdollPortrait] Failed to create renderer:",
+            "[EquipmentPaperdollPortrait] Failed to build preview avatar:",
             error,
           );
           if (!cancelled) {
-            setRendererReady(false);
             setMode("fallback");
           }
-        });
+        }
+      };
 
-      let resizeObserver: ResizeObserver | null = null;
-      if (typeof ResizeObserver !== "undefined") {
-        resizeObserver = new ResizeObserver(() => resize());
-        resizeObserver.observe(containerRef.current);
-      } else {
-        window.addEventListener("resize", resize);
-      }
+      void buildPortrait();
 
       return () => {
         cancelled = true;
-        if (frameRef.current) {
-          window.cancelAnimationFrame(frameRef.current);
-        }
-        resizeObserver?.disconnect();
-        window.removeEventListener("resize", resize);
-        disposePortraitClone(avatarRootRef.current);
-        avatarRootRef.current?.parent?.remove(avatarRootRef.current);
-        avatarRootRef.current = null;
-        rendererRef.current?.dispose();
-        rendererRef.current = null;
-        sceneRef.current = null;
-        cameraRef.current = null;
-        setRendererReady(false);
+        clearPreviewAvatar();
       };
-    }, [world]);
-
-    useEffect(() => {
-      if (!rendererReady || !sceneRef.current || !cameraRef.current) {
-        return;
-      }
-
-      setMode("loading");
-      disposePortraitClone(avatarRootRef.current);
-      avatarRootRef.current?.parent?.remove(avatarRootRef.current);
-      avatarRootRef.current = null;
-
-      const sourceScene = getLiveAvatarScene(world);
-      if (!sourceScene) {
-        setMode("fallback");
-        return;
-      }
-
-      try {
-        const portraitClone = buildPortraitClone(sourceScene);
-        const bounds = new THREE.Box3().setFromObject(portraitClone);
-        if (bounds.isEmpty()) {
-          setMode("loading");
-          return;
-        }
-
-        sceneRef.current.add(portraitClone);
-        avatarRootRef.current = portraitClone;
-        framePortraitAvatar(portraitClone, cameraRef.current);
-        setMode("live");
-      } catch (error) {
-        console.error(
-          "[EquipmentPaperdollPortrait] Failed to build portrait clone:",
-          error,
-        );
-        setMode("fallback");
-      }
-    }, [refreshNonce, rendererReady, signature, world]);
+    }, [avatarUrl, equipment, rendererReady, signature, world]);
 
     return (
       <div
@@ -608,10 +634,10 @@ export const EquipmentPaperdollPortrait = React.memo(
         data-portrait-mode={mode}
         className={`relative overflow-hidden ${className}`}
         style={{
-          borderRadius: compact ? 14 : 18,
+          borderRadius: compact ? 16 : 20,
           ...getPanelInsetStyle(theme, {
             emphasis: "strong",
-            radius: compact ? 14 : 18,
+            radius: compact ? 16 : 20,
           }),
           padding: 0,
           background:

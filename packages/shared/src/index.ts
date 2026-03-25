@@ -398,6 +398,19 @@ export type {
 
 // Export prayer data provider for UI panels
 export { prayerDataProvider } from "./data/PrayerDataProvider";
+export {
+  attachEquipmentVisualToVRM,
+  extractEquipmentAttachmentData,
+  removeEquipmentVisual,
+  resolveEquipmentVisualData,
+  resolveEquipmentVisualUrls,
+} from "./systems/client/EquipmentVisualHelpers";
+export type {
+  EquipmentAttachmentData,
+  EquipmentVisualModelData,
+  EquipmentVisualStore,
+  EquipmentVisualUrlResolution,
+} from "./systems/client/EquipmentVisualHelpers";
 
 // Export spell service for magic combat
 export { spellService } from "./systems/shared/combat/SpellService";
