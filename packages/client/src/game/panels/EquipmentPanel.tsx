@@ -657,7 +657,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
 
   const renderEquipmentGrid = (isMobile: boolean) => {
     const slotWidth = isMobile ? 34 : 38;
-    const slotHeight = isMobile ? 34 : 38;
+    const slotHeight = isMobile ? 32 : 36;
     const portraitWidth = isMobile ? 66 : 78;
     const gap = isMobile ? 2 : 3;
     const padding = isMobile ? 2 : 3;

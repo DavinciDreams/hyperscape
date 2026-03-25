@@ -16,12 +16,14 @@ export async function createAvatarPreviewViewport(options: {
   canvas: HTMLCanvasElement;
   cameraPosition?: THREE.Vector3;
   fov?: number;
+  adjustCameraDepth?: boolean;
 }): Promise<AvatarPreviewViewport> {
   const {
     container,
     canvas,
     cameraPosition = new THREE.Vector3(0, 1.4, 3.0),
     fov = 30,
+    adjustCameraDepth = true,
   } = options;
 
   const scene = new THREE.Scene();
@@ -64,10 +66,10 @@ export async function createAvatarPreviewViewport(options: {
     const aspect = width / height;
     camera.aspect = aspect;
 
-    if (aspect < baseAspect) {
+    if (adjustCameraDepth && aspect < baseAspect) {
       const zoomFactor = baseAspect / aspect;
       camera.position.z = baseCameraZ * Math.min(zoomFactor, 1.5);
-    } else {
+    } else if (adjustCameraDepth) {
       camera.position.z = baseCameraZ;
     }
 

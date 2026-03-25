@@ -155,8 +155,8 @@ function framePortraitAvatar(
   const center = box.getCenter(new THREE.Vector3());
   const height = Math.max(size.y, 1.6);
   const width = Math.max(size.x, 0.7);
-  const distance = Math.max(2.28, height * 1.12, width * 1.92);
-  const lookY = center.y - height * 0.05;
+  const distance = Math.max(2.18, height * 1.08, width * 1.84);
+  const lookY = center.y - height * 0.08;
 
   camera.position.set(center.x, lookY, -distance);
   camera.lookAt(center.x, lookY, center.z);
@@ -446,6 +446,7 @@ export const EquipmentPaperdollPortrait = React.memo(
         container,
         canvas,
         cameraPosition: new THREE.Vector3(0, 1.32, 2.95),
+        adjustCameraDepth: false,
       })
         .then((viewport) => {
           if (cancelled) {
@@ -612,8 +613,8 @@ export const EquipmentPaperdollPortrait = React.memo(
 
           avatarNode.visible = true;
           avatarScene.visible = true;
-          framePortraitAvatar(avatarScene, viewport.camera);
           viewport.resize();
+          framePortraitAvatar(avatarScene, viewport.camera);
           setMode("live");
         } catch (error) {
           console.error(
