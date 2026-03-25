@@ -695,101 +695,41 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           {renderEquipmentGrid(shouldUseMobileUI)}
         </div>
 
-        {shouldUseMobileUI ? (
-          <>
-            <div
-              className="flex justify-center gap-3 py-1"
-              style={{
-                background:
-                  "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
-                borderRadius: `${theme.borderRadius.md}px`,
-                border: `1px solid ${theme.colors.border.default}66`,
-                fontSize: "9px",
-                boxShadow: theme.shadows.sm,
-              }}
-            >
-              <span style={{ color: theme.colors.state.danger }}>
-                ⚔️ {totalBonuses.attack}
-              </span>
-              <span style={{ color: theme.colors.state.success }}>
-                🛡️ {totalBonuses.defense}
-              </span>
-              <span style={{ color: theme.colors.state.warning }}>
-                💪 {totalBonuses.strength}
-              </span>
-            </div>
+        <div
+          className="flex justify-center gap-4 py-1"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
+            borderRadius: `${theme.borderRadius.md}px`,
+            border: `1px solid ${theme.colors.border.default}66`,
+            fontSize: "9px",
+            boxShadow: theme.shadows.sm,
+          }}
+        >
+          <span style={{ color: "#cb6c67" }}>{totalBonuses.attack}</span>
+          <span style={{ color: "#5ca97f" }}>{totalBonuses.defense}</span>
+          <span style={{ color: "#5d8fcb" }}>{totalBonuses.strength}</span>
+        </div>
 
-            <div
-              className="flex items-center gap-2 px-2 py-1"
-              style={{
-                background:
-                  "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
-                borderRadius: `${theme.borderRadius.sm}px`,
-                border: `1px solid ${theme.colors.border.default}66`,
-                boxShadow: `${theme.shadows.sm}, inset 1px 1px 3px rgba(0, 0, 0, 0.3)`,
-              }}
-            >
-              <UtilityButton
-                icon={<StatsIcon className="w-full h-full" />}
-                label="Stats"
-                onClick={handleOpenStats}
-                compact
-              />
-              <UtilityButton
-                icon={<DeathIcon className="w-full h-full" />}
-                label="Death"
-                onClick={handleOpenDeath}
-                compact
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            <div
-              className="flex justify-center gap-3 py-1"
-              style={{
-                background:
-                  "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
-                borderRadius: `${theme.borderRadius.md}px`,
-                border: `1px solid ${theme.colors.border.default}66`,
-                fontSize: "9px",
-                boxShadow: theme.shadows.sm,
-              }}
-            >
-              <span style={{ color: theme.colors.state.danger }}>
-                ⚔️ {totalBonuses.attack}
-              </span>
-              <span style={{ color: theme.colors.state.success }}>
-                🛡️ {totalBonuses.defense}
-              </span>
-              <span style={{ color: theme.colors.state.warning }}>
-                💪 {totalBonuses.strength}
-              </span>
-            </div>
-
-            <div
-              className="flex items-center gap-2 px-2 py-1"
-              style={{
-                background:
-                  "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
-                borderRadius: `${theme.borderRadius.md}px`,
-                border: `1px solid ${theme.colors.border.default}66`,
-                boxShadow: theme.shadows.sm,
-              }}
-            >
-              <UtilityButton
-                icon={<StatsIcon className="w-full h-full" />}
-                label="Stats"
-                onClick={handleOpenStats}
-              />
-              <UtilityButton
-                icon={<DeathIcon className="w-full h-full" />}
-                label="Death"
-                onClick={handleOpenDeath}
-              />
-            </div>
-          </>
-        )}
+        <div
+          className="flex items-center gap-2 px-1"
+          style={{
+            minHeight: shouldUseMobileUI ? 36 : 40,
+          }}
+        >
+          <UtilityButton
+            icon={<StatsIcon className="w-full h-full" />}
+            label="Stats"
+            onClick={handleOpenStats}
+            compact={shouldUseMobileUI}
+          />
+          <UtilityButton
+            icon={<DeathIcon className="w-full h-full" />}
+            label="Death"
+            onClick={handleOpenDeath}
+            compact={shouldUseMobileUI}
+          />
+        </div>
       </div>
 
       {/* Enhanced hover tooltip - rendered via portal */}

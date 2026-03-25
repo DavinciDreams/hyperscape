@@ -27,6 +27,11 @@ interface PlayerWithLiveAvatar {
   avatar?: AvatarCarrier;
 }
 
+type MaterialCarrier = THREE.Object3D & {
+  material?: THREE.Material | THREE.Material[];
+  frustumCulled?: boolean;
+};
+
 function getLiveAvatarScene(world?: ClientWorld): THREE.Object3D | null {
   const player = world?.getPlayer() as PlayerWithLiveAvatar | null;
   if (!player) return null;
@@ -36,6 +41,33 @@ function getLiveAvatarScene(world?: ClientWorld): THREE.Object3D | null {
     player.avatar?.instance?.raw?.scene ??
     null
   );
+}
+
+function cloneMaterial(
+  material: THREE.Material | THREE.Material[],
+): THREE.Material | THREE.Material[] {
+  if (Array.isArray(material)) {
+    return material.map((entry) => entry.clone());
+  }
+
+  return material.clone();
+}
+
+function disposePortraitClone(root: THREE.Object3D | null): void {
+  if (!root) return;
+
+  root.traverse((child) => {
+    const materialCarrier = child as MaterialCarrier;
+    const material = materialCarrier.material;
+    if (!material) return;
+
+    if (Array.isArray(material)) {
+      material.forEach((entry) => entry.dispose());
+      return;
+    }
+
+    material.dispose();
+  });
 }
 
 function buildPortraitClone(sourceScene: THREE.Object3D): THREE.Object3D {
@@ -49,6 +81,12 @@ function buildPortraitClone(sourceScene: THREE.Object3D): THREE.Object3D {
 
     child.castShadow = false;
     child.receiveShadow = false;
+
+    const materialCarrier = child as MaterialCarrier;
+    if (materialCarrier.material) {
+      materialCarrier.material = cloneMaterial(materialCarrier.material);
+      materialCarrier.frustumCulled = false;
+    }
   });
 
   silhouettes.forEach((node) => node.parent?.remove(node));
@@ -270,6 +308,7 @@ export const EquipmentPaperdollPortrait = React.memo(
         return;
       }
 
+      setMode("loading");
       const triggerRefresh = () => setRefreshNonce((current) => current + 1);
       triggerRefresh();
 
@@ -385,6 +424,7 @@ export const EquipmentPaperdollPortrait = React.memo(
         }
         resizeObserver?.disconnect();
         window.removeEventListener("resize", resize);
+        disposePortraitClone(avatarRootRef.current);
         avatarRootRef.current?.parent?.remove(avatarRootRef.current);
         avatarRootRef.current = null;
         rendererRef.current?.dispose();
@@ -400,6 +440,8 @@ export const EquipmentPaperdollPortrait = React.memo(
         return;
       }
 
+      setMode("loading");
+      disposePortraitClone(avatarRootRef.current);
       avatarRootRef.current?.parent?.remove(avatarRootRef.current);
       avatarRootRef.current = null;
 
