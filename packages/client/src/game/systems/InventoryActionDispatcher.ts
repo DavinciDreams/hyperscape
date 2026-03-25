@@ -15,9 +15,7 @@ import {
   EventType,
   uuid,
   getItem,
-  PendingActionTracker,
   type Item,
-  type InventorySnapshot,
   type ClientNetwork,
 } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
@@ -36,85 +34,6 @@ export interface ActionResult {
 
 /** Actions that are intentionally no-ops (don't warn) */
 const SILENT_ACTIONS = new Set(["cancel"]);
-
-/** Tracks optimistic inventory actions awaiting server confirmation (5s timeout) */
-const inventoryTracker = new PendingActionTracker<InventorySnapshot>(5000);
-
-/** Interval ID for the stale-action pruner (allows cleanup on HMR) */
-let prunerInterval: ReturnType<typeof setInterval> | null = null;
-
-/** World reference for rollback emission (set on first dispatch) */
-let trackedWorld: ClientWorld | null = null;
-
-/** Start periodic stale-action pruning (once per second) */
-function ensurePruner(): void {
-  if (prunerInterval) return;
-  prunerInterval = setInterval(() => {
-    const rollbacks = inventoryTracker.pruneStale();
-    for (const snapshot of rollbacks) {
-      if (!trackedWorld) continue;
-      const network = trackedWorld.network as ClientNetwork | null;
-      if (network?.restoreInventorySnapshot) {
-        network.restoreInventorySnapshot(snapshot);
-      }
-      console.warn(
-        "[InventoryActionDispatcher] Optimistic action timed out, rolling back inventory",
-      );
-    }
-  }, 1000);
-}
-
-/** Listeners registered per world to clear tracker on server inventory updates */
-const worldListeners = new WeakSet<ClientWorld>();
-
-function ensureServerListener(world: ClientWorld): void {
-  if (worldListeners.has(world)) return;
-  worldListeners.add(world);
-  world.on(EventType.INVENTORY_UPDATED, () => {
-    // Server sent authoritative inventory state — discard all pending rollbacks.
-    // We clear all pending actions (not per-txId) because the server's inventory
-    // packet is a full snapshot that replaces the client cache entirely, making
-    // individual transaction tracking unnecessary.
-    inventoryTracker.clear();
-  });
-  // Clean up module-level state when the world disconnects so stale references
-  // don't leak across reconnections or HMR reloads.
-  world.on(EventType.NETWORK_DISCONNECTED, () => {
-    if (prunerInterval) {
-      clearInterval(prunerInterval);
-      prunerInterval = null;
-    }
-    inventoryTracker.clear();
-    trackedWorld = null;
-  });
-}
-
-/**
- * Deep-clone the current inventory cache for a player so we can roll back.
- * Delegates to ClientNetwork's public API.
- */
-function snapshotInventory(
-  world: ClientWorld,
-  playerId: string,
-): InventorySnapshot | null {
-  const network = world.network as ClientNetwork | null;
-  return network?.snapshotInventory?.(playerId) ?? null;
-}
-
-/**
- * Optimistically remove an item from the client-side inventory cache and
- * emit an immediate UI update so the player sees instant feedback.
- * Delegates to ClientNetwork's public API.
- */
-function applyOptimisticRemoval(
-  world: ClientWorld,
-  playerId: string,
-  slot: number,
-  quantity: number,
-): void {
-  const network = world.network as ClientNetwork | null;
-  network?.applyOptimisticRemoval?.(playerId, slot, quantity);
-}
 
 /**
  * Dispatch an inventory action to the appropriate handler.
@@ -135,20 +54,15 @@ export function dispatchInventoryAction(
     return { success: false, message: "No local player" };
   }
 
-  // Wire up tracker infrastructure on first call
-  trackedWorld = world;
-  ensurePruner();
-  ensureServerListener(world);
+  const network = world.network as ClientNetwork | null;
 
   switch (action) {
     case "eat":
     case "drink":
     case "bury": {
-      // Snapshot before optimistic removal for rollback on timeout
-      const snapshot = snapshotInventory(world, localPlayer.id);
-      if (snapshot) inventoryTracker.add(snapshot);
-      // Optimistic: remove the item from UI immediately
-      applyOptimisticRemoval(world, localPlayer.id, slot, 1);
+      // Optimistic: remove the item from UI immediately (ClientNetwork
+      // handles snapshot + rollback tracking internally)
+      network?.applyOptimisticRemoval(localPlayer.id, slot, 1);
       // Send to server — server handles validation, consumption, and effects
       // Server flow: useItem → INVENTORY_USE → InventorySystem → ITEM_USED → PlayerSystem
       world.network?.send("useItem", { itemId, slot });
@@ -165,11 +79,8 @@ export function dispatchInventoryAction(
       return { success: true };
 
     case "drop": {
-      // Snapshot before optimistic removal for rollback on timeout
-      const dropSnapshot = snapshotInventory(world, localPlayer.id);
-      if (dropSnapshot) inventoryTracker.add(dropSnapshot);
       // Optimistic: remove the item from UI immediately
-      applyOptimisticRemoval(world, localPlayer.id, slot, quantity);
+      network?.applyOptimisticRemoval(localPlayer.id, slot, quantity);
       if (world.network?.dropItem) {
         world.network.dropItem(itemId, slot, quantity);
       } else {

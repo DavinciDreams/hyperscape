@@ -30,11 +30,7 @@ import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { getTargetValidator } from "./TargetValidator";
 import { MESSAGE_TYPES } from "../../client/interaction/constants";
 import { INPUT_LIMITS } from "../../../constants/interaction";
-import type {
-  ClientNetwork,
-  InventorySnapshot,
-} from "../../client/ClientNetwork";
-import { PendingActionTracker } from "../../client/network/PendingActionTracker";
+import type { ClientNetwork } from "../../client/ClientNetwork";
 
 /**
  * Create a minimal Item with all required properties
@@ -88,14 +84,6 @@ export class InventoryInteractionSystem extends SystemBase {
   private elementAbortControllers: Map<HTMLElement, AbortController> =
     new Map();
 
-  // Optimistic inventory rollback (matches InventoryActionDispatcher pattern).
-  // Uses the same "clear all on any INVENTORY_UPDATED" strategy as
-  // InventoryActionDispatcher — the server's inventory packet is a full
-  // snapshot that replaces the client cache entirely, so all pending
-  // rollbacks become moot regardless of which action triggered the update.
-  private inventoryTracker = new PendingActionTracker<InventorySnapshot>(5000);
-  private prunerInterval: ReturnType<typeof setInterval> | null = null;
-
   /** Typed accessor for ClientNetwork (this system is client-only). */
   private get clientNetwork(): ClientNetwork | null {
     return (this.world.network as ClientNetwork) ?? null;
@@ -124,23 +112,6 @@ export class InventoryInteractionSystem extends SystemBase {
       }) => this.setupInventoryInteractions(data),
     );
     this.subscribe(EventType.UI_CLOSE_MENU, () => this.cleanupInteractions());
-
-    // Clear pending rollbacks when server sends authoritative inventory state
-    this.subscribe(EventType.INVENTORY_UPDATED, () => {
-      this.inventoryTracker.clear();
-    });
-
-    // Start periodic rollback pruner (same pattern as InventoryActionDispatcher)
-    this.prunerInterval = setInterval(() => {
-      const rollbacks = this.inventoryTracker.pruneStale();
-      for (const snapshot of rollbacks) {
-        if (!this.clientNetwork) continue;
-        this.clientNetwork.restoreInventorySnapshot(snapshot);
-        console.warn(
-          "[InventoryInteractionSystem] Optimistic action timed out, rolling back inventory",
-        );
-      }
-    }, 1000);
 
     // Listen to equipment changes for reactive patterns
     this.subscribe<{
@@ -1103,21 +1074,15 @@ export class InventoryInteractionSystem extends SystemBase {
   }
 
   /**
-   * Snapshot + optimistically remove an item from the client inventory cache.
-   * Uses ClientNetwork's public API with PendingActionTracker rollback.
+   * Optimistically remove an item from the client inventory cache.
+   * Delegates to ClientNetwork which handles snapshot + rollback tracking.
    */
   private applyOptimisticRemoval(
     playerId: string,
     slot: number,
     quantity: number,
   ): void {
-    const network = this.clientNetwork;
-    if (!network) return;
-
-    const snapshot = network.snapshotInventory(playerId);
-    if (snapshot) this.inventoryTracker.add(snapshot);
-
-    network.applyOptimisticRemoval(playerId, slot, quantity);
+    this.clientNetwork?.applyOptimisticRemoval(playerId, slot, quantity);
   }
 
   destroy(): void {
@@ -1126,13 +1091,6 @@ export class InventoryInteractionSystem extends SystemBase {
     this.contextMenus.clear();
     this.itemActions.clear();
     this.playerEquipment.clear();
-
-    // Clean up optimistic rollback pruner
-    if (this.prunerInterval) {
-      clearInterval(this.prunerInterval);
-      this.prunerInterval = null;
-    }
-    this.inventoryTracker.clear();
 
     // Ensure all element listeners are cleaned up
     for (const controller of this.elementAbortControllers.values()) {
