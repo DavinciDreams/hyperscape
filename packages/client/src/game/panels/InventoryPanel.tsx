@@ -231,13 +231,13 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
     () =>
       getInteractiveTileStyle(theme, {
         active: isSourceItem,
-        hovered: !isEmpty && !isTargetingActive,
+        hovered: !isEmpty,
         dragging: isDragging,
         dropTarget: isOver,
         radius: 4,
         accentColor: theme.colors.accent.secondary,
       }),
-    [theme, isSourceItem, isEmpty, isTargetingActive, isDragging, isOver],
+    [theme, isSourceItem, isEmpty, isDragging, isOver],
   );
 
   return (
@@ -1110,6 +1110,8 @@ export function InventoryPanel({
             targetType: "inventory_item",
             targetSlot: slotIndex,
           });
+          // Clear targeting immediately — action is committed
+          setTargetingState(initialTargetingState);
         }
       }
     },

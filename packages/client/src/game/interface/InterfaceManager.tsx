@@ -319,28 +319,23 @@ function DesktopInterfaceManager({
   // Listen for UI_OPEN_PANE events
   useOpenPaneEvent(world, handleMenuClick);
 
+  const inventoryRef = useRef(inventory);
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+
+  // Ref-based late binding: renderPanel captures panelDataRef and reads
+  // fresh data each time it's called. The function itself stays stable.
   const panelDataRef = useRef({
     inventory,
     coins,
     playerStats,
     equipment,
   });
-
   useEffect(() => {
-    panelDataRef.current = {
-      inventory,
-      coins,
-      playerStats,
-      equipment,
-    };
+    panelDataRef.current = { inventory, coins, playerStats, equipment };
   }, [inventory, coins, playerStats, equipment]);
 
-  const inventoryRef = useRef(inventory);
-  useEffect(() => {
-    inventoryRef.current = inventory;
-  }, [inventory]);
-
-  // Create panel renderer
   const renderPanel = useMemo(
     () =>
       createPanelRenderer({
@@ -356,6 +351,14 @@ function DesktopInterfaceManager({
       }),
     [world, handleMenuClick, isUnlocked, editModeEnabled],
   );
+
+  // Monotonic counter that changes when panel data updates, breaking
+  // through React.memo barriers in WindowRenderer/WindowItem without
+  // recreating renderPanel (which would re-mount all panels).
+  const panelDataVersionRef = useRef(0);
+  const panelDataVersion = useMemo(() => {
+    return ++panelDataVersionRef.current;
+  }, [inventory, coins, playerStats, equipment]);
 
   // Drag-drop coordination (delegated to hook)
   const {
@@ -412,6 +415,7 @@ function DesktopInterfaceManager({
             editModeEnabled={editModeEnabled}
             windowCombiningEnabled={windowCombiningEnabled}
             renderPanel={renderPanel}
+            panelDataVersion={panelDataVersion}
           />
 
           {/* @dnd-kit drag overlay */}

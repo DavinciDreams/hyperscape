@@ -118,6 +118,7 @@ import type {
 } from "../../types/game/social-types";
 import { uuid } from "../../utils";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
+import { PendingActionTracker } from "./network/PendingActionTracker";
 import { isStreamingLikeViewport } from "../../runtime/clientViewportMode";
 import { PlayerLocal } from "../../entities/player/PlayerLocal";
 import { TileInterpolator } from "./TileInterpolator";
@@ -199,6 +200,14 @@ interface InterpolationState {
 // SnapshotData interface moved to shared types
 // Social system payload types are now imported from ../../types/game/social-types
 
+/** Shape of the cached inventory snapshot stored per player. */
+export interface InventorySnapshot {
+  playerId: string;
+  items: Array<{ slot: number; itemId: string; quantity: number }>;
+  coins: number;
+  maxSlots: number;
+}
+
 /**
  * Client Network System
  *
@@ -268,15 +277,11 @@ export class ClientNetwork extends SystemBase {
     lastLocation?: { x: number; y: number; z: number };
   }> | null = null;
   // Cache latest inventory per player so UI can hydrate even if it mounted late
-  lastInventoryByPlayerId: Record<
-    string,
-    {
-      playerId: string;
-      items: Array<{ slot: number; itemId: string; quantity: number }>;
-      coins: number;
-      maxSlots: number;
-    }
-  > = {};
+  lastInventoryByPlayerId: Record<string, InventorySnapshot> = {};
+  // Single tracker for all optimistic inventory mutations (shared by all callers).
+  // Snapshots the cache before mutation; rolls back after 5s if no server confirmation.
+  private inventoryTracker = new PendingActionTracker<InventorySnapshot>(5000);
+  private inventoryPrunerInterval: ReturnType<typeof setInterval> | null = null;
   // Cache latest skills per player so UI can hydrate even if it mounted late
   lastSkillsByPlayerId: Record<
     string,
@@ -339,6 +344,67 @@ export class ClientNetwork extends SystemBase {
     this.serverTimeOffset = 0;
     this.worldTimeOffset = 0;
     this.maxUploadSize = 0;
+  }
+
+  /**
+   * Deep-clone the current inventory cache for a player for rollback purposes.
+   * Returns null if no cache exists yet.
+   */
+  snapshotInventory(playerId: string): InventorySnapshot | null {
+    const cached = this.lastInventoryByPlayerId[playerId];
+    if (!cached) return null;
+    return {
+      playerId: cached.playerId,
+      items: cached.items.map((i) => ({ ...i })),
+      coins: cached.coins,
+      maxSlots: cached.maxSlots,
+    };
+  }
+
+  /**
+   * Optimistically remove an item from the inventory cache and emit an
+   * immediate UI update. Automatically snapshots before mutation for
+   * rollback if the server doesn't confirm within 5 seconds.
+   */
+  applyOptimisticRemoval(
+    playerId: string,
+    slot: number,
+    quantity: number,
+  ): void {
+    const cached = this.lastInventoryByPlayerId[playerId];
+    if (!cached) return;
+
+    const itemIndex = cached.items.findIndex((i) => i.slot === slot);
+    if (itemIndex === -1) return;
+
+    // Snapshot before mutation for rollback on timeout
+    const snapshot = this.snapshotInventory(playerId);
+    if (snapshot) this.inventoryTracker.add(snapshot);
+    this.ensureInventoryPruner();
+
+    const item = cached.items[itemIndex];
+    if (item.quantity <= quantity) {
+      cached.items.splice(itemIndex, 1);
+    } else {
+      item.quantity -= quantity;
+    }
+
+    this.world.emit(EventType.INVENTORY_UPDATED, { ...cached });
+  }
+
+  /** Start the periodic rollback pruner (once, lazily on first optimistic call). */
+  private ensureInventoryPruner(): void {
+    if (this.inventoryPrunerInterval) return;
+    this.inventoryPrunerInterval = setInterval(() => {
+      const rollbacks = this.inventoryTracker.pruneStale();
+      for (const snapshot of rollbacks) {
+        this.lastInventoryByPlayerId[snapshot.playerId] = snapshot;
+        this.world.emit(EventType.INVENTORY_UPDATED, { ...snapshot });
+        console.warn(
+          "[ClientNetwork] Optimistic inventory action timed out, rolling back",
+        );
+      }
+    }, 1000);
   }
 
   public getSpectatorFollowEntity(): string | undefined {
@@ -2279,7 +2345,9 @@ export class ClientNetwork extends SystemBase {
     coins: number;
     maxSlots: number;
   }) => {
-    // Debug log removed — fires per food eat / item change during combat
+    // Server sent authoritative inventory — discard all pending rollbacks
+    this.inventoryTracker.clear();
+
     const snapshot = {
       ...data,
       items: Array.isArray(data.items)
@@ -4892,6 +4960,13 @@ export class ClientNetwork extends SystemBase {
       code: code.code,
       reason: code.reason || "closed",
     });
+
+    // Clean up optimistic inventory tracker on disconnect
+    if (this.inventoryPrunerInterval) {
+      clearInterval(this.inventoryPrunerInterval);
+      this.inventoryPrunerInterval = null;
+    }
+    this.inventoryTracker.clear();
 
     // Don't attempt reconnection if this was intentional (user logout, etc.)
     if (this.intentionalDisconnect) {

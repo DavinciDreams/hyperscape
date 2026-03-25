@@ -416,6 +416,7 @@ export async function registerSystems(world: World): Promise<void> {
     world.register("damage-splat", DamageSplatSystem);
     world.register("duel-countdown-splat", DuelCountdownSplatSystem);
     world.register("projectile-renderer", ProjectileRenderer);
+    world.register("inventory-interaction", InventoryInteractionSystem);
 
     // XP Drop System - 3D version disabled, using 2D screen-space drops in XPProgressOrb
     // The 2D approach is more like RS3 where XP floats up the screen toward the orb
