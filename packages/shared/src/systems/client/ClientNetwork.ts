@@ -4296,12 +4296,15 @@ export class ClientNetwork extends SystemBase {
     // Deduplicate: sendToNearby publishes to 9 region topics, so players near
     // region boundaries receive the same packet 2-3x. Include the server tick
     // so same-damage rapid hits on different ticks are NOT dropped.
-    const dedupKey = `${data.attackerId}-${data.targetId}-${data.damage}-${data.tick ?? 0}`;
+    // Use | separator (not -) to avoid collisions if IDs contain hyphens.
+    const dedupKey = `${data.attackerId}|${data.targetId}|${data.damage}|${data.tick ?? 0}`;
     if (this._recentDamageKeys.has(dedupKey)) {
       return; // Already processed this damage event
     }
 
-    // Periodic sweep: clear stale entries (>500ms old) when map grows
+    // Periodic sweep: clear stale entries (>500ms old) when map exceeds threshold.
+    // 50 is chosen because at 8Hz server tick rate with ~6 concurrent combatants,
+    // the steady-state is ~48 keys/sec — sweep triggers just above normal load.
     const now = performance.now();
     if (this._recentDamageKeys.size > 50) {
       for (const [key, ts] of this._recentDamageKeys) {
