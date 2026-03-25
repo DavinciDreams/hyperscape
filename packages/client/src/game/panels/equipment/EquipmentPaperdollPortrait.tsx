@@ -155,7 +155,7 @@ function framePortraitAvatar(
   const center = box.getCenter(new THREE.Vector3());
   const height = Math.max(size.y, 1.6);
   const width = Math.max(size.x, 0.7);
-  const distance = Math.max(2.18, height * 1.08, width * 1.84);
+  const distance = Math.max(2.5, height * 1.24, width * 2.08);
   const lookY = center.y - height * 0.08;
 
   camera.position.set(center.x, lookY, -distance);

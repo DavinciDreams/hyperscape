@@ -661,6 +661,9 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
     const portraitWidth = isMobile ? 66 : 78;
     const gap = isMobile ? 2 : 3;
     const padding = isMobile ? 2 : 3;
+    const portraitHeight = isMobile
+      ? slotHeight * 4 + gap * 3 + 6
+      : slotHeight * 4 + gap * 3 + 10;
 
     return (
       <div
@@ -688,7 +691,9 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           style={{
             gridArea: "portrait",
             minWidth: 0,
-            minHeight: slotHeight * 5 + gap * 4,
+            height: portraitHeight,
+            minHeight: portraitHeight,
+            alignSelf: "center",
           }}
         >
           <EquipmentPaperdollPortrait
