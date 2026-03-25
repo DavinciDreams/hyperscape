@@ -119,23 +119,32 @@ describe("BiomeResourceGenerator", () => {
     });
 
     it("respects weighted distribution", () => {
-      // Generate trees across many tiles for statistical significance
+      // Use a 2-species config with a large weight gap so the dominant
+      // species stays dominant even after the 10x species-zoning boost.
+      const weightedConfig: BiomeTreeConfig = {
+        enabled: true,
+        trees: {
+          tree_normal: { weight: 0.85 },
+          tree_willow: { weight: 0.15 },
+        },
+        density: 8,
+        minSpacing: 8,
+        clustering: false,
+      };
+
       const allTrees: ReturnType<typeof generateTrees> = [];
-      for (let i = 0; i < 10; i++) {
-        for (let j = 0; j < 10; j++) {
+      for (let i = 0; i < 30; i++) {
+        for (let j = 0; j < 30; j++) {
           const ctx = createTestContext(i, j);
-          allTrees.push(...generateTrees(ctx, forestTreeConfig));
+          allTrees.push(...generateTrees(ctx, weightedConfig));
         }
       }
 
       const normalCount = allTrees.filter((r) => r.subType === "normal").length;
-      const oakCount = allTrees.filter((r) => r.subType === "oak").length;
       const willowCount = allTrees.filter((r) => r.subType === "willow").length;
 
-      // Normal (50%) should be most common
-      expect(normalCount).toBeGreaterThan(oakCount);
-      // Oak (35%) should be more common than willow (15%)
-      expect(oakCount).toBeGreaterThan(willowCount);
+      // Normal (85%) should be significantly more common than willow (15%)
+      expect(normalCount).toBeGreaterThan(willowCount);
     });
 
     it("assigns correct level requirements from shared constants", () => {

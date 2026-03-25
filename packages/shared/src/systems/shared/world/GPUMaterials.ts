@@ -414,7 +414,7 @@ export function createGPUVegetationMaterial(
 
   material.transparent = false;
   material.opacity = 1.0;
-  material.alphaTest = 0.5;
+  material.alphaTest = 0.1;
   material.side = THREE.DoubleSide;
   material.depthWrite = true;
 
@@ -1092,28 +1092,43 @@ export function createTreeDissolveMaterial(
       const aoRaw = vtxColor.y;
 
       if (enableSnow) {
-        const aoFactor = pow(aoRaw, float(AO_POWER));
+        // Detect default/unset vertex colors (all channels ~1.0).
+        // Real AO data always has variation; LOD models often have flat white.
+        // When detected, zero out snow to avoid all-white LOD trees.
+        const isDefaultVtx = step(float(0.98), mul(vtxColor.x, vtxColor.y));
+        const effectiveAO = mix(aoRaw, float(0.5), isDefaultVtx);
+
+        const aoFactor = pow(effectiveAO, float(AO_POWER));
         const aoMul = mix(float(AO_BARK_DARK), float(1.0), aoFactor);
         baseAlbedo = mul(baseAlbedo, aoMul);
 
         let snowMask: any;
         if (snowVertexData) {
-          // Explicit R-channel snow mask (pineSnow models)
           const rawSnowMask = vtxColor.x;
-          snowMask = smoothstep(
+          const rMask = smoothstep(
             float(SNOW_SMOOTH_LO),
             float(SNOW_SMOOTH_HI),
             rawSnowMask,
           );
+          const upFacing = smoothstep(
+            float(SNOW_NORMAL_LO),
+            float(SNOW_NORMAL_HI),
+            normalWorldGeometry.y,
+          );
+          const fallback = clamp(
+            mul(mul(upFacing, effectiveAO), float(SNOW_NORMAL_STRENGTH)),
+            float(0.0),
+            float(1.0),
+          );
+          snowMask = mix(rMask, fallback, isDefaultVtx);
         } else {
-          // Normal-based fallback (pine, pineDead — no R-channel snow data)
           const upFacing = smoothstep(
             float(SNOW_NORMAL_LO),
             float(SNOW_NORMAL_HI),
             normalWorldGeometry.y,
           );
           snowMask = clamp(
-            mul(mul(upFacing, aoRaw), float(SNOW_NORMAL_STRENGTH)),
+            mul(mul(upFacing, effectiveAO), float(SNOW_NORMAL_STRENGTH)),
             float(0.0),
             float(1.0),
           );

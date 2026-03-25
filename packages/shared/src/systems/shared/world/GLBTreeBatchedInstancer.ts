@@ -83,7 +83,7 @@ interface TreeTypePool {
   snowCapable: boolean;
 }
 
-const resourceLOD = getLODDistances("resource");
+const resourceLOD = getLODDistances("tree");
 
 // ---- Module state ----
 let scene: THREE.Scene | null = null;
