@@ -255,16 +255,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   // Equipment - fixed layout, needs specific dimensions for slot arrangement
   // Min/max width aligned with skills panel for consistent right column sizing
   equipment: {
-    minSize: { width: 235, height: 290 },
-    preferredSize: { width: 260, height: 360 },
-    maxSize: { width: 390, height: 550 },
+    minSize: { width: 300, height: 430 },
+    preferredSize: { width: 340, height: 510 },
+    maxSize: { width: 430, height: 620 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
     responsive: {
-      mobile: { width: 235, height: 310 },
-      tablet: { width: 235, height: 340 },
-      desktop: { width: 260, height: 360 },
+      mobile: { width: 300, height: 430 },
+      tablet: { width: 320, height: 470 },
+      desktop: { width: 340, height: 510 },
     },
     mobileLayout: {
       drawerType: "sheet",

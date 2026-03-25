@@ -421,18 +421,71 @@ test.describe("Equipment Panel", () => {
     await page.waitForTimeout(500);
 
     const equipmentPanel = page.locator('[data-panel="equipment"]');
+    const portrait = equipmentPanel.locator('[data-equipment-portrait="true"]');
 
-    // Equipment panel should have slot elements
-    const slots = equipmentPanel.locator(
-      "[data-slot], [data-equipment-slot], .equipment-slot",
-    );
-    const slotCount = await slots.count();
+    await expect(portrait).toBeVisible();
 
-    // Should have at least some equipment slots (head, body, legs, weapon, etc.)
-    // Standard RPG has ~11 equipment slots, but at minimum we expect 1
-    expect(slotCount).toBeGreaterThanOrEqual(1);
+    const slots = equipmentPanel.locator("[data-equipment-slot]");
+    await expect(slots).toHaveCount(11);
 
     await takeGameScreenshot(page, "equipment-slots");
+  });
+
+  test("should render the paperdoll layout on a mobile viewport", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await waitForGameLoad(page);
+    await waitForPlayerSpawn(page);
+
+    await openPanel(page, "equipment");
+    await page.waitForTimeout(500);
+
+    const equipmentPanel = page.locator('[data-panel="equipment"]');
+    await expect(
+      equipmentPanel.locator('[data-equipment-grid="paperdoll"]'),
+    ).toBeVisible();
+    await expect(
+      equipmentPanel.locator('[data-equipment-portrait="true"]'),
+    ).toBeVisible();
+    await expect(equipmentPanel.locator("[data-equipment-slot]")).toHaveCount(
+      11,
+    );
+
+    await takeGameScreenshot(page, "equipment-mobile-paperdoll");
+  });
+
+  test("should keep the portrait stable during equipment interactions", async ({
+    page,
+  }) => {
+    await openPanel(page, "equipment");
+    await page.waitForTimeout(500);
+
+    const equipmentPanel = page.locator('[data-panel="equipment"]');
+    const portrait = equipmentPanel.locator('[data-equipment-portrait="true"]');
+    await expect(portrait).toBeVisible();
+
+    const occupiedSlots = equipmentPanel.locator(
+      '[data-equipment-slot][data-slot-empty="false"]',
+    );
+    const beforeCount = await occupiedSlots.count();
+
+    if (beforeCount > 0) {
+      await occupiedSlots.first().click();
+      await page.waitForTimeout(600);
+
+      const afterCount = await equipmentPanel
+        .locator('[data-equipment-slot][data-slot-empty="false"]')
+        .count();
+
+      expect(afterCount).toBeLessThanOrEqual(beforeCount);
+      await expect(portrait).toBeVisible();
+    }
+
+    await expect(equipmentPanel.locator("[data-equipment-slot]")).toHaveCount(
+      11,
+    );
   });
 });
 
