@@ -352,13 +352,13 @@ function DesktopInterfaceManager({
     [world, handleMenuClick, isUnlocked, editModeEnabled],
   );
 
-  // Lightweight counter that changes when panel data updates, breaking
+  // Monotonic counter that changes when panel data updates, breaking
   // through React.memo barriers in WindowRenderer/WindowItem without
   // recreating renderPanel (which would re-mount all panels).
-  const panelDataVersion = useMemo(
-    () => Math.random(),
-    [inventory, coins, playerStats, equipment],
-  );
+  const panelDataVersionRef = useRef(0);
+  const panelDataVersion = useMemo(() => {
+    return ++panelDataVersionRef.current;
+  }, [inventory, coins, playerStats, equipment]);
 
   // Drag-drop coordination (delegated to hook)
   const {

@@ -103,6 +103,10 @@ const WindowItem = memo(function WindowItem({
   isEditMode,
   windowCombiningEnabled,
   renderPanel,
+  // Intentionally unused — its presence in props breaks React.memo's
+  // shallow comparison when panel data changes, causing WindowItem to
+  // re-render and call renderPanel with fresh ref-based data.
+  panelDataVersion: _,
 }: WindowItemProps): React.ReactElement {
   const windowState = useWindowStore(
     useMemo(
