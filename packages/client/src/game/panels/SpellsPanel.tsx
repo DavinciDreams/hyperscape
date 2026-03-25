@@ -15,30 +15,36 @@ import React, {
   useMemo,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  calculateCursorTooltipPosition,
-  useThemeStore,
-  useMobileLayout,
-} from "@/ui";
+import { useThemeStore, useMobileLayout, CursorTooltip } from "@/ui";
 import {
   getInteractiveTileStyle,
   getPanelInsetStyle,
   getPanelSurfaceStyle,
 } from "@/ui/theme/themes";
 import { zIndex } from "../../constants";
-import { useTooltipSize } from "../../hooks";
+import {
+  PANEL_ICON_SIZE,
+  PANEL_GRID_GAP,
+  PANEL_PADDING,
+  PANEL_GRID_PADDING,
+  PANEL_MOBILE_PADDING,
+  PANEL_MOBILE_ICON_SIZE,
+  PANEL_MOBILE_GRID_GAP,
+  PANEL_SLOT_RADIUS,
+} from "../../constants/panelLayout";
 import type { PlayerStats, ClientWorld } from "../../types";
 import { spellService, EventType, type Spell } from "@hyperscape/shared";
 
-// Spell panel layout constants
-const SPELL_ICON_SIZE = 40;
-const SPELL_GAP = 4;
-const PANEL_PADDING = 8;
-const GRID_PADDING = 6;
+// Spell panel layout constants — use shared sizing tokens from panelLayout.ts
+// to ensure consistency across Prayer, Spells, Skills, and Inventory panels.
+const SPELL_ICON_SIZE = PANEL_ICON_SIZE; // 36px desktop icon size
+const SPELL_GAP = PANEL_GRID_GAP; // 3px gap between slots
+// PANEL_PADDING re-exported from constants barrel
+const GRID_PADDING = PANEL_GRID_PADDING; // alias for local use
 
-// Mobile constants
-const MOBILE_SPELL_ICON_SIZE = 52;
-const MOBILE_SPELL_GAP = 6;
+// Mobile constants – use shared mobile icon size token
+const MOBILE_SPELL_ICON_SIZE = PANEL_MOBILE_ICON_SIZE; // 48px (touch target)
+const MOBILE_SPELL_GAP = PANEL_MOBILE_GRID_GAP; // 6px
 
 /**
  * Calculate number of columns based on container width
@@ -49,7 +55,8 @@ function calculateColumns(containerWidth: number, isMobile: boolean): number {
   const availableWidth = containerWidth - PANEL_PADDING * 2 - GRID_PADDING * 2;
   const colWidth = iconSize + gap;
   const maxCols = Math.floor((availableWidth + gap) / colWidth);
-  return Math.max(2, Math.min(4, maxCols));
+  // 5 columns by default (matches PrayerPanel), adapt for narrower windows
+  return Math.max(2, Math.min(5, maxCols));
 }
 
 /** Export dimensions for window configuration */
@@ -129,6 +136,8 @@ function SpellIcon({
   const isUnlocked = playerLevel >= spell.level;
   const isSelected = spell.isSelected;
 
+  const [isHovered, setIsHovered] = React.useState(false);
+
   const iconSize = isMobile ? MOBILE_SPELL_ICON_SIZE : SPELL_ICON_SIZE;
 
   const buttonStyle = useMemo(
@@ -136,16 +145,24 @@ function SpellIcon({
       width: iconSize,
       height: iconSize,
       padding: 0,
+      background:
+        isHovered && isUnlocked
+          ? "rgba(183, 140, 76, 0.08)"
+          : "var(--color-slot-empty)",
       ...getInteractiveTileStyle(theme, {
         active: isSelected,
+        hovered: isHovered,
         disabled: !isUnlocked,
-        radius: isMobile ? 6 : 4,
-        accentColor: getElementColor(spell.element),
+        radius: 4, // Square matching equipment/inventory UI
+        accentColor: getElementColor(spell.element), // Keep logic
       }),
-      border: isSelected
-        ? `2px solid ${getElementColor(spell.element)}B3`
-        : `1px solid ${theme.colors.border.default}40`,
-      borderRadius: isMobile ? 6 : 4,
+      borderColor: isSelected
+        ? `${getElementColor(spell.element)}B3`
+        : isHovered && isUnlocked
+          ? "rgba(183, 140, 76, 0.4)"
+          : "rgba(8, 8, 10, 0.6)",
+      borderWidth: "1px",
+      borderRadius: 4,
       cursor: isUnlocked ? "pointer" : "not-allowed",
       display: "flex",
       alignItems: "center",
@@ -153,20 +170,36 @@ function SpellIcon({
       position: "relative",
       overflow: "hidden",
       boxShadow: isSelected
-        ? `0 0 ${isMobile ? 14 : 10}px ${getElementColor(spell.element)}80, inset 0 0 ${isMobile ? 18 : 12}px ${getElementColor(spell.element)}33`
-        : "inset 0 1px 2px rgba(0, 0, 0, 0.4)",
+        ? `0 0 ${isMobile ? 12 : 8}px ${getElementColor(spell.element)}80, inset 0 0 ${isMobile ? 16 : 10}px ${getElementColor(spell.element)}33, inset 2px 2px 4px rgba(0, 0, 0, 0.34)`
+        : isHovered && isUnlocked
+          ? "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(183, 140, 76, 0.15)"
+          : "inset 2px 2px 4px rgba(0, 0, 0, 0.42), inset -1px -1px 2px rgba(88, 74, 56, 0.12)",
       opacity: isUnlocked ? 1 : 0.5,
     }),
-    [isSelected, isUnlocked, theme, iconSize, isMobile, spell.element],
+    [
+      isSelected,
+      isUnlocked,
+      isHovered,
+      theme,
+      iconSize,
+      isMobile,
+      spell.element,
+    ],
   );
 
   return (
     <button
       onClick={isUnlocked ? onClick : undefined}
       onContextMenu={onContextMenu}
-      onMouseEnter={onMouseEnter}
+      onMouseEnter={(e) => {
+        setIsHovered(true);
+        onMouseEnter(e);
+      }}
       onMouseMove={onMouseMove}
-      onMouseLeave={onMouseLeave}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        onMouseLeave();
+      }}
       disabled={!isUnlocked}
       aria-label={`${spell.name}${isSelected ? " (Selected)" : ""}${!isUnlocked ? " (Locked)" : ""}`}
       className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
@@ -252,16 +285,10 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
     y: 0,
     spell: null,
   });
-  const spellTooltipRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const playerMagicLevel = stats?.skills?.magic?.level ?? 1;
-
-  const spellTooltipSize = useTooltipSize(hoveredSpell, spellTooltipRef, {
-    width: 220,
-    height: 150,
-  });
 
   // Track container width for adaptive layout
   useEffect(() => {
@@ -383,91 +410,75 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
       className="flex flex-col h-full"
       style={{
         ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
-        padding: PANEL_PADDING,
+        padding: shouldUseMobileUI ? PANEL_MOBILE_PADDING : PANEL_PADDING,
       }}
     >
-      {/* Header */}
+      {/* Magic Level Header — mirrors Prayer's prayer-points header */}
       <div
         style={{
+          ...getPanelInsetStyle(theme, { emphasis: "normal", radius: 4 }),
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: shouldUseMobileUI ? "6px 8px" : "4px 8px",
-          marginBottom: 6,
-          ...getPanelInsetStyle(theme, {
-            emphasis: "normal",
-            radius: theme.borderRadius.md,
-          }),
+          padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
+          marginBottom: 4,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: shouldUseMobileUI ? 18 : 16 }}>🔮</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: shouldUseMobileUI ? 16 : 14 }}>🔮</span>
           <div>
             <div
               style={{
-                fontSize: shouldUseMobileUI ? 10 : 9,
+                fontSize: shouldUseMobileUI ? 9 : 8,
                 color: theme.colors.text.muted,
                 textTransform: "uppercase",
                 letterSpacing: 0.5,
               }}
             >
-              Spellbook
-            </div>
-            <div
-              style={{
-                fontSize: shouldUseMobileUI ? 14 : 12,
-                fontWeight: 600,
-                color: theme.colors.text.primary,
-              }}
-            >
-              Magic Level: {playerMagicLevel}
+              Magic Level
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Selected spell indicator */}
-      {selectedSpellId && (
+        {/* Magic level value on the right — always visible, matches prayer panel pattern */}
         <div
           style={{
-            padding: shouldUseMobileUI ? "6px 8px" : "4px 8px",
-            marginBottom: 6,
-            ...getPanelInsetStyle(theme, {
-              emphasis: "normal",
-              radius: theme.borderRadius.md,
-            }),
-            background: `${getElementColor(spells.find((s) => s.id === selectedSpellId)?.element || "air")}1f`,
-            border: `1px solid ${getElementColor(spells.find((s) => s.id === selectedSpellId)?.element || "air")}40`,
-            fontSize: shouldUseMobileUI ? 11 : 10,
-            color: theme.colors.text.secondary,
+            textAlign: "right",
             display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 2,
           }}
         >
-          <span>
-            Autocast:{" "}
-            <span style={{ color: theme.colors.text.primary, fontWeight: 600 }}>
-              {spells.find((s) => s.id === selectedSpellId)?.name}
-            </span>
-          </span>
-          <button
-            onClick={() => selectSpell(selectedSpellId)}
+          <div
             style={{
-              background: "transparent",
-              border: "none",
-              color: theme.colors.state.danger,
-              cursor: "pointer",
-              fontSize: shouldUseMobileUI ? 11 : 10,
-              padding: "2px 6px",
+              fontSize: shouldUseMobileUI ? 13 : 11,
+              fontWeight: 600,
+              color: theme.colors.accent.secondary,
             }}
           >
-            Clear
-          </button>
+            {playerMagicLevel}
+          </div>
+          {selectedSpellId && (
+            <div
+              style={{
+                fontSize: 8,
+                color: theme.colors.state.success,
+                textTransform: "uppercase",
+                opacity: 0.8,
+                maxWidth: 64,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ✓ {spells.find((s) => s.id === selectedSpellId)?.name ?? ""}
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
-      {/* Spell Grid */}
+      {/* Spell Grid — mirrors PrayerPanel grid exactly */}
       <div
         className="scrollbar-thin"
         style={{
@@ -479,14 +490,13 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
       >
         <div
           style={{
+            ...getPanelInsetStyle(theme, { emphasis: "strong", radius: 4 }),
             display: "grid",
-            gridTemplateColumns: `repeat(${gridColumns}, ${iconSize}px)`,
-            gap: gap,
-            padding: GRID_PADDING,
-            ...getPanelInsetStyle(theme, {
-              emphasis: "strong",
-              radius: theme.borderRadius.md,
-            }),
+            gridTemplateColumns: shouldUseMobileUI
+              ? `repeat(${gridColumns}, ${MOBILE_SPELL_ICON_SIZE}px)`
+              : `repeat(${gridColumns}, ${SPELL_ICON_SIZE}px)`,
+            gap: shouldUseMobileUI ? MOBILE_SPELL_GAP : SPELL_GAP,
+            padding: "8px 4px",
             justifyContent: "center",
           }}
         >
@@ -515,160 +525,180 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
         </div>
       </div>
 
-      {/* Spell Tooltip */}
-      {hoveredSpell &&
-        createPortal(
-          (() => {
-            const tooltipSize = {
-              width: spellTooltipSize.width || 220,
-              height: spellTooltipSize.height || 150,
-            };
-            const { left, top } = calculateCursorTooltipPosition(
-              mousePos,
-              tooltipSize,
-            );
-            const isUnlocked = playerMagicLevel >= hoveredSpell.level;
+      {/* Footer — mirrors Prayer's "Active: X / Deactivate All" row */}
+      <div
+        style={{
+          ...getPanelInsetStyle(theme, { emphasis: "normal", radius: 4 }),
+          marginTop: 4,
+          padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <span
+          style={{
+            fontSize: shouldUseMobileUI ? 10 : 9,
+            color: theme.colors.text.muted,
+          }}
+        >
+          {selectedSpellId
+            ? `Autocast: ${spells.find((s) => s.id === selectedSpellId)?.name ?? ""}`
+            : "No autocast set"}
+        </span>
+        <button
+          onClick={() => selectedSpellId && selectSpell(selectedSpellId)}
+          disabled={!selectedSpellId}
+          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+          style={{
+            padding: shouldUseMobileUI ? "3px 8px" : "2px 6px",
+            fontSize: shouldUseMobileUI ? 10 : 9,
+            background: selectedSpellId
+              ? `linear-gradient(180deg, ${theme.colors.state.danger}26 0%, rgba(39, 15, 15, 0.28) 100%)`
+              : theme.colors.slot.disabled,
+            border: `1px solid ${
+              selectedSpellId
+                ? theme.colors.state.danger
+                : theme.colors.border.default
+            }40`,
+            borderRadius: 4,
+            color: selectedSpellId
+              ? theme.colors.state.danger
+              : theme.colors.text.disabled,
+            cursor: selectedSpellId ? "pointer" : "default",
+          }}
+        >
+          Clear
+        </button>
+      </div>
 
-            return (
+      {/* Spell Tooltip */}
+      <CursorTooltip
+        visible={!!hoveredSpell && !contextMenu.visible}
+        position={mousePos}
+      >
+        {hoveredSpell && (
+          <div
+            style={{
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
+                  : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+              border: `1px solid ${getElementColor(hoveredSpell.element)}50`,
+              borderRadius: theme.borderRadius.md,
+              padding: "12px 14px",
+              boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
+              minWidth: 200,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 8,
+              }}
+            >
+              <span style={{ fontSize: 28 }}>
+                {ELEMENT_ICONS[hoveredSpell.element] || "✨"}
+              </span>
+              <div>
+                <div
+                  style={{
+                    fontSize: 15,
+                    fontWeight: 700,
+                    color: getElementColor(hoveredSpell.element),
+                  }}
+                >
+                  {hoveredSpell.name}
+                </div>
+                <div style={{ fontSize: 11, color: theme.colors.text.muted }}>
+                  Level {hoveredSpell.level} Magic
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 6,
+                fontSize: 11,
+                marginBottom: 10,
+              }}
+            >
+              <div style={{ color: theme.colors.text.muted }}>
+                Max Hit:{" "}
+                <span style={{ color: theme.colors.state.danger }}>
+                  {hoveredSpell.baseMaxHit}
+                </span>
+              </div>
+              <div style={{ color: theme.colors.text.muted }}>
+                XP:{" "}
+                <span style={{ color: theme.colors.state.success }}>
+                  {hoveredSpell.baseXp}
+                </span>
+              </div>
+            </div>
+
+            <div
+              style={{
+                fontSize: 10,
+                color: theme.colors.text.muted,
+                marginBottom: 8,
+              }}
+            >
+              <div style={{ marginBottom: 4, fontWeight: 600 }}>Rune Cost:</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {hoveredSpell.runes.map((rune, idx) => (
+                  <span
+                    key={idx}
+                    style={{
+                      background: theme.colors.slot.filled,
+                      padding: "2px 6px",
+                      borderRadius: theme.borderRadius.sm,
+                      color: theme.colors.text.secondary,
+                    }}
+                  >
+                    {rune.quantity}x{" "}
+                    {rune.runeId.replace("_rune", "").replace("_", " ")}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {playerMagicLevel < hoveredSpell.level && (
               <div
-                ref={spellTooltipRef}
-                className="fixed pointer-events-none"
                 style={{
-                  left,
-                  top,
-                  zIndex: zIndex.tooltip,
-                  background:
-                    theme.name === "hyperscape"
-                      ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
-                      : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
-                  border: `1px solid ${getElementColor(hoveredSpell.element)}50`,
-                  borderRadius: theme.borderRadius.md,
-                  padding: "12px 14px",
-                  boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
-                  minWidth: 200,
+                  padding: "5px 10px",
+                  background: `${theme.colors.state.danger}26`,
+                  borderRadius: theme.borderRadius.sm,
+                  fontSize: 11,
+                  color: theme.colors.state.danger,
+                  textAlign: "center",
                 }}
               >
-                {/* Header */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    marginBottom: 8,
-                  }}
-                >
-                  <span style={{ fontSize: 28 }}>
-                    {ELEMENT_ICONS[hoveredSpell.element] || "✨"}
-                  </span>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 15,
-                        fontWeight: 700,
-                        color: getElementColor(hoveredSpell.element),
-                      }}
-                    >
-                      {hoveredSpell.name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: theme.colors.text.muted,
-                      }}
-                    >
-                      Level {hoveredSpell.level} Magic
-                    </div>
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 6,
-                    fontSize: 11,
-                    marginBottom: 10,
-                  }}
-                >
-                  <div style={{ color: theme.colors.text.muted }}>
-                    Max Hit:{" "}
-                    <span style={{ color: theme.colors.state.danger }}>
-                      {hoveredSpell.baseMaxHit}
-                    </span>
-                  </div>
-                  <div style={{ color: theme.colors.text.muted }}>
-                    XP:{" "}
-                    <span style={{ color: theme.colors.state.success }}>
-                      {hoveredSpell.baseXp}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Rune cost */}
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: theme.colors.text.muted,
-                    marginBottom: 8,
-                  }}
-                >
-                  <div style={{ marginBottom: 4, fontWeight: 600 }}>
-                    Rune Cost:
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {hoveredSpell.runes.map((rune, idx) => (
-                      <span
-                        key={idx}
-                        style={{
-                          background: theme.colors.slot.filled,
-                          padding: "2px 6px",
-                          borderRadius: theme.borderRadius.sm,
-                          color: theme.colors.text.secondary,
-                        }}
-                      >
-                        {rune.quantity}x{" "}
-                        {rune.runeId.replace("_rune", "").replace("_", " ")}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Status */}
-                {!isUnlocked && (
-                  <div
-                    style={{
-                      padding: "5px 10px",
-                      background: `${theme.colors.state.danger}26`,
-                      borderRadius: theme.borderRadius.sm,
-                      fontSize: 11,
-                      color: theme.colors.state.danger,
-                      textAlign: "center",
-                    }}
-                  >
-                    Requires level {hoveredSpell.level} Magic
-                  </div>
-                )}
-                {hoveredSpell.isSelected && (
-                  <div
-                    style={{
-                      padding: "5px 10px",
-                      background: `${theme.colors.state.success}26`,
-                      borderRadius: theme.borderRadius.sm,
-                      fontSize: 11,
-                      color: theme.colors.state.success,
-                      textAlign: "center",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Currently Selected for Autocast
-                  </div>
-                )}
+                Requires level {hoveredSpell.level} Magic
               </div>
-            );
-          })(),
-          document.body,
+            )}
+            {hoveredSpell.isSelected && (
+              <div
+                style={{
+                  padding: "5px 10px",
+                  background: `${theme.colors.state.success}26`,
+                  borderRadius: theme.borderRadius.sm,
+                  fontSize: 11,
+                  color: theme.colors.state.success,
+                  textAlign: "center",
+                  fontWeight: 600,
+                }}
+              >
+                Currently Selected for Autocast
+              </div>
+            )}
+          </div>
         )}
+      </CursorTooltip>
 
       {/* Context Menu */}
       {contextMenu.visible &&
@@ -692,7 +722,6 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
               overflow: "hidden",
             }}
           >
-            {/* Menu Header */}
             <div
               style={{
                 padding: "6px 10px",
@@ -706,7 +735,6 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
               {contextMenu.spell.name}
             </div>
 
-            {/* Autocast option */}
             {playerMagicLevel >= contextMenu.spell.level && (
               <button
                 onClick={() => {
@@ -742,7 +770,6 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
               </button>
             )}
 
-            {/* Locked message */}
             {playerMagicLevel < contextMenu.spell.level && (
               <div
                 style={{
@@ -756,11 +783,10 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
               </div>
             )}
 
-            {/* Cancel option */}
             <button
-              onClick={() => {
-                setContextMenu((prev) => ({ ...prev, visible: false }));
-              }}
+              onClick={() =>
+                setContextMenu((prev) => ({ ...prev, visible: false }))
+              }
               className="w-full text-left transition-colors duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/60"
               style={{
                 padding: "6px 10px",
@@ -785,7 +811,6 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
           document.body,
         )}
 
-      {/* CSS for pulse animation */}
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }
