@@ -974,7 +974,13 @@ export function createTreeDissolveMaterial(
   const material = baseDm as unknown as THREE.MeshStandardNodeMaterial;
   const isLeaf = options.isLeafMaterial ?? false;
 
-  const hasVertexColors = !!(source as any).vertexColors;
+  // Vertex-color detection: check material flag AND geometry attribute.
+  // GLTFLoader sets material.vertexColors=true when COLOR_0 is present,
+  // but we also check geometry as a fallback for manual mesh construction.
+  const srcMat = source as any;
+  const hasVertexColors =
+    !!srcMat.vertexColors ||
+    !!(srcMat._geometry ?? srcMat.geometry)?.attributes?.color;
   material.vertexColors = false;
 
   // --- Uniforms ---
@@ -988,8 +994,10 @@ export function createTreeDissolveMaterial(
   const uWindDir = uniform(new THREE.Vector2(1, 0));
 
   // --- Tuning ---
-  const AO_POWER = 1.8;
-  const AO_DARK = 0.35;
+  // Vertex color channels: R = bark/leaf mask (1=bark, 0=leaf), G = AO, B = unused
+  const AO_POWER = 1.4;
+  const AO_DARK = 0.45;
+  const AO_BARK_DARK = 0.55;
   const SAT_BOOST = 1.15;
   const HL_BRIGHTEN = 0.08;
   const HL_RIM_POWER = 2.5;
@@ -1061,10 +1069,16 @@ export function createTreeDissolveMaterial(
     let baseAlbedo: any = mul(albedoSample.rgb, matColor);
 
     // ---- Vertex-color AO ----
+    // R = bark/leaf mask (1 = bark, 0 = leaf), G = ambient occlusion (0 = occluded, 1 = exposed)
+    // Bark gets a lighter AO floor (AO_BARK_DARK) because deep crevice darkening
+    // looks wrong on solid trunk geometry; leaves use the stronger AO_DARK.
     if (hasVertexColors) {
-      const aoRaw = attribute("color", "vec3").y;
+      const vtxColor = attribute("color", "vec3");
+      const aoRaw = vtxColor.y;
+      const barkMask = vtxColor.x;
       const aoFactor = pow(aoRaw, float(AO_POWER));
-      const aoMul = mix(float(AO_DARK), float(1.0), aoFactor);
+      const aoDarkFloor = mix(float(AO_DARK), float(AO_BARK_DARK), barkMask);
+      const aoMul = mix(aoDarkFloor, float(1.0), aoFactor);
       baseAlbedo = mul(baseAlbedo, aoMul);
     }
 
