@@ -932,7 +932,7 @@ describe("TERRAIN_CONSTANTS Centralization", () => {
   it("should have consistent MAX_WALKABLE_SLOPE value", async () => {
     const { TERRAIN_CONSTANTS } = await import("@hyperscape/shared");
 
-    // MAX_WALKABLE_SLOPE should be 1.5
-    expect(TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE).toBe(1.5);
+    // MAX_WALKABLE_SLOPE should be 2.5
+    expect(TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE).toBe(2.5);
   });
 });

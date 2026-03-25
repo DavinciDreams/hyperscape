@@ -29,7 +29,7 @@ export enum TreeId {
   Banana = "tree_banana",
   Dead = "tree_dead",
   Knotwood = "tree_knotwood",
-  WindPine = "tree_windPine",
+  PineDead = "tree_pineDead",
 }
 
 /** Extract the subtype key from a TreeId (e.g. TreeId.Oak → "oak") */
@@ -71,6 +71,8 @@ export interface TreeTypeDefinition {
   name: string;
   /** Woodcutting level required to chop */
   levelRequired: number;
+  /** Model vertex-color R channel encodes snow mask (used by tundra biome shader) */
+  snowCapable?: boolean;
 }
 
 /**
@@ -89,7 +91,7 @@ export const TREE_TYPES = {
   banana: { name: "Banana Tree", levelRequired: 1 },
   dead: { name: "Dead Tree", levelRequired: 1 },
   knotwood: { name: "Knotwood Tree", levelRequired: 1 },
-  windPine: { name: "Wind Pine", levelRequired: 1 },
+  pineDead: { name: "Dead Pine", levelRequired: 1, snowCapable: true },
 } as const satisfies Record<string, TreeTypeDefinition>;
 
 /** All valid tree subtype keys (e.g., "oak", "willow") */
