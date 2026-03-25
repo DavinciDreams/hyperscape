@@ -1096,15 +1096,8 @@ function setupAPI(world: World, systems: Systems): void {
 
       // Attack style actions
       changeAttackStyle: (playerId: string, newStyle: string) => {
-        console.log(
-          `[SystemLoader] changeAttackStyle called: ${playerId} -> ${newStyle}, isServer: ${world.isServer}`,
-        );
-
-        // On client, send packet to server
+        // On client, send packet to server (server is authoritative)
         if (world.isClient && world.network) {
-          console.log(
-            `[SystemLoader] Sending changeAttackStyle packet to server`,
-          );
           (
             world.network as {
               send?: (method: string, data: unknown) => void;
@@ -1117,7 +1110,6 @@ function setupAPI(world: World, systems: Systems): void {
 
         // On server, emit the event locally
         if (world.isServer) {
-          console.log(`[SystemLoader] Emitting ATTACK_STYLE_CHANGED on server`);
           world.emit(EventType.ATTACK_STYLE_CHANGED, {
             playerId,
             newStyle,

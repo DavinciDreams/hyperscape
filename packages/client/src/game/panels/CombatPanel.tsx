@@ -727,6 +727,12 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
 
     if (!actions?.actionMethods?.changeAttackStyle) return;
 
+    // Optimistic: update UI instantly (OSRS has zero visible delay)
+    combatStyleCache.set(playerId, next);
+    setStyle(next);
+
+    // Send to server — server confirms via attackStyleChanged packet,
+    // which will overwrite our optimistic value with the authoritative one
     actions.actionMethods.changeAttackStyle(playerId, next);
 
     // OSRS-accurate: selecting autocast opens the spells panel for spell selection

@@ -306,8 +306,21 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       }
 
       if (data.component === "equipment" && isObject(data.data)) {
-        const equipmentPayload = data.data as { equipment?: RawEquipmentData };
+        const equipmentPayload = data.data as {
+          playerId?: string;
+          equipment?: RawEquipmentData;
+        };
         if (!equipmentPayload.equipment) {
+          return;
+        }
+
+        // Only update if this equipment belongs to the local player
+        // (server broadcasts equipment for all players including AI agents)
+        if (
+          playerId &&
+          equipmentPayload.playerId &&
+          equipmentPayload.playerId !== playerId
+        ) {
           return;
         }
 

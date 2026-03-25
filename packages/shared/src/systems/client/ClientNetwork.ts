@@ -2435,9 +2435,11 @@ export class ClientNetwork extends SystemBase {
     }
 
     // Re-emit as UI update event for the active client UI hooks to handle
+    // Include playerId so UI can filter for local player only
     this.world.emit(EventType.UI_UPDATE, {
       component: "equipment",
       data: {
+        playerId: data.playerId,
         equipment: data.equipment,
       },
     });
@@ -4232,17 +4234,15 @@ export class ClientNetwork extends SystemBase {
     cooldownRemaining?: number;
   }) => {
     // Cache for late-mounting UI (same pattern as skills)
-    // This ensures CombatPanel gets correct value even if it mounts after packet arrives
     this.lastAttackStyleByPlayerId[data.playerId] = {
       currentStyle: data.currentStyle as { id: string },
       availableStyles: data.availableStyles,
       canChange: data.canChange,
     };
 
-    // Forward to local event system so UI can update
-    // CRITICAL: Emit unconditionally - the packet is already filtered server-side
-    // for this player, and waiting for localPlayer causes race conditions where
-    // the packet arrives before the player entity is created (style not synced)
+    // Emit unconditionally — packet is already filtered server-side for this
+    // player, and gating on localPlayer causes race conditions where the packet
+    // arrives before the player entity is created
     this.world.emit(EventType.UI_ATTACK_STYLE_CHANGED, data);
   };
 
@@ -4265,15 +4265,19 @@ export class ClientNetwork extends SystemBase {
   };
 
   onAutoRetaliateChanged = (data: { enabled: boolean }) => {
-    // Only handle for local player
-    const localPlayer = this.world.getPlayer();
-    if (localPlayer) {
-      // Forward to local event system so CombatPanel UI can update
-      this.world.emit(EventType.UI_AUTO_RETALIATE_CHANGED, {
-        playerId: localPlayer.id,
-        enabled: data.enabled,
-      });
-    }
+    // Emit unconditionally — same pattern as onAttackStyleChanged.
+    // Gating on localPlayer causes race conditions where the packet arrives
+    // before the player entity is created. The packet is already filtered
+    // server-side for this player. Use local player ID if available, otherwise
+    // use the network's own ID as the player identifier.
+    const playerId =
+      this.world.getPlayer()?.id || (this as { id?: string }).id || "";
+    if (!playerId) return;
+
+    this.world.emit(EventType.UI_AUTO_RETALIATE_CHANGED, {
+      playerId,
+      enabled: data.enabled,
+    });
   };
 
   onCombatDamageDealt = (data: {
