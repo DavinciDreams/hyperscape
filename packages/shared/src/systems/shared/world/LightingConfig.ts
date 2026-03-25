@@ -87,7 +87,7 @@ export const SUN_SHADE = {
 export const NIGHT = {
   /** Master night brightness (0 = pitch black, 1 = full day brightness).
    *  Controls both the tree shader nightDim floor and scene light intensity bases. */
-  BRIGHTNESS: 0.5,
+  BRIGHTNESS: 0.8,
 } as const;
 
 // ============================================================================
