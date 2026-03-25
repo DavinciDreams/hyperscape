@@ -31,8 +31,6 @@ import {
   CapeIcon,
   AmuletIcon,
   RingIcon,
-  StatsIcon,
-  DeathIcon,
 } from "./equipment/EquipmentIcons";
 import {
   EquipmentTooltip,
@@ -48,55 +46,6 @@ interface EquipmentPanelProps {
 }
 
 type EquipmentSlot = EquipmentSlotData;
-
-// ============================================================================
-// Utility Button Component
-// ============================================================================
-
-interface UtilityButtonProps {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-}
-
-function UtilityButton({
-  icon,
-  label,
-  onClick,
-  disabled,
-  compact = false,
-}: UtilityButtonProps & { compact?: boolean }) {
-  const theme = useThemeStore((s) => s.theme);
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none"
-      title={label}
-      style={{
-        width: compact ? 32 : 36,
-        height: compact ? 32 : 36,
-        ...getInteractiveTileStyle(theme, {
-          radius: compact ? 9 : 10,
-        }),
-      }}
-    >
-      <div
-        className="flex items-center justify-center"
-        style={{
-          width: compact ? 17 : 20,
-          height: compact ? 17 : 20,
-          color: theme.colors.accent.primary,
-        }}
-      >
-        {icon}
-      </div>
-    </button>
-  );
-}
 
 interface DroppableEquipmentSlotProps {
   slot: EquipmentSlot;
@@ -164,7 +113,7 @@ function DroppableEquipmentSlot({
   const baseTileStyle = getInteractiveTileStyle(theme, {
     hovered: isHovered && !validDrop && !invalidDrop,
     dropTarget: validDrop,
-    radius: shouldUseMobileUI ? 10 : 12,
+    radius: 2,
     accentColor: theme.colors.accent.primary,
   });
 
@@ -172,7 +121,6 @@ function DroppableEquipmentSlot({
     <button
       ref={setNodeRef}
       type="button"
-      title={slotTitle}
       data-equipment-slot={slot.key}
       data-slot-empty={isEmpty ? "true" : "false"}
       aria-label={
@@ -183,14 +131,10 @@ function DroppableEquipmentSlot({
       onClick={() => onSlotClick(slot)}
       onMouseEnter={(e) => {
         setIsHovered(true);
-        if (slot.item) {
-          onHoverStart(slot, { x: e.clientX, y: e.clientY });
-        }
+        onHoverStart(slot, { x: e.clientX, y: e.clientY });
       }}
       onMouseMove={(e) => {
-        if (slot.item) {
-          onHoverMove({ x: e.clientX, y: e.clientY });
-        }
+        onHoverMove({ x: e.clientX, y: e.clientY });
       }}
       onBlur={() => setIsHovered(false)}
       onMouseLeave={() => {
@@ -244,18 +188,19 @@ function DroppableEquipmentSlot({
         });
         window.dispatchEvent(evt);
       }}
-      className="w-full h-full rounded-[14px] transition-all duration-150 cursor-pointer group relative overflow-hidden focus-visible:outline-none"
+      className="w-full h-full rounded-[2px] transition-all duration-150 cursor-pointer group relative overflow-hidden focus-visible:outline-none"
       style={{
         ...baseTileStyle,
         background: invalidDrop
-          ? `linear-gradient(180deg, ${theme.colors.state.danger}20 0%, rgba(22, 26, 31, 0.98) 100%)`
+          ? `linear-gradient(180deg, ${theme.colors.state.danger}20 0%, rgba(22, 26, 31, 0.4) 100%)`
           : validDrop
             ? baseTileStyle.background
             : isDraggingInventoryItem && isValidDrop
-              ? `linear-gradient(180deg, ${theme.colors.accent.primary}14 0%, rgba(22, 26, 31, 0.99) 100%)`
+              ? `linear-gradient(180deg, ${theme.colors.accent.primary}14 0%, rgba(22, 26, 31, 0.4) 100%)`
               : isEmpty
-                ? "linear-gradient(180deg, rgba(255,255,255,0.022) 0%, rgba(22,26,31,0.99) 100%)"
-                : "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(26,30,36,0.99) 100%)",
+                ? "linear-gradient(180deg, rgba(255,255,255,0.022) 0%, rgba(22,26,31,0.25) 100%)"
+                : "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(26,30,36,0.25) 100%)",
+        zIndex: 10,
         borderWidth: "1px",
         borderStyle:
           validDrop || invalidDrop
@@ -290,33 +235,24 @@ function DroppableEquipmentSlot({
         }}
       />
 
-      <div
-        className="absolute inset-x-[14%] top-[10%] bottom-[24%] rounded-[12px] pointer-events-none"
-        style={{
-          border: `1px solid ${isEmpty ? `${theme.colors.border.default}2e` : `${theme.colors.border.hover}44`}`,
-          opacity: isEmpty ? 0.3 : 0.55,
-        }}
-      />
-
-      <div
-        className="flex h-full w-full flex-col items-center justify-between"
-        style={{
-          paddingTop: shouldUseMobileUI ? 5 : 6,
-          paddingBottom: shouldUseMobileUI ? 4 : 5,
-        }}
-      >
+      {isEmpty && (
         <div
-          className="flex flex-1 items-center justify-center"
+          className="absolute inset-x-[14%] top-[14%] bottom-[14%] rounded-[2px] pointer-events-none"
           style={{
-            minHeight: 0,
+            border: `1px solid ${theme.colors.border.default}2e`,
+            opacity: 0.3,
           }}
-        >
+        />
+      )}
+
+      <div className="flex h-full w-full items-center justify-center">
+        <div className="flex items-center justify-center">
           {isEmpty ? (
             <div
               className="transition-all duration-150 group-hover:scale-105 group-hover:opacity-40"
               style={{
-                width: shouldUseMobileUI ? "14px" : "16px",
-                height: shouldUseMobileUI ? "14px" : "16px",
+                width: shouldUseMobileUI ? "20px" : "24px",
+                height: shouldUseMobileUI ? "20px" : "24px",
                 color: `${theme.colors.text.muted}aa`,
               }}
             >
@@ -326,38 +262,23 @@ function DroppableEquipmentSlot({
             <div
               className="transition-transform duration-150 group-hover:scale-105"
               style={{
-                width: shouldUseMobileUI ? "18px" : "20px",
-                height: shouldUseMobileUI ? "18px" : "20px",
+                width: shouldUseMobileUI ? "24px" : "28px",
+                height: shouldUseMobileUI ? "24px" : "28px",
                 filter: "drop-shadow(0 3px 6px rgba(0, 0, 0, 0.55))",
               }}
             >
               <ItemIcon
                 itemId={slot.item!.id}
-                size={shouldUseMobileUI ? 18 : 20}
+                size={shouldUseMobileUI ? 24 : 28}
               />
             </div>
           )}
-        </div>
-
-        <div
-          className="w-full truncate text-center font-semibold uppercase tracking-[0.14em]"
-          style={{
-            fontSize: shouldUseMobileUI ? "6px" : "7px",
-            lineHeight: 1.1,
-            color: isEmpty
-              ? `${theme.colors.text.muted}bf`
-              : theme.colors.text.secondary,
-            textShadow: "0 1px 1px rgba(0,0,0,0.7)",
-            paddingInline: shouldUseMobileUI ? 3 : 4,
-          }}
-        >
-          {slot.label}
         </div>
       </div>
 
       {!isEmpty && (
         <div
-          className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none"
+          className="absolute inset-0 rounded-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none"
           style={{
             background: `radial-gradient(circle at center, ${theme.colors.accent.primary}15 0%, transparent 70%)`,
           }}
@@ -381,7 +302,7 @@ function DroppableEquipmentSlot({
       )}
 
       <div
-        className="absolute inset-[2px] rounded-[12px] pointer-events-none opacity-0 group-focus-visible:opacity-100 transition-opacity duration-150"
+        className="absolute inset-[2px] rounded-[2px] pointer-events-none opacity-0 group-focus-visible:opacity-100 transition-opacity duration-150"
         style={{
           border: `1px solid ${theme.colors.accent.primary}aa`,
           boxShadow: `0 0 0 1px ${theme.colors.accent.primary}22`,
@@ -397,15 +318,15 @@ interface PaperdollSlotPlacement {
 }
 
 const PAPERDOLL_PLACEMENTS: PaperdollSlotPlacement[] = [
+  { area: "ammo", key: EquipmentSlotName.ARROWS },
   { area: "cape", key: EquipmentSlotName.CAPE },
   { area: "head", key: EquipmentSlotName.HELMET },
-  { area: "body", key: EquipmentSlotName.BODY },
-  { area: "legs", key: EquipmentSlotName.LEGS },
-  { area: "boots", key: EquipmentSlotName.BOOTS },
-  { area: "ammo", key: EquipmentSlotName.ARROWS },
   { area: "amulet", key: EquipmentSlotName.AMULET },
+  { area: "body", key: EquipmentSlotName.BODY },
   { area: "ring", key: EquipmentSlotName.RING },
+  { area: "legs", key: EquipmentSlotName.LEGS },
   { area: "gloves", key: EquipmentSlotName.GLOVES },
+  { area: "boots", key: EquipmentSlotName.BOOTS },
   { area: "weapon", key: EquipmentSlotName.WEAPON },
   { area: "shield", key: EquipmentSlotName.SHIELD },
 ];
@@ -658,27 +579,22 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   const renderEquipmentGrid = (isMobile: boolean) => {
     const slotWidth = isMobile ? 34 : 38;
     const slotHeight = isMobile ? 32 : 36;
-    const portraitWidth = isMobile ? 66 : 78;
-    const gap = isMobile ? 2 : 3;
+    const gap = isMobile ? 5 : 8;
     const padding = isMobile ? 2 : 3;
-    const portraitHeight = isMobile
-      ? slotHeight * 4 + gap * 3 + 6
-      : slotHeight * 4 + gap * 3 + 10;
 
     return (
       <div
         data-equipment-grid="paperdoll"
         className="grid h-full"
         style={{
-          gridTemplateColumns: `${slotWidth}px ${isMobile ? 4 : 6}px minmax(${portraitWidth}px, 1fr) ${isMobile ? 4 : 6}px ${slotWidth}px`,
-          gridTemplateRows: `repeat(5, ${slotHeight}px) ${slotHeight}px`,
+          gridTemplateColumns: `${slotWidth}px ${slotWidth}px 1fr ${slotWidth}px ${slotWidth}px`,
+          gridTemplateRows: `repeat(5, ${slotHeight}px)`,
           gridTemplateAreas: `
-          "cape . portrait . ammo"
-          "head . portrait . amulet"
-          "body . portrait . ring"
-          "legs . portrait . gloves"
-          "boots . portrait . empty"
-          ". weapon . shield ."
+          "head . . . cape"
+          "body . . . amulet"
+          "legs . . . ring"
+          "boots . . . gloves"
+          "ammo weapon . shield ."
         `,
           gap,
           padding,
@@ -689,11 +605,12 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         <div
           data-equipment-center="portrait"
           style={{
-            gridArea: "portrait",
+            gridColumn: "1 / -1",
+            gridRow: "1 / -1",
             minWidth: 0,
-            height: portraitHeight,
-            minHeight: portraitHeight,
-            alignSelf: "center",
+            width: "100%",
+            height: "100%",
+            zIndex: 0,
           }}
         >
           <EquipmentPaperdollPortrait
@@ -708,8 +625,6 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         {PAPERDOLL_PLACEMENTS.map((placement) =>
           renderSlotCell(placement.key, isMobile, slotHeight, placement.area),
         )}
-
-        <div style={{ gridArea: "empty" }} />
       </div>
     );
   };
@@ -732,7 +647,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           style={{
             ...getPanelInsetStyle(theme, {
               emphasis: "strong",
-              radius: theme.borderRadius.lg,
+              radius: 4,
             }),
             padding: shouldUseMobileUI ? 0 : "3px",
             boxShadow:
@@ -743,11 +658,51 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         </div>
 
         <div
+          className="grid grid-cols-2 gap-1.5 px-0.5"
+          style={{
+            minHeight: shouldUseMobileUI ? 24 : 28,
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleOpenStats}
+            className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 focus-visible:outline-none"
+            style={{
+              height: shouldUseMobileUI ? 24 : 28,
+              ...getInteractiveTileStyle(theme, { radius: 2 }),
+              fontSize: shouldUseMobileUI ? "9px" : "10px",
+              fontWeight: 600,
+              letterSpacing: "0.04em",
+              color: theme.colors.accent.primary,
+              textTransform: "uppercase",
+            }}
+          >
+            Stats
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenDeath}
+            className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 focus-visible:outline-none"
+            style={{
+              height: shouldUseMobileUI ? 24 : 28,
+              ...getInteractiveTileStyle(theme, { radius: 2 }),
+              fontSize: shouldUseMobileUI ? "9px" : "10px",
+              fontWeight: 600,
+              letterSpacing: "0.04em",
+              color: theme.colors.accent.primary,
+              textTransform: "uppercase",
+            }}
+          >
+            On Death
+          </button>
+        </div>
+
+        <div
           className="flex justify-center gap-3"
           style={{
             ...getPanelInsetStyle(theme, {
               emphasis: "normal",
-              radius: theme.borderRadius.md,
+              radius: 4,
             }),
             padding: shouldUseMobileUI ? "2px 6px" : "4px 8px",
             fontSize: shouldUseMobileUI ? "8px" : "10px",
@@ -763,26 +718,6 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
           <span style={{ color: theme.colors.status.prayer }}>
             {totalBonuses.strength}
           </span>
-        </div>
-
-        <div
-          className="flex items-center gap-1.5 px-0.5"
-          style={{
-            minHeight: shouldUseMobileUI ? 28 : 32,
-          }}
-        >
-          <UtilityButton
-            icon={<StatsIcon className="w-full h-full" />}
-            label="Stats"
-            onClick={handleOpenStats}
-            compact={shouldUseMobileUI}
-          />
-          <UtilityButton
-            icon={<DeathIcon className="w-full h-full" />}
-            label="Death"
-            onClick={handleOpenDeath}
-            compact={shouldUseMobileUI}
-          />
         </div>
       </div>
 

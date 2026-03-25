@@ -141,7 +141,22 @@ function clearPreviewVisuals(visuals: EquipmentVisualStore): void {
 function framePortraitAvatar(
   avatarRoot: THREE.Object3D,
   camera: THREE.PerspectiveCamera,
+  zoomMultiplier = 1.0,
+  baseStateRef?: React.MutableRefObject<{
+    camY: number;
+    lookY: number;
+    distance: number;
+    center: THREE.Vector3;
+  } | null>,
 ) {
+  if (baseStateRef?.current) {
+    const { camY, lookY, distance, center } = baseStateRef.current;
+    const currentDistance = distance / Math.max(0.1, zoomMultiplier);
+    camera.position.set(center.x, camY, -currentDistance);
+    camera.lookAt(center.x, lookY, center.z);
+    return;
+  }
+
   avatarRoot.updateMatrixWorld(true);
 
   const box = new THREE.Box3().setFromObject(avatarRoot);
@@ -155,13 +170,26 @@ function framePortraitAvatar(
   const center = box.getCenter(new THREE.Vector3());
   const height = Math.max(size.y, 1.6);
   const width = Math.max(size.x, 0.7);
-  const distance = Math.max(2.5, height * 1.24, width * 2.08);
-  const lookY = center.y - height * 0.08;
 
-  camera.position.set(center.x, lookY, -distance);
+  // Zoom out enough so the full avatar fits within the portrait container
+  const distance = Math.max(3.2, height * 2.1, width * 1.6);
+
+  // Look slightly higher to push the avatar down in the viewport
+  const lookY = center.y + height * 0.02;
+
+  // Keep camera vertically offset relatively the same angle
+  const camY = lookY + height * 0.6;
+
+  if (baseStateRef) {
+    baseStateRef.current = { camY, lookY, distance, center: center.clone() };
+  }
+
+  const currentDistance = distance / Math.max(0.1, zoomMultiplier);
+
+  camera.position.set(center.x, camY, -currentDistance);
   camera.lookAt(center.x, lookY, center.z);
   camera.near = 0.1;
-  camera.far = Math.max(12, distance + height * 3);
+  camera.far = Math.max(12, currentDistance + height * 3);
   camera.updateProjectionMatrix();
 }
 
@@ -398,6 +426,19 @@ export const EquipmentPaperdollPortrait = React.memo(
     const [mode, setMode] = useState<PortraitMode>("loading");
     const [refreshNonce, setRefreshNonce] = useState(0);
 
+    const isDraggingRef = useRef(false);
+    const lastMousePosRef = useRef({ x: 0, y: 0 });
+    const targetRotationRef = useRef(Math.PI * 0.08);
+    const currentRotationRef = useRef(Math.PI * 0.08);
+    const targetZoomRef = useRef(1);
+    const currentZoomRef = useRef(1);
+    const baseCameraStateRef = useRef<{
+      camY: number;
+      lookY: number;
+      distance: number;
+      center: THREE.Vector3;
+    } | null>(null);
+
     const avatarUrl = useMemo(
       () => resolvePlayerAvatarUrl(world),
       [world, refreshNonce],
@@ -429,6 +470,7 @@ export const EquipmentPaperdollPortrait = React.memo(
 
       avatarSceneRef.current = null;
       avatarNodeRef.current = null;
+      baseCameraStateRef.current = null;
     };
 
     useEffect(() => {
@@ -457,6 +499,29 @@ export const EquipmentPaperdollPortrait = React.memo(
           viewportRef.current = viewport;
           viewport.start((delta) => {
             avatarNodeRef.current?.instance?.update(delta);
+
+            const rDiff =
+              targetRotationRef.current - currentRotationRef.current;
+            const zDiff = targetZoomRef.current - currentZoomRef.current;
+
+            if (Math.abs(rDiff) > 0.001 || Math.abs(zDiff) > 0.001) {
+              currentRotationRef.current += rDiff * Math.min(1.0, delta * 15);
+              currentZoomRef.current += zDiff * Math.min(1.0, delta * 15);
+
+              const vrm = getPreviewVRM(
+                avatarNodeRef.current?.instance ?? null,
+              );
+              if (vrm && avatarSceneRef.current) {
+                avatarSceneRef.current.rotation.y = currentRotationRef.current;
+                vrm.scene.rotation.y = currentRotationRef.current;
+                framePortraitAvatar(
+                  avatarSceneRef.current,
+                  viewport.camera,
+                  currentZoomRef.current,
+                  baseCameraStateRef,
+                );
+              }
+            }
           });
           setRendererReady(true);
 
@@ -586,8 +651,8 @@ export const EquipmentPaperdollPortrait = React.memo(
 
           avatarNode.visible = false;
           avatarScene.visible = false;
-          avatarScene.rotation.y = 0;
-          vrm.scene.rotation.y = 0;
+          avatarScene.rotation.y = currentRotationRef.current;
+          vrm.scene.rotation.y = currentRotationRef.current;
 
           if (avatarInstance.setEmoteAndWait) {
             await avatarInstance.setEmoteAndWait(Emotes.IDLE, 3000);
@@ -614,7 +679,12 @@ export const EquipmentPaperdollPortrait = React.memo(
           avatarNode.visible = true;
           avatarScene.visible = true;
           viewport.resize();
-          framePortraitAvatar(avatarScene, viewport.camera);
+          framePortraitAvatar(
+            avatarScene,
+            viewport.camera,
+            currentZoomRef.current,
+            baseCameraStateRef,
+          );
           setMode("live");
         } catch (error) {
           console.error(
@@ -640,29 +710,42 @@ export const EquipmentPaperdollPortrait = React.memo(
         ref={containerRef}
         data-equipment-portrait="true"
         data-portrait-mode={mode}
-        className={`relative overflow-hidden ${className}`}
+        className={`relative overflow-hidden touch-none select-none ${className}`}
+        onPointerDown={(e) => {
+          isDraggingRef.current = true;
+          lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          if (!isDraggingRef.current) return;
+          const deltaX = e.clientX - lastMousePosRef.current.x;
+          targetRotationRef.current += deltaX * 0.01;
+          lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+        }}
+        onPointerUp={(e) => {
+          isDraggingRef.current = false;
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }}
+        onWheel={(e) => {
+          const zoomDelta = e.deltaY > 0 ? 0.1 : -0.1;
+          targetZoomRef.current = Math.max(
+            0.4,
+            Math.min(1.15, targetZoomRef.current + zoomDelta),
+          );
+        }}
         style={{
-          borderRadius: compact ? 16 : 20,
+          borderRadius: 4,
           ...getPanelInsetStyle(theme, {
             emphasis: "strong",
-            radius: compact ? 16 : 20,
+            radius: 4,
           }),
           padding: 0,
-          background:
-            theme.name === "hyperscape"
-              ? `radial-gradient(circle at 50% 8%, ${theme.colors.accent.primary}14 0%, rgba(15, 18, 22, 0) 42%), linear-gradient(180deg, rgba(31, 35, 42, 0.98) 0%, rgba(18, 21, 26, 0.99) 100%)`
-              : undefined,
-          boxShadow:
-            "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -14px 20px rgba(0,0,0,0.16)",
+          border: "none",
+          background: "transparent",
+          boxShadow: "none",
         }}
       >
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 24%, rgba(0,0,0,0.1) 100%)",
-          }}
-        />
+        <div className="absolute inset-0 pointer-events-none" />
 
         <canvas
           ref={canvasRef}

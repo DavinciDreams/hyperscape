@@ -1,10 +1,7 @@
-import React from "react";
+import React, { useRef } from "react";
 import { createPortal } from "react-dom";
-import {
-  calculateCursorTooltipPosition,
-  TOOLTIP_SIZE_ESTIMATES,
-  useThemeStore,
-} from "@/ui";
+import { useTooltipSize } from "@/hooks/useTooltipSize";
+import { TOOLTIP_SIZE_ESTIMATES, useThemeStore, CursorTooltip } from "@/ui";
 import { getItem } from "@hyperscape/shared";
 import type { Item } from "../../../types";
 
@@ -45,9 +42,24 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
   const theme = useThemeStore((s) => s.theme);
 
   if (!hoverState) return null;
-
   const item = hoverState.slot.item;
-  if (!item) return null;
+
+  if (!item) {
+    return (
+      <CursorTooltip
+        visible={true}
+        position={hoverState.position}
+        estimatedSize={{ width: 80, height: 32 }}
+        className="text-[10px] font-semibold tracking-wider uppercase whitespace-nowrap !p-[6px_10px]"
+        style={{
+          background: "rgba(18, 21, 25, 0.98)",
+          color: theme.colors.text.primary,
+        }}
+      >
+        {hoverState.slot.label}
+      </CursorTooltip>
+    );
+  }
 
   // Get full item data for additional info
   const itemData = getItem(item.id);
@@ -55,13 +67,6 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
   const equipSlot = itemData?.equipSlot || hoverState.slot.label;
 
   const rarityColor = RARITY_COLORS[rarity] || theme.colors.accent.primary;
-
-  // Use tooltip positioning with edge detection
-  const { left, top } = calculateCursorTooltipPosition(
-    { x: hoverState.position.x, y: hoverState.position.y },
-    TOOLTIP_SIZE_ESTIMATES.large,
-    8,
-  );
 
   const hasBonuses =
     item.bonuses &&
@@ -91,21 +96,15 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
     hasMagicBonuses ||
     hasRangedBonuses;
 
-  return createPortal(
-    <div
-      className="pointer-events-none"
+  return (
+    <CursorTooltip
+      visible={true}
+      position={hoverState.position}
+      estimatedSize={TOOLTIP_SIZE_ESTIMATES.xlarge}
       style={{
-        position: "fixed",
-        left,
-        top,
-        zIndex: theme.zIndex.tooltip,
-        background: `linear-gradient(180deg, ${theme.colors.background.primary} 0%, ${theme.colors.background.secondary} 100%)`,
-        border: `1px solid ${theme.colors.border.hover}`,
-        borderRadius: `${theme.borderRadius.md}px`,
-        padding: "10px 12px",
-        boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
         minWidth: "160px",
         maxWidth: "240px",
+        zIndex: theme.zIndex.tooltip,
       }}
     >
       {/* Item name with rarity color */}
@@ -359,7 +358,6 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
       >
         Click to unequip • Right-click for options
       </div>
-    </div>,
-    document.body,
+    </CursorTooltip>
   );
 });
