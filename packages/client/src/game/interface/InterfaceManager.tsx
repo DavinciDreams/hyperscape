@@ -319,22 +319,6 @@ function DesktopInterfaceManager({
   // Listen for UI_OPEN_PANE events
   useOpenPaneEvent(world, handleMenuClick);
 
-  const panelDataRef = useRef({
-    inventory,
-    coins,
-    playerStats,
-    equipment,
-  });
-
-  useEffect(() => {
-    panelDataRef.current = {
-      inventory,
-      coins,
-      playerStats,
-      equipment,
-    };
-  }, [inventory, coins, playerStats, equipment]);
-
   const inventoryRef = useRef(inventory);
   useEffect(() => {
     inventoryRef.current = inventory;
@@ -348,16 +332,24 @@ function DesktopInterfaceManager({
         onPanelClick: handleMenuClick,
         isEditMode: isUnlocked && editModeEnabled,
         getPanelData: () => ({
-          inventoryItems: panelDataRef.current.inventory as never[],
-          coins: panelDataRef.current.coins,
-          stats: panelDataRef.current.playerStats,
-          equipment: panelDataRef.current.equipment,
+          inventoryItems: inventory as never[],
+          coins,
+          stats: playerStats,
+          equipment,
         }),
       }),
-    [world, handleMenuClick, isUnlocked, editModeEnabled],
+    [
+      world,
+      handleMenuClick,
+      isUnlocked,
+      editModeEnabled,
+      inventory,
+      coins,
+      playerStats,
+      equipment,
+    ],
   );
 
-  // Drag-drop coordination (delegated to hook)
   const {
     handleDragEnd,
     handleDndKitDragStart,
