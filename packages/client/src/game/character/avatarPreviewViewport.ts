@@ -77,13 +77,15 @@ export async function createAvatarPreviewViewport(options: {
     renderer.setSize(width, height);
   };
 
-  const clock = new THREE.Clock();
+  let lastTime = 0;
   let frameId = 0;
   let frameCallback: ((delta: number) => void) | undefined;
 
   const renderFrame = () => {
     frameId = window.requestAnimationFrame(renderFrame);
-    const delta = clock.getDelta();
+    const time = performance.now();
+    const delta = lastTime === 0 ? 0 : (time - lastTime) / 1000;
+    lastTime = time;
     frameCallback?.(delta);
     renderer.render(scene, camera);
   };
@@ -98,7 +100,7 @@ export async function createAvatarPreviewViewport(options: {
   const start = (onFrame?: (delta: number) => void) => {
     frameCallback = onFrame;
     stop();
-    clock.start();
+    lastTime = performance.now();
     renderFrame();
   };
 
