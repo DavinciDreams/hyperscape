@@ -199,6 +199,14 @@ interface InterpolationState {
 // SnapshotData interface moved to shared types
 // Social system payload types are now imported from ../../types/game/social-types
 
+/** Shape of the cached inventory snapshot stored per player. */
+export interface InventorySnapshot {
+  playerId: string;
+  items: Array<{ slot: number; itemId: string; quantity: number }>;
+  coins: number;
+  maxSlots: number;
+}
+
 /**
  * Client Network System
  *
@@ -268,15 +276,7 @@ export class ClientNetwork extends SystemBase {
     lastLocation?: { x: number; y: number; z: number };
   }> | null = null;
   // Cache latest inventory per player so UI can hydrate even if it mounted late
-  lastInventoryByPlayerId: Record<
-    string,
-    {
-      playerId: string;
-      items: Array<{ slot: number; itemId: string; quantity: number }>;
-      coins: number;
-      maxSlots: number;
-    }
-  > = {};
+  lastInventoryByPlayerId: Record<string, InventorySnapshot> = {};
   // Cache latest skills per player so UI can hydrate even if it mounted late
   lastSkillsByPlayerId: Record<
     string,
@@ -339,6 +339,54 @@ export class ClientNetwork extends SystemBase {
     this.serverTimeOffset = 0;
     this.worldTimeOffset = 0;
     this.maxUploadSize = 0;
+  }
+
+  /**
+   * Deep-clone the current inventory cache for a player for rollback purposes.
+   * Returns null if no cache exists yet.
+   */
+  snapshotInventory(playerId: string): InventorySnapshot | null {
+    const cached = this.lastInventoryByPlayerId[playerId];
+    if (!cached) return null;
+    return {
+      playerId: cached.playerId,
+      items: cached.items.map((i) => ({ ...i })),
+      coins: cached.coins,
+      maxSlots: cached.maxSlots,
+    };
+  }
+
+  /**
+   * Optimistically remove an item from the inventory cache and emit an
+   * immediate UI update. Callers should snapshot first for rollback.
+   */
+  applyOptimisticRemoval(
+    playerId: string,
+    slot: number,
+    quantity: number,
+  ): void {
+    const cached = this.lastInventoryByPlayerId[playerId];
+    if (!cached) return;
+
+    const itemIndex = cached.items.findIndex((i) => i.slot === slot);
+    if (itemIndex === -1) return;
+
+    const item = cached.items[itemIndex];
+    if (item.quantity <= quantity) {
+      cached.items.splice(itemIndex, 1);
+    } else {
+      item.quantity -= quantity;
+    }
+
+    this.world.emit(EventType.INVENTORY_UPDATED, { ...cached });
+  }
+
+  /**
+   * Restore a previously snapshotted inventory state (for rollback on timeout).
+   */
+  restoreInventorySnapshot(snapshot: InventorySnapshot): void {
+    this.lastInventoryByPlayerId[snapshot.playerId] = snapshot;
+    this.world.emit(EventType.INVENTORY_UPDATED, { ...snapshot });
   }
 
   public getSpectatorFollowEntity(): string | undefined {

@@ -30,6 +30,11 @@ import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { getTargetValidator } from "./TargetValidator";
 import { MESSAGE_TYPES } from "../../client/interaction/constants";
 import { INPUT_LIMITS } from "../../../constants/interaction";
+import type {
+  ClientNetwork,
+  InventorySnapshot,
+} from "../../client/ClientNetwork";
+import { PendingActionTracker } from "../../client/network/PendingActionTracker";
 
 /**
  * Create a minimal Item with all required properties
@@ -83,6 +88,10 @@ export class InventoryInteractionSystem extends SystemBase {
   private elementAbortControllers: Map<HTMLElement, AbortController> =
     new Map();
 
+  // Optimistic inventory rollback (matches InventoryActionDispatcher pattern)
+  private inventoryTracker = new PendingActionTracker<InventorySnapshot>(5000);
+  private prunerInterval: ReturnType<typeof setInterval> | null = null;
+
   constructor(world: World) {
     super(world, {
       name: "inventory-interaction",
@@ -106,6 +115,24 @@ export class InventoryInteractionSystem extends SystemBase {
       }) => this.setupInventoryInteractions(data),
     );
     this.subscribe(EventType.UI_CLOSE_MENU, () => this.cleanupInteractions());
+
+    // Clear pending rollbacks when server sends authoritative inventory state
+    this.subscribe(EventType.INVENTORY_UPDATED, () => {
+      this.inventoryTracker.clear();
+    });
+
+    // Start periodic rollback pruner (same pattern as InventoryActionDispatcher)
+    this.prunerInterval = setInterval(() => {
+      const rollbacks = this.inventoryTracker.pruneStale();
+      const network = this.world.network as ClientNetwork | null;
+      for (const snapshot of rollbacks) {
+        if (!network) continue;
+        network.restoreInventorySnapshot(snapshot);
+        console.warn(
+          "[InventoryInteractionSystem] Optimistic action timed out, rolling back inventory",
+        );
+      }
+    }, 1000);
 
     // Listen to equipment changes for reactive patterns
     this.subscribe<{
@@ -1068,39 +1095,21 @@ export class InventoryInteractionSystem extends SystemBase {
   }
 
   /**
-   * Optimistically remove an item from the client inventory cache so the UI
-   * updates immediately, without waiting for the server round-trip.
+   * Snapshot + optimistically remove an item from the client inventory cache.
+   * Uses ClientNetwork's public API with PendingActionTracker rollback.
    */
   private applyOptimisticRemoval(
     playerId: string,
     slot: number,
     quantity: number,
   ): void {
-    const network = this.world.network as {
-      lastInventoryByPlayerId?: Record<
-        string,
-        {
-          playerId: string;
-          items: Array<{ slot: number; itemId: string; quantity: number }>;
-          coins: number;
-          maxSlots: number;
-        }
-      >;
-    };
-    const cached = network.lastInventoryByPlayerId?.[playerId];
-    if (!cached) return;
+    const network = this.world.network as ClientNetwork | null;
+    if (!network?.snapshotInventory) return;
 
-    const itemIndex = cached.items.findIndex((i) => i.slot === slot);
-    if (itemIndex === -1) return;
+    const snapshot = network.snapshotInventory(playerId);
+    if (snapshot) this.inventoryTracker.add(snapshot);
 
-    const item = cached.items[itemIndex];
-    if (item.quantity <= quantity) {
-      cached.items.splice(itemIndex, 1);
-    } else {
-      item.quantity -= quantity;
-    }
-
-    this.world.emit(EventType.INVENTORY_UPDATED, { ...cached });
+    network.applyOptimisticRemoval(playerId, slot, quantity);
   }
 
   destroy(): void {
@@ -1109,6 +1118,13 @@ export class InventoryInteractionSystem extends SystemBase {
     this.contextMenus.clear();
     this.itemActions.clear();
     this.playerEquipment.clear();
+
+    // Clean up optimistic rollback pruner
+    if (this.prunerInterval) {
+      clearInterval(this.prunerInterval);
+      this.prunerInterval = null;
+    }
+    this.inventoryTracker.clear();
 
     // Ensure all element listeners are cleaned up
     for (const controller of this.elementAbortControllers.values()) {

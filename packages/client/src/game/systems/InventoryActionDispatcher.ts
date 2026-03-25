@@ -17,6 +17,8 @@ import {
   getItem,
   PendingActionTracker,
   type Item,
+  type InventorySnapshot,
+  type ClientNetwork,
 } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 
@@ -35,14 +37,6 @@ export interface ActionResult {
 /** Actions that are intentionally no-ops (don't warn) */
 const SILENT_ACTIONS = new Set(["cancel"]);
 
-/** Snapshot of the inventory cache at the moment before an optimistic update */
-interface InventorySnapshot {
-  playerId: string;
-  items: Array<{ slot: number; itemId: string; quantity: number }>;
-  coins: number;
-  maxSlots: number;
-}
-
 /** Tracks optimistic inventory actions awaiting server confirmation (5s timeout) */
 const inventoryTracker = new PendingActionTracker<InventorySnapshot>(5000);
 
@@ -59,14 +53,10 @@ function ensurePruner(): void {
     const rollbacks = inventoryTracker.pruneStale();
     for (const snapshot of rollbacks) {
       if (!trackedWorld) continue;
-      // Restore the pre-action cache so the UI corrects itself
-      const network = trackedWorld.network as {
-        lastInventoryByPlayerId?: Record<string, InventorySnapshot>;
-      };
-      if (network?.lastInventoryByPlayerId) {
-        network.lastInventoryByPlayerId[snapshot.playerId] = snapshot;
+      const network = trackedWorld.network as ClientNetwork | null;
+      if (network?.restoreInventorySnapshot) {
+        network.restoreInventorySnapshot(snapshot);
       }
-      trackedWorld.emit(EventType.INVENTORY_UPDATED, { ...snapshot });
       console.warn(
         "[InventoryActionDispatcher] Optimistic action timed out, rolling back inventory",
       );
@@ -101,32 +91,20 @@ function ensureServerListener(world: ClientWorld): void {
 
 /**
  * Deep-clone the current inventory cache for a player so we can roll back.
- * Returns null if no cache exists yet.
+ * Delegates to ClientNetwork's public API.
  */
 function snapshotInventory(
   world: ClientWorld,
   playerId: string,
 ): InventorySnapshot | null {
-  const network = world.network as {
-    lastInventoryByPlayerId?: Record<string, InventorySnapshot>;
-  };
-  const cached = network.lastInventoryByPlayerId?.[playerId];
-  if (!cached) return null;
-  return {
-    playerId: cached.playerId,
-    items: cached.items.map((i) => ({ ...i })),
-    coins: cached.coins,
-    maxSlots: cached.maxSlots,
-  };
+  const network = world.network as ClientNetwork | null;
+  return network?.snapshotInventory?.(playerId) ?? null;
 }
 
 /**
  * Optimistically remove an item from the client-side inventory cache and
  * emit an immediate UI update so the player sees instant feedback.
- *
- * The server's authoritative `inventoryUpdated` packet will replace this
- * cache within ~100-200 ms. If it never arrives, the PendingActionTracker
- * rolls back after 5 seconds.
+ * Delegates to ClientNetwork's public API.
  */
 function applyOptimisticRemoval(
   world: ClientWorld,
@@ -134,35 +112,8 @@ function applyOptimisticRemoval(
   slot: number,
   quantity: number,
 ): void {
-  const network = world.network as {
-    lastInventoryByPlayerId?: Record<
-      string,
-      {
-        playerId: string;
-        items: Array<{ slot: number; itemId: string; quantity: number }>;
-        coins: number;
-        maxSlots: number;
-      }
-    >;
-  };
-  const cached = network.lastInventoryByPlayerId?.[playerId];
-  if (!cached) return;
-
-  // Find the item in the cached inventory
-  const itemIndex = cached.items.findIndex((i) => i.slot === slot);
-  if (itemIndex === -1) return;
-
-  const item = cached.items[itemIndex];
-  if (item.quantity <= quantity) {
-    // Remove entirely
-    cached.items.splice(itemIndex, 1);
-  } else {
-    // Decrease quantity
-    item.quantity -= quantity;
-  }
-
-  // Emit the updated inventory so UI re-renders immediately
-  world.emit(EventType.INVENTORY_UPDATED, { ...cached });
+  const network = world.network as ClientNetwork | null;
+  network?.applyOptimisticRemoval?.(playerId, slot, quantity);
 }
 
 /**
