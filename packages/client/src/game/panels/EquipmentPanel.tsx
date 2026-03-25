@@ -70,15 +70,17 @@ function UtilityButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center justify-center rounded transition-all duration-150 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-2 focus-visible:outline-none"
+      className="flex h-10 w-10 items-center justify-center rounded-[10px] transition-all duration-150 hover:scale-[1.03] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none"
       title={label}
       style={{
-        background: `${theme.colors.background.tertiary}80`,
-        border: `1px solid ${theme.colors.border.default}60`,
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+        background:
+          "linear-gradient(180deg, rgba(73, 62, 54, 0.92) 0%, rgba(45, 37, 34, 0.96) 100%)",
+        border: `1px solid ${theme.colors.border.default}66`,
+        boxShadow:
+          "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -10px 12px rgba(0,0,0,0.18)",
       }}
     >
-      <div className="w-5 h-5" style={{ color: theme.colors.accent.primary }}>
+      <div className="h-5 w-5" style={{ color: theme.colors.accent.primary }}>
         {icon}
       </div>
     </button>
@@ -605,17 +607,17 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   );
 
   const renderEquipmentGrid = (isMobile: boolean) => {
-    const slotSize = isMobile ? MOBILE_EQUIPMENT.slotHeight : 72;
-    const gap = isMobile ? MOBILE_EQUIPMENT.gap : 8;
-    const padding = isMobile ? MOBILE_EQUIPMENT.padding : 10;
-    const portraitMin = isMobile ? 96 : 128;
+    const slotSize = isMobile ? 42 : 46;
+    const centerMin = isMobile ? 24 : 32;
+    const gap = isMobile ? 4 : 5;
+    const padding = isMobile ? 5 : 6;
 
     return (
       <div
         data-equipment-grid="paperdoll"
         className="grid h-full"
         style={{
-          gridTemplateColumns: `${slotSize}px minmax(0, 1fr) minmax(0, 1fr) ${slotSize}px`,
+          gridTemplateColumns: `${slotSize}px minmax(${centerMin}px, 1fr) minmax(${centerMin}px, 1fr) ${slotSize}px`,
           gridTemplateRows: `repeat(5, ${slotSize}px)`,
           gridTemplateAreas: `
           "cape portrait portrait ammo"
@@ -662,8 +664,8 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         className="flex flex-col h-full overflow-hidden"
         style={{
           ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
-          padding: shouldUseMobileUI ? "6px" : `${theme.spacing.xs}px`,
-          gap: shouldUseMobileUI ? "6px" : `${theme.spacing.xs}px`,
+          padding: shouldUseMobileUI ? "5px" : "6px",
+          gap: shouldUseMobileUI ? "5px" : "6px",
           border: "none",
           borderRadius: 0,
           boxShadow: "none",
@@ -676,7 +678,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
               "linear-gradient(180deg, rgba(38, 31, 29, 0.98) 0%, rgba(20, 17, 18, 0.99) 100%)",
             border: `1px solid ${theme.colors.border.default}70`,
             borderRadius: `${theme.borderRadius.lg}px`,
-            padding: shouldUseMobileUI ? 0 : `${theme.spacing.sm}px`,
+            padding: shouldUseMobileUI ? 0 : "6px",
             boxShadow:
               "0 12px 30px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -18px 26px rgba(0,0,0,0.24)",
           }}
@@ -687,13 +689,13 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         {shouldUseMobileUI ? (
           <>
             <div
-              className="flex justify-center gap-4 py-1.5"
+              className="flex justify-center gap-3 py-1"
               style={{
                 background:
                   "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
                 borderRadius: `${theme.borderRadius.md}px`,
                 border: `1px solid ${theme.colors.border.default}66`,
-                fontSize: "11px",
+                fontSize: "10px",
                 boxShadow: theme.shadows.sm,
               }}
             >
@@ -709,7 +711,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
             </div>
 
             <div
-              className="flex items-center justify-center gap-2 px-3 py-1.5"
+              className="flex items-center gap-2 px-3 py-1.5"
               style={{
                 background:
                   "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
@@ -733,13 +735,13 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         ) : (
           <>
             <div
-              className="flex justify-center gap-4 py-1"
+              className="flex justify-center gap-3 py-1"
               style={{
                 background:
                   "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
                 borderRadius: `${theme.borderRadius.md}px`,
                 border: `1px solid ${theme.colors.border.default}66`,
-                fontSize: "11px",
+                fontSize: "10px",
                 boxShadow: theme.shadows.sm,
               }}
             >
@@ -755,7 +757,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
             </div>
 
             <div
-              className="flex justify-between px-1 py-1.5"
+              className="flex items-center gap-2 px-3 py-1.5"
               style={{
                 background:
                   "linear-gradient(180deg, rgba(46, 39, 37, 0.98) 0%, rgba(24, 20, 21, 0.98) 100%)",
