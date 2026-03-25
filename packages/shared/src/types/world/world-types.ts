@@ -261,6 +261,8 @@ export interface BiomeTreeConfig {
   minSpacing: number;
   /** Whether trees should cluster together */
   clustering: boolean;
+  /** Whether snow-capable trees in this biome receive snow coverage */
+  enableSnow?: boolean;
   /** Cluster size if clustering is enabled */
   clusterSize?: number;
   /** Scale variation range [min, max] multiplier (default: [0.8, 1.2]) */

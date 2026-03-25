@@ -18,6 +18,7 @@ import THREE from "../../../extras/three/three";
 import type { World } from "../../../core/World";
 import { TREE_TYPES, treeIdToSubType } from "../../../constants/TreeTypes";
 import type { TreeTypeDefinition } from "../../../constants/TreeTypes";
+import { SNOW_BIOMES } from "./TerrainBiomeTypes";
 import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
   createTreeDissolveMaterial,
@@ -709,8 +710,13 @@ export async function addInstance(
           (a: number, b: number) => a + b,
           0,
         );
-        snowWeight =
-          totalWeight > 0 ? (weights["tundra"] ?? 0) / totalWeight : 0;
+        if (totalWeight > 0) {
+          let snowSum = 0;
+          for (const [biome, w] of Object.entries(weights)) {
+            if (SNOW_BIOMES.has(biome)) snowSum += w;
+          }
+          snowWeight = snowSum / totalWeight;
+        }
       } else {
         snowWeight = 1.0;
       }

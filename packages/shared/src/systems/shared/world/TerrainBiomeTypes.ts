@@ -79,6 +79,7 @@ const CANYON_TREE_CONFIG: BiomeTreeConfig = {
 
 const TUNDRA_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
+  enableSnow: true,
   trees: {
     [TreeId.PineSnow]: { weight: 40, minHeight: 38 },
     [TreeId.PineDead]: { weight: 20, minHeight: 38 },
@@ -104,3 +105,10 @@ const BIOME_TREE_CONFIGS: Record<BiomeType, BiomeTreeConfig> = {
 export function getTreeConfigForBiome(biomeId: string): BiomeTreeConfig {
   return BIOME_TREE_CONFIGS[biomeId as BiomeType] ?? FOREST_TREE_CONFIG;
 }
+
+/** Biome IDs whose tree config has enableSnow set to true. */
+export const SNOW_BIOMES: ReadonlySet<string> = new Set(
+  Object.entries(BIOME_TREE_CONFIGS)
+    .filter(([, cfg]) => cfg.enableSnow)
+    .map(([id]) => id),
+);
