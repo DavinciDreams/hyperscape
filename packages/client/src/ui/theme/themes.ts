@@ -671,8 +671,8 @@ export function getTabStyle(
     display: "flex",
     alignItems: "center",
     gap: theme.spacing.xs,
-    minHeight: 34,
-    padding: `0 ${theme.spacing.sm + 1}px`,
+    minHeight: 32,
+    padding: `0 6px`,
     ...getTabChromeStyle(theme, {
       isActive: active,
       isDragging: dragging,

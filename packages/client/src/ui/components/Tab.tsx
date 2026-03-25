@@ -116,8 +116,8 @@ export const Tab = memo(function Tab({
   const containerStyle: React.CSSProperties = {
     ...getTabStyle(theme, { active: isActive, dragging: isDragging }),
     justifyContent: "center",
-    minWidth: hasVisualIcon ? 42 : 76,
-    maxWidth: hasVisualIcon ? 42 : 168,
+    minWidth: hasVisualIcon ? 34 : 70,
+    maxWidth: hasVisualIcon ? 42 : 140,
     ...style,
     ...(isUnlocked ? dragHandleProps.style : { cursor: "pointer" }),
   };
