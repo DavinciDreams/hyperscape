@@ -1848,7 +1848,11 @@ export class PlayerSystem extends SystemBase {
       // Auto-initialize if player exists but wasn't registered yet (event ordering).
       // Use weapon-appropriate default so the player doesn't get an "invalid style"
       // error if "accurate" isn't valid for their equipped weapon.
-      if (this.players.has(playerId) || this.world.entities?.get(playerId)) {
+      const entity = this.world.entities?.get(playerId);
+      if (
+        this.players.has(playerId) ||
+        (entity && (entity as { type?: string }).type === "player")
+      ) {
         const weaponType = this.getPlayerWeaponType(playerId);
         const defaultStyle = getDefaultStyleForWeapon(weaponType);
         this.logger.debug(
@@ -2117,8 +2121,12 @@ export class PlayerSystem extends SystemBase {
     // 1. Validate playerId exists in our system — auto-initialize if missing
     // (onPlayerRegister may not have fired yet due to event ordering)
     if (!this.playerAutoRetaliate.has(playerId)) {
-      // Only auto-initialize for players we actually know about
-      if (this.players.has(playerId) || this.world.entities?.get(playerId)) {
+      // Only auto-initialize for player entities (not mobs or other entity types)
+      const entity = this.world.entities?.get(playerId);
+      if (
+        this.players.has(playerId) ||
+        (entity && (entity as { type?: string }).type === "player")
+      ) {
         this.logger.debug(
           `Auto-initializing auto-retaliate for ${playerId} (event ordering race)`,
         );
