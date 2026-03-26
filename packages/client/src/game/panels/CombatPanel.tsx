@@ -959,18 +959,6 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       setAutoRetaliate(enabled);
     });
 
-    // Direct fallback: read from player entity if callback doesn't fire
-    // This ensures we get the correct value even if the event system has issues
-    const player = world.entities?.player;
-    if (player) {
-      const playerCombat = (player as { combat?: { autoRetaliate?: boolean } })
-        ?.combat;
-      if (typeof playerCombat?.autoRetaliate === "boolean") {
-        autoRetaliateCache.set(playerId, playerCombat.autoRetaliate);
-        setAutoRetaliate(playerCombat.autoRetaliate);
-      }
-    }
-
     const onUpdate = (data: unknown) => {
       if (!isStyleUpdateEvent(data)) return;
       if (data.playerId !== playerId) return;
