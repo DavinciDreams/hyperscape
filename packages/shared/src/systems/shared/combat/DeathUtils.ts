@@ -8,6 +8,9 @@
 import type { InventoryItem } from "../../../types/core/core";
 import { dataManager } from "../../../data/DataManager";
 
+/** Prefix for gravestone entity IDs. Used in ID generation and filtering. */
+export const GRAVESTONE_ID_PREFIX = "gravestone_";
+
 /**
  * Sanitize killedBy string to prevent injection attacks
  * - Normalizes Unicode to prevent homograph attacks (Cyrillic 'а' vs Latin 'a')
@@ -89,8 +92,9 @@ export function splitItemsForSafeDeath(
     unitValue: getItemValue(item.itemId),
   }));
 
-  // Sort descending by value (most valuable first)
-  tagged.sort((a, b) => b.unitValue - a.unitValue);
+  // Sort descending by value (most valuable first).
+  // Tiebreak on original index for deterministic behavior when values are equal.
+  tagged.sort((a, b) => b.unitValue - a.unitValue || a.index - b.index);
 
   // Greedily assign keep-count without expanding stacks
   const keptCounts = new Map<number, number>();

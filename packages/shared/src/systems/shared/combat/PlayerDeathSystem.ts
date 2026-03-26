@@ -33,6 +33,7 @@ import type {
 import {
   sanitizeKilledBy,
   ITEMS_KEPT_ON_DEATH,
+  GRAVESTONE_ID_PREFIX,
   splitItemsForSafeDeath,
   validatePosition,
   isPositionInBounds,
@@ -280,7 +281,7 @@ export class PlayerDeathSystem extends SystemBase {
     // non-player entities). The real security boundary is the isServer check in
     // _processPlayerDeathInner which prevents client-triggered death processing.
     // Gravestone IDs are server-generated (SafeAreaDeathHandler.spawnGravestone).
-    if (data.entityId?.startsWith("gravestone_")) {
+    if (data.entityId?.startsWith(GRAVESTONE_ID_PREFIX)) {
       return;
     }
 

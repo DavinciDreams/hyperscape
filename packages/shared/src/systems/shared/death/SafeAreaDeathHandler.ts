@@ -26,6 +26,7 @@ import type { HeadstoneEntityConfig } from "../../../types/entities";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 import { ticksToMs } from "../../../utils/game/CombatCalculations";
 import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
+import { GRAVESTONE_ID_PREFIX } from "../combat/DeathUtils";
 
 const GRAVESTONE_MODEL_PATH = "models/environment/gravestone.glb";
 
@@ -175,7 +176,7 @@ export class SafeAreaDeathHandler {
       playerEntity?.name ||
       playerId;
 
-    const gravestoneId = `gravestone_${playerId}_${Date.now()}`;
+    const gravestoneId = `${GRAVESTONE_ID_PREFIX}${playerId}_${Date.now()}`;
     // Calculate despawnTime in ms for entity config (backwards compatible)
     const despawnTime =
       Date.now() + ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS);
