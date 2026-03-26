@@ -1809,10 +1809,11 @@ export class PlayerSystem extends SystemBase {
     playerId: string,
     savedStyle?: string,
   ): void {
-    // No idempotency guard here — onPlayerRegister carries DB-loaded values that
-    // must overwrite any auto-initialized defaults. The auto-init call sites
-    // (handleStyleChange, handleAutoRetaliateToggle) already guard with
-    // `if (!playerState)` before calling, so they won't overwrite existing state.
+    // Idempotency is the caller's responsibility:
+    // - Auto-init call sites guard with `if (!playerState)` before calling
+    // - onPlayerRegister guards with `if (!this.playerAttackStyles.has(playerId))`
+    // This method itself has no guard so that it can be called unconditionally
+    // by any future caller that intentionally needs to reset state.
 
     // Use saved style from database, or default to "accurate"
     const initialStyle =
@@ -1848,11 +1849,7 @@ export class PlayerSystem extends SystemBase {
       // Auto-initialize if player exists but wasn't registered yet (event ordering).
       // Use weapon-appropriate default so the player doesn't get an "invalid style"
       // error if "accurate" isn't valid for their equipped weapon.
-      const entity = this.world.entities?.get(playerId);
-      if (
-        this.players.has(playerId) ||
-        (entity && (entity as { type?: string }).type === "player")
-      ) {
+      if (this.isKnownPlayer(playerId)) {
         const weaponType = this.getPlayerWeaponType(playerId);
         const defaultStyle = getDefaultStyleForWeapon(weaponType);
         this.logger.debug(
@@ -1975,6 +1972,13 @@ export class PlayerSystem extends SystemBase {
   }
 
   /** Validated weapon type lookup — returns WeaponType.NONE for unknown types */
+  /** Check if an ID corresponds to a known player (registered or entity with type "player"). */
+  private isKnownPlayer(playerId: string): boolean {
+    if (this.players.has(playerId)) return true;
+    const entity = this.world.entities?.get(playerId);
+    return !!entity && (entity as { type?: string }).type === "player";
+  }
+
   private static readonly VALID_WEAPON_TYPES = new Set<string>(
     Object.values(WeaponType),
   );
@@ -2122,11 +2126,7 @@ export class PlayerSystem extends SystemBase {
     // (onPlayerRegister may not have fired yet due to event ordering)
     if (!this.playerAutoRetaliate.has(playerId)) {
       // Only auto-initialize for player entities (not mobs or other entity types)
-      const entity = this.world.entities?.get(playerId);
-      if (
-        this.players.has(playerId) ||
-        (entity && (entity as { type?: string }).type === "player")
-      ) {
+      if (this.isKnownPlayer(playerId)) {
         this.logger.debug(
           `Auto-initializing auto-retaliate for ${playerId} (event ordering race)`,
         );

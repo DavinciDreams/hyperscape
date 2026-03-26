@@ -4303,10 +4303,10 @@ export class ClientNetwork extends SystemBase {
     }
 
     // Periodic sweep: clear stale entries (>500ms old) when map exceeds threshold.
-    // 100 accommodates normal combat load (8Hz tick × ~6 combatants ≈ 48 keys/sec)
-    // without sweeping on every packet.
+    // Soft threshold at 150 (close to hard cap of 200) avoids unnecessary sweeps
+    // during normal combat while still catching buildup before the hard cap.
     const now = performance.now();
-    if (this._recentDamageKeys.size > 100) {
+    if (this._recentDamageKeys.size > 150) {
       // Deleting from a Map during for...of is safe per ES spec (§24.1.5.4).
       for (const [key, ts] of this._recentDamageKeys) {
         if (now - ts > 500) this._recentDamageKeys.delete(key);
