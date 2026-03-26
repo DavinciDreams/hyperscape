@@ -209,7 +209,7 @@ class HomeTeleportManager {
   }
 }
 
-function formatCooldownRemaining(remainingMs: number): string {
+export function formatCooldownRemaining(remainingMs: number): string {
   const totalSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;

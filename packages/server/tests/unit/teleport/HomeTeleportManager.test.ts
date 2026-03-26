@@ -20,6 +20,7 @@ import {
   getHomeTeleportManager,
   handleHomeTeleport,
   handleHomeTeleportCancel,
+  formatCooldownRemaining,
 } from "../../../src/systems/ServerNetwork/handlers/home-teleport";
 
 // ============================================================================
@@ -827,6 +828,22 @@ describe("Home Teleport Manager", () => {
 
     it("cast time ticks matches 10s / 600ms per tick", () => {
       expect(HOME_TELEPORT_CONSTANTS.CAST_TIME_TICKS).toBe(17);
+    });
+  });
+
+  describe("formatCooldownRemaining", () => {
+    it("rounds sub-second values up to 1s", () => {
+      expect(formatCooldownRemaining(0)).toBe("1s");
+      expect(formatCooldownRemaining(999)).toBe("1s");
+    });
+
+    it("formats exact minutes without seconds", () => {
+      expect(formatCooldownRemaining(60_000)).toBe("1m");
+    });
+
+    it("formats minutes and seconds when needed", () => {
+      expect(formatCooldownRemaining(61_000)).toBe("1m 1s");
+      expect(formatCooldownRemaining(90_500)).toBe("1m 31s");
     });
   });
 

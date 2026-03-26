@@ -34,14 +34,15 @@ const BURST_COUNT = 6;
 const GATHER_END = 0.2;
 const ERUPT_END = 0.34;
 const SUSTAIN_END = 0.68;
+const CHANNEL_EFFECT_TIMEOUT_BUFFER_MS = 1500;
 
 // Pre-allocated colors (shared, never disposed)
 const COLOR_CYAN = new THREE.Color(0x66ccff);
 const COLOR_WHITE = new THREE.Color(0xffffff);
-const COLOR_PORTAL_VIOLET = new THREE.Color(0x8e7a59);
-const COLOR_PORTAL_INDIGO = new THREE.Color(0x231f1a);
+const COLOR_PORTAL_BRONZE = new THREE.Color(0x8e7a59);
+const COLOR_PORTAL_UMBER = new THREE.Color(0x231f1a);
 const COLOR_PORTAL_GOLD = new THREE.Color(0xbea57b);
-const COLOR_PORTAL_ROSE = new THREE.Color(0xd7c7ab);
+const COLOR_PORTAL_PARCHMENT = new THREE.Color(0xd7c7ab);
 const PORTAL_ENDGAME_START = 0.8;
 const PORTAL_GROUND_CLEARANCE = 0.015;
 const TELEPORT_GROUND_CONTACT_BONES = [
@@ -356,7 +357,7 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     // ─── 8. Cast Portal Veil + Orbit Rings ───────────────────────────────
     const uPortalVeilOpacity = uniform(0.0);
     const portalVeilMat = this.createBeamMaterial(
-      COLOR_PORTAL_INDIGO,
+      COLOR_PORTAL_UMBER,
       COLOR_PORTAL_GOLD,
       uPortalVeilOpacity,
     );
@@ -368,7 +369,7 @@ export class ClientTeleportEffectsSystem extends SystemBase {
 
     const uPortalBandLowerOpacity = uniform(0.0);
     const portalBandLowerMat = this.createBasicAdditiveMaterial(
-      COLOR_PORTAL_VIOLET,
+      COLOR_PORTAL_BRONZE,
       uPortalBandLowerOpacity,
     );
     perEffectMaterials.push(portalBandLowerMat);
@@ -398,7 +399,7 @@ export class ClientTeleportEffectsSystem extends SystemBase {
 
     const uPortalCrownOpacity = uniform(0.0);
     const portalCrownMat = this.createBasicAdditiveMaterial(
-      COLOR_PORTAL_ROSE,
+      COLOR_PORTAL_PARCHMENT,
       uPortalCrownOpacity,
     );
     perEffectMaterials.push(portalCrownMat);
@@ -520,6 +521,7 @@ export class ClientTeleportEffectsSystem extends SystemBase {
       this.homeTeleportCastEffect.life = 0;
       this.homeTeleportCastEffect.channelDurationMs = channelDurationMs;
       this.homeTeleportCastEffect.group.position.copy(localPlayerAnchor);
+      this.resetChannelEffectState(this.homeTeleportCastEffect);
       return;
     }
 
@@ -650,6 +652,18 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     fx.group.position.y += 0.05;
     fx.group.visible = true;
 
+    this.resetChannelEffectState(fx);
+
+    if (!fx.group.parent) {
+      this.world.stage.scene.add(fx.group);
+    }
+
+    return fx;
+  }
+
+  private resetChannelEffectState(fx: PooledEffect): void {
+    fx.life = 0;
+
     fx.runeCircle.scale.setScalar(0.92);
     fx.runeCircle.rotation.z = 0;
     fx.runeCircle.visible = true;
@@ -706,12 +720,6 @@ export class ClientTeleportEffectsSystem extends SystemBase {
       p.mesh.scale.setScalar(0);
       p.velocity.set(0, 0, 0);
     }
-
-    if (!fx.group.parent) {
-      this.world.stage.scene.add(fx.group);
-    }
-
-    return fx;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -760,6 +768,14 @@ export class ClientTeleportEffectsSystem extends SystemBase {
       return;
     }
 
+    if (
+      fx.life * 1000 >
+      fx.channelDurationMs + CHANNEL_EFFECT_TIMEOUT_BUFFER_MS
+    ) {
+      this.deactivateEffect(fx);
+      return;
+    }
+
     fx.group.position.copy(localPlayerAnchor);
 
     const progress = Math.min(
@@ -768,7 +784,6 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     );
     const portalRise = easeOutExpo(progress);
     const portalCinch = easeInQuad(progress);
-    const portalAnticipation = easeInQuad(progress);
     const endgameCharge =
       progress > PORTAL_ENDGAME_START
         ? (progress - PORTAL_ENDGAME_START) / (1 - PORTAL_ENDGAME_START)
@@ -803,7 +818,7 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     fx.portalBandLower.visible = true;
     fx.portalBandLower.position.y = 0.02 + portalRise * 0.12;
     fx.portalBandLower.scale.setScalar(
-      0.92 + portalAnticipation * 0.16 + pulse * 0.03 - finalTighten * 0.06,
+      0.92 + portalCinch * 0.16 + pulse * 0.03 - finalTighten * 0.06,
     );
     fx.portalBandLower.rotation.z +=
       dt * (0.58 + portalRise * 1.2 + endgameCharge * 0.35);
@@ -1133,15 +1148,19 @@ export class ClientTeleportEffectsSystem extends SystemBase {
 
     const getBoneTransform = player.avatar?.getBoneTransform;
     if (getBoneTransform) {
-      for (const boneName of TELEPORT_GROUND_CONTACT_BONES) {
-        const boneMatrix = getBoneTransform(boneName);
-        if (!boneMatrix) {
-          continue;
-        }
+      try {
+        for (const boneName of TELEPORT_GROUND_CONTACT_BONES) {
+          const boneMatrix = getBoneTransform(boneName);
+          if (!boneMatrix) {
+            continue;
+          }
 
-        const boneWorldPos =
-          this.teleportBoneWorldPosition.setFromMatrixPosition(boneMatrix);
-        lowestBoneY = Math.min(lowestBoneY, boneWorldPos.y);
+          const boneWorldPos =
+            this.teleportBoneWorldPosition.setFromMatrixPosition(boneMatrix);
+          lowestBoneY = Math.min(lowestBoneY, boneWorldPos.y);
+        }
+      } catch {
+        lowestBoneY = Number.POSITIVE_INFINITY;
       }
     }
 

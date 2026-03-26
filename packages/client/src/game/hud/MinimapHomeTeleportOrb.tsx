@@ -7,6 +7,10 @@
 import React, { useEffect, useState, useCallback, useRef, useId } from "react";
 import { HOME_TELEPORT_CONSTANTS, EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
+import {
+  getHomeTeleportCooldownProgress,
+  readHomeTeleportRemainingMs,
+} from "./homeTeleportUi";
 
 type TeleportState = "ready" | "cooldown" | "casting";
 
@@ -92,13 +96,7 @@ export function MinimapHomeTeleportOrb({
     };
 
     const onFailed = (event?: unknown) => {
-      const remainingMs =
-        typeof event === "object" &&
-        event !== null &&
-        "remainingMs" in event &&
-        typeof event.remainingMs === "number"
-          ? event.remainingMs
-          : 0;
+      const remainingMs = readHomeTeleportRemainingMs(event);
       if (remainingMs > 0) {
         setState("cooldown");
         setCooldownEndTime(performance.now() + remainingMs);
@@ -236,15 +234,7 @@ export function MinimapHomeTeleportOrb({
   const isCasting = state === "casting";
   const isDisabled = state === "cooldown";
   const cooldownProgress = isDisabled
-    ? Math.max(
-        0,
-        Math.min(
-          100,
-          ((HOME_TELEPORT_CONSTANTS.COOLDOWN_MS - cooldownRemaining) /
-            HOME_TELEPORT_CONSTANTS.COOLDOWN_MS) *
-            100,
-        ),
-      )
+    ? getHomeTeleportCooldownProgress(cooldownRemaining)
     : 0;
 
   // Color scheme based on state
