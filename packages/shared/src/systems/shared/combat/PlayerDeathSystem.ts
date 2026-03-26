@@ -78,6 +78,8 @@ export class PlayerDeathSystem extends SystemBase {
     playerId: string;
     type: "equipment" | "inventory";
   }> = [];
+  // Tracks players with in-flight persist retries to prevent races with reconnect/new death
+  private persistRetryInFlight = new Set<string>();
 
   private lastDeathTime = new Map<string, number>();
   private readonly DEATH_COOLDOWN = ticksToMs(
@@ -264,6 +266,7 @@ export class PlayerDeathSystem extends SystemBase {
     this.itemsKeptOnDeath.clear();
     this.deathProcessingInProgress.clear();
     this.pendingPersistRetries.length = 0;
+    this.persistRetryInFlight.clear();
   }
 
   private async handlePlayerDeath(data: {
@@ -273,10 +276,10 @@ export class PlayerDeathSystem extends SystemBase {
     deathPosition?: { x: number; y: number; z: number };
   }): Promise<void> {
     // Skip gravestone entity destruction events — not player deaths.
-    // Safe: gravestone IDs are server-generated (SafeAreaDeathHandler.spawnGravestone),
-    // never user-influenced, so the prefix cannot be spoofed. This also relies on
-    // ENTITY_DEATH only being emitted server-side (enforced by isServer check in
-    // _processPlayerDeathInner).
+    // This is a performance optimization (avoids entering processPlayerDeath for
+    // non-player entities). The real security boundary is the isServer check in
+    // _processPlayerDeathInner which prevents client-triggered death processing.
+    // Gravestone IDs are server-generated (SafeAreaDeathHandler.spawnGravestone).
     if (data.entityId?.startsWith("gravestone_")) {
       return;
     }
@@ -1255,32 +1258,33 @@ export class PlayerDeathSystem extends SystemBase {
       return;
     }
 
-    // Allow immediate respawn if timer is still active (e.g., clicked respawn button)
-    const timer = this.respawnTimers.get(data.playerId);
-    if (timer) {
-      clearTimeout(timer);
-      this.respawnTimers.delete(data.playerId);
-    }
-
-    // Also check tick-based respawn: if player is in DYING state, allow immediate respawn
+    // PRECONDITION: Player must be in DYING state. This is the single source of truth
+    // for whether a player is dead. PlayerSystem.handleDeath always sets deathState = DYING
+    // before emitting ENTITY_DEATH, so any legitimately dead player will have this state.
     const playerEntity = this.world.entities?.get?.(data.playerId);
     const isDying =
       playerEntity &&
       "data" in playerEntity &&
       (playerEntity as PlayerEntityLike).data?.deathState === DeathState.DYING;
 
-    // If neither a setTimeout timer nor DYING state exists, the player is not dead
-    // and the respawn request is a no-op. Tick-based respawn always sets deathState
-    // to DYING (via PlayerSystem.handleDeath), so a dead player will always match isDying.
-    if (timer || isDying) {
-      this.initiateRespawn(data.playerId).catch((err) => {
-        this.logger.error(
-          "Respawn request failed",
-          err instanceof Error ? err : undefined,
-          { playerId: data.playerId },
-        );
-      });
+    if (!isDying) {
+      return;
     }
+
+    // Clear any legacy setTimeout timer if still active
+    const timer = this.respawnTimers.get(data.playerId);
+    if (timer) {
+      clearTimeout(timer);
+      this.respawnTimers.delete(data.playerId);
+    }
+
+    this.initiateRespawn(data.playerId).catch((err) => {
+      this.logger.error(
+        "Respawn request failed",
+        err instanceof Error ? err : undefined,
+        { playerId: data.playerId },
+      );
+    });
   }
 
   private async handlePlayerReconnect(data: {
@@ -1707,6 +1711,21 @@ export class PlayerDeathSystem extends SystemBase {
     const retries = this.pendingPersistRetries.splice(0);
 
     for (const { playerId, type } of retries) {
+      // Skip if a retry is already in-flight for this player (prevents races)
+      if (this.persistRetryInFlight.has(playerId)) {
+        this.logger.debug(
+          "Skipping persist retry — already in-flight for player",
+          { playerId, type },
+        );
+        continue;
+      }
+
+      this.persistRetryInFlight.add(playerId);
+
+      const onComplete = () => {
+        this.persistRetryInFlight.delete(playerId);
+      };
+
       if (type === "equipment") {
         const equipmentSystem = this.world.getSystem(
           "equipment",
@@ -1735,7 +1754,10 @@ export class PlayerDeathSystem extends SystemBase {
                 failureReason: "equipment_persist_retry_failed",
                 timestamp: Date.now(),
               });
-            });
+            })
+            .finally(onComplete);
+        } else {
+          onComplete();
         }
       } else {
         const inventorySystem = this.world.getSystem(
@@ -1765,7 +1787,10 @@ export class PlayerDeathSystem extends SystemBase {
                 failureReason: "inventory_persist_retry_failed",
                 timestamp: Date.now(),
               });
-            });
+            })
+            .finally(onComplete);
+        } else {
+          onComplete();
         }
       }
     }

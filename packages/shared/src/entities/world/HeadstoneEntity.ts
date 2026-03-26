@@ -345,7 +345,8 @@ export class HeadstoneEntity extends InteractableEntity {
           item !== null &&
           typeof item === "object" &&
           typeof (item as Record<string, unknown>).itemId === "string" &&
-          typeof (item as Record<string, unknown>).quantity === "number",
+          typeof (item as Record<string, unknown>).quantity === "number" &&
+          ((item as Record<string, unknown>).quantity as number) > 0,
       );
       if (validated.length !== raw.length) {
         console.warn(
