@@ -391,7 +391,7 @@ export abstract class CombatantEntity extends Entity {
     super.setHealth(newHealth);
 
     // Handle death
-    if (wasAlive && this.getHealth() <= 0 && !this.isDead) {
+    if (wasAlive && this.getHealth() <= 0 && !this.isDead()) {
       this.die();
     }
   }

@@ -2786,6 +2786,18 @@ export class PlayerLocal extends Entity implements HotReloadable {
       playerWithDying.isDying = false;
       playerWithDying.data.isDying = false;
 
+      // Reset animation from death to idle
+      this.data.e = "idle";
+      this.data.emote = "idle";
+      this.emote = "idle";
+      if (this._avatar?.setEmote) {
+        this._avatar.setEmote(Emotes.IDLE);
+      }
+
+      // Clear death state on entity data
+      this.data.deathState = undefined;
+      this.data.deathPosition = undefined;
+
       // Unfreeze physics if needed
       const physXGlobal = globalThis as PhysXGlobal;
       if (this.capsule && physXGlobal.PHYSX) {
@@ -2796,6 +2808,9 @@ export class PlayerLocal extends Entity implements HotReloadable {
         );
       }
 
+      console.log(
+        "[PlayerLocal] ✅ Death state cleared (PLAYER_SET_DEAD isDead:false)",
+      );
       return;
     }
 
@@ -2919,6 +2934,18 @@ export class PlayerLocal extends Entity implements HotReloadable {
     const playerWithDying = this as PlayerLocalWithDying;
     playerWithDying.isDying = false;
     playerWithDying.data.isDying = false;
+
+    // Reset animation from death to idle
+    this.data.e = "idle";
+    this.data.emote = "idle";
+    this.emote = "idle";
+    if (this._avatar?.setEmote) {
+      this._avatar.setEmote(Emotes.IDLE);
+    }
+
+    // Clear death state on entity data
+    this.data.deathState = undefined;
+    this.data.deathPosition = undefined;
 
     // CRITICAL: Teleport player to spawn position
     // Without this, player stays at death location instead of respawning at spawn

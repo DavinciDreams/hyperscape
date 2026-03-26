@@ -20,6 +20,7 @@ import type { InventorySystem } from "../character/InventorySystem";
 import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
 import { STARTER_TOWNS } from "../../../data/world-areas";
 import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
+import { dataManager } from "../../../data/DataManager";
 
 /**
  * Sanitize killedBy string to prevent injection attacks
@@ -60,6 +61,83 @@ function sanitizeKilledBy(killedBy: unknown): string {
 
   sanitized = sanitized.trim().substring(0, 64); // Limit to 64 characters
   return sanitized || "unknown";
+}
+
+/**
+ * OSRS-style: In safe zones, player keeps their 3 most valuable items on death.
+ * These items are returned to inventory after respawn instead of going to gravestone.
+ * @see https://oldschool.runescape.wiki/w/Items_Kept_on_Death
+ */
+const ITEMS_KEPT_ON_DEATH = 3;
+
+/**
+ * Get the value of an item from manifest data.
+ * Returns 0 for unknown items (they sort to bottom and get dropped first).
+ */
+function getItemValue(itemId: string): number {
+  const item = dataManager.getItem(itemId);
+  return item?.value ?? 0;
+}
+
+/**
+ * Split items into "kept" and "dropped" lists for safe zone deaths (OSRS-style).
+ * Keeps the N most valuable individual items. For stacked items (quantity > 1),
+ * each unit counts as one item but only the top N units across all stacks are kept.
+ *
+ * Returns { kept: items retained by player, dropped: items for gravestone }
+ */
+function splitItemsForSafeDeath(
+  allItems: InventoryItem[],
+  keepCount: number,
+): { kept: InventoryItem[]; dropped: InventoryItem[] } {
+  if (keepCount <= 0) {
+    return { kept: [], dropped: [...allItems] };
+  }
+
+  // Expand stacks into individual value-tagged entries for sorting
+  const expanded: Array<{
+    item: InventoryItem;
+    index: number;
+    unitValue: number;
+  }> = [];
+  for (let i = 0; i < allItems.length; i++) {
+    const item = allItems[i];
+    const unitValue = getItemValue(item.itemId);
+    // For stacked items, each unit is considered separately
+    for (let q = 0; q < item.quantity; q++) {
+      expanded.push({ item, index: i, unitValue });
+    }
+  }
+
+  // Sort descending by value (most valuable first)
+  expanded.sort((a, b) => b.unitValue - a.unitValue);
+
+  // Track how many units to keep per original item index
+  const keptCounts = new Map<number, number>();
+  let remaining = keepCount;
+  for (const entry of expanded) {
+    if (remaining <= 0) break;
+    keptCounts.set(entry.index, (keptCounts.get(entry.index) ?? 0) + 1);
+    remaining--;
+  }
+
+  const kept: InventoryItem[] = [];
+  const dropped: InventoryItem[] = [];
+
+  for (let i = 0; i < allItems.length; i++) {
+    const item = allItems[i];
+    const keptQty = keptCounts.get(i) ?? 0;
+    const droppedQty = item.quantity - keptQty;
+
+    if (keptQty > 0) {
+      kept.push({ ...item, quantity: keptQty });
+    }
+    if (droppedQty > 0) {
+      dropped.push({ ...item, quantity: droppedQty });
+    }
+  }
+
+  return { kept, dropped };
 }
 
 /**
@@ -235,6 +313,9 @@ export class PlayerDeathSystem extends SystemBase {
     }
   >();
 
+  // OSRS-style: Items kept on death (top 3 most valuable) — returned on respawn
+  private itemsKeptOnDeath = new Map<string, InventoryItem[]>();
+
   private lastDeathTime = new Map<string, number>();
   private readonly DEATH_COOLDOWN = ticksToMs(
     COMBAT_CONSTANTS.DEATH.COOLDOWN_TICKS,
@@ -321,6 +402,7 @@ export class PlayerDeathSystem extends SystemBase {
     this.subscribe(EventType.PLAYER_UNREGISTERED, (data: { id: string }) => {
       this.cleanupPlayerDeath(data);
       this.playerInventories.delete(data.id);
+      this.itemsKeptOnDeath.delete(data.id);
     });
     this.subscribe(
       EventType.DEATH_HEADSTONE_EXPIRED,
@@ -416,6 +498,7 @@ export class PlayerDeathSystem extends SystemBase {
     this.playerInventories.clear();
     this.pendingGravestones.clear();
     this.lastDeathTime.clear();
+    this.itemsKeptOnDeath.clear();
   }
 
   private async handlePlayerDeath(data: {
@@ -424,6 +507,13 @@ export class PlayerDeathSystem extends SystemBase {
     entityType: "player" | "mob";
     deathPosition?: { x: number; y: number; z: number };
   }): Promise<void> {
+    console.warn("[DEATH-DEBUG] handlePlayerDeath received ENTITY_DEATH", {
+      entityId: data.entityId,
+      entityType: data.entityType,
+      killedBy: data.killedBy,
+      hasDeathPosition: !!data.deathPosition,
+      isServer: this.world.isServer,
+    });
     // Only handle player deaths - mob deaths are handled by MobDeathSystem
     if (data.entityType !== "player") {
       // Fallback: Check if entityId looks like a player (fixes rare bug if entityType missing)
@@ -474,8 +564,17 @@ export class PlayerDeathSystem extends SystemBase {
       deadPlayerEntity?.data?.inStreamingDuel === true ||
       deadPlayerEntity?.data?.preventRespawn === true;
 
+    console.warn("[DEATH-DEBUG] duel check", {
+      playerId,
+      hasDuelSystem: !!duelSystem,
+      isInActiveDuel: duelSystem?.isPlayerInActiveDuel?.(playerId) ?? false,
+      inStreamingDuel: deadPlayerEntity?.data?.inStreamingDuel,
+      preventRespawn: deadPlayerEntity?.data?.preventRespawn,
+      inStreamingDuelResult: inStreamingDuel,
+    });
+
     if (duelSystem?.isPlayerInActiveDuel?.(playerId) || inStreamingDuel) {
-      this.logger.info("Player died in duel - playing death animation only", {
+      console.warn("[DEATH-DEBUG] DUEL DEATH - skipping normal death flow!", {
         playerId,
       });
 
@@ -580,6 +679,11 @@ export class PlayerDeathSystem extends SystemBase {
           typedPlayerEntity.data.deathPosition = undefined;
           typedPlayerEntity.data.respawnTick = undefined;
         }
+        if ("setHealth" in playerEntity && "getMaxHealth" in playerEntity) {
+          const maxHealth =
+            (playerEntity as PlayerEntityLike).getMaxHealth?.() ?? 100;
+          (playerEntity as PlayerEntityLike).setHealth?.(maxHealth);
+        }
         if ("markNetworkDirty" in playerEntity) {
           (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
         }
@@ -587,6 +691,12 @@ export class PlayerDeathSystem extends SystemBase {
       this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
         playerId,
         isDead: false,
+      });
+      // Emit PLAYER_RESPAWNED so PlayerSystem restores player.alive and health
+      // Without this, PlayerSystem state stays dead even though entity is reset
+      this.emitTypedEvent(EventType.PLAYER_RESPAWNED, {
+        playerId,
+        spawnPosition: deathPosition,
       });
       this.lastDeathTime.delete(playerId);
     }
@@ -621,17 +731,16 @@ export class PlayerDeathSystem extends SystemBase {
     deathPosition: { x: number; y: number; z: number },
     killedByRaw: string,
   ): Promise<void> {
+    console.warn("[DEATH-DEBUG] processPlayerDeath called", {
+      playerId,
+      deathPosition,
+      killedBy: killedByRaw,
+    });
     // Sanitize killedBy input to prevent injection attacks
     const killedBy = sanitizeKilledBy(killedByRaw);
     // Server-only - prevent client from triggering death events
     if (!this.world.isServer) {
-      this.logger.error(
-        "Client attempted server-only death processing",
-        undefined,
-        {
-          playerId,
-        },
-      );
+      console.warn("[DEATH-DEBUG] ABORT: not server-side", { playerId });
       return;
     }
 
@@ -657,13 +766,9 @@ export class PlayerDeathSystem extends SystemBase {
         validatedPosition = validatePosition(playerEntity.position);
       }
       if (!validatedPosition) {
-        this.logger.error(
-          "Cannot determine valid death position, aborting",
-          undefined,
-          {
-            playerId,
-          },
-        );
+        console.warn("[DEATH-DEBUG] ABORT: no valid death position", {
+          playerId,
+        });
         return;
       }
     }
@@ -688,22 +793,39 @@ export class PlayerDeathSystem extends SystemBase {
 
     const lastDeath = this.lastDeathTime.get(playerId) || 0;
     if (now - lastDeath < this.DEATH_COOLDOWN) {
-      this.logger.warn("Death spam detected", { playerId });
+      console.warn("[DEATH-DEBUG] ABORT: death cooldown active", {
+        playerId,
+        timeSinceLast: now - lastDeath,
+        cooldown: this.DEATH_COOLDOWN,
+      });
       return;
     }
+    console.warn("[DEATH-DEBUG] checkpoint: past cooldown check", { playerId });
 
     // Check for existing death lock - if player dies again before looting, clear old one
     // This matches OSRS behavior where dying again replaces your old gravestone
-    const existingDeathLock =
-      await this.deathStateManager.getDeathLock(playerId);
+    console.warn("[DEATH-DEBUG] checkpoint: checking death lock", { playerId });
+    let existingDeathLock;
+    try {
+      existingDeathLock = await this.deathStateManager.getDeathLock(playerId);
+    } catch (err) {
+      console.warn("[DEATH-DEBUG] ABORT: getDeathLock threw", {
+        playerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     if (existingDeathLock) {
-      this.logger.info(
-        "Player dying again with existing death lock - clearing old gravestone",
-        {
+      console.warn("[DEATH-DEBUG] clearing existing death lock", { playerId });
+      try {
+        await this.deathStateManager.clearDeathLock(playerId);
+      } catch (err) {
+        console.warn("[DEATH-DEBUG] ABORT: clearDeathLock threw", {
           playerId,
-        },
-      );
-      await this.deathStateManager.clearDeathLock(playerId);
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
     }
 
     // Update last death time (use cached timestamp)
@@ -725,11 +847,16 @@ export class PlayerDeathSystem extends SystemBase {
 
     // Duel arena deaths should not generate gravestones, ground items, or other loot clutter.
     // Keep normal death animation + respawn timing, but preserve inventory/equipment.
-    if (isPositionInsideDuelArenaZone(deathPosition.x, deathPosition.z)) {
-      this.logger.info(
-        "Duel arena death - suppressing drops and death lock creation",
-        { playerId },
-      );
+    const inDuelArenaZone = isPositionInsideDuelArenaZone(
+      deathPosition.x,
+      deathPosition.z,
+    );
+    console.warn("[DEATH-DEBUG] checkpoint: duel arena zone check", {
+      playerId,
+      inDuelArenaZone,
+      deathPosition,
+    });
+    if (inDuelArenaZone) {
       this.postDeathCleanup(playerId, deathPosition, [], killedBy);
       return;
     }
@@ -741,17 +868,31 @@ export class PlayerDeathSystem extends SystemBase {
     const databaseSystem = this.world.getSystem(
       "database",
     ) as unknown as DatabaseSystemLike | null;
+    console.warn("[DEATH-DEBUG] checkpoint: database system", {
+      playerId,
+      hasDB: !!databaseSystem,
+      hasExecuteInTransaction: !!databaseSystem?.executeInTransaction,
+    });
     if (!databaseSystem || !databaseSystem.executeInTransaction) {
-      this.logger.error("DatabaseSystem not available, cannot use transaction");
-      this.resetDeathState(playerId, playerEntity);
+      console.warn("[DEATH-DEBUG] no DB - proceeding without item drops", {
+        playerId,
+      });
+      this.postDeathCleanup(playerId, deathPosition, [], killedBy);
       return;
     }
 
     // Get inventory system
     const inventorySystem = this.world.getSystem("inventory");
+    console.warn("[DEATH-DEBUG] checkpoint: inventory system", {
+      playerId,
+      hasInventory: !!inventorySystem,
+    });
     if (!inventorySystem) {
-      this.logger.error("InventorySystem not available");
-      this.resetDeathState(playerId, playerEntity);
+      console.warn(
+        "[DEATH-DEBUG] no inventory - proceeding without item drops",
+        { playerId },
+      );
+      this.postDeathCleanup(playerId, deathPosition, [], killedBy);
       return;
     }
 
@@ -761,14 +902,23 @@ export class PlayerDeathSystem extends SystemBase {
     ) as unknown as EquipmentSystemLike | null;
 
     let itemsToDrop: InventoryItem[] = [];
+    let itemsKept: InventoryItem[] = [];
 
+    console.warn("[DEATH-DEBUG] checkpoint: starting death transaction", {
+      playerId,
+    });
     try {
       await databaseSystem.executeInTransaction(
         async (tx: TransactionContext) => {
+          console.warn("[DEATH-DEBUG] inside transaction callback", {
+            playerId,
+          });
           const inventory = inventorySystem.getInventory(playerId);
-          if (!inventory) {
-            this.logger.warn("No inventory for player", { playerId });
-          }
+          console.warn("[DEATH-DEBUG] tx: got inventory", {
+            playerId,
+            hasInventory: !!inventory,
+            itemCount: inventory?.items?.length ?? 0,
+          });
 
           const inventoryItems =
             inventory?.items.map((item, index) => ({
@@ -779,24 +929,27 @@ export class PlayerDeathSystem extends SystemBase {
               metadata: null,
             })) || [];
 
-          // Use atomic clearEquipmentAndReturn to prevent race condition
-          // This atomically reads AND clears equipment in one operation,
-          // preventing item duplication if server crashes between read and clear.
           let equipmentItems: InventoryItem[] = [];
           if (equipmentSystem) {
             if (equipmentSystem.clearEquipmentAndReturn) {
-              // NEW: Atomic read-and-clear operation
+              console.warn(
+                "[DEATH-DEBUG] tx: calling clearEquipmentAndReturn",
+                { playerId },
+              );
               const clearedEquipment =
                 await equipmentSystem.clearEquipmentAndReturn(playerId, tx);
+              console.warn("[DEATH-DEBUG] tx: clearEquipmentAndReturn done", {
+                playerId,
+                count: clearedEquipment.length,
+              });
               equipmentItems = clearedEquipment.map((item, index) => ({
                 id: `death_equip_${playerId}_${Date.now()}_${index}`,
                 itemId: item.itemId,
                 quantity: item.quantity,
-                slot: -1, // Equipment items don't have inventory slots
+                slot: -1,
                 metadata: null,
               }));
             } else {
-              // Fallback to old method if clearEquipmentAndReturn not available
               const equipment = equipmentSystem.getPlayerEquipment(playerId);
               if (equipment) {
                 equipmentItems = this.convertEquipmentToInventoryItems(
@@ -805,16 +958,27 @@ export class PlayerDeathSystem extends SystemBase {
                 );
               }
             }
-          } else {
-            this.logger.warn(
-              "EquipmentSystem not available, only inventory items will drop",
-            );
           }
 
-          itemsToDrop = [...inventoryItems, ...equipmentItems];
+          const allItems = [...inventoryItems, ...equipmentItems];
           const zoneType = this.zoneDetection.getZoneType(deathPosition);
+          console.warn("[DEATH-DEBUG] tx: zone type", {
+            playerId,
+            zoneType,
+            totalItems: allItems.length,
+          });
 
+          // OSRS-style: In safe zones, keep 3 most valuable items
           if (zoneType === ZoneType.SAFE_AREA) {
+            const split = splitItemsForSafeDeath(allItems, ITEMS_KEPT_ON_DEATH);
+            itemsToDrop = split.dropped;
+            itemsKept = split.kept;
+            console.warn("[DEATH-DEBUG] tx: safe zone split", {
+              playerId,
+              kept: itemsKept.map((i) => `${i.itemId} x${i.quantity}`),
+              dropped: itemsToDrop.length,
+            });
+
             this.pendingGravestones.set(playerId, {
               position: deathPosition,
               items: itemsToDrop,
@@ -822,7 +986,7 @@ export class PlayerDeathSystem extends SystemBase {
               zoneType,
             });
 
-            // Include items and killedBy for crash recovery
+            console.warn("[DEATH-DEBUG] tx: creating death lock", { playerId });
             await this.deathStateManager.createDeathLock(
               playerId,
               {
@@ -838,7 +1002,14 @@ export class PlayerDeathSystem extends SystemBase {
               },
               tx,
             );
+            console.warn("[DEATH-DEBUG] tx: death lock created", { playerId });
           } else {
+            // Wilderness: drop everything
+            itemsToDrop = allItems;
+            itemsKept = [];
+            console.warn("[DEATH-DEBUG] tx: calling wildernessHandler", {
+              playerId,
+            });
             await this.wildernessHandler.handleDeath(
               playerId,
               deathPosition,
@@ -847,13 +1018,18 @@ export class PlayerDeathSystem extends SystemBase {
               zoneType,
               tx,
             );
+            console.warn("[DEATH-DEBUG] tx: wildernessHandler done", {
+              playerId,
+            });
           }
 
-          // Clear inventory in memory and persist within the transaction callback
-          // so both death lock creation and inventory clear succeed or fail together
-          await inventorySystem.clearInventoryImmediate(playerId, false);
+          // Clear all inventory in memory (kept items will be re-added after respawn)
+          // skipPersist=true: we're inside a DB transaction — independent persist
+          // would open a nested transaction that deadlocks on SQLite.
+          console.warn("[DEATH-DEBUG] tx: clearing inventory", { playerId });
+          await inventorySystem.clearInventoryImmediate(playerId, true);
+          console.warn("[DEATH-DEBUG] tx: inventory cleared", { playerId });
 
-          // Only call old clearEquipmentImmediate if atomic method wasn't used
           if (
             equipmentSystem &&
             !equipmentSystem.clearEquipmentAndReturn &&
@@ -861,16 +1037,60 @@ export class PlayerDeathSystem extends SystemBase {
           ) {
             await equipmentSystem.clearEquipmentImmediate(playerId);
           }
+          console.warn("[DEATH-DEBUG] tx: transaction callback COMPLETE", {
+            playerId,
+          });
         },
       );
 
-      this.postDeathCleanup(playerId, deathPosition, itemsToDrop, killedBy);
-    } catch (error) {
-      this.logger.error(
-        "Death transaction failed",
-        error instanceof Error ? error : undefined,
+      // CRITICAL: Persist equipment clearing to DB AFTER transaction completes
+      // (inside the transaction it would deadlock on SQLite)
+      if (equipmentSystem) {
+        try {
+          // saveEquipmentToDatabase is private, so use clearEquipmentImmediate
+          // which saves to DB. Equipment is already cleared in memory by
+          // clearEquipmentAndReturn, so this just persists the empty state.
+          if (equipmentSystem.clearEquipmentImmediate) {
+            await equipmentSystem.clearEquipmentImmediate(playerId);
+          }
+        } catch (err) {
+          console.warn(
+            "[DEATH-DEBUG] equipment DB persist failed (non-fatal)",
+            {
+              playerId,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          );
+        }
+      }
+
+      // Persist empty inventory to DB (was skipped inside transaction)
+      try {
+        await inventorySystem.clearInventoryImmediate(playerId, false);
+      } catch (err) {
+        console.warn("[DEATH-DEBUG] inventory DB persist failed (non-fatal)", {
+          playerId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      console.warn(
+        "[DEATH-DEBUG] checkpoint: transaction complete, calling postDeathCleanup",
         { playerId },
       );
+      this.postDeathCleanup(
+        playerId,
+        deathPosition,
+        itemsToDrop,
+        killedBy,
+        itemsKept,
+      );
+    } catch (error) {
+      console.warn("[DEATH-DEBUG] ABORT: death transaction THREW", {
+        playerId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       throw error;
     }
   }
@@ -880,7 +1100,22 @@ export class PlayerDeathSystem extends SystemBase {
     deathPosition: { x: number; y: number; z: number },
     itemsToDrop: InventoryItem[],
     killedBy: string,
+    keptItems?: InventoryItem[],
   ): void {
+    console.warn("[DEATH-DEBUG] postDeathCleanup called", {
+      playerId,
+      deathPosition,
+      itemCount: itemsToDrop.length,
+      keptCount: keptItems?.length ?? 0,
+      killedBy,
+      hasTickSystem: !!this.tickSystem,
+    });
+
+    // Store items to return on respawn (OSRS keep-3)
+    if (keptItems && keptItems.length > 0) {
+      this.itemsKeptOnDeath.set(playerId, keptItems);
+    }
+
     const deathData: DeathLocationData = {
       playerId,
       deathPosition,
@@ -900,6 +1135,14 @@ export class PlayerDeathSystem extends SystemBase {
       playerId,
       isDead: true,
       deathPosition,
+    });
+
+    // Emit death screen so the client shows the death overlay
+    this.emitTypedEvent(EventType.UI_DEATH_SCREEN, {
+      playerId,
+      message: `Oh dear, you are dead!`,
+      killedBy,
+      respawnTime: ticksToMs(COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS),
     });
 
     const playerEntity = this.world.entities?.get?.(playerId);
@@ -931,11 +1174,26 @@ export class PlayerDeathSystem extends SystemBase {
         const MAX_SAFE_TICK = MAX_TICK - animationTicks;
         typedPlayerEntity.data.respawnTick =
           currentTick > MAX_SAFE_TICK ? MAX_TICK : currentTick + animationTicks;
+        console.warn("[DEATH-DEBUG] respawnTick set", {
+          playerId,
+          currentTick,
+          animationTicks,
+          respawnTick: typedPlayerEntity.data.respawnTick,
+          deathState: typedPlayerEntity.data.deathState,
+        });
       }
 
       if ("markNetworkDirty" in playerEntity) {
         (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
       }
+    } else {
+      console.warn(
+        "[DEATH-DEBUG] postDeathCleanup: no playerEntity found for death state",
+        {
+          playerId,
+          entityExists: !!playerEntity,
+        },
+      );
     }
 
     // Fallback: Use setTimeout if tick system is not available (e.g., client-side)
@@ -1276,9 +1534,47 @@ export class PlayerDeathSystem extends SystemBase {
       isDead: false,
     });
 
+    // Close death screen overlay on client
+    this.emitTypedEvent(EventType.UI_DEATH_SCREEN_CLOSE, {
+      playerId,
+    });
+
+    // OSRS-style: Return kept items to inventory after respawn
+    const keptItems = this.itemsKeptOnDeath.get(playerId);
+    if (keptItems && keptItems.length > 0) {
+      this.itemsKeptOnDeath.delete(playerId);
+      const inventorySystem = this.world.getSystem(
+        "inventory",
+      ) as InventorySystem | null;
+      if (inventorySystem) {
+        for (const item of keptItems) {
+          try {
+            await inventorySystem.addItemDirect(playerId, {
+              itemId: item.itemId,
+              quantity: item.quantity,
+            });
+          } catch (err) {
+            console.warn("[DEATH-DEBUG] Failed to return kept item", {
+              playerId,
+              itemId: item.itemId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+        console.warn("[DEATH-DEBUG] Returned kept items on respawn", {
+          playerId,
+          count: keptItems.length,
+          items: keptItems.map((i) => `${i.itemId} x${i.quantity}`),
+        });
+      }
+    }
+
+    const hasGravestone = this.deathLocations.has(playerId);
     this.emitTypedEvent(EventType.UI_MESSAGE, {
       playerId,
-      message: `You have respawned in ${townName}. Your items are where you died.`,
+      message: hasGravestone
+        ? `You have respawned in ${townName}. Your items are at your gravestone where you died.`
+        : `You have respawned in ${townName}.`,
       type: "info",
     });
 
@@ -1298,6 +1594,16 @@ export class PlayerDeathSystem extends SystemBase {
     if (timer) {
       clearTimeout(timer);
       this.respawnTimers.delete(data.playerId);
+    }
+
+    // Also check tick-based respawn: if player is in DYING state, allow immediate respawn
+    const playerEntity = this.world.entities?.get?.(data.playerId);
+    const isDying =
+      playerEntity &&
+      "data" in playerEntity &&
+      (playerEntity as PlayerEntityLike).data?.deathState === DeathState.DYING;
+
+    if (timer || isDying) {
       this.initiateRespawn(data.playerId).catch((err) => {
         this.logger.error(
           "Respawn request failed",
@@ -1562,6 +1868,7 @@ export class PlayerDeathSystem extends SystemBase {
   /**
    * Reset death state when death processing fails early (system unavailable).
    * Prevents players from being permanently stuck in DYING state.
+   * Restores entity health AND PlayerSystem state to avoid stuck-at-0-HP.
    */
   private resetDeathState(
     playerId: string,
@@ -1571,14 +1878,27 @@ export class PlayerDeathSystem extends SystemBase {
       const typedPlayerEntity = playerEntity as PlayerEntityLike;
       if (typedPlayerEntity.data) {
         typedPlayerEntity.data.deathState = DeathState.ALIVE;
-        if ("markNetworkDirty" in playerEntity) {
-          (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
-        }
+        typedPlayerEntity.data.deathPosition = undefined;
+        typedPlayerEntity.data.respawnTick = undefined;
+      }
+      // Restore entity health so player isn't stuck at 0 HP
+      if ("setHealth" in playerEntity && "getMaxHealth" in playerEntity) {
+        const maxHealth =
+          (playerEntity as PlayerEntityLike).getMaxHealth?.() ?? 100;
+        (playerEntity as PlayerEntityLike).setHealth?.(maxHealth);
+      }
+      if ("markNetworkDirty" in playerEntity) {
+        (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
       }
     }
     this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
       playerId,
       isDead: false,
+    });
+    // Restore PlayerSystem state (player.alive and health)
+    this.emitTypedEvent(EventType.PLAYER_RESPAWNED, {
+      playerId,
+      spawnPosition: playerEntity?.position ?? { x: 0, y: 10, z: 0 },
     });
     this.logger.warn("Reset death state after failed death processing", {
       playerId,
@@ -1710,6 +2030,25 @@ export class PlayerDeathSystem extends SystemBase {
       const typedEntity = playerEntity as PlayerEntityLike;
       if (!typedEntity.data) continue;
 
+      // Log dying players so we can trace respawn timing
+      if (typedEntity.data.deathState === DeathState.DYING) {
+        // Only log every 10 ticks to avoid spam
+        if (currentTick % 10 === 0) {
+          console.warn(
+            "[DEATH-DEBUG] processPendingRespawns: player in DYING state",
+            {
+              playerId,
+              currentTick,
+              respawnTick: typedEntity.data.respawnTick,
+              ticksRemaining:
+                typedEntity.data.respawnTick !== undefined
+                  ? (typedEntity.data.respawnTick as number) - currentTick
+                  : "NO_RESPAWN_TICK",
+            },
+          );
+        }
+      }
+
       // Check if player is in DYING state and respawn tick has been reached
       if (
         typedEntity.data.deathState === DeathState.DYING &&
@@ -1723,6 +2062,14 @@ export class PlayerDeathSystem extends SystemBase {
         }
 
         // Initiate respawn for this player
+        console.warn(
+          "[DEATH-DEBUG] processPendingRespawns: triggering respawn",
+          {
+            playerId,
+            currentTick,
+            respawnTick: typedEntity.data.respawnTick,
+          },
+        );
         this.initiateRespawn(playerId).catch((err) => {
           this.logger.error(
             "Tick-based respawn failed",

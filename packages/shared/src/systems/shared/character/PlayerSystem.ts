@@ -56,7 +56,6 @@ import {
 import type { CombatStyleExtended } from "../../../types/game/combat-types";
 import type {
   HealthUpdateEvent,
-  PlayerDeathEvent,
   PlayerEnterEvent,
   PlayerLeaveEvent,
   PlayerLevelUpEvent,
@@ -302,9 +301,6 @@ export class PlayerSystem extends SystemBase {
     });
     this.subscribe(EventType.PLAYER_DAMAGE_TAKEN, (data) => {
       this.takeDamage(data as { playerId: string; damage: number });
-    });
-    this.subscribe<PlayerDeathEvent>(EventType.PLAYER_DIED, (data) => {
-      this.handleDeath(data);
     });
     // Subscribe to PLAYER_RESPAWNED from DeathSystem to update our player data
     this.subscribe(EventType.PLAYER_RESPAWNED, (data) => {
@@ -831,7 +827,6 @@ export class PlayerSystem extends SystemBase {
     if (player.health.current <= 0 && player.alive) {
       this.handleDeath({
         playerId: data.entityId,
-        deathLocation: player.position,
         cause: "health_depletion",
       });
     }
@@ -839,16 +834,29 @@ export class PlayerSystem extends SystemBase {
     this.emitPlayerUpdate(data.entityId);
   }
 
-  private handleDeath(data: PlayerDeathEvent): void {
+  private handleDeath(data: { playerId: string; cause?: string }): void {
     const player = this.players.get(data.playerId);
     if (!player) {
+      console.warn("[DEATH-DEBUG] handleDeath: player not found", {
+        playerId: data.playerId,
+      });
       return; // Player not found, ignore
     }
 
     // Prevent infinite recursion: if player is already dead, don't process again
     if (!player.alive) {
+      console.warn("[DEATH-DEBUG] handleDeath: player already dead", {
+        playerId: data.playerId,
+      });
       return; // Already dead, ignore duplicate death events
     }
+
+    console.warn("[DEATH-DEBUG] handleDeath: processing death", {
+      playerId: data.playerId,
+      cause: data.cause,
+      health: player.health.current,
+      isServer: this.world.isServer,
+    });
 
     // Mark player as dead in PlayerSystem data
     player.alive = false;
@@ -858,12 +866,47 @@ export class PlayerSystem extends SystemBase {
     // Clear eat cooldown on death (memory hygiene)
     this.eatDelayManager.clearPlayer(data.playerId);
 
+    // Set entity death state IMMEDIATELY so client sees death animation
+    // even if PlayerDeathSystem's async processing fails
+    const deathEntity = this.world.entities?.get?.(data.playerId);
+    if (deathEntity) {
+      const entityAny = deathEntity as unknown as Record<string, unknown>;
+      if ("emote" in deathEntity) {
+        entityAny.emote = "death";
+      }
+      if (deathEntity.data) {
+        (deathEntity.data as Record<string, unknown>).e = "death";
+        (deathEntity.data as Record<string, unknown>).deathState = 2; // DeathState.DYING
+        (deathEntity.data as Record<string, unknown>).deathPosition = [
+          player.position.x,
+          player.position.y,
+          player.position.z,
+        ];
+      }
+      if ("markNetworkDirty" in deathEntity) {
+        (deathEntity as { markNetworkDirty: () => void }).markNetworkDirty();
+      }
+    }
+
+    // Emit PLAYER_SET_DEAD immediately so client blocks input
+    this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
+      playerId: data.playerId,
+      isDead: true,
+      deathPosition: player.position,
+    });
+
     // Emit ENTITY_DEATH for DeathSystem to handle (headstones, loot, respawn)
     // DeathSystem will handle the full death flow including respawn
+    // Include deathPosition so PlayerDeathSystem can use the exact death location
+    // without falling back to potentially stale position caches
+    console.log("[DEATH-DEBUG] handleDeath: emitting ENTITY_DEATH", {
+      playerId: data.playerId,
+    });
     this.emitTypedEvent(EventType.ENTITY_DEATH, {
       entityId: data.playerId,
       killedBy: data.cause || "unknown",
       entityType: "player" as const,
+      deathPosition: { ...player.position },
     });
 
     this.emitPlayerUpdate(data.playerId);
@@ -900,7 +943,6 @@ export class PlayerSystem extends SystemBase {
     if (newHealth <= 0) {
       this.handleDeath({
         playerId: data.playerId,
-        deathLocation: player.position,
         cause: "combat",
       });
     }
@@ -1408,7 +1450,16 @@ export class PlayerSystem extends SystemBase {
 
   damagePlayer(playerId: string, amount: number, _source?: string): boolean {
     const player = this.players.get(playerId);
-    if (!player || !player.alive) return false;
+    if (!player || !player.alive) {
+      console.warn("[DEATH-DEBUG] damagePlayer: early return", {
+        playerId,
+        hasPlayer: !!player,
+        alive: player?.alive,
+        amount,
+        source: _source,
+      });
+      return false;
+    }
 
     // Validate amount to prevent NaN
     const validAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
@@ -1468,9 +1519,17 @@ export class PlayerSystem extends SystemBase {
     });
 
     if (player.health.current <= 0) {
+      console.warn(
+        "[DEATH-DEBUG] damagePlayer: health <= 0, calling handleDeath",
+        {
+          playerId,
+          health: player.health.current,
+          source: _source,
+          isServer: this.world.isServer,
+        },
+      );
       this.handleDeath({
         playerId,
-        deathLocation: player.position,
         cause: _source || "damage",
       });
     }

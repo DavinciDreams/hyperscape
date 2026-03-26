@@ -281,12 +281,16 @@ export class ChainWriterBridge {
       );
     });
 
-    // Player deaths (EventType.PLAYER_DIED = "player:died")
-    world.on("player:died", (payload: unknown) => {
-      const data = payload as PlayerDeathPayload;
-      if (!data.playerId) return;
-      if (!this.shouldMirrorPlayer(data.playerId)) return;
-      this.chainWriter.queueDeath(data.playerId);
+    // Player deaths — listen to ENTITY_DEATH (PLAYER_DIED is never emitted)
+    world.on("entity:death", (payload: unknown) => {
+      const data = payload as {
+        entityId: string;
+        entityType: string;
+        killedBy?: string;
+      };
+      if (data.entityType !== "player") return;
+      if (!this.shouldMirrorPlayer(data.entityId)) return;
+      this.chainWriter.queueDeath(data.entityId);
     });
 
     // Player registration (EventType.PLAYER_REGISTERED = "player:registered")

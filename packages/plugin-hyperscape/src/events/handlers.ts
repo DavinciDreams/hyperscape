@@ -256,12 +256,15 @@ export function registerEventHandlers(
     }
   });
 
-  service.onGameEvent("PLAYER_DIED", async (data: unknown) => {
-    await storeCombatMemory(runtime, "Player died in combat", data, [
-      "combat",
-      "death",
-    ]);
-    logger.warn("[HyperscapePlugin] Player died");
+  service.onGameEvent("ENTITY_DEATH", async (data: unknown) => {
+    const eventData = data as { entityType?: string };
+    if (eventData.entityType === "player") {
+      await storeCombatMemory(runtime, "Player died in combat", data, [
+        "combat",
+        "death",
+      ]);
+      logger.warn("[HyperscapePlugin] Player died");
+    }
   });
 
   // Resource gathering events

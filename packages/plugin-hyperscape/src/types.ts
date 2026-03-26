@@ -20,6 +20,7 @@ export type EventType =
   | "PLAYER_LEFT"
   | "PLAYER_SPAWNED"
   | "PLAYER_DIED"
+  | "ENTITY_DEATH"
   | "ENTITY_JOINED"
   | "ENTITY_LEFT"
   | "ENTITY_UPDATED"

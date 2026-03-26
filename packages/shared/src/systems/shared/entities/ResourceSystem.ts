@@ -387,9 +387,14 @@ export class ResourceSystem extends SystemBase {
 
     // OSRS-ACCURACY: Cancel gathering when player dies
     // Critical: Dead players cannot continue gathering
-    this.subscribe<{ playerId: string }>(EventType.PLAYER_DIED, (data) => {
-      this.cancelGatheringForPlayer(data.playerId, "died");
-    });
+    this.subscribe<{ entityId: string; entityType: string }>(
+      EventType.ENTITY_DEATH,
+      (data) => {
+        if (data.entityType === "player") {
+          this.cancelGatheringForPlayer(data.entityId, "died");
+        }
+      },
+    );
 
     // OSRS-ACCURACY: Cancel gathering when player teleports
     // Cannot gather from a resource across the map
