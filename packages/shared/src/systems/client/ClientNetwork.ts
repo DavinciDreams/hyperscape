@@ -4312,7 +4312,8 @@ export class ClientNetwork extends SystemBase {
         if (now - ts > 500) this._recentDamageKeys.delete(key);
       }
       // Hard cap: if sweep didn't clear enough (all entries <500ms old),
-      // drop oldest entries to prevent unbounded growth under extreme combat.
+      // drop oldest-inserted entries to prevent unbounded growth. Trims to 100
+      // (below the 150 sweep threshold) so we don't re-trigger on the next packet.
       if (this._recentDamageKeys.size > 200) {
         const excess = this._recentDamageKeys.size - 100;
         let dropped = 0;
