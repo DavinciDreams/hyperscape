@@ -467,6 +467,12 @@ export class PlayerDeathSystem extends SystemBase {
     const killedBy = sanitizeKilledBy(killedByRaw);
     // Server-only - prevent client from triggering death events
     if (!this.world.isServer) {
+      this.logger.warn(
+        "Client attempted server-only death processing — blocked",
+        {
+          playerId,
+        },
+      );
       return;
     }
 
@@ -657,8 +663,12 @@ export class PlayerDeathSystem extends SystemBase {
       },
     );
 
-    // CRITICAL: Persist equipment clearing to DB AFTER transaction completes
-    // (inside the transaction it would deadlock on SQLite)
+    // TWO-PHASE CLEAR: clearEquipmentAndReturn (inside tx) cleared in-memory state
+    // and returned the items. clearEquipmentImmediate (below) persists the empty state
+    // to DB. The tx couldn't persist because EquipmentSystem's save opens its own
+    // transaction, which would deadlock on SQLite. If the persist below fails, the
+    // retry queue handles it. On reconnect, onPlayerReconnect checks for death locks
+    // and blocks inventory load, so even a DB desync won't give items back.
     if (equipmentSystem?.clearEquipmentImmediate) {
       try {
         await equipmentSystem.clearEquipmentImmediate(playerId);
@@ -672,7 +682,8 @@ export class PlayerDeathSystem extends SystemBase {
       }
     }
 
-    // Persist empty inventory to DB (was skipped inside transaction)
+    // Same two-phase pattern: in-memory clear happened inside tx (skipPersist=true),
+    // now persist the empty inventory to DB. Death lock prevents reconnect item restore.
     try {
       await inventorySystem.clearInventoryImmediate(playerId, false);
     } catch (err) {
@@ -1193,6 +1204,9 @@ export class PlayerDeathSystem extends SystemBase {
       "data" in playerEntity &&
       (playerEntity as PlayerEntityLike).data?.deathState === DeathState.DYING;
 
+    // If neither a setTimeout timer nor DYING state exists, the player is not dead
+    // and the respawn request is a no-op. Tick-based respawn always sets deathState
+    // to DYING (via PlayerSystem.handleDeath), so a dead player will always match isDying.
     if (timer || isDying) {
       this.initiateRespawn(data.playerId).catch((err) => {
         this.logger.error(
@@ -1624,6 +1638,12 @@ export class PlayerDeathSystem extends SystemBase {
         if (equipmentSystem?.clearEquipmentImmediate) {
           void equipmentSystem
             .clearEquipmentImmediate(playerId)
+            .then(() => {
+              this.logger.info(
+                "DEATH_PERSIST_DESYNC: Equipment DB persist retry succeeded",
+                { playerId },
+              );
+            })
             .catch((err) => {
               this.logger.error(
                 "DEATH_PERSIST_DESYNC: Equipment DB persist retry also failed — possible item duplication",
@@ -1639,6 +1659,12 @@ export class PlayerDeathSystem extends SystemBase {
         if (inventorySystem) {
           void inventorySystem
             .clearInventoryImmediate(playerId, false)
+            .then(() => {
+              this.logger.info(
+                "DEATH_PERSIST_DESYNC: Inventory DB persist retry succeeded",
+                { playerId },
+              );
+            })
             .catch((err) => {
               this.logger.error(
                 "DEATH_PERSIST_DESYNC: Inventory DB persist retry also failed — possible item duplication",

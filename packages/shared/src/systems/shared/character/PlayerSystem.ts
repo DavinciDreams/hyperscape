@@ -48,6 +48,7 @@ import {
 } from "../../../types/core/core";
 import { WeaponType } from "../../../types/game/item-types";
 import { DeathState } from "../../../types/entities";
+import type { PlayerEntityLike } from "../combat/DeathTypes";
 import {
   isStyleValidForWeapon,
   getAvailableStyles,
@@ -850,22 +851,21 @@ export class PlayerSystem extends SystemBase {
     // even if PlayerDeathSystem's async processing fails
     const deathEntity = this.world.entities?.get?.(data.playerId);
     if (deathEntity) {
-      const entityAny = deathEntity as unknown as Record<string, unknown>;
-      if ("emote" in deathEntity) {
-        entityAny.emote = "death";
+      const typedEntity = deathEntity as PlayerEntityLike;
+      if (typedEntity.emote !== undefined) {
+        typedEntity.emote = "death";
       }
-      if (deathEntity.data) {
-        (deathEntity.data as Record<string, unknown>).e = "death";
-        (deathEntity.data as Record<string, unknown>).deathState =
-          DeathState.DYING;
-        (deathEntity.data as Record<string, unknown>).deathPosition = [
+      if (typedEntity.data) {
+        typedEntity.data.e = "death";
+        typedEntity.data.deathState = DeathState.DYING;
+        typedEntity.data.deathPosition = [
           player.position.x,
           player.position.y,
           player.position.z,
         ];
       }
-      if ("markNetworkDirty" in deathEntity) {
-        (deathEntity as { markNetworkDirty: () => void }).markNetworkDirty();
+      if (typedEntity.markNetworkDirty) {
+        typedEntity.markNetworkDirty();
       }
     }
 
