@@ -1384,7 +1384,21 @@ export class PlayerDeathSystem extends SystemBase {
       }, ticksToMs(COMBAT_CONSTANTS.DEATH.RECONNECT_RESPAWN_DELAY_TICKS));
       this.respawnTimers.set(playerId, reconnectTimer);
 
-      // Block inventory load until respawn
+      // Block inventory load until respawn.
+      // AUDIT: This means a death lock survived a server restart or reconnect.
+      // If the post-tx persist never ran (crash window), DB inventory/equipment
+      // rows may still contain stale items — blockInventoryLoad prevents them
+      // from being restored. Ops can cross-reference this with DB state.
+      this.emitTypedEvent(EventType.AUDIT_LOG, {
+        action: "DEATH_LOCK_RECONNECT_BLOCK",
+        playerId,
+        actorId: playerId,
+        zoneType: deathLock.zoneType,
+        success: true,
+        itemCount: deathLock.itemCount,
+        deathAge: deathAge,
+        timestamp: Date.now(),
+      });
       return { blockInventoryLoad: true };
     }
 
