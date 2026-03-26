@@ -89,16 +89,6 @@ export class HeadstoneEntity extends InteractableEntity {
     return this.headstoneData.zoneType || "safe_area";
   }
 
-  private getEntityManager(): {
-    destroyEntity: (id: string) => boolean;
-  } | null {
-    return (
-      (this.world.getSystem("entity-manager") as unknown as {
-        destroyEntity: (id: string) => boolean;
-      }) ?? null
-    );
-  }
-
   // --- Rendering ---
 
   protected async createMesh(): Promise<void> {
@@ -210,6 +200,11 @@ export class HeadstoneEntity extends InteractableEntity {
       return;
     }
 
+    // Don't open loot window for empty gravestones (defense-in-depth)
+    if (this.lootItems.length === 0) {
+      return;
+    }
+
     const lootData = {
       corpseId: this.id,
       playerId: data.playerId,
@@ -262,15 +257,9 @@ export class HeadstoneEntity extends InteractableEntity {
         corpseId: this.id,
         playerId: this.headstoneData.playerId,
       });
-
-      setTimeout(() => {
-        const entityManager = this.getEntityManager();
-        if (entityManager) {
-          entityManager.destroyEntity(this.id);
-        } else {
-          this.world.entities.remove(this.id);
-        }
-      }, 500);
+      // Entity destruction is handled by PlayerDeathSystem.handleCorpseEmpty()
+      // which destroys via EntityManager → sends entityRemoved to all clients.
+      // No setTimeout here — system-driven cleanup is more reliable.
     }
 
     this.markNetworkDirty();
@@ -329,11 +318,35 @@ export class HeadstoneEntity extends InteractableEntity {
     const buf = super.getNetworkData();
     const hd = this.headstoneData;
     buf.lootItemCount = this.lootItems.length;
+    buf.lootItems = this.lootItems; // Full items array for client sync
     buf.despawnTime = hd.despawnTime;
     buf.playerId = hd.playerId;
     buf.deathMessage = hd.deathMessage;
     buf.lootProtectionUntil = this.lootProtectionUntil;
     return buf;
+  }
+
+  /**
+   * Apply network data from server. Syncs private lootItems from server state
+   * to prevent stale item lists on the client (which caused item duplication
+   * when old gravestones showed original items after being looted).
+   */
+  modify(data: Partial<EntityData>): void {
+    super.modify(data);
+    const changes = data as Record<string, unknown>;
+    if (Array.isArray(changes.lootItems)) {
+      this.lootItems = (changes.lootItems as InventoryItem[]).map((item) => ({
+        ...item,
+      }));
+    } else if (
+      typeof changes.lootItemCount === "number" &&
+      changes.lootItemCount === 0
+    ) {
+      this.lootItems = [];
+    }
+    if (this.mesh?.userData?.corpseData) {
+      this.mesh.userData.corpseData.itemCount = this.lootItems.length;
+    }
   }
 
   serialize(): EntityData {

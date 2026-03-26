@@ -272,6 +272,11 @@ export class PlayerDeathSystem extends SystemBase {
     entityType: "player" | "mob";
     deathPosition?: { x: number; y: number; z: number };
   }): Promise<void> {
+    // Skip gravestone entity destruction events — not player deaths
+    if (data.entityId?.startsWith("gravestone_")) {
+      return;
+    }
+
     // Only handle player deaths - mob deaths are handled by MobDeathSystem
     if (data.entityType !== "player") {
       // Fallback: Check if entityId looks like a player (fixes rare bug if entityType missing)
@@ -1507,6 +1512,17 @@ export class PlayerDeathSystem extends SystemBase {
 
     // Cancel tick-based gravestone expiration to prevent duplicate ground item spawns
     this.safeAreaHandler.cancelGravestoneTimer(data.corpseId);
+
+    // Destroy the gravestone entity immediately via EntityManager.
+    // This sends an entityRemoved packet to all clients, preventing stale
+    // gravestones from persisting and showing duplicate items.
+    // Previously relied on HeadstoneEntity's internal setTimeout which was unreliable.
+    const entityManager = this.world.getSystem(
+      "entity-manager",
+    ) as EntityManager | null;
+    if (entityManager) {
+      entityManager.destroyEntity(data.corpseId);
+    }
 
     await this.deathStateManager.clearDeathLock(data.playerId);
   }
