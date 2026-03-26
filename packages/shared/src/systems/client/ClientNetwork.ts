@@ -4275,8 +4275,7 @@ export class ClientNetwork extends SystemBase {
     // before the player entity is created. The packet is already filtered
     // server-side for this player. Use local player ID if available, otherwise
     // use the network's own ID as the player identifier.
-    const playerId =
-      this.world.getPlayer()?.id || (this as { id?: string }).id || "";
+    const playerId = this.world.getPlayer()?.id || this.id || "";
     if (!playerId) return;
 
     this.world.emit(EventType.UI_AUTO_RETALIATE_CHANGED, {
@@ -4309,6 +4308,16 @@ export class ClientNetwork extends SystemBase {
     if (this._recentDamageKeys.size > 50) {
       for (const [key, ts] of this._recentDamageKeys) {
         if (now - ts > 500) this._recentDamageKeys.delete(key);
+      }
+      // Hard cap: if sweep didn't clear enough (all entries <500ms old),
+      // drop oldest entries to prevent unbounded growth under extreme combat.
+      if (this._recentDamageKeys.size > 200) {
+        const excess = this._recentDamageKeys.size - 100;
+        let dropped = 0;
+        for (const key of this._recentDamageKeys.keys()) {
+          this._recentDamageKeys.delete(key);
+          if (++dropped >= excess) break;
+        }
       }
     }
 

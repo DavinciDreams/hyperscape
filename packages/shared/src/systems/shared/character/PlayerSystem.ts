@@ -1801,10 +1801,10 @@ export class PlayerSystem extends SystemBase {
     playerId: string,
     savedStyle?: string,
   ): void {
-    // Idempotent: don't overwrite existing state (auto-init race with onPlayerRegister)
-    if (this.playerAttackStyles.has(playerId)) {
-      return;
-    }
+    // No idempotency guard here — onPlayerRegister carries DB-loaded values that
+    // must overwrite any auto-initialized defaults. The auto-init call sites
+    // (handleStyleChange, handleAutoRetaliateToggle) already guard with
+    // `if (!playerState)` before calling, so they won't overwrite existing state.
 
     // Use saved style from database, or default to "accurate"
     const initialStyle =
@@ -2102,10 +2102,9 @@ export class PlayerSystem extends SystemBase {
     playerId: string,
     enabled: boolean,
   ): void {
-    // Idempotent: don't overwrite existing state (auto-init race with onPlayerRegister)
-    if (this.playerAutoRetaliate.has(playerId)) {
-      return;
-    }
+    // No idempotency guard — onPlayerRegister carries DB-loaded values that must
+    // overwrite any auto-initialized defaults. Auto-init call sites already guard
+    // with `if (!this.playerAutoRetaliate.has(playerId))` before setting.
     this.playerAutoRetaliate.set(playerId, enabled);
 
     // Notify UI of initial state
