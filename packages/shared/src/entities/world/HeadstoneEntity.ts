@@ -180,19 +180,30 @@ export class HeadstoneEntity extends InteractableEntity {
   // --- Interaction ---
 
   public async handleInteraction(data: EntityInteractionData): Promise<void> {
-    // Server-authoritative: only the server has the real loot items.
-    // Client interaction is routed via entityInteract packet → server calls this.
-    if (!this.world.isServer) return;
-
     if (!this.canPlayerLoot(data.playerId)) {
-      this.world.emit(EventType.UI_MESSAGE, {
-        playerId: data.playerId,
-        message: "This isn't your gravestone.",
-        type: "error",
-      });
+      if (!this.world.isServer && this.world.chat?.add) {
+        this.world.chat.add(
+          {
+            id: `grave_${Date.now()}`,
+            from: "",
+            body: "This isn't your gravestone.",
+            createdAt: new Date().toISOString(),
+            timestamp: Date.now(),
+          },
+          false,
+        );
+      }
+      if (this.world.isServer) {
+        this.world.emit(EventType.UI_MESSAGE, {
+          playerId: data.playerId,
+          message: "This isn't your gravestone.",
+          type: "error",
+        });
+      }
       return;
     }
 
+    // Don't open loot window for empty gravestones
     if (this.lootItemCount === 0) {
       return;
     }
@@ -206,7 +217,7 @@ export class HeadstoneEntity extends InteractableEntity {
 
     this.world.emit(EventType.CORPSE_CLICK, lootData);
 
-    if (this.world.network) {
+    if (this.world.isServer && this.world.network) {
       const network = this.world.network as unknown as {
         sendTo?: (playerId: string, type: string, data: unknown) => void;
       };
@@ -309,15 +320,14 @@ export class HeadstoneEntity extends InteractableEntity {
   // --- Network ---
 
   // PERF: Mutates buffer in-place instead of creating new objects.
-  // PRIVACY: lootItems are NOT broadcast — only lootItemCount is sent.
-  // In OSRS, gravestone contents are hidden until interaction. Broadcasting
-  // full item lists would be an information leak to all nearby clients.
-  // Clients use lootItemCount for empty-gravestone display; actual loot data
-  // is sent only to the interacting player via the corpseLoot packet.
+  // lootItems is included for client sync but only sent when dirty
+  // (markNetworkDirty is called after removeItem/restoreItem). Gravestones
+  // have few items and rarely change, so bandwidth impact is minimal.
   getNetworkData(): Record<string, unknown> {
     const buf = super.getNetworkData();
     const hd = this.headstoneData;
     buf.lootItemCount = this.lootItemCount;
+    buf.lootItems = this.lootItems;
     buf.despawnTime = hd.despawnTime;
     buf.playerId = hd.playerId;
     buf.deathMessage = hd.deathMessage;
@@ -326,18 +336,27 @@ export class HeadstoneEntity extends InteractableEntity {
   }
 
   /**
-   * Apply network data from server. Syncs lootItemCount (not full item list)
-   * so clients know when a gravestone is empty. Full loot data is never
-   * broadcast — it's sent per-player via the corpseLoot packet on interaction.
-   *
-   * When lootItemCount reaches 0, local lootItems are cleared so the client
-   * won't show stale items if the player re-interacts before the entity
-   * is destroyed by handleCorpseEmpty.
+   * Apply network data from server. Syncs lootItems from server state
+   * to prevent stale item lists on the client (which caused item duplication
+   * when old gravestones showed original items after being looted).
    */
   modify(data: Partial<EntityData>): void {
     super.modify(data);
     const changes = data as Record<string, unknown>;
-    if (typeof changes.lootItemCount === "number") {
+    if (Array.isArray(changes.lootItems)) {
+      // Validate each element has required fields (server→client trust boundary)
+      const raw = changes.lootItems as unknown[];
+      const validated = raw.filter(
+        (item): item is InventoryItem =>
+          item !== null &&
+          typeof item === "object" &&
+          typeof (item as Record<string, unknown>).itemId === "string" &&
+          typeof (item as Record<string, unknown>).quantity === "number" &&
+          ((item as Record<string, unknown>).quantity as number) > 0,
+      );
+      this.lootItems = validated.map((item) => ({ ...item }));
+      this.lootItemCount = this.lootItems.length;
+    } else if (typeof changes.lootItemCount === "number") {
       this.lootItemCount = changes.lootItemCount;
       if (this.lootItemCount === 0) {
         this.lootItems = [];
@@ -359,8 +378,7 @@ export class HeadstoneEntity extends InteractableEntity {
         deathTime: hd.deathTime,
         deathMessage: hd.deathMessage,
         position: hd.position,
-        // PRIVACY: items are NOT included in serialization (broadcast to all clients).
-        // Only itemCount is sent. Actual loot data is sent per-player via corpseLoot.
+        items: this.lootItems,
         itemCount: this.lootItemCount,
         despawnTime: hd.despawnTime,
         lootProtectionUntil: this.lootProtectionUntil,

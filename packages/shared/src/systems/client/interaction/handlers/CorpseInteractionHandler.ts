@@ -21,6 +21,11 @@ import { INTERACTION_RANGE } from "../constants";
 /** OSRS scenery/object color (cyan) for context menu target names */
 const SCENERY_COLOR = "#00ffff";
 
+/** Corpse/Headstone entity interface */
+interface CorpseEntity {
+  handleInteraction?: (data: unknown) => Promise<void>;
+}
+
 export class CorpseInteractionHandler extends BaseInteractionHandler {
   /**
    * Left-click: Loot corpse/gravestone
@@ -87,13 +92,20 @@ export class CorpseInteractionHandler extends BaseInteractionHandler {
       actionId: "loot",
       range: INTERACTION_RANGE.LOOT,
       onExecute: () => {
-        // Send entityInteract to server — server calls handleInteraction on the
-        // authoritative HeadstoneEntity which has the real loot items, then sends
-        // a targeted corpseLoot packet back to open the loot window.
-        this.send("entityInteract", {
-          entityId: target.entityId,
-          interactionType: "loot",
-        });
+        const currentPlayer = this.getPlayer();
+        if (!currentPlayer) return;
+
+        // Call handleInteraction on the client-side entity directly.
+        // The entity has loot items synced via network data (modify).
+        // This emits CORPSE_CLICK which opens the loot window.
+        const entity = target.entity as CorpseEntity;
+        if (entity?.handleInteraction) {
+          entity.handleInteraction({
+            entityId: target.entityId,
+            playerId: currentPlayer.id,
+            playerPosition: currentPlayer.position,
+          });
+        }
       },
     });
   }
