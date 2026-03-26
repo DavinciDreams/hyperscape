@@ -310,7 +310,7 @@ export class ItemSpawnerSystem extends SystemBase {
     if (difficulty === 1) {
       // Bronze equipment
       itemIds.push(
-        "bronze_sword",
+        "bronze_shortsword",
         "bronze_shield",
         "bronze_helmet",
         "bronze_body",

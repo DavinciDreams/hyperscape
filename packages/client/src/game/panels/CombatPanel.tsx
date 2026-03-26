@@ -1100,13 +1100,11 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       };
     } | null;
 
-    if (actions?.actionMethods?.changeAttackStyle) {
-      actions.actionMethods.changeAttackStyle(playerId, next);
-    } else {
-      console.warn(
-        "[CombatPanel] changeStyle: actions system missing changeAttackStyle",
-      );
-    }
+    if (!actions?.actionMethods?.changeAttackStyle) return;
+
+    // Send to server — server confirms via attackStyleChanged packet,
+    // which will overwrite our optimistic value with the authoritative one
+    actions.actionMethods.changeAttackStyle(playerId, next);
 
     // OSRS-accurate: selecting autocast opens the spells panel for spell selection
     if (next === "autocast") {
@@ -1162,13 +1160,11 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       };
     } | null;
 
-    if (actions?.actionMethods?.setAutoRetaliate) {
-      actions.actionMethods.setAutoRetaliate(playerId, newValue);
-    } else {
-      console.warn(
-        "[CombatPanel] toggleAutoRetaliate: actions system missing setAutoRetaliate",
-      );
-    }
+    if (!actions?.actionMethods?.setAutoRetaliate) return;
+
+    // Send to server — server confirms via autoRetaliateChanged packet,
+    // which will overwrite our optimistic value with the authoritative one
+    actions.actionMethods.setAutoRetaliate(playerId, newValue);
   };
 
   // All possible combat styles with their XP training info and colors

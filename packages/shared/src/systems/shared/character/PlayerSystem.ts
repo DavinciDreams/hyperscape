@@ -50,6 +50,7 @@ import { WeaponType } from "../../../types/game/item-types";
 import {
   isStyleValidForWeapon,
   getAvailableStyles,
+  getDefaultStyleForWeapon,
 } from "../../../constants/WeaponStyleConfig";
 // CombatStyle type available from: "../../../utils/game/CombatCalculations"
 import type { CombatStyleExtended } from "../../../types/game/combat-types";
@@ -137,12 +138,10 @@ export class PlayerSystem extends SystemBase {
     itemId: string;
     slot: string;
     autoEquip: boolean;
-  }> = [{ itemId: "bronze_sword", slot: "weapon", autoEquip: true }];
+  }> = [{ itemId: "bronze_shortsword", slot: "weapon", autoEquip: true }];
 
   // Attack style tracking (merged from AttackStyleSystem)
   private playerAttackStyles = new Map<string, PlayerAttackStyleState>();
-  private styleChangeTimers = new Map<string, NodeJS.Timeout>();
-  private readonly STYLE_CHANGE_COOLDOWN = 0; // No cooldown - instant style switching like RuneScape
   private skillSaveTimers = new Map<string, NodeJS.Timeout>();
 
   // Auto-retaliate tracking (OSRS-style combat preference)
@@ -363,6 +362,21 @@ export class PlayerSystem extends SystemBase {
       ),
     );
 
+    // OSRS-accurate: auto-switch style when weapon changes and current style is invalid
+    // Only subscribe on server — style changes are server-authoritative
+    if (this.world.isServer) {
+      this.subscribe(EventType.PLAYER_EQUIPMENT_CHANGED, (data) => {
+        const eqData = data as {
+          playerId: string;
+          slot: string;
+          itemId: string | null;
+        };
+        if (eqData.slot === "weapon") {
+          this.handleWeaponChange(eqData.playerId);
+        }
+      });
+    }
+
     // Auto-retaliate events
     this.subscribe(EventType.UI_AUTO_RETALIATE_GET, (data) =>
       this.handleGetAutoRetaliate(
@@ -508,15 +522,10 @@ export class PlayerSystem extends SystemBase {
 
   private async onPlayerRegister(data: { playerId: string }): Promise<void> {
     if (!data?.playerId) {
-      console.error(
-        "[PlayerSystem] ERROR: playerId is undefined in registration data!",
-        data,
-      );
+      this.logger.error("playerId is undefined in registration data");
       return;
     }
 
-    // Note: Skills are already loaded by ServerNetwork and passed to entity spawn
-    // No need to load again - just initialize attack style and auto-retaliate
     // Load saved combat preferences from database if available
     let savedAttackStyle: string | undefined;
     let savedAutoRetaliate = true; // Default ON (OSRS behavior)
@@ -525,7 +534,6 @@ export class PlayerSystem extends SystemBase {
         const databaseId = PlayerIdMapper.getDatabaseId(data.playerId);
         const dbData = await this.databaseSystem.getPlayerAsync(databaseId);
         savedAttackStyle = (dbData as { attackStyle?: string })?.attackStyle;
-        // Defensive: treat null/undefined as default (1 = true)
         savedAutoRetaliate =
           ((dbData as { autoRetaliate?: number })?.autoRetaliate ?? 1) === 1;
       } catch (err: unknown) {
@@ -535,8 +543,16 @@ export class PlayerSystem extends SystemBase {
         );
       }
     }
-    this.initializePlayerAttackStyle(data.playerId, savedAttackStyle);
-    this.initializePlayerAutoRetaliate(data.playerId, savedAutoRetaliate);
+    // Only initialize if no state exists yet. If the player already has state
+    // (from auto-init + an active style/toggle change before registration),
+    // their in-session choice takes precedence over the DB-saved value.
+    // The updated value will be persisted on the next periodic save.
+    if (!this.playerAttackStyles.has(data.playerId)) {
+      this.initializePlayerAttackStyle(data.playerId, savedAttackStyle);
+    }
+    if (!this.playerAutoRetaliate.has(data.playerId)) {
+      this.initializePlayerAutoRetaliate(data.playerId, savedAutoRetaliate);
+    }
 
     // CRITICAL: Send health data to client NOW (after client is connected and ready)
     // This matches the inventory initialization pattern - send data in PLAYER_REGISTERED
@@ -750,11 +766,6 @@ export class PlayerSystem extends SystemBase {
     this.cleanupPlayerMobs(data.playerId);
 
     // Clean up attack style (merged from AttackStyleSystem)
-    const styleTimer = this.styleChangeTimers.get(data.playerId);
-    if (styleTimer) {
-      clearTimeout(styleTimer);
-      this.styleChangeTimers.delete(data.playerId);
-    }
     this.playerAttackStyles.delete(data.playerId);
 
     // Clean up auto-retaliate
@@ -1484,12 +1495,8 @@ export class PlayerSystem extends SystemBase {
     }
     this.spawnedPlayers.clear();
 
-    // Clear attack style timers (merged from AttackStyleSystem)
-    for (const timer of this.styleChangeTimers.values()) {
-      clearTimeout(timer);
-    }
+    // Clear attack style state (merged from AttackStyleSystem)
     this.playerAttackStyles.clear();
-    this.styleChangeTimers.clear();
 
     // Clear references
     this.players.clear();
@@ -1504,6 +1511,12 @@ export class PlayerSystem extends SystemBase {
   private async handleSpawnComplete(event: {
     playerId: string;
   }): Promise<void> {
+    // Guard: don't re-equip starter gear if already equipped (prevents overwriting player's chosen equipment)
+    const spawnData = this.spawnedPlayers.get(event.playerId);
+    if (!spawnData || spawnData.hasStarterEquipment) {
+      return;
+    }
+
     // Send welcome message
     this.emitTypedEvent(EventType.UI_MESSAGE, {
       playerId: event.playerId,
@@ -1796,6 +1809,12 @@ export class PlayerSystem extends SystemBase {
     playerId: string,
     savedStyle?: string,
   ): void {
+    // Idempotency is the caller's responsibility:
+    // - Auto-init call sites guard with `if (!playerState)` before calling
+    // - onPlayerRegister guards with `if (!this.playerAttackStyles.has(playerId))`
+    // This method itself has no guard so that it can be called unconditionally
+    // by any future caller that intentionally needs to reset state.
+
     // Use saved style from database, or default to "accurate"
     const initialStyle =
       savedStyle && this.ATTACK_STYLES[savedStyle] ? savedStyle : "accurate";
@@ -1803,8 +1822,6 @@ export class PlayerSystem extends SystemBase {
     const playerState: PlayerAttackStyleState = {
       playerId,
       selectedStyle: initialStyle,
-      lastStyleChange: 0, // Start at 0 so player can change style immediately
-      combatStyleHistory: [],
     };
 
     this.playerAttackStyles.set(playerId, playerState);
@@ -1827,12 +1844,29 @@ export class PlayerSystem extends SystemBase {
   }): void {
     const { playerId, newStyle } = data;
 
-    const playerState = this.playerAttackStyles.get(playerId);
+    let playerState = this.playerAttackStyles.get(playerId);
     if (!playerState) {
-      return;
+      // Auto-initialize if player exists but wasn't registered yet (event ordering).
+      // Use weapon-appropriate default so the player doesn't get an "invalid style"
+      // error if "accurate" isn't valid for their equipped weapon.
+      if (this.isKnownPlayer(playerId)) {
+        const weaponType = this.getPlayerWeaponType(playerId);
+        const defaultStyle = getDefaultStyleForWeapon(weaponType);
+        this.logger.debug(
+          `Auto-initializing attack style for ${playerId} (event ordering race), default: ${defaultStyle}`,
+        );
+        this.initializePlayerAttackStyle(playerId, defaultStyle);
+        playerState = this.playerAttackStyles.get(playerId);
+      }
+      if (!playerState) {
+        this.logger.warn(
+          `Attack style change rejected: no state for player ${playerId}`,
+        );
+        return;
+      }
     }
 
-    // Validate new style
+    // Validate new style exists
     const style = this.ATTACK_STYLES[newStyle];
     if (!style) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
@@ -1844,21 +1878,7 @@ export class PlayerSystem extends SystemBase {
     }
 
     // Validate style is allowed for equipped weapon (OSRS-accurate)
-    const equipmentSystem = this.world.getSystem("equipment") as {
-      getPlayerEquipment?: (id: string) => {
-        weapon?: { item?: { weaponType?: string } };
-      } | null;
-    } | null;
-
-    let weaponType: WeaponType = WeaponType.NONE;
-    if (equipmentSystem?.getPlayerEquipment) {
-      const equipment = equipmentSystem.getPlayerEquipment(playerId);
-      if (equipment?.weapon?.item?.weaponType) {
-        weaponType =
-          (equipment.weapon.item.weaponType.toLowerCase() as WeaponType) ||
-          WeaponType.NONE;
-      }
-    }
+    const weaponType = this.getPlayerWeaponType(playerId);
 
     if (!isStyleValidForWeapon(weaponType, newStyle as CombatStyleExtended)) {
       const availableStyles = getAvailableStyles(weaponType);
@@ -1870,63 +1890,17 @@ export class PlayerSystem extends SystemBase {
       return;
     }
 
-    // Check cooldown
-    const now = Date.now();
-    const timeSinceLastChange = now - playerState.lastStyleChange;
-
-    if (timeSinceLastChange < this.STYLE_CHANGE_COOLDOWN) {
-      const remainingCooldown = Math.ceil(
-        (this.STYLE_CHANGE_COOLDOWN - (now - playerState.lastStyleChange)) /
-          1000,
-      );
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId,
-        message: `You must wait ${remainingCooldown} seconds before changing attack style.`,
-        type: "warning",
-      });
-      return;
-    }
-
     // Update player's attack style
     const oldStyle = playerState.selectedStyle;
     playerState.selectedStyle = newStyle;
-    playerState.lastStyleChange = now;
 
-    // Record style change in history
-    playerState.combatStyleHistory.push({
-      style: newStyle,
-      timestamp: now,
-      combatSession: `session_${now}`,
-    });
-
-    // Keep only last 50 style changes
-    if (playerState.combatStyleHistory.length > 50) {
-      playerState.combatStyleHistory =
-        playerState.combatStyleHistory.slice(-50);
-    }
-
-    // Set temporary cooldown
-    const cooldownTimer = setTimeout(() => {
-      this.styleChangeTimers.delete(playerId);
-
-      // Notify UI that cooldown is over
-      this.emitTypedEvent(EventType.UI_ATTACK_STYLE_UPDATE, {
-        playerId,
-        currentStyle: this.ATTACK_STYLES[playerState.selectedStyle],
-        availableStyles: Object.values(this.ATTACK_STYLES),
-        canChange: true,
-      });
-    }, this.STYLE_CHANGE_COOLDOWN);
-
-    this.styleChangeTimers.set(playerId, cooldownTimer);
-
-    // Notify UI immediately
+    // Notify UI
     this.emitTypedEvent(EventType.UI_ATTACK_STYLE_CHANGED, {
       playerId,
       currentStyle: style,
       availableStyles: Object.values(this.ATTACK_STYLES),
-      canChange: false,
-      cooldownRemaining: this.STYLE_CHANGE_COOLDOWN,
+      canChange: true,
+      cooldownRemaining: 0,
     });
 
     // Notify chat
@@ -1942,6 +1916,24 @@ export class PlayerSystem extends SystemBase {
       this.databaseSystem.savePlayer(databaseId, {
         attackStyle: newStyle,
       });
+    }
+  }
+
+  /**
+   * OSRS-accurate: When weapon changes, validate current style is still available.
+   * If not, auto-switch to the first valid style for the new weapon type.
+   * Example: switching from staff (autocast) to sword → auto-select "accurate"
+   */
+  private handleWeaponChange(playerId: string): void {
+    const playerState = this.playerAttackStyles.get(playerId);
+    if (!playerState) return;
+
+    const weaponType = this.getPlayerWeaponType(playerId);
+    const currentStyle = playerState.selectedStyle as CombatStyleExtended;
+
+    if (!isStyleValidForWeapon(weaponType, currentStyle)) {
+      const newStyle = getDefaultStyleForWeapon(weaponType);
+      this.handleStyleChange({ playerId, newStyle });
     }
   }
 
@@ -1969,8 +1961,6 @@ export class PlayerSystem extends SystemBase {
       this.playerAttackStyles.set(playerId, {
         playerId,
         selectedStyle: currentStyle.id,
-        lastStyleChange: 0,
-        combatStyleHistory: [],
       });
       return;
     }
@@ -1979,6 +1969,35 @@ export class PlayerSystem extends SystemBase {
     if (playerState.selectedStyle !== currentStyle.id) {
       playerState.selectedStyle = currentStyle.id;
     }
+  }
+
+  /** Check if an ID corresponds to a known player (registered or entity with type "player"). */
+  private isKnownPlayer(playerId: string): boolean {
+    if (this.players.has(playerId)) return true;
+    const entity = this.world.entities?.get(playerId);
+    return !!entity && (entity as { type?: string }).type === "player";
+  }
+
+  private static readonly VALID_WEAPON_TYPES = new Set<string>(
+    Object.values(WeaponType),
+  );
+
+  /** Validated weapon type lookup — returns WeaponType.NONE for unknown types */
+  private getPlayerWeaponType(playerId: string): WeaponType {
+    const equipmentSystem = this.world.getSystem("equipment") as {
+      getPlayerEquipment?: (id: string) => {
+        weapon?: { item?: { weaponType?: string } };
+      } | null;
+    } | null;
+
+    if (!equipmentSystem?.getPlayerEquipment) return WeaponType.NONE;
+
+    const equipment = equipmentSystem.getPlayerEquipment(playerId);
+    const raw = equipment?.weapon?.item?.weaponType?.toLowerCase();
+    if (!raw || !PlayerSystem.VALID_WEAPON_TYPES.has(raw)) {
+      return WeaponType.NONE;
+    }
+    return raw as WeaponType;
   }
 
   /**
@@ -2002,24 +2021,12 @@ export class PlayerSystem extends SystemBase {
     }
 
     const currentStyle = this.ATTACK_STYLES[playerState.selectedStyle];
-    const canChange = !this.styleChangeTimers.has(playerId);
-
-    let cooldownRemaining = 0;
-    if (!canChange) {
-      const now = Date.now();
-      cooldownRemaining = Math.max(
-        0,
-        this.STYLE_CHANGE_COOLDOWN - (now - playerState.lastStyleChange),
-      );
-    }
 
     const styleInfo = {
-      style: playerState.selectedStyle, // Return the string ID that UI expects
-      cooldown: cooldownRemaining, // Use 'cooldown' not 'cooldownRemaining'
+      style: playerState.selectedStyle,
       currentStyle,
       availableStyles: Object.values(this.ATTACK_STYLES),
-      canChange,
-      styleHistory: playerState.combatStyleHistory.slice(-10),
+      canChange: true,
     };
 
     callback(styleInfo);
@@ -2029,14 +2036,12 @@ export class PlayerSystem extends SystemBase {
     const playerState = this.playerAttackStyles.get(playerId);
     if (playerState) {
       const currentStyle = this.ATTACK_STYLES[playerState.selectedStyle];
-      const canChange = !this.styleChangeTimers.has(playerId);
 
       this.emitTypedEvent(EventType.UI_ATTACK_STYLE_UPDATE, {
         playerId,
         currentStyle,
         availableStyles: Object.values(this.ATTACK_STYLES),
-        canChange,
-        styleHistory: playerState.combatStyleHistory.slice(-10),
+        canChange: true,
       });
     }
   }
@@ -2053,21 +2058,6 @@ export class PlayerSystem extends SystemBase {
     return Object.values(this.ATTACK_STYLES);
   }
 
-  canPlayerChangeStyle(playerId: string): boolean {
-    return !this.styleChangeTimers.has(playerId);
-  }
-
-  getRemainingStyleCooldown(playerId: string): number {
-    const playerState = this.playerAttackStyles.get(playerId);
-    if (!playerState || this.canPlayerChangeStyle(playerId)) return 0;
-
-    const now = Date.now();
-    return Math.max(
-      0,
-      this.STYLE_CHANGE_COOLDOWN - (now - playerState.lastStyleChange),
-    );
-  }
-
   forceChangeAttackStyle(playerId: string, styleId: string): boolean {
     const style = this.ATTACK_STYLES[styleId];
     if (!style) return false;
@@ -2075,23 +2065,8 @@ export class PlayerSystem extends SystemBase {
     const playerState = this.playerAttackStyles.get(playerId);
     if (!playerState) return false;
 
-    // Clear any existing cooldown
-    const timer = this.styleChangeTimers.get(playerId);
-    if (timer) {
-      clearTimeout(timer);
-      this.styleChangeTimers.delete(playerId);
-    }
-
-    // Force change style
     this.handleStyleChange({ playerId, newStyle: styleId });
     return true;
-  }
-
-  getPlayerStyleHistory(
-    playerId: string,
-  ): Array<{ style: string; timestamp: number; combatSession: string }> {
-    const playerState = this.playerAttackStyles.get(playerId);
-    return playerState?.combatStyleHistory || [];
   }
 
   getAttackStyleSystemInfo(): Record<string, unknown> {
@@ -2108,8 +2083,6 @@ export class PlayerSystem extends SystemBase {
       totalPlayers,
       activeStyles,
       availableStyles: Object.keys(this.ATTACK_STYLES),
-      activeCooldowns: this.styleChangeTimers.size,
-      systemLoaded: true,
     };
   }
 
@@ -2124,6 +2097,9 @@ export class PlayerSystem extends SystemBase {
     playerId: string,
     enabled: boolean,
   ): void {
+    // No idempotency guard — onPlayerRegister carries DB-loaded values that must
+    // overwrite any auto-initialized defaults. Auto-init call sites already guard
+    // with `if (!this.playerAutoRetaliate.has(playerId))` before setting.
     this.playerAutoRetaliate.set(playerId, enabled);
 
     // Notify UI of initial state
@@ -2146,12 +2122,21 @@ export class PlayerSystem extends SystemBase {
     const { playerId, enabled } = data;
 
     // === INPUT VALIDATION (OWASP) ===
-    // 1. Validate playerId exists in our system
+    // 1. Validate playerId exists in our system — auto-initialize if missing
+    // (onPlayerRegister may not have fired yet due to event ordering)
     if (!this.playerAutoRetaliate.has(playerId)) {
-      this.logger.warn(
-        `Auto-retaliate toggle rejected: unknown player ${playerId}`,
-      );
-      return;
+      // Only auto-initialize for player entities (not mobs or other entity types)
+      if (this.isKnownPlayer(playerId)) {
+        this.logger.debug(
+          `Auto-initializing auto-retaliate for ${playerId} (event ordering race)`,
+        );
+        this.playerAutoRetaliate.set(playerId, true); // default ON
+      } else {
+        this.logger.warn(
+          `Auto-retaliate toggle rejected: unknown player ${playerId}`,
+        );
+        return;
+      }
     }
 
     // 2. Validate enabled is actually a boolean (prevent type coercion attacks)
