@@ -41,6 +41,7 @@ import type {
 import { BankPanel } from "../panels/BankPanel";
 import { StorePanel } from "../panels/StorePanel";
 import { DialoguePanel } from "../panels/DialoguePanel";
+import { DialoguePopupShell } from "../panels/dialogue/DialoguePopupShell";
 import { SmeltingPanel } from "../panels/SmeltingPanel";
 import { SmithingPanel } from "../panels/SmithingPanel";
 import { CraftingPanel } from "../panels/CraftingPanel";
@@ -936,28 +937,45 @@ export const InterfaceModalsRenderer = memo(function InterfaceModalsRenderer({
         </ModalWindow>
       )}
 
-      {/* Dialogue Panel - renders with its own fixed positioning, no ModalWindow wrapper needed */}
+      {/* Dialogue Panel */}
       {dialogueData?.visible && (
-        <DialoguePanel
-          visible={dialogueData.visible}
-          npcName={dialogueData.npcName}
-          npcId={dialogueData.npcId}
-          text={dialogueData.text}
-          responses={dialogueData.responses}
-          npcEntityId={dialogueData.npcEntityId}
-          world={world}
-          onSelectResponse={(_index, response) => {
-            if (!response.nextNodeId) {
-              setDialogueData(null);
-            }
-          }}
+        <DialoguePopupShell
+          visible={true}
           onClose={() => {
             setDialogueData(null);
             world?.network?.send?.("dialogueEnd", {
               npcId: dialogueData.npcId,
             });
           }}
-        />
+          title={dialogueData.npcName}
+          width={700}
+          maxWidth="min(86vw, 700px)"
+          maxHeight="min(40vh, 400px)"
+          contentStyle={{
+            overflow: "hidden",
+          }}
+        >
+          <DialoguePanel
+            visible={dialogueData.visible}
+            npcName={dialogueData.npcName}
+            npcId={dialogueData.npcId}
+            text={dialogueData.text}
+            responses={dialogueData.responses}
+            npcEntityId={dialogueData.npcEntityId}
+            world={world}
+            onSelectResponse={(_index, response) => {
+              if (!response.nextNodeId) {
+                setDialogueData(null);
+              }
+            }}
+            onClose={() => {
+              setDialogueData(null);
+              world?.network?.send?.("dialogueEnd", {
+                npcId: dialogueData.npcId,
+              });
+            }}
+          />
+        </DialoguePopupShell>
       )}
 
       {/* Smelting Panel */}
