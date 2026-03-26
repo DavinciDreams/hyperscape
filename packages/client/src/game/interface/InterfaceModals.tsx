@@ -9,7 +9,7 @@
  * @packageDocumentation
  */
 
-import React, { memo, useMemo } from "react";
+import React, { memo, useCallback, useMemo } from "react";
 import { EventType, getItem } from "@hyperscape/shared";
 import type { PlayerStats, PlayerID, StakedItem } from "@hyperscape/shared";
 import { ModalWindow, useThemeStore } from "@/ui";
@@ -844,6 +844,17 @@ export const InterfaceModalsRenderer = memo(function InterfaceModalsRenderer({
   setStatsModalOpen,
   setDeathModalOpen,
 }: InterfaceModalsRendererProps): React.ReactElement {
+  const closeDialogue = useCallback(() => {
+    if (!dialogueData) {
+      return;
+    }
+
+    setDialogueData(null);
+    world?.network?.send?.("dialogueEnd", {
+      npcId: dialogueData.npcId,
+    });
+  }, [dialogueData, setDialogueData, world]);
+
   const myStakeValue = useMemo(
     () => duelData?.myStakes.reduce((sum, s) => sum + s.value, 0) ?? 0,
     [duelData?.myStakes],
@@ -941,12 +952,7 @@ export const InterfaceModalsRenderer = memo(function InterfaceModalsRenderer({
       {dialogueData?.visible && (
         <DialoguePopupShell
           visible={true}
-          onClose={() => {
-            setDialogueData(null);
-            world?.network?.send?.("dialogueEnd", {
-              npcId: dialogueData.npcId,
-            });
-          }}
+          onClose={closeDialogue}
           title={dialogueData.npcName}
           width={700}
           maxWidth="min(86vw, 700px)"
@@ -967,12 +973,6 @@ export const InterfaceModalsRenderer = memo(function InterfaceModalsRenderer({
               if (!response.nextNodeId) {
                 setDialogueData(null);
               }
-            }}
-            onClose={() => {
-              setDialogueData(null);
-              world?.network?.send?.("dialogueEnd", {
-                npcId: dialogueData.npcId,
-              });
             }}
           />
         </DialoguePopupShell>

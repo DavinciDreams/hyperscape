@@ -123,6 +123,17 @@ export function MobileInterfaceManager({
     setXpLampData,
   } = useModalPanels(world);
 
+  const closeDialogue = useCallback(() => {
+    if (!dialogueData) {
+      return;
+    }
+
+    setDialogueData(null);
+    world?.network?.send?.("dialogueEnd", {
+      npcId: dialogueData.npcId,
+    });
+  }, [dialogueData, setDialogueData, world]);
+
   // Handle radial menu button clicks (by panel id)
   const handleRadialButtonClick = useCallback(
     (panelId: string) => {
@@ -639,12 +650,7 @@ export function MobileInterfaceManager({
       {dialogueData?.visible && (
         <DialoguePopupShell
           visible={true}
-          onClose={() => {
-            setDialogueData(null);
-            world?.network?.send?.("dialogueEnd", {
-              npcId: dialogueData.npcId,
-            });
-          }}
+          onClose={closeDialogue}
           title={dialogueData.npcName}
           width="min(88vw, 640px)"
           maxWidth="88vw"
@@ -665,12 +671,6 @@ export function MobileInterfaceManager({
               if (!response.nextNodeId) {
                 setDialogueData(null);
               }
-            }}
-            onClose={() => {
-              setDialogueData(null);
-              world?.network?.send?.("dialogueEnd", {
-                npcId: dialogueData.npcId,
-              });
             }}
           />
         </DialoguePopupShell>

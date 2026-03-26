@@ -2,6 +2,7 @@ import React, {
   useEffect,
   useId,
   useRef,
+  useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -37,6 +38,12 @@ export function DialoguePopupShell({
   const theme = useThemeStore((s) => s.theme);
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const [isCloseHovered, setIsCloseHovered] = useState(false);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!visible) {
@@ -52,12 +59,12 @@ export function DialoguePopupShell({
 
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      onCloseRef.current();
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, visible]);
+  }, [visible]);
 
   if (!visible) {
     return null;
@@ -68,6 +75,10 @@ export function DialoguePopupShell({
     width: 22,
     height: 22,
   } satisfies CSSProperties;
+  const closeButtonHoverBackground =
+    "var(--shell-button-hover-bg)" as CSSProperties["background"];
+  const closeButtonHoverColor =
+    "var(--shell-button-hover-fg)" as CSSProperties["color"];
 
   return (
     <div
@@ -143,19 +154,18 @@ export function DialoguePopupShell({
           <button
             type="button"
             aria-label="Close dialogue"
-            style={closeButtonStyle}
+            style={{
+              ...closeButtonStyle,
+              background: isCloseHovered
+                ? closeButtonHoverBackground
+                : closeButtonStyle.background,
+              color: isCloseHovered
+                ? closeButtonHoverColor
+                : closeButtonStyle.color,
+            }}
             onClick={onClose}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background =
-                "var(--shell-button-hover-bg)" as string;
-              e.currentTarget.style.color =
-                "var(--shell-button-hover-fg)" as string;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background =
-                closeButtonStyle.background as string;
-              e.currentTarget.style.color = closeButtonStyle.color as string;
-            }}
+            onMouseEnter={() => setIsCloseHovered(true)}
+            onMouseLeave={() => setIsCloseHovered(false)}
           >
             <X size={18} />
           </button>

@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Emotes, EventType, THREE } from "@hyperscape/shared";
+import {
+  Emotes,
+  EventType,
+  THREE,
+  type EntityConfig,
+} from "@hyperscape/shared";
 import type { VRM } from "@pixiv/three-vrm";
 import { useThemeStore } from "@/ui";
 import { createAvatarPreviewViewport } from "@/game/character/avatarPreviewViewport";
@@ -43,6 +48,18 @@ interface PreviewAvatarNode {
   parent: { matrixWorld: THREE.Matrix4 };
   activate(ctx: ClientWorld): void;
   deactivate?: () => void;
+}
+
+type EntityWithModelConfig = {
+  config?: Pick<EntityConfig, "model">;
+};
+
+function getEntityModelUrl(entity: unknown): string | null {
+  const candidate = (entity as EntityWithModelConfig | undefined)?.config
+    ?.model;
+  return typeof candidate === "string" && candidate.length > 0
+    ? candidate
+    : null;
 }
 
 function getPreviewVRM(instance: PreviewAvatarInstance | null): VRM | null {
@@ -180,15 +197,7 @@ export const DialogueCharacterPortrait = React.memo(
         return null;
       }
 
-      const entity = world.entities.get(npcEntityId);
-      const config =
-        entity && typeof entity === "object"
-          ? (Reflect.get(entity, "config") as { model?: unknown } | undefined)
-          : undefined;
-      const candidate = config?.model;
-      return typeof candidate === "string" && candidate.length > 0
-        ? candidate
-        : null;
+      return getEntityModelUrl(world.entities.get(npcEntityId));
     }, [npcEntityId, refreshNonce, world.entities]);
 
     const clearPreviewAvatar = () => {
@@ -212,6 +221,8 @@ export const DialogueCharacterPortrait = React.memo(
     };
 
     useEffect(() => {
+      // The preview viewport should be created once per mounted portrait shell.
+      // The effect intentionally closes over refs so renderer state survives prop updates.
       const container = containerRef.current;
       const canvas = canvasRef.current;
 

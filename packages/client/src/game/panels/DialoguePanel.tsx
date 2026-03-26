@@ -35,7 +35,6 @@ interface DialoguePanelProps {
   responses: DialogueResponse[];
   npcEntityId?: string;
   onSelectResponse: (index: number, response: DialogueResponse) => void;
-  onClose: () => void;
   world: ClientWorld;
 }
 
@@ -47,7 +46,6 @@ export function DialoguePanel({
   responses,
   npcEntityId,
   onSelectResponse,
-  onClose,
   world,
 }: DialoguePanelProps) {
   const theme = useThemeStore((s) => s.theme);
@@ -73,14 +71,12 @@ export function DialoguePanel({
 
   const handleContinue = () => {
     // Terminal node - send continue packet to server so it can execute any pending effects
-    // Server will then send dialogueEnd which clears the active modal state
+    // Server will then send dialogueEnd which clears the shell-owned modal state.
     if (world.network?.send) {
       world.network.send("dialogueContinue", {
         npcId,
       });
     }
-    // Close the dialogue UI immediately for responsive feel
-    onClose();
   };
 
   return (
