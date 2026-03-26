@@ -404,6 +404,7 @@ function DesktopInterfaceManager({
             editModeEnabled={editModeEnabled}
             windowCombiningEnabled={windowCombiningEnabled}
             renderPanel={renderPanel}
+            panelDataVersion={panelDataVersion}
           />
 
           {/* @dnd-kit drag overlay */}

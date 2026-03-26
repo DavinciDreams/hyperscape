@@ -226,6 +226,7 @@ async function loadPreviewEquipmentVisuals(options: {
     let gltf = previewEquipmentCache.get(equippedItem.id);
     if (!gltf) {
       let file: File | undefined;
+      let resolvedUrl = urls.primaryUrl;
 
       try {
         file = world.loader
@@ -236,6 +237,7 @@ async function loadPreviewEquipmentVisuals(options: {
           file = world.loader
             ? await world.loader.loadFile(urls.fallbackUrl)
             : undefined;
+          resolvedUrl = urls.fallbackUrl;
         } else {
           throw error;
         }
@@ -248,7 +250,7 @@ async function loadPreviewEquipmentVisuals(options: {
       const buffer = await file.arrayBuffer();
       gltf = (await previewEquipmentParser.parseAsync(
         buffer,
-        urls.primaryUrl,
+        resolvedUrl,
       )) as GLTF;
       previewEquipmentCache.set(equippedItem.id, gltf);
     }

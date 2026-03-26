@@ -726,7 +726,7 @@ const CombatStyleBanner = ({
               ? "grabbing"
               : "pointer",
           touchAction: "none",
-          pointerEvents: "none",
+          pointerEvents: disabled ? "none" : "auto",
         }}
       />
     </div>

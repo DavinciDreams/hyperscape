@@ -332,12 +332,14 @@ export class EquipmentVisualSystem extends SystemBase {
         // deduplication, and concurrency control.
         const loader = this.world.loader;
         let file: File | undefined;
+        let resolvedUrl = urls.primaryUrl;
         try {
           file = loader ? await loader.loadFile(urls.primaryUrl) : undefined;
         } catch (error) {
           // Fallback to base model if fitted version not found (only for convention-based)
           if (urls.fallbackUrl) {
             file = loader ? await loader.loadFile(urls.fallbackUrl) : undefined;
+            resolvedUrl = urls.fallbackUrl;
           } else {
             throw error;
           }
@@ -345,16 +347,13 @@ export class EquipmentVisualSystem extends SystemBase {
 
         if (!file) {
           throw new Error(
-            `[EquipmentVisual] Failed to load model: ${urls.primaryUrl}`,
+            `[EquipmentVisual] Failed to load model: ${resolvedUrl}`,
           );
         }
 
         // Parse the cached bytes with GLTFLoader
         const buffer = await file.arrayBuffer();
-        gltf = (await this.gltfParser.parseAsync(
-          buffer,
-          urls.primaryUrl,
-        )) as GLTF;
+        gltf = (await this.gltfParser.parseAsync(buffer, resolvedUrl)) as GLTF;
         this.weaponCache.set(itemId, gltf);
       }
 

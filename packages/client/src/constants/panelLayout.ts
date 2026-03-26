@@ -12,7 +12,7 @@
  * All other panels should defer to these.
  *
  * Desktop reference (EquipmentPanel renderEquipmentGrid):
- *   gap = 6, padding = 3 (inner), outer = 4
+ *   gap = 8, padding = 3 (inner), outer = 4
  * Desktop reference (InventoryPanel):
  *   outer padding = theme.spacing.xs = 4px
  *   inner grid gap = clamp(2px, 0.5cqw, 3px) ≈ 3px
@@ -35,8 +35,8 @@ export const PANEL_PADDING = 4;
 
 /**
  * Gap between icons/slots in every grid panel.
- * EquipmentPanel uses 6px for its slot grid; InventoryPanel uses ~3px.
- * We align Prayer/Spells/Skills to 4px — a clean midpoint.
+ * EquipmentPanel uses 8px for its slot grid; InventoryPanel uses ~3px.
+ * We align Prayer/Spells/Skills to 4px — a compact midpoint.
  */
 export const PANEL_GRID_GAP = 4;
 
