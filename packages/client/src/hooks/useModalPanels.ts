@@ -445,6 +445,7 @@ function handleLegacyEconomyUIUpdate(
         maxSlots: bankUpdate.maxSlots ?? prev?.maxSlots ?? 480,
         bankId: bankUpdate.bankId ?? prev?.bankId ?? "spawn_bank",
       }));
+      setDialogueData(null);
       return;
     }
   }
@@ -468,6 +469,7 @@ function handleLegacyEconomyUIUpdate(
         npcEntityId: storeUpdate.npcEntityId,
         items: storeUpdate.items || [],
       });
+      setDialogueData(null);
     } else {
       setStoreData(null);
     }
@@ -1041,7 +1043,10 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     // Bank handlers
     const handleBankOpen = (data: unknown) => {
       const d = data as BankData;
-      if (d) setBankData({ ...d, visible: true });
+      if (d) {
+        setBankData({ ...d, visible: true });
+        setDialogueData(null);
+      }
     };
 
     const handleBankClose = () => setBankData(null);
@@ -1049,7 +1054,10 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     // Store handlers
     const handleStoreOpen = (data: unknown) => {
       const d = data as StoreData;
-      if (d) setStoreData({ ...d, visible: true });
+      if (d) {
+        setStoreData({ ...d, visible: true });
+        setDialogueData(null);
+      }
     };
 
     const handleStoreClose = () => setStoreData(null);
