@@ -10,11 +10,17 @@
  * - Sends fletching request to server
  */
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { formatItemName } from "@/utils";
+import {
+  getSkillingBadgeStyle,
+  getSkillingSelectableStyle,
+  SkillingPanelBody,
+  SkillingQuantitySelector,
+  SkillingSection,
+} from "./skilling/SkillingPanelShared";
 
 interface FletchingRecipe {
   recipeId: string;
@@ -36,9 +42,6 @@ interface FletchingPanelProps {
   onClose: () => void;
 }
 
-/**
- * Get icon for fletching item type
- */
 function getItemIcon(output: string, category: string): string {
   const id = output.toLowerCase();
 
@@ -51,9 +54,6 @@ function getItemIcon(output: string, category: string): string {
   return "🪓";
 }
 
-/**
- * Category display order and labels
- */
 const CATEGORY_ORDER = [
   "arrow_shafts",
   "shortbows",
@@ -61,6 +61,7 @@ const CATEGORY_ORDER = [
   "stringing",
   "arrows",
 ];
+
 const CATEGORY_LABELS: Record<string, string> = {
   arrow_shafts: "Arrow Shafts",
   shortbows: "Shortbows",
@@ -69,7 +70,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   arrows: "Arrows",
 };
 
-/** localStorage key for Make X memory */
 const FLETCHING_LAST_X_KEY = "fletching_last_x";
 
 export function FletchingPanel({
@@ -84,7 +84,6 @@ export function FletchingPanel({
   const [showQuantityInput, setShowQuantityInput] = useState(false);
   const [customQuantity, setCustomQuantity] = useState("");
 
-  // Make X memory - remember last custom quantity (OSRS feature)
   const [lastCustomQuantity, setLastCustomQuantity] = useState(() => {
     try {
       const stored = localStorage.getItem(FLETCHING_LAST_X_KEY);
@@ -94,7 +93,6 @@ export function FletchingPanel({
     }
   });
 
-  // Group recipes by category
   const groupedRecipes = useMemo(() => {
     const groups: Record<string, FletchingRecipe[]> = {};
 
@@ -106,24 +104,22 @@ export function FletchingPanel({
       groups[category].push(recipe);
     }
 
-    // Sort by category order
     const sorted: Array<[string, FletchingRecipe[]]> = [];
-    for (const cat of CATEGORY_ORDER) {
-      if (groups[cat]) {
-        sorted.push([cat, groups[cat]]);
+    for (const category of CATEGORY_ORDER) {
+      if (groups[category]) {
+        sorted.push([category, groups[category]]);
       }
     }
-    // Add any categories not in the predefined order
-    for (const cat of Object.keys(groups)) {
-      if (!CATEGORY_ORDER.includes(cat)) {
-        sorted.push([cat, groups[cat]]);
+
+    for (const category of Object.keys(groups)) {
+      if (!CATEGORY_ORDER.includes(category)) {
+        sorted.push([category, groups[category]]);
       }
     }
 
     return sorted;
   }, [availableRecipes]);
 
-  // Auto-select when only one recipe (e.g., stringing a specific bow)
   useEffect(() => {
     if (availableRecipes.length === 1) {
       setSelectedRecipe(availableRecipes[0]);
@@ -160,244 +156,143 @@ export function FletchingPanel({
     setCustomQuantity("");
   };
 
-  /**
-   * Format recipe display name, appending output quantity for multi-output recipes
-   */
   const getDisplayName = (recipe: FletchingRecipe): string => {
     const name = recipe.name || formatItemName(recipe.output);
-    if (recipe.outputQuantity > 1) {
-      return `${name} (x${recipe.outputQuantity})`;
-    }
-    return name;
+    return recipe.outputQuantity > 1
+      ? `${name} (x${recipe.outputQuantity})`
+      : name;
   };
 
   return (
-    <div
-      className="rounded-lg shadow-2xl border"
-      style={{
-        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
-        minWidth: "380px",
-        maxWidth: "480px",
-        maxHeight: "80vh",
-      }}
+    <SkillingPanelBody
+      theme={theme}
+      intro="Review each fletching recipe by category, including multi-output results and required materials, before starting."
+      emptyMessage={
+        availableRecipes.length === 0
+          ? "You don't have the materials to fletch anything."
+          : undefined
+      }
     >
-      {/* Content */}
-      <div
-        className="p-3 overflow-y-auto"
-        style={{
-          maxHeight: "calc(80vh - 100px)",
-          background:
-            theme.name === "hyperscape"
-              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.12) 100%)"
-              : "transparent",
-        }}
-      >
-        {availableRecipes.length === 0 ? (
-          <div
-            className="text-center py-4 text-sm"
-            style={{ color: theme.colors.text.secondary }}
-          >
-            You don&apos;t have the materials to fletch anything.
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {groupedRecipes.map(([category, recipes]) => (
-              <div key={category}>
-                {/* Category Header */}
-                <div
-                  className="text-xs font-semibold uppercase tracking-wider mb-1.5 px-1"
-                  style={{ color: theme.colors.text.muted }}
-                >
-                  {CATEGORY_LABELS[category] || category}
-                </div>
+      <div className="flex flex-col gap-3">
+        {groupedRecipes.map(([category, recipes]) => (
+          <SkillingSection key={category} theme={theme}>
+            <div
+              className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.18em]"
+              style={{ color: theme.colors.text.muted }}
+            >
+              {CATEGORY_LABELS[category] || category}
+            </div>
 
-                {/* Recipe Grid */}
-                <div className="grid grid-cols-2 gap-1">
-                  {recipes.map((recipe) => {
-                    const canFletch = recipe.meetsLevel && recipe.hasInputs;
-                    return (
-                      <button
-                        key={recipe.recipeId}
-                        onClick={() => setSelectedRecipe(recipe)}
-                        className={`flex items-center gap-2 p-2 rounded border transition-all text-left ${
-                          selectedRecipe?.recipeId === recipe.recipeId
-                            ? "ring-2 ring-yellow-500"
-                            : ""
-                        }`}
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              {recipes.map((recipe) => {
+                const isSelected = selectedRecipe?.recipeId === recipe.recipeId;
+                const canFletch = recipe.meetsLevel && recipe.hasInputs;
+
+                return (
+                  <button
+                    key={recipe.recipeId}
+                    onClick={() => setSelectedRecipe(recipe)}
+                    className="flex items-center gap-3 rounded-xl border p-3 text-left transition-all"
+                    style={getSkillingSelectableStyle(
+                      theme,
+                      isSelected,
+                      !canFletch,
+                    )}
+                  >
+                    <span className="text-xl">
+                      {getItemIcon(recipe.output, recipe.category)}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className="truncate text-sm font-semibold"
                         style={{
-                          background:
-                            selectedRecipe?.recipeId === recipe.recipeId
-                              ? `${theme.colors.accent.primary}15`
-                              : theme.colors.background.tertiary,
-                          borderColor:
-                            selectedRecipe?.recipeId === recipe.recipeId
-                              ? `${theme.colors.accent.primary}50`
-                              : theme.colors.border.default,
-                          opacity: canFletch ? 1 : 0.5,
+                          color: recipe.meetsLevel
+                            ? theme.colors.accent.primary
+                            : theme.colors.state.danger,
                         }}
                       >
-                        {/* Item Icon */}
-                        <span className="text-lg">
-                          {getItemIcon(recipe.output, recipe.category)}
-                        </span>
-
-                        {/* Item Info */}
-                        <div className="flex-1 min-w-0">
-                          <div
-                            className="font-medium text-xs truncate"
-                            style={{
-                              color: recipe.meetsLevel
-                                ? theme.colors.accent.primary
-                                : theme.colors.state.danger,
-                            }}
-                          >
-                            {getDisplayName(recipe)}
-                          </div>
-                          <div
-                            className="text-[9px] flex items-center gap-1"
-                            style={{ color: theme.colors.text.muted }}
-                          >
-                            <span>Lv{recipe.level}</span>
-                            <span className="mx-0.5">|</span>
-                            <span>{recipe.xp} XP</span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            {/* Selected Recipe Details & Quantity */}
-            {selectedRecipe && (
-              <div
-                className="mt-2 pt-3"
-                style={{
-                  borderTop: `1px solid ${theme.colors.border.default}`,
-                }}
-              >
-                {/* Recipe Details */}
-                <div className="flex items-center gap-3 mb-3">
-                  <span className="text-2xl">
-                    {getItemIcon(
-                      selectedRecipe.output,
-                      selectedRecipe.category,
-                    )}
-                  </span>
-                  <div>
-                    <div
-                      className="font-semibold text-sm"
-                      style={{ color: theme.colors.accent.primary }}
-                    >
-                      {getDisplayName(selectedRecipe)}
-                    </div>
-                    <div
-                      className="text-xs"
-                      style={{ color: theme.colors.text.secondary }}
-                    >
-                      {selectedRecipe.inputs
-                        .map(
-                          (inp) => `${inp.amount}x ${formatItemName(inp.item)}`,
-                        )
-                        .join(", ")}{" "}
-                      | {selectedRecipe.xp} XP
-                    </div>
-                    {!selectedRecipe.meetsLevel && (
-                      <div
-                        className="text-[10px]"
-                        style={{ color: theme.colors.state.danger }}
-                      >
-                        Requires Fletching level {selectedRecipe.level}
+                        {getDisplayName(recipe)}
                       </div>
-                    )}
-                  </div>
-                </div>
+                      <div
+                        className="mt-1 flex items-center gap-1 text-[10px]"
+                        style={{ color: theme.colors.text.muted }}
+                      >
+                        <span>Lv {recipe.level}</span>
+                        <span className="mx-1">•</span>
+                        <span>{recipe.xp} XP</span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </SkillingSection>
+        ))}
 
-                {/* Quantity Selection */}
+        {selectedRecipe ? (
+          <SkillingSection theme={theme}>
+            <div className="mb-3 flex items-start gap-3">
+              <span className="text-2xl">
+                {getItemIcon(selectedRecipe.output, selectedRecipe.category)}
+              </span>
+              <div className="min-w-0 flex-1">
                 <div
-                  className="text-xs mb-2"
+                  className="text-sm font-semibold"
+                  style={{ color: theme.colors.accent.primary }}
+                >
+                  {getDisplayName(selectedRecipe)}
+                </div>
+                <div
+                  className="mt-1 text-xs"
                   style={{ color: theme.colors.text.secondary }}
                 >
-                  How many?
+                  {selectedRecipe.inputs
+                    .map(
+                      (input) =>
+                        `${input.amount}x ${formatItemName(input.item)}`,
+                    )
+                    .join(", ")}
                 </div>
-
-                {showQuantityInput ? (
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      value={customQuantity}
-                      onChange={(e) => setCustomQuantity(e.target.value)}
-                      className="flex-1 px-2 py-1 rounded text-sm"
-                      style={{
-                        background: theme.colors.background.panelSecondary,
-                        border: `1px solid ${theme.colors.border.default}`,
-                        color: theme.colors.accent.primary,
-                      }}
-                      placeholder={`Amount (last: ${lastCustomQuantity})`}
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleCustomQuantitySubmit();
-                        if (e.key === "Escape") setShowQuantityInput(false);
-                      }}
-                    />
-                    <button
-                      onClick={handleCustomQuantitySubmit}
-                      className="px-3 py-1 rounded text-sm font-medium transition-colors"
-                      style={{
-                        background: `${theme.colors.state.success}30`,
-                        border: `1px solid ${theme.colors.state.success}50`,
-                        color: theme.colors.state.success,
-                      }}
-                    >
-                      OK
-                    </button>
+                {!selectedRecipe.meetsLevel ? (
+                  <div
+                    className="mt-1 text-[10px]"
+                    style={{ color: theme.colors.state.danger }}
+                  >
+                    Requires Fletching level {selectedRecipe.level}
                   </div>
-                ) : (
-                  <div className="flex gap-1">
-                    {[1, 5, 10].map((qty) => (
-                      <button
-                        key={qty}
-                        onClick={() => handleFletch(selectedRecipe, qty)}
-                        className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
-                        style={{
-                          background: `${theme.colors.accent.primary}20`,
-                          border: `1px solid ${theme.colors.accent.primary}30`,
-                          color: theme.colors.accent.primary,
-                        }}
-                      >
-                        {qty}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => handleFletch(selectedRecipe, -1)}
-                      className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
-                      style={{
-                        background: `${theme.colors.accent.primary}20`,
-                        border: `1px solid ${theme.colors.accent.primary}30`,
-                        color: theme.colors.accent.primary,
-                      }}
-                    >
-                      All
-                    </button>
-                    <button
-                      onClick={() => setShowQuantityInput(true)}
-                      className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
-                      style={{
-                        background: `${theme.colors.accent.primary}20`,
-                        border: `1px solid ${theme.colors.accent.primary}30`,
-                        color: theme.colors.accent.primary,
-                      }}
-                    >
-                      X
-                    </button>
-                  </div>
-                )}
+                ) : null}
               </div>
-            )}
-          </div>
-        )}
+              <div
+                className="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                style={getSkillingBadgeStyle(theme)}
+              >
+                {selectedRecipe.xp} XP
+              </div>
+            </div>
+
+            <div
+              className="mb-2 text-xs font-medium"
+              style={{ color: theme.colors.text.secondary }}
+            >
+              How many?
+            </div>
+
+            <SkillingQuantitySelector
+              theme={theme}
+              showCustomInput={showQuantityInput}
+              customQuantity={customQuantity}
+              lastCustomQuantity={lastCustomQuantity}
+              onCustomQuantityChange={setCustomQuantity}
+              onCustomSubmit={handleCustomQuantitySubmit}
+              onCancelCustomInput={() => setShowQuantityInput(false)}
+              onPresetQuantity={(qty) => handleFletch(selectedRecipe, qty)}
+              allQuantity={-1}
+              onShowCustomInput={() => setShowQuantityInput(true)}
+            />
+          </SkillingSection>
+        ) : null}
       </div>
-    </div>
+    </SkillingPanelBody>
   );
 }

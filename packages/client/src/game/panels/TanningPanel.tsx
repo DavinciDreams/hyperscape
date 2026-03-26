@@ -11,8 +11,14 @@
 import React, { useState } from "react";
 import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { formatItemName } from "@/utils";
+import {
+  getSkillingBadgeStyle,
+  getSkillingSelectableStyle,
+  SkillingPanelBody,
+  SkillingQuantitySelector,
+  SkillingSection,
+} from "./skilling/SkillingPanelShared";
 
 interface TanningRecipe {
   input: string;
@@ -29,9 +35,6 @@ interface TanningPanelProps {
   onClose: () => void;
 }
 
-/**
- * Get icon for tanning item
- */
 function getHideIcon(input: string): string {
   const id = input.toLowerCase();
   if (id.includes("dragon")) return "🐉";
@@ -39,7 +42,6 @@ function getHideIcon(input: string): string {
   return "🧶";
 }
 
-/** localStorage key for Make X memory */
 const TANNING_LAST_X_KEY = "tanning_last_x";
 
 export function TanningPanel({
@@ -54,7 +56,6 @@ export function TanningPanel({
   const [showQuantityInput, setShowQuantityInput] = useState(false);
   const [customQuantity, setCustomQuantity] = useState("");
 
-  // Make X memory - remember last custom quantity (OSRS feature)
   const [lastCustomQuantity, setLastCustomQuantity] = useState(() => {
     try {
       const stored = localStorage.getItem(TANNING_LAST_X_KEY);
@@ -95,76 +96,49 @@ export function TanningPanel({
   };
 
   return (
-    <div
-      className="rounded-lg shadow-2xl border"
-      style={{
-        ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
-        minWidth: "320px",
-        maxWidth: "400px",
-      }}
+    <SkillingPanelBody
+      theme={theme}
+      intro="Select a hide to see its leather result, cost, and how many you can process from your current inventory."
+      emptyMessage={
+        availableRecipes.length === 0
+          ? "No hides available for tanning."
+          : undefined
+      }
     >
-      {/* Content */}
-      <div
-        className="p-3"
-        style={{
-          background:
-            theme.name === "hyperscape"
-              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.12) 100%)"
-              : "transparent",
-        }}
-      >
-        {availableRecipes.length === 0 ? (
+      <div className="flex flex-col gap-3">
+        <SkillingSection theme={theme}>
           <div
-            className="text-center py-4 text-sm"
+            className="mb-2 text-xs font-medium"
             style={{ color: theme.colors.text.secondary }}
           >
-            No hides available for tanning.
+            Select a hide to tan:
           </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div
-              className="text-xs mb-1"
-              style={{ color: theme.colors.text.secondary }}
-            >
-              Select a hide to tan:
-            </div>
 
-            {/* Recipe List */}
-            <div className="flex flex-col gap-1 max-h-60 overflow-y-auto">
-              {availableRecipes.map((recipe) => (
+          <div className="flex max-h-[20rem] flex-col gap-2 overflow-y-auto pr-1">
+            {availableRecipes.map((recipe) => {
+              const isSelected = selectedRecipe?.input === recipe.input;
+              return (
                 <button
                   key={recipe.input}
                   onClick={() => setSelectedRecipe(recipe)}
-                  className={`flex items-center gap-2 p-2 rounded border transition-all ${
-                    selectedRecipe?.input === recipe.input
-                      ? "ring-2 ring-yellow-500"
-                      : ""
-                  }`}
-                  style={{
-                    background:
-                      selectedRecipe?.input === recipe.input
-                        ? `${theme.colors.accent.primary}15`
-                        : theme.colors.background.tertiary,
-                    borderColor:
-                      selectedRecipe?.input === recipe.input
-                        ? `${theme.colors.accent.primary}50`
-                        : theme.colors.border.default,
-                    opacity: recipe.hasHide ? 1 : 0.5,
-                  }}
+                  className="flex items-center gap-3 rounded-xl border p-3 text-left transition-all"
+                  style={getSkillingSelectableStyle(
+                    theme,
+                    isSelected,
+                    !recipe.hasHide,
+                  )}
                 >
-                  {/* Hide Icon */}
                   <span className="text-xl">{getHideIcon(recipe.input)}</span>
 
-                  {/* Recipe Info */}
-                  <div className="flex-1 text-left">
+                  <div className="min-w-0 flex-1">
                     <div
-                      className="font-medium text-sm"
+                      className="text-sm font-semibold"
                       style={{ color: theme.colors.accent.primary }}
                     >
                       {recipe.name || formatItemName(recipe.output)}
                     </div>
                     <div
-                      className="text-[10px]"
+                      className="mt-1 text-[10px]"
                       style={{ color: theme.colors.text.muted }}
                     >
                       {formatItemName(recipe.input)}
@@ -173,111 +147,70 @@ export function TanningPanel({
                     </div>
                   </div>
 
-                  {/* Cost */}
                   <div
-                    className="text-xs px-2 py-1 rounded"
-                    style={{
-                      background: theme.colors.background.panelSecondary,
-                      color: theme.colors.text.secondary,
-                    }}
+                    className="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                    style={getSkillingBadgeStyle(theme)}
                   >
                     {recipe.cost} gp
                   </div>
                 </button>
-              ))}
-            </div>
+              );
+            })}
+          </div>
+        </SkillingSection>
 
-            {/* Quantity Selection */}
-            {selectedRecipe && (
-              <div
-                className="mt-2 pt-2"
-                style={{
-                  borderTop: `1px solid ${theme.colors.border.default}`,
-                }}
-              >
+        {selectedRecipe ? (
+          <SkillingSection theme={theme}>
+            <div className="mb-3 flex items-start gap-3">
+              <span className="text-2xl">
+                {getHideIcon(selectedRecipe.input)}
+              </span>
+              <div className="min-w-0 flex-1">
                 <div
-                  className="text-xs mb-2"
+                  className="text-sm font-semibold"
+                  style={{ color: theme.colors.accent.primary }}
+                >
+                  {selectedRecipe.name || formatItemName(selectedRecipe.output)}
+                </div>
+                <div
+                  className="mt-1 text-xs"
                   style={{ color: theme.colors.text.secondary }}
                 >
-                  How many?
+                  {formatItemName(selectedRecipe.input)}
+                  {selectedRecipe.hideCount > 0 &&
+                    ` (${selectedRecipe.hideCount} in inventory)`}
                 </div>
-
-                {showQuantityInput ? (
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      value={customQuantity}
-                      onChange={(e) => setCustomQuantity(e.target.value)}
-                      className="flex-1 px-2 py-1 rounded text-sm"
-                      style={{
-                        background: theme.colors.background.panelSecondary,
-                        border: `1px solid ${theme.colors.border.default}`,
-                        color: theme.colors.accent.primary,
-                      }}
-                      placeholder={`Amount (last: ${lastCustomQuantity})`}
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleCustomQuantitySubmit();
-                        if (e.key === "Escape") setShowQuantityInput(false);
-                      }}
-                    />
-                    <button
-                      onClick={handleCustomQuantitySubmit}
-                      className="px-3 py-1 rounded text-sm font-medium transition-colors"
-                      style={{
-                        background: `${theme.colors.state.success}30`,
-                        border: `1px solid ${theme.colors.state.success}50`,
-                        color: theme.colors.state.success,
-                      }}
-                    >
-                      OK
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex gap-1">
-                    {[1, 5, 10].map((qty) => (
-                      <button
-                        key={qty}
-                        onClick={() => handleTan(selectedRecipe, qty)}
-                        className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
-                        style={{
-                          background: `${theme.colors.accent.primary}20`,
-                          border: `1px solid ${theme.colors.accent.primary}30`,
-                          color: theme.colors.accent.primary,
-                        }}
-                      >
-                        {qty}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => handleTan(selectedRecipe, -1)}
-                      className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
-                      style={{
-                        background: `${theme.colors.accent.primary}20`,
-                        border: `1px solid ${theme.colors.accent.primary}30`,
-                        color: theme.colors.accent.primary,
-                      }}
-                    >
-                      All
-                    </button>
-                    <button
-                      onClick={() => setShowQuantityInput(true)}
-                      className="flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors hover:brightness-110"
-                      style={{
-                        background: `${theme.colors.accent.primary}20`,
-                        border: `1px solid ${theme.colors.accent.primary}30`,
-                        color: theme.colors.accent.primary,
-                      }}
-                    >
-                      X
-                    </button>
-                  </div>
-                )}
               </div>
-            )}
-          </div>
-        )}
+              <div
+                className="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                style={getSkillingBadgeStyle(theme)}
+              >
+                {selectedRecipe.cost} gp
+              </div>
+            </div>
+
+            <div
+              className="mb-2 text-xs font-medium"
+              style={{ color: theme.colors.text.secondary }}
+            >
+              How many?
+            </div>
+
+            <SkillingQuantitySelector
+              theme={theme}
+              showCustomInput={showQuantityInput}
+              customQuantity={customQuantity}
+              lastCustomQuantity={lastCustomQuantity}
+              onCustomQuantityChange={setCustomQuantity}
+              onCustomSubmit={handleCustomQuantitySubmit}
+              onCancelCustomInput={() => setShowQuantityInput(false)}
+              onPresetQuantity={(qty) => handleTan(selectedRecipe, qty)}
+              allQuantity={-1}
+              onShowCustomInput={() => setShowQuantityInput(true)}
+            />
+          </SkillingSection>
+        ) : null}
       </div>
-    </div>
+    </SkillingPanelBody>
   );
 }
