@@ -2,7 +2,7 @@
  * Home Teleport Handler
  *
  * Allows players to return to spawn with:
- * - 15-minute cooldown
+ * - 30-second cooldown
  * - 10-second interruptible cast time
  * - Blocked by combat/death
  */
@@ -83,8 +83,8 @@ class HomeTeleportManager {
     if (this.isCasting(playerId)) return "Already casting home teleport";
 
     if (this.isOnCooldown(playerId)) {
-      const minutes = Math.ceil(this.getCooldownRemaining(playerId) / 60000);
-      return `Home teleport on cooldown (${minutes}m remaining)`;
+      const remainingMs = this.getCooldownRemaining(playerId);
+      return `Home teleport on cooldown (${formatCooldownRemaining(remainingMs)} remaining)`;
     }
 
     const combatSystem = this.world.getSystem("combat") as CombatSystem | null;
@@ -119,13 +119,6 @@ class HomeTeleportManager {
     socket.send("homeTeleportStart", {
       castTimeMs: HOME_TELEPORT_CONSTANTS.CAST_TIME_MS,
     });
-
-    // Use SQUAT emote for casting (kneeling/concentrating pose)
-    this.sendFn(
-      "entityModified",
-      { id: playerId, changes: { emote: Emotes.SQUAT } },
-      socket.id,
-    );
 
     return null;
   }
@@ -216,6 +209,22 @@ class HomeTeleportManager {
   }
 }
 
+function formatCooldownRemaining(remainingMs: number): string {
+  const totalSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes <= 0) {
+    return `${totalSeconds}s`;
+  }
+
+  if (seconds === 0) {
+    return `${minutes}m`;
+  }
+
+  return `${minutes}m ${seconds}s`;
+}
+
 let homeTeleportManager: HomeTeleportManager | null = null;
 
 export function initHomeTeleportManager(
@@ -248,7 +257,13 @@ export function handleHomeTeleport(
 
   const error = homeTeleportManager.startCasting(socket, currentTick);
   if (error) {
-    socket.send("homeTeleportFailed", { reason: error });
+    const remainingMs = socket.player
+      ? homeTeleportManager.getCooldownRemaining(socket.player.id)
+      : 0;
+    socket.send("homeTeleportFailed", {
+      reason: error,
+      ...(remainingMs > 0 ? { remainingMs } : {}),
+    });
     socket.send("showToast", { message: error, type: "error" });
   }
 }

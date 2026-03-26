@@ -85,13 +85,30 @@ export function MinimapHomeTeleportOrb({
   useEffect(() => {
     const onCastStart = () => {
       setState("casting");
-      setCastStartTime(Date.now());
+      setCastStartTime(performance.now());
+      setCooldownEndTime(null);
+      setCooldownRemaining(0);
       setCastProgress(0);
     };
 
-    const onFailed = () => {
-      // Server rejected or cancelled - reset to ready
-      setState("ready");
+    const onFailed = (event?: unknown) => {
+      const remainingMs =
+        typeof event === "object" &&
+        event !== null &&
+        "remainingMs" in event &&
+        typeof event.remainingMs === "number"
+          ? event.remainingMs
+          : 0;
+      if (remainingMs > 0) {
+        setState("cooldown");
+        setCooldownEndTime(performance.now() + remainingMs);
+        setCooldownRemaining(remainingMs);
+      } else {
+        // Server rejected or cancelled - reset to ready
+        setState("ready");
+        setCooldownEndTime(null);
+        setCooldownRemaining(0);
+      }
       setCastStartTime(null);
       setCastProgress(0);
     };
@@ -100,6 +117,8 @@ export function MinimapHomeTeleportOrb({
       // Server confirmed cancel - reset to ready
       setState("ready");
       setCastStartTime(null);
+      setCooldownEndTime(null);
+      setCooldownRemaining(0);
       setCastProgress(0);
     };
 
@@ -107,7 +126,9 @@ export function MinimapHomeTeleportOrb({
       // Use ref to get current state (avoids stale closure)
       if (stateRef.current === "casting") {
         setState("cooldown");
-        setCooldownEndTime(Date.now() + HOME_TELEPORT_CONSTANTS.COOLDOWN_MS);
+        setCooldownEndTime(
+          performance.now() + HOME_TELEPORT_CONSTANTS.COOLDOWN_MS,
+        );
         setCooldownRemaining(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS);
         setCastStartTime(null);
         setCastProgress(0);
@@ -150,11 +171,14 @@ export function MinimapHomeTeleportOrb({
       const now = performance.now();
 
       if (state === "casting" && castStartTimeRef.current !== null) {
-        const progress = Math.min(
-          100,
-          ((now - castStartTimeRef.current) /
-            HOME_TELEPORT_CONSTANTS.CAST_TIME_MS) *
+        const progress = Math.max(
+          0,
+          Math.min(
             100,
+            ((now - castStartTimeRef.current) /
+              HOME_TELEPORT_CONSTANTS.CAST_TIME_MS) *
+              100,
+          ),
         );
         setCastProgress(progress);
       } else if (state === "cooldown" && cooldownEndTimeRef.current !== null) {
@@ -211,23 +235,34 @@ export function MinimapHomeTeleportOrb({
 
   const isCasting = state === "casting";
   const isDisabled = state === "cooldown";
+  const cooldownProgress = isDisabled
+    ? Math.max(
+        0,
+        Math.min(
+          100,
+          ((HOME_TELEPORT_CONSTANTS.COOLDOWN_MS - cooldownRemaining) /
+            HOME_TELEPORT_CONSTANTS.COOLDOWN_MS) *
+            100,
+        ),
+      )
+    : 0;
 
   // Color scheme based on state
-  // Ready: Warm purple/magenta (magical feel)
+  // Ready/cooldown fill: Warm purple/magenta (magical feel)
   // Casting: Bright blue (active)
-  // Cooldown: Muted gray
+  // Cooldown shell: Muted gray
   const fillColorStart = isDisabled
-    ? "#666666"
+    ? "#c084fc"
     : isCasting
       ? "#60a5fa"
       : "#c084fc";
   const fillColorMid = isDisabled
-    ? "#4a4a4a"
+    ? "#a855f7"
     : isCasting
       ? "#3b82f6"
       : "#a855f7";
   const fillColorEnd = isDisabled
-    ? "#333333"
+    ? "#7c3aed"
     : isCasting
       ? "#2563eb"
       : "#7c3aed";
@@ -254,7 +289,11 @@ export function MinimapHomeTeleportOrb({
   const outerBorderRadius = center - borderWidth / 2; // Border stroke centered on edge
 
   // Calculate fill percentage based on state
-  const fillPercent = isCasting ? castProgress : isDisabled ? 0 : 100;
+  const fillPercent = isCasting
+    ? Math.max(0, Math.min(100, castProgress))
+    : isDisabled
+      ? cooldownProgress
+      : 100;
 
   // Label text
   const label =
@@ -328,8 +367,13 @@ export function MinimapHomeTeleportOrb({
           </clipPath>
         </defs>
 
-        {/* Background (dark) */}
-        <circle cx={center} cy={center} r={fillRadius} fill="#1a1510" />
+        {/* Background shell */}
+        <circle
+          cx={center}
+          cy={center}
+          r={fillRadius}
+          fill={isDisabled ? "#2c2a31" : "#1a1510"}
+        />
 
         {/* Fill rectangle clipped to circle, height based on progress/state */}
         <g clipPath={`url(#${clipId})`}>

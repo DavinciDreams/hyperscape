@@ -4767,9 +4767,12 @@ export class ClientNetwork extends SystemBase {
    * Handle home teleport failed
    * Server rejected teleport request (combat, cooldown, etc.)
    */
-  onHomeTeleportFailed = (data: { reason: string }) => {
+  onHomeTeleportFailed = (data: { reason: string; remainingMs?: number }) => {
     this.world.emit(EventType.HOME_TELEPORT_FAILED, {
       reason: data.reason,
+      ...(typeof data.remainingMs === "number"
+        ? { remainingMs: data.remainingMs }
+        : {}),
     });
   };
 

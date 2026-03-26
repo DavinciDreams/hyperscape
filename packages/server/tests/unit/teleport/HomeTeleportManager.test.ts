@@ -178,11 +178,11 @@ describe("Home Teleport Manager", () => {
       );
     });
 
-    it("broadcasts emote change to other players", () => {
+    it("does not broadcast a cast emote on teleport start", () => {
       const manager = getManager();
       manager.startCasting(mockSocket as never, 0);
 
-      expect(mockSendFn).toHaveBeenCalledWith(
+      expect(mockSendFn).not.toHaveBeenCalledWith(
         "entityModified",
         { id: "player-123", changes: { emote: Emotes.SQUAT } },
         mockSocket.id,
@@ -372,7 +372,25 @@ describe("Home Teleport Manager", () => {
       expect(error).toContain("cooldown");
     });
 
-    it("cooldown expires after 15 minutes", () => {
+    it("handleHomeTeleport sends remainingMs when blocked by cooldown", () => {
+      const manager = getManager();
+      manager.startCasting(mockSocket as never, 0);
+      manager.processTick(CAST_TICKS, () => mockSocket as never);
+
+      mockSocket.send.mockClear();
+
+      handleHomeTeleport(mockSocket as never, {}, mockWorld as never, 999);
+
+      expect(mockSocket.send).toHaveBeenCalledWith(
+        "homeTeleportFailed",
+        expect.objectContaining({
+          reason: expect.stringContaining("cooldown"),
+          remainingMs: expect.any(Number),
+        }),
+      );
+    });
+
+    it("cooldown expires after 30 seconds", () => {
       const manager = getManager();
       // Complete first teleport
       manager.startCasting(mockSocket as never, 0);
@@ -799,8 +817,8 @@ describe("Home Teleport Manager", () => {
 
   describe("Constants", () => {
     it("cooldown matches HOME_TELEPORT_CONSTANTS", () => {
-      // Production value: 15 minutes
-      expect(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS).toBe(15 * 60 * 1000);
+      // Production value: 30 seconds
+      expect(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS).toBe(30 * 1000);
     });
 
     it("cast time is exactly 10 seconds in milliseconds", () => {
