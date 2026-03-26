@@ -189,6 +189,37 @@ export class TerrainVisualManager implements QuadTreeListener {
     this.workerBiomes = biomes;
   }
 
+  /**
+   * Invalidate quad-tree chunks that overlap a world-space AABB.
+   * Destroys affected chunks so they get regenerated on the next update
+   * with current flat-zone / road data. Called when flat zones are
+   * registered after initial terrain generation.
+   */
+  invalidateRegion(
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ): void {
+    for (const [key, chunk] of this.chunks) {
+      const node = chunk.node;
+      const half = node.size * 0.5;
+      const nMinX = node.centerX - half;
+      const nMaxX = node.centerX + half;
+      const nMinZ = node.centerZ - half;
+      const nMaxZ = node.centerZ + half;
+
+      if (nMaxX < minX || nMinX > maxX || nMaxZ < minZ || nMinZ > maxZ) {
+        continue;
+      }
+
+      this.removeMeshFromScene(chunk);
+      this.chunks.delete(key);
+      node.visualChunkKey = null;
+      node.terrainNeedsUpdate = true;
+    }
+  }
+
   // =========================================================================
   // QuadTreeListener implementation
   // =========================================================================
