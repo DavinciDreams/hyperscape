@@ -115,6 +115,7 @@ import {
   type VisualManagerTerrainProvider,
 } from "./TerrainVisualManager";
 import { WaterVisualManager } from "./WaterVisualManager";
+import { GrassVisualManager } from "./GrassVisualManager";
 import { CompositeQuadTreeListener } from "./TerrainQuadTree";
 import type { QuadChunkWorkerConfig } from "../../../utils/workers/QuadChunkWorker";
 import { terminateQuadChunkWorkerPool } from "../../../utils/workers/QuadChunkWorker";
@@ -261,6 +262,7 @@ export class TerrainSystem extends System {
   // Quad-tree LOD visual manager (client-only, when CONFIG.USE_QUADTREE_LOD is true)
   private quadTreeVisualManager: TerrainVisualManager | null = null;
   private waterVisualManager: WaterVisualManager | null = null;
+  private grassVisualManager: GrassVisualManager | null = null;
 
   // Unified terrain generator from @hyperscape/procgen
   // Provides deterministic height/biome calculation independent of rendering
@@ -1953,10 +1955,27 @@ export class TerrainSystem extends System {
         this.CONFIG.WATER_THRESHOLD,
       );
 
-      // Wire both terrain and water managers to the same quad-tree via composite
+      // Grass quad-tree visual manager — instanced grass blades on finest terrain leaves
+      const grassContainer = new THREE.Group();
+      grassContainer.name = "QuadTreeGrassContainer";
+      if (this.terrainContainer) {
+        this.terrainContainer.parent?.add(grassContainer);
+      }
+
+      this.grassVisualManager = new GrassVisualManager(
+        grassContainer,
+        this.world,
+        (x: number, z: number) => this.getHeightAt(x, z),
+        this.CONFIG.WATER_THRESHOLD,
+        (wx: number, wz: number) =>
+          this.calculateRoadInfluenceAtVertex(wx, wz, 0, 0),
+      );
+
+      // Wire terrain, water, and grass managers to the same quad-tree via composite
       const composite = new CompositeQuadTreeListener();
       composite.add(this.quadTreeVisualManager);
       composite.add(this.waterVisualManager);
+      composite.add(this.grassVisualManager);
       this.quadTreeVisualManager.getQuadTree().setListener(composite);
     }
 
@@ -5154,6 +5173,10 @@ export class TerrainSystem extends System {
       if (centers.length > 0) {
         const pos = centers[0].position;
         this.quadTreeVisualManager.update(pos.x, pos.z);
+
+        if (this.grassVisualManager) {
+          this.grassVisualManager.update(pos.x, pos.z, this.world.camera);
+        }
       }
     }
 
@@ -6740,6 +6763,11 @@ export class TerrainSystem extends System {
     if (this.waterVisualManager) {
       this.waterVisualManager.destroy();
       this.waterVisualManager = null;
+    }
+
+    if (this.grassVisualManager) {
+      this.grassVisualManager.destroy();
+      this.grassVisualManager = null;
     }
 
     // Terminate worker pools to free resources
