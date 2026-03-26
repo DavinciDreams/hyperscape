@@ -339,13 +339,19 @@ export class HeadstoneEntity extends InteractableEntity {
     const changes = data as Record<string, unknown>;
     if (Array.isArray(changes.lootItems)) {
       // Validate each element has required fields (server→client trust boundary)
-      const validated = (changes.lootItems as unknown[]).filter(
+      const raw = changes.lootItems as unknown[];
+      const validated = raw.filter(
         (item): item is InventoryItem =>
           item !== null &&
           typeof item === "object" &&
           typeof (item as Record<string, unknown>).itemId === "string" &&
           typeof (item as Record<string, unknown>).quantity === "number",
       );
+      if (validated.length !== raw.length) {
+        console.warn(
+          `[HeadstoneEntity] modify(): dropped ${raw.length - validated.length} invalid lootItems (protocol mismatch?)`,
+        );
+      }
       this.lootItems = validated.map((item) => ({ ...item }));
     } else if (
       typeof changes.lootItemCount === "number" &&

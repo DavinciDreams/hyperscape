@@ -274,7 +274,9 @@ export class PlayerDeathSystem extends SystemBase {
   }): Promise<void> {
     // Skip gravestone entity destruction events — not player deaths.
     // Safe: gravestone IDs are server-generated (SafeAreaDeathHandler.spawnGravestone),
-    // never user-influenced, so the prefix cannot be spoofed.
+    // never user-influenced, so the prefix cannot be spoofed. This also relies on
+    // ENTITY_DEATH only being emitted server-side (enforced by isServer check in
+    // _processPlayerDeathInner).
     if (data.entityId?.startsWith("gravestone_")) {
       return;
     }
@@ -511,6 +513,12 @@ export class PlayerDeathSystem extends SystemBase {
         validatedPosition = validatePosition(playerEntity.position);
       }
       if (!validatedPosition) {
+        this.logger.warn(
+          "All position fallbacks exhausted, dropping death event",
+          {
+            playerId,
+          },
+        );
         return;
       }
     }
@@ -535,6 +543,10 @@ export class PlayerDeathSystem extends SystemBase {
 
     const lastDeath = this.lastDeathTime.get(playerId) || 0;
     if (now - lastDeath < this.DEATH_COOLDOWN) {
+      this.logger.debug("Death ignored — within cooldown window", {
+        playerId,
+        elapsed: now - lastDeath,
+      });
       return;
     }
 
@@ -685,6 +697,16 @@ export class PlayerDeathSystem extends SystemBase {
     // Below: persist the in-memory clears to DB. These calls are idempotent —
     // clearing an already-empty inventory/equipment is a no-op write. The
     // deathProcessingInProgress guard prevents item pickups during this window.
+    //
+    // CRASH RECOVERY: If the server crashes between the transaction commit above
+    // and the persist calls below, the death lock exists in DB but equipment/
+    // inventory rows may still contain the old items. Recovery path:
+    //   1. On server restart, DeathStateManager.recoverUnrecoveredDeaths() finds
+    //      the death lock and emits DEATH_RECOVERED.
+    //   2. onPlayerReconnect() checks for an active death lock and blocks inventory
+    //      load from DB, so old items are never restored to the player.
+    //   3. The retry queue (pendingPersistRetries) handles transient failures during
+    //      normal operation. If it also fails, AUDIT_LOG is emitted for ops alerting.
 
     // TWO-PHASE CLEAR: clearEquipmentAndReturn (inside tx) cleared in-memory state
     // and returned the items. clearEquipmentImmediate (below) persists the empty state
