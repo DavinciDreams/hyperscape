@@ -180,31 +180,19 @@ export class HeadstoneEntity extends InteractableEntity {
   // --- Interaction ---
 
   public async handleInteraction(data: EntityInteractionData): Promise<void> {
+    // Server-authoritative: only the server has the real loot items.
+    // Client interaction is routed via entityInteract packet → server calls this.
+    if (!this.world.isServer) return;
+
     if (!this.canPlayerLoot(data.playerId)) {
-      if (!this.world.isServer && this.world.chat?.add) {
-        this.world.chat.add(
-          {
-            id: `grave_${Date.now()}`,
-            from: "",
-            body: "This isn't your gravestone.",
-            createdAt: new Date().toISOString(),
-            timestamp: Date.now(),
-          },
-          false,
-        );
-      }
-      if (this.world.isServer) {
-        this.world.emit(EventType.UI_MESSAGE, {
-          playerId: data.playerId,
-          message: "This isn't your gravestone.",
-          type: "error",
-        });
-      }
+      this.world.emit(EventType.UI_MESSAGE, {
+        playerId: data.playerId,
+        message: "This isn't your gravestone.",
+        type: "error",
+      });
       return;
     }
 
-    // Don't open loot window for empty gravestones.
-    // Uses lootItemCount (synced via network) so both client and server can gate this.
     if (this.lootItemCount === 0) {
       return;
     }
@@ -218,7 +206,7 @@ export class HeadstoneEntity extends InteractableEntity {
 
     this.world.emit(EventType.CORPSE_CLICK, lootData);
 
-    if (this.world.isServer && this.world.network) {
+    if (this.world.network) {
       const network = this.world.network as unknown as {
         sendTo?: (playerId: string, type: string, data: unknown) => void;
       };
