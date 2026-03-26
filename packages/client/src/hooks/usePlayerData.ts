@@ -53,6 +53,10 @@ function cloneInventoryItems(
   return items.map((item) => ({ ...item }));
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function areEquipmentItemsEqual(
   left: PlayerEquipmentItems | null,
   right: PlayerEquipmentItems | null,
@@ -423,26 +427,15 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       }
     };
 
-    // Register event listeners
-    world.on(EventType.UI_UPDATE, handleUIUpdate, undefined);
-    world.on(EventType.INVENTORY_UPDATED, handleInventory, undefined);
-    world.on(EventType.INVENTORY_UPDATE_COINS, handleCoins, undefined);
-    world.on(EventType.UI_EQUIPMENT_UPDATE, handleEquipment, undefined);
-    world.on(EventType.STATS_UPDATE, handleStats, undefined);
-    world.on(EventType.SKILLS_UPDATED, handleSkillsUpdate, undefined);
-    world.on(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync, undefined);
-    world.on(
-      EventType.PRAYER_POINTS_CHANGED,
-      handlePrayerPointsChanged,
-      undefined,
-    );
-
-    // Request initial data from cache - uses extracted playerId from deps
+    // Request initial data from cache and live entity state.
     const requestInitial = () => {
-      if (!playerId) return false;
+      const resolvedPlayerId =
+        world.entities?.player?.id ?? world.getPlayer?.()?.id ?? playerId;
+      if (!resolvedPlayerId) return false;
 
       // Get cached inventory
-      const cachedInv = world.network?.lastInventoryByPlayerId?.[playerId];
+      const cachedInv =
+        world.network?.lastInventoryByPlayerId?.[resolvedPlayerId];
       if (cachedInv && Array.isArray(cachedInv.items)) {
         const cachedItems = cachedInv.items as InventorySlotViewItem[];
         setInventory((prev) =>
@@ -459,7 +452,8 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       // Note: lastSkillsByPlayerId is typed as Record<string, { level: number; xp: number }>
       // but at runtime contains Skills data. The intermediate unknown is required because
       // TypeScript sees them as incompatible even though they're structurally similar.
-      const cachedSkills = world.network?.lastSkillsByPlayerId?.[playerId];
+      const cachedSkills =
+        world.network?.lastSkillsByPlayerId?.[resolvedPlayerId];
       if (cachedSkills) {
         // Runtime: cachedSkills has skill-specific keys (attack, strength, etc.)
         const skills = cachedSkills as unknown as PlayerStats["skills"];
@@ -473,7 +467,7 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
 
       // Get cached equipment
       const cachedEquipment =
-        world.network?.lastEquipmentByPlayerId?.[playerId];
+        world.network?.lastEquipmentByPlayerId?.[resolvedPlayerId];
       if (cachedEquipment) {
         const nextEquipment = processRawEquipment(
           cachedEquipment as RawEquipmentData,
@@ -484,7 +478,8 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       }
 
       // Get cached prayer state
-      const cachedPrayer = world.network?.lastPrayerStateByPlayerId?.[playerId];
+      const cachedPrayer =
+        world.network?.lastPrayerStateByPlayerId?.[resolvedPlayerId];
       if (cachedPrayer) {
         setPlayerStats((prev) => {
           const merged = prev
@@ -504,7 +499,7 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
         });
       }
 
-      // Get player entity for health/prayer
+      // Get player entity for health and explicit prayer fallback.
       // Entity has health/data properties at runtime that aren't fully exposed in the base type.
       // The intermediate unknown is required because Entity.maxHealth is protected.
       const playerEntity = world.entities?.player;
@@ -522,16 +517,32 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
         const entityData = playerEntity as unknown as PlayerEntityData;
 
         const health = entityData.health ?? entityData.data?.health;
-        const maxHealth =
-          entityData.maxHealth ?? entityData.data?.maxHealth ?? 10;
-        const prayerPoints = entityData.data?.prayerPoints ?? 0;
-        const maxPrayerPoints = entityData.data?.maxPrayerPoints ?? 1;
+        const maxHealth = isFiniteNumber(entityData.maxHealth)
+          ? entityData.maxHealth
+          : isFiniteNumber(entityData.data?.maxHealth)
+            ? entityData.data.maxHealth
+            : 10;
+        const prayerPoints = entityData.data?.prayerPoints;
+        const maxPrayerPoints = entityData.data?.maxPrayerPoints;
+        const hasExplicitPrayerPoints =
+          isFiniteNumber(prayerPoints) && isFiniteNumber(maxPrayerPoints);
 
-        if (typeof health === "number") {
+        if (isFiniteNumber(health) || hasExplicitPrayerPoints) {
           setPlayerStats((prev) => {
             const merged = mergePlayerStats(prev, {
-              health: { current: health, max: maxHealth },
-              prayerPoints: { current: prayerPoints, max: maxPrayerPoints },
+              ...(isFiniteNumber(health)
+                ? {
+                    health: { current: health, max: maxHealth },
+                  }
+                : {}),
+              ...(hasExplicitPrayerPoints
+                ? {
+                    prayerPoints: {
+                      current: prayerPoints,
+                      max: maxPrayerPoints,
+                    },
+                  }
+                : {}),
             });
             return arePlayerStatsEqual(prev, merged) ? prev : merged;
           });
@@ -539,9 +550,48 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       }
 
       // Request fresh data from server
-      world.emit(EventType.INVENTORY_REQUEST, { playerId });
+      world.emit(EventType.INVENTORY_REQUEST, {
+        playerId: resolvedPlayerId,
+      });
       return true;
     };
+
+    const handlePlayerSpawned = (event: unknown) => {
+      const spawnedPlayerId =
+        typeof event === "object" &&
+        event !== null &&
+        "playerId" in event &&
+        typeof (event as { playerId?: unknown }).playerId === "string"
+          ? (event as { playerId: string }).playerId
+          : null;
+
+      const localPlayerId =
+        world.entities?.player?.id ?? world.getPlayer?.()?.id ?? playerId;
+      if (
+        spawnedPlayerId &&
+        localPlayerId &&
+        spawnedPlayerId !== localPlayerId
+      ) {
+        return;
+      }
+
+      requestInitial();
+    };
+
+    // Register event listeners
+    world.on(EventType.UI_UPDATE, handleUIUpdate, undefined);
+    world.on(EventType.INVENTORY_UPDATED, handleInventory, undefined);
+    world.on(EventType.INVENTORY_UPDATE_COINS, handleCoins, undefined);
+    world.on(EventType.UI_EQUIPMENT_UPDATE, handleEquipment, undefined);
+    world.on(EventType.STATS_UPDATE, handleStats, undefined);
+    world.on(EventType.SKILLS_UPDATED, handleSkillsUpdate, undefined);
+    world.on(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync, undefined);
+    world.on(
+      EventType.PRAYER_POINTS_CHANGED,
+      handlePrayerPointsChanged,
+      undefined,
+    );
+    world.on(EventType.PLAYER_SPAWNED, handlePlayerSpawned, undefined);
 
     // Try to get initial data immediately, or retry after a short delay
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -586,6 +636,12 @@ export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
       world.off(
         EventType.PRAYER_POINTS_CHANGED,
         handlePrayerPointsChanged,
+        undefined,
+        undefined,
+      );
+      world.off(
+        EventType.PLAYER_SPAWNED,
+        handlePlayerSpawned,
         undefined,
         undefined,
       );

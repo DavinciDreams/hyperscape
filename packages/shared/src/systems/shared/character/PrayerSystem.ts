@@ -32,6 +32,7 @@ import {
   prayerDataProvider,
   type PrayerDefinition,
 } from "../../../data/PrayerDataProvider";
+import type { PlayerJoinedPayload } from "../../../types/events";
 import {
   type PrayerState,
   isValidPrayerId,
@@ -270,6 +271,33 @@ export class PrayerSystem extends SystemBase {
   };
 
   /**
+   * Handler for PLAYER_JOINED events.
+   * Re-emits the authoritative prayer snapshot for the new session after join.
+   */
+  private readonly onPlayerJoined = async (event: unknown): Promise<void> => {
+    if (!this.world.isServer) {
+      return;
+    }
+
+    const payload = event as Partial<PlayerJoinedPayload>;
+    if (!payload.playerId || typeof payload.playerId !== "string") {
+      Logger.systemError(
+        "PrayerSystem",
+        "Invalid PLAYER_JOINED payload",
+        new Error(`Invalid payload: ${JSON.stringify(event)}`),
+      );
+      return;
+    }
+
+    const state = await this.ensurePlayerPrayerInitialized(payload.playerId);
+    if (!state) {
+      return;
+    }
+
+    this.emitPrayerStateSync(payload.playerId, state);
+  };
+
+  /**
    * Handler for PRAYER_TOGGLE events
    * Validates payload including prayer ID format before processing.
    */
@@ -379,6 +407,7 @@ export class PrayerSystem extends SystemBase {
     this.world.on(EventType.PLAYER_REGISTERED, this.onPlayerRegistered);
     this.world.on(EventType.PLAYER_CLEANUP, this.onPlayerCleanup);
     this.world.on(EventType.PLAYER_LEFT, this.onPlayerLeft);
+    this.world.on(EventType.PLAYER_JOINED, this.onPlayerJoined);
     this.world.on(EventType.PRAYER_TOGGLE, this.onPrayerToggle);
     this.world.on(EventType.ALTAR_PRAY, this.onAltarPray);
     // Listen for deactivate-all requests (prayerId === "*")
@@ -1340,6 +1369,7 @@ export class PrayerSystem extends SystemBase {
     this.world.off(EventType.PLAYER_REGISTERED, this.onPlayerRegistered);
     this.world.off(EventType.PLAYER_CLEANUP, this.onPlayerCleanup);
     this.world.off(EventType.PLAYER_LEFT, this.onPlayerLeft);
+    this.world.off(EventType.PLAYER_JOINED, this.onPlayerJoined);
     this.world.off(EventType.PRAYER_TOGGLE, this.onPrayerToggle);
     this.world.off(EventType.ALTAR_PRAY, this.onAltarPray);
     this.world.off(EventType.PRAYER_DEACTIVATED, this.onPrayerDeactivated);
