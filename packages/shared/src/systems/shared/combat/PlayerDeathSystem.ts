@@ -285,6 +285,13 @@ export class PlayerDeathSystem extends SystemBase {
       return;
     }
 
+    // Guard: if this player's death is already being processed (e.g., two ENTITY_DEATH
+    // events fired in rapid succession), skip the duplicate. processPlayerDeath also
+    // adds to this set, but checking here avoids unnecessary work before that point.
+    if (this.deathProcessingInProgress.has(data.entityId)) {
+      return;
+    }
+
     // Only handle player deaths - mob deaths are handled by MobDeathSystem
     if (data.entityType !== "player") {
       // Fallback: Check if entityId looks like a player (fixes rare bug if entityType missing)
@@ -1563,7 +1570,10 @@ export class PlayerDeathSystem extends SystemBase {
       playerId: data.playerId,
     });
 
-    // Cancel tick-based gravestone expiration to prevent duplicate ground item spawns
+    // Cancel tick-based gravestone expiration to prevent duplicate ground item spawns.
+    // NOTE: If CORPSE_EMPTY never fires (event lost), the gravestone still gets cleaned
+    // up by SafeAreaDeathHandler.processTick when its tick-based TTL expires — that's
+    // the fallback. This handler is the fast path for immediate cleanup after looting.
     this.safeAreaHandler.cancelGravestoneTimer(data.corpseId);
 
     // Destroy the gravestone entity immediately via EntityManager.

@@ -148,7 +148,11 @@ export enum EventType {
   // Player Health & Status
   PLAYER_HEALTH_UPDATED = "player:health_updated",
   PLAYER_DAMAGE = "player:damage",
-  /** @deprecated Use PLAYER_SET_DEAD for client death UI, or ENTITY_DEATH for server-side death processing */
+  /**
+   * @deprecated Use PLAYER_SET_DEAD for client death UI, or ENTITY_DEATH for server-side death processing.
+   * BREAKING: Nothing emits this event as of the death pipeline fix. External subscribers must migrate.
+   * TODO: Remove in next major version.
+   */
   PLAYER_DIED = "player:died",
   PLAYER_RESPAWNED = "player:respawned",
   PLAYER_RESPAWN_REQUEST = "player:respawn_request",

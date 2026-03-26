@@ -928,3 +928,105 @@ describe("Event type migration: PLAYER_DIED → PLAYER_SET_DEAD", () => {
     expect(EventType.PLAYER_DIED).not.toBe(EventType.PLAYER_SET_DEAD);
   });
 });
+
+// =============================================================================
+// HEADSTONE ENTITY — modify() NETWORK SYNC LOGIC
+// =============================================================================
+
+describe("HeadstoneEntity — modify() network sync logic", () => {
+  /**
+   * Tests the modify() branching logic that HeadstoneEntity applies on top of
+   * super.modify(). We replicate the exact logic here rather than importing
+   * HeadstoneEntity (which pulls THREE.js and World dependencies).
+   *
+   * This mirrors HeadstoneEntity.modify() lines 342-357:
+   *   - lootItemCount === 0 → clear lootItems
+   *   - mesh?.userData?.corpseData.itemCount updated
+   */
+  function applyModifyLogic(
+    state: {
+      lootItems: Array<{ itemId: string; quantity: number }>;
+      mesh: { userData: { corpseData: { itemCount: number } } } | null;
+    },
+    changes: Record<string, unknown>,
+  ) {
+    // Exact replica of HeadstoneEntity.modify() logic (after super.modify)
+    if (
+      typeof changes.lootItemCount === "number" &&
+      changes.lootItemCount === 0
+    ) {
+      state.lootItems = [];
+    }
+    if (state.mesh?.userData?.corpseData) {
+      state.mesh.userData.corpseData.itemCount =
+        typeof changes.lootItemCount === "number"
+          ? changes.lootItemCount
+          : state.lootItems.length;
+    }
+  }
+
+  it("clears lootItems when lootItemCount is 0", () => {
+    const state = {
+      lootItems: [
+        { itemId: "bronze_sword", quantity: 1 },
+        { itemId: "coins", quantity: 500 },
+      ],
+      mesh: { userData: { corpseData: { itemCount: 2 } } },
+    };
+
+    applyModifyLogic(state, { lootItemCount: 0 });
+    expect(state.lootItems).toEqual([]);
+    expect(state.mesh.userData.corpseData.itemCount).toBe(0);
+  });
+
+  it("does not clear lootItems when lootItemCount > 0", () => {
+    const state = {
+      lootItems: [
+        { itemId: "bronze_sword", quantity: 1 },
+        { itemId: "coins", quantity: 500 },
+      ],
+      mesh: { userData: { corpseData: { itemCount: 2 } } },
+    };
+
+    applyModifyLogic(state, { lootItemCount: 1 });
+    expect(state.lootItems).toHaveLength(2); // Not cleared
+    expect(state.mesh.userData.corpseData.itemCount).toBe(1); // Updated from network
+  });
+
+  it("handles missing lootItemCount gracefully", () => {
+    const state = {
+      lootItems: [{ itemId: "rune_scimitar", quantity: 1 }],
+      mesh: { userData: { corpseData: { itemCount: 1 } } },
+    };
+
+    applyModifyLogic(state, { someOtherField: "value" });
+    expect(state.lootItems).toHaveLength(1); // Unchanged
+    expect(state.mesh.userData.corpseData.itemCount).toBe(1); // Falls back to lootItems.length
+  });
+
+  it("handles null mesh safely", () => {
+    const state = {
+      lootItems: [{ itemId: "coins", quantity: 100 }],
+      mesh: null,
+    };
+
+    applyModifyLogic(state, { lootItemCount: 0 });
+    expect(state.lootItems).toEqual([]); // Still cleared
+    // No crash from null mesh
+  });
+
+  it("does not clear lootItems for non-zero lootItemCount", () => {
+    const state = {
+      lootItems: [
+        { itemId: "rune_scimitar", quantity: 1 },
+        { itemId: "dragon_med_helm", quantity: 1 },
+        { itemId: "coins", quantity: 1000 },
+      ],
+      mesh: { userData: { corpseData: { itemCount: 3 } } },
+    };
+
+    applyModifyLogic(state, { lootItemCount: 2 });
+    expect(state.lootItems).toHaveLength(3); // Not cleared (only 0 clears)
+    expect(state.mesh.userData.corpseData.itemCount).toBe(2);
+  });
+});
