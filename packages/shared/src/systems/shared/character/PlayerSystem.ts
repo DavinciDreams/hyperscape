@@ -1971,7 +1971,6 @@ export class PlayerSystem extends SystemBase {
     }
   }
 
-  /** Validated weapon type lookup — returns WeaponType.NONE for unknown types */
   /** Check if an ID corresponds to a known player (registered or entity with type "player"). */
   private isKnownPlayer(playerId: string): boolean {
     if (this.players.has(playerId)) return true;
@@ -1983,6 +1982,7 @@ export class PlayerSystem extends SystemBase {
     Object.values(WeaponType),
   );
 
+  /** Validated weapon type lookup — returns WeaponType.NONE for unknown types */
   private getPlayerWeaponType(playerId: string): WeaponType {
     const equipmentSystem = this.world.getSystem("equipment") as {
       getPlayerEquipment?: (id: string) => {
