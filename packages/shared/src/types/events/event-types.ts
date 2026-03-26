@@ -148,6 +148,7 @@ export enum EventType {
   // Player Health & Status
   PLAYER_HEALTH_UPDATED = "player:health_updated",
   PLAYER_DAMAGE = "player:damage",
+  /** @deprecated Use PLAYER_SET_DEAD instead — PLAYER_DIED is legacy and will be removed */
   PLAYER_DIED = "player:died",
   PLAYER_RESPAWNED = "player:respawned",
   PLAYER_RESPAWN_REQUEST = "player:respawn_request",

@@ -521,18 +521,10 @@ export class PlayerDeathSystem extends SystemBase {
 
     // Check for existing death lock - if player dies again before looting, clear old one
     // This matches OSRS behavior where dying again replaces your old gravestone
-    let existingDeathLock;
-    try {
-      existingDeathLock = await this.deathStateManager.getDeathLock(playerId);
-    } catch (err) {
-      throw err;
-    }
+    const existingDeathLock =
+      await this.deathStateManager.getDeathLock(playerId);
     if (existingDeathLock) {
-      try {
-        await this.deathStateManager.clearDeathLock(playerId);
-      } catch (err) {
-        throw err;
-      }
+      await this.deathStateManager.clearDeathLock(playerId);
     }
 
     // Update last death time (use cached timestamp)
@@ -561,6 +553,8 @@ export class PlayerDeathSystem extends SystemBase {
       "database",
     ) as unknown as DatabaseSystemLike | null;
     if (!databaseSystem || !databaseSystem.executeInTransaction) {
+      // No DB: death animation + respawn only, no item drops. Items stay in memory
+      // (player keeps them). This is safe because without DB, nothing to desync.
       this.postDeathCleanup(playerId, deathPosition, [], killedBy);
       return;
     }
@@ -568,6 +562,7 @@ export class PlayerDeathSystem extends SystemBase {
     // Get inventory system
     const inventorySystem = this.world.getSystem("inventory");
     if (!inventorySystem) {
+      // No inventory system: same as no-DB — respawn without item drops.
       this.postDeathCleanup(playerId, deathPosition, [], killedBy);
       return;
     }
@@ -593,6 +588,10 @@ export class PlayerDeathSystem extends SystemBase {
             metadata: null,
           })) || [];
 
+        // clearEquipmentAndReturn is always available on EquipmentSystem — the old
+        // fallback to getPlayerEquipment + manual conversion only covered 6/11 slots
+        // and was removed as dead code. If equipment system exists but lacks this
+        // method, equipped items are intentionally ignored (no partial drop).
         let equipmentItems: InventoryItem[] = [];
         if (equipmentSystem?.clearEquipmentAndReturn) {
           const clearedEquipment =
@@ -665,7 +664,7 @@ export class PlayerDeathSystem extends SystemBase {
         await equipmentSystem.clearEquipmentImmediate(playerId);
       } catch (err) {
         this.logger.error(
-          "Equipment DB persist failed, queuing retry",
+          "DEATH_PERSIST_DESYNC: Equipment DB persist failed, queuing retry",
           err instanceof Error ? err : undefined,
           { playerId },
         );
@@ -678,7 +677,7 @@ export class PlayerDeathSystem extends SystemBase {
       await inventorySystem.clearInventoryImmediate(playerId, false);
     } catch (err) {
       this.logger.error(
-        "Inventory DB persist failed, queuing retry",
+        "DEATH_PERSIST_DESYNC: Inventory DB persist failed, queuing retry",
         err instanceof Error ? err : undefined,
         { playerId },
       );
@@ -1627,7 +1626,7 @@ export class PlayerDeathSystem extends SystemBase {
             .clearEquipmentImmediate(playerId)
             .catch((err) => {
               this.logger.error(
-                "Equipment DB persist retry failed",
+                "DEATH_PERSIST_DESYNC: Equipment DB persist retry also failed — possible item duplication",
                 err instanceof Error ? err : undefined,
                 { playerId },
               );
@@ -1642,7 +1641,7 @@ export class PlayerDeathSystem extends SystemBase {
             .clearInventoryImmediate(playerId, false)
             .catch((err) => {
               this.logger.error(
-                "Inventory DB persist retry failed",
+                "DEATH_PERSIST_DESYNC: Inventory DB persist retry also failed — possible item duplication",
                 err instanceof Error ? err : undefined,
                 { playerId },
               );

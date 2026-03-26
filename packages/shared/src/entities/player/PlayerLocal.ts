@@ -2767,6 +2767,23 @@ export class PlayerLocal extends Entity implements HotReloadable {
    * Handle PLAYER_SET_DEAD event from server
    * CRITICAL: This is the entry point to death flow - blocks all input and movement
    */
+  /** Clear death animation state and restore to idle (shared by respawn handlers) */
+  private clearDeathAnimationState(): void {
+    const playerWithDying = this as PlayerLocalWithDying;
+    playerWithDying.isDying = false;
+    playerWithDying.data.isDying = false;
+
+    this.data.e = "idle";
+    this.data.emote = "idle";
+    this.emote = "idle";
+    if (this._avatar?.setEmote) {
+      this._avatar.setEmote(Emotes.IDLE);
+    }
+
+    this.data.deathState = undefined;
+    this.data.deathPosition = undefined;
+  }
+
   handlePlayerSetDead(event: {
     playerId: string;
     isDead: boolean;
@@ -2780,23 +2797,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // isDead:true = entering death state, isDead:false = exiting death state
     if (event.isDead === false) {
       // Player is being restored to alive (after respawn)
-
-      // Clear isDying flag (same as handlePlayerRespawned)
-      const playerWithDying = this as PlayerLocalWithDying;
-      playerWithDying.isDying = false;
-      playerWithDying.data.isDying = false;
-
-      // Reset animation from death to idle
-      this.data.e = "idle";
-      this.data.emote = "idle";
-      this.emote = "idle";
-      if (this._avatar?.setEmote) {
-        this._avatar.setEmote(Emotes.IDLE);
-      }
-
-      // Clear death state on entity data
-      this.data.deathState = undefined;
-      this.data.deathPosition = undefined;
+      this.clearDeathAnimationState();
 
       // Unfreeze physics if needed
       const physXGlobal = globalThis as PhysXGlobal;
@@ -2808,9 +2809,6 @@ export class PlayerLocal extends Entity implements HotReloadable {
         );
       }
 
-      console.log(
-        "[PlayerLocal] ✅ Death state cleared (PLAYER_SET_DEAD isDead:false)",
-      );
       return;
     }
 
@@ -2930,22 +2928,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }): void {
     if (event.playerId !== this.data.id) return;
 
-    // Clear isDying flag (allows input again)
-    const playerWithDying = this as PlayerLocalWithDying;
-    playerWithDying.isDying = false;
-    playerWithDying.data.isDying = false;
-
-    // Reset animation from death to idle
-    this.data.e = "idle";
-    this.data.emote = "idle";
-    this.emote = "idle";
-    if (this._avatar?.setEmote) {
-      this._avatar.setEmote(Emotes.IDLE);
-    }
-
-    // Clear death state on entity data
-    this.data.deathState = undefined;
-    this.data.deathPosition = undefined;
+    this.clearDeathAnimationState();
 
     // CRITICAL: Teleport player to spawn position
     // Without this, player stays at death location instead of respawning at spawn
