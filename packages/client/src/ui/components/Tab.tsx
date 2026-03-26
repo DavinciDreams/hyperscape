@@ -89,6 +89,7 @@ export const Tab = memo(function Tab({
   panelId,
   onActivate,
   onNavigate,
+  reserveArrowKeys = false,
   onClose,
   className,
   style,
@@ -181,19 +182,37 @@ export const Tab = memo(function Tab({
       className={className}
       style={containerStyle}
       data-tab={tab.id}
-      onClick={onActivate}
+      onClick={(e: React.MouseEvent<HTMLDivElement>) => {
+        onActivate();
+        if (reserveArrowKeys && e.detail > 0) {
+          e.currentTarget.blur();
+        }
+      }}
+      onMouseDown={(e: React.MouseEvent<HTMLDivElement>) => {
+        if (reserveArrowKeys) {
+          // Keep pointer-clicked game shell tabs from holding keyboard focus
+          // so arrow keys remain visually and behaviorally attached to gameplay.
+          e.preventDefault();
+        }
+      }}
       onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onActivate();
           return;
         }
-        if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        if (
+          !reserveArrowKeys &&
+          (e.key === "ArrowLeft" || e.key === "ArrowUp")
+        ) {
           e.preventDefault();
           onNavigate?.("previous");
           return;
         }
-        if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        if (
+          !reserveArrowKeys &&
+          (e.key === "ArrowRight" || e.key === "ArrowDown")
+        ) {
           e.preventDefault();
           onNavigate?.("next");
           return;

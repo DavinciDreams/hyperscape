@@ -524,6 +524,8 @@ export interface TabProps {
   onActivate: () => void;
   /** Callback for roving keyboard navigation */
   onNavigate?: (direction: "previous" | "next" | "first" | "last") => void;
+  /** When true, shared shell tabs must not consume arrow keys */
+  reserveArrowKeys?: boolean;
   /** Callback when close button is clicked */
   onClose?: () => void;
   /** Optional className */
@@ -538,6 +540,8 @@ export interface TabBarProps {
   windowId: string;
   /** DOM id for the active tab panel */
   panelId?: string;
+  /** When true, shell tabs must not use arrow keys for roving navigation */
+  reserveArrowKeys?: boolean;
   /** Optional className */
   className?: string;
   /** Optional style */

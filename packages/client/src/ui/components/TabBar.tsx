@@ -39,6 +39,7 @@ interface ExtendedTabBarProps extends TabBarProps {
 export const TabBar = memo(function TabBar({
   windowId,
   panelId,
+  reserveArrowKeys = false,
   className,
   style,
   dragHandleProps,
@@ -445,6 +446,7 @@ export const TabBar = memo(function TabBar({
             panelId={panelId}
             onActivate={() => setActiveTab(index)}
             onNavigate={handleTabNavigate}
+            reserveArrowKeys={reserveArrowKeys}
             onClose={tab.closeable ? () => removeTab(tab.id) : undefined}
             // Dim the tab if it's the one being dragged
             style={draggingTabId === tab.id ? { opacity: 0.4 } : undefined}

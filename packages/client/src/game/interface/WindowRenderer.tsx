@@ -145,7 +145,7 @@ const WindowItem = memo(function WindowItem({
         ) : isMinimap ? (
           <MinimapWrapper world={world} isUnlocked={isEditMode} />
         ) : showTabBar ? (
-          <TabBar windowId={windowState.id} />
+          <TabBar windowId={windowState.id} reserveArrowKeys={true} />
         ) : null}
 
         {!isActionBar && !isMenuBar && !isMinimap && needsDraggableWrapper ? (
