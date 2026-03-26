@@ -1813,8 +1813,6 @@ export class PlayerSystem extends SystemBase {
     const playerState: PlayerAttackStyleState = {
       playerId,
       selectedStyle: initialStyle,
-      lastStyleChange: 0, // Start at 0 so player can change style immediately
-      combatStyleHistory: [],
     };
 
     this.playerAttackStyles.set(playerId, playerState);
@@ -1882,7 +1880,6 @@ export class PlayerSystem extends SystemBase {
     // Update player's attack style
     const oldStyle = playerState.selectedStyle;
     playerState.selectedStyle = newStyle;
-    playerState.lastStyleChange = Date.now();
 
     // Notify UI
     this.emitTypedEvent(EventType.UI_ATTACK_STYLE_CHANGED, {
@@ -1951,8 +1948,6 @@ export class PlayerSystem extends SystemBase {
       this.playerAttackStyles.set(playerId, {
         playerId,
         selectedStyle: currentStyle.id,
-        lastStyleChange: 0,
-        combatStyleHistory: [],
       });
       return;
     }
@@ -2009,11 +2004,9 @@ export class PlayerSystem extends SystemBase {
 
     const styleInfo = {
       style: playerState.selectedStyle,
-      cooldown: 0,
       currentStyle,
       availableStyles: Object.values(this.ATTACK_STYLES),
       canChange: true,
-      styleHistory: playerState.combatStyleHistory.slice(-10),
     };
 
     callback(styleInfo);
@@ -2029,7 +2022,6 @@ export class PlayerSystem extends SystemBase {
         currentStyle,
         availableStyles: Object.values(this.ATTACK_STYLES),
         canChange: true,
-        styleHistory: playerState.combatStyleHistory.slice(-10),
       });
     }
   }
@@ -2046,14 +2038,6 @@ export class PlayerSystem extends SystemBase {
     return Object.values(this.ATTACK_STYLES);
   }
 
-  canPlayerChangeStyle(_playerId: string): boolean {
-    return true;
-  }
-
-  getRemainingStyleCooldown(_playerId: string): number {
-    return 0;
-  }
-
   forceChangeAttackStyle(playerId: string, styleId: string): boolean {
     const style = this.ATTACK_STYLES[styleId];
     if (!style) return false;
@@ -2063,13 +2047,6 @@ export class PlayerSystem extends SystemBase {
 
     this.handleStyleChange({ playerId, newStyle: styleId });
     return true;
-  }
-
-  getPlayerStyleHistory(
-    playerId: string,
-  ): Array<{ style: string; timestamp: number; combatSession: string }> {
-    const playerState = this.playerAttackStyles.get(playerId);
-    return playerState?.combatStyleHistory || [];
   }
 
   getAttackStyleSystemInfo(): Record<string, unknown> {

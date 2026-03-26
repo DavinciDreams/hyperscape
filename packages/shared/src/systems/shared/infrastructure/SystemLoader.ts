@@ -850,14 +850,8 @@ function setupAPI(world: World, systems: Systems): void {
     getPlayerAttackStyle: (playerId: string) =>
       systems.player?.getPlayerAttackStyle(playerId),
     getAllAttackStyles: () => systems.player?.getAllAttackStyles(),
-    canPlayerChangeStyle: (playerId: string) =>
-      systems.player?.canPlayerChangeStyle(playerId),
-    getRemainingStyleCooldown: (playerId: string) =>
-      systems.player?.getRemainingStyleCooldown(playerId),
     forceChangeAttackStyle: (playerId: string, styleId: string) =>
       systems.player?.forceChangeAttackStyle(playerId, styleId),
-    getPlayerStyleHistory: (playerId: string) =>
-      systems.player?.getPlayerStyleHistory(playerId),
     getAttackStyleSystemInfo: () => systems.player?.getAttackStyleSystemInfo(),
 
     // App Manager API

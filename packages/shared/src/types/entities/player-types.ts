@@ -424,12 +424,6 @@ export interface PlayerStats {
 export interface PlayerAttackStyleState {
   playerId: string;
   selectedStyle: string;
-  lastStyleChange: number;
-  combatStyleHistory: Array<{
-    style: string;
-    timestamp: number;
-    combatSession: string;
-  }>;
 }
 
 // Authentication interfaces
