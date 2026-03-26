@@ -509,6 +509,8 @@ const CombatStyleBanner = ({
   return (
     <div
       ref={setNodeRef}
+      {...attributes}
+      {...listeners}
       style={{
         flex: "0 0 calc((100% - 3 * (var(--banner-gap))) / 4)",
         maxWidth: "calc((100% - 3 * (var(--banner-gap))) / 4)",
@@ -517,6 +519,7 @@ const CombatStyleBanner = ({
         opacity: disabled ? 0.5 : isDragging ? 0.6 : 1,
         transform: isDragging ? "scale(0.95)" : "scale(1)",
         transition: "opacity 0.15s ease, transform 0.15s ease",
+        touchAction: "none",
       }}
     >
       <button
@@ -712,28 +715,6 @@ const CombatStyleBanner = ({
           </span>
         </div>
       </button>
-
-      {/* Drag handle overlay — also handles clicks since it sits on top */}
-      <div
-        {...attributes}
-        {...listeners}
-        aria-label={`Drag ${styleInfo.label} style to action bar`}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!disabled) onClick();
-        }}
-        style={{
-          position: "absolute",
-          inset: 0,
-          cursor: disabled
-            ? "not-allowed"
-            : isDragging
-              ? "grabbing"
-              : "pointer",
-          touchAction: "none",
-          pointerEvents: disabled ? "none" : "auto",
-        }}
-      />
     </div>
   );
 };
@@ -1093,11 +1074,6 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     const playerId = world.entities?.player?.id;
     if (!playerId) return;
 
-    // Optimistic UI update — immediately show the change
-    combatStyleCache.set(playerId, next);
-    setStyle(next);
-
-    // Send to server (server event callback will confirm/correct the state)
     const actions = world.getSystem("actions") as {
       actionMethods?: {
         changeAttackStyle?: (id: string, style: string) => void;
@@ -1105,6 +1081,10 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     } | null;
 
     if (!actions?.actionMethods?.changeAttackStyle) return;
+
+    // Optimistic: update UI instantly (OSRS has zero visible delay)
+    combatStyleCache.set(playerId, next);
+    setStyle(next);
 
     // Send to server — server confirms via attackStyleChanged packet,
     // which will overwrite our optimistic value with the authoritative one
@@ -1152,12 +1132,6 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     const playerId = world.entities?.player?.id;
     if (!playerId) return;
 
-    // Optimistic UI update — immediately show the toggle
-    const newValue = !autoRetaliate;
-    autoRetaliateCache.set(playerId, newValue);
-    setAutoRetaliate(newValue);
-
-    // Send to server (server event callback will confirm/correct the state)
     const actions = world.getSystem("actions") as {
       actionMethods?: {
         setAutoRetaliate?: (id: string, enabled: boolean) => void;
@@ -1165,6 +1139,12 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     } | null;
 
     if (!actions?.actionMethods?.setAutoRetaliate) return;
+
+    const newValue = !autoRetaliate;
+
+    // Optimistic: update UI instantly (OSRS has zero visible delay)
+    autoRetaliateCache.set(playerId, newValue);
+    setAutoRetaliate(newValue);
 
     // Send to server — server confirms via autoRetaliateChanged packet,
     // which will overwrite our optimistic value with the authoritative one
