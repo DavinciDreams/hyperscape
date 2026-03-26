@@ -4307,6 +4307,7 @@ export class ClientNetwork extends SystemBase {
     // without sweeping on every packet.
     const now = performance.now();
     if (this._recentDamageKeys.size > 100) {
+      // Deleting from a Map during for...of is safe per ES spec (§24.1.5.4).
       for (const [key, ts] of this._recentDamageKeys) {
         if (now - ts > 500) this._recentDamageKeys.delete(key);
       }

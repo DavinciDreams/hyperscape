@@ -1837,12 +1837,16 @@ export class PlayerSystem extends SystemBase {
 
     let playerState = this.playerAttackStyles.get(playerId);
     if (!playerState) {
-      // Auto-initialize if player exists but wasn't registered yet (event ordering)
+      // Auto-initialize if player exists but wasn't registered yet (event ordering).
+      // Use weapon-appropriate default so the player doesn't get an "invalid style"
+      // error if "accurate" isn't valid for their equipped weapon.
       if (this.players.has(playerId) || this.world.entities?.get(playerId)) {
+        const weaponType = this.getPlayerWeaponType(playerId);
+        const defaultStyle = getDefaultStyleForWeapon(weaponType);
         this.logger.debug(
-          `Auto-initializing attack style for ${playerId} (event ordering race)`,
+          `Auto-initializing attack style for ${playerId} (event ordering race), default: ${defaultStyle}`,
         );
-        this.initializePlayerAttackStyle(playerId);
+        this.initializePlayerAttackStyle(playerId, defaultStyle);
         playerState = this.playerAttackStyles.get(playerId);
       }
       if (!playerState) {
@@ -2063,8 +2067,6 @@ export class PlayerSystem extends SystemBase {
       totalPlayers,
       activeStyles,
       availableStyles: Object.keys(this.ATTACK_STYLES),
-      activeCooldowns: 0,
-      systemLoaded: true,
     };
   }
 
