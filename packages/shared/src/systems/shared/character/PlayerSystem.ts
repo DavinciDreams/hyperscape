@@ -543,8 +543,16 @@ export class PlayerSystem extends SystemBase {
         );
       }
     }
-    this.initializePlayerAttackStyle(data.playerId, savedAttackStyle);
-    this.initializePlayerAutoRetaliate(data.playerId, savedAutoRetaliate);
+    // Only initialize if no state exists yet. If the player already has state
+    // (from auto-init + an active style/toggle change before registration),
+    // their in-session choice takes precedence over the DB-saved value.
+    // The updated value will be persisted on the next periodic save.
+    if (!this.playerAttackStyles.has(data.playerId)) {
+      this.initializePlayerAttackStyle(data.playerId, savedAttackStyle);
+    }
+    if (!this.playerAutoRetaliate.has(data.playerId)) {
+      this.initializePlayerAutoRetaliate(data.playerId, savedAutoRetaliate);
+    }
 
     // CRITICAL: Send health data to client NOW (after client is connected and ready)
     // This matches the inventory initialization pattern - send data in PLAYER_REGISTERED
