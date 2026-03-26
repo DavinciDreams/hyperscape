@@ -20,7 +20,6 @@ import type { InventorySystem } from "../character/InventorySystem";
 import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
 import { STARTER_TOWNS } from "../../../data/world-areas";
 import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
-import { dataManager } from "../../../data/DataManager";
 import type {
   PlayerSystemLike,
   DatabaseSystemLike,
@@ -31,194 +30,13 @@ import type {
   PlayerEntityLike,
   DeathLocationDataWithHeadstone,
 } from "./DeathTypes";
-
-/**
- * Sanitize killedBy string to prevent injection attacks
- * - Normalizes Unicode to prevent homograph attacks (Cyrillic 'а' vs Latin 'a')
- * - Removes zero-width characters and BiDi overrides that could manipulate display
- * - Removes control characters and dangerous HTML characters
- * - Limits length to prevent buffer overflow attacks
- * - Defaults to "unknown" for invalid inputs
- */
-function sanitizeKilledBy(killedBy: unknown): string {
-  if (typeof killedBy !== "string" || !killedBy) {
-    return "unknown";
-  }
-
-  // Normalize Unicode to NFKC form to prevent homograph attacks
-  const normalized = killedBy.normalize("NFKC");
-
-  // Build sanitized string character by character
-  let sanitized = "";
-  for (const char of normalized) {
-    const code = char.charCodeAt(0);
-
-    // Skip zero-width characters (U+200B-U+200D, U+FEFF)
-    if (code >= 0x200b && code <= 0x200d) continue;
-    if (code === 0xfeff) continue;
-
-    // Skip BiDi override characters (U+202A-U+202E)
-    if (code >= 0x202a && code <= 0x202e) continue;
-
-    // Skip control characters (0x00-0x1F and 0x7F)
-    if (code < 32 || code === 127) continue;
-
-    // Skip dangerous HTML characters
-    if ("<>'\"&".includes(char)) continue;
-
-    sanitized += char;
-  }
-
-  sanitized = sanitized.trim().substring(0, 64); // Limit to 64 characters
-  return sanitized || "unknown";
-}
-
-/**
- * OSRS-style: In safe zones, player keeps their 3 most valuable items on death.
- * These items are returned to inventory after respawn instead of going to gravestone.
- * @see https://oldschool.runescape.wiki/w/Items_Kept_on_Death
- */
-const ITEMS_KEPT_ON_DEATH = 3;
-
-/**
- * Get the value of an item from manifest data.
- * Returns 0 for unknown items (they sort to bottom and get dropped first).
- */
-function getItemValue(itemId: string): number {
-  const item = dataManager.getItem(itemId);
-  return item?.value ?? 0;
-}
-
-/**
- * Split items into "kept" and "dropped" lists for safe zone deaths (OSRS-style).
- * Keeps the N most valuable individual items. For stacked items (quantity > 1),
- * each unit counts as one item but only the top N units across all stacks are kept.
- *
- * Returns { kept: items retained by player, dropped: items for gravestone }
- */
-function splitItemsForSafeDeath(
-  allItems: InventoryItem[],
-  keepCount: number,
-): { kept: InventoryItem[]; dropped: InventoryItem[] } {
-  if (keepCount <= 0) {
-    return { kept: [], dropped: [...allItems] };
-  }
-
-  // Expand stacks into individual value-tagged entries for sorting
-  const expanded: Array<{
-    item: InventoryItem;
-    index: number;
-    unitValue: number;
-  }> = [];
-  for (let i = 0; i < allItems.length; i++) {
-    const item = allItems[i];
-    const unitValue = getItemValue(item.itemId);
-    // For stacked items, each unit is considered separately
-    for (let q = 0; q < item.quantity; q++) {
-      expanded.push({ item, index: i, unitValue });
-    }
-  }
-
-  // Sort descending by value (most valuable first)
-  expanded.sort((a, b) => b.unitValue - a.unitValue);
-
-  // Track how many units to keep per original item index
-  const keptCounts = new Map<number, number>();
-  let remaining = keepCount;
-  for (const entry of expanded) {
-    if (remaining <= 0) break;
-    keptCounts.set(entry.index, (keptCounts.get(entry.index) ?? 0) + 1);
-    remaining--;
-  }
-
-  const kept: InventoryItem[] = [];
-  const dropped: InventoryItem[] = [];
-
-  for (let i = 0; i < allItems.length; i++) {
-    const item = allItems[i];
-    const keptQty = keptCounts.get(i) ?? 0;
-    const droppedQty = item.quantity - keptQty;
-
-    if (keptQty > 0) {
-      kept.push({ ...item, quantity: keptQty });
-    }
-    if (droppedQty > 0) {
-      dropped.push({ ...item, quantity: droppedQty });
-    }
-  }
-
-  return { kept, dropped };
-}
-
-/**
- * Position validation constants
- */
-const POSITION_VALIDATION = {
-  WORLD_BOUNDS: 10000, // Max 10km from origin
-  MAX_HEIGHT: 500, // Max height
-  MIN_HEIGHT: -50, // Allow some underground (caves)
-} as const;
-
-/**
- * Check if a number is valid for position use
- */
-function isValidPositionNumber(n: number): boolean {
-  return Number.isFinite(n);
-}
-
-/**
- * Validate and clamp a position to world bounds
- * @param position - Position to validate
- * @returns Validated and clamped position, or null if completely invalid
- */
-function validatePosition(position: {
-  x: number;
-  y: number;
-  z: number;
-}): { x: number; y: number; z: number } | null {
-  const { x, y, z } = position;
-
-  // Check for invalid numbers (NaN, Infinity)
-  if (
-    !isValidPositionNumber(x) ||
-    !isValidPositionNumber(y) ||
-    !isValidPositionNumber(z)
-  ) {
-    return null;
-  }
-
-  // Clamp to world bounds
-  return {
-    x: Math.max(
-      -POSITION_VALIDATION.WORLD_BOUNDS,
-      Math.min(POSITION_VALIDATION.WORLD_BOUNDS, x),
-    ),
-    y: Math.max(
-      POSITION_VALIDATION.MIN_HEIGHT,
-      Math.min(POSITION_VALIDATION.MAX_HEIGHT, y),
-    ),
-    z: Math.max(
-      -POSITION_VALIDATION.WORLD_BOUNDS,
-      Math.min(POSITION_VALIDATION.WORLD_BOUNDS, z),
-    ),
-  };
-}
-
-/**
- * Check if position is within world bounds without clamping
- */
-function isPositionInBounds(position: {
-  x: number;
-  y: number;
-  z: number;
-}): boolean {
-  return (
-    Math.abs(position.x) <= POSITION_VALIDATION.WORLD_BOUNDS &&
-    Math.abs(position.z) <= POSITION_VALIDATION.WORLD_BOUNDS &&
-    position.y >= POSITION_VALIDATION.MIN_HEIGHT &&
-    position.y <= POSITION_VALIDATION.MAX_HEIGHT
-  );
-}
+import {
+  sanitizeKilledBy,
+  ITEMS_KEPT_ON_DEATH,
+  splitItemsForSafeDeath,
+  validatePosition,
+  isPositionInBounds,
+} from "./DeathUtils";
 
 /**
  * Orchestrates player death via modular handlers (zone detection, safe area, wilderness).
