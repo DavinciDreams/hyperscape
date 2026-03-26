@@ -27,6 +27,9 @@ vi.mock("../../../src/ui/stores/themeStore", () => ({
         primary: "#fff",
         secondary: "#aaa",
       },
+      border: {
+        focus: "#09f",
+      },
       accent: {
         primary: "#f90",
       },
@@ -134,5 +137,28 @@ describe("Tab keyboard behavior", () => {
     fireEvent.keyDown(tab, { key: " " });
 
     expect(onActivate).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops pointer focus when reserveArrowKeys is enabled", () => {
+    const onActivate = vi.fn();
+
+    const { getByRole } = render(
+      <Tab
+        tab={baseTab}
+        isActive={true}
+        onActivate={onActivate}
+        reserveArrowKeys={true}
+      />,
+    );
+
+    const tab = getByRole("tab", { name: "Inventory" }) as HTMLDivElement;
+    tab.focus();
+    expect(document.activeElement).toBe(tab);
+
+    fireEvent.mouseDown(tab);
+    fireEvent.click(tab, { detail: 1 });
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).not.toBe(tab);
   });
 });
