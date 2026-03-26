@@ -153,7 +153,7 @@ const POSITION_VALIDATION = {
  * Check if a number is valid for position use
  */
 function isValidPositionNumber(n: number): boolean {
-  return Number.isFinite(n) && !Number.isNaN(n);
+  return Number.isFinite(n);
 }
 
 /**
@@ -686,30 +686,6 @@ export class PlayerDeathSystem extends SystemBase {
     }
   }
 
-  private convertEquipmentToInventoryItems(
-    equipment: EquipmentData,
-    playerId: string,
-  ): InventoryItem[] {
-    const items: InventoryItem[] = [];
-    const timestamp = Date.now();
-    const slots = ["weapon", "shield", "helmet", "body", "legs", "arrows"];
-
-    for (const slotName of slots) {
-      const equipSlot = equipment[slotName];
-      if (equipSlot && equipSlot.item) {
-        items.push({
-          id: `death_equipped_${playerId}_${slotName}_${timestamp}`,
-          itemId: equipSlot.item.id,
-          quantity: equipSlot.item.quantity || 1,
-          slot: -1, // Equipment items don't have inventory slots
-          metadata: null,
-        });
-      }
-    }
-
-    return items;
-  }
-
   private async processPlayerDeath(
     playerId: string,
     deathPosition: { x: number; y: number; z: number },
@@ -860,26 +836,16 @@ export class PlayerDeathSystem extends SystemBase {
           })) || [];
 
         let equipmentItems: InventoryItem[] = [];
-        if (equipmentSystem) {
-          if (equipmentSystem.clearEquipmentAndReturn) {
-            const clearedEquipment =
-              await equipmentSystem.clearEquipmentAndReturn(playerId, tx);
-            equipmentItems = clearedEquipment.map((item, index) => ({
-              id: `death_equip_${playerId}_${Date.now()}_${index}`,
-              itemId: item.itemId,
-              quantity: item.quantity,
-              slot: -1,
-              metadata: null,
-            }));
-          } else {
-            const equipment = equipmentSystem.getPlayerEquipment(playerId);
-            if (equipment) {
-              equipmentItems = this.convertEquipmentToInventoryItems(
-                equipment,
-                playerId,
-              );
-            }
-          }
+        if (equipmentSystem?.clearEquipmentAndReturn) {
+          const clearedEquipment =
+            await equipmentSystem.clearEquipmentAndReturn(playerId, tx);
+          equipmentItems = clearedEquipment.map((item, index) => ({
+            id: `death_equip_${playerId}_${Date.now()}_${index}`,
+            itemId: item.itemId,
+            quantity: item.quantity,
+            slot: -1,
+            metadata: null,
+          }));
         }
 
         const allItems = [...inventoryItems, ...equipmentItems];
@@ -931,14 +897,6 @@ export class PlayerDeathSystem extends SystemBase {
         // skipPersist=true: we're inside a DB transaction — independent persist
         // would open a nested transaction that deadlocks on SQLite.
         await inventorySystem.clearInventoryImmediate(playerId, true);
-
-        if (
-          equipmentSystem &&
-          !equipmentSystem.clearEquipmentAndReturn &&
-          equipmentSystem.clearEquipmentImmediate
-        ) {
-          await equipmentSystem.clearEquipmentImmediate(playerId);
-        }
       },
     );
 
@@ -1741,46 +1699,6 @@ export class PlayerDeathSystem extends SystemBase {
       clearTimeout(respawnTimer);
       this.respawnTimers.delete(playerId);
     }
-  }
-
-  /**
-   * Reset death state when death processing fails early (system unavailable).
-   * Prevents players from being permanently stuck in DYING state.
-   * Restores entity health AND PlayerSystem state to avoid stuck-at-0-HP.
-   */
-  private resetDeathState(
-    playerId: string,
-    playerEntity: ReturnType<NonNullable<typeof this.world.entities>["get"]>,
-  ): void {
-    if (playerEntity && "data" in playerEntity) {
-      const typedPlayerEntity = playerEntity as PlayerEntityLike;
-      if (typedPlayerEntity.data) {
-        typedPlayerEntity.data.deathState = DeathState.ALIVE;
-        typedPlayerEntity.data.deathPosition = undefined;
-        typedPlayerEntity.data.respawnTick = undefined;
-      }
-      // Restore entity health so player isn't stuck at 0 HP
-      if ("setHealth" in playerEntity && "getMaxHealth" in playerEntity) {
-        const maxHealth =
-          (playerEntity as PlayerEntityLike).getMaxHealth?.() ?? 100;
-        (playerEntity as PlayerEntityLike).setHealth?.(maxHealth);
-      }
-      if ("markNetworkDirty" in playerEntity) {
-        (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
-      }
-    }
-    this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
-      playerId,
-      isDead: false,
-    });
-    // Restore PlayerSystem state (player.alive and health)
-    this.emitTypedEvent(EventType.PLAYER_RESPAWNED, {
-      playerId,
-      spawnPosition: playerEntity?.position ?? { x: 0, y: 10, z: 0 },
-    });
-    this.logger.warn("Reset death state after failed death processing", {
-      playerId,
-    });
   }
 
   private cleanupPlayerDeath(data: { id: string }): void {

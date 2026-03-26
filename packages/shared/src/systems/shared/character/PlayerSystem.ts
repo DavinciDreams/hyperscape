@@ -85,11 +85,9 @@ export class PlayerSystem extends SystemBase {
   declare world: World;
 
   private players = new Map<string, Player>();
-  private respawnTimers = new Map<string, NodeJS.Timeout>();
   private entityManager?: EntityManager;
   private databaseSystem?: DatabaseSystem;
   private playerLocalRefs = new Map<string, PlayerLocal>(); // Store PlayerLocal references for integration
-  private readonly RESPAWN_TIME = 30000; // 30 seconds per GDD
   private readonly AUTO_SAVE_INTERVAL = 30000; // 30 seconds auto-save
   private saveInterval?: NodeJS.Timeout;
   private _tempVec3 = new THREE.Vector3();
@@ -775,12 +773,7 @@ export class PlayerSystem extends SystemBase {
     // Unregister userId mapping
     PlayerIdMapper.unregister(data.playerId);
 
-    // Clear any respawn timers
-    const timer = this.respawnTimers.get(data.playerId);
-    if (timer) {
-      clearTimeout(timer);
-      this.respawnTimers.delete(data.playerId);
-    }
+    // Note: respawn timers are owned by PlayerDeathSystem
   }
 
   async updateHealth(data: HealthUpdateEvent): Promise<void> {
@@ -849,7 +842,6 @@ export class PlayerSystem extends SystemBase {
     // Mark player as dead in PlayerSystem data
     player.alive = false;
     player.death.deathLocation = { ...player.position };
-    player.death.respawnTime = Date.now() + this.RESPAWN_TIME;
 
     // Clear eat cooldown on death (memory hygiene)
     this.eatDelayManager.clearPlayer(data.playerId);
@@ -1509,10 +1501,6 @@ export class PlayerSystem extends SystemBase {
   }
 
   destroy(): void {
-    // Clear all timers
-    this.respawnTimers.forEach((timer) => clearTimeout(timer));
-    this.respawnTimers.clear();
-
     // Clear auto-save
     if (this.saveInterval) {
       clearInterval(this.saveInterval);
