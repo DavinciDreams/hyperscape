@@ -99,6 +99,7 @@ import {
   updateTerrainVertexLights,
   createTerrainMaterial,
   TerrainUniforms,
+  computeTerrainColorCPU,
 } from "./TerrainShader";
 import { isLamppostLightTextureReady } from "./LamppostLightMask";
 import { isCsmEnabled } from "./Environment";
@@ -240,7 +241,6 @@ export class TerrainSystem extends System {
   private _tempVec2_2 = new THREE.Vector2();
   private _tempVec2_3 = new THREE.Vector2(); // For road distance calculations
   private _tempBox3 = new THREE.Box3();
-  private _tempColor = new THREE.Color(); // For biome color parsing
   private _spectatorFocusPos = new THREE.Vector3();
   private lamppostLightUpdateTimer = 0;
   private lamppostActiveLights: VertexLight[] = [];
@@ -947,8 +947,7 @@ export class TerrainSystem extends System {
       }
     }
 
-    // Set attributes
-    geometry.setAttribute("color", new THREE.BufferAttribute(colorData, 3));
+    // Set attributes (color attribute removed — shader computes colors procedurally)
     geometry.setAttribute(
       "biomeId",
       new THREE.BufferAttribute(new Float32Array(biomeData), 1),
@@ -1030,8 +1029,9 @@ export class TerrainSystem extends System {
 
     this.applyFlatZoneCarve(geometry, tileX, tileZ);
 
-    // Store height data for persistence
-    this.storeHeightData(tileX, tileZ, Array.from(heightData));
+    // Attach heightData to geometry so the caller can store it AFTER the tile
+    // is added to terrainTiles (storeHeightData requires the tile to exist).
+    geometry.userData.heightData = Array.from(heightData);
 
     return geometry;
   }
@@ -1270,6 +1270,14 @@ export class TerrainSystem extends System {
 
     this.terrainTiles.set(key, tile);
     this.activeChunks.add(key);
+
+    // Store height data NOW that the tile is in the map.
+    // createTileGeometryFromWorkerData attaches heightData to geometry.userData
+    // because storeHeightData requires the tile to exist in terrainTiles.
+    if (geometry.userData.heightData) {
+      tile.heightData = geometry.userData.heightData;
+      tile.needsSave = true;
+    }
 
     // Synchronously bake WATER and STEEP_SLOPE collision flags (server-only).
     // Must match generateTile() — worker-generated tiles need the same
@@ -1708,6 +1716,11 @@ export class TerrainSystem extends System {
         );
         this.refreshRoadInfluence();
       }
+
+      // Rebuild grass chunks so road influence is reflected
+      if (this.grassVisualManager) {
+        this.grassVisualManager.rebuildAllChunks();
+      }
     });
 
     // Fallback: If no roads event within 15 seconds, generate tiles anyway
@@ -1955,13 +1968,11 @@ export class TerrainSystem extends System {
         this.CONFIG.WATER_THRESHOLD,
       );
 
-      // Grass quad-tree visual manager — instanced grass blades on finest terrain leaves
       const grassContainer = new THREE.Group();
       grassContainer.name = "QuadTreeGrassContainer";
       if (this.terrainContainer) {
         this.terrainContainer.parent?.add(grassContainer);
       }
-
       this.grassVisualManager = new GrassVisualManager(
         grassContainer,
         this.world,
@@ -1969,9 +1980,11 @@ export class TerrainSystem extends System {
         this.CONFIG.WATER_THRESHOLD,
         (wx: number, wz: number) =>
           this.calculateRoadInfluenceAtVertex(wx, wz, 0, 0),
+        computeTerrainColorCPU,
+        (wx: number, wz: number) => this.computeBiomeWeightsAtPosition(wx, wz),
       );
 
-      // Wire terrain, water, and grass managers to the same quad-tree via composite
+      // Wire terrain, water, grass managers to the same quad-tree via composite
       const composite = new CompositeQuadTreeListener();
       composite.add(this.quadTreeVisualManager);
       composite.add(this.waterVisualManager);
@@ -2583,6 +2596,14 @@ export class TerrainSystem extends System {
     this.terrainTiles.set(key, tile);
     this.activeChunks.add(key);
 
+    // Store height data NOW that the tile is in the map.
+    // createTileGeometry attaches heightData to geometry.userData because
+    // storeHeightData requires the tile to exist in terrainTiles.
+    if (geometry.userData.heightData) {
+      tile.heightData = geometry.userData.heightData;
+      tile.needsSave = true;
+    }
+
     // Synchronously bake WATER and STEEP_SLOPE collision flags (server-only).
     // Must complete before any movement query can reach this tile, otherwise
     // players can walk into water during the gap between tile generation and
@@ -2649,8 +2670,9 @@ export class TerrainSystem extends System {
     // Carve terrain triangles inside building flat zones to avoid overdraw
     this.applyFlatZoneCarve(geometry, tileX, tileZ);
 
-    // Store height data for persistence
-    this.storeHeightData(tileX, tileZ, heightData);
+    // Attach heightData to geometry so the caller can store it AFTER the tile
+    // is added to terrainTiles (storeHeightData requires the tile to exist).
+    geometry.userData.heightData = heightData;
 
     // SERVER: Skip all visual-only attributes (colors, biomeIds, roadInfluences,
     // forestWeights, canyonWeights) and the expensive per-vertex biome/color
@@ -2661,121 +2683,45 @@ export class TerrainSystem extends System {
       return geometry;
     }
 
-    // CLIENT: Full visual attribute generation
-    const colors = new Float32Array(positions.count * 3);
+    // CLIENT: Visual attribute generation (shader computes colors procedurally)
     const biomeIds = new Float32Array(positions.count);
     const roadInfluences = new Float32Array(positions.count);
     const forestWeights = new Float32Array(positions.count);
     const canyonWeights = new Float32Array(positions.count);
 
-    // Verify biome data is loaded - error if not
-    if (Object.keys(BIOMES).length === 0) {
-      throw new Error(
-        "[TerrainSystem] BIOMES data not loaded! DataManager must initialize before terrain generation.",
-      );
-    }
-    const defaultBiomeData = BIOMES[DEFAULT_BIOME];
-    if (!defaultBiomeData) {
-      throw new Error(
-        "[TerrainSystem] Default biome not found in BIOMES data!",
-      );
-    }
-
     for (let i = 0; i < positions.count; i++) {
       const i3 = i * 3;
       const x = positionsArray[i3] + tileX * this.CONFIG.TILE_SIZE;
       const z = positionsArray[i3 + 2] + tileZ * this.CONFIG.TILE_SIZE;
-      const height = positionsArray[i3 + 1]; // Already computed above
 
-      // Get biome influences for smooth color blending
       const { biomeWeightMap, totalWeight } =
         this.computeBiomeWeightsAtPosition(x, z);
-      const normalizedHeight = height / MAX_HEIGHT;
 
-      // Store dominant biome ID for shader
       let dominantBiome = DEFAULT_BIOME as string;
       let dominantWeight = -Infinity;
 
-      // PERFORMANCE: Reuse _tempColor to avoid GC pressure (no new THREE.Color per vertex)
-      // Blend up to 3 biome colors based on influence weights
-      let colorR = 0,
-        colorG = 0,
-        colorB = 0;
-
       if (totalWeight > 0) {
-        const invTotal = 1 / totalWeight;
+        const invW = 1 / totalWeight;
         for (const [type, rawWeight] of biomeWeightMap) {
-          const weight = rawWeight * invTotal;
+          const weight = rawWeight * invW;
           if (weight > dominantWeight) {
             dominantWeight = weight;
             dominantBiome = type;
           }
-
-          const biomeData = BIOMES[type];
-          if (!biomeData) {
-            throw new Error(
-              `[TerrainSystem] Biome "${type}" not found in BIOMES data!`,
-            );
-          }
-          this._tempColor.set(biomeData.color);
-
-          colorR += this._tempColor.r * weight;
-          colorG += this._tempColor.g * weight;
-          colorB += this._tempColor.b * weight;
         }
-      } else {
-        const biomeData = BIOMES[DEFAULT_BIOME];
-        if (!biomeData) {
-          throw new Error(
-            `[TerrainSystem] Default biome not found in BIOMES data!`,
-          );
-        }
-        this._tempColor.set(biomeData.color);
-        colorR = this._tempColor.r;
-        colorG = this._tempColor.g;
-        colorB = this._tempColor.b;
-      }
-      biomeIds[i] = this.getBiomeId(dominantBiome);
-
-      if (totalWeight > 0) {
-        const invW = 1 / totalWeight;
         forestWeights[i] = (biomeWeightMap.get(BiomeType.Forest) || 0) * invW;
         canyonWeights[i] = (biomeWeightMap.get(BiomeType.Canyon) || 0) * invW;
       }
+      biomeIds[i] = this.getBiomeId(dominantBiome);
 
-      // Apply brownish shoreline tint near water level
-      const waterLevel = WATER_LEVEL_NORMALIZED;
-      const shorelineThreshold = SHORELINE_CONFIG.THRESHOLD;
-      if (
-        normalizedHeight > waterLevel &&
-        normalizedHeight < shorelineThreshold
-      ) {
-        const shoreFactor =
-          (1.0 -
-            (normalizedHeight - waterLevel) /
-              (shorelineThreshold - waterLevel)) *
-          SHORELINE_CONFIG.STRENGTH;
-        colorR = colorR + (0.545 - colorR) * shoreFactor;
-        colorG = colorG + (0.451 - colorG) * shoreFactor;
-        colorB = colorB + (0.333 - colorB) * shoreFactor;
-      }
-
-      // Calculate road influence - shader uses this attribute for road coloring
-      // (vertex colors are NOT modified for roads, shader handles this procedurally)
       roadInfluences[i] = this.calculateRoadInfluenceAtVertex(
         x,
         z,
         tileX,
         tileZ,
       );
-
-      // Store biome color (kept for potential fallback/debug rendering)
-      colors[i * 3] = colorR;
-      colors[i * 3 + 1] = colorG;
-      colors[i * 3 + 2] = colorB;
     }
 
-    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute("biomeId", new THREE.BufferAttribute(biomeIds, 1));
     geometry.setAttribute(
       "roadInfluence",
@@ -3402,12 +3348,6 @@ export class TerrainSystem extends System {
 
   private getHeightAtWithoutShore(worldX: number, worldZ: number): number {
     this.ensureNoiseInitialized();
-
-    const flatHeight = this.getFlatZoneHeight(worldX, worldZ);
-    if (flatHeight !== null) {
-      return flatHeight;
-    }
-
     return this.getBaseHeightAt(worldX, worldZ);
   }
 
@@ -3908,62 +3848,6 @@ export class TerrainSystem extends System {
   }
 
   /**
-   * Get terrain color at a world position by sampling the nearest terrain tile vertex.
-   * Used by ProceduralGrassSystem to match grass color to terrain.
-   *
-   * @param worldX - World X coordinate
-   * @param worldZ - World Z coordinate
-   * @returns RGB color (0-1 range) or null if no terrain data available
-   */
-  getTerrainColorAt(
-    worldX: number,
-    worldZ: number,
-  ): { r: number; g: number; b: number } | null {
-    const tileX = this.worldToTerrainTileIndex(worldX);
-    const tileZ = this.worldToTerrainTileIndex(worldZ);
-    const key = `${tileX}_${tileZ}`;
-
-    const tile = this.terrainTiles.get(key);
-    if (!tile?.mesh) {
-      return null;
-    }
-
-    // Get vertex colors from geometry
-    const geometry = tile.mesh.geometry as THREE.BufferGeometry;
-    const colorAttr = geometry.getAttribute("color") as
-      | THREE.BufferAttribute
-      | undefined;
-    if (!colorAttr) {
-      return null;
-    }
-
-    const localX = worldX - tileX * this.CONFIG.TILE_SIZE;
-    const localZ = worldZ - tileZ * this.CONFIG.TILE_SIZE;
-
-    const resolution = this.CONFIG.TILE_RESOLUTION;
-    const vertexX = Math.round(
-      Math.max(0, Math.min(resolution - 1, this.localToGridIndex(localX))),
-    );
-    const vertexZ = Math.round(
-      Math.max(0, Math.min(resolution - 1, this.localToGridIndex(localZ))),
-    );
-    const vertexIndex = vertexZ * resolution + vertexX;
-
-    if (
-      vertexIndex < 0 ||
-      vertexIndex * 3 + 2 >= colorAttr.count * colorAttr.itemSize
-    ) {
-      return null;
-    }
-
-    return {
-      r: colorAttr.getX(vertexIndex),
-      g: colorAttr.getY(vertexIndex),
-      b: colorAttr.getZ(vertexIndex),
-    };
-  }
-
-  /**
    * Register a flat zone and update spatial index.
    * Spatial index uses terrain tiles (100m each) for efficient lookup.
    *
@@ -4076,6 +3960,26 @@ export class TerrainSystem extends System {
           this.queueTerrainTileRegeneration(tile.x, tile.z, "flat_zone");
         }
       }
+    }
+
+    // Invalidate quad-tree visual chunks so they regenerate with flat zone heights.
+    // Without this, chunks generated before the flat zone was registered would
+    // show the procedural height instead of the flat zone height.
+    if (this.quadTreeVisualManager) {
+      this.quadTreeVisualManager.invalidateRegion(
+        zoneMinX,
+        zoneMinZ,
+        zoneMaxX,
+        zoneMaxZ,
+      );
+    }
+    if (this.grassVisualManager) {
+      this.grassVisualManager.invalidateRegion(
+        zoneMinX,
+        zoneMinZ,
+        zoneMaxX,
+        zoneMaxZ,
+      );
     }
   }
 
@@ -4213,6 +4117,18 @@ export class TerrainSystem extends System {
           }
         }
       }
+    }
+
+    // Invalidate quad-tree visual chunks so they regenerate without the flat zone.
+    const minX = zone.centerX - totalRadius;
+    const maxX = zone.centerX + totalRadius;
+    const minZ = zone.centerZ - totalRadius;
+    const maxZ = zone.centerZ + totalRadius;
+    if (this.quadTreeVisualManager) {
+      this.quadTreeVisualManager.invalidateRegion(minX, minZ, maxX, maxZ);
+    }
+    if (this.grassVisualManager) {
+      this.grassVisualManager.invalidateRegion(minX, minZ, maxX, maxZ);
     }
   }
 
@@ -5223,6 +5139,11 @@ export class TerrainSystem extends System {
           materialWithUniforms.terrainUniforms.sunDirection.value
             .copy(env.lightDirection)
             .negate();
+          if (this.grassVisualManager) {
+            this.grassVisualManager.updateLighting(
+              materialWithUniforms.terrainUniforms.sunDirection.value,
+            );
+          }
         }
 
         // Fog texture is the shared fogRenderTarget from FogConfig — no sync needed

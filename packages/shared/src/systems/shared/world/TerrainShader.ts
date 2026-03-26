@@ -85,39 +85,39 @@ const TERRAIN_TEX_DIR = "textures/terrain-biomes";
 const TERRAIN_BIOME_TEXTURES = {
   grass: {
     file: "grass.png",
-    fallback: [0.3, 0.58, 0.15] as [number, number, number],
+    fallback: [0.39, 0.63, 0.2] as [number, number, number],
   },
   dirt: {
     file: "dirt.png",
-    fallback: [0.35, 0.24, 0.12] as [number, number, number],
+    fallback: [0.82, 0.64, 0.34] as [number, number, number],
   },
   cliff: {
     file: "cliff.png",
-    fallback: [0.4, 0.38, 0.32] as [number, number, number],
+    fallback: [0.71, 0.67, 0.6] as [number, number, number],
   },
   desertGrass: {
     file: "desertGrass.png",
-    fallback: [0.82, 0.52, 0.28] as [number, number, number],
+    fallback: [0.51, 0.41, 0.28] as [number, number, number],
   },
   desertDirt: {
     file: "desertDirt.png",
-    fallback: [0.62, 0.28, 0.15] as [number, number, number],
+    fallback: [0.54, 0.42, 0.32] as [number, number, number],
   },
   desertCliff: {
     file: "desertDirt.png",
-    fallback: [0.72, 0.38, 0.18] as [number, number, number],
+    fallback: [0.54, 0.42, 0.32] as [number, number, number],
   },
   snowGrass: {
     file: "snowgrass.png",
-    fallback: [0.78, 0.82, 0.85] as [number, number, number],
+    fallback: [0.79, 0.8, 0.8] as [number, number, number],
   },
   snowDirt: {
     file: "snowdirt.png",
-    fallback: [0.55, 0.55, 0.58] as [number, number, number],
+    fallback: [0.78, 0.82, 0.84] as [number, number, number],
   },
   snowCliff: {
     file: "snowdirt.png",
-    fallback: [0.5, 0.52, 0.56] as [number, number, number],
+    fallback: [0.78, 0.82, 0.84] as [number, number, number],
   },
 };
 
@@ -699,6 +699,256 @@ export function calculateSlope(
 }
 
 // ============================================================================
+// CPU TERRAIN COLOR — mirrors computeTerrainBaseColor() for grass placement
+// ============================================================================
+
+type RGB = { r: number; g: number; b: number };
+
+// GPU shader darkens textures by multiplying with TEX_DARKEN (0.65).
+// CPU dark variants = base × 0.65 to match.
+const TEX_DARKEN_CPU = 0.65;
+const darken = (c: RGB): RGB => ({
+  r: c.r * TEX_DARKEN_CPU,
+  g: c.g * TEX_DARKEN_CPU,
+  b: c.b * TEX_DARKEN_CPU,
+});
+
+// Colors matched to actual texture average colors (sampled from PNGs).
+// Tundra/snow biome — snowgrass.png avg (0.79, 0.80, 0.80)
+const _TUNDRA_GRASS: RGB = { r: 0.79, g: 0.8, b: 0.8 };
+const _TUNDRA_GRASS_DARK: RGB = darken(_TUNDRA_GRASS);
+const _TUNDRA_GRASS_HIGH: RGB = { r: 0.68, g: 0.72, b: 0.78 };
+const _TUNDRA_VARIATION: RGB = { r: 0.6, g: 0.64, b: 0.7 };
+// snowdirt.png avg (0.78, 0.82, 0.84)
+const _TUNDRA_DIRT: RGB = { r: 0.78, g: 0.82, b: 0.84 };
+const _TUNDRA_DIRT_DARK: RGB = darken(_TUNDRA_DIRT);
+// snowdirt.png used for cliff too
+const _TUNDRA_CLIFF: RGB = { r: 0.78, g: 0.82, b: 0.84 };
+const _TUNDRA_CLIFF_DARK: RGB = darken(_TUNDRA_CLIFF);
+
+// Forest biome — grass.png avg (0.39, 0.63, 0.20)
+const _FOREST_GRASS: RGB = { r: 0.39, g: 0.63, b: 0.2 };
+const _FOREST_GRASS_DARK: RGB = darken(_FOREST_GRASS);
+const _FOREST_GRASS_HIGH: RGB = { r: 0.24, g: 0.45, b: 0.18 };
+const _FOREST_VARIATION: RGB = { r: 0.15, g: 0.35, b: 0.1 };
+// dirt.png avg (0.82, 0.64, 0.34)
+const _FOREST_DIRT: RGB = { r: 0.82, g: 0.64, b: 0.34 };
+const _FOREST_DIRT_DARK: RGB = darken(_FOREST_DIRT);
+// cliff.png avg (0.71, 0.67, 0.60)
+const _FOREST_CLIFF: RGB = { r: 0.71, g: 0.67, b: 0.6 };
+const _FOREST_CLIFF_DARK: RGB = darken(_FOREST_CLIFF);
+
+// Canyon/desert biome — desertGrass.png avg (0.51, 0.41, 0.28)
+const _CANYON_SAND: RGB = { r: 0.51, g: 0.41, b: 0.28 };
+const _CANYON_SAND_DARK: RGB = darken(_CANYON_SAND);
+const _CANYON_SAND_HIGH: RGB = { r: 0.42, g: 0.34, b: 0.22 };
+const _CANYON_VARIATION: RGB = { r: 0.45, g: 0.34, b: 0.2 };
+// desertDirt.png avg (0.54, 0.42, 0.32)
+const _CANYON_ROCK: RGB = { r: 0.54, g: 0.42, b: 0.32 };
+const _CANYON_ROCK_DARK: RGB = darken(_CANYON_ROCK);
+// desertDirt.png used for cliff too
+const _CANYON_CLIFF: RGB = { r: 0.54, g: 0.42, b: 0.32 };
+const _CANYON_CLIFF_DARK: RGB = darken(_CANYON_CLIFF);
+
+const _CLIFF_TINT: RGB = { r: 0.28, g: 0.3, b: 0.36 };
+const _SAND_YELLOW: RGB = { r: 0.7, g: 0.6, b: 0.38 };
+const _DIRT_DARK_CPU: RGB = { r: 0.22, g: 0.15, b: 0.08 };
+const _MUD_BROWN: RGB = { r: 0.18, g: 0.12, b: 0.08 };
+const _WATER_EDGE: RGB = { r: 0.08, g: 0.06, b: 0.04 };
+
+function mixRGB(a: RGB, b: RGB, t: number): RGB {
+  return {
+    r: a.r + (b.r - a.r) * t,
+    g: a.g + (b.g - a.g) * t,
+    b: a.b + (b.b - a.b) * t,
+  };
+}
+
+function blendBiome(
+  tundra: RGB,
+  forest: RGB,
+  canyon: RGB,
+  tW: number,
+  fW: number,
+  dW: number,
+): RGB {
+  return {
+    r: tundra.r * tW + forest.r * fW + canyon.r * dW,
+    g: tundra.g * tW + forest.g * fW + canyon.g * dW,
+    b: tundra.b * tW + forest.b * fW + canyon.b * dW,
+  };
+}
+
+function sampleNoiseCPU(worldX: number, worldZ: number, scale: number): number {
+  if (!cachedPerm) cachedPerm = createPermutation(12345);
+  const u = worldX * scale;
+  const v = worldZ * scale;
+  const wu = u - Math.floor(u);
+  const wv = v - Math.floor(v);
+  return (seamlessFbm(wu, wv, cachedPerm, 4) + 1) * 0.5;
+}
+
+/**
+ * CPU mirror of the GPU `computeTerrainBaseColor()`.
+ * Returns the procedural terrain color AND a grassWeight (0-1) indicating
+ * how much of the surface is "grass texture" vs dirt/cliff/sand/shoreline.
+ */
+export function computeTerrainColorCPU(
+  worldX: number,
+  worldZ: number,
+  height: number,
+  slope: number,
+  forestW: number,
+  canyonW: number,
+): { r: number; g: number; b: number; grassWeight: number } {
+  const fW = forestW;
+  const dW = canyonW;
+  const tW = 1 - fW - dW;
+
+  const noiseVal = sampleNoiseCPU(
+    worldX,
+    worldZ,
+    TERRAIN_SHADER_CONSTANTS.NOISE_SCALE,
+  );
+  const noiseVal2 = Math.sin(noiseVal * 6.28) * 0.3 + 0.5;
+  const distortN = sampleNoiseCPU(
+    worldX,
+    worldZ,
+    TERRAIN_SHADER_CONSTANTS.DISTORT_NOISE_SCALE,
+  );
+  const variationN = sampleNoiseCPU(
+    worldX,
+    worldZ,
+    TERRAIN_SHADER_CONSTANTS.VARIATION_NOISE_SCALE,
+  );
+
+  const distortedNY =
+    1 -
+    slope +
+    (distortN - 0.5) * TERRAIN_SHADER_CONSTANTS.ROCK_DISTORT_STRENGTH;
+  const dSlope = 1 - distortedNY;
+  const dHeight =
+    height +
+    (distortN - 0.5) * TERRAIN_SHADER_CONSTANTS.HEIGHT_DISTORT_STRENGTH;
+
+  // Biome-blended grass
+  const grassVar = smoothstepCPU(0.4, 0.6, noiseVal2);
+  const tundraGrass = mixRGB(_TUNDRA_GRASS, _TUNDRA_GRASS_DARK, grassVar);
+  const forestGrass = mixRGB(_FOREST_GRASS, _FOREST_GRASS_DARK, grassVar);
+  const canyonGrass = mixRGB(_CANYON_SAND, _CANYON_SAND_DARK, grassVar);
+  let c = blendBiome(tundraGrass, forestGrass, canyonGrass, tW, fW, dW);
+
+  // Height-based gradient
+  const heightGrad = smoothstepCPU(25, 55, height) * 0.3;
+  const grassHigh = blendBiome(
+    _TUNDRA_GRASS_HIGH,
+    _FOREST_GRASS_HIGH,
+    _CANYON_SAND_HIGH,
+    tW,
+    fW,
+    dW,
+  );
+  c = mixRGB(c, grassHigh, heightGrad);
+
+  // Low-frequency variation
+  const gVar = Math.max(0, Math.min(1, Math.pow(variationN + 0.3, 5)));
+  const varColor = blendBiome(
+    _TUNDRA_VARIATION,
+    _FOREST_VARIATION,
+    _CANYON_VARIATION,
+    tW,
+    fW,
+    dW,
+  );
+  c = mixRGB(c, varColor, gVar * 0.25);
+
+  // Biome-blended dirt
+  const dirtVar = smoothstepCPU(0.3, 0.7, noiseVal2);
+  const dirtColor = blendBiome(
+    mixRGB(_TUNDRA_DIRT, _TUNDRA_DIRT_DARK, dirtVar),
+    mixRGB(_FOREST_DIRT, _FOREST_DIRT_DARK, dirtVar),
+    mixRGB(_CANYON_ROCK, _CANYON_ROCK_DARK, dirtVar),
+    tW,
+    fW,
+    dW,
+  );
+
+  // Biome-blended cliff
+  const cliffVar = smoothstepCPU(0.3, 0.7, noiseVal);
+  let cliffColor = blendBiome(
+    mixRGB(_TUNDRA_CLIFF, _TUNDRA_CLIFF_DARK, cliffVar),
+    mixRGB(_FOREST_CLIFF, _FOREST_CLIFF_DARK, cliffVar),
+    mixRGB(_CANYON_CLIFF, _CANYON_CLIFF_DARK, cliffVar),
+    tW,
+    fW,
+    dW,
+  );
+  const rockTexV = Math.pow(distortN, 0.5) * 0.3;
+  cliffColor = mixRGB(cliffColor, _CLIFF_TINT, rockTexV);
+
+  // Track grass weight: starts at 1, reduced by each non-grass layer
+  let grassWeight = 1.0;
+
+  // Dirt patches on flat areas
+  const nDirtF =
+    smoothstepCPU(
+      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05,
+      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15,
+      noiseVal,
+    ) * smoothstepCPU(0.3, 0.05, dSlope);
+  c = mixRGB(c, dirtColor, nDirtF);
+  grassWeight -= nDirtF;
+
+  // Dirt on moderate slopes
+  const dirtSlopeF =
+    smoothstepCPU(0.15, 0.4, dSlope) * smoothstepCPU(0.6, 0.3, dSlope) * 0.6;
+  c = mixRGB(c, dirtColor, dirtSlopeF);
+  grassWeight -= dirtSlopeF;
+
+  // Cliff on steep slopes
+  const cliffF = smoothstepCPU(0.3, 0.55, dSlope);
+  c = mixRGB(c, cliffColor, cliffF);
+  grassWeight -= cliffF;
+
+  // Sand near water
+  const sandBlend =
+    smoothstepCPU(18, 12, dHeight) * smoothstepCPU(0.25, 0.0, slope);
+  const sandStr = 0.6 + (0.9 - 0.6) * dW;
+  const sandF = sandBlend * sandStr;
+  c = mixRGB(c, _SAND_YELLOW, sandF);
+  grassWeight -= sandF;
+
+  // Shoreline transitions
+  const shore1 = smoothstepCPU(22, 14, dHeight) * 0.4;
+  c = mixRGB(c, _DIRT_DARK_CPU, shore1);
+  grassWeight -= shore1;
+
+  const shore2 = smoothstepCPU(15, 10, dHeight) * 0.7;
+  c = mixRGB(c, _MUD_BROWN, shore2);
+  grassWeight -= shore2;
+
+  const shore3 = smoothstepCPU(11, 7, dHeight) * 0.9;
+  c = mixRGB(c, _WATER_EDGE, shore3);
+  grassWeight -= shore3;
+
+  // Saturation boost
+  const luma = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
+  const sat = TERRAIN_SHADER_CONSTANTS.SATURATION_BOOST;
+  c = {
+    r: luma + (c.r - luma) * sat,
+    g: luma + (c.g - luma) * sat,
+    b: luma + (c.b - luma) * sat,
+  };
+
+  return {
+    r: c.r,
+    g: c.g,
+    b: c.b,
+    grassWeight: Math.max(0, Math.min(1, grassWeight)),
+  };
+}
+
+// ============================================================================
 // TERRAIN MATERIAL - OSRS Style (No Textures)
 // ============================================================================
 
@@ -1071,11 +1321,48 @@ export function createTerrainMaterial(): THREE.Material & {
     ),
   );
 
-  // === ROAD OVERLAY (disabled) ===
-  // const roadInfluenceAttr = attribute("roadInfluence", "float");
-  // const roadMaskState = getRoadInfluenceTextureState();
-  // ... road rendering commented out for now
-  const baseWithRoads = variedColor;
+  // === ROAD OVERLAY ===
+  const roadInfluenceAttr = attribute("roadInfluence", "float");
+  const roadMaskState = getRoadInfluenceTextureState();
+  const roadHalfWorld = roadMaskState.uWorldSize.mul(0.5);
+  const roadUvX = worldPos.x
+    .sub(roadMaskState.uCenterX)
+    .add(roadHalfWorld)
+    .div(roadMaskState.uWorldSize);
+  const roadUvZ = worldPos.z
+    .sub(roadMaskState.uCenterZ)
+    .add(roadHalfWorld)
+    .div(roadMaskState.uWorldSize);
+  const roadUV = vec2(roadUvX.clamp(0.001, 0.999), roadUvZ.clamp(0.001, 0.999));
+  const roadMask = roadMaskState.textureNode.sample(roadUV).r;
+  const hasRoadMask = smoothstep(
+    float(1.0),
+    float(2.0),
+    roadMaskState.uWorldSize,
+  );
+  const dx = abs(worldPos.x.sub(roadMaskState.uCenterX));
+  const dz = abs(worldPos.z.sub(roadMaskState.uCenterZ));
+  const insideMask = step(dx, roadHalfWorld).mul(step(dz, roadHalfWorld));
+  const useMask = hasRoadMask.mul(insideMask);
+  const roadInfluenceRaw = mix(roadInfluenceAttr, roadMask, useMask);
+  const roadInfluence = smoothstep(float(0.0), float(1.0), roadInfluenceRaw);
+
+  const roadNoiseVar = mul(noiseValue2, float(0.5));
+  const roadBaseColor = mix(DIRT_BROWN, DIRT_DARK, roadNoiseVar);
+
+  const stoneNoise = smoothstep(float(0.4), float(0.7), fineNoise);
+  const stoneColor = mix(ROCK_GRAY, ROCK_DARK, float(0.5));
+
+  const roadDetailColor = mix(
+    roadBaseColor,
+    stoneColor,
+    mul(stoneNoise, float(0.6)),
+  );
+
+  const roadCenterDarken = mul(roadInfluence, float(0.08));
+  const compactedRoadColor = sub(roadDetailColor, vec3(roadCenterDarken));
+
+  const baseWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
 
   // ============================================================================
   // HALF-LAMBERT ANIME SHADE (cool shadow tint — Genshin-style)
