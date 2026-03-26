@@ -20,10 +20,10 @@ import {
 } from "@dnd-kit/core";
 import {
   useDragStore,
-  calculateCursorTooltipPosition,
   TOOLTIP_SIZE_ESTIMATES,
   useThemeStore,
   useMobileLayout,
+  CursorTooltip,
 } from "@/ui";
 import {
   getInteractiveTileStyle,
@@ -683,28 +683,13 @@ function renderItemHoverTooltip(
       (bonuses.defense !== undefined && bonuses.defense !== 0) ||
       (bonuses.strength !== undefined && bonuses.strength !== 0));
 
-  // Use shared tooltip positioning for consistent edge detection
-  // Offset of 4px keeps tooltip close to cursor while avoiding overlap
-  const { left, top } = calculateCursorTooltipPosition(
-    itemHover.position,
-    TOOLTIP_SIZE_ESTIMATES.medium, // Use shared size estimate
-    4, // cursorOffset - keep tooltip close to cursor
-    8, // margin from screen edges
-  );
-
-  return createPortal(
-    <div
-      className="pointer-events-none"
+  return (
+    <CursorTooltip
+      visible={true}
+      position={itemHover.position}
+      estimatedSize={TOOLTIP_SIZE_ESTIMATES.medium}
       style={{
-        position: "fixed",
-        left,
-        top,
         zIndex: zIndex.tooltip,
-        background: `linear-gradient(135deg, ${theme.colors.background.primary} 0%, ${theme.colors.background.secondary} 100%)`,
-        border: `2px solid ${theme.colors.accent.secondary}80`,
-        borderRadius: "4px",
-        padding: "8px 12px",
-        boxShadow: theme.shadows.lg,
         minWidth: "120px",
         maxWidth: "220px",
       }}
@@ -761,8 +746,7 @@ function renderItemHoverTooltip(
           )}
         </div>
       )}
-    </div>,
-    document.body,
+    </CursorTooltip>
   );
 }
 

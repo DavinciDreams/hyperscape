@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   useDroppable,
   useDragStore,
   useThemeStore,
   useMobileLayout,
 } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
-import { MOBILE_EQUIPMENT } from "../../constants";
+import {
+  getInteractiveTileStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { useContextMenuState } from "../../hooks";
 import {
   EquipmentSlotName,
@@ -28,8 +31,6 @@ import {
   CapeIcon,
   AmuletIcon,
   RingIcon,
-  StatsIcon,
-  DeathIcon,
 } from "./equipment/EquipmentIcons";
 import {
   EquipmentTooltip,
@@ -37,6 +38,7 @@ import {
   type EquipmentHoverState,
 } from "./equipment/EquipmentTooltip";
 import { ItemIcon } from "../../ui/components/ItemIcon";
+import { EquipmentPaperdollPortrait } from "./equipment/EquipmentPaperdollPortrait";
 
 interface EquipmentPanelProps {
   equipment: PlayerEquipmentItems | null;
@@ -44,43 +46,6 @@ interface EquipmentPanelProps {
 }
 
 type EquipmentSlot = EquipmentSlotData;
-
-// ============================================================================
-// Utility Button Component
-// ============================================================================
-
-interface UtilityButtonProps {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-}
-
-function UtilityButton({
-  icon,
-  label,
-  onClick,
-  disabled,
-}: UtilityButtonProps & { compact?: boolean }) {
-  const theme = useThemeStore((s) => s.theme);
-
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="flex items-center justify-center rounded transition-all duration-150 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-2"
-      title={label}
-      style={{
-        background: `${theme.colors.background.tertiary}80`,
-        border: `1px solid ${theme.colors.border.default}60`,
-      }}
-    >
-      <div className="w-5 h-5" style={{ color: theme.colors.accent.primary }}>
-        {icon}
-      </div>
-    </button>
-  );
-}
 
 interface DroppableEquipmentSlotProps {
   slot: EquipmentSlot;
@@ -104,6 +69,7 @@ function DroppableEquipmentSlot({
 }: DroppableEquipmentSlotProps) {
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
+  const [isHovered, setIsHovered] = useState(false);
   const { isOver, setNodeRef } = useDroppable({
     id: `equipment-${slot.key}`,
     data: { slot: slot.key },
@@ -139,10 +105,24 @@ function DroppableEquipmentSlot({
     isDragging && dragItem?.id?.toString().startsWith("inventory-");
 
   const isEmpty = !slot.item;
+  const slotTitle = slot.item
+    ? `${slot.item.name} (${slot.label})`
+    : `${slot.label} (empty)`;
+  const invalidDrop = isOver && !isValidDrop;
+  const validDrop = isOver && isValidDrop;
+  const baseTileStyle = getInteractiveTileStyle(theme, {
+    hovered: isHovered && !validDrop && !invalidDrop,
+    dropTarget: validDrop,
+    radius: 2,
+    accentColor: theme.colors.accent.primary,
+  });
 
   return (
     <button
       ref={setNodeRef}
+      type="button"
+      data-equipment-slot={slot.key}
+      data-slot-empty={isEmpty ? "true" : "false"}
       aria-label={
         slot.item
           ? `${slot.item.name} equipped in ${slot.label} slot`
@@ -150,16 +130,17 @@ function DroppableEquipmentSlot({
       }
       onClick={() => onSlotClick(slot)}
       onMouseEnter={(e) => {
-        if (slot.item) {
-          onHoverStart(slot, { x: e.clientX, y: e.clientY });
-        }
+        setIsHovered(true);
+        onHoverStart(slot, { x: e.clientX, y: e.clientY });
       }}
       onMouseMove={(e) => {
-        if (slot.item) {
-          onHoverMove({ x: e.clientX, y: e.clientY });
-        }
+        onHoverMove({ x: e.clientX, y: e.clientY });
       }}
-      onMouseLeave={() => onHoverEnd()}
+      onBlur={() => setIsHovered(false)}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        onHoverEnd();
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -207,133 +188,148 @@ function DroppableEquipmentSlot({
         });
         window.dispatchEvent(evt);
       }}
-      className="w-full h-full rounded transition-all duration-150 cursor-pointer group relative"
+      className="w-full h-full rounded-[2px] transition-all duration-150 cursor-pointer group relative overflow-hidden focus-visible:outline-none"
       style={{
-        // Embossed style matching inventory - aligned with theme
-        background:
-          isOver && isValidDrop
-            ? "rgba(242, 208, 138, 0.15)"
-            : isOver && !isValidDrop
-              ? "rgba(220, 80, 80, 0.15)"
-              : isDraggingInventoryItem && isValidDrop
-                ? "rgba(242, 208, 138, 0.08)"
-                : isEmpty
-                  ? "rgba(16, 16, 18, 0.95)"
-                  : "rgba(20, 20, 22, 0.95)",
-        borderWidth: "1px",
-        borderStyle: isOver
-          ? "solid"
-          : isDraggingInventoryItem && isValidDrop
-            ? "dashed"
-            : "solid",
-        borderColor:
-          isOver && isValidDrop
-            ? "rgba(100, 180, 100, 0.7)"
-            : isOver && !isValidDrop
-              ? "rgba(180, 80, 80, 0.7)"
-              : isDraggingInventoryItem && isValidDrop
-                ? "rgba(180, 160, 100, 0.5)"
-                : "rgba(8, 8, 10, 0.6)",
-        // Embossed shadows: dark on top-left, subtle light on bottom-right
-        boxShadow:
-          isOver && isValidDrop
-            ? "inset 0 0 8px rgba(100, 180, 100, 0.3)"
-            : isOver && !isValidDrop
-              ? "inset 0 0 8px rgba(180, 80, 80, 0.3)"
+        ...baseTileStyle,
+        background: invalidDrop
+          ? `linear-gradient(180deg, ${theme.colors.state.danger}20 0%, rgba(22, 26, 31, 0.4) 100%)`
+          : validDrop
+            ? baseTileStyle.background
+            : isDraggingInventoryItem && isValidDrop
+              ? `linear-gradient(180deg, ${theme.colors.accent.primary}14 0%, rgba(22, 26, 31, 0.4) 100%)`
               : isEmpty
-                ? "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(40, 40, 45, 0.15)"
-                : "inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 2px rgba(50, 50, 55, 0.12)",
+                ? "linear-gradient(180deg, rgba(255,255,255,0.022) 0%, rgba(22,26,31,0.25) 100%)"
+                : "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(26,30,36,0.25) 100%)",
+        zIndex: 10,
+        borderWidth: "1px",
+        borderStyle:
+          validDrop || invalidDrop
+            ? "solid"
+            : isDraggingInventoryItem && isValidDrop
+              ? "dashed"
+              : "solid",
+        borderColor: invalidDrop
+          ? `${theme.colors.state.danger}99`
+          : validDrop
+            ? theme.colors.border.hover
+            : isDraggingInventoryItem && isValidDrop
+              ? `${theme.colors.accent.primary}7a`
+              : isEmpty
+                ? `${theme.colors.border.default}55`
+                : `${theme.colors.border.default}80`,
+        boxShadow: invalidDrop
+          ? `inset 0 0 8px ${theme.colors.state.danger}26`
+          : validDrop
+            ? `0 0 10px ${theme.colors.accent.primary}12, inset 0 1px 0 rgba(255,255,255,0.05)`
+            : isEmpty
+              ? "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -8px 12px rgba(0,0,0,0.14)"
+              : "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -10px 14px rgba(0,0,0,0.16)",
+        outline: "none",
       }}
     >
-      {/* Slot Label - subtle, positioned at top */}
       <div
-        className={`absolute left-0 right-0 text-center ${shouldUseMobileUI ? "top-1" : "top-1.5"}`}
+        className="absolute inset-0"
         style={{
-          fontSize: shouldUseMobileUI ? "8px" : "10px",
-          fontWeight: 600,
-          color: "rgba(200, 180, 140, 0.7)",
-          textShadow: "0 1px 2px rgba(0, 0, 0, 0.9)",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 26%, rgba(0,0,0,0.1) 100%)",
         }}
-      >
-        {slot.label}
-      </div>
+      />
 
-      {/* Slot Content */}
-      <div
-        className={`flex flex-col items-center justify-center h-full ${shouldUseMobileUI ? "pt-2.5" : "pt-3"}`}
-      >
-        {isEmpty ? (
-          <div
-            className="transition-all duration-150 group-hover:scale-105 group-hover:opacity-40"
-            style={{
-              width: shouldUseMobileUI ? "20px" : "26px",
-              height: shouldUseMobileUI ? "20px" : "26px",
-              color: "rgba(180, 160, 120, 0.3)",
-            }}
-          >
-            {slot.icon}
-          </div>
-        ) : (
-          <>
+      {isEmpty && (
+        <div
+          className="absolute inset-x-[14%] top-[14%] bottom-[14%] rounded-[2px] pointer-events-none"
+          style={{
+            border: `1px solid ${theme.colors.border.default}2e`,
+            opacity: 0.3,
+          }}
+        />
+      )}
+
+      <div className="flex h-full w-full items-center justify-center">
+        <div className="flex items-center justify-center">
+          {isEmpty ? (
+            <div
+              className="transition-all duration-150 group-hover:scale-105 group-hover:opacity-40"
+              style={{
+                width: shouldUseMobileUI ? "20px" : "24px",
+                height: shouldUseMobileUI ? "20px" : "24px",
+                color: `${theme.colors.text.muted}aa`,
+              }}
+            >
+              {slot.icon}
+            </div>
+          ) : (
             <div
               className="transition-transform duration-150 group-hover:scale-105"
               style={{
-                width: shouldUseMobileUI ? "18px" : "24px",
-                height: shouldUseMobileUI ? "18px" : "24px",
-                filter: "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7))",
+                width: shouldUseMobileUI ? "24px" : "28px",
+                height: shouldUseMobileUI ? "24px" : "28px",
+                filter: "drop-shadow(0 3px 6px rgba(0, 0, 0, 0.55))",
               }}
             >
               <ItemIcon
                 itemId={slot.item!.id}
-                size={shouldUseMobileUI ? 18 : 24}
+                size={shouldUseMobileUI ? 24 : 28}
               />
             </div>
-            <div
-              className="text-center px-0.5 mt-0.5"
-              style={{
-                fontSize: shouldUseMobileUI ? "8px" : "9px",
-                color: "rgba(220, 200, 160, 0.9)",
-                fontWeight: 500,
-                lineHeight: "1.1",
-                maxWidth: "100%",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
-              }}
-            >
-              {slot.item!.name}
-            </div>
-            {(slot.item!.quantity ?? 1) > 1 && (
-              <div
-                className="absolute bottom-0.5 right-1 font-bold"
-                style={{
-                  fontSize: shouldUseMobileUI ? "8px" : "9px",
-                  color: "#d4b87a",
-                  textShadow: "0 1px 2px rgba(0, 0, 0, 0.9)",
-                }}
-              >
-                {slot.item!.quantity ?? 1}
-              </div>
-            )}
-          </>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Hover Glow Effect */}
       {!isEmpty && (
         <div
-          className="absolute inset-0 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none"
+          className="absolute inset-0 rounded-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none"
           style={{
             background: `radial-gradient(circle at center, ${theme.colors.accent.primary}15 0%, transparent 70%)`,
           }}
         />
       )}
+
+      {(slot.item?.quantity ?? 1) > 1 && (
+        <div
+          className="absolute bottom-1.5 right-1.5 min-w-[18px] rounded-full px-1 text-center font-bold"
+          style={{
+            fontSize: shouldUseMobileUI ? "8px" : "9px",
+            color: theme.colors.text.primary,
+            background: "rgba(17, 20, 25, 0.86)",
+            border: `1px solid ${theme.colors.border.hover}`,
+            textShadow: "0 1px 2px rgba(0, 0, 0, 0.9)",
+            lineHeight: shouldUseMobileUI ? "14px" : "15px",
+          }}
+        >
+          {slot.item!.quantity ?? 1}
+        </div>
+      )}
+
+      <div
+        className="absolute inset-[2px] rounded-[2px] pointer-events-none opacity-0 group-focus-visible:opacity-100 transition-opacity duration-150"
+        style={{
+          border: `1px solid ${theme.colors.accent.primary}aa`,
+          boxShadow: `0 0 0 1px ${theme.colors.accent.primary}22`,
+        }}
+      />
     </button>
   );
 }
+
+interface PaperdollSlotPlacement {
+  area: string;
+  key: string;
+}
+
+const PAPERDOLL_PLACEMENTS: PaperdollSlotPlacement[] = [
+  { area: "ammo", key: EquipmentSlotName.ARROWS },
+  { area: "cape", key: EquipmentSlotName.CAPE },
+  { area: "head", key: EquipmentSlotName.HELMET },
+  { area: "amulet", key: EquipmentSlotName.AMULET },
+  { area: "body", key: EquipmentSlotName.BODY },
+  { area: "ring", key: EquipmentSlotName.RING },
+  { area: "legs", key: EquipmentSlotName.LEGS },
+  { area: "gloves", key: EquipmentSlotName.GLOVES },
+  { area: "boots", key: EquipmentSlotName.BOOTS },
+  { area: "weapon", key: EquipmentSlotName.WEAPON },
+  { area: "shield", key: EquipmentSlotName.SHIELD },
+];
 
 export const EquipmentPanel = React.memo(function EquipmentPanel({
   equipment,
@@ -542,12 +538,30 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   // Helper to find slot by key
   const getSlot = (key: string) => slots.find((s) => s.key === key) || null;
 
-  // Unified slot cell renderer for both mobile and desktop
-  const renderSlotCell = (slotName: string, isMobile: boolean) => (
+  const equipmentSignature = useMemo(
+    () =>
+      slots
+        .map((slot) =>
+          slot.item
+            ? `${slot.key}:${slot.item.id}:${slot.item.quantity ?? 1}`
+            : `${slot.key}:empty`,
+        )
+        .join("|"),
+    [slots],
+  );
+
+  const renderSlotCell = (
+    slotName: string,
+    isMobile: boolean,
+    slotSize: number,
+    area?: string,
+  ) => (
     <div
+      key={slotName}
       className={isMobile ? undefined : "w-full h-full"}
       style={{
-        height: isMobile ? MOBILE_EQUIPMENT.slotHeight : undefined,
+        gridArea: area,
+        height: isMobile ? slotSize : undefined,
         containerType: "size",
       }}
     >
@@ -562,46 +576,58 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
     </div>
   );
 
-  // OSRS Paperdoll Grid Layout - 3 columns, 4 rows
-  // Both mobile and desktop share the same slot order, only styling differs
-  const renderEquipmentGrid = (isMobile: boolean) => (
-    <div
-      className={isMobile ? "grid" : "relative grid h-full"}
-      style={
-        isMobile
-          ? {
-              gridTemplateColumns: `repeat(${MOBILE_EQUIPMENT.columns}, 1fr)`,
-              gap: `${MOBILE_EQUIPMENT.gap}px`,
-              padding: `${MOBILE_EQUIPMENT.padding}px`,
-            }
-          : {
-              gridTemplateColumns: "1fr 1.2fr 1fr",
-              gridTemplateRows: "1fr 1.2fr 1fr 1fr",
-              gap: `${theme.spacing.xs}px`,
-            }
-      }
-    >
-      {/* Row 1: Cape, Head, Amulet */}
-      {renderSlotCell(EquipmentSlotName.CAPE, isMobile)}
-      {renderSlotCell(EquipmentSlotName.HELMET, isMobile)}
-      {renderSlotCell(EquipmentSlotName.AMULET, isMobile)}
+  const renderEquipmentGrid = (isMobile: boolean) => {
+    const slotWidth = isMobile ? 34 : 38;
+    const slotHeight = isMobile ? 32 : 36;
+    const gap = isMobile ? 5 : 8;
+    const padding = isMobile ? 2 : 3;
 
-      {/* Row 2: Weapon, Body, Shield */}
-      {renderSlotCell(EquipmentSlotName.WEAPON, isMobile)}
-      {renderSlotCell(EquipmentSlotName.BODY, isMobile)}
-      {renderSlotCell(EquipmentSlotName.SHIELD, isMobile)}
+    return (
+      <div
+        data-equipment-grid="paperdoll"
+        className="grid h-full"
+        style={{
+          gridTemplateColumns: `${slotWidth}px ${slotWidth}px 1fr ${slotWidth}px ${slotWidth}px`,
+          gridTemplateRows: `repeat(5, ${slotHeight}px)`,
+          gridTemplateAreas: `
+          "head . . . cape"
+          "body . . . amulet"
+          "legs . . . ring"
+          "boots . . . gloves"
+          "ammo weapon . shield ."
+        `,
+          gap,
+          padding,
+          alignItems: "stretch",
+          justifyItems: "stretch",
+        }}
+      >
+        <div
+          data-equipment-center="portrait"
+          style={{
+            gridColumn: "1 / -1",
+            gridRow: "1 / -1",
+            minWidth: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: 0,
+          }}
+        >
+          <EquipmentPaperdollPortrait
+            world={world}
+            equipment={equipment}
+            equipmentSignature={equipmentSignature}
+            compact={isMobile}
+            className="h-full w-full"
+          />
+        </div>
 
-      {/* Row 3: Ring, Legs, Gloves */}
-      {renderSlotCell(EquipmentSlotName.RING, isMobile)}
-      {renderSlotCell(EquipmentSlotName.LEGS, isMobile)}
-      {renderSlotCell(EquipmentSlotName.GLOVES, isMobile)}
-
-      {/* Row 4: Boots, empty, Ammo */}
-      {renderSlotCell(EquipmentSlotName.BOOTS, isMobile)}
-      <div />
-      {renderSlotCell(EquipmentSlotName.ARROWS, isMobile)}
-    </div>
-  );
+        {PAPERDOLL_PLACEMENTS.map((placement) =>
+          renderSlotCell(placement.key, isMobile, slotHeight, placement.area),
+        )}
+      </div>
+    );
+  };
 
   return (
     <>
@@ -609,97 +635,90 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         className="flex flex-col h-full overflow-hidden"
         style={{
           ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
-          padding: shouldUseMobileUI ? "6px" : `${theme.spacing.xs}px`,
-          gap: shouldUseMobileUI ? "6px" : `${theme.spacing.xs}px`,
+          padding: shouldUseMobileUI ? "3px" : "4px",
+          gap: shouldUseMobileUI ? "3px" : "4px",
           border: "none",
           borderRadius: 0,
           boxShadow: "none",
         }}
       >
-        {/* Equipment Grid Container */}
         <div
           className="flex-1 relative overflow-hidden"
           style={{
-            background: `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-            border: `1px solid ${theme.colors.border.default}66`,
-            borderRadius: `${theme.borderRadius.md}px`,
-            padding: shouldUseMobileUI ? 0 : `${theme.spacing.sm}px`,
-            // Embossed container
-            boxShadow: `${theme.shadows.sm}, inset 2px 2px 4px rgba(0, 0, 0, 0.4), inset -1px -1px 3px rgba(60, 60, 68, 0.1)`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: 4,
+            }),
+            padding: shouldUseMobileUI ? 0 : "3px",
+            boxShadow:
+              "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -18px 26px rgba(0,0,0,0.18)",
           }}
         >
           {renderEquipmentGrid(shouldUseMobileUI)}
         </div>
 
-        {/* Bottom section: Utility Buttons */}
-        {shouldUseMobileUI ? (
-          <div
-            className="flex items-center justify-center gap-2 px-3 py-1.5"
+        <div
+          className="grid grid-cols-2 gap-1.5 px-0.5"
+          style={{
+            minHeight: shouldUseMobileUI ? 24 : 28,
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleOpenStats}
+            className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 focus-visible:outline-none"
             style={{
-              background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-              borderRadius: `${theme.borderRadius.sm}px`,
-              border: `1px solid ${theme.colors.border.default}66`,
-              boxShadow: `${theme.shadows.sm}, inset 1px 1px 3px rgba(0, 0, 0, 0.3)`,
+              height: shouldUseMobileUI ? 24 : 28,
+              ...getInteractiveTileStyle(theme, { radius: 2 }),
+              fontSize: shouldUseMobileUI ? "9px" : "10px",
+              fontWeight: 600,
+              letterSpacing: "0.04em",
+              color: theme.colors.accent.primary,
+              textTransform: "uppercase",
             }}
           >
-            <UtilityButton
-              icon={<StatsIcon className="w-full h-full" />}
-              label="Stats"
-              onClick={handleOpenStats}
-            />
-            <UtilityButton
-              icon={<DeathIcon className="w-full h-full" />}
-              label="Death"
-              onClick={handleOpenDeath}
-            />
-          </div>
-        ) : (
-          <>
-            {/* Equipment Bonuses Summary - Desktop */}
-            <div
-              className="flex justify-center gap-4 py-1"
-              style={{
-                background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-                borderRadius: `${theme.borderRadius.md}px`,
-                border: `1px solid ${theme.colors.border.default}66`,
-                fontSize: "11px",
-                boxShadow: theme.shadows.sm,
-              }}
-            >
-              <span style={{ color: theme.colors.state.danger }}>
-                ⚔️ {totalBonuses.attack}
-              </span>
-              <span style={{ color: theme.colors.state.success }}>
-                🛡️ {totalBonuses.defense}
-              </span>
-              <span style={{ color: theme.colors.state.warning }}>
-                💪 {totalBonuses.strength}
-              </span>
-            </div>
+            Stats
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenDeath}
+            className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 focus-visible:outline-none"
+            style={{
+              height: shouldUseMobileUI ? 24 : 28,
+              ...getInteractiveTileStyle(theme, { radius: 2 }),
+              fontSize: shouldUseMobileUI ? "9px" : "10px",
+              fontWeight: 600,
+              letterSpacing: "0.04em",
+              color: theme.colors.accent.primary,
+              textTransform: "uppercase",
+            }}
+          >
+            On Death
+          </button>
+        </div>
 
-            {/* Utility Buttons (RS3-style) - Desktop */}
-            <div
-              className="flex justify-between px-1 py-1.5"
-              style={{
-                background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-                borderRadius: `${theme.borderRadius.md}px`,
-                border: `1px solid ${theme.colors.border.default}66`,
-                boxShadow: theme.shadows.sm,
-              }}
-            >
-              <UtilityButton
-                icon={<StatsIcon className="w-full h-full" />}
-                label="Stats"
-                onClick={handleOpenStats}
-              />
-              <UtilityButton
-                icon={<DeathIcon className="w-full h-full" />}
-                label="Death"
-                onClick={handleOpenDeath}
-              />
-            </div>
-          </>
-        )}
+        <div
+          className="flex justify-center gap-3"
+          style={{
+            ...getPanelInsetStyle(theme, {
+              emphasis: "normal",
+              radius: 4,
+            }),
+            padding: shouldUseMobileUI ? "2px 6px" : "4px 8px",
+            fontSize: shouldUseMobileUI ? "8px" : "10px",
+            lineHeight: 1,
+          }}
+        >
+          <span style={{ color: theme.colors.status.hp }}>
+            {totalBonuses.attack}
+          </span>
+          <span style={{ color: theme.colors.status.energy }}>
+            {totalBonuses.defense}
+          </span>
+          <span style={{ color: theme.colors.status.prayer }}>
+            {totalBonuses.strength}
+          </span>
+        </div>
       </div>
 
       {/* Enhanced hover tooltip - rendered via portal */}

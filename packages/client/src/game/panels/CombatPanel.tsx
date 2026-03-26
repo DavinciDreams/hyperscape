@@ -7,6 +7,11 @@ import {
   getPanelSurfaceStyle,
 } from "@/ui/theme/themes";
 import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
+import {
+  PANEL_PADDING,
+  PANEL_MOBILE_PADDING,
+  PANEL_GRID_GAP,
+} from "../../constants/panelLayout";
 import type {
   ClientWorld,
   PlayerStats,
@@ -224,8 +229,241 @@ interface CombatStyleInfo {
   color: string;
 }
 
-/** Draggable combat style button component */
-const DraggableCombatStyleButton = ({
+/** Short XP labels for compact banner display */
+const XP_SHORT_LABELS: Record<string, string> = {
+  Attack: "+ATK",
+  Strength: "+STR",
+  Defense: "+DEF",
+  All: "+ALL",
+  Ranged: "+RNG",
+  "Rng+Def": "+R/D",
+  Magic: "+MAG",
+};
+
+/** Filled game-style icons for combat banners — bold, solid fills for fantasy UI */
+const BannerStyleIcon = ({
+  style,
+  size = 24,
+  color = "currentColor",
+  muted = false,
+}: {
+  style: string;
+  size?: number;
+  color?: string;
+  muted?: boolean;
+}) => {
+  const fo = muted ? 0.25 : 0.55;
+  const so = muted ? 0.45 : 1;
+
+  switch (style) {
+    case "accurate":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <circle
+            cx="12"
+            cy="12"
+            r="10.5"
+            fill={color}
+            fillOpacity={fo * 0.35}
+            stroke={color}
+            strokeWidth="1.4"
+            strokeOpacity={so}
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r="7"
+            fill={color}
+            fillOpacity={fo * 0.55}
+            stroke={color}
+            strokeWidth="1.1"
+            strokeOpacity={so * 0.85}
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r="3.5"
+            fill={color}
+            fillOpacity={fo * 0.85}
+            stroke={color}
+            strokeWidth="0.9"
+            strokeOpacity={so * 0.9}
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r="1.3"
+            fill={color}
+            fillOpacity={muted ? 0.4 : 0.95}
+          />
+        </svg>
+      );
+    case "aggressive":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <path
+            d="M5 4l12 8-12 8Z"
+            fill={color}
+            fillOpacity={fo * 0.6}
+            stroke={color}
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+            strokeOpacity={so}
+          />
+          <path
+            d="M11 7l8 5-8 5Z"
+            fill={color}
+            fillOpacity={fo * 0.35}
+            stroke={color}
+            strokeWidth="1.4"
+            strokeLinejoin="round"
+            strokeOpacity={so * 0.7}
+          />
+        </svg>
+      );
+    case "defensive":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <path
+            d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+            fill={color}
+            fillOpacity={fo * 0.55}
+            stroke={color}
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+            strokeOpacity={so}
+          />
+          <path
+            d="M12 18.5s5.5-2.5 5.5-7V6.5L12 4.5 6.5 6.5V11.5c0 4.5 5.5 7 5.5 7z"
+            fill={color}
+            fillOpacity={fo * 0.3}
+            stroke={color}
+            strokeWidth="0.7"
+            strokeOpacity={so * 0.5}
+          />
+        </svg>
+      );
+    case "controlled":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <circle
+            cx="12"
+            cy="12"
+            r="10"
+            fill={color}
+            fillOpacity={fo * 0.2}
+            stroke={color}
+            strokeWidth="1.4"
+            strokeOpacity={so}
+          />
+          <line
+            x1="12"
+            y1="3"
+            x2="12"
+            y2="21"
+            stroke={color}
+            strokeWidth="1.4"
+            strokeOpacity={so}
+          />
+          <line
+            x1="3"
+            y1="12"
+            x2="21"
+            y2="12"
+            stroke={color}
+            strokeWidth="1.4"
+            strokeOpacity={so}
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r="3"
+            fill={color}
+            fillOpacity={fo * 0.6}
+            stroke={color}
+            strokeWidth="1"
+            strokeOpacity={so * 0.85}
+          />
+        </svg>
+      );
+    case "rapid":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <polygon
+            points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+            fill={color}
+            fillOpacity={fo * 0.65}
+            stroke={color}
+            strokeWidth="1.4"
+            strokeLinejoin="round"
+            strokeOpacity={so}
+          />
+        </svg>
+      );
+    case "longrange":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <circle
+            cx="12"
+            cy="12"
+            r="10"
+            fill={color}
+            fillOpacity={fo * 0.12}
+            stroke={color}
+            strokeWidth="1.2"
+            strokeOpacity={so * 0.5}
+          />
+          <path
+            d="m3 12 5-4v8l-5-4z"
+            fill={color}
+            fillOpacity={fo * 0.55}
+            stroke={color}
+            strokeWidth="1.2"
+            strokeOpacity={so}
+          />
+          <path
+            d="M10 12h11"
+            stroke={color}
+            strokeWidth="2"
+            strokeOpacity={so}
+            strokeLinecap="round"
+          />
+          <path
+            d="M17 8l4 4-4 4"
+            stroke={color}
+            strokeWidth="1.5"
+            strokeOpacity={so}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "autocast":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <path
+            d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"
+            fill={color}
+            fillOpacity={fo * 0.6}
+            stroke={color}
+            strokeWidth="1.3"
+            strokeOpacity={so}
+          />
+        </svg>
+      );
+    default:
+      return null;
+  }
+};
+
+// Shield/crest SVG paths for combat banners
+const SHIELD_OUTER =
+  "M 5 0 L 95 0 Q 100 0 100 5 L 100 82 Q 100 102 50 128 Q 0 102 0 82 L 0 5 Q 0 0 5 0 Z";
+const SHIELD_INNER =
+  "M 8 3 L 92 3 Q 97 3 97 7 L 97 80 Q 97 99 50 123 Q 3 99 3 80 L 3 7 Q 3 3 8 3 Z";
+
+/** Combat style banner — heraldic shield using theme colors */
+const CombatStyleBanner = ({
   style: styleInfo,
   isActive,
   disabled,
@@ -240,7 +478,6 @@ const DraggableCombatStyleButton = ({
   onClick: () => void;
   theme: ReturnType<typeof useThemeStore.getState>["theme"];
 }) => {
-  // Make combat style draggable for action bar
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `combatstyle-${styleInfo.id}`,
     data: {
@@ -254,27 +491,35 @@ const DraggableCombatStyleButton = ({
     disabled,
   });
 
+  const shortXp =
+    XP_SHORT_LABELS[styleInfo.xp] ||
+    `+${styleInfo.xp.slice(0, 3).toUpperCase()}`;
+  const baseGradId = `banner-base-${styleInfo.id}`;
+  const tintGradId = `banner-tint-${styleInfo.id}`;
+
+  // Theme-derived colors
+  const bgDark = theme.colors.background.primary;
+  const bgMid = theme.colors.background.secondary;
+  const bgLight = theme.colors.background.tertiary;
+  const accentGold = theme.colors.accent.primary;
+  const borderClr = theme.colors.border.default;
+  const textMuted = theme.colors.text.muted;
+  const textPrimary = theme.colors.text.primary;
+
   return (
     <div
       ref={setNodeRef}
+      {...attributes}
+      {...listeners}
       style={{
+        flex: "0 0 calc((100% - 3 * (var(--banner-gap))) / 4)",
+        maxWidth: "calc((100% - 3 * (var(--banner-gap))) / 4)",
         minWidth: 0,
-        padding: isMobile ? "5px 6px" : "4px 6px",
-        transition: "all 0.12s ease",
-        ...getInteractiveTileStyle(theme, {
-          active: isActive,
-          disabled,
-          dragging: isDragging,
-          radius: 5,
-          accentColor: styleInfo.color,
-        }),
-        display: "flex",
-        alignItems: "center",
-        gap: "6px",
-        opacity: disabled ? 0.5 : isDragging ? 0.7 : 1,
-        transform: isDragging ? "scale(1.01)" : "scale(1)",
-        width: "100%",
         position: "relative",
+        opacity: disabled ? 0.5 : isDragging ? 0.6 : 1,
+        transform: isDragging ? "scale(0.95)" : "scale(1)",
+        transition: "opacity 0.15s ease, transform 0.15s ease",
+        touchAction: "none",
       }}
     >
       <button
@@ -285,81 +530,191 @@ const DraggableCombatStyleButton = ({
         }}
         disabled={disabled}
         aria-pressed={isActive}
-        className="style-btn focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
+        className="combat-banner focus-visible:outline-none"
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "6px",
-          flex: 1,
-          minWidth: 0,
+          position: "relative",
+          width: "100%",
+          aspectRatio: isMobile ? "0.58" : "0.52",
           background: "transparent",
           border: "none",
           padding: 0,
-          margin: 0,
           cursor: disabled ? "not-allowed" : "pointer",
-          color: isActive ? styleInfo.color : theme.colors.text.secondary,
-          textAlign: "left",
           touchAction: "manipulation",
         }}
       >
-        <StyleIcon
-          style={styleInfo.id}
-          size={isMobile ? 14 : 13}
-          color={isActive ? styleInfo.color : theme.colors.text.muted}
-        />
-        <span
+        {/* SVG shield / crest shape */}
+        <svg
+          viewBox="0 0 100 130"
+          preserveAspectRatio="none"
           style={{
-            fontWeight: 600,
-            lineHeight: 1,
-            fontSize: isMobile ? "11px" : "10px",
-            color: isActive
-              ? theme.colors.text.primary
-              : theme.colors.text.secondary,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            flex: 1,
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            filter: isActive
+              ? `drop-shadow(0 3px 8px ${styleInfo.color}35) drop-shadow(0 1px 2px rgba(0,0,0,0.6))`
+              : "drop-shadow(0 2px 5px rgba(0,0,0,0.5))",
+            transition: "filter 0.2s ease",
           }}
         >
-          {styleInfo.label}
-        </span>
-        <span
-          style={{
-            fontSize: isMobile ? "9px" : "8px",
-            color: isActive ? styleInfo.color : theme.colors.text.muted,
-            fontWeight: 600,
-            opacity: 0.8,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {styleInfo.xp}
-        </span>
-      </button>
-      {/* Separate drag handle so dnd-kit doesn't intercept clicks */}
-      <div
-        {...attributes}
-        {...listeners}
-        aria-label={`Drag ${styleInfo.label} style to action bar`}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: "14px",
-          height: "14px",
-          cursor: disabled ? "not-allowed" : isDragging ? "grabbing" : "grab",
-          color: theme.colors.text.muted,
-          opacity: disabled ? 0.35 : 0.5,
-          flexShrink: 0,
-          touchAction: "none",
-        }}
-      >
-        <svg width="8" height="8" viewBox="0 0 10 10" fill="currentColor">
-          <circle cx="3" cy="3" r="0.9" />
-          <circle cx="7" cy="3" r="0.9" />
-          <circle cx="3" cy="7" r="0.9" />
-          <circle cx="7" cy="7" r="0.9" />
+          <defs>
+            {/* Theme base gradient */}
+            <linearGradient id={baseGradId} x1="0" y1="0" x2="0" y2="1">
+              <stop
+                offset="0%"
+                stopColor={isActive ? bgLight : bgMid}
+                stopOpacity={1}
+              />
+              <stop
+                offset="50%"
+                stopColor={isActive ? bgMid : bgDark}
+                stopOpacity={1}
+              />
+              <stop offset="100%" stopColor={bgDark} stopOpacity={1} />
+            </linearGradient>
+            {/* Color tint overlay for active state */}
+            {isActive && (
+              <linearGradient id={tintGradId} x1="0" y1="0" x2="0" y2="1">
+                <stop
+                  offset="0%"
+                  stopColor={styleInfo.color}
+                  stopOpacity={0.28}
+                />
+                <stop
+                  offset="55%"
+                  stopColor={styleInfo.color}
+                  stopOpacity={0.1}
+                />
+                <stop
+                  offset="100%"
+                  stopColor={styleInfo.color}
+                  stopOpacity={0.03}
+                />
+              </linearGradient>
+            )}
+          </defs>
+
+          {/* Outer shadow edge */}
+          <path
+            d={SHIELD_OUTER}
+            fill="none"
+            stroke="rgba(0,0,0,0.7)"
+            strokeWidth={3.5}
+          />
+          {/* Base fill */}
+          <path d={SHIELD_OUTER} fill={`url(#${baseGradId})`} />
+          {/* Active color tint overlay */}
+          {isActive && <path d={SHIELD_OUTER} fill={`url(#${tintGradId})`} />}
+          {/* Border stroke — gold accent inactive, style color active */}
+          <path
+            d={SHIELD_OUTER}
+            fill="none"
+            stroke={isActive ? `${styleInfo.color}aa` : `${borderClr}`}
+            strokeWidth={isActive ? 1.8 : 1.2}
+          />
+          {/* Top edge highlight */}
+          <line
+            x1="10"
+            y1="1.2"
+            x2="90"
+            y2="1.2"
+            stroke={isActive ? `${styleInfo.color}44` : `${accentGold}18`}
+            strokeWidth={0.8}
+            strokeLinecap="round"
+          />
+          {/* Inner bevel for depth */}
+          <path
+            d={SHIELD_INNER}
+            fill="none"
+            stroke={
+              isActive ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.025)"
+            }
+            strokeWidth={0.6}
+          />
         </svg>
-      </div>
+
+        {/* Icon protruding from top of shield */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: isMobile ? 28 : 34,
+            height: isMobile ? 28 : 34,
+            borderRadius: "50%",
+            background: isActive
+              ? `radial-gradient(circle, ${bgLight} 40%, ${bgMid} 100%)`
+              : `radial-gradient(circle, ${bgMid} 40%, ${bgDark} 100%)`,
+            border: isActive
+              ? `1.5px solid ${styleInfo.color}88`
+              : `1px solid ${borderClr}`,
+            boxShadow: isActive
+              ? `0 2px 6px ${styleInfo.color}30, 0 1px 3px rgba(0,0,0,0.4)`
+              : "0 2px 4px rgba(0,0,0,0.4)",
+          }}
+        >
+          <BannerStyleIcon
+            style={styleInfo.id}
+            size={isMobile ? 16 : 20}
+            color={isActive ? styleInfo.color : accentGold}
+            muted={!isActive}
+          />
+        </div>
+
+        {/* Content overlay */}
+        <div
+          style={{
+            position: "relative",
+            zIndex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            height: "100%",
+            paddingTop: isMobile ? "16px" : "20px",
+            paddingBottom: isMobile ? "18px" : "22px",
+            gap: isMobile ? "2px" : "3px",
+          }}
+        >
+          {/* Style name */}
+          <span
+            style={{
+              fontSize: isMobile ? "8.5px" : "10px",
+              fontWeight: 700,
+              color: isActive ? textPrimary : textMuted,
+              lineHeight: 1.15,
+              textAlign: "center",
+              whiteSpace: "nowrap",
+              letterSpacing: "0.01em",
+              textShadow: isActive
+                ? `0 1px 3px rgba(0,0,0,0.7), 0 0 8px ${styleInfo.color}25`
+                : "0 1px 2px rgba(0,0,0,0.6)",
+            }}
+          >
+            {styleInfo.label}
+          </span>
+
+          {/* XP bonus label */}
+          <span
+            style={{
+              fontSize: isMobile ? "8.5px" : "10px",
+              fontWeight: 700,
+              color: isActive ? styleInfo.color : `${accentGold}88`,
+              lineHeight: 1,
+              textAlign: "center",
+              letterSpacing: "0.05em",
+              textShadow: isActive ? `0 0 6px ${styleInfo.color}35` : "none",
+            }}
+          >
+            {shortXp}
+          </span>
+        </div>
+      </button>
     </div>
   );
 };
@@ -603,18 +958,6 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       autoRetaliateCache.set(playerId, enabled);
       setAutoRetaliate(enabled);
     });
-
-    // Direct fallback: read from player entity if callback doesn't fire
-    // This ensures we get the correct value even if the event system has issues
-    const player = world.entities?.player;
-    if (player) {
-      const playerCombat = (player as { combat?: { autoRetaliate?: boolean } })
-        ?.combat;
-      if (typeof playerCombat?.autoRetaliate === "boolean") {
-        autoRetaliateCache.set(playerId, playerCombat.autoRetaliate);
-        setAutoRetaliate(playerCombat.autoRetaliate);
-      }
-    }
 
     const onUpdate = (data: unknown) => {
       if (!isStyleUpdateEvent(data)) return;
@@ -887,13 +1230,20 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     return () => observer.disconnect();
   }, []);
 
-  // Responsive padding/sizing - compact for both mobile and desktop
+  // Responsive padding/sizing — built from shared panelLayout constants
+  // compact = mobile or small panel; outer/inner/gap scale accordingly
   const compactPanel =
     shouldUseMobileUI || panelSize.height < 330 || panelSize.width < 250;
   const ultraCompactPanel = panelSize.height < 290 || panelSize.width < 220;
   const p = compactPanel
-    ? { outer: 3, inner: 4, gap: 3 }
-    : { outer: 4, inner: 6, gap: 4 };
+    ? {
+        outer: PANEL_MOBILE_PADDING,
+        inner: PANEL_PADDING,
+        gap: PANEL_MOBILE_PADDING,
+      }
+    : { outer: PANEL_PADDING, inner: PANEL_PADDING + 2, gap: PANEL_GRID_GAP };
+  // ultraCompactPanel is available for future use if needed (currently unused)
+  void ultraCompactPanel;
   return (
     <div
       ref={panelRef}
@@ -908,182 +1258,23 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
       <style>{`
         @keyframes combat-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
         .combat-pulse { animation: combat-pulse 1.5s ease-in-out infinite; }
-        .style-btn:hover:not(:disabled) { transform: translateY(-1px); }
-        .style-btn:active:not(:disabled) { transform: translateY(0); }
+        .combat-banner { transition: transform 0.15s ease, filter 0.15s ease; }
+        .combat-banner:hover:not(:disabled) { transform: translateY(-2px) scale(1.03); filter: brightness(1.15) contrast(1.05); }
+        .combat-banner:active:not(:disabled) { transform: translateY(0) scale(0.98); filter: brightness(0.9); }
       `}</style>
 
-      {/* HP + Combat Level — single compact row */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "6px",
-          padding: `${p.inner}px`,
-          background:
-            theme.name === "hyperscape"
-              ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.12) 100%)"
-              : theme.colors.slot.filled,
-          border: inCombat
-            ? `1px solid ${theme.colors.state.danger}50`
-            : `1px solid ${theme.colors.border.default}35`,
-          borderRadius: theme.borderRadius.md,
-          flexShrink: 0,
-        }}
-      >
-        <svg width={12} height={12} viewBox="0 0 24 24" fill="#ef4444">
-          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-        </svg>
-        {/* HP bar inline */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              width: "100%",
-              height: "5px",
-              background: theme.colors.background.panelPrimary,
-              borderRadius: 3,
-              overflow: "hidden",
-              border: `1px solid ${theme.colors.border.default}30`,
-            }}
-          >
-            <div
-              style={{
-                height: "100%",
-                width: `${healthPercent}%`,
-                borderRadius: 3,
-                transition: "width 0.2s ease",
-                background: "linear-gradient(180deg, #f87171, #dc2626)",
-              }}
-            />
-          </div>
-        </div>
-        <span
-          style={{
-            fontSize: "11px",
-            color: theme.colors.text.primary,
-            fontWeight: 700,
-            fontFamily: "var(--font-mono, monospace)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {health.current}/{health.max}
-        </span>
-        {inCombat && (
-          <span
-            className="combat-pulse"
-            style={{
-              fontSize: "9px",
-              color: theme.colors.state.danger,
-              fontWeight: 600,
-            }}
-          >
-            ⚔
-          </span>
-        )}
-        <span
-          style={{
-            borderLeft: `1px solid ${theme.colors.border.default}25`,
-            paddingLeft: "6px",
-            fontSize: "10px",
-            color: theme.colors.text.muted,
-            whiteSpace: "nowrap",
-          }}
-        >
-          Lvl{" "}
-          <span
-            style={{
-              color: "#f59e0b",
-              fontWeight: 700,
-              fontFamily: "var(--font-mono, monospace)",
-              fontSize: "12px",
-            }}
-          >
-            {combatLevel}
-          </span>
-        </span>
-      </div>
-
-      {/* Target health — only when in combat */}
-      {targetName && targetHealth && !ultraCompactPanel && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: `${p.inner - 1}px ${p.inner}px`,
-            background: `${theme.colors.state.danger}08`,
-            border: `1px solid ${theme.colors.state.danger}30`,
-            borderRadius: theme.borderRadius.sm,
-            flexShrink: 0,
-          }}
-        >
-          <span
-            style={{
-              fontSize: "10px",
-              color: theme.colors.state.danger,
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              maxWidth: "80px",
-            }}
-          >
-            🎯 {targetName}
-          </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                width: "100%",
-                height: "4px",
-                background: theme.colors.background.panelPrimary,
-                borderRadius: 2,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  height: "100%",
-                  width: `${targetHealthPercent}%`,
-                  borderRadius: 2,
-                  background: "linear-gradient(180deg, #f87171, #dc2626)",
-                }}
-              />
-            </div>
-          </div>
-          <span
-            style={{
-              fontSize: "10px",
-              color: theme.colors.state.danger,
-              fontWeight: 700,
-              fontFamily: "var(--font-mono, monospace)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {targetHealth.current}/{targetHealth.max}
-          </span>
-        </div>
-      )}
-
-      {/* Stats Row */}
-      <CombatStatsRow
-        attackLevel={attackLevel}
-        strengthLevel={strengthLevel}
-        defenseLevel={defenseLevel}
-        isMobile={shouldUseMobileUI}
-      />
-
-      {/* Attack Styles */}
+      {/* Attack Styles — Banner Grid (top) */}
       <div
         style={{
           ...getPanelInsetStyle(theme, {
             emphasis: "strong",
-            radius: theme.borderRadius.md,
+            radius: 4,
             padding: `${p.inner}px`,
           }),
-          flex: 1,
-          minHeight: 0,
           display: "flex",
           flexDirection: "column",
-          overflow: "hidden",
+          overflow: "visible",
+          flexShrink: 0,
         }}
       >
         <div
@@ -1091,7 +1282,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            marginBottom: 2,
+            marginBottom: compactPanel ? 6 : 8,
             flexShrink: 0,
           }}
         >
@@ -1111,7 +1302,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             <span
               style={{
                 padding: "2px 5px",
-                borderRadius: theme.borderRadius.sm,
+                borderRadius: 4,
                 background: "#8b5cf618",
                 border: "1px solid #8b5cf633",
                 fontSize: "8px",
@@ -1126,64 +1317,227 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           )}
         </div>
         <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "2px",
-            width: "100%",
-            flex: 1,
-            minHeight: 0,
-            overflowY: "auto",
-          }}
+          style={
+            {
+              display: "flex",
+              gap: compactPanel ? "4px" : "6px",
+              width: "100%",
+              marginTop: compactPanel ? 14 : 17,
+              justifyContent: "center",
+              "--banner-gap": compactPanel ? "4px" : "6px",
+            } as React.CSSProperties
+          }
         >
           {styles.map((s) => (
-            <DraggableCombatStyleButton
+            <CombatStyleBanner
               key={s.id}
               style={s}
               isActive={style === s.id}
               disabled={cooldown > 0}
-              isMobile={shouldUseMobileUI}
+              isMobile={compactPanel}
               onClick={() => changeStyle(s.id)}
               theme={theme}
             />
           ))}
         </div>
-      </div>
 
-      {cooldown > 0 && (
+        {cooldown > 0 && (
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: "9px",
+              color: theme.colors.state.warning,
+              background: `${theme.colors.state.warning}10`,
+              padding: "2px 5px",
+              borderRadius: 4,
+              border: `1px solid ${theme.colors.state.warning}25`,
+              marginTop: compactPanel ? 4 : 6,
+            }}
+          >
+            Style change in {Math.ceil(cooldown / 1000)}s
+          </div>
+        )}
+
+        {/* HP + Combat Level */}
         <div
           style={{
-            textAlign: "center",
-            fontSize: "9px",
-            color: theme.colors.state.warning,
-            background: `${theme.colors.state.warning}10`,
-            padding: "2px 5px",
-            borderRadius: theme.borderRadius.sm,
-            border: `1px solid ${theme.colors.state.warning}25`,
-            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: `${p.inner}px`,
+            marginTop: compactPanel ? 16 : 22,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.12) 100%)"
+                : theme.colors.slot.filled,
+            border: inCombat
+              ? `1px solid ${theme.colors.state.danger}50`
+              : `1px solid ${theme.colors.border.default}35`,
+            borderRadius: 4,
           }}
         >
-          Style change in {Math.ceil(cooldown / 1000)}s
+          <svg width={12} height={12} viewBox="0 0 24 24" fill="#ef4444">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+          </svg>
+          {/* HP bar inline */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                width: "100%",
+                height: "5px",
+                background: theme.colors.background.panelPrimary,
+                borderRadius: 3,
+                overflow: "hidden",
+                border: `1px solid ${theme.colors.border.default}30`,
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${healthPercent}%`,
+                  borderRadius: 3,
+                  transition: "width 0.2s ease",
+                  background: "linear-gradient(180deg, #f87171, #dc2626)",
+                }}
+              />
+            </div>
+          </div>
+          <span
+            style={{
+              fontSize: "11px",
+              color: theme.colors.text.primary,
+              fontWeight: 700,
+              fontFamily: "var(--font-mono, monospace)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {health.current}/{health.max}
+          </span>
+          {inCombat && (
+            <span
+              className="combat-pulse"
+              style={{
+                fontSize: "9px",
+                color: theme.colors.state.danger,
+                fontWeight: 600,
+              }}
+            >
+              ⚔
+            </span>
+          )}
+          <span
+            style={{
+              borderLeft: `1px solid ${theme.colors.border.default}25`,
+              paddingLeft: "6px",
+              fontSize: "10px",
+              color: theme.colors.text.muted,
+              whiteSpace: "nowrap",
+            }}
+          >
+            Lvl{" "}
+            <span
+              style={{
+                color: "#f59e0b",
+                fontWeight: 700,
+                fontFamily: "var(--font-mono, monospace)",
+                fontSize: "12px",
+              }}
+            >
+              {combatLevel}
+            </span>
+          </span>
         </div>
-      )}
 
-      {/* Auto Retaliate — compact single row */}
+        {/* Target health — only when in combat */}
+        {targetName && targetHealth && !ultraCompactPanel && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: `${p.inner - 1}px ${p.inner}px`,
+              marginTop: compactPanel ? 3 : 4,
+              background: `${theme.colors.state.danger}08`,
+              border: `1px solid ${theme.colors.state.danger}30`,
+              borderRadius: 4,
+            }}
+          >
+            <span
+              style={{
+                fontSize: "10px",
+                color: theme.colors.state.danger,
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                maxWidth: "80px",
+              }}
+            >
+              🎯 {targetName}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  width: "100%",
+                  height: "4px",
+                  background: theme.colors.background.panelPrimary,
+                  borderRadius: 2,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${targetHealthPercent}%`,
+                    borderRadius: 2,
+                    background: "linear-gradient(180deg, #f87171, #dc2626)",
+                  }}
+                />
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: "10px",
+                color: theme.colors.state.danger,
+                fontWeight: 700,
+                fontFamily: "var(--font-mono, monospace)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {targetHealth.current}/{targetHealth.max}
+            </span>
+          </div>
+        )}
+
+        {/* Stats Row */}
+        <CombatStatsRow
+          attackLevel={attackLevel}
+          strengthLevel={strengthLevel}
+          defenseLevel={defenseLevel}
+          isMobile={shouldUseMobileUI}
+        />
+      </div>
+
+      {/* Spacer to push auto-retaliate to bottom */}
+      <div style={{ flex: 1 }} />
+
+      {/* Auto Retaliate — pinned to bottom */}
       <button
         onClick={toggleAutoRetaliate}
         aria-pressed={autoRetaliate}
         className="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
         style={{
-          padding: "4px 6px",
+          padding: `${PANEL_PADDING}px 6px`,
           cursor: "pointer",
           transition: "all 0.1s ease",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           touchAction: "manipulation",
-          borderRadius: theme.borderRadius.sm,
+          borderRadius: 4,
           ...getInteractiveTileStyle(theme, {
             active: autoRetaliate,
-            radius: theme.borderRadius.sm,
+            radius: 4,
             accentColor: autoRetaliate
               ? theme.colors.state.success
               : theme.colors.accent.secondary,

@@ -15,24 +15,21 @@ import React, {
   useEffect,
   type CSSProperties,
 } from "react";
-
-/** Mobile breakpoint (matches client/constants breakpoints.md) */
-const MOBILE_BREAKPOINT = 640;
-
-/** Filter icon SVG */
-const FilterIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-    <path d="M1 2h14v2H1V2zm2 4h10v2H3V6zm2 4h6v2H5v-2z" />
-  </svg>
-);
-
-/** Search icon SVG */
-const SearchIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-    <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z" />
-  </svg>
-);
 import { useTheme, useAccessibilityStore, useMobileLayout } from "@/ui";
+import {
+  getPanelSurfaceStyle,
+  getPanelInsetStyle,
+  getPanelHeaderStyle,
+  getInteractiveTileStyle,
+  getWindowSurfaceStyle,
+  getDecorativeBorderStyle,
+} from "@/ui/theme/themes";
+import {
+  PANEL_PADDING,
+  PANEL_GRID_GAP,
+  PANEL_MOBILE_PADDING,
+  PANEL_SLOT_RADIUS,
+} from "../../../constants/panelLayout";
 import {
   type Quest,
   type QuestState,
@@ -46,6 +43,29 @@ import {
 } from "@/game/systems";
 import { QuestObjective } from "./QuestObjective";
 import { QuestRewards } from "./QuestRewards";
+
+/** Filter icon SVG */
+const FilterIcon = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor">
+    <path d="M1 2h14v2H1V2zm2 4h10v2H3V6zm2 4h6v2H5v-2z" />
+  </svg>
+);
+
+/** Search icon SVG */
+const SearchIcon = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor">
+    <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z" />
+  </svg>
+);
+
+/** Category icon map */
+const CATEGORY_ICONS: Record<string, string> = {
+  crown: "\u{1F451}",
+  scroll: "\u{1F4DC}",
+  sun: "\u2600\uFE0F",
+  calendar: "\u{1F4C5}",
+  star: "\u2B50",
+};
 
 /** Props for QuestLog component */
 export interface QuestLogProps {
@@ -121,13 +141,10 @@ export interface QuestLogProps {
   onQuestClick?: (quest: Quest) => void;
 }
 
-// OSRS-style status colors
-const STATUS_COLORS: Record<QuestState, string> = {
-  available: "#ff4444", // Red - not started
-  active: "#ffff00", // Yellow - in progress
-  completed: "#00ff00", // Green - complete
-  failed: "#888888", // Gray - failed
-};
+/** Get quest state color from theme-compatible STATE_CONFIG */
+function getStateColor(state: QuestState): string {
+  return STATE_CONFIG[state].color;
+}
 
 /** Props for Quest Detail Popup Component */
 export interface QuestDetailPopupProps {
@@ -154,28 +171,17 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
   onTrackQuest,
 }: QuestDetailPopupProps): React.ReactElement {
   const theme = useTheme();
+  const { shouldUseMobileUI: isMobile } = useMobileLayout();
   const progress = calculateQuestProgress(quest);
   const categoryConfig = CATEGORY_CONFIG[quest.category];
 
   const canAccept = quest.state === "available";
   const canComplete = quest.state === "active" && progress === 100;
 
-  // Mobile responsiveness
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined"
-      ? window.innerWidth < MOBILE_BREAKPOINT
-      : false,
-  );
+  const stateColor = getStateColor(quest.state);
+  const categoryIcon =
+    CATEGORY_ICONS[categoryConfig.icon] || categoryConfig.icon;
 
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  // Overlay styles
   const overlayStyle: CSSProperties = {
     position: "fixed",
     inset: 0,
@@ -183,207 +189,184 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.8)",
-    backdropFilter: "blur(2px)",
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backdropFilter: "blur(6px)",
     padding: isMobile ? `${theme.spacing.sm}px` : 0,
   };
 
-  // Popup container - using theme colors (responsive)
+  // Use the actual game window surface for an immersive feel
+  const windowBase = getWindowSurfaceStyle(theme, { state: "focused" });
+  const decorBorder = getDecorativeBorderStyle(theme);
   const popupStyle: CSSProperties = {
+    ...windowBase,
+    ...decorBorder,
     width: isMobile ? "100%" : "400px",
-    maxWidth: "90vw",
-    maxHeight: isMobile ? "90vh" : "80vh",
-    background: theme.colors.background.primary,
-    border: `1px solid ${theme.colors.border.decorative}`,
-    borderRadius: `${theme.borderRadius.lg}px`,
+    maxWidth: "92vw",
+    maxHeight: isMobile ? "90vh" : "78vh",
+    borderTop: `2px solid ${stateColor}`,
     padding: "0",
-    boxShadow: theme.shadows.window,
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
   };
 
-  // Header styles (responsive)
+  // Game-style header with gradient
+  const panelHeader = getPanelHeaderStyle(theme);
   const headerStyle: CSSProperties = {
+    ...panelHeader,
     display: "flex",
     alignItems: "center",
-    gap: isMobile ? theme.spacing.xs : theme.spacing.sm,
-    padding: isMobile
-      ? `${theme.spacing.sm}px ${theme.spacing.sm}px`
-      : `${theme.spacing.sm}px ${theme.spacing.md}px`,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    background: theme.colors.background.secondary,
-    minHeight: isMobile ? "48px" : "44px",
+    gap: isMobile ? "8px" : "6px",
+    padding: isMobile ? "10px 12px" : "8px 10px",
+    minHeight: isMobile ? "48px" : "38px",
   };
 
-  // Back button (larger on mobile for touch)
-  const buttonSize = isMobile ? "36px" : "24px";
-  const backButtonStyle: CSSProperties = {
+  const buttonSize = isMobile ? "32px" : "24px";
+  const headerBtnStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     width: buttonSize,
     height: buttonSize,
-    background: "transparent",
-    border: "none",
+    background: `${theme.colors.slot.empty}`,
+    border: `1px solid ${theme.colors.border.default}40`,
     color: theme.colors.text.muted,
     cursor: "pointer",
     padding: 0,
-    borderRadius: `${theme.borderRadius.sm}px`,
-    transition: theme.transitions.fast,
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
   };
 
   const titleStyle: CSSProperties = {
     flex: 1,
-    color: STATUS_COLORS[quest.state],
+    color: theme.colors.text.primary,
     fontSize: isMobile
       ? theme.typography.fontSize.lg
-      : theme.typography.fontSize.base,
-    fontWeight: theme.typography.fontWeight.semibold,
+      : theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.bold,
     margin: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   };
 
-  const closeButtonStyle: CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: buttonSize,
-    height: buttonSize,
-    background: "transparent",
-    border: "none",
-    color: theme.colors.text.muted,
-    cursor: "pointer",
-    padding: 0,
-    borderRadius: `${theme.borderRadius.sm}px`,
-    fontSize: isMobile ? "22px" : "18px",
-    lineHeight: 1,
+  // State indicator dot next to title
+  const stateDotStyle: CSSProperties = {
+    width: isMobile ? "8px" : "6px",
+    height: isMobile ? "8px" : "6px",
+    borderRadius: "50%",
+    backgroundColor: stateColor,
+    flexShrink: 0,
+    boxShadow: `0 0 4px ${stateColor}60`,
   };
 
-  // Content area with scrollbar (responsive padding)
+  const contentPad = isMobile ? "10px" : "8px";
   const contentStyle: CSSProperties = {
     flex: 1,
     overflowY: "auto",
-    padding: isMobile ? theme.spacing.sm : theme.spacing.md,
-    WebkitOverflowScrolling: "touch", // Smooth scrolling on iOS
+    padding: contentPad,
+    display: "flex",
+    flexDirection: "column",
+    gap: isMobile ? "8px" : "6px",
+    WebkitOverflowScrolling: "touch",
   };
 
-  // Section styles
-  const sectionStyle: CSSProperties = {
-    marginBottom: isMobile ? theme.spacing.sm : theme.spacing.md,
+  // Inset section cards — the core "game panel" feel
+  const sectionCardStyle: CSSProperties = {
+    ...getPanelInsetStyle(theme, { radius: PANEL_SLOT_RADIUS }),
+    padding: isMobile ? "8px 10px" : "6px 8px",
   };
 
   const sectionTitleStyle: CSSProperties = {
-    color: theme.colors.accent.primary,
-    fontSize: isMobile
-      ? theme.typography.fontSize.sm
-      : theme.typography.fontSize.xs,
-    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.accent.gold,
+    fontSize: "9px",
+    fontWeight: theme.typography.fontWeight.bold,
     textTransform: "uppercase",
-    letterSpacing: "0.5px",
-    marginBottom: theme.spacing.xs,
+    letterSpacing: "1.2px",
+    marginBottom: isMobile ? "6px" : "4px",
   };
 
   const descriptionStyle: CSSProperties = {
     color: theme.colors.text.secondary,
     fontSize: isMobile
-      ? theme.typography.fontSize.base
-      : theme.typography.fontSize.sm,
-    lineHeight: theme.typography.lineHeight.normal,
+      ? theme.typography.fontSize.sm
+      : theme.typography.fontSize.xs,
+    lineHeight: theme.typography.lineHeight.relaxed,
     margin: 0,
   };
 
-  // Meta info row (responsive - wrap on mobile)
-  const metaRowStyle: CSSProperties = {
-    display: "flex",
-    flexWrap: isMobile ? "wrap" : "nowrap",
-    gap: isMobile ? theme.spacing.sm : theme.spacing.md,
-    marginBottom: isMobile ? theme.spacing.sm : theme.spacing.md,
-    padding: theme.spacing.sm,
-    background: theme.colors.background.tertiary,
-    borderRadius: `${theme.borderRadius.md}px`,
-    border: `1px solid ${theme.colors.border.default}`,
-    fontSize: isMobile
-      ? theme.typography.fontSize.base
-      : theme.typography.fontSize.sm,
-  };
+  // Compact pill badges for meta info
+  const metaBadgeStyle = (color: string): CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "3px",
+    padding: isMobile ? "3px 7px" : "2px 5px",
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
+    backgroundColor: `${color}15`,
+    border: `1px solid ${color}25`,
+    color,
+    fontSize: isMobile ? "11px" : "9px",
+    fontWeight: theme.typography.fontWeight.semibold,
+    lineHeight: `${theme.typography.lineHeight.tight}`,
+  });
 
-  const metaItemStyle: CSSProperties = {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
-    minWidth: isMobile ? "calc(50% - 8px)" : "auto",
-  };
-
-  const metaLabelStyle: CSSProperties = {
-    color: theme.colors.text.muted,
-    fontSize: isMobile
-      ? theme.typography.fontSize.sm
-      : theme.typography.fontSize.xs,
-    textTransform: "uppercase",
-  };
-
-  const metaValueStyle: CSSProperties = {
-    color: theme.colors.text.primary,
-    fontWeight: theme.typography.fontWeight.medium,
-  };
-
-  // Progress bar (taller on mobile for visibility)
   const progressBarContainerStyle: CSSProperties = {
-    height: isMobile ? "6px" : "4px",
-    backgroundColor: theme.colors.background.tertiary,
-    borderRadius: `${theme.borderRadius.sm}px`,
+    height: isMobile ? "5px" : "3px",
+    backgroundColor: `${theme.colors.background.primary}80`,
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
     overflow: "hidden",
-    marginTop: theme.spacing.xs,
   };
 
   const progressBarFillStyle: CSSProperties = {
     height: "100%",
     width: `${progress}%`,
-    backgroundColor:
-      progress === 100
-        ? theme.colors.state.success
-        : theme.colors.accent.primary,
+    backgroundColor: progress === 100 ? theme.colors.state.success : stateColor,
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
     transition: "width 0.3s ease",
   };
 
-  // Action buttons container (responsive)
+  // Action footer with game-style buttons
   const actionsStyle: CSSProperties = {
+    ...panelHeader,
     display: "flex",
     flexDirection: isMobile ? "column" : "row",
-    gap: theme.spacing.sm,
-    padding: isMobile ? theme.spacing.sm : theme.spacing.md,
-    borderTop: `1px solid ${theme.colors.border.default}`,
-    background: theme.colors.background.secondary,
+    gap: `${PANEL_GRID_GAP + 2}px`,
+    padding: isMobile ? "10px 12px" : "8px 10px",
+    borderTop: `1px solid ${theme.colors.border.default}30`,
+    borderBottom: "none",
   };
 
   const buttonBaseStyle: CSSProperties = {
     flex: isMobile ? "none" : 1,
-    padding: isMobile
-      ? `${theme.spacing.md}px ${theme.spacing.md}px`
-      : `${theme.spacing.sm}px ${theme.spacing.md}px`,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "5px",
+    padding: isMobile ? "8px 14px" : "5px 10px",
     border: "none",
-    borderRadius: `${theme.borderRadius.md}px`,
-    minHeight: isMobile ? "44px" : "auto", // Touch-friendly on mobile
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.semibold,
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
+    minHeight: isMobile ? "44px" : "28px",
+    fontSize: isMobile
+      ? theme.typography.fontSize.sm
+      : theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.bold,
     cursor: "pointer",
-    transition: theme.transitions.fast,
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
   };
 
   const primaryButtonStyle: CSSProperties = {
     ...buttonBaseStyle,
-    background: theme.colors.accent.primary,
+    background: `linear-gradient(180deg, ${stateColor}, ${stateColor}cc)`,
     color: theme.colors.background.primary,
+    boxShadow: `0 1px 3px ${stateColor}40, inset 0 1px 0 rgba(255,255,255,0.15)`,
   };
 
   const secondaryButtonStyle: CSSProperties = {
     ...buttonBaseStyle,
-    background: theme.colors.background.tertiary,
-    color: theme.colors.text.primary,
-    border: `1px solid ${theme.colors.border.default}`,
+    background: theme.colors.slot.empty,
+    color: theme.colors.text.secondary,
+    border: `1px solid ${theme.colors.border.default}40`,
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
   };
 
   return (
@@ -399,14 +382,18 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
         onMouseDown={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {/* Header with back button */}
+        {/* Header */}
         <div style={headerStyle}>
           <button
-            style={backButtonStyle}
+            style={headerBtnStyle}
             onClick={onClose}
             title="Back to quest list"
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <svg
+              width={isMobile ? 18 : 14}
+              height={isMobile ? 18 : 14}
+              viewBox="0 0 16 16"
+            >
               <path
                 d="M11 2L5 8l6 6"
                 stroke="currentColor"
@@ -420,7 +407,7 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
           <h3 style={titleStyle}>
             {quest.pinned && (
               <span
-                style={{ color: "#ffd700", marginRight: "6px" }}
+                style={{ color: theme.colors.accent.gold, marginRight: "6px" }}
                 title="Pinned"
               >
                 ★
@@ -428,38 +415,43 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
             )}
             {quest.title}
           </h3>
-          <button style={closeButtonStyle} onClick={onClose} title="Close">
-            ×
+          <button style={headerBtnStyle} onClick={onClose} title="Close">
+            <svg
+              width={isMobile ? 16 : 12}
+              height={isMobile ? 16 : 12}
+              viewBox="0 0 12 12"
+            >
+              <path
+                d="M2 2l8 8M10 2l-8 8"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
           </button>
         </div>
 
         {/* Content */}
         <div style={contentStyle} className="scrollbar-thin">
-          {/* Meta info */}
-          <div style={metaRowStyle}>
-            <div style={metaItemStyle}>
-              <span style={metaLabelStyle}>Type</span>
-              <span style={{ ...metaValueStyle, color: categoryConfig.color }}>
-                {categoryConfig.label}
-              </span>
-            </div>
-            <div style={metaItemStyle}>
-              <span style={metaLabelStyle}>Level</span>
-              <span style={metaValueStyle}>{quest.level}</span>
-            </div>
-            <div style={metaItemStyle}>
-              <span style={metaLabelStyle}>Status</span>
-              <span
-                style={{ ...metaValueStyle, color: STATUS_COLORS[quest.state] }}
-              >
-                {STATE_CONFIG[quest.state].label}
-              </span>
-            </div>
+          {/* Meta badges row */}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: `${PANEL_GRID_GAP + 2}px`,
+            }}
+          >
+            <span style={metaBadgeStyle(categoryConfig.color)}>
+              {categoryIcon} {categoryConfig.label}
+            </span>
+            <span style={metaBadgeStyle(theme.colors.text.secondary)}>
+              Lv. {quest.level}
+            </span>
+            <span style={metaBadgeStyle(stateColor)}>
+              {STATE_CONFIG[quest.state].label}
+            </span>
             {quest.state === "active" && (
-              <div style={metaItemStyle}>
-                <span style={metaLabelStyle}>Progress</span>
-                <span style={metaValueStyle}>{progress}%</span>
-              </div>
+              <span style={metaBadgeStyle(stateColor)}>{progress}%</span>
             )}
           </div>
 
@@ -467,21 +459,21 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
           {quest.timeRemaining !== undefined && quest.state === "active" && (
             <div
               style={{
-                marginBottom: theme.spacing.md,
-                padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+                ...getPanelInsetStyle(theme, { radius: PANEL_SLOT_RADIUS + 2 }),
+                padding: isMobile ? "8px 10px" : "6px 10px",
                 background:
                   quest.timeRemaining <= 60
-                    ? "rgba(248, 113, 113, 0.15)"
-                    : "rgba(251, 191, 36, 0.15)",
-                borderRadius: `${theme.borderRadius.sm}px`,
+                    ? "rgba(248, 113, 113, 0.12)"
+                    : "rgba(251, 191, 36, 0.12)",
                 color:
                   quest.timeRemaining <= 60
                     ? theme.colors.state.danger
                     : theme.colors.state.warning,
                 fontSize: theme.typography.fontSize.sm,
+                fontWeight: theme.typography.fontWeight.medium,
                 display: "flex",
                 alignItems: "center",
-                gap: theme.spacing.xs,
+                gap: "6px",
               }}
             >
               <svg
@@ -492,47 +484,47 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
               >
                 <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12A5 5 0 118 3a5 5 0 010 10zm.5-8H7v4.5l3.5 2 .75-1.25-2.75-1.5V5z" />
               </svg>
-              Time remaining: {formatTimeRemaining(quest.timeRemaining)}
+              {formatTimeRemaining(quest.timeRemaining)}
+            </div>
+          )}
+
+          {/* Progress bar for active quests */}
+          {quest.state === "active" && quest.objectives.length > 0 && (
+            <div style={progressBarContainerStyle}>
+              <div style={progressBarFillStyle} />
             </div>
           )}
 
           {/* Description */}
-          <div style={sectionStyle}>
+          <div style={sectionCardStyle}>
             <div style={sectionTitleStyle}>Description</div>
             <p style={descriptionStyle}>{quest.description}</p>
-          </div>
-
-          {/* Quest giver */}
-          {quest.questGiver && (
-            <div style={sectionStyle}>
-              <div style={sectionTitleStyle}>Quest Giver</div>
+            {quest.questGiver && (
               <div
                 style={{
-                  color: theme.colors.text.primary,
-                  fontSize: theme.typography.fontSize.sm,
+                  marginTop: `${PANEL_GRID_GAP + 2}px`,
+                  color: theme.colors.text.muted,
+                  fontSize: theme.typography.fontSize.xs,
                 }}
               >
-                {quest.questGiver}
+                Quest giver:{" "}
+                <span style={{ color: theme.colors.text.primary }}>
+                  {quest.questGiver}
+                </span>
                 {quest.questGiverLocation && (
-                  <span style={{ color: theme.colors.text.muted }}>
-                    {" "}
-                    · {quest.questGiverLocation}
-                  </span>
+                  <span> · {quest.questGiverLocation}</span>
                 )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Objectives */}
           {quest.objectives.length > 0 && (
-            <div style={sectionStyle}>
+            <div style={sectionCardStyle}>
               <div style={sectionTitleStyle}>Objectives</div>
-              {quest.state === "active" && (
-                <div style={progressBarContainerStyle}>
-                  <div style={progressBarFillStyle} />
-                </div>
-              )}
-              <div style={{ marginTop: theme.spacing.sm }}>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: "2px" }}
+              >
                 {quest.objectives.map((objective) => (
                   <QuestObjective
                     key={objective.id}
@@ -546,7 +538,7 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
 
           {/* Rewards */}
           {quest.rewards.length > 0 && (
-            <div style={sectionStyle}>
+            <div style={sectionCardStyle}>
               <QuestRewards rewards={quest.rewards} showTitle />
             </div>
           )}
@@ -581,7 +573,7 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
               style={secondaryButtonStyle}
               onClick={() => onTogglePin(quest)}
             >
-              {quest.pinned ? "Unpin" : "Pin"}
+              {quest.pinned ? "★ Unpin" : "☆ Pin"}
             </button>
           )}
           {quest.state === "active" && onTrackQuest && (
@@ -603,7 +595,7 @@ export const QuestDetailPopup = memo(function QuestDetailPopup({
   );
 });
 
-/** Quest List Item Component - Clean minimal row */
+/** Quest List Item Component — Themed interactive tile */
 interface QuestListItemProps {
   quest: Quest;
   onClick: () => void;
@@ -617,83 +609,167 @@ const QuestListItem = memo(function QuestListItem({
 }: QuestListItemProps): React.ReactElement {
   const theme = useTheme();
   const { shouldUseMobileUI } = useMobileLayout();
+  const { reducedMotion } = useAccessibilityStore();
   const [isHovered, setIsHovered] = useState(false);
   const progress = calculateQuestProgress(quest);
+  const stateColor = getStateColor(quest.state);
+  const categoryConfig = CATEGORY_CONFIG[quest.category];
 
-  const rowStyle: CSSProperties = {
+  const tileBase = getInteractiveTileStyle(theme, {
+    hovered: isHovered,
+    active: isSelected,
+    radius: PANEL_SLOT_RADIUS,
+  });
+
+  const tileStyle: CSSProperties = {
+    ...tileBase,
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
-    padding: shouldUseMobileUI ? "8px 12px" : "4px 8px",
+    gap: shouldUseMobileUI ? 8 : 6,
+    padding: shouldUseMobileUI
+      ? `${PANEL_MOBILE_PADDING + 5}px ${PANEL_MOBILE_PADDING + 6}px`
+      : `${PANEL_PADDING + 2}px ${PANEL_PADDING + 4}px`,
     cursor: "pointer",
-    backgroundColor: isSelected
-      ? `${theme.colors.accent.primary}30`
-      : isHovered
-        ? theme.colors.slot.hover
-        : "transparent",
-    borderLeft: isSelected
-      ? `3px solid ${theme.colors.accent.primary}`
-      : "3px solid transparent",
-    transition: "background-color 0.1s ease, border-color 0.1s ease",
-    minHeight: shouldUseMobileUI ? "44px" : "28px",
+    borderLeft: `3px solid ${isSelected ? theme.colors.border.active : stateColor}`,
+    minHeight: shouldUseMobileUI ? 48 : 34,
+    transition: reducedMotion
+      ? "none"
+      : "background-color 0.1s ease, border-color 0.1s ease",
   };
 
-  const nameStyle: CSSProperties = {
-    color: STATUS_COLORS[quest.state],
-    fontSize: shouldUseMobileUI ? "14px" : "11px",
-    fontWeight: 500,
+  const dotStyle: CSSProperties = {
+    width: shouldUseMobileUI ? 8 : 6,
+    height: shouldUseMobileUI ? 8 : 6,
+    borderRadius: "50%",
+    backgroundColor: stateColor,
+    flexShrink: 0,
+  };
+
+  const titleContainerStyle: CSSProperties = {
     flex: 1,
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 1,
+  };
+
+  const titleStyle: CSSProperties = {
+    color: theme.colors.text.primary,
+    fontSize: shouldUseMobileUI
+      ? theme.typography.fontSize.base
+      : theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.medium,
+    lineHeight: theme.typography.lineHeight.tight,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   };
 
+  const subtitleStyle: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: shouldUseMobileUI ? 6 : 4,
+    fontSize: shouldUseMobileUI
+      ? theme.typography.fontSize.sm
+      : theme.typography.fontSize.xs,
+    color: theme.colors.text.muted,
+    lineHeight: 1.2,
+  };
+
   return (
     <div
-      style={rowStyle}
+      style={tileStyle}
       onClick={onClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <span style={nameStyle}>
-        {quest.pinned && (
+      {/* State dot */}
+      <div style={dotStyle} title={STATE_CONFIG[quest.state].label} />
+
+      {/* Title and subtitle */}
+      <div style={titleContainerStyle}>
+        <span style={titleStyle}>
+          {quest.pinned && (
+            <span
+              style={{
+                color: theme.colors.accent.gold,
+                marginRight: shouldUseMobileUI ? 5 : 3,
+              }}
+              title="Pinned"
+            >
+              ★
+            </span>
+          )}
+          {quest.title}
+        </span>
+        <div style={subtitleStyle}>
           <span
             style={{
-              color: "#ffd700", // Gold star for pinned quests
-              marginRight: shouldUseMobileUI ? "6px" : "4px",
+              color: categoryConfig.color,
+              fontWeight: theme.typography.fontWeight.medium,
             }}
-            title="Pinned"
           >
-            ★
+            {categoryConfig.label}
           </span>
-        )}
-        {quest.title}
-      </span>
-      {quest.state === "active" && progress > 0 && progress < 100 && (
-        <span
+          <span style={{ opacity: 0.4 }}>·</span>
+          <span>Lv. {quest.level}</span>
+        </div>
+      </div>
+
+      {/* Progress (active quests) */}
+      {quest.state === "active" && (
+        <div
           style={{
-            color: theme.colors.text.muted,
-            fontSize: shouldUseMobileUI ? "12px" : "9px",
-            marginLeft: shouldUseMobileUI ? "8px" : "6px",
+            display: "flex",
+            alignItems: "center",
+            gap: shouldUseMobileUI ? 6 : 4,
+            flexShrink: 0,
           }}
         >
-          {progress}%
-        </span>
+          <div
+            style={{
+              width: shouldUseMobileUI ? 48 : 36,
+              height: shouldUseMobileUI ? 5 : 3,
+              backgroundColor: theme.colors.background.tertiary,
+              borderRadius: PANEL_SLOT_RADIUS,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: `${progress}%`,
+                backgroundColor:
+                  progress === 100
+                    ? theme.colors.state.success
+                    : theme.colors.accent.primary,
+                transition: reducedMotion ? "none" : "width 0.3s ease",
+              }}
+            />
+          </div>
+          <span
+            style={{
+              fontSize: shouldUseMobileUI
+                ? theme.typography.fontSize.xs
+                : theme.typography.fontSize.xs,
+              color:
+                progress === 100
+                  ? theme.colors.state.success
+                  : theme.colors.text.muted,
+              fontWeight: theme.typography.fontWeight.medium,
+              minWidth: shouldUseMobileUI ? 28 : 24,
+              textAlign: "right",
+            }}
+          >
+            {progress}%
+          </span>
+        </div>
       )}
-      <span
-        style={{
-          color: theme.colors.text.muted,
-          marginLeft: shouldUseMobileUI ? "8px" : "6px",
-          fontSize: shouldUseMobileUI ? "12px" : "9px",
-        }}
-      >
-        Lv. {quest.level}
-      </span>
     </div>
   );
 });
 
-/** Category Group Component - Clean minimal header */
+/** Category Group Component — Themed header with accent bar */
 interface CategoryGroupProps {
   category: QuestCategory;
   quests: Quest[];
@@ -714,49 +790,66 @@ const CategoryGroup = memo(function CategoryGroup({
   const { shouldUseMobileUI } = useMobileLayout();
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const config = CATEGORY_CONFIG[category];
+  const categoryIcon = CATEGORY_ICONS[config.icon] || "";
 
   if (quests.length === 0) {
     return null;
   }
 
+  const insetBase = getPanelInsetStyle(theme, {
+    emphasis: "normal",
+    radius: PANEL_SLOT_RADIUS,
+  });
+
   const headerStyle: CSSProperties = {
+    ...insetBase,
     display: "flex",
     alignItems: "center",
-    gap: shouldUseMobileUI ? "8px" : "6px",
-    padding: shouldUseMobileUI ? "8px 12px" : "5px 8px",
+    gap: shouldUseMobileUI ? 8 : 6,
+    padding: shouldUseMobileUI
+      ? `${PANEL_MOBILE_PADDING + 5}px ${PANEL_MOBILE_PADDING + 6}px`
+      : `${PANEL_PADDING + 1}px ${PANEL_PADDING + 4}px`,
     cursor: "pointer",
     userSelect: "none",
-    backgroundColor: theme.colors.slot.filled,
-    borderBottom: `1px solid ${theme.colors.border.default}30`,
-    minHeight: shouldUseMobileUI ? "40px" : "26px",
+    borderLeft: `3px solid ${config.color}`,
+    minHeight: shouldUseMobileUI ? 40 : 28,
+    marginBottom: 1,
   };
 
   const expandIconStyle: CSSProperties = {
-    width: shouldUseMobileUI ? "14px" : "10px",
-    height: shouldUseMobileUI ? "14px" : "10px",
+    width: shouldUseMobileUI ? 14 : 10,
+    height: shouldUseMobileUI ? 14 : 10,
     color: theme.colors.text.muted,
     transform: collapsed ? "rotate(0deg)" : "rotate(90deg)",
     transition: reducedMotion ? "none" : "transform 0.15s ease",
-  };
-
-  const indicatorStyle: CSSProperties = {
-    width: shouldUseMobileUI ? "8px" : "6px",
-    height: shouldUseMobileUI ? "8px" : "6px",
-    borderRadius: "50%",
-    backgroundColor: config.color,
+    flexShrink: 0,
   };
 
   const nameStyle: CSSProperties = {
     flex: 1,
     color: theme.colors.text.secondary,
-    fontSize: shouldUseMobileUI ? "13px" : "10px",
-    fontWeight: 600,
+    fontSize: shouldUseMobileUI
+      ? theme.typography.fontSize.sm
+      : theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
     textTransform: "uppercase",
-    letterSpacing: "0.3px",
+    letterSpacing: "0.4px",
+  };
+
+  const countBadgeStyle: CSSProperties = {
+    fontSize: shouldUseMobileUI
+      ? theme.typography.fontSize.xs
+      : theme.typography.fontSize.xs,
+    color: theme.colors.text.muted,
+    backgroundColor: `${theme.colors.text.muted}15`,
+    padding: shouldUseMobileUI ? "2px 8px" : "1px 6px",
+    borderRadius: PANEL_SLOT_RADIUS,
+    fontWeight: theme.typography.fontWeight.medium,
+    flexShrink: 0,
   };
 
   return (
-    <div>
+    <div style={{ marginBottom: PANEL_GRID_GAP }}>
       <div
         role="button"
         tabIndex={0}
@@ -781,11 +874,26 @@ const CategoryGroup = memo(function CategoryGroup({
         >
           <path d="M4 2l4 4-4 4V2z" />
         </svg>
-        <div style={indicatorStyle} aria-hidden="true" />
+        {categoryIcon && (
+          <span
+            style={{ fontSize: shouldUseMobileUI ? 14 : 11, lineHeight: 1 }}
+            aria-hidden="true"
+          >
+            {categoryIcon}
+          </span>
+        )}
         <span style={nameStyle}>{config.label}</span>
+        <span style={countBadgeStyle}>{quests.length}</span>
       </div>
       {!collapsed && (
-        <div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: PANEL_GRID_GAP,
+            padding: `${PANEL_GRID_GAP}px 0`,
+          }}
+        >
           {quests.map((quest) => (
             <QuestListItem
               key={quest.id}
@@ -800,7 +908,7 @@ const CategoryGroup = memo(function CategoryGroup({
   );
 });
 
-/** Pinned Group Component - Shows pinned quests at top */
+/** Pinned Group Component — Gold-accented header for pinned quests */
 interface PinnedGroupProps {
   quests: Quest[];
   onQuestClick: (quest: Quest) => void;
@@ -818,50 +926,66 @@ const PinnedGroup = memo(function PinnedGroup({
   const { reducedMotion } = useAccessibilityStore();
   const { shouldUseMobileUI } = useMobileLayout();
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const goldColor = theme.colors.accent.gold;
 
-  // Don't render if no pinned quests
   if (quests.length === 0) {
     return null;
   }
 
+  const insetBase = getPanelInsetStyle(theme, {
+    emphasis: "normal",
+    radius: PANEL_SLOT_RADIUS,
+  });
+
   const headerStyle: CSSProperties = {
+    ...insetBase,
     display: "flex",
     alignItems: "center",
-    gap: shouldUseMobileUI ? "8px" : "6px",
-    padding: shouldUseMobileUI ? "8px 12px" : "5px 8px",
+    gap: shouldUseMobileUI ? 8 : 6,
+    padding: shouldUseMobileUI
+      ? `${PANEL_MOBILE_PADDING + 5}px ${PANEL_MOBILE_PADDING + 6}px`
+      : `${PANEL_PADDING + 1}px ${PANEL_PADDING + 4}px`,
     cursor: "pointer",
     userSelect: "none",
-    backgroundColor: theme.colors.slot.filled,
-    borderBottom: `1px solid ${theme.colors.border.default}30`,
-    minHeight: shouldUseMobileUI ? "40px" : "26px",
+    borderLeft: `3px solid ${goldColor}`,
+    minHeight: shouldUseMobileUI ? 40 : 28,
+    marginBottom: 1,
   };
 
   const expandIconStyle: CSSProperties = {
-    width: shouldUseMobileUI ? "14px" : "10px",
-    height: shouldUseMobileUI ? "14px" : "10px",
+    width: shouldUseMobileUI ? 14 : 10,
+    height: shouldUseMobileUI ? 14 : 10,
     color: theme.colors.text.muted,
     transform: collapsed ? "rotate(0deg)" : "rotate(90deg)",
     transition: reducedMotion ? "none" : "transform 0.15s ease",
-  };
-
-  const indicatorStyle: CSSProperties = {
-    width: shouldUseMobileUI ? "8px" : "6px",
-    height: shouldUseMobileUI ? "8px" : "6px",
-    borderRadius: "50%",
-    backgroundColor: "#ffd700", // Gold color for pinned
+    flexShrink: 0,
   };
 
   const nameStyle: CSSProperties = {
     flex: 1,
     color: theme.colors.text.secondary,
-    fontSize: shouldUseMobileUI ? "13px" : "10px",
-    fontWeight: 600,
+    fontSize: shouldUseMobileUI
+      ? theme.typography.fontSize.sm
+      : theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
     textTransform: "uppercase",
-    letterSpacing: "0.3px",
+    letterSpacing: "0.4px",
+  };
+
+  const countBadgeStyle: CSSProperties = {
+    fontSize: shouldUseMobileUI
+      ? theme.typography.fontSize.xs
+      : theme.typography.fontSize.xs,
+    color: goldColor,
+    backgroundColor: `${goldColor}15`,
+    padding: shouldUseMobileUI ? "2px 8px" : "1px 6px",
+    borderRadius: PANEL_SLOT_RADIUS,
+    fontWeight: theme.typography.fontWeight.medium,
+    flexShrink: 0,
   };
 
   return (
-    <div>
+    <div style={{ marginBottom: PANEL_GRID_GAP }}>
       <div
         role="button"
         tabIndex={0}
@@ -886,11 +1010,28 @@ const PinnedGroup = memo(function PinnedGroup({
         >
           <path d="M4 2l4 4-4 4V2z" />
         </svg>
-        <div style={indicatorStyle} aria-hidden="true" />
+        <span
+          style={{
+            color: goldColor,
+            fontSize: shouldUseMobileUI ? 14 : 11,
+            lineHeight: 1,
+          }}
+          aria-hidden="true"
+        >
+          ★
+        </span>
         <span style={nameStyle}>Pinned</span>
+        <span style={countBadgeStyle}>{quests.length}</span>
       </div>
       {!collapsed && (
-        <div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: PANEL_GRID_GAP,
+            padding: `${PANEL_GRID_GAP}px 0`,
+          }}
+        >
           {quests.map((quest) => (
             <QuestListItem
               key={quest.id}
@@ -1066,65 +1207,62 @@ export const QuestLog = memo(function QuestLog({
   // Check if any filters are active
   const hasActiveFilters = stateFilter.length > 0 || categoryFilter.length > 0;
 
-  // Container styles - clean minimal
   const containerStyle: CSSProperties = {
+    ...getPanelSurfaceStyle(theme),
     display: "flex",
     flexDirection: "column",
-    backgroundColor: theme.colors.background.panelSecondary,
     overflow: "hidden",
     height: "100%",
     ...style,
   };
 
-  // Compact header with stats and toolbar - mobile responsive
   const headerStyle: CSSProperties = {
+    ...getPanelInsetStyle(theme, { radius: 0 }),
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
-    backgroundColor: theme.colors.slot.filled,
-    borderBottom: `1px solid ${theme.colors.border.default}30`,
+    padding: shouldUseMobileUI
+      ? `${PANEL_MOBILE_PADDING * 2}px ${PANEL_MOBILE_PADDING * 2 + 2}px`
+      : `${PANEL_PADDING}px ${PANEL_PADDING + 2}px`,
     minHeight: shouldUseMobileUI ? "36px" : "26px",
-    gap: shouldUseMobileUI ? "6px" : "4px",
+    gap: shouldUseMobileUI ? "6px" : `${PANEL_GRID_GAP}px`,
+    borderBottom: `1px solid ${theme.colors.border.default}30`,
   };
 
-  // Compact stats - mobile responsive
   const statsStyle: CSSProperties = {
     display: "flex",
-    gap: shouldUseMobileUI ? "8px" : "6px",
-    fontSize: shouldUseMobileUI ? "12px" : "10px",
-    color: theme.colors.text.muted,
+    gap: shouldUseMobileUI ? "6px" : `${PANEL_GRID_GAP}px`,
     flex: 1,
+    flexWrap: "wrap",
   };
 
-  // Toolbar buttons
   const toolbarStyle: CSSProperties = {
     display: "flex",
-    gap: shouldUseMobileUI ? "6px" : "3px",
+    gap: shouldUseMobileUI ? "6px" : `${PANEL_GRID_GAP - 1}px`,
     alignItems: "center",
   };
 
-  // Icon button - mobile responsive for touch targets
   const iconButtonStyle = (active: boolean): CSSProperties => ({
-    width: shouldUseMobileUI ? "32px" : "20px",
-    height: shouldUseMobileUI ? "32px" : "20px",
+    width: shouldUseMobileUI ? "32px" : "22px",
+    height: shouldUseMobileUI ? "32px" : "22px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: active
       ? theme.colors.accent.primary
-      : theme.colors.slot.filled,
+      : theme.colors.slot.empty,
     color: active ? theme.colors.background.primary : theme.colors.text.muted,
     border: `1px solid ${active ? theme.colors.accent.primary : theme.colors.border.default}30`,
-    borderRadius: shouldUseMobileUI ? "4px" : "3px",
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
     cursor: "pointer",
     padding: 0,
     transition: reducedMotion ? "none" : "all 0.1s ease",
   });
 
-  // Collapsible search - mobile responsive
   const searchContainerStyle: CSSProperties = {
-    padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
+    padding: shouldUseMobileUI
+      ? `${PANEL_MOBILE_PADDING * 2}px`
+      : `${PANEL_PADDING}px ${PANEL_PADDING + 2}px`,
     borderBottom: `1px solid ${theme.colors.border.default}30`,
     display: searchExpanded ? "block" : "none",
   };
@@ -1134,60 +1272,66 @@ export const QuestLog = memo(function QuestLog({
     padding: shouldUseMobileUI ? "8px 12px" : "4px 8px",
     backgroundColor: theme.colors.slot.empty,
     border: `1px solid ${theme.colors.border.default}30`,
-    borderRadius: shouldUseMobileUI ? "4px" : "3px",
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
     color: theme.colors.text.primary,
-    fontSize: shouldUseMobileUI ? "14px" : "10px",
+    fontSize: shouldUseMobileUI
+      ? theme.typography.fontSize.sm
+      : theme.typography.fontSize.xs,
     outline: "none",
   };
 
-  // Collapsible filters - compact, mobile responsive
   const filtersContainerStyle: CSSProperties = {
-    padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
+    ...getPanelInsetStyle(theme, { radius: 0 }),
+    padding: shouldUseMobileUI
+      ? `${PANEL_MOBILE_PADDING * 2}px`
+      : `${PANEL_PADDING}px ${PANEL_PADDING + 2}px`,
     borderBottom: `1px solid ${theme.colors.border.default}30`,
     display: filtersExpanded ? "flex" : "none",
     flexDirection: "column",
-    gap: shouldUseMobileUI ? "6px" : "3px",
-    backgroundColor: theme.colors.slot.filled,
+    gap: shouldUseMobileUI ? "6px" : `${PANEL_GRID_GAP}px`,
   };
 
-  // Compact filter row - mobile responsive
   const filterRowStyle: CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: shouldUseMobileUI ? "6px" : "3px",
+    gap: shouldUseMobileUI ? "6px" : `${PANEL_GRID_GAP}px`,
     flexWrap: "wrap",
   };
 
-  // Filter chips - mobile responsive for touch targets
   const getFilterChipStyle = (active: boolean): CSSProperties => ({
-    padding: shouldUseMobileUI ? "6px 10px" : "2px 5px",
-    borderRadius: shouldUseMobileUI ? "4px" : "3px",
+    padding: shouldUseMobileUI ? "4px 8px" : "2px 6px",
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
     backgroundColor: active
       ? theme.colors.accent.primary
       : theme.colors.slot.empty,
     color: active ? theme.colors.background.primary : theme.colors.text.muted,
-    fontSize: shouldUseMobileUI ? "12px" : "9px",
-    fontWeight: 500,
+    fontSize: shouldUseMobileUI
+      ? theme.typography.fontSize.sm
+      : theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.medium,
     cursor: "pointer",
     border: active ? "none" : `1px solid ${theme.colors.border.default}30`,
     transition: reducedMotion ? "none" : "all 0.1s ease",
-    lineHeight: "1.3",
+    lineHeight: `${theme.typography.lineHeight.tight}`,
   });
 
-  // Content area - takes remaining space
   const contentStyle: CSSProperties = {
     flex: 1,
     overflowY: "auto",
     maxHeight: maxHeight,
+    padding: shouldUseMobileUI
+      ? `${PANEL_MOBILE_PADDING}px`
+      : `${PANEL_PADDING}px`,
     WebkitOverflowScrolling: "touch",
   };
 
-  // Empty state - mobile responsive
   const emptyStyle: CSSProperties = {
     padding: shouldUseMobileUI ? "24px" : "16px",
     textAlign: "center",
     color: theme.colors.text.muted,
-    fontSize: shouldUseMobileUI ? "14px" : "11px",
+    fontSize: shouldUseMobileUI
+      ? theme.typography.fontSize.sm
+      : theme.typography.fontSize.xs,
   };
 
   // Sort options
@@ -1215,33 +1359,58 @@ export const QuestLog = memo(function QuestLog({
         {/* Header with Title, Stats and Toolbar */}
         {showHeader && (
           <div style={headerStyle}>
-            {/* Title */}
             <span
               style={{
                 color: theme.colors.text.secondary,
-                fontSize: shouldUseMobileUI ? "13px" : "10px",
-                fontWeight: 600,
+                fontSize: shouldUseMobileUI
+                  ? theme.typography.fontSize.sm
+                  : theme.typography.fontSize.xs,
+                fontWeight: theme.typography.fontWeight.semibold,
                 marginRight: shouldUseMobileUI ? "8px" : "6px",
+                whiteSpace: "nowrap",
               }}
             >
               {title}
             </span>
-            {/* Quest counts - colored numbers */}
             {questCounts && (
               <div style={statsStyle}>
-                <span style={{ color: STATUS_COLORS.active, fontWeight: 600 }}>
-                  {questCounts.active}
-                </span>
-                <span
-                  style={{ color: STATUS_COLORS.available, fontWeight: 600 }}
-                >
-                  {questCounts.available}
-                </span>
-                <span
-                  style={{ color: STATUS_COLORS.completed, fontWeight: 600 }}
-                >
-                  {questCounts.completed}
-                </span>
+                {(
+                  [
+                    {
+                      state: "active" as QuestState,
+                      count: questCounts.active,
+                      label: "Active",
+                    },
+                    {
+                      state: "available" as QuestState,
+                      count: questCounts.available,
+                      label: "Avail",
+                    },
+                    {
+                      state: "completed" as QuestState,
+                      count: questCounts.completed,
+                      label: "Done",
+                    },
+                  ] as const
+                ).map(({ state, count, label }) => (
+                  <span
+                    key={state}
+                    style={{
+                      backgroundColor: `${getStateColor(state)}18`,
+                      color: getStateColor(state),
+                      padding: shouldUseMobileUI ? "2px 6px" : "1px 4px",
+                      borderRadius: `${PANEL_SLOT_RADIUS}px`,
+                      fontSize: shouldUseMobileUI
+                        ? theme.typography.fontSize.xs
+                        : "9px",
+                      fontWeight: theme.typography.fontWeight.semibold,
+                      lineHeight: `${theme.typography.lineHeight.tight}`,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {count} {label}
+                  </span>
+                ))}
               </div>
             )}
             <div style={toolbarStyle}>
@@ -1252,7 +1421,7 @@ export const QuestLog = memo(function QuestLog({
                   onClick={() => setSearchExpanded(!searchExpanded)}
                   title="Search"
                 >
-                  <SearchIcon />
+                  <SearchIcon size={shouldUseMobileUI ? 16 : 12} />
                 </button>
               )}
               {/* Filter toggle */}
@@ -1263,7 +1432,7 @@ export const QuestLog = memo(function QuestLog({
                     onClick={() => setFiltersExpanded(!filtersExpanded)}
                     title="Filters"
                   >
-                    <FilterIcon />
+                    <FilterIcon size={shouldUseMobileUI ? 16 : 12} />
                   </button>
                 )}
               {/* Sort dropdown with direction toggle */}
@@ -1275,12 +1444,14 @@ export const QuestLog = memo(function QuestLog({
                       onSortChange(e.target.value as QuestSortOption)
                     }
                     style={{
-                      padding: shouldUseMobileUI ? "6px 8px" : "2px 4px",
+                      padding: shouldUseMobileUI ? "4px 6px" : "2px 4px",
                       backgroundColor: theme.colors.slot.empty,
                       border: `1px solid ${theme.colors.border.default}30`,
-                      borderRadius: shouldUseMobileUI ? "4px" : "3px",
+                      borderRadius: `${PANEL_SLOT_RADIUS}px`,
                       color: theme.colors.text.muted,
-                      fontSize: shouldUseMobileUI ? "12px" : "9px",
+                      fontSize: shouldUseMobileUI
+                        ? theme.typography.fontSize.xs
+                        : "9px",
                       cursor: "pointer",
                       outline: "none",
                     }}
@@ -1295,8 +1466,8 @@ export const QuestLog = memo(function QuestLog({
                     <button
                       style={{
                         ...iconButtonStyle(false),
-                        width: shouldUseMobileUI ? "28px" : "18px",
-                        height: shouldUseMobileUI ? "28px" : "18px",
+                        width: shouldUseMobileUI ? "28px" : "20px",
+                        height: shouldUseMobileUI ? "28px" : "20px",
                       }}
                       onClick={() =>
                         onSortDirectionChange(
@@ -1308,8 +1479,8 @@ export const QuestLog = memo(function QuestLog({
                       }
                     >
                       <svg
-                        width="8"
-                        height="8"
+                        width={shouldUseMobileUI ? 10 : 8}
+                        height={shouldUseMobileUI ? 10 : 8}
                         viewBox="0 0 12 12"
                         fill="currentColor"
                         style={{

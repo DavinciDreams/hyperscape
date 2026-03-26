@@ -3,7 +3,7 @@
  *
  * Connects the QuestLog component to the server's quest system via network.
  * Displays available, active, and completed quests with filtering and sorting.
- * Uses COLORS constants for consistent styling with other panels.
+ * Uses theme utilities for consistent styling with other panels.
  *
  * Desktop: When a quest is clicked, it opens the QuestDetailPanel in a separate window.
  * Mobile: Quest details are shown inline with a back button to return to the list.
@@ -18,7 +18,11 @@ import {
   useMobileLayout,
   useTheme,
 } from "@/ui";
-import { getPanelSurfaceStyle } from "@/ui/theme/themes";
+import { getPanelSurfaceStyle, getPanelInsetStyle } from "@/ui/theme/themes";
+import {
+  PANEL_MOBILE_PADDING,
+  PANEL_SLOT_RADIUS,
+} from "../../constants/panelLayout";
 import { QuestLog } from "@/game/components/quest";
 import {
   type Quest,
@@ -30,8 +34,8 @@ import {
   filterQuests,
   calculateQuestProgress,
   CATEGORY_CONFIG,
+  STATE_CONFIG,
 } from "@/game/systems";
-import { COLORS, spacing, typography } from "../../constants";
 import { parseJSONWithDefault } from "../../utils/validation";
 import type { ClientWorld } from "../../types";
 
@@ -108,12 +112,16 @@ function saveLastViewedQuest(questId: string | null): void {
   }
 }
 
-// OSRS-style status colors for mobile detail view
-const STATUS_COLORS: Record<string, string> = {
-  available: COLORS.ERROR,
-  active: COLORS.WARNING,
-  completed: COLORS.SUCCESS,
-  failed: COLORS.TEXT_MUTED,
+function getStateColor(state: QuestState): string {
+  return STATE_CONFIG[state].color;
+}
+
+const CATEGORY_ICONS: Record<string, string> = {
+  crown: "\u{1F451}",
+  scroll: "\u{1F4DC}",
+  sun: "\u2600\uFE0F",
+  calendar: "\u{1F4C5}",
+  star: "\u2B50",
 };
 
 /** Server quest list item structure */
@@ -281,24 +289,26 @@ function MobileQuestDetail({
 }: MobileQuestDetailProps) {
   const progress = calculateQuestProgress(quest);
   const categoryConfig = CATEGORY_CONFIG[quest.category];
+  const categoryIcon =
+    CATEGORY_ICONS[categoryConfig.icon] || categoryConfig.icon;
   const canAccept = quest.state === "available";
   const canComplete = quest.state === "active" && progress === 100;
 
   const containerStyle: React.CSSProperties = {
+    ...getPanelSurfaceStyle(theme),
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    background: theme.colors.background.panelSecondary,
     overflow: "hidden",
   };
 
   const headerStyle: React.CSSProperties = {
+    ...getPanelInsetStyle(theme, { radius: 0 }),
     display: "flex",
     alignItems: "center",
-    gap: spacing.sm,
-    padding: `${spacing.sm} ${spacing.sm}`,
+    gap: theme.spacing.sm,
+    padding: `${PANEL_MOBILE_PADDING * 2 + 2}px`,
     borderBottom: `1px solid ${theme.colors.border.default}`,
-    background: theme.colors.background.panelSecondary,
     minHeight: "48px",
   };
 
@@ -310,17 +320,17 @@ function MobileQuestDetail({
     height: "36px",
     background: "transparent",
     border: "none",
-    color: COLORS.TEXT_SECONDARY,
+    color: theme.colors.text.secondary,
     cursor: "pointer",
     padding: 0,
-    borderRadius: "6px",
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
   };
 
   const titleStyle: React.CSSProperties = {
     flex: 1,
-    color: STATUS_COLORS[quest.state] || COLORS.TEXT_PRIMARY,
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.semibold,
+    color: getStateColor(quest.state),
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
     margin: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -330,40 +340,38 @@ function MobileQuestDetail({
   const contentStyle: React.CSSProperties = {
     flex: 1,
     overflowY: "auto",
-    padding: spacing.sm,
+    padding: `${PANEL_MOBILE_PADDING * 2 + 2}px`,
     WebkitOverflowScrolling: "touch",
   };
 
   const sectionStyle: React.CSSProperties = {
-    marginBottom: spacing.sm,
+    marginBottom: theme.spacing.sm,
   };
 
   const sectionTitleStyle: React.CSSProperties = {
-    color: COLORS.ACCENT,
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
+    color: theme.colors.accent.primary,
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
     textTransform: "uppercase",
     letterSpacing: "0.5px",
-    marginBottom: spacing.xs,
+    marginBottom: theme.spacing.xs,
   };
 
   const descriptionStyle: React.CSSProperties = {
-    color: COLORS.TEXT_SECONDARY,
-    fontSize: typography.fontSize.base,
-    lineHeight: "1.5",
+    color: theme.colors.text.secondary,
+    fontSize: theme.typography.fontSize.base,
+    lineHeight: theme.typography.lineHeight.normal,
     margin: 0,
   };
 
   const metaRowStyle: React.CSSProperties = {
+    ...getPanelInsetStyle(theme, { radius: PANEL_SLOT_RADIUS }),
     display: "flex",
     flexWrap: "wrap",
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-    padding: spacing.sm,
-    background: theme.colors.background.tertiary,
-    borderRadius: "6px",
-    border: `1px solid ${theme.colors.border.default}`,
-    fontSize: typography.fontSize.base,
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+    padding: theme.spacing.sm,
+    fontSize: theme.typography.fontSize.base,
   };
 
   const metaItemStyle: React.CSSProperties = {
@@ -374,39 +382,42 @@ function MobileQuestDetail({
   };
 
   const metaLabelStyle: React.CSSProperties = {
-    color: COLORS.TEXT_MUTED,
-    fontSize: typography.fontSize.sm,
+    color: theme.colors.text.muted,
+    fontSize: theme.typography.fontSize.sm,
     textTransform: "uppercase",
   };
 
   const metaValueStyle: React.CSSProperties = {
-    color: COLORS.TEXT_PRIMARY,
-    fontWeight: typography.fontWeight.medium,
+    color: theme.colors.text.primary,
+    fontWeight: theme.typography.fontWeight.medium,
   };
 
   const progressBarContainerStyle: React.CSSProperties = {
     height: "6px",
-    backgroundColor: COLORS.BG_TERTIARY,
-    borderRadius: "2px",
+    backgroundColor: theme.colors.background.tertiary,
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
     overflow: "hidden",
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
+    marginTop: theme.spacing.xs,
+    marginBottom: theme.spacing.sm,
   };
 
   const progressBarFillStyle: React.CSSProperties = {
     height: "100%",
     width: `${progress}%`,
-    backgroundColor: progress === 100 ? COLORS.SUCCESS : COLORS.ACCENT,
+    backgroundColor:
+      progress === 100
+        ? theme.colors.state.success
+        : theme.colors.accent.primary,
     transition: "width 0.3s ease",
   };
 
   const objectiveStyle = (completed: boolean): React.CSSProperties => ({
     display: "flex",
     alignItems: "flex-start",
-    gap: spacing.xs,
-    padding: `${spacing.xs} 0`,
-    color: completed ? COLORS.SUCCESS : COLORS.TEXT_SECONDARY,
-    fontSize: typography.fontSize.base,
+    gap: theme.spacing.xs,
+    padding: `${theme.spacing.xs}px 0`,
+    color: completed ? theme.colors.state.success : theme.colors.text.secondary,
+    fontSize: theme.typography.fontSize.base,
     textDecoration: completed ? "line-through" : "none",
     opacity: completed ? 0.7 : 1,
   });
@@ -414,34 +425,34 @@ function MobileQuestDetail({
   const actionsStyle: React.CSSProperties = {
     display: "flex",
     flexDirection: "column",
-    gap: spacing.sm,
-    padding: spacing.sm,
+    gap: theme.spacing.sm,
+    padding: `${PANEL_MOBILE_PADDING * 2 + 2}px`,
     borderTop: `1px solid ${theme.colors.border.default}`,
-    background: theme.colors.background.panelSecondary,
+    background: theme.colors.background.secondary,
   };
 
   const buttonBaseStyle: React.CSSProperties = {
-    padding: `${spacing.md} ${spacing.md}`,
+    padding: `${theme.spacing.md}px`,
     border: "none",
-    borderRadius: "6px",
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.medium,
+    borderRadius: `${PANEL_SLOT_RADIUS}px`,
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.medium,
     cursor: "pointer",
-    transition: "all 0.15s ease",
+    transition: theme.transitions.fast,
     minHeight: "44px",
   };
 
   const primaryButtonStyle: React.CSSProperties = {
     ...buttonBaseStyle,
-    background: COLORS.ACCENT,
-    color: COLORS.BG_PRIMARY,
+    background: theme.colors.accent.primary,
+    color: theme.colors.background.primary,
   };
 
   const secondaryButtonStyle: React.CSSProperties = {
     ...buttonBaseStyle,
-    background: COLORS.BG_TERTIARY,
-    color: COLORS.TEXT_PRIMARY,
-    border: `1px solid ${COLORS.BORDER_PRIMARY}`,
+    background: theme.colors.background.tertiary,
+    color: theme.colors.text.primary,
+    border: `1px solid ${theme.colors.border.default}`,
   };
 
   return (
@@ -467,7 +478,7 @@ function MobileQuestDetail({
         <h3 style={titleStyle}>
           {quest.pinned && (
             <span
-              style={{ color: "#ffd700", marginRight: "6px" }}
+              style={{ color: theme.colors.accent.gold, marginRight: "6px" }}
               title="Pinned"
             >
               ★
@@ -484,7 +495,7 @@ function MobileQuestDetail({
           <div style={metaItemStyle}>
             <span style={metaLabelStyle}>Category</span>
             <span style={{ ...metaValueStyle, color: categoryConfig.color }}>
-              {categoryConfig.icon} {categoryConfig.label}
+              {categoryIcon} {categoryConfig.label}
             </span>
           </div>
           <div style={metaItemStyle}>
@@ -496,7 +507,7 @@ function MobileQuestDetail({
             <span
               style={{
                 ...metaValueStyle,
-                color: STATUS_COLORS[quest.state],
+                color: getStateColor(quest.state),
               }}
             >
               {quest.state.charAt(0).toUpperCase() + quest.state.slice(1)}
@@ -552,10 +563,10 @@ function MobileQuestDetail({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: spacing.xs,
-                  padding: `${spacing.xs} 0`,
-                  color: COLORS.TEXT_SECONDARY,
-                  fontSize: typography.fontSize.base,
+                  gap: theme.spacing.xs,
+                  padding: `${theme.spacing.xs}px 0`,
+                  color: theme.colors.text.secondary,
+                  fontSize: theme.typography.fontSize.base,
                 }}
               >
                 <span>{reward.icon || "•"}</span>
@@ -575,7 +586,7 @@ function MobileQuestDetail({
             <div style={descriptionStyle}>
               {quest.questGiver}
               {quest.questGiverLocation && (
-                <span style={{ color: COLORS.TEXT_MUTED }}>
+                <span style={{ color: theme.colors.text.muted }}>
                   {" "}
                   - {quest.questGiverLocation}
                 </span>

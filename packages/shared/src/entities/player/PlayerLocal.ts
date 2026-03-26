@@ -2350,17 +2350,39 @@ export class PlayerLocal extends Entity implements HotReloadable {
       // Otherwise entities face AWAY from each other instead of towards
       angle += Math.PI;
 
-      // Apply instant rotation (RuneScape doesn't lerp combat rotation) using pre-allocated temps
-      if (this.base) {
-        _combatQuat.setFromAxisAngle(_combatAxis, angle);
-        this.base.quaternion.copy(_combatQuat);
+      _combatQuat.setFromAxisAngle(_combatAxis, angle);
 
-        // Issue #322: Store this rotation to preserve facing after combat ends
-        if (!this._lastCombatRotation) {
-          this._lastCombatRotation = new THREE.Quaternion();
-        }
-        this._lastCombatRotation.copy(_combatQuat);
+      // FIX: Route combat rotation through TileInterpolator when it controls this entity.
+      // Previously, PlayerLocal wrote directly to base.quaternion which caused a race condition:
+      // PlayerLocal.update() (hot entity) runs BEFORE TileInterpolator.update() (system),
+      // so TileInterpolator would overwrite the combat rotation with its stale state.quaternion,
+      // or vice versa — the two systems fought over base.quaternion every frame.
+      // Now combat rotation flows through TileInterpolator's state, matching how remote players work.
+      const tileControlled = this.data?.tileInterpolatorControlled === true;
+      if (tileControlled) {
+        const network = this.world.network as {
+          tileInterpolator?: {
+            setCombatRotation?: (
+              entityId: string,
+              quaternion: number[] | THREE.Quaternion,
+              entityPosition?: { x: number; y: number; z: number },
+            ) => boolean;
+          };
+        };
+        network?.tileInterpolator?.setCombatRotation?.(
+          this.data.id,
+          _combatQuat,
+        );
+      } else if (this.base) {
+        // Fallback: TileInterpolator hasn't touched this entity yet
+        this.base.quaternion.copy(_combatQuat);
       }
+
+      // Issue #322: Store this rotation to preserve facing after combat ends
+      if (!this._lastCombatRotation) {
+        this._lastCombatRotation = new THREE.Quaternion();
+      }
+      this._lastCombatRotation.copy(_combatQuat);
     } else if (
       !combatTarget &&
       !isMoving &&
@@ -2368,7 +2390,25 @@ export class PlayerLocal extends Entity implements HotReloadable {
       this.base
     ) {
       // Issue #322: When combat ends but player isn't moving, preserve combat facing direction
-      this.base.quaternion.copy(this._lastCombatRotation);
+      // Route through TileInterpolator to avoid the same race condition
+      const tileControlled = this.data?.tileInterpolatorControlled === true;
+      if (tileControlled) {
+        const network = this.world.network as {
+          tileInterpolator?: {
+            setCombatRotation?: (
+              entityId: string,
+              quaternion: number[] | THREE.Quaternion,
+              entityPosition?: { x: number; y: number; z: number },
+            ) => boolean;
+          };
+        };
+        network?.tileInterpolator?.setCombatRotation?.(
+          this.data.id,
+          this._lastCombatRotation,
+        );
+      } else {
+        this.base.quaternion.copy(this._lastCombatRotation);
+      }
     }
 
     // Server-authoritative movement: minimal updates only

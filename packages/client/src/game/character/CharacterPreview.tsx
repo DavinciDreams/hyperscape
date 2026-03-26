@@ -68,7 +68,7 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
   const rendererRef = useRef<WebGPURenderer | null>(null);
   const vrmRef = useRef<VRM | null>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
-  const clockRef = useRef<THREE.Clock>(new THREE.Clock());
+  const lastTimeRef = useRef<number>(0);
   const frameIdRef = useRef<number>(0);
   const rendererInitializedRef = useRef<boolean>(false);
   // Store lights in refs for proper disposal
@@ -318,7 +318,10 @@ export const CharacterPreview: React.FC<CharacterPreviewProps> = ({
 
     const animate = () => {
       frameIdRef.current = requestAnimationFrame(animate);
-      const delta = clockRef.current.getDelta();
+      const time = performance.now();
+      const delta =
+        lastTimeRef.current === 0 ? 0 : (time - lastTimeRef.current) / 1000;
+      lastTimeRef.current = time;
 
       if (vrmRef.current) {
         vrmRef.current.update(delta);
