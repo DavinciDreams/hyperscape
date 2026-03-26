@@ -128,15 +128,16 @@ export class TradingSystem {
 
     // Subscribe to player death to cancel active trades
     const onPlayerDied = (payload: unknown): void => {
-      const data = payload as { playerId: string };
-      const tradeId = this.getPlayerTradeId(data.playerId);
+      const data = payload as { entityId: string; entityType: string };
+      if (data.entityType !== "player") return;
+      const tradeId = this.getPlayerTradeId(data.entityId);
       if (tradeId) {
         this.cancelTrade(tradeId, "player_died");
       }
     };
-    this.world.on(EventType.PLAYER_DIED, onPlayerDied);
+    this.world.on(EventType.ENTITY_DEATH, onPlayerDied);
     this.eventListeners.push({
-      event: EventType.PLAYER_DIED,
+      event: EventType.ENTITY_DEATH,
       handler: onPlayerDied,
     });
   }

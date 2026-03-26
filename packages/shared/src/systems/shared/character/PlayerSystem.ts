@@ -47,6 +47,8 @@ import {
   Skills,
 } from "../../../types/core/core";
 import { WeaponType } from "../../../types/game/item-types";
+import { DeathState } from "../../../types/entities";
+import type { PlayerEntityLike } from "../combat/DeathTypes";
 import {
   isStyleValidForWeapon,
   getAvailableStyles,
@@ -56,7 +58,6 @@ import {
 import type { CombatStyleExtended } from "../../../types/game/combat-types";
 import type {
   HealthUpdateEvent,
-  PlayerDeathEvent,
   PlayerEnterEvent,
   PlayerLeaveEvent,
   PlayerLevelUpEvent,
@@ -85,11 +86,9 @@ export class PlayerSystem extends SystemBase {
   declare world: World;
 
   private players = new Map<string, Player>();
-  private respawnTimers = new Map<string, NodeJS.Timeout>();
   private entityManager?: EntityManager;
   private databaseSystem?: DatabaseSystem;
   private playerLocalRefs = new Map<string, PlayerLocal>(); // Store PlayerLocal references for integration
-  private readonly RESPAWN_TIME = 30000; // 30 seconds per GDD
   private readonly AUTO_SAVE_INTERVAL = 30000; // 30 seconds auto-save
   private saveInterval?: NodeJS.Timeout;
   private _tempVec3 = new THREE.Vector3();
@@ -302,9 +301,6 @@ export class PlayerSystem extends SystemBase {
     });
     this.subscribe(EventType.PLAYER_DAMAGE_TAKEN, (data) => {
       this.takeDamage(data as { playerId: string; damage: number });
-    });
-    this.subscribe<PlayerDeathEvent>(EventType.PLAYER_DIED, (data) => {
-      this.handleDeath(data);
     });
     // Subscribe to PLAYER_RESPAWNED from DeathSystem to update our player data
     this.subscribe(EventType.PLAYER_RESPAWNED, (data) => {
@@ -778,12 +774,7 @@ export class PlayerSystem extends SystemBase {
     // Unregister userId mapping
     PlayerIdMapper.unregister(data.playerId);
 
-    // Clear any respawn timers
-    const timer = this.respawnTimers.get(data.playerId);
-    if (timer) {
-      clearTimeout(timer);
-      this.respawnTimers.delete(data.playerId);
-    }
+    // Note: respawn timers are owned by PlayerDeathSystem
   }
 
   async updateHealth(data: HealthUpdateEvent): Promise<void> {
@@ -831,7 +822,6 @@ export class PlayerSystem extends SystemBase {
     if (player.health.current <= 0 && player.alive) {
       this.handleDeath({
         playerId: data.entityId,
-        deathLocation: player.position,
         cause: "health_depletion",
       });
     }
@@ -839,7 +829,7 @@ export class PlayerSystem extends SystemBase {
     this.emitPlayerUpdate(data.entityId);
   }
 
-  private handleDeath(data: PlayerDeathEvent): void {
+  private handleDeath(data: { playerId: string; cause?: string }): void {
     const player = this.players.get(data.playerId);
     if (!player) {
       return; // Player not found, ignore
@@ -853,17 +843,61 @@ export class PlayerSystem extends SystemBase {
     // Mark player as dead in PlayerSystem data
     player.alive = false;
     player.death.deathLocation = { ...player.position };
-    player.death.respawnTime = Date.now() + this.RESPAWN_TIME;
 
     // Clear eat cooldown on death (memory hygiene)
     this.eatDelayManager.clearPlayer(data.playerId);
 
+    // DEATH FLOW: PlayerSystem sets entity state + emits PLAYER_SET_DEAD (immediate client feedback).
+    // Then ENTITY_DEATH fires → PlayerDeathSystem handles items, transaction, gravestone, respawnTick.
+    // See PlayerDeathSystem.postDeathCleanup for the respawn/death-screen half of the flow.
+    //
+    // Set entity death state IMMEDIATELY so client sees death animation
+    // even if PlayerDeathSystem's async processing fails
+    const deathEntity = this.world.entities?.get?.(data.playerId);
+    if (deathEntity) {
+      const typedEntity = deathEntity as PlayerEntityLike;
+      if (typedEntity.emote !== undefined) {
+        typedEntity.emote = "death";
+      }
+      if (typedEntity.data) {
+        typedEntity.data.e = "death";
+        typedEntity.data.deathState = DeathState.DYING;
+        typedEntity.data.deathPosition = [
+          player.position.x,
+          player.position.y,
+          player.position.z,
+        ];
+      }
+      if (typedEntity.markNetworkDirty) {
+        typedEntity.markNetworkDirty();
+      }
+    }
+
+    // Emit PLAYER_SET_DEAD immediately so client blocks input.
+    // Wrapped in try-catch: if a subscriber throws, ENTITY_DEATH must still fire
+    // so PlayerDeathSystem processes the death (items, gravestone, respawn).
+    try {
+      this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
+        playerId: data.playerId,
+        isDead: true,
+        deathPosition: player.position,
+      });
+    } catch (err) {
+      console.error(
+        `[PlayerSystem] PLAYER_SET_DEAD subscriber threw — continuing to ENTITY_DEATH`,
+        err,
+      );
+    }
+
     // Emit ENTITY_DEATH for DeathSystem to handle (headstones, loot, respawn)
     // DeathSystem will handle the full death flow including respawn
+    // Include deathPosition so PlayerDeathSystem can use the exact death location
+    // without falling back to potentially stale position caches
     this.emitTypedEvent(EventType.ENTITY_DEATH, {
       entityId: data.playerId,
       killedBy: data.cause || "unknown",
       entityType: "player" as const,
+      deathPosition: { ...player.position },
     });
 
     this.emitPlayerUpdate(data.playerId);
@@ -900,7 +934,6 @@ export class PlayerSystem extends SystemBase {
     if (newHealth <= 0) {
       this.handleDeath({
         playerId: data.playerId,
-        deathLocation: player.position,
         cause: "combat",
       });
     }
@@ -1408,7 +1441,9 @@ export class PlayerSystem extends SystemBase {
 
   damagePlayer(playerId: string, amount: number, _source?: string): boolean {
     const player = this.players.get(playerId);
-    if (!player || !player.alive) return false;
+    if (!player || !player.alive) {
+      return false;
+    }
 
     // Validate amount to prevent NaN
     const validAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
@@ -1470,7 +1505,6 @@ export class PlayerSystem extends SystemBase {
     if (player.health.current <= 0) {
       this.handleDeath({
         playerId,
-        deathLocation: player.position,
         cause: _source || "damage",
       });
     }
@@ -1480,10 +1514,6 @@ export class PlayerSystem extends SystemBase {
   }
 
   destroy(): void {
-    // Clear all timers
-    this.respawnTimers.forEach((timer) => clearTimeout(timer));
-    this.respawnTimers.clear();
-
     // Clear auto-save
     if (this.saveInterval) {
       clearInterval(this.saveInterval);

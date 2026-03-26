@@ -81,7 +81,8 @@ export interface DeathLock {
   zoneType: ZoneType;
   itemCount: number;
   // Crash recovery fields (optional for backwards compatibility)
-  items?: DeathItemData[]; // Actual item data for recovery
+  items?: DeathItemData[]; // Dropped items for recovery (gravestone/ground)
+  keptItems?: DeathItemData[]; // OSRS keep-3 items returned on respawn
   killedBy?: string; // What killed the player
   recovered?: boolean; // Whether death was processed during crash recovery
 }

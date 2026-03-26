@@ -238,20 +238,23 @@ export class ActivityLoggerSystem extends SystemBase {
     });
 
     this.subscribe<{
-      playerId: string;
+      entityId: string;
+      entityType: string;
       killedBy?: string;
-      position?: Position;
-    }>(EventType.PLAYER_DIED, (d) =>
-      this.log(
-        d.playerId,
-        "PLAYER_DEATH",
-        "died",
-        "player",
-        d.playerId,
-        { killedBy: d.killedBy },
-        d.position,
-      ),
-    );
+      deathPosition?: { x: number; y: number; z: number };
+    }>(EventType.ENTITY_DEATH, (d) => {
+      if (d.entityType === "player") {
+        this.log(
+          d.entityId,
+          "PLAYER_DEATH",
+          "died",
+          "player",
+          d.entityId,
+          { killedBy: d.killedBy },
+          d.deathPosition,
+        );
+      }
+    });
 
     // Equipment
     this.subscribe<{ playerId: string; itemId: string; slot: string }>(

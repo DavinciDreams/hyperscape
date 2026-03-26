@@ -660,8 +660,12 @@ export class EquipmentSystem extends SystemBase {
     // Emit UI update event with all slots null
     this.emitAllSlotsNullUIUpdate(playerId);
 
-    // Save with transaction context for atomicity
-    await this.saveEquipmentToDatabase(playerId, tx);
+    // When called within a death transaction (tx provided), skip the independent
+    // DB save — it opens a nested transaction that deadlocks on SQLite.
+    // The caller's transaction handles persistence; in-memory state is already cleared.
+    if (!tx) {
+      await this.saveEquipmentToDatabase(playerId);
+    }
 
     return clearedItems;
   }

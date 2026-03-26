@@ -556,10 +556,6 @@ export class CombatSystem extends SystemBase {
     this.subscribe(EventType.NPC_DIED, (data: { mobId: string }) => {
       this.handleEntityDied(data.mobId, "mob");
     });
-    this.subscribe(EventType.PLAYER_DIED, (data: { playerId: string }) => {
-      this.handleEntityDied(data.playerId, "player");
-    });
-    // Also listen for ENTITY_DEATH to catch all entity destructions
     this.subscribe(
       EventType.ENTITY_DEATH,
       (data: { entityId: string; entityType: string }) => {
