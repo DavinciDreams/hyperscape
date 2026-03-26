@@ -65,9 +65,9 @@ export class PlayerDeathSystem extends SystemBase {
   >();
 
   // OSRS-style: Items kept on death (top 3 most valuable) — returned on respawn.
-  // NOTE: In-memory only. If server crashes between death and respawn, kept items
-  // are lost. Dropped items are persisted via death lock for crash recovery.
-  // TODO: Persist kept items in death lock's DB record for full crash safety.
+  // In-memory for fast access; also persisted in death lock (keptItems field) for
+  // crash recovery. On respawn, in-memory is preferred; on reconnect after crash,
+  // DeathStateManager loads keptItems from DB.
   private itemsKeptOnDeath = new Map<string, InventoryItem[]>();
 
   // Guard: prevents respawn race while death transaction is in progress
@@ -272,7 +272,9 @@ export class PlayerDeathSystem extends SystemBase {
     entityType: "player" | "mob";
     deathPosition?: { x: number; y: number; z: number };
   }): Promise<void> {
-    // Skip gravestone entity destruction events — not player deaths
+    // Skip gravestone entity destruction events — not player deaths.
+    // Safe: gravestone IDs are server-generated (SafeAreaDeathHandler.spawnGravestone),
+    // never user-influenced, so the prefix cannot be spoofed.
     if (data.entityId?.startsWith("gravestone_")) {
       return;
     }
@@ -648,6 +650,10 @@ export class PlayerDeathSystem extends SystemBase {
               zoneType: ZoneType.SAFE_AREA,
               itemCount: itemsToDrop.length,
               items: itemsToDrop.map((item) => ({
+                itemId: item.itemId,
+                quantity: item.quantity,
+              })),
+              keptItems: itemsKept.map((item) => ({
                 itemId: item.itemId,
                 quantity: item.quantity,
               })),
@@ -1143,8 +1149,28 @@ export class PlayerDeathSystem extends SystemBase {
       playerId,
     });
 
-    // OSRS-style: Return kept items to inventory after respawn
-    const keptItems = this.itemsKeptOnDeath.get(playerId);
+    // OSRS-style: Return kept items to inventory after respawn.
+    // Prefer in-memory (fast path), fall back to death lock DB (crash recovery).
+    let keptItems = this.itemsKeptOnDeath.get(playerId);
+    if (!keptItems || keptItems.length === 0) {
+      const deathLock = await this.deathStateManager?.getDeathLock(playerId);
+      if (deathLock?.keptItems && deathLock.keptItems.length > 0) {
+        keptItems = deathLock.keptItems.map((item) => ({
+          id: `kept_${playerId}_${Date.now()}_${item.itemId}`,
+          itemId: item.itemId,
+          quantity: item.quantity,
+          slot: -1,
+          metadata: null,
+        }));
+        this.logger.info(
+          "Restored kept items from death lock (crash recovery)",
+          {
+            playerId,
+            count: keptItems.length,
+          },
+        );
+      }
+    }
     if (keptItems && keptItems.length > 0) {
       this.itemsKeptOnDeath.delete(playerId);
       const inventorySystem = this.world.getSystem(
@@ -1678,6 +1704,15 @@ export class PlayerDeathSystem extends SystemBase {
                 err instanceof Error ? err : undefined,
                 { playerId },
               );
+              this.emitTypedEvent(EventType.AUDIT_LOG, {
+                action: "DEATH_PERSIST_DESYNC",
+                playerId,
+                actorId: playerId,
+                zoneType: "unknown",
+                success: false,
+                failureReason: "equipment_persist_retry_failed",
+                timestamp: Date.now(),
+              });
             });
         }
       } else {
@@ -1699,6 +1734,15 @@ export class PlayerDeathSystem extends SystemBase {
                 err instanceof Error ? err : undefined,
                 { playerId },
               );
+              this.emitTypedEvent(EventType.AUDIT_LOG, {
+                action: "DEATH_PERSIST_DESYNC",
+                playerId,
+                actorId: playerId,
+                zoneType: "unknown",
+                success: false,
+                failureReason: "inventory_persist_retry_failed",
+                timestamp: Date.now(),
+              });
             });
         }
       }

@@ -313,12 +313,15 @@ export class HeadstoneEntity extends InteractableEntity {
 
   // --- Network ---
 
-  // PERF: Mutates buffer in-place instead of creating new objects
+  // PERF: Mutates buffer in-place instead of creating new objects.
+  // NOTE: lootItems is included for client sync but only sent when dirty
+  // (markNetworkDirty is called after removeItem/restoreItem). Gravestones
+  // have few items and rarely change, so bandwidth impact is minimal.
   getNetworkData(): Record<string, unknown> {
     const buf = super.getNetworkData();
     const hd = this.headstoneData;
     buf.lootItemCount = this.lootItems.length;
-    buf.lootItems = this.lootItems; // Full items array for client sync
+    buf.lootItems = this.lootItems;
     buf.despawnTime = hd.despawnTime;
     buf.playerId = hd.playerId;
     buf.deathMessage = hd.deathMessage;
@@ -335,9 +338,15 @@ export class HeadstoneEntity extends InteractableEntity {
     super.modify(data);
     const changes = data as Record<string, unknown>;
     if (Array.isArray(changes.lootItems)) {
-      this.lootItems = (changes.lootItems as InventoryItem[]).map((item) => ({
-        ...item,
-      }));
+      // Validate each element has required fields (server→client trust boundary)
+      const validated = (changes.lootItems as unknown[]).filter(
+        (item): item is InventoryItem =>
+          item !== null &&
+          typeof item === "object" &&
+          typeof (item as Record<string, unknown>).itemId === "string" &&
+          typeof (item as Record<string, unknown>).quantity === "number",
+      );
+      this.lootItems = validated.map((item) => ({ ...item }));
     } else if (
       typeof changes.lootItemCount === "number" &&
       changes.lootItemCount === 0

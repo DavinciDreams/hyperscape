@@ -420,7 +420,7 @@ describe("PlayerDeathSystem — kept items on respawn", () => {
     getInventory: Mock;
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     world = createMockWorld(true, 1000);
 
     world.on.mockImplementation(() => {});
@@ -521,6 +521,386 @@ describe("PlayerDeathSystem — kept items on respawn", () => {
     await respawnPlayer("player1", { x: 0, y: 10, z: 0 }, "Central Haven");
 
     expect(mockInventorySystem.addItemDirect).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// TRANSACTION FAILURE — REVIVE IN-PLACE
+// =============================================================================
+
+describe("PlayerDeathSystem — transaction failure revives player in-place", () => {
+  let world: MockWorld;
+  let deathSystem: PlayerDeathSystem;
+  let emitTypedEventSpy: Mock;
+
+  beforeEach(() => {
+    world = createMockWorld(true, 1000);
+
+    world.on.mockImplementation(() => {});
+    world.emit.mockImplementation(() => {});
+
+    // Database system that REJECTS to simulate transaction failure
+    // Also includes DeathStateManager methods (getDeathLockAsync, etc.)
+    const mockDatabaseSystem = {
+      executeInTransaction: vi
+        .fn()
+        .mockRejectedValue(new Error("SQLite BUSY — database is locked")),
+      getDeathLockAsync: vi.fn().mockResolvedValue(null),
+      saveDeathLockAsync: vi.fn().mockResolvedValue(undefined),
+      deleteDeathLockAsync: vi.fn().mockResolvedValue(undefined),
+      acquireDeathLockAsync: vi.fn().mockResolvedValue(true),
+      updateGroundItemsAsync: vi.fn().mockResolvedValue(undefined),
+      getUnrecoveredDeathsAsync: vi.fn().mockResolvedValue([]),
+      markDeathRecoveredAsync: vi.fn().mockResolvedValue(undefined),
+    };
+
+    // Equipment system
+    const mockEquipmentSystem = {
+      getPlayerEquipment: vi.fn().mockReturnValue(null),
+      clearEquipmentAndReturn: vi.fn().mockResolvedValue([]),
+      clearEquipmentImmediate: vi.fn().mockResolvedValue(undefined),
+    };
+
+    // Inventory system
+    const mockInventorySystem = {
+      getItems: vi.fn().mockReturnValue([]),
+      clearInventoryImmediate: vi.fn().mockResolvedValue(undefined),
+      getInventory: vi.fn().mockReturnValue(null),
+    };
+
+    // Ground items system
+    const mockGroundItemSystem = {
+      spawnGroundItems: vi.fn().mockResolvedValue([]),
+    };
+
+    // Tick system
+    const mockTickSystem = {
+      getCurrentTick: vi.fn().mockReturnValue(world.currentTick),
+      onTick: vi.fn().mockReturnValue(() => {}),
+    };
+
+    // Duel system (no active duels)
+    const mockDuelSystem = {
+      isPlayerInActiveDuel: vi.fn().mockReturnValue(false),
+    };
+
+    // Entity manager
+    const mockEntityManager = {
+      spawnEntity: vi.fn().mockResolvedValue({ id: "gravestone_test" }),
+      destroyEntity: vi.fn(),
+    };
+
+    world.getSystem.mockImplementation((name: string) => {
+      switch (name) {
+        case "ground-items":
+          return mockGroundItemSystem;
+        case "database":
+          return mockDatabaseSystem;
+        case "equipment":
+          return mockEquipmentSystem;
+        case "inventory":
+          return mockInventorySystem;
+        case "tick":
+          return mockTickSystem;
+        case "duel":
+          return mockDuelSystem;
+        case "entity-manager":
+          return mockEntityManager;
+        case "terrain":
+          return null;
+        case "combat":
+          return null;
+        case "player":
+          return { players: world.entities.players };
+        default:
+          return null;
+      }
+    });
+
+    deathSystem = new PlayerDeathSystem(createSystemWorld(world));
+
+    // Stub deathStateManager and zoneDetection (normally set by init())
+    // so code reaches the transaction before failing
+    (
+      deathSystem as unknown as {
+        deathStateManager: {
+          getDeathLock: Mock;
+          clearDeathLock: Mock;
+          createDeathLock: Mock;
+        };
+      }
+    ).deathStateManager = {
+      getDeathLock: vi.fn().mockResolvedValue(null),
+      clearDeathLock: vi.fn().mockResolvedValue(undefined),
+      createDeathLock: vi.fn().mockResolvedValue(undefined),
+    };
+    (
+      deathSystem as unknown as {
+        zoneDetection: { getZoneType: Mock };
+      }
+    ).zoneDetection = {
+      getZoneType: vi.fn().mockReturnValue("safe_area"),
+    };
+
+    // Spy on emitTypedEvent to capture emitted events
+    emitTypedEventSpy = vi.fn();
+    (
+      deathSystem as unknown as {
+        emitTypedEvent: Mock;
+      }
+    ).emitTypedEvent = emitTypedEventSpy;
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("emits PLAYER_RESPAWNED with deathPosition and resets deathState on tx failure", async () => {
+    const deathPosition = { x: 100, y: 0, z: 200 };
+
+    // Create player entity at the death position
+    const playerEntity = createMockPlayerEntity({
+      data: { deathState: DeathState.DYING },
+      position: deathPosition,
+    });
+    world.entities.get.mockReturnValue(playerEntity);
+    world.entities.players.set("player1", playerEntity);
+
+    // Call handlePlayerDeath directly (private method)
+    const handlePlayerDeath = (
+      deathSystem as unknown as {
+        handlePlayerDeath: (data: {
+          entityId: string;
+          killedBy: string;
+          entityType: "player" | "mob";
+          deathPosition?: { x: number; y: number; z: number };
+        }) => Promise<void>;
+      }
+    ).handlePlayerDeath.bind(deathSystem);
+
+    await handlePlayerDeath({
+      entityId: "player1",
+      killedBy: "goblin_1",
+      entityType: "player",
+      deathPosition,
+    });
+
+    // Verify PLAYER_SET_DEAD emitted with isDead: false (reviving)
+    const setDeadCall = emitTypedEventSpy.mock.calls.find(
+      (call: unknown[]) => call[0] === EventType.PLAYER_SET_DEAD,
+    );
+    expect(setDeadCall).toBeDefined();
+    expect(setDeadCall![1]).toEqual({
+      playerId: "player1",
+      isDead: false,
+    });
+
+    // Verify PLAYER_RESPAWNED emitted with spawnPosition = deathPosition (in-place revive)
+    const respawnedCall = emitTypedEventSpy.mock.calls.find(
+      (call: unknown[]) => call[0] === EventType.PLAYER_RESPAWNED,
+    );
+    expect(respawnedCall).toBeDefined();
+    expect(respawnedCall![1]).toEqual({
+      playerId: "player1",
+      spawnPosition: deathPosition,
+    });
+
+    // Verify player deathState is reset to ALIVE
+    expect(playerEntity.data.deathState).toBe(DeathState.ALIVE);
+
+    // Verify lastDeathTime is cleared
+    const lastDeathTime = (
+      deathSystem as unknown as {
+        lastDeathTime: Map<string, number>;
+      }
+    ).lastDeathTime;
+    expect(lastDeathTime.has("player1")).toBe(false);
+
+    // Verify health was restored to max
+    expect(playerEntity.setHealth).toHaveBeenCalledWith(100);
+  });
+});
+
+// =============================================================================
+// DOUBLE-DEATH COOLDOWN GUARD
+// =============================================================================
+
+describe("PlayerDeathSystem — double-death cooldown guard", () => {
+  let world: MockWorld;
+  let deathSystem: PlayerDeathSystem;
+  let mockDatabaseSystem: { executeInTransaction: Mock; [key: string]: Mock };
+
+  beforeEach(() => {
+    world = createMockWorld(true, 1000);
+
+    world.on.mockImplementation(() => {});
+    world.emit.mockImplementation(() => {});
+
+    // Database system that succeeds (tracks call count)
+    // Also includes DeathStateManager methods (getDeathLockAsync, etc.)
+    mockDatabaseSystem = {
+      executeInTransaction: vi
+        .fn()
+        .mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+          await fn({ __tx: true });
+        }),
+      getDeathLockAsync: vi.fn().mockResolvedValue(null),
+      saveDeathLockAsync: vi.fn().mockResolvedValue(undefined),
+      deleteDeathLockAsync: vi.fn().mockResolvedValue(undefined),
+      acquireDeathLockAsync: vi.fn().mockResolvedValue(true),
+      updateGroundItemsAsync: vi.fn().mockResolvedValue(undefined),
+      getUnrecoveredDeathsAsync: vi.fn().mockResolvedValue([]),
+      markDeathRecoveredAsync: vi.fn().mockResolvedValue(undefined),
+    };
+
+    // Equipment system
+    const mockEquipmentSystem = {
+      getPlayerEquipment: vi.fn().mockReturnValue(null),
+      clearEquipmentAndReturn: vi.fn().mockResolvedValue([]),
+      clearEquipmentImmediate: vi.fn().mockResolvedValue(undefined),
+    };
+
+    // Inventory system
+    const mockInventorySystem = {
+      getItems: vi.fn().mockReturnValue([]),
+      clearInventoryImmediate: vi.fn().mockResolvedValue(undefined),
+      getInventory: vi.fn().mockReturnValue(null),
+    };
+
+    // Ground items system
+    const mockGroundItemSystem = {
+      spawnGroundItems: vi.fn().mockResolvedValue([]),
+    };
+
+    // Tick system
+    const mockTickSystem = {
+      getCurrentTick: vi.fn().mockReturnValue(world.currentTick),
+      onTick: vi.fn().mockReturnValue(() => {}),
+    };
+
+    // Duel system (no active duels)
+    const mockDuelSystem = {
+      isPlayerInActiveDuel: vi.fn().mockReturnValue(false),
+    };
+
+    // Entity manager
+    const mockEntityManager = {
+      spawnEntity: vi.fn().mockResolvedValue({ id: "gravestone_test" }),
+      destroyEntity: vi.fn(),
+    };
+
+    world.getSystem.mockImplementation((name: string) => {
+      switch (name) {
+        case "ground-items":
+          return mockGroundItemSystem;
+        case "database":
+          return mockDatabaseSystem;
+        case "equipment":
+          return mockEquipmentSystem;
+        case "inventory":
+          return mockInventorySystem;
+        case "tick":
+          return mockTickSystem;
+        case "duel":
+          return mockDuelSystem;
+        case "entity-manager":
+          return mockEntityManager;
+        case "terrain":
+          return null;
+        case "combat":
+          return null;
+        case "player":
+          return { players: world.entities.players };
+        default:
+          return null;
+      }
+    });
+
+    deathSystem = new PlayerDeathSystem(createSystemWorld(world));
+
+    // Stub deathStateManager and zoneDetection (normally set by init())
+    (
+      deathSystem as unknown as {
+        deathStateManager: {
+          getDeathLock: Mock;
+          clearDeathLock: Mock;
+          createDeathLock: Mock;
+        };
+      }
+    ).deathStateManager = {
+      getDeathLock: vi.fn().mockResolvedValue(null),
+      clearDeathLock: vi.fn().mockResolvedValue(undefined),
+      createDeathLock: vi.fn().mockResolvedValue(undefined),
+    };
+    (
+      deathSystem as unknown as {
+        zoneDetection: { getZoneType: Mock };
+      }
+    ).zoneDetection = {
+      getZoneType: vi.fn().mockReturnValue("safe_area"),
+    };
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("silently ignores second death within DEATH_COOLDOWN window", async () => {
+    // Position must be outside the duel arena zone bounds (35..145 x, 37..140 z)
+    const deathPosition = { x: 500, y: 0, z: 500 };
+
+    const playerEntity = createMockPlayerEntity({
+      data: { deathState: DeathState.DYING },
+      position: deathPosition,
+    });
+    world.entities.get.mockReturnValue(playerEntity);
+    world.entities.players.set("player1", playerEntity);
+
+    // Call handlePlayerDeath directly (private method)
+    const handlePlayerDeath = (
+      deathSystem as unknown as {
+        handlePlayerDeath: (data: {
+          entityId: string;
+          killedBy: string;
+          entityType: "player" | "mob";
+          deathPosition?: { x: number; y: number; z: number };
+        }) => Promise<void>;
+      }
+    ).handlePlayerDeath.bind(deathSystem);
+
+    const deathEvent = {
+      entityId: "player1",
+      killedBy: "goblin_1",
+      entityType: "player" as const,
+      deathPosition,
+    };
+
+    // Spy on _processPlayerDeathInner to count actual death processing invocations
+    const innerSpy = vi.spyOn(
+      deathSystem as unknown as {
+        _processPlayerDeathInner: (
+          playerId: string,
+          deathPosition: { x: number; y: number; z: number },
+          killedByRaw: string,
+        ) => Promise<void>;
+      },
+      "_processPlayerDeathInner",
+    );
+
+    // First death — should process normally
+    await handlePlayerDeath(deathEvent);
+
+    // Verify first death reached inner processing
+    expect(innerSpy).toHaveBeenCalledTimes(1);
+
+    // Second death — should be silently ignored by cooldown guard
+    await handlePlayerDeath(deathEvent);
+
+    // _processPlayerDeathInner is called both times (processPlayerDeath delegates to it),
+    // but the cooldown check at the top of _processPlayerDeathInner returns early.
+    // Verify the transaction (which runs AFTER the cooldown check) was only executed once.
+    expect(innerSpy).toHaveBeenCalledTimes(2);
+    expect(mockDatabaseSystem.executeInTransaction).toHaveBeenCalledTimes(1);
   });
 });
 
