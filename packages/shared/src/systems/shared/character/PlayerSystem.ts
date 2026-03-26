@@ -838,26 +838,13 @@ export class PlayerSystem extends SystemBase {
   private handleDeath(data: { playerId: string; cause?: string }): void {
     const player = this.players.get(data.playerId);
     if (!player) {
-      console.warn("[DEATH-DEBUG] handleDeath: player not found", {
-        playerId: data.playerId,
-      });
       return; // Player not found, ignore
     }
 
     // Prevent infinite recursion: if player is already dead, don't process again
     if (!player.alive) {
-      console.warn("[DEATH-DEBUG] handleDeath: player already dead", {
-        playerId: data.playerId,
-      });
       return; // Already dead, ignore duplicate death events
     }
-
-    console.warn("[DEATH-DEBUG] handleDeath: processing death", {
-      playerId: data.playerId,
-      cause: data.cause,
-      health: player.health.current,
-      isServer: this.world.isServer,
-    });
 
     // Mark player as dead in PlayerSystem data
     player.alive = false;
@@ -901,9 +888,6 @@ export class PlayerSystem extends SystemBase {
     // DeathSystem will handle the full death flow including respawn
     // Include deathPosition so PlayerDeathSystem can use the exact death location
     // without falling back to potentially stale position caches
-    console.log("[DEATH-DEBUG] handleDeath: emitting ENTITY_DEATH", {
-      playerId: data.playerId,
-    });
     this.emitTypedEvent(EventType.ENTITY_DEATH, {
       entityId: data.playerId,
       killedBy: data.cause || "unknown",
@@ -1453,13 +1437,6 @@ export class PlayerSystem extends SystemBase {
   damagePlayer(playerId: string, amount: number, _source?: string): boolean {
     const player = this.players.get(playerId);
     if (!player || !player.alive) {
-      console.warn("[DEATH-DEBUG] damagePlayer: early return", {
-        playerId,
-        hasPlayer: !!player,
-        alive: player?.alive,
-        amount,
-        source: _source,
-      });
       return false;
     }
 
@@ -1521,15 +1498,6 @@ export class PlayerSystem extends SystemBase {
     });
 
     if (player.health.current <= 0) {
-      console.warn(
-        "[DEATH-DEBUG] damagePlayer: health <= 0, calling handleDeath",
-        {
-          playerId,
-          health: player.health.current,
-          source: _source,
-          isServer: this.world.isServer,
-        },
-      );
       this.handleDeath({
         playerId,
         cause: _source || "damage",
