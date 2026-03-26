@@ -2651,6 +2651,18 @@ export class ClientNetwork extends SystemBase {
   };
 
   // --- Smelting/Smithing interface handlers ---
+  onCookingComplete = (data: {
+    rawItemId: string;
+    resultItemId: string;
+    wasBurnt: boolean;
+    xpGained: number;
+  }) => {
+    this.world.emit(EventType.COOKING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
+    });
+  };
+
   onSmeltingInterfaceOpen = (data: {
     furnaceId: string;
     availableBars: Array<{
@@ -2669,6 +2681,18 @@ export class ClientNetwork extends SystemBase {
         furnaceId: data.furnaceId,
         availableBars: data.availableBars,
       },
+    });
+  };
+
+  onSmeltingComplete = (data: {
+    barItemId: string;
+    totalSmelted: number;
+    totalFailed: number;
+    totalXp: number;
+  }) => {
+    this.world.emit(EventType.SMELTING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
     });
   };
 
@@ -2692,6 +2716,18 @@ export class ClientNetwork extends SystemBase {
         anvilId: data.anvilId,
         availableRecipes: data.availableRecipes,
       },
+    });
+  };
+
+  onSmithingComplete = (data: {
+    recipeId: string;
+    outputItemId: string;
+    totalSmithed: number;
+    totalXp: number;
+  }) => {
+    this.world.emit(EventType.SMITHING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
     });
   };
 
@@ -2727,6 +2763,18 @@ export class ClientNetwork extends SystemBase {
     });
   };
 
+  onCraftingComplete = (data: {
+    recipeId: string;
+    outputItemId: string;
+    totalCrafted: number;
+    totalXp: number;
+  }) => {
+    this.world.emit(EventType.CRAFTING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
+    });
+  };
+
   // --- Fletching interface handler ---
   onFletchingInterfaceOpen = (
     data: Omit<FletchingInterfaceOpenPayload, "playerId">,
@@ -2734,6 +2782,18 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.FLETCHING_INTERFACE_OPEN, {
       playerId: this.world?.entities?.player?.id || "",
       availableRecipes: data.availableRecipes,
+    });
+  };
+
+  onFletchingComplete = (data: {
+    recipeId: string;
+    outputItemId: string;
+    totalCrafted: number;
+    totalXp: number;
+  }) => {
+    this.world.emit(EventType.FLETCHING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
     });
   };
 
@@ -2768,6 +2828,18 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.UI_UPDATE, {
       component: "tanningClose",
       data: _data,
+    });
+  };
+
+  onTanningComplete = (data: {
+    inputItemId: string;
+    outputItemId: string;
+    totalTanned: number;
+    totalCost: number;
+  }) => {
+    this.world.emit(EventType.TANNING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
     });
   };
 
@@ -2922,6 +2994,11 @@ export class ClientNetwork extends SystemBase {
     // Add playerId since server doesn't send it (packet is already routed to this player)
     const playerId = this.world?.entities?.player?.id || "";
     this.world.emit(EventType.QUEST_START_CONFIRM, { ...data, playerId });
+  };
+
+  onQuestStarted = (data: { questId: string; questName: string }) => {
+    const playerId = this.world?.entities?.player?.id || "";
+    this.world.emit(EventType.QUEST_STARTED, { ...data, playerId });
   };
 
   onQuestProgressed = (data: {
@@ -4346,6 +4423,10 @@ export class ClientNetwork extends SystemBase {
   onCombatFaceTarget = (data: { playerId: string; targetId: string }) => {
     // Forward to local event system so PlayerLocal rotates toward combat target
     this.world.emit(EventType.COMBAT_FACE_TARGET, data);
+  };
+
+  onCombatEnded = (data: { attackerId: string; targetId: string }) => {
+    this.world.emit(EventType.COMBAT_ENDED, data);
   };
 
   onCombatClearFaceTarget = (data: { playerId: string }) => {
