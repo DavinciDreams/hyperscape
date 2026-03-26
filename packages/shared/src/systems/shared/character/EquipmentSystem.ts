@@ -262,6 +262,9 @@ export class EquipmentSystem extends SystemBase {
   private initializePlayerEquipment(playerData: { id: string }): void {
     // Idempotent: don't overwrite existing equipment (prevents reconnection/re-registration wiping gear)
     if (this.playerEquipment.has(playerData.id)) {
+      this.logger.debug(
+        `Equipment already initialized for ${playerData.id}, skipping`,
+      );
       return;
     }
 

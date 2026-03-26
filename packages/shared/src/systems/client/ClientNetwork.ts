@@ -4270,12 +4270,10 @@ export class ClientNetwork extends SystemBase {
   };
 
   onAutoRetaliateChanged = (data: { enabled: boolean }) => {
-    // Emit unconditionally — same pattern as onAttackStyleChanged.
-    // Gating on localPlayer causes race conditions where the packet arrives
-    // before the player entity is created. The packet is already filtered
-    // server-side for this player. Use local player ID if available, otherwise
-    // use the network's own ID as the player identifier.
-    const playerId = this.world.getPlayer()?.id || this.id || "";
+    // Require the player entity to exist — this.id is the socket/connection UUID,
+    // not the player entity ID, so it cannot be used as a fallback. If the player
+    // entity isn't created yet, the UI isn't mounted to receive this event anyway.
+    const playerId = this.world.getPlayer()?.id;
     if (!playerId) return;
 
     this.world.emit(EventType.UI_AUTO_RETALIATE_CHANGED, {
@@ -4296,16 +4294,19 @@ export class ClientNetwork extends SystemBase {
     // region boundaries receive the same packet 2-3x. Include the server tick
     // so same-damage rapid hits on different ticks are NOT dropped.
     // Use | separator (not -) to avoid collisions if IDs contain hyphens.
-    const dedupKey = `${data.attackerId}|${data.targetId}|${data.damage}|${data.tick ?? 0}`;
+    // If tick is missing (rolling deploy), fall back to ms timestamp rounded to
+    // 125ms (one server tick at 8Hz) so distinct hits aren't collapsed to tick 0.
+    const tick = data.tick ?? Math.floor(performance.now() / 125);
+    const dedupKey = `${data.attackerId}|${data.targetId}|${data.damage}|${tick}`;
     if (this._recentDamageKeys.has(dedupKey)) {
       return; // Already processed this damage event
     }
 
     // Periodic sweep: clear stale entries (>500ms old) when map exceeds threshold.
-    // 50 is chosen because at 8Hz server tick rate with ~6 concurrent combatants,
-    // the steady-state is ~48 keys/sec — sweep triggers just above normal load.
+    // 100 accommodates normal combat load (8Hz tick × ~6 combatants ≈ 48 keys/sec)
+    // without sweeping on every packet.
     const now = performance.now();
-    if (this._recentDamageKeys.size > 50) {
+    if (this._recentDamageKeys.size > 100) {
       for (const [key, ts] of this._recentDamageKeys) {
         if (now - ts > 500) this._recentDamageKeys.delete(key);
       }
