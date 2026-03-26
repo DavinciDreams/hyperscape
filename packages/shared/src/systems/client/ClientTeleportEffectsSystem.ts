@@ -18,6 +18,7 @@ import THREE, {
 } from "../../extras/three/three";
 import type { ShaderNode } from "../../extras/three/three";
 import { World } from "../../core/World";
+import { HOME_TELEPORT_CONSTANTS } from "../../constants/GameConstants";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
 import { EventType } from "../../types/events/event-types";
 import { Curve } from "../../extras/animation/Curve";
@@ -33,10 +34,31 @@ const BURST_COUNT = 6;
 const GATHER_END = 0.2;
 const ERUPT_END = 0.34;
 const SUSTAIN_END = 0.68;
+const CHANNEL_EFFECT_TIMEOUT_BUFFER_MS = 1500;
 
 // Pre-allocated colors (shared, never disposed)
 const COLOR_CYAN = new THREE.Color(0x66ccff);
 const COLOR_WHITE = new THREE.Color(0xffffff);
+const COLOR_PORTAL_BRONZE = new THREE.Color(0x8e7a59);
+const COLOR_PORTAL_UMBER = new THREE.Color(0x231f1a);
+const COLOR_PORTAL_GOLD = new THREE.Color(0xbea57b);
+const COLOR_PORTAL_PARCHMENT = new THREE.Color(0xd7c7ab);
+const PORTAL_ENDGAME_START = 0.8;
+const PORTAL_GROUND_CLEARANCE = 0.015;
+const TELEPORT_GROUND_CONTACT_BONES = [
+  "leftFoot",
+  "rightFoot",
+  "leftToes",
+  "rightToes",
+  "leftLowerLeg",
+  "rightLowerLeg",
+  "leftUpperLeg",
+  "rightUpperLeg",
+  "hips",
+  "spine",
+  "chest",
+  "upperChest",
+] as const;
 
 // ─── Pooled particle state ──────────────────────────────────────────────────
 interface HelixParticle {
@@ -58,6 +80,8 @@ interface BurstParticle {
 
 interface PooledEffect {
   group: THREE.Group;
+  mode: "burst" | "channel";
+  channelDurationMs: number;
 
   // Structural meshes (pre-allocated)
   runeCircle: THREE.Mesh;
@@ -67,8 +91,12 @@ interface PooledEffect {
   coreFlash: THREE.Mesh;
   shockwave1: THREE.Mesh;
   shockwave2: THREE.Mesh;
+  portalVeil: THREE.Mesh;
+  portalBandLower: THREE.Mesh;
+  portalBandUpper: THREE.Mesh;
+  portalCrown: THREE.Mesh;
 
-  // Per-effect materials with own uniforms (7 per pool entry)
+  // Per-effect materials with own uniforms
   perEffectMaterials: InstanceType<typeof MeshBasicNodeMaterial>[];
   uRuneOpacity: ReturnType<typeof uniform>;
   uGlowOpacity: ReturnType<typeof uniform>;
@@ -77,6 +105,10 @@ interface PooledEffect {
   uFlashOpacity: ReturnType<typeof uniform>;
   uShock1Opacity: ReturnType<typeof uniform>;
   uShock2Opacity: ReturnType<typeof uniform>;
+  uPortalVeilOpacity: ReturnType<typeof uniform>;
+  uPortalBandLowerOpacity: ReturnType<typeof uniform>;
+  uPortalBandUpperOpacity: ReturnType<typeof uniform>;
+  uPortalCrownOpacity: ReturnType<typeof uniform>;
 
   // Particles (share materials across pool, fade via scale)
   helixParticles: HelixParticle[];
@@ -111,6 +143,8 @@ export class ClientTeleportEffectsSystem extends SystemBase {
   private runeCircleGeo: THREE.CircleGeometry | null = null;
   private shockwaveGeo: THREE.RingGeometry | null = null;
   private sphereGeo: THREE.SphereGeometry | null = null;
+  private portalVeilGeo: THREE.CylinderGeometry | null = null;
+  private portalRingGeo: THREE.TorusGeometry | null = null;
 
   // ─── Shared textures ────────────────────────────────────────────────────
   private runeTexture: THREE.CanvasTexture | null = null;
@@ -123,6 +157,9 @@ export class ClientTeleportEffectsSystem extends SystemBase {
 
   // ─── Shared Hermite curves ──────────────────────────────────────────────
   private beamElasticCurve: Curve | null = null;
+  private readonly localPlayerTeleportAnchor = new THREE.Vector3();
+  private readonly teleportBoneWorldPosition = new THREE.Vector3();
+  private homeTeleportCastEffect: PooledEffect | null = null;
 
   constructor(world: World) {
     super(world, {
@@ -135,6 +172,15 @@ export class ClientTeleportEffectsSystem extends SystemBase {
   async init(options?: WorldOptions): Promise<void> {
     await super.init(options as WorldOptions);
 
+    this.world.on(
+      EventType.HOME_TELEPORT_CAST_START,
+      this.onHomeTeleportCastStart,
+    );
+    this.world.on(EventType.HOME_TELEPORT_FAILED, this.onHomeTeleportStopped);
+    this.world.on(
+      EventType.HOME_TELEPORT_CAST_CANCEL,
+      this.onHomeTeleportStopped,
+    );
     this.world.on(EventType.PLAYER_TELEPORTED, this.onPlayerTeleported);
   }
 
@@ -158,6 +204,16 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     this.runeCircleGeo = new THREE.CircleGeometry(1.5, 32);
     this.shockwaveGeo = new THREE.RingGeometry(0.15, 0.4, 24);
     this.sphereGeo = new THREE.SphereGeometry(0.4, 8, 6);
+    this.portalVeilGeo = new THREE.CylinderGeometry(
+      0.9,
+      0.72,
+      3.05,
+      24,
+      1,
+      true,
+    );
+    this.portalVeilGeo.translate(0, 1.525, 0);
+    this.portalRingGeo = new THREE.TorusGeometry(0.84, 0.04, 8, 32);
 
     // ─── Shared textures ────────────────────────────────────────────────
     this.runeTexture = this.createRuneTexture();
@@ -298,6 +354,61 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     shockwave2.frustumCulled = false;
     group.add(shockwave2);
 
+    // ─── 8. Cast Portal Veil + Orbit Rings ───────────────────────────────
+    const uPortalVeilOpacity = uniform(0.0);
+    const portalVeilMat = this.createBeamMaterial(
+      COLOR_PORTAL_UMBER,
+      COLOR_PORTAL_GOLD,
+      uPortalVeilOpacity,
+    );
+    perEffectMaterials.push(portalVeilMat);
+    const portalVeil = new THREE.Mesh(this.portalVeilGeo!, portalVeilMat);
+    portalVeil.renderOrder = 997;
+    portalVeil.frustumCulled = false;
+    group.add(portalVeil);
+
+    const uPortalBandLowerOpacity = uniform(0.0);
+    const portalBandLowerMat = this.createBasicAdditiveMaterial(
+      COLOR_PORTAL_BRONZE,
+      uPortalBandLowerOpacity,
+    );
+    perEffectMaterials.push(portalBandLowerMat);
+    const portalBandLower = new THREE.Mesh(
+      this.portalRingGeo!,
+      portalBandLowerMat,
+    );
+    portalBandLower.rotation.x = Math.PI / 2;
+    portalBandLower.renderOrder = 1006;
+    portalBandLower.frustumCulled = false;
+    group.add(portalBandLower);
+
+    const uPortalBandUpperOpacity = uniform(0.0);
+    const portalBandUpperMat = this.createBasicAdditiveMaterial(
+      COLOR_PORTAL_GOLD,
+      uPortalBandUpperOpacity,
+    );
+    perEffectMaterials.push(portalBandUpperMat);
+    const portalBandUpper = new THREE.Mesh(
+      this.portalRingGeo!,
+      portalBandUpperMat,
+    );
+    portalBandUpper.rotation.x = Math.PI / 2;
+    portalBandUpper.renderOrder = 1007;
+    portalBandUpper.frustumCulled = false;
+    group.add(portalBandUpper);
+
+    const uPortalCrownOpacity = uniform(0.0);
+    const portalCrownMat = this.createBasicAdditiveMaterial(
+      COLOR_PORTAL_PARCHMENT,
+      uPortalCrownOpacity,
+    );
+    perEffectMaterials.push(portalCrownMat);
+    const portalCrown = new THREE.Mesh(this.portalRingGeo!, portalCrownMat);
+    portalCrown.rotation.x = Math.PI / 2;
+    portalCrown.renderOrder = 1008;
+    portalCrown.frustumCulled = false;
+    group.add(portalCrown);
+
     // ─── 9. Helix Spiral Particles (8: 2 strands of 4) ────────────────
     const helixParticles: HelixParticle[] = [];
     for (let i = 0; i < HELIX_COUNT; i++) {
@@ -341,6 +452,8 @@ export class ClientTeleportEffectsSystem extends SystemBase {
 
     return {
       group,
+      mode: "burst",
+      channelDurationMs: HOME_TELEPORT_CONSTANTS.CAST_TIME_MS,
       runeCircle,
       baseGlow,
       innerBeam,
@@ -348,6 +461,10 @@ export class ClientTeleportEffectsSystem extends SystemBase {
       coreFlash,
       shockwave1,
       shockwave2,
+      portalVeil,
+      portalBandLower,
+      portalBandUpper,
+      portalCrown,
       perEffectMaterials,
       uRuneOpacity,
       uGlowOpacity,
@@ -356,6 +473,10 @@ export class ClientTeleportEffectsSystem extends SystemBase {
       uFlashOpacity,
       uShock1Opacity,
       uShock2Opacity,
+      uPortalVeilOpacity,
+      uPortalBandLowerOpacity,
+      uPortalBandUpperOpacity,
+      uPortalCrownOpacity,
       helixParticles,
       burstParticles,
       active: false,
@@ -375,6 +496,11 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     if (!payload?.position) return;
     if (payload.suppressEffect) return;
 
+    const localPlayerId = this.getLocalPlayerId();
+    if (localPlayerId && payload.playerId === localPlayerId) {
+      this.stopHomeTeleportCastEffect();
+    }
+
     const pos = payload.position;
     const vec =
       pos instanceof THREE.Vector3
@@ -382,6 +508,31 @@ export class ClientTeleportEffectsSystem extends SystemBase {
         : new THREE.Vector3(pos.x, pos.y, pos.z);
 
     this.spawnTeleportEffect(vec);
+  };
+
+  private onHomeTeleportCastStart = (data: unknown): void => {
+    const payload = data as { castTimeMs?: number } | undefined;
+    const localPlayerAnchor = this.getLocalPlayerTeleportAnchor();
+    if (!localPlayerAnchor) return;
+    const channelDurationMs =
+      payload?.castTimeMs ?? HOME_TELEPORT_CONSTANTS.CAST_TIME_MS;
+
+    if (this.homeTeleportCastEffect) {
+      this.homeTeleportCastEffect.life = 0;
+      this.homeTeleportCastEffect.channelDurationMs = channelDurationMs;
+      this.homeTeleportCastEffect.group.position.copy(localPlayerAnchor);
+      this.resetChannelEffectState(this.homeTeleportCastEffect);
+      return;
+    }
+
+    this.homeTeleportCastEffect = this.spawnChannelEffect(
+      localPlayerAnchor,
+      channelDurationMs,
+    );
+  };
+
+  private onHomeTeleportStopped = (): void => {
+    this.stopHomeTeleportCastEffect();
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -399,6 +550,7 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     // Reset timeline
     fx.active = true;
     fx.life = 0;
+    fx.mode = "burst";
 
     // Position the group
     fx.group.position.copy(position);
@@ -415,12 +567,29 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     fx.innerBeam.visible = false; // Hidden until ERUPT
     fx.outerBeam.scale.set(1, 0, 1);
     fx.outerBeam.visible = false; // Hidden until ERUPT
+    fx.coreFlash.position.y = 0.5;
     fx.coreFlash.scale.setScalar(0);
     fx.coreFlash.visible = false; // Hidden until ERUPT
+    fx.shockwave1.position.y = 0;
     fx.shockwave1.scale.setScalar(1);
     fx.shockwave1.visible = false; // Hidden until ERUPT
+    fx.shockwave2.position.y = 0;
     fx.shockwave2.scale.setScalar(1);
     fx.shockwave2.visible = false; // Hidden until ERUPT
+    fx.portalVeil.scale.set(1, 0.01, 1);
+    fx.portalVeil.visible = false;
+    fx.portalBandLower.position.y = 0;
+    fx.portalBandLower.scale.setScalar(0.5);
+    fx.portalBandLower.rotation.z = 0;
+    fx.portalBandLower.visible = false;
+    fx.portalBandUpper.position.y = 0;
+    fx.portalBandUpper.scale.setScalar(0.5);
+    fx.portalBandUpper.rotation.z = 0;
+    fx.portalBandUpper.visible = false;
+    fx.portalCrown.position.y = 0;
+    fx.portalCrown.scale.setScalar(0.5);
+    fx.portalCrown.rotation.z = 0;
+    fx.portalCrown.visible = false;
 
     // Reset uniforms
     fx.uRuneOpacity.value = 0;
@@ -430,6 +599,10 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     fx.uFlashOpacity.value = 0;
     fx.uShock1Opacity.value = 0;
     fx.uShock2Opacity.value = 0;
+    fx.uPortalVeilOpacity.value = 0;
+    fx.uPortalBandLowerOpacity.value = 0;
+    fx.uPortalBandUpperOpacity.value = 0;
+    fx.uPortalCrownOpacity.value = 0;
 
     // Reset helix particles
     for (const p of fx.helixParticles) {
@@ -460,6 +633,95 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     }
   }
 
+  private spawnChannelEffect(
+    position: THREE.Vector3,
+    channelDurationMs: number,
+  ): PooledEffect | null {
+    if (!this.world.stage?.scene) return null;
+
+    this.ensurePoolInitialized();
+
+    const fx = this.pool.find((entry) => !entry.active);
+    if (!fx) return null;
+
+    fx.active = true;
+    fx.life = 0;
+    fx.mode = "channel";
+    fx.channelDurationMs = channelDurationMs;
+    fx.group.position.copy(position);
+    fx.group.position.y += 0.05;
+    fx.group.visible = true;
+
+    this.resetChannelEffectState(fx);
+
+    if (!fx.group.parent) {
+      this.world.stage.scene.add(fx.group);
+    }
+
+    return fx;
+  }
+
+  private resetChannelEffectState(fx: PooledEffect): void {
+    fx.life = 0;
+
+    fx.runeCircle.scale.setScalar(0.92);
+    fx.runeCircle.rotation.z = 0;
+    fx.runeCircle.visible = true;
+    fx.baseGlow.scale.setScalar(1.02);
+    fx.baseGlow.visible = true;
+    fx.innerBeam.scale.set(0.72, 0.22, 0.72);
+    fx.innerBeam.visible = false;
+    fx.outerBeam.scale.set(0.94, 0.18, 0.94);
+    fx.outerBeam.visible = false;
+    fx.coreFlash.position.y = 0.85;
+    fx.coreFlash.scale.setScalar(0.55);
+    fx.coreFlash.visible = false;
+    fx.shockwave1.position.y = 0;
+    fx.shockwave1.visible = false;
+    fx.shockwave2.position.y = 0;
+    fx.shockwave2.visible = false;
+    fx.portalVeil.scale.set(0.72, 0.1, 0.72);
+    fx.portalVeil.visible = true;
+    fx.portalBandLower.position.y = 0.03;
+    fx.portalBandLower.scale.setScalar(0.88);
+    fx.portalBandLower.rotation.z = 0;
+    fx.portalBandLower.visible = true;
+    fx.portalBandUpper.position.y = 0.58;
+    fx.portalBandUpper.scale.setScalar(0.56);
+    fx.portalBandUpper.rotation.z = Math.PI * 0.12;
+    fx.portalBandUpper.visible = true;
+    fx.portalCrown.position.y = 1.08;
+    fx.portalCrown.scale.setScalar(0.5);
+    fx.portalCrown.rotation.z = Math.PI * 0.2;
+    fx.portalCrown.visible = true;
+
+    fx.uRuneOpacity.value = 0.12;
+    fx.uGlowOpacity.value = 0.08;
+    fx.uInnerBeamOpacity.value = 0;
+    fx.uOuterBeamOpacity.value = 0;
+    fx.uFlashOpacity.value = 0;
+    fx.uShock1Opacity.value = 0;
+    fx.uShock2Opacity.value = 0;
+    fx.uPortalVeilOpacity.value = 0.06;
+    fx.uPortalBandLowerOpacity.value = 0.15;
+    fx.uPortalBandUpperOpacity.value = 0.09;
+    fx.uPortalCrownOpacity.value = 0.06;
+
+    for (const p of fx.helixParticles) {
+      p.mesh.visible = false;
+      p.mesh.position.set(0, 0, 0);
+      p.mesh.scale.setScalar(p.baseScale * 0.55);
+      p.angle = p.helixIndex * Math.PI + (p.particleIndex / 4) * Math.PI * 2;
+    }
+
+    for (const p of fx.burstParticles) {
+      p.mesh.visible = false;
+      p.mesh.position.set(0, 0.5, 0);
+      p.mesh.scale.setScalar(0);
+      p.velocity.set(0, 0, 0);
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // UPDATE LOOP
   // ═══════════════════════════════════════════════════════════════════════════
@@ -472,6 +734,11 @@ export class ClientTeleportEffectsSystem extends SystemBase {
       if (!fx.active) continue;
 
       fx.life += dt;
+      if (fx.mode === "channel") {
+        this.updateChannelEffect(fx, dt);
+        continue;
+      }
+
       const t = Math.min(fx.life / EFFECT_DURATION, 1.0);
 
       if (t >= 1) {
@@ -491,6 +758,101 @@ export class ClientTeleportEffectsSystem extends SystemBase {
         this.updateHelixParticles(fx, dt, camQuat);
         this.updateBurstParticles(fx, t, dt, camQuat);
       }
+    }
+  }
+
+  private updateChannelEffect(fx: PooledEffect, dt: number): void {
+    const localPlayerAnchor = this.getLocalPlayerTeleportAnchor();
+    if (!localPlayerAnchor) {
+      this.stopHomeTeleportCastEffect();
+      return;
+    }
+
+    if (
+      fx.life * 1000 >
+      fx.channelDurationMs + CHANNEL_EFFECT_TIMEOUT_BUFFER_MS
+    ) {
+      this.deactivateEffect(fx);
+      return;
+    }
+
+    fx.group.position.copy(localPlayerAnchor);
+
+    const progress = Math.min(
+      1,
+      (fx.life * 1000) / Math.max(1, fx.channelDurationMs),
+    );
+    const portalRise = easeOutExpo(progress);
+    const portalCinch = easeInQuad(progress);
+    const endgameCharge =
+      progress > PORTAL_ENDGAME_START
+        ? (progress - PORTAL_ENDGAME_START) / (1 - PORTAL_ENDGAME_START)
+        : 0;
+    const finalTighten = easeInQuad(endgameCharge);
+    const pulse = 0.5 + 0.5 * Math.sin(fx.life * 3.2);
+    const secondaryPulse = 0.5 + 0.5 * Math.sin(fx.life * 1.8 + 1.2);
+    fx.runeCircle.visible = true;
+    fx.baseGlow.visible = true;
+    fx.innerBeam.visible = false;
+    fx.outerBeam.visible = false;
+    fx.coreFlash.visible = false;
+    fx.shockwave1.visible = false;
+    fx.shockwave2.visible = false;
+    fx.uRuneOpacity.value = 0.08 + portalRise * 0.08 + endgameCharge * 0.08;
+    fx.uGlowOpacity.value = 0.05 + portalRise * 0.05 + pulse * 0.015;
+    fx.uInnerBeamOpacity.value = 0;
+    fx.uOuterBeamOpacity.value = 0;
+    fx.uFlashOpacity.value = 0;
+    fx.uShock1Opacity.value = 0;
+    fx.uShock2Opacity.value = 0;
+
+    fx.portalVeil.visible = true;
+    fx.portalVeil.scale.set(
+      0.68 + portalCinch * 0.08 - finalTighten * 0.025,
+      0.06 + portalRise * 0.42 + endgameCharge * 0.08,
+      0.68 + portalCinch * 0.08 - finalTighten * 0.025,
+    );
+    fx.uPortalVeilOpacity.value =
+      0.035 + portalRise * 0.065 + endgameCharge * 0.08 + pulse * 0.012;
+
+    fx.portalBandLower.visible = true;
+    fx.portalBandLower.position.y = 0.02 + portalRise * 0.12;
+    fx.portalBandLower.scale.setScalar(
+      0.92 + portalCinch * 0.16 + pulse * 0.03 - finalTighten * 0.06,
+    );
+    fx.portalBandLower.rotation.z +=
+      dt * (0.58 + portalRise * 1.2 + endgameCharge * 0.35);
+    fx.uPortalBandLowerOpacity.value =
+      0.11 + portalRise * 0.08 + endgameCharge * 0.08;
+
+    fx.portalBandUpper.visible = progress > 0.1;
+    fx.portalBandUpper.position.y = 0.4 + portalRise * 0.9;
+    fx.portalBandUpper.scale.setScalar(
+      0.52 + portalRise * 0.18 + secondaryPulse * 0.025 - finalTighten * 0.04,
+    );
+    fx.portalBandUpper.rotation.z -=
+      dt * (0.52 + portalRise * 0.92 + endgameCharge * 0.3);
+    fx.uPortalBandUpperOpacity.value = fx.portalBandUpper.visible
+      ? 0.05 + portalRise * 0.06 + endgameCharge * 0.09
+      : 0;
+
+    fx.portalCrown.visible = progress > 0.28;
+    fx.portalCrown.position.y = 0.76 + portalRise * 0.92;
+    fx.portalCrown.scale.setScalar(
+      0.44 + portalRise * 0.12 + endgameCharge * 0.08,
+    );
+    fx.portalCrown.rotation.z +=
+      dt * (0.85 + portalRise * 1.25 + endgameCharge * 0.35);
+    fx.uPortalCrownOpacity.value = fx.portalCrown.visible
+      ? 0.045 + portalRise * 0.04 + endgameCharge * 0.08 + pulse * 0.01
+      : 0;
+
+    for (const particle of fx.burstParticles) {
+      particle.mesh.visible = false;
+    }
+
+    for (const particle of fx.helixParticles) {
+      particle.mesh.visible = false;
     }
   }
 
@@ -753,7 +1115,79 @@ export class ClientTeleportEffectsSystem extends SystemBase {
   // ═══════════════════════════════════════════════════════════════════════════
   private deactivateEffect(fx: PooledEffect): void {
     fx.active = false;
+    fx.mode = "burst";
     fx.group.visible = false;
+    if (this.homeTeleportCastEffect === fx) {
+      this.homeTeleportCastEffect = null;
+    }
+  }
+
+  private stopHomeTeleportCastEffect(): void {
+    if (!this.homeTeleportCastEffect) return;
+    this.deactivateEffect(this.homeTeleportCastEffect);
+  }
+
+  private getLocalPlayerId(): string | null {
+    const player = this.world.entities.player as { id?: string } | null;
+    return player?.id ?? null;
+  }
+
+  private getLocalPlayerTeleportAnchor(): THREE.Vector3 | null {
+    const player = this.world.entities.player as {
+      position?: THREE.Vector3;
+      avatar?: {
+        getBoneTransform?: (boneName: string) => THREE.Matrix4 | null;
+      };
+    } | null;
+    if (!player?.position) {
+      return null;
+    }
+
+    const anchor = this.localPlayerTeleportAnchor.copy(player.position);
+    let lowestBoneY = Number.POSITIVE_INFINITY;
+
+    const getBoneTransform = player.avatar?.getBoneTransform;
+    if (getBoneTransform) {
+      try {
+        for (const boneName of TELEPORT_GROUND_CONTACT_BONES) {
+          const boneMatrix = getBoneTransform(boneName);
+          if (!boneMatrix) {
+            continue;
+          }
+
+          const boneWorldPos =
+            this.teleportBoneWorldPosition.setFromMatrixPosition(boneMatrix);
+          lowestBoneY = Math.min(lowestBoneY, boneWorldPos.y);
+        }
+      } catch {
+        lowestBoneY = Number.POSITIVE_INFINITY;
+      }
+    }
+
+    const terrain = this.world.getSystem("terrain") as {
+      getHeightAt?: (x: number, z: number) => number;
+    } | null;
+    const terrainHeight = terrain?.getHeightAt?.(anchor.x, anchor.z);
+    const safeTerrainHeight: number | null =
+      typeof terrainHeight === "number" && Number.isFinite(terrainHeight)
+        ? terrainHeight
+        : null;
+
+    if (safeTerrainHeight !== null) {
+      anchor.y = safeTerrainHeight + PORTAL_GROUND_CLEARANCE;
+      if (
+        Number.isFinite(lowestBoneY) &&
+        Math.abs(lowestBoneY - safeTerrainHeight) <= 0.18
+      ) {
+        anchor.y = lowestBoneY + PORTAL_GROUND_CLEARANCE;
+      }
+    } else if (Number.isFinite(lowestBoneY)) {
+      anchor.y = lowestBoneY + PORTAL_GROUND_CLEARANCE;
+    } else {
+      anchor.y += PORTAL_GROUND_CLEARANCE;
+    }
+
+    return anchor;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -851,7 +1285,9 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     material.side = THREE.DoubleSide;
     material.fog = false;
 
-    const yNorm = positionLocal.y;
+    // Use UV space rather than local position so the gradient remains stable
+    // across translated / differently sized cylinders (beams and portal veil).
+    const yNorm = uv().y;
     const baseVec = vec3(
       float(baseColor.r),
       float(baseColor.g),
@@ -865,11 +1301,8 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     const gradientColor = mix(baseVec, topVec, yNorm) as ShaderNode;
 
     const pulse = add(
-      float(0.8),
-      mul(
-        sin(add(mul(positionLocal.y, float(3.0)), mul(time, float(4.0)))),
-        float(0.2),
-      ),
+      float(0.86),
+      mul(sin(add(mul(yNorm, float(6.0)), mul(time, float(2.6)))), float(0.14)),
     );
 
     // Soft fade at beam base so it emerges from the rune circle, not through the floor
@@ -985,6 +1418,16 @@ export class ClientTeleportEffectsSystem extends SystemBase {
   // ═══════════════════════════════════════════════════════════════════════════
 
   destroy(): void {
+    this.stopHomeTeleportCastEffect();
+    this.world.off(
+      EventType.HOME_TELEPORT_CAST_START,
+      this.onHomeTeleportCastStart,
+    );
+    this.world.off(EventType.HOME_TELEPORT_FAILED, this.onHomeTeleportStopped);
+    this.world.off(
+      EventType.HOME_TELEPORT_CAST_CANCEL,
+      this.onHomeTeleportStopped,
+    );
     this.world.off(EventType.PLAYER_TELEPORTED, this.onPlayerTeleported);
 
     // Dispose all pool entries
@@ -1012,6 +1455,8 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     this.runeCircleGeo?.dispose();
     this.shockwaveGeo?.dispose();
     this.sphereGeo?.dispose();
+    this.portalVeilGeo?.dispose();
+    this.portalRingGeo?.dispose();
     this.particleGeo = null;
     this.beamInnerGeo = null;
     this.beamOuterGeo = null;
@@ -1019,6 +1464,8 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     this.runeCircleGeo = null;
     this.shockwaveGeo = null;
     this.sphereGeo = null;
+    this.portalVeilGeo = null;
+    this.portalRingGeo = null;
 
     // Dispose shared textures
     this.runeTexture?.dispose();
