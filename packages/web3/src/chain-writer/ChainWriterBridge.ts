@@ -281,7 +281,8 @@ export class ChainWriterBridge {
       );
     });
 
-    // Player deaths — listen to ENTITY_DEATH (PLAYER_DIED is never emitted)
+    // Player deaths — listen to ENTITY_DEATH (PLAYER_DIED is deprecated/never emitted)
+    // String literal "entity:death" must match EventType.ENTITY_DEATH from @hyperscape/shared
     world.on("entity:death", (payload: unknown) => {
       const data = payload as {
         entityId: string;

@@ -64,7 +64,10 @@ export class PlayerDeathSystem extends SystemBase {
     }
   >();
 
-  // OSRS-style: Items kept on death (top 3 most valuable) — returned on respawn
+  // OSRS-style: Items kept on death (top 3 most valuable) — returned on respawn.
+  // NOTE: In-memory only. If server crashes between death and respawn, kept items
+  // are lost. Dropped items are persisted via death lock for crash recovery.
+  // TODO: Persist kept items in death lock's DB record for full crash safety.
   private itemsKeptOnDeath = new Map<string, InventoryItem[]>();
 
   // Guard: prevents respawn race while death transaction is in progress
@@ -665,6 +668,10 @@ export class PlayerDeathSystem extends SystemBase {
         await inventorySystem.clearInventoryImmediate(playerId, true);
       },
     );
+
+    // Below: persist the in-memory clears to DB. These calls are idempotent —
+    // clearing an already-empty inventory/equipment is a no-op write. The
+    // deathProcessingInProgress guard prevents item pickups during this window.
 
     // TWO-PHASE CLEAR: clearEquipmentAndReturn (inside tx) cleared in-memory state
     // and returned the items. clearEquipmentImmediate (below) persists the empty state

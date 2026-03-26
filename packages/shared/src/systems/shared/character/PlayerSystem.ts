@@ -847,6 +847,10 @@ export class PlayerSystem extends SystemBase {
     // Clear eat cooldown on death (memory hygiene)
     this.eatDelayManager.clearPlayer(data.playerId);
 
+    // DEATH FLOW: PlayerSystem sets entity state + emits PLAYER_SET_DEAD (immediate client feedback).
+    // Then ENTITY_DEATH fires → PlayerDeathSystem handles items, transaction, gravestone, respawnTick.
+    // See PlayerDeathSystem.postDeathCleanup for the respawn/death-screen half of the flow.
+    //
     // Set entity death state IMMEDIATELY so client sees death animation
     // even if PlayerDeathSystem's async processing fails
     const deathEntity = this.world.entities?.get?.(data.playerId);

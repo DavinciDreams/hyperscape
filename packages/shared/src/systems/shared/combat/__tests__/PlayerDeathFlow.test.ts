@@ -407,6 +407,124 @@ describe("PlayerDeathSystem — death-to-respawn flow", () => {
 });
 
 // =============================================================================
+// KEPT ITEMS RETURNED ON RESPAWN
+// =============================================================================
+
+describe("PlayerDeathSystem — kept items on respawn", () => {
+  let world: MockWorld;
+  let deathSystem: PlayerDeathSystem;
+  let mockInventorySystem: {
+    addItemDirect: Mock;
+    getItems: Mock;
+    clearInventoryImmediate: Mock;
+    getInventory: Mock;
+  };
+
+  beforeEach(() => {
+    world = createMockWorld(true, 1000);
+
+    world.on.mockImplementation(() => {});
+    world.emit.mockImplementation(() => {});
+
+    mockInventorySystem = {
+      addItemDirect: vi.fn().mockResolvedValue(undefined),
+      getItems: vi.fn().mockReturnValue([]),
+      clearInventoryImmediate: vi.fn().mockResolvedValue(undefined),
+      getInventory: vi.fn().mockReturnValue(null),
+    };
+
+    world.getSystem.mockImplementation((name: string) => {
+      if (name === "inventory") return mockInventorySystem;
+      if (name === "ground-items")
+        return { spawnGroundItems: vi.fn().mockResolvedValue([]) };
+      return null;
+    });
+
+    deathSystem = new PlayerDeathSystem(createSystemWorld(world));
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("returns kept items to inventory via addItemDirect on respawn", async () => {
+    // Set up kept items in the in-memory map
+    const keptItemsMap = (
+      deathSystem as unknown as {
+        itemsKeptOnDeath: Map<
+          string,
+          Array<{ itemId: string; quantity: number }>
+        >;
+      }
+    ).itemsKeptOnDeath;
+
+    keptItemsMap.set("player1", [
+      { itemId: "rune_scimitar", quantity: 1 },
+      { itemId: "dragon_med_helm", quantity: 1 },
+      { itemId: "amulet_of_glory", quantity: 1 },
+    ]);
+
+    // Create player entity for respawn
+    const playerEntity = createMockPlayerEntity({
+      data: { deathState: DeathState.DYING, visible: false },
+    });
+    world.entities.get.mockReturnValue(playerEntity);
+
+    // Call respawnPlayer directly
+    const respawnPlayer = (
+      deathSystem as unknown as {
+        respawnPlayer: (
+          playerId: string,
+          spawnPosition: { x: number; y: number; z: number },
+          townName: string,
+        ) => Promise<void>;
+      }
+    ).respawnPlayer.bind(deathSystem);
+
+    await respawnPlayer("player1", { x: 0, y: 10, z: 0 }, "Central Haven");
+
+    // Verify all 3 kept items were returned
+    expect(mockInventorySystem.addItemDirect).toHaveBeenCalledTimes(3);
+    expect(mockInventorySystem.addItemDirect).toHaveBeenCalledWith("player1", {
+      itemId: "rune_scimitar",
+      quantity: 1,
+    });
+    expect(mockInventorySystem.addItemDirect).toHaveBeenCalledWith("player1", {
+      itemId: "dragon_med_helm",
+      quantity: 1,
+    });
+    expect(mockInventorySystem.addItemDirect).toHaveBeenCalledWith("player1", {
+      itemId: "amulet_of_glory",
+      quantity: 1,
+    });
+
+    // Kept items should be cleared after return
+    expect(keptItemsMap.has("player1")).toBe(false);
+  });
+
+  it("does not call addItemDirect when no kept items exist", async () => {
+    const playerEntity = createMockPlayerEntity({
+      data: { deathState: DeathState.DYING, visible: false },
+    });
+    world.entities.get.mockReturnValue(playerEntity);
+
+    const respawnPlayer = (
+      deathSystem as unknown as {
+        respawnPlayer: (
+          playerId: string,
+          spawnPosition: { x: number; y: number; z: number },
+          townName: string,
+        ) => Promise<void>;
+      }
+    ).respawnPlayer.bind(deathSystem);
+
+    await respawnPlayer("player1", { x: 0, y: 10, z: 0 }, "Central Haven");
+
+    expect(mockInventorySystem.addItemDirect).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
 // EVENT MIGRATION TEST
 // =============================================================================
 
