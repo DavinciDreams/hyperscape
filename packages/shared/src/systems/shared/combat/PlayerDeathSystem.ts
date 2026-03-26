@@ -21,6 +21,16 @@ import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
 import { STARTER_TOWNS } from "../../../data/world-areas";
 import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
 import { dataManager } from "../../../data/DataManager";
+import type {
+  PlayerSystemLike,
+  DatabaseSystemLike,
+  EquipmentSystemLike,
+  TerrainSystemLike,
+  NetworkLike,
+  TickSystemLike,
+  PlayerEntityLike,
+  DeathLocationDataWithHeadstone,
+} from "./DeathTypes";
 
 /**
  * Sanitize killedBy string to prevent injection attacks
@@ -208,83 +218,6 @@ function isPositionInBounds(position: {
     position.y >= POSITION_VALIDATION.MIN_HEIGHT &&
     position.y <= POSITION_VALIDATION.MAX_HEIGHT
   );
-}
-
-interface PlayerSystemLike {
-  players?: Map<string, { position?: { x: number; y: number; z: number } }>;
-}
-
-interface DatabaseSystemLike {
-  executeInTransaction: (
-    fn: (tx: TransactionContext) => Promise<void>,
-  ) => Promise<void>;
-}
-
-interface EquipmentSystemLike {
-  getPlayerEquipment: (playerId: string) => EquipmentData | null;
-  clearEquipmentImmediate?: (playerId: string) => Promise<void>;
-  // Atomic clear-and-return for death system
-  clearEquipmentAndReturn?: (
-    playerId: string,
-    tx?: TransactionContext,
-  ) => Promise<Array<{ itemId: string; slot: string; quantity: number }>>;
-}
-
-interface EquipmentData {
-  weapon?: { item?: { id: string; quantity?: number } };
-  shield?: { item?: { id: string; quantity?: number } };
-  helmet?: { item?: { id: string; quantity?: number } };
-  body?: { item?: { id: string; quantity?: number } };
-  legs?: { item?: { id: string; quantity?: number } };
-  arrows?: { item?: { id: string; quantity?: number } };
-  [key: string]: { item?: { id: string; quantity?: number } } | undefined;
-}
-
-interface TerrainSystemLike {
-  isReady: () => boolean;
-  getHeightAt: (x: number, z: number) => number;
-}
-
-interface NetworkLike {
-  sendTo: (
-    playerId: string,
-    eventName: string,
-    data: Record<string, unknown>,
-  ) => void;
-}
-
-interface TickSystemLike {
-  getCurrentTick: () => number;
-  onTick: (
-    callback: (tickNumber: number, deltaMs: number) => void,
-    priority?: number,
-  ) => () => void;
-}
-
-interface PlayerEntityLike {
-  emote?: string;
-  data?: {
-    e?: string;
-    visible?: boolean;
-    name?: string;
-    position?: number[];
-    // Death state fields (single source of truth)
-    deathState?: DeathState;
-    deathPosition?: [number, number, number];
-    respawnTick?: number;
-  };
-  node?: {
-    position: { set: (x: number, y: number, z: number) => void };
-  };
-  position?: { x: number; y: number; z: number };
-  setHealth?: (health: number) => void;
-  getMaxHealth?: () => number;
-  markNetworkDirty?: () => void;
-}
-
-/** Extended death location data with headstone tracking */
-interface DeathLocationDataWithHeadstone extends DeathLocationData {
-  headstoneId?: string;
 }
 
 /**

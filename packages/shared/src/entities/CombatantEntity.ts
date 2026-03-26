@@ -126,14 +126,14 @@ export abstract class CombatantEntity extends Entity {
 
     // Initialize combat properties from config
     if (config.combat) {
-      this.attackPower = config.combat.attack || this.attackPower;
-      this.defense = config.combat.defense || this.defense;
-      this.attackSpeed = config.combat.attackSpeed || this.attackSpeed;
-      this.criticalChance = config.combat.criticalChance || this.criticalChance;
-      this.combatLevel = config.combat.combatLevel || this.combatLevel;
-      this.respawnTime = config.combat.respawnTime || this.respawnTime;
-      this.aggroRadius = config.combat.aggroRadius || this.aggroRadius;
-      this.attackRange = config.combat.attackRange || this.attackRange;
+      this.attackPower = config.combat.attack ?? this.attackPower;
+      this.defense = config.combat.defense ?? this.defense;
+      this.attackSpeed = config.combat.attackSpeed ?? this.attackSpeed;
+      this.criticalChance = config.combat.criticalChance ?? this.criticalChance;
+      this.combatLevel = config.combat.combatLevel ?? this.combatLevel;
+      this.respawnTime = config.combat.respawnTime ?? this.respawnTime;
+      this.aggroRadius = config.combat.aggroRadius ?? this.aggroRadius;
+      this.attackRange = config.combat.attackRange ?? this.attackRange;
     }
 
     this.initializeCombat();
@@ -331,10 +331,7 @@ export abstract class CombatantEntity extends Entity {
       deathTime: this.deathTime,
     });
 
-    // Handle respawn scheduling
-    if (this.respawnTime > 0) {
-      setTimeout(() => this.respawn(), this.respawnTime);
-    }
+    // Respawn is handled by the tick-based update() poll — no setTimeout needed
   }
 
   /**
