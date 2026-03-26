@@ -74,7 +74,9 @@ export class PlayerDeathSystem extends SystemBase {
   // Guard: prevents respawn race while death transaction is in progress
   private deathProcessingInProgress = new Set<string>();
 
-  // Single-retry queue for post-transaction DB persist failures
+  // Single-retry queue for post-transaction DB persist failures.
+  // Bounded to MAX_PERSIST_RETRIES to prevent unbounded growth if DB is persistently unavailable.
+  private static readonly MAX_PERSIST_RETRIES = 100;
   private pendingPersistRetries: Array<{
     playerId: string;
     type: "equipment" | "inventory";
@@ -734,7 +736,7 @@ export class PlayerDeathSystem extends SystemBase {
           err instanceof Error ? err : undefined,
           { playerId },
         );
-        this.pendingPersistRetries.push({ playerId, type: "equipment" });
+        this.queuePersistRetry(playerId, "equipment");
       }
     }
 
@@ -748,7 +750,7 @@ export class PlayerDeathSystem extends SystemBase {
         err instanceof Error ? err : undefined,
         { playerId },
       );
-      this.pendingPersistRetries.push({ playerId, type: "inventory" });
+      this.queuePersistRetry(playerId, "inventory");
     }
 
     this.postDeathCleanup(
@@ -1726,6 +1728,34 @@ export class PlayerDeathSystem extends SystemBase {
         });
       }
     }
+  }
+
+  /** Queue a persist retry, bounded to prevent unbounded growth under sustained DB failures */
+  private queuePersistRetry(
+    playerId: string,
+    type: "equipment" | "inventory",
+  ): void {
+    if (
+      this.pendingPersistRetries.length >= PlayerDeathSystem.MAX_PERSIST_RETRIES
+    ) {
+      this.logger.error(
+        "DEATH_PERSIST_DESYNC: Retry queue full — dropping retry (DB may be persistently unavailable)",
+        undefined,
+        { playerId, type, queueSize: this.pendingPersistRetries.length },
+      );
+      this.emitTypedEvent(EventType.AUDIT_LOG, {
+        action: "DEATH_PERSIST_RETRY_QUEUE_FULL",
+        playerId,
+        actorId: playerId,
+        zoneType: "unknown",
+        success: false,
+        failureReason: `${type}_persist_retry_dropped`,
+        queueSize: this.pendingPersistRetries.length,
+        timestamp: Date.now(),
+      });
+      return;
+    }
+    this.pendingPersistRetries.push({ playerId, type });
   }
 
   /** Single-attempt retry for post-transaction DB persist failures */
