@@ -873,12 +873,21 @@ export class PlayerSystem extends SystemBase {
       }
     }
 
-    // Emit PLAYER_SET_DEAD immediately so client blocks input
-    this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
-      playerId: data.playerId,
-      isDead: true,
-      deathPosition: player.position,
-    });
+    // Emit PLAYER_SET_DEAD immediately so client blocks input.
+    // Wrapped in try-catch: if a subscriber throws, ENTITY_DEATH must still fire
+    // so PlayerDeathSystem processes the death (items, gravestone, respawn).
+    try {
+      this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
+        playerId: data.playerId,
+        isDead: true,
+        deathPosition: player.position,
+      });
+    } catch (err) {
+      console.error(
+        `[PlayerSystem] PLAYER_SET_DEAD subscriber threw — continuing to ENTITY_DEATH`,
+        err,
+      );
+    }
 
     // Emit ENTITY_DEATH for DeathSystem to handle (headstones, loot, respawn)
     // DeathSystem will handle the full death flow including respawn
