@@ -89,6 +89,7 @@ export const Tab = memo(function Tab({
   panelId,
   onActivate,
   onNavigate,
+  reserveArrowKeys = false,
   onClose,
   className,
   style,
@@ -188,12 +189,18 @@ export const Tab = memo(function Tab({
           onActivate();
           return;
         }
-        if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        if (
+          !reserveArrowKeys &&
+          (e.key === "ArrowLeft" || e.key === "ArrowUp")
+        ) {
           e.preventDefault();
           onNavigate?.("previous");
           return;
         }
-        if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        if (
+          !reserveArrowKeys &&
+          (e.key === "ArrowRight" || e.key === "ArrowDown")
+        ) {
           e.preventDefault();
           onNavigate?.("next");
           return;
