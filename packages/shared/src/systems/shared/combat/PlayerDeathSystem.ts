@@ -70,6 +70,12 @@ export class PlayerDeathSystem extends SystemBase {
   // Guard: prevents respawn race while death transaction is in progress
   private deathProcessingInProgress = new Set<string>();
 
+  // Single-retry queue for post-transaction DB persist failures
+  private pendingPersistRetries: Array<{
+    playerId: string;
+    type: "equipment" | "inventory";
+  }> = [];
+
   private lastDeathTime = new Map<string, number>();
   private readonly DEATH_COOLDOWN = ticksToMs(
     COMBAT_CONSTANTS.DEATH.COOLDOWN_TICKS,
@@ -254,6 +260,7 @@ export class PlayerDeathSystem extends SystemBase {
     this.lastDeathTime.clear();
     this.itemsKeptOnDeath.clear();
     this.deathProcessingInProgress.clear();
+    this.pendingPersistRetries.length = 0;
   }
 
   private async handlePlayerDeath(data: {
@@ -653,20 +660,16 @@ export class PlayerDeathSystem extends SystemBase {
 
     // CRITICAL: Persist equipment clearing to DB AFTER transaction completes
     // (inside the transaction it would deadlock on SQLite)
-    if (equipmentSystem) {
+    if (equipmentSystem?.clearEquipmentImmediate) {
       try {
-        // saveEquipmentToDatabase is private, so use clearEquipmentImmediate
-        // which saves to DB. Equipment is already cleared in memory by
-        // clearEquipmentAndReturn, so this just persists the empty state.
-        if (equipmentSystem.clearEquipmentImmediate) {
-          await equipmentSystem.clearEquipmentImmediate(playerId);
-        }
+        await equipmentSystem.clearEquipmentImmediate(playerId);
       } catch (err) {
         this.logger.error(
-          "Equipment DB persist failed (non-fatal)",
+          "Equipment DB persist failed, queuing retry",
           err instanceof Error ? err : undefined,
           { playerId },
         );
+        this.pendingPersistRetries.push({ playerId, type: "equipment" });
       }
     }
 
@@ -675,10 +678,11 @@ export class PlayerDeathSystem extends SystemBase {
       await inventorySystem.clearInventoryImmediate(playerId, false);
     } catch (err) {
       this.logger.error(
-        "Inventory DB persist failed (non-fatal)",
+        "Inventory DB persist failed, queuing retry",
         err instanceof Error ? err : undefined,
         { playerId },
       );
+      this.pendingPersistRetries.push({ playerId, type: "inventory" });
     }
 
     this.postDeathCleanup(
@@ -1568,6 +1572,9 @@ export class PlayerDeathSystem extends SystemBase {
    * Checks all players in DYING state and respawns them when respawnTick is reached.
    */
   private processPendingRespawns(currentTick: number): void {
+    // Process single-retry persist queue (equipment/inventory DB writes that failed)
+    this.processPersistRetries();
+
     // Iterate over all player entities and check for pending respawns
     // Use world.entities.players to get the players Map
     const players = this.world.entities?.players;
@@ -1599,6 +1606,48 @@ export class PlayerDeathSystem extends SystemBase {
             { playerId },
           );
         });
+      }
+    }
+  }
+
+  /** Single-attempt retry for post-transaction DB persist failures */
+  private processPersistRetries(): void {
+    if (this.pendingPersistRetries.length === 0) return;
+
+    // Drain the queue (single attempt only — no infinite retry loops)
+    const retries = this.pendingPersistRetries.splice(0);
+
+    for (const { playerId, type } of retries) {
+      if (type === "equipment") {
+        const equipmentSystem = this.world.getSystem(
+          "equipment",
+        ) as unknown as EquipmentSystemLike | null;
+        if (equipmentSystem?.clearEquipmentImmediate) {
+          void equipmentSystem
+            .clearEquipmentImmediate(playerId)
+            .catch((err) => {
+              this.logger.error(
+                "Equipment DB persist retry failed",
+                err instanceof Error ? err : undefined,
+                { playerId },
+              );
+            });
+        }
+      } else {
+        const inventorySystem = this.world.getSystem(
+          "inventory",
+        ) as InventorySystem | null;
+        if (inventorySystem) {
+          void inventorySystem
+            .clearInventoryImmediate(playerId, false)
+            .catch((err) => {
+              this.logger.error(
+                "Inventory DB persist retry failed",
+                err instanceof Error ? err : undefined,
+                { playerId },
+              );
+            });
+        }
       }
     }
   }

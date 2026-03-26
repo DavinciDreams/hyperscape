@@ -25,28 +25,9 @@ import { EntityType, InteractionType } from "../../../types/entities";
 import type { HeadstoneEntityConfig } from "../../../types/entities";
 import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 import { ticksToMs } from "../../../utils/game/CombatCalculations";
-import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
 
 const GRAVESTONE_MODEL_PATH = "models/environment/gravestone.glb";
-
-/**
- * Check if a position is inside the duel arena bounds.
- * Gravestones should NEVER spawn inside the duel arena — the duel system
- * owns all death handling there. This spatial guard is robust against
- * server restarts and race conditions where runtime duel flags may have
- * been cleared before death processing ran.
- */
-function isPositionInDuelArena(position: { x: number; z: number }): boolean {
-  const duelArena = ALL_WORLD_AREAS["duel_arena"];
-  if (!duelArena?.bounds) return false;
-  const { minX, maxX, minZ, maxZ } = duelArena.bounds;
-  return (
-    position.x >= minX &&
-    position.x <= maxX &&
-    position.z >= minZ &&
-    position.z <= maxZ
-  );
-}
 
 /** Gravestone data tracked for tick-based expiration */
 interface GravestoneData {
@@ -271,14 +252,17 @@ export class SafeAreaDeathHandler {
       }
     }
 
-    // Process expired gravestones with proper error handling
-    // Using void operator to explicitly ignore the promise (fire-and-forget pattern)
+    // Process expired gravestones — delete from Map only AFTER async completes
     for (const gravestoneData of expiredGravestones) {
+      // Remove from tracking BEFORE async work to prevent double-processing on next tick
+      this.gravestones.delete(gravestoneData.gravestoneId);
+
       void this.handleGravestoneExpire(gravestoneData, currentTick).catch(
         (err) => {
-          console.error(
-            `[SafeAreaDeathHandler] Gravestone expiration failed for ${gravestoneData.gravestoneId}:`,
-            err,
+          Logger.systemError(
+            "SafeAreaDeathHandler",
+            `Gravestone expiration failed for ${gravestoneData.gravestoneId}`,
+            err instanceof Error ? err : new Error(String(err)),
           );
         },
       );
@@ -294,15 +278,8 @@ export class SafeAreaDeathHandler {
   ): Promise<void> {
     const { gravestoneId, playerId, position, items } = gravestoneData;
 
-    const ticksExisted =
-      currentTick -
-      (gravestoneData.expirationTick - COMBAT_CONSTANTS.GRAVESTONE_TICKS);
-    console.log(
-      `[SafeAreaDeathHandler] Gravestone ${gravestoneId} expired after ${ticksExisted} ticks (${(ticksToMs(ticksExisted) / 1000).toFixed(1)}s), transitioning to ground items`,
-    );
-
-    // Remove from tracking
-    this.gravestones.delete(gravestoneId);
+    // Note: gravestone was already removed from this.gravestones in processTick
+    // to prevent double-processing on next tick.
 
     // Destroy gravestone entity
     const entityManager = this.world.getSystem(
@@ -328,8 +305,9 @@ export class SafeAreaDeathHandler {
     // Update death lock
     await this.deathStateManager.onGravestoneExpired(playerId, groundItemIds);
 
-    console.log(
-      `[SafeAreaDeathHandler] Transitioned gravestone ${gravestoneId} to ${groundItemIds.length} ground items`,
+    Logger.system(
+      "SafeAreaDeathHandler",
+      `Transitioned gravestone ${gravestoneId} to ${groundItemIds.length} ground items`,
     );
   }
 
@@ -361,7 +339,7 @@ export class SafeAreaDeathHandler {
 
     // HARD RULE: Never spawn gravestones inside the duel arena.
     // Duel deaths are handled by DuelSystem/StreamingDuelScheduler.
-    if (isPositionInDuelArena(position)) {
+    if (isPositionInsideDuelArenaZone(position.x, position.z)) {
       console.log(
         `[SafeAreaDeathHandler] Position (${position.x.toFixed(1)}, ${position.z.toFixed(1)}) is inside duel arena — skipping gravestone for ${playerId}`,
       );
