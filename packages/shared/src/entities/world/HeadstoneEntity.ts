@@ -200,8 +200,9 @@ export class HeadstoneEntity extends InteractableEntity {
       return;
     }
 
-    // Don't open loot window for empty gravestones (defense-in-depth)
-    if (this.lootItems.length === 0) {
+    // Don't open loot window for empty gravestones (defense-in-depth).
+    // Server-only: client doesn't have lootItems (privacy — sent via corpseLoot packet).
+    if (this.world.isServer && this.lootItems.length === 0) {
       return;
     }
 
