@@ -713,11 +713,15 @@ const CombatStyleBanner = ({
         </div>
       </button>
 
-      {/* Invisible drag handle */}
+      {/* Drag handle overlay — also handles clicks since it sits on top */}
       <div
         {...attributes}
         {...listeners}
         aria-label={`Drag ${styleInfo.label} style to action bar`}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!disabled) onClick();
+        }}
         style={{
           position: "absolute",
           inset: 0,
