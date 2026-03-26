@@ -19,7 +19,7 @@ export type EventType =
   | "PLAYER_JOINED"
   | "PLAYER_LEFT"
   | "PLAYER_SPAWNED"
-  | "PLAYER_DIED"
+  | "PLAYER_DIED" // @deprecated — use ENTITY_DEATH with entityType filtering instead
   | "ENTITY_DEATH"
   | "ENTITY_JOINED"
   | "ENTITY_LEFT"

@@ -1,7 +1,9 @@
 /**
- * PlayerDeathSystem Integration Tests
+ * PlayerDeathSystem Unit Tests
  *
- * Tests the death-to-respawn pipeline and security guards.
+ * Tests the death-to-respawn pipeline and security guards using mocked systems.
+ * (True integration tests use Playwright with real Hyperscape instances.)
+ *
  * Verifies:
  * - Death processing guard prevents respawn race conditions
  * - Duel system blocks respawn during active duels
@@ -264,6 +266,16 @@ describe("PlayerDeathSystem — death-to-respawn flow", () => {
   });
 
   describe("tick-based respawn", () => {
+    /** Call the private processPendingRespawns directly (init() is not called in unit tests) */
+    function callProcessPendingRespawns(currentTick: number): void {
+      const fn = (
+        deathSystem as unknown as {
+          processPendingRespawns: (tick: number) => void;
+        }
+      ).processPendingRespawns.bind(deathSystem);
+      fn(currentTick);
+    }
+
     it("respawns player when currentTick reaches respawnTick", async () => {
       const playerEntity = createMockPlayerEntity({
         data: {
@@ -275,25 +287,14 @@ describe("PlayerDeathSystem — death-to-respawn flow", () => {
       world.entities.get.mockReturnValue(playerEntity);
       world.entities.players.set("player1", playerEntity);
 
-      // Get the processPendingRespawns via the tick callback registered in init
-      const tickSystem = world.getSystem("tick") as {
-        onTick: Mock;
-      };
-      if (tickSystem?.onTick?.mock?.calls?.length > 0) {
-        const tickCallback = tickSystem.onTick.mock.calls[0][0] as (
-          tickNumber: number,
-        ) => void;
+      // Process at the respawn tick
+      callProcessPendingRespawns(1000 + COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS);
 
-        // Process at the respawn tick
-        tickCallback(1000 + COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS);
+      // Wait for async respawn
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
-        // Wait for async respawn
-        await new Promise((resolve) => setTimeout(resolve, 50));
-
-        // Player should be hidden (pre-respawn) then respawned
-        // The markNetworkDirty should have been called
-        expect(playerEntity.markNetworkDirty).toHaveBeenCalled();
-      }
+      // Player should be hidden (pre-respawn) then respawned
+      expect(playerEntity.markNetworkDirty).toHaveBeenCalled();
     });
 
     it("does not respawn before respawnTick", () => {
@@ -307,21 +308,12 @@ describe("PlayerDeathSystem — death-to-respawn flow", () => {
       world.entities.get.mockReturnValue(playerEntity);
       world.entities.players.set("player1", playerEntity);
 
-      const tickSystem = world.getSystem("tick") as {
-        onTick: Mock;
-      };
-      if (tickSystem?.onTick?.mock?.calls?.length > 0) {
-        const tickCallback = tickSystem.onTick.mock.calls[0][0] as (
-          tickNumber: number,
-        ) => void;
+      // Process before respawn tick
+      callProcessPendingRespawns(1500);
 
-        // Process before respawn tick
-        tickCallback(1500);
-
-        // Player should still be visible and dying
-        expect(playerEntity.data.visible).toBe(true);
-        expect(playerEntity.data.deathState).toBe(DeathState.DYING);
-      }
+      // Player should still be visible and dying
+      expect(playerEntity.data.visible).toBe(true);
+      expect(playerEntity.data.deathState).toBe(DeathState.DYING);
     });
 
     it("skips respawn for player being death-processed", () => {
@@ -342,19 +334,10 @@ describe("PlayerDeathSystem — death-to-respawn flow", () => {
       world.entities.get.mockReturnValue(playerEntity);
       world.entities.players.set("player1", playerEntity);
 
-      const tickSystem = world.getSystem("tick") as {
-        onTick: Mock;
-      };
-      if (tickSystem?.onTick?.mock?.calls?.length > 0) {
-        const tickCallback = tickSystem.onTick.mock.calls[0][0] as (
-          tickNumber: number,
-        ) => void;
+      callProcessPendingRespawns(1000);
 
-        tickCallback(1000);
-
-        // Player should NOT have been modified — death processing guard blocked it
-        expect(playerEntity.data.visible).toBe(true);
-      }
+      // Player should NOT have been modified — death processing guard blocked it
+      expect(playerEntity.data.visible).toBe(true);
 
       inProgress.delete("player1");
     });

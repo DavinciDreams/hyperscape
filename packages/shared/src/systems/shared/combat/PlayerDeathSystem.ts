@@ -434,8 +434,9 @@ export class PlayerDeathSystem extends SystemBase {
         playerId,
         isDead: false,
       });
-      // Emit PLAYER_RESPAWNED so PlayerSystem restores player.alive and health
-      // Without this, PlayerSystem state stays dead even though entity is reset
+      // Emit PLAYER_RESPAWNED so PlayerSystem restores player.alive and health.
+      // Uses deathPosition (not spawn town) intentionally — on tx failure we revive
+      // the player in-place rather than teleporting them, which is less disruptive.
       this.emitTypedEvent(EventType.PLAYER_RESPAWNED, {
         playerId,
         spawnPosition: deathPosition,
@@ -449,7 +450,9 @@ export class PlayerDeathSystem extends SystemBase {
     deathPosition: { x: number; y: number; z: number },
     killedByRaw: string,
   ): Promise<void> {
-    // Guard: mark player as processing to prevent respawn race
+    // Guard: mark player as processing to prevent respawn race.
+    // NOTE: This method intentionally does NOT catch errors — they propagate to
+    // handlePlayerDeath's catch block which resets the player to alive state.
     this.deathProcessingInProgress.add(playerId);
     try {
       await this._processPlayerDeathInner(playerId, deathPosition, killedByRaw);
