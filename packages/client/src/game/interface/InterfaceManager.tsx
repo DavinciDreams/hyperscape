@@ -326,15 +326,17 @@ function DesktopInterfaceManager({
 
   // Ref-based late binding: renderPanel captures panelDataRef and reads
   // fresh data each time it's called. The function itself stays stable.
+  // IMPORTANT: Update synchronously during render (not in useEffect) so
+  // that when panelDataVersion triggers a re-render, the ref already
+  // holds the latest data. useEffect is deferred post-render, causing a
+  // one-frame stale read that makes the equipment panel show old items.
   const panelDataRef = useRef({
     inventory,
     coins,
     playerStats,
     equipment,
   });
-  useEffect(() => {
-    panelDataRef.current = { inventory, coins, playerStats, equipment };
-  }, [inventory, coins, playerStats, equipment]);
+  panelDataRef.current = { inventory, coins, playerStats, equipment };
 
   const renderPanel = useMemo(
     () =>

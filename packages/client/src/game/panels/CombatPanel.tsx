@@ -727,6 +727,12 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
 
     if (!actions?.actionMethods?.changeAttackStyle) return;
 
+    // Optimistic: update UI instantly (OSRS has zero visible delay)
+    combatStyleCache.set(playerId, next);
+    setStyle(next);
+
+    // Send to server — server confirms via attackStyleChanged packet,
+    // which will overwrite our optimistic value with the authoritative one
     actions.actionMethods.changeAttackStyle(playerId, next);
 
     // OSRS-accurate: selecting autocast opens the spells panel for spell selection
@@ -779,7 +785,15 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
 
     if (!actions?.actionMethods?.setAutoRetaliate) return;
 
-    actions.actionMethods.setAutoRetaliate(playerId, !autoRetaliate);
+    const newValue = !autoRetaliate;
+
+    // Optimistic: update UI instantly (OSRS has zero visible delay)
+    autoRetaliateCache.set(playerId, newValue);
+    setAutoRetaliate(newValue);
+
+    // Send to server — server confirms via autoRetaliateChanged packet,
+    // which will overwrite our optimistic value with the authoritative one
+    actions.actionMethods.setAutoRetaliate(playerId, newValue);
   };
 
   // All possible combat styles with their XP training info and colors
