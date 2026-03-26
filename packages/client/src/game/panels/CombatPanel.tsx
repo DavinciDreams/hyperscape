@@ -510,7 +510,8 @@ const CombatStyleBanner = ({
     <div
       ref={setNodeRef}
       style={{
-        flex: 1,
+        flex: "0 0 calc((100% - 3 * (var(--banner-gap))) / 4)",
+        maxWidth: "calc((100% - 3 * (var(--banner-gap))) / 4)",
         minWidth: 0,
         position: "relative",
         opacity: disabled ? 0.5 : isDragging ? 0.6 : 1,
@@ -1348,13 +1349,16 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
           )}
         </div>
         <div
-          style={{
-            display: "flex",
-            gap: compactPanel ? "4px" : "6px",
-            width: "100%",
-            marginTop: compactPanel ? 14 : 17,
-            justifyContent: "center",
-          }}
+          style={
+            {
+              display: "flex",
+              gap: compactPanel ? "4px" : "6px",
+              width: "100%",
+              marginTop: compactPanel ? 14 : 17,
+              justifyContent: "center",
+              "--banner-gap": compactPanel ? "4px" : "6px",
+            } as React.CSSProperties
+          }
         >
           {styles.map((s) => (
             <CombatStyleBanner
