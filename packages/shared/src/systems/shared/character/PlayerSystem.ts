@@ -47,6 +47,7 @@ import {
   Skills,
 } from "../../../types/core/core";
 import { WeaponType } from "../../../types/game/item-types";
+import { DeathState } from "../../../types/entities";
 import {
   isStyleValidForWeapon,
   getAvailableStyles,
@@ -876,7 +877,8 @@ export class PlayerSystem extends SystemBase {
       }
       if (deathEntity.data) {
         (deathEntity.data as Record<string, unknown>).e = "death";
-        (deathEntity.data as Record<string, unknown>).deathState = 2; // DeathState.DYING
+        (deathEntity.data as Record<string, unknown>).deathState =
+          DeathState.DYING;
         (deathEntity.data as Record<string, unknown>).deathPosition = [
           player.position.x,
           player.position.y,

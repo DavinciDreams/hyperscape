@@ -316,6 +316,9 @@ export class PlayerDeathSystem extends SystemBase {
   // OSRS-style: Items kept on death (top 3 most valuable) — returned on respawn
   private itemsKeptOnDeath = new Map<string, InventoryItem[]>();
 
+  // Guard: prevents respawn race while death transaction is in progress
+  private deathProcessingInProgress = new Set<string>();
+
   private lastDeathTime = new Map<string, number>();
   private readonly DEATH_COOLDOWN = ticksToMs(
     COMBAT_CONSTANTS.DEATH.COOLDOWN_TICKS,
@@ -499,6 +502,7 @@ export class PlayerDeathSystem extends SystemBase {
     this.pendingGravestones.clear();
     this.lastDeathTime.clear();
     this.itemsKeptOnDeath.clear();
+    this.deathProcessingInProgress.clear();
   }
 
   private async handlePlayerDeath(data: {
@@ -731,11 +735,20 @@ export class PlayerDeathSystem extends SystemBase {
     deathPosition: { x: number; y: number; z: number },
     killedByRaw: string,
   ): Promise<void> {
-    console.warn("[DEATH-DEBUG] processPlayerDeath called", {
-      playerId,
-      deathPosition,
-      killedBy: killedByRaw,
-    });
+    // Guard: mark player as processing to prevent respawn race
+    this.deathProcessingInProgress.add(playerId);
+    try {
+      await this._processPlayerDeathInner(playerId, deathPosition, killedByRaw);
+    } finally {
+      this.deathProcessingInProgress.delete(playerId);
+    }
+  }
+
+  private async _processPlayerDeathInner(
+    playerId: string,
+    deathPosition: { x: number; y: number; z: number },
+    killedByRaw: string,
+  ): Promise<void> {
     // Sanitize killedBy input to prevent injection attacks
     const killedBy = sanitizeKilledBy(killedByRaw);
     // Server-only - prevent client from triggering death events
@@ -831,19 +844,9 @@ export class PlayerDeathSystem extends SystemBase {
     // Update last death time (use cached timestamp)
     this.lastDeathTime.set(playerId, now);
 
-    // Set death state IMMEDIATELY to block any incoming loot/pickup requests
-    // This must happen BEFORE the transaction to prevent race conditions where
-    // items are looted between inventory snapshot and clear
+    // Death state (deathState = DYING) is already set by PlayerSystem.handleDeath
+    // which fires before this method. No need to set it again here.
     const playerEntity = this.world.entities?.get?.(playerId);
-    if (playerEntity && "data" in playerEntity) {
-      const typedPlayerEntity = playerEntity as PlayerEntityLike;
-      if (typedPlayerEntity.data) {
-        typedPlayerEntity.data.deathState = DeathState.DYING;
-        if ("markNetworkDirty" in playerEntity) {
-          (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
-        }
-      }
-    }
 
     // Duel arena deaths should not generate gravestones, ground items, or other loot clutter.
     // Keep normal death animation + respawn timing, but preserve inventory/equipment.
@@ -1130,12 +1133,8 @@ export class PlayerDeathSystem extends SystemBase {
     // before PlayerDeathSystem runs, making stateService queries unreliable
     this.emitCombatKillForPvP(playerId, killedBy);
 
-    // Set player as dead and disable movement
-    this.emitTypedEvent(EventType.PLAYER_SET_DEAD, {
-      playerId,
-      isDead: true,
-      deathPosition,
-    });
+    // NOTE: PLAYER_SET_DEAD(isDead: true) is already emitted by PlayerSystem.handleDeath
+    // (immediate client feedback). Do NOT emit it again here to avoid duplicate packets.
 
     // Emit death screen so the client shows the death overlay
     this.emitTypedEvent(EventType.UI_DEATH_SCREEN, {
@@ -1145,26 +1144,12 @@ export class PlayerDeathSystem extends SystemBase {
       respawnTime: ticksToMs(COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS),
     });
 
+    // Death state, emote, and deathPosition are already set by PlayerSystem.handleDeath.
+    // Only set the respawnTick here (requires tick system, only available on server).
     const playerEntity = this.world.entities?.get?.(playerId);
     if (playerEntity && "data" in playerEntity) {
-      const entityData = playerEntity.data as { e?: string; visible?: boolean };
-      entityData.visible = true;
-
       const typedPlayerEntity = playerEntity as PlayerEntityLike;
-      if (typedPlayerEntity.emote !== undefined) {
-        typedPlayerEntity.emote = "death";
-      }
       if (typedPlayerEntity.data) {
-        typedPlayerEntity.data.e = "death";
-
-        // AAA QUALITY: Set entity death state (single source of truth)
-        typedPlayerEntity.data.deathState = DeathState.DYING;
-        typedPlayerEntity.data.deathPosition = [
-          deathPosition.x,
-          deathPosition.y,
-          deathPosition.z,
-        ];
-
         // Calculate respawn tick using tick system
         // Use safe addition to prevent integer overflow
         const currentTick = this.tickSystem?.getCurrentTick() ?? 0;
@@ -1174,21 +1159,14 @@ export class PlayerDeathSystem extends SystemBase {
         const MAX_SAFE_TICK = MAX_TICK - animationTicks;
         typedPlayerEntity.data.respawnTick =
           currentTick > MAX_SAFE_TICK ? MAX_TICK : currentTick + animationTicks;
-        console.warn("[DEATH-DEBUG] respawnTick set", {
-          playerId,
-          currentTick,
-          animationTicks,
-          respawnTick: typedPlayerEntity.data.respawnTick,
-          deathState: typedPlayerEntity.data.deathState,
-        });
       }
 
       if ("markNetworkDirty" in playerEntity) {
         (playerEntity as { markNetworkDirty: () => void }).markNetworkDirty();
       }
     } else {
-      console.warn(
-        "[DEATH-DEBUG] postDeathCleanup: no playerEntity found for death state",
+      this.logger.warn(
+        "postDeathCleanup: no playerEntity found for respawnTick",
         {
           playerId,
           entityExists: !!playerEntity,
@@ -1363,6 +1341,18 @@ export class PlayerDeathSystem extends SystemBase {
 
   private async initiateRespawn(playerId: string): Promise<void> {
     this.respawnTimers.delete(playerId);
+
+    // Defense-in-depth: block respawn during active duel
+    const duelSystem = this.world.getSystem?.("duel") as {
+      isPlayerInActiveDuel?: (playerId: string) => boolean;
+    } | null;
+    if (duelSystem?.isPlayerInActiveDuel?.(playerId)) {
+      this.logger.warn("Blocked initiateRespawn during active duel", {
+        playerId,
+      });
+      return;
+    }
+
     this.logger.info("initiateRespawn called", { playerId });
 
     const deathData = this.deathLocations.get(playerId);
@@ -1589,6 +1579,25 @@ export class PlayerDeathSystem extends SystemBase {
   }
 
   private handleRespawnRequest(data: { playerId: string }): void {
+    // SECURITY: Block respawn during active duel — players cannot escape duels via respawn button
+    const duelSystem = this.world.getSystem?.("duel") as {
+      isPlayerInActiveDuel?: (playerId: string) => boolean;
+    } | null;
+    if (duelSystem?.isPlayerInActiveDuel?.(data.playerId)) {
+      this.logger.warn("Blocked respawn request during active duel", {
+        playerId: data.playerId,
+      });
+      return;
+    }
+
+    // Block respawn while death transaction is still processing
+    if (this.deathProcessingInProgress.has(data.playerId)) {
+      this.logger.info("Blocked respawn request during death processing", {
+        playerId: data.playerId,
+      });
+      return;
+    }
+
     // Allow immediate respawn if timer is still active (e.g., clicked respawn button)
     const timer = this.respawnTimers.get(data.playerId);
     if (timer) {
@@ -2050,10 +2059,12 @@ export class PlayerDeathSystem extends SystemBase {
       }
 
       // Check if player is in DYING state and respawn tick has been reached
+      // Skip if death transaction is still in progress
       if (
         typedEntity.data.deathState === DeathState.DYING &&
         typedEntity.data.respawnTick !== undefined &&
-        currentTick >= typedEntity.data.respawnTick
+        currentTick >= typedEntity.data.respawnTick &&
+        !this.deathProcessingInProgress.has(playerId)
       ) {
         // Hide player briefly before respawn
         typedEntity.data.visible = false;
