@@ -545,7 +545,6 @@ export class PlayerDeathSystem extends SystemBase {
     // Death state (deathState = DYING) is already set by PlayerSystem.handleDeath
     // which fires before this method. No need to set it again here.
     const playerEntity = this.world.entities?.get?.(playerId);
-
     // Duel arena deaths should not generate gravestones, ground items, or other loot clutter.
     // Keep normal death animation + respawn timing, but preserve inventory/equipment.
     const inDuelArenaZone = isPositionInsideDuelArenaZone(
@@ -590,6 +589,9 @@ export class PlayerDeathSystem extends SystemBase {
     await databaseSystem.executeInTransaction(
       async (tx: TransactionContext) => {
         const inventory = inventorySystem.getInventory(playerId);
+        if (!inventory) {
+          this.logger.info("No inventory data for dying player", { playerId });
+        }
 
         const inventoryItems =
           inventory?.items.map((item, index) => ({

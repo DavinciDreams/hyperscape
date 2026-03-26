@@ -331,8 +331,9 @@ export class SafeAreaDeathHandler {
     }
 
     if (items.length === 0) {
-      console.log(
-        `[SafeAreaDeathHandler] No items to drop for ${playerId}, skipping gravestone`,
+      Logger.system(
+        "SafeAreaDeathHandler",
+        `No items to drop for ${playerId}, skipping gravestone`,
       );
       return "";
     }
@@ -340,8 +341,9 @@ export class SafeAreaDeathHandler {
     // HARD RULE: Never spawn gravestones inside the duel arena.
     // Duel deaths are handled by DuelSystem/StreamingDuelScheduler.
     if (isPositionInsideDuelArenaZone(position.x, position.z)) {
-      console.log(
-        `[SafeAreaDeathHandler] Position (${position.x.toFixed(1)}, ${position.z.toFixed(1)}) is inside duel arena — skipping gravestone for ${playerId}`,
+      Logger.system(
+        "SafeAreaDeathHandler",
+        `Position (${position.x.toFixed(1)}, ${position.z.toFixed(1)}) is inside duel arena — skipping gravestone for ${playerId}`,
       );
       return "";
     }
