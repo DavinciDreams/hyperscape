@@ -925,7 +925,7 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
         const oldIds = oldPool.instanceIds.get(slot.entityId);
         if (oldIds && oldIds.length > 0) {
           oldPool.batches[0].getColorAt(oldIds[0], _tmpColor);
-          wasDissolveVal = Math.max(0, 1.0 - _tmpColor.b);
+          wasDissolveVal = Math.max(0, Math.min(1, 1.0 - _tmpColor.b));
         }
         removeFromPool(oldPool, slot.entityId);
       }

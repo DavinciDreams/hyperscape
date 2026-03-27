@@ -57,6 +57,8 @@ interface LODPool {
   slots: Map<string, number>;
   activeCount: number;
   dirty: boolean;
+  /** True when dissolveData has changed and needs GPU upload */
+  dissolveDirty: boolean;
   /** Shared backing array for per-instance highlight intensity (0 or 1) */
   highlightData: Float32Array;
   /** Shared backing array for per-instance dissolve progress (0 = visible, 1 = dissolved) */
@@ -196,6 +198,7 @@ function createLODPool(
     slots: new Map(),
     activeCount: 0,
     dirty: false,
+    dissolveDirty: false,
     highlightData: hlData,
     dissolveData,
     sourceGeometries,
@@ -677,17 +680,15 @@ function applyDissolveValue(entityId: string, value: number): void {
   const slot = pool.instances.get(entityId);
   if (!slot) return;
 
-  // Apply to whichever LOD pool the instance is currently in
+  // Apply to whichever LOD pool the instance is currently in.
+  // Sets dissolveDirty — the update loop flushes needsUpdate once per pool.
   for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
     if (!lodPool) continue;
     const idx = lodPool.slots.get(entityId);
     if (idx === undefined) continue;
 
     lodPool.dissolveData[idx] = value;
-    for (const im of lodPool.meshes) {
-      const attr = im.geometry.getAttribute("instanceDissolve");
-      if (attr) (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
-    }
+    lodPool.dissolveDirty = true;
     return;
   }
 }
@@ -846,6 +847,14 @@ export function updateGLBTreeInstancer(deltaTime: number): void {
           im.instanceMatrix.needsUpdate = true;
         }
         lodPool.dirty = false;
+      }
+
+      if (lodPool.dissolveDirty) {
+        for (const im of lodPool.meshes) {
+          const attr = im.geometry.getAttribute("instanceDissolve");
+          if (attr) (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
+        }
+        lodPool.dissolveDirty = false;
       }
 
       for (const mat of lodPool.materials) {

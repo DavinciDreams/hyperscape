@@ -1168,7 +1168,8 @@ export function createTreeDissolveMaterial(
     const fogged = mix(finalRgb, treeFogTex.rgb, treeFogFactor);
 
     // ---- Dissolve transparency (depleted trees) ----
-    // Uniform 80% transparency across the whole tree when dissolved.
+    // Max alpha reduction when fully dissolved (0.7 = 30% opacity at full dissolve)
+    const DISSOLVE_ALPHA_SCALE = 0.7;
     const dissolveVal = options.batched
       ? clamp(
           sub(float(1.0), varyingProperty("vec3", "vBatchColor").z),
@@ -1176,7 +1177,10 @@ export function createTreeDissolveMaterial(
           float(1.0),
         )
       : attribute("instanceDissolve", "float");
-    const dissolveAlpha = sub(float(1.0), mul(dissolveVal, float(0.7)));
+    const dissolveAlpha = sub(
+      float(1.0),
+      mul(dissolveVal, float(DISSOLVE_ALPHA_SCALE)),
+    );
 
     return vec4(fogged, mul(pbrOut.a, dissolveAlpha));
   })();
