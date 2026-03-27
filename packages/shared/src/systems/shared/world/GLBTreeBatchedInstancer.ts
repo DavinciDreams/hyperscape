@@ -612,6 +612,9 @@ function isHighlighted(pool: BatchedLODPool, entityId: string): boolean {
   return _tmpColor.r > 1.01;
 }
 
+/** Highlight multiplier for R/G channels (>1.0 brightens; shader detects via step(1.01)) */
+const HL_COLOR_INTENSITY = 1.15;
+
 function applyHighlightColor(
   pool: BatchedLODPool,
   entityId: string,
@@ -619,11 +622,11 @@ function applyHighlightColor(
 ): void {
   const ids = pool.instanceIds.get(entityId);
   if (!ids) return;
+  const rg = on ? HL_COLOR_INTENSITY : 1.0;
   for (let i = 0; i < pool.batches.length; i++) {
     // Preserve blue channel (encodes dissolve state)
     pool.batches[i].getColorAt(ids[i], _tmpColor);
-    const blue = _tmpColor.b;
-    _tmpColor.setRGB(on ? 1.15 : 1.0, on ? 1.15 : 1.0, blue);
+    _tmpColor.setRGB(rg, rg, _tmpColor.b);
     pool.batches[i].setColorAt(ids[i], _tmpColor);
   }
 }
@@ -870,7 +873,10 @@ export function startDissolve(
 
 let lastUpdateFrame = -1;
 
-export function updateGLBTreeBatchedInstancer(deltaTime?: number): void {
+// Reused across ticks to avoid per-frame allocation
+const _completedAnims: string[] = [];
+
+export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
   if (!world) return;
   if (world.frame === lastUpdateFrame) return;
   lastUpdateFrame = world.frame;
@@ -912,7 +918,8 @@ export function updateGLBTreeBatchedInstancer(deltaTime?: number): void {
 
       const oldPool = getLodPool(pool, slot);
       const wasHl = oldPool ? isHighlighted(oldPool, slot.entityId) : false;
-      // Read dissolve state from old pool's color before removing
+      // Read dissolve state from old pool's color before removing.
+      // Safe to sample batches[0] only — applyDissolveColor sets all batches uniformly.
       let wasDissolveVal = 0;
       if (oldPool) {
         const oldIds = oldPool.instanceIds.get(slot.entityId);
@@ -943,20 +950,19 @@ export function updateGLBTreeBatchedInstancer(deltaTime?: number): void {
   }
 
   // Tick dissolve animations
-  const dt = deltaTime ?? 1 / 60;
-  const completed: string[] = [];
+  _completedAnims.length = 0;
   for (const [entityId, anim] of dissolveAnims) {
-    anim.progress += (anim.direction * dt) / DISSOLVE_DURATION;
+    anim.progress += (anim.direction * deltaTime) / DISSOLVE_DURATION;
     anim.progress = Math.max(0, Math.min(DISSOLVE_MAX, anim.progress));
     applyDissolveValue(entityId, anim.progress);
     if (
       (anim.direction > 0 && anim.progress >= DISSOLVE_MAX) ||
       (anim.direction < 0 && anim.progress <= 0)
     ) {
-      completed.push(entityId);
+      _completedAnims.push(entityId);
     }
   }
-  for (const id of completed) dissolveAnims.delete(id);
+  for (const id of _completedAnims) dissolveAnims.delete(id);
 
   // Update dissolve uniforms
   const camY = camPos.y;

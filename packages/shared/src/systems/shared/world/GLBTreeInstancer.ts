@@ -714,7 +714,10 @@ export function startDissolve(
 
 let lastUpdateFrame = -1;
 
-export function updateGLBTreeInstancer(deltaTime?: number): void {
+// Reused across ticks to avoid per-frame allocation
+const _completedAnims: string[] = [];
+
+export function updateGLBTreeInstancer(deltaTime: number): void {
   if (!world) return;
   if (world.frame === lastUpdateFrame) return;
   lastUpdateFrame = world.frame;
@@ -805,20 +808,19 @@ export function updateGLBTreeInstancer(deltaTime?: number): void {
   }
 
   // Tick dissolve animations
-  const dt = deltaTime ?? 1 / 60;
-  const completed: string[] = [];
+  _completedAnims.length = 0;
   for (const [entityId, anim] of dissolveAnims) {
-    anim.progress += (anim.direction * dt) / DISSOLVE_DURATION;
+    anim.progress += (anim.direction * deltaTime) / DISSOLVE_DURATION;
     anim.progress = Math.max(0, Math.min(DISSOLVE_MAX, anim.progress));
     applyDissolveValue(entityId, anim.progress);
     if (
       (anim.direction > 0 && anim.progress >= DISSOLVE_MAX) ||
       (anim.direction < 0 && anim.progress <= 0)
     ) {
-      completed.push(entityId);
+      _completedAnims.push(entityId);
     }
   }
-  for (const id of completed) dissolveAnims.delete(id);
+  for (const id of _completedAnims) dissolveAnims.delete(id);
 
   // Flush dirty pools + update dissolve uniforms
   const camY = camPos.y;

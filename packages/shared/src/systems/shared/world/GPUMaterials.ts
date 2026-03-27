@@ -1176,15 +1176,18 @@ export function createTreeDissolveMaterial(
           float(1.0),
         )
       : attribute("instanceDissolve", "float");
-    const dissolveAlpha = sub(float(1.0), mul(dissolveVal, float(0.8)));
+    const dissolveAlpha = sub(float(1.0), mul(dissolveVal, float(0.7)));
 
     return vec4(fogged, mul(pbrOut.a, dissolveAlpha));
   })();
 
   // transparent = true is required for real alpha blending on depleted trees.
-  // Non-depleted instances output alpha=1.0 (dissolveVal=0) so they don't incur
-  // sorting overhead — Three.js skips sort for opaque fragments in the transparent pass.
-  // depthWrite stays true to prevent z-fighting between overlapping trees.
+  // This does put all tree InstancedMesh objects into the transparent render pass,
+  // but Three.js sorts per-object (not per-instance), so the cost is proportional
+  // to the number of InstancedMesh objects (~one per model per LOD level), not the
+  // total tree count. depthWrite stays true so non-depleted instances (alpha=1.0)
+  // still write depth correctly; the rare case of overlapping depleted trees may
+  // show minor ordering artifacts, but depleted trees are sparse in practice.
   material.transparent = true;
   material.depthWrite = true;
   material.needsUpdate = true;
