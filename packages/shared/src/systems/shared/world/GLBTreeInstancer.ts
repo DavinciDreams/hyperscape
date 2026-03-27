@@ -59,6 +59,12 @@ interface LODPool {
   dirty: boolean;
   /** Shared backing array for per-instance highlight intensity (0 or 1) */
   highlightData: Float32Array;
+  /**
+   * Snapshot of original source geometries (before InstancedBufferAttribute
+   * additions). Retained so collision proxies can use the model shape without
+   * depending on live InstancedMesh geometry references.
+   */
+  sourceGeometries: THREE.BufferGeometry[];
 }
 
 interface ModelPool {
@@ -155,8 +161,12 @@ function createLODPool(
 ): LODPool {
   const meshes: THREE.InstancedMesh[] = [];
   const materials: DissolveMaterial[] = [];
+  const sourceGeometries: THREE.BufferGeometry[] = [];
   const hlData = new Float32Array(MAX_INSTANCES);
   for (const part of parts) {
+    // Store the original geometry before adding instanced attributes
+    sourceGeometries.push(part.geometry);
+
     const geo = createSharedGeometry(part.geometry);
 
     const hlAttr = new THREE.InstancedBufferAttribute(hlData, 1);
@@ -180,6 +190,7 @@ function createLODPool(
     activeCount: 0,
     dirty: false,
     highlightData: hlData,
+    sourceGeometries,
   };
 }
 
@@ -432,6 +443,10 @@ export function initGLBTreeInstancer(s: THREE.Scene, w: World): void {
   world = w;
 }
 
+/**
+ * NOTE: Caller must also call clearProxyGeometryCache() (from TreeGLBVisualStrategy)
+ * after this to dispose cached proxy geometries that reference sourceGeometries.
+ */
 export function destroyGLBTreeInstancer(): void {
   for (const pool of pools.values()) {
     for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
@@ -441,6 +456,7 @@ export function destroyGLBTreeInstancer(): void {
         im.geometry.dispose();
       }
       for (const mat of lodPool.materials) mat.dispose();
+      lodPool.sourceGeometries.length = 0;
     }
   }
   pools.clear();
@@ -598,6 +614,33 @@ export function getModelDimensions(
   const pool = pools.get(modelPath);
   if (!pool) return null;
   return { height: pool.modelHeight, radius: pool.modelRadius };
+}
+
+/**
+ * Returns the lowest-available LOD geometries for use as a collision proxy,
+ * plus the yOffset needed to align the geometry with the visual instance.
+ * Prefers LOD2 → LOD1 → LOD0.  Returns null if the entity isn't registered.
+ *
+ * NOTE: This instancer uses a single model per pool (no variants).
+ * If multi-variant support is ever added, this must select by variant index
+ * like GLBTreeBatchedInstancer.getProxyGeometry does.
+ *
+ * **Important**: Returned geometries are shared by the instancer pool.
+ * Callers MUST clone before mutating (e.g. scaling).
+ */
+export function getProxyGeometry(
+  entityId: string,
+): { geometries: THREE.BufferGeometry[]; yOffset: number } | null {
+  const modelPath = entityToModel.get(entityId);
+  if (!modelPath) return null;
+  const pool = pools.get(modelPath);
+  if (!pool) return null;
+  const lodPool = pool.lod2 ?? pool.lod1 ?? pool.lod0;
+  if (!lodPool) return null;
+  return {
+    geometries: lodPool.sourceGeometries,
+    yOffset: pool.yOffset,
+  };
 }
 
 /**
