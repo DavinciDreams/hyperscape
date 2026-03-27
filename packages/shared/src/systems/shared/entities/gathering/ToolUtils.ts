@@ -2,10 +2,14 @@
  * ToolUtils - Pure utility functions for tool validation and categorization
  *
  * Extracted from ResourceSystem.ts for SOLID compliance (Single Responsibility).
- * These are pure functions with no system dependencies.
+ *
+ * Tool validation uses the tools.json manifest as the single source of truth.
+ * Each tool has an explicit `skill` field ("woodcutting", "mining", "fishing")
+ * that determines which resources it can be used on — no substring matching.
  */
 
 import { isNotedItemId } from "../../../../data/NoteGenerator";
+import { getExternalTool } from "../../../../utils/ExternalAssetUtils";
 
 /**
  * OSRS fishing tools that require exact matching (not interchangeable)
@@ -20,6 +24,15 @@ export const EXACT_FISHING_TOOLS = [
 ] as const;
 
 export type FishingToolId = (typeof EXACT_FISHING_TOOLS)[number];
+
+/**
+ * Map from tool category to the skill it belongs to.
+ * Used to look up tools in the manifest by category.
+ */
+const CATEGORY_TO_SKILL: Record<string, string> = {
+  hatchet: "woodcutting",
+  pickaxe: "mining",
+};
 
 /**
  * Extract tool category from toolRequired field
@@ -93,10 +106,15 @@ export function isExactMatchFishingTool(category: string): boolean {
 }
 
 /**
- * Check if an item ID matches the required tool category
+ * Check if an item ID matches the required tool category.
  *
- * OSRS-ACCURACY: Fishing tools require EXACT matching.
- * Other tools (pickaxe, hatchet) use category matching (any tier works).
+ * Uses the tools.json manifest as the single source of truth:
+ * - Looks up the item in the manifest to get its declared skill
+ * - Compares the skill against the expected skill for the category
+ * - Fishing tools require exact ID match (not interchangeable)
+ *
+ * This prevents cross-skill tool usage (e.g., pickaxe for woodcutting)
+ * which was possible with the old substring-matching approach.
  *
  * @param itemId - The item ID from player inventory
  * @param category - The required tool category
@@ -118,14 +136,28 @@ export function itemMatchesToolCategory(
     return lowerItemId === category;
   }
 
-  // For hatchet/pickaxe categories, check if item contains the category
+  // Manifest-based validation: look up the item in tools.json
+  const toolData = getExternalTool(lowerItemId);
+  if (toolData) {
+    // Tool exists in manifest — check if its skill matches the required category
+    const expectedSkill = CATEGORY_TO_SKILL[category];
+    if (expectedSkill) {
+      return toolData.skill === expectedSkill;
+    }
+  }
+
+  // Fallback for tools not in the manifest: check if item ID contains the category
+  // (e.g., future tools added to the game before the manifest is updated)
+  // Exclude cross-matches: if category is "hatchet", reject items containing "pickaxe"
   if (category === "hatchet") {
+    if (lowerItemId.includes("pickaxe") || lowerItemId.includes("pick")) {
+      return false;
+    }
     return lowerItemId.includes("hatchet") || lowerItemId.includes("axe");
   }
   if (category === "pickaxe") {
     return lowerItemId.includes("pickaxe") || lowerItemId.includes("pick");
   }
 
-  // Fallback: check if item ID contains the category
   return lowerItemId.includes(category);
 }

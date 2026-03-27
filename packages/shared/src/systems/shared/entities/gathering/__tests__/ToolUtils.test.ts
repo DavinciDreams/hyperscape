@@ -122,12 +122,28 @@ describe("ToolUtils", () => {
       });
 
       it("does not match pickaxe for hatchet category", () => {
-        // 'pickaxe' contains 'axe' but should not match hatchet category
-        // because pickaxe check happens first in getToolCategory
-        // However, itemMatchesToolCategory checks category, not extraction
-        // So "bronze_pickaxe" does contain "axe" and would match hatchet
-        // This is expected behavior - the category is determined by getToolCategory first
-        expect(itemMatchesToolCategory("bronze_pickaxe", "hatchet")).toBe(true);
+        // Pickaxes are mining tools — they must NOT match the hatchet (woodcutting) category.
+        // The manifest declares each tool's skill explicitly, preventing cross-skill usage.
+        expect(itemMatchesToolCategory("bronze_pickaxe", "hatchet")).toBe(
+          false,
+        );
+        expect(itemMatchesToolCategory("iron_pickaxe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("rune_pickaxe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("dragon_pickaxe", "hatchet")).toBe(
+          false,
+        );
+      });
+
+      it("does not match hatchet for pickaxe category", () => {
+        // Hatchets are woodcutting tools — they must NOT match the pickaxe (mining) category.
+        expect(itemMatchesToolCategory("bronze_hatchet", "pickaxe")).toBe(
+          false,
+        );
+        expect(itemMatchesToolCategory("iron_hatchet", "pickaxe")).toBe(false);
+        expect(itemMatchesToolCategory("rune_hatchet", "pickaxe")).toBe(false);
+        expect(itemMatchesToolCategory("dragon_hatchet", "pickaxe")).toBe(
+          false,
+        );
       });
     });
 
