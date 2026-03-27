@@ -48,10 +48,8 @@ interface TreeSlot {
   position: THREE.Vector3;
   rotation: number;
   scale: number;
-  depletedScale: number;
   yOffset: number;
   currentLOD: 0 | 1 | 2;
-  depleted: boolean;
 }
 
 interface LODPool {
@@ -81,10 +79,8 @@ interface ModelPool {
   lod0: LODPool | null;
   lod1: LODPool | null;
   lod2: LODPool | null;
-  depleted: LODPool | null;
   instances: Map<string, TreeSlot>;
   yOffset: number;
-  depletedYOffset: number;
   /** Unscaled model height from bounding box */
   modelHeight: number;
   /** Unscaled model horizontal radius from bounding box */
@@ -248,17 +244,11 @@ function enableTextureRepeat(mat: DissolveMaterial): void {
 
 async function ensureModelPool(
   modelPath: string,
-  depletedModelPath?: string | null,
   lod1ModelPath?: string | null,
   lod2ModelPath?: string | null,
 ): Promise<ModelPool> {
   const existing = pools.get(modelPath);
-  if (existing) {
-    if (depletedModelPath && !existing.depleted) {
-      await loadDepletedPool(existing, depletedModelPath);
-    }
-    return existing;
-  }
+  if (existing) return existing;
 
   const pending = pendingEnsure.get(modelPath);
   if (pending) return pending;
@@ -336,18 +326,12 @@ async function ensureModelPool(
       lod0: lod0Pool,
       lod1: lod1Pool,
       lod2: lod2Pool,
-      depleted: null,
       instances: new Map(),
       yOffset: bounds.yOffset,
-      depletedYOffset: 0,
       modelHeight: bounds.height,
       modelRadius: bounds.radius,
     };
     pools.set(modelPath, pool);
-
-    if (depletedModelPath) {
-      await loadDepletedPool(pool, depletedModelPath);
-    }
 
     return pool;
   })();
@@ -358,44 +342,6 @@ async function ensureModelPool(
   } finally {
     pendingEnsure.delete(modelPath);
   }
-}
-
-async function loadDepletedPool(
-  pool: ModelPool,
-  depletedModelPath: string,
-): Promise<void> {
-  if (pool.depleted) return;
-  const depletedParts = await loadLODParts(depletedModelPath);
-  if (!depletedParts) return;
-
-  let depletedYOffset = 0;
-  try {
-    const { scene: depScene } = await modelCache.loadModel(
-      depletedModelPath,
-      world!,
-    );
-    depletedYOffset = computeModelBounds(depScene, 1).yOffset;
-  } catch {
-    /* use 0 */
-  }
-
-  const dissolveOpts = {
-    fadeStart: GPU_VEG_CONFIG.FADE_START,
-    fadeEnd: GPU_VEG_CONFIG.FADE_END,
-    enableNearFade: false,
-    enableWaterCulling: false,
-    enableOcclusionDissolve: false,
-    enableRimHighlight: true,
-  };
-  const depletedDissolveParts = depletedParts.map((p) => {
-    const dm = createTreeDissolveMaterial(p.material, dissolveOpts);
-    dm.side = THREE.DoubleSide;
-    enableTextureRepeat(dm);
-    world!.setupMaterial(dm);
-    return { geometry: p.geometry, material: dm };
-  });
-  pool.depleted = createLODPool(depletedDissolveParts);
-  pool.depletedYOffset = depletedYOffset;
 }
 
 // ---- Instance matrix helper ----
@@ -474,7 +420,7 @@ export function initGLBTreeInstancer(s: THREE.Scene, w: World): void {
  */
 export function destroyGLBTreeInstancer(): void {
   for (const pool of pools.values()) {
-    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
+    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
       if (!lodPool) continue;
       for (const im of lodPool.meshes) {
         scene?.remove(im);
@@ -498,20 +444,13 @@ export async function addInstance(
   position: THREE.Vector3,
   rotation: number,
   scale: number,
-  depletedModelPath?: string | null,
-  depletedScale?: number,
   lod1ModelPath?: string | null,
   lod2ModelPath?: string | null,
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
   try {
-    const pool = await ensureModelPool(
-      modelPath,
-      depletedModelPath,
-      lod1ModelPath,
-      lod2ModelPath,
-    );
+    const pool = await ensureModelPool(modelPath, lod1ModelPath, lod2ModelPath);
 
     if (pool.lod0 && pool.lod0.activeCount >= MAX_INSTANCES) {
       console.warn(
@@ -525,10 +464,8 @@ export async function addInstance(
       position: position.clone(),
       rotation,
       scale,
-      depletedScale: depletedScale ?? scale,
       yOffset: pool.yOffset,
       currentLOD: 0,
-      depleted: false,
     };
 
     pool.instances.set(entityId, slot);
@@ -636,9 +573,8 @@ export function setHighlight(entityId: string, on: boolean): void {
   const slot = pool.instances.get(entityId);
   if (!slot) return;
 
-  const lodPool = slot.depleted
-    ? pool.depleted
-    : slot.currentLOD === 0
+  const lodPool =
+    slot.currentLOD === 0
       ? pool.lod0
       : slot.currentLOD === 1
         ? pool.lod1
@@ -727,8 +663,6 @@ export function updateGLBTreeInstancer(deltaTime: number): void {
 
   for (const pool of pools.values()) {
     for (const slot of pool.instances.values()) {
-      if (slot.depleted) continue;
-
       const dx = camPos.x - slot.position.x;
       const dz = camPos.z - slot.position.z;
       const distSq = dx * dx + dz * dz;
@@ -813,7 +747,7 @@ export function updateGLBTreeInstancer(deltaTime: number): void {
   const wind = world.getSystem("wind") as Wind | null;
 
   for (const pool of pools.values()) {
-    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
+    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
       if (!lodPool) continue;
 
       if (lodPool.dirty) {

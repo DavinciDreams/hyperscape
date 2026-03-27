@@ -244,8 +244,6 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
         worldPos,
         rotation,
         baseScale,
-        config.depletedModelPath ?? null,
-        config.depletedModelScale ?? 0.3,
       );
     } else {
       let modelPath = config.model;
@@ -257,8 +255,6 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
         worldPos,
         rotation,
         baseScale,
-        config.depletedModelPath ?? null,
-        config.depletedModelScale ?? 0.3,
       );
     }
 

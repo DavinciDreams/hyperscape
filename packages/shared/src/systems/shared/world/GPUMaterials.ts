@@ -1177,6 +1177,10 @@ export function createTreeDissolveMaterial(
     const fogged = mix(finalRgb, treeFogTex.rgb, treeFogFactor);
 
     // ---- Dissolve transparency (depleted trees) ----
+    // For BatchedMesh: dissolve is encoded in the blue channel of per-instance
+    // batch colors (blue = 1.0 - dissolveVal). R/G channels carry highlight
+    // state. See GLBTreeBatchedInstancer.applyDissolveColor / applyHighlightColor.
+    // For InstancedMesh: dissolve is a dedicated per-instance float attribute.
     const DISSOLVE_ALPHA_SCALE = GPU_VEG_CONFIG.DISSOLVE_ALPHA_SCALE;
     const dissolveVal = options.batched
       ? clamp(
@@ -1194,12 +1198,15 @@ export function createTreeDissolveMaterial(
   })();
 
   // transparent = true is required for real alpha blending on depleted trees.
-  // This does put all tree InstancedMesh objects into the transparent render pass,
-  // but Three.js sorts per-object (not per-instance), so the cost is proportional
-  // to the number of InstancedMesh objects (~one per model per LOD level), not the
-  // total tree count. depthWrite stays true so non-depleted instances (alpha=1.0)
-  // still write depth correctly; the rare case of overlapping depleted trees may
-  // show minor ordering artifacts, but depleted trees are sparse in practice.
+  // This puts all tree meshes into the transparent render pass, which prevents
+  // early-Z rejection for opaque trees. Dynamic toggling per-mesh was considered
+  // but any pool with at least one depleted tree (common during gameplay) would
+  // remain transparent anyway, so the benefit is marginal for added complexity.
+  // A dithered/discard-based dissolve could avoid the transparent pass entirely
+  // but would look noticeably worse at the 0.3s animation speed.
+  // depthWrite stays true so non-depleted instances (alpha=1.0) still write depth
+  // correctly; overlapping depleted trees may show minor ordering artifacts since
+  // Three.js sorts per-object not per-instance, but depleted trees are sparse.
   material.transparent = true;
   material.depthWrite = true;
   material.needsUpdate = true;

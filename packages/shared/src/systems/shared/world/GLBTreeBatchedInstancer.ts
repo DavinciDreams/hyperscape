@@ -48,10 +48,8 @@ interface TreeSlot {
   position: THREE.Vector3;
   rotation: number;
   scale: number;
-  depletedScale: number;
   yOffset: number;
   currentLOD: 0 | 1 | 2;
-  depleted: boolean;
   variantIndex: number;
 }
 
@@ -79,10 +77,8 @@ interface TreeTypePool {
   lod0: BatchedLODPool | null;
   lod1: BatchedLODPool | null;
   lod2: BatchedLODPool | null;
-  depleted: BatchedLODPool | null;
   instances: Map<string, TreeSlot>;
   yOffset: number;
-  depletedYOffset: number;
   modelHeight: number;
   modelRadius: number;
 }
@@ -330,15 +326,9 @@ const pendingEnsure = new Map<string, Promise<TreeTypePool>>();
 async function ensureTreeTypePool(
   treeType: string,
   variantPaths: string[],
-  depletedModelPath?: string | null,
 ): Promise<TreeTypePool> {
   const existing = pools.get(treeType);
-  if (existing) {
-    if (depletedModelPath && !existing.depleted) {
-      await loadDepletedPool(existing, depletedModelPath);
-    }
-    return existing;
-  }
+  if (existing) return existing;
 
   const pending = pendingEnsure.get(treeType);
   if (pending) return pending;
@@ -481,18 +471,12 @@ async function ensureTreeTypePool(
       lod0: lod0Pool,
       lod1: lod1Pool,
       lod2: lod2Pool,
-      depleted: null,
       instances: new Map(),
       yOffset: bounds.yOffset,
-      depletedYOffset: 0,
       modelHeight: bounds.height,
       modelRadius: bounds.radius,
     };
     pools.set(treeType, pool);
-
-    if (depletedModelPath) {
-      await loadDepletedPool(pool, depletedModelPath);
-    }
 
     return pool;
   })();
@@ -503,59 +487,6 @@ async function ensureTreeTypePool(
   } finally {
     pendingEnsure.delete(treeType);
   }
-}
-
-async function loadDepletedPool(
-  pool: TreeTypePool,
-  depletedModelPath: string,
-): Promise<void> {
-  if (pool.depleted) return;
-  const depletedParts = await loadLODParts(depletedModelPath);
-  if (!depletedParts) return;
-
-  let depletedYOffset = 0;
-  try {
-    const { scene: depScene } = await modelCache.loadModel(
-      depletedModelPath,
-      world!,
-    );
-    depletedYOffset = computeModelBounds(depScene, 1).yOffset;
-  } catch {
-    /* use 0 */
-  }
-
-  const dissolveOpts = {
-    fadeStart: GPU_VEG_CONFIG.FADE_START,
-    fadeEnd: GPU_VEG_CONFIG.FADE_END,
-    enableNearFade: false,
-    enableWaterCulling: false,
-    enableOcclusionDissolve: false,
-    enableRimHighlight: true,
-  };
-
-  const depletedDissolveParts = depletedParts.map((p) => {
-    const dm = createTreeDissolveMaterial(p.material, {
-      ...dissolveOpts,
-      batched: true,
-    });
-    dm.side = THREE.DoubleSide;
-    enableTextureRepeat(dm);
-    world!.setupMaterial(dm);
-    return [{ geometry: p.geometry, material: dm }];
-  });
-
-  // Depleted has 1 "variant" (the stump)
-  // Transpose: depletedDissolveParts is [slot][1 variant] but we need [1 variant][slot]
-  const numSlots = depletedParts.length;
-  const singleVariant: {
-    geometry: THREE.BufferGeometry;
-    material: DissolveMaterial;
-  }[] = [];
-  for (let s = 0; s < numSlots; s++) {
-    singleVariant.push(depletedDissolveParts[s][0]);
-  }
-  pool.depleted = createBatchedLODPool([singleVariant]);
-  pool.depletedYOffset = depletedYOffset;
 }
 
 // ---- Instance matrix helper ----
@@ -656,7 +587,7 @@ export function initGLBTreeBatchedInstancer(s: THREE.Scene, w: World): void {
  */
 export function destroyGLBTreeBatchedInstancer(): void {
   for (const pool of pools.values()) {
-    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
+    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
       if (!lodPool) continue;
       for (const bm of lodPool.batches) {
         scene?.remove(bm);
@@ -682,27 +613,19 @@ export async function addInstance(
   position: THREE.Vector3,
   rotation: number,
   scale: number,
-  depletedModelPath?: string | null,
-  depletedScale?: number,
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
   try {
-    const pool = await ensureTreeTypePool(
-      treeType,
-      variantPaths,
-      depletedModelPath,
-    );
+    const pool = await ensureTreeTypePool(treeType, variantPaths);
 
     const slot: TreeSlot = {
       entityId,
       position: position.clone(),
       rotation,
       scale,
-      depletedScale: depletedScale ?? scale,
       yOffset: pool.yOffset,
       currentLOD: 0,
-      depleted: false,
       variantIndex,
     };
 
@@ -741,7 +664,6 @@ export function removeInstance(entityId: string): void {
 }
 
 function getLodPool(pool: TreeTypePool, slot: TreeSlot): BatchedLODPool | null {
-  if (slot.depleted) return pool.depleted;
   return slot.currentLOD === 0
     ? pool.lod0
     : slot.currentLOD === 1
@@ -888,8 +810,6 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
 
   for (const pool of pools.values()) {
     for (const slot of pool.instances.values()) {
-      if (slot.depleted) continue;
-
       const dx = camPos.x - slot.position.x;
       const dz = camPos.z - slot.position.z;
       const distSq = dx * dx + dz * dz;
@@ -970,7 +890,7 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
   const wind = world.getSystem("wind") as Wind | null;
 
   for (const pool of pools.values()) {
-    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
+    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
       if (!lodPool) continue;
 
       for (const mat of lodPool.materials) {
