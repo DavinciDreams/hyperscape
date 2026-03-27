@@ -240,6 +240,15 @@ describe("ToolUtils", () => {
         warnSpy.mockRestore();
       });
 
+      it("warns for any category, not just hatchet/pickaxe", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        itemMatchesToolCategory("bronze_hammer", "hammer");
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("not found in tools manifest"),
+        );
+        warnSpy.mockRestore();
+      });
+
       it("uses generic substring match for unknown categories", () => {
         expect(itemMatchesToolCategory("bronze_hammer", "hammer")).toBe(true);
         expect(itemMatchesToolCategory("iron_chisel", "hammer")).toBe(false);

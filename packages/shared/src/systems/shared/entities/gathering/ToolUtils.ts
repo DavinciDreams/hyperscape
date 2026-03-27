@@ -28,10 +28,17 @@ export type FishingToolId = (typeof EXACT_FISHING_TOOLS)[number];
 /** Skill types matching the manifest's GatheringToolData.skill union */
 type GatheringSkill = "woodcutting" | "mining" | "fishing";
 
-/** Track items that have already triggered the fallback warning (warn once per item) */
+/**
+ * Track items that have already triggered the fallback warning (warn once per item).
+ * Capped at MAX_FALLBACK_WARNINGS to prevent unbounded growth on long-running servers.
+ */
+const MAX_FALLBACK_WARNINGS = 50;
 const fallbackWarned = new Set<string>();
 
-/** Reset the fallback warning cache. Test-only. */
+/**
+ * Reset the fallback warning cache.
+ * @internal Exported for test isolation only — do not call in production code.
+ */
 export function _resetFallbackWarnings(): void {
   fallbackWarned.clear();
 }
@@ -160,10 +167,10 @@ export function itemMatchesToolCategory(
   }
 
   // Fallback for tools not in the manifest — substring matching with cross-skill guards.
-  // Warn once per item so manifest gaps are visible without flooding production logs.
+  // Warn once per item (capped) so manifest gaps are visible without flooding logs.
   if (
-    (category === "hatchet" || category === "pickaxe") &&
-    !fallbackWarned.has(lowerItemId)
+    !fallbackWarned.has(lowerItemId) &&
+    fallbackWarned.size < MAX_FALLBACK_WARNINGS
   ) {
     fallbackWarned.add(lowerItemId);
     console.warn(
@@ -171,6 +178,10 @@ export function itemMatchesToolCategory(
     );
   }
 
+  // NOTE: The substring fallback below is inherently fragile. For example, a combat
+  // weapon like "battleaxe" would match the hatchet category because it contains "axe".
+  // This is acceptable as a safety net — the manifest path is the long-term solution
+  // and all known gathering tools should be in tools.json.
   if (category === "hatchet") {
     if (lowerItemId.includes("pickaxe") || lowerItemId.includes("pick")) {
       return false;
