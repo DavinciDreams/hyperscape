@@ -10,18 +10,23 @@
  * initiates challenges between bots.
  */
 
-import {
-  AgentRuntime,
-  type Plugin,
-  // @ts-ignore — InMemoryDatabaseAdapter is exported at runtime but not in .d.ts
-  InMemoryDatabaseAdapter,
-} from "@elizaos/core";
+import { AgentRuntime, type Plugin, type UUID } from "@elizaos/core";
 import { EventEmitter } from "events";
 import { hyperscapePlugin } from "@hyperscape/plugin-hyperscape";
 import { createJWT } from "../shared/utils.js";
 import { errMsg } from "../shared/errMsg.js";
 import type { ModelProviderConfig } from "./ModelAgentSpawner.js";
-import { loadModelPlugin, createAgentCharacter } from "./agentHelpers.js";
+import {
+  loadModelPlugin,
+  createAgentCharacter,
+  loadSqlPlugin,
+  loadTrajectoryLoggerPlugin,
+  elizaDatabaseSecretsFromUrl,
+} from "./agentHelpers.js";
+import {
+  createSqlAdapterForAgent,
+  ensureElizaPostgresEnv,
+} from "./sharedElizaDatabase.js";
 import { duelLogError, duelLogInfo, duelLogWarn } from "./logging.js";
 
 // Re-export for convenience
@@ -181,6 +186,27 @@ export class ElizaDuelBot extends EventEmitter {
       `${name} connecting (${modelConfig.displayName} / ${modelConfig.model})...`,
     );
 
+    let postgresUrl: string;
+    try {
+      postgresUrl = ensureElizaPostgresEnv();
+    } catch (err) {
+      const msg = errMsg(err);
+      duelLogError("ElizaDuelBot", `❌ ${name} — ${msg}`);
+      throw new Error(`Postgres required for Eliza duel bot: ${msg}`);
+    }
+
+    const sqlPlugin = await loadSqlPlugin(tag);
+    const trajectoryPlugin = await loadTrajectoryLoggerPlugin(tag);
+    if (!sqlPlugin || !trajectoryPlugin) {
+      const err = new Error(
+        "@elizaos/plugin-sql and @elizaos/plugin-trajectory-logger are required",
+      );
+      duelLogError("ElizaDuelBot", err.message);
+      throw err;
+    }
+
+    const dbSecrets = elizaDatabaseSecretsFromUrl(postgresUrl);
+
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= MAX_INIT_RETRIES; attempt++) {
@@ -211,6 +237,7 @@ export class ElizaDuelBot extends EventEmitter {
           name,
           smallModel: this.config.smallModel,
           secrets: {
+            ...dbSecrets,
             HYPERSCAPE_SERVER_URL: wsUrl,
             HYPERSCAPE_AUTH_TOKEN: authToken,
             HYPERSCAPE_PRIVY_USER_ID: accountId,
@@ -225,22 +252,16 @@ export class ElizaDuelBot extends EventEmitter {
           ).HYPERSCAPE_CHARACTER_ID = characterId;
         }
 
-        // Build plugins (no SQL plugin — InMemoryDatabaseAdapter replaces PGLite WASM)
-        const plugins: Plugin[] = [modelPlugin, hyperscapePlugin];
+        const plugins: Plugin[] = [
+          sqlPlugin,
+          trajectoryPlugin,
+          modelPlugin,
+          hyperscapePlugin,
+        ];
 
-        // Create a memory-safe adapter (cap logs + fix memoriesByRoom leak)
-        const adapter = new InMemoryDatabaseAdapter();
-        const MAX_LOGS = 20;
-        const origLog = adapter.log.bind(adapter);
-        adapter.log = async (params: Parameters<typeof origLog>[0]) => {
-          await origLog(params);
-          const logs = (adapter as unknown as { logs: unknown[] }).logs;
-          if (logs && logs.length > MAX_LOGS) {
-            logs.splice(0, logs.length - MAX_LOGS);
-          }
-        };
+        const agentUuid = character.id as UUID;
+        const adapter = createSqlAdapterForAgent(agentUuid, postgresUrl);
 
-        // Create runtime with lightweight in-memory adapter (no PGLite WASM overhead)
         this.runtime = new AgentRuntime({
           character,
           plugins,

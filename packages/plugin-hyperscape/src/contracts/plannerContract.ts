@@ -33,19 +33,13 @@ export interface CanonicalPlannerEntity {
   type: CanonicalPlannerEntityType;
   position: [number, number, number];
   rotation: [number, number, number, number] | null;
+  /** Distance from player in world units (null if player position unknown) */
+  distanceFromPlayer: number | null;
   sourceEntityType: string;
   confidence: number;
   affordances: string[];
-  attributes: {
-    alive: boolean | null;
-    level: number | null;
-    mobType: string | null;
-    resourceType: string | null;
-    itemId: string | null;
-    playerId: string | null;
-    playerName: string | null;
-    npcType: string | null;
-  };
+  /** Only non-null attributes are included to reduce payload size */
+  attributes: Record<string, string | number | boolean>;
 }
 
 export interface CanonicalPlannerActionCandidate {
@@ -71,6 +65,16 @@ export interface CanonicalPlannerPlayerState {
   combatTarget: string | null;
   coins: number;
   inventoryCount: number;
+  /** Inventory item IDs for reasoning about available tools/food */
+  inventoryItems: string[];
+}
+
+export interface CanonicalPlannerQuestInfo {
+  questId: string;
+  name: string;
+  stage: string | null;
+  progress: number | null;
+  target: number | null;
 }
 
 export interface CanonicalPlannerContext {
@@ -83,6 +87,8 @@ export interface CanonicalPlannerContext {
   entities: CanonicalPlannerEntity[];
   actionCandidates: CanonicalPlannerActionCandidate[];
   recentDecisionTrace: HyperscapeDecisionTrace[];
+  /** Active quests with progress */
+  quests: CanonicalPlannerQuestInfo[];
   metadata: {
     localChatCount: number;
     questCount: number;
@@ -151,26 +157,41 @@ function inferAffordances(entity: HyperscapeEntitySnapshot): string[] {
 
 function toCanonicalEntity(
   entity: HyperscapeEntitySnapshot,
+  playerPosition: [number, number, number] | null,
 ): CanonicalPlannerEntity {
+  // Compute distance from player
+  let distanceFromPlayer: number | null = null;
+  if (playerPosition) {
+    const dx = entity.position[0] - playerPosition[0];
+    const dz = entity.position[2] - playerPosition[2];
+    distanceFromPlayer = Math.round(Math.sqrt(dx * dx + dz * dz) * 10) / 10;
+  }
+
+  // Only include non-null attributes to reduce payload noise
+  const attrs: Record<string, string | number | boolean> = {};
+  if (entity.alive !== null) attrs.alive = entity.alive;
+  if (entity.level !== null) attrs.level = entity.level;
+  if (entity.mobType) attrs.mobType = entity.mobType;
+  if (entity.resourceType) attrs.resourceType = entity.resourceType;
+  if (entity.itemId) attrs.itemId = entity.itemId;
+  if (entity.playerId) attrs.playerId = entity.playerId;
+  if (entity.playerName) attrs.playerName = entity.playerName;
+  if (entity.npcType) attrs.npcType = entity.npcType;
+  if (entity.depleted === true) attrs.depleted = true;
+  if (entity.requiredLevel !== null) attrs.requiredLevel = entity.requiredLevel;
+  if (entity.harvestSkill) attrs.harvestSkill = entity.harvestSkill;
+
   return {
     entityId: entity.id,
     label: entity.name,
     type: inferEntityType(entity),
     position: entity.position,
     rotation: entity.rotation,
+    distanceFromPlayer,
     sourceEntityType: entity.entityType,
     confidence: 1,
     affordances: inferAffordances(entity),
-    attributes: {
-      alive: entity.alive,
-      level: entity.level,
-      mobType: entity.mobType,
-      resourceType: entity.resourceType,
-      itemId: entity.itemId,
-      playerId: entity.playerId,
-      playerName: entity.playerName,
-      npcType: entity.npcType,
-    },
+    attributes: attrs,
   };
 }
 
@@ -196,6 +217,9 @@ function toCanonicalPlayerState(
     combatTarget: player.combatTarget,
     coins: player.coins,
     inventoryCount: player.inventory.length,
+    inventoryItems: player.inventory
+      .map((item) => item.itemId || item.name)
+      .filter(Boolean) as string[],
   };
 }
 
@@ -292,6 +316,26 @@ export function buildCanonicalPlannerContext(
   snapshot: HyperscapeWorldSnapshot,
   recentDecisionTrace: HyperscapeDecisionTrace[],
 ): CanonicalPlannerContext {
+  const playerPos = snapshot.player?.position ?? null;
+
+  // Sort entities by distance from player so nearest are first
+  const entities = snapshot.nearbyEntities
+    .map((e) => toCanonicalEntity(e, playerPos))
+    .sort(
+      (a, b) => (a.distanceFromPlayer ?? 9999) - (b.distanceFromPlayer ?? 9999),
+    );
+
+  // Extract quest progress
+  const quests: CanonicalPlannerQuestInfo[] = snapshot.quests.map((q) => ({
+    questId: q.questId ?? "",
+    name: q.name ?? "",
+    stage: q.currentStage ?? q.stageType ?? null,
+    progress: q.stageProgress
+      ? (Object.values(q.stageProgress)[0] ?? null)
+      : null,
+    target: typeof q.stageCount === "number" ? q.stageCount : null,
+  }));
+
   return {
     schemaVersion: EMBODIED_PLANNER_SCHEMA_VERSION,
     source: "hyperscape",
@@ -299,9 +343,10 @@ export function buildCanonicalPlannerContext(
     worldId: snapshot.worldId,
     roomId: snapshot.currentRoomId,
     player: toCanonicalPlayerState(snapshot.player),
-    entities: snapshot.nearbyEntities.map(toCanonicalEntity),
+    entities,
     actionCandidates: deriveActionCandidates(snapshot),
     recentDecisionTrace,
+    quests,
     metadata: {
       localChatCount: snapshot.localChat.length,
       questCount: snapshot.quests.length,

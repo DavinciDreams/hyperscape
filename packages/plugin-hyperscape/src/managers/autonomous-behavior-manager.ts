@@ -325,6 +325,8 @@ export class AutonomousBehaviorManager {
   private autonomyMode: AutonomyMode;
   private readonly dedicatedDuelBot: boolean;
   private readonly forceFullLLMPath: boolean;
+  private _lastLlmResponse: string = "";
+  private _lastSelectedAction: string = "";
   private scriptedRole: ScriptedRole | null = null;
   private actionContext: { messageText?: string } | null = null;
   private lastTickTime = 0;
@@ -1526,10 +1528,24 @@ export class AutonomousBehaviorManager {
     }
 
     // --- SHORT-CIRCUIT: Skip LLM for obvious decisions ---
-    // When forceFullLLMPath is enabled, skip short-circuit so every tick produces
-    // an autonomous_llm_selection trajectory with full planner context.
-    const shortCircuit = this.forceFullLLMPath ? null : this.tryShortCircuit();
-    if (shortCircuit) {
+    // When forceFullLLMPath is enabled, still evaluate short-circuit for the decision
+    // trace (so training data shows what the deterministic path WOULD have chosen),
+    // but don't return it — continue to the LLM path instead.
+    const shortCircuit = this.tryShortCircuit();
+    if (this.forceFullLLMPath && shortCircuit) {
+      // Record what short-circuit would have done, for training signal
+      this.recordDecisionBoundary(
+        {
+          kind: "selection",
+          actionName: shortCircuit.name,
+          decisionPath: "short-circuit",
+          providerScope: ["gameState", "nearbyEntities"],
+          note: `Short-circuit would select ${shortCircuit.name} (overridden by FORCE_LLM_PATH)`,
+        },
+        `Short-circuit: ${shortCircuit.name} (overridden → LLM)`,
+      );
+    }
+    if (shortCircuit && !this.forceFullLLMPath) {
       logger.info(`[AutonomousBehavior] Short-circuit: ${shortCircuit.name}`);
 
       // Sync short-circuit decisions as thoughts so the dashboard shows activity
@@ -1703,8 +1719,22 @@ export class AutonomousBehaviorManager {
     if (trajectoryLogger) {
       try {
         const currentSnapshot = this.service?.getWorldSnapshot() ?? null;
-        const currentDecisionTrace =
-          this.service?.getRecentDecisionTrace(20) ?? [];
+        // Get 40 trace entries then deduplicate consecutive identical action+kind pairs
+        // to reduce noise from repeated validation failures
+        const rawTrace = this.service?.getRecentDecisionTrace(40) ?? [];
+        const currentDecisionTrace: typeof rawTrace = [];
+        for (const entry of rawTrace) {
+          const prev = currentDecisionTrace[currentDecisionTrace.length - 1];
+          if (
+            prev &&
+            prev.actionName === entry.actionName &&
+            prev.kind === entry.kind &&
+            prev.decisionPath === entry.decisionPath
+          ) {
+            continue; // Skip consecutive duplicate
+          }
+          currentDecisionTrace.push(entry);
+        }
         const canonicalPlannerContext = currentSnapshot
           ? buildCanonicalPlannerContext(currentSnapshot, currentDecisionTrace)
           : null;
@@ -1717,8 +1747,10 @@ export class AutonomousBehaviorManager {
             traceId: plannerTraceId,
             plannerStepId,
             canonicalPlannerContext,
-            currentGoalType: this.currentGoal?.type ?? null,
-            currentGoalDescription: this.currentGoal?.description ?? null,
+            currentGoalType: this.currentGoal?.type ?? "exploration",
+            currentGoalDescription:
+              this.currentGoal?.description ??
+              "No active goal — agent is exploring and deciding what to do",
           },
         });
         const trajectoryStepId =
@@ -1761,16 +1793,6 @@ export class AutonomousBehaviorManager {
     try {
       // Use the LLM to select an action — abort if it takes longer than LLM_TIMEOUT_MS
       const hasTrajectory = !!(trajectoryId && trajectoryLogger);
-      if (!hasTrajectory) {
-        process.stderr.write(
-          `[AutonomousBehavior] LLM path WITHOUT trajectory: trajectoryId=${trajectoryId} logger=${!!trajectoryLogger}\n`,
-        );
-      } else {
-        const stepId = trajectoryLogger!.getCurrentStepId(trajectoryId!);
-        process.stderr.write(
-          `[AutonomousBehavior] LLM path WITH trajectory: id=${trajectoryId} stepId=${stepId}\n`,
-        );
-      }
       const response = await Promise.race([
         hasTrajectory
           ? loggedLLMCall(
@@ -1805,6 +1827,9 @@ export class AutonomousBehaviorManager {
       const responseText =
         typeof response === "string" ? response : String(response);
 
+      // Store LLM response for trajectory finalization (avoids loggedLLMCall race condition)
+      this._lastLlmResponse = responseText;
+
       // Parse THINKING and ACTION from the response
       const { thinking, actionName } = this.parseThinkingAndAction(
         responseText,
@@ -1833,6 +1858,13 @@ export class AutonomousBehaviorManager {
 
       let selectedActionName = actionName;
 
+      // Also extract the raw action name from the LLM response for training data
+      // even if it doesn't match an available action
+      const rawActionMatch = responseText.match(/ACTION:\s*(\w+)/i);
+      this._lastSelectedAction =
+        selectedActionName ||
+        (rawActionMatch ? rawActionMatch[1].toUpperCase() : "");
+
       if (!selectedActionName) {
         // If there's an active goal, don't derail it — retry next tick
         if (this.currentGoal) {
@@ -1851,6 +1883,7 @@ export class AutonomousBehaviorManager {
               parameters: {
                 traceId: plannerTraceId,
                 plannerStepId,
+                llmResponse: responseText,
                 providerScope: providerFilter ?? ["*"],
               },
               success: false,
@@ -1943,6 +1976,8 @@ export class AutonomousBehaviorManager {
           result: {
             selectedActionName,
             fallbackApplied: foundAction === undefined,
+            llmResponse: responseText,
+            llmPromptLength: prompt.length,
           },
           reasoning: thinking,
         });
@@ -1999,10 +2034,18 @@ export class AutonomousBehaviorManager {
     } finally {
       if (trajectoryId && trajectoryLogger) {
         try {
+          // Include the most recent action result from the previous tick
+          const lastRingEntry = this.actionRing[this.actionRing.length - 1];
           await endAutonomousTick(trajectoryLogger, trajectoryId, "completed", {
             stepCount: 1,
             traceId: plannerTraceId,
             plannerStepId,
+            llmResponse: this._lastLlmResponse || undefined,
+            selectedAction:
+              this._lastSelectedAction || (lastRingEntry?.action ?? null),
+            reasoning: this.lastThinking || undefined,
+            lastActionResult: lastRingEntry?.result ?? null,
+            lastActionName: lastRingEntry?.action ?? null,
           });
         } catch {
           /* best-effort */
@@ -2402,8 +2445,8 @@ export class AutonomousBehaviorManager {
       // Clean up any trailing whitespace or newlines
       thinking = thinking.replace(/\n+$/, "").trim();
       // Limit length for dashboard display
-      if (thinking.length > 500) {
-        thinking = thinking.substring(0, 497) + "...";
+      if (thinking.length > 1000) {
+        thinking = thinking.substring(0, 997) + "...";
       }
     }
 
@@ -2430,8 +2473,8 @@ export class AutonomousBehaviorManager {
         .replace(/ACTION:\s*\w+/gi, "")
         .replace(/THINKING:/gi, "")
         .trim();
-      if (thinking.length > 500) {
-        thinking = thinking.substring(0, 497) + "...";
+      if (thinking.length > 1000) {
+        thinking = thinking.substring(0, 997) + "...";
       }
     }
 
