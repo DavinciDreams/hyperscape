@@ -59,6 +59,8 @@ interface LODPool {
   dirty: boolean;
   /** Shared backing array for per-instance highlight intensity (0 or 1) */
   highlightData: Float32Array;
+  /** Shared backing array for per-instance dissolve progress (0 = visible, 1 = dissolved) */
+  dissolveData: Float32Array;
   /**
    * Snapshot of original source geometries (before InstancedBufferAttribute
    * additions). Retained so collision proxies can use the model shape without
@@ -163,6 +165,7 @@ function createLODPool(
   const materials: DissolveMaterial[] = [];
   const sourceGeometries: THREE.BufferGeometry[] = [];
   const hlData = new Float32Array(MAX_INSTANCES);
+  const dissolveData = new Float32Array(MAX_INSTANCES);
   for (const part of parts) {
     // Store the original geometry before adding instanced attributes
     sourceGeometries.push(part.geometry);
@@ -172,6 +175,10 @@ function createLODPool(
     const hlAttr = new THREE.InstancedBufferAttribute(hlData, 1);
     hlAttr.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute("instanceHighlight", hlAttr);
+
+    const dsAttr = new THREE.InstancedBufferAttribute(dissolveData, 1);
+    dsAttr.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("instanceDissolve", dsAttr);
 
     const im = new THREE.InstancedMesh(geo, part.material, MAX_INSTANCES);
     im.count = 0;
@@ -190,6 +197,7 @@ function createLODPool(
     activeCount: 0,
     dirty: false,
     highlightData: hlData,
+    dissolveData,
     sourceGeometries,
   };
 }
@@ -418,6 +426,7 @@ function removeFromPool(pool: LODPool, entityId: string): void {
       im.setMatrixAt(idx, _swapMatrix);
     }
     pool.highlightData[idx] = pool.highlightData[lastIdx];
+    pool.dissolveData[idx] = pool.dissolveData[lastIdx];
 
     for (const [eid, eidIdx] of pool.slots) {
       if (eidIdx === lastIdx) {
@@ -427,6 +436,7 @@ function removeFromPool(pool: LODPool, entityId: string): void {
     }
   }
   pool.highlightData[lastIdx] = 0;
+  pool.dissolveData[lastIdx] = 0;
 
   pool.slots.delete(entityId);
   pool.activeCount--;
@@ -462,6 +472,7 @@ export function destroyGLBTreeInstancer(): void {
   pools.clear();
   entityToModel.clear();
   pendingEnsure.clear();
+  dissolveAnims.clear();
   scene = null;
   world = null;
 }
@@ -541,6 +552,7 @@ export function removeInstance(entityId: string): void {
 
   pool.instances.delete(entityId);
   entityToModel.delete(entityId);
+  dissolveAnims.delete(entityId);
 }
 
 export function setDepleted(entityId: string, depleted: boolean): void {
@@ -708,6 +720,72 @@ export function clearHighlight(): void {
   }
 }
 
+// ---- Height-based dissolve (tree depletion/respawn) ----
+
+const DISSOLVE_DURATION = 0.3; // seconds for respawn dissolve-in
+const DISSOLVE_MAX = 1.0;
+
+interface DissolveAnim {
+  /** 1 = dissolving out, -1 = appearing in */
+  direction: 1 | -1;
+  progress: number;
+}
+
+const dissolveAnims = new Map<string, DissolveAnim>();
+
+function applyDissolveValue(entityId: string, value: number): void {
+  const modelPath = entityToModel.get(entityId);
+  if (!modelPath) return;
+
+  const pool = pools.get(modelPath);
+  if (!pool) return;
+
+  const slot = pool.instances.get(entityId);
+  if (!slot) return;
+
+  // Apply to whichever LOD pool the instance is currently in
+  for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
+    if (!lodPool) continue;
+    const idx = lodPool.slots.get(entityId);
+    if (idx === undefined) continue;
+
+    lodPool.dissolveData[idx] = value;
+    for (const im of lodPool.meshes) {
+      const attr = im.geometry.getAttribute("instanceDissolve");
+      if (attr) (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
+    }
+    return;
+  }
+}
+
+/**
+ * Set dissolve value directly (no animation). 0 = visible, 1 = dissolved.
+ */
+export function setDissolve(entityId: string, value: number): void {
+  dissolveAnims.delete(entityId);
+  applyDissolveValue(entityId, value);
+}
+
+/**
+ * Start a dissolve animation. direction=1 dissolves out (depletion),
+ * direction=-1 dissolves in (respawn).
+ */
+export function startDissolve(
+  entityId: string,
+  direction: 1 | -1,
+  instant = false,
+): void {
+  if (instant) {
+    const target = direction > 0 ? DISSOLVE_MAX : 0.0;
+    applyDissolveValue(entityId, target);
+    dissolveAnims.delete(entityId);
+    return;
+  }
+  const current = direction > 0 ? 0.0 : DISSOLVE_MAX;
+  applyDissolveValue(entityId, current);
+  dissolveAnims.set(entityId, { direction, progress: current });
+}
+
 let lastUpdateFrame = -1;
 
 export function updateGLBTreeInstancer(): void {
@@ -760,10 +838,13 @@ export function updateGLBTreeInstancer(): void {
       const newPool =
         targetLOD === 0 ? pool.lod0 : targetLOD === 1 ? pool.lod1 : pool.lod2;
 
-      const wasHighlighted =
-        oldPool && oldPool.slots.has(slot.entityId)
-          ? oldPool.highlightData[oldPool.slots.get(slot.entityId)!]
-          : 0;
+      let wasHighlighted = 0;
+      let wasDissolve = 0;
+      if (oldPool && oldPool.slots.has(slot.entityId)) {
+        const oldIdx = oldPool.slots.get(slot.entityId)!;
+        wasHighlighted = oldPool.highlightData[oldIdx];
+        wasDissolve = oldPool.dissolveData[oldIdx];
+      }
       if (oldPool) removeFromPool(oldPool, slot.entityId);
       if (newPool) {
         const mat = composeInstanceMatrix(
@@ -773,9 +854,9 @@ export function updateGLBTreeInstancer(): void {
           slot.yOffset,
         );
         addToPool(newPool, slot.entityId, mat);
-        if (wasHighlighted > 0) {
-          const newIdx = newPool.slots.get(slot.entityId);
-          if (newIdx !== undefined) {
+        const newIdx = newPool.slots.get(slot.entityId);
+        if (newIdx !== undefined) {
+          if (wasHighlighted > 0) {
             newPool.highlightData[newIdx] = wasHighlighted;
             for (const im of newPool.meshes) {
               const attr = im.geometry.getAttribute("instanceHighlight");
@@ -783,9 +864,31 @@ export function updateGLBTreeInstancer(): void {
                 (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
             }
           }
+          if (wasDissolve > 0) {
+            newPool.dissolveData[newIdx] = wasDissolve;
+            for (const im of newPool.meshes) {
+              const attr = im.geometry.getAttribute("instanceDissolve");
+              if (attr)
+                (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
+            }
+          }
         }
       }
       slot.currentLOD = targetLOD;
+    }
+  }
+
+  // Tick dissolve animations
+  const dt = 1 / 60; // fixed step (trees use frame-based update, not real deltaTime)
+  for (const [entityId, anim] of dissolveAnims) {
+    anim.progress += (anim.direction * dt) / DISSOLVE_DURATION;
+    anim.progress = Math.max(0, Math.min(DISSOLVE_MAX, anim.progress));
+    applyDissolveValue(entityId, anim.progress);
+    if (
+      (anim.direction > 0 && anim.progress >= DISSOLVE_MAX) ||
+      (anim.direction < 0 && anim.progress <= 0)
+    ) {
+      dissolveAnims.delete(entityId);
     }
   }
 

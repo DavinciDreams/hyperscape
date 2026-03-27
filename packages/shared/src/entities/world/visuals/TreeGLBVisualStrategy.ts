@@ -15,24 +15,22 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   addInstance as addInstancedTree,
   removeInstance as removeInstancedTree,
-  setDepleted as setInstancedDepleted,
-  hasDepleted as hasInstancedDepleted,
   setHighlight as setInstancedHighlight,
   getModelDimensions as getInstancedDimensions,
   getProxyGeometry as getInstancedProxyGeometry,
   hasInstance as isInInstancedPool,
   updateGLBTreeInstancer,
+  startDissolve as startInstancedDissolve,
 } from "../../../systems/shared/world/GLBTreeInstancer";
 import {
   addInstance as addBatchedTree,
   removeInstance as removeBatchedTree,
-  setDepleted as setBatchedDepleted,
-  hasDepleted as hasBatchedDepleted,
   setHighlight as setBatchedHighlight,
   getModelDimensions as getBatchedDimensions,
   getProxyGeometry as getBatchedProxyGeometry,
   hasInstance as isInBatchedPool,
   updateGLBTreeBatchedInstancer,
+  startDissolve as startBatchedDissolve,
 } from "../../../systems/shared/world/GLBTreeBatchedInstancer";
 import type {
   ResourceVisualContext,
@@ -266,22 +264,36 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
 
     if (success) {
       createCollisionProxy(ctx, baseScale, !!config.modelVariants?.length);
+
+      // If tree starts depleted (initial load), set dissolve instantly (no animation)
+      if (config.depleted) {
+        if (config.modelVariants?.length) {
+          startBatchedDissolve(id, 1, true);
+        } else {
+          startInstancedDissolve(id, 1, true);
+        }
+        const proxy = ctx.getMesh();
+        if (proxy) {
+          proxy.userData.depleted = true;
+          proxy.userData.interactable = false;
+        }
+      }
     }
   }
 
   async onDepleted(ctx: ResourceVisualContext): Promise<boolean> {
-    const b = isBatched(ctx.id);
-    if (b) {
-      setBatchedDepleted(ctx.id, true);
+    // Instant dissolve — immediate visual feedback on depletion
+    if (isBatched(ctx.id)) {
+      startBatchedDissolve(ctx.id, 1, true);
     } else {
-      setInstancedDepleted(ctx.id, true);
+      startInstancedDissolve(ctx.id, 1, true);
     }
     const proxy = ctx.getMesh();
     if (proxy) {
       proxy.userData.depleted = true;
       proxy.userData.interactable = false;
     }
-    return b ? hasBatchedDepleted(ctx.id) : hasInstancedDepleted(ctx.id);
+    return true;
   }
 
   setShaderHighlight(ctx: ResourceVisualContext, on: boolean): void {
@@ -293,10 +305,11 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
   }
 
   async onRespawn(ctx: ResourceVisualContext): Promise<void> {
+    // Start reverse dissolve animation (trunk → canopy)
     if (isBatched(ctx.id)) {
-      setBatchedDepleted(ctx.id, false);
+      startBatchedDissolve(ctx.id, -1);
     } else {
-      setInstancedDepleted(ctx.id, false);
+      startInstancedDissolve(ctx.id, -1);
     }
     const proxy = ctx.getMesh();
     if (proxy) {

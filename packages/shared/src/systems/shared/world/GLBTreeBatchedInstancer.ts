@@ -618,9 +618,12 @@ function applyHighlightColor(
 ): void {
   const ids = pool.instanceIds.get(entityId);
   if (!ids) return;
-  const color = on ? _hlColor : _defaultColor;
   for (let i = 0; i < pool.batches.length; i++) {
-    pool.batches[i].setColorAt(ids[i], color);
+    // Preserve blue channel (encodes dissolve state)
+    pool.batches[i].getColorAt(ids[i], _tmpColor);
+    const blue = _tmpColor.b;
+    _tmpColor.setRGB(on ? 1.15 : 1.0, on ? 1.15 : 1.0, blue);
+    pool.batches[i].setColorAt(ids[i], _tmpColor);
   }
 }
 
@@ -650,6 +653,7 @@ export function destroyGLBTreeBatchedInstancer(): void {
   pools.clear();
   entityToTreeType.clear();
   pendingEnsure.clear();
+  dissolveAnims.clear();
   scene = null;
   world = null;
 }
@@ -717,6 +721,7 @@ export function removeInstance(entityId: string): void {
 
   pool.instances.delete(entityId);
   entityToTreeType.delete(entityId);
+  dissolveAnims.delete(entityId);
 }
 
 function getLodPool(pool: TreeTypePool, slot: TreeSlot): BatchedLODPool | null {
@@ -851,6 +856,78 @@ export function clearHighlight(): void {
   }
 }
 
+// ---- Height-based dissolve (tree depletion/respawn) ----
+
+const DISSOLVE_DURATION = 0.3;
+const DISSOLVE_MAX = 1.0;
+
+interface DissolveAnim {
+  direction: 1 | -1;
+  progress: number;
+}
+
+const dissolveAnims = new Map<string, DissolveAnim>();
+
+function applyDissolveColor(
+  pool: BatchedLODPool,
+  entityId: string,
+  dissolveVal: number,
+): void {
+  const ids = pool.instanceIds.get(entityId);
+  if (!ids) return;
+  for (let i = 0; i < pool.batches.length; i++) {
+    pool.batches[i].getColorAt(ids[i], _tmpColor);
+    // Encode dissolve in blue channel: blue = 1.0 - dissolveVal
+    _tmpColor.b = 1.0 - dissolveVal;
+    pool.batches[i].setColorAt(ids[i], _tmpColor);
+  }
+}
+
+function applyDissolveValue(entityId: string, value: number): void {
+  const treeType = entityToTreeType.get(entityId);
+  if (!treeType) return;
+
+  const pool = pools.get(treeType);
+  if (!pool) return;
+
+  const slot = pool.instances.get(entityId);
+  if (!slot) return;
+
+  for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
+    if (!lodPool || !lodPool.instanceIds.has(entityId)) continue;
+    applyDissolveColor(lodPool, entityId, value);
+    return;
+  }
+}
+
+/**
+ * Set dissolve value directly (no animation). 0 = visible, 1 = dissolved.
+ */
+export function setDissolve(entityId: string, value: number): void {
+  dissolveAnims.delete(entityId);
+  applyDissolveValue(entityId, value);
+}
+
+/**
+ * Start a dissolve animation. direction=1 dissolves out (depletion),
+ * direction=-1 dissolves in (respawn).
+ */
+export function startDissolve(
+  entityId: string,
+  direction: 1 | -1,
+  instant = false,
+): void {
+  if (instant) {
+    const target = direction > 0 ? DISSOLVE_MAX : 0.0;
+    applyDissolveValue(entityId, target);
+    dissolveAnims.delete(entityId);
+    return;
+  }
+  const current = direction > 0 ? 0.0 : DISSOLVE_MAX;
+  applyDissolveValue(entityId, current);
+  dissolveAnims.set(entityId, { direction, progress: current });
+}
+
 let lastUpdateFrame = -1;
 
 export function updateGLBTreeBatchedInstancer(): void {
@@ -895,7 +972,16 @@ export function updateGLBTreeBatchedInstancer(): void {
 
       const oldPool = getLodPool(pool, slot);
       const wasHl = oldPool ? isHighlighted(oldPool, slot.entityId) : false;
-      if (oldPool) removeFromPool(oldPool, slot.entityId);
+      // Read dissolve state from old pool's color before removing
+      let wasDissolveVal = 0;
+      if (oldPool) {
+        const oldIds = oldPool.instanceIds.get(slot.entityId);
+        if (oldIds && oldIds.length > 0) {
+          oldPool.batches[0].getColorAt(oldIds[0], _tmpColor);
+          wasDissolveVal = Math.max(0, 1.0 - _tmpColor.b);
+        }
+        removeFromPool(oldPool, slot.entityId);
+      }
 
       slot.currentLOD = targetLOD;
 
@@ -909,7 +995,24 @@ export function updateGLBTreeBatchedInstancer(): void {
         );
         addToPool(newPool, slot.entityId, mat, slot.variantIndex);
         if (wasHl) applyHighlightColor(newPool, slot.entityId, true);
+        if (wasDissolveVal > 0.001) {
+          applyDissolveColor(newPool, slot.entityId, wasDissolveVal);
+        }
       }
+    }
+  }
+
+  // Tick dissolve animations
+  const dt = 1 / 60;
+  for (const [entityId, anim] of dissolveAnims) {
+    anim.progress += (anim.direction * dt) / DISSOLVE_DURATION;
+    anim.progress = Math.max(0, Math.min(DISSOLVE_MAX, anim.progress));
+    applyDissolveValue(entityId, anim.progress);
+    if (
+      (anim.direction > 0 && anim.progress >= DISSOLVE_MAX) ||
+      (anim.direction < 0 && anim.progress <= 0)
+    ) {
+      dissolveAnims.delete(entityId);
     }
   }
 

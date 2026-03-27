@@ -1167,9 +1167,22 @@ export function createTreeDissolveMaterial(
     // ---- Sky-color fog ----
     const fogged = mix(finalRgb, treeFogTex.rgb, treeFogFactor);
 
-    return vec4(fogged, pbrOut.a);
+    // ---- Dissolve transparency (depleted trees) ----
+    // Uniform 80% transparency across the whole tree when dissolved.
+    const dissolveVal = options.batched
+      ? clamp(
+          sub(float(1.0), varyingProperty("vec3", "vBatchColor").z),
+          float(0.0),
+          float(1.0),
+        )
+      : attribute("instanceDissolve", "float");
+    const dissolveAlpha = sub(float(1.0), mul(dissolveVal, float(0.8)));
+
+    return vec4(fogged, mul(pbrOut.a, dissolveAlpha));
   })();
 
+  material.transparent = true;
+  material.depthWrite = true;
   material.needsUpdate = true;
 
   const treeMat = baseDm as TreeDissolveMaterial;
