@@ -27,9 +27,12 @@ import THREE, {
   sub,
   dot,
   clamp,
+  mul,
   modelWorldMatrix,
+  cameraViewMatrix,
+  output,
 } from "../../../extras/three/three";
-import { SUN_LIGHT, SUN_SHADE, applyCustomLighting } from "./LightingConfig";
+import { SUN_LIGHT } from "./LightingConfig";
 import { applyAnimeShade, TERRAIN_SHADER_CONSTANTS } from "./TerrainShader";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import type { TerrainQuadNode, QuadTreeListener } from "./TerrainQuadTree";
@@ -724,7 +727,7 @@ export class GrassVisualManager implements QuadTreeListener {
     mesh.position.set(node.centerX, 0, node.centerZ);
     mesh.name = `GrassQT_${key}`;
     mesh.frustumCulled = false;
-    mesh.receiveShadow = false;
+    mesh.receiveShadow = true;
     mesh.castShadow = false;
     mesh.userData = { type: "grass", walkable: false, clickable: false };
 
@@ -867,7 +870,7 @@ export class GrassVisualManager implements QuadTreeListener {
     mesh.position.set(node.centerX, 0, node.centerZ);
     mesh.name = `GrassQT_${key}`;
     mesh.frustumCulled = false;
-    mesh.receiveShadow = false;
+    mesh.receiveShadow = true;
     mesh.castShadow = false;
     mesh.userData = { type: "grass", walkable: false, clickable: false };
 
@@ -983,7 +986,6 @@ export class GrassVisualManager implements QuadTreeListener {
 
   private createMaterial(): MeshStandardNodeMaterial {
     const mat = new MeshStandardNodeMaterial();
-    mat.colorNode = vec3(0, 0, 0);
     mat.side = THREE.DoubleSide;
     mat.transparent = false;
     mat.depthWrite = true;
@@ -1045,6 +1047,39 @@ export class GrassVisualManager implements QuadTreeListener {
       localPos.x.assign(preRotX.mul(cosR).sub(preRotZ.mul(sinR)));
       localPos.z.assign(preRotX.mul(sinR).add(preRotZ.mul(cosR)));
 
+      // Tilt grass to align with terrain slope (axis-angle rotation from Y-up to ground normal).
+      // Uses Rodrigues' rotation matrix with axis = cross((0,1,0), N) = (nz, 0, -nx).
+      // The 1/(1+ny) substitution avoids acos/sin and has no singularity for upward-facing normals.
+      const gn = attribute("instanceGroundNormal", "vec3");
+      const nx = gn.x;
+      const ny = gn.y;
+      const nz = gn.z;
+      const invOnePlusNy = float(1.0).div(ny.add(float(1.0)));
+      const nxnzTerm = nx.mul(nz).mul(invOnePlusNy).negate();
+
+      const preTiltX = localPos.x.toVar("preTiltX");
+      const preTiltY = localPos.y.toVar("preTiltY");
+      const preTiltZ = localPos.z.toVar("preTiltZ");
+
+      localPos.x.assign(
+        preTiltX
+          .mul(ny.add(nz.mul(nz).mul(invOnePlusNy)))
+          .add(preTiltY.mul(nx))
+          .add(preTiltZ.mul(nxnzTerm)),
+      );
+      localPos.y.assign(
+        preTiltX
+          .mul(nx.negate())
+          .add(preTiltY.mul(ny))
+          .add(preTiltZ.mul(nz.negate())),
+      );
+      localPos.z.assign(
+        preTiltX
+          .mul(nxnzTerm)
+          .add(preTiltY.mul(nz))
+          .add(preTiltZ.mul(ny.add(nx.mul(nx).mul(invOnePlusNy)))),
+      );
+
       // Wind: displace tips via sine waves keyed to world-space offset
       const wt = time.mul(uWindSpeed);
       const bendFactor = pow(t, float(1.8));
@@ -1073,12 +1108,19 @@ export class GrassVisualManager implements QuadTreeListener {
     })();
 
     const uSunDir = this.sunDirUniform;
-    const uDayIntensity = this.dayIntensityUniform;
-    const shadeColor = vec3(...SUN_SHADE.TINT_COLOR);
+    const terrainNormal = attribute("instanceGroundNormal", "vec3");
 
-    mat.outputNode = Fn(() => {
+    // Override PBR surface normal to terrain normal (world→view transform).
+    // mat4.transformDirection(vec3) is left-multiply: matrixWorldInverse * normal
+    // = correct world→view.  With normalNode set, PBR's faceDirection flip is
+    // bypassed so both sides of a blade get the same terrain N·L.
+    mat.normalNode = cameraViewMatrix.transformDirection(terrainNormal);
+
+    // Anime shade (half-lambert cool tint + fresnel rim) tints the ALBEDO
+    // using the terrain normal so grass root color blends with terrain.
+    // PBR then adds a single Lambert N·L + shadow on top.
+    mat.colorNode = Fn(() => {
       const groundCol = attribute("instanceGroundColor", "vec3");
-      const terrainNormal = attribute("instanceGroundNormal", "vec3");
       const t = uv().y;
       const tipCol = groundCol.mul(1.4);
       const bladeCol = mix(
@@ -1086,15 +1128,11 @@ export class GrassVisualManager implements QuadTreeListener {
         tipCol,
         smoothstep(float(0.0), float(1.0), t),
       );
-      const animeCol = applyAnimeShade(bladeCol, terrainNormal, uSunDir);
-      const lit = applyCustomLighting(
-        animeCol,
-        terrainNormal,
-        uSunDir,
-        uDayIntensity,
-        shadeColor,
-      );
-      return vec4(lit, float(1.0));
+      return applyAnimeShade(bladeCol, terrainNormal, uSunDir);
+    })();
+
+    mat.outputNode = Fn(() => {
+      return vec4(output.rgb, output.a);
     })();
 
     return mat;

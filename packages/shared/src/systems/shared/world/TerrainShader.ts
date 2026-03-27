@@ -50,7 +50,7 @@ import { getRoadInfluenceTextureState } from "./RoadInfluenceMask";
 import { getLamppostLightTextureState } from "./LamppostLightMask";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
-import { SUN_LIGHT, SUN_SHADE, applyCustomLighting } from "./LightingConfig";
+import { SUN_LIGHT, SUN_SHADE } from "./LightingConfig";
 
 export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
@@ -1438,7 +1438,8 @@ export function createTerrainMaterial(): THREE.Material & {
 
   const baseWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
 
-  // Half-lambert anime shade + fresnel rim (shared with grass)
+  // Half-lambert cool tint + fresnel rim — tints the ALBEDO before PBR.
+  // PBR then adds a single Lambert N·L + shadow on top.
   const animeBase = applyAnimeShade(
     baseWithRoads,
     worldNormal,
@@ -1593,28 +1594,18 @@ export function createTerrainMaterial(): THREE.Material & {
   const fogColor = fogTexNode.rgb;
 
   // === CREATE MATERIAL ===
-  // Bypass PBR entirely — use applyCustomLighting for both terrain and grass
-  // so they produce identical pixels at the same world position.
+  // Base color + vertex lights only.  PBR handles Lambert N·L + shadow.
   const dayIntensityUniform = uniform(1.0);
-  const shadeColor = vec3(...SUN_SHADE.TINT_COLOR);
 
   const material = new MeshStandardNodeMaterial();
-  material.colorNode = vec3(0, 0, 0);
+  material.colorNode = litTerrain;
   material.roughness = 1.0;
   material.metalness = 0.0;
   material.side = THREE.FrontSide;
   material.fog = false;
 
   material.outputNode = Fn(() => {
-    const lit = applyCustomLighting(
-      litTerrain,
-      worldNormal,
-      sunDirectionUniform,
-      dayIntensityUniform,
-      shadeColor,
-    );
-    const fogged = mix(lit, fogColor, fogFactor);
-    return vec4(fogged, float(1.0));
+    return vec4(mix(output.rgb, fogColor, fogFactor), output.a);
   })();
 
   const terrainUniforms: TerrainUniforms = {
