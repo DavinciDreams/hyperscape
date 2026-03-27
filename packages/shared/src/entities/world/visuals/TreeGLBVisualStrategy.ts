@@ -12,6 +12,7 @@
 
 import THREE from "../../../extras/three/three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
+import { GPU_VEG_CONFIG } from "../../../systems/shared/world/GPUMaterials";
 import {
   addInstance as addInstancedTree,
   removeInstance as removeInstancedTree,
@@ -229,6 +230,9 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     );
     const rotation = ((rotHash % 1000) / 1000) * Math.PI * 2;
 
+    // Pass initial dissolve through addInstance so the GPU attribute is set
+    // atomically with pool insertion — no 1-frame flash on initial load.
+    const initialDissolve = config.depleted ? GPU_VEG_CONFIG.DISSOLVE_MAX : 0;
     let success = false;
 
     if (config.modelVariants?.length) {
@@ -244,6 +248,7 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
         worldPos,
         rotation,
         baseScale,
+        initialDissolve,
       );
     } else {
       let modelPath = config.model;
@@ -255,19 +260,16 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
         worldPos,
         rotation,
         baseScale,
+        undefined,
+        undefined,
+        initialDissolve,
       );
     }
 
     if (success) {
       createCollisionProxy(ctx, baseScale, !!config.modelVariants?.length);
 
-      // If tree starts depleted (initial load), set dissolve instantly (no animation)
       if (config.depleted) {
-        if (config.modelVariants?.length) {
-          startBatchedDissolve(id, 1, true);
-        } else {
-          startInstancedDissolve(id, 1, true);
-        }
         const proxy = ctx.getMesh();
         if (proxy) {
           proxy.userData.depleted = true;

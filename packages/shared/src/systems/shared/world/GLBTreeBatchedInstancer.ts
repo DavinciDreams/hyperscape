@@ -615,6 +615,7 @@ export async function addInstance(
   position: THREE.Vector3,
   rotation: number,
   scale: number,
+  initialDissolve = 0,
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
@@ -635,7 +636,8 @@ export async function addInstance(
     entityToTreeType.set(entityId, treeType);
 
     const mat = composeInstanceMatrix(position, rotation, scale, pool.yOffset);
-    if (pool.lod0) addToPool(pool.lod0, entityId, mat, variantIndex);
+    if (pool.lod0)
+      addToPool(pool.lod0, entityId, mat, variantIndex, initialDissolve);
 
     return true;
   } catch (error) {
@@ -774,11 +776,11 @@ function applyDissolveValue(entityId: string, value: number): void {
   const slot = pool.instances.get(entityId);
   if (!slot) return;
 
-  for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
-    if (!lodPool || !lodPool.instanceIds.has(entityId)) continue;
-    applyDissolveColor(lodPool, entityId, value);
-    return;
-  }
+  // Use slot.currentLOD for O(1) pool lookup instead of searching all 3 pools.
+  const lodPool = getLodPool(pool, slot);
+  if (!lodPool) return;
+
+  applyDissolveColor(lodPool, entityId, value);
 }
 
 export function startDissolve(

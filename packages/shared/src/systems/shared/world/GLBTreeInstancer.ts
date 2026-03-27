@@ -448,6 +448,7 @@ export async function addInstance(
   scale: number,
   lod1ModelPath?: string | null,
   lod2ModelPath?: string | null,
+  initialDissolve = 0,
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
@@ -474,7 +475,7 @@ export async function addInstance(
     entityToModel.set(entityId, modelPath);
 
     const mat = composeInstanceMatrix(position, rotation, scale, pool.yOffset);
-    addToPool(pool.lod0!, entityId, mat);
+    addToPool(pool.lod0!, entityId, mat, initialDissolve);
 
     return true;
   } catch (error) {
@@ -621,17 +622,20 @@ function applyDissolveValue(entityId: string, value: number): void {
   const slot = pool.instances.get(entityId);
   if (!slot) return;
 
-  // Apply to whichever LOD pool the instance is currently in.
-  // Sets dissolveDirty — the update loop flushes needsUpdate once per pool.
-  for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
-    if (!lodPool) continue;
-    const idx = lodPool.slots.get(entityId);
-    if (idx === undefined) continue;
+  // Use slot.currentLOD for O(1) pool lookup instead of searching all 3 pools.
+  const lodPool =
+    slot.currentLOD === 0
+      ? pool.lod0
+      : slot.currentLOD === 1
+        ? pool.lod1
+        : pool.lod2;
+  if (!lodPool) return;
 
-    lodPool.dissolveData[idx] = value;
-    lodPool.dissolveDirty = true;
-    return;
-  }
+  const idx = lodPool.slots.get(entityId);
+  if (idx === undefined) return;
+
+  lodPool.dissolveData[idx] = value;
+  lodPool.dissolveDirty = true;
 }
 
 export function startDissolve(
