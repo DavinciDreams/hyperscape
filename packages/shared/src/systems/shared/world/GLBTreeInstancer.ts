@@ -59,6 +59,12 @@ interface LODPool {
   dirty: boolean;
   /** Shared backing array for per-instance highlight intensity (0 or 1) */
   highlightData: Float32Array;
+  /**
+   * Snapshot of original source geometries (before InstancedBufferAttribute
+   * additions). Retained so collision proxies can use the model shape without
+   * depending on live InstancedMesh geometry references.
+   */
+  sourceGeometries: THREE.BufferGeometry[];
 }
 
 interface ModelPool {
@@ -155,8 +161,12 @@ function createLODPool(
 ): LODPool {
   const meshes: THREE.InstancedMesh[] = [];
   const materials: DissolveMaterial[] = [];
+  const sourceGeometries: THREE.BufferGeometry[] = [];
   const hlData = new Float32Array(MAX_INSTANCES);
   for (const part of parts) {
+    // Store the original geometry before adding instanced attributes
+    sourceGeometries.push(part.geometry);
+
     const geo = createSharedGeometry(part.geometry);
 
     const hlAttr = new THREE.InstancedBufferAttribute(hlData, 1);
@@ -180,6 +190,7 @@ function createLODPool(
     activeCount: 0,
     dirty: false,
     highlightData: hlData,
+    sourceGeometries,
   };
 }
 
@@ -441,6 +452,7 @@ export function destroyGLBTreeInstancer(): void {
         im.geometry.dispose();
       }
       for (const mat of lodPool.materials) mat.dispose();
+      lodPool.sourceGeometries.length = 0;
     }
   }
   pools.clear();
@@ -618,7 +630,7 @@ export function getProxyGeometry(
   const lodPool = pool.lod2 ?? pool.lod1 ?? pool.lod0;
   if (!lodPool) return null;
   return {
-    geometries: lodPool.meshes.map((m) => m.geometry),
+    geometries: lodPool.sourceGeometries,
     yOffset: pool.yOffset,
   };
 }

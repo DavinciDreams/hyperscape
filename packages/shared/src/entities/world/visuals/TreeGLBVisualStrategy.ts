@@ -49,6 +49,7 @@ function mergeGeometries(
   // Filter out any parts missing position data (malformed GLBs)
   const valid = parts.filter((g) => g.getAttribute("position"));
   if (valid.length === 0) return null;
+  // Single-part: return the shared geometry directly — caller must clone before mutating.
   if (valid.length === 1) return valid[0];
 
   let totalVerts = 0;
@@ -100,6 +101,38 @@ function mergeGeometries(
   return merged;
 }
 
+// Cache merged+scaled proxy geometry per (sourceGeometries identity, scale) to avoid
+// redundant merge/clone/scale work for trees sharing the same model variant and scale.
+const _proxyGeometryCache = new Map<
+  THREE.BufferGeometry[],
+  Map<number, THREE.BufferGeometry>
+>();
+
+function getOrCreateProxyGeometry(
+  sourceGeometries: THREE.BufferGeometry[],
+  scale: number,
+): THREE.BufferGeometry | null {
+  let scaleMap = _proxyGeometryCache.get(sourceGeometries);
+  if (scaleMap) {
+    const cached = scaleMap.get(scale);
+    if (cached) return cached;
+  }
+
+  const merged = mergeGeometries(sourceGeometries);
+  if (!merged) return null;
+
+  // Clone + scale (or just scale if mergeGeometries created a new geometry for multi-part)
+  const scaled = merged.clone();
+  scaled.scale(scale, scale, scale);
+
+  if (!scaleMap) {
+    scaleMap = new Map();
+    _proxyGeometryCache.set(sourceGeometries, scaleMap);
+  }
+  scaleMap.set(scale, scaled);
+  return scaled;
+}
+
 function createCollisionProxy(
   ctx: ResourceVisualContext,
   scale: number,
@@ -110,15 +143,15 @@ function createCollisionProxy(
   const proxyData = batched
     ? getBatchedProxyGeometry(ctx.id)
     : getInstancedProxyGeometry(ctx.id);
-  const merged = proxyData ? mergeGeometries(proxyData.geometries) : null;
+  const geometry_cached = proxyData
+    ? getOrCreateProxyGeometry(proxyData.geometries, scale)
+    : null;
 
   let geometry: THREE.BufferGeometry;
   let yPos: number;
 
-  if (merged && proxyData) {
-    // Use a clone so the instancer's shared geometry isn't mutated by scale
-    geometry = merged.clone();
-    geometry.scale(scale, scale, scale);
+  if (geometry_cached && proxyData) {
+    geometry = geometry_cached;
     // Align with visual: instancer shifts instances up by yOffset * scale
     yPos = proxyData.yOffset * scale;
   } else {
