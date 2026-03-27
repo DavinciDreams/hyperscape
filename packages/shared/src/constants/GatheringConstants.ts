@@ -248,24 +248,6 @@ export const GATHERING_CONSTANTS = {
     redwood: 199, // ~119.4 seconds
   } as const,
 
-  // === Mining Depletion (OSRS: always depletes) ===
-  /**
-   * Mining rocks ALWAYS deplete after yielding one ore in OSRS.
-   * There is NO random chance - depletion is guaranteed (100%).
-   *
-   * The only exception is Mining gloves which can prevent depletion:
-   * - Mining gloves: 1 extra ore before depletion (silver, coal, gold)
-   * - Superior mining gloves: 1-2 extra ores (iron, silver, coal, gold, mithril)
-   * - Expert mining gloves: 1-3 extra ores (all ores)
-   * (Mining gloves not currently implemented)
-   *
-   * @see https://oldschool.runescape.wiki/w/Copper_rocks
-   * @see https://oldschool.runescape.wiki/w/Iron_rocks
-   * @see https://oldschool.runescape.wiki/w/Mining
-   */
-  MINING_DEPLETE_CHANCE: 1.0, // OSRS: Always depletes after one ore
-  MINING_REDWOOD_DEPLETE_CHANCE: 0.091, // 1/11 for redwood stumps (woodcutting)
-
   // === Timer Regeneration ===
   /**
    * Rate at which tree timers regenerate when no one is gathering.
