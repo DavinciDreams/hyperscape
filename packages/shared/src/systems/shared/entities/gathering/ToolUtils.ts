@@ -167,10 +167,11 @@ export function itemMatchesToolCategory(
   }
 
   // Fallback for tools not in the manifest — substring matching with cross-skill guards.
-  // Warn once per item (capped) so manifest gaps are visible without flooding logs.
+  // Warn once per item. Both the warning count AND Set size are capped to prevent
+  // unbounded memory growth on long-running servers.
   if (
-    !fallbackWarned.has(lowerItemId) &&
-    fallbackWarned.size < MAX_FALLBACK_WARNINGS
+    fallbackWarned.size < MAX_FALLBACK_WARNINGS &&
+    !fallbackWarned.has(lowerItemId)
   ) {
     fallbackWarned.add(lowerItemId);
     console.warn(
@@ -178,18 +179,15 @@ export function itemMatchesToolCategory(
     );
   }
 
-  // Substring fallback with combat-weapon exclusions to prevent false positives.
-  // All known gathering tools should be in tools.json — this is a safety net only.
+  // Substring fallback — intentionally conservative to avoid false positives.
+  // All known gathering tools should be in tools.json; this is a safety net only.
+  // For hatchet, we only match "hatchet" (not bare "axe") to avoid combat weapons
+  // like battleaxe, greataxe, etc. that would otherwise false-positive.
   if (category === "hatchet") {
-    if (
-      lowerItemId.includes("pickaxe") ||
-      lowerItemId.includes("pick") ||
-      lowerItemId.includes("battleaxe") ||
-      lowerItemId.includes("greataxe")
-    ) {
+    if (lowerItemId.includes("pickaxe") || lowerItemId.includes("pick")) {
       return false;
     }
-    return lowerItemId.includes("hatchet") || lowerItemId.includes("axe");
+    return lowerItemId.includes("hatchet");
   }
   if (category === "pickaxe") {
     if (lowerItemId.includes("hatchet")) {

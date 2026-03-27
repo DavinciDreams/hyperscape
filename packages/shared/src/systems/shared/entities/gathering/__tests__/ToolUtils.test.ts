@@ -69,7 +69,7 @@ describe("ToolUtils", () => {
         expect(itemMatchesToolCategory("bronze_pickaxe", "pickaxe")).toBe(true);
         expect(itemMatchesToolCategory("rune_pickaxe", "pickaxe")).toBe(true);
         expect(itemMatchesToolCategory("dragon_pickaxe", "pickaxe")).toBe(true);
-        expect(itemMatchesToolCategory("bronze_axe", "hatchet")).toBe(true);
+        expect(itemMatchesToolCategory("bronze_hatchet", "hatchet")).toBe(true);
         expect(itemMatchesToolCategory("rune_hatchet", "hatchet")).toBe(true);
       });
     });
@@ -110,10 +110,14 @@ describe("ToolUtils", () => {
         expect(itemMatchesToolCategory("rune_hatchet", "hatchet")).toBe(true);
       });
 
-      it("matches items containing 'axe'", () => {
-        expect(itemMatchesToolCategory("bronze_axe", "hatchet")).toBe(true);
-        expect(itemMatchesToolCategory("iron_axe", "hatchet")).toBe(true);
-        expect(itemMatchesToolCategory("dragon_axe", "hatchet")).toBe(true);
+      it("rejects bare 'axe' items without 'hatchet' in fallback", () => {
+        // Fallback only matches "hatchet" substring, not bare "axe",
+        // to avoid false positives with combat weapons (battleaxe, greataxe, etc.).
+        // Real tools like bronze_axe/dragon_axe go through the manifest path.
+        expect(itemMatchesToolCategory("bronze_axe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("iron_axe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("battleaxe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("greataxe", "hatchet")).toBe(false);
       });
 
       it("rejects non-hatchet items", () => {
@@ -121,17 +125,6 @@ describe("ToolUtils", () => {
           false,
         );
         expect(itemMatchesToolCategory("logs", "hatchet")).toBe(false);
-      });
-
-      it("rejects combat weapons containing 'axe'", () => {
-        expect(itemMatchesToolCategory("battleaxe", "hatchet")).toBe(false);
-        expect(itemMatchesToolCategory("iron_battleaxe", "hatchet")).toBe(
-          false,
-        );
-        expect(itemMatchesToolCategory("greataxe", "hatchet")).toBe(false);
-        expect(itemMatchesToolCategory("dragon_greataxe", "hatchet")).toBe(
-          false,
-        );
       });
 
       it("does not match pickaxe for hatchet category", () => {
@@ -228,36 +221,33 @@ describe("ToolUtils", () => {
         delete (globalThis as Record<string, unknown>).EXTERNAL_TOOLS;
         // Reset warn-once cache so each test can verify warnings independently
         _resetFallbackWarnings();
+        vi.spyOn(console, "warn").mockImplementation(() => {});
+      });
+
+      afterEach(() => {
+        vi.restoreAllMocks();
       });
 
       it("matches hatchet via fallback and logs warning", () => {
-        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         expect(itemMatchesToolCategory("bronze_hatchet", "hatchet")).toBe(true);
-        expect(warnSpy).toHaveBeenCalledWith(
+        expect(console.warn).toHaveBeenCalledWith(
           expect.stringContaining("not found in tools manifest"),
         );
-        warnSpy.mockRestore();
       });
 
       it("rejects pickaxe for hatchet via fallback", () => {
-        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         expect(itemMatchesToolCategory("iron_pickaxe", "hatchet")).toBe(false);
-        warnSpy.mockRestore();
       });
 
       it("rejects hatchet for pickaxe via fallback", () => {
-        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         expect(itemMatchesToolCategory("iron_hatchet", "pickaxe")).toBe(false);
-        warnSpy.mockRestore();
       });
 
       it("warns for any category, not just hatchet/pickaxe", () => {
-        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         itemMatchesToolCategory("bronze_hammer", "hammer");
-        expect(warnSpy).toHaveBeenCalledWith(
+        expect(console.warn).toHaveBeenCalledWith(
           expect.stringContaining("not found in tools manifest"),
         );
-        warnSpy.mockRestore();
       });
 
       it("uses generic substring match for unknown categories", () => {
