@@ -250,8 +250,9 @@ describe("ToolUtils", () => {
         );
       });
 
-      it("uses generic substring match for unknown categories", () => {
-        expect(itemMatchesToolCategory("bronze_hammer", "hammer")).toBe(true);
+      it("rejects unknown categories not in manifest", () => {
+        // Unknown categories default to false — forces manifest completeness
+        expect(itemMatchesToolCategory("bronze_hammer", "hammer")).toBe(false);
         expect(itemMatchesToolCategory("iron_chisel", "hammer")).toBe(false);
       });
     });

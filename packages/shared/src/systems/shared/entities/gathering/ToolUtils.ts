@@ -47,7 +47,10 @@ export function _resetFallbackWarnings(): void {
  * Map from tool category to the skill it belongs to.
  * When a new gathering category is added (e.g., "knife" for crafting),
  * add an entry here so the manifest path handles it — otherwise the
- * fallback path uses a direct category===skill comparison.
+ * fallback compares category===skill directly.
+ *
+ * NOTE: Fishing tools bypass this map via the exact-match path.
+ * If you add a new gathering skill, you MUST add its category here.
  */
 const CATEGORY_TO_SKILL: Partial<Record<string, GatheringSkill>> = {
   hatchet: "woodcutting",
@@ -196,5 +199,7 @@ export function itemMatchesToolCategory(
     return lowerItemId.includes("pickaxe") || lowerItemId.includes("pick");
   }
 
-  return lowerItemId.includes(category);
+  // Unknown category with no manifest entry — reject rather than substring match.
+  // All gathering tools must be in tools.json; this forces manifest completeness.
+  return false;
 }
