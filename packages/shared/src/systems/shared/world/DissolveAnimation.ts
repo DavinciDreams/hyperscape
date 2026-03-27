@@ -17,8 +17,10 @@ export interface DissolveAnim {
 
 /**
  * Reused across ticks to avoid per-frame allocation (zero-alloc hot path).
- * Safe because each instancer owns its own dissolveAnims map and calls
- * tickDissolveAnims sequentially within the same frame — never concurrently.
+ * WARNING: Not re-entrant — if applyFn ever triggers another tickDissolveAnims
+ * call, _completed will be corrupted. Safe today because each instancer owns
+ * its own dissolveAnims map and calls tickDissolveAnims sequentially within
+ * the same frame, never from within an applyFn callback.
  */
 const _completed: string[] = [];
 
@@ -55,6 +57,7 @@ export function tickDissolveAnims(
   deltaTime: number,
   applyFn: (entityId: string, value: number) => void,
 ): void {
+  if (anims.size === 0) return;
   _completed.length = 0;
   for (const [entityId, anim] of anims) {
     anim.progress += (anim.direction * deltaTime) / DISSOLVE_DURATION;
