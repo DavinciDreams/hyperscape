@@ -312,7 +312,7 @@ export function createClientWorld() {
 
   world.register("towns", TownSystem);
   world.register("pois", POISystem);
-  world.register("roads", RoadNetworkSystem);
+  // world.register("roads", RoadNetworkSystem);
 
   // ============================================================================
   // BUILDING RENDERING SYSTEM
