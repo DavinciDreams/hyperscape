@@ -16,6 +16,7 @@ import {
   getToolCategory,
   isExactMatchFishingTool,
   getToolDisplayName,
+  _resetFallbackWarnings,
 } from "../ToolUtils";
 
 describe("ToolUtils", () => {
@@ -214,6 +215,8 @@ describe("ToolUtils", () => {
       beforeEach(() => {
         // Ensure no manifest is loaded so fallback substring matching is exercised
         delete (globalThis as Record<string, unknown>).EXTERNAL_TOOLS;
+        // Reset warn-once cache so each test can verify warnings independently
+        _resetFallbackWarnings();
       });
 
       it("matches hatchet via fallback and logs warning", () => {

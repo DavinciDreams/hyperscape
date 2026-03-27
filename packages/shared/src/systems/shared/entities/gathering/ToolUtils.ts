@@ -25,11 +25,16 @@ export const EXACT_FISHING_TOOLS = [
 
 export type FishingToolId = (typeof EXACT_FISHING_TOOLS)[number];
 
-/** Known gathering tool categories */
-type ToolCategory = "hatchet" | "pickaxe";
-
 /** Skill types matching the manifest's GatheringToolData.skill union */
 type GatheringSkill = "woodcutting" | "mining" | "fishing";
+
+/** Track items that have already triggered the fallback warning (warn once per item) */
+const fallbackWarned = new Set<string>();
+
+/** Reset the fallback warning cache. Test-only. */
+export function _resetFallbackWarnings(): void {
+  fallbackWarned.clear();
+}
 
 /**
  * Map from tool category to the skill it belongs to.
@@ -155,8 +160,12 @@ export function itemMatchesToolCategory(
   }
 
   // Fallback for tools not in the manifest — substring matching with cross-skill guards.
-  // Log a warning so we know to backfill the manifest for any tool hitting this path.
-  if (category === "hatchet" || category === "pickaxe") {
+  // Warn once per item so manifest gaps are visible without flooding production logs.
+  if (
+    (category === "hatchet" || category === "pickaxe") &&
+    !fallbackWarned.has(lowerItemId)
+  ) {
+    fallbackWarned.add(lowerItemId);
     console.warn(
       `[ToolUtils] Item "${itemId}" not found in tools manifest — using fallback matching for category "${category}"`,
     );
