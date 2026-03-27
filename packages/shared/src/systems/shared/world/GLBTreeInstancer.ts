@@ -604,6 +604,9 @@ export function getModelDimensions(
  * Returns the lowest-available LOD geometries for use as a collision proxy,
  * plus the yOffset needed to align the geometry with the visual instance.
  * Prefers LOD2 → LOD1 → LOD0.  Returns null if the entity isn't registered.
+ *
+ * **Important**: Returned geometries are shared by the instancer pool.
+ * Callers MUST clone before mutating (e.g. scaling).
  */
 export function getProxyGeometry(
   entityId: string,

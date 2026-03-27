@@ -108,7 +108,8 @@ function createCollisionProxy(
     // Use a clone so the instancer's shared geometry isn't mutated by scale
     geometry = merged.clone();
     geometry.scale(scale, scale, scale);
-    // Align with visual: instancer shifts instances up by yOffset * scale
+    // Align with visual: instancer shifts instances up by yOffset * scale.
+    // proxyData is guaranteed non-null here — merged is only truthy when proxyData was non-null.
     yPos = proxyData!.yOffset * scale;
   } else {
     // Fallback: tight cylinder around trunk (only if LOD geometry unavailable)
