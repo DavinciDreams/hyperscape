@@ -29,6 +29,11 @@ import {
 } from "./GPUMaterials";
 import type { Wind } from "./Wind";
 import { getLODDistances, inferLOD1Path, inferLOD2Path } from "./LODConfig";
+import {
+  type DissolveAnim,
+  startDissolve as startDissolveAnim,
+  tickDissolveAnims,
+} from "./DissolveAnimation";
 
 const MAX_INSTANCES = 512;
 
@@ -407,13 +412,20 @@ function composeInstanceMatrix(
   return _matrix.compose(_position, _quaternion, _scale);
 }
 
-function addToPool(pool: LODPool, entityId: string, mat: THREE.Matrix4): void {
+function addToPool(
+  pool: LODPool,
+  entityId: string,
+  mat: THREE.Matrix4,
+  dissolve = 0,
+): void {
   const idx = pool.activeCount;
   for (const im of pool.meshes) {
     im.setMatrixAt(idx, mat);
     im.count = idx + 1;
   }
   pool.slots.set(entityId, idx);
+  pool.dissolveData[idx] = dissolve;
+  if (dissolve > 0) pool.dissolveDirty = true;
   pool.activeCount++;
   pool.dirty = true;
 }
@@ -659,12 +671,6 @@ export function clearHighlight(): void {
 
 // ---- Dissolve (tree depletion/respawn) ----
 
-import {
-  type DissolveAnim,
-  startDissolve as startDissolveAnim,
-  tickDissolveAnims,
-} from "./DissolveAnimation";
-
 const dissolveAnims = new Map<string, DissolveAnim>();
 
 function applyDissolveValue(entityId: string, value: number): void {
@@ -771,21 +777,13 @@ export function updateGLBTreeInstancer(deltaTime: number): void {
           slot.scale,
           slot.yOffset,
         );
-        addToPool(newPool, slot.entityId, mat);
-        const newIdx = newPool.slots.get(slot.entityId);
-        if (newIdx !== undefined) {
-          if (wasHighlighted > 0) {
+        addToPool(newPool, slot.entityId, mat, wasDissolve);
+        if (wasHighlighted > 0) {
+          const newIdx = newPool.slots.get(slot.entityId);
+          if (newIdx !== undefined) {
             newPool.highlightData[newIdx] = wasHighlighted;
             for (const im of newPool.meshes) {
               const attr = im.geometry.getAttribute("instanceHighlight");
-              if (attr)
-                (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
-            }
-          }
-          if (wasDissolve > 0) {
-            newPool.dissolveData[newIdx] = wasDissolve;
-            for (const im of newPool.meshes) {
-              const attr = im.geometry.getAttribute("instanceDissolve");
               if (attr)
                 (attr as THREE.InstancedBufferAttribute).needsUpdate = true;
             }

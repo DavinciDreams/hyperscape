@@ -26,6 +26,11 @@ import {
 } from "./GPUMaterials";
 import type { Wind } from "./Wind";
 import { getLODDistances, inferLOD1Path, inferLOD2Path } from "./LODConfig";
+import {
+  type DissolveAnim,
+  startDissolve as startDissolveAnim,
+  tickDissolveAnims,
+} from "./DissolveAnimation";
 
 const MAX_INSTANCES = 512;
 
@@ -574,6 +579,7 @@ function addToPool(
   entityId: string,
   mat: THREE.Matrix4,
   variantIndex: number,
+  dissolve = 0,
 ): void {
   const ids: number[] = [];
   for (let i = 0; i < pool.batches.length; i++) {
@@ -588,7 +594,13 @@ function addToPool(
     }
     const instId = pool.batches[i].addInstance(geoId);
     pool.batches[i].setMatrixAt(instId, mat);
-    pool.batches[i].setColorAt(instId, _defaultColor);
+    if (dissolve > 0) {
+      // Write dissolve into blue channel immediately to avoid a 1-frame flash
+      _tmpColor.setRGB(1, 1, 1.0 - dissolve);
+      pool.batches[i].setColorAt(instId, _tmpColor);
+    } else {
+      pool.batches[i].setColorAt(instId, _defaultColor);
+    }
     ids.push(instId);
   }
   pool.instanceIds.set(entityId, ids);
@@ -809,12 +821,6 @@ export function clearHighlight(): void {
 
 // ---- Dissolve (tree depletion/respawn) ----
 
-import {
-  type DissolveAnim,
-  startDissolve as startDissolveAnim,
-  tickDissolveAnims,
-} from "./DissolveAnimation";
-
 const DISSOLVE_MAX = GPU_VEG_CONFIG.DISSOLVE_MAX;
 
 const dissolveAnims = new Map<string, DissolveAnim>();
@@ -934,11 +940,14 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
           slot.scale,
           slot.yOffset,
         );
-        addToPool(newPool, slot.entityId, mat, slot.variantIndex);
+        addToPool(
+          newPool,
+          slot.entityId,
+          mat,
+          slot.variantIndex,
+          wasDissolveVal,
+        );
         if (wasHl) applyHighlightColor(newPool, slot.entityId, true);
-        if (wasDissolveVal > 0.001) {
-          applyDissolveColor(newPool, slot.entityId, wasDissolveVal);
-        }
       }
     }
   }
