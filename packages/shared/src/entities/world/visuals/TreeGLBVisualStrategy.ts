@@ -46,14 +46,17 @@ import type {
 function mergeGeometries(
   parts: THREE.BufferGeometry[],
 ): THREE.BufferGeometry | null {
-  if (parts.length === 0) return null;
-  if (parts.length === 1) return parts[0];
+  // Filter out any parts missing position data (malformed GLBs)
+  const valid = parts.filter((g) => g.getAttribute("position"));
+  if (valid.length === 0) return null;
+  if (valid.length === 1) return valid[0];
 
   let totalVerts = 0;
   let totalIndices = 0;
-  for (const g of parts) {
-    totalVerts += g.getAttribute("position").count;
-    totalIndices += g.index ? g.index.count : g.getAttribute("position").count;
+  for (const g of valid) {
+    const pos = g.getAttribute("position");
+    totalVerts += pos.count;
+    totalIndices += g.index ? g.index.count : pos.count;
   }
 
   const positions = new Float32Array(totalVerts * 3);
@@ -61,12 +64,20 @@ function mergeGeometries(
   let vertOffset = 0;
   let idxOffset = 0;
 
-  for (const g of parts) {
-    const pos = g.getAttribute("position");
-    for (let i = 0; i < pos.count; i++) {
-      positions[(vertOffset + i) * 3] = pos.getX(i);
-      positions[(vertOffset + i) * 3 + 1] = pos.getY(i);
-      positions[(vertOffset + i) * 3 + 2] = pos.getZ(i);
+  for (const g of valid) {
+    const pos = g.getAttribute("position") as THREE.BufferAttribute;
+    // Bulk copy when the backing array is a contiguous Float32Array (common for loaded GLBs)
+    if (pos.array instanceof Float32Array && pos.itemSize === 3) {
+      positions.set(
+        new Float32Array(pos.array.buffer, pos.array.byteOffset, pos.count * 3),
+        vertOffset * 3,
+      );
+    } else {
+      for (let i = 0; i < pos.count; i++) {
+        positions[(vertOffset + i) * 3] = pos.getX(i);
+        positions[(vertOffset + i) * 3 + 1] = pos.getY(i);
+        positions[(vertOffset + i) * 3 + 2] = pos.getZ(i);
+      }
     }
     if (g.index) {
       for (let i = 0; i < g.index.count; i++) {
@@ -104,13 +115,12 @@ function createCollisionProxy(
   let geometry: THREE.BufferGeometry;
   let yPos: number;
 
-  if (merged) {
+  if (merged && proxyData) {
     // Use a clone so the instancer's shared geometry isn't mutated by scale
     geometry = merged.clone();
     geometry.scale(scale, scale, scale);
-    // Align with visual: instancer shifts instances up by yOffset * scale.
-    // proxyData is guaranteed non-null here — merged is only truthy when proxyData was non-null.
-    yPos = proxyData!.yOffset * scale;
+    // Align with visual: instancer shifts instances up by yOffset * scale
+    yPos = proxyData.yOffset * scale;
   } else {
     // Fallback: tight cylinder around trunk (only if LOD geometry unavailable)
     const dims = batched
