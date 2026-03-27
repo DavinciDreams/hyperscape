@@ -42,6 +42,8 @@ const _scale = new THREE.Vector3();
 // Blue channel of batch colors encodes dissolve state (blue = 1.0 - dissolveVal).
 // Do NOT change the blue component of these defaults without updating applyDissolveColor.
 const _defaultColor = new THREE.Color(1, 1, 1);
+/** Highlight multiplier for R/G channels (>1.0 brightens; shader detects via step(1.01)) */
+const HL_COLOR_INTENSITY = 1.15;
 
 interface TreeSlot {
   entityId: string;
@@ -555,9 +557,6 @@ function isHighlighted(pool: BatchedLODPool, entityId: string): boolean {
   return _tmpColor.r > 1.01;
 }
 
-/** Highlight multiplier for R/G channels (>1.0 brightens; shader detects via step(1.01)) */
-const HL_COLOR_INTENSITY = 1.15;
-
 function applyHighlightColor(
   pool: BatchedLODPool,
   entityId: string,
@@ -872,7 +871,8 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
     }
   }
 
-  // Tick dissolve animations
+  // Tick dissolve animations — runs AFTER LOD transitions above so that
+  // applyDissolveValue always finds the entity in its current (post-swap) pool.
   tickDissolveAnims(dissolveAnims, deltaTime, applyDissolveValue);
 
   // Update dissolve uniforms

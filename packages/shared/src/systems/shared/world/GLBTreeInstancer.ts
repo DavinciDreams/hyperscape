@@ -728,7 +728,8 @@ export function updateGLBTreeInstancer(deltaTime: number): void {
     }
   }
 
-  // Tick dissolve animations
+  // Tick dissolve animations — runs AFTER LOD transitions above so that
+  // applyDissolveValue always finds the entity in its current (post-swap) pool.
   tickDissolveAnims(dissolveAnims, deltaTime, applyDissolveValue);
 
   // Flush dirty pools + update dissolve uniforms

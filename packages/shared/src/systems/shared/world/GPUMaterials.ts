@@ -128,6 +128,10 @@ export const GPU_VEG_CONFIG = {
   NEAR_CAMERA_FADE_END: 0.05,
 
   // ========== TREE DEPLETION DISSOLVE ==========
+  // BatchedMesh encodes dissolve in the **blue channel** of per-instance batch
+  // colors (blue = 1.0 - dissolveVal). R/G channels carry highlight intensity.
+  // See GLBTreeBatchedInstancer.applyDissolveColor / applyHighlightColor.
+  // InstancedMesh uses a dedicated per-instance `instanceDissolve` float attribute.
 
   /** Duration of the respawn dissolve-in animation (seconds). Depletion is instant. */
   DISSOLVE_DURATION: 0.3,
@@ -135,7 +139,10 @@ export const GPU_VEG_CONFIG = {
   /** Maximum dissolve progress (1.0 = fully dissolved) */
   DISSOLVE_MAX: 1.0,
 
-  /** Alpha reduction factor when fully dissolved (0.7 = 30% opacity) */
+  /**
+   * Fraction of fragments discarded when fully dissolved via screen-door dithering.
+   * 0.7 = ~70% of the Bayer 4×4 grid cells are discarded, giving a stippled look.
+   */
   DISSOLVE_ALPHA_SCALE: 0.7,
 } as const;
 
@@ -1176,11 +1183,11 @@ export function createTreeDissolveMaterial(
     // ---- Sky-color fog ----
     const fogged = mix(finalRgb, treeFogTex.rgb, treeFogFactor);
 
-    // ---- Dissolve transparency (depleted trees) ----
-    // For BatchedMesh: dissolve is encoded in the blue channel of per-instance
-    // batch colors (blue = 1.0 - dissolveVal). R/G channels carry highlight
-    // state. See GLBTreeBatchedInstancer.applyDissolveColor / applyHighlightColor.
-    // For InstancedMesh: dissolve is a dedicated per-instance float attribute.
+    // ---- Dithered dissolve (depleted trees — screen-door pattern) ----
+    // Uses Bayer 4×4 dithering to discard fragments proportional to dissolveVal,
+    // keeping all tree meshes in the opaque render pass for full early-Z benefits.
+    // At the 0.3s animation speed the stipple pattern is barely visible, and many
+    // AAA titles use this exact technique for vegetation fade (e.g. UE stippled LOD).
     const DISSOLVE_ALPHA_SCALE = GPU_VEG_CONFIG.DISSOLVE_ALPHA_SCALE;
     const dissolveVal = options.batched
       ? clamp(
@@ -1189,26 +1196,38 @@ export function createTreeDissolveMaterial(
           float(1.0),
         )
       : attribute("instanceDissolve", "float");
-    const dissolveAlpha = sub(
-      float(1.0),
-      mul(dissolveVal, float(DISSOLVE_ALPHA_SCALE)),
-    );
+    const dissolveAmount = mul(dissolveVal, float(DISSOLVE_ALPHA_SCALE));
 
-    return vec4(fogged, mul(pbrOut.a, dissolveAlpha));
+    // Bayer 4×4 dither (same pattern used by vegetation far-fade elsewhere)
+    const dix = mod(floor(viewportCoordinate.x), float(4.0));
+    const diy = mod(floor(viewportCoordinate.y), float(4.0));
+    const db0x = mod(dix, float(2.0));
+    const db1x = floor(mul(dix, float(0.5)));
+    const db0y = mod(diy, float(2.0));
+    const db1y = floor(mul(diy, float(0.5)));
+    const dxr0 = abs(sub(db0x, db0y));
+    const dxr1 = abs(sub(db1x, db1y));
+    const dbayer = add(
+      add(
+        add(mul(dxr0, float(8.0)), mul(db0y, float(4.0))),
+        mul(dxr1, float(2.0)),
+      ),
+      db1y,
+    );
+    const dither = mul(dbayer, float(0.0625));
+
+    // When dissolveAmount exceeds the dither threshold, force alpha to 0
+    // so alphaTest discards the fragment. hasDissolve gate prevents dither
+    // noise on fully-visible trees (dissolveVal ≈ 0).
+    const hasDissolve = step(float(0.001), dissolveAmount);
+    const shouldDiscard = mul(step(dither, dissolveAmount), hasDissolve);
+    const finalAlpha = mul(pbrOut.a, sub(float(1.0), shouldDiscard));
+
+    return vec4(fogged, finalAlpha);
   })();
 
-  // transparent = true is required for real alpha blending on depleted trees.
-  // This puts all tree meshes into the transparent render pass, which prevents
-  // early-Z rejection for opaque trees. Dynamic toggling per-mesh was considered
-  // but any pool with at least one depleted tree (common during gameplay) would
-  // remain transparent anyway, so the benefit is marginal for added complexity.
-  // A dithered/discard-based dissolve could avoid the transparent pass entirely
-  // but would look noticeably worse at the 0.3s animation speed.
-  // depthWrite stays true so non-depleted instances (alpha=1.0) still write depth
-  // correctly; overlapping depleted trees may show minor ordering artifacts since
-  // Three.js sorts per-object not per-instance, but depleted trees are sparse.
-  material.transparent = true;
-  material.depthWrite = true;
+  // Dithered dissolve uses alphaTest discard — no transparent pass needed.
+  // Trees stay in the opaque render pass with full early-Z rejection benefits.
   material.needsUpdate = true;
 
   const treeMat = baseDm as TreeDissolveMaterial;

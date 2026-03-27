@@ -15,6 +15,9 @@ export interface DissolveAnim {
   progress: number;
 }
 
+/** Reused across ticks to avoid per-frame allocation (zero-alloc hot path) */
+const _completed: string[] = [];
+
 /**
  * Start or instantly apply a dissolve.
  *
@@ -48,7 +51,7 @@ export function tickDissolveAnims(
   deltaTime: number,
   applyFn: (entityId: string, value: number) => void,
 ): void {
-  const completed: string[] = [];
+  _completed.length = 0;
   for (const [entityId, anim] of anims) {
     anim.progress += (anim.direction * deltaTime) / DISSOLVE_DURATION;
     anim.progress = Math.max(0, Math.min(DISSOLVE_MAX, anim.progress));
@@ -57,8 +60,8 @@ export function tickDissolveAnims(
       (anim.direction > 0 && anim.progress >= DISSOLVE_MAX) ||
       (anim.direction < 0 && anim.progress <= 0)
     ) {
-      completed.push(entityId);
+      _completed.push(entityId);
     }
   }
-  for (const id of completed) anims.delete(id);
+  for (const id of _completed) anims.delete(id);
 }
