@@ -25,11 +25,17 @@ export const EXACT_FISHING_TOOLS = [
 
 export type FishingToolId = (typeof EXACT_FISHING_TOOLS)[number];
 
+/** Known gathering tool categories */
+type ToolCategory = "hatchet" | "pickaxe";
+
+/** Skill types matching the manifest's GatheringToolData.skill union */
+type GatheringSkill = "woodcutting" | "mining" | "fishing";
+
 /**
  * Map from tool category to the skill it belongs to.
  * Used to look up tools in the manifest by category.
  */
-const CATEGORY_TO_SKILL: Record<string, string> = {
+const CATEGORY_TO_SKILL: Record<ToolCategory, GatheringSkill> = {
   hatchet: "woodcutting",
   pickaxe: "mining",
 };
@@ -146,9 +152,14 @@ export function itemMatchesToolCategory(
     }
   }
 
-  // Fallback for tools not in the manifest: check if item ID contains the category
-  // (e.g., future tools added to the game before the manifest is updated)
-  // Exclude cross-matches: if category is "hatchet", reject items containing "pickaxe"
+  // Fallback for tools not in the manifest — substring matching with cross-skill guards.
+  // Log a warning so we know to backfill the manifest for any tool hitting this path.
+  if (!toolData && (category === "hatchet" || category === "pickaxe")) {
+    console.warn(
+      `[ToolUtils] Item "${itemId}" not found in tools manifest — using fallback matching for category "${category}"`,
+    );
+  }
+
   if (category === "hatchet") {
     if (lowerItemId.includes("pickaxe") || lowerItemId.includes("pick")) {
       return false;

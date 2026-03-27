@@ -9,7 +9,8 @@
  * @see https://oldschool.runescape.wiki/w/Noted_items
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import type { GatheringToolData } from "../../../../../data/DataManager";
 import {
   itemMatchesToolCategory,
   getToolCategory,
@@ -144,6 +145,59 @@ describe("ToolUtils", () => {
         expect(itemMatchesToolCategory("dragon_hatchet", "pickaxe")).toBe(
           false,
         );
+      });
+    });
+
+    describe("manifest-based validation", () => {
+      // Populate globalThis.EXTERNAL_TOOLS so the manifest path is exercised
+      const mockTools = new Map<string, GatheringToolData>();
+
+      function addMockTool(
+        itemId: string,
+        skill: "woodcutting" | "mining" | "fishing",
+      ) {
+        mockTools.set(itemId, {
+          itemId,
+          skill,
+          tier: "test",
+          levelRequired: 1,
+          priority: 1,
+        });
+      }
+
+      afterEach(() => {
+        mockTools.clear();
+        delete (globalThis as Record<string, unknown>).EXTERNAL_TOOLS;
+      });
+
+      it("accepts woodcutting tool for hatchet category via manifest", () => {
+        addMockTool("bronze_hatchet", "woodcutting");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("bronze_hatchet", "hatchet")).toBe(true);
+      });
+
+      it("rejects mining tool for hatchet category via manifest", () => {
+        addMockTool("bronze_pickaxe", "mining");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("bronze_pickaxe", "hatchet")).toBe(
+          false,
+        );
+      });
+
+      it("rejects woodcutting tool for pickaxe category via manifest", () => {
+        addMockTool("iron_hatchet", "woodcutting");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("iron_hatchet", "pickaxe")).toBe(false);
+      });
+
+      it("accepts mining tool for pickaxe category via manifest", () => {
+        addMockTool("rune_pickaxe", "mining");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("rune_pickaxe", "pickaxe")).toBe(true);
       });
     });
 
