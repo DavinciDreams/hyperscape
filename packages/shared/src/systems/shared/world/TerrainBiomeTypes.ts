@@ -129,6 +129,10 @@ export interface BiomeGrassConfig {
   patchiness: number;
   /** World-space noise frequency for patch mask (higher = smaller patches) */
   patchScale: number;
+  /** Optional grass tint color [r, g, b] in 0-1 range. Blended over the terrain color. */
+  tintColor?: [number, number, number];
+  /** How strongly tintColor is applied (0 = terrain color, 1 = full tint). Default 0. */
+  tintStrength?: number;
 }
 
 const FOREST_GRASS_CONFIG: BiomeGrassConfig = {
@@ -141,21 +145,25 @@ const FOREST_GRASS_CONFIG: BiomeGrassConfig = {
 };
 
 const CANYON_GRASS_CONFIG: BiomeGrassConfig = {
-  density: 0.15,
+  density: 1.0,
   maxSlope: 0.15,
   minGrassWeight: 0.8,
-  heightScale: 0.7,
-  patchiness: 0.8,
+  heightScale: 1.7,
+  patchiness: 0.95,
   patchScale: 0.015,
+  tintColor: [0.35, 0.4, 0.15],
+  tintStrength: 0.4,
 };
 
 const TUNDRA_GRASS_CONFIG: BiomeGrassConfig = {
   density: 0.5,
   maxSlope: 0.3,
   minGrassWeight: 0.8,
-  heightScale: 0.6,
+  heightScale: 1.0,
   patchiness: 0.6,
   patchScale: 0.018,
+  tintColor: [1.0, 1.0, 1.0],
+  tintStrength: 0.4,
 };
 
 const BIOME_GRASS_CONFIGS: Record<BiomeType, BiomeGrassConfig> = {

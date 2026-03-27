@@ -51,6 +51,10 @@ export interface BiomeGrassConfigWorker {
   heightScale: number;
   patchiness: number;
   patchScale: number;
+  tintR: number;
+  tintG: number;
+  tintB: number;
+  tintStrength: number;
 }
 
 export interface GrassWorkerInput {
@@ -111,6 +115,7 @@ export interface GrassWorkerOutput {
   offsets: Float32Array;
   rotScaleHash: Float32Array;
   groundColors: Float32Array;
+  grassTints: Float32Array;
   groundNormals: Float32Array;
   count: number;
 }
@@ -452,6 +457,7 @@ function generateGrassInstances(input) {
   var offsets = new Float32Array(maxCount * 3);
   var rotScaleHash = new Float32Array(maxCount * 3);
   var groundColors = new Float32Array(maxCount * 3);
+  var grassTints = new Float32Array(maxCount * 4);
   var groundNormals = new Float32Array(maxCount * 3);
   var count = 0;
 
@@ -534,6 +540,18 @@ function generateGrassInstances(input) {
     groundColors[count * 3 + 1] = color.g;
     groundColors[count * 3 + 2] = color.b;
 
+    var tS = tCfg.tintStrength * tundraW + fCfg.tintStrength * forestW + cCfg.tintStrength * canyonW;
+    if (tS > 0) {
+      var tR = tCfg.tintR * tCfg.tintStrength * tundraW + fCfg.tintR * fCfg.tintStrength * forestW + cCfg.tintR * cCfg.tintStrength * canyonW;
+      var tG = tCfg.tintG * tCfg.tintStrength * tundraW + fCfg.tintG * fCfg.tintStrength * forestW + cCfg.tintG * cCfg.tintStrength * canyonW;
+      var tB = tCfg.tintB * tCfg.tintStrength * tundraW + fCfg.tintB * fCfg.tintStrength * forestW + cCfg.tintB * cCfg.tintStrength * canyonW;
+      var inv = 1 / tS;
+      grassTints[count * 4] = tR * inv;
+      grassTints[count * 4 + 1] = tG * inv;
+      grassTints[count * 4 + 2] = tB * inv;
+      grassTints[count * 4 + 3] = tS;
+    }
+
     groundNormals[count * 3] = rnx * invLen;
     groundNormals[count * 3 + 1] = rny * invLen;
     groundNormals[count * 3 + 2] = rnz * invLen;
@@ -548,6 +566,7 @@ function generateGrassInstances(input) {
       offsets: new Float32Array(0),
       rotScaleHash: new Float32Array(0),
       groundColors: new Float32Array(0),
+      grassTints: new Float32Array(0),
       groundNormals: new Float32Array(0),
       count: 0
     };
@@ -559,6 +578,7 @@ function generateGrassInstances(input) {
     offsets: offsets.subarray(0, count * 3),
     rotScaleHash: rotScaleHash.subarray(0, count * 3),
     groundColors: groundColors.subarray(0, count * 3),
+    grassTints: grassTints.subarray(0, count * 4),
     groundNormals: groundNormals.subarray(0, count * 3),
     count: count
   };
@@ -574,6 +594,7 @@ self.onmessage = function(e) {
       if (result.offsets.buffer.byteLength > 0) transfers.push(result.offsets.buffer);
       if (result.rotScaleHash.buffer.byteLength > 0) transfers.push(result.rotScaleHash.buffer);
       if (result.groundColors.buffer.byteLength > 0) transfers.push(result.groundColors.buffer);
+      if (result.grassTints.buffer.byteLength > 0) transfers.push(result.grassTints.buffer);
       if (result.groundNormals.buffer.byteLength > 0) transfers.push(result.groundNormals.buffer);
       self.postMessage({ result: result }, transfers);
     } catch (err) {

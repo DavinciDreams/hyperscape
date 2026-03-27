@@ -113,6 +113,42 @@ export const GRASS_CONFIG = {
 };
 
 // ---------------------------------------------------------------------------
+// Interleave groundColor (vec3) + grassTint (vec4) into a single vertex buffer
+// to stay within WebGPU's 8-buffer limit.
+// ---------------------------------------------------------------------------
+
+function setColorTintInterleaved(
+  geo: THREE.BufferGeometry,
+  groundColors: Float32Array,
+  grassTints: Float32Array,
+  count: number,
+): void {
+  const stride = 7; // 3 (color) + 4 (tint)
+  const buf = new Float32Array(count * stride);
+  for (let i = 0; i < count; i++) {
+    const s = i * stride;
+    const c = i * 3;
+    const t = i * 4;
+    buf[s] = groundColors[c];
+    buf[s + 1] = groundColors[c + 1];
+    buf[s + 2] = groundColors[c + 2];
+    buf[s + 3] = grassTints[t];
+    buf[s + 4] = grassTints[t + 1];
+    buf[s + 5] = grassTints[t + 2];
+    buf[s + 6] = grassTints[t + 3];
+  }
+  const ib = new THREE.InstancedInterleavedBuffer(buf, stride);
+  geo.setAttribute(
+    "instanceGroundColor",
+    new THREE.InterleavedBufferAttribute(ib, 3, 0),
+  );
+  geo.setAttribute(
+    "instanceGrassTint",
+    new THREE.InterleavedBufferAttribute(ib, 4, 3),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Seeded PRNG
 // ---------------------------------------------------------------------------
 
@@ -316,6 +352,10 @@ export class GrassVisualManager implements QuadTreeListener {
     grassWeight: number;
     grassPlacement: number;
     grassHeightScale: number;
+    tintR: number;
+    tintG: number;
+    tintB: number;
+    tintStrength: number;
     nx: number;
     ny: number;
     nz: number;
@@ -714,9 +754,11 @@ export class GrassVisualManager implements QuadTreeListener {
       "instanceRotScaleHash",
       new THREE.InstancedBufferAttribute(data.rotScaleHash, 3),
     );
-    geo.setAttribute(
-      "instanceGroundColor",
-      new THREE.InstancedBufferAttribute(data.groundColors, 3),
+    setColorTintInterleaved(
+      geo,
+      data.groundColors,
+      data.grassTints,
+      data.count,
     );
     geo.setAttribute(
       "instanceGroundNormal",
@@ -853,9 +895,11 @@ export class GrassVisualManager implements QuadTreeListener {
       "instanceRotScaleHash",
       new THREE.InstancedBufferAttribute(instanceData.rotScaleHash, 3),
     );
-    geo.setAttribute(
-      "instanceGroundColor",
-      new THREE.InstancedBufferAttribute(instanceData.groundColors, 3),
+    setColorTintInterleaved(
+      geo,
+      instanceData.groundColors,
+      instanceData.grassTints,
+      instanceData.count,
     );
     geo.setAttribute(
       "instanceGroundNormal",
@@ -899,6 +943,7 @@ export class GrassVisualManager implements QuadTreeListener {
     offsets: Float32Array;
     rotScaleHash: Float32Array;
     groundColors: Float32Array;
+    grassTints: Float32Array;
     groundNormals: Float32Array;
     count: number;
   } | null {
@@ -912,6 +957,7 @@ export class GrassVisualManager implements QuadTreeListener {
     const offsets = new Float32Array(maxCount * 3);
     const rotScaleHash = new Float32Array(maxCount * 3);
     const groundColors = new Float32Array(maxCount * 3);
+    const grassTints = new Float32Array(maxCount * 4);
     const groundNormals = new Float32Array(maxCount * 3);
 
     let count = 0;
@@ -938,6 +984,10 @@ export class GrassVisualManager implements QuadTreeListener {
         b,
         grassPlacement: rawGP,
         grassHeightScale,
+        tintR,
+        tintG,
+        tintB,
+        tintStrength,
         nx,
         ny,
         nz,
@@ -964,6 +1014,11 @@ export class GrassVisualManager implements QuadTreeListener {
       groundColors[count * 3 + 1] = g;
       groundColors[count * 3 + 2] = b;
 
+      grassTints[count * 4] = tintR;
+      grassTints[count * 4 + 1] = tintG;
+      grassTints[count * 4 + 2] = tintB;
+      grassTints[count * 4 + 3] = tintStrength;
+
       groundNormals[count * 3] = nx;
       groundNormals[count * 3 + 1] = ny;
       groundNormals[count * 3 + 2] = nz;
@@ -977,6 +1032,7 @@ export class GrassVisualManager implements QuadTreeListener {
       offsets: offsets.slice(0, count * 3),
       rotScaleHash: rotScaleHash.slice(0, count * 3),
       groundColors: groundColors.slice(0, count * 3),
+      grassTints: grassTints.slice(0, count * 4),
       groundNormals: groundNormals.slice(0, count * 3),
       count,
     };
@@ -1116,13 +1172,18 @@ export class GrassVisualManager implements QuadTreeListener {
     // bypassed so both sides of a blade get the same terrain N·L.
     mat.normalNode = cameraViewMatrix.transformDirection(terrainNormal);
 
-    // Anime shade (half-lambert cool tint + fresnel rim) tints the ALBEDO
-    // using the terrain normal so grass root color blends with terrain.
-    // PBR then adds a single Lambert N·L + shadow on top.
     mat.colorNode = Fn(() => {
       const groundCol = attribute("instanceGroundColor", "vec3");
+      const tint = attribute("instanceGrassTint", "vec4");
+      const tintCol = tint.xyz;
+      const tintStr = tint.w;
       const t = uv().y;
-      const tipCol = groundCol.mul(1.4);
+      const tintedCol = mix(groundCol, tintCol, tintStr);
+      const tipCol = mix(
+        groundCol,
+        tintedCol,
+        smoothstep(float(0.0), float(1.0), t),
+      ).mul(1.4);
       const bladeCol = mix(
         groundCol,
         tipCol,

@@ -2047,6 +2047,19 @@ export class TerrainSystem extends System {
     const fCfg = getGrassConfigForBiome(BiomeType.Forest);
     const cCfg = getGrassConfigForBiome(BiomeType.Canyon);
 
+    const resolveTint = (cfg: ReturnType<typeof getGrassConfigForBiome>) => ({
+      density: cfg.density,
+      maxSlope: cfg.maxSlope,
+      minGrassWeight: cfg.minGrassWeight,
+      heightScale: cfg.heightScale,
+      patchiness: cfg.patchiness,
+      patchScale: cfg.patchScale,
+      tintR: cfg.tintColor?.[0] ?? 0,
+      tintG: cfg.tintColor?.[1] ?? 0,
+      tintB: cfg.tintColor?.[2] ?? 0,
+      tintStrength: cfg.tintStrength ?? 0,
+    });
+
     const grassConfigs: Record<
       string,
       {
@@ -2056,11 +2069,15 @@ export class TerrainSystem extends System {
         heightScale: number;
         patchiness: number;
         patchScale: number;
+        tintR: number;
+        tintG: number;
+        tintB: number;
+        tintStrength: number;
       }
     > = {
-      [BiomeType.Tundra]: { ...tCfg },
-      [BiomeType.Forest]: { ...fCfg },
-      [BiomeType.Canyon]: { ...cCfg },
+      [BiomeType.Tundra]: resolveTint(tCfg),
+      [BiomeType.Forest]: resolveTint(fCfg),
+      [BiomeType.Canyon]: resolveTint(cCfg),
     };
 
     const tileSize = this.CONFIG.TILE_SIZE;
@@ -4805,6 +4822,10 @@ export class TerrainSystem extends System {
     grassWeight: number;
     grassPlacement: number;
     grassHeightScale: number;
+    tintR: number;
+    tintG: number;
+    tintB: number;
+    tintStrength: number;
     nx: number;
     ny: number;
     nz: number;
@@ -4884,10 +4905,41 @@ export class TerrainSystem extends System {
     const grassPlacement =
       color.grassWeight * density * slopeOk * weightOk * patchMask;
 
+    // Biome-blended grass tint (returned separately for tip-only application)
+    const tintStrength =
+      (tCfg.tintStrength ?? 0) * tundraW +
+      (fCfg.tintStrength ?? 0) * forestW +
+      (cCfg.tintStrength ?? 0) * canyonW;
+    let tintR = 0,
+      tintG = 0,
+      tintB = 0;
+    if (tintStrength > 0) {
+      const wR =
+        (tCfg.tintColor?.[0] ?? 0) * (tCfg.tintStrength ?? 0) * tundraW +
+        (fCfg.tintColor?.[0] ?? 0) * (fCfg.tintStrength ?? 0) * forestW +
+        (cCfg.tintColor?.[0] ?? 0) * (cCfg.tintStrength ?? 0) * canyonW;
+      const wG =
+        (tCfg.tintColor?.[1] ?? 0) * (tCfg.tintStrength ?? 0) * tundraW +
+        (fCfg.tintColor?.[1] ?? 0) * (fCfg.tintStrength ?? 0) * forestW +
+        (cCfg.tintColor?.[1] ?? 0) * (cCfg.tintStrength ?? 0) * canyonW;
+      const wB =
+        (tCfg.tintColor?.[2] ?? 0) * (tCfg.tintStrength ?? 0) * tundraW +
+        (fCfg.tintColor?.[2] ?? 0) * (fCfg.tintStrength ?? 0) * forestW +
+        (cCfg.tintColor?.[2] ?? 0) * (cCfg.tintStrength ?? 0) * canyonW;
+      const inv = 1 / tintStrength;
+      tintR = wR * inv;
+      tintG = wG * inv;
+      tintB = wB * inv;
+    }
+
     return {
       ...color,
       grassPlacement,
       grassHeightScale,
+      tintR,
+      tintG,
+      tintB,
+      tintStrength,
       nx: rnx * invLen,
       ny: rny * invLen,
       nz: rnz * invLen,
