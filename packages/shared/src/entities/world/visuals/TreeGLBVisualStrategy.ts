@@ -164,11 +164,16 @@ function createCollisionProxy(
   let yPos: number;
 
   if (cachedGeometry && proxyData) {
+    // NOTE: This geometry is shared across all proxies with the same model+scale.
+    // It must not be mutated — the proxy mesh is invisible and used only for
+    // raycasting, so Three.js internals won't modify it in normal operation.
     geometry = cachedGeometry;
     // Align with visual: instancer shifts instances up by yOffset * scale
     yPos = proxyData.yOffset * scale;
   } else {
-    // Fallback: tight cylinder around trunk (only if LOD geometry unavailable)
+    // Fallback: tighter trunk-only cylinder (only if LOD geometry unavailable).
+    // Reduced from 0.4 to 0.25 since the LOD proxy now handles canopy clicks;
+    // this path is only hit during initial load before LODs are ready.
     const dims = batched
       ? getBatchedDimensions(ctx.id)
       : getInstancedDimensions(ctx.id);

@@ -443,6 +443,10 @@ export function initGLBTreeInstancer(s: THREE.Scene, w: World): void {
   world = w;
 }
 
+/**
+ * NOTE: Caller must also call clearProxyGeometryCache() (from TreeGLBVisualStrategy)
+ * after this to dispose cached proxy geometries that reference sourceGeometries.
+ */
 export function destroyGLBTreeInstancer(): void {
   for (const pool of pools.values()) {
     for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
@@ -616,6 +620,10 @@ export function getModelDimensions(
  * Returns the lowest-available LOD geometries for use as a collision proxy,
  * plus the yOffset needed to align the geometry with the visual instance.
  * Prefers LOD2 → LOD1 → LOD0.  Returns null if the entity isn't registered.
+ *
+ * NOTE: This instancer uses a single model per pool (no variants).
+ * If multi-variant support is ever added, this must select by variant index
+ * like GLBTreeBatchedInstancer.getProxyGeometry does.
  *
  * **Important**: Returned geometries are shared by the instancer pool.
  * Callers MUST clone before mutating (e.g. scaling).

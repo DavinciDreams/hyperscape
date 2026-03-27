@@ -631,6 +631,10 @@ export function initGLBTreeBatchedInstancer(s: THREE.Scene, w: World): void {
   world = w;
 }
 
+/**
+ * NOTE: Caller must also call clearProxyGeometryCache() (from TreeGLBVisualStrategy)
+ * after this to dispose cached proxy geometries that reference sourceGeometries.
+ */
 export function destroyGLBTreeBatchedInstancer(): void {
   for (const pool of pools.values()) {
     for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
