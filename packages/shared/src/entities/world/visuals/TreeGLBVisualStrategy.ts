@@ -12,27 +12,26 @@
 
 import THREE from "../../../extras/three/three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
+import { GPU_VEG_CONFIG } from "../../../systems/shared/world/GPUMaterials";
 import {
   addInstance as addInstancedTree,
   removeInstance as removeInstancedTree,
-  setDepleted as setInstancedDepleted,
-  hasDepleted as hasInstancedDepleted,
   setHighlight as setInstancedHighlight,
   getModelDimensions as getInstancedDimensions,
   getProxyGeometry as getInstancedProxyGeometry,
   hasInstance as isInInstancedPool,
   updateGLBTreeInstancer,
+  startDissolve as startInstancedDissolve,
 } from "../../../systems/shared/world/GLBTreeInstancer";
 import {
   addInstance as addBatchedTree,
   removeInstance as removeBatchedTree,
-  setDepleted as setBatchedDepleted,
-  hasDepleted as hasBatchedDepleted,
   setHighlight as setBatchedHighlight,
   getModelDimensions as getBatchedDimensions,
   getProxyGeometry as getBatchedProxyGeometry,
   hasInstance as isInBatchedPool,
   updateGLBTreeBatchedInstancer,
+  startDissolve as startBatchedDissolve,
 } from "../../../systems/shared/world/GLBTreeBatchedInstancer";
 import type {
   ResourceVisualContext,
@@ -231,6 +230,9 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     );
     const rotation = ((rotHash % 1000) / 1000) * Math.PI * 2;
 
+    // Pass initial dissolve through addInstance so the GPU attribute is set
+    // atomically with pool insertion — no 1-frame flash on initial load.
+    const initialDissolve = config.depleted ? GPU_VEG_CONFIG.DISSOLVE_MAX : 0;
     let success = false;
 
     if (config.modelVariants?.length) {
@@ -246,8 +248,7 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
         worldPos,
         rotation,
         baseScale,
-        config.depletedModelPath ?? null,
-        config.depletedModelScale ?? 0.3,
+        initialDissolve,
       );
     } else {
       let modelPath = config.model;
@@ -259,29 +260,40 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
         worldPos,
         rotation,
         baseScale,
-        config.depletedModelPath ?? null,
-        config.depletedModelScale ?? 0.3,
+        null, // lod1ModelPath — auto-inferred by instancer
+        null, // lod2ModelPath — auto-inferred by instancer
+        initialDissolve,
       );
     }
 
     if (success) {
       createCollisionProxy(ctx, baseScale, !!config.modelVariants?.length);
+
+      if (config.depleted) {
+        const proxy = ctx.getMesh();
+        if (proxy) {
+          proxy.userData.depleted = true;
+          proxy.userData.interactable = false;
+        }
+      }
     }
   }
 
   async onDepleted(ctx: ResourceVisualContext): Promise<boolean> {
-    const b = isBatched(ctx.id);
-    if (b) {
-      setBatchedDepleted(ctx.id, true);
+    // Always returns true — dissolve handles depletion for all trees.
+    // Returning false would trigger ResourceEntity.loadDepletedModel() fallback,
+    // which is only needed by non-tree strategies (e.g. InstancedModelVisualStrategy).
+    if (isBatched(ctx.id)) {
+      startBatchedDissolve(ctx.id, 1, true);
     } else {
-      setInstancedDepleted(ctx.id, true);
+      startInstancedDissolve(ctx.id, 1, true);
     }
     const proxy = ctx.getMesh();
     if (proxy) {
       proxy.userData.depleted = true;
       proxy.userData.interactable = false;
     }
-    return b ? hasBatchedDepleted(ctx.id) : hasInstancedDepleted(ctx.id);
+    return true;
   }
 
   setShaderHighlight(ctx: ResourceVisualContext, on: boolean): void {
@@ -293,10 +305,11 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
   }
 
   async onRespawn(ctx: ResourceVisualContext): Promise<void> {
+    // Start reverse dissolve animation (trunk → canopy)
     if (isBatched(ctx.id)) {
-      setBatchedDepleted(ctx.id, false);
+      startBatchedDissolve(ctx.id, -1);
     } else {
-      setInstancedDepleted(ctx.id, false);
+      startInstancedDissolve(ctx.id, -1);
     }
     const proxy = ctx.getMesh();
     if (proxy) {
@@ -305,9 +318,9 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     }
   }
 
-  update(): void {
-    updateGLBTreeInstancer();
-    updateGLBTreeBatchedInstancer();
+  update(_ctx: ResourceVisualContext, deltaTime: number): void {
+    updateGLBTreeInstancer(deltaTime);
+    updateGLBTreeBatchedInstancer(deltaTime);
   }
 
   destroy(ctx: ResourceVisualContext): void {
