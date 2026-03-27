@@ -1,7 +1,12 @@
-import React, { useRef } from "react";
-import { createPortal } from "react-dom";
-import { useTooltipSize } from "@/hooks/useTooltipSize";
+import React from "react";
 import { TOOLTIP_SIZE_ESTIMATES, useThemeStore, CursorTooltip } from "@/ui";
+import {
+  getTooltipBodyStyle,
+  getTooltipDividerStyle,
+  getTooltipMetaStyle,
+  getTooltipStatusStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
 import { getItem } from "@hyperscape/shared";
 import type { Item } from "../../../types";
 
@@ -110,8 +115,7 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
       {/* Item name with rarity color */}
       <div
         style={{
-          color: rarityColor,
-          fontWeight: theme.typography.fontWeight.bold,
+          ...getTooltipTitleStyle(theme, rarityColor),
           fontSize: theme.typography.fontSize.sm,
           marginBottom: "2px",
         }}
@@ -122,8 +126,7 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
       {/* Item type and rarity */}
       <div
         style={{
-          fontSize: "10px",
-          color: theme.colors.text.muted,
+          ...getTooltipMetaStyle(theme),
           marginBottom: hasBonuses ? "8px" : "0",
           textTransform: "capitalize",
         }}
@@ -135,16 +138,15 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
       {hasDetailedBonuses ? (
         <div
           style={{
+            ...getTooltipDividerStyle(theme, rarityColor),
             fontSize: "11px",
-            borderTop: `1px solid ${theme.colors.border.default}40`,
-            paddingTop: "6px",
             marginBottom: "6px",
           }}
         >
           {hasPerStyleDefence && (
             <div
               style={{
-                color: theme.colors.text.secondary,
+                ...getTooltipBodyStyle(theme),
                 marginBottom: "3px",
               }}
             >
@@ -200,7 +202,7 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
             </div>
           )}
           {(hasMagicBonuses || hasRangedBonuses || hasPerStyleAttack) && (
-            <div style={{ color: theme.colors.text.secondary }}>
+            <div style={getTooltipBodyStyle(theme)}>
               <span style={{ color: theme.colors.text.muted }}>Attack: </span>
               {[
                 hasPerStyleAttack &&
@@ -257,9 +259,8 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
       ) : hasBonuses ? (
         <div
           style={{
+            ...getTooltipDividerStyle(theme, rarityColor),
             fontSize: "11px",
-            borderTop: `1px solid ${theme.colors.border.default}40`,
-            paddingTop: "6px",
             marginBottom: "6px",
           }}
         >
@@ -268,7 +269,7 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                color: theme.colors.text.secondary,
+                ...getTooltipBodyStyle(theme),
                 marginBottom: "2px",
               }}
             >
@@ -284,7 +285,7 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  color: theme.colors.text.secondary,
+                  ...getTooltipBodyStyle(theme),
                   marginBottom: "2px",
                 }}
               >
@@ -300,7 +301,7 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  color: theme.colors.text.secondary,
+                  ...getTooltipBodyStyle(theme),
                 }}
               >
                 <span>Strength</span>
@@ -316,8 +317,7 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
       {itemData?.requirements?.level && (
         <div
           style={{
-            fontSize: "10px",
-            color: theme.colors.text.muted,
+            ...getTooltipMetaStyle(theme),
             marginBottom: "4px",
           }}
         >
@@ -327,8 +327,7 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
       {itemData?.requirements?.skills && !itemData?.requirements?.level && (
         <div
           style={{
-            fontSize: "10px",
-            color: theme.colors.text.muted,
+            ...getTooltipMetaStyle(theme),
             marginBottom: "4px",
           }}
         >
@@ -348,15 +347,11 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
       {/* Click hint */}
       <div
         style={{
-          fontSize: "9px",
-          color: theme.colors.text.muted,
-          marginTop: "6px",
-          paddingTop: "6px",
-          borderTop: `1px solid ${theme.colors.border.default}30`,
-          opacity: 0.7,
+          ...getTooltipStatusStyle(theme, "default"),
+          opacity: 0.85,
         }}
       >
-        Click to unequip • Right-click for options
+        Right-click for options
       </div>
     </CursorTooltip>
   );

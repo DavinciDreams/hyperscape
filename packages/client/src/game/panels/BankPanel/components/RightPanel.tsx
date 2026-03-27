@@ -5,7 +5,7 @@
  * RS3-style tab switcher between backpack and worn equipment.
  */
 
-import React, { useCallback } from "react";
+import React, { useState } from "react";
 import { useThemeStore, useMobileLayout } from "@/ui";
 import {
   getInteractiveTileStyle,
@@ -13,12 +13,11 @@ import {
   getPanelInsetStyle,
   getPanelSurfaceStyle,
 } from "@/ui/theme/themes";
-import type { PlayerEquipmentItems } from "@hyperscape/shared";
 import { INV_SLOTS_PER_ROW, INV_SLOT_SIZE } from "../constants";
-import { formatItemName } from "../utils";
-import { ItemIcon } from "@/ui/components/ItemIcon";
 import type { InventorySlotViewItem, RightPanelMode } from "../types";
 import { InventoryPanel } from "../../InventoryPanel";
+import { EquipmentPanel } from "../../EquipmentPanel";
+import type { ClientWorld } from "../../../types";
 
 export interface RightPanelProps {
   mode: RightPanelMode;
@@ -27,9 +26,10 @@ export interface RightPanelProps {
   // Inventory data
   inventory: InventorySlotViewItem[];
   coins: number;
+  world: ClientWorld;
 
   // Equipment data
-  equipment?: PlayerEquipmentItems | null;
+  equipment?: import("@hyperscape/shared").PlayerEquipmentItems | null;
 
   // Inventory actions
   onDeposit: (itemId: string, quantity: number) => void;
@@ -55,6 +55,7 @@ export function RightPanel({
   inventory,
   coins,
   equipment,
+  world,
   onDeposit,
   onDepositAll,
   onOpenCoinModal,
@@ -64,117 +65,29 @@ export function RightPanel({
 }: RightPanelProps) {
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
+  const [hoveredModeButton, setHoveredModeButton] =
+    useState<RightPanelMode | null>(null);
+  const [isDepositCoinsHovered, setIsDepositCoinsHovered] = useState(false);
+  const [isDepositInventoryHovered, setIsDepositInventoryHovered] =
+    useState(false);
+  const [isDepositEquipmentHovered, setIsDepositEquipmentHovered] =
+    useState(false);
 
   // Responsive sizing
   const responsiveSlotSize = shouldUseMobileUI ? 34 : INV_SLOT_SIZE;
-
-  /**
-   * Render a single equipment slot for the paperdoll layout
-   */
-  const renderEquipmentSlot = useCallback(
-    (key: string, label: string, icon: string) => {
-      const item = equipment?.[key as keyof PlayerEquipmentItems] ?? null;
-      const hasItem = !!item;
-
-      return (
-        <button
-          key={key}
-          onClick={() => hasItem && onDepositEquipment(key)}
-          className="w-full h-full rounded transition-all duration-200 cursor-pointer group relative"
-          style={{
-            ...getInteractiveTileStyle(theme, {
-              active: hasItem,
-              radius: theme.borderRadius.md,
-              accentColor: theme.colors.state.success,
-            }),
-            boxShadow: hasItem
-              ? `0 4px 12px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -8px 14px rgba(0, 0, 0, 0.14)`
-              : "inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -8px 12px rgba(0, 0, 0, 0.12)",
-          }}
-          onMouseEnter={(e) => {
-            if (hasItem) {
-              e.currentTarget.style.borderColor = theme.colors.state.success;
-              e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.state.success}1f 18%, rgba(24, 28, 34, 0.98) 100%)`;
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (hasItem) {
-              e.currentTarget.style.borderColor = theme.colors.border.hover;
-              e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.012) 18%, rgba(22, 26, 31, 0.99) 100%)`;
-            }
-          }}
-          title={
-            hasItem
-              ? `${formatItemName(item.id)} - Click to deposit`
-              : `${label} (empty)`
-          }
-        >
-          {/* Slot Label */}
-          <div
-            className="absolute top-0.5 left-1 text-[8px] font-medium uppercase tracking-wider"
-            style={{
-              color: theme.colors.text.secondary,
-              textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
-            }}
-          >
-            {label}
-          </div>
-
-          {/* Slot Content */}
-          <div className="flex flex-col items-center justify-center h-full pt-2">
-            {!hasItem ? (
-              <span
-                className="transition-transform duration-200 group-hover:scale-110"
-                style={{
-                  fontSize: "1.25rem",
-                  filter: "grayscale(100%) opacity(0.3)",
-                }}
-              >
-                {icon}
-              </span>
-            ) : (
-              <>
-                <span
-                  className="transition-transform duration-200 group-hover:scale-110"
-                  style={{
-                    filter: "drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8))",
-                  }}
-                >
-                  <ItemIcon itemId={item.id} size={32} />
-                </span>
-                <div
-                  className="text-center px-0.5 mt-0.5"
-                  style={{
-                    fontSize: "8px",
-                    color: theme.colors.text.secondary,
-                    lineHeight: "1.1",
-                    maxWidth: "100%",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {formatItemName(item.id).slice(0, 10)}
-                </div>
-              </>
-            )}
-          </div>
-        </button>
-      );
-    },
-    [equipment, onDepositEquipment, theme],
+  const inventoryPanelWidth = Math.max(
+    INV_SLOTS_PER_ROW * (responsiveSlotSize + 4) + 24,
+    248,
   );
-
+  const desktopPanelWidth = inventoryPanelWidth;
   return (
     <div
       className="flex flex-col rounded-lg"
       style={{
         ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
         boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255,248,236,0.06), inset 0 -14px 22px rgba(0,0,0,0.1)`,
-        width: shouldUseMobileUI
-          ? "100%"
-          : `${INV_SLOTS_PER_ROW * (responsiveSlotSize + 4) + 24}px`,
-        minWidth: shouldUseMobileUI ? undefined : "180px",
+        width: shouldUseMobileUI ? "100%" : `${desktopPanelWidth}px`,
+        minWidth: shouldUseMobileUI ? undefined : `${desktopPanelWidth}px`,
       }}
     >
       {/* RS3-style Tab Header with view switcher */}
@@ -199,20 +112,37 @@ export function RightPanel({
                         radius: theme.borderRadius.sm,
                       }).background,
                     )
-                  : String(
-                      getPanelInsetStyle(theme, {
-                        radius: theme.borderRadius.sm,
-                      }).background,
-                    ),
+                  : hoveredModeButton === "inventory"
+                    ? String(
+                        getInteractiveTileStyle(theme, {
+                          hovered: true,
+                          radius: theme.borderRadius.sm,
+                        }).background,
+                      )
+                    : String(
+                        getPanelInsetStyle(theme, {
+                          radius: theme.borderRadius.sm,
+                        }).background,
+                      ),
               color:
                 mode === "inventory"
                   ? theme.colors.accent.primary
-                  : theme.colors.text.secondary,
+                  : hoveredModeButton === "inventory"
+                    ? theme.colors.text.primary
+                    : theme.colors.text.secondary,
               border:
                 mode === "inventory"
                   ? `1px solid ${theme.colors.accent.primary}50`
-                  : `1px solid ${theme.colors.border.default}50`,
+                  : hoveredModeButton === "inventory"
+                    ? `1px solid ${theme.colors.border.hover}`
+                    : `1px solid ${theme.colors.border.default}50`,
             }}
+            onMouseEnter={() => setHoveredModeButton("inventory")}
+            onMouseLeave={() =>
+              setHoveredModeButton((prev) =>
+                prev === "inventory" ? null : prev,
+              )
+            }
             title="View Backpack"
           >
             🎒
@@ -229,20 +159,37 @@ export function RightPanel({
                         radius: theme.borderRadius.sm,
                       }).background,
                     )
-                  : String(
-                      getPanelInsetStyle(theme, {
-                        radius: theme.borderRadius.sm,
-                      }).background,
-                    ),
+                  : hoveredModeButton === "equipment"
+                    ? String(
+                        getInteractiveTileStyle(theme, {
+                          hovered: true,
+                          radius: theme.borderRadius.sm,
+                        }).background,
+                      )
+                    : String(
+                        getPanelInsetStyle(theme, {
+                          radius: theme.borderRadius.sm,
+                        }).background,
+                      ),
               color:
                 mode === "equipment"
                   ? theme.colors.accent.primary
-                  : theme.colors.text.secondary,
+                  : hoveredModeButton === "equipment"
+                    ? theme.colors.text.primary
+                    : theme.colors.text.secondary,
               border:
                 mode === "equipment"
                   ? `1px solid ${theme.colors.accent.primary}50`
-                  : `1px solid ${theme.colors.border.default}50`,
+                  : hoveredModeButton === "equipment"
+                    ? `1px solid ${theme.colors.border.hover}`
+                    : `1px solid ${theme.colors.border.default}50`,
             }}
+            onMouseEnter={() => setHoveredModeButton("equipment")}
+            onMouseLeave={() =>
+              setHoveredModeButton((prev) =>
+                prev === "equipment" ? null : prev,
+              )
+            }
             title="View Worn Equipment"
           >
             ⚔️
@@ -256,9 +203,19 @@ export function RightPanel({
         </span>
       </div>
 
-      {/* Content Area - switches between inventory and equipment */}
-      {mode === "inventory" ? (
-        <>
+      {/* Content Area - keep both views mounted so the paperdoll preview stays warm across tab switches */}
+      <div
+        className="relative flex-1"
+        style={{ minHeight: shouldUseMobileUI ? "200px" : "360px" }}
+      >
+        <div
+          className="absolute inset-0 flex flex-col"
+          style={{
+            opacity: mode === "inventory" ? 1 : 0,
+            pointerEvents: mode === "inventory" ? "auto" : "none",
+            visibility: mode === "inventory" ? "visible" : "hidden",
+          }}
+        >
           {/* Modern Inventory Panel in bank mode */}
           <div
             className="flex-1"
@@ -303,19 +260,15 @@ export function RightPanel({
               className="px-2 py-1 rounded text-xs font-bold transition-colors disabled:opacity-30"
               style={{
                 ...getInteractiveTileStyle(theme, {
-                  active: true,
+                  active: !isDepositCoinsHovered,
+                  hovered: isDepositCoinsHovered,
                   accentColor: theme.colors.state.success,
                   radius: theme.borderRadius.sm,
                 }),
                 color: theme.colors.text.primary,
               }}
-              onMouseEnter={(e) => {
-                if (coins > 0)
-                  e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, ${theme.colors.state.success}22 22%, rgba(20, 36, 25, 0.98) 100%)`;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, ${theme.colors.state.success}18 20%, rgba(20, 31, 24, 0.98) 100%)`;
-              }}
+              onMouseEnter={() => setIsDepositCoinsHovered(true)}
+              onMouseLeave={() => setIsDepositCoinsHovered(false)}
             >
               Deposit
             </button>
@@ -328,28 +281,32 @@ export function RightPanel({
               className="w-full py-2 rounded text-sm font-bold transition-colors"
               style={{
                 ...getInteractiveTileStyle(theme, {
-                  active: true,
+                  active: !isDepositInventoryHovered,
+                  hovered: isDepositInventoryHovered,
                   accentColor: theme.colors.accent.primary,
                   radius: theme.borderRadius.md,
                 }),
                 color: theme.colors.accent.primary,
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.accent.primary}18 20%, rgba(25, 29, 35, 0.98) 100%)`;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, ${theme.colors.accent.primary}14 20%, rgba(22, 26, 31, 0.98) 100%)`;
-              }}
+              onMouseEnter={() => setIsDepositInventoryHovered(true)}
+              onMouseLeave={() => setIsDepositInventoryHovered(false)}
             >
               Deposit Inventory
             </button>
           </div>
-        </>
-      ) : (
-        <>
-          {/* Equipment View - Paperdoll layout matching EquipmentPanel */}
+        </div>
+
+        <div
+          className="absolute inset-0 flex flex-col"
+          style={{
+            opacity: mode === "equipment" ? 1 : 0,
+            pointerEvents: mode === "equipment" ? "auto" : "none",
+            visibility: mode === "equipment" ? "visible" : "hidden",
+          }}
+        >
+          {/* Shared EquipmentPanel with bank-specific deposit actions */}
           <div
-            className="p-2 flex-1"
+            className="p-2 flex-1 overflow-hidden"
             style={{
               ...getPanelInsetStyle(theme, {
                 emphasis: "strong",
@@ -360,30 +317,16 @@ export function RightPanel({
               margin: "4px",
             }}
           >
-            {/* Paperdoll Grid: 3 columns x 3 rows (melee-only MVP) */}
-            <div
-              className="grid gap-1 h-full"
-              style={{
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gridTemplateRows: "repeat(3, 1fr)",
-              }}
-            >
-              {/* Row 1: empty, helmet, empty */}
-              <div />
-              {renderEquipmentSlot("helmet", "Head", "⛑️")}
-              <div />
-
-              {/* Row 2: weapon, body, shield */}
-              {renderEquipmentSlot("weapon", "Weapon", "⚔️")}
-              {renderEquipmentSlot("body", "Body", "🎽")}
-              {renderEquipmentSlot("shield", "Shield", "🛡️")}
-
-              {/* Row 3: empty, legs, empty */}
-              <div />
-              {renderEquipmentSlot("legs", "Legs", "👖")}
-              <div />
-              {/* Row 4: Arrows slot hidden for melee-only MVP */}
-            </div>
+            <EquipmentPanel
+              equipment={equipment ?? null}
+              world={world}
+              slotActionLabel="Deposit"
+              onSlotAction={onDepositEquipment}
+              footerButtons={[]}
+              showBonuses={true}
+              layoutVariant="bank"
+              isVisible={mode === "equipment"}
+            />
           </div>
 
           {/* Deposit All Equipment Button */}
@@ -396,24 +339,21 @@ export function RightPanel({
               className="w-full py-2 rounded text-sm font-bold transition-colors disabled:opacity-30"
               style={{
                 ...getInteractiveTileStyle(theme, {
-                  active: true,
+                  active: !isDepositEquipmentHovered,
+                  hovered: isDepositEquipmentHovered,
                   accentColor: theme.colors.accent.primary,
                   radius: theme.borderRadius.md,
                 }),
                 color: theme.colors.accent.primary,
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, ${theme.colors.accent.primary}18 20%, rgba(25, 29, 35, 0.98) 100%)`;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, ${theme.colors.accent.primary}14 20%, rgba(22, 26, 31, 0.98) 100%)`;
-              }}
+              onMouseEnter={() => setIsDepositEquipmentHovered(true)}
+              onMouseLeave={() => setIsDepositEquipmentHovered(false)}
             >
               Deposit Worn Items
             </button>
           </div>
-        </>
-      )}
+        </div>
+      </div>
     </div>
   );
 }

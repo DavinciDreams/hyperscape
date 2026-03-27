@@ -43,12 +43,23 @@ import { EquipmentPaperdollPortrait } from "./equipment/EquipmentPaperdollPortra
 interface EquipmentPanelProps {
   equipment: PlayerEquipmentItems | null;
   world?: ClientWorld;
+  slotActionLabel?: string;
+  onSlotAction?: (slotKey: string) => void;
+  footerButtons?: Array<{
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+  }>;
+  showBonuses?: boolean;
+  layoutVariant?: "default" | "bank";
+  isVisible?: boolean;
 }
 
 type EquipmentSlot = EquipmentSlotData;
 
 interface DroppableEquipmentSlotProps {
   slot: EquipmentSlot;
+  slotActionLabel: string;
   onSlotClick: (slot: EquipmentSlot) => void;
   onHoverStart: (
     slot: EquipmentSlot,
@@ -61,6 +72,7 @@ interface DroppableEquipmentSlotProps {
 
 function DroppableEquipmentSlot({
   slot,
+  slotActionLabel,
   onSlotClick,
   onHoverStart,
   onHoverMove,
@@ -156,10 +168,10 @@ function DroppableEquipmentSlot({
 
         const items = [
           {
-            id: "unequip",
-            label: `Remove ${itemName}`,
+            id: "slotAction",
+            label: `${slotActionLabel} ${itemName}`,
             styledLabel: [
-              { text: "Remove " },
+              { text: `${slotActionLabel} ` },
               { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
             ],
             enabled: true,
@@ -331,9 +343,77 @@ const PAPERDOLL_PLACEMENTS: PaperdollSlotPlacement[] = [
   { area: "shield", key: EquipmentSlotName.SHIELD },
 ];
 
+interface EquipmentLayoutConfig {
+  slotWidth: number;
+  slotHeight: number;
+  centerMin?: number;
+  gap: number;
+  padding: number;
+  portraitMode: "overlay" | "area";
+  portraitPadding?: string;
+  portraitOffsetX?: number;
+  portraitBleedX?: number;
+  templateAreas: string;
+  rowCount: number;
+  portraitArea?: string;
+  emptyAreas?: string[];
+}
+
+function getEquipmentLayoutConfig(
+  isMobile: boolean,
+  variant: "default" | "bank",
+): EquipmentLayoutConfig {
+  if (variant === "bank") {
+    return {
+      slotWidth: isMobile ? 30 : 30,
+      slotHeight: isMobile ? 34 : 38,
+      centerMin: 0,
+      gap: isMobile ? 4 : 4,
+      padding: isMobile ? 4 : 4,
+      portraitMode: "area",
+      portraitPadding: isMobile ? "0" : "0",
+      portraitOffsetX: 0,
+      portraitBleedX: isMobile ? 10 : 18,
+      rowCount: 5,
+      portraitArea: "portrait",
+      emptyAreas: ["empty"],
+      templateAreas: `
+        "head portrait portrait cape"
+        "body portrait portrait amulet"
+        "legs portrait portrait ring"
+        "boots portrait portrait gloves"
+        "weapon ammo shield ."
+      `,
+    };
+  }
+
+  return {
+    slotWidth: isMobile ? 34 : 38,
+    slotHeight: isMobile ? 32 : 36,
+    gap: isMobile ? 5 : 8,
+    padding: isMobile ? 2 : 3,
+    portraitMode: "overlay",
+    portraitBleedX: isMobile ? 12 : 20,
+    rowCount: 5,
+    templateAreas: `
+      "head . . . cape"
+      "body . . . amulet"
+      "legs . . . ring"
+      "boots . . . gloves"
+      "ammo weapon . shield ."
+    `,
+  };
+}
+
 export const EquipmentPanel = React.memo(function EquipmentPanel({
   equipment,
   world,
+  slotActionLabel = "Remove",
+  onSlotAction,
+  footerButtons,
+  showBonuses = true,
+  layoutVariant = "default",
+  isVisible = true,
 }: EquipmentPanelProps) {
   const theme = useThemeStore((s) => s.theme);
   const { shouldUseMobileUI } = useMobileLayout();
@@ -461,6 +541,10 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   // RS3-style: Click immediately unequips
   const handleSlotClick = (slot: EquipmentSlot) => {
     if (!slot.item) return;
+    if (onSlotAction) {
+      onSlotAction(slot.key);
+      return;
+    }
     sendUnequip(slot.key);
   };
 
@@ -503,8 +587,12 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
 
       if (!slot || !slot.item) return;
 
-      if (ce.detail.actionId === "unequip") {
-        sendUnequip(slotKey);
+      if (ce.detail.actionId === "slotAction") {
+        if (onSlotAction) {
+          onSlotAction(slotKey);
+        } else {
+          sendUnequip(slotKey);
+        }
       }
 
       if (ce.detail.actionId === "examine") {
@@ -533,7 +621,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         "contextmenu:select",
         onCtxSelect as EventListener,
       );
-  }, [equipment, world]);
+  }, [onSlotAction, slots, world]);
 
   // Helper to find slot by key
   const getSlot = (key: string) => slots.find((s) => s.key === key) || null;
@@ -567,6 +655,7 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
     >
       <DroppableEquipmentSlot
         slot={getSlot(slotName)!}
+        slotActionLabel={slotActionLabel}
         onSlotClick={handleSlotClick}
         onHoverStart={handleHoverStart}
         onHoverMove={handleHoverMove}
@@ -577,27 +666,21 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
   );
 
   const renderEquipmentGrid = (isMobile: boolean) => {
-    const slotWidth = isMobile ? 34 : 38;
-    const slotHeight = isMobile ? 32 : 36;
-    const gap = isMobile ? 5 : 8;
-    const padding = isMobile ? 2 : 3;
+    const layout = getEquipmentLayoutConfig(isMobile, layoutVariant);
 
     return (
       <div
         data-equipment-grid="paperdoll"
-        className="grid h-full"
+        className="grid h-full w-full"
         style={{
-          gridTemplateColumns: `${slotWidth}px ${slotWidth}px 1fr ${slotWidth}px ${slotWidth}px`,
-          gridTemplateRows: `repeat(5, ${slotHeight}px)`,
-          gridTemplateAreas: `
-          "head . . . cape"
-          "body . . . amulet"
-          "legs . . . ring"
-          "boots . . . gloves"
-          "ammo weapon . shield ."
-        `,
-          gap,
-          padding,
+          gridTemplateColumns:
+            layout.portraitMode === "overlay"
+              ? `${layout.slotWidth}px ${layout.slotWidth}px 1fr ${layout.slotWidth}px ${layout.slotWidth}px`
+              : `${layout.slotWidth}px minmax(${layout.centerMin}px, 1fr) minmax(${layout.centerMin}px, 1fr) ${layout.slotWidth}px`,
+          gridTemplateRows: `repeat(${layout.rowCount}, ${layout.slotHeight}px)`,
+          gridTemplateAreas: layout.templateAreas,
+          gap: layout.gap,
+          padding: layout.padding,
           alignItems: "stretch",
           justifyItems: "stretch",
         }}
@@ -605,29 +688,73 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         <div
           data-equipment-center="portrait"
           style={{
-            gridColumn: "1 / -1",
-            gridRow: "1 / -1",
+            gridArea:
+              layout.portraitMode === "area" ? layout.portraitArea : undefined,
+            gridColumn:
+              layout.portraitMode === "overlay" ? "1 / -1" : undefined,
+            gridRow: layout.portraitMode === "overlay" ? "1 / -1" : undefined,
             minWidth: 0,
-            width: "100%",
-            height: "100%",
+            minHeight:
+              layout.portraitMode === "overlay"
+                ? layout.slotHeight * layout.rowCount +
+                  layout.gap * (layout.rowCount - 1)
+                : layout.slotHeight * (layout.rowCount - 1) + layout.gap * 4,
             zIndex: 0,
+            width: layout.portraitBleedX
+              ? `calc(100% + ${layout.portraitBleedX * 2}px)`
+              : "100%",
+            height: "100%",
+            padding: layout.portraitPadding,
+            marginLeft: layout.portraitBleedX
+              ? `-${layout.portraitBleedX}px`
+              : 0,
+            marginRight: layout.portraitBleedX
+              ? `-${layout.portraitBleedX}px`
+              : 0,
+            overflow: "visible",
+            transform:
+              layout.portraitMode === "area" && layout.portraitOffsetX
+                ? `translateX(${layout.portraitOffsetX}px)`
+                : undefined,
           }}
         >
           <EquipmentPaperdollPortrait
             world={world}
             equipment={equipment}
             equipmentSignature={equipmentSignature}
-            compact={isMobile}
+            compact={isMobile || layoutVariant === "bank"}
+            layoutVariant={layoutVariant}
+            isVisible={isVisible}
             className="h-full w-full"
           />
         </div>
 
         {PAPERDOLL_PLACEMENTS.map((placement) =>
-          renderSlotCell(placement.key, isMobile, slotHeight, placement.area),
+          renderSlotCell(
+            placement.key,
+            isMobile,
+            layout.slotHeight,
+            placement.area,
+          ),
         )}
+
+        {layout.emptyAreas?.map((area) => (
+          <div key={area} style={{ gridArea: area }} />
+        ))}
       </div>
     );
   };
+
+  const resolvedFooterButtons = footerButtons ?? [
+    {
+      label: "Stats",
+      onClick: handleOpenStats,
+    },
+    {
+      label: "On Death",
+      onClick: handleOpenDeath,
+    },
+  ];
 
   return (
     <>
@@ -635,90 +762,108 @@ export const EquipmentPanel = React.memo(function EquipmentPanel({
         className="flex flex-col h-full overflow-hidden"
         style={{
           ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
-          padding: shouldUseMobileUI ? "3px" : "4px",
-          gap: shouldUseMobileUI ? "3px" : "4px",
+          padding:
+            layoutVariant === "bank"
+              ? shouldUseMobileUI
+                ? "2px"
+                : "0"
+              : shouldUseMobileUI
+                ? "3px"
+                : "4px",
+          gap:
+            layoutVariant === "bank"
+              ? shouldUseMobileUI
+                ? "4px"
+                : "8px"
+              : shouldUseMobileUI
+                ? "3px"
+                : "4px",
           border: "none",
           borderRadius: 0,
           boxShadow: "none",
         }}
       >
         <div
-          className="flex-1 relative overflow-hidden"
+          className="flex-1 relative"
           style={{
             ...getPanelInsetStyle(theme, {
               emphasis: "strong",
               radius: 4,
             }),
-            padding: shouldUseMobileUI ? 0 : "3px",
+            padding:
+              layoutVariant === "bank"
+                ? shouldUseMobileUI
+                  ? "4px"
+                  : "8px"
+                : shouldUseMobileUI
+                  ? 0
+                  : "3px",
             boxShadow:
               "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -18px 26px rgba(0,0,0,0.18)",
+            display: "flex",
+            alignItems: "stretch",
+            justifyContent: "stretch",
+            overflow: "visible",
           }}
         >
           {renderEquipmentGrid(shouldUseMobileUI)}
         </div>
 
-        <div
-          className="grid grid-cols-2 gap-1.5 px-0.5"
-          style={{
-            minHeight: shouldUseMobileUI ? 24 : 28,
-          }}
-        >
-          <button
-            type="button"
-            onClick={handleOpenStats}
-            className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 focus-visible:outline-none"
+        {resolvedFooterButtons.length > 0 && (
+          <div
+            className="grid gap-1.5 px-0.5"
             style={{
-              height: shouldUseMobileUI ? 24 : 28,
-              ...getInteractiveTileStyle(theme, { radius: 2 }),
-              fontSize: shouldUseMobileUI ? "9px" : "10px",
-              fontWeight: 600,
-              letterSpacing: "0.04em",
-              color: theme.colors.accent.primary,
-              textTransform: "uppercase",
+              gridTemplateColumns: `repeat(${resolvedFooterButtons.length}, minmax(0, 1fr))`,
+              minHeight: shouldUseMobileUI ? 24 : 28,
             }}
           >
-            Stats
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenDeath}
-            className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 focus-visible:outline-none"
-            style={{
-              height: shouldUseMobileUI ? 24 : 28,
-              ...getInteractiveTileStyle(theme, { radius: 2 }),
-              fontSize: shouldUseMobileUI ? "9px" : "10px",
-              fontWeight: 600,
-              letterSpacing: "0.04em",
-              color: theme.colors.accent.primary,
-              textTransform: "uppercase",
-            }}
-          >
-            On Death
-          </button>
-        </div>
+            {resolvedFooterButtons.map((button) => (
+              <button
+                key={button.label}
+                type="button"
+                onClick={button.onClick}
+                disabled={button.disabled}
+                className="flex items-center justify-center transition-all duration-150 hover:scale-[1.02] active:scale-95 focus-visible:outline-none disabled:opacity-40"
+                style={{
+                  height: shouldUseMobileUI ? 24 : 28,
+                  ...getInteractiveTileStyle(theme, { radius: 2 }),
+                  fontSize: shouldUseMobileUI ? "9px" : "10px",
+                  fontWeight: 600,
+                  letterSpacing: "0.04em",
+                  color: theme.colors.accent.primary,
+                  textTransform: "uppercase",
+                }}
+              >
+                {button.label}
+              </button>
+            ))}
+          </div>
+        )}
 
-        <div
-          className="flex justify-center gap-3"
-          style={{
-            ...getPanelInsetStyle(theme, {
-              emphasis: "normal",
-              radius: 4,
-            }),
-            padding: shouldUseMobileUI ? "2px 6px" : "4px 8px",
-            fontSize: shouldUseMobileUI ? "8px" : "10px",
-            lineHeight: 1,
-          }}
-        >
-          <span style={{ color: theme.colors.status.hp }}>
-            {totalBonuses.attack}
-          </span>
-          <span style={{ color: theme.colors.status.energy }}>
-            {totalBonuses.defense}
-          </span>
-          <span style={{ color: theme.colors.status.prayer }}>
-            {totalBonuses.strength}
-          </span>
-        </div>
+        {showBonuses && (
+          <div
+            className="flex justify-center gap-3"
+            style={{
+              ...getPanelInsetStyle(theme, {
+                emphasis: "normal",
+                radius: 4,
+              }),
+              padding: shouldUseMobileUI ? "2px 6px" : "4px 8px",
+              fontSize: shouldUseMobileUI ? "8px" : "10px",
+              lineHeight: 1,
+            }}
+          >
+            <span style={{ color: theme.colors.status.hp }}>
+              {totalBonuses.attack}
+            </span>
+            <span style={{ color: theme.colors.status.energy }}>
+              {totalBonuses.defense}
+            </span>
+            <span style={{ color: theme.colors.status.prayer }}>
+              {totalBonuses.strength}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Enhanced hover tooltip - rendered via portal */}
