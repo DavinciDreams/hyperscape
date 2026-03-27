@@ -601,6 +601,26 @@ export function getModelDimensions(
 }
 
 /**
+ * Returns the lowest-available LOD geometries for use as a collision proxy,
+ * plus the yOffset needed to align the geometry with the visual instance.
+ * Prefers LOD2 → LOD1 → LOD0.  Returns null if the entity isn't registered.
+ */
+export function getProxyGeometry(
+  entityId: string,
+): { geometries: THREE.BufferGeometry[]; yOffset: number } | null {
+  const modelPath = entityToModel.get(entityId);
+  if (!modelPath) return null;
+  const pool = pools.get(modelPath);
+  if (!pool) return null;
+  const lodPool = pool.lod2 ?? pool.lod1 ?? pool.lod0;
+  if (!lodPool) return null;
+  return {
+    geometries: lodPool.meshes.map((m) => m.geometry),
+    yOffset: pool.yOffset,
+  };
+}
+
+/**
  * Returns true if the instancer has a depleted pool for this entity's model.
  * When true, ResourceEntity can skip loading an individual depleted model.
  */

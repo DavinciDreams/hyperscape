@@ -60,6 +60,11 @@ interface BatchedLODPool {
   geometryIds: number[][];
   /** entityId → array of instanceIds (one per BatchedMesh/material slot) */
   instanceIds: Map<string, number[]>;
+  /**
+   * sourceGeometries[variantIndex][materialSlot] = original BufferGeometry.
+   * Retained so collision proxies can use the actual model shape.
+   */
+  sourceGeometries: THREE.BufferGeometry[][];
 }
 
 interface TreeTypePool {
@@ -273,11 +278,18 @@ function createBatchedLODPool(
     geometryIds.push(slotGeoIds);
   }
 
+  // Store source geometries per variant for collision proxy use
+  const sourceGeometries: THREE.BufferGeometry[][] = [];
+  for (let v = 0; v < numVariants; v++) {
+    sourceGeometries.push(variantParts[v].map((p) => p.geometry));
+  }
+
   return {
     batches,
     materials,
     geometryIds,
     instanceIds: new Map(),
+    sourceGeometries,
   };
 }
 
@@ -769,6 +781,30 @@ export function getModelDimensions(
   const pool = pools.get(treeType);
   if (!pool) return null;
   return { height: pool.modelHeight, radius: pool.modelRadius };
+}
+
+/**
+ * Returns the lowest-available LOD geometries for use as a collision proxy,
+ * plus the yOffset needed to align the geometry with the visual instance.
+ * Prefers LOD2 → LOD1 → LOD0, using the entity's assigned variant.
+ * Returns null if the entity isn't registered.
+ */
+export function getProxyGeometry(
+  entityId: string,
+): { geometries: THREE.BufferGeometry[]; yOffset: number } | null {
+  const treeType = entityToTreeType.get(entityId);
+  if (!treeType) return null;
+  const pool = pools.get(treeType);
+  if (!pool) return null;
+  const slot = pool.instances.get(entityId);
+  if (!slot) return null;
+  const lodPool = pool.lod2 ?? pool.lod1 ?? pool.lod0;
+  if (!lodPool) return null;
+  const vi = slot.variantIndex % lodPool.sourceGeometries.length;
+  return {
+    geometries: lodPool.sourceGeometries[vi],
+    yOffset: pool.yOffset,
+  };
 }
 
 export function hasDepleted(entityId: string): boolean {
