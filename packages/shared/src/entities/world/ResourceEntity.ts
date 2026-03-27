@@ -41,7 +41,6 @@ export type { ResourceEntityConfig } from "../../types/entities";
 
 export class ResourceEntity extends InteractableEntity {
   public config: ResourceEntityConfig;
-  private respawnTimer?: ReturnType<typeof setTimeout>;
 
   /** Tiles this resource occupies for collision (cached for cleanup) */
   private collisionTiles: TileCoord[] = [];
@@ -203,13 +202,8 @@ export class ResourceEntity extends InteractableEntity {
       interactionComponent.data.description = `${this.config.resourceType} - Depleted`;
     }
 
-    if (this.respawnTimer) clearTimeout(this.respawnTimer);
-
-    // Schedule respawn with tracked timer to prevent memory leaks
-    this.respawnTimer = setTimeout(() => {
-      this.respawn();
-      this.respawnTimer = undefined;
-    }, this.config.respawnTime);
+    // Respawn is handled by ResourceSystem.processRespawns() via tick-based timing.
+    // No setTimeout here — tick-based respawn is deterministic and OSRS-accurate.
   }
 
   public respawn(): void {
@@ -423,11 +417,6 @@ export class ResourceEntity extends InteractableEntity {
   destroy(local?: boolean): void {
     if (this.world.isServer && this.collisionTiles.length > 0) {
       this.unregisterCollision();
-    }
-
-    if (this.respawnTimer) {
-      clearTimeout(this.respawnTimer);
-      this.respawnTimer = undefined;
     }
 
     // Delegate visual cleanup to strategy

@@ -2751,12 +2751,15 @@ export class ResourceSystem extends SystemBase {
           resource.type === "ore" ||
           resource.skillRequired === "mining"
         ) {
-          // MINING: Chance-based depletion (1/8 for most rocks)
-          const roll = Math.random();
-          shouldDeplete = roll < GATHERING_CONSTANTS.MINING_DEPLETE_CHANCE;
-          console.log(
-            `[Forestry] ⛏️ ${session.resourceId}: Mining roll=${roll.toFixed(3)} vs ${GATHERING_CONSTANTS.MINING_DEPLETE_CHANCE} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
-          );
+          // MINING: Use manifest depleteChance (1.0 for most rocks, 0 for essence)
+          // OSRS: Rune essence rocks never deplete — continuous mining until inventory full.
+          const depletionChance = tuned.depleteChance;
+          if (depletionChance <= 0) {
+            shouldDeplete = false;
+          } else {
+            const roll = Math.random();
+            shouldDeplete = roll < depletionChance;
+          }
         } else if (
           resource.type === "fishing_spot" ||
           resource.skillRequired === "fishing"
