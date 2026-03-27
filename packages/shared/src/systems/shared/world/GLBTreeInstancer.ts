@@ -657,16 +657,13 @@ export function clearHighlight(): void {
   }
 }
 
-// ---- Height-based dissolve (tree depletion/respawn) ----
+// ---- Dissolve (tree depletion/respawn) ----
 
-const DISSOLVE_DURATION = GPU_VEG_CONFIG.DISSOLVE_DURATION;
-const DISSOLVE_MAX = GPU_VEG_CONFIG.DISSOLVE_MAX;
-
-interface DissolveAnim {
-  /** 1 = dissolving out, -1 = appearing in */
-  direction: 1 | -1;
-  progress: number;
-}
+import {
+  type DissolveAnim,
+  startDissolve as startDissolveAnim,
+  tickDissolveAnims,
+} from "./DissolveAnimation";
 
 const dissolveAnims = new Map<string, DissolveAnim>();
 
@@ -693,30 +690,21 @@ function applyDissolveValue(entityId: string, value: number): void {
   }
 }
 
-/**
- * Start a dissolve animation. direction=1 dissolves out (depletion),
- * direction=-1 dissolves in (respawn).
- */
 export function startDissolve(
   entityId: string,
   direction: 1 | -1,
   instant = false,
 ): void {
-  if (instant) {
-    const target = direction > 0 ? DISSOLVE_MAX : 0.0;
-    applyDissolveValue(entityId, target);
-    dissolveAnims.delete(entityId);
-    return;
-  }
-  const current = direction > 0 ? 0.0 : DISSOLVE_MAX;
-  applyDissolveValue(entityId, current);
-  dissolveAnims.set(entityId, { direction, progress: current });
+  startDissolveAnim(
+    dissolveAnims,
+    entityId,
+    direction,
+    instant,
+    applyDissolveValue,
+  );
 }
 
 let lastUpdateFrame = -1;
-
-// Reused across ticks to avoid per-frame allocation
-const _completedAnims: string[] = [];
 
 export function updateGLBTreeInstancer(deltaTime: number): void {
   if (!world) return;
@@ -809,19 +797,7 @@ export function updateGLBTreeInstancer(deltaTime: number): void {
   }
 
   // Tick dissolve animations
-  _completedAnims.length = 0;
-  for (const [entityId, anim] of dissolveAnims) {
-    anim.progress += (anim.direction * deltaTime) / DISSOLVE_DURATION;
-    anim.progress = Math.max(0, Math.min(DISSOLVE_MAX, anim.progress));
-    applyDissolveValue(entityId, anim.progress);
-    if (
-      (anim.direction > 0 && anim.progress >= DISSOLVE_MAX) ||
-      (anim.direction < 0 && anim.progress <= 0)
-    ) {
-      _completedAnims.push(entityId);
-    }
-  }
-  for (const id of _completedAnims) dissolveAnims.delete(id);
+  tickDissolveAnims(dissolveAnims, deltaTime, applyDissolveValue);
 
   // Flush dirty pools + update dissolve uniforms
   const camY = camPos.y;

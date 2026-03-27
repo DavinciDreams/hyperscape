@@ -134,6 +134,9 @@ export const GPU_VEG_CONFIG = {
 
   /** Maximum dissolve progress (1.0 = fully dissolved) */
   DISSOLVE_MAX: 1.0,
+
+  /** Alpha reduction factor when fully dissolved (0.7 = 30% opacity) */
+  DISSOLVE_ALPHA_SCALE: 0.7,
 } as const;
 
 // ============================================================================
@@ -1174,8 +1177,7 @@ export function createTreeDissolveMaterial(
     const fogged = mix(finalRgb, treeFogTex.rgb, treeFogFactor);
 
     // ---- Dissolve transparency (depleted trees) ----
-    // Max alpha reduction when fully dissolved (0.7 = 30% opacity at full dissolve)
-    const DISSOLVE_ALPHA_SCALE = 0.7;
+    const DISSOLVE_ALPHA_SCALE = GPU_VEG_CONFIG.DISSOLVE_ALPHA_SCALE;
     const dissolveVal = options.batched
       ? clamp(
           sub(float(1.0), varyingProperty("vec3", "vBatchColor").z),
