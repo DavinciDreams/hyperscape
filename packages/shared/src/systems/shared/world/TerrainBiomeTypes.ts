@@ -148,9 +148,9 @@ const CANYON_GRASS_CONFIG: BiomeGrassConfig = {
   density: 1.0,
   maxSlope: 0.15,
   minGrassWeight: 0.8,
-  heightScale: 1.7,
+  heightScale: 1.5,
   patchiness: 0.95,
-  patchScale: 0.015,
+  patchScale: 0.025,
   tintColor: [0.35, 0.4, 0.15],
   tintStrength: 0.4,
 };
