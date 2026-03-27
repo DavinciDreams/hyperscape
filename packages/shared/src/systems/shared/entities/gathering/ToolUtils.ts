@@ -30,7 +30,8 @@ type GatheringSkill = "woodcutting" | "mining" | "fishing";
 
 /**
  * Track items that have already triggered the fallback warning (warn once per item).
- * Capped at MAX_FALLBACK_WARNINGS to prevent unbounded growth on long-running servers.
+ * Once the Set reaches MAX_FALLBACK_WARNINGS, no new entries are added and no further
+ * warnings are logged. The Set entries persist for the lifetime of the process.
  */
 const MAX_FALLBACK_WARNINGS = 50;
 const fallbackWarned = new Set<string>();
@@ -50,7 +51,7 @@ export function _resetFallbackWarnings(): void {
  * fallback compares category===skill directly.
  *
  * NOTE: Fishing tools bypass this map via the exact-match path.
- * If you add a new gathering skill, you MUST add its category here.
+ * If you add a new category-matched gathering skill, you MUST add its category here.
  */
 const CATEGORY_TO_SKILL: Partial<Record<string, GatheringSkill>> = {
   hatchet: "woodcutting",
@@ -170,8 +171,7 @@ export function itemMatchesToolCategory(
   }
 
   // Fallback for tools not in the manifest — substring matching with cross-skill guards.
-  // Warn once per item. Both the warning count AND Set size are capped to prevent
-  // unbounded memory growth on long-running servers.
+  // Warn once per item, capped at MAX_FALLBACK_WARNINGS total unique items.
   if (
     fallbackWarned.size < MAX_FALLBACK_WARNINGS &&
     !fallbackWarned.has(lowerItemId)
