@@ -126,6 +126,14 @@ export const GPU_VEG_CONFIG = {
 
   /** Distance from camera where geometry is fully dissolved (meters) - at near clip */
   NEAR_CAMERA_FADE_END: 0.05,
+
+  // ========== TREE DEPLETION DISSOLVE ==========
+
+  /** Duration of the respawn dissolve-in animation (seconds). Depletion is instant. */
+  DISSOLVE_DURATION: 0.3,
+
+  /** Maximum dissolve progress (1.0 = fully dissolved) */
+  DISSOLVE_MAX: 1.0,
 } as const;
 
 // ============================================================================
@@ -1145,10 +1153,8 @@ export function createTreeDissolveMaterial(
     let hlIntensity;
     if (options.batched) {
       const batchColor = varyingProperty("vec3", "vBatchColor");
-      hlIntensity = step(
-        float(1.01),
-        max(batchColor.x, max(batchColor.y, batchColor.z)),
-      );
+      // Only check R/G for highlight — blue channel is reserved for dissolve state
+      hlIntensity = step(float(1.01), max(batchColor.x, batchColor.y));
     } else {
       hlIntensity = attribute("instanceHighlight", "float");
     }

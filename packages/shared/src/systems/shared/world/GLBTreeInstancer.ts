@@ -659,8 +659,8 @@ export function clearHighlight(): void {
 
 // ---- Height-based dissolve (tree depletion/respawn) ----
 
-const DISSOLVE_DURATION = 0.3; // seconds for respawn dissolve-in
-const DISSOLVE_MAX = 1.0;
+const DISSOLVE_DURATION = GPU_VEG_CONFIG.DISSOLVE_DURATION;
+const DISSOLVE_MAX = GPU_VEG_CONFIG.DISSOLVE_MAX;
 
 interface DissolveAnim {
   /** 1 = dissolving out, -1 = appearing in */
