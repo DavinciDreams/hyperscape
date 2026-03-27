@@ -27,6 +27,16 @@ function createMobTarget(health: number = 12): RaycastTarget {
   };
 }
 
+function createMobTargetWithDisplayName(
+  name: string,
+  health: number = 12,
+): RaycastTarget {
+  return {
+    ...createMobTarget(health),
+    name,
+  };
+}
+
 describe("Mob right-click attack flow", () => {
   const send = vi.fn();
   const emit = vi.fn();
@@ -135,6 +145,18 @@ describe("Mob right-click attack flow", () => {
 
     const actions = handler.getContextMenuActions(target);
     expect(actions).toEqual([]);
+  });
+
+  it("strips the short Lv suffix from mob context menu labels", () => {
+    const handler = new MobInteractionHandler(world, actionQueue);
+    const target = createMobTargetWithDisplayName("Bandit (Lv8)");
+
+    const actions = handler.getContextMenuActions(target);
+    const attackAction = actions.find((action) => action.id === "attack");
+    const examineAction = actions.find((action) => action.id === "examine");
+
+    expect(attackAction?.label).toBe("Attack Bandit (Level: 2)");
+    expect(examineAction?.label).toBe("Examine Bandit");
   });
 
   it("ContextMenuController executes selected action for matching target", () => {
