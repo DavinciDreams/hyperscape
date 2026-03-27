@@ -1301,7 +1301,7 @@ export class SkySystem extends System {
         );
         const darkColor = mix(
           vec3(0.024, 0.32, 0.59),
-          vec3(0.141, 0.807, 0.94),
+          vec3(0.22, 0.5, 0.85),
           sunNightStep,
         );
 
