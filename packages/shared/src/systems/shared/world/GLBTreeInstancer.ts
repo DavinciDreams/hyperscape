@@ -634,6 +634,7 @@ function applyDissolveValue(entityId: string, value: number): void {
   const idx = lodPool.slots.get(entityId);
   if (idx === undefined) return;
 
+  if (lodPool.dissolveData[idx] === value) return;
   lodPool.dissolveData[idx] = value;
   lodPool.dissolveDirty = true;
 }

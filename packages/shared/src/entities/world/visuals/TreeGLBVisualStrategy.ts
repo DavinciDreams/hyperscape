@@ -260,8 +260,8 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
         worldPos,
         rotation,
         baseScale,
-        undefined,
-        undefined,
+        null, // lod1ModelPath — auto-inferred by instancer
+        null, // lod2ModelPath — auto-inferred by instancer
         initialDissolve,
       );
     }

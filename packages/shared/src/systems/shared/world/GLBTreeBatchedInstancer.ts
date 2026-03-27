@@ -45,6 +45,7 @@ const _scale = new THREE.Vector3();
 // B = 1.0 - dissolveVal (1.0 = fully visible, 0.0 = fully dissolved)
 // Only modify channels through applyHighlightColor (R/G) and applyDissolveColor (B).
 const _defaultColor = new THREE.Color(1, 1, 1);
+const _tmpColor = new THREE.Color();
 /** Highlight multiplier for R/G channels (>1.0 brightens; shader detects via step(1.01)) */
 const HL_COLOR_INTENSITY = 1.15;
 
@@ -551,8 +552,6 @@ function removeFromPool(pool: BatchedLODPool, entityId: string): void {
   pool.instanceIds.delete(entityId);
 }
 
-const _tmpColor = new THREE.Color();
-
 function isHighlighted(pool: BatchedLODPool, entityId: string): boolean {
   const ids = pool.instanceIds.get(entityId);
   if (!ids || ids.length === 0) return false;
@@ -841,6 +840,8 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
       const wasHl = oldPool ? isHighlighted(oldPool, slot.entityId) : false;
       // Read dissolve state from old pool's color before removing.
       // Safe to sample batches[0] only — applyDissolveColor sets all batches uniformly.
+      // Defaults to 0 (fully visible) if instance IDs are missing — this edge case
+      // can only occur if the entity wasn't fully added, which shouldn't happen in practice.
       let wasDissolveVal = 0;
       if (oldPool) {
         const oldIds = oldPool.instanceIds.get(slot.entityId);

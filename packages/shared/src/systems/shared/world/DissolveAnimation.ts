@@ -15,8 +15,15 @@ export interface DissolveAnim {
   progress: number;
 }
 
+/** Reused across ticks to avoid per-frame allocation. */
+const _completed: string[] = [];
+
 /**
  * Start or instantly apply a dissolve.
+ *
+ * If an animation is already in progress for this entity (e.g. interrupted
+ * mid-dissolve), continues from the current progress instead of resetting
+ * to avoid a visible pop.
  *
  * @param anims   The animation map to manage
  * @param applyFn Callback that writes the dissolve value to the rendering backend
@@ -34,7 +41,13 @@ export function startDissolve(
     anims.delete(entityId);
     return;
   }
-  const current = direction > 0 ? 0.0 : DISSOLVE_MAX;
+  // If already animating, continue from current progress to avoid a pop.
+  const existing = anims.get(entityId);
+  const current = existing
+    ? existing.progress
+    : direction > 0
+      ? 0.0
+      : DISSOLVE_MAX;
   applyFn(entityId, current);
   anims.set(entityId, { direction, progress: current });
 }
@@ -49,7 +62,7 @@ export function tickDissolveAnims(
   applyFn: (entityId: string, value: number) => void,
 ): void {
   if (anims.size === 0) return;
-  const completed: string[] = [];
+  _completed.length = 0;
   for (const [entityId, anim] of anims) {
     anim.progress += (anim.direction * deltaTime) / DISSOLVE_DURATION;
     anim.progress = Math.max(0, Math.min(DISSOLVE_MAX, anim.progress));
@@ -58,8 +71,8 @@ export function tickDissolveAnims(
       (anim.direction > 0 && anim.progress >= DISSOLVE_MAX) ||
       (anim.direction < 0 && anim.progress <= 0)
     ) {
-      completed.push(entityId);
+      _completed.push(entityId);
     }
   }
-  for (const id of completed) anims.delete(id);
+  for (const id of _completed) anims.delete(id);
 }
