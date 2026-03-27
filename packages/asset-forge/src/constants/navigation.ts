@@ -24,6 +24,7 @@ export const NAVIGATION_VIEWS = {
   GRASS_GEN: "grassGen",
   FLOWER_GEN: "flowerGen",
   VEGETATION_GEN: "vegetationGen",
+  TREE_VIEWER: "treeViewer",
 } as const satisfies Record<string, NavigationView>;
 
 // Route paths for URL navigation
@@ -49,6 +50,7 @@ export const ROUTES = {
   WORLD_BUILDER: "/world",
   WORLD_EDITOR: "/world-editor", // New: Uses real game systems
   MANIFESTS: "/manifests",
+  TREE_VIEWER: "/tree-viewer",
 } as const;
 
 // Map routes to navigation views
@@ -73,6 +75,7 @@ export const ROUTE_TO_VIEW: Record<string, NavigationView> = {
   [ROUTES.WORLD_BUILDER]: NAVIGATION_VIEWS.WORLD_BUILDER,
   [ROUTES.WORLD_EDITOR]: NAVIGATION_VIEWS.WORLD_EDITOR,
   [ROUTES.MANIFESTS]: NAVIGATION_VIEWS.MANIFESTS,
+  [ROUTES.TREE_VIEWER]: NAVIGATION_VIEWS.TREE_VIEWER,
 };
 
 // Map navigation views to routes
@@ -97,6 +100,7 @@ export const VIEW_TO_ROUTE: Record<NavigationView, string> = {
   [NAVIGATION_VIEWS.WORLD_BUILDER]: ROUTES.WORLD_BUILDER,
   [NAVIGATION_VIEWS.WORLD_EDITOR]: ROUTES.WORLD_EDITOR,
   [NAVIGATION_VIEWS.MANIFESTS]: ROUTES.MANIFESTS,
+  [NAVIGATION_VIEWS.TREE_VIEWER]: ROUTES.TREE_VIEWER,
 };
 
 // Grid background styles for the app

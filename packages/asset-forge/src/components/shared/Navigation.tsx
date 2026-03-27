@@ -184,6 +184,14 @@ const Navigation: React.FC = () => {
           </Link>
 
           <Link
+            to={ROUTES.TREE_VIEWER}
+            className={navLinkClass(ROUTES.TREE_VIEWER)}
+          >
+            <TreePine size={18} />
+            <span>Trees</span>
+          </Link>
+
+          <Link
             to={ROUTES.WORLD_BUILDER}
             className={navLinkClass(ROUTES.WORLD_BUILDER)}
           >

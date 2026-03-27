@@ -23,6 +23,7 @@ import { RoadsGenPage } from "./pages/RoadsGenPage";
 import { RockGenPage } from "./pages/RockGenPage";
 import { TerrainGenPage } from "./pages/TerrainGenPage";
 import { TreeGenPage } from "./pages/TreeGenPage";
+import { TreeViewerPage } from "./pages/TreeViewerPage";
 import { VegetationGenPage } from "./pages/VegetationGenPage";
 import { VFXPage } from "./pages/VFXPage";
 import { WorldBuilderPage } from "./pages/WorldBuilderPage";
@@ -91,6 +92,9 @@ function AppLayout() {
               path={ROUTES.VEGETATION_GEN}
               element={<VegetationGenPage />}
             />
+
+            {/* Tree Viewer */}
+            <Route path={ROUTES.TREE_VIEWER} element={<TreeViewerPage />} />
 
             {/* Catch-all redirect */}
             <Route

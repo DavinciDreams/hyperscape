@@ -23,16 +23,20 @@ export enum TreeId {
   Fir = "tree_fir",
   Pine = "tree_pine",
   Oak = "tree_oak",
+  Willow = "tree_willow",
   Birch = "tree_birch",
   Bamboo = "tree_bamboo",
   ChinaPine = "tree_chinaPine",
+  Teak = "tree_teak",
   Maple = "tree_maple",
+  Mahogany = "tree_mahogany",
   Coconut = "tree_coconut",
   Palm = "tree_palm",
+  Yew = "tree_yew",
   Dead = "tree_dead",
   Cactus = "tree_cactus",
-  Knotwood = "tree_knotwood",
   WindPine = "tree_windPine",
+  Magic = "tree_magic",
 }
 
 /** Extract the subtype key from a TreeId (e.g. TreeId.Oak → "oak") */
@@ -79,18 +83,22 @@ export interface TreeTypeDefinition {
  */
 export const TREE_TYPES = {
   fir: { name: "Fir Tree", levelRequired: 1 },
-  pine: { name: "Pine Tree", levelRequired: 1 },
+  pine: { name: "Pine Tree", levelRequired: 54 },
   oak: { name: "Oak Tree", levelRequired: 15 },
-  birch: { name: "Birch Tree", levelRequired: 1 },
-  bamboo: { name: "Bamboo Tree", levelRequired: 1 },
-  chinaPine: { name: "China Pine", levelRequired: 1 },
+  willow: { name: "Willow Tree", levelRequired: 30 },
+  birch: { name: "Birch Tree", levelRequired: 5 },
+  bamboo: { name: "Bamboo Tree", levelRequired: 90 },
+  chinaPine: { name: "China Pine", levelRequired: 10 },
+  teak: { name: "Teak Tree", levelRequired: 35 },
   maple: { name: "Maple Tree", levelRequired: 45 },
-  coconut: { name: "Coconut Palm", levelRequired: 1 },
-  palm: { name: "Desert Palm", levelRequired: 1 },
+  mahogany: { name: "Mahogany Tree", levelRequired: 50 },
+  coconut: { name: "Coconut Palm", levelRequired: 8 },
+  palm: { name: "Desert Palm", levelRequired: 8 },
+  yew: { name: "Yew Tree", levelRequired: 60 },
   dead: { name: "Dead Tree", levelRequired: 1 },
   cactus: { name: "Cactus", levelRequired: 1 },
-  knotwood: { name: "Knotwood Tree", levelRequired: 1 },
-  windPine: { name: "Wind Pine", levelRequired: 1 },
+  windPine: { name: "Wind Pine", levelRequired: 12 },
+  magic: { name: "Magic Tree", levelRequired: 75 },
 } as const satisfies Record<string, TreeTypeDefinition>;
 
 /** All valid tree subtype keys (e.g., "oak", "willow") */

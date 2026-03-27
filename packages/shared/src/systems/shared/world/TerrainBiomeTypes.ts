@@ -39,7 +39,7 @@ export function buildBiomeConstantsJS(): string {
 const FOREST_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
   trees: {
-    [TreeId.Knotwood]: { weight: 40, maxHeight: 30 },
+    [TreeId.Yew]: { weight: 40, maxHeight: 30 },
     [TreeId.Oak]: { weight: 20, maxHeight: 30 },
     [TreeId.Birch]: { weight: 20, maxHeight: 30 },
     [TreeId.Maple]: { weight: 40, maxHeight: 30 },
