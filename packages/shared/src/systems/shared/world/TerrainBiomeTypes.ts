@@ -112,6 +112,62 @@ export function getTreeConfigForBiome(biomeId: string): BiomeTreeConfig {
   return BIOME_TREE_CONFIGS[biomeId as BiomeType] ?? FOREST_TREE_CONFIG;
 }
 
+// ---------------------------------------------------------------------------
+// Per-biome grass configs
+// ---------------------------------------------------------------------------
+
+export interface BiomeGrassConfig {
+  /** Overall density multiplier (0 = no grass, 1 = full density) */
+  density: number;
+  /** Max terrain slope (0-1, same metric as GPU shader) for grass placement */
+  maxSlope: number;
+  /** Minimum grassWeight from terrain color to allow placement */
+  minGrassWeight: number;
+  /** Blade height scale relative to global BLADE_HEIGHT_MIN/MAX */
+  heightScale: number;
+  /** Patchiness (0 = uniform spread, 1 = highly clustered islands) */
+  patchiness: number;
+  /** World-space noise frequency for patch mask (higher = smaller patches) */
+  patchScale: number;
+}
+
+const FOREST_GRASS_CONFIG: BiomeGrassConfig = {
+  density: 1.0,
+  maxSlope: 0.4,
+  minGrassWeight: 0.8,
+  heightScale: 1.0,
+  patchiness: 0.0,
+  patchScale: 0.02,
+};
+
+const CANYON_GRASS_CONFIG: BiomeGrassConfig = {
+  density: 0.15,
+  maxSlope: 0.15,
+  minGrassWeight: 0.8,
+  heightScale: 0.7,
+  patchiness: 0.8,
+  patchScale: 0.015,
+};
+
+const TUNDRA_GRASS_CONFIG: BiomeGrassConfig = {
+  density: 0.5,
+  maxSlope: 0.3,
+  minGrassWeight: 0.8,
+  heightScale: 0.6,
+  patchiness: 0.6,
+  patchScale: 0.018,
+};
+
+const BIOME_GRASS_CONFIGS: Record<BiomeType, BiomeGrassConfig> = {
+  [BiomeType.Forest]: FOREST_GRASS_CONFIG,
+  [BiomeType.Canyon]: CANYON_GRASS_CONFIG,
+  [BiomeType.Tundra]: TUNDRA_GRASS_CONFIG,
+};
+
+export function getGrassConfigForBiome(biomeId: string): BiomeGrassConfig {
+  return BIOME_GRASS_CONFIGS[biomeId as BiomeType] ?? FOREST_GRASS_CONFIG;
+}
+
 /** Biome IDs whose tree config has enableSnow set to true. */
 export const SNOW_BIOMES: ReadonlySet<string> = new Set(
   Object.entries(BIOME_TREE_CONFIGS)

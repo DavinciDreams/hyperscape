@@ -75,7 +75,10 @@ import {
   // generatePlants, // DISABLED - plants not working/looking good yet
   type ResourceGenerationContext,
 } from "./BiomeResourceGenerator";
-import { getTreeConfigForBiome } from "./TerrainBiomeTypes";
+import {
+  getTreeConfigForBiome,
+  getGrassConfigForBiome,
+} from "./TerrainBiomeTypes";
 import {
   setProcgenRockWorld,
   addRockInstance,
@@ -4598,6 +4601,8 @@ export class TerrainSystem extends System {
     g: number;
     b: number;
     grassWeight: number;
+    grassPlacement: number;
+    grassHeightScale: number;
     nx: number;
     ny: number;
     nz: number;
@@ -4615,7 +4620,6 @@ export class TerrainSystem extends System {
     const normalY = 1 / Math.sqrt(1 + gradMag * gradMag);
     const slope = 1 - normalY;
 
-    // Surface normal from height gradient (same derivation as terrain geometry)
     const rnx = -dhdx;
     const rnz = -dhdz;
     const rny = 1.0;
@@ -4629,6 +4633,7 @@ export class TerrainSystem extends System {
     const invW = totalWeight > 0 ? 1 / totalWeight : 1;
     const forestW = (biomeWeightMap.get("forest") || 0) * invW;
     const canyonW = (biomeWeightMap.get("canyon") || 0) * invW;
+    const tundraW = 1 - forestW - canyonW;
 
     const color = computeTerrainColorCPU(
       wx,
@@ -4638,7 +4643,53 @@ export class TerrainSystem extends System {
       forestW,
       canyonW,
     );
-    return { ...color, nx: rnx * invLen, ny: rny * invLen, nz: rnz * invLen };
+
+    const tCfg = getGrassConfigForBiome(BiomeType.Tundra);
+    const fCfg = getGrassConfigForBiome(BiomeType.Forest);
+    const cCfg = getGrassConfigForBiome(BiomeType.Canyon);
+
+    const maxSlope =
+      tCfg.maxSlope * tundraW +
+      fCfg.maxSlope * forestW +
+      cCfg.maxSlope * canyonW;
+    const minGW =
+      tCfg.minGrassWeight * tundraW +
+      fCfg.minGrassWeight * forestW +
+      cCfg.minGrassWeight * canyonW;
+    const density =
+      tCfg.density * tundraW + fCfg.density * forestW + cCfg.density * canyonW;
+    const grassHeightScale =
+      tCfg.heightScale * tundraW +
+      fCfg.heightScale * forestW +
+      cCfg.heightScale * canyonW;
+    const patchiness =
+      tCfg.patchiness * tundraW +
+      fCfg.patchiness * forestW +
+      cCfg.patchiness * canyonW;
+    const patchScale =
+      tCfg.patchScale * tundraW +
+      fCfg.patchScale * forestW +
+      cCfg.patchScale * canyonW;
+
+    const slopeOk = slope <= maxSlope ? 1.0 : 0.0;
+    const weightOk = color.grassWeight >= minGW ? 1.0 : 0.0;
+
+    // Noise-based patch mask: patchiness 0 = uniform, 1 = tight clusters
+    const patchThreshold = patchiness * 2 - 1; // maps [0,1] -> [-1,1]
+    const noiseVal = this.noise.simplex2D(wx * patchScale, wz * patchScale);
+    const patchMask = noiseVal > patchThreshold ? 1.0 : 0.0;
+
+    const grassPlacement =
+      color.grassWeight * density * slopeOk * weightOk * patchMask;
+
+    return {
+      ...color,
+      grassPlacement,
+      grassHeightScale,
+      nx: rnx * invLen,
+      ny: rny * invLen,
+      nz: rnz * invLen,
+    };
   }
 
   computeBiomeWeightsByPosition(

@@ -24,6 +24,10 @@ import THREE, {
   vec4,
   mix,
   smoothstep,
+  sub,
+  dot,
+  clamp,
+  modelWorldMatrix,
 } from "../../../extras/three/three";
 import { SUN_LIGHT, SUN_SHADE, applyCustomLighting } from "./LightingConfig";
 import { applyAnimeShade } from "./TerrainShader";
@@ -74,19 +78,21 @@ export const GRASS_CONFIG = {
   /** Gradient power curve (higher = root color persists longer up the blade) */
   GRADIENT_FALLOFF: 1.7,
 
-  // -- Terrain filters ------------------------------------------------------
-  /** Minimum grassWeight from terrain color function to place a clump (0-1) */
-  MIN_GRASS_WEIGHT: 0.3,
+  // -- Distance limits -------------------------------------------------------
+  /** Grass starts shrinking at this distance (meters) */
+  FADE_START: 350,
+  /** Grass fully invisible / chunks pruned beyond this distance */
+  MAX_RENDER_DISTANCE: 500,
 
   // -- LOD tiers (by distance from camera) ------------------------------------
   LOD_TIERS: [
-    { maxDistance: 200, bladesPerClump: 24, bladeSegments: 3, spacingMul: 1.0 },
-    { maxDistance: 400, bladesPerClump: 12, bladeSegments: 2, spacingMul: 2.0 },
+    { maxDistance: 80, bladesPerClump: 24, bladeSegments: 3, spacingMul: 1.0 },
+    { maxDistance: 200, bladesPerClump: 12, bladeSegments: 2, spacingMul: 2.0 },
     {
-      maxDistance: Infinity,
-      bladesPerClump: 6,
+      maxDistance: 500,
+      bladesPerClump: 4,
       bladeSegments: 1,
-      spacingMul: 4.0,
+      spacingMul: 5.0,
     },
   ],
   LOD_HYSTERESIS: 0.1,
@@ -254,12 +260,15 @@ export class GrassVisualManager implements QuadTreeListener {
     g: number;
     b: number;
     grassWeight: number;
+    grassPlacement: number;
+    grassHeightScale: number;
     nx: number;
     ny: number;
     nz: number;
   };
   private sunDirUniform: ReturnType<typeof uniform<THREE.Vector3>>;
   private dayIntensityUniform: ReturnType<typeof uniform<number>>;
+  private playerPosUniform: ReturnType<typeof uniform<THREE.Vector3>>;
   private waterThreshold: number;
   private chunks = new Map<string, GrassChunk>();
   private material: MeshStandardNodeMaterial;
@@ -281,7 +290,14 @@ export class GrassVisualManager implements QuadTreeListener {
     getTerrainColorAt: (
       wx: number,
       wz: number,
-    ) => { r: number; g: number; b: number; grassWeight: number },
+    ) => {
+      r: number;
+      g: number;
+      b: number;
+      grassWeight: number;
+      grassPlacement: number;
+      grassHeightScale: number;
+    },
   ) {
     this.container = container;
     this.getHeightAt = getHeightAt;
@@ -322,6 +338,7 @@ export class GrassVisualManager implements QuadTreeListener {
   update(playerX: number, playerZ: number, camera?: THREE.Camera): void {
     this.playerX = playerX;
     this.playerZ = playerZ;
+    this.playerPosUniform.value.set(playerX, 0, playerZ);
 
     // Drain pending queue — build at most N new chunks per frame
     let built = 0;
@@ -347,7 +364,21 @@ export class GrassVisualManager implements QuadTreeListener {
     const tiers = GRASS_CONFIG.LOD_TIERS;
     const hysteresis = GRASS_CONFIG.LOD_HYSTERESIS;
 
-    for (const [, chunk] of this.chunks) {
+    const maxDistSq =
+      GRASS_CONFIG.MAX_RENDER_DISTANCE * GRASS_CONFIG.MAX_RENDER_DISTANCE;
+    const pruneKeys: string[] = [];
+
+    for (const [key, chunk] of this.chunks) {
+      const dx = chunk.node.centerX - playerX;
+      const dz = chunk.node.centerZ - playerZ;
+      const distSq = dx * dx + dz * dz;
+
+      if (distSq > maxDistSq) {
+        pruneKeys.push(key);
+        chunk.mesh.visible = false;
+        continue;
+      }
+
       chunk.mesh.visible = this.frustum.intersectsBox(chunk.box);
       if (
         !chunk.mesh.visible ||
@@ -355,9 +386,7 @@ export class GrassVisualManager implements QuadTreeListener {
       )
         continue;
 
-      const dx = chunk.node.centerX - playerX;
-      const dz = chunk.node.centerZ - playerZ;
-      const dist = Math.sqrt(dx * dx + dz * dz);
+      const dist = Math.sqrt(distSq);
       const desiredLod = this.getLodLevel(chunk.node);
 
       if (desiredLod !== chunk.lodLevel) {
@@ -381,12 +410,28 @@ export class GrassVisualManager implements QuadTreeListener {
         }
       }
     }
+
+    for (const key of pruneKeys) {
+      const chunk = this.chunks.get(key);
+      if (chunk) {
+        if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+        chunk.mesh.geometry.dispose();
+        this.chunks.delete(key);
+      }
+    }
   }
 
   // -- QuadTreeListener -----------------------------------------------------
 
   onNodeNeedsGeometry(node: TerrainQuadNode): void {
     if (!node.isMaxDepth) return;
+    const dx = node.centerX - this.playerX;
+    const dz = node.centerZ - this.playerZ;
+    if (
+      dx * dx + dz * dz >
+      GRASS_CONFIG.MAX_RENDER_DISTANCE * GRASS_CONFIG.MAX_RENDER_DISTANCE
+    )
+      return;
     const key = this.chunkKey(node);
     if (this.chunks.has(key)) return;
     if (this.pendingNodes.some((p) => p.node === node)) return;
@@ -577,15 +622,16 @@ export class GrassVisualManager implements QuadTreeListener {
         r,
         g,
         b,
-        grassWeight: rawGW,
+        grassPlacement: rawGP,
+        grassHeightScale,
         nx,
         ny,
         nz,
       } = this.getTerrainColorAt(wx, wz);
-      const grassWeight = Math.max(0, rawGW - roadInf);
+      const grassPlacement = Math.max(0, rawGP - roadInf);
 
-      if (grassWeight < GRASS_CONFIG.MIN_GRASS_WEIGHT) continue;
-      if (clumpRng > grassWeight) continue;
+      if (grassPlacement <= 0) continue;
+      if (clumpRng > grassPlacement) continue;
 
       offsets[count * 3] = lx;
       offsets[count * 3 + 1] = ty;
@@ -593,8 +639,9 @@ export class GrassVisualManager implements QuadTreeListener {
 
       const rotation = rng() * Math.PI * 2;
       const scale =
-        GRASS_CONFIG.SCALE_MIN +
-        clumpRng * (GRASS_CONFIG.SCALE_MAX - GRASS_CONFIG.SCALE_MIN);
+        (GRASS_CONFIG.SCALE_MIN +
+          clumpRng * (GRASS_CONFIG.SCALE_MAX - GRASS_CONFIG.SCALE_MIN)) *
+        grassHeightScale;
       rotScaleHash[count * 3] = rotation;
       rotScaleHash[count * 3 + 1] = scale;
       rotScaleHash[count * 3 + 2] = clumpRng;
@@ -640,6 +687,11 @@ export class GrassVisualManager implements QuadTreeListener {
       new THREE.Vector3(...SUN_LIGHT.DEFAULT_DIRECTION),
     );
     this.dayIntensityUniform = uniform(1.0);
+    this.playerPosUniform = uniform(new THREE.Vector3(0, 0, 0));
+
+    const uPlayerPos = this.playerPosUniform;
+    const uFadeStart = float(GRASS_CONFIG.FADE_START);
+    const uFadeEnd = float(GRASS_CONFIG.MAX_RENDER_DISTANCE);
 
     mat.positionNode = Fn(() => {
       const localPos = positionLocal.toVar("gp");
@@ -651,9 +703,26 @@ export class GrassVisualManager implements QuadTreeListener {
 
       const t = uv().y;
 
-      // Scale entire clump
+      // Compute world-space XZ of the instance base for distance fade.
+      // offset is chunk-local; modelWorldMatrix translates by mesh.position (chunk center).
+      const worldBase = modelWorldMatrix.mul(
+        vec4(offset.x, float(0), offset.z, float(1.0)),
+      );
+      const toPlayer = sub(
+        vec3(worldBase.x, float(0), worldBase.z),
+        vec3(uPlayerPos.x, float(0), uPlayerPos.z),
+      );
+      const distSq = dot(toPlayer, toPlayer);
+      const dist = pow(distSq, float(0.5));
+      const fadeFactor = clamp(
+        sub(float(1.0), smoothstep(uFadeStart, uFadeEnd, dist)),
+        float(0.0),
+        float(1.0),
+      );
+
+      // Scale entire clump (with distance fade on Y)
       localPos.x.assign(localPos.x.mul(scale));
-      localPos.y.assign(localPos.y.mul(scale));
+      localPos.y.assign(localPos.y.mul(scale).mul(fadeFactor));
       localPos.z.assign(localPos.z.mul(scale));
 
       // Rotate entire clump around Y — snapshot x/z first because TSL assign

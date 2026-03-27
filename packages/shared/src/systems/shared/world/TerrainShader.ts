@@ -75,10 +75,12 @@ export const TERRAIN_SHADER_CONSTANTS = {
 export const TERRAIN_SHADE = {
   TINT_COLOR: SUN_SHADE.TINT_COLOR,
   STRENGTH: 0.7,
+  FRESNEL_POWER: 3.0,
+  FRESNEL_INTENSITY: 0.2,
 };
 
 /**
- * Shared TSL anime shading: half-lambert cool tint.
+ * Shared TSL anime shading: half-lambert cool tint + fresnel rim highlight.
  * Used by both terrain and grass so the shading stays in sync.
  */
 export function applyAnimeShade(
@@ -92,11 +94,23 @@ export function applyAnimeShade(
   const shadeFactor = sub(float(1.0), halfLambert);
   const coolTint = vec3(...TERRAIN_SHADE.TINT_COLOR);
   const tintedBase = mul(baseColor, coolTint);
-  return mix(
+  const shaded = mix(
     baseColor,
     tintedBase,
     mul(shadeFactor, float(TERRAIN_SHADE.STRENGTH)),
   );
+
+  const viewDir = normalize(sub(positionWorld, cameraPosition));
+  const rim = clamp(
+    add(float(1.0), dot(viewDir, normal)),
+    float(0.0),
+    float(1.0),
+  );
+  const fresnelRim = mul(
+    pow(rim, float(TERRAIN_SHADE.FRESNEL_POWER)),
+    float(TERRAIN_SHADE.FRESNEL_INTENSITY),
+  );
+  return add(shaded, vec3(fresnelRim, fresnelRim, fresnelRim));
 }
 
 const TERRAIN_TEX_TILE = 0.3;
