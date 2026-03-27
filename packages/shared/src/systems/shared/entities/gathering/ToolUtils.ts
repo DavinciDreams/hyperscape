@@ -2,10 +2,14 @@
  * ToolUtils - Pure utility functions for tool validation and categorization
  *
  * Extracted from ResourceSystem.ts for SOLID compliance (Single Responsibility).
- * These are pure functions with no system dependencies.
+ *
+ * Tool validation uses the tools.json manifest as the single source of truth.
+ * Each tool has an explicit `skill` field ("woodcutting", "mining", "fishing")
+ * that determines which resources it can be used on — no substring matching.
  */
 
 import { isNotedItemId } from "../../../../data/NoteGenerator";
+import { getExternalTool } from "../../../../utils/ExternalAssetUtils";
 
 /**
  * OSRS fishing tools that require exact matching (not interchangeable)
@@ -20,6 +24,39 @@ export const EXACT_FISHING_TOOLS = [
 ] as const;
 
 export type FishingToolId = (typeof EXACT_FISHING_TOOLS)[number];
+
+/** Skill types matching the manifest's GatheringToolData.skill union */
+type GatheringSkill = "woodcutting" | "mining" | "fishing";
+
+/**
+ * Track items that have already triggered the fallback warning (warn once per item).
+ * Once the Set reaches MAX_FALLBACK_WARNINGS, no new entries are added and no further
+ * warnings are logged. The Set entries persist for the lifetime of the process.
+ */
+const MAX_FALLBACK_WARNINGS = 50;
+const fallbackWarned = new Set<string>();
+
+/**
+ * Reset the fallback warning cache.
+ * @internal Exported for test isolation only — do not call in production code.
+ */
+export function _resetFallbackWarnings(): void {
+  fallbackWarned.clear();
+}
+
+/**
+ * Map from tool category to the skill it belongs to.
+ * When a new gathering category is added (e.g., "knife" for crafting),
+ * add an entry here so the manifest path handles it — otherwise the
+ * fallback compares category===skill directly.
+ *
+ * NOTE: Fishing tools bypass this map via the exact-match path.
+ * If you add a new category-matched gathering skill, you MUST add its category here.
+ */
+const CATEGORY_TO_SKILL: Partial<Record<string, GatheringSkill>> = {
+  hatchet: "woodcutting",
+  pickaxe: "mining",
+};
 
 /**
  * Extract tool category from toolRequired field
@@ -93,10 +130,15 @@ export function isExactMatchFishingTool(category: string): boolean {
 }
 
 /**
- * Check if an item ID matches the required tool category
+ * Check if an item ID matches the required tool category.
  *
- * OSRS-ACCURACY: Fishing tools require EXACT matching.
- * Other tools (pickaxe, hatchet) use category matching (any tier works).
+ * Uses the tools.json manifest as the single source of truth:
+ * - Looks up the item in the manifest to get its declared skill
+ * - Compares the skill against the expected skill for the category
+ * - Fishing tools require exact ID match (not interchangeable)
+ *
+ * This prevents cross-skill tool usage (e.g., pickaxe for woodcutting)
+ * which was possible with the old substring-matching approach.
  *
  * @param itemId - The item ID from player inventory
  * @param category - The required tool category
@@ -118,14 +160,46 @@ export function itemMatchesToolCategory(
     return lowerItemId === category;
   }
 
-  // For hatchet/pickaxe categories, check if item contains the category
+  // Manifest-based validation: look up the item in tools.json
+  const toolData = getExternalTool(lowerItemId);
+  if (toolData) {
+    // Tool exists in manifest — check if its skill matches the required category.
+    // For known categories (hatchet, pickaxe), compare via CATEGORY_TO_SKILL.
+    // For unknown categories, compare the skill directly against the category string.
+    const expectedSkill = CATEGORY_TO_SKILL[category] ?? category;
+    return toolData.skill === expectedSkill;
+  }
+
+  // Fallback for tools not in the manifest — substring matching with cross-skill guards.
+  // Warn once per item, capped at MAX_FALLBACK_WARNINGS total unique items.
+  if (
+    fallbackWarned.size < MAX_FALLBACK_WARNINGS &&
+    !fallbackWarned.has(lowerItemId)
+  ) {
+    fallbackWarned.add(lowerItemId);
+    console.warn(
+      `[ToolUtils] Item "${itemId}" not found in tools manifest — using fallback matching for category "${category}"`,
+    );
+  }
+
+  // Substring fallback — intentionally conservative to avoid false positives.
+  // All known gathering tools should be in tools.json; this is a safety net only.
+  // For hatchet, we only match "hatchet" (not bare "axe") to avoid combat weapons
+  // like battleaxe, greataxe, etc. that would otherwise false-positive.
   if (category === "hatchet") {
-    return lowerItemId.includes("hatchet") || lowerItemId.includes("axe");
+    if (lowerItemId.includes("pickaxe") || lowerItemId.includes("pick")) {
+      return false;
+    }
+    return lowerItemId.includes("hatchet");
   }
   if (category === "pickaxe") {
+    if (lowerItemId.includes("hatchet")) {
+      return false;
+    }
     return lowerItemId.includes("pickaxe") || lowerItemId.includes("pick");
   }
 
-  // Fallback: check if item ID contains the category
-  return lowerItemId.includes(category);
+  // Unknown category with no manifest entry — reject rather than substring match.
+  // All gathering tools must be in tools.json; this forces manifest completeness.
+  return false;
 }
