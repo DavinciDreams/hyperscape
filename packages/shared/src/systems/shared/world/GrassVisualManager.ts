@@ -30,9 +30,17 @@ import THREE, {
   modelWorldMatrix,
 } from "../../../extras/three/three";
 import { SUN_LIGHT, SUN_SHADE, applyCustomLighting } from "./LightingConfig";
-import { applyAnimeShade } from "./TerrainShader";
+import { applyAnimeShade, TERRAIN_SHADER_CONSTANTS } from "./TerrainShader";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import type { TerrainQuadNode, QuadTreeListener } from "./TerrainQuadTree";
+import {
+  getGrassWorkerPool,
+  terminateGrassWorkerPool,
+  type GrassWorkerInput,
+  type GrassWorkerOutput,
+} from "../../../utils/workers/GrassWorker";
+import type { TerrainWorkerConfig } from "../../../utils/workers/TerrainWorker";
+import type { BiomeGrassConfigWorker } from "../../../utils/workers/GrassWorker";
 
 // ---------------------------------------------------------------------------
 // Configuration — tweak these to control grass appearance & performance
@@ -87,7 +95,7 @@ export const GRASS_CONFIG = {
   // -- LOD tiers (by distance from camera) ------------------------------------
   LOD_TIERS: [
     { maxDistance: 80, bladesPerClump: 24, bladeSegments: 3, spacingMul: 1.0 },
-    { maxDistance: 200, bladesPerClump: 12, bladeSegments: 2, spacingMul: 2.0 },
+    { maxDistance: 200, bladesPerClump: 12, bladeSegments: 2, spacingMul: 1.0 },
     {
       maxDistance: 500,
       bladesPerClump: 4,
@@ -248,6 +256,36 @@ interface GrassChunk {
 // GrassVisualManager
 // ---------------------------------------------------------------------------
 
+/** Config data for the grass worker, passed from TerrainSystem at construction. */
+export interface GrassWorkerSetup {
+  terrainConfig: TerrainWorkerConfig;
+  seed: number;
+  biomeCenters: Array<{
+    x: number;
+    z: number;
+    type: string;
+    influence: number;
+  }>;
+  biomes: Record<
+    string,
+    { heightModifier: number; color: { r: number; g: number; b: number } }
+  >;
+  grassConfigs: Record<string, BiomeGrassConfigWorker>;
+  tileSize: number;
+  getRoadSegmentsForRegion: (
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ) => Array<{
+    startX: number;
+    startZ: number;
+    endX: number;
+    endZ: number;
+    width: number;
+  }>;
+}
+
 export class GrassVisualManager implements QuadTreeListener {
   private container: THREE.Group;
   private getHeightAt: (x: number, z: number) => number;
@@ -282,6 +320,13 @@ export class GrassVisualManager implements QuadTreeListener {
   private pendingNodes: { node: TerrainQuadNode; lod?: number }[] = [];
   private static readonly MAX_CHUNKS_PER_FRAME = 2;
 
+  private workerSetup: GrassWorkerSetup | null = null;
+  private workerInflight = new Set<string>();
+  private pendingLodSwap = new Map<
+    string,
+    { node: TerrainQuadNode; desiredLod: number }
+  >();
+
   constructor(
     container: THREE.Group,
     getHeightAt: (x: number, z: number) => number,
@@ -298,17 +343,22 @@ export class GrassVisualManager implements QuadTreeListener {
       grassPlacement: number;
       grassHeightScale: number;
     },
+    workerSetup?: GrassWorkerSetup,
   ) {
     this.container = container;
     this.getHeightAt = getHeightAt;
     this.waterThreshold = waterThreshold;
     this.getRoadInfluence = getRoadInfluence;
     this.getTerrainColorAt = getTerrainColorAt;
+    this.workerSetup = workerSetup ?? null;
 
     this.lodGeometries = GRASS_CONFIG.LOD_TIERS.map((tier) =>
       createClumpGeometry(tier.bladesPerClump, tier.bladeSegments),
     );
     this.material = this.createMaterial();
+
+    const pool = getGrassWorkerPool();
+    const workerStatus = pool ? "workers available" : "sync fallback";
 
     const tierDescs = GRASS_CONFIG.LOD_TIERS.map((t, i) => {
       const g = this.lodGeometries[i];
@@ -321,11 +371,16 @@ export class GrassVisualManager implements QuadTreeListener {
     });
     console.log(
       `[GrassVisualManager] ${tierDescs.length} LOD tiers | ` +
-        `spacing ${GRASS_CONFIG.CLUMP_SPACING}m | ${tierDescs.join(" | ")}`,
+        `spacing ${GRASS_CONFIG.CLUMP_SPACING}m | ${workerStatus} | ${tierDescs.join(" | ")}`,
     );
   }
 
   // -- Public API -----------------------------------------------------------
+
+  setPlayerPosition(x: number, z: number): void {
+    this.playerX = x;
+    this.playerZ = z;
+  }
 
   updateLighting(sunDir: THREE.Vector3): void {
     this.sunDirUniform.value.copy(sunDir);
@@ -340,14 +395,19 @@ export class GrassVisualManager implements QuadTreeListener {
     this.playerZ = playerZ;
     this.playerPosUniform.value.set(playerX, 0, playerZ);
 
-    // Drain pending queue — build at most N new chunks per frame
+    // Drain pending queue — dispatch to worker or build sync (fallback only)
     let built = 0;
+    const pool = getGrassWorkerPool();
     while (
       this.pendingNodes.length > 0 &&
       built < GrassVisualManager.MAX_CHUNKS_PER_FRAME
     ) {
       const { node, lod } = this.pendingNodes.shift()!;
-      if (!this.chunks.has(this.chunkKey(node))) {
+      const key = this.chunkKey(node);
+      if (this.chunks.has(key) || this.workerInflight.has(key)) continue;
+      if (pool && this.workerSetup) {
+        this.dispatchToWorker(node, key);
+      } else {
         this.createChunkMesh(node, lod);
         built++;
       }
@@ -402,11 +462,23 @@ export class GrassVisualManager implements QuadTreeListener {
           desiredLod < chunk.lodLevel ? dist < threshold : dist > threshold;
 
         if (shouldSwitch) {
-          if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
-          chunk.mesh.geometry.dispose();
-          this.chunks.delete(this.chunkKey(chunk.node));
-          this.createChunkMesh(chunk.node, desiredLod);
-          built++;
+          const nodeKey = this.chunkKey(chunk.node);
+          const workerPool = getGrassWorkerPool();
+          if (workerPool && this.workerSetup) {
+            if (!this.workerInflight.has(nodeKey)) {
+              this.pendingLodSwap.set(nodeKey, {
+                node: chunk.node,
+                desiredLod,
+              });
+              this.dispatchLodSwap(chunk.node, nodeKey, desiredLod);
+            }
+          } else {
+            if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+            chunk.mesh.geometry.dispose();
+            this.chunks.delete(nodeKey);
+            this.createChunkMesh(chunk.node, desiredLod);
+            built++;
+          }
         }
       }
     }
@@ -434,8 +506,213 @@ export class GrassVisualManager implements QuadTreeListener {
       return;
     const key = this.chunkKey(node);
     if (this.chunks.has(key)) return;
-    if (this.pendingNodes.some((p) => p.node === node)) return;
-    this.pendingNodes.push({ node });
+    if (this.workerInflight.has(key)) return;
+
+    const pool = getGrassWorkerPool();
+    if (pool && this.workerSetup) {
+      this.dispatchToWorker(node, key);
+    } else {
+      if (!this.pendingNodes.some((p) => p.node === node)) {
+        this.pendingNodes.push({ node });
+      }
+    }
+  }
+
+  private dispatchLodSwap(
+    node: TerrainQuadNode,
+    key: string,
+    desiredLod: number,
+  ): void {
+    const ws = this.workerSetup!;
+    const pool = getGrassWorkerPool()!;
+    const tier = GRASS_CONFIG.LOD_TIERS[desiredLod];
+
+    const half = node.halfSize;
+    const roadSegments = ws.getRoadSegmentsForRegion(
+      node.centerX - half,
+      node.centerZ - half,
+      node.centerX + half,
+      node.centerZ + half,
+    );
+
+    const input: GrassWorkerInput = {
+      type: "generateGrassInstances",
+      chunkKey: key,
+      centerX: node.centerX,
+      centerZ: node.centerZ,
+      size: node.size,
+      spacingMul: tier.spacingMul,
+      config: ws.terrainConfig,
+      seed: ws.seed,
+      biomeCenters: ws.biomeCenters,
+      biomes: ws.biomes,
+      grassSeed: GRASS_CONFIG.SEED,
+      clumpSpacing: GRASS_CONFIG.CLUMP_SPACING,
+      scaleMin: GRASS_CONFIG.SCALE_MIN,
+      scaleMax: GRASS_CONFIG.SCALE_MAX,
+      waterThreshold: this.waterThreshold,
+      grassConfigs: ws.grassConfigs,
+      shaderConstants: {
+        NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.NOISE_SCALE,
+        DISTORT_NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.DISTORT_NOISE_SCALE,
+        VARIATION_NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.VARIATION_NOISE_SCALE,
+        ROCK_DISTORT_STRENGTH: TERRAIN_SHADER_CONSTANTS.ROCK_DISTORT_STRENGTH,
+        HEIGHT_DISTORT_STRENGTH:
+          TERRAIN_SHADER_CONSTANTS.HEIGHT_DISTORT_STRENGTH,
+        DIRT_THRESHOLD: TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD,
+        SATURATION_BOOST: TERRAIN_SHADER_CONSTANTS.SATURATION_BOOST,
+      },
+      roadSegments,
+      roadBlendWidth: 0.5,
+      tileSize: ws.tileSize,
+    };
+
+    this.workerInflight.add(key);
+
+    pool
+      .execute(input)
+      .then((output: GrassWorkerOutput) => {
+        this.workerInflight.delete(key);
+        this.pendingLodSwap.delete(key);
+
+        // Remove old chunk now that replacement is ready
+        const oldChunk = this.chunks.get(key);
+        if (oldChunk) {
+          if (oldChunk.mesh.parent) oldChunk.mesh.parent.remove(oldChunk.mesh);
+          oldChunk.mesh.geometry.dispose();
+          this.chunks.delete(key);
+        }
+
+        if (output.count === 0) return;
+        this.createChunkMeshFromWorkerData(node, output, desiredLod);
+      })
+      .catch((err: unknown) => {
+        this.workerInflight.delete(key);
+        this.pendingLodSwap.delete(key);
+        console.warn(
+          `[GrassVisualManager] LOD swap worker failed for ${key}:`,
+          err,
+        );
+      });
+  }
+
+  private dispatchToWorker(node: TerrainQuadNode, key: string): void {
+    const ws = this.workerSetup!;
+    const pool = getGrassWorkerPool()!;
+    const lod = this.getLodLevel(node);
+    const tier = GRASS_CONFIG.LOD_TIERS[lod];
+
+    const half = node.halfSize;
+    const roadSegments = ws.getRoadSegmentsForRegion(
+      node.centerX - half,
+      node.centerZ - half,
+      node.centerX + half,
+      node.centerZ + half,
+    );
+
+    const input: GrassWorkerInput = {
+      type: "generateGrassInstances",
+      chunkKey: key,
+      centerX: node.centerX,
+      centerZ: node.centerZ,
+      size: node.size,
+      spacingMul: tier.spacingMul,
+      config: ws.terrainConfig,
+      seed: ws.seed,
+      biomeCenters: ws.biomeCenters,
+      biomes: ws.biomes,
+      grassSeed: GRASS_CONFIG.SEED,
+      clumpSpacing: GRASS_CONFIG.CLUMP_SPACING,
+      scaleMin: GRASS_CONFIG.SCALE_MIN,
+      scaleMax: GRASS_CONFIG.SCALE_MAX,
+      waterThreshold: this.waterThreshold,
+      grassConfigs: ws.grassConfigs,
+      shaderConstants: {
+        NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.NOISE_SCALE,
+        DISTORT_NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.DISTORT_NOISE_SCALE,
+        VARIATION_NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.VARIATION_NOISE_SCALE,
+        ROCK_DISTORT_STRENGTH: TERRAIN_SHADER_CONSTANTS.ROCK_DISTORT_STRENGTH,
+        HEIGHT_DISTORT_STRENGTH:
+          TERRAIN_SHADER_CONSTANTS.HEIGHT_DISTORT_STRENGTH,
+        DIRT_THRESHOLD: TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD,
+        SATURATION_BOOST: TERRAIN_SHADER_CONSTANTS.SATURATION_BOOST,
+      },
+      roadSegments,
+      roadBlendWidth: 0.5,
+      tileSize: ws.tileSize,
+    };
+
+    this.workerInflight.add(key);
+
+    pool
+      .execute(input)
+      .then((output: GrassWorkerOutput) => {
+        this.workerInflight.delete(key);
+        if (this.chunks.has(key)) return;
+        if (output.count === 0) return;
+        this.createChunkMeshFromWorkerData(node, output, lod);
+      })
+      .catch((err: unknown) => {
+        this.workerInflight.delete(key);
+        console.warn(
+          `[GrassVisualManager] Worker failed for ${key}, falling back to sync:`,
+          err,
+        );
+        if (!this.chunks.has(key)) {
+          this.pendingNodes.push({ node });
+        }
+      });
+  }
+
+  private createChunkMeshFromWorkerData(
+    node: TerrainQuadNode,
+    data: GrassWorkerOutput,
+    lodLevel: number,
+  ): void {
+    const key = data.chunkKey;
+    if (this.chunks.has(key)) return;
+    if (data.count === 0) return;
+
+    const geo = this.lodGeometries[lodLevel].clone();
+    geo.setAttribute(
+      "instanceOffset",
+      new THREE.InstancedBufferAttribute(data.offsets, 3),
+    );
+    geo.setAttribute(
+      "instanceRotScaleHash",
+      new THREE.InstancedBufferAttribute(data.rotScaleHash, 3),
+    );
+    geo.setAttribute(
+      "instanceGroundColor",
+      new THREE.InstancedBufferAttribute(data.groundColors, 3),
+    );
+    geo.setAttribute(
+      "instanceGroundNormal",
+      new THREE.InstancedBufferAttribute(data.groundNormals, 3),
+    );
+
+    const mesh = new THREE.InstancedMesh(geo, this.material, data.count);
+    mesh.position.set(node.centerX, 0, node.centerZ);
+    mesh.name = `GrassQT_${key}`;
+    mesh.frustumCulled = false;
+    mesh.receiveShadow = false;
+    mesh.castShadow = false;
+    mesh.userData = { type: "grass", walkable: false, clickable: false };
+
+    const identity = new THREE.Matrix4();
+    for (let i = 0; i < data.count; i++) {
+      mesh.setMatrixAt(i, identity);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+
+    const half = node.halfSize;
+    const box = new THREE.Box3(
+      new THREE.Vector3(node.centerX - half, -50, node.centerZ - half),
+      new THREE.Vector3(node.centerX + half, 200, node.centerZ + half),
+    );
+
+    this.container.add(mesh);
+    this.chunks.set(key, { nodeId: node.id, mesh, box, lodLevel, node });
   }
 
   onNodeDestroyGeometry(node: TerrainQuadNode): void {
@@ -449,6 +726,9 @@ export class GrassVisualManager implements QuadTreeListener {
 
   destroy(): void {
     this.pendingNodes.length = 0;
+    this.workerInflight.clear();
+    this.pendingLodSwap.clear();
+    terminateGrassWorkerPool();
     for (const [, chunk] of this.chunks) {
       if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
       chunk.mesh.geometry.dispose();

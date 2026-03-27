@@ -119,7 +119,11 @@ import {
   type VisualManagerTerrainProvider,
 } from "./TerrainVisualManager";
 import { WaterVisualManager } from "./WaterVisualManager";
-import { GrassVisualManager } from "./GrassVisualManager";
+import {
+  GrassVisualManager,
+  type GrassWorkerSetup,
+} from "./GrassVisualManager";
+import { terminateGrassWorkerPool } from "../../../utils/workers/GrassWorker";
 import { CompositeQuadTreeListener } from "./TerrainQuadTree";
 import type { QuadChunkWorkerConfig } from "../../../utils/workers/QuadChunkWorker";
 import { terminateQuadChunkWorkerPool } from "../../../utils/workers/QuadChunkWorker";
@@ -1976,6 +1980,7 @@ export class TerrainSystem extends System {
       if (this.terrainContainer) {
         this.terrainContainer.parent?.add(grassContainer);
       }
+      const grassWorkerSetup = this.buildGrassWorkerSetup();
       this.grassVisualManager = new GrassVisualManager(
         grassContainer,
         (x: number, z: number) => this.getHeightAt(x, z),
@@ -1983,6 +1988,7 @@ export class TerrainSystem extends System {
         (wx: number, wz: number) =>
           this.calculateRoadInfluenceAtVertex(wx, wz, 0, 0),
         (wx: number, wz: number) => this.getTerrainColorAt(wx, wz),
+        grassWorkerSetup,
       );
 
       // Wire terrain, water, grass managers to the same quad-tree via composite
@@ -1998,6 +2004,140 @@ export class TerrainSystem extends System {
         `(minSize=${this.CONFIG.QUADTREE_MIN_SIZE}, maxDepth=${this.CONFIG.QUADTREE_MAX_DEPTH}, ` +
         `resolution=${this.CONFIG.QUADTREE_RESOLUTION}, splitRatio=${this.CONFIG.QUADTREE_SPLIT_RATIO})`,
     );
+  }
+
+  private buildGrassWorkerSetup(): GrassWorkerSetup {
+    const workerConfig: TerrainWorkerConfig = {
+      TILE_SIZE: this.CONFIG.TILE_SIZE,
+      TILE_RESOLUTION: this.CONFIG.TILE_RESOLUTION,
+      MAX_HEIGHT: MAX_HEIGHT,
+      BIOME_GAUSSIAN_COEFF: BIOME_CONFIG.gaussianCoeff,
+      BIOME_BOUNDARY_NOISE_SCALE: BIOME_CONFIG.boundaryNoiseScale,
+      BIOME_BOUNDARY_NOISE_AMOUNT: BIOME_CONFIG.boundaryNoiseAmount,
+      WATER_THRESHOLD: this.CONFIG.WATER_THRESHOLD,
+      WATER_LEVEL_NORMALIZED: WATER_LEVEL_NORMALIZED,
+      SHORELINE_THRESHOLD: SHORELINE_CONFIG.THRESHOLD,
+      SHORELINE_STRENGTH: SHORELINE_CONFIG.STRENGTH,
+      SHORELINE_MIN_SLOPE: SHORELINE_CONFIG.MIN_SLOPE,
+      SHORELINE_SLOPE_SAMPLE_DISTANCE: SHORELINE_CONFIG.SLOPE_SAMPLE_DISTANCE,
+      SHORELINE_LAND_BAND: SHORELINE_CONFIG.LAND_BAND,
+      SHORELINE_LAND_MAX_MULTIPLIER: SHORELINE_CONFIG.LAND_MAX_MULTIPLIER,
+      SHORELINE_UNDERWATER_BAND: SHORELINE_CONFIG.UNDERWATER_BAND,
+      UNDERWATER_DEPTH_MULTIPLIER: SHORELINE_CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
+    };
+
+    const biomeData: Record<
+      string,
+      { heightModifier: number; color: { r: number; g: number; b: number } }
+    > = {};
+    for (const [name, biome] of Object.entries(BIOMES)) {
+      const color = new THREE.Color(biome.color);
+      biomeData[name] = {
+        heightModifier: biome.terrainMultiplier || 1,
+        color: { r: color.r, g: color.g, b: color.b },
+      };
+    }
+
+    const biomeCenters = this.terrainGenerator
+      .getBiomeSystem()
+      .getBiomeCenters() as BiomeCenter[];
+
+    const tCfg = getGrassConfigForBiome(BiomeType.Tundra);
+    const fCfg = getGrassConfigForBiome(BiomeType.Forest);
+    const cCfg = getGrassConfigForBiome(BiomeType.Canyon);
+
+    const grassConfigs: Record<
+      string,
+      {
+        density: number;
+        maxSlope: number;
+        minGrassWeight: number;
+        heightScale: number;
+        patchiness: number;
+        patchScale: number;
+      }
+    > = {
+      [BiomeType.Tundra]: { ...tCfg },
+      [BiomeType.Forest]: { ...fCfg },
+      [BiomeType.Canyon]: { ...cCfg },
+    };
+
+    const tileSize = this.CONFIG.TILE_SIZE;
+
+    return {
+      terrainConfig: workerConfig,
+      seed: this.computeSeedFromWorldId(),
+      biomeCenters: biomeCenters.map((c) => ({
+        x: c.x,
+        z: c.z,
+        type: c.type,
+        influence: c.influence,
+      })),
+      biomes: biomeData,
+      grassConfigs,
+      tileSize,
+      getRoadSegmentsForRegion: (
+        minX: number,
+        minZ: number,
+        maxX: number,
+        maxZ: number,
+      ) => this.getWorldSpaceRoadSegmentsForRegion(minX, minZ, maxX, maxZ),
+    };
+  }
+
+  /**
+   * Collect road segments overlapping a world-space AABB, returned in
+   * world coordinates for the grass worker.
+   */
+  private getWorldSpaceRoadSegmentsForRegion(
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ): Array<{
+    startX: number;
+    startZ: number;
+    endX: number;
+    endZ: number;
+    width: number;
+  }> {
+    this.roadNetworkSystem ??= this.world.getSystem("roads") as
+      | RoadNetworkSystem
+      | undefined;
+    if (!this.roadNetworkSystem) return [];
+
+    const ts = this.CONFIG.TILE_SIZE;
+    const minTX = Math.floor(minX / ts);
+    const minTZ = Math.floor(minZ / ts);
+    const maxTX = Math.floor(maxX / ts);
+    const maxTZ = Math.floor(maxZ / ts);
+
+    const result: Array<{
+      startX: number;
+      startZ: number;
+      endX: number;
+      endZ: number;
+      width: number;
+    }> = [];
+
+    for (let tx = minTX; tx <= maxTX; tx++) {
+      for (let tz = minTZ; tz <= maxTZ; tz++) {
+        const segs = this.roadNetworkSystem.getRoadSegmentsForTile(tx, tz);
+        const originX = tx * ts;
+        const originZ = tz * ts;
+        for (const seg of segs) {
+          result.push({
+            startX: originX + seg.start.x,
+            startZ: originZ + seg.start.z,
+            endX: originX + seg.end.x,
+            endZ: originZ + seg.end.z,
+            width: seg.width,
+          });
+        }
+      }
+    }
+
+    return result;
   }
 
   private registerInstancedMeshes(): void {
@@ -5194,6 +5334,13 @@ export class TerrainSystem extends System {
       const centers = this.getTerrainCenters();
       if (centers.length > 0) {
         const pos = centers[0].position;
+
+        // Set grass player position BEFORE quad-tree update so
+        // onNodeNeedsGeometry dispatches with correct LOD & distance
+        if (this.grassVisualManager) {
+          this.grassVisualManager.setPlayerPosition(pos.x, pos.z);
+        }
+
         this.quadTreeVisualManager.update(pos.x, pos.z);
 
         if (this.grassVisualManager) {
@@ -6808,6 +6955,7 @@ export class TerrainSystem extends System {
     // Terminate worker pools to free resources
     terminateTerrainWorkerPool();
     terminateQuadChunkWorkerPool();
+    terminateGrassWorkerPool();
 
     // Clear pending worker results
     this.pendingWorkerResults.clear();
