@@ -34,8 +34,9 @@ const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 
+// Blue channel of batch colors encodes dissolve state (blue = 1.0 - dissolveVal).
+// Do NOT change the blue component of these defaults without updating applyDissolveColor.
 const _defaultColor = new THREE.Color(1, 1, 1);
-const _hlColor = new THREE.Color(1.15, 1.15, 1.15);
 
 interface TreeSlot {
   entityId: string;
@@ -733,52 +734,6 @@ function getLodPool(pool: TreeTypePool, slot: TreeSlot): BatchedLODPool | null {
       : pool.lod2;
 }
 
-export function setDepleted(entityId: string, depleted: boolean): void {
-  const treeType = entityToTreeType.get(entityId);
-  if (!treeType) return;
-
-  const pool = pools.get(treeType);
-  if (!pool) return;
-
-  const slot = pool.instances.get(entityId);
-  if (!slot || slot.depleted === depleted) return;
-
-  slot.depleted = depleted;
-
-  if (depleted) {
-    const lodPool = getLodPool(pool, slot);
-    if (lodPool) removeFromPool(lodPool, entityId);
-
-    if (pool.depleted) {
-      const mat = composeInstanceMatrix(
-        slot.position,
-        slot.rotation,
-        slot.depletedScale,
-        pool.depletedYOffset,
-      );
-      addToPool(pool.depleted, entityId, mat, 0);
-    }
-  } else {
-    if (pool.depleted) {
-      removeFromPool(pool.depleted, entityId);
-    }
-
-    const mat = composeInstanceMatrix(
-      slot.position,
-      slot.rotation,
-      slot.scale,
-      slot.yOffset,
-    );
-    const lodPool =
-      slot.currentLOD === 0
-        ? pool.lod0
-        : slot.currentLOD === 1
-          ? pool.lod1
-          : pool.lod2;
-    if (lodPool) addToPool(lodPool, entityId, mat, slot.variantIndex);
-  }
-}
-
 export function hasInstance(entityId: string): boolean {
   return entityToTreeType.has(entityId);
 }
@@ -818,13 +773,6 @@ export function getProxyGeometry(
     geometries: lodPool.sourceGeometries[vi],
     yOffset: pool.yOffset,
   };
-}
-
-export function hasDepleted(entityId: string): boolean {
-  const treeType = entityToTreeType.get(entityId);
-  if (!treeType) return false;
-  const pool = pools.get(treeType);
-  return !!pool?.depleted;
 }
 
 let highlightedEntityId: string | null = null;
@@ -901,14 +849,6 @@ function applyDissolveValue(entityId: string, value: number): void {
 }
 
 /**
- * Set dissolve value directly (no animation). 0 = visible, 1 = dissolved.
- */
-export function setDissolve(entityId: string, value: number): void {
-  dissolveAnims.delete(entityId);
-  applyDissolveValue(entityId, value);
-}
-
-/**
  * Start a dissolve animation. direction=1 dissolves out (depletion),
  * direction=-1 dissolves in (respawn).
  */
@@ -930,7 +870,7 @@ export function startDissolve(
 
 let lastUpdateFrame = -1;
 
-export function updateGLBTreeBatchedInstancer(): void {
+export function updateGLBTreeBatchedInstancer(deltaTime?: number): void {
   if (!world) return;
   if (world.frame === lastUpdateFrame) return;
   lastUpdateFrame = world.frame;
@@ -1003,7 +943,8 @@ export function updateGLBTreeBatchedInstancer(): void {
   }
 
   // Tick dissolve animations
-  const dt = 1 / 60;
+  const dt = deltaTime ?? 1 / 60;
+  const completed: string[] = [];
   for (const [entityId, anim] of dissolveAnims) {
     anim.progress += (anim.direction * dt) / DISSOLVE_DURATION;
     anim.progress = Math.max(0, Math.min(DISSOLVE_MAX, anim.progress));
@@ -1012,9 +953,10 @@ export function updateGLBTreeBatchedInstancer(): void {
       (anim.direction > 0 && anim.progress >= DISSOLVE_MAX) ||
       (anim.direction < 0 && anim.progress <= 0)
     ) {
-      dissolveAnims.delete(entityId);
+      completed.push(entityId);
     }
   }
+  for (const id of completed) dissolveAnims.delete(id);
 
   // Update dissolve uniforms
   const camY = camPos.y;

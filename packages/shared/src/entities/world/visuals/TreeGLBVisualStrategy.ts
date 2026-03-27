@@ -318,9 +318,9 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     }
   }
 
-  update(): void {
-    updateGLBTreeInstancer();
-    updateGLBTreeBatchedInstancer();
+  update(_ctx: ResourceVisualContext, deltaTime: number): void {
+    updateGLBTreeInstancer(deltaTime);
+    updateGLBTreeBatchedInstancer(deltaTime);
   }
 
   destroy(ctx: ResourceVisualContext): void {

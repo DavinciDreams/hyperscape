@@ -555,61 +555,6 @@ export function removeInstance(entityId: string): void {
   dissolveAnims.delete(entityId);
 }
 
-export function setDepleted(entityId: string, depleted: boolean): void {
-  const modelPath = entityToModel.get(entityId);
-  if (!modelPath) return;
-
-  const pool = pools.get(modelPath);
-  if (!pool) return;
-
-  const slot = pool.instances.get(entityId);
-  if (!slot || slot.depleted === depleted) return;
-
-  slot.depleted = depleted;
-
-  if (depleted) {
-    // Remove from living LOD pool
-    const lodPool =
-      slot.currentLOD === 0
-        ? pool.lod0
-        : slot.currentLOD === 1
-          ? pool.lod1
-          : pool.lod2;
-    if (lodPool) removeFromPool(lodPool, entityId);
-
-    // Add to depleted pool (instanced stump)
-    if (pool.depleted) {
-      const mat = composeInstanceMatrix(
-        slot.position,
-        slot.rotation,
-        slot.depletedScale,
-        pool.depletedYOffset,
-      );
-      addToPool(pool.depleted, entityId, mat);
-    }
-  } else {
-    // Remove from depleted pool
-    if (pool.depleted) {
-      removeFromPool(pool.depleted, entityId);
-    }
-
-    // Re-add to living LOD pool
-    const mat = composeInstanceMatrix(
-      slot.position,
-      slot.rotation,
-      slot.scale,
-      slot.yOffset,
-    );
-    const lodPool =
-      slot.currentLOD === 0
-        ? pool.lod0
-        : slot.currentLOD === 1
-          ? pool.lod1
-          : pool.lod2;
-    if (lodPool) addToPool(lodPool, entityId, mat);
-  }
-}
-
 export function hasInstance(entityId: string): boolean {
   return entityToModel.has(entityId);
 }
@@ -653,17 +598,6 @@ export function getProxyGeometry(
     geometries: lodPool.sourceGeometries,
     yOffset: pool.yOffset,
   };
-}
-
-/**
- * Returns true if the instancer has a depleted pool for this entity's model.
- * When true, ResourceEntity can skip loading an individual depleted model.
- */
-export function hasDepleted(entityId: string): boolean {
-  const modelPath = entityToModel.get(entityId);
-  if (!modelPath) return false;
-  const pool = pools.get(modelPath);
-  return !!pool?.depleted;
 }
 
 /** Track which entity is currently highlighted so we can clear it */
@@ -759,14 +693,6 @@ function applyDissolveValue(entityId: string, value: number): void {
 }
 
 /**
- * Set dissolve value directly (no animation). 0 = visible, 1 = dissolved.
- */
-export function setDissolve(entityId: string, value: number): void {
-  dissolveAnims.delete(entityId);
-  applyDissolveValue(entityId, value);
-}
-
-/**
  * Start a dissolve animation. direction=1 dissolves out (depletion),
  * direction=-1 dissolves in (respawn).
  */
@@ -788,7 +714,7 @@ export function startDissolve(
 
 let lastUpdateFrame = -1;
 
-export function updateGLBTreeInstancer(): void {
+export function updateGLBTreeInstancer(deltaTime?: number): void {
   if (!world) return;
   if (world.frame === lastUpdateFrame) return;
   lastUpdateFrame = world.frame;
@@ -879,7 +805,8 @@ export function updateGLBTreeInstancer(): void {
   }
 
   // Tick dissolve animations
-  const dt = 1 / 60; // fixed step (trees use frame-based update, not real deltaTime)
+  const dt = deltaTime ?? 1 / 60;
+  const completed: string[] = [];
   for (const [entityId, anim] of dissolveAnims) {
     anim.progress += (anim.direction * dt) / DISSOLVE_DURATION;
     anim.progress = Math.max(0, Math.min(DISSOLVE_MAX, anim.progress));
@@ -888,9 +815,10 @@ export function updateGLBTreeInstancer(): void {
       (anim.direction > 0 && anim.progress >= DISSOLVE_MAX) ||
       (anim.direction < 0 && anim.progress <= 0)
     ) {
-      dissolveAnims.delete(entityId);
+      completed.push(entityId);
     }
   }
+  for (const id of completed) dissolveAnims.delete(id);
 
   // Flush dirty pools + update dissolve uniforms
   const camY = camPos.y;

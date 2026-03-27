@@ -1181,6 +1181,10 @@ export function createTreeDissolveMaterial(
     return vec4(fogged, mul(pbrOut.a, dissolveAlpha));
   })();
 
+  // transparent = true is required for real alpha blending on depleted trees.
+  // Non-depleted instances output alpha=1.0 (dissolveVal=0) so they don't incur
+  // sorting overhead — Three.js skips sort for opaque fragments in the transparent pass.
+  // depthWrite stays true to prevent z-fighting between overlapping trees.
   material.transparent = true;
   material.depthWrite = true;
   material.needsUpdate = true;
