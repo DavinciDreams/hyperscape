@@ -96,6 +96,13 @@ export interface GrassWorkerInput {
   }>;
   roadBlendWidth: number;
   tileSize: number;
+  flatZones: Array<{
+    centerX: number;
+    centerZ: number;
+    halfWidth: number;
+    halfDepth: number;
+    blendRadius: number;
+  }>;
 }
 
 export interface GrassWorkerOutput {
@@ -393,6 +400,18 @@ function calculateRoadInfluence(wx, wz, roadSegments, roadBlendWidth) {
   return t * t * (3 - 2 * t);
 }
 
+function isInFlatZone(wx, wz, flatZones) {
+  for (var i = 0; i < flatZones.length; i++) {
+    var fz = flatZones[i];
+    var dx = Math.abs(wx - fz.centerX);
+    var dz = Math.abs(wz - fz.centerZ);
+    if (dx <= fz.halfWidth + fz.blendRadius && dz <= fz.halfDepth + fz.blendRadius) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function generateGrassInstances(input) {
   var startTime = performance.now();
   var centerX = input.centerX, centerZ = input.centerZ, size = input.size;
@@ -450,6 +469,8 @@ function generateGrassInstances(input) {
     var ty = getHeightComputed(wx, wz);
 
     if (ty < WATER_THRESHOLD + 0.1) continue;
+
+    if (input.flatZones.length > 0 && isInFlatZone(wx, wz, input.flatZones)) continue;
 
     var roadInf = calculateRoadInfluence(wx, wz, input.roadSegments, input.roadBlendWidth);
     if (roadInf > 0.8) continue;

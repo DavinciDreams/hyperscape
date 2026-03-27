@@ -284,12 +284,25 @@ export interface GrassWorkerSetup {
     endZ: number;
     width: number;
   }>;
+  getFlatZonesForRegion: (
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ) => Array<{
+    centerX: number;
+    centerZ: number;
+    halfWidth: number;
+    halfDepth: number;
+    blendRadius: number;
+  }>;
 }
 
 export class GrassVisualManager implements QuadTreeListener {
   private container: THREE.Group;
   private getHeightAt: (x: number, z: number) => number;
   private getRoadInfluence: (wx: number, wz: number) => number;
+  private isInFlatZone: (wx: number, wz: number) => boolean;
   private getTerrainColorAt: (
     wx: number,
     wz: number,
@@ -332,6 +345,7 @@ export class GrassVisualManager implements QuadTreeListener {
     getHeightAt: (x: number, z: number) => number,
     waterThreshold: number,
     getRoadInfluence: (wx: number, wz: number) => number,
+    isInFlatZone: (wx: number, wz: number) => boolean,
     getTerrainColorAt: (
       wx: number,
       wz: number,
@@ -349,6 +363,7 @@ export class GrassVisualManager implements QuadTreeListener {
     this.getHeightAt = getHeightAt;
     this.waterThreshold = waterThreshold;
     this.getRoadInfluence = getRoadInfluence;
+    this.isInFlatZone = isInFlatZone;
     this.getTerrainColorAt = getTerrainColorAt;
     this.workerSetup = workerSetup ?? null;
 
@@ -534,6 +549,12 @@ export class GrassVisualManager implements QuadTreeListener {
       node.centerX + half,
       node.centerZ + half,
     );
+    const flatZones = ws.getFlatZonesForRegion(
+      node.centerX - half,
+      node.centerZ - half,
+      node.centerX + half,
+      node.centerZ + half,
+    );
 
     const input: GrassWorkerInput = {
       type: "generateGrassInstances",
@@ -565,6 +586,7 @@ export class GrassVisualManager implements QuadTreeListener {
       roadSegments,
       roadBlendWidth: 0.5,
       tileSize: ws.tileSize,
+      flatZones,
     };
 
     this.workerInflight.add(key);
@@ -609,6 +631,12 @@ export class GrassVisualManager implements QuadTreeListener {
       node.centerX + half,
       node.centerZ + half,
     );
+    const flatZones = ws.getFlatZonesForRegion(
+      node.centerX - half,
+      node.centerZ - half,
+      node.centerX + half,
+      node.centerZ + half,
+    );
 
     const input: GrassWorkerInput = {
       type: "generateGrassInstances",
@@ -640,6 +668,7 @@ export class GrassVisualManager implements QuadTreeListener {
       roadSegments,
       roadBlendWidth: 0.5,
       tileSize: ws.tileSize,
+      flatZones,
     };
 
     this.workerInflight.add(key);
@@ -894,6 +923,8 @@ export class GrassVisualManager implements QuadTreeListener {
       const ty = this.getHeightAt(wx, wz);
 
       if (ty < this.waterThreshold + 0.1) continue;
+
+      if (this.isInFlatZone(wx, wz)) continue;
 
       const roadInf = this.getRoadInfluence(wx, wz);
       if (roadInf > 0.8) continue;

@@ -1987,6 +1987,7 @@ export class TerrainSystem extends System {
         this.CONFIG.WATER_THRESHOLD,
         (wx: number, wz: number) =>
           this.calculateRoadInfluenceAtVertex(wx, wz, 0, 0),
+        (wx: number, wz: number) => this.isInFlatZone(wx, wz),
         (wx: number, wz: number) => this.getTerrainColorAt(wx, wz),
         grassWorkerSetup,
       );
@@ -2082,6 +2083,12 @@ export class TerrainSystem extends System {
         maxX: number,
         maxZ: number,
       ) => this.getWorldSpaceRoadSegmentsForRegion(minX, minZ, maxX, maxZ),
+      getFlatZonesForRegion: (
+        minX: number,
+        minZ: number,
+        maxX: number,
+        maxZ: number,
+      ) => this.getFlatZonesForRegion(minX, minZ, maxX, maxZ),
     };
   }
 
@@ -2132,6 +2139,61 @@ export class TerrainSystem extends System {
             endX: originX + seg.end.x,
             endZ: originZ + seg.end.z,
             width: seg.width,
+          });
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Collect flat zones overlapping a world-space AABB, returned as simplified
+   * rectangles for the grass worker to exclude grass from buildings/arenas.
+   */
+  private getFlatZonesForRegion(
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ): Array<{
+    centerX: number;
+    centerZ: number;
+    halfWidth: number;
+    halfDepth: number;
+    blendRadius: number;
+  }> {
+    if (this.flatZones.size === 0) return [];
+
+    const tileSize = this.CONFIG.TILE_SIZE;
+    const halfTile = tileSize / 2;
+    const minTX = Math.floor((minX + halfTile) / tileSize);
+    const minTZ = Math.floor((minZ + halfTile) / tileSize);
+    const maxTX = Math.floor((maxX + halfTile) / tileSize);
+    const maxTZ = Math.floor((maxZ + halfTile) / tileSize);
+
+    const seen = new Set<string>();
+    const result: Array<{
+      centerX: number;
+      centerZ: number;
+      halfWidth: number;
+      halfDepth: number;
+      blendRadius: number;
+    }> = [];
+
+    for (let tx = minTX; tx <= maxTX; tx++) {
+      for (let tz = minTZ; tz <= maxTZ; tz++) {
+        const zones = this.flatZonesByTile.get(`${tx}_${tz}`);
+        if (!zones) continue;
+        for (const zone of zones) {
+          if (seen.has(zone.id)) continue;
+          seen.add(zone.id);
+          result.push({
+            centerX: zone.centerX,
+            centerZ: zone.centerZ,
+            halfWidth: zone.width / 2,
+            halfDepth: zone.depth / 2,
+            blendRadius: zone.blendRadius,
           });
         }
       }
