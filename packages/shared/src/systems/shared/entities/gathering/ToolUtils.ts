@@ -178,12 +178,15 @@ export function itemMatchesToolCategory(
     );
   }
 
-  // NOTE: The substring fallback below is inherently fragile. For example, a combat
-  // weapon like "battleaxe" would match the hatchet category because it contains "axe".
-  // This is acceptable as a safety net — the manifest path is the long-term solution
-  // and all known gathering tools should be in tools.json.
+  // Substring fallback with combat-weapon exclusions to prevent false positives.
+  // All known gathering tools should be in tools.json — this is a safety net only.
   if (category === "hatchet") {
-    if (lowerItemId.includes("pickaxe") || lowerItemId.includes("pick")) {
+    if (
+      lowerItemId.includes("pickaxe") ||
+      lowerItemId.includes("pick") ||
+      lowerItemId.includes("battleaxe") ||
+      lowerItemId.includes("greataxe")
+    ) {
       return false;
     }
     return lowerItemId.includes("hatchet") || lowerItemId.includes("axe");

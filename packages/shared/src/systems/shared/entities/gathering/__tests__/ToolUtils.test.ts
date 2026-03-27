@@ -123,6 +123,17 @@ describe("ToolUtils", () => {
         expect(itemMatchesToolCategory("logs", "hatchet")).toBe(false);
       });
 
+      it("rejects combat weapons containing 'axe'", () => {
+        expect(itemMatchesToolCategory("battleaxe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("iron_battleaxe", "hatchet")).toBe(
+          false,
+        );
+        expect(itemMatchesToolCategory("greataxe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("dragon_greataxe", "hatchet")).toBe(
+          false,
+        );
+      });
+
       it("does not match pickaxe for hatchet category", () => {
         // Pickaxes are mining tools — they must NOT match the hatchet (woodcutting) category.
         // The manifest declares each tool's skill explicitly, preventing cross-skill usage.
@@ -298,6 +309,20 @@ describe("ToolUtils", () => {
           true,
         );
         expect(itemMatchesToolCategory("pot", "lobster_pot")).toBe(false);
+      });
+
+      it("fishing tools do not match hatchet or pickaxe categories", () => {
+        // Three-way invariant: fishing tools are never valid for woodcutting/mining
+        expect(itemMatchesToolCategory("fishing_rod", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("fishing_rod", "pickaxe")).toBe(false);
+        expect(itemMatchesToolCategory("harpoon", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("harpoon", "pickaxe")).toBe(false);
+        expect(itemMatchesToolCategory("small_fishing_net", "hatchet")).toBe(
+          false,
+        );
+        expect(itemMatchesToolCategory("small_fishing_net", "pickaxe")).toBe(
+          false,
+        );
       });
     });
   });
