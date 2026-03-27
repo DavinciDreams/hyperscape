@@ -108,20 +108,33 @@ const _proxyGeometryCache = new Map<
   Map<number, THREE.BufferGeometry>
 >();
 
+/**
+ * Dispose all cached proxy geometries and clear the cache.
+ * Must be called during world teardown to prevent GPU buffer leaks.
+ */
+export function clearProxyGeometryCache(): void {
+  for (const scaleMap of _proxyGeometryCache.values()) {
+    for (const geo of scaleMap.values()) geo.dispose();
+  }
+  _proxyGeometryCache.clear();
+}
+
 function getOrCreateProxyGeometry(
   sourceGeometries: THREE.BufferGeometry[],
   scale: number,
 ): THREE.BufferGeometry | null {
+  // Round scale to 3 decimal places to avoid floating-point cache misses
+  const key = Math.round(scale * 1000) / 1000;
   let scaleMap = _proxyGeometryCache.get(sourceGeometries);
   if (scaleMap) {
-    const cached = scaleMap.get(scale);
+    const cached = scaleMap.get(key);
     if (cached) return cached;
   }
 
   const merged = mergeGeometries(sourceGeometries);
   if (!merged) return null;
 
-  // Clone + scale (or just scale if mergeGeometries created a new geometry for multi-part)
+  // Always clone so mergeGeometries' single-part return (shared ref) is never mutated
   const scaled = merged.clone();
   scaled.scale(scale, scale, scale);
 
@@ -129,7 +142,7 @@ function getOrCreateProxyGeometry(
     scaleMap = new Map();
     _proxyGeometryCache.set(sourceGeometries, scaleMap);
   }
-  scaleMap.set(scale, scaled);
+  scaleMap.set(key, scaled);
   return scaled;
 }
 
@@ -143,15 +156,15 @@ function createCollisionProxy(
   const proxyData = batched
     ? getBatchedProxyGeometry(ctx.id)
     : getInstancedProxyGeometry(ctx.id);
-  const geometry_cached = proxyData
+  const cachedGeometry = proxyData
     ? getOrCreateProxyGeometry(proxyData.geometries, scale)
     : null;
 
   let geometry: THREE.BufferGeometry;
   let yPos: number;
 
-  if (geometry_cached && proxyData) {
-    geometry = geometry_cached;
+  if (cachedGeometry && proxyData) {
+    geometry = cachedGeometry;
     // Align with visual: instancer shifts instances up by yOffset * scale
     yPos = proxyData.yOffset * scale;
   } else {
