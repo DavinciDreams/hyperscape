@@ -49,6 +49,14 @@ import { DAY_CYCLE, SUN_LIGHT } from "./LightingConfig";
 
 const SKY_DOME_RADIUS = 5000;
 
+const SKY_RENDER_ORDER = {
+  SKY_DOME: -1000,
+  CELESTIAL_GLOW_OUTER: -999,
+  CELESTIAL_GLOW_INNER: -998,
+  CELESTIAL_DISC: -997,
+  CLOUDS: -995,
+} as const;
+
 // -----------------------------
 // Utility: Procedural noise textures (avoids external deps)
 // -----------------------------
@@ -648,7 +656,7 @@ export class SkySystem extends System {
     this.sun = new THREE.Mesh(sunGeom, sunMat);
     this.sun.name = "SkySun";
     this.sun.frustumCulled = false;
-    this.sun.renderOrder = 1000; // Render AFTER terrain so depth test works
+    this.sun.renderOrder = SKY_RENDER_ORDER.CELESTIAL_DISC;
     this.sun.layers.set(1); // Main camera only, not minimap
     this.group.add(this.sun);
 
@@ -682,7 +690,7 @@ export class SkySystem extends System {
     const innerGlow = new THREE.Mesh(innerGlowGeom, innerGlowMat);
     innerGlow.name = "SkySunInnerGlow";
     innerGlow.frustumCulled = false;
-    innerGlow.renderOrder = 999; // Render after terrain, before sun
+    innerGlow.renderOrder = SKY_RENDER_ORDER.CELESTIAL_GLOW_INNER;
     innerGlow.layers.set(1); // Main camera only, not minimap
     this.group.add(innerGlow);
     // Store for position updates
@@ -723,7 +731,7 @@ export class SkySystem extends System {
     this.sunGlow = new THREE.Mesh(outerGlowGeom, outerGlowMat);
     this.sunGlow.name = "SkySunGlow";
     this.sunGlow.frustumCulled = false;
-    this.sunGlow.renderOrder = 998; // Render after terrain, before inner glow
+    this.sunGlow.renderOrder = SKY_RENDER_ORDER.CELESTIAL_GLOW_OUTER;
     this.sunGlow.layers.set(1); // Main camera only, not minimap
     this.group.add(this.sunGlow);
   }
@@ -767,7 +775,7 @@ export class SkySystem extends System {
     this.moon = new THREE.Mesh(moonGeom, moonMat);
     this.moon.name = "SkyMoon";
     this.moon.frustumCulled = false;
-    this.moon.renderOrder = 1000; // Render AFTER terrain so depth test works
+    this.moon.renderOrder = SKY_RENDER_ORDER.CELESTIAL_DISC;
     this.moon.layers.set(1); // Main camera only, not minimap
     this.group.add(this.moon);
 
@@ -803,7 +811,7 @@ export class SkySystem extends System {
     this.moonGlow = new THREE.Mesh(moonGlowGeom, moonGlowMat);
     this.moonGlow.name = "SkyMoonGlow";
     this.moonGlow.frustumCulled = false;
-    this.moonGlow.renderOrder = 999; // Render after terrain, before moon
+    this.moonGlow.renderOrder = SKY_RENDER_ORDER.CELESTIAL_GLOW_INNER;
     this.moonGlow.layers.set(1); // Main camera only, not minimap
     this.group.add(this.moonGlow);
   }
@@ -1052,7 +1060,7 @@ export class SkySystem extends System {
 
     this.skyMesh = new THREE.Mesh(skyGeom, skyMat);
     this.skyMesh.frustumCulled = false;
-    this.skyMesh.renderOrder = -1000; // Render first, behind everything
+    this.skyMesh.renderOrder = SKY_RENDER_ORDER.SKY_DOME;
     this.skyMesh.name = "AdvancedSkydome";
     this.skyMesh.layers.set(1); // Main camera only, not minimap
     this.group.add(this.skyMesh);
@@ -1332,7 +1340,7 @@ export class SkySystem extends System {
 
       const mesh = new THREE.Mesh(geom, mat);
       mesh.frustumCulled = false;
-      mesh.renderOrder = -995;
+      mesh.renderOrder = SKY_RENDER_ORDER.CLOUDS;
       mesh.position.set(cx, cy, cz);
       mesh.rotation.y = azRad + Math.PI;
       mesh.scale.set(def.w * 10, def.h * 10, 1);
@@ -1507,10 +1515,6 @@ export class SkySystem extends System {
         this._sunDir.z * SKY_DOME_RADIUS,
       );
     }
-
-    // Ensure render order - render AFTER terrain so depth test works (terrain occludes celestials)
-    if (this.sun) this.sun.renderOrder = 1000;
-    if (this.moon) this.moon.renderOrder = 1000;
 
     // Clouds are static on the ring — movement comes from the shader's
     // noise UV distortion and alpha oscillation.
