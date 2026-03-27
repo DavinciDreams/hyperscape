@@ -156,7 +156,7 @@ const CANYON_GRASS_CONFIG: BiomeGrassConfig = {
 };
 
 const TUNDRA_GRASS_CONFIG: BiomeGrassConfig = {
-  density: 0.5,
+  density: 1.0,
   maxSlope: 0.3,
   minGrassWeight: 0.8,
   heightScale: 1.0,
