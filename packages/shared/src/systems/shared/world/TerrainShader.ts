@@ -50,7 +50,7 @@ import { getRoadInfluenceTextureState } from "./RoadInfluenceMask";
 import { getLamppostLightTextureState } from "./LamppostLightMask";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
-import { SUN_LIGHT, SUN_SHADE } from "./LightingConfig";
+import { SUN_LIGHT, SUN_SHADE, applyCustomLighting } from "./LightingConfig";
 
 export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
@@ -75,9 +75,29 @@ export const TERRAIN_SHADER_CONSTANTS = {
 export const TERRAIN_SHADE = {
   TINT_COLOR: SUN_SHADE.TINT_COLOR,
   STRENGTH: 0.7,
-  FRESNEL_POWER: 3.0,
-  FRESNEL_INTENSITY: 0.2,
 };
+
+/**
+ * Shared TSL anime shading: half-lambert cool tint.
+ * Used by both terrain and grass so the shading stays in sync.
+ */
+export function applyAnimeShade(
+  baseColor: any,
+  normal: any,
+  sunDirNode: any,
+): any {
+  const sDir = normalize(vec3(sunDirNode));
+  const NdotL = dot(normal, sDir);
+  const halfLambert = add(mul(NdotL, float(0.5)), float(0.5));
+  const shadeFactor = sub(float(1.0), halfLambert);
+  const coolTint = vec3(...TERRAIN_SHADE.TINT_COLOR);
+  const tintedBase = mul(baseColor, coolTint);
+  return mix(
+    baseColor,
+    tintedBase,
+    mul(shadeFactor, float(TERRAIN_SHADE.STRENGTH)),
+  );
+}
 
 const TERRAIN_TEX_TILE = 0.3;
 const TERRAIN_TEX_DIR = "textures/terrain-biomes";
@@ -704,8 +724,19 @@ export function calculateSlope(
 
 type RGB = { r: number; g: number; b: number };
 
+// sRGB channel → linear.  GPU auto-converts SRGBColorSpace textures to linear
+// before any math.  All CPU constants must also be in linear so the blending
+// (mixRGB / blendBiome / darken) produces identical results to the GPU shader.
+function srgbCh(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+const lin = (r: number, g: number, b: number): RGB => ({
+  r: srgbCh(r),
+  g: srgbCh(g),
+  b: srgbCh(b),
+});
+
 // GPU shader darkens textures by multiplying with TEX_DARKEN (0.65).
-// CPU dark variants = base × 0.65 to match.
 const TEX_DARKEN_CPU = 0.65;
 const darken = (c: RGB): RGB => ({
   r: c.r * TEX_DARKEN_CPU,
@@ -713,41 +744,41 @@ const darken = (c: RGB): RGB => ({
   b: c.b * TEX_DARKEN_CPU,
 });
 
-// Colors matched to actual texture average colors (sampled from PNGs).
-// Tundra/snow biome — snowgrass.png avg (0.79, 0.80, 0.80)
-const _TUNDRA_GRASS: RGB = { r: 0.79, g: 0.8, b: 0.8 };
+// Texture-matching constants: sRGB fallback values → linear via lin().
+// Non-texture constants: raw linear values matching GPU vec3() exactly.
+
+// Tundra/snow — snowgrass.png avg sRGB (0.79, 0.80, 0.80)
+const _TUNDRA_GRASS: RGB = lin(0.79, 0.8, 0.8);
 const _TUNDRA_GRASS_DARK: RGB = darken(_TUNDRA_GRASS);
 const _TUNDRA_GRASS_HIGH: RGB = { r: 0.68, g: 0.72, b: 0.78 };
 const _TUNDRA_VARIATION: RGB = { r: 0.6, g: 0.64, b: 0.7 };
-// snowdirt.png avg (0.78, 0.82, 0.84)
-const _TUNDRA_DIRT: RGB = { r: 0.78, g: 0.82, b: 0.84 };
+// snowdirt.png avg sRGB (0.78, 0.82, 0.84)
+const _TUNDRA_DIRT: RGB = lin(0.78, 0.82, 0.84);
 const _TUNDRA_DIRT_DARK: RGB = darken(_TUNDRA_DIRT);
-// snowdirt.png used for cliff too
-const _TUNDRA_CLIFF: RGB = { r: 0.78, g: 0.82, b: 0.84 };
+const _TUNDRA_CLIFF: RGB = lin(0.78, 0.82, 0.84);
 const _TUNDRA_CLIFF_DARK: RGB = darken(_TUNDRA_CLIFF);
 
-// Forest biome — grass.png avg (0.39, 0.63, 0.20)
-const _FOREST_GRASS: RGB = { r: 0.39, g: 0.63, b: 0.2 };
+// Forest — grass.png avg sRGB (0.39, 0.63, 0.20)
+const _FOREST_GRASS: RGB = lin(0.39, 0.63, 0.2);
 const _FOREST_GRASS_DARK: RGB = darken(_FOREST_GRASS);
 const _FOREST_GRASS_HIGH: RGB = { r: 0.24, g: 0.45, b: 0.18 };
 const _FOREST_VARIATION: RGB = { r: 0.15, g: 0.35, b: 0.1 };
-// dirt.png avg (0.82, 0.64, 0.34)
-const _FOREST_DIRT: RGB = { r: 0.82, g: 0.64, b: 0.34 };
+// dirt.png avg sRGB (0.82, 0.64, 0.34)
+const _FOREST_DIRT: RGB = lin(0.82, 0.64, 0.34);
 const _FOREST_DIRT_DARK: RGB = darken(_FOREST_DIRT);
-// cliff.png avg (0.71, 0.67, 0.60)
-const _FOREST_CLIFF: RGB = { r: 0.71, g: 0.67, b: 0.6 };
+// cliff.png avg sRGB (0.71, 0.67, 0.60)
+const _FOREST_CLIFF: RGB = lin(0.71, 0.67, 0.6);
 const _FOREST_CLIFF_DARK: RGB = darken(_FOREST_CLIFF);
 
-// Canyon/desert biome — desertGrass.png avg (0.51, 0.41, 0.28)
-const _CANYON_SAND: RGB = { r: 0.51, g: 0.41, b: 0.28 };
+// Canyon/desert — desertGrass.png avg sRGB (0.51, 0.41, 0.28)
+const _CANYON_SAND: RGB = lin(0.51, 0.41, 0.28);
 const _CANYON_SAND_DARK: RGB = darken(_CANYON_SAND);
-const _CANYON_SAND_HIGH: RGB = { r: 0.42, g: 0.34, b: 0.22 };
-const _CANYON_VARIATION: RGB = { r: 0.45, g: 0.34, b: 0.2 };
-// desertDirt.png avg (0.54, 0.42, 0.32)
-const _CANYON_ROCK: RGB = { r: 0.54, g: 0.42, b: 0.32 };
+const _CANYON_SAND_HIGH: RGB = { r: 0.62, g: 0.38, b: 0.22 };
+const _CANYON_VARIATION: RGB = { r: 0.58, g: 0.34, b: 0.16 };
+// desertDirt.png avg sRGB (0.54, 0.42, 0.32)
+const _CANYON_ROCK: RGB = lin(0.54, 0.42, 0.32);
 const _CANYON_ROCK_DARK: RGB = darken(_CANYON_ROCK);
-// desertDirt.png used for cliff too
-const _CANYON_CLIFF: RGB = { r: 0.54, g: 0.42, b: 0.32 };
+const _CANYON_CLIFF: RGB = lin(0.54, 0.42, 0.32);
 const _CANYON_CLIFF_DARK: RGB = darken(_CANYON_CLIFF);
 
 const _CLIFF_TINT: RGB = { r: 0.28, g: 0.3, b: 0.36 };
@@ -780,6 +811,34 @@ function blendBiome(
 }
 
 function sampleNoiseCPU(worldX: number, worldZ: number, scale: number): number {
+  const tex = cachedNoiseTexture;
+  if (tex?.image?.data) {
+    const data = tex.image.data as Uint8Array;
+    const u = worldX * scale;
+    const v = worldZ * scale;
+    // Bilinear sample matching GPU's LinearFilter + RepeatWrapping
+    const px = (((u % 1) + 1) % 1) * NOISE_SIZE - 0.5;
+    const py = (((v % 1) + 1) % 1) * NOISE_SIZE - 0.5;
+    const x0 = Math.floor(px);
+    const y0 = Math.floor(py);
+    const fx = px - x0;
+    const fy = py - y0;
+    const ix0 = ((x0 % NOISE_SIZE) + NOISE_SIZE) % NOISE_SIZE;
+    const iy0 = ((y0 % NOISE_SIZE) + NOISE_SIZE) % NOISE_SIZE;
+    const ix1 = (ix0 + 1) % NOISE_SIZE;
+    const iy1 = (iy0 + 1) % NOISE_SIZE;
+    const v00 = data[(iy0 * NOISE_SIZE + ix0) * 4] / 255;
+    const v10 = data[(iy0 * NOISE_SIZE + ix1) * 4] / 255;
+    const v01 = data[(iy1 * NOISE_SIZE + ix0) * 4] / 255;
+    const v11 = data[(iy1 * NOISE_SIZE + ix1) * 4] / 255;
+    return (
+      v00 * (1 - fx) * (1 - fy) +
+      v10 * fx * (1 - fy) +
+      v01 * (1 - fx) * fy +
+      v11 * fx * fy
+    );
+  }
+  // Fallback: direct computation if texture not yet generated
   if (!cachedPerm) cachedPerm = createPermutation(12345);
   const u = worldX * scale;
   const v = worldZ * scale;
@@ -963,6 +1022,7 @@ export type TerrainUniforms = {
   sunDirection: { value: THREE.Vector3 };
   time: { value: number };
   fogEnabled: { value: number }; // 1.0 = fog enabled, 0.0 = fog disabled (for minimap)
+  dayIntensity: { value: number }; // 0 = night, 1 = day
   // Vertex lighting uniforms (lampposts, etc.)
   vertexLightPositions: { value: THREE.Vector3 }[]; // Array of 8 light positions
   vertexLightColors: { value: THREE.Vector3 }[]; // Array of 8 light colors
@@ -1364,36 +1424,12 @@ export function createTerrainMaterial(): THREE.Material & {
 
   const baseWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
 
-  // ============================================================================
-  // HALF-LAMBERT ANIME SHADE (cool shadow tint — Genshin-style)
-  // Wraps N·L to [0,1] for soft wrapped lighting, then tints shadow side
-  // with cool blue-teal hue. Applied to albedo before PBR so the hue shift
-  // survives through subsequent lighting calculations.
-  // ============================================================================
-  const sunDir = normalize(vec3(sunDirectionUniform));
-  const NdotL = dot(worldNormal, sunDir);
-  const halfLambert = add(mul(NdotL, float(0.5)), float(0.5));
-  const shadeFactor = sub(float(1.0), halfLambert);
-  const coolTint = vec3(...TERRAIN_SHADE.TINT_COLOR);
-  const tintedBase = mul(baseWithRoads, coolTint);
-  const shadedBase = mix(
+  // Half-lambert anime shade + fresnel rim (shared with grass)
+  const animeBase = applyAnimeShade(
     baseWithRoads,
-    tintedBase,
-    mul(shadeFactor, float(TERRAIN_SHADE.STRENGTH)),
+    worldNormal,
+    sunDirectionUniform,
   );
-
-  // Fresnel rim highlight at grazing angles (subtle painterly edge glow)
-  const viewDir = normalize(sub(worldPos, cameraPosition));
-  const rim = clamp(
-    add(float(1.0), dot(viewDir, worldNormal)),
-    float(0.0),
-    float(1.0),
-  );
-  const fresnelRim = mul(
-    pow(rim, float(TERRAIN_SHADE.FRESNEL_POWER)),
-    float(TERRAIN_SHADE.FRESNEL_INTENSITY),
-  );
-  const animeBase = add(shadedBase, vec3(fresnelRim, fresnelRim, fresnelRim));
 
   // ============================================================================
   // VERTEX LIGHTING (lampposts, torches, etc.)
@@ -1543,21 +1579,28 @@ export function createTerrainMaterial(): THREE.Material & {
   const fogColor = fogTexNode.rgb;
 
   // === CREATE MATERIAL ===
-  // Half-lambert anime shade (cool shadow tint + fresnel rim) is baked into
-  // the albedo above.  PBR still applies Lambertian diffuse on top, which
-  // darkens the shadow side further — the hue shift in the albedo is what
-  // gives the Genshin-style warm-lit / cool-shadow look.
+  // Bypass PBR entirely — use applyCustomLighting for both terrain and grass
+  // so they produce identical pixels at the same world position.
+  const dayIntensityUniform = uniform(1.0);
+  const shadeColor = vec3(...SUN_SHADE.TINT_COLOR);
+
   const material = new MeshStandardNodeMaterial();
-  material.colorNode = litTerrain;
+  material.colorNode = vec3(0, 0, 0);
   material.roughness = 1.0;
   material.metalness = 0.0;
   material.side = THREE.FrontSide;
   material.fog = false;
 
-  // Fog applied AFTER PBR lighting (fog blends with sky, must be post-lit)
   material.outputNode = Fn(() => {
-    const litColor = output;
-    return vec4(mix(litColor.rgb, fogColor, fogFactor), litColor.a);
+    const lit = applyCustomLighting(
+      litTerrain,
+      worldNormal,
+      sunDirectionUniform,
+      dayIntensityUniform,
+      shadeColor,
+    );
+    const fogged = mix(lit, fogColor, fogFactor);
+    return vec4(fogged, float(1.0));
   })();
 
   const terrainUniforms: TerrainUniforms = {
@@ -1565,6 +1608,7 @@ export function createTerrainMaterial(): THREE.Material & {
     sunDirection: sunDirectionUniform as unknown as { value: THREE.Vector3 },
     time: timeUniform,
     fogEnabled: fogEnabledUniform,
+    dayIntensity: dayIntensityUniform as unknown as { value: number },
     // Vertex lighting arrays
     vertexLightPositions: vertexLightPositionUniforms.map(
       (u) => u as unknown as { value: THREE.Vector3 },

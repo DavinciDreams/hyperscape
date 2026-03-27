@@ -87,7 +87,7 @@ export const SUN_SHADE = {
 export const NIGHT = {
   /** Master night brightness (0 = pitch black, 1 = full day brightness).
    *  Controls both the tree shader nightDim floor and scene light intensity bases. */
-  BRIGHTNESS: 0.8,
+  BRIGHTNESS: 0.5,
 } as const;
 
 // ============================================================================
@@ -149,7 +149,16 @@ export const EXPOSURE = {
 // SHARED SUN-SHADE SHADER FUNCTION (TSL)
 // ============================================================================
 
-import { sub, mul, float, mix, vec3 } from "../../../extras/three/three";
+import {
+  sub,
+  mul,
+  float,
+  mix,
+  vec3,
+  add,
+  dot,
+  normalize,
+} from "../../../extras/three/three";
 
 /**
  * Apply a day/night sky-tint to a colour in TSL.
@@ -169,6 +178,35 @@ export function applySunShade(color: any, dayIntensity: any, shadeColor: any) {
   const shadeFactor = sub(float(1.0), dayIntensity);
   const tinted = mul(color, shadeColor);
   return mix(color, tinted, shadeFactor);
+}
+
+/**
+ * Shared custom lighting for terrain and grass — bypasses PBR entirely.
+ * Applies day/night tint + half-lambert directional shading + ambient floor.
+ * Both terrain and grass call this with the same parameters to guarantee
+ * identical pixel output at the same world position.
+ *
+ * @param albedo       - Pre-lit base color (after anime shade + vertex lights)
+ * @param normal       - Surface normal (terrain slope)
+ * @param sunDirNode   - Sun direction uniform
+ * @param dayIntensity - Day intensity uniform [0,1]
+ * @param shadeColor   - Night tint color node
+ */
+export function applyCustomLighting(
+  albedo: any,
+  normal: any,
+  sunDirNode: any,
+  dayIntensity: any,
+  shadeColor: any,
+): any {
+  const tinted = applySunShade(albedo, dayIntensity, shadeColor);
+  const sunDir = normalize(vec3(sunDirNode));
+  const NdotL = dot(normal, sunDir);
+  const halfLambert = add(mul(NdotL, float(0.5)), float(0.5));
+  const ambient = float(0.35);
+  const lighting = add(ambient, mul(float(0.65), halfLambert));
+  const nightDim = mix(float(NIGHT.BRIGHTNESS), float(1.0), dayIntensity);
+  return mul(tinted, mul(lighting, nightDim));
 }
 
 // ============================================================================

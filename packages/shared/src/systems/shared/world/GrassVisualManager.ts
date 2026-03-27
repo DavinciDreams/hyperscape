@@ -14,8 +14,6 @@ import THREE, {
   Fn,
   float,
   sin,
-  mix,
-  smoothstep,
   time,
   positionLocal,
   attribute,
@@ -23,25 +21,14 @@ import THREE, {
   uv,
   pow,
   vec3,
-  dot,
-  normalize,
-  add,
-  mul,
-  sub,
+  vec4,
+  mix,
+  smoothstep,
 } from "../../../extras/three/three";
-import { SUN_LIGHT } from "./LightingConfig";
-import { TERRAIN_SHADE } from "./TerrainShader";
+import { SUN_LIGHT, SUN_SHADE, applyCustomLighting } from "./LightingConfig";
+import { applyAnimeShade } from "./TerrainShader";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import type { TerrainQuadNode, QuadTreeListener } from "./TerrainQuadTree";
-
-// sRGB → linear conversion.  computeTerrainColorCPU returns sRGB-space values
-// (its constants match the textures' sRGB averages). The GPU terrain shader
-// auto-converts sRGB textures to linear before blending. Float vertex
-// attributes have NO automatic conversion, so we must do it on the CPU side
-// before writing to instanceGroundColor.
-function srgbToLinear(c: number): number {
-  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-}
 
 // ---------------------------------------------------------------------------
 // Configuration — tweak these to control grass appearance & performance
@@ -88,7 +75,6 @@ export const GRASS_CONFIG = {
   GRADIENT_FALLOFF: 1.7,
 
   // -- Terrain filters ------------------------------------------------------
-  MAX_SLOPE: 0.7,
   /** Minimum grassWeight from terrain color function to place a clump (0-1) */
   MIN_GRASS_WEIGHT: 0.3,
 
@@ -153,7 +139,6 @@ function createClumpGeometry(
   const normals = new Float32Array(totalVerts * 3);
   const uvs = new Float32Array(totalVerts * 2);
   const indices = new Uint16Array(totalIdx);
-  const bladeHashAttr = new Float32Array(totalVerts);
 
   const rng = mulberry32(91827364);
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -182,7 +167,7 @@ function createClumpGeometry(
     const curveDirX = Math.cos(curveAngle) * arcDist;
     const curveDirZ = Math.sin(curveAngle) * arcDist;
 
-    const bHash = rng();
+    rng(); // consume one RNG value to keep deterministic sequence stable
     const baseVert = vi;
 
     for (let i = 0; i < segs; i++) {
@@ -203,7 +188,6 @@ function createClumpGeometry(
         normals[vi * 3 + 2] = cr;
         uvs[vi * 2] = side;
         uvs[vi * 2 + 1] = t;
-        bladeHashAttr[vi] = bHash;
         vi++;
       }
     }
@@ -216,7 +200,6 @@ function createClumpGeometry(
     normals[vi * 3 + 2] = cr;
     uvs[vi * 2] = 0.5;
     uvs[vi * 2 + 1] = 1.0;
-    bladeHashAttr[vi] = bHash;
     vi++;
 
     for (let i = 0; i < segs - 1; i++) {
@@ -239,7 +222,6 @@ function createClumpGeometry(
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
   geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-  geo.setAttribute("bladeHash", new THREE.BufferAttribute(bladeHashAttr, 1));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
   return geo;
 }
@@ -264,19 +246,20 @@ export class GrassVisualManager implements QuadTreeListener {
   private container: THREE.Group;
   private getHeightAt: (x: number, z: number) => number;
   private getRoadInfluence: (wx: number, wz: number) => number;
+  private getTerrainColorAt: (
+    wx: number,
+    wz: number,
+  ) => {
+    r: number;
+    g: number;
+    b: number;
+    grassWeight: number;
+    nx: number;
+    ny: number;
+    nz: number;
+  };
   private sunDirUniform: ReturnType<typeof uniform<THREE.Vector3>>;
-  private getTerrainColor: (
-    wx: number,
-    wz: number,
-    h: number,
-    slope: number,
-    fW: number,
-    cW: number,
-  ) => { r: number; g: number; b: number; grassWeight: number };
-  private getBiomeWeights: (
-    wx: number,
-    wz: number,
-  ) => { biomeWeightMap: Map<string, number>; totalWeight: number };
+  private dayIntensityUniform: ReturnType<typeof uniform<number>>;
   private waterThreshold: number;
   private chunks = new Map<string, GrassChunk>();
   private material: MeshStandardNodeMaterial;
@@ -287,31 +270,24 @@ export class GrassVisualManager implements QuadTreeListener {
   private playerX = 0;
   private playerZ = 0;
 
+  private pendingNodes: { node: TerrainQuadNode; lod?: number }[] = [];
+  private static readonly MAX_CHUNKS_PER_FRAME = 2;
+
   constructor(
     container: THREE.Group,
-    _world: unknown,
     getHeightAt: (x: number, z: number) => number,
     waterThreshold: number,
     getRoadInfluence: (wx: number, wz: number) => number,
-    getTerrainColor: (
+    getTerrainColorAt: (
       wx: number,
       wz: number,
-      h: number,
-      slope: number,
-      fW: number,
-      cW: number,
     ) => { r: number; g: number; b: number; grassWeight: number },
-    getBiomeWeights: (
-      wx: number,
-      wz: number,
-    ) => { biomeWeightMap: Map<string, number>; totalWeight: number },
   ) {
     this.container = container;
     this.getHeightAt = getHeightAt;
     this.waterThreshold = waterThreshold;
     this.getRoadInfluence = getRoadInfluence;
-    this.getTerrainColor = getTerrainColor;
-    this.getBiomeWeights = getBiomeWeights;
+    this.getTerrainColorAt = getTerrainColorAt;
 
     this.lodGeometries = GRASS_CONFIG.LOD_TIERS.map((tier) =>
       createClumpGeometry(tier.bladesPerClump, tier.bladeSegments),
@@ -339,9 +315,27 @@ export class GrassVisualManager implements QuadTreeListener {
     this.sunDirUniform.value.copy(sunDir);
   }
 
+  updateDayIntensity(val: number): void {
+    this.dayIntensityUniform.value = val;
+  }
+
   update(playerX: number, playerZ: number, camera?: THREE.Camera): void {
     this.playerX = playerX;
     this.playerZ = playerZ;
+
+    // Drain pending queue — build at most N new chunks per frame
+    let built = 0;
+    while (
+      this.pendingNodes.length > 0 &&
+      built < GrassVisualManager.MAX_CHUNKS_PER_FRAME
+    ) {
+      const { node, lod } = this.pendingNodes.shift()!;
+      if (!this.chunks.has(this.chunkKey(node))) {
+        this.createChunkMesh(node, lod);
+        built++;
+      }
+    }
+
     if (!camera || this.chunks.size === 0) return;
 
     this.projScreenMatrix.multiplyMatrices(
@@ -352,25 +346,26 @@ export class GrassVisualManager implements QuadTreeListener {
 
     const tiers = GRASS_CONFIG.LOD_TIERS;
     const hysteresis = GRASS_CONFIG.LOD_HYSTERESIS;
-    let rebuilds = 0;
-    const MAX_REBUILDS_PER_FRAME = 2;
 
-    for (const [key, chunk] of this.chunks) {
+    for (const [, chunk] of this.chunks) {
       chunk.mesh.visible = this.frustum.intersectsBox(chunk.box);
-      if (!chunk.mesh.visible || rebuilds >= MAX_REBUILDS_PER_FRAME) continue;
+      if (
+        !chunk.mesh.visible ||
+        built >= GrassVisualManager.MAX_CHUNKS_PER_FRAME
+      )
+        continue;
 
-      // Check if LOD tier should change
       const dx = chunk.node.centerX - playerX;
       const dz = chunk.node.centerZ - playerZ;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      const currentTier = tiers[chunk.lodLevel];
       const desiredLod = this.getLodLevel(chunk.node);
 
       if (desiredLod !== chunk.lodLevel) {
+        const currentTier = tiers[chunk.lodLevel];
         const boundary =
           desiredLod < chunk.lodLevel
-            ? currentTier.maxDistance // moving closer: use current tier boundary
-            : (tiers[desiredLod - 1]?.maxDistance ?? 0); // moving farther: use target-1 boundary
+            ? currentTier.maxDistance
+            : (tiers[desiredLod - 1]?.maxDistance ?? 0);
         const threshold =
           boundary *
           (1 + (desiredLod < chunk.lodLevel ? -hysteresis : hysteresis));
@@ -380,9 +375,9 @@ export class GrassVisualManager implements QuadTreeListener {
         if (shouldSwitch) {
           if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
           chunk.mesh.geometry.dispose();
-          this.chunks.delete(key);
+          this.chunks.delete(this.chunkKey(chunk.node));
           this.createChunkMesh(chunk.node, desiredLod);
-          rebuilds++;
+          built++;
         }
       }
     }
@@ -394,7 +389,8 @@ export class GrassVisualManager implements QuadTreeListener {
     if (!node.isMaxDepth) return;
     const key = this.chunkKey(node);
     if (this.chunks.has(key)) return;
-    this.createChunkMesh(node);
+    if (this.pendingNodes.some((p) => p.node === node)) return;
+    this.pendingNodes.push({ node });
   }
 
   onNodeDestroyGeometry(node: TerrainQuadNode): void {
@@ -407,6 +403,7 @@ export class GrassVisualManager implements QuadTreeListener {
   }
 
   destroy(): void {
+    this.pendingNodes.length = 0;
     for (const [, chunk] of this.chunks) {
       if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
       chunk.mesh.geometry.dispose();
@@ -429,7 +426,7 @@ export class GrassVisualManager implements QuadTreeListener {
     this.chunks.clear();
     for (const node of nodes) {
       node.visualChunkKey = null;
-      this.createChunkMesh(node);
+      this.pendingNodes.push({ node });
     }
   }
 
@@ -462,7 +459,7 @@ export class GrassVisualManager implements QuadTreeListener {
       this.chunks.delete(key);
     }
     for (const node of toRebuild) {
-      this.createChunkMesh(node);
+      this.pendingNodes.push({ node });
     }
   }
 
@@ -503,6 +500,10 @@ export class GrassVisualManager implements QuadTreeListener {
       "instanceGroundColor",
       new THREE.InstancedBufferAttribute(instanceData.groundColors, 3),
     );
+    geo.setAttribute(
+      "instanceGroundNormal",
+      new THREE.InstancedBufferAttribute(instanceData.groundNormals, 3),
+    );
 
     const mesh = new THREE.InstancedMesh(
       geo,
@@ -541,6 +542,7 @@ export class GrassVisualManager implements QuadTreeListener {
     offsets: Float32Array;
     rotScaleHash: Float32Array;
     groundColors: Float32Array;
+    groundNormals: Float32Array;
     count: number;
   } | null {
     const spacing = GRASS_CONFIG.CLUMP_SPACING * spacingMul;
@@ -553,6 +555,7 @@ export class GrassVisualManager implements QuadTreeListener {
     const offsets = new Float32Array(maxCount * 3);
     const rotScaleHash = new Float32Array(maxCount * 3);
     const groundColors = new Float32Array(maxCount * 3);
+    const groundNormals = new Float32Array(maxCount * 3);
 
     let count = 0;
 
@@ -570,33 +573,15 @@ export class GrassVisualManager implements QuadTreeListener {
       const roadInf = this.getRoadInfluence(wx, wz);
       if (roadInf > 0.8) continue;
 
-      // Slope via finite differences
-      const sd = 0.5;
-      const hL = this.getHeightAt(wx - sd, wz);
-      const hR = this.getHeightAt(wx + sd, wz);
-      const hD = this.getHeightAt(wx, wz - sd);
-      const hU = this.getHeightAt(wx, wz + sd);
-      const dhdx = (hR - hL) / (2 * sd);
-      const dhdz = (hU - hD) / (2 * sd);
-      const gradMag = Math.sqrt(dhdx * dhdx + dhdz * dhdz);
-      const normalY = 1 / Math.sqrt(1 + gradMag * gradMag);
-      const slope = 1 - normalY;
-
-      if (slope > GRASS_CONFIG.MAX_SLOPE) continue;
-
-      // Biome weights at this position
-      const { biomeWeightMap, totalWeight } = this.getBiomeWeights(wx, wz);
-      const invW = totalWeight > 0 ? 1 / totalWeight : 1;
-      const forestW = (biomeWeightMap.get("forest") || 0) * invW;
-      const canyonW = (biomeWeightMap.get("canyon") || 0) * invW;
-
-      // Terrain color + grass weight, reduced by road influence
       const {
         r,
         g,
         b,
         grassWeight: rawGW,
-      } = this.getTerrainColor(wx, wz, ty, slope, forestW, canyonW);
+        nx,
+        ny,
+        nz,
+      } = this.getTerrainColorAt(wx, wz);
       const grassWeight = Math.max(0, rawGW - roadInf);
 
       if (grassWeight < GRASS_CONFIG.MIN_GRASS_WEIGHT) continue;
@@ -614,9 +599,13 @@ export class GrassVisualManager implements QuadTreeListener {
       rotScaleHash[count * 3 + 1] = scale;
       rotScaleHash[count * 3 + 2] = clumpRng;
 
-      groundColors[count * 3] = srgbToLinear(r);
-      groundColors[count * 3 + 1] = srgbToLinear(g);
-      groundColors[count * 3 + 2] = srgbToLinear(b);
+      groundColors[count * 3] = r;
+      groundColors[count * 3 + 1] = g;
+      groundColors[count * 3 + 2] = b;
+
+      groundNormals[count * 3] = nx;
+      groundNormals[count * 3 + 1] = ny;
+      groundNormals[count * 3 + 2] = nz;
 
       count++;
     }
@@ -627,6 +616,7 @@ export class GrassVisualManager implements QuadTreeListener {
       offsets: offsets.slice(0, count * 3),
       rotScaleHash: rotScaleHash.slice(0, count * 3),
       groundColors: groundColors.slice(0, count * 3),
+      groundNormals: groundNormals.slice(0, count * 3),
       count,
     };
   }
@@ -635,6 +625,7 @@ export class GrassVisualManager implements QuadTreeListener {
 
   private createMaterial(): MeshStandardNodeMaterial {
     const mat = new MeshStandardNodeMaterial();
+    mat.colorNode = vec3(0, 0, 0);
     mat.side = THREE.DoubleSide;
     mat.transparent = false;
     mat.depthWrite = true;
@@ -648,6 +639,7 @@ export class GrassVisualManager implements QuadTreeListener {
     this.sunDirUniform = uniform(
       new THREE.Vector3(...SUN_LIGHT.DEFAULT_DIRECTION),
     );
+    this.dayIntensityUniform = uniform(1.0);
 
     mat.positionNode = Fn(() => {
       const localPos = positionLocal.toVar("gp");
@@ -700,36 +692,29 @@ export class GrassVisualManager implements QuadTreeListener {
       return localPos;
     })();
 
-    // All normals point up so PBR lighting is uniform across all blades
-    mat.normalNode = vec3(0, 1, 0);
-
     const uSunDir = this.sunDirUniform;
+    const uDayIntensity = this.dayIntensityUniform;
+    const shadeColor = vec3(...SUN_SHADE.TINT_COLOR);
 
-    mat.colorNode = Fn(() => {
+    mat.outputNode = Fn(() => {
       const groundCol = attribute("instanceGroundColor", "vec3");
-      const t = uv().y; // 0 = root, 1 = tip
-
-      const colorLerp = smoothstep(float(0.0), float(0.8), t);
-      const rootCol = groundCol.mul(float(1.5));
-      const baseCol = mix(rootCol, groundCol, colorLerp).toVar("grassBaseCol");
-
-      // Half-lambert anime shade — same as terrain shader so grass
-      // blends visually at the root boundary.
-      const sunDir = normalize(vec3(uSunDir));
-      const NdotL = dot(vec3(0, 1, 0), sunDir);
-      const halfLambert = add(mul(NdotL, float(0.5)), float(0.5));
-      const shadeFactor = sub(float(1.0), halfLambert);
-      const coolTint = vec3(...TERRAIN_SHADE.TINT_COLOR);
-      const tintedBase = mul(baseCol, coolTint);
-      baseCol.assign(
-        mix(
-          baseCol,
-          tintedBase,
-          mul(shadeFactor, float(TERRAIN_SHADE.STRENGTH)),
-        ),
+      const terrainNormal = attribute("instanceGroundNormal", "vec3");
+      const t = uv().y;
+      const tipCol = groundCol.mul(1.4);
+      const bladeCol = mix(
+        groundCol,
+        tipCol,
+        smoothstep(float(0.0), float(1.0), t),
       );
-
-      return baseCol;
+      const animeCol = applyAnimeShade(bladeCol, terrainNormal, uSunDir);
+      const lit = applyCustomLighting(
+        animeCol,
+        terrainNormal,
+        uSunDir,
+        uDayIntensity,
+        shadeColor,
+      );
+      return vec4(lit, float(1.0));
     })();
 
     return mat;

@@ -1975,13 +1975,11 @@ export class TerrainSystem extends System {
       }
       this.grassVisualManager = new GrassVisualManager(
         grassContainer,
-        this.world,
         (x: number, z: number) => this.getHeightAt(x, z),
         this.CONFIG.WATER_THRESHOLD,
         (wx: number, wz: number) =>
           this.calculateRoadInfluenceAtVertex(wx, wz, 0, 0),
-        computeTerrainColorCPU,
-        (wx: number, wz: number) => this.computeBiomeWeightsAtPosition(wx, wz),
+        (wx: number, wz: number) => this.getTerrainColorAt(wx, wz),
       );
 
       // Wire terrain, water, grass managers to the same quad-tree via composite
@@ -4586,6 +4584,63 @@ export class TerrainSystem extends System {
     return { biomeWeightMap, totalWeight };
   }
 
+  /**
+   * Single entry point for getting the terrain base color and grass weight
+   * at a world position.  Encapsulates height, slope, biome-weight lookups
+   * and the CPU terrain-color computation so callers (e.g. GrassVisualManager)
+   * don't need any biome knowledge.
+   */
+  getTerrainColorAt(
+    wx: number,
+    wz: number,
+  ): {
+    r: number;
+    g: number;
+    b: number;
+    grassWeight: number;
+    nx: number;
+    ny: number;
+    nz: number;
+  } {
+    const height = this.getHeightAt(wx, wz);
+
+    const sd = 0.5;
+    const hL = this.getHeightAt(wx - sd, wz);
+    const hR = this.getHeightAt(wx + sd, wz);
+    const hD = this.getHeightAt(wx, wz - sd);
+    const hU = this.getHeightAt(wx, wz + sd);
+    const dhdx = (hR - hL) / (2 * sd);
+    const dhdz = (hU - hD) / (2 * sd);
+    const gradMag = Math.sqrt(dhdx * dhdx + dhdz * dhdz);
+    const normalY = 1 / Math.sqrt(1 + gradMag * gradMag);
+    const slope = 1 - normalY;
+
+    // Surface normal from height gradient (same derivation as terrain geometry)
+    const rnx = -dhdx;
+    const rnz = -dhdz;
+    const rny = 1.0;
+    const nLen = Math.sqrt(rnx * rnx + rny * rny + rnz * rnz);
+    const invLen = 1 / nLen;
+
+    const { biomeWeightMap, totalWeight } = this.computeBiomeWeightsAtPosition(
+      wx,
+      wz,
+    );
+    const invW = totalWeight > 0 ? 1 / totalWeight : 1;
+    const forestW = (biomeWeightMap.get("forest") || 0) * invW;
+    const canyonW = (biomeWeightMap.get("canyon") || 0) * invW;
+
+    const color = computeTerrainColorCPU(
+      wx,
+      wz,
+      height,
+      slope,
+      forestW,
+      canyonW,
+    );
+    return { ...color, nx: rnx * invLen, ny: rny * invLen, nz: rnz * invLen };
+  }
+
   computeBiomeWeightsByPosition(
     worldX: number,
     worldZ: number,
@@ -5131,9 +5186,10 @@ export class TerrainSystem extends System {
       if (materialWithUniforms) {
         materialWithUniforms.terrainUniforms.time.value = this.terrainTime;
 
-        // Sync sun direction from Environment system
+        // Sync sun direction + day intensity from Environment system
         const env = this.world.getSystem("environment") as {
           lightDirection?: THREE.Vector3;
+          getDayIntensity?: () => number;
         } | null;
         if (env?.lightDirection) {
           materialWithUniforms.terrainUniforms.sunDirection.value
@@ -5143,6 +5199,13 @@ export class TerrainSystem extends System {
             this.grassVisualManager.updateLighting(
               materialWithUniforms.terrainUniforms.sunDirection.value,
             );
+          }
+        }
+        if (env?.getDayIntensity) {
+          const dayVal = env.getDayIntensity();
+          materialWithUniforms.terrainUniforms.dayIntensity.value = dayVal;
+          if (this.grassVisualManager) {
+            this.grassVisualManager.updateDayIntensity(dayVal);
           }
         }
 
