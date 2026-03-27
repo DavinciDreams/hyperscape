@@ -280,7 +280,9 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
   }
 
   async onDepleted(ctx: ResourceVisualContext): Promise<boolean> {
-    // Instant dissolve — immediate visual feedback on depletion
+    // Always returns true — dissolve handles depletion for all trees.
+    // Returning false would trigger ResourceEntity.loadDepletedModel() fallback,
+    // which is only needed by non-tree strategies (e.g. InstancedModelVisualStrategy).
     if (isBatched(ctx.id)) {
       startBatchedDissolve(ctx.id, 1, true);
     } else {

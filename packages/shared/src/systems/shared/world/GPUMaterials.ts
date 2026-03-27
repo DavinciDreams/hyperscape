@@ -136,7 +136,10 @@ export const GPU_VEG_CONFIG = {
   /** Duration of the respawn dissolve-in animation (seconds). Depletion is instant. */
   DISSOLVE_DURATION: 0.3,
 
-  /** Maximum dissolve progress (1.0 = fully dissolved) */
+  /**
+   * Animation progress ceiling (not visual opacity).
+   * The actual fraction of fragments discarded is controlled by DISSOLVE_ALPHA_SCALE.
+   */
   DISSOLVE_MAX: 1.0,
 
   /**

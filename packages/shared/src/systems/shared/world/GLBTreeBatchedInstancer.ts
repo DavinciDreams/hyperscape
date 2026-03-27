@@ -44,6 +44,8 @@ const _scale = new THREE.Vector3();
 // G = highlight intensity (same as R — shader detects highlight via step(1.01, max(R, G)))
 // B = 1.0 - dissolveVal (1.0 = fully visible, 0.0 = fully dissolved)
 // Only modify channels through applyHighlightColor (R/G) and applyDissolveColor (B).
+// NOTE: If the underlying color buffer is Uint8 (256 levels), dissolve precision is
+// ~0.004 per step. At 0.3s duration / 60fps (~18 steps) this is more than sufficient.
 const _defaultColor = new THREE.Color(1, 1, 1);
 const _tmpColor = new THREE.Color();
 /** Highlight multiplier for R/G channels (>1.0 brightens; shader detects via step(1.01)) */

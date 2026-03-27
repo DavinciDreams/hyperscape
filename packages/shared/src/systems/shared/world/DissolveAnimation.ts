@@ -15,7 +15,11 @@ export interface DissolveAnim {
   progress: number;
 }
 
-/** Reused across ticks to avoid per-frame allocation. */
+/**
+ * Reused across ticks to avoid per-frame allocation.
+ * Safe because both instancers call tickDissolveAnims sequentially on the
+ * main thread within the same frame — never concurrently or from workers.
+ */
 const _completed: string[] = [];
 
 /**
