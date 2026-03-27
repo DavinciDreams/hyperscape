@@ -2751,12 +2751,18 @@ export class ResourceSystem extends SystemBase {
           resource.type === "ore" ||
           resource.skillRequired === "mining"
         ) {
-          // MINING: Chance-based depletion (1/8 for most rocks)
-          const roll = Math.random();
-          shouldDeplete = roll < GATHERING_CONSTANTS.MINING_DEPLETE_CHANCE;
-          console.log(
-            `[Forestry] ⛏️ ${session.resourceId}: Mining roll=${roll.toFixed(3)} vs ${GATHERING_CONSTANTS.MINING_DEPLETE_CHANCE} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
-          );
+          // MINING: Use manifest depleteChance (1.0 for most rocks, 0 for essence)
+          // OSRS: Rune essence rocks never deplete — continuous mining until inventory full.
+          const depletionChance = tuned.depleteChance ?? 1.0;
+          if (depletionChance <= 0) {
+            shouldDeplete = false;
+          } else {
+            const roll = Math.random();
+            shouldDeplete = roll < depletionChance;
+            console.log(
+              `[Mining] ⛏️ ${session.resourceId}: Chance roll=${roll.toFixed(3)} vs ${depletionChance} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
+            );
+          }
         } else if (
           resource.type === "fishing_spot" ||
           resource.skillRequired === "fishing"
@@ -2766,9 +2772,10 @@ export class ResourceSystem extends SystemBase {
         } else {
           // REGULAR TREES & FALLBACK: Use manifest depleteChance (1/8 for regular trees)
           const roll = Math.random();
-          shouldDeplete = roll < tuned.depleteChance;
+          const fallbackChance = tuned.depleteChance ?? 1.0;
+          shouldDeplete = roll < fallbackChance;
           console.log(
-            `[Forestry] 🌲 ${session.resourceId}: Chance roll=${roll.toFixed(3)} vs ${tuned.depleteChance} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
+            `[Forestry] 🌲 ${session.resourceId}: Chance roll=${roll.toFixed(3)} vs ${fallbackChance} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
           );
         }
 

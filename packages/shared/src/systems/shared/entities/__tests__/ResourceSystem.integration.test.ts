@@ -544,6 +544,251 @@ describe("ResourceSystem Integration", () => {
     });
   });
 
+  describe("Depletion Chance", () => {
+    it("should never deplete a resource with depleteChance: 0 (essence rock)", () => {
+      // Setup: Player with mining skill and pickaxe
+      const player = createTestPlayer("miner1", { mining: 1 });
+      player.position = { x: 10, y: 0, z: 10 };
+      mockWorld.addPlayer(player);
+      mockWorld.setInventory(
+        "miner1",
+        createTestInventory([{ itemId: "bronze_pickaxe", quantity: 1 }]),
+      );
+
+      const resourceId = "ore_essence_10_10";
+      const playerId = "miner1";
+      const startTick = 100;
+
+      // Inject resource into the resources map (type: "ore" triggers mining branch)
+      const resources = (
+        system as unknown as {
+          resources: Map<
+            string,
+            {
+              id: string;
+              type: string;
+              name: string;
+              position: { x: number; y: number; z: number };
+              skillRequired: string;
+              levelRequired: number;
+              toolRequired: string;
+              respawnTime: number;
+              isAvailable: boolean;
+              lastDepleted: number;
+              drops: Array<{
+                itemId: string;
+                itemName: string;
+                quantity: number;
+                chance: number;
+                xpAmount: number;
+              }>;
+            }
+          >;
+        }
+      ).resources;
+
+      resources.set(resourceId as never, {
+        id: resourceId,
+        type: "ore",
+        name: "Rune Essence",
+        position: { x: 11, y: 0, z: 10 },
+        skillRequired: "mining",
+        levelRequired: 1,
+        toolRequired: "pickaxe",
+        respawnTime: 0,
+        isAvailable: true,
+        lastDepleted: 0,
+        drops: [
+          {
+            itemId: "rune_essence",
+            itemName: "Rune essence",
+            quantity: 1,
+            chance: 1,
+            xpAmount: 5,
+          },
+        ],
+      });
+
+      // Inject gathering session with depleteChance: 0
+      const activeGathering = (
+        system as {
+          activeGathering: Map<string, Record<string, unknown>>;
+        }
+      ).activeGathering;
+
+      activeGathering.set(playerId, {
+        playerId,
+        resourceId,
+        startTick,
+        nextAttemptTick: startTick, // Ready to process immediately
+        cycleTickInterval: 4,
+        attempts: 0,
+        successes: 0,
+        cachedTuning: {
+          levelRequired: 1,
+          xpPerLog: 5,
+          depleteChance: 0, // KEY: essence rocks never deplete
+          respawnTicks: 0,
+        },
+        cachedSuccessRate: 1.0, // Always succeed to force depletion checks
+        cachedDrops: [
+          {
+            itemId: "rune_essence",
+            itemName: "Rune essence",
+            quantity: 1,
+            chance: 1,
+            xpAmount: 5,
+          },
+        ],
+        cachedResourceName: "Rune Essence",
+        cachedStartPosition: { ...player.position },
+      });
+
+      // Run 10 gather cycles — resource should never deplete
+      for (let tick = 0; tick < 10; tick++) {
+        const currentTick = startTick + tick * 4;
+        (mockWorld as { currentTick: number }).currentTick = currentTick;
+
+        // Reset nextAttemptTick so each call processes a gather
+        const session = activeGathering.get(playerId);
+        if (session) {
+          session.nextAttemptTick = currentTick;
+        }
+
+        system.processGatheringTick(currentTick);
+      }
+
+      // Resource should still be available (never depleted)
+      const resource = resources.get(resourceId as never);
+      expect(resource?.isAvailable).toBe(true);
+
+      // No RESOURCE_DEPLETED events should have been emitted via eventBus
+      const emitCalls = (
+        mockWorld.$eventBus.emitEvent as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      const depleteEvents = emitCalls.filter(
+        (call: unknown[]) => call[0] === EventType.RESOURCE_DEPLETED,
+      );
+      expect(depleteEvents).toHaveLength(0);
+    });
+
+    it("should deplete a resource with depleteChance: 1.0 (regular ore)", () => {
+      // Setup: Player with mining skill and pickaxe
+      const player = createTestPlayer("miner2", { mining: 1 });
+      player.position = { x: 20, y: 0, z: 20 };
+      mockWorld.addPlayer(player);
+      mockWorld.setInventory(
+        "miner2",
+        createTestInventory([{ itemId: "bronze_pickaxe", quantity: 1 }]),
+      );
+
+      const resourceId = "ore_copper_20_20";
+      const playerId = "miner2";
+      const startTick = 200;
+
+      // Inject resource
+      const resources = (
+        system as unknown as {
+          resources: Map<
+            string,
+            {
+              id: string;
+              type: string;
+              name: string;
+              position: { x: number; y: number; z: number };
+              skillRequired: string;
+              levelRequired: number;
+              toolRequired: string;
+              respawnTime: number;
+              isAvailable: boolean;
+              lastDepleted: number;
+              drops: Array<{
+                itemId: string;
+                itemName: string;
+                quantity: number;
+                chance: number;
+                xpAmount: number;
+              }>;
+            }
+          >;
+        }
+      ).resources;
+
+      resources.set(resourceId as never, {
+        id: resourceId,
+        type: "ore",
+        name: "Copper Rock",
+        position: { x: 21, y: 0, z: 20 },
+        skillRequired: "mining",
+        levelRequired: 1,
+        toolRequired: "pickaxe",
+        respawnTime: 2400,
+        isAvailable: true,
+        lastDepleted: 0,
+        drops: [
+          {
+            itemId: "copper_ore",
+            itemName: "Copper ore",
+            quantity: 1,
+            chance: 1,
+            xpAmount: 17.5,
+          },
+        ],
+      });
+
+      // Inject gathering session with depleteChance: 1.0
+      const activeGathering = (
+        system as {
+          activeGathering: Map<string, Record<string, unknown>>;
+        }
+      ).activeGathering;
+
+      activeGathering.set(playerId, {
+        playerId,
+        resourceId,
+        startTick,
+        nextAttemptTick: startTick,
+        cycleTickInterval: 4,
+        attempts: 0,
+        successes: 0,
+        cachedTuning: {
+          levelRequired: 1,
+          xpPerLog: 17.5,
+          depleteChance: 1.0, // Always deplete on success
+          respawnTicks: 4,
+        },
+        cachedSuccessRate: 1.0, // Always succeed
+        cachedDrops: [
+          {
+            itemId: "copper_ore",
+            itemName: "Copper ore",
+            quantity: 1,
+            chance: 1,
+            xpAmount: 17.5,
+          },
+        ],
+        cachedResourceName: "Copper Rock",
+        cachedStartPosition: { ...player.position },
+      });
+
+      (mockWorld as { currentTick: number }).currentTick = startTick;
+      system.processGatheringTick(startTick);
+
+      // Resource should be depleted after first successful gather
+      const resource = resources.get(resourceId as never);
+      expect(resource?.isAvailable).toBe(false);
+
+      // RESOURCE_DEPLETED event should have been emitted via eventBus
+      const emitCalls = (
+        mockWorld.$eventBus.emitEvent as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      const depleteEvents = emitCalls.filter(
+        (call: unknown[]) => call[0] === EventType.RESOURCE_DEPLETED,
+      );
+      expect(depleteEvents).toHaveLength(1);
+    });
+  });
+
   it("REGRESSION: should ignore duplicate gather requests (spam click exploit)", () => {
     // Setup: Create player and add to world
     const player = createTestPlayer("spam_clicker", { woodcutting: 99 });
