@@ -39,8 +39,11 @@ const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 
-// Blue channel of batch colors encodes dissolve state (blue = 1.0 - dissolveVal).
-// Do NOT change the blue component of these defaults without updating applyDissolveColor.
+// ---- Batch color channel layout ----
+// R = highlight intensity (1.0 = normal, >1.0 = highlighted via HL_COLOR_INTENSITY)
+// G = highlight intensity (same as R — shader detects highlight via step(1.01, max(R, G)))
+// B = 1.0 - dissolveVal (1.0 = fully visible, 0.0 = fully dissolved)
+// Only modify channels through applyHighlightColor (R/G) and applyDissolveColor (B).
 const _defaultColor = new THREE.Color(1, 1, 1);
 /** Highlight multiplier for R/G channels (>1.0 brightens; shader detects via step(1.01)) */
 const HL_COLOR_INTENSITY = 1.15;

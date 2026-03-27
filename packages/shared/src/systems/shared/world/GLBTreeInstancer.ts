@@ -405,6 +405,8 @@ function removeFromPool(pool: LODPool, entityId: string): void {
     im.count = pool.activeCount;
   }
   pool.dirty = true;
+  // Swap may have moved dissolve data to a different slot — flush to GPU
+  pool.dissolveDirty = true;
 }
 
 // ---- Public API ----
