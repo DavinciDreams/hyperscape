@@ -17,6 +17,14 @@ import React, {
 import { createPortal } from "react-dom";
 import { useThemeStore, useMobileLayout, CursorTooltip } from "@/ui";
 import {
+  getTooltipBodyStyle,
+  getTooltipDividerStyle,
+  getTooltipMetaStyle,
+  getTooltipStatusStyle,
+  getTooltipTagStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
+import {
   getInteractiveTileStyle,
   getPanelInsetStyle,
   getPanelSurfaceStyle,
@@ -576,27 +584,21 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
       <CursorTooltip
         visible={!!hoveredSpell && !contextMenu.visible}
         position={mousePos}
+        estimatedSize={{ width: 220, height: 140 }}
+        style={{
+          zIndex: zIndex.tooltip,
+          minWidth: 190,
+          maxWidth: 260,
+        }}
       >
         {hoveredSpell && (
-          <div
-            style={{
-              background:
-                theme.name === "hyperscape"
-                  ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
-                  : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
-              border: `1px solid ${getElementColor(hoveredSpell.element)}50`,
-              borderRadius: theme.borderRadius.md,
-              padding: "12px 14px",
-              boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
-              minWidth: 200,
-            }}
-          >
+          <>
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
-                marginBottom: 8,
+                marginBottom: 10,
               }}
             >
               <span style={{ fontSize: 28 }}>
@@ -605,14 +607,13 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
               <div>
                 <div
                   style={{
+                    ...getTooltipTitleStyle(theme),
                     fontSize: 15,
-                    fontWeight: 700,
-                    color: getElementColor(hoveredSpell.element),
                   }}
                 >
                   {hoveredSpell.name}
                 </div>
-                <div style={{ fontSize: 11, color: theme.colors.text.muted }}>
+                <div style={getTooltipMetaStyle(theme)}>
                   Level {hoveredSpell.level} Magic
                 </div>
               </div>
@@ -623,19 +624,23 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr",
                 gap: 6,
-                fontSize: 11,
-                marginBottom: 10,
+                ...getTooltipBodyStyle(theme),
+                marginBottom: 8,
               }}
             >
-              <div style={{ color: theme.colors.text.muted }}>
+              <div>
                 Max Hit:{" "}
-                <span style={{ color: theme.colors.state.danger }}>
+                <span
+                  style={{ fontWeight: 600, color: theme.colors.text.primary }}
+                >
                   {hoveredSpell.baseMaxHit}
                 </span>
               </div>
-              <div style={{ color: theme.colors.text.muted }}>
+              <div>
                 XP:{" "}
-                <span style={{ color: theme.colors.state.success }}>
+                <span
+                  style={{ fontWeight: 600, color: theme.colors.text.primary }}
+                >
                   {hoveredSpell.baseXp}
                 </span>
               </div>
@@ -643,23 +648,22 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
 
             <div
               style={{
-                fontSize: 10,
-                color: theme.colors.text.muted,
+                ...getTooltipDividerStyle(theme),
                 marginBottom: 8,
               }}
             >
-              <div style={{ marginBottom: 4, fontWeight: 600 }}>Rune Cost:</div>
+              <div
+                style={{
+                  ...getTooltipMetaStyle(theme),
+                  marginBottom: 4,
+                  fontWeight: 600,
+                }}
+              >
+                Rune Cost
+              </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {hoveredSpell.runes.map((rune, idx) => (
-                  <span
-                    key={idx}
-                    style={{
-                      background: theme.colors.slot.filled,
-                      padding: "2px 6px",
-                      borderRadius: theme.borderRadius.sm,
-                      color: theme.colors.text.secondary,
-                    }}
-                  >
+                  <span key={idx} style={getTooltipTagStyle(theme)}>
                     {rune.quantity}x{" "}
                     {rune.runeId.replace("_rune", "").replace("_", " ")}
                   </span>
@@ -670,12 +674,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
             {playerMagicLevel < hoveredSpell.level && (
               <div
                 style={{
-                  padding: "5px 10px",
-                  background: `${theme.colors.state.danger}26`,
-                  borderRadius: theme.borderRadius.sm,
-                  fontSize: 11,
-                  color: theme.colors.state.danger,
-                  textAlign: "center",
+                  ...getTooltipStatusStyle(theme, "danger"),
                 }}
               >
                 Requires level {hoveredSpell.level} Magic
@@ -684,19 +683,13 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
             {hoveredSpell.isSelected && (
               <div
                 style={{
-                  padding: "5px 10px",
-                  background: `${theme.colors.state.success}26`,
-                  borderRadius: theme.borderRadius.sm,
-                  fontSize: 11,
-                  color: theme.colors.state.success,
-                  textAlign: "center",
-                  fontWeight: 600,
+                  ...getTooltipStatusStyle(theme, "success"),
                 }}
               >
                 Currently Selected for Autocast
               </div>
             )}
-          </div>
+          </>
         )}
       </CursorTooltip>
 

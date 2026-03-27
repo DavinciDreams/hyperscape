@@ -20,7 +20,16 @@ import { createPortal } from "react-dom";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { COLORS } from "../../constants";
 import { InventoryPanel } from "./InventoryPanel";
-import { useWindowStore, useThemeStore, useMobileLayout } from "@/ui";
+import {
+  CursorTooltip,
+  useWindowStore,
+  useThemeStore,
+  useMobileLayout,
+} from "@/ui";
+import {
+  getTooltipMetaStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
 import {
   getContextMenuItemStyle,
   getContextMenuSurfaceStyle,
@@ -374,6 +383,13 @@ export function StorePanel({
     type: "store",
     itemName: "",
   });
+  const [hoveredStoreItemId, setHoveredStoreItemId] = useState<string | null>(
+    null,
+  );
+  const [hoveredStoreTooltip, setHoveredStoreTooltip] = useState<{
+    item: StoreItem;
+    position: { x: number; y: number };
+  } | null>(null);
 
   // NOTE: Distance validation is handled server-side (InteractionSessionManager)
   // The server sends storeClose packets when the player moves too far away.
@@ -531,26 +547,37 @@ export function StorePanel({
                     width: `${responsiveSlotSize}px`,
                     height: `${responsiveSlotSize}px`,
                     ...getInteractiveTileStyle(theme, {
+                      hovered: hoveredStoreItemId === item.id,
                       radius: theme.borderRadius.md,
                       accentColor: theme.colors.accent.primary,
                     }),
                   }}
-                  title={`${item.name} - ${item.price} gp${item.stockQuantity !== -1 ? ` (${item.stockQuantity} in stock)` : ""}`}
                   onClick={() => handleBuy(item.itemId, 1)}
                   onContextMenu={(e) => openStoreContextMenu(e, item)}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background =
-                      theme.name === "hyperscape"
-                        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(190, 165, 123, 0.12) 20%, rgba(25, 29, 35, 0.98) 100%)"
-                        : `${theme.colors.accent.primary}20`;
-                    e.currentTarget.style.borderColor = `${theme.colors.accent.primary}66`;
+                    setHoveredStoreItemId(item.id);
+                    setHoveredStoreTooltip({
+                      item,
+                      position: { x: e.clientX, y: e.clientY },
+                    });
                   }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background =
-                      theme.name === "hyperscape"
-                        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.012) 18%, rgba(22, 26, 31, 0.99) 100%)"
-                        : `${theme.colors.accent.primary}10`;
-                    e.currentTarget.style.borderColor = `${theme.colors.accent.primary}40`;
+                  onMouseMove={(e) => {
+                    setHoveredStoreTooltip((prev) =>
+                      prev?.item.id === item.id
+                        ? {
+                            item,
+                            position: { x: e.clientX, y: e.clientY },
+                          }
+                        : prev,
+                    );
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredStoreItemId((prev) =>
+                      prev === item.id ? null : prev,
+                    );
+                    setHoveredStoreTooltip((prev) =>
+                      prev?.item.id === item.id ? null : prev,
+                    );
                   }}
                 >
                   <span className="select-none">
@@ -585,6 +612,38 @@ export function StorePanel({
               ))}
             </div>
           </div>
+
+          {hoveredStoreTooltip && !contextMenu.visible && (
+            <CursorTooltip
+              visible={true}
+              position={hoveredStoreTooltip.position}
+              estimatedSize={{ width: 220, height: 70 }}
+              style={{
+                zIndex: theme.zIndex.tooltip,
+                minWidth: "180px",
+                maxWidth: "260px",
+              }}
+            >
+              <div
+                style={{
+                  ...getTooltipTitleStyle(theme),
+                }}
+              >
+                {hoveredStoreTooltip.item.name}
+              </div>
+              <div
+                style={{
+                  ...getTooltipMetaStyle(theme),
+                  marginTop: "4px",
+                }}
+              >
+                {hoveredStoreTooltip.item.price} gp
+                {hoveredStoreTooltip.item.stockQuantity !== -1
+                  ? ` • ${hoveredStoreTooltip.item.stockQuantity} in stock`
+                  : " • Unlimited stock"}
+              </div>
+            </CursorTooltip>
+          )}
 
           {/* Footer */}
           <div

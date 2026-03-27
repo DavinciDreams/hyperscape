@@ -27,6 +27,8 @@ interface EquipmentPaperdollPortraitProps {
   className?: string;
   equipmentSignature?: string;
   compact?: boolean;
+  layoutVariant?: "default" | "bank";
+  isVisible?: boolean;
 }
 
 interface PreviewAvatarScene {
@@ -142,6 +144,8 @@ function framePortraitAvatar(
   avatarRoot: THREE.Object3D,
   camera: THREE.PerspectiveCamera,
   zoomMultiplier = 1.0,
+  fitDistanceMultiplier = 1.0,
+  centerBiasX = 0,
   baseStateRef?: React.MutableRefObject<{
     camY: number;
     lookY: number;
@@ -151,7 +155,8 @@ function framePortraitAvatar(
 ) {
   if (baseStateRef?.current) {
     const { camY, lookY, distance, center } = baseStateRef.current;
-    const currentDistance = distance / Math.max(0.1, zoomMultiplier);
+    const currentDistance =
+      (distance * fitDistanceMultiplier) / Math.max(0.1, zoomMultiplier);
     camera.position.set(center.x, camY, -currentDistance);
     camera.lookAt(center.x, lookY, center.z);
     return;
@@ -170,9 +175,16 @@ function framePortraitAvatar(
   const center = box.getCenter(new THREE.Vector3());
   const height = Math.max(size.y, 1.6);
   const width = Math.max(size.x, 0.7);
+  center.x += width * centerBiasX;
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+  const effectiveAspect = Math.max(camera.aspect, 0.25);
+  const horizontalFov =
+    2 * Math.atan(Math.tan(verticalFov / 2) * effectiveAspect);
+  const verticalDistance = (height * 0.5) / Math.tan(verticalFov / 2);
+  const horizontalDistance = (width * 0.5) / Math.tan(horizontalFov / 2);
 
-  // Zoom out enough so the full avatar fits within the portrait container
-  const distance = Math.max(3.2, height * 2.1, width * 1.6);
+  // Add a little breathing room so narrow portrait panels do not clip shoulders or weapons.
+  const distance = Math.max(3.2, verticalDistance, horizontalDistance) * 1.22;
 
   // Look slightly higher to push the avatar down in the viewport
   const lookY = center.y + height * 0.02;
@@ -184,7 +196,8 @@ function framePortraitAvatar(
     baseStateRef.current = { camY, lookY, distance, center: center.clone() };
   }
 
-  const currentDistance = distance / Math.max(0.1, zoomMultiplier);
+  const currentDistance =
+    (distance * fitDistanceMultiplier) / Math.max(0.1, zoomMultiplier);
 
   camera.position.set(center.x, camY, -currentDistance);
   camera.lookAt(center.x, lookY, center.z);
@@ -414,6 +427,8 @@ export const EquipmentPaperdollPortrait = React.memo(
     className = "",
     equipmentSignature = "",
     compact = false,
+    layoutVariant = "default",
+    isVisible = true,
   }: EquipmentPaperdollPortraitProps) {
     const theme = useThemeStore((s) => s.theme);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -448,9 +463,11 @@ export const EquipmentPaperdollPortrait = React.memo(
 
     const signature = useMemo(
       () =>
-        `${avatarUrl ?? "no-avatar"}|${equipmentSignature}|${compact ? "compact" : "full"}`,
-      [avatarUrl, compact, equipmentSignature],
+        `${avatarUrl ?? "no-avatar"}|${equipmentSignature}|${compact ? "compact" : "full"}|${layoutVariant}`,
+      [avatarUrl, compact, equipmentSignature, layoutVariant],
     );
+    const fitDistanceMultiplier = layoutVariant === "bank" ? 1 : 1.03;
+    const centerBiasX = 0;
 
     const clearPreviewAvatar = () => {
       clearPreviewVisuals(previewVisualsRef.current);
@@ -485,6 +502,7 @@ export const EquipmentPaperdollPortrait = React.memo(
 
       let cancelled = false;
       let resizeObserver: ResizeObserver | null = null;
+      let resizeHandler: (() => void) | null = null;
 
       createAvatarPreviewViewport({
         container,
@@ -499,6 +517,23 @@ export const EquipmentPaperdollPortrait = React.memo(
           }
 
           viewportRef.current = viewport;
+          const handleViewportResize = () => {
+            viewport.resize();
+
+            if (avatarSceneRef.current) {
+              baseCameraStateRef.current = null;
+              framePortraitAvatar(
+                avatarSceneRef.current,
+                viewport.camera,
+                currentZoomRef.current,
+                fitDistanceMultiplier,
+                centerBiasX,
+                baseCameraStateRef,
+              );
+            }
+          };
+          resizeHandler = handleViewportResize;
+
           viewport.start((delta) => {
             avatarNodeRef.current?.instance?.update(delta);
 
@@ -520,6 +555,8 @@ export const EquipmentPaperdollPortrait = React.memo(
                   avatarSceneRef.current,
                   viewport.camera,
                   currentZoomRef.current,
+                  fitDistanceMultiplier,
+                  centerBiasX,
                   baseCameraStateRef,
                 );
               }
@@ -528,10 +565,10 @@ export const EquipmentPaperdollPortrait = React.memo(
           setRendererReady(true);
 
           if (typeof ResizeObserver !== "undefined") {
-            resizeObserver = new ResizeObserver(() => viewport.resize());
+            resizeObserver = new ResizeObserver(handleViewportResize);
             resizeObserver.observe(container);
           } else {
-            window.addEventListener("resize", viewport.resize);
+            window.addEventListener("resize", handleViewportResize);
           }
         })
         .catch((error) => {
@@ -548,8 +585,8 @@ export const EquipmentPaperdollPortrait = React.memo(
       return () => {
         cancelled = true;
         resizeObserver?.disconnect();
-        if (viewportRef.current) {
-          window.removeEventListener("resize", viewportRef.current.resize);
+        if (resizeHandler) {
+          window.removeEventListener("resize", resizeHandler);
         }
         clearPreviewAvatar();
         viewportRef.current?.dispose();
@@ -685,6 +722,8 @@ export const EquipmentPaperdollPortrait = React.memo(
             avatarScene,
             viewport.camera,
             currentZoomRef.current,
+            fitDistanceMultiplier,
+            centerBiasX,
             baseCameraStateRef,
           );
           setMode("live");
@@ -707,12 +746,29 @@ export const EquipmentPaperdollPortrait = React.memo(
       };
     }, [avatarUrl, equipment, rendererReady, signature, world]);
 
+    useEffect(() => {
+      if (!isVisible || !viewportRef.current || !avatarSceneRef.current) {
+        return;
+      }
+
+      viewportRef.current.resize();
+      baseCameraStateRef.current = null;
+      framePortraitAvatar(
+        avatarSceneRef.current,
+        viewportRef.current.camera,
+        currentZoomRef.current,
+        fitDistanceMultiplier,
+        centerBiasX,
+        baseCameraStateRef,
+      );
+    }, [centerBiasX, fitDistanceMultiplier, isVisible]);
+
     return (
       <div
         ref={containerRef}
         data-equipment-portrait="true"
         data-portrait-mode={mode}
-        className={`relative overflow-hidden touch-none select-none ${className}`}
+        className={`relative overflow-visible touch-none select-none ${className}`}
         onPointerDown={(e) => {
           isDraggingRef.current = true;
           lastMousePosRef.current = { x: e.clientX, y: e.clientY };

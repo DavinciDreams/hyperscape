@@ -26,6 +26,12 @@ import {
   CursorTooltip,
 } from "@/ui";
 import {
+  getTooltipBodyStyle,
+  getTooltipDividerStyle,
+  getTooltipMetaStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
+import {
   getInteractiveTileStyle,
   getPanelInsetStyle,
   getPanelSurfaceStyle,
@@ -171,6 +177,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
   onEmbeddedContextMenu,
 }: DraggableItemProps) {
   const theme = useThemeStore((s) => s.theme);
+  const [isHovered, setIsHovered] = useState(false);
   // In embedded mode, disable drag-drop
   const isDragDisabled = !!embeddedMode || !item;
 
@@ -231,13 +238,13 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
     () =>
       getInteractiveTileStyle(theme, {
         active: isSourceItem,
-        hovered: !isEmpty,
+        hovered: isHovered && !isEmpty,
         dragging: isDragging,
         dropTarget: isOver,
         radius: 4,
         accentColor: theme.colors.accent.secondary,
       }),
-    [theme, isSourceItem, isEmpty, isDragging, isOver],
+    [theme, isSourceItem, isHovered, isEmpty, isDragging, isOver],
   );
 
   return (
@@ -291,6 +298,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
         }
       }}
       onMouseEnter={(e) => {
+        setIsHovered(true);
         // OSRS-style: show "Use X → Y" tooltip when hovering valid target
         if (isValidTarget && item && onTargetHover) {
           onTargetHover(item, { x: e.clientX, y: e.clientY });
@@ -300,6 +308,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
         }
       }}
       onMouseLeave={() => {
+        setIsHovered(false);
         if (onTargetHoverEnd) {
           onTargetHoverEnd();
         }
@@ -697,17 +706,15 @@ function renderItemHoverTooltip(
       {/* Item name */}
       <div
         style={{
-          color: theme.colors.accent.secondary,
-          fontWeight: "bold",
+          ...getTooltipTitleStyle(theme),
           marginBottom: hasBonuses ? "6px" : "0",
-          fontSize: "13px",
         }}
       >
         {itemName}
         {itemHover.item.quantity > 1 && (
           <span
             style={{
-              color: theme.colors.text.muted,
+              ...getTooltipMetaStyle(theme),
               fontWeight: "normal",
             }}
           >
@@ -719,9 +726,9 @@ function renderItemHoverTooltip(
 
       {/* Bonuses (for equipment) */}
       {hasBonuses && (
-        <div style={{ fontSize: "11px" }}>
+        <div style={getTooltipDividerStyle(theme)}>
           {bonuses.attack !== undefined && bonuses.attack !== 0 && (
-            <div style={{ color: theme.colors.text.secondary }}>
+            <div style={getTooltipBodyStyle(theme)}>
               ⚔️ Attack:{" "}
               <span style={{ color: theme.colors.state.success }}>
                 +{bonuses.attack}
@@ -729,7 +736,7 @@ function renderItemHoverTooltip(
             </div>
           )}
           {bonuses.defense !== undefined && bonuses.defense !== 0 && (
-            <div style={{ color: theme.colors.text.secondary }}>
+            <div style={getTooltipBodyStyle(theme)}>
               🛡️ Defense:{" "}
               <span style={{ color: theme.colors.state.success }}>
                 +{bonuses.defense}
@@ -737,7 +744,7 @@ function renderItemHoverTooltip(
             </div>
           )}
           {bonuses.strength !== undefined && bonuses.strength !== 0 && (
-            <div style={{ color: theme.colors.text.secondary }}>
+            <div style={getTooltipBodyStyle(theme)}>
               💪 Strength:{" "}
               <span style={{ color: theme.colors.state.success }}>
                 +{bonuses.strength}

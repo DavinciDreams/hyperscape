@@ -28,6 +28,14 @@ import {
   TOOLTIP_SIZE_ESTIMATES,
 } from "@/ui";
 import {
+  getTooltipBodyStyle,
+  getTooltipDividerStyle,
+  getTooltipMetaStyle,
+  getTooltipStatusStyle,
+  getTooltipTagStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
+import {
   getInteractiveTileStyle,
   getPanelInsetStyle,
   getPanelSurfaceStyle,
@@ -918,8 +926,8 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               estimatedSize={{ width: 200, height: 100 }}
               style={{
                 zIndex: zIndex.tooltip,
-                border: `1px solid ${getCategoryColor(hoveredPrayer.category)}50`,
                 minWidth: 180,
+                maxWidth: 250,
               }}
             >
               {/* Header */}
@@ -937,19 +945,13 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                 <div>
                   <div
                     style={{
+                      ...getTooltipTitleStyle(theme),
                       fontSize: 14,
-                      fontWeight: 700,
-                      color: getCategoryColor(hoveredPrayer.category),
                     }}
                   >
                     {hoveredPrayer.name}
                   </div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: theme.colors.text.muted,
-                    }}
-                  >
+                  <div style={getTooltipMetaStyle(theme)}>
                     Level {hoveredPrayer.level} Prayer
                   </div>
                 </div>
@@ -958,10 +960,8 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               {/* Description */}
               <div
                 style={{
-                  fontSize: 11,
-                  color: theme.colors.text.secondary,
+                  ...getTooltipBodyStyle(theme),
                   marginBottom: 8,
-                  lineHeight: 1.4,
                 }}
               >
                 {hoveredPrayer.description}
@@ -970,14 +970,14 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               {/* Drain rate */}
               <div
                 style={{
-                  fontSize: 10,
-                  color: theme.colors.text.muted,
+                  ...getTooltipDividerStyle(theme),
                   display: "flex",
                   justifyContent: "space-between",
+                  alignItems: "center",
                 }}
               >
-                <span>Drain rate:</span>
-                <span style={{ color: theme.colors.accent.secondary }}>
+                <span style={getTooltipMetaStyle(theme)}>Drain rate</span>
+                <span style={getTooltipTagStyle(theme)}>
                   {hoveredPrayer.drainRate} points/min
                 </span>
               </div>
@@ -986,13 +986,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               {!isUnlocked && (
                 <div
                   style={{
-                    marginTop: 8,
-                    padding: "4px 8px",
-                    background: `${theme.colors.state.danger}26`,
-                    borderRadius: 4,
-                    fontSize: 10,
-                    color: theme.colors.state.danger,
-                    textAlign: "center",
+                    ...getTooltipStatusStyle(theme, "danger"),
                   }}
                 >
                   Requires level {hoveredPrayer.level} Prayer
@@ -1001,14 +995,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
               {hoveredPrayer.active && (
                 <div
                   style={{
-                    marginTop: 8,
-                    padding: "4px 8px",
-                    background: `${theme.colors.state.success}26`,
-                    borderRadius: 4,
-                    fontSize: 10,
-                    color: theme.colors.state.success,
-                    textAlign: "center",
-                    fontWeight: 600,
+                    ...getTooltipStatusStyle(theme, "success"),
                   }}
                 >
                   Currently Active

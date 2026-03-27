@@ -10,7 +10,9 @@
  * - Delete tabs via right-click
  */
 
-import { useThemeStore } from "@/ui";
+import { useState } from "react";
+import { CursorTooltip, useThemeStore } from "@/ui";
+import { getTooltipTitleStyle } from "@/ui/core/tooltip/tooltipStyles";
 import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
 import type { BankItem, BankTab, ConfirmModalState } from "../types";
 import type { DragState } from "../hooks";
@@ -64,6 +66,41 @@ export function BankTabBar({
 }: BankTabBarProps) {
   const theme = useThemeStore((s) => s.theme);
   const { draggedSlot, draggedTabIndex, hoveredTabIndex } = dragState;
+  const [hoveredButton, setHoveredButton] = useState<string | null>(null);
+  const [hoverTooltip, setHoverTooltip] = useState<{
+    label: string;
+    position: { x: number; y: number };
+  } | null>(null);
+
+  const getTabIconSlotStyle = (
+    state: "idle" | "hovered" | "active" | "success",
+  ): React.CSSProperties => {
+    const accentColor =
+      state === "success"
+        ? theme.colors.state.success
+        : theme.colors.accent.primary;
+    const hovered = state === "hovered" || state === "success";
+    const active = state === "active";
+
+    return {
+      ...getInteractiveTileStyle(theme, {
+        hovered,
+        active,
+        radius: theme.borderRadius.sm,
+        accentColor,
+      }),
+      width: 36,
+      height: 36,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      boxShadow: active
+        ? `${theme.shadows.sm}, inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -10px 14px rgba(0,0,0,0.16)`
+        : hovered
+          ? `${theme.shadows.sm}, inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -10px 14px rgba(0,0,0,0.12)`
+          : "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -8px 12px rgba(0,0,0,0.14)",
+    };
+  };
 
   // Get the next available tab index for creating new tabs
   // RS3-STYLE: Always append at end (max + 1), never fill gaps
@@ -87,7 +124,7 @@ export function BankTabBar({
       {/* All Tab (∞) - RS3 style */}
       <button
         onClick={() => onSelectTab(TAB_INDEX_ALL)}
-        className="px-3 py-1.5 rounded-t text-xs font-bold transition-colors flex-shrink-0"
+        className="px-2 py-1.5 rounded-t text-xs font-bold transition-colors flex-shrink-0"
         style={{
           background:
             selectedTab === TAB_INDEX_ALL
@@ -97,14 +134,23 @@ export function BankTabBar({
                     radius: theme.borderRadius.sm,
                   }).background,
                 )
-              : String(
-                  getPanelInsetStyle(theme, { radius: theme.borderRadius.sm })
-                    .background,
-                ),
+              : hoveredButton === "all"
+                ? String(
+                    getInteractiveTileStyle(theme, {
+                      hovered: true,
+                      radius: theme.borderRadius.sm,
+                    }).background,
+                  )
+                : String(
+                    getPanelInsetStyle(theme, { radius: theme.borderRadius.sm })
+                      .background,
+                  ),
           color:
             selectedTab === TAB_INDEX_ALL
               ? theme.colors.text.primary
-              : theme.colors.text.secondary,
+              : hoveredButton === "all"
+                ? theme.colors.text.primary
+                : theme.colors.text.secondary,
           borderTop:
             selectedTab === TAB_INDEX_ALL
               ? `1px solid ${theme.colors.border.default}`
@@ -119,9 +165,41 @@ export function BankTabBar({
               : `1px solid ${theme.colors.border.decorative}`,
           borderBottom: "none",
         }}
-        title="View all items across all tabs"
+        onMouseEnter={(e) => {
+          setHoveredButton("all");
+          setHoverTooltip({
+            label: "View all items across all tabs",
+            position: { x: e.clientX, y: e.clientY },
+          });
+        }}
+        onMouseMove={(e) => {
+          setHoverTooltip((prev) =>
+            prev?.label === "View all items across all tabs"
+              ? {
+                  label: prev.label,
+                  position: { x: e.clientX, y: e.clientY },
+                }
+              : prev,
+          );
+        }}
+        onMouseLeave={() => {
+          setHoveredButton((prev) => (prev === "all" ? null : prev));
+          setHoverTooltip((prev) =>
+            prev?.label === "View all items across all tabs" ? null : prev,
+          );
+        }}
       >
-        ∞
+        <div
+          style={getTabIconSlotStyle(
+            selectedTab === TAB_INDEX_ALL
+              ? "active"
+              : hoveredButton === "all"
+                ? "hovered"
+                : "idle",
+          )}
+        >
+          <span style={{ fontSize: 20, lineHeight: 1 }}>∞</span>
+        </div>
       </button>
 
       {/* All Tabs (0-9) - RS3 style: Tab 0 is just another tab, icon = first item */}
@@ -196,10 +274,15 @@ export function BankTabBar({
                 setDraggedTabIndex(null);
                 setHoveredTabIndex(null);
               }}
-              className="px-3 py-1.5 rounded-t text-xs font-bold transition-colors flex-shrink-0"
+              className="px-2 py-1.5 rounded-t text-xs font-bold transition-colors flex-shrink-0"
               style={{
                 background: isHovered
-                  ? `${theme.colors.accent.primary}4d` // 30% opacity
+                  ? String(
+                      getInteractiveTileStyle(theme, {
+                        hovered: true,
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    )
                   : isSelected
                     ? String(
                         getInteractiveTileStyle(theme, {
@@ -207,27 +290,64 @@ export function BankTabBar({
                           radius: theme.borderRadius.sm,
                         }).background,
                       )
-                    : String(
-                        getPanelInsetStyle(theme, {
-                          radius: theme.borderRadius.sm,
-                        }).background,
-                      ),
+                    : hoveredButton === `tab-${tabIndex}`
+                      ? String(
+                          getInteractiveTileStyle(theme, {
+                            hovered: true,
+                            radius: theme.borderRadius.sm,
+                          }).background,
+                        )
+                      : String(
+                          getPanelInsetStyle(theme, {
+                            radius: theme.borderRadius.sm,
+                          }).background,
+                        ),
                 color: isSelected
                   ? theme.colors.text.primary
-                  : theme.colors.text.secondary,
+                  : hoveredButton === `tab-${tabIndex}`
+                    ? theme.colors.text.primary
+                    : theme.colors.text.secondary,
                 borderTop: borderColor,
                 borderLeft: borderColor,
                 borderRight: borderColor,
                 borderBottom: "none",
                 opacity: isPlaceholderIcon && !isSelected ? 0.6 : 1,
               }}
-              title={
-                iconItem
-                  ? `${formatItemName(iconItem.itemId)}${isPlaceholderIcon ? " (empty)" : ""}${canDelete ? " - Right-click to delete" : ""}`
-                  : `Tab ${tabIndex}${canDelete ? " - Right-click to delete" : ""}`
-              }
+              onMouseEnter={() => setHoveredButton(`tab-${tabIndex}`)}
+              onMouseEnter={(e) => {
+                setHoveredButton(`tab-${tabIndex}`);
+                setHoverTooltip({
+                  label: iconItem
+                    ? `${formatItemName(iconItem.itemId)}${isPlaceholderIcon ? " (empty)" : ""}${canDelete ? " - Right-click to delete" : ""}`
+                    : `Tab ${tabIndex}${canDelete ? " - Right-click to delete" : ""}`,
+                  position: { x: e.clientX, y: e.clientY },
+                });
+              }}
+              onMouseMove={(e) => {
+                setHoverTooltip((prev) =>
+                  prev
+                    ? { ...prev, position: { x: e.clientX, y: e.clientY } }
+                    : prev,
+                );
+              }}
+              onMouseLeave={() => {
+                setHoveredButton((prev) =>
+                  prev === `tab-${tabIndex}` ? null : prev,
+                );
+                setHoverTooltip(null);
+              }}
             >
-              {tabIcon}
+              <div
+                style={getTabIconSlotStyle(
+                  isSelected
+                    ? "active"
+                    : isHovered || hoveredButton === `tab-${tabIndex}`
+                      ? "hovered"
+                      : "idle",
+                )}
+              >
+                {tabIcon}
+              </div>
             </button>
           );
         });
@@ -259,35 +379,109 @@ export function BankTabBar({
             setDraggedTabIndex(null);
             setHoveredTabIndex(null);
           }}
-          className="px-3 py-1.5 rounded-t text-xs font-bold transition-colors flex-shrink-0"
+          className="px-2 py-1.5 rounded-t text-xs font-bold transition-colors flex-shrink-0"
           style={{
             background:
               hoveredTabIndex === TAB_INDEX_NEW_TAB_HOVER
-                ? `${theme.colors.state.success}4d` // 30% opacity
-                : String(
-                    getPanelInsetStyle(theme, {
+                ? String(
+                    getInteractiveTileStyle(theme, {
+                      hovered: true,
                       radius: theme.borderRadius.sm,
+                      accentColor: theme.colors.state.success,
                     }).background,
-                  ),
+                  )
+                : hoveredButton === "new-tab"
+                  ? String(
+                      getInteractiveTileStyle(theme, {
+                        hovered: true,
+                        radius: theme.borderRadius.sm,
+                        accentColor: theme.colors.state.success,
+                      }).background,
+                    )
+                  : String(
+                      getPanelInsetStyle(theme, {
+                        radius: theme.borderRadius.sm,
+                      }).background,
+                    ),
             color: theme.colors.state.success,
             borderTop:
               hoveredTabIndex === TAB_INDEX_NEW_TAB_HOVER
                 ? `1px solid ${theme.colors.state.success}`
-                : `1px dashed ${theme.colors.state.success}66`,
+                : hoveredButton === "new-tab"
+                  ? `1px solid ${theme.colors.state.success}`
+                  : `1px dashed ${theme.colors.state.success}66`,
             borderLeft:
               hoveredTabIndex === TAB_INDEX_NEW_TAB_HOVER
                 ? `1px solid ${theme.colors.state.success}`
-                : `1px dashed ${theme.colors.state.success}66`,
+                : hoveredButton === "new-tab"
+                  ? `1px solid ${theme.colors.state.success}`
+                  : `1px dashed ${theme.colors.state.success}66`,
             borderRight:
               hoveredTabIndex === TAB_INDEX_NEW_TAB_HOVER
                 ? `1px solid ${theme.colors.state.success}`
-                : `1px dashed ${theme.colors.state.success}66`,
+                : hoveredButton === "new-tab"
+                  ? `1px solid ${theme.colors.state.success}`
+                  : `1px dashed ${theme.colors.state.success}66`,
             borderBottom: "none",
           }}
-          title="Drag an item here to create a new tab"
+          onMouseEnter={(e) => {
+            setHoveredButton("new-tab");
+            setHoverTooltip({
+              label: "Drag an item here to create a new tab",
+              position: { x: e.clientX, y: e.clientY },
+            });
+          }}
+          onMouseMove={(e) => {
+            setHoverTooltip((prev) =>
+              prev?.label === "Drag an item here to create a new tab"
+                ? {
+                    label: prev.label,
+                    position: { x: e.clientX, y: e.clientY },
+                  }
+                : prev,
+            );
+          }}
+          onMouseLeave={() => {
+            setHoveredButton((prev) => (prev === "new-tab" ? null : prev));
+            setHoverTooltip((prev) =>
+              prev?.label === "Drag an item here to create a new tab"
+                ? null
+                : prev,
+            );
+          }}
         >
-          +
+          <div
+            style={getTabIconSlotStyle(
+              hoveredTabIndex === TAB_INDEX_NEW_TAB_HOVER ||
+                hoveredButton === "new-tab"
+                ? "success"
+                : "idle",
+            )}
+          >
+            <span style={{ fontSize: 22, lineHeight: 1 }}>+</span>
+          </div>
         </button>
+      )}
+
+      {hoverTooltip && (
+        <CursorTooltip
+          visible={true}
+          position={hoverTooltip.position}
+          estimatedSize={{ width: 220, height: 48 }}
+          style={{
+            zIndex: theme.zIndex.tooltip,
+            minWidth: "160px",
+            maxWidth: "260px",
+          }}
+        >
+          <div
+            style={{
+              ...getTooltipTitleStyle(theme),
+            }}
+          >
+            {hoverTooltip.label}
+          </div>
+        </CursorTooltip>
       )}
     </div>
   );

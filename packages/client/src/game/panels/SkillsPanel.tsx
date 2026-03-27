@@ -11,6 +11,11 @@ import { createPortal } from "react-dom";
 import { useDraggable } from "@dnd-kit/core";
 import { CursorTooltip, useThemeStore, useMobileLayout } from "@/ui";
 import {
+  getTooltipMetaStyle,
+  getTooltipStatusStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
+import {
   getInteractiveTileStyle,
   getPanelInsetStyle,
   getPanelSurfaceStyle,
@@ -427,9 +432,8 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                 <span style={{ fontSize: "14px" }}>{hoveredSkill.icon}</span>
                 <span
                   style={{
+                    ...getTooltipTitleStyle(theme),
                     fontSize: "11px",
-                    fontWeight: 600,
-                    color: theme.colors.text.accent,
                   }}
                 >
                   {hoveredSkill.label}
@@ -437,7 +441,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                 <span
                   style={{
                     marginLeft: "auto",
-                    fontSize: "10px",
+                    ...getTooltipMetaStyle(theme),
                     fontWeight: 600,
                     color:
                       hoveredSkill.level >= 99
@@ -452,8 +456,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
               {/* XP Info */}
               <div
                 style={{
-                  fontSize: "9px",
-                  color: theme.colors.text.secondary,
+                  ...getTooltipMetaStyle(theme),
                   marginBottom: "2px",
                 }}
               >
@@ -461,8 +464,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
               </div>
               <div
                 style={{
-                  fontSize: "9px",
-                  color: theme.colors.text.muted,
+                  ...getTooltipMetaStyle(theme),
                   marginBottom: "4px",
                 }}
               >
@@ -472,7 +474,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
               </div>
 
               {/* Progress bar */}
-              {hoveredSkill.level < 99 && (
+              {hoveredSkill.level < 99 ? (
                 <div
                   style={{
                     height: "3px",
@@ -489,6 +491,10 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
                       borderRadius: theme.borderRadius.sm,
                     }}
                   />
+                </div>
+              ) : (
+                <div style={getTooltipStatusStyle(theme, "success")}>
+                  Max level reached
                 </div>
               )}
             </CursorTooltip>
@@ -508,8 +514,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
         >
           <div
             style={{
-              fontSize: "9px",
-              color: theme.colors.text.muted,
+              ...getTooltipMetaStyle(theme),
               textTransform: "uppercase",
               letterSpacing: "0.3px",
               marginBottom: "2px",
@@ -519,9 +524,8 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
           </div>
           <div
             style={{
+              ...getTooltipTitleStyle(theme),
               fontSize: "11px",
-              fontWeight: 600,
-              color: theme.colors.text.accent,
             }}
           >
             {totalXP.toLocaleString()}
