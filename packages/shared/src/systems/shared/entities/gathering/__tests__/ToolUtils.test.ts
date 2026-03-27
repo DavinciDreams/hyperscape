@@ -9,7 +9,7 @@
  * @see https://oldschool.runescape.wiki/w/Noted_items
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import type { GatheringToolData } from "../../../../../data/DataManager";
 import {
   itemMatchesToolCategory,
@@ -198,6 +198,48 @@ describe("ToolUtils", () => {
         (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
 
         expect(itemMatchesToolCategory("rune_pickaxe", "pickaxe")).toBe(true);
+      });
+
+      it("rejects manifest tool for unknown category via direct skill comparison", () => {
+        // Tool is in manifest with skill "mining", but category "hammer" isn't in CATEGORY_TO_SKILL.
+        // Falls back to direct comparison: toolData.skill ("mining") === category ("hammer") → false.
+        addMockTool("bronze_pickaxe", "mining");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("bronze_pickaxe", "hammer")).toBe(false);
+      });
+    });
+
+    describe("fallback path (no manifest)", () => {
+      beforeEach(() => {
+        // Ensure no manifest is loaded so fallback substring matching is exercised
+        delete (globalThis as Record<string, unknown>).EXTERNAL_TOOLS;
+      });
+
+      it("matches hatchet via fallback and logs warning", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        expect(itemMatchesToolCategory("bronze_hatchet", "hatchet")).toBe(true);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("not found in tools manifest"),
+        );
+        warnSpy.mockRestore();
+      });
+
+      it("rejects pickaxe for hatchet via fallback", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        expect(itemMatchesToolCategory("iron_pickaxe", "hatchet")).toBe(false);
+        warnSpy.mockRestore();
+      });
+
+      it("rejects hatchet for pickaxe via fallback", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        expect(itemMatchesToolCategory("iron_hatchet", "pickaxe")).toBe(false);
+        warnSpy.mockRestore();
+      });
+
+      it("uses generic substring match for unknown categories", () => {
+        expect(itemMatchesToolCategory("bronze_hammer", "hammer")).toBe(true);
+        expect(itemMatchesToolCategory("iron_chisel", "hammer")).toBe(false);
       });
     });
 

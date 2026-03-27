@@ -33,9 +33,11 @@ type GatheringSkill = "woodcutting" | "mining" | "fishing";
 
 /**
  * Map from tool category to the skill it belongs to.
- * Used to look up tools in the manifest by category.
+ * When a new gathering category is added (e.g., "knife" for crafting),
+ * add an entry here so the manifest path handles it — otherwise the
+ * fallback path uses a direct category===skill comparison.
  */
-const CATEGORY_TO_SKILL: Record<ToolCategory, GatheringSkill> = {
+const CATEGORY_TO_SKILL: Partial<Record<string, GatheringSkill>> = {
   hatchet: "woodcutting",
   pickaxe: "mining",
 };
@@ -145,16 +147,16 @@ export function itemMatchesToolCategory(
   // Manifest-based validation: look up the item in tools.json
   const toolData = getExternalTool(lowerItemId);
   if (toolData) {
-    // Tool exists in manifest — check if its skill matches the required category
-    const expectedSkill = CATEGORY_TO_SKILL[category];
-    if (expectedSkill) {
-      return toolData.skill === expectedSkill;
-    }
+    // Tool exists in manifest — check if its skill matches the required category.
+    // For known categories (hatchet, pickaxe), compare via CATEGORY_TO_SKILL.
+    // For unknown categories, compare the skill directly against the category string.
+    const expectedSkill = CATEGORY_TO_SKILL[category] ?? category;
+    return toolData.skill === expectedSkill;
   }
 
   // Fallback for tools not in the manifest — substring matching with cross-skill guards.
   // Log a warning so we know to backfill the manifest for any tool hitting this path.
-  if (!toolData && (category === "hatchet" || category === "pickaxe")) {
+  if (category === "hatchet" || category === "pickaxe") {
     console.warn(
       `[ToolUtils] Item "${itemId}" not found in tools manifest — using fallback matching for category "${category}"`,
     );
@@ -167,6 +169,9 @@ export function itemMatchesToolCategory(
     return lowerItemId.includes("hatchet") || lowerItemId.includes("axe");
   }
   if (category === "pickaxe") {
+    if (lowerItemId.includes("hatchet")) {
+      return false;
+    }
     return lowerItemId.includes("pickaxe") || lowerItemId.includes("pick");
   }
 
