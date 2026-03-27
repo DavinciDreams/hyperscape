@@ -1796,8 +1796,8 @@ export class AutonomousBehaviorManager {
       const response = await Promise.race([
         hasTrajectory
           ? loggedLLMCall(
-              trajectoryLogger,
-              trajectoryId,
+              trajectoryLogger!,
+              trajectoryId!,
               {
                 model: ModelType.TEXT_SMALL,
                 systemPrompt: "autonomous_llm_selection",
