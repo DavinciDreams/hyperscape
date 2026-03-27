@@ -103,6 +103,8 @@ function mergeGeometries(
 
 // Cache merged+scaled proxy geometry per (sourceGeometries identity, scale) to avoid
 // redundant merge/clone/scale work for trees sharing the same model variant and scale.
+// NOTE: This cache only grows; it is cleared on world teardown via clearProxyGeometryCache().
+// This is fine as long as tree scales are discrete (e.g. from manifest modelScale values).
 const _proxyGeometryCache = new Map<
   THREE.BufferGeometry[],
   Map<number, THREE.BufferGeometry>
@@ -134,9 +136,14 @@ function getOrCreateProxyGeometry(
   const merged = mergeGeometries(sourceGeometries);
   if (!merged) return null;
 
-  // Always clone so mergeGeometries' single-part return (shared ref) is never mutated
+  // Always clone — mergeGeometries may return the pool's shared geometry directly
+  // (single-part case) or a freshly created merge. Cloning unconditionally ensures
+  // the cached entry is always an independent copy safe for Three.js raycaster use.
   const scaled = merged.clone();
   scaled.scale(scale, scale, scale);
+  // Pre-compute both bounds so Three.js raycaster never lazily mutates this geometry
+  scaled.computeBoundingBox();
+  scaled.computeBoundingSphere();
 
   if (!scaleMap) {
     scaleMap = new Map();
@@ -173,7 +180,11 @@ function createCollisionProxy(
   } else {
     // Fallback: tighter trunk-only cylinder (only if LOD geometry unavailable).
     // Reduced from 0.4 to 0.25 since the LOD proxy now handles canopy clicks;
-    // this path is only hit during initial load before LODs are ready.
+    // this path should rarely trigger — LOD data is typically available by the
+    // time createCollisionProxy is called after a successful addInstance.
+    console.warn(
+      `[TreeProxy] LOD geometry unavailable for ${ctx.id}, using cylinder fallback`,
+    );
     const dims = batched
       ? getBatchedDimensions(ctx.id)
       : getInstancedDimensions(ctx.id);
