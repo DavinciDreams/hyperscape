@@ -759,13 +759,15 @@ function applyDissolveColor(
 ): void {
   const ids = pool.instanceIds.get(entityId);
   if (!ids || ids.length === 0) return;
-  // Skip redundant writes — read blue from batches[0] (all batches are uniform)
+  // Skip redundant writes — read from batches[0] (all batches are kept uniform)
   pool.batches[0].getColorAt(ids[0], _tmpColor);
   const encoded = 1.0 - dissolveVal;
   if (Math.abs(_tmpColor.b - encoded) < 1e-6) return;
+  // Reuse R/G from the first read — only blue changes for dissolve
+  const r = _tmpColor.r;
+  const g = _tmpColor.g;
   for (let i = 0; i < pool.batches.length; i++) {
-    pool.batches[i].getColorAt(ids[i], _tmpColor);
-    _tmpColor.b = encoded;
+    _tmpColor.setRGB(r, g, encoded);
     pool.batches[i].setColorAt(ids[i], _tmpColor);
   }
 }

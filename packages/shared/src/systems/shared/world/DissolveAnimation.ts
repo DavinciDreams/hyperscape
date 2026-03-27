@@ -17,8 +17,11 @@ export interface DissolveAnim {
 
 /**
  * Reused across ticks to avoid per-frame allocation.
- * Safe because both instancers call tickDissolveAnims sequentially on the
- * main thread within the same frame — never concurrently or from workers.
+ * WARNING: Not re-entrant — callers must invoke tickDissolveAnims sequentially
+ * on the main thread. Currently both instancers do so within the same frame,
+ * never concurrently or from workers. Adding a third caller or async scheduling
+ * would silently corrupt this array.
+ * @internal
  */
 const _completed: string[] = [];
 

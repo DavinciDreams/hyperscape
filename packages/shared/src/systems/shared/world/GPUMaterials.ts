@@ -133,7 +133,12 @@ export const GPU_VEG_CONFIG = {
   // See GLBTreeBatchedInstancer.applyDissolveColor / applyHighlightColor.
   // InstancedMesh uses a dedicated per-instance `instanceDissolve` float attribute.
 
-  /** Duration of the respawn dissolve-in animation (seconds). Depletion is instant. */
+  /**
+   * Duration of the respawn dissolve-in animation (seconds). Depletion is instant.
+   * NOTE: BatchedMesh encodes dissolve in a Uint8 blue channel (~256 levels).
+   * At 60fps this gives ~18 steps over 0.3s, which is smooth enough. Increasing
+   * this value significantly may require switching to Float32 encoding to avoid banding.
+   */
   DISSOLVE_DURATION: 0.3,
 
   /**
