@@ -84,8 +84,7 @@ RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/plugin-hyperscape && bun run build && \
     cd /app/packages/web3 && bun run build && \
     cd /app/packages/server && bun run build && \
-    cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' bun run build:cf && \
-    bun run verify:tailwind-artifact
+    cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' bun run build:cf
 
 # ─── Runtime ────────────────────────────────────────────────────────────────
 

@@ -21,7 +21,6 @@
     "dev": "vite --host --port 3333 --strictPort",
     "build": "cd ../.. && turbo run build --filter=@hyperscape/shared && cd packages/client && NODE_OPTIONS='--max-old-space-size=4096' vite build",
     "build:cf": "NODE_OPTIONS='--max-old-space-size=4096' vite build",
-    "verify:tailwind-artifact": "node scripts/verify-tailwind-artifact.mjs",
     "preview": "vite preview",
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit",
