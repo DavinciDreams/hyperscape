@@ -382,6 +382,7 @@ export class GrassVisualManager implements QuadTreeListener {
     string,
     { node: TerrainQuadNode; desiredLod: number }
   >();
+  private destroyed = false;
 
   constructor(
     container: THREE.Group,
@@ -523,11 +524,11 @@ export class GrassVisualManager implements QuadTreeListener {
           const nodeKey = this.chunkKey(chunk.node);
           const workerPool = getGrassWorkerPool();
           if (workerPool && this.workerSetup) {
+            this.pendingLodSwap.set(nodeKey, {
+              node: chunk.node,
+              desiredLod,
+            });
             if (!this.workerInflight.has(nodeKey)) {
-              this.pendingLodSwap.set(nodeKey, {
-                node: chunk.node,
-                desiredLod,
-              });
               this.dispatchLodSwap(chunk.node, nodeKey, desiredLod);
             }
           } else {
@@ -548,6 +549,8 @@ export class GrassVisualManager implements QuadTreeListener {
         chunk.mesh.geometry.dispose();
         this.chunks.delete(key);
       }
+      this.workerInflight.delete(key);
+      this.pendingLodSwap.delete(key);
     }
   }
 
@@ -638,9 +641,12 @@ export class GrassVisualManager implements QuadTreeListener {
       .execute(input)
       .then((output: GrassWorkerOutput) => {
         this.workerInflight.delete(key);
+        if (this.destroyed) return;
+
+        const latest = this.pendingLodSwap.get(key);
+        const finalLod = latest ? latest.desiredLod : desiredLod;
         this.pendingLodSwap.delete(key);
 
-        // Remove old chunk now that replacement is ready
         const oldChunk = this.chunks.get(key);
         if (oldChunk) {
           if (oldChunk.mesh.parent) oldChunk.mesh.parent.remove(oldChunk.mesh);
@@ -649,11 +655,12 @@ export class GrassVisualManager implements QuadTreeListener {
         }
 
         if (output.count === 0) return;
-        this.createChunkMeshFromWorkerData(node, output, desiredLod);
+        this.createChunkMeshFromWorkerData(node, output, finalLod);
       })
       .catch((err: unknown) => {
         this.workerInflight.delete(key);
         this.pendingLodSwap.delete(key);
+        if (this.destroyed) return;
         console.warn(
           `[GrassVisualManager] LOD swap worker failed for ${key}:`,
           err,
@@ -720,17 +727,22 @@ export class GrassVisualManager implements QuadTreeListener {
       .execute(input)
       .then((output: GrassWorkerOutput) => {
         this.workerInflight.delete(key);
+        if (this.destroyed) return;
         if (this.chunks.has(key)) return;
         if (output.count === 0) return;
         this.createChunkMeshFromWorkerData(node, output, lod);
       })
       .catch((err: unknown) => {
         this.workerInflight.delete(key);
+        if (this.destroyed) return;
         console.warn(
           `[GrassVisualManager] Worker failed for ${key}, falling back to sync:`,
           err,
         );
-        if (!this.chunks.has(key)) {
+        if (
+          !this.chunks.has(key) &&
+          !this.pendingNodes.some((p) => p.node === node)
+        ) {
           this.pendingNodes.push({ node });
         }
       });
@@ -792,13 +804,17 @@ export class GrassVisualManager implements QuadTreeListener {
   onNodeDestroyGeometry(node: TerrainQuadNode): void {
     const key = this.chunkKey(node);
     const chunk = this.chunks.get(key);
-    if (!chunk) return;
-    if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
-    chunk.mesh.geometry.dispose();
-    this.chunks.delete(key);
+    if (chunk) {
+      if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+      chunk.mesh.geometry.dispose();
+      this.chunks.delete(key);
+    }
+    this.workerInflight.delete(key);
+    this.pendingLodSwap.delete(key);
   }
 
   destroy(): void {
+    this.destroyed = true;
     this.pendingNodes.length = 0;
     this.workerInflight.clear();
     this.pendingLodSwap.clear();
@@ -808,6 +824,7 @@ export class GrassVisualManager implements QuadTreeListener {
       chunk.mesh.geometry.dispose();
     }
     this.chunks.clear();
+    this.lodGeometries.forEach((g) => g.dispose());
     if (this.material) this.material.dispose();
     if (this.container.parent) this.container.parent.remove(this.container);
   }
@@ -823,9 +840,13 @@ export class GrassVisualManager implements QuadTreeListener {
       chunk.mesh.geometry.dispose();
     }
     this.chunks.clear();
+    this.workerInflight.clear();
+    this.pendingLodSwap.clear();
     for (const node of nodes) {
       node.visualChunkKey = null;
-      this.pendingNodes.push({ node });
+      if (!this.pendingNodes.some((p) => p.node === node)) {
+        this.pendingNodes.push({ node });
+      }
     }
   }
 
@@ -856,9 +877,13 @@ export class GrassVisualManager implements QuadTreeListener {
       if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
       chunk.mesh.geometry.dispose();
       this.chunks.delete(key);
+      this.workerInflight.delete(key);
+      this.pendingLodSwap.delete(key);
     }
     for (const node of toRebuild) {
-      this.pendingNodes.push({ node });
+      if (!this.pendingNodes.some((p) => p.node === node)) {
+        this.pendingNodes.push({ node });
+      }
     }
   }
 

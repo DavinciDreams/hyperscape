@@ -112,12 +112,14 @@ function createSharedGeometry(
 ): THREE.BufferGeometry {
   const geo = new THREE.BufferGeometry();
   for (const name in source.attributes) {
-    geo.setAttribute(name, source.attributes[name]);
+    geo.setAttribute(name, source.attributes[name].clone());
   }
-  if (source.index) geo.setIndex(source.index);
+  if (source.index) geo.setIndex(source.index.clone());
   if (source.morphAttributes) {
     for (const name in source.morphAttributes) {
-      geo.morphAttributes[name] = source.morphAttributes[name];
+      geo.morphAttributes[name] = source.morphAttributes[name].map((a) =>
+        a.clone(),
+      );
     }
   }
   if (source.groups.length > 0) {
@@ -385,7 +387,12 @@ function composeInstanceMatrix(
   return _matrix.compose(_position, _quaternion, _scale);
 }
 
-function addToPool(pool: LODPool, entityId: string, mat: THREE.Matrix4): void {
+function addToPool(
+  pool: LODPool,
+  entityId: string,
+  mat: THREE.Matrix4,
+): boolean {
+  if (pool.activeCount >= MAX_INSTANCES) return false;
   const idx = pool.activeCount;
   for (const im of pool.meshes) {
     im.setMatrixAt(idx, mat);
@@ -394,6 +401,7 @@ function addToPool(pool: LODPool, entityId: string, mat: THREE.Matrix4): void {
   pool.slots.set(entityId, idx);
   pool.activeCount++;
   pool.dirty = true;
+  return true;
 }
 
 function removeFromPool(pool: LODPool, entityId: string): void {
@@ -463,6 +471,10 @@ export async function addInstance(
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
+  if (entityToModel.has(entityId)) {
+    removeInstance(entityId);
+  }
+
   try {
     const pool = await ensureModelPool(
       modelPath,
@@ -470,13 +482,6 @@ export async function addInstance(
       lod1ModelPath,
       lod2ModelPath,
     );
-
-    if (pool.lod0 && pool.lod0.activeCount >= MAX_INSTANCES) {
-      console.warn(
-        `[GLBTreeInstancer] LOD0 pool full for ${modelPath}, cannot add ${entityId}`,
-      );
-      return false;
-    }
 
     // Pick initial LOD based on camera distance to avoid LOD0 pop-in at range
     let initialLOD: 0 | 1 | 2 = 0;
@@ -509,7 +514,14 @@ export async function addInstance(
     const mat = composeInstanceMatrix(position, rotation, scale, pool.yOffset);
     const initialPool =
       initialLOD === 0 ? pool.lod0 : initialLOD === 1 ? pool.lod1 : pool.lod2;
-    if (initialPool) addToPool(initialPool, entityId, mat);
+    if (initialPool && !addToPool(initialPool, entityId, mat)) {
+      console.warn(
+        `[GLBTreeInstancer] LOD${initialLOD} pool full for ${modelPath}, cannot add ${entityId}`,
+      );
+      pool.instances.delete(entityId);
+      entityToModel.delete(entityId);
+      return false;
+    }
 
     return true;
   } catch (error) {

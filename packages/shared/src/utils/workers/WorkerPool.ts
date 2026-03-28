@@ -19,14 +19,15 @@ type WorkerTask<T, R> = {
   reject: (error: Error) => void;
 };
 
-interface PoolWorker {
+interface PoolWorker<TInput = unknown, TOutput = unknown> {
   worker: Worker;
   busy: boolean;
   taskCount: number;
+  activeTask?: WorkerTask<TInput, TOutput>;
 }
 
 export class WorkerPool<TInput = unknown, TOutput = unknown> {
-  private workers: PoolWorker[] = [];
+  private workers: PoolWorker<TInput, TOutput>[] = [];
   private taskQueue: WorkerTask<TInput, TOutput>[] = [];
   private nextWorkerIndex = 0;
   private terminated = false;
@@ -232,19 +233,22 @@ export class WorkerPool<TInput = unknown, TOutput = unknown> {
    */
   terminate(): void {
     this.terminated = true;
-    for (const { worker } of this.workers) {
-      worker.terminate();
+    for (const pw of this.workers) {
+      if (pw.activeTask) {
+        pw.activeTask.reject(new Error("WorkerPool terminated"));
+        pw.activeTask = undefined;
+      }
+      pw.worker.terminate();
     }
     this.workers = [];
 
-    // Reject any pending tasks
     for (const task of this.taskQueue) {
       task.reject(new Error("WorkerPool terminated"));
     }
     this.taskQueue = [];
   }
 
-  private getAvailableWorker(): PoolWorker | null {
+  private getAvailableWorker(): PoolWorker<TInput, TOutput> | null {
     // Round-robin with availability check
     const startIndex = this.nextWorkerIndex;
     for (let i = 0; i < this.workers.length; i++) {
@@ -259,15 +263,17 @@ export class WorkerPool<TInput = unknown, TOutput = unknown> {
   }
 
   private runTask(
-    poolWorker: PoolWorker,
+    poolWorker: PoolWorker<TInput, TOutput>,
     task: WorkerTask<TInput, TOutput>,
   ): void {
     poolWorker.busy = true;
+    poolWorker.activeTask = task;
 
     const handleMessage = (e: MessageEvent) => {
       poolWorker.worker.removeEventListener("message", handleMessage);
       poolWorker.worker.removeEventListener("error", handleError);
       poolWorker.busy = false;
+      poolWorker.activeTask = undefined;
       poolWorker.taskCount++;
 
       if (e.data.error) {
@@ -276,7 +282,6 @@ export class WorkerPool<TInput = unknown, TOutput = unknown> {
         task.resolve(e.data.result as TOutput);
       }
 
-      // Process next queued task
       this.processQueue();
     };
 
@@ -284,10 +289,10 @@ export class WorkerPool<TInput = unknown, TOutput = unknown> {
       poolWorker.worker.removeEventListener("message", handleMessage);
       poolWorker.worker.removeEventListener("error", handleError);
       poolWorker.busy = false;
+      poolWorker.activeTask = undefined;
 
       task.reject(new Error(e.message || "Worker error"));
 
-      // Process next queued task
       this.processQueue();
     };
 

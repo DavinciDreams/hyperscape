@@ -579,23 +579,28 @@ function addToPool(
   variantIndex: number,
   snowWeight = 0,
 ): void {
+  for (let i = 0; i < pool.batches.length; i++) {
+    const numVariants = pool.geometryIds[i].length;
+    const clampedIdx = variantIndex % numVariants;
+    if (pool.geometryIds[i][clampedIdx] === undefined) {
+      console.warn(
+        `[GLBTreeBatchedInstancer] geoId undefined: slot=${i} variant=${clampedIdx} available=${numVariants}, aborting addToPool`,
+      );
+      return;
+    }
+  }
+
   const color =
     snowWeight > 0 ? _snowColor.setRGB(1, 1, snowWeight) : _defaultColor;
-  const ids: number[] = [];
+  const ids: number[] = new Array(pool.batches.length);
   for (let i = 0; i < pool.batches.length; i++) {
     const numVariants = pool.geometryIds[i].length;
     const clampedIdx = variantIndex % numVariants;
     const geoId = pool.geometryIds[i][clampedIdx];
-    if (geoId === undefined) {
-      console.warn(
-        `[GLBTreeBatchedInstancer] geoId undefined: slot=${i} variant=${clampedIdx} available=${numVariants}`,
-      );
-      continue;
-    }
     const instId = pool.batches[i].addInstance(geoId);
     pool.batches[i].setMatrixAt(instId, mat);
     pool.batches[i].setColorAt(instId, color);
-    ids.push(instId);
+    ids[i] = instId;
   }
   pool.instanceIds.set(entityId, ids);
 }
@@ -676,6 +681,10 @@ export async function addInstance(
   depletedScale?: number,
 ): Promise<boolean> {
   if (!scene || !world) return false;
+
+  if (entityToTreeType.has(entityId)) {
+    removeInstance(entityId);
+  }
 
   try {
     const pool = await ensureTreeTypePool(
