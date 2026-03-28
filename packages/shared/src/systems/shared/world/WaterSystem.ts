@@ -1,8 +1,10 @@
 /**
  * WaterSystem - AAA Lake Water Shader (WebGPU TSL)
  *
- * Features: Gerstner waves, GGX specular, Beer-Lambert absorption,
- * subsurface scattering, foam, multi-layer detail normals, planar reflections.
+ * Features: Gerstner waves (5-wave), Phong specular, cosine-gradient depth
+ * colour, flow-mapped 4-scroll detail normals (two-phase crossfade via
+ * FlowUVW from cloud-sea technique), Schlick fresnel, Worley foam,
+ * planar reflections (lake), day/night + fog integration.
  */
 
 import THREE, {
@@ -32,6 +34,8 @@ import THREE, {
   smoothstep,
   clamp,
   saturate,
+  fract,
+  abs,
   Fn,
   output,
   attribute,
@@ -81,11 +85,11 @@ const WATER = {
   COLOR_DEPTH_FALLOFF: 3,
   COLOR_DIST_FADE: 200,
 
-  // Cosine gradient colour parameters (based on reference, darkened offsets)
-  COS_PHASES: [0.28, 0.5, 0.07] as const,
-  COS_AMPLITUDES: [4.02, 0.34, 0.65] as const,
-  COS_FREQUENCIES: [0.0, 0.48, 0.08] as const,
-  COS_OFFSETS: [-0.3, -0.05, -0.2] as const,
+  // Cosine gradient colour parameters (deep blue, subtle indigo)
+  COS_PHASES: [0.5, 0.48, 0.5] as const,
+  COS_AMPLITUDES: [0.04, 0.16, 0.15] as const,
+  COS_FREQUENCIES: [0.5, 0.48, 0.5] as const,
+  COS_OFFSETS: [-0.46, -0.3, -0.03] as const,
 
   // Normal noise strength (xz multiplier for surface normal)
   NORMAL_STRENGTH: 1.5,
@@ -95,11 +99,18 @@ const WATER = {
   FOAM_CREST_MIN: 0.15,
   FOAM_CREST_MAX: 0.4,
   FOAM_CREST_MULTIPLIER: 0.6,
-  FOAM_COLOR: { r: 0.92, g: 0.94, b: 0.96 },
+  FOAM_COLOR: { r: 0.9, g: 0.91, b: 0.96 },
   FOAM_MAX_OPACITY: 0.85,
   FOAM_SCROLL_X: 0.02,
   FOAM_SCROLL_Y: 0.015,
   FOAM_SCALE: 0.1,
+
+  // Flow mapping (two-phase crossfade, ported from cloud-sea FlowUVW)
+  FLOW_SPEED: 0.05,
+  FLOW_STRENGTH: 1.0,
+  FLOW_OFFSET: -0.1,
+  FLOW_JUMP: [0.5, -0.25] as const,
+  FLOW_UV_SCALE: 0.001,
 };
 
 // LOD configuration for water mesh resolution
@@ -182,6 +193,7 @@ export class WaterSystem {
   private oceanUniforms: WaterUniforms | null = null;
   private normalTex?: THREE.Texture;
   private foamTex?: THREE.Texture;
+  private flowTex?: THREE.Texture;
 
   // TSL planar reflection (Three.js ReflectorNode handles camera, RT, clipping)
   private reflection?: ReturnType<typeof reflector>;
@@ -195,6 +207,8 @@ export class WaterSystem {
 
   // Wind system reference for coordinated wind effects
   private windSystem: Wind | null = null;
+
+  private static _textureLoader = new THREE.TextureLoader();
 
   constructor(world: World) {
     this.world = world;
@@ -302,7 +316,38 @@ export class WaterSystem {
   async init(): Promise<void> {
     if (this.world.isServer) return;
 
-    this.normalTex = await this.createNormalMap(512, 1.0, 42);
+    const cachedLoader = WaterSystem._textureLoader;
+
+    const loadTex = (url: string): Promise<THREE.Texture> =>
+      new Promise((resolve, reject) => {
+        cachedLoader.load(
+          url,
+          (t) => {
+            t.wrapS = THREE.RepeatWrapping;
+            t.wrapT = THREE.RepeatWrapping;
+            t.magFilter = THREE.LinearFilter;
+            t.minFilter = THREE.LinearMipmapLinearFilter;
+            t.generateMipmaps = true;
+            resolve(t);
+          },
+          undefined,
+          (e) => reject(e),
+        );
+      });
+
+    const [normalResult, flowResult] = await Promise.allSettled([
+      loadTex("/textures/waterNormal.png"),
+      loadTex("/textures/noise28.png"),
+    ]);
+
+    this.normalTex =
+      normalResult.status === "fulfilled"
+        ? normalResult.value
+        : await this.createNormalMap(512, 1.0, 42);
+    this.flowTex =
+      flowResult.status === "fulfilled"
+        ? flowResult.value
+        : this.createFlowFallback(256);
     this.foamTex = await this.createFoamTexture(128);
 
     // TSL reflector: handles render target, camera mirroring, oblique clipping
@@ -311,11 +356,7 @@ export class WaterSystem {
     this.reflection.target.position.y = this.waterLevel;
 
     this.lakeMaterial = this.createLakeMaterial();
-
-    // Create ocean material without reflections (different visual style)
     this.oceanMaterial = this.createOceanMaterial();
-
-    // Lake (reflective) and ocean (non-reflective) shaders initialized
   }
 
   /**
@@ -344,13 +385,40 @@ export class WaterSystem {
   }
 
   // ==========================================================================
-  // PROCEDURAL TEXTURES (Async with yielding to prevent main thread blocking)
+  // PROCEDURAL TEXTURE FALLBACKS
   // ==========================================================================
 
-  /**
-   * Create a procedural normal map texture.
-   * Processes rows in batches, yielding between batches to prevent main thread blocking.
-   */
+  private createFlowFallback(size: number): THREE.Texture {
+    const data = new Uint8Array(size * size * 4);
+    let s = 77777;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const nx = x / size,
+          ny = y / size;
+        const r = Math.floor(
+          (Math.sin(nx * 6.28 * 2 + ny * 3.7) * 0.5 + 0.5) * 255,
+        );
+        const g = Math.floor(
+          (Math.cos(ny * 6.28 * 3 + nx * 2.3) * 0.5 + 0.5) * 255,
+        );
+        s = (s * 1103515245 + 12345) & 0x7fffffff;
+        const a = (s >>> 8) & 0xff;
+        const idx = (y * size + x) * 4;
+        data[idx] = r;
+        data[idx + 1] = g;
+        data[idx + 2] = 128;
+        data[idx + 3] = a;
+      }
+    }
+    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
   /**
    * Generate a seamless water normal map using FBM value noise + finite
    * differences. Produces organic ripple patterns matching a tangent-space
@@ -565,6 +633,7 @@ export class WaterSystem {
     material.fog = false;
 
     const nTex = this.normalTex!;
+    const fTex = this.flowTex!;
     const foamTex = this.foamTex!;
 
     const reflNode = this.reflection!;
@@ -707,29 +776,77 @@ export class WaterSystem {
       );
       const waterColor = vec3(cosR, cosG, cosB);
 
-      // --- 4-layer scrolling normal noise (matches reference scroll speeds) ---
-      const baseUV = mul(wUV, float(5));
+      // --- Flow-mapped 4-scroll normal noise (FlowUVW two-phase crossfade) ---
+      const flowSampleUV = mul(wUV, float(WATER.FLOW_UV_SCALE));
+      const flowSample = texture(fTex, flowSampleUV);
+      const flowVec = mul(
+        sub(mul(flowSample.rg, float(2)), float(1)),
+        float(WATER.FLOW_STRENGTH),
+      );
+      const flowTime = add(mul(uTime, float(WATER.FLOW_SPEED)), flowSample.a);
+
+      const progressA = fract(flowTime);
+      const progressB = fract(add(flowTime, float(0.5)));
+      const weightA = sub(
+        float(1),
+        abs(sub(mul(progressA, float(2)), float(1))),
+      );
+      const weightB = sub(
+        float(1),
+        abs(sub(mul(progressB, float(2)), float(1))),
+      );
+
+      const jumpVec = vec2(
+        float(WATER.FLOW_JUMP[0]),
+        float(WATER.FLOW_JUMP[1]),
+      );
+
+      // Phase A: flow-distorted base UV
+      const baseA = add(
+        mul(
+          sub(wUV, mul(flowVec, add(progressA, float(WATER.FLOW_OFFSET)))),
+          float(5),
+        ),
+        mul(sub(flowTime, progressA), jumpVec),
+      );
+      // Phase B: offset by 0.5 to avoid sampling same location
+      const baseB = add(
+        add(
+          mul(
+            sub(wUV, mul(flowVec, add(progressB, float(WATER.FLOW_OFFSET)))),
+            float(5),
+          ),
+          float(0.5),
+        ),
+        mul(sub(flowTime, progressB), jumpVec),
+      );
+
+      // Phase A: scroll layers 0 + 2 (large + ultra-fine scale)
       const nUV0 = add(
-        div(baseUV, float(103)),
+        div(baseA, float(103)),
         vec2(div(uTime, float(17)), div(uTime, float(29))),
       );
-      const nUV1 = add(
-        div(baseUV, float(107)),
-        vec2(div(uTime, float(19)), mul(div(uTime, float(31)), float(-1))),
-      );
       const nUV2 = add(
-        vec2(div(baseUV.x, float(8907)), div(baseUV.y, float(9803))),
+        vec2(div(baseA.x, float(8907)), div(baseA.y, float(9803))),
         vec2(div(uTime, float(101)), div(uTime, float(97))),
       );
+      // Phase B: scroll layers 1 + 3 (large + medium-fine scale)
+      const nUV1 = add(
+        div(baseB, float(107)),
+        vec2(div(uTime, float(19)), mul(div(uTime, float(31)), float(-1))),
+      );
       const nUV3 = add(
-        vec2(div(baseUV.x, float(1091)), div(baseUV.y, float(1027))),
+        vec2(div(baseB.x, float(1091)), div(baseB.y, float(1027))),
         vec2(mul(div(uTime, float(109)), float(-1)), div(uTime, float(113))),
       );
-      const n0 = texture(nTex, nUV0);
-      const n1 = texture(nTex, nUV1);
-      const n2 = texture(nTex, nUV2);
-      const n3 = texture(nTex, nUV3);
-      const noiseSum = add(add(add(n0, n1), n2), n3);
+
+      const noiseSum = mul(
+        add(
+          mul(add(texture(nTex, nUV0), texture(nTex, nUV2)), weightA),
+          mul(add(texture(nTex, nUV1), texture(nTex, nUV3)), weightB),
+        ),
+        float(2),
+      );
       const noise = sub(mul(noiseSum, float(0.5)), float(1));
       const surfaceNormal = normalize(
         vec3(
@@ -890,6 +1007,7 @@ export class WaterSystem {
     material.fog = false;
 
     const nTex = this.normalTex!;
+    const fTex = this.flowTex!;
     const foamTex = this.foamTex!;
 
     const wavePhase = (
@@ -1013,27 +1131,72 @@ export class WaterSystem {
       );
       const waterColor = vec3(cosR, cosG, cosB);
 
-      // --- 4-layer normal noise (matches reference scroll speeds) ---
-      const baseUV = mul(wUV, float(5));
+      // --- Flow-mapped 4-scroll normal noise (FlowUVW two-phase crossfade) ---
+      const flowSampleUV = mul(wUV, float(WATER.FLOW_UV_SCALE));
+      const flowSample = texture(fTex, flowSampleUV);
+      const flowVec = mul(
+        sub(mul(flowSample.rg, float(2)), float(1)),
+        float(WATER.FLOW_STRENGTH),
+      );
+      const flowTime = add(mul(uTime, float(WATER.FLOW_SPEED)), flowSample.a);
+
+      const progressA = fract(flowTime);
+      const progressB = fract(add(flowTime, float(0.5)));
+      const weightA = sub(
+        float(1),
+        abs(sub(mul(progressA, float(2)), float(1))),
+      );
+      const weightB = sub(
+        float(1),
+        abs(sub(mul(progressB, float(2)), float(1))),
+      );
+
+      const jumpVec = vec2(
+        float(WATER.FLOW_JUMP[0]),
+        float(WATER.FLOW_JUMP[1]),
+      );
+
+      const baseA = add(
+        mul(
+          sub(wUV, mul(flowVec, add(progressA, float(WATER.FLOW_OFFSET)))),
+          float(5),
+        ),
+        mul(sub(flowTime, progressA), jumpVec),
+      );
+      const baseB = add(
+        add(
+          mul(
+            sub(wUV, mul(flowVec, add(progressB, float(WATER.FLOW_OFFSET)))),
+            float(5),
+          ),
+          float(0.5),
+        ),
+        mul(sub(flowTime, progressB), jumpVec),
+      );
+
       const nUV0 = add(
-        div(baseUV, float(103)),
+        div(baseA, float(103)),
         vec2(div(uTime, float(17)), div(uTime, float(29))),
       );
-      const nUV1 = add(
-        div(baseUV, float(107)),
-        vec2(div(uTime, float(19)), mul(div(uTime, float(31)), float(-1))),
-      );
       const nUV2 = add(
-        vec2(div(baseUV.x, float(8907)), div(baseUV.y, float(9803))),
+        vec2(div(baseA.x, float(8907)), div(baseA.y, float(9803))),
         vec2(div(uTime, float(101)), div(uTime, float(97))),
       );
+      const nUV1 = add(
+        div(baseB, float(107)),
+        vec2(div(uTime, float(19)), mul(div(uTime, float(31)), float(-1))),
+      );
       const nUV3 = add(
-        vec2(div(baseUV.x, float(1091)), div(baseUV.y, float(1027))),
+        vec2(div(baseB.x, float(1091)), div(baseB.y, float(1027))),
         vec2(mul(div(uTime, float(109)), float(-1)), div(uTime, float(113))),
       );
-      const noiseSum = add(
-        add(add(texture(nTex, nUV0), texture(nTex, nUV1)), texture(nTex, nUV2)),
-        texture(nTex, nUV3),
+
+      const noiseSum = mul(
+        add(
+          mul(add(texture(nTex, nUV0), texture(nTex, nUV2)), weightA),
+          mul(add(texture(nTex, nUV1), texture(nTex, nUV3)), weightB),
+        ),
+        float(2),
       );
       const noise = sub(mul(noiseSum, float(0.5)), float(1));
       const surfaceNormal = normalize(
@@ -1088,7 +1251,7 @@ export class WaterSystem {
       const fresnelSky = pow(sub(float(1), NdotV), float(4));
       color = add(
         color,
-        mul(vec3(0.4, 0.5, 0.65), mul(fresnelSky, float(0.2))),
+        mul(vec3(0.38, 0.42, 0.68), mul(fresnelSky, float(0.2))),
       );
 
       // --- Foam (more whitecaps on ocean) ---
@@ -1108,7 +1271,7 @@ export class WaterSystem {
       const foamIntensity = mul(crestFoam, foamPattern);
       color = mix(
         color,
-        vec3(0.9, 0.92, 0.95),
+        vec3(0.9, 0.91, 0.96),
         clamp(foamIntensity, float(0), float(0.75)),
       );
 
@@ -1465,9 +1628,11 @@ export class WaterSystem {
     this.oceanMaterial?.dispose();
     this.oceanMaterial = undefined;
 
-    // Dispose procedural textures
+    // Dispose textures
     this.normalTex?.dispose();
     this.normalTex = undefined;
+    this.flowTex?.dispose();
+    this.flowTex = undefined;
     this.foamTex?.dispose();
     this.foamTex = undefined;
 
