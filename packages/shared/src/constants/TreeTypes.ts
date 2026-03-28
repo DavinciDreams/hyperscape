@@ -20,7 +20,6 @@
  * Use this instead of hardcoded "tree_xxx" strings everywhere.
  */
 export enum TreeId {
-  Fir = "tree_fir",
   Pine = "tree_pine",
   Oak = "tree_oak",
   Birch = "tree_birch",
@@ -85,7 +84,6 @@ export interface TreeTypeDefinition {
  * in TerrainBiomeTypes.ts.
  */
 export const TREE_TYPES = {
-  fir: { name: "Fir Tree", levelRequired: 1 },
   pine: { name: "Pine Tree", levelRequired: 1, snowCapable: true },
   oak: { name: "Oak Tree", levelRequired: 15 },
   birch: { name: "Birch Tree", levelRequired: 1 },
