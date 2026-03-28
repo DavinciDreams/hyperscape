@@ -44,9 +44,10 @@ const _scale = new THREE.Vector3();
 
 // ---- Batch color channel layout ----
 // R = highlight intensity (1.0 = normal, >1.0 = highlighted via HL_COLOR_INTENSITY)
-// G = highlight intensity (same as R — shader detects highlight via step(1.01, max(R, G)))
+// G = biome snow weight (0.0 = no snow, 1.0 = full snow) — set once on add/LOD swap
 // B = 1.0 - dissolveVal (1.0 = fully visible, 0.0 = fully dissolved)
-// Only modify channels through applyHighlightColor (R/G) and applyDissolveColor (B).
+// Only modify channels through applyHighlightColor (R), applyDissolveColor (B),
+// and addToPool (G for snow).
 // NOTE: If the underlying color buffer is Uint8 (256 levels), dissolve precision is
 // ~0.004 per step. At 0.3s duration / 60fps (~18 steps) this is more than sufficient.
 const _defaultColor = new THREE.Color(1, 1, 1);
@@ -533,6 +534,7 @@ function addToPool(
   mat: THREE.Matrix4,
   variantIndex: number,
   dissolve = 0,
+  snowWeight = 0,
 ): void {
   for (let i = 0; i < pool.batches.length; i++) {
     const numVariants = pool.geometryIds[i].length;
@@ -546,18 +548,14 @@ function addToPool(
   }
 
   const ids: number[] = new Array(pool.batches.length);
+  _tmpColor.setRGB(1, snowWeight, 1.0 - dissolve);
   for (let i = 0; i < pool.batches.length; i++) {
     const numVariants = pool.geometryIds[i].length;
     const clampedIdx = variantIndex % numVariants;
     const geoId = pool.geometryIds[i][clampedIdx];
     const instId = pool.batches[i].addInstance(geoId);
     pool.batches[i].setMatrixAt(instId, mat);
-    if (dissolve > 0) {
-      _tmpColor.setRGB(1, 1, 1.0 - dissolve);
-      pool.batches[i].setColorAt(instId, _tmpColor);
-    } else {
-      pool.batches[i].setColorAt(instId, _defaultColor);
-    }
+    pool.batches[i].setColorAt(instId, _tmpColor);
     ids[i] = instId;
   }
   pool.instanceIds.set(entityId, ids);
@@ -586,11 +584,11 @@ function applyHighlightColor(
 ): void {
   const ids = pool.instanceIds.get(entityId);
   if (!ids) return;
-  const rg = on ? HL_COLOR_INTENSITY : 1.0;
+  const r = on ? HL_COLOR_INTENSITY : 1.0;
   for (let i = 0; i < pool.batches.length; i++) {
-    // Preserve blue channel (encodes dissolve state)
+    // Only modify R (highlight); preserve G (snow weight) and B (dissolve)
     pool.batches[i].getColorAt(ids[i], _tmpColor);
-    _tmpColor.setRGB(rg, rg, _tmpColor.b);
+    _tmpColor.setRGB(r, _tmpColor.g, _tmpColor.b);
     pool.batches[i].setColorAt(ids[i], _tmpColor);
   }
 }
@@ -701,7 +699,14 @@ export async function addInstance(
     const initialPool =
       initialLOD === 0 ? pool.lod0 : initialLOD === 1 ? pool.lod1 : pool.lod2;
     if (initialPool)
-      addToPool(initialPool, entityId, mat, variantIndex, initialDissolve);
+      addToPool(
+        initialPool,
+        entityId,
+        mat,
+        variantIndex,
+        initialDissolve,
+        snowWeight,
+      );
 
     return true;
   } catch (error) {
@@ -941,6 +946,7 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
           mat,
           slot.variantIndex,
           wasDissolveVal,
+          slot.snowWeight,
         );
         if (wasHl) applyHighlightColor(newPool, slot.entityId, true);
       }

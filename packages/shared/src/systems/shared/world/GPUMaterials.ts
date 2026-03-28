@@ -130,9 +130,8 @@ export const GPU_VEG_CONFIG = {
   NEAR_CAMERA_FADE_END: 0.05,
 
   // ========== TREE DEPLETION DISSOLVE ==========
-  // BatchedMesh encodes dissolve in the **blue channel** of per-instance batch
-  // colors (blue = 1.0 - dissolveVal). R/G channels carry highlight intensity.
-  // See GLBTreeBatchedInstancer.applyDissolveColor / applyHighlightColor.
+  // BatchedMesh channel layout: R = highlight (1.0 or >1.0), G = snow weight,
+  // B = 1.0 - dissolveVal. See GLBTreeBatchedInstancer channel layout comment.
   // InstancedMesh uses a dedicated per-instance `instanceDissolve` float attribute.
 
   /**
@@ -1191,7 +1190,7 @@ export function createTreeDissolveMaterial(
         }
 
         const batchColor = varyingProperty("vec3", "vBatchColor");
-        const biomeSnowStrength = clamp(batchColor.z, float(0.0), float(1.0));
+        const biomeSnowStrength = clamp(batchColor.y, float(0.0), float(1.0));
         const snowBase = vec3(...SNOW_COLOR);
         const snowAO = vec3(...SNOW_AO_TINT);
         const snowCol = mix(snowAO, snowBase, aoFactor);
@@ -1274,8 +1273,8 @@ export function createTreeDissolveMaterial(
     let hlIntensity;
     if (options.batched) {
       const batchColor = varyingProperty("vec3", "vBatchColor");
-      // Only check R/G for highlight — blue channel is reserved for dissolve state
-      hlIntensity = step(float(1.01), max(batchColor.x, batchColor.y));
+      // Only check R for highlight — G = snow weight, B = dissolve state
+      hlIntensity = step(float(1.01), batchColor.x);
     } else {
       hlIntensity = attribute("instanceHighlight", "float");
     }
