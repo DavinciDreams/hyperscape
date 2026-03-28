@@ -1,18 +1,10 @@
-/**
- * Tailwind CSS v4 Entry Point
- */
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/**
- * Tailwind v4 Theme Configuration
- * Custom colors and design tokens
- */
-@theme {
-  /* Custom color palette */
+:root {
   --color-dark-bg: rgba(11, 10, 21, 0.85);
   --color-dark-border: #2a2b39;
-  
-  /* Backdrop blur */
   --backdrop-blur-xs: 2px;
 }
 

@@ -1,7 +1,7 @@
 # Hyperscape — full-stack Docker image (game server + web client)
 #
 # Build from repo root:
-#   docker build --platform linux/amd64 -f Dockerfile.server -t ghcr.io/alternatefutures/hyperscape:v12 .
+#   docker build --platform linux/amd64 -f Dockerfile.server -t ghcr.io/alternatefutures/hyperscape:v19 .
 #
 # Issues this Dockerfile works around:
 #   1. better-sqlite3 — node-gyp fails under QEMU (stripped before install)
@@ -68,6 +68,10 @@ RUN bun -e " \
 
 RUN bun install --trust
 
+# Bun 1.3+ may not create per-package node_modules for every workspace member.
+# Ensure they exist so the runtime COPY --from=builder doesn't fail.
+RUN mkdir -p packages/web3/node_modules packages/client/node_modules
+
 # Download game asset manifests (bypass CDN reliance on boot).
 RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
 
@@ -82,9 +86,17 @@ RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/server && bun run build && \
     cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' bun run build:cf
 
+# Compile polyfills.ts for Node.js runtime and create ESM entry wrapper
+RUN bun build packages/server/src/shared/polyfills.ts \
+      --outfile packages/server/dist/polyfills.mjs \
+      --target node --format esm && \
+    printf 'import "./polyfills.mjs";\nawait import("./index.js");\n' \
+      > packages/server/dist/entry.mjs
+
 # ─── Runtime ────────────────────────────────────────────────────────────────
 
-FROM oven/bun:1.3.10-debian AS runtime
+# Node.js on Debian Trixie — uWebSockets.js needs Node NAPI + GLIBC ≥ 2.38.
+FROM node:22-trixie-slim AS runtime
 
 RUN apt-get update && apt-get install -y \
     libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
@@ -100,7 +112,7 @@ ENV NODE_ENV=production \
     HYPERSCAPE_SKIP_BROWSER_INSTALL=true
 
 # Package manifests from builder (has better-sqlite3 stripped).
-COPY --from=builder /app/package.json /app/bun.lock ./
+COPY --from=builder /app/package.json ./
 COPY --from=builder /app/packages/physx-js-webidl/package.json ./packages/physx-js-webidl/
 COPY --from=builder /app/packages/decimation/package.json      ./packages/decimation/
 COPY --from=builder /app/packages/impostors/package.json       ./packages/impostors/
@@ -135,8 +147,10 @@ COPY --from=builder /app/packages/shared/node_modules            ./packages/shar
 COPY --from=builder /app/packages/procgen/node_modules           ./packages/procgen/node_modules
 COPY --from=builder /app/packages/impostors/node_modules         ./packages/impostors/node_modules
 COPY --from=builder /app/packages/plugin-hyperscape/node_modules ./packages/plugin-hyperscape/node_modules
-COPY --from=builder /app/packages/web3/node_modules              ./packages/web3/node_modules
-COPY --from=builder /app/packages/client/node_modules            ./packages/client/node_modules
+# web3 and client deps are hoisted to root node_modules by Bun;
+# per-package dirs may not exist. Create empty dirs so the workspace
+# symlinks resolve without errors.
+RUN mkdir -p ./packages/web3/node_modules ./packages/client/node_modules
 
 # ── Build artifacts ──
 COPY --from=builder /app/packages/physx-js-webidl/dist  ./packages/physx-js-webidl/dist
@@ -151,6 +165,10 @@ COPY --from=builder /app/packages/server/src            ./packages/server/src
 COPY --from=builder /app/packages/server/world          ./packages/server/world
 COPY --from=builder /app/packages/client/dist           ./packages/client/dist
 
+# tsx: extension-less ESM imports that tsc emits without .js suffixes
+# serve: static file server for the web client companion service
+RUN npm install -g tsx serve
+
 RUN mkdir -p ./packages/server/public/live
 
 EXPOSE 5555
@@ -158,4 +176,4 @@ EXPOSE 5555
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
     CMD curl -fsS http://localhost:${PORT:-5555}/status >/dev/null || exit 1
 
-CMD ["bun", "--preload", "/app/packages/server/src/shared/polyfills.ts", "/app/packages/server/dist/index.js"]
+CMD ["tsx", "/app/packages/server/dist/entry.mjs"]
