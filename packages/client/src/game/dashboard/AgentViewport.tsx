@@ -15,31 +15,43 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
   const [waitingForAgent, setWaitingForAgent] = useState(false);
   // Store spectator token in ref to persist across re-renders
   const spectatorTokenRef = useRef<string | null>(null);
-  // Track polling interval for cleanup
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fetchInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
 
   // Use Privy hook to get fresh access token (not stale localStorage token)
   const { getAccessToken, user } = usePrivy();
 
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
-    };
+  const clearPolling = useCallback(() => {
+    if (pollingTimeoutRef.current) {
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = null;
+    }
   }, []);
-
-  useEffect(() => {
-    fetchSpectatorData();
-  }, [agent.id]);
 
   const fetchSpectatorData = useCallback(
     async (isPolling = false) => {
+      if (!mountedRef.current) return;
+
+      if (fetchInFlightRef.current) return;
       if (!isPolling) {
         setError(null);
       }
+
+      fetchInFlightRef.current = true;
+      if (!isPolling) {
+        setLoading(true);
+        clearPolling();
+      }
+
+      const scheduleRetry = () => {
+        if (!mountedRef.current || pollingTimeoutRef.current) return;
+        pollingTimeoutRef.current = setTimeout(() => {
+          pollingTimeoutRef.current = null;
+          void fetchSpectatorData(true);
+        }, 3000);
+      };
+
       try {
         // Get FRESH Privy token using the SDK (not stale localStorage)
         // This ensures we always have a valid, non-expired token
@@ -52,6 +64,7 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
           setError("Please log in to view the agent viewport");
           setLoading(false);
           setWaitingForAgent(false);
+          clearPolling();
           return;
         }
 
@@ -77,40 +90,26 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
           setAuthToken(tokenData.spectatorToken);
           setCharacterId(tokenData.characterId || "");
           setWaitingForAgent(false);
-          // Clear polling since we got the data
-          if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-          }
-          console.log(
-            "[AgentViewport] Got permanent spectator token for:",
-            tokenData.agentName,
-          );
+          setError(null);
+          clearPolling();
         } else if (tokenResponse.status === 401) {
           // Privy token expired - user needs to re-authenticate
           console.warn("[AgentViewport] Privy token expired, need to re-login");
           setError("Session expired. Please log out and log back in.");
           setWaitingForAgent(false);
+          clearPolling();
           // Clear stale token from localStorage
           localStorage.removeItem("privy_auth_token");
         } else if (tokenResponse.status === 403) {
           setError("You don't have permission to view this agent");
           setWaitingForAgent(false);
+          clearPolling();
         } else if (tokenResponse.status === 404) {
           // Agent not yet registered - start polling to wait for it
-          console.log(
-            "[AgentViewport] Agent not yet registered, waiting for connection...",
-          );
           setWaitingForAgent(true);
+          setError(null);
           setLoading(false);
-
-          // Start polling if not already polling
-          if (!pollingIntervalRef.current) {
-            pollingIntervalRef.current = setInterval(() => {
-              console.log("[AgentViewport] Polling for agent registration...");
-              fetchSpectatorData(true);
-            }, 3000); // Poll every 3 seconds
-          }
+          scheduleRetry();
           return;
         } else {
           // Fallback: try to get character ID from mapping endpoint
@@ -127,28 +126,26 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
               setWaitingForAgent(false);
               // Use Privy token as fallback (will expire)
               setAuthToken(privyToken);
+              setError(null);
+              clearPolling();
               console.warn(
                 "[AgentViewport] Using Privy token as fallback - may expire in ~1 hour",
               );
             } else {
               // No characterId yet, wait for agent
               setWaitingForAgent(true);
-              if (!pollingIntervalRef.current) {
-                pollingIntervalRef.current = setInterval(() => {
-                  fetchSpectatorData(true);
-                }, 3000);
-              }
+              clearPolling();
+              setError(null);
+              scheduleRetry();
               setLoading(false);
               return;
             }
           } else if (mappingResponse.status === 404) {
             // Agent not registered yet - wait for it
             setWaitingForAgent(true);
-            if (!pollingIntervalRef.current) {
-              pollingIntervalRef.current = setInterval(() => {
-                fetchSpectatorData(true);
-              }, 3000);
-            }
+            setError(null);
+            clearPolling();
+            scheduleRetry();
             setLoading(false);
             return;
           }
@@ -157,15 +154,29 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
         console.error("[AgentViewport] Error fetching spectator data:", err);
         if (!isPolling) {
           setError("Failed to connect to server");
+        } else if (mountedRef.current) {
+          setError("Connection issue while checking agent. Retrying...");
+          scheduleRetry();
         }
       } finally {
+        fetchInFlightRef.current = false;
         if (!isPolling) {
           setLoading(false);
         }
       }
     },
-    [agent.id, getAccessToken],
+    [agent.id, clearPolling, getAccessToken],
   );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void fetchSpectatorData();
+
+    return () => {
+      mountedRef.current = false;
+      clearPolling();
+    };
+  }, [agent.id, clearPolling, fetchSpectatorData]);
 
   if (loading) {
     return (
@@ -184,12 +195,19 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
           {error.includes("expired") ? "Session Expired" : "Error"}
         </h2>
         <p className="text-center max-w-md mb-4">{error}</p>
-        {error.includes("expired") && (
+        {error.includes("expired") ? (
           <button
             onClick={() => window.location.reload()}
             className="px-4 py-2 bg-[#f2d08a] text-[#0b0a15] rounded-lg font-bold hover:bg-[#f2d08a]/80 transition-colors"
           >
             Refresh Page
+          </button>
+        ) : (
+          <button
+            onClick={() => void fetchSpectatorData()}
+            className="px-4 py-2 bg-[#f2d08a] text-[#0b0a15] rounded-lg font-bold hover:bg-[#f2d08a]/80 transition-colors"
+          >
+            Retry
           </button>
         )}
       </div>

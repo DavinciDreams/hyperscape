@@ -30,6 +30,7 @@ import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { getTargetValidator } from "./TargetValidator";
 import { MESSAGE_TYPES } from "../../client/interaction/constants";
 import { INPUT_LIMITS } from "../../../constants/interaction";
+import type { ClientNetwork } from "../../client/ClientNetwork";
 
 /**
  * Create a minimal Item with all required properties
@@ -82,6 +83,11 @@ export class InventoryInteractionSystem extends SystemBase {
   // Event listener cleanup - AbortController per element for proper cleanup
   private elementAbortControllers: Map<HTMLElement, AbortController> =
     new Map();
+
+  /** Typed accessor for ClientNetwork (this system is client-only). */
+  private get clientNetwork(): ClientNetwork | null {
+    return (this.world.network as ClientNetwork) ?? null;
+  }
 
   constructor(world: World) {
     super(world, {
@@ -1067,6 +1073,18 @@ export class InventoryInteractionSystem extends SystemBase {
     };
   }
 
+  /**
+   * Optimistically remove an item from the client inventory cache.
+   * Delegates to ClientNetwork which handles snapshot + rollback tracking.
+   */
+  private applyOptimisticRemoval(
+    playerId: string,
+    slot: number,
+    quantity: number,
+  ): void {
+    this.clientNetwork?.applyOptimisticRemoval(playerId, slot, quantity);
+  }
+
   destroy(): void {
     this.cleanupInteractions();
     this.currentDrag = undefined;
@@ -1378,7 +1396,7 @@ export class InventoryInteractionSystem extends SystemBase {
   }
 
   /**
-   * Handle corpse/gravestone click - opens loot UI (handled by client Sidebar.tsx)
+   * Handle corpse/gravestone click - opens loot UI in the active client interface
    * This handler is kept for logging/debugging purposes
    */
   private handleCorpseClick(event: {
@@ -1391,7 +1409,7 @@ export class InventoryInteractionSystem extends SystemBase {
       "InventoryInteractionSystem",
       `CORPSE_CLICK event received for ${event.corpseId} with ${event.lootItems?.length || 0} items - LootWindow should open in client UI`,
     );
-    // Note: The actual loot UI (LootWindow) is rendered in the client's Sidebar.tsx
+    // Note: The actual loot UI (LootWindow) is rendered by the active client interface
     // which listens to this event and displays the loot interface
   }
 
@@ -1655,6 +1673,12 @@ export class InventoryInteractionSystem extends SystemBase {
           logsSlot,
           tinderboxSlot,
         });
+
+        // Optimistic removal: remove the logs from the client inventory cache
+        // so the UI updates immediately (same pattern as eat/drop/bury in
+        // InventoryActionDispatcher). The server's authoritative inventoryUpdated
+        // packet will replace this cache within ~100-200ms.
+        this.applyOptimisticRemoval(playerId, logsSlot, 1);
       } else {
         // Fallback: emit local event (for single-player/testing)
         this.emitTypedEvent(EventType.PROCESSING_FIREMAKING_REQUEST, {

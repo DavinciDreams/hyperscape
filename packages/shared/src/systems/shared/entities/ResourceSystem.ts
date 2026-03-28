@@ -387,9 +387,14 @@ export class ResourceSystem extends SystemBase {
 
     // OSRS-ACCURACY: Cancel gathering when player dies
     // Critical: Dead players cannot continue gathering
-    this.subscribe<{ playerId: string }>(EventType.PLAYER_DIED, (data) => {
-      this.cancelGatheringForPlayer(data.playerId, "died");
-    });
+    this.subscribe<{ entityId: string; entityType: string }>(
+      EventType.ENTITY_DEATH,
+      (data) => {
+        if (data.entityType === "player") {
+          this.cancelGatheringForPlayer(data.entityId, "died");
+        }
+      },
+    );
 
     // OSRS-ACCURACY: Cancel gathering when player teleports
     // Cannot gather from a resource across the map
@@ -1935,9 +1940,10 @@ export class ResourceSystem extends SystemBase {
       tickDurationMs: TICK_DURATION_MS,
     });
 
-    // OSRS-STYLE: Show gathering tool in hand during fishing (tool is in inventory, not equipped)
-    // For fishing, the rod appears in hand even though it's not wielded as a weapon
-    if (resource.skillRequired === "fishing" && toolInfo?.itemId) {
+    // OSRS-STYLE: Show gathering tool in hand during gathering (overrides equipped weapon)
+    // e.g., if player has a pickaxe equipped but a hatchet in inventory, the hatchet
+    // appears in hand while woodcutting. Applies to all gathering skills.
+    if (toolInfo?.itemId) {
       this.emitTypedEvent(EventType.GATHERING_TOOL_SHOW, {
         playerId: data.playerId,
         itemId: toolInfo.itemId,
@@ -1973,8 +1979,8 @@ export class ResourceSystem extends SystemBase {
       // Reset emote back to idle when gathering stops
       this.resetGatheringEmote(data.playerId);
 
-      // OSRS-STYLE: Hide gathering tool visual if fishing
-      if (session.skill === "fishing" && session.toolItemId) {
+      // OSRS-STYLE: Hide gathering tool visual and restore equipped weapon
+      if (session.toolItemId) {
         this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
           playerId: data.playerId,
           slot: "weapon",
@@ -2018,8 +2024,8 @@ export class ResourceSystem extends SystemBase {
       patterns.lastDisconnect = now;
       this.suspiciousPatterns.set(pid, patterns);
 
-      // OSRS-STYLE: Hide gathering tool visual if fishing
-      if (session.skill === "fishing" && session.toolItemId) {
+      // OSRS-STYLE: Hide gathering tool visual and restore equipped weapon
+      if (session.toolItemId) {
         this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
           playerId: playerId,
           slot: "weapon",
@@ -2068,8 +2074,8 @@ export class ResourceSystem extends SystemBase {
       // FORESTRY: Remove from active gatherers (timer will regenerate if no other gatherers)
       this.removeActiveGatherer(pid, session.resourceId);
 
-      // OSRS-STYLE: Hide gathering tool visual if fishing
-      if (session.skill === "fishing" && session.toolItemId) {
+      // OSRS-STYLE: Hide gathering tool visual and restore equipped weapon
+      if (session.toolItemId) {
         this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
           playerId: playerId,
           slot: "weapon",
@@ -2837,12 +2843,18 @@ export class ResourceSystem extends SystemBase {
           resource.type === "ore" ||
           resource.skillRequired === "mining"
         ) {
-          // MINING: Chance-based depletion (1/8 for most rocks)
-          const roll = Math.random();
-          shouldDeplete = roll < GATHERING_CONSTANTS.MINING_DEPLETE_CHANCE;
-          console.log(
-            `[Forestry] ⛏️ ${session.resourceId}: Mining roll=${roll.toFixed(3)} vs ${GATHERING_CONSTANTS.MINING_DEPLETE_CHANCE} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
-          );
+          // MINING: Use manifest depleteChance (1.0 for most rocks, 0 for essence)
+          // OSRS: Rune essence rocks never deplete — continuous mining until inventory full.
+          const depletionChance = tuned.depleteChance ?? 1.0;
+          if (depletionChance <= 0) {
+            shouldDeplete = false;
+          } else {
+            const roll = Math.random();
+            shouldDeplete = roll < depletionChance;
+            console.log(
+              `[Mining] ⛏️ ${session.resourceId}: Chance roll=${roll.toFixed(3)} vs ${depletionChance} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
+            );
+          }
         } else if (
           resource.type === "fishing_spot" ||
           resource.skillRequired === "fishing"
@@ -2852,9 +2864,10 @@ export class ResourceSystem extends SystemBase {
         } else {
           // REGULAR TREES & FALLBACK: Use manifest depleteChance (1/8 for regular trees)
           const roll = Math.random();
-          shouldDeplete = roll < tuned.depleteChance;
+          const fallbackChance = tuned.depleteChance ?? 1.0;
+          shouldDeplete = roll < fallbackChance;
           console.log(
-            `[Forestry] 🌲 ${session.resourceId}: Chance roll=${roll.toFixed(3)} vs ${tuned.depleteChance} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
+            `[Forestry] 🌲 ${session.resourceId}: Chance roll=${roll.toFixed(3)} vs ${fallbackChance} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
           );
         }
 

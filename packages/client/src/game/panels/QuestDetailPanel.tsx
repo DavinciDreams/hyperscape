@@ -10,6 +10,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useQuestSelectionStore, useTheme } from "@/ui";
 import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
+import {
   type Quest,
   calculateQuestProgress,
   CATEGORY_CONFIG,
@@ -168,13 +175,14 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
   const categoryConfig = CATEGORY_CONFIG[selectedQuest.category];
   const canAccept = selectedQuest.state === "available";
   const canComplete = selectedQuest.state === "active" && progress === 100;
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
 
   // Styles
   const containerStyle: React.CSSProperties = {
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    background: theme.colors.background.panelSecondary,
+    ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
     overflow: "hidden",
   };
 
@@ -185,8 +193,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     padding: isMobile
       ? `${spacing.sm} ${spacing.sm}`
       : `${spacing.sm} ${spacing.md}`,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    background: theme.colors.background.panelSecondary,
+    ...getPanelHeaderStyle(theme),
     minHeight: isMobile ? "48px" : "44px",
   };
 
@@ -210,10 +217,15 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
 
   const sectionStyle: React.CSSProperties = {
     marginBottom: isMobile ? spacing.sm : spacing.md,
+    ...getPanelInsetStyle(theme, {
+      emphasis: "normal",
+      radius: theme.borderRadius.md,
+      padding: isMobile ? spacing.sm : spacing.md,
+    }),
   };
 
   const sectionTitleStyle: React.CSSProperties = {
-    color: COLORS.ACCENT,
+    color: theme.colors.text.accent,
     fontSize: isMobile ? typography.fontSize.sm : typography.fontSize.xs,
     fontWeight: typography.fontWeight.semibold,
     textTransform: "uppercase",
@@ -222,7 +234,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
   };
 
   const descriptionStyle: React.CSSProperties = {
-    color: COLORS.TEXT_SECONDARY,
+    color: theme.colors.text.secondary,
     fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
     lineHeight: "1.5",
     margin: 0,
@@ -233,10 +245,11 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     flexWrap: isMobile ? "wrap" : "nowrap",
     gap: isMobile ? spacing.sm : spacing.md,
     marginBottom: isMobile ? spacing.sm : spacing.md,
-    padding: spacing.sm,
-    background: theme.colors.background.tertiary,
-    borderRadius: "6px",
-    border: `1px solid ${theme.colors.border.default}`,
+    ...getPanelInsetStyle(theme, {
+      emphasis: "strong",
+      radius: theme.borderRadius.md,
+      padding: spacing.sm,
+    }),
     fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
   };
 
@@ -248,28 +261,33 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
   };
 
   const metaLabelStyle: React.CSSProperties = {
-    color: COLORS.TEXT_MUTED,
+    color: theme.colors.text.muted,
     fontSize: isMobile ? typography.fontSize.sm : typography.fontSize.xs,
     textTransform: "uppercase",
   };
 
   const metaValueStyle: React.CSSProperties = {
-    color: COLORS.TEXT_PRIMARY,
+    color: theme.colors.text.primary,
     fontWeight: typography.fontWeight.medium,
   };
 
   const progressBarContainerStyle: React.CSSProperties = {
     height: isMobile ? "6px" : "4px",
-    backgroundColor: COLORS.BG_TERTIARY,
-    borderRadius: "2px",
+    ...getPanelInsetStyle(theme, {
+      radius: 999,
+    }),
     overflow: "hidden",
     marginTop: spacing.xs,
+    padding: 0,
   };
 
   const progressBarFillStyle: React.CSSProperties = {
     height: "100%",
     width: `${progress}%`,
-    backgroundColor: progress === 100 ? COLORS.SUCCESS : COLORS.ACCENT,
+    backgroundColor:
+      progress === 100
+        ? theme.colors.state.success
+        : theme.colors.accent.primary,
     transition: "width 0.3s ease",
   };
 
@@ -278,7 +296,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     alignItems: "flex-start",
     gap: spacing.xs,
     padding: `${spacing.xs} 0`,
-    color: completed ? COLORS.SUCCESS : COLORS.TEXT_SECONDARY,
+    color: completed ? theme.colors.state.success : theme.colors.text.secondary,
     fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
     textDecoration: completed ? "line-through" : "none",
     opacity: completed ? 0.7 : 1,
@@ -290,7 +308,10 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     gap: spacing.sm,
     padding: isMobile ? spacing.sm : spacing.md,
     borderTop: `1px solid ${theme.colors.border.default}`,
-    background: theme.colors.background.panelSecondary,
+    ...getPanelInsetStyle(theme, {
+      emphasis: "normal",
+      radius: 0,
+    }),
   };
 
   const buttonBaseStyle: React.CSSProperties = {
@@ -309,15 +330,20 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
 
   const primaryButtonStyle: React.CSSProperties = {
     ...buttonBaseStyle,
-    background: COLORS.ACCENT,
-    color: COLORS.BG_PRIMARY,
+    ...getInteractiveTileStyle(theme, {
+      active: true,
+      accentColor: theme.colors.accent.primary,
+      radius: theme.borderRadius.md,
+    }),
+    color: theme.colors.text.primary,
   };
 
   const secondaryButtonStyle: React.CSSProperties = {
     ...buttonBaseStyle,
-    background: COLORS.BG_TERTIARY,
-    color: COLORS.TEXT_PRIMARY,
-    border: `1px solid ${COLORS.BORDER_PRIMARY}`,
+    ...getInteractiveTileStyle(theme, {
+      radius: theme.borderRadius.md,
+    }),
+    color: theme.colors.text.primary,
   };
 
   return (
@@ -327,7 +353,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
         <h3 style={titleStyle}>
           {selectedQuest.pinned && (
             <span
-              style={{ color: "#ffd700", marginRight: "6px" }}
+              style={{ color: theme.colors.accent.gold, marginRight: "6px" }}
               title="Pinned"
             >
               ★
@@ -338,15 +364,26 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
         <button
           onClick={handleClose}
           style={{
-            background: "transparent",
-            border: "none",
-            color: COLORS.TEXT_MUTED,
+            ...closeButtonStyle,
             fontSize: typography.fontSize.lg,
-            cursor: "pointer",
             padding: spacing.xs,
             lineHeight: 1,
           }}
           title="Close"
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = String(
+              closeButtonStyle["--shell-button-hover-bg"],
+            );
+            e.currentTarget.style.color = String(
+              closeButtonStyle["--shell-button-hover-fg"],
+            );
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = String(
+              closeButtonStyle.background,
+            );
+            e.currentTarget.style.color = String(closeButtonStyle.color);
+          }}
         >
           ✕
         </button>
@@ -430,7 +467,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
                   alignItems: "center",
                   gap: spacing.xs,
                   padding: `${spacing.xs} 0`,
-                  color: COLORS.TEXT_SECONDARY,
+                  color: theme.colors.text.secondary,
                   fontSize: isMobile
                     ? typography.fontSize.base
                     : typography.fontSize.sm,
@@ -453,7 +490,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
             <div style={descriptionStyle}>
               {selectedQuest.questGiver}
               {selectedQuest.questGiverLocation && (
-                <span style={{ color: COLORS.TEXT_MUTED }}>
+                <span style={{ color: theme.colors.text.muted }}>
                   {" "}
                   - {selectedQuest.questGiverLocation}
                 </span>

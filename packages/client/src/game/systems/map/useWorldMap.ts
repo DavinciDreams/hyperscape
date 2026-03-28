@@ -480,48 +480,46 @@ export function useWorldMap(options: WorldMapOptions = {}): WorldMapResult {
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      // Calculate world position under mouse before zoom
-      const worldBefore = mapToWorld(
-        { x: mouseX, y: mouseY },
-        viewport,
-        opts.pixelsPerUnit,
-      );
-
-      // Calculate new zoom
       const zoomDelta =
         e.deltaY > 0 ? -opts.wheelZoomSpeed : opts.wheelZoomSpeed;
-      const newZoom = clampZoom(
-        viewport.zoom * (1 + zoomDelta),
-        opts.minZoom,
-        opts.maxZoom,
-      );
 
-      // Calculate world position under mouse after zoom
-      const tempViewport = { ...viewport, zoom: newZoom };
-      const worldAfter = mapToWorld(
-        { x: mouseX, y: mouseY },
-        tempViewport,
-        opts.pixelsPerUnit,
-      );
+      setViewport((prev) => {
+        const worldBefore = mapToWorld(
+          { x: mouseX, y: mouseY },
+          prev,
+          opts.pixelsPerUnit,
+        );
 
-      // Adjust center to keep mouse position stable
-      const newCenter = clampToBounds(
-        {
-          x: viewport.center.x + (worldBefore.x - worldAfter.x),
-          y: viewport.center.y + (worldBefore.y - worldAfter.y),
-          z: viewport.center.z,
-        },
-        opts.worldBounds,
-      );
+        const newZoom = clampZoom(
+          prev.zoom * (1 + zoomDelta),
+          opts.minZoom,
+          opts.maxZoom,
+        );
 
-      setViewport((prev) => ({
-        ...prev,
-        zoom: newZoom,
-        center: newCenter,
-      }));
+        const tempViewport = { ...prev, zoom: newZoom };
+        const worldAfter = mapToWorld(
+          { x: mouseX, y: mouseY },
+          tempViewport,
+          opts.pixelsPerUnit,
+        );
+
+        const newCenter = clampToBounds(
+          {
+            x: prev.center.x + (worldBefore.x - worldAfter.x),
+            y: prev.center.y + (worldBefore.y - worldAfter.y),
+            z: prev.center.z,
+          },
+          opts.worldBounds,
+        );
+
+        return {
+          ...prev,
+          zoom: newZoom,
+          center: newCenter,
+        };
+      });
     },
     [
-      viewport,
       opts.pixelsPerUnit,
       opts.wheelZoomSpeed,
       opts.minZoom,
@@ -584,24 +582,14 @@ export function useWorldMap(options: WorldMapOptions = {}): WorldMapResult {
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         const scale = distance / touchRef.current.lastDistance;
-        const newZoom = clampZoom(
-          viewport.zoom * scale,
-          opts.minZoom,
-          opts.maxZoom,
-        );
-
         touchRef.current.lastDistance = distance;
-
-        setViewport((prev) => ({ ...prev, zoom: newZoom }));
+        setViewport((prev) => ({
+          ...prev,
+          zoom: clampZoom(prev.zoom * scale, opts.minZoom, opts.maxZoom),
+        }));
       }
     },
-    [
-      opts.pixelsPerUnit,
-      opts.worldBounds,
-      opts.minZoom,
-      opts.maxZoom,
-      viewport.zoom,
-    ],
+    [opts.pixelsPerUnit, opts.worldBounds, opts.minZoom, opts.maxZoom],
   );
 
   const onTouchEnd = useCallback(() => {

@@ -23,6 +23,47 @@ const NetworkEvents = {
   DUEL_ERROR: "duelError",
 } as const;
 
+interface LegacyUIUpdatePayload {
+  component: string;
+  data: Record<string, unknown>;
+}
+
+interface DuelCompletedPayload {
+  won?: boolean;
+  opponentName?: string;
+  itemsReceived?: InventoryItem[];
+  itemsLost?: InventoryItem[];
+  totalValueWon?: number;
+  totalValueLost?: number;
+  forfeit?: boolean;
+}
+
+function normalizeDuelResultItems(
+  items: InventoryItem[] | undefined,
+): DuelResultData["itemsReceived"] {
+  return (items ?? []).map((item) => ({
+    itemId: item.itemId,
+    quantity: item.quantity,
+    value: 0,
+  }));
+}
+
+interface ModalPanelSetters {
+  setBankData: React.Dispatch<React.SetStateAction<BankData | null>>;
+  setStoreData: React.Dispatch<React.SetStateAction<StoreData | null>>;
+  setDialogueData: React.Dispatch<React.SetStateAction<DialogueData | null>>;
+  setSmeltingData: React.Dispatch<React.SetStateAction<SmeltingData | null>>;
+  setSmithingData: React.Dispatch<React.SetStateAction<SmithingData | null>>;
+  setCraftingData: React.Dispatch<React.SetStateAction<CraftingData | null>>;
+  setFletchingData: React.Dispatch<React.SetStateAction<FletchingData | null>>;
+  setTanningData: React.Dispatch<React.SetStateAction<TanningData | null>>;
+  setDuelData: React.Dispatch<React.SetStateAction<DuelData | null>>;
+  setDuelResultData: React.Dispatch<
+    React.SetStateAction<DuelResultData | null>
+  >;
+  setTradeData: React.Dispatch<React.SetStateAction<TradeData | null>>;
+}
+
 /** Bank item structure */
 export interface BankItem {
   itemId: string;
@@ -311,6 +352,565 @@ export interface DuelResultData {
   forfeit: boolean;
 }
 
+const defaultDuelRules: DuelData["rules"] = {
+  noRanged: false,
+  noMelee: false,
+  noMagic: false,
+  noSpecialAttack: false,
+  noPrayer: false,
+  noPotions: false,
+  noFood: false,
+  noForfeit: false,
+  noMovement: false,
+  funWeapons: false,
+};
+
+const defaultEquipmentRestrictions: DuelData["equipmentRestrictions"] = {
+  head: false,
+  cape: false,
+  amulet: false,
+  weapon: false,
+  body: false,
+  shield: false,
+  legs: false,
+  gloves: false,
+  boots: false,
+  ring: false,
+  ammo: false,
+};
+
+function handleLegacyEconomyUIUpdate(
+  payload: LegacyUIUpdatePayload,
+  setters: Pick<
+    ModalPanelSetters,
+    | "setBankData"
+    | "setStoreData"
+    | "setDialogueData"
+    | "setSmeltingData"
+    | "setSmithingData"
+    | "setCraftingData"
+    | "setFletchingData"
+    | "setTanningData"
+  >,
+): void {
+  const {
+    setBankData,
+    setStoreData,
+    setDialogueData,
+    setSmeltingData,
+    setSmithingData,
+    setCraftingData,
+    setFletchingData,
+    setTanningData,
+  } = setters;
+
+  if (payload.component === "bank") {
+    const bankUpdate = payload.data as {
+      items?: Array<{
+        itemId: string;
+        quantity: number;
+        slot: number;
+        tabIndex?: number;
+      }>;
+      tabs?: Array<{ tabIndex: number; iconItemId: string | null }>;
+      alwaysSetPlaceholder?: boolean;
+      maxSlots?: number;
+      bankId?: string;
+      isOpen?: boolean;
+    };
+
+    if (bankUpdate.isOpen === false) {
+      setBankData(null);
+      return;
+    }
+
+    if (bankUpdate.isOpen || bankUpdate.items !== undefined) {
+      const itemsWithTabIndex = (bankUpdate.items || []).map((item) => ({
+        ...item,
+        tabIndex: item.tabIndex ?? 0,
+      }));
+
+      setBankData((prev) => ({
+        visible: true,
+        items:
+          bankUpdate.items !== undefined
+            ? itemsWithTabIndex
+            : prev?.items || [],
+        tabs:
+          bankUpdate.tabs !== undefined ? bankUpdate.tabs : prev?.tabs || [],
+        alwaysSetPlaceholder:
+          bankUpdate.alwaysSetPlaceholder ??
+          prev?.alwaysSetPlaceholder ??
+          false,
+        maxSlots: bankUpdate.maxSlots ?? prev?.maxSlots ?? 480,
+        bankId: bankUpdate.bankId ?? prev?.bankId ?? "spawn_bank",
+      }));
+      setDialogueData(null);
+      return;
+    }
+  }
+
+  if (payload.component === "store") {
+    const storeUpdate = payload.data as {
+      storeId: string;
+      storeName: string;
+      buybackRate: number;
+      npcEntityId?: string;
+      items: StoreItem[];
+      isOpen?: boolean;
+    };
+
+    if (storeUpdate.isOpen) {
+      setStoreData({
+        visible: true,
+        storeId: storeUpdate.storeId,
+        storeName: storeUpdate.storeName,
+        buybackRate: storeUpdate.buybackRate || 0.5,
+        npcEntityId: storeUpdate.npcEntityId,
+        items: storeUpdate.items || [],
+      });
+      setDialogueData(null);
+    } else {
+      setStoreData(null);
+    }
+    return;
+  }
+
+  if (payload.component === "dialogue") {
+    const dialogueUpdate = payload.data as {
+      npcId: string;
+      npcName: string;
+      text: string;
+      responses: DialogueResponse[];
+      npcEntityId?: string;
+    };
+
+    setDialogueData((prev) => ({
+      visible: true,
+      npcId: dialogueUpdate.npcId,
+      npcName: dialogueUpdate.npcName || prev?.npcName || "NPC",
+      text: dialogueUpdate.text,
+      responses: dialogueUpdate.responses || [],
+      npcEntityId: dialogueUpdate.npcEntityId || prev?.npcEntityId,
+    }));
+    return;
+  }
+
+  if (payload.component === "dialogueEnd") {
+    setDialogueData(null);
+    return;
+  }
+
+  if (payload.component === "smelting") {
+    const smeltingUpdate = payload.data as {
+      isOpen: boolean;
+      furnaceId?: string;
+      availableBars?: SmeltingBar[];
+    };
+
+    if (
+      smeltingUpdate.isOpen &&
+      smeltingUpdate.furnaceId &&
+      smeltingUpdate.availableBars
+    ) {
+      setSmeltingData({
+        visible: true,
+        furnaceId: smeltingUpdate.furnaceId,
+        availableBars: smeltingUpdate.availableBars,
+      });
+    } else {
+      setSmeltingData(null);
+    }
+    return;
+  }
+
+  if (payload.component === "smithing") {
+    const smithingUpdate = payload.data as {
+      isOpen: boolean;
+      anvilId?: string;
+      availableRecipes?: SmithingRecipe[];
+    };
+
+    if (
+      smithingUpdate.isOpen &&
+      smithingUpdate.anvilId &&
+      smithingUpdate.availableRecipes
+    ) {
+      setSmithingData({
+        visible: true,
+        anvilId: smithingUpdate.anvilId,
+        availableRecipes: smithingUpdate.availableRecipes,
+      });
+    } else {
+      setSmithingData(null);
+    }
+    return;
+  }
+
+  if (payload.component === "crafting") {
+    const craftingUpdate = payload.data as {
+      isOpen: boolean;
+      availableRecipes?: CraftingRecipeData[];
+      station?: string;
+    };
+
+    if (craftingUpdate.isOpen && craftingUpdate.availableRecipes) {
+      setCraftingData({
+        visible: true,
+        availableRecipes: craftingUpdate.availableRecipes,
+        station: craftingUpdate.station || "crafting",
+      });
+    } else {
+      setCraftingData(null);
+    }
+    return;
+  }
+
+  if (payload.component === "fletching") {
+    const fletchingUpdate = payload.data as {
+      isOpen: boolean;
+      availableRecipes?: FletchingRecipeData[];
+    };
+
+    if (fletchingUpdate.isOpen && fletchingUpdate.availableRecipes) {
+      setFletchingData({
+        visible: true,
+        availableRecipes: fletchingUpdate.availableRecipes,
+      });
+    } else {
+      setFletchingData(null);
+    }
+    return;
+  }
+
+  if (payload.component === "tanning") {
+    const tanningUpdate = payload.data as {
+      isOpen: boolean;
+      availableRecipes?: TanningRecipeData[];
+    };
+
+    if (tanningUpdate.isOpen && tanningUpdate.availableRecipes) {
+      setTanningData({
+        visible: true,
+        availableRecipes: tanningUpdate.availableRecipes,
+      });
+    } else {
+      setTanningData(null);
+    }
+  }
+}
+
+function handleLegacyDuelUIUpdate(
+  payload: LegacyUIUpdatePayload,
+  setters: Pick<ModalPanelSetters, "setDuelData" | "setDuelResultData">,
+): void {
+  const { setDuelData, setDuelResultData } = setters;
+
+  if (payload.component === "duel" && payload.data?.isOpen) {
+    const duelOpenData = payload.data as {
+      duelId?: string;
+      opponent?: { id: string; name: string };
+      isChallenger?: boolean;
+    };
+    setDuelData({
+      visible: true,
+      duelId: duelOpenData.duelId || "",
+      opponentId: duelOpenData.opponent?.id || "",
+      opponentName: duelOpenData.opponent?.name || "",
+      isChallenger: duelOpenData.isChallenger || false,
+      screenState: "RULES",
+      rules: { ...defaultDuelRules },
+      equipmentRestrictions: { ...defaultEquipmentRestrictions },
+      myAccepted: false,
+      opponentAccepted: false,
+      myStakes: [],
+      opponentStakes: [],
+      opponentModifiedStakes: false,
+    });
+    return;
+  }
+
+  if (payload.component === "duelRulesUpdate") {
+    const rulesData = payload.data as {
+      duelId: string;
+      rules: Record<string, boolean>;
+      challengerAccepted: boolean;
+      targetAccepted: boolean;
+    };
+    setDuelData((prev) => {
+      if (!prev || prev.duelId !== rulesData.duelId) return prev;
+      const isChallenger = prev.isChallenger;
+      return {
+        ...prev,
+        rules: {
+          noRanged: rulesData.rules.noRanged ?? prev.rules.noRanged,
+          noMelee: rulesData.rules.noMelee ?? prev.rules.noMelee,
+          noMagic: rulesData.rules.noMagic ?? prev.rules.noMagic,
+          noSpecialAttack:
+            rulesData.rules.noSpecialAttack ?? prev.rules.noSpecialAttack,
+          noPrayer: rulesData.rules.noPrayer ?? prev.rules.noPrayer,
+          noPotions: rulesData.rules.noPotions ?? prev.rules.noPotions,
+          noFood: rulesData.rules.noFood ?? prev.rules.noFood,
+          noForfeit: rulesData.rules.noForfeit ?? prev.rules.noForfeit,
+          noMovement: rulesData.rules.noMovement ?? prev.rules.noMovement,
+          funWeapons: rulesData.rules.funWeapons ?? prev.rules.funWeapons,
+        },
+        myAccepted: isChallenger
+          ? rulesData.challengerAccepted
+          : rulesData.targetAccepted,
+        opponentAccepted: isChallenger
+          ? rulesData.targetAccepted
+          : rulesData.challengerAccepted,
+      };
+    });
+    return;
+  }
+
+  if (payload.component === "duelEquipmentUpdate") {
+    const equipData = payload.data as {
+      duelId: string;
+      equipmentRestrictions: Record<string, boolean>;
+      challengerAccepted: boolean;
+      targetAccepted: boolean;
+    };
+    setDuelData((prev) => {
+      if (!prev || prev.duelId !== equipData.duelId) return prev;
+      const isChallenger = prev.isChallenger;
+      return {
+        ...prev,
+        equipmentRestrictions: {
+          head:
+            equipData.equipmentRestrictions.head ??
+            prev.equipmentRestrictions.head,
+          cape:
+            equipData.equipmentRestrictions.cape ??
+            prev.equipmentRestrictions.cape,
+          amulet:
+            equipData.equipmentRestrictions.amulet ??
+            prev.equipmentRestrictions.amulet,
+          weapon:
+            equipData.equipmentRestrictions.weapon ??
+            prev.equipmentRestrictions.weapon,
+          body:
+            equipData.equipmentRestrictions.body ??
+            prev.equipmentRestrictions.body,
+          shield:
+            equipData.equipmentRestrictions.shield ??
+            prev.equipmentRestrictions.shield,
+          legs:
+            equipData.equipmentRestrictions.legs ??
+            prev.equipmentRestrictions.legs,
+          gloves:
+            equipData.equipmentRestrictions.gloves ??
+            prev.equipmentRestrictions.gloves,
+          boots:
+            equipData.equipmentRestrictions.boots ??
+            prev.equipmentRestrictions.boots,
+          ring:
+            equipData.equipmentRestrictions.ring ??
+            prev.equipmentRestrictions.ring,
+          ammo:
+            equipData.equipmentRestrictions.ammo ??
+            prev.equipmentRestrictions.ammo,
+        },
+        myAccepted: isChallenger
+          ? equipData.challengerAccepted
+          : equipData.targetAccepted,
+        opponentAccepted: isChallenger
+          ? equipData.targetAccepted
+          : equipData.challengerAccepted,
+      };
+    });
+    return;
+  }
+
+  if (payload.component === "duelAcceptanceUpdate") {
+    const acceptData = payload.data as {
+      duelId: string;
+      challengerAccepted: boolean;
+      targetAccepted: boolean;
+    };
+    setDuelData((prev) => {
+      if (!prev || prev.duelId !== acceptData.duelId) return prev;
+      const isChallenger = prev.isChallenger;
+      return {
+        ...prev,
+        myAccepted: isChallenger
+          ? acceptData.challengerAccepted
+          : acceptData.targetAccepted,
+        opponentAccepted: isChallenger
+          ? acceptData.targetAccepted
+          : acceptData.challengerAccepted,
+      };
+    });
+    return;
+  }
+
+  if (payload.component === "duelStakesUpdate") {
+    const stakesData = payload.data as {
+      duelId: string;
+      challengerStakes: DuelData["myStakes"];
+      targetStakes: DuelData["myStakes"];
+      challengerAccepted: boolean;
+      targetAccepted: boolean;
+      modifiedBy: string;
+    };
+    setDuelData((prev) => {
+      if (!prev || prev.duelId !== stakesData.duelId) return prev;
+      const isChallenger = prev.isChallenger;
+      return {
+        ...prev,
+        myStakes: isChallenger
+          ? stakesData.challengerStakes
+          : stakesData.targetStakes,
+        opponentStakes: isChallenger
+          ? stakesData.targetStakes
+          : stakesData.challengerStakes,
+        myAccepted: isChallenger
+          ? stakesData.challengerAccepted
+          : stakesData.targetAccepted,
+        opponentAccepted: isChallenger
+          ? stakesData.targetAccepted
+          : stakesData.challengerAccepted,
+        opponentModifiedStakes: stakesData.modifiedBy === prev.opponentId,
+      };
+    });
+    return;
+  }
+
+  if (payload.component === "duelStateChange") {
+    const stateData = payload.data as { duelId: string; state: string };
+    setDuelData((prev) => {
+      if (!prev || prev.duelId !== stateData.duelId) return prev;
+      const panelStates = new Set(["RULES", "STAKES", "CONFIRMING"]);
+      if (!panelStates.has(stateData.state)) {
+        return null;
+      }
+      return {
+        ...prev,
+        screenState: stateData.state as DuelData["screenState"],
+        myAccepted: false,
+        opponentAccepted: false,
+      };
+    });
+    return;
+  }
+
+  if (
+    payload.component === "duelClose" ||
+    payload.component === "duelCancelled"
+  ) {
+    const closeData = payload.data as { duelId?: string };
+    setDuelData((prev) => {
+      if (!prev) return prev;
+      if (closeData.duelId && prev.duelId !== closeData.duelId) return prev;
+      return null;
+    });
+    return;
+  }
+
+  if (payload.component === "duelCompleted") {
+    const completedData = payload.data as unknown as DuelCompletedPayload;
+    setDuelData(null);
+    setDuelResultData({
+      visible: true,
+      won: completedData.won ?? false,
+      opponentName: completedData.opponentName || "Unknown",
+      itemsReceived: normalizeDuelResultItems(completedData.itemsReceived),
+      itemsLost: normalizeDuelResultItems(completedData.itemsLost),
+      totalValueWon: completedData.totalValueWon || 0,
+      totalValueLost: completedData.totalValueLost || 0,
+      forfeit: completedData.forfeit || false,
+    });
+  }
+}
+
+function handleLegacyTradeUIUpdate(
+  payload: LegacyUIUpdatePayload,
+  setters: Pick<ModalPanelSetters, "setTradeData">,
+): void {
+  const { setTradeData } = setters;
+
+  if (payload.component === "trade" && payload.data?.isOpen) {
+    const tradeOpenData = payload.data as {
+      tradeId?: string;
+      partner?: { id: string; name: string; level: number };
+    };
+    setTradeData({
+      visible: true,
+      tradeId: tradeOpenData.tradeId || "",
+      partnerId: tradeOpenData.partner?.id || "",
+      partnerName: tradeOpenData.partner?.name || "",
+      partnerLevel: tradeOpenData.partner?.level || 0,
+      myOffer: [],
+      myAccepted: false,
+      theirOffer: [],
+      theirAccepted: false,
+      myOfferValue: 0,
+      theirOfferValue: 0,
+      partnerFreeSlots: 28,
+      screen: "offer",
+    });
+    return;
+  }
+
+  if (payload.component === "tradeUpdate") {
+    const updateData = payload.data as {
+      tradeId: string;
+      myOffer: TradeOfferItem[];
+      myAccepted: boolean;
+      theirOffer: TradeOfferItem[];
+      theirAccepted: boolean;
+    };
+    setTradeData((prev) => {
+      if (!prev || prev.tradeId !== updateData.tradeId) return prev;
+      return {
+        ...prev,
+        myOffer: updateData.myOffer || prev.myOffer,
+        myAccepted: updateData.myAccepted,
+        theirOffer: updateData.theirOffer || prev.theirOffer,
+        theirAccepted: updateData.theirAccepted,
+      };
+    });
+    return;
+  }
+
+  if (payload.component === "tradeConfirm") {
+    const confirmData = payload.data as {
+      tradeId: string;
+      myOffer: TradeOfferItem[];
+      theirOffer: TradeOfferItem[];
+      myOfferValue: number;
+      theirOfferValue: number;
+      myAccepted: boolean;
+      theirAccepted: boolean;
+    };
+    setTradeData((prev) => {
+      if (!prev || prev.tradeId !== confirmData.tradeId) return prev;
+      return {
+        ...prev,
+        screen: "confirm",
+        myOffer: confirmData.myOffer || prev.myOffer,
+        theirOffer: confirmData.theirOffer || prev.theirOffer,
+        myOfferValue: confirmData.myOfferValue ?? prev.myOfferValue,
+        theirOfferValue: confirmData.theirOfferValue ?? prev.theirOfferValue,
+        myAccepted: confirmData.myAccepted,
+        theirAccepted: confirmData.theirAccepted,
+      };
+    });
+    return;
+  }
+
+  if (payload.component === "tradeClose") {
+    const closeData = payload.data as { tradeId?: string };
+    setTradeData((prev) => {
+      if (!prev) return prev;
+      if (closeData.tradeId && prev.tradeId !== closeData.tradeId) return prev;
+      return null;
+    });
+  }
+}
+
 /**
  * Hook return type for modal panels
  */
@@ -443,7 +1043,10 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     // Bank handlers
     const handleBankOpen = (data: unknown) => {
       const d = data as BankData;
-      if (d) setBankData({ ...d, visible: true });
+      if (d) {
+        setBankData({ ...d, visible: true });
+        setDialogueData(null);
+      }
     };
 
     const handleBankClose = () => setBankData(null);
@@ -451,7 +1054,10 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     // Store handlers
     const handleStoreOpen = (data: unknown) => {
       const d = data as StoreData;
-      if (d) setStoreData({ ...d, visible: true });
+      if (d) {
+        setStoreData({ ...d, visible: true });
+        setDialogueData(null);
+      }
     };
 
     const handleStoreClose = () => setStoreData(null);
@@ -597,387 +1203,21 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
       }
     };
 
-    // Default duel rules/equipment for new duels
-    const defaultDuelRules = {
-      noRanged: false,
-      noMelee: false,
-      noMagic: false,
-      noSpecialAttack: false,
-      noPrayer: false,
-      noPotions: false,
-      noFood: false,
-      noForfeit: false,
-      noMovement: false,
-      funWeapons: false,
-    };
-
-    const defaultEquipmentRestrictions = {
-      head: false,
-      cape: false,
-      amulet: false,
-      weapon: false,
-      body: false,
-      shield: false,
-      legs: false,
-      gloves: false,
-      boots: false,
-      ring: false,
-      ammo: false,
-    };
-
     // UI_UPDATE handler for duel panel
     const handleUIUpdate = (data: unknown) => {
-      const d = data as {
-        component: string;
-        data: Record<string, unknown>;
-      };
-
-      // Duel session started - open panel with default state
-      if (d.component === "duel" && d.data?.isOpen) {
-        const duelData = d.data as {
-          duelId?: string;
-          opponent?: { id: string; name: string };
-          isChallenger?: boolean;
-        };
-        setDuelData({
-          visible: true,
-          duelId: duelData.duelId || "",
-          opponentId: duelData.opponent?.id || "",
-          opponentName: duelData.opponent?.name || "",
-          isChallenger: duelData.isChallenger || false,
-          screenState: "RULES",
-          rules: { ...defaultDuelRules },
-          equipmentRestrictions: { ...defaultEquipmentRestrictions },
-          myAccepted: false,
-          opponentAccepted: false,
-          myStakes: [],
-          opponentStakes: [],
-          opponentModifiedStakes: false,
-        });
-      }
-
-      // Duel rules updated
-      if (d.component === "duelRulesUpdate") {
-        const rulesData = d.data as {
-          duelId: string;
-          rules: Record<string, boolean>;
-          challengerAccepted: boolean;
-          targetAccepted: boolean;
-          modifiedBy: string;
-        };
-        setDuelData((prev) => {
-          if (!prev || prev.duelId !== rulesData.duelId) return prev;
-          const isChallenger = prev.isChallenger;
-          return {
-            ...prev,
-            rules: {
-              noRanged: rulesData.rules.noRanged ?? prev.rules.noRanged,
-              noMelee: rulesData.rules.noMelee ?? prev.rules.noMelee,
-              noMagic: rulesData.rules.noMagic ?? prev.rules.noMagic,
-              noSpecialAttack:
-                rulesData.rules.noSpecialAttack ?? prev.rules.noSpecialAttack,
-              noPrayer: rulesData.rules.noPrayer ?? prev.rules.noPrayer,
-              noPotions: rulesData.rules.noPotions ?? prev.rules.noPotions,
-              noFood: rulesData.rules.noFood ?? prev.rules.noFood,
-              noForfeit: rulesData.rules.noForfeit ?? prev.rules.noForfeit,
-              noMovement: rulesData.rules.noMovement ?? prev.rules.noMovement,
-              funWeapons: rulesData.rules.funWeapons ?? prev.rules.funWeapons,
-            },
-            myAccepted: isChallenger
-              ? rulesData.challengerAccepted
-              : rulesData.targetAccepted,
-            opponentAccepted: isChallenger
-              ? rulesData.targetAccepted
-              : rulesData.challengerAccepted,
-          };
-        });
-      }
-
-      // Duel equipment updated
-      if (d.component === "duelEquipmentUpdate") {
-        const equipData = d.data as {
-          duelId: string;
-          equipmentRestrictions: Record<string, boolean>;
-          challengerAccepted: boolean;
-          targetAccepted: boolean;
-          modifiedBy: string;
-        };
-        setDuelData((prev) => {
-          if (!prev || prev.duelId !== equipData.duelId) return prev;
-          const isChallenger = prev.isChallenger;
-          return {
-            ...prev,
-            equipmentRestrictions: {
-              head:
-                equipData.equipmentRestrictions.head ??
-                prev.equipmentRestrictions.head,
-              cape:
-                equipData.equipmentRestrictions.cape ??
-                prev.equipmentRestrictions.cape,
-              amulet:
-                equipData.equipmentRestrictions.amulet ??
-                prev.equipmentRestrictions.amulet,
-              weapon:
-                equipData.equipmentRestrictions.weapon ??
-                prev.equipmentRestrictions.weapon,
-              body:
-                equipData.equipmentRestrictions.body ??
-                prev.equipmentRestrictions.body,
-              shield:
-                equipData.equipmentRestrictions.shield ??
-                prev.equipmentRestrictions.shield,
-              legs:
-                equipData.equipmentRestrictions.legs ??
-                prev.equipmentRestrictions.legs,
-              gloves:
-                equipData.equipmentRestrictions.gloves ??
-                prev.equipmentRestrictions.gloves,
-              boots:
-                equipData.equipmentRestrictions.boots ??
-                prev.equipmentRestrictions.boots,
-              ring:
-                equipData.equipmentRestrictions.ring ??
-                prev.equipmentRestrictions.ring,
-              ammo:
-                equipData.equipmentRestrictions.ammo ??
-                prev.equipmentRestrictions.ammo,
-            },
-            myAccepted: isChallenger
-              ? equipData.challengerAccepted
-              : equipData.targetAccepted,
-            opponentAccepted: isChallenger
-              ? equipData.targetAccepted
-              : equipData.challengerAccepted,
-          };
-        });
-      }
-
-      // Duel acceptance updated
-      if (d.component === "duelAcceptanceUpdate") {
-        const acceptData = d.data as {
-          duelId: string;
-          challengerAccepted: boolean;
-          targetAccepted: boolean;
-          state: string;
-          movedToStakes?: boolean;
-        };
-        setDuelData((prev) => {
-          if (!prev || prev.duelId !== acceptData.duelId) return prev;
-          const isChallenger = prev.isChallenger;
-          return {
-            ...prev,
-            myAccepted: isChallenger
-              ? acceptData.challengerAccepted
-              : acceptData.targetAccepted,
-            opponentAccepted: isChallenger
-              ? acceptData.targetAccepted
-              : acceptData.challengerAccepted,
-          };
-        });
-      }
-
-      // Duel stakes updated
-      if (d.component === "duelStakesUpdate") {
-        const stakesData = d.data as {
-          duelId: string;
-          challengerStakes: Array<{
-            inventorySlot: number;
-            itemId: string;
-            quantity: number;
-            value: number;
-          }>;
-          targetStakes: Array<{
-            inventorySlot: number;
-            itemId: string;
-            quantity: number;
-            value: number;
-          }>;
-          challengerAccepted: boolean;
-          targetAccepted: boolean;
-          modifiedBy: string;
-        };
-        setDuelData((prev) => {
-          if (!prev || prev.duelId !== stakesData.duelId) return prev;
-          const isChallenger = prev.isChallenger;
-          const opponentModified = stakesData.modifiedBy === prev.opponentId;
-          return {
-            ...prev,
-            myStakes: isChallenger
-              ? stakesData.challengerStakes
-              : stakesData.targetStakes,
-            opponentStakes: isChallenger
-              ? stakesData.targetStakes
-              : stakesData.challengerStakes,
-            myAccepted: isChallenger
-              ? stakesData.challengerAccepted
-              : stakesData.targetAccepted,
-            opponentAccepted: isChallenger
-              ? stakesData.targetAccepted
-              : stakesData.challengerAccepted,
-            opponentModifiedStakes: opponentModified,
-          };
-        });
-      }
-
-      // Duel state changed (e.g., RULES -> STAKES -> CONFIRMING -> COUNTDOWN)
-      if (d.component === "duelStateChange") {
-        const stateData = d.data as {
-          duelId: string;
-          state: string;
-        };
-        setDuelData((prev) => {
-          if (!prev || prev.duelId !== stateData.duelId) return prev;
-          // Close panel for non-panel states (COUNTDOWN, FIGHTING, etc.)
-          // The panel only displays RULES, STAKES, and CONFIRMING screens.
-          // When the duel transitions to COUNTDOWN, the panel should close
-          // and the countdown overlay takes over.
-          const panelStates = new Set(["RULES", "STAKES", "CONFIRMING"]);
-          if (!panelStates.has(stateData.state)) {
-            return null;
-          }
-          return {
-            ...prev,
-            screenState: stateData.state as "RULES" | "STAKES" | "CONFIRMING",
-            myAccepted: false,
-            opponentAccepted: false,
-          };
-        });
-      }
-
-      // Duel closed/cancelled
-      if (d.component === "duelClose" || d.component === "duelCancelled") {
-        const closeData = d.data as {
-          duelId?: string;
-        };
-        setDuelData((prev) => {
-          if (!prev) return prev;
-          // If duelId is specified, only close if it matches
-          if (closeData.duelId && prev.duelId !== closeData.duelId) return prev;
-          return null;
-        });
-      }
-
-      // Duel completed - show result modal
-      // Server sends pre-computed data for each player directly
-      if (d.component === "duelCompleted") {
-        const completedData = d.data as {
-          duelId: string;
-          won: boolean;
-          opponentName: string;
-          itemsReceived: Array<{
-            itemId: string;
-            quantity: number;
-            value: number;
-          }>;
-          itemsLost: Array<{
-            itemId: string;
-            quantity: number;
-            value: number;
-          }>;
-          totalValueWon: number;
-          totalValueLost: number;
-          forfeit: boolean;
-        };
-
-        // Close the duel panel first
-        setDuelData(null);
-
-        // Use the server's pre-computed data directly
-        // Ensure arrays are never undefined to prevent React render errors
-        setDuelResultData({
-          visible: true,
-          won: completedData.won,
-          opponentName: completedData.opponentName || "Unknown",
-          itemsReceived: completedData.itemsReceived || [],
-          itemsLost: completedData.itemsLost || [],
-          totalValueWon: completedData.totalValueWon || 0,
-          totalValueLost: completedData.totalValueLost || 0,
-          forfeit: completedData.forfeit || false,
-        });
-      }
-
-      // Trade session started - open panel
-      if (d.component === "trade" && d.data?.isOpen) {
-        const tradeOpenData = d.data as {
-          tradeId?: string;
-          partner?: { id: string; name: string; level: number };
-        };
-        setTradeData({
-          visible: true,
-          tradeId: tradeOpenData.tradeId || "",
-          partnerId: tradeOpenData.partner?.id || "",
-          partnerName: tradeOpenData.partner?.name || "",
-          partnerLevel: tradeOpenData.partner?.level || 0,
-          myOffer: [],
-          myAccepted: false,
-          theirOffer: [],
-          theirAccepted: false,
-          myOfferValue: 0,
-          theirOfferValue: 0,
-          partnerFreeSlots: 28,
-          screen: "offer",
-        });
-      }
-
-      // Trade offers updated
-      if (d.component === "tradeUpdate") {
-        const updateData = d.data as {
-          tradeId: string;
-          myOffer: TradeOfferItem[];
-          myAccepted: boolean;
-          theirOffer: TradeOfferItem[];
-          theirAccepted: boolean;
-        };
-        setTradeData((prev) => {
-          if (!prev || prev.tradeId !== updateData.tradeId) return prev;
-          return {
-            ...prev,
-            myOffer: updateData.myOffer || prev.myOffer,
-            myAccepted: updateData.myAccepted,
-            theirOffer: updateData.theirOffer || prev.theirOffer,
-            theirAccepted: updateData.theirAccepted,
-          };
-        });
-      }
-
-      // Trade confirm screen
-      if (d.component === "tradeConfirm") {
-        const confirmData = d.data as {
-          tradeId: string;
-          screen: string;
-          myOffer: TradeOfferItem[];
-          theirOffer: TradeOfferItem[];
-          myOfferValue: number;
-          theirOfferValue: number;
-          myAccepted: boolean;
-          theirAccepted: boolean;
-        };
-        setTradeData((prev) => {
-          if (!prev || prev.tradeId !== confirmData.tradeId) return prev;
-          return {
-            ...prev,
-            screen: "confirm",
-            myOffer: confirmData.myOffer || prev.myOffer,
-            theirOffer: confirmData.theirOffer || prev.theirOffer,
-            myOfferValue: confirmData.myOfferValue ?? prev.myOfferValue,
-            theirOfferValue:
-              confirmData.theirOfferValue ?? prev.theirOfferValue,
-            myAccepted: confirmData.myAccepted,
-            theirAccepted: confirmData.theirAccepted,
-          };
-        });
-      }
-
-      // Trade closed/cancelled/completed
-      if (d.component === "tradeClose") {
-        const closeData = d.data as { tradeId?: string };
-        setTradeData((prev) => {
-          if (!prev) return prev;
-          if (closeData.tradeId && prev.tradeId !== closeData.tradeId)
-            return prev;
-          return null;
-        });
-      }
+      const payload = data as LegacyUIUpdatePayload;
+      handleLegacyEconomyUIUpdate(payload, {
+        setBankData,
+        setStoreData,
+        setDialogueData,
+        setSmeltingData,
+        setSmithingData,
+        setCraftingData,
+        setFletchingData,
+        setTanningData,
+      });
+      handleLegacyDuelUIUpdate(payload, { setDuelData, setDuelResultData });
+      handleLegacyTradeUIUpdate(payload, { setTradeData });
     };
 
     // Register world event listeners

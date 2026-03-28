@@ -5,6 +5,11 @@
 import React, { memo, useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/ui";
+import { UI } from "@/ui/core";
+import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
+} from "@/ui/theme/themes";
 import { CONTEXT_MENU_COLORS } from "@hyperscape/shared";
 import type {
   ActionBarSlotContent,
@@ -227,22 +232,21 @@ export const ContextMenuPortal = memo(function ContextMenuPortal({
   return (
     <div
       ref={menuRef}
-      className="fixed z-[9999]"
+      className="fixed"
       style={{
         left: position.left,
         top: position.top,
+        zIndex: UI.Z_INDEX.CONTEXT_MENU,
         opacity: isPositioned ? 1 : 0,
         visibility: isPositioned ? "visible" : "hidden",
       }}
     >
       <div
         style={{
-          background: theme.colors.background.panelSecondary,
-          border: `1px solid ${theme.colors.border.default}`,
-          borderRadius: 0,
-          boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
-          overflow: "hidden",
-          minWidth: 100,
+          ...getContextMenuSurfaceStyle(theme, {
+            minWidth: 124,
+            radius: theme.borderRadius.sm,
+          }),
         }}
       >
         {items.map((menuItem, idx) => (
@@ -251,9 +255,11 @@ export const ContextMenuPortal = memo(function ContextMenuPortal({
             onClick={() => onItemClick(menuItem)}
             className="w-full text-left transition-colors duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400/60"
             style={{
-              padding: "4px 8px",
+              ...getContextMenuItemStyle(theme, {
+                radius: 0,
+                padding: "4px 8px",
+              }),
               fontSize: 10,
-              background: "transparent",
               border: "none",
               cursor: "pointer",
               borderTop:
@@ -261,7 +267,8 @@ export const ContextMenuPortal = memo(function ContextMenuPortal({
               display: "block",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = `${theme.colors.accent.secondary}1F`;
+              e.currentTarget.style.background =
+                "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(214, 197, 160, 0.12) 24%, rgba(21, 25, 31, 0.98) 100%)";
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = "transparent";

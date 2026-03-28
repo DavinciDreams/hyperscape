@@ -24,10 +24,16 @@ import * as THREE from "three";
 import { EventType } from "../../types/events";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
 import type { World } from "../../types";
-import type { VRM, VRMHumanBoneName } from "@pixiv/three-vrm";
-import { getItem } from "../../data/items";
+import type { VRM } from "@pixiv/three-vrm";
 import { EQUIPMENT_SLOT_NAMES } from "../../constants/EquipmentConstants";
 import type { Entity } from "../../entities/Entity";
+import {
+  attachEquipmentVisualToVRM,
+  removeEquipmentVisual,
+  resolveEquipmentVisualData,
+  resolveEquipmentVisualUrls,
+  type EquipmentVisualStore,
+} from "./EquipmentVisualHelpers";
 
 interface AvatarLike {
   instance?: {
@@ -50,19 +56,6 @@ interface PlayerWithAvatar extends Entity {
 /** Resolve avatar from either PlayerLocal (_avatar) or PlayerRemote (avatar) */
 function getAvatar(player: PlayerWithAvatar): AvatarLike | undefined {
   return player._avatar || player.avatar;
-}
-
-interface EquipmentAttachmentData {
-  vrmBoneName: string; // VRM bone to attach to (e.g., "rightHand")
-  originalSlot?: string; // Original Asset Forge slot
-  weaponType?: string; // Weapon type for debugging
-  usage?: string; // Usage instructions
-  note?: string; // Developer notes
-  // V2 format fields
-  version?: number; // Format version (2 = relative matrix approach)
-  relativeMatrix?: number[]; // 16-element matrix array (for v2)
-  avatarId?: string; // Avatar used for fitting (for v2)
-  avatarHeight?: number; // Avatar height used for fitting
 }
 
 interface PlayerEquipmentVisuals {
@@ -279,13 +272,7 @@ export class EquipmentVisualSystem extends SystemBase {
   ): void {
     // Remove existing visual for this slot
     const slotKey = slot.toLowerCase() as keyof PlayerEquipmentVisuals;
-    const existingVisual = equipment[slotKey];
-
-    if (existingVisual && existingVisual.parent) {
-      existingVisual.parent.remove(existingVisual);
-    }
-
-    equipment[slotKey] = undefined;
+    removeEquipmentVisual(equipment as EquipmentVisualStore, slotKey);
   }
 
   /**
@@ -320,108 +307,21 @@ export class EquipmentVisualSystem extends SystemBase {
     try {
       const assetsUrl = this.world.assetsUrl?.replace(/\/$/, "") || "";
 
-      // Look up item data from manifest for equippedModelPath.
-      // Primary: client-side ITEMS map.  Fallback: cached item data from the
-      // server's equipmentUpdated broadcast (handles race where manifest hasn't
-      // loaded yet or a new item ID isn't in the client build).
-      const itemData = getItem(itemId);
-      let equippedModelPath = itemData?.equippedModelPath;
-      let modelPath = itemData?.modelPath;
+      const cachedItem = this.getItemFromNetworkCache(playerId, slot);
+      const itemData = resolveEquipmentVisualData({
+        itemId,
+        fallbackItemData: cachedItem,
+      });
+      const urls = resolveEquipmentVisualUrls({
+        assetsUrl,
+        itemId,
+        slot,
+        itemData,
+        fallbackItemData: cachedItem,
+      });
 
-      // If equippedModelPath is explicitly null (not undefined), the item has no 3D model yet.
-      // Skip visual to avoid convention-based URL fallback producing 404 errors.
-      if (equippedModelPath === null) {
+      if (!urls) {
         return;
-      }
-
-      if (!equippedModelPath) {
-        const cachedItem = this.getItemFromNetworkCache(playerId, slot);
-        if (cachedItem?.equippedModelPath) {
-          equippedModelPath = cachedItem.equippedModelPath;
-        }
-        if (!modelPath && cachedItem?.modelPath) {
-          modelPath = cachedItem.modelPath;
-        }
-      }
-      let weaponUrl: string;
-      let fallbackUrl: string | null = null;
-
-      if (equippedModelPath) {
-        // Use explicit equippedModelPath from items.json
-        // Convert "asset://models/..." to full CDN URL
-        weaponUrl = equippedModelPath.replace("asset://", `${assetsUrl}/`);
-        console.log(
-          `[EquipmentVisual] ${itemId} → explicit path: ${weaponUrl}`,
-        );
-      } else if (modelPath && typeof modelPath === "string") {
-        // Use modelPath as equipped model (handles items like arrows where convention
-        // produces wrong directory name: arrow-bronze vs arrows-bronze)
-        weaponUrl = modelPath.replace("asset://", `${assetsUrl}/`);
-        console.log(
-          `[EquipmentVisual] ${itemId} → modelPath fallback: ${weaponUrl}`,
-        );
-      } else {
-        console.warn(
-          `[EquipmentVisual] ${itemId} → no manifest data (getItem returned ${itemData ? "partial" : "null"}), using convention`,
-        );
-        // Fallback to convention-based derivation
-        // itemId formats:
-        //   "{material}_{item}" e.g., "bronze_sword" → "sword-bronze"
-        //   "{material}_{item1}_{item2}" e.g., "bronze_2h_sword" → "2h-sword-bronze"
-        const parts = itemId.split("_");
-        let assetId = itemId.replace(/_/g, "-");
-        let category = "";
-
-        const materials = [
-          "bronze",
-          "steel",
-          "mithril",
-          "iron",
-          "rune",
-          "dragon",
-          "wood",
-          "oak",
-          "willow",
-          "yew",
-        ];
-
-        // Map item types to their category subdirectories
-        const categoryMap: Record<string, string> = {
-          sword: "swords-old",
-          longsword: "swords/long-swords",
-          scimitar: "swords/scimitars",
-          "2h_sword": "swords/2h-swords",
-          "2h": "swords/2h-swords",
-          shortsword: "swords/shortswords",
-          dagger: "swords/daggers",
-          hatchet: "hatchets",
-          pickaxe: "pickaxes",
-          arrow: "arrows",
-          bow: "bows",
-          staff: "magic-staffs",
-          shield: "shields",
-        };
-
-        if (parts.length >= 2 && materials.includes(parts[0])) {
-          const material = parts[0];
-          const itemParts = parts.slice(1); // e.g., ["2h", "sword"] or ["longsword"]
-          const itemKey = itemParts.join("_"); // e.g., "2h_sword" or "longsword"
-          assetId = `${itemParts.join("-")}-${material}`; // e.g., "2h-sword-bronze"
-          category = categoryMap[itemKey] || categoryMap[itemParts[0]] || "";
-        }
-
-        // If no matching category was found, this item type has no 3D models
-        // available (e.g., helms, platelegs, boots, gloves, capes).
-        // Skip visual to avoid generating 404 requests.
-        if (!category) {
-          return;
-        }
-
-        // Try fitted version: flat layout first (swords/long-swords/longsword-bronze-aligned.glb),
-        // then subdirectory layout (hatchets/hatchet-bronze/hatchet-bronze-aligned.glb)
-        const prefix = category ? `${category}/` : "";
-        weaponUrl = `${assetsUrl}/models/${prefix}${assetId}-aligned.glb`;
-        fallbackUrl = `${assetsUrl}/models/${prefix}${assetId}/${assetId}-aligned.glb`;
       }
 
       // Check cache first
@@ -432,12 +332,14 @@ export class EquipmentVisualSystem extends SystemBase {
         // deduplication, and concurrency control.
         const loader = this.world.loader;
         let file: File | undefined;
+        let resolvedUrl = urls.primaryUrl;
         try {
-          file = loader ? await loader.loadFile(weaponUrl) : undefined;
+          file = loader ? await loader.loadFile(urls.primaryUrl) : undefined;
         } catch (error) {
           // Fallback to base model if fitted version not found (only for convention-based)
-          if (fallbackUrl) {
-            file = loader ? await loader.loadFile(fallbackUrl) : undefined;
+          if (urls.fallbackUrl) {
+            file = loader ? await loader.loadFile(urls.fallbackUrl) : undefined;
+            resolvedUrl = urls.fallbackUrl;
           } else {
             throw error;
           }
@@ -445,93 +347,17 @@ export class EquipmentVisualSystem extends SystemBase {
 
         if (!file) {
           throw new Error(
-            `[EquipmentVisual] Failed to load model: ${weaponUrl}`,
+            `[EquipmentVisual] Failed to load model: ${resolvedUrl}`,
           );
         }
 
         // Parse the cached bytes with GLTFLoader
         const buffer = await file.arrayBuffer();
-        gltf = (await this.gltfParser.parseAsync(buffer, weaponUrl)) as GLTF;
+        gltf = (await this.gltfParser.parseAsync(buffer, resolvedUrl)) as GLTF;
         this.weaponCache.set(itemId, gltf);
       }
 
       const weaponMesh: THREE.Object3D = gltf.scene.clone(true); // Clone to allow multiple instances
-
-      // Read attachment metadata from Asset Forge export
-      // Try root first, then first child (EquipmentWrapper)
-      let attachmentData = weaponMesh.userData.hyperscape as
-        | EquipmentAttachmentData
-        | undefined;
-
-      // If not on root, check first child (the EquipmentWrapper)
-      if (!attachmentData && weaponMesh.children[0]?.userData?.hyperscape) {
-        attachmentData = weaponMesh.children[0].userData
-          .hyperscape as EquipmentAttachmentData;
-      }
-
-      const boneName = attachmentData?.vrmBoneName || "rightHand";
-
-      // POSELAB TECH: Check if this is a skinned armor piece (Body, Legs, Boots, Gloves)
-      const skinnedSlots = ["body", "legs", "boots", "gloves", "cape"];
-      const isSkinnedSlot = skinnedSlots.includes(slot.toLowerCase());
-
-      let hasSkinnedMesh = false;
-      if (isSkinnedSlot) {
-        weaponMesh.traverse((child) => {
-          if (child instanceof THREE.SkinnedMesh) {
-            hasSkinnedMesh = true;
-          }
-        });
-      }
-
-      if (isSkinnedSlot && hasSkinnedMesh) {
-        // Find player skeleton
-        let playerSkeleton: THREE.Skeleton | undefined;
-        vrm.scene.traverse((child) => {
-          if (child instanceof THREE.SkinnedMesh && child.skeleton) {
-            playerSkeleton = child.skeleton;
-          }
-        });
-
-        if (playerSkeleton) {
-          const skeleton = playerSkeleton;
-          // Bind all skinned meshes in equipment to player skeleton
-          weaponMesh.traverse((child) => {
-            if (child instanceof THREE.SkinnedMesh) {
-              child.skeleton = skeleton;
-              child.bind(skeleton, child.bindMatrix);
-            }
-          });
-
-          // Remove existing visual
-          this.unequipVisual(playerId, slot, equipment, vrm);
-
-          // Add directly to VRM scene for skinned animation
-          const slotKey = slot.toLowerCase() as keyof PlayerEquipmentVisuals;
-          equipment[slotKey] = weaponMesh;
-          vrm.scene.add(weaponMesh);
-          return;
-        }
-      }
-
-      // Get VRM bone (cast to VRMHumanBoneName for type safety)
-      if (!vrm.humanoid) {
-        console.error(
-          `[EquipmentVisual] ❌ VRM has no humanoid property for ${itemId}`,
-        );
-        return;
-      }
-
-      const bone = vrm.humanoid.getNormalizedBoneNode(
-        boneName as VRMHumanBoneName,
-      );
-      if (!bone) {
-        console.error(`[EquipmentVisual] ❌ VRM bone not found: ${boneName}`);
-        return;
-      }
-
-      // Remove existing visual for this slot first
-      this.unequipVisual(playerId, slot, equipment, vrm);
 
       // Get player entity for bone attachment
       const player = this.world.entities.get(playerId);
@@ -542,126 +368,32 @@ export class EquipmentVisualSystem extends SystemBase {
         return;
       }
 
-      // Find the target bone in the player's live hierarchy
-      const prefabBone = vrm.humanoid.getRawBoneNode(
-        boneName as VRMHumanBoneName,
-      );
-      if (!prefabBone) {
-        console.error(
-          `[EquipmentVisual] ❌ VRM bone not found in prefab: ${boneName}`,
-        );
-        return;
-      }
-
-      const targetBoneName = prefabBone.name;
-      let targetBone: THREE.Object3D | undefined = undefined;
-
-      // Traverse the avatar's visual root (instance.raw) to find the bone
       const playerWithAvatar = player as PlayerWithAvatar;
       const rawInstance = getAvatar(playerWithAvatar)?.instance?.raw;
       const avatarRoot = (rawInstance?.scene || rawInstance) as
         | THREE.Object3D
         | undefined;
 
-      if (avatarRoot && avatarRoot.traverse) {
-        avatarRoot.traverse((child) => {
-          if (child.name === targetBoneName) {
-            targetBone = child;
-          }
-        });
-      } else {
-        if (player.node) {
-          player.node.traverse((child) => {
-            if (child.name === targetBoneName) {
-              targetBone = child;
-            }
-          });
-        }
-      }
-
-      if (!targetBone) {
+      if (!avatarRoot) {
         console.error(
-          `[EquipmentVisual] ❌ Could not find bone '${targetBoneName}' in avatar hierarchy`,
+          `[EquipmentVisual] ❌ Could not resolve avatar root for ${playerId}`,
         );
         return;
       }
 
-      // Store in component for tracking
-      const slotKey = slot.toLowerCase() as keyof PlayerEquipmentVisuals;
+      const attached = attachEquipmentVisualToVRM({
+        slot,
+        modelRoot: weaponMesh,
+        visuals: equipment as EquipmentVisualStore,
+        vrm,
+        avatarRoot,
+      });
 
-      // === V2 FORMAT: Use relative matrix directly ===
-      // Validate relativeMatrix is a proper 16-element array of numbers
-      const hasValidMatrix =
-        attachmentData?.version === 2 &&
-        Array.isArray(attachmentData.relativeMatrix) &&
-        attachmentData.relativeMatrix.length === 16 &&
-        attachmentData.relativeMatrix.every(
-          (n) => typeof n === "number" && !isNaN(n),
+      if (!attached) {
+        console.error(
+          `[EquipmentVisual] ❌ Failed to attach ${itemId} to slot ${slot}`,
         );
-
-      if (hasValidMatrix) {
-        // Find the EquipmentWrapper which has the pre-baked transforms
-        const equipmentWrapper = weaponMesh.children.find(
-          (child) => child.name === "EquipmentWrapper",
-        );
-
-        if (equipmentWrapper) {
-          // V2: The wrapper already has the correct relative transform baked in
-          // Just attach it directly - no scale hacks needed!
-          equipment[slotKey] = weaponMesh;
-          (targetBone as THREE.Object3D).add(weaponMesh);
-        } else {
-          // Fallback: Apply relativeMatrix manually if no wrapper found
-          const relativeMatrix = new THREE.Matrix4();
-          // Safe to assert: hasValidMatrix guarantees attachmentData.relativeMatrix is valid
-          relativeMatrix.fromArray(attachmentData!.relativeMatrix!);
-
-          // Create a wrapper group with the relative transform
-          const wrapperGroup = new THREE.Group();
-          wrapperGroup.name = "EquipmentWrapper";
-
-          // Decompose and apply the matrix
-          const position = new THREE.Vector3();
-          const quaternion = new THREE.Quaternion();
-          const scale = new THREE.Vector3();
-          relativeMatrix.decompose(position, quaternion, scale);
-
-          wrapperGroup.position.copy(position);
-          wrapperGroup.quaternion.copy(quaternion);
-          wrapperGroup.scale.copy(scale);
-
-          // Add weapon as child
-          wrapperGroup.add(weaponMesh);
-
-          equipment[slotKey] = wrapperGroup;
-          (targetBone as THREE.Object3D).add(wrapperGroup);
-        }
-        return;
       }
-
-      // === LEGACY FORMAT (V1): Use old logic with scale hack ===
-
-      // Find the EquipmentWrapper child which has the fitting position
-      const equipmentWrapper = weaponMesh.children.find(
-        (child) => child.name === "EquipmentWrapper",
-      );
-
-      if (equipmentWrapper) {
-        // LEGACY: Apply scale multiplier hack for V1 exports
-        const WEAPON_SCALE_MULTIPLIER = 1.75;
-        weaponMesh.scale.multiplyScalar(WEAPON_SCALE_MULTIPLIER);
-      } else if (!attachmentData) {
-        console.warn(
-          `[EquipmentVisual] ⚠️ No EquipmentWrapper or metadata - applying default transform`,
-        );
-        // Fallback: Scale down to reasonable size
-        weaponMesh.scale.set(0.01, 0.01, 0.01);
-      }
-
-      equipment[slotKey] = weaponMesh;
-
-      // Add to the LIVE bone
-      (targetBone as THREE.Object3D).add(weaponMesh);
     } catch (error) {
       console.error(`[EquipmentVisual] ❌ Error equipping ${itemId}:`, error);
     }

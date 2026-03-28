@@ -6,6 +6,7 @@
  * Left-click: add 1 item, Right-click: context menu
  */
 
+import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
 import { TRADE_GRID_COLS, TRADE_SLOTS } from "../constants";
 import { InventoryItem } from "./InventoryItem";
 import type { InventoryMiniPanelProps } from "../types";
@@ -40,8 +41,10 @@ export function InventoryMiniPanel({
         style={{
           // OSRS style: 4 columns x 7 rows = 28 slots
           gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-          background: theme.colors.background.panelSecondary,
-          border: `1px solid ${theme.colors.border.default}`,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: theme.borderRadius.md,
+          }),
         }}
       >
         {/* Render all 28 slots, showing items in their actual positions */}
@@ -66,9 +69,10 @@ export function InventoryMiniPanel({
               style={{
                 width: "36px",
                 height: "36px",
-                background: theme.colors.background.panelPrimary,
-                border: `1px solid ${theme.colors.border.default}`,
-                borderRadius: "4px",
+                ...getInteractiveTileStyle(theme, {
+                  radius: 4,
+                  disabled: true,
+                }),
                 opacity: 0.5,
               }}
             />

@@ -7,6 +7,10 @@
 import React, { useEffect, useState, useCallback, useRef, useId } from "react";
 import { HOME_TELEPORT_CONSTANTS, EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
+import {
+  getHomeTeleportCooldownProgress,
+  readHomeTeleportRemainingMs,
+} from "./homeTeleportUi";
 
 type TeleportState = "ready" | "cooldown" | "casting";
 
@@ -64,22 +68,45 @@ export function MinimapHomeTeleportOrb({
   const [cooldownEndTime, setCooldownEndTime] = useState<number | null>(null);
   const [isHovered, setIsHovered] = useState(false);
   const uniqueId = useId();
+  const castStartTimeRef = useRef<number | null>(null);
+  const cooldownEndTimeRef = useRef<number | null>(null);
+  const cooldownSecondRef = useRef(-1);
+  const tickerRef = useRef<number | null>(null);
 
   // Use ref to track state in event handlers (avoids stale closure)
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  useEffect(() => {
+    castStartTimeRef.current = castStartTime;
+  }, [castStartTime]);
+
+  useEffect(() => {
+    cooldownEndTimeRef.current = cooldownEndTime;
+  }, [cooldownEndTime]);
+
   // Server event handlers
   useEffect(() => {
     const onCastStart = () => {
       setState("casting");
-      setCastStartTime(Date.now());
+      setCastStartTime(performance.now());
+      setCooldownEndTime(null);
+      setCooldownRemaining(0);
       setCastProgress(0);
     };
 
-    const onFailed = () => {
-      // Server rejected or cancelled - reset to ready
-      setState("ready");
+    const onFailed = (event?: unknown) => {
+      const remainingMs = readHomeTeleportRemainingMs(event);
+      if (remainingMs > 0) {
+        setState("cooldown");
+        setCooldownEndTime(performance.now() + remainingMs);
+        setCooldownRemaining(remainingMs);
+      } else {
+        // Server rejected or cancelled - reset to ready
+        setState("ready");
+        setCooldownEndTime(null);
+        setCooldownRemaining(0);
+      }
       setCastStartTime(null);
       setCastProgress(0);
     };
@@ -88,6 +115,8 @@ export function MinimapHomeTeleportOrb({
       // Server confirmed cancel - reset to ready
       setState("ready");
       setCastStartTime(null);
+      setCooldownEndTime(null);
+      setCooldownRemaining(0);
       setCastProgress(0);
     };
 
@@ -95,7 +124,9 @@ export function MinimapHomeTeleportOrb({
       // Use ref to get current state (avoids stale closure)
       if (stateRef.current === "casting") {
         setState("cooldown");
-        setCooldownEndTime(Date.now() + HOME_TELEPORT_CONSTANTS.COOLDOWN_MS);
+        setCooldownEndTime(
+          performance.now() + HOME_TELEPORT_CONSTANTS.COOLDOWN_MS,
+        );
         setCooldownRemaining(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS);
         setCastStartTime(null);
         setCastProgress(0);
@@ -115,33 +146,64 @@ export function MinimapHomeTeleportOrb({
     };
   }, [world]);
 
-  // Cast progress timer
+  // Animation-driven progress/cooldown tickers (replaced setInterval for lower overhead)
   useEffect(() => {
-    if (state !== "casting" || !castStartTime) return;
-    const interval = setInterval(() => {
-      const progress = Math.min(
-        100,
-        ((Date.now() - castStartTime) / HOME_TELEPORT_CONSTANTS.CAST_TIME_MS) *
-          100,
-      );
-      setCastProgress(progress);
-    }, 50);
-    return () => clearInterval(interval);
-  }, [state, castStartTime]);
-
-  // Cooldown timer - uses end time to avoid drift over 15 minutes
-  useEffect(() => {
-    if (state !== "cooldown" || !cooldownEndTime) return;
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, cooldownEndTime - Date.now());
-      setCooldownRemaining(remaining);
-      if (remaining <= 0) {
-        setState("ready");
-        setCooldownEndTime(null);
+    const clearTicker = () => {
+      if (tickerRef.current !== null) {
+        cancelAnimationFrame(tickerRef.current);
+        tickerRef.current = null;
       }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [state, cooldownEndTime]);
+    };
+
+    if (state === "ready") {
+      clearTicker();
+      cooldownSecondRef.current = -1;
+      setCooldownRemaining(0);
+      setCastProgress(0);
+      return undefined;
+    }
+
+    cooldownSecondRef.current = -1;
+
+    const tick = () => {
+      const now = performance.now();
+
+      if (state === "casting" && castStartTimeRef.current !== null) {
+        const progress = Math.max(
+          0,
+          Math.min(
+            100,
+            ((now - castStartTimeRef.current) /
+              HOME_TELEPORT_CONSTANTS.CAST_TIME_MS) *
+              100,
+          ),
+        );
+        setCastProgress(progress);
+      } else if (state === "cooldown" && cooldownEndTimeRef.current !== null) {
+        const remaining = Math.max(0, cooldownEndTimeRef.current - now);
+        const remainingSeconds = Math.floor(remaining / 1000);
+        if (remainingSeconds !== cooldownSecondRef.current) {
+          cooldownSecondRef.current = remainingSeconds;
+          setCooldownRemaining(remaining);
+        }
+        if (remaining <= 0) {
+          setCooldownRemaining(0);
+          setState("ready");
+          setCooldownEndTime(null);
+          clearTicker();
+          return;
+        }
+      } else {
+        clearTicker();
+        return;
+      }
+
+      tickerRef.current = requestAnimationFrame(tick);
+    };
+
+    tickerRef.current = requestAnimationFrame(tick);
+    return clearTicker;
+  }, [state, castStartTime, cooldownEndTime]);
 
   const handleClick = useCallback(() => {
     const network = world.network as {
@@ -171,23 +233,26 @@ export function MinimapHomeTeleportOrb({
 
   const isCasting = state === "casting";
   const isDisabled = state === "cooldown";
+  const cooldownProgress = isDisabled
+    ? getHomeTeleportCooldownProgress(cooldownRemaining)
+    : 0;
 
   // Color scheme based on state
-  // Ready: Warm purple/magenta (magical feel)
+  // Ready/cooldown fill: Warm purple/magenta (magical feel)
   // Casting: Bright blue (active)
-  // Cooldown: Muted gray
+  // Cooldown shell: Muted gray
   const fillColorStart = isDisabled
-    ? "#666666"
+    ? "#c084fc"
     : isCasting
       ? "#60a5fa"
       : "#c084fc";
   const fillColorMid = isDisabled
-    ? "#4a4a4a"
+    ? "#a855f7"
     : isCasting
       ? "#3b82f6"
       : "#a855f7";
   const fillColorEnd = isDisabled
-    ? "#333333"
+    ? "#7c3aed"
     : isCasting
       ? "#2563eb"
       : "#7c3aed";
@@ -214,7 +279,11 @@ export function MinimapHomeTeleportOrb({
   const outerBorderRadius = center - borderWidth / 2; // Border stroke centered on edge
 
   // Calculate fill percentage based on state
-  const fillPercent = isCasting ? castProgress : isDisabled ? 0 : 100;
+  const fillPercent = isCasting
+    ? Math.max(0, Math.min(100, castProgress))
+    : isDisabled
+      ? cooldownProgress
+      : 100;
 
   // Label text
   const label =
@@ -288,8 +357,13 @@ export function MinimapHomeTeleportOrb({
           </clipPath>
         </defs>
 
-        {/* Background (dark) */}
-        <circle cx={center} cy={center} r={fillRadius} fill="#1a1510" />
+        {/* Background shell */}
+        <circle
+          cx={center}
+          cy={center}
+          r={fillRadius}
+          fill={isDisabled ? "#2c2a31" : "#1a1510"}
+        />
 
         {/* Fill rectangle clipped to circle, height based on progress/state */}
         <g clipPath={`url(#${clipId})`}>

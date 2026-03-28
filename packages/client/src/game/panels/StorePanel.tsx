@@ -20,10 +20,28 @@ import { createPortal } from "react-dom";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { COLORS } from "../../constants";
 import { InventoryPanel } from "./InventoryPanel";
-import { useWindowStore, useThemeStore, useMobileLayout } from "@/ui";
+import {
+  CursorTooltip,
+  useWindowStore,
+  useThemeStore,
+  useMobileLayout,
+} from "@/ui";
+import {
+  getTooltipMetaStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
+import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { getItem } from "@hyperscape/shared";
 import { formatItemName, formatPrice } from "@/utils";
 import { ItemIcon } from "@/ui/components/ItemIcon";
+import { UI } from "@/ui/core";
 
 interface StoreItem {
   id: string;
@@ -131,10 +149,10 @@ function ContextMenu({
   ];
 
   const menuContainerStyle: CSSProperties = {
-    background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-    border: `1px solid ${theme.colors.border.default}`,
-    borderRadius: theme.borderRadius.md,
-    boxShadow: theme.shadows.lg,
+    ...getContextMenuSurfaceStyle(theme, {
+      minWidth: 188,
+      radius: theme.borderRadius.md,
+    }),
     padding: `${theme.spacing.xs}px 0`,
     display: "inline-block",
   };
@@ -146,7 +164,12 @@ function ContextMenu({
     textAlign: "left",
     fontSize: theme.typography.fontSize.xs,
     color: isHovered ? theme.colors.text.primary : theme.colors.text.secondary,
-    background: isHovered ? theme.colors.background.tertiary : "transparent",
+    ...getContextMenuItemStyle(theme, {
+      hovered: isHovered,
+      radius: 0,
+      padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
+    }),
+    borderBottom: `1px solid ${isHovered ? `${theme.colors.border.hover}55` : "transparent"}`,
     border: "none",
     cursor: "pointer",
     transition: "all 0.15s ease",
@@ -161,7 +184,7 @@ function ContextMenu({
         left: menu.x,
         top: menu.y,
         width: "auto",
-        zIndex: 10000,
+        zIndex: UI.Z_INDEX.CONTEXT_MENU,
         pointerEvents: "auto",
       }}
     >
@@ -169,11 +192,11 @@ function ContextMenu({
         {/* Item name header */}
         <div
           style={{
+            ...getPanelHeaderStyle(theme),
             padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
             fontSize: theme.typography.fontSize.xs,
             fontWeight: theme.typography.fontWeight.bold,
             color: theme.colors.accent.primary,
-            borderBottom: `1px solid ${theme.colors.border.default}`,
           }}
         >
           {menu.itemName}
@@ -184,7 +207,11 @@ function ContextMenu({
             padding: `${theme.spacing.xs}px ${theme.spacing.md}px`,
             fontSize: theme.typography.fontSize.xs,
             color: theme.colors.state.warning,
-            borderBottom: `1px solid ${theme.colors.border.default}`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "normal",
+              radius: theme.borderRadius.sm,
+            }),
+            borderBottom: `1px solid ${theme.colors.border.default}40`,
           }}
         >
           {menu.type === "store" ? "Price" : "Sell"}: {formatPrice(menu.price)}{" "}
@@ -207,9 +234,10 @@ function ContextMenu({
                 width: "100%",
                 padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                 fontSize: theme.typography.fontSize.sm,
-                borderRadius: theme.borderRadius.sm,
-                background: theme.colors.background.tertiary,
-                border: `1px solid ${theme.colors.border.default}`,
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "normal",
+                  radius: theme.borderRadius.sm,
+                }),
                 color: theme.colors.text.primary,
                 outline: "none",
               }}
@@ -228,10 +256,12 @@ function ContextMenu({
                   flex: 1,
                   padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                   fontSize: theme.typography.fontSize.xs,
-                  borderRadius: theme.borderRadius.sm,
-                  background: `${theme.colors.state.success}99`,
+                  ...getInteractiveTileStyle(theme, {
+                    active: true,
+                    accentColor: theme.colors.state.success,
+                    radius: theme.borderRadius.sm,
+                  }),
                   color: theme.colors.text.primary,
-                  border: "none",
                   cursor: "pointer",
                 }}
               >
@@ -243,10 +273,12 @@ function ContextMenu({
                   flex: 1,
                   padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
                   fontSize: theme.typography.fontSize.xs,
-                  borderRadius: theme.borderRadius.sm,
-                  background: `${theme.colors.state.danger}99`,
+                  ...getInteractiveTileStyle(theme, {
+                    active: true,
+                    accentColor: theme.colors.state.danger,
+                    radius: theme.borderRadius.sm,
+                  }),
                   color: theme.colors.text.primary,
-                  border: "none",
                   cursor: "pointer",
                 }}
               >
@@ -301,14 +333,12 @@ export function StorePanel({
   npcEntityId: _npcEntityId,
   onClose: _onClose, // Handled by ModalWindow wrapper, kept for interface compatibility
 }: StorePanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+
   // Cleanup: Remove any orphaned store windows from previous UI system
   // Store is now rendered as a modal, not a window
   useEffect(() => {
     const { windows, destroyWindow } = useWindowStore.getState();
-    console.log(
-      "[StorePanel] Checking for orphaned windows, found:",
-      Array.from(windows.keys()),
-    );
     windows.forEach((win) => {
       const winIdLower = win.id.toLowerCase();
       const isStoreWindow =
@@ -332,9 +362,6 @@ export function StorePanel({
           );
         });
       if (isStoreWindow) {
-        console.log("[StorePanel] Removing orphaned store window:", win.id, {
-          tabs: win.tabs.map((t) => ({ id: t.id, label: t.label })),
-        });
         destroyWindow(win.id);
       }
     });
@@ -356,6 +383,13 @@ export function StorePanel({
     type: "store",
     itemName: "",
   });
+  const [hoveredStoreItemId, setHoveredStoreItemId] = useState<string | null>(
+    null,
+  );
+  const [hoveredStoreTooltip, setHoveredStoreTooltip] = useState<{
+    item: StoreItem;
+    position: { x: number; y: number };
+  } | null>(null);
 
   // NOTE: Distance validation is handled server-side (InteractionSessionManager)
   // The server sends storeClose packets when the player moves too far away.
@@ -479,11 +513,9 @@ export function StorePanel({
         <div
           className="rounded-lg shadow-xl flex-1"
           style={{
-            background:
-              "linear-gradient(135deg, rgba(20, 15, 10, 0.98) 0%, rgba(15, 10, 5, 0.98) 100%)",
-            border: "2px solid rgba(139, 69, 19, 0.7)",
-            boxShadow:
-              "0 10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 4px rgba(242, 208, 138, 0.1)",
+            ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+            borderRadius: theme.borderRadius.xl,
+            boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -16px 24px rgba(0, 0, 0, 0.08)`,
             maxWidth: "100%",
           }}
         >
@@ -494,6 +526,10 @@ export function StorePanel({
               maxHeight: shouldUseMobileUI
                 ? `${4 * (responsiveSlotSize + 8)}px`
                 : `${STORE_SCROLL_HEIGHT}px`,
+              ...getPanelInsetStyle(theme, {
+                emphasis: "strong",
+                radius: theme.borderRadius.lg,
+              }),
             }}
           >
             <div
@@ -510,24 +546,38 @@ export function StorePanel({
                   style={{
                     width: `${responsiveSlotSize}px`,
                     height: `${responsiveSlotSize}px`,
-                    background:
-                      "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(242, 208, 138, 0.05) 100%)",
-                    border: "1px solid rgba(242, 208, 138, 0.3)",
+                    ...getInteractiveTileStyle(theme, {
+                      hovered: hoveredStoreItemId === item.id,
+                      radius: theme.borderRadius.md,
+                      accentColor: theme.colors.accent.primary,
+                    }),
                   }}
-                  title={`${item.name} - ${item.price} gp${item.stockQuantity !== -1 ? ` (${item.stockQuantity} in stock)` : ""}`}
                   onClick={() => handleBuy(item.itemId, 1)}
                   onContextMenu={(e) => openStoreContextMenu(e, item)}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background =
-                      "linear-gradient(135deg, rgba(242, 208, 138, 0.2) 0%, rgba(242, 208, 138, 0.1) 100%)";
-                    e.currentTarget.style.borderColor =
-                      "rgba(242, 208, 138, 0.5)";
+                    setHoveredStoreItemId(item.id);
+                    setHoveredStoreTooltip({
+                      item,
+                      position: { x: e.clientX, y: e.clientY },
+                    });
                   }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background =
-                      "linear-gradient(135deg, rgba(242, 208, 138, 0.1) 0%, rgba(242, 208, 138, 0.05) 100%)";
-                    e.currentTarget.style.borderColor =
-                      "rgba(242, 208, 138, 0.3)";
+                  onMouseMove={(e) => {
+                    setHoveredStoreTooltip((prev) =>
+                      prev?.item.id === item.id
+                        ? {
+                            item,
+                            position: { x: e.clientX, y: e.clientY },
+                          }
+                        : prev,
+                    );
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredStoreItemId((prev) =>
+                      prev === item.id ? null : prev,
+                    );
+                    setHoveredStoreTooltip((prev) =>
+                      prev?.item.id === item.id ? null : prev,
+                    );
                   }}
                 >
                   <span className="select-none">
@@ -537,7 +587,7 @@ export function StorePanel({
                   <span
                     className="absolute bottom-0 right-0.5 text-[9px] font-bold"
                     style={{
-                      color: "#fbbf24",
+                      color: theme.colors.accent.gold,
                       textShadow: "1px 1px 1px black, -1px -1px 1px black",
                     }}
                   >
@@ -548,7 +598,10 @@ export function StorePanel({
                     <span
                       className="absolute top-0 left-0.5 text-[8px] font-bold"
                       style={{
-                        color: item.stockQuantity === 0 ? "#ff6666" : "#ffffff",
+                        color:
+                          item.stockQuantity === 0
+                            ? theme.colors.state.danger
+                            : theme.colors.text.primary,
                         textShadow: "1px 1px 1px black",
                       }}
                     >
@@ -560,17 +613,50 @@ export function StorePanel({
             </div>
           </div>
 
+          {hoveredStoreTooltip && !contextMenu.visible && (
+            <CursorTooltip
+              visible={true}
+              position={hoveredStoreTooltip.position}
+              estimatedSize={{ width: 220, height: 70 }}
+              style={{
+                zIndex: theme.zIndex.tooltip,
+                minWidth: "180px",
+                maxWidth: "260px",
+              }}
+            >
+              <div
+                style={{
+                  ...getTooltipTitleStyle(theme),
+                }}
+              >
+                {hoveredStoreTooltip.item.name}
+              </div>
+              <div
+                style={{
+                  ...getTooltipMetaStyle(theme),
+                  marginTop: "4px",
+                }}
+              >
+                {hoveredStoreTooltip.item.price} gp
+                {hoveredStoreTooltip.item.stockQuantity !== -1
+                  ? ` • ${hoveredStoreTooltip.item.stockQuantity} in stock`
+                  : " • Unlimited stock"}
+              </div>
+            </CursorTooltip>
+          )}
+
           {/* Footer */}
           <div
             className="px-4 py-2 rounded-b-lg"
             style={{
-              background: "rgba(0, 0, 0, 0.3)",
-              borderTop: "1px solid rgba(139, 69, 19, 0.3)",
+              ...getPanelHeaderStyle(theme),
+              borderTop: `1px solid ${theme.colors.border.default}40`,
+              borderBottom: "none",
             }}
           >
             <div
               className="flex justify-between items-center text-xs"
-              style={{ color: "rgba(242, 208, 138, 0.6)" }}
+              style={{ color: theme.colors.text.secondary }}
             >
               <span>Sells at {Math.floor(buybackRate * 100)}% value</span>
               <span>Left: Buy 1 | Right: Options</span>
@@ -582,11 +668,9 @@ export function StorePanel({
         <div
           className="rounded-lg shadow-xl overflow-hidden"
           style={{
-            background:
-              "linear-gradient(135deg, rgba(20, 15, 10, 0.98) 0%, rgba(15, 10, 5, 0.98) 100%)",
-            border: "2px solid rgba(139, 69, 19, 0.7)",
-            boxShadow:
-              "0 10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 4px rgba(242, 208, 138, 0.1)",
+            ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+            borderRadius: theme.borderRadius.xl,
+            boxShadow: `${theme.shadows.xl}, inset 0 2px 4px rgba(255, 255, 255, 0.05)`,
             width: shouldUseMobileUI ? "100%" : "200px",
             minWidth: shouldUseMobileUI ? undefined : "180px",
           }}
@@ -595,9 +679,7 @@ export function StorePanel({
           <div
             className="flex justify-between items-center px-3 py-1.5"
             style={{
-              background:
-                "linear-gradient(180deg, rgba(139, 69, 19, 0.4) 0%, rgba(139, 69, 19, 0.2) 100%)",
-              borderBottom: "1px solid rgba(139, 69, 19, 0.5)",
+              ...getPanelHeaderStyle(theme),
             }}
           >
             <h2

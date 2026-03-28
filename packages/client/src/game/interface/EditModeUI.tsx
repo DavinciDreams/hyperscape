@@ -8,15 +8,18 @@
  * @packageDocumentation
  */
 
-import React, { useCallback } from "react";
-import { EditModeOverlay, type WindowConfig, type WindowState } from "@/ui";
+import React, { memo, useCallback } from "react";
+import {
+  EditModeOverlay,
+  useWindowStore,
+  type WindowConfig,
+  type WindowState,
+} from "@/ui";
 import { snapToGrid, MAX_ACTION_BARS } from "./types";
 import { getResponsivePanelSizing } from "./DefaultLayoutFactory";
 
 /** Props for EditModeOverlayManager */
 interface EditModeOverlayManagerProps {
-  /** All window configurations */
-  windows: WindowState[];
   /** Whether multiple action bars feature is enabled */
   multipleActionBarsEnabled: boolean;
   /** Function to create a new window */
@@ -26,16 +29,19 @@ interface EditModeOverlayManagerProps {
 /**
  * Manages the edit mode overlay with action bar creation
  */
-export function EditModeOverlayManager({
-  windows,
+export const EditModeOverlayManager = memo(function EditModeOverlayManager({
   multipleActionBarsEnabled,
   createWindow,
 }: EditModeOverlayManagerProps): React.ReactElement {
-  const actionBarCount = windows.filter(
-    (w) => w.id?.startsWith("actionbar-") && w.id?.endsWith("-window"),
-  ).length;
+  const actionBarCount = useWindowStore(
+    (s) =>
+      Array.from(s.windows.values()).filter(
+        (w) => w.id?.startsWith("actionbar-") && w.id?.endsWith("-window"),
+      ).length,
+  );
 
   const handleAddActionBar = useCallback(() => {
+    const windows = Array.from(useWindowStore.getState().windows.values());
     const existingIds = new Set(
       windows.filter((w) => w.id?.startsWith("actionbar-")).map((w) => w.id!),
     );
@@ -79,7 +85,7 @@ export function EditModeOverlayManager({
         transparency: 0,
       });
     }
-  }, [windows, createWindow]);
+  }, [createWindow]);
 
   return (
     <EditModeOverlay
@@ -90,7 +96,7 @@ export function EditModeOverlayManager({
       }
     />
   );
-}
+});
 
 /** Props for HoldToEditIndicator */
 interface HoldToEditIndicatorProps {
@@ -107,7 +113,7 @@ interface HoldToEditIndicatorProps {
 /**
  * Visual indicator shown while holding L key to toggle edit mode
  */
-export function HoldToEditIndicator({
+export const HoldToEditIndicator = memo(function HoldToEditIndicator({
   isHolding,
   holdProgress,
   isUnlocked,
@@ -256,4 +262,4 @@ export function HoldToEditIndicator({
       </div>
     </div>
   );
-}
+});

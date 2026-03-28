@@ -24,6 +24,7 @@
     "install": "node scripts/install.mjs",
     "postinstall": "node scripts/ensure-assets.mjs",
     "assets:sync": "cd packages/server/world/assets && git pull origin main",
+    "assets:validate": "node scripts/validate-assets-sync.mjs",
     "assets:optimize": "node scripts/optimize-assets.mjs",
     "assets:optimize:dry": "node scripts/optimize-assets.mjs --dry-run --verbose",
     "assets:optimize:textures": "node scripts/optimize-assets.mjs --textures",

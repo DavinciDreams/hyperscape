@@ -1464,20 +1464,17 @@ export class PlayerLocal extends Entity implements HotReloadable {
       (this.data.avatar as string) ||
       "asset://avatars/avatar-male-01.vrm";
 
-    // TEMP DEBUG: Force non-optimized VRM to test humanoid.update
-    if (url.includes("_optimized.vrm")) {
+    const useRawAvatar =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("rawAvatar") === "1";
+    if (useRawAvatar && url.includes("_optimized.vrm")) {
       const nonOptimized = url.replace("_optimized.vrm", ".vrm");
       console.warn(
-        `[PlayerLocal] ⚠️ Forcing non-optimized VRM: ${url} -> ${nonOptimized}`,
+        `[PlayerLocal] Forcing non-optimized VRM via ?rawAvatar=1: ${url} -> ${nonOptimized}`,
       );
       url = nonOptimized;
     }
 
-    console.log(`[PlayerLocal] getAvatarUrl:`, {
-      sessionAvatar: this.data.sessionAvatar,
-      avatar: this.data.avatar,
-      resolved: url,
-    });
     return url;
   }
 
@@ -2353,17 +2350,39 @@ export class PlayerLocal extends Entity implements HotReloadable {
       // Otherwise entities face AWAY from each other instead of towards
       angle += Math.PI;
 
-      // Apply instant rotation (RuneScape doesn't lerp combat rotation) using pre-allocated temps
-      if (this.base) {
-        _combatQuat.setFromAxisAngle(_combatAxis, angle);
-        this.base.quaternion.copy(_combatQuat);
+      _combatQuat.setFromAxisAngle(_combatAxis, angle);
 
-        // Issue #322: Store this rotation to preserve facing after combat ends
-        if (!this._lastCombatRotation) {
-          this._lastCombatRotation = new THREE.Quaternion();
-        }
-        this._lastCombatRotation.copy(_combatQuat);
+      // FIX: Route combat rotation through TileInterpolator when it controls this entity.
+      // Previously, PlayerLocal wrote directly to base.quaternion which caused a race condition:
+      // PlayerLocal.update() (hot entity) runs BEFORE TileInterpolator.update() (system),
+      // so TileInterpolator would overwrite the combat rotation with its stale state.quaternion,
+      // or vice versa — the two systems fought over base.quaternion every frame.
+      // Now combat rotation flows through TileInterpolator's state, matching how remote players work.
+      const tileControlled = this.data?.tileInterpolatorControlled === true;
+      if (tileControlled) {
+        const network = this.world.network as {
+          tileInterpolator?: {
+            setCombatRotation?: (
+              entityId: string,
+              quaternion: number[] | THREE.Quaternion,
+              entityPosition?: { x: number; y: number; z: number },
+            ) => boolean;
+          };
+        };
+        network?.tileInterpolator?.setCombatRotation?.(
+          this.data.id,
+          _combatQuat,
+        );
+      } else if (this.base) {
+        // Fallback: TileInterpolator hasn't touched this entity yet
+        this.base.quaternion.copy(_combatQuat);
       }
+
+      // Issue #322: Store this rotation to preserve facing after combat ends
+      if (!this._lastCombatRotation) {
+        this._lastCombatRotation = new THREE.Quaternion();
+      }
+      this._lastCombatRotation.copy(_combatQuat);
     } else if (
       !combatTarget &&
       !isMoving &&
@@ -2371,7 +2390,25 @@ export class PlayerLocal extends Entity implements HotReloadable {
       this.base
     ) {
       // Issue #322: When combat ends but player isn't moving, preserve combat facing direction
-      this.base.quaternion.copy(this._lastCombatRotation);
+      // Route through TileInterpolator to avoid the same race condition
+      const tileControlled = this.data?.tileInterpolatorControlled === true;
+      if (tileControlled) {
+        const network = this.world.network as {
+          tileInterpolator?: {
+            setCombatRotation?: (
+              entityId: string,
+              quaternion: number[] | THREE.Quaternion,
+              entityPosition?: { x: number; y: number; z: number },
+            ) => boolean;
+          };
+        };
+        network?.tileInterpolator?.setCombatRotation?.(
+          this.data.id,
+          this._lastCombatRotation,
+        );
+      } else {
+        this.base.quaternion.copy(this._lastCombatRotation);
+      }
     }
 
     // Server-authoritative movement: minimal updates only
@@ -2730,6 +2767,23 @@ export class PlayerLocal extends Entity implements HotReloadable {
    * Handle PLAYER_SET_DEAD event from server
    * CRITICAL: This is the entry point to death flow - blocks all input and movement
    */
+  /** Clear death animation state and restore to idle (shared by respawn handlers) */
+  private clearDeathAnimationState(): void {
+    const playerWithDying = this as PlayerLocalWithDying;
+    playerWithDying.isDying = false;
+    playerWithDying.data.isDying = false;
+
+    this.data.e = "idle";
+    this.data.emote = "idle";
+    this.emote = "idle";
+    if (this._avatar?.setEmote) {
+      this._avatar.setEmote(Emotes.IDLE);
+    }
+
+    this.data.deathState = undefined;
+    this.data.deathPosition = undefined;
+  }
+
   handlePlayerSetDead(event: {
     playerId: string;
     isDead: boolean;
@@ -2743,11 +2797,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // isDead:true = entering death state, isDead:false = exiting death state
     if (event.isDead === false) {
       // Player is being restored to alive (after respawn)
-
-      // Clear isDying flag (same as handlePlayerRespawned)
-      const playerWithDying = this as PlayerLocalWithDying;
-      playerWithDying.isDying = false;
-      playerWithDying.data.isDying = false;
+      this.clearDeathAnimationState();
 
       // Unfreeze physics if needed
       const physXGlobal = globalThis as PhysXGlobal;
@@ -2878,10 +2928,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
   }): void {
     if (event.playerId !== this.data.id) return;
 
-    // Clear isDying flag (allows input again)
-    const playerWithDying = this as PlayerLocalWithDying;
-    playerWithDying.isDying = false;
-    playerWithDying.data.isDying = false;
+    this.clearDeathAnimationState();
 
     // CRITICAL: Teleport player to spawn position
     // Without this, player stays at death location instead of respawning at spawn

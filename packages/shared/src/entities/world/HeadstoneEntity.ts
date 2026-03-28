@@ -33,6 +33,8 @@ export class HeadstoneEntity extends InteractableEntity {
     return this.config.headstoneData;
   }
 
+  /** Network-synced item count. Server uses lootItems.length; client gets this via modify(). */
+  private lootItemCount: number = 0;
   private lootProtectionUntil: number = 0;
   private protectedFor?: string;
   private despawnScheduled = false;
@@ -54,6 +56,7 @@ export class HeadstoneEntity extends InteractableEntity {
     super(world, interactableConfig);
     this.config = config;
     this.lootItems = [...(config.headstoneData.items || [])];
+    this.lootItemCount = this.lootItems.length;
 
     if (config.headstoneData.playerName) {
       this.name = `${config.headstoneData.playerName}'s Gravestone`;
@@ -87,16 +90,6 @@ export class HeadstoneEntity extends InteractableEntity {
   /** Get the death zone type for audit logging */
   public getZoneType(): string {
     return this.headstoneData.zoneType || "safe_area";
-  }
-
-  private getEntityManager(): {
-    destroyEntity: (id: string) => boolean;
-  } | null {
-    return (
-      (this.world.getSystem("entity-manager") as unknown as {
-        destroyEntity: (id: string) => boolean;
-      }) ?? null
-    );
   }
 
   // --- Rendering ---
@@ -210,6 +203,11 @@ export class HeadstoneEntity extends InteractableEntity {
       return;
     }
 
+    // Don't open loot window for empty gravestones
+    if (this.lootItemCount === 0) {
+      return;
+    }
+
     const lootData = {
       corpseId: this.id,
       playerId: data.playerId,
@@ -252,25 +250,20 @@ export class HeadstoneEntity extends InteractableEntity {
       this.lootItems.splice(itemIndex, 1);
     }
 
+    this.lootItemCount = this.lootItems.length;
     if (this.mesh?.userData?.corpseData) {
-      this.mesh.userData.corpseData.itemCount = this.lootItems.length;
+      this.mesh.userData.corpseData.itemCount = this.lootItemCount;
     }
 
-    if (this.lootItems.length === 0 && !this.despawnScheduled) {
+    if (this.lootItemCount === 0 && !this.despawnScheduled) {
       this.despawnScheduled = true;
       this.world.emit(EventType.CORPSE_EMPTY, {
         corpseId: this.id,
         playerId: this.headstoneData.playerId,
       });
-
-      setTimeout(() => {
-        const entityManager = this.getEntityManager();
-        if (entityManager) {
-          entityManager.destroyEntity(this.id);
-        } else {
-          this.world.entities.remove(this.id);
-        }
-      }, 500);
+      // Entity destruction is handled by PlayerDeathSystem.handleCorpseEmpty()
+      // which destroys via EntityManager → sends entityRemoved to all clients.
+      // No setTimeout here — system-driven cleanup is more reliable.
     }
 
     this.markNetworkDirty();
@@ -299,8 +292,9 @@ export class HeadstoneEntity extends InteractableEntity {
         metadata: null,
       });
     }
+    this.lootItemCount = this.lootItems.length;
     if (this.mesh?.userData?.corpseData) {
-      this.mesh.userData.corpseData.itemCount = this.lootItems.length;
+      this.mesh.userData.corpseData.itemCount = this.lootItemCount;
     }
     this.markNetworkDirty();
   }
@@ -310,7 +304,7 @@ export class HeadstoneEntity extends InteractableEntity {
   }
 
   public hasLoot(): boolean {
-    return this.lootItems.length > 0;
+    return this.lootItemCount > 0;
   }
 
   /** Atomically consume all remaining items (e.g., for gravestone expiration to ground items). Server-only. */
@@ -318,22 +312,59 @@ export class HeadstoneEntity extends InteractableEntity {
     if (!this.world.isServer) return [];
     const items = [...this.lootItems];
     this.lootItems.length = 0;
+    this.lootItemCount = 0;
     this.markNetworkDirty();
     return items;
   }
 
   // --- Network ---
 
-  // PERF: Mutates buffer in-place instead of creating new objects
+  // PERF: Mutates buffer in-place instead of creating new objects.
+  // lootItems is included for client sync but only sent when dirty
+  // (markNetworkDirty is called after removeItem/restoreItem). Gravestones
+  // have few items and rarely change, so bandwidth impact is minimal.
   getNetworkData(): Record<string, unknown> {
     const buf = super.getNetworkData();
     const hd = this.headstoneData;
-    buf.lootItemCount = this.lootItems.length;
+    buf.lootItemCount = this.lootItemCount;
+    buf.lootItems = this.lootItems;
     buf.despawnTime = hd.despawnTime;
     buf.playerId = hd.playerId;
     buf.deathMessage = hd.deathMessage;
     buf.lootProtectionUntil = this.lootProtectionUntil;
     return buf;
+  }
+
+  /**
+   * Apply network data from server. Syncs lootItems from server state
+   * to prevent stale item lists on the client (which caused item duplication
+   * when old gravestones showed original items after being looted).
+   */
+  modify(data: Partial<EntityData>): void {
+    super.modify(data);
+    const changes = data as Record<string, unknown>;
+    if (Array.isArray(changes.lootItems)) {
+      // Validate each element has required fields (server→client trust boundary)
+      const raw = changes.lootItems as unknown[];
+      const validated = raw.filter(
+        (item): item is InventoryItem =>
+          item !== null &&
+          typeof item === "object" &&
+          typeof (item as Record<string, unknown>).itemId === "string" &&
+          typeof (item as Record<string, unknown>).quantity === "number" &&
+          ((item as Record<string, unknown>).quantity as number) > 0,
+      );
+      this.lootItems = validated.map((item) => ({ ...item }));
+      this.lootItemCount = this.lootItems.length;
+    } else if (typeof changes.lootItemCount === "number") {
+      this.lootItemCount = changes.lootItemCount;
+      if (this.lootItemCount === 0) {
+        this.lootItems = [];
+      }
+    }
+    if (this.mesh?.userData?.corpseData) {
+      this.mesh.userData.corpseData.itemCount = this.lootItemCount;
+    }
   }
 
   serialize(): EntityData {
@@ -348,12 +379,12 @@ export class HeadstoneEntity extends InteractableEntity {
         deathMessage: hd.deathMessage,
         position: hd.position,
         items: this.lootItems,
-        itemCount: this.lootItems.length,
+        itemCount: this.lootItemCount,
         despawnTime: hd.despawnTime,
         lootProtectionUntil: this.lootProtectionUntil,
         protectedFor: this.protectedFor,
       },
-      lootItemCount: this.lootItems.length,
+      lootItemCount: this.lootItemCount,
       lootProtectionUntil: this.lootProtectionUntil,
     } as unknown as EntityData;
   }

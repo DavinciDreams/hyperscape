@@ -24,6 +24,12 @@ interface ElizaOSTimelineLog {
   [key: string]: unknown;
 }
 
+interface TimelineLogsResponse {
+  success?: boolean;
+  data?: ElizaOSTimelineLog[] | { logs?: ElizaOSTimelineLog[] };
+  logs?: ElizaOSTimelineLog[];
+}
+
 interface AgentTimelineProps {
   agent: Agent;
 }
@@ -32,6 +38,7 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTimeline();
@@ -46,16 +53,23 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
       );
 
       if (!response.ok) {
-        console.warn("[AgentTimeline] Failed to fetch timeline");
         setEvents([]);
+        setError("Timeline unavailable right now");
         return;
       }
 
-      const logs = await response.json();
-      console.log("[AgentTimeline] Fetched logs:", logs);
+      const payload = (await response.json()) as
+        | ElizaOSTimelineLog[]
+        | TimelineLogsResponse;
+
+      const logs = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload.data)
+          ? payload.data
+          : payload.data?.logs || payload.logs || [];
 
       // Transform logs to timeline events
-      const timelineEvents = (Array.isArray(logs) ? logs : []).map(
+      const timelineEvents = logs.map(
         (log: ElizaOSTimelineLog): TimelineEvent => ({
           id: log.id || `${Date.now()}-${Math.random()}`,
           type: (log.level === "error"
@@ -76,9 +90,10 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
       );
 
       setEvents(timelineEvents);
-    } catch (error) {
-      console.error("[AgentTimeline] Error fetching timeline:", error);
+      setError(null);
+    } catch {
       setEvents([]);
+      setError("Timeline unavailable right now");
     } finally {
       setLoading(false);
     }
@@ -164,6 +179,11 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
             Errors
           </button>
         </div>
+        {error && (
+          <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            {error}
+          </div>
+        )}
       </div>
 
       {/* Timeline */}

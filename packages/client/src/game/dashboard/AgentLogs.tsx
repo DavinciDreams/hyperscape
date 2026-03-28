@@ -33,6 +33,12 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
   const [isPaused, setIsPaused] = React.useState(false);
   const [deletingLogId, setDeletingLogId] = React.useState<string | null>(null);
   const logsEndRef = React.useRef<HTMLDivElement>(null);
+  const retryTimeoutRef = React.useRef<number | null>(null);
+  const inFlightRef = React.useRef(false);
+  const filteredLogs = React.useMemo(
+    () => logs.filter((log) => filter === "all" || log.level === filter),
+    [filter, logs],
+  );
 
   // Delete individual log entry
   const deleteLog = async (logId: string) => {
@@ -46,7 +52,6 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
       if (response.ok) {
         // Remove log from local state immediately
         setLogs((prev) => prev.filter((log) => log.id !== logId));
-        console.log(`[AgentLogs] ✅ Log ${logId} deleted`);
       } else {
         console.error(
           `[AgentLogs] Failed to delete log: HTTP ${response.status}`,
@@ -61,15 +66,21 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
 
   // Fetch logs from API
   React.useEffect(() => {
+    const clearRetryTimeout = () => {
+      if (retryTimeoutRef.current !== null) {
+        window.clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+    };
+
     const fetchLogs = async () => {
-      if (isPaused) return;
+      if (isPaused || inFlightRef.current) return;
+      inFlightRef.current = true;
 
       // Only fetch logs for active agents
       if (agent.status !== "active") {
-        console.log(
-          `[AgentLogs] Agent ${agent.name} is ${agent.status} - skipping log fetch`,
-        );
-        setLogs([]);
+        setLogs((prev) => (prev.length > 0 ? [] : prev));
+        inFlightRef.current = false;
         return;
       }
 
@@ -79,24 +90,16 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
         const response = await fetch(
           `${ELIZAOS_API}/agents/${agent.id}/logs?limit=200&level=info`,
         );
-        console.log(
-          "[AgentLogs] Fetching logs from:",
-          `${ELIZAOS_API}/agents/${agent.id}/logs`,
-        );
         if (response.ok) {
           const result = await response.json();
-          console.log("[AgentLogs] Raw response:", result);
 
           // ElizaOS returns { success, data: [...] } where data is the logs array
           if (!result.success || !result.data || !Array.isArray(result.data)) {
-            console.warn("[AgentLogs] Unexpected response format:", result);
-            setLogs([]);
+            console.warn("[AgentLogs] Unexpected response format");
             return;
           }
 
           const logs = result.data;
-          console.log("[AgentLogs] Logs count from API:", logs.length);
-          console.log("[AgentLogs] First log sample:", logs[0]);
 
           // Extract log level from type (e.g., "useModel:TEXT_EMBEDDING" -> "info")
           const extractLevel = (log: ElizaOSLog): string => {
@@ -136,26 +139,37 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
             source: agent.name,
           }));
 
-          console.log(
-            "[AgentLogs] Formatted logs count:",
-            formattedLogs.length,
-          );
           setLogs(formattedLogs);
         } else {
-          console.error(
-            "[AgentLogs] Response not OK:",
-            response.status,
-            response.statusText,
-          );
+          console.error(`[AgentLogs] Failed to fetch logs: ${response.status}`);
         }
       } catch (error) {
-        console.error("Failed to fetch logs:", error);
+        console.error("[AgentLogs] Failed to fetch logs:", error);
+      } finally {
+        inFlightRef.current = false;
       }
     };
 
-    fetchLogs();
-    const interval = setInterval(fetchLogs, 2000); // Poll every 2 seconds
-    return () => clearInterval(interval);
+    const scheduleNextFetch = () => {
+      clearRetryTimeout();
+      const delay =
+        document.visibilityState === "visible" && !isPaused ? 5000 : 20000;
+      retryTimeoutRef.current = window.setTimeout(() => {
+        retryTimeoutRef.current = null;
+        void fetchLogs().finally(scheduleNextFetch);
+      }, delay);
+    };
+
+    void fetchLogs().finally(scheduleNextFetch);
+    const onVisibilityChange = () => {
+      clearRetryTimeout();
+      scheduleNextFetch();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearRetryTimeout();
+    };
   }, [agent.id, agent.status, isPaused]);
 
   // Auto-scroll to bottom
@@ -178,6 +192,29 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
         return "text-green-400"; // Default for info
     }
   };
+
+  const downloadLogs = React.useCallback(() => {
+    if (filteredLogs.length === 0) return;
+
+    const payload = filteredLogs.map((log) => ({
+      id: log.id,
+      timestamp: log.timestamp.toISOString(),
+      level: log.level,
+      source: log.source,
+      message: log.message,
+    }));
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${agent.name || agent.id}-logs.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [agent.id, agent.name, filteredLogs]);
 
   return (
     <div className="flex flex-col h-full bg-[#0b0a15]/50 backdrop-blur-sm">
@@ -215,7 +252,12 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
             {isPaused ? <Play size={18} /> : <Pause size={18} />}
           </button>
 
-          <button className="p-2 hover:bg-[#f2d08a]/10 rounded-lg text-[#f2d08a]/60 hover:text-[#f2d08a] transition-colors">
+          <button
+            className="p-2 hover:bg-[#f2d08a]/10 rounded-lg text-[#f2d08a]/60 hover:text-[#f2d08a] transition-colors disabled:opacity-40"
+            onClick={downloadLogs}
+            disabled={filteredLogs.length === 0}
+            title="Download logs"
+          >
             <Download size={18} />
           </button>
         </div>
@@ -224,48 +266,46 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
       {/* Logs Viewer */}
       <div className="flex-1 overflow-y-auto p-4 font-mono text-sm bg-[#050408]">
         <div className="space-y-1">
-          {logs
-            .filter((log) => filter === "all" || log.level === filter)
-            .map((log) => (
-              <div
-                key={log.id}
-                className="flex gap-3 hover:bg-[#f2d08a]/5 p-1 rounded transition-colors group"
+          {filteredLogs.map((log) => (
+            <div
+              key={log.id}
+              className="flex gap-3 hover:bg-[#f2d08a]/5 p-1 rounded transition-colors group"
+            >
+              <span className="text-[#f2d08a]/30 w-20 flex-shrink-0 text-xs pt-0.5">
+                {log.timestamp.toLocaleTimeString([], {
+                  hour12: false,
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}
+              </span>
+
+              <span
+                className={`w-16 flex-shrink-0 text-xs font-bold pt-0.5 uppercase ${getLevelColor(log.level)}`}
               >
-                <span className="text-[#f2d08a]/30 w-20 flex-shrink-0 text-xs pt-0.5">
-                  {log.timestamp.toLocaleTimeString([], {
-                    hour12: false,
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  })}
-                </span>
+                {log.level}
+              </span>
 
-                <span
-                  className={`w-16 flex-shrink-0 text-xs font-bold pt-0.5 uppercase ${getLevelColor(log.level)}`}
-                >
-                  {log.level}
-                </span>
+              <span className="text-[#f2d08a]/60 w-32 flex-shrink-0 text-xs pt-0.5 truncate">
+                [{log.source}]
+              </span>
 
-                <span className="text-[#f2d08a]/60 w-32 flex-shrink-0 text-xs pt-0.5 truncate">
-                  [{log.source}]
-                </span>
+              <span className="text-[#e8ebf4]/80 flex-1 break-all">
+                {log.message}
+              </span>
 
-                <span className="text-[#e8ebf4]/80 flex-1 break-all">
-                  {log.message}
-                </span>
+              <button
+                onClick={() => deleteLog(log.id)}
+                disabled={deletingLogId === log.id}
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-500/10 rounded text-red-400/60 hover:text-red-400 disabled:opacity-50"
+                title="Delete log"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
 
-                <button
-                  onClick={() => deleteLog(log.id)}
-                  disabled={deletingLogId === log.id}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-500/10 rounded text-red-400/60 hover:text-red-400 disabled:opacity-50"
-                  title="Delete log"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-
-          {logs.length === 0 && (
+          {filteredLogs.length === 0 && (
             <div className="text-center py-20 text-[#f2d08a]/40">
               {agent.status !== "active" ? (
                 <>

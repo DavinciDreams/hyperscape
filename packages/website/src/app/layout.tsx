@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { cinzel, crimsonText, medievalSharp } from "@/lib/fonts";
 import { MotionProvider } from "@/lib/motion";
 import "./globals.css";
 
@@ -118,10 +117,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html
-      lang="en"
-      className={`${cinzel.variable} ${crimsonText.variable} ${medievalSharp.variable} text-[15px]`}
-    >
+    <html lang="en" className="text-[15px]">
       <head>
         <script
           type="application/ld+json"

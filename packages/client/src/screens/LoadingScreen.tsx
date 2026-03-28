@@ -4,7 +4,7 @@
  * Displays loading progress while world initializes and assets load.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useThemeStore } from "@/ui";
 
 import { World } from "@hyperscape/shared";
@@ -13,17 +13,28 @@ import { EventType } from "@hyperscape/shared";
 export function LoadingScreen({
   world,
   message,
+  fadingOut = false,
   completionStage = "Finalizing...",
 }: {
   world: World;
   message?: string;
+  fadingOut?: boolean;
   completionStage?: string;
 }) {
   const theme = useThemeStore((s) => s.theme);
   const [progress, setProgress] = useState(3); // Start at 3% to show immediate feedback
+  const [displayProgress, setDisplayProgress] = useState(3);
   const [loadingStage, setLoadingStage] = useState(
     message || "Initializing...",
   );
+  const animationFrameRef = useRef<number | null>(null);
+
+  // Keep loadingStage in sync when the message prop changes externally
+  useEffect(() => {
+    if (message) {
+      setLoadingStage(message);
+    }
+  }, [message]);
 
   useEffect(() => {
     let systemsComplete = false;
@@ -89,8 +100,39 @@ export function LoadingScreen({
     };
   }, [world, completionStage]);
 
+  useEffect(() => {
+    const animate = () => {
+      setDisplayProgress((current) => {
+        const delta = progress - current;
+        if (Math.abs(delta) < 0.2) return progress;
+        const next = current + delta * 0.16;
+        return next > progress ? progress : next;
+      });
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
+  }, [progress]);
+
+  const progressValue = Math.max(displayProgress, 0);
+  const isFinishing = progressValue >= 99.5;
+
   return (
-    <div className="loading-screen absolute inset-0 bg-black flex pointer-events-auto">
+    <div
+      className="loading-screen absolute inset-0 bg-black flex pointer-events-auto"
+      style={{
+        opacity: fadingOut ? 0 : 1,
+        transform: fadingOut ? "scale(1.015)" : "scale(1)",
+        transition:
+          "opacity 220ms ease-out, transform 260ms cubic-bezier(0.22, 1, 0.36, 1)",
+      }}
+    >
       <style>{`
         @keyframes slowZoom {
           0% {
@@ -224,14 +266,20 @@ export function LoadingScreen({
           top: 0;
           left: 0;
           bottom: 0;
-          width: ${Math.max(progress, 0)}%;
-          min-width: ${progress > 0 ? "10px" : "0"};
+          width: ${progressValue}%;
+          min-width: ${progressValue > 0 ? "10px" : "0"};
           background: linear-gradient(90deg, ${theme.colors.accent.primary}, ${theme.colors.accent.secondary}, ${theme.colors.accent.primary});
           background-size: 200% 100%;
           animation: shimmer 1.5s infinite;
           border-radius: 5px;
           transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
           box-shadow: 0 0 15px ${theme.colors.accent.secondary}cc, inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+        .loading-bar.is-finishing {
+          box-shadow:
+            0 0 18px ${theme.colors.accent.secondary}dd,
+            0 0 34px ${theme.colors.accent.primary}66,
+            inset 0 1px 0 rgba(255, 255, 255, 0.32);
         }
         .loading-bar::after {
           content: '';
@@ -287,7 +335,7 @@ export function LoadingScreen({
             height: 8px;
           }
           .loading-bar {
-            min-width: ${progress > 0 ? "8px" : "0"};
+            min-width: ${progressValue > 0 ? "8px" : "0"};
             border-radius: 4px;
           }
           .loading-bar-frame {
@@ -316,11 +364,15 @@ export function LoadingScreen({
           <div className="loading-progress-container">
             <div className="loading-track">
               <div className="loading-bar-container">
-                <div className="loading-bar" />
+                <div
+                  className={`loading-bar${isFinishing ? " is-finishing" : ""}`}
+                />
               </div>
               <div className="loading-bar-frame" />
             </div>
-            <div className="loading-percentage">{Math.floor(progress)}%</div>
+            <div className="loading-percentage">
+              {Math.floor(progressValue)}%
+            </div>
           </div>
         </div>
       </div>

@@ -118,6 +118,7 @@ import type {
 } from "../../types/game/social-types";
 import { uuid } from "../../utils";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
+import { PendingActionTracker } from "./network/PendingActionTracker";
 import { isStreamingLikeViewport } from "../../runtime/clientViewportMode";
 import { PlayerLocal } from "../../entities/player/PlayerLocal";
 import { TileInterpolator } from "./TileInterpolator";
@@ -199,6 +200,14 @@ interface InterpolationState {
 // SnapshotData interface moved to shared types
 // Social system payload types are now imported from ../../types/game/social-types
 
+/** Shape of the cached inventory snapshot stored per player. */
+export interface InventorySnapshot {
+  playerId: string;
+  items: Array<{ slot: number; itemId: string; quantity: number }>;
+  coins: number;
+  maxSlots: number;
+}
+
 /**
  * Client Network System
  *
@@ -268,15 +277,16 @@ export class ClientNetwork extends SystemBase {
     lastLocation?: { x: number; y: number; z: number };
   }> | null = null;
   // Cache latest inventory per player so UI can hydrate even if it mounted late
-  lastInventoryByPlayerId: Record<
-    string,
-    {
-      playerId: string;
-      items: Array<{ slot: number; itemId: string; quantity: number }>;
-      coins: number;
-      maxSlots: number;
-    }
-  > = {};
+  lastInventoryByPlayerId: Record<string, InventorySnapshot> = {};
+
+  // Deduplication for combat damage packets — sendToNearby publishes to 9 region
+  // topics, so players near region boundaries receive the same packet multiple times.
+  // Map key → timestamp for periodic sweep (no per-key setTimeout).
+  private readonly _recentDamageKeys = new Map<string, number>();
+  // Single tracker for all optimistic inventory mutations (shared by all callers).
+  // Snapshots the cache before mutation; rolls back after 5s if no server confirmation.
+  private inventoryTracker = new PendingActionTracker<InventorySnapshot>(5000);
+  private inventoryPrunerInterval: ReturnType<typeof setInterval> | null = null;
   // Cache latest skills per player so UI can hydrate even if it mounted late
   lastSkillsByPlayerId: Record<
     string,
@@ -339,6 +349,67 @@ export class ClientNetwork extends SystemBase {
     this.serverTimeOffset = 0;
     this.worldTimeOffset = 0;
     this.maxUploadSize = 0;
+  }
+
+  /**
+   * Deep-clone the current inventory cache for a player for rollback purposes.
+   * Returns null if no cache exists yet.
+   */
+  snapshotInventory(playerId: string): InventorySnapshot | null {
+    const cached = this.lastInventoryByPlayerId[playerId];
+    if (!cached) return null;
+    return {
+      playerId: cached.playerId,
+      items: cached.items.map((i) => ({ ...i })),
+      coins: cached.coins,
+      maxSlots: cached.maxSlots,
+    };
+  }
+
+  /**
+   * Optimistically remove an item from the inventory cache and emit an
+   * immediate UI update. Automatically snapshots before mutation for
+   * rollback if the server doesn't confirm within 5 seconds.
+   */
+  applyOptimisticRemoval(
+    playerId: string,
+    slot: number,
+    quantity: number,
+  ): void {
+    const cached = this.lastInventoryByPlayerId[playerId];
+    if (!cached) return;
+
+    const itemIndex = cached.items.findIndex((i) => i.slot === slot);
+    if (itemIndex === -1) return;
+
+    // Snapshot before mutation for rollback on timeout
+    const snapshot = this.snapshotInventory(playerId);
+    if (snapshot) this.inventoryTracker.add(snapshot);
+    this.ensureInventoryPruner();
+
+    const item = cached.items[itemIndex];
+    if (item.quantity <= quantity) {
+      cached.items.splice(itemIndex, 1);
+    } else {
+      item.quantity -= quantity;
+    }
+
+    this.world.emit(EventType.INVENTORY_UPDATED, { ...cached });
+  }
+
+  /** Start the periodic rollback pruner (once, lazily on first optimistic call). */
+  private ensureInventoryPruner(): void {
+    if (this.inventoryPrunerInterval) return;
+    this.inventoryPrunerInterval = setInterval(() => {
+      const rollbacks = this.inventoryTracker.pruneStale();
+      for (const snapshot of rollbacks) {
+        this.lastInventoryByPlayerId[snapshot.playerId] = snapshot;
+        this.world.emit(EventType.INVENTORY_UPDATED, { ...snapshot });
+        console.warn(
+          "[ClientNetwork] Optimistic inventory action timed out, rolling back",
+        );
+      }
+    }, 1000);
   }
 
   public getSpectatorFollowEntity(): string | undefined {
@@ -1042,6 +1113,16 @@ export class ClientNetwork extends SystemBase {
 
     // Use assetsUrl from server (always absolute URL to CDN)
     this.world.assetsUrl = data.assetsUrl || "/";
+    if (typeof window !== "undefined") {
+      const windowWithAssets = window as Window & {
+        __CDN_URL?: string;
+        __ASSETS_URL?: string;
+      };
+      if (data.assetsUrl) {
+        windowWithAssets.__ASSETS_URL = data.assetsUrl;
+        windowWithAssets.__CDN_URL = data.assetsUrl;
+      }
+    }
 
     const loader = this.world.loader!;
     // Assume preload and execPreload methods exist on loader
@@ -2269,11 +2350,19 @@ export class ClientNetwork extends SystemBase {
     coins: number;
     maxSlots: number;
   }) => {
-    // Debug log removed — fires per food eat / item change during combat
+    // Server sent authoritative inventory — discard all pending rollbacks
+    this.inventoryTracker.clear();
+
+    const snapshot = {
+      ...data,
+      items: Array.isArray(data.items)
+        ? data.items.map((item) => ({ ...item }))
+        : [],
+    };
     // Cache latest snapshot for late-mounting UI
-    this.lastInventoryByPlayerId[data.playerId] = data;
+    this.lastInventoryByPlayerId[data.playerId] = snapshot;
     // Re-emit with typed event so UI updates without waiting for local add
-    this.world.emit(EventType.INVENTORY_UPDATED, data);
+    this.world.emit(EventType.INVENTORY_UPDATED, snapshot);
   };
 
   onCoinsUpdated = (data: { playerId: string; coins: number }) => {
@@ -2350,10 +2439,12 @@ export class ClientNetwork extends SystemBase {
       }
     }
 
-    // Re-emit as UI update event for Sidebar to handle
+    // Re-emit as UI update event for the active client UI hooks to handle
+    // Include playerId so UI can filter for local player only
     this.world.emit(EventType.UI_UPDATE, {
       component: "equipment",
       data: {
+        playerId: data.playerId,
         equipment: data.equipment,
       },
     });
@@ -2560,6 +2651,18 @@ export class ClientNetwork extends SystemBase {
   };
 
   // --- Smelting/Smithing interface handlers ---
+  onCookingComplete = (data: {
+    rawItemId: string;
+    resultItemId: string;
+    wasBurnt: boolean;
+    xpGained: number;
+  }) => {
+    this.world.emit(EventType.COOKING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
+    });
+  };
+
   onSmeltingInterfaceOpen = (data: {
     furnaceId: string;
     availableBars: Array<{
@@ -2578,6 +2681,18 @@ export class ClientNetwork extends SystemBase {
         furnaceId: data.furnaceId,
         availableBars: data.availableBars,
       },
+    });
+  };
+
+  onSmeltingComplete = (data: {
+    barItemId: string;
+    totalSmelted: number;
+    totalFailed: number;
+    totalXp: number;
+  }) => {
+    this.world.emit(EventType.SMELTING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
     });
   };
 
@@ -2601,6 +2716,18 @@ export class ClientNetwork extends SystemBase {
         anvilId: data.anvilId,
         availableRecipes: data.availableRecipes,
       },
+    });
+  };
+
+  onSmithingComplete = (data: {
+    recipeId: string;
+    outputItemId: string;
+    totalSmithed: number;
+    totalXp: number;
+  }) => {
+    this.world.emit(EventType.SMITHING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
     });
   };
 
@@ -2636,6 +2763,18 @@ export class ClientNetwork extends SystemBase {
     });
   };
 
+  onCraftingComplete = (data: {
+    recipeId: string;
+    outputItemId: string;
+    totalCrafted: number;
+    totalXp: number;
+  }) => {
+    this.world.emit(EventType.CRAFTING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
+    });
+  };
+
   // --- Fletching interface handler ---
   onFletchingInterfaceOpen = (
     data: Omit<FletchingInterfaceOpenPayload, "playerId">,
@@ -2643,6 +2782,18 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.FLETCHING_INTERFACE_OPEN, {
       playerId: this.world?.entities?.player?.id || "",
       availableRecipes: data.availableRecipes,
+    });
+  };
+
+  onFletchingComplete = (data: {
+    recipeId: string;
+    outputItemId: string;
+    totalCrafted: number;
+    totalXp: number;
+  }) => {
+    this.world.emit(EventType.FLETCHING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
     });
   };
 
@@ -2677,6 +2828,18 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.UI_UPDATE, {
       component: "tanningClose",
       data: _data,
+    });
+  };
+
+  onTanningComplete = (data: {
+    inputItemId: string;
+    outputItemId: string;
+    totalTanned: number;
+    totalCost: number;
+  }) => {
+    this.world.emit(EventType.TANNING_COMPLETE, {
+      playerId: this.world?.entities?.player?.id || "",
+      ...data,
     });
   };
 
@@ -2827,10 +2990,15 @@ export class ClientNetwork extends SystemBase {
       xp: Record<string, number>;
     };
   }) => {
-    // Emit QUEST_START_CONFIRM event for Sidebar to show QuestStartScreen
+    // Emit QUEST_START_CONFIRM event for the active client UI to show QuestStartScreen
     // Add playerId since server doesn't send it (packet is already routed to this player)
     const playerId = this.world?.entities?.player?.id || "";
     this.world.emit(EventType.QUEST_START_CONFIRM, { ...data, playerId });
+  };
+
+  onQuestStarted = (data: { questId: string; questName: string }) => {
+    const playerId = this.world?.entities?.player?.id || "";
+    this.world.emit(EventType.QUEST_STARTED, { ...data, playerId });
   };
 
   onQuestProgressed = (data: {
@@ -2853,7 +3021,7 @@ export class ClientNetwork extends SystemBase {
       xp: Record<string, number>;
     };
   }) => {
-    // Emit QUEST_COMPLETED event for Sidebar to show completion screen
+    // Emit QUEST_COMPLETED event for the active client UI to show completion screen
     const playerId = this.world?.entities?.player?.id || "";
     this.world.emit(EventType.QUEST_COMPLETED, { ...data, playerId });
   };
@@ -4148,17 +4316,15 @@ export class ClientNetwork extends SystemBase {
     cooldownRemaining?: number;
   }) => {
     // Cache for late-mounting UI (same pattern as skills)
-    // This ensures CombatPanel gets correct value even if it mounts after packet arrives
     this.lastAttackStyleByPlayerId[data.playerId] = {
       currentStyle: data.currentStyle as { id: string },
       availableStyles: data.availableStyles,
       canChange: data.canChange,
     };
 
-    // Forward to local event system so UI can update
-    // CRITICAL: Emit unconditionally - the packet is already filtered server-side
-    // for this player, and waiting for localPlayer causes race conditions where
-    // the packet arrives before the player entity is created (style not synced)
+    // Emit unconditionally — packet is already filtered server-side for this
+    // player, and gating on localPlayer causes race conditions where the packet
+    // arrives before the player entity is created
     this.world.emit(EventType.UI_ATTACK_STYLE_CHANGED, data);
   };
 
@@ -4181,15 +4347,16 @@ export class ClientNetwork extends SystemBase {
   };
 
   onAutoRetaliateChanged = (data: { enabled: boolean }) => {
-    // Only handle for local player
-    const localPlayer = this.world.getPlayer();
-    if (localPlayer) {
-      // Forward to local event system so CombatPanel UI can update
-      this.world.emit(EventType.UI_AUTO_RETALIATE_CHANGED, {
-        playerId: localPlayer.id,
-        enabled: data.enabled,
-      });
-    }
+    // Require the player entity to exist — this.id is the socket/connection UUID,
+    // not the player entity ID, so it cannot be used as a fallback. If the player
+    // entity isn't created yet, the UI isn't mounted to receive this event anyway.
+    const playerId = this.world.getPlayer()?.id;
+    if (!playerId) return;
+
+    this.world.emit(EventType.UI_AUTO_RETALIATE_CHANGED, {
+      playerId,
+      enabled: data.enabled,
+    });
   };
 
   onCombatDamageDealt = (data: {
@@ -4198,7 +4365,44 @@ export class ClientNetwork extends SystemBase {
     damage: number;
     targetType: "player" | "mob";
     position: { x: number; y: number; z: number };
+    tick?: number;
   }) => {
+    // Deduplicate: sendToNearby publishes to 9 region topics, so players near
+    // region boundaries receive the same packet 2-3x. Include the server tick
+    // so same-damage rapid hits on different ticks are NOT dropped.
+    // Use | separator (not -) to avoid collisions if IDs contain hyphens.
+    // If tick is missing (rolling deploy), fall back to ms timestamp rounded to
+    // 125ms (one server tick at 8Hz) so distinct hits aren't collapsed to tick 0.
+    const tick = data.tick ?? Math.floor(performance.now() / 125);
+    const dedupKey = `${data.attackerId}|${data.targetId}|${data.damage}|${tick}`;
+    if (this._recentDamageKeys.has(dedupKey)) {
+      return; // Already processed this damage event
+    }
+
+    // Periodic sweep: clear stale entries (>500ms old) when map exceeds threshold.
+    // Soft threshold at 150 (close to hard cap of 200) avoids unnecessary sweeps
+    // during normal combat while still catching buildup before the hard cap.
+    const now = performance.now();
+    if (this._recentDamageKeys.size > 150) {
+      // Deleting from a Map during for...of is safe per ES spec (§24.1.5.4).
+      for (const [key, ts] of this._recentDamageKeys) {
+        if (now - ts > 500) this._recentDamageKeys.delete(key);
+      }
+      // Hard cap: if sweep didn't clear enough (all entries <500ms old),
+      // drop oldest-inserted entries to prevent unbounded growth. Trims to 100
+      // (below the 150 sweep threshold) so we don't re-trigger on the next packet.
+      if (this._recentDamageKeys.size > 200) {
+        const excess = this._recentDamageKeys.size - 100;
+        let dropped = 0;
+        for (const key of this._recentDamageKeys.keys()) {
+          this._recentDamageKeys.delete(key);
+          if (++dropped >= excess) break;
+        }
+      }
+    }
+
+    this._recentDamageKeys.set(dedupKey, now);
+
     // Forward to local event system so DamageSplatSystem can show visual feedback
     this.world.emit(EventType.COMBAT_DAMAGE_DEALT, data);
   };
@@ -4219,6 +4423,10 @@ export class ClientNetwork extends SystemBase {
   onCombatFaceTarget = (data: { playerId: string; targetId: string }) => {
     // Forward to local event system so PlayerLocal rotates toward combat target
     this.world.emit(EventType.COMBAT_FACE_TARGET, data);
+  };
+
+  onCombatEnded = (data: { attackerId: string; targetId: string }) => {
+    this.world.emit(EventType.COMBAT_ENDED, data);
   };
 
   onCombatClearFaceTarget = (data: { playerId: string }) => {
@@ -4559,9 +4767,12 @@ export class ClientNetwork extends SystemBase {
    * Handle home teleport failed
    * Server rejected teleport request (combat, cooldown, etc.)
    */
-  onHomeTeleportFailed = (data: { reason: string }) => {
+  onHomeTeleportFailed = (data: { reason: string; remainingMs?: number }) => {
     this.world.emit(EventType.HOME_TELEPORT_FAILED, {
       reason: data.reason,
+      ...(typeof data.remainingMs === "number"
+        ? { remainingMs: data.remainingMs }
+        : {}),
     });
   };
 
@@ -4876,6 +5087,13 @@ export class ClientNetwork extends SystemBase {
       code: code.code,
       reason: code.reason || "closed",
     });
+
+    // Clean up optimistic inventory tracker on disconnect
+    if (this.inventoryPrunerInterval) {
+      clearInterval(this.inventoryPrunerInterval);
+      this.inventoryPrunerInterval = null;
+    }
+    this.inventoryTracker.clear();
 
     // Don't attempt reconnection if this was intentional (user logout, etc.)
     if (this.intentionalDisconnect) {

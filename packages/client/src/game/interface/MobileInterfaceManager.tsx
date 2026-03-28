@@ -26,11 +26,12 @@ import { createPanelRenderer, MODAL_PANEL_IDS } from "./PanelRegistry";
 import { RadialMinimapMenu } from "../../game/hud/RadialMinimapMenu";
 import { CompactStatusHUD } from "./CompactStatusHUD";
 import { getMobileUISizes } from "./mobileUISizes";
-import { usePlayerData, useModalPanels } from "@/hooks";
+import { useModalPanels, usePlayerDataContext } from "@/hooks";
 import { zIndex } from "../../constants";
 import { BankPanel } from "../../game/panels/BankPanel";
 import { StorePanel } from "../../game/panels/StorePanel";
 import { DialoguePanel } from "../../game/panels/DialoguePanel";
+import { DialoguePopupShell } from "../../game/panels/dialogue/DialoguePopupShell";
 import { SmeltingPanel } from "../../game/panels/SmeltingPanel";
 import { SmithingPanel } from "../../game/panels/SmithingPanel";
 import { CraftingPanel } from "../../game/panels/CraftingPanel";
@@ -92,7 +93,7 @@ export function MobileInterfaceManager({
   const [chatVisible, setChatVisible] = useState(false);
 
   // Player state from shared hook
-  const { inventory, equipment, playerStats, coins } = usePlayerData(world);
+  const { inventory, equipment, playerStats, coins } = usePlayerDataContext();
 
   // Modal panel states from shared hook
   const {
@@ -121,6 +122,17 @@ export function MobileInterfaceManager({
     setQuestCompleteData,
     setXpLampData,
   } = useModalPanels(world);
+
+  const closeDialogue = useCallback(() => {
+    if (!dialogueData) {
+      return;
+    }
+
+    setDialogueData(null);
+    world?.network?.send?.("dialogueEnd", {
+      npcId: dialogueData.npcId,
+    });
+  }, [dialogueData, setDialogueData, world]);
 
   // Handle radial menu button clicks (by panel id)
   const handleRadialButtonClick = useCallback(
@@ -172,19 +184,37 @@ export function MobileInterfaceManager({
   // Handle viewport size changes - recalculate UI sizes
   const mobileUISizes = useMemo(() => getMobileUISizes(layout), [layout]);
 
+  const panelDataRef = React.useRef({
+    inventory,
+    coins,
+    playerStats,
+    equipment,
+  });
+
+  useEffect(() => {
+    panelDataRef.current = {
+      inventory,
+      coins,
+      playerStats,
+      equipment,
+    };
+  }, [inventory, coins, playerStats, equipment]);
+
   // Create panel renderer
   const renderPanel = useMemo(
     () =>
       createPanelRenderer({
         world,
-        inventoryItems: inventory as never[],
-        coins,
-        stats: playerStats,
-        equipment,
         onPanelClick: handleMenuClick,
         isEditMode: false,
+        getPanelData: () => ({
+          inventoryItems: panelDataRef.current.inventory as never[],
+          coins: panelDataRef.current.coins,
+          stats: panelDataRef.current.playerStats,
+          equipment: panelDataRef.current.equipment,
+        }),
       }),
-    [world, inventory, coins, playerStats, equipment, handleMenuClick],
+    [world, handleMenuClick],
   );
 
   // Event subscriptions are now handled by usePlayerData and useModalPanels hooks
@@ -616,25 +646,34 @@ export function MobileInterfaceManager({
         </ModalWindow>
       )}
 
-      {/* Dialogue Panel - renders with its own fixed positioning, no ModalWindow wrapper needed */}
+      {/* Dialogue Panel */}
       {dialogueData?.visible && (
-        <DialoguePanel
+        <DialoguePopupShell
           visible={true}
-          world={world}
-          npcId={dialogueData.npcId}
-          npcName={dialogueData.npcName}
-          text={dialogueData.text}
-          responses={dialogueData.responses}
-          npcEntityId={dialogueData.npcEntityId}
-          onSelectResponse={(index, response) => {
-            // Send response to server - the panel handles this internally,
-            // but we can also track it here if needed
-            console.log(
-              `[MobileUI] Dialogue response selected: ${index} - ${response.text}`,
-            );
+          onClose={closeDialogue}
+          title={dialogueData.npcName}
+          width="min(88vw, 640px)"
+          maxWidth="88vw"
+          maxHeight="min(48vh, 400px)"
+          contentStyle={{
+            overflow: "hidden",
           }}
-          onClose={() => setDialogueData(null)}
-        />
+        >
+          <DialoguePanel
+            visible={true}
+            world={world}
+            npcId={dialogueData.npcId}
+            npcName={dialogueData.npcName}
+            text={dialogueData.text}
+            responses={dialogueData.responses}
+            npcEntityId={dialogueData.npcEntityId}
+            onSelectResponse={(_index, response) => {
+              if (!response.nextNodeId) {
+                setDialogueData(null);
+              }
+            }}
+          />
+        </DialoguePopupShell>
       )}
 
       {smeltingData?.visible && (

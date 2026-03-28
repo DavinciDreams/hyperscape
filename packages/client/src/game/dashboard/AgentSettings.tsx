@@ -158,7 +158,6 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
         }),
       });
       if (response.ok) {
-        console.log("[AgentSettings] ✅ Settings updated successfully");
         showNotification("Settings saved successfully!", "success");
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -208,7 +207,6 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
       });
 
       if (response.ok) {
-        console.log("[AgentSettings] ✅ API keys saved successfully");
         showNotification(
           "API keys saved successfully! Restart the agent for changes to take effect.",
           "success",
@@ -234,7 +232,6 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
     setDeleting(true);
     try {
       await onDelete(agent.id);
-      console.log("[AgentSettings] ✅ Agent deleted successfully");
       // Navigation will happen automatically when agent is removed from list
     } catch (error) {
       console.error("[AgentSettings] ❌ Error deleting agent:", error);

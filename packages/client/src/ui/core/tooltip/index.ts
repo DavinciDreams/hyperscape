@@ -23,3 +23,5 @@ export {
   type TooltipPositionOptions,
   type TooltipPositionResult,
 } from "./useTooltipPosition";
+
+export * from "./CursorTooltip";

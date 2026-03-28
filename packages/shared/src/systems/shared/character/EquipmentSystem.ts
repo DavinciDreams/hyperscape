@@ -144,7 +144,19 @@ export class EquipmentSystem extends SystemBase {
       const typedData = data as {
         playerId: string;
         equipment?: EquipmentSyncData[];
+        isReconnect?: boolean;
       };
+
+      // On reconnection, equipment is already in memory — just re-send to client
+      // This prevents stale DB data from overwriting current in-memory equipment
+      if (
+        typedData.isReconnect &&
+        this.playerEquipment.has(typedData.playerId)
+      ) {
+        this.sendEquipmentUpdated(typedData.playerId);
+        this.emitEquipmentChangedForAllSlots(typedData.playerId);
+        return;
+      }
 
       // Use equipment from payload (single source of truth from character-selection)
       if (typedData.equipment && typedData.equipment.length > 0) {
@@ -248,6 +260,14 @@ export class EquipmentSystem extends SystemBase {
   }
 
   private initializePlayerEquipment(playerData: { id: string }): void {
+    // Idempotent: don't overwrite existing equipment (prevents reconnection/re-registration wiping gear)
+    if (this.playerEquipment.has(playerData.id)) {
+      this.logger.debug(
+        `Equipment already initialized for ${playerData.id}, skipping`,
+      );
+      return;
+    }
+
     const equipment: PlayerEquipment = {
       playerId: playerData.id,
       weapon: {
@@ -640,8 +660,12 @@ export class EquipmentSystem extends SystemBase {
     // Emit UI update event with all slots null
     this.emitAllSlotsNullUIUpdate(playerId);
 
-    // Save with transaction context for atomicity
-    await this.saveEquipmentToDatabase(playerId, tx);
+    // When called within a death transaction (tx provided), skip the independent
+    // DB save — it opens a nested transaction that deadlocks on SQLite.
+    // The caller's transaction handles persistence; in-memory state is already cleared.
+    if (!tx) {
+      await this.saveEquipmentToDatabase(playerId);
+    }
 
     return clearedItems;
   }

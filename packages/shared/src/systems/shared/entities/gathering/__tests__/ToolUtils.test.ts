@@ -9,12 +9,14 @@
  * @see https://oldschool.runescape.wiki/w/Noted_items
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import type { GatheringToolData } from "../../../../../data/DataManager";
 import {
   itemMatchesToolCategory,
   getToolCategory,
   isExactMatchFishingTool,
   getToolDisplayName,
+  _resetFallbackWarnings,
 } from "../ToolUtils";
 
 describe("ToolUtils", () => {
@@ -67,7 +69,7 @@ describe("ToolUtils", () => {
         expect(itemMatchesToolCategory("bronze_pickaxe", "pickaxe")).toBe(true);
         expect(itemMatchesToolCategory("rune_pickaxe", "pickaxe")).toBe(true);
         expect(itemMatchesToolCategory("dragon_pickaxe", "pickaxe")).toBe(true);
-        expect(itemMatchesToolCategory("bronze_axe", "hatchet")).toBe(true);
+        expect(itemMatchesToolCategory("bronze_hatchet", "hatchet")).toBe(true);
         expect(itemMatchesToolCategory("rune_hatchet", "hatchet")).toBe(true);
       });
     });
@@ -108,10 +110,14 @@ describe("ToolUtils", () => {
         expect(itemMatchesToolCategory("rune_hatchet", "hatchet")).toBe(true);
       });
 
-      it("matches items containing 'axe'", () => {
-        expect(itemMatchesToolCategory("bronze_axe", "hatchet")).toBe(true);
-        expect(itemMatchesToolCategory("iron_axe", "hatchet")).toBe(true);
-        expect(itemMatchesToolCategory("dragon_axe", "hatchet")).toBe(true);
+      it("rejects bare 'axe' items without 'hatchet' in fallback", () => {
+        // Fallback only matches "hatchet" substring, not bare "axe",
+        // to avoid false positives with combat weapons (battleaxe, greataxe, etc.).
+        // Real tools like bronze_axe/dragon_axe go through the manifest path.
+        expect(itemMatchesToolCategory("bronze_axe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("iron_axe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("battleaxe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("greataxe", "hatchet")).toBe(false);
       });
 
       it("rejects non-hatchet items", () => {
@@ -122,12 +128,132 @@ describe("ToolUtils", () => {
       });
 
       it("does not match pickaxe for hatchet category", () => {
-        // 'pickaxe' contains 'axe' but should not match hatchet category
-        // because pickaxe check happens first in getToolCategory
-        // However, itemMatchesToolCategory checks category, not extraction
-        // So "bronze_pickaxe" does contain "axe" and would match hatchet
-        // This is expected behavior - the category is determined by getToolCategory first
-        expect(itemMatchesToolCategory("bronze_pickaxe", "hatchet")).toBe(true);
+        // Pickaxes are mining tools — they must NOT match the hatchet (woodcutting) category.
+        // The manifest declares each tool's skill explicitly, preventing cross-skill usage.
+        expect(itemMatchesToolCategory("bronze_pickaxe", "hatchet")).toBe(
+          false,
+        );
+        expect(itemMatchesToolCategory("iron_pickaxe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("rune_pickaxe", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("dragon_pickaxe", "hatchet")).toBe(
+          false,
+        );
+      });
+
+      it("does not match hatchet for pickaxe category", () => {
+        // Hatchets are woodcutting tools — they must NOT match the pickaxe (mining) category.
+        expect(itemMatchesToolCategory("bronze_hatchet", "pickaxe")).toBe(
+          false,
+        );
+        expect(itemMatchesToolCategory("iron_hatchet", "pickaxe")).toBe(false);
+        expect(itemMatchesToolCategory("rune_hatchet", "pickaxe")).toBe(false);
+        expect(itemMatchesToolCategory("dragon_hatchet", "pickaxe")).toBe(
+          false,
+        );
+      });
+    });
+
+    describe("manifest-based validation", () => {
+      // Populate globalThis.EXTERNAL_TOOLS so the manifest path is exercised
+      const mockTools = new Map<string, GatheringToolData>();
+
+      function addMockTool(
+        itemId: string,
+        skill: "woodcutting" | "mining" | "fishing",
+      ) {
+        mockTools.set(itemId, {
+          itemId,
+          skill,
+          tier: "test",
+          levelRequired: 1,
+          priority: 1,
+        });
+      }
+
+      afterEach(() => {
+        mockTools.clear();
+        delete (globalThis as Record<string, unknown>).EXTERNAL_TOOLS;
+      });
+
+      it("accepts woodcutting tool for hatchet category via manifest", () => {
+        addMockTool("bronze_hatchet", "woodcutting");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("bronze_hatchet", "hatchet")).toBe(true);
+      });
+
+      it("rejects mining tool for hatchet category via manifest", () => {
+        addMockTool("bronze_pickaxe", "mining");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("bronze_pickaxe", "hatchet")).toBe(
+          false,
+        );
+      });
+
+      it("rejects woodcutting tool for pickaxe category via manifest", () => {
+        addMockTool("iron_hatchet", "woodcutting");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("iron_hatchet", "pickaxe")).toBe(false);
+      });
+
+      it("accepts mining tool for pickaxe category via manifest", () => {
+        addMockTool("rune_pickaxe", "mining");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("rune_pickaxe", "pickaxe")).toBe(true);
+      });
+
+      it("rejects manifest tool for unknown category via direct skill comparison", () => {
+        // Tool is in manifest with skill "mining", but category "hammer" isn't in CATEGORY_TO_SKILL.
+        // Falls back to direct comparison: toolData.skill ("mining") === category ("hammer") → false.
+        addMockTool("bronze_pickaxe", "mining");
+        (globalThis as Record<string, unknown>).EXTERNAL_TOOLS = mockTools;
+
+        expect(itemMatchesToolCategory("bronze_pickaxe", "hammer")).toBe(false);
+      });
+    });
+
+    describe("fallback path (no manifest)", () => {
+      beforeEach(() => {
+        // Ensure no manifest is loaded so fallback substring matching is exercised
+        delete (globalThis as Record<string, unknown>).EXTERNAL_TOOLS;
+        // Reset warn-once cache so each test can verify warnings independently
+        _resetFallbackWarnings();
+        vi.spyOn(console, "warn").mockImplementation(() => {});
+      });
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+      });
+
+      it("matches hatchet via fallback and logs warning", () => {
+        expect(itemMatchesToolCategory("bronze_hatchet", "hatchet")).toBe(true);
+        expect(console.warn).toHaveBeenCalledWith(
+          expect.stringContaining("not found in tools manifest"),
+        );
+      });
+
+      it("rejects pickaxe for hatchet via fallback", () => {
+        expect(itemMatchesToolCategory("iron_pickaxe", "hatchet")).toBe(false);
+      });
+
+      it("rejects hatchet for pickaxe via fallback", () => {
+        expect(itemMatchesToolCategory("iron_hatchet", "pickaxe")).toBe(false);
+      });
+
+      it("warns for any category, not just hatchet/pickaxe", () => {
+        itemMatchesToolCategory("bronze_hammer", "hammer");
+        expect(console.warn).toHaveBeenCalledWith(
+          expect.stringContaining("not found in tools manifest"),
+        );
+      });
+
+      it("rejects unknown categories not in manifest", () => {
+        // Unknown categories default to false — forces manifest completeness
+        expect(itemMatchesToolCategory("bronze_hammer", "hammer")).toBe(false);
+        expect(itemMatchesToolCategory("iron_chisel", "hammer")).toBe(false);
       });
     });
 
@@ -174,6 +300,20 @@ describe("ToolUtils", () => {
           true,
         );
         expect(itemMatchesToolCategory("pot", "lobster_pot")).toBe(false);
+      });
+
+      it("fishing tools do not match hatchet or pickaxe categories", () => {
+        // Three-way invariant: fishing tools are never valid for woodcutting/mining
+        expect(itemMatchesToolCategory("fishing_rod", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("fishing_rod", "pickaxe")).toBe(false);
+        expect(itemMatchesToolCategory("harpoon", "hatchet")).toBe(false);
+        expect(itemMatchesToolCategory("harpoon", "pickaxe")).toBe(false);
+        expect(itemMatchesToolCategory("small_fishing_net", "hatchet")).toBe(
+          false,
+        );
+        expect(itemMatchesToolCategory("small_fishing_net", "pickaxe")).toBe(
+          false,
+        );
       });
     });
   });

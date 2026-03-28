@@ -526,6 +526,8 @@ export function EmbeddedGameClient() {
   const [cameraLocked, setCameraLocked] = useState(false);
   const [targetAvatarReady, setTargetAvatarReady] = useState(false);
   const [minimumLoadElapsed, setMinimumLoadElapsed] = useState(true);
+  const [terrainStalled, setTerrainStalled] = useState(false);
+  const [avatarStalled, setAvatarStalled] = useState(false);
 
   // Store cleanup function in ref to call on unmount
   const worldRef = useRef<World | null>(null);
@@ -782,6 +784,8 @@ export function EmbeddedGameClient() {
       setTerrainReady(false);
       setCameraLocked(false);
       setTargetAvatarReady(false);
+      setTerrainStalled(false);
+      setAvatarStalled(false);
 
       const handleWorldReady = () => {
         setWorldReady(true);
@@ -852,15 +856,16 @@ export function EmbeddedGameClient() {
           // Terrain readiness implies core world systems are operational.
           setWorldReady(true);
           setTerrainReady(true);
+          setTerrainStalled(false);
           clearTerrainPolling();
         }
       }, 100);
 
       terrainTimeoutRef.current = setTimeout(() => {
-        // Failsafe: avoid infinite loading if readiness signal is unavailable.
-        setWorldReady(true);
-        setTerrainReady(true);
-        clearTerrainPolling();
+        setTerrainStalled(true);
+        logger.warn(
+          "[EmbeddedGameClient] Terrain readiness timeout reached; continuing to wait for a real ready signal",
+        );
       }, 30000);
 
       const resolveTargetEntityId = () =>
@@ -876,6 +881,7 @@ export function EmbeddedGameClient() {
 
         if (isTargetAvatarReady(world, targetEntityId)) {
           setTargetAvatarReady(true);
+          setAvatarStalled(false);
           clearAvatarPolling();
           return true;
         }
@@ -891,6 +897,7 @@ export function EmbeddedGameClient() {
           if (data.success === false) return;
           if (data.playerId === resolveTargetEntityId() || checkAvatarReady()) {
             setTargetAvatarReady(true);
+            setAvatarStalled(false);
             clearAvatarPolling();
           }
         };
@@ -901,9 +908,10 @@ export function EmbeddedGameClient() {
           checkAvatarReady();
         }, 250);
         avatarTimeoutRef.current = setTimeout(() => {
-          // Failsafe: don't block forever if avatar event is missed.
-          setTargetAvatarReady(true);
-          clearAvatarPolling();
+          setAvatarStalled(true);
+          logger.warn(
+            "[EmbeddedGameClient] Avatar readiness timeout reached; continuing to wait for the target avatar",
+          );
         }, 30000);
 
         const previousCleanup = cleanupRef.current;
@@ -997,6 +1005,19 @@ export function EmbeddedGameClient() {
       : !cameraLocked
         ? "Locking camera to target..."
         : "Loading duel avatars...";
+  const loadingDetail = !worldReady
+    ? "Bootstrapping embedded viewport"
+    : !terrainReady
+      ? terrainStalled
+        ? "Terrain is taking longer than expected; waiting for a real ready signal"
+        : "Waiting for terrain and arena state"
+      : !cameraLocked
+        ? "Following the requested spectator target"
+        : !targetAvatarReady
+          ? avatarStalled
+            ? "Avatar load is delayed; waiting for the target avatar to resolve"
+            : "Waiting for the target avatar to finish loading"
+          : "Finalizing spectator presentation";
 
   return (
     <div
@@ -1039,7 +1060,7 @@ export function EmbeddedGameClient() {
             <h2 style={{ fontSize: "1.6rem", marginBottom: "0.8rem" }}>
               {loadingHeadline}
             </h2>
-            <p style={{ opacity: 0.75 }}>Preparing spectator viewport</p>
+            <p style={{ opacity: 0.75 }}>{loadingDetail}</p>
           </div>
         </div>
       )}

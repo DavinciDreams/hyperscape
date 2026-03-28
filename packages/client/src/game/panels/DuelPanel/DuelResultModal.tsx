@@ -14,6 +14,7 @@
 
 import { useCallback, useState, useEffect, type CSSProperties } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
+import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { getItem } from "@hyperscape/shared";
 import { formatGoldValue } from "./utils";
 
@@ -131,8 +132,7 @@ export function DuelResultModal({ state, onClose }: DuelResultModalProps) {
   };
 
   const sectionStyle: CSSProperties = {
-    background: theme.colors.background.tertiary,
-    border: `1px solid ${theme.colors.border.default}`,
+    ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
     borderRadius: theme.borderRadius.md,
     padding: theme.spacing.md,
     marginBottom: theme.spacing.md,
@@ -184,8 +184,8 @@ export function DuelResultModal({ state, onClose }: DuelResultModalProps) {
     transition: "all 0.2s ease",
     textShadow: "0 1px 2px rgba(0,0,0,0.5)",
     background: buttonHover
-      ? theme.colors.state.info
-      : `${theme.colors.state.info}cc`,
+      ? `linear-gradient(135deg, ${theme.colors.state.info} 0%, ${theme.colors.state.info}CC 100%)`
+      : `linear-gradient(135deg, ${theme.colors.state.info}CC 0%, ${theme.colors.state.info}AA 100%)`,
     color: "#fff",
     border: `1px solid ${theme.colors.state.info}`,
     transform: buttonHover ? "translateY(-1px)" : "none",
@@ -239,7 +239,12 @@ export function DuelResultModal({ state, onClose }: DuelResultModalProps) {
       width={380}
       showCloseButton={false}
     >
-      <div style={{ padding: theme.spacing.sm }}>
+      <div
+        style={{
+          ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+          padding: theme.spacing.sm,
+        }}
+      >
         {/* Result header */}
         <div style={resultHeaderStyle}>
           <div style={iconStyle}>{isWinner ? "🏆" : "💀"}</div>

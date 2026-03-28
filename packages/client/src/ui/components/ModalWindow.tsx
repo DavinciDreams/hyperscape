@@ -18,11 +18,43 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useId,
   useRef,
   type ReactNode,
   type CSSProperties,
 } from "react";
+import {
+  getPanelHeaderStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+  type ShellControlButtonStyle,
+} from "../theme/themes";
 import { useTheme } from "../stores/themeStore";
+
+let _modalOverflowCount = 0;
+
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter((element) => {
+    if (element.hasAttribute("disabled")) {
+      return false;
+    }
+    if (element.getAttribute("aria-hidden") === "true") {
+      return false;
+    }
+    return element.offsetParent !== null;
+  });
+}
 
 /** Modal window props */
 export interface ModalWindowProps {
@@ -44,7 +76,7 @@ export interface ModalWindowProps {
   maxWidth?: number | string;
   /** Modal max height (default: 90vh) */
   maxHeight?: number | string;
-  /** Custom z-index (default: 10000) */
+  /** Custom z-index (defaults to theme modal layer) */
   zIndex?: number;
   /** Show close button in header (default: true) */
   showCloseButton?: boolean;
@@ -52,6 +84,8 @@ export interface ModalWindowProps {
   className?: string;
   /** Additional style for the modal container */
   style?: CSSProperties;
+  /** Additional style for the modal content area */
+  contentStyle?: CSSProperties;
 }
 
 /**
@@ -85,28 +119,96 @@ export const ModalWindow = memo(function ModalWindow({
   width,
   maxWidth = "90vw",
   maxHeight = "90vh",
-  zIndex = 10000,
+  zIndex,
   showCloseButton = true,
   className,
   style,
+  contentStyle: contentStyleOverride,
 }: ModalWindowProps): React.ReactElement | null {
   const theme = useTheme();
+  const resolvedZIndex = zIndex ?? theme.zIndex.modal;
   const modalRef = useRef<HTMLDivElement>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+  const contentId = useId();
+  const reduceMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-  // Handle escape key
   useEffect(() => {
-    if (!visible || !closeOnEscape) return;
+    if (!visible) {
+      return;
+    }
+
+    previousActiveElementRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const container = modalRef.current;
+    if (!container) {
+      return;
+    }
+
+    const focusableElements = getFocusableElements(container);
+    const initialFocusTarget = focusableElements[0] ?? container;
+    initialFocusTarget.focus();
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && closeOnEscape) {
         e.preventDefault();
         e.stopPropagation();
         onClose();
+        return;
+      }
+
+      if (e.key !== "Tab") {
+        return;
+      }
+
+      const liveContainer = modalRef.current;
+      if (!liveContainer) {
+        return;
+      }
+
+      const liveFocusableElements = getFocusableElements(liveContainer);
+      if (liveFocusableElements.length === 0) {
+        e.preventDefault();
+        liveContainer.focus();
+        return;
+      }
+
+      const firstElement = liveFocusableElements[0];
+      const lastElement =
+        liveFocusableElements[liveFocusableElements.length - 1];
+      const activeElement =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+
+      if (!activeElement || !liveContainer.contains(activeElement)) {
+        e.preventDefault();
+        firstElement.focus();
+        return;
+      }
+
+      if (e.shiftKey && activeElement === firstElement) {
+        e.preventDefault();
+        lastElement.focus();
+      } else if (!e.shiftKey && activeElement === lastElement) {
+        e.preventDefault();
+        firstElement.focus();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      const previousActiveElement = previousActiveElementRef.current;
+      if (previousActiveElement?.isConnected) {
+        previousActiveElement.focus();
+      }
+    };
   }, [visible, closeOnEscape, onClose]);
 
   // Handle backdrop click
@@ -119,21 +221,20 @@ export const ModalWindow = memo(function ModalWindow({
     [closeOnBackdropClick, onClose],
   );
 
-  // Prevent body scroll when modal is open
+  // Prevent body scroll when modal is open (ref-counted for stacked modals)
   useEffect(() => {
     if (visible) {
-      const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
+      _modalOverflowCount += 1;
+      if (_modalOverflowCount === 1) {
+        document.body.style.overflow = "hidden";
+      }
       return () => {
-        document.body.style.overflow = originalOverflow;
+        _modalOverflowCount -= 1;
+        if (_modalOverflowCount <= 0) {
+          _modalOverflowCount = 0;
+          document.body.style.overflow = "";
+        }
       };
-    }
-  }, [visible]);
-
-  // Focus trap - focus modal when opened
-  useEffect(() => {
-    if (visible && modalRef.current) {
-      modalRef.current.focus();
     }
   }, [visible]);
 
@@ -148,12 +249,17 @@ export const ModalWindow = memo(function ModalWindow({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backgroundColor: "rgba(7, 9, 12, 0.74)",
+    backgroundImage:
+      theme.name === "hyperscape"
+        ? "radial-gradient(circle at top, rgba(190, 165, 123, 0.07), transparent 30%), radial-gradient(circle at center, rgba(255, 255, 255, 0.028), transparent 44%)"
+        : "radial-gradient(circle at top, rgba(255, 255, 255, 0.04), transparent 42%)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    zIndex,
-    animation: "modalFadeIn 0.2s ease-out",
+    zIndex: resolvedZIndex,
+    animation: reduceMotion ? undefined : "modalFadeIn 0.2s ease-out",
+    overscrollBehavior: "contain",
     // CRITICAL: Enable pointer events to block clicks from reaching the game canvas
     // CoreUI parent has pointer-events: none, so we must explicitly enable them here
     pointerEvents: "auto",
@@ -167,28 +273,28 @@ export const ModalWindow = memo(function ModalWindow({
     maxHeight,
     display: "flex",
     flexDirection: "column",
-    backgroundColor: theme.colors.background.primary,
-    borderRadius: theme.borderRadius.lg,
-    border: `1px solid ${theme.colors.border.decorative}`,
-    boxShadow: theme.shadows.xl,
+    ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+    borderRadius: theme.borderRadius.xl,
+    boxShadow: `${theme.shadows.xl}, inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -24px 36px rgba(0, 0, 0, 0.14)`,
     overflow: "hidden",
-    animation: "modalSlideIn 0.2s ease-out",
+    animation: reduceMotion ? undefined : "modalSlideIn 0.22s ease-out",
     outline: "none",
+    willChange: reduceMotion ? "auto" : "transform, opacity",
     ...style,
   };
 
   // Header styles
   const headerStyle: CSSProperties = {
+    ...getPanelHeaderStyle(theme),
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    backgroundColor: theme.colors.background.secondary,
     userSelect: "none",
     position: "relative",
     zIndex: 5,
     pointerEvents: "auto",
+    minHeight: 52,
   };
 
   // Title styles
@@ -196,23 +302,19 @@ export const ModalWindow = memo(function ModalWindow({
     fontSize: theme.typography.fontSize.lg,
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.primary,
+    letterSpacing: "0.01em",
     margin: 0,
   };
 
   // Close button styles
-  const closeButtonStyle: CSSProperties = {
+  const closeButtonStyle: ShellControlButtonStyle = {
+    ...getShellControlButtonStyle(theme, "danger"),
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     width: 28,
     height: 28,
-    borderRadius: theme.borderRadius.sm,
-    border: "none",
-    backgroundColor: "transparent",
-    color: theme.colors.text.secondary,
-    cursor: "pointer",
     fontSize: 18,
-    transition: `all ${theme.transitions.fast}`,
     position: "relative",
     zIndex: 10,
     pointerEvents: "auto",
@@ -223,8 +325,13 @@ export const ModalWindow = memo(function ModalWindow({
     flex: 1,
     overflow: "auto",
     padding: theme.spacing.md,
-    backgroundColor: theme.colors.background.primary,
+    overscrollBehavior: "contain",
+    background:
+      theme.name === "hyperscape"
+        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.028) 0%, rgba(255, 255, 255, 0.014) 18%, rgba(0, 0, 0, 0.08) 100%)"
+        : "transparent",
     pointerEvents: "auto",
+    ...contentStyleOverride,
   };
 
   return (
@@ -274,7 +381,8 @@ export const ModalWindow = memo(function ModalWindow({
           className={className}
           role="dialog"
           aria-modal="true"
-          aria-labelledby="modal-title"
+          aria-labelledby={titleId}
+          aria-describedby={contentId}
           tabIndex={-1}
           onMouseDown={(e) => {
             (e.nativeEvent as PointerEvent & { isCoreUI?: boolean }).isCoreUI =
@@ -289,9 +397,22 @@ export const ModalWindow = memo(function ModalWindow({
             e.stopPropagation();
           }}
         >
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+              background:
+                theme.name === "hyperscape"
+                  ? "linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, transparent 14%, transparent 82%, rgba(0, 0, 0, 0.055) 100%)"
+                  : "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 16%, transparent 84%, rgba(0, 0, 0, 0.06) 100%)",
+              zIndex: 0,
+            }}
+          />
           {/* Header */}
           <div style={headerStyle}>
-            <h2 id="modal-title" style={titleStyle}>
+            <h2 id={titleId} style={titleStyle}>
               {title}
             </h2>
             {showCloseButton && (
@@ -308,13 +429,18 @@ export const ModalWindow = memo(function ModalWindow({
                   e.stopPropagation();
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor =
-                    theme.colors.background.tertiary;
-                  e.currentTarget.style.color = theme.colors.text.primary;
+                  e.currentTarget.style.backgroundColor = String(
+                    closeButtonStyle["--shell-button-hover-bg"],
+                  );
+                  e.currentTarget.style.color = String(
+                    closeButtonStyle["--shell-button-hover-fg"],
+                  );
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "transparent";
-                  e.currentTarget.style.color = theme.colors.text.secondary;
+                  e.currentTarget.style.backgroundColor = String(
+                    closeButtonStyle.background,
+                  );
+                  e.currentTarget.style.color = String(closeButtonStyle.color);
                 }}
                 aria-label="Close modal"
                 type="button"
@@ -325,7 +451,9 @@ export const ModalWindow = memo(function ModalWindow({
           </div>
 
           {/* Content */}
-          <div style={contentStyle}>{children}</div>
+          <div id={contentId} style={contentStyle}>
+            {children}
+          </div>
         </div>
       </div>
     </>

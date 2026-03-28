@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from "react";
 import { useEditMode } from "../core/edit/useEditMode";
 import { useGrid } from "../core/edit/useGrid";
 import { usePresets } from "../core/presets/usePresets";
-import { useWindowManager } from "../core/window/useWindowManager";
 import { useTheme } from "../stores/themeStore";
 import { useEditStore } from "../stores/editStore";
 import { useWindowStore } from "../stores/windowStore";
@@ -110,7 +109,7 @@ export function EditModeOverlay({
   const { getGridLines, majorGridSize } = useGrid();
   const { presets, savePreset, loadPreset, deletePreset, renamePreset } =
     usePresets();
-  const { resetLayout } = useWindowManager();
+  const resetLayout = useWindowStore((s) => s.reset);
 
   // Get active alignment guides from edit store
   const activeGuides = useEditStore((s) => s.activeGuides);

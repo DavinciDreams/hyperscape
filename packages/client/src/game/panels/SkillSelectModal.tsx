@@ -1,5 +1,14 @@
 import React, { useState } from "react";
 import type { ClientWorld, PlayerStats } from "../../types";
+import { useThemeStore } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
+import { UI } from "@/ui/core";
 
 interface SkillSelectModalProps {
   visible: boolean;
@@ -40,7 +49,9 @@ export function SkillSelectModal({
   slot,
   onClose,
 }: SkillSelectModalProps) {
+  const theme = useThemeStore((s) => s.theme);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
 
   if (!visible) return null;
 
@@ -56,22 +67,57 @@ export function SkillSelectModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 pointer-events-auto">
-      <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 max-w-md w-full mx-4 shadow-2xl">
+    <div
+      className="fixed inset-0 flex items-center justify-center bg-black/50 pointer-events-auto"
+      style={{ zIndex: UI.Z_INDEX.MODAL }}
+    >
+      <div
+        className="max-w-md w-full mx-4"
+        style={{
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
+          padding: "1rem",
+          boxShadow: theme.shadows.xl,
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-white">Select a Skill</h2>
+        <div
+          className="flex items-center justify-between mb-4"
+          style={{
+            ...getPanelHeaderStyle(theme),
+            margin: "-1rem -1rem 1rem",
+            padding: "0.75rem 1rem",
+          }}
+        >
+          <h2
+            className="text-lg font-bold"
+            style={{ color: theme.colors.text.accent }}
+          >
+            Select a Skill
+          </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
+            style={{ ...closeButtonStyle, width: 28, height: 28, fontSize: 18 }}
           >
             ✕
           </button>
         </div>
 
         {/* XP Amount */}
-        <div className="text-center mb-4">
-          <span className="text-amber-400 text-xl font-bold">
+        <div
+          className="text-center mb-4"
+          style={{
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: theme.borderRadius.md,
+              padding: "0.65rem 0.75rem",
+            }),
+          }}
+        >
+          <span
+            className="text-xl font-bold"
+            style={{ color: theme.colors.text.accent }}
+          >
             +{xpAmount.toLocaleString()} XP
           </span>
         </div>
@@ -88,16 +134,25 @@ export function SkillSelectModal({
               <button
                 key={skill.key}
                 onClick={() => setSelectedSkill(skill.key)}
-                className={`flex items-center gap-2 p-2 rounded border transition-colors ${
-                  isSelected
-                    ? "bg-amber-600/30 border-amber-500 text-white"
-                    : "bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700 hover:border-gray-600"
-                }`}
+                className="flex items-center gap-2 p-2 rounded border transition-colors"
+                style={{
+                  ...getInteractiveTileStyle(theme, {
+                    active: isSelected,
+                    radius: theme.borderRadius.md,
+                    accentColor: theme.colors.accent.primary,
+                  }),
+                  color: theme.colors.text.primary,
+                }}
               >
                 <span className="text-xl">{skill.icon}</span>
                 <div className="text-left">
                   <div className="text-sm font-medium">{skill.label}</div>
-                  <div className="text-xs text-gray-400">Level {level}</div>
+                  <div
+                    className="text-xs"
+                    style={{ color: theme.colors.text.muted }}
+                  >
+                    Level {level}
+                  </div>
                 </div>
               </button>
             );
@@ -108,18 +163,31 @@ export function SkillSelectModal({
         <div className="flex gap-2">
           <button
             onClick={onClose}
-            className="flex-1 py-2 px-4 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+            className="flex-1 py-2 px-4 rounded transition-colors"
+            style={{
+              ...getInteractiveTileStyle(theme, {
+                radius: theme.borderRadius.md,
+              }),
+              color: theme.colors.text.primary,
+            }}
           >
             Cancel
           </button>
           <button
             onClick={handleConfirm}
             disabled={!selectedSkill}
-            className={`flex-1 py-2 px-4 rounded transition-colors ${
-              selectedSkill
-                ? "bg-amber-600 hover:bg-amber-500 text-white"
-                : "bg-gray-600 text-gray-400 cursor-not-allowed"
-            }`}
+            className="flex-1 py-2 px-4 rounded transition-colors"
+            style={{
+              ...getInteractiveTileStyle(theme, {
+                active: Boolean(selectedSkill),
+                disabled: !selectedSkill,
+                radius: theme.borderRadius.md,
+                accentColor: theme.colors.accent.primary,
+              }),
+              color: selectedSkill
+                ? theme.colors.text.primary
+                : theme.colors.text.disabled,
+            }}
           >
             Confirm
           </button>

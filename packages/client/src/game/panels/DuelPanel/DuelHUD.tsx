@@ -18,6 +18,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useThemeStore } from "@/ui";
+import { UI } from "@/ui/core";
 import type { DuelRules } from "@hyperscape/shared";
 
 // ============================================================================
@@ -149,7 +150,7 @@ export function DuelHUD({ state, onForfeit }: DuelHUDProps) {
     flexDirection: "column",
     alignItems: "center",
     gap: theme.spacing.sm,
-    zIndex: 9000,
+    zIndex: UI.Z_INDEX.OVERLAY,
     pointerEvents: "auto",
   };
 

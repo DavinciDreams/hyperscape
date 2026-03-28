@@ -74,10 +74,6 @@ export function UsernameSelectionScreen({
         return;
       }
 
-      console.log(
-        `[UsernameSelection] 🎮 Creating account with username: ${trimmedUsername}`,
-      );
-
       // Create user account with username and main wallet
       const authToken =
         privyAuthManager.getToken() || localStorage.getItem("privy_auth_token");
@@ -105,11 +101,6 @@ export function UsernameSelectionScreen({
         setIsSubmitting(false);
         return;
       }
-
-      console.log(
-        `[UsernameSelection] ✅ Account created successfully: ${trimmedUsername}`,
-      );
-
       // Success - proceed to character selection
       onUsernameSelected(trimmedUsername);
     } catch (err) {

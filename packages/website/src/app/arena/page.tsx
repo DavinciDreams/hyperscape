@@ -298,6 +298,8 @@ export default function ArenaBettingPage() {
     null,
   );
   const streamVideoRef = useRef<HTMLVideoElement | null>(null);
+  const roundRefreshInFlightRef = useRef(false);
+  const walletRefreshInFlightRef = useRef(false);
 
   const connection = useMemo(
     () =>
@@ -306,8 +308,24 @@ export default function ArenaBettingPage() {
   );
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNextTick = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      const delay = document.visibilityState === "visible" ? 1000 : 5000;
+      timeoutId = setTimeout(() => {
+        setNow(Date.now());
+        scheduleNextTick();
+      }, delay);
+    };
+
+    scheduleNextTick();
+    const onVisibilityChange = () => scheduleNextTick();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, []);
 
   useEffect(() => {
@@ -458,31 +476,52 @@ export default function ArenaBettingPage() {
   }, []);
 
   const refresh = useCallback(async () => {
-    const [roundRes, streamRes] = await Promise.all([
-      fetch(apiPath("/api/arena/current"), { cache: "no-store" }),
-      fetch(apiPath("/api/arena/stream-state"), { cache: "no-store" }),
-    ]);
+    if (roundRefreshInFlightRef.current) return;
+    roundRefreshInFlightRef.current = true;
+    try {
+      const [roundRes, streamRes] = await Promise.all([
+        fetch(apiPath("/api/arena/current"), { cache: "no-store" }),
+        fetch(apiPath("/api/arena/stream-state"), { cache: "no-store" }),
+      ]);
 
-    const roundJson = (await roundRes.json()) as {
-      round: ArenaRoundSnapshot | null;
-    };
-    const streamJson = (await streamRes.json()) as StreamState;
-    setRound(roundJson.round);
-    setStreamState(streamJson);
+      const roundJson = (await roundRes.json()) as {
+        round: ArenaRoundSnapshot | null;
+      };
+      const streamJson = (await streamRes.json()) as StreamState;
+      setRound(roundJson.round);
+      setStreamState(streamJson);
+    } finally {
+      roundRefreshInFlightRef.current = false;
+    }
   }, []);
 
   useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => {
-      void refresh();
-    }, 3000);
-    return () => clearInterval(timer);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNextRefresh = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      const delay = document.visibilityState === "visible" ? 3000 : 12000;
+      timeoutId = setTimeout(() => {
+        void refresh().finally(scheduleNextRefresh);
+      }, delay);
+    };
+
+    void refresh().finally(scheduleNextRefresh);
+    const onVisibilityChange = () => scheduleNextRefresh();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [refresh]);
 
   const refreshWalletStats = useCallback(async () => {
+    if (walletRefreshInFlightRef.current) return;
+    walletRefreshInFlightRef.current = true;
     if (!wallet) {
       setPoints(null);
       setInviteSummary(null);
+      walletRefreshInFlightRef.current = false;
       return;
     }
 
@@ -510,15 +549,29 @@ export default function ArenaBettingPage() {
     } catch {
       setPoints(null);
       setInviteSummary(null);
+    } finally {
+      walletRefreshInFlightRef.current = false;
     }
   }, [wallet]);
 
   useEffect(() => {
-    void refreshWalletStats();
-    const timer = setInterval(() => {
-      void refreshWalletStats();
-    }, 15_000);
-    return () => clearInterval(timer);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNextRefresh = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      const delay = document.visibilityState === "visible" ? 15000 : 45000;
+      timeoutId = setTimeout(() => {
+        void refreshWalletStats().finally(scheduleNextRefresh);
+      }, delay);
+    };
+
+    void refreshWalletStats().finally(scheduleNextRefresh);
+    const onVisibilityChange = () => scheduleNextRefresh();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [refreshWalletStats]);
 
   useEffect(() => {

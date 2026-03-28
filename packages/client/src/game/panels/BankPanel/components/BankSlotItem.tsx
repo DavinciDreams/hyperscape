@@ -11,8 +11,9 @@
  * DO NOT REMOVE React.memo - it is essential for performance!
  */
 
-import React, { memo } from "react";
+import React, { memo, useState } from "react";
 import { useThemeStore } from "@/ui";
+import { getInteractiveTileStyle } from "@/ui/theme/themes";
 import type { BankItem } from "../types";
 import { formatItemName, formatQuantity, getQuantityColor } from "../utils";
 import { ItemIcon } from "@/ui/components/ItemIcon";
@@ -40,6 +41,9 @@ export interface BankSlotItemProps {
   onDragEnd: () => void;
   onClick: (itemId: string, tabIndex: number, slot: number) => void;
   onContextMenu: (e: React.MouseEvent, item: BankItem) => void;
+  onHoverStart: (item: BankItem, position: { x: number; y: number }) => void;
+  onHoverMove: (position: { x: number; y: number }) => void;
+  onHoverEnd: () => void;
 }
 
 /**
@@ -66,9 +70,21 @@ export const BankSlotItem = memo(function BankSlotItem({
   onDragEnd,
   onClick,
   onContextMenu,
+  onHoverStart,
+  onHoverMove,
+  onHoverEnd,
 }: BankSlotItemProps) {
   const theme = useThemeStore((s) => s.theme);
   const isPlaceholder = item.quantity === 0;
+  const [isHovered, setIsHovered] = useState(false);
+  const tileStyle = getInteractiveTileStyle(theme, {
+    hovered: isHovered && !isDragging && !isPlaceholder,
+    dragging: isDragging,
+    dropTarget: showSwapHighlight,
+    disabled: isPlaceholder,
+    radius: theme.borderRadius.sm,
+    accentColor: theme.colors.accent.primary,
+  });
 
   return (
     <div
@@ -76,29 +92,15 @@ export const BankSlotItem = memo(function BankSlotItem({
       style={{
         width: slotSize,
         height: slotSize,
-        background: showSwapHighlight
-          ? `linear-gradient(135deg, rgba(${dropColor}, 0.35) 0%, rgba(${dropColor}, 0.2) 100%)`
-          : isPlaceholder
-            ? `linear-gradient(135deg, ${theme.colors.background.panelSecondary}66 0%, ${theme.colors.background.panelPrimary}66 100%)`
-            : `linear-gradient(135deg, ${theme.colors.slot.filled} 0%, ${theme.colors.slot.empty} 100%)`,
-        border: showSwapHighlight
-          ? `2px solid rgba(${dropColor}, 0.9)`
-          : isPlaceholder
-            ? `1px dashed ${theme.colors.border.default}33`
-            : `1px solid ${theme.colors.border.hover}`,
+        ...tileStyle,
         transform: isDragging ? "scale(0.9)" : "scale(1)",
         opacity: isDragging ? 0.4 : isPlaceholder ? 0.6 : 1,
         transition:
           "transform 0.15s ease, opacity 0.15s ease, background 0.1s ease, border 0.1s ease",
         boxShadow: showSwapHighlight
-          ? `0 0 12px rgba(${dropColor}, 0.5)`
-          : "none",
+          ? `${tileStyle.boxShadow ?? ""}, 0 0 12px rgba(${dropColor}, 0.5)`
+          : tileStyle.boxShadow,
       }}
-      title={
-        isPlaceholder
-          ? `${formatItemName(item.itemId)} (placeholder)`
-          : `${formatItemName(item.itemId)} x${item.quantity} (Tab ${itemTabIndex})`
-      }
       draggable={true}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
@@ -110,6 +112,17 @@ export const BankSlotItem = memo(function BankSlotItem({
       onDragEnd={onDragEnd}
       onClick={() => onClick(item.itemId, itemTabIndex, slotIndex)}
       onContextMenu={(e) => onContextMenu(e, item)}
+      onMouseEnter={(e) => {
+        setIsHovered(true);
+        onHoverStart(item, { x: e.clientX, y: e.clientY });
+      }}
+      onMouseMove={(e) => {
+        onHoverMove({ x: e.clientX, y: e.clientY });
+      }}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        onHoverEnd();
+      }}
     >
       {/* Single INSERT LINE on left edge */}
       {(showInsertLine || showFaintGuide) && (
@@ -132,7 +145,13 @@ export const BankSlotItem = memo(function BankSlotItem({
           }}
         />
       )}
-      <span className="select-none pointer-events-none">
+      <span
+        className="select-none pointer-events-none"
+        style={{
+          transform: isHovered && !isPlaceholder ? "scale(1.03)" : "scale(1)",
+          transition: "transform 0.15s ease",
+        }}
+      >
         <ItemIcon itemId={item.itemId} size={38} />
       </span>
       {item.quantity > 1 && (

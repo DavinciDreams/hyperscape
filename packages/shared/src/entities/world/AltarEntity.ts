@@ -285,7 +285,7 @@ export class AltarEntity extends InteractableEntity {
     // Emit event to pray at altar
     this.world.emit(EventType.ALTAR_PRAY, {
       playerId: data.playerId,
-      altarId: this.altarId,
+      altarId: this.id,
     });
   }
 

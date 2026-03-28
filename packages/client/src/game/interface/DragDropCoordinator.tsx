@@ -9,7 +9,7 @@
  * @packageDocumentation
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, type MutableRefObject } from "react";
 import { EventType, getItem } from "@hyperscape/shared";
 import {
   PointerSensor,
@@ -47,7 +47,7 @@ export interface DndKitActiveItem {
 /** Props for useDragDropCoordinator hook */
 interface DragDropCoordinatorProps {
   world: ClientWorld | null;
-  inventory: InventorySlotViewItem[];
+  inventoryRef: MutableRefObject<InventorySlotViewItem[]>;
 }
 
 /** Return type for useDragDropCoordinator hook */
@@ -69,7 +69,7 @@ interface DragDropCoordinatorResult {
  */
 export function useDragDropCoordinator({
   world,
-  inventory,
+  inventoryRef,
 }: DragDropCoordinatorProps): DragDropCoordinatorResult {
   // State for @dnd-kit item dragging
   const [dndKitActiveItem, setDndKitActiveItem] =
@@ -105,7 +105,12 @@ export function useDragDropCoordinator({
         activeId.startsWith("inventory-") &&
         overId?.startsWith("equipment-")
       ) {
-        handleInventoryToEquipment(activeId, overId, inventory, world);
+        handleInventoryToEquipment(
+          activeId,
+          overId,
+          inventoryRef.current,
+          world,
+        );
         return;
       }
 
@@ -121,7 +126,13 @@ export function useDragDropCoordinator({
 
       // Handle drops to action bar
       if (overId?.startsWith("actionbar-drop-")) {
-        handleActionBarDrop(activeId, overId, active, inventory, world);
+        handleActionBarDrop(
+          activeId,
+          overId,
+          active,
+          inventoryRef.current,
+          world,
+        );
         return;
       }
 
@@ -156,7 +167,7 @@ export function useDragDropCoordinator({
 
       splitTab(tabId, dropPosition);
     },
-    [splitTab, inventory, world],
+    [splitTab, inventoryRef, world],
   );
 
   // @dnd-kit drag start handler
@@ -228,7 +239,7 @@ export function useDragDropCoordinator({
           activeId,
           overId,
           activeData,
-          inventory,
+          inventoryRef.current,
           world,
         );
         return;
@@ -270,14 +281,14 @@ export function useDragDropCoordinator({
         handleInventoryToEquipment(
           activeId,
           overId,
-          inventory,
+          inventoryRef.current,
           world,
           activeData,
         );
         return;
       }
     },
-    [inventory, world],
+    [inventoryRef, world],
   );
 
   return {

@@ -2,9 +2,21 @@
  * ActionBarPanel - Individual slot component
  */
 
-import React, { memo, useMemo, useCallback, useRef, useEffect } from "react";
+import React, {
+  memo,
+  useMemo,
+  useCallback,
+  useRef,
+  useEffect,
+  useState,
+} from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
-import { useTheme } from "@/ui";
+import { CursorTooltip, useTheme } from "@/ui";
+import {
+  getTooltipMetaStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
+import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
 import type { ActionBarSlotContent } from "./types";
 import { getSlotIcon, SLOT_SIZE } from "./utils";
 
@@ -135,6 +147,9 @@ export const ActionBarSlot = memo(function ActionBarSlot({
   onContextMenu,
 }: ActionBarSlotProps) {
   const theme = useTheme();
+  const [hoverState, setHoverState] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const isEmpty = slot.type === "empty";
   const isPrayer = slot.type === "prayer";
   const isCombatStyle = slot.type === "combatstyle";
@@ -249,27 +264,22 @@ export const ActionBarSlot = memo(function ActionBarSlot({
     (): React.CSSProperties => ({
       width: slotSize,
       height: slotSize,
+      ...getInteractiveTileStyle(theme, {
+        active: hasActiveState && isActive,
+        hovered: isHovered,
+        dragging: isDragging,
+        disabled: isUnavailable,
+        dropTarget: isOver,
+        radius: 4,
+      }),
       background: isEmpty
-        ? theme.colors.background.primary
-        : hasActiveState && isActive
-          ? `radial-gradient(ellipse at center, ${theme.colors.accent.primary}4D 0%, ${theme.colors.background.secondary} 70%)`
-          : isOver
-            ? `linear-gradient(180deg, ${theme.colors.accent.secondary}33 0%, ${theme.colors.background.primary} 100%)`
-            : isHovered
-              ? `linear-gradient(180deg, ${theme.colors.accent.secondary}22 0%, ${theme.colors.background.panelPrimary} 100%)`
-              : `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
+        ? getPanelInsetStyle(theme, { radius: 4 }).background
+        : undefined,
       border: isEmpty
         ? `1px solid ${theme.colors.border.default}66`
         : isUnavailable
           ? `1px solid ${theme.colors.state.danger}40`
-          : hasActiveState && isActive
-            ? `1px solid ${theme.colors.accent.primary}B3`
-            : isOver
-              ? `2px solid ${theme.colors.accent.primary}B3`
-              : isHovered
-                ? `1px solid ${theme.colors.accent.primary}80`
-                : `1px solid ${theme.colors.border.default}`,
-      borderRadius: 0,
+          : undefined,
       cursor:
         isEmpty || isLocked ? "default" : isDragging ? "grabbing" : "grab",
       // RS3 behavior: dim unavailable items
@@ -279,8 +289,6 @@ export const ActionBarSlot = memo(function ActionBarSlot({
         : isDragging
           ? "scale(0.95)"
           : "scale(1)",
-      transition:
-        "transform 0.15s ease, opacity 0.15s ease, background 0.15s ease, border 0.15s ease",
       touchAction: "none",
       boxShadow:
         hasActiveState && isActive
@@ -303,93 +311,129 @@ export const ActionBarSlot = memo(function ActionBarSlot({
     ],
   );
 
+  const tooltipLabel = isEmpty
+    ? `Empty slot (${shortcut})`
+    : isUnavailable
+      ? `${slot.label || slot.itemId || "Unknown"} - Not in inventory (${shortcut})`
+      : `${slot.label || slot.itemId || slot.skillId || "Unknown"} (${shortcut})`;
+
   return (
-    <button
-      ref={combinedRef}
-      onClick={handleClick}
-      onContextMenu={onContextMenu}
-      onMouseEnter={onHover}
-      onMouseLeave={onLeave}
-      className="relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-      title={
-        isEmpty
-          ? `Empty slot (${shortcut})`
-          : isUnavailable
-            ? `${slot.label || slot.itemId || "Unknown"} - Not in inventory (${shortcut})`
-            : `${slot.label || slot.itemId || slot.skillId || "Unknown"} (${shortcut})`
-      }
-      style={slotStyle}
-      {...attributes}
-      {...wrappedListeners}
-    >
-      {/* Icon */}
-      {!isEmpty && (
+    <>
+      <button
+        ref={combinedRef}
+        onClick={handleClick}
+        onContextMenu={onContextMenu}
+        onMouseEnter={(e) => {
+          onHover();
+          setHoverState({ x: e.clientX, y: e.clientY });
+        }}
+        onMouseMove={(e) => {
+          setHoverState({ x: e.clientX, y: e.clientY });
+        }}
+        onMouseLeave={() => {
+          onLeave();
+          setHoverState(null);
+        }}
+        className="relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+        style={slotStyle}
+        {...attributes}
+        {...wrappedListeners}
+      >
+        {/* Icon */}
+        {!isEmpty && (
+          <div
+            className="flex items-center justify-center h-full"
+            style={{
+              fontSize: 16,
+              filter: "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))",
+            }}
+          >
+            {isCombatStyle && slot.combatStyleId ? (
+              <CombatStyleIcon
+                styleId={slot.combatStyleId}
+                size={18}
+                isActive={isActive}
+              />
+            ) : (
+              icon
+            )}
+          </div>
+        )}
+
+        {/* Quantity Badge - RS3 style: shows actual inventory quantity */}
+        {slot.type === "item" &&
+          (() => {
+            // Use inventory quantity if provided, otherwise fall back to slot quantity
+            const qty = inventoryQuantity ?? slot.quantity ?? 0;
+            if (qty <= 0) return null;
+            return (
+              <div
+                className="absolute font-bold"
+                style={{
+                  bottom: 1,
+                  right: 1,
+                  background: theme.colors.background.overlay,
+                  color: isUnavailable
+                    ? theme.colors.state.danger
+                    : theme.colors.text.primary,
+                  fontSize: 8,
+                  padding: "0px 2px",
+                  borderRadius: 2,
+                  lineHeight: 1.1,
+                }}
+              >
+                {qty > 999999
+                  ? `${Math.floor(qty / 1000000)}M`
+                  : qty > 999
+                    ? `${Math.floor(qty / 1000)}K`
+                    : qty}
+              </div>
+            );
+          })()}
+
+        {/* Shortcut Key */}
         <div
-          className="flex items-center justify-center h-full"
+          className="absolute font-bold"
           style={{
-            fontSize: 16,
-            filter: "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))",
+            top: 1,
+            left: 2,
+            color: isEmpty
+              ? `${theme.colors.text.secondary}80`
+              : `${theme.colors.text.secondary}A6`,
+            fontSize: 7,
+            textShadow: "0 1px 1px rgba(0, 0, 0, 0.6)",
           }}
         >
-          {isCombatStyle && slot.combatStyleId ? (
-            <CombatStyleIcon
-              styleId={slot.combatStyleId}
-              size={18}
-              isActive={isActive}
-            />
-          ) : (
-            icon
-          )}
+          {shortcut}
         </div>
-      )}
+      </button>
 
-      {/* Quantity Badge - RS3 style: shows actual inventory quantity */}
-      {slot.type === "item" &&
-        (() => {
-          // Use inventory quantity if provided, otherwise fall back to slot quantity
-          const qty = inventoryQuantity ?? slot.quantity ?? 0;
-          if (qty <= 0) return null;
-          return (
-            <div
-              className="absolute font-bold"
-              style={{
-                bottom: 1,
-                right: 1,
-                background: theme.colors.background.overlay,
-                color: isUnavailable
-                  ? theme.colors.state.danger
-                  : theme.colors.text.primary,
-                fontSize: 8,
-                padding: "0px 2px",
-                borderRadius: 2,
-                lineHeight: 1.1,
-              }}
-            >
-              {qty > 999999
-                ? `${Math.floor(qty / 1000000)}M`
-                : qty > 999
-                  ? `${Math.floor(qty / 1000)}K`
-                  : qty}
+      {hoverState && (
+        <CursorTooltip
+          visible={true}
+          position={hoverState}
+          estimatedSize={{ width: 180, height: 48 }}
+          style={{
+            zIndex: theme.zIndex.tooltip,
+            minWidth: "140px",
+            maxWidth: "260px",
+          }}
+        >
+          <div
+            style={{
+              ...getTooltipTitleStyle(theme),
+            }}
+          >
+            {tooltipLabel}
+          </div>
+          {!isEmpty && (
+            <div style={{ ...getTooltipMetaStyle(theme), marginTop: "4px" }}>
+              Drag to reorder
             </div>
-          );
-        })()}
-
-      {/* Shortcut Key */}
-      <div
-        className="absolute font-bold"
-        style={{
-          top: 1,
-          left: 2,
-          color: isEmpty
-            ? `${theme.colors.text.secondary}80`
-            : `${theme.colors.text.secondary}A6`,
-          fontSize: 7,
-          textShadow: "0 1px 1px rgba(0, 0, 0, 0.6)",
-        }}
-      >
-        {shortcut}
-      </div>
-    </button>
+          )}
+        </CursorTooltip>
+      )}
+    </>
   );
 });
 
@@ -402,45 +446,76 @@ export const RubbishBin = memo(function RubbishBin({
   isDragging: boolean;
 }) {
   const theme = useTheme();
+  const [hoverState, setHoverState] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const { setNodeRef, isOver } = useDroppable({
     id: "actionbar-rubbish-bin",
     data: { target: "rubbish-bin" },
   });
 
   return (
-    <button
-      ref={setNodeRef}
-      onContextMenu={onContextMenu}
-      title="Drag items here to remove them"
-      className="relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-      style={{
-        width: SLOT_SIZE,
-        height: SLOT_SIZE,
-        background: isOver
-          ? `radial-gradient(ellipse at center, ${theme.colors.state.danger}4D 0%, ${theme.colors.background.panelSecondary} 70%)`
-          : isDragging
-            ? `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`
-            : `linear-gradient(180deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-        border: isOver
-          ? `2px solid ${theme.colors.state.danger}B3`
-          : isDragging
-            ? `1px dashed ${theme.colors.state.warning}80`
-            : `1px solid ${theme.colors.border.default}66`,
-        borderRadius: 0,
-        cursor: "default",
-        opacity: isDragging ? 1 : 0.6,
-        transform: isOver ? "scale(1.1)" : "scale(1)",
-        transition: "all 0.15s ease",
-        boxShadow: isOver
-          ? `0 0 12px ${theme.colors.state.danger}80, inset 0 0 15px ${theme.colors.state.danger}33`
-          : `inset 0 2px 4px rgba(0, 0, 0, 0.4)`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 14,
-      }}
-    >
-      🗑️
-    </button>
+    <>
+      <button
+        ref={setNodeRef}
+        onContextMenu={onContextMenu}
+        onMouseEnter={(e) => {
+          setHoverState({ x: e.clientX, y: e.clientY });
+        }}
+        onMouseMove={(e) => {
+          setHoverState({ x: e.clientX, y: e.clientY });
+        }}
+        onMouseLeave={() => setHoverState(null)}
+        className="relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+        style={{
+          width: SLOT_SIZE,
+          height: SLOT_SIZE,
+          ...getInteractiveTileStyle(theme, {
+            active: false,
+            hovered: isDragging,
+            dropTarget: isOver,
+            radius: 4,
+            accentColor: theme.colors.state.danger,
+          }),
+          border: isOver
+            ? `2px solid ${theme.colors.state.danger}B3`
+            : isDragging
+              ? `1px dashed ${theme.colors.state.warning}80`
+              : `1px solid ${theme.colors.border.default}66`,
+          cursor: "default",
+          opacity: isDragging ? 1 : 0.6,
+          transform: isOver ? "scale(1.1)" : "scale(1)",
+          boxShadow: isOver
+            ? `0 0 12px ${theme.colors.state.danger}80, inset 0 0 15px ${theme.colors.state.danger}33`
+            : `inset 0 2px 4px rgba(0, 0, 0, 0.4)`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 14,
+        }}
+      >
+        🗑️
+      </button>
+
+      {hoverState && (
+        <CursorTooltip
+          visible={true}
+          position={hoverState}
+          estimatedSize={{ width: 170, height: 44 }}
+          style={{
+            zIndex: theme.zIndex.tooltip,
+            minWidth: "140px",
+          }}
+        >
+          <div
+            style={{
+              ...getTooltipTitleStyle(theme),
+            }}
+          >
+            Drag items here to remove them
+          </div>
+        </CursorTooltip>
+      )}
+    </>
   );
 });

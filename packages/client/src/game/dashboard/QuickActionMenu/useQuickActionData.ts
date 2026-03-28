@@ -4,6 +4,7 @@ import { GAME_API_URL } from "../../../lib/api-config";
 
 // Configuration constants
 const QUICK_ACTIONS_POLL_INTERVAL_MS = 3000; // Poll every 3 seconds while menu is open
+const QUICK_ACTIONS_BACKGROUND_POLL_INTERVAL_MS = 10000;
 
 interface UseQuickActionDataResult {
   data: QuickActionsData | null;
@@ -65,17 +66,33 @@ export function useQuickActionData(
     }
   }, [agentId, authToken]);
 
-  // Fetch on open and poll every 3 seconds while open
   useEffect(() => {
     if (!isOpen) return;
 
-    // Initial fetch
-    fetchData();
+    let timeoutId: number | null = null;
 
-    // Poll while menu is open
-    const interval = setInterval(fetchData, QUICK_ACTIONS_POLL_INTERVAL_MS);
+    const clearTimeoutRef = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
 
-    return () => clearInterval(interval);
+    const scheduleNextPoll = () => {
+      clearTimeoutRef();
+      const delay =
+        document.visibilityState === "visible"
+          ? QUICK_ACTIONS_POLL_INTERVAL_MS
+          : QUICK_ACTIONS_BACKGROUND_POLL_INTERVAL_MS;
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null;
+        void fetchData().finally(scheduleNextPoll);
+      }, delay);
+    };
+
+    void fetchData().finally(scheduleNextPoll);
+
+    return clearTimeoutRef;
   }, [isOpen, fetchData]);
 
   return { data, loading, error, refetch: fetchData };

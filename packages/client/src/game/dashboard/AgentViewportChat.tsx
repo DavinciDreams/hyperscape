@@ -17,6 +17,15 @@ interface AgentViewportChatProps {
   agent: Agent;
 }
 
+const RETRY_DELAY_MS = 1000;
+const MAX_ATTEMPTS = 30;
+
+function waitForRetry(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
   agent,
 }) => {
@@ -37,24 +46,26 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
 
   useEffect(() => {
     isMountedRef.current = true;
-    fetchSpectatorData();
+    if (agent.status === "active") {
+      void fetchSpectatorData();
+    } else {
+      setLoading(false);
+      setWaitingForEntity(false);
+      setEntityError(null);
+    }
     return () => {
       isMountedRef.current = false;
     };
-  }, [agent.id]);
+  }, [agent.id, agent.status]);
 
   const fetchSpectatorData = async () => {
-    const MAX_ATTEMPTS = 30; // Wait up to 30 seconds for agent to register and entity to appear
-
     try {
       // Get FRESH Privy token using the SDK (not stale localStorage)
       // This ensures we always have a valid, non-expired token
       const privyToken = await getAccessToken();
 
       if (!privyToken) {
-        console.warn(
-          "[AgentViewportChat] No Privy token available - spectator mode requires authentication",
-        );
+        setEntityError("Please log in to interact with the agent.");
         setLoading(false);
         return;
       }
@@ -87,10 +98,6 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
             setCharacterId(tokenData.characterId || "");
             setWaitingForEntity(false);
             setLoading(false);
-            console.log(
-              "[AgentViewportChat] ✅ Got permanent spectator token for:",
-              tokenData.agentName,
-            );
             return;
           }
 
@@ -102,41 +109,31 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
             setCharacterId(tokenData.characterId || "");
           }
 
-          console.log(
-            `[AgentViewportChat] Waiting for agent entity (${attempt}/${MAX_ATTEMPTS})...`,
-          );
-
           // Wait 1 second before next attempt
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await waitForRetry(RETRY_DELAY_MS);
           continue;
         } else if (tokenResponse.status === 401) {
           // Privy token expired - user needs to re-authenticate
-          console.warn(
-            "[AgentViewportChat] Privy token expired, need to re-login",
-          );
           localStorage.removeItem("privy_auth_token");
+          setEntityError("Session expired. Please log out and log back in.");
           setLoading(false);
           return;
         } else if (tokenResponse.status === 403) {
-          console.warn("[AgentViewportChat] No permission to view this agent");
+          setEntityError(
+            "You do not have permission to interact with this agent.",
+          );
           setLoading(false);
           return;
         } else if (tokenResponse.status === 404) {
           // Agent not yet registered - continue polling to wait for it
-          console.log(
-            `[AgentViewportChat] Agent not yet registered (${attempt}/${MAX_ATTEMPTS}), waiting...`,
-          );
           if (attempt === 1) {
             setWaitingForEntity(true);
           }
           // Wait 1 second before next attempt
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await waitForRetry(RETRY_DELAY_MS);
           continue;
         } else {
           // Fallback: try to get character ID from mapping endpoint
-          console.warn(
-            "[AgentViewportChat] Spectator token endpoint failed, falling back to mapping",
-          );
           const mappingResponse = await fetch(
             `${GAME_API_URL}/api/agents/mapping/${agent.id}`,
           );
@@ -144,9 +141,6 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
             const mappingData = await mappingResponse.json();
             setCharacterId(mappingData.characterId || "");
             setAuthToken(privyToken);
-            console.warn(
-              "[AgentViewportChat] Using Privy token as fallback - may expire in ~1 hour",
-            );
           }
           setLoading(false);
           return;
@@ -154,9 +148,6 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
       }
 
       // Max attempts reached - agent not ready yet
-      console.warn(
-        `[AgentViewportChat] Agent not ready after ${MAX_ATTEMPTS} seconds`,
-      );
       setEntityError(
         "Agent is still connecting to the game world. Make sure the agent is running with valid Hyperscape credentials.",
       );
@@ -167,7 +158,58 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
         "[AgentViewportChat] Error fetching spectator data:",
         error,
       );
+      setEntityError("Failed to connect to the agent viewport.");
       setLoading(false);
+    }
+  };
+
+  const deliverCommand = async (command: string) => {
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      sender: "user",
+      text: command,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setIsTyping(true);
+    try {
+      const response = await fetch(
+        `${GAME_API_URL}/api/agents/${agent.id}/message`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({ content: command }),
+        },
+      );
+      const data = await response.json();
+      if (data.success) {
+        const confirmMessage: Message = {
+          id: Date.now().toString(),
+          sender: "agent",
+          text: "Command sent to agent",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, confirmMessage]);
+        if (iframeRef.current?.contentWindow) {
+          const iframeSrc = iframeRef.current.src;
+          const iframeOrigin = iframeSrc
+            ? new URL(iframeSrc, window.location.origin).origin
+            : window.location.origin;
+          iframeRef.current.contentWindow.postMessage(
+            { type: "OPEN_CHAT" },
+            iframeOrigin,
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Failed to send command:", err);
+    } finally {
+      setIsTyping(false);
+      setInputValue("");
     }
   };
 
@@ -467,57 +509,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
               authToken={authToken}
               onCommandSend={(command) => {
                 setInputValue(command);
-                // Auto-send the command
-                setTimeout(async () => {
-                  const userMessage: Message = {
-                    id: Date.now().toString(),
-                    sender: "user",
-                    text: command,
-                    timestamp: new Date(),
-                  };
-                  setMessages((prev) => [...prev, userMessage]);
-                  setIsTyping(true);
-                  try {
-                    const response = await fetch(
-                      `${GAME_API_URL}/api/agents/${agent.id}/message`,
-                      {
-                        method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                          Authorization: `Bearer ${authToken}`,
-                        },
-                        body: JSON.stringify({ content: command }),
-                      },
-                    );
-                    const data = await response.json();
-                    if (data.success) {
-                      const confirmMessage: Message = {
-                        id: Date.now().toString(),
-                        sender: "agent",
-                        text: "Command sent to agent",
-                        timestamp: new Date(),
-                      };
-                      setMessages((prev) => [...prev, confirmMessage]);
-                      // Open chat in iframe
-                      // SECURITY: Use specific origin instead of "*"
-                      if (iframeRef.current?.contentWindow) {
-                        const iframeSrc = iframeRef.current.src;
-                        const iframeOrigin = iframeSrc
-                          ? new URL(iframeSrc, window.location.origin).origin
-                          : window.location.origin;
-                        iframeRef.current.contentWindow.postMessage(
-                          { type: "OPEN_CHAT" },
-                          iframeOrigin,
-                        );
-                      }
-                    }
-                  } catch (err) {
-                    console.error("Failed to send command:", err);
-                  } finally {
-                    setIsTyping(false);
-                    setInputValue("");
-                  }
-                }, 0);
+                void deliverCommand(command);
               }}
             />
 

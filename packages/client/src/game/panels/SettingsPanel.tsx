@@ -17,6 +17,12 @@ import { isTouch } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import { useFullscreen } from "../../hooks/useFullscreen";
 import { ToggleSwitch, Slider } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import { NAME_SANITIZE_REGEX } from "../../utils/validation";
 import {
   useComplexityStore,
@@ -25,7 +31,11 @@ import {
   useThemeStore,
   type ComplexityMode,
 } from "@/ui";
-import type { StatusBarsConfig } from "../hud/StatusBars";
+import {
+  type StatusBarsConfig,
+  STATUSBAR_CONFIG_CHANGED_EVENT,
+  STATUSBAR_CONFIG_STORAGE_KEY,
+} from "../hud/StatusBars";
 import { privyAuthManager } from "../../auth/PrivyAuthManager";
 import { useSolanaWallet } from "../../hooks/useSolanaWallet";
 import {
@@ -680,7 +690,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
   const [statusBarsConfig, setStatusBarsConfig] = useState<StatusBarsConfig>(
     () => {
       if (typeof window !== "undefined") {
-        const saved = localStorage.getItem("statusbar-config");
+        const saved = localStorage.getItem(STATUSBAR_CONFIG_STORAGE_KEY);
         if (saved) {
           try {
             return JSON.parse(saved) as StatusBarsConfig;
@@ -704,7 +714,18 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       setStatusBarsConfig((prev) => {
         const newConfig = { ...prev, ...updates };
         if (typeof window !== "undefined") {
-          localStorage.setItem("statusbar-config", JSON.stringify(newConfig));
+          localStorage.setItem(
+            STATUSBAR_CONFIG_STORAGE_KEY,
+            JSON.stringify(newConfig),
+          );
+          window.dispatchEvent(
+            new CustomEvent<{ config: StatusBarsConfig }>(
+              STATUSBAR_CONFIG_CHANGED_EVENT,
+              {
+                detail: { config: newConfig },
+              },
+            ),
+          );
         }
         return newConfig;
       });
@@ -831,15 +852,17 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
   return (
     <div
       className="flex flex-col h-full overflow-hidden"
-      style={{ padding: "4px" }}
+      style={{
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+        padding: "4px",
+      }}
     >
       {/* Horizontal Tab Navigation (Top) - Icon only */}
       <div
         className="flex gap-1 mb-2 flex-shrink-0"
         style={{
-          background: theme.colors.background.panelPrimary,
-          border: `1px solid ${theme.colors.border.default}66`,
-          borderRadius: "6px",
+          ...getPanelHeaderStyle(theme),
+          borderRadius: theme.borderRadius.md,
           padding: "4px",
         }}
       >
@@ -851,23 +874,25 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
               onClick={() => setActiveTab(tab.id)}
               className="flex items-center justify-center transition-all flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
               style={{
+                ...getInteractiveTileStyle(theme, {
+                  active: isActive,
+                  radius: theme.borderRadius.sm,
+                }),
                 padding: "8px",
-                background: isActive
-                  ? `linear-gradient(180deg, ${theme.colors.accent.secondary}33 0%, ${theme.colors.border.decorative}40 100%)`
-                  : "transparent",
-                border: isActive
-                  ? `1px solid ${theme.colors.accent.secondary}66`
-                  : "1px solid transparent",
-                borderRadius: "4px",
                 cursor: "pointer",
                 color: isActive
                   ? theme.colors.text.accent
                   : theme.colors.text.muted,
+                flexDirection: "column",
+                gap: 3,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                fontSize: 9,
               }}
               title={tab.label}
             >
               <tab.Icon
-                size={18}
+                size={16}
                 strokeWidth={isActive ? 2 : 1.5}
                 style={{
                   filter: isActive
@@ -875,6 +900,7 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
                     : "none",
                 }}
               />
+              <span>{tab.label}</span>
             </button>
           );
         })}
@@ -884,10 +910,11 @@ export function SettingsPanel({ world }: SettingsPanelProps) {
       <div
         className="flex-1 overflow-y-auto noscrollbar"
         style={{
-          background: theme.colors.background.panelSecondary,
-          border: `1px solid ${theme.colors.border.default}66`,
-          borderRadius: "6px",
-          padding: "8px",
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: theme.borderRadius.md,
+            padding: "8px",
+          }),
         }}
       >
         {/* Account Tab */}

@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback, useId } from "react";
 import { useMemo } from "react";
 import { useThemeStore } from "@/ui";
+import { UI } from "@/ui/core";
+import {
+  getContextMenuItemStyle,
+  getContextMenuSurfaceStyle,
+} from "@/ui/theme/themes";
 
 interface ContextMenuAction {
   id: string;
@@ -160,13 +165,11 @@ export function ContextMenu({
         position: "fixed" as const,
         left: adjustedPosition.x,
         top: adjustedPosition.y,
-        minWidth: 180,
-        background: `linear-gradient(135deg, ${theme.colors.background.glass} 0%, ${theme.colors.background.secondary} 100%)`,
-        backdropFilter: `blur(${theme.glass.blur}px)`,
-        border: `1px solid ${theme.colors.border.default}`,
-        borderRadius: theme.borderRadius.lg,
-        boxShadow: theme.shadows.lg,
-        zIndex: theme.zIndex.popover,
+        ...getContextMenuSurfaceStyle(theme, {
+          minWidth: 196,
+          radius: theme.borderRadius.md,
+        }),
+        zIndex: UI.Z_INDEX.CONTEXT_MENU,
         padding: `${theme.spacing.sm}px 0`,
         pointerEvents: "auto" as const,
         // Hide until positioned to prevent flash
@@ -249,13 +252,17 @@ export function ContextMenu({
           }}
           style={{
             ...styles.menuItem,
-            background:
-              focusedIndex === index ? theme.colors.slot.hover : "transparent",
-            color: action.danger
-              ? theme.colors.state.danger
-              : action.enabled
-                ? theme.colors.text.primary
-                : theme.colors.text.disabled,
+            ...getContextMenuItemStyle(theme, {
+              hovered: focusedIndex === index,
+              danger: action.danger,
+              radius: 0,
+              padding: `${theme.spacing.sm}px ${theme.spacing.lg}px`,
+            }),
+            color: !action.enabled
+              ? theme.colors.text.disabled
+              : action.danger
+                ? theme.colors.state.danger
+                : theme.colors.text.primary,
             cursor: action.enabled ? "pointer" : "not-allowed",
           }}
         >

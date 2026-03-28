@@ -75,6 +75,7 @@ export default [
         PromiseRejectionEvent: "readonly",
         SecurityPolicyViolationEvent: "readonly",
         EventListener: "readonly",
+        EventTarget: "readonly",
         Node: "readonly",
         Element: "readonly",
         DOMRect: "readonly",

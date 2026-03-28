@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import { useState, useEffect } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { EventType } from "@hyperscape/shared";
 import type { PlayerStats } from "@hyperscape/shared";
 import type { ClientWorld, PlayerEquipmentItems } from "../types";
@@ -23,6 +23,138 @@ import {
   isPrayerPointsChangedEvent,
   isObject,
 } from "../types/guards";
+
+function areInventoryItemsEqual(
+  left: InventorySlotViewItem[],
+  right: InventorySlotViewItem[],
+): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (
+      a.slot !== b.slot ||
+      a.itemId !== b.itemId ||
+      a.quantity !== b.quantity
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function cloneInventoryItems(
+  items: InventorySlotViewItem[] | undefined | null,
+): InventorySlotViewItem[] {
+  if (!items || items.length === 0) return [];
+  return items.map((item) => ({ ...item }));
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function areEquipmentItemsEqual(
+  left: PlayerEquipmentItems | null,
+  right: PlayerEquipmentItems | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return left === right;
+
+  const slots = Object.keys(left) as Array<keyof PlayerEquipmentItems>;
+  for (const slot of slots) {
+    const leftItem = left[slot];
+    const rightItem = right[slot];
+    if (!leftItem || !rightItem) {
+      if (leftItem !== rightItem) return false;
+      continue;
+    }
+
+    if (
+      leftItem.id !== rightItem.id ||
+      leftItem.quantity !== rightItem.quantity ||
+      leftItem.name !== rightItem.name
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function areStatusValuesEqual(
+  left?: { current?: number; max?: number },
+  right?: { current?: number; max?: number },
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return left === right;
+  return left.current === right.current && left.max === right.max;
+}
+
+function areSkillsEqual(
+  left: PlayerStats["skills"],
+  right: PlayerStats["skills"],
+): boolean {
+  if (left === right) return true;
+
+  const skillNames = Object.keys(left) as Array<keyof PlayerStats["skills"]>;
+  for (const skillName of skillNames) {
+    const leftSkill = left[skillName];
+    const rightSkill = right[skillName];
+    if (
+      !rightSkill ||
+      leftSkill.level !== rightSkill.level ||
+      leftSkill.xp !== rightSkill.xp
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function mergePlayerStats(
+  previous: PlayerStats | null,
+  updates: Partial<PlayerStats>,
+): PlayerStats {
+  if (!previous) {
+    return updates as PlayerStats;
+  }
+
+  const next = { ...previous, ...updates } as PlayerStats;
+  if (updates.health) {
+    next.health = updates.health;
+  }
+  if (updates.skills) {
+    next.skills = updates.skills;
+  }
+  if (updates.prayerPoints) {
+    next.prayerPoints = updates.prayerPoints;
+  }
+
+  return next;
+}
+
+function arePlayerStatsEqual(
+  left: PlayerStats | null,
+  right: PlayerStats | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return left === right;
+
+  return (
+    left.level === right.level &&
+    left.combatLevel === right.combatLevel &&
+    left.inCombat === right.inCombat &&
+    areStatusValuesEqual(left.health, right.health) &&
+    areStatusValuesEqual(left.prayerPoints, right.prayerPoints) &&
+    areSkillsEqual(left.skills, right.skills) &&
+    areEquipmentItemsEqual(left.equipment, right.equipment)
+  );
+}
 
 /**
  * Hook return type for player data
@@ -48,6 +180,14 @@ export interface PlayerDataState {
   setCoins: React.Dispatch<React.SetStateAction<number>>;
 }
 
+interface PlayerDataProviderProps {
+  world: ClientWorld | null;
+  children: React.ReactNode;
+}
+
+const PlayerDataContext = createContext<PlayerDataState | null>(null);
+const PlayerStatsContext = createContext<PlayerStats | null>(null);
+
 /**
  * usePlayerData - Subscribe to player data events
  *
@@ -62,7 +202,7 @@ export interface PlayerDataState {
  * @param world - The game world instance
  * @returns Player data state and setters
  */
-export function usePlayerData(world: ClientWorld | null): PlayerDataState {
+export function usePlayerDataState(world: ClientWorld | null): PlayerDataState {
   const [inventory, setInventory] = useState<InventorySlotViewItem[]>([]);
   const [equipment, setEquipment] = useState<PlayerEquipmentItems | null>(null);
   const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
@@ -89,15 +229,19 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
       if (playerId && invData.playerId && invData.playerId !== playerId) {
         return;
       }
-      setInventory(invData.items || []);
+      setInventory((prev) =>
+        areInventoryItemsEqual(prev, invData.items || [])
+          ? prev
+          : cloneInventoryItems(invData.items),
+      );
       if (typeof invData.coins === "number") {
-        setCoins(invData.coins);
+        setCoins((prev) => (prev === invData.coins ? prev : invData.coins));
       } else {
         // Calculate coins from inventory items
         const totalCoins = (data.items || [])
           .filter((item) => item.itemId === "coins")
           .reduce((sum, item) => sum + item.quantity, 0);
-        setCoins(totalCoins);
+        setCoins((prev) => (prev === totalCoins ? prev : totalCoins));
       }
     };
 
@@ -108,7 +252,7 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         return;
       }
       if (!playerId || data.playerId === playerId) {
-        setCoins(data.coins);
+        setCoins((prev) => (prev === data.coins ? prev : data.coins));
       }
     };
 
@@ -118,7 +262,10 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         console.warn("[usePlayerData] Invalid equipment update event:", data);
         return;
       }
-      setEquipment(processRawEquipment(data as RawEquipmentData));
+      const nextEquipment = processRawEquipment(data as RawEquipmentData);
+      setEquipment((prev) =>
+        areEquipmentItemsEqual(prev, nextEquipment) ? prev : nextEquipment,
+      );
     };
 
     // UI_UPDATE is the primary source for player stats
@@ -131,14 +278,59 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
       if (data.component === "player" && isPlayerStatsData(data.data)) {
         // PlayerStatsData is a partial type - safe to cast since we merge with existing state
         const newData = data.data as unknown as Partial<PlayerStats>;
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, {
                 ...newData,
                 prayerPoints: newData.prayerPoints || prev.prayerPoints,
-              }
-            : (newData as PlayerStats),
+              })
+            : (newData as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
+        return;
+      }
+
+      if (data.component === "inventory" && isObject(data.data)) {
+        const inventoryPayload = data.data as {
+          items?: InventorySlotViewItem[];
+          coins?: number;
+        };
+        if (Array.isArray(inventoryPayload.items)) {
+          setInventory((prev) =>
+            areInventoryItemsEqual(prev, inventoryPayload.items ?? [])
+              ? prev
+              : cloneInventoryItems(inventoryPayload.items),
+          );
+        }
+        if (typeof inventoryPayload.coins === "number") {
+          const nextCoins = inventoryPayload.coins;
+          setCoins((prev) => (prev === nextCoins ? prev : nextCoins));
+        }
+        return;
+      }
+
+      if (data.component === "equipment" && isObject(data.data)) {
+        const equipmentPayload = data.data as {
+          playerId?: string;
+          equipment?: RawEquipmentData;
+        };
+        if (!equipmentPayload.equipment) {
+          return;
+        }
+
+        // Only update if this equipment belongs to the local player
+        // (server broadcasts equipment for all players including AI agents)
+        if (
+          playerId &&
+          equipmentPayload.playerId &&
+          equipmentPayload.playerId !== playerId
+        ) {
+          return;
+        }
+
+        const nextEquipment = processRawEquipment(equipmentPayload.equipment);
+        setEquipment((prev) =>
+          areEquipmentItemsEqual(prev, nextEquipment) ? prev : nextEquipment,
         );
       }
     };
@@ -151,15 +343,15 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
       }
       // PlayerStatsData is a partial type - safe to cast since we merge with existing state
       const newData = data as unknown as Partial<PlayerStats>;
-      setPlayerStats((prev) =>
-        prev
-          ? {
-              ...prev,
+      setPlayerStats((prev) => {
+        const merged = prev
+          ? mergePlayerStats(prev, {
               ...newData,
               prayerPoints: newData.prayerPoints || prev.prayerPoints,
-            }
-          : (newData as PlayerStats),
-      );
+            })
+          : (newData as PlayerStats);
+        return arePlayerStatsEqual(prev, merged) ? prev : merged;
+      });
     };
 
     // Skills updates - with type guard validation
@@ -171,11 +363,12 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
       if (!playerId || data.playerId === playerId) {
         // Skills event only has skills data - merge with existing state
         const updatedSkills = data.skills as unknown as PlayerStats["skills"];
-        setPlayerStats((prev) =>
-          prev
-            ? { ...prev, skills: updatedSkills }
-            : ({ skills: updatedSkills } as unknown as PlayerStats),
-        );
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, { skills: updatedSkills })
+            : ({ skills: updatedSkills } as unknown as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
     };
 
@@ -186,22 +379,22 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         return;
       }
       if (!playerId || data.playerId === playerId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, {
                 prayerPoints: {
                   current: data.points,
                   max: data.maxPoints,
                 },
-              }
+              })
             : ({
                 prayerPoints: {
                   current: data.points,
                   max: data.maxPoints,
                 },
-              } as PlayerStats),
-        );
+              } as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
     };
 
@@ -215,92 +408,98 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         return;
       }
       if (!playerId || data.playerId === playerId) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, {
                 prayerPoints: {
                   current: data.points,
                   max: data.maxPoints,
                 },
-              }
+              })
             : ({
                 prayerPoints: {
                   current: data.points,
                   max: data.maxPoints,
                 },
-              } as PlayerStats),
-        );
+              } as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
     };
 
-    // Register event listeners
-    world.on(EventType.UI_UPDATE, handleUIUpdate, undefined);
-    world.on(EventType.INVENTORY_UPDATED, handleInventory, undefined);
-    world.on(EventType.INVENTORY_UPDATE_COINS, handleCoins, undefined);
-    world.on(EventType.UI_EQUIPMENT_UPDATE, handleEquipment, undefined);
-    world.on(EventType.STATS_UPDATE, handleStats, undefined);
-    world.on(EventType.SKILLS_UPDATED, handleSkillsUpdate, undefined);
-    world.on(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync, undefined);
-    world.on(
-      EventType.PRAYER_POINTS_CHANGED,
-      handlePrayerPointsChanged,
-      undefined,
-    );
-
-    // Request initial data from cache - uses extracted playerId from deps
+    // Request initial data from cache and live entity state.
     const requestInitial = () => {
-      if (!playerId) return false;
+      const resolvedPlayerId =
+        world.entities?.player?.id ?? world.getPlayer?.()?.id ?? playerId;
+      if (!resolvedPlayerId) return false;
 
       // Get cached inventory
-      const cachedInv = world.network?.lastInventoryByPlayerId?.[playerId];
+      const cachedInv =
+        world.network?.lastInventoryByPlayerId?.[resolvedPlayerId];
       if (cachedInv && Array.isArray(cachedInv.items)) {
-        setInventory(cachedInv.items as InventorySlotViewItem[]);
-        setCoins(cachedInv.coins || 0);
+        const cachedItems = cachedInv.items as InventorySlotViewItem[];
+        setInventory((prev) =>
+          areInventoryItemsEqual(prev, cachedItems)
+            ? prev
+            : cloneInventoryItems(cachedItems),
+        );
+        setCoins((prev) =>
+          prev === (cachedInv.coins || 0) ? prev : cachedInv.coins || 0,
+        );
       }
 
       // Get cached skills
       // Note: lastSkillsByPlayerId is typed as Record<string, { level: number; xp: number }>
       // but at runtime contains Skills data. The intermediate unknown is required because
       // TypeScript sees them as incompatible even though they're structurally similar.
-      const cachedSkills = world.network?.lastSkillsByPlayerId?.[playerId];
+      const cachedSkills =
+        world.network?.lastSkillsByPlayerId?.[resolvedPlayerId];
       if (cachedSkills) {
         // Runtime: cachedSkills has skill-specific keys (attack, strength, etc.)
         const skills = cachedSkills as unknown as PlayerStats["skills"];
-        setPlayerStats((prev) =>
-          prev ? { ...prev, skills } : ({ skills } as PlayerStats),
-        );
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, { skills })
+            : ({ skills } as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
 
       // Get cached equipment
       const cachedEquipment =
-        world.network?.lastEquipmentByPlayerId?.[playerId];
+        world.network?.lastEquipmentByPlayerId?.[resolvedPlayerId];
       if (cachedEquipment) {
-        setEquipment(processRawEquipment(cachedEquipment as RawEquipmentData));
+        const nextEquipment = processRawEquipment(
+          cachedEquipment as RawEquipmentData,
+        );
+        setEquipment((prev) =>
+          areEquipmentItemsEqual(prev, nextEquipment) ? prev : nextEquipment,
+        );
       }
 
       // Get cached prayer state
-      const cachedPrayer = world.network?.lastPrayerStateByPlayerId?.[playerId];
+      const cachedPrayer =
+        world.network?.lastPrayerStateByPlayerId?.[resolvedPlayerId];
       if (cachedPrayer) {
-        setPlayerStats((prev) =>
-          prev
-            ? {
-                ...prev,
+        setPlayerStats((prev) => {
+          const merged = prev
+            ? mergePlayerStats(prev, {
                 prayerPoints: {
                   current: cachedPrayer.points,
                   max: cachedPrayer.maxPoints,
                 },
-              }
+              })
             : ({
                 prayerPoints: {
                   current: cachedPrayer.points,
                   max: cachedPrayer.maxPoints,
                 },
-              } as PlayerStats),
-        );
+              } as PlayerStats);
+          return arePlayerStatsEqual(prev, merged) ? prev : merged;
+        });
       }
 
-      // Get player entity for health/prayer
+      // Get player entity for health and explicit prayer fallback.
       // Entity has health/data properties at runtime that aren't fully exposed in the base type.
       // The intermediate unknown is required because Entity.maxHealth is protected.
       const playerEntity = world.entities?.player;
@@ -318,27 +517,81 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         const entityData = playerEntity as unknown as PlayerEntityData;
 
         const health = entityData.health ?? entityData.data?.health;
-        const maxHealth =
-          entityData.maxHealth ?? entityData.data?.maxHealth ?? 10;
-        const prayerPoints = entityData.data?.prayerPoints ?? 0;
-        const maxPrayerPoints = entityData.data?.maxPrayerPoints ?? 1;
+        const maxHealth = isFiniteNumber(entityData.maxHealth)
+          ? entityData.maxHealth
+          : isFiniteNumber(entityData.data?.maxHealth)
+            ? entityData.data.maxHealth
+            : 10;
+        const prayerPoints = entityData.data?.prayerPoints;
+        const maxPrayerPoints = entityData.data?.maxPrayerPoints;
+        const hasExplicitPrayerPoints =
+          isFiniteNumber(prayerPoints) && isFiniteNumber(maxPrayerPoints);
 
-        if (typeof health === "number") {
-          setPlayerStats(
-            (prev) =>
-              ({
-                ...prev,
-                health: { current: health, max: maxHealth },
-                prayerPoints: { current: prayerPoints, max: maxPrayerPoints },
-              }) as PlayerStats,
-          );
+        if (isFiniteNumber(health) || hasExplicitPrayerPoints) {
+          setPlayerStats((prev) => {
+            const merged = mergePlayerStats(prev, {
+              ...(isFiniteNumber(health)
+                ? {
+                    health: { current: health, max: maxHealth },
+                  }
+                : {}),
+              ...(hasExplicitPrayerPoints
+                ? {
+                    prayerPoints: {
+                      current: prayerPoints,
+                      max: maxPrayerPoints,
+                    },
+                  }
+                : {}),
+            });
+            return arePlayerStatsEqual(prev, merged) ? prev : merged;
+          });
         }
       }
 
       // Request fresh data from server
-      world.emit(EventType.INVENTORY_REQUEST, { playerId });
+      world.emit(EventType.INVENTORY_REQUEST, {
+        playerId: resolvedPlayerId,
+      });
       return true;
     };
+
+    const handlePlayerSpawned = (event: unknown) => {
+      const spawnedPlayerId =
+        typeof event === "object" &&
+        event !== null &&
+        "playerId" in event &&
+        typeof (event as { playerId?: unknown }).playerId === "string"
+          ? (event as { playerId: string }).playerId
+          : null;
+
+      const localPlayerId =
+        world.entities?.player?.id ?? world.getPlayer?.()?.id ?? playerId;
+      if (
+        spawnedPlayerId &&
+        localPlayerId &&
+        spawnedPlayerId !== localPlayerId
+      ) {
+        return;
+      }
+
+      requestInitial();
+    };
+
+    // Register event listeners
+    world.on(EventType.UI_UPDATE, handleUIUpdate, undefined);
+    world.on(EventType.INVENTORY_UPDATED, handleInventory, undefined);
+    world.on(EventType.INVENTORY_UPDATE_COINS, handleCoins, undefined);
+    world.on(EventType.UI_EQUIPMENT_UPDATE, handleEquipment, undefined);
+    world.on(EventType.STATS_UPDATE, handleStats, undefined);
+    world.on(EventType.SKILLS_UPDATED, handleSkillsUpdate, undefined);
+    world.on(EventType.PRAYER_STATE_SYNC, handlePrayerStateSync, undefined);
+    world.on(
+      EventType.PRAYER_POINTS_CHANGED,
+      handlePrayerPointsChanged,
+      undefined,
+    );
+    world.on(EventType.PLAYER_SPAWNED, handlePlayerSpawned, undefined);
 
     // Try to get initial data immediately, or retry after a short delay
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -386,6 +639,12 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
         undefined,
         undefined,
       );
+      world.off(
+        EventType.PLAYER_SPAWNED,
+        handlePlayerSpawned,
+        undefined,
+        undefined,
+      );
     };
   }, [world, playerId]);
 
@@ -399,4 +658,40 @@ export function usePlayerData(world: ClientWorld | null): PlayerDataState {
     setPlayerStats,
     setCoins,
   };
+}
+
+export function PlayerDataProvider({
+  world,
+  children,
+}: PlayerDataProviderProps): React.ReactElement {
+  const value = usePlayerDataState(world);
+  return React.createElement(
+    PlayerDataContext.Provider,
+    { value },
+    React.createElement(
+      PlayerStatsContext.Provider,
+      { value: value.playerStats },
+      children,
+    ),
+  );
+}
+
+export function usePlayerDataContext(): PlayerDataState {
+  const context = useContext(PlayerDataContext);
+
+  if (!context) {
+    throw new Error(
+      "usePlayerDataContext must be used within PlayerDataProvider",
+    );
+  }
+
+  return context;
+}
+
+export function usePlayerStatsContext(): PlayerStats | null {
+  return useContext(PlayerStatsContext);
+}
+
+export function usePlayerData(world: ClientWorld | null): PlayerDataState {
+  return usePlayerDataState(world);
 }

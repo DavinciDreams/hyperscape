@@ -46,7 +46,14 @@ export {
   type DuelResultData,
   type TradeData,
 } from "./useModalPanels";
-export { usePlayerData, type PlayerDataState } from "./usePlayerData";
+export {
+  PlayerDataProvider,
+  usePlayerData,
+  usePlayerDataContext,
+  usePlayerStatsContext,
+  usePlayerDataState,
+  type PlayerDataState,
+} from "./usePlayerData";
 export {
   useFocusTrap,
   type UseFocusTrapOptions,

@@ -125,6 +125,23 @@ const PLAYER_IMPOSTOR_DISTANCES = {
   hysteresis: 5,
 } as const;
 
+let _remoteDeathTraceCache: boolean | undefined;
+function isRemoteDeathTraceEnabled(): boolean {
+  if (_remoteDeathTraceCache !== undefined) return _remoteDeathTraceCache;
+  if (typeof window === "undefined") {
+    _remoteDeathTraceCache = false;
+    return false;
+  }
+  try {
+    _remoteDeathTraceCache =
+      new URLSearchParams(window.location.search).get("traceRemoteDeath") ===
+      "1";
+  } catch {
+    _remoteDeathTraceCache = false;
+  }
+  return _remoteDeathTraceCache;
+}
+
 const FALLBACK_AVATAR_RETRY_DELAY_MS = 15_000;
 const FALLBACK_PLAYER_PALETTE = [
   0x27f5d2, 0xff5b6d, 0xf7c948, 0x7dd3fc,
@@ -1071,17 +1088,19 @@ export class PlayerRemote extends Entity implements HotReloadable {
       currentDeathState === DeathState.DEAD
     ) {
       if (serverEmote !== "death") {
-        console.log(
-          `[PlayerRemote] FORCING death emote (was "${serverEmote}") because deathState=${currentDeathState} for ${this.id}`,
-        );
+        if (isRemoteDeathTraceEnabled()) {
+          console.debug(
+            `[PlayerRemote] FORCING death emote (was "${serverEmote}") because deathState=${currentDeathState} for ${this.id}`,
+          );
+        }
         serverEmote = "death";
         this.data.emote = "death"; // Also fix the data for consistency
       }
     }
 
     // DEBUG: Log when death emote is set but we're in update()
-    if (serverEmote === "death") {
-      console.log(`[PlayerRemote] update() with death emote:`, {
+    if (serverEmote === "death" && isRemoteDeathTraceEnabled()) {
+      console.debug(`[PlayerRemote] update() with death emote:`, {
         id: this.id,
         hasAvatar: !!this.avatar,
         lastEmote: this.lastEmote,
@@ -1129,8 +1148,11 @@ export class PlayerRemote extends Entity implements HotReloadable {
       // Update animation if changed
       if (desiredUrl !== this.lastEmote) {
         // DEBUG: Log death emote application
-        if (serverEmote === "death" || desiredUrl === Emotes.DEATH) {
-          console.log(`[PlayerRemote] update() applying death emote:`, {
+        if (
+          (serverEmote === "death" || desiredUrl === Emotes.DEATH) &&
+          isRemoteDeathTraceEnabled()
+        ) {
+          console.debug(`[PlayerRemote] update() applying death emote:`, {
             id: this.id,
             serverEmote,
             desiredUrl,
@@ -1148,15 +1170,15 @@ export class PlayerRemote extends Entity implements HotReloadable {
           (this.avatar as Avatar).setEmote(desiredUrl);
         }
         this.lastEmote = desiredUrl;
-      } else if (serverEmote === "death") {
+      } else if (serverEmote === "death" && isRemoteDeathTraceEnabled()) {
         // DEBUG: Death emote but animation already matches
-        console.log(`[PlayerRemote] update() death emote already applied:`, {
+        console.debug(`[PlayerRemote] update() death emote already applied:`, {
           id: this.id,
           desiredUrl,
           lastEmote: this.lastEmote,
         });
       }
-    } else if (serverEmote === "death") {
+    } else if (serverEmote === "death" && isRemoteDeathTraceEnabled()) {
       // DEBUG: Avatar not available when death emote is set
       console.warn(`[PlayerRemote] update() death emote but NO AVATAR:`, {
         id: this.id,
@@ -1285,14 +1307,16 @@ export class PlayerRemote extends Entity implements HotReloadable {
       if (isCurrentlyDying && data.e !== "death") {
         // Player is dying - ignore non-death emote changes but continue processing other data
         // IMPORTANT: Don't return early! Other data (position, etc.) still needs to be processed
-        console.log(
-          `[PlayerRemote] BLOCKED emote change to "${data.e}" during death for ${this.id} (deathState=${currentDeathState})`,
-        );
+        if (isRemoteDeathTraceEnabled()) {
+          console.debug(
+            `[PlayerRemote] BLOCKED emote change to "${data.e}" during death for ${this.id} (deathState=${currentDeathState})`,
+          );
+        }
         // Skip emote assignment but continue with rest of modify()
       } else {
         // DEBUG: Log death emote setting
-        if (data.e === "death") {
-          console.log(`[PlayerRemote] Setting death emote:`, {
+        if (data.e === "death" && isRemoteDeathTraceEnabled()) {
+          console.debug(`[PlayerRemote] Setting death emote:`, {
             id: this.id,
             oldEmote: this.data.emote,
             newEmote: data.e,

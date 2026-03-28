@@ -117,6 +117,17 @@ function clampToViewport(
   };
 }
 
+function windowUpdatesAreNoOp(
+  window: WindowState,
+  updates: Partial<WindowState>,
+): boolean {
+  const entries = Object.entries(updates) as Array<
+    [keyof WindowState, WindowState[keyof WindowState]]
+  >;
+
+  return entries.every(([key, value]) => Object.is(window[key], value));
+}
+
 /** Window store state and actions */
 export interface WindowStoreState {
   /** Map of window ID to window state */
@@ -192,8 +203,9 @@ const STORAGE_KEY = "hyperscape-window-layout";
  * - 14: New flush layout with proportional scaling (Minimap→Quests→Skills→Inventory→Menubar right column, Chat left, Action bar bottom center)
  * - 15: Improved flush layout with proper height distribution - right column fills entire viewport height
  * - 16: UI theme and layout improvements - taller chat, action bar bottom anchoring fix
+ * - 17: Add SpellsPanel to the default layout alongside Prayer
  */
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 /** Panel ID to icon mapping for tab display migration */
 const PANEL_ICONS: Record<string, string> = {
@@ -203,6 +215,7 @@ const PANEL_ICONS: Record<string, string> = {
   stats: "📊",
   skills: "⭐",
   prayer: "✨",
+  spells: "🪄",
   combat: "🗡️",
   account: "👤",
   settings: "⚙️",
@@ -600,6 +613,14 @@ const migrations: Record<number, MigrationFn> = {
     );
     return new Map<string, WindowState>();
   },
+
+  // v17: Add spells tab
+  17: () => {
+    debugLog(
+      "[WindowStore Migration v17] Clearing all windows to include spellbook in default layout",
+    );
+    return new Map<string, WindowState>();
+  },
 };
 
 /**
@@ -686,6 +707,7 @@ export const useWindowStore = create<WindowStoreState>()(
         set((state) => {
           const window = state.windows.get(id);
           if (!window) return state;
+          if (windowUpdatesAreNoOp(window, updates)) return state;
 
           const newWindows = new Map(state.windows);
           newWindows.set(id, { ...window, ...updates });
@@ -894,6 +916,9 @@ export const useWindowStore = create<WindowStoreState>()(
             0,
             Math.min(index, window.tabs.length - 1),
           );
+          if (clampedIndex === window.activeTabIndex) {
+            return state;
+          }
 
           const newWindows = new Map(state.windows);
           newWindows.set(windowId, { ...window, activeTabIndex: clampedIndex });
@@ -905,6 +930,7 @@ export const useWindowStore = create<WindowStoreState>()(
         set((state) => {
           const window = state.windows.get(windowId);
           if (!window) return state;
+          if (fromIndex === toIndex) return state;
 
           if (
             fromIndex < 0 ||

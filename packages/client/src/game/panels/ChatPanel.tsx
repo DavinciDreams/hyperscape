@@ -10,6 +10,12 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useThemeStore, useMobileLayout } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+} from "@/ui/theme/themes";
 import type { ClientWorld } from "../../types";
 import { COLORS, MOBILE_CHAT } from "../../constants";
 
@@ -321,10 +327,10 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
   );
 
   const tabs = [
-    { id: "all" as const, icon: "📢", title: "All Messages" },
-    { id: "game" as const, icon: "🎮", title: "Game Messages" },
-    { id: "clan" as const, icon: "👥", title: "Clan Chat" },
-    { id: "private" as const, icon: "💬", title: "Private Messages" },
+    { id: "all" as const, shortLabel: "All", title: "All Messages" },
+    { id: "game" as const, shortLabel: "Game", title: "Game Messages" },
+    { id: "clan" as const, shortLabel: "Clan", title: "Clan Chat" },
+    { id: "private" as const, shortLabel: "PM", title: "Private Messages" },
   ];
 
   return (
@@ -333,10 +339,13 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        backgroundColor: theme.colors.background.panelPrimary,
+        ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
         color: theme.colors.text.primary,
         fontFamily: theme.typography.fontFamily.body,
         fontSize: parseInt(theme.typography.fontSize.sm),
+        border: "none",
+        borderRadius: 0,
+        boxShadow: "none",
       }}
     >
       {/* Tab Bar - Mobile: compact icon-only, Desktop: larger with padding */}
@@ -344,12 +353,12 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
         style={{
           display: "flex",
           gap: 0,
-          borderBottom: `1px solid ${theme.colors.border.default}`,
           padding: `0 ${theme.spacing.xs}px`,
           flexShrink: 0,
           // Mobile: compact height
           height: shouldUseMobileUI ? MOBILE_CHAT.tabBarHeight : "auto",
           alignItems: "center",
+          ...getPanelHeaderStyle(theme),
         }}
       >
         {tabs.map((tab) => (
@@ -366,26 +375,35 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
                 : `${theme.spacing.xs}px ${theme.spacing.sm}px`,
               width: shouldUseMobileUI ? MOBILE_CHAT.tabButtonSize : "auto",
               height: shouldUseMobileUI ? MOBILE_CHAT.tabButtonSize : "auto",
-              background:
-                activeTab === tab.id ? theme.colors.slot.hover : "transparent",
-              border: "none",
-              borderBottom:
-                activeTab === tab.id
-                  ? `2px solid ${theme.colors.accent.primary}`
-                  : "2px solid transparent",
+              ...getInteractiveTileStyle(theme, {
+                active: activeTab === tab.id,
+                radius: theme.borderRadius.sm,
+              }),
               fontSize: shouldUseMobileUI
-                ? parseInt(theme.typography.fontSize.lg)
-                : parseInt(theme.typography.fontSize.base),
+                ? parseInt(theme.typography.fontSize.xs)
+                : parseInt(theme.typography.fontSize.sm),
               cursor: "pointer",
               transition: theme.transitions.fast,
-              opacity: activeTab === tab.id ? 1 : 0.6,
+              opacity: activeTab === tab.id ? 1 : 0.78,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              gap: shouldUseMobileUI ? 0 : theme.spacing.xs,
+              margin: "4px 2px",
               touchAction: "manipulation",
+              color:
+                activeTab === tab.id
+                  ? theme.colors.text.primary
+                  : theme.colors.text.secondary,
+              fontWeight:
+                activeTab === tab.id
+                  ? theme.typography.fontWeight.semibold
+                  : theme.typography.fontWeight.medium,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
             }}
           >
-            {tab.icon}
+            <span>{tab.shortLabel}</span>
           </button>
         ))}
       </div>
@@ -398,10 +416,15 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
           minHeight: 0,
           overflowY: "auto",
           overflowX: "hidden",
-          padding: `${theme.spacing.sm}px ${theme.spacing.sm}px`,
+          padding: `${theme.spacing.sm}px ${theme.spacing.sm}px ${theme.spacing.md}px`,
           display: "flex",
           flexDirection: "column",
-          gap: 2,
+          gap: 4,
+          ...getPanelInsetStyle(theme, {
+            emphasis: "normal",
+            radius: theme.borderRadius.md,
+            padding: `${theme.spacing.sm}px ${theme.spacing.sm}px ${theme.spacing.md}px`,
+          }),
         }}
         className="scrollbar-thin"
       >
@@ -432,12 +455,26 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
               onClick={handleClick}
               style={{
                 fontSize: 11,
-                lineHeight: 1.4,
+                lineHeight: 1.5,
                 wordBreak: "break-word",
                 overflowWrap: "break-word",
                 whiteSpace: "pre-wrap",
                 cursor: isClickable ? "pointer" : "default",
                 textDecoration: isClickable ? "underline" : "none",
+                padding: "4px 6px",
+                borderRadius: theme.borderRadius.sm,
+                background:
+                  msgType === "system" || msgType === "warning"
+                    ? "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(22, 26, 31, 0.96) 100%)"
+                    : "linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(18, 22, 27, 0.82) 100%)",
+                border:
+                  msgType === "system" || msgType === "warning"
+                    ? `1px solid ${theme.colors.border.hover}55`
+                    : `1px solid ${theme.colors.border.default}20`,
+                boxShadow:
+                  msgType === "system" || msgType === "warning"
+                    ? "inset 0 1px 0 rgba(255,255,255,0.05)"
+                    : "inset 0 1px 0 rgba(255,255,255,0.03)",
               }}
               title={clickTitle}
             >
@@ -503,11 +540,16 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
       <div
         style={{
           borderTop: `1px solid ${theme.colors.border.default}`,
-          padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+          padding: `${theme.spacing.sm}px`,
           flexShrink: 0,
           display: "flex",
           gap: theme.spacing.xs,
           alignItems: "center",
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: theme.borderRadius.md,
+            padding: `${theme.spacing.sm}px`,
+          }),
         }}
       >
         <input
@@ -521,17 +563,20 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
           placeholder="Type a message..."
           style={{
             flex: 1,
-            background: "transparent",
-            border: "none",
-            borderBottom: isInputFocused
-              ? `1px solid ${theme.colors.border.focus}`
-              : `1px solid transparent`,
-            padding: `${theme.spacing.xs}px 0`,
+            ...getPanelInsetStyle(theme, {
+              emphasis: "normal",
+              radius: theme.borderRadius.sm,
+              padding: `${theme.spacing.xs}px ${theme.spacing.sm}px`,
+            }),
+            border: `1px solid ${isInputFocused ? theme.colors.border.focus : theme.colors.border.default}`,
             color: theme.colors.text.primary,
             fontSize: parseInt(theme.typography.fontSize.sm),
             outline: "none",
             transition: theme.transitions.fast,
             minHeight: shouldUseMobileUI ? 32 : 28,
+            boxShadow: isInputFocused
+              ? `0 0 0 1px ${theme.colors.border.focus}40`
+              : "none",
           }}
         />
         <button
@@ -540,21 +585,25 @@ export function ChatPanel({ world }: ChatPanelProps): React.ReactElement {
           title="Send message"
           aria-label="Send message"
           style={{
-            padding: 0,
-            background: "transparent",
-            border: "none",
-            fontSize: shouldUseMobileUI ? 22 : 20,
+            ...getInteractiveTileStyle(theme, {
+              active: Boolean(inputValue.trim()),
+              radius: theme.borderRadius.sm,
+            }),
+            fontSize: shouldUseMobileUI ? 20 : 18,
             cursor: inputValue.trim() ? "pointer" : "default",
             transition: theme.transitions.fast,
-            opacity: inputValue.trim() ? 1 : 0.3,
+            opacity: inputValue.trim() ? 1 : 0.55,
             color: inputValue.trim()
-              ? theme.colors.accent.primary
+              ? theme.colors.text.primary
               : theme.colors.text.muted,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            width: 32,
-            height: 32,
+            width: 34,
+            height: 34,
+            boxShadow: inputValue.trim()
+              ? `0 8px 18px ${theme.colors.accent.primary}33`
+              : "none",
           }}
         >
           ➤

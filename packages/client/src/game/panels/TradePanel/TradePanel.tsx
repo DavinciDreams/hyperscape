@@ -22,7 +22,15 @@
 import { useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useThemeStore } from "@/ui";
+import {
+  getInteractiveTileStyle,
+  getPanelHeaderStyle,
+  getPanelInsetStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
 import type { TradeOfferItem } from "@hyperscape/shared";
+import { UI } from "@/ui/core";
 
 // Import from split modules
 import type {
@@ -51,6 +59,7 @@ export function TradePanel({
   onValueItem,
 }: TradePanelProps) {
   const theme = useThemeStore((s) => s.theme);
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
@@ -147,8 +156,11 @@ export function TradePanel({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center"
-      style={{ background: theme.colors.background.overlay }}
+      className="fixed inset-0 flex items-center justify-center"
+      style={{
+        background: theme.colors.background.overlay,
+        zIndex: UI.Z_INDEX.MODAL,
+      }}
     >
       {/* CSS Animation for pulse effect */}
       <style>{`
@@ -183,8 +195,8 @@ export function TradePanel({
       <div
         className="rounded-lg shadow-xl"
         style={{
-          background: `linear-gradient(135deg, ${theme.colors.background.panelSecondary} 0%, ${theme.colors.background.panelPrimary} 100%)`,
-          border: `2px solid ${theme.colors.border.decorative}`,
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
           // OSRS layout: wider to fit inventory on right side
           width: state.screen === "offer" ? "680px" : "480px",
         }}
@@ -193,8 +205,7 @@ export function TradePanel({
         <div
           className="px-4 py-3 rounded-t-lg flex items-center justify-between"
           style={{
-            background: theme.colors.background.panelSecondary,
-            borderBottom: `1px solid ${theme.colors.border.decorative}`,
+            ...getPanelHeaderStyle(theme),
           }}
         >
           <h2
@@ -223,12 +234,20 @@ export function TradePanel({
           <button
             onClick={onCancel}
             className="text-xl font-bold px-2 rounded transition-colors"
-            style={{ color: theme.colors.text.muted }}
+            style={{ ...closeButtonStyle, width: 28, height: 28, fontSize: 18 }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = theme.colors.text.primary;
+              e.currentTarget.style.backgroundColor = String(
+                closeButtonStyle["--shell-button-hover-bg"],
+              );
+              e.currentTarget.style.color = String(
+                closeButtonStyle["--shell-button-hover-fg"],
+              );
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = theme.colors.text.muted;
+              e.currentTarget.style.backgroundColor = String(
+                closeButtonStyle.background,
+              );
+              e.currentTarget.style.color = String(closeButtonStyle.color);
             }}
           >
             ×
@@ -244,12 +263,20 @@ export function TradePanel({
                 {/* My offer */}
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-2">
-                    <h3
-                      className="text-sm font-bold"
-                      style={{ color: theme.colors.text.accent }}
-                    >
-                      Your Offer
-                    </h3>
+                    <div>
+                      <div
+                        className="text-[10px] uppercase tracking-[0.14em] mb-1"
+                        style={{ color: theme.colors.text.muted }}
+                      >
+                        Contract Tray
+                      </div>
+                      <h3
+                        className="text-sm font-bold"
+                        style={{ color: theme.colors.text.accent }}
+                      >
+                        Your Offer
+                      </h3>
+                    </div>
                     {state.myAccepted && (
                       <span
                         className="text-xs px-2 py-0.5 rounded"
@@ -267,8 +294,10 @@ export function TradePanel({
                     className="grid gap-1 p-2 rounded"
                     style={{
                       gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                      background: theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}`,
+                      ...getPanelInsetStyle(theme, {
+                        emphasis: "strong",
+                        radius: theme.borderRadius.md,
+                      }),
                     }}
                   >
                     {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
@@ -291,13 +320,20 @@ export function TradePanel({
                   <div
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
-                      background: theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}`,
+                      ...getPanelInsetStyle(theme, {
+                        emphasis: "strong",
+                        radius: theme.borderRadius.md,
+                      }),
                       color: theme.colors.text.secondary,
                     }}
                   >
                     Value:{" "}
-                    <span style={{ color: "#ffd700", fontWeight: "bold" }}>
+                    <span
+                      style={{
+                        color: theme.colors.accent.gold,
+                        fontWeight: "bold",
+                      }}
+                    >
                       {formatGoldValue(state.myOfferValue)} gp
                     </span>
                   </div>
@@ -312,12 +348,20 @@ export function TradePanel({
                 {/* Their offer */}
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-2">
-                    <h3
-                      className="text-sm font-bold"
-                      style={{ color: theme.colors.text.accent }}
-                    >
-                      {state.partner.name}'s Offer
-                    </h3>
+                    <div>
+                      <div
+                        className="text-[10px] uppercase tracking-[0.14em] mb-1"
+                        style={{ color: theme.colors.text.muted }}
+                      >
+                        Counterparty Tray
+                      </div>
+                      <h3
+                        className="text-sm font-bold"
+                        style={{ color: theme.colors.text.accent }}
+                      >
+                        {state.partner.name}'s Offer
+                      </h3>
+                    </div>
                     {state.theirAccepted && (
                       <span
                         className="text-xs px-2 py-0.5 rounded"
@@ -335,8 +379,10 @@ export function TradePanel({
                     className="grid gap-1 p-2 rounded"
                     style={{
                       gridTemplateColumns: `repeat(${TRADE_GRID_COLS}, 36px)`,
-                      background: theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}`,
+                      ...getPanelInsetStyle(theme, {
+                        emphasis: "strong",
+                        radius: theme.borderRadius.md,
+                      }),
                     }}
                   >
                     {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
@@ -354,13 +400,20 @@ export function TradePanel({
                   <div
                     className="mt-2 px-2 py-1 rounded text-xs text-center"
                     style={{
-                      background: theme.colors.background.panelSecondary,
-                      border: `1px solid ${theme.colors.border.default}`,
+                      ...getPanelInsetStyle(theme, {
+                        emphasis: "strong",
+                        radius: theme.borderRadius.md,
+                      }),
                       color: theme.colors.text.secondary,
                     }}
                   >
                     Value:{" "}
-                    <span style={{ color: "#ffd700", fontWeight: "bold" }}>
+                    <span
+                      style={{
+                        color: theme.colors.accent.gold,
+                        fontWeight: "bold",
+                      }}
+                    >
                       {formatGoldValue(state.theirOfferValue)} gp
                     </span>
                   </div>
@@ -371,12 +424,20 @@ export function TradePanel({
               <div
                 className="mt-3 px-3 py-2 rounded text-sm flex items-center justify-between"
                 style={{
-                  background: theme.colors.background.panelSecondary,
-                  border: `1px solid ${theme.colors.border.decorative}`,
+                  ...getPanelInsetStyle(theme, {
+                    emphasis: "strong",
+                    radius: theme.borderRadius.md,
+                  }),
                 }}
               >
                 {/* Partner free slots indicator (OSRS-style) */}
                 <span style={{ color: theme.colors.text.secondary }}>
+                  <span
+                    className="mr-2 uppercase tracking-[0.14em] text-[10px]"
+                    style={{ color: theme.colors.text.muted }}
+                  >
+                    Capacity
+                  </span>
                   Partner's free slots:{" "}
                   <span
                     style={{
@@ -452,8 +513,10 @@ export function TradePanel({
             <div
               className="mt-3 px-3 py-2 rounded text-sm text-center"
               style={{
-                background: `${theme.colors.state.warning}20`,
-                border: `1px solid ${theme.colors.state.warning}50`,
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "strong",
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.state.warning,
               }}
             >
@@ -466,9 +529,11 @@ export function TradePanel({
             <div
               className="mt-3 px-3 py-2 rounded text-sm text-center"
               style={{
-                background: "rgba(239, 68, 68, 0.2)",
-                border: "1px solid rgba(239, 68, 68, 0.5)",
-                color: "#ef4444",
+                ...getPanelInsetStyle(theme, {
+                  emphasis: "strong",
+                  radius: theme.borderRadius.md,
+                }),
+                color: theme.colors.state.danger,
               }}
             >
               ⚠️ Items have been removed from the trade!
@@ -482,25 +547,25 @@ export function TradePanel({
               disabled={state.myAccepted}
               className="flex-1 py-2.5 rounded text-sm font-bold transition-all"
               style={{
-                background: state.myAccepted
-                  ? theme.colors.background.tertiary
-                  : `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`,
+                ...getInteractiveTileStyle(theme, {
+                  active: !state.myAccepted,
+                  disabled: state.myAccepted,
+                  accentColor: theme.colors.state.success,
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.text.primary,
-                border: state.myAccepted
-                  ? `1px solid ${theme.colors.border.default}`
-                  : `1px solid ${theme.colors.state.success}`,
-                textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+                textShadow: "0 1px 2px rgba(0,0,0,0.35)",
                 opacity: state.myAccepted ? 0.7 : 1,
                 cursor: state.myAccepted ? "default" : "pointer",
               }}
               onMouseEnter={(e) => {
                 if (!state.myAccepted) {
-                  e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.success} 0%, ${theme.colors.state.success}CC 100%)`;
+                  e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.08) 0%, ${theme.colors.state.success}26 22%, rgba(20, 42, 24, 0.98) 100%)`;
                 }
               }}
               onMouseLeave={(e) => {
                 if (!state.myAccepted) {
-                  e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.success}CC 0%, ${theme.colors.state.success}AA 100%)`;
+                  e.currentTarget.style.background = `linear-gradient(180deg, rgba(245, 252, 246, 0.06) 0%, ${theme.colors.state.success}1c 20%, rgba(22, 36, 25, 0.98) 100%)`;
                 }
               }}
             >
@@ -514,16 +579,19 @@ export function TradePanel({
               onClick={onCancel}
               className="flex-1 py-2.5 rounded text-sm font-bold transition-all"
               style={{
-                background: `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`,
+                ...getInteractiveTileStyle(theme, {
+                  active: true,
+                  accentColor: theme.colors.state.danger,
+                  radius: theme.borderRadius.md,
+                }),
                 color: theme.colors.text.primary,
-                border: `1px solid ${theme.colors.state.danger}`,
-                textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+                textShadow: "0 1px 2px rgba(0,0,0,0.35)",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.danger} 0%, ${theme.colors.state.danger}CC 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 246, 246, 0.08) 0%, ${theme.colors.state.danger}24 22%, rgba(53, 24, 24, 0.98) 100%)`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = `linear-gradient(135deg, ${theme.colors.state.danger}CC 0%, ${theme.colors.state.danger}AA 100%)`;
+                e.currentTarget.style.background = `linear-gradient(180deg, rgba(255, 246, 246, 0.06) 0%, ${theme.colors.state.danger}1a 20%, rgba(40, 24, 24, 0.98) 100%)`;
               }}
             >
               Cancel

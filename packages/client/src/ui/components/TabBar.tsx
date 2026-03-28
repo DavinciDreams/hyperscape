@@ -6,6 +6,10 @@ import { Tab } from "./Tab";
 import { useTheme } from "../stores/themeStore";
 import { useWindowStore } from "../stores/windowStore";
 import { useDragStore } from "../stores/dragStore";
+import {
+  getShellControlButtonStyle,
+  getTabBarChromeStyle,
+} from "../theme/themes";
 import type { TabBarProps } from "../types";
 
 /** Extended TabBar props with window controls */
@@ -34,6 +38,8 @@ interface ExtendedTabBarProps extends TabBarProps {
  */
 export const TabBar = memo(function TabBar({
   windowId,
+  panelId,
+  reserveArrowKeys = false,
   className,
   style,
   dragHandleProps,
@@ -62,6 +68,28 @@ export const TabBar = memo(function TabBar({
       );
     }
   };
+
+  const focusTabAtIndex = React.useCallback(
+    (index: number) => {
+      const nextIndex = Math.min(Math.max(index, 0), tabs.length - 1);
+      const nextTab = tabs[nextIndex];
+      if (!nextTab) return;
+      setActiveTab(nextIndex);
+      requestAnimationFrame(() => {
+        const tabElement = document.getElementById(
+          `window-tab-${windowId}-${nextTab.id}`,
+        );
+        if (tabElement instanceof HTMLElement) {
+          tabElement.focus();
+          tabElement.scrollIntoView({
+            block: "nearest",
+            inline: "nearest",
+          });
+        }
+      });
+    },
+    [setActiveTab, tabs, windowId],
+  );
 
   useEffect(() => {
     updateScrollState();
@@ -209,47 +237,64 @@ export const TabBar = memo(function TabBar({
       ? Math.min(Math.floor(relativePosition.x / 100), tabs.length)
       : -1;
 
+  const dropIndicatorLeft = React.useMemo(() => {
+    if (!(isOver && canDrop) || !relativePosition) {
+      return -1;
+    }
+
+    const container = tabsContainerRef.current;
+    if (!container) {
+      return dropIndicatorIndex >= 0 ? dropIndicatorIndex * 40 : -1;
+    }
+
+    const tabElements = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-tab]"),
+    );
+    const relativeX = relativePosition.x + container.scrollLeft;
+    if (tabElements.length === 0) {
+      return 0;
+    }
+
+    let accumulatedWidth = 0;
+    for (let i = 0; i < tabElements.length; i += 1) {
+      const tabWidth = tabElements[i].getBoundingClientRect().width;
+      const midpoint = accumulatedWidth + tabWidth / 2;
+      if (relativeX < midpoint) {
+        return accumulatedWidth - container.scrollLeft;
+      }
+      accumulatedWidth += tabWidth;
+    }
+
+    return accumulatedWidth - container.scrollLeft;
+  }, [canDrop, dropIndicatorIndex, isOver, relativePosition, tabs.length]);
+
   const containerStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
-    backgroundColor: theme.colors.background.secondary,
-    borderBottom: `1px solid ${theme.colors.border.default}`,
-    minHeight: 28,
     overflow: "hidden",
     position: "relative",
     userSelect: "none",
     touchAction: dragHandleProps?.style.touchAction || "none",
     cursor: isUnlocked ? dragHandleProps?.style.cursor || "move" : "default",
-    // Highlight when dragging from another window and hovering
-    ...(isOver && canDrop
-      ? {
-          backgroundColor: theme.colors.background.tertiary,
-          borderBottom: `1px solid ${theme.colors.accent.primary}`,
-        }
-      : {}),
-    // Dim when dragging from this window
-    ...(isDraggingFromThisWindow
-      ? {
-          opacity: 0.7,
-        }
-      : {}),
-    // Highlight border when potential drop target (tab or window from another source)
-    ...(isDraggingFromOther && !isOver
-      ? {
-          borderBottom: `1px solid ${theme.colors.border.hover}`,
-        }
-      : {}),
+    padding: "0 8px",
+    gap: 6,
+    ...getTabBarChromeStyle(theme, {
+      isDropTarget: isOver && canDrop,
+      isPotentialDropTarget: isDraggingFromOther && !isOver,
+      isSourceDragging: isDraggingFromThisWindow,
+    }),
     ...style,
   };
 
   const dropIndicatorStyle: React.CSSProperties = {
     position: "absolute",
-    width: 2,
-    top: 4,
-    bottom: 4,
+    width: 3,
+    top: 6,
+    bottom: 6,
     backgroundColor: theme.colors.accent.primary,
-    borderRadius: 1,
+    borderRadius: 999,
     transition: "left 100ms ease-out",
+    boxShadow: `0 0 14px ${theme.colors.accent.primary}`,
   };
 
   const tabsContainerStyle: React.CSSProperties = {
@@ -257,44 +302,42 @@ export const TabBar = memo(function TabBar({
     flex: 1,
     overflow: "auto",
     scrollbarWidth: "none",
+    minWidth: 0,
+    paddingBlock: 3,
   };
 
   const scrollButtonStyle: React.CSSProperties = {
-    width: 20,
-    height: 20,
-    border: "none",
-    background: "transparent",
-    color: theme.colors.text.muted,
-    cursor: "pointer",
-    borderRadius: 2,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 12,
-    flexShrink: 0,
+    ...getShellControlButtonStyle(theme),
+    marginBlock: 5,
   };
 
   const actionButtonStyle: React.CSSProperties = {
-    width: 20,
-    height: 20,
-    border: "none",
-    background: "transparent",
-    color: theme.colors.text.muted,
-    cursor: "pointer",
-    borderRadius: 2,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    ...getShellControlButtonStyle(theme),
+    marginBlock: 5,
     fontSize: 14,
-    flexShrink: 0,
+  };
+
+  const applyShellButtonHover = (button: HTMLButtonElement) => {
+    button.style.color = String(
+      button.style.getPropertyValue("--shell-button-hover-fg"),
+    );
+    button.style.backgroundColor = String(
+      button.style.getPropertyValue("--shell-button-hover-bg"),
+    );
+    button.style.borderColor = theme.colors.border.hover;
+  };
+
+  const clearShellButtonHover = (button: HTMLButtonElement) => {
+    button.style.color = theme.colors.text.muted;
+    button.style.backgroundColor = "transparent";
+    button.style.borderColor = "transparent";
   };
 
   const buttonGroupStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
-    gap: 2,
-    marginLeft: 4,
-    marginRight: 4,
+    gap: 4,
+    marginLeft: 2,
   };
 
   // Handle drag on the container (not on tabs or buttons)
@@ -312,6 +355,30 @@ export const TabBar = memo(function TabBar({
     dragHandleProps?.onPointerDown(e);
   };
 
+  const handleTabNavigate = React.useCallback(
+    (direction: "previous" | "next" | "first" | "last") => {
+      if (tabs.length === 0) return;
+      switch (direction) {
+        case "first":
+          focusTabAtIndex(0);
+          return;
+        case "last":
+          focusTabAtIndex(tabs.length - 1);
+          return;
+        case "previous":
+          focusTabAtIndex(
+            activeTabIndex <= 0 ? tabs.length - 1 : activeTabIndex - 1,
+          );
+          return;
+        case "next":
+          focusTabAtIndex(
+            activeTabIndex >= tabs.length - 1 ? 0 : activeTabIndex + 1,
+          );
+      }
+    },
+    [activeTabIndex, focusTabAtIndex, tabs.length],
+  );
+
   // Combine refs: dropProps.ref for drop target registration, tabBarRef for position calculations
   const setTabBarRef = (node: HTMLDivElement | null) => {
     tabBarRef.current = node;
@@ -328,6 +395,7 @@ export const TabBar = memo(function TabBar({
       style={containerStyle}
       onPointerDown={handlePointerDown}
       role="tablist"
+      aria-orientation="horizontal"
       aria-label="Window tabs"
       data-drop-id={dropProps["data-drop-id"]}
     >
@@ -336,7 +404,7 @@ export const TabBar = memo(function TabBar({
         <div
           style={{
             ...dropIndicatorStyle,
-            left: dropIndicatorIndex * 100, // Approximate tab width
+            left: Math.max(0, dropIndicatorLeft),
           }}
         />
       )}
@@ -350,11 +418,17 @@ export const TabBar = memo(function TabBar({
             e.stopPropagation()
           }
           onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.currentTarget.style.color = theme.colors.text.primary;
+            applyShellButtonHover(e.currentTarget);
           }}
           onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.currentTarget.style.color = theme.colors.text.muted;
+            clearShellButtonHover(e.currentTarget);
           }}
+          onFocus={(e: React.FocusEvent<HTMLButtonElement>) =>
+            applyShellButtonHover(e.currentTarget)
+          }
+          onBlur={(e: React.FocusEvent<HTMLButtonElement>) =>
+            clearShellButtonHover(e.currentTarget)
+          }
           aria-label="Scroll tabs left"
         >
           ◀
@@ -368,7 +442,11 @@ export const TabBar = memo(function TabBar({
             key={tab.id}
             tab={tab}
             isActive={index === activeTabIndex}
+            tabId={`window-tab-${windowId}-${tab.id}`}
+            panelId={panelId}
             onActivate={() => setActiveTab(index)}
+            onNavigate={handleTabNavigate}
+            reserveArrowKeys={reserveArrowKeys}
             onClose={tab.closeable ? () => removeTab(tab.id) : undefined}
             // Dim the tab if it's the one being dragged
             style={draggingTabId === tab.id ? { opacity: 0.4 } : undefined}
@@ -387,7 +465,8 @@ export const TabBar = memo(function TabBar({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              marginLeft: 2,
+              marginLeft: 4,
+              minWidth: 28,
             }}
           >
             {draggedTabInfo.icon || draggedTabInfo.label?.charAt(0) || "+"}
@@ -404,11 +483,17 @@ export const TabBar = memo(function TabBar({
             e.stopPropagation()
           }
           onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.currentTarget.style.color = theme.colors.text.primary;
+            applyShellButtonHover(e.currentTarget);
           }}
           onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.currentTarget.style.color = theme.colors.text.muted;
+            clearShellButtonHover(e.currentTarget);
           }}
+          onFocus={(e: React.FocusEvent<HTMLButtonElement>) =>
+            applyShellButtonHover(e.currentTarget)
+          }
+          onBlur={(e: React.FocusEvent<HTMLButtonElement>) =>
+            clearShellButtonHover(e.currentTarget)
+          }
           aria-label="Scroll tabs right"
         >
           ▶
@@ -427,21 +512,27 @@ export const TabBar = memo(function TabBar({
             title="Add tab"
             aria-label="Add new tab"
             onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.currentTarget.style.color = theme.colors.text.primary;
-              e.currentTarget.style.backgroundColor =
-                theme.colors.background.tertiary;
+              applyShellButtonHover(e.currentTarget);
             }}
             onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.currentTarget.style.color = theme.colors.text.muted;
-              e.currentTarget.style.backgroundColor = "transparent";
+              clearShellButtonHover(e.currentTarget);
             }}
+            onFocus={(e: React.FocusEvent<HTMLButtonElement>) =>
+              applyShellButtonHover(e.currentTarget)
+            }
+            onBlur={(e: React.FocusEvent<HTMLButtonElement>) =>
+              clearShellButtonHover(e.currentTarget)
+            }
           >
             +
           </button>
         )}
         {isUnlocked && onCloseWindow && (
           <button
-            style={actionButtonStyle}
+            style={{
+              ...actionButtonStyle,
+              ...getShellControlButtonStyle(theme, "danger"),
+            }}
             data-close-button
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
               e.stopPropagation();
@@ -453,13 +544,17 @@ export const TabBar = memo(function TabBar({
             title="Close window"
             aria-label="Close window"
             onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.currentTarget.style.color = theme.colors.text.primary;
-              e.currentTarget.style.backgroundColor = theme.colors.state.danger;
+              applyShellButtonHover(e.currentTarget);
             }}
             onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.currentTarget.style.color = theme.colors.text.muted;
-              e.currentTarget.style.backgroundColor = "transparent";
+              clearShellButtonHover(e.currentTarget);
             }}
+            onFocus={(e: React.FocusEvent<HTMLButtonElement>) =>
+              applyShellButtonHover(e.currentTarget)
+            }
+            onBlur={(e: React.FocusEvent<HTMLButtonElement>) =>
+              clearShellButtonHover(e.currentTarget)
+            }
           >
             ×
           </button>

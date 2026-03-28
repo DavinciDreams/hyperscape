@@ -10,6 +10,7 @@
 
 import { useCallback, useState, type CSSProperties } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
+import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
 import type { TradeRequestModalState } from "@hyperscape/shared";
 
 interface TradeRequestModalProps {
@@ -36,10 +37,11 @@ export function TradeRequestModal({
   const { name, level } = state.fromPlayer;
 
   const playerInfoStyle: CSSProperties = {
-    background: theme.colors.background.panelSecondary,
-    border: `1px solid ${theme.colors.border.default}`,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.md,
+    ...getPanelInsetStyle(theme, {
+      emphasis: "strong",
+      radius: theme.borderRadius.md,
+      padding: theme.spacing.md,
+    }),
     textAlign: "center",
     marginBottom: theme.spacing.lg,
   };
@@ -57,21 +59,25 @@ export function TradeRequestModal({
 
   const acceptButtonStyle: CSSProperties = {
     ...baseButtonStyle,
-    background: acceptHover
-      ? theme.colors.state.success
-      : `${theme.colors.state.success}cc`,
+    ...getInteractiveTileStyle(theme, {
+      active: true,
+      hovered: acceptHover,
+      accentColor: theme.colors.state.success,
+      radius: theme.borderRadius.md,
+    }),
     color: "#fff",
-    border: `1px solid ${theme.colors.state.success}`,
     transform: acceptHover ? "translateY(-1px)" : "none",
   };
 
   const declineButtonStyle: CSSProperties = {
     ...baseButtonStyle,
-    background: declineHover
-      ? theme.colors.state.danger
-      : `${theme.colors.state.danger}cc`,
+    ...getInteractiveTileStyle(theme, {
+      active: true,
+      hovered: declineHover,
+      accentColor: theme.colors.state.danger,
+      radius: theme.borderRadius.md,
+    }),
     color: "#fff",
-    border: `1px solid ${theme.colors.state.danger}`,
     transform: declineHover ? "translateY(-1px)" : "none",
   };
 

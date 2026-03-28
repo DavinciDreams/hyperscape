@@ -25,6 +25,7 @@ import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
 import { logger } from "./lib/logger";
+import { devValidateManifest } from "./lib/manifestValidator";
 import { primeStreamingAccessTokenFromWindow } from "./lib/streamingAccessToken";
 import {
   applyHyperscapeAuthMessage,
@@ -134,6 +135,7 @@ if (typeof window !== "undefined") {
   const windowWithEnv = window as Window & {
     env?: { PUBLIC_CDN_URL?: string };
     __CDN_URL?: string;
+    __ASSETS_URL?: string;
   };
   // Scrub streaming viewer secrets before React or telemetry code can observe
   // them in the address bar. Hash takes precedence over query for compatibility.
@@ -149,6 +151,7 @@ if (typeof window !== "undefined") {
         .replace("0.0.0.0", "localhost");
     }
     windowWithEnv.__CDN_URL = resolvedCdn;
+    windowWithEnv.__ASSETS_URL = resolvedCdn;
   }
 }
 
@@ -167,6 +170,15 @@ if (!globalThis.setImmediate) {
     callback: (...args: unknown[]) => void,
     ...args: unknown[]
   ) => setTimeout(callback, 0, ...args)) as unknown as typeof setImmediate;
+}
+
+try {
+  devValidateManifest();
+} catch (error) {
+  console.warn(
+    "[index] Development manifest validation failed:",
+    error instanceof Error ? error.message : String(error),
+  );
 }
 
 // Parse URL parameters for embedded configuration
@@ -233,7 +245,7 @@ if (isEmbedded) {
     // It will be set via postMessage from parent window or from session storage
     authToken: "", // Will be populated via secure postMessage
     characterId: (params.characterId as string) || undefined,
-    wsUrl: (params.wsUrl as string) || GAME_WS_URL || "ws://localhost:5555/ws",
+    wsUrl: (params.wsUrl as string) || GAME_WS_URL || "ws://localhost:5556/ws",
     mode,
     followEntity: (params.followEntity as string) || undefined,
     hiddenUI: validHiddenUI.length > 0 ? validHiddenUI : undefined,
@@ -399,7 +411,9 @@ function cleanupCorruptedPrivyData(): void {
             errorStr.includes("setImmedia") ||
             errorStr.includes("Unexpected token")
           ) {
-            console.warn(`[App] 🧹 Found corrupted localStorage key: ${key}`);
+            if (import.meta.env.DEV) {
+              console.warn(`[App] Found corrupted localStorage key: ${key}`);
+            }
             corruptedKeys.push(key);
           }
         }
@@ -408,14 +422,13 @@ function cleanupCorruptedPrivyData(): void {
 
     // Remove corrupted keys
     if (corruptedKeys.length > 0) {
-      console.log(
-        `[App] 🧹 Cleaning up ${corruptedKeys.length} corrupted Privy keys`,
-      );
       corruptedKeys.forEach((key) => {
         try {
           localStorage.removeItem(key);
         } catch (e) {
-          console.warn(`[App] Failed to remove corrupted key ${key}:`, e);
+          if (import.meta.env.DEV) {
+            console.warn(`[App] Failed to remove corrupted key ${key}:`, e);
+          }
         }
       });
     }
@@ -424,8 +437,15 @@ function cleanupCorruptedPrivyData(): void {
   }
 }
 
-// Run cleanup on app load
-cleanupCorruptedPrivyData();
+// Defer cleanup so app boot is not blocked on a full localStorage scan.
+if (typeof window !== "undefined") {
+  const schedulePrivyCleanup = () => cleanupCorruptedPrivyData();
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(schedulePrivyCleanup, { timeout: 1500 });
+  } else {
+    globalThis.setTimeout(schedulePrivyCleanup, 0);
+  }
+}
 
 // In development, aggressively unregister any stale service workers.
 // Devs occasionally run production builds locally ('vite preview'), which installs
@@ -436,9 +456,6 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
     .then((registrations) => {
       for (const registration of registrations) {
         registration.unregister();
-        console.log(
-          "[App] 🧹 Unregistered stale service worker in development mode",
-        );
       }
     })
     .catch((err) =>
@@ -451,7 +468,6 @@ function App() {
   const appId = import.meta.env.PUBLIC_PRIVY_APP_ID || "";
   const privyEnabled = appId.length > 0 && !appId.includes("your-privy-app-id");
 
-  const [isAuthenticated, setIsAuthenticated] = React.useState(false);
   const [authState, setAuthState] = React.useState(privyAuthManager.getState());
   const [showCharacterPage, setShowCharacterPage] =
     React.useState<boolean>(privyEnabled);
@@ -487,10 +503,8 @@ function App() {
       }
 
       // Use PrivyAuthManager with localStorage fallback
-      const accountId =
-        privyAuthManager.getUserId() || localStorage.getItem("privy_user_id");
+      const accountId = authState.privyUserId || privyAuthManager.getUserId();
       if (!accountId) {
-        console.warn("[App] No privy_user_id found");
         // Don't immediately assume no username - Privy may still be writing
         // Stay in loading state briefly, then check again
         setHasUsername(null);
@@ -513,23 +527,10 @@ function App() {
           if (response.ok) {
             const data = await response.json();
             setHasUsername(data.exists);
-            console.log(
-              `[App] User ${accountId} ${data.exists ? "has" : "does not have"} username`,
-            );
             setIsCheckingUsername(false);
             return;
-          } else {
-            console.warn(
-              `[App] Username check failed (attempt ${attempt + 1}/${maxRetries}):`,
-              response.statusText,
-            );
           }
-        } catch (error) {
-          console.warn(
-            `[App] Username check error (attempt ${attempt + 1}/${maxRetries}):`,
-            error,
-          );
-        }
+        } catch {}
 
         // Wait before retry (unless last attempt)
         if (attempt < maxRetries - 1) {
@@ -540,15 +541,16 @@ function App() {
       }
 
       // All retries failed - stay in loading state rather than showing wrong screen
-      console.error(
-        "[App] Username check failed after all retries, staying in loading state",
-      );
       setHasUsername(null);
       setIsCheckingUsername(false);
     };
 
     checkUsername();
-  }, [authState.isAuthenticated, authState.privySdkReady]);
+  }, [
+    authState.isAuthenticated,
+    authState.privySdkReady,
+    authState.privyUserId,
+  ]);
 
   // Show character page when authenticated and has username
   React.useEffect(() => {
@@ -567,22 +569,15 @@ function App() {
     };
   }, []);
 
-  const wsUrl: string = GAME_WS_URL || "ws://localhost:5555/ws";
+  const wsUrl: string = GAME_WS_URL || "ws://localhost:5556/ws";
   const appRef = React.useRef<HTMLDivElement>(null);
 
-  const handleAuthenticated = React.useCallback(() => {
-    setIsAuthenticated(true);
-  }, []);
-
-  const handleUsernameSelected = React.useCallback((username: string) => {
-    console.log(`[App] Username selected: ${username}`);
+  const handleUsernameSelected = React.useCallback((_username: string) => {
     setHasUsername(true);
     setShowCharacterPage(true);
   }, []);
 
   const handleLogout = React.useCallback(() => {
-    console.log("[App] 🚪 Logging out...");
-
     try {
       // Clear Privy auth manager first
       privyAuthManager.clearAuth();
@@ -603,9 +598,6 @@ function App() {
         }
       }
 
-      console.log(
-        `[App] 🧹 Clearing ${keysToRemove.length} Privy localStorage keys`,
-      );
       keysToRemove.forEach((key) => {
         try {
           localStorage.removeItem(key);
@@ -615,7 +607,6 @@ function App() {
       });
 
       // Update React state
-      setIsAuthenticated(false);
       setShowCharacterPage(false);
       setHasUsername(null);
 
@@ -628,8 +619,6 @@ function App() {
           privyError,
         );
       }
-
-      console.log("[App] ✅ Logout complete - reloading page for clean state");
 
       // Force reload to ensure completely clean state
       setTimeout(() => {
@@ -645,20 +634,22 @@ function App() {
   const handleSetup = React.useCallback(
     (world: InstanceType<typeof World>, _config: unknown) => {
       // Extend window with debug utilities
-      window.world = world;
-      window.THREE = THREE;
-      window.Hyperscape = {
-        CircularSpawnArea,
-      };
+      if (import.meta.env.DEV) {
+        window.world = world;
+        window.THREE = THREE;
+        window.Hyperscape = {
+          CircularSpawnArea,
+        };
 
-      window.testChat = () => {
-        const chat = world.getSystem("chat") as {
-          send?: (msg: string) => void;
-        } | null;
-        chat?.send?.(
-          "Test message from console at " + new Date().toLocaleTimeString(),
-        );
-      };
+        window.testChat = () => {
+          const chat = world.getSystem("chat") as {
+            send?: (msg: string) => void;
+          } | null;
+          chat?.send?.(
+            "Test message from console at " + new Date().toLocaleTimeString(),
+          );
+        };
+      }
     },
     [],
   );
@@ -678,12 +669,12 @@ function App() {
   }
 
   // Show login screen if Privy enabled and not authenticated
-  if (privyEnabled && !isAuthenticated && !authState.isAuthenticated) {
+  if (privyEnabled && !authState.isAuthenticated) {
     return (
       <div ref={appRef} data-component="app-root">
         <ErrorBoundary>
           <React.Suspense fallback={<ScreenLoadingFallback />}>
-            <LoginScreen onAuthenticated={handleAuthenticated} />
+            <LoginScreen />
           </React.Suspense>
         </ErrorBoundary>
       </div>
@@ -799,11 +790,7 @@ import {
 async function setupTauriDeepLinks(): Promise<void> {
   if (!isTauriApp()) return;
 
-  console.log("[Hyperscape] Running in Tauri app, setting up deep links");
-
   const unlisten = await onDeepLink((url) => {
-    console.log("[Hyperscape] OAuth callback received:", url);
-
     const { code, state, error } = parseOAuthCallback(url);
 
     if (error) {
@@ -814,7 +801,6 @@ async function setupTauriDeepLinks(): Promise<void> {
     if (code) {
       // Store the auth code for Privy to pick up
       // Privy will handle the token exchange
-      console.log("[Hyperscape] OAuth code received, state:", state);
 
       // Dispatch custom event for auth handling
       window.dispatchEvent(
@@ -854,10 +840,6 @@ async function mountApp() {
 
   // Check if running in embedded viewport mode
   if (isEmbeddedMode()) {
-    console.log(
-      "[Hyperscape] Embedded mode detected - rendering EmbeddedGameClient",
-    );
-
     // Render embedded game client directly (no auth screens)
     root.render(
       <ErrorBoundary>
@@ -869,9 +851,6 @@ async function mountApp() {
     );
   } else {
     if (page === "dashboard") {
-      console.log(
-        "[Hyperscape] Dashboard mode detected - rendering DashboardScreen",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -885,9 +864,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "character-editor") {
-      console.log(
-        "[Hyperscape] Character editor mode detected - rendering CharacterEditorScreen",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -901,7 +877,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "admin") {
-      console.log("[Hyperscape] Admin mode detected - rendering AdminScreen");
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -911,9 +886,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "stream") {
-      console.log(
-        "[Hyperscape] Streaming mode detected - rendering StreamingMode",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -923,9 +895,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "leaderboard") {
-      console.log(
-        "[Hyperscape] Leaderboard mode detected - rendering LeaderboardScreen",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
@@ -935,9 +904,6 @@ async function mountApp() {
         </ErrorBoundary>,
       );
     } else if (page === "agent-monitor") {
-      console.log(
-        "[Hyperscape] Agent monitor mode detected - rendering AgentMonitorScreen",
-      );
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />

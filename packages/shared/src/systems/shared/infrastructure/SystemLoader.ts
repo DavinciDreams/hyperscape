@@ -416,6 +416,7 @@ export async function registerSystems(world: World): Promise<void> {
     world.register("damage-splat", DamageSplatSystem);
     world.register("duel-countdown-splat", DuelCountdownSplatSystem);
     world.register("projectile-renderer", ProjectileRenderer);
+    world.register("inventory-interaction", InventoryInteractionSystem);
 
     // XP Drop System - 3D version disabled, using 2D screen-space drops in XPProgressOrb
     // The 2D approach is more like RS3 where XP floats up the screen toward the orb
@@ -849,14 +850,8 @@ function setupAPI(world: World, systems: Systems): void {
     getPlayerAttackStyle: (playerId: string) =>
       systems.player?.getPlayerAttackStyle(playerId),
     getAllAttackStyles: () => systems.player?.getAllAttackStyles(),
-    canPlayerChangeStyle: (playerId: string) =>
-      systems.player?.canPlayerChangeStyle(playerId),
-    getRemainingStyleCooldown: (playerId: string) =>
-      systems.player?.getRemainingStyleCooldown(playerId),
     forceChangeAttackStyle: (playerId: string, styleId: string) =>
       systems.player?.forceChangeAttackStyle(playerId, styleId),
-    getPlayerStyleHistory: (playerId: string) =>
-      systems.player?.getPlayerStyleHistory(playerId),
     getAttackStyleSystemInfo: () => systems.player?.getAttackStyleSystemInfo(),
 
     // App Manager API
@@ -1095,15 +1090,8 @@ function setupAPI(world: World, systems: Systems): void {
 
       // Attack style actions
       changeAttackStyle: (playerId: string, newStyle: string) => {
-        console.log(
-          `[SystemLoader] changeAttackStyle called: ${playerId} -> ${newStyle}, isServer: ${world.isServer}`,
-        );
-
-        // On client, send packet to server
+        // On client, send packet to server (server is authoritative)
         if (world.isClient && world.network) {
-          console.log(
-            `[SystemLoader] Sending changeAttackStyle packet to server`,
-          );
           (
             world.network as {
               send?: (method: string, data: unknown) => void;
@@ -1116,7 +1104,6 @@ function setupAPI(world: World, systems: Systems): void {
 
         // On server, emit the event locally
         if (world.isServer) {
-          console.log(`[SystemLoader] Emitting ATTACK_STYLE_CHANGED on server`);
           world.emit(EventType.ATTACK_STYLE_CHANGED, {
             playerId,
             newStyle,

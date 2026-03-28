@@ -24,6 +24,7 @@ export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchMemories();
@@ -38,13 +39,12 @@ export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
       );
 
       if (!response.ok) {
-        console.warn("[AgentMemories] Failed to fetch memories");
         setMemories([]);
+        setError("Memories unavailable right now");
         return;
       }
 
       const data = await response.json();
-      console.log("[AgentMemories] Fetched memories:", data);
 
       // Extract memories array from response
       const memoriesArray = Array.isArray(data)
@@ -52,9 +52,10 @@ export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
         : data?.data?.memories || data?.data || data?.memories || [];
 
       setMemories(memoriesArray);
-    } catch (error) {
-      console.error("[AgentMemories] Error fetching memories:", error);
+      setError(null);
+    } catch {
       setMemories([]);
+      setError("Memories unavailable right now");
     } finally {
       setLoading(false);
     }
@@ -103,6 +104,11 @@ export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
             className="w-full bg-[#1a1005] border border-[#8b4513]/30 rounded-lg pl-10 pr-4 py-2 text-[#e8ebf4] placeholder-[#f2d08a]/30 focus:border-[#f2d08a] outline-none transition-colors text-sm"
           />
         </div>
+        {error && (
+          <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            {error}
+          </div>
+        )}
       </div>
 
       {/* Memories List */}

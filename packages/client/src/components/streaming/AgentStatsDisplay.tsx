@@ -7,7 +7,7 @@
 
 import React, { useEffect, useState } from "react";
 import type { AgentInfo } from "../../screens/StreamingMode";
-import { GAME_API_URL } from "../../lib/api-config";
+import { getRuntimeAssetBaseUrl } from "../../lib/api-config";
 
 interface AgentStatsDisplayProps {
   agent: AgentInfo;
@@ -51,10 +51,10 @@ let cachedItemIconMap: Record<string, string> | null = null;
 let itemIconMapPromise: Promise<Record<string, string>> | null = null;
 
 function resolveManifestIconPath(iconPath: string): string {
-  const base = GAME_API_URL.replace(/\/$/, "");
+  const base = getRuntimeAssetBaseUrl().replace(/\/$/, "");
   if (iconPath.startsWith("asset://")) {
     const relativePath = iconPath.replace("asset://", "");
-    return `${base}/game-assets/${relativePath}`;
+    return `${base}/${relativePath}`;
   }
   if (iconPath.startsWith("/")) return `${base}${iconPath}`;
   return `${base}/${iconPath}`;
@@ -70,7 +70,7 @@ async function loadItemIconMap(): Promise<Record<string, string>> {
       responses = await Promise.all(
         ITEM_MANIFEST_FILES.map(async (fileName) => {
           const response = await fetch(
-            `${GAME_API_URL}/game-assets/manifests/items/${fileName}`,
+            `${getRuntimeAssetBaseUrl().replace(/\/$/, "")}/manifests/items/${fileName}`,
             { cache: "force-cache" },
           );
           if (!response.ok) return [] as ManifestItemRecord[];

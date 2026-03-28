@@ -9,10 +9,16 @@
  * @packageDocumentation
  */
 
-import React, { useMemo } from "react";
+import React, { memo, useCallback, useMemo } from "react";
 import { EventType, getItem } from "@hyperscape/shared";
 import type { PlayerStats, PlayerID, StakedItem } from "@hyperscape/shared";
 import { ModalWindow, useThemeStore } from "@/ui";
+import { UI } from "@/ui/core";
+import {
+  getPanelHeaderStyle,
+  getPanelSurfaceStyle,
+  getShellControlButtonStyle,
+} from "@/ui/theme/themes";
 import type { ClientWorld, PlayerEquipmentItems } from "../../types";
 import type { InventorySlotViewItem } from "../types";
 import type {
@@ -35,6 +41,7 @@ import type {
 import { BankPanel } from "../panels/BankPanel";
 import { StorePanel } from "../panels/StorePanel";
 import { DialoguePanel } from "../panels/DialoguePanel";
+import { DialoguePopupShell } from "../panels/dialogue/DialoguePopupShell";
 import { SmeltingPanel } from "../panels/SmeltingPanel";
 import { SmithingPanel } from "../panels/SmithingPanel";
 import { CraftingPanel } from "../panels/CraftingPanel";
@@ -50,6 +57,29 @@ import { DuelResultModal } from "../panels/DuelPanel/DuelResultModal";
 import { TradePanel } from "../panels/TradePanel";
 import { Minimap } from "../hud/Minimap";
 import { MinimapOverlayControls } from "../hud/MinimapOverlayControls";
+
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter((element) => {
+    if (element.hasAttribute("disabled")) {
+      return false;
+    }
+    if (element.getAttribute("aria-hidden") === "true") {
+      return false;
+    }
+    return element.offsetParent !== null;
+  });
+}
 
 /**
  * FullscreenWorldMap - RuneScape-style fullscreen world map overlay
@@ -70,6 +100,10 @@ export function FullscreenWorldMap({
   onClose: () => void;
 }): React.ReactElement {
   const theme = useThemeStore((s) => s.theme);
+  const closeButtonStyle = getShellControlButtonStyle(theme, "danger");
+  const modalRef = React.useRef<HTMLDivElement>(null);
+  const previousActiveElementRef = React.useRef<HTMLElement | null>(null);
+  const titleId = React.useId();
 
   // Get player position for header display
   const player = world?.getPlayer?.();
@@ -83,16 +117,75 @@ export function FullscreenWorldMap({
 
   // Handle ESC key to close
   React.useEffect(() => {
+    previousActiveElementRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const container = modalRef.current;
+    if (!container) {
+      return;
+    }
+
+    const focusableElements = getFocusableElements(container);
+    const initialFocusTarget = focusableElements[0] ?? container;
+    initialFocusTarget.focus();
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         onClose();
+        return;
+      }
+
+      if (e.key !== "Tab") {
+        return;
+      }
+
+      const liveContainer = modalRef.current;
+      if (!liveContainer) {
+        return;
+      }
+
+      const liveFocusableElements = getFocusableElements(liveContainer);
+      if (liveFocusableElements.length === 0) {
+        e.preventDefault();
+        liveContainer.focus();
+        return;
+      }
+
+      const firstElement = liveFocusableElements[0];
+      const lastElement =
+        liveFocusableElements[liveFocusableElements.length - 1];
+      const activeElement =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+
+      if (!activeElement || !liveContainer.contains(activeElement)) {
+        e.preventDefault();
+        firstElement.focus();
+        return;
+      }
+
+      if (e.shiftKey && activeElement === firstElement) {
+        e.preventDefault();
+        lastElement.focus();
+      } else if (!e.shiftKey && activeElement === lastElement) {
+        e.preventDefault();
+        firstElement.focus();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      const previousActiveElement = previousActiveElementRef.current;
+      if (previousActiveElement?.isConnected) {
+        previousActiveElement.focus();
+      }
+    };
   }, [onClose]);
 
   // Update map dimensions on window resize
@@ -112,6 +205,7 @@ export function FullscreenWorldMap({
     <div
       role="dialog"
       aria-modal="true"
+      aria-labelledby={titleId}
       data-modal="true"
       style={{
         position: "fixed",
@@ -119,7 +213,7 @@ export function FullscreenWorldMap({
         left: 0,
         right: 0,
         bottom: 0,
-        zIndex: 10000,
+        zIndex: UI.Z_INDEX.MODAL,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -162,12 +256,13 @@ export function FullscreenWorldMap({
 
       {/* Map Container */}
       <div
+        ref={modalRef}
+        tabIndex={-1}
         style={{
           display: "flex",
           flexDirection: "column",
-          background: `linear-gradient(135deg, ${theme.colors.background.primary}fa 0%, ${theme.colors.background.secondary}fa 100%)`,
-          border: `2px solid ${theme.colors.border.decorative}`,
-          borderRadius: theme.borderRadius.lg,
+          ...getPanelSurfaceStyle(theme, { emphasis: "strong" }),
+          borderRadius: theme.borderRadius.xl,
           boxShadow: "0 20px 60px rgba(0, 0, 0, 0.8)",
           overflow: "hidden",
           animation: "worldMapSlideIn 0.2s ease-out",
@@ -179,9 +274,8 @@ export function FullscreenWorldMap({
         {/* Header */}
         <div
           style={{
+            ...getPanelHeaderStyle(theme),
             padding: "12px 20px",
-            background: theme.colors.background.secondary,
-            borderBottom: `1px solid ${theme.colors.border.default}`,
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -189,6 +283,7 @@ export function FullscreenWorldMap({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <span
+              id={titleId}
               style={{
                 color: theme.colors.text.primary,
                 fontSize: theme.typography.fontSize.lg,
@@ -222,30 +317,27 @@ export function FullscreenWorldMap({
             <button
               onClick={onClose}
               style={{
+                ...closeButtonStyle,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 width: 32,
                 height: 32,
-                borderRadius: theme.borderRadius.md,
-                border: `1px solid ${theme.colors.border.default}`,
-                backgroundColor: theme.colors.background.tertiary,
-                color: theme.colors.text.secondary,
-                cursor: "pointer",
                 fontSize: 18,
-                transition: "all 0.15s ease",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor =
-                  theme.colors.state.danger;
-                e.currentTarget.style.color = theme.colors.text.primary;
-                e.currentTarget.style.borderColor = theme.colors.state.danger;
+                e.currentTarget.style.backgroundColor = String(
+                  closeButtonStyle["--shell-button-hover-bg"],
+                );
+                e.currentTarget.style.color = String(
+                  closeButtonStyle["--shell-button-hover-fg"],
+                );
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor =
-                  theme.colors.background.tertiary;
-                e.currentTarget.style.color = theme.colors.text.secondary;
-                e.currentTarget.style.borderColor = theme.colors.border.default;
+                e.currentTarget.style.backgroundColor = String(
+                  closeButtonStyle.background,
+                );
+                e.currentTarget.style.color = String(closeButtonStyle.color);
               }}
               aria-label="Close map (ESC)"
               title="Close (ESC)"
@@ -263,7 +355,10 @@ export function FullscreenWorldMap({
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
-            background: theme.colors.background.primary,
+            background:
+              theme.name === "hyperscape"
+                ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.14) 100%)"
+                : "transparent",
             overflow: "visible",
           }}
         >
@@ -295,8 +390,9 @@ export function FullscreenWorldMap({
         {/* Footer with legend and controls hint */}
         <div
           style={{
+            ...getPanelHeaderStyle(theme),
             padding: "10px 20px",
-            background: theme.colors.background.secondary,
+            borderBottom: "none",
             borderTop: `1px solid ${theme.colors.border.default}`,
             display: "flex",
             justifyContent: "space-between",
@@ -377,9 +473,13 @@ export function FullscreenWorldMap({
             <span
               style={{
                 padding: "2px 8px",
-                background: theme.colors.background.tertiary,
+                background:
+                  theme.name === "hyperscape"
+                    ? "rgba(255, 255, 255, 0.06)"
+                    : theme.colors.background.tertiary,
                 borderRadius: theme.borderRadius.sm,
                 color: theme.colors.text.secondary,
+                border: `1px solid ${theme.colors.border.default}40`,
               }}
             >
               ESC or M to close
@@ -403,6 +503,7 @@ export function ItemsKeptOnDeathPanel({
   equipment: PlayerEquipmentItems | null;
   onClose: () => void;
 }): React.ReactElement {
+  const theme = useThemeStore((s) => s.theme);
   // Get inventory items from network cache
   const playerId = world?.entities?.player?.id;
   const cachedInventory = playerId
@@ -469,23 +570,35 @@ export function ItemsKeptOnDeathPanel({
         display: "flex",
         flexDirection: "column",
         gap: "16px",
-        color: "rgba(242, 208, 138, 0.9)",
+        color: theme.colors.text.secondary,
         fontSize: 13,
       }}
     >
       {/* Info header */}
       <div
         style={{
-          background: "rgba(0, 0, 0, 0.3)",
-          borderRadius: 6,
+          ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
+          borderRadius: theme.borderRadius.md,
           padding: "12px",
-          border: "1px solid rgba(139, 69, 19, 0.4)",
         }}
       >
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        <div
+          style={{
+            color: theme.colors.text.primary,
+            fontWeight: 600,
+            marginBottom: 4,
+          }}
+        >
           Standard Death Mechanics
         </div>
-        <div style={{ fontSize: 11, opacity: 0.8, lineHeight: 1.4 }}>
+        <div
+          style={{
+            fontSize: 11,
+            opacity: 0.8,
+            lineHeight: 1.4,
+            color: theme.colors.text.secondary,
+          }}
+        >
           On death, you will keep your <strong>3 most valuable</strong> items.
           All other items will remain on your gravestone for 15 minutes.
         </div>
@@ -495,7 +608,7 @@ export function ItemsKeptOnDeathPanel({
       <div>
         <div
           style={{
-            color: "#22c55e",
+            color: theme.colors.state.success,
             fontWeight: 600,
             marginBottom: 8,
             fontSize: 12,
@@ -517,13 +630,21 @@ export function ItemsKeptOnDeathPanel({
                   justifyContent: "space-between",
                   alignItems: "center",
                   padding: "6px 10px",
-                  background: "rgba(34, 197, 94, 0.1)",
-                  borderRadius: 4,
-                  border: "1px solid rgba(34, 197, 94, 0.3)",
+                  background: `${theme.colors.state.success}14`,
+                  borderRadius: theme.borderRadius.sm,
+                  border: `1px solid ${theme.colors.state.success}40`,
                 }}
               >
-                <span>{item.name}</span>
-                <span style={{ fontSize: 11, opacity: 0.7 }}>
+                <span style={{ color: theme.colors.text.primary }}>
+                  {item.name}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    opacity: 0.7,
+                    color: theme.colors.text.secondary,
+                  }}
+                >
                   {item.value.toLocaleString()} gp
                 </span>
               </div>
@@ -536,7 +657,7 @@ export function ItemsKeptOnDeathPanel({
       <div>
         <div
           style={{
-            color: "#ef4444",
+            color: theme.colors.state.danger,
             fontWeight: 600,
             marginBottom: 8,
             fontSize: 12,
@@ -568,13 +689,21 @@ export function ItemsKeptOnDeathPanel({
                   justifyContent: "space-between",
                   alignItems: "center",
                   padding: "6px 10px",
-                  background: "rgba(239, 68, 68, 0.1)",
-                  borderRadius: 4,
-                  border: "1px solid rgba(239, 68, 68, 0.3)",
+                  background: `${theme.colors.state.danger}14`,
+                  borderRadius: theme.borderRadius.sm,
+                  border: `1px solid ${theme.colors.state.danger}40`,
                 }}
               >
-                <span>{item.name}</span>
-                <span style={{ fontSize: 11, opacity: 0.7 }}>
+                <span style={{ color: theme.colors.text.primary }}>
+                  {item.name}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    opacity: 0.7,
+                    color: theme.colors.text.secondary,
+                  }}
+                >
                   {item.value.toLocaleString()} gp
                 </span>
               </div>
@@ -586,15 +715,17 @@ export function ItemsKeptOnDeathPanel({
       {/* Total value footer */}
       <div
         style={{
-          borderTop: "1px solid rgba(139, 69, 19, 0.4)",
+          borderTop: `1px solid ${theme.colors.border.default}40`,
           paddingTop: 12,
           display: "flex",
           justifyContent: "space-between",
           fontSize: 12,
         }}
       >
-        <span style={{ opacity: 0.7 }}>Total Risked Value:</span>
-        <span style={{ color: "#ef4444", fontWeight: 600 }}>
+        <span style={{ opacity: 0.7, color: theme.colors.text.secondary }}>
+          Total Risked Value:
+        </span>
+        <span style={{ color: theme.colors.state.danger, fontWeight: 600 }}>
           {lostItems
             .reduce((sum, item) => sum + item.value, 0)
             .toLocaleString()}{" "}
@@ -670,7 +801,7 @@ export interface InterfaceModalsRendererProps {
  * This component renders all modal panels based on their visibility state.
  * It is extracted from InterfaceManager to reduce file size.
  */
-export function InterfaceModalsRenderer({
+export const InterfaceModalsRenderer = memo(function InterfaceModalsRenderer({
   world,
   inventory,
   equipment,
@@ -713,6 +844,17 @@ export function InterfaceModalsRenderer({
   setStatsModalOpen,
   setDeathModalOpen,
 }: InterfaceModalsRendererProps): React.ReactElement {
+  const closeDialogue = useCallback(() => {
+    if (!dialogueData) {
+      return;
+    }
+
+    setDialogueData(null);
+    world?.network?.send?.("dialogueEnd", {
+      npcId: dialogueData.npcId,
+    });
+  }, [dialogueData, setDialogueData, world]);
+
   const myStakeValue = useMemo(
     () => duelData?.myStakes.reduce((sum, s) => sum + s.value, 0) ?? 0,
     [duelData?.myStakes],
@@ -720,6 +862,15 @@ export function InterfaceModalsRenderer({
   const opponentStakeValue = useMemo(
     () => duelData?.opponentStakes.reduce((sum, s) => sum + s.value, 0) ?? 0,
     [duelData?.opponentStakes],
+  );
+  const compactInventory = useMemo(
+    () =>
+      inventory.map((item) => ({
+        slot: item.slot,
+        itemId: item.itemId,
+        quantity: item.quantity,
+      })),
+    [inventory],
   );
 
   return (
@@ -797,28 +948,34 @@ export function InterfaceModalsRenderer({
         </ModalWindow>
       )}
 
-      {/* Dialogue Panel - renders with its own fixed positioning, no ModalWindow wrapper needed */}
+      {/* Dialogue Panel */}
       {dialogueData?.visible && (
-        <DialoguePanel
-          visible={dialogueData.visible}
-          npcName={dialogueData.npcName}
-          npcId={dialogueData.npcId}
-          text={dialogueData.text}
-          responses={dialogueData.responses}
-          npcEntityId={dialogueData.npcEntityId}
-          world={world}
-          onSelectResponse={(_index, response) => {
-            if (!response.nextNodeId) {
-              setDialogueData(null);
-            }
+        <DialoguePopupShell
+          visible={true}
+          onClose={closeDialogue}
+          title={dialogueData.npcName}
+          width={700}
+          maxWidth="min(86vw, 700px)"
+          maxHeight="min(40vh, 400px)"
+          contentStyle={{
+            overflow: "hidden",
           }}
-          onClose={() => {
-            setDialogueData(null);
-            world?.network?.send?.("dialogueEnd", {
-              npcId: dialogueData.npcId,
-            });
-          }}
-        />
+        >
+          <DialoguePanel
+            visible={dialogueData.visible}
+            npcName={dialogueData.npcName}
+            npcId={dialogueData.npcId}
+            text={dialogueData.text}
+            responses={dialogueData.responses}
+            npcEntityId={dialogueData.npcEntityId}
+            world={world}
+            onSelectResponse={(_index, response) => {
+              if (!response.nextNodeId) {
+                setDialogueData(null);
+              }
+            }}
+          />
+        </DialoguePopupShell>
       )}
 
       {/* Smelting Panel */}
@@ -1021,11 +1178,7 @@ export function InterfaceModalsRenderer({
             opponentStakeValue,
             opponentModifiedStakes: duelData.opponentModifiedStakes,
           }}
-          inventory={inventory.map((item) => ({
-            slot: item.slot,
-            itemId: item.itemId,
-            quantity: item.quantity,
-          }))}
+          inventory={compactInventory}
           onToggleRule={(rule) => {
             world?.network?.send?.("duel:toggle:rule", {
               duelId: duelData.duelId,
@@ -1095,11 +1248,7 @@ export function InterfaceModalsRenderer({
             theirOfferValue: tradeData.theirOfferValue,
             partnerFreeSlots: tradeData.partnerFreeSlots,
           }}
-          inventory={inventory.map((item) => ({
-            slot: item.slot,
-            itemId: item.itemId,
-            quantity: item.quantity,
-          }))}
+          inventory={compactInventory}
           onAddItem={(slot, qty) =>
             world?.network?.send?.("tradeAddItem", {
               tradeId: tradeData.tradeId,
@@ -1145,4 +1294,4 @@ export function InterfaceModalsRenderer({
       )}
     </>
   );
-}
+});

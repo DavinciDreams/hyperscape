@@ -19,7 +19,6 @@ import type {
 } from "../../types";
 import type { PlayerStats } from "@hyperscape/shared";
 import { MenuButton, type MenuIconName } from "@/ui";
-import { ChatPanel } from "../../game/panels/ChatPanel";
 import {
   ActionBarPanel,
   ACTION_BAR_DIMENSIONS,
@@ -256,16 +255,16 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   // Equipment - fixed layout, needs specific dimensions for slot arrangement
   // Min/max width aligned with skills panel for consistent right column sizing
   equipment: {
-    minSize: { width: 235, height: 290 },
-    preferredSize: { width: 260, height: 360 },
-    maxSize: { width: 390, height: 550 },
+    minSize: { width: 235, height: 340 },
+    preferredSize: { width: 260, height: 390 },
+    maxSize: { width: 340, height: 520 },
     scrollable: false,
     resizable: true,
     scaleFactor: { min: 0.85, max: 1.15 },
     responsive: {
-      mobile: { width: 235, height: 310 },
-      tablet: { width: 235, height: 340 },
-      desktop: { width: 260, height: 360 },
+      mobile: { width: 235, height: 340 },
+      tablet: { width: 250, height: 370 },
+      desktop: { width: 260, height: 390 },
     },
     mobileLayout: {
       drawerType: "sheet",
@@ -862,6 +861,11 @@ function MenuBarPanel({
 }
 
 // Lazy load panels for better code splitting
+const ChatPanel = lazy(() =>
+  import("../../game/panels/ChatPanel").then((m) => ({
+    default: m.ChatPanel,
+  })),
+);
 const EquipmentPanel = lazy(() =>
   import("../../game/panels/EquipmentPanel").then((m) => ({
     default: m.EquipmentPanel,
@@ -995,6 +999,11 @@ export interface PanelRenderContext {
   onPanelClick?: (panelId: string) => void;
   /** Whether edit mode is unlocked (for action bar +/- controls) */
   isEditMode?: boolean;
+  /** Optional getter for current player-facing panel data */
+  getPanelData?: () => Pick<
+    PanelRenderContext,
+    "inventoryItems" | "coins" | "stats" | "equipment"
+  >;
 }
 
 /**
@@ -1030,12 +1039,13 @@ export function createPanelRenderer(
 ): (panelId: string, world?: ClientWorld, windowId?: string) => ReactNode {
   const {
     world,
-    inventoryItems = [],
-    coins = 0,
-    stats = null,
-    equipment = null,
+    inventoryItems: initialInventoryItems = [],
+    coins: initialCoins = 0,
+    stats: initialStats = null,
+    equipment: initialEquipment = null,
     onPanelClick,
     isEditMode = false,
+    getPanelData,
   } = context;
 
   return (
@@ -1054,6 +1064,12 @@ export function createPanelRenderer(
 
     // Get panel config for scrollability
     const config = getPanelConfig(panelId);
+    const livePanelData = getPanelData?.();
+    const inventoryItems =
+      livePanelData?.inventoryItems ?? initialInventoryItems;
+    const coins = livePanelData?.coins ?? initialCoins;
+    const stats = livePanelData?.stats ?? initialStats;
+    const equipment = livePanelData?.equipment ?? initialEquipment;
 
     switch (panelId) {
       case "inventory":
@@ -1155,7 +1171,9 @@ export function createPanelRenderer(
       case "chat":
         return (
           <ScrollablePanelWrapper scrollable={config.scrollable}>
-            <ChatPanel world={world} />
+            <Suspense fallback={<PanelLoadingFallback />}>
+              <ChatPanel world={world} />
+            </Suspense>
           </ScrollablePanelWrapper>
         );
 

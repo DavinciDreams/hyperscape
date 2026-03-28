@@ -28,7 +28,13 @@ import {
   useMobileLayout,
   StatusOrb,
 } from "@/ui";
+import { getHudClusterSurfaceStyle } from "@/ui/theme/themes";
 import type { PlayerStats } from "../../types";
+import { HUD_FRAME, HUD_LAYERS } from "./layout";
+
+export const STATUSBAR_CONFIG_STORAGE_KEY = "statusbar-config";
+export const STATUSBAR_CONFIG_CHANGED_EVENT =
+  "hyperscape:statusbar-config:changed";
 
 /** Display mode type */
 export type DisplayMode = "bars" | "orbs";
@@ -51,7 +57,7 @@ export interface StatusBarsConfig {
 const STORAGE_KEYS = {
   position: "statusbar-position",
   size: "statusbar-size",
-  config: "statusbar-config",
+  config: STATUSBAR_CONFIG_STORAGE_KEY,
 } as const;
 
 /** Default configuration */
@@ -81,6 +87,27 @@ const ORB_SIZE_PRESETS: Record<SizePreset, number> = {
 const MIN_SIZE = { width: 100, height: 32 };
 const MAX_SIZE = { width: 350, height: 100 };
 
+const parseConfig = (value: string | null): StatusBarsConfig | null => {
+  if (!value) return null;
+  try {
+    return {
+      ...DEFAULT_CONFIG,
+      ...JSON.parse(value),
+    } as StatusBarsConfig;
+  } catch {
+    return null;
+  }
+};
+
+const isStatusBarsConfigEqual = (
+  a: StatusBarsConfig,
+  b: StatusBarsConfig,
+): boolean =>
+  a.displayMode === b.displayMode &&
+  a.orientation === b.orientation &&
+  a.sizePreset === b.sizePreset &&
+  a.showLabels === b.showLabels;
+
 interface StatusBarsProps {
   /** Player stats containing health and prayerPoints */
   stats: PlayerStats | null;
@@ -101,16 +128,11 @@ export function StatusBars({
   // Configuration with localStorage persistence
   const [config, setConfig] = useState<StatusBarsConfig>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(STORAGE_KEYS.config);
-      if (saved) {
-        try {
-          return {
-            ...DEFAULT_CONFIG,
-            ...JSON.parse(saved),
-          } as StatusBarsConfig;
-        } catch {
-          // Use default
-        }
+      const savedConfig = parseConfig(
+        localStorage.getItem(STORAGE_KEYS.config),
+      );
+      if (savedConfig) {
+        return savedConfig;
       }
     }
     return DEFAULT_CONFIG;
@@ -175,46 +197,39 @@ export function StatusBars({
 
   // Listen for config changes from Settings panel
   useEffect(() => {
-    const handleStorageChange = (e: globalThis.StorageEvent) => {
-      if (e.key === STORAGE_KEYS.config && e.newValue) {
-        try {
-          const newConfig = JSON.parse(e.newValue) as StatusBarsConfig;
-          setConfig(newConfig);
-        } catch {
-          // Ignore parse errors
-        }
-      }
+    const applyConfig = (next: StatusBarsConfig | null) => {
+      if (!next) return;
+      setConfig((current) =>
+        isStatusBarsConfigEqual(current, next) ? current : next,
+      );
     };
 
-    // Also poll for changes since storage events don't fire in same window
-    const checkForChanges = () => {
-      const saved = localStorage.getItem(STORAGE_KEYS.config);
-      if (saved) {
-        try {
-          const savedConfig = JSON.parse(saved) as StatusBarsConfig;
-          // Check if any values differ
-          if (
-            savedConfig.displayMode !== config.displayMode ||
-            savedConfig.orientation !== config.orientation ||
-            savedConfig.sizePreset !== config.sizePreset ||
-            savedConfig.showLabels !== config.showLabels
-          ) {
-            setConfig(savedConfig);
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
+    const handleStorageChange = (e: globalThis.StorageEvent) => {
+      if (e.key !== STORAGE_KEYS.config) return;
+      if (e.newValue === null) return;
+      applyConfig(parseConfig(e.newValue));
+    };
+
+    const handleInternalConfigChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ config: StatusBarsConfig }>).detail
+        ?.config;
+      applyConfig(detail ?? null);
     };
 
     window.addEventListener("storage", handleStorageChange);
-    const intervalId = setInterval(checkForChanges, 500);
+    window.addEventListener(
+      STATUSBAR_CONFIG_CHANGED_EVENT,
+      handleInternalConfigChange,
+    );
 
     return () => {
       window.removeEventListener("storage", handleStorageChange);
-      clearInterval(intervalId);
+      window.removeEventListener(
+        STATUSBAR_CONFIG_CHANGED_EVENT,
+        handleInternalConfigChange,
+      );
     };
-  }, [config]);
+  }, []);
 
   // Persist position
   useEffect(() => {
@@ -526,23 +541,21 @@ export function StatusBars({
     <div
       style={{
         position: "fixed",
-        left: position.x,
-        top: position.y,
+        left: `calc(${HUD_FRAME.left} + ${position.x}px)`,
+        top: `calc(${HUD_FRAME.top} + ${position.y}px)`,
         width: containerWidth,
         height: containerHeight,
-        zIndex: 100,
+        zIndex: HUD_LAYERS.cluster,
         display: "flex",
         flexDirection: config.displayMode === "bars" ? "column" : "row",
         alignItems: config.displayMode === "bars" ? "stretch" : "center",
         justifyContent: config.displayMode === "bars" ? "center" : "flex-start",
         gap: config.displayMode === "bars" ? 0 : compactGap,
         padding: config.displayMode === "bars" ? "4px 6px" : compactPadding,
-        background: theme.colors.slot.filled,
-        borderRadius: 0,
-        border: `1px solid ${theme.colors.border.default}30`,
-        boxShadow: isUnlocked
-          ? `0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px ${theme.colors.accent.primary}40`
-          : "0 1px 3px rgba(0,0,0,0.3)",
+        ...getHudClusterSurfaceStyle(theme, {
+          active: isUnlocked,
+          radius: config.displayMode === "bars" ? 6 : 8,
+        }),
         cursor: isUnlocked ? "move" : "default",
         userSelect: "none",
         pointerEvents: "auto",
@@ -630,15 +643,18 @@ export function StatusBars({
             right: 1,
             width: 14,
             height: 14,
-            borderRadius: 3,
-            backgroundColor: theme.colors.slot.filled,
-            border: `1px solid ${theme.colors.border.default}30`,
+            borderRadius: theme.borderRadius.sm,
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(18,22,28,0.94) 100%)",
+            border: `1px solid ${theme.colors.border.default}55`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             fontSize: 8,
             cursor: "pointer",
             zIndex: 20,
+            color: theme.colors.text.secondary,
+            backdropFilter: `blur(${Math.max(4, theme.glass.blur - 3)}px)`,
           }}
           onClick={(e) => {
             e.stopPropagation();
@@ -667,7 +683,7 @@ export function StatusBars({
               zIndex: 10,
               background:
                 isResizing && resizeDir === dir
-                  ? "rgba(242, 208, 138, 0.3)"
+                  ? `${theme.colors.accent.secondary}26`
                   : "transparent",
             }}
             onPointerDown={(e) => {

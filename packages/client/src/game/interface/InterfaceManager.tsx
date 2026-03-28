@@ -27,7 +27,6 @@ import React, {
 import { DndContext as DndKitContext } from "@dnd-kit/core";
 import {
   DndProvider,
-  useWindowManager,
   useEditMode,
   useEditModeKeyboard,
   usePresetStore,
@@ -41,7 +40,7 @@ import {
   DragOverlay,
 } from "@/ui";
 import { HintProvider } from "@/ui";
-import { usePlayerData, useModalPanels } from "@/hooks";
+import { useModalPanels, usePlayerDataContext } from "@/hooks";
 
 // Local modules
 import { MobileInterfaceManager } from "./MobileInterfaceManager";
@@ -52,7 +51,6 @@ import {
 } from "./PanelRegistry";
 import {
   useWorldMapHotkey,
-  useUIUpdateEvents,
   useOpenPaneEvent,
   useInterfaceUIState,
 } from "./useInterfaceEvents";
@@ -69,6 +67,18 @@ import { useDragDropCoordinator } from "./DragDropCoordinator";
 import { WindowRenderer } from "./WindowRenderer";
 import { EditModeOverlayManager, HoldToEditIndicator } from "./EditModeUI";
 import { DndKitDragOverlayRenderer } from "./DndKitOverlay";
+
+interface WindowStorePersistApi {
+  hasHydrated: () => boolean;
+  onFinishHydration: (listener: () => void) => () => void;
+}
+
+function getWindowStorePersistApi(): WindowStorePersistApi | null {
+  const store = useWindowStore as typeof useWindowStore & {
+    persist?: WindowStorePersistApi;
+  };
+  return store.persist ?? null;
+}
 
 /**
  * Main interface manager component
@@ -109,10 +119,10 @@ function DesktopInterfaceManager({
   // Initialize edit mode keyboard handling
   useEditModeKeyboard();
 
-  // Window management hooks
-  const { windows, createWindow } = useWindowManager();
   const { isUnlocked, isHolding, holdProgress } = useEditMode();
   const { loadFromStorage } = usePresetStore();
+  const createWindow = useWindowStore((s) => s.createWindow);
+  const windowCount = useWindowStore((s) => s.windows.size);
   const windowStoreUpdate = useWindowStore((s) => s.updateWindow);
   const normalizeZIndices = useWindowStore((s) => s.normalizeZIndices);
 
@@ -130,14 +140,7 @@ function DesktopInterfaceManager({
   const { isMobile } = useViewportResize();
 
   // Player data from shared hook
-  const {
-    inventory,
-    equipment,
-    playerStats,
-    coins,
-    setPlayerStats,
-    setEquipment,
-  } = usePlayerData(world);
+  const { inventory, equipment, playerStats, coins } = usePlayerDataContext();
 
   // Modal panel data from shared hook
   const {
@@ -187,21 +190,6 @@ function DesktopInterfaceManager({
   // World map hotkey (M key)
   useWorldMapHotkey(toggleWorldMap);
 
-  // UI_UPDATE event routing
-  useUIUpdateEvents(
-    world,
-    { setPlayerStats, setEquipment },
-    {
-      setBankData,
-      setStoreData,
-      setDialogueData,
-      setSmeltingData,
-      setSmithingData,
-      setCraftingData,
-      setTanningData,
-    },
-  );
-
   // Feature gating based on complexity mode
   const presetHotkeysEnabled = useFeatureEnabled("presetHotkeys");
   const multipleActionBarsEnabled = useFeatureEnabled("multipleActionBars");
@@ -219,12 +207,29 @@ function DesktopInterfaceManager({
 
   // Hydration and initialization state
   const initializedRef = React.useRef(false);
-  const [isHydrated, setIsHydrated] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(() => {
+    const persistApi = getWindowStorePersistApi();
+    return persistApi ? persistApi.hasHydrated() : true;
+  });
   const prevWindowsCountRef = React.useRef<number>(-1);
 
-  // Wait for window store to hydrate
+  // Wait for window store persistence to finish hydrating before mounting windows
   useEffect(() => {
-    setTimeout(() => setIsHydrated(true), 50);
+    const persistApi = getWindowStorePersistApi();
+
+    if (!persistApi) {
+      setIsHydrated(true);
+      return;
+    }
+
+    if (persistApi.hasHydrated()) {
+      setIsHydrated(true);
+      return;
+    }
+
+    return persistApi.onFinishHydration(() => {
+      setIsHydrated(true);
+    });
   }, []);
 
   // Detect reset and recreate defaults
@@ -232,7 +237,7 @@ function DesktopInterfaceManager({
     if (!enabled || !isHydrated) return;
 
     const prevCount = prevWindowsCountRef.current;
-    const currentCount = windows.length;
+    const currentCount = windowCount;
     prevWindowsCountRef.current = currentCount;
 
     if (prevCount > 0 && currentCount === 0) {
@@ -245,7 +250,7 @@ function DesktopInterfaceManager({
         window.dispatchEvent(new Event("resize"));
       });
     }
-  }, [windows.length, enabled, isHydrated, createWindow]);
+  }, [windowCount, enabled, isHydrated, createWindow]);
 
   // Initialize default windows on mount
   useEffect(() => {
@@ -281,7 +286,10 @@ function DesktopInterfaceManager({
         return;
       }
 
-      const existingWindow = windows.find((w) =>
+      const currentWindows = Array.from(
+        useWindowStore.getState().windows.values(),
+      );
+      const existingWindow = currentWindows.find((w) =>
         w.tabs.some((t) => t.content === panelId),
       );
 
@@ -296,11 +304,10 @@ function DesktopInterfaceManager({
           });
         }
       } else {
-        createPanelWindow(panelId, windows, createWindow);
+        createPanelWindow(panelId, currentWindows.length, createWindow);
       }
     },
     [
-      windows,
       windowStoreUpdate,
       createWindow,
       setWorldMapOpen,
@@ -312,38 +319,44 @@ function DesktopInterfaceManager({
   // Listen for UI_OPEN_PANE events
   useOpenPaneEvent(world, handleMenuClick);
 
+  const inventoryRef = useRef(inventory);
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+
   // Create panel renderer
   const renderPanel = useMemo(
     () =>
       createPanelRenderer({
         world,
-        inventoryItems: inventory as never[],
-        coins,
-        stats: playerStats,
-        equipment,
         onPanelClick: handleMenuClick,
         isEditMode: isUnlocked && editModeEnabled,
+        getPanelData: () => ({
+          inventoryItems: inventory as never[],
+          coins,
+          stats: playerStats,
+          equipment,
+        }),
       }),
     [
       world,
+      handleMenuClick,
+      isUnlocked,
+      editModeEnabled,
       inventory,
       coins,
       playerStats,
       equipment,
-      handleMenuClick,
-      isUnlocked,
-      editModeEnabled,
     ],
   );
 
-  // Drag-drop coordination (delegated to hook)
   const {
     handleDragEnd,
     handleDndKitDragStart,
     handleDndKitDragEnd,
     dndKitSensors,
     dndKitActiveItem,
-  } = useDragDropCoordinator({ world, inventory });
+  } = useDragDropCoordinator({ world, inventoryRef });
 
   if (!enabled) {
     return <>{children}</>;
@@ -370,7 +383,6 @@ function DesktopInterfaceManager({
         {/* Edit mode overlay */}
         {isUnlocked && editModeEnabled && (
           <EditModeOverlayManager
-            windows={windows}
             multipleActionBarsEnabled={multipleActionBarsEnabled}
             createWindow={createWindow}
           />
@@ -387,7 +399,6 @@ function DesktopInterfaceManager({
         >
           {/* Windows */}
           <WindowRenderer
-            windows={windows}
             world={world}
             isUnlocked={isUnlocked}
             editModeEnabled={editModeEnabled}
@@ -474,7 +485,7 @@ function handleModalOpen(
 
 function createPanelWindow(
   panelId: string,
-  windows: WindowConfig[],
+  windowCount: number,
   createWindow: (config: WindowConfig) => WindowConfig | null,
 ): void {
   const viewport =
@@ -483,7 +494,7 @@ function createPanelWindow(
       : { width: 1920, height: 1080 };
 
   const panelSizing = getResponsivePanelSizing(panelId, viewport);
-  const offset = snapToGrid(windows.length * 30);
+  const offset = snapToGrid(windowCount * 30);
 
   createWindow({
     id: `panel-${panelId}-${Date.now()}`,

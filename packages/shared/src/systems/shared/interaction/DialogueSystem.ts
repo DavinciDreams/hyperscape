@@ -36,6 +36,20 @@ export class DialogueSystem extends SystemBase {
   // Active dialogues per player
   private activeDialogues = new Map<string, DialogueState>();
 
+  private isImmediateHandoffEffect(effect?: string): boolean {
+    if (!effect) {
+      return false;
+    }
+
+    const [effectName] = effect.split(":");
+    return (
+      effectName === "openBank" ||
+      effectName === "openShop" ||
+      effectName === "openStore" ||
+      effectName === "openTanner"
+    );
+  }
+
   constructor(world: World) {
     super(world, {
       name: "dialogue",
@@ -271,6 +285,14 @@ export class DialogueSystem extends SystemBase {
     const nextNodeId = selectedResponse.nextNodeId;
     const effect = selectedResponse.effect;
 
+    // Service panel handoff responses should end the dialogue immediately.
+    // These are not real conversational branches; the next UI owns the flow.
+    if (effect && this.isImmediateHandoffEffect(effect)) {
+      this.executeEffect(playerId, npcId, effect, state.npcEntityId);
+      this.endDialogue(playerId, npcId);
+      return;
+    }
+
     // Execute effect if present (now from SERVER data, not client)
     if (effect) {
       this.executeEffect(playerId, npcId, effect, state.npcEntityId);
@@ -286,11 +308,14 @@ export class DialogueSystem extends SystemBase {
       return;
     }
 
+    const nextNodeIsTerminal =
+      !nextNode.responses || nextNode.responses.length === 0;
+
     // Update state
     state.currentNodeId = nextNodeId;
 
     // Check if this node has responses
-    if (!nextNode.responses || nextNode.responses.length === 0) {
+    if (nextNodeIsTerminal) {
       // Terminal node - store pending effect instead of executing immediately
       // Effect will execute when player clicks continue
       if (nextNode.effect) {

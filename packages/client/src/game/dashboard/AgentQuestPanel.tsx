@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
 import type { Agent } from "./types";
 import { ChevronDown, ChevronUp, ScrollText } from "lucide-react";
@@ -73,19 +73,12 @@ export const AgentQuestPanel: React.FC<AgentQuestPanelProps> = ({ agent }) => {
   const [questPoints, setQuestPoints] = useState(0);
   const [expanded, setExpanded] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
-  useEffect(() => {
-    if (agent.status !== "active") {
-      setQuests([]);
-      return;
-    }
-
-    fetchQuests();
-    const interval = setInterval(fetchQuests, QUEST_POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [agent.id, agent.status]);
-
-  const fetchQuests = async () => {
+  const fetchQuests = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const result = await apiClient.get<{
         quests?: QuestInfo[];
@@ -105,8 +98,43 @@ export const AgentQuestPanel: React.FC<AgentQuestPanelProps> = ({ agent }) => {
       setError(null);
     } catch (err) {
       console.error("[AgentQuestPanel] Error fetching quests:", err);
+    } finally {
+      inFlightRef.current = false;
     }
-  };
+  }, [agent.id]);
+
+  useEffect(() => {
+    if (agent.status !== "active") {
+      setQuests([]);
+      return;
+    }
+
+    let cancelled = false;
+    const schedule = (delay: number) => {
+      if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = window.setTimeout(run, delay);
+    };
+    const run = async () => {
+      await fetchQuests();
+      if (!cancelled) {
+        schedule(
+          document.hidden ? QUEST_POLL_INTERVAL_MS * 2 : QUEST_POLL_INTERVAL_MS,
+        );
+      }
+    };
+    const onVisibilityChange = () => {
+      if (!cancelled)
+        schedule(document.hidden ? QUEST_POLL_INTERVAL_MS * 2 : 1000);
+    };
+
+    void run();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pollTimeoutRef.current) window.clearTimeout(pollTimeoutRef.current);
+    };
+  }, [agent.status, fetchQuests]);
 
   if (agent.status !== "active") {
     return null;

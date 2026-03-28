@@ -1,5 +1,5 @@
 import { GAME_API_URL } from "@/lib/api-config";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Agent } from "../../screens/DashboardScreen";
 import {
   ChevronDown,
@@ -56,7 +56,7 @@ const renderThoughtContent = (content: string): React.ReactNode => {
       {lines.map((line, idx) => {
         if (!line.trim()) return null;
         return (
-          <p key={idx} className="text-[11px] text-[#e8dcc8] leading-relaxed">
+          <p key={idx} className="text-[11px] text-[#ddd7ce] leading-relaxed">
             {line}
           </p>
         );
@@ -142,6 +142,8 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
   const [isNewThought, setIsNewThought] = useState(false);
   const lastTimestampRef = useRef<number>(0);
   const lastThoughtIdRef = useRef<string | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
 
   // Flash effect when new thought arrives
   useEffect(() => {
@@ -151,18 +153,9 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
     }
   }, [isNewThought]);
 
-  useEffect(() => {
-    if (agent.status !== "active") {
-      setThoughts([]);
-      return;
-    }
-
-    fetchThoughts();
-    const interval = setInterval(fetchThoughts, THOUGHTS_POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [agent.id, agent.status]);
-
-  const fetchThoughts = async () => {
+  const fetchThoughts = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const sinceParam =
         lastTimestampRef.current > 0
@@ -210,12 +203,58 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
       }
 
       setError(null);
-    } catch (err) {
-      console.error("[AgentThoughtsOverlay] Error fetching thoughts:", err);
+    } catch {
+      setError((prev) => prev ?? "Unable to refresh thoughts");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
-  };
+  }, [agent.id, thoughts.length]);
+
+  useEffect(() => {
+    if (agent.status !== "active") {
+      setThoughts([]);
+      return;
+    }
+
+    let cancelled = false;
+    const schedule = (delay: number) => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+      }
+      pollTimeoutRef.current = window.setTimeout(run, delay);
+    };
+    const run = async () => {
+      await fetchThoughts();
+      if (!cancelled) {
+        schedule(
+          document.visibilityState === "visible"
+            ? THOUGHTS_POLL_INTERVAL_MS
+            : THOUGHTS_POLL_INTERVAL_MS * 2,
+        );
+      }
+    };
+    const onVisibilityChange = () => {
+      if (!cancelled) {
+        schedule(
+          document.visibilityState === "visible"
+            ? 1000
+            : THOUGHTS_POLL_INTERVAL_MS * 2,
+        );
+      }
+    };
+
+    void run();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+  }, [agent.status, fetchThoughts]);
 
   // Don't show if agent is inactive
   if (agent.status !== "active") {
@@ -232,38 +271,38 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
     return (
       <button
         onClick={() => setMinimized(false)}
-        className="group bg-[#1a150a]/95 backdrop-blur-md border border-[#8b4513]/40 rounded-full px-3 py-1.5 flex items-center gap-2 hover:border-[#c9a227]/50 hover:bg-[#2a1f0f] transition-all shadow-lg"
+        className="group bg-[#14181f]/95 backdrop-blur-md border border-[#3c444f]/70 rounded-full px-3 py-1.5 flex items-center gap-2 hover:border-[#c6b18d]/40 hover:bg-[#1b2129] transition-all shadow-lg"
       >
-        <Scroll size={14} className="text-[#c9a227]" />
-        <span className="text-[11px] font-medium text-[#f2d08a]/80">Mind</span>
+        <Scroll size={14} className="text-[#c6b18d]" />
+        <span className="text-[11px] font-medium text-[#ddd7ce]/80">Mind</span>
         {thoughts.length > 0 && (
           <>
             <div className="w-1 h-1 rounded-full bg-[#4ade80] animate-pulse" />
-            <span className="text-[10px] text-[#c9a227]/70">
+            <span className="text-[10px] text-[#c6b18d]/70">
               {thoughts.length}
             </span>
           </>
         )}
         <Maximize2
           size={10}
-          className="text-[#f2d08a]/30 group-hover:text-[#f2d08a]/60"
+          className="text-[#c6b18d]/30 group-hover:text-[#ddd7ce]/60"
         />
       </button>
     );
   }
 
   return (
-    <div className="bg-[#0f0d08]/95 backdrop-blur-md border border-[#8b4513]/40 rounded-xl shadow-2xl w-80 overflow-hidden">
+    <div className="bg-[#11151b]/95 backdrop-blur-md border border-[#3c444f]/70 rounded-xl shadow-2xl w-80 overflow-hidden">
       {/* Header - RuneScape scroll style */}
-      <div className="flex items-center justify-between px-3 py-2 bg-gradient-to-r from-[#2a1f0f] to-[#1a150a] border-b border-[#8b4513]/40">
+      <div className="flex items-center justify-between px-3 py-2 bg-gradient-to-r from-[#1c2128] to-[#12161c] border-b border-white/10">
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Scroll size={16} className="text-[#c9a227]" />
+            <Scroll size={16} className="text-[#c6b18d]" />
             {thoughts.length > 0 && (
               <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#4ade80] animate-pulse" />
             )}
           </div>
-          <span className="text-xs font-semibold text-[#f2d08a] tracking-wide">
+          <span className="text-xs font-semibold text-[#ddd7ce] tracking-wide">
             Agent's Mind
           </span>
           {isNewThought && (
@@ -275,22 +314,22 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
         <div className="flex items-center gap-1">
           <button
             onClick={fetchThoughts}
-            className="p-1 rounded hover:bg-[#f2d08a]/10 transition-colors"
+            className="p-1 rounded hover:bg-white/5 transition-colors"
             title="Refresh"
           >
             <RefreshCw
               size={11}
-              className={`text-[#c9a227]/60 hover:text-[#c9a227] ${loading ? "animate-spin" : ""}`}
+              className={`text-[#c6b18d]/60 hover:text-[#ddd7ce] ${loading ? "animate-spin" : ""}`}
             />
           </button>
           <button
             onClick={() => setMinimized(true)}
-            className="p-1 rounded hover:bg-[#f2d08a]/10 transition-colors"
+            className="p-1 rounded hover:bg-white/5 transition-colors"
             title="Minimize"
           >
             <Minimize2
               size={11}
-              className="text-[#c9a227]/60 hover:text-[#c9a227]"
+              className="text-[#c6b18d]/60 hover:text-[#ddd7ce]"
             />
           </button>
         </div>
@@ -303,7 +342,7 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
       >
         {loading && thoughts.length === 0 ? (
           <div className="flex items-center justify-center py-4">
-            <div className="flex items-center gap-2 text-[#c9a227]/60">
+            <div className="flex items-center gap-2 text-[#c6b18d]/60">
               <Scroll size={14} className="animate-pulse" />
               <span className="text-[11px]">Reading the scrolls...</span>
             </div>
@@ -314,11 +353,11 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
           </div>
         ) : !latestThinking ? (
           <div className="text-center py-4">
-            <Scroll size={24} className="mx-auto mb-2 text-[#c9a227]/30" />
-            <p className="text-[11px] text-[#c9a227]/50">
+            <Scroll size={24} className="mx-auto mb-2 text-[#c6b18d]/30" />
+            <p className="text-[11px] text-[#c6b18d]/50">
               The mind is quiet...
             </p>
-            <p className="text-[10px] text-[#c9a227]/30 mt-1">
+            <p className="text-[10px] text-[#c6b18d]/30 mt-1">
               Thoughts will appear here
             </p>
           </div>
@@ -329,13 +368,13 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
               {/* Header */}
               <div className="flex items-center gap-1.5 mb-2">
                 <div
-                  className={`w-2 h-2 rounded-full ${isNewThought ? "bg-[#4ade80] animate-ping" : "bg-[#c9a227]/60"}`}
+                  className={`w-2 h-2 rounded-full ${isNewThought ? "bg-[#4ade80] animate-ping" : "bg-[#c6b18d]/60"}`}
                 />
-                <span className="text-[10px] font-medium text-[#c9a227] uppercase tracking-wider">
+                <span className="text-[10px] font-medium text-[#c6b18d] uppercase tracking-wider">
                   Current Thought
                 </span>
                 <DecisionPathBadge path={latestThinking.decisionPath} />
-                <span className="text-[9px] text-[#8b7355] ml-auto">
+                <span className="text-[9px] text-[#8f98a3] ml-auto">
                   {formatTimeAgo(latestThinking.timestamp)}
                 </span>
               </div>
@@ -346,14 +385,14 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
                   relative rounded border p-3 transition-all duration-300
                   ${
                     isNewThought
-                      ? "bg-[#3d2f1a] border-[#c9a227]/60 shadow-[0_0_12px_rgba(201,162,39,0.3)]"
-                      : "bg-[#1f1a10] border-[#8b4513]/40"
+                      ? "bg-[#222933] border-[#c6b18d]/45 shadow-[0_0_12px_rgba(198,177,141,0.18)]"
+                      : "bg-[#171c23] border-[#3c444f]"
                   }
                 `}
               >
                 {/* Decorative corner */}
-                <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-[#8b4513]/60 rounded-tl" />
-                <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-[#8b4513]/60 rounded-br" />
+                <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-[#57616d]/60 rounded-tl" />
+                <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-[#57616d]/60 rounded-br" />
 
                 {/* Content */}
                 <div className="px-1">
@@ -368,10 +407,10 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
 
             {/* History Section (collapsible) */}
             {olderThoughts.length > 0 && (
-              <div className="pt-2 border-t border-[#8b4513]/30">
+              <div className="pt-2 border-t border-white/8">
                 <button
                   onClick={() => setShowHistory(!showHistory)}
-                  className="flex items-center gap-1.5 text-[10px] text-[#8b7355] hover:text-[#c9a227] transition-colors w-full"
+                  className="flex items-center gap-1.5 text-[10px] text-[#8f98a3] hover:text-[#ddd7ce] transition-colors w-full"
                 >
                   <Clock size={10} />
                   <span>Past thoughts ({olderThoughts.length})</span>
@@ -390,20 +429,20 @@ export const AgentThoughtsOverlay: React.FC<AgentThoughtsOverlayProps> = ({
                     {olderThoughts.map((thought) => (
                       <div
                         key={thought.id}
-                        className="bg-[#151208] border border-[#8b4513]/20 rounded p-2"
+                        className="bg-[#13181f] border border-[#313943] rounded p-2"
                       >
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] text-[#8b7355] uppercase">
+                            <span className="text-[9px] text-[#8f98a3] uppercase">
                               {thought.type}
                             </span>
                             <DecisionPathBadge path={thought.decisionPath} />
                           </div>
-                          <span className="text-[8px] text-[#8b7355]/60">
+                          <span className="text-[8px] text-[#8f98a3]/60">
                             {formatTimeAgo(thought.timestamp)}
                           </span>
                         </div>
-                        <p className="text-[10px] text-[#c9b896]/70">
+                        <p className="text-[10px] text-[#c7cfd8]/72">
                           {cleanThoughtContent(thought.content)}
                         </p>
                         <ProviderChips

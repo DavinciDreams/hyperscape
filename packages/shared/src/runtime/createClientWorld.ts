@@ -94,6 +94,7 @@ import {
   initGLBTreeBatchedInstancer,
   destroyGLBTreeBatchedInstancer,
 } from "../systems/shared/world/GLBTreeBatchedInstancer";
+import { clearProxyGeometryCache } from "../entities/world/visuals/TreeGLBVisualStrategy";
 import {
   initPlaceholderInstancer,
   destroyPlaceholderInstancer,
@@ -209,6 +210,7 @@ export function createClientWorld() {
   // Clean up any previous instancer state from prior world
   destroyGLBTreeInstancer();
   destroyGLBTreeBatchedInstancer();
+  clearProxyGeometryCache();
   destroyPlaceholderInstancer();
   destroyGLBResourceInstancer();
 

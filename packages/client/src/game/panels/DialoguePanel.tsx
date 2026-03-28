@@ -16,7 +16,10 @@
  */
 
 import React from "react";
-import type { World } from "@hyperscape/shared";
+import { useThemeStore } from "@/ui";
+import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
+import { DialogueCharacterPortrait } from "./dialogue/DialogueCharacterPortrait";
+import type { ClientWorld } from "../../types";
 
 interface DialogueResponse {
   text: string;
@@ -32,8 +35,7 @@ interface DialoguePanelProps {
   responses: DialogueResponse[];
   npcEntityId?: string;
   onSelectResponse: (index: number, response: DialogueResponse) => void;
-  onClose: () => void;
-  world: World;
+  world: ClientWorld;
 }
 
 export function DialoguePanel({
@@ -42,11 +44,12 @@ export function DialoguePanel({
   npcId,
   text,
   responses,
-  npcEntityId: _npcEntityId,
+  npcEntityId,
   onSelectResponse,
-  onClose,
   world,
 }: DialoguePanelProps) {
+  const theme = useThemeStore((s) => s.theme);
+
   // NOTE: Distance validation is handled server-side by InteractionSessionManager.
   // The server sends 'dialogueClose' packets when the player moves too far away.
   // This prevents race conditions between client and server position sync under lag.
@@ -68,106 +71,130 @@ export function DialoguePanel({
 
   const handleContinue = () => {
     // Terminal node - send continue packet to server so it can execute any pending effects
-    // Server will then send dialogueEnd which triggers onClose via Sidebar
+    // Server will then send dialogueEnd which clears the shell-owned modal state.
     if (world.network?.send) {
       world.network.send("dialogueContinue", {
         npcId,
       });
     }
-    // Close the dialogue UI immediately for responsive feel
-    onClose();
   };
 
   return (
-    <div
-      className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto"
-      style={{
-        width: "40rem",
-        maxWidth: "90vw",
-        background: "rgba(11, 10, 21, 0.85)",
-        border: "2px solid #c9a227",
-        borderRadius: "0.5rem",
-        padding: "1.5rem",
-        backdropFilter: "blur(10px)",
-        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)",
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* NPC Name Header */}
+    <div className="flex min-w-0 w-full flex-col gap-2 overflow-visible">
       <div
-        className="flex justify-between items-center mb-3 pb-2"
-        style={{ borderBottom: "1px solid #c9a227" }}
+        className="grid min-h-0 gap-3 md:grid-cols-[136px_minmax(0,1fr)]"
+        style={{ alignItems: "start" }}
       >
-        <h3 className="m-0 text-lg font-bold" style={{ color: "#c9a227" }}>
-          {npcName}
-        </h3>
-        <button
-          onClick={onClose}
-          className="bg-transparent border-none text-gray-400 hover:text-white cursor-pointer text-xl leading-none"
-          title="Close dialogue"
-          aria-label="Close dialogue"
-        >
-          x
-        </button>
-      </div>
+        <DialogueCharacterPortrait
+          world={world}
+          npcEntityId={npcEntityId}
+          npcName={npcName}
+          className="self-start"
+        />
 
-      {/* Dialogue Text */}
-      <div
-        className="mb-4 text-white leading-relaxed"
-        style={{
-          fontSize: "1rem",
-          minHeight: "3rem",
-        }}
-      >
-        {text}
-      </div>
-
-      {/* Response Options */}
-      <div className="flex flex-col gap-2">
-        {responses.length > 0 ? (
-          responses.map((response, index) => (
-            <button
-              key={index}
-              onClick={() => handleResponseClick(index, response)}
-              className="w-full text-left py-2 px-4 rounded cursor-pointer transition-all"
-              aria-label={`Response ${index + 1}: ${response.text}`}
-              style={{
-                background: "rgba(201, 162, 39, 0.1)",
-                border: "1px solid rgba(201, 162, 39, 0.3)",
-                color: "#e0d6c0",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(201, 162, 39, 0.2)";
-                e.currentTarget.style.borderColor = "#c9a227";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(201, 162, 39, 0.1)";
-                e.currentTarget.style.borderColor = "rgba(201, 162, 39, 0.3)";
-              }}
-            >
-              {index + 1}. {response.text}
-            </button>
-          ))
-        ) : (
-          <button
-            onClick={handleContinue}
-            className="w-full py-2 px-4 rounded cursor-pointer transition-all"
-            aria-label="Continue dialogue"
+        <div className="flex min-w-0 flex-col gap-2">
+          <div
+            className="shrink-0 text-white leading-relaxed"
             style={{
-              background: "rgba(201, 162, 39, 0.2)",
-              border: "1px solid #c9a227",
-              color: "#c9a227",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(201, 162, 39, 0.3)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(201, 162, 39, 0.2)";
+              fontSize: "0.89rem",
+              lineHeight: 1.5,
+              minHeight: "3.8rem",
+              color: theme.colors.text.primary,
+              ...getPanelInsetStyle(theme, {
+                emphasis: "normal",
+                radius: theme.borderRadius.lg,
+                padding: `${theme.spacing.sm - 1}px ${theme.spacing.md - 1}px`,
+              }),
             }}
           >
-            Click to continue...
-          </button>
-        )}
+            {text}
+          </div>
+
+          <div
+            className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1"
+            style={{ maxHeight: "min(10.5rem, 22vh)" }}
+          >
+            {responses.length > 0 ? (
+              responses.map((response, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleResponseClick(index, response)}
+                  className="w-full rounded text-left transition-all"
+                  aria-label={`Response ${index + 1}: ${response.text}`}
+                  style={{
+                    ...getInteractiveTileStyle(theme, {
+                      radius: theme.borderRadius.md,
+                      accentColor: theme.colors.accent.primary,
+                    }),
+                    color: theme.colors.text.primary,
+                    padding: `${theme.spacing.sm - 1}px ${theme.spacing.md - 1}px`,
+                    fontWeight: theme.typography.fontWeight.semibold,
+                    fontSize: "0.95rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: theme.spacing.sm - 1,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background =
+                      theme.name === "hyperscape"
+                        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(190, 165, 123, 0.12) 22%, rgba(25, 29, 35, 0.98) 100%)"
+                        : `${theme.colors.accent.primary}18`;
+                    e.currentTarget.style.borderColor = `${theme.colors.accent.primary}80`;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background =
+                      theme.name === "hyperscape"
+                        ? "linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.012) 18%, rgba(22, 26, 31, 0.99) 100%)"
+                        : `${theme.colors.accent.primary}12`;
+                    e.currentTarget.style.borderColor = `${theme.colors.border.default}80`;
+                  }}
+                >
+                  <span
+                    style={{
+                      color: theme.colors.text.muted,
+                      fontSize: "10px",
+                      minWidth: 14,
+                    }}
+                  >
+                    {index + 1}.
+                  </span>
+                  <span className="leading-snug">{response.text}</span>
+                </button>
+              ))
+            ) : (
+              <button
+                onClick={handleContinue}
+                className="w-full rounded transition-all"
+                aria-label="Continue dialogue"
+                style={{
+                  ...getInteractiveTileStyle(theme, {
+                    active: true,
+                    radius: theme.borderRadius.md,
+                    accentColor: theme.colors.accent.primary,
+                  }),
+                  color: theme.colors.text.primary,
+                  padding: `${theme.spacing.sm - 1}px ${theme.spacing.md - 1}px`,
+                  fontWeight: theme.typography.fontWeight.semibold,
+                  fontSize: "0.95rem",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background =
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(190, 165, 123, 0.14) 22%, rgba(27, 31, 37, 0.98) 100%)"
+                      : `${theme.colors.accent.primary}28`;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background =
+                    theme.name === "hyperscape"
+                      ? "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(190, 165, 123, 0.12) 20%, rgba(25, 29, 35, 0.98) 100%)"
+                      : `${theme.colors.accent.primary}20`;
+                }}
+              >
+                Click to continue...
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
