@@ -387,7 +387,7 @@ function computeCanyonHeight(
   ns: BiomeNoiseSet,
   coordScale: number,
 ): { y: number; water: number } {
-  const { main, variation } = ns;
+  const { main } = ns;
   const nx = x * coordScale;
   const nz = z * coordScale;
 
@@ -401,15 +401,7 @@ function computeCanyonHeight(
     cfg.lacunarity,
     cfg.noiseOffset,
   );
-  let terrainNoise = normalizeFbmRange(Math.abs(canyonFbm - cfg.noiseOffset));
-
-  const riverWidthVar = normalizeFbmRange(
-    variation.simplexFbm2D(nx + 1000, nz + 1000, 1, 1.0, 0.012, 0.5, 2.0, 0),
-  );
-  const rw = cfg.riverWidth;
-  const edge1 = (0.2 + rw * 0.25) * (0.75 + riverWidthVar * 0.4);
-  const edge2 = (0.3 + rw * 0.25) * (0.75 + riverWidthVar * 0.4);
-  const water = mapRangeSmooth(terrainNoise, edge1, edge2, 1, 0) * 0.2;
+  const terrainNoise = normalizeFbmRange(Math.abs(canyonFbm - cfg.noiseOffset));
 
   const cliffs = mapRangeSmooth(
     terrainNoise,
@@ -418,9 +410,8 @@ function computeCanyonHeight(
     0,
     1,
   );
-  const y = cliffs - water;
 
-  return { y, water: water * 5 };
+  return { y: cliffs, water: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -701,15 +692,8 @@ export function buildGetBaseHeightAtJS(): string {
     var nz = z * coordScale;
     var canyonFbm = ns.main.simplexFbm2D(nx, nz, cfg.octaves, cfg.amplitude * cfg.canyonAmpScale, cfg.frequency * cfg.canyonFreqScale, cfg.gain, cfg.lacunarity, cfg.noiseOffset);
     var terrainNoise = _normalizeFbmRange(Math.abs(canyonFbm - cfg.noiseOffset));
-
-    var riverWidthVar = _normalizeFbmRange(ns.variation.simplexFbm2D(nx + 1000, nz + 1000, 1, 1.0, 0.012, 0.5, 2.0, 0));
-    var rw = cfg.riverWidth;
-    var edge1 = (0.2 + rw * 0.25) * (0.75 + riverWidthVar * 0.4);
-    var edge2 = (0.3 + rw * 0.25) * (0.75 + riverWidthVar * 0.4);
-    var water = _mapRangeSmooth(terrainNoise, edge1, edge2, 1, 0) * 0.2;
     var cliffs = _mapRangeSmooth(terrainNoise, cfg.cliffLow, cfg.cliffHigh, 0, 1);
-    var y = cliffs - water;
-    return { y: y, water: water * 5 };
+    return { y: cliffs, water: 0 };
   }
 
   function computeBiomeHeight(x, z, cfg, ns, coordScale) {
