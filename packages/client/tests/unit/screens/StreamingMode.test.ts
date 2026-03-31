@@ -15,6 +15,8 @@ describe("shouldDismissStreamingLoading", () => {
         initError: null,
         needsCameraLock: false,
         cameraLocked: false,
+        needsTargetAvatar: false,
+        targetAvatarReady: true,
         phase: "ANNOUNCEMENT",
       }),
     ).toBe(false);
@@ -30,6 +32,8 @@ describe("shouldDismissStreamingLoading", () => {
         initError: null,
         needsCameraLock: true,
         cameraLocked: false,
+        needsTargetAvatar: false,
+        targetAvatarReady: true,
         phase: "FIGHTING",
       }),
     ).toBe(false);
@@ -45,6 +49,8 @@ describe("shouldDismissStreamingLoading", () => {
         initError: null,
         needsCameraLock: false,
         cameraLocked: false,
+        needsTargetAvatar: false,
+        targetAvatarReady: true,
         phase: "COUNTDOWN",
       }),
     ).toBe(false);
@@ -60,6 +66,8 @@ describe("shouldDismissStreamingLoading", () => {
         initError: null,
         needsCameraLock: false,
         cameraLocked: false,
+        needsTargetAvatar: false,
+        targetAvatarReady: true,
         phase: "COUNTDOWN",
       }),
     ).toBe(false);
@@ -75,6 +83,25 @@ describe("shouldDismissStreamingLoading", () => {
         initError: null,
         needsCameraLock: false,
         cameraLocked: false,
+        needsTargetAvatar: false,
+        targetAvatarReady: true,
+        phase: "FIGHTING",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the overlay up until the followed duel avatar resolves", () => {
+    expect(
+      shouldDismissStreamingLoading({
+        connected: true,
+        worldReady: true,
+        terrainReady: true,
+        hasStreamingState: true,
+        initError: null,
+        needsCameraLock: true,
+        cameraLocked: true,
+        needsTargetAvatar: true,
+        targetAvatarReady: false,
         phase: "FIGHTING",
       }),
     ).toBe(false);
@@ -90,6 +117,8 @@ describe("shouldDismissStreamingLoading", () => {
         initError: null,
         needsCameraLock: true,
         cameraLocked: true,
+        needsTargetAvatar: false,
+        targetAvatarReady: true,
         loadingDismissed: false,
         phase: "FIGHTING",
         agent1: {
@@ -144,6 +173,8 @@ describe("shouldDismissStreamingLoading", () => {
         initError: null,
         needsCameraLock: false,
         cameraLocked: false,
+        needsTargetAvatar: false,
+        targetAvatarReady: true,
         loadingDismissed: true,
         phase: "COUNTDOWN",
         agent1: {
@@ -197,6 +228,8 @@ describe("shouldDismissStreamingLoading", () => {
       initError: null,
       needsCameraLock: true,
       cameraLocked: true,
+      needsTargetAvatar: false,
+      targetAvatarReady: true,
       loadingDismissed: true,
       phase: "FIGHTING",
       agent1: {
@@ -252,6 +285,8 @@ describe("shouldDismissStreamingLoading", () => {
       initError: null,
       needsCameraLock: false,
       cameraLocked: false,
+      needsTargetAvatar: false,
+      targetAvatarReady: true,
       loadingDismissed: true,
       phase: "IDLE",
       agent1: null,
@@ -272,6 +307,8 @@ describe("shouldDismissStreamingLoading", () => {
       initError: "HTTP error! status: 404",
       needsCameraLock: true,
       cameraLocked: true,
+      needsTargetAvatar: false,
+      targetAvatarReady: true,
       loadingDismissed: true,
       phase: "ANNOUNCEMENT",
       agent1: {
@@ -316,5 +353,62 @@ describe("shouldDismissStreamingLoading", () => {
 
     expect(health.ready).toBe(false);
     expect(health.degradedReason).toBe("initialization_failed");
+  });
+
+  it("marks active duels as degraded until the followed avatar is ready", () => {
+    const health = deriveStreamingRendererHealth({
+      connected: true,
+      worldReady: true,
+      terrainReady: true,
+      hasStreamingState: true,
+      initError: null,
+      needsCameraLock: true,
+      cameraLocked: true,
+      needsTargetAvatar: true,
+      targetAvatarReady: false,
+      loadingDismissed: true,
+      phase: "FIGHTING",
+      agent1: {
+        id: "a",
+        name: "Agent A",
+        provider: "provider",
+        model: "model",
+        hp: 10,
+        maxHp: 10,
+        combatLevel: 1,
+        wins: 0,
+        losses: 0,
+        damageDealtThisFight: 0,
+        equipment: {},
+        inventory: [],
+        rank: 1,
+        headToHeadWins: 0,
+        headToHeadLosses: 0,
+      },
+      agent2: {
+        id: "b",
+        name: "Agent B",
+        provider: "provider",
+        model: "model",
+        hp: 10,
+        maxHp: 10,
+        combatLevel: 1,
+        wins: 0,
+        losses: 0,
+        damageDealtThisFight: 0,
+        equipment: {},
+        inventory: [],
+        rank: 2,
+        headToHeadWins: 0,
+        headToHeadLosses: 0,
+      },
+      arenaPositions: {
+        agent1: [1, 0, 1],
+        agent2: [4, 0, 4],
+      },
+    });
+
+    expect(health.ready).toBe(false);
+    expect(health.degradedReason).toBe("avatar_not_ready");
   });
 });

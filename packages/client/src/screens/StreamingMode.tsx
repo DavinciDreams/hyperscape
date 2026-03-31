@@ -94,6 +94,34 @@ export interface StreamingRendererHealth {
   phase: StreamingState["cycle"]["phase"] | null;
 }
 
+function isTargetAvatarReady(world: World, targetEntityId: string): boolean {
+  const playerDirect = world.entities?.players?.get(targetEntityId) as
+    | { avatar?: unknown }
+    | undefined;
+  if (playerDirect?.avatar) {
+    return true;
+  }
+
+  if (world.entities?.players) {
+    for (const [, player] of world.entities.players) {
+      const candidate = player as {
+        id?: string;
+        characterId?: string;
+        avatar?: unknown;
+      };
+      if (
+        (candidate.id === targetEntityId ||
+          candidate.characterId === targetEntityId) &&
+        candidate.avatar
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function toGuardrailAgent(
   agent: AgentInfo | null,
 ): StreamingGuardrailAgentSnapshot | null {
@@ -114,6 +142,8 @@ function deriveStreamingSurfaceBlockReason(params: {
   initError: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  needsTargetAvatar: boolean;
+  targetAvatarReady: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
 }): string | null {
   const activePhase = Boolean(params.phase && params.phase !== "IDLE");
@@ -136,6 +166,9 @@ function deriveStreamingSurfaceBlockReason(params: {
   if (params.needsCameraLock && !params.cameraLocked) {
     return "camera_target_unresolved";
   }
+  if (params.needsTargetAvatar && !params.targetAvatarReady) {
+    return "avatar_not_ready";
+  }
   return null;
 }
 
@@ -147,6 +180,8 @@ export function deriveStreamingRendererHealth(params: {
   initError: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  needsTargetAvatar: boolean;
+  targetAvatarReady: boolean;
   loadingDismissed: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
   agent1: AgentInfo | null;
@@ -162,6 +197,8 @@ export function deriveStreamingRendererHealth(params: {
     initError: params.initError,
     needsCameraLock: params.needsCameraLock,
     cameraLocked: params.cameraLocked,
+    needsTargetAvatar: params.needsTargetAvatar,
+    targetAvatarReady: params.targetAvatarReady,
     phase: params.phase,
   });
   let degradedReason =
@@ -193,6 +230,8 @@ export function shouldDismissStreamingLoading(params: {
   initError?: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  needsTargetAvatar: boolean;
+  targetAvatarReady: boolean;
   phase?: StreamingState["cycle"]["phase"] | null;
 }): boolean {
   return (
@@ -204,6 +243,8 @@ export function shouldDismissStreamingLoading(params: {
       initError: params.initError ?? null,
       needsCameraLock: params.needsCameraLock,
       cameraLocked: params.cameraLocked,
+      needsTargetAvatar: params.needsTargetAvatar,
+      targetAvatarReady: params.targetAvatarReady,
       phase: params.phase ?? null,
     }) === null
   );
@@ -217,6 +258,7 @@ export function StreamingMode() {
   const [worldReady, setWorldReady] = useState(false);
   const [terrainReady, setTerrainReady] = useState(false);
   const [cameraLocked, setCameraLocked] = useState(false);
+  const [targetAvatarReady, setTargetAvatarReady] = useState(false);
   const [terrainStalled, setTerrainStalled] = useState(false);
   const [readyEventDelayed, setReadyEventDelayed] = useState(false);
   const [clientInitError, setClientInitError] = useState<string | null>(null);
@@ -229,10 +271,13 @@ export function StreamingMode() {
   const lastCameraTargetRef = useRef<string | null>(null);
   const terrainPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const terrainTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const avatarPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const avatarTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const worldReadyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const cameraRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const lastCycleIdRef = useRef<string | null>(null);
   const worldListenerCleanupRef = useRef<(() => void) | null>(null);
   const [streamAccessToken] = useState<string | null>(() =>
     getStreamingAccessToken(),
@@ -260,6 +305,17 @@ export function StreamingMode() {
     }
   }, []);
 
+  const clearAvatarPolling = useCallback(() => {
+    if (avatarPollRef.current) {
+      clearInterval(avatarPollRef.current);
+      avatarPollRef.current = null;
+    }
+    if (avatarTimeoutRef.current) {
+      clearTimeout(avatarTimeoutRef.current);
+      avatarTimeoutRef.current = null;
+    }
+  }, []);
+
   const clearCameraRetryTimeouts = useCallback(() => {
     for (const timeoutId of cameraRetryTimeoutsRef.current) {
       clearTimeout(timeoutId);
@@ -280,6 +336,7 @@ export function StreamingMode() {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
       setWorldReady(false);
       setTerrainReady(false);
+      setTargetAvatarReady(false);
       setTerrainStalled(false);
       setReadyEventDelayed(false);
       setClientInitError(null);
@@ -921,14 +978,99 @@ export function StreamingMode() {
       worldRef.current = null;
       worldReadyRef.current = false;
       clearTerrainPolling();
+      clearAvatarPolling();
       clearCameraRetryTimeouts();
     };
-  }, [clearTerrainPolling, clearCameraRetryTimeouts]);
+  }, [clearAvatarPolling, clearTerrainPolling, clearCameraRetryTimeouts]);
 
   // Loading screen is shown only during initial boot. Once everything is
   // ready for the first time, we fade out and never show it again — camera
   // target switches are handled seamlessly by ClientCameraSystem.
   const needsCameraLock = Boolean(streamingState?.cameraTarget);
+  const needsTargetAvatar = Boolean(
+    streamingState?.cameraTarget &&
+    streamingState?.cycle.phase &&
+    streamingState.cycle.phase !== "IDLE",
+  );
+  const waitingForTargetAvatar = needsTargetAvatar && !targetAvatarReady;
+
+  useEffect(() => {
+    const cycleId = streamingState?.cycle.cycleId ?? null;
+    const previousCycleId = lastCycleIdRef.current;
+    lastCycleIdRef.current = cycleId;
+
+    if (!cycleId || !needsTargetAvatar) {
+      return;
+    }
+
+    if (
+      previousCycleId !== null &&
+      previousCycleId !== cycleId &&
+      loadingDismissed
+    ) {
+      setLoadingDismissed(false);
+      setFadingOut(false);
+    }
+  }, [loadingDismissed, needsTargetAvatar, streamingState?.cycle.cycleId]);
+
+  useEffect(() => {
+    clearAvatarPolling();
+
+    if (!needsTargetAvatar) {
+      setTargetAvatarReady(true);
+      return;
+    }
+
+    const world = worldRef.current;
+    const targetEntityId = streamingState?.cameraTarget;
+    if (!world || !worldReady || !targetEntityId) {
+      setTargetAvatarReady(false);
+      return;
+    }
+
+    const checkAvatarReady = () => {
+      if (isTargetAvatarReady(world, targetEntityId)) {
+        setTargetAvatarReady(true);
+        clearAvatarPolling();
+        return true;
+      }
+      return false;
+    };
+
+    setTargetAvatarReady(false);
+    if (checkAvatarReady()) {
+      return;
+    }
+
+    const handleAvatarLoadComplete = (payload: unknown) => {
+      const data = payload as { playerId?: string; success?: boolean };
+      if (data.success === false) return;
+      if (data.playerId === targetEntityId || checkAvatarReady()) {
+        setTargetAvatarReady(true);
+        clearAvatarPolling();
+      }
+    };
+
+    world.on(EventType.AVATAR_LOAD_COMPLETE, handleAvatarLoadComplete);
+    avatarPollRef.current = setInterval(() => {
+      checkAvatarReady();
+    }, 250);
+    avatarTimeoutRef.current = setTimeout(() => {
+      clearAvatarPolling();
+    }, 30000);
+
+    return () => {
+      world.off(EventType.AVATAR_LOAD_COMPLETE, handleAvatarLoadComplete);
+      clearAvatarPolling();
+    };
+  }, [
+    clearAvatarPolling,
+    needsTargetAvatar,
+    streamingState?.cycle.cycleId,
+    streamingState?.cameraTarget,
+    worldReady,
+  ]);
+
   const isInitiallyReady = shouldDismissStreamingLoading({
     connected,
     worldReady,
@@ -937,6 +1079,8 @@ export function StreamingMode() {
     initError: clientInitError,
     needsCameraLock,
     cameraLocked,
+    needsTargetAvatar,
+    targetAvatarReady,
     phase: streamingState?.cycle.phase ?? null,
   });
   const rendererHealth = useMemo(
@@ -949,6 +1093,8 @@ export function StreamingMode() {
         initError: clientInitError,
         needsCameraLock,
         cameraLocked,
+        needsTargetAvatar,
+        targetAvatarReady,
         loadingDismissed,
         phase: streamingState?.cycle.phase ?? null,
         agent1: streamingState?.cycle.agent1 ?? null,
@@ -961,8 +1107,10 @@ export function StreamingMode() {
       connected,
       loadingDismissed,
       needsCameraLock,
+      needsTargetAvatar,
       streamingState,
       terrainReady,
+      targetAvatarReady,
       worldReady,
     ],
   );
@@ -977,7 +1125,7 @@ export function StreamingMode() {
   // health probe can detect loading/error state without reading DOM textContent.
   useEffect(() => {
     const win = window as StreamingWindow;
-    if (loadingDismissed) {
+    if (loadingDismissed && !waitingForTargetAvatar) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = null;
     } else if (clientInitError) {
       const lower = clientInitError.toLowerCase();
@@ -994,10 +1142,19 @@ export function StreamingMode() {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
     } else if (!terrainReady) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_assets";
+    } else if (waitingForTargetAvatar) {
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_avatar";
     } else {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "finalizing";
     }
-  }, [clientInitError, connected, loadingDismissed, terrainReady, worldReady]);
+  }, [
+    clientInitError,
+    connected,
+    loadingDismissed,
+    terrainReady,
+    waitingForTargetAvatar,
+    worldReady,
+  ]);
 
   // Trigger fade-out once when the stream is first ready.
   useEffect(() => {
@@ -1020,7 +1177,8 @@ export function StreamingMode() {
   }, [fadingOut, loadingDismissed]);
 
   // Show loading overlay only during initial load or fade-out
-  const showLoading = !loadingDismissed && !clientInitError;
+  const showLoading =
+    !clientInitError && (!loadingDismissed || waitingForTargetAvatar);
 
   const loadingHeadline = !connected
     ? "Connecting to Hyperscape..."
@@ -1041,7 +1199,9 @@ export function StreamingMode() {
           : "Waiting for terrain and arena visuals"
         : needsCameraLock && !cameraLocked
           ? "Locking the initial camera target"
-          : "Finalizing spectator presentation";
+          : waitingForTargetAvatar
+            ? "Waiting for the active duel avatar to finish loading"
+            : "Finalizing spectator presentation";
 
   return (
     <div
