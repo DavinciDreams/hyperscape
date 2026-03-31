@@ -551,7 +551,11 @@ export function ViewportContainer() {
   const teleportTarget = state.tools.cameraTeleportTarget;
   useEffect(() => {
     if (!teleportTarget) return;
-    viewportRef.current.navigateCamera?.(teleportTarget.x, teleportTarget.z);
+    viewportRef.current.navigateCamera?.(
+      teleportTarget.x,
+      teleportTarget.z,
+      teleportTarget.close,
+    );
     actions.cameraTeleportConsumed();
   }, [teleportTarget, viewportRef, actions]);
 

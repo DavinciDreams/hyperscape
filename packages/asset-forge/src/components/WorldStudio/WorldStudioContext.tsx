@@ -149,7 +149,12 @@ interface StudioToolState {
   /** Brush settings (when brush tool is active) */
   brushSettings: BrushSettings;
   /** Camera teleport request from minimap (consumed by viewport) */
-  cameraTeleportTarget: { x: number; y: number; z: number } | null;
+  cameraTeleportTarget: {
+    x: number;
+    y: number;
+    z: number;
+    close?: boolean;
+  } | null;
   /** Transform gizmo mode (translate/rotate/scale) */
   transformMode: GizmoTransformMode;
   /** Transform coordinate space (world/local) */
@@ -1504,7 +1509,7 @@ function worldStudioReducer(
  *  Set by ViewportContainer when scene is ready, consumed by panels like ProcgenPanel. */
 export interface ViewportCallbacks {
   refreshVegetation?: (vegConfig?: VegetationConfig) => Promise<void>;
-  navigateCamera?: (x: number, z: number) => void;
+  navigateCamera?: (x: number, z: number, close?: boolean) => void;
 }
 
 // ============== CONTEXT ==============
@@ -1629,7 +1634,12 @@ interface WorldStudioContextValue {
     setTool: (tool: StudioToolMode) => void;
     setTransformMode: (mode: GizmoTransformMode) => void;
     setTransformSpace: (space: GizmoTransformSpace) => void;
-    cameraTeleport: (target: { x: number; y: number; z: number }) => void;
+    cameraTeleport: (target: {
+      x: number;
+      y: number;
+      z: number;
+      close?: boolean;
+    }) => void;
     cameraTeleportConsumed: () => void;
 
     // Studio-specific: Brush
@@ -1971,8 +1981,12 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         dispatch({ type: "SET_TRANSFORM_MODE", mode }),
       setTransformSpace: (space: GizmoTransformSpace) =>
         dispatch({ type: "SET_TRANSFORM_SPACE", space }),
-      cameraTeleport: (target: { x: number; y: number; z: number }) =>
-        dispatch({ type: "CAMERA_TELEPORT", target }),
+      cameraTeleport: (target: {
+        x: number;
+        y: number;
+        z: number;
+        close?: boolean;
+      }) => dispatch({ type: "CAMERA_TELEPORT", target }),
       cameraTeleportConsumed: () =>
         dispatch({ type: "CAMERA_TELEPORT_CONSUMED" }),
 

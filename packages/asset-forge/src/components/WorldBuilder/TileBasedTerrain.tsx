@@ -243,8 +243,8 @@ export interface TerrainSceneRefs {
    * Pass a VegetationConfig to override biome defaults, or omit for defaults.
    */
   refreshVegetation: (vegConfig?: VegetationConfig) => Promise<void>;
-  /** Teleport camera to a world position */
-  navigateCamera: (x: number, z: number) => void;
+  /** Teleport camera to a world position. Pass close=true for entity-level zoom. */
+  navigateCamera: (x: number, z: number, close?: boolean) => void;
 }
 
 export interface TileBasedTerrainProps {
@@ -3580,14 +3580,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
           console.log(`[refreshVegetation] Placed ${totalTreeCount} trees`);
         },
-        navigateCamera: (x: number, z: number) => {
-          // Place camera at a comfortable viewing height, offset slightly so target is visible
-          const viewHeight = 150;
-          const offsetZ = 80;
-          cameraStateRef.current.position.set(x, viewHeight, z + offsetZ);
+        navigateCamera: (x: number, z: number, close?: boolean) => {
+          const viewHeight = close ? 35 : 150;
+          // No Z offset — camera directly above-and-in-front so target is screen-center
+          cameraStateRef.current.position.set(x, viewHeight, z);
           const cam = cameraRef.current;
           if (cam) {
-            cam.position.set(x, viewHeight, z + offsetZ);
+            cam.position.set(x, viewHeight, z);
             const controls = orbitControlsRef.current;
             if (controls) {
               controls.target.set(x, 0, z);

@@ -1343,7 +1343,7 @@ function findEntityPosition(
   state: ReturnType<typeof useWorldStudio>["state"],
   type: string,
   id: string,
-): { x: number; y: number; z: number } | null {
+): { x: number; y: number; z: number; close?: boolean } | null {
   const ext = state.extendedLayers;
   const world = state.builder.editing.world;
 
@@ -1363,7 +1363,7 @@ function findEntityPosition(
   const list = lists[type];
   if (list) {
     const entity = list.find((e) => e.id === id);
-    if (entity?.position) return entity.position;
+    if (entity?.position) return { ...entity.position, close: true };
   }
 
   // Towns have a position field
@@ -1398,7 +1398,7 @@ function findEntityPosition(
   // Buildings: look up parent town position as fallback
   if (type === "building" && world) {
     const building = world.foundation.buildings.find((b) => b.id === id);
-    if (building?.position) return building.position;
+    if (building?.position) return { ...building.position, close: true };
   }
 
   // Game manifest entities — positions are in game-centered coords, need offset to render coords
@@ -1423,6 +1423,7 @@ function findEntityPosition(
           x: entity.position.x + offset,
           y: 0,
           z: entity.position.z + offset,
+          close: true,
         };
       }
     }
