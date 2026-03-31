@@ -692,11 +692,11 @@ body {
 @layer utilities {
   /* Page layouts */
   .page-container {
-    @apply flex h-[calc(100vh-60px)] bg-[var(--bg-primary)] p-4 gap-4;
+    @apply flex h-[calc(100vh-44px)] bg-[var(--bg-primary)] p-4 gap-4;
   }
-  
+
   .page-container-no-padding {
-    @apply flex h-[calc(100vh-60px)] bg-[var(--bg-primary)];
+    @apply flex h-[calc(100vh-44px)] bg-[var(--bg-primary)];
   }
   
   /* Backgrounds */
@@ -717,12 +717,168 @@ body {
   }
   
   .loading-state {
-    @apply flex items-center justify-center h-[calc(100vh-60px)];
+    @apply flex items-center justify-center h-[calc(100vh-44px)];
     background: linear-gradient(to bottom right, var(--bg-primary), var(--bg-secondary));
   }
-  
+
   /* Dimensions */
   .viewport-height {
-    @apply h-[calc(100vh-60px)];
+    @apply h-[calc(100vh-44px)];
+  }
+}
+
+/* ============== WORLD STUDIO EDITOR THEME ============== */
+@layer components {
+  /* --- Recessed UE5-style inputs --- */
+  .ws-input {
+    background: #141414;
+    border: 1px solid #1a1a1a;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 2px;
+    transition: border-color 150ms;
+  }
+  .ws-input:focus {
+    border-color: var(--color-primary);
+    outline: none;
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3);
+  }
+  .ws-input:hover:not(:focus) {
+    border-color: #2a2a2a;
+  }
+
+  /* --- UE5-style section header --- */
+  .ws-section-header {
+    background: #1a1a1a;
+    padding: 4px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid #141414;
+  }
+  .ws-section-header:hover {
+    background: #1e1e1e;
+  }
+
+  /* --- UE5-style filled slider bar --- */
+  .ws-slider-bar {
+    position: relative;
+    height: 18px;
+    background: #141414;
+    border: 1px solid #1a1a1a;
+    border-radius: 2px;
+    cursor: ew-resize;
+    overflow: hidden;
+    user-select: none;
+  }
+  .ws-slider-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    background: rgba(99, 102, 241, 0.25);
+    pointer-events: none;
+    transition: width 50ms;
+  }
+  .ws-slider-text {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+    padding: 0 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-primary);
+  }
+  .ws-slider-bar:hover {
+    border-color: #2a2a2a;
+  }
+  .ws-slider-bar:active .ws-slider-fill {
+    background: rgba(99, 102, 241, 0.35);
+  }
+
+  /* --- Drag-to-scrub numeric labels --- */
+  .ws-drag-label {
+    cursor: ew-resize;
+    user-select: none;
+    color: var(--text-secondary);
+    font-size: 11px;
+  }
+  .ws-drag-label:hover {
+    color: var(--text-primary);
+  }
+  .ws-drag-label:active {
+    color: var(--color-primary);
+  }
+
+  /* --- Axis-colored inputs --- */
+  .ws-axis-x { border-left: 2px solid #ef4444 !important; }
+  .ws-axis-y { border-left: 2px solid #22c55e !important; }
+  .ws-axis-z { border-left: 2px solid #3b82f6 !important; }
+
+  /* --- Toast notification animations --- */
+  @keyframes ws-toast-in {
+    from { opacity: 0; transform: translateX(100%); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes ws-toast-out {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(100%); }
+  }
+  .ws-toast-enter { animation: ws-toast-in 200ms ease-out; }
+  .ws-toast-exit { animation: ws-toast-out 200ms ease-in; }
+
+  @keyframes ws-toast-progress {
+    from { width: 100%; }
+    to { width: 0%; }
+  }
+  .ws-toast-progress {
+    animation: ws-toast-progress var(--toast-duration, 4000ms) linear;
+  }
+
+  /* --- Viewport overlay styling --- */
+  .ws-viewport-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .ws-viewport-overlay > * {
+    pointer-events: auto;
+  }
+  .ws-viewport-pill {
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  /* --- World Studio panel scrollbar (thin, subtle) --- */
+  .ws-panel {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a2a transparent;
+  }
+  .ws-panel::-webkit-scrollbar {
+    width: 4px;
+  }
+  .ws-panel::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .ws-panel::-webkit-scrollbar-thumb {
+    background: #2a2a2a;
+    border-radius: 2px;
+  }
+  .ws-panel::-webkit-scrollbar-thumb:hover {
+    background: #3a3a3a;
   }
 } 

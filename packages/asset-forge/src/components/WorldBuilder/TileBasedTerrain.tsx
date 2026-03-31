@@ -34,8 +34,46 @@ import {
   LineBasicNodeMaterial,
 } from "three/webgpu";
 
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { ViewHelper } from "three/examples/jsm/helpers/ViewHelper.js";
+
 import { buildingWalkabilityService } from "./BuildingWalkabilityService";
-import type { WorldCreationConfig, GeneratedRoad } from "./types";
+import {
+  createGameTerrainQuerier,
+  GAME_MAX_HEIGHT,
+  GAME_WATER_THRESHOLD,
+} from "./GameTerrainAdapter";
+import {
+  initTreeModels,
+  getTreeSpeciesInstance,
+  getAllTreeSpeciesIds,
+  clearTreeSpeciesCache,
+  createBridgeMeshes,
+  createDuelArena,
+} from "./GameWorldAssets";
+import {
+  createGameWorldEntities,
+  disposeEntitySync,
+  disposeEntitySyncGeometry,
+  type GameEntityData,
+} from "./GameWorldEntitySync";
+import type {
+  WorldCreationConfig,
+  GeneratedRoad,
+  VegetationConfig,
+} from "./types";
+
+/** Generic terrain query interface — satisfied by both procgen TerrainGenerator and GameTerrainAdapter */
+interface TerrainQueryResult {
+  height: number;
+  biome: string;
+  color?: { r: number; g: number; b: number };
+  /** Forest biome weight 0-1 for per-biome shader blending */
+  biomeForestWeight?: number;
+  /** Canyon biome weight 0-1 for per-biome shader blending */
+  biomeCanyonWeight?: number;
+}
+type TerrainQuerier = (worldX: number, worldZ: number) => TerrainQueryResult;
 
 import {
   THREE,
@@ -47,12 +85,14 @@ import {
 const TownBasicMat = MeshBasicNodeMaterial;
 const TownLineMat = LineBasicNodeMaterial;
 const TownStdMat = MeshStandardNodeMaterial;
-const VegStdMat = MeshStandardNodeMaterial;
+// VegStdMat alias removed — rocks are now generated server-side
 
 // ============== CONSTANTS ==============
 
-const TILE_LOAD_RADIUS = 5; // tiles in each direction from camera
+const TILE_LOAD_RADIUS = 5; // tiles in each direction from camera (standalone)
+const TILE_LOAD_RADIUS_STUDIO = 3; // reduced for World Studio (49 tiles vs 121)
 const TILE_UNLOAD_RADIUS = 7; // tiles beyond this are unloaded
+const TILE_UNLOAD_RADIUS_STUDIO = 5;
 const MAX_TILES_PER_FRAME = 2; // limit tile generation per frame for performance
 
 // LOD distances for buildings
@@ -105,7 +145,16 @@ interface CameraState {
 
 /** Selection info returned when clicking objects in the viewport */
 export interface ViewportSelection {
-  type: "terrain" | "chunk" | "tile" | "biome" | "town" | "building" | "road";
+  type:
+    | "terrain"
+    | "chunk"
+    | "tile"
+    | "biome"
+    | "town"
+    | "building"
+    | "road"
+    | "entity"
+    | "vegetation";
   id: string;
   position: { x: number; y: number; z: number };
   townId?: string;
@@ -113,6 +162,17 @@ export interface ViewportSelection {
   buildingType?: string;
   biomeType?: string;
   tileKey?: string;
+  /** Entity type for entity selections (spawnPoint, teleport, mobSpawn, etc.) */
+  entityType?: string;
+  /** Entity ID for entity selections */
+  entityId?: string;
+  /** Display name for entity selections */
+  entityDisplayName?: string;
+  /** Full entity metadata from userData (for game world entities) */
+  entityData?: Record<string, unknown>;
+  /** Vegetation instance data (for vegetation selections) */
+  vegetationSpecies?: string;
+  vegetationInstanceIndex?: number;
   /** Tile inspector data for terrain selections */
   tileData?: {
     tileX: number;
@@ -132,6 +192,61 @@ export interface ViewportSelection {
   };
 }
 
+/** View mode for the viewport */
+export type ViewMode = "lit" | "wireframe" | "biomeColors";
+
+/** Refs exposed to parent for editing tool integration */
+export interface TerrainSceneRefs {
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  raycaster: THREE.Raycaster;
+  /** DOM container element for mouse event binding */
+  container: HTMLDivElement;
+  terrainContainer: THREE.Group;
+  /** Group for adding editor entity markers (NPCs, spawn points, etc.) */
+  entityOverlay: THREE.Group;
+  /** Register an object as clickable for selection */
+  addSelectable: (obj: THREE.Object3D) => void;
+  /** Remove an object from selectables */
+  removeSelectable: (obj: THREE.Object3D) => void;
+  /**
+   * Set interaction mode to prevent OrbitControls from conflicting with editing tools.
+   * 'orbit' = normal camera controls (left-click rotates)
+   * 'tool'  = editing mode (left-click disabled on orbit, middle dolly, right pan)
+   * 'gizmo' = transform gizmo active (left disabled for gizmo, middle orbit, right pan)
+   */
+  setInteractionMode: (mode: "orbit" | "tool" | "gizmo") => void;
+  /** Animate camera to focus on a world position with a given bounding radius */
+  focusOnPosition: (target: THREE.Vector3, radius: number) => void;
+  /** Change the viewport rendering mode */
+  setViewMode: (mode: ViewMode) => void;
+  /** Toggle the ground grid helper */
+  setGridVisible: (visible: boolean) => void;
+  /**
+   * Promote a vegetation InstancedMesh instance into a standalone Object3D
+   * so TransformControls can attach to it. Hides the original instance.
+   * Returns the proxy group (already added to entityOverlay), or null if not found.
+   */
+  promoteVegetationInstance: (
+    speciesId: string,
+    instanceIndex: number,
+    selectableId: string,
+  ) => THREE.Group | null;
+  /**
+   * Write the proxy group's current transform back to the InstancedMesh
+   * instance and remove the proxy from the scene.
+   */
+  demoteVegetationInstance: (proxyGroup: THREE.Group) => void;
+  /**
+   * Re-fetch tree positions from the server and rebuild all vegetation
+   * InstancedMeshes without tearing down the rest of the scene.
+   * Pass a VegetationConfig to override biome defaults, or omit for defaults.
+   */
+  refreshVegetation: (vegConfig?: VegetationConfig) => Promise<void>;
+  /** Teleport camera to a world position */
+  navigateCamera: (x: number, z: number) => void;
+}
+
 export interface TileBasedTerrainProps {
   config: WorldCreationConfig;
   className?: string;
@@ -148,47 +263,15 @@ export interface TileBasedTerrainProps {
   onFlyModeChange?: (enabled: boolean) => void;
   /** Pre-generated road network (uses actual pathfinding data) */
   roads?: GeneratedRoad[];
+  /** Called when scene is ready, exposes refs for editing tool integration */
+  onSceneReady?: (refs: TerrainSceneRefs) => void;
+  /** When true, suppress built-in HUD overlays (used by World Studio which has its own) */
+  hideBuiltinOverlays?: boolean;
+  /** Called after game world entities are loaded from the manifest API */
+  onGameEntitiesLoaded?: (data: GameEntityData) => void;
 }
 
-// Vegetation types and their visual appearance
-const VEGETATION_TYPES = {
-  tree: {
-    color: 0x2d5016,
-    trunkColor: 0x4a3728,
-    height: { min: 6, max: 12 },
-    width: { min: 2, max: 4 },
-  },
-  bush: {
-    color: 0x3d6b1e,
-    height: { min: 1, max: 2 },
-    width: { min: 1.5, max: 3 },
-  },
-  rock: {
-    color: 0x6b6b6b,
-    height: { min: 0.5, max: 2 },
-    width: { min: 0.5, max: 2 },
-  },
-  grass: {
-    color: 0x4a7c23,
-    height: { min: 0.3, max: 0.8 },
-    width: { min: 0.1, max: 0.3 },
-  },
-};
-
-// Biome vegetation density settings
-const BIOME_VEGETATION: Record<
-  string,
-  { trees: number; bushes: number; rocks: number; grass: number }
-> = {
-  plains: { trees: 0.02, bushes: 0.05, rocks: 0.01, grass: 0.3 },
-  forest: { trees: 0.15, bushes: 0.1, rocks: 0.02, grass: 0.2 },
-  valley: { trees: 0.08, bushes: 0.08, rocks: 0.03, grass: 0.25 },
-  desert: { trees: 0.005, bushes: 0.02, rocks: 0.08, grass: 0.01 },
-  tundra: { trees: 0.01, bushes: 0.03, rocks: 0.05, grass: 0.05 },
-  swamp: { trees: 0.1, bushes: 0.15, rocks: 0.01, grass: 0.15 },
-  mountains: { trees: 0.03, bushes: 0.02, rocks: 0.15, grass: 0.05 },
-  lakes: { trees: 0, bushes: 0, rocks: 0, grass: 0 },
-};
+export type { GameEntityData };
 
 // ============== MINIMAP COMPONENT ==============
 
@@ -510,7 +593,7 @@ const Minimap: React.FC<MinimapProps> = ({
         ref={canvasRef}
         width={MINIMAP_SIZE}
         height={MINIMAP_SIZE}
-        className="shadow-lg cursor-crosshair border-2 border-white/30 rounded"
+        className="shadow-lg cursor-crosshair rounded border-2 border-white/30"
         onClick={handleClick}
         title="Click to teleport camera"
       />
@@ -563,11 +646,16 @@ function createTemplateGeometry(
 function createTerrainMaterial(): THREE.Material & {
   terrainUniforms: TerrainUniforms;
 } {
-  // Use the game's terrain shader for unified rendering
-  // This material reads the roadInfluence attribute and blends road colors
-  const material = createGameTerrainMaterial();
+  // Use the game's terrain shader for unified rendering.
+  // Disable fog — the World Studio camera is at altitude 200m+
+  // where the game's 150-350m fog range makes everything invisible.
+  const material = createGameTerrainMaterial({
+    fogEnabled: false,
+    fogNear: 5000,
+    fogFar: 10000,
+  });
   console.log(
-    "[TileBasedTerrain] Created terrain material with road influence support",
+    "[TileBasedTerrain] Created terrain material (fog disabled for World Studio)",
   );
   return material;
 }
@@ -761,7 +849,7 @@ function generateTileGeometry(
   tileX: number,
   tileZ: number,
   templateGeometry: THREE.PlaneGeometry,
-  generator: TerrainGenerator,
+  queryTerrain: TerrainQuerier,
   tileSize: number,
   waterThreshold: number,
   maxHeight: number,
@@ -773,6 +861,8 @@ function generateTileGeometry(
   const colors = new Float32Array(positions.count * 3);
   const roadInfluences = new Float32Array(positions.count);
   const biomeIds = new Float32Array(positions.count);
+  const forestWeights = new Float32Array(positions.count);
+  const canyonWeights = new Float32Array(positions.count);
 
   let hasWater = false;
   const shorelineThreshold = waterThreshold / maxHeight + 0.1; // Normalized
@@ -809,7 +899,7 @@ function generateTileGeometry(
     const worldZ = localZ + halfTileSize + tileZ * tileSize - worldCenterOffset;
 
     // Query terrain
-    const query = generator.queryPoint(worldX, worldZ);
+    const query = queryTerrain(worldX, worldZ);
     const height = query.height;
 
     // Set vertex height
@@ -820,11 +910,18 @@ function generateTileGeometry(
       hasWater = true;
     }
 
-    // Get biome color (used for fallback/debug rendering)
-    const biomeColor = BIOME_COLORS[query.biome] || BIOME_COLORS.plains;
-    let r = biomeColor.r;
-    let g = biomeColor.g;
-    let b = biomeColor.b;
+    // Get biome color — use query-provided color (game pipeline) or look up from table
+    let r: number, g: number, b: number;
+    if (query.color) {
+      r = query.color.r;
+      g = query.color.g;
+      b = query.color.b;
+    } else {
+      const biomeColor = BIOME_COLORS[query.biome] || BIOME_COLORS.plains;
+      r = biomeColor.r;
+      g = biomeColor.g;
+      b = biomeColor.b;
+    }
 
     // Apply shoreline tinting near water level
     const normalizedHeight = height / maxHeight;
@@ -848,8 +945,10 @@ function generateTileGeometry(
     colors[i * 3 + 1] = g;
     colors[i * 3 + 2] = b;
 
-    // Store biome ID for shader
+    // Store biome ID and per-biome weights for shader
     biomeIds[i] = biomeNameToId[query.biome] ?? 0;
+    forestWeights[i] = query.biomeForestWeight ?? 0;
+    canyonWeights[i] = query.biomeCanyonWeight ?? 0;
 
     // Calculate road influence at this vertex
     // Roads are in terrain-space coordinates, so use worldX/worldZ directly
@@ -890,6 +989,14 @@ function generateTileGeometry(
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute("biomeId", new THREE.BufferAttribute(biomeIds, 1));
   geometry.setAttribute(
+    "biomeForestWeight",
+    new THREE.BufferAttribute(forestWeights, 1),
+  );
+  geometry.setAttribute(
+    "biomeCanyonWeight",
+    new THREE.BufferAttribute(canyonWeights, 1),
+  );
+  geometry.setAttribute(
     "roadInfluence",
     new THREE.BufferAttribute(roadInfluences, 1),
   );
@@ -911,27 +1018,46 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   flyModeEnabled = false,
   onFlyModeChange,
   roads: providedRoads,
+  onSceneReady,
+  hideBuiltinOverlays = false,
+  onGameEntitiesLoaded,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const orbitControlsRef = useRef<OrbitControls | null>(null);
+  const viewHelperRef = useRef<ViewHelper | null>(null);
+  const gridHelperRef = useRef<THREE.GridHelper | null>(null);
+  const viewModeRef = useRef<ViewMode>("lit");
   const animationIdRef = useRef<number>(0);
 
   // Terrain state
   const tilesRef = useRef<Map<string, TileData>>(new Map());
   const templateGeometryRef = useRef<THREE.PlaneGeometry | null>(null);
+  const waterTemplateGeometryRef = useRef<THREE.PlaneGeometry | null>(null);
   const terrainMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
   const waterMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
+  const lodObjectsRef = useRef<THREE.LOD[]>([]);
   const terrainContainerRef = useRef<THREE.Group | null>(null);
   const waterContainerRef = useRef<THREE.Group | null>(null);
   const townMarkersRef = useRef<THREE.Group | null>(null);
   const vegetationContainerRef = useRef<THREE.Group | null>(null);
+  /** Map InstancedMesh → species ID for vegetation instance selection */
+  const vegetationSpeciesMapRef = useRef<Map<THREE.InstancedMesh, string>>(
+    new Map(),
+  );
+  const entitySyncRef = useRef<THREE.Group | null>(null);
+  const entityOverlayRef = useRef<THREE.Group | null>(null);
   const wildernessOverlayRef = useRef<THREE.Mesh | null>(null);
+  /** Cached world center offset for vegetation refresh (set in main effect) */
+  const worldCenterOffsetRef = useRef<number>(0);
   const generatorRef = useRef<TerrainGenerator | null>(null);
+  const terrainQuerierRef = useRef<TerrainQuerier | null>(null);
 
-  // Tile generation queue
+  // Tile generation queue + O(1) membership set
   const tileQueueRef = useRef<Array<{ tileX: number; tileZ: number }>>([]);
+  const tileQueueSetRef = useRef<Set<string>>(new Set());
 
   // Camera state for fly controls
   const cameraStateRef = useRef<CameraState>({
@@ -946,6 +1072,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const keysRef = useRef<Set<string>>(new Set());
   const isPointerLockedRef = useRef(false);
 
+  // Performance: track whether we're in World Studio mode via ref
+  // (avoids adding hideBuiltinOverlays to callback dep arrays)
+  const isStudioModeRef = useRef(hideBuiltinOverlays);
+  isStudioModeRef.current = hideBuiltinOverlays;
+
   // Raycasting for selection
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
@@ -953,6 +1084,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
   // Selection highlighting
   const selectionOutlineRef = useRef<THREE.Mesh | null>(null);
+  /** Track which selectable has labels shown due to being selected */
+  const selectedLabelRef = useRef<THREE.Object3D | null>(null);
 
   // UI state
   const [isGenerating, setIsGenerating] = useState(false);
@@ -960,6 +1093,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const [townCount, setTownCount] = useState(0);
   const [roadCount, setRoadCount] = useState(0);
   const [hoveredObject, setHoveredObject] = useState<string | null>(null);
+  /** Track hovered selectable group for label visibility toggle (UE5-style) */
+  const hoveredSelectableRef = useRef<THREE.Object3D | null>(null);
   const [cameraRotationY, setCameraRotationY] = useState(0);
 
   // Minimap data
@@ -1035,7 +1170,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const generateTile = useCallback(
     (tileX: number, tileZ: number) => {
       const scene = sceneRef.current;
-      const generator = generatorRef.current;
+      const querier = terrainQuerierRef.current;
       const template = templateGeometryRef.current;
       const terrainMaterial = terrainMaterialRef.current;
       const waterMaterial = waterMaterialRef.current;
@@ -1044,7 +1179,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       if (
         !scene ||
-        !generator ||
+        !querier ||
         !template ||
         !terrainMaterial ||
         !waterMaterial ||
@@ -1061,7 +1196,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         tileX,
         tileZ,
         template,
-        generator,
+        querier,
         tileSize,
         waterThreshold,
         maxHeight,
@@ -1094,8 +1229,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Create water mesh if needed
       let waterMesh: THREE.Mesh | null = null;
       if (hasWater) {
-        const waterGeometry = new THREE.PlaneGeometry(tileSize, tileSize);
-        waterGeometry.rotateX(-Math.PI / 2);
+        const waterGeometry = waterTemplateGeometryRef.current
+          ? waterTemplateGeometryRef.current.clone()
+          : (() => {
+              const g = new THREE.PlaneGeometry(tileSize, tileSize);
+              g.rotateX(-Math.PI / 2);
+              return g;
+            })();
         waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
         waterMesh.position.set(
           tileX * tileSize + tileSize / 2,
@@ -1147,9 +1287,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const updateTiles = useCallback(() => {
     const { tileX: cameraTileX, tileZ: cameraTileZ } = getCameraTile();
 
+    // Use reduced radius in World Studio for better FPS (49 tiles vs 121)
+    const loadRadius = isStudioModeRef.current
+      ? TILE_LOAD_RADIUS_STUDIO
+      : TILE_LOAD_RADIUS;
+
     // Queue tiles to load
-    for (let dx = -TILE_LOAD_RADIUS; dx <= TILE_LOAD_RADIUS; dx++) {
-      for (let dz = -TILE_LOAD_RADIUS; dz <= TILE_LOAD_RADIUS; dz++) {
+    for (let dx = -loadRadius; dx <= loadRadius; dx++) {
+      for (let dz = -loadRadius; dz <= loadRadius; dz++) {
         const tileX = cameraTileX + dx;
         const tileZ = cameraTileZ + dz;
 
@@ -1160,12 +1305,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           // Update last accessed time
           const tile = tilesRef.current.get(key)!;
           tile.lastAccessed = performance.now();
-        } else if (
-          !tileQueueRef.current.some(
-            (t) => t.tileX === tileX && t.tileZ === tileZ,
-          )
-        ) {
-          // Add to queue (closer tiles first)
+        } else if (!tileQueueSetRef.current.has(key)) {
+          // Add to queue (closer tiles first) — O(1) membership check via Set
+          tileQueueSetRef.current.add(key);
           const distance = Math.abs(dx) + Math.abs(dz);
           const insertIndex = tileQueueRef.current.findIndex(
             (t) =>
@@ -1186,10 +1328,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     let generated = 0;
     while (tileQueueRef.current.length > 0 && generated < MAX_TILES_PER_FRAME) {
       const { tileX, tileZ } = tileQueueRef.current.shift()!;
-      if (
-        isInBounds(tileX, tileZ) &&
-        !tilesRef.current.has(getTileKey(tileX, tileZ))
-      ) {
+      const qKey = getTileKey(tileX, tileZ);
+      tileQueueSetRef.current.delete(qKey);
+      if (isInBounds(tileX, tileZ) && !tilesRef.current.has(qKey)) {
         generateTile(tileX, tileZ);
         generated++;
       }
@@ -1201,7 +1342,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const dx = Math.abs(tile.tileX - cameraTileX);
       const dz = Math.abs(tile.tileZ - cameraTileZ);
 
-      if (dx > TILE_UNLOAD_RADIUS || dz > TILE_UNLOAD_RADIUS) {
+      const unloadRadius = isStudioModeRef.current
+        ? TILE_UNLOAD_RADIUS_STUDIO
+        : TILE_UNLOAD_RADIUS;
+      if (dx > unloadRadius || dz > unloadRadius) {
         // Only unload if not recently accessed
         if (now - tile.lastAccessed > 1000) {
           unloadTile(key);
@@ -1209,73 +1353,78 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
     }
 
-    // Update generating state
-    setIsGenerating(tileQueueRef.current.length > 0);
+    // Update generating state (only when changed to avoid unnecessary re-renders)
+    const isStillGenerating = tileQueueRef.current.length > 0;
+    setIsGenerating((prev) =>
+      prev !== isStillGenerating ? isStillGenerating : prev,
+    );
   }, [getCameraTile, isInBounds, getTileKey, generateTile, unloadTile]);
 
-  // Handle fly camera movement
+  // Handle camera updates — fly mode (pointer lock) or orbit controls
   const updateCamera = useCallback(
     (deltaTime: number) => {
       const camera = cameraRef.current;
       const state = cameraStateRef.current;
       const keys = keysRef.current;
+      const controls = orbitControlsRef.current;
 
       if (!camera) return;
 
-      // Movement direction
-      const forward = new THREE.Vector3(0, 0, -1).applyEuler(state.euler);
-      const right = new THREE.Vector3(1, 0, 0).applyEuler(state.euler);
-      const up = new THREE.Vector3(0, 1, 0);
+      if (isPointerLockedRef.current) {
+        // Fly mode: WASD movement
+        const forward = new THREE.Vector3(0, 0, -1).applyEuler(state.euler);
+        const right = new THREE.Vector3(1, 0, 0).applyEuler(state.euler);
+        const up = new THREE.Vector3(0, 1, 0);
 
-      // Calculate target velocity
-      const targetVelocity = new THREE.Vector3();
+        const targetVelocity = new THREE.Vector3();
 
-      if (keys.has("KeyW") || keys.has("ArrowUp")) {
-        targetVelocity.add(forward);
-      }
-      if (keys.has("KeyS") || keys.has("ArrowDown")) {
-        targetVelocity.sub(forward);
-      }
-      if (keys.has("KeyA") || keys.has("ArrowLeft")) {
-        targetVelocity.sub(right);
-      }
-      if (keys.has("KeyD") || keys.has("ArrowRight")) {
-        targetVelocity.add(right);
-      }
-      if (keys.has("Space")) {
-        targetVelocity.add(up);
-      }
-      if (keys.has("ShiftLeft") || keys.has("ShiftRight")) {
-        targetVelocity.sub(up);
-      }
+        if (keys.has("KeyW") || keys.has("ArrowUp")) {
+          targetVelocity.add(forward);
+        }
+        if (keys.has("KeyS") || keys.has("ArrowDown")) {
+          targetVelocity.sub(forward);
+        }
+        if (keys.has("KeyA") || keys.has("ArrowLeft")) {
+          targetVelocity.sub(right);
+        }
+        if (keys.has("KeyD") || keys.has("ArrowRight")) {
+          targetVelocity.add(right);
+        }
+        if (keys.has("Space")) {
+          targetVelocity.add(up);
+        }
+        if (keys.has("ShiftLeft") || keys.has("ShiftRight")) {
+          targetVelocity.sub(up);
+        }
 
-      // Normalize and apply speed
-      if (targetVelocity.length() > 0) {
-        targetVelocity.normalize().multiplyScalar(state.moveSpeed);
+        if (targetVelocity.length() > 0) {
+          targetVelocity.normalize().multiplyScalar(state.moveSpeed);
+        }
+
+        state.velocity.lerp(targetVelocity, 1 - Math.exp(-10 * deltaTime));
+        state.position.add(state.velocity.clone().multiplyScalar(deltaTime));
+
+        // Clamp to world bounds
+        const worldSizeMeters = worldSize * tileSize;
+        const margin = tileSize * 2;
+        state.position.x = Math.max(
+          -margin,
+          Math.min(worldSizeMeters + margin, state.position.x),
+        );
+        state.position.z = Math.max(
+          -margin,
+          Math.min(worldSizeMeters + margin, state.position.z),
+        );
+        state.position.y = Math.max(10, Math.min(2000, state.position.y));
+
+        camera.position.copy(state.position);
+        camera.quaternion.setFromEuler(state.euler);
+      } else if (controls) {
+        // Orbit mode: OrbitControls drives the camera, sync state for tile loading
+        controls.update();
+        state.position.copy(camera.position);
+        state.euler.setFromQuaternion(camera.quaternion, "YXZ");
       }
-
-      // Smooth velocity transition
-      state.velocity.lerp(targetVelocity, 1 - Math.exp(-10 * deltaTime));
-
-      // Apply movement
-      state.position.add(state.velocity.clone().multiplyScalar(deltaTime));
-
-      // Clamp to world bounds (with some margin)
-      const worldSizeMeters = worldSize * tileSize;
-      const margin = tileSize * 2;
-      state.position.x = Math.max(
-        -margin,
-        Math.min(worldSizeMeters + margin, state.position.x),
-      );
-      state.position.z = Math.max(
-        -margin,
-        Math.min(worldSizeMeters + margin, state.position.z),
-      );
-      state.position.y = Math.max(10, Math.min(2000, state.position.y));
-
-      // Update camera
-      camera.position.copy(state.position);
-      camera.quaternion.setFromEuler(state.euler);
     },
     [worldSize, tileSize],
   );
@@ -1355,37 +1504,86 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       if (selectableIntersects.length > 0) {
         const hit = selectableIntersects[0];
         const object = hit.object;
-        const userData = object.userData as {
-          selectable?: boolean;
-          selectableType?: string;
-          selectableId?: string;
-          townId?: string;
-          townName?: string;
-          buildingType?: string;
-          biomeType?: string;
-        };
+        // Walk up parent chain to find userData with selectable info
+        // (ray may hit a child mesh inside a group)
+        let current: THREE.Object3D | null = object;
+        let userData: Record<string, unknown> | null = null;
+        while (current) {
+          const ud = current.userData as Record<string, unknown>;
+          if (ud.selectable && ud.selectableType && ud.selectableId) {
+            userData = ud;
+            break;
+          }
+          current = current.parent;
+        }
 
-        if (
-          userData.selectable &&
-          userData.selectableType &&
-          userData.selectableId
-        ) {
+        if (userData) {
           const selection: ViewportSelection = {
             type: userData.selectableType as ViewportSelection["type"],
-            id: userData.selectableId,
+            id: userData.selectableId as string,
             position: {
               x: hit.point.x,
               y: hit.point.y,
               z: hit.point.z,
             },
-            townId: userData.townId,
-            townName: userData.townName,
-            buildingType: userData.buildingType,
-            biomeType: userData.biomeType,
+            townId: userData.townId as string | undefined,
+            townName: userData.townName as string | undefined,
+            buildingType: userData.buildingType as string | undefined,
+            biomeType: userData.biomeType as string | undefined,
+            entityType: userData.entityType as string | undefined,
+            entityId: userData.entityId as string | undefined,
+            entityDisplayName: userData.displayName as string | undefined,
+            entityData: userData as Record<string, unknown>,
           };
 
           onSelect?.(selection);
           return;
+        }
+      }
+
+      // Check vegetation instances (InstancedMesh per-instance selection)
+      const vegContainer = vegetationContainerRef.current;
+      if (vegContainer && vegContainer.visible) {
+        const vegChildren: THREE.InstancedMesh[] = [];
+        vegContainer.traverse((child) => {
+          if (child instanceof THREE.InstancedMesh) {
+            vegChildren.push(child);
+          }
+        });
+        if (vegChildren.length > 0) {
+          const vegIntersects = raycasterRef.current.intersectObjects(
+            vegChildren,
+            false,
+          );
+          if (vegIntersects.length > 0) {
+            const hit = vegIntersects[0];
+            const im = hit.object as THREE.InstancedMesh;
+            const instanceId = hit.instanceId;
+            const speciesId = vegetationSpeciesMapRef.current.get(im);
+            if (instanceId !== undefined && speciesId) {
+              // Extract the instance position from the instance matrix
+              const instanceMatrix = new THREE.Matrix4();
+              im.getMatrixAt(instanceId, instanceMatrix);
+              const instancePos = new THREE.Vector3();
+              instanceMatrix.decompose(
+                instancePos,
+                new THREE.Quaternion(),
+                new THREE.Vector3(),
+              );
+              onSelect?.({
+                type: "vegetation",
+                id: `${speciesId}_${instanceId}`,
+                position: {
+                  x: instancePos.x,
+                  y: instancePos.y,
+                  z: instancePos.z,
+                },
+                vegetationSpecies: speciesId,
+                vegetationInstanceIndex: instanceId,
+              });
+              return;
+            }
+          }
         }
       }
 
@@ -1421,18 +1619,36 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             let slope = 0;
             let walkable = true;
 
-            if (generator) {
+            // Query terrain info — use procgen generator or game querier
+            const clickQuerier = terrainQuerierRef.current;
+            if (generator && !config.useGamePipeline) {
               const query = generator.queryPoint(worldX, worldZ);
               biomeType = query.biome;
               terrainHeight = query.height;
-              // Calculate slope from surface normal (1 - y component gives steepness)
               slope = query.normal ? 1 - Math.abs(query.normal.y) : 0;
+            } else if (clickQuerier) {
+              const query = clickQuerier(worldX, worldZ);
+              biomeType = query.biome;
+              terrainHeight = query.height;
+              // Finite-difference slope for game pipeline
+              const sd = 1.0;
+              const hn = clickQuerier(worldX, worldZ + sd).height;
+              const hs = clickQuerier(worldX, worldZ - sd).height;
+              const he = clickQuerier(worldX + sd, worldZ).height;
+              const hw = clickQuerier(worldX - sd, worldZ).height;
+              const dzdx = (he - hw) / (2 * sd);
+              const dzdy = (hn - hs) / (2 * sd);
+              slope =
+                Math.sqrt(dzdx * dzdx + dzdy * dzdy) /
+                (1 + Math.sqrt(dzdx * dzdx + dzdy * dzdy));
+            }
+
+            {
               // Walkable if not too steep and not underwater
               const terrainWalkable =
                 slope < 0.7 && terrainHeight > waterThreshold;
 
               // Check building walkability (unified with game's BuildingCollisionService logic)
-              // Building interiors are walkable even if terrain underneath isn't
               const buildingCheck = buildingWalkabilityService.checkWalkability(
                 worldX,
                 worldZ,
@@ -1440,7 +1656,6 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               );
               walkable = buildingCheck.walkable;
 
-              // Update terrain height to building floor if inside a building
               if (buildingCheck.inBuilding) {
                 const floorHeight = buildingWalkabilityService.getFloorHeight(
                   worldX,
@@ -1541,10 +1756,29 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     isPointerLockedRef.current =
       document.pointerLockElement === containerRef.current;
 
-    // Notify parent if fly mode state changed
+    const controls = orbitControlsRef.current;
+
     if (wasLocked && !isPointerLockedRef.current) {
+      // Exiting fly mode → re-enable orbit controls, sync target
+      if (controls) {
+        const cam = cameraRef.current;
+        if (cam) {
+          // Set orbit target 200 units in front of camera
+          const dir = new THREE.Vector3(0, 0, -1).applyEuler(
+            cameraStateRef.current.euler,
+          );
+          controls.target.copy(cam.position).add(dir.multiplyScalar(200));
+          controls.target.y = Math.max(0, controls.target.y);
+        }
+        controls.enabled = true;
+        controls.update();
+      }
       onFlyModeChange?.(false);
     } else if (!wasLocked && isPointerLockedRef.current) {
+      // Entering fly mode → disable orbit controls
+      if (controls) {
+        controls.enabled = false;
+      }
       onFlyModeChange?.(true);
     }
   }, [onFlyModeChange]);
@@ -1569,13 +1803,30 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       1,
       10000,
     );
-    // Start camera at center of world, looking down
+    // Start camera at center of world, looking down at an angle
     const worldCenter = (worldSize * tileSize) / 2;
-    cameraStateRef.current.position.set(worldCenter, 300, worldCenter);
-    cameraStateRef.current.euler.set(-0.5, 0, 0);
-    camera.position.copy(cameraStateRef.current.position);
-    camera.quaternion.setFromEuler(cameraStateRef.current.euler);
+    camera.position.set(worldCenter, 400, worldCenter + 300);
+    cameraStateRef.current.position.copy(camera.position);
     cameraRef.current = camera;
+
+    // Orbit controls — immediate mouse interaction (rotate, pan, zoom)
+    const controls = new OrbitControls(camera, container);
+    controls.target.set(worldCenter, 0, worldCenter);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.screenSpacePanning = true;
+    controls.minDistance = 20;
+    controls.maxDistance = 3000;
+    controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below ground
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT: THREE.MOUSE.PAN,
+    };
+    controls.update();
+    orbitControlsRef.current = controls;
+    // Sync initial euler from orbit position
+    cameraStateRef.current.euler.setFromQuaternion(camera.quaternion, "YXZ");
 
     // Containers for terrain, water, and town markers
     const terrainContainer = new THREE.Group();
@@ -1738,15 +1989,18 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
     const sun = new THREE.DirectionalLight(0xffffff, 1.0);
     sun.position.set(1000, 2000, 1000);
-    sun.castShadow = true;
-    sun.shadow.mapSize.width = 2048;
-    sun.shadow.mapSize.height = 2048;
-    sun.shadow.camera.near = 100;
-    sun.shadow.camera.far = 5000;
-    sun.shadow.camera.left = -1000;
-    sun.shadow.camera.right = 1000;
-    sun.shadow.camera.top = 1000;
-    sun.shadow.camera.bottom = -1000;
+    // Skip shadow casting entirely in World Studio (shadows disabled on renderer)
+    sun.castShadow = !hideBuiltinOverlays;
+    if (sun.castShadow) {
+      sun.shadow.mapSize.width = 2048;
+      sun.shadow.mapSize.height = 2048;
+      sun.shadow.camera.near = 100;
+      sun.shadow.camera.far = 5000;
+      sun.shadow.camera.left = -1000;
+      sun.shadow.camera.right = 1000;
+      sun.shadow.camera.top = 1000;
+      sun.shadow.camera.bottom = -1000;
+    }
     scene.add(sun);
 
     // Create terrain resources
@@ -1754,813 +2008,1191 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       tileSize,
       tileResolution,
     );
+    const waterTemplate = new THREE.PlaneGeometry(tileSize, tileSize);
+    waterTemplate.rotateX(-Math.PI / 2);
+    waterTemplateGeometryRef.current = waterTemplate;
     terrainMaterialRef.current = createTerrainMaterial();
     waterMaterialRef.current = createWaterMaterial();
 
-    // Create terrain generator
+    // Create terrain generator and querier
     const generator = new TerrainGenerator(terrainConfig);
     generatorRef.current = generator;
 
-    // Generate towns using the factory method for proper terrain integration
+    // Build the terrain querier — game pipeline uses exact game algorithm,
+    // procgen pipeline wraps TerrainGenerator.queryPoint
+    if (config.useGamePipeline) {
+      const gameQuerier = createGameTerrainQuerier(config.seed);
+      terrainQuerierRef.current = (worldX: number, worldZ: number) => {
+        const q = gameQuerier.queryPoint(worldX, worldZ);
+        return {
+          height: q.height,
+          biome: q.biomeId,
+          color: q.biomeColor,
+          biomeForestWeight: q.biomeForestWeight,
+          biomeCanyonWeight: q.biomeCanyonWeight,
+        };
+      };
+    } else {
+      terrainQuerierRef.current = (worldX: number, worldZ: number) => {
+        const q = generator.queryPoint(worldX, worldZ);
+        // Extract per-biome weights for shader blending
+        const fW =
+          q.biomeInfluences?.find((b) => b.type === "forest")?.weight ?? 0;
+        const cW =
+          q.biomeInfluences?.find((b) => b.type === "canyon")?.weight ?? 0;
+        return {
+          height: q.height,
+          biome: q.biome,
+          biomeForestWeight: fW,
+          biomeCanyonWeight: cW,
+        };
+      };
+    }
+
+    // Compute world metrics shared by all pipelines
     const worldSizeMeters = worldSize * tileSize;
     const worldCenterOffset = worldSizeMeters / 2;
-
-    // Scale town spacing based on world size (smaller worlds need closer towns)
-    // Minimum spacing should allow at least 3-5 towns to fit
-    const scaledMinSpacing = Math.min(
-      config.towns.minTownSpacing,
-      worldSizeMeters / 5, // Ensure at least ~5 potential town spots
-    );
-
-    const townGenerator = TownGenerator.fromTerrainGenerator(generator, {
-      seed: config.seed,
-      config: {
-        townCount: config.towns.townCount,
-        worldSize: worldSizeMeters,
-        minTownSpacing: scaledMinSpacing,
-        waterThreshold: waterThreshold,
-        landmarks: {
-          fencesEnabled: config.towns.landmarks.fencesEnabled,
-          fenceDensity: config.towns.landmarks.fenceDensity,
-          fencePostHeight: config.towns.landmarks.fencePostHeight,
-          lamppostsInVillages: config.towns.landmarks.lamppostsInVillages,
-          lamppostSpacing: config.towns.landmarks.lamppostSpacing,
-          marketStallsEnabled: config.towns.landmarks.marketStallsEnabled,
-          decorationsEnabled: config.towns.landmarks.decorationsEnabled,
-        },
-      },
-    });
-
-    const townResult = townGenerator.generate();
-    console.log(
-      `[TileBasedTerrain] Generated ${townResult.towns.length} towns in ${townResult.stats.generationTime.toFixed(0)}ms`,
-    );
-    setTownCount(townResult.towns.length);
+    worldCenterOffsetRef.current = worldCenterOffset;
 
     // Clear selectable objects array
     selectableObjectsRef.current = [];
 
-    // Create town markers and internal roads
-    for (const town of townResult.towns) {
-      const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
-      // Offset town position to match our tile grid (towns are generated with origin at center)
-      const markerX = town.position.x + worldCenterOffset;
-      const markerY = town.position.y;
-      const markerZ = town.position.z + worldCenterOffset;
-
-      // Town userData for selection
-      const townUserData = {
-        selectable: true,
-        selectableType: "town",
-        selectableId: town.id,
-        townId: town.id,
-        townName: town.name,
-      };
-
-      // Cone marker pointing down at town location (main selectable element)
-      const coneGeometry = new THREE.ConeGeometry(20, 50, 8);
-      const coneMaterial = new MeshBasicNodeMaterial();
-      coneMaterial.color = new THREE.Color(color);
-      const marker = new THREE.Mesh(coneGeometry, coneMaterial);
-      marker.position.set(markerX, markerY + 60, markerZ);
-      marker.rotation.x = Math.PI; // Point downward
-      marker.userData = townUserData;
-      townMarkers.add(marker);
-      selectableObjectsRef.current.push(marker);
-
-      // Safe zone ring around town (also selectable as town)
-      const ringGeometry = new THREE.RingGeometry(
-        town.safeZoneRadius - 5,
-        town.safeZoneRadius,
-        48,
-      );
-      const ringMaterial = new MeshBasicNodeMaterial();
-      ringMaterial.color = new THREE.Color(color);
-      ringMaterial.side = THREE.DoubleSide;
-      ringMaterial.transparent = true;
-      ringMaterial.opacity = 0.4;
-      const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(markerX, markerY + 2, markerZ);
-      ring.userData = townUserData;
-      townMarkers.add(ring);
-      selectableObjectsRef.current.push(ring);
-
-      // Town center marker (small pillar) - also selectable
-      const pillarGeometry = new THREE.CylinderGeometry(3, 3, 30, 8);
-      const pillarMaterial = new TownBasicMat();
-      pillarMaterial.color = new THREE.Color(0xffffff);
-      const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
-      pillar.position.set(markerX, markerY + 15, markerZ);
-      pillar.userData = townUserData;
-      townMarkers.add(pillar);
-      selectableObjectsRef.current.push(pillar);
-
-      // Draw internal roads if available
-      if (town.internalRoads && town.internalRoads.length > 0) {
-        for (const road of town.internalRoads) {
-          const roadPoints: THREE.Vector3[] = [];
-          const startX = road.start.x + worldCenterOffset;
-          const startZ = road.start.z + worldCenterOffset;
-          const endX = road.end.x + worldCenterOffset;
-          const endZ = road.end.z + worldCenterOffset;
-
-          // Get height at road points
-          const startY = generator.getHeightAt(road.start.x, road.start.z) + 1;
-          const endY = generator.getHeightAt(road.end.x, road.end.z) + 1;
-
-          roadPoints.push(new THREE.Vector3(startX, startY, startZ));
-          roadPoints.push(new THREE.Vector3(endX, endY, endZ));
-
-          const roadGeometry = new THREE.BufferGeometry().setFromPoints(
-            roadPoints,
+    // ---- Game pipeline: fetch exact towns + roads from server-side game code ----
+    // The Asset Forge API runs the ACTUAL TownGenerator + BFS road pathfinding
+    // from the game, producing pixel-identical town/road layouts.
+    if (config.useGamePipeline) {
+      const initLayout = async () => {
+        const layoutRes = await fetch("/api/world/layout");
+        if (!mounted) return;
+        if (!layoutRes.ok) {
+          console.error(
+            "[TileBasedTerrain] Failed to fetch world layout:",
+            layoutRes.status,
           );
-          const roadLineMat = new TownLineMat();
-          // Match terrain dirt color for town internal roads
-          roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18); // dirtBrown
-          roadLineMat.linewidth = 2;
-          const roadLine = new THREE.Line(roadGeometry, roadLineMat);
-          townMarkers.add(roadLine);
+          return;
         }
-      }
 
-      // Draw building footprints with LOD support
-      for (const building of town.buildings) {
-        const bx = building.position.x + worldCenterOffset;
-        const bz = building.position.z + worldCenterOffset;
-        const by = building.position.y;
+        const layout = (await layoutRes.json()) as {
+          towns: Array<{
+            id: string;
+            name: string;
+            size: string;
+            biome: string;
+            position: { x: number; y: number; z: number };
+            safeZoneRadius: number;
+            layoutType: string;
+            buildings: Array<{
+              id: string;
+              type: string;
+              position: { x: number; y: number; z: number };
+              rotation: number;
+              size: { width: number; depth: number };
+            }>;
+            entryPoints: Array<{
+              position: { x: number; z: number };
+              angle: number;
+            }>;
+            internalRoads: Array<{
+              start: { x: number; z: number };
+              end: { x: number; z: number };
+              width: number;
+              isMain: boolean;
+            }>;
+            paths: Array<{
+              start: { x: number; z: number };
+              end: { x: number; z: number };
+              width: number;
+            }>;
+            landmarks: Array<{
+              type: string;
+              position: { x: number; y: number; z: number };
+              rotation: number;
+              size: { width: number; depth: number; height: number };
+            }>;
+            plaza?: { center: { x: number; z: number }; radius: number };
+          }>;
+          roads: Array<{
+            id: string;
+            fromTownId: string;
+            toTownId: string;
+            path: Array<{ x: number; z: number }>;
+            width: number;
+            isMainRoad: boolean;
+          }>;
+          generationTimeMs: number;
+        };
+        if (!mounted) return;
 
-        // Building dimensions (use defaults if not specified)
-        const buildingWidth = building.size?.width || 10;
-        const buildingDepth = building.size?.depth || 10;
-        const buildingHeight = 8; // Default height for visualization
-
-        // Create LOD group for this building
-        const buildingLOD = new THREE.LOD();
-        buildingLOD.position.set(bx, by, bz);
-        buildingLOD.rotation.y = building.rotation || 0;
-
-        // LOD 0: Full detail - try to generate procedural building
-        let fullDetailMesh: THREE.Object3D | null = null;
-        const buildingGen = new BuildingGenerator();
-        const generatedBuilding = buildingGen.generate(
-          building.type || "house",
-          {
-            includeRoof: true,
-            seed: `${town.id}-${building.id}`,
-          },
+        console.log(
+          `[TileBasedTerrain] Received ${layout.towns.length} towns, ${layout.roads.length} roads from server (generated in ${layout.generationTimeMs}ms)`,
         );
+        setTownCount(layout.towns.length);
 
-        if (generatedBuilding && generatedBuilding.mesh) {
-          fullDetailMesh = generatedBuilding.mesh;
-          fullDetailMesh.traverse((child) => {
-            if (child instanceof THREE.Mesh) {
-              child.castShadow = true;
-              child.receiveShadow = true;
+        // Get height function from game terrain querier
+        const heightQuerier = terrainQuerierRef.current;
+        const getHeight = (wx: number, wz: number): number =>
+          heightQuerier
+            ? heightQuerier(wx, wz).height
+            : generator.getHeightAt(wx, wz);
+
+        // ---- Render town markers, buildings, landmarks, internal roads ----
+        for (const town of layout.towns) {
+          const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
+          const markerX = town.position.x + worldCenterOffset;
+          const markerY = town.position.y;
+          const markerZ = town.position.z + worldCenterOffset;
+
+          const townUserData = {
+            selectable: true,
+            selectableType: "town",
+            selectableId: town.id,
+            townId: town.id,
+            townName: town.name,
+          };
+
+          // Cone marker pointing down
+          const coneGeometry = new THREE.ConeGeometry(20, 50, 8);
+          const coneMaterial = new MeshBasicNodeMaterial();
+          coneMaterial.color = new THREE.Color(color);
+          const marker = new THREE.Mesh(coneGeometry, coneMaterial);
+          marker.position.set(markerX, markerY + 60, markerZ);
+          marker.rotation.x = Math.PI;
+          marker.userData = townUserData;
+          townMarkers.add(marker);
+          selectableObjectsRef.current.push(marker);
+
+          // Safe zone ring
+          const ringGeometry = new THREE.RingGeometry(
+            town.safeZoneRadius - 5,
+            town.safeZoneRadius,
+            48,
+          );
+          const ringMaterial = new MeshBasicNodeMaterial();
+          ringMaterial.color = new THREE.Color(color);
+          ringMaterial.side = THREE.DoubleSide;
+          ringMaterial.transparent = true;
+          ringMaterial.opacity = 0.4;
+          const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+          ring.rotation.x = -Math.PI / 2;
+          ring.position.set(markerX, markerY + 2, markerZ);
+          ring.userData = townUserData;
+          townMarkers.add(ring);
+          selectableObjectsRef.current.push(ring);
+
+          // Town center pillar
+          const pillarGeometry = new THREE.CylinderGeometry(3, 3, 30, 8);
+          const pillarMaterial = new TownBasicMat();
+          pillarMaterial.color = new THREE.Color(0xffffff);
+          const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
+          pillar.position.set(markerX, markerY + 15, markerZ);
+          pillar.userData = townUserData;
+          townMarkers.add(pillar);
+          selectableObjectsRef.current.push(pillar);
+
+          // Internal roads
+          if (town.internalRoads && town.internalRoads.length > 0) {
+            for (const road of town.internalRoads) {
+              const startX = road.start.x + worldCenterOffset;
+              const startZ = road.start.z + worldCenterOffset;
+              const endX = road.end.x + worldCenterOffset;
+              const endZ = road.end.z + worldCenterOffset;
+              const startY = getHeight(road.start.x, road.start.z) + 1;
+              const endY = getHeight(road.end.x, road.end.z) + 1;
+
+              const roadGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(startX, startY, startZ),
+                new THREE.Vector3(endX, endY, endZ),
+              ]);
+              const roadLineMat = new TownLineMat();
+              roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
+              roadLineMat.linewidth = 2;
+              townMarkers.add(new THREE.Line(roadGeometry, roadLineMat));
             }
-          });
-
-          // Register building for walkability tracking (unified with game logic)
-          if (generatedBuilding.layout) {
-            buildingWalkabilityService.registerBuilding(
-              building.id,
-              town.id,
-              { x: bx, y: by, z: bz },
-              building.rotation || 0,
-              generatedBuilding.layout,
-              by, // maxGroundY approximation
-            );
           }
+
+          // Buildings with LOD
+          for (const building of town.buildings) {
+            const bx = building.position.x + worldCenterOffset;
+            const bz = building.position.z + worldCenterOffset;
+            const by = building.position.y;
+            const buildingWidth = building.size?.width || 10;
+            const buildingDepth = building.size?.depth || 10;
+            const buildingHeight = 8;
+
+            const buildingLOD = new THREE.LOD();
+            buildingLOD.position.set(bx, by, bz);
+            buildingLOD.rotation.y = building.rotation || 0;
+            lodObjectsRef.current.push(buildingLOD);
+
+            // LOD 0: Procedural building
+            let fullDetailMesh: THREE.Object3D | null = null;
+            const buildingGen = new BuildingGenerator();
+            const generatedBuilding = buildingGen.generate(
+              building.type || "house",
+              {
+                includeRoof: true,
+                seed: `${town.id}-${building.id}`,
+              },
+            );
+
+            if (generatedBuilding && generatedBuilding.mesh) {
+              fullDetailMesh = generatedBuilding.mesh;
+              fullDetailMesh.traverse((child) => {
+                if (child instanceof THREE.Mesh) {
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+                }
+              });
+              if (generatedBuilding.layout) {
+                buildingWalkabilityService.registerBuilding(
+                  building.id,
+                  town.id,
+                  { x: bx, y: by, z: bz },
+                  building.rotation || 0,
+                  generatedBuilding.layout,
+                  by,
+                );
+              }
+            } else {
+              const detailGeometry = new THREE.BoxGeometry(
+                buildingWidth,
+                buildingHeight,
+                buildingDepth,
+              );
+              const detailMaterial = new TownStdMat();
+              detailMaterial.color = new THREE.Color(0xd4a373);
+              detailMaterial.roughness = 0.7;
+              detailMaterial.metalness = 0.1;
+              fullDetailMesh = new THREE.Mesh(detailGeometry, detailMaterial);
+              fullDetailMesh.position.y = buildingHeight / 2;
+              fullDetailMesh.castShadow = true;
+              fullDetailMesh.receiveShadow = true;
+            }
+
+            // LOD 1: Simple box
+            const simpleGeometry = new THREE.BoxGeometry(
+              buildingWidth,
+              buildingHeight,
+              buildingDepth,
+            );
+            const simpleMaterial = new TownStdMat();
+            simpleMaterial.color = new THREE.Color(0xd4a373);
+            simpleMaterial.roughness = 0.9;
+            const simpleMesh = new THREE.Mesh(simpleGeometry, simpleMaterial);
+            simpleMesh.position.y = buildingHeight / 2;
+            simpleMesh.castShadow = false;
+            simpleMesh.receiveShadow = true;
+
+            // LOD 2: Far box
+            const farGeometry = new THREE.BoxGeometry(
+              buildingWidth,
+              buildingHeight,
+              buildingDepth,
+              1,
+              1,
+              1,
+            );
+            const farMaterial = new TownBasicMat();
+            farMaterial.color = new THREE.Color(0xc9a577);
+            const farMesh = new THREE.Mesh(farGeometry, farMaterial);
+            farMesh.position.y = buildingHeight / 2;
+
+            const buildingUserData = {
+              selectable: true,
+              selectableType: "building",
+              selectableId: building.id,
+              townId: town.id,
+              townName: town.name,
+              buildingType: building.type,
+            };
+            fullDetailMesh.userData = buildingUserData;
+            fullDetailMesh.traverse((child) => {
+              child.userData = { ...child.userData, ...buildingUserData };
+            });
+            simpleMesh.userData = buildingUserData;
+            farMesh.userData = buildingUserData;
+
+            buildingLOD.addLevel(fullDetailMesh, 0);
+            buildingLOD.addLevel(simpleMesh, BUILDING_LOD_FULL_DISTANCE);
+            buildingLOD.addLevel(farMesh, BUILDING_LOD_SIMPLE_DISTANCE);
+            buildingLOD.userData = buildingUserData;
+            townMarkers.add(buildingLOD);
+            selectableObjectsRef.current.push(buildingLOD);
+          }
+
+          // Landmarks
+          if (town.landmarks && town.landmarks.length > 0) {
+            for (const landmark of town.landmarks) {
+              const lx = landmark.position.x + worldCenterOffset;
+              const lz = landmark.position.z + worldCenterOffset;
+              const ly = landmark.position.y;
+
+              let color2 = 0x888888;
+              let height = landmark.size.height;
+              switch (landmark.type) {
+                case "well":
+                  color2 = 0x5a5a6a;
+                  break;
+                case "fountain":
+                  color2 = 0x4a7aaa;
+                  break;
+                case "market_stall":
+                  color2 = 0xaa7a4a;
+                  break;
+                case "signpost":
+                  color2 = 0x8a6a4a;
+                  break;
+                case "bench":
+                  color2 = 0x7a5a3a;
+                  break;
+                case "barrel":
+                  color2 = 0x6a5a4a;
+                  break;
+                case "crate":
+                  color2 = 0x8a7a5a;
+                  break;
+                case "lamppost":
+                  color2 = 0x3a3a3a;
+                  break;
+                case "planter":
+                  color2 = 0x5a8a5a;
+                  break;
+                case "tree":
+                  color2 = 0x3a6a3a;
+                  height = 4;
+                  break;
+                case "fence_post":
+                  color2 = 0x6a5030;
+                  break;
+                case "fence_gate":
+                  color2 = 0x7a6040;
+                  break;
+              }
+
+              const landmarkGeo = new THREE.BoxGeometry(
+                landmark.size.width,
+                height,
+                landmark.size.depth,
+              );
+              const landmarkMat = new TownStdMat();
+              landmarkMat.color = new THREE.Color(color2);
+              landmarkMat.roughness = 0.7;
+              const landmarkMesh = new THREE.Mesh(landmarkGeo, landmarkMat);
+              landmarkMesh.position.set(lx, ly + height / 2, lz);
+              landmarkMesh.rotation.y = landmark.rotation;
+              landmarkMesh.castShadow = true;
+              landmarkMesh.receiveShadow = true;
+              townMarkers.add(landmarkMesh);
+            }
+          }
+        }
+
+        // ---- Render inter-town roads from server BFS pathfinding ----
+        if (layout.roads.length > 0) {
+          const roadMaterial = new MeshBasicNodeMaterial();
+          roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16);
+          roadMaterial.side = THREE.DoubleSide;
+
+          const mainRoadMaterial = new MeshBasicNodeMaterial();
+          mainRoadMaterial.color = new THREE.Color(0.32, 0.22, 0.12);
+          mainRoadMaterial.side = THREE.DoubleSide;
+
+          for (const road of layout.roads) {
+            if (road.path.length < 2) continue;
+
+            const roadPoints: THREE.Vector3[] = road.path.map((point) => {
+              const y = getHeight(point.x, point.z) + 0.3;
+              return new THREE.Vector3(
+                point.x + worldCenterOffset,
+                y,
+                point.z + worldCenterOffset,
+              );
+            });
+
+            const roadWidth = road.isMainRoad ? road.width * 1.2 : road.width;
+            const segments = Math.max(roadPoints.length * 2, 20);
+            const roadCurve = new THREE.CatmullRomCurve3(roadPoints);
+            const roadGeometry = new THREE.TubeGeometry(
+              roadCurve,
+              segments,
+              roadWidth / 2,
+              4,
+              false,
+            );
+            const material = road.isMainRoad ? mainRoadMaterial : roadMaterial;
+            const roadMesh = new THREE.Mesh(roadGeometry, material);
+            roadMesh.userData = {
+              selectable: true,
+              selectableType: "road",
+              selectableId: road.id,
+              connectedTowns: [road.fromTownId, road.toTownId],
+              isMainRoad: road.isMainRoad,
+            };
+            townMarkers.add(roadMesh);
+            selectableObjectsRef.current.push(roadMesh);
+          }
+
+          console.log(
+            `[TileBasedTerrain] Created ${layout.roads.length} roads from server BFS pathfinding`,
+          );
+          setRoadCount(layout.roads.length);
+
+          // Minimap roads
+          setMinimapRoads(
+            layout.roads.map((road) => ({
+              path: road.path.map((p) => ({
+                x: p.x + worldCenterOffset,
+                z: p.z + worldCenterOffset,
+              })),
+            })),
+          );
         } else {
-          // Fallback to detailed box if generation fails
-          const detailGeometry = new THREE.BoxGeometry(
+          setRoadCount(0);
+          setMinimapRoads([]);
+        }
+
+        // Minimap towns
+        setMinimapTowns(
+          layout.towns.map((town) => ({
+            id: town.id,
+            name: town.name,
+            position: {
+              x: town.position.x + worldCenterOffset,
+              z: town.position.z + worldCenterOffset,
+            },
+            size: town.size,
+          })),
+        );
+      };
+      initLayout();
+    } else {
+      // ---- Procgen pipeline: generate towns locally ----
+
+      // Scale town spacing based on world size (smaller worlds need closer towns)
+      // Minimum spacing should allow at least 3-5 towns to fit
+      const scaledMinSpacing = Math.min(
+        config.towns.minTownSpacing,
+        worldSizeMeters / 5, // Ensure at least ~5 potential town spots
+      );
+
+      const townGenerator = TownGenerator.fromTerrainGenerator(generator, {
+        seed: config.seed,
+        config: {
+          townCount: config.towns.townCount,
+          worldSize: worldSizeMeters,
+          minTownSpacing: scaledMinSpacing,
+          waterThreshold: waterThreshold,
+          landmarks: {
+            fencesEnabled: config.towns.landmarks.fencesEnabled,
+            fenceDensity: config.towns.landmarks.fenceDensity,
+            fencePostHeight: config.towns.landmarks.fencePostHeight,
+            lamppostsInVillages: config.towns.landmarks.lamppostsInVillages,
+            lamppostSpacing: config.towns.landmarks.lamppostSpacing,
+            marketStallsEnabled: config.towns.landmarks.marketStallsEnabled,
+            decorationsEnabled: config.towns.landmarks.decorationsEnabled,
+          },
+        },
+      });
+
+      const townResult = townGenerator.generate();
+      console.log(
+        `[TileBasedTerrain] Generated ${townResult.towns.length} towns in ${townResult.stats.generationTime.toFixed(0)}ms`,
+      );
+      setTownCount(townResult.towns.length);
+
+      // Clear selectable objects array
+      selectableObjectsRef.current = [];
+
+      // Create town markers and internal roads
+      for (const town of townResult.towns) {
+        const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
+        // Offset town position to match our tile grid (towns are generated with origin at center)
+        const markerX = town.position.x + worldCenterOffset;
+        const markerY = town.position.y;
+        const markerZ = town.position.z + worldCenterOffset;
+
+        // Town userData for selection
+        const townUserData = {
+          selectable: true,
+          selectableType: "town",
+          selectableId: town.id,
+          townId: town.id,
+          townName: town.name,
+        };
+
+        // Cone marker pointing down at town location (main selectable element)
+        const coneGeometry = new THREE.ConeGeometry(20, 50, 8);
+        const coneMaterial = new MeshBasicNodeMaterial();
+        coneMaterial.color = new THREE.Color(color);
+        const marker = new THREE.Mesh(coneGeometry, coneMaterial);
+        marker.position.set(markerX, markerY + 60, markerZ);
+        marker.rotation.x = Math.PI; // Point downward
+        marker.userData = townUserData;
+        townMarkers.add(marker);
+        selectableObjectsRef.current.push(marker);
+
+        // Safe zone ring around town (also selectable as town)
+        const ringGeometry = new THREE.RingGeometry(
+          town.safeZoneRadius - 5,
+          town.safeZoneRadius,
+          48,
+        );
+        const ringMaterial = new MeshBasicNodeMaterial();
+        ringMaterial.color = new THREE.Color(color);
+        ringMaterial.side = THREE.DoubleSide;
+        ringMaterial.transparent = true;
+        ringMaterial.opacity = 0.4;
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(markerX, markerY + 2, markerZ);
+        ring.userData = townUserData;
+        townMarkers.add(ring);
+        selectableObjectsRef.current.push(ring);
+
+        // Town center marker (small pillar) - also selectable
+        const pillarGeometry = new THREE.CylinderGeometry(3, 3, 30, 8);
+        const pillarMaterial = new TownBasicMat();
+        pillarMaterial.color = new THREE.Color(0xffffff);
+        const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
+        pillar.position.set(markerX, markerY + 15, markerZ);
+        pillar.userData = townUserData;
+        townMarkers.add(pillar);
+        selectableObjectsRef.current.push(pillar);
+
+        // Draw internal roads if available
+        if (town.internalRoads && town.internalRoads.length > 0) {
+          for (const road of town.internalRoads) {
+            const roadPoints: THREE.Vector3[] = [];
+            const startX = road.start.x + worldCenterOffset;
+            const startZ = road.start.z + worldCenterOffset;
+            const endX = road.end.x + worldCenterOffset;
+            const endZ = road.end.z + worldCenterOffset;
+
+            // Get height at road points
+            const startY =
+              generator.getHeightAt(road.start.x, road.start.z) + 1;
+            const endY = generator.getHeightAt(road.end.x, road.end.z) + 1;
+
+            roadPoints.push(new THREE.Vector3(startX, startY, startZ));
+            roadPoints.push(new THREE.Vector3(endX, endY, endZ));
+
+            const roadGeometry = new THREE.BufferGeometry().setFromPoints(
+              roadPoints,
+            );
+            const roadLineMat = new TownLineMat();
+            // Match terrain dirt color for town internal roads
+            roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18); // dirtBrown
+            roadLineMat.linewidth = 2;
+            const roadLine = new THREE.Line(roadGeometry, roadLineMat);
+            townMarkers.add(roadLine);
+          }
+        }
+
+        // Draw building footprints with LOD support
+        for (const building of town.buildings) {
+          const bx = building.position.x + worldCenterOffset;
+          const bz = building.position.z + worldCenterOffset;
+          const by = building.position.y;
+
+          // Building dimensions (use defaults if not specified)
+          const buildingWidth = building.size?.width || 10;
+          const buildingDepth = building.size?.depth || 10;
+          const buildingHeight = 8; // Default height for visualization
+
+          // Create LOD group for this building
+          const buildingLOD = new THREE.LOD();
+          buildingLOD.position.set(bx, by, bz);
+          buildingLOD.rotation.y = building.rotation || 0;
+          lodObjectsRef.current.push(buildingLOD);
+
+          // LOD 0: Full detail - try to generate procedural building
+          let fullDetailMesh: THREE.Object3D | null = null;
+          const buildingGen = new BuildingGenerator();
+          const generatedBuilding = buildingGen.generate(
+            building.type || "house",
+            {
+              includeRoof: true,
+              seed: `${town.id}-${building.id}`,
+            },
+          );
+
+          if (generatedBuilding && generatedBuilding.mesh) {
+            fullDetailMesh = generatedBuilding.mesh;
+            fullDetailMesh.traverse((child) => {
+              if (child instanceof THREE.Mesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+              }
+            });
+
+            // Register building for walkability tracking (unified with game logic)
+            if (generatedBuilding.layout) {
+              buildingWalkabilityService.registerBuilding(
+                building.id,
+                town.id,
+                { x: bx, y: by, z: bz },
+                building.rotation || 0,
+                generatedBuilding.layout,
+                by, // maxGroundY approximation
+              );
+            }
+          } else {
+            // Fallback to detailed box if generation fails
+            const detailGeometry = new THREE.BoxGeometry(
+              buildingWidth,
+              buildingHeight,
+              buildingDepth,
+            );
+            const detailMaterial = new TownStdMat();
+            detailMaterial.color = new THREE.Color(0xd4a373);
+            detailMaterial.roughness = 0.7;
+            detailMaterial.metalness = 0.1;
+            fullDetailMesh = new THREE.Mesh(detailGeometry, detailMaterial);
+            fullDetailMesh.position.y = buildingHeight / 2;
+            fullDetailMesh.castShadow = true;
+            fullDetailMesh.receiveShadow = true;
+          }
+
+          // LOD 1: Simple box (medium distance)
+          const simpleGeometry = new THREE.BoxGeometry(
             buildingWidth,
             buildingHeight,
             buildingDepth,
           );
-          const detailMaterial = new TownStdMat();
-          detailMaterial.color = new THREE.Color(0xd4a373);
-          detailMaterial.roughness = 0.7;
-          detailMaterial.metalness = 0.1;
-          fullDetailMesh = new THREE.Mesh(detailGeometry, detailMaterial);
-          fullDetailMesh.position.y = buildingHeight / 2;
-          fullDetailMesh.castShadow = true;
-          fullDetailMesh.receiveShadow = true;
+          const simpleMaterial = new TownStdMat();
+          simpleMaterial.color = new THREE.Color(0xd4a373);
+          simpleMaterial.roughness = 0.9;
+          const simpleMesh = new THREE.Mesh(simpleGeometry, simpleMaterial);
+          simpleMesh.position.y = buildingHeight / 2;
+          simpleMesh.castShadow = false;
+          simpleMesh.receiveShadow = true;
+
+          // LOD 2: Very simple box (far distance) - less geometry
+          const farGeometry = new THREE.BoxGeometry(
+            buildingWidth,
+            buildingHeight,
+            buildingDepth,
+            1,
+            1,
+            1,
+          );
+          const farMaterial = new TownBasicMat();
+          farMaterial.color = new THREE.Color(0xc9a577);
+          const farMesh = new THREE.Mesh(farGeometry, farMaterial);
+          farMesh.position.y = buildingHeight / 2;
+
+          // Building userData for selection
+          const buildingUserData = {
+            selectable: true,
+            selectableType: "building",
+            selectableId: building.id,
+            townId: town.id,
+            townName: town.name,
+            buildingType: building.type,
+          };
+
+          // Set userData on all meshes and descendants so raycasting works
+          // fullDetailMesh might be a group with children, so traverse it
+          fullDetailMesh.userData = buildingUserData;
+          fullDetailMesh.traverse((child) => {
+            child.userData = { ...child.userData, ...buildingUserData };
+          });
+          simpleMesh.userData = buildingUserData;
+          farMesh.userData = buildingUserData;
+
+          // Add LOD levels
+          buildingLOD.addLevel(fullDetailMesh, 0);
+          buildingLOD.addLevel(simpleMesh, BUILDING_LOD_FULL_DISTANCE);
+          buildingLOD.addLevel(farMesh, BUILDING_LOD_SIMPLE_DISTANCE);
+
+          // Also set on LOD parent for consistency
+          buildingLOD.userData = buildingUserData;
+
+          townMarkers.add(buildingLOD);
+          selectableObjectsRef.current.push(buildingLOD);
         }
 
-        // LOD 1: Simple box (medium distance)
-        const simpleGeometry = new THREE.BoxGeometry(
-          buildingWidth,
-          buildingHeight,
-          buildingDepth,
-        );
-        const simpleMaterial = new TownStdMat();
-        simpleMaterial.color = new THREE.Color(0xd4a373);
-        simpleMaterial.roughness = 0.9;
-        const simpleMesh = new THREE.Mesh(simpleGeometry, simpleMaterial);
-        simpleMesh.position.y = buildingHeight / 2;
-        simpleMesh.castShadow = false;
-        simpleMesh.receiveShadow = true;
+        // Render town landmarks (fences, lampposts, wells, signposts, etc.)
+        if (town.landmarks && town.landmarks.length > 0) {
+          for (const landmark of town.landmarks) {
+            const lx = landmark.position.x + worldCenterOffset;
+            const lz = landmark.position.z + worldCenterOffset;
+            const ly = landmark.position.y;
 
-        // LOD 2: Very simple box (far distance) - less geometry
-        const farGeometry = new THREE.BoxGeometry(
-          buildingWidth,
-          buildingHeight,
-          buildingDepth,
-          1,
-          1,
-          1,
-        );
-        const farMaterial = new TownBasicMat();
-        farMaterial.color = new THREE.Color(0xc9a577);
-        const farMesh = new THREE.Mesh(farGeometry, farMaterial);
-        farMesh.position.y = buildingHeight / 2;
+            // Color based on landmark type
+            let color = 0x888888;
+            let height = landmark.size.height;
 
-        // Building userData for selection
-        const buildingUserData = {
-          selectable: true,
-          selectableType: "building",
-          selectableId: building.id,
-          townId: town.id,
-          townName: town.name,
-          buildingType: building.type,
-        };
+            switch (landmark.type) {
+              case "well":
+                color = 0x5a5a6a;
+                break; // Gray stone
+              case "fountain":
+                color = 0x4a7aaa;
+                break; // Blue-gray
+              case "market_stall":
+                color = 0xaa7a4a;
+                break; // Brown wood
+              case "signpost":
+                color = 0x8a6a4a;
+                break; // Wood brown
+              case "bench":
+                color = 0x7a5a3a;
+                break; // Dark wood
+              case "barrel":
+                color = 0x6a5a4a;
+                break; // Barrel brown
+              case "crate":
+                color = 0x8a7a5a;
+                break; // Crate tan
+              case "lamppost":
+                color = 0x3a3a3a;
+                break; // Dark iron
+              case "planter":
+                color = 0x5a8a5a;
+                break; // Green
+              case "tree":
+                color = 0x3a6a3a;
+                height = 4;
+                break; // Tree green
+              case "fence_post":
+                color = 0x6a5030;
+                break; // Rustic wood brown
+              case "fence_gate":
+                color = 0x7a6040;
+                break; // Lighter wood for gate
+            }
 
-        // Set userData on all meshes and descendants so raycasting works
-        // fullDetailMesh might be a group with children, so traverse it
-        fullDetailMesh.userData = buildingUserData;
-        fullDetailMesh.traverse((child) => {
-          child.userData = { ...child.userData, ...buildingUserData };
-        });
-        simpleMesh.userData = buildingUserData;
-        farMesh.userData = buildingUserData;
-
-        // Add LOD levels
-        buildingLOD.addLevel(fullDetailMesh, 0);
-        buildingLOD.addLevel(simpleMesh, BUILDING_LOD_FULL_DISTANCE);
-        buildingLOD.addLevel(farMesh, BUILDING_LOD_SIMPLE_DISTANCE);
-
-        // Also set on LOD parent for consistency
-        buildingLOD.userData = buildingUserData;
-
-        townMarkers.add(buildingLOD);
-        selectableObjectsRef.current.push(buildingLOD);
-      }
-
-      // Render town landmarks (fences, lampposts, wells, signposts, etc.)
-      if (town.landmarks && town.landmarks.length > 0) {
-        for (const landmark of town.landmarks) {
-          const lx = landmark.position.x + worldCenterOffset;
-          const lz = landmark.position.z + worldCenterOffset;
-          const ly = landmark.position.y;
-
-          // Color based on landmark type
-          let color = 0x888888;
-          let height = landmark.size.height;
-
-          switch (landmark.type) {
-            case "well":
-              color = 0x5a5a6a;
-              break; // Gray stone
-            case "fountain":
-              color = 0x4a7aaa;
-              break; // Blue-gray
-            case "market_stall":
-              color = 0xaa7a4a;
-              break; // Brown wood
-            case "signpost":
-              color = 0x8a6a4a;
-              break; // Wood brown
-            case "bench":
-              color = 0x7a5a3a;
-              break; // Dark wood
-            case "barrel":
-              color = 0x6a5a4a;
-              break; // Barrel brown
-            case "crate":
-              color = 0x8a7a5a;
-              break; // Crate tan
-            case "lamppost":
-              color = 0x3a3a3a;
-              break; // Dark iron
-            case "planter":
-              color = 0x5a8a5a;
-              break; // Green
-            case "tree":
-              color = 0x3a6a3a;
-              height = 4;
-              break; // Tree green
-            case "fence_post":
-              color = 0x6a5030;
-              break; // Rustic wood brown
-            case "fence_gate":
-              color = 0x7a6040;
-              break; // Lighter wood for gate
-          }
-
-          const landmarkGeo = new THREE.BoxGeometry(
-            landmark.size.width,
-            height,
-            landmark.size.depth,
-          );
-          const landmarkMat = new TownStdMat();
-          landmarkMat.color = new THREE.Color(color);
-          landmarkMat.roughness = 0.7;
-          const landmarkMesh = new THREE.Mesh(landmarkGeo, landmarkMat);
-          landmarkMesh.position.set(lx, ly + height / 2, lz);
-          landmarkMesh.rotation.y = landmark.rotation;
-          landmarkMesh.castShadow = true;
-          landmarkMesh.receiveShadow = true;
-          townMarkers.add(landmarkMesh);
-        }
-      }
-    }
-
-    // Generate roads using actual road network data
-    if (providedRoads && providedRoads.length > 0) {
-      // DEBUG: Log road coordinate transformation details
-      console.log("[TileBasedTerrain] ===== ROAD COORDINATE DEBUG =====");
-      console.log(`[TileBasedTerrain] worldCenterOffset: ${worldCenterOffset}`);
-      console.log(`[TileBasedTerrain] worldSize: ${worldSize}`);
-
-      // Log first road's first few points in both coordinate systems
-      const firstRoad = providedRoads[0];
-      if (firstRoad && firstRoad.path.length > 0) {
-        console.log(
-          `[TileBasedTerrain] First road (${firstRoad.id}) sample points:`,
-        );
-        const sampleCount = Math.min(3, firstRoad.path.length);
-        for (let i = 0; i < sampleCount; i++) {
-          const p = firstRoad.path[i];
-          const renderX = p.x + worldCenterOffset;
-          const renderZ = p.z + worldCenterOffset;
-          const terrainY = generator.getHeightAt(p.x, p.z);
-          console.log(
-            `  Point ${i}: terrain-gen coords (${p.x.toFixed(1)}, ${p.z.toFixed(1)}) -> render coords (${renderX.toFixed(1)}, ${renderZ.toFixed(1)}), height: ${terrainY.toFixed(1)}`,
-          );
-        }
-      }
-      console.log("[TileBasedTerrain] ================================");
-
-      // Use pre-generated road network with actual pathfinding data
-      // Road colors match terrain dirt colors: dirtBrown (0.45, 0.32, 0.18), dirtDark (0.32, 0.22, 0.12)
-      const roadMaterial = new MeshBasicNodeMaterial();
-      roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16); // Matches dirtBrown
-      roadMaterial.side = THREE.DoubleSide;
-
-      const mainRoadMaterial = new MeshBasicNodeMaterial();
-      mainRoadMaterial.color = new THREE.Color(0.32, 0.22, 0.12); // Matches dirtDark - compacted main roads
-      mainRoadMaterial.side = THREE.DoubleSide;
-
-      for (const road of providedRoads) {
-        if (road.path.length < 2) continue;
-
-        // Convert road path points to THREE.Vector3 with terrain sampling
-        const roadPoints: THREE.Vector3[] = road.path.map((point) => {
-          // Get actual terrain height at this point, or use provided y
-          const y =
-            point.y !== undefined
-              ? point.y
-              : generator.getHeightAt(point.x, point.z) + 0.3;
-          return new THREE.Vector3(
-            point.x + worldCenterOffset,
-            y,
-            point.z + worldCenterOffset,
-          );
-        });
-
-        // Create road as a tube/ribbon with appropriate width
-        const roadWidth = road.isMainRoad
-          ? (road.width || 4) * 1.2
-          : road.width || 4;
-        const segments = Math.max(roadPoints.length * 2, 20);
-
-        const roadCurve = new THREE.CatmullRomCurve3(roadPoints);
-        const roadGeometry = new THREE.TubeGeometry(
-          roadCurve,
-          segments,
-          roadWidth / 2, // radius = half width
-          4,
-          false,
-        );
-
-        const material = road.isMainRoad ? mainRoadMaterial : roadMaterial;
-        const roadMesh = new THREE.Mesh(roadGeometry, material);
-        roadMesh.userData = {
-          selectable: true,
-          selectableType: "road",
-          selectableId: road.id,
-          connectedTowns: road.connectedTowns,
-          isMainRoad: road.isMainRoad,
-        };
-
-        townMarkers.add(roadMesh);
-        selectableObjectsRef.current.push(roadMesh);
-      }
-
-      console.log(
-        `[TileBasedTerrain] Created ${providedRoads.length} roads from road network data`,
-      );
-      setRoadCount(providedRoads.length);
-
-      // DEBUG: Create elevated road visualization 5m above ground
-      // This helps verify road coordinates align with terrain road influence
-      const DEBUG_ROAD_HEIGHT = 5;
-      const debugRoadMaterial = new THREE.LineBasicMaterial({
-        color: 0xff00ff, // Bright magenta for visibility
-        linewidth: 2,
-      });
-      const debugMainRoadMaterial = new THREE.LineBasicMaterial({
-        color: 0x00ffff, // Bright cyan for main roads
-        linewidth: 3,
-      });
-
-      for (const road of providedRoads) {
-        if (road.path.length < 2) continue;
-
-        // Create line geometry for debug visualization
-        const debugPoints: THREE.Vector3[] = road.path.map((point) => {
-          const terrainY = generator.getHeightAt(point.x, point.z);
-          return new THREE.Vector3(
-            point.x + worldCenterOffset,
-            terrainY + DEBUG_ROAD_HEIGHT,
-            point.z + worldCenterOffset,
-          );
-        });
-
-        const debugGeometry = new THREE.BufferGeometry().setFromPoints(
-          debugPoints,
-        );
-        const debugMaterial = road.isMainRoad
-          ? debugMainRoadMaterial
-          : debugRoadMaterial;
-        const debugLine = new THREE.Line(debugGeometry, debugMaterial);
-        debugLine.name = `debug-road-${road.id}`;
-        townMarkers.add(debugLine);
-
-        // Also add small spheres at road path vertices for point visibility
-        const sphereGeometry = new THREE.SphereGeometry(1, 8, 8);
-        const sphereMaterial = new THREE.MeshBasicMaterial({
-          color: road.isMainRoad ? 0x00ffff : 0xff00ff,
-        });
-        for (const point of debugPoints) {
-          const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-          sphere.position.copy(point);
-          townMarkers.add(sphere);
-        }
-      }
-
-      // Also add ground-level ring markers every 20m along road paths
-      // These show where road influence SHOULD be affecting terrain color
-      const ringGeometry = new THREE.RingGeometry(1.5, 2, 16);
-      ringGeometry.rotateX(-Math.PI / 2); // Lay flat on ground
-      const ringMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffff00, // Yellow rings
-        side: THREE.DoubleSide,
-      });
-
-      let ringCount = 0;
-      for (const road of providedRoads) {
-        if (road.path.length < 2) continue;
-
-        // Sample points every ~20m along the path
-        for (let i = 0; i < road.path.length - 1; i++) {
-          const p1 = road.path[i];
-          const p2 = road.path[i + 1];
-          const dx = p2.x - p1.x;
-          const dz = p2.z - p1.z;
-          const segmentLength = Math.sqrt(dx * dx + dz * dz);
-          const steps = Math.max(1, Math.floor(segmentLength / 20));
-
-          for (let s = 0; s <= steps; s++) {
-            const t = s / steps;
-            const x = p1.x + dx * t;
-            const z = p1.z + dz * t;
-            const terrainY = generator.getHeightAt(x, z);
-
-            const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-            ring.position.set(
-              x + worldCenterOffset,
-              terrainY + 0.2, // Slightly above ground to avoid z-fighting
-              z + worldCenterOffset,
+            const landmarkGeo = new THREE.BoxGeometry(
+              landmark.size.width,
+              height,
+              landmark.size.depth,
             );
-            townMarkers.add(ring);
-            ringCount++;
+            const landmarkMat = new TownStdMat();
+            landmarkMat.color = new THREE.Color(color);
+            landmarkMat.roughness = 0.7;
+            const landmarkMesh = new THREE.Mesh(landmarkGeo, landmarkMat);
+            landmarkMesh.position.set(lx, ly + height / 2, lz);
+            landmarkMesh.rotation.y = landmark.rotation;
+            landmarkMesh.castShadow = true;
+            landmarkMesh.receiveShadow = true;
+            townMarkers.add(landmarkMesh);
           }
         }
       }
 
-      console.log(
-        `[TileBasedTerrain] DEBUG: Created elevated road visualization (${DEBUG_ROAD_HEIGHT}m above ground) for ${providedRoads.length} roads`,
-      );
-      console.log(
-        `[TileBasedTerrain] DEBUG: Created ${ringCount} ground-level road markers (yellow rings)`,
-      );
+      // Generate roads using actual road network data
+      if (providedRoads && providedRoads.length > 0) {
+        // DEBUG: Log road coordinate transformation details
+        console.log("[TileBasedTerrain] ===== ROAD COORDINATE DEBUG =====");
+        console.log(
+          `[TileBasedTerrain] worldCenterOffset: ${worldCenterOffset}`,
+        );
+        console.log(`[TileBasedTerrain] worldSize: ${worldSize}`);
 
-      // Populate minimap roads data from actual road paths
-      const minimapRoadData: Array<{ path: Array<{ x: number; z: number }> }> =
-        providedRoads.map((road) => ({
+        // Log first road's first few points in both coordinate systems
+        const firstRoad = providedRoads[0];
+        if (firstRoad && firstRoad.path.length > 0) {
+          console.log(
+            `[TileBasedTerrain] First road (${firstRoad.id}) sample points:`,
+          );
+          const sampleCount = Math.min(3, firstRoad.path.length);
+          for (let i = 0; i < sampleCount; i++) {
+            const p = firstRoad.path[i];
+            const renderX = p.x + worldCenterOffset;
+            const renderZ = p.z + worldCenterOffset;
+            const terrainY = generator.getHeightAt(p.x, p.z);
+            console.log(
+              `  Point ${i}: terrain-gen coords (${p.x.toFixed(1)}, ${p.z.toFixed(1)}) -> render coords (${renderX.toFixed(1)}, ${renderZ.toFixed(1)}), height: ${terrainY.toFixed(1)}`,
+            );
+          }
+        }
+        console.log("[TileBasedTerrain] ================================");
+
+        // Use pre-generated road network with actual pathfinding data
+        // Road colors match terrain dirt colors: dirtBrown (0.45, 0.32, 0.18), dirtDark (0.32, 0.22, 0.12)
+        const roadMaterial = new MeshBasicNodeMaterial();
+        roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16); // Matches dirtBrown
+        roadMaterial.side = THREE.DoubleSide;
+
+        const mainRoadMaterial = new MeshBasicNodeMaterial();
+        mainRoadMaterial.color = new THREE.Color(0.32, 0.22, 0.12); // Matches dirtDark - compacted main roads
+        mainRoadMaterial.side = THREE.DoubleSide;
+
+        for (const road of providedRoads) {
+          if (road.path.length < 2) continue;
+
+          // Convert road path points to THREE.Vector3 with terrain sampling
+          const roadPoints: THREE.Vector3[] = road.path.map((point) => {
+            // Get actual terrain height at this point, or use provided y
+            const y =
+              point.y !== undefined
+                ? point.y
+                : generator.getHeightAt(point.x, point.z) + 0.3;
+            return new THREE.Vector3(
+              point.x + worldCenterOffset,
+              y,
+              point.z + worldCenterOffset,
+            );
+          });
+
+          // Create road as a tube/ribbon with appropriate width
+          const roadWidth = road.isMainRoad
+            ? (road.width || 4) * 1.2
+            : road.width || 4;
+          const segments = Math.max(roadPoints.length * 2, 20);
+
+          const roadCurve = new THREE.CatmullRomCurve3(roadPoints);
+          const roadGeometry = new THREE.TubeGeometry(
+            roadCurve,
+            segments,
+            roadWidth / 2, // radius = half width
+            4,
+            false,
+          );
+
+          const material = road.isMainRoad ? mainRoadMaterial : roadMaterial;
+          const roadMesh = new THREE.Mesh(roadGeometry, material);
+          roadMesh.userData = {
+            selectable: true,
+            selectableType: "road",
+            selectableId: road.id,
+            connectedTowns: road.connectedTowns,
+            isMainRoad: road.isMainRoad,
+          };
+
+          townMarkers.add(roadMesh);
+          selectableObjectsRef.current.push(roadMesh);
+        }
+
+        console.log(
+          `[TileBasedTerrain] Created ${providedRoads.length} roads from road network data`,
+        );
+        setRoadCount(providedRoads.length);
+
+        // Populate minimap roads data from actual road paths
+        const minimapRoadData: Array<{
+          path: Array<{ x: number; z: number }>;
+        }> = providedRoads.map((road) => ({
           path: road.path.map((point) => ({
             x: point.x + worldCenterOffset,
             z: point.z + worldCenterOffset,
           })),
         }));
-      setMinimapRoads(minimapRoadData);
-    } else if (townResult.towns.length >= 2) {
-      // Fallback: Generate simple MST-like roads for preview when no road data is provided
-      console.warn(
-        "[TileBasedTerrain] No road network data provided, using simplified preview roads",
-      );
+        setMinimapRoads(minimapRoadData);
+      } else if (townResult.towns.length >= 2) {
+        // Fallback: Generate simple MST-like roads for preview when no road data is provided
+        console.warn(
+          "[TileBasedTerrain] No road network data provided, using simplified preview roads",
+        );
 
-      // Match terrain dirt colors for roads
-      const roadMaterial = new MeshBasicNodeMaterial();
-      roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16); // Matches dirtBrown
-      roadMaterial.side = THREE.DoubleSide;
+        // Match terrain dirt colors for roads
+        const roadMaterial = new MeshBasicNodeMaterial();
+        roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16); // Matches dirtBrown
+        roadMaterial.side = THREE.DoubleSide;
 
-      // Create simple road connections between nearby towns
-      const connectedPairs = new Set<string>();
-      const sortedTowns = [...townResult.towns];
+        // Create simple road connections between nearby towns
+        const connectedPairs = new Set<string>();
+        const sortedTowns = [...townResult.towns];
 
-      for (let i = 0; i < sortedTowns.length; i++) {
-        const town1 = sortedTowns[i];
-        // Connect to nearest 2 towns not already connected
-        const distances = sortedTowns
-          .map((town2, j) => ({
-            town2,
-            index: j,
-            dist: Math.sqrt(
-              (town2.position.x - town1.position.x) ** 2 +
-                (town2.position.z - town1.position.z) ** 2,
-            ),
-          }))
-          .filter((d) => d.index !== i)
-          .sort((a, b) => a.dist - b.dist);
-
-        for (const { town2, index } of distances.slice(0, 2)) {
-          const pairKey = [Math.min(i, index), Math.max(i, index)].join("-");
-          if (connectedPairs.has(pairKey)) continue;
-          connectedPairs.add(pairKey);
-
-          // Create road path between towns
-          const roadPoints: THREE.Vector3[] = [];
-          const steps = 20;
-
-          for (let s = 0; s <= steps; s++) {
-            const t = s / steps;
-            const x =
-              town1.position.x + (town2.position.x - town1.position.x) * t;
-            const z =
-              town1.position.z + (town2.position.z - town1.position.z) * t;
-            const y = generator.getHeightAt(x, z) + 0.5;
-
-            roadPoints.push(
-              new THREE.Vector3(
-                x + worldCenterOffset,
-                y,
-                z + worldCenterOffset,
+        for (let i = 0; i < sortedTowns.length; i++) {
+          const town1 = sortedTowns[i];
+          // Connect to nearest 2 towns not already connected
+          const distances = sortedTowns
+            .map((town2, j) => ({
+              town2,
+              index: j,
+              dist: Math.sqrt(
+                (town2.position.x - town1.position.x) ** 2 +
+                  (town2.position.z - town1.position.z) ** 2,
               ),
-            );
-          }
+            }))
+            .filter((d) => d.index !== i)
+            .sort((a, b) => a.dist - b.dist);
 
-          // Create road as a tube/ribbon
-          if (roadPoints.length >= 2) {
-            const roadCurve = new THREE.CatmullRomCurve3(roadPoints);
-            const roadGeometry = new THREE.TubeGeometry(
-              roadCurve,
-              steps,
-              4,
-              4,
-              false,
-            );
-            const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
-            townMarkers.add(roadMesh);
+          for (const { town2, index } of distances.slice(0, 2)) {
+            const pairKey = [Math.min(i, index), Math.max(i, index)].join("-");
+            if (connectedPairs.has(pairKey)) continue;
+            connectedPairs.add(pairKey);
+
+            // Create road path between towns
+            const roadPoints: THREE.Vector3[] = [];
+            const steps = 20;
+
+            for (let s = 0; s <= steps; s++) {
+              const t = s / steps;
+              const x =
+                town1.position.x + (town2.position.x - town1.position.x) * t;
+              const z =
+                town1.position.z + (town2.position.z - town1.position.z) * t;
+              const y = generator.getHeightAt(x, z) + 0.5;
+
+              roadPoints.push(
+                new THREE.Vector3(
+                  x + worldCenterOffset,
+                  y,
+                  z + worldCenterOffset,
+                ),
+              );
+            }
+
+            // Create road as a tube/ribbon
+            if (roadPoints.length >= 2) {
+              const roadCurve = new THREE.CatmullRomCurve3(roadPoints);
+              const roadGeometry = new THREE.TubeGeometry(
+                roadCurve,
+                steps,
+                4,
+                4,
+                false,
+              );
+              const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
+              townMarkers.add(roadMesh);
+            }
           }
         }
-      }
 
-      console.log(
-        `[TileBasedTerrain] Created ${connectedPairs.size} fallback road connections`,
-      );
-      setRoadCount(connectedPairs.size);
+        console.log(
+          `[TileBasedTerrain] Created ${connectedPairs.size} fallback road connections`,
+        );
+        setRoadCount(connectedPairs.size);
 
-      // Populate minimap roads data (simplified straight lines)
-      const minimapRoadData: Array<{ path: Array<{ x: number; z: number }> }> =
-        [];
-      const sortedTownsForRoads = [...townResult.towns];
-      const processedPairs = new Set<string>();
+        // Populate minimap roads data (simplified straight lines)
+        const minimapRoadData: Array<{
+          path: Array<{ x: number; z: number }>;
+        }> = [];
+        const sortedTownsForRoads = [...townResult.towns];
+        const processedPairs = new Set<string>();
 
-      for (let i = 0; i < sortedTownsForRoads.length; i++) {
-        const town1 = sortedTownsForRoads[i];
-        const distances = sortedTownsForRoads
-          .map((town2, j) => ({
-            town2,
-            index: j,
-            dist: Math.sqrt(
-              (town2.position.x - town1.position.x) ** 2 +
-                (town2.position.z - town1.position.z) ** 2,
-            ),
-          }))
-          .filter((d) => d.index !== i)
-          .sort((a, b) => a.dist - b.dist);
+        for (let i = 0; i < sortedTownsForRoads.length; i++) {
+          const town1 = sortedTownsForRoads[i];
+          const distances = sortedTownsForRoads
+            .map((town2, j) => ({
+              town2,
+              index: j,
+              dist: Math.sqrt(
+                (town2.position.x - town1.position.x) ** 2 +
+                  (town2.position.z - town1.position.z) ** 2,
+              ),
+            }))
+            .filter((d) => d.index !== i)
+            .sort((a, b) => a.dist - b.dist);
 
-        for (const { town2, index } of distances.slice(0, 2)) {
-          const pairKey = [Math.min(i, index), Math.max(i, index)].join("-");
-          if (processedPairs.has(pairKey)) continue;
-          processedPairs.add(pairKey);
+          for (const { town2, index } of distances.slice(0, 2)) {
+            const pairKey = [Math.min(i, index), Math.max(i, index)].join("-");
+            if (processedPairs.has(pairKey)) continue;
+            processedPairs.add(pairKey);
 
-          minimapRoadData.push({
-            path: [
-              {
-                x: town1.position.x + worldCenterOffset,
-                z: town1.position.z + worldCenterOffset,
-              },
-              {
-                x: town2.position.x + worldCenterOffset,
-                z: town2.position.z + worldCenterOffset,
-              },
-            ],
-          });
+            minimapRoadData.push({
+              path: [
+                {
+                  x: town1.position.x + worldCenterOffset,
+                  z: town1.position.z + worldCenterOffset,
+                },
+                {
+                  x: town2.position.x + worldCenterOffset,
+                  z: town2.position.z + worldCenterOffset,
+                },
+              ],
+            });
+          }
         }
+        setMinimapRoads(minimapRoadData);
+      } else {
+        setRoadCount(0);
+        setMinimapRoads([]);
       }
-      setMinimapRoads(minimapRoadData);
-    } else {
-      setRoadCount(0);
-      setMinimapRoads([]);
-    }
 
-    // Populate minimap towns data
-    const minimapTownData = townResult.towns.map((town) => ({
-      id: town.id,
-      name: town.name,
-      position: {
-        x: town.position.x + worldCenterOffset,
-        z: town.position.z + worldCenterOffset,
-      },
-      size: town.size,
-    }));
-    setMinimapTowns(minimapTownData);
+      // Populate minimap towns data
+      const minimapTownData = townResult.towns.map((town) => ({
+        id: town.id,
+        name: town.name,
+        position: {
+          x: town.position.x + worldCenterOffset,
+          z: town.position.z + worldCenterOffset,
+        },
+        size: town.size,
+      }));
+      setMinimapTowns(minimapTownData);
+    } // end else (procgen pipeline)
 
-    // Generate vegetation if enabled
-    if (showVegetation) {
-      const vegetationSeed = config.seed;
-      const seededRandom = (x: number, z: number, offset: number) => {
-        const n =
-          Math.sin(x * 12.9898 + z * 78.233 + vegetationSeed + offset) *
-          43758.5453;
-        return n - Math.floor(n);
+    // Generate vegetation if enabled — async to allow GLB model loading
+    const initVegetation = async () => {
+      if (!showVegetation || !mounted) return;
+
+      // Load actual game GLB tree models from manifest
+      await initTreeModels();
+      if (!mounted) return;
+
+      // ---- Fetch tree positions from server (runs ACTUAL game code) ----
+      // The Asset Forge API runs generateTrees() from @hyperscape/shared
+      // server-side with exact same BiomeSystem, RNG, and terrain height
+      // computation as the live game. No reimplementation needed.
+      // POST with vegetation overrides if config has them.
+      const hasVegOverrides =
+        config.vegetation && Object.keys(config.vegetation).length > 0;
+      const treeDataRes = hasVegOverrides
+        ? await fetch("/api/world/trees", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ vegetation: config.vegetation }),
+          })
+        : await fetch("/api/world/trees");
+      if (!mounted) return;
+
+      if (!treeDataRes.ok) {
+        console.error(
+          "[TileBasedTerrain] Failed to fetch world trees:",
+          treeDataRes.status,
+        );
+        return;
+      }
+
+      const treeData = (await treeDataRes.json()) as {
+        trees: Array<{
+          s: string;
+          x: number;
+          y: number;
+          z: number;
+          sc: number;
+          r: number;
+        }>;
+        generationTimeMs: number;
       };
+      if (!mounted) return;
 
-      // Create instanced meshes for each vegetation type
-      const maxInstances = Math.min(
-        10000,
-        worldSizeMeters * worldSizeMeters * 0.01,
-      ); // Cap instances
-
-      // Tree instanced mesh (cone + cylinder)
-      const treeGeometry = new THREE.ConeGeometry(3, 8, 6);
-      treeGeometry.translate(0, 8, 0);
-      const treeMaterial = new MeshStandardNodeMaterial();
-      treeMaterial.color = new THREE.Color(VEGETATION_TYPES.tree.color);
-      treeMaterial.flatShading = true;
-      const treeInstances = new THREE.InstancedMesh(
-        treeGeometry,
-        treeMaterial,
-        maxInstances,
-      );
-      treeInstances.castShadow = true;
-      treeInstances.receiveShadow = true;
-
-      // Trunk instanced mesh
-      const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.7, 4, 6);
-      trunkGeometry.translate(0, 2, 0);
-      const trunkMaterial = new VegStdMat();
-      trunkMaterial.color = new THREE.Color(VEGETATION_TYPES.tree.trunkColor);
-      const trunkInstances = new THREE.InstancedMesh(
-        trunkGeometry,
-        trunkMaterial,
-        maxInstances,
+      console.log(
+        `[TileBasedTerrain] Received ${treeData.trees.length} trees from server (generated in ${treeData.generationTimeMs}ms)`,
       );
 
-      // Rock instanced mesh (dodecahedron for irregular shape)
-      const rockGeometry = new THREE.DodecahedronGeometry(1, 0);
-      rockGeometry.translate(0, 0.5, 0);
-      const rockMaterial = new VegStdMat();
-      rockMaterial.color = new THREE.Color(VEGETATION_TYPES.rock.color);
-      rockMaterial.flatShading = true;
-      const rockInstances = new THREE.InstancedMesh(
-        rockGeometry,
-        rockMaterial,
-        maxInstances,
-      );
-      rockInstances.castShadow = true;
-      rockInstances.receiveShadow = true;
+      // ---- Set up InstancedMesh per species for GLB models ----
+      const maxPerSpecies = 20000;
+      const speciesIds = getAllTreeSpeciesIds();
+      const speciesInstanceData = new Map<
+        string,
+        {
+          meshes: THREE.InstancedMesh[];
+          manifestScale: number;
+          count: number;
+        }
+      >();
 
-      let treeCount = 0;
-      let rockCount = 0;
+      for (const id of speciesIds) {
+        const data = getTreeSpeciesInstance(id);
+        if (!data || data.parts.length === 0) continue;
+
+        const meshes = data.parts.map((part) => {
+          const im = new THREE.InstancedMesh(
+            part.geometry,
+            part.material,
+            maxPerSpecies,
+          );
+          im.castShadow = true;
+          im.receiveShadow = true;
+          return im;
+        });
+
+        speciesInstanceData.set(id, {
+          meshes,
+          manifestScale: data.manifestScale,
+          count: 0,
+        });
+      }
+
+      let totalTreeCount = 0;
       const matrix = new THREE.Matrix4();
-      const position = new THREE.Vector3();
-      const scale = new THREE.Vector3();
-      const quaternion = new THREE.Quaternion();
+      const pos = new THREE.Vector3();
+      const scl = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const upAxis = new THREE.Vector3(0, 1, 0);
 
-      // Sample points across the terrain
-      const sampleStep = 15; // Sample every 15 meters
-      for (
-        let wx = -worldSizeMeters / 2;
-        wx < worldSizeMeters / 2;
-        wx += sampleStep
-      ) {
-        for (
-          let wz = -worldSizeMeters / 2;
-          wz < worldSizeMeters / 2;
-          wz += sampleStep
-        ) {
-          // Get terrain info at this point
-          const query = generator.queryPoint(wx, wz);
-          const height = query.height;
+      // Place every tree from the server data
+      // Server returns centered world coords; scene uses 0-based coords.
+      // Scene offset = worldCenterOffset (= halfWorld = worldSizeMeters / 2)
+      for (const tree of treeData.trees) {
+        const speciesId = `tree_${tree.s}`;
+        const speciesData = speciesInstanceData.get(speciesId);
+        if (!speciesData || speciesData.count >= maxPerSpecies) continue;
 
-          // Skip water areas
-          if (height < waterThreshold) continue;
+        // Convert centered world coords → 0-based scene coords
+        const sceneX = tree.x + worldCenterOffset;
+        const sceneZ = tree.z + worldCenterOffset;
 
-          // Skip roads - check road influence at this point
-          // Roads should have no vegetation (trees, rocks)
-          if (providedRoads && providedRoads.length > 0) {
-            const roadInfluence = calculateRoadInfluenceAtPoint(
-              wx,
-              wz,
-              providedRoads,
-              worldCenterOffset,
-            );
-            // Skip placement if on road (influence > 0.1 threshold)
-            if (roadInfluence > 0.1) continue;
-          }
+        const finalScale = speciesData.manifestScale * tree.sc;
 
-          // Get vegetation density for this biome
-          const vegDensity =
-            BIOME_VEGETATION[query.biome] || BIOME_VEGETATION.plains;
+        pos.set(sceneX, tree.y, sceneZ);
+        scl.set(finalScale, finalScale, finalScale);
+        quat.setFromAxisAngle(upAxis, tree.r);
+        matrix.compose(pos, quat, scl);
 
-          // Random chance for tree
-          const treeRandom = seededRandom(wx, wz, 0);
-          if (treeRandom < vegDensity.trees && treeCount < maxInstances) {
-            const treeScale = 0.6 + seededRandom(wx, wz, 1) * 0.8;
-            const treeRotation = seededRandom(wx, wz, 2) * Math.PI * 2;
+        for (const im of speciesData.meshes) {
+          im.setMatrixAt(speciesData.count, matrix);
+        }
+        speciesData.count++;
+        totalTreeCount++;
+      }
 
-            position.set(
-              wx + worldCenterOffset,
-              height,
-              wz + worldCenterOffset,
-            );
-            scale.set(treeScale, treeScale, treeScale);
-            quaternion.setFromAxisAngle(
-              new THREE.Vector3(0, 1, 0),
-              treeRotation,
-            );
-            matrix.compose(position, quaternion, scale);
-
-            treeInstances.setMatrixAt(treeCount, matrix);
-            trunkInstances.setMatrixAt(treeCount, matrix);
-            treeCount++;
-          }
-
-          // Random chance for rock
-          const rockRandom = seededRandom(wx, wz, 3);
-          if (rockRandom < vegDensity.rocks && rockCount < maxInstances) {
-            const rockScale = 0.3 + seededRandom(wx, wz, 4) * 1.2;
-            const rockRotation = seededRandom(wx, wz, 5) * Math.PI * 2;
-
-            position.set(
-              wx + worldCenterOffset,
-              height,
-              wz + worldCenterOffset,
-            );
-            scale.set(rockScale, rockScale * 0.7, rockScale);
-            quaternion.setFromAxisAngle(
-              new THREE.Vector3(0, 1, 0),
-              rockRotation,
-            );
-            matrix.compose(position, quaternion, scale);
-
-            rockInstances.setMatrixAt(rockCount, matrix);
-            rockCount++;
-          }
+      // Finalize instance counts and add to scene
+      vegetationSpeciesMapRef.current.clear();
+      for (const [speciesId, data] of speciesInstanceData) {
+        for (const im of data.meshes) {
+          im.count = data.count;
+          im.instanceMatrix.needsUpdate = true;
+          vegetationContainer.add(im);
+          // Register for vegetation instance selection
+          vegetationSpeciesMapRef.current.set(im, speciesId);
         }
       }
 
-      // Update instance counts
-      treeInstances.count = treeCount;
-      trunkInstances.count = treeCount;
-      rockInstances.count = rockCount;
-
-      treeInstances.instanceMatrix.needsUpdate = true;
-      trunkInstances.instanceMatrix.needsUpdate = true;
-      rockInstances.instanceMatrix.needsUpdate = true;
-
-      vegetationContainer.add(treeInstances);
-      vegetationContainer.add(trunkInstances);
-      vegetationContainer.add(rockInstances);
-
+      const speciesSummary = [...speciesInstanceData.entries()]
+        .filter(([, d]) => d.count > 0)
+        .map(([id, d]) => `${id.replace("tree_", "")}:${d.count}`)
+        .join(", ");
       console.log(
-        `[TileBasedTerrain] Created ${treeCount} trees, ${rockCount} rocks`,
+        `[TileBasedTerrain] Placed ${totalTreeCount} trees (${speciesSummary})`,
       );
+    };
+    initVegetation();
+
+    // ---- Game structures: bridges + duel arena + manifest entities ----
+    if (config.useGamePipeline) {
+      const heightQuerier = terrainQuerierRef.current;
+      if (heightQuerier) {
+        const getH = (wx: number, wz: number) => heightQuerier(wx, wz).height;
+
+        // Bridges at known river crossing positions
+        const bridges = createBridgeMeshes(worldCenterOffset, getH);
+        scene.add(bridges);
+
+        // Duel arena at fixed game position
+        const arena = createDuelArena(worldCenterOffset, getH);
+        scene.add(arena);
+
+        // All manifest entities (NPCs, stations, resources, mob spawns, fishing)
+        createGameWorldEntities(worldCenterOffset, getH, waterThreshold).then(
+          (result) => {
+            if (!mounted) {
+              disposeEntitySync(result.group);
+              return;
+            }
+            scene.add(result.group);
+            entitySyncRef.current = result.group;
+
+            // Register entity groups as selectable for click-to-select
+            for (const subGroup of result.group.children) {
+              if (!(subGroup instanceof THREE.Group)) continue;
+              for (const entity of subGroup.children) {
+                if (entity.userData?.selectable) {
+                  selectableObjectsRef.current.push(entity);
+                }
+              }
+            }
+
+            // Report entity data to parent
+            onGameEntitiesLoaded?.(result.entities);
+          },
+        );
+      }
     }
 
     // Event listeners
@@ -2573,7 +3205,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     // Async WebGPU renderer initialization
     const initRenderer = async () => {
       const renderer = await createWebGPURenderer({
-        antialias: true,
+        // Disable antialiasing in World Studio for better FPS
+        antialias: !hideBuiltinOverlays,
         alpha: true,
       });
 
@@ -2582,18 +3215,383 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         return;
       }
 
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setSize(container.clientWidth, container.clientHeight);
+      // World Studio: cap pixel ratio at 1 and disable shadows for FPS
+      // (editors don't need Retina resolution or shadow maps)
+      const maxPixelRatio = hideBuiltinOverlays
+        ? 1
+        : Math.min(window.devicePixelRatio, 2);
+      renderer.setPixelRatio(maxPixelRatio);
+      // Guard against zero-size container (can happen during mount before layout)
+      const w = container.clientWidth || 1;
+      const h = container.clientHeight || 1;
+      renderer.setSize(w, h);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.enabled = !hideBuiltinOverlays;
+      if (renderer.shadowMap.enabled) {
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      }
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
+
+      // Create ViewHelper orientation cube (bottom-right corner)
+      // Skip in World Studio — it provides its own viewport controls
+      if (!hideBuiltinOverlays) {
+        try {
+          const helper = new ViewHelper(camera, renderer.domElement);
+          viewHelperRef.current = helper;
+        } catch (err) {
+          console.warn(
+            "[TileBasedTerrain] ViewHelper init failed (non-critical):",
+            err,
+          );
+        }
+      }
+
+      // Create ground grid helper (hidden by default)
+      const worldSizeMeters = worldSize * tileSize;
+      const gridDivisions = worldSize; // One line per tile
+      const grid = new THREE.GridHelper(
+        worldSizeMeters,
+        gridDivisions,
+        0x444466, // Center line color
+        0x333344, // Grid line color
+      );
+      grid.position.set(worldSizeMeters / 2, 0.5, worldSizeMeters / 2);
+      grid.visible = false;
+      scene.add(grid);
+      gridHelperRef.current = grid;
+
+      // Create editor entity overlay group (for NPCs, spawn points, etc.)
+      if (!entityOverlayRef.current) {
+        const overlay = new THREE.Group();
+        overlay.name = "editor-entity-overlay";
+        scene.add(overlay);
+        entityOverlayRef.current = overlay;
+      }
+
+      // Notify parent that scene is ready for editing tool integration
+      onSceneReady?.({
+        scene,
+        camera,
+        raycaster: raycasterRef.current,
+        container,
+        terrainContainer,
+        entityOverlay: entityOverlayRef.current,
+        addSelectable: (obj: THREE.Object3D) => {
+          if (!selectableObjectsRef.current.includes(obj)) {
+            selectableObjectsRef.current.push(obj);
+          }
+        },
+        removeSelectable: (obj: THREE.Object3D) => {
+          const idx = selectableObjectsRef.current.indexOf(obj);
+          if (idx >= 0) selectableObjectsRef.current.splice(idx, 1);
+        },
+        setInteractionMode: (mode: "orbit" | "tool" | "gizmo") => {
+          const ctrl = orbitControlsRef.current;
+          if (!ctrl) return;
+          if (mode === "gizmo") {
+            // Transform gizmo active — left free for gizmo handles,
+            // middle click = orbit so user can still rotate the camera,
+            // right click = pan
+            ctrl.mouseButtons = {
+              LEFT: -1 as THREE.MOUSE,
+              MIDDLE: THREE.MOUSE.ROTATE,
+              RIGHT: THREE.MOUSE.PAN,
+            };
+          } else if (mode === "tool") {
+            // Brush / placement tool — left free for painting / placing
+            ctrl.mouseButtons = {
+              LEFT: -1 as THREE.MOUSE, // no action
+              MIDDLE: THREE.MOUSE.DOLLY,
+              RIGHT: THREE.MOUSE.PAN,
+            };
+          } else {
+            ctrl.mouseButtons = {
+              LEFT: THREE.MOUSE.ROTATE,
+              MIDDLE: THREE.MOUSE.PAN,
+              RIGHT: THREE.MOUSE.PAN,
+            };
+          }
+        },
+        focusOnPosition: (target: THREE.Vector3, radius: number) => {
+          const ctrl = orbitControlsRef.current;
+          if (!ctrl) return;
+          // Calculate camera distance to frame the object
+          const fov = camera.fov * (Math.PI / 180);
+          const distance = Math.max(radius * 2.5, 10) / Math.tan(fov / 2);
+          // Animate orbit target and camera position
+          const startTarget = ctrl.target.clone();
+          const startPos = camera.position.clone();
+          const endTarget = target.clone();
+          const endPos = target
+            .clone()
+            .add(
+              camera.position
+                .clone()
+                .sub(ctrl.target)
+                .normalize()
+                .multiplyScalar(distance),
+            );
+          const duration = 300; // ms
+          const startTime = performance.now();
+          const animateFocus = () => {
+            const elapsed = performance.now() - startTime;
+            const t = Math.min(elapsed / duration, 1);
+            // Ease-out cubic
+            const ease = 1 - Math.pow(1 - t, 3);
+            ctrl.target.lerpVectors(startTarget, endTarget, ease);
+            camera.position.lerpVectors(startPos, endPos, ease);
+            ctrl.update();
+            if (t < 1) requestAnimationFrame(animateFocus);
+          };
+          animateFocus();
+        },
+        setViewMode: (mode: ViewMode) => {
+          viewModeRef.current = mode;
+          const mat = terrainMaterialRef.current as
+            | (THREE.Material & { wireframe?: boolean })
+            | null;
+          if (mat) {
+            mat.wireframe = mode === "wireframe";
+          }
+          // Toggle vertex color display for biome mode
+          // (terrain already uses vertex colors, this is a display hint)
+        },
+        setGridVisible: (visible: boolean) => {
+          if (gridHelperRef.current) {
+            gridHelperRef.current.visible = visible;
+          }
+        },
+        promoteVegetationInstance: (
+          speciesId: string,
+          instanceIndex: number,
+          selectableId: string,
+        ): THREE.Group | null => {
+          const vegContainer = vegetationContainerRef.current;
+          const entityOverlay = entityOverlayRef.current;
+          if (!vegContainer || !entityOverlay) return null;
+
+          // Find the InstancedMesh(es) for this species
+          const speciesMeshes: THREE.InstancedMesh[] = [];
+          for (const [im, sid] of vegetationSpeciesMapRef.current) {
+            if (sid === speciesId) speciesMeshes.push(im);
+          }
+          if (speciesMeshes.length === 0) return null;
+
+          // Read the instance transform from the first mesh
+          const instanceMatrix = new THREE.Matrix4();
+          speciesMeshes[0].getMatrixAt(instanceIndex, instanceMatrix);
+          const instancePos = new THREE.Vector3();
+          const instanceQuat = new THREE.Quaternion();
+          const instanceScl = new THREE.Vector3();
+          instanceMatrix.decompose(instancePos, instanceQuat, instanceScl);
+
+          // Create standalone proxy group with the species' mesh parts
+          const speciesData = getTreeSpeciesInstance(speciesId);
+          if (!speciesData) return null;
+
+          const proxy = new THREE.Group();
+          proxy.name = `veg_proxy_${selectableId}`;
+          proxy.position.copy(instancePos);
+          proxy.quaternion.copy(instanceQuat);
+          proxy.scale.copy(instanceScl);
+
+          for (const part of speciesData.parts) {
+            const mesh = new THREE.Mesh(part.geometry, part.material);
+            mesh.castShadow = true;
+            mesh.userData._cachedModel = true; // Don't dispose — shared with cache
+            proxy.add(mesh);
+          }
+
+          proxy.userData = {
+            selectable: true,
+            selectableId,
+            _vegPromo: true,
+            _vegSpeciesId: speciesId,
+            _vegInstanceIndex: instanceIndex,
+            displayName: speciesId.replace(/_/g, " "),
+          };
+
+          // Hide the original instance (scale to 0)
+          const zeroMatrix = new THREE.Matrix4().compose(
+            instancePos,
+            instanceQuat,
+            new THREE.Vector3(0, 0, 0),
+          );
+          for (const im of speciesMeshes) {
+            im.setMatrixAt(instanceIndex, zeroMatrix);
+            im.instanceMatrix.needsUpdate = true;
+          }
+
+          entityOverlay.add(proxy);
+          return proxy;
+        },
+        demoteVegetationInstance: (proxyGroup: THREE.Group): void => {
+          const entityOverlay = entityOverlayRef.current;
+          if (!entityOverlay) return;
+
+          const speciesId = proxyGroup.userData._vegSpeciesId as string;
+          const instanceIndex = proxyGroup.userData._vegInstanceIndex as number;
+          if (!speciesId || instanceIndex === undefined) return;
+
+          // Find the InstancedMesh(es)
+          const speciesMeshes: THREE.InstancedMesh[] = [];
+          for (const [im, sid] of vegetationSpeciesMapRef.current) {
+            if (sid === speciesId) speciesMeshes.push(im);
+          }
+
+          // Write the proxy's current transform back to the InstancedMesh
+          const matrix = new THREE.Matrix4().compose(
+            proxyGroup.position,
+            proxyGroup.quaternion,
+            proxyGroup.scale,
+          );
+          for (const im of speciesMeshes) {
+            im.setMatrixAt(instanceIndex, matrix);
+            im.instanceMatrix.needsUpdate = true;
+          }
+
+          // Remove proxy from overlay
+          entityOverlay.remove(proxyGroup);
+        },
+        refreshVegetation: async (
+          vegConfig?: VegetationConfig,
+        ): Promise<void> => {
+          const vegContainer = vegetationContainerRef.current;
+          if (!vegContainer) return;
+
+          // Dispose existing vegetation InstancedMeshes (keep GLB model cache)
+          const toRemove = [...vegContainer.children];
+          for (const child of toRemove) {
+            vegContainer.remove(child);
+            if (
+              child instanceof THREE.InstancedMesh ||
+              child instanceof THREE.Mesh
+            ) {
+              // Don't dispose geometry/material — they're shared from the species cache
+            }
+          }
+          vegetationSpeciesMapRef.current.clear();
+
+          // Ensure tree GLB models are loaded
+          await initTreeModels();
+
+          // Fetch tree positions from server
+          const hasOverrides = vegConfig && Object.keys(vegConfig).length > 0;
+          const treeDataRes = hasOverrides
+            ? await fetch("/api/world/trees", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ vegetation: vegConfig }),
+              })
+            : await fetch("/api/world/trees");
+
+          if (!treeDataRes.ok) {
+            console.error(
+              "[refreshVegetation] Failed to fetch trees:",
+              treeDataRes.status,
+            );
+            return;
+          }
+
+          const treeData = (await treeDataRes.json()) as {
+            trees: Array<{
+              s: string;
+              x: number;
+              y: number;
+              z: number;
+              sc: number;
+              r: number;
+            }>;
+            generationTimeMs: number;
+          };
+
+          console.log(
+            `[refreshVegetation] Received ${treeData.trees.length} trees (${treeData.generationTimeMs}ms)`,
+          );
+
+          // Rebuild InstancedMeshes per species
+          const maxPerSpecies = 20000;
+          const speciesIds = getAllTreeSpeciesIds();
+          const speciesInstanceData = new Map<
+            string,
+            {
+              meshes: THREE.InstancedMesh[];
+              manifestScale: number;
+              count: number;
+            }
+          >();
+
+          for (const id of speciesIds) {
+            const data = getTreeSpeciesInstance(id);
+            if (!data || data.parts.length === 0) continue;
+            const meshes = data.parts.map((part) => {
+              const im = new THREE.InstancedMesh(
+                part.geometry,
+                part.material,
+                maxPerSpecies,
+              );
+              im.castShadow = true;
+              im.receiveShadow = true;
+              return im;
+            });
+            speciesInstanceData.set(id, {
+              meshes,
+              manifestScale: data.manifestScale,
+              count: 0,
+            });
+          }
+
+          let totalTreeCount = 0;
+          const mat = new THREE.Matrix4();
+          const p = new THREE.Vector3();
+          const s = new THREE.Vector3();
+          const q = new THREE.Quaternion();
+          const up = new THREE.Vector3(0, 1, 0);
+          const offset = worldCenterOffsetRef.current;
+
+          for (const tree of treeData.trees) {
+            const speciesId = `tree_${tree.s}`;
+            const sd = speciesInstanceData.get(speciesId);
+            if (!sd || sd.count >= maxPerSpecies) continue;
+
+            p.set(tree.x + offset, tree.y, tree.z + offset);
+            const fs = sd.manifestScale * tree.sc;
+            s.set(fs, fs, fs);
+            q.setFromAxisAngle(up, tree.r);
+            mat.compose(p, q, s);
+
+            for (const im of sd.meshes) {
+              im.setMatrixAt(sd.count, mat);
+            }
+            sd.count++;
+            totalTreeCount++;
+          }
+
+          // Finalize and add to scene
+          for (const [speciesId, data] of speciesInstanceData) {
+            for (const im of data.meshes) {
+              im.count = data.count;
+              im.instanceMatrix.needsUpdate = true;
+              vegContainer.add(im);
+              vegetationSpeciesMapRef.current.set(im, speciesId);
+            }
+          }
+
+          console.log(`[refreshVegetation] Placed ${totalTreeCount} trees`);
+        },
+        navigateCamera: (x: number, z: number) => {
+          const newY = Math.max(cameraStateRef.current.position.y, 100);
+          cameraStateRef.current.position.set(x, newY, z);
+        },
+      });
 
       // Animation loop
       let lastTime = performance.now();
       // Track camera rotation for minimap (throttled updates)
       let lastRotationUpdate = 0;
+      // Pre-allocated vector for label world position query (avoids GC)
+      const _labelWorldPos = new THREE.Vector3();
 
       const animate = () => {
         if (!mounted) return;
@@ -2608,11 +3606,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         updateTiles();
 
         // Update LOD objects based on camera position
-        townMarkers.traverse((child) => {
-          if (child instanceof THREE.LOD) {
-            child.update(camera);
-          }
-        });
+        for (const lod of lodObjectsRef.current) {
+          lod.update(camera);
+        }
 
         // Animate wilderness skull (bobbing and pulsing)
         if (wildernessOverlayRef.current) {
@@ -2639,13 +3635,45 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
 
-        // Update camera rotation for minimap (throttle to every 100ms)
-        if (now - lastRotationUpdate > 100) {
+        // Update camera rotation for minimap (only when built-in minimap is shown)
+        if (!hideBuiltinOverlays && now - lastRotationUpdate > 100) {
           setCameraRotationY(cameraStateRef.current.euler.y);
           lastRotationUpdate = now;
         }
 
+        // UE5-style constant screen-space label sizing —
+        // scale visible label sprites so they stay the same pixel height
+        // regardless of camera distance.  Only hovered + selected are visible
+        // so this is O(1).
+        const LABEL_SCREEN_HEIGHT = 0.035; // fraction of viewport height
+        const labelTargets = [
+          hoveredSelectableRef.current,
+          selectedLabelRef.current,
+        ];
+        for (const target of labelTargets) {
+          if (!target) continue;
+          for (const child of target.children) {
+            if (!child.userData?.isLabel || !child.visible) continue;
+            const sprite = child as THREE.Sprite;
+            const dist = camera.position.distanceTo(
+              sprite.getWorldPosition(_labelWorldPos),
+            );
+            const vFov = camera.fov * (Math.PI / 180);
+            const worldHeight =
+              2 * dist * Math.tan(vFov / 2) * LABEL_SCREEN_HEIGHT;
+            const aspect = (sprite.userData.labelAspect as number) ?? 4;
+            sprite.scale.set(worldHeight * aspect, worldHeight, 1);
+          }
+        }
+
         renderer.render(scene, camera);
+
+        // Render ViewHelper orientation cube overlay
+        // ViewHelper types expect WebGLRenderer but work with WebGPURenderer at runtime
+        if (viewHelperRef.current) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          viewHelperRef.current.render(renderer as any);
+        }
       };
       animate();
     };
@@ -2655,8 +3683,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     // Handle resize
     const handleResize = () => {
       if (!container || !camera || !rendererRef.current) return;
-      const width = container.clientWidth;
-      const height = container.clientHeight;
+      const width = container.clientWidth || 1;
+      const height = container.clientHeight || 1;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       rendererRef.current.setSize(width, height);
@@ -2708,7 +3736,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Clear building walkability tracking
       buildingWalkabilityService.clear();
 
-      // Dispose vegetation
+      // Dispose vegetation (InstancedMesh per species + rocks)
       vegetationContainer.traverse((child) => {
         if (
           child instanceof THREE.InstancedMesh ||
@@ -2720,19 +3748,49 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
       });
+      clearTreeSpeciesCache();
 
-      // Dispose wilderness overlay
-      if (wildernessOverlayRef.current) {
-        wildernessOverlayRef.current.geometry.dispose();
-        if (wildernessOverlayRef.current.material instanceof THREE.Material) {
-          wildernessOverlayRef.current.material.dispose();
+      // Dispose manifest entity sync markers
+      if (entitySyncRef.current) {
+        // Remove from selectables before disposing
+        for (const subGroup of entitySyncRef.current.children) {
+          if (!(subGroup instanceof THREE.Group)) continue;
+          for (const entity of subGroup.children) {
+            const idx = selectableObjectsRef.current.indexOf(entity);
+            if (idx >= 0) selectableObjectsRef.current.splice(idx, 1);
+          }
         }
+        disposeEntitySync(entitySyncRef.current);
+        entitySyncRef.current = null;
+      }
+      disposeEntitySyncGeometry();
+
+      // Dispose wilderness overlay (stored as a Group, not a Mesh)
+      if (wildernessOverlayRef.current) {
+        const wildernessObj =
+          wildernessOverlayRef.current as unknown as THREE.Object3D;
+        wildernessObj.traverse((child) => {
+          if (child instanceof THREE.Mesh || child instanceof THREE.Sprite) {
+            child.geometry?.dispose();
+            if (child.material instanceof THREE.Material) {
+              child.material.dispose();
+            }
+          }
+        });
       }
 
       // Dispose shared resources
       currentTemplateGeometry.current?.dispose();
+      waterTemplateGeometryRef.current?.dispose();
       currentTerrainMaterial.current?.dispose();
       currentWaterMaterial.current?.dispose();
+      lodObjectsRef.current = [];
+
+      // Dispose orbit controls
+      if (orbitControlsRef.current) {
+        orbitControlsRef.current.dispose();
+        orbitControlsRef.current = null;
+      }
 
       // Dispose WebGPU renderer
       if (rendererRef.current) {
@@ -2758,6 +3816,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     tileResolution,
     waterThreshold,
     config.seed,
+    config.useGamePipeline,
     config.towns,
     providedRoads,
     handleMouseMove,
@@ -2777,9 +3836,39 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       unloadTile(key);
     }
     tileQueueRef.current = [];
+    tileQueueSetRef.current.clear();
 
-    // Update generator
-    generatorRef.current = new TerrainGenerator(terrainConfig);
+    // Update generator and querier
+    const newGenerator = new TerrainGenerator(terrainConfig);
+    generatorRef.current = newGenerator;
+
+    if (config.useGamePipeline) {
+      const gameQuerier = createGameTerrainQuerier(config.seed);
+      terrainQuerierRef.current = (worldX: number, worldZ: number) => {
+        const q = gameQuerier.queryPoint(worldX, worldZ);
+        return {
+          height: q.height,
+          biome: q.biomeId,
+          color: q.biomeColor,
+          biomeForestWeight: q.biomeForestWeight,
+          biomeCanyonWeight: q.biomeCanyonWeight,
+        };
+      };
+    } else {
+      terrainQuerierRef.current = (worldX: number, worldZ: number) => {
+        const q = newGenerator.queryPoint(worldX, worldZ);
+        const fW =
+          q.biomeInfluences?.find((b) => b.type === "forest")?.weight ?? 0;
+        const cW =
+          q.biomeInfluences?.find((b) => b.type === "canyon")?.weight ?? 0;
+        return {
+          height: q.height,
+          biome: q.biome,
+          biomeForestWeight: fW,
+          biomeCanyonWeight: cW,
+        };
+      };
+    }
 
     // Update template geometry if resolution changed
     if (templateGeometryRef.current) {
@@ -2789,7 +3878,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         tileResolution,
       );
     }
-  }, [terrainConfig, tileSize, tileResolution, unloadTile]);
+  }, [
+    terrainConfig,
+    tileSize,
+    tileResolution,
+    unloadTile,
+    config.useGamePipeline,
+    config.seed,
+  ]);
 
   // Regenerate tiles when roads change to update road influence on terrain
   // This ensures road colors appear when roads are generated asynchronously
@@ -2824,6 +3920,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       // Reset tile queue to trigger immediate regeneration
       tileQueueRef.current = [];
+      tileQueueSetRef.current.clear();
     }
   }, [providedRoads, unloadTile]);
 
@@ -2843,6 +3940,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   // Selection highlighting effect
   useEffect(() => {
     const scene = sceneRef.current;
+
+    // Hide labels from previously selected entity
+    if (selectedLabelRef.current) {
+      for (const child of selectedLabelRef.current.children) {
+        if (child.userData?.isLabel) child.visible = false;
+      }
+      selectedLabelRef.current = null;
+    }
+
     if (!scene || !selectedId) {
       // Remove existing selection outline
       if (selectionOutlineRef.current) {
@@ -2861,7 +3967,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       (obj) => obj.userData.selectableId === selectedId,
     );
 
-    if (selectedObject && selectedObject instanceof THREE.Mesh) {
+    if (selectedObject) {
+      // Show labels for selected entity (UE5 style)
+      for (const child of selectedObject.children) {
+        if (child.userData?.isLabel) child.visible = true;
+      }
+      selectedLabelRef.current = selectedObject;
+
       // Remove existing outline
       if (selectionOutlineRef.current) {
         scene.remove(selectionOutlineRef.current);
@@ -2871,22 +3983,27 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         }
       }
 
-      // Create outline based on object's bounding box
+      // Create outline based on object's bounding box (works for Groups and Meshes)
       const box = new THREE.Box3().setFromObject(selectedObject);
+      if (box.isEmpty()) return;
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
 
+      // Padding scales with object size for entities vs buildings
+      const padding = Math.min(size.length() * 0.15, 2);
+
       // Create a wireframe box as selection indicator
       const outlineGeometry = new THREE.BoxGeometry(
-        size.x + 4,
-        size.y + 4,
-        size.z + 4,
+        size.x + padding,
+        size.y + padding,
+        size.z + padding,
       );
       const outlineMaterial = new MeshBasicNodeMaterial();
-      outlineMaterial.color = new THREE.Color(0x00ff00);
+      outlineMaterial.color = new THREE.Color(0x4fc3f7); // Light blue (UE5-style)
       outlineMaterial.wireframe = true;
       outlineMaterial.transparent = true;
-      outlineMaterial.opacity = 0.8;
+      outlineMaterial.opacity = 0.9;
+      outlineMaterial.depthTest = false;
       const outline = new THREE.Mesh(outlineGeometry, outlineMaterial);
       outline.position.copy(center);
       outline.renderOrder = 999; // Render on top
@@ -2908,9 +4025,22 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     };
   }, [selectedId]);
 
-  // Hover detection for tooltip
+  // Hover detection for tooltip + UE5-style label visibility
+  // Throttled to max ~15fps to avoid expensive raycasts on every mousemove
+  const lastHoverRaycastRef = useRef(0);
   const handleMouseMoveForHover = useCallback((event: MouseEvent) => {
+    const now = performance.now();
+    if (now - lastHoverRaycastRef.current < 66) return; // ~15fps throttle
+    lastHoverRaycastRef.current = now;
+
     if (isPointerLockedRef.current) {
+      // Hide previous hover label
+      if (hoveredSelectableRef.current) {
+        for (const child of hoveredSelectableRef.current.children) {
+          if (child.userData?.isLabel) child.visible = false;
+        }
+        hoveredSelectableRef.current = null;
+      }
       setHoveredObject(null);
       return;
     }
@@ -2935,28 +4065,63 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
     if (intersects.length > 0) {
       const hit = intersects[0];
-      const userData = hit.object.userData as {
-        selectableType?: string;
-        selectableId?: string;
-        townName?: string;
-        buildingType?: string;
-      };
+      // Walk up parent chain to find selectable group (ray may hit child mesh)
+      let obj: THREE.Object3D | null = hit.object;
+      let userData: Record<string, unknown> | null = null;
+      while (obj) {
+        const ud = obj.userData as Record<string, unknown>;
+        if (ud.selectableId) {
+          userData = ud;
+          break;
+        }
+        obj = obj.parent;
+      }
 
-      if (userData.selectableId) {
-        let label = userData.selectableId;
+      if (userData && obj) {
+        // Toggle label visibility — UE5 style: only show for hovered entity
+        if (obj !== hoveredSelectableRef.current) {
+          // Hide previous
+          if (hoveredSelectableRef.current) {
+            for (const child of hoveredSelectableRef.current.children) {
+              if (child.userData?.isLabel) child.visible = false;
+            }
+          }
+          // Show new (unless it's the selected item — that's handled separately)
+          for (const child of obj.children) {
+            if (child.userData?.isLabel) child.visible = true;
+          }
+          hoveredSelectableRef.current = obj;
+        }
+
+        let label = userData.selectableId as string;
         if (userData.selectableType === "town" && userData.townName) {
-          label = `Town: ${userData.townName}`;
+          label = `Town: ${userData.townName as string}`;
         } else if (
           userData.selectableType === "building" &&
           userData.buildingType
         ) {
-          label = `Building: ${userData.buildingType}`;
+          label = `Building: ${userData.buildingType as string}`;
+        } else if (
+          userData.selectableType === "entity" &&
+          userData.entityType
+        ) {
+          const displayName = userData.displayName as string | undefined;
+          label =
+            displayName ??
+            `${userData.entityType as string}: ${userData.entityId as string}`;
         }
         setHoveredObject(label);
         return;
       }
     }
 
+    // No hit — hide previous hover label
+    if (hoveredSelectableRef.current) {
+      for (const child of hoveredSelectableRef.current.children) {
+        if (child.userData?.isLabel) child.visible = false;
+      }
+      hoveredSelectableRef.current = null;
+    }
     setHoveredObject(null);
   }, []);
 
@@ -2988,119 +4153,125 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     <div className={`relative w-full h-full ${className}`}>
       <div ref={containerRef} className="w-full h-full" />
 
-      {/* Fly mode controls overlay - only show when fly mode enabled or active */}
-      {(flyModeEnabled || isFlyModeActive) && (
-        <div
-          className={`absolute top-4 left-4 rounded-lg p-3 text-xs pointer-events-none transition-colors ${
-            isFlyModeActive
-              ? "bg-blue-500/20 border border-blue-500/50 text-blue-200"
-              : "bg-bg-secondary/90 text-text-secondary"
-          }`}
-        >
-          <div className="font-semibold text-text-primary mb-2 flex items-center gap-2">
-            {isFlyModeActive ? "✈️ Fly Mode Active" : "✈️ Fly Mode Ready"}
-          </div>
-          {isFlyModeActive ? (
-            <>
-              <div>WASD / Arrows - Move</div>
-              <div>Space / Shift - Up / Down</div>
-              <div>Ctrl - Speed boost</div>
-              <div className="text-yellow-300 mt-1">
-                Press Esc or Click to exit
+      {/* ---- Built-in HUD (hidden when World Studio provides its own overlay) ---- */}
+      {!hideBuiltinOverlays && (
+        <>
+          {/* Fly mode controls overlay */}
+          {(flyModeEnabled || isFlyModeActive) && (
+            <div
+              className={`absolute top-4 left-4 rounded-lg p-3 text-xs pointer-events-none transition-colors ${
+                isFlyModeActive
+                  ? "bg-blue-500/20 border border-blue-500/50 text-blue-200"
+                  : "bg-bg-secondary/90 text-text-secondary"
+              }`}
+            >
+              <div className="font-semibold text-text-primary mb-2 flex items-center gap-2">
+                {isFlyModeActive ? "Fly Mode Active" : "Fly Mode Ready"}
               </div>
-            </>
-          ) : (
-            <div>Click anywhere to enter fly mode</div>
+              {isFlyModeActive ? (
+                <>
+                  <div>WASD / Arrows - Move</div>
+                  <div>Space / Shift - Up / Down</div>
+                  <div>Ctrl - Speed boost</div>
+                  <div className="text-yellow-300 mt-1">
+                    Press Esc or Click to exit
+                  </div>
+                </>
+              ) : (
+                <div>Click anywhere to enter fly mode</div>
+              )}
+            </div>
           )}
-        </div>
+
+          {/* Selection mode indicator */}
+          {!flyModeEnabled && !isFlyModeActive && (
+            <div className="absolute top-4 left-4 bg-bg-secondary/90 rounded-lg p-3 text-xs text-text-secondary pointer-events-none">
+              <div className="font-semibold text-text-primary mb-2">
+                Selection Mode
+              </div>
+              <div>Click terrain, towns, or buildings to select</div>
+              <div>Enable Fly Mode from toolbar for camera control</div>
+            </div>
+          )}
+
+          {/* Stats overlay */}
+          <div className="absolute top-4 right-4 bg-bg-secondary/90 rounded-lg p-3 text-xs text-text-primary pointer-events-none">
+            <div>
+              Tiles: {loadedTiles} / {worldSize * worldSize}
+            </div>
+            <div>
+              World: {worldSize * tileSize}m x {worldSize * tileSize}m
+            </div>
+            <div>
+              Towns: {townCount} | Roads: {roadCount}
+            </div>
+            <div>Vegetation: {showVegetation ? "On" : "Off"}</div>
+            {isGenerating && (
+              <div className="text-accent-primary mt-1">Loading tiles...</div>
+            )}
+
+            {/* LOD Legend */}
+            <div className="mt-2 pt-2 border-t border-border-primary">
+              <div className="font-semibold mb-1">Building LOD</div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-500" />
+                  <span>Full (0-200m)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-yellow-500" />
+                  <span>Simple (200-500m)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-orange-500" />
+                  <span>Box (500m+)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Zone Legend */}
+            <div className="mt-2 pt-2 border-t border-border-primary">
+              <div className="font-semibold mb-1">Zones</div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-500/50" />
+                  <span>Wilderness (PVP)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Hover tooltip */}
+          {hoveredObject && !isPointerLockedRef.current && (
+            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-bg-primary/95 border border-border-primary rounded-lg px-3 py-2 text-sm text-text-primary pointer-events-none shadow-lg">
+              {hoveredObject}
+              <span className="text-text-muted ml-2">(click to select)</span>
+            </div>
+          )}
+
+          {/* Selected item indicator */}
+          {selectedId && (
+            <div className="absolute bottom-4 right-4 bg-green-500/20 border border-green-500/50 rounded-lg px-3 py-2 text-sm text-green-400 pointer-events-none">
+              Selected: {selectedId}
+            </div>
+          )}
+        </>
       )}
 
-      {/* Selection mode indicator - show when not in fly mode */}
-      {!flyModeEnabled && !isFlyModeActive && (
-        <div className="absolute top-4 left-4 bg-bg-secondary/90 rounded-lg p-3 text-xs text-text-secondary pointer-events-none">
-          <div className="font-semibold text-text-primary mb-2">
-            🎯 Selection Mode
-          </div>
-          <div>Click terrain, towns, or buildings to select</div>
-          <div>Enable Fly Mode from toolbar for camera control</div>
-        </div>
-      )}
-
-      {/* Stats overlay */}
-      <div className="absolute top-4 right-4 bg-bg-secondary/90 rounded-lg p-3 text-xs text-text-primary pointer-events-none">
-        <div>
-          Tiles: {loadedTiles} / {worldSize * worldSize}
-        </div>
-        <div>
-          World: {worldSize * tileSize}m x {worldSize * tileSize}m
-        </div>
-        <div>
-          Towns: {townCount} | Roads: {roadCount}
-        </div>
-        <div>Vegetation: {showVegetation ? "On" : "Off"}</div>
-        {isGenerating && (
-          <div className="text-accent-primary mt-1">Loading tiles...</div>
-        )}
-
-        {/* LOD Legend */}
-        <div className="mt-2 pt-2 border-t border-border-primary">
-          <div className="font-semibold mb-1">Building LOD</div>
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-green-500" />
-              <span>Full (0-200m)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-yellow-500" />
-              <span>Simple (200-500m)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-orange-500" />
-              <span>Box (500m+)</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Zone Legend */}
-        <div className="mt-2 pt-2 border-t border-border-primary">
-          <div className="font-semibold mb-1">Zones</div>
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-500/50" />
-              <span>Wilderness (PVP)</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Minimap */}
-      <Minimap
-        worldSize={worldSize * tileSize}
-        cameraPosition={cameraStateRef.current.position}
-        cameraRotationY={cameraRotationY}
-        towns={minimapTowns}
-        roads={minimapRoads}
-        className="absolute bottom-4 left-4"
-        onNavigate={(x, z) => {
-          // Teleport camera to clicked position
-          const newY = Math.max(cameraStateRef.current.position.y, 100);
-          cameraStateRef.current.position.set(x, newY, z);
-        }}
-      />
-
-      {/* Hover tooltip */}
-      {hoveredObject && !isPointerLockedRef.current && (
-        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-bg-primary/95 border border-border-primary rounded-lg px-3 py-2 text-sm text-text-primary pointer-events-none shadow-lg">
-          {hoveredObject}
-          <span className="text-text-muted ml-2">(click to select)</span>
-        </div>
-      )}
-
-      {/* Selected item indicator */}
-      {selectedId && (
-        <div className="absolute bottom-4 right-4 bg-green-500/20 border border-green-500/50 rounded-lg px-3 py-2 text-sm text-green-400 pointer-events-none">
-          Selected: {selectedId}
-        </div>
+      {/* Minimap — hidden in World Studio (it provides its own overlay controls) */}
+      {!hideBuiltinOverlays && (
+        <Minimap
+          worldSize={worldSize * tileSize}
+          cameraPosition={cameraStateRef.current.position}
+          cameraRotationY={cameraRotationY}
+          towns={minimapTowns}
+          roads={minimapRoads}
+          className="absolute bottom-4 left-4"
+          onNavigate={(x, z) => {
+            const newY = Math.max(cameraStateRef.current.position.y, 100);
+            cameraStateRef.current.position.set(x, newY, z);
+          }}
+        />
       )}
     </div>
   );

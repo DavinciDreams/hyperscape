@@ -18,10 +18,19 @@ import {
   Gamepad2,
   Image,
   Sparkles,
+  Menu,
+  X,
+  Anchor,
+  BrickWall,
+  Landmark,
+  Map,
+  LogOut,
+  User,
 } from "lucide-react";
 import React, { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 
+import { useForgeAuth } from "../../auth/ForgeAuthProvider";
 import { ROUTES } from "../../constants";
 
 // Procedural generator menu items
@@ -38,96 +47,181 @@ const GENERATOR_ITEMS = [
     label: "Vegetation (Grass+Flowers)",
     icon: Sprout,
   },
+  { route: ROUTES.DOCK_GEN, label: "Docks", icon: Anchor },
+  { route: ROUTES.BRIDGE_GEN, label: "Bridges", icon: BrickWall },
+  { route: ROUTES.LANDMARK_GEN, label: "Landmarks", icon: Landmark },
 ] as const;
 
+const NAV_ITEMS = [
+  { route: ROUTES.DASHBOARD, label: "Dashboard", icon: Boxes },
+  { route: ROUTES.GENERATION, label: "Generate", icon: Wand2 },
+  { route: ROUTES.ASSETS, label: "Assets", icon: Database },
+  { route: ROUTES.HAND_RIGGING, label: "Hand Rigging", icon: Hand },
+  { route: ROUTES.EQUIPMENT, label: "Equipment", icon: Wrench },
+  { route: ROUTES.ARMOR_FITTING, label: "Armor Fitting", icon: Shield },
+  { route: ROUTES.RETARGET_ANIMATE, label: "Retarget Animate", icon: Shuffle },
+  { route: ROUTES.BATCH_SPRITES, label: "Batch Sprites", icon: Image },
+  { route: ROUTES.VFX, label: "VFX", icon: Sparkles },
+  { route: ROUTES.WORLD_BUILDER, label: "World Builder", icon: Globe },
+  { route: ROUTES.WORLD_EDITOR, label: "World Editor", icon: Gamepad2 },
+  { route: ROUTES.WORLD_STUDIO, label: "World Studio", icon: Map },
+  { route: ROUTES.MANIFESTS, label: "Manifests", icon: FileJson },
+] as const;
+
+const ACTIVE_BG = "bg-[rgba(99,102,241,0.15)] text-primary";
+const INACTIVE_CLASSES =
+  "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary";
+
 const Navigation: React.FC = () => {
-  const [generatorMenuOpen, setGeneratorMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [generatorsExpanded, setGeneratorsExpanded] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const currentPath = location.pathname;
+  const auth = useForgeAuth();
 
-  // Check if current path is a generator route
+  // Expand generators section if current route is a generator
   const isGeneratorRoute = GENERATOR_ITEMS.some(
     (item) => currentPath === item.route,
   );
 
-  // Close menu when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setGeneratorMenuOpen(false);
-      }
-    };
+    if (isGeneratorRoute) setGeneratorsExpanded(true);
+  }, [isGeneratorRoute]);
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+  // Close sidebar on route change
+  useEffect(() => {
+    setOpen(false);
+  }, [currentPath]);
+
+  // Close on Escape key
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
   }, []);
 
+  // Prevent body scroll when sidebar is open
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [open]);
+
   const navLinkClass = (route: string) =>
-    `flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all duration-base ${
-      currentPath === route
-        ? "bg-primary bg-opacity-10 text-primary"
-        : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+    `flex items-center gap-3 px-4 py-2.5 rounded-md text-sm font-medium transition-all duration-150 ${
+      currentPath === route ? ACTIVE_BG : INACTIVE_CLASSES
     }`;
 
   return (
-    <nav className="bg-bg-secondary border-b border-border-primary px-6 shadow-theme-sm relative z-[100]">
-      <div className="flex items-center justify-between h-[60px]">
-        <div className="flex items-center">
+    <>
+      {/* Top bar with hamburger */}
+      <div className="h-11 bg-bg-secondary border-b border-border-primary flex items-center px-3 relative z-[100]">
+        <button
+          className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-all duration-150"
+          onClick={() => setOpen(true)}
+          aria-label="Open navigation menu"
+        >
+          <Menu size={20} />
+        </button>
+        <span className="ml-3 text-sm font-medium text-text-secondary">
+          Asset Forge
+        </span>
+
+        {/* User info */}
+        {auth.authenticated && auth.user?.email?.address && (
+          <span className="ml-auto text-xs text-text-tertiary truncate max-w-[200px]">
+            {auth.user.email.address}
+          </span>
+        )}
+      </div>
+
+      {/* Backdrop */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] transition-opacity duration-200"
+          onClick={() => setOpen(false)}
+        />
+      )}
+
+      {/* Sidebar drawer */}
+      <div
+        ref={sidebarRef}
+        className={`fixed top-0 left-0 h-full w-[280px] bg-bg-secondary border-r border-border-primary shadow-xl z-[201] flex flex-col transition-transform duration-200 ease-out ${
+          open ? "translate-x-0" : "-translate-x-full pointer-events-none"
+        }`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border-primary">
           <Link
-            to={ROUTES.GENERATION}
-            className="text-xl font-semibold text-gradient hover:opacity-80 transition-opacity"
+            to={ROUTES.DASHBOARD}
+            className="text-lg font-semibold text-gradient hover:opacity-80 transition-opacity"
           >
-            3D Asset Forge
+            Asset Forge
           </Link>
+          <button
+            className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-all duration-150"
+            onClick={() => setOpen(false)}
+            aria-label="Close navigation menu"
+          >
+            <X size={18} />
+          </button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Link
-            to={ROUTES.GENERATION}
-            className={navLinkClass(ROUTES.GENERATION)}
-          >
-            <Wand2 size={18} />
-            <span>Generate</span>
-          </Link>
+        {/* Navigation links */}
+        <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-1 scrollbar-thin">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.route}
+                to={item.route}
+                className={navLinkClass(item.route)}
+              >
+                <Icon size={18} />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
 
-          <Link to={ROUTES.ASSETS} className={navLinkClass(ROUTES.ASSETS)}>
-            <Database size={18} />
-            <span>Assets</span>
-          </Link>
-
-          {/* Procedural Generators Dropdown */}
-          <div className="relative" ref={menuRef}>
+          {/* Generators section */}
+          <div className="pt-2">
             <button
-              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all duration-base ${
-                isGeneratorRoute
-                  ? "bg-primary bg-opacity-10 text-primary"
-                  : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-md text-sm font-medium transition-all duration-150 ${
+                isGeneratorRoute && !generatorsExpanded
+                  ? ACTIVE_BG
+                  : INACTIVE_CLASSES
               }`}
-              onClick={() => setGeneratorMenuOpen(!generatorMenuOpen)}
+              onClick={() => setGeneratorsExpanded(!generatorsExpanded)}
             >
               <Boxes size={18} />
-              <span>Generators</span>
+              <span className="flex-1 text-left">Generators</span>
               <ChevronDown
                 size={14}
-                className={`transition-transform ${generatorMenuOpen ? "rotate-180" : ""}`}
+                className={`transition-transform duration-150 ${generatorsExpanded ? "rotate-180" : ""}`}
               />
             </button>
 
-            {generatorMenuOpen && (
-              <div className="absolute top-full left-0 mt-1 bg-bg-secondary border border-border-primary rounded-md shadow-lg py-1 min-w-[180px] z-50">
+            {generatorsExpanded && (
+              <div className="ml-4 mt-1 space-y-0.5 border-l border-border-primary pl-2">
                 {GENERATOR_ITEMS.map((item) => {
                   const Icon = item.icon;
                   return (
                     <Link
                       key={item.route}
                       to={item.route}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-all duration-base ${
+                      className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150 ${
                         currentPath === item.route
-                          ? "bg-primary bg-opacity-10 text-primary"
-                          : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+                          ? ACTIVE_BG
+                          : INACTIVE_CLASSES
                       }`}
-                      onClick={() => setGeneratorMenuOpen(false)}
                     >
                       <Icon size={16} />
                       <span>{item.label}</span>
@@ -137,79 +231,44 @@ const Navigation: React.FC = () => {
               </div>
             )}
           </div>
+        </nav>
 
-          <Link
-            to={ROUTES.HAND_RIGGING}
-            className={navLinkClass(ROUTES.HAND_RIGGING)}
-          >
-            <Hand size={18} />
-            <span>Hand Rigging</span>
-          </Link>
+        {/* Account section */}
+        {auth.authenticated && (
+          <div className="border-t border-border-primary">
+            {/* User profile */}
+            <div className="px-4 py-3 flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
+                <User size={14} className="text-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-text-primary truncate">
+                  {auth.user?.email?.address?.split("@")[0] ||
+                    auth.user?.wallet?.address?.slice(0, 8) ||
+                    "User"}
+                </p>
+                <p className="text-[11px] text-text-tertiary truncate">
+                  {auth.user?.email?.address ||
+                    auth.user?.wallet?.address ||
+                    "Signed in"}
+                </p>
+              </div>
+            </div>
 
-          <Link
-            to={ROUTES.EQUIPMENT}
-            className={navLinkClass(ROUTES.EQUIPMENT)}
-          >
-            <Wrench size={18} />
-            <span>Equipment</span>
-          </Link>
-
-          <Link
-            to={ROUTES.ARMOR_FITTING}
-            className={navLinkClass(ROUTES.ARMOR_FITTING)}
-          >
-            <Shield size={18} />
-            <span>Armor</span>
-          </Link>
-
-          <Link
-            to={ROUTES.RETARGET_ANIMATE}
-            className={navLinkClass(ROUTES.RETARGET_ANIMATE)}
-          >
-            <Shuffle size={18} />
-            <span>Retarget</span>
-          </Link>
-
-          <Link
-            to={ROUTES.BATCH_SPRITES}
-            className={navLinkClass(ROUTES.BATCH_SPRITES)}
-          >
-            <Image size={18} />
-            <span>Batch Sprites</span>
-          </Link>
-
-          <Link to={ROUTES.VFX} className={navLinkClass(ROUTES.VFX)}>
-            <Sparkles size={18} />
-            <span>VFX</span>
-          </Link>
-
-          <Link
-            to={ROUTES.WORLD_BUILDER}
-            className={navLinkClass(ROUTES.WORLD_BUILDER)}
-          >
-            <Globe size={18} />
-            <span>World</span>
-          </Link>
-
-          <Link
-            to={ROUTES.WORLD_EDITOR}
-            className={navLinkClass(ROUTES.WORLD_EDITOR)}
-            title="World Editor using real game systems"
-          >
-            <Gamepad2 size={18} />
-            <span>Editor</span>
-          </Link>
-
-          <Link
-            to={ROUTES.MANIFESTS}
-            className={navLinkClass(ROUTES.MANIFESTS)}
-          >
-            <FileJson size={18} />
-            <span>Manifests</span>
-          </Link>
-        </div>
+            {/* Sign out button */}
+            <div className="px-3 pb-3">
+              <button
+                className="flex items-center gap-3 px-4 py-2 rounded-md text-sm font-medium text-text-secondary hover:text-red-400 hover:bg-bg-tertiary transition-all duration-150 w-full"
+                onClick={() => auth.logout()}
+              >
+                <LogOut size={16} />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
-    </nav>
+    </>
   );
 };
 

@@ -1,5 +1,6 @@
 // Navigation view type used for route mapping
 export type NavigationView =
+  | "dashboard"
   | "assets"
   | "generation"
   | "equipment"
@@ -20,7 +21,11 @@ export type NavigationView =
   | "roadsGen"
   | "grassGen"
   | "flowerGen"
-  | "vegetationGen";
+  | "vegetationGen"
+  | "dockGen"
+  | "bridgeGen"
+  | "landmarkGen"
+  | "worldStudio";
 
 export interface NavigationState {
   currentView: NavigationView;

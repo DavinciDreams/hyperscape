@@ -51,6 +51,10 @@ export interface ResourceGenerationContext {
   getWaterSurfaceAt?: (worldX: number, worldZ: number) => number;
   /** Get the dominant biome at a world position (for per-tree biome selection) */
   getDominantBiome?: (worldX: number, worldZ: number) => string;
+  /** Override the default getTreeConfigForBiome for per-position biome resolution.
+   *  When provided, generateTrees uses this instead of the hardcoded defaults,
+   *  allowing editor vegetation overrides to apply at biome boundaries. */
+  resolveTreeConfig?: (biomeId: string) => BiomeTreeConfig;
   /** Deterministic RNG seeded for this tile */
   createRng: (salt: string) => () => number;
 }
@@ -273,7 +277,8 @@ export function generateTrees(
 
     if (ctx.getDominantBiome) {
       const positionBiome = ctx.getDominantBiome(worldX, worldZ);
-      const posConfig = getTreeConfigForBiome(positionBiome);
+      const resolveConfig = ctx.resolveTreeConfig ?? getTreeConfigForBiome;
+      const posConfig = resolveConfig(positionBiome);
       if (posConfig && posConfig.trees !== tileTreeMap) {
         activeTreeMap = posConfig.trees;
         treeTypes = Object.keys(activeTreeMap);

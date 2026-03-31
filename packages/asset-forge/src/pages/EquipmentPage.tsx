@@ -494,7 +494,7 @@ export const EquipmentPage: React.FC = () => {
   }, [selectedEquipment, batchReview]);
 
   return (
-    <div className="flex h-[calc(100vh-60px)] bg-gradient-to-br from-bg-primary to-bg-secondary p-4 gap-4">
+    <div className="flex h-[calc(100vh-44px)] bg-gradient-to-br from-bg-primary to-bg-secondary p-4 gap-4">
       {/* Left Panel - Asset Selection */}
       <AssetSelectionPanel
         assets={assets}

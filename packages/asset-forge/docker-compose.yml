@@ -1,0 +1,25 @@
+# Local development database for Asset Forge
+# Usage: docker compose up -d
+# Then set DATABASE_URL=postgresql://forge:forge_dev_password@localhost:5489/forge in .env
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: forge-postgres
+    ports:
+      - "${FORGE_POSTGRES_PORT:-5489}:5432"
+    environment:
+      POSTGRES_USER: forge
+      POSTGRES_PASSWORD: ${FORGE_POSTGRES_PASSWORD:-forge_dev_password}
+      POSTGRES_DB: forge
+    command: postgres -c max_connections=100 -c shared_buffers=128MB
+    volumes:
+      - forge-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forge"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  forge-postgres-data:

@@ -43,6 +43,56 @@ export function getAssetSpritesUrl(assetId: string): string {
   return getFullUrl(`/api/assets/${assetId}/sprites`);
 }
 
+// ============== Async Token Provider ==============
+// Same pattern as the game client's api-client.ts.
+// ForgeAuthHandler registers Privy's getAccessToken() so apiFetch
+// can get a *fresh* token on every request instead of reading a
+// stale window variable.
+
+type AsyncTokenProvider = () => Promise<string | null>;
+
+let asyncTokenProvider: AsyncTokenProvider | null = null;
+
+/**
+ * Register Privy's getAccessToken as the token provider.
+ * Called from ForgeAuthHandler once the SDK is ready.
+ */
+export function setAsyncTokenProvider(provider: AsyncTokenProvider): void {
+  asyncTokenProvider = provider;
+}
+
+/** Clear the token provider on logout. */
+export function clearAsyncTokenProvider(): void {
+  asyncTokenProvider = null;
+}
+
+/** Get a fresh auth token — tries the async provider first, then cached fallbacks. */
+async function getAuthToken(): Promise<string | null> {
+  // 1. Ask Privy for a fresh token (handles refresh automatically)
+  if (asyncTokenProvider) {
+    try {
+      const token = await asyncTokenProvider();
+      if (token) return token;
+    } catch {
+      // Fall through to cached
+    }
+  }
+
+  // 2. Fallback: cached values
+  try {
+    const win = window as unknown as Record<string, unknown>;
+    if (typeof win.__PRIVY_TOKEN__ === "string" && win.__PRIVY_TOKEN__) {
+      return win.__PRIVY_TOKEN__;
+    }
+    const stored = localStorage.getItem("forge:auth_token");
+    if (stored) return stored;
+  } catch {
+    // SSR or restricted storage
+  }
+
+  return null;
+}
+
 export async function apiFetch(
   input: string,
   init: RequestOptions = {},
@@ -56,9 +106,19 @@ export async function apiFetch(
 
   const url = getFullUrl(input);
 
+  // Inject auth token for API requests
+  const headers = new Headers(rest.headers);
+  if (url.includes("/api/") && !headers.has("Authorization")) {
+    const token = await getAuthToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+
   try {
     const response = await fetch(url, {
       ...rest,
+      headers,
       signal: signal ?? controller.signal,
     });
     return response;

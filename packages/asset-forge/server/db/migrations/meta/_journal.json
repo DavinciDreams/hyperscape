@@ -15,6 +15,13 @@
       "when": 1762489200253,
       "tag": "0001_eager_violations",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1743120000000,
+      "tag": "0002_world_studio_foundation",
+      "breakpoints": true
     }
   ]
 }

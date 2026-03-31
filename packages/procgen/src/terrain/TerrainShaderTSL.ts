@@ -356,20 +356,44 @@ export function createTerrainMaterial(
   const slope = sub(float(1.0), abs(worldNormal.y));
 
   // ============================================================================
-  // OSRS-STYLE VERTEX COLORS
+  // PER-BIOME TERRAIN COLORS (matches game's TerrainShader.ts palettes)
   // ============================================================================
 
-  // Core terrain colors (OSRS palette)
-  const grassGreen = vec3(0.3, 0.55, 0.15);
-  const grassDark = vec3(0.22, 0.42, 0.1);
-  const dirtBrown = vec3(0.45, 0.32, 0.18);
-  const dirtDark = vec3(0.32, 0.22, 0.12);
-  const rockGray = vec3(0.45, 0.42, 0.38);
-  const rockDark = vec3(0.3, 0.28, 0.25);
+  // --- Tundra palette: snowy white-blue with frozen grey stone ---
+  const TUNDRA_GRASS = vec3(0.78, 0.82, 0.85);
+  const TUNDRA_GRASS_DARK = vec3(0.65, 0.7, 0.75);
+  const TUNDRA_DIRT = vec3(0.55, 0.55, 0.58);
+  const TUNDRA_DIRT_DARK = vec3(0.42, 0.42, 0.45);
+  const TUNDRA_CLIFF = vec3(0.5, 0.52, 0.56);
+  const TUNDRA_CLIFF_DARK = vec3(0.38, 0.4, 0.44);
+
+  // --- Forest palette: vibrant energetic greens with warm brown earth ---
+  const FOREST_GRASS = vec3(0.3, 0.58, 0.15);
+  const FOREST_GRASS_DARK = vec3(0.18, 0.42, 0.08);
+  const FOREST_DIRT = vec3(0.35, 0.24, 0.12);
+  const FOREST_DIRT_DARK = vec3(0.22, 0.15, 0.08);
+  const FOREST_CLIFF = vec3(0.4, 0.38, 0.32);
+  const FOREST_CLIFF_DARK = vec3(0.28, 0.26, 0.22);
+
+  // --- Canyon palette: red-orange sand with deep crimson rock ---
+  const CANYON_SAND = vec3(0.82, 0.52, 0.28);
+  const CANYON_SAND_DARK = vec3(0.72, 0.42, 0.2);
+  const CANYON_ROCK = vec3(0.62, 0.28, 0.15);
+  const CANYON_ROCK_DARK = vec3(0.48, 0.2, 0.1);
+  const CANYON_CLIFF = vec3(0.72, 0.38, 0.18);
+  const CANYON_CLIFF_DARK = vec3(0.55, 0.25, 0.12);
+
+  // Legacy aliases (default = forest biome)
+  const dirtBrown = FOREST_DIRT;
+  const dirtDark = FOREST_DIRT_DARK;
   const sandYellow = vec3(0.7, 0.6, 0.38);
-  const snowWhite = vec3(0.92, 0.94, 0.96);
   const mudBrown = vec3(0.18, 0.12, 0.08);
   const waterEdge = vec3(0.08, 0.06, 0.04);
+
+  // Per-vertex biome weights (set by TileBasedTerrain from GameTerrainAdapter)
+  const fW = attribute("biomeForestWeight", "float");
+  const dW = attribute("biomeCanyonWeight", "float");
+  const tW = sub(float(1.0), add(fW, dW)); // tundra = remainder
 
   // Distance-based LOD
   const toCamera = sub(worldPos, cameraPosition);
@@ -400,11 +424,17 @@ export function createTerrainMaterial(
     float(0.5),
   );
 
-  // === BASE: GRASS with variation ===
+  // === BIOME-BLENDED GRASS with variation ===
   const grassVariation = smoothstep(float(0.4), float(0.6), noiseValue2);
-  let baseColor = mix(grassGreen, grassDark, grassVariation);
+  const tundraGrass = mix(TUNDRA_GRASS, TUNDRA_GRASS_DARK, grassVariation);
+  const forestGrass = mix(FOREST_GRASS, FOREST_GRASS_DARK, grassVariation);
+  const canyonGrass = mix(CANYON_SAND, CANYON_SAND_DARK, grassVariation);
+  let baseColor: Node = add(
+    add(mul(tundraGrass, tW), mul(forestGrass, fW)),
+    mul(canyonGrass, dW),
+  );
 
-  // === DIRT PATCHES ===
+  // === BIOME-BLENDED DIRT PATCHES ===
   const dirtPatchFactor = smoothstep(
     float(TERRAIN_CONSTANTS.DIRT_THRESHOLD - 0.05),
     float(TERRAIN_CONSTANTS.DIRT_THRESHOLD + 0.15),
@@ -412,48 +442,61 @@ export function createTerrainMaterial(
   );
   const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
   const dirtVariation = smoothstep(float(0.3), float(0.7), noiseValue2);
-  const dirtColor = mix(dirtBrown, dirtDark, dirtVariation);
+  const tundraDirt = mix(TUNDRA_DIRT, TUNDRA_DIRT_DARK, dirtVariation);
+  const forestDirt = mix(FOREST_DIRT, FOREST_DIRT_DARK, dirtVariation);
+  const canyonDirt = mix(CANYON_ROCK, CANYON_ROCK_DARK, dirtVariation);
+  const dirtColor = add(
+    add(mul(tundraDirt, tW), mul(forestDirt, fW)),
+    mul(canyonDirt, dW),
+  );
   baseColor = mix(baseColor, dirtColor, mul(dirtPatchFactor, flatnessFactor));
 
-  // === SLOPE-BASED DIRT ===
+  // === SLOPE-BASED DIRT (fades out where cliff takes over) ===
+  const dirtSlopeFactor = mul(
+    smoothstep(float(0.15), float(0.4), slope),
+    smoothstep(float(0.6), float(0.3), slope),
+  );
+  baseColor = mix(baseColor, dirtColor, mul(dirtSlopeFactor, float(0.6)));
+
+  // === PER-BIOME CLIFF ON STEEP SLOPES ===
+  const cliffVariation = smoothstep(float(0.3), float(0.7), noiseValue);
+  const tundraCliff = mix(TUNDRA_CLIFF, TUNDRA_CLIFF_DARK, cliffVariation);
+  const forestCliff = mix(FOREST_CLIFF, FOREST_CLIFF_DARK, cliffVariation);
+  const canyonCliff = mix(CANYON_CLIFF, CANYON_CLIFF_DARK, cliffVariation);
+  const cliffColor = add(
+    add(mul(tundraCliff, tW), mul(forestCliff, fW)),
+    mul(canyonCliff, dW),
+  );
   baseColor = mix(
     baseColor,
-    dirtColor,
-    mul(smoothstep(float(0.15), float(0.5), slope), float(0.6)),
+    cliffColor,
+    smoothstep(float(0.3), float(0.55), slope),
   );
 
-  // === ROCK ON STEEP SLOPES ===
-  const rockVariation = smoothstep(float(0.3), float(0.7), noiseValue);
-  const rockColorFinal = mix(rockGray, rockDark, rockVariation);
-  baseColor = mix(
-    baseColor,
-    rockColorFinal,
-    smoothstep(float(0.45), float(0.75), slope),
-  );
-
-  // === SNOW AT HIGH ELEVATION ===
-  baseColor = mix(
-    baseColor,
-    snowWhite,
-    smoothstep(float(TERRAIN_CONSTANTS.SNOW_HEIGHT - 5.0), float(60.0), height),
-  );
-
-  // === SAND NEAR WATER ===
+  // === SAND NEAR WATER (stronger in canyon) ===
   const sandBlend = mul(
     smoothstep(float(10.0), float(6.0), height),
     smoothstep(float(0.25), float(0.0), slope),
   );
-  baseColor = mix(baseColor, sandYellow, mul(sandBlend, float(0.6)));
+  const sandStrength = mix(float(0.6), float(0.9), dW);
+  baseColor = mix(baseColor, sandYellow, mul(sandBlend, sandStrength));
 
   // === SHORELINE TRANSITIONS ===
-  const wetDirtZone = smoothstep(float(14.0), float(8.0), height);
-  baseColor = mix(baseColor, dirtDark, mul(wetDirtZone, float(0.4)));
-
-  const mudZone = smoothstep(float(9.0), float(6.0), height);
-  baseColor = mix(baseColor, mudBrown, mul(mudZone, float(0.7)));
-
-  const edgeZone = smoothstep(float(6.5), float(5.0), height);
-  baseColor = mix(baseColor, waterEdge, mul(edgeZone, float(0.9)));
+  baseColor = mix(
+    baseColor,
+    dirtDark,
+    mul(smoothstep(float(14.0), float(8.0), height), float(0.4)),
+  );
+  baseColor = mix(
+    baseColor,
+    mudBrown,
+    mul(smoothstep(float(9.0), float(6.0), height), float(0.7)),
+  );
+  baseColor = mix(
+    baseColor,
+    waterEdge,
+    mul(smoothstep(float(6.5), float(5.0), height), float(0.9)),
+  );
 
   // === ANTI-DITHERING ===
   const brightnessVar = mul(sub(fineNoise, float(0.5)), float(0.08));

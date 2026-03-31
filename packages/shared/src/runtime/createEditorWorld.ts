@@ -33,6 +33,9 @@ import { EditorGizmoSystem } from "../systems/editor/EditorGizmoSystem";
 import { Settings } from "../systems/shared/infrastructure/Settings";
 import { LODs } from "../systems/shared/presentation/LODs";
 
+// Data — editor needs DataManager initialized for BIOMES, zones, etc.
+import { dataManager } from "../data/DataManager";
+
 export interface EditorWorldOptions {
   viewport: HTMLElement;
   enableTerrain?: boolean;
@@ -115,6 +118,10 @@ export async function initEditorWorld(
   options: EditorWorldOptions,
   initOptions: Partial<WorldOptions> = {},
 ): Promise<EditorWorld> {
+  // Initialize DataManager BEFORE world.init() so BIOMES/zones are populated
+  // when TerrainSystem starts up
+  await dataManager.initialize();
+
   const world = createEditorWorld(options);
   await world.init({ ...initOptions, viewport: options.viewport });
 
@@ -133,6 +140,7 @@ export async function initEditorWorld(
   return world;
 }
 
+export { dataManager as editorDataManager } from "../data/DataManager";
 export { EditorCameraSystem } from "../systems/editor/EditorCameraSystem";
 export { EditorSelectionSystem } from "../systems/editor/EditorSelectionSystem";
 export { EditorGizmoSystem } from "../systems/editor/EditorGizmoSystem";

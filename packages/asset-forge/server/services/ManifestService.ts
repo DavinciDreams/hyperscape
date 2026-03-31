@@ -47,7 +47,14 @@ type ManifestSchemaType =
   | "tier-requirements"
   | "tools"
   | "vegetation"
-  | "lod-settings";
+  | "lod-settings"
+  | "items"
+  | "gathering"
+  | "recipes"
+  | "combat"
+  | "ammunition"
+  | "runes"
+  | "duel-arenas";
 
 // Define all manifest files and their metadata
 const MANIFEST_DEFINITIONS: ManifestInfo[] = [
@@ -180,6 +187,194 @@ const MANIFEST_DEFINITIONS: ManifestInfo[] = [
     category: "world",
     editable: true,
     schema: "lod-settings",
+  },
+  // Combat
+  {
+    name: "combat-spells",
+    filename: "combat-spells.json",
+    description: "Magic combat spell definitions with rune costs",
+    category: "progression",
+    editable: true,
+    schema: "combat",
+  },
+  {
+    name: "runes",
+    filename: "runes.json",
+    description: "Rune definitions for magic system",
+    category: "items",
+    editable: true,
+    schema: "runes",
+  },
+  {
+    name: "ammunition",
+    filename: "ammunition.json",
+    description: "Arrow and bolt ammunition definitions",
+    category: "items",
+    editable: true,
+    schema: "ammunition",
+  },
+  {
+    name: "duel-arenas",
+    filename: "duel-arenas.json",
+    description: "Duel arena definitions with spawn points",
+    category: "world",
+    editable: true,
+    schema: "duel-arenas",
+  },
+  // Items (subdirectory)
+  {
+    name: "items/weapons",
+    filename: "items/weapons.json",
+    description: "Weapon item definitions",
+    category: "items",
+    editable: true,
+    schema: "items",
+  },
+  {
+    name: "items/armor",
+    filename: "items/armor.json",
+    description: "Armor item definitions",
+    category: "items",
+    editable: true,
+    schema: "items",
+  },
+  {
+    name: "items/resources",
+    filename: "items/resources.json",
+    description: "Resource item definitions (ores, logs, fish, etc.)",
+    category: "items",
+    editable: true,
+    schema: "items",
+  },
+  {
+    name: "items/tools",
+    filename: "items/tools.json",
+    description: "Tool item definitions (pickaxes, axes, etc.)",
+    category: "items",
+    editable: true,
+    schema: "items",
+  },
+  {
+    name: "items/ammunition",
+    filename: "items/ammunition.json",
+    description: "Ammunition item definitions",
+    category: "items",
+    editable: true,
+    schema: "items",
+  },
+  {
+    name: "items/food",
+    filename: "items/food.json",
+    description: "Food item definitions",
+    category: "items",
+    editable: true,
+    schema: "items",
+  },
+  {
+    name: "items/misc",
+    filename: "items/misc.json",
+    description: "Miscellaneous item definitions",
+    category: "items",
+    editable: true,
+    schema: "items",
+  },
+  {
+    name: "items/runes",
+    filename: "items/runes.json",
+    description: "Rune item definitions",
+    category: "items",
+    editable: true,
+    schema: "items",
+  },
+  // Gathering (subdirectory)
+  {
+    name: "gathering/mining",
+    filename: "gathering/mining.json",
+    description: "Mining rock definitions with levels and ore types",
+    category: "world",
+    editable: true,
+    schema: "gathering",
+  },
+  {
+    name: "gathering/woodcutting",
+    filename: "gathering/woodcutting.json",
+    description: "Tree definitions with levels and log types",
+    category: "world",
+    editable: true,
+    schema: "gathering",
+  },
+  {
+    name: "gathering/fishing",
+    filename: "gathering/fishing.json",
+    description: "Fishing spot definitions with levels and fish types",
+    category: "world",
+    editable: true,
+    schema: "gathering",
+  },
+  // Recipes (subdirectory)
+  {
+    name: "recipes/smithing",
+    filename: "recipes/smithing.json",
+    description: "Smithing recipes (bars to equipment)",
+    category: "progression",
+    editable: true,
+    schema: "recipes",
+  },
+  {
+    name: "recipes/fletching",
+    filename: "recipes/fletching.json",
+    description: "Fletching recipes (bows and arrows)",
+    category: "progression",
+    editable: true,
+    schema: "recipes",
+  },
+  {
+    name: "recipes/crafting",
+    filename: "recipes/crafting.json",
+    description: "Crafting recipes (leather, jewelry)",
+    category: "progression",
+    editable: true,
+    schema: "recipes",
+  },
+  {
+    name: "recipes/cooking",
+    filename: "recipes/cooking.json",
+    description: "Cooking recipes (raw to cooked food)",
+    category: "progression",
+    editable: true,
+    schema: "recipes",
+  },
+  {
+    name: "recipes/smelting",
+    filename: "recipes/smelting.json",
+    description: "Smelting recipes (ores to bars)",
+    category: "progression",
+    editable: true,
+    schema: "recipes",
+  },
+  {
+    name: "recipes/runecrafting",
+    filename: "recipes/runecrafting.json",
+    description: "Runecrafting recipes (essence to runes)",
+    category: "progression",
+    editable: true,
+    schema: "recipes",
+  },
+  {
+    name: "recipes/firemaking",
+    filename: "recipes/firemaking.json",
+    description: "Firemaking recipes (logs to fires)",
+    category: "progression",
+    editable: true,
+    schema: "recipes",
+  },
+  {
+    name: "recipes/tanning",
+    filename: "recipes/tanning.json",
+    description: "Tanning recipes (hides to leather)",
+    category: "progression",
+    editable: true,
+    schema: "recipes",
   },
 ];
 

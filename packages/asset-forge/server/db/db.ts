@@ -2,70 +2,139 @@
  * Database Connection
  * PostgreSQL connection using Bun-optimized postgres library and Drizzle ORM
  *
- * NOTE: Database is OPTIONAL for local development. Asset system works file-based.
- * Set DATABASE_URL to enable database features.
+ * Supports two modes:
+ * 1. USE_LOCAL_POSTGRES=true — auto-starts a Docker PostgreSQL container
+ * 2. DATABASE_URL=... — connects to an external PostgreSQL instance
+ *
+ * If neither is set, runs in file-based mode (database features disabled).
+ *
+ * IMPORTANT: Use getDb() and isDatabaseEnabled() getters, NOT raw imports.
+ * Raw `export let` variables can break with some bundlers that snapshot
+ * the value at import time instead of creating live bindings.
  */
 
 import postgres from "postgres";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { schema } from "./schema";
 import type { Sql } from "postgres";
+import {
+  createDefaultDockerManager,
+  type DockerManager,
+} from "../infrastructure/docker/docker-manager";
 
-// Check if database is available
-const DATABASE_URL = process.env.DATABASE_URL;
-const isDatabaseEnabled = Boolean(DATABASE_URL);
+// Private state — consumers use the getter functions below
+let _queryClient: Sql | null = null;
+let _db: PostgresJsDatabase<typeof schema> | null = null;
+let _isDatabaseEnabled = false;
+let _dockerManager: DockerManager | undefined;
 
-// Create postgres client only if DATABASE_URL is provided
-let queryClient: Sql | null = null;
-let db: PostgresJsDatabase<typeof schema> | null = null;
-
-if (isDatabaseEnabled && DATABASE_URL) {
-  // Create postgres client (optimized for Bun)
-  // Using connection pool with sensible defaults
-  queryClient = postgres(DATABASE_URL, {
-    max: 20, // Maximum number of connections
-    idle_timeout: 20, // Close idle connections after 20 seconds
-    connect_timeout: 10, // Fail after 10 seconds if can't connect
-    prepare: false, // Disable prepared statements for better compatibility
-  });
-
-  // Create Drizzle instance with schema
-  db = drizzle(queryClient, { schema });
-
-  // Test connection
-  queryClient`SELECT NOW()`
-    .then((result) => {
-      console.log("[Database] ✓ Connected to PostgreSQL at", result[0].now);
-    })
-    .catch((error) => {
-      console.error("[Database] ✗ Connection failed:", error.message);
-      console.warn(
-        "[Database] Continuing without database - file-based storage only",
-      );
-      queryClient = null;
-      db = null;
-    });
-
-  // Graceful shutdown
-  process.on("SIGINT", async () => {
-    if (queryClient) {
-      console.log("[Database] Closing connection...");
-      await queryClient.end();
-    }
-    process.exit(0);
-  });
-
-  process.on("SIGTERM", async () => {
-    if (queryClient) {
-      console.log("[Database] Closing connection...");
-      await queryClient.end();
-    }
-    process.exit(0);
-  });
-} else {
-  console.log(
-    "[Database] DATABASE_URL not set - running in file-based mode (database features disabled)",
-  );
+/** Get the Drizzle database client. Returns null if DB is not connected. */
+export function getDb(): PostgresJsDatabase<typeof schema> | null {
+  return _db;
 }
 
-export { queryClient, db, isDatabaseEnabled };
+/** Check if the database is connected and available. */
+export function isDatabaseEnabled(): boolean {
+  return _isDatabaseEnabled;
+}
+
+/** Get the raw postgres query client. Returns null if DB is not connected. */
+export function getQueryClient(): Sql | null {
+  return _queryClient;
+}
+
+/**
+ * Initialize the database connection.
+ * Called from server startup (api-elysia.ts) BEFORE routes are registered.
+ */
+export async function initializeDatabase(): Promise<void> {
+  let connectionString = process.env.DATABASE_URL || "";
+
+  const useLocalPostgres =
+    process.env.USE_LOCAL_POSTGRES === "true" && !connectionString;
+
+  if (useLocalPostgres) {
+    try {
+      _dockerManager = createDefaultDockerManager();
+      await _dockerManager.checkDockerRunning();
+
+      const isRunning = await _dockerManager.checkPostgresRunning();
+      if (!isRunning) {
+        console.log("[Database] Starting Docker PostgreSQL...");
+        await _dockerManager.startPostgres();
+      } else {
+        console.log("[Database] Docker PostgreSQL already running");
+      }
+
+      connectionString = await _dockerManager.getConnectionString();
+      console.log("[Database] Using local Docker PostgreSQL");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[Database] Docker PostgreSQL unavailable:", msg);
+      console.log(
+        "[Database] Continuing without database - file-based storage only",
+      );
+      return;
+    }
+  }
+
+  if (!connectionString) {
+    console.log(
+      "[Database] No database configured (set USE_LOCAL_POSTGRES=true or DATABASE_URL) - file-based mode",
+    );
+    return;
+  }
+
+  _queryClient = postgres(connectionString, {
+    max: 20,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    prepare: false,
+  });
+
+  _db = drizzle(_queryClient, { schema });
+  _isDatabaseEnabled = true;
+
+  try {
+    const result = await _queryClient`SELECT NOW()`;
+    console.log("[Database] Connected to PostgreSQL at", result[0].now);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[Database] Connection failed:", msg);
+    console.warn(
+      "[Database] Continuing without database - file-based storage only",
+    );
+    _queryClient = null;
+    _db = null;
+    _isDatabaseEnabled = false;
+    return;
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    try {
+      const { execSync } = await import("child_process");
+      execSync("bunx drizzle-kit push --force", {
+        cwd: new URL("../../", import.meta.url).pathname,
+        env: { ...process.env, DATABASE_URL: connectionString },
+        stdio: "pipe",
+      });
+      console.log("[Database] Schema synced via drizzle-kit push");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[Database] Schema sync skipped:", msg);
+    }
+  }
+
+  const shutdown = async () => {
+    if (_queryClient) {
+      console.log("[Database] Closing connection...");
+      await _queryClient.end();
+    }
+    if (_dockerManager) {
+      await _dockerManager.stopPostgres();
+    }
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}

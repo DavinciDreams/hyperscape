@@ -1817,4 +1817,13 @@ export function useSelection(): Selection | null {
   return useWorldBuilderSelector((state) => state.editing.selection);
 }
 
+// Export reducer internals for composition by WorldStudioContext
+export {
+  coreReducer,
+  worldBuilderReducer,
+  UNDOABLE_ACTIONS,
+  initialState as worldBuilderInitialState,
+  initialCreationState,
+};
+
 export default WorldBuilderContext;

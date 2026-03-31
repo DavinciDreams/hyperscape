@@ -549,7 +549,7 @@ export const VegetationGenPage: React.FC = () => {
   };
 
   return (
-    <div className="flex h-[calc(100vh-60px)]">
+    <div className="flex h-[calc(100vh-44px)]">
       {/* Sidebar Controls */}
       <div className="w-80 bg-bg-secondary border-r border-border-primary overflow-y-auto">
         <div className="p-4 space-y-6">

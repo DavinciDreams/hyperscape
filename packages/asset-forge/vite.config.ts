@@ -1,8 +1,73 @@
+import fs from "fs";
 import path from "path";
 import { createRequire } from "module";
 
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
+import type { Plugin } from "vite";
+
+/**
+ * Vite plugin to serve game manifest files directly from the server package.
+ * This lets the EditorWorld's DataManager load biomes.json etc. without
+ * requiring the game server (port 5555) to be running.
+ */
+function serveGameAssets(): Plugin {
+  const manifestsDir = path.resolve(
+    __dirname,
+    "../server/world/assets/manifests",
+  );
+  const gameAssetsDir = path.resolve(__dirname, "../server/world/assets");
+
+  return {
+    name: "serve-game-assets",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith("/game-assets/")) return next();
+
+        // Strip /game-assets/ prefix
+        const assetPath = req.url.replace(/^\/game-assets\//, "");
+
+        // Try manifests dir first (higher priority), then general assets dir
+        const manifestFile = path.join(
+          manifestsDir,
+          assetPath.replace(/^manifests\//, ""),
+        );
+        const generalFile = path.join(gameAssetsDir, assetPath);
+
+        const filePath = assetPath.startsWith("manifests/")
+          ? manifestFile
+          : generalFile;
+
+        // Prevent path traversal
+        const resolvedPath = path.resolve(filePath);
+        if (
+          !resolvedPath.startsWith(manifestsDir) &&
+          !resolvedPath.startsWith(gameAssetsDir)
+        ) {
+          res.statusCode = 403;
+          res.end("Forbidden");
+          return;
+        }
+
+        if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
+          const ext = path.extname(resolvedPath);
+          const contentType =
+            ext === ".json"
+              ? "application/json"
+              : ext === ".png"
+                ? "image/png"
+                : "application/octet-stream";
+          res.setHeader("Content-Type", contentType);
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          fs.createReadStream(resolvedPath).pipe(res);
+        } else {
+          res.statusCode = 404;
+          res.end("Not found");
+        }
+      });
+    },
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -13,7 +78,7 @@ export default defineConfig(({ mode }) => {
   const threeRoot = path.dirname(path.dirname(require.resolve("three")));
 
   return {
-    plugins: [react()],
+    plugins: [react(), serveGameAssets()],
     // Define process.env for pre-built packages that use it (e.g., MovementUtils.ts)
     define: {
       "process.env.NODE_ENV": JSON.stringify(mode),
@@ -40,6 +105,20 @@ export default defineConfig(({ mode }) => {
         "three/addons": path.resolve(threeRoot, "examples/jsm"),
         // Ensure single Three.js instance across all packages
         three: threeRoot,
+        // Direct source imports for game-world tree generation (exact same code path)
+        // These must come BEFORE the general @hyperscape/shared alias
+        "@hyperscape/shared/world/BiomeResourceGenerator": path.resolve(
+          __dirname,
+          "../shared/src/systems/shared/world/BiomeResourceGenerator.ts",
+        ),
+        "@hyperscape/shared/world/TerrainBiomeTypes": path.resolve(
+          __dirname,
+          "../shared/src/systems/shared/world/TerrainBiomeTypes.ts",
+        ),
+        "@hyperscape/shared/constants/TreeTypes": path.resolve(
+          __dirname,
+          "../shared/src/constants/TreeTypes.ts",
+        ),
         // Use client-only build of shared to exclude server-side modules (fs-extra, etc.)
         "@hyperscape/shared": path.resolve(
           __dirname,

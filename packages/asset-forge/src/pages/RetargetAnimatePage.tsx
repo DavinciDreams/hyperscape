@@ -268,7 +268,7 @@ export const RetargetAnimatePage: React.FC = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-60px)] w-full flex">
+    <div className="h-[calc(100vh-44px)] w-full flex">
       {/* Sidebar */}
       <aside className="w-80 border-r border-border-primary bg-bg-secondary p-4 flex flex-col gap-4">
         <div>

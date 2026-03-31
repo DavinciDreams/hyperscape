@@ -1,0 +1,92 @@
+/**
+ * Teams & Games Schema
+ * Organizations and their game projects
+ */
+
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  timestamp,
+  unique,
+} from "drizzle-orm/pg-core";
+
+import { forgeUsers } from "./forge-users.schema";
+
+/**
+ * Teams table
+ * Organizations that own games and world projects
+ */
+export const teams = pgTable("teams", {
+  id: uuid("id").defaultRandom().primaryKey(),
+
+  // Identity
+  name: text("name").notNull(),
+  slug: text("slug").unique().notNull(),
+  description: text("description"),
+  avatarUrl: text("avatar_url"),
+
+  // Ownership
+  createdBy: uuid("created_by").references(() => forgeUsers.id),
+
+  // Plan & AI budget
+  plan: text("plan").notNull().default("free"), // 'free' | 'pro' | 'enterprise'
+  aiBudgetMonthlyCents: integer("ai_budget_monthly_cents")
+    .notNull()
+    .default(5000), // $50 default
+  aiSpentThisMonthCents: integer("ai_spent_this_month_cents")
+    .notNull()
+    .default(0),
+
+  // Timestamps
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * Games table
+ * A team can have multiple games, each with its own staging + production servers
+ */
+export const games = pgTable(
+  "games",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+
+    // Ownership
+    teamId: uuid("team_id")
+      .references(() => teams.id)
+      .notNull(),
+
+    // Identity
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description"),
+
+    // Server connection info
+    stagingServerUrl: text("staging_server_url"),
+    stagingAssetsPath: text("staging_assets_path"),
+    productionServerUrl: text("production_server_url"),
+    productionAssetsPath: text("production_assets_path"),
+    stagingAdminCode: text("staging_admin_code"),
+    productionAdminCode: text("production_admin_code"),
+
+    // Timestamps
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    teamSlugUnique: unique("games_team_slug_unique").on(
+      table.teamId,
+      table.slug,
+    ),
+  }),
+);
+
+// Type exports
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
+export type Game = typeof games.$inferSelect;
+export type NewGame = typeof games.$inferInsert;

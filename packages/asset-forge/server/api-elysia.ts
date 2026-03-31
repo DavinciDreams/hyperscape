@@ -54,6 +54,24 @@ import { createPlacementRoutes } from "./routes/placements";
 import { createProcgenRoutes } from "./routes/procgen";
 import { ProcgenPresetService } from "./services/ProcgenPresetService";
 
+// World Studio services
+import { TeamService } from "./services/TeamService";
+import { AuditLogService } from "./services/AuditLogService";
+import { WorldProjectService } from "./services/WorldProjectService";
+
+// World data routes
+import { worldTreeRoutes } from "./routes/world-trees";
+import { worldLayoutRoutes } from "./routes/world-layout";
+
+// World Studio routes
+import { createAuthRoutes } from "./routes/auth";
+import { createTeamRoutes, createInviteAcceptRoute } from "./routes/teams";
+import { createGameRoutes } from "./routes/games";
+import { createWorldProjectRoutes } from "./routes/world-projects";
+
+// Database initialization (auto-Docker when USE_LOCAL_POSTGRES=true)
+import { initializeDatabase } from "./db/db";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, "..");
@@ -62,6 +80,19 @@ const ROOT_DIR = path.join(__dirname, "..");
 await fs.promises.mkdir(path.join(ROOT_DIR, "temp-images"), {
   recursive: true,
 });
+
+// Startup validation — confirm auth env vars are loaded
+const _privyId = process.env.PRIVY_APP_ID || process.env.PUBLIC_PRIVY_APP_ID;
+const _privySecret = process.env.PRIVY_APP_SECRET;
+console.log(
+  "[Startup] Auth config: PRIVY_APP_ID=%s PRIVY_APP_SECRET=%s GRANT_DEV_ADMIN=%s",
+  _privyId ? `${_privyId.slice(0, 8)}...` : "NOT SET",
+  _privySecret ? "SET" : "NOT SET",
+  process.env.GRANT_DEV_ADMIN || "not set",
+);
+
+// Initialize database before services that depend on it
+await initializeDatabase();
 
 // Initialize services
 const API_PORT =
@@ -76,11 +107,17 @@ const generationService = new GenerationService();
 
 // World building services
 const PROJECT_ROOT = path.join(ROOT_DIR, "..", "..");
-const manifestService = new ManifestService(PROJECT_ROOT);
+const GAME_WORLD_ROOT = path.join(ROOT_DIR, "..", "server", "world");
+const manifestService = new ManifestService(GAME_WORLD_ROOT);
 const lodBakingService = new LODBakingService(PROJECT_ROOT);
 const vatBakingService = new VATBakingService(PROJECT_ROOT);
 const placementService = new PlacementService(PROJECT_ROOT);
 const procgenPresetService = new ProcgenPresetService();
+
+// World Studio services
+const teamService = new TeamService();
+const auditLogService = new AuditLogService();
+const worldProjectService = new WorldProjectService();
 
 // Create Elysia app
 const app = new Elysia()
@@ -102,8 +139,15 @@ const app = new Elysia()
           headers: { "Content-Type": "application/json" },
         },
       ),
-      // Skip rate limiting for health checks
-      skip: (req) => new URL(req.url).pathname === "/api/health",
+      // Skip rate limiting for read-only data endpoints
+      skip: (req) => {
+        const path = new URL(req.url).pathname;
+        return (
+          path === "/api/health" ||
+          path.startsWith("/api/manifests") ||
+          path.startsWith("/api/world/")
+        );
+      },
     }),
   )
 
@@ -184,6 +228,23 @@ const app = new Elysia()
             name: "Procgen",
             description:
               "Procedural generation presets - save seeds + settings, batch generation",
+          },
+          {
+            name: "Auth",
+            description: "Authentication and user profile",
+          },
+          {
+            name: "Teams",
+            description: "Team management, members, and invites",
+          },
+          {
+            name: "Games",
+            description: "Game project management within teams",
+          },
+          {
+            name: "World Projects",
+            description:
+              "World project CRUD, locking, snapshots, and deployments",
           },
         ],
         components: {
@@ -304,8 +365,19 @@ const app = new Elysia()
   .use(createLODRoutes(lodBakingService, PROJECT_ROOT))
   .use(createVATRoutes(vatBakingService))
   .use(createPlacementRoutes(placementService))
+  // World data (trees, towns, roads) — runs actual game generation code
+  .use(worldTreeRoutes)
+  .use(worldLayoutRoutes)
   // Procgen preset management
   .use(createProcgenRoutes(procgenPresetService))
+  // World Studio routes (auth, teams, games, world projects)
+  .use(createAuthRoutes(teamService))
+  .use(createTeamRoutes(teamService, auditLogService))
+  .use(createInviteAcceptRoute(teamService))
+  .use(createGameRoutes(teamService, auditLogService))
+  .use(
+    createWorldProjectRoutes(teamService, worldProjectService, auditLogService),
+  )
 
   // Start server
   .listen(API_PORT);

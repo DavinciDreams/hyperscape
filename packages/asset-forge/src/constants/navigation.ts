@@ -2,6 +2,7 @@ import { NavigationView } from "../types";
 
 // Navigation view constants
 export const NAVIGATION_VIEWS = {
+  DASHBOARD: "dashboard",
   ASSETS: "assets",
   GENERATION: "generation",
   EQUIPMENT: "equipment",
@@ -24,10 +25,16 @@ export const NAVIGATION_VIEWS = {
   GRASS_GEN: "grassGen",
   FLOWER_GEN: "flowerGen",
   VEGETATION_GEN: "vegetationGen",
+  DOCK_GEN: "dockGen",
+  BRIDGE_GEN: "bridgeGen",
+  LANDMARK_GEN: "landmarkGen",
+  WORLD_STUDIO: "worldStudio",
 } as const satisfies Record<string, NavigationView>;
 
 // Route paths for URL navigation
 export const ROUTES = {
+  SIGN_IN: "/sign-in",
+  DASHBOARD: "/dashboard",
   GENERATION: "/generate",
   ASSETS: "/assets",
   BUILDING_GEN: "/generators/buildings",
@@ -40,6 +47,10 @@ export const ROUTES = {
   GRASS_GEN: "/generators/grass",
   FLOWER_GEN: "/generators/flowers",
   VEGETATION_GEN: "/generators/vegetation",
+  DOCK_GEN: "/generators/docks",
+  BRIDGE_GEN: "/generators/bridges",
+  LANDMARK_GEN: "/generators/landmarks",
+  WORLD_STUDIO: "/world-studio",
   HAND_RIGGING: "/hand-rigging",
   EQUIPMENT: "/equipment",
   ARMOR_FITTING: "/armor",
@@ -53,6 +64,7 @@ export const ROUTES = {
 
 // Map routes to navigation views
 export const ROUTE_TO_VIEW: Record<string, NavigationView> = {
+  [ROUTES.DASHBOARD]: NAVIGATION_VIEWS.DASHBOARD,
   [ROUTES.GENERATION]: NAVIGATION_VIEWS.GENERATION,
   [ROUTES.ASSETS]: NAVIGATION_VIEWS.ASSETS,
   [ROUTES.BUILDING_GEN]: NAVIGATION_VIEWS.BUILDING_GEN,
@@ -64,6 +76,10 @@ export const ROUTE_TO_VIEW: Record<string, NavigationView> = {
   [ROUTES.GRASS_GEN]: NAVIGATION_VIEWS.GRASS_GEN,
   [ROUTES.FLOWER_GEN]: NAVIGATION_VIEWS.FLOWER_GEN,
   [ROUTES.VEGETATION_GEN]: NAVIGATION_VIEWS.VEGETATION_GEN,
+  [ROUTES.DOCK_GEN]: NAVIGATION_VIEWS.DOCK_GEN,
+  [ROUTES.BRIDGE_GEN]: NAVIGATION_VIEWS.BRIDGE_GEN,
+  [ROUTES.LANDMARK_GEN]: NAVIGATION_VIEWS.LANDMARK_GEN,
+  [ROUTES.WORLD_STUDIO]: NAVIGATION_VIEWS.WORLD_STUDIO,
   [ROUTES.HAND_RIGGING]: NAVIGATION_VIEWS.HAND_RIGGING,
   [ROUTES.EQUIPMENT]: NAVIGATION_VIEWS.EQUIPMENT,
   [ROUTES.ARMOR_FITTING]: NAVIGATION_VIEWS.ARMOR_FITTING,
@@ -77,6 +93,7 @@ export const ROUTE_TO_VIEW: Record<string, NavigationView> = {
 
 // Map navigation views to routes
 export const VIEW_TO_ROUTE: Record<NavigationView, string> = {
+  [NAVIGATION_VIEWS.DASHBOARD]: ROUTES.DASHBOARD,
   [NAVIGATION_VIEWS.GENERATION]: ROUTES.GENERATION,
   [NAVIGATION_VIEWS.ASSETS]: ROUTES.ASSETS,
   [NAVIGATION_VIEWS.BUILDING_GEN]: ROUTES.BUILDING_GEN,
@@ -88,6 +105,10 @@ export const VIEW_TO_ROUTE: Record<NavigationView, string> = {
   [NAVIGATION_VIEWS.GRASS_GEN]: ROUTES.GRASS_GEN,
   [NAVIGATION_VIEWS.FLOWER_GEN]: ROUTES.FLOWER_GEN,
   [NAVIGATION_VIEWS.VEGETATION_GEN]: ROUTES.VEGETATION_GEN,
+  [NAVIGATION_VIEWS.DOCK_GEN]: ROUTES.DOCK_GEN,
+  [NAVIGATION_VIEWS.BRIDGE_GEN]: ROUTES.BRIDGE_GEN,
+  [NAVIGATION_VIEWS.LANDMARK_GEN]: ROUTES.LANDMARK_GEN,
+  [NAVIGATION_VIEWS.WORLD_STUDIO]: ROUTES.WORLD_STUDIO,
   [NAVIGATION_VIEWS.HAND_RIGGING]: ROUTES.HAND_RIGGING,
   [NAVIGATION_VIEWS.EQUIPMENT]: ROUTES.EQUIPMENT,
   [NAVIGATION_VIEWS.ARMOR_FITTING]: ROUTES.ARMOR_FITTING,

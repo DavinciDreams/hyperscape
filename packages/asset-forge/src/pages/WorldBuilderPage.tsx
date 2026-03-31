@@ -5314,7 +5314,7 @@ export const WorldBuilderPage: React.FC = () => {
   // World tab has its own full-width layout
   if (activeTab === "world") {
     return (
-      <div className="flex flex-col h-[calc(100vh-60px)] bg-bg-primary">
+      <div className="flex flex-col h-[calc(100vh-44px)] bg-bg-primary">
         {/* Tab navigation bar for switching back to other tabs */}
         <div className="p-2 border-b border-border-primary flex gap-1 flex-wrap bg-bg-secondary">
           <TabButton
@@ -5401,7 +5401,7 @@ export const WorldBuilderPage: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-60px)] bg-bg-primary">
+    <div className="flex flex-col h-[calc(100vh-44px)] bg-bg-primary">
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <div className="w-96 bg-bg-secondary border-r border-border-primary flex flex-col">

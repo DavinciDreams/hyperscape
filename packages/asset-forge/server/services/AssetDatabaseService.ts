@@ -6,7 +6,7 @@
  * This allows the asset system to work in file-based mode for local development.
  */
 
-import { db, isDatabaseEnabled } from "../db/db";
+import { getDb, isDatabaseEnabled } from "../db/db";
 import { assets, type Asset, type NewAsset } from "../db/schema";
 import { eq } from "drizzle-orm";
 import type { AssetMetadataType } from "../models";
@@ -22,7 +22,8 @@ export class AssetDatabaseService {
     ownerId: string,
     filePath: string,
   ): Promise<Asset | null> {
-    if (!isDatabaseEnabled || !db) {
+    const db = getDb();
+    if (!isDatabaseEnabled() || !db) {
       console.log(
         `[AssetDatabaseService] Database not available - skipping record creation for: ${assetId}`,
       );
@@ -76,7 +77,8 @@ export class AssetDatabaseService {
     assetId: string,
     updates: Partial<NewAsset>,
   ): Promise<Asset | null> {
-    if (!isDatabaseEnabled || !db) {
+    const db = getDb();
+    if (!isDatabaseEnabled() || !db) {
       console.log(
         `[AssetDatabaseService] Database not available - skipping record update for: ${assetId}`,
       );
@@ -124,7 +126,8 @@ export class AssetDatabaseService {
    * Delete asset from database
    */
   async deleteAssetRecord(assetId: string): Promise<void> {
-    if (!isDatabaseEnabled || !db) {
+    const db = getDb();
+    if (!isDatabaseEnabled() || !db) {
       console.log(
         `[AssetDatabaseService] Database not available - skipping record deletion for: ${assetId}`,
       );
@@ -153,7 +156,8 @@ export class AssetDatabaseService {
    * Get asset with owner info
    */
   async getAssetWithOwner(assetId: string): Promise<Asset | null> {
-    if (!isDatabaseEnabled || !db) {
+    const db = getDb();
+    if (!isDatabaseEnabled() || !db) {
       return null;
     }
 

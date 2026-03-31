@@ -49,6 +49,54 @@ export interface TownLandmarkConfig {
   decorationsEnabled: boolean;
 }
 
+// ============== VEGETATION TYPES ==============
+
+/**
+ * Per-species spawn configuration (mirrors shared BiomeTreeConfig.trees entries)
+ */
+export interface TreeSpawnConfigUI {
+  /** Relative spawn weight (higher = more likely) */
+  weight: number;
+  /** Minimum terrain height for spawning */
+  minHeight?: number;
+  /** Maximum terrain height for spawning */
+  maxHeight?: number;
+  /** How strongly this tree prefers water-adjacent placement (0-1) */
+  waterAffinity?: number;
+  /** Max height above water to consider "near water" */
+  waterProximityHeight?: number;
+  /** Reject placement below this height above water threshold */
+  avoidsWaterBelow?: number;
+}
+
+/**
+ * Per-biome tree vegetation configuration
+ * Matches the shape of BiomeTreeConfig from @hyperscape/shared
+ */
+export interface BiomeTreeVegetationConfig {
+  /** Whether trees are enabled for this biome */
+  enabled: boolean;
+  /** Per-tree spawn weight + placement rules, keyed by tree ID */
+  trees: Record<string, TreeSpawnConfigUI>;
+  /** Trees per tile (base density) */
+  density: number;
+  /** Minimum spacing between trees in meters */
+  minSpacing: number;
+  /** Whether trees should cluster together */
+  clustering: boolean;
+  /** Cluster size if clustering is enabled */
+  clusterSize?: number;
+  /** Scale variation range [min, max] multiplier */
+  scaleVariation?: [number, number];
+  /** Maximum terrain slope for tree placement */
+  maxSlope?: number;
+}
+
+/**
+ * Vegetation overrides per biome type
+ */
+export type VegetationConfig = Record<string, BiomeTreeVegetationConfig>;
+
 /**
  * Configuration for town generation during world creation
  */
@@ -102,6 +150,8 @@ export interface WorldCreationConfig {
   seed: number;
   /** Preset ID if using a preset */
   preset: string | null;
+  /** Use the game's exact terrain pipeline (computeBaseHeight) instead of procgen */
+  useGamePipeline?: boolean;
 
   // Terrain configuration
   terrain: {
@@ -134,6 +184,9 @@ export interface WorldCreationConfig {
 
   /** Road generation configuration */
   roads: RoadGenerationConfig;
+
+  /** Per-biome vegetation (tree) configuration overrides */
+  vegetation?: VegetationConfig;
 }
 
 // ============== GENERATED WORLD DATA ==============
@@ -750,13 +803,33 @@ export interface Selection {
     | "lore"
     | "difficultyZone"
     | "customPlacement"
-    | "wilderness";
+    | "wilderness"
+    | "spawnPoint"
+    | "teleport"
+    | "mobSpawn"
+    | "resource"
+    | "station"
+    | "road"
+    | "poi"
+    | "waterBody"
+    | "musicZone"
+    | "ambientZone"
+    | "sfxTrigger"
+    // Vegetation instance selection (InstancedMesh per-instance)
+    | "vegetation"
+    // Game world manifest entity types (from GameWorldEntitySync)
+    | "gameNpc"
+    | "gameStation"
+    | "gameResource"
+    | "gameMobSpawn";
   /** ID of selected element */
   id: string;
   /** Breadcrumb path to selection (for nested elements) */
   path: SelectionPathItem[];
   /** Additional data for tile inspector */
   tileData?: TileInspectorData;
+  /** Entity metadata from 3D scene userData (for game world entities) */
+  entityData?: Record<string, unknown>;
 }
 
 /**
@@ -841,7 +914,39 @@ export interface HierarchyNode {
     | "mobSpawns"
     | "mobSpawn"
     | "customPlacements"
-    | "customPlacement";
+    | "customPlacement"
+    | "spawnPoints"
+    | "spawnPoint"
+    | "teleports"
+    | "teleport"
+    | "resources"
+    | "resource"
+    | "stations"
+    | "station"
+    | "pois"
+    | "poi"
+    | "waterBodies"
+    | "waterBody"
+    | "water"
+    | "audio"
+    | "musicZones"
+    | "musicZone"
+    | "ambientZones"
+    | "ambientZone"
+    | "sfxTriggers"
+    | "sfxTrigger"
+    | "gameEntities"
+    | "gameNpcs"
+    | "gameNpc"
+    | "gameStations"
+    | "gameStation"
+    | "gameResources"
+    | "gameResource"
+    | "gameMobSpawns"
+    | "gameMobSpawn"
+    | "gameFishing"
+    | "gameAreas"
+    | "folder";
   /** Child nodes */
   children: HierarchyNode[];
   /** Associated data ID for selection */
@@ -1193,6 +1298,69 @@ export const DEFAULT_SHORELINE_CONFIG: ShorelineConfig = {
 };
 
 /**
+ * Default per-biome vegetation configs — mirrors TerrainBiomeTypes.ts hardcoded values.
+ * Tree IDs use "tree_xxx" format matching the TreeId enum in @hyperscape/shared.
+ */
+export const DEFAULT_VEGETATION_CONFIG: VegetationConfig = {
+  forest: {
+    enabled: true,
+    trees: {
+      tree_knotwood: { weight: 40, maxHeight: 30 },
+      tree_oak: { weight: 20, maxHeight: 30 },
+      tree_birch: { weight: 20, maxHeight: 30 },
+      tree_maple: { weight: 40, maxHeight: 30 },
+      tree_fir: { weight: 15, maxHeight: 30 },
+      tree_pine: { weight: 15, maxHeight: 30 },
+      tree_chinaPine: { weight: 15, minHeight: 30, maxHeight: 60 },
+      tree_bamboo: { weight: 15, minHeight: 35 },
+    },
+    density: 15,
+    minSpacing: 12,
+    clustering: false,
+    scaleVariation: [0.8, 1.2],
+    maxSlope: 1.5,
+  },
+  canyon: {
+    enabled: true,
+    trees: {
+      tree_cactus: { weight: 20, avoidsWaterBelow: 3 },
+      tree_dead: { weight: 20, minHeight: 20 },
+      tree_palm: {
+        weight: 20,
+        waterAffinity: 0.3,
+        waterProximityHeight: 9,
+        maxHeight: 15,
+      },
+      tree_coconut: {
+        weight: 10,
+        waterAffinity: 0.6,
+        waterProximityHeight: 9,
+        maxHeight: 15,
+      },
+    },
+    density: 15,
+    minSpacing: 18,
+    clustering: false,
+    scaleVariation: [0.7, 1.3],
+    maxSlope: 2.0,
+  },
+  tundra: {
+    enabled: true,
+    trees: {
+      tree_windPine: { weight: 40, minHeight: 15 },
+      tree_fir: { weight: 30, minHeight: 10 },
+      tree_pine: { weight: 25, minHeight: 8 },
+      tree_birch: { weight: 10 },
+    },
+    density: 10,
+    minSpacing: 12,
+    clustering: false,
+    scaleVariation: [0.6, 1.0],
+    maxSlope: 1.5,
+  },
+};
+
+/**
  * Default world creation configuration
  * Note: worldSize and tileResolution are kept modest for preview performance.
  * For final world generation, these can be increased before "Apply & Lock".
@@ -1214,6 +1382,7 @@ export const DEFAULT_CREATION_CONFIG: WorldCreationConfig = {
   shoreline: DEFAULT_SHORELINE_CONFIG,
   towns: DEFAULT_TOWN_CONFIG,
   roads: DEFAULT_ROAD_CONFIG,
+  vegetation: DEFAULT_VEGETATION_CONFIG,
 };
 
 /**

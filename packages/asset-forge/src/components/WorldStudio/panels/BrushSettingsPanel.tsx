@@ -1,0 +1,357 @@
+/**
+ * BrushSettingsPanel — Left sidebar when brush tool is active
+ *
+ * Shows brush type selector, radius/strength sliders, falloff curve,
+ * and mode-specific options (terrain raise/lower/flatten/smooth,
+ * biome paint target, vegetation add/remove).
+ */
+
+import { Mountain, TreePine, Leaf, Grid3X3, Undo2, Trash2 } from "lucide-react";
+import React, { useCallback } from "react";
+
+import type {
+  BrushType,
+  TerrainBrushMode,
+  BrushFalloff,
+  BiomePaintMode,
+  VegetationPaintMode,
+} from "../types";
+import { useWorldStudio } from "../WorldStudioContext";
+import {
+  PropertySection,
+  SliderInput,
+  SelectInput,
+  Toggle,
+  InfoRow,
+} from "./properties/PropertyControls";
+
+const BRUSH_TYPE_OPTIONS: Array<{ value: BrushType; label: string }> = [
+  { value: "terrain", label: "Terrain" },
+  { value: "biome", label: "Biome" },
+  { value: "vegetation", label: "Vegetation" },
+  { value: "collision", label: "Collision" },
+];
+
+const TERRAIN_MODE_OPTIONS: Array<{
+  value: TerrainBrushMode;
+  label: string;
+}> = [
+  { value: "raise", label: "Raise" },
+  { value: "lower", label: "Lower" },
+  { value: "flatten", label: "Flatten" },
+  { value: "smooth", label: "Smooth" },
+];
+
+const FALLOFF_OPTIONS: Array<{ value: BrushFalloff; label: string }> = [
+  { value: "sharp", label: "Sharp" },
+  { value: "linear", label: "Linear" },
+  { value: "smooth", label: "Smooth" },
+];
+
+const BIOME_TYPES = [
+  "plains",
+  "forest",
+  "mountain",
+  "desert",
+  "swamp",
+  "ocean",
+  "cave",
+  "volcano",
+  "snow",
+];
+
+const BIOME_PAINT_MODE_OPTIONS: Array<{
+  value: BiomePaintMode;
+  label: string;
+}> = [
+  { value: "paint", label: "Paint" },
+  { value: "erase", label: "Erase" },
+];
+
+const VEG_PAINT_MODE_OPTIONS: Array<{
+  value: VegetationPaintMode;
+  label: string;
+}> = [
+  { value: "add", label: "Add" },
+  { value: "remove", label: "Remove" },
+];
+
+const VEGETATION_SPECIES = [
+  "tree",
+  "bush",
+  "fern",
+  "rock",
+  "fallen_tree",
+  "flower",
+  "mushroom",
+  "grass",
+];
+
+const BRUSH_ICONS: Record<BrushType, React.ReactNode> = {
+  terrain: <Mountain size={10} />,
+  biome: <TreePine size={10} />,
+  vegetation: <Leaf size={10} />,
+  collision: <Grid3X3 size={10} />,
+};
+
+export function BrushSettingsPanel() {
+  const { state, actions } = useWorldStudio();
+  const settings = state.tools.brushSettings;
+  const overlays = state.brushOverlays;
+
+  const updateSetting = useCallback(
+    (updates: Record<string, unknown>) => {
+      actions.setBrushSettings(updates);
+    },
+    [actions],
+  );
+
+  const strokeCount =
+    settings.brushType === "terrain"
+      ? overlays.terrainSculpts.length
+      : settings.brushType === "biome"
+        ? overlays.biomePaints.length
+        : settings.brushType === "collision"
+          ? overlays.tileCollisions.length
+          : overlays.vegetationPaints.length;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Panel header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary">
+        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+          Brush Settings
+        </span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scrollbar-thin">
+        {/* Brush type selector */}
+        <PropertySection title="Brush Type">
+          <div className="flex gap-1">
+            {BRUSH_TYPE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] rounded border transition-colors ${
+                  settings.brushType === opt.value
+                    ? "bg-primary/20 border-primary/50 text-primary"
+                    : "bg-bg-tertiary border-border-primary text-text-tertiary hover:text-text-secondary hover:border-border-primary/80"
+                }`}
+                onClick={() => updateSetting({ brushType: opt.value })}
+              >
+                {BRUSH_ICONS[opt.value]}
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </PropertySection>
+
+        {/* Common brush settings */}
+        <PropertySection title="Brush">
+          <SliderInput
+            label="Radius"
+            value={settings.radius}
+            onChange={(radius) => updateSetting({ radius })}
+            min={1}
+            max={50}
+            step={1}
+            unit="m"
+          />
+          <SliderInput
+            label="Strength"
+            value={settings.strength}
+            onChange={(strength) => updateSetting({ strength })}
+            min={0.05}
+            max={1}
+            step={0.05}
+          />
+          <SelectInput
+            label="Falloff"
+            value={settings.falloff}
+            onChange={(falloff) => updateSetting({ falloff })}
+            options={FALLOFF_OPTIONS}
+          />
+        </PropertySection>
+
+        {/* Terrain-specific settings */}
+        {settings.brushType === "terrain" && (
+          <PropertySection title="Terrain Mode" icon={<Mountain size={10} />}>
+            <div className="grid grid-cols-2 gap-1">
+              {TERRAIN_MODE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={`px-2 py-1 text-[10px] rounded border transition-colors ${
+                    settings.terrainMode === opt.value
+                      ? "bg-primary/20 border-primary/50 text-primary"
+                      : "bg-bg-tertiary border-border-primary text-text-tertiary hover:text-text-secondary"
+                  }`}
+                  onClick={() => updateSetting({ terrainMode: opt.value })}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {settings.terrainMode === "flatten" && (
+              <div className="text-[10px] text-text-tertiary italic pt-1">
+                Click to set target height, drag to flatten area.
+              </div>
+            )}
+          </PropertySection>
+        )}
+
+        {/* Biome-specific settings */}
+        {settings.brushType === "biome" && (
+          <PropertySection title="Biome Paint" icon={<TreePine size={10} />}>
+            <SelectInput
+              label="Mode"
+              value={settings.biomePaintMode}
+              onChange={(mode) =>
+                updateSetting({
+                  biomePaintMode: mode,
+                })
+              }
+              options={BIOME_PAINT_MODE_OPTIONS}
+            />
+            {settings.biomePaintMode === "paint" && (
+              <SelectInput
+                label="Target Biome"
+                value={settings.biomePaintTarget}
+                onChange={(biomePaintTarget) =>
+                  updateSetting({ biomePaintTarget })
+                }
+                options={BIOME_TYPES.map((t) => ({
+                  value: t,
+                  label: t.charAt(0).toUpperCase() + t.slice(1),
+                }))}
+              />
+            )}
+          </PropertySection>
+        )}
+
+        {/* Vegetation-specific settings */}
+        {settings.brushType === "vegetation" && (
+          <PropertySection title="Vegetation Paint" icon={<Leaf size={10} />}>
+            <SelectInput
+              label="Mode"
+              value={settings.vegetationPaintMode}
+              onChange={(mode) =>
+                updateSetting({
+                  vegetationPaintMode: mode,
+                })
+              }
+              options={VEG_PAINT_MODE_OPTIONS}
+            />
+            <div className="text-[10px] text-text-tertiary pt-1">
+              Species Filter:
+            </div>
+            <div className="space-y-0.5">
+              {VEGETATION_SPECIES.map((species) => (
+                <Toggle
+                  key={species}
+                  label={
+                    species.charAt(0).toUpperCase() +
+                    species.slice(1).replace("_", " ")
+                  }
+                  value={
+                    settings.vegetationSpeciesFilter.length === 0 ||
+                    settings.vegetationSpeciesFilter.includes(species)
+                  }
+                  onChange={(enabled) => {
+                    const current = settings.vegetationSpeciesFilter;
+                    if (enabled) {
+                      // Add to filter (or clear filter if all selected)
+                      const newFilter = [...current, species];
+                      if (newFilter.length >= VEGETATION_SPECIES.length) {
+                        updateSetting({
+                          vegetationSpeciesFilter: [],
+                        });
+                      } else {
+                        updateSetting({
+                          vegetationSpeciesFilter: newFilter,
+                        });
+                      }
+                    } else {
+                      // Remove from filter
+                      const newFilter =
+                        current.length === 0
+                          ? VEGETATION_SPECIES.filter((s) => s !== species)
+                          : current.filter((s) => s !== species);
+                      updateSetting({
+                        vegetationSpeciesFilter: newFilter,
+                      });
+                    }
+                  }}
+                />
+              ))}
+            </div>
+            <div className="text-[10px] text-text-tertiary italic pt-1">
+              Plants are currently disabled in the generator.
+            </div>
+          </PropertySection>
+        )}
+
+        {/* Collision-specific settings */}
+        {settings.brushType === "collision" && (
+          <PropertySection title="Collision Paint" icon={<Grid3X3 size={10} />}>
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                className={`px-2 py-1 text-[10px] rounded border transition-colors ${
+                  settings.collisionMode === "block"
+                    ? "bg-red-400/20 border-red-400/50 text-red-400"
+                    : "bg-bg-tertiary border-border-primary text-text-tertiary hover:text-text-secondary"
+                }`}
+                onClick={() => updateSetting({ collisionMode: "block" })}
+              >
+                Block
+              </button>
+              <button
+                className={`px-2 py-1 text-[10px] rounded border transition-colors ${
+                  settings.collisionMode === "unblock"
+                    ? "bg-green-400/20 border-green-400/50 text-green-400"
+                    : "bg-bg-tertiary border-border-primary text-text-tertiary hover:text-text-secondary"
+                }`}
+                onClick={() => updateSetting({ collisionMode: "unblock" })}
+              >
+                Unblock
+              </button>
+            </div>
+            <div className="text-[10px] text-text-tertiary italic pt-1">
+              Paint to mark tiles as blocked (unwalkable) or unblock previously
+              blocked tiles. 1m grid resolution.
+            </div>
+            <InfoRow
+              label="Blocked Tiles"
+              value={overlays.tileCollisions.filter((t) => t.blocked).length}
+            />
+            <InfoRow
+              label="Total Overrides"
+              value={overlays.tileCollisions.length}
+            />
+          </PropertySection>
+        )}
+
+        {/* Stroke history */}
+        <PropertySection title="History" defaultOpen={false}>
+          <InfoRow label="Strokes" value={strokeCount} />
+          <div className="flex gap-1 pt-1">
+            <button
+              className="flex-1 flex items-center justify-center gap-1 px-2 py-1 text-[10px] rounded border border-border-primary text-text-tertiary hover:text-text-secondary hover:bg-bg-tertiary transition-colors disabled:opacity-30"
+              onClick={() => actions.undoLastBrushStroke(settings.brushType)}
+              disabled={strokeCount === 0}
+            >
+              <Undo2 size={10} />
+              Undo Last
+            </button>
+            <button
+              className="flex-1 flex items-center justify-center gap-1 px-2 py-1 text-[10px] rounded border border-red-400/30 text-red-400/60 hover:text-red-400 hover:bg-red-400/5 transition-colors disabled:opacity-30"
+              onClick={() => actions.clearBrushOverlays(settings.brushType)}
+              disabled={strokeCount === 0}
+            >
+              <Trash2 size={10} />
+              Clear All
+            </button>
+          </div>
+        </PropertySection>
+      </div>
+    </div>
+  );
+}

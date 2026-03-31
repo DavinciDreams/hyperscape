@@ -533,7 +533,7 @@ export function WorldEditorPage() {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col bg-gray-900">
+    <div className="h-[calc(100vh-44px)] flex flex-col bg-gray-900">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
         <h1 className="text-lg font-semibold text-white flex items-center gap-2">

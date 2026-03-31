@@ -13,6 +13,7 @@ export {
   createEditorWorld,
   initEditorWorld,
   EditorWorld,
+  editorDataManager,
 } from "./runtime/createEditorWorld";
 export type { EditorWorldOptions } from "./runtime/createEditorWorld";
 export { World } from "./core/World";

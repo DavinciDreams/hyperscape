@@ -1,5 +1,6 @@
 import {
   createEditorWorld,
+  editorDataManager,
   EditorWorld,
   type EditorWorldOptions,
   type EditorCameraSystem,
@@ -99,6 +100,13 @@ export function EditorWorldProvider({
       setError(null);
       setInitWarnings([]);
       setSystemsReady({ camera: false, selection: false, gizmo: false });
+
+      // Point DataManager at our Vite-served game-assets (no game server needed)
+      (window as Record<string, unknown>).__ASSETS_URL = "/game-assets";
+
+      // Initialize DataManager BEFORE world.init() so BIOMES/zones are populated
+      // when TerrainSystem starts up
+      await editorDataManager.initialize();
 
       const newWorld = createEditorWorld({
         ...options,

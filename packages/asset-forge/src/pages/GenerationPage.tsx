@@ -666,14 +666,14 @@ export const GenerationPage: React.FC = () => {
   // Show generation type selector first
   if (!generationType) {
     return (
-      <div className="fixed inset-0 overflow-hidden">
+      <div className="fixed inset-0 pt-[44px] overflow-hidden">
         <GenerationTypeSelector onSelectType={setGenerationType} />
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 pt-[60px] bg-bg-primary bg-opacity-95 backdrop-blur-xl z-40 overflow-y-auto animate-fade-in scrollbar-hide">
+    <div className="fixed inset-0 pt-[44px] bg-bg-primary bg-opacity-95 backdrop-blur-xl z-40 overflow-y-auto animate-fade-in scrollbar-hide">
       {/* Main container with hidden scrollbar for clean appearance while maintaining scroll functionality */}
 
       {/* Main Content Area */}

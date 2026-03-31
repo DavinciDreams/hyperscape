@@ -232,7 +232,7 @@ export const VFXPage: React.FC = () => {
   const [selected, setSelected] = useState<VFXEffect | null>(null);
 
   return (
-    <div className="flex h-[calc(100vh-60px)]">
+    <div className="flex h-[calc(100vh-44px)]">
       <Sidebar selected={selected} onSelect={setSelected} />
       {selected ? <DetailPanel effect={selected} /> : <EmptyState />}
     </div>
