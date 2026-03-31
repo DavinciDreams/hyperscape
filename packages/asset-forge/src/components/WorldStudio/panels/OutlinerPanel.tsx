@@ -1372,7 +1372,36 @@ function findEntityPosition(
     if (town?.position) return town.position;
   }
 
-  // Game manifest entities — search by entityId
+  // Biomes: use centroid of assigned tiles (biome.center can be in ocean for island maps)
+  if (type === "biome" && world) {
+    const biome = world.foundation.biomes.find((b) => b.id === id);
+    if (biome) {
+      if (biome.tileKeys.length > 0) {
+        const ts = world.foundation.config.terrain.tileSize;
+        let sumX = 0;
+        let sumZ = 0;
+        for (const key of biome.tileKeys) {
+          const [tx, tz] = key.split(",").map(Number);
+          sumX += tx * ts;
+          sumZ += tz * ts;
+        }
+        return {
+          x: sumX / biome.tileKeys.length,
+          y: 0,
+          z: sumZ / biome.tileKeys.length,
+        };
+      }
+      if (biome.center) return biome.center;
+    }
+  }
+
+  // Buildings: look up parent town position as fallback
+  if (type === "building" && world) {
+    const building = world.foundation.buildings.find((b) => b.id === id);
+    if (building?.position) return building.position;
+  }
+
+  // Game manifest entities — positions are in game-centered coords, need offset to render coords
   const ge = state.gameEntities;
   if (ge) {
     const gameTypeLists: Record<
@@ -1387,7 +1416,15 @@ function findEntityPosition(
     const gameList = gameTypeLists[type];
     if (gameList) {
       const entity = gameList.find((e) => e.entityId === id);
-      if (entity) return { x: entity.position.x, y: 50, z: entity.position.z };
+      if (entity) {
+        const cfg = world?.foundation.config.terrain;
+        const offset = cfg ? (cfg.worldSize * cfg.tileSize) / 2 : 0;
+        return {
+          x: entity.position.x + offset,
+          y: 0,
+          z: entity.position.z + offset,
+        };
+      }
     }
   }
 

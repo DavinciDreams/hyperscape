@@ -28,6 +28,7 @@ import type {
   WorldPosition,
 } from "./types";
 import { generateWorldName, createNewWorld } from "./utils";
+import { GAME_BIOME_DEFINITIONS } from "./GameTerrainAdapter";
 
 // ============== ROAD GENERATION ==============
 
@@ -265,6 +266,7 @@ export function generateWorldFromConfig(
     config.seed,
     worldSizeMeters,
     config.biomes,
+    GAME_BIOME_DEFINITIONS,
   );
   const biomeCenters = biomeSystem.getBiomeCenters();
   const biomes: GeneratedBiome[] = biomeCenters.map((center, index) => {
@@ -282,6 +284,27 @@ export function generateWorldFromConfig(
       color: biomeDefinition.color,
     };
   });
+
+  // Populate biome tileKeys — assign each tile to its nearest biome center
+  const biomeTileSize = config.terrain.tileSize;
+  for (let tx = 0; tx < config.terrain.worldSize; tx++) {
+    for (let tz = 0; tz < config.terrain.worldSize; tz++) {
+      const worldX = tx * biomeTileSize;
+      const worldZ = tz * biomeTileSize;
+      let closestBiome: GeneratedBiome | null = null;
+      let closestDist = Infinity;
+      for (const biome of biomes) {
+        const dx = worldX - biome.center.x;
+        const dz = worldZ - biome.center.z;
+        const dist = dx * dx + dz * dz;
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestBiome = biome;
+        }
+      }
+      if (closestBiome) closestBiome.tileKeys.push(`${tx},${tz}`);
+    }
+  }
 
   // Generate towns
   const townGenerator = TownGenerator.fromTerrainGenerator(terrainGenerator, {

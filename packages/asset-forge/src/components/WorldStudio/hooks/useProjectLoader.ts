@@ -20,8 +20,10 @@ import {
   DEFAULT_TOWN_CONFIG,
   DEFAULT_ROAD_CONFIG,
 } from "../../WorldBuilder/types";
-import type { WorldCreationConfig } from "../../WorldBuilder/types";
+import type { WorldCreationConfig, WorldData } from "../../WorldBuilder/types";
 import { generateWorldFromConfig } from "../../WorldBuilder/worldGeneration";
+import { BiomeSystem } from "@hyperscape/procgen/terrain";
+import { GAME_BIOME_DEFINITIONS } from "../../WorldBuilder/GameTerrainAdapter";
 import {
   getWorldProject,
   saveWorldProject,
@@ -52,6 +54,69 @@ const HYPERSCAPE_GAME_WORLD_CONFIG: WorldCreationConfig = {
   towns: DEFAULT_TOWN_CONFIG,
   roads: DEFAULT_ROAD_CONFIG,
 };
+
+/**
+ * Ensure biomes exist and have tileKeys populated.
+ * Worlds saved before the biome generation fix may have an empty biomes array
+ * or biomes with empty tileKeys. This regenerates/backfills as needed.
+ */
+function repairBiomes(world: WorldData): void {
+  const config = world.foundation.config;
+  const { worldSize, tileSize } = config.terrain;
+  const worldSizeMeters = worldSize * tileSize;
+
+  // If no biomes at all, regenerate from config
+  if (world.foundation.biomes.length === 0) {
+    const biomeConfig = config.biomes ?? DEFAULT_BIOME_CONFIG;
+    const biomeSystem = new BiomeSystem(
+      config.seed,
+      worldSizeMeters,
+      biomeConfig,
+      GAME_BIOME_DEFINITIONS,
+    );
+    const centers = biomeSystem.getBiomeCenters();
+    world.foundation.biomes = centers.map((center, index) => {
+      const def = biomeSystem.getBiomeDefinition(center.type);
+      return {
+        id: `biome-${index}`,
+        type: center.type,
+        center: {
+          x: center.x + worldSizeMeters / 2,
+          y: 0,
+          z: center.z + worldSizeMeters / 2,
+        },
+        influenceRadius: center.influence,
+        tileKeys: [],
+        color: def.color,
+      };
+    });
+  }
+
+  // Backfill tileKeys if all empty
+  const biomes = world.foundation.biomes;
+  if (biomes.length === 0) return;
+  const allEmpty = biomes.every((b) => b.tileKeys.length === 0);
+  if (!allEmpty) return;
+
+  for (let tx = 0; tx < worldSize; tx++) {
+    for (let tz = 0; tz < worldSize; tz++) {
+      const wx = tx * tileSize;
+      const wz = tz * tileSize;
+      let closest = biomes[0];
+      let closestDist = Infinity;
+      for (const biome of biomes) {
+        const dx = wx - biome.center.x;
+        const dz = wz - biome.center.z;
+        const dist = dx * dx + dz * dz;
+        if (dist < closestDist) {
+          closestDist = dist;
+          closest = biome;
+        }
+      }
+      closest.tileKeys.push(`${tx},${tz}`);
+    }
+  }
+}
 
 export function useProjectLoader(projectId: string) {
   const { actions } = useWorldStudio();
@@ -99,6 +164,9 @@ export function useProjectLoader(projectId: string) {
             rawData as unknown as Parameters<typeof deserializeWorld>[0],
           );
         }
+
+        // Repair biomes for worlds saved before the biome generation fix
+        repairBiomes(world);
 
         // Set project context
         actions.setProject(

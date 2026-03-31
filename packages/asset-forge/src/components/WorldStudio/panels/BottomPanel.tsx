@@ -145,24 +145,43 @@ function loadString<T extends string>(key: string, fallback: T, valid: T[]): T {
 // ============== HOOKS ==============
 
 /** Subscribe to commandHistory changes via useSyncExternalStore */
-function useCommandHistorySnapshot(): {
+let _cachedSnapshot: {
   undoEntries: readonly Command[];
   redoEntries: readonly Command[];
   undoCount: number;
-} {
-  const subscribe = useCallback((onStoreChange: () => void) => {
-    return commandHistory.subscribe(onStoreChange);
-  }, []);
+} | null = null;
+let _lastUndoRef: readonly Command[] | null = null;
+let _lastRedoRef: readonly Command[] | null = null;
+let _lastUndoCount = -1;
 
-  const getSnapshot = useCallback(() => {
-    return {
-      undoEntries: commandHistory.getUndoEntries(),
-      redoEntries: commandHistory.getRedoEntries(),
-      undoCount: commandHistory.undoCount,
-    };
-  }, []);
+function getCommandHistorySnapshot() {
+  const undo = commandHistory.getUndoEntries();
+  const redo = commandHistory.getRedoEntries();
+  const count = commandHistory.undoCount;
+  if (
+    _cachedSnapshot &&
+    undo === _lastUndoRef &&
+    redo === _lastRedoRef &&
+    count === _lastUndoCount
+  ) {
+    return _cachedSnapshot;
+  }
+  _lastUndoRef = undo;
+  _lastRedoRef = redo;
+  _lastUndoCount = count;
+  _cachedSnapshot = { undoEntries: undo, redoEntries: redo, undoCount: count };
+  return _cachedSnapshot;
+}
 
-  return useSyncExternalStore(subscribe, getSnapshot);
+function subscribeCommandHistory(onStoreChange: () => void) {
+  return commandHistory.subscribe(onStoreChange);
+}
+
+function useCommandHistorySnapshot() {
+  return useSyncExternalStore(
+    subscribeCommandHistory,
+    getCommandHistorySnapshot,
+  );
 }
 
 // ============== VALIDATION TAB ==============

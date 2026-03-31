@@ -547,6 +547,14 @@ export function ViewportContainer() {
     return () => clearInterval(interval);
   }, [activeSceneRefs]);
 
+  // ----- Camera teleport from outliner selection -----
+  const teleportTarget = state.tools.cameraTeleportTarget;
+  useEffect(() => {
+    if (!teleportTarget) return;
+    viewportRef.current.navigateCamera?.(teleportTarget.x, teleportTarget.z);
+    actions.cameraTeleportConsumed();
+  }, [teleportTarget, viewportRef, actions]);
+
   // ----- Entity count for viewport overlay -----
   const entityCount = useMemo(() => {
     const ext = state.extendedLayers;

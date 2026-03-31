@@ -238,7 +238,7 @@ const GAME_BIOME_COLORS: Record<string, number> = {
 };
 
 // Biome definitions for procgen BiomeSystem
-const GAME_BIOME_DEFINITIONS: Record<string, BiomeDefinition> = {
+export const GAME_BIOME_DEFINITIONS: Record<string, BiomeDefinition> = {
   tundra: {
     id: "tundra",
     name: "Tundra",

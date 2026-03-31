@@ -3581,8 +3581,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           console.log(`[refreshVegetation] Placed ${totalTreeCount} trees`);
         },
         navigateCamera: (x: number, z: number) => {
-          const newY = Math.max(cameraStateRef.current.position.y, 100);
-          cameraStateRef.current.position.set(x, newY, z);
+          // Place camera at a comfortable viewing height, offset slightly so target is visible
+          const viewHeight = 150;
+          const offsetZ = 80;
+          cameraStateRef.current.position.set(x, viewHeight, z + offsetZ);
+          const cam = cameraRef.current;
+          if (cam) {
+            cam.position.set(x, viewHeight, z + offsetZ);
+            const controls = orbitControlsRef.current;
+            if (controls) {
+              controls.target.set(x, 0, z);
+              controls.update();
+            }
+          }
         },
       });
 
@@ -4270,6 +4281,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           onNavigate={(x, z) => {
             const newY = Math.max(cameraStateRef.current.position.y, 100);
             cameraStateRef.current.position.set(x, newY, z);
+            const cam = cameraRef.current;
+            if (cam) {
+              cam.position.set(x, newY, z);
+              const ctrl = orbitControlsRef.current;
+              if (ctrl) {
+                ctrl.target.set(x, 0, z);
+                ctrl.update();
+              }
+            }
           }}
         />
       )}
