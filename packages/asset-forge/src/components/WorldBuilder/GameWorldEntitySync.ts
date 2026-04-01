@@ -162,6 +162,11 @@ const RESOURCE_TREE_TO_GAME_ID: Record<string, string> = {
 // ============== SHARED GEOMETRY ==============
 
 /** Reusable geometry created once */
+/** Title-case a snake_case/space-separated name: "copper_ore" → "Copper Ore" */
+function titleCase(s: string): string {
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 let _npcBodyGeom: THREE.CylinderGeometry | null = null;
 let _npcHeadGeom: THREE.SphereGeometry | null = null;
 let _stationGeom: THREE.BoxGeometry | null = null;
@@ -945,7 +950,7 @@ export async function createGameWorldEntities(
       npcInfos.push({
         selectableId: group.name,
         entityId: npc.id,
-        name: npc.name ?? npc.id.replace(/_/g, " "),
+        name: npc.name ?? titleCase(npc.id),
         position: { x: npc.position.x, z: npc.position.z },
         npcType: npc.type,
         storeId: npc.storeId,
@@ -965,8 +970,8 @@ export async function createGameWorldEntities(
           selectableId: group.name,
           entityId: station.id,
           name: station.runeType
-            ? `${station.runeType} ${station.type}`.replace(/_/g, " ")
-            : station.type.replace(/_/g, " "),
+            ? titleCase(`${station.runeType} ${station.type}`)
+            : titleCase(station.type),
           position: { x: station.position.x, z: station.position.z },
           stationType: station.type,
         });
@@ -985,7 +990,7 @@ export async function createGameWorldEntities(
       resourceInfos.push({
         selectableId: group.name,
         entityId: resource.resourceId,
-        name: resource.resourceId.replace(/_/g, " "),
+        name: titleCase(resource.resourceId),
         position: { x: resource.position.x, z: resource.position.z },
         resourceType: resource.type,
       });
@@ -998,7 +1003,7 @@ export async function createGameWorldEntities(
       mobSpawnInfos.push({
         selectableId: group.name,
         entityId: spawn.mobId,
-        name: `${spawn.mobId.replace(/_/g, " ")} (×${spawn.maxCount})`,
+        name: `${titleCase(spawn.mobId)} (×${spawn.maxCount})`,
         position: { x: spawn.position.x, z: spawn.position.z },
         spawnRadius: spawn.spawnRadius,
         maxCount: spawn.maxCount,

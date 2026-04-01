@@ -3956,7 +3956,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
     initRenderer();
 
-    // Handle resize
+    // Handle resize — use ResizeObserver so sidebar collapse/expand triggers
+    // a resize (window.resize only fires when the browser window itself changes)
     const handleResize = () => {
       if (!container || !camera || !rendererRef.current) return;
       const width = container.clientWidth || 1;
@@ -3965,6 +3966,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       camera.updateProjectionMatrix();
       rendererRef.current.setSize(width, height);
     };
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(container);
+    // Also listen on window resize as fallback (fullscreen changes, etc.)
     window.addEventListener("resize", handleResize);
 
     // Capture refs for cleanup
@@ -3977,6 +3981,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
     // Cleanup
     return () => {
+      resizeObserver.disconnect();
       window.removeEventListener("resize", handleResize);
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("keydown", handleKeyDown);

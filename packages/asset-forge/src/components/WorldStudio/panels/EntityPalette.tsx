@@ -14,7 +14,6 @@
  */
 
 import {
-  Axe,
   ChevronRight,
   Compass,
   Droplets,
@@ -46,68 +45,146 @@ interface CategoryConfig {
   label: string;
   icon: React.ReactNode;
   description: string;
+  /** Tailwind color classes for the category accent */
+  color: {
+    icon: string;
+    bg: string;
+    bgHover: string;
+    border: string;
+    count: string;
+  };
 }
 
 const CATEGORIES: CategoryConfig[] = [
   {
     id: "npcs",
     label: "NPCs",
-    icon: <User size={14} />,
+    icon: <User size={13} />,
     description: "Place NPC entities from manifest",
+    color: {
+      icon: "text-blue-400",
+      bg: "bg-blue-500/5",
+      bgHover: "hover:bg-blue-500/10",
+      border: "border-l-blue-500/60",
+      count: "bg-blue-500/15 text-blue-400",
+    },
   },
   {
     id: "stations",
     label: "Stations",
-    icon: <Flame size={14} />,
+    icon: <Flame size={13} />,
     description: "Crafting and service stations",
+    color: {
+      icon: "text-orange-400",
+      bg: "bg-orange-500/5",
+      bgHover: "hover:bg-orange-500/10",
+      border: "border-l-orange-500/60",
+      count: "bg-orange-500/15 text-orange-400",
+    },
   },
   {
     id: "mob-spawns",
     label: "Mob Spawns",
-    icon: <Skull size={14} />,
+    icon: <Skull size={13} />,
     description: "Mob spawn zone markers",
+    color: {
+      icon: "text-red-400",
+      bg: "bg-red-500/5",
+      bgHover: "hover:bg-red-500/10",
+      border: "border-l-red-500/60",
+      count: "bg-red-500/15 text-red-400",
+    },
   },
   {
     id: "resources-mining",
     label: "Mining Rocks",
-    icon: <Gem size={14} />,
+    icon: <Gem size={13} />,
     description: "Ore nodes and mining spots",
+    color: {
+      icon: "text-amber-400",
+      bg: "bg-amber-500/5",
+      bgHover: "hover:bg-amber-500/10",
+      border: "border-l-amber-500/60",
+      count: "bg-amber-500/15 text-amber-400",
+    },
   },
   {
     id: "resources-woodcutting",
     label: "Trees",
-    icon: <TreePine size={14} />,
+    icon: <TreePine size={13} />,
     description: "Woodcutting trees",
+    color: {
+      icon: "text-green-400",
+      bg: "bg-green-500/5",
+      bgHover: "hover:bg-green-500/10",
+      border: "border-l-green-500/60",
+      count: "bg-green-500/15 text-green-400",
+    },
   },
   {
     id: "resources-fishing",
     label: "Fishing Spots",
-    icon: <Fish size={14} />,
+    icon: <Fish size={13} />,
     description: "Fishing spot markers",
+    color: {
+      icon: "text-cyan-400",
+      bg: "bg-cyan-500/5",
+      bgHover: "hover:bg-cyan-500/10",
+      border: "border-l-cyan-500/60",
+      count: "bg-cyan-500/15 text-cyan-400",
+    },
   },
   {
     id: "spawn-points",
     label: "Spawn Points",
-    icon: <MapPin size={14} />,
+    icon: <MapPin size={13} />,
     description: "Player spawn locations",
+    color: {
+      icon: "text-emerald-400",
+      bg: "bg-emerald-500/5",
+      bgHover: "hover:bg-emerald-500/10",
+      border: "border-l-emerald-500/60",
+      count: "bg-emerald-500/15 text-emerald-400",
+    },
   },
   {
     id: "teleports",
     label: "Teleports",
-    icon: <Navigation size={14} />,
+    icon: <Navigation size={13} />,
     description: "Teleport network nodes",
+    color: {
+      icon: "text-purple-400",
+      bg: "bg-purple-500/5",
+      bgHover: "hover:bg-purple-500/10",
+      border: "border-l-purple-500/60",
+      count: "bg-purple-500/15 text-purple-400",
+    },
   },
   {
     id: "pois",
     label: "Points of Interest",
-    icon: <Compass size={14} />,
+    icon: <Compass size={13} />,
     description: "Dungeons, shrines, landmarks, camps",
+    color: {
+      icon: "text-pink-400",
+      bg: "bg-pink-500/5",
+      bgHover: "hover:bg-pink-500/10",
+      border: "border-l-pink-500/60",
+      count: "bg-pink-500/15 text-pink-400",
+    },
   },
   {
     id: "water-bodies",
     label: "Water Bodies",
-    icon: <Droplets size={14} />,
+    icon: <Droplets size={13} />,
     description: "Rivers, lakes, ponds",
+    color: {
+      icon: "text-sky-400",
+      bg: "bg-sky-500/5",
+      bgHover: "hover:bg-sky-500/10",
+      border: "border-l-sky-500/60",
+      count: "bg-sky-500/15 text-sky-400",
+    },
   },
 ];
 
@@ -459,16 +536,17 @@ export function EntityPalette() {
       <PaletteHeader viewMode={viewMode} onViewModeChange={setViewMode} />
 
       {/* Search */}
-      <div className="px-3 py-2 border-b border-border-primary">
+      <div className="px-2 py-1.5 border-b border-white/[0.06]">
         <div className="relative">
           <Search
-            size={12}
-            className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary"
+            size={11}
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary/60"
           />
           <input
             type="text"
             placeholder="Search entities..."
-            className="w-full pl-7 pr-2 py-1.5 text-xs bg-bg-tertiary border border-border-primary rounded text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary/50"
+            className="w-full pl-6.5 pr-2 py-1.5 text-xs bg-white/[0.03] border border-transparent rounded text-text-primary placeholder:text-text-tertiary/50 focus:outline-none focus:border-primary/30 focus:bg-white/[0.05] transition-colors"
+            style={{ paddingLeft: "1.625rem" }}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -477,23 +555,26 @@ export function EntityPalette() {
 
       {/* Active placement indicator */}
       {activePlacement && (
-        <div className="px-3 py-2 bg-primary/10 border-b border-primary/20">
+        <div className="mx-2.5 mt-2 mb-0 px-2.5 py-2 bg-primary/10 border border-primary/20 rounded-md">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-primary font-medium">
-              Placing: {activePlacement.templateName}
-            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              <span className="text-[11px] text-primary font-medium">
+                Placing: {activePlacement.templateName}
+              </span>
+            </div>
             <button
-              className="text-xs text-text-tertiary hover:text-text-primary"
+              className="text-[10px] text-text-tertiary hover:text-text-primary px-1.5 py-0.5 rounded hover:bg-white/[0.05] transition-colors"
               onClick={actions.cancelPlacement}
             >
-              Cancel
+              ESC
             </button>
           </div>
         </div>
       )}
 
       {/* Category list */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
+      <div className="flex-1 overflow-y-auto scrollbar-thin px-1.5 py-1.5 space-y-1">
         {CATEGORIES.map((category) => {
           const items = filteredItems.get(category.id);
           if (searchQuery && !items) return null;
@@ -504,37 +585,47 @@ export function EntityPalette() {
           return (
             <div
               key={category.id}
-              className="border-b border-border-primary/50"
+              className={`rounded-md overflow-hidden transition-colors ${
+                isExpanded ? category.color.bg : ""
+              }`}
             >
               {/* Category header */}
               <button
-                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-tertiary/50 transition-colors"
+                className={`w-full flex items-center gap-2 px-2.5 py-2 text-left transition-colors rounded-md border-l-2 ${
+                  isExpanded
+                    ? `${category.color.border} ${category.color.bg}`
+                    : `border-l-transparent ${category.color.bgHover}`
+                }`}
                 onClick={() => handleCategoryToggle(category.id)}
               >
                 <ChevronRight
-                  size={12}
-                  className={`text-text-tertiary transition-transform ${
+                  size={11}
+                  className={`text-text-tertiary transition-transform flex-shrink-0 ${
                     isExpanded ? "rotate-90" : ""
                   }`}
                 />
-                <span className="text-text-secondary">{category.icon}</span>
-                <span className="text-xs font-medium text-text-primary flex-1">
+                <span className={`flex-shrink-0 ${category.color.icon}`}>
+                  {category.icon}
+                </span>
+                <span className="text-xs font-medium text-text-primary flex-1 truncate">
                   {category.label}
                 </span>
-                <span className="text-[10px] text-text-tertiary font-mono">
+                <span
+                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${category.color.count}`}
+                >
                   {itemCount}
                 </span>
               </button>
 
               {/* Expanded items */}
               {isExpanded && items && (
-                <div className="pb-1">
+                <div className="pb-1.5 pt-0.5">
                   {items.length === 0 ? (
                     <div className="px-7 py-2 text-[10px] text-text-tertiary italic">
                       No items available
                     </div>
                   ) : viewMode === "grid" ? (
-                    <div className="grid grid-cols-3 gap-1 px-2 py-1">
+                    <div className="grid grid-cols-3 gap-1.5 px-2 py-1">
                       {items.map((item) => (
                         <PaletteItemCard
                           key={item.id}
@@ -549,20 +640,22 @@ export function EntityPalette() {
                       ))}
                     </div>
                   ) : (
-                    items.map((item) => (
-                      <PaletteItemRow
-                        key={item.id}
-                        item={item}
-                        isActive={
-                          activePlacement?.templateId === item.id &&
-                          activePlacement?.category === item.category
-                        }
-                        isFavorite={favorites.has(item.id)}
-                        onClick={() => handleItemClick(item)}
-                        onDragStart={(e) => handleDragStart(e, item)}
-                        onToggleFavorite={() => toggleFavorite(item.id)}
-                      />
-                    ))
+                    <div className="space-y-px px-1">
+                      {items.map((item) => (
+                        <PaletteItemRow
+                          key={item.id}
+                          item={item}
+                          isActive={
+                            activePlacement?.templateId === item.id &&
+                            activePlacement?.category === item.category
+                          }
+                          isFavorite={favorites.has(item.id)}
+                          onClick={() => handleItemClick(item)}
+                          onDragStart={(e) => handleDragStart(e, item)}
+                          onToggleFavorite={() => toggleFavorite(item.id)}
+                        />
+                      ))}
+                    </div>
                   )}
                 </div>
               )}
@@ -583,21 +676,21 @@ function PaletteHeader({
   onViewModeChange: (mode: "list" | "grid") => void;
 }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-border-primary">
-      <Shield size={14} className="text-primary" />
-      <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider flex-1">
+    <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06]">
+      <Shield size={13} className="text-primary/70" />
+      <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider flex-1">
         Entity Palette
       </span>
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-px rounded-md p-px bg-white/[0.04]">
         <button
-          className={`p-1 rounded transition-colors ${viewMode === "list" ? "text-primary bg-primary/10" : "text-text-tertiary hover:text-text-primary"}`}
+          className={`p-1 rounded transition-colors ${viewMode === "list" ? "text-primary bg-primary/15" : "text-text-tertiary hover:text-text-secondary"}`}
           onClick={() => onViewModeChange("list")}
           title="List view"
         >
           <List size={12} />
         </button>
         <button
-          className={`p-1 rounded transition-colors ${viewMode === "grid" ? "text-primary bg-primary/10" : "text-text-tertiary hover:text-text-primary"}`}
+          className={`p-1 rounded transition-colors ${viewMode === "grid" ? "text-primary bg-primary/15" : "text-text-tertiary hover:text-text-secondary"}`}
           onClick={() => onViewModeChange("grid")}
           title="Grid view"
         >
@@ -607,20 +700,6 @@ function PaletteHeader({
     </div>
   );
 }
-
-/** Category badge color mapping */
-const CATEGORY_COLORS: Record<string, string> = {
-  npcs: "bg-blue-500/20 text-blue-400",
-  stations: "bg-orange-500/20 text-orange-400",
-  "mob-spawns": "bg-red-500/20 text-red-400",
-  "resources-mining": "bg-amber-500/20 text-amber-400",
-  "resources-woodcutting": "bg-green-500/20 text-green-400",
-  "resources-fishing": "bg-cyan-500/20 text-cyan-400",
-  "spawn-points": "bg-violet-500/20 text-violet-400",
-  teleports: "bg-purple-500/20 text-purple-400",
-  pois: "bg-emerald-500/20 text-emerald-400",
-  "water-bodies": "bg-sky-500/20 text-sky-400",
-};
 
 /** Single item row in the palette (list view) */
 function PaletteItemRow({
@@ -640,17 +719,21 @@ function PaletteItemRow({
 }) {
   return (
     <div
-      className={`group w-full flex items-center gap-2 px-3 py-1.5 pl-7 text-left transition-colors cursor-pointer ${
+      className={`group w-full flex items-center gap-2.5 px-2 py-1 text-left transition-all cursor-pointer rounded-md ${
         isActive
-          ? "bg-primary/15 border-l-2 border-primary"
-          : "hover:bg-bg-tertiary/50 border-l-2 border-transparent"
+          ? "bg-primary/15 ring-1 ring-primary/30"
+          : "hover:bg-white/[0.03]"
       }`}
       onClick={onClick}
       draggable
       onDragStart={onDragStart}
       title={item.description}
     >
-      <div className="w-6 h-6 rounded bg-bg-tertiary overflow-hidden flex-shrink-0">
+      <div
+        className={`w-8 h-8 rounded-md overflow-hidden flex-shrink-0 ring-1 ${
+          isActive ? "ring-primary/40" : "ring-white/[0.06]"
+        }`}
+      >
         <EntityThumbnail
           category={item.category}
           templateId={item.id}
@@ -658,9 +741,11 @@ function PaletteItemRow({
         />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-xs text-text-primary truncate">{item.name}</div>
+        <div className="text-[11px] text-text-primary truncate leading-tight">
+          {item.name}
+        </div>
         {item.levelRequired != null && item.levelRequired > 1 && (
-          <div className="text-[10px] text-text-tertiary">
+          <div className="text-[10px] text-text-tertiary leading-tight mt-0.5">
             Lvl {item.levelRequired}
           </div>
         )}
@@ -691,17 +776,12 @@ function PaletteItemCard({
   onClick: () => void;
   onDragStart: (e: React.DragEvent) => void;
 }) {
-  const badgeColor =
-    CATEGORY_COLORS[item.category] ?? "bg-gray-500/20 text-gray-400";
-  const categoryLabel =
-    CATEGORIES.find((c) => c.id === item.category)?.label ?? item.category;
-
   return (
     <div
-      className={`flex flex-col items-center p-2 rounded-md border cursor-pointer transition-colors ${
+      className={`group flex flex-col items-center p-1.5 rounded-lg cursor-pointer transition-all ${
         isActive
-          ? "border-primary bg-primary/10"
-          : "border-border-primary hover:border-border-secondary hover:bg-bg-tertiary/50"
+          ? "ring-1 ring-primary/40 bg-primary/10"
+          : "hover:bg-white/[0.04] ring-1 ring-transparent hover:ring-white/[0.06]"
       }`}
       onClick={onClick}
       draggable
@@ -709,21 +789,25 @@ function PaletteItemCard({
       title={item.description}
     >
       {/* 3D model thumbnail */}
-      <div className="w-full aspect-square rounded bg-bg-tertiary flex items-center justify-center mb-1.5 overflow-hidden">
+      <div
+        className={`w-full aspect-square rounded-md overflow-hidden ring-1 ${
+          isActive ? "ring-primary/30" : "ring-white/[0.06]"
+        }`}
+      >
         <EntityThumbnail
           category={item.category}
           templateId={item.id}
           className="w-full h-full"
         />
       </div>
-      <span className="text-[10px] text-text-primary text-center truncate w-full leading-tight">
+      <span className="text-[10px] text-text-primary text-center truncate w-full leading-tight mt-1.5">
         {item.name}
       </span>
-      <span
-        className={`text-[8px] px-1 py-0.5 rounded-sm mt-0.5 ${badgeColor}`}
-      >
-        {categoryLabel}
-      </span>
+      {item.levelRequired != null && item.levelRequired > 1 && (
+        <span className="text-[9px] text-text-tertiary mt-0.5">
+          Lvl {item.levelRequired}
+        </span>
+      )}
     </div>
   );
 }

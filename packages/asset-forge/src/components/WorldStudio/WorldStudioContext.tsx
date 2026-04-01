@@ -2411,26 +2411,25 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       };
     });
 
-    // Extended layer children (entities with viewport presence)
+    // Extended layer entities — placed manually via the Entity Palette.
+    // These are merged into the Game Entities hierarchy below (NPCs → Characters,
+    // Stations → Stations, Resources → Resources, Mob Spawns → Creatures).
+    // Only types that have NO game entity equivalent remain as top-level folders.
     const ext = state.extendedLayers;
-    // Extended layer children — only show folders that have entities placed
-    const extendedLayersDefs: HierarchyNode[] = [
-      {
-        id: "layer-npcs",
-        label: "NPCs",
-        type: "npcs",
-        children: ext.npcs.map((npc) => ({
-          id: `npc-${npc.id}`,
-          label: npc.name,
-          type: "npc" as const,
-          children: [],
-          dataId: npc.id,
-          expandable: false,
-          metadata: { npcTypeId: npc.npcTypeId },
-        })),
-        badge: ext.npcs.length,
-        expandable: ext.npcs.length > 0,
-      },
+
+    // Placed mob spawns — built here, may also receive placed mob/boss NPCs during classification
+    const extMobSpawnNodes: HierarchyNode[] = ext.mobSpawns.map((ms) => ({
+      id: `mobspawn-${ms.id}`,
+      label: ms.name,
+      type: "mobSpawn" as const,
+      children: [],
+      dataId: ms.id,
+      expandable: false,
+      metadata: { mobId: ms.mobId, maxCount: ms.maxCount },
+    }));
+
+    // Types without game entity equivalents — remain as top-level folders
+    const worldFeaturesDefs: HierarchyNode[] = [
       {
         id: "layer-spawn-points",
         label: "Spawn Points",
@@ -2462,54 +2461,6 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         })),
         badge: ext.teleports.length,
         expandable: ext.teleports.length > 0,
-      },
-      {
-        id: "layer-mob-spawns",
-        label: "Mob Spawns",
-        type: "mobSpawns",
-        children: ext.mobSpawns.map((ms) => ({
-          id: `mobspawn-${ms.id}`,
-          label: ms.name,
-          type: "mobSpawn" as const,
-          children: [],
-          dataId: ms.id,
-          expandable: false,
-          metadata: { mobId: ms.mobId, maxCount: ms.maxCount },
-        })),
-        badge: ext.mobSpawns.length,
-        expandable: ext.mobSpawns.length > 0,
-      },
-      {
-        id: "layer-resources",
-        label: "Resources",
-        type: "resources",
-        children: ext.resources.map((r) => ({
-          id: `resource-${r.id}`,
-          label: r.name,
-          type: "resource" as const,
-          children: [],
-          dataId: r.id,
-          expandable: false,
-          metadata: { resourceType: r.resourceType },
-        })),
-        badge: ext.resources.length,
-        expandable: ext.resources.length > 0,
-      },
-      {
-        id: "layer-stations",
-        label: "Stations",
-        type: "stations",
-        children: ext.stations.map((s) => ({
-          id: `station-${s.id}`,
-          label: s.name,
-          type: "station" as const,
-          children: [],
-          dataId: s.id,
-          expandable: false,
-          metadata: { stationType: s.stationType },
-        })),
-        badge: ext.stations.length,
-        expandable: ext.stations.length > 0,
       },
       {
         id: "layer-pois",
@@ -2544,7 +2495,7 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         expandable: ext.waterBodies.length > 0,
       },
     ];
-    const extendedLayersChildren = extendedLayersDefs.filter(
+    const worldFeaturesChildren = worldFeaturesDefs.filter(
       (node) => node.children.length > 0,
     );
 
@@ -2690,17 +2641,32 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
           badge: roadChildren.length,
           expandable: roadChildren.length > 0,
         },
-        ...extendedLayersChildren,
-        // Game manifest entities — manifest-aware hierarchy
-        ...(state.gameEntities
+        ...worldFeaturesChildren,
+        // Game manifest entities + placed entities — unified hierarchy
+        ...(state.gameEntities ||
+        ext.npcs.length > 0 ||
+        ext.stations.length > 0 ||
+        ext.resources.length > 0 ||
+        ext.mobSpawns.length > 0
           ? (() => {
-              const ge = state.gameEntities;
+              const ge = state.gameEntities ?? {
+                npcs: [],
+                stations: [],
+                resources: [],
+                mobSpawns: [],
+                fishingSpots: 0,
+                areas: 0,
+              };
               const manifests = state.manifests;
               const totalGame =
                 ge.npcs.length +
                 ge.stations.length +
                 ge.resources.length +
-                ge.mobSpawns.length;
+                ge.mobSpawns.length +
+                ext.npcs.length +
+                ext.stations.length +
+                ext.resources.length +
+                ext.mobSpawns.length;
 
               // Helper: build a leaf node for a game entity
               const makeNpcNode = (n: (typeof ge.npcs)[0]): HierarchyNode => ({
@@ -2751,38 +2717,82 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
                 "guard",
               ]);
 
-              const questNpcs: typeof ge.npcs = [];
-              const shopkeepers: typeof ge.npcs = [];
-              const serviceNpcs: typeof ge.npcs = [];
+              // Classify NPCs — combines game entities + placed entities
+              const questNpcNodes: HierarchyNode[] = [];
+              const shopkeeperNodes: HierarchyNode[] = [];
+              const serviceNpcNodes: HierarchyNode[] = [];
               const mobNpcs: typeof ge.npcs = [];
               const bossNpcs: typeof ge.npcs = [];
 
+              // Helper to classify a single NPC and push a node into the right bucket
+              const classifyNpc = (
+                entityId: string,
+                npcType: string | undefined,
+                storeId: string | undefined,
+                node: HierarchyNode,
+              ) => {
+                const manifestNpc = manifests.npcs.find(
+                  (m) => m.id === entityId,
+                );
+                const category = manifestNpc?.category;
+                if (category === "quest" || npcType === "quest_giver") {
+                  questNpcNodes.push(node);
+                } else if (
+                  storeId ||
+                  (npcType && SHOP_NPC_TYPES.has(npcType))
+                ) {
+                  shopkeeperNodes.push(node);
+                } else if (npcType && SERVICE_NPC_TYPES.has(npcType)) {
+                  serviceNpcNodes.push(node);
+                } else if (category === "mob" || category === "boss") {
+                  // Handled separately for mob/boss nesting — skip here
+                  return false;
+                } else {
+                  serviceNpcNodes.push(node);
+                }
+                return true;
+              };
+
+              // Classify game-entity NPCs
               for (const npc of ge.npcs) {
-                // Check manifest for category
                 const manifestNpc = manifests.npcs.find(
                   (m) => m.id === npc.entityId,
                 );
                 const category = manifestNpc?.category;
-
                 if (category === "mob") {
                   mobNpcs.push(npc);
                 } else if (category === "boss") {
                   bossNpcs.push(npc);
-                } else if (
-                  npc.npcType === "quest_giver" ||
-                  category === "quest"
-                ) {
-                  questNpcs.push(npc);
-                } else if (
-                  npc.storeId ||
-                  (npc.npcType && SHOP_NPC_TYPES.has(npc.npcType))
-                ) {
-                  shopkeepers.push(npc);
-                } else if (npc.npcType && SERVICE_NPC_TYPES.has(npc.npcType)) {
-                  serviceNpcs.push(npc);
                 } else {
-                  // Neutral NPCs without specific role → service
-                  serviceNpcs.push(npc);
+                  classifyNpc(
+                    npc.entityId,
+                    npc.npcType,
+                    npc.storeId,
+                    makeNpcNode(npc),
+                  );
+                }
+              }
+
+              // Classify placed NPCs (from Entity Palette) using the same manifest lookup
+              for (const npc of ext.npcs) {
+                const manifestNpc = manifests.npcs.find(
+                  (m) => m.id === npc.npcTypeId,
+                );
+                const category = manifestNpc?.category;
+                const node: HierarchyNode = {
+                  id: `npc-${npc.id}`,
+                  label: npc.name,
+                  type: "npc" as const,
+                  children: [],
+                  dataId: npc.id,
+                  expandable: false,
+                  metadata: { npcTypeId: npc.npcTypeId },
+                };
+                if (category === "mob" || category === "boss") {
+                  // Placed mob/boss NPCs go into creatures as mob spawn equivalents
+                  extMobSpawnNodes.push(node);
+                } else {
+                  classifyNpc(npc.npcTypeId, undefined, undefined, node);
                 }
               }
 
@@ -2836,40 +2846,42 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
                 return nodes;
               };
 
-              // Build Characters section
+              // Build Characters section (game entities + placed NPCs, unified)
               const charactersChildren: HierarchyNode[] = [];
-              if (questNpcs.length > 0) {
+              if (questNpcNodes.length > 0) {
                 charactersChildren.push({
                   id: "game-quest-npcs",
                   label: "Quest Givers",
                   type: "gameQuestNpcs" as const,
-                  children: questNpcs.map(makeNpcNode),
-                  badge: questNpcs.length,
+                  children: questNpcNodes,
+                  badge: questNpcNodes.length,
                   expandable: true,
                 });
               }
-              if (shopkeepers.length > 0) {
+              if (shopkeeperNodes.length > 0) {
                 charactersChildren.push({
                   id: "game-shopkeepers",
                   label: "Shopkeepers",
                   type: "gameShopkeepers" as const,
-                  children: shopkeepers.map(makeNpcNode),
-                  badge: shopkeepers.length,
+                  children: shopkeeperNodes,
+                  badge: shopkeeperNodes.length,
                   expandable: true,
                 });
               }
-              if (serviceNpcs.length > 0) {
+              if (serviceNpcNodes.length > 0) {
                 charactersChildren.push({
                   id: "game-service-npcs",
                   label: "Service NPCs",
                   type: "gameServiceNpcs" as const,
-                  children: serviceNpcs.map(makeNpcNode),
-                  badge: serviceNpcs.length,
+                  children: serviceNpcNodes,
+                  badge: serviceNpcNodes.length,
                   expandable: true,
                 });
               }
               const totalCharacters =
-                questNpcs.length + shopkeepers.length + serviceNpcs.length;
+                questNpcNodes.length +
+                shopkeeperNodes.length +
+                serviceNpcNodes.length;
 
               // Build Creatures section (mobs + bosses with nested spawns)
               const mobNodes = buildMobNodes(mobNpcs);
@@ -2895,8 +2907,32 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
                   expandable: true,
                 });
               }
+              // Add placed mob spawns directly into Mobs section
+              if (extMobSpawnNodes.length > 0) {
+                // Find or create the Mobs sub-folder to add placed spawns into
+                const mobsFolder = creaturesChildren.find(
+                  (c) => c.id === "game-mobs",
+                );
+                if (mobsFolder) {
+                  mobsFolder.children.push(...extMobSpawnNodes);
+                  mobsFolder.badge =
+                    (mobsFolder.badge ?? 0) + extMobSpawnNodes.length;
+                } else {
+                  creaturesChildren.push({
+                    id: "game-mobs",
+                    label: "Mobs",
+                    type: "gameMobs" as const,
+                    children: extMobSpawnNodes,
+                    badge: extMobSpawnNodes.length,
+                    expandable: true,
+                  });
+                }
+              }
               const totalCreatures =
-                mobNpcs.length + bossNpcs.length + ge.mobSpawns.length;
+                mobNpcs.length +
+                bossNpcs.length +
+                ge.mobSpawns.length +
+                extMobSpawnNodes.length;
 
               // --- Classify Stations ---
               const CRAFTING_STATION_TYPES = new Set([
@@ -2968,6 +3004,73 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
                   expandable: true,
                 });
               }
+              // Classify placed stations into the same Crafting/Services/Other buckets
+              for (const s of ext.stations) {
+                const node: HierarchyNode = {
+                  id: `station-${s.id}`,
+                  label: s.name,
+                  type: "station" as const,
+                  children: [],
+                  dataId: s.id,
+                  expandable: false,
+                  metadata: { stationType: s.stationType },
+                };
+                if (
+                  s.stationType &&
+                  CRAFTING_STATION_TYPES.has(s.stationType)
+                ) {
+                  const folder = stationsChildren.find(
+                    (c) => c.id === "game-crafting-stations",
+                  );
+                  if (folder) {
+                    folder.children.push(node);
+                    folder.badge = (folder.badge ?? 0) + 1;
+                  } else
+                    stationsChildren.push({
+                      id: "game-crafting-stations",
+                      label: "Crafting",
+                      type: "gameCraftingStations" as const,
+                      children: [node],
+                      badge: 1,
+                      expandable: true,
+                    });
+                } else if (
+                  s.stationType &&
+                  SERVICE_STATION_TYPES.has(s.stationType)
+                ) {
+                  const folder = stationsChildren.find(
+                    (c) => c.id === "game-service-stations",
+                  );
+                  if (folder) {
+                    folder.children.push(node);
+                    folder.badge = (folder.badge ?? 0) + 1;
+                  } else
+                    stationsChildren.push({
+                      id: "game-service-stations",
+                      label: "Services",
+                      type: "gameServiceStations" as const,
+                      children: [node],
+                      badge: 1,
+                      expandable: true,
+                    });
+                } else {
+                  const folder = stationsChildren.find(
+                    (c) => c.id === "game-other-stations",
+                  );
+                  if (folder) {
+                    folder.children.push(node);
+                    folder.badge = (folder.badge ?? 0) + 1;
+                  } else
+                    stationsChildren.push({
+                      id: "game-other-stations",
+                      label: "Other",
+                      type: "gameOtherStations" as const,
+                      children: [node],
+                      badge: 1,
+                      expandable: true,
+                    });
+                }
+              }
 
               // --- Classify Resources ---
               const miningResources = ge.resources.filter(
@@ -3034,6 +3137,56 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
                   expandable: true,
                 });
               }
+              // Classify placed resources into Mining/Woodcutting/Fishing/Other
+              for (const r of ext.resources) {
+                const node: HierarchyNode = {
+                  id: `resource-${r.id}`,
+                  label: r.name,
+                  type: "resource" as const,
+                  children: [],
+                  dataId: r.id,
+                  expandable: false,
+                  metadata: { resourceType: r.resourceType },
+                };
+                const addToFolder = (
+                  folderId: string,
+                  label: string,
+                  type: string,
+                ) => {
+                  const folder = resourcesChildren.find(
+                    (c) => c.id === folderId,
+                  );
+                  if (folder) {
+                    folder.children.push(node);
+                    folder.badge = (folder.badge ?? 0) + 1;
+                  } else
+                    resourcesChildren.push({
+                      id: folderId,
+                      label,
+                      type: type as never,
+                      children: [node],
+                      badge: 1,
+                      expandable: true,
+                    });
+                };
+                if (r.resourceType === "mining") {
+                  addToFolder("game-mining-resources", "Mining", "gameMining");
+                } else if (r.resourceType === "woodcutting") {
+                  addToFolder(
+                    "game-woodcutting-resources",
+                    "Woodcutting",
+                    "gameWoodcutting",
+                  );
+                } else if (r.resourceType === "fishing") {
+                  addToFolder("game-fishing", "Fishing", "gameFishing");
+                } else {
+                  addToFolder(
+                    "game-other-resources",
+                    "Other",
+                    "gameOtherResources",
+                  );
+                }
+              }
 
               // Build top-level Game Entities node
               const gameChildren: HierarchyNode[] = [];
@@ -3057,23 +3210,30 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
                   expandable: true,
                 });
               }
-              if (ge.stations.length > 0) {
+              if (ge.stations.length > 0 || ext.stations.length > 0) {
                 gameChildren.push({
                   id: "game-stations",
                   label: "Stations",
                   type: "gameStations" as const,
                   children: stationsChildren,
-                  badge: ge.stations.length,
+                  badge: ge.stations.length + ext.stations.length,
                   expandable: true,
                 });
               }
-              if (ge.resources.length > 0 || ge.fishingSpots > 0) {
+              if (
+                ge.resources.length > 0 ||
+                ge.fishingSpots > 0 ||
+                ext.resources.length > 0
+              ) {
                 gameChildren.push({
                   id: "game-resources",
                   label: "Resources",
                   type: "gameResources" as const,
                   children: resourcesChildren,
-                  badge: ge.resources.length + ge.fishingSpots,
+                  badge:
+                    ge.resources.length +
+                    ge.fishingSpots +
+                    ext.resources.length,
                   expandable: true,
                 });
               }
