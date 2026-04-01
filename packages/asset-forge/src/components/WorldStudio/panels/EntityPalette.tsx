@@ -38,6 +38,7 @@ import React, { useMemo, useState, useCallback } from "react";
 
 import type { PaletteCategory, PaletteItem } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
+import { EntityThumbnail } from "./EntityThumbnail";
 
 /** Category display config */
 interface CategoryConfig {
@@ -649,6 +650,13 @@ function PaletteItemRow({
       onDragStart={onDragStart}
       title={item.description}
     >
+      <div className="w-6 h-6 rounded bg-bg-tertiary overflow-hidden flex-shrink-0">
+        <EntityThumbnail
+          category={item.category}
+          templateId={item.id}
+          className="w-full h-full"
+        />
+      </div>
       <div className="flex-1 min-w-0">
         <div className="text-xs text-text-primary truncate">{item.name}</div>
         {item.levelRequired != null && item.levelRequired > 1 && (
@@ -700,11 +708,13 @@ function PaletteItemCard({
       onDragStart={onDragStart}
       title={item.description}
     >
-      {/* Placeholder thumbnail area */}
-      <div className="w-full aspect-square rounded bg-bg-tertiary flex items-center justify-center mb-1.5">
-        <span className="text-lg text-text-tertiary/40">
-          {item.name.charAt(0).toUpperCase()}
-        </span>
+      {/* 3D model thumbnail */}
+      <div className="w-full aspect-square rounded bg-bg-tertiary flex items-center justify-center mb-1.5 overflow-hidden">
+        <EntityThumbnail
+          category={item.category}
+          templateId={item.id}
+          className="w-full h-full"
+        />
       </div>
       <span className="text-[10px] text-text-primary text-center truncate w-full leading-tight">
         {item.name}

@@ -232,8 +232,9 @@ export function usePlacementConfirmation() {
       commandHistory.execute(cmd);
     }
 
-    // Clear placement (allow starting a new one)
-    actions.cancelPlacement();
+    // Restart placement with the same template for rapid placement
+    // (UE5-style: place one, immediately ready to place another)
+    actions.startPlacement(category, templateId, templateName);
   }, [activePlacement, actions]);
 
   // Reset processed flag when placement changes
