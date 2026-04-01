@@ -744,6 +744,7 @@ export {
   type ColorblindMode,
   type ColorOverrides,
   type AccessibilitySettings,
+  type FontSizeOption,
 } from "./types/interface/accessibility";
 
 // UI complexity mode types and constants
@@ -751,6 +752,7 @@ export {
   COMPLEXITY_MODE_CONFIGS,
   DEFAULT_PROGRESSION_THRESHOLDS,
   type ComplexityMode,
+  type ComplexityFeatures,
   type ComplexityModeConfig,
   type ProgressionThresholds,
 } from "./types/interface/complexity";

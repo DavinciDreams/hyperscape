@@ -1339,3 +1339,30 @@ export type {
   CullingGroup,
   FrustumData,
 } from "./utils/compute";
+
+// Accessibility types and constants (OSRS-accurate colorblind palettes)
+export {
+  COLORBLIND_PALETTES,
+  FONT_SIZE_SCALE,
+  DEFAULT_ACCESSIBILITY_SETTINGS,
+  type ColorblindMode,
+  type ColorOverrides,
+  type AccessibilitySettings,
+  type FontSizeOption,
+} from "./types/interface/accessibility";
+
+// UI complexity mode types and constants
+export {
+  COMPLEXITY_MODE_CONFIGS,
+  DEFAULT_PROGRESSION_THRESHOLDS,
+  type ComplexityMode,
+  type ComplexityFeatures,
+  type ComplexityModeConfig,
+  type ProgressionThresholds,
+} from "./types/interface/complexity";
+
+// Combat level color utilities (OSRS-accurate threat coloring)
+export {
+  getCombatLevelColor,
+  getCombatLevelDescription,
+} from "./systems/client/interaction/utils/combatLevelColor";
