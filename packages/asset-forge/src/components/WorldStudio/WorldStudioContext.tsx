@@ -2382,7 +2382,8 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
 
     // Extended layer children (entities with viewport presence)
     const ext = state.extendedLayers;
-    const extendedLayersChildren: HierarchyNode[] = [
+    // Extended layer children — only show folders that have entities placed
+    const extendedLayersDefs: HierarchyNode[] = [
       {
         id: "layer-spawn-points",
         label: "Spawn Points",
@@ -2496,6 +2497,9 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         expandable: ext.waterBodies.length > 0,
       },
     ];
+    const extendedLayersChildren = extendedLayersDefs.filter(
+      (node) => node.children.length > 0,
+    );
 
     // Build audio layer children
     const audio = state.audioLayers;
