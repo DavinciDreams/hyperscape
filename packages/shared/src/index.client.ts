@@ -264,6 +264,8 @@ export { NodeClient } from "./systems/client/NodeClient";
 // Environment system works in both browser and Node contexts
 export { Node } from "./nodes/Node";
 // Re-export commonly used node classes to satisfy API extractor
+// @internal — These are engine-internal 3D UI nodes using Yoga layout.
+// Client UI uses React/CSS, not these canvas-based nodes.
 export { UI } from "./nodes/UI";
 export { UIView } from "./nodes/UIView";
 export { UIText } from "./nodes/UIText";
@@ -438,7 +440,8 @@ export type {
   EquipmentSlot,
 } from "./types/core/core";
 export type { Physics as PhysicsInterface } from "./types/index";
-// Re-export UI-related types used by UIView/UIText/UI
+// @internal — UI node types for engine-internal 3D UI system (Yoga layout).
+// Client UI uses React/CSS, not these types.
 export type {
   UIData,
   UIViewData,
