@@ -196,7 +196,7 @@ export function EntityPalette() {
         id: t.id,
         name: t.name,
         category: "resources-woodcutting" as PaletteCategory,
-        modelPath: t.modelVariants[0] || undefined,
+        modelPath: t.modelVariants?.[0] || undefined,
         description: t.examine,
         levelRequired: t.levelRequired,
         manifestData: { ...t } as unknown as Record<string, unknown>,
