@@ -313,7 +313,7 @@ export function RecipeEditor({ recipe }: { recipe: ManifestRecipe }) {
       />
       <TextInput
         label="Output"
-        value={recipe.output}
+        value={recipe.output ?? ""}
         onChange={(output) => update({ output })}
       />
       <NumberInput

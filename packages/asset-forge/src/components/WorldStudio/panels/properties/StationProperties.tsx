@@ -122,7 +122,7 @@ export function StationProperties({ station }: Props) {
                 key={recipe.id}
                 className="flex items-center gap-1 pl-2 py-0.5"
               >
-                <ItemReference itemId={recipe.output} />
+                <ItemReference itemId={recipe.output ?? recipe.id} />
                 <span className="text-[10px] text-text-tertiary">
                   Lv{recipe.level} · {recipe.xp}xp
                 </span>

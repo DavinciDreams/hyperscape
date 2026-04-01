@@ -702,7 +702,8 @@ export interface ManifestAmmunition {
 export interface ManifestRecipe {
   id: string;
   skill: string;
-  output: string;
+  /** Output item ID. Undefined for XP-only skills like firemaking. */
+  output?: string;
   inputs: Array<{ itemId: string; quantity: number }>;
   level: number;
   xp: number;

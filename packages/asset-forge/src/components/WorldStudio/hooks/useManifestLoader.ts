@@ -418,12 +418,22 @@ interface RawRecipeEntry {
   output?: string;
   raw?: string;
   cooked?: string;
-  level: number;
-  xp: number;
+  level?: number;
+  levelRequired?: number;
+  xp?: number;
+  xpPerEssence?: number;
   ticks?: number;
   category?: string;
   bar?: string;
   barsRequired?: number;
+  runeItemId?: string;
+  runeType?: string;
+  essenceTypes?: string[];
+  log?: string;
+  input?: string;
+  inputs?: Array<{ item: string; amount: number }>;
+  cost?: number;
+  name?: string;
   [key: string]: unknown;
 }
 
@@ -432,18 +442,51 @@ function mapRecipes(
   raw: { recipes?: RawRecipeEntry[] },
 ): ManifestRecipe[] {
   return (raw.recipes ?? []).map((r, idx) => {
-    const output = r.output ?? r.cooked ?? `${skill}_output_${idx}`;
+    // Resolve output item ID — each skill uses different field names
+    let output: string | undefined;
     const inputs: Array<{ itemId: string; quantity: number }> = [];
+
+    if (r.output) {
+      // smithing, crafting, fletching, smelting, tanning
+      output = r.output;
+    } else if (r.cooked) {
+      // cooking
+      output = r.cooked;
+    } else if (r.runeItemId) {
+      // runecrafting — output is the rune, inputs are essence
+      output = r.runeItemId;
+      if (r.essenceTypes) {
+        inputs.push({ itemId: r.essenceTypes[0], quantity: 1 });
+      }
+    } else if (r.log) {
+      // firemaking — consumes log, no item output (XP only)
+      output = undefined;
+      inputs.push({ itemId: r.log, quantity: 1 });
+    }
+
+    // Build inputs from skill-specific fields
     if (r.bar) inputs.push({ itemId: r.bar, quantity: r.barsRequired ?? 1 });
     if (r.raw) inputs.push({ itemId: r.raw, quantity: 1 });
+    if (r.input) inputs.push({ itemId: r.input, quantity: 1 });
+    if (r.inputs) {
+      for (const inp of r.inputs) {
+        inputs.push({ itemId: inp.item, quantity: inp.amount });
+      }
+    }
+
+    const level = r.level ?? r.levelRequired ?? 1;
+    const xp = r.xp ?? r.xpPerEssence ?? 0;
+    const id = output
+      ? `${skill}_${output}_${idx}`
+      : `${skill}_${r.log ?? r.runeType ?? idx}_${idx}`;
 
     return {
-      id: `${skill}_${output}_${idx}`,
+      id,
       skill,
       output,
       inputs,
-      level: r.level,
-      xp: r.xp,
+      level,
+      xp,
       ticks: r.ticks,
       category: r.category,
       _raw: r as Record<string, unknown>,

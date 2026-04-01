@@ -207,7 +207,7 @@ export function useManifestValidation(): ManifestValidationIssue[] {
           issues.push({
             manifest: `recipes/${recipe.skill}`,
             entryId: recipe.id,
-            entryName: recipe.output,
+            entryName: recipe.output ?? recipe.id,
             field: "inputs.itemId",
             value: input.itemId,
             expected: "valid item ID",
