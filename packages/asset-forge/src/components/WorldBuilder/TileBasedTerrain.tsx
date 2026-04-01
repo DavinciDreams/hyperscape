@@ -281,6 +281,8 @@ export interface TileBasedTerrainProps {
   flyModeEnabled?: boolean;
   /** Called when fly mode state changes */
   onFlyModeChange?: (enabled: boolean) => void;
+  /** Called when camera move speed changes (scroll wheel or [ ] keys) */
+  onMoveSpeedChange?: (speed: number) => void;
   /** Pre-generated road network (uses actual pathfinding data) */
   roads?: GeneratedRoad[];
   /** Called when scene is ready, exposes refs for editing tool integration */
@@ -1194,6 +1196,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   showVegetation = false,
   flyModeEnabled = false,
   onFlyModeChange,
+  onMoveSpeedChange,
   roads: providedRoads,
   onSceneReady,
   hideBuiltinOverlays = false,
@@ -1261,6 +1264,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const rmbHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** True if fly mode was activated during this RMB session (for context menu suppression) */
   const rmbDidFlyRef = useRef(false);
+  /** Skip the first N mouse-move events after entering fly mode — macOS pointer lock
+   *  produces a bogus large movementY on the first event, snapping the camera down. */
+  const flySkipMovesRef = useRef(0);
+  /** Deferred orbit controls creation — wait N frames after fly-exit for all
+   *  pointer-lock cursor-jump events to settle before creating OrbitControls. */
+  const pendingOrbitCreateRef = useRef(0);
 
   // Performance: track whether we're in World Studio mode via ref
   // (avoids adding hideBuiltinOverlays to callback dep arrays)
@@ -1603,6 +1612,68 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     tileResolution,
   ]);
 
+  // Create a fresh OrbitControls synced to the current camera position.
+  // Called from the animation loop AFTER pointer-lock events have settled.
+  //
+  // IMPORTANT: OrbitControls constructor internally calls this.update() with
+  // target=(0,0,0), which calls camera.lookAt(0,0,0) and CORRUPTS the camera
+  // rotation. We save camera state before construction and restore it after.
+  const createOrbitControls = useCallback(() => {
+    const cam = cameraRef.current;
+    const container = containerRef.current;
+    if (!cam || !container) return;
+
+    // Dispose any existing controls (safety — should already be null)
+    if (orbitControlsRef.current) {
+      orbitControlsRef.current.dispose();
+    }
+
+    // --- Save camera state BEFORE OrbitControls constructor corrupts it ---
+    const savedPos = cameraStateRef.current.position.clone();
+    const savedEuler = cameraStateRef.current.euler.clone();
+    const savedQuat = new THREE.Quaternion().setFromEuler(savedEuler);
+
+    // Constructor calls update() → lookAt(0,0,0) → corrupts camera rotation
+    const controls = new OrbitControls(cam, container);
+
+    // --- Restore camera state that constructor corrupted ---
+    cam.position.copy(savedPos);
+    cam.quaternion.copy(savedQuat);
+
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.screenSpacePanning = true;
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT: -1 as THREE.MOUSE, // RMB handled manually for fly mode
+    };
+
+    // Orbit target = 200 units in front of where camera was looking
+    const dir = new THREE.Vector3(0, 0, -1).applyEuler(savedEuler);
+    controls.target.copy(savedPos).add(dir.multiplyScalar(200));
+
+    // Compute safe maxPolarAngle that accommodates current camera angle.
+    // Without this, update() would clamp phi and snap the camera upward.
+    const offset = new THREE.Vector3().subVectors(savedPos, controls.target);
+    const spherical = new THREE.Spherical().setFromVector3(offset);
+    const currentPhi = spherical.phi;
+    controls.maxPolarAngle = Math.max(Math.PI / 2 - 0.05, currentPhi + 0.1);
+
+    // No distance constraints yet — let first update() sync internal state
+    controls.update();
+
+    // Force-restore camera one final time as safety net against update() drift
+    cam.position.copy(savedPos);
+    cam.quaternion.copy(savedQuat);
+
+    // Now apply constraints for future user interactions
+    controls.minDistance = 20;
+    controls.maxDistance = 3000;
+
+    orbitControlsRef.current = controls;
+  }, []);
+
   // Handle camera updates — fly mode (pointer lock) or orbit controls
   const updateCamera = useCallback(
     (deltaTime: number) => {
@@ -1666,14 +1737,21 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
         camera.position.copy(state.position);
         camera.quaternion.setFromEuler(state.euler);
-      } else if (controls) {
-        // Orbit mode: OrbitControls drives the camera, sync state for tile loading
+      } else if (pendingOrbitCreateRef.current > 0) {
+        // Transition: camera holds perfectly still while pointer-lock
+        // cursor-jump events settle. After enough frames, create OrbitControls.
+        pendingOrbitCreateRef.current--;
+        if (pendingOrbitCreateRef.current === 0) {
+          createOrbitControls();
+        }
+      } else if (controls && controls.enabled) {
+        // Orbit mode: OrbitControls drives the camera, sync state for tile loading.
         controls.update();
         state.position.copy(camera.position);
         state.euler.setFromQuaternion(camera.quaternion, "YXZ");
       }
     },
-    [worldSize, tileSize],
+    [worldSize, tileSize, createOrbitControls],
   );
 
   // Shared fly-mode activation (called by hold timer OR drag threshold)
@@ -1681,6 +1759,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     if (rmbFlyActiveRef.current) return;
     rmbFlyActiveRef.current = true;
     rmbDidFlyRef.current = true;
+    // Skip first 2 mouse-move events — macOS pointer lock fires bogus movementY
+    flySkipMovesRef.current = 2;
 
     // Sync euler from current camera orientation
     const cam = cameraRef.current;
@@ -1689,10 +1769,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       cameraStateRef.current.position.copy(cam.position);
     }
 
-    // Disable orbit controls
+    // Destroy orbit controls entirely — when fly mode exits, a fresh instance
+    // is created. This eliminates all stale internal state (damping inertia,
+    // spherical deltas, pan offsets, event listener state).
     const controls = orbitControlsRef.current;
     if (controls) {
-      controls.enabled = false;
+      controls.dispose();
+      orbitControlsRef.current = null;
     }
 
     // Request pointer lock (transient activation from recent mousedown is valid ~5s)
@@ -1708,7 +1791,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       if (isRmbHeldRef.current && !rmbFlyActiveRef.current) {
         const dx = event.clientX - rmbStartPosRef.current.x;
         const dy = event.clientY - rmbStartPosRef.current.y;
-        if (dx * dx + dy * dy > 9) {
+        if (dx * dx + dy * dy > 100) {
           // Cancel hold timer (drag activated first)
           if (rmbHoldTimerRef.current) {
             clearTimeout(rmbHoldTimerRef.current);
@@ -1720,6 +1803,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
 
       if (!rmbFlyActiveRef.current) return;
+
+      // Skip initial events after entering fly mode — macOS pointer lock
+      // produces a bogus large movementY that snaps the camera downward
+      if (flySkipMovesRef.current > 0) {
+        flySkipMovesRef.current--;
+        return;
+      }
 
       const state = cameraStateRef.current;
       const movementX = event.movementX || 0;
@@ -1738,9 +1828,25 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   );
 
   // Handle keyboard input
-  const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    keysRef.current.add(event.code);
-  }, []);
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      keysRef.current.add(event.code);
+
+      // [ / ] keys adjust fly speed (trackpad-friendly alternative to scroll wheel)
+      if (rmbFlyActiveRef.current) {
+        if (event.code === "BracketLeft" || event.code === "BracketRight") {
+          const factor = event.code === "BracketLeft" ? 0.8 : 1.25;
+          const newSpeed = Math.max(
+            20,
+            Math.min(2000, cameraStateRef.current.moveSpeed * factor),
+          );
+          cameraStateRef.current.moveSpeed = newSpeed;
+          onMoveSpeedChange?.(newSpeed);
+        }
+      }
+    },
+    [onMoveSpeedChange],
+  );
 
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
     keysRef.current.delete(event.code);
@@ -2023,13 +2129,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         rmbDidFlyRef.current = false;
         rmbStartPosRef.current = { x: event.clientX, y: event.clientY };
 
-        // Start hold timer — activates fly mode after 150ms even without mouse movement
+        // Start hold timer — activates fly mode after 300ms even without mouse movement.
+        // 300ms is long enough that a quick trackpad two-finger tap registers as a
+        // right-click (context menu) rather than accidentally entering fly mode.
         rmbHoldTimerRef.current = setTimeout(() => {
           rmbHoldTimerRef.current = null;
           if (isRmbHeldRef.current) {
             enterFlyMode();
           }
-        }, 150);
+        }, 300);
       }
     },
     [enterFlyMode],
@@ -2049,25 +2157,20 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         isRmbHeldRef.current = false;
         rmbFlyActiveRef.current = false;
 
+        // Zero out fly velocity so it doesn't bleed into orbit mode
+        cameraStateRef.current.velocity.set(0, 0, 0);
+
         // Exit pointer lock if active
         if (document.pointerLockElement) {
           document.exitPointerLock();
         }
 
         if (wasFlying) {
-          // Re-enable orbit controls and sync target
-          const controls = orbitControlsRef.current;
-          const cam = cameraRef.current;
-          if (controls && cam) {
-            // Set orbit target 200 units in front of camera
-            const dir = new THREE.Vector3(0, 0, -1).applyEuler(
-              cameraStateRef.current.euler,
-            );
-            controls.target.copy(cam.position).add(dir.multiplyScalar(200));
-            controls.target.y = Math.max(0, controls.target.y);
-            controls.enabled = true;
-            controls.update();
-          }
+          // Don't create OrbitControls now — pointer lock exit is async and
+          // the browser will fire cursor-jump mousemove events. Defer creation
+          // by 5 frames in the animation loop so all events settle first.
+          // Camera holds perfectly still during those frames.
+          pendingOrbitCreateRef.current = 5;
 
           onFlyModeChange?.(false);
         } else {
@@ -2080,18 +2183,23 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   );
 
   // Handle scroll wheel — speed adjustment during fly, zoom in orbit
-  const handleWheel = useCallback((event: WheelEvent) => {
-    if (rmbFlyActiveRef.current) {
-      // During fly: adjust moveSpeed (persists across sessions)
-      event.preventDefault();
-      const factor = event.deltaY > 0 ? 0.8 : 1.25; // 20% steps
-      cameraStateRef.current.moveSpeed = Math.max(
-        20,
-        Math.min(2000, cameraStateRef.current.moveSpeed * factor),
-      );
-    }
-    // In orbit mode: OrbitControls handles zoom automatically
-  }, []);
+  const handleWheel = useCallback(
+    (event: WheelEvent) => {
+      if (rmbFlyActiveRef.current) {
+        // During fly: adjust moveSpeed (persists across sessions)
+        event.preventDefault();
+        const factor = event.deltaY > 0 ? 0.8 : 1.25; // 20% steps
+        const newSpeed = Math.max(
+          20,
+          Math.min(2000, cameraStateRef.current.moveSpeed * factor),
+        );
+        cameraStateRef.current.moveSpeed = newSpeed;
+        onMoveSpeedChange?.(newSpeed);
+      }
+      // In orbit mode: OrbitControls handles zoom automatically
+    },
+    [onMoveSpeedChange],
+  );
 
   // Always suppress native + React contextmenu from the viewport.
   // On macOS, contextmenu fires on mousedown (before fly mode can activate).
@@ -2110,18 +2218,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     if (!isPointerLockedRef.current && rmbFlyActiveRef.current) {
       isRmbHeldRef.current = false;
       rmbFlyActiveRef.current = false;
+      cameraStateRef.current.velocity.set(0, 0, 0);
 
-      const controls = orbitControlsRef.current;
-      const cam = cameraRef.current;
-      if (controls && cam) {
-        const dir = new THREE.Vector3(0, 0, -1).applyEuler(
-          cameraStateRef.current.euler,
-        );
-        controls.target.copy(cam.position).add(dir.multiplyScalar(200));
-        controls.target.y = Math.max(0, controls.target.y);
-        controls.enabled = true;
-        controls.update();
-      }
+      // Defer OrbitControls creation (same as handleMouseUp path)
+      pendingOrbitCreateRef.current = 5;
       onFlyModeChange?.(false);
     }
   }, [onFlyModeChange]);

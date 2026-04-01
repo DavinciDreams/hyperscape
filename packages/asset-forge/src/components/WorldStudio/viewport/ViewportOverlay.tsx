@@ -81,6 +81,10 @@ export interface ViewportOverlayProps {
   }>;
   /** Teleport camera to world position */
   onNavigateCamera?: (x: number, z: number) => void;
+  /** Whether the camera is in RMB fly mode */
+  flyMode?: boolean;
+  /** Current camera move speed (m/s) */
+  cameraMoveSpeed?: number;
   onToggleGrid: () => void;
   onToggleSnap: () => void;
   onToggleSurfaceSnap: () => void;
@@ -382,6 +386,7 @@ const CONTROLS_ROWS: Array<[string, string]> = [
   ["WASD", "Move (fly)"],
   ["Q / E", "Down / Up (fly)"],
   ["Scroll (fly)", "Adjust speed"],
+  ["[ / ]", "Speed −/+ (fly)"],
   ["F", "Focus selection"],
   ["W / E / R", "Translate / Rotate / Scale"],
   ["Del", "Delete selection"],
@@ -447,6 +452,8 @@ export function ViewportOverlay({
   roads,
   towns,
   onNavigateCamera,
+  flyMode,
+  cameraMoveSpeed,
   onToggleGrid,
   onToggleSnap,
   onToggleSurfaceSnap,
@@ -619,10 +626,23 @@ export function ViewportOverlay({
 
             <span className="text-white/15 mx-0.5">|</span>
 
+            {/* Fly mode speed */}
+            {flyMode && cameraMoveSpeed != null && (
+              <>
+                <span className="text-sky-400 font-medium">
+                  {Math.round(cameraMoveSpeed)}
+                </span>
+                <span className="text-white/40">m/s</span>
+                <span className="text-white/15 mx-0.5">|</span>
+              </>
+            )}
+
             {/* Active tool */}
             <ToolIcon size={10} className="text-white/50" />
-            <span className="text-white/70">{toolInfo.label}</span>
-            {activeTool === "select" && (
+            <span className="text-white/70">
+              {flyMode ? "Fly" : toolInfo.label}
+            </span>
+            {!flyMode && activeTool === "select" && (
               <span className="text-white/40">{transformMode}</span>
             )}
           </div>

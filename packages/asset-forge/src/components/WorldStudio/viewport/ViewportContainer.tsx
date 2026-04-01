@@ -145,6 +145,10 @@ export function ViewportContainer() {
     total: number;
   } | null>(null);
 
+  // ----- Fly mode state -----
+  const [flyMode, setFlyMode] = useState(false);
+  const [cameraMoveSpeed, setCameraMoveSpeed] = useState(200);
+
   // ----- Context menu -----
   const { contextMenu, showContextMenuAt, hideContextMenu } = useContextMenu();
 
@@ -1119,6 +1123,8 @@ export function ViewportContainer() {
         hideBuiltinOverlays={isEditing}
         onGameEntitiesLoaded={handleGameEntitiesLoaded}
         onViewportContextMenu={handleViewportContextMenu}
+        onFlyModeChange={setFlyMode}
+        onMoveSpeedChange={setCameraMoveSpeed}
       />
       {/* Viewport info overlay (UE5-style corner HUD) */}
       {isEditing && (
@@ -1151,6 +1157,8 @@ export function ViewportContainer() {
           onNavigateCamera={(x, z) =>
             viewportRef.current.navigateCamera?.(x, z)
           }
+          flyMode={flyMode}
+          cameraMoveSpeed={cameraMoveSpeed}
           onToggleGrid={handleGridToggle}
           onToggleSnap={handleSnapToggle}
           onToggleSurfaceSnap={handleSurfaceSnapToggle}
