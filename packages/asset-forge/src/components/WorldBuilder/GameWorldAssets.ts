@@ -577,8 +577,17 @@ export function createBridgeMeshes(
     const endY = getHeight(bridge.endX, bridge.endZ);
     const waterY = Math.min(startY, endY) - 2;
 
+    // Offset bridge positions to render-space (terrain-gen coords → world coords)
+    const offsetBridge: BridgeDef = {
+      ...bridge,
+      startX: bridge.startX + worldCenterOffset,
+      startZ: bridge.startZ + worldCenterOffset,
+      endX: bridge.endX + worldCenterOffset,
+      endZ: bridge.endZ + worldCenterOffset,
+    };
+
     const bridgeGroup = createProceduralBridge(
-      bridge,
+      offsetBridge,
       startY,
       endY,
       waterY,
