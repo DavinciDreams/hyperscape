@@ -7,3 +7,4 @@ export * from "./buttons";
 export * from "./borderRoundRect";
 export * from "./roundRect";
 export * from "./yoga";
+export * from "./imageCache";
