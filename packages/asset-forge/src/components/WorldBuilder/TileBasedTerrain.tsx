@@ -245,6 +245,8 @@ export interface TerrainSceneRefs {
   refreshVegetation: (vegConfig?: VegetationConfig) => Promise<void>;
   /** Teleport camera to a world position. Pass close=true for entity-level zoom. */
   navigateCamera: (x: number, z: number, close?: boolean) => void;
+  /** True if RMB fly mode was used in the current mouse interaction (for context menu suppression) */
+  wasRecentlyFlying: () => boolean;
 }
 
 export interface TileBasedTerrainProps {
@@ -269,6 +271,8 @@ export interface TileBasedTerrainProps {
   hideBuiltinOverlays?: boolean;
   /** Called after game world entities are loaded from the manifest API */
   onGameEntitiesLoaded?: (data: GameEntityData) => void;
+  /** Called on quick RMB click (no fly) with screen coords for context menu */
+  onViewportContextMenu?: (x: number, y: number) => void;
 }
 
 export type { GameEntityData };
@@ -1021,6 +1025,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   onSceneReady,
   hideBuiltinOverlays = false,
   onGameEntitiesLoaded,
+  onViewportContextMenu,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
@@ -1071,6 +1076,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   // Input state
   const keysRef = useRef<Set<string>>(new Set());
   const isPointerLockedRef = useRef(false);
+  // RMB-hold fly mode (UE5-style: hold = fly, quick click = context menu)
+  const isRmbHeldRef = useRef(false);
+  const rmbFlyActiveRef = useRef(false);
+  /** Start position of RMB press — used for drag threshold */
+  const rmbStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  /** Timer ID for hold-to-fly delay */
+  const rmbHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** True if fly mode was activated during this RMB session (for context menu suppression) */
+  const rmbDidFlyRef = useRef(false);
 
   // Performance: track whether we're in World Studio mode via ref
   // (avoids adding hideBuiltinOverlays to callback dep arrays)
@@ -1370,8 +1384,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       if (!camera) return;
 
-      if (isPointerLockedRef.current) {
-        // Fly mode: WASD movement
+      if (rmbFlyActiveRef.current) {
+        // Fly mode: WASD + Q/E movement (UE5-style)
         const forward = new THREE.Vector3(0, 0, -1).applyEuler(state.euler);
         const right = new THREE.Vector3(1, 0, 0).applyEuler(state.euler);
         const up = new THREE.Vector3(0, 1, 0);
@@ -1390,10 +1404,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         if (keys.has("KeyD") || keys.has("ArrowRight")) {
           targetVelocity.add(right);
         }
-        if (keys.has("Space")) {
+        if (keys.has("Space") || keys.has("KeyE")) {
           targetVelocity.add(up);
         }
-        if (keys.has("ShiftLeft") || keys.has("ShiftRight")) {
+        if (
+          keys.has("ShiftLeft") ||
+          keys.has("ShiftRight") ||
+          keys.has("KeyQ")
+        ) {
           targetVelocity.sub(up);
         }
 
@@ -1429,41 +1447,74 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     [worldSize, tileSize],
   );
 
-  // Handle mouse movement for camera look
-  const handleMouseMove = useCallback((event: MouseEvent) => {
-    if (!isPointerLockedRef.current) return;
+  // Shared fly-mode activation (called by hold timer OR drag threshold)
+  const enterFlyMode = useCallback(() => {
+    if (rmbFlyActiveRef.current) return;
+    rmbFlyActiveRef.current = true;
+    rmbDidFlyRef.current = true;
 
-    const state = cameraStateRef.current;
-    const movementX = event.movementX || 0;
-    const movementY = event.movementY || 0;
+    // Sync euler from current camera orientation
+    const cam = cameraRef.current;
+    if (cam) {
+      cameraStateRef.current.euler.setFromQuaternion(cam.quaternion, "YXZ");
+      cameraStateRef.current.position.copy(cam.position);
+    }
 
-    state.euler.y -= movementX * state.lookSpeed;
-    state.euler.x -= movementY * state.lookSpeed;
+    // Disable orbit controls
+    const controls = orbitControlsRef.current;
+    if (controls) {
+      controls.enabled = false;
+    }
 
-    // Clamp vertical rotation
-    state.euler.x = Math.max(
-      -Math.PI / 2,
-      Math.min(Math.PI / 2, state.euler.x),
-    );
-  }, []);
+    // Request pointer lock (transient activation from recent mousedown is valid ~5s)
+    containerRef.current?.requestPointerLock();
+
+    onFlyModeChange?.(true);
+  }, [onFlyModeChange]);
+
+  // Handle mouse movement for camera look + RMB drag threshold
+  const handleMouseMove = useCallback(
+    (event: MouseEvent) => {
+      // Drag threshold to enter fly mode immediately (before hold timer fires)
+      if (isRmbHeldRef.current && !rmbFlyActiveRef.current) {
+        const dx = event.clientX - rmbStartPosRef.current.x;
+        const dy = event.clientY - rmbStartPosRef.current.y;
+        if (dx * dx + dy * dy > 9) {
+          // Cancel hold timer (drag activated first)
+          if (rmbHoldTimerRef.current) {
+            clearTimeout(rmbHoldTimerRef.current);
+            rmbHoldTimerRef.current = null;
+          }
+          enterFlyMode();
+        }
+        return;
+      }
+
+      if (!rmbFlyActiveRef.current) return;
+
+      const state = cameraStateRef.current;
+      const movementX = event.movementX || 0;
+      const movementY = event.movementY || 0;
+
+      state.euler.y -= movementX * state.lookSpeed;
+      state.euler.x -= movementY * state.lookSpeed;
+
+      // Clamp vertical rotation
+      state.euler.x = Math.max(
+        -Math.PI / 2,
+        Math.min(Math.PI / 2, state.euler.x),
+      );
+    },
+    [enterFlyMode],
+  );
 
   // Handle keyboard input
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     keysRef.current.add(event.code);
-
-    // Speed boost with Ctrl
-    if (event.code === "ControlLeft" || event.code === "ControlRight") {
-      cameraStateRef.current.moveSpeed = 600;
-    }
   }, []);
 
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
     keysRef.current.delete(event.code);
-
-    // Reset speed
-    if (event.code === "ControlLeft" || event.code === "ControlRight") {
-      cameraStateRef.current.moveSpeed = 200;
-    }
   }, []);
 
   // Handle viewport click for selection
@@ -1475,18 +1526,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       if (!container || !camera || !scene) return;
 
-      // If pointer is locked (fly mode active), clicking exits fly mode
-      if (isPointerLockedRef.current) {
-        document.exitPointerLock();
-        onFlyModeChange?.(false);
-        return;
-      }
-
-      // If fly mode is enabled but not locked, enter fly mode on click
-      if (flyModeEnabled) {
-        container.requestPointerLock();
-        return;
-      }
+      // During RMB fly mode, ignore LMB clicks for selection
+      if (rmbFlyActiveRef.current) return;
 
       // Selection mode: perform raycast to find what was clicked
       const rect = container.getBoundingClientRect();
@@ -1741,45 +1782,118 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Click on empty space (sky/water) - deselect
       onSelect?.(null);
     },
-    [
-      onSelect,
-      worldSize,
-      tileSize,
-      waterThreshold,
-      flyModeEnabled,
-      onFlyModeChange,
-    ],
+    [onSelect, worldSize, tileSize, waterThreshold],
   );
 
+  // Handle RMB mousedown — start hold timer + drag tracking for fly mode
+  // UE5 behavior: quick click = context menu, hold (~150ms) or drag = fly mode
+  const handleMouseDown = useCallback(
+    (event: MouseEvent) => {
+      if (event.button === 2) {
+        isRmbHeldRef.current = true;
+        rmbDidFlyRef.current = false;
+        rmbStartPosRef.current = { x: event.clientX, y: event.clientY };
+
+        // Start hold timer — activates fly mode after 150ms even without mouse movement
+        rmbHoldTimerRef.current = setTimeout(() => {
+          rmbHoldTimerRef.current = null;
+          if (isRmbHeldRef.current) {
+            enterFlyMode();
+          }
+        }, 150);
+      }
+    },
+    [enterFlyMode],
+  );
+
+  // Handle RMB mouseup — exit fly mode or trigger context menu
+  const handleMouseUp = useCallback(
+    (event: MouseEvent) => {
+      if (event.button === 2 && isRmbHeldRef.current) {
+        // Cancel hold timer if it hasn't fired yet (quick click)
+        if (rmbHoldTimerRef.current) {
+          clearTimeout(rmbHoldTimerRef.current);
+          rmbHoldTimerRef.current = null;
+        }
+
+        const wasFlying = rmbFlyActiveRef.current;
+        isRmbHeldRef.current = false;
+        rmbFlyActiveRef.current = false;
+
+        // Exit pointer lock if active
+        if (document.pointerLockElement) {
+          document.exitPointerLock();
+        }
+
+        if (wasFlying) {
+          // Re-enable orbit controls and sync target
+          const controls = orbitControlsRef.current;
+          const cam = cameraRef.current;
+          if (controls && cam) {
+            // Set orbit target 200 units in front of camera
+            const dir = new THREE.Vector3(0, 0, -1).applyEuler(
+              cameraStateRef.current.euler,
+            );
+            controls.target.copy(cam.position).add(dir.multiplyScalar(200));
+            controls.target.y = Math.max(0, controls.target.y);
+            controls.enabled = true;
+            controls.update();
+          }
+
+          onFlyModeChange?.(false);
+        } else {
+          // Quick click (no fly) — trigger custom context menu
+          onViewportContextMenu?.(event.clientX, event.clientY);
+        }
+      }
+    },
+    [onFlyModeChange, onViewportContextMenu],
+  );
+
+  // Handle scroll wheel — speed adjustment during fly, zoom in orbit
+  const handleWheel = useCallback((event: WheelEvent) => {
+    if (rmbFlyActiveRef.current) {
+      // During fly: adjust moveSpeed (persists across sessions)
+      event.preventDefault();
+      const factor = event.deltaY > 0 ? 0.8 : 1.25; // 20% steps
+      cameraStateRef.current.moveSpeed = Math.max(
+        20,
+        Math.min(2000, cameraStateRef.current.moveSpeed * factor),
+      );
+    }
+    // In orbit mode: OrbitControls handles zoom automatically
+  }, []);
+
+  // Always suppress native + React contextmenu from the viewport.
+  // On macOS, contextmenu fires on mousedown (before fly mode can activate).
+  // Instead, quick-click context menu is triggered manually from handleMouseUp.
+  const handleContextMenu = useCallback((event: MouseEvent) => {
+    if (!containerRef.current?.contains(event.target as Node)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, []);
+
   const handlePointerLockChange = useCallback(() => {
-    const wasLocked = isPointerLockedRef.current;
     isPointerLockedRef.current =
       document.pointerLockElement === containerRef.current;
 
-    const controls = orbitControlsRef.current;
+    // Handle unexpected pointer lock exit (e.g., user pressed Esc while RMB held)
+    if (!isPointerLockedRef.current && rmbFlyActiveRef.current) {
+      isRmbHeldRef.current = false;
+      rmbFlyActiveRef.current = false;
 
-    if (wasLocked && !isPointerLockedRef.current) {
-      // Exiting fly mode → re-enable orbit controls, sync target
-      if (controls) {
-        const cam = cameraRef.current;
-        if (cam) {
-          // Set orbit target 200 units in front of camera
-          const dir = new THREE.Vector3(0, 0, -1).applyEuler(
-            cameraStateRef.current.euler,
-          );
-          controls.target.copy(cam.position).add(dir.multiplyScalar(200));
-          controls.target.y = Math.max(0, controls.target.y);
-        }
+      const controls = orbitControlsRef.current;
+      const cam = cameraRef.current;
+      if (controls && cam) {
+        const dir = new THREE.Vector3(0, 0, -1).applyEuler(
+          cameraStateRef.current.euler,
+        );
+        controls.target.copy(cam.position).add(dir.multiplyScalar(200));
+        controls.target.y = Math.max(0, controls.target.y);
         controls.enabled = true;
         controls.update();
       }
       onFlyModeChange?.(false);
-    } else if (!wasLocked && isPointerLockedRef.current) {
-      // Entering fly mode → disable orbit controls
-      if (controls) {
-        controls.enabled = false;
-      }
-      onFlyModeChange?.(true);
     }
   }, [onFlyModeChange]);
 
@@ -1821,7 +1935,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.PAN,
-      RIGHT: THREE.MOUSE.PAN,
+      RIGHT: -1 as THREE.MOUSE, // RMB handled manually for fly mode
     };
     controls.update();
     orbitControlsRef.current = controls;
@@ -3200,7 +3314,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("keyup", handleKeyUp);
     document.addEventListener("pointerlockchange", handlePointerLockChange);
+    document.addEventListener("mouseup", handleMouseUp);
     container.addEventListener("click", handleClick);
+    container.addEventListener("mousedown", handleMouseDown);
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    document.addEventListener("contextmenu", handleContextMenu, true);
 
     // Async WebGPU renderer initialization
     const initRenderer = async () => {
@@ -3289,27 +3407,27 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         setInteractionMode: (mode: "orbit" | "tool" | "gizmo") => {
           const ctrl = orbitControlsRef.current;
           if (!ctrl) return;
+          // RMB always reserved for fly mode — never assign to OrbitControls
           if (mode === "gizmo") {
             // Transform gizmo active — left free for gizmo handles,
-            // middle click = orbit so user can still rotate the camera,
-            // right click = pan
+            // middle click = orbit so user can still rotate the camera
             ctrl.mouseButtons = {
               LEFT: -1 as THREE.MOUSE,
               MIDDLE: THREE.MOUSE.ROTATE,
-              RIGHT: THREE.MOUSE.PAN,
+              RIGHT: -1 as THREE.MOUSE,
             };
           } else if (mode === "tool") {
             // Brush / placement tool — left free for painting / placing
             ctrl.mouseButtons = {
-              LEFT: -1 as THREE.MOUSE, // no action
+              LEFT: -1 as THREE.MOUSE,
               MIDDLE: THREE.MOUSE.DOLLY,
-              RIGHT: THREE.MOUSE.PAN,
+              RIGHT: -1 as THREE.MOUSE,
             };
           } else {
             ctrl.mouseButtons = {
               LEFT: THREE.MOUSE.ROTATE,
               MIDDLE: THREE.MOUSE.PAN,
-              RIGHT: THREE.MOUSE.PAN,
+              RIGHT: -1 as THREE.MOUSE,
             };
           }
         },
@@ -3594,6 +3712,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             }
           }
         },
+        wasRecentlyFlying: () => {
+          const val = rmbDidFlyRef.current;
+          rmbDidFlyRef.current = false; // Auto-reset on read
+          return val;
+        },
       });
 
       // Animation loop
@@ -3719,7 +3842,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         "pointerlockchange",
         handlePointerLockChange,
       );
+      document.removeEventListener("mouseup", handleMouseUp);
       container.removeEventListener("click", handleClick);
+      container.removeEventListener("mousedown", handleMouseDown);
+      container.removeEventListener("wheel", handleWheel);
+      document.removeEventListener("contextmenu", handleContextMenu, true);
 
       cancelAnimationFrame(currentAnimationId.current);
 
@@ -3834,6 +3961,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     handleKeyUp,
     handlePointerLockChange,
     handleClick,
+    handleMouseDown,
+    handleMouseUp,
+    handleWheel,
+    handleContextMenu,
     updateCamera,
     updateTiles,
     showVegetation,
@@ -4043,8 +4174,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     if (now - lastHoverRaycastRef.current < 66) return; // ~15fps throttle
     lastHoverRaycastRef.current = now;
 
-    if (isPointerLockedRef.current) {
-      // Hide previous hover label
+    if (rmbFlyActiveRef.current) {
+      // Hide previous hover label during fly mode
       if (hoveredSelectableRef.current) {
         for (const child of hoveredSelectableRef.current.children) {
           if (child.userData?.isLabel) child.visible = false;
@@ -4166,41 +4297,29 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       {/* ---- Built-in HUD (hidden when World Studio provides its own overlay) ---- */}
       {!hideBuiltinOverlays && (
         <>
-          {/* Fly mode controls overlay */}
-          {(flyModeEnabled || isFlyModeActive) && (
-            <div
-              className={`absolute top-4 left-4 rounded-lg p-3 text-xs pointer-events-none transition-colors ${
-                isFlyModeActive
-                  ? "bg-blue-500/20 border border-blue-500/50 text-blue-200"
-                  : "bg-bg-secondary/90 text-text-secondary"
-              }`}
-            >
-              <div className="font-semibold text-text-primary mb-2 flex items-center gap-2">
-                {isFlyModeActive ? "Fly Mode Active" : "Fly Mode Ready"}
+          {/* UE5-style camera controls overlay */}
+          {isFlyModeActive ? (
+            <div className="absolute top-4 left-4 rounded-lg p-3 text-xs pointer-events-none bg-blue-500/20 border border-blue-500/50 text-blue-200">
+              <div className="font-semibold text-text-primary mb-2">
+                Fly Mode
               </div>
-              {isFlyModeActive ? (
-                <>
-                  <div>WASD / Arrows - Move</div>
-                  <div>Space / Shift - Up / Down</div>
-                  <div>Ctrl - Speed boost</div>
-                  <div className="text-yellow-300 mt-1">
-                    Press Esc or Click to exit
-                  </div>
-                </>
-              ) : (
-                <div>Click anywhere to enter fly mode</div>
-              )}
+              <div>WASD — Move</div>
+              <div>Q / E — Down / Up</div>
+              <div>
+                Scroll — Speed ({Math.round(cameraStateRef.current.moveSpeed)})
+              </div>
+              <div className="text-text-muted mt-1">Release RMB to exit</div>
             </div>
-          )}
-
-          {/* Selection mode indicator */}
-          {!flyModeEnabled && !isFlyModeActive && (
+          ) : (
             <div className="absolute top-4 left-4 bg-bg-secondary/90 rounded-lg p-3 text-xs text-text-secondary pointer-events-none">
               <div className="font-semibold text-text-primary mb-2">
-                Selection Mode
+                Viewport Controls
               </div>
-              <div>Click terrain, towns, or buildings to select</div>
-              <div>Enable Fly Mode from toolbar for camera control</div>
+              <div>LMB Drag — Orbit</div>
+              <div>MMB Drag — Pan</div>
+              <div>Scroll — Zoom</div>
+              <div>RMB Hold — Fly mode</div>
+              <div>F — Focus selection</div>
             </div>
           )}
 
@@ -4252,7 +4371,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           </div>
 
           {/* Hover tooltip */}
-          {hoveredObject && !isPointerLockedRef.current && (
+          {hoveredObject && !rmbFlyActiveRef.current && (
             <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-bg-primary/95 border border-border-primary rounded-lg px-3 py-2 text-sm text-text-primary pointer-events-none shadow-lg">
               {hoveredObject}
               <span className="text-text-muted ml-2">(click to select)</span>

@@ -44,5 +44,15 @@ export function useContextMenu() {
     setContextMenu((prev) => ({ ...prev, visible: false }));
   }, []);
 
-  return { contextMenu, showContextMenu, hideContextMenu } as const;
+  /** Show context menu at specific screen coordinates (no event needed). */
+  const showContextMenuAt = useCallback((x: number, y: number) => {
+    setContextMenu({ visible: true, position: { x, y } });
+  }, []);
+
+  return {
+    contextMenu,
+    showContextMenu,
+    showContextMenuAt,
+    hideContextMenu,
+  } as const;
 }

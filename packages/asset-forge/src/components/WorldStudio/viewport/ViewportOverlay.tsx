@@ -29,6 +29,7 @@ import {
   Layers,
   Map,
   X,
+  HelpCircle,
 } from "lucide-react";
 import React, {
   useCallback,
@@ -370,6 +371,62 @@ function useFps(): number {
 }
 
 // ---------------------------------------------------------------------------
+// Controls Help Tooltip — hover to reveal camera/editing shortcuts
+// ---------------------------------------------------------------------------
+
+const CONTROLS_ROWS: Array<[string, string]> = [
+  ["LMB Drag", "Orbit"],
+  ["MMB Drag", "Pan"],
+  ["Scroll", "Zoom"],
+  ["RMB Hold", "Fly mode"],
+  ["WASD", "Move (fly)"],
+  ["Q / E", "Down / Up (fly)"],
+  ["Scroll (fly)", "Adjust speed"],
+  ["F", "Focus selection"],
+  ["W / E / R", "Translate / Rotate / Scale"],
+  ["Del", "Delete selection"],
+];
+
+function ControlsTooltip() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        className={`${CHIP_BTN_OFF} text-[10px]`}
+        title="Camera & Editing Controls"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <HelpCircle size={10} />
+      </button>
+
+      {open && (
+        <div className="absolute bottom-full right-0 mb-1.5 bg-black/90 backdrop-blur-md rounded-lg border border-white/[0.08] shadow-xl p-2.5 w-52 pointer-events-auto">
+          <div className="text-[9px] text-white/50 uppercase tracking-wider font-medium mb-1.5">
+            Controls
+          </div>
+          <div className="space-y-0.5">
+            {CONTROLS_ROWS.map(([key, action]) => (
+              <div
+                key={key}
+                className="flex items-center justify-between text-[10px]"
+              >
+                <span className="text-white/50 font-medium">{key}</span>
+                <span className="text-white/80">{action}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -521,47 +578,54 @@ export function ViewportOverlay({
           </div>
         </div>
 
-        {/* Bottom-right: status bar */}
-        <div className={CHIP}>
-          {/* FPS */}
-          <span
-            className={`font-semibold ${
-              fps >= 50
-                ? "text-green-400"
-                : fps >= 30
-                  ? "text-amber-400"
-                  : "text-red-400"
-            }`}
-          >
-            {fps}
-          </span>
-          <span className="text-white/40">FPS</span>
+        {/* Bottom-right: status bar + controls help */}
+        <div className="flex items-end gap-1 pointer-events-auto">
+          {/* Controls help tooltip */}
+          <ControlsTooltip />
 
-          <span className="text-white/15 mx-0.5">|</span>
+          <div className={CHIP}>
+            {/* FPS */}
+            <span
+              className={`font-semibold ${
+                fps >= 50
+                  ? "text-green-400"
+                  : fps >= 30
+                    ? "text-amber-400"
+                    : "text-red-400"
+              }`}
+            >
+              {fps}
+            </span>
+            <span className="text-white/40">FPS</span>
 
-          {/* Tile progress (only while loading) */}
-          {tilesLoading && (
-            <>
-              <span className="text-amber-400 font-medium">
-                {tileProgress.loaded}
-              </span>
-              <span className="text-white/40">/{tileProgress.total} tiles</span>
-              <span className="text-white/15 mx-0.5">|</span>
-            </>
-          )}
+            <span className="text-white/15 mx-0.5">|</span>
 
-          {/* Entity count */}
-          <Layers size={9} className="text-white/40" />
-          <span className="text-white/70">{entityCount}</span>
+            {/* Tile progress (only while loading) */}
+            {tilesLoading && (
+              <>
+                <span className="text-amber-400 font-medium">
+                  {tileProgress.loaded}
+                </span>
+                <span className="text-white/40">
+                  /{tileProgress.total} tiles
+                </span>
+                <span className="text-white/15 mx-0.5">|</span>
+              </>
+            )}
 
-          <span className="text-white/15 mx-0.5">|</span>
+            {/* Entity count */}
+            <Layers size={9} className="text-white/40" />
+            <span className="text-white/70">{entityCount}</span>
 
-          {/* Active tool */}
-          <ToolIcon size={10} className="text-white/50" />
-          <span className="text-white/70">{toolInfo.label}</span>
-          {activeTool === "select" && (
-            <span className="text-white/40">{transformMode}</span>
-          )}
+            <span className="text-white/15 mx-0.5">|</span>
+
+            {/* Active tool */}
+            <ToolIcon size={10} className="text-white/50" />
+            <span className="text-white/70">{toolInfo.label}</span>
+            {activeTool === "select" && (
+              <span className="text-white/40">{transformMode}</span>
+            )}
+          </div>
         </div>
       </div>
     </div>

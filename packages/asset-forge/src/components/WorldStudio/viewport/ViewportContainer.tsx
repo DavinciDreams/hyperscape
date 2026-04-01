@@ -144,7 +144,16 @@ export function ViewportContainer() {
   } | null>(null);
 
   // ----- Context menu -----
-  const { contextMenu, showContextMenu, hideContextMenu } = useContextMenu();
+  const { contextMenu, showContextMenuAt, hideContextMenu } = useContextMenu();
+
+  // ----- Viewport context menu from TileBasedTerrain (quick RMB click) -----
+  const handleViewportContextMenu = useCallback(
+    (x: number, y: number) => {
+      if (!isEditing) return;
+      showContextMenuAt(x, y);
+    },
+    [isEditing, showContextMenuAt],
+  );
 
   // ----- Generate Town dialog state -----
   const [townDialogPosition, setTownDialogPosition] = useState<{
@@ -404,8 +413,12 @@ export function ViewportContainer() {
         return;
       if (!isEditing) return;
 
-      // W = translate, E = rotate, R = scale (matches UE5)
+      // During RMB fly mode, WASD/QE/F are used for camera — don't intercept
+      const isInFlyMode = document.pointerLockElement != null;
+
+      // W = translate, E = rotate, R = scale (matches UE5) — only outside fly mode
       if (
+        !isInFlyMode &&
         e.key === "w" &&
         !e.metaKey &&
         !e.ctrlKey &&
@@ -417,6 +430,7 @@ export function ViewportContainer() {
         return;
       }
       if (
+        !isInFlyMode &&
         e.key === "e" &&
         !e.metaKey &&
         !e.ctrlKey &&
@@ -428,6 +442,7 @@ export function ViewportContainer() {
         return;
       }
       if (
+        !isInFlyMode &&
         e.key === "r" &&
         !e.metaKey &&
         !e.ctrlKey &&
@@ -439,8 +454,9 @@ export function ViewportContainer() {
         return;
       }
 
-      // F = focus on selected object
+      // F = focus on selected object — only outside fly mode
       if (
+        !isInFlyMode &&
         e.key === "f" &&
         !e.metaKey &&
         !e.ctrlKey &&
@@ -978,9 +994,6 @@ export function ViewportContainer() {
       className="flex-1 relative bg-bg-primary"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      onContextMenu={(e) => {
-        if (isEditing) showContextMenu(e);
-      }}
     >
       <TileBasedTerrain
         config={config}
@@ -991,6 +1004,7 @@ export function ViewportContainer() {
         onSceneReady={handleSceneReady}
         hideBuiltinOverlays={isEditing}
         onGameEntitiesLoaded={handleGameEntitiesLoaded}
+        onViewportContextMenu={handleViewportContextMenu}
       />
       {/* Viewport info overlay (UE5-style corner HUD) */}
       {isEditing && (
