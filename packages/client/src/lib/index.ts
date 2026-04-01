@@ -20,13 +20,6 @@ export {
   ELIZAOS_API,
 } from "./api-config";
 export {
-  WebSocketManager,
-  createWebSocketManager,
-  ConnectionState,
-  type WebSocketManagerConfig,
-  type WebSocketManagerCallbacks,
-} from "./websocket-manager";
-export {
   withRetry,
   tryWithRetry,
   retryable,
