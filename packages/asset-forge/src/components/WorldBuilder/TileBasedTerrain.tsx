@@ -830,6 +830,161 @@ function distanceToLineSegment(
   return Math.sqrt((px - closestX) ** 2 + (pz - closestZ) ** 2);
 }
 
+// Road colors matching the game's terrain shader (compacted dirt with gravel)
+const ROAD_CENTER_COLOR = new THREE.Color(0.4, 0.333, 0.267); // #665544 — compacted dirt
+const ROAD_EDGE_COLOR = new THREE.Color(0.349, 0.29, 0.239); // #594a3d — road edge
+const ROAD_MAIN_COLOR = new THREE.Color(0.32, 0.24, 0.18); // Darker main roads
+
+/**
+ * Create flat ribbon geometry for a road path that hugs the terrain surface.
+ * Matches the game's flat dirt-path look instead of cylindrical tubes.
+ *
+ * Generates a triangle strip: for each path point, two vertices are placed
+ * perpendicular to the path direction at ±halfWidth. Vertex colors blend
+ * from center (road color) to edge (road edge color) for the soft-edge look.
+ */
+function createRoadRibbonGeometry(
+  pathPoints: THREE.Vector3[],
+  halfWidth: number,
+  isMainRoad: boolean,
+): THREE.BufferGeometry {
+  if (pathPoints.length < 2) return new THREE.BufferGeometry();
+
+  const vertCount = pathPoints.length * 2;
+  const positions = new Float32Array(vertCount * 3);
+  const colors = new Float32Array(vertCount * 3);
+  const indices: number[] = [];
+
+  const centerColor = isMainRoad ? ROAD_MAIN_COLOR : ROAD_CENTER_COLOR;
+  const edgeColor = ROAD_EDGE_COLOR;
+
+  // Temporary vectors
+  const tangent = new THREE.Vector3();
+  const perp = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+
+  for (let i = 0; i < pathPoints.length; i++) {
+    const p = pathPoints[i];
+
+    // Calculate tangent direction (forward along path)
+    if (i < pathPoints.length - 1) {
+      tangent.subVectors(pathPoints[i + 1], p).normalize();
+    }
+    // else keep previous tangent for the last point
+
+    // Perpendicular in the XZ plane (cross tangent with up)
+    perp.crossVectors(tangent, up).normalize();
+
+    // Left and right vertices
+    const li = i * 2; // left vertex index
+    const ri = i * 2 + 1; // right vertex index
+
+    positions[li * 3] = p.x - perp.x * halfWidth;
+    positions[li * 3 + 1] = p.y;
+    positions[li * 3 + 2] = p.z - perp.z * halfWidth;
+
+    positions[ri * 3] = p.x + perp.x * halfWidth;
+    positions[ri * 3 + 1] = p.y;
+    positions[ri * 3 + 2] = p.z + perp.z * halfWidth;
+
+    // Vertex colors: edges slightly darker for soft-edge look
+    colors[li * 3] = edgeColor.r;
+    colors[li * 3 + 1] = edgeColor.g;
+    colors[li * 3 + 2] = edgeColor.b;
+
+    colors[ri * 3] = edgeColor.r;
+    colors[ri * 3 + 1] = edgeColor.g;
+    colors[ri * 3 + 2] = edgeColor.b;
+
+    // Build triangle strip (two triangles per segment)
+    if (i < pathPoints.length - 1) {
+      const bl = li;
+      const br = ri;
+      const tl = (i + 1) * 2;
+      const tr = (i + 1) * 2 + 1;
+      indices.push(bl, br, tl); // first triangle
+      indices.push(br, tr, tl); // second triangle
+    }
+  }
+
+  // Add center vertices for a 3-strip ribbon: edge | center | edge
+  // This gives a flat path with darkened edges like the game shader
+  const centerPositions = new Float32Array(pathPoints.length * 3);
+  const centerColors = new Float32Array(pathPoints.length * 3);
+  for (let i = 0; i < pathPoints.length; i++) {
+    centerPositions[i * 3] = pathPoints[i].x;
+    centerPositions[i * 3 + 1] = pathPoints[i].y;
+    centerPositions[i * 3 + 2] = pathPoints[i].z;
+    centerColors[i * 3] = centerColor.r;
+    centerColors[i * 3 + 1] = centerColor.g;
+    centerColors[i * 3 + 2] = centerColor.b;
+  }
+
+  // Merge: [left edges, right edges, centers]
+  // Rebuild with 3 verts per point: left edge, center, right edge
+  const totalVerts = pathPoints.length * 3;
+  const finalPositions = new Float32Array(totalVerts * 3);
+  const finalColors = new Float32Array(totalVerts * 3);
+  const finalIndices: number[] = [];
+
+  const narrowEdge = halfWidth * 0.15; // Edge band is 15% of half-width on each side
+
+  for (let i = 0; i < pathPoints.length; i++) {
+    const p = pathPoints[i];
+    if (i < pathPoints.length - 1) {
+      tangent.subVectors(pathPoints[i + 1], p).normalize();
+    }
+    perp.crossVectors(tangent, up).normalize();
+
+    const base = i * 3;
+
+    // Left edge vertex
+    finalPositions[base * 3] = p.x - perp.x * halfWidth;
+    finalPositions[base * 3 + 1] = p.y;
+    finalPositions[base * 3 + 2] = p.z - perp.z * halfWidth;
+    finalColors[base * 3] = edgeColor.r;
+    finalColors[base * 3 + 1] = edgeColor.g;
+    finalColors[base * 3 + 2] = edgeColor.b;
+
+    // Center vertex
+    finalPositions[(base + 1) * 3] = p.x;
+    finalPositions[(base + 1) * 3 + 1] = p.y;
+    finalPositions[(base + 1) * 3 + 2] = p.z;
+    finalColors[(base + 1) * 3] = centerColor.r;
+    finalColors[(base + 1) * 3 + 1] = centerColor.g;
+    finalColors[(base + 1) * 3 + 2] = centerColor.b;
+
+    // Right edge vertex
+    finalPositions[(base + 2) * 3] = p.x + perp.x * halfWidth;
+    finalPositions[(base + 2) * 3 + 1] = p.y;
+    finalPositions[(base + 2) * 3 + 2] = p.z + perp.z * halfWidth;
+    finalColors[(base + 2) * 3] = edgeColor.r;
+    finalColors[(base + 2) * 3 + 1] = edgeColor.g;
+    finalColors[(base + 2) * 3 + 2] = edgeColor.b;
+
+    // Triangles: connect left-center-right strips to next row
+    if (i < pathPoints.length - 1) {
+      const nBase = (i + 1) * 3;
+      // Left strip (left edge → center)
+      finalIndices.push(base, base + 1, nBase);
+      finalIndices.push(base + 1, nBase + 1, nBase);
+      // Right strip (center → right edge)
+      finalIndices.push(base + 1, base + 2, nBase + 1);
+      finalIndices.push(base + 2, nBase + 2, nBase + 1);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(finalPositions, 3),
+  );
+  geometry.setAttribute("color", new THREE.BufferAttribute(finalColors, 3));
+  geometry.setIndex(finalIndices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 /**
  * Create water material
  * Uses MeshStandardNodeMaterial for WebGPU compatibility
@@ -2503,19 +2658,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
         // ---- Render inter-town roads from server BFS pathfinding ----
         if (layout.roads.length > 0) {
-          const roadMaterial = new MeshBasicNodeMaterial();
-          roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16);
-          roadMaterial.side = THREE.DoubleSide;
-
-          const mainRoadMaterial = new MeshBasicNodeMaterial();
-          mainRoadMaterial.color = new THREE.Color(0.32, 0.22, 0.12);
-          mainRoadMaterial.side = THREE.DoubleSide;
+          const ribbonMat = new MeshBasicNodeMaterial();
+          ribbonMat.vertexColors = true;
+          ribbonMat.side = THREE.DoubleSide;
 
           for (const road of layout.roads) {
             if (road.path.length < 2) continue;
 
             const roadPoints: THREE.Vector3[] = road.path.map((point) => {
-              const y = getHeight(point.x, point.z) + 0.3;
+              const y = getHeight(point.x, point.z) + 0.15;
               return new THREE.Vector3(
                 point.x + worldCenterOffset,
                 y,
@@ -2524,17 +2675,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             });
 
             const roadWidth = road.isMainRoad ? road.width * 1.2 : road.width;
-            const segments = Math.max(roadPoints.length * 2, 20);
-            const roadCurve = new THREE.CatmullRomCurve3(roadPoints);
-            const roadGeometry = new THREE.TubeGeometry(
-              roadCurve,
-              segments,
+            const roadGeometry = createRoadRibbonGeometry(
+              roadPoints,
               roadWidth / 2,
-              4,
-              false,
+              !!road.isMainRoad,
             );
-            const material = road.isMainRoad ? mainRoadMaterial : roadMaterial;
-            const roadMesh = new THREE.Mesh(roadGeometry, material);
+            const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
             roadMesh.userData = {
               selectable: true,
               selectableType: "road",
@@ -2924,14 +3070,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         console.log("[TileBasedTerrain] ================================");
 
         // Use pre-generated road network with actual pathfinding data
-        // Road colors match terrain dirt colors: dirtBrown (0.45, 0.32, 0.18), dirtDark (0.32, 0.22, 0.12)
-        const roadMaterial = new MeshBasicNodeMaterial();
-        roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16); // Matches dirtBrown
-        roadMaterial.side = THREE.DoubleSide;
-
-        const mainRoadMaterial = new MeshBasicNodeMaterial();
-        mainRoadMaterial.color = new THREE.Color(0.32, 0.22, 0.12); // Matches dirtDark - compacted main roads
-        mainRoadMaterial.side = THREE.DoubleSide;
+        // Flat ribbon geometry matching the game's dirt-path look
+        const ribbonMat = new MeshBasicNodeMaterial();
+        ribbonMat.vertexColors = true;
+        ribbonMat.side = THREE.DoubleSide;
 
         for (const road of providedRoads) {
           if (road.path.length < 2) continue;
@@ -2942,7 +3084,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             const y =
               point.y !== undefined
                 ? point.y
-                : generator.getHeightAt(point.x, point.z) + 0.3;
+                : generator.getHeightAt(point.x, point.z) + 0.15;
             return new THREE.Vector3(
               point.x + worldCenterOffset,
               y,
@@ -2950,23 +3092,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             );
           });
 
-          // Create road as a tube/ribbon with appropriate width
           const roadWidth = road.isMainRoad
             ? (road.width || 4) * 1.2
             : road.width || 4;
-          const segments = Math.max(roadPoints.length * 2, 20);
 
-          const roadCurve = new THREE.CatmullRomCurve3(roadPoints);
-          const roadGeometry = new THREE.TubeGeometry(
-            roadCurve,
-            segments,
-            roadWidth / 2, // radius = half width
-            4,
-            false,
+          const roadGeometry = createRoadRibbonGeometry(
+            roadPoints,
+            roadWidth / 2,
+            !!road.isMainRoad,
           );
-
-          const material = road.isMainRoad ? mainRoadMaterial : roadMaterial;
-          const roadMesh = new THREE.Mesh(roadGeometry, material);
+          const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
           roadMesh.userData = {
             selectable: true,
             selectableType: "road",
@@ -3000,10 +3135,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           "[TileBasedTerrain] No road network data provided, using simplified preview roads",
         );
 
-        // Match terrain dirt colors for roads
-        const roadMaterial = new MeshBasicNodeMaterial();
-        roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16); // Matches dirtBrown
-        roadMaterial.side = THREE.DoubleSide;
+        // Flat ribbon material for fallback roads
+        const ribbonMat = new MeshBasicNodeMaterial();
+        ribbonMat.vertexColors = true;
+        ribbonMat.side = THREE.DoubleSide;
 
         // Create simple road connections between nearby towns
         const connectedPairs = new Set<string>();
@@ -3039,7 +3174,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 town1.position.x + (town2.position.x - town1.position.x) * t;
               const z =
                 town1.position.z + (town2.position.z - town1.position.z) * t;
-              const y = generator.getHeightAt(x, z) + 0.5;
+              const y = generator.getHeightAt(x, z) + 0.15;
 
               roadPoints.push(
                 new THREE.Vector3(
@@ -3050,17 +3185,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               );
             }
 
-            // Create road as a tube/ribbon
             if (roadPoints.length >= 2) {
-              const roadCurve = new THREE.CatmullRomCurve3(roadPoints);
-              const roadGeometry = new THREE.TubeGeometry(
-                roadCurve,
-                steps,
-                4,
-                4,
+              const roadGeometry = createRoadRibbonGeometry(
+                roadPoints,
+                2, // halfWidth = 2m (4m total)
                 false,
               );
-              const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
+              const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
               townMarkers.add(roadMesh);
             }
           }
