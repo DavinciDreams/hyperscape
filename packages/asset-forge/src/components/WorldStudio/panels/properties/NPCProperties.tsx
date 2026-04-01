@@ -116,7 +116,11 @@ export function NPCProperties({ npc }: Props) {
             <InfoRow label="Category" value={manifestNPC.category} />
             <InfoRow
               label="Level Range"
-              value={`${manifestNPC.levelRange[0]}–${manifestNPC.levelRange[1]}`}
+              value={
+                manifestNPC.levelRange
+                  ? `${manifestNPC.levelRange[0]}–${manifestNPC.levelRange[1]}`
+                  : undefined
+              }
             />
             {manifestNPC.services?.enabled && (
               <InfoRow

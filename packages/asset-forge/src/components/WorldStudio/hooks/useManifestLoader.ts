@@ -223,7 +223,7 @@ function mapNPCs(raw: RawNPC[]): ManifestNPC[] {
     name: npc.name,
     description: npc.description,
     category: categorizeNPC(npc),
-    levelRange: npc.levelRange,
+    levelRange: npc.levelRange ?? [1, 1],
     appearance: {
       modelPath: npc.appearance?.modelPath ?? "",
       iconPath: npc.appearance?.iconPath,
