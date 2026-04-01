@@ -90,10 +90,24 @@ const TownStdMat = MeshStandardNodeMaterial;
 // ============== CONSTANTS ==============
 
 const TILE_LOAD_RADIUS = 5; // tiles in each direction from camera (standalone)
-const TILE_LOAD_RADIUS_STUDIO = 3; // reduced for World Studio (49 tiles vs 121)
+const TILE_LOAD_RADIUS_STUDIO = 3; // full-detail radius for World Studio
 const TILE_UNLOAD_RADIUS = 7; // tiles beyond this are unloaded
 const TILE_UNLOAD_RADIUS_STUDIO = 5;
 const MAX_TILES_PER_FRAME = 2; // limit tile generation per frame for performance
+
+// LOD terrain: low-res tiles fill the horizon when zoomed out
+const TILE_LOD_LOW_RESOLUTION = 8; // 8×8 grid for far tiles (vs 32×32 full)
+const MAX_LOW_RES_TILES_PER_FRAME = 8; // low-res tiles are 16× cheaper to generate
+
+/** Compute how many tiles to load based on camera altitude */
+function getDynamicLoadRadius(cameraY: number, isStudio: boolean): number {
+  if (!isStudio) return TILE_LOAD_RADIUS;
+  // Near ground: radius 3 (49 tiles). As altitude increases, scale up.
+  // Y=50→3, Y=200→5, Y=400→8, Y=800→13, Y=1500→20, Y=3000+→40
+  const base = TILE_LOAD_RADIUS_STUDIO;
+  const extra = Math.max(0, cameraY - 50) / 80;
+  return Math.min(50, Math.round(base + extra));
+}
 
 // LOD distances for buildings
 const BUILDING_LOD_FULL_DISTANCE = 200; // Full detail within this distance
@@ -133,6 +147,8 @@ interface TileData {
   tileX: number;
   tileZ: number;
   lastAccessed: number;
+  /** Vertex resolution (e.g. 32 for full, 8 for LOD far tiles) */
+  resolution: number;
 }
 
 interface CameraState {
@@ -1197,6 +1213,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   // Terrain state
   const tilesRef = useRef<Map<string, TileData>>(new Map());
   const templateGeometryRef = useRef<THREE.PlaneGeometry | null>(null);
+  const lowResTemplateGeometryRef = useRef<THREE.PlaneGeometry | null>(null);
   const waterTemplateGeometryRef = useRef<THREE.PlaneGeometry | null>(null);
   const terrainMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
   const waterMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
@@ -1218,7 +1235,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const terrainQuerierRef = useRef<TerrainQuerier | null>(null);
 
   // Tile generation queue + O(1) membership set
-  const tileQueueRef = useRef<Array<{ tileX: number; tileZ: number }>>([]);
+  const tileQueueRef = useRef<
+    Array<{ tileX: number; tileZ: number; resolution: number }>
+  >([]);
   const tileQueueSetRef = useRef<Set<string>>(new Set());
 
   // Camera state for fly controls
@@ -1337,12 +1356,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     return { tileX, tileZ };
   }, [tileSize]);
 
-  // Generate a single tile
+  // Generate a single tile at a given resolution (full or low-res LOD)
   const generateTile = useCallback(
-    (tileX: number, tileZ: number) => {
+    (tileX: number, tileZ: number, resolution?: number) => {
       const scene = sceneRef.current;
       const querier = terrainQuerierRef.current;
-      const template = templateGeometryRef.current;
+      const fullTemplate = templateGeometryRef.current;
+      const lowResTemplate = lowResTemplateGeometryRef.current;
       const terrainMaterial = terrainMaterialRef.current;
       const waterMaterial = waterMaterialRef.current;
       const terrainContainer = terrainContainerRef.current;
@@ -1351,7 +1371,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       if (
         !scene ||
         !querier ||
-        !template ||
+        !fullTemplate ||
         !terrainMaterial ||
         !waterMaterial ||
         !terrainContainer ||
@@ -1361,6 +1381,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       const key = getTileKey(tileX, tileZ);
       if (tilesRef.current.has(key)) return; // Already exists
+
+      // Pick template based on requested resolution
+      const useRes = resolution ?? tileResolution;
+      const isLowRes = lowResTemplate && useRes <= TILE_LOD_LOW_RESOLUTION;
+      const template = isLowRes ? lowResTemplate : fullTemplate;
 
       // Generate tile geometry with road influence support
       const { geometry, hasWater } = generateTileGeometry(
@@ -1376,10 +1401,6 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       );
 
       // Create terrain mesh
-      // NOTE: PlaneGeometry is centered at origin with vertices from -halfTileSize to +halfTileSize.
-      // To align the mesh properly with the tile grid, we offset the position by halfTileSize.
-      // This ensures that the terrain vertex at local (0,0) aligns with the tile center,
-      // which is where centered coordinates map to render coordinates.
       const mesh = new THREE.Mesh(geometry, terrainMaterial);
       const halfTileSizeOffset = tileSize / 2;
       mesh.position.set(
@@ -1416,18 +1437,27 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         waterContainer.add(waterMesh);
       }
 
-      // Store tile data
+      // Store tile data with resolution for LOD upgrade/downgrade
       tilesRef.current.set(key, {
         mesh,
         water: waterMesh,
         tileX,
         tileZ,
         lastAccessed: performance.now(),
+        resolution: useRes,
       });
 
       setLoadedTiles(tilesRef.current.size);
     },
-    [getTileKey, tileSize, waterThreshold, maxHeight, worldSize, providedRoads],
+    [
+      getTileKey,
+      tileSize,
+      tileResolution,
+      waterThreshold,
+      maxHeight,
+      worldSize,
+      providedRoads,
+    ],
   );
 
   // Unload a tile
@@ -1454,32 +1484,56 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     setLoadedTiles(tilesRef.current.size);
   }, []);
 
-  // Update tiles based on camera position
+  // Update tiles based on camera position with two-tier LOD:
+  //   - Near tiles (within fullDetailRadius): full resolution geometry
+  //   - Far tiles (beyond that, up to dynamic farRadius): low-res LOD geometry
   const updateTiles = useCallback(() => {
+    const camera = cameraRef.current;
+    if (!camera) return;
     const { tileX: cameraTileX, tileZ: cameraTileZ } = getCameraTile();
 
-    // Use reduced radius in World Studio for better FPS (49 tiles vs 121)
-    const loadRadius = isStudioModeRef.current
+    const isStudio = isStudioModeRef.current;
+
+    // Full-detail radius stays constant
+    const fullDetailRadius = isStudio
       ? TILE_LOAD_RADIUS_STUDIO
       : TILE_LOAD_RADIUS;
 
-    // Queue tiles to load
-    for (let dx = -loadRadius; dx <= loadRadius; dx++) {
-      for (let dz = -loadRadius; dz <= loadRadius; dz++) {
+    // Far radius scales with camera altitude — covers visible area when zoomed out
+    const farRadius = getDynamicLoadRadius(camera.position.y, isStudio);
+
+    // Unload radius is slightly beyond the far radius
+    const unloadRadius = farRadius + 2;
+
+    // Queue tiles to load across the full dynamic radius
+    for (let dx = -farRadius; dx <= farRadius; dx++) {
+      for (let dz = -farRadius; dz <= farRadius; dz++) {
         const tileX = cameraTileX + dx;
         const tileZ = cameraTileZ + dz;
 
         if (!isInBounds(tileX, tileZ)) continue;
 
         const key = getTileKey(tileX, tileZ);
-        if (tilesRef.current.has(key)) {
-          // Update last accessed time
-          const tile = tilesRef.current.get(key)!;
-          tile.lastAccessed = performance.now();
-        } else if (!tileQueueSetRef.current.has(key)) {
-          // Add to queue (closer tiles first) — O(1) membership check via Set
+        const dist = Math.max(Math.abs(dx), Math.abs(dz)); // Chebyshev distance
+        const wantFullRes = dist <= fullDetailRadius;
+        const wantRes = wantFullRes ? tileResolution : TILE_LOD_LOW_RESOLUTION;
+
+        const existing = tilesRef.current.get(key);
+        if (existing) {
+          existing.lastAccessed = performance.now();
+          // LOD upgrade: tile is low-res but camera moved close enough for full detail
+          if (wantFullRes && existing.resolution <= TILE_LOD_LOW_RESOLUTION) {
+            unloadTile(key);
+            // Falls through to queue for full-res generation
+          } else {
+            continue;
+          }
+        }
+
+        if (!tileQueueSetRef.current.has(key)) {
           tileQueueSetRef.current.add(key);
           const distance = Math.abs(dx) + Math.abs(dz);
+          const entry = { tileX, tileZ, resolution: wantRes };
           const insertIndex = tileQueueRef.current.findIndex(
             (t) =>
               Math.abs(t.tileX - cameraTileX) +
@@ -1487,37 +1541,48 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               distance,
           );
           if (insertIndex === -1) {
-            tileQueueRef.current.push({ tileX, tileZ });
+            tileQueueRef.current.push(entry);
           } else {
-            tileQueueRef.current.splice(insertIndex, 0, { tileX, tileZ });
+            tileQueueRef.current.splice(insertIndex, 0, entry);
           }
         }
       }
     }
 
-    // Process tile queue (limited per frame)
-    let generated = 0;
-    while (tileQueueRef.current.length > 0 && generated < MAX_TILES_PER_FRAME) {
-      const { tileX, tileZ } = tileQueueRef.current.shift()!;
-      const qKey = getTileKey(tileX, tileZ);
+    // Process tile queue with separate budgets for full-res and low-res
+    let fullResGen = 0;
+    let lowResGen = 0;
+    const remaining: typeof tileQueueRef.current = [];
+
+    for (const entry of tileQueueRef.current) {
+      const isFullRes = entry.resolution > TILE_LOD_LOW_RESOLUTION;
+
+      if (isFullRes && fullResGen >= MAX_TILES_PER_FRAME) {
+        remaining.push(entry);
+        continue;
+      }
+      if (!isFullRes && lowResGen >= MAX_LOW_RES_TILES_PER_FRAME) {
+        remaining.push(entry);
+        continue;
+      }
+
+      const qKey = getTileKey(entry.tileX, entry.tileZ);
       tileQueueSetRef.current.delete(qKey);
-      if (isInBounds(tileX, tileZ) && !tilesRef.current.has(qKey)) {
-        generateTile(tileX, tileZ);
-        generated++;
+      if (isInBounds(entry.tileX, entry.tileZ) && !tilesRef.current.has(qKey)) {
+        generateTile(entry.tileX, entry.tileZ, entry.resolution);
+        if (isFullRes) fullResGen++;
+        else lowResGen++;
       }
     }
+    tileQueueRef.current = remaining;
 
-    // Unload distant tiles
+    // Unload tiles beyond dynamic radius
     const now = performance.now();
     for (const [key, tile] of tilesRef.current) {
       const dx = Math.abs(tile.tileX - cameraTileX);
       const dz = Math.abs(tile.tileZ - cameraTileZ);
 
-      const unloadRadius = isStudioModeRef.current
-        ? TILE_UNLOAD_RADIUS_STUDIO
-        : TILE_UNLOAD_RADIUS;
       if (dx > unloadRadius || dz > unloadRadius) {
-        // Only unload if not recently accessed
         if (now - tile.lastAccessed > 1000) {
           unloadTile(key);
         }
@@ -1529,7 +1594,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     setIsGenerating((prev) =>
       prev !== isStillGenerating ? isStillGenerating : prev,
     );
-  }, [getCameraTile, isInBounds, getTileKey, generateTile, unloadTile]);
+  }, [
+    getCameraTile,
+    isInBounds,
+    getTileKey,
+    generateTile,
+    unloadTile,
+    tileResolution,
+  ]);
 
   // Handle camera updates — fly mode (pointer lock) or orbit controls
   const updateCamera = useCallback(
@@ -2274,10 +2346,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     }
     scene.add(sun);
 
-    // Create terrain resources
+    // Create terrain resources (full-res + low-res LOD template)
     templateGeometryRef.current = createTemplateGeometry(
       tileSize,
       tileResolution,
+    );
+    lowResTemplateGeometryRef.current = createTemplateGeometry(
+      tileSize,
+      TILE_LOD_LOW_RESOLUTION,
     );
     const waterTemplate = new THREE.PlaneGeometry(tileSize, tileSize);
     waterTemplate.rotateX(-Math.PI / 2);
@@ -4066,6 +4142,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       // Dispose shared resources
       currentTemplateGeometry.current?.dispose();
+      lowResTemplateGeometryRef.current?.dispose();
       waterTemplateGeometryRef.current?.dispose();
       currentTerrainMaterial.current?.dispose();
       currentWaterMaterial.current?.dispose();
@@ -4159,12 +4236,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       };
     }
 
-    // Update template geometry if resolution changed
+    // Update template geometries if resolution changed
     if (templateGeometryRef.current) {
       templateGeometryRef.current.dispose();
       templateGeometryRef.current = createTemplateGeometry(
         tileSize,
         tileResolution,
+      );
+    }
+    if (lowResTemplateGeometryRef.current) {
+      lowResTemplateGeometryRef.current.dispose();
+      lowResTemplateGeometryRef.current = createTemplateGeometry(
+        tileSize,
+        TILE_LOD_LOW_RESOLUTION,
       );
     }
   }, [
