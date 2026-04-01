@@ -8,6 +8,7 @@
  * - R key → rotate placement 45 degrees
  *
  * Uses TerrainSceneRefs from TileBasedTerrain for raycasting.
+ * Event listeners are registered once per placement session (not per frame).
  */
 
 import * as THREE from "three";
@@ -21,10 +22,13 @@ const ROTATION_STEP = Math.PI / 4; // 45 degree increments
 
 interface PlacementInteractionOptions {
   sceneRefs: TerrainSceneRefs | null;
+  /** When true, snap placement X/Z to the 1m grid */
+  gridSnap: boolean;
 }
 
 export function usePlacementInteraction({
   sceneRefs,
+  gridSnap,
 }: PlacementInteractionOptions) {
   const { state, actions } = useWorldStudio();
   const activePlacement = state.tools.activePlacement;
@@ -35,9 +39,22 @@ export function usePlacementInteraction({
   const sceneRefsRef = useRef(sceneRefs);
   sceneRefsRef.current = sceneRefs;
 
-  // Snap position to grid
-  const snapToGrid = useCallback(
+  // Keep a ref to the current placement for keyboard handler (avoids re-registering listeners)
+  const placementRef = useRef(activePlacement);
+  placementRef.current = activePlacement;
+
+  // Stable ref to actions (doesn't change between renders)
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+
+  // Stable ref for gridSnap so event handlers see latest value without re-registering
+  const gridSnapRef = useRef(gridSnap);
+  gridSnapRef.current = gridSnap;
+
+  // Snap position to grid (conditional)
+  const applySnap = useCallback(
     (x: number, z: number): { x: number; z: number } => {
+      if (!gridSnapRef.current) return { x, z };
       return {
         x: Math.round(x / SNAP_GRID) * SNAP_GRID,
         z: Math.round(z / SNAP_GRID) * SNAP_GRID,
@@ -68,7 +85,7 @@ export function usePlacementInteraction({
         const intersects = raycasterRef.current.intersectObjects(meshes, false);
         if (intersects.length > 0) {
           const point = intersects[0].point;
-          const snapped = snapToGrid(point.x, point.z);
+          const snapped = applySnap(point.x, point.z);
           return { x: snapped.x, y: point.y, z: snapped.z };
         }
       }
@@ -79,76 +96,75 @@ export function usePlacementInteraction({
         intersectionRef.current,
       );
       if (hit) {
-        const snapped = snapToGrid(hit.x, hit.z);
+        const snapped = applySnap(hit.x, hit.z);
         return { x: snapped.x, y: 0, z: snapped.z };
       }
 
       return null;
     },
-    [snapToGrid],
+    [applySnap],
   );
 
-  // Handle mouse move — update ghost position
+  // Derive a stable boolean for whether we're actively placing
+  const isPlacing = !!activePlacement && !activePlacement.confirmed;
+
+  // Single effect that manages ALL placement listeners.
+  // Only re-runs when isPlacing or sceneRefs change — NOT on every position update.
   useEffect(() => {
-    if (!activePlacement || activePlacement.confirmed || !sceneRefs) return;
+    if (!isPlacing || !sceneRefs) return;
 
     const el = sceneRefs.container;
 
     const handleMouseMove = (e: MouseEvent) => {
       const pos = raycastToGround(e.clientX, e.clientY);
       if (pos) {
-        actions.updatePlacementPosition(pos);
+        actionsRef.current.updatePlacementPosition(pos);
       }
     };
 
-    el.addEventListener("mousemove", handleMouseMove);
-    return () => el.removeEventListener("mousemove", handleMouseMove);
-  }, [activePlacement, sceneRefs, raycastToGround, actions]);
-
-  // Handle click — confirm placement
-  useEffect(() => {
-    if (!activePlacement || activePlacement.confirmed || !sceneRefs) return;
-
-    const el = sceneRefs.container;
-
     const handleClick = (e: MouseEvent) => {
       if (e.button !== 0) return;
-
+      e.stopPropagation(); // Prevent TileBasedTerrain selection handler
       const pos = raycastToGround(e.clientX, e.clientY);
       if (pos) {
-        actions.updatePlacementPosition(pos);
-        actions.confirmPlacement();
+        actionsRef.current.updatePlacementPosition(pos);
+        actionsRef.current.confirmPlacement();
       }
     };
 
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      actions.cancelPlacement();
+      actionsRef.current.cancelPlacement();
     };
-
-    el.addEventListener("click", handleClick);
-    el.addEventListener("contextmenu", handleContextMenu);
-    return () => {
-      el.removeEventListener("click", handleClick);
-      el.removeEventListener("contextmenu", handleContextMenu);
-    };
-  }, [activePlacement, sceneRefs, raycastToGround, actions]);
-
-  // Handle R key for rotation during placement
-  useEffect(() => {
-    if (!activePlacement || activePlacement.confirmed) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        actionsRef.current.cancelPlacement();
+        return;
+      }
       if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        actions.updatePlacementPosition(
-          activePlacement.position,
-          activePlacement.rotation + ROTATION_STEP,
-        );
+        const cur = placementRef.current;
+        if (cur) {
+          actionsRef.current.updatePlacementPosition(
+            cur.position,
+            cur.rotation + ROTATION_STEP,
+          );
+        }
       }
     };
 
+    // Use capture phase for click so we fire before TileBasedTerrain's handler
+    el.addEventListener("mousemove", handleMouseMove);
+    el.addEventListener("click", handleClick, true);
+    el.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [activePlacement, actions]);
+
+    return () => {
+      el.removeEventListener("mousemove", handleMouseMove);
+      el.removeEventListener("click", handleClick, true);
+      el.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isPlacing, sceneRefs, raycastToGround]);
 }

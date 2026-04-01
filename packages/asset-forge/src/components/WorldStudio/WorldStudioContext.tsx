@@ -702,7 +702,38 @@ function studioReducer(
         ...state,
         tools: {
           ...state.tools,
+          activeTool: "select",
           activePlacement: null,
+        },
+      };
+
+    // Extended layer entity actions — NPCs
+    case "ADD_NPC":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          npcs: [...state.extendedLayers.npcs, action.npc],
+        },
+      };
+
+    case "UPDATE_NPC":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          npcs: state.extendedLayers.npcs.map((n) =>
+            n.id === action.npcId ? { ...n, ...action.updates } : n,
+          ),
+        },
+      };
+
+    case "REMOVE_NPC":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          npcs: state.extendedLayers.npcs.filter((n) => n.id !== action.npcId),
         },
       };
 
@@ -2384,6 +2415,22 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
     const ext = state.extendedLayers;
     // Extended layer children — only show folders that have entities placed
     const extendedLayersDefs: HierarchyNode[] = [
+      {
+        id: "layer-npcs",
+        label: "NPCs",
+        type: "npcs",
+        children: ext.npcs.map((npc) => ({
+          id: `npc-${npc.id}`,
+          label: npc.name,
+          type: "npc" as const,
+          children: [],
+          dataId: npc.id,
+          expandable: false,
+          metadata: { npcTypeId: npc.npcTypeId },
+        })),
+        badge: ext.npcs.length,
+        expandable: ext.npcs.length > 0,
+      },
       {
         id: "layer-spawn-points",
         label: "Spawn Points",

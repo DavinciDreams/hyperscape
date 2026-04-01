@@ -241,6 +241,14 @@ export function ViewportContainer() {
   const hasActivePlacement =
     !!state.tools.activePlacement && !state.tools.activePlacement.confirmed;
 
+  // Stable refs so handleSelect doesn't recreate when tool/placement changes.
+  // Callback identity must stay stable to avoid cascading TileBasedTerrain
+  // scene re-init through: onSelect → handleClick → massive init effect.
+  const hasActivePlacementRef = useRef(hasActivePlacement);
+  hasActivePlacementRef.current = hasActivePlacement;
+  const activeToolRef = useRef(activeTool);
+  activeToolRef.current = activeTool;
+
   // Compute showGizmo early — needed for interaction mode decision
   const MOVABLE_TYPES = useMemo(
     () =>
@@ -623,6 +631,7 @@ export function ViewportContainer() {
   // Click-to-place viewport interaction (raycasts, rotation, confirm/cancel)
   usePlacementInteraction({
     sceneRefs: activeSceneRefs,
+    gridSnap: snapEnabled,
   });
 
   // Brush painting (terrain sculpt, biome paint, vegetation, collision)
@@ -682,6 +691,8 @@ export function ViewportContainer() {
   const handleSelect = useCallback(
     (selection: ViewportSelection | null) => {
       if (!isEditing) return;
+      // During placement mode, suppress selection — clicks are handled by usePlacementInteraction
+      if (hasActivePlacementRef.current) return;
       if (!selection) {
         actions.setSelection(null);
         return;
@@ -693,6 +704,8 @@ export function ViewportContainer() {
         selection.entityId
       ) {
         // Map game world entity types to Selection types
+        // Extended layer entities (from useEditorWorldSync) use their type directly
+        const isExtended = selection.entityData?.isExtendedLayer;
         const GAME_ENTITY_TYPE_MAP: Record<string, string> = {
           npc: "gameNpc",
           station: "gameStation",
@@ -700,8 +713,10 @@ export function ViewportContainer() {
           tree: "gameResource",
           mob_spawn: "gameMobSpawn",
         };
-        const selType =
-          GAME_ENTITY_TYPE_MAP[selection.entityType] ?? selection.entityType;
+        const selType = isExtended
+          ? selection.entityType!
+          : (GAME_ENTITY_TYPE_MAP[selection.entityType!] ??
+            selection.entityType!);
         const displayName =
           selection.entityDisplayName ?? selection.entityId.replace(/_/g, " ");
         actions.setSelection({
@@ -782,7 +797,7 @@ export function ViewportContainer() {
       } else if (
         selection.type === "tile" &&
         selection.tileData &&
-        activeTool === "select"
+        activeToolRef.current === "select"
       ) {
         // Tile inspector — only when select tool is active (not brush/place)
         actions.setSelection({
@@ -799,51 +814,87 @@ export function ViewportContainer() {
         });
       }
     },
-    [isEditing, actions, activeTool],
+    [isEditing, actions],
   );
 
   // ----- Drag-and-drop from EntityPalette -----
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes("application/x-entity-palette")) {
+  // EntityPalette's handleDragStart already calls startPlacement() so the ghost
+  // exists before dragover fires. Here we just raycast to terrain on dragover
+  // to move the ghost, confirm on drop, and cancel on dragleave.
+
+  /** Raycast from a client mouse position to terrain, return world pos or null */
+  const raycastToTerrain = useCallback(
+    (clientX: number, clientY: number, container: HTMLElement) => {
+      if (!activeSceneRefs) return null;
+      const rect = container.getBoundingClientRect();
+      const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+      const mouse = new THREE.Vector2(ndcX, ndcY);
+      activeSceneRefs.raycaster.setFromCamera(mouse, activeSceneRefs.camera);
+      const intersects = activeSceneRefs.raycaster.intersectObject(
+        activeSceneRefs.terrainContainer,
+        true,
+      );
+      if (intersects.length > 0) {
+        const p = intersects[0].point;
+        let x = p.x;
+        let z = p.z;
+        if (snapEnabled) {
+          x = Math.round(x);
+          z = Math.round(z);
+        }
+        return { x, y: p.y, z };
+      }
+      return null;
+    },
+    [activeSceneRefs, snapEnabled],
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("application/x-entity-palette"))
+        return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
-    }
-  }, []);
+      // Move ghost to cursor position on terrain
+      const pos = raycastToTerrain(
+        e.clientX,
+        e.clientY,
+        e.currentTarget as HTMLElement,
+      );
+      if (pos) {
+        actions.updatePlacementPosition(pos);
+      }
+    },
+    [raycastToTerrain, actions],
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
-      const data = e.dataTransfer.getData("application/x-entity-palette");
-      if (!data || !activeSceneRefs) return;
+      if (!e.dataTransfer.types.includes("application/x-entity-palette"))
+        return;
       e.preventDefault();
-
-      try {
-        const { category, id, name } = JSON.parse(data) as {
-          category: string;
-          id: string;
-          name: string;
-        };
-        // Raycast to find drop position on terrain
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        const mouse = new THREE.Vector2(mouseX, mouseY);
-        activeSceneRefs.raycaster.setFromCamera(mouse, activeSceneRefs.camera);
-        const intersects = activeSceneRefs.raycaster.intersectObject(
-          activeSceneRefs.terrainContainer,
-          true,
-        );
-        if (intersects.length > 0) {
-          const pos = intersects[0].point;
-          // Start placement, set position, confirm — one-gesture placement
-          actions.startPlacement(category as never, id, name);
-          actions.updatePlacementPosition({ x: pos.x, y: pos.y, z: pos.z });
-          actions.confirmPlacement();
-        }
-      } catch {
-        // Invalid data
+      // Final position update + confirm
+      const pos = raycastToTerrain(
+        e.clientX,
+        e.clientY,
+        e.currentTarget as HTMLElement,
+      );
+      if (pos) {
+        actions.updatePlacementPosition(pos);
       }
+      actions.confirmPlacement();
     },
-    [activeSceneRefs, actions],
+    [raycastToTerrain, actions],
+  );
+
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent) => {
+      // Only cancel when leaving the viewport entirely (not entering a child)
+      if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+      actions.cancelPlacement();
+    },
+    [actions],
   );
 
   // Derive the selectedId to pass to TileBasedTerrain for its own highlighting
@@ -1056,6 +1107,7 @@ export function ViewportContainer() {
       className="flex-1 relative bg-bg-primary"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onDragLeave={handleDragLeave}
     >
       <TileBasedTerrain
         config={config}

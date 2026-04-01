@@ -5,7 +5,9 @@
  * and manifest-driven palette categories.
  */
 
-import type { WorldPosition } from "../WorldBuilder/types";
+import type { WorldPosition, PlacedNPC } from "../WorldBuilder/types";
+
+export type { PlacedNPC };
 
 // ============== PLACEMENT ENTITY TYPES ==============
 
@@ -295,6 +297,7 @@ export const EMPTY_AI_GENERATION_STATE: AIGenerationState = {
 
 /** Additional layers for Phase 3+ entity types */
 export interface ExtendedWorldLayers {
+  npcs: PlacedNPC[];
   spawnPoints: PlacedSpawnPoint[];
   teleports: PlacedTeleport[];
   mobSpawns: PlacedMobSpawn[];
@@ -306,6 +309,7 @@ export interface ExtendedWorldLayers {
 
 /** Default empty extended layers */
 export const EMPTY_EXTENDED_LAYERS: ExtendedWorldLayers = {
+  npcs: [],
   spawnPoints: [],
   teleports: [],
   mobSpawns: [],

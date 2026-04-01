@@ -395,6 +395,8 @@ export function EntityPalette() {
   }, []);
 
   // Drag start handler for drag-and-drop placement
+  // Starts placement immediately so the ghost preview appears as the cursor
+  // enters the viewport during drag.
   const handleDragStart = useCallback(
     (e: React.DragEvent, item: PaletteItem) => {
       e.dataTransfer.setData(
@@ -406,8 +408,10 @@ export function EntityPalette() {
         }),
       );
       e.dataTransfer.effectAllowed = "copy";
+      // Start placement so ghost renders during drag
+      actions.startPlacement(item.category, item.id, item.name);
     },
-    [],
+    [actions],
   );
 
   // Loading state

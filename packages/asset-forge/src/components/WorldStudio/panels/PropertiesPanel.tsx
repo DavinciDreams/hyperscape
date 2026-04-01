@@ -151,6 +151,11 @@ export function PropertiesPanel() {
         break;
 
       case "npc": {
+        // Check editor-placed NPCs (extendedLayers) first, then world.layers
+        const extNpc = state.extendedLayers.npcs.find(
+          (n) => n.id === selection.id,
+        );
+        if (extNpc) return <NPCProperties npc={extNpc} />;
         if (world) {
           const npc = world.layers.npcs.find((n) => n.id === selection.id);
           if (npc) return <NPCProperties npc={npc} />;

@@ -10,6 +10,7 @@ import { useEffect, useRef } from "react";
 
 import { commandHistory, PlaceEntityCommand } from "../../../editor/commands";
 import { useWorldStudio } from "../WorldStudioContext";
+import { getPlacementYOffset } from "./useEditorWorldSync";
 
 let nextEntityId = 1;
 function generateId(prefix: string): string {
@@ -25,8 +26,16 @@ export function usePlacementConfirmation() {
     if (!activePlacement?.confirmed || processedRef.current) return;
     processedRef.current = true;
 
-    const { category, templateId, templateName, position, rotation } =
-      activePlacement;
+    const { category, templateId, templateName, rotation } = activePlacement;
+
+    // Adjust Y so the model's bottom sits on the terrain surface (same logic
+    // as the transform gizmo's surface snap). Abstract markers have geometry
+    // pre-translated above y=0 so getPlacementYOffset returns 0 for them.
+    const yOffset = getPlacementYOffset(category, templateId);
+    const position = {
+      ...activePlacement.position,
+      y: activePlacement.position.y + yOffset,
+    };
 
     // Build entity data and add/remove callbacks per category
     let entityId: string | null = null;

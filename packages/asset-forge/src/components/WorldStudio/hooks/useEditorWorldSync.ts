@@ -19,6 +19,12 @@ import {
 import { useEffect, useRef, useCallback } from "react";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
+import {
+  getNpcModel,
+  getStationModel,
+  getOreModel,
+  getTreeSpeciesInstance,
+} from "../../WorldBuilder/GameWorldAssets";
 
 /** Safe material dispose — WebGPU renderer can race with React cleanup */
 function safeDispose(mat: THREE.Material | THREE.Material[]): void {
@@ -33,6 +39,7 @@ import type { WorldStudioState } from "../WorldStudioContext";
 import type {
   ExtendedWorldLayers,
   ActivePlacement,
+  PlacedNPC,
   PlacedSpawnPoint,
   PlacedTeleport,
   PlacedMobSpawn,
@@ -45,6 +52,7 @@ import type {
 // ============== MARKER COLORS ==============
 
 const MARKER_COLORS = {
+  npc: 0xa855f7, // purple
   spawnPoint: 0x22c55e, // green
   teleport: 0x8b5cf6, // violet
   mobSpawn: 0xef4444, // red
@@ -62,6 +70,38 @@ function getMarkerGeometry(type: string): THREE.BufferGeometry {
   if (geo) return geo;
 
   switch (type) {
+    case "npc": {
+      // Capsule-like figure: body cylinder + head sphere
+      const bodyGeo = new THREE.CylinderGeometry(0.3, 0.3, 1.2, 8);
+      bodyGeo.translate(0, 0.6, 0);
+      const headGeo = new THREE.SphereGeometry(0.25, 8, 6);
+      headGeo.translate(0, 1.45, 0);
+      const merged = new THREE.BufferGeometry();
+      // Merge body + head
+      const bodyPos = bodyGeo.getAttribute("position");
+      const headPos = headGeo.getAttribute("position");
+      const positions = new Float32Array(bodyPos.count * 3 + headPos.count * 3);
+      for (let i = 0; i < bodyPos.count * 3; i++)
+        positions[i] = (bodyPos.array as Float32Array)[i];
+      for (let i = 0; i < headPos.count * 3; i++)
+        positions[bodyPos.count * 3 + i] = (headPos.array as Float32Array)[i];
+      merged.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      // Merge indices
+      const bodyIdx = bodyGeo.getIndex()!;
+      const headIdx = headGeo.getIndex()!;
+      const indices = new Uint16Array(bodyIdx.count + headIdx.count);
+      for (let i = 0; i < bodyIdx.count; i++)
+        indices[i] = (bodyIdx.array as Uint16Array)[i];
+      for (let i = 0; i < headIdx.count; i++)
+        indices[bodyIdx.count + i] =
+          (headIdx.array as Uint16Array)[i] + bodyPos.count;
+      merged.setIndex(new THREE.BufferAttribute(indices, 1));
+      merged.computeVertexNormals();
+      bodyGeo.dispose();
+      headGeo.dispose();
+      geo = merged;
+      break;
+    }
     case "spawnPoint":
       geo = new THREE.ConeGeometry(0.6, 1.5, 6);
       geo.translate(0, 0.75, 0);
@@ -120,34 +160,160 @@ function createMarkerMesh(
   return mesh;
 }
 
-function createGhostMesh(
-  type: string,
+/**
+ * Create the ghost preview for placement. Tries to use the real 3D model
+ * from GameWorldAssets cache (translucent). Falls back to an abstract marker shape.
+ */
+function createGhostObject(
+  category: string,
+  templateId: string,
   position: { x: number; y: number; z: number },
   rotation: number = 0,
-): THREE.Mesh {
-  const markerType = categoryToMarkerType(type);
+): THREE.Object3D {
+  // Try real model first
+  const modelGroup = tryLoadEntityModel(category, templateId, { ghost: true });
+  if (modelGroup) {
+    // Mark cloned materials for cleanup
+    modelGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh) child.userData._ghostClone = true;
+    });
+
+    // Compute bbox offset so model bottom sits on terrain surface (not half buried)
+    const bbox = new THREE.Box3().setFromObject(modelGroup);
+    const bottomOffset = Math.max(0, -bbox.min.y);
+    modelGroup.position.set(position.x, position.y + bottomOffset, position.z);
+    modelGroup.rotation.y = rotation;
+    modelGroup.name = "placement-ghost";
+    modelGroup.userData.bottomOffset = bottomOffset;
+    return modelGroup;
+  }
+
+  // Fallback: abstract marker shape
+  const markerType = categoryToMarkerType(category);
   const geo = getMarkerGeometry(markerType);
   const mat = new MeshStandardNodeMaterial();
   mat.color = new THREE.Color(
     MARKER_COLORS[markerType as keyof typeof MARKER_COLORS] ?? 0xffffff,
   );
+  mat.emissive = new THREE.Color(
+    MARKER_COLORS[markerType as keyof typeof MARKER_COLORS] ?? 0xffffff,
+  );
+  mat.emissiveIntensity = 0.5;
   mat.transparent = true;
-  mat.opacity = 0.5;
+  mat.opacity = 0.6;
   mat.depthWrite = false;
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(position.x, position.y, position.z);
   mesh.rotation.y = rotation;
   mesh.name = "placement-ghost";
+  mesh.userData._fallbackGhost = true;
   return mesh;
 }
 
 function categoryToMarkerType(category: string): string {
+  if (category === "npcs") return "npc";
   if (category.startsWith("resources-")) return "resource";
   if (category === "mob-spawns") return "mobSpawn";
   if (category === "spawn-points") return "spawnPoint";
   if (category === "water-bodies") return "waterBody";
   if (category === "pois") return "poi";
   return category.replace(/-/g, "");
+}
+
+// ============== REAL MODEL LOADING ==============
+
+/**
+ * Try to load the actual 3D model for an entity from GameWorldAssets cache.
+ * Returns a THREE.Group containing cloned model meshes, or null if no model is available.
+ */
+function tryLoadEntityModel(
+  category: string,
+  templateId: string,
+  opts?: { ghost?: boolean },
+): THREE.Group | null {
+  let modelData: {
+    parts: Array<{ geometry: THREE.BufferGeometry; material: THREE.Material }>;
+    scale?: number;
+    yOffset?: number;
+    manifestScale?: number;
+  } | null = null;
+
+  if (category === "npcs" || category === "npc") {
+    modelData = getNpcModel(templateId);
+  } else if (category === "stations" || category === "station") {
+    modelData = getStationModel(templateId);
+  } else if (category === "resources-mining" || category === "resource") {
+    modelData = getOreModel(templateId);
+  } else if (category === "resources-woodcutting") {
+    const tree = getTreeSpeciesInstance(templateId);
+    if (tree) {
+      modelData = {
+        parts: tree.parts,
+        scale: tree.manifestScale,
+        yOffset: 0,
+      };
+    }
+  } else if (category === "mob-spawns" || category === "mobSpawn") {
+    // Mob spawns reference an NPC model
+    modelData = getNpcModel(templateId);
+  }
+
+  if (!modelData || modelData.parts.length === 0) return null;
+
+  const group = new THREE.Group();
+  const scale =
+    modelData.scale ??
+    (modelData as { manifestScale?: number }).manifestScale ??
+    1;
+
+  for (const part of modelData.parts) {
+    let mat: THREE.Material;
+    if (opts?.ghost) {
+      // Ghost: clone material, make translucent
+      mat = part.material.clone();
+      (mat as THREE.MeshStandardMaterial).transparent = true;
+      (mat as THREE.MeshStandardMaterial).opacity = 0.45;
+      mat.depthWrite = false;
+    } else {
+      mat = part.material;
+    }
+    const mesh = new THREE.Mesh(part.geometry, mat);
+    mesh.castShadow = !opts?.ghost;
+    group.add(mesh);
+  }
+
+  group.scale.setScalar(scale);
+  if (modelData.yOffset) group.position.y = modelData.yOffset;
+
+  return group;
+}
+
+/**
+ * Compute the Y offset needed to sit a model's bottom on the ground plane.
+ * Returns 0 when no model is available (abstract markers have geometry pre-translated above y=0).
+ */
+export function getPlacementYOffset(
+  category: string,
+  templateId: string,
+): number {
+  const group = tryLoadEntityModel(category, templateId);
+  if (!group) return 0;
+  const bbox = new THREE.Box3().setFromObject(group);
+  return Math.max(0, -bbox.min.y);
+}
+
+/**
+ * Dispose all children of a model group (cloned ghost materials).
+ */
+function disposeModelGroup(group: THREE.Group): void {
+  group.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      // Only dispose material if it's a ghost clone (not the cached original)
+      if (child.userData._ghostClone) {
+        safeDispose(child.material as THREE.Material);
+      }
+    }
+  });
 }
 
 // ============== LABEL SPRITES ==============
@@ -186,14 +352,17 @@ function createLabelSprite(text: string): THREE.Sprite {
 interface ManagedMarker {
   id: string;
   type: string;
-  mesh: THREE.Mesh;
+  mesh: THREE.Mesh | null; // null when using real model
   label: THREE.Sprite;
   group: THREE.Group;
+  hasRealModel: boolean;
 }
 
 interface SyncState {
   markers: Map<string, ManagedMarker>;
-  ghostMesh: THREE.Mesh | null;
+  ghostObject: THREE.Object3D | null;
+  ghostCategory: string | null;
+  ghostTemplateId: string | null;
   boundaryRing: THREE.Mesh | null;
   connectionLines: THREE.Group | null;
   disposed: boolean;
@@ -216,7 +385,9 @@ export function useEditorWorldSync({
 }: SyncOptions) {
   const syncRef = useRef<SyncState>({
     markers: new Map(),
-    ghostMesh: null,
+    ghostObject: null,
+    ghostCategory: null,
+    ghostTemplateId: null,
     boundaryRing: null,
     connectionLines: null,
     disposed: false,
@@ -238,13 +409,15 @@ export function useEditorWorldSync({
     const overlay = refs.entityOverlay;
     const activeIds = new Set<string>();
 
-    // Helper: add or update a marker
+    // Helper: add or update a marker. Tries to use real 3D models from cache.
     const upsertMarker = (
       id: string,
       type: keyof typeof MARKER_COLORS,
       name: string,
       position: { x: number; y: number; z: number },
       rotation: number = 0,
+      modelCategory?: string,
+      templateId?: string,
     ) => {
       activeIds.add(id);
       const existing = sync.markers.get(id);
@@ -252,55 +425,120 @@ export function useEditorWorldSync({
         existing.group.position.set(position.x, position.y, position.z);
         existing.group.rotation.y = rotation;
       } else {
-        const mesh = createMarkerMesh(type, { x: 0, y: 0, z: 0 }, 0);
         const label = createLabelSprite(name);
         const group = new THREE.Group();
-        group.add(mesh);
+
+        // Try real model first
+        let mesh: THREE.Mesh | null = null;
+        let hasRealModel = false;
+        if (modelCategory && templateId) {
+          const modelGroup = tryLoadEntityModel(modelCategory, templateId);
+          if (modelGroup) {
+            group.add(modelGroup);
+            hasRealModel = true;
+          }
+        }
+
+        // Fallback: abstract colored marker
+        if (!hasRealModel) {
+          mesh = createMarkerMesh(type, { x: 0, y: 0, z: 0 }, 0);
+          group.add(mesh);
+        }
+
         group.add(label);
         group.position.set(position.x, position.y, position.z);
         group.rotation.y = rotation;
         group.name = `entity-${type}-${id}`;
-        // Store entity info for selection routing (matches TileBasedTerrain's click handler)
+
+        // Store entity info for selection routing
+        // isExtendedLayer distinguishes editor-placed entities from game manifest entities
         const selectData = {
           selectable: true,
           selectableType: "entity" as const,
           selectableId: id,
           entityType: type,
           entityId: id,
+          isExtendedLayer: true,
         };
         group.userData = selectData;
-        mesh.userData = selectData;
+        // Propagate to all mesh children for raycast hit detection
+        group.traverse((child) => {
+          if (child instanceof THREE.Mesh) child.userData = { ...selectData };
+        });
 
         overlay.add(group);
         refs.addSelectable(group);
 
-        sync.markers.set(id, { id, type, mesh, label, group });
+        sync.markers.set(id, { id, type, mesh, label, group, hasRealModel });
       }
     };
 
-    // Spawn points
+    // NPCs — use real NPC model from cache
+    layers.npcs.forEach((npc: PlacedNPC) => {
+      upsertMarker(
+        npc.id,
+        "npc",
+        npc.name,
+        npc.position,
+        npc.rotation,
+        "npcs",
+        npc.npcTypeId,
+      );
+    });
+
+    // Spawn points (no model — abstract marker)
     layers.spawnPoints.forEach((sp: PlacedSpawnPoint) => {
       upsertMarker(sp.id, "spawnPoint", sp.name, sp.position, sp.rotation);
     });
 
-    // Teleports
+    // Teleports (no model — abstract marker)
     layers.teleports.forEach((tp: PlacedTeleport) => {
       upsertMarker(tp.id, "teleport", tp.name, tp.position);
     });
 
-    // Mob spawns
+    // Mob spawns — use NPC model for the mob type
     layers.mobSpawns.forEach((ms: PlacedMobSpawn) => {
-      upsertMarker(ms.id, "mobSpawn", ms.name, ms.position);
+      upsertMarker(
+        ms.id,
+        "mobSpawn",
+        ms.name,
+        ms.position,
+        0,
+        "mob-spawns",
+        ms.mobId,
+      );
     });
 
-    // Resources
+    // Resources — use ore/tree model
     layers.resources.forEach((r: PlacedResource) => {
-      upsertMarker(r.id, "resource", r.name, r.position, r.rotation);
+      const resCat =
+        r.resourceType === "mining"
+          ? "resources-mining"
+          : r.resourceType === "woodcutting"
+            ? "resources-woodcutting"
+            : "resource";
+      upsertMarker(
+        r.id,
+        "resource",
+        r.name,
+        r.position,
+        r.rotation,
+        resCat,
+        r.resourceId,
+      );
     });
 
-    // Stations
+    // Stations — use station model
     layers.stations.forEach((s: PlacedStation) => {
-      upsertMarker(s.id, "station", s.name, s.position, s.rotation);
+      upsertMarker(
+        s.id,
+        "station",
+        s.name,
+        s.position,
+        s.rotation,
+        "stations",
+        s.stationType,
+      );
     });
 
     // POIs
@@ -372,8 +610,11 @@ export function useEditorWorldSync({
       if (!activeIds.has(id)) {
         overlay.remove(marker.group);
         refs.removeSelectable(marker.group);
-        marker.mesh.geometry.dispose();
-        safeDispose(marker.mesh.material as THREE.Material);
+        // Only dispose the abstract marker mesh (real model geometry is shared/cached)
+        if (marker.mesh) {
+          marker.mesh.geometry.dispose();
+          safeDispose(marker.mesh.material as THREE.Material);
+        }
         try {
           (marker.label.material as THREE.SpriteMaterial).map?.dispose();
         } catch {
@@ -385,31 +626,73 @@ export function useEditorWorldSync({
     }
   }, []);
 
-  // Sync ghost placement preview
-  const syncGhost = useCallback((placement: ActivePlacement | null) => {
-    const sync = syncRef.current;
-    const refs = sceneRefsRef.current;
-    if (!refs || sync.disposed) return;
+  /** Dispose a ghost object (handles both model groups and fallback meshes) */
+  const disposeGhost = useCallback(
+    (ghost: THREE.Object3D, refs: TerrainSceneRefs) => {
+      refs.entityOverlay.remove(ghost);
+      if (ghost instanceof THREE.Group) {
+        disposeModelGroup(ghost);
+      } else if (ghost instanceof THREE.Mesh) {
+        if (ghost.userData._fallbackGhost) {
+          safeDispose(ghost.material as THREE.Material);
+        }
+      }
+    },
+    [],
+  );
 
-    // Remove existing ghost
-    if (sync.ghostMesh) {
-      refs.entityOverlay.remove(sync.ghostMesh);
-      sync.ghostMesh.geometry.dispose();
-      safeDispose(sync.ghostMesh.material as THREE.Material);
-      sync.ghostMesh = null;
-    }
+  // Sync ghost placement preview — uses real 3D models from GameWorldAssets cache
+  const syncGhost = useCallback(
+    (placement: ActivePlacement | null) => {
+      const sync = syncRef.current;
+      const refs = sceneRefsRef.current;
+      if (!refs || sync.disposed) return;
 
-    // Create new ghost if placement is active and not yet confirmed
-    if (placement && !placement.confirmed) {
-      const ghost = createGhostMesh(
+      // No placement or confirmed → remove ghost
+      if (!placement || placement.confirmed) {
+        if (sync.ghostObject) {
+          disposeGhost(sync.ghostObject, refs);
+          sync.ghostObject = null;
+          sync.ghostCategory = null;
+          sync.ghostTemplateId = null;
+        }
+        return;
+      }
+
+      // Don't show ghost until first real mouse position (avoids flash at origin)
+      const pos = placement.position;
+      if (pos.x === 0 && pos.y === 0 && pos.z === 0) return;
+
+      // Reuse existing ghost if same template — just update transform
+      if (
+        sync.ghostObject &&
+        sync.ghostCategory === placement.category &&
+        sync.ghostTemplateId === placement.templateId
+      ) {
+        const offset = sync.ghostObject.userData.bottomOffset ?? 0;
+        sync.ghostObject.position.set(pos.x, pos.y + offset, pos.z);
+        sync.ghostObject.rotation.y = placement.rotation;
+        return;
+      }
+
+      // Template or category changed — dispose old, create new
+      if (sync.ghostObject) {
+        disposeGhost(sync.ghostObject, refs);
+      }
+
+      const ghost = createGhostObject(
         placement.category,
-        placement.position,
+        placement.templateId,
+        pos,
         placement.rotation,
       );
       refs.entityOverlay.add(ghost);
-      sync.ghostMesh = ghost;
-    }
-  }, []);
+      sync.ghostObject = ghost;
+      sync.ghostCategory = placement.category;
+      sync.ghostTemplateId = placement.templateId;
+    },
+    [disposeGhost],
+  );
 
   // Sync extended layers when they change
   useEffect(() => {
@@ -489,8 +772,10 @@ export function useEditorWorldSync({
       for (const [, marker] of sync.markers) {
         refs.entityOverlay.remove(marker.group);
         refs.removeSelectable(marker.group);
-        marker.mesh.geometry.dispose();
-        safeDispose(marker.mesh.material as THREE.Material);
+        if (marker.mesh) {
+          marker.mesh.geometry.dispose();
+          safeDispose(marker.mesh.material as THREE.Material);
+        }
         try {
           (marker.label.material as THREE.SpriteMaterial).map?.dispose();
         } catch {
@@ -500,11 +785,17 @@ export function useEditorWorldSync({
       }
       sync.markers.clear();
 
-      if (sync.ghostMesh) {
-        refs.entityOverlay.remove(sync.ghostMesh);
-        sync.ghostMesh.geometry.dispose();
-        safeDispose(sync.ghostMesh.material as THREE.Material);
-        sync.ghostMesh = null;
+      if (sync.ghostObject) {
+        refs.entityOverlay.remove(sync.ghostObject);
+        if (sync.ghostObject instanceof THREE.Group) {
+          disposeModelGroup(sync.ghostObject);
+        } else if (
+          sync.ghostObject instanceof THREE.Mesh &&
+          sync.ghostObject.userData._fallbackGhost
+        ) {
+          safeDispose(sync.ghostObject.material as THREE.Material);
+        }
+        sync.ghostObject = null;
       }
 
       if (sync.connectionLines) {
