@@ -12,6 +12,7 @@ import {
   saveWorldProject,
   acquireProjectLock,
 } from "../../../utils/worldProjectApi";
+import { serializeManifestOverrides } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
 
 const AUTO_SAVE_DEBOUNCE_MS = 30_000; // 30 seconds
@@ -21,8 +22,11 @@ export function useAutoSave(projectId: string, enabled: boolean) {
   const hasUnsavedChanges = state.builder.editing.hasUnsavedChanges;
   const isSaving = state.persistence.isSaving;
   const world = state.builder.editing.world;
+  const manifestOverrides = state.manifestOverrides;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSavingRef = useRef(false);
+  const manifestOverridesRef = useRef(manifestOverrides);
+  manifestOverridesRef.current = manifestOverrides;
 
   const doSave = useCallback(async () => {
     if (!world || isSavingRef.current) return;
@@ -31,8 +35,12 @@ export function useAutoSave(projectId: string, enabled: boolean) {
 
     try {
       const serialized = serializeWorld(world);
+      const manifestSnapshot = serializeManifestOverrides(
+        manifestOverridesRef.current,
+      );
       const result = await saveWorldProject(projectId, {
         worldData: serialized,
+        manifestSnapshot,
       });
       actions.saveSuccess(Date.now(), result.version);
 

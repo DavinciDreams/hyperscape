@@ -13,8 +13,6 @@
  */
 
 import {
-  ChevronDown,
-  ChevronRight,
   Eye,
   EyeOff,
   Search,
@@ -42,7 +40,6 @@ import {
   TreePine,
   Radio,
   Filter,
-  Layers,
   X,
   Copy,
   Trash2,
@@ -51,6 +48,12 @@ import {
   Folder,
   FolderOpen,
   Pencil,
+  Store,
+  Pickaxe,
+  Axe,
+  Fish,
+  Crown,
+  Hammer,
 } from "lucide-react";
 import React, {
   useState,
@@ -154,18 +157,126 @@ const TYPE_ICONS: Record<string, typeof Globe> = {
   sfxTriggers: Speaker,
   sfxTrigger: Speaker,
   gameEntities: Package,
+  gameCharacters: Users,
+  gameCreatures: Skull,
   gameNpcs: Users,
   gameNpc: Users,
+  gameQuestNpcs: ScrollText,
+  gameShopkeepers: Store,
+  gameServiceNpcs: Shield,
+  gameMobs: Skull,
+  gameBosses: Crown,
   gameStations: Flame,
   gameStation: Flame,
+  gameCraftingStations: Hammer,
+  gameServiceStations: Shield,
+  gameOtherStations: Flame,
   gameResources: Gem,
   gameResource: Gem,
+  gameMining: Pickaxe,
+  gameWoodcutting: Axe,
+  gameOtherResources: Gem,
   gameMobSpawns: Skull,
   gameMobSpawn: Skull,
-  gameFishing: Droplets,
+  gameFishing: Fish,
   gameAreas: Compass,
   folder: Folder,
 };
+
+/** UE5-style colored icons — each type gets a distinct color */
+const TYPE_ICON_COLORS: Record<string, string> = {
+  world: "#7c8fa6",
+  terrain: "#8b9467",
+  biome: "#6b9e5a",
+  biomes: "#6b9e5a",
+  town: "#c4a24e",
+  towns: "#c4a24e",
+  building: "#c4a24e",
+  road: "#8a8a8a",
+  roads: "#8a8a8a",
+  npc: "#5b9bd5",
+  npcs: "#5b9bd5",
+  quest: "#d4a03e",
+  quests: "#d4a03e",
+  boss: "#d45b5b",
+  bosses: "#d45b5b",
+  event: "#b07cd4",
+  events: "#b07cd4",
+  lore: "#9b8ec4",
+  loreEntries: "#9b8ec4",
+  difficultyZone: "#d47c3e",
+  difficultyZones: "#d47c3e",
+  customPlacement: "#7ca6c4",
+  customPlacements: "#7ca6c4",
+  layers: "#7ca6c4",
+  chunks: "#8b9467",
+  chunk: "#8b9467",
+  spawnPoint: "#4ec46e",
+  spawnPoints: "#4ec46e",
+  teleport: "#4ec4c4",
+  teleports: "#4ec4c4",
+  mobSpawn: "#d45b5b",
+  mobSpawns: "#d45b5b",
+  resource: "#5bd4a0",
+  resources: "#5bd4a0",
+  station: "#d4a03e",
+  stations: "#d4a03e",
+  poi: "#c4a24e",
+  pois: "#c4a24e",
+  waterBody: "#5b9bd5",
+  waterBodies: "#5b9bd5",
+  water: "#5b9bd5",
+  audio: "#b07cd4",
+  musicZones: "#b07cd4",
+  musicZone: "#b07cd4",
+  ambientZones: "#9b8ec4",
+  ambientZone: "#9b8ec4",
+  sfxTriggers: "#8a7cb0",
+  sfxTrigger: "#8a7cb0",
+  gameEntities: "#7ca6c4",
+  gameCharacters: "#5b9bd5",
+  gameCreatures: "#d45b5b",
+  gameNpcs: "#5b9bd5",
+  gameNpc: "#5b9bd5",
+  gameQuestNpcs: "#d4a03e",
+  gameShopkeepers: "#4ec46e",
+  gameServiceNpcs: "#7ca6c4",
+  gameMobs: "#d45b5b",
+  gameBosses: "#d47c3e",
+  gameStations: "#d4a03e",
+  gameStation: "#d4a03e",
+  gameCraftingStations: "#d4a03e",
+  gameServiceStations: "#7ca6c4",
+  gameOtherStations: "#d4a03e",
+  gameResources: "#5bd4a0",
+  gameResource: "#5bd4a0",
+  gameMining: "#8b9467",
+  gameWoodcutting: "#6b9e5a",
+  gameOtherResources: "#5bd4a0",
+  gameMobSpawns: "#d45b5b",
+  gameMobSpawn: "#d45b5b",
+  gameFishing: "#5b9bd5",
+  gameAreas: "#c4a24e",
+  folder: "#c4a24e",
+};
+
+/** UE5-style filled triangle arrow for expand/collapse */
+function ExpandArrow({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      className="flex-shrink-0"
+      style={{
+        transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+        transition: "transform 0.1s ease",
+      }}
+    >
+      <path d="M3 1.5L7.5 5L3 8.5z" fill="currentColor" />
+    </svg>
+  );
+}
 
 const CATEGORY_FILTERS = [
   { id: "all", label: "All" },
@@ -205,7 +316,16 @@ const LAYERS: LayerDef[] = [
     id: "npcs",
     label: "NPCs",
     icon: Users,
-    types: ["npc", "boss", "gameNpc", "gameNpcs"],
+    types: [
+      "npc",
+      "boss",
+      "gameNpc",
+      "gameNpcs",
+      "gameCharacters",
+      "gameQuestNpcs",
+      "gameShopkeepers",
+      "gameServiceNpcs",
+    ],
   },
   {
     id: "quests",
@@ -223,6 +343,9 @@ const LAYERS: LayerDef[] = [
       "mobSpawn",
       "gameMobSpawns",
       "gameMobSpawn",
+      "gameCreatures",
+      "gameMobs",
+      "gameBosses",
     ],
   },
   {
@@ -237,6 +360,12 @@ const LAYERS: LayerDef[] = [
       "gameStations",
       "gameResources",
       "gameFishing",
+      "gameCraftingStations",
+      "gameServiceStations",
+      "gameOtherStations",
+      "gameMining",
+      "gameWoodcutting",
+      "gameOtherResources",
     ],
   },
   {
@@ -278,9 +407,9 @@ function loadLayerVisibility(): Record<string, boolean> {
   return {};
 }
 
-function saveLayerVisibility(visibility: Record<string, boolean>) {
+function saveLayerVisibility(vis: Record<string, boolean>) {
   try {
-    localStorage.setItem(LAYER_STORAGE_KEY, JSON.stringify(visibility));
+    localStorage.setItem(LAYER_STORAGE_KEY, JSON.stringify(vis));
   } catch {
     /* ignore */
   }
@@ -414,8 +543,8 @@ function OutlinerNode({
   const isMultiSelected = multiSelectedIds.has(nodeDataId);
   const hasChildren = node.children && node.children.length > 0;
   const Icon = TYPE_ICONS[node.type] ?? Globe;
+  const iconColor = TYPE_ICON_COLORS[node.type] ?? "#7c8fa6";
   const isVisible = visibilityMap.get(node.id) !== false;
-  const isLeaf = !hasChildren || node.expandable === false;
   const hasValidationIssue = nodeDataId
     ? validationIssueIds.has(nodeDataId)
     : false;
@@ -423,14 +552,14 @@ function OutlinerNode({
   return (
     <div data-outliner-id={nodeDataId}>
       <div
-        className={`group flex items-center gap-0.5 py-0.5 pr-1 rounded-sm text-xs transition-colors cursor-pointer ${
+        className={`group flex items-center gap-1 py-[3px] pr-1 text-xs cursor-pointer ${
           isSelected
             ? "bg-primary/15 text-primary"
             : isMultiSelected
               ? "bg-primary/8 text-primary/80"
-              : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+              : "text-text-secondary hover:text-text-primary hover:bg-white/[0.04]"
         }`}
-        style={{ paddingLeft: depth * 14 + 4 }}
+        style={{ paddingLeft: depth * 16 + 4 }}
         onClick={(e) => {
           if (
             hasChildren &&
@@ -446,20 +575,21 @@ function OutlinerNode({
         onDoubleClick={() => onDoubleClick(node)}
         onContextMenu={(e) => onContextMenu(node, e)}
       >
-        {/* Expand/collapse chevron */}
-        <span className="w-3 flex-shrink-0">
+        {/* Expand/collapse filled triangle */}
+        <span className="w-3 flex-shrink-0 flex items-center justify-center">
           {hasChildren && node.expandable !== false ? (
-            isExpanded ? (
-              <ChevronDown size={10} />
-            ) : (
-              <ChevronRight size={10} />
-            )
+            <ExpandArrow expanded={isExpanded} />
           ) : null}
         </span>
 
-        <Icon size={11} className="flex-shrink-0 opacity-50" />
+        {/* Colored type icon */}
+        <Icon
+          size={12}
+          className="flex-shrink-0"
+          style={{ color: iconColor }}
+        />
         <span
-          className={`truncate flex-1 text-left ml-0.5 ${!isVisible ? "opacity-40 line-through" : ""}`}
+          className={`truncate flex-1 text-left ${!isVisible ? "opacity-40 line-through" : ""}`}
         >
           {node.label}
         </span>
@@ -479,23 +609,25 @@ function OutlinerNode({
           />
         )}
 
-        {/* Visibility toggle */}
-        {isLeaf && (
-          <button
-            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-primary/50 transition-opacity flex-shrink-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleVisibility(node.id);
-            }}
-            title={isVisible ? "Hide" : "Show"}
-          >
-            {isVisible ? (
-              <Eye size={10} className="text-text-tertiary" />
-            ) : (
-              <EyeOff size={10} className="text-text-tertiary" />
-            )}
-          </button>
-        )}
+        {/* Visibility toggle — hover-revealed (UE5 style) */}
+        <button
+          className={`p-0.5 flex-shrink-0 transition-opacity ${
+            isVisible
+              ? "opacity-0 group-hover:opacity-60 hover:!opacity-100"
+              : "opacity-100"
+          }`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleVisibility(node.id);
+          }}
+          title={isVisible ? "Hide" : "Show"}
+        >
+          {isVisible ? (
+            <Eye size={11} className="text-text-tertiary" />
+          ) : (
+            <EyeOff size={11} className="text-amber-400" />
+          )}
+        </button>
       </div>
 
       {/* Children */}
@@ -544,7 +676,6 @@ export function OutlinerPanel() {
   );
   const [layerVisibility, setLayerVisibility] =
     useState<Record<string, boolean>>(loadLayerVisibility);
-  const [showLayers, setShowLayers] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Custom folders
@@ -705,16 +836,64 @@ export function OutlinerPanel() {
       const selectionType = SELECTABLE_NODE_TYPES[node.type];
       if (!node.dataId || !selectionType) return;
 
-      // For game entities, pass selectableId in entityData so the viewport can find the 3D object
+      // For game entities, build full entityData by looking up the game entity info.
+      // This mirrors the userData the viewport provides on click (npcType, entityId, storeId, etc.)
       const isGameEntity =
         node.type === "gameNpc" ||
         node.type === "gameStation" ||
         node.type === "gameResource" ||
         node.type === "gameMobSpawn";
-      const entityData =
-        isGameEntity && node.metadata?.selectableId
-          ? { selectableId: node.metadata.selectableId as string }
-          : undefined;
+      let entityData: Record<string, unknown> | undefined;
+      if (isGameEntity && state.gameEntities) {
+        const ge = state.gameEntities;
+        // Find the matching entity info across all lists
+        const gameTypeLists: Record<string, typeof ge.npcs> = {
+          gameNpc: ge.npcs,
+          gameStation: ge.stations,
+          gameResource: ge.resources,
+          gameMobSpawn: ge.mobSpawns,
+        };
+        const list = gameTypeLists[node.type];
+        const info = list?.find(
+          (e) =>
+            e.selectableId === (node.metadata?.selectableId as string) ||
+            e.entityId === node.dataId,
+        );
+        if (info) {
+          entityData = {
+            selectableId: info.selectableId,
+            entityId: info.entityId,
+            displayName: info.name,
+            npcType: info.npcType,
+            storeId: info.storeId,
+            stationType: info.stationType,
+            entityType:
+              info.resourceType ??
+              (node.type === "gameMobSpawn" ? "mob_spawn" : undefined),
+            spawnRadius: info.spawnRadius,
+            maxCount: info.maxCount,
+            position: { x: info.position.x, y: 0, z: info.position.z },
+          };
+        } else if (node.dataId) {
+          // Virtual node (e.g., mob parent with no placed NPC) — build from node + metadata
+          entityData = {
+            entityId: node.dataId,
+            displayName: node.label,
+            ...(node.metadata?.selectableId
+              ? { selectableId: node.metadata.selectableId as string }
+              : {}),
+            ...(node.metadata?.position
+              ? {
+                  position: {
+                    x: (node.metadata.position as { x: number }).x,
+                    y: 0,
+                    z: (node.metadata.position as { z: number }).z,
+                  },
+                }
+              : {}),
+          };
+        }
+      }
 
       const sel = {
         type: selectionType,
@@ -736,7 +915,14 @@ export function OutlinerPanel() {
         actions.setSelection(sel);
       }
     },
-    [actions, addToMulti, removeFromMulti, clearMulti, multiSelectedIds],
+    [
+      actions,
+      addToMulti,
+      removeFromMulti,
+      clearMulti,
+      multiSelectedIds,
+      state.gameEntities,
+    ],
   );
 
   // Double-click to focus camera
@@ -906,60 +1092,16 @@ export function OutlinerPanel() {
     });
   }, []);
 
-  // Layer visibility toggle
-  const handleLayerToggle = useCallback(
-    (layerId: string) => {
-      setLayerVisibility((prev) => {
-        const next = {
-          ...prev,
-          [layerId]: prev[layerId] === false ? true : false,
-        };
-        saveLayerVisibility(next);
-        // Also apply to individual nodes in the visibility map
-        const layer = LAYERS.find((l) => l.id === layerId);
-        if (layer) {
-          const isVisible = next[layerId] !== false;
-          setVisibilityMap((prevMap) => {
-            const nextMap = new Map(prevMap);
-            const toggleNodes = (node: HierarchyNode) => {
-              if (layer.types.includes(node.type)) {
-                nextMap.set(node.id, isVisible);
-              }
-              node.children?.forEach(toggleNodes);
-            };
-            if (hierarchyTree) toggleNodes(hierarchyTree);
-            return nextMap;
-          });
-        }
-        return next;
-      });
-    },
-    [hierarchyTree],
-  );
-
-  const handleToggleAllLayers = useCallback(
-    (visible: boolean) => {
-      setLayerVisibility(() => {
-        const next: Record<string, boolean> = {};
-        for (const layer of LAYERS) {
-          next[layer.id] = visible;
-        }
-        saveLayerVisibility(next);
-        // Apply to all nodes
-        setVisibilityMap((prevMap) => {
-          const nextMap = new Map(prevMap);
-          const toggleAll = (node: HierarchyNode) => {
-            nextMap.set(node.id, visible);
-            node.children?.forEach(toggleAll);
-          };
-          if (hierarchyTree) toggleAll(hierarchyTree);
-          return nextMap;
-        });
-        return next;
-      });
-    },
-    [hierarchyTree],
-  );
+  const handleLayerToggle = useCallback((layerId: string) => {
+    setLayerVisibility((prev) => {
+      const next = {
+        ...prev,
+        [layerId]: prev[layerId] === false ? true : false,
+      };
+      saveLayerVisibility(next);
+      return next;
+    });
+  }, []);
 
   // Filter hierarchy nodes by active layer visibility
   // Build set of entity IDs that are in folders for efficient lookup
@@ -1109,7 +1251,7 @@ export function OutlinerPanel() {
             <Filter size={12} />
           </button>
           {showFilterDropdown && (
-            <div className="absolute right-0 top-full mt-1 z-50 bg-bg-secondary border border-border-primary rounded-md shadow-lg py-1 min-w-[120px]">
+            <div className="absolute right-0 top-full mt-1 z-50 bg-bg-secondary border border-border-primary rounded-md shadow-lg py-1 min-w-[180px]">
               {CATEGORY_FILTERS.map((f) => (
                 <button
                   key={f.id}
@@ -1126,6 +1268,44 @@ export function OutlinerPanel() {
                   {f.label}
                 </button>
               ))}
+              {/* Separator */}
+              <div className="border-t border-border-primary my-1" />
+              <div className="px-3 py-1 text-[10px] text-text-tertiary uppercase tracking-wider">
+                Layers
+              </div>
+              {LAYERS.map((layer) => {
+                const LayerIcon = layer.icon;
+                const isLayerVisible = layerVisibility[layer.id] !== false;
+                return (
+                  <button
+                    key={layer.id}
+                    className="w-full px-3 py-1 text-left text-xs transition-colors text-text-secondary hover:text-text-primary hover:bg-bg-tertiary flex items-center gap-2"
+                    onClick={() => handleLayerToggle(layer.id)}
+                  >
+                    {isLayerVisible ? (
+                      <Eye
+                        size={11}
+                        className="text-text-tertiary flex-shrink-0"
+                      />
+                    ) : (
+                      <EyeOff
+                        size={11}
+                        className="text-amber-400 flex-shrink-0"
+                      />
+                    )}
+                    <LayerIcon
+                      size={11}
+                      className="flex-shrink-0"
+                      style={{
+                        color: TYPE_ICON_COLORS[layer.types[0]] ?? "#7c8fa6",
+                      }}
+                    />
+                    <span className={!isLayerVisible ? "opacity-50" : ""}>
+                      {layer.label}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1200,71 +1380,6 @@ export function OutlinerPanel() {
         </div>
       )}
 
-      {/* Layer visibility controls */}
-      <div className="border-b border-border-primary">
-        <button
-          className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-text-tertiary hover:text-text-primary transition-colors"
-          onClick={() => setShowLayers((v) => !v)}
-        >
-          {showLayers ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-          <Layers size={10} />
-          Layers
-          {Object.values(layerVisibility).some((v) => v === false) && (
-            <span className="ml-auto text-[9px] text-amber-400">
-              {Object.values(layerVisibility).filter((v) => v === false).length}{" "}
-              hidden
-            </span>
-          )}
-        </button>
-        {showLayers && (
-          <div className="px-2 pb-1.5 space-y-0.5">
-            {/* Show/Hide All */}
-            <div className="flex items-center gap-1 mb-1">
-              <button
-                className="text-[9px] text-primary hover:underline"
-                onClick={() => handleToggleAllLayers(true)}
-              >
-                Show All
-              </button>
-              <span className="text-text-tertiary text-[9px]">/</span>
-              <button
-                className="text-[9px] text-primary hover:underline"
-                onClick={() => handleToggleAllLayers(false)}
-              >
-                Hide All
-              </button>
-            </div>
-            {LAYERS.map((layer) => {
-              const isVisible = layerVisibility[layer.id] !== false;
-              const LayerIcon = layer.icon;
-              return (
-                <button
-                  key={layer.id}
-                  className={`w-full flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] transition-colors ${
-                    isVisible
-                      ? "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
-                      : "text-text-tertiary opacity-50 hover:opacity-75 hover:bg-bg-tertiary"
-                  }`}
-                  onClick={() => handleLayerToggle(layer.id)}
-                >
-                  {isVisible ? (
-                    <Eye size={9} className="flex-shrink-0" />
-                  ) : (
-                    <EyeOff size={9} className="flex-shrink-0" />
-                  )}
-                  <LayerIcon size={9} className="flex-shrink-0 opacity-60" />
-                  <span
-                    className={`truncate ${!isVisible ? "line-through" : ""}`}
-                  >
-                    {layer.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
       {/* Multi-select indicator */}
       {multiSelection.length > 0 && (
         <div className="px-3 py-1 border-b border-border-primary bg-primary/5 flex items-center justify-between">
@@ -1283,7 +1398,7 @@ export function OutlinerPanel() {
       {/* Tree content */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-1 py-1 scrollbar-thin"
+        className="flex-1 overflow-y-auto py-0.5 scrollbar-thin"
       >
         {filteredTree ? (
           <OutlinerNode
@@ -1313,6 +1428,20 @@ export function OutlinerPanel() {
         {activeFilter !== "all" && (
           <span className="text-primary">
             Filter: {CATEGORY_FILTERS.find((f) => f.id === activeFilter)?.label}
+          </span>
+        )}
+        {Object.values(layerVisibility).some((v) => v === false) && (
+          <span className="text-amber-400 flex items-center gap-0.5">
+            <EyeOff size={9} />
+            {
+              Object.values(layerVisibility).filter((v) => v === false).length
+            }{" "}
+            layer
+            {Object.values(layerVisibility).filter((v) => v === false)
+              .length !== 1
+              ? "s"
+              : ""}{" "}
+            hidden
           </span>
         )}
         {validationIssues.length > 0 && (

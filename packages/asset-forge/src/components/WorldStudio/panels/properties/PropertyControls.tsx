@@ -847,6 +847,49 @@ export function PositionEditor({
   );
 }
 
+// ============== OVERRIDABLE FIELD ==============
+
+interface OverridableFieldProps {
+  label: string;
+  isOverridden: boolean;
+  onReset?: () => void;
+  children: React.ReactNode;
+}
+
+/** Field with override visual indicator — label turns primary color, dot badge, hover reset */
+export function OverridableField({
+  label,
+  isOverridden,
+  onReset,
+  children,
+}: OverridableFieldProps) {
+  return (
+    <div className="group/field relative">
+      <div className="flex items-center justify-between mb-0.5">
+        <span
+          className={`text-xs ${isOverridden ? "text-primary font-medium" : "text-text-tertiary"}`}
+        >
+          {label}
+          {isOverridden && (
+            <span className="ml-0.5 text-[8px] text-primary/60">
+              {"\u25CF"}
+            </span>
+          )}
+        </span>
+        {isOverridden && onReset && (
+          <button
+            onClick={onReset}
+            className="text-[9px] text-text-tertiary hover:text-primary opacity-0 group-hover/field:opacity-100 transition-opacity"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ============== INFO ROW ==============
 
 interface InfoRowProps {

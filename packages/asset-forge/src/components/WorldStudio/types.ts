@@ -1249,3 +1249,143 @@ export const EMPTY_MANIFEST_DATA: ManifestData = {
   loading: false,
   error: null,
 };
+
+// ============== MANIFEST OVERRIDE TYPES ==============
+
+/** Sparse delta — only set fields override base manifest */
+export interface NPCManifestOverride {
+  entityId: string;
+  identity?: {
+    name?: string;
+    description?: string;
+    category?: string;
+    faction?: string;
+    levelRange?: [number, number];
+  };
+  stats?: {
+    level?: number;
+    health?: number;
+    attack?: number;
+    strength?: number;
+    defense?: number;
+    defenseBonus?: number;
+    ranged?: number;
+    magic?: number;
+  };
+  combat?: {
+    attackable?: boolean;
+    aggressive?: boolean;
+    retaliates?: boolean;
+    aggroRange?: number;
+    combatRange?: number;
+    leashRange?: number;
+    attackSpeedTicks?: number;
+    respawnTicks?: number;
+  };
+  movement?: { type?: string; speed?: number; wanderRadius?: number };
+  appearance?: { modelPath?: string; scale?: number };
+  drops?: {
+    [tier: string]: Array<{
+      itemId: string;
+      quantity?: number;
+      minQuantity?: number;
+      maxQuantity?: number;
+      chance?: number;
+    }>;
+  };
+}
+
+export interface StationManifestOverride {
+  entityId: string;
+  name?: string;
+  examine?: string;
+  modelScale?: number;
+  modelYOffset?: number;
+  flattenGround?: boolean;
+  flattenPadding?: number;
+  flattenBlendRadius?: number;
+}
+
+export interface ResourceManifestOverride {
+  entityId: string;
+  resourceType: "mining" | "woodcutting" | "fishing";
+  identity?: { name?: string; examine?: string };
+  gathering?: {
+    levelRequired?: number;
+    baseCycleTicks?: number;
+    depleteChance?: number;
+    respawnTicks?: number;
+    toolRequired?: string;
+  };
+  model?: { scale?: number };
+}
+
+export interface MobSpawnManifestOverride {
+  entityId: string;
+  spawnRadius?: number;
+  maxCount?: number;
+}
+
+export interface StoreManifestOverride {
+  entityId: string;
+  name?: string;
+  description?: string;
+  buyback?: boolean;
+  buybackRate?: number;
+  itemOverrides?: Record<string, { price?: number; stockQuantity?: number }>;
+  /** Added items not in the base manifest */
+  addedItems?: Array<{
+    itemId: string;
+    name: string;
+    price: number;
+    stockQuantity: number;
+  }>;
+}
+
+export interface ManifestOverrides {
+  npcOverrides: Map<string, NPCManifestOverride>;
+  stationOverrides: Map<string, StationManifestOverride>;
+  resourceOverrides: Map<string, ResourceManifestOverride>;
+  mobSpawnOverrides: Map<string, MobSpawnManifestOverride>;
+  storeOverrides: Map<string, StoreManifestOverride>;
+}
+
+export interface SerializedManifestOverrides {
+  npcOverrides: Record<string, NPCManifestOverride>;
+  stationOverrides: Record<string, StationManifestOverride>;
+  resourceOverrides: Record<string, ResourceManifestOverride>;
+  mobSpawnOverrides: Record<string, MobSpawnManifestOverride>;
+  storeOverrides: Record<string, StoreManifestOverride>;
+}
+
+export const EMPTY_MANIFEST_OVERRIDES: ManifestOverrides = {
+  npcOverrides: new Map(),
+  stationOverrides: new Map(),
+  resourceOverrides: new Map(),
+  mobSpawnOverrides: new Map(),
+  storeOverrides: new Map(),
+};
+
+export function serializeManifestOverrides(
+  o: ManifestOverrides,
+): SerializedManifestOverrides {
+  return {
+    npcOverrides: Object.fromEntries(o.npcOverrides),
+    stationOverrides: Object.fromEntries(o.stationOverrides),
+    resourceOverrides: Object.fromEntries(o.resourceOverrides),
+    mobSpawnOverrides: Object.fromEntries(o.mobSpawnOverrides),
+    storeOverrides: Object.fromEntries(o.storeOverrides),
+  };
+}
+
+export function deserializeManifestOverrides(
+  d: SerializedManifestOverrides,
+): ManifestOverrides {
+  return {
+    npcOverrides: new Map(Object.entries(d.npcOverrides ?? {})),
+    stationOverrides: new Map(Object.entries(d.stationOverrides ?? {})),
+    resourceOverrides: new Map(Object.entries(d.resourceOverrides ?? {})),
+    mobSpawnOverrides: new Map(Object.entries(d.mobSpawnOverrides ?? {})),
+    storeOverrides: new Map(Object.entries(d.storeOverrides ?? {})),
+  };
+}

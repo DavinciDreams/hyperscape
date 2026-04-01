@@ -108,7 +108,9 @@ import {
   EMPTY_AUDIO_LAYERS,
   EMPTY_AI_GENERATION_STATE,
   EMPTY_DEPLOYMENT_STATE,
+  EMPTY_MANIFEST_OVERRIDES,
 } from "./types";
+import type { ManifestOverrides } from "./types";
 
 import { useStoreSync } from "../../editor/stores/useStoreSync";
 
@@ -214,6 +216,8 @@ export interface WorldStudioState {
   deployment: DeploymentState;
   /** Phase 9: Viewport overlay settings */
   overlays: StudioViewportOverlays;
+  /** Manifest override deltas (staging layer over base manifests) */
+  manifestOverrides: ManifestOverrides;
   /** Entity data from game manifest (world-areas.json), populated by GameWorldEntitySync */
   gameEntities: GameEntityData | null;
 }
@@ -418,7 +422,21 @@ type StudioSpecificAction =
   // Phase 9: Viewport overlays
   | { type: "SET_OVERLAY"; overlay: Partial<StudioViewportOverlays> }
   // Game entity data from manifest
-  | { type: "SET_GAME_ENTITIES"; data: GameEntityData };
+  | { type: "SET_GAME_ENTITIES"; data: GameEntityData }
+  // Manifest overrides
+  | {
+      type: "SET_MANIFEST_OVERRIDE";
+      overrideType: keyof ManifestOverrides;
+      entityId: string;
+      data: Record<string, unknown>;
+    }
+  | {
+      type: "CLEAR_MANIFEST_OVERRIDE";
+      overrideType: keyof ManifestOverrides;
+      entityId: string;
+    }
+  | { type: "LOAD_MANIFEST_OVERRIDES"; overrides: ManifestOverrides }
+  | { type: "CLEAR_ALL_MANIFEST_OVERRIDES" };
 
 /** Union of all world builder + studio-specific actions */
 export type WorldStudioAction = WorldBuilderAction | StudioSpecificAction;
@@ -464,6 +482,7 @@ const initialState: WorldStudioState = {
   aiGeneration: EMPTY_AI_GENERATION_STATE,
   deployment: EMPTY_DEPLOYMENT_STATE,
   overlays: DEFAULT_VIEWPORT_OVERLAYS,
+  manifestOverrides: EMPTY_MANIFEST_OVERRIDES,
   gameEntities: null,
 };
 
@@ -1475,6 +1494,41 @@ function studioReducer(
         gameEntities: action.data,
       };
 
+    case "SET_MANIFEST_OVERRIDE": {
+      const mapClone = new Map(state.manifestOverrides[action.overrideType]);
+      const existing = mapClone.get(action.entityId) ?? {};
+      mapClone.set(action.entityId, {
+        ...existing,
+        ...action.data,
+        entityId: action.entityId,
+      } as never);
+      return {
+        ...state,
+        manifestOverrides: {
+          ...state.manifestOverrides,
+          [action.overrideType]: mapClone,
+        },
+      };
+    }
+
+    case "CLEAR_MANIFEST_OVERRIDE": {
+      const mapClone = new Map(state.manifestOverrides[action.overrideType]);
+      mapClone.delete(action.entityId);
+      return {
+        ...state,
+        manifestOverrides: {
+          ...state.manifestOverrides,
+          [action.overrideType]: mapClone,
+        },
+      };
+    }
+
+    case "LOAD_MANIFEST_OVERRIDES":
+      return { ...state, manifestOverrides: action.overrides };
+
+    case "CLEAR_ALL_MANIFEST_OVERRIDES":
+      return { ...state, manifestOverrides: EMPTY_MANIFEST_OVERRIDES };
+
     default:
       return null; // Not a studio-specific action
   }
@@ -1785,6 +1839,18 @@ interface WorldStudioContextValue {
     setOverlay: (overlay: Partial<StudioViewportOverlays>) => void;
     // Game entity data
     setGameEntities: (data: GameEntityData) => void;
+    // Manifest overrides
+    setManifestOverride: (
+      overrideType: keyof ManifestOverrides,
+      entityId: string,
+      data: Record<string, unknown>,
+    ) => void;
+    clearManifestOverride: (
+      overrideType: keyof ManifestOverrides,
+      entityId: string,
+    ) => void;
+    loadManifestOverrides: (overrides: ManifestOverrides) => void;
+    clearAllManifestOverrides: () => void;
   };
 
   /** Computed values */
@@ -2208,6 +2274,27 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       // Game entity data
       setGameEntities: (data: GameEntityData) =>
         dispatch({ type: "SET_GAME_ENTITIES", data }),
+      // Manifest overrides
+      setManifestOverride: (
+        overrideType: keyof ManifestOverrides,
+        entityId: string,
+        data: Record<string, unknown>,
+      ) =>
+        dispatch({
+          type: "SET_MANIFEST_OVERRIDE",
+          overrideType,
+          entityId,
+          data,
+        }),
+      clearManifestOverride: (
+        overrideType: keyof ManifestOverrides,
+        entityId: string,
+      ) =>
+        dispatch({ type: "CLEAR_MANIFEST_OVERRIDE", overrideType, entityId }),
+      loadManifestOverrides: (overrides: ManifestOverrides) =>
+        dispatch({ type: "LOAD_MANIFEST_OVERRIDES", overrides }),
+      clearAllManifestOverrides: () =>
+        dispatch({ type: "CLEAR_ALL_MANIFEST_OVERRIDES" }),
     }),
     [],
   );
@@ -2293,122 +2380,7 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       };
     });
 
-    // Build layers children
-    const worldNpcs = layers.npcs.filter(
-      (npc) => npc.parentContext.type === "world",
-    );
-    const layersChildren: HierarchyNode[] = [
-      {
-        id: "layer-npcs",
-        label: "NPCs",
-        type: "npcs",
-        children: worldNpcs.map((npc) => ({
-          id: `npc-${npc.id}`,
-          label: npc.name,
-          type: "npc" as const,
-          children: [],
-          dataId: npc.id,
-          expandable: false,
-        })),
-        badge: layers.npcs.length,
-        expandable: layers.npcs.length > 0,
-      },
-      {
-        id: "layer-quests",
-        label: "Quests",
-        type: "quests",
-        children: layers.quests.map((quest) => ({
-          id: `quest-${quest.id}`,
-          label: quest.name,
-          type: "quest" as const,
-          children: [],
-          dataId: quest.id,
-          expandable: false,
-        })),
-        badge: layers.quests.length,
-        expandable: layers.quests.length > 0,
-      },
-      {
-        id: "layer-bosses",
-        label: "Bosses",
-        type: "bosses",
-        children: layers.bosses.map((boss) => ({
-          id: `boss-${boss.id}`,
-          label: boss.name,
-          type: "boss" as const,
-          children: [],
-          dataId: boss.id,
-          expandable: false,
-        })),
-        badge: layers.bosses.length,
-        expandable: layers.bosses.length > 0,
-      },
-      {
-        id: "layer-events",
-        label: "Events",
-        type: "events",
-        children: layers.events.map((event) => ({
-          id: `event-${event.id}`,
-          label: event.name,
-          type: "event" as const,
-          children: [],
-          dataId: event.id,
-          expandable: false,
-        })),
-        badge: layers.events.length,
-        expandable: layers.events.length > 0,
-      },
-      {
-        id: "layer-lore",
-        label: "Lore",
-        type: "loreEntries",
-        children: layers.lore.map((lore) => ({
-          id: `lore-${lore.id}`,
-          label: lore.title,
-          type: "lore" as const,
-          children: [],
-          dataId: lore.id,
-          expandable: false,
-          metadata: { category: lore.category },
-        })),
-        badge: layers.lore.length,
-        expandable: layers.lore.length > 0,
-      },
-      {
-        id: "layer-difficulty-zones",
-        label: "Difficulty Zones",
-        type: "difficultyZones",
-        children: layers.difficultyZones.map((zone) => ({
-          id: `zone-${zone.id}`,
-          label: zone.name,
-          type: "difficultyZone" as const,
-          children: [],
-          dataId: zone.id,
-          expandable: false,
-          metadata: { difficultyLevel: zone.difficultyLevel },
-        })),
-        badge: layers.difficultyZones.length,
-        expandable: layers.difficultyZones.length > 0,
-      },
-      {
-        id: "layer-custom-placements",
-        label: "Custom Placements",
-        type: "customPlacements",
-        children: layers.customPlacements.map((placement) => ({
-          id: `placement-${placement.id}`,
-          label: `${placement.objectType} @ (${Math.round(placement.position.x)}, ${Math.round(placement.position.z)})`,
-          type: "customPlacement" as const,
-          children: [],
-          dataId: placement.id,
-          expandable: false,
-          metadata: { objectType: placement.objectType },
-        })),
-        badge: layers.customPlacements.length,
-        expandable: layers.customPlacements.length > 0,
-      },
-    ];
-
-    // Phase 3 extended layer children
+    // Extended layer children (entities with viewport presence)
     const ext = state.extendedLayers;
     const extendedLayersChildren: HierarchyNode[] = [
       {
@@ -2667,121 +2639,410 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
           badge: roadChildren.length,
           expandable: roadChildren.length > 0,
         },
-        {
-          id: "layers",
-          label: "Layers",
-          type: "layers",
-          children: [...layersChildren, ...extendedLayersChildren],
-          expandable: true,
-        },
-        // Game manifest entities (from world-areas.json, rendered in viewport)
+        ...extendedLayersChildren,
+        // Game manifest entities — manifest-aware hierarchy
         ...(state.gameEntities
           ? (() => {
               const ge = state.gameEntities;
+              const manifests = state.manifests;
               const totalGame =
                 ge.npcs.length +
                 ge.stations.length +
                 ge.resources.length +
                 ge.mobSpawns.length;
+
+              // Helper: build a leaf node for a game entity
+              const makeNpcNode = (n: (typeof ge.npcs)[0]): HierarchyNode => ({
+                id: `game-npc-${n.selectableId}`,
+                label: n.name,
+                type: "gameNpc" as const,
+                children: [] as HierarchyNode[],
+                dataId: n.entityId,
+                expandable: false,
+                metadata: {
+                  selectableId: n.selectableId,
+                  position: n.position,
+                },
+              });
+              const makeSpawnNode = (
+                m: (typeof ge.mobSpawns)[0],
+              ): HierarchyNode => ({
+                id: `game-mobspawn-${m.selectableId}`,
+                label: `Spawn: ${m.name}`,
+                type: "gameMobSpawn" as const,
+                children: [] as HierarchyNode[],
+                dataId: m.entityId,
+                expandable: false,
+                metadata: {
+                  selectableId: m.selectableId,
+                  position: m.position,
+                },
+              });
+
+              // --- Classify NPCs ---
+              // Store NPC types determine shop vs service vs quest:
+              const SHOP_NPC_TYPES = new Set([
+                "general_store",
+                "magic_store",
+                "range_store",
+                "armor_store",
+                "crafting_store",
+                "sword_store",
+                "food_store",
+                "rune_store",
+              ]);
+              const SERVICE_NPC_TYPES = new Set([
+                "bank",
+                "tanner",
+                "healer",
+                "guide",
+                "scoreboard",
+                "guard",
+              ]);
+
+              const questNpcs: typeof ge.npcs = [];
+              const shopkeepers: typeof ge.npcs = [];
+              const serviceNpcs: typeof ge.npcs = [];
+              const mobNpcs: typeof ge.npcs = [];
+              const bossNpcs: typeof ge.npcs = [];
+
+              for (const npc of ge.npcs) {
+                // Check manifest for category
+                const manifestNpc = manifests.npcs.find(
+                  (m) => m.id === npc.entityId,
+                );
+                const category = manifestNpc?.category;
+
+                if (category === "mob") {
+                  mobNpcs.push(npc);
+                } else if (category === "boss") {
+                  bossNpcs.push(npc);
+                } else if (
+                  npc.npcType === "quest_giver" ||
+                  category === "quest"
+                ) {
+                  questNpcs.push(npc);
+                } else if (
+                  npc.storeId ||
+                  (npc.npcType && SHOP_NPC_TYPES.has(npc.npcType))
+                ) {
+                  shopkeepers.push(npc);
+                } else if (npc.npcType && SERVICE_NPC_TYPES.has(npc.npcType)) {
+                  serviceNpcs.push(npc);
+                } else {
+                  // Neutral NPCs without specific role → service
+                  serviceNpcs.push(npc);
+                }
+              }
+
+              // --- Nest mob spawns under their parent mob ---
+              const spawnsByMob = new Map<string, typeof ge.mobSpawns>();
+              for (const spawn of ge.mobSpawns) {
+                const list = spawnsByMob.get(spawn.entityId);
+                if (list) list.push(spawn);
+                else spawnsByMob.set(spawn.entityId, [spawn]);
+              }
+
+              // Build mob nodes with spawn children
+              const buildMobNodes = (npcs: typeof ge.npcs): HierarchyNode[] => {
+                const nodes: HierarchyNode[] = [];
+                const handledMobs = new Set<string>();
+                for (const npc of npcs) {
+                  handledMobs.add(npc.entityId);
+                  const spawns = spawnsByMob.get(npc.entityId) ?? [];
+                  const spawnChildren = spawns.map(makeSpawnNode);
+                  nodes.push({
+                    id: `game-npc-${npc.selectableId}`,
+                    label: npc.name,
+                    type: "gameNpc" as const,
+                    children: spawnChildren,
+                    dataId: npc.entityId,
+                    expandable: spawnChildren.length > 0,
+                    metadata: {
+                      selectableId: npc.selectableId,
+                      position: npc.position,
+                    },
+                  });
+                }
+                // Orphan spawns: mob exists in manifest but not placed as NPC
+                for (const [mobId, spawns] of spawnsByMob) {
+                  if (handledMobs.has(mobId)) continue;
+                  const manifestNpc = manifests.npcs.find(
+                    (m) => m.id === mobId,
+                  );
+                  const mobName = manifestNpc?.name ?? mobId.replace(/_/g, " ");
+                  const spawnChildren = spawns.map(makeSpawnNode);
+                  nodes.push({
+                    id: `game-mob-virtual-${mobId}`,
+                    label: mobName,
+                    type: "gameNpc" as const,
+                    children: spawnChildren,
+                    dataId: mobId,
+                    expandable: spawnChildren.length > 0,
+                    metadata: { virtual: true },
+                  });
+                }
+                return nodes;
+              };
+
+              // Build Characters section
+              const charactersChildren: HierarchyNode[] = [];
+              if (questNpcs.length > 0) {
+                charactersChildren.push({
+                  id: "game-quest-npcs",
+                  label: "Quest Givers",
+                  type: "gameQuestNpcs" as const,
+                  children: questNpcs.map(makeNpcNode),
+                  badge: questNpcs.length,
+                  expandable: true,
+                });
+              }
+              if (shopkeepers.length > 0) {
+                charactersChildren.push({
+                  id: "game-shopkeepers",
+                  label: "Shopkeepers",
+                  type: "gameShopkeepers" as const,
+                  children: shopkeepers.map(makeNpcNode),
+                  badge: shopkeepers.length,
+                  expandable: true,
+                });
+              }
+              if (serviceNpcs.length > 0) {
+                charactersChildren.push({
+                  id: "game-service-npcs",
+                  label: "Service NPCs",
+                  type: "gameServiceNpcs" as const,
+                  children: serviceNpcs.map(makeNpcNode),
+                  badge: serviceNpcs.length,
+                  expandable: true,
+                });
+              }
+              const totalCharacters =
+                questNpcs.length + shopkeepers.length + serviceNpcs.length;
+
+              // Build Creatures section (mobs + bosses with nested spawns)
+              const mobNodes = buildMobNodes(mobNpcs);
+              const bossNodes = buildMobNodes(bossNpcs);
+              const creaturesChildren: HierarchyNode[] = [];
+              if (mobNodes.length > 0) {
+                creaturesChildren.push({
+                  id: "game-mobs",
+                  label: "Mobs",
+                  type: "gameMobs" as const,
+                  children: mobNodes,
+                  badge: mobNodes.length,
+                  expandable: true,
+                });
+              }
+              if (bossNodes.length > 0) {
+                creaturesChildren.push({
+                  id: "game-bosses",
+                  label: "Bosses",
+                  type: "gameBosses" as const,
+                  children: bossNodes,
+                  badge: bossNodes.length,
+                  expandable: true,
+                });
+              }
+              const totalCreatures =
+                mobNpcs.length + bossNpcs.length + ge.mobSpawns.length;
+
+              // --- Classify Stations ---
+              const CRAFTING_STATION_TYPES = new Set([
+                "anvil",
+                "furnace",
+                "range",
+              ]);
+              const SERVICE_STATION_TYPES = new Set([
+                "bank",
+                "altar",
+                "runecrafting_altar",
+              ]);
+              const craftingStations = ge.stations.filter(
+                (s) =>
+                  s.stationType && CRAFTING_STATION_TYPES.has(s.stationType),
+              );
+              const serviceStations = ge.stations.filter(
+                (s) =>
+                  s.stationType && SERVICE_STATION_TYPES.has(s.stationType),
+              );
+              const otherStations = ge.stations.filter(
+                (s) =>
+                  !s.stationType ||
+                  (!CRAFTING_STATION_TYPES.has(s.stationType) &&
+                    !SERVICE_STATION_TYPES.has(s.stationType)),
+              );
+              const makeStationNode = (
+                s: (typeof ge.stations)[0],
+              ): HierarchyNode => ({
+                id: `game-station-${s.selectableId}`,
+                label: s.name,
+                type: "gameStation" as const,
+                children: [] as HierarchyNode[],
+                dataId: s.entityId,
+                expandable: false,
+                metadata: {
+                  selectableId: s.selectableId,
+                  position: s.position,
+                },
+              });
+              const stationsChildren: HierarchyNode[] = [];
+              if (craftingStations.length > 0) {
+                stationsChildren.push({
+                  id: "game-crafting-stations",
+                  label: "Crafting",
+                  type: "gameCraftingStations" as const,
+                  children: craftingStations.map(makeStationNode),
+                  badge: craftingStations.length,
+                  expandable: true,
+                });
+              }
+              if (serviceStations.length > 0) {
+                stationsChildren.push({
+                  id: "game-service-stations",
+                  label: "Services",
+                  type: "gameServiceStations" as const,
+                  children: serviceStations.map(makeStationNode),
+                  badge: serviceStations.length,
+                  expandable: true,
+                });
+              }
+              if (otherStations.length > 0) {
+                stationsChildren.push({
+                  id: "game-other-stations",
+                  label: "Other",
+                  type: "gameOtherStations" as const,
+                  children: otherStations.map(makeStationNode),
+                  badge: otherStations.length,
+                  expandable: true,
+                });
+              }
+
+              // --- Classify Resources ---
+              const miningResources = ge.resources.filter(
+                (r) => r.resourceType === "ore",
+              );
+              const woodcuttingResources = ge.resources.filter(
+                (r) => r.resourceType === "tree",
+              );
+              const otherResources = ge.resources.filter(
+                (r) => r.resourceType !== "ore" && r.resourceType !== "tree",
+              );
+              const makeResourceNode = (
+                r: (typeof ge.resources)[0],
+              ): HierarchyNode => ({
+                id: `game-resource-${r.selectableId}`,
+                label: r.name,
+                type: "gameResource" as const,
+                children: [] as HierarchyNode[],
+                dataId: r.entityId,
+                expandable: false,
+                metadata: {
+                  selectableId: r.selectableId,
+                  position: r.position,
+                },
+              });
+              const resourcesChildren: HierarchyNode[] = [];
+              if (miningResources.length > 0) {
+                resourcesChildren.push({
+                  id: "game-mining-resources",
+                  label: "Mining",
+                  type: "gameMining" as const,
+                  children: miningResources.map(makeResourceNode),
+                  badge: miningResources.length,
+                  expandable: true,
+                });
+              }
+              if (woodcuttingResources.length > 0) {
+                resourcesChildren.push({
+                  id: "game-woodcutting-resources",
+                  label: "Woodcutting",
+                  type: "gameWoodcutting" as const,
+                  children: woodcuttingResources.map(makeResourceNode),
+                  badge: woodcuttingResources.length,
+                  expandable: true,
+                });
+              }
+              if (ge.fishingSpots > 0) {
+                resourcesChildren.push({
+                  id: "game-fishing",
+                  label: "Fishing",
+                  type: "gameFishing" as const,
+                  children: [],
+                  badge: ge.fishingSpots,
+                  expandable: false,
+                });
+              }
+              if (otherResources.length > 0) {
+                resourcesChildren.push({
+                  id: "game-other-resources",
+                  label: "Other",
+                  type: "gameOtherResources" as const,
+                  children: otherResources.map(makeResourceNode),
+                  badge: otherResources.length,
+                  expandable: true,
+                });
+              }
+
+              // Build top-level Game Entities node
+              const gameChildren: HierarchyNode[] = [];
+              if (totalCharacters > 0) {
+                gameChildren.push({
+                  id: "game-characters",
+                  label: "Characters",
+                  type: "gameCharacters" as const,
+                  children: charactersChildren,
+                  badge: totalCharacters,
+                  expandable: true,
+                });
+              }
+              if (totalCreatures > 0) {
+                gameChildren.push({
+                  id: "game-creatures",
+                  label: "Creatures",
+                  type: "gameCreatures" as const,
+                  children: creaturesChildren,
+                  badge: totalCreatures,
+                  expandable: true,
+                });
+              }
+              if (ge.stations.length > 0) {
+                gameChildren.push({
+                  id: "game-stations",
+                  label: "Stations",
+                  type: "gameStations" as const,
+                  children: stationsChildren,
+                  badge: ge.stations.length,
+                  expandable: true,
+                });
+              }
+              if (ge.resources.length > 0 || ge.fishingSpots > 0) {
+                gameChildren.push({
+                  id: "game-resources",
+                  label: "Resources",
+                  type: "gameResources" as const,
+                  children: resourcesChildren,
+                  badge: ge.resources.length + ge.fishingSpots,
+                  expandable: true,
+                });
+              }
+              if (ge.areas > 0) {
+                gameChildren.push({
+                  id: "game-areas",
+                  label: "World Areas",
+                  type: "gameAreas" as const,
+                  children: [],
+                  badge: ge.areas,
+                  expandable: false,
+                });
+              }
+
               return [
                 {
                   id: "game-entities",
                   label: "Game Entities",
                   type: "gameEntities" as const,
-                  children: [
-                    {
-                      id: "game-npcs",
-                      label: "NPCs",
-                      type: "gameNpcs" as const,
-                      children: ge.npcs.map((n) => ({
-                        id: `game-npc-${n.selectableId}`,
-                        label: n.name,
-                        type: "gameNpc" as const,
-                        children: [] as HierarchyNode[],
-                        dataId: n.entityId,
-                        expandable: false,
-                        metadata: {
-                          selectableId: n.selectableId,
-                          position: n.position,
-                        },
-                      })),
-                      badge: ge.npcs.length,
-                      expandable: ge.npcs.length > 0,
-                    },
-                    {
-                      id: "game-stations",
-                      label: "Stations",
-                      type: "gameStations" as const,
-                      children: ge.stations.map((s) => ({
-                        id: `game-station-${s.selectableId}`,
-                        label: s.name,
-                        type: "gameStation" as const,
-                        children: [] as HierarchyNode[],
-                        dataId: s.entityId,
-                        expandable: false,
-                        metadata: {
-                          selectableId: s.selectableId,
-                          position: s.position,
-                        },
-                      })),
-                      badge: ge.stations.length,
-                      expandable: ge.stations.length > 0,
-                    },
-                    {
-                      id: "game-resources",
-                      label: "Resources",
-                      type: "gameResources" as const,
-                      children: ge.resources.map((r) => ({
-                        id: `game-resource-${r.selectableId}`,
-                        label: r.name,
-                        type: "gameResource" as const,
-                        children: [] as HierarchyNode[],
-                        dataId: r.entityId,
-                        expandable: false,
-                        metadata: {
-                          selectableId: r.selectableId,
-                          position: r.position,
-                        },
-                      })),
-                      badge: ge.resources.length,
-                      expandable: ge.resources.length > 0,
-                    },
-                    {
-                      id: "game-mob-spawns",
-                      label: "Mob Spawns",
-                      type: "gameMobSpawns" as const,
-                      children: ge.mobSpawns.map((m) => ({
-                        id: `game-mobspawn-${m.selectableId}`,
-                        label: m.name,
-                        type: "gameMobSpawn" as const,
-                        children: [] as HierarchyNode[],
-                        dataId: m.entityId,
-                        expandable: false,
-                        metadata: {
-                          selectableId: m.selectableId,
-                          position: m.position,
-                        },
-                      })),
-                      badge: ge.mobSpawns.length,
-                      expandable: ge.mobSpawns.length > 0,
-                    },
-                    {
-                      id: "game-fishing",
-                      label: "Fishing Spots",
-                      type: "gameFishing" as const,
-                      children: [],
-                      badge: ge.fishingSpots,
-                      expandable: false,
-                    },
-                    {
-                      id: "game-areas",
-                      label: "World Areas",
-                      type: "gameAreas" as const,
-                      children: [],
-                      badge: ge.areas,
-                      expandable: false,
-                    },
-                  ],
+                  children: gameChildren,
                   badge: totalGame,
                   expandable: true,
                 },
@@ -2807,6 +3068,7 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
     state.extendedLayers,
     state.audioLayers,
     state.gameEntities,
+    state.manifests,
   ]);
 
   // Computed values

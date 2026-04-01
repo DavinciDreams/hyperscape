@@ -13,16 +13,7 @@
  * - station → StationProperties
  */
 
-import {
-  Info,
-  Settings,
-  Search,
-  MessageSquare,
-  Mic,
-  Package,
-  Target,
-  Pickaxe,
-} from "lucide-react";
+import { Info, Settings, Search } from "lucide-react";
 import React, { useState, useMemo, createContext, useContext } from "react";
 
 import { useWorldStudio } from "../WorldStudioContext";
@@ -44,27 +35,10 @@ import { WaterBodyProperties } from "./properties/WaterBodyProperties";
 import { MusicZoneProperties } from "./properties/MusicZoneProperties";
 import { AmbientZoneProperties } from "./properties/AmbientZoneProperties";
 import { SFXTriggerProperties } from "./properties/SFXTriggerProperties";
-
-/** Action button for entity-specific operations */
-function ActionButton({
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  icon: typeof MessageSquare;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-bg-tertiary hover:bg-primary/10 hover:text-primary text-text-secondary rounded-md border border-border-primary transition-colors w-full"
-      onClick={onClick}
-    >
-      <Icon size={12} className="flex-shrink-0" />
-      <span>{label}</span>
-    </button>
-  );
-}
+import { GameNPCProperties } from "./properties/GameNPCProperties";
+import { GameStationProperties } from "./properties/GameStationProperties";
+import { GameResourceProperties } from "./properties/GameResourceProperties";
+import { GameMobSpawnProperties } from "./properties/GameMobSpawnProperties";
 
 /** Context for property search filtering */
 const PropertySearchContext = createContext<string>("");
@@ -308,190 +282,25 @@ export function PropertiesPanel() {
       }
 
       // Game world manifest entities (from GameWorldEntitySync)
-      case "gameNpc": {
-        const d = selection.entityData;
-        if (d) {
-          const pos = d.position as
-            | { x: number; y: number; z: number }
-            | undefined;
-          return (
-            <>
-              <PropertySection title="NPC (Game World)">
-                <InfoRow
-                  label="Name"
-                  value={String(d.displayName ?? d.entityId)}
-                />
-                <InfoRow
-                  label="NPC Type"
-                  value={String(d.npcType ?? "unknown")}
-                />
-                <InfoRow label="Entity ID" value={String(d.entityId)} />
-                {d.storeId ? (
-                  <InfoRow label="Store ID" value={String(d.storeId)} />
-                ) : null}
-              </PropertySection>
-              {pos && (
-                <PropertySection title="Transform">
-                  <TransformSection position={pos} readOnly />
-                </PropertySection>
-              )}
-              <PropertySection title="Actions">
-                <div className="space-y-1">
-                  <ActionButton
-                    icon={MessageSquare}
-                    label="Edit Dialogue"
-                    onClick={() =>
-                      console.log("[Action] Edit Dialogue for", d.entityId)
-                    }
-                  />
-                  <ActionButton
-                    icon={Mic}
-                    label="Generate Voice"
-                    onClick={() =>
-                      console.log("[Action] Generate Voice for", d.entityId)
-                    }
-                  />
-                </div>
-              </PropertySection>
-            </>
-          );
-        }
-        break;
-      }
+      case "gameNpc":
+        return selection.entityData ? (
+          <GameNPCProperties entityData={selection.entityData} />
+        ) : null;
 
-      case "gameStation": {
-        const d = selection.entityData;
-        if (d) {
-          const pos = d.position as
-            | { x: number; y: number; z: number }
-            | undefined;
-          return (
-            <>
-              <PropertySection title="Station (Game World)">
-                <InfoRow
-                  label="Name"
-                  value={String(d.displayName ?? d.entityId)}
-                />
-                <InfoRow
-                  label="Station Type"
-                  value={String(d.stationType ?? "unknown")}
-                />
-                <InfoRow label="Entity ID" value={String(d.entityId)} />
-                {d.bankId ? (
-                  <InfoRow label="Bank ID" value={String(d.bankId)} />
-                ) : null}
-                {d.runeType ? (
-                  <InfoRow label="Rune Type" value={String(d.runeType)} />
-                ) : null}
-              </PropertySection>
-              {pos && (
-                <PropertySection title="Transform">
-                  <TransformSection position={pos} readOnly />
-                </PropertySection>
-              )}
-              {(d.bankId ||
-                d.stationType === "bank" ||
-                d.stationType === "general_store") && (
-                <PropertySection title="Actions">
-                  <div className="space-y-1">
-                    <ActionButton
-                      icon={Package}
-                      label="Edit Inventory"
-                      onClick={() =>
-                        console.log("[Action] Edit Inventory for", d.entityId)
-                      }
-                    />
-                  </div>
-                </PropertySection>
-              )}
-            </>
-          );
-        }
-        break;
-      }
+      case "gameStation":
+        return selection.entityData ? (
+          <GameStationProperties entityData={selection.entityData} />
+        ) : null;
 
-      case "gameResource": {
-        const d = selection.entityData;
-        if (d) {
-          const isTree = d.entityType === "tree";
-          const pos = d.position as
-            | { x: number; y: number; z: number }
-            | undefined;
-          return (
-            <>
-              <PropertySection
-                title={isTree ? "Tree (Game World)" : "Ore (Game World)"}
-              >
-                <InfoRow
-                  label="Name"
-                  value={String(d.displayName ?? d.entityId)}
-                />
-                <InfoRow
-                  label="Type"
-                  value={isTree ? "Woodcutting" : "Mining"}
-                />
-                <InfoRow label="Resource ID" value={String(d.entityId)} />
-              </PropertySection>
-              {pos && (
-                <PropertySection title="Transform">
-                  <TransformSection position={pos} readOnly />
-                </PropertySection>
-              )}
-              <PropertySection title="Actions">
-                <div className="space-y-1">
-                  <ActionButton
-                    icon={Pickaxe}
-                    label="Change Resource Type"
-                    onClick={() =>
-                      console.log("[Action] Change Type for", d.entityId)
-                    }
-                  />
-                </div>
-              </PropertySection>
-            </>
-          );
-        }
-        break;
-      }
+      case "gameResource":
+        return selection.entityData ? (
+          <GameResourceProperties entityData={selection.entityData} />
+        ) : null;
 
-      case "gameMobSpawn": {
-        const d = selection.entityData;
-        if (d) {
-          const pos = d.position as
-            | { x: number; y: number; z: number }
-            | undefined;
-          return (
-            <>
-              <PropertySection title="Mob Spawn (Game World)">
-                <InfoRow
-                  label="Name"
-                  value={String(d.displayName ?? d.entityId)}
-                />
-                <InfoRow label="Mob ID" value={String(d.entityId)} />
-                <InfoRow label="Spawn Radius" value={`${d.spawnRadius}m`} />
-                <InfoRow label="Max Count" value={String(d.maxCount)} />
-              </PropertySection>
-              {pos && (
-                <PropertySection title="Transform">
-                  <TransformSection position={pos} readOnly />
-                </PropertySection>
-              )}
-              <PropertySection title="Actions">
-                <div className="space-y-1">
-                  <ActionButton
-                    icon={Target}
-                    label="Adjust Spawn Radius"
-                    onClick={() =>
-                      console.log("[Action] Adjust Radius for", d.entityId)
-                    }
-                  />
-                </div>
-              </PropertySection>
-            </>
-          );
-        }
-        break;
-      }
+      case "gameMobSpawn":
+        return selection.entityData ? (
+          <GameMobSpawnProperties entityData={selection.entityData} />
+        ) : null;
     }
 
     return null;

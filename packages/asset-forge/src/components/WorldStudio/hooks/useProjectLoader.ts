@@ -30,6 +30,10 @@ import {
   acquireProjectLock,
   releaseProjectLock,
 } from "../../../utils/worldProjectApi";
+import {
+  deserializeManifestOverrides,
+  type SerializedManifestOverrides,
+} from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
 
 /**
@@ -181,6 +185,22 @@ export function useProjectLoader(projectId: string) {
         actions.loadWorld(world);
         actions.switchToEditing();
         actions.loadSuccess();
+
+        // Restore manifest overrides from snapshot
+        if (project.manifestSnapshot) {
+          try {
+            actions.loadManifestOverrides(
+              deserializeManifestOverrides(
+                project.manifestSnapshot as SerializedManifestOverrides,
+              ),
+            );
+          } catch (e) {
+            console.warn(
+              "[ProjectLoader] Failed to restore manifest overrides:",
+              e,
+            );
+          }
+        }
 
         // Acquire edit lock
         try {

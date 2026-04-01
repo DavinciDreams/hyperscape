@@ -594,7 +594,7 @@ function createMobSpawnZone(
   const rx = spawn.position.x + worldCenterOffset;
   const rz = spawn.position.z + worldCenterOffset;
 
-  // Ring outline showing spawn radius (simpler than a cylinder — fewer vertices, no transparency overdraw)
+  // Ring outline showing spawn radius
   const ringGeom = new THREE.RingGeometry(
     spawn.spawnRadius - 0.15,
     spawn.spawnRadius + 0.15,
@@ -605,15 +605,32 @@ function createMobSpawnZone(
   ring.position.set(rx, h + 0.05, rz);
   group.add(ring);
 
-  // Center marker (red cone pointing down, shared material)
-  const marker = new THREE.Mesh(
-    getMobMarkerGeom(),
-    getStandardMat(0xff0000, { roughness: 0.5 }),
-  );
-  marker.position.set(rx, h + 1.5, rz);
-  marker.rotation.x = Math.PI;
-  marker.castShadow = true;
-  group.add(marker);
+  // Mob figure at spawn center — try real GLB model first, fallback to capsule
+  const mobModel = getNpcModel(spawn.mobId);
+  if (mobModel && mobModel.parts.length > 0) {
+    for (const part of mobModel.parts) {
+      const mesh = new THREE.Mesh(part.geometry, part.material);
+      mesh.position.set(rx, h, rz);
+      mesh.scale.setScalar(mobModel.scale);
+      mesh.castShadow = true;
+      mesh.userData._cachedModel = true;
+      group.add(mesh);
+    }
+  } else {
+    // Fallback: red-tinted capsule (body + head) like NPC markers
+    const body = new THREE.Mesh(getNpcBodyGeom(), getStandardMat(0xcc2222));
+    body.position.set(rx, h + 0.7, rz);
+    body.castShadow = true;
+    group.add(body);
+
+    const head = new THREE.Mesh(
+      getNpcHeadGeom(),
+      getStandardMat(0xff3333, { roughness: 0.6 }),
+    );
+    head.position.set(rx, h + 1.7, rz);
+    head.castShadow = true;
+    group.add(head);
+  }
 
   // Label
   const displayName = `${spawn.mobId.replace(/_/g, " ")} (×${spawn.maxCount})`;
@@ -799,6 +816,21 @@ export interface GameEntityInfo {
   name: string;
   /** World position (game coords, not render coords) */
   position: { x: number; z: number };
+  // Grouping metadata for manifest-aware outliner hierarchy:
+  /** NPC category from manifest ("mob"|"boss"|"neutral"|"quest") */
+  category?: string;
+  /** NPC placement type ("bank", "quest_giver", "general_store", etc.) */
+  npcType?: string;
+  /** Linked store ID (for shopkeeper NPCs) */
+  storeId?: string;
+  /** Station type ("anvil"|"furnace"|"bank"|"altar"|etc.) */
+  stationType?: string;
+  /** Resource type ("ore"|"tree") */
+  resourceType?: string;
+  /** Mob spawn radius */
+  spawnRadius?: number;
+  /** Mob spawn max count */
+  maxCount?: number;
 }
 
 /** Entity data from the game manifest (world-areas.json) */
@@ -915,6 +947,8 @@ export async function createGameWorldEntities(
         entityId: npc.id,
         name: npc.name ?? npc.id.replace(/_/g, " "),
         position: { x: npc.position.x, z: npc.position.z },
+        npcType: npc.type,
+        storeId: npc.storeId,
       });
     }
 
@@ -934,6 +968,7 @@ export async function createGameWorldEntities(
             ? `${station.runeType} ${station.type}`.replace(/_/g, " ")
             : station.type.replace(/_/g, " "),
           position: { x: station.position.x, z: station.position.z },
+          stationType: station.type,
         });
       }
     }
@@ -952,6 +987,7 @@ export async function createGameWorldEntities(
         entityId: resource.resourceId,
         name: resource.resourceId.replace(/_/g, " "),
         position: { x: resource.position.x, z: resource.position.z },
+        resourceType: resource.type,
       });
     }
 
@@ -964,6 +1000,8 @@ export async function createGameWorldEntities(
         entityId: spawn.mobId,
         name: `${spawn.mobId.replace(/_/g, " ")} (×${spawn.maxCount})`,
         position: { x: spawn.position.x, z: spawn.position.z },
+        spawnRadius: spawn.spawnRadius,
+        maxCount: spawn.maxCount,
       });
     }
 
