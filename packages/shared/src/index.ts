@@ -492,6 +492,7 @@ export { Node } from "./nodes/Node";
 export { UI } from "./nodes/UI";
 export { UIView } from "./nodes/UIView";
 export { UIText } from "./nodes/UIText";
+export { UIImage } from "./nodes/UIImage";
 export { Group } from "./nodes/Group";
 export { Mesh } from "./nodes/Mesh";
 export { Avatar } from "./nodes/Avatar";
