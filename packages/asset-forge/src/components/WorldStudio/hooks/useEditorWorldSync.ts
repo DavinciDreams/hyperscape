@@ -10,6 +10,12 @@
  */
 
 import * as THREE from "three";
+import {
+  MeshStandardNodeMaterial,
+  MeshBasicNodeMaterial,
+  LineBasicNodeMaterial,
+  SpriteNodeMaterial,
+} from "three/webgpu";
 import { useEffect, useRef, useCallback } from "react";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
@@ -100,13 +106,12 @@ function createMarkerMesh(
   rotation: number = 0,
 ): THREE.Mesh {
   const geo = getMarkerGeometry(type);
-  const mat = new THREE.MeshStandardMaterial({
-    color: MARKER_COLORS[type],
-    emissive: MARKER_COLORS[type],
-    emissiveIntensity: 0.3,
-    roughness: 0.7,
-    metalness: 0.2,
-  });
+  const mat = new MeshStandardNodeMaterial();
+  mat.color = new THREE.Color(MARKER_COLORS[type]);
+  mat.emissive = new THREE.Color(MARKER_COLORS[type]);
+  mat.emissiveIntensity = 0.3;
+  mat.roughness = 0.7;
+  mat.metalness = 0.2;
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(position.x, position.y, position.z);
   mesh.rotation.y = rotation;
@@ -122,12 +127,13 @@ function createGhostMesh(
 ): THREE.Mesh {
   const markerType = categoryToMarkerType(type);
   const geo = getMarkerGeometry(markerType);
-  const mat = new THREE.MeshStandardMaterial({
-    color: MARKER_COLORS[markerType as keyof typeof MARKER_COLORS] ?? 0xffffff,
-    transparent: true,
-    opacity: 0.5,
-    depthWrite: false,
-  });
+  const mat = new MeshStandardNodeMaterial();
+  mat.color = new THREE.Color(
+    MARKER_COLORS[markerType as keyof typeof MARKER_COLORS] ?? 0xffffff,
+  );
+  mat.transparent = true;
+  mat.opacity = 0.5;
+  mat.depthWrite = false;
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(position.x, position.y, position.z);
   mesh.rotation.y = rotation;
@@ -160,7 +166,10 @@ function createLabelSprite(text: string): THREE.Sprite {
   ctx.fillText(text, 128, 40);
 
   const texture = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+  const mat = new SpriteNodeMaterial();
+  mat.map = texture;
+  mat.depthTest = false;
+  mat.transparent = true;
   const sprite = new THREE.Sprite(mat);
   const aspect = 256 / 64; // canvas dimensions
   sprite.scale.set(1.5, 0.375, 1);
@@ -322,12 +331,11 @@ export function useEditorWorldSync({
     const lineGroup = new THREE.Group();
     lineGroup.name = "teleport-connections";
     const drawnPairs = new Set<string>();
-    const lineMat = new THREE.LineBasicMaterial({
-      color: 0x8b5cf6,
-      transparent: true,
-      opacity: 0.6,
-      depthWrite: false,
-    });
+    const lineMat = new LineBasicNodeMaterial();
+    lineMat.color = new THREE.Color(0x8b5cf6);
+    lineMat.transparent = true;
+    lineMat.opacity = 0.6;
+    lineMat.depthWrite = false;
 
     for (const tp of layers.teleports) {
       for (const connId of tp.connections) {
@@ -447,13 +455,12 @@ export function useEditorWorldSync({
       128,
     );
     ringGeo.rotateX(-Math.PI / 2);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xff4444,
-      transparent: true,
-      opacity: 0.15,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
+    const ringMat = new MeshBasicNodeMaterial();
+    ringMat.color = new THREE.Color(0xff4444);
+    ringMat.transparent = true;
+    ringMat.opacity = 0.15;
+    ringMat.side = THREE.DoubleSide;
+    ringMat.depthWrite = false;
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.position.y = 1;
     ring.name = "world-boundary-ring";
