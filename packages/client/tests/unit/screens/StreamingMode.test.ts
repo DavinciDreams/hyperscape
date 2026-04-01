@@ -80,6 +80,25 @@ describe("shouldDismissStreamingLoading", () => {
     ).toBe(false);
   });
 
+  it("marks viewer access denial with a dedicated degraded reason", () => {
+    expect(
+      deriveStreamingRendererHealth({
+        connected: false,
+        worldReady: false,
+        terrainReady: false,
+        hasStreamingState: false,
+        initError: "Streaming viewer access denied",
+        needsCameraLock: false,
+        cameraLocked: false,
+        loadingDismissed: false,
+        phase: "ANNOUNCEMENT",
+        agent1: null,
+        agent2: null,
+        arenaPositions: null,
+      }).degradedReason,
+    ).toBe("viewer_access_denied");
+  });
+
   it("marks a live duel as degraded while the loading overlay is still visible", () => {
     expect(
       deriveStreamingRendererHealth({

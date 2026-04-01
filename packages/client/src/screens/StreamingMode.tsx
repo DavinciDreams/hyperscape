@@ -94,6 +94,26 @@ export interface StreamingRendererHealth {
   phase: StreamingState["cycle"]["phase"] | null;
 }
 
+type StreamingConfig = {
+  publicDelayMs?: number;
+};
+
+const STREAMING_VIEWER_ACCESS_DENIED_MESSAGE =
+  "Streaming viewer access denied";
+const STREAMING_VIEWER_ACCESS_REQUIRED_MESSAGE =
+  "Streaming viewer access required";
+
+function isStreamingViewerAccessDeniedError(
+  message: string | null | undefined,
+): boolean {
+  if (!message) return false;
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized.includes("streaming viewer access denied") ||
+    normalized.includes("streaming viewer access required")
+  );
+}
+
 function toGuardrailAgent(
   agent: AgentInfo | null,
 ): StreamingGuardrailAgentSnapshot | null {
@@ -118,6 +138,9 @@ function deriveStreamingSurfaceBlockReason(params: {
 }): string | null {
   const activePhase = Boolean(params.phase && params.phase !== "IDLE");
 
+  if (isStreamingViewerAccessDeniedError(params.initError)) {
+    return "viewer_access_denied";
+  }
   if (params.initError?.trim()) {
     return "initialization_failed";
   }
@@ -213,7 +236,12 @@ export function StreamingMode() {
   const [streamingState, setStreamingState] = useState<StreamingState | null>(
     null,
   );
+  const [streamAccessToken] = useState<string | null>(() =>
+    getStreamingAccessToken(),
+  );
   const [connected, setConnected] = useState(false);
+  const [streamAccessCheckPending, setStreamAccessCheckPending] =
+    useState<boolean>(() => streamAccessToken == null);
   const [worldReady, setWorldReady] = useState(false);
   const [terrainReady, setTerrainReady] = useState(false);
   const [cameraLocked, setCameraLocked] = useState(false);
@@ -232,9 +260,6 @@ export function StreamingMode() {
   );
   const cameraRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const worldListenerCleanupRef = useRef<(() => void) | null>(null);
-  const [streamAccessToken] = useState<string | null>(() =>
-    getStreamingAccessToken(),
-  );
 
   // WebSocket URL for streaming mode (supports optional streamToken gate)
   const wsUrl = useMemo(() => {
@@ -264,6 +289,51 @@ export function StreamingMode() {
     }
     cameraRetryTimeoutsRef.current = [];
   }, []);
+
+  useEffect(() => {
+    if (streamAccessToken) {
+      setStreamAccessCheckPending(false);
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5_000);
+    const baseApiUrl = GAME_API_URL || "http://localhost:5555";
+    setStreamAccessCheckPending(true);
+
+    fetch(`${baseApiUrl}/api/streaming/config`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as StreamingConfig;
+      })
+      .then((config) => {
+        if (!active) return;
+        if (Number(config?.publicDelayMs ?? 0) > 0) {
+          setConnected(false);
+          setClientInitError(STREAMING_VIEWER_ACCESS_REQUIRED_MESSAGE);
+        }
+      })
+      .catch((error) => {
+        if (!active || (error as Error)?.name === "AbortError") return;
+        console.warn(
+          "[StreamingMode] Failed to verify streaming access policy:",
+          error,
+        );
+      })
+      .finally(() => {
+        clearTimeout(timeoutId);
+        if (active) {
+          setStreamAccessCheckPending(false);
+        }
+      });
+
+    return () => {
+      active = false;
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [streamAccessToken]);
 
   // Handle world setup
   const handleSetup = useCallback(
@@ -387,10 +457,25 @@ export function StreamingMode() {
           return state;
         });
       };
+      const onNetworkDisconnected = (data: unknown) => {
+        const payload = data as { code?: number; reason?: string } | null;
+        setConnected(false);
+
+        const reason = payload?.reason?.trim() || "";
+        if (
+          payload?.code === 4001 ||
+          reason.toLowerCase() ===
+            STREAMING_VIEWER_ACCESS_DENIED_MESSAGE.toLowerCase()
+        ) {
+          setClientInitError(STREAMING_VIEWER_ACCESS_DENIED_MESSAGE);
+        }
+      };
       world.on("streaming:state:update", onStreamingStateUpdate);
+      world.on(EventType.NETWORK_DISCONNECTED, onNetworkDisconnected);
       worldListenerCleanupRef.current = () => {
         world.off(EventType.READY, markWorldReady);
         world.off("streaming:state:update", onStreamingStateUpdate);
+        world.off(EventType.NETWORK_DISCONNECTED, onNetworkDisconnected);
       };
 
       // Disable player controls (spectator mode)
@@ -951,11 +1036,14 @@ export function StreamingMode() {
     const win = window as StreamingWindow;
     if (loadingDismissed) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = null;
+    } else if (streamAccessCheckPending) {
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "checking_access";
     } else if (clientInitError) {
-      const lower = clientInitError.toLowerCase();
-      if (lower.includes("webgpu")) {
+      if (isStreamingViewerAccessDeniedError(clientInitError)) {
+        win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:viewer_access_denied";
+      } else if (clientInitError.toLowerCase().includes("webgpu")) {
         win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:webgpu_required";
-      } else if (lower.includes("http error")) {
+      } else if (clientInitError.toLowerCase().includes("http error")) {
         win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:http";
       } else {
         win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:init_failed";
@@ -969,7 +1057,14 @@ export function StreamingMode() {
     } else {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "finalizing";
     }
-  }, [clientInitError, connected, loadingDismissed, terrainReady, worldReady]);
+  }, [
+    clientInitError,
+    connected,
+    loadingDismissed,
+    streamAccessCheckPending,
+    terrainReady,
+    worldReady,
+  ]);
 
   // Trigger fade-out once when the stream is first ready.
   useEffect(() => {
@@ -993,14 +1088,30 @@ export function StreamingMode() {
 
   // Show loading overlay only during initial load or fade-out
   const showLoading = !loadingDismissed && !clientInitError;
-
-  const loadingHeadline = !connected
-    ? "Connecting to Hyperscape..."
-    : !worldReady
-      ? "Initializing world systems..."
-      : !terrainReady
-        ? "Generating terrain..."
-        : "Preparing stream view...";
+  const tokenlessAccessDenied =
+    !streamAccessToken &&
+    isStreamingViewerAccessDeniedError(clientInitError) &&
+    !streamAccessCheckPending;
+  const shouldMountGameClient = !streamAccessCheckPending && !tokenlessAccessDenied;
+  const loadingHeadline = streamAccessCheckPending
+    ? "Checking stream access..."
+    : !connected
+      ? "Connecting to Hyperscape..."
+      : !worldReady
+        ? "Initializing world systems..."
+        : !terrainReady
+          ? "Generating terrain..."
+          : "Preparing stream view...";
+  const accessError =
+    clientInitError && isStreamingViewerAccessDeniedError(clientInitError);
+  const errorTitle = accessError
+    ? "Live Stream Access Required"
+    : "Stream Initialization Failed";
+  const errorDetail = accessError
+    ? streamAccessToken
+      ? "This viewer token was rejected by the staging stream gate."
+      : "This live 3D stream is internal-only while delayed-public mode is enabled. Open the tokenized stream URL instead of the public stream route."
+    : clientInitError;
 
   return (
     <div
@@ -1013,13 +1124,15 @@ export function StreamingMode() {
       }}
     >
       {/* Game client (fullscreen, no UI) */}
-      <GameClient
-        wsUrl={wsUrl}
-        onSetup={handleSetup}
-        onInitError={setClientInitError}
-        hideUI={true}
-        streamingMode={true}
-      />
+      {shouldMountGameClient && (
+        <GameClient
+          wsUrl={wsUrl}
+          onSetup={handleSetup}
+          onInitError={setClientInitError}
+          hideUI={true}
+          streamingMode={true}
+        />
+      )}
 
       {/* Streaming overlay (on top of game) */}
       <StreamingOverlay state={streamingState} />
@@ -1068,6 +1181,35 @@ export function StreamingMode() {
               {loadingHeadline}
             </h2>
             <p style={{ opacity: 0.7 }}>AI Agent Duel Streaming Mode</p>
+          </div>
+        </div>
+      )}
+      {clientInitError && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0, 0, 0, 0.92)",
+            zIndex: 110,
+            padding: "24px",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: "720px",
+              textAlign: "center",
+              color: "#f2d08a",
+            }}
+          >
+            <h2 style={{ fontSize: "2rem", marginBottom: "1rem" }}>
+              {errorTitle}
+            </h2>
+            <p style={{ opacity: 0.85, lineHeight: 1.6, margin: 0 }}>
+              {errorDetail}
+            </p>
           </div>
         </div>
       )}

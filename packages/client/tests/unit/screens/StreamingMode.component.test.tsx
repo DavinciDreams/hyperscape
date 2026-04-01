@@ -11,6 +11,9 @@ const gameClientState = vi.hoisted(() => ({
   wsUrl: null as string | null,
   world: null as ReturnType<typeof createMockWorld> | null,
 }));
+const streamingAccessTokenState = vi.hoisted(() => ({
+  token: "stream-token" as string | null,
+}));
 
 function createMockWorld() {
   const listeners = new Map<string, Set<Listener>>();
@@ -73,7 +76,7 @@ vi.mock("../../../src/lib/api-config", () => ({
 }));
 
 vi.mock("../../../src/lib/streamingAccessToken", () => ({
-  getStreamingAccessToken: vi.fn(() => "stream-token"),
+  getStreamingAccessToken: vi.fn(() => streamingAccessTokenState.token),
 }));
 
 vi.mock("../../../src/screens/GameClient", () => ({
@@ -189,6 +192,7 @@ describe("StreamingMode component", () => {
     gameClientState.mode = "setup";
     gameClientState.wsUrl = null;
     gameClientState.world = null;
+    streamingAccessTokenState.token = "stream-token";
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -254,6 +258,64 @@ describe("StreamingMode component", () => {
           } | null;
         }).__HYPERSCAPE_STREAM_RENDERER_HEALTH__?.degradedReason,
       ).toBe("initialization_failed");
+    });
+  });
+
+  it("shows a dedicated access error when delayed-public staging is opened without a stream token", async () => {
+    streamingAccessTokenState.token = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/api/streaming/config")) {
+          return {
+            ok: true,
+            json: async () => ({ publicDelayMs: 15_000 }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => createStreamingState(),
+        };
+      }),
+    );
+
+    const { queryByTestId, findByText } = render(<StreamingMode />);
+
+    expect(await findByText("Live Stream Access Required")).toBeTruthy();
+    expect(
+      await findByText(
+        /tokenized stream url instead of the public stream route/i,
+      ),
+    ).toBeTruthy();
+    expect(queryByTestId("game-client")).toBeNull();
+  });
+
+  it("maps websocket close code 4001 to the stream access error state", async () => {
+    render(<StreamingMode />);
+
+    await waitFor(() => {
+      expect(gameClientState.world).toBeTruthy();
+    });
+
+    gameClientState.world?.emitLocal(EventType.NETWORK_DISCONNECTED, {
+      code: 4001,
+      reason: "Streaming viewer access denied",
+    });
+
+    await waitFor(() => {
+      expect(
+        (window as Window & {
+          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
+            degradedReason?: string | null;
+          } | null;
+          __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
+        }).__HYPERSCAPE_STREAM_RENDERER_HEALTH__?.degradedReason,
+      ).toBe("viewer_access_denied");
+      expect(
+        (window as Window & {
+          __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
+        }).__HYPERSCAPE_STREAM_BOOT_STATUS__,
+      ).toBe("error:viewer_access_denied");
     });
   });
 });
