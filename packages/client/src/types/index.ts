@@ -44,7 +44,6 @@ export type {
 // UI and component types
 export type {
   Field,
-  HintContextType,
   PermissionsInfo,
   PointerEventHandler,
   ChangeEventHandler,
