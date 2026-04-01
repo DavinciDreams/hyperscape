@@ -515,6 +515,11 @@ export function createProceduralBridge(
   // ── Merge and build group ──
   const group = new THREE.Group();
   group.name = `${def.id}_group`;
+  group.userData = {
+    selectableId: def.id,
+    selectableType: "bridge",
+    selectable: true,
+  };
 
   if (woodGeometries.length > 0) {
     const mergedWood = mergeGeometries(woodGeometries);

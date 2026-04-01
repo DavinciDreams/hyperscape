@@ -154,7 +154,9 @@ export interface ViewportSelection {
     | "building"
     | "road"
     | "entity"
-    | "vegetation";
+    | "vegetation"
+    | "bridge"
+    | "duelArena";
   id: string;
   position: { x: number; y: number; z: number };
   townId?: string;
@@ -3408,10 +3410,20 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         // Bridges at known river crossing positions
         const bridges = createBridgeMeshes(worldCenterOffset, getH);
         scene.add(bridges);
+        // Register each bridge subgroup as selectable for click-to-select
+        for (const child of bridges.children) {
+          if (child.userData?.selectable) {
+            selectableObjectsRef.current.push(child);
+          }
+        }
 
         // Duel arena at fixed game position
         const arena = createDuelArena(worldCenterOffset, getH);
         scene.add(arena);
+        // Register arena group as selectable for click-to-select
+        if (arena.userData?.selectable) {
+          selectableObjectsRef.current.push(arena);
+        }
 
         // All manifest entities (NPCs, stations, resources, mob spawns, fishing)
         createGameWorldEntities(worldCenterOffset, getH, waterThreshold).then(

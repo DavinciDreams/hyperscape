@@ -106,6 +106,11 @@ export function createProceduralArena(
 ): THREE.Group {
   const group = new THREE.Group();
   group.name = "duel_arena";
+  group.userData = {
+    selectableId: "duel_arena",
+    selectableType: "duelArena",
+    selectable: true,
+  };
 
   const floorGeometries: THREE.BufferGeometry[] = [];
   const fenceGeometries: THREE.BufferGeometry[] = [];

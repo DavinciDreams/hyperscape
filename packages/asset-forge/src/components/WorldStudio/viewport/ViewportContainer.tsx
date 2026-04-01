@@ -82,11 +82,13 @@ function getSelectableIdFromSelection(
     return selection.entityData.selectableId as string;
   }
 
-  // Foundation elements use their id
+  // Foundation elements and procgen structures use their id
   if (
     selection.type === "town" ||
     selection.type === "building" ||
-    selection.type === "road"
+    selection.type === "road" ||
+    selection.type === "bridge" ||
+    selection.type === "duelArena"
   ) {
     return selection.id;
   }
@@ -260,6 +262,9 @@ export function ViewportContainer() {
         "event",
         "lore",
         "vegetation",
+        "bridge",
+        "duelArena",
+        "building",
       ]),
     [],
   );
@@ -756,6 +761,24 @@ export function ViewportContainer() {
             position: selection.position,
           },
         });
+      } else if (selection.type === "bridge") {
+        actions.setSelection({
+          type: "bridge" as never,
+          id: selection.id,
+          path: [
+            {
+              type: "bridge",
+              id: selection.id,
+              name: selection.id.replace(/_/g, " "),
+            },
+          ],
+        });
+      } else if (selection.type === "duelArena") {
+        actions.setSelection({
+          type: "duelArena" as never,
+          id: selection.id,
+          path: [{ type: "duelArena", id: selection.id, name: "Duel Arena" }],
+        });
       } else if (
         selection.type === "tile" &&
         selection.tileData &&
@@ -886,6 +909,45 @@ export function ViewportContainer() {
         },
         { label: "", separator: true },
       );
+
+      // Flatten Terrain Below — for structures that sit on terrain
+      const FLATTENABLE_TYPES = new Set(["building", "bridge", "duelArena"]);
+      if (FLATTENABLE_TYPES.has(selType)) {
+        items.push({
+          label: "Flatten Terrain Below",
+          onClick: () => {
+            if (selectedSelectableId && activeSceneRefs) {
+              let found: THREE.Object3D | null = null;
+              activeSceneRefs.scene.traverse((obj) => {
+                if (found) return;
+                if (obj.userData?.selectableId === selectedSelectableId) {
+                  found = obj;
+                }
+              });
+              if (found) {
+                const box = new THREE.Box3().setFromObject(found);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                // Sharp falloff gives full strength within 70% of radius, so
+                // divide by 0.7 to ensure the entire footprint is fully flattened.
+                const diagonal = Math.sqrt(size.x * size.x + size.z * size.z);
+                const footprintRadius = diagonal / 2 + 2;
+                actions.addTerrainSculpt({
+                  id: `flatten_${selId}_${Date.now()}`,
+                  center: { x: center.x, z: center.z },
+                  radius: footprintRadius / 0.7,
+                  strength: 1.0,
+                  falloff: "sharp",
+                  mode: "flatten",
+                  flattenTarget: box.min.y,
+                  timestamp: Date.now(),
+                });
+              }
+            }
+            hideContextMenu();
+          },
+        });
+      }
     }
 
     items.push({
