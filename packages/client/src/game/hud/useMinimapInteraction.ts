@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { THREE, INPUT } from "@hyperscape/shared";
+import { THREE, INPUT, TerrainSystem } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import {
   type MinimapRenderState,
@@ -26,19 +26,6 @@ const STEP_EXTENT = 10;
 const MINIMAP_BASE_SIZE_PX = 200;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
-
-/** Terrain system interface used for height sampling and click-to-move */
-interface TerrainSystemLike {
-  getHeightAt: (x: number, z: number) => number;
-  getWaterBodyRegistry?: () => {
-    getWaterSurfaceAt: (x: number, z: number) => number;
-  };
-}
-
-/** Network send interface needed for server-authoritative move requests */
-interface WorldNetworkSend {
-  network: { send: (method: string, data: unknown) => void };
-}
 
 interface UseMinimapInteractionOptions {
   world: ClientWorld;
@@ -290,10 +277,7 @@ export function useMinimapInteraction(
         targetZ = player.position.z + dz * scale;
       }
 
-      const terrainSystem = world.getSystem("terrain") as unknown as
-        | TerrainSystemLike
-        | null
-        | undefined;
+      const terrainSystem = world.getSystem<TerrainSystem>("terrain");
       let targetY = 0;
       if (terrainSystem?.getHeightAt) {
         const h = terrainSystem.getHeightAt(targetX, targetZ);
@@ -301,7 +285,7 @@ export function useMinimapInteraction(
       }
 
       const currentRun = (player as { runMode?: boolean }).runMode === true;
-      (world as unknown as WorldNetworkSend).network.send("moveRequest", {
+      world.network?.send?.("moveRequest", {
         target: [targetX, targetY, targetZ],
         runMode: currentRun,
         cancel: false,

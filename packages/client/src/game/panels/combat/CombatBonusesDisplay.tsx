@@ -5,6 +5,7 @@
  */
 
 import React from "react";
+import { getHpPercent } from "@hyperscape/shared";
 import { useThemeStore } from "@/ui";
 import { StatIcon } from "./StyleIcons";
 import type { CombatBonusesDisplayProps } from "./types";
@@ -92,9 +93,9 @@ export function CombatBonusesDisplay({
   innerPadding,
   theme,
 }: CombatBonusesDisplayProps) {
-  const healthPercent = Math.round((health.current / health.max) * 100);
+  const healthPercent = getHpPercent(health.current, health.max);
   const targetHealthPercent = targetHealth
-    ? Math.round((targetHealth.current / targetHealth.max) * 100)
+    ? getHpPercent(targetHealth.current, targetHealth.max)
     : 0;
 
   return (
