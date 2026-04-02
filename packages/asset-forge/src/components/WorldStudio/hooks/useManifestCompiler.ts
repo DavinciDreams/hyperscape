@@ -19,11 +19,23 @@ import type {
   ManifestDiffEntry,
 } from "../types";
 import { MANIFEST_REGISTRY } from "../types";
+import type {
+  CompiledWorldJson,
+  CompiledWorldArea,
+  CompiledMobSpawnPoint,
+  CompiledBiomeResource,
+  CompiledNPCLocation,
+  CompiledStationLocation,
+} from "../types/compiledManifests";
+import {
+  TOWN_STATION_SEARCH_RADIUS,
+  getTownSafeRadius,
+} from "../utils/worldConstants";
 
 /** Compiled manifest output: filename → JSON content */
 export interface CompiledManifests {
   files: Map<string, unknown>;
-  worldJson: Record<string, unknown>;
+  worldJson: CompiledWorldJson;
 }
 
 /**
@@ -33,7 +45,7 @@ export interface CompiledManifests {
 function compileWorldJson(
   world: WorldData,
   extendedLayers: ExtendedWorldLayers,
-): Record<string, unknown> {
+): CompiledWorldJson {
   // Compile NPC placements
   const npcs = world.layers.npcs.map((npc) => ({
     id: npc.id,
@@ -47,6 +59,7 @@ function compileWorldJson(
   }));
 
   // Compile mob spawns
+  // NOTE: Runtime reads `respawnTime` (MobNPCSpawnerSystem:489), NOT `respawnTicks`
   const mobSpawns = extendedLayers.mobSpawns.map((ms) => ({
     id: ms.id,
     mobId: ms.mobId,
@@ -54,7 +67,7 @@ function compileWorldJson(
     position: ms.position,
     spawnRadius: ms.spawnRadius,
     maxCount: ms.maxCount,
-    respawnTicks: ms.respawnTicks,
+    respawnTime: ms.respawnTicks, // field renamed to match runtime expectation
   }));
 
   // Compile resources
@@ -127,47 +140,162 @@ function compileWorldJson(
 }
 
 /**
- * Compile world areas from placements grouped by town/area.
+ * Compile world areas in the full WorldArea format the game expects.
+ *
+ * Each town → one WorldArea with safeZone: true
+ * Each auto-gen zone/region → one WorldArea with tier-derived difficulty
  */
 function compileWorldAreas(
   world: WorldData,
   extendedLayers: ExtendedWorldLayers,
-): Record<string, unknown> {
-  const areas: Record<string, unknown> = {};
+): CompiledWorldArea[] {
+  const areas: CompiledWorldArea[] = [];
 
+  // Compile towns as safe WorldAreas
   for (const town of world.foundation.towns) {
-    const townNpcs = world.layers.npcs
+    const safeRadius = getTownSafeRadius(town);
+    const townNpcs: CompiledNPCLocation[] = world.layers.npcs
       .filter(
         (n) =>
           n.parentContext.type === "town" && n.parentContext.townId === town.id,
       )
       .map((npc) => ({
-        id: npc.npcTypeId,
-        name: npc.name,
+        id: npc.id, // placement-unique ID, not npcTypeId
+        type: "general_store" as const,
         position: npc.position,
+        name: npc.name,
         storeId: npc.storeId,
-        dialogId: npc.dialogId,
       }));
 
-    const townStations = extendedLayers.stations
+    const townStations: CompiledStationLocation[] = extendedLayers.stations
       .filter((s) => {
         const dx = s.position.x - town.position.x;
         const dz = s.position.z - town.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        return dist < 80; // within ~80m of town center
+        return Math.sqrt(dx * dx + dz * dz) < TOWN_STATION_SEARCH_RADIUS;
       })
-      .map((s) => ({ type: s.stationType, position: s.position }));
+      .map((s) => ({
+        id: s.id,
+        type: s.stationType,
+        position: s.position,
+        rotation: s.rotation,
+      }));
 
-    areas[town.id] = {
+    areas.push({
+      id: town.id,
       name: town.name,
-      position: town.position,
-      size: town.size,
+      description: `${town.size.charAt(0).toUpperCase() + town.size.slice(1)} of ${town.name}`,
+      difficultyLevel: 0,
+      bounds: {
+        minX: town.position.x - safeRadius,
+        maxX: town.position.x + safeRadius,
+        minZ: town.position.z - safeRadius,
+        maxZ: town.position.z + safeRadius,
+      },
+      biomeType: "town",
+      safeZone: true,
       npcs: townNpcs,
+      resources: [],
+      mobSpawns: [],
       stations: townStations,
-    };
+    });
   }
 
-  return { starterTowns: areas };
+  // Compile regions/zones as WorldAreas
+  for (const region of extendedLayers.regions) {
+    // Determine bounds from autoGenBounds or tile keys
+    let bounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+    if (region.autoGenBounds?.boundingBox) {
+      bounds = region.autoGenBounds.boundingBox;
+    }
+
+    // Map tier to difficultyLevel (0-3)
+    let difficultyLevel: 0 | 1 | 2 | 3 = 0;
+    if (region.autoGenBounds) {
+      const scalar = region.autoGenBounds.difficultyRange[0];
+      if (scalar >= 0.5) difficultyLevel = 3;
+      else if (scalar >= 0.3) difficultyLevel = 2;
+      else if (scalar >= 0.05) difficultyLevel = 1;
+    }
+
+    // Determine biome
+    const biomeType =
+      region.autoGenBounds?.biomeFilter ?? region.biomeOverride ?? "unknown";
+
+    // Gather entities within this region
+    const regionMobs: CompiledMobSpawnPoint[] = extendedLayers.mobSpawns
+      .filter((m) => m.sourceRegionId === region.id)
+      .map((m) => ({
+        mobId: m.mobId,
+        position: m.position,
+        spawnRadius: m.spawnRadius,
+        maxCount: m.maxCount,
+        respawnTime: m.respawnTicks,
+      }));
+
+    const regionResources: CompiledBiomeResource[] = extendedLayers.resources
+      .filter((r) => r.sourceRegionId === region.id)
+      .map((r) => ({
+        type: resourceTypeToCompiled(r.resourceType),
+        position: r.position,
+        resourceId: r.resourceId,
+        respawnTime: 100,
+        level: 1,
+      }));
+
+    // Fishing spots within region
+    const fishingResources = extendedLayers.resources.filter(
+      (r) => r.sourceRegionId === region.id && r.resourceType === "fishing",
+    );
+    const fishing =
+      fishingResources.length > 0
+        ? {
+            enabled: true,
+            spotCount: fishingResources.length,
+            spotTypes: [...new Set(fishingResources.map((f) => f.resourceId))],
+          }
+        : undefined;
+
+    const regionStations: CompiledStationLocation[] = extendedLayers.stations
+      .filter((s) => s.sourceRegionId === region.id)
+      .map((s) => ({
+        id: s.id,
+        type: s.stationType,
+        position: s.position,
+        rotation: s.rotation,
+      }));
+
+    areas.push({
+      id: region.id,
+      name: region.name,
+      description: region.description ?? `${biomeType} zone`,
+      difficultyLevel,
+      bounds,
+      biomeType,
+      safeZone: difficultyLevel === 0,
+      npcs: [],
+      resources: regionResources,
+      mobSpawns: regionMobs,
+      fishing,
+      stations: regionStations.length > 0 ? regionStations : undefined,
+    });
+  }
+
+  return areas;
+}
+
+function resourceTypeToCompiled(
+  type: string,
+): "tree" | "fishing_spot" | "mine" | "herb_patch" {
+  switch (type) {
+    case "woodcutting":
+      return "tree";
+    case "fishing":
+      return "fishing_spot";
+    case "mining":
+      return "mine";
+    default:
+      return "herb_patch";
+  }
 }
 
 /**
