@@ -174,6 +174,112 @@ export function computeDifficulty(
   return { level, scalar, biome, difficultyTier, isSafe: false };
 }
 
+// ============== ZONE-GENERATION DIFFICULTY (distance-primary) ==============
+//
+// Distance from town is the primary axis, biome is a modifier.
+// This creates concentric difficulty rings from each town —
+// every biome gets multiple tiers as you walk away from safety.
+//
+// Formula:
+//   distanceScalar = clamp(distFromTownEdge / (worldRadius * 0.75), 0, 1)
+//   biomeModifier  = 0.5 + (biomeDifficulty / 3) * 1.0   (range: 0.5 → 1.5)
+//   scalar         = distanceScalar * biomeModifier + dangerBonus + noise
+//
+// Note: This is SEPARATE from the runtime combat difficulty (computeDifficulty above)
+// which is biome-primary. Zone generation needs distance-primary so every biome
+// gets multiple tiers. The heatmap can display either formula.
+
+export interface ZoneDifficultySample {
+  scalar: number;
+  biome: string;
+  isSafe: boolean;
+}
+
+export interface ZoneDifficultyConfig {
+  /** Noise scale for organic zone boundary jitter. Default 0.0007 */
+  noiseScale: number;
+  /** Noise amplitude (±scalar jitter). Default 0.08 */
+  noiseAmplitude: number;
+  /** Fraction of world radius where scalar=1. Default 0.75 */
+  worldRadiusFraction: number;
+}
+
+export const DEFAULT_ZONE_DIFFICULTY_CONFIG: ZoneDifficultyConfig = {
+  noiseScale: 0.0007,
+  noiseAmplitude: 0.08,
+  worldRadiusFraction: 0.75,
+};
+
+/**
+ * Zone-generation difficulty: distance from town is primary, biome is a modifier.
+ *
+ * @param biomeDifficulty  0-3 from biomes.json manifest (via getBiomeDifficulty callback)
+ * @param worldRadius      Half the world size in meters
+ * @param config           Tunable noise/scale parameters (from world-config.json)
+ */
+export function computeZoneDifficulty(
+  worldX: number,
+  worldZ: number,
+  biome: string,
+  biomeDifficulty: number,
+  noise: NoiseGenerator,
+  towns: TownInfo[],
+  dangerSources: DangerSourceInfo[],
+  worldRadius: number,
+  config: ZoneDifficultyConfig = DEFAULT_ZONE_DIFFICULTY_CONFIG,
+): ZoneDifficultySample {
+  // Hard safe zone inside town radius
+  for (const town of towns) {
+    const dx = worldX - town.position.x;
+    const dz = worldZ - town.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist <= town.safeZoneRadius) {
+      return { scalar: 0, biome, isSafe: true };
+    }
+  }
+
+  // Distance from nearest town edge (primary factor)
+  let nearestDist = worldRadius * 2; // fallback for no towns
+  for (const town of towns) {
+    const dx = worldX - town.position.x;
+    const dz = worldZ - town.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const distFromEdge = Math.max(0, dist - town.safeZoneRadius);
+    if (distFromEdge < nearestDist) nearestDist = distFromEdge;
+  }
+
+  // Normalize: 0 at town edge, 1 at worldRadiusFraction of world radius
+  const distanceScalar = Math.min(
+    1,
+    nearestDist / (worldRadius * config.worldRadiusFraction),
+  );
+
+  // Biome modifier: 0.5 (easy biomes, diff=0) → 1.5 (hard biomes, diff=3)
+  const biomeModifier = 0.5 + (biomeDifficulty / 3) * 1.0;
+
+  // Danger source additive bonus (capped at 0.3)
+  const dangerBonus =
+    dangerSources.length > 0
+      ? Math.min(
+          0.3,
+          computeDangerInfluence(worldX, worldZ, dangerSources) * 0.15,
+        )
+      : 0;
+
+  // Noise for organic boundary jitter
+  const noiseVal = noise.simplex2D(
+    worldX * config.noiseScale,
+    worldZ * config.noiseScale,
+  );
+  const noiseMod = noiseVal * config.noiseAmplitude;
+
+  // Combine
+  const raw = distanceScalar * biomeModifier + dangerBonus + noiseMod;
+  const scalar = Math.min(1, Math.max(0, raw));
+
+  return { scalar, biome, isSafe: scalar < 0.01 };
+}
+
 // ============== COLOR MAPPING ==============
 
 const COLOR_SAFE = new THREE.Color(0x4caf50); // Green

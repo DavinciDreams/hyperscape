@@ -12,10 +12,14 @@ import { useCallback } from "react";
 import { NoiseGenerator } from "@hyperscape/procgen/terrain";
 
 import {
-  computeDangerInfluence,
+  computeZoneDifficulty,
+  withBiomeDifficultyFallback,
+  DEFAULT_ZONE_DIFFICULTY_CONFIG,
+  type ZoneDifficultyConfig,
   type TownInfo,
   type DangerSourceInfo,
   type BiomeQuerier,
+  type BiomeDifficultyLookup,
 } from "../../WorldBuilder/DifficultyHeatmap";
 
 import type {
@@ -44,117 +48,9 @@ import {
 } from "../utils/poissonDisc";
 import { SpatialGrid } from "../utils/SpatialGrid";
 
-// ============== AUTO-GEN DIFFICULTY (distance-primary, biome-secondary) ==============
-//
-// Reference: RuneScape, WoW, Albion Online, Guild Wars 2 all use DISTANCE FROM
-// SAFETY as the primary difficulty axis, not biome type. A forest near town is
-// safe; the same forest far from town is dangerous.
-//
-// Formula:
-//   distanceScalar = clamp(distFromTownEdge / (worldRadius * 0.75), 0, 1)
-//   biomeModifier  = 0.5 + (biomeDiff / 3) * 1.0   (range: 0.5 → 1.5)
-//   scalar         = distanceScalar * biomeModifier + dangerBonus + noise
-//
-// This produces concentric difficulty rings from each town, with biome shifting
-// the ring boundaries ±50%. Harder biomes compress the rings (reach danger
-// faster); easy biomes stretch them (stay safe longer).
-//
-// Result: EVERY biome gets multiple tiers as you walk away from town.
-//   Tundra near town: Safe → Beginner → Low → Mid → High → Extreme
-//   Plains near town: Safe → Beginner → Low → Mid → High (Extreme only at map edge)
-
-/** Biome modifier values for auto-gen difficulty. Range 0-3, used as
- *  biomeModifier = 0.5 + (value / 3) * 1.0 giving range 0.5 to 1.5. */
-const AUTOGEN_BIOME_WEIGHT: Record<string, number> = {
-  plains: 0.3, // modifier 0.60 — easy, stretches safe zones outward
-  valley: 0.5, // modifier 0.67
-  lakes: 0.2, // modifier 0.57 — very easy near water
-  forest: 1.2, // modifier 0.90
-  swamp: 1.5, // modifier 1.00 — neutral baseline
-  mountains: 2.2, // modifier 1.23 — compresses rings inward
-  desert: 2.0, // modifier 1.17
-  canyon: 2.2, // modifier 1.23
-  tundra: 3.0, // modifier 1.50 — most compressed, danger comes fast
-};
-
-function getAutoGenBiomeWeight(biomeId: string): number {
-  return AUTOGEN_BIOME_WEIGHT[biomeId] ?? 1.0;
-}
-
-/** Noise scale for organic zone boundary jitter */
-const AUTOGEN_NOISE_SCALE = 0.0007;
-const AUTOGEN_NOISE_AMPLITUDE = 0.08; // ±0.08 scalar jitter
-
-interface AutoGenDifficultySample {
-  scalar: number;
-  biome: string;
-  isSafe: boolean;
-}
-
-/**
- * Auto-gen difficulty: distance from town is primary, biome is a modifier.
- * This is separate from the game's TerrainSystem.getDifficultyAtWorldPosition() —
- * the game uses biome-primary for combat difficulty, but auto-gen needs
- * distance-primary for zone variety (every biome gets multiple tiers).
- */
-function computeAutoGenDifficulty(
-  worldX: number,
-  worldZ: number,
-  biome: string,
-  noise: NoiseGenerator,
-  towns: TownInfo[],
-  dangerSources: DangerSourceInfo[],
-  worldRadius: number,
-): AutoGenDifficultySample {
-  // Hard safe zone inside town radius
-  for (const town of towns) {
-    const dx = worldX - town.position.x;
-    const dz = worldZ - town.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist <= town.safeZoneRadius) {
-      return { scalar: 0, biome, isSafe: true };
-    }
-  }
-
-  // Distance from nearest town edge (primary factor)
-  let nearestDist = worldRadius * 2; // fallback for no towns
-  for (const town of towns) {
-    const dx = worldX - town.position.x;
-    const dz = worldZ - town.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    const distFromEdge = Math.max(0, dist - town.safeZoneRadius);
-    if (distFromEdge < nearestDist) nearestDist = distFromEdge;
-  }
-
-  // Normalize: 0 at town edge, 1 at ~75% of world radius
-  const distanceScalar = Math.min(1, nearestDist / (worldRadius * 0.75));
-
-  // Biome modifier: 0.5 (easy biomes) → 1.5 (hard biomes)
-  const biomeWeight = getAutoGenBiomeWeight(biome);
-  const biomeModifier = 0.5 + (biomeWeight / 3) * 1.0;
-
-  // Danger source additive bonus
-  const dangerBonus =
-    dangerSources.length > 0
-      ? Math.min(
-          0.3,
-          computeDangerInfluence(worldX, worldZ, dangerSources) * 0.15,
-        )
-      : 0;
-
-  // Noise for organic boundary jitter
-  const noiseVal = noise.simplex2D(
-    worldX * AUTOGEN_NOISE_SCALE,
-    worldZ * AUTOGEN_NOISE_SCALE,
-  );
-  const noiseMod = noiseVal * AUTOGEN_NOISE_AMPLITUDE; // ±0.08
-
-  // Combine
-  const raw = distanceScalar * biomeModifier + dangerBonus + noiseMod;
-  const scalar = Math.min(1, Math.max(0, raw));
-
-  return { scalar, biome, isSafe: scalar < 0.01 };
-}
+// Difficulty function imported from DifficultyHeatmap.ts (computeZoneDifficulty)
+// Uses distance-primary formula with biome modifier from manifest data.
+// See DifficultyHeatmap.ts for the full formula documentation.
 
 // ============== DEFAULT TIER CONFIG ==============
 
@@ -320,6 +216,7 @@ function scanLandBounds(
 function sampleDifficultyGrid(
   resolution: number,
   queryBiome: BiomeQuerier,
+  getBiomeDifficulty: BiomeDifficultyLookup,
   noise: NoiseGenerator,
   towns: TownInfo[],
   dangerSources: DangerSourceInfo[],
@@ -327,6 +224,7 @@ function sampleDifficultyGrid(
   waterThreshold: number,
   landBounds: { minX: number; maxX: number; minZ: number; maxZ: number },
   worldRadius: number,
+  zoneDiffConfig: ZoneDifficultyConfig,
 ): GridCell[] {
   // Only sample within the land bounding box (skip ocean)
   const startX = landBounds.minX;
@@ -360,14 +258,16 @@ function sampleDifficultyGrid(
         continue;
       }
 
-      const sample = computeAutoGenDifficulty(
+      const sample = computeZoneDifficulty(
         worldX,
         worldZ,
         biomeQuery.biome,
+        getBiomeDifficulty(biomeQuery.biome),
         noise,
         towns,
         dangerSources,
         worldRadius,
+        zoneDiffConfig,
       );
 
       // Classify into tier
@@ -436,12 +336,13 @@ function floodFillZones(
       cells: [],
     };
 
-    // BFS
+    // BFS with index pointer (O(1) dequeue instead of O(n) shift)
     const queue: GridCell[] = [cell];
+    let head = 0;
     cell.zoneId = zoneId;
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+    while (head < queue.length) {
+      const current = queue[head++];
       zone.cells.push(current);
 
       // 4-connected neighbors
@@ -494,12 +395,13 @@ function cleanupZones(
     }
   }
 
-  // Try to merge each small zone into the nearest large zone of same tier
+  // Try to merge each small zone: prefer same-tier, fall back to nearest any-tier
   for (const sz of small) {
     const centroid = zoneCentroid(sz);
     let bestDist = Infinity;
     let bestZone: RawZone | null = null;
 
+    // First pass: same-tier neighbors
     for (const lz of large) {
       if (lz.tierIndex !== sz.tierIndex) continue;
       const lc = zoneCentroid(lz);
@@ -510,10 +412,29 @@ function cleanupZones(
       }
     }
 
+    // Second pass: if no same-tier found, merge into nearest zone of any tier
+    if (!bestZone) {
+      for (const lz of large) {
+        const lc = zoneCentroid(lz);
+        const d2 = (centroid.x - lc.x) ** 2 + (centroid.z - lc.z) ** 2;
+        if (d2 < bestDist) {
+          bestDist = d2;
+          bestZone = lz;
+        }
+      }
+      if (bestZone) {
+        console.warn(
+          `[AutoGen] Cross-tier merge: small zone (tier ${sz.tierIndex}, ${sz.cells.length} cells) merged into tier ${bestZone.tierIndex}`,
+        );
+      }
+    }
+
     if (bestZone) {
       bestZone.cells.push(...sz.cells);
+    } else if (sz.cells.length > 0) {
+      // No large zones exist at all — promote this small zone to avoid data loss
+      large.push(sz);
     }
-    // If no match found, drop the tiny zone
   }
 
   // Recursively split oversized zones along longest axis
@@ -779,12 +700,14 @@ function populateEntities(
   zones: AutoGenZone[],
   config: AutoGenConfig,
   queryBiome: BiomeQuerier,
+  getBiomeDifficulty: BiomeDifficultyLookup,
   noise: NoiseGenerator,
   towns: TownInfo[],
   dangerSources: DangerSourceInfo[],
   waterThreshold: number,
   worldRadius: number,
   existingEntities: ExistingEntityPosition[],
+  zoneDiffConfig: ZoneDifficultyConfig,
 ): { mobs: PlacedMobSpawn[]; resources: PlacedResource[] } {
   const allMobs: PlacedMobSpawn[] = [];
   const allResources: PlacedResource[] = [];
@@ -810,14 +733,16 @@ function populateEntities(
     const inZone: PoissonBoundaryTest = (x: number, z: number) => {
       const bq = queryBiome(x, z);
       if (bq.height < waterThreshold) return false; // water
-      const sample = computeAutoGenDifficulty(
+      const sample = computeZoneDifficulty(
         x,
         z,
         bq.biome,
+        getBiomeDifficulty(bq.biome),
         noise,
         towns,
         dangerSources,
         worldRadius,
+        zoneDiffConfig,
       );
       return (
         sample.scalar >= scalarLo &&
@@ -942,6 +867,8 @@ export interface ExistingEntityPosition {
 
 export interface AutoGenDeps {
   queryBiome: BiomeQuerier;
+  /** Biome difficulty lookup (0-3) from manifest data */
+  getBiomeDifficulty: BiomeDifficultyLookup;
   worldSize: number;
   waterThreshold: number;
   seed: number;
@@ -950,6 +877,8 @@ export interface AutoGenDeps {
   manifests: ManifestData;
   /** Hand-placed entities to avoid (NPCs, stations, spawn points, etc.) */
   existingEntities: ExistingEntityPosition[];
+  /** Zone difficulty tuning parameters (from world-config.json) */
+  zoneDifficultyConfig?: ZoneDifficultyConfig;
 }
 
 export function runAutoGenPipeline(
@@ -959,6 +888,8 @@ export function runAutoGenPipeline(
   const startTime = performance.now();
   const noise = new NoiseGenerator(deps.seed);
   const worldRadius = deps.worldSize / 2;
+  const zoneDiffConfig =
+    deps.zoneDifficultyConfig ?? DEFAULT_ZONE_DIFFICULTY_CONFIG;
 
   // Pre-scan: find the bounding box of actual land to skip ocean
   const landBounds = scanLandBounds(
@@ -992,6 +923,7 @@ export function runAutoGenPipeline(
   const cells = sampleDifficultyGrid(
     config.gridResolution,
     deps.queryBiome,
+    deps.getBiomeDifficulty,
     noise,
     deps.towns,
     deps.dangerSources,
@@ -999,6 +931,7 @@ export function runAutoGenPipeline(
     deps.waterThreshold,
     landBounds,
     worldRadius,
+    zoneDiffConfig,
   );
 
   // Step 2: Flood fill
@@ -1055,12 +988,14 @@ export function runAutoGenPipeline(
     autoGenZones,
     config,
     deps.queryBiome,
+    deps.getBiomeDifficulty,
     noise,
     deps.towns,
     deps.dangerSources,
     deps.waterThreshold,
     worldRadius,
     deps.existingEntities,
+    zoneDiffConfig,
   );
 
   const elapsed = performance.now() - startTime;
@@ -1116,7 +1051,12 @@ export function useZoneAutoGen() {
       if (!world) return null;
 
       const vp = viewportRef?.current;
-      if (!vp?.queryBiome) return null;
+      if (!vp?.queryBiome || !vp?.getBiomeDifficulty) return null;
+
+      // Wrap with fallback so biomes without explicit difficulty get sensible defaults
+      const getBiomeDifficulty = withBiomeDifficultyFallback(
+        vp.getBiomeDifficulty,
+      );
 
       const worldSizeMeters =
         world.foundation.config.terrain.worldSize *
@@ -1199,6 +1139,7 @@ export function useZoneAutoGen() {
 
       return runAutoGenPipeline(config, {
         queryBiome: vp.queryBiome,
+        getBiomeDifficulty,
         worldSize: worldSizeMeters,
         waterThreshold,
         seed,
