@@ -425,6 +425,11 @@ function render() {
     }
   }
 
+  ctx.restore();
+
+  // Roads, buildings, entities drawn AFTER ctx.restore() because worldToScreen()
+  // already applies camera rotation — no double-rotation from ctx.rotate().
+
   // Draw roads (two-pass: outlines first, then fills to avoid dark bands at intersections)
   if (roads.length > 0) {
     const viewRadius = camera.extent * 2;
@@ -493,11 +498,9 @@ function render() {
     }
   }
 
-  ctx.restore();
-
   frameCount++;
 
-  // Render entities (after rotation restore so they're always upright)
+  // Render entities
   for (const entity of entities) {
     const pos = worldToScreen(entity.x, entity.z);
 
