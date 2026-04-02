@@ -6,6 +6,8 @@
  * @packageDocumentation
  */
 
+import { MAX_COINS } from "@hyperscape/shared";
+
 /** Currency type identifier */
 export type CurrencyType = "gold" | "silver" | "copper" | "gems" | "tokens";
 
@@ -39,7 +41,7 @@ export const DEFAULT_CURRENCIES: Record<CurrencyType, CurrencyDefinition> = {
     backgroundColor: "#3d3224",
     icon: "coins",
     conversionRate: 1,
-    maxValue: 2147483647, // Max int32
+    maxValue: MAX_COINS, // Max int32
   },
   silver: {
     type: "silver",
@@ -49,7 +51,7 @@ export const DEFAULT_CURRENCIES: Record<CurrencyType, CurrencyDefinition> = {
     backgroundColor: "#2a2a2a",
     icon: "coins",
     conversionRate: 0.01, // 100 silver = 1 gold
-    maxValue: 2147483647,
+    maxValue: MAX_COINS,
   },
   copper: {
     type: "copper",
@@ -59,7 +61,7 @@ export const DEFAULT_CURRENCIES: Record<CurrencyType, CurrencyDefinition> = {
     backgroundColor: "#2d1a0d",
     icon: "coins",
     conversionRate: 0.0001, // 10000 copper = 1 gold
-    maxValue: 2147483647,
+    maxValue: MAX_COINS,
   },
   gems: {
     type: "gems",

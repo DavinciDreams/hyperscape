@@ -785,6 +785,12 @@ export {
 // HP bar utilities (OSRS-style)
 export { getHpPercent, getHpColor } from "./utils/game/CombatUtils";
 
+// Currency constants (single source of truth for coin caps)
+export {
+  MAX_COINS,
+  DEFAULT_STARTING_COINS,
+} from "./systems/shared/character/CoinPouchSystem";
+
 // Prayer event type guards (runtime validation for UI components)
 export {
   isPrayerStateSyncPayload,
