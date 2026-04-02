@@ -116,7 +116,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     : 1;
 
   const inCombat = stats?.inCombat || false;
-  const health = stats?.health || { current: 100, max: 100 };
+  const health = stats?.health ?? { current: 0, max: 1 };
   const attackLevel = stats?.skills?.attack?.level || 1;
   const strengthLevel = stats?.skills?.strength?.level || 1;
   const defenseLevel = stats?.skills?.defense?.level || 1;

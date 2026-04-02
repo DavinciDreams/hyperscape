@@ -1478,14 +1478,22 @@ export class PlayerSystem extends SystemBase {
           player.health.current <= 0;
       }
 
-      // Update stats component health
-      const statsComponent = playerEntity.getComponent("stats");
-      if (statsComponent && statsComponent.data && statsComponent.data.health) {
-        const healthData = statsComponent.data.health as {
-          current: number;
-          max: number;
-        };
-        healthData.current = player.health.current;
+      // Update stats component health (both public property AND data dict)
+      // StatsComponent has TWO health objects: this.health (public) and this.data.health
+      // Both must stay in sync — handleLevelUp reads this.health, serialization reads this.data.health
+      const statsComponent = playerEntity.getComponent("stats") as {
+        health?: { current: number; max: number };
+        data?: { health?: { current: number; max: number } };
+      } | null;
+      if (statsComponent) {
+        if (statsComponent.health) {
+          statsComponent.health.current = player.health.current;
+          statsComponent.health.max = player.health.max;
+        }
+        if (statsComponent.data?.health) {
+          statsComponent.data.health.current = player.health.current;
+          statsComponent.data.health.max = player.health.max;
+        }
       }
 
       // COMBAT_DAMAGE_DEALT is emitted by CombatSystem - no need to emit here
@@ -2332,6 +2340,21 @@ export class PlayerSystem extends SystemBase {
     // Update player skills
     player.skills = data.skills;
 
+    // Sync health.max from constitution (same formula as initial registration at line 693)
+    // Without this, emitPlayerUpdate() broadcasts stale health.max after constitution XP gain
+    const constitutionLevel =
+      Number.isFinite(data.skills.constitution?.level) &&
+      data.skills.constitution.level > 0
+        ? data.skills.constitution.level
+        : 10;
+    const healthMaxChanged = constitutionLevel !== player.health.max;
+    if (healthMaxChanged) {
+      player.health.max = constitutionLevel;
+      if (player.health.current > player.health.max) {
+        player.health.current = player.health.max;
+      }
+    }
+
     // Recalculate combat level
     player.combat.combatLevel = this.calculateCombatLevel(data.skills);
 
@@ -2353,6 +2376,13 @@ export class PlayerSystem extends SystemBase {
         statsComponent.data.fishing = data.skills.fishing;
         statsComponent.data.firemaking = data.skills.firemaking;
         statsComponent.data.cooking = data.skills.cooking;
+      }
+
+      // Push updated health.max to entity data for network serialization
+      if (healthMaxChanged) {
+        playerEntity.data.health = player.health.current;
+        (playerEntity.data as { maxHealth?: number }).maxHealth =
+          player.health.max;
       }
     }
 
