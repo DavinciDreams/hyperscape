@@ -491,7 +491,7 @@ function MinimapInner({
             x: cam.position.x,
             z: cam.position.z,
             extent: extentRef.current,
-            rotation: -yaw,
+            rotation: yaw,
           });
 
           // Convert EntityPip[] to WorkerEntity[]
