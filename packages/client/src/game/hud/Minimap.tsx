@@ -227,14 +227,8 @@ function MinimapInner({
 
     canvas.width = width;
     canvas.height = height;
-    overlayCanvas.width = width;
-    overlayCanvas.height = height;
-
     mainCtxRef.current = canvas.getContext("2d");
-    // Only get overlay 2D context if worker hasn't claimed it
-    if (!workerInitializedRef.current) {
-      overlayCtxRef.current = overlayCanvas.getContext("2d");
-    }
+    overlayCtxRef.current = overlayCanvas.getContext("2d");
     invalidateTerrainCache();
 
     // Resize worker if it exists
@@ -465,7 +459,8 @@ function MinimapInner({
 
       // --- Worker overlay (roads, buildings, entities, destination) ---
       if (cam && isMinimapWorkerSupported()) {
-        // Lazy-init worker on first frame with overlay canvas
+        // Lazy-init worker on first frame (ImageBitmap mode — avoids
+        // transferControlToOffscreen() which makes the overlay canvas opaque)
         if (!workerInitializedRef.current && overlayCanvas) {
           workerInitializedRef.current = true;
           const mgr = new MinimapWorkerManager(
@@ -473,21 +468,15 @@ function MinimapInner({
             overlayCanvas.height,
           );
           workerRef.current = mgr;
-          try {
-            const offscreen = overlayCanvas.transferControlToOffscreen();
-            mgr.initWithCanvas(offscreen);
-          } catch {
-            // Fallback: worker creates its own canvas, we draw bitmaps
-            mgr.init();
-            mgr.setOnBitmap((bitmap) => {
-              const ctx = overlayCtxRef.current;
-              if (ctx) {
-                ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-                ctx.drawImage(bitmap, 0, 0);
-                bitmap.close();
-              }
-            });
-          }
+          mgr.init();
+          mgr.setOnBitmap((bitmap) => {
+            const ctx = overlayCtxRef.current;
+            if (ctx) {
+              ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+              ctx.drawImage(bitmap, 0, 0);
+              bitmap.close();
+            }
+          });
         }
 
         const worker = workerRef.current;
