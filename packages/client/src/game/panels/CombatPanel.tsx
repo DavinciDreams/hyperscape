@@ -9,7 +9,13 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useThemeStore, useMobileLayout, useWindowStore } from "@/ui";
 import { getPanelInsetStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
-import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
+import {
+  EventType,
+  getAvailableStyles,
+  WeaponType,
+  calculateCombatLevel,
+  normalizeCombatSkills,
+} from "@hyperscape/shared";
 import {
   PANEL_PADDING,
   PANEL_MOBILE_PADDING,
@@ -103,16 +109,18 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
   const playerId = world.entities?.player?.id ?? null;
   const previousPlayerIdRef = useRef<string | null>(null);
 
-  // Calculate combat level using OSRS formula (melee-only MVP)
   const combatLevel = stats?.skills
-    ? (() => {
-        const s = stats.skills;
-        const base =
-          0.25 * ((s.defense?.level || 1) + (s.constitution?.level || 10));
-        const melee =
-          0.325 * ((s.attack?.level || 1) + (s.strength?.level || 1));
-        return Math.floor(base + melee);
-      })()
+    ? calculateCombatLevel(
+        normalizeCombatSkills({
+          attack: stats.skills.attack?.level,
+          strength: stats.skills.strength?.level,
+          defense: stats.skills.defense?.level,
+          constitution: stats.skills.constitution?.level,
+          ranged: stats.skills.ranged?.level,
+          magic: stats.skills.magic?.level,
+          prayer: stats.skills.prayer?.level,
+        }),
+      )
     : 1;
 
   const inCombat = stats?.inCombat || false;

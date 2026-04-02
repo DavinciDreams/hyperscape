@@ -62,6 +62,7 @@ import type {
   PlayerLeaveEvent,
   PlayerLevelUpEvent,
 } from "../../../types/events";
+import type { StatsComponent } from "../../../components/StatsComponent";
 import { EventType } from "../../../types/events";
 import type { World } from "../../../types/index";
 import { Logger } from "../../../utils/Logger";
@@ -1481,18 +1482,18 @@ export class PlayerSystem extends SystemBase {
       // Update stats component health (both public property AND data dict)
       // StatsComponent has TWO health objects: this.health (public) and this.data.health
       // Both must stay in sync — handleLevelUp reads this.health, serialization reads this.data.health
-      const statsComponent = playerEntity.getComponent("stats") as {
-        health?: { current: number; max: number };
-        data?: { health?: { current: number; max: number } };
-      } | null;
+      const statsComponent = playerEntity.getComponent(
+        "stats",
+      ) as StatsComponent | null;
       if (statsComponent) {
-        if (statsComponent.health) {
-          statsComponent.health.current = player.health.current;
-          statsComponent.health.max = player.health.max;
-        }
+        statsComponent.health.current = player.health.current;
+        statsComponent.health.max = player.health.max;
         if (statsComponent.data?.health) {
-          statsComponent.data.health.current = player.health.current;
-          statsComponent.data.health.max = player.health.max;
+          (
+            statsComponent.data.health as { current: number; max: number }
+          ).current = player.health.current;
+          (statsComponent.data.health as { current: number; max: number }).max =
+            player.health.max;
         }
       }
 
@@ -2364,7 +2365,9 @@ export class PlayerSystem extends SystemBase {
     // Update stats component with new skill data for SkillsSystem and combat calculations
     const playerEntity = this.world.entities.get(data.playerId);
     if (playerEntity) {
-      const statsComponent = playerEntity.getComponent("stats");
+      const statsComponent = playerEntity.getComponent(
+        "stats",
+      ) as StatsComponent | null;
       if (statsComponent) {
         // Update skill data (full SkillData objects with level + xp) in stats component
         statsComponent.data.attack = data.skills.attack;
@@ -2376,6 +2379,11 @@ export class PlayerSystem extends SystemBase {
         statsComponent.data.fishing = data.skills.fishing;
         statsComponent.data.firemaking = data.skills.firemaking;
         statsComponent.data.cooking = data.skills.cooking;
+
+        // Sync health to statsComponent so handleLevelUp reads correct values
+        // (defense-in-depth: handleLevelUp reads stats.health, not player.health)
+        statsComponent.health.current = player.health.current;
+        statsComponent.health.max = player.health.max;
       }
 
       // Push updated health.max to entity data for network serialization
