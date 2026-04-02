@@ -33,6 +33,16 @@ import type {
   ManifestNPC,
 } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
+import {
+  createSeededRng,
+  hashString,
+  weightedSelect,
+} from "../utils/procgenUtils";
+import {
+  poissonDiscSample,
+  type PoissonBoundaryTest,
+} from "../utils/poissonDisc";
+import { SpatialGrid } from "../utils/SpatialGrid";
 
 // ============== AUTO-GEN DIFFICULTY (distance-primary, biome-secondary) ==============
 //
@@ -238,182 +248,9 @@ export const DEFAULT_AUTOGEN_CONFIG: AutoGenConfig = {
   resourceSpacing: 8,
 };
 
-// ============== SEEDED RNG ==============
+// Shared utilities imported from ../utils/procgenUtils, ../utils/poissonDisc, ../utils/SpatialGrid
 
-function createSeededRng(seed: number): () => number {
-  let s = seed | 0;
-  return () => {
-    s = (s * 1664525 + 1013904223) | 0;
-    return (s >>> 0) / 4294967296;
-  };
-}
-
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 31 + str.charCodeAt(i)) | 0;
-  }
-  return hash;
-}
-
-// ============== SPATIAL GRID (for mob-resource proximity) ==============
-
-class SpatialGrid {
-  private cellSize: number;
-  private cells = new Map<string, Array<{ x: number; z: number }>>();
-
-  constructor(cellSize: number) {
-    this.cellSize = cellSize;
-  }
-
-  private key(x: number, z: number): string {
-    return `${Math.floor(x / this.cellSize)}_${Math.floor(z / this.cellSize)}`;
-  }
-
-  insert(x: number, z: number): void {
-    const k = this.key(x, z);
-    let arr = this.cells.get(k);
-    if (!arr) {
-      arr = [];
-      this.cells.set(k, arr);
-    }
-    arr.push({ x, z });
-  }
-
-  nearestDistance(x: number, z: number): number {
-    const cx = Math.floor(x / this.cellSize);
-    const cz = Math.floor(z / this.cellSize);
-    let minDist2 = Infinity;
-    // Check 3x3 neighborhood
-    for (let dz = -1; dz <= 1; dz++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const k = `${cx + dx}_${cz + dz}`;
-        const arr = this.cells.get(k);
-        if (!arr) continue;
-        for (const p of arr) {
-          const d2 = (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z);
-          if (d2 < minDist2) minDist2 = d2;
-        }
-      }
-    }
-    return Math.sqrt(minDist2);
-  }
-}
-
-// ============== POISSON DISC SAMPLING (contour-bounded) ==============
-
-interface PoissonBoundaryTest {
-  (x: number, z: number): boolean;
-}
-
-function poissonDiscSample(
-  bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
-  minSpacing: number,
-  maxPoints: number,
-  rng: () => number,
-  inBounds: PoissonBoundaryTest,
-): Array<{ x: number; z: number }> {
-  const points: Array<{ x: number; z: number }> = [];
-  const cellSize = minSpacing / Math.SQRT2;
-  const gridW = Math.ceil((bounds.maxX - bounds.minX) / cellSize);
-  const gridH = Math.ceil((bounds.maxZ - bounds.minZ) / cellSize);
-  if (gridW <= 0 || gridH <= 0) return points;
-  const grid: (number | null)[] = new Array(gridW * gridH).fill(null);
-  const active: number[] = [];
-
-  const gridIdx = (x: number, z: number) => {
-    const gx = Math.floor((x - bounds.minX) / cellSize);
-    const gz = Math.floor((z - bounds.minZ) / cellSize);
-    if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridH) return -1;
-    return gz * gridW + gx;
-  };
-
-  // Seed with first valid point
-  for (let att = 0; att < maxPoints * 30 && points.length === 0; att++) {
-    const px = bounds.minX + rng() * (bounds.maxX - bounds.minX);
-    const pz = bounds.minZ + rng() * (bounds.maxZ - bounds.minZ);
-    if (inBounds(px, pz)) {
-      points.push({ x: px, z: pz });
-      active.push(0);
-      const gi = gridIdx(px, pz);
-      if (gi >= 0) grid[gi] = 0;
-    }
-  }
-
-  const k = 30;
-  while (active.length > 0 && points.length < maxPoints) {
-    const idx = Math.floor(rng() * active.length);
-    const pi = active[idx];
-    const base = points[pi];
-    let found = false;
-
-    for (let i = 0; i < k; i++) {
-      const angle = rng() * Math.PI * 2;
-      const d = minSpacing + rng() * minSpacing;
-      const nx = base.x + Math.cos(angle) * d;
-      const nz = base.z + Math.sin(angle) * d;
-
-      if (
-        nx < bounds.minX ||
-        nx > bounds.maxX ||
-        nz < bounds.minZ ||
-        nz > bounds.maxZ
-      )
-        continue;
-      if (!inBounds(nx, nz)) continue;
-
-      const gi = gridIdx(nx, nz);
-      if (gi < 0) continue;
-
-      const gx = Math.floor((nx - bounds.minX) / cellSize);
-      const gz = Math.floor((nz - bounds.minZ) / cellSize);
-      let tooClose = false;
-      for (let ddz = -2; ddz <= 2 && !tooClose; ddz++) {
-        for (let ddx = -2; ddx <= 2 && !tooClose; ddx++) {
-          const ngx = gx + ddx;
-          const ngz = gz + ddz;
-          if (ngx < 0 || ngx >= gridW || ngz < 0 || ngz >= gridH) continue;
-          const ni = grid[ngz * gridW + ngx];
-          if (ni !== null) {
-            const p = points[ni];
-            const d2 = (nx - p.x) * (nx - p.x) + (nz - p.z) * (nz - p.z);
-            if (d2 < minSpacing * minSpacing) tooClose = true;
-          }
-        }
-      }
-
-      if (!tooClose) {
-        const newIdx = points.length;
-        points.push({ x: nx, z: nz });
-        active.push(newIdx);
-        grid[gi] = newIdx;
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) active.splice(idx, 1);
-  }
-
-  return points;
-}
-
-// ============== WEIGHTED RANDOM SELECT ==============
-
-function weightedSelect<T extends { weight: number }>(
-  items: T[],
-  rng: () => number,
-): T | null {
-  if (items.length === 0) return null;
-  const totalWeight = items.reduce((sum, item) => sum + item.weight, 0);
-  if (totalWeight <= 0) return items[0];
-  let roll = rng() * totalWeight;
-  for (const item of items) {
-    roll -= item.weight;
-    if (roll <= 0) return item;
-  }
-  return items[items.length - 1];
-}
+// poissonDiscSample and weightedSelect imported from shared utils above
 
 // ============== GRID CELL ==============
 
@@ -1286,26 +1123,14 @@ export function useZoneAutoGen() {
         world.foundation.config.terrain.tileSize;
       const seed = world.foundation.config.seed;
 
-      // Prefer runtime towns (from terrain generation) over foundation towns.
-      // Runtime towns have exact positions + safeZoneRadius computed by the town generator.
-      // Foundation towns may have been generated with different parameters.
-      const rtTowns = vp.runtimeTowns;
-      const towns: TownInfo[] =
-        rtTowns && rtTowns.length > 0
-          ? rtTowns.map(
-              (rt: {
-                position: { x: number; z: number };
-                safeZoneRadius: number;
-              }) => ({
-                position: { x: rt.position.x, z: rt.position.z },
-                safeZoneRadius: rt.safeZoneRadius,
-              }),
-            )
-          : world.foundation.towns.map((t) => ({
-              position: { x: t.position.x, z: t.position.z },
-              safeZoneRadius:
-                t.size === "town" ? 80 : t.size === "village" ? 50 : 30,
-            }));
+      // Use foundation.towns (synced from runtime by SYNC_RUNTIME_TOWNS action).
+      // safeZoneRadius is stored on GeneratedTown; fallback to size-based heuristic.
+      const towns: TownInfo[] = world.foundation.towns.map((t) => ({
+        position: { x: t.position.x, z: t.position.z },
+        safeZoneRadius:
+          t.safeZoneRadius ??
+          (t.size === "town" ? 80 : t.size === "village" ? 50 : 30),
+      }));
 
       console.log(
         `[AutoGen] Using ${towns.length} towns for zone generation:`,

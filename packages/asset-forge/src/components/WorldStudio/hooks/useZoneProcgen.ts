@@ -27,24 +27,13 @@ import {
   ZONE_TILE_SIZE,
 } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
-
-// ============== SEEDED RNG ==============
-
-function createSeededRng(seed: number): () => number {
-  let s = seed | 0;
-  return () => {
-    s = (s * 1664525 + 1013904223) | 0;
-    return (s >>> 0) / 4294967296;
-  };
-}
-
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 31 + str.charCodeAt(i)) | 0;
-  }
-  return hash;
-}
+import {
+  createSeededRng,
+  hashString,
+  dist2,
+  weightedSelect,
+} from "../utils/procgenUtils";
+import { poissonDiscSample } from "../utils/poissonDisc";
 
 // ============== TILE-BASED GEOMETRY HELPERS ==============
 
@@ -58,13 +47,6 @@ function isInRegion(
   const tx = Math.floor(worldX / tileSize);
   const tz = Math.floor(worldZ / tileSize);
   return tileKeySet.has(tileKey(tx, tz));
-}
-
-/** Distance squared between two 2D points */
-function dist2(x1: number, z1: number, x2: number, z2: number): number {
-  const dx = x1 - x2;
-  const dz = z1 - z2;
-  return dx * dx + dz * dz;
 }
 
 /** Compute centroid of a tile-based region in world coordinates */
@@ -107,126 +89,6 @@ export interface ProcgenStats {
   seed: number;
 }
 
-// ============== WEIGHTED RANDOM SELECT ==============
-
-function weightedSelect<T extends { weight: number }>(
-  items: T[],
-  rng: () => number,
-): T | null {
-  if (items.length === 0) return null;
-  const totalWeight = items.reduce((sum, item) => sum + item.weight, 0);
-  if (totalWeight <= 0) return items[0];
-  let roll = rng() * totalWeight;
-  for (const item of items) {
-    roll -= item.weight;
-    if (roll <= 0) return item;
-  }
-  return items[items.length - 1];
-}
-
-// ============== POISSON DISC SAMPLING (tile-bounded) ==============
-
-/** Generate well-spaced points within a tile-based region using Poisson disk sampling */
-function poissonDiscSample(
-  tileKeySet: Set<string>,
-  tileSize: number,
-  bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
-  minSpacing: number,
-  maxPoints: number,
-  rng: () => number,
-): Array<{ x: number; z: number }> {
-  const points: Array<{ x: number; z: number }> = [];
-  const cellSize = minSpacing / Math.SQRT2;
-  const gridW = Math.ceil((bounds.maxX - bounds.minX) / cellSize);
-  const gridH = Math.ceil((bounds.maxZ - bounds.minZ) / cellSize);
-  if (gridW <= 0 || gridH <= 0) return points;
-  const grid: (number | null)[] = new Array(gridW * gridH).fill(null);
-
-  const active: number[] = [];
-
-  const gridIdx = (x: number, z: number) => {
-    const gx = Math.floor((x - bounds.minX) / cellSize);
-    const gz = Math.floor((z - bounds.minZ) / cellSize);
-    if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridH) return -1;
-    return gz * gridW + gx;
-  };
-
-  // Seed with first point inside region
-  const attempts = maxPoints * 30;
-  for (let att = 0; att < attempts && points.length === 0; att++) {
-    const px = bounds.minX + rng() * (bounds.maxX - bounds.minX);
-    const pz = bounds.minZ + rng() * (bounds.maxZ - bounds.minZ);
-    if (isInRegion(px, pz, tileKeySet, tileSize)) {
-      points.push({ x: px, z: pz });
-      active.push(0);
-      const gi = gridIdx(px, pz);
-      if (gi >= 0) grid[gi] = 0;
-    }
-  }
-
-  const k = 30;
-  while (active.length > 0 && points.length < maxPoints) {
-    const idx = Math.floor(rng() * active.length);
-    const pi = active[idx];
-    const base = points[pi];
-    let found = false;
-
-    for (let i = 0; i < k; i++) {
-      const angle = rng() * Math.PI * 2;
-      const d = minSpacing + rng() * minSpacing;
-      const nx = base.x + Math.cos(angle) * d;
-      const nz = base.z + Math.sin(angle) * d;
-
-      if (
-        nx < bounds.minX ||
-        nx > bounds.maxX ||
-        nz < bounds.minZ ||
-        nz > bounds.maxZ
-      )
-        continue;
-      if (!isInRegion(nx, nz, tileKeySet, tileSize)) continue;
-
-      const gi = gridIdx(nx, nz);
-      if (gi < 0) continue;
-
-      const gx = Math.floor((nx - bounds.minX) / cellSize);
-      const gz = Math.floor((nz - bounds.minZ) / cellSize);
-      let tooClose = false;
-      for (let dz = -2; dz <= 2 && !tooClose; dz++) {
-        for (let dx = -2; dx <= 2 && !tooClose; dx++) {
-          const ngx = gx + dx;
-          const ngz = gz + dz;
-          if (ngx < 0 || ngx >= gridW || ngz < 0 || ngz >= gridH) continue;
-          const ni = grid[ngz * gridW + ngx];
-          if (ni !== null) {
-            if (
-              dist2(nx, nz, points[ni].x, points[ni].z) <
-              minSpacing * minSpacing
-            ) {
-              tooClose = true;
-            }
-          }
-        }
-      }
-
-      if (!tooClose) {
-        const newIdx = points.length;
-        points.push({ x: nx, z: nz });
-        active.push(newIdx);
-        grid[gi] = newIdx;
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) {
-      active.splice(idx, 1);
-    }
-  }
-
-  return points;
-}
-
 // ============== MOB GENERATION ==============
 
 function generateMobs(
@@ -252,12 +114,11 @@ function generateMobs(
     .map((m) => ({ x: m.position.x, z: m.position.z }));
 
   const positions = poissonDiscSample(
-    tileKeySet,
-    tileSize,
     bounds,
     MIN_MOB_SPACING,
     targetCount,
     rng,
+    (x, z) => isInRegion(x, z, tileKeySet, tileSize),
   );
 
   const validPositions = positions.filter((p) =>
@@ -313,12 +174,11 @@ function generateResources(
     .map((r) => ({ x: r.position.x, z: r.position.z }));
 
   const positions = poissonDiscSample(
-    tileKeySet,
-    tileSize,
     bounds,
     MIN_RESOURCE_SPACING,
     targetCount,
     rng,
+    (x, z) => isInRegion(x, z, tileKeySet, tileSize),
   );
 
   const validPositions = positions.filter((p) =>
