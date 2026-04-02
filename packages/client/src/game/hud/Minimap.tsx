@@ -2,9 +2,12 @@
  * Minimap.tsx - 2D Minimap Component
  *
  * Shows player position, nearby entities, and terrain on a 2D minimap.
- * Orchestrates the canvas ref lifecycle, requestAnimationFrame loop,
- * and composes satellite components. All pure draw logic lives in
- * MinimapRenderer.ts; all interaction logic lives in useMinimapInteraction.ts.
+ * Orchestrates canvas lifecycle, RAF loop, and satellite hooks.
+ *
+ * Rendering: Overlay (roads, buildings, entities, destination) is rendered
+ * off-thread by shared MinimapWorker via OffscreenCanvas. Terrain background
+ * stays on main thread (biome-aware cache in useMinimapTerrainCache).
+ * Interaction logic lives in useMinimapInteraction.ts.
  */
 
 import React, { memo, useEffect, useRef } from "react";
@@ -36,7 +39,7 @@ import {
   type HyperscapeWindow,
   createRenderState,
   getSpectatorTarget,
-} from "./MinimapRenderer";
+} from "./minimapTypes";
 import { useMinimapInteraction } from "./useMinimapInteraction";
 
 // Shared with terrain-cache generation so draw-time coverage matches the
