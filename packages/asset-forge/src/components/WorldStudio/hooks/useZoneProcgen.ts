@@ -19,6 +19,7 @@ import type {
   PlacedStation,
   PlacedRegion,
   RegionSpawnRules,
+  ManifestData,
 } from "../types";
 import {
   parseTileKey,
@@ -34,6 +35,13 @@ import {
   weightedSelect,
 } from "../utils/procgenUtils";
 import { poissonDiscSample } from "../utils/poissonDisc";
+import {
+  MIN_MOB_SPACING,
+  MIN_RESOURCE_SPACING,
+  MIN_STATION_SPACING,
+  BASE_MOB_DENSITY,
+  BASE_RESOURCE_DENSITY,
+} from "../utils/worldConstants";
 
 // ============== TILE-BASED GEOMETRY HELPERS ==============
 
@@ -65,13 +73,7 @@ function regionCentroid(
   return { x: cx / tileKeys.length, z: cz / tileKeys.length };
 }
 
-// ============== GENERATION CONSTANTS ==============
-
-const DEFAULT_MOB_DENSITY = 0.0003; // mobs per m² (~3 per 100x100m tile)
-const DEFAULT_RESOURCE_DENSITY = 0.0005; // resources per m² (~5 per 100x100m)
-const MIN_MOB_SPACING = 15; // meters
-const MIN_RESOURCE_SPACING = 8; // meters
-const MIN_STATION_SPACING = 20; // meters
+// Generation constants imported from ../utils/worldConstants
 
 // ============== TYPES ==============
 
@@ -104,7 +106,7 @@ function generateMobs(
 
   const rng = createSeededRng(seed + hashString(region.id + ":mobs"));
   const tileKeySet = new Set(region.tileKeys);
-  const density = DEFAULT_MOB_DENSITY * (mobRules.densityMultiplier ?? 1);
+  const density = BASE_MOB_DENSITY * (mobRules.densityMultiplier ?? 1);
   const area = region.tileKeys.length * tileSize * tileSize;
   const targetCount = Math.max(1, Math.round(area * density));
   const bounds = tileBoundsWorld(region.tileKeys, tileSize);
@@ -164,7 +166,7 @@ function generateResources(
   const rng = createSeededRng(seed + hashString(region.id + ":resources"));
   const tileKeySet = new Set(region.tileKeys);
   const density =
-    DEFAULT_RESOURCE_DENSITY * (resourceRules.densityMultiplier ?? 1);
+    BASE_RESOURCE_DENSITY * (resourceRules.densityMultiplier ?? 1);
   const area = region.tileKeys.length * tileSize * tileSize;
   const targetCount = Math.max(1, Math.round(area * density));
   const bounds = tileBoundsWorld(region.tileKeys, tileSize);
@@ -361,39 +363,37 @@ const RESOURCE_SKILL_MAP: Record<string, string> = {
   farming: "Farming",
 };
 
-const RESOURCE_LEVEL_TIERS: Record<string, Record<string, number>> = {
-  mining: {
-    ore_copper: 1,
-    ore_tin: 1,
-    ore_iron: 15,
-    ore_coal: 30,
-    ore_mithril: 55,
-    ore_adamant: 70,
-    ore_runite: 85,
-  },
-  woodcutting: {
-    tree_normal: 1,
-    tree_oak: 15,
-    tree_willow: 30,
-    tree_maple: 45,
-    tree_yew: 60,
-    tree_magic: 75,
-  },
-  fishing: {
-    fish_shrimp: 1,
-    fish_trout: 20,
-    fish_lobster: 40,
-    fish_swordfish: 50,
-    fish_shark: 76,
-  },
-};
+/** Build resource level tiers dynamically from manifest data (no hardcoded levels). */
+function buildResourceLevelTiers(
+  manifests: ManifestData,
+): Record<string, Record<string, number>> {
+  const tiers: Record<string, Record<string, number>> = {
+    mining: {},
+    woodcutting: {},
+    fishing: {},
+  };
+
+  for (const rock of manifests.miningRocks) {
+    tiers.mining[rock.id] = rock.levelRequired;
+  }
+  for (const tree of manifests.trees) {
+    tiers.woodcutting[tree.id] = tree.levelRequired;
+  }
+  for (const spot of manifests.fishingSpots) {
+    tiers.fishing[spot.id] = spot.levelRequired;
+  }
+
+  return tiers;
+}
 
 export function validateSkillProgression(
   resources: PlacedResource[],
   regions: PlacedRegion[],
   tileSize: number,
+  manifests: ManifestData,
 ): ProgressionWarning[] {
   const warnings: ProgressionWarning[] = [];
+  const resourceLevelTiers = buildResourceLevelTiers(manifests);
 
   const bySkill: Record<string, PlacedResource[]> = {};
   for (const r of resources) {
@@ -402,7 +402,7 @@ export function validateSkillProgression(
     bySkill[skill].push(r);
   }
 
-  for (const [skill, tiers] of Object.entries(RESOURCE_LEVEL_TIERS)) {
+  for (const [skill, tiers] of Object.entries(resourceLevelTiers)) {
     const skillName = RESOURCE_SKILL_MAP[skill] ?? skill;
     const skillResources = bySkill[skill] ?? [];
     const placedIds = new Set(skillResources.map((r) => r.resourceId));
@@ -599,8 +599,14 @@ export function useZoneProcgen() {
       state.extendedLayers.resources,
       state.extendedLayers.regions,
       tileSize,
+      state.manifests,
     );
-  }, [state.extendedLayers.resources, state.extendedLayers.regions, tileSize]);
+  }, [
+    state.extendedLayers.resources,
+    state.extendedLayers.regions,
+    tileSize,
+    state.manifests,
+  ]);
 
   return {
     generateAndCommit,

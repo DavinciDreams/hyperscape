@@ -47,6 +47,12 @@ import {
   type PoissonBoundaryTest,
 } from "../utils/poissonDisc";
 import { SpatialGrid } from "../utils/SpatialGrid";
+import {
+  BASE_MOB_DENSITY,
+  BASE_RESOURCE_DENSITY,
+  HAND_PLACED_ENTITY_BUFFER,
+  getTownSafeRadius,
+} from "../utils/worldConstants";
 
 // Difficulty function imported from DifficultyHeatmap.ts (computeZoneDifficulty)
 // Uses distance-primary formula with biome modifier from manifest data.
@@ -684,8 +690,7 @@ function deriveSpawnRules(
 
 // ============== STEP 6: ENTITY POPULATION ==============
 
-const DEFAULT_MOB_DENSITY = 0.0004; // mobs per m² (base, scaled by tier multiplier)
-const DEFAULT_RESOURCE_DENSITY = 0.0004; // resources per m² (base, scaled by tier multiplier)
+// Density constants imported from ../utils/worldConstants
 
 function inferResourceType(
   id: string,
@@ -754,9 +759,9 @@ function populateEntities(
     // Phase A: Mobs (avoid existing hand-placed entities)
     if (zone.spawnRules.mobs && zone.spawnRules.mobs.table.length > 0) {
       const density =
-        DEFAULT_MOB_DENSITY * (zone.spawnRules.mobs.densityMultiplier ?? 1);
+        BASE_MOB_DENSITY * (zone.spawnRules.mobs.densityMultiplier ?? 1);
       const targetCount = Math.max(1, Math.round(zone.area * density));
-      const existingBuffer = 15; // meters clearance from hand-placed entities
+      const existingBuffer = HAND_PLACED_ENTITY_BUFFER;
 
       const mobPositions = poissonDiscSample(
         zone.bounds,
@@ -801,7 +806,7 @@ function populateEntities(
       zone.spawnRules.resources.table.length > 0
     ) {
       const density =
-        DEFAULT_RESOURCE_DENSITY *
+        BASE_RESOURCE_DENSITY *
         (zone.spawnRules.resources.densityMultiplier ?? 1);
       const targetCount = Math.max(1, Math.round(zone.area * density));
       const buffer = tier.mobResourceBuffer;
@@ -1067,9 +1072,7 @@ export function useZoneAutoGen() {
       // safeZoneRadius is stored on GeneratedTown; fallback to size-based heuristic.
       const towns: TownInfo[] = world.foundation.towns.map((t) => ({
         position: { x: t.position.x, z: t.position.z },
-        safeZoneRadius:
-          t.safeZoneRadius ??
-          (t.size === "town" ? 80 : t.size === "village" ? 50 : 30),
+        safeZoneRadius: getTownSafeRadius(t),
       }));
 
       console.log(
@@ -1095,7 +1098,7 @@ export function useZoneAutoGen() {
 
       // Collect all hand-placed entities to avoid overlapping them
       const existingEntities: ExistingEntityPosition[] = [];
-      const entityBuffer = 12; // meters
+      const entityBuffer = HAND_PLACED_ENTITY_BUFFER;
       // NPCs
       for (const npc of world.layers.npcs) {
         existingEntities.push({
