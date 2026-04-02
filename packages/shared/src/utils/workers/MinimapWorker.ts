@@ -357,9 +357,13 @@ function render() {
   
   const startTime = performance.now();
   
-  // Clear with background
-  ctx.fillStyle = hexToRgb(config.backgroundColor);
-  ctx.fillRect(0, 0, width, height);
+  // Clear canvas (transparent when used as overlay, opaque when standalone)
+  ctx.clearRect(0, 0, width, height);
+  if (!useDirectCanvas) {
+    // Standalone mode: fill with background for ImageBitmap output
+    ctx.fillStyle = hexToRgb(config.backgroundColor);
+    ctx.fillRect(0, 0, width, height);
+  }
   
   // Save context for rotation
   ctx.save();
