@@ -125,10 +125,14 @@ vi.mock("../../../src/components/streaming/StreamingOverlay", () => ({
     state,
   }: {
     state: { cycle?: { phase?: string } } | null;
-  }) => <div data-testid="streaming-overlay">{state?.cycle?.phase ?? "NONE"}</div>,
+  }) => (
+    <div data-testid="streaming-overlay">{state?.cycle?.phase ?? "NONE"}</div>
+  ),
 }));
 
-function createStreamingState(phase: "ANNOUNCEMENT" | "COUNTDOWN" | "FIGHTING" = "FIGHTING") {
+function createStreamingState(
+  phase: "ANNOUNCEMENT" | "COUNTDOWN" | "FIGHTING" = "FIGHTING",
+) {
   return {
     type: "STREAMING_STATE_UPDATE" as const,
     cycle: {
@@ -200,13 +204,25 @@ describe("StreamingMode component", () => {
         json: async () => createStreamingState(),
       })),
     );
-    (window as Window & {
-      __HYPERSCAPE_STREAM_READY__?: boolean;
-      __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
-    }).__HYPERSCAPE_STREAM_READY__ = false;
-    (window as Window & {
-      __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
-    }).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
+    (
+      window as Window & {
+        __HYPERSCAPE_STREAM_READY__?: boolean;
+        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+      }
+    ).__HYPERSCAPE_STREAM_READY__ = false;
+    (
+      window as Window & {
+        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+      }
+    ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
+    Object.defineProperty(window, "parent", {
+      value: window,
+      configurable: true,
+    });
+    Object.defineProperty(document, "referrer", {
+      value: "",
+      configurable: true,
+    });
   });
 
   afterEach(() => {
@@ -244,19 +260,23 @@ describe("StreamingMode component", () => {
 
     await waitFor(() => {
       expect(
-        (window as Window & {
-          __HYPERSCAPE_STREAM_READY__?: boolean;
-          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
-            degradedReason?: string | null;
-          } | null;
-        }).__HYPERSCAPE_STREAM_READY__,
+        (
+          window as Window & {
+            __HYPERSCAPE_STREAM_READY__?: boolean;
+            __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
+              degradedReason?: string | null;
+            } | null;
+          }
+        ).__HYPERSCAPE_STREAM_READY__,
       ).toBe(false);
       expect(
-        (window as Window & {
-          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
-            degradedReason?: string | null;
-          } | null;
-        }).__HYPERSCAPE_STREAM_RENDERER_HEALTH__?.degradedReason,
+        (
+          window as Window & {
+            __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
+              degradedReason?: string | null;
+            } | null;
+          }
+        ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__?.degradedReason,
       ).toBe("initialization_failed");
     });
   });
@@ -304,18 +324,46 @@ describe("StreamingMode component", () => {
 
     await waitFor(() => {
       expect(
-        (window as Window & {
-          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
-            degradedReason?: string | null;
-          } | null;
-          __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
-        }).__HYPERSCAPE_STREAM_RENDERER_HEALTH__?.degradedReason,
+        (
+          window as Window & {
+            __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
+              degradedReason?: string | null;
+            } | null;
+            __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
+          }
+        ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__?.degradedReason,
       ).toBe("viewer_access_denied");
       expect(
-        (window as Window & {
-          __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
-        }).__HYPERSCAPE_STREAM_BOOT_STATUS__,
+        (
+          window as Window & {
+            __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
+          }
+        ).__HYPERSCAPE_STREAM_BOOT_STATUS__,
       ).toBe("error:viewer_access_denied");
+    });
+  });
+
+  it("posts stream status updates to a trusted embed parent", async () => {
+    const postMessage = vi.fn();
+    Object.defineProperty(window, "parent", {
+      value: { postMessage },
+      configurable: true,
+    });
+    Object.defineProperty(document, "referrer", {
+      value: `${window.location.origin}/frame`,
+      configurable: true,
+    });
+
+    render(<StreamingMode />);
+
+    await waitFor(() => {
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "HYPERSCAPE_STREAM_STATUS",
+          ready: true,
+        }),
+        window.location.origin,
+      );
     });
   });
 });

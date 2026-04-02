@@ -36,7 +36,12 @@ export function isStreamPageRoute(win?: Window): boolean {
   if (!windowRef) return false;
 
   const pathname = windowRef.location.pathname.trim().toLowerCase();
-  if (pathname.endsWith("/stream.html") || pathname === "/stream.html") {
+  const normalizedPathname =
+    pathname !== "/" ? pathname.replace(/\/+$/, "") : pathname;
+  if (
+    normalizedPathname.endsWith("/stream") ||
+    normalizedPathname.endsWith("/stream.html")
+  ) {
     return true;
   }
 

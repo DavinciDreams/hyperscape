@@ -1,8 +1,13 @@
+import fs from "fs";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  buildPagesHeaders,
+  parseEmbedAllowedOrigins,
+} from "./src/lib/embedOriginPolicy";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,6 +55,10 @@ export default defineConfig(({ mode }) => {
     process.env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
     env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
     "";
+  const resolvedEmbedAllowedOrigins = parseEmbedAllowedOrigins(
+    resolvedPublicEmbedAllowedOrigins,
+  );
+  const clientDistDir = path.resolve(__dirname, "dist");
 
   console.log("[Vite Config] Build mode:", mode);
   console.log("[Vite Config] Loaded env from:", clientDir);
@@ -109,6 +118,18 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      {
+        name: "write-pages-headers",
+        closeBundle() {
+          fs.mkdirSync(clientDistDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(clientDistDir, "_headers"),
+            buildPagesHeaders({
+              embedAllowedOrigins: resolvedEmbedAllowedOrigins,
+            }),
+          );
+        },
+      },
       react(),
       // PWA plugin for installable web app on Saga and Android devices
       VitePWA({
@@ -452,7 +473,6 @@ export default defineConfig(({ mode }) => {
       // Security headers for development server
       headers: {
         "X-Content-Type-Options": "nosniff",
-        ...(mode === "production" ? { "X-Frame-Options": "DENY" } : {}),
         "X-XSS-Protection": "1; mode=block",
         "Referrer-Policy": "strict-origin-when-cross-origin",
       },

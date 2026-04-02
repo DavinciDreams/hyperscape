@@ -64,21 +64,65 @@ interface CachedModel {
 
 const PROCESSED_DB_NAME = "hyperscape-processed-models";
 const PROCESSED_STORE_NAME = "models";
-const PROCESSED_CACHE_VERSION = 5;
+const PROCESSED_CACHE_VERSION = 6;
+
+type SupportedTypedArrayName =
+  | "Float32Array"
+  | "Float64Array"
+  | "Uint32Array"
+  | "Uint16Array"
+  | "Uint8Array"
+  | "Uint8ClampedArray"
+  | "Int32Array"
+  | "Int16Array"
+  | "Int8Array";
+
+type SupportedTypedArray =
+  | Float32Array
+  | Float64Array
+  | Uint32Array
+  | Uint16Array
+  | Uint8Array
+  | Uint8ClampedArray
+  | Int32Array
+  | Int16Array
+  | Int8Array;
+
+const TYPED_ARRAY_CONSTRUCTORS: Record<
+  SupportedTypedArrayName,
+  new (buffer: ArrayBuffer) => SupportedTypedArray
+> = {
+  Float32Array,
+  Float64Array,
+  Uint32Array,
+  Uint16Array,
+  Uint8Array,
+  Uint8ClampedArray,
+  Int32Array,
+  Int16Array,
+  Int8Array,
+};
+
+interface SerializedAttributeData {
+  data: ArrayBuffer;
+  arrayType: SupportedTypedArrayName;
+  itemSize: number;
+  normalized: boolean;
+  count: number;
+}
 
 /** Serialized mesh data for IndexedDB storage */
 interface SerializedMesh {
   name: string;
   type: "Mesh" | "SkinnedMesh";
-  positions: ArrayBuffer; // Float32Array
-  normals?: ArrayBuffer;
-  uvs?: ArrayBuffer;
-  uv2s?: ArrayBuffer;
-  colors?: ArrayBuffer;
-  indices?: ArrayBuffer;
-  indexType?: "Uint16" | "Uint32";
-  skinWeights?: ArrayBuffer;
-  skinIndices?: ArrayBuffer;
+  positions: SerializedAttributeData;
+  normals?: SerializedAttributeData;
+  uvs?: SerializedAttributeData;
+  uv2s?: SerializedAttributeData;
+  colors?: SerializedAttributeData;
+  indices?: SerializedAttributeData;
+  skinWeights?: SerializedAttributeData;
+  skinIndices?: SerializedAttributeData;
   /** Material properties (not the GPU material itself) */
   material: SerializedMaterialProps | SerializedMaterialProps[];
 }
@@ -264,6 +308,178 @@ export class ModelCache {
     return this.processedDBReady;
   }
 
+  private deleteProcessedModel(url: string): void {
+    if (!this.processedDB) return;
+
+    try {
+      const tx = this.processedDB.transaction(
+        PROCESSED_STORE_NAME,
+        "readwrite",
+      );
+      const deleteReq = tx.objectStore(PROCESSED_STORE_NAME).delete(url);
+      deleteReq.onerror = () =>
+        console.warn(
+          `[ModelCache] Failed to purge processed cache entry for ${url}:`,
+          deleteReq.error,
+        );
+    } catch (error) {
+      console.warn(
+        `[ModelCache] Failed to open purge transaction for ${url}:`,
+        error,
+      );
+    }
+  }
+
+  private resolveTypedArrayName(
+    view: ArrayBufferView,
+  ): SupportedTypedArrayName {
+    if (view instanceof Float32Array) return "Float32Array";
+    if (view instanceof Float64Array) return "Float64Array";
+    if (view instanceof Uint32Array) return "Uint32Array";
+    if (view instanceof Uint16Array) return "Uint16Array";
+    if (view instanceof Uint8Array) return "Uint8Array";
+    if (view instanceof Uint8ClampedArray) return "Uint8ClampedArray";
+    if (view instanceof Int32Array) return "Int32Array";
+    if (view instanceof Int16Array) return "Int16Array";
+    if (view instanceof Int8Array) return "Int8Array";
+    throw new Error(
+      `[ModelCache] Unsupported typed array for processed cache: ${view.constructor.name}`,
+    );
+  }
+
+  private materializeAttributeArray(
+    attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+  ): SupportedTypedArray {
+    const arrayType = this.resolveTypedArrayName(attribute.array);
+    const ArrayCtor = TYPED_ARRAY_CONSTRUCTORS[arrayType];
+
+    if (
+      "isInterleavedBufferAttribute" in attribute &&
+      attribute.isInterleavedBufferAttribute
+    ) {
+      const source = attribute.array as SupportedTypedArray;
+      const materialized = new ArrayCtor(
+        new ArrayBuffer(
+          attribute.count * attribute.itemSize * source.BYTES_PER_ELEMENT,
+        ),
+      );
+      const stride = attribute.data.stride;
+      const offset = attribute.offset;
+
+      for (let itemIndex = 0; itemIndex < attribute.count; itemIndex += 1) {
+        const sourceBase = itemIndex * stride + offset;
+        const targetBase = itemIndex * attribute.itemSize;
+        for (
+          let componentIndex = 0;
+          componentIndex < attribute.itemSize;
+          componentIndex += 1
+        ) {
+          materialized[targetBase + componentIndex] =
+            source[sourceBase + componentIndex] ?? 0;
+        }
+      }
+
+      return materialized;
+    }
+
+    const source = attribute.array as SupportedTypedArray;
+    const copiedBuffer = source.buffer.slice(
+      source.byteOffset,
+      source.byteOffset + source.byteLength,
+    ) as ArrayBuffer;
+    return new ArrayCtor(copiedBuffer);
+  }
+
+  private serializeGeometryAttribute(
+    attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+  ): SerializedAttributeData {
+    const packedArray = this.materializeAttributeArray(attribute);
+    return {
+      data: packedArray.buffer.slice(0) as ArrayBuffer,
+      arrayType: this.resolveTypedArrayName(packedArray),
+      itemSize: attribute.itemSize,
+      normalized: attribute.normalized,
+      count: attribute.count,
+    };
+  }
+
+  private deserializeGeometryAttribute(
+    attribute: SerializedAttributeData,
+  ): THREE.BufferAttribute {
+    const ArrayCtor = TYPED_ARRAY_CONSTRUCTORS[attribute.arrayType];
+    const restoredArray = new ArrayCtor(attribute.data);
+    if (restoredArray.length !== attribute.count * attribute.itemSize) {
+      throw new Error(
+        `[ModelCache] Invalid processed attribute payload (${attribute.arrayType}, ${restoredArray.length} values for ${attribute.count}x${attribute.itemSize})`,
+      );
+    }
+
+    return new THREE.BufferAttribute(
+      restoredArray,
+      attribute.itemSize,
+      attribute.normalized,
+    );
+  }
+
+  private isFiniteNumericArray(values: ArrayLike<number>): boolean {
+    for (let index = 0; index < values.length; index += 1) {
+      if (!Number.isFinite(values[index] ?? NaN)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private validateProcessedGeometry(
+    url: string,
+    meshName: string,
+    geometry: THREE.BufferGeometry,
+  ): void {
+    const position = geometry.getAttribute("position");
+    if (!position) {
+      throw new Error(
+        `[ModelCache] Missing position attribute in processed mesh ${meshName || "<unnamed>"} (${url})`,
+      );
+    }
+    if (position.itemSize !== 3) {
+      throw new Error(
+        `[ModelCache] Invalid position itemSize ${position.itemSize} in processed mesh ${meshName || "<unnamed>"} (${url})`,
+      );
+    }
+
+    const attributes = Object.entries(geometry.attributes) as Array<
+      [string, THREE.BufferAttribute | THREE.InterleavedBufferAttribute]
+    >;
+    for (const [attributeName, attribute] of attributes) {
+      const expectedLength = attribute.count * attribute.itemSize;
+      if (attribute.array.length !== expectedLength) {
+        throw new Error(
+          `[ModelCache] Invalid ${attributeName} length ${attribute.array.length}; expected ${expectedLength} in processed mesh ${meshName || "<unnamed>"} (${url})`,
+        );
+      }
+      if (!this.isFiniteNumericArray(attribute.array as ArrayLike<number>)) {
+        throw new Error(
+          `[ModelCache] Non-finite ${attributeName} values in processed mesh ${meshName || "<unnamed>"} (${url})`,
+        );
+      }
+    }
+
+    const index = geometry.getIndex();
+    if (index) {
+      const expectedLength = index.count * index.itemSize;
+      if (index.array.length !== expectedLength) {
+        throw new Error(
+          `[ModelCache] Invalid index length ${index.array.length}; expected ${expectedLength} in processed mesh ${meshName || "<unnamed>"} (${url})`,
+        );
+      }
+      if (!this.isFiniteNumericArray(index.array as ArrayLike<number>)) {
+        throw new Error(
+          `[ModelCache] Non-finite index values in processed mesh ${meshName || "<unnamed>"} (${url})`,
+        );
+      }
+    }
+  }
+
   /**
    * Load a processed model from IndexedDB.
    * Returns the deserialized scene + materials if cached, null otherwise.
@@ -293,6 +509,9 @@ export class ModelCache {
             stored.version !== PROCESSED_CACHE_VERSION ||
             stored.sourceSize !== sourceSize
           ) {
+            if (stored) {
+              this.deleteProcessedModel(url);
+            }
             resolve(null);
             return;
           }
@@ -304,6 +523,7 @@ export class ModelCache {
               `[ModelCache] Failed to deserialize cached model ${url}:`,
               err,
             );
+            this.deleteProcessedModel(url);
             resolve(null);
           }
         };
@@ -375,7 +595,9 @@ export class ModelCache {
         const sm: SerializedMesh = {
           name: node.name,
           type: node instanceof THREE.SkinnedMesh ? "SkinnedMesh" : "Mesh",
-          positions: geo.getAttribute("position").array.buffer.slice(0),
+          positions: this.serializeGeometryAttribute(
+            geo.getAttribute("position"),
+          ),
           material: Array.isArray(node.material)
             ? node.material.map((m) => this.serializeMaterialProps(m))
             : this.serializeMaterialProps(node.material),
@@ -383,29 +605,31 @@ export class ModelCache {
 
         // Optional attributes
         const normals = geo.getAttribute("normal");
-        if (normals) sm.normals = normals.array.buffer.slice(0);
+        if (normals) sm.normals = this.serializeGeometryAttribute(normals);
 
         const uvs = geo.getAttribute("uv");
-        if (uvs) sm.uvs = uvs.array.buffer.slice(0);
+        if (uvs) sm.uvs = this.serializeGeometryAttribute(uvs);
 
         const uv2s = geo.getAttribute("uv2");
-        if (uv2s) sm.uv2s = uv2s.array.buffer.slice(0);
+        if (uv2s) sm.uv2s = this.serializeGeometryAttribute(uv2s);
 
         const colors = geo.getAttribute("color");
-        if (colors) sm.colors = colors.array.buffer.slice(0);
+        if (colors) sm.colors = this.serializeGeometryAttribute(colors);
 
         if (geo.index) {
-          sm.indices = geo.index.array.buffer.slice(0);
-          sm.indexType =
-            geo.index.array instanceof Uint16Array ? "Uint16" : "Uint32";
+          sm.indices = this.serializeGeometryAttribute(geo.index);
         }
 
         // Skinning data
         if (node instanceof THREE.SkinnedMesh) {
           const skinWeights = geo.getAttribute("skinWeight");
           const skinIndices = geo.getAttribute("skinIndex");
-          if (skinWeights) sm.skinWeights = skinWeights.array.buffer.slice(0);
-          if (skinIndices) sm.skinIndices = skinIndices.array.buffer.slice(0);
+          if (skinWeights) {
+            sm.skinWeights = this.serializeGeometryAttribute(skinWeights);
+          }
+          if (skinIndices) {
+            sm.skinIndices = this.serializeGeometryAttribute(skinIndices);
+          }
         }
 
         meshes.push(sm);
@@ -597,50 +821,40 @@ export class ModelCache {
       // Restore geometry attributes
       geo.setAttribute(
         "position",
-        new THREE.BufferAttribute(new Float32Array(sm.positions), 3),
+        this.deserializeGeometryAttribute(sm.positions),
       );
       if (sm.normals) {
         geo.setAttribute(
           "normal",
-          new THREE.BufferAttribute(new Float32Array(sm.normals), 3),
+          this.deserializeGeometryAttribute(sm.normals),
         );
       }
       if (sm.uvs) {
-        geo.setAttribute(
-          "uv",
-          new THREE.BufferAttribute(new Float32Array(sm.uvs), 2),
-        );
+        geo.setAttribute("uv", this.deserializeGeometryAttribute(sm.uvs));
       }
       if (sm.uv2s) {
-        geo.setAttribute(
-          "uv2",
-          new THREE.BufferAttribute(new Float32Array(sm.uv2s), 2),
-        );
+        geo.setAttribute("uv2", this.deserializeGeometryAttribute(sm.uv2s));
       }
       if (sm.colors) {
-        geo.setAttribute(
-          "color",
-          new THREE.BufferAttribute(new Float32Array(sm.colors), 3),
-        );
+        geo.setAttribute("color", this.deserializeGeometryAttribute(sm.colors));
       }
       if (sm.indices) {
-        const IndexArray =
-          sm.indexType === "Uint16" ? Uint16Array : Uint32Array;
-        geo.setIndex(new THREE.BufferAttribute(new IndexArray(sm.indices), 1));
+        geo.setIndex(this.deserializeGeometryAttribute(sm.indices));
       }
       if (sm.skinWeights) {
         geo.setAttribute(
           "skinWeight",
-          new THREE.BufferAttribute(new Float32Array(sm.skinWeights), 4),
+          this.deserializeGeometryAttribute(sm.skinWeights),
         );
       }
       if (sm.skinIndices) {
         geo.setAttribute(
           "skinIndex",
-          new THREE.BufferAttribute(new Uint16Array(sm.skinIndices), 4),
+          this.deserializeGeometryAttribute(sm.skinIndices),
         );
       }
 
+      this.validateProcessedGeometry(stored.url, sm.name, geo);
       geo.computeBoundingSphere();
       geo.computeBoundingBox();
 

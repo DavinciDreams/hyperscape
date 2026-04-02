@@ -1,4 +1,8 @@
 import type { EmbeddedViewportConfig } from "../types/embeddedConfig";
+import {
+  normalizeEmbedOrigin,
+  resolveTrustedEmbedOrigins as resolveTrustedOriginsFromPolicy,
+} from "./embedOriginPolicy";
 
 type ParsedHyperscapeAuthMessage = {
   authToken: string;
@@ -38,56 +42,14 @@ function extractOrigin(value: string | null | undefined): string | null {
   }
 }
 
-export function normalizeTrustedOrigin(
-  value: string | null | undefined,
-): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const normalized = value.trim();
-  if (!normalized || normalized === "*" || normalized === "null") {
-    return null;
-  }
-
-  try {
-    const url = new URL(normalized);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return null;
-    }
-    if (url.pathname !== "/" || url.search || url.hash) {
-      return null;
-    }
-    return url.origin;
-  } catch {
-    return null;
-  }
-}
+export const normalizeTrustedOrigin = normalizeEmbedOrigin;
 
 export function resolveTrustedEmbedOrigins(params: {
   currentOrigin: string;
   publicAppUrl?: string | null;
   embedAllowedOrigins?: string | null;
 }): string[] {
-  const trustedOrigins = new Set<string>();
-  const currentOrigin = normalizeTrustedOrigin(params.currentOrigin);
-  if (currentOrigin) {
-    trustedOrigins.add(currentOrigin);
-  }
-
-  const publicAppOrigin = extractOrigin(params.publicAppUrl);
-  if (publicAppOrigin) {
-    trustedOrigins.add(publicAppOrigin);
-  }
-
-  for (const candidate of (params.embedAllowedOrigins || "").split(",")) {
-    const normalizedOrigin = normalizeTrustedOrigin(candidate);
-    if (normalizedOrigin) {
-      trustedOrigins.add(normalizedOrigin);
-    }
-  }
-
-  return [...trustedOrigins];
+  return resolveTrustedOriginsFromPolicy(params);
 }
 
 export function isTrustedEmbedOrigin(

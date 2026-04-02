@@ -26,9 +26,16 @@ import type {
   StreamingGuardrailPhase,
 } from "@hyperscape/shared";
 import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
-import type { StreamingWindow } from "@/lib/streamingWindow";
+import type {
+  StreamingWindow,
+  StreamingWindowStatusMessage,
+} from "@/lib/streamingWindow";
 import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
 import { getStreamingAccessToken } from "../lib/streamingAccessToken";
+import {
+  resolveEmbedReadyTargetOrigin,
+  resolveTrustedEmbedOrigins,
+} from "../lib/embeddedAuth";
 
 /** Streaming state from server */
 export interface StreamingState {
@@ -98,8 +105,7 @@ type StreamingConfig = {
   publicDelayMs?: number;
 };
 
-const STREAMING_VIEWER_ACCESS_DENIED_MESSAGE =
-  "Streaming viewer access denied";
+const STREAMING_VIEWER_ACCESS_DENIED_MESSAGE = "Streaming viewer access denied";
 const STREAMING_VIEWER_ACCESS_REQUIRED_MESSAGE =
   "Streaming viewer access required";
 
@@ -260,6 +266,28 @@ export function StreamingMode() {
   );
   const cameraRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const worldListenerCleanupRef = useRef<(() => void) | null>(null);
+  const streamStatusTargetOrigin = useMemo(() => {
+    if (
+      typeof window === "undefined" ||
+      typeof document === "undefined" ||
+      window.parent === window
+    ) {
+      return null;
+    }
+
+    const trustedOrigins = resolveTrustedEmbedOrigins({
+      currentOrigin: window.location.origin,
+      publicAppUrl: import.meta.env.PUBLIC_APP_URL,
+      embedAllowedOrigins: import.meta.env.PUBLIC_EMBED_ALLOWED_ORIGINS,
+    });
+
+    return resolveEmbedReadyTargetOrigin({
+      currentOrigin: window.location.origin,
+      trustedOrigins,
+      referrer: document.referrer || null,
+      allowWildcardFallback: false,
+    });
+  }, []);
 
   // WebSocket URL for streaming mode (supports optional streamToken gate)
   const wsUrl = useMemo(() => {
@@ -1023,40 +1051,35 @@ export function StreamingMode() {
       worldReady,
     ],
   );
-
-  useEffect(() => {
-    const win = window as StreamingWindow;
-    win.__HYPERSCAPE_STREAM_READY__ = rendererHealth.ready;
-    win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = rendererHealth;
-  }, [rendererHealth]);
-
-  // Write boot status to a window global so the capture pipeline's renderer
-  // health probe can detect loading/error state without reading DOM textContent.
-  useEffect(() => {
-    const win = window as StreamingWindow;
+  const streamBootStatus = useMemo(() => {
     if (loadingDismissed) {
-      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = null;
-    } else if (streamAccessCheckPending) {
-      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "checking_access";
-    } else if (clientInitError) {
-      if (isStreamingViewerAccessDeniedError(clientInitError)) {
-        win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:viewer_access_denied";
-      } else if (clientInitError.toLowerCase().includes("webgpu")) {
-        win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:webgpu_required";
-      } else if (clientInitError.toLowerCase().includes("http error")) {
-        win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:http";
-      } else {
-        win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "error:init_failed";
-      }
-    } else if (!connected) {
-      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "connecting";
-    } else if (!worldReady) {
-      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
-    } else if (!terrainReady) {
-      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_assets";
-    } else {
-      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "finalizing";
+      return null;
     }
+    if (streamAccessCheckPending) {
+      return "checking_access";
+    }
+    if (clientInitError) {
+      if (isStreamingViewerAccessDeniedError(clientInitError)) {
+        return "error:viewer_access_denied";
+      }
+      if (clientInitError.toLowerCase().includes("webgpu")) {
+        return "error:webgpu_required";
+      }
+      if (clientInitError.toLowerCase().includes("http error")) {
+        return "error:http";
+      }
+      return "error:init_failed";
+    }
+    if (!connected) {
+      return "connecting";
+    }
+    if (!worldReady) {
+      return "initializing";
+    }
+    if (!terrainReady) {
+      return "loading_assets";
+    }
+    return "finalizing";
   }, [
     clientInitError,
     connected,
@@ -1065,6 +1088,33 @@ export function StreamingMode() {
     terrainReady,
     worldReady,
   ]);
+
+  useEffect(() => {
+    const win = window as StreamingWindow;
+    win.__HYPERSCAPE_STREAM_READY__ = rendererHealth.ready;
+    win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = rendererHealth;
+    win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = streamBootStatus;
+
+    if (
+      typeof window !== "undefined" &&
+      window.parent !== window &&
+      streamStatusTargetOrigin
+    ) {
+      const statusMessage: StreamingWindowStatusMessage = {
+        type: "HYPERSCAPE_STREAM_STATUS",
+        ready: rendererHealth.ready,
+        status: streamBootStatus,
+      };
+      try {
+        window.parent.postMessage(statusMessage, streamStatusTargetOrigin);
+      } catch (error) {
+        console.warn(
+          "[StreamingMode] Failed to notify embed parent of stream status:",
+          error,
+        );
+      }
+    }
+  }, [rendererHealth, streamBootStatus, streamStatusTargetOrigin]);
 
   // Trigger fade-out once when the stream is first ready.
   useEffect(() => {
@@ -1092,7 +1142,8 @@ export function StreamingMode() {
     !streamAccessToken &&
     isStreamingViewerAccessDeniedError(clientInitError) &&
     !streamAccessCheckPending;
-  const shouldMountGameClient = !streamAccessCheckPending && !tokenlessAccessDenied;
+  const shouldMountGameClient =
+    !streamAccessCheckPending && !tokenlessAccessDenied;
   const loadingHeadline = streamAccessCheckPending
     ? "Checking stream access..."
     : !connected
