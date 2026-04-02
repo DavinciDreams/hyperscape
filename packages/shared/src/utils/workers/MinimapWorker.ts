@@ -931,6 +931,30 @@ export class MinimapWorkerManager {
     this.worker.postMessage({ type: "updateEntities", entities });
   }
 
+  /** Update road polylines */
+  updateRoads(roads: MinimapRoad[]): void {
+    if (!this.worker || !this.ready) return;
+    this.worker.postMessage({ type: "updateRoads", roads });
+  }
+
+  /** Update building rectangles */
+  updateBuildings(buildings: MinimapBuilding[]): void {
+    if (!this.worker || !this.ready) return;
+    this.worker.postMessage({ type: "updateBuildings", buildings });
+  }
+
+  /** Set destination marker position */
+  updateDestination(x: number, z: number): void {
+    if (!this.worker || !this.ready) return;
+    this.worker.postMessage({ type: "updateDestination", x, z });
+  }
+
+  /** Clear destination marker */
+  clearDestination(): void {
+    if (!this.worker || !this.ready) return;
+    this.worker.postMessage({ type: "clearDestination" });
+  }
+
   /** Request a render */
   render(): void {
     if (!this.worker || !this.ready) return;
