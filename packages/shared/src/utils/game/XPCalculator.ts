@@ -17,8 +17,9 @@ const MAX_LEVEL = 99;
 /**
  * Get the total XP required to reach a given level.
  *
- * OSRS formula:
- *   XP(L) = floor( sum from i=1 to L-1 of floor(i + 300 * 2^(i/7)) / 4 )
+ * Uses the same accumulative formula as SkillsSystem.generateXPTable() and
+ * the on-chain XPTable.sol contract to ensure parity across server, client,
+ * and blockchain. Produces 13,034,394 at level 99.
  *
  * @param level - Target level (1-99)
  * @returns Total XP required (0 for level 1)
@@ -26,17 +27,21 @@ const MAX_LEVEL = 99;
  * @example
  * getXPForLevel(1)  // => 0
  * getXPForLevel(2)  // => 83
- * getXPForLevel(99) // => 13,034,431
+ * getXPForLevel(99) // => 13,034,394
  */
 export function getXPForLevel(level: number): number {
   if (level <= 1) return 0;
   const clampedLevel = Math.min(level, MAX_LEVEL);
 
-  let total = 0;
-  for (let i = 1; i < clampedLevel; i++) {
-    total += Math.floor(i + 300 * Math.pow(2, i / 7));
+  // Accumulative formula matching SkillsSystem.generateXPTable() exactly:
+  // xpDelta(L) = floor((L-1 + 300 * 2^((L-1)/7)) / 4)
+  // xpForLevel(N) = sum(xpDelta(2)..xpDelta(N))
+  let cumulative = 0;
+  for (let l = 2; l <= clampedLevel; l++) {
+    const xp = Math.floor(l - 1 + 300 * Math.pow(2, (l - 1) / 7)) / 4;
+    cumulative = Math.floor(cumulative + xp);
   }
-  return Math.floor(total / 4);
+  return cumulative;
 }
 
 /**

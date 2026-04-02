@@ -78,7 +78,7 @@ const CombatStatsRow = React.memo(function CombatStatsRow({
 });
 
 /** HP bar, combat level, target health, and stat row */
-export function CombatBonusesDisplay({
+export const CombatBonusesDisplay = React.memo(function CombatBonusesDisplay({
   health,
   combatLevel,
   inCombat,
@@ -260,4 +260,4 @@ export function CombatBonusesDisplay({
       />
     </>
   );
-}
+});

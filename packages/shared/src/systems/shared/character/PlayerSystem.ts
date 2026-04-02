@@ -63,6 +63,10 @@ import type {
   PlayerLevelUpEvent,
 } from "../../../types/events";
 import type { StatsComponent } from "../../../components/StatsComponent";
+import {
+  calculateCombatLevel,
+  normalizeCombatSkills,
+} from "../../../utils/game/CombatLevelCalculator";
 import { EventType } from "../../../types/events";
 import type { World } from "../../../types/index";
 import { Logger } from "../../../utils/Logger";
@@ -1797,22 +1801,17 @@ export class PlayerSystem extends SystemBase {
   }
 
   private calculateCombatLevel(skills: Skills): number {
-    // OSRS Combat Level Formula:
-    // base = 0.25 × (Defence + Hitpoints + floor(Prayer / 2))
-    // melee = 0.325 × (Attack + Strength)
-    // ranged = 0.325 × floor(Ranged × 1.5)
-    // magic = 0.325 × floor(Magic × 1.5)
-    // combat = base + max(melee, ranged, magic)
-
-    // Since we don't have Prayer or Magic yet, simplified formula:
-    const base = 0.25 * (skills.defense.level + skills.constitution.level);
-
-    const melee = 0.325 * (skills.attack.level + skills.strength.level);
-    const ranged = 0.325 * Math.floor(skills.ranged.level * 1.5);
-
-    const combatLevel = base + Math.max(melee, ranged);
-
-    return Math.floor(combatLevel);
+    return calculateCombatLevel(
+      normalizeCombatSkills({
+        attack: skills.attack.level,
+        strength: skills.strength.level,
+        defense: skills.defense.level,
+        hitpoints: skills.constitution.level,
+        ranged: skills.ranged.level,
+        magic: skills.magic?.level,
+        prayer: skills.prayer?.level,
+      }),
+    );
   }
 
   /**

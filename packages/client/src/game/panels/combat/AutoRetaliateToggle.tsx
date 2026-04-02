@@ -10,7 +10,7 @@ import { PANEL_PADDING } from "../../../constants/panelLayout";
 import type { AutoRetaliateToggleProps } from "./types";
 
 /** Auto-retaliate toggle button with on/off indicator */
-export function AutoRetaliateToggle({
+export const AutoRetaliateToggle = React.memo(function AutoRetaliateToggle({
   enabled,
   onToggle,
   theme,
@@ -110,4 +110,4 @@ export function AutoRetaliateToggle({
       </span>
     </button>
   );
-}
+});

@@ -275,7 +275,7 @@ const CombatStyleBanner = ({
 };
 
 /** Combat style selector section with banner grid, header, and cooldown indicator */
-export function CombatStyleSelector({
+export const CombatStyleSelector = React.memo(function CombatStyleSelector({
   styles,
   activeStyleId,
   cooldown,
@@ -367,4 +367,4 @@ export function CombatStyleSelector({
       )}
     </>
   );
-}
+});
