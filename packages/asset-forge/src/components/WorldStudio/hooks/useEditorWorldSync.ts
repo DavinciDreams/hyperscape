@@ -25,6 +25,7 @@ import {
   getOreModel,
   getTreeSpeciesInstance,
 } from "../../WorldBuilder/GameWorldAssets";
+import { MaterialPool } from "../utils/MaterialPool";
 
 /** Safe material dispose — WebGPU renderer can race with React cleanup */
 function safeDispose(mat: THREE.Material | THREE.Material[]): void {
@@ -151,20 +152,34 @@ function createMarkerMesh(
   type: keyof typeof MARKER_COLORS,
   position: { x: number; y: number; z: number },
   rotation: number = 0,
+  pool?: MaterialPool,
 ): THREE.Mesh {
   const geo = getMarkerGeometry(type);
+  // Use pooled material when available — one GPU material per marker type
+  // instead of one per entity (reduces allocation from N to ~9)
+  const mat = pool
+    ? pool.acquireMarker(type, MARKER_COLORS[type])
+    : createFallbackMarkerMaterial(type);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(position.x, position.y, position.z);
+  mesh.rotation.y = rotation;
+  mesh.castShadow = true;
+  mesh.name = `marker-${type}`;
+  // Track whether material is pooled (shared) so we don't dispose it individually
+  mesh.userData._pooledMaterial = !!pool;
+  return mesh;
+}
+
+function createFallbackMarkerMaterial(
+  type: keyof typeof MARKER_COLORS,
+): MeshStandardNodeMaterial {
   const mat = new MeshStandardNodeMaterial();
   mat.color = new THREE.Color(MARKER_COLORS[type]);
   mat.emissive = new THREE.Color(MARKER_COLORS[type]);
   mat.emissiveIntensity = 0.3;
   mat.roughness = 0.7;
   mat.metalness = 0.2;
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(position.x, position.y, position.z);
-  mesh.rotation.y = rotation;
-  mesh.castShadow = true;
-  mesh.name = `marker-${type}`;
-  return mesh;
+  return mat;
 }
 
 /**
@@ -176,9 +191,13 @@ function createGhostObject(
   templateId: string,
   position: { x: number; y: number; z: number },
   rotation: number = 0,
+  cloneTracker?: Set<THREE.Material>,
 ): THREE.Object3D {
-  // Try real model first
-  const modelGroup = tryLoadEntityModel(category, templateId, { ghost: true });
+  // Try real model first — pass clone tracker for disposal tracking
+  const modelGroup = tryLoadEntityModel(category, templateId, {
+    ghost: true,
+    cloneTracker,
+  });
   if (modelGroup) {
     // Mark cloned materials for cleanup
     modelGroup.traverse((child) => {
@@ -209,6 +228,7 @@ function createGhostObject(
   mat.transparent = true;
   mat.opacity = 0.6;
   mat.depthWrite = false;
+  cloneTracker?.add(mat);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(position.x, position.y, position.z);
   mesh.rotation.y = rotation;
@@ -237,7 +257,7 @@ function categoryToMarkerType(category: string): string {
 function tryLoadEntityModel(
   category: string,
   templateId: string,
-  opts?: { ghost?: boolean },
+  opts?: { ghost?: boolean; cloneTracker?: Set<THREE.Material> },
 ): THREE.Group | null {
   let modelData: {
     parts: Array<{ geometry: THREE.BufferGeometry; material: THREE.Material }>;
@@ -282,6 +302,8 @@ function tryLoadEntityModel(
       (mat as THREE.MeshStandardMaterial).transparent = true;
       (mat as THREE.MeshStandardMaterial).opacity = 0.45;
       mat.depthWrite = false;
+      // Track clone for comprehensive disposal
+      opts.cloneTracker?.add(mat);
     } else {
       mat = part.material;
     }
@@ -312,13 +334,19 @@ export function getPlacementYOffset(
 
 /**
  * Dispose all children of a model group (cloned ghost materials).
+ * Optionally removes disposed materials from a tracking set.
  */
-function disposeModelGroup(group: THREE.Group): void {
+function disposeModelGroup(
+  group: THREE.Group,
+  cloneTracker?: Set<THREE.Material>,
+): void {
   group.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       // Only dispose material if it's a ghost clone (not the cached original)
       if (child.userData._ghostClone) {
-        safeDispose(child.material as THREE.Material);
+        const mat = child.material as THREE.Material;
+        safeDispose(mat);
+        cloneTracker?.delete(mat);
       }
     }
   });
@@ -373,6 +401,9 @@ interface SyncState {
   ghostTemplateId: string | null;
   boundaryRing: THREE.Mesh | null;
   connectionLines: THREE.Group | null;
+  /** Tracks all ghost-cloned materials for comprehensive disposal */
+  ghostClones: Set<THREE.Material>;
+  materialPool: MaterialPool;
   disposed: boolean;
 }
 
@@ -398,6 +429,8 @@ export function useEditorWorldSync({
     ghostTemplateId: null,
     boundaryRing: null,
     connectionLines: null,
+    ghostClones: new Set(),
+    materialPool: new MaterialPool(),
     disposed: false,
   });
   // Keep a stable ref to sceneRefs for cleanup
@@ -447,9 +480,14 @@ export function useEditorWorldSync({
           }
         }
 
-        // Fallback: abstract colored marker
+        // Fallback: abstract colored marker — material from pool (shared)
         if (!hasRealModel) {
-          mesh = createMarkerMesh(type, { x: 0, y: 0, z: 0 }, 0);
+          mesh = createMarkerMesh(
+            type,
+            { x: 0, y: 0, z: 0 },
+            0,
+            sync.materialPool,
+          );
           group.add(mesh);
         }
 
@@ -623,10 +661,15 @@ export function useEditorWorldSync({
       if (!activeIds.has(id)) {
         overlay.remove(marker.group);
         refs.removeSelectable(marker.group);
-        // Only dispose the abstract marker mesh (real model geometry is shared/cached)
+        // Only dispose the abstract marker mesh material if it's NOT pooled.
+        // Pooled materials are shared across all markers of the same type
+        // and disposed when the pool itself is disposed (on hook unmount).
         if (marker.mesh) {
-          marker.mesh.geometry.dispose();
-          safeDispose(marker.mesh.material as THREE.Material);
+          if (!marker.mesh.userData._pooledMaterial) {
+            safeDispose(marker.mesh.material as THREE.Material);
+          } else {
+            sync.materialPool.releaseMarker(marker.type);
+          }
         }
         try {
           (marker.label.material as THREE.SpriteMaterial).map?.dispose();
@@ -642,12 +685,15 @@ export function useEditorWorldSync({
   /** Dispose a ghost object (handles both model groups and fallback meshes) */
   const disposeGhost = useCallback(
     (ghost: THREE.Object3D, refs: TerrainSceneRefs) => {
+      const sync = syncRef.current;
       refs.entityOverlay.remove(ghost);
       if (ghost instanceof THREE.Group) {
-        disposeModelGroup(ghost);
+        disposeModelGroup(ghost, sync.ghostClones);
       } else if (ghost instanceof THREE.Mesh) {
         if (ghost.userData._fallbackGhost) {
-          safeDispose(ghost.material as THREE.Material);
+          const mat = ghost.material as THREE.Material;
+          safeDispose(mat);
+          sync.ghostClones.delete(mat);
         }
       }
     },
@@ -698,6 +744,7 @@ export function useEditorWorldSync({
         placement.templateId,
         pos,
         placement.rotation,
+        sync.ghostClones,
       );
       refs.entityOverlay.add(ghost);
       sync.ghostObject = ghost;
@@ -786,8 +833,10 @@ export function useEditorWorldSync({
         refs.entityOverlay.remove(marker.group);
         refs.removeSelectable(marker.group);
         if (marker.mesh) {
-          marker.mesh.geometry.dispose();
-          safeDispose(marker.mesh.material as THREE.Material);
+          // Skip pooled materials — pool.dispose() handles them below
+          if (!marker.mesh.userData._pooledMaterial) {
+            safeDispose(marker.mesh.material as THREE.Material);
+          }
         }
         try {
           (marker.label.material as THREE.SpriteMaterial).map?.dispose();
@@ -811,6 +860,12 @@ export function useEditorWorldSync({
         sync.ghostObject = null;
       }
 
+      // Dispose any remaining tracked ghost clone materials
+      for (const mat of sync.ghostClones) {
+        safeDispose(mat);
+      }
+      sync.ghostClones.clear();
+
       if (sync.connectionLines) {
         refs.scene.remove(sync.connectionLines);
         sync.connectionLines.traverse((child) => {
@@ -821,6 +876,16 @@ export function useEditorWorldSync({
         });
         sync.connectionLines = null;
       }
+
+      // Dispose material pool — frees all shared marker materials
+      sync.materialPool.dispose();
+
+      // Dispose cached marker geometries — prevents accumulation across
+      // mount/unmount cycles (these are module-level singletons)
+      for (const [, geo] of MARKER_GEOMETRY_CACHE) {
+        geo.dispose();
+      }
+      MARKER_GEOMETRY_CACHE.clear();
     };
   }, []);
 }
