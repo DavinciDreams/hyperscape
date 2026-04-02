@@ -30,6 +30,7 @@ import { EntityPalette } from "./panels/EntityPalette";
 import { OutlinerPanel } from "./panels/OutlinerPanel";
 import { PathToolPanel } from "./panels/PathToolPanel";
 import { ProcgenPanel } from "./panels/ProcgenPanel";
+import { ZonePaintPanel } from "./panels/ZonePaintPanel";
 import { ManifestBrowserPanel } from "./panels/ManifestBrowserPanel";
 import { ContentBrowser } from "./panels/ContentBrowser";
 import { DeploymentPanel } from "./panels/DeploymentPanel";
@@ -346,6 +347,8 @@ export function WorldStudioLayout({ projectId }: WorldStudioLayoutProps) {
         return <EntityPalette />;
       case "brush":
         return <BrushSettingsPanel />;
+      case "zonePaint":
+        return <ZonePaintPanel />;
       case "path":
         return <PathToolPanel />;
       case "procgen":

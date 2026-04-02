@@ -18,6 +18,7 @@ import { useEffect, useRef } from "react";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import { useWorldStudio } from "../WorldStudioContext";
+import type { PlacedDangerSource, WildernessBoundary } from "../types";
 
 // ============== CONSTANTS ==============
 
@@ -33,12 +34,28 @@ const DIFFICULTY_COLORS = [
 /** Town boundary color — warm yellow. */
 const TOWN_BOUNDARY_COLOR = 0xfbbf24;
 
+/** Safe zone fill color — bright green. */
+const SAFE_ZONE_COLOR = 0x22c55e;
+
+/** Falloff boundary color — orange/amber. */
+const FALLOFF_BOUNDARY_COLOR = 0xf59e0b;
+
 /** Town radius defaults by size category (meters). */
 const TOWN_RADIUS_DEFAULTS: Record<string, number> = {
   hamlet: 50,
   village: 100,
   town: 150,
 };
+
+/** Safe zone radius defaults by town size (meters). Matches game manifest export. */
+const SAFE_ZONE_RADIUS_DEFAULTS: Record<string, number> = {
+  hamlet: 40,
+  village: 60,
+  town: 80,
+};
+
+/** Falloff distance from safe zone edge (meters). Matches TerrainSystem constant. */
+const TOWN_FALLOFF_RADIUS = 300;
 
 /** Height offset so lines sit slightly above the terrain surface. */
 const LINE_Y = 0.5;
@@ -180,6 +197,7 @@ function buildTownBoundaryOverlay(
     id: string;
     position: { x: number; y: number; z: number };
   }>,
+  townOverrides?: ReadonlyMap<string, { safeZoneRadiusOverride?: number }>,
 ): void {
   // Index buildings by id for quick lookup
   const buildingMap = new Map<string, { x: number; y: number; z: number }>();
@@ -188,27 +206,69 @@ function buildTownBoundaryOverlay(
   }
 
   for (const town of towns) {
-    // Compute radius from building spread, fallback to size-based default
-    let radius = TOWN_RADIUS_DEFAULTS[town.size] ?? 75;
+    const px = town.position.x;
+    const pz = town.position.z;
 
+    // Compute town extent from building spread
+    let extentRadius = TOWN_RADIUS_DEFAULTS[town.size] ?? 75;
     if (town.buildingIds.length > 0) {
       let maxDist = 0;
       for (const bid of town.buildingIds) {
         const bpos = buildingMap.get(bid);
         if (!bpos) continue;
-        const dx = bpos.x - town.position.x;
-        const dz = bpos.z - town.position.z;
+        const dx = bpos.x - px;
+        const dz = bpos.z - pz;
         const dist = Math.sqrt(dx * dx + dz * dz);
         if (dist > maxDist) maxDist = dist;
       }
-      // Add padding beyond furthest building
-      if (maxDist > 0) {
-        radius = maxDist + 15;
-      }
+      if (maxDist > 0) extentRadius = maxDist + 15;
     }
 
-    // Dashed circle outline
-    const circleGeo = createCircleGeometry(radius);
+    // Safe zone radius (from override or size default)
+    const override = townOverrides?.get(town.id);
+    const safeZoneRadius =
+      override?.safeZoneRadiusOverride ??
+      SAFE_ZONE_RADIUS_DEFAULTS[town.size] ??
+      60;
+
+    // Falloff outer boundary
+    const falloffRadius = safeZoneRadius + TOWN_FALLOFF_RADIUS;
+
+    // 1) Safe zone — semi-transparent green filled circle
+    const safeGeo = new THREE.CircleGeometry(safeZoneRadius, 64);
+    safeGeo.rotateX(-Math.PI / 2);
+    const safeMat = new THREE.MeshBasicMaterial({
+      color: SAFE_ZONE_COLOR,
+      transparent: true,
+      opacity: 0.08,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+    });
+    const safeFill = new THREE.Mesh(safeGeo, safeMat);
+    safeFill.position.set(px, LINE_Y, pz);
+    safeFill.renderOrder = 997;
+    safeFill.name = `town-safe-fill-${town.id}`;
+    safeFill.raycast = () => {};
+    group.add(safeFill);
+
+    // Safe zone outline — solid green
+    const safeOutlineGeo = createCircleGeometry(safeZoneRadius);
+    const safeOutlineMat = new THREE.LineBasicMaterial({
+      color: SAFE_ZONE_COLOR,
+      depthWrite: false,
+      depthTest: true,
+      transparent: true,
+      opacity: 0.6,
+    });
+    const safeOutline = new THREE.Line(safeOutlineGeo, safeOutlineMat);
+    safeOutline.position.set(px, LINE_Y, pz);
+    safeOutline.renderOrder = 998;
+    safeOutline.name = `town-safe-outline-${town.id}`;
+    group.add(safeOutline);
+
+    // 2) Town extent — dashed yellow circle (existing behavior)
+    const circleGeo = createCircleGeometry(extentRadius);
     const dashMat = new THREE.LineDashedMaterial({
       color: TOWN_BOUNDARY_COLOR,
       dashSize: 4,
@@ -219,15 +279,33 @@ function buildTownBoundaryOverlay(
       opacity: 0.8,
     });
     const circle = new THREE.Line(circleGeo, dashMat);
-    circle.computeLineDistances(); // required for dashed material
-    circle.position.set(town.position.x, LINE_Y, town.position.z);
+    circle.computeLineDistances();
+    circle.position.set(px, LINE_Y, pz);
     circle.renderOrder = 998;
     circle.name = `town-boundary-${town.id}`;
     group.add(circle);
 
+    // 3) Falloff outer boundary — dashed orange circle
+    const falloffGeo = createCircleGeometry(falloffRadius);
+    const falloffMat = new THREE.LineDashedMaterial({
+      color: FALLOFF_BOUNDARY_COLOR,
+      dashSize: 6,
+      gapSize: 4,
+      depthWrite: false,
+      depthTest: true,
+      transparent: true,
+      opacity: 0.35,
+    });
+    const falloffLine = new THREE.Line(falloffGeo, falloffMat);
+    falloffLine.computeLineDistances();
+    falloffLine.position.set(px, LINE_Y, pz);
+    falloffLine.renderOrder = 998;
+    falloffLine.name = `town-falloff-${town.id}`;
+    group.add(falloffLine);
+
     // Label
     const label = createLabelSprite(town.name, TOWN_BOUNDARY_COLOR);
-    label.position.set(town.position.x, LINE_Y + 5, town.position.z);
+    label.position.set(px, LINE_Y + 5, pz);
     label.name = `town-label-${town.id}`;
     group.add(label);
   }
@@ -280,6 +358,137 @@ function buildBiomeOverlay(
   }
 }
 
+// ============== DANGER SOURCE OVERLAY ==============
+
+/** Danger source color — red with varying opacity by intensity. */
+const DANGER_SOURCE_COLOR = 0xe54545;
+
+function buildDangerSourceOverlay(
+  group: THREE.Group,
+  dangerSources: ReadonlyArray<PlacedDangerSource>,
+): void {
+  for (const ds of dangerSources) {
+    const px = ds.position.x;
+    const pz = ds.position.z;
+
+    // Semi-transparent red filled circle (opacity scales with intensity)
+    const fillGeo = new THREE.CircleGeometry(ds.radius, 48);
+    fillGeo.rotateX(-Math.PI / 2);
+    const fillMat = new THREE.MeshBasicMaterial({
+      color: DANGER_SOURCE_COLOR,
+      transparent: true,
+      opacity: Math.min(0.2, 0.05 + ds.intensity * 0.05),
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+    });
+    const fillMesh = new THREE.Mesh(fillGeo, fillMat);
+    fillMesh.position.set(px, LINE_Y, pz);
+    fillMesh.renderOrder = 997;
+    fillMesh.name = `danger-fill-${ds.id}`;
+    fillMesh.raycast = () => {};
+    group.add(fillMesh);
+
+    // Dashed red outline
+    const outlineGeo = createCircleGeometry(ds.radius);
+    const outlineMat = new THREE.LineDashedMaterial({
+      color: DANGER_SOURCE_COLOR,
+      dashSize: 3,
+      gapSize: 2,
+      depthWrite: false,
+      depthTest: true,
+      transparent: true,
+      opacity: 0.6,
+    });
+    const outline = new THREE.Line(outlineGeo, outlineMat);
+    outline.computeLineDistances();
+    outline.position.set(px, LINE_Y, pz);
+    outline.renderOrder = 998;
+    outline.name = `danger-outline-${ds.id}`;
+    group.add(outline);
+
+    // Center marker (small diamond/dot)
+    const dotGeo = new THREE.CircleGeometry(2, 8);
+    dotGeo.rotateX(-Math.PI / 2);
+    const dotMat = new THREE.MeshBasicMaterial({
+      color: DANGER_SOURCE_COLOR,
+      transparent: true,
+      opacity: 0.8,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    dot.position.set(px, LINE_Y + 0.1, pz);
+    dot.renderOrder = 999;
+    dot.name = `danger-dot-${ds.id}`;
+    group.add(dot);
+
+    // Label
+    const label = createLabelSprite(ds.name, DANGER_SOURCE_COLOR);
+    label.position.set(px, LINE_Y + 5, pz);
+    label.name = `danger-label-${ds.id}`;
+    group.add(label);
+  }
+}
+
+// ============== WILDERNESS BOUNDARY OVERLAY ==============
+
+const WILDERNESS_COLOR = 0xd45b5b;
+
+function buildWildernessBoundaryOverlay(
+  group: THREE.Group,
+  boundary: WildernessBoundary,
+): void {
+  if (boundary.points.length < 2) return;
+
+  // Main boundary line — thick red
+  const points = boundary.points.map(
+    (p) => new THREE.Vector3(p.x, LINE_Y, p.z),
+  );
+  const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+  const lineMat = new THREE.LineBasicMaterial({
+    color: WILDERNESS_COLOR,
+    depthWrite: false,
+    depthTest: true,
+    transparent: true,
+    opacity: 0.8,
+    linewidth: 2,
+  });
+  const line = new THREE.Line(lineGeo, lineMat);
+  line.renderOrder = 998;
+  line.name = "wilderness-boundary-line";
+  group.add(line);
+
+  // Vertex markers
+  for (let i = 0; i < boundary.points.length; i++) {
+    const p = boundary.points[i];
+    const dotGeo = new THREE.CircleGeometry(3, 8);
+    dotGeo.rotateX(-Math.PI / 2);
+    const dotMat = new THREE.MeshBasicMaterial({
+      color: WILDERNESS_COLOR,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    dot.position.set(p.x, LINE_Y + 0.1, p.z);
+    dot.renderOrder = 999;
+    dot.name = `wilderness-vertex-${i}`;
+    group.add(dot);
+  }
+
+  // Label at midpoint
+  const mid = boundary.points[Math.floor(boundary.points.length / 2)];
+  const label = createLabelSprite(
+    `Wilderness (Lv ${boundary.maxLevel})`,
+    WILDERNESS_COLOR,
+  );
+  label.position.set(mid.x, LINE_Y + 8, mid.z);
+  label.name = "wilderness-boundary-label";
+  group.add(label);
+}
+
 // ============== DISPOSAL ==============
 
 function disposeGroup(group: THREE.Group): void {
@@ -315,13 +524,18 @@ export function useAreaBoundaryOverlay(
   const difficultyOverlay = state.overlays.difficultyOverlay;
   const biomeOverlay = state.overlays.biomeOverlay;
 
-  // Any overlay active means we also show town boundaries
+  // Extended layers for danger sources + wilderness
+  const dangerSources = state.extendedLayers.dangerSources;
+  const wildernessBoundary = state.extendedLayers.wildernessBoundary;
+
+  // Any overlay active means we also show town boundaries + danger sources
   const anyOverlayActive = difficultyOverlay || biomeOverlay;
 
   const difficultyZones = world?.layers.difficultyZones;
   const towns = world?.foundation.towns;
   const buildings = world?.foundation.buildings;
   const biomes = world?.foundation.biomes;
+  const townOverrides = world?.layers.townOverrides;
 
   useEffect(() => {
     if (!sceneRefs) return;
@@ -347,7 +561,17 @@ export function useAreaBoundaryOverlay(
 
     // Town boundaries (always shown when any overlay is active)
     if (towns && towns.length > 0) {
-      buildTownBoundaryOverlay(group, towns, buildings ?? []);
+      buildTownBoundaryOverlay(group, towns, buildings ?? [], townOverrides);
+    }
+
+    // Danger sources (shown when difficulty overlay is active)
+    if (difficultyOverlay && dangerSources.length > 0) {
+      buildDangerSourceOverlay(group, dangerSources);
+    }
+
+    // Wilderness boundary (shown when difficulty overlay is active)
+    if (difficultyOverlay && wildernessBoundary) {
+      buildWildernessBoundaryOverlay(group, wildernessBoundary);
     }
 
     // Biome regions
@@ -366,6 +590,9 @@ export function useAreaBoundaryOverlay(
     towns,
     buildings,
     biomes,
+    townOverrides,
+    dangerSources,
+    wildernessBoundary,
     world,
   ]);
 

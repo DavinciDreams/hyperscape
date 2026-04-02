@@ -186,6 +186,71 @@ function compileBiomes(world: WorldData): unknown[] {
 }
 
 /**
+ * Compile regions.json from tile-based named regions.
+ */
+function compileRegions(
+  extendedLayers: ExtendedWorldLayers,
+): Record<string, unknown> {
+  return {
+    regions: extendedLayers.regions.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      tileKeys: r.tileKeys,
+      tags: r.tags,
+      biomeOverride: r.biomeOverride,
+      musicTrack: r.musicTrack,
+      ambientSound: r.ambientSound,
+      spawnRules: r.spawnRules,
+      ...(r.autoGenBounds
+        ? {
+            autoGenBounds: {
+              difficultyRange: r.autoGenBounds.difficultyRange,
+              biomeFilter: r.autoGenBounds.biomeFilter,
+              boundingBox: r.autoGenBounds.boundingBox,
+              generationSeed: r.autoGenBounds.generationSeed,
+              generatedAt: r.autoGenBounds.generatedAt,
+            },
+          }
+        : {}),
+    })),
+  };
+}
+
+/**
+ * Compile danger-sources.json from danger source placements.
+ */
+function compileDangerSources(
+  extendedLayers: ExtendedWorldLayers,
+): Record<string, unknown> {
+  return {
+    sources: extendedLayers.dangerSources.map((ds) => ({
+      id: ds.id,
+      name: ds.name,
+      position: { x: ds.position.x, z: ds.position.z },
+      radius: ds.radius,
+      intensity: ds.intensity,
+      falloffCurve: ds.falloffCurve,
+    })),
+  };
+}
+
+/**
+ * Compile wilderness-boundary.json from wilderness boundary polyline.
+ */
+function compileWildernessBoundary(
+  extendedLayers: ExtendedWorldLayers,
+): Record<string, unknown> | null {
+  const wb = extendedLayers.wildernessBoundary;
+  if (!wb) return null;
+  return {
+    points: wb.points,
+    levelScale: wb.levelScale,
+    maxLevel: wb.maxLevel,
+  };
+}
+
+/**
  * Compile music.json from audio layers.
  */
 function compileMusic(audioLayers: AudioLayers): Record<string, unknown> {
@@ -314,6 +379,22 @@ export function useManifestCompiler() {
 
       // music.json
       files.set("music.json", compileMusic(audioLayers));
+
+      // regions.json
+      if (extendedLayers.regions.length > 0) {
+        files.set("regions.json", compileRegions(extendedLayers));
+      }
+
+      // danger-sources.json
+      if (extendedLayers.dangerSources.length > 0) {
+        files.set("danger-sources.json", compileDangerSources(extendedLayers));
+      }
+
+      // wilderness-boundary.json
+      const wb = compileWildernessBoundary(extendedLayers);
+      if (wb) {
+        files.set("wilderness-boundary.json", wb);
+      }
 
       // Pass through manifest data that was loaded from server
       // (items, quests, npcs, etc. may have been edited via manifest browser)

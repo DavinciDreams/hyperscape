@@ -36,6 +36,8 @@ import {
   Speaker,
   Radio,
   Folder,
+  Hexagon,
+  AlertTriangle,
 } from "lucide-react";
 import React, { useCallback, memo } from "react";
 
@@ -119,6 +121,11 @@ const NODE_ICONS: Record<HierarchyNode["type"], React.ReactNode> = {
   gameMobSpawn: <Bug className="w-4 h-4 text-lime-300" />,
   gameFishing: <Droplets className="w-4 h-4 text-blue-400" />,
   gameAreas: <Compass className="w-4 h-4 text-pink-400" />,
+  regions: <Hexagon className="w-4 h-4 text-orange-400" />,
+  region: <Hexagon className="w-4 h-4 text-orange-300" />,
+  dangerSources: <Zap className="w-4 h-4 text-red-400" />,
+  dangerSource: <Zap className="w-4 h-4 text-red-300" />,
+  wildernessBoundary: <AlertTriangle className="w-4 h-4 text-red-400" />,
   folder: <Folder className="w-4 h-4 text-yellow-400" />,
 };
 

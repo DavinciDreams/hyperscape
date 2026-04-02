@@ -68,7 +68,10 @@ import type {
   TerrainTile,
   FlatZone,
 } from "../../../types/world/terrain";
-import type { RoadTileSegment } from "../../../types/world/world-types";
+import type {
+  RoadTileSegment,
+  DangerSource,
+} from "../../../types/world/world-types";
 import { PhysicsHandle } from "../../../types/systems/physics";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
@@ -260,6 +263,7 @@ export class TerrainSystem extends System {
   private _cachedRoadSegments: ReadonlyArray<RoadTileSegment> = [];
   private townSystem: TownSystem | null = null;
   private bossHotspots: BossHotspot[] = [];
+  private dangerSources: DangerSource[] = [];
 
   // GPU compute context for accelerated terrain operations
   private terrainComputeContext: TerrainComputeContext | null = null;
@@ -6635,8 +6639,33 @@ export class TerrainSystem extends System {
   }
 
   /**
+   * Set danger sources that increase local difficulty beyond biome defaults.
+   */
+  setDangerSources(sources: DangerSource[]): void {
+    this.dangerSources = sources;
+  }
+
+  /**
+   * Compute danger source influence at a position.
+   * Returns the maximum additive difficulty bonus from any overlapping source.
+   */
+  private getDangerInfluence(worldX: number, worldZ: number): number {
+    let maxInfluence = 0;
+    for (const ds of this.dangerSources) {
+      const dx = worldX - ds.position.x;
+      const dz = worldZ - ds.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist >= ds.radius) continue;
+      const t = dist / ds.radius;
+      const influence = ds.intensity * Math.pow(1 - t, ds.falloffCurve);
+      if (influence > maxInfluence) maxInfluence = influence;
+    }
+    return maxInfluence;
+  }
+
+  /**
    * Get difficulty sample at a world position.
-   * Scales from biome difficulty with noise and town falloff.
+   * Scales from biome difficulty with noise, town falloff, and danger source influence.
    */
   getDifficultyAtWorldPosition(
     worldX: number,
@@ -6650,10 +6679,17 @@ export class TerrainSystem extends System {
     const biome = this.getBiomeAtWorldPosition(worldX, worldZ);
     const biomeData = BIOMES[biome];
     const biomeDifficulty = biomeData ? biomeData.difficulty : 0;
+
+    // Add danger source influence to biome difficulty
+    const dangerBonus =
+      this.dangerSources.length > 0
+        ? this.getDangerInfluence(worldX, worldZ)
+        : 0;
+
     const difficultyTier =
       overrideDifficultyLevel !== undefined
         ? overrideDifficultyLevel
-        : biomeDifficulty;
+        : biomeDifficulty + dangerBonus;
 
     const townDistance = this.getNearestTownDistance(worldX, worldZ);
     const townFalloff =

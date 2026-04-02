@@ -47,6 +47,7 @@ import type {
   PlacedStation,
   PlacedPOI,
   PlacedWaterBody,
+  PlacedDangerSource,
 } from "../types";
 
 // ============== MARKER COLORS ==============
@@ -60,6 +61,7 @@ const MARKER_COLORS = {
   station: 0xf59e0b, // amber
   poi: 0xec4899, // pink
   waterBody: 0x06b6d4, // cyan
+  dangerSource: 0xe54545, // danger red
   ghost: 0xffffff, // white (translucent)
 } as const;
 
@@ -130,6 +132,11 @@ function getMarkerGeometry(type: string): THREE.BufferGeometry {
     case "waterBody":
       geo = new THREE.CylinderGeometry(0.8, 0.8, 0.3, 12);
       geo.translate(0, 0.15, 0);
+      break;
+    case "dangerSource":
+      // Upward-pointing tetrahedron with warning feel
+      geo = new THREE.TetrahedronGeometry(0.8);
+      geo.translate(0, 0.8, 0);
       break;
     default:
       geo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
@@ -216,6 +223,7 @@ function categoryToMarkerType(category: string): string {
   if (category === "mob-spawns") return "mobSpawn";
   if (category === "spawn-points") return "spawnPoint";
   if (category === "water-bodies") return "waterBody";
+  if (category === "danger-sources") return "dangerSource";
   if (category === "pois") return "poi";
   return category.replace(/-/g, "");
 }
@@ -552,6 +560,11 @@ export function useEditorWorldSync({
         ? { x: w.waypoints[0].x, y: 0, z: w.waypoints[0].z }
         : { x: 0, y: 0, z: 0 };
       upsertMarker(w.id, "waterBody", w.name, pos);
+    });
+
+    // Danger Sources
+    layers.dangerSources.forEach((ds: PlacedDangerSource) => {
+      upsertMarker(ds.id, "dangerSource", ds.name, ds.position);
     });
 
     // Teleport network connection lines

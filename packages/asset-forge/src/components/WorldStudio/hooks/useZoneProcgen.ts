@@ -1,0 +1,753 @@
+/**
+ * useZoneProcgen — Procedural entity population for tile-based regions
+ *
+ * Implements the layered spawn rule system:
+ *   Layer 1: Biome defaults (from biomes.json)
+ *   Layer 2: Region overrides (extend/replace biome defaults)
+ *   Layer 3: Hand-placed entities (never touched)
+ *   Layer 4: Procgen fill (this module — fills gaps respecting layers 1-3)
+ *
+ * Generation is per-region and deterministic given a seed.
+ * Regions are defined by sets of terrain tile keys ("tileX_tileZ").
+ */
+
+import { useCallback } from "react";
+
+import type {
+  PlacedMobSpawn,
+  PlacedResource,
+  PlacedStation,
+  PlacedRegion,
+  RegionSpawnRules,
+} from "../types";
+import {
+  parseTileKey,
+  tileKey,
+  tileBoundsWorld,
+  ZONE_TILE_SIZE,
+} from "../types";
+import { useWorldStudio } from "../WorldStudioContext";
+
+// ============== SEEDED RNG ==============
+
+function createSeededRng(seed: number): () => number {
+  let s = seed | 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) | 0;
+    return (s >>> 0) / 4294967296;
+  };
+}
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) | 0;
+  }
+  return hash;
+}
+
+// ============== TILE-BASED GEOMETRY HELPERS ==============
+
+/** Check if a world position falls within the region's tile set */
+function isInRegion(
+  worldX: number,
+  worldZ: number,
+  tileKeySet: Set<string>,
+  tileSize: number,
+): boolean {
+  const tx = Math.floor(worldX / tileSize);
+  const tz = Math.floor(worldZ / tileSize);
+  return tileKeySet.has(tileKey(tx, tz));
+}
+
+/** Distance squared between two 2D points */
+function dist2(x1: number, z1: number, x2: number, z2: number): number {
+  const dx = x1 - x2;
+  const dz = z1 - z2;
+  return dx * dx + dz * dz;
+}
+
+/** Compute centroid of a tile-based region in world coordinates */
+function regionCentroid(
+  tileKeys: string[],
+  tileSize: number,
+): { x: number; z: number } {
+  if (tileKeys.length === 0) return { x: 0, z: 0 };
+  let cx = 0,
+    cz = 0;
+  for (const key of tileKeys) {
+    const { x, z } = parseTileKey(key);
+    cx += x * tileSize + tileSize / 2;
+    cz += z * tileSize + tileSize / 2;
+  }
+  return { x: cx / tileKeys.length, z: cz / tileKeys.length };
+}
+
+// ============== GENERATION CONSTANTS ==============
+
+const DEFAULT_MOB_DENSITY = 0.0003; // mobs per m² (~3 per 100x100m tile)
+const DEFAULT_RESOURCE_DENSITY = 0.0005; // resources per m² (~5 per 100x100m)
+const MIN_MOB_SPACING = 15; // meters
+const MIN_RESOURCE_SPACING = 8; // meters
+const MIN_STATION_SPACING = 20; // meters
+
+// ============== TYPES ==============
+
+export interface ProcgenResult {
+  mobSpawns: PlacedMobSpawn[];
+  resources: PlacedResource[];
+  stations: PlacedStation[];
+}
+
+export interface ProcgenStats {
+  mobsGenerated: number;
+  resourcesGenerated: number;
+  stationsGenerated: number;
+  regionArea: number;
+  seed: number;
+}
+
+// ============== WEIGHTED RANDOM SELECT ==============
+
+function weightedSelect<T extends { weight: number }>(
+  items: T[],
+  rng: () => number,
+): T | null {
+  if (items.length === 0) return null;
+  const totalWeight = items.reduce((sum, item) => sum + item.weight, 0);
+  if (totalWeight <= 0) return items[0];
+  let roll = rng() * totalWeight;
+  for (const item of items) {
+    roll -= item.weight;
+    if (roll <= 0) return item;
+  }
+  return items[items.length - 1];
+}
+
+// ============== POISSON DISC SAMPLING (tile-bounded) ==============
+
+/** Generate well-spaced points within a tile-based region using Poisson disk sampling */
+function poissonDiscSample(
+  tileKeySet: Set<string>,
+  tileSize: number,
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+  minSpacing: number,
+  maxPoints: number,
+  rng: () => number,
+): Array<{ x: number; z: number }> {
+  const points: Array<{ x: number; z: number }> = [];
+  const cellSize = minSpacing / Math.SQRT2;
+  const gridW = Math.ceil((bounds.maxX - bounds.minX) / cellSize);
+  const gridH = Math.ceil((bounds.maxZ - bounds.minZ) / cellSize);
+  if (gridW <= 0 || gridH <= 0) return points;
+  const grid: (number | null)[] = new Array(gridW * gridH).fill(null);
+
+  const active: number[] = [];
+
+  const gridIdx = (x: number, z: number) => {
+    const gx = Math.floor((x - bounds.minX) / cellSize);
+    const gz = Math.floor((z - bounds.minZ) / cellSize);
+    if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridH) return -1;
+    return gz * gridW + gx;
+  };
+
+  // Seed with first point inside region
+  const attempts = maxPoints * 30;
+  for (let att = 0; att < attempts && points.length === 0; att++) {
+    const px = bounds.minX + rng() * (bounds.maxX - bounds.minX);
+    const pz = bounds.minZ + rng() * (bounds.maxZ - bounds.minZ);
+    if (isInRegion(px, pz, tileKeySet, tileSize)) {
+      points.push({ x: px, z: pz });
+      active.push(0);
+      const gi = gridIdx(px, pz);
+      if (gi >= 0) grid[gi] = 0;
+    }
+  }
+
+  const k = 30;
+  while (active.length > 0 && points.length < maxPoints) {
+    const idx = Math.floor(rng() * active.length);
+    const pi = active[idx];
+    const base = points[pi];
+    let found = false;
+
+    for (let i = 0; i < k; i++) {
+      const angle = rng() * Math.PI * 2;
+      const d = minSpacing + rng() * minSpacing;
+      const nx = base.x + Math.cos(angle) * d;
+      const nz = base.z + Math.sin(angle) * d;
+
+      if (
+        nx < bounds.minX ||
+        nx > bounds.maxX ||
+        nz < bounds.minZ ||
+        nz > bounds.maxZ
+      )
+        continue;
+      if (!isInRegion(nx, nz, tileKeySet, tileSize)) continue;
+
+      const gi = gridIdx(nx, nz);
+      if (gi < 0) continue;
+
+      const gx = Math.floor((nx - bounds.minX) / cellSize);
+      const gz = Math.floor((nz - bounds.minZ) / cellSize);
+      let tooClose = false;
+      for (let dz = -2; dz <= 2 && !tooClose; dz++) {
+        for (let dx = -2; dx <= 2 && !tooClose; dx++) {
+          const ngx = gx + dx;
+          const ngz = gz + dz;
+          if (ngx < 0 || ngx >= gridW || ngz < 0 || ngz >= gridH) continue;
+          const ni = grid[ngz * gridW + ngx];
+          if (ni !== null) {
+            if (
+              dist2(nx, nz, points[ni].x, points[ni].z) <
+              minSpacing * minSpacing
+            ) {
+              tooClose = true;
+            }
+          }
+        }
+      }
+
+      if (!tooClose) {
+        const newIdx = points.length;
+        points.push({ x: nx, z: nz });
+        active.push(newIdx);
+        grid[gi] = newIdx;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      active.splice(idx, 1);
+    }
+  }
+
+  return points;
+}
+
+// ============== MOB GENERATION ==============
+
+function generateMobs(
+  region: PlacedRegion,
+  rules: RegionSpawnRules,
+  existingMobs: PlacedMobSpawn[],
+  seed: number,
+  tileSize: number,
+): PlacedMobSpawn[] {
+  const mobRules = rules.mobs;
+  if (!mobRules || mobRules.table.length === 0) return [];
+  if (region.tileKeys.length === 0) return [];
+
+  const rng = createSeededRng(seed + hashString(region.id + ":mobs"));
+  const tileKeySet = new Set(region.tileKeys);
+  const density = DEFAULT_MOB_DENSITY * (mobRules.densityMultiplier ?? 1);
+  const area = region.tileKeys.length * tileSize * tileSize;
+  const targetCount = Math.max(1, Math.round(area * density));
+  const bounds = tileBoundsWorld(region.tileKeys, tileSize);
+
+  const existingPositions = existingMobs
+    .filter((m) => m.source !== "procgen")
+    .map((m) => ({ x: m.position.x, z: m.position.z }));
+
+  const positions = poissonDiscSample(
+    tileKeySet,
+    tileSize,
+    bounds,
+    MIN_MOB_SPACING,
+    targetCount,
+    rng,
+  );
+
+  const validPositions = positions.filter((p) =>
+    existingPositions.every(
+      (ep) => dist2(p.x, p.z, ep.x, ep.z) >= MIN_MOB_SPACING * MIN_MOB_SPACING,
+    ),
+  );
+
+  const results: PlacedMobSpawn[] = [];
+  for (let i = 0; i < validPositions.length; i++) {
+    const pos = validPositions[i];
+    const entry = weightedSelect(mobRules.table, rng);
+    if (!entry) continue;
+    results.push({
+      id: `procgen-mob-${region.id}-${i}`,
+      mobId: entry.mobId,
+      name: `${entry.mobId} spawn`,
+      position: { x: pos.x, y: 0, z: pos.z },
+      spawnRadius: 5 + rng() * 10,
+      maxCount: 1 + Math.floor(rng() * 3),
+      respawnTicks: 50 + Math.floor(rng() * 30),
+      source: "procgen",
+      sourceRegionId: region.id,
+      properties: {},
+    });
+  }
+  return results;
+}
+
+// ============== RESOURCE GENERATION ==============
+
+function generateResources(
+  region: PlacedRegion,
+  rules: RegionSpawnRules,
+  existingResources: PlacedResource[],
+  seed: number,
+  tileSize: number,
+): PlacedResource[] {
+  const resourceRules = rules.resources;
+  if (!resourceRules || resourceRules.table.length === 0) return [];
+  if (region.tileKeys.length === 0) return [];
+
+  const rng = createSeededRng(seed + hashString(region.id + ":resources"));
+  const tileKeySet = new Set(region.tileKeys);
+  const density =
+    DEFAULT_RESOURCE_DENSITY * (resourceRules.densityMultiplier ?? 1);
+  const area = region.tileKeys.length * tileSize * tileSize;
+  const targetCount = Math.max(1, Math.round(area * density));
+  const bounds = tileBoundsWorld(region.tileKeys, tileSize);
+
+  const existingPositions = existingResources
+    .filter((r) => r.source !== "procgen")
+    .map((r) => ({ x: r.position.x, z: r.position.z }));
+
+  const positions = poissonDiscSample(
+    tileKeySet,
+    tileSize,
+    bounds,
+    MIN_RESOURCE_SPACING,
+    targetCount,
+    rng,
+  );
+
+  const validPositions = positions.filter((p) =>
+    existingPositions.every(
+      (ep) =>
+        dist2(p.x, p.z, ep.x, ep.z) >=
+        MIN_RESOURCE_SPACING * MIN_RESOURCE_SPACING,
+    ),
+  );
+
+  const inferType = (
+    id: string,
+  ): "mining" | "woodcutting" | "fishing" | "farming" => {
+    if (id.startsWith("ore_") || id.includes("rock")) return "mining";
+    if (id.startsWith("tree_") || id.includes("wood")) return "woodcutting";
+    if (id.includes("fish")) return "fishing";
+    return "farming";
+  };
+
+  const results: PlacedResource[] = [];
+  for (let i = 0; i < validPositions.length; i++) {
+    const pos = validPositions[i];
+    const entry = weightedSelect(resourceRules.table, rng);
+    if (!entry) continue;
+
+    const clusterSize = entry.clusterSize ?? 1;
+    results.push({
+      id: `procgen-res-${region.id}-${i}`,
+      resourceId: entry.resourceId,
+      resourceType: inferType(entry.resourceId),
+      name:
+        clusterSize > 1
+          ? `${entry.resourceId} (cluster of ${clusterSize})`
+          : entry.resourceId,
+      position: { x: pos.x, y: 0, z: pos.z },
+      rotation: rng() * Math.PI * 2,
+      modelVariant: 0,
+      source: "procgen",
+      sourceRegionId: region.id,
+      properties: clusterSize > 1 ? { clusterSize } : {},
+    });
+  }
+  return results;
+}
+
+// ============== STATION GENERATION ==============
+
+function generateStations(
+  region: PlacedRegion,
+  rules: RegionSpawnRules,
+  existingStations: PlacedStation[],
+  seed: number,
+  tileSize: number,
+): PlacedStation[] {
+  if (!rules.stations || rules.stations.length === 0) return [];
+  if (region.tileKeys.length === 0) return [];
+
+  const rng = createSeededRng(seed + hashString(region.id + ":stations"));
+  const tileKeySet = new Set(region.tileKeys);
+  const centroid = regionCentroid(region.tileKeys, tileSize);
+  const bounds = tileBoundsWorld(region.tileKeys, tileSize);
+
+  const existingPositions = existingStations
+    .filter((s) => s.source !== "procgen")
+    .map((s) => ({ x: s.position.x, z: s.position.z }));
+
+  const results: PlacedStation[] = [];
+
+  for (const stationRule of rules.stations) {
+    for (let i = 0; i < stationRule.count; i++) {
+      let pos: { x: number; z: number } | null = null;
+
+      switch (stationRule.placement) {
+        case "center":
+          pos = {
+            x: centroid.x + (rng() - 0.5) * 20,
+            z: centroid.z + (rng() - 0.5) * 20,
+          };
+          // Ensure center placement is in region
+          if (!isInRegion(pos.x, pos.z, tileKeySet, tileSize)) {
+            pos = null;
+          }
+          break;
+        case "random":
+        case "near-road":
+        case "near-water":
+        default: {
+          for (let att = 0; att < 50; att++) {
+            const px = bounds.minX + rng() * (bounds.maxX - bounds.minX);
+            const pz = bounds.minZ + rng() * (bounds.maxZ - bounds.minZ);
+            if (isInRegion(px, pz, tileKeySet, tileSize)) {
+              pos = { x: px, z: pz };
+              break;
+            }
+          }
+          break;
+        }
+      }
+
+      if (!pos) continue;
+
+      const tooClose = existingPositions.some(
+        (ep) =>
+          dist2(pos!.x, pos!.z, ep.x, ep.z) <
+          MIN_STATION_SPACING * MIN_STATION_SPACING,
+      );
+      if (tooClose) continue;
+
+      results.push({
+        id: `procgen-sta-${region.id}-${results.length}`,
+        stationType: stationRule.stationType,
+        name: stationRule.stationType,
+        position: { x: pos.x, y: 0, z: pos.z },
+        rotation: rng() * Math.PI * 2,
+        source: "procgen",
+        sourceRegionId: region.id,
+        properties: {},
+      });
+
+      existingPositions.push(pos);
+    }
+  }
+
+  return results;
+}
+
+// ============== MAIN GENERATION ==============
+
+function generateForRegion(
+  region: PlacedRegion,
+  existingMobs: PlacedMobSpawn[],
+  existingResources: PlacedResource[],
+  existingStations: PlacedStation[],
+  seed: number,
+  tileSize: number,
+): ProcgenResult {
+  const rules = region.spawnRules;
+  if (!rules) return { mobSpawns: [], resources: [], stations: [] };
+  if (region.tileKeys.length === 0)
+    return { mobSpawns: [], resources: [], stations: [] };
+
+  const tileKeySet = new Set(region.tileKeys);
+
+  // Only consider entities within this region for spacing checks
+  const regionMobs = existingMobs.filter((m) =>
+    isInRegion(m.position.x, m.position.z, tileKeySet, tileSize),
+  );
+  const regionResources = existingResources.filter((r) =>
+    isInRegion(r.position.x, r.position.z, tileKeySet, tileSize),
+  );
+  const regionStations = existingStations.filter((s) =>
+    isInRegion(s.position.x, s.position.z, tileKeySet, tileSize),
+  );
+
+  return {
+    mobSpawns: generateMobs(region, rules, regionMobs, seed, tileSize),
+    resources: generateResources(
+      region,
+      rules,
+      regionResources,
+      seed,
+      tileSize,
+    ),
+    stations: generateStations(region, rules, regionStations, seed, tileSize),
+  };
+}
+
+// ============== SKILL PROGRESSION VALIDATOR (Phase 4D) ==============
+
+export interface ProgressionWarning {
+  level: "error" | "warning" | "info";
+  skill: string;
+  message: string;
+}
+
+const RESOURCE_SKILL_MAP: Record<string, string> = {
+  mining: "Mining",
+  woodcutting: "Woodcutting",
+  fishing: "Fishing",
+  farming: "Farming",
+};
+
+const RESOURCE_LEVEL_TIERS: Record<string, Record<string, number>> = {
+  mining: {
+    ore_copper: 1,
+    ore_tin: 1,
+    ore_iron: 15,
+    ore_coal: 30,
+    ore_mithril: 55,
+    ore_adamant: 70,
+    ore_runite: 85,
+  },
+  woodcutting: {
+    tree_normal: 1,
+    tree_oak: 15,
+    tree_willow: 30,
+    tree_maple: 45,
+    tree_yew: 60,
+    tree_magic: 75,
+  },
+  fishing: {
+    fish_shrimp: 1,
+    fish_trout: 20,
+    fish_lobster: 40,
+    fish_swordfish: 50,
+    fish_shark: 76,
+  },
+};
+
+export function validateSkillProgression(
+  resources: PlacedResource[],
+  regions: PlacedRegion[],
+  tileSize: number,
+): ProgressionWarning[] {
+  const warnings: ProgressionWarning[] = [];
+
+  const bySkill: Record<string, PlacedResource[]> = {};
+  for (const r of resources) {
+    const skill = r.resourceType;
+    if (!bySkill[skill]) bySkill[skill] = [];
+    bySkill[skill].push(r);
+  }
+
+  for (const [skill, tiers] of Object.entries(RESOURCE_LEVEL_TIERS)) {
+    const skillName = RESOURCE_SKILL_MAP[skill] ?? skill;
+    const skillResources = bySkill[skill] ?? [];
+    const placedIds = new Set(skillResources.map((r) => r.resourceId));
+
+    const starterResources = Object.entries(tiers)
+      .filter(([, lvl]) => lvl <= 15)
+      .map(([id]) => id);
+
+    const hasStarter = starterResources.some((id) => placedIds.has(id));
+    if (!hasStarter && starterResources.length > 0) {
+      warnings.push({
+        level: "error",
+        skill: skillName,
+        message: `No starter-level ${skillName} resources found (${starterResources.join(", ")})`,
+      });
+    }
+
+    const sortedTiers = Object.entries(tiers).sort(([, a], [, b]) => a - b);
+    for (let i = 0; i < sortedTiers.length; i++) {
+      const [resourceId, level] = sortedTiers[i];
+      if (!placedIds.has(resourceId) && level <= 60) {
+        warnings.push({
+          level: "warning",
+          skill: skillName,
+          message: `No ${resourceId} placed (level ${level} ${skillName})`,
+        });
+      }
+    }
+
+    // Check high-level resources aren't in safe regions
+    for (const r of skillResources) {
+      const tier = tiers[r.resourceId];
+      if (tier && tier >= 55) {
+        const inSafeRegion = regions.find((reg) => {
+          if (!reg.tags.includes("starter")) return false;
+          const tileKeySet = new Set(reg.tileKeys);
+          return isInRegion(r.position.x, r.position.z, tileKeySet, tileSize);
+        });
+        if (inSafeRegion) {
+          warnings.push({
+            level: "warning",
+            skill: skillName,
+            message: `High-level ${r.resourceId} (lvl ${tier}) found in starter region "${inSafeRegion.name}"`,
+          });
+        }
+      }
+    }
+  }
+
+  return warnings;
+}
+
+// ============== HOOK ==============
+
+export function useZoneProcgen() {
+  const { state, actions } = useWorldStudio();
+
+  const tileSize = ZONE_TILE_SIZE;
+
+  /** Generate entities for a single region */
+  const generateForSingleRegion = useCallback(
+    (
+      regionId: string,
+      seed: number,
+    ): ProcgenResult & { stats: ProcgenStats } => {
+      const region = state.extendedLayers.regions.find(
+        (r) => r.id === regionId,
+      );
+      if (!region) {
+        return {
+          mobSpawns: [],
+          resources: [],
+          stations: [],
+          stats: {
+            mobsGenerated: 0,
+            resourcesGenerated: 0,
+            stationsGenerated: 0,
+            regionArea: 0,
+            seed,
+          },
+        };
+      }
+
+      const result = generateForRegion(
+        region,
+        state.extendedLayers.mobSpawns,
+        state.extendedLayers.resources,
+        state.extendedLayers.stations,
+        seed,
+        tileSize,
+      );
+
+      const area = region.tileKeys.length * tileSize * tileSize;
+
+      return {
+        ...result,
+        stats: {
+          mobsGenerated: result.mobSpawns.length,
+          resourcesGenerated: result.resources.length,
+          stationsGenerated: result.stations.length,
+          regionArea: Math.round(area),
+          seed,
+        },
+      };
+    },
+    [state.extendedLayers, tileSize],
+  );
+
+  /** Clear all procgen entities for a region */
+  const clearRegion = useCallback(
+    (regionId: string) => {
+      const mobsToRemove = state.extendedLayers.mobSpawns.filter(
+        (m) => m.source === "procgen" && m.sourceRegionId === regionId,
+      );
+      for (const m of mobsToRemove) {
+        actions.removeMobSpawn(m.id);
+      }
+
+      const resToRemove = state.extendedLayers.resources.filter(
+        (r) => r.source === "procgen" && r.sourceRegionId === regionId,
+      );
+      for (const r of resToRemove) {
+        actions.removeResource(r.id);
+      }
+
+      const staToRemove = state.extendedLayers.stations.filter(
+        (s) => s.source === "procgen" && s.sourceRegionId === regionId,
+      );
+      for (const s of staToRemove) {
+        actions.removeStation(s.id);
+      }
+    },
+    [state.extendedLayers, actions],
+  );
+
+  /** Generate and commit entities for a region */
+  const generateAndCommit = useCallback(
+    (regionId: string, seed: number): ProcgenStats => {
+      clearRegion(regionId);
+
+      const result = generateForSingleRegion(regionId, seed);
+
+      for (const mob of result.mobSpawns) {
+        actions.addMobSpawn(mob);
+      }
+      for (const resource of result.resources) {
+        actions.addResource(resource);
+      }
+      for (const station of result.stations) {
+        actions.addStation(station);
+      }
+
+      return result.stats;
+    },
+    [generateForSingleRegion, clearRegion, actions],
+  );
+
+  /** Generate for all regions */
+  const generateAll = useCallback(
+    (baseSeed: number): ProcgenStats[] => {
+      const allStats: ProcgenStats[] = [];
+      for (const region of state.extendedLayers.regions) {
+        if (region.spawnRules) {
+          const stats = generateAndCommit(region.id, baseSeed);
+          allStats.push(stats);
+        }
+      }
+      return allStats;
+    },
+    [state.extendedLayers.regions, generateAndCommit],
+  );
+
+  /** Clear all procgen entities across all regions */
+  const clearAll = useCallback(() => {
+    for (const region of state.extendedLayers.regions) {
+      clearRegion(region.id);
+    }
+  }, [state.extendedLayers.regions, clearRegion]);
+
+  /** Preview (dry run) — returns what would be generated without committing */
+  const preview = useCallback(
+    (
+      regionId: string,
+      seed: number,
+    ): ProcgenResult & { stats: ProcgenStats } => {
+      return generateForSingleRegion(regionId, seed);
+    },
+    [generateForSingleRegion],
+  );
+
+  /** Validate skill progression across all resources */
+  const validate = useCallback((): ProgressionWarning[] => {
+    return validateSkillProgression(
+      state.extendedLayers.resources,
+      state.extendedLayers.regions,
+      tileSize,
+    );
+  }, [state.extendedLayers.resources, state.extendedLayers.regions, tileSize]);
+
+  return {
+    generateAndCommit,
+    generateAll,
+    clearRegion,
+    clearAll,
+    preview,
+    validate,
+  };
+}

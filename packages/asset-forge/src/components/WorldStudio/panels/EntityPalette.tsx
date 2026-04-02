@@ -32,6 +32,7 @@ import {
   TreePine,
   User,
   AlertTriangle,
+  Zap,
 } from "lucide-react";
 import React, { useMemo, useState, useCallback } from "react";
 
@@ -184,6 +185,19 @@ const CATEGORIES: CategoryConfig[] = [
       bgHover: "hover:bg-sky-500/10",
       border: "border-l-sky-500/60",
       count: "bg-sky-500/15 text-sky-400",
+    },
+  },
+  {
+    id: "danger-sources",
+    label: "Danger Sources",
+    icon: <Zap size={13} />,
+    description: "Localized difficulty hotspots",
+    color: {
+      icon: "text-rose-400",
+      bg: "bg-rose-500/5",
+      bgHover: "hover:bg-rose-500/10",
+      border: "border-l-rose-500/60",
+      count: "bg-rose-500/15 text-rose-400",
     },
   },
 ];
@@ -419,6 +433,39 @@ export function EntityPalette() {
         category: "water-bodies" as PaletteCategory,
         description: "Small water feature",
         manifestData: { bodyType: "pond" },
+      },
+    ]);
+
+    // Danger sources — user-created templates
+    map.set("danger-sources", [
+      {
+        id: "danger-dark-wizard",
+        name: "Dark Wizard Circle",
+        category: "danger-sources" as PaletteCategory,
+        description:
+          "High-intensity danger pocket (like dark wizards south of Varrock)",
+        manifestData: { intensity: 2, radius: 40, falloffCurve: 1.5 },
+      },
+      {
+        id: "danger-spider-nest",
+        name: "Spider Nest",
+        category: "danger-sources" as PaletteCategory,
+        description: "Medium danger zone with sharp falloff",
+        manifestData: { intensity: 1.5, radius: 30, falloffCurve: 2 },
+      },
+      {
+        id: "danger-weak",
+        name: "Danger Zone (Weak)",
+        category: "danger-sources" as PaletteCategory,
+        description: "Slight difficulty increase over a wide area",
+        manifestData: { intensity: 0.5, radius: 60, falloffCurve: 1 },
+      },
+      {
+        id: "danger-strong",
+        name: "Danger Zone (Strong)",
+        category: "danger-sources" as PaletteCategory,
+        description: "Intense danger with gradual falloff",
+        manifestData: { intensity: 3, radius: 50, falloffCurve: 1.2 },
       },
     ]);
 

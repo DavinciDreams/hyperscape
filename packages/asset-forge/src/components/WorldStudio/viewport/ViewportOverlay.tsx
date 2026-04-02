@@ -30,6 +30,8 @@ import {
   Map,
   X,
   HelpCircle,
+  Flame,
+  Hexagon,
 } from "lucide-react";
 import React, {
   useCallback,
@@ -85,6 +87,12 @@ export interface ViewportOverlayProps {
   flyMode?: boolean;
   /** Current camera move speed (m/s) */
   cameraMoveSpeed?: number;
+  /** Whether difficulty heatmap is shown */
+  showDifficultyHeatmap?: boolean;
+  /** Toggle difficulty heatmap */
+  onToggleDifficultyHeatmap?: () => void;
+  /** Populate all regions with procgen entities */
+  onPopulateAllRegions?: () => void;
   onToggleGrid: () => void;
   onToggleSnap: () => void;
   onToggleSurfaceSnap: () => void;
@@ -128,6 +136,7 @@ const TOOL_LABELS: Record<
   brush: { label: "Brush", icon: Paintbrush },
   path: { label: "Path", icon: Route },
   procgen: { label: "Procgen", icon: Sparkles },
+  zonePaint: { label: "Paint Zone", icon: Hexagon },
 };
 
 /** Biome type → minimap color */
@@ -390,6 +399,11 @@ const CONTROLS_ROWS: Array<[string, string]> = [
   ["F", "Focus selection"],
   ["W / E / R", "Translate / Rotate / Scale"],
   ["Del", "Delete selection"],
+  ["—", "— Zone Paint (Z) —"],
+  ["LMB / Drag", "Paint tiles"],
+  ["RMB / Drag", "Erase tiles"],
+  ["[ / ]", "Brush size −/+"],
+  ["E", "Toggle paint/erase"],
 ];
 
 function ControlsTooltip() {
@@ -454,6 +468,9 @@ export function ViewportOverlay({
   onNavigateCamera,
   flyMode,
   cameraMoveSpeed,
+  showDifficultyHeatmap,
+  onToggleDifficultyHeatmap,
+  onPopulateAllRegions,
   onToggleGrid,
   onToggleSnap,
   onToggleSurfaceSnap,
@@ -515,6 +532,30 @@ export function ViewportOverlay({
           >
             <Mountain size={10} />
           </button>
+
+          {onToggleDifficultyHeatmap && (
+            <button
+              className={`${showDifficultyHeatmap ? CHIP_BTN_ON : CHIP_BTN_OFF} text-[10px]`}
+              onClick={onToggleDifficultyHeatmap}
+              title={
+                showDifficultyHeatmap
+                  ? "Hide Difficulty Heatmap"
+                  : "Show Difficulty Heatmap"
+              }
+            >
+              <Flame size={10} />
+            </button>
+          )}
+
+          {onPopulateAllRegions && (
+            <button
+              className={`${CHIP_BTN_OFF} text-[10px]`}
+              onClick={onPopulateAllRegions}
+              title="Populate All Regions (procgen entities)"
+            >
+              <Sparkles size={10} />
+            </button>
+          )}
 
           {/* Coordinate system */}
           <div className="flex items-center gap-1.5 px-1.5 py-1 rounded bg-[#1e1e1e] text-white/60 border border-[#333] text-[10px]">

@@ -77,6 +77,9 @@ import type {
   PlacedStation,
   PlacedPOI,
   PlacedWaterBody,
+  PlacedRegion,
+  PlacedDangerSource,
+  WildernessBoundary,
   PaletteCategory,
   BrushSettings,
   BrushOverlays,
@@ -137,7 +140,13 @@ interface StudioPersistenceState {
 }
 
 /** Tool modes — select is default, others unlock in Phase 3+ */
-export type StudioToolMode = "select" | "place" | "brush" | "path" | "procgen";
+export type StudioToolMode =
+  | "select"
+  | "place"
+  | "brush"
+  | "path"
+  | "procgen"
+  | "zonePaint";
 
 /** Transform gizmo mode */
 export type GizmoTransformMode = "translate" | "rotate" | "scale";
@@ -161,6 +170,20 @@ interface StudioToolState {
   transformMode: GizmoTransformMode;
   /** Transform coordinate space (world/local) */
   transformSpace: GizmoTransformSpace;
+  /** Zone tile painting state (when zonePaint tool is active) */
+  zonePaint: ZonePaintState | null;
+}
+
+/** State for painting zone tiles */
+export interface ZonePaintState {
+  /** Region being painted */
+  regionId: string;
+  /** Brush size in tiles (1, 3, 5) */
+  brushSize: number;
+  /** Current cursor tile position */
+  cursorTile: { x: number; z: number } | null;
+  /** Paint or erase mode */
+  mode: "paint" | "erase";
 }
 
 /** Studio-specific viewport overlay toggles and preview settings */
@@ -270,6 +293,20 @@ type StudioSpecificAction =
   | { type: "CONFIRM_PLACEMENT" }
   | { type: "CANCEL_PLACEMENT" }
 
+  // Zone tile painting actions
+  | { type: "START_ZONE_PAINT"; regionId: string }
+  | { type: "UPDATE_ZONE_CURSOR"; tile: { x: number; z: number } | null }
+  | {
+      type: "PAINT_ZONE_TILES";
+      regionId: string;
+      tileKeys: string[];
+      erase: boolean;
+    }
+  | { type: "SET_ZONE_BRUSH_SIZE"; size: number }
+  | { type: "SET_ZONE_PAINT_MODE"; mode: "paint" | "erase" }
+  | { type: "STOP_ZONE_PAINT" }
+  | { type: "SWITCH_ZONE_PAINT_REGION"; regionId: string }
+
   // Extended layer entity actions — Spawn Points
   | { type: "ADD_SPAWN_POINT"; spawnPoint: PlacedSpawnPoint }
   | {
@@ -320,6 +357,23 @@ type StudioSpecificAction =
   | { type: "ADD_WATER_BODY"; waterBody: PlacedWaterBody }
   | { type: "UPDATE_WATER_BODY"; id: string; updates: Partial<PlacedWaterBody> }
   | { type: "REMOVE_WATER_BODY"; id: string }
+
+  // Extended layer entity actions — Regions
+  | { type: "ADD_REGION"; region: PlacedRegion }
+  | { type: "UPDATE_REGION"; id: string; updates: Partial<PlacedRegion> }
+  | { type: "REMOVE_REGION"; id: string }
+
+  // Extended layer entity actions — Danger Sources
+  | { type: "ADD_DANGER_SOURCE"; dangerSource: PlacedDangerSource }
+  | {
+      type: "UPDATE_DANGER_SOURCE";
+      id: string;
+      updates: Partial<PlacedDangerSource>;
+    }
+  | { type: "REMOVE_DANGER_SOURCE"; id: string }
+
+  // Extended layer entity actions — Wilderness Boundary
+  | { type: "SET_WILDERNESS_BOUNDARY"; boundary: WildernessBoundary | null }
 
   // Manifest loading
   | { type: "MANIFESTS_LOAD_START" }
@@ -436,7 +490,15 @@ type StudioSpecificAction =
       entityId: string;
     }
   | { type: "LOAD_MANIFEST_OVERRIDES"; overrides: ManifestOverrides }
-  | { type: "CLEAR_ALL_MANIFEST_OVERRIDES" };
+  | { type: "CLEAR_ALL_MANIFEST_OVERRIDES" }
+  // Batch actions for auto-generation pipeline
+  | { type: "BATCH_ADD_REGIONS"; regions: PlacedRegion[] }
+  | {
+      type: "BATCH_ADD_ENTITIES";
+      mobSpawns: PlacedMobSpawn[];
+      resources: PlacedResource[];
+    }
+  | { type: "CLEAR_ALL_AUTOGEN" };
 
 /** Union of all world builder + studio-specific actions */
 export type WorldStudioAction = WorldBuilderAction | StudioSpecificAction;
@@ -468,6 +530,7 @@ const initialToolState: StudioToolState = {
   cameraTeleportTarget: null,
   transformMode: "translate",
   transformSpace: "world",
+  zonePaint: null,
 };
 
 const initialState: WorldStudioState = {
@@ -618,17 +681,44 @@ function studioReducer(
       };
 
     // Tool actions
-    case "SET_TOOL":
-      return {
-        ...state,
-        tools: {
-          ...state.tools,
-          activeTool: action.tool,
-          // Clear active placement when switching away from place tool
-          activePlacement:
-            action.tool !== "place" ? null : state.tools.activePlacement,
-        },
+    case "SET_TOOL": {
+      const newTools = {
+        ...state.tools,
+        activeTool: action.tool,
+        // Clear active placement when switching away from place tool
+        activePlacement:
+          action.tool !== "place" ? null : state.tools.activePlacement,
       };
+
+      // Auto-stop zone paint when switching AWAY from zonePaint tool
+      if (action.tool !== "zonePaint" && state.tools.zonePaint) {
+        newTools.zonePaint = null;
+      }
+
+      // Auto-start zone paint when switching TO zonePaint tool
+      if (action.tool === "zonePaint" && !state.tools.zonePaint) {
+        // Pick the selected region, or the first region, or null
+        const selectedRegionId =
+          state.builder.editing.selection?.type === "region"
+            ? state.builder.editing.selection.id
+            : null;
+        const targetRegion =
+          selectedRegionId ??
+          (state.extendedLayers.regions.length > 0
+            ? state.extendedLayers.regions[0].id
+            : null);
+        if (targetRegion) {
+          newTools.zonePaint = {
+            regionId: targetRegion,
+            brushSize: 1,
+            cursorTile: null,
+            mode: "paint",
+          };
+        }
+      }
+
+      return { ...state, tools: newTools };
+    }
 
     case "SET_TRANSFORM_MODE":
       return {
@@ -704,6 +794,110 @@ function studioReducer(
           ...state.tools,
           activeTool: "select",
           activePlacement: null,
+        },
+      };
+
+    // Zone tile painting actions
+    case "START_ZONE_PAINT":
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          activeTool: "zonePaint",
+          zonePaint: {
+            regionId: action.regionId,
+            brushSize: state.tools.zonePaint?.brushSize ?? 1,
+            cursorTile: null,
+            mode: state.tools.zonePaint?.mode ?? "paint",
+          },
+        },
+      };
+
+    case "UPDATE_ZONE_CURSOR":
+      if (!state.tools.zonePaint) return state;
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          zonePaint: { ...state.tools.zonePaint, cursorTile: action.tile },
+        },
+      };
+
+    case "PAINT_ZONE_TILES": {
+      const region = state.extendedLayers.regions.find(
+        (r) => r.id === action.regionId,
+      );
+      if (!region) return state;
+      const currentSet = new Set(region.tileKeys);
+      if (action.erase) {
+        for (const k of action.tileKeys) currentSet.delete(k);
+      } else {
+        for (const k of action.tileKeys) currentSet.add(k);
+      }
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          regions: state.extendedLayers.regions.map((r) =>
+            r.id === action.regionId
+              ? { ...r, tileKeys: Array.from(currentSet) }
+              : r,
+          ),
+        },
+      };
+    }
+
+    case "SET_ZONE_BRUSH_SIZE":
+      if (!state.tools.zonePaint) return state;
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          zonePaint: { ...state.tools.zonePaint, brushSize: action.size },
+        },
+      };
+
+    case "SET_ZONE_PAINT_MODE":
+      if (!state.tools.zonePaint) return state;
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          zonePaint: { ...state.tools.zonePaint, mode: action.mode },
+        },
+      };
+
+    case "STOP_ZONE_PAINT":
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          activeTool: "select",
+          zonePaint: null,
+        },
+      };
+
+    case "SWITCH_ZONE_PAINT_REGION":
+      if (!state.tools.zonePaint) return state;
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          zonePaint: {
+            ...state.tools.zonePaint,
+            regionId: action.regionId,
+          },
+        },
+        builder: {
+          ...state.builder,
+          editing: {
+            ...state.builder.editing,
+            selection: {
+              type: "region" as never,
+              id: action.regionId,
+              path: [{ type: "region", id: action.regionId, name: "" }],
+            },
+          },
         },
       };
 
@@ -817,7 +1011,16 @@ function studioReducer(
         extendedLayers: {
           ...state.extendedLayers,
           mobSpawns: state.extendedLayers.mobSpawns.map((ms) =>
-            ms.id === action.id ? { ...ms, ...action.updates } : ms,
+            ms.id === action.id
+              ? {
+                  ...ms,
+                  ...action.updates,
+                  source:
+                    ms.source === "procgen"
+                      ? ("hand-placed" as const)
+                      : ms.source,
+                }
+              : ms,
           ),
         },
       };
@@ -849,7 +1052,16 @@ function studioReducer(
         extendedLayers: {
           ...state.extendedLayers,
           resources: state.extendedLayers.resources.map((r) =>
-            r.id === action.id ? { ...r, ...action.updates } : r,
+            r.id === action.id
+              ? {
+                  ...r,
+                  ...action.updates,
+                  source:
+                    r.source === "procgen"
+                      ? ("hand-placed" as const)
+                      : r.source,
+                }
+              : r,
           ),
         },
       };
@@ -881,7 +1093,16 @@ function studioReducer(
         extendedLayers: {
           ...state.extendedLayers,
           stations: state.extendedLayers.stations.map((s) =>
-            s.id === action.id ? { ...s, ...action.updates } : s,
+            s.id === action.id
+              ? {
+                  ...s,
+                  ...action.updates,
+                  source:
+                    s.source === "procgen"
+                      ? ("hand-placed" as const)
+                      : s.source,
+                }
+              : s,
           ),
         },
       };
@@ -956,6 +1177,83 @@ function studioReducer(
           waterBodies: state.extendedLayers.waterBodies.filter(
             (w) => w.id !== action.id,
           ),
+        },
+      };
+
+    // Region CRUD
+    case "ADD_REGION":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          regions: [...state.extendedLayers.regions, action.region],
+        },
+      };
+
+    case "UPDATE_REGION":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          regions: state.extendedLayers.regions.map((r) =>
+            r.id === action.id ? { ...r, ...action.updates } : r,
+          ),
+        },
+      };
+
+    case "REMOVE_REGION":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          regions: state.extendedLayers.regions.filter(
+            (r) => r.id !== action.id,
+          ),
+        },
+      };
+
+    // Danger Source CRUD
+    case "ADD_DANGER_SOURCE":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          dangerSources: [
+            ...state.extendedLayers.dangerSources,
+            action.dangerSource,
+          ],
+        },
+      };
+
+    case "UPDATE_DANGER_SOURCE":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          dangerSources: state.extendedLayers.dangerSources.map((d) =>
+            d.id === action.id ? { ...d, ...action.updates } : d,
+          ),
+        },
+      };
+
+    case "REMOVE_DANGER_SOURCE":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          dangerSources: state.extendedLayers.dangerSources.filter(
+            (d) => d.id !== action.id,
+          ),
+        },
+      };
+
+    // Wilderness Boundary
+    case "SET_WILDERNESS_BOUNDARY":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          wildernessBoundary: action.boundary,
         },
       };
 
@@ -1061,6 +1359,41 @@ function studioReducer(
         return { ...state, brushOverlays: cleared };
       }
       return { ...state, brushOverlays: EMPTY_BRUSH_OVERLAYS };
+
+    // Batch actions for auto-generation
+    case "BATCH_ADD_REGIONS":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          regions: [...state.extendedLayers.regions, ...action.regions],
+        },
+      };
+
+    case "BATCH_ADD_ENTITIES":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          mobSpawns: [...state.extendedLayers.mobSpawns, ...action.mobSpawns],
+          resources: [...state.extendedLayers.resources, ...action.resources],
+        },
+      };
+
+    case "CLEAR_ALL_AUTOGEN":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          regions: state.extendedLayers.regions.filter((r) => !r.autoGenBounds),
+          mobSpawns: state.extendedLayers.mobSpawns.filter(
+            (m) => m.source !== "procgen" || !m.id.startsWith("autogen-"),
+          ),
+          resources: state.extendedLayers.resources.filter(
+            (r) => r.source !== "procgen" || !r.id.startsWith("autogen-"),
+          ),
+        },
+      };
 
     // Manifest loading
     case "MANIFESTS_LOAD_START":
@@ -1595,6 +1928,21 @@ function worldStudioReducer(
 export interface ViewportCallbacks {
   refreshVegetation?: (vegConfig?: VegetationConfig) => Promise<void>;
   navigateCamera?: (x: number, z: number, close?: boolean) => void;
+  /** Query biome + height at world coordinates (game space). Used by auto-gen pipeline. */
+  queryBiome?: (
+    worldX: number,
+    worldZ: number,
+  ) => { biome: string; height: number };
+  /** Get difficulty level for a biome ID. Used by auto-gen pipeline. */
+  getBiomeDifficulty?: (biomeId: string) => number;
+  /** Runtime-generated towns with game-space positions + safe zone radii. */
+  runtimeTowns?: Array<{
+    id: string;
+    name: string;
+    position: { x: number; y: number; z: number };
+    size: string;
+    safeZoneRadius: number;
+  }>;
 }
 
 // ============== CONTEXT ==============
@@ -1751,6 +2099,19 @@ interface WorldStudioContextValue {
     confirmPlacement: () => void;
     cancelPlacement: () => void;
 
+    // Zone tile painting
+    startZonePaint: (regionId: string) => void;
+    updateZoneCursor: (tile: { x: number; z: number } | null) => void;
+    paintZoneTiles: (
+      regionId: string,
+      tileKeys: string[],
+      erase: boolean,
+    ) => void;
+    setZoneBrushSize: (size: number) => void;
+    setZonePaintMode: (mode: "paint" | "erase") => void;
+    stopZonePaint: () => void;
+    switchZonePaintRegion: (regionId: string) => void;
+
     // Studio-specific: Extended layers — Spawn Points
     addSpawnPoint: (spawnPoint: PlacedSpawnPoint) => void;
     updateSpawnPoint: (id: string, updates: Partial<PlacedSpawnPoint>) => void;
@@ -1785,6 +2146,30 @@ interface WorldStudioContextValue {
     addWaterBody: (waterBody: PlacedWaterBody) => void;
     updateWaterBody: (id: string, updates: Partial<PlacedWaterBody>) => void;
     removeWaterBody: (id: string) => void;
+
+    // Studio-specific: Regions
+    addRegion: (region: PlacedRegion) => void;
+    updateRegion: (id: string, updates: Partial<PlacedRegion>) => void;
+    removeRegion: (id: string) => void;
+
+    // Studio-specific: Batch auto-generation
+    batchAddRegions: (regions: PlacedRegion[]) => void;
+    batchAddEntities: (
+      mobSpawns: PlacedMobSpawn[],
+      resources: PlacedResource[],
+    ) => void;
+    clearAllAutogen: () => void;
+
+    // Studio-specific: Danger Sources
+    addDangerSource: (dangerSource: PlacedDangerSource) => void;
+    updateDangerSource: (
+      id: string,
+      updates: Partial<PlacedDangerSource>,
+    ) => void;
+    removeDangerSource: (id: string) => void;
+
+    // Studio-specific: Wilderness Boundary
+    setWildernessBoundary: (boundary: WildernessBoundary | null) => void;
 
     // Studio-specific: Manifests
     loadManifestsStart: () => void;
@@ -2121,6 +2506,21 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       confirmPlacement: () => dispatch({ type: "CONFIRM_PLACEMENT" }),
       cancelPlacement: () => dispatch({ type: "CANCEL_PLACEMENT" }),
 
+      // Zone tile painting
+      startZonePaint: (regionId: string) =>
+        dispatch({ type: "START_ZONE_PAINT", regionId }),
+      updateZoneCursor: (tile: { x: number; z: number } | null) =>
+        dispatch({ type: "UPDATE_ZONE_CURSOR", tile }),
+      paintZoneTiles: (regionId: string, tileKeys: string[], erase: boolean) =>
+        dispatch({ type: "PAINT_ZONE_TILES", regionId, tileKeys, erase }),
+      setZoneBrushSize: (size: number) =>
+        dispatch({ type: "SET_ZONE_BRUSH_SIZE", size }),
+      setZonePaintMode: (mode: "paint" | "erase") =>
+        dispatch({ type: "SET_ZONE_PAINT_MODE", mode }),
+      stopZonePaint: () => dispatch({ type: "STOP_ZONE_PAINT" }),
+      switchZonePaintRegion: (regionId: string) =>
+        dispatch({ type: "SWITCH_ZONE_PAINT_REGION", regionId }),
+
       // Studio-specific: Extended layers — Spawn Points
       addSpawnPoint: (spawnPoint: PlacedSpawnPoint) =>
         dispatch({ type: "ADD_SPAWN_POINT", spawnPoint }),
@@ -2171,6 +2571,34 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         dispatch({ type: "UPDATE_WATER_BODY", id, updates }),
       removeWaterBody: (id: string) =>
         dispatch({ type: "REMOVE_WATER_BODY", id }),
+
+      // Studio-specific: Extended layers — Regions
+      addRegion: (region: PlacedRegion) =>
+        dispatch({ type: "ADD_REGION", region }),
+      updateRegion: (id: string, updates: Partial<PlacedRegion>) =>
+        dispatch({ type: "UPDATE_REGION", id, updates }),
+      removeRegion: (id: string) => dispatch({ type: "REMOVE_REGION", id }),
+
+      // Studio-specific: Batch auto-generation actions
+      batchAddRegions: (regions: PlacedRegion[]) =>
+        dispatch({ type: "BATCH_ADD_REGIONS", regions }),
+      batchAddEntities: (
+        mobSpawns: PlacedMobSpawn[],
+        resources: PlacedResource[],
+      ) => dispatch({ type: "BATCH_ADD_ENTITIES", mobSpawns, resources }),
+      clearAllAutogen: () => dispatch({ type: "CLEAR_ALL_AUTOGEN" }),
+
+      // Studio-specific: Extended layers — Danger Sources
+      addDangerSource: (dangerSource: PlacedDangerSource) =>
+        dispatch({ type: "ADD_DANGER_SOURCE", dangerSource }),
+      updateDangerSource: (id: string, updates: Partial<PlacedDangerSource>) =>
+        dispatch({ type: "UPDATE_DANGER_SOURCE", id, updates }),
+      removeDangerSource: (id: string) =>
+        dispatch({ type: "REMOVE_DANGER_SOURCE", id }),
+
+      // Studio-specific: Extended layers — Wilderness Boundary
+      setWildernessBoundary: (boundary: WildernessBoundary | null) =>
+        dispatch({ type: "SET_WILDERNESS_BOUNDARY", boundary }),
 
       // Studio-specific: Manifests
       loadManifestsStart: () => dispatch({ type: "MANIFESTS_LOAD_START" }),
@@ -2494,6 +2922,55 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         badge: ext.waterBodies.length,
         expandable: ext.waterBodies.length > 0,
       },
+      {
+        id: "layer-regions",
+        label: "Regions",
+        type: "regions",
+        children: ext.regions.map((r) => ({
+          id: `region-${r.id}`,
+          label: r.name,
+          type: "region" as const,
+          children: [],
+          dataId: r.id,
+          expandable: false,
+          badge: r.tileKeys.length,
+          metadata: { tags: r.tags, tileCount: r.tileKeys.length },
+        })),
+        badge: ext.regions.length,
+        expandable: ext.regions.length > 0,
+      },
+      {
+        id: "layer-danger-sources",
+        label: "Danger Sources",
+        type: "dangerSources",
+        children: ext.dangerSources.map((ds) => ({
+          id: `danger-${ds.id}`,
+          label: ds.name,
+          type: "dangerSource" as const,
+          children: [],
+          dataId: ds.id,
+          expandable: false,
+          metadata: { intensity: ds.intensity, radius: ds.radius },
+        })),
+        badge: ext.dangerSources.length,
+        expandable: ext.dangerSources.length > 0,
+      },
+      ...(ext.wildernessBoundary
+        ? [
+            {
+              id: "layer-wilderness-boundary",
+              label: "Wilderness Boundary",
+              type: "wildernessBoundary" as const,
+              children: [] as HierarchyNode[],
+              dataId: "wilderness-boundary",
+              expandable: false,
+              metadata: {
+                points: ext.wildernessBoundary.points.length,
+                maxLevel: ext.wildernessBoundary.maxLevel,
+              },
+            },
+          ]
+        : []),
     ];
     const worldFeaturesChildren = worldFeaturesDefs.filter(
       (node) => node.children.length > 0,

@@ -34,10 +34,12 @@ import {
 import { useWorldStudio } from "../WorldStudioContext";
 import { useEditorWorldSync } from "../hooks/useEditorWorldSync";
 import { usePlacementInteraction } from "../hooks/usePlacementInteraction";
+import { useZonePainting } from "../hooks/useZonePainting";
 import { useBrushInteraction } from "../hooks/useBrushInteraction";
 import { usePlacementConfirmation } from "../hooks/usePlacementConfirmation";
 import { useBrushOverlaySync } from "../hooks/useBrushOverlaySync";
 import { useAreaBoundaryOverlay } from "../hooks/useAreaBoundaryOverlay";
+import { useZoneProcgen } from "../hooks/useZoneProcgen";
 import { commandHistory } from "../../../editor/commands";
 import { useSelectionOutline } from "../hooks/useSelectionOutline";
 import { useTransformGizmo } from "../hooks/useTransformGizmo";
@@ -121,6 +123,13 @@ export function ViewportContainer() {
       // Expose refreshVegetation to sibling components via viewportRef
       viewportRef.current.refreshVegetation = refs.refreshVegetation;
       viewportRef.current.navigateCamera = refs.navigateCamera;
+      viewportRef.current.queryBiome = refs.queryBiome;
+      viewportRef.current.getBiomeDifficulty = refs.getBiomeDifficulty;
+      // Use a getter so runtimeTowns is always current (towns load after scene ready)
+      Object.defineProperty(viewportRef.current, "runtimeTowns", {
+        get: () => refs.runtimeTowns,
+        configurable: true,
+      });
       setSceneReady(true);
     },
     [viewportRef],
@@ -148,6 +157,22 @@ export function ViewportContainer() {
   // ----- Fly mode state -----
   const [flyMode, setFlyMode] = useState(false);
   const [cameraMoveSpeed, setCameraMoveSpeed] = useState(200);
+
+  // ----- Difficulty heatmap -----
+  const [showDifficultyHeatmap, setShowDifficultyHeatmap] = useState(false);
+
+  // Danger sources for heatmap overlay — memoize to avoid re-renders
+  const heatmapDangerSources = useMemo(() => {
+    if (!isEditing) return undefined;
+    const ds = state.extendedLayers.dangerSources;
+    if (ds.length === 0) return undefined;
+    return ds.map((d) => ({
+      position: { x: d.position.x, z: d.position.z },
+      radius: d.radius,
+      intensity: d.intensity,
+      falloffCurve: d.falloffCurve,
+    }));
+  }, [isEditing, state.extendedLayers.dangerSources]);
 
   // ----- Context menu -----
   const { contextMenu, showContextMenuAt, hideContextMenu } = useContextMenu();
@@ -638,6 +663,11 @@ export function ViewportContainer() {
     gridSnap: snapEnabled,
   });
 
+  // Zone tile painting interaction + overlay
+  useZonePainting({
+    sceneRefs: activeSceneRefs,
+  });
+
   // Brush painting (terrain sculpt, biome paint, vegetation, collision)
   useBrushInteraction({
     sceneRefs: activeSceneRefs,
@@ -669,17 +699,35 @@ export function ViewportContainer() {
   // Area boundary overlays (difficulty zones, town boundaries, biome regions)
   useAreaBoundaryOverlay(activeSceneRefs);
 
+  // Zone procgen — populate all regions from toolbar button
+  const { generateAll: procgenGenerateAll } = useZoneProcgen();
+
   // Convert confirmed placement ghost into an actual entity in state
   usePlacementConfirmation();
 
   // ----- TileBasedTerrain callbacks -----
 
   // Handle tile count changes during creation preview
+  // Use refs for values that change frequently to keep the callback identity stable
+  // and avoid re-render loops between ViewportContainer ↔ TileBasedTerrain.
+  const isCreationGeneratingRef = useRef(state.builder.creation.isGenerating);
+  isCreationGeneratingRef.current = state.builder.creation.isGenerating;
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+  const tileProgressRef = useRef<{ loaded: number; total: number } | null>(
+    null,
+  );
+
   const handleTileCountChange = useCallback(
     (loaded: number, total: number) => {
-      setTileProgress({ loaded, total });
-      if (loaded > 0 && state.builder.creation.isGenerating) {
-        actions.finishGeneration({
+      // Only call setState if values actually changed
+      const prev = tileProgressRef.current;
+      if (!prev || prev.loaded !== loaded || prev.total !== total) {
+        tileProgressRef.current = { loaded, total };
+        setTileProgress({ loaded, total });
+      }
+      if (loaded > 0 && isCreationGeneratingRef.current) {
+        actionsRef.current.finishGeneration({
           generationTime: 0,
           tiles: total,
           biomes: 0,
@@ -688,15 +736,16 @@ export function ViewportContainer() {
         });
       }
     },
-    [state.builder.creation.isGenerating, actions],
+    [], // stable — reads from refs
   );
 
   // Map TileBasedTerrain selection to WorldStudio selection
   const handleSelect = useCallback(
     (selection: ViewportSelection | null) => {
       if (!isEditing) return;
-      // During placement mode, suppress selection — clicks are handled by usePlacementInteraction
+      // During placement/drawing modes, suppress selection — clicks handled by interaction hooks
       if (hasActivePlacementRef.current) return;
+      if (activeToolRef.current === "zonePaint") return;
       if (!selection) {
         actions.setSelection(null);
         return;
@@ -1060,6 +1109,50 @@ export function ViewportContainer() {
       },
     });
 
+    // Create Wilderness Boundary (singleton — only if none exists)
+    if (!state.extendedLayers.wildernessBoundary) {
+      items.push({
+        label: "Create Wilderness Boundary",
+        onClick: () => {
+          // Raycast to get world position at click
+          let worldZ = 0;
+          let worldX = 0;
+          if (activeSceneRefs) {
+            const rect = activeSceneRefs.container.getBoundingClientRect();
+            const ndcX =
+              ((contextMenu.position.x - rect.left) / rect.width) * 2 - 1;
+            const ndcY =
+              -((contextMenu.position.y - rect.top) / rect.height) * 2 + 1;
+            const mouse = new THREE.Vector2(ndcX, ndcY);
+            activeSceneRefs.raycaster.setFromCamera(
+              mouse,
+              activeSceneRefs.camera,
+            );
+            const hits = activeSceneRefs.raycaster.intersectObject(
+              activeSceneRefs.terrainContainer,
+              true,
+            );
+            if (hits.length > 0) {
+              worldX = hits[0].point.x;
+              worldZ = hits[0].point.z;
+            }
+          }
+          // Create a default east-west line at click Z position
+          const span = 500;
+          actions.setWildernessBoundary({
+            points: [
+              { x: worldX - span, z: worldZ },
+              { x: worldX, z: worldZ },
+              { x: worldX + span, z: worldZ },
+            ],
+            levelScale: 10,
+            maxLevel: 56,
+          });
+          hideContextMenu();
+        },
+      });
+    }
+
     // Camera bookmarks
     if (activeSceneRefs) {
       items.push({ label: "", separator: true });
@@ -1125,6 +1218,8 @@ export function ViewportContainer() {
         onViewportContextMenu={handleViewportContextMenu}
         onFlyModeChange={setFlyMode}
         onMoveSpeedChange={setCameraMoveSpeed}
+        showDifficultyHeatmap={showDifficultyHeatmap}
+        dangerSources={heatmapDangerSources}
       />
       {/* Viewport info overlay (UE5-style corner HUD) */}
       {isEditing && (
@@ -1159,6 +1254,9 @@ export function ViewportContainer() {
           }
           flyMode={flyMode}
           cameraMoveSpeed={cameraMoveSpeed}
+          showDifficultyHeatmap={showDifficultyHeatmap}
+          onToggleDifficultyHeatmap={() => setShowDifficultyHeatmap((v) => !v)}
+          onPopulateAllRegions={() => procgenGenerateAll(Date.now())}
           onToggleGrid={handleGridToggle}
           onToggleSnap={handleSnapToggle}
           onToggleSurfaceSnap={handleSurfaceSnapToggle}

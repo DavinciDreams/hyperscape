@@ -52,6 +52,11 @@ import {
   createDuelArena,
 } from "./GameWorldAssets";
 import {
+  DifficultyHeatmapManager,
+  type TownInfo,
+  type DangerSourceInfo,
+} from "./DifficultyHeatmap";
+import {
   createGameWorldEntities,
   disposeEntitySync,
   disposeEntitySyncGeometry,
@@ -265,6 +270,25 @@ export interface TerrainSceneRefs {
   navigateCamera: (x: number, z: number, close?: boolean) => void;
   /** True if RMB fly mode was used in the current mouse interaction (for context menu suppression) */
   wasRecentlyFlying: () => boolean;
+  /** Sample terrain height at scene coordinates (analytical — no raycasting). Returns 0 if querier not ready. */
+  getTerrainHeight: (sceneX: number, sceneZ: number) => number;
+  /** Offset to convert between scene-space (0..worldSize) and game-space (-half..+half). sceneX = gameX + offset. */
+  worldCenterOffset: number;
+  /** Query biome + height at world coordinates (game space). Used by auto-gen pipeline. */
+  queryBiome: (
+    worldX: number,
+    worldZ: number,
+  ) => { biome: string; height: number };
+  /** Get difficulty level for a biome ID. Used by auto-gen pipeline. */
+  getBiomeDifficulty: (biomeId: string) => number;
+  /** Runtime-generated towns with positions in game-space. Set by terrain generation. */
+  runtimeTowns: Array<{
+    id: string;
+    name: string;
+    position: { x: number; y: number; z: number };
+    size: string;
+    safeZoneRadius: number;
+  }>;
 }
 
 export interface TileBasedTerrainProps {
@@ -293,6 +317,10 @@ export interface TileBasedTerrainProps {
   onGameEntitiesLoaded?: (data: GameEntityData) => void;
   /** Called on quick RMB click (no fly) with screen coords for context menu */
   onViewportContextMenu?: (x: number, y: number) => void;
+  /** Show difficulty heatmap overlay on terrain */
+  showDifficultyHeatmap?: boolean;
+  /** Danger sources for difficulty heatmap overlay */
+  dangerSources?: DangerSourceInfo[];
 }
 
 export type { GameEntityData };
@@ -1202,6 +1230,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   hideBuiltinOverlays = false,
   onGameEntitiesLoaded,
   onViewportContextMenu,
+  showDifficultyHeatmap = false,
+  dangerSources,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
@@ -1236,6 +1266,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const worldCenterOffsetRef = useRef<number>(0);
   const generatorRef = useRef<TerrainGenerator | null>(null);
   const terrainQuerierRef = useRef<TerrainQuerier | null>(null);
+  const heatmapManagerRef = useRef<DifficultyHeatmapManager | null>(null);
 
   // Tile generation queue + O(1) membership set
   const tileQueueRef = useRef<
@@ -1288,8 +1319,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
   // UI state
   const [isGenerating, setIsGenerating] = useState(false);
+  const isGeneratingRef = useRef(false);
   const [loadedTiles, setLoadedTiles] = useState(0);
   const [townCount, setTownCount] = useState(0);
+  /** Runtime town data from terrain generation (game-space coordinates + safeZoneRadius) */
+  const runtimeTownsRef = useRef<TerrainSceneRefs["runtimeTowns"]>([]);
   const [roadCount, setRoadCount] = useState(0);
   const [hoveredObject, setHoveredObject] = useState<string | null>(null);
   /** Track hovered selectable group for label visibility toggle (UE5-style) */
@@ -1456,6 +1490,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         resolution: useRes,
       });
 
+      // Notify heatmap manager of new tile
+      heatmapManagerRef.current?.onTileLoaded(tileX, tileZ);
+
       setLoadedTiles(tilesRef.current.size);
     },
     [
@@ -1488,6 +1525,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       waterContainer.remove(tileData.water);
       tileData.water.geometry.dispose();
     }
+
+    // Notify heatmap manager
+    heatmapManagerRef.current?.onTileUnloaded(tileData.tileX, tileData.tileZ);
 
     tilesRef.current.delete(key);
     setLoadedTiles(tilesRef.current.size);
@@ -1598,11 +1638,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
     }
 
-    // Update generating state (only when changed to avoid unnecessary re-renders)
+    // Update generating state — only call setState when the value actually changes
+    // to avoid triggering React reconciliation on every animation frame.
     const isStillGenerating = tileQueueRef.current.length > 0;
-    setIsGenerating((prev) =>
-      prev !== isStillGenerating ? isStillGenerating : prev,
-    );
+    if (isGeneratingRef.current !== isStillGenerating) {
+      isGeneratingRef.current = isStillGenerating;
+      setIsGenerating(isStillGenerating);
+    }
   }, [
     getCameraTile,
     isInBounds,
@@ -2504,6 +2546,28 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     // Clear selectable objects array
     selectableObjectsRef.current = [];
 
+    // ---- Difficulty heatmap overlay ----
+    // Create the manager now (querier + scene are ready). Town data arrives
+    // later and is fed via setTowns(). The manager creates overlay meshes
+    // as terrain tiles load/unload.
+    const biomeSystem = generator.getBiomeSystem();
+    const heatmapQuerier = terrainQuerierRef.current!;
+    const heatmapManager = new DifficultyHeatmapManager({
+      scene,
+      seed: config.seed,
+      tileSize,
+      worldCenterOffset,
+      queryBiome: (wx, wz) => {
+        const q = heatmapQuerier(wx, wz);
+        return { biome: q.biome, height: q.height };
+      },
+      getBiomeDifficulty: (biomeId: string) => {
+        const def = biomeSystem.getBiomeDefinition(biomeId);
+        return def?.difficultyLevel ?? 0;
+      },
+    });
+    heatmapManagerRef.current = heatmapManager;
+
     // ---- Game pipeline: fetch exact towns + roads from server-side game code ----
     // The Asset Forge API runs the ACTUAL TownGenerator + BFS road pathfinding
     // from the game, producing pixel-identical town/road layouts.
@@ -2574,6 +2638,24 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           `[TileBasedTerrain] Received ${layout.towns.length} towns, ${layout.roads.length} roads from server (generated in ${layout.generationTimeMs}ms)`,
         );
         setTownCount(layout.towns.length);
+
+        // Store runtime town data for auto-gen pipeline
+        runtimeTownsRef.current = layout.towns.map((t) => ({
+          id: t.id,
+          name: t.name,
+          position: { x: t.position.x, y: t.position.y, z: t.position.z },
+          size: t.size,
+          safeZoneRadius: t.safeZoneRadius,
+        }));
+
+        // Feed town data to difficulty heatmap
+        if (heatmapManagerRef.current) {
+          const townInfos: TownInfo[] = layout.towns.map((t) => ({
+            position: { x: t.position.x, z: t.position.z },
+            safeZoneRadius: t.safeZoneRadius,
+          }));
+          heatmapManagerRef.current.setTowns(townInfos);
+        }
 
         // Get height function from game terrain querier
         const heightQuerier = terrainQuerierRef.current;
@@ -2937,6 +3019,24 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         `[TileBasedTerrain] Generated ${townResult.towns.length} towns in ${townResult.stats.generationTime.toFixed(0)}ms`,
       );
       setTownCount(townResult.towns.length);
+
+      // Store runtime town data for auto-gen pipeline
+      runtimeTownsRef.current = townResult.towns.map((t) => ({
+        id: t.id,
+        name: t.name,
+        position: { x: t.position.x, y: t.position.y, z: t.position.z },
+        size: t.size,
+        safeZoneRadius: t.safeZoneRadius,
+      }));
+
+      // Feed town data to difficulty heatmap
+      if (heatmapManagerRef.current) {
+        const townInfos: TownInfo[] = townResult.towns.map((t) => ({
+          position: { x: t.position.x, z: t.position.z },
+          safeZoneRadius: t.safeZoneRadius,
+        }));
+        heatmapManagerRef.current.setTowns(townInfos);
+      }
 
       // Clear selectable objects array
       selectableObjectsRef.current = [];
@@ -4036,6 +4136,28 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           rmbDidFlyRef.current = false; // Auto-reset on read
           return val;
         },
+        getTerrainHeight: (sceneX: number, sceneZ: number): number => {
+          const querier = terrainQuerierRef.current;
+          if (!querier) return 0;
+          const offset = worldCenterOffsetRef.current;
+          return querier(sceneX - offset, sceneZ - offset).height;
+        },
+        worldCenterOffset: worldCenterOffsetRef.current,
+        queryBiome: (worldX: number, worldZ: number) => {
+          const querier = terrainQuerierRef.current;
+          if (!querier) return { biome: "plains", height: 0 };
+          const q = querier(worldX, worldZ);
+          return { biome: q.biome, height: q.height };
+        },
+        getBiomeDifficulty: (biomeId: string) => {
+          const gen = generatorRef.current;
+          if (!gen) return 0;
+          const def = gen.getBiomeSystem().getBiomeDefinition(biomeId);
+          return def?.difficultyLevel ?? 0;
+        },
+        get runtimeTowns() {
+          return runtimeTownsRef.current;
+        },
       });
 
       // Animation loop
@@ -4193,6 +4315,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
       });
+
+      // Dispose difficulty heatmap
+      heatmapManagerRef.current?.dispose();
+      heatmapManagerRef.current = null;
 
       // Clear building walkability tracking
       buildingWalkabilityService.clear();
@@ -4409,6 +4535,18 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       vegetationContainerRef.current.visible = showVegetation;
     }
   }, [showVegetation]);
+
+  // Toggle difficulty heatmap visibility
+  useEffect(() => {
+    heatmapManagerRef.current?.setVisible(showDifficultyHeatmap);
+  }, [showDifficultyHeatmap]);
+
+  // Feed danger sources to heatmap manager
+  useEffect(() => {
+    if (heatmapManagerRef.current && dangerSources) {
+      heatmapManagerRef.current.setDangerSources(dangerSources);
+    }
+  }, [dangerSources]);
 
   // Selection highlighting effect
   useEffect(() => {

@@ -519,6 +519,36 @@ export interface WorldArea {
   >;
 }
 
+// ============== DANGER SOURCES & WILDERNESS ==============
+
+/**
+ * A localized point that increases difficulty beyond biome defaults.
+ * Like dark wizards south of Varrock — a dangerous pocket in an otherwise safe area.
+ */
+export interface DangerSource {
+  id: string;
+  position: { x: number; z: number };
+  radius: number;
+  /** Additive difficulty bonus (0-3), stacks with biome difficulty */
+  intensity: number;
+  /** Controls how quickly intensity falls off from center to edge */
+  falloffCurve: number;
+  name?: string;
+}
+
+/**
+ * Polyline boundary marking where PvP wilderness begins.
+ * Difficulty increases by distance north of the boundary line.
+ */
+export interface WildernessBoundary {
+  /** Ordered polyline points (not closed) */
+  points: Array<{ x: number; z: number }>;
+  /** Meters per wilderness level north of the boundary */
+  levelScale: number;
+  /** Maximum wilderness level */
+  maxLevel: number;
+}
+
 // ============== ZONE SPAWN POINTS ==============
 
 /**

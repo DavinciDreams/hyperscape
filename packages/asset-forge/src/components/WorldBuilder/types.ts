@@ -444,6 +444,8 @@ export interface TownOverride {
   townId: string;
   /** Custom name override */
   nameOverride?: string;
+  /** Override safe zone radius (meters). Default is derived from town size. */
+  safeZoneRadiusOverride?: number;
   /** Building modifications */
   buildingModifications?: BuildingModification[];
   /** Custom properties */
@@ -821,7 +823,11 @@ export interface Selection {
     | "gameNpc"
     | "gameStation"
     | "gameResource"
-    | "gameMobSpawn";
+    | "gameMobSpawn"
+    // Region/zone entity
+    | "region"
+    // Danger source
+    | "dangerSource";
   /** ID of selected element */
   id: string;
   /** Breadcrumb path to selection (for nested elements) */
@@ -959,6 +965,11 @@ export interface HierarchyNode {
     | "gameMobSpawn"
     | "gameFishing"
     | "gameAreas"
+    | "regions"
+    | "region"
+    | "dangerSources"
+    | "dangerSource"
+    | "wildernessBoundary"
     | "folder";
   /** Child nodes */
   children: HierarchyNode[];

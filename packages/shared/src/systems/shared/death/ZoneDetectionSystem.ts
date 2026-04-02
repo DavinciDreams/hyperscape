@@ -16,6 +16,7 @@ import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import type { ZoneType, ZoneProperties } from "../../../types/death";
 import { ZoneType as ZoneTypeEnum } from "../../../types/death";
 import type { WorldArea } from "../../../types/core/core";
+import type { WildernessBoundary } from "../../../types/world/world-types";
 import type { TownSystem } from "../world/TownSystem";
 
 export class ZoneDetectionSystem extends SystemBase {
@@ -33,6 +34,8 @@ export class ZoneDetectionSystem extends SystemBase {
   }> = [];
   // Reference to procedural town system
   private townSystem?: TownSystem;
+  // Optional wilderness boundary polyline for PvP detection
+  private wildernessBoundary: WildernessBoundary | null = null;
 
   constructor(world: World) {
     super(world, {
@@ -293,6 +296,23 @@ export class ZoneDetectionSystem extends SystemBase {
       }
     }
 
+    // Check wilderness boundary polyline — positions north of the line are PvP wilderness
+    const wildLevel = this.getWildernessLevel(position.x, position.z);
+    if (wildLevel > 0) {
+      return {
+        type: ZoneTypeEnum.PVP_ZONE,
+        isSafe: false,
+        isPvPEnabled: true,
+        isWilderness: true,
+        name: `Wilderness (Level ${wildLevel})`,
+        difficultyLevel: Math.min(3, Math.ceil(wildLevel / 20)) as
+          | 0
+          | 1
+          | 2
+          | 3,
+      };
+    }
+
     // Default unknown areas to UNKNOWN type (treated as wilderness for death mechanics)
     // This is the conservative approach for death system - prevents exploits in undefined areas
     // Items will drop on death, incentivizing proper zone definition
@@ -327,6 +347,59 @@ export class ZoneDetectionSystem extends SystemBase {
         this.getZoneProperties({ x: centerX, z: centerZ });
       }
     }
+  }
+
+  /**
+   * Set a wilderness boundary polyline. Positions north (positive Z) of this
+   * line are treated as PvP wilderness. Clears the zone cache.
+   */
+  setWildernessBoundary(boundary: WildernessBoundary | null): void {
+    this.wildernessBoundary = boundary;
+    this.zoneCache.clear();
+  }
+
+  /**
+   * Check if a position is north of the wilderness boundary polyline.
+   * Returns the wilderness level (0 = not wilderness), based on distance north.
+   */
+  private getWildernessLevel(x: number, z: number): number {
+    const wb = this.wildernessBoundary;
+    if (!wb || wb.points.length < 2) return 0;
+
+    // Find the closest point on the boundary polyline
+    let minDist = Infinity;
+    let closestZ = 0;
+    for (let i = 0; i < wb.points.length - 1; i++) {
+      const ax = wb.points[i].x;
+      const az = wb.points[i].z;
+      const bx = wb.points[i + 1].x;
+      const bz = wb.points[i + 1].z;
+
+      // Project point onto line segment
+      const abx = bx - ax;
+      const abz = bz - az;
+      const lenSq = abx * abx + abz * abz;
+      if (lenSq === 0) continue;
+      const t = Math.max(
+        0,
+        Math.min(1, ((x - ax) * abx + (z - az) * abz) / lenSq),
+      );
+      const projX = ax + t * abx;
+      const projZ = az + t * abz;
+      const dx = x - projX;
+      const dz = z - projZ;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < minDist) {
+        minDist = dist;
+        closestZ = projZ;
+      }
+    }
+
+    // North = positive Z direction. If position Z > boundary Z, it's in wilderness
+    const distanceNorth = z - closestZ;
+    if (distanceNorth <= 0) return 0;
+
+    return Math.min(wb.maxLevel, Math.floor(distanceNorth / wb.levelScale));
   }
 
   /**

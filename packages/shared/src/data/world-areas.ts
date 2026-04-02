@@ -21,6 +21,10 @@ import type {
   StationLocation,
   WorldArea,
 } from "../types/core/core";
+import type {
+  DangerSource,
+  WildernessBoundary,
+} from "../types/world/world-types";
 
 // Re-export types from core
 export type {
@@ -30,6 +34,11 @@ export type {
   MobSpawnPoint,
   StationLocation,
 } from "../types/core/core";
+
+export type {
+  DangerSource,
+  WildernessBoundary,
+} from "../types/world/world-types";
 
 /**
  * World Areas Database - Populated at runtime from JSON manifests
@@ -200,3 +209,26 @@ export const WORLD_GENERATION_CONSTANTS = {
   MOB_SPAWN_CHECK_RADIUS: 5, // Don't spawn mobs within 5m of players
   AREA_TRANSITION_OVERLAP: 5, // 5 meter overlap between adjacent areas
 } as const;
+
+/**
+ * Runtime danger sources — populated from editor saves or JSON manifest.
+ * Used by TerrainSystem.getDifficultyAtWorldPosition() to increase local difficulty.
+ */
+export const ALL_DANGER_SOURCES: DangerSource[] = [];
+
+/**
+ * Runtime wilderness boundary — populated from editor saves or JSON manifest.
+ * Used by ZoneDetectionSystem to determine PvP zones north of the line.
+ */
+export let WILDERNESS_BOUNDARY: WildernessBoundary | null = null;
+
+export function setDangerSources(sources: DangerSource[]): void {
+  ALL_DANGER_SOURCES.length = 0;
+  ALL_DANGER_SOURCES.push(...sources);
+}
+
+export function setWildernessBoundary(
+  boundary: WildernessBoundary | null,
+): void {
+  WILDERNESS_BOUNDARY = boundary;
+}

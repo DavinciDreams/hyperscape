@@ -183,6 +183,37 @@ export function usePlacementConfirmation() {
         break;
       }
 
+      case "danger-sources": {
+        // Preset defaults based on template ID
+        const presets: Record<
+          string,
+          { intensity: number; radius: number; falloffCurve: number }
+        > = {
+          "danger-dark-wizard": { intensity: 2, radius: 40, falloffCurve: 1.5 },
+          "danger-spider-nest": { intensity: 1.5, radius: 30, falloffCurve: 2 },
+          "danger-weak": { intensity: 0.5, radius: 60, falloffCurve: 1 },
+          "danger-strong": { intensity: 3, radius: 50, falloffCurve: 1.2 },
+        };
+        const preset = presets[templateId] ?? {
+          intensity: 1,
+          radius: 30,
+          falloffCurve: 1.5,
+        };
+        entityId = generateId("danger");
+        entityData = {
+          id: entityId,
+          name: templateName,
+          position: { ...position },
+          radius: preset.radius,
+          intensity: preset.intensity,
+          falloffCurve: preset.falloffCurve,
+          description: "",
+        };
+        addFn = (d) => actions.addDangerSource(d as never);
+        removeFn = (id) => actions.removeDangerSource(id);
+        break;
+      }
+
       case "water-bodies": {
         const bodyType = activePlacement.templateId.replace("water-", "") as
           | "river"

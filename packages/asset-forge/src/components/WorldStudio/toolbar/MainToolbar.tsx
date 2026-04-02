@@ -15,12 +15,14 @@ import {
   Paintbrush,
   PenTool,
   Mountain,
+  Hexagon,
   PanelLeft,
   PanelRight,
   Loader2,
   Book,
   Rocket,
   Wand2,
+  Sparkles,
   Move,
   RotateCw,
   Maximize2,
@@ -33,6 +35,7 @@ import React, { useState, useEffect } from "react";
 
 import { commandHistory } from "../../../editor/commands";
 import { useWorldStudio, type StudioToolMode } from "../WorldStudioContext";
+import { ZoneAutoGenDialog } from "../panels/ZoneAutoGenDialog";
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -51,9 +54,10 @@ const TOOL_GROUPS: ToolDef[][] = [
     { mode: "select", icon: MousePointer, label: "Select", shortcut: "V" },
     { mode: "place", icon: Plus, label: "Place", shortcut: "P" },
   ],
-  // Group 2: Painting + Procgen
+  // Group 2: Painting + Zones + Procgen
   [
     { mode: "brush", icon: Paintbrush, label: "Brush", shortcut: "B" },
+    { mode: "zonePaint", icon: Hexagon, label: "Zone", shortcut: "Z" },
     { mode: "procgen", icon: Mountain, label: "Procgen", shortcut: "G" },
   ],
   // Group 3: Utility
@@ -166,6 +170,9 @@ export function MainToolbar({
     else actions.redo();
   };
 
+  // Zone auto-gen dialog
+  const [autoGenOpen, setAutoGenOpen] = useState(false);
+
   // Save flash animation
   const [saveFlash, setSaveFlash] = useState(false);
   const handleSave = () => {
@@ -218,6 +225,15 @@ export function MainToolbar({
             ))}
           </React.Fragment>
         ))}
+
+        {/* Auto-Generate Zones button */}
+        <Divider />
+        <ToolButton
+          icon={Sparkles}
+          label="Auto-Generate Zones"
+          onClick={() => setAutoGenOpen(true)}
+          disabled={!computed.hasLoadedWorld}
+        />
 
         {/* Transform mode buttons — only when select tool active */}
         {isSelectTool && (
@@ -381,6 +397,12 @@ export function MainToolbar({
           onClick={onToggleRight}
         />
       </div>
+
+      {/* Zone auto-gen dialog (portal) */}
+      <ZoneAutoGenDialog
+        open={autoGenOpen}
+        onClose={() => setAutoGenOpen(false)}
+      />
     </div>
   );
 }

@@ -39,6 +39,9 @@ import { GameNPCProperties } from "./properties/GameNPCProperties";
 import { GameStationProperties } from "./properties/GameStationProperties";
 import { GameResourceProperties } from "./properties/GameResourceProperties";
 import { GameMobSpawnProperties } from "./properties/GameMobSpawnProperties";
+import { RegionProperties } from "./properties/RegionProperties";
+import { DangerSourceProperties } from "./properties/DangerSourceProperties";
+import { WildernessBoundaryProperties } from "./properties/WildernessBoundaryProperties";
 
 /** Context for property search filtering */
 const PropertySearchContext = createContext<string>("");
@@ -306,6 +309,26 @@ export function PropertiesPanel() {
         return selection.entityData ? (
           <GameMobSpawnProperties entityData={selection.entityData} />
         ) : null;
+
+      case "region": {
+        const reg = extendedLayers.regions.find((r) => r.id === selection.id);
+        if (reg) return <RegionProperties region={reg} />;
+        break;
+      }
+
+      case "dangerSource": {
+        const ds = extendedLayers.dangerSources.find(
+          (d) => d.id === selection.id,
+        );
+        if (ds) return <DangerSourceProperties dangerSource={ds} />;
+        break;
+      }
+
+      case "wilderness": {
+        const wb = extendedLayers.wildernessBoundary;
+        if (wb) return <WildernessBoundaryProperties boundary={wb} />;
+        break;
+      }
     }
 
     return null;

@@ -54,6 +54,9 @@ import {
   Fish,
   Crown,
   Hammer,
+  Hexagon,
+  Zap,
+  AlertTriangle,
 } from "lucide-react";
 import React, {
   useState,
@@ -105,6 +108,9 @@ const SELECTABLE_NODE_TYPES: Record<string, Selection["type"] | undefined> = {
   gameStation: "gameStation" as Selection["type"],
   gameResource: "gameResource" as Selection["type"],
   gameMobSpawn: "gameMobSpawn" as Selection["type"],
+  region: "region" as Selection["type"],
+  dangerSource: "dangerSource" as Selection["type"],
+  wildernessBoundary: "wilderness",
 };
 
 const TYPE_ICONS: Record<string, typeof Globe> = {
@@ -180,6 +186,11 @@ const TYPE_ICONS: Record<string, typeof Globe> = {
   gameMobSpawn: Skull,
   gameFishing: Fish,
   gameAreas: Compass,
+  region: Hexagon,
+  regions: Hexagon,
+  dangerSource: Zap,
+  dangerSources: Zap,
+  wildernessBoundary: AlertTriangle,
   folder: Folder,
 };
 
@@ -257,6 +268,11 @@ const TYPE_ICON_COLORS: Record<string, string> = {
   gameMobSpawn: "#d45b5b",
   gameFishing: "#5b9bd5",
   gameAreas: "#c4a24e",
+  region: "#d47c3e",
+  regions: "#d47c3e",
+  dangerSource: "#e54545",
+  dangerSources: "#e54545",
+  wildernessBoundary: "#d45b5b",
   folder: "#c4a24e",
 };
 
@@ -377,6 +393,9 @@ const LAYERS: LayerDef[] = [
       "waterBody",
       "road",
       "difficultyZone",
+      "region",
+      "dangerSource",
+      "wildernessBoundary",
       "gameAreas",
       "gameEntities",
     ],

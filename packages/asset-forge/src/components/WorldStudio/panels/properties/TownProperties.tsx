@@ -20,6 +20,7 @@ import {
   TextInput,
   InfoRow,
   Toggle,
+  SliderInput,
 } from "./PropertyControls";
 
 interface Props {
@@ -96,6 +97,15 @@ export function TownProperties({ townId, world }: Props) {
 
   const displayName = override?.nameOverride || town.name;
 
+  // Safe zone defaults by town size
+  const SAFE_ZONE_DEFAULTS: Record<string, number> = {
+    hamlet: 40,
+    village: 60,
+    town: 80,
+  };
+  const defaultSafeZone = SAFE_ZONE_DEFAULTS[town.size] ?? 60;
+  const effectiveSafeZone = override?.safeZoneRadiusOverride ?? defaultSafeZone;
+
   return (
     <>
       <PropertySection title="Town" icon={<Building2 size={10} />}>
@@ -112,6 +122,38 @@ export function TownProperties({ townId, world }: Props) {
           value={`(${Math.round(town.position.x)}, ${Math.round(town.position.z)})`}
         />
         {town.biomeId && <InfoRow label="Biome" value={town.biomeId} />}
+      </PropertySection>
+
+      <PropertySection title="Safe Zone" defaultOpen>
+        <SliderInput
+          label="Safe Zone Radius"
+          value={effectiveSafeZone}
+          onChange={(val) =>
+            updateOverride({
+              safeZoneRadiusOverride: val === defaultSafeZone ? undefined : val,
+            })
+          }
+          min={10}
+          max={200}
+          step={5}
+          unit="m"
+          hint={`Default for ${town.size}: ${defaultSafeZone}m`}
+        />
+        <InfoRow label="Falloff Distance" value="300m" />
+        <InfoRow
+          label="Total Influence"
+          value={`${effectiveSafeZone + 300}m`}
+        />
+        {override?.safeZoneRadiusOverride != null && (
+          <button
+            className="text-[10px] text-primary hover:text-primary/80 mt-1"
+            onClick={() =>
+              updateOverride({ safeZoneRadiusOverride: undefined })
+            }
+          >
+            Reset to default ({defaultSafeZone}m)
+          </button>
+        )}
       </PropertySection>
 
       <PropertySection

@@ -39,6 +39,8 @@ export const ENTITY_ACTIONS: Record<string, { remove: string; add: string }> = {
   musicZone: { remove: "removeMusicZone", add: "addMusicZone" },
   ambientZone: { remove: "removeAmbientZone", add: "addAmbientZone" },
   sfxTrigger: { remove: "removeSFXTrigger", add: "addSFXTrigger" },
+  region: { remove: "removeRegion", add: "addRegion" },
+  dangerSource: { remove: "removeDangerSource", add: "addDangerSource" },
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +121,18 @@ export function findEntityData(
     case "sfxTrigger":
       return (
         (audio.sfxTriggers.find((e) => e.id === id) as
+          | Record<string, unknown>
+          | undefined) ?? null
+      );
+    case "region":
+      return (
+        (ext.regions.find((e) => e.id === id) as
+          | Record<string, unknown>
+          | undefined) ?? null
+      );
+    case "dangerSource":
+      return (
+        (ext.dangerSources.find((e) => e.id === id) as
           | Record<string, unknown>
           | undefined) ?? null
       );

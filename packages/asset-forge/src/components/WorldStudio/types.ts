@@ -43,6 +43,9 @@ export interface PlacedTeleport {
   properties: Record<string, unknown>;
 }
 
+/** Entity provenance — how it was created */
+export type EntitySource = "hand-placed" | "procgen";
+
 /** Mob spawn zone */
 export interface PlacedMobSpawn {
   id: string;
@@ -56,6 +59,10 @@ export interface PlacedMobSpawn {
   maxCount: number;
   /** Respawn delay in game ticks */
   respawnTicks: number;
+  /** How this entity was created */
+  source?: EntitySource;
+  /** Region that generated this entity (for procgen cleanup) */
+  sourceRegionId?: string;
   properties: Record<string, unknown>;
 }
 
@@ -71,6 +78,10 @@ export interface PlacedResource {
   rotation: number;
   /** Model variant index (for resources with multiple models) */
   modelVariant: number;
+  /** How this entity was created */
+  source?: EntitySource;
+  /** Region that generated this entity (for procgen cleanup) */
+  sourceRegionId?: string;
   properties: Record<string, unknown>;
 }
 
@@ -86,6 +97,10 @@ export interface PlacedStation {
   bankId?: string;
   /** For runecrafting altars */
   runeType?: string;
+  /** How this entity was created */
+  source?: EntitySource;
+  /** Region that generated this entity (for procgen cleanup) */
+  sourceRegionId?: string;
   properties: Record<string, unknown>;
 }
 
@@ -293,6 +308,258 @@ export const EMPTY_AI_GENERATION_STATE: AIGenerationState = {
   quests: [],
 };
 
+// ============== REGION / ZONE TYPES ==============
+
+/** A named world region defined by painted terrain tiles */
+export interface PlacedRegion {
+  id: string;
+  name: string;
+  description: string;
+  /** Terrain tile keys ("tileX_tileZ" format) comprising this region */
+  tileKeys: string[];
+  /** Tags for filtering/searching (e.g., "starter", "forest", "mining-hub") */
+  tags: string[];
+  /** Override biome within this region (empty = inherit from terrain) */
+  biomeOverride?: string;
+  /** Music track ID for this region */
+  musicTrack?: string;
+  /** Ambient sound for this region */
+  ambientSound?: string;
+  /** Spawn rules — controls what mobs/resources procgen places in this region */
+  spawnRules?: RegionSpawnRules;
+  /** Auto-generated zone bounds (set by zone auto-gen, null for hand-painted) */
+  autoGenBounds?: AutoGenBounds;
+}
+
+// ============== AUTO-GENERATION TYPES ==============
+
+/** Contour-based zone bounds for auto-generated regions */
+export interface AutoGenBounds {
+  /** Difficulty scalar range that defines this zone [min, max) */
+  difficultyRange: [number, number];
+  /** Biome filter — null means any biome */
+  biomeFilter: string | null;
+  /** World-space bounding box */
+  boundingBox: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** Seed used for generation (for deterministic regeneration) */
+  generationSeed: number;
+  /** Timestamp when this zone was generated */
+  generatedAt: number;
+  /** Grid resolution used during generation (meters) */
+  gridResolution: number;
+  /** World-space cell positions (game coords) — for rendering the zone overlay */
+  cellPositions: Array<{ x: number; z: number }>;
+}
+
+/** Configuration for a difficulty tier */
+export interface DifficultyTierConfig {
+  name: string;
+  scalarRange: [number, number];
+  levelRange: [number, number];
+  resourceLevelRange: [number, number];
+  namePrefix: string;
+  color: string;
+  mobDensityMultiplier: number;
+  resourceDensityMultiplier: number;
+  /** Minimum distance between resources and mob spawns (meters) */
+  mobResourceBuffer: number;
+}
+
+/** Full configuration for the auto-generation pipeline */
+export interface AutoGenConfig {
+  /** Grid sampling resolution in meters (default: 10) */
+  gridResolution: number;
+  /** Minimum zone area in m² to keep (smaller zones merge) */
+  minZoneArea: number;
+  /** Maximum zone span in meters (larger zones split) */
+  maxZoneSpan: number;
+  /** Global seed for deterministic generation */
+  seed: number;
+  /** Difficulty tier definitions */
+  tiers: DifficultyTierConfig[];
+  /** Minimum spacing between mob spawns (meters) */
+  mobSpacing: number;
+  /** Minimum spacing between resource spawns (meters) */
+  resourceSpacing: number;
+}
+
+/** A single auto-generated zone (preview, before commit) */
+export interface AutoGenZone {
+  id: string;
+  name: string;
+  tierIndex: number;
+  biome: string;
+  /** Centroid in world coordinates */
+  centroid: { x: number; z: number };
+  /** Bounding box in world coordinates */
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** Area in m² */
+  area: number;
+  /** Grid cells belonging to this zone */
+  cellCount: number;
+  /** Spawn table derived from manifests */
+  spawnRules: RegionSpawnRules;
+  /** Auto-gen bounds for contour membership */
+  autoGenBounds: AutoGenBounds;
+}
+
+/** Result of the auto-generation pipeline */
+export interface AutoGenResult {
+  zones: AutoGenZone[];
+  mobSpawns: PlacedMobSpawn[];
+  resources: PlacedResource[];
+  stats: AutoGenStats;
+}
+
+/** Summary statistics from auto-generation */
+export interface AutoGenStats {
+  zonesGenerated: number;
+  zoneMerged: number;
+  totalMobs: number;
+  totalResources: number;
+  totalArea: number;
+  generationTimeMs: number;
+  /** Detected land bounding box (excludes ocean) */
+  landBounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** Per-tier breakdown */
+  tierBreakdown: Array<{
+    tierName: string;
+    zoneCount: number;
+    mobCount: number;
+    resourceCount: number;
+    area: number;
+  }>;
+}
+
+// ============== ZONE TILE CONSTANTS ==============
+
+/**
+ * Zone tile size in meters. This is the resolution of the zone painting grid.
+ * 1m matches game movement tiles for precise editing.
+ * Brush sizes scale from 1m to 50m for both fine-tuning and bulk painting.
+ */
+export const ZONE_TILE_SIZE = 1;
+
+// ============== TILE REGION HELPERS ==============
+
+/** Encode tile coordinates to a tile key string */
+export function tileKey(tileX: number, tileZ: number): string {
+  return `${tileX}_${tileZ}`;
+}
+
+/** Decode a tile key string to tile coordinates */
+export function parseTileKey(key: string): { x: number; z: number } {
+  const [x, z] = key.split("_").map(Number);
+  return { x, z };
+}
+
+/** Convert world position to tile coordinates */
+export function worldToTile(
+  worldX: number,
+  worldZ: number,
+  tileSize: number,
+): { x: number; z: number } {
+  return {
+    x: Math.floor(worldX / tileSize),
+    z: Math.floor(worldZ / tileSize),
+  };
+}
+
+/** Get tile center in world coordinates */
+export function tileCenterWorld(
+  tileX: number,
+  tileZ: number,
+  tileSize: number,
+): { x: number; z: number } {
+  return {
+    x: tileX * tileSize + tileSize / 2,
+    z: tileZ * tileSize + tileSize / 2,
+  };
+}
+
+/** Get bounding box of a tile set in world coordinates */
+export function tileBoundsWorld(
+  tileKeys: string[],
+  tileSize: number,
+): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  if (tileKeys.length === 0) {
+    return { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+  }
+  let minX = Infinity,
+    maxX = -Infinity,
+    minZ = Infinity,
+    maxZ = -Infinity;
+  for (const key of tileKeys) {
+    const { x, z } = parseTileKey(key);
+    const wx = x * tileSize;
+    const wz = z * tileSize;
+    if (wx < minX) minX = wx;
+    if (wx + tileSize > maxX) maxX = wx + tileSize;
+    if (wz < minZ) minZ = wz;
+    if (wz + tileSize > maxZ) maxZ = wz + tileSize;
+  }
+  return { minX, maxX, minZ, maxZ };
+}
+
+/** Spawn rule overrides for a region (layered on top of biome defaults) */
+export interface RegionSpawnRules {
+  mobs?: {
+    mode: "replace" | "extend";
+    table: Array<{
+      mobId: string;
+      weight: number;
+      minScalar?: number;
+      maxScalar?: number;
+    }>;
+    densityMultiplier?: number;
+  };
+  resources?: {
+    mode: "replace" | "extend";
+    table: Array<{
+      resourceId: string;
+      weight: number;
+      clusterSize?: number;
+      clusterSpacing?: number;
+      affinity?: "water" | "mountain" | "road" | "any";
+    }>;
+    densityMultiplier?: number;
+  };
+  stations?: Array<{
+    stationType: string;
+    count: number;
+    placement: "near-road" | "center" | "near-water" | "random";
+  }>;
+}
+
+// ============== DANGER SOURCE TYPES ==============
+
+/** A placeable point that increases local difficulty beyond biome defaults */
+export interface PlacedDangerSource {
+  id: string;
+  name: string;
+  position: WorldPosition;
+  /** Radius of influence in meters */
+  radius: number;
+  /** Intensity (0-3), adds to biome difficulty scalar */
+  intensity: number;
+  /** How quickly intensity falls off with distance (higher = sharper falloff) */
+  falloffCurve: number;
+  /** Optional description for tooltips */
+  description?: string;
+}
+
+// ============== WILDERNESS BOUNDARY TYPES ==============
+
+/** Draggable polyline marking where PvP begins */
+export interface WildernessBoundary {
+  /** Boundary waypoints forming an east-west polyline */
+  points: Array<{ x: number; z: number }>;
+  /** How many meters north of the line equals 1 wilderness level */
+  levelScale: number;
+  /** Maximum wilderness level */
+  maxLevel: number;
+}
+
 // ============== EXTENDED WORLD LAYERS ==============
 
 /** Additional layers for Phase 3+ entity types */
@@ -305,6 +572,9 @@ export interface ExtendedWorldLayers {
   stations: PlacedStation[];
   pois: PlacedPOI[];
   waterBodies: PlacedWaterBody[];
+  regions: PlacedRegion[];
+  dangerSources: PlacedDangerSource[];
+  wildernessBoundary: WildernessBoundary | null;
 }
 
 /** Default empty extended layers */
@@ -317,6 +587,9 @@ export const EMPTY_EXTENDED_LAYERS: ExtendedWorldLayers = {
   stations: [],
   pois: [],
   waterBodies: [],
+  regions: [],
+  dangerSources: [],
+  wildernessBoundary: null,
 };
 
 // ============== ENTITY PALETTE TYPES ==============
@@ -332,7 +605,8 @@ export type PaletteCategory =
   | "spawn-points"
   | "teleports"
   | "pois"
-  | "water-bodies";
+  | "water-bodies"
+  | "danger-sources";
 
 /** Template item from a manifest */
 export interface PaletteItem {
@@ -818,6 +1092,30 @@ export const MANIFEST_REGISTRY: ManifestFileInfo[] = [
     category: "world",
     description: "Town building definitions (placeholder)",
     editable: true,
+  },
+  {
+    name: "regions",
+    displayName: "Regions",
+    filename: "regions.json",
+    category: "world",
+    description: "Named regions with polygonal boundaries, spawn rules",
+    editable: false,
+  },
+  {
+    name: "danger-sources",
+    displayName: "Danger Sources",
+    filename: "danger-sources.json",
+    category: "world",
+    description: "Localized difficulty hotspots that increase danger",
+    editable: false,
+  },
+  {
+    name: "wilderness-boundary",
+    displayName: "Wilderness Boundary",
+    filename: "wilderness-boundary.json",
+    category: "world",
+    description: "PvP wilderness boundary polyline",
+    editable: false,
   },
   // Entities
   {

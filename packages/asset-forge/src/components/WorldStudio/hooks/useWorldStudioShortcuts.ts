@@ -27,6 +27,7 @@ const TOOL_KEYS: Record<string, StudioToolMode> = {
   v: "select",
   p: "place",
   b: "brush",
+  z: "zonePaint",
   g: "procgen",
   n: "path",
 };
