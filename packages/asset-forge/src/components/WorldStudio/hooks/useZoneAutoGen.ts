@@ -1,10 +1,14 @@
 /**
- * useZoneAutoGen — One-click zone generation pipeline
+ * useZoneAutoGen — One-click zone generation pipeline (orchestrator)
  *
- * Samples the difficulty function across the world, flood-fills contiguous
- * difficulty+biome bands into zones, derives spawn tables from manifest data,
- * and populates with mobs + resources using a two-phase Poisson disc scatter
- * with mob-resource proximity buffers for RuneScape-style gameplay feel.
+ * Thin React hook that wires pipeline stages together:
+ *   1. scanLandBounds + sampleDifficultyGrid (grid sampling)
+ *   2. floodFillZones + cleanupZones (zone extraction)
+ *   3. nameZones (naming)
+ *   4. deriveSpawnRules (spawn table derivation)
+ *   5. populateEntities (two-phase entity scatter)
+ *
+ * Pipeline stages live in ../pipeline/ for single-responsibility and testability.
  */
 
 import { useCallback } from "react";
@@ -24,9 +28,6 @@ import {
 
 import type {
   PlacedRegion,
-  PlacedMobSpawn,
-  PlacedResource,
-  RegionSpawnRules,
   DifficultyTierConfig,
   AutoGenBounds,
   AutoGenConfig,
@@ -34,29 +35,27 @@ import type {
   AutoGenStats,
   AutoGenZone,
   ManifestData,
-  ManifestNPC,
 } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
 import {
-  createSeededRng,
-  hashString,
-  weightedSelect,
-} from "../utils/procgenUtils";
-import {
-  poissonDiscSample,
-  type PoissonBoundaryTest,
-} from "../utils/poissonDisc";
-import { SpatialGrid } from "../utils/SpatialGrid";
-import {
-  BASE_MOB_DENSITY,
-  BASE_RESOURCE_DENSITY,
   HAND_PLACED_ENTITY_BUFFER,
   getTownSafeRadius,
 } from "../utils/worldConstants";
 
-// Difficulty function imported from DifficultyHeatmap.ts (computeZoneDifficulty)
-// Uses distance-primary formula with biome modifier from manifest data.
-// See DifficultyHeatmap.ts for the full formula documentation.
+// Pipeline stages
+import {
+  floodFillZones,
+  cleanupZones,
+  zoneCentroid,
+  zoneBounds,
+  type GridCell,
+} from "../pipeline/zoneFloodFill";
+import { nameZones } from "../pipeline/zoneNaming";
+import { deriveSpawnRules } from "../pipeline/spawnTableBuilder";
+import {
+  populateEntities,
+  type ExistingEntityPosition,
+} from "../pipeline/entityPopulator";
 
 // ============== DEFAULT TIER CONFIG ==============
 
@@ -150,31 +149,10 @@ export const DEFAULT_AUTOGEN_CONFIG: AutoGenConfig = {
   resourceSpacing: 8,
 };
 
-// Shared utilities imported from ../utils/procgenUtils, ../utils/poissonDisc, ../utils/SpatialGrid
-
-// poissonDiscSample and weightedSelect imported from shared utils above
-
-// ============== GRID CELL ==============
-
-interface GridCell {
-  x: number; // grid column
-  z: number; // grid row
-  worldX: number;
-  worldZ: number;
-  scalar: number;
-  biome: string;
-  isSafe: boolean;
-  tierIndex: number; // -1 for safe zones with no tier
-  /** Zone ID assigned during flood fill */
-  zoneId: number;
-}
-
-// ============== STEP 1: SAMPLE DIFFICULTY GRID ==============
+// ============== GRID SAMPLING ==============
 
 /**
  * Pre-scan to find the bounding box of actual land (non-water terrain).
- * Uses a coarse grid (4x the resolution) to quickly identify where land exists,
- * then returns the tight bounds so the main sampling can skip ocean.
  */
 function scanLandBounds(
   worldSize: number,
@@ -188,7 +166,7 @@ function scanLandBounds(
   hasLand: boolean;
 } {
   const half = worldSize / 2;
-  const coarseStep = Math.max(20, worldSize / 100); // ~100 samples per axis
+  const coarseStep = Math.max(20, worldSize / 100);
   let minX = Infinity,
     maxX = -Infinity;
   let minZ = Infinity,
@@ -208,7 +186,6 @@ function scanLandBounds(
     }
   }
 
-  // Add padding of one coarse step to avoid clipping edges
   if (hasLand) {
     minX -= coarseStep;
     maxX += coarseStep;
@@ -232,7 +209,6 @@ function sampleDifficultyGrid(
   worldRadius: number,
   zoneDiffConfig: ZoneDifficultyConfig,
 ): GridCell[] {
-  // Only sample within the land bounding box (skip ocean)
   const startX = landBounds.minX;
   const startZ = landBounds.minZ;
   const rangeX = landBounds.maxX - landBounds.minX;
@@ -248,7 +224,6 @@ function sampleDifficultyGrid(
 
       const biomeQuery = queryBiome(worldX, worldZ);
 
-      // Skip water — terrain below waterThreshold is ocean
       if (biomeQuery.height < waterThreshold) {
         cells.push({
           x: gx,
@@ -276,7 +251,6 @@ function sampleDifficultyGrid(
         zoneDiffConfig,
       );
 
-      // Classify into tier
       let tierIndex = -1;
       for (let t = 0; t < tiers.length; t++) {
         const [lo, hi] = tiers[t].scalarRange;
@@ -285,7 +259,6 @@ function sampleDifficultyGrid(
           break;
         }
       }
-      // Handle scalar === 1.0 (fits into last tier)
       if (tierIndex === -1 && sample.scalar >= 1.0 && tiers.length > 0) {
         tierIndex = tiers.length - 1;
       }
@@ -307,572 +280,10 @@ function sampleDifficultyGrid(
   return cells;
 }
 
-// ============== STEP 2: FLOOD FILL ==============
-
-interface RawZone {
-  id: number;
-  tierIndex: number;
-  biome: string;
-  cells: GridCell[];
-}
-
-function floodFillZones(
-  cells: GridCell[],
-  cols: number,
-  rows: number,
-): RawZone[] {
-  const zones: RawZone[] = [];
-  let nextZoneId = 0;
-
-  // Build lookup grid
-  const grid = new Array<GridCell | null>(cols * rows).fill(null);
-  for (const cell of cells) {
-    grid[cell.z * cols + cell.x] = cell;
-  }
-
-  for (const cell of cells) {
-    if (cell.zoneId !== -1) continue;
-    if (cell.tierIndex < 0) continue; // skip unclassified / water
-
-    const zoneId = nextZoneId++;
-    const zone: RawZone = {
-      id: zoneId,
-      tierIndex: cell.tierIndex,
-      biome: cell.biome,
-      cells: [],
-    };
-
-    // BFS with index pointer (O(1) dequeue instead of O(n) shift)
-    const queue: GridCell[] = [cell];
-    let head = 0;
-    cell.zoneId = zoneId;
-
-    while (head < queue.length) {
-      const current = queue[head++];
-      zone.cells.push(current);
-
-      // 4-connected neighbors
-      const neighbors = [
-        { x: current.x - 1, z: current.z },
-        { x: current.x + 1, z: current.z },
-        { x: current.x, z: current.z - 1 },
-        { x: current.x, z: current.z + 1 },
-      ];
-
-      for (const n of neighbors) {
-        if (n.x < 0 || n.x >= cols || n.z < 0 || n.z >= rows) continue;
-        const neighbor = grid[n.z * cols + n.x];
-        if (!neighbor || neighbor.zoneId !== -1) continue;
-        if (neighbor.tierIndex !== cell.tierIndex) continue;
-        if (neighbor.biome !== cell.biome) continue;
-        neighbor.zoneId = zoneId;
-        queue.push(neighbor);
-      }
-    }
-
-    if (zone.cells.length > 0) {
-      zones.push(zone);
-    }
-  }
-
-  return zones;
-}
-
-// ============== STEP 3: CLEANUP (merge small, split large) ==============
-
-function cleanupZones(
-  zones: RawZone[],
-  resolution: number,
-  minArea: number,
-  maxSpan: number,
-): RawZone[] {
-  const cellArea = resolution * resolution;
-
-  // Merge small zones into nearest same-tier neighbor
-  const result: RawZone[] = [];
-  const small: RawZone[] = [];
-  const large: RawZone[] = [];
-
-  for (const z of zones) {
-    if (z.cells.length * cellArea < minArea) {
-      small.push(z);
-    } else {
-      large.push(z);
-    }
-  }
-
-  // Try to merge each small zone: prefer same-tier, fall back to nearest any-tier
-  for (const sz of small) {
-    const centroid = zoneCentroid(sz);
-    let bestDist = Infinity;
-    let bestZone: RawZone | null = null;
-
-    // First pass: same-tier neighbors
-    for (const lz of large) {
-      if (lz.tierIndex !== sz.tierIndex) continue;
-      const lc = zoneCentroid(lz);
-      const d2 = (centroid.x - lc.x) ** 2 + (centroid.z - lc.z) ** 2;
-      if (d2 < bestDist) {
-        bestDist = d2;
-        bestZone = lz;
-      }
-    }
-
-    // Second pass: if no same-tier found, merge into nearest zone of any tier
-    if (!bestZone) {
-      for (const lz of large) {
-        const lc = zoneCentroid(lz);
-        const d2 = (centroid.x - lc.x) ** 2 + (centroid.z - lc.z) ** 2;
-        if (d2 < bestDist) {
-          bestDist = d2;
-          bestZone = lz;
-        }
-      }
-      if (bestZone) {
-        console.warn(
-          `[AutoGen] Cross-tier merge: small zone (tier ${sz.tierIndex}, ${sz.cells.length} cells) merged into tier ${bestZone.tierIndex}`,
-        );
-      }
-    }
-
-    if (bestZone) {
-      bestZone.cells.push(...sz.cells);
-    } else if (sz.cells.length > 0) {
-      // No large zones exist at all — promote this small zone to avoid data loss
-      large.push(sz);
-    }
-  }
-
-  // Recursively split oversized zones along longest axis
-  let nextSplitId = 10000;
-  const splitZone = (z: RawZone): RawZone[] => {
-    const bounds = zoneBounds(z);
-    const spanX = bounds.maxX - bounds.minX;
-    const spanZ = bounds.maxZ - bounds.minZ;
-    const maxDim = Math.max(spanX, spanZ);
-
-    if (maxDim <= maxSpan || z.cells.length <= 4) {
-      return [z];
-    }
-
-    // Split along longest axis at midpoint
-    const splitHorizontal = spanX >= spanZ;
-    const mid = splitHorizontal
-      ? (bounds.minX + bounds.maxX) / 2
-      : (bounds.minZ + bounds.maxZ) / 2;
-
-    const a: RawZone = { ...z, id: nextSplitId++, cells: [] };
-    const b: RawZone = { ...z, id: nextSplitId++, cells: [] };
-
-    for (const c of z.cells) {
-      if (splitHorizontal ? c.worldX < mid : c.worldZ < mid) {
-        a.cells.push(c);
-      } else {
-        b.cells.push(c);
-      }
-    }
-
-    // Recurse on each half
-    const parts: RawZone[] = [];
-    if (a.cells.length > 0) parts.push(...splitZone(a));
-    if (b.cells.length > 0) parts.push(...splitZone(b));
-    return parts;
-  };
-
-  for (const z of large) {
-    result.push(...splitZone(z));
-  }
-
-  return result;
-}
-
-function zoneCentroid(zone: RawZone): { x: number; z: number } {
-  let cx = 0,
-    cz = 0;
-  for (const c of zone.cells) {
-    cx += c.worldX;
-    cz += c.worldZ;
-  }
-  return { x: cx / zone.cells.length, z: cz / zone.cells.length };
-}
-
-function zoneBounds(zone: RawZone): {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-} {
-  let minX = Infinity,
-    maxX = -Infinity,
-    minZ = Infinity,
-    maxZ = -Infinity;
-  for (const c of zone.cells) {
-    if (c.worldX < minX) minX = c.worldX;
-    if (c.worldX > maxX) maxX = c.worldX;
-    if (c.worldZ < minZ) minZ = c.worldZ;
-    if (c.worldZ > maxZ) maxZ = c.worldZ;
-  }
-  return { minX, maxX, minZ, maxZ };
-}
-
-// ============== STEP 4: NAME ZONES ==============
-
-function nameZones(
-  zones: RawZone[],
-  tiers: DifficultyTierConfig[],
-  towns: TownInfo[],
-): Map<number, string> {
-  const names = new Map<number, string>();
-  const usedNames = new Set<string>();
-
-  for (const zone of zones) {
-    const tier = tiers[zone.tierIndex];
-    if (!tier) continue;
-    const centroid = zoneCentroid(zone);
-
-    // Find nearest town for direction reference
-    let direction = "";
-    if (towns.length > 0) {
-      let nearestTown: TownInfo | null = null;
-      let nearestDist = Infinity;
-      for (const town of towns) {
-        const d2 =
-          (centroid.x - town.position.x) ** 2 +
-          (centroid.z - town.position.z) ** 2;
-        if (d2 < nearestDist) {
-          nearestDist = d2;
-          nearestTown = town;
-        }
-      }
-      if (nearestTown) {
-        const dx = centroid.x - nearestTown.position.x;
-        const dz = centroid.z - nearestTown.position.z;
-        const angle = Math.atan2(dz, dx) * (180 / Math.PI);
-        if (angle >= -22.5 && angle < 22.5) direction = "Eastern";
-        else if (angle >= 22.5 && angle < 67.5) direction = "Southeastern";
-        else if (angle >= 67.5 && angle < 112.5) direction = "Southern";
-        else if (angle >= 112.5 && angle < 157.5) direction = "Southwestern";
-        else if (angle >= 157.5 || angle < -157.5) direction = "Western";
-        else if (angle >= -157.5 && angle < -112.5) direction = "Northwestern";
-        else if (angle >= -112.5 && angle < -67.5) direction = "Northern";
-        else direction = "Northeastern";
-      }
-    }
-
-    // Capitalize biome
-    const biomeName = zone.biome.charAt(0).toUpperCase() + zone.biome.slice(1);
-    let name = `${direction} ${biomeName} (${tier.name})`.trim();
-
-    // Deduplicate
-    if (usedNames.has(name)) {
-      let suffix = 2;
-      while (usedNames.has(`${name} ${suffix}`)) suffix++;
-      name = `${name} ${suffix}`;
-    }
-    usedNames.add(name);
-    names.set(zone.id, name);
-  }
-
-  return names;
-}
-
-// ============== STEP 5: DERIVE SPAWN TABLES ==============
-
-/** Biome affinity weights for resource types */
-const BIOME_RESOURCE_WEIGHTS: Record<
-  string,
-  Partial<Record<string, number>>
-> = {
-  forest: { woodcutting: 2.0, mining: 0.5 },
-  mountains: { mining: 2.0, woodcutting: 0.3 },
-  plains: { farming: 1.5 },
-  lakes: { fishing: 2.0 },
-  swamp: { fishing: 1.5, woodcutting: 0.7 },
-  desert: { mining: 1.3 },
-  valley: { woodcutting: 1.2, farming: 1.3 },
-  tundra: { mining: 1.0 },
-};
-
-function deriveSpawnRules(
-  tier: DifficultyTierConfig,
-  biome: string,
-  manifests: ManifestData,
-): RegionSpawnRules {
-  const [minLevel, maxLevel] = tier.levelRange;
-  const [minResLevel, maxResLevel] = tier.resourceLevelRange;
-  const biomeWeights = BIOME_RESOURCE_WEIGHTS[biome] ?? {};
-
-  // Filter mobs by level range overlap: mob [mobMin..mobMax] overlaps tier [minLevel..maxLevel]
-  const mobTable: RegionSpawnRules["mobs"] =
-    tier.mobDensityMultiplier > 0
-      ? {
-          mode: "replace" as const,
-          table: manifests.npcs
-            .filter(
-              (npc: ManifestNPC) =>
-                npc.category === "mob" &&
-                npc.levelRange[0] <= maxLevel &&
-                npc.levelRange[1] >= minLevel,
-            )
-            .map((npc: ManifestNPC) => ({
-              mobId: npc.id,
-              weight: 10,
-            })),
-          densityMultiplier: tier.mobDensityMultiplier,
-        }
-      : undefined;
-
-  // Build resource table from all gathering types
-  const resourceEntries: Array<{
-    resourceId: string;
-    weight: number;
-    clusterSize?: number;
-  }> = [];
-
-  // Mining rocks
-  for (const rock of manifests.miningRocks) {
-    if (
-      rock.levelRequired >= minResLevel &&
-      rock.levelRequired <= maxResLevel
-    ) {
-      const biomeBonus = biomeWeights["mining"] ?? 1.0;
-      resourceEntries.push({
-        resourceId: rock.id,
-        weight: 10 * biomeBonus,
-        clusterSize: rock.levelRequired >= 55 ? 1 : 2,
-      });
-    }
-  }
-
-  // Trees
-  for (const tree of manifests.trees) {
-    if (
-      tree.levelRequired >= minResLevel &&
-      tree.levelRequired <= maxResLevel
-    ) {
-      const biomeBonus = biomeWeights["woodcutting"] ?? 1.0;
-      resourceEntries.push({
-        resourceId: tree.id,
-        weight: 10 * biomeBonus,
-        clusterSize: tree.levelRequired >= 60 ? 1 : 3,
-      });
-    }
-  }
-
-  // Fishing spots
-  for (const spot of manifests.fishingSpots) {
-    if (
-      spot.levelRequired >= minResLevel &&
-      spot.levelRequired <= maxResLevel
-    ) {
-      const biomeBonus = biomeWeights["fishing"] ?? 1.0;
-      resourceEntries.push({
-        resourceId: spot.id,
-        weight: 10 * biomeBonus,
-      });
-    }
-  }
-
-  const resourceTable: RegionSpawnRules["resources"] =
-    resourceEntries.length > 0
-      ? {
-          mode: "replace" as const,
-          table: resourceEntries,
-          densityMultiplier: tier.resourceDensityMultiplier,
-        }
-      : undefined;
-
-  return {
-    mobs: mobTable,
-    resources: resourceTable,
-  };
-}
-
-// ============== STEP 6: ENTITY POPULATION ==============
-
-// Density constants imported from ../utils/worldConstants
-
-function inferResourceType(
-  id: string,
-): "mining" | "woodcutting" | "fishing" | "farming" {
-  if (id.startsWith("ore_") || id.includes("rock")) return "mining";
-  if (id.startsWith("tree_") || id.includes("wood")) return "woodcutting";
-  if (id.includes("fish")) return "fishing";
-  return "farming";
-}
-
-function populateEntities(
-  zones: AutoGenZone[],
-  config: AutoGenConfig,
-  queryBiome: BiomeQuerier,
-  getBiomeDifficulty: BiomeDifficultyLookup,
-  noise: NoiseGenerator,
-  towns: TownInfo[],
-  dangerSources: DangerSourceInfo[],
-  waterThreshold: number,
-  worldRadius: number,
-  existingEntities: ExistingEntityPosition[],
-  zoneDiffConfig: ZoneDifficultyConfig,
-): { mobs: PlacedMobSpawn[]; resources: PlacedResource[] } {
-  const allMobs: PlacedMobSpawn[] = [];
-  const allResources: PlacedResource[] = [];
-  const mobGrid = new SpatialGrid(30); // for proximity checks
-
-  // Pre-populate spatial grid with existing hand-placed entities
-  // so auto-gen entities maintain distance from them
-  const existingGrid = new SpatialGrid(30);
-  for (const e of existingEntities) {
-    existingGrid.insert(e.x, e.z);
-    // Also add to mob grid so resources avoid existing entities too
-    mobGrid.insert(e.x, e.z);
-  }
-
-  for (const zone of zones) {
-    const tier = config.tiers[zone.tierIndex];
-    if (!tier) continue;
-
-    const rng = createSeededRng(config.seed + hashString(zone.id));
-    const [scalarLo, scalarHi] = tier.scalarRange;
-
-    // Contour boundary test: point must fall within this tier's difficulty range + biome
-    const inZone: PoissonBoundaryTest = (x: number, z: number) => {
-      const bq = queryBiome(x, z);
-      if (bq.height < waterThreshold) return false; // water
-      const sample = computeZoneDifficulty(
-        x,
-        z,
-        bq.biome,
-        getBiomeDifficulty(bq.biome),
-        noise,
-        towns,
-        dangerSources,
-        worldRadius,
-        zoneDiffConfig,
-      );
-      return (
-        sample.scalar >= scalarLo &&
-        sample.scalar < scalarHi &&
-        bq.biome === zone.biome
-      );
-    };
-
-    // Phase A: Mobs (avoid existing hand-placed entities)
-    if (zone.spawnRules.mobs && zone.spawnRules.mobs.table.length > 0) {
-      const density =
-        BASE_MOB_DENSITY * (zone.spawnRules.mobs.densityMultiplier ?? 1);
-      const targetCount = Math.max(1, Math.round(zone.area * density));
-      const existingBuffer = HAND_PLACED_ENTITY_BUFFER;
-
-      const mobPositions = poissonDiscSample(
-        zone.bounds,
-        config.mobSpacing,
-        targetCount,
-        rng,
-        (x, z) => {
-          if (!inZone(x, z)) return false;
-          // Keep distance from hand-placed entities
-          return existingGrid.nearestDistance(x, z) >= existingBuffer;
-        },
-      );
-
-      for (let i = 0; i < mobPositions.length; i++) {
-        const pos = mobPositions[i];
-        const entry = weightedSelect(
-          zone.spawnRules.mobs.table.map((t) => ({ ...t, weight: t.weight })),
-          rng,
-        );
-        if (!entry) continue;
-
-        allMobs.push({
-          id: `autogen-mob-${zone.id}-${i}`,
-          mobId: entry.mobId,
-          name: `${entry.mobId} spawn`,
-          position: { x: pos.x, y: 0, z: pos.z },
-          spawnRadius: 5 + rng() * 10,
-          maxCount: 1 + Math.floor(rng() * 3),
-          respawnTicks: 50 + Math.floor(rng() * 30),
-          source: "procgen",
-          sourceRegionId: zone.id,
-          properties: {},
-        });
-
-        mobGrid.insert(pos.x, pos.z);
-      }
-    }
-
-    // Phase B: Resources with mob-proximity buffer
-    if (
-      zone.spawnRules.resources &&
-      zone.spawnRules.resources.table.length > 0
-    ) {
-      const density =
-        BASE_RESOURCE_DENSITY *
-        (zone.spawnRules.resources.densityMultiplier ?? 1);
-      const targetCount = Math.max(1, Math.round(zone.area * density));
-      const buffer = tier.mobResourceBuffer;
-
-      const resourcePositions = poissonDiscSample(
-        zone.bounds,
-        config.resourceSpacing,
-        targetCount * 2, // oversample since we'll reject some
-        rng,
-        (x, z) => {
-          if (!inZone(x, z)) return false;
-          // Mob-resource proximity rejection
-          const mobDist = mobGrid.nearestDistance(x, z);
-          return mobDist >= buffer;
-        },
-      );
-
-      // Trim to target count
-      const finalPositions = resourcePositions.slice(0, targetCount);
-
-      for (let i = 0; i < finalPositions.length; i++) {
-        const pos = finalPositions[i];
-        const entry = weightedSelect(
-          zone.spawnRules.resources.table.map((t) => ({
-            ...t,
-            weight: t.weight,
-          })),
-          rng,
-        );
-        if (!entry) continue;
-
-        allResources.push({
-          id: `autogen-res-${zone.id}-${i}`,
-          resourceId: entry.resourceId,
-          resourceType: inferResourceType(entry.resourceId),
-          name: entry.resourceId,
-          position: { x: pos.x, y: 0, z: pos.z },
-          rotation: rng() * Math.PI * 2,
-          modelVariant: 0,
-          source: "procgen",
-          sourceRegionId: zone.id,
-          properties:
-            entry.clusterSize && entry.clusterSize > 1
-              ? { clusterSize: entry.clusterSize }
-              : {},
-        });
-      }
-    }
-  }
-
-  return { mobs: allMobs, resources: allResources };
-}
-
-// ============== MAIN PIPELINE ==============
-
-/** Existing entity position for collision avoidance */
-export interface ExistingEntityPosition {
-  x: number;
-  z: number;
-  /** Buffer radius — auto-gen entities avoid this distance from existing ones */
-  radius: number;
-}
+// ============== PIPELINE DEPENDENCIES ==============
 
 export interface AutoGenDeps {
   queryBiome: BiomeQuerier;
-  /** Biome difficulty lookup (0-3) from manifest data */
   getBiomeDifficulty: BiomeDifficultyLookup;
   worldSize: number;
   waterThreshold: number;
@@ -880,11 +291,11 @@ export interface AutoGenDeps {
   towns: TownInfo[];
   dangerSources: DangerSourceInfo[];
   manifests: ManifestData;
-  /** Hand-placed entities to avoid (NPCs, stations, spawn points, etc.) */
   existingEntities: ExistingEntityPosition[];
-  /** Zone difficulty tuning parameters (from world-config.json) */
   zoneDifficultyConfig?: ZoneDifficultyConfig;
 }
+
+// ============== MAIN PIPELINE ==============
 
 export function runAutoGenPipeline(
   config: AutoGenConfig,
@@ -896,7 +307,7 @@ export function runAutoGenPipeline(
   const zoneDiffConfig =
     deps.zoneDifficultyConfig ?? DEFAULT_ZONE_DIFFICULTY_CONFIG;
 
-  // Pre-scan: find the bounding box of actual land to skip ocean
+  // Step 1: Pre-scan land bounds
   const landBounds = scanLandBounds(
     deps.worldSize,
     deps.queryBiome,
@@ -924,7 +335,7 @@ export function runAutoGenPipeline(
   const cols = Math.ceil(rangeX / config.gridResolution);
   const rows = Math.ceil(rangeZ / config.gridResolution);
 
-  // Step 1: Sample grid (only within land bounds)
+  // Step 2: Sample difficulty grid
   const cells = sampleDifficultyGrid(
     config.gridResolution,
     deps.queryBiome,
@@ -939,10 +350,10 @@ export function runAutoGenPipeline(
     zoneDiffConfig,
   );
 
-  // Step 2: Flood fill
+  // Step 3: Flood fill
   const rawZones = floodFillZones(cells, cols, rows);
 
-  // Step 3: Cleanup
+  // Step 4: Cleanup (merge small, split large)
   const cleanedZones = cleanupZones(
     rawZones,
     config.gridResolution,
@@ -950,11 +361,11 @@ export function runAutoGenPipeline(
     config.maxZoneSpan,
   );
 
-  // Step 4: Name zones
+  // Step 5: Name zones
   const zoneNames = nameZones(cleanedZones, config.tiers, deps.towns);
   const cellArea = config.gridResolution * config.gridResolution;
 
-  // Build AutoGenZone objects
+  // Build AutoGenZone objects with spawn rules
   const autoGenZones: AutoGenZone[] = cleanedZones.map((raw, idx) => {
     const tier = config.tiers[raw.tierIndex];
     const bounds = zoneBounds(raw);
@@ -988,19 +399,21 @@ export function runAutoGenPipeline(
     };
   });
 
-  // Step 5+6: Populate entities
+  // Step 6: Populate entities
   const { mobs, resources } = populateEntities(
     autoGenZones,
     config,
-    deps.queryBiome,
-    deps.getBiomeDifficulty,
-    noise,
-    deps.towns,
-    deps.dangerSources,
-    deps.waterThreshold,
-    worldRadius,
+    {
+      queryBiome: deps.queryBiome,
+      getBiomeDifficulty: deps.getBiomeDifficulty,
+      noise,
+      towns: deps.towns,
+      dangerSources: deps.dangerSources,
+      waterThreshold: deps.waterThreshold,
+      worldRadius,
+      zoneDiffConfig,
+    },
     deps.existingEntities,
-    zoneDiffConfig,
   );
 
   const elapsed = performance.now() - startTime;
@@ -1044,7 +457,7 @@ export function runAutoGenPipeline(
   };
 }
 
-// ============== HOOK ==============
+// ============== REACT HOOK ==============
 
 export function useZoneAutoGen() {
   const { state, actions, viewportRef } = useWorldStudio();
@@ -1058,7 +471,6 @@ export function useZoneAutoGen() {
       const vp = viewportRef?.current;
       if (!vp?.queryBiome || !vp?.getBiomeDifficulty) return null;
 
-      // Wrap with fallback so biomes without explicit difficulty get sensible defaults
       const getBiomeDifficulty = withBiomeDifficultyFallback(
         vp.getBiomeDifficulty,
       );
@@ -1068,8 +480,6 @@ export function useZoneAutoGen() {
         world.foundation.config.terrain.tileSize;
       const seed = world.foundation.config.seed;
 
-      // Use foundation.towns (synced from runtime by SYNC_RUNTIME_TOWNS action).
-      // safeZoneRadius is stored on GeneratedTown; fallback to size-based heuristic.
       const towns: TownInfo[] = world.foundation.towns.map((t) => ({
         position: { x: t.position.x, z: t.position.z },
         safeZoneRadius: getTownSafeRadius(t),
@@ -1085,7 +495,6 @@ export function useZoneAutoGen() {
           .join(", "),
       );
 
-      // Build danger source info
       const dangerSources: DangerSourceInfo[] =
         state.extendedLayers.dangerSources.map((ds) => ({
           position: { x: ds.position.x, z: ds.position.z },
@@ -1099,7 +508,6 @@ export function useZoneAutoGen() {
       // Collect all hand-placed entities to avoid overlapping them
       const existingEntities: ExistingEntityPosition[] = [];
       const entityBuffer = HAND_PLACED_ENTITY_BUFFER;
-      // NPCs
       for (const npc of world.layers.npcs) {
         existingEntities.push({
           x: npc.position.x,
@@ -1107,7 +515,6 @@ export function useZoneAutoGen() {
           radius: entityBuffer,
         });
       }
-      // Stations
       for (const s of state.extendedLayers.stations) {
         existingEntities.push({
           x: s.position.x,
@@ -1115,7 +522,6 @@ export function useZoneAutoGen() {
           radius: entityBuffer,
         });
       }
-      // Spawn points
       for (const sp of state.extendedLayers.spawnPoints) {
         existingEntities.push({
           x: sp.position.x,
@@ -1123,7 +529,6 @@ export function useZoneAutoGen() {
           radius: entityBuffer,
         });
       }
-      // Teleports
       for (const tp of state.extendedLayers.teleports) {
         existingEntities.push({
           x: tp.position.x,
@@ -1131,7 +536,6 @@ export function useZoneAutoGen() {
           radius: entityBuffer,
         });
       }
-      // POIs
       for (const poi of state.extendedLayers.pois) {
         existingEntities.push({
           x: poi.position.x,
