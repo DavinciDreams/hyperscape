@@ -193,6 +193,7 @@ export function createDefaultConfig(): TownGeneratorConfig {
     waterThreshold: DEFAULT_WATER_THRESHOLD,
     optimalWaterDistanceMin: DEFAULT_OPTIMAL_WATER_DISTANCE_MIN,
     optimalWaterDistanceMax: DEFAULT_OPTIMAL_WATER_DISTANCE_MAX,
+    placementGridSize: PLACEMENT_GRID_SIZE,
     townSizes: { ...DEFAULT_TOWN_SIZES },
     biomeSuitability: { ...DEFAULT_BIOME_SUITABILITY },
     buildingTypes: { ...DEFAULT_BUILDING_CONFIGS },

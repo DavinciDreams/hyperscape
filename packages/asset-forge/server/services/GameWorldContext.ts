@@ -489,12 +489,21 @@ export interface GameWorldContext {
   ) => Record<string, number>;
 }
 
-let cachedContext: GameWorldContext | null = null;
+const cachedContexts = new Map<number, GameWorldContext>();
 
-export function getGameWorldContext(): GameWorldContext {
-  if (cachedContext) return cachedContext;
+/**
+ * Get (or create) a GameWorldContext for the given seed.
+ * Defaults to GAME_SEED (0) for the live game world.
+ * The editor may pass a different seed for custom worlds — each seed
+ * produces a unique biome map and terrain, so tree generation must match.
+ */
+export function getGameWorldContext(
+  seed: number = GAME_SEED,
+): GameWorldContext {
+  const existing = cachedContexts.get(seed);
+  if (existing) return existing;
 
-  const noise = new NoiseGenerator(GAME_SEED);
+  const noise = new NoiseGenerator(seed);
   const biomeTypes = ["tundra", "forest", "canyon"];
   const explicitCenters = BiomeSystem.computePolygonCenters(
     biomeTypes,
@@ -515,7 +524,7 @@ export function getGameWorldContext(): GameWorldContext {
 
   const worldSizeMeters = GAME_TILE_SIZE * GAME_WORLD_SIZE;
   const biomeSystem = new BiomeSystem(
-    GAME_SEED,
+    seed,
     worldSizeMeters,
     biomeConfig,
     GAME_BIOME_DEFINITIONS,
@@ -578,7 +587,7 @@ export function getGameWorldContext(): GameWorldContext {
     return computeBaseHeight(worldX, worldZ, noiseAdapter, biomeWeights);
   }
 
-  cachedContext = {
+  const context: GameWorldContext = {
     noise,
     biomeSystem,
     biomeCenters,
@@ -588,5 +597,6 @@ export function getGameWorldContext(): GameWorldContext {
     computeBiomeWeights,
   };
 
-  return cachedContext;
+  cachedContexts.set(seed, context);
+  return context;
 }

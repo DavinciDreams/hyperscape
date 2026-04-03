@@ -42,6 +42,15 @@ const VERTS_PER_TILE = (TILE_SEGMENTS + 1) * (TILE_SEGMENTS + 1); // 25
 const TRIS_PER_TILE = TILE_SEGMENTS * TILE_SEGMENTS * 2; // 32
 const INDICES_PER_TILE = TRIS_PER_TILE * 3; // 96
 
+/** Safely dispose a material — WebGPU NodeManager may crash if the material was never rendered */
+function safeDispose(resource: { dispose(): void }): void {
+  try {
+    resource.dispose();
+  } catch {
+    // WebGPU NodeManager.delete throws when usedTimes is undefined on unrendered materials
+  }
+}
+
 const REGION_COLORS = [
   0xff8800, 0x00ccff, 0x88ff00, 0xff44aa, 0xaa44ff, 0xffcc00, 0x00ff88,
   0xff4444, 0x4488ff, 0x44ffcc,
@@ -238,10 +247,10 @@ interface RegionOverlayEntry {
 }
 
 function disposeOverlayEntry(entry: RegionOverlayEntry): void {
-  entry.geometry.dispose();
-  entry.material.dispose();
-  entry.label.material.map?.dispose();
-  entry.label.material.dispose();
+  safeDispose(entry.geometry);
+  safeDispose(entry.material);
+  if (entry.label.material.map) safeDispose(entry.label.material.map);
+  safeDispose(entry.label.material);
 }
 
 function buildRegionMesh(
@@ -515,6 +524,7 @@ export function useZonePainting({ sceneRefs }: ZonePaintingOptions) {
   const regions = state.extendedLayers.regions;
   const selection = state.builder.editing.selection;
   const selectedRegionId = selection?.type === "region" ? selection.id : null;
+  const zoneOverlayVisible = state.overlays.zoneOverlay;
 
   const ts = ZONE_TILE_SIZE;
 
@@ -528,6 +538,8 @@ export function useZonePainting({ sceneRefs }: ZonePaintingOptions) {
   const regionsRef = useRef(regions);
   regionsRef.current = regions;
   const isMouseDownRef = useRef(false);
+  const zoneOverlayVisibleRef = useRef(zoneOverlayVisible);
+  zoneOverlayVisibleRef.current = zoneOverlayVisible;
 
   // Overlay state (imperative, not React-driven during painting)
   const overlayGroupRef = useRef<THREE.Group | null>(null);
@@ -598,9 +610,17 @@ export function useZonePainting({ sceneRefs }: ZonePaintingOptions) {
       overlayEntriesRef.current.set(region.id, entry);
     }
 
+    group.visible = zoneOverlayVisibleRef.current;
     refs.scene.add(group);
     overlayGroupRef.current = group;
   }, [selection, ts]);
+
+  // Toggle overlay visibility without rebuilding geometry
+  useEffect(() => {
+    if (overlayGroupRef.current) {
+      overlayGroupRef.current.visible = zoneOverlayVisible;
+    }
+  }, [zoneOverlayVisible]);
 
   // Rebuild overlay on structural changes only
   const regionStructureKey = regions.map((r) => r.id).join(",");
@@ -715,11 +735,11 @@ export function useZonePainting({ sceneRefs }: ZonePaintingOptions) {
 
     return () => {
       sceneRefs.scene.remove(cursorMesh);
-      cursorGeo.dispose();
-      cursorMat.dispose();
+      safeDispose(cursorGeo);
+      safeDispose(cursorMat);
       sceneRefs.scene.remove(outline);
-      outlineGeo.dispose();
-      outlineMat.dispose();
+      safeDispose(outlineGeo);
+      safeDispose(outlineMat);
       cursorMeshRef.current = null;
       cursorGeoRef.current = null;
       cursorOutlineRef.current = null;

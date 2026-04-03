@@ -17,6 +17,7 @@ import {
   Shield,
   Flame,
   Route,
+  Map,
   Sun,
   Moon,
   Cloud,
@@ -68,6 +69,12 @@ const OVERLAY_TOGGLES: OverlayToggle[] = [
     label: "Road Network",
     color: "text-stone-400",
   },
+  {
+    key: "zoneOverlay",
+    icon: Map,
+    label: "Zone Colors",
+    color: "text-cyan-400",
+  },
 ];
 
 const WEATHER_OPTIONS: Array<{
@@ -113,7 +120,7 @@ export function ViewportOverlayBar() {
   return (
     <div className="absolute top-12 right-2 z-10 flex flex-col gap-1">
       {/* Overlay toggles */}
-      <div className="bg-bg-primary/90 border border-border-primary rounded-lg p-1 flex flex-col gap-0.5">
+      <div className="bg-bg-primary border border-border-primary rounded-lg p-1 flex flex-col gap-0.5 shadow-lg">
         {OVERLAY_TOGGLES.map(({ key, icon: Icon, label, color }) => {
           const active = overlays[key] === true;
           return (
@@ -135,7 +142,7 @@ export function ViewportOverlayBar() {
       </div>
 
       {/* Day/Night slider */}
-      <div className="bg-bg-primary/90 border border-border-primary rounded-lg p-2">
+      <div className="bg-bg-primary border border-border-primary rounded-lg p-2 shadow-lg">
         <div className="flex items-center justify-between mb-1">
           <span className="text-[10px] text-text-tertiary flex items-center gap-1">
             {overlays.timeOfDay != null ? (
@@ -180,7 +187,7 @@ export function ViewportOverlayBar() {
       </div>
 
       {/* Weather toggle */}
-      <div className="bg-bg-primary/90 border border-border-primary rounded-lg p-1 flex gap-0.5">
+      <div className="bg-bg-primary border border-border-primary rounded-lg p-1 flex gap-0.5 shadow-lg">
         {WEATHER_OPTIONS.map(({ value, icon: Icon, label }) => {
           const active = overlays.weatherPreview === value;
           return (

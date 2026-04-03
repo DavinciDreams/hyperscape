@@ -34,7 +34,6 @@ import {
   createDefaultConfig,
   NAME_PREFIXES,
   NAME_SUFFIXES,
-  PLACEMENT_GRID_SIZE,
   WATER_CHECK_DIRECTIONS,
   WATER_CHECK_MAX_DISTANCE,
   WATER_CHECK_STEP,
@@ -368,9 +367,9 @@ export class TownGenerator {
   }
 
   private generateTownCandidates(): TownCandidate[] {
-    const { worldSize, biomeSuitability } = this.config;
+    const { worldSize, biomeSuitability, placementGridSize } = this.config;
     const halfWorld = worldSize / 2;
-    const gridSize = PLACEMENT_GRID_SIZE;
+    const gridSize = placementGridSize;
     const cellSize = worldSize / gridSize;
     const candidates: TownCandidate[] = [];
 

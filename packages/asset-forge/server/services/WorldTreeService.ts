@@ -92,13 +92,17 @@ function resolveTreeConfig(
 
 export function generateWorldTrees(
   overrides?: VegetationOverrides,
+  seed: number = GAME_SEED,
 ): WorldTreeResponse {
-  // Cache key includes overrides so changing config regenerates
-  const overridesKey = overrides ? JSON.stringify(overrides) : "";
-  if (cachedResult && cachedOverridesKey === overridesKey) return cachedResult;
+  // Cache key includes overrides AND seed so changing either regenerates
+  const cacheKey = `${seed}:${overrides ? JSON.stringify(overrides) : ""}`;
+  if (cachedResult && cachedOverridesKey === cacheKey) return cachedResult;
 
+  console.log(
+    `[WorldTreeService] Generating trees with seed=${seed} (GAME_SEED=${GAME_SEED})`,
+  );
   const startTime = performance.now();
-  const ctx = getGameWorldContext();
+  const ctx = getGameWorldContext(seed);
 
   // Generate trees for all tiles using centered tile coordinates (game's system)
   const halfTiles = Math.floor(GAME_WORLD_SIZE / 2);
@@ -127,7 +131,7 @@ export function generateWorldTrees(
         resolveTreeConfig: overrides
           ? (biomeId: string) => resolveTreeConfig(biomeId, overrides)
           : undefined,
-        createRng: (salt) => createTileRng(GAME_SEED, tileX, tileZ, salt),
+        createRng: (salt) => createTileRng(seed, tileX, tileZ, salt),
       };
 
       const trees = generateTrees(resourceCtx, treeConfig);
@@ -156,10 +160,10 @@ export function generateWorldTrees(
     trees: allTrees,
     tileSize: GAME_TILE_SIZE,
     worldSize: GAME_WORLD_SIZE,
-    seed: GAME_SEED,
+    seed,
     generationTimeMs: Math.round(elapsed),
   };
-  cachedOverridesKey = overridesKey;
+  cachedOverridesKey = cacheKey;
 
   return cachedResult;
 }

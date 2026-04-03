@@ -48,6 +48,7 @@ import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
 import { useContextMenu } from "../layout/useContextMenu";
 import { executeDuplicate, executeDelete } from "../utils/entityActions";
 import { ViewModeDropdown } from "./ViewModeDropdown";
+import { ViewportOverlayBar } from "../toolbar/ViewportOverlayBar";
 import { ViewportOverlay } from "./ViewportOverlay";
 import { GenerateTownDialog } from "../panels/GenerateTownDialog";
 
@@ -125,11 +126,19 @@ export function ViewportContainer() {
       viewportRef.current.navigateCamera = refs.navigateCamera;
       viewportRef.current.queryBiome = refs.queryBiome;
       viewportRef.current.getBiomeDifficulty = refs.getBiomeDifficulty;
+      viewportRef.current.worldCenterOffset = refs.worldCenterOffset;
       // Use a getter so runtimeTowns is always current (towns load after scene ready)
       Object.defineProperty(viewportRef.current, "runtimeTowns", {
         get: () => refs.runtimeTowns,
         configurable: true,
       });
+      // Use a getter so vegetationPositions is always current (populated after refreshVegetation)
+      Object.defineProperty(viewportRef.current, "vegetationPositions", {
+        get: () => refs.vegetationPositions,
+        configurable: true,
+      });
+      viewportRef.current.refreshTownMarkers = refs.refreshTownMarkers;
+      viewportRef.current.setVegetationVisible = refs.setVegetationVisible;
       setSceneReady(true);
     },
     [viewportRef],
@@ -1236,6 +1245,7 @@ export function ViewportContainer() {
         onMoveSpeedChange={setCameraMoveSpeed}
         showDifficultyHeatmap={showDifficultyHeatmap}
         dangerSources={heatmapDangerSources}
+        roads={state.builder.editing.world?.foundation.roads}
         onTownsGenerated={handleTownsGenerated}
       />
       {/* Viewport info overlay (UE5-style corner HUD) */}
@@ -1289,6 +1299,9 @@ export function ViewportContainer() {
           />
         </div>
       )}
+
+      {/* Viewport overlay toggles (right side, below view mode dropdown) */}
+      {isEditing && <ViewportOverlayBar />}
 
       {/* Viewport context menu */}
       {contextMenu.visible && (

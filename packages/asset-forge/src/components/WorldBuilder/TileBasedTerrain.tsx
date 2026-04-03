@@ -13,6 +13,7 @@
 
 import { BuildingGenerator } from "@hyperscape/procgen/building";
 import { TownGenerator } from "@hyperscape/procgen/building/town";
+import type { GeneratedTown as ProcgenTown } from "@hyperscape/procgen/building/town";
 import {
   TerrainGenerator,
   createConfigFromPreset,
@@ -42,7 +43,12 @@ import {
   createGameTerrainQuerier,
   GAME_MAX_HEIGHT,
   GAME_WATER_THRESHOLD,
+  GAME_TILE_SIZE,
+  GAME_WORLD_SIZE,
 } from "./GameTerrainAdapter";
+import { generateTrees } from "@hyperscape/shared/world/BiomeResourceGenerator";
+import type { ResourceGenerationContext } from "@hyperscape/shared/world/BiomeResourceGenerator";
+import { getTreeConfigForBiome } from "@hyperscape/shared/world/TerrainBiomeTypes";
 import {
   initTreeModels,
   getTreeSpeciesInstance,
@@ -218,6 +224,161 @@ export interface ViewportSelection {
 /** View mode for the viewport */
 export type ViewMode = "lit" | "wireframe" | "biomeColors";
 
+/**
+ * Exclusion zones for vegetation filtering. Inspired by Far Cry 5's SDF-based
+ * density field and Horizon Zero Dawn's distance-to-civilization maps.
+ *
+ * Instead of binary keep/remove, the system computes a continuous survival
+ * probability per tree using signed distance fields + FBM noise distortion +
+ * town proximity gradients + scale tapering at forest edges.
+ *
+ * All positions are in game-space (centered coordinates).
+ */
+export interface VegetationExclusions {
+  /** Hard keep-out zones — buildings, resources, spawn points.
+   *  Trees inside the footprint are always removed; trees near the edge are
+   *  probabilistically thinned with noise-distorted boundaries. */
+  circles: Array<{ x: number; z: number; radius: number }>;
+  /** Road/path exclusions — hard cutoff on road surface, gradual density
+   *  ramp at the road shoulders. */
+  roads: Array<{ path: Array<{ x: number; z: number }>; halfWidth: number }>;
+  /** Town centers — creates a broad density gradient (RuneScape-style: sparse
+   *  near town center, gradually reaching full density in the wilderness).
+   *  This replaces giant circular cutouts with natural thinning. */
+  towns?: Array<{ x: number; z: number; safeZoneRadius: number }>;
+}
+
+// ---------------------------------------------------------------------------
+// Vegetation density field — simplified two-layer approach
+// ---------------------------------------------------------------------------
+// Layer 1: Hard exclusions (buildings, roads) — binary remove, no noise.
+// Layer 2: Town proximity gradient — smooth density ramp with FBM noise on
+//          the boundary for organic town edges. This is the ONLY probabilistic
+//          layer. Noise is NOT applied to individual buildings (that caused
+//          random tree clusters inside towns from noise-created survival pockets).
+// ---------------------------------------------------------------------------
+
+/** Spatial hash for value noise (shader-style, deterministic) */
+function _vegHash(x: number, z: number): number {
+  const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+/** Bicubic-interpolated value noise [0..1] */
+function _vegSmoothNoise(x: number, z: number): number {
+  const ix = Math.floor(x),
+    iz = Math.floor(z);
+  const fx = x - ix,
+    fz = z - iz;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sz = fz * fz * (3 - 2 * fz);
+  return (
+    _vegHash(ix, iz) * (1 - sx) * (1 - sz) +
+    _vegHash(ix + 1, iz) * sx * (1 - sz) +
+    _vegHash(ix, iz + 1) * (1 - sx) * sz +
+    _vegHash(ix + 1, iz + 1) * sx * sz
+  );
+}
+
+/** 3-octave FBM [0..1] for organic town boundary distortion */
+function _vegFbm(x: number, z: number): number {
+  return (
+    _vegSmoothNoise(x, z) * 0.5714 +
+    _vegSmoothNoise(x * 2, z * 2) * 0.2857 +
+    _vegSmoothNoise(x * 4, z * 4) * 0.1429
+  );
+}
+
+/** Deterministic per-position random [0..1] for survival roll */
+function _vegRand(x: number, z: number): number {
+  const n = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+/** Hermite smoothstep (clamped) */
+function _vegSmoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+// Town gradient constants — tuned for RuneScape-style settlement→wilderness
+const _VEG_NOISE_FREQ = 0.07; // Noise frequency (features ~14m, subtle wobble)
+const _VEG_NOISE_AMP = 6; // ±6m town boundary wobble (subtle, not chaotic)
+const _VEG_TOWN_INNER_FRAC = 0.3; // Fraction of safeZone ≈ zero density
+const _VEG_TOWN_OUTER_FRAC = 1.5; // Fraction of safeZone ≈ full density
+const _VEG_MIN_EDGE_SCALE = 0.35; // Smallest trees at town fringe
+
+/**
+ * Determine the visually dominant biome from terrain shader blend weights.
+ * Uses simple max-weight for general reporting (queryBiome on viewport ref).
+ */
+function _getVisualBiome(q: TerrainQueryResult): string {
+  const fW = q.biomeForestWeight ?? 0;
+  const cW = q.biomeCanyonWeight ?? 0;
+  const tW = Math.max(0, 1 - fW - cW);
+  if (fW >= cW && fW >= tW) return "forest";
+  if (cW >= fW && cW >= tW) return "canyon";
+  return "tundra";
+}
+
+/**
+ * Biome selection specifically for tree species placement.
+ *
+ * The terrain shader linearly blends biome colors:
+ *   finalColor = tundra*tW + forest*fW + canyon*cW
+ *
+ * At boundaries (e.g., forest=0.4, tundra=0.35, canyon=0.25), the max-weight
+ * biome is "forest" but the blended visual color is grey-muddy — NOT clearly
+ * forest-green. Placing forest-exclusive species (Maple, Knotwood) on this
+ * grey ground looks wrong.
+ *
+ * Fix: require a biome to have >55% weight (clear visual dominance) before
+ * using its full species set. Below that threshold the blended color is
+ * ambiguous, so we fall back to "tundra" whose conifers (WindPine, Fir, Pine,
+ * Birch) look natural on any ground color and create a pleasing transition.
+ */
+const _BIOME_DOMINANCE_THRESHOLD = 0.55;
+
+function _getVisualBiomeForTrees(q: TerrainQueryResult): string {
+  const fW = q.biomeForestWeight ?? 0;
+  const cW = q.biomeCanyonWeight ?? 0;
+  const tW = Math.max(0, 1 - fW - cW);
+
+  if (fW > _BIOME_DOMINANCE_THRESHOLD) return "forest";
+  if (cW > _BIOME_DOMINANCE_THRESHOLD) return "canyon";
+  if (tW > _BIOME_DOMINANCE_THRESHOLD) return "tundra";
+
+  // No clear winner — tundra conifers are visually neutral on blended ground
+  return "tundra";
+}
+
+/**
+ * Deterministic LCG RNG for tile-based tree generation (client-side).
+ * Matches the server's createTileRng exactly so same seed → same trees.
+ */
+function _createTileRng(
+  baseSeed: number,
+  tileX: number,
+  tileZ: number,
+  salt: string,
+): () => number {
+  const seed = baseSeed >>> 0;
+  let saltHash = 5381 >>> 0;
+  for (let i = 0; i < salt.length; i++) {
+    saltHash = (((saltHash << 5) + saltHash) ^ salt.charCodeAt(i)) >>> 0;
+  }
+  let state =
+    (seed ^
+      ((tileX * 73856093) >>> 0) ^
+      ((tileZ * 19349663) >>> 0) ^
+      saltHash) >>>
+    0;
+  return () => {
+    state = (1664525 * state + 1013904223) >>> 0;
+    return state / 0xffffffff;
+  };
+}
+
 /** Refs exposed to parent for editing tool integration */
 export interface TerrainSceneRefs {
   scene: THREE.Scene;
@@ -264,8 +425,12 @@ export interface TerrainSceneRefs {
    * Re-fetch tree positions from the server and rebuild all vegetation
    * InstancedMeshes without tearing down the rest of the scene.
    * Pass a VegetationConfig to override biome defaults, or omit for defaults.
+   * Pass exclusions to filter out trees near wizard-placed content.
    */
-  refreshVegetation: (vegConfig?: VegetationConfig) => Promise<void>;
+  refreshVegetation: (
+    vegConfig?: VegetationConfig,
+    exclusions?: VegetationExclusions,
+  ) => Promise<void>;
   /** Teleport camera to a world position. Pass close=true for entity-level zoom. */
   navigateCamera: (x: number, z: number, close?: boolean) => void;
   /** True if RMB fly mode was used in the current mouse interaction (for context menu suppression) */
@@ -289,6 +454,12 @@ export interface TerrainSceneRefs {
     size: string;
     safeZoneRadius: number;
   }>;
+  /** Vegetation tree positions in game-space, populated by refreshVegetation(). */
+  vegetationPositions: Array<{ x: number; z: number }>;
+  /** Rebuild town 3D meshes (buildings, roads, landmarks) from full procgen data. */
+  refreshTownMarkers: (towns: ProcgenTown[]) => void;
+  /** Show or hide the decorative instanced vegetation layer. */
+  setVegetationVisible: (visible: boolean) => void;
 }
 
 export interface TileBasedTerrainProps {
@@ -1063,6 +1234,20 @@ function createWaterMaterial(): THREE.Material {
  * Generate tile geometry with proper heightmap, colors, and road influence.
  * Uses the same approach as the game's TerrainSystem for unified rendering.
  */
+/** Town flatten data passed into tile generation */
+interface TownFlattenZone {
+  /** Game-space X */
+  x: number;
+  /** Game-space Z */
+  z: number;
+  /** Terrain height at town center */
+  centerHeight: number;
+  /** Radius of fully-flat inner zone (buildings sit here) */
+  innerRadius: number;
+  /** Radius of outer blend zone (smooth ramp back to natural terrain) */
+  outerRadius: number;
+}
+
 function generateTileGeometry(
   tileX: number,
   tileZ: number,
@@ -1073,6 +1258,7 @@ function generateTileGeometry(
   maxHeight: number,
   worldSizeTiles: number,
   roads?: GeneratedRoad[],
+  townFlattenZones?: TownFlattenZone[],
 ): { geometry: THREE.PlaneGeometry; hasWater: boolean } {
   const geometry = templateGeometry.clone();
   const positions = geometry.attributes.position;
@@ -1118,7 +1304,29 @@ function generateTileGeometry(
 
     // Query terrain
     const query = queryTerrain(worldX, worldZ);
-    const height = query.height;
+    let height = query.height;
+
+    // Flatten terrain under towns: full-flat inside innerRadius,
+    // smooth hermite blend back to natural terrain at outerRadius
+    if (townFlattenZones && townFlattenZones.length > 0) {
+      for (const tz of townFlattenZones) {
+        const dx = worldX - tz.x;
+        const dz = worldZ - tz.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist >= tz.outerRadius) continue;
+        if (dist <= tz.innerRadius) {
+          // Fully flat at town center height
+          height = tz.centerHeight;
+        } else {
+          // Smooth blend: 0 at innerRadius (full flatten) → 1 at outerRadius (natural)
+          const t = (dist - tz.innerRadius) / (tz.outerRadius - tz.innerRadius);
+          // Hermite smoothstep for natural-looking ramp
+          const blend = t * t * (3 - 2 * t);
+          height = tz.centerHeight + (height - tz.centerHeight) * blend;
+        }
+        break; // Only one town per vertex (first match)
+      }
+    }
 
     // Set vertex height
     positions.setY(i, height);
@@ -1274,11 +1482,20 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const entitySyncRef = useRef<THREE.Group | null>(null);
   const entityOverlayRef = useRef<THREE.Group | null>(null);
   const wildernessOverlayRef = useRef<THREE.Mesh | null>(null);
+  /** Vegetation tree positions in game-space, populated by refreshVegetation(). */
+  const vegetationPositionsRef = useRef<Array<{ x: number; z: number }>>([]);
   /** Cached world center offset for vegetation refresh (set in main effect) */
   const worldCenterOffsetRef = useRef<number>(0);
   const generatorRef = useRef<TerrainGenerator | null>(null);
   const terrainQuerierRef = useRef<TerrainQuerier | null>(null);
   const heatmapManagerRef = useRef<DifficultyHeatmapManager | null>(null);
+  /** Ref-stable copies of props that should NOT trigger full scene rebuild */
+  const providedRoadsRef = useRef(providedRoads);
+  providedRoadsRef.current = providedRoads;
+  const townConfigRef = useRef(config.towns);
+  townConfigRef.current = config.towns;
+  const configSeedRef = useRef(config.seed);
+  configSeedRef.current = config.seed;
 
   // Tile generation queue + O(1) membership set
   const tileQueueRef = useRef<
@@ -1442,7 +1659,43 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const isLowRes = lowResTemplate && useRes <= TILE_LOD_LOW_RESOLUTION;
       const template = isLowRes ? lowResTemplate : fullTemplate;
 
-      // Generate tile geometry with road influence support
+      // Build town flatten zones from runtime towns (game-space coords)
+      // innerRadius = 85% of safeZoneRadius — covers all buildings (building placement
+      //   radius is ~70% of safeZoneRadius, so 85% leaves margin)
+      // outerRadius = 140% of safeZoneRadius — wide blend zone for smooth ramp to
+      //   natural terrain, prevents visible cliffs and terrain gaps
+      const towns = runtimeTownsRef.current;
+      const wcOffset = (worldSize * tileSize) / 2;
+      let flattenZones: TownFlattenZone[] | undefined;
+      if (towns.length > 0) {
+        // Quick AABB reject: only include towns whose outer radius could overlap this tile
+        const tileMinX = tileX * tileSize - wcOffset;
+        const tileMaxX = tileMinX + tileSize;
+        const tileMinZ = tileZ * tileSize - wcOffset;
+        const tileMaxZ = tileMinZ + tileSize;
+        flattenZones = [];
+        for (const t of towns) {
+          const r = t.safeZoneRadius;
+          const outerR = r * 1.4;
+          if (
+            t.position.x + outerR < tileMinX ||
+            t.position.x - outerR > tileMaxX ||
+            t.position.z + outerR < tileMinZ ||
+            t.position.z - outerR > tileMaxZ
+          )
+            continue;
+          flattenZones.push({
+            x: t.position.x,
+            z: t.position.z,
+            centerHeight: querier(t.position.x, t.position.z).height,
+            innerRadius: r * 0.85,
+            outerRadius: outerR,
+          });
+        }
+        if (flattenZones.length === 0) flattenZones = undefined;
+      }
+
+      // Generate tile geometry with road influence + town flattening
       const { geometry, hasWater } = generateTileGeometry(
         tileX,
         tileZ,
@@ -1452,7 +1705,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         waterThreshold,
         maxHeight,
         worldSize,
-        providedRoads, // Pass roads for road influence calculation
+        providedRoadsRef.current,
+        flattenZones,
       );
 
       // Create terrain mesh
@@ -1514,7 +1768,6 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       waterThreshold,
       maxHeight,
       worldSize,
-      providedRoads,
     ],
   );
 
@@ -2646,8 +2899,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         };
         if (!mounted) return;
 
-        console.log(
-          `[TileBasedTerrain] Received ${layout.towns.length} towns, ${layout.roads.length} roads from server (generated in ${layout.generationTimeMs}ms)`,
+        console.warn(
+          `%c[initLayout] Received ${layout.towns.length} towns, ${layout.roads.length} roads from server (${layout.generationTimeMs}ms). This will render initial towns.`,
+          "color: orange; font-weight: bold",
         );
         setTownCount(layout.towns.length);
 
@@ -2692,7 +2946,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         for (const town of layout.towns) {
           const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
           const markerX = town.position.x + worldCenterOffset;
-          const markerY = town.position.y;
+          // Use queried terrain height at town center — matches the centerHeight
+          // used by generateTileGeometry for flattening
+          const markerY = getHeight(town.position.x, town.position.z);
           const markerZ = town.position.z + worldCenterOffset;
 
           const townUserData = {
@@ -2742,15 +2998,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           townMarkers.add(pillar);
           selectableObjectsRef.current.push(pillar);
 
-          // Internal roads
+          // Internal roads — use flattened centerHeight for Y
           if (town.internalRoads && town.internalRoads.length > 0) {
             for (const road of town.internalRoads) {
               const startX = road.start.x + worldCenterOffset;
               const startZ = road.start.z + worldCenterOffset;
               const endX = road.end.x + worldCenterOffset;
               const endZ = road.end.z + worldCenterOffset;
-              const startY = getHeight(road.start.x, road.start.z) + 1;
-              const endY = getHeight(road.end.x, road.end.z) + 1;
+              const startY = markerY + 1;
+              const endY = markerY + 1;
 
               const roadGeometry = new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(startX, startY, startZ),
@@ -2763,11 +3019,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             }
           }
 
-          // Buildings with LOD
+          // Buildings with LOD — use flattened centerHeight for Y
           for (const building of town.buildings) {
             const bx = building.position.x + worldCenterOffset;
             const bz = building.position.z + worldCenterOffset;
-            const by = building.position.y;
+            const by = markerY;
             const buildingWidth = building.size?.width || 10;
             const buildingDepth = building.size?.depth || 10;
             const buildingHeight = 8;
@@ -2873,12 +3129,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             selectableObjectsRef.current.push(buildingLOD);
           }
 
-          // Landmarks
+          // Landmarks — use flattened centerHeight for Y
           if (town.landmarks && town.landmarks.length > 0) {
             for (const landmark of town.landmarks) {
               const lx = landmark.position.x + worldCenterOffset;
               const lz = landmark.position.z + worldCenterOffset;
-              const ly = landmark.position.y;
+              const ly = markerY;
 
               let color2 = 0x888888;
               let height = landmark.size.height;
@@ -3014,26 +3270,27 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       // Scale town spacing based on world size (smaller worlds need closer towns)
       // Minimum spacing should allow at least 3-5 towns to fit
+      const townCfg = townConfigRef.current;
       const scaledMinSpacing = Math.min(
-        config.towns.minTownSpacing,
+        townCfg.minTownSpacing,
         worldSizeMeters / 5, // Ensure at least ~5 potential town spots
       );
 
       const townGenerator = TownGenerator.fromTerrainGenerator(generator, {
         seed: config.seed,
         config: {
-          townCount: config.towns.townCount,
+          townCount: townCfg.townCount,
           worldSize: worldSizeMeters,
           minTownSpacing: scaledMinSpacing,
           waterThreshold: waterThreshold,
           landmarks: {
-            fencesEnabled: config.towns.landmarks.fencesEnabled,
-            fenceDensity: config.towns.landmarks.fenceDensity,
-            fencePostHeight: config.towns.landmarks.fencePostHeight,
-            lamppostsInVillages: config.towns.landmarks.lamppostsInVillages,
-            lamppostSpacing: config.towns.landmarks.lamppostSpacing,
-            marketStallsEnabled: config.towns.landmarks.marketStallsEnabled,
-            decorationsEnabled: config.towns.landmarks.decorationsEnabled,
+            fencesEnabled: townCfg.landmarks.fencesEnabled,
+            fenceDensity: townCfg.landmarks.fenceDensity,
+            fencePostHeight: townCfg.landmarks.fencePostHeight,
+            lamppostsInVillages: townCfg.landmarks.lamppostsInVillages,
+            lamppostSpacing: townCfg.landmarks.lamppostSpacing,
+            marketStallsEnabled: townCfg.landmarks.marketStallsEnabled,
+            decorationsEnabled: townCfg.landmarks.decorationsEnabled,
           },
         },
       });
@@ -3356,40 +3613,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
 
       // Generate roads using actual road network data
-      if (providedRoads && providedRoads.length > 0) {
-        // DEBUG: Log road coordinate transformation details
-        console.log("[TileBasedTerrain] ===== ROAD COORDINATE DEBUG =====");
-        console.log(
-          `[TileBasedTerrain] worldCenterOffset: ${worldCenterOffset}`,
-        );
-        console.log(`[TileBasedTerrain] worldSize: ${worldSize}`);
-
-        // Log first road's first few points in both coordinate systems
-        const firstRoad = providedRoads[0];
-        if (firstRoad && firstRoad.path.length > 0) {
-          console.log(
-            `[TileBasedTerrain] First road (${firstRoad.id}) sample points:`,
-          );
-          const sampleCount = Math.min(3, firstRoad.path.length);
-          for (let i = 0; i < sampleCount; i++) {
-            const p = firstRoad.path[i];
-            const renderX = p.x + worldCenterOffset;
-            const renderZ = p.z + worldCenterOffset;
-            const terrainY = generator.getHeightAt(p.x, p.z);
-            console.log(
-              `  Point ${i}: terrain-gen coords (${p.x.toFixed(1)}, ${p.z.toFixed(1)}) -> render coords (${renderX.toFixed(1)}, ${renderZ.toFixed(1)}), height: ${terrainY.toFixed(1)}`,
-            );
-          }
-        }
-        console.log("[TileBasedTerrain] ================================");
-
+      const roadsToRender = providedRoadsRef.current;
+      if (roadsToRender && roadsToRender.length > 0) {
         // Use pre-generated road network with actual pathfinding data
         // Flat ribbon geometry matching the game's dirt-path look
         const ribbonMat = new MeshBasicNodeMaterial();
         ribbonMat.vertexColors = true;
         ribbonMat.side = THREE.DoubleSide;
 
-        for (const road of providedRoads) {
+        for (const road of roadsToRender) {
           if (road.path.length < 2) continue;
 
           // Convert road path points to THREE.Vector3 with terrain sampling
@@ -3429,14 +3661,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         }
 
         console.log(
-          `[TileBasedTerrain] Created ${providedRoads.length} roads from road network data`,
+          `[TileBasedTerrain] Created ${roadsToRender.length} roads from road network data`,
         );
-        setRoadCount(providedRoads.length);
+        setRoadCount(roadsToRender.length);
 
         // Populate minimap roads data from actual road paths
         const minimapRoadData: Array<{
           path: Array<{ x: number; z: number }>;
-        }> = providedRoads.map((road) => ({
+        }> = roadsToRender.map((road) => ({
           path: road.path.map((point) => ({
             x: point.x + worldCenterOffset,
             z: point.z + worldCenterOffset,
@@ -3583,45 +3815,79 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       await initTreeModels();
       if (!mounted) return;
 
-      // ---- Fetch tree positions from server (runs ACTUAL game code) ----
-      // The Asset Forge API runs generateTrees() from @hyperscape/shared
-      // server-side with exact same BiomeSystem, RNG, and terrain height
-      // computation as the live game. No reimplementation needed.
-      // POST with vegetation overrides if config has them.
-      const hasVegOverrides =
-        config.vegetation && Object.keys(config.vegetation).length > 0;
-      const treeDataRes = hasVegOverrides
-        ? await fetch("/api/world/trees", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ vegetation: config.vegetation }),
-          })
-        : await fetch("/api/world/trees");
-      if (!mounted) return;
-
-      if (!treeDataRes.ok) {
-        console.error(
-          "[TileBasedTerrain] Failed to fetch world trees:",
-          treeDataRes.status,
-        );
-        return;
+      // Clear any existing vegetation (handles double-init from React StrictMode
+      // or effect re-runs). Without this, both runs pile up in the container.
+      const existingChildren = [...vegetationContainer.children];
+      if (existingChildren.length > 0) {
+        for (const child of existingChildren) {
+          vegetationContainer.remove(child);
+        }
+        vegetationSpeciesMapRef.current.clear();
       }
 
-      const treeData = (await treeDataRes.json()) as {
-        trees: Array<{
-          s: string;
-          x: number;
-          y: number;
-          z: number;
-          sc: number;
-          r: number;
-        }>;
-        generationTimeMs: number;
-      };
+      // ---- Generate trees CLIENT-SIDE using editor's terrain querier ----
+      // The server's GameWorldContext uses a different terrain implementation
+      // that produces different biome/height maps. Generating locally with
+      // terrainQuerierRef guarantees trees match the terrain the user sees.
+      const initQuerier = terrainQuerierRef.current;
+      const initSeed = config.seed;
+      const initGenStart = performance.now();
+      const initTrees: Array<{
+        s: string;
+        x: number;
+        y: number;
+        z: number;
+        sc: number;
+        r: number;
+      }> = [];
+
+      if (initQuerier) {
+        const halfT = Math.floor(GAME_WORLD_SIZE / 2);
+        for (let tx = -halfT; tx < halfT; tx++) {
+          for (let tz = -halfT; tz < halfT; tz++) {
+            const cx = tx * GAME_TILE_SIZE + GAME_TILE_SIZE / 2;
+            const cz = tz * GAME_TILE_SIZE + GAME_TILE_SIZE / 2;
+            const tq = initQuerier(cx, cz);
+            // Use threshold-based biome so tree species only appear on ground
+            // that clearly reads as their biome (prevents maples on grey ground)
+            const tileBiome = _getVisualBiomeForTrees(tq);
+            const tc = getTreeConfigForBiome(tileBiome);
+            if (!tc.enabled || tc.density <= 0) continue;
+
+            const rCtx: ResourceGenerationContext = {
+              tileX: tx,
+              tileZ: tz,
+              tileKey: `${tx}_${tz}`,
+              tileSize: GAME_TILE_SIZE,
+              waterThreshold: GAME_WATER_THRESHOLD,
+              getHeightAt: (wx, wz) => initQuerier(wx, wz).height,
+              // Per-position threshold biome — requires clear dominance before
+              // using biome-exclusive species (prevents maples on grey ground)
+              getDominantBiome: (wx, wz) =>
+                _getVisualBiomeForTrees(initQuerier(wx, wz)),
+              createRng: (salt) => _createTileRng(initSeed, tx, tz, salt),
+            };
+
+            const genResult = generateTrees(rCtx, tc);
+            for (const node of genResult) {
+              const p = node.position as { x: number; y: number; z: number };
+              initTrees.push({
+                s: node.subType ?? "oak",
+                x: tx * GAME_TILE_SIZE + p.x,
+                y: p.y,
+                z: tz * GAME_TILE_SIZE + p.z,
+                sc: node.scale ?? 1,
+                r: node.rotation ?? 0,
+              });
+            }
+          }
+        }
+      }
       if (!mounted) return;
 
+      const initGenElapsed = performance.now() - initGenStart;
       console.log(
-        `[TileBasedTerrain] Received ${treeData.trees.length} trees from server (generated in ${treeData.generationTimeMs}ms)`,
+        `[TileBasedTerrain] Generated ${initTrees.length} trees client-side in ${initGenElapsed.toFixed(0)}ms (seed=${initSeed})`,
       );
 
       // ---- Set up InstancedMesh per species for GLB models ----
@@ -3665,10 +3931,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const quat = new THREE.Quaternion();
       const upAxis = new THREE.Vector3(0, 1, 0);
 
-      // Place every tree from the server data
-      // Server returns centered world coords; scene uses 0-based coords.
+      // Place every tree from client-side generation
+      // Trees are in centered world coords; scene uses 0-based coords.
       // Scene offset = worldCenterOffset (= halfWorld = worldSizeMeters / 2)
-      for (const tree of treeData.trees) {
+      for (const tree of initTrees) {
         const speciesId = `tree_${tree.s}`;
         const speciesData = speciesInstanceData.get(speciesId);
         if (!speciesData || speciesData.count >= maxPerSpecies) continue;
@@ -3703,13 +3969,44 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         }
       }
 
+      // Track vegetation positions for external consumers (auto-gen, debug panel)
+      vegetationPositionsRef.current = initTrees.map((t) => ({
+        x: t.x,
+        z: t.z,
+      }));
+
       const speciesSummary = [...speciesInstanceData.entries()]
         .filter(([, d]) => d.count > 0)
         .map(([id, d]) => `${id.replace("tree_", "")}:${d.count}`)
         .join(", ");
+
+      // Log species that had NO InstancedMesh (missing GLB model)
+      const missingSpecies = initTrees
+        .map((t) => `tree_${t.s}`)
+        .filter((sid) => !speciesInstanceData.has(sid));
+      const uniqueMissing = [...new Set(missingSpecies)];
+      if (uniqueMissing.length > 0) {
+        console.warn(
+          `[initVegetation] Missing GLB models for species: ${uniqueMissing.join(", ")}. ` +
+            `Available: ${[...speciesInstanceData.keys()].join(", ")}`,
+        );
+      }
+
       console.log(
-        `[TileBasedTerrain] Placed ${totalTreeCount} trees (${speciesSummary})`,
+        `%c[initVegetation] Placed ${totalTreeCount}/${initTrees.length} trees (${speciesSummary})`,
+        "color: #4ade80; font-weight: bold;",
       );
+      if (totalTreeCount === 0 && initTrees.length > 0) {
+        console.error(
+          `[initVegetation] Generated ${initTrees.length} trees but placed ZERO! ` +
+            `Species lookup failed — check species ID format. ` +
+            `Sample tree.s values: ${initTrees
+              .slice(0, 5)
+              .map((t) => t.s)
+              .join(", ")}. ` +
+            `Available speciesIds: ${[...speciesInstanceData.keys()].join(", ")}`,
+        );
+      }
     };
     initVegetation();
 
@@ -4029,6 +4326,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         },
         refreshVegetation: async (
           vegConfig?: VegetationConfig,
+          exclusions?: VegetationExclusions,
         ): Promise<void> => {
           const vegContainer = vegetationContainerRef.current;
           if (!vegContainer) return;
@@ -4049,39 +4347,218 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           // Ensure tree GLB models are loaded
           await initTreeModels();
 
-          // Fetch tree positions from server
-          const hasOverrides = vegConfig && Object.keys(vegConfig).length > 0;
-          const treeDataRes = hasOverrides
-            ? await fetch("/api/world/trees", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ vegetation: vegConfig }),
-              })
-            : await fetch("/api/world/trees");
+          // Generate trees CLIENT-SIDE using the editor's own terrain querier.
+          // This guarantees tree positions match the terrain the user sees — the
+          // server's GameWorldContext uses a different implementation that produces
+          // different biome/height maps even with the same seed.
+          const currentSeed = configSeedRef.current;
+          const querier = terrainQuerierRef.current;
+          const genStartTime = performance.now();
 
-          if (!treeDataRes.ok) {
-            console.error(
-              "[refreshVegetation] Failed to fetch trees:",
-              treeDataRes.status,
-            );
-            return;
+          const allTrees: Array<{
+            s: string;
+            x: number;
+            y: number;
+            z: number;
+            sc: number;
+            r: number;
+          }> = [];
+
+          const editorTileSize = GAME_TILE_SIZE;
+          const editorWorldSize = GAME_WORLD_SIZE;
+          const editorWaterThreshold = GAME_WATER_THRESHOLD;
+          const halfTiles = Math.floor(editorWorldSize / 2);
+
+          if (querier) {
+            for (let tileX = -halfTiles; tileX < halfTiles; tileX++) {
+              for (let tileZ = -halfTiles; tileZ < halfTiles; tileZ++) {
+                // Get dominant biome at tile center (matches game's approach)
+                const tileCenterX = tileX * editorTileSize + editorTileSize / 2;
+                const tileCenterZ = tileZ * editorTileSize + editorTileSize / 2;
+                const tileQuery = querier(tileCenterX, tileCenterZ);
+                const tileBiome = _getVisualBiomeForTrees(tileQuery);
+                const treeConfig = getTreeConfigForBiome(tileBiome);
+
+                if (!treeConfig.enabled || treeConfig.density <= 0) continue;
+
+                const resourceCtx: ResourceGenerationContext = {
+                  tileX,
+                  tileZ,
+                  tileKey: `${tileX}_${tileZ}`,
+                  tileSize: editorTileSize,
+                  waterThreshold: editorWaterThreshold,
+                  getHeightAt: (wx, wz) => querier(wx, wz).height,
+                  getDominantBiome: (wx, wz) =>
+                    _getVisualBiomeForTrees(querier(wx, wz)),
+                  createRng: (salt) =>
+                    _createTileRng(currentSeed, tileX, tileZ, salt),
+                };
+
+                const trees = generateTrees(resourceCtx, treeConfig);
+
+                for (const node of trees) {
+                  const pos = node.position as {
+                    x: number;
+                    y: number;
+                    z: number;
+                  };
+                  allTrees.push({
+                    s: node.subType ?? "oak",
+                    x: tileX * editorTileSize + pos.x,
+                    y: pos.y,
+                    z: tileZ * editorTileSize + pos.z,
+                    sc: node.scale ?? 1,
+                    r: node.rotation ?? 0,
+                  });
+                }
+              }
+            }
           }
 
-          const treeData = (await treeDataRes.json()) as {
-            trees: Array<{
-              s: string;
-              x: number;
-              y: number;
-              z: number;
-              sc: number;
-              r: number;
-            }>;
-            generationTimeMs: number;
-          };
-
+          const genElapsed = performance.now() - genStartTime;
           console.log(
-            `[refreshVegetation] Received ${treeData.trees.length} trees (${treeData.generationTimeMs}ms)`,
+            `[refreshVegetation] Generated ${allTrees.length} trees client-side in ${genElapsed.toFixed(0)}ms (seed=${currentSeed})`,
           );
+
+          // Two-layer vegetation filtering:
+          //   Layer 1 — Hard exclusions: buildings, roads, objects (binary, no noise)
+          //   Layer 2 — Town gradient: smooth density ramp with FBM noise on the
+          //             boundary for organic town-edge shapes + scale tapering
+          //
+          // Noise is ONLY on the town boundary, never on individual buildings.
+          // Applying noise to building SDFs created random "survival pockets"
+          // inside towns (noise pushed some trees above threshold → clusters).
+          let trees = allTrees;
+          if (exclusions) {
+            const beforeCount = trees.length;
+
+            // Pre-compute circle exclusions (squared radii for fast check)
+            const circleSq = exclusions.circles.map((c) => ({
+              x: c.x,
+              z: c.z,
+              rSq: c.radius * c.radius,
+            }));
+
+            // Pre-compute road segments (squared half-width)
+            const roadSegs = exclusions.roads.flatMap((road) => {
+              const segs: Array<{
+                ax: number;
+                az: number;
+                abx: number;
+                abz: number;
+                abLenSq: number;
+                hwSq: number;
+              }> = [];
+              for (let i = 0; i < road.path.length - 1; i++) {
+                const a = road.path[i],
+                  b = road.path[i + 1];
+                const abx = b.x - a.x,
+                  abz = b.z - a.z;
+                const abLenSq = abx * abx + abz * abz;
+                if (abLenSq < 0.001) continue;
+                segs.push({
+                  ax: a.x,
+                  az: a.z,
+                  abx,
+                  abz,
+                  abLenSq,
+                  hwSq: road.halfWidth * road.halfWidth,
+                });
+              }
+              return segs;
+            });
+
+            // Pre-compute town gradient parameters
+            const townData = (exclusions.towns ?? []).map((t) => {
+              const innerR = t.safeZoneRadius * _VEG_TOWN_INNER_FRAC;
+              const outerR = t.safeZoneRadius * _VEG_TOWN_OUTER_FRAC;
+              return {
+                x: t.x,
+                z: t.z,
+                innerR,
+                outerR,
+                // Include noise amplitude in the outer check so we don't
+                // skip trees that noise might push inside the gradient
+                maxDSq: (outerR + _VEG_NOISE_AMP) * (outerR + _VEG_NOISE_AMP),
+              };
+            });
+
+            trees = trees.filter((tree) => {
+              // ---- Layer 1: Hard exclusions (binary, no noise) ----
+              // Buildings, resources, plazas — precise cutouts hidden by meshes.
+              for (let i = 0; i < circleSq.length; i++) {
+                const c = circleSq[i];
+                const dx = tree.x - c.x,
+                  dz = tree.z - c.z;
+                if (dx * dx + dz * dz < c.rSq) return false;
+              }
+
+              // Roads — point-to-segment distance
+              for (let i = 0; i < roadSegs.length; i++) {
+                const seg = roadSegs[i];
+                const apx = tree.x - seg.ax,
+                  apz = tree.z - seg.az;
+                const t = Math.max(
+                  0,
+                  Math.min(1, (apx * seg.abx + apz * seg.abz) / seg.abLenSq),
+                );
+                const px = seg.ax + t * seg.abx - tree.x;
+                const pz = seg.az + t * seg.abz - tree.z;
+                if (px * px + pz * pz < seg.hwSq) return false;
+              }
+
+              // ---- Layer 2: Town density gradient (the only probabilistic layer) ----
+              // Noise distorts the TOWN boundary (not individual buildings),
+              // creating organic shapes without random clusters inside town.
+              let townDensity = 1.0;
+              for (let i = 0; i < townData.length; i++) {
+                const town = townData[i];
+                const dx = tree.x - town.x,
+                  dz = tree.z - town.z;
+                const dSq = dx * dx + dz * dz;
+                if (dSq > town.maxDSq) continue;
+
+                const dist = Math.sqrt(dSq);
+                // FBM noise wobbles the effective distance → organic boundary
+                const noise =
+                  (_vegFbm(tree.x * _VEG_NOISE_FREQ, tree.z * _VEG_NOISE_FREQ) -
+                    0.5) *
+                  2 *
+                  _VEG_NOISE_AMP;
+                const td = _vegSmoothstep(
+                  town.innerR,
+                  town.outerR,
+                  dist + noise,
+                );
+                if (td < townDensity) townDensity = td;
+              }
+
+              // Probabilistic thinning — only when inside a town's gradient
+              if (townDensity < 0.999) {
+                // Deterministic roll seeded by position (same tree, same result)
+                if (_vegRand(tree.x, tree.z) > townDensity) return false;
+
+                // Scale tapering: survivors near town are smaller ("younger growth")
+                // density=0 → minScale, density=1 → full scale
+                tree.sc *=
+                  _VEG_MIN_EDGE_SCALE + (1 - _VEG_MIN_EDGE_SCALE) * townDensity;
+              }
+
+              return true;
+            });
+
+            console.log(
+              `[refreshVegetation] Filter: ${circleSq.length} circles, ` +
+                `${roadSegs.length} road segs, ${townData.length} town gradients → ` +
+                `${beforeCount} → ${trees.length} trees (removed ${beforeCount - trees.length})`,
+            );
+          }
+
+          // Cache game-space positions so the auto-gen pipeline can avoid them
+          vegetationPositionsRef.current = trees.map((t) => ({
+            x: t.x,
+            z: t.z,
+          }));
 
           // Rebuild InstancedMeshes per species
           const maxPerSpecies = 20000;
@@ -4123,7 +4600,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           const up = new THREE.Vector3(0, 1, 0);
           const offset = worldCenterOffsetRef.current;
 
-          for (const tree of treeData.trees) {
+          for (const tree of trees) {
             const speciesId = `tree_${tree.s}`;
             const sd = speciesInstanceData.get(speciesId);
             if (!sd || sd.count >= maxPerSpecies) continue;
@@ -4183,7 +4660,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           const querier = terrainQuerierRef.current;
           if (!querier) return { biome: "plains", height: 0 };
           const q = querier(worldX, worldZ);
-          return { biome: q.biome, height: q.height };
+          // Return visual biome (from shader blend weights) so external
+          // consumers get the biome that matches the rendered ground color
+          return { biome: _getVisualBiome(q), height: q.height };
         },
         getBiomeDifficulty: (biomeId: string) => {
           const gen = generatorRef.current;
@@ -4193,6 +4672,330 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         },
         get runtimeTowns() {
           return runtimeTownsRef.current;
+        },
+        get vegetationPositions() {
+          return vegetationPositionsRef.current;
+        },
+        refreshTownMarkers: (newTowns: ProcgenTown[]) => {
+          console.warn(
+            `%c[refreshTownMarkers] Called with ${newTowns.length} towns: ${newTowns.map((t) => `${t.name}(${t.size}, ${t.buildings.length} bldg, pos ${Math.round(t.position.x)},${Math.round(t.position.z)})`).join(", ")}`,
+            "color: cyan; font-weight: bold",
+          );
+          const townGroup = townMarkersRef.current;
+          if (!townGroup) {
+            console.error(
+              "[refreshTownMarkers] townMarkersRef.current is NULL! Aborting.",
+            );
+            return;
+          }
+          console.warn(
+            `[refreshTownMarkers] Clearing ${townGroup.children.length} existing children from townMarkers group`,
+          );
+          const offset = worldCenterOffsetRef.current;
+          const heightQuerier = terrainQuerierRef.current;
+          const gen = generatorRef.current;
+          const getHeight = (wx: number, wz: number): number =>
+            heightQuerier
+              ? heightQuerier(wx, wz).height
+              : gen
+                ? gen.getHeightAt(wx, wz)
+                : 0;
+
+          // Clear existing town meshes + remove from selectables & LOD tracking
+          while (townGroup.children.length > 0) {
+            const child = townGroup.children[0];
+            townGroup.remove(child);
+            const selIdx = selectableObjectsRef.current.indexOf(child);
+            if (selIdx >= 0) selectableObjectsRef.current.splice(selIdx, 1);
+            // Remove LOD objects that belonged to the town group
+            if (child instanceof THREE.LOD) {
+              const lodIdx = lodObjectsRef.current.indexOf(child);
+              if (lodIdx >= 0) lodObjectsRef.current.splice(lodIdx, 1);
+            }
+          }
+
+          // Render each town with full detail (mirrors initial layout.towns rendering)
+          for (const town of newTowns) {
+            const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
+            const mx = town.position.x + offset;
+            // Use the queried terrain height at town center — this is the same centerHeight
+            // that generateTileGeometry uses for flattening. Building/landmark/road Y must
+            // match this value, NOT the un-flattened heights from TownGenerator.
+            const my = getHeight(town.position.x, town.position.z);
+            const mz = town.position.z + offset;
+            const townUserData = {
+              selectable: true,
+              selectableType: "town",
+              selectableId: town.id,
+              townId: town.id,
+              townName: town.name,
+            };
+
+            // Cone marker pointing down
+            const coneGeo = new THREE.ConeGeometry(20, 50, 8);
+            const coneMat = new MeshBasicNodeMaterial();
+            coneMat.color = new THREE.Color(color);
+            const cone = new THREE.Mesh(coneGeo, coneMat);
+            cone.position.set(mx, my + 60, mz);
+            cone.rotation.x = Math.PI;
+            cone.userData = townUserData;
+            townGroup.add(cone);
+            selectableObjectsRef.current.push(cone);
+
+            // Safe zone ring
+            const ringGeo = new THREE.RingGeometry(
+              town.safeZoneRadius - 5,
+              town.safeZoneRadius,
+              48,
+            );
+            const ringMat = new MeshBasicNodeMaterial();
+            ringMat.color = new THREE.Color(color);
+            ringMat.side = THREE.DoubleSide;
+            ringMat.transparent = true;
+            ringMat.opacity = 0.4;
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.set(mx, my + 2, mz);
+            ring.userData = townUserData;
+            townGroup.add(ring);
+            selectableObjectsRef.current.push(ring);
+
+            // Center pillar
+            const pillarGeo = new THREE.CylinderGeometry(3, 3, 30, 8);
+            const pillarMat = new TownBasicMat();
+            pillarMat.color = new THREE.Color(0xffffff);
+            const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+            pillar.position.set(mx, my + 15, mz);
+            pillar.userData = townUserData;
+            townGroup.add(pillar);
+            selectableObjectsRef.current.push(pillar);
+
+            // Internal roads — use flattened centerHeight for Y
+            if (town.internalRoads && town.internalRoads.length > 0) {
+              for (const road of town.internalRoads) {
+                const startX = road.start.x + offset;
+                const startZ = road.start.z + offset;
+                const endX = road.end.x + offset;
+                const endZ = road.end.z + offset;
+                const startY = my + 1;
+                const endY = my + 1;
+
+                const roadGeo = new THREE.BufferGeometry().setFromPoints([
+                  new THREE.Vector3(startX, startY, startZ),
+                  new THREE.Vector3(endX, endY, endZ),
+                ]);
+                const roadLineMat = new TownLineMat();
+                roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
+                roadLineMat.linewidth = 2;
+                townGroup.add(new THREE.Line(roadGeo, roadLineMat));
+              }
+            }
+
+            // Buildings with LOD — use flattened centerHeight (my) for Y,
+            // not building.position.y which is the un-flattened terrain height
+            for (const building of town.buildings) {
+              const bx = building.position.x + offset;
+              const bz = building.position.z + offset;
+              const by = my;
+              const buildingWidth = building.size?.width || 10;
+              const buildingDepth = building.size?.depth || 10;
+              const buildingHeight = 8;
+
+              const buildingLOD = new THREE.LOD();
+              buildingLOD.position.set(bx, by, bz);
+              buildingLOD.rotation.y = building.rotation || 0;
+              lodObjectsRef.current.push(buildingLOD);
+
+              // LOD 0: Procedural building
+              let fullDetailMesh: THREE.Object3D | null = null;
+              const buildingGen = new BuildingGenerator();
+              const generatedBuilding = buildingGen.generate(
+                building.type || "house",
+                { includeRoof: true, seed: `${town.id}-${building.id}` },
+              );
+
+              if (generatedBuilding && generatedBuilding.mesh) {
+                fullDetailMesh = generatedBuilding.mesh;
+                fullDetailMesh.traverse((child) => {
+                  if (child instanceof THREE.Mesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                  }
+                });
+                if (generatedBuilding.layout) {
+                  buildingWalkabilityService.registerBuilding(
+                    building.id,
+                    town.id,
+                    { x: bx, y: by, z: bz },
+                    building.rotation || 0,
+                    generatedBuilding.layout,
+                    by,
+                  );
+                }
+              } else {
+                const detailGeo = new THREE.BoxGeometry(
+                  buildingWidth,
+                  buildingHeight,
+                  buildingDepth,
+                );
+                const detailMat = new TownStdMat();
+                detailMat.color = new THREE.Color(0xd4a373);
+                detailMat.roughness = 0.7;
+                detailMat.metalness = 0.1;
+                fullDetailMesh = new THREE.Mesh(detailGeo, detailMat);
+                fullDetailMesh.position.y = buildingHeight / 2;
+                fullDetailMesh.castShadow = true;
+                fullDetailMesh.receiveShadow = true;
+              }
+
+              // LOD 1: Simple box
+              const simpleGeo = new THREE.BoxGeometry(
+                buildingWidth,
+                buildingHeight,
+                buildingDepth,
+              );
+              const simpleMat = new TownStdMat();
+              simpleMat.color = new THREE.Color(0xd4a373);
+              simpleMat.roughness = 0.9;
+              const simpleMesh = new THREE.Mesh(simpleGeo, simpleMat);
+              simpleMesh.position.y = buildingHeight / 2;
+              simpleMesh.castShadow = false;
+              simpleMesh.receiveShadow = true;
+
+              // LOD 2: Far box
+              const farGeo = new THREE.BoxGeometry(
+                buildingWidth,
+                buildingHeight,
+                buildingDepth,
+                1,
+                1,
+                1,
+              );
+              const farMat = new TownBasicMat();
+              farMat.color = new THREE.Color(0xc9a577);
+              const farMesh = new THREE.Mesh(farGeo, farMat);
+              farMesh.position.y = buildingHeight / 2;
+
+              const buildingUserData = {
+                selectable: true,
+                selectableType: "building",
+                selectableId: building.id,
+                townId: town.id,
+                townName: town.name,
+                buildingType: building.type,
+              };
+              fullDetailMesh.userData = buildingUserData;
+              fullDetailMesh.traverse((child) => {
+                child.userData = { ...child.userData, ...buildingUserData };
+              });
+              simpleMesh.userData = buildingUserData;
+              farMesh.userData = buildingUserData;
+
+              buildingLOD.addLevel(fullDetailMesh, 0);
+              buildingLOD.addLevel(simpleMesh, BUILDING_LOD_FULL_DISTANCE);
+              buildingLOD.addLevel(farMesh, BUILDING_LOD_SIMPLE_DISTANCE);
+              buildingLOD.userData = buildingUserData;
+              townGroup.add(buildingLOD);
+              selectableObjectsRef.current.push(buildingLOD);
+            }
+
+            // Landmarks — use flattened centerHeight for Y
+            if (town.landmarks && town.landmarks.length > 0) {
+              for (const landmark of town.landmarks) {
+                const lx = landmark.position.x + offset;
+                const lz = landmark.position.z + offset;
+                const ly = my;
+
+                let landmarkColor = 0x888888;
+                let height = landmark.size.height;
+                switch (landmark.type) {
+                  case "well":
+                    landmarkColor = 0x5a5a6a;
+                    break;
+                  case "fountain":
+                    landmarkColor = 0x4a7aaa;
+                    break;
+                  case "market_stall":
+                    landmarkColor = 0xaa7a4a;
+                    break;
+                  case "signpost":
+                    landmarkColor = 0x8a6a4a;
+                    break;
+                  case "bench":
+                    landmarkColor = 0x7a5a3a;
+                    break;
+                  case "barrel":
+                    landmarkColor = 0x6a5a4a;
+                    break;
+                  case "crate":
+                    landmarkColor = 0x8a7a5a;
+                    break;
+                  case "lamppost":
+                    landmarkColor = 0x3a3a3a;
+                    break;
+                  case "planter":
+                    landmarkColor = 0x5a8a5a;
+                    break;
+                  case "tree":
+                    landmarkColor = 0x3a6a3a;
+                    height = 4;
+                    break;
+                  case "fence_post":
+                    landmarkColor = 0x6a5030;
+                    break;
+                  case "fence_gate":
+                    landmarkColor = 0x7a6040;
+                    break;
+                }
+
+                const landmarkGeo = new THREE.BoxGeometry(
+                  landmark.size.width,
+                  height,
+                  landmark.size.depth,
+                );
+                const landmarkMat = new TownStdMat();
+                landmarkMat.color = new THREE.Color(landmarkColor);
+                landmarkMat.roughness = 0.7;
+                const landmarkMesh = new THREE.Mesh(landmarkGeo, landmarkMat);
+                landmarkMesh.position.set(lx, ly + height / 2, lz);
+                landmarkMesh.rotation.y = landmark.rotation;
+                landmarkMesh.castShadow = true;
+                landmarkMesh.receiveShadow = true;
+                townGroup.add(landmarkMesh);
+              }
+            }
+          }
+
+          // Update runtimeTowns ref so the pipeline sees them
+          runtimeTownsRef.current = newTowns.map((t) => ({
+            id: t.id,
+            name: t.name,
+            position: { ...t.position },
+            size: t.size,
+            safeZoneRadius: t.safeZoneRadius,
+          }));
+
+          // Regenerate terrain tiles under/near towns so flattening takes effect
+          if (tilesRef.current.size > 0) {
+            console.log(
+              `[refreshTownMarkers] Regenerating ${tilesRef.current.size} tiles for town terrain flattening`,
+            );
+            for (const key of tilesRef.current.keys()) {
+              unloadTile(key);
+            }
+            tileQueueRef.current = [];
+            tileQueueSetRef.current.clear();
+          }
+
+          console.warn(
+            `%c[refreshTownMarkers] DONE — Rendered ${newTowns.length} towns, townGroup now has ${townGroup.children.length} children`,
+            "color: lime; font-weight: bold",
+          );
+        },
+        setVegetationVisible: (visible: boolean) => {
+          if (vegetationContainerRef.current) {
+            vegetationContainerRef.current.visible = visible;
+          }
         },
       });
 
@@ -4441,8 +5244,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     waterThreshold,
     config.seed,
     config.useGamePipeline,
-    config.towns,
-    providedRoads,
+    // config.towns and providedRoads read from refs to avoid full scene rebuild
     handleMouseMove,
     handleKeyDown,
     handleKeyUp,

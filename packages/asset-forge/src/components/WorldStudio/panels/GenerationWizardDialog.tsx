@@ -39,6 +39,7 @@ import {
   DEFAULT_AUTOGEN_CONFIG,
   DEFAULT_TIERS,
 } from "../hooks/useZoneAutoGen";
+import { useWorldStudio } from "../WorldStudioContext";
 import {
   type GenerationMachineState,
   type MachineAction,
@@ -69,6 +70,8 @@ export function GenerationWizardDialog({
   mode,
 }: GenerationWizardDialogProps) {
   const { generate, apply, clearAutogen } = useZoneAutoGen();
+  const { state: studioState } = useWorldStudio();
+  const manifestsLoaded = studioState.manifests.loaded;
   const [machine, dispatch] = useReducer(
     machineReducer,
     createInitialMachineState(),
@@ -249,6 +252,18 @@ export function GenerationWizardDialog({
                 dispatch({ type: "JUMP_TO_STEP", stepIndex: idx })
               }
             />
+          </div>
+        )}
+
+        {/* Manifest loading warning */}
+        {!manifestsLoaded && (
+          <div className="mx-4 mt-2 px-3 py-2 rounded bg-amber-500/10 border border-amber-500/30 flex items-center gap-2">
+            <AlertTriangle size={14} className="text-amber-400 flex-shrink-0" />
+            <span className="text-[11px] text-amber-300">
+              Game manifests not loaded yet. Entity population (mobs, resources)
+              requires manifest data. Wait for manifests to finish loading
+              before generating.
+            </span>
           </div>
         )}
 
@@ -503,9 +518,13 @@ function CompleteView({
       </h3>
       {result && (
         <p className="text-xs text-text-secondary max-w-sm text-center">
-          Created {result.stats.zonesGenerated} zones with{" "}
-          {result.stats.totalMobs} mob spawns and {result.stats.totalResources}{" "}
-          resources. All entities tagged{" "}
+          Created{" "}
+          {result.generatedTowns.length > 0
+            ? `${result.generatedTowns.length} towns, `
+            : ""}
+          {result.stats.zonesGenerated} zones with {result.stats.totalMobs} mob
+          spawns, {result.stats.totalResources} resources, and{" "}
+          {result.roads.length} roads. All entities tagged{" "}
           <code className="bg-bg-tertiary px-1 rounded">source: procgen</code>.
         </p>
       )}

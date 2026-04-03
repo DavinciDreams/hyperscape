@@ -445,6 +445,7 @@ export function useEditorWorldSync({
   const syncExtendedLayers = useCallback((layers: ExtendedWorldLayers) => {
     const sync = syncRef.current;
     const refs = sceneRefsRef.current;
+
     if (!refs || sync.disposed) return;
 
     const overlay = refs.entityOverlay;
@@ -495,6 +496,11 @@ export function useEditorWorldSync({
         group.position.set(position.x, position.y, position.z);
         group.rotation.y = rotation;
         group.name = `entity-${type}-${id}`;
+        // Auto-gen fallback markers: scale up so they're visible from zone-overview distance.
+        // Real 3D models already have proper scale — don't inflate them.
+        if (id.startsWith("autogen-") && !hasRealModel) {
+          group.scale.setScalar(5);
+        }
 
         // Store entity info for selection routing
         // isExtendedLayer distinguishes editor-placed entities from game manifest entities

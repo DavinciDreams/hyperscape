@@ -275,6 +275,8 @@ export interface TownGeneratorConfig {
   optimalWaterDistanceMin: number;
   /** Maximum optimal distance from water */
   optimalWaterDistanceMax: number;
+  /** Grid resolution for candidate placement (NxN). Higher = more candidates. Default 15 */
+  placementGridSize: number;
   /** Configuration for each town size */
   townSizes: Record<TownSize, TownSizeConfig>;
   /** Biome suitability scores (0-1) */

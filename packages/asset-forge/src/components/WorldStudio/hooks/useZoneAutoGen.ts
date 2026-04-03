@@ -41,6 +41,7 @@ import type {
 import { useWorldStudio } from "../WorldStudioContext";
 import {
   HAND_PLACED_ENTITY_BUFFER,
+  VEGETATION_BUFFER,
   getTownSafeRadius,
 } from "../utils/worldConstants";
 
@@ -58,6 +59,12 @@ import {
   populateEntities,
   type ExistingEntityPosition,
 } from "../pipeline/entityPopulator";
+import { generateRoadNetwork } from "../pipeline/roadGenerator";
+import { TownGenerator } from "@hyperscape/procgen/building/town";
+import type {
+  TerrainProvider,
+  GeneratedTown as ProcgenTown,
+} from "@hyperscape/procgen/building/town";
 
 // ============== DEFAULT TIER CONFIG ==============
 
@@ -291,10 +298,21 @@ export interface AutoGenDeps {
   waterThreshold: number;
   seed: number;
   towns: TownInfo[];
+  /** Full town data for road generation (id, name, position) */
+  townDetails: Array<{
+    id: string;
+    name: string;
+    position: { x: number; y: number; z: number };
+  }>;
   dangerSources: DangerSourceInfo[];
   manifests: ManifestData;
   existingEntities: ExistingEntityPosition[];
   zoneDifficultyConfig?: ZoneDifficultyConfig;
+  /** Town generation config from world creation settings */
+  townConfig?: {
+    townCount: number;
+    minTownSpacing: number;
+  };
 }
 
 // ============== MAIN PIPELINE ==============
@@ -322,6 +340,8 @@ export function runAutoGenPipeline(
       resources: [],
       spawnPoints: [],
       teleports: [],
+      roads: [],
+      generatedTowns: [],
       stats: {
         zonesGenerated: 0,
         zoneMerged: 0,
@@ -332,6 +352,282 @@ export function runAutoGenPipeline(
         tierBreakdown: [],
       },
     };
+  }
+
+  // Step 1b: Always procgen towns (replaces any existing placeholders)
+  const generatedTowns: ProcgenTown[] = [];
+  let towns: TownInfo[] = [];
+  let townDetails: AutoGenDeps["townDetails"] = [];
+
+  if (deps.townConfig) {
+    const desiredCount = deps.townConfig.townCount;
+    console.log(
+      `[AutoGen] Generating ${desiredCount} towns (replacing ${deps.towns.length} existing)`,
+    );
+
+    const terrainProvider: TerrainProvider = {
+      getHeightAt: (x, z) => deps.queryBiome(x, z).height,
+      getBiomeAt: (x, z) => deps.queryBiome(x, z).biome,
+      getWaterThreshold: () => deps.waterThreshold,
+    };
+
+    const townGen = new TownGenerator({
+      seed: deps.seed,
+      terrain: terrainProvider,
+      config: {
+        townCount: desiredCount,
+        worldSize: deps.worldSize,
+        minTownSpacing: deps.townConfig.minTownSpacing,
+        waterThreshold: deps.waterThreshold,
+      },
+    });
+
+    // ── Strategic town placement ──
+    // Scan actual land, force a spawn town at origin, ensure biome coverage,
+    // then fill remaining slots with best candidates.
+
+    const scanStep = Math.max(40, deps.worldSize / 100);
+    const half = deps.worldSize / 2;
+    const landSites: Array<{
+      x: number;
+      z: number;
+      biome: string;
+      height: number;
+      flatness: number;
+    }> = [];
+
+    // Dense scan of land within the pre-computed land bounds
+    for (let wz = landBounds.minZ; wz <= landBounds.maxZ; wz += scanStep) {
+      for (let wx = landBounds.minX; wx <= landBounds.maxX; wx += scanStep) {
+        if (Math.abs(wx) > half - 100 || Math.abs(wz) > half - 100) continue;
+        const q = deps.queryBiome(wx, wz);
+        if (q.height < deps.waterThreshold) continue;
+        // Flatness: average height delta across 4 cardinal neighbours.
+        // Use /20 so a 20m delta ≈ 0.37, 10m ≈ 0.61, 5m ≈ 0.78.
+        // Mountains (~30m delta) still get 0.22 — enough for a hamlet.
+        let totalDelta = 0;
+        for (const [dx, dz] of [
+          [30, 0],
+          [-30, 0],
+          [0, 30],
+          [0, -30],
+        ] as const) {
+          totalDelta += Math.abs(
+            deps.queryBiome(wx + dx, wz + dz).height - q.height,
+          );
+        }
+        const avgDelta = totalDelta / 4;
+        const flatness = Math.exp(-avgDelta / 20);
+        landSites.push({
+          x: wx,
+          z: wz,
+          biome: q.biome,
+          height: q.height,
+          flatness,
+        });
+      }
+    }
+
+    // Per-biome diagnostic counts
+    const biomeCounts = new Map<string, { total: number; flat: number }>();
+    for (const s of landSites) {
+      const entry = biomeCounts.get(s.biome) ?? { total: 0, flat: 0 };
+      entry.total++;
+      if (s.flatness > 0.1) entry.flat++;
+      biomeCounts.set(s.biome, entry);
+    }
+    console.log(
+      `[AutoGen] Land scan: ${landSites.length} viable sites (step=${scanStep}m). ` +
+        `Per-biome: ${[...biomeCounts.entries()].map(([b, c]) => `${b}=${c.total}(${c.flat} flat)`).join(", ")}`,
+    );
+
+    // Collect unique biomes present on land (exclude water biomes)
+    const biomeSet = new Set(landSites.map((s) => s.biome));
+    for (const water of ["lakes", "ocean", "water", "deep_ocean"])
+      biomeSet.delete(water);
+    const uniqueBiomes = [...biomeSet];
+    console.log(`[AutoGen] Biomes on land: ${uniqueBiomes.join(", ")}`);
+
+    // Distance helper
+    const dist2 = (ax: number, az: number, bx: number, bz: number) =>
+      Math.sqrt((bx - ax) ** 2 + (bz - az) ** 2);
+
+    // Spacing must fit actual land extent, not the full (mostly ocean) world.
+    const landExtentX = landBounds.maxX - landBounds.minX;
+    const landExtentZ = landBounds.maxZ - landBounds.minZ;
+    const landExtent = Math.max(landExtentX, landExtentZ);
+    const minSpacing = Math.min(
+      deps.townConfig.minTownSpacing,
+      landExtent / (Math.sqrt(desiredCount) * 2),
+    );
+    console.log(
+      `[AutoGen] Land extent: ${Math.round(landExtentX)}×${Math.round(landExtentZ)}m, ` +
+        `spacing=${Math.round(minSpacing)}m (land-based=${Math.round(landExtent / (Math.sqrt(desiredCount) * 2))}m, ` +
+        `config=${deps.townConfig.minTownSpacing}m)`,
+    );
+
+    type TownSlot = {
+      x: number;
+      z: number;
+      size: "town" | "village" | "hamlet";
+      name?: string;
+    };
+    const slots: TownSlot[] = [];
+
+    const isTooClose = (x: number, z: number) =>
+      slots.some((s) => dist2(x, z, s.x, s.z) < minSpacing);
+
+    // 1) Starter town near origin (0,0) — "Lumbridge"
+    const spawnCandidates = landSites
+      .filter((s) => s.flatness > 0.15)
+      .sort((a, b) => dist2(a.x, a.z, 0, 0) - dist2(b.x, b.z, 0, 0));
+
+    if (spawnCandidates.length > 0) {
+      const spawn = spawnCandidates[0];
+      slots.push({
+        x: spawn.x,
+        z: spawn.z,
+        size: "town",
+        name: "Starter Town",
+      });
+      console.log(
+        `[AutoGen] Spawn town at (${Math.round(spawn.x)}, ${Math.round(spawn.z)}) ` +
+          `biome=${spawn.biome}, flatness=${spawn.flatness.toFixed(2)}, ` +
+          `dist-from-origin=${Math.round(dist2(spawn.x, spawn.z, 0, 0))}m`,
+      );
+    }
+
+    // Land centroid — sites closer to this are more "interior" (not coastal)
+    let centX = 0,
+      centZ = 0;
+    for (const s of landSites) {
+      centX += s.x;
+      centZ += s.z;
+    }
+    centX /= landSites.length;
+    centZ /= landSites.length;
+    // Max distance any land site is from centroid (for normalisation)
+    let maxCentDist = 0;
+    for (const s of landSites) {
+      const d = dist2(s.x, s.z, centX, centZ);
+      if (d > maxCentDist) maxCentDist = d;
+    }
+    if (maxCentDist === 0) maxCentDist = 1;
+
+    // Composite score: spread from existing towns + interior bonus + flatness
+    //   spread  0.45 — push towns apart
+    //   interior 0.35 — keep away from coastline
+    //   flatness 0.20 — prefer buildable terrain
+    const siteScore = (s: { x: number; z: number; flatness: number }) => {
+      // Spread: min distance to any placed town, normalised
+      let minDist = landExtent; // default if no slots yet
+      for (const sl of slots) {
+        const d = dist2(s.x, s.z, sl.x, sl.z);
+        if (d < minDist) minDist = d;
+      }
+      const normSpread = Math.min(minDist / landExtent, 1);
+
+      // Interior: 1.0 at centroid, 0.0 at farthest edge
+      const normInterior = 1 - dist2(s.x, s.z, centX, centZ) / maxCentDist;
+
+      return normSpread * 0.45 + normInterior * 0.35 + s.flatness * 0.2;
+    };
+
+    // 2) One town per biome — pick the site DEEPEST in each biome
+    //    (farthest from existing towns) so towns spread across the island.
+    const coveredBiomes = new Set(
+      slots.map((s) => deps.queryBiome(s.x, s.z).biome),
+    );
+
+    for (const biome of uniqueBiomes) {
+      if (coveredBiomes.has(biome)) continue;
+      if (slots.length >= desiredCount) break;
+
+      const biomeSites = landSites
+        .filter((s) => s.biome === biome && !isTooClose(s.x, s.z))
+        .sort((a, b) => siteScore(b) - siteScore(a));
+
+      if (biomeSites.length > 0) {
+        const pick = biomeSites[0];
+        const size = pick.flatness > 0.5 ? "village" : "hamlet";
+        slots.push({ x: pick.x, z: pick.z, size });
+        coveredBiomes.add(biome);
+        console.log(
+          `[AutoGen] Biome town: ${biome} at (${Math.round(pick.x)}, ${Math.round(pick.z)}) ` +
+            `size=${size}, flatness=${pick.flatness.toFixed(2)}, ` +
+            `spread=${siteScore(pick).toFixed(2)}, candidates=${biomeSites.length}`,
+        );
+      } else {
+        console.warn(
+          `[AutoGen] No site for biome "${biome}" — ` +
+            `${landSites.filter((s) => s.biome === biome).length} sites exist ` +
+            `but all within ${minSpacing}m of existing towns`,
+        );
+      }
+    }
+
+    // 3) Fill remaining slots — maximise spread across the island
+    if (slots.length < desiredCount) {
+      const remaining = landSites
+        .filter((s) => !isTooClose(s.x, s.z))
+        .sort((a, b) => siteScore(b) - siteScore(a));
+
+      for (const site of remaining) {
+        if (slots.length >= desiredCount) break;
+        if (isTooClose(site.x, site.z)) continue;
+        const size = site.flatness > 0.5 ? "village" : "hamlet";
+        slots.push({ x: site.x, z: site.z, size });
+        console.log(
+          `[AutoGen] Fill town at (${Math.round(site.x)}, ${Math.round(site.z)}) ` +
+            `biome=${site.biome}, flatness=${site.flatness.toFixed(2)}`,
+        );
+      }
+    }
+
+    console.log(
+      `[AutoGen] Placed ${slots.length}/${desiredCount} town slots ` +
+        `(spacing=${Math.round(minSpacing)}m, biomes covered: ${coveredBiomes.size}/${uniqueBiomes.length})`,
+    );
+
+    // 4) Generate full town data at each slot using TownGenerator.generateSingleTown
+    for (let i = 0; i < slots.length; i++) {
+      const slot = slots[i];
+      const town = townGen.generateSingleTown(slot.x, slot.z, slot.size, {
+        id: `town_${i}`,
+        name: slot.name,
+      });
+      const safeRadius =
+        town.safeZoneRadius ??
+        (town.size === "town" ? 80 : town.size === "village" ? 50 : 30);
+      generatedTowns.push({ ...town, safeZoneRadius: safeRadius });
+      towns.push({
+        position: { x: town.position.x, z: town.position.z },
+        safeZoneRadius: safeRadius,
+      });
+      townDetails.push({
+        id: town.id,
+        name: town.name,
+        position: {
+          x: town.position.x,
+          y: town.position.y,
+          z: town.position.z,
+        },
+      });
+    }
+
+    console.log(
+      `[AutoGen] Generated ${generatedTowns.length} towns: ` +
+        generatedTowns
+          .map(
+            (t) =>
+              `${t.name}(${t.size}, ${t.buildings.length} bldg, ${t.biome})`,
+          )
+          .join(", "),
+    );
+  } else {
+    // No town config — fall back to existing towns
+    towns = deps.towns;
+    townDetails = deps.townDetails;
   }
 
   const rangeX = landBounds.maxX - landBounds.minX;
@@ -345,7 +641,7 @@ export function runAutoGenPipeline(
     deps.queryBiome,
     deps.getBiomeDifficulty,
     noise,
-    deps.towns,
+    towns,
     deps.dangerSources,
     config.tiers,
     deps.waterThreshold,
@@ -366,7 +662,7 @@ export function runAutoGenPipeline(
   );
 
   // Step 5: Name zones
-  const zoneNames = nameZones(cleanedZones, config.tiers, deps.towns);
+  const zoneNames = nameZones(cleanedZones, config.tiers, towns);
   const cellArea = config.gridResolution * config.gridResolution;
 
   // Build AutoGenZone objects with spawn rules
@@ -411,7 +707,7 @@ export function runAutoGenPipeline(
       queryBiome: deps.queryBiome,
       getBiomeDifficulty: deps.getBiomeDifficulty,
       noise,
-      towns: deps.towns,
+      towns,
       dangerSources: deps.dangerSources,
       waterThreshold: deps.waterThreshold,
       worldRadius,
@@ -427,16 +723,17 @@ export function runAutoGenPipeline(
   // Find the largest town (by safe zone radius) as the default spawn
   let largestTownIdx = 0;
   let largestRadius = 0;
-  for (let i = 0; i < deps.towns.length; i++) {
-    if (deps.towns[i].safeZoneRadius > largestRadius) {
-      largestRadius = deps.towns[i].safeZoneRadius;
+  for (let i = 0; i < towns.length; i++) {
+    if (towns[i].safeZoneRadius > largestRadius) {
+      largestRadius = towns[i].safeZoneRadius;
       largestTownIdx = i;
     }
   }
 
-  for (let i = 0; i < deps.towns.length; i++) {
-    const town = deps.towns[i];
-    const townName = `Town ${i + 1}`;
+  for (let i = 0; i < towns.length; i++) {
+    const town = towns[i];
+    const detail = townDetails[i];
+    const townName = detail?.name ?? `Town ${i + 1}`;
     const isMainSpawn = i === largestTownIdx;
 
     // Spawn point at plaza center
@@ -463,6 +760,13 @@ export function runAutoGenPipeline(
       properties: { source: "autogen", type: "lodestone" },
     });
   }
+
+  // Step 8: Generate road network between towns
+  const roads = generateRoadNetwork(
+    townDetails,
+    deps.queryBiome,
+    deps.waterThreshold,
+  );
 
   const elapsed = performance.now() - startTime;
 
@@ -503,6 +807,8 @@ export function runAutoGenPipeline(
     resources,
     spawnPoints,
     teleports,
+    roads,
+    generatedTowns,
     stats,
   };
 }
@@ -594,17 +900,58 @@ export function useZoneAutoGen() {
         });
       }
 
-      return runAutoGenPipeline(config, {
+      // Include existing vegetation trees so procgen entities don't overlap them.
+      // Positions are in game-space (same as other entities above).
+      const vegPositions = vp.vegetationPositions ?? [];
+      for (const veg of vegPositions) {
+        existingEntities.push({
+          x: veg.x,
+          z: veg.z,
+          radius: VEGETATION_BUFFER,
+        });
+      }
+
+      console.log(
+        `[AutoGen] Manifests loaded=${state.manifests.loaded}: ` +
+          `${state.manifests.npcs.length} npcs (${state.manifests.npcs.filter((n) => n.category === "mob").length} mobs), ` +
+          `${state.manifests.miningRocks.length} rocks, ` +
+          `${state.manifests.trees.length} trees, ` +
+          `${state.manifests.fishingSpots.length} fishing. ` +
+          `Existing entities: ${existingEntities.length} (${vegPositions.length} vegetation)`,
+      );
+
+      const townDetails = world.foundation.towns.map((t) => ({
+        id: t.id,
+        name: t.name,
+        position: { x: t.position.x, y: t.position.y, z: t.position.z },
+      }));
+
+      const result = runAutoGenPipeline(config, {
         queryBiome: vp.queryBiome,
         getBiomeDifficulty,
         worldSize: worldSizeMeters,
         waterThreshold,
         seed,
         towns,
+        townDetails,
         dangerSources,
         manifests: state.manifests,
         existingEntities,
+        townConfig: {
+          townCount: world.foundation.config.towns.townCount,
+          minTownSpacing: world.foundation.config.towns.minTownSpacing,
+        },
       });
+
+      console.log(
+        `[AutoGen] Pipeline result: ${result.zones.length} zones, ` +
+          `${result.mobSpawns.length} mobs, ${result.resources.length} resources, ` +
+          `${result.spawnPoints.length} spawns, ${result.teleports.length} teleports, ` +
+          `${result.roads.length} roads, ${result.generatedTowns.length} new towns ` +
+          `(requested townCount=${world.foundation.config.towns.townCount})`,
+      );
+
+      return result;
     },
     [
       state.builder.editing.world,
@@ -617,8 +964,65 @@ export function useZoneAutoGen() {
   /** Commit an auto-gen result to state */
   const apply = useCallback(
     (result: AutoGenResult) => {
+      // Auto-gen pipeline produces positions in GAME space (-half..+half).
+      // The editor viewport operates in SCENE space (0..worldSize).
+      // Convert all entity positions: sceneX = gameX + worldCenterOffset.
+      // Also sample terrain height for Y so markers sit on the surface.
+      const vp = viewportRef?.current;
+      const offset = vp?.worldCenterOffset ?? 0;
+      const queryBiome = vp?.queryBiome;
+
+      console.log(
+        `[AutoGen] Applying: ${result.zones.length} zones, ` +
+          `${result.mobSpawns.length} mobs, ${result.resources.length} resources, ` +
+          `${result.spawnPoints.length} spawns, ${result.teleports.length} teleports, ` +
+          `${result.roads.length} roads, ${result.generatedTowns.length} towns` +
+          ` (worldCenterOffset=${offset}, refreshTownMarkers=${typeof vp?.refreshTownMarkers})`,
+      );
+
+      /** Convert game-space position to scene-space with terrain height */
+      const toScene = (pos: { x: number; y: number; z: number }) => {
+        const y = queryBiome ? queryBiome(pos.x, pos.z).height : pos.y;
+        return { x: pos.x + offset, y, z: pos.z + offset };
+      };
+
       // First clear any previous auto-gen
       actions.clearAllAutogen();
+
+      // Sync generated towns to foundation (if any were created)
+      if (result.generatedTowns.length > 0) {
+        console.log(
+          `[AutoGen] Syncing ${result.generatedTowns.length} generated towns:`,
+          result.generatedTowns
+            .map(
+              (t) => `${t.name} (${t.size}, ${t.buildings.length} buildings)`,
+            )
+            .join(", "),
+        );
+        actions.syncRuntimeTowns(
+          result.generatedTowns.map((t) => ({
+            id: t.id,
+            name: t.name,
+            position: { x: t.position.x, y: t.position.y, z: t.position.z },
+            size: t.size,
+            safeZoneRadius: t.safeZoneRadius,
+            biomeId: t.biome ?? "unknown",
+          })),
+        );
+        // Rebuild 3D town meshes (buildings, roads, landmarks) in the viewport
+        if (vp?.refreshTownMarkers) {
+          console.log(
+            `[AutoGen] Calling refreshTownMarkers with ${result.generatedTowns.length} towns`,
+          );
+          vp.refreshTownMarkers(result.generatedTowns);
+        } else {
+          console.warn(
+            `[AutoGen] refreshTownMarkers NOT available on viewport ref!`,
+          );
+        }
+      } else {
+        console.log(`[AutoGen] No towns generated (generatedTowns is empty)`);
+      }
 
       // Build PlacedRegion objects from zones
       const regions: PlacedRegion[] = result.zones.map((zone) => ({
@@ -635,25 +1039,159 @@ export function useZoneAutoGen() {
         autoGenBounds: zone.autoGenBounds,
       }));
 
+      // Convert entity positions from game-space to scene-space
+      const sceneMobs = result.mobSpawns.map((m) => ({
+        ...m,
+        position: toScene(m.position),
+      }));
+      const sceneResources = result.resources.map((r) => ({
+        ...r,
+        position: toScene(r.position),
+      }));
+      const sceneSpawns = result.spawnPoints.map((sp) => ({
+        ...sp,
+        position: toScene(sp.position),
+      }));
+      const sceneTeleports = result.teleports.map((tp) => ({
+        ...tp,
+        position: toScene(tp.position),
+      }));
+
       actions.batchAddRegions(regions);
-      actions.batchAddEntities(result.mobSpawns, result.resources);
+      actions.batchAddEntities(sceneMobs, sceneResources);
 
       // Add auto-generated spawn points
-      for (const sp of result.spawnPoints) {
+      for (const sp of sceneSpawns) {
         actions.addSpawnPoint(sp);
       }
       // Add auto-generated lodestones
-      for (const tp of result.teleports) {
+      for (const tp of sceneTeleports) {
         actions.addTeleport(tp);
       }
+
+      // Set auto-generated roads on the foundation (game-space, renderer handles conversion)
+      if (result.roads.length > 0) {
+        actions.setFoundationRoads(result.roads);
+      }
+
+      // Rebuild vegetation using AAA density field (SDF + noise + town gradient).
+      // Buildings create hard exclusion footprints, towns create broad density
+      // gradients, and FBM noise distorts all boundaries for organic forest edges.
+      // Trees near settlement edges are scaled smaller (Far Cry 5's "age" technique).
+      if (vp?.refreshVegetation) {
+        const circles: Array<{ x: number; z: number; radius: number }> = [];
+
+        // Per-building hard exclusions (tight: just the footprint + 2m for eaves/porches)
+        // The density field's noise + town gradient handles the broader thinning.
+        for (const town of result.generatedTowns) {
+          for (const b of town.buildings) {
+            const footprint = Math.max(
+              b.size?.width ?? 10,
+              b.size?.depth ?? 10,
+            );
+            circles.push({
+              x: b.position.x,
+              z: b.position.z,
+              radius: footprint / 2 + 2,
+            });
+          }
+          // Town plaza/fountain — compact hard exclusion (town gradient handles the rest)
+          circles.push({ x: town.position.x, z: town.position.z, radius: 8 });
+          // Per-landmark exclusions (wells, benches, etc.)
+          if (town.landmarks) {
+            for (const lm of town.landmarks) {
+              circles.push({
+                x: lm.position.x,
+                z: lm.position.z,
+                radius: Math.max(lm.size.width, lm.size.depth) / 2 + 1.5,
+              });
+            }
+          }
+        }
+
+        // Resources — small clear zone for visual clarity
+        for (const r of result.resources) {
+          circles.push({ x: r.position.x, z: r.position.z, radius: 2.5 });
+        }
+        // Spawn points + teleports — small clear zone
+        for (const sp of result.spawnPoints) {
+          circles.push({ x: sp.position.x, z: sp.position.z, radius: 4 });
+        }
+        for (const tp of result.teleports) {
+          circles.push({ x: tp.position.x, z: tp.position.z, radius: 4 });
+        }
+
+        // Roads — road surface + small buffer (noise creates organic shoulders)
+        const roads = result.roads.map((r) => ({
+          path: r.path.map((p) => ({ x: p.x, z: p.z })),
+          halfWidth: (r.width ?? 6) / 2 + 0.5,
+        }));
+
+        // Town centers for the broad density gradient (RuneScape-style:
+        // sparse near center, gradually thickening into full forest).
+        const towns = result.generatedTowns.map((t) => ({
+          x: t.position.x,
+          z: t.position.z,
+          safeZoneRadius: t.safeZoneRadius,
+        }));
+
+        // Diagnostic: dump sample coordinates to verify alignment
+        if (circles.length > 0) {
+          const sample = circles.slice(0, 3);
+          console.log(
+            `[AutoGen] Sample exclusion circles (game-space):`,
+            sample
+              .map(
+                (c) =>
+                  `(${c.x.toFixed(1)}, ${c.z.toFixed(1)}) r=${c.radius.toFixed(1)}`,
+              )
+              .join(", "),
+          );
+        }
+        if (towns.length > 0) {
+          console.log(
+            `[AutoGen] Town centers (game-space):`,
+            towns
+              .map(
+                (t) =>
+                  `(${t.x.toFixed(1)}, ${t.z.toFixed(1)}) safeR=${t.safeZoneRadius}`,
+              )
+              .join(", "),
+          );
+        }
+
+        vp.refreshVegetation(undefined, { circles, roads, towns });
+      }
+
+      // Navigate camera to the first generated town (where buildings are)
+      // so the user immediately sees the new content.
+      if (result.generatedTowns.length > 0 && vp?.navigateCamera) {
+        const t0 = result.generatedTowns[0];
+        const cx = t0.position.x + offset;
+        const cz = t0.position.z + offset;
+        vp.navigateCamera(cx, cz, true);
+        console.log(
+          `[AutoGen] Camera navigated to town "${t0.name}" at scene (${cx.toFixed(0)}, ${cz.toFixed(0)})`,
+        );
+      } else if (result.zones.length > 0 && vp?.navigateCamera) {
+        const z0 = result.zones[0];
+        const cx = z0.centroid.x + offset;
+        const cz = z0.centroid.z + offset;
+        vp.navigateCamera(cx, cz, true);
+        console.log(
+          `[AutoGen] Camera navigated to zone "${z0.name}" at scene (${cx.toFixed(0)}, ${cz.toFixed(0)})`,
+        );
+      }
     },
-    [actions],
+    [actions, viewportRef],
   );
 
   /** Clear all auto-generated content */
   const clearAutogen = useCallback(() => {
     actions.clearAllAutogen();
-  }, [actions]);
+    // Restore full vegetation (no exclusion zones) since wizard content is gone
+    viewportRef?.current?.refreshVegetation?.();
+  }, [actions, viewportRef]);
 
   return { generate, apply, clearAutogen };
 }

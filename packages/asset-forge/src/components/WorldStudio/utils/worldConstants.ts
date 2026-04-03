@@ -23,6 +23,9 @@ export const BASE_RESOURCE_DENSITY = 0.0004;
 /** Buffer distance (meters) for auto-gen entities from hand-placed entities */
 export const HAND_PLACED_ENTITY_BUFFER = 12;
 
+/** Buffer distance (meters) for auto-gen entities from existing vegetation trees */
+export const VEGETATION_BUFFER = 4;
+
 /** Radius (meters) to search for stations near towns */
 export const TOWN_STATION_SEARCH_RADIUS = 80;
 

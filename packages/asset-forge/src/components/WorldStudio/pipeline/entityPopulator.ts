@@ -139,29 +139,74 @@ export function populateEntities(
     if (!tier) continue;
 
     const rng = createSeededRng(config.seed + hashString(zone.id));
-    const [scalarLo, scalarHi] = tier.scalarRange;
 
-    // Contour boundary test: point must fall within this tier's difficulty range + biome
+    // Build a spatial grid from the zone's precomputed cell positions.
+    // This is deterministic (matches the grid sampling exactly) and avoids the
+    // expensive computeZoneDifficulty re-evaluation that can produce scalar drift
+    // from noise at sub-grid resolution, causing 100% rejection rates.
+    const resolution =
+      zone.autoGenBounds?.gridResolution ?? config.gridResolution;
+    const cellPositions = zone.autoGenBounds?.cellPositions;
+    const zoneCellGrid =
+      cellPositions && cellPositions.length > 0
+        ? new SpatialGrid(resolution)
+        : null;
+    if (zoneCellGrid && cellPositions) {
+      for (const cp of cellPositions) {
+        zoneCellGrid.insert(cp.x, cp.z);
+      }
+    }
+
+    // Cell-based boundary test: check if the candidate position falls within
+    // any of the zone's grid cells (within resolution/2 of a cell center).
+    // Fast, deterministic, and consistent with the grid sampling that created zones.
+    const halfRes = resolution * 0.55; // slight overshoot to cover cell corners
     const inZone: PoissonBoundaryTest = (x: number, z: number) => {
+      if (zoneCellGrid) {
+        // Check if this point is near any cell center in this zone
+        const nearestDist = zoneCellGrid.nearestDistance(x, z);
+        if (nearestDist > halfRes) return false;
+      } else {
+        // Fallback: contour-based test for zones without cellPositions
+        const bq = deps.queryBiome(x, z);
+        if (bq.height < deps.waterThreshold) return false;
+        const [scalarLo, scalarHi] = tier.scalarRange;
+        const sample = computeZoneDifficulty(
+          x,
+          z,
+          bq.biome,
+          deps.getBiomeDifficulty(bq.biome),
+          deps.noise,
+          deps.towns,
+          deps.dangerSources,
+          deps.worldRadius,
+          deps.zoneDiffConfig,
+        );
+        if (
+          sample.scalar < scalarLo ||
+          sample.scalar >= scalarHi ||
+          bq.biome !== zone.biome
+        ) {
+          return false;
+        }
+      }
+      // Water check at the actual candidate position
       const bq = deps.queryBiome(x, z);
-      if (bq.height < deps.waterThreshold) return false; // water
-      const sample = computeZoneDifficulty(
-        x,
-        z,
-        bq.biome,
-        deps.getBiomeDifficulty(bq.biome),
-        deps.noise,
-        deps.towns,
-        deps.dangerSources,
-        deps.worldRadius,
-        deps.zoneDiffConfig,
-      );
-      return (
-        sample.scalar >= scalarLo &&
-        sample.scalar < scalarHi &&
-        bq.biome === zone.biome
-      );
+      return bq.height >= deps.waterThreshold;
     };
+
+    const hasMobRules = !!(
+      zone.spawnRules.mobs && zone.spawnRules.mobs.table.length > 0
+    );
+    const hasResRules = !!(
+      zone.spawnRules.resources && zone.spawnRules.resources.table.length > 0
+    );
+    console.log(
+      `[EntityPop] Zone "${zone.name}" (tier=${zone.tierIndex}, ${zone.cellCount} cells, ${Math.round(zone.area)}m²): ` +
+        `mobRules=${hasMobRules ? zone.spawnRules.mobs!.table.length + " entries" : "none"}, ` +
+        `resRules=${hasResRules ? zone.spawnRules.resources!.table.length + " entries" : "none"}, ` +
+        `cellGrid=${zoneCellGrid ? "yes" : "no"} (${cellPositions?.length ?? 0} cells)`,
+    );
 
     // Phase A: Mobs (avoid existing hand-placed entities)
     if (zone.spawnRules.mobs && zone.spawnRules.mobs.table.length > 0) {
@@ -205,61 +250,140 @@ export function populateEntities(
 
         mobGrid.insert(pos.x, pos.z);
       }
+      if (mobPositions.length > 0) {
+        console.log(
+          `[EntityPop]   → ${mobPositions.length} mob positions placed (target: ${targetCount})`,
+        );
+      }
     }
 
-    // Phase B: Resources with mob-proximity buffer
+    // Phase B: Land resources with mob-proximity buffer (skip water-affinity)
     if (
       zone.spawnRules.resources &&
       zone.spawnRules.resources.table.length > 0
     ) {
+      const landTable = zone.spawnRules.resources.table.filter(
+        (t) => t.affinity !== "water",
+      );
+      const waterTable = zone.spawnRules.resources.table.filter(
+        (t) => t.affinity === "water",
+      );
+
       const density =
         BASE_RESOURCE_DENSITY *
         (zone.spawnRules.resources.densityMultiplier ?? 1);
-      const targetCount = Math.max(1, Math.round(zone.area * density));
       const buffer = tier.mobResourceBuffer;
 
-      const resourcePositions = poissonDiscSample(
-        zone.bounds,
-        config.resourceSpacing,
-        targetCount * 2, // oversample since we'll reject some
-        rng,
-        (x, z) => {
-          if (!inZone(x, z)) return false;
-          // Mob-resource proximity rejection
-          const mobDist = mobGrid.nearestDistance(x, z);
-          return mobDist >= buffer;
-        },
-      );
+      // Phase B1: Land resources (mining, woodcutting, farming)
+      if (landTable.length > 0) {
+        const targetCount = Math.max(1, Math.round(zone.area * density));
 
-      // Trim to target count
-      const finalPositions = resourcePositions.slice(0, targetCount);
-
-      for (let i = 0; i < finalPositions.length; i++) {
-        const pos = finalPositions[i];
-        const entry = weightedSelect(
-          zone.spawnRules.resources.table.map((t) => ({
-            ...t,
-            weight: t.weight,
-          })),
+        const resourcePositions = poissonDiscSample(
+          zone.bounds,
+          config.resourceSpacing,
+          targetCount * 2, // oversample since we'll reject some
           rng,
+          (x, z) => {
+            if (!inZone(x, z)) return false;
+            // Mob-resource proximity rejection
+            const mobDist = mobGrid.nearestDistance(x, z);
+            return mobDist >= buffer;
+          },
         );
-        if (!entry) continue;
 
-        allResources.push({
-          id: `autogen-res-${zone.id}-${i}`,
-          resourceId: entry.resourceId,
-          resourceType: inferResourceType(entry.resourceId),
-          name: entry.resourceId,
-          position: { x: pos.x, y: 0, z: pos.z },
-          rotation: rng() * Math.PI * 2,
-          modelVariant: 0,
-          source: "procgen",
-          sourceRegionId: zone.id,
-          properties:
-            entry.clusterSize && entry.clusterSize > 1
-              ? { clusterSize: entry.clusterSize }
-              : {},
-        });
+        // Trim to target count
+        const finalPositions = resourcePositions.slice(0, targetCount);
+
+        for (let i = 0; i < finalPositions.length; i++) {
+          const pos = finalPositions[i];
+          const entry = weightedSelect(
+            landTable.map((t) => ({ ...t, weight: t.weight })),
+            rng,
+          );
+          if (!entry) continue;
+
+          allResources.push({
+            id: `autogen-res-${zone.id}-${i}`,
+            resourceId: entry.resourceId,
+            resourceType: inferResourceType(entry.resourceId),
+            name: entry.resourceId,
+            position: { x: pos.x, y: 0, z: pos.z },
+            rotation: rng() * Math.PI * 2,
+            modelVariant: 0,
+            source: "procgen",
+            sourceRegionId: zone.id,
+            properties:
+              entry.clusterSize && entry.clusterSize > 1
+                ? { clusterSize: entry.clusterSize }
+                : {},
+          });
+        }
+      }
+
+      // Phase B2: Water-affinity resources (fishing spots) — place near shoreline
+      if (waterTable.length > 0) {
+        // Fishing spots are sparse: ~1 per 5000m² of zone area
+        const fishDensity = density * 0.15;
+        const fishTarget = Math.max(1, Math.round(zone.area * fishDensity));
+
+        // Expand bounds slightly to reach nearby water outside the zone
+        const waterSearchBounds = {
+          minX: zone.bounds.minX - 30,
+          maxX: zone.bounds.maxX + 30,
+          minZ: zone.bounds.minZ - 30,
+          maxZ: zone.bounds.maxZ + 30,
+        };
+
+        const fishPositions = poissonDiscSample(
+          waterSearchBounds,
+          config.resourceSpacing * 2, // wider spacing for fishing spots
+          fishTarget * 4, // oversample heavily — most candidates will be rejected
+          rng,
+          (x, z) => {
+            // Must be in or very near water
+            const bq = deps.queryBiome(x, z);
+            if (bq.height >= deps.waterThreshold) return false;
+            // Must be near shore: at least one sample within 15m must be above water
+            const probeD = 15;
+            const nearShore =
+              deps.queryBiome(x + probeD, z).height >= deps.waterThreshold ||
+              deps.queryBiome(x - probeD, z).height >= deps.waterThreshold ||
+              deps.queryBiome(x, z + probeD).height >= deps.waterThreshold ||
+              deps.queryBiome(x, z - probeD).height >= deps.waterThreshold;
+            return nearShore;
+          },
+        );
+
+        const finalFish = fishPositions.slice(0, fishTarget);
+        const landResCount = allResources.length;
+
+        for (let i = 0; i < finalFish.length; i++) {
+          const pos = finalFish[i];
+          const entry = weightedSelect(
+            waterTable.map((t) => ({ ...t, weight: t.weight })),
+            rng,
+          );
+          if (!entry) continue;
+
+          allResources.push({
+            id: `autogen-fish-${zone.id}-${i}`,
+            resourceId: entry.resourceId,
+            resourceType: "fishing",
+            name: entry.resourceId,
+            position: { x: pos.x, y: 0, z: pos.z },
+            rotation: rng() * Math.PI * 2,
+            modelVariant: 0,
+            source: "procgen",
+            sourceRegionId: zone.id,
+            properties: {},
+          });
+        }
+
+        if (allResources.length > landResCount) {
+          console.log(
+            `[EntityPop]   → ${allResources.length - landResCount} fishing spots placed near water (target: ${fishTarget})`,
+          );
+        }
       }
     }
   }

@@ -48,6 +48,7 @@ import type {
   HierarchyNode,
   WorldPosition,
   GeneratedTown,
+  GeneratedRoad,
 } from "../WorldBuilder/types";
 
 import {
@@ -199,6 +200,8 @@ export interface StudioViewportOverlays {
   densityHeatmap: boolean;
   /** Show road network overlay */
   roadOverlay: boolean;
+  /** Show zone tile color overlay (auto-gen + hand-painted regions) */
+  zoneOverlay: boolean;
   /** Day/night time-of-day (0-24 hours, null = default lighting) */
   timeOfDay: number | null;
   /** Weather preview mode */
@@ -211,6 +214,7 @@ const DEFAULT_VIEWPORT_OVERLAYS: StudioViewportOverlays = {
   difficultyOverlay: false,
   densityHeatmap: false,
   roadOverlay: false,
+  zoneOverlay: true,
   timeOfDay: null,
   weatherPreview: null,
 };
@@ -511,6 +515,11 @@ type StudioSpecificAction =
         safeZoneRadius: number;
         biomeId?: string;
       }>;
+    }
+  // Replace foundation roads (used by auto-gen to add inter-town roads)
+  | {
+      type: "SET_FOUNDATION_ROADS";
+      roads: GeneratedRoad[];
     };
 
 /** Union of all world builder + studio-specific actions */
@@ -1383,15 +1392,18 @@ function studioReducer(
         },
       };
 
-    case "BATCH_ADD_ENTITIES":
+    case "BATCH_ADD_ENTITIES": {
+      const newMobs = [...state.extendedLayers.mobSpawns, ...action.mobSpawns];
+      const newRes = [...state.extendedLayers.resources, ...action.resources];
       return {
         ...state,
         extendedLayers: {
           ...state.extendedLayers,
-          mobSpawns: [...state.extendedLayers.mobSpawns, ...action.mobSpawns],
-          resources: [...state.extendedLayers.resources, ...action.resources],
+          mobSpawns: newMobs,
+          resources: newRes,
         },
       };
+    }
 
     case "CLEAR_ALL_AUTOGEN":
       return {
@@ -1490,6 +1502,24 @@ function studioReducer(
                 ...world.foundation,
                 towns: [...world.foundation.towns, ...newTowns],
               },
+            },
+          },
+        },
+      };
+    }
+
+    case "SET_FOUNDATION_ROADS": {
+      const world = state.builder.editing.world;
+      if (!world) return state;
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: {
+            ...state.builder.editing,
+            world: {
+              ...world,
+              foundation: { ...world.foundation, roads: action.roads },
             },
           },
         },
@@ -2027,7 +2057,10 @@ function worldStudioReducer(
 /** Ref-based callbacks for viewport operations that bypass React state.
  *  Set by ViewportContainer when scene is ready, consumed by panels like ProcgenPanel. */
 export interface ViewportCallbacks {
-  refreshVegetation?: (vegConfig?: VegetationConfig) => Promise<void>;
+  refreshVegetation?: (
+    vegConfig?: VegetationConfig,
+    exclusions?: import("../WorldBuilder/TileBasedTerrain").VegetationExclusions,
+  ) => Promise<void>;
   navigateCamera?: (x: number, z: number, close?: boolean) => void;
   /** Query biome + height at world coordinates (game space). Used by auto-gen pipeline. */
   queryBiome?: (
@@ -2036,6 +2069,8 @@ export interface ViewportCallbacks {
   ) => { biome: string; height: number };
   /** Get difficulty level for a biome ID. Used by auto-gen pipeline. */
   getBiomeDifficulty?: (biomeId: string) => number;
+  /** Offset to convert game-space → scene-space: sceneX = gameX + worldCenterOffset. */
+  worldCenterOffset?: number;
   /** Runtime-generated towns with game-space positions + safe zone radii. */
   runtimeTowns?: Array<{
     id: string;
@@ -2044,6 +2079,14 @@ export interface ViewportCallbacks {
     size: string;
     safeZoneRadius: number;
   }>;
+  /** Vegetation tree positions in game-space. Used by auto-gen to avoid placing entities on trees. */
+  vegetationPositions?: Array<{ x: number; z: number }>;
+  /** Rebuild town 3D meshes (buildings, roads, landmarks) from full procgen town data. */
+  refreshTownMarkers?: (
+    towns: import("@hyperscape/procgen/building/town").GeneratedTown[],
+  ) => void;
+  /** Show or hide the decorative instanced vegetation layer. */
+  setVegetationVisible?: (visible: boolean) => void;
 }
 
 // ============== CONTEXT ==============
@@ -2272,6 +2315,7 @@ interface WorldStudioContextValue {
         biomeId?: string;
       }>,
     ) => void;
+    setFoundationRoads: (roads: GeneratedRoad[]) => void;
 
     // Studio-specific: Danger Sources
     addDangerSource: (dangerSource: PlacedDangerSource) => void;
@@ -2712,6 +2756,10 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
           biomeId?: string;
         }>,
       ) => dispatch({ type: "SYNC_RUNTIME_TOWNS", towns }),
+
+      // Foundation roads
+      setFoundationRoads: (roads: GeneratedRoad[]) =>
+        dispatch({ type: "SET_FOUNDATION_ROADS", roads }),
 
       // Studio-specific: Extended layers — Danger Sources
       addDangerSource: (dangerSource: PlacedDangerSource) =>

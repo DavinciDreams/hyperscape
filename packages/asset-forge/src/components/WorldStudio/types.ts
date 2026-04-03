@@ -6,6 +6,7 @@
  */
 
 import type { WorldPosition, PlacedNPC } from "../WorldBuilder/types";
+import type { GeneratedTown as ProcgenTown } from "@hyperscape/procgen/building/town";
 
 export type { PlacedNPC };
 
@@ -412,6 +413,16 @@ export interface AutoGenResult {
   spawnPoints: PlacedSpawnPoint[];
   /** Auto-placed lodestone teleports at town plazas */
   teleports: PlacedTeleport[];
+  /** Auto-generated road network between towns */
+  roads: Array<{
+    id: string;
+    path: Array<{ x: number; y: number; z: number }>;
+    width: number;
+    connectedTowns: [string, string];
+    isMainRoad: boolean;
+  }>;
+  /** Newly generated towns with full procgen data (buildings, roads, landmarks) */
+  generatedTowns: ProcgenTown[];
   stats: AutoGenStats;
 }
 

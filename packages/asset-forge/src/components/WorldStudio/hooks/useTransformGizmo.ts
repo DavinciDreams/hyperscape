@@ -366,7 +366,11 @@ export function useTransformGizmo({
       }
       controls.detach();
       scene.remove(controls.getHelper());
-      controls.dispose();
+      try {
+        controls.dispose();
+      } catch {
+        // WebGPU NodeManager.delete throws when usedTimes is undefined on unrendered materials
+      }
       gizmo.controls = null;
       gizmo.attachedObject = null;
       gizmo.attachedEntityId = null;

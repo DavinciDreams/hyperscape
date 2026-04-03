@@ -13,6 +13,15 @@ import { useEffect, useRef } from "react";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 
+/** Safely dispose a material — WebGPU NodeManager may crash if the material was never rendered */
+function safeDispose(resource: { dispose(): void }): void {
+  try {
+    resource.dispose();
+  } catch {
+    // WebGPU NodeManager.delete throws when usedTimes is undefined on unrendered materials
+  }
+}
+
 const OUTLINE_COLOR = 0x4fc3f7; // Light blue (UE5-inspired)
 const OUTLINE_OPACITY = 0.9;
 const OUTLINE_PADDING = 0.3; // Padding around bounding box
@@ -68,9 +77,9 @@ export function useSelectionOutline({
     const cleanup = () => {
       if (state.mesh) {
         scene.remove(state.mesh);
-        state.mesh.geometry.dispose();
+        safeDispose(state.mesh.geometry);
         if (state.mesh.material instanceof THREE.Material) {
-          state.mesh.material.dispose();
+          safeDispose(state.mesh.material);
         }
         state.mesh = null;
       }
@@ -133,9 +142,9 @@ export function useSelectionOutline({
     return () => {
       const state = stateRef.current;
       if (state.mesh) {
-        state.mesh.geometry.dispose();
+        safeDispose(state.mesh.geometry);
         if (state.mesh.material instanceof THREE.Material) {
-          state.mesh.material.dispose();
+          safeDispose(state.mesh.material);
         }
         state.mesh = null;
       }

@@ -12,6 +12,7 @@ import type {
   ManifestData,
   ManifestNPC,
 } from "../types";
+import { getTreeConfigForBiome } from "@hyperscape/shared/world/TerrainBiomeTypes";
 
 // ============== BIOME AFFINITY WEIGHTS ==============
 
@@ -66,6 +67,7 @@ export function deriveSpawnRules(
     resourceId: string;
     weight: number;
     clusterSize?: number;
+    affinity?: "water" | "mountain" | "road" | "any";
   }> = [];
 
   // Mining rocks
@@ -83,11 +85,16 @@ export function deriveSpawnRules(
     }
   }
 
-  // Trees
+  // Trees — only include species that belong in this biome's tree config.
+  // e.g. maple/knotwood only in forest zones, cactus/palm only in canyon.
+  const biomeTreeConfig = getTreeConfigForBiome(biome);
+  const allowedTreeIds = new Set(Object.keys(biomeTreeConfig.trees));
+
   for (const tree of manifests.trees) {
     if (
       tree.levelRequired >= minResLevel &&
-      tree.levelRequired <= maxResLevel
+      tree.levelRequired <= maxResLevel &&
+      allowedTreeIds.has(tree.id)
     ) {
       const biomeBonus = biomeWeights["woodcutting"] ?? 1.0;
       resourceEntries.push({
@@ -98,7 +105,7 @@ export function deriveSpawnRules(
     }
   }
 
-  // Fishing spots
+  // Fishing spots — affinity: "water" ensures placement near shoreline
   for (const spot of manifests.fishingSpots) {
     if (
       spot.levelRequired >= minResLevel &&
@@ -108,6 +115,7 @@ export function deriveSpawnRules(
       resourceEntries.push({
         resourceId: spot.id,
         weight: 10 * biomeBonus,
+        affinity: "water",
       });
     }
   }

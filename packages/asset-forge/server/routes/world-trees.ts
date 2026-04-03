@@ -21,9 +21,8 @@ export const worldTreeRoutes = new Elysia({
     return generateWorldTrees();
   })
   .post("/trees", ({ body }) => {
-    const overrides = (body as { vegetation?: VegetationOverrides })
-      ?.vegetation;
-    return generateWorldTrees(overrides ?? undefined);
+    const b = body as { vegetation?: VegetationOverrides; seed?: number };
+    return generateWorldTrees(b?.vegetation ?? undefined, b?.seed);
   })
   .post("/trees/invalidate", () => {
     clearWorldTreeCache();
