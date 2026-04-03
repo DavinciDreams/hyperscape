@@ -36,6 +36,8 @@ import {
   abs,
   sin,
   cos,
+  max as tslMax,
+  div,
 } from "three/tsl";
 import type Node from "three/src/nodes/core/Node.js";
 
@@ -384,7 +386,6 @@ export function createTerrainMaterial(
   const CANYON_CLIFF_DARK = vec3(0.55, 0.25, 0.12);
 
   // Legacy aliases (default = forest biome)
-  const dirtBrown = FOREST_DIRT;
   const dirtDark = FOREST_DIRT_DARK;
   const sandYellow = vec3(0.7, 0.6, 0.38);
   const mudBrown = vec3(0.18, 0.12, 0.08);
@@ -512,22 +513,116 @@ export function createTerrainMaterial(
   );
 
   // === ROAD OVERLAY (optional) ===
-  // Roads are compacted dirt paths - use same dirt colors as terrain for consistency
+  // Multi-technique procedural dirt road: noise-distorted edges, height-based
+  // blending, multi-layer composition, edge border darkening
   let colorWithRoads: Node = variedColor;
+  let roadRoughnessBlend: Node = float(1.0); // terrain default roughness
   if (includeRoadOverlay) {
     const roadInfluence = attribute("roadInfluence", "float");
+    const roadUV = vec2(worldPos.x, worldPos.z);
 
-    // Use same dirt colors as terrain dirt patches (dirtBrown, dirtDark defined above)
-    // Add noise variation for natural look - compacted dirt has less variation
-    const roadNoiseVar = mul(noiseValue2, float(0.5)); // Less variation than regular dirt
-    const roadDirtColor = mix(dirtBrown, dirtDark, roadNoiseVar);
+    // --- Multi-scale noise samples ---
+    const rn1 = texture(noiseTex, mul(roadUV, float(0.015))).r; // large patches
+    const rn2 = texture(noiseTex, mul(roadUV, float(0.045))).r; // medium detail
+    const rn3 = texture(noiseTex, mul(roadUV, float(0.12))).r; // fine grain
+    const rn4 = texture(noiseTex, mul(roadUV, float(0.3))).r; // micro detail
 
-    // Road center is darker (compacted, worn surface)
-    const roadCenterDarken = mul(roadInfluence, float(0.15));
-    const compactedRoadColor = sub(roadDirtColor, vec3(roadCenterDarken));
+    // === NOISE-DISTORTED EDGE MASK ===
+    // Distort roadInfluence with noise for irregular, natural-looking edges
+    const edgeDistortion = add(
+      mul(sub(rn2, float(0.5)), float(0.35)), // medium wiggles
+      mul(sub(rn3, float(0.5)), float(0.15)), // fine roughness
+    );
+    const distortedInfluence = add(roadInfluence, edgeDistortion);
+    // Sharp-ish smoothstep for defined edges (0.25-0.55 controls edge width)
+    const roadMask = smoothstep(float(0.25), float(0.55), distortedInfluence);
 
-    // Blend road color with terrain based on influence
-    colorWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
+    // === MULTI-LAYER ROAD COMPOSITION ===
+    // Layer 1: compacted earth base (warm brown, two-tone + micro variation)
+    const earthBase = mix(
+      vec3(0.42, 0.32, 0.2),
+      vec3(0.52, 0.4, 0.26),
+      smoothstep(
+        float(0.3),
+        float(0.7),
+        add(mul(rn1, float(0.8)), mul(rn4, float(0.2))),
+      ),
+    );
+
+    // Layer 2: surface dust (lighter sandy patches)
+    const dustMask = smoothstep(float(0.55), float(0.75), rn2);
+    const withDust = mix(
+      earthBase,
+      vec3(0.6, 0.52, 0.38),
+      mul(dustMask, float(0.35)),
+    );
+
+    // Layer 3: gravel highlights + cracks between pebbles
+    const gravelMask = smoothstep(float(0.7), float(0.8), rn3);
+    const gravelShadow = smoothstep(float(0.15), float(0.25), rn3);
+    const withGravel = mix(
+      withDust,
+      vec3(0.58, 0.52, 0.42),
+      mul(gravelMask, float(0.4)),
+    );
+    // Darken the cracks between gravel
+    const withCracks = mix(
+      mul(withGravel, float(0.82)),
+      withGravel,
+      gravelShadow,
+    );
+
+    // Layer 4: wear track darkening (center of road, compacted)
+    const wearTrack = mul(mul(roadMask, roadMask), roadMask); // pow(roadMask, 3)
+    const wornRoad = mul(withCracks, mix(float(1.0), float(0.88), wearTrack));
+
+    // Layer 5: grass tufts at road margins (edge scatter)
+    const edgeZone = mul(
+      smoothstep(float(0.15), float(0.4), roadMask),
+      smoothstep(float(0.75), float(0.45), roadMask),
+    );
+    const edgeScatter = mul(edgeZone, smoothstep(float(0.4), float(0.65), rn2));
+    const roadDetailColor = mix(
+      wornRoad,
+      variedColor,
+      mul(edgeScatter, float(0.4)),
+    );
+
+    // === HEIGHT-BASED BLENDING ===
+    // Grass "pokes through" road at edges (taller grass wins over short dirt)
+    const grassH = add(mul(noiseValue, float(0.4)), float(0.6));
+    const roadH = add(mul(rn3, float(0.3)), float(0.1));
+    const grassBl = add(grassH, mul(sub(float(1.0), roadMask), float(2.0)));
+    const roadBl = add(roadH, mul(roadMask, float(2.0)));
+    const maxH = tslMax(grassBl, roadBl);
+    const depthParam = float(0.15);
+    const thresh = sub(maxH, depthParam);
+    const gW = tslMax(sub(grassBl, thresh), float(0.0));
+    const rW = tslMax(sub(roadBl, thresh), float(0.0));
+    const totalW = add(gW, rW);
+    const heightBlended = div(
+      add(mul(variedColor, gW), mul(roadDetailColor, rW)),
+      totalW,
+    );
+
+    // === EDGE BORDER DARKENING ===
+    // Narrow dark band at road edge for readability
+    const edgeBand = mul(
+      smoothstep(float(0.28), float(0.4), roadMask),
+      smoothstep(float(0.55), float(0.42), roadMask),
+    );
+    const borderDarken = mul(edgeBand, float(0.12));
+    colorWithRoads = mul(heightBlended, sub(float(1.0), borderDarken));
+
+    // === ROAD ROUGHNESS ===
+    // Gravel rough, compacted center smoother
+    const roadRoughGravel = mix(
+      float(0.65),
+      float(0.92),
+      sub(float(1.0), gravelShadow),
+    );
+    const roadRough = mix(roadRoughGravel, float(0.55), wearTrack);
+    roadRoughnessBlend = mix(float(1.0), roadRough, roadMask);
   }
 
   // === DISTANCE FOG ===
@@ -538,7 +633,7 @@ export function createTerrainMaterial(
   // === CREATE MATERIAL ===
   const material = new MeshStandardNodeMaterial();
   material.colorNode = finalColor;
-  material.roughness = 1.0;
+  material.roughnessNode = roadRoughnessBlend;
   material.metalness = 0.0;
   material.side = THREE.FrontSide;
   material.fog = false;

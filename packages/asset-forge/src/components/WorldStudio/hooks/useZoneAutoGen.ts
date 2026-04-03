@@ -298,15 +298,21 @@ export interface AutoGenDeps {
   waterThreshold: number;
   seed: number;
   towns: TownInfo[];
-  /** Full town data for road generation (id, name, position) */
+  /** Full town data for road generation */
   townDetails: Array<{
     id: string;
     name: string;
     position: { x: number; y: number; z: number };
+    /** Fallback offset if no entry points */
+    radius?: number;
+    /** Town entry/exit points where internal roads meet the perimeter */
+    entryPoints?: Array<{ angle: number; position: { x: number; z: number } }>;
   }>;
   dangerSources: DangerSourceInfo[];
   manifests: ManifestData;
   existingEntities: ExistingEntityPosition[];
+  /** Structure obstacles for road avoidance (buildings, platforms, POIs) */
+  structureObstacles: Array<{ x: number; z: number; radius: number }>;
   zoneDifficultyConfig?: ZoneDifficultyConfig;
   /** Town generation config from world creation settings */
   townConfig?: {
@@ -612,6 +618,8 @@ export function runAutoGenPipeline(
           y: town.position.y,
           z: town.position.z,
         },
+        radius: safeRadius * 0.35,
+        entryPoints: town.entryPoints,
       });
     }
 
@@ -762,10 +770,48 @@ export function runAutoGenPipeline(
   }
 
   // Step 8: Generate road network between towns
+  // Build obstacle list from generated town buildings/landmarks + existing structures
+  const roadObstacles: Array<{ x: number; z: number; radius: number }> = [
+    ...deps.structureObstacles,
+  ];
+
+  // Add individual building obstacles from generated towns (with generous buffer)
+  const ROAD_STRUCTURE_BUFFER = 6;
+  for (const town of generatedTowns) {
+    for (const b of town.buildings) {
+      const halfDiag =
+        Math.sqrt((b.size?.width ?? 10) ** 2 + (b.size?.depth ?? 10) ** 2) / 2;
+      roadObstacles.push({
+        x: b.position.x,
+        z: b.position.z,
+        radius: halfDiag + ROAD_STRUCTURE_BUFFER,
+      });
+    }
+    if (town.landmarks) {
+      for (const lm of town.landmarks) {
+        const halfDiag = Math.sqrt(lm.size.width ** 2 + lm.size.depth ** 2) / 2;
+        roadObstacles.push({
+          x: lm.position.x,
+          z: lm.position.z,
+          radius: halfDiag + ROAD_STRUCTURE_BUFFER,
+        });
+      }
+    }
+    if (town.plaza) {
+      roadObstacles.push({
+        x: town.plaza.position.x,
+        z: town.plaza.position.z,
+        radius: (town.plaza.radius ?? 8) + ROAD_STRUCTURE_BUFFER,
+      });
+    }
+  }
+
   const roads = generateRoadNetwork(
     townDetails,
     deps.queryBiome,
     deps.waterThreshold,
+    undefined,
+    roadObstacles,
   );
 
   const elapsed = performance.now() - startTime;
@@ -920,11 +966,81 @@ export function useZoneAutoGen() {
           `Existing entities: ${existingEntities.length} (${vegPositions.length} vegetation)`,
       );
 
-      const townDetails = world.foundation.towns.map((t) => ({
-        id: t.id,
-        name: t.name,
-        position: { x: t.position.x, y: t.position.y, z: t.position.z },
-      }));
+      const townDetails = world.foundation.towns.map((t) => {
+        const safeR = getTownSafeRadius(t);
+        // Convert foundation entryPoints (direction string) to angle-based format
+        const entryPoints = t.entryPoints
+          ?.filter((ep) => ep.position)
+          .map((ep) => ({
+            angle: Math.atan2(
+              ep.position.x - t.position.x,
+              ep.position.z - t.position.z,
+            ),
+            position: { x: ep.position.x, z: ep.position.z },
+          }));
+        return {
+          id: t.id,
+          name: t.name,
+          position: { x: t.position.x, y: t.position.y, z: t.position.z },
+          radius: safeR * 0.35,
+          entryPoints: entryPoints?.length ? entryPoints : undefined,
+        };
+      });
+
+      // Build structure obstacles for road avoidance — ALL procgen structures
+      // are obstacles unless explicitly road-connectable (bridges, docks).
+      const structureObstacles: Array<{
+        x: number;
+        z: number;
+        radius: number;
+      }> = [];
+      const ROAD_BLDG_BUFFER = 4;
+
+      // Foundation buildings (existing world)
+      for (const b of world.foundation.buildings) {
+        const halfDiag =
+          Math.sqrt(b.dimensions.width ** 2 + b.dimensions.depth ** 2) / 2;
+        structureObstacles.push({
+          x: b.position.x,
+          z: b.position.z,
+          radius: halfDiag + ROAD_BLDG_BUFFER,
+        });
+      }
+
+      // POIs (dungeons, shrines, landmarks, resource areas, ruins, camps)
+      for (const poi of state.extendedLayers.pois) {
+        structureObstacles.push({
+          x: poi.position.x,
+          z: poi.position.z,
+          radius: (poi.radius ?? 10) + ROAD_BLDG_BUFFER,
+        });
+      }
+
+      // Stations (banks, anvils, furnaces, altars, etc.)
+      for (const s of state.extendedLayers.stations) {
+        structureObstacles.push({
+          x: s.position.x,
+          z: s.position.z,
+          radius: 4 + ROAD_BLDG_BUFFER,
+        });
+      }
+
+      // Duel arenas (from manifests — each arena has center + size)
+      for (const arena of state.manifests.duelArenas) {
+        structureObstacles.push({
+          x: arena.center.x,
+          z: arena.center.z,
+          radius: Math.max(arena.size, 12) + ROAD_BLDG_BUFFER,
+        });
+      }
+
+      console.log(
+        `[AutoGen] Road obstacles: ${structureObstacles.length} structures ` +
+          `(${world.foundation.buildings.length} buildings, ` +
+          `${state.extendedLayers.pois.length} POIs, ` +
+          `${state.extendedLayers.stations.length} stations, ` +
+          `${state.manifests.duelArenas.length} arenas)`,
+      );
 
       const result = runAutoGenPipeline(config, {
         queryBiome: vp.queryBiome,
@@ -937,6 +1053,7 @@ export function useZoneAutoGen() {
         dangerSources,
         manifests: state.manifests,
         existingEntities,
+        structureObstacles,
         townConfig: {
           townCount: world.foundation.config.towns.townCount,
           minTownSpacing: world.foundation.config.towns.minTownSpacing,

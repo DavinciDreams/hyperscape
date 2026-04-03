@@ -8,6 +8,7 @@
  * Requires WebGPU renderer (uses three/tsl node materials).
  */
 
+import * as THREE from "three";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import {
   Fn,
@@ -25,7 +26,9 @@ import {
   mix,
   smoothstep,
   min as tslMin,
+  max as tslMax,
   mod,
+  vertexColor,
 } from "three/tsl";
 
 // ============== SHARED TSL HELPERS ==============
@@ -430,5 +433,91 @@ export function createArenaFloorMaterial(): MeshStandardNodeMaterial {
     return mix(float(0.9), stoneRough, isStone);
   })();
 
+  return mat;
+}
+
+// ============== ROAD / DIRT PATH MATERIAL ==============
+
+/**
+ * Creates a TSL procedural dirt/gravel road material.
+ * Uses world-space position for tiling + vertex colors for edge darkening.
+ * PBR with proper roughness, normal perturbation for gravel bumpiness.
+ */
+export function createRoadMaterial(): MeshStandardNodeMaterial {
+  const mat = new MeshStandardNodeMaterial();
+
+  // --- Color ---
+  mat.colorNode = Fn(() => {
+    const wp = positionWorld;
+    const uv2 = vec2(wp.x, wp.z);
+    const vColor = vertexColor();
+
+    // Multi-octave noise for natural dirt variation
+    const n1 = tslNoise2D(uv2.mul(1.2));
+    const n2 = tslNoise2D(uv2.mul(3.5)).mul(0.4);
+    const n3 = tslNoise2D(uv2.mul(8.0)).mul(0.15);
+    const n4 = tslNoise2D(uv2.mul(18.0)).mul(0.08);
+    const combined = n1.add(n2).add(n3).add(n4);
+
+    // Base warm dirt tones — two colors that blend via noise
+    const dirtLight = vec3(0.58, 0.46, 0.32);
+    const dirtDark = vec3(0.38, 0.28, 0.18);
+    const baseColor = mix(dirtDark, dirtLight, smoothstep(0.3, 0.7, combined));
+
+    // Gravel speckle — bright pebble highlights on high-frequency peaks
+    const gravelNoise = tslNoise2D(uv2.mul(28.0));
+    const gravelMask = smoothstep(0.72, 0.82, gravelNoise);
+    const gravelColor = vec3(0.65, 0.58, 0.48);
+    const withGravel = mix(baseColor, gravelColor, gravelMask.mul(0.5));
+
+    // Dark cracks/ruts from very low frequency
+    const crackNoise = tslNoise2D(uv2.mul(0.5));
+    const crackMask = smoothstep(0.0, 0.15, crackNoise);
+    const cracked = mix(withGravel.mul(0.7), withGravel, crackMask);
+
+    // Integrate vertex color (darker at edges, lighter at center)
+    const vRGB = vec3(vColor.x, vColor.y, vColor.z);
+    const edgeDarken = vRGB.mul(0.7).add(vec3(0.3, 0.3, 0.3));
+    const final = cracked.mul(edgeDarken);
+
+    return vec4(final, 1.0);
+  })();
+
+  // --- Roughness ---
+  mat.roughnessNode = Fn(() => {
+    const wp = positionWorld;
+    const uv2 = vec2(wp.x, wp.z);
+
+    const baseRough = float(0.88);
+    const variation = tslNoise2D(uv2.mul(6.0)).mul(0.1).sub(0.05);
+    const gravelBump = tslNoise2D(uv2.mul(22.0)).mul(0.06);
+    return tslMin(
+      float(1.0),
+      tslMax(float(0.6), baseRough.add(variation).add(gravelBump)),
+    );
+  })();
+
+  // --- Normal perturbation for gravel/pebble bump detail ---
+  mat.normalNode = Fn(() => {
+    const wp = positionWorld;
+    const uv2 = vec2(wp.x, wp.z);
+    const N = normalWorld;
+
+    // Sample noise at slight offsets for finite-difference normal
+    const eps = float(0.08);
+    const center = tslNoise2D(uv2.mul(16.0));
+    const dx = tslNoise2D(uv2.add(vec2(eps, 0.0)).mul(16.0)).sub(center);
+    const dz = tslNoise2D(uv2.add(vec2(0.0, eps)).mul(16.0)).sub(center);
+
+    // Perturb normal with gravel-scale bumps
+    const bumpStrength = float(0.35);
+    const perturbed = N.add(
+      vec3(dx.mul(bumpStrength), float(0.0), dz.mul(bumpStrength)),
+    ).normalize();
+
+    return perturbed;
+  })();
+
+  mat.side = THREE.DoubleSide;
   return mat;
 }

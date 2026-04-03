@@ -62,6 +62,7 @@ import {
   type TownInfo,
   type DangerSourceInfo,
 } from "./DifficultyHeatmap";
+import { createRoadMaterial } from "./ProceduralMaterials";
 import {
   createGameWorldEntities,
   disposeEntitySync,
@@ -1060,6 +1061,68 @@ function distanceToLineSegment(
   return Math.sqrt((px - closestX) ** 2 + (pz - closestZ) ** 2);
 }
 
+/**
+ * Calculate the interpolated road path height at a world point.
+ * Finds the closest road segment and lerps the Y between its endpoints.
+ * Returns { height, influence } or null if no road is close enough.
+ */
+function getRoadHeightAtPoint(
+  worldX: number,
+  worldZ: number,
+  roads: GeneratedRoad[],
+): { height: number; influence: number } | null {
+  let minDist = Infinity;
+  let bestHeight = 0;
+  let closestWidth = 6;
+
+  for (const road of roads) {
+    if (road.path.length < 2) continue;
+    const effectiveWidth = Math.max(road.width || 4, 6);
+
+    for (let i = 0; i < road.path.length - 1; i++) {
+      const p1 = road.path[i];
+      const p2 = road.path[i + 1];
+
+      const dx = p2.x - p1.x;
+      const dz = p2.z - p1.z;
+      const lenSq = dx * dx + dz * dz;
+      if (lenSq === 0) continue;
+
+      let t = ((worldX - p1.x) * dx + (worldZ - p1.z) * dz) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+
+      const cx = p1.x + t * dx;
+      const cz = p1.z + t * dz;
+      const dist = Math.sqrt((worldX - cx) ** 2 + (worldZ - cz) ** 2);
+
+      if (dist < minDist) {
+        minDist = dist;
+        // Interpolate Y along the segment
+        const y1 = p1.y ?? 0;
+        const y2 = p2.y ?? 0;
+        bestHeight = y1 + t * (y2 - y1);
+        closestWidth = effectiveWidth;
+      }
+    }
+  }
+
+  const halfWidth = closestWidth / 2;
+  const blendWidth = 2;
+  const totalWidth = halfWidth + blendWidth;
+
+  if (minDist >= totalWidth) return null;
+
+  let influence: number;
+  if (minDist <= halfWidth) {
+    influence = 1.0;
+  } else {
+    const f = 1.0 - (minDist - halfWidth) / blendWidth;
+    influence = f * f * (3 - 2 * f);
+  }
+
+  return { height: bestHeight, influence };
+}
+
 // Road colors matching the game's terrain shader (compacted dirt with gravel)
 const ROAD_CENTER_COLOR = new THREE.Color(0.4, 0.333, 0.267); // #665544 — compacted dirt
 const ROAD_EDGE_COLOR = new THREE.Color(0.349, 0.29, 0.239); // #594a3d — road edge
@@ -1325,6 +1388,19 @@ function generateTileGeometry(
           height = tz.centerHeight + (height - tz.centerHeight) * blend;
         }
         break; // Only one town per vertex (first match)
+      }
+    }
+
+    // Flatten terrain under roads: blend vertex height toward the
+    // interpolated road path height based on road influence.
+    // This makes roads sit flat on the terrain instead of following
+    // every bump and ridge.
+    if (roads && roads.length > 0) {
+      const roadInfo = getRoadHeightAtPoint(worldX, worldZ, roads);
+      if (roadInfo && roadInfo.influence > 0) {
+        // Road path height + small offset so road sits slightly above terrain
+        const targetHeight = roadInfo.height + 0.1;
+        height = height + (targetHeight - height) * roadInfo.influence;
       }
     }
 
@@ -3198,9 +3274,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
         // ---- Render inter-town roads from server BFS pathfinding ----
         if (layout.roads.length > 0) {
-          const ribbonMat = new MeshBasicNodeMaterial();
-          ribbonMat.vertexColors = true;
-          ribbonMat.side = THREE.DoubleSide;
+          const ribbonMat = createRoadMaterial();
 
           for (const road of layout.roads) {
             if (road.path.length < 2) continue;
@@ -3221,6 +3295,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               !!road.isMainRoad,
             );
             const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
+            roadMesh.receiveShadow = true;
             roadMesh.userData = {
               selectable: true,
               selectableType: "road",
@@ -3616,10 +3691,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const roadsToRender = providedRoadsRef.current;
       if (roadsToRender && roadsToRender.length > 0) {
         // Use pre-generated road network with actual pathfinding data
-        // Flat ribbon geometry matching the game's dirt-path look
-        const ribbonMat = new MeshBasicNodeMaterial();
-        ribbonMat.vertexColors = true;
-        ribbonMat.side = THREE.DoubleSide;
+        // TSL procedural dirt/gravel material with PBR lighting
+        const ribbonMat = createRoadMaterial();
 
         for (const road of roadsToRender) {
           if (road.path.length < 2) continue;
@@ -3648,6 +3721,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             !!road.isMainRoad,
           );
           const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
+          roadMesh.receiveShadow = true;
           roadMesh.userData = {
             selectable: true,
             selectableType: "road",
@@ -3681,10 +3755,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           "[TileBasedTerrain] No road network data provided, using simplified preview roads",
         );
 
-        // Flat ribbon material for fallback roads
-        const ribbonMat = new MeshBasicNodeMaterial();
-        ribbonMat.vertexColors = true;
-        ribbonMat.side = THREE.DoubleSide;
+        // TSL procedural fallback road material
+        const ribbonMat = createRoadMaterial();
 
         // Create simple road connections between nearby towns
         const connectedPairs = new Set<string>();
@@ -3738,6 +3810,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 false,
               );
               const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
+              roadMesh.receiveShadow = true;
               townMarkers.add(roadMesh);
             }
           }
@@ -4974,6 +5047,44 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             size: t.size,
             safeZoneRadius: t.safeZoneRadius,
           }));
+
+          // Re-render inter-town road ribbons (cleared when townGroup was wiped)
+          const roadsToRender = providedRoadsRef.current;
+          if (roadsToRender && roadsToRender.length > 0) {
+            const ribbonMat = createRoadMaterial();
+            for (const road of roadsToRender) {
+              if (road.path.length < 2) continue;
+              const roadPoints: THREE.Vector3[] = road.path.map((point) => {
+                const y =
+                  point.y !== undefined
+                    ? point.y
+                    : getHeight(point.x, point.z) + 0.15;
+                return new THREE.Vector3(point.x + offset, y, point.z + offset);
+              });
+              const roadWidth = road.isMainRoad
+                ? (road.width || 4) * 1.2
+                : road.width || 4;
+              const roadGeometry = createRoadRibbonGeometry(
+                roadPoints,
+                roadWidth / 2,
+                !!road.isMainRoad,
+              );
+              const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
+              roadMesh.receiveShadow = true;
+              roadMesh.userData = {
+                selectable: true,
+                selectableType: "road",
+                selectableId: road.id,
+                connectedTowns: road.connectedTowns,
+                isMainRoad: road.isMainRoad,
+              };
+              townGroup.add(roadMesh);
+              selectableObjectsRef.current.push(roadMesh);
+            }
+            console.log(
+              `[refreshTownMarkers] Re-rendered ${roadsToRender.length} inter-town roads`,
+            );
+          }
 
           // Regenerate terrain tiles under/near towns so flattening takes effect
           if (tilesRef.current.size > 0) {
