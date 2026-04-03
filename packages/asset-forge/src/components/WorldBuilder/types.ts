@@ -242,6 +242,8 @@ export interface GeneratedTown {
   }>;
   /** Biome the town is located in */
   biomeId: string;
+  /** Safe zone radius in meters (computed by town generator based on size) */
+  safeZoneRadius?: number;
 }
 
 /**

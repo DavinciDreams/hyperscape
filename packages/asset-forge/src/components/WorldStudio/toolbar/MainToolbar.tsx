@@ -28,14 +28,19 @@ import {
   Maximize2,
   Globe,
   Box,
-  Copy,
   ChevronDown,
+  Users,
+  Trash2,
 } from "lucide-react";
 import React, { useState, useEffect } from "react";
 
 import { commandHistory } from "../../../editor/commands";
 import { useWorldStudio, type StudioToolMode } from "../WorldStudioContext";
-import { ZoneAutoGenDialog } from "../panels/ZoneAutoGenDialog";
+import { useZoneAutoGen } from "../hooks/useZoneAutoGen";
+import {
+  GenerationWizardDialog,
+  type WizardMode,
+} from "../panels/GenerationWizardDialog";
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -115,6 +120,36 @@ function ToolButton({
   );
 }
 
+/** Dropdown menu item */
+function DropdownItem({
+  icon: Icon,
+  label,
+  onClick,
+  destructive,
+}: {
+  icon: typeof MousePointer;
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+}) {
+  return (
+    <button
+      className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+        destructive
+          ? "text-red-400 hover:bg-red-500/10"
+          : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+      }`}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onClick();
+      }}
+    >
+      <Icon size={14} />
+      {label}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -170,8 +205,11 @@ export function MainToolbar({
     else actions.redo();
   };
 
-  // Zone auto-gen dialog
-  const [autoGenOpen, setAutoGenOpen] = useState(false);
+  // Generation wizard
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardMode, setWizardMode] = useState<WizardMode>("full");
+  const [genDropdownOpen, setGenDropdownOpen] = useState(false);
+  const { clearAutogen } = useZoneAutoGen();
 
   // Save flash animation
   const [saveFlash, setSaveFlash] = useState(false);
@@ -226,14 +264,67 @@ export function MainToolbar({
           </React.Fragment>
         ))}
 
-        {/* Auto-Generate Zones button */}
+        {/* Generation wizard dropdown */}
         <Divider />
-        <ToolButton
-          icon={Sparkles}
-          label="Auto-Generate Zones"
-          onClick={() => setAutoGenOpen(true)}
-          disabled={!computed.hasLoadedWorld}
-        />
+        <div className="relative">
+          <button
+            className={`flex items-center gap-1 p-1.5 rounded-md transition-colors ${
+              !computed.hasLoadedWorld
+                ? "text-text-tertiary/30 cursor-not-allowed"
+                : genDropdownOpen
+                  ? "text-primary bg-primary/15"
+                  : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
+            }`}
+            disabled={!computed.hasLoadedWorld}
+            title="World Generation"
+            onClick={() => setGenDropdownOpen((v) => !v)}
+            onBlur={() => setTimeout(() => setGenDropdownOpen(false), 150)}
+          >
+            <Sparkles size={16} />
+            <ChevronDown size={10} />
+          </button>
+          {genDropdownOpen && (
+            <div className="absolute top-full left-0 mt-1 w-48 py-1 bg-bg-secondary border border-border-primary rounded-md shadow-xl z-50">
+              <DropdownItem
+                icon={Wand2}
+                label="Full World Wizard"
+                onClick={() => {
+                  setWizardMode("full");
+                  setWizardOpen(true);
+                  setGenDropdownOpen(false);
+                }}
+              />
+              <DropdownItem
+                icon={Hexagon}
+                label="Zones Only"
+                onClick={() => {
+                  setWizardMode("zones-only");
+                  setWizardOpen(true);
+                  setGenDropdownOpen(false);
+                }}
+              />
+              <DropdownItem
+                icon={Users}
+                label="Population Only"
+                onClick={() => {
+                  setWizardMode("population-only");
+                  setWizardOpen(true);
+                  setGenDropdownOpen(false);
+                }}
+              />
+              <div className="h-px bg-border-primary my-1" />
+              <DropdownItem
+                icon={Trash2}
+                label="Clear All Procgen"
+                onClick={() => {
+                  clearAutogen();
+                  setGenDropdownOpen(false);
+                }}
+                destructive
+              />
+            </div>
+          )}
+        </div>
 
         {/* Transform mode buttons — only when select tool active */}
         {isSelectTool && (
@@ -398,10 +489,11 @@ export function MainToolbar({
         />
       </div>
 
-      {/* Zone auto-gen dialog (portal) */}
-      <ZoneAutoGenDialog
-        open={autoGenOpen}
-        onClose={() => setAutoGenOpen(false)}
+      {/* Generation wizard dialog (portal) */}
+      <GenerationWizardDialog
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        mode={wizardMode}
       />
     </div>
   );

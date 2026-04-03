@@ -321,6 +321,17 @@ export interface TileBasedTerrainProps {
   showDifficultyHeatmap?: boolean;
   /** Danger sources for difficulty heatmap overlay */
   dangerSources?: DangerSourceInfo[];
+  /** Called after towns are generated/loaded — used to sync runtime towns back to foundation */
+  onTownsGenerated?: (
+    towns: Array<{
+      id: string;
+      name: string;
+      position: { x: number; y: number; z: number };
+      size: "hamlet" | "village" | "town";
+      safeZoneRadius: number;
+      biomeId?: string;
+    }>,
+  ) => void;
 }
 
 export type { GameEntityData };
@@ -1232,6 +1243,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   onViewportContextMenu,
   showDifficultyHeatmap = false,
   dangerSources,
+  onTownsGenerated,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
@@ -2648,6 +2660,18 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           safeZoneRadius: t.safeZoneRadius,
         }));
 
+        // Sync runtime towns back to foundation (single source of truth)
+        onTownsGenerated?.(
+          layout.towns.map((t) => ({
+            id: t.id,
+            name: t.name,
+            position: { x: t.position.x, y: t.position.y, z: t.position.z },
+            size: t.size as "hamlet" | "village" | "town",
+            safeZoneRadius: t.safeZoneRadius,
+            biomeId: t.biome,
+          })),
+        );
+
         // Feed town data to difficulty heatmap
         if (heatmapManagerRef.current) {
           const townInfos: TownInfo[] = layout.towns.map((t) => ({
@@ -3028,6 +3052,18 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         size: t.size,
         safeZoneRadius: t.safeZoneRadius,
       }));
+
+      // Sync runtime towns back to foundation (single source of truth)
+      onTownsGenerated?.(
+        townResult.towns.map((t) => ({
+          id: t.id,
+          name: t.name,
+          position: { x: t.position.x, y: t.position.y, z: t.position.z },
+          size: t.size,
+          safeZoneRadius: t.safeZoneRadius,
+          biomeId: t.biome,
+        })),
+      );
 
       // Feed town data to difficulty heatmap
       if (heatmapManagerRef.current) {

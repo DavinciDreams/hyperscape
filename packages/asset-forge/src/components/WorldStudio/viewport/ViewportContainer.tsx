@@ -142,6 +142,22 @@ export function ViewportContainer() {
     [actions],
   );
 
+  const handleTownsGenerated = useCallback(
+    (
+      towns: Array<{
+        id: string;
+        name: string;
+        position: { x: number; y: number; z: number };
+        size: "hamlet" | "village" | "town";
+        safeZoneRadius: number;
+        biomeId?: string;
+      }>,
+    ) => {
+      actions.syncRuntimeTowns(towns);
+    },
+    [actions],
+  );
+
   const activeSceneRefs = sceneReady ? sceneRefsRef.current : null;
 
   // ----- View mode state -----
@@ -1220,6 +1236,7 @@ export function ViewportContainer() {
         onMoveSpeedChange={setCameraMoveSpeed}
         showDifficultyHeatmap={showDifficultyHeatmap}
         dangerSources={heatmapDangerSources}
+        onTownsGenerated={handleTownsGenerated}
       />
       {/* Viewport info overlay (UE5-style corner HUD) */}
       {isEditing && (

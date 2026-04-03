@@ -47,6 +47,7 @@ import type {
   CreationModeState,
   HierarchyNode,
   WorldPosition,
+  GeneratedTown,
 } from "../WorldBuilder/types";
 
 import {
@@ -498,7 +499,19 @@ type StudioSpecificAction =
       mobSpawns: PlacedMobSpawn[];
       resources: PlacedResource[];
     }
-  | { type: "CLEAR_ALL_AUTOGEN" };
+  | { type: "CLEAR_ALL_AUTOGEN" }
+  // Town unification — sync runtime-generated towns into foundation.towns
+  | {
+      type: "SYNC_RUNTIME_TOWNS";
+      towns: Array<{
+        id: string;
+        name: string;
+        position: { x: number; y: number; z: number };
+        size: "hamlet" | "village" | "town";
+        safeZoneRadius: number;
+        biomeId?: string;
+      }>;
+    };
 
 /** Union of all world builder + studio-specific actions */
 export type WorldStudioAction = WorldBuilderAction | StudioSpecificAction;
@@ -1395,6 +1408,88 @@ function studioReducer(
         },
       };
 
+    // Town unification — merge runtime-generated towns into foundation
+    case "SYNC_RUNTIME_TOWNS": {
+      const world = state.builder.editing.world;
+      if (!world) return state;
+
+      // Build a set of existing town IDs to avoid duplicates
+      const existingIds = new Set(world.foundation.towns.map((t) => t.id));
+      const newTowns = action.towns
+        .filter((rt) => !existingIds.has(rt.id))
+        .map(
+          (rt): GeneratedTown => ({
+            id: rt.id,
+            name: rt.name,
+            size: rt.size,
+            position: { x: rt.position.x, y: rt.position.y, z: rt.position.z },
+            layoutType: "terminus",
+            buildingIds: [],
+            entryPoints: [],
+            biomeId: rt.biomeId ?? "unknown",
+            safeZoneRadius: rt.safeZoneRadius,
+          }),
+        );
+
+      if (newTowns.length === 0) {
+        // Update positions and safeZoneRadius of existing towns that may have changed
+        let changed = false;
+        const updatedTowns = world.foundation.towns.map((existing) => {
+          const runtime = action.towns.find((rt) => rt.id === existing.id);
+          if (!runtime) return existing;
+          const posChanged =
+            Math.abs(runtime.position.x - existing.position.x) > 0.1 ||
+            Math.abs(runtime.position.z - existing.position.z) > 0.1;
+          const radiusChanged =
+            existing.safeZoneRadius !== runtime.safeZoneRadius;
+          if (posChanged || radiusChanged) {
+            changed = true;
+            return {
+              ...existing,
+              position: {
+                x: runtime.position.x,
+                y: runtime.position.y,
+                z: runtime.position.z,
+              },
+              safeZoneRadius: runtime.safeZoneRadius,
+            };
+          }
+          return existing;
+        });
+        if (!changed) return state;
+        return {
+          ...state,
+          builder: {
+            ...state.builder,
+            editing: {
+              ...state.builder.editing,
+              world: {
+                ...world,
+                foundation: { ...world.foundation, towns: updatedTowns },
+              },
+            },
+          },
+        };
+      }
+
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: {
+            ...state.builder.editing,
+            world: {
+              ...world,
+              foundation: {
+                ...world.foundation,
+                towns: [...world.foundation.towns, ...newTowns],
+              },
+            },
+          },
+        },
+      };
+    }
+
     // Manifest loading
     case "MANIFESTS_LOAD_START":
       return {
@@ -2160,6 +2255,18 @@ interface WorldStudioContextValue {
     ) => void;
     clearAllAutogen: () => void;
 
+    // Town unification — sync runtime-generated towns into foundation
+    syncRuntimeTowns: (
+      towns: Array<{
+        id: string;
+        name: string;
+        position: { x: number; y: number; z: number };
+        size: "hamlet" | "village" | "town";
+        safeZoneRadius: number;
+        biomeId?: string;
+      }>,
+    ) => void;
+
     // Studio-specific: Danger Sources
     addDangerSource: (dangerSource: PlacedDangerSource) => void;
     updateDangerSource: (
@@ -2587,6 +2694,18 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         resources: PlacedResource[],
       ) => dispatch({ type: "BATCH_ADD_ENTITIES", mobSpawns, resources }),
       clearAllAutogen: () => dispatch({ type: "CLEAR_ALL_AUTOGEN" }),
+
+      // Town unification
+      syncRuntimeTowns: (
+        towns: Array<{
+          id: string;
+          name: string;
+          position: { x: number; y: number; z: number };
+          size: "hamlet" | "village" | "town";
+          safeZoneRadius: number;
+          biomeId?: string;
+        }>,
+      ) => dispatch({ type: "SYNC_RUNTIME_TOWNS", towns }),
 
       // Studio-specific: Extended layers — Danger Sources
       addDangerSource: (dangerSource: PlacedDangerSource) =>
