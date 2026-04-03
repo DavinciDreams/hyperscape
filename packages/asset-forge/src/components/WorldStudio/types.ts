@@ -794,8 +794,31 @@ export interface ManifestNPC {
     enabled: boolean;
     types: string[];
   };
+  /** Building type this NPC belongs to (e.g., "smithy", "bank", "inn") */
+  buildingRole?: string;
+  /** Store ID this NPC manages (e.g., "sword_store", "general_store") */
+  storeId?: string;
+  /** Placement rules for contextual positioning */
+  placementRules?: NPCPlacementRules;
   /** Full raw data for detailed editing */
   _raw?: Record<string, unknown>;
+}
+
+/** Placement rules for contextual NPC positioning */
+export interface NPCPlacementRules {
+  /** Preferred biome for placement */
+  biomePreference?: string;
+  /** Placement strategy */
+  placement?:
+    | "town_interior"
+    | "town_edge"
+    | "biome_edge"
+    | "near_water"
+    | "road_side";
+  /** Maximum distance from nearest town */
+  maxDistFromTown?: number;
+  /** Minimum distance from nearest town */
+  minDistFromTown?: number;
 }
 
 /** Station manifest entry (from stations.json) */
@@ -899,6 +922,8 @@ export interface ManifestQuest {
     items?: Array<{ itemId: string; quantity: number }>;
     xp?: Record<string, number>;
   };
+  /** Placement rules for the quest's start NPC */
+  placementRules?: NPCPlacementRules;
 }
 
 // ============== STORE MANIFEST TYPES ==============

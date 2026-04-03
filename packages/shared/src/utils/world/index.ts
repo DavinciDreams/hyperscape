@@ -51,3 +51,24 @@ export {
   scoreShorelinePosition,
   generateDocks,
 } from "./dockPlacement";
+
+export {
+  type StoreBuilding,
+  type StoreNPCEntry,
+  type StoreAssignment,
+  type TownSizeCategory,
+  BUILDING_STORE_MAP,
+  TOWN_SIZE_STORES,
+  assignStores,
+  buildStoreMap,
+} from "./storeAssignment";
+
+export {
+  type QuestTerrainQuerier,
+  type PlacementRules,
+  type PlacementTownRef,
+  type QuestNPCToPlace,
+  type PlacedQuestNPC,
+  placeQuestNPCs,
+  extractQuestNPCsToPlace,
+} from "./questNPCPlacement";
