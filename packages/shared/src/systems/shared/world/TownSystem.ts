@@ -58,6 +58,11 @@ import {
   getSideVector,
 } from "@hyperscape/procgen/building";
 import { BuildingCollisionService } from "./BuildingCollisionService";
+import {
+  extractBuildingNPC,
+  BUILDING_NPC_TYPES as SHARED_BUILDING_NPC_TYPES,
+  type BuildingNPCSpawn as SharedBuildingNPCSpawn,
+} from "../../../utils/world/townPopulation";
 import type {
   FlatZone,
   FlatZoneTile,
@@ -218,33 +223,11 @@ const BUILDING_TYPE_TO_RECIPE: Record<string, string> = {
  */
 const STATION_TYPES = new Set(["well", "anvil"]);
 
-/** NPC spawn position calculated from building interior placement */
-interface BuildingNPCSpawn {
-  /** World position for the NPC */
-  position: { x: number; y: number; z: number };
-  /** NPC facing direction (radians) */
-  rotation: number;
-  /** NPC type to spawn (e.g., "innkeeper", "banker", "blacksmith") */
-  npcType: string;
-}
+/** NPC spawn position stored per building (uses shared utility types) */
+type BuildingNPCSpawn = Omit<SharedBuildingNPCSpawn, "buildingId">;
 
-/** Mapping from building type to NPC type */
-const BUILDING_NPC_TYPES: Record<string, string> = {
-  inn: "innkeeper",
-  bank: "banker",
-  smithy: "blacksmith",
-  store: "shopkeeper",
-  church: "priest",
-  cathedral: "priest",
-  chapel: "priest",
-  "guild-hall": "guild-master",
-  "town-hall": "mayor",
-  mansion: "noble",
-  manor: "noble",
-  keep: "guard-captain",
-  fortress: "guard-captain",
-  castle: "lord",
-};
+/** Re-export shared mapping for local use (e.g., fallback path in getNPCSpawnPointsForBuildingType) */
+const BUILDING_NPC_TYPES = SHARED_BUILDING_NPC_TYPES;
 
 export class TownSystem extends System {
   private towns: ProceduralTown[] = [];
@@ -1168,136 +1151,28 @@ export class TownSystem extends System {
     layout: BuildingLayout,
     propPlacements?: PropPlacements,
   ): void {
-    if (!propPlacements) return;
+    // Delegate to shared utility (extracted for editor reuse)
+    const spawn = extractBuildingNPC(
+      {
+        id: building.id,
+        type: building.type,
+        position: building.position,
+        rotation: building.rotation,
+      },
+      layout,
+      propPlacements,
+    );
+    if (!spawn) return;
 
-    // Get NPC type for this building type
-    const npcType = BUILDING_NPC_TYPES[building.type];
-    if (!npcType) return;
-
-    let localX: number;
-    let localZ: number;
-    let npcRotation: number;
-
-    // Handle different building types
-    if (building.type === "smithy" && propPlacements.forge) {
-      // Blacksmith stands near the forge
-      const forgePlacement = propPlacements.forge;
-      const cellCenter = getCellCenter(
-        forgePlacement.col,
-        forgePlacement.row,
-        CELL_SIZE,
-        layout.width,
-        layout.depth,
-      );
-      // Stand next to the forge (offset by 1 meter)
-      localX = cellCenter.x + 1.0;
-      localZ = cellCenter.z;
-      // Face toward the forge (toward the entrance usually)
-      npcRotation = building.rotation + Math.PI;
-    } else {
-      // Inn bar or bank counter - NPC stands behind counter
-      let placement:
-        | {
-            col: number;
-            row: number;
-            side: string;
-            secondCell?: { col: number; row: number };
-          }
-        | null
-        | undefined;
-      if (building.type === "inn") {
-        placement = propPlacements.innBar;
-      } else if (building.type === "bank") {
-        placement = propPlacements.bankCounter;
-      }
-
-      if (!placement) return;
-
-      // Calculate cell center in building-local coordinates
-      if (placement.secondCell) {
-        // 2-tile counter: use center between the two cells
-        const cell1 = getCellCenter(
-          placement.col,
-          placement.row,
-          CELL_SIZE,
-          layout.width,
-          layout.depth,
-        );
-        const cell2 = getCellCenter(
-          placement.secondCell.col,
-          placement.secondCell.row,
-          CELL_SIZE,
-          layout.width,
-          layout.depth,
-        );
-        localX = (cell1.x + cell2.x) / 2;
-        localZ = (cell1.z + cell2.z) / 2;
-      } else {
-        // Single-tile counter
-        const cellCenter = getCellCenter(
-          placement.col,
-          placement.row,
-          CELL_SIZE,
-          layout.width,
-          layout.depth,
-        );
-        localX = cellCenter.x;
-        localZ = cellCenter.z;
-      }
-
-      // Apply NPC offset (behind the counter, between counter and wall)
-      // NPC_BEHIND_COUNTER_OFFSET is the distance from cell center toward the wall
-      // where the NPC stands. This places them between the counter's back face
-      // and the wall's interior face, snug against the wall.
-      const sideVec = getSideVector(placement.side);
-      localX += sideVec.x * NPC_BEHIND_COUNTER_OFFSET;
-      localZ += sideVec.z * NPC_BEHIND_COUNTER_OFFSET;
-
-      // Calculate NPC facing direction (opposite of the counter side, rotated by building)
-      // NPC faces away from the wall they're against (toward customers)
-      let faceAngle = 0;
-      switch (placement.side) {
-        case "north":
-          faceAngle = Math.PI; // Face south
-          break;
-        case "south":
-          faceAngle = 0; // Face north
-          break;
-        case "east":
-          faceAngle = -Math.PI / 2; // Face west
-          break;
-        case "west":
-          faceAngle = Math.PI / 2; // Face east
-          break;
-      }
-      // Apply building rotation
-      npcRotation = faceAngle + building.rotation;
-    }
-
-    // Transform to world coordinates using building position and rotation
-    const cos = Math.cos(building.rotation);
-    const sin = Math.sin(building.rotation);
-
-    const worldX = building.position.x + localX * cos - localZ * sin;
-    const worldZ = building.position.z + localX * sin + localZ * cos;
-
-    // Y position is building floor height above building.position.y.
-    // Use dynamic foundation height from the layout's step count.
-    // Note: building.position.y gets updated later to maxGroundY, so we store the base
-    // and compute the actual Y when reading the spawn point.
-    const dynamicFoundationH = layout.foundationSteps * ENTRANCE_STEP_HEIGHT;
-    const worldY = building.position.y + dynamicFoundationH;
-
-    // Store the NPC spawn data
     this.buildingNPCSpawns.set(building.id, {
-      position: { x: worldX, y: worldY, z: worldZ },
-      rotation: npcRotation,
-      npcType,
+      position: spawn.position,
+      rotation: spawn.rotation,
+      npcType: spawn.npcType,
     });
 
     Logger.system(
       "TownSystem",
-      `NPC spawn for ${building.id}: ${npcType} at (${worldX.toFixed(1)}, ${worldY.toFixed(1)}, ${worldZ.toFixed(1)})`,
+      `NPC spawn for ${building.id}: ${spawn.npcType} at (${spawn.position.x.toFixed(1)}, ${spawn.position.y.toFixed(1)}, ${spawn.position.z.toFixed(1)})`,
     );
   }
 
