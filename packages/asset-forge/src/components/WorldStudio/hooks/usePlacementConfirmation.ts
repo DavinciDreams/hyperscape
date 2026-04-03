@@ -140,14 +140,20 @@ export function usePlacementConfirmation() {
 
       case "teleports": {
         entityId = generateId("teleport");
+        const teleportType =
+          activePlacement.templateId === "teleport-portal"
+            ? "portal"
+            : activePlacement.templateId === "teleport-shortcut"
+              ? "shortcut"
+              : "lodestone";
         entityData = {
           id: entityId,
-          name: `Teleport ${templateName}`,
+          name: `${templateName}`,
           position: { ...position },
           connections: [],
           requirements: {},
           cost: 0,
-          properties: {},
+          properties: { type: teleportType },
         };
         addFn = (d) => actions.addTeleport(d as never);
         removeFn = (id) => actions.removeTeleport(id);

@@ -101,12 +101,15 @@ function compileWorldJson(
     linkedAreaId: sp.linkedAreaId,
   }));
 
-  // Compile teleports
+  // Compile teleports (includes requirements + cost for runtime TeleportSystem)
   const teleports = extendedLayers.teleports.map((tp) => ({
     id: tp.id,
     name: tp.name,
     position: tp.position,
     connections: tp.connections,
+    type: (tp.properties?.type as string) ?? "lodestone",
+    requirements: tp.requirements,
+    cost: tp.cost,
   }));
 
   // Compile POIs

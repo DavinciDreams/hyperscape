@@ -30,6 +30,9 @@ export * from "./ProcgenTreeCache";
 export * from "./ProcgenTreeInstancer";
 export * from "./AtlasedTreeImpostors";
 
+// Teleport Network
+export * from "./TeleportSystem";
+
 // Tree LOD System (consolidated tree baking and rendering)
 export * from "./TreeLODSystem";
 export * from "./TreeLODMaterials";

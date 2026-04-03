@@ -128,6 +128,9 @@ export interface CompiledWorldJson {
       name: string;
       position: { x: number; y: number; z: number };
       connections: string[];
+      type?: string;
+      requirements?: { questId?: string; minLevel?: number; itemId?: string };
+      cost?: number;
     }>;
     pois: Array<{
       id: string;

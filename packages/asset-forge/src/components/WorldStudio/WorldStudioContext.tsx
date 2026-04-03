@@ -1405,6 +1405,12 @@ function studioReducer(
           resources: state.extendedLayers.resources.filter(
             (r) => r.source !== "procgen" || !r.id.startsWith("autogen-"),
           ),
+          spawnPoints: state.extendedLayers.spawnPoints.filter(
+            (sp) => !sp.id.startsWith("autogen-"),
+          ),
+          teleports: state.extendedLayers.teleports.filter(
+            (tp) => !tp.id.startsWith("autogen-"),
+          ),
         },
       };
 

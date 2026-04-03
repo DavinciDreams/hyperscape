@@ -502,6 +502,8 @@ export interface WorldArea {
     heightOffset?: number;
     blendRadius: number;
   }>;
+  /** Teleport nodes in this area (lodestones, portals, shortcuts) */
+  teleports?: TeleportNode[];
   /** Sub-zones within this area (e.g., lobby, hospital, arenas) */
   subZones?: Record<
     string,
@@ -517,6 +519,40 @@ export interface WorldArea {
       arenaGap?: number;
     }
   >;
+}
+
+// ============== TELEPORT NETWORK ==============
+
+/** A teleport node (lodestone, portal, shortcut) within a world area */
+export interface TeleportNode {
+  id: string;
+  name: string;
+  position: Position3D;
+  /** Node type: lodestone (unlocked by visiting), portal (always available), shortcut (quest-gated) */
+  type: "lodestone" | "portal" | "shortcut";
+  /** Requirements to use this teleport */
+  requirements?: {
+    /** Quest that must be completed */
+    questComplete?: string | null;
+    /** Minimum total level */
+    level?: number;
+    /** Item required in inventory */
+    itemId?: string;
+  };
+  /** Gold cost to teleport here (0 = free) */
+  cost?: number;
+}
+
+/** Global teleport network configuration (from world-config.json) */
+export interface TeleportNetworkConfig {
+  /** Default home teleport destination node ID */
+  homeNode: string;
+  /** How lodestones are unlocked: "visit" = walk near, "interact" = click */
+  unlockType: "visit" | "interact";
+  /** Cooldown between teleports in seconds */
+  cooldownSeconds: number;
+  /** Radius to unlock a lodestone by visiting (meters) */
+  unlockRadius?: number;
 }
 
 // ============== DANGER SOURCES & WILDERNESS ==============
@@ -1334,6 +1370,8 @@ export interface WorldConfigManifest {
   pois?: POIConfigManifest;
   /** World seed for procedural generation */
   seed: number;
+  /** Teleport network configuration */
+  teleportNetwork?: TeleportNetworkConfig;
 }
 
 // ============== BUILDINGS MANIFEST TYPES ==============

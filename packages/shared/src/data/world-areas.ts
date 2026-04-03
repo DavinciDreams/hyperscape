@@ -38,6 +38,8 @@ export type {
 export type {
   DangerSource,
   WildernessBoundary,
+  TeleportNode,
+  TeleportNetworkConfig,
 } from "../types/world/world-types";
 
 /**

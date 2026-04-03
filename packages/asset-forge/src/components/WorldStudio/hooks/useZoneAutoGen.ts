@@ -28,6 +28,8 @@ import {
 
 import type {
   PlacedRegion,
+  PlacedSpawnPoint,
+  PlacedTeleport,
   DifficultyTierConfig,
   AutoGenBounds,
   AutoGenConfig,
@@ -318,6 +320,8 @@ export function runAutoGenPipeline(
       zones: [],
       mobSpawns: [],
       resources: [],
+      spawnPoints: [],
+      teleports: [],
       stats: {
         zonesGenerated: 0,
         zoneMerged: 0,
@@ -416,6 +420,50 @@ export function runAutoGenPipeline(
     deps.existingEntities,
   );
 
+  // Step 7: Auto-place spawn points + lodestones at each town plaza
+  const spawnPoints: PlacedSpawnPoint[] = [];
+  const teleports: PlacedTeleport[] = [];
+
+  // Find the largest town (by safe zone radius) as the default spawn
+  let largestTownIdx = 0;
+  let largestRadius = 0;
+  for (let i = 0; i < deps.towns.length; i++) {
+    if (deps.towns[i].safeZoneRadius > largestRadius) {
+      largestRadius = deps.towns[i].safeZoneRadius;
+      largestTownIdx = i;
+    }
+  }
+
+  for (let i = 0; i < deps.towns.length; i++) {
+    const town = deps.towns[i];
+    const townName = `Town ${i + 1}`;
+    const isMainSpawn = i === largestTownIdx;
+
+    // Spawn point at plaza center
+    spawnPoints.push({
+      id: `autogen-spawn-${i}`,
+      name: isMainSpawn ? `${townName} (Default Spawn)` : `${townName} Respawn`,
+      position: { x: town.position.x, y: 0, z: town.position.z },
+      rotation: 0,
+      spawnType: isMainSpawn ? "initial" : "death-respawn",
+      capacity: isMainSpawn ? 50 : 10,
+      linkedAreaId: undefined,
+      properties: { source: "autogen" },
+    });
+
+    // Lodestone teleport at plaza center (slightly offset from spawn)
+    const lodestoneId = `autogen-lodestone-${i}`;
+    teleports.push({
+      id: lodestoneId,
+      name: `${townName} Lodestone`,
+      position: { x: town.position.x + 3, y: 0, z: town.position.z + 3 },
+      connections: [], // Lodestone network — all lodestones are implicitly connected
+      requirements: { minLevel: 1 },
+      cost: 0,
+      properties: { source: "autogen", type: "lodestone" },
+    });
+  }
+
   const elapsed = performance.now() - startTime;
 
   // Build stats
@@ -453,6 +501,8 @@ export function runAutoGenPipeline(
     zones: autoGenZones,
     mobSpawns: mobs,
     resources,
+    spawnPoints,
+    teleports,
     stats,
   };
 }
@@ -587,6 +637,15 @@ export function useZoneAutoGen() {
 
       actions.batchAddRegions(regions);
       actions.batchAddEntities(result.mobSpawns, result.resources);
+
+      // Add auto-generated spawn points
+      for (const sp of result.spawnPoints) {
+        actions.addSpawnPoint(sp);
+      }
+      // Add auto-generated lodestones
+      for (const tp of result.teleports) {
+        actions.addTeleport(tp);
+      }
     },
     [actions],
   );

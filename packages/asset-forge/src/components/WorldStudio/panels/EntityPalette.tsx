@@ -336,11 +336,25 @@ export function EntityPalette() {
     // Teleports — user-created templates
     map.set("teleports", [
       {
-        id: "teleport-node",
-        name: "Teleport Node",
+        id: "teleport-lodestone",
+        name: "Lodestone",
         category: "teleports" as PaletteCategory,
-        description: "Bidirectional teleport network node",
-        manifestData: { nodeType: "standard" },
+        description: "Teleport node unlocked by visiting (RuneScape-style)",
+        manifestData: { nodeType: "lodestone" },
+      },
+      {
+        id: "teleport-portal",
+        name: "Portal",
+        category: "teleports" as PaletteCategory,
+        description: "Always-available teleport destination",
+        manifestData: { nodeType: "portal" },
+      },
+      {
+        id: "teleport-shortcut",
+        name: "Shortcut",
+        category: "teleports" as PaletteCategory,
+        description: "Quest-gated teleport shortcut",
+        manifestData: { nodeType: "shortcut" },
       },
     ]);
 

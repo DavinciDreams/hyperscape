@@ -408,6 +408,10 @@ export interface AutoGenResult {
   zones: AutoGenZone[];
   mobSpawns: PlacedMobSpawn[];
   resources: PlacedResource[];
+  /** Auto-placed spawn points at town plazas */
+  spawnPoints: PlacedSpawnPoint[];
+  /** Auto-placed lodestone teleports at town plazas */
+  teleports: PlacedTeleport[];
   stats: AutoGenStats;
 }
 
