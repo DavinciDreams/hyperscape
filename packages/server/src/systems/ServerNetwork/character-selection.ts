@@ -20,6 +20,7 @@ import {
   EventType,
   uuid,
   getItem,
+  getRandomSpawnPoint,
   TerrainSystem,
   Entity,
   World,
@@ -808,9 +809,10 @@ export async function handleEnterWorld(
   }
 
   // Load saved position from character data if available
+  const fallbackPt = getRandomSpawnPoint();
   let position = Array.isArray(spawn.position)
     ? ([...spawn.position] as [number, number, number])
-    : [0, 50, 0];
+    : ([fallbackPt.x, fallbackPt.y, fallbackPt.z] as [number, number, number]);
   const quaternion = Array.isArray(spawn.quaternion)
     ? ([...spawn.quaternion] as [number, number, number, number])
     : [0, 0, 0, 1];

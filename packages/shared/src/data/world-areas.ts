@@ -199,16 +199,10 @@ export function getRandomSpawnPoint(): WorldPosition {
 }
 
 /**
- * World Generation Constants (areas, spawning, resources)
- * Note: Different from WORLD_STRUCTURE_CONSTANTS in world-structure.ts
+ * World Generation Constants — DEPRECATED, values now in world-config.json.
+ * Per-area safe zones use WorldArea.safeZone + town safeZoneRadius.
+ * Remaining values loaded from ManifestService at runtime.
  */
-export const WORLD_GENERATION_CONSTANTS = {
-  TOTAL_WORLD_SIZE: 500, // 500x500 meter world
-  SAFE_ZONE_RADIUS: 25, // 25 meter radius around spawn points
-  RESOURCE_RESPAWN_VARIANCE: 0.2, // ±20% respawn time variance
-  MOB_SPAWN_CHECK_RADIUS: 5, // Don't spawn mobs within 5m of players
-  AREA_TRANSITION_OVERLAP: 5, // 5 meter overlap between adjacent areas
-} as const;
 
 /**
  * Runtime danger sources — populated from editor saves or JSON manifest.

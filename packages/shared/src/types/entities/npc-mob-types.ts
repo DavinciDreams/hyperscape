@@ -252,6 +252,7 @@ export interface NPCDataInput {
   position?: Position3D;
   spawnBiomes?: string[];
   dialogue?: NPCDialogueTree;
+  buildingRole?: string;
 }
 
 /**
@@ -448,6 +449,10 @@ export interface NPCData {
   // ========== SPAWN INFO ==========
   position: Position3D;
   spawnBiomes?: string[]; // Which biomes this NPC can spawn in
+
+  // ========== BUILDING ASSOCIATION (Optional) ==========
+  /** Role tag matching building npcType (e.g., "store", "smithy", "bank") */
+  buildingRole?: string;
 }
 
 // ============== LEGACY MOB DATA STRUCTURES ==============

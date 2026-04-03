@@ -47,6 +47,7 @@ import {
   TERRAIN_CONSTANTS,
   TICK_DURATION_MS,
   MobEntity,
+  getRandomSpawnPoint,
 } from "@hyperscape/shared";
 
 // Payload types (extracted to types.ts)
@@ -328,7 +329,11 @@ function traceAttackMob(stage: string, data?: Record<string, unknown>): void {
 }
 import { executeDuelStakeTransferWithRetry } from "./duel-settlement";
 
-const defaultSpawn = '{ "position": [0, 50, 0], "quaternion": [0, 0, 0, 1] }';
+/** Initial spawn — replaced by loadSpawnPoint() from manifests during init */
+function getDefaultSpawn(): SpawnData {
+  const pt = getRandomSpawnPoint();
+  return { position: [pt.x, pt.y, pt.z], quaternion: [0, 0, 0, 1] };
+}
 
 /**
  * ServerNetwork - Authoritative multiplayer networking system
@@ -495,7 +500,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.isServer = true;
     this.isClient = false;
     this.queue = [];
-    this.spawn = JSON.parse(defaultSpawn);
+    this.spawn = getDefaultSpawn();
     this.maxUploadSize = 50; // Default 50MB upload limit
 
     // Initialize managers will happen in init() after world.db is set

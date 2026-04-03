@@ -20,12 +20,9 @@
  */
 
 import type { World } from "@hyperscape/shared";
-import { STARTER_TOWNS } from "@hyperscape/shared";
+import { STARTER_TOWNS, getRandomSpawnPoint } from "@hyperscape/shared";
 import type { SystemDatabase, SpawnData } from "../../shared/types";
 import { errMsg } from "../../shared/errMsg.js";
-
-// Default spawn point (fallback if manifest unavailable)
-const DEFAULT_SPAWN = '{ "position": [0, 50, 0], "quaternion": [0, 0, 0, 1] }';
 
 /**
  * InitializationManager - Handles ServerNetwork startup tasks
@@ -66,11 +63,15 @@ export class InitializationManager {
       };
     }
 
-    // Fallback to default spawn at origin
+    // Fallback: use manifest-derived spawn point from safe zones
+    const spawnPt = getRandomSpawnPoint();
     console.log(
-      "[InitializationManager] Starter town not found, using default spawn",
+      `[InitializationManager] Starter town not found, using manifest spawn at (${spawnPt.x}, ${spawnPt.z})`,
     );
-    return JSON.parse(DEFAULT_SPAWN) as SpawnData;
+    return {
+      position: [spawnPt.x, spawnPt.y, spawnPt.z],
+      quaternion: [0, 0, 0, 1],
+    };
   }
 
   /**

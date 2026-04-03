@@ -51,17 +51,19 @@ import type { Physics } from "../shared/interaction/Physics";
 import type { PxRigidStatic } from "../../types/systems/physics";
 import type { ParticleSystem } from "../shared/presentation/ParticleSystem";
 import type { FlatZone } from "../../types/world/terrain";
+import { getDuelArenaConfig } from "../../data/duel-manifest";
 
 // ============================================================================
-// Arena Configuration (matches ArenaPoolManager)
+// Arena Configuration — derived from manifest via getDuelArenaConfig()
 // ============================================================================
 
-const ARENA_BASE_X = 60;
-const ARENA_BASE_Z = 80;
-const ARENA_WIDTH = 20;
-const ARENA_LENGTH = 24;
-const ARENA_GAP = 4;
-const ARENA_COUNT = 6;
+const _cfg = getDuelArenaConfig();
+const ARENA_BASE_X = _cfg.baseX;
+const ARENA_BASE_Z = _cfg.baseZ;
+const ARENA_WIDTH = _cfg.arenaWidth;
+const ARENA_LENGTH = _cfg.arenaLength;
+const ARENA_GAP = _cfg.arenaGap;
+const ARENA_COUNT = _cfg.arenaCount;
 
 const FENCE_HEIGHT = 1.5;
 const FENCE_POST_SPACING = 2.0;
@@ -72,13 +74,15 @@ const FENCE_RAIL_HEIGHTS = [0.3, 0.75, 1.2];
 const FLOOR_THICKNESS = 0.3;
 const FLOOR_HEIGHT_OFFSET = 0.27;
 
-const LOBBY_CENTER_X = 105;
-const LOBBY_CENTER_Z = 62;
+// Lobby: center X = arena right edge + gap + half lobby width
+const LOBBY_CENTER_X = _cfg.lobbySpawnPoint.x;
+const LOBBY_CENTER_Z = _cfg.lobbySpawnPoint.z + 2; // Slight offset to match legacy
 const LOBBY_WIDTH = 40;
 const LOBBY_LENGTH = 25;
 
-const HOSPITAL_CENTER_X = 65;
-const HOSPITAL_CENTER_Z = 62;
+// Hospital: positioned to left of arenas
+const HOSPITAL_CENTER_X = ARENA_BASE_X + 5;
+const HOSPITAL_CENTER_Z = LOBBY_CENTER_Z;
 const HOSPITAL_WIDTH = 30;
 const HOSPITAL_LENGTH = 25;
 

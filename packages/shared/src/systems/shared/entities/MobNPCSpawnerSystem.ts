@@ -102,8 +102,6 @@ export class MobNPCSpawnerSystem extends SystemBase {
       await this.spawnAllNPCsFromManifest();
       // Spawn procedural building NPCs inside town buildings
       await this.spawnBuildingNPCs();
-      // Spawn a default test goblin near origin for testing combat
-      await this.spawnDefaultMob();
     }
     // Additional mobs are spawned reactively as terrain tiles generate via biomes.json
   }
@@ -210,74 +208,45 @@ export class MobNPCSpawnerSystem extends SystemBase {
   }
 
   /**
-   * NPC config for procedural building NPCs (not in npcs.json manifest).
-   * Each npcType maps to display name, description, and services.
+   * Look up building NPC config from manifests by buildingRole.
+   * Falls back to a generic config if no manifest entry matches.
    */
-  private static readonly BUILDING_NPC_CONFIG: Record<
-    string,
-    { name: string; description: string; services: string[]; model: string }
-  > = {
-    innkeeper: {
-      name: "Innkeeper",
-      description: "The innkeeper tends the bar and rents rooms.",
-      services: ["rest", "food"],
-      model: "asset://models/npcs/Lowe/Lowe.vrm",
-    },
-    banker: {
-      name: "Banker",
-      description: "A banker who manages your deposits.",
-      services: ["bank"],
-      model: "asset://models/npcs/banker/banker.vrm",
-    },
-    blacksmith: {
-      name: "Blacksmith",
-      description: "A skilled blacksmith working the forge.",
-      services: ["repair", "smithing"],
-      model: "asset://models/npcs/horvik/Horvik.vrm",
-    },
-    shopkeeper: {
-      name: "Shopkeeper",
-      description: "A general store shopkeeper with various wares.",
-      services: ["shop"],
-      model: "asset://models/npcs/shopkeeper/shopkeeper.vrm",
-    },
-    priest: {
-      name: "Priest",
-      description: "A priest offering blessings and guidance.",
-      services: ["prayer", "blessing"],
-      model: "asset://models/npcs/Zamorin/Zamorin.vrm",
-    },
-    "guild-master": {
-      name: "Guild Master",
-      description: "The guild master oversees guild operations.",
-      services: ["guild", "quests"],
-      model: "asset://models/npcs/dommik/Dommik.vrm",
-    },
-    mayor: {
-      name: "Mayor",
-      description: "The town mayor manages local affairs.",
-      services: ["quests", "governance"],
-      model: "asset://models/npcs/tanner-ellis/tanner-ellis.vrm",
-    },
-    noble: {
-      name: "Noble",
-      description: "A noble resident of the estate.",
-      services: ["quests"],
-      model: "asset://models/npcs/fisherman-pete/fisherman-pete.vrm",
-    },
-    "guard-captain": {
-      name: "Guard Captain",
-      description: "The guard captain oversees the garrison.",
-      services: ["quests", "bounties"],
-      model: "asset://models/npcs/captain-rowan/captain-rowan.vrm",
-    },
-    lord: {
-      name: "Lord",
-      description: "The lord of this castle commands the region.",
-      services: ["quests", "governance"],
-      model: "asset://models/npcs/forester-wilma/forester-wilma.vrm",
-    },
-  };
+  private static getBuildingNPCConfig(
+    npcType: string,
+  ): {
+    name: string;
+    description: string;
+    services: string[];
+    model: string;
+  } | null {
+    // Search manifest NPCs by buildingRole match
+    for (const npc of ALL_NPCS.values()) {
+      if (npc.buildingRole === npcType) {
+        return {
+          name: npc.name,
+          description:
+            npc.description ?? `A ${npc.name} working in this building.`,
+          services: npc.services?.types ?? [],
+          model:
+            npc.appearance?.modelPath ??
+            "asset://models/npcs/default/default.vrm",
+        };
+      }
+    }
+    // Try direct ID lookup as fallback
+    const byId = getNPCById(npcType);
+    if (byId) {
+      return {
+        name: byId.name,
+        description: byId.description ?? `A ${byId.name}.`,
+        services: byId.services?.types ?? [],
+        model:
+          byId.appearance?.modelPath ??
+          "asset://models/npcs/default/default.vrm",
+      };
+    }
+    return null;
+  }
 
   /**
    * Spawn procedural NPCs inside town buildings.
@@ -308,7 +277,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
 
     let spawnedCount = 0;
     for (const point of spawnPoints) {
-      const config = MobNPCSpawnerSystem.BUILDING_NPC_CONFIG[point.npcType];
+      const config = MobNPCSpawnerSystem.getBuildingNPCConfig(point.npcType);
       if (!config) {
         console.warn(
           `[MobNPCSpawnerSystem] ⚠️ Unknown building NPC type: ${point.npcType}`,
@@ -368,140 +337,6 @@ export class MobNPCSpawnerSystem extends SystemBase {
 
     console.log(
       `[MobNPCSpawnerSystem] ✅ Spawned ${spawnedCount}/${spawnPoints.length} building NPCs across ${this.townSystem.getTowns().length} towns`,
-    );
-  }
-
-  /**
-   * Spawn default test mobs for initial world content
-   * Spawns multiple goblins around the spawn area for testing
-   */
-  private async spawnDefaultMob(): Promise<void> {
-    // Wait for EntityManager to be ready
-    let entityManager = this.world.getSystem<EntityManager>("entity-manager");
-    let attempts = 0;
-
-    while (!entityManager && attempts < 100) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      entityManager = this.world.getSystem<EntityManager>("entity-manager");
-      attempts++;
-    }
-
-    if (!entityManager) {
-      console.error(
-        "[MobNPCSpawnerSystem] ❌ EntityManager never became available after 10 seconds!",
-      );
-      return;
-    }
-
-    // Get goblin data from manifest - fail fast if not found
-    const goblinData = getNPCById("goblin");
-
-    if (!goblinData) {
-      console.error(
-        `[MobNPCSpawnerSystem] ❌ NPC manifest not found for 'goblin'. ` +
-          `Ensure npcs.json is loaded and contains this NPC type.`,
-      );
-      return;
-    }
-
-    if (!goblinData.appearance?.modelPath) {
-      console.error(
-        `[MobNPCSpawnerSystem] ❌ NPC 'goblin' has no modelPath defined in manifest.`,
-      );
-      return;
-    }
-
-    // Spawn multiple test goblins around the spawn area
-    const testPositions = [
-      { x: 8, z: 8 }, // Near spawn, north-east
-      { x: -8, z: 8 }, // Near spawn, north-west
-      { x: 12, z: -5 }, // East of spawn
-      { x: -12, z: -5 }, // West of spawn
-      { x: 15, z: 15 }, // Further north-east
-    ];
-
-    let spawnedCount = 0;
-    for (let i = 0; i < testPositions.length; i++) {
-      const pos = testPositions[i];
-      // Get terrain height at position
-      const terrainHeight = this.terrainSystem.getHeightAt(pos.x, pos.z);
-      const spawnPosition = { x: pos.x, y: terrainHeight, z: pos.z };
-
-      // Build mob config from manifest data
-      const mobConfig = {
-        id: `default_goblin_${i + 1}`,
-        type: EntityType.MOB,
-        name: goblinData.name,
-        position: spawnPosition,
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
-        scale: {
-          x: goblinData.appearance.scale ?? 1,
-          y: goblinData.appearance.scale ?? 1,
-          z: goblinData.appearance.scale ?? 1,
-        },
-        visible: true,
-        interactable: true,
-        interactionType: InteractionType.ATTACK,
-        interactionDistance: 10,
-        description: goblinData.description,
-        model: goblinData.appearance.modelPath,
-        properties: {
-          movementComponent: null,
-          combatComponent: null,
-          healthComponent: null,
-          visualComponent: null,
-          health: {
-            current: goblinData.stats.health,
-            max: goblinData.stats.health,
-          },
-          level: goblinData.stats.level,
-        },
-        // MobEntity specific - from manifest
-        mobType: goblinData.id,
-        level: goblinData.stats.level,
-        currentHealth: goblinData.stats.health,
-        maxHealth: goblinData.stats.health,
-        attack: goblinData.stats.attack,
-        attackPower: goblinData.stats.strength,
-        defense: goblinData.stats.defense,
-        attackSpeedTicks: goblinData.combat.attackSpeedTicks,
-        moveSpeed: goblinData.movement.speed,
-        xpReward: goblinData.combat.xpReward,
-        lootTable: goblinData.drops.common.map((drop) => ({
-          itemId: drop.itemId,
-          minQuantity: drop.minQuantity,
-          maxQuantity: drop.maxQuantity,
-          chance: drop.chance,
-        })),
-        spawnPoint: spawnPosition,
-        aggressive: goblinData.combat.aggressive,
-        retaliates: goblinData.combat.retaliates,
-        attackable: goblinData.combat.attackable ?? true,
-        movementType: goblinData.movement.type,
-        aggroRange: goblinData.combat.aggroRange,
-        combatRange: goblinData.combat.combatRange,
-        leashRange: goblinData.combat.leashRange,
-        wanderRadius: goblinData.movement.wanderRadius,
-        aiState: "idle",
-        targetPlayerId: null,
-        lastAttackTime: 0,
-        deathTime: null,
-        respawnTime: goblinData.combat.respawnTime,
-      };
-
-      try {
-        await entityManager.spawnEntity(mobConfig);
-        spawnedCount++;
-      } catch (err) {
-        console.error(
-          `[MobNPCSpawnerSystem] ❌ Error spawning goblin ${i + 1}:`,
-          err,
-        );
-      }
-    }
-
-    console.log(
-      `[MobNPCSpawnerSystem] ✅ Spawned ${spawnedCount} test goblins around spawn area`,
     );
   }
 
