@@ -13,7 +13,8 @@ export function LeaderboardPanel({ leaderboard }: LeaderboardPanelProps) {
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <span style={styles.title}>LEADERBOARD</span>
+        <span style={styles.title}>Arena ladder</span>
+        <span style={styles.subtitle}>AI duelists by record</span>
       </div>
 
       <div style={styles.list}>
@@ -55,22 +56,37 @@ export function LeaderboardPanel({ leaderboard }: LeaderboardPanelProps) {
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    background: "rgba(0, 0, 0, 0.85)",
-    border: "2px solid rgba(242, 208, 138, 0.4)",
-    borderRadius: "8px",
-    width: "240px",
+    background:
+      "linear-gradient(165deg, rgba(6,8,14,0.92) 0%, rgba(10,14,24,0.88) 100%)",
+    border: "1px solid rgba(242, 208, 138, 0.28)",
+    borderRadius: "16px",
+    width: "248px",
     overflow: "hidden",
+    boxShadow:
+      "0 18px 44px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04) inset",
+    backdropFilter: "blur(12px) saturate(1.1)",
+    WebkitBackdropFilter: "blur(12px) saturate(1.1)",
   },
   header: {
-    background: "rgba(242, 208, 138, 0.15)",
-    padding: "10px 16px",
-    borderBottom: "1px solid rgba(242, 208, 138, 0.3)",
+    background: "rgba(242, 208, 138, 0.1)",
+    padding: "12px 14px 10px",
+    borderBottom: "1px solid rgba(242, 208, 138, 0.22)",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
   },
   title: {
     color: "#f2d08a",
-    fontSize: "0.8rem",
-    fontWeight: "bold",
-    letterSpacing: "2px",
+    fontSize: "0.72rem",
+    fontWeight: 800,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+  },
+  subtitle: {
+    color: "rgba(203, 213, 225, 0.75)",
+    fontSize: "0.65rem",
+    fontWeight: 500,
+    letterSpacing: "0.02em",
   },
   list: {
     maxHeight: "400px",

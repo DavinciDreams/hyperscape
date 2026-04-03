@@ -117,6 +117,8 @@ export class ClientCameraSystem extends SystemBase {
   // Cinematic spectator controls for duel streaming
   private streamPageMode = false;
   private cinematicEnabled = false;
+  /** Dashboard viewport locked to a specific agent — streaming retarget is suppressed. */
+  private dashboardFollowMode = false;
   private cinematicClock = Math.random() * 1000;
   private latestStreamingState: StreamingCameraStateUpdate | null = null;
   private lastStreamingStateAt = 0;
@@ -183,6 +185,9 @@ export class ClientCameraSystem extends SystemBase {
   // Reverse angle cuts during FIGHTING
   private cinematicLastReverseAt = 0;
   private cinematicNextReverseCooldown = 14000;
+  /** Prior HP from streaming state — damage deltas drive punch/shake */
+  private streamingPrevAgent1Hp: number | null = null;
+  private streamingPrevAgent2Hp: number | null = null;
   private readonly cinematicTuning = {
     thetaRefreshRate: 0.8,
     thetaIdleDriftRate: 0.25,
@@ -299,6 +304,43 @@ export class ClientCameraSystem extends SystemBase {
     this.streamPageMode = context.streamPageMode;
     this.cinematicEnabled =
       context.streamPageMode || context.embeddedSpectatorMode;
+
+    // Dashboard viewfinders have an explicit followEntity — they should use
+    // cinematic camera style but NOT retarget to the streaming duel's
+    // cameraTarget.  Detect via multiple signals since ClientNetwork may not
+    // have connected yet when the camera system initializes:
+    //   1. Frozen follow value from a prior ClientNetwork instance (HMR)
+    //   2. URL params (always available at init time)
+    //   3. __HYPERSCAPE_CONFIG__ (set by the iframe host before load)
+    if (this.cinematicEnabled && typeof window !== "undefined") {
+      const frozenFollow =
+        (window as { __HYPERSCAPE_ORIGINAL_FOLLOW__?: string })
+          .__HYPERSCAPE_ORIGINAL_FOLLOW__ || null;
+      let urlFollow: string | null = null;
+      try {
+        const params = new URLSearchParams(window.location.search);
+        urlFollow =
+          params.get("followEntity") || params.get("characterId") || null;
+      } catch {
+        /* ignore */
+      }
+      const configFollow =
+        (
+          window as {
+            __HYPERSCAPE_CONFIG__?: {
+              followEntity?: string;
+              characterId?: string;
+            };
+          }
+        ).__HYPERSCAPE_CONFIG__?.followEntity ||
+        (window as { __HYPERSCAPE_CONFIG__?: { characterId?: string } })
+          .__HYPERSCAPE_CONFIG__?.characterId ||
+        null;
+      if (frozenFollow || urlFollow || configFollow) {
+        this.dashboardFollowMode = true;
+      }
+    }
+
     this.subscribe<StreamingCameraStateUpdate>(
       "streaming:state:update",
       (state) => {
@@ -1116,6 +1158,12 @@ export class ClientCameraSystem extends SystemBase {
       return false;
     }
 
+    // Dashboard viewfinders are locked to a specific agent — don't let the
+    // streaming scheduler's cameraTarget hijack the camera to the duel arena.
+    if (this.dashboardFollowMode) {
+      return false;
+    }
+
     const targetId = this.resolveStreamingCameraTargetId(
       this.latestStreamingState,
     );
@@ -1186,6 +1234,12 @@ export class ClientCameraSystem extends SystemBase {
 
   private tryAcquireSpectatorFallbackTarget(): boolean {
     if (!this.cinematicEnabled) {
+      return false;
+    }
+
+    // Dashboard viewfinders should never fall back to streaming-state duel
+    // participants — if the target agent isn't loaded yet, just wait.
+    if (this.dashboardFollowMode) {
       return false;
     }
 
@@ -1509,6 +1563,8 @@ export class ClientCameraSystem extends SystemBase {
     this.cinematicLockedSeparation = null;
     this.cinematicSmoothedBiasValid = false;
     this.cinematicVelocity.set(0, 0, 0);
+    this.streamingPrevAgent1Hp = null;
+    this.streamingPrevAgent2Hp = null;
   }
 
   private onCinematicPhaseChange(_oldPhase: string, newPhase: string): void {
@@ -1529,6 +1585,8 @@ export class ClientCameraSystem extends SystemBase {
     this.cinematicLockedActorY = null;
     this.cinematicLockedOpponentY = null;
     this.cinematicLockedSeparation = null;
+    this.streamingPrevAgent1Hp = null;
+    this.streamingPrevAgent2Hp = null;
   }
 
   private getCinematicPhaseParams(): {
@@ -1563,13 +1621,13 @@ export class ClientCameraSystem extends SystemBase {
         };
       case "FIGHTING":
         return {
-          radiusMin: 5,
-          radiusMax: 9,
-          basePhi: Math.PI * 0.31,
-          driftSpeed: 0.035,
-          targetFov: 55,
-          orbitAmplitude: 0.15,
-          focusBias: 0.58,
+          radiusMin: 4.0,
+          radiusMax: 7.5,
+          basePhi: Math.PI * 0.27,
+          driftSpeed: 0.018,
+          targetFov: 46,
+          orbitAmplitude: 0.07,
+          focusBias: 0.5,
         };
       case "RESOLUTION":
         return {
@@ -2101,6 +2159,48 @@ export class ClientCameraSystem extends SystemBase {
     this.camera.quaternion.slerp(_cinematicOrientationQuat, alpha);
   }
 
+  /**
+   * When streaming duel HP drops, add punch-in + shake so hits read on broadcast.
+   */
+  private tickStreamingCombatFeedback(deltaSeconds: number): void {
+    if (!this.cinematicEnabled || deltaSeconds <= 0) return;
+    const cycle = this.latestStreamingState?.cycle;
+    if (!cycle || cycle.phase !== "FIGHTING") {
+      this.streamingPrevAgent1Hp = null;
+      this.streamingPrevAgent2Hp = null;
+      return;
+    }
+    const a1 = cycle.agent1;
+    const a2 = cycle.agent2;
+    if (!a1 || !a2) return;
+
+    const h1 = typeof a1.hp === "number" ? a1.hp : 0;
+    const h2 = typeof a2.hp === "number" ? a2.hp : 0;
+    const m1 = Math.max(1, a1.maxHp ?? 1);
+    const m2 = Math.max(1, a2.maxHp ?? 1);
+
+    const applyHit = (prev: number | null, next: number, maxHp: number) => {
+      if (prev === null) return;
+      if (next >= prev - 0.01) return;
+      const lost = prev - next;
+      const severity = lost / maxHp;
+      this.cinematicShakeIntensity = Math.min(
+        0.32,
+        this.cinematicShakeIntensity + 0.055 + severity * 0.22,
+      );
+      this.cinematicPunchIn = Math.min(
+        1,
+        this.cinematicPunchIn + 0.32 + severity * 0.25,
+      );
+    };
+
+    applyHit(this.streamingPrevAgent1Hp, h1, m1);
+    applyHit(this.streamingPrevAgent2Hp, h2, m2);
+
+    this.streamingPrevAgent1Hp = h1;
+    this.streamingPrevAgent2Hp = h2;
+  }
+
   private buildCinematicFrame(deltaTime: number): {
     focus: THREE.Vector3;
     lookAt: THREE.Vector3;
@@ -2201,10 +2301,19 @@ export class ClientCameraSystem extends SystemBase {
 
     // Phase-aware camera parameters
     const pp = this.getCinematicPhaseParams();
-    this.cinematicTargetFov = pp.targetFov;
+    this.cinematicTargetFov =
+      pp.targetFov +
+      (this.cinematicPhase === "FIGHTING"
+        ? this.cinematicPunchIn * 5.5
+        : this.cinematicPunchIn * 2);
 
     // Movement lead offset (camera anticipates movement direction)
-    const leadScale = this.cinematicPhase === "IDLE" ? 1.5 : 0.8;
+    const leadScale =
+      this.cinematicPhase === "IDLE"
+        ? 1.5
+        : this.cinematicPhase === "FIGHTING"
+          ? 0.35
+          : 0.8;
     const speed = Math.sqrt(
       this.cinematicVelocity.x * this.cinematicVelocity.x +
         this.cinematicVelocity.z * this.cinematicVelocity.z,
@@ -2293,23 +2402,26 @@ export class ClientCameraSystem extends SystemBase {
       }
 
       const t = this.cinematicClock;
-      // Orbit drift with phase-controlled amplitude
+      // Orbit drift with phase-controlled amplitude (bounded sines only — never
+      // add t * driftSpeed: that is unbounded and reads as endless camera spin.)
       const amp = pp.orbitAmplitude;
       const orbitDrift =
-        t * pp.driftSpeed +
         Math.sin(t * 0.17) * amp +
         Math.sin(t * 0.089 + 2.1) * amp * 0.73 +
-        Math.sin(t * 0.31 + 0.7) * amp * 0.4;
-      const bigSwing = Math.sin(t * 0.048) * Math.sin(t * 0.032) * amp * 2.3;
+        Math.sin(t * 0.31 + 0.7) * amp * 0.4 +
+        Math.sin(t * pp.driftSpeed * 2.5 + 0.2) * amp * 0.35;
+      const bigSwingRaw = Math.sin(t * 0.048) * Math.sin(t * 0.032) * amp * 2.3;
+      const bigSwing =
+        this.cinematicPhase === "FIGHTING" ? bigSwingRaw * 0.2 : bigSwingRaw;
 
-      // Reverse angle cuts during FIGHTING for visual variety
+      // Reverse angle cuts during FIGHTING for visual variety (smaller, less frequent)
       let reverseAngleBoost = 0;
       if (this.cinematicPhase === "FIGHTING") {
         const timeSinceReverse = now - this.cinematicLastReverseAt;
         if (timeSinceReverse > this.cinematicNextReverseCooldown) {
-          reverseAngleBoost = Math.PI * 0.7;
+          reverseAngleBoost = Math.PI * 0.3;
           this.cinematicLastReverseAt = now;
-          this.cinematicNextReverseCooldown = 12000 + Math.random() * 6000;
+          this.cinematicNextReverseCooldown = 18000 + Math.random() * 8000;
           // Reset theta cache so LOS scorer accepts the new angle
           this.cinematicThetaCacheValid = false;
           this.cinematicLastLosRefreshAt = 0;
@@ -2332,11 +2444,15 @@ export class ClientCameraSystem extends SystemBase {
         pp.radiusMin,
         pp.radiusMax,
       );
-      const radius = clamp(
+      let radius = clamp(
         baseRadius + Math.sin(t * 0.32) * 0.2,
         pp.radiusMin,
         pp.radiusMax,
       );
+      if (this.cinematicPhase === "FIGHTING") {
+        radius *= 1 - this.cinematicPunchIn * 0.13;
+        radius = clamp(radius, pp.radiusMin * 0.86, pp.radiusMax);
+      }
 
       // Phase-aware phi (pitch angle) — smooth blend for close combat
       let phi: number;
@@ -2402,7 +2518,7 @@ export class ClientCameraSystem extends SystemBase {
     const thetaDrift =
       Math.sin(tSolo * 0.15) * soloAmp * 0.5 +
       Math.sin(tSolo * 0.067 + 1.3) * soloAmp * 0.4 +
-      tSolo * pp.driftSpeed;
+      Math.sin(tSolo * pp.driftSpeed * 2.5 + 0.2) * soloAmp * 0.35;
     const baseTheta = this.spherical.theta + thetaDrift;
     const radius = clamp(
       (pp.radiusMin + pp.radiusMax) * 0.5 +
@@ -2455,7 +2571,9 @@ export class ClientCameraSystem extends SystemBase {
       if (!this.target) {
         // In streaming/spectator mode with no entities, park the camera at the
         // duel arena lobby so the stream shows the arena instead of void.
-        if (this.cinematicEnabled) {
+        // Dashboard viewfinders should NOT do this — they're waiting for their
+        // specific agent entity to load, not looking at the arena.
+        if (this.cinematicEnabled && !this.dashboardFollowMode) {
           this.positionCameraAtArenaFallback();
         }
         return;
@@ -2463,6 +2581,7 @@ export class ClientCameraSystem extends SystemBase {
     }
 
     const frameDt = Math.max(0.001, deltaTime || 0.016);
+    this.tickStreamingCombatFeedback(frameDt);
 
     // Safety check: ensure camera is still detached from rig
     if (this.camera.parent === this.world.rig) {
@@ -2677,6 +2796,9 @@ export class ClientCameraSystem extends SystemBase {
     // Follow target. If zoom changed this frame, snap position instantly for straight-in/out motion
     // RS3: move camera directly with no positional lerp to avoid swoop or lag
     this.camera.position.copy(this.cameraPosition);
+    if (cinematicFrame) {
+      this.camera.position.add(this.computeCameraShake(frameDt));
+    }
     this.zoomDirty = false;
 
     if (cinematicFrame) {
@@ -2699,10 +2821,28 @@ export class ClientCameraSystem extends SystemBase {
 
     // Update camera matrices since it has no parent transform to inherit from
     this.camera.updateMatrixWorld(true);
+
+    this.cinematicPunchIn *= Math.exp(-2.85 * frameDt);
   }
+
+  /** Cached collision raycast result — avoid raycasting every single frame */
+  private _lastCollisionRaycastTime = 0;
+  private _cachedCollisionDistance = 0;
+  private _lastCollisionDesired = 0;
+  private static readonly COLLISION_RAYCAST_THROTTLE_MS = 80;
 
   private computeCollisionAdjustedDistance(desiredDistance: number): number {
     if (!this.camera || !this.target) return desiredDistance;
+
+    // Throttle raycasts: reuse cached result if camera hasn't moved much
+    const now = performance.now();
+    if (
+      now - this._lastCollisionRaycastTime <
+        ClientCameraSystem.COLLISION_RAYCAST_THROTTLE_MS &&
+      Math.abs(desiredDistance - this._lastCollisionDesired) < 0.1
+    ) {
+      return this._cachedCollisionDistance;
+    }
 
     // Direction from orbit center (smoothed target) to ideal camera position
     const dir = _v3_3
@@ -2724,16 +2864,24 @@ export class ClientCameraSystem extends SystemBase {
       desiredDistance,
       this.getCollisionProbeMask(),
     );
+
+    let result: number;
     // Strong type assumption - RaycastHit.distance is always number
     if (hit && hit.distance > 0) {
       const minDist = this.settings.minDistance;
       const margin = 0.4;
-      return Math.max(
+      result = Math.max(
         Math.min(desiredDistance, hit.distance - margin),
         minDist,
       );
+    } else {
+      result = desiredDistance;
     }
-    return desiredDistance;
+
+    this._lastCollisionRaycastTime = now;
+    this._lastCollisionDesired = desiredDistance;
+    this._cachedCollisionDistance = result;
+    return result;
   }
 
   private getTerrainSystem(): TerrainSystem | null {

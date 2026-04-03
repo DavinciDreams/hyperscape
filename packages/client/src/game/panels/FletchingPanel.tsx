@@ -15,6 +15,7 @@ import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
 import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { formatItemName } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 
 interface FletchingRecipe {
   recipeId: string;
@@ -34,21 +35,6 @@ interface FletchingPanelProps {
   availableRecipes: FletchingRecipe[];
   world: ClientWorld;
   onClose: () => void;
-}
-
-/**
- * Get icon for fletching item type
- */
-function getItemIcon(output: string, category: string): string {
-  const id = output.toLowerCase();
-
-  if (category === "arrow_shafts" || id.includes("arrow_shaft")) return "🪵";
-  if (category === "shortbows" || id.includes("shortbow")) return "🏹";
-  if (category === "longbows" || id.includes("longbow")) return "🎯";
-  if (category === "stringing") return "🧵";
-  if (category === "arrows" || id.includes("arrow")) return "➳";
-
-  return "🪓";
 }
 
 /**
@@ -236,10 +222,7 @@ export function FletchingPanel({
                           opacity: canFletch ? 1 : 0.5,
                         }}
                       >
-                        {/* Item Icon */}
-                        <span className="text-lg">
-                          {getItemIcon(recipe.output, recipe.category)}
-                        </span>
+                        <ItemIcon itemId={recipe.output} size={28} />
 
                         {/* Item Info */}
                         <div className="flex-1 min-w-0">
@@ -279,12 +262,7 @@ export function FletchingPanel({
               >
                 {/* Recipe Details */}
                 <div className="flex items-center gap-3 mb-3">
-                  <span className="text-2xl">
-                    {getItemIcon(
-                      selectedRecipe.output,
-                      selectedRecipe.category,
-                    )}
-                  </span>
+                  <ItemIcon itemId={selectedRecipe.output} size={40} />
                   <div>
                     <div
                       className="font-semibold text-sm"

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState, useRef } from "react";
 import { apiClient } from "@/lib/api-client";
 import { DashboardLayout } from "../game/dashboard/DashboardLayout";
-import { AgentChat } from "../game/dashboard/AgentChat";
 import { AgentViewportChat } from "../game/dashboard/AgentViewportChat";
 import { AgentSettings } from "../game/dashboard/AgentSettings";
 import { AgentLogs } from "../game/dashboard/AgentLogs";
@@ -62,6 +61,19 @@ export const DashboardScreen: React.FC = () => {
     null,
   );
   const [viewportAgentId, setViewportAgentId] = useState<string | null>(null);
+
+  // Keep sidebar "viewport active" in sync: live viewfinder uses AgentViewportChat whenever
+  // the selected agent is running (no longer gated on the post-start modal alone).
+  useEffect(() => {
+    const agent = selectedAgentId
+      ? agents.find((a) => a.id === selectedAgentId)
+      : undefined;
+    if (selectedAgentId && agent?.status === "active") {
+      setViewportAgentId(selectedAgentId);
+    } else {
+      setViewportAgentId(null);
+    }
+  }, [selectedAgentId, agents]);
 
   // Ref to track if component is mounted (prevents state updates after unmount)
   const isMountedRef = useRef(true);
@@ -131,8 +143,6 @@ export const DashboardScreen: React.FC = () => {
             filteredAgents = data.data.agents.filter((agent: Agent) => {
               return userAgentIds.includes(agent.id);
             });
-          } else if (userAccountId && !mappingFetchFailed) {
-            filteredAgents = [];
           } else if (mappingFetchFailed) {
             console.warn(
               "[Dashboard] Mapping fetch failed - showing all agents as fallback",
@@ -560,12 +570,15 @@ export const DashboardScreen: React.FC = () => {
 
           {/* Content Area */}
           <div className="flex-1 overflow-hidden relative">
-            {activeView === "chat" &&
-              (viewportAgentId === selectedAgent.id ? (
-                <AgentViewportChat agent={selectedAgent} />
-              ) : (
-                <AgentChat agent={selectedAgent} />
-              ))}
+            {/* Viewport stays mounted always — hidden behind other tabs via CSS */}
+            <div
+              className="absolute inset-0"
+              style={{
+                visibility: activeView === "chat" ? "visible" : "hidden",
+              }}
+            >
+              <AgentViewportChat key={selectedAgent.id} agent={selectedAgent} />
+            </div>
             {activeView === "settings" && (
               <AgentSettings agent={selectedAgent} onDelete={deleteAgent} />
             )}

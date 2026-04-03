@@ -200,6 +200,18 @@ async function startServer() {
     }
   }
 
+  // Step 8.5: Wire up thought persistence to DB (before agent init so hydration works)
+  try {
+    const { setThoughtDb } = await import("./eliza/dashboardInterop.js");
+    const dbSystem = world.getSystem("database") as
+      | { db?: unknown; getDb?: () => unknown }
+      | undefined;
+    const db = dbSystem?.db ?? dbSystem?.getDb?.();
+    if (db) setThoughtDb(db);
+  } catch {
+    // Non-critical — thoughts will stay in-memory only
+  }
+
   // Step 9: Initialize embedded agents
   try {
     const duelServerAgentMode = (process.env.DUEL_SERVER_AGENT_MODE || "")

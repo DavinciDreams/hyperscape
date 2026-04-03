@@ -382,3 +382,49 @@ export async function authenticateUser(
 
   return { user, authToken: authToken || "", userWithPrivy };
 }
+
+/**
+ * True when connection params carry a cryptographically valid identity (Privy access token
+ * + matching privyUserId, or valid Hyperscape JWT) and the user is not banned.
+ *
+ * Used only for `mode=streaming` when public stream delay is enabled (`STREAMING_PUBLIC_DELAY_MS` > 0): anonymous
+ * public viewers stay on the delayed surface, while logged-in accounts can open a
+ * real-time streaming WebSocket without relying on loopback IP or `streamToken`.
+ */
+export async function verifyStreamingViewerCredentials(
+  params: ConnectionParams,
+  db: SystemDatabase,
+): Promise<boolean> {
+  const authToken = params.authToken;
+  const privyUserId = params.privyUserId;
+  if (!authToken || authToken.length === 0) return false;
+
+  let resolvedUserId: string | undefined;
+
+  if (isPrivyEnabled() && privyUserId) {
+    try {
+      const privyInfo = await verifyPrivyToken(authToken);
+      if (privyInfo && privyInfo.privyUserId === privyUserId) {
+        resolvedUserId = privyInfo.privyUserId;
+      }
+    } catch {
+      // Wrong token type or network — try Hyperscape JWT below
+    }
+  }
+
+  if (!resolvedUserId) {
+    try {
+      const jwtPayload = await verifyJWT(authToken);
+      if (jwtPayload && jwtPayload.userId) {
+        resolvedUserId = jwtPayload.userId as string;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  if (!resolvedUserId) return false;
+
+  const banInfo = await checkUserBan(resolvedUserId, db);
+  return !banInfo.isBanned;
+}

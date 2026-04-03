@@ -28,6 +28,7 @@ import type { VRM, VRMHumanBoneName } from "@pixiv/three-vrm";
 import { getItem } from "../../data/items";
 import { EQUIPMENT_SLOT_NAMES } from "../../constants/EquipmentConstants";
 import type { Entity } from "../../entities/Entity";
+import { AttackType } from "../../types/game/item-types";
 
 interface AvatarLike {
   instance?: {
@@ -96,6 +97,22 @@ export class EquipmentVisualSystem extends SystemBase {
   // Track players whose weapon is temporarily hidden during gathering
   // (e.g., fishing - weapon hidden while fishing rod is shown)
   private hiddenWeapons = new Set<string>();
+
+  // Track players whose weapon is hidden during non-melee combat (magic/ranged)
+  private hiddenWeaponsCombat = new Set<string>();
+
+  // Timers to restore weapon visibility after non-melee attack animation completes
+  private combatWeaponRestoreTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+
+  // Track item ID in weapon slot per player (to check if it's melee before hiding)
+  private playerWeaponItemIds = new Map<string, string>();
+
+  // How long to keep weapon hidden after the last non-melee attack (ms).
+  // Using ~4 ticks (2400ms) to cover the full attack animation at standard speed.
+  private static readonly COMBAT_WEAPON_RESTORE_DELAY_MS = 2400;
 
   constructor(world: World) {
     super(world, {
@@ -199,6 +216,14 @@ export class EquipmentVisualSystem extends SystemBase {
         this.handleGatheringToolHide(data);
       },
     );
+
+    // OSRS-STYLE: Hide melee weapon during magic/ranged attacks
+    this.subscribe(
+      EventType.COMBAT_PROJECTILE_LAUNCHED,
+      (data: { attackerId: string }) => {
+        this.handleCombatProjectileLaunched(data.attackerId);
+      },
+    );
   }
 
   private async handleEquipmentChange(data: {
@@ -260,6 +285,15 @@ export class EquipmentVisualSystem extends SystemBase {
       this.playerEquipment.set(playerId, {});
     }
     const equipment = this.playerEquipment.get(playerId)!;
+
+    // Track weapon slot item ID for combat visibility checks
+    if (slot.toLowerCase() === "weapon") {
+      if (itemId) {
+        this.playerWeaponItemIds.set(playerId, itemId);
+      } else {
+        this.playerWeaponItemIds.delete(playerId);
+      }
+    }
 
     // Handle unequip (itemId is null)
     if (!itemId) {
@@ -343,7 +377,8 @@ export class EquipmentVisualSystem extends SystemBase {
           modelPath = cachedItem.modelPath;
         }
       }
-      let weaponUrl: string;
+      /** Set only on paths that actually load a model; guarded before load below. */
+      let weaponUrl: string | undefined;
       let fallbackUrl: string | null = null;
 
       if (equippedModelPath) {
@@ -361,9 +396,6 @@ export class EquipmentVisualSystem extends SystemBase {
           `[EquipmentVisual] ${itemId} → modelPath fallback: ${weaponUrl}`,
         );
       } else {
-        console.warn(
-          `[EquipmentVisual] ${itemId} → no manifest data (getItem returned ${itemData ? "partial" : "null"}), using convention`,
-        );
         // Fallback to convention-based derivation
         // itemId formats:
         //   "{material}_{item}" e.g., "bronze_sword" → "sword-bronze"
@@ -385,43 +417,67 @@ export class EquipmentVisualSystem extends SystemBase {
           "yew",
         ];
 
-        // Map item types to their category subdirectories
-        const categoryMap: Record<string, string> = {
-          sword: "swords-old",
-          longsword: "swords/long-swords",
-          scimitar: "swords/scimitars",
-          "2h_sword": "swords/2h-swords",
-          "2h": "swords/2h-swords",
-          shortsword: "swords/shortswords",
-          dagger: "swords/daggers",
-          hatchet: "hatchets",
-          pickaxe: "pickaxes",
-          arrow: "arrows",
-          bow: "bows",
-          staff: "magic-staffs",
-          shield: "shields",
-        };
-
-        if (parts.length >= 2 && materials.includes(parts[0])) {
-          const material = parts[0];
-          const itemParts = parts.slice(1); // e.g., ["2h", "sword"] or ["longsword"]
-          const itemKey = itemParts.join("_"); // e.g., "2h_sword" or "longsword"
-          assetId = `${itemParts.join("-")}-${material}`; // e.g., "2h-sword-bronze"
-          category = categoryMap[itemKey] || categoryMap[itemParts[0]] || "";
+        // Ammunition on disk: models/arrows/arrows-{material}/arrows-{material}.glb
+        // (only bronze + base exist today; others fall back to arrows-base).
+        // The generic sword-style convention produced arrow-iron-aligned.glb → 404.
+        let arrowConvention = false;
+        if (parts.length === 2 && parts[1] === "arrow" && parts[0].length > 0) {
+          const mat = parts[0];
+          const baseName = `arrows-${mat}`;
+          weaponUrl = `${assetsUrl}/models/arrows/${baseName}/${baseName}.glb`;
+          fallbackUrl = `${assetsUrl}/models/arrows/arrows-base/arrows-base.glb`;
+          arrowConvention = true;
         }
 
-        // If no matching category was found, this item type has no 3D models
-        // available (e.g., helms, platelegs, boots, gloves, capes).
-        // Skip visual to avoid generating 404 requests.
-        if (!category) {
-          return;
+        if (!arrowConvention) {
+          console.warn(
+            `[EquipmentVisual] ${itemId} → no manifest data (getItem returned ${itemData ? "partial" : "null"}), using convention`,
+          );
         }
 
-        // Try fitted version: flat layout first (swords/long-swords/longsword-bronze-aligned.glb),
-        // then subdirectory layout (hatchets/hatchet-bronze/hatchet-bronze-aligned.glb)
-        const prefix = category ? `${category}/` : "";
-        weaponUrl = `${assetsUrl}/models/${prefix}${assetId}-aligned.glb`;
-        fallbackUrl = `${assetsUrl}/models/${prefix}${assetId}/${assetId}-aligned.glb`;
+        if (!arrowConvention) {
+          // Map item types to their category subdirectories
+          const categoryMap: Record<string, string> = {
+            sword: "swords-old",
+            longsword: "swords/long-swords",
+            scimitar: "swords/scimitars",
+            "2h_sword": "swords/2h-swords",
+            "2h": "swords/2h-swords",
+            shortsword: "swords/shortswords",
+            dagger: "swords/daggers",
+            hatchet: "hatchets",
+            pickaxe: "pickaxes",
+            arrow: "arrows",
+            bow: "bows",
+            staff: "magic-staffs",
+            shield: "shields",
+          };
+
+          if (parts.length >= 2 && materials.includes(parts[0])) {
+            const material = parts[0];
+            const itemParts = parts.slice(1); // e.g., ["2h", "sword"] or ["longsword"]
+            const itemKey = itemParts.join("_"); // e.g., "2h_sword" or "longsword"
+            assetId = `${itemParts.join("-")}-${material}`; // e.g., "2h-sword-bronze"
+            category = categoryMap[itemKey] || categoryMap[itemParts[0]] || "";
+          }
+
+          // If no matching category was found, this item type has no 3D models
+          // available (e.g., helms, platelegs, boots, gloves, capes).
+          // Skip visual to avoid generating 404 requests.
+          if (!category) {
+            return;
+          }
+
+          // Try fitted version: flat layout first (swords/long-swords/longsword-bronze-aligned.glb),
+          // then subdirectory layout (hatchets/hatchet-bronze/hatchet-bronze-aligned.glb)
+          const prefix = category ? `${category}/` : "";
+          weaponUrl = `${assetsUrl}/models/${prefix}${assetId}-aligned.glb`;
+          fallbackUrl = `${assetsUrl}/models/${prefix}${assetId}/${assetId}-aligned.glb`;
+        }
+      }
+
+      if (!weaponUrl?.trim()) {
+        return;
       }
 
       // Check cache first
@@ -475,42 +531,45 @@ export class EquipmentVisualSystem extends SystemBase {
       const skinnedSlots = ["body", "legs", "boots", "gloves", "cape"];
       const isSkinnedSlot = skinnedSlots.includes(slot.toLowerCase());
 
-      let hasSkinnedMesh = false;
+      // Single-pass skinned mesh detection + collection (avoids 3× traverse)
       if (isSkinnedSlot) {
+        const skinnedMeshes: THREE.SkinnedMesh[] = [];
         weaponMesh.traverse((child) => {
           if (child instanceof THREE.SkinnedMesh) {
-            hasSkinnedMesh = true;
-          }
-        });
-      }
-
-      if (isSkinnedSlot && hasSkinnedMesh) {
-        // Find player skeleton
-        let playerSkeleton: THREE.Skeleton | undefined;
-        vrm.scene.traverse((child) => {
-          if (child instanceof THREE.SkinnedMesh && child.skeleton) {
-            playerSkeleton = child.skeleton;
+            skinnedMeshes.push(child);
           }
         });
 
-        if (playerSkeleton) {
-          const skeleton = playerSkeleton;
-          // Bind all skinned meshes in equipment to player skeleton
-          weaponMesh.traverse((child) => {
-            if (child instanceof THREE.SkinnedMesh) {
-              child.skeleton = skeleton;
-              child.bind(skeleton, child.bindMatrix);
+        if (skinnedMeshes.length > 0) {
+          // Find player skeleton (single traverse of VRM scene)
+          let playerSkeleton: THREE.Skeleton | undefined;
+          vrm.scene.traverse((child) => {
+            if (
+              !playerSkeleton &&
+              child instanceof THREE.SkinnedMesh &&
+              child.skeleton
+            ) {
+              playerSkeleton = child.skeleton;
             }
           });
 
-          // Remove existing visual
-          this.unequipVisual(playerId, slot, equipment, vrm);
+          if (playerSkeleton) {
+            const skeleton = playerSkeleton;
+            // Bind all collected skinned meshes to player skeleton
+            for (const mesh of skinnedMeshes) {
+              mesh.skeleton = skeleton;
+              mesh.bind(skeleton, mesh.bindMatrix);
+            }
 
-          // Add directly to VRM scene for skinned animation
-          const slotKey = slot.toLowerCase() as keyof PlayerEquipmentVisuals;
-          equipment[slotKey] = weaponMesh;
-          vrm.scene.add(weaponMesh);
-          return;
+            // Remove existing visual
+            this.unequipVisual(playerId, slot, equipment, vrm);
+
+            // Add directly to VRM scene for skinned animation
+            const slotKey = slot.toLowerCase() as keyof PlayerEquipmentVisuals;
+            equipment[slotKey] = weaponMesh;
+            vrm.scene.add(weaponMesh);
+            return;
+          }
         }
       }
 
@@ -667,6 +726,57 @@ export class EquipmentVisualSystem extends SystemBase {
     }
   }
 
+  /**
+   * OSRS-STYLE: Hide melee weapon during magic/ranged attacks.
+   *
+   * When a non-melee projectile is launched, the attacker's equipped melee weapon
+   * should be hidden for the duration of the attack animation. Staffs and bows
+   * (ranged/magic attackType) are left visible since they ARE the attack weapon.
+   */
+  private handleCombatProjectileLaunched(attackerId: string): void {
+    const equipment = this.playerEquipment.get(attackerId);
+    if (!equipment?.weapon) return;
+
+    // Only hide if the equipped weapon is a melee weapon (sword, scimitar, etc.)
+    const weaponItemId = this.playerWeaponItemIds.get(attackerId);
+    if (weaponItemId) {
+      const itemData = getItem(weaponItemId);
+      // Staff, bow, crossbow, wand have non-melee attackType — leave them visible
+      if (itemData?.attackType && itemData.attackType !== AttackType.MELEE) {
+        return;
+      }
+    }
+
+    // Hide the melee weapon (avoid double-hiding)
+    if (equipment.weapon.visible) {
+      equipment.weapon.visible = false;
+    }
+    this.hiddenWeaponsCombat.add(attackerId);
+
+    // Reset restore timer — extends window if attacks keep firing
+    const existing = this.combatWeaponRestoreTimers.get(attackerId);
+    if (existing) clearTimeout(existing);
+
+    const timer = setTimeout(() => {
+      this.restoreCombatHiddenWeapon(attackerId);
+    }, EquipmentVisualSystem.COMBAT_WEAPON_RESTORE_DELAY_MS);
+    this.combatWeaponRestoreTimers.set(attackerId, timer);
+  }
+
+  private restoreCombatHiddenWeapon(playerId: string): void {
+    this.combatWeaponRestoreTimers.delete(playerId);
+    if (!this.hiddenWeaponsCombat.has(playerId)) return;
+    this.hiddenWeaponsCombat.delete(playerId);
+
+    const equipment = this.playerEquipment.get(playerId);
+    if (!equipment?.weapon) return;
+
+    // Only restore if not also hidden by a gathering tool
+    if (!this.hiddenWeapons.has(playerId)) {
+      equipment.weapon.visible = true;
+    }
+  }
+
   private cleanupPlayerEquipment(playerId: string): void {
     const equipment = this.playerEquipment.get(playerId);
     if (!equipment) return;
@@ -679,8 +789,15 @@ export class EquipmentVisualSystem extends SystemBase {
     }
 
     this.playerEquipment.delete(playerId);
-    this.pendingEquipment.delete(playerId); // Clear pending equipment too
-    this.hiddenWeapons.delete(playerId); // Clear hidden weapon tracking
+    this.pendingEquipment.delete(playerId);
+    this.hiddenWeapons.delete(playerId);
+    this.hiddenWeaponsCombat.delete(playerId);
+    this.playerWeaponItemIds.delete(playerId);
+    const timer = this.combatWeaponRestoreTimers.get(playerId);
+    if (timer) {
+      clearTimeout(timer);
+      this.combatWeaponRestoreTimers.delete(playerId);
+    }
   }
 
   /**
@@ -828,9 +945,17 @@ export class EquipmentVisualSystem extends SystemBase {
       this.cleanupPlayerEquipment(playerId);
     }
 
+    // Clear all timers
+    for (const timer of this.combatWeaponRestoreTimers.values()) {
+      clearTimeout(timer);
+    }
+
     // Clear cache and pending equipment
     this.weaponCache.clear();
     this.pendingEquipment.clear();
+    this.combatWeaponRestoreTimers.clear();
+    this.hiddenWeaponsCombat.clear();
+    this.playerWeaponItemIds.clear();
 
     super.destroy();
   }

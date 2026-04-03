@@ -117,7 +117,7 @@ async function _createElizaOSAgent(
         secrets: {
           HYPERSCAPE_CHARACTER_ID: characterId,
           HYPERSCAPE_SERVER_URL:
-            process.env.PUBLIC_WS_URL || "ws://localhost:5555/ws",
+            process.env.PUBLIC_WS_URL || "ws://localhost:5556/ws",
           HYPERSCAPE_ACCOUNT_ID: accountId, // Link to user's account
           wallet,
         },

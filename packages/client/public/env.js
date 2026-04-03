@@ -1,14 +1,26 @@
-// Runtime environment configuration
-// This file is loaded at runtime to override build-time environment variables.
-// In development, defaults are used. In production, this file is generated
-// by the deployment platform (Cloudflare Pages, Vercel, etc.) with actual values.
-//
-// Example production content:
-//   window.env = {
-//     PUBLIC_CDN_URL: "https://assets.hyperscape.club",
-//     PUBLIC_WS_URL: "wss://hyperscape-production.up.railway.app/ws",
-//     PUBLIC_API_URL: "https://hyperscape-production.up.railway.app",
-//   };
-//
-// For local development, the Vite build-time variables are used instead.
-window.env = {};
+/**
+ * Runtime public env bootstrap (no secrets).
+ *
+ * Served as a static file from Vite public/ in dev (not proxied), so window.env exists
+ * even when the game server on :5555 is down or restarting.
+ *
+ * Only fills defaults on loopback hosts so production (hyperscape.club, etc.) is unchanged.
+ */
+(function () {
+  if (typeof window === "undefined") return;
+  var h = window.location.hostname;
+  var loopback =
+    h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
+  if (!loopback) return;
+
+  window.env = window.env || {};
+  if (!window.env.PUBLIC_API_URL) {
+    window.env.PUBLIC_API_URL = "http://127.0.0.1:5555";
+  }
+  if (!window.env.PUBLIC_WS_URL) {
+    window.env.PUBLIC_WS_URL = "ws://127.0.0.1:5556/ws";
+  }
+  if (!window.env.PUBLIC_CDN_URL) {
+    window.env.PUBLIC_CDN_URL = "http://127.0.0.1:5555/game-assets";
+  }
+})();

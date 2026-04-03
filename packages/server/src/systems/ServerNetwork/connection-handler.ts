@@ -30,6 +30,7 @@
  * ```
  */
 
+import net from "node:net";
 import type { World } from "@hyperscape/shared";
 import {
   Socket,
@@ -50,7 +51,11 @@ import type {
 } from "../../shared/types";
 import { STREAMING_PUBLIC_DELAY_MS } from "../../streaming/streaming-policy.js";
 import { resolveStreamingViewerAccessToken } from "../../streaming/stream-viewer-access-token.js";
-import { authenticateUser, checkUserBan } from "./authentication";
+import {
+  authenticateUser,
+  checkUserBan,
+  verifyStreamingViewerCredentials,
+} from "./authentication";
 import { loadCharacterList } from "./character-selection";
 import type { BroadcastManager } from "./broadcast";
 import type { UwsWebSocketAdapter } from "../../startup/UwsWebSocketAdapter";
@@ -135,6 +140,27 @@ export class ConnectionHandler {
     this.spatialIndex = index;
   }
 
+  /** Normalize uWS / Node remote address text and detect loopback (IPv4, IPv6, IPv4-mapped). */
+  private static isLoopbackAddress(rawAddress: string): boolean {
+    let addr = rawAddress.trim();
+    if (addr.startsWith("[") && addr.endsWith("]")) {
+      addr = addr.slice(1, -1);
+    }
+    const base = addr.split("%")[0] ?? addr;
+
+    if (net.isIPv4(base)) {
+      return base === "127.0.0.1";
+    }
+    if (net.isIPv6(base)) {
+      if (base === "::1") return true;
+      const lower = base.toLowerCase();
+      return (
+        lower === "::ffff:127.0.0.1" || lower === "0:0:0:0:0:ffff:127.0.0.1"
+      );
+    }
+    return false;
+  }
+
   private isLoopbackWs(ws: NodeWebSocket): boolean {
     const rawAddress =
       ws.__remoteAddress ||
@@ -145,11 +171,7 @@ export class ConnectionHandler {
       )._socket?.remoteAddress;
 
     if (!rawAddress) return false;
-    return (
-      rawAddress === "127.0.0.1" ||
-      rawAddress === "::1" ||
-      rawAddress === "::ffff:127.0.0.1"
-    );
+    return ConnectionHandler.isLoopbackAddress(rawAddress);
   }
 
   private hasStreamingViewerAccessToken(params: ConnectionParams): boolean {
@@ -851,11 +873,36 @@ export class ConnectionHandler {
         : 110;
       const radiusSq = effectiveRadius * effectiveRadius;
 
-      if (this.world.entities?.items) {
-        for (const [_entityId, entity] of this.world.entities.items.entries()) {
+      // Include both world items AND player entities — players live in a
+      // separate collection and were previously missing from spectator snapshots,
+      // which prevented the camera from ever locking to the followed agent.
+      const entityCollections = [
+        this.world.entities?.items,
+        this.world.entities?.players,
+      ].filter(Boolean) as Map<
+        string,
+        {
+          id: string;
+          data?: Record<string, unknown>;
+          serialize: () => unknown;
+          position?: unknown;
+        }[]
+      >[];
+      for (const collection of entityCollections) {
+        for (const [_entityId, entity] of (
+          collection as Map<
+            string,
+            {
+              id: string;
+              data?: Record<string, unknown>;
+              serialize: () => unknown;
+              position?: unknown;
+            }
+          >
+        ).entries()) {
           if (
             !this.shouldIncludeSpectatorEntity(
-              entity,
+              entity as Parameters<typeof this.shouldIncludeSpectatorEntity>[0],
               followEntityId,
               duelParticipantIds,
               followPos,
@@ -865,7 +912,9 @@ export class ConnectionHandler {
             continue;
           }
 
-          const serialized = entity.serialize();
+          const serialized = (
+            entity as { serialize: () => unknown }
+          ).serialize();
           this.applyAuthoritativeTransformSnapshot(entity, serialized, {
             groundPlayersToTerrain: true,
           });
@@ -1021,6 +1070,46 @@ export class ConnectionHandler {
   }
 
   /**
+   * Find a live entity by network id OR database character id.
+   * Spectator `followEntity` / `spectatingCharacterId` is often the character UUID;
+   * world maps are keyed by network entity id, so direct `.get(uuid)` misses the player.
+   */
+  private findEntityBySpectatorKey(
+    entityOrCharacterId: string | undefined,
+  ): unknown | undefined {
+    if (!entityOrCharacterId) return undefined;
+    const items = this.world.entities?.items;
+    const players = this.world.entities?.players;
+
+    const direct =
+      items?.get(entityOrCharacterId) ?? players?.get(entityOrCharacterId);
+    if (direct) return direct;
+
+    const scan = (map: Map<string, unknown> | undefined) => {
+      if (!map) return undefined;
+      for (const [, entity] of map.entries()) {
+        const e = entity as {
+          id?: string;
+          data?: { characterId?: string; id?: string };
+        };
+        if (
+          e.id === entityOrCharacterId ||
+          e.data?.characterId === entityOrCharacterId ||
+          e.data?.id === entityOrCharacterId
+        ) {
+          return entity;
+        }
+      }
+      return undefined;
+    };
+
+    return (
+      scan(items as Map<string, unknown> | undefined) ??
+      scan(players as Map<string, unknown> | undefined)
+    );
+  }
+
+  /**
    * Resolve spectator snapshot focus position.
    *
    * Order:
@@ -1033,9 +1122,7 @@ export class ConnectionHandler {
     duelParticipantIds: Set<string>,
   ): { x: number; z: number } | null {
     if (followEntityId) {
-      const followEntity =
-        this.world.entities?.items?.get(followEntityId) ||
-        this.world.entities?.players?.get(followEntityId);
+      const followEntity = this.findEntityBySpectatorKey(followEntityId);
       const followPos = this.getEntityXZ(followEntity);
       if (followPos) {
         return followPos;
@@ -1043,9 +1130,7 @@ export class ConnectionHandler {
     }
 
     for (const participantId of duelParticipantIds) {
-      const participant =
-        this.world.entities?.items?.get(participantId) ||
-        this.world.entities?.players?.get(participantId);
+      const participant = this.findEntityBySpectatorKey(participantId);
       const participantPos = this.getEntityXZ(participant);
       if (participantPos) {
         return participantPos;
@@ -1071,10 +1156,28 @@ export class ConnectionHandler {
 
     const data = (entity as { data?: Record<string, unknown> }).data;
     const id = (entity as { id?: string }).id;
+    const dataCharacterId =
+      typeof data?.characterId === "string" ? data.characterId : undefined;
+    const dataId = typeof data?.id === "string" ? data.id : undefined;
 
     // Always include explicit follow target and active duel contestants.
-    if (followEntityId && id === followEntityId) return true;
-    if (id && duelParticipantIds.has(id)) return true;
+    // followEntityId may be character UUID while entity.id is network id — match both.
+    if (followEntityId) {
+      if (
+        id === followEntityId ||
+        dataCharacterId === followEntityId ||
+        dataId === followEntityId
+      ) {
+        return true;
+      }
+    }
+    if (
+      id &&
+      (duelParticipantIds.has(id) ||
+        (dataCharacterId && duelParticipantIds.has(dataCharacterId)))
+    ) {
+      return true;
+    }
     if (data?.inStreamingDuel === true) return true;
 
     const pos = this.getEntityXZ(entity);
@@ -1090,10 +1193,7 @@ export class ConnectionHandler {
 
   private entityExists(entityId: string | undefined): boolean {
     if (!entityId) return false;
-    return Boolean(
-      this.world.entities?.items?.get(entityId) ||
-      this.world.entities?.players?.get(entityId),
-    );
+    return Boolean(this.findEntityBySpectatorKey(entityId));
   }
 
   private findAnySpectatableAgentId(): string | undefined {
@@ -1323,10 +1423,22 @@ export class ConnectionHandler {
       const isAgentCharacter =
         targetCharacter?.isAgent === 1 || characterId.startsWith("agent-");
 
-      // Spectator streams should stay focused on active duel participants.
-      // If the requested/derived target is stale or outside the active duel,
-      // pivot to scheduler camera target.
-      if (isAgentCharacter && streamingContext.contestants.length > 0) {
+      // Spectator streams should stay focused on active duel participants —
+      // BUT only for *anonymous/public* streaming views that did NOT explicitly
+      // request a specific character.  Any viewer who supplied followEntity/characterId
+      // in their URL params is deliberately watching a chosen agent and must never be
+      // silently redirected to whoever happens to be duelling right now.
+      // NOTE: authToken is intentionally NOT included in the WebSocket URL for embedded
+      // spectators (see EmbeddedGameClient "SECURITY" comment) — agents can be watched
+      // anonymously via the "trusted viewer path", so requiring authToken here would
+      // always make this false for dashboard viewfinders, causing the pivot bug.
+      const isExplicitDashboardSpectator = !!requestedCharacterId;
+
+      if (
+        isAgentCharacter &&
+        streamingContext.contestants.length > 0 &&
+        !isExplicitDashboardSpectator
+      ) {
         const activeContestants = new Set(streamingContext.contestants);
         const targetIsLive = this.entityExists(characterId);
         const targetInActiveDuel = activeContestants.has(characterId);
@@ -1451,6 +1563,16 @@ export class ConnectionHandler {
       // Register spectator socket
       this.sockets.set(socket.id, socket);
 
+      // Index for fast region-subscription updates
+      if (characterId) {
+        let set = this.spectatorsByPlayer.get(characterId);
+        if (!set) {
+          set = new Set();
+          this.spectatorsByPlayer.set(characterId, set);
+        }
+        set.add(socket.id);
+      }
+
       // Subscribe to pub/sub topics for spectator broadcasting
       this.subscribeSpectatorTopics(socket, characterId);
 
@@ -1535,15 +1657,18 @@ export class ConnectionHandler {
   ): Promise<void> {
     try {
       const requiresRestrictedAccess = STREAMING_PUBLIC_DELAY_MS > 0;
-      if (
-        requiresRestrictedAccess &&
-        !this.hasStreamingBypassAccess(ws, params)
-      ) {
-        console.warn(
-          "[ConnectionHandler] 🚫 Rejected public streaming websocket: delayed public mode requires loopback or valid streamToken",
-        );
-        ws.close(4001, "Streaming viewer access denied");
-        return;
+      if (requiresRestrictedAccess) {
+        const bypassSync = this.hasStreamingBypassAccess(ws, params);
+        const bypassAuth = bypassSync
+          ? true
+          : await verifyStreamingViewerCredentials(params, this.db);
+        if (!bypassSync && !bypassAuth) {
+          console.warn(
+            "[ConnectionHandler] 🚫 Rejected public streaming websocket: delayed public mode requires dev, loopback, streamToken, or verified login",
+          );
+          ws.close(4001, "Streaming viewer access denied");
+          return;
+        }
       }
 
       console.log("[ConnectionHandler] 📺 Streaming viewer connecting...");
@@ -1612,6 +1737,13 @@ export class ConnectionHandler {
 
     if (followEntity) {
       socket.spectatingCharacterId = followEntity;
+      // Update spectator index
+      let set = this.spectatorsByPlayer.get(followEntity);
+      if (!set) {
+        set = new Set();
+        this.spectatorsByPlayer.set(followEntity, set);
+      }
+      set.add(socket.id);
     }
     socket.spectatingDuelParticipantIds = streamingContext.contestants;
 
@@ -1674,7 +1806,8 @@ export class ConnectionHandler {
     adapter.subscribe(`spectator:${characterId}`);
 
     // Subscribe to followed player's region topics
-    const followedEntity = this.world.entities?.get(characterId);
+    // Use findEntityBySpectatorKey so it searches both items AND players collections
+    const followedEntity = this.findEntityBySpectatorKey(characterId);
     if (followedEntity?.position && this.spatialIndex) {
       const regionKeys = this.spatialIndex.getAdjacentRegionKeys(
         followedEntity.position.x,

@@ -264,6 +264,8 @@ export interface DuelArenaConfig {
   arenaCount: number;
   /** Distance from center to spawn point */
   spawnOffset: number;
+  /** Spawns on arena length (±Z) vs width (±X) */
+  spawnLayout: "alongLength" | "alongWidth";
   /** Lobby spawn point */
   lobbySpawnPoint: { x: number; y: number; z: number };
 }
@@ -282,6 +284,7 @@ const DEFAULT_ARENA_CONFIG: DuelArenaConfig = {
   rows: 3,
   arenaCount: 6,
   spawnOffset: 8,
+  spawnLayout: "alongLength",
   lobbySpawnPoint: { x: 105, y: 0.42, z: 60 },
 };
 
@@ -310,6 +313,10 @@ export function getDuelArenaConfig(): DuelArenaConfig {
     }
   }
 
+  const rawLayout = (arenas as { spawnLayout?: string }).spawnLayout;
+  const spawnLayout: DuelArenaConfig["spawnLayout"] =
+    rawLayout === "alongWidth" ? "alongWidth" : "alongLength";
+
   const config: DuelArenaConfig = {
     baseX: arenas.bounds.minX,
     baseZ: arenas.bounds.minZ,
@@ -321,6 +328,7 @@ export function getDuelArenaConfig(): DuelArenaConfig {
     rows,
     arenaCount: arenas.arenaCount ?? columns * rows,
     spawnOffset: DEFAULT_ARENA_CONFIG.spawnOffset,
+    spawnLayout,
     lobbySpawnPoint: lobby?.spawnPoint ?? DEFAULT_ARENA_CONFIG.lobbySpawnPoint,
   };
 

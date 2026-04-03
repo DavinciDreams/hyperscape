@@ -14,6 +14,7 @@ import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
 import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { formatItemName } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 
 interface CraftingRecipe {
   output: string;
@@ -32,49 +33,6 @@ interface CraftingPanelProps {
   world: ClientWorld;
   onClose: () => void;
   station?: string;
-}
-
-/**
- * Get icon for crafting item type
- */
-function getItemIcon(output: string, category: string): string {
-  const id = output.toLowerCase();
-
-  // Leather items
-  if (id.includes("leather") && !id.includes("dragon")) return "🧥";
-  if (id.includes("vambraces") || id.includes("vambrace")) return "🧤";
-  if (id.includes("chaps")) return "👖";
-  if (id.includes("coif")) return "⛑️";
-  if (id.includes("cowl")) return "⛑️";
-  if (id.includes("body")) return "🛡️";
-
-  // Dragonhide
-  if (
-    category === "dragonhide" ||
-    id.includes("dhide") ||
-    id.includes("dragon")
-  )
-    return "🐉";
-
-  // Studded
-  if (id.includes("studded")) return "🔩";
-
-  // Jewelry
-  if (id.includes("ring")) return "💍";
-  if (id.includes("necklace")) return "📿";
-  if (id.includes("amulet")) return "📿";
-  if (id.includes("bracelet")) return "⌚";
-
-  // Gems
-  if (id.includes("sapphire")) return "💎";
-  if (id.includes("emerald")) return "💚";
-  if (id.includes("ruby")) return "❤️";
-  if (id.includes("diamond")) return "💠";
-
-  // Gem cutting
-  if (category === "gem_cutting") return "💎";
-
-  return "🧵";
 }
 
 /**
@@ -251,10 +209,7 @@ export function CraftingPanel({
                           opacity: canCraft ? 1 : 0.5,
                         }}
                       >
-                        {/* Item Icon */}
-                        <span className="text-lg">
-                          {getItemIcon(recipe.output, recipe.category)}
-                        </span>
+                        <ItemIcon itemId={recipe.output} size={28} />
 
                         {/* Item Info */}
                         <div className="flex-1 min-w-0">
@@ -294,12 +249,7 @@ export function CraftingPanel({
               >
                 {/* Recipe Details */}
                 <div className="flex items-center gap-3 mb-3">
-                  <span className="text-2xl">
-                    {getItemIcon(
-                      selectedRecipe.output,
-                      selectedRecipe.category,
-                    )}
-                  </span>
+                  <ItemIcon itemId={selectedRecipe.output} size={40} />
                   <div>
                     <div
                       className="font-semibold text-sm"

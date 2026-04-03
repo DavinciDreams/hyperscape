@@ -232,8 +232,17 @@ export interface IEmbeddedHyperscapeService {
   /** Get current game state for the agent */
   getGameState(): EmbeddedGameState | null;
 
+  /** Short world-map summary for LLM prompts (towns, POIs, resources near the agent). */
+  formatMapAwarenessForLlm(): string;
+
+  /** Horizontal facing (radians), for operator intent targeting; null if unknown */
+  getPlayerYaw(): number | null;
+
   /** Get nearby entities */
   getNearbyEntities(): NearbyEntityData[];
+
+  /** Drop cached nearby scan so the next read reflects the current world (e.g. dashboard orders). */
+  invalidateNearbyEntityCache(): void;
 
   /** Execute a move command */
   executeMove(
@@ -299,4 +308,20 @@ export interface IEmbeddedHyperscapeService {
 
   /** Complete a quest by ID (must be ready_to_complete) */
   executeQuestComplete(questId: string): Promise<boolean>;
+
+  /**
+   * Constrain all movement to the given XZ rectangle.
+   * Any executeMove call whose target falls outside the bounds is clamped to
+   * the nearest legal point before being dispatched — preventing out-of-bounds
+   * movement at the source rather than correcting it reactively.
+   */
+  setArenaBounds(bounds: {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  }): void;
+
+  /** Remove the arena movement constraint set by setArenaBounds(). */
+  clearArenaBounds(): void;
 }

@@ -67,6 +67,9 @@ export interface AgentInfo {
   wins: number;
   losses: number;
   damageDealtThisFight: number;
+  highestHit: number;
+  attacksLanded: number;
+  healsUsed: number;
   equipment: Record<string, string>;
   inventory: Array<{ itemId: string; quantity: number } | null>;
   rank: number;

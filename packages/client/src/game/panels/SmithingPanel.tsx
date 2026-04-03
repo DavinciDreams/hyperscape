@@ -14,6 +14,7 @@ import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
 import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { formatItemName } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 
 interface SmithingRecipe {
   itemId: string;
@@ -31,66 +32,6 @@ interface SmithingPanelProps {
   availableRecipes: SmithingRecipe[];
   world: ClientWorld;
   onClose: () => void;
-}
-
-/**
- * Get icon for item type
- */
-function getItemIcon(itemId: string, category: string): string {
-  const id = itemId.toLowerCase();
-
-  // Weapons
-  if (category === "weapons" || id.includes("sword") || id.includes("scimitar"))
-    return "⚔️";
-  if (id.includes("dagger")) return "🗡️";
-  if (id.includes("mace")) return "🔨";
-  if (id.includes("axe") && !id.includes("pickaxe")) return "🪓";
-  if (id.includes("warhammer")) return "⚒️";
-
-  // Armor
-  if (
-    category === "armor" ||
-    id.includes("platebody") ||
-    id.includes("chainbody")
-  )
-    return "🛡️";
-  if (id.includes("helmet") || id.includes("helm") || id.includes("full_helm"))
-    return "⛑️";
-  if (id.includes("platelegs") || id.includes("plateskirt")) return "👖";
-  if (
-    id.includes("shield") ||
-    id.includes("sq_shield") ||
-    id.includes("kiteshield")
-  )
-    return "🛡️";
-  if (id.includes("boots")) return "👢";
-  if (id.includes("gauntlets") || id.includes("gloves")) return "🧤";
-
-  // Tools
-  if (id.includes("pickaxe")) return "⛏️";
-  if (id.includes("hatchet")) return "🪓";
-
-  // Misc
-  if (id.includes("nails")) return "📍";
-  if (id.includes("bar")) return "🔶";
-  if (id.includes("arrowtips") || id.includes("dart")) return "➤";
-  if (id.includes("knife")) return "🔪";
-
-  return "🔨";
-}
-
-/**
- * Get bar type icon
- */
-function getBarIcon(barType: string): string {
-  const type = barType.toLowerCase();
-  if (type.includes("bronze")) return "🟤";
-  if (type.includes("iron")) return "⚫";
-  if (type.includes("steel")) return "⚪";
-  if (type.includes("mithril")) return "🔵";
-  if (type.includes("adamant")) return "🟢";
-  if (type.includes("rune") || type.includes("runite")) return "🔷";
-  return "🔶";
 }
 
 /**
@@ -274,10 +215,7 @@ export function SmithingPanel({
                               : theme.colors.border.default,
                         }}
                       >
-                        {/* Item Icon */}
-                        <span className="text-lg">
-                          {getItemIcon(recipe.itemId, recipe.category)}
-                        </span>
+                        <ItemIcon itemId={recipe.itemId} size={28} />
 
                         {/* Item Info */}
                         <div className="flex-1 min-w-0">
@@ -294,7 +232,7 @@ export function SmithingPanel({
                             className="text-[9px] flex items-center gap-1"
                             style={{ color: theme.colors.text.muted }}
                           >
-                            <span>{getBarIcon(recipe.barType)}</span>
+                            <ItemIcon itemId={recipe.barType} size={14} />
                             <span>×{recipe.barsRequired}</span>
                             <span className="mx-0.5">|</span>
                             <span>Lv{recipe.levelRequired}</span>
@@ -316,12 +254,7 @@ export function SmithingPanel({
                 >
                   {/* Recipe Details */}
                   <div className="flex items-center gap-3 mb-3">
-                    <span className="text-2xl">
-                      {getItemIcon(
-                        selectedRecipe.itemId,
-                        selectedRecipe.category,
-                      )}
-                    </span>
+                    <ItemIcon itemId={selectedRecipe.itemId} size={40} />
                     <div>
                       <div
                         className="font-semibold text-sm"

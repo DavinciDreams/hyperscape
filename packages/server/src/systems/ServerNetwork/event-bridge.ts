@@ -632,8 +632,8 @@ export class EventBridge {
         }
 
         // Safety cap: prevent unbounded memory growth with aggressive eviction
-        // Lower threshold (1000) and evict more entries (75%) to recover quickly
-        if (this.recentDamageEvents.size > 1000) {
+        // 256 entries covers ~128 concurrent combatants at 2 ticks retention
+        if (this.recentDamageEvents.size > 256) {
           let evicted = 0;
           const evictTarget = Math.floor(this.recentDamageEvents.size * 0.75);
           for (const [key] of this.recentDamageEvents) {

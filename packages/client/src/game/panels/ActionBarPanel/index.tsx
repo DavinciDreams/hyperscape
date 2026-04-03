@@ -51,6 +51,7 @@ import {
 
 // Components
 import { ActionBarSlot, RubbishBin } from "./ActionBarSlot";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 
 // Local imports
 import type { ActionBarPanelProps } from "./types";
@@ -351,7 +352,14 @@ export function ActionBarPanel({
                 pointerEvents: "none",
               }}
             >
-              {getSlotIcon(draggedSlot)}
+              {draggedSlot.type === "item" && draggedSlot.itemId ? (
+                <ItemIcon
+                  itemId={draggedSlot.itemId}
+                  size={Math.max(18, SLOT_SIZE - 6)}
+                />
+              ) : (
+                getSlotIcon(draggedSlot)
+              )}
             </div>
           )}
         </DragOverlay>

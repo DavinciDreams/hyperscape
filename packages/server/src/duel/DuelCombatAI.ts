@@ -26,6 +26,21 @@ export interface DuelCombatConfig {
   maxTicksWithoutAttack: number;
   useLlmTactics: boolean;
   combatRole: "melee" | "ranged" | "mage";
+  /** When true (duel rule), skip all food use */
+  noFood?: boolean;
+  /** Clamp movement targets to arena floor (world XZ) */
+  movementClampBounds?: {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  };
+  /**
+   * Initial strafe direction for this agent. Pass opposite signs (+1/-1) for the
+   * two combatants so they orbit in opposite directions and don't converge on the
+   * same standoff point.
+   */
+  initialStrafeSign?: 1 | -1;
 }
 
 const DEFAULT_CONFIG: DuelCombatConfig = {
@@ -35,6 +50,7 @@ const DEFAULT_CONFIG: DuelCombatConfig = {
   maxTicksWithoutAttack: 5,
   useLlmTactics: false,
   combatRole: "melee",
+  noFood: false,
 };
 
 /** Health percentage thresholds that trigger trash talk events. */
@@ -224,19 +240,32 @@ export class DuelCombatAI {
     health: 0,
     maxHealth: 0,
     distance: 0,
+    equippedWeapon: undefined,
     position: null,
   };
 
   /** Movement AI: last time a move action was issued */
   private lastMoveTime = 0;
-  /** Movement AI cooldown (ms) */
-  private static readonly MOVE_COOLDOWN_MS = 1200;
-  /** Ideal engagement ranges per combat role */
+  /** Lateral strafe direction (+1 / -1), flipped occasionally for variety */
+  private strafeSign: 1 | -1 = 1;
+  private strafeMoveCount = 0;
+  /** Log once per fight when food is expected but inventory has none */
+  private warnedNoFood = false;
+  /** Movement AI cooldown (ms) — longer = more deliberate, less jittery */
+  private static readonly MOVE_COOLDOWN_MS = 1800;
+  /** Perpendicular offset magnitude (world units) when strafing during reposition */
+  private static readonly STRAFE_STEP = 0.85;
+  /**
+   * Ideal engagement ranges (world-space meters, center-to-center).
+   * Wider bands = agents settle into range and stay there instead of constantly
+   * overshooting and correcting. Melee min prevents capsule overlap; melee max
+   * gives a comfortable melee "ring" where both fighters look engaged.
+   */
   private static readonly IDEAL_RANGE: Record<
     string,
     { min: number; max: number }
   > = {
-    melee: { min: 1, max: 2 },
+    melee: { min: 1.5, max: 3.0 },
     ranged: { min: 5, max: 8 },
     mage: { min: 5, max: 8 },
   };
@@ -256,6 +285,9 @@ export class DuelCombatAI {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.runtime = runtime ?? null;
     this.sendChat = sendChat ?? null;
+    if (config?.initialStrafeSign !== undefined) {
+      this.strafeSign = config.initialStrafeSign;
+    }
   }
 
   setContext(
@@ -282,6 +314,10 @@ export class DuelCombatAI {
     this.lastFoodUseTime = 0;
     this.lastMoveTime = 0;
     this.lastPhase = "opening";
+    this.strafeSign =
+      this.config.initialStrafeSign ?? (Math.random() < 0.5 ? 1 : -1);
+    this.strafeMoveCount = 0;
+    this.warnedNoFood = false;
     // Set default strategy prayer based on combat role
     this.strategy = {
       ...DEFAULT_STRATEGY,
@@ -380,10 +416,10 @@ export class DuelCombatAI {
     const prevHealthPct = this.lastHealthPct;
     const prevOpponentHealthPct = this.opponentLastHealthPct;
 
-    const damageThisTick = this.lastHealthPct - healthPct;
-    if (damageThisTick > 0) {
+    const damageThisTickPct = this.lastHealthPct - healthPct;
+    if (damageThisTickPct > 0) {
       this.totalDamageReceived += Math.round(
-        (damageThisTick / 100) * state.maxHealth,
+        (damageThisTickPct / 100) * state.maxHealth,
       );
     }
     this.lastHealthPct = healthPct;
@@ -409,6 +445,12 @@ export class DuelCombatAI {
     const phaseChanged = phase !== this.lastPhase;
     this.lastPhase = phase;
 
+    // 5b. Protection prayer — activate based on opponent's visible weapon type.
+    // Fires every tick; activatePrayer no-ops if already active.
+    if (opponentData) {
+      this.maybeActivateProtectionPrayer(opponentData).catch(() => {});
+    }
+
     // 6. Trash talk (fire-and-forget, never blocks tick)
     this.checkHealthMilestones(
       healthPct,
@@ -418,8 +460,16 @@ export class DuelCombatAI {
     );
     this.maybeAmbientTrashTalk(healthPct, opponentData);
 
-    // 7. tryHeal (context-aware #4, finishing adjustment #10)
-    if (await this.tryHeal(state, healthPct, phase, opponentData)) {
+    // 7. tryHeal (context-aware #4, finishing adjustment #10, burst-reactive)
+    if (
+      await this.tryHeal(
+        state,
+        healthPct,
+        phase,
+        opponentData,
+        damageThisTickPct,
+      )
+    ) {
       this.healsUsed++;
       return;
     }
@@ -430,7 +480,7 @@ export class DuelCombatAI {
     }
 
     // 9. Movement AI - kite/chase by role (#1, #5, #17)
-    this.movementTick(state, opponentData, Date.now());
+    this.movementTick(state, opponentData, Date.now(), phase);
 
     // 10. Strategy/prayer/style (correct IDs, faster switching, faster replan)
     if (this.config.useLlmTactics && this.runtime) {
@@ -478,16 +528,27 @@ export class DuelCombatAI {
     healthPct: number,
     phase: CombatPhase,
     opponentData?: OpponentData | null,
+    damageThisTickPct = 0,
   ): Promise<boolean> {
+    if (this.config.noFood === true) return false;
+
     const baseThreshold = this.config.useLlmTactics
       ? this.strategy.foodThreshold
       : this.config.healThresholdPct;
-    const threshold =
+    const burstEase =
+      damageThisTickPct >= 12 ? 18 : damageThisTickPct >= 7 ? 10 : 0;
+    let threshold =
       phase === "desperate"
         ? baseThreshold + 15
         : phase === "finishing"
           ? Math.max(15, baseThreshold - 10)
           : baseThreshold;
+    threshold = Math.max(10, threshold - burstEase);
+
+    // Prefer not to eat in melee unless desperate (buys a beat to reposition)
+    if (phase !== "desperate" && opponentData && opponentData.distance < 2.2) {
+      threshold = Math.min(95, threshold + 12);
+    }
 
     if (healthPct >= threshold) return false;
 
@@ -505,7 +566,16 @@ export class DuelCombatAI {
     if (now - this.lastFoodUseTime < 1800) return false;
 
     const food = this.findBestFood(state.inventory);
-    if (!food) return false;
+    if (!food) {
+      if (!this.warnedNoFood && healthPct < 50 && phase !== "opening") {
+        this.warnedNoFood = true;
+        duelLogDebug(
+          "DuelCombatAI",
+          `No edible food in inventory at ${healthPct.toFixed(0)}% HP (agent=${this.agentName || this.opponentId})`,
+        );
+      }
+      return false;
+    }
 
     try {
       await this.service.executeUse(food.itemId);
@@ -781,6 +851,55 @@ export class DuelCombatAI {
     if (!this.activePrayers.has(prayerId)) return;
     const success = await this.service.executePrayerToggle(prayerId);
     if (success) this.activePrayers.delete(prayerId);
+  }
+
+  /**
+   * Detect the likely attack type of an opponent from their equipped weapon ID.
+   * Used to decide which protection prayer to activate.
+   */
+  private detectOpponentAttackType(
+    weapon: string | undefined,
+  ): "melee" | "ranged" | "magic" | null {
+    if (!weapon) return null;
+    const w = weapon.toLowerCase();
+    if (
+      w.includes("staff") ||
+      w.includes("wand") ||
+      w.includes("battlestaff") ||
+      w.includes("mystic")
+    )
+      return "magic";
+    if (
+      w.includes("bow") ||
+      w.includes("crossbow") ||
+      w.includes("ballista") ||
+      w.includes("blowpipe")
+    )
+      return "ranged";
+    return "melee";
+  }
+
+  /**
+   * Activate the appropriate protection prayer based on what the opponent is wielding.
+   * Only activates — never deactivates — so it stacks with offensive prayers.
+   * Runs every tick but `activatePrayer` no-ops if the prayer is already active.
+   */
+  private async maybeActivateProtectionPrayer(
+    opponentData: OpponentData,
+  ): Promise<void> {
+    const attackType = this.detectOpponentAttackType(
+      opponentData.equippedWeapon,
+    );
+    if (!attackType) return;
+    const prayerMap: Record<string, string> = {
+      melee: "protect_from_melee",
+      ranged: "protect_from_missiles",
+      magic: "protect_from_magic",
+    };
+    const protPrayer = prayerMap[attackType];
+    if (protPrayer) {
+      await this.activatePrayer(protPrayer);
+    }
   }
 
   private async tryPrayerSwitch(
@@ -1080,12 +1199,15 @@ export class DuelCombatAI {
 
   /**
    * Movement AI: position agent at ideal range for their combat role (#1, #5, #17).
-   * Ranged/mage kite away when too close, melee chases when too far.
+   * Melee: hold a standoff ring (min–max); back up when too close, not only chase when far.
+   * Ranged/mage: kite when too close, walk in when too far.
+   * Finishing phase: always run to press the advantage regardless of distance.
    */
   private movementTick(
     state: EmbeddedGameState,
     opponentData: OpponentData | null,
     now: number,
+    phase: CombatPhase = "trading",
   ): void {
     if (now - this.lastMoveTime < DuelCombatAI.MOVE_COOLDOWN_MS) return;
     if (!opponentData) return;
@@ -1108,34 +1230,101 @@ export class DuelCombatAI {
     const dx = oppPos[0] - ownPos[0];
     const dz = oppPos[2] - ownPos[2];
     const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist < 0.01) return; // overlapping, skip
-
-    const nx = dx / dist;
-    const nz = dz / dist;
 
     let targetX: number;
     let targetZ: number;
     let run = false;
 
-    if (tooClose && this.config.combatRole !== "melee") {
-      // Kite away for ranged/mage
-      const targetDist = idealRange.max;
-      targetX = oppPos[0] - nx * targetDist;
-      targetZ = oppPos[2] - nz * targetDist;
-      run = true;
-    } else if (tooFar && this.config.combatRole === "melee") {
-      // Chase for melee
-      const targetDist = idealRange.min;
-      targetX = oppPos[0] - nx * targetDist;
-      targetZ = oppPos[2] - nz * targetDist;
+    // Stacked or overlapping — push apart using relative geometry so the two agents
+    // always diverge. Each agent pushes in the direction from opponent to self (opposite
+    // vectors for the two combatants), so they can never target the same world position.
+    // A perpendicular offset (strafeSign) breaks the tie when they are perfectly co-located.
+    if (dist < 1.5) {
+      // Push apart gently — enough to unstick without sending agents flying
+      const push = 2.2;
+      if (dist > 0.05) {
+        const awayX = -dx / dist;
+        const awayZ = -dz / dist;
+        const perpX = -awayZ * this.strafeSign;
+        const perpZ = awayX * this.strafeSign;
+        targetX = ownPos[0] + awayX * push + perpX * 1.0;
+        targetZ = ownPos[2] + awayZ * push + perpZ * 1.0;
+      } else {
+        targetX = ownPos[0] + push * this.strafeSign;
+        targetZ = ownPos[2] + push * 0.5 * -this.strafeSign;
+      }
       run = true;
     } else {
-      return;
+      const nx = dx / dist;
+      const nz = dz / dist;
+
+      if (this.config.combatRole === "melee") {
+        // Same standoff point whether we're inside or outside the band: on the ring at min distance from opponent.
+        const standoff = idealRange.min;
+        targetX = oppPos[0] - nx * standoff;
+        targetZ = oppPos[2] - nz * standoff;
+        // In finishing phase, always sprint — press the advantage and don't let
+        // a low-HP opponent create distance.
+        run = tooFar || phase === "finishing";
+      } else if (tooClose) {
+        const targetDist = idealRange.max;
+        targetX = oppPos[0] - nx * targetDist;
+        targetZ = oppPos[2] - nz * targetDist;
+        run = true;
+      } else {
+        const targetDist = idealRange.min;
+        targetX = oppPos[0] - nx * targetDist;
+        targetZ = oppPos[2] - nz * targetDist;
+        run = true;
+      }
+
+      // Lateral strafe using a world-space diagonal that is ALWAYS opposite for the
+      // two combatants. The line-of-sight perpendicular (-nz, nx) * strafeSign is
+      // mathematically identical for both agents (opposite nx/nz cancels opposite
+      // strafeSign), so both used to orbit the same direction. Instead we use a
+      // fixed world-space diagonal so strafeSign=+1 → (+X,-Z) and
+      // strafeSign=-1 → (-X,+Z): always diverging regardless of orientation.
+      const strafeScale =
+        dist < idealRange.max
+          ? Math.max(0.35, Math.min(1, dist / idealRange.max))
+          : 1;
+      const strafeAmt = DuelCombatAI.STRAFE_STEP * strafeScale * 0.7;
+      targetX += this.strafeSign * strafeAmt;
+      targetZ -= this.strafeSign * strafeAmt;
+    }
+
+    const b = this.config.movementClampBounds;
+    if (b) {
+      // 2.5-unit pad keeps targets well clear of the wall. Agents running at full
+      // speed can overshoot a tight target, so this margin prevents them from
+      // reaching the boundary even with physics overshoot.
+      const pad = 2.5;
+      const preClampX = targetX;
+      const preClampZ = targetZ;
+      targetX = Math.min(b.maxX - pad, Math.max(b.minX + pad, targetX));
+      targetZ = Math.min(b.maxZ - pad, Math.max(b.minZ + pad, targetZ));
+
+      // Wall-aware strafe: if clamping moved the target more than ~0.5 units the
+      // agent is strafing into a wall. Flip direction immediately so they circle
+      // away from the boundary instead of pressing against it every move tick.
+      const wallPush = Math.sqrt(
+        (targetX - preClampX) ** 2 + (targetZ - preClampZ) ** 2,
+      );
+      if (wallPush > 0.5) {
+        this.strafeSign = (this.strafeSign * -1) as 1 | -1;
+        this.strafeMoveCount = 0; // reset counter so the next natural flip is delayed
+      }
     }
 
     try {
       void this.service.executeMove([targetX, ownPos[1], targetZ], run);
       this.lastMoveTime = now;
+      this.strafeMoveCount++;
+      // Flip orbit direction every 5 moves — creates longer, more readable arcs
+      // instead of the rapid zig-zag from flipping every 3.
+      if (this.strafeMoveCount % 5 === 0) {
+        this.strafeSign = (this.strafeSign * -1) as 1 | -1;
+      }
     } catch (err) {
       duelLogDebug("DuelCombatAI", "Move failed:", errMsg(err));
     }
@@ -1186,6 +1375,7 @@ export class DuelCombatAI {
         this._cachedOpponentData.distance = e.distance;
         this._cachedOpponentData.position =
           (e as { position?: [number, number, number] }).position ?? null;
+        this._cachedOpponentData.equippedWeapon = e.equippedWeapon;
         return this._cachedOpponentData;
       }
     }
@@ -1246,6 +1436,7 @@ interface OpponentData {
   maxHealth: number;
   distance: number;
   position: [number, number, number] | null;
+  equippedWeapon: string | undefined;
 }
 
 type InventorySlot = EmbeddedGameState["inventory"][number];

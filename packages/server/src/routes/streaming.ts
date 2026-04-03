@@ -77,7 +77,10 @@ const STREAMING_SSE_MAX_PENDING_BYTES = Math.max(
   128 * 1024,
   Math.min(
     16 * 1024 * 1024,
-    Number.parseInt(process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576", 10),
+    Number.parseInt(
+      process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576",
+      10,
+    ),
   ),
 );
 const STREAMING_SSE_REPLAY_MAX_BYTES = Math.max(
@@ -1005,6 +1008,8 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      const betUrl =
+        (process.env.STREAMING_PUBLIC_BET_URL || "").trim() || null;
       return reply.send({
         enabled: process.env.STREAMING_DUEL_ENABLED !== "false",
         cycleDuration: STREAMING_TIMING.CYCLE_DURATION,
@@ -1016,7 +1021,32 @@ export function registerStreamingRoutes(
         publicDelayMs: STREAMING_PUBLIC_DELAY_MS,
         publicDelayDefaultMs: STREAMING_PUBLIC_DELAY_DEFAULT_MS,
         publicDelayOverridden: STREAMING_PUBLIC_DELAY_OVERRIDDEN,
-        wsUrl: process.env.PUBLIC_WS_URL || "ws://localhost:5555/ws",
+        wsUrl: process.env.PUBLIC_WS_URL || "ws://localhost:5556/ws",
+        betUrl,
+        bettingBridgeEnabled: process.env.DUEL_BETTING_ENABLED === "true",
+      });
+    },
+  );
+
+  /**
+   * Public betting CTA for stream overlays (no secrets).
+   * Set STREAMING_PUBLIC_BET_URL to your prediction-market / wallet-connect page.
+   */
+  fastify.get(
+    "/api/streaming/betting",
+    {
+      config: { rateLimit: false },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const betUrl =
+        (process.env.STREAMING_PUBLIC_BET_URL || "").trim() || null;
+      return reply.send({
+        betUrl,
+        bettingBridgeEnabled: process.env.DUEL_BETTING_ENABLED === "true",
+        hint:
+          betUrl != null
+            ? "Wagers typically lock when the countdown starts. Pick a side before the bell."
+            : "Set STREAMING_PUBLIC_BET_URL on the server to show a bet link on stream.",
       });
     },
   );

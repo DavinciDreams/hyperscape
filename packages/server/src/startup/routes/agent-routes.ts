@@ -15,9 +15,17 @@
  * No proxying is needed for localhost development.
  */
 
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { World } from "@hyperscape/shared";
 import { createJWT } from "../../shared/utils.js";
+import {
+  recordAgentThought,
+  resolveDashboardIntent,
+} from "../../eliza/dashboardInterop.js";
+import type {
+  AgentCharacterConfig,
+  EmbeddedAgentInfo,
+} from "../../eliza/types.js";
 
 // Command acknowledgment delay (ms) - allows plugin to process before response
 const COMMAND_ACK_DELAY_MS = 100;
@@ -34,6 +42,7 @@ type AgentMappingRecord = {
   agentId: string;
   agentName: string;
   characterId: string;
+  streamingDuelEnabled?: boolean;
 };
 
 type CachedValue<T> = {
@@ -66,6 +75,11 @@ type AgentRouteDb = {
   select: (fields?: unknown) => {
     from: (table: unknown) => {
       where: (condition: unknown) => Promise<unknown[]>;
+    };
+  };
+  update: (table: unknown) => {
+    set: (values: Record<string, unknown>) => {
+      where: (condition: unknown) => Promise<unknown>;
     };
   };
 };
@@ -280,6 +294,59 @@ export function registerAgentRoutes(
     }
 
     return mapping;
+  };
+
+  const getAgentMappingByCharacterId = async (
+    db: AgentRouteDb,
+    characterId: string,
+  ): Promise<AgentMappingRecord | null> => {
+    const { agentMappings } = await schemaModulePromise;
+    const { eq } = await drizzleModulePromise;
+    const mappings = (await db
+      .select()
+      .from(agentMappings)
+      .where(
+        eq(agentMappings.characterId, characterId),
+      )) as AgentMappingRecord[];
+    return mappings[0] ?? null;
+  };
+
+  /**
+   * Resolve dashboard / Eliza route param to embedded agent characterId.
+   * Accepts either Hyperscape character UUID or stored mapping agent_id (e.g. Eliza id).
+   */
+  const resolveDashboardAgentCharacterId = async (
+    routeAgentId: string,
+  ): Promise<string | null> => {
+    const { getAgentManager, getRunningAgents } = await elizaIndexModulePromise;
+    const agentManager = getAgentManager();
+    if (agentManager?.getAgentInfo(routeAgentId)) {
+      return routeAgentId;
+    }
+
+    const db = getDatabaseDb();
+    if (db) {
+      const byAgentKey = await getAgentMappingById(db, routeAgentId);
+      if (byAgentKey?.characterId) {
+        return byAgentKey.characterId;
+      }
+      const byCharacter = await getAgentMappingByCharacterId(db, routeAgentId);
+      if (byCharacter?.characterId) {
+        return byCharacter.characterId;
+      }
+    }
+
+    const runningModelAgents = getRunningAgents() as Map<
+      string,
+      { characterId: string }
+    >;
+    for (const [, runningAgent] of runningModelAgents) {
+      if (runningAgent.characterId === routeAgentId) {
+        return routeAgentId;
+      }
+    }
+
+    return null;
   };
 
   const getRunningModelAgentMapping = async (
@@ -698,7 +765,7 @@ export function registerAgentRoutes(
 
       const mappings = await listAgentMappingsByAccount(db, accountId);
 
-      const agentIds = mappings.map((m) => m.agentId);
+      const agentIds = mappings.flatMap((m) => [m.agentId, m.characterId]);
 
       // Model duel agents are public streaming participants; include them in
       // mapping lookup so dashboards can discover live duel roster.
@@ -830,6 +897,7 @@ export function registerAgentRoutes(
           accountId,
           characterId,
           agentName,
+          streamingDuelEnabled: true,
           createdAt: new Date(),
           updatedAt: new Date(),
         })
@@ -852,6 +920,7 @@ export function registerAgentRoutes(
         accountId,
         characterId,
         agentName,
+        streamingDuelEnabled: true,
       });
 
       console.log(`[AgentRoutes] ✅ Agent mapping saved for: ${agentName}`);
@@ -922,6 +991,7 @@ export function registerAgentRoutes(
             characterId: runningAgentMapping.characterId,
             accountId: runningAgentMapping.accountId,
             agentName: runningAgentMapping.agentName,
+            streamingDuelEnabled: true,
           });
         }
 
@@ -942,6 +1012,7 @@ export function registerAgentRoutes(
         characterId: mapping.characterId,
         accountId: mapping.accountId,
         agentName: mapping.agentName,
+        streamingDuelEnabled: mapping.streamingDuelEnabled ?? true,
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to fetch agent mapping:", error);
@@ -955,6 +1026,116 @@ export function registerAgentRoutes(
       });
     }
   });
+
+  /**
+   * PATCH / POST /api/agents/mappings/:agentId/streaming-duel
+   *
+   * Toggle whether this agent participates in streaming duel arena matchmaking.
+   * POST is registered alongside PATCH for clients/proxies that mishandle PATCH.
+   */
+  const handleStreamingDuelPreference = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    try {
+      const userId = await getVerifiedUserId(request);
+      if (!userId) {
+        await reply.status(401).send({
+          success: false,
+          error: "Unauthorized",
+        });
+        return;
+      }
+
+      const params = request.params as { agentId: string };
+      const { agentId } = params;
+      const body = request.body as { streamingDuelEnabled?: boolean };
+
+      if (!agentId || typeof body.streamingDuelEnabled !== "boolean") {
+        await reply.status(400).send({
+          success: false,
+          error: "Missing agentId or streamingDuelEnabled (boolean)",
+        });
+        return;
+      }
+
+      const db = getDatabaseDb();
+      if (!db) {
+        await reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+        return;
+      }
+
+      const existingMapping = await getAgentMappingById(db, agentId, true);
+      if (!existingMapping || existingMapping.accountId !== userId) {
+        await reply.status(403).send({
+          success: false,
+          error: "Forbidden",
+        });
+        return;
+      }
+
+      const { agentMappings } = await schemaModulePromise;
+      const { eq } = await drizzleModulePromise;
+
+      await db
+        .update(agentMappings)
+        .set({
+          streamingDuelEnabled: body.streamingDuelEnabled,
+          updatedAt: new Date(),
+        })
+        .where(eq(agentMappings.agentId, agentId));
+
+      invalidateAgentMappingCache(agentId, existingMapping.accountId);
+
+      const updatedMapping: AgentMappingRecord = {
+        ...existingMapping,
+        streamingDuelEnabled: body.streamingDuelEnabled,
+      };
+      primeAgentMappingCache(updatedMapping);
+
+      const { getStreamingDuelScheduler } =
+        await import("../../systems/StreamingDuelScheduler/index.js");
+      const scheduler = getStreamingDuelScheduler();
+      const characterId = existingMapping.characterId;
+      // Matchmaking + world.entities use character (player) id, not dashboard mapping id.
+      scheduler?.unregisterAgent(agentId);
+      scheduler?.applyStreamingDuelParticipation(
+        characterId,
+        body.streamingDuelEnabled,
+      );
+
+      await reply.send({
+        success: true,
+        agentId,
+        characterId,
+        streamingDuelEnabled: body.streamingDuelEnabled,
+      });
+    } catch (error) {
+      console.error(
+        "[AgentRoutes] ❌ Failed to update streaming duel preference:",
+        error,
+      );
+      await reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to update preference",
+      });
+    }
+  };
+
+  fastify.patch(
+    "/api/agents/mappings/:agentId/streaming-duel",
+    handleStreamingDuelPreference,
+  );
+  fastify.post(
+    "/api/agents/mappings/:agentId/streaming-duel",
+    handleStreamingDuelPreference,
+  );
 
   /**
    * DELETE /api/agents/mappings/:agentId
@@ -1020,25 +1201,9 @@ export function registerAgentRoutes(
   /**
    * POST /api/agents/:agentId/message
    *
-   * Send a message to an agent via ElizaOS messaging system.
-   * This properly integrates with ElizaOS's runtime, allowing the agent to
-   * process messages through its personality, providers, and actions.
-   *
-   * SECURITY: Requires authentication. User must own the agent to send messages.
-   *
-   * Headers:
-   * - Authorization: Bearer <token> (Privy or Hyperscape JWT)
-   *
-   * Request body:
-   * {
-   *   content: "Move to coordinates [10, 0, 5]"
-   * }
-   *
-   * Response:
-   * {
-   *   success: true,
-   *   message: "Message sent to agent"
-   * }
+   * Operator → agent chat: scripted intent (if matched) or LLM reply only.
+   * Does not return synthetic “posted to chat” text — start the agent and fix model config instead.
+   * SECURITY: User must own the agent (Bearer Privy or Hyperscape JWT).
    */
   fastify.post("/api/agents/:agentId/message", async (request, reply) => {
     try {
@@ -1050,51 +1215,7 @@ export function registerAgentRoutes(
       const { agentId } = params;
       const { content } = body;
 
-      // SECURITY: Require authentication via Authorization header
-      const authHeader = request.headers.authorization;
-      if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        console.warn(
-          "[AgentRoutes] ❌ Message endpoint called without auth token",
-        );
-        return reply.status(401).send({
-          success: false,
-          error:
-            "Authentication required. Provide Bearer token in Authorization header.",
-        });
-      }
-
-      const token = authHeader.slice(7); // Remove "Bearer " prefix
-
-      // Verify the token and get user identity
-      const { verifyJWT } = await import("../../shared/utils.js");
-      const { verifyPrivyToken, isPrivyEnabled } =
-        await import("../../infrastructure/auth/privy-auth.js");
-
-      let verifiedUserId: string | null = null;
-
-      // Try Privy token verification first (if enabled)
-      if (isPrivyEnabled()) {
-        try {
-          const privyInfo = await verifyPrivyToken(token);
-          if (privyInfo) {
-            verifiedUserId = privyInfo.privyUserId;
-            console.log(
-              `[AgentRoutes] 🔐 Privy auth verified: ${verifiedUserId}`,
-            );
-          }
-        } catch {
-          // Privy verification failed, try JWT next
-        }
-      }
-
-      // Fall back to Hyperscape JWT verification
-      if (!verifiedUserId) {
-        const jwtPayload = await verifyJWT(token);
-        if (jwtPayload && jwtPayload.userId) {
-          verifiedUserId = jwtPayload.userId as string;
-          console.log(`[AgentRoutes] 🔐 JWT auth verified: ${verifiedUserId}`);
-        }
-      }
+      const verifiedUserId = await getVerifiedUserId(request);
 
       if (!verifiedUserId) {
         console.warn("[AgentRoutes] ❌ Token verification failed");
@@ -1127,7 +1248,10 @@ export function registerAgentRoutes(
         });
       }
 
-      const mapping = await getAgentMappingById(db, agentId);
+      let mapping = await getAgentMappingById(db, agentId);
+      if (!mapping) {
+        mapping = await getAgentMappingByCharacterId(db, agentId);
+      }
       if (!mapping) {
         console.warn(`[AgentRoutes] Agent ${agentId} not found in mappings`);
         return reply.status(404).send({
@@ -1136,7 +1260,6 @@ export function registerAgentRoutes(
         });
       }
 
-      // SECURITY: Verify the authenticated user owns this agent
       if (mapping.accountId !== verifiedUserId) {
         console.warn(
           `[AgentRoutes] ❌ SECURITY: User ${verifiedUserId} tried to message agent ${agentId} owned by ${mapping.accountId}`,
@@ -1155,61 +1278,244 @@ export function registerAgentRoutes(
         `[AgentRoutes] Found agent ${mapping.agentName} (character: ${characterId})`,
       );
 
-      // Send message via in-game chat system
-      // The agent receives this through the game's WebSocket and processes it via ElizaOS
-      const chatSystem = world.getSystem("chat") as
-        | {
-            add: (
-              message: {
-                id: string;
-                from: string;
-                fromId: string;
-                body: string;
-                text: string;
-                timestamp: number;
-                createdAt: string;
-              },
-              broadcast?: boolean,
-            ) => void;
-          }
-        | undefined;
+      const { getAgentManager } = await elizaIndexModulePromise;
+      const agentManager = getAgentManager();
+      const hasEmbedded = agentManager?.hasAgent(characterId) ?? false;
+      const embeddedAgent = agentManager?.getAgentInfo(characterId);
+      const running = hasEmbedded && embeddedAgent?.state === "running";
 
-      if (!chatSystem) {
-        console.error("[AgentRoutes] ChatSystem not available");
-        return reply.status(500).send({
+      const service = agentManager?.getAgentService(characterId);
+      let resolvedIntent: ReturnType<typeof resolveDashboardIntent> | null =
+        null;
+      if (running && service) {
+        try {
+          service.invalidateNearbyEntityCache();
+          resolvedIntent = resolveDashboardIntent(content, service);
+        } catch (intentErr) {
+          const msg =
+            intentErr instanceof Error ? intentErr.message : String(intentErr);
+          console.warn(
+            "[AgentRoutes] Dashboard intent resolution failed:",
+            intentErr,
+          );
+          return reply.status(400).send({
+            success: false,
+            error: `Could not interpret operator message: ${msg}`,
+          });
+        }
+      }
+
+      if (resolvedIntent && running && agentManager) {
+        try {
+          await agentManager.sendCommand(
+            characterId,
+            resolvedIntent.command,
+            resolvedIntent.data,
+          );
+
+          recordAgentThought(characterId, {
+            type: "decision",
+            content: resolvedIntent.thought,
+            decisionPath: "scripted",
+          });
+
+          return reply.send({
+            success: true,
+            message: `Agent ${resolvedIntent.command} command queued`,
+            text: resolvedIntent.text,
+            meta: {
+              delivery: "dashboard_command",
+              source: "dashboard-command-bridge",
+              execution: "command",
+              command: resolvedIntent.command,
+              targetName: resolvedIntent.targetName,
+            },
+          });
+        } catch (cmdErr) {
+          const msg = cmdErr instanceof Error ? cmdErr.message : String(cmdErr);
+          console.warn(
+            "[AgentRoutes] Dashboard command dispatch failed:",
+            cmdErr,
+          );
+          return reply.status(502).send({
+            success: false,
+            error: msg,
+          });
+        }
+      }
+
+      if (running && agentManager) {
+        try {
+          const generatedReply = await agentManager.generateDashboardChatReply(
+            characterId,
+            content,
+          );
+
+          if (generatedReply.ok) {
+            const replyService = agentManager.getAgentService(characterId);
+            let messageId: string | null = null;
+            if (replyService) {
+              try {
+                messageId = await replyService.sendChatMessage(
+                  generatedReply.text,
+                );
+              } catch (sendErr) {
+                console.warn(
+                  "[AgentRoutes] LLM reply ok but sendChatMessage failed (operator still sees text below):",
+                  sendErr instanceof Error ? sendErr.message : String(sendErr),
+                );
+              }
+            }
+            return reply.send({
+              success: true,
+              message: "Agent replied",
+              id: messageId,
+              text: generatedReply.text,
+              meta: {
+                delivery: "world_chat",
+                provider: generatedReply.provider,
+                model: generatedReply.model,
+                source: generatedReply.source,
+              },
+            });
+          }
+
+          console.warn(
+            "[AgentRoutes] Dashboard LLM did not succeed:",
+            generatedReply.code,
+            generatedReply.message,
+          );
+          return reply.status(503).send({
+            success: false,
+            error: generatedReply.message,
+            code: generatedReply.code,
+          });
+        } catch (llmErr) {
+          const msg = llmErr instanceof Error ? llmErr.message : String(llmErr);
+          console.warn("[AgentRoutes] Dashboard LLM failed:", llmErr);
+          return reply.status(503).send({
+            success: false,
+            error: `LLM error: ${msg}`,
+            code: "UNEXPECTED",
+          });
+        }
+      }
+
+      if (!hasEmbedded) {
+        return reply.status(503).send({
           success: false,
-          error: "Chat system not available",
+          error:
+            "Agent is not connected to the game server. Start the agent from the dashboard, then try again.",
         });
       }
 
-      // Create chat message - use verified user ID as sender
-      const chatMessage = {
-        id: crypto.randomUUID(),
-        from: "Dashboard",
-        fromId: verifiedUserId,
-        body: content,
-        text: content,
-        timestamp: Date.now(),
-        createdAt: new Date().toISOString(),
-      };
+      if (!running) {
+        return reply.status(409).send({
+          success: false,
+          error:
+            "Agent is not running. Start the agent to receive LLM replies in this chat.",
+        });
+      }
 
-      // Broadcast through game chat - agent will receive via chatAdded packet
-      chatSystem.add(chatMessage, true);
-
-      console.log(
-        `[AgentRoutes] ✅ Message sent to agent ${agentId} via game chat`,
-      );
-
-      return reply.send({
-        success: true,
-        message: "Message sent to agent",
+      return reply.status(500).send({
+        success: false,
+        error:
+          "Unexpected state while generating an agent reply. If this persists, check server logs.",
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to send message to agent:", error);
 
       return reply.status(500).send({
         success: false,
-        error: "Failed to send message to agent",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to send message to agent",
+      });
+    }
+  });
+
+  /**
+   * GET /api/agents/:agentId/chat
+   *
+   * Recent world chat lines spoken by the agent (for dashboard).
+   */
+  fastify.get("/api/agents/:agentId/chat", async (request, reply) => {
+    try {
+      const params = request.params as { agentId: string };
+      const query = request.query as { limit?: string | number };
+      const { agentId } = params;
+      const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 50);
+
+      if (!agentId) {
+        return reply.status(400).send({
+          success: false,
+          error: "Missing required parameter: agentId",
+        });
+      }
+
+      const verifiedUserId = await getVerifiedUserId(request);
+      if (!verifiedUserId) {
+        return reply.status(401).send({
+          success: false,
+          error: "Invalid or missing authentication token",
+        });
+      }
+
+      const db = getDatabaseDb();
+      if (!db) {
+        return reply.status(500).send({
+          success: false,
+          error: "Database system not available",
+        });
+      }
+
+      const mapping = await getAgentMappingById(db, agentId);
+      if (!mapping) {
+        return reply.status(404).send({
+          success: false,
+          error: "Agent not found",
+        });
+      }
+
+      if (mapping.accountId !== verifiedUserId) {
+        return reply.status(403).send({
+          success: false,
+          error: "You do not have permission to access this agent",
+        });
+      }
+
+      const chatSystem = world.chat as
+        | {
+            serialize?: () => Array<{
+              id: string;
+              from: string;
+              fromId?: string;
+              body: string;
+              text: string;
+              timestamp: number;
+              createdAt: string;
+              type?: string;
+            }>;
+          }
+        | undefined;
+
+      const messages = (chatSystem?.serialize?.() || [])
+        .filter((msg) => msg.fromId === mapping.characterId)
+        .slice(-limit);
+
+      return reply.send({
+        success: true,
+        data: {
+          messages,
+        },
+      });
+    } catch (error) {
+      console.error("[AgentRoutes] ❌ Failed to get agent chat:", error);
+      return reply.status(500).send({
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Failed to get agent chat",
       });
     }
   });
@@ -1529,7 +1835,7 @@ export function registerAgentRoutes(
         });
       }
 
-      const characterId = await resolveAgentCharacterId(db, agentId);
+      const characterId = await resolveAgentCharacterId(db, agentId, true);
       if (!characterId) {
         return reply.status(404).send({
           success: false,
@@ -1602,7 +1908,7 @@ export function registerAgentRoutes(
         });
       }
 
-      const characterId = await resolveAgentCharacterId(db, agentId);
+      const characterId = await resolveAgentCharacterId(db, agentId, true);
       if (!characterId) {
         return reply.status(404).send({
           success: false,
@@ -1669,7 +1975,7 @@ export function registerAgentRoutes(
         });
       }
 
-      const characterId = await resolveAgentCharacterId(db, agentId);
+      const characterId = await resolveAgentCharacterId(db, agentId, true);
       if (!characterId) {
         return reply.status(404).send({
           success: false,
@@ -1744,7 +2050,7 @@ export function registerAgentRoutes(
         });
       }
 
-      const characterId = await resolveAgentCharacterId(db, agentId);
+      const characterId = await resolveAgentCharacterId(db, agentId, true);
       if (!characterId) {
         return reply.status(404).send({
           success: false,
@@ -2336,7 +2642,7 @@ export function registerAgentRoutes(
         });
       }
 
-      const characterId = await resolveAgentCharacterId(db, agentId);
+      const characterId = await resolveAgentCharacterId(db, agentId, true);
       if (!characterId) {
         return reply.send({
           success: true,
@@ -2584,7 +2890,7 @@ export function registerAgentRoutes(
         });
       }
 
-      const characterId = await resolveAgentCharacterId(db, agentId);
+      const characterId = await resolveAgentCharacterId(db, agentId, true);
       if (!characterId) {
         return reply.send({
           success: true,
@@ -2594,11 +2900,11 @@ export function registerAgentRoutes(
         });
       }
 
-      // Get thoughts from ServerNetwork storage
+      // Get thoughts from ServerNetwork in-memory cache first
       const { ServerNetwork } =
         await import("../../systems/ServerNetwork/index.js");
 
-      const thoughts =
+      let thoughts =
         (
           ServerNetwork as {
             agentThoughts?: Map<
@@ -2608,10 +2914,41 @@ export function registerAgentRoutes(
                 type: string;
                 content: string;
                 timestamp: number;
+                decisionPath?: string;
               }>
             >;
           }
         ).agentThoughts?.get(characterId) || [];
+
+      // If in-memory is empty (e.g. after restart), hydrate from DB
+      if (thoughts.length === 0 && db) {
+        try {
+          const { agentThoughts: agentThoughtsTable } =
+            await import("../../database/schema.js");
+          const { desc, eq } = await import("drizzle-orm");
+          const rows = await db
+            .select()
+            .from(agentThoughtsTable)
+            .where(eq(agentThoughtsTable.characterId, characterId))
+            .orderBy(desc(agentThoughtsTable.timestamp))
+            .limit(limit);
+          thoughts = rows.map((r) => ({
+            id: `${r.characterId}-thought-${r.timestamp}`,
+            type: r.type,
+            content: r.content,
+            timestamp: r.timestamp,
+            decisionPath: r.decisionPath ?? undefined,
+          }));
+          // Re-populate in-memory cache so subsequent requests are fast
+          if (thoughts.length > 0) {
+            (
+              ServerNetwork as { agentThoughts?: Map<string, typeof thoughts> }
+            ).agentThoughts?.set(characterId, thoughts);
+          }
+        } catch {
+          // DB not available or table doesn't exist yet — use empty
+        }
+      }
 
       // Filter by since timestamp and limit
       let filteredThoughts = thoughts;
@@ -2663,7 +3000,7 @@ export function registerAgentRoutes(
         });
       }
 
-      const characterId = await resolveAgentCharacterId(db, agentId);
+      const characterId = await resolveAgentCharacterId(db, agentId, true);
       if (!characterId) {
         return reply.send({
           success: true,
@@ -3855,6 +4192,217 @@ export function registerAgentRoutes(
     }
   });
 
+  const maskSecretValues = (
+    secrets: Record<string, string> | undefined,
+  ): Record<string, string> | undefined => {
+    if (!secrets) return undefined;
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(secrets)) {
+      out[key] = value ? "***" : "";
+    }
+    return out;
+  };
+
+  const mergeAgentUpdatePayload = (
+    current: AgentCharacterConfig | null,
+    body: Record<string, unknown>,
+  ): AgentCharacterConfig => {
+    const base: AgentCharacterConfig = current ?? { name: "Agent" };
+    const nestedChar =
+      body.character !== undefined &&
+      typeof body.character === "object" &&
+      body.character !== null
+        ? (body.character as Record<string, unknown>)
+        : {};
+
+    const src: Record<string, unknown> = { ...nestedChar };
+    for (const [key, value] of Object.entries(body)) {
+      if (key !== "character") {
+        src[key] = value;
+      }
+    }
+
+    const next: AgentCharacterConfig = { ...base };
+
+    if (typeof src.name === "string" && src.name.trim()) {
+      next.name = src.name.trim();
+    }
+
+    if (typeof src.username === "string") {
+      next.username = src.username;
+    }
+
+    if (typeof src.system === "string") {
+      next.system = src.system;
+    }
+
+    if (src.bio !== undefined) {
+      if (Array.isArray(src.bio)) {
+        next.bio = src.bio.filter((x): x is string => typeof x === "string");
+      } else if (typeof src.bio === "string") {
+        next.bio = src.bio
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0);
+      }
+    }
+
+    if (Array.isArray(src.lore)) {
+      next.lore = src.lore.filter((x): x is string => typeof x === "string");
+    }
+
+    if (Array.isArray(src.topics)) {
+      next.topics = src.topics.filter(
+        (x): x is string => typeof x === "string",
+      );
+    }
+
+    if (Array.isArray(src.adjectives)) {
+      next.adjectives = src.adjectives.filter(
+        (x): x is string => typeof x === "string",
+      );
+    }
+
+    const mp = src.modelProvider;
+    if (
+      mp === "openai" ||
+      mp === "anthropic" ||
+      mp === "groq" ||
+      mp === "xai" ||
+      mp === "openrouter"
+    ) {
+      next.modelProvider = mp;
+    }
+
+    if (
+      src.style !== undefined &&
+      typeof src.style === "object" &&
+      src.style !== null
+    ) {
+      next.style = src.style as AgentCharacterConfig["style"];
+    }
+
+    if (
+      src.settings !== undefined &&
+      typeof src.settings === "object" &&
+      src.settings !== null
+    ) {
+      const st = src.settings as Record<string, unknown> & {
+        secrets?: Record<string, string>;
+      };
+      const prevSettings = base.settings ?? {};
+      next.settings = { ...prevSettings, ...st };
+      if (st.secrets !== undefined && typeof st.secrets === "object") {
+        next.settings.secrets = {
+          ...(prevSettings.secrets ?? {}),
+          ...(st.secrets as Record<string, string>),
+        };
+      }
+    }
+
+    return next;
+  };
+
+  const buildSettingsPayload = (
+    accountId: string,
+    characterId: string,
+    cfg: AgentCharacterConfig | null,
+    extras: Record<string, unknown> = {},
+  ): Record<string, unknown> => {
+    const merged: Record<string, unknown> = {
+      accountId,
+      characterId,
+      ...extras,
+    };
+    if (cfg?.settings) {
+      Object.assign(merged, cfg.settings);
+      const masked = maskSecretValues(cfg.settings.secrets);
+      merged.secrets = masked ?? cfg.settings.secrets;
+    }
+    return merged;
+  };
+
+  const agentDetailFromEmbedded = (
+    routeAgentId: string,
+    info: EmbeddedAgentInfo,
+    cfg: AgentCharacterConfig | null,
+  ) => {
+    const settingsOut = buildSettingsPayload(
+      info.accountId,
+      info.characterId,
+      cfg,
+    );
+    return {
+      id: routeAgentId,
+      name: info.name,
+      status: info.state === "running" ? "active" : info.state,
+      username: cfg?.username,
+      bio: cfg?.bio,
+      lore: cfg?.lore,
+      topics: cfg?.topics,
+      adjectives: cfg?.adjectives,
+      style: cfg?.style,
+      system: cfg?.system,
+      settings: settingsOut,
+      character: {
+        name: info.name,
+        settings: settingsOut,
+      },
+      createdAt: new Date(info.startedAt).toISOString(),
+      updatedAt: new Date(info.lastActivity).toISOString(),
+    };
+  };
+
+  /**
+   * If the user has an agent_mappings row but AgentManager never created an instance
+   * (agent not started yet), create a stopped embedded agent so dashboard PATCH/GET works.
+   */
+  const tryEnsureEmbeddedAgentFromDashboardMapping = async (
+    routeAgentId: string,
+    effectiveCharacterId: string,
+  ): Promise<boolean> => {
+    const db = getDatabaseDb();
+    if (!db) {
+      return false;
+    }
+
+    const { getAgentManager } = await import("../../eliza/index.js");
+    const agentManager = getAgentManager();
+    if (!agentManager || agentManager.hasAgent(effectiveCharacterId)) {
+      return false;
+    }
+
+    let mapping: AgentMappingRecord | null = await getAgentMappingById(
+      db,
+      routeAgentId,
+    );
+    if (!mapping || mapping.characterId !== effectiveCharacterId) {
+      mapping = await getAgentMappingByCharacterId(db, effectiveCharacterId);
+    }
+    if (!mapping || mapping.characterId !== effectiveCharacterId) {
+      return false;
+    }
+
+    try {
+      await agentManager.createAgent({
+        characterId: mapping.characterId,
+        accountId: mapping.accountId,
+        name: mapping.agentName,
+        autoStart: false,
+      });
+      console.log(
+        `[AgentRoutes] Ensured embedded agent for character ${mapping.characterId} (dashboard id ${routeAgentId})`,
+      );
+      return true;
+    } catch (error) {
+      console.error(
+        "[AgentRoutes] Failed to ensure embedded agent from mapping:",
+        error,
+      );
+      return false;
+    }
+  };
+
   /**
    * GET /api/agents/:agentId
    *
@@ -3874,85 +4422,126 @@ export function registerAgentRoutes(
       const { getAgentManager, getRunningAgents } =
         await import("../../eliza/index.js");
       const agentManager = getAgentManager();
+      const runningModelAgents = getRunningAgents() as Map<
+        string,
+        {
+          config: { displayName: string; provider: string; model: string };
+          characterId: string;
+          accountId: string;
+          service?: {
+            getGameState?: () => {
+              health?: number;
+              maxHealth?: number;
+              position?: [number, number, number] | null;
+            } | null;
+          };
+        }
+      >;
 
       const params = request.params as { agentId: string };
-      const { agentId } = params;
-      const agentInfo = agentManager?.getAgentInfo(agentId);
+      const routeAgentId = params.agentId;
 
-      if (!agentInfo) {
-        const runningModelAgents = getRunningAgents() as Map<
-          string,
-          {
-            config: { displayName: string; provider: string; model: string };
-            characterId: string;
-            accountId: string;
-            service?: {
-              getGameState?: () => {
-                health?: number;
-                maxHealth?: number;
-                position?: [number, number, number] | null;
-              } | null;
-            };
-          }
-        >;
-
-        for (const [, runningAgent] of runningModelAgents) {
-          if (runningAgent.characterId !== agentId) {
-            continue;
-          }
-
-          const gameState = runningAgent.service?.getGameState?.() ?? null;
-
-          return reply.send({
-            success: true,
-            data: {
-              agent: {
-                id: runningAgent.characterId,
-                name: runningAgent.config.displayName,
-                status: "active",
-                character: {
-                  name: runningAgent.config.displayName,
-                  settings: {
-                    accountId: runningAgent.accountId,
-                    characterId: runningAgent.characterId,
-                    provider: runningAgent.config.provider,
-                    model: runningAgent.config.model,
-                    health: gameState?.health ?? null,
-                    maxHealth: gameState?.maxHealth ?? null,
-                    position: gameState?.position ?? null,
-                  },
-                },
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              },
-            },
-          });
-        }
-
+      const effectiveCharacterId =
+        await resolveDashboardAgentCharacterId(routeAgentId);
+      if (!effectiveCharacterId) {
         return reply.status(404).send({
           success: false,
           error: "Agent not found",
         });
       }
 
-      return reply.send({
-        success: true,
-        data: {
-          agent: {
-            id: agentInfo.agentId,
-            name: agentInfo.name,
-            status: agentInfo.state === "running" ? "active" : agentInfo.state,
-            character: {
-              name: agentInfo.name,
-              settings: {
-                accountId: agentInfo.accountId,
-                characterId: agentInfo.characterId,
-              },
-            },
-            createdAt: new Date(agentInfo.startedAt).toISOString(),
-            updatedAt: new Date(agentInfo.lastActivity).toISOString(),
+      const findRunningForCharacter = (cid: string) => {
+        for (const [, agent] of runningModelAgents) {
+          if (agent.characterId === cid) {
+            return agent;
+          }
+        }
+        return null;
+      };
+
+      const embeddedInfo = agentManager?.getAgentInfo(effectiveCharacterId);
+      if (embeddedInfo) {
+        const cfg = agentManager?.getAgentCharacterConfig(effectiveCharacterId);
+        return reply.send({
+          success: true,
+          data: {
+            agent: agentDetailFromEmbedded(
+              routeAgentId,
+              embeddedInfo,
+              cfg ?? null,
+            ),
           },
-        },
+        });
+      }
+
+      const running = findRunningForCharacter(effectiveCharacterId);
+      if (running) {
+        const cfg = agentManager?.getAgentCharacterConfig(effectiveCharacterId);
+        const gameState = running.service?.getGameState?.() ?? null;
+        const settingsOut = buildSettingsPayload(
+          running.accountId,
+          running.characterId,
+          cfg ?? null,
+          {
+            provider: running.config.provider,
+            model: running.config.model,
+            health: gameState?.health ?? null,
+            maxHealth: gameState?.maxHealth ?? null,
+            position: gameState?.position ?? null,
+          },
+        );
+        return reply.send({
+          success: true,
+          data: {
+            agent: {
+              id: routeAgentId,
+              name: running.config.displayName,
+              status: "active",
+              username: cfg?.username,
+              bio: cfg?.bio,
+              lore: cfg?.lore,
+              topics: cfg?.topics,
+              adjectives: cfg?.adjectives,
+              style: cfg?.style,
+              system: cfg?.system,
+              settings: settingsOut,
+              character: {
+                name: running.config.displayName,
+                settings: settingsOut,
+              },
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        });
+      }
+
+      if (
+        await tryEnsureEmbeddedAgentFromDashboardMapping(
+          routeAgentId,
+          effectiveCharacterId,
+        )
+      ) {
+        const retryEmbedded = agentManager?.getAgentInfo(effectiveCharacterId);
+        if (retryEmbedded) {
+          const cfg =
+            agentManager?.getAgentCharacterConfig(effectiveCharacterId);
+          return reply.send({
+            success: true,
+            data: {
+              agent: agentDetailFromEmbedded(
+                routeAgentId,
+                retryEmbedded,
+                cfg ?? null,
+              ),
+            },
+          });
+        }
+      }
+
+      return reply.status(404).send({
+        success: false,
+        error: "Agent not found",
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to get agent:", error);
@@ -3964,38 +4553,85 @@ export function registerAgentRoutes(
   });
 
   /**
-   * PUT /api/agents/:agentId
+   * PUT / PATCH /api/agents/:agentId
    *
    * Update agent (ElizaOS-compatible).
-   * Used by AgentSettings to update character config.
-   *
-   * Request body:
-   * {
-   *   character: { name, ... }
-   * }
+   * Used by AgentSettings (PATCH) to update character config.
    */
-  fastify.put("/api/agents/:agentId", async (request, reply) => {
+  const handleAgentElizaUpdate = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<void> => {
     try {
       const params = request.params as { agentId: string };
-      const { agentId } = params;
+      const routeAgentId = params.agentId;
+      const rawBody = request.body;
+      const body: Record<string, unknown> =
+        rawBody !== null &&
+        typeof rawBody === "object" &&
+        !Array.isArray(rawBody)
+          ? (rawBody as Record<string, unknown>)
+          : {};
 
-      // For now, just acknowledge the update
-      // Full character editing would require more complex logic
-      console.log(`[AgentRoutes] Update request for agent ${agentId}`);
+      const effectiveCharacterId =
+        await resolveDashboardAgentCharacterId(routeAgentId);
+      if (!effectiveCharacterId) {
+        await reply.status(404).send({
+          success: false,
+          error: "Not found",
+        });
+        return;
+      }
 
-      return reply.send({
+      const { getAgentManager } = await import("../../eliza/index.js");
+      const agentManager = getAgentManager();
+      if (!agentManager) {
+        await reply.status(503).send({
+          success: false,
+          error: "Agent system not initialized",
+        });
+        return;
+      }
+
+      if (!agentManager.hasAgent(effectiveCharacterId)) {
+        await tryEnsureEmbeddedAgentFromDashboardMapping(
+          routeAgentId,
+          effectiveCharacterId,
+        );
+      }
+
+      if (!agentManager.hasAgent(effectiveCharacterId)) {
+        await reply.status(404).send({
+          success: false,
+          error: "Not found",
+        });
+        return;
+      }
+
+      const current =
+        agentManager.getAgentCharacterConfig(effectiveCharacterId);
+      const merged = mergeAgentUpdatePayload(current, body);
+      await agentManager.updateAgentCharacterConfig(
+        effectiveCharacterId,
+        merged,
+      );
+
+      await reply.send({
         success: true,
         message: "Agent updated",
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to update agent:", error);
-      return reply.status(500).send({
+      await reply.status(500).send({
         success: false,
         error:
           error instanceof Error ? error.message : "Failed to update agent",
       });
     }
-  });
+  };
+
+  fastify.put("/api/agents/:agentId", handleAgentElizaUpdate);
+  fastify.patch("/api/agents/:agentId", handleAgentElizaUpdate);
 
   /**
    * DELETE /api/agents/:agentId
@@ -4310,9 +4946,9 @@ export function registerAgentRoutes(
         });
       }
 
-      return reply.status(501).send({
-        success: false,
-        error: "Agent panel storage is not configured",
+      return reply.send({
+        success: true,
+        panels: [],
       });
     } catch (error) {
       console.error("[AgentRoutes] ❌ Failed to get agent panels:", error);

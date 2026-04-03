@@ -1,11 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { TileMovementManager } from "../tile-movement";
 import { BuildingCollisionService } from "@hyperscape/shared";
+import { EntityOccupancyMap } from "@hyperscape/shared/systems/shared/movement/EntityOccupancyMap";
 
 // Mocks
 const createMockWorld = () => ({
   entities: {
     get: vi.fn(),
+    players: new Map<string, unknown>(),
+  },
+  entityOccupancy: {
+    isBlocked: vi.fn().mockReturnValue(false),
+    occupy: vi.fn(),
+    vacate: vi.fn(),
   },
   getSystem: vi.fn(),
   emit: vi.fn(),
@@ -124,5 +131,49 @@ describe("TileMovementManager - Building Integration", () => {
     manager.processPlayerTick(playerId, 1);
 
     expect(mockSetPosition).toHaveBeenCalledWith(11.5, 2.01, 10.5);
+  });
+
+  it("does not step onto a tile occupied by another player; path is retained", () => {
+    const occ = new EntityOccupancyMap();
+    const mockWorld: ReturnType<typeof createMockWorld> & {
+      entityOccupancy: EntityOccupancyMap;
+    } = {
+      ...createMockWorld(),
+      entityOccupancy: occ,
+    };
+
+    const blockerTile = { x: 11, z: 10 };
+    occ.occupy("blocker" as `${string}`, [blockerTile], 1, "player", false);
+
+    const moverId = "mover";
+    const manager = new TileMovementManager(mockWorld, vi.fn());
+
+    manager.syncPlayerPosition(moverId, { x: 10, y: 0, z: 10 });
+    const state = (
+      manager as unknown as { playerStates: Map<string, unknown> }
+    ).playerStates.get(moverId) as {
+      path: Array<{ x: number; z: number }>;
+      pathIndex: number;
+      previousTile: { x: number; z: number };
+      currentTile: { x: number; z: number };
+    };
+    state.path = [{ x: 11, z: 10 }];
+    state.pathIndex = 0;
+    state.previousTile = { x: 10, z: 10 };
+
+    mockWorld.entities.get.mockReturnValue({
+      position: { set: vi.fn(), x: 10.5, y: 0, z: 10.5 },
+      data: {
+        position: [10.5, 0, 10.5],
+        quaternion: [0, 0, 0, 1],
+        tileMovementActive: true,
+      },
+      node: { quaternion: { copy: vi.fn() } },
+    });
+
+    manager.processPlayerTick(moverId, 1);
+
+    expect(state.currentTile).toEqual({ x: 10, z: 10 });
+    expect(state.pathIndex).toBe(0);
   });
 });

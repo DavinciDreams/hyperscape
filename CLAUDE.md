@@ -417,6 +417,265 @@ See [Port Allocation](#port-allocation) section for full port list.
 - Tests spawn their own Hyperscape instances
 - Visual tests require WebGPU support (headful browser with GPU access)
 
+## Agent Combat System
+
+This section covers every layer of the embedded-agent combat stack. Read this before touching anything related to agent behavior, duels, or the streaming arena.
+
+### Architecture Overview
+
+There are **two separate combat loops** for agents. They are mutually exclusive:
+
+| Loop | File | Tick Rate | When Active |
+|------|------|-----------|-------------|
+| `AgentBehaviorTicker` | `packages/server/src/eliza/managers/AgentBehaviorTicker.ts` | 8 seconds | Normal overworld play |
+| `DuelCombatAI` | `packages/server/src/duel/DuelCombatAI.ts` | 600 ms | Inside the streaming duel arena |
+
+The `DuelOrchestrator` (`packages/server/src/systems/StreamingDuelScheduler/managers/DuelOrchestrator.ts`) manages the transition: when a duel starts it calls `service.setAutonomousBehaviorEnabled(false)` on each agent's service, suspending the 8-second loop entirely. When the duel ends `stopCombatAIs()` calls `setAutonomousBehaviorEnabled(true)` to resume normal behavior.
+
+### EmbeddedHyperscapeService — the action layer
+
+`packages/server/src/eliza/EmbeddedHyperscapeService.ts`
+
+This is the single interface through which ALL agent actions are issued. Every combat method below ultimately emits a world event or calls a game system — never touch game state directly, always go through this service.
+
+**Key combat methods:**
+
+| Method | What it does |
+|--------|-------------|
+| `executeAttack(targetId)` | Initiates/re-initiates combat against a specific entity ID |
+| `executeMove(target, runMode?)` | Moves the agent to `[x, y, z]`; clamped to `_arenaBounds` when set |
+| `executeUse(itemId)` | Uses an item from inventory — used for food/potions |
+| `executePrayer(prayerId)` | Activates a single prayer by ID |
+| `executePrayerToggle(prayerId)` | Toggles a prayer on/off, returns new state |
+| `executePrayerDeactivateAll()` | Deactivates all active prayers |
+| `executeStop()` | Cancels current movement and combat |
+| `getGameState()` | Returns cached `EmbeddedGameState` (position, HP, inCombat, inventory, prayers, etc.) |
+| `getNearbyEntities()` | Returns `NearbyEntityData[]` of everything in scan radius |
+| `getEquippedItems()` | Returns a map of slot → itemId for all equipped gear |
+| `getInventoryItems()` | Returns the agent's full inventory array |
+
+**Arena-mode methods (set by DuelOrchestrator):**
+
+| Method | Purpose |
+|--------|---------|
+| `setArenaBounds(bounds)` | Clamps movement to `{minX, maxX, minZ, maxZ}` at **two layers**: (1) `executeMove` on the service, and (2) `entity.data.arenaBounds` checked by `TileMovementManager.movePlayerToward()` — this second layer catches combat-follow, pending-attack walk, and every other server-side movement path that bypasses the service |
+| `clearArenaBounds()` | Removes both clamps (service + entity data) |
+| `setAutonomousBehaviorEnabled(false)` | Suspends the 8-second `AgentBehaviorTicker` loop |
+| `setAutonomousBehaviorEnabled(true)` | Restores normal behavior ticking |
+
+**IEmbeddedHyperscapeService** (`packages/server/src/eliza/types.ts`) is the interface contract. Add any new service methods here first, then implement in `EmbeddedHyperscapeService`.
+
+### AgentBehaviorTicker — overworld combat (8-second loop)
+
+`packages/server/src/eliza/managers/AgentBehaviorTicker.ts`
+
+This is the autonomous behavior loop for agents outside the duel arena. It runs every 8 seconds per agent (staggered by 800 ms across agents to prevent simultaneous spikes).
+
+**Tick pipeline (in order):**
+1. Death-loop recovery check
+2. Arena-ejection check
+3. `inStreamingDuel` flag check — skips tick if true
+4. `isAutonomousEnabled()` check — skips tick if false (arena mode)
+5. Combat chat reactions
+6. `manageQuests()` — update goal, auto-accept quests
+7. `manageInventory()` — drop junk, bury bones
+8. `manageShopping()` — buy missing tools/weapons
+9. `manageEquipment()` — equip best gear
+10. `assessAndEat()` — eat food if HP < threshold; returns early if eaten
+11. `pickBehaviorAction()` — decide and return the next action
+12. Execute the action, sync dashboard
+
+**Combat-specific behavior in `pickBehaviorAction`:**
+
+- **`inCombat = true`**: The game's auto-attack system handles hits. The ticker:
+  - Activates offensive prayer (fire-and-forget) on the first tick of each fight, determined by `getOffensivePrayerForAgent()` (mage staff → `mystic_lore`, bow → `hawk_eye`, else → `superhuman_strength`)
+  - Re-issues `executeAttack(currentTargetId)` every 16 seconds to prevent silent combat drops
+  - Returns `idle` otherwise (let the game engine tick)
+- **`inCombat = false` → nearby mobs**: calls `pickCombatOrExplore()` which selects the best target (spreading agents across different mobs to avoid all piling on one) and returns `{ type: "attack", targetId }`
+- **`inCombat = false` → no mobs**: gathers resources or returns to spawn
+
+**On attack execution (`case "attack"` in the switch):**
+- `executeAttack(targetId)` is awaited
+- `executePrayer(offensivePrayer)` is fired immediately (fire-and-forget) if prayer not already active
+- `instance.combatPrayerActive` is set to `true`
+
+**On leaving combat (`inCombat` just became false):**
+- `executePrayerDeactivateAll()` fires to save prayer points
+- `instance.combatPrayerActive` and `instance.lastCombatReEngageAt` reset to 0
+
+**Key `AgentInstance` fields for combat:**
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `currentTargetId` | `string \| null` | ID of the mob the agent last chose to attack |
+| `lastCombatReEngageAt` | `number` | Timestamp of last re-engage attack; used for 16s re-engage interval |
+| `combatPrayerActive` | `boolean` | Whether offensive prayer has been activated this fight |
+| `lastAteAt` | `number` | Timestamp of last food use; prevents eat-spam |
+
+**Editing thresholds:**
+- Eat threshold: `assessAndEat()` — `eatThreshold = inCombat ? 0.5 : 0.7` (50%/70% HP)
+- Eat cooldown: `EAT_COOLDOWN_MS = inCombat ? 6000 : 12000`
+- Re-engage interval: `RE_ENGAGE_INTERVAL_MS = 16000` (constant in `pickBehaviorAction`)
+- Combat-distance mob scan: `entity.distance <= 40` in `nearbyMobs` filter
+- HP threshold to initiate combat: `healthPercent > 0.5` in `pickCombatOrExplore`, `healthPercent > 0.4` for quest kill stages
+
+### DuelCombatAI — arena combat (600 ms loop)
+
+`packages/server/src/duel/DuelCombatAI.ts`
+
+A dedicated tick-based combat controller used only during streaming duels. Created and owned by `DuelOrchestrator`. Has no knowledge of quests or overworld — pure combat only.
+
+**Config (`DuelCombatConfig`):**
+
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `combatRole` | `"melee"` | `"melee" \| "ranged" \| "mage"` — determines ideal range and offensive prayer |
+| `healThresholdPct` | `40` | Eat food below this HP% |
+| `aggressiveThresholdPct` | `70` | Switch to aggressive style above this HP% |
+| `defensiveThresholdPct` | `30` | Enter "desperate" phase below this HP% |
+| `noFood` | `false` | Skip all food use (for no-food duel rules) |
+| `useLlmTactics` | `false` | Use LLM for strategy planning when an ElizaOS runtime is available |
+| `movementClampBounds` | `undefined` | Legacy arena bounds clamp (superseded by `setArenaBounds` on the service) |
+| `initialStrafeSign` | random | `+1 \| -1` — initial lateral strafe direction; set opposite for each fighter |
+
+**Tick pipeline (in order, runs every 600 ms):**
+1. Get game state, check alive
+2. Sync active prayers from entity state
+3. Track HP deltas (damage dealt/received counters)
+4. Get opponent data from `getNearbyEntities()`
+5. Determine `CombatPhase`: `opening | trading | finishing | desperate`
+6. Activate protection prayer based on opponent's weapon type (fire-and-forget)
+7. Trash talk — check HP milestones, ambient taunts
+8. `tryHeal()` — context-aware food use; returns early if healed
+9. `tryBuff()` — activate offensive prayer at fight start; returns early if buffed
+10. `movementTick()` — kite/chase opponent to stay at `IDEAL_RANGE`
+11. `maybeReplanStrategyBackground()` / `executeStrategy()` (LLM mode only)
+12. `tryAttack()` — re-engage opponent
+
+**Combat phases:**
+
+| Phase | Condition | Effect |
+|-------|-----------|--------|
+| `opening` | First 5 ticks | Heal threshold unchanged |
+| `trading` | Default mid-fight | Standard thresholds |
+| `finishing` | Opponent HP < 25% | Lower heal threshold (more aggressive) |
+| `desperate` | Own HP < 30% | Raise heal threshold, force defensive prayer |
+
+**Ideal engagement ranges by role:**
+
+| Role | Min distance | Max distance |
+|------|-------------|-------------|
+| `melee` | 0.8 | 1.8 |
+| `ranged` | 5 | 8 |
+| `mage` | 5 | 8 |
+
+Movement constants: `MOVE_COOLDOWN_MS = 1200`, `STRAFE_STEP = 1.35` world units.
+
+**Offensive prayers by role:**
+
+| Role | Prayer ID |
+|------|-----------|
+| `melee` | `superhuman_strength` |
+| `ranged` | `hawk_eye` |
+| `mage` | `mystic_lore` |
+
+Defensive/protection prayer (always): `rock_skin`. Protection prayers (activated based on opponent weapon type) are separate and fire every tick but no-op if already active.
+
+**Trash talk system:**
+- Opening taunt fires at `start()`
+- HP milestone taunts fire when own HP or opponent HP crosses 90/80/70/60/50/40/30/20/10%
+- Ambient taunts fire every 5–12 ticks randomly
+- All taunts are fire-and-forget; `TRASH_TALK_COOLDOWN_MS = 4000`
+- With a `chatRuntime` (ElizaOS), taunts use the LLM; fallback arrays are used otherwise
+
+**Adding a new duel rule / config change:**
+1. Add the field to `DuelCombatConfig` in `DuelCombatAI.ts`
+2. Pass it in `startCombatAIs()` inside `DuelOrchestrator.ts` via `baseAiConfig`
+3. Use `process.env.YOUR_FLAG` with a sensible default so it can be toggled without deploys
+
+### DuelOrchestrator — arena lifecycle
+
+`packages/server/src/systems/StreamingDuelScheduler/managers/DuelOrchestrator.ts`
+
+Manages the full duel lifecycle: provisioning agents, teleporting them to the arena, running the fight, resolving the result, and cleaning up.
+
+**Arena mode transition (the critical sequence):**
+
+```
+startCombatAIs()
+  ├─ service.setArenaBounds(movementClampBounds)   // clamp movement at source
+  ├─ service.setAutonomousBehaviorEnabled(false)   // suspend 8s behavior loop
+  ├─ DuelCombatAI.start()                          // begin 600ms tick loop
+  └─ cache services in _arenaModeServices[]
+
+stopCombatAIs()   (called on fight resolution or destroy)
+  ├─ DuelCombatAI.stop()                           // end 600ms tick loop
+  ├─ service.clearArenaBounds()                    // restore free movement
+  └─ service.setAutonomousBehaviorEnabled(true)    // resume 8s behavior loop
+```
+
+**`_arenaModeServices`**: Array of cached service references. Typed as `Array<{ clearArenaBounds(); setAutonomousBehaviorEnabled(enabled) }>`. Both operations are called in `stopCombatAIs()` without needing the dynamic AgentManager import (which is only available in async contexts).
+
+**Duel flags on entity data:**
+- `entity.data.inStreamingDuel = true/false` — secondary guard checked by `AgentBehaviorTicker` and `DuelSystem.ejectNonDuelingPlayersFromCombatArenas()`
+- `entity.data.preventRespawn = true/false` — prevents normal respawn during a duel
+- These are set by `setDuelFlags(inDuel)` and cleared by `clearAllDuelFlags()` / `cleanupAfterDuel()`
+
+**Suppressing teleport effects:**
+All housekeeping teleports (arena bounds enforcement, spawn-lock, facing correction) must pass `suppressEffect: true`:
+```typescript
+this.world.emit("player:teleport", {
+  playerId: id,
+  position: { x, y, z },
+  suppressEffect: true,  // REQUIRED — prevents blue helix VFX
+});
+```
+
+### Prayer IDs reference
+
+These are the prayer IDs used in `executePrayer(id)` calls:
+
+| ID | Type | Effect |
+|----|------|--------|
+| `superhuman_strength` | Offensive (melee) | Strength bonus |
+| `hawk_eye` | Offensive (ranged) | Ranged attack bonus |
+| `mystic_lore` | Offensive (mage) | Magic attack bonus |
+| `rock_skin` | Defensive | Defense bonus |
+| `protect_from_melee` | Protection | Reduces melee damage |
+| `protect_from_missiles` | Protection | Reduces ranged damage |
+| `protect_from_magic` | Protection | Reduces magic damage |
+
+### Common edits and where to make them
+
+**Change when agents eat food in general combat:**
+→ `assessAndEat()` in `AgentBehaviorTicker.ts` — adjust `eatThreshold` constants
+
+**Change when the DuelCombatAI heals:**
+→ `tryHeal()` in `DuelCombatAI.ts` — adjust `this.config.healThresholdPct` or the burst-reactive ease values
+
+**Change how far arena agents strafe/kite:**
+→ `DuelCombatAI.IDEAL_RANGE` and `DuelCombatAI.STRAFE_STEP` static fields
+
+**Change how often general combat re-engages stale fights:**
+→ `RE_ENGAGE_INTERVAL_MS` constant in `pickBehaviorAction()` in `AgentBehaviorTicker.ts`
+
+**Change the 8-second behavior tick interval:**
+→ `EMBEDDED_BEHAVIOR_TICK_INTERVAL` constant at top of `AgentBehaviorTicker.ts`
+
+**Change the DuelCombatAI tick rate:**
+→ The `externalTick()` caller in `DuelOrchestrator` controls when ticks fire; look for the combat loop interval there
+
+**Add a new action type to general agent behavior:**
+1. Add it to the `EmbeddedBehaviorAction` union type in `AgentBehaviorTicker.ts`
+2. Handle it in the `switch (action.type)` in `executeBehaviorTick()`
+3. Return it from `pickBehaviorAction()` or `pickQuestAction()`
+4. Add the corresponding `execute*()` method to `EmbeddedHyperscapeService` if needed
+
+**Add a new service method:**
+1. Add the signature to `IEmbeddedHyperscapeService` in `types.ts`
+2. Implement it in `EmbeddedHyperscapeService.ts`
+3. The method must emit a world event or call a game system — never mutate state directly
+
 ## Additional Resources
 
 - [README.md](README.md) - Full project documentation

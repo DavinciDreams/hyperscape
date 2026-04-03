@@ -13,6 +13,7 @@ import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
 import { getPanelHeaderStyle, getPanelSurfaceStyle } from "@/ui/theme/themes";
 import { formatItemName } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 
 interface SmeltingBar {
   barItemId: string;
@@ -27,24 +28,6 @@ interface SmeltingPanelProps {
   availableBars: SmeltingBar[];
   world: ClientWorld;
   onClose: () => void;
-}
-
-/**
- * Get icon for bar/ore type
- */
-function getItemIcon(itemId: string): string {
-  const id = itemId.toLowerCase();
-  if (id.includes("bronze")) return "🟤";
-  if (id.includes("iron")) return "⚫";
-  if (id.includes("steel")) return "⚪";
-  if (id.includes("mithril")) return "🔵";
-  if (id.includes("adamant")) return "🟢";
-  if (id.includes("rune") || id.includes("runite")) return "🔷";
-  if (id.includes("gold")) return "🟡";
-  if (id.includes("silver")) return "⚪";
-  if (id.includes("coal")) return "⬛";
-  if (id.includes("ore")) return "🪨";
-  return "🔶";
 }
 
 /** localStorage key for Make X memory */
@@ -185,10 +168,7 @@ export function SmeltingPanel({
                           : theme.colors.border.default,
                     }}
                   >
-                    {/* Bar Icon */}
-                    <span className="text-xl">
-                      {getItemIcon(bar.barItemId)}
-                    </span>
+                    <ItemIcon itemId={bar.barItemId} size={32} />
 
                     {/* Bar Info */}
                     <div className="flex-1 text-left">

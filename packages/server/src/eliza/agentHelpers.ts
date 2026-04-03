@@ -149,6 +149,39 @@ export async function loadSqlPlugin(tag = "Agent"): Promise<Plugin | null> {
   }
 }
 
+/**
+ * Load the Goals plugin (@elizaos/plugin-goals).
+ *
+ * Provides long-term goal management for agents:
+ *   - GOAL_CREATE / GOAL_UPDATE / GOAL_COMPLETE / GOAL_CANCEL actions
+ *   - A goals context provider that surfaces active goals in every planning prompt
+ *
+ * Returns null (and logs a warning) if the package is missing or fails to load
+ * so that callers can degrade gracefully.
+ */
+export async function loadGoalsPlugin(tag = "Agent"): Promise<Plugin | null> {
+  try {
+    const mod = await import("@elizaos/plugin-goals");
+    // Published package exports `GoalsPlugin` as named export and default
+    const plugin: Plugin = mod.GoalsPlugin ?? mod.default;
+    if (plugin) {
+      console.log(`[${tag}] ✅ Goals plugin loaded`);
+      return plugin;
+    }
+    console.warn(
+      `[${tag}] ⚠️ @elizaos/plugin-goals loaded but no export found (tried GoalsPlugin, default)`,
+    );
+    return null;
+  } catch (err) {
+    // Non-fatal: agent still works without goals plugin
+    console.warn(
+      `[${tag}] ⚠️ Could not load @elizaos/plugin-goals (long-term goals unavailable):`,
+      errMsg(err),
+    );
+    return null;
+  }
+}
+
 // ============================================================================
 // CHARACTER CREATION
 // ============================================================================

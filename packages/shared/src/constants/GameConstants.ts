@@ -225,6 +225,10 @@ export { GATHERING_CONSTANTS };
 export const MOB_CONSTANTS = {
   SPAWN_RADIUS: 20,
   MAX_MOBS_PER_AREA: 10,
+  /** Max concurrent bandit-type mobs world-wide (matches manifest npc ids, e.g. bandit). */
+  MAX_BANDIT_MOBS_WORLD: 100,
+  /** Mob ids counted toward {@link MAX_BANDIT_MOBS_WORLD} (extend if you add variants). */
+  BANDIT_MOB_IDS_FOR_GLOBAL_CAP: ["bandit", "desert_bandit"] as const,
   // Derived from tick-based constant for consistency (25 ticks * 600ms = 15000ms)
   MOB_RESPAWN_TIME:
     COMBAT_CONSTANTS.DEFAULTS.NPC.RESPAWN_TICKS *

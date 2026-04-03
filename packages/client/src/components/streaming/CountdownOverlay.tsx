@@ -15,9 +15,14 @@ import React, { useState, useEffect, useRef } from "react";
 
 interface CountdownOverlayProps {
   fightStartTime: number;
+  /** e.g. "Agent A vs Agent B" — public stream context under the big number */
+  matchupLine?: string | null;
 }
 
-export function CountdownOverlay({ fightStartTime }: CountdownOverlayProps) {
+export function CountdownOverlay({
+  fightStartTime,
+  matchupLine,
+}: CountdownOverlayProps) {
   const [displayCount, setDisplayCount] = useState(() =>
     Math.max(0, Math.ceil((fightStartTime - Date.now()) / 1000)),
   );
@@ -84,20 +89,32 @@ export function CountdownOverlay({ fightStartTime }: CountdownOverlayProps) {
 
   return (
     <div style={styles.container}>
-      <div
-        ref={countdownRef}
-        className="countdown-pulse"
-        style={{
-          ...styles.countdown,
-          color: isFight ? "#ff6b6b" : "#f2d08a",
-          textShadow: isFight
-            ? "0 0 40px rgba(255,107,107,0.8), 0 0 80px rgba(255,107,107,0.4)"
-            : "0 0 40px rgba(242,208,138,0.8), 0 0 80px rgba(242,208,138,0.4)",
-          opacity: fightOpacity,
-          transform: `scale(${fightScale})`,
-        }}
-      >
-        {displayText}
+      <div style={styles.stack}>
+        <div
+          ref={countdownRef}
+          className="countdown-pulse"
+          style={{
+            ...styles.countdown,
+            color: isFight ? "#ff6b6b" : "#f2d08a",
+            textShadow: isFight
+              ? "0 0 40px rgba(255,107,107,0.8), 0 0 80px rgba(255,107,107,0.4)"
+              : "0 0 40px rgba(242,208,138,0.8), 0 0 80px rgba(242,208,138,0.4)",
+            opacity: fightOpacity,
+            transform: `scale(${fightScale})`,
+          }}
+        >
+          {displayText}
+        </div>
+        {matchupLine ? (
+          <div
+            style={{
+              ...styles.matchupLine,
+              opacity: isFight ? fightOpacity * 0.85 : 1,
+            }}
+          >
+            {matchupLine}
+          </div>
+        ) : null}
       </div>
       <style>
         {`
@@ -124,11 +141,32 @@ const styles: Record<string, React.CSSProperties> = {
     transform: "translate(-50%, -50%)",
     zIndex: 60,
   },
+  stack: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "0.15em",
+  },
   countdown: {
-    fontSize: "10rem",
+    fontSize: "clamp(4.5rem, 16vw, 10rem)",
     fontWeight: "bold",
     fontFamily: "Impact, sans-serif",
     letterSpacing: "-5px",
     transition: "opacity 0.1s ease-out",
+    lineHeight: 1,
+    textAlign: "center",
+  },
+  matchupLine: {
+    maxWidth: "min(90vw, 720px)",
+    padding: "0 16px",
+    textAlign: "center",
+    fontSize: "clamp(0.95rem, 2.8vw, 1.35rem)",
+    fontWeight: 800,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    color: "rgba(248, 250, 252, 0.92)",
+    textShadow:
+      "0 0 24px rgba(0,0,0,0.9), 0 2px 12px rgba(0,0,0,0.85), 0 0 20px rgba(251,191,36,0.15)",
+    transition: "opacity 0.12s ease-out",
   },
 };
