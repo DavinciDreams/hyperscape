@@ -54,6 +54,7 @@ import { registerDataRoutes } from "./routes/data-routes.js";
 import { registerProxyRoutes } from "../routes/proxy-routes.js";
 import { registerStreamingRoutes } from "../routes/streaming.js";
 import { registerDuelOracleRoutes } from "./routes/duel-oracle-routes.js";
+import { registerDeployRoutes } from "./routes/deploy-routes.js";
 
 /**
  * Register all API routes
@@ -120,6 +121,9 @@ export function registerApiRoutes(
 
   // Duel arena oracle metadata and inspection
   registerDuelOracleRoutes(fastify, world);
+
+  // Deployment pipeline (staging → production)
+  registerDeployRoutes(fastify, config);
 
   console.log("[API] ✅ API routes registered");
 }

@@ -191,7 +191,7 @@ export function DeploymentPanel() {
     deployment.stagingStatus === "success" ||
     deployment.stagingStatus === "error";
 
-  const handlePushStaging = useCallback(() => {
+  const handlePushStaging = useCallback(async () => {
     if (!world) return;
 
     actions.deployStagingStart();
@@ -208,7 +208,43 @@ export function DeploymentPanel() {
 
       actions.deployStagingStatus("pushing");
 
-      // Step 2: Compute diff against empty (first push) or deployed state
+      // Step 2: Push to server staging endpoint
+      const serverUrl = import.meta.env.VITE_API_URL ?? "";
+      const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
+      let serverDeploymentId: string | undefined;
+
+      try {
+        const resp = await fetch(`${serverUrl}/api/deploy/staging`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-code": adminCode,
+          },
+          body: JSON.stringify({
+            manifests: compiled,
+            deployedBy: state.project.currentTeamId ?? "local",
+          }),
+        });
+        if (resp.ok) {
+          const data = (await resp.json()) as {
+            deploymentId?: string;
+            diff?: { added: string[]; modified: string[]; removed: string[] };
+          };
+          serverDeploymentId = data.deploymentId;
+          console.log(
+            `[Deploy] Pushed to server staging: ${serverDeploymentId}`,
+          );
+        } else {
+          console.warn(
+            "[Deploy] Server staging push failed, continuing with local state",
+          );
+        }
+      } catch {
+        // Server unreachable — proceed with local-only flow
+        console.warn("[Deploy] Server unreachable, local-only deployment");
+      }
+
+      // Step 3: Compute diff against empty (first push) or deployed state
       const deployedState =
         deployment.history.length > 0
           ? Object.fromEntries(
@@ -222,9 +258,9 @@ export function DeploymentPanel() {
 
       actions.deployStagingStatus("reloading");
 
-      // Step 3: Create deployment record
+      // Step 4: Create deployment record
       const record: DeploymentRecord = {
-        id: `deploy-${Date.now()}`,
+        id: serverDeploymentId ?? `deploy-${Date.now()}`,
         target: "staging",
         deployedBy: state.project.currentTeamId ?? "local",
         deployedAt: new Date().toISOString(),
@@ -243,8 +279,32 @@ export function DeploymentPanel() {
     }
   }, [world, actions, compile, diff, state, deployment.history]);
 
-  const handleRequestPromotion = useCallback(() => {
+  const handleRequestPromotion = useCallback(async () => {
     if (!deployment.currentDiff) return;
+
+    // Try server-side promotion
+    const serverUrl = import.meta.env.VITE_API_URL ?? "";
+    const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
+
+    try {
+      const resp = await fetch(`${serverUrl}/api/deploy/production`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-code": adminCode,
+        },
+        body: JSON.stringify({
+          deployedBy: state.project.currentTeamId ?? "local",
+        }),
+      });
+      if (resp.ok) {
+        console.log("[Deploy] Production promotion succeeded on server");
+      } else {
+        console.warn("[Deploy] Server promotion failed, continuing locally");
+      }
+    } catch {
+      console.warn("[Deploy] Server unreachable for promotion");
+    }
 
     actions.deployPromotionRequest(
       `promo-${Date.now()}`,
