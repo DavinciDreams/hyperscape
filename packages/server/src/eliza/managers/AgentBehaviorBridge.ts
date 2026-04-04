@@ -916,28 +916,26 @@ export class AgentBehaviorBridge {
           });
         }
       } else if (!inOperatorGrace && isLlmBehaviorEnabled(instance)) {
-        // LLM-driven action selection (only outside grace period)
-        const gameState = instance.service.getGameState();
-        if (gameState?.position) {
-          const llmResult = await pickBehaviorActionWithLlm(
-            instance,
-            gameState,
-          );
-          if (llmResult) {
-            action = llmResult.action;
-            if (llmResult.goal) {
-              instance.goal = llmResult.goal;
-            }
-            // Record chain-of-thought + action reasoning for dashboard
-            const thoughtContent = llmResult.thinking
-              ? `💭 ${llmResult.thinking}\n→ ${llmResult.reasoning}`
-              : llmResult.reasoning;
-            recordAgentThought(result.characterId, {
-              type: "thinking",
-              content: thoughtContent,
-              decisionPath: "llm",
-            });
+        // LLM-driven action selection — consume pre-fetched result from
+        // the previous tick so we never block the game loop waiting on an
+        // API call. The LLM call for the *next* tick is fired non-blocking
+        // after apply completes (see below).
+        const llmResult = instance.pendingLlmResult ?? null;
+        instance.pendingLlmResult = undefined; // consumed
+        if (llmResult) {
+          action = llmResult.action;
+          if (llmResult.goal) {
+            instance.goal = llmResult.goal;
           }
+          // Record chain-of-thought + action reasoning for dashboard
+          const thoughtContent = llmResult.thinking
+            ? `💭 ${llmResult.thinking}\n→ ${llmResult.reasoning}`
+            : llmResult.reasoning;
+          recordAgentThought(result.characterId, {
+            type: "thinking",
+            content: thoughtContent,
+            decisionPath: "llm",
+          });
         }
       }
 
@@ -1224,6 +1222,31 @@ export class AgentBehaviorBridge {
         action.type,
         null,
       );
+
+      // ── NON-BLOCKING LLM PRE-FETCH ──────────────────────────────────
+      // Fire the LLM call for the NEXT tick now. The result will be
+      // consumed by applyTickResult on the next cycle (~8s from now).
+      // This moves the 1-2s LLM latency completely off the critical path.
+      if (
+        !instance.llmCallInFlight &&
+        !inOperatorGrace &&
+        isLlmBehaviorEnabled(instance)
+      ) {
+        const freshState = instance.service.getGameState();
+        if (freshState?.position) {
+          instance.llmCallInFlight = true;
+          pickBehaviorActionWithLlm(instance, freshState)
+            .then((llmResult) => {
+              instance.pendingLlmResult = llmResult;
+            })
+            .catch(() => {
+              instance.pendingLlmResult = null;
+            })
+            .finally(() => {
+              instance.llmCallInFlight = false;
+            });
+        }
+      }
     } catch (err) {
       console.warn(
         `[AgentBehaviorBridge] Failed to apply tick result for ${result.characterId}: ${errMsg(err)}`,

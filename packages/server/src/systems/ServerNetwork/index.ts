@@ -1802,6 +1802,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.sockets,
       this.broadcastManager,
       this.db,
+      this.spectatorsByPlayer,
     );
     this.connectionHandler.setSpatialIndex(this.spatialIndex);
 
@@ -3449,14 +3450,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     oldKey: number,
     newKey: number,
   ): void {
-    const adapter = this.getUwsAdapterForPlayer(playerId);
-    if (!adapter) return;
     const diff = this.spatialIndex.getRegionSubscriptionDiff(oldKey, newKey);
-    for (const key of diff.unsubscribe) {
-      adapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
-    }
-    for (const key of diff.subscribe) {
-      adapter.subscribe(this.spatialIndex.getRegionTopic(key));
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (adapter) {
+      for (const key of diff.unsubscribe) {
+        adapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
+      }
+      for (const key of diff.subscribe) {
+        adapter.subscribe(this.spatialIndex.getRegionTopic(key));
+      }
     }
 
     // Also update any spectators following this player
@@ -3473,17 +3475,37 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     worldX: number,
     worldZ: number,
   ): void {
-    const adapter = this.getUwsAdapterForPlayer(playerId);
-    if (!adapter) return;
-    // Unsub old 9 regions
+    // Unsub old 9 regions, sub new 9 regions
     const oldKeys = this.spatialIndex.getAdjacentRegionKeysFromKey(oldKey);
-    for (let i = 0; i < 9; i++) {
-      adapter.unsubscribe(this.spatialIndex.getRegionTopic(oldKeys[i]));
-    }
-    // Sub new 9 regions
     const newKeys = this.spatialIndex.getAdjacentRegionKeys(worldX, worldZ);
+
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (adapter) {
+      for (let i = 0; i < 9; i++) {
+        adapter.unsubscribe(this.spatialIndex.getRegionTopic(oldKeys[i]));
+      }
+      for (let i = 0; i < 9; i++) {
+        adapter.subscribe(this.spatialIndex.getRegionTopic(newKeys[i]));
+      }
+    }
+
+    // Update spectators following this player (embedded agents have no adapter
+    // but may have spectator viewfinders that need region resubscription).
+    const oldKeySet = new Set(oldKeys);
+    const subKeys: number[] = [];
+    const unsubKeys: number[] = [];
     for (let i = 0; i < 9; i++) {
-      adapter.subscribe(this.spatialIndex.getRegionTopic(newKeys[i]));
+      if (!oldKeySet.has(newKeys[i])) subKeys.push(newKeys[i]);
+    }
+    const newKeySet = new Set(newKeys);
+    for (let i = 0; i < 9; i++) {
+      if (!newKeySet.has(oldKeys[i])) unsubKeys.push(oldKeys[i]);
+    }
+    if (subKeys.length > 0 || unsubKeys.length > 0) {
+      this.updateSpectatorRegionSubscriptions(playerId, {
+        subscribe: subKeys,
+        unsubscribe: unsubKeys,
+      });
     }
   }
 

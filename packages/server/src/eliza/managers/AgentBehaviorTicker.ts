@@ -161,6 +161,12 @@ export interface AgentInstance {
   tickCounter?: number;
   /** Persistent learnings the agent discovers through play (survives across ticks) */
   memories?: string[];
+  /** Pre-fetched LLM decision from the previous tick (non-blocking pipeline) */
+  pendingLlmResult?:
+    | import("../llmBehaviorDecision.js").LlmBehaviorResult
+    | null;
+  /** Whether an LLM call is currently in-flight for this agent */
+  llmCallInFlight?: boolean;
   /** LLM token cost tracker */
   llmCostTracker?: {
     totalCalls: number;

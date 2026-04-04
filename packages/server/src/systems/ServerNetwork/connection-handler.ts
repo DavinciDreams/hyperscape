@@ -133,6 +133,7 @@ export class ConnectionHandler {
     private sockets: Map<string, ServerSocket>,
     private broadcast: BroadcastManager,
     private db: SystemDatabase,
+    private spectatorsByPlayer: Map<string, Set<string>> = new Map(),
   ) {}
 
   /** Set spatial index for spectator region topic subscriptions. */
