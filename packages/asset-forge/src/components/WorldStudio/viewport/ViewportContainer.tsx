@@ -39,6 +39,7 @@ import { useBrushInteraction } from "../hooks/useBrushInteraction";
 import { usePlacementConfirmation } from "../hooks/usePlacementConfirmation";
 import { useBrushOverlaySync } from "../hooks/useBrushOverlaySync";
 import { useAreaBoundaryOverlay } from "../hooks/useAreaBoundaryOverlay";
+import { useWizardPreviewOverlay } from "../hooks/useWizardPreviewOverlay";
 import { useZoneProcgen } from "../hooks/useZoneProcgen";
 import { commandHistory } from "../../../editor/commands";
 import { useSelectionOutline } from "../hooks/useSelectionOutline";
@@ -51,6 +52,21 @@ import { ViewModeDropdown } from "./ViewModeDropdown";
 import { ViewportOverlayBar } from "../toolbar/ViewportOverlayBar";
 import { ViewportOverlay } from "./ViewportOverlay";
 import { GenerateTownDialog } from "../panels/GenerateTownDialog";
+import {
+  getTownSafeRadius,
+  HAND_PLACED_ENTITY_BUFFER,
+  VEGETATION_BUFFER,
+} from "../utils/worldConstants";
+import {
+  runAutoGenPipeline,
+  DEFAULT_AUTOGEN_CONFIG,
+} from "../hooks/useZoneAutoGen";
+import {
+  withBiomeDifficultyFallback,
+  type TownInfo,
+  type DangerSourceInfo,
+} from "../../WorldBuilder/DifficultyHeatmap";
+import type { PlacedRegion } from "../types";
 
 /**
  * Derive the selectableId used in the 3D scene from a WorldStudio selection.
@@ -113,6 +129,10 @@ export function ViewportContainer() {
     isEditing && state.builder.editing.world
       ? state.builder.editing.world.foundation.config
       : state.builder.creation.config;
+
+  // Ref-stable state for async callbacks (avoids stale closures in setTimeout)
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   // Scene refs from TileBasedTerrain for editing tool integration
   const sceneRefsRef = useRef<TerrainSceneRefs | null>(null);
@@ -327,6 +347,7 @@ export function ViewportContainer() {
         "bridge",
         "duelArena",
         "building",
+        "town",
       ]),
     [],
   );
@@ -388,6 +409,401 @@ export function ViewportContainer() {
 
   // ----- Transform gizmo -----
 
+  // ----- Debounced town move: road regen + terrain refresh -----
+  // Triggered directly from handleEntityMoved (not from state watching) to
+  // avoid false triggers from SYNC_RUNTIME_TOWNS during initial load.
+  // Uses stateRef to read LATEST state inside the timer (avoids stale closure).
+  // Accumulates all moved towns so rapidly moving multiple towns is handled.
+  const townMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTownMovesRef = useRef<
+    Map<string, { x: number; y: number; z: number }>
+  >(new Map());
+
+  const debouncedTownRefresh = useCallback(
+    (movedTownId: string, newGamePos: { x: number; y: number; z: number }) => {
+      pendingTownMovesRef.current.set(movedTownId, newGamePos);
+
+      if (townMoveTimerRef.current) {
+        clearTimeout(townMoveTimerRef.current);
+      }
+
+      townMoveTimerRef.current = setTimeout(() => {
+        const refs = sceneRefsRef.current;
+        if (!refs) return;
+
+        const movedTowns = new Map(pendingTownMovesRef.current);
+        pendingTownMovesRef.current.clear();
+        const pipelineStart = performance.now();
+
+        // ── Step 1: Y-snap moved towns to terrain height ──
+        for (const [townId, gamePos] of movedTowns) {
+          const terrainY = refs.queryBiome(gamePos.x, gamePos.z).height;
+          if (Math.abs(terrainY - gamePos.y) > 0.5) {
+            const snapped = { x: gamePos.x, y: terrainY, z: gamePos.z };
+            actions.moveTown(townId, snapped);
+            movedTowns.set(townId, snapped);
+          }
+        }
+
+        // ── Step 2: Read latest state ──
+        const latestState = stateRef.current;
+        const currentWorld = latestState.builder.editing.world;
+        if (!currentWorld) return;
+
+        const queryBiome = refs.queryBiome;
+        const getBiomeDifficulty = withBiomeDifficultyFallback(
+          refs.getBiomeDifficulty,
+        );
+        const worldSizeMeters =
+          currentWorld.foundation.config.terrain.worldSize *
+          currentWorld.foundation.config.terrain.tileSize;
+        const waterThreshold =
+          currentWorld.foundation.config.terrain.waterThreshold;
+        const seed = currentWorld.foundation.config.seed;
+
+        // ── Step 3: Build pipeline deps (mirrors useZoneAutoGen.generate) ──
+        const towns: TownInfo[] = currentWorld.foundation.towns.map((t) => ({
+          position: { x: t.position.x, z: t.position.z },
+          safeZoneRadius: getTownSafeRadius(t),
+        }));
+
+        const townDetails = currentWorld.foundation.towns.map((t) => {
+          const safeR = getTownSafeRadius(t);
+          const entryPoints = t.entryPoints
+            ?.filter((ep) => ep.position)
+            .map((ep) => ({
+              angle: Math.atan2(
+                ep.position.x - t.position.x,
+                ep.position.z - t.position.z,
+              ),
+              position: { x: ep.position.x, z: ep.position.z },
+            }));
+          return {
+            id: t.id,
+            name: t.name,
+            position: {
+              x: t.position.x,
+              y: t.position.y,
+              z: t.position.z,
+            },
+            radius: safeR * 0.35,
+            safeZoneRadius: safeR,
+            entryPoints: entryPoints?.length ? entryPoints : undefined,
+          };
+        });
+
+        const dangerSources: DangerSourceInfo[] =
+          latestState.extendedLayers.dangerSources.map((ds) => ({
+            position: { x: ds.position.x, z: ds.position.z },
+            radius: ds.radius,
+            intensity: ds.intensity,
+            falloffCurve: ds.falloffCurve,
+          }));
+
+        // Existing entities for placement avoidance
+        const existingEntities: Array<{
+          x: number;
+          z: number;
+          radius: number;
+        }> = [];
+        const entityBuffer = HAND_PLACED_ENTITY_BUFFER;
+        for (const npc of currentWorld.layers.npcs) {
+          existingEntities.push({
+            x: npc.position.x,
+            z: npc.position.z,
+            radius: entityBuffer,
+          });
+        }
+        for (const s of latestState.extendedLayers.stations) {
+          existingEntities.push({
+            x: s.position.x,
+            z: s.position.z,
+            radius: entityBuffer,
+          });
+        }
+        for (const sp of latestState.extendedLayers.spawnPoints) {
+          existingEntities.push({
+            x: sp.position.x,
+            z: sp.position.z,
+            radius: entityBuffer,
+          });
+        }
+        for (const tp of latestState.extendedLayers.teleports) {
+          existingEntities.push({
+            x: tp.position.x,
+            z: tp.position.z,
+            radius: entityBuffer,
+          });
+        }
+        for (const poi of latestState.extendedLayers.pois) {
+          existingEntities.push({
+            x: poi.position.x,
+            z: poi.position.z,
+            radius: poi.radius ?? entityBuffer,
+          });
+        }
+        const vegPositions = refs.vegetationPositions ?? [];
+        for (const veg of vegPositions) {
+          existingEntities.push({
+            x: veg.x,
+            z: veg.z,
+            radius: VEGETATION_BUFFER,
+          });
+        }
+
+        // Structure obstacles for road avoidance
+        const ROAD_BLDG_BUFFER = 4;
+        const structureObstacles: Array<{
+          x: number;
+          z: number;
+          radius: number;
+        }> = [];
+        for (const b of currentWorld.foundation.buildings) {
+          const halfDiag =
+            Math.sqrt(b.dimensions.width ** 2 + b.dimensions.depth ** 2) / 2;
+          structureObstacles.push({
+            x: b.position.x,
+            z: b.position.z,
+            radius: halfDiag + ROAD_BLDG_BUFFER,
+          });
+        }
+        for (const poi of latestState.extendedLayers.pois) {
+          structureObstacles.push({
+            x: poi.position.x,
+            z: poi.position.z,
+            radius: (poi.radius ?? 10) + ROAD_BLDG_BUFFER,
+          });
+        }
+        for (const s of latestState.extendedLayers.stations) {
+          structureObstacles.push({
+            x: s.position.x,
+            z: s.position.z,
+            radius: 4 + ROAD_BLDG_BUFFER,
+          });
+        }
+        for (const arena of latestState.manifests.duelArenas) {
+          structureObstacles.push({
+            x: arena.center.x,
+            z: arena.center.z,
+            radius: Math.max(arena.size, 12) + ROAD_BLDG_BUFFER,
+          });
+        }
+
+        // ── Step 4: Run full auto-gen pipeline (NO townConfig → keeps existing towns) ──
+        const pipelineConfig = { ...DEFAULT_AUTOGEN_CONFIG, seed };
+        const result = runAutoGenPipeline(pipelineConfig, {
+          queryBiome,
+          getBiomeDifficulty,
+          worldSize: worldSizeMeters,
+          waterThreshold,
+          seed,
+          towns,
+          townDetails,
+          dangerSources,
+          manifests: latestState.manifests,
+          existingEntities,
+          structureObstacles,
+          // NO townConfig — pipeline uses existing towns, skips town generation
+        });
+
+        console.log(
+          `[TownMove] Pipeline complete in ${Math.round(performance.now() - pipelineStart)}ms: ` +
+            `${result.roads.length} roads, ${result.zones.length} zones, ` +
+            `${result.mobSpawns.length} mobs, ${result.resources.length} resources`,
+        );
+
+        // ── Step 5: Update procgen town positions + rebuild town markers ──
+        // Set new road data in ref BEFORE refreshTownMarkers unloads tiles,
+        // so regenerated tiles pick up the correct road influence.
+        refs.rebuildRoadRibbons(result.roads);
+
+        const lastProcgen = refs.getLastProcgenTowns();
+        if (lastProcgen.length > 0) {
+          // Shift procgen town positions to match foundation state
+          const updatedProcgen = lastProcgen.map((pt) => {
+            const ft = currentWorld.foundation.towns.find(
+              (t) => t.id === pt.id,
+            );
+            if (!ft) return pt;
+            const dx = ft.position.x - pt.position.x;
+            const dy = ft.position.y - pt.position.y;
+            const dz = ft.position.z - pt.position.z;
+            if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) return pt;
+            return {
+              ...pt,
+              position: { ...ft.position },
+              buildings: pt.buildings.map((b) => ({
+                ...b,
+                position: {
+                  x: b.position.x + dx,
+                  y: b.position.y + dy,
+                  z: b.position.z + dz,
+                },
+              })),
+              landmarks: pt.landmarks?.map((l) => ({
+                ...l,
+                position: {
+                  x: l.position.x + dx,
+                  y: l.position.y + dy,
+                  z: l.position.z + dz,
+                },
+              })),
+              internalRoads: pt.internalRoads?.map((r) => ({
+                ...r,
+                start: { ...r.start, x: r.start.x + dx, z: r.start.z + dz },
+                end: { ...r.end, x: r.end.x + dx, z: r.end.z + dz },
+              })),
+              entryPoints: pt.entryPoints?.map((ep) => ({
+                ...ep,
+                position: ep.position
+                  ? { x: ep.position.x + dx, z: ep.position.z + dz }
+                  : ep.position,
+              })),
+              plaza: pt.plaza
+                ? {
+                    ...pt.plaza,
+                    position: {
+                      ...pt.plaza.position,
+                      x: pt.plaza.position.x + dx,
+                      z: pt.plaza.position.z + dz,
+                    },
+                  }
+                : undefined,
+              paths: pt.paths?.map((p) => ({
+                ...p,
+                start: { x: p.start.x + dx, z: p.start.z + dz },
+                end: { x: p.end.x + dx, z: p.end.z + dz },
+              })),
+            };
+          });
+          // refreshTownMarkers rebuilds 3D meshes at new positions, updates
+          // runtimeTownsRef for terrain flattening, and unloads ALL tiles
+          // so they regenerate with correct flatten zones + road influence.
+          refs.refreshTownMarkers(updatedProcgen);
+        } else {
+          // No stored procgen towns (shouldn't happen) — move meshes manually
+          for (const [townId, gamePos] of movedTowns) {
+            refs.moveTownInScene(townId, gamePos);
+          }
+        }
+
+        // ── Step 6: Clear old autogen + apply new entities/zones/roads ──
+        actions.clearAllAutogen();
+
+        const offset = refs.worldCenterOffset;
+        const toScene = (pos: { x: number; y: number; z: number }) => {
+          const y = queryBiome(pos.x, pos.z).height;
+          return { x: pos.x + offset, y, z: pos.z + offset };
+        };
+
+        // Convert zones to PlacedRegion
+        const tiers = pipelineConfig.tiers;
+        const regions: PlacedRegion[] = result.zones.map((zone, idx) => ({
+          id: `autogen-zone-${idx}`,
+          name: zone.name,
+          description: `Auto-generated ${zone.biome} zone (${tiers[zone.tierIndex]?.name ?? "Unknown"} tier)`,
+          tileKeys: [],
+          tags: [
+            "autogen",
+            zone.biome,
+            tiers[zone.tierIndex]?.name.toLowerCase() ?? "unknown",
+          ],
+          spawnRules: zone.spawnRules,
+          autoGenBounds: zone.autoGenBounds,
+        }));
+
+        // Convert positions from game-space to scene-space
+        const sceneMobs = result.mobSpawns.map((m) => ({
+          ...m,
+          position: toScene(m.position),
+        }));
+        const sceneResources = result.resources.map((r) => ({
+          ...r,
+          position: toScene(r.position),
+        }));
+        const sceneSpawns = result.spawnPoints.map((sp) => ({
+          ...sp,
+          position: toScene(sp.position),
+        }));
+        const sceneTeleports = result.teleports.map((tp) => ({
+          ...tp,
+          position: toScene(tp.position),
+        }));
+
+        actions.batchAddRegions(regions);
+        actions.batchAddEntities(sceneMobs, sceneResources);
+        for (const sp of sceneSpawns) actions.addSpawnPoint(sp);
+        for (const tp of sceneTeleports) actions.addTeleport(tp);
+        actions.setFoundationRoads(result.roads);
+
+        // ── Step 7: Refresh vegetation with updated exclusion zones ──
+        if (refs.refreshVegetation) {
+          const circles: Array<{ x: number; z: number; radius: number }> = [];
+          // Building exclusion zones
+          for (const b of currentWorld.foundation.buildings) {
+            const footprint = Math.max(b.dimensions.width, b.dimensions.depth);
+            circles.push({
+              x: b.position.x,
+              z: b.position.z,
+              radius: footprint / 2 + 2,
+            });
+          }
+          // Town center exclusion
+          for (const ft of currentWorld.foundation.towns) {
+            circles.push({
+              x: ft.position.x,
+              z: ft.position.z,
+              radius: 8,
+            });
+          }
+          // Resource/spawn/teleport exclusion
+          for (const r of result.resources) {
+            circles.push({ x: r.position.x, z: r.position.z, radius: 2.5 });
+          }
+          for (const sp of result.spawnPoints) {
+            circles.push({ x: sp.position.x, z: sp.position.z, radius: 4 });
+          }
+          for (const tp of result.teleports) {
+            circles.push({ x: tp.position.x, z: tp.position.z, radius: 4 });
+          }
+
+          const roadExclusions = result.roads.map((r) => ({
+            path: r.path.map((p) => ({ x: p.x, z: p.z })),
+            halfWidth: (r.width ?? 6) / 2 + 0.5,
+          }));
+
+          const townCenters = currentWorld.foundation.towns.map((t) => ({
+            x: t.position.x,
+            z: t.position.z,
+            safeZoneRadius: getTownSafeRadius(t),
+          }));
+
+          refs.refreshVegetation(undefined, {
+            circles,
+            roads: roadExclusions,
+            towns: townCenters,
+          });
+        }
+
+        console.log(
+          `[TownMove] Full regeneration complete — ${movedTowns.size} town(s) moved, ` +
+            `${result.roads.length} roads, ${result.zones.length} zones, ` +
+            `${result.mobSpawns.length + result.resources.length} entities`,
+        );
+      }, 500);
+    },
+    [actions],
+  );
+
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (townMoveTimerRef.current) {
+        clearTimeout(townMoveTimerRef.current);
+      }
+    };
+  }, []);
+
   // ----- Gizmo transform persistence -----
   // Map selection type → update action for extended layer entities
   const handleEntityMoved = useCallback(
@@ -416,12 +832,25 @@ export function ViewportContainer() {
         case "waterBody":
           actions.updateWaterBody(entityId, { surfaceY: pos.y });
           break;
+        case "town": {
+          // Town meshes are in scene-space (game + offset), convert back to game-space
+          const offset = sceneRefsRef.current?.worldCenterOffset ?? 0;
+          const newGamePos = {
+            x: pos.x - offset,
+            y: pos.y,
+            z: pos.z - offset,
+          };
+          actions.moveTown(entityId, newGamePos);
+          // Debounced terrain + road refresh (only on user-initiated drags)
+          debouncedTownRefresh(entityId, newGamePos);
+          break;
+        }
         default:
           // Game entities (gameNpc, gameStation, etc.) — visual only for now
           break;
       }
     },
-    [selection, actions],
+    [selection, actions, debouncedTownRefresh],
   );
 
   const handleEntityRotated = useCallback(
@@ -663,6 +1092,15 @@ export function ViewportContainer() {
     return count;
   }, [state.extendedLayers, state.builder.editing.world]);
 
+  // Memoized roads prop — avoids creating a new array reference on every render
+  // (which would cause TileBasedTerrain's useEffect to fire on every MOVE_TOWN
+  // re-render, overwriting providedRoadsRef with stale road data during drag).
+  const foundationRoads = state.builder.editing.world?.foundation.roads;
+  const memoizedRoads = useMemo(
+    () => foundationRoads?.map((r) => ({ path: r.path, width: r.width })),
+    [foundationRoads],
+  );
+
   // ----- Editing hooks (self-guard on null sceneRefs / inactive tools) -----
 
   // Sync extended-layer entity markers and ghost preview to the 3D scene
@@ -723,6 +1161,9 @@ export function ViewportContainer() {
 
   // Area boundary overlays (difficulty zones, town boundaries, biome regions)
   useAreaBoundaryOverlay(activeSceneRefs);
+
+  // Wizard generation preview overlay (ghost towns, roads, zones, entities)
+  useWizardPreviewOverlay(activeSceneRefs);
 
   // Zone procgen — populate all regions from toolbar button
   const { generateAll: procgenGenerateAll } = useZoneProcgen();
@@ -1267,9 +1708,7 @@ export function ViewportContainer() {
             type: b.type,
             tileKeys: b.tileKeys,
           }))}
-          roads={state.builder.editing.world?.foundation.roads.map((r) => ({
-            path: r.path,
-          }))}
+          roads={memoizedRoads}
           towns={state.builder.editing.world?.foundation.towns.map((t) => ({
             id: t.id,
             name: t.name,

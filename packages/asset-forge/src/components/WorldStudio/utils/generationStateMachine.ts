@@ -1,10 +1,19 @@
 /**
  * generationStateMachine — Explicit state machine for the generation wizard
  *
+ * 3-stage wizard: Towns → Roads & Zones → Population
+ * Each stage independently generates and previews content.
+ *
  * States: idle → configuring → generating → previewing → applying → complete
  * Prevents invalid transitions (can't apply without preview, can't generate
  * while applying). Each step wraps in an undoable command.
  */
+
+import type {
+  TownStageResult,
+  RoadZoneStageResult,
+  PopulationStageResult,
+} from "../hooks/useZoneAutoGen";
 
 // ============== STATES ==============
 
@@ -42,14 +51,19 @@ export interface GenerationStep {
 }
 
 export const WIZARD_STEPS: GenerationStep[] = [
-  { index: 0, name: "Terrain", optional: false },
-  { index: 1, name: "Towns", optional: false },
-  { index: 2, name: "Roads", optional: true },
-  { index: 3, name: "Zones", optional: false },
-  { index: 4, name: "Population", optional: false },
-  { index: 5, name: "POIs & Landmarks", optional: true },
-  { index: 6, name: "Review & Compile", optional: false },
+  { index: 0, name: "Towns", optional: false },
+  { index: 1, name: "Roads & Zones", optional: false },
+  { index: 2, name: "Population", optional: false },
 ];
+
+// ============== STAGE RESULTS ==============
+
+/** Intermediate results held per stage for cascading re-roll */
+export interface WizardStageResults {
+  towns?: TownStageResult;
+  roadsZones?: RoadZoneStageResult;
+  population?: PopulationStageResult;
+}
 
 // ============== STATE MACHINE ==============
 
@@ -70,6 +84,8 @@ export interface GenerationMachineState {
   completedSteps: Set<number>;
   /** Generation batch ID for source tagging */
   batchId: string | null;
+  /** Intermediate results per stage */
+  stageResults: WizardStageResults;
 }
 
 export function createInitialMachineState(): GenerationMachineState {
@@ -82,6 +98,7 @@ export function createInitialMachineState(): GenerationMachineState {
     recoverable: false,
     completedSteps: new Set(),
     batchId: null,
+    stageResults: {},
   };
 }
 
@@ -100,6 +117,12 @@ export type MachineAction =
   | { type: "NEXT_STEP" }
   | { type: "PREV_STEP" }
   | { type: "JUMP_TO_STEP"; stepIndex: number }
+  | { type: "REGENERATE_STEP"; stepIndex: number }
+  | {
+      type: "SET_STAGE_RESULT";
+      stepIndex: number;
+      result: TownStageResult | RoadZoneStageResult | PopulationStageResult;
+    }
   | { type: "RESET" };
 
 // ============== REDUCER ==============
@@ -143,6 +166,47 @@ export function machineReducer(
         current: "previewing",
         progress: 100,
         completedSteps: completed,
+      };
+    }
+
+    case "SET_STAGE_RESULT": {
+      const newResults = { ...state.stageResults };
+      if (action.stepIndex === 0) {
+        newResults.towns = action.result as TownStageResult;
+      } else if (action.stepIndex === 1) {
+        newResults.roadsZones = action.result as RoadZoneStageResult;
+      } else if (action.stepIndex === 2) {
+        newResults.population = action.result as PopulationStageResult;
+      }
+      return { ...state, stageResults: newResults };
+    }
+
+    case "REGENERATE_STEP": {
+      const { stepIndex } = action;
+      if (stepIndex < 0 || stepIndex >= WIZARD_STEPS.length) return state;
+      // Clear this step and all downstream steps
+      const completed = new Set(state.completedSteps);
+      const newResults = { ...state.stageResults };
+      for (let i = stepIndex; i < WIZARD_STEPS.length; i++) {
+        completed.delete(i);
+      }
+      if (stepIndex <= 0) {
+        delete newResults.towns;
+        delete newResults.roadsZones;
+        delete newResults.population;
+      } else if (stepIndex <= 1) {
+        delete newResults.roadsZones;
+        delete newResults.population;
+      } else {
+        delete newResults.population;
+      }
+      return {
+        ...state,
+        stepIndex,
+        current: "configuring",
+        progress: 0,
+        completedSteps: completed,
+        stageResults: newResults,
       };
     }
 

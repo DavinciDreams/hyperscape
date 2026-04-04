@@ -119,6 +119,22 @@ import type { ManifestOverrides } from "./types";
 
 import { useStoreSync } from "../../editor/stores/useStoreSync";
 
+import type {
+  TownStageResult,
+  RoadZoneStageResult,
+  PopulationStageResult,
+} from "./hooks/useZoneAutoGen";
+
+// ============== WIZARD PREVIEW ==============
+
+/** Data passed to the 3D viewport overlay during wizard generation */
+export interface WizardPreviewData {
+  towns?: TownStageResult;
+  roadsZones?: RoadZoneStageResult;
+  population?: PopulationStageResult;
+  worldCenterOffset: number;
+}
+
 // ============== STUDIO-SPECIFIC TYPES ==============
 
 /** Team/project context from the Phase 1 API */
@@ -248,6 +264,8 @@ export interface WorldStudioState {
   manifestOverrides: ManifestOverrides;
   /** Entity data from game manifest (world-areas.json), populated by GameWorldEntitySync */
   gameEntities: GameEntityData | null;
+  /** Wizard preview data for 3D viewport ghost overlay */
+  wizardPreview: WizardPreviewData | null;
 }
 
 // ============== ACTION TYPES ==============
@@ -504,6 +522,12 @@ type StudioSpecificAction =
       resources: PlacedResource[];
     }
   | { type: "CLEAR_ALL_AUTOGEN" }
+  // Move a single town to a new position
+  | {
+      type: "MOVE_TOWN";
+      townId: string;
+      position: { x: number; y: number; z: number };
+    }
   // Town unification — sync runtime-generated towns into foundation.towns
   | {
       type: "SYNC_RUNTIME_TOWNS";
@@ -520,7 +544,10 @@ type StudioSpecificAction =
   | {
       type: "SET_FOUNDATION_ROADS";
       roads: GeneratedRoad[];
-    };
+    }
+  // Wizard preview overlay
+  | { type: "SET_WIZARD_PREVIEW"; preview: WizardPreviewData }
+  | { type: "CLEAR_WIZARD_PREVIEW" };
 
 /** Union of all world builder + studio-specific actions */
 export type WorldStudioAction = WorldBuilderAction | StudioSpecificAction;
@@ -569,6 +596,7 @@ const initialState: WorldStudioState = {
   overlays: DEFAULT_VIEWPORT_OVERLAYS,
   manifestOverrides: EMPTY_MANIFEST_OVERRIDES,
   gameEntities: null,
+  wizardPreview: null,
 };
 
 // ============== REDUCER ==============
@@ -1508,6 +1536,70 @@ function studioReducer(
       };
     }
 
+    case "MOVE_TOWN": {
+      const world = state.builder.editing.world;
+      if (!world) return state;
+
+      // Compute delta so entry points and buildings shift with the town
+      const oldTown = world.foundation.towns.find(
+        (t) => t.id === action.townId,
+      );
+      if (!oldTown) return state;
+      const dx = action.position.x - oldTown.position.x;
+      const dy = action.position.y - oldTown.position.y;
+      const dz = action.position.z - oldTown.position.z;
+
+      const movedTowns = world.foundation.towns.map((t) => {
+        if (t.id !== action.townId) return t;
+        return {
+          ...t,
+          position: { ...action.position },
+          // Shift entry/exit points by the same delta so roads connect correctly
+          entryPoints: t.entryPoints.map((ep) => ({
+            ...ep,
+            position: ep.position
+              ? {
+                  x: ep.position.x + dx,
+                  y: ep.position.y + dy,
+                  z: ep.position.z + dz,
+                }
+              : ep.position,
+          })),
+        };
+      });
+
+      // Shift buildings that belong to this town
+      const movedBuildings = world.foundation.buildings.map((b) => {
+        if (b.townId !== action.townId) return b;
+        return {
+          ...b,
+          position: {
+            x: b.position.x + dx,
+            y: b.position.y + dy,
+            z: b.position.z + dz,
+          },
+        };
+      });
+
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: {
+            ...state.builder.editing,
+            world: {
+              ...world,
+              foundation: {
+                ...world.foundation,
+                towns: movedTowns,
+                buildings: movedBuildings,
+              },
+            },
+          },
+        },
+      };
+    }
+
     case "SET_FOUNDATION_ROADS": {
       const world = state.builder.editing.world;
       if (!world) return state;
@@ -1989,6 +2081,12 @@ function studioReducer(
         gameEntities: action.data,
       };
 
+    case "SET_WIZARD_PREVIEW":
+      return { ...state, wizardPreview: action.preview };
+
+    case "CLEAR_WIZARD_PREVIEW":
+      return { ...state, wizardPreview: null };
+
     case "SET_MANIFEST_OVERRIDE": {
       const mapClone = new Map(state.manifestOverrides[action.overrideType]);
       const existing = mapClone.get(action.entityId) ?? {};
@@ -2304,6 +2402,11 @@ interface WorldStudioContextValue {
     ) => void;
     clearAllAutogen: () => void;
 
+    // Move a town to a new position
+    moveTown: (
+      townId: string,
+      position: { x: number; y: number; z: number },
+    ) => void;
     // Town unification — sync runtime-generated towns into foundation
     syncRuntimeTowns: (
       towns: Array<{
@@ -2412,6 +2515,9 @@ interface WorldStudioContextValue {
     setOverlay: (overlay: Partial<StudioViewportOverlays>) => void;
     // Game entity data
     setGameEntities: (data: GameEntityData) => void;
+    // Wizard preview
+    setWizardPreview: (preview: WizardPreviewData) => void;
+    clearWizardPreview: () => void;
     // Manifest overrides
     setManifestOverride: (
       overrideType: keyof ManifestOverrides,
@@ -2745,6 +2851,12 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       ) => dispatch({ type: "BATCH_ADD_ENTITIES", mobSpawns, resources }),
       clearAllAutogen: () => dispatch({ type: "CLEAR_ALL_AUTOGEN" }),
 
+      // Move a town to a new position
+      moveTown: (
+        townId: string,
+        position: { x: number; y: number; z: number },
+      ) => dispatch({ type: "MOVE_TOWN", townId, position }),
+
       // Town unification
       syncRuntimeTowns: (
         towns: Array<{
@@ -2906,6 +3018,10 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       // Game entity data
       setGameEntities: (data: GameEntityData) =>
         dispatch({ type: "SET_GAME_ENTITIES", data }),
+      // Wizard preview
+      setWizardPreview: (preview: WizardPreviewData) =>
+        dispatch({ type: "SET_WIZARD_PREVIEW", preview }),
+      clearWizardPreview: () => dispatch({ type: "CLEAR_WIZARD_PREVIEW" }),
       // Manifest overrides
       setManifestOverride: (
         overrideType: keyof ManifestOverrides,

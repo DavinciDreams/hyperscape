@@ -30,6 +30,8 @@ import type {
   PlacedRegion,
   PlacedSpawnPoint,
   PlacedTeleport,
+  PlacedMobSpawn,
+  PlacedResource,
   DifficultyTierConfig,
   AutoGenBounds,
   AutoGenConfig,
@@ -289,6 +291,35 @@ function sampleDifficultyGrid(
   return cells;
 }
 
+// ============== STAGE RESULT TYPES ==============
+
+/** Result of the town generation stage */
+export interface TownStageResult {
+  generatedTowns: ProcgenTown[];
+  towns: TownInfo[];
+  townDetails: AutoGenDeps["townDetails"];
+  landBounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+}
+
+/** Result of the road + zone generation stage */
+export interface RoadZoneStageResult {
+  zones: AutoGenZone[];
+  roads: AutoGenResult["roads"];
+  spawnPoints: PlacedSpawnPoint[];
+  teleports: PlacedTeleport[];
+  stats: Pick<
+    AutoGenStats,
+    "zonesGenerated" | "zoneMerged" | "totalArea" | "tierBreakdown"
+  >;
+}
+
+/** Result of the population (entity scatter) stage */
+export interface PopulationStageResult {
+  mobSpawns: PlacedMobSpawn[];
+  resources: PlacedResource[];
+  stats: Pick<AutoGenStats, "totalMobs" | "totalResources">;
+}
+
 // ============== PIPELINE DEPENDENCIES ==============
 
 export interface AutoGenDeps {
@@ -321,46 +352,20 @@ export interface AutoGenDeps {
   };
 }
 
-// ============== MAIN PIPELINE ==============
+// ============== STAGE 1: TOWN GENERATION ==============
 
-export function runAutoGenPipeline(
+export function runTownStage(
   config: AutoGenConfig,
   deps: AutoGenDeps,
-): AutoGenResult {
-  const startTime = performance.now();
-  const noise = new NoiseGenerator(deps.seed);
-  const worldRadius = deps.worldSize / 2;
-  const zoneDiffConfig =
-    deps.zoneDifficultyConfig ?? DEFAULT_ZONE_DIFFICULTY_CONFIG;
-
-  // Step 1: Pre-scan land bounds
+): TownStageResult | null {
+  // Pre-scan land bounds
   const landBounds = scanLandBounds(
     deps.worldSize,
     deps.queryBiome,
     deps.waterThreshold,
   );
-  if (!landBounds.hasLand) {
-    return {
-      zones: [],
-      mobSpawns: [],
-      resources: [],
-      spawnPoints: [],
-      teleports: [],
-      roads: [],
-      generatedTowns: [],
-      stats: {
-        zonesGenerated: 0,
-        zoneMerged: 0,
-        totalMobs: 0,
-        totalResources: 0,
-        totalArea: 0,
-        generationTimeMs: Math.round(performance.now() - startTime),
-        tierBreakdown: [],
-      },
-    };
-  }
+  if (!landBounds.hasLand) return null;
 
-  // Step 1b: Always procgen towns (replaces any existing placeholders)
   const generatedTowns: ProcgenTown[] = [];
   let towns: TownInfo[] = [];
   let townDetails: AutoGenDeps["townDetails"] = [];
@@ -573,19 +578,37 @@ export function runAutoGenPipeline(
     }
 
     // 3) Fill remaining slots — maximise spread across the island
-    if (slots.length < desiredCount) {
+    //    Progressively relax spacing if we can't fit all requested towns.
+    let currentSpacing = minSpacing;
+    while (slots.length < desiredCount && currentSpacing >= 40) {
+      const spacingForCheck = currentSpacing;
+      const isTooCloseRelaxed = (x: number, z: number) =>
+        slots.some((s) => dist2(x, z, s.x, s.z) < spacingForCheck);
+
       const remaining = landSites
-        .filter((s) => !isTooClose(s.x, s.z))
+        .filter((s) => !isTooCloseRelaxed(s.x, s.z))
         .sort((a, b) => siteScore(b) - siteScore(a));
 
+      let placedThisRound = 0;
       for (const site of remaining) {
         if (slots.length >= desiredCount) break;
-        if (isTooClose(site.x, site.z)) continue;
+        if (isTooCloseRelaxed(site.x, site.z)) continue;
         const size = site.flatness > 0.5 ? "village" : "hamlet";
         slots.push({ x: site.x, z: site.z, size });
+        placedThisRound++;
         console.log(
           `[AutoGen] Fill town at (${Math.round(site.x)}, ${Math.round(site.z)}) ` +
-            `biome=${site.biome}, flatness=${site.flatness.toFixed(2)}`,
+            `biome=${site.biome}, flatness=${site.flatness.toFixed(2)}, ` +
+            `spacing=${Math.round(spacingForCheck)}m`,
+        );
+      }
+
+      if (placedThisRound === 0 && slots.length < desiredCount) {
+        // Couldn't place any at this spacing — halve it and retry
+        currentSpacing = Math.floor(currentSpacing * 0.6);
+        console.log(
+          `[AutoGen] Relaxing spacing to ${currentSpacing}m ` +
+            `(have ${slots.length}/${desiredCount} towns)`,
         );
       }
     }
@@ -638,12 +661,28 @@ export function runAutoGenPipeline(
     townDetails = deps.townDetails;
   }
 
+  return { generatedTowns, towns, townDetails, landBounds };
+}
+
+// ============== STAGE 2: ROADS + ZONES ==============
+
+export function runRoadZoneStage(
+  config: AutoGenConfig,
+  deps: AutoGenDeps,
+  townResult: TownStageResult,
+): RoadZoneStageResult {
+  const noise = new NoiseGenerator(deps.seed);
+  const worldRadius = deps.worldSize / 2;
+  const zoneDiffConfig =
+    deps.zoneDifficultyConfig ?? DEFAULT_ZONE_DIFFICULTY_CONFIG;
+  const { landBounds, towns, townDetails, generatedTowns } = townResult;
+
   const rangeX = landBounds.maxX - landBounds.minX;
   const rangeZ = landBounds.maxZ - landBounds.minZ;
   const cols = Math.ceil(rangeX / config.gridResolution);
   const rows = Math.ceil(rangeZ / config.gridResolution);
 
-  // Step 2: Sample difficulty grid
+  // Sample difficulty grid
   const cells = sampleDifficultyGrid(
     config.gridResolution,
     deps.queryBiome,
@@ -658,10 +697,10 @@ export function runAutoGenPipeline(
     zoneDiffConfig,
   );
 
-  // Step 3: Flood fill
+  // Flood fill
   const rawZones = floodFillZones(cells, cols, rows);
 
-  // Step 4: Cleanup (merge small, split large)
+  // Cleanup (merge small, split large)
   const cleanedZones = cleanupZones(
     rawZones,
     config.gridResolution,
@@ -669,7 +708,7 @@ export function runAutoGenPipeline(
     config.maxZoneSpan,
   );
 
-  // Step 5: Name zones
+  // Name zones
   const zoneNames = nameZones(cleanedZones, config.tiers, towns);
   const cellArea = config.gridResolution * config.gridResolution;
 
@@ -707,28 +746,10 @@ export function runAutoGenPipeline(
     };
   });
 
-  // Step 6: Populate entities
-  const { mobs, resources } = populateEntities(
-    autoGenZones,
-    config,
-    {
-      queryBiome: deps.queryBiome,
-      getBiomeDifficulty: deps.getBiomeDifficulty,
-      noise,
-      towns,
-      dangerSources: deps.dangerSources,
-      waterThreshold: deps.waterThreshold,
-      worldRadius,
-      zoneDiffConfig,
-    },
-    deps.existingEntities,
-  );
-
-  // Step 7: Auto-place spawn points + lodestones at each town plaza
+  // Auto-place spawn points + lodestones at each town plaza
   const spawnPoints: PlacedSpawnPoint[] = [];
   const teleports: PlacedTeleport[] = [];
 
-  // Find the largest town (by safe zone radius) as the default spawn
   let largestTownIdx = 0;
   let largestRadius = 0;
   for (let i = 0; i < towns.length; i++) {
@@ -744,7 +765,6 @@ export function runAutoGenPipeline(
     const townName = detail?.name ?? `Town ${i + 1}`;
     const isMainSpawn = i === largestTownIdx;
 
-    // Spawn point at plaza center
     spawnPoints.push({
       id: `autogen-spawn-${i}`,
       name: isMainSpawn ? `${townName} (Default Spawn)` : `${townName} Respawn`,
@@ -756,26 +776,23 @@ export function runAutoGenPipeline(
       properties: { source: "autogen" },
     });
 
-    // Lodestone teleport at plaza center (slightly offset from spawn)
     const lodestoneId = `autogen-lodestone-${i}`;
     teleports.push({
       id: lodestoneId,
       name: `${townName} Lodestone`,
       position: { x: town.position.x + 3, y: 0, z: town.position.z + 3 },
-      connections: [], // Lodestone network — all lodestones are implicitly connected
+      connections: [],
       requirements: { minLevel: 1 },
       cost: 0,
       properties: { source: "autogen", type: "lodestone" },
     });
   }
 
-  // Step 8: Generate road network between towns
-  // Build obstacle list from generated town buildings/landmarks + existing structures
+  // Generate road network between towns
   const roadObstacles: Array<{ x: number; z: number; radius: number }> = [
     ...deps.structureObstacles,
   ];
 
-  // Add individual building obstacles from generated towns (with generous buffer)
   const ROAD_STRUCTURE_BUFFER = 6;
   for (const town of generatedTowns) {
     for (const b of town.buildings) {
@@ -814,49 +831,163 @@ export function runAutoGenPipeline(
     roadObstacles,
   );
 
-  const elapsed = performance.now() - startTime;
-
   // Build stats
   const tierBreakdown = config.tiers.map((tier) => {
     const tierZones = autoGenZones.filter(
       (z) => z.tierIndex === config.tiers.indexOf(tier),
     );
-    const tierMobs = mobs.filter((m) =>
-      tierZones.some((z) => m.sourceRegionId === z.id),
-    );
-    const tierRes = resources.filter((r) =>
-      tierZones.some((z) => r.sourceRegionId === z.id),
-    );
     return {
       tierName: tier.name,
       zoneCount: tierZones.length,
-      mobCount: tierMobs.length,
-      resourceCount: tierRes.length,
+      mobCount: 0,
+      resourceCount: 0,
       area: tierZones.reduce((sum, z) => sum + z.area, 0),
     };
   });
 
-  const stats: AutoGenStats = {
-    zonesGenerated: autoGenZones.length,
-    zoneMerged: rawZones.length - cleanedZones.length,
-    totalMobs: mobs.length,
-    totalResources: resources.length,
-    totalArea: autoGenZones.reduce((sum, z) => sum + z.area, 0),
-    generationTimeMs: Math.round(elapsed),
-    landBounds,
-    tierBreakdown,
-  };
-
   return {
     zones: autoGenZones,
-    mobSpawns: mobs,
-    resources,
+    roads,
     spawnPoints,
     teleports,
-    roads,
-    generatedTowns,
-    stats,
+    stats: {
+      zonesGenerated: autoGenZones.length,
+      zoneMerged: rawZones.length - cleanedZones.length,
+      totalArea: autoGenZones.reduce((sum, z) => sum + z.area, 0),
+      tierBreakdown,
+    },
   };
+}
+
+// ============== STAGE 3: POPULATION ==============
+
+export function runPopulationStage(
+  config: AutoGenConfig,
+  deps: AutoGenDeps,
+  townResult: TownStageResult,
+  roadZoneResult: RoadZoneStageResult,
+): PopulationStageResult {
+  const noise = new NoiseGenerator(deps.seed);
+  const worldRadius = deps.worldSize / 2;
+  const zoneDiffConfig =
+    deps.zoneDifficultyConfig ?? DEFAULT_ZONE_DIFFICULTY_CONFIG;
+
+  const { mobs, resources } = populateEntities(
+    roadZoneResult.zones,
+    config,
+    {
+      queryBiome: deps.queryBiome,
+      getBiomeDifficulty: deps.getBiomeDifficulty,
+      noise,
+      towns: townResult.towns,
+      dangerSources: deps.dangerSources,
+      waterThreshold: deps.waterThreshold,
+      worldRadius,
+      zoneDiffConfig,
+    },
+    deps.existingEntities,
+  );
+
+  return {
+    mobSpawns: mobs,
+    resources,
+    stats: {
+      totalMobs: mobs.length,
+      totalResources: resources.length,
+    },
+  };
+}
+
+// ============== MERGE STAGE RESULTS ==============
+
+/** Merge the 3 stage results into a unified AutoGenResult */
+export function mergeStageResults(
+  townResult: TownStageResult,
+  rzResult: RoadZoneStageResult,
+  popResult: PopulationStageResult,
+  config: AutoGenConfig,
+  elapsedMs: number,
+): AutoGenResult {
+  // Update tier breakdown with population counts
+  const tierBreakdown = rzResult.stats.tierBreakdown.map((tb) => {
+    const tierZones = rzResult.zones.filter(
+      (z) =>
+        z.tierIndex === config.tiers.findIndex((t) => t.name === tb.tierName),
+    );
+    const tierMobs = popResult.mobSpawns.filter((m) =>
+      tierZones.some((z) => m.sourceRegionId === z.id),
+    );
+    const tierRes = popResult.resources.filter((r) =>
+      tierZones.some((z) => r.sourceRegionId === z.id),
+    );
+    return {
+      ...tb,
+      mobCount: tierMobs.length,
+      resourceCount: tierRes.length,
+    };
+  });
+
+  return {
+    zones: rzResult.zones,
+    mobSpawns: popResult.mobSpawns,
+    resources: popResult.resources,
+    spawnPoints: rzResult.spawnPoints,
+    teleports: rzResult.teleports,
+    roads: rzResult.roads,
+    generatedTowns: townResult.generatedTowns,
+    stats: {
+      zonesGenerated: rzResult.stats.zonesGenerated,
+      zoneMerged: rzResult.stats.zoneMerged,
+      totalMobs: popResult.stats.totalMobs,
+      totalResources: popResult.stats.totalResources,
+      totalArea: rzResult.stats.totalArea,
+      generationTimeMs: Math.round(elapsedMs),
+      landBounds: townResult.landBounds,
+      tierBreakdown,
+    },
+  };
+}
+
+// ============== MAIN PIPELINE (composes stages) ==============
+
+export function runAutoGenPipeline(
+  config: AutoGenConfig,
+  deps: AutoGenDeps,
+): AutoGenResult {
+  const startTime = performance.now();
+
+  const townResult = runTownStage(config, deps);
+  if (!townResult) {
+    return {
+      zones: [],
+      mobSpawns: [],
+      resources: [],
+      spawnPoints: [],
+      teleports: [],
+      roads: [],
+      generatedTowns: [],
+      stats: {
+        zonesGenerated: 0,
+        zoneMerged: 0,
+        totalMobs: 0,
+        totalResources: 0,
+        totalArea: 0,
+        generationTimeMs: Math.round(performance.now() - startTime),
+        tierBreakdown: [],
+      },
+    };
+  }
+
+  const rzResult = runRoadZoneStage(config, deps, townResult);
+  const popResult = runPopulationStage(config, deps, townResult, rzResult);
+
+  return mergeStageResults(
+    townResult,
+    rzResult,
+    popResult,
+    config,
+    performance.now() - startTime,
+  );
 }
 
 // ============== REACT HOOK ==============
@@ -983,6 +1114,7 @@ export function useZoneAutoGen() {
           name: t.name,
           position: { x: t.position.x, y: t.position.y, z: t.position.z },
           radius: safeR * 0.35,
+          safeZoneRadius: safeR,
           entryPoints: entryPoints?.length ? entryPoints : undefined,
         };
       });
@@ -1076,6 +1208,227 @@ export function useZoneAutoGen() {
       state.manifests,
       viewportRef,
     ],
+  );
+
+  /** Build AutoGenDeps from current state + viewport (shared by all stage wrappers) */
+  const buildDeps = useCallback(
+    (configOverride?: {
+      seed?: number;
+      townCount?: number;
+      minTownSpacing?: number;
+    }): {
+      deps: AutoGenDeps;
+      world: NonNullable<typeof state.builder.editing.world>;
+    } | null => {
+      const world = state.builder.editing.world;
+      if (!world) return null;
+
+      const vp = viewportRef?.current;
+      if (!vp?.queryBiome || !vp?.getBiomeDifficulty) return null;
+
+      const getBiomeDifficulty = withBiomeDifficultyFallback(
+        vp.getBiomeDifficulty,
+      );
+
+      const worldSizeMeters =
+        world.foundation.config.terrain.worldSize *
+        world.foundation.config.terrain.tileSize;
+      const seed = configOverride?.seed ?? world.foundation.config.seed;
+
+      const towns: TownInfo[] = world.foundation.towns.map((t) => ({
+        position: { x: t.position.x, z: t.position.z },
+        safeZoneRadius: getTownSafeRadius(t),
+      }));
+
+      const dangerSources: DangerSourceInfo[] =
+        state.extendedLayers.dangerSources.map((ds) => ({
+          position: { x: ds.position.x, z: ds.position.z },
+          radius: ds.radius,
+          intensity: ds.intensity,
+          falloffCurve: ds.falloffCurve,
+        }));
+
+      const waterThreshold = world.foundation.config.terrain.waterThreshold;
+
+      const existingEntities: ExistingEntityPosition[] = [];
+      const entityBuffer = HAND_PLACED_ENTITY_BUFFER;
+      for (const npc of world.layers.npcs) {
+        existingEntities.push({
+          x: npc.position.x,
+          z: npc.position.z,
+          radius: entityBuffer,
+        });
+      }
+      for (const s of state.extendedLayers.stations) {
+        existingEntities.push({
+          x: s.position.x,
+          z: s.position.z,
+          radius: entityBuffer,
+        });
+      }
+      for (const sp of state.extendedLayers.spawnPoints) {
+        existingEntities.push({
+          x: sp.position.x,
+          z: sp.position.z,
+          radius: entityBuffer,
+        });
+      }
+      for (const tp of state.extendedLayers.teleports) {
+        existingEntities.push({
+          x: tp.position.x,
+          z: tp.position.z,
+          radius: entityBuffer,
+        });
+      }
+      for (const poi of state.extendedLayers.pois) {
+        existingEntities.push({
+          x: poi.position.x,
+          z: poi.position.z,
+          radius: poi.radius ?? entityBuffer,
+        });
+      }
+      const vegPositions = vp.vegetationPositions ?? [];
+      for (const veg of vegPositions) {
+        existingEntities.push({
+          x: veg.x,
+          z: veg.z,
+          radius: VEGETATION_BUFFER,
+        });
+      }
+
+      const townDetails = world.foundation.towns.map((t) => {
+        const safeR = getTownSafeRadius(t);
+        const entryPoints = t.entryPoints
+          ?.filter((ep) => ep.position)
+          .map((ep) => ({
+            angle: Math.atan2(
+              ep.position.x - t.position.x,
+              ep.position.z - t.position.z,
+            ),
+            position: { x: ep.position.x, z: ep.position.z },
+          }));
+        return {
+          id: t.id,
+          name: t.name,
+          position: { x: t.position.x, y: t.position.y, z: t.position.z },
+          radius: safeR * 0.35,
+          safeZoneRadius: safeR,
+          entryPoints: entryPoints?.length ? entryPoints : undefined,
+        };
+      });
+
+      const structureObstacles: Array<{
+        x: number;
+        z: number;
+        radius: number;
+      }> = [];
+      const ROAD_BLDG_BUFFER = 4;
+      for (const b of world.foundation.buildings) {
+        const halfDiag =
+          Math.sqrt(b.dimensions.width ** 2 + b.dimensions.depth ** 2) / 2;
+        structureObstacles.push({
+          x: b.position.x,
+          z: b.position.z,
+          radius: halfDiag + ROAD_BLDG_BUFFER,
+        });
+      }
+      for (const poi of state.extendedLayers.pois) {
+        structureObstacles.push({
+          x: poi.position.x,
+          z: poi.position.z,
+          radius: (poi.radius ?? 10) + ROAD_BLDG_BUFFER,
+        });
+      }
+      for (const s of state.extendedLayers.stations) {
+        structureObstacles.push({
+          x: s.position.x,
+          z: s.position.z,
+          radius: 4 + ROAD_BLDG_BUFFER,
+        });
+      }
+      for (const arena of state.manifests.duelArenas) {
+        structureObstacles.push({
+          x: arena.center.x,
+          z: arena.center.z,
+          radius: Math.max(arena.size, 12) + ROAD_BLDG_BUFFER,
+        });
+      }
+
+      const deps: AutoGenDeps = {
+        queryBiome: vp.queryBiome,
+        getBiomeDifficulty,
+        worldSize: worldSizeMeters,
+        waterThreshold,
+        seed,
+        towns,
+        townDetails,
+        dangerSources,
+        manifests: state.manifests,
+        existingEntities,
+        structureObstacles,
+        townConfig: {
+          townCount:
+            configOverride?.townCount ??
+            world.foundation.config.towns.townCount,
+          minTownSpacing:
+            configOverride?.minTownSpacing ??
+            world.foundation.config.towns.minTownSpacing,
+        },
+      };
+
+      return { deps, world };
+    },
+    [
+      state.builder.editing.world,
+      state.extendedLayers,
+      state.manifests,
+      viewportRef,
+    ],
+  );
+
+  /** Run only the town generation stage */
+  const generateTownStage = useCallback(
+    (
+      config: AutoGenConfig,
+      overrides?: {
+        seed?: number;
+        townCount?: number;
+        minTownSpacing?: number;
+      },
+    ): TownStageResult | null => {
+      const built = buildDeps(overrides);
+      if (!built) return null;
+      return runTownStage(config, built.deps);
+    },
+    [buildDeps],
+  );
+
+  /** Run only the road + zone stage (requires prior TownStageResult) */
+  const generateRoadZoneStage = useCallback(
+    (
+      config: AutoGenConfig,
+      townResult: TownStageResult,
+      overrides?: { seed?: number },
+    ): RoadZoneStageResult | null => {
+      const built = buildDeps(overrides);
+      if (!built) return null;
+      return runRoadZoneStage(config, built.deps, townResult);
+    },
+    [buildDeps],
+  );
+
+  /** Run only the population stage (requires prior stage results) */
+  const generatePopulationStage = useCallback(
+    (
+      config: AutoGenConfig,
+      townResult: TownStageResult,
+      roadZoneResult: RoadZoneStageResult,
+    ): PopulationStageResult | null => {
+      const built = buildDeps();
+      if (!built) return null;
+      return runPopulationStage(config, built.deps, townResult, roadZoneResult);
+    },
+    [buildDeps],
   );
 
   /** Commit an auto-gen result to state */
@@ -1310,5 +1663,12 @@ export function useZoneAutoGen() {
     viewportRef?.current?.refreshVegetation?.();
   }, [actions, viewportRef]);
 
-  return { generate, apply, clearAutogen };
+  return {
+    generate,
+    generateTownStage,
+    generateRoadZoneStage,
+    generatePopulationStage,
+    apply,
+    clearAutogen,
+  };
 }

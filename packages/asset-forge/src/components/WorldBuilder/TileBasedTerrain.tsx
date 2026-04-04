@@ -62,7 +62,7 @@ import {
   type TownInfo,
   type DangerSourceInfo,
 } from "./DifficultyHeatmap";
-import { createRoadMaterial } from "./ProceduralMaterials";
+// createRoadMaterial removed — roads rendered by terrain shader, not ribbon meshes
 import {
   createGameWorldEntities,
   disposeEntitySync,
@@ -459,6 +459,24 @@ export interface TerrainSceneRefs {
   vegetationPositions: Array<{ x: number; z: number }>;
   /** Rebuild town 3D meshes (buildings, roads, landmarks) from full procgen data. */
   refreshTownMarkers: (towns: ProcgenTown[]) => void;
+  /** Move a town's 3D scene markers + update runtimeTownsRef for flatten zones.
+   *  Does NOT unload tiles — that's handled by the useEffect when roads prop changes. */
+  moveTownInScene: (
+    townId: string,
+    newPosition: { x: number; y: number; z: number },
+  ) => void;
+  /** Remove all inter-town road ribbon meshes and re-render from provided roads. */
+  rebuildRoadRibbons: (
+    roads: Array<{
+      id: string;
+      path: Array<{ x: number; y: number; z: number }>;
+      width: number;
+      connectedTowns: [string, string];
+      isMainRoad: boolean;
+    }>,
+  ) => void;
+  /** Get the last ProcgenTown[] passed to refreshTownMarkers (for town-move pipeline). */
+  getLastProcgenTowns: () => ProcgenTown[];
   /** Show or hide the decorative instanced vegetation layer. */
   setVegetationVisible: (visible: boolean) => void;
 }
@@ -895,170 +913,120 @@ function createTerrainMaterial(): THREE.Material & {
   return material;
 }
 
-// Road influence calculation constants - must match game engine (TerrainSystem.ts ROAD_BLEND_WIDTH)
-const ROAD_INFLUENCE_BLEND_WIDTH = 2; // meters of blending beyond road edge (matches game engine)
-const ROAD_INFLUENCE_MINIMUM_WIDTH = 6; // minimum road width for visibility (wider than config default)
+/**
+ * Clip a road path so it stops at town safe zone boundaries instead of
+ * going through town centers. Inter-town roads connect edge-to-edge,
+ * and internal town streets handle the interior.
+ *
+ * Uses the town's innerRadius (safeZoneRadius * 0.85) as the clip boundary
+ * to match the flat terrain zone.
+ */
+function clipRoadPathAtTowns<T extends { x: number; z: number }>(
+  path: T[],
+  connectedTowns: [string, string],
+  runtimeTowns: Array<{
+    id: string;
+    position: { x: number; z: number };
+    safeZoneRadius: number;
+  }>,
+): T[] {
+  if (path.length < 2) return path;
 
-// Debug: track which roads we've logged (by their ID to detect changes)
-let lastRoadDebugId: string | null = null;
-let loggedFirstInfluenceVertex = false;
-let _debugVertexCount = 0;
+  const townA = runtimeTowns.find((t) => t.id === connectedTowns[0]);
+  const townB = runtimeTowns.find((t) => t.id === connectedTowns[1]);
+
+  let startIdx = 0;
+  let endIdx = path.length - 1;
+
+  // Clip from start: skip points inside Town A
+  if (townA) {
+    const clipR = townA.safeZoneRadius * 0.85;
+    const clipRSq = clipR * clipR;
+    for (let i = 0; i < path.length - 1; i++) {
+      const dx = path[i].x - townA.position.x;
+      const dz = path[i].z - townA.position.z;
+      if (dx * dx + dz * dz < clipRSq) {
+        startIdx = i + 1;
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Clip from end: skip points inside Town B
+  if (townB) {
+    const clipR = townB.safeZoneRadius * 0.85;
+    const clipRSq = clipR * clipR;
+    for (let i = path.length - 1; i > startIdx; i--) {
+      const dx = path[i].x - townB.position.x;
+      const dz = path[i].z - townB.position.z;
+      if (dx * dx + dz * dz < clipRSq) {
+        endIdx = i - 1;
+      } else {
+        break;
+      }
+    }
+  }
+
+  if (endIdx <= startIdx) return path.slice(0, 2); // Degenerate: towns overlap
+
+  return path.slice(startIdx, endIdx + 1);
+}
+
+// Road influence constants — must match game engine (TerrainSystem.ts ROAD_BLEND_WIDTH)
+const ROAD_INFLUENCE_BLEND_WIDTH = 2;
+const ROAD_INFLUENCE_MINIMUM_WIDTH = 6;
 
 /**
  * Calculate road influence at a point based on distance to nearest road segment.
  * Returns 0-1 where 1 = center of road, 0 = no road influence.
+ * The game terrain shader uses this to render road coloring on the terrain surface.
  */
 function calculateRoadInfluenceAtPoint(
   worldX: number,
   worldZ: number,
   roads: GeneratedRoad[] | undefined,
-  worldCenterOffset: number,
 ): number {
   if (!roads || roads.length === 0) return 0;
 
-  // Debug: log road coordinates when roads change
-  const currentRoadId = roads[0]?.id ?? null;
-  if (currentRoadId !== lastRoadDebugId && roads.length > 0) {
-    lastRoadDebugId = currentRoadId;
-    loggedFirstInfluenceVertex = false;
-    _debugVertexCount = 0;
-    console.log("[RoadInfluence] ===== ROADS DATA =====");
-    console.log("[RoadInfluence] Total roads:", roads.length);
-    console.log("[RoadInfluence] World center offset:", worldCenterOffset);
-
-    // Calculate road coordinate bounds
-    let minRoadX = Infinity,
-      maxRoadX = -Infinity;
-    let minRoadZ = Infinity,
-      maxRoadZ = -Infinity;
-
-    for (const road of roads) {
-      for (const point of road.path) {
-        minRoadX = Math.min(minRoadX, point.x);
-        maxRoadX = Math.max(maxRoadX, point.x);
-        minRoadZ = Math.min(minRoadZ, point.z);
-        maxRoadZ = Math.max(maxRoadZ, point.z);
-      }
-    }
-
-    console.log("[RoadInfluence] Road coordinate bounds:", {
-      x: `${minRoadX.toFixed(0)} to ${maxRoadX.toFixed(0)}`,
-      z: `${minRoadZ.toFixed(0)} to ${maxRoadZ.toFixed(0)}`,
-    });
-
-    // Log first road details
-    const firstRoad = roads[0];
-    const firstPoint = firstRoad.path[0];
-    const lastPoint = firstRoad.path[firstRoad.path.length - 1];
-    console.log("[RoadInfluence] First road:", {
-      id: firstRoad.id,
-      start: { x: firstPoint.x.toFixed(1), z: firstPoint.z.toFixed(1) },
-      end: { x: lastPoint.x.toFixed(1), z: lastPoint.z.toFixed(1) },
-      width: firstRoad.width,
-      pathLength: firstRoad.path.length,
-      isMainRoad: firstRoad.isMainRoad,
-    });
-
-    // Log sample vertex position for comparison
-    console.log("[RoadInfluence] First vertex worldX/worldZ:", {
-      worldX: worldX.toFixed(1),
-      worldZ: worldZ.toFixed(1),
-    });
-    console.log("[RoadInfluence] =====================");
-  }
-
   let minDistance = Infinity;
-  let closestRoadWidth = ROAD_INFLUENCE_MINIMUM_WIDTH; // Use minimum width for visibility
+  let closestRoadWidth = ROAD_INFLUENCE_MINIMUM_WIDTH;
 
   for (const road of roads) {
     if (road.path.length < 2) continue;
-
-    // Ensure road width is at least the minimum for visibility
     const effectiveWidth = Math.max(
       road.width || 4,
       ROAD_INFLUENCE_MINIMUM_WIDTH,
     );
 
-    // Check each segment of the road
     for (let i = 0; i < road.path.length - 1; i++) {
       const p1 = road.path[i];
       const p2 = road.path[i + 1];
+      const dx = p2.x - p1.x;
+      const dz = p2.z - p1.z;
+      const lenSq = dx * dx + dz * dz;
+      if (lenSq === 0) continue;
 
-      // Road paths are in terrain generator coordinates (centered at 0,0)
-      // This matches the worldX/worldZ we receive (also in terrain generator coords)
-      const x1 = p1.x;
-      const z1 = p1.z;
-      const x2 = p2.x;
-      const z2 = p2.z;
+      let t = ((worldX - p1.x) * dx + (worldZ - p1.z) * dz) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const cx = p1.x + t * dx;
+      const cz = p1.z + t * dz;
+      const dist = Math.sqrt((worldX - cx) ** 2 + (worldZ - cz) ** 2);
 
-      // Distance from point to line segment
-      const distance = distanceToLineSegment(worldX, worldZ, x1, z1, x2, z2);
-      if (distance < minDistance) {
-        minDistance = distance;
+      if (dist < minDistance) {
+        minDistance = dist;
         closestRoadWidth = effectiveWidth;
       }
     }
   }
 
-  // Calculate influence based on distance
-  // Use effective width to make roads more visible on terrain
   const halfWidth = closestRoadWidth / 2;
-  const totalInfluenceWidth = halfWidth + ROAD_INFLUENCE_BLEND_WIDTH;
+  const totalWidth = halfWidth + ROAD_INFLUENCE_BLEND_WIDTH;
+  if (minDistance >= totalWidth) return 0;
 
-  if (minDistance >= totalInfluenceWidth) {
-    return 0;
-  }
-
-  // Calculate final influence value
-  let influence: number;
-  if (minDistance <= halfWidth) {
-    influence = 1.0;
-  } else {
-    // Smoothstep blending at edges
-    const t = 1.0 - (minDistance - halfWidth) / ROAD_INFLUENCE_BLEND_WIDTH;
-    influence = t * t * (3 - 2 * t); // smoothstep
-  }
-
-  // Debug: Log first vertex with significant road influence
-  if (influence > 0.5 && !loggedFirstInfluenceVertex) {
-    console.log(
-      `[RoadInfluence] Found vertex with influence=${influence.toFixed(2)} at (${worldX.toFixed(1)}, ${worldZ.toFixed(1)}), minDist=${minDistance.toFixed(1)}, roadWidth=${closestRoadWidth}`,
-    );
-    loggedFirstInfluenceVertex = true;
-  }
-
-  return influence;
-}
-
-/**
- * Calculate perpendicular distance from a point to a line segment
- */
-function distanceToLineSegment(
-  px: number,
-  pz: number,
-  x1: number,
-  z1: number,
-  x2: number,
-  z2: number,
-): number {
-  const dx = x2 - x1;
-  const dz = z2 - z1;
-  const lengthSq = dx * dx + dz * dz;
-
-  if (lengthSq === 0) {
-    // Segment is a point
-    return Math.sqrt((px - x1) ** 2 + (pz - z1) ** 2);
-  }
-
-  // Parameter t of closest point on line
-  let t = ((px - x1) * dx + (pz - z1) * dz) / lengthSq;
-  t = Math.max(0, Math.min(1, t)); // Clamp to segment
-
-  // Closest point on segment
-  const closestX = x1 + t * dx;
-  const closestZ = z1 + t * dz;
-
-  return Math.sqrt((px - closestX) ** 2 + (pz - closestZ) ** 2);
+  if (minDistance <= halfWidth) return 1.0;
+  const f = 1.0 - (minDistance - halfWidth) / ROAD_INFLUENCE_BLEND_WIDTH;
+  return f * f * (3 - 2 * f); // smoothstep
 }
 
 /**
@@ -1371,6 +1339,8 @@ function generateTileGeometry(
 
     // Flatten terrain under towns: full-flat inside innerRadius,
     // smooth hermite blend back to natural terrain at outerRadius
+    // Track how much this vertex is influenced by town flattening (0 = none, 1 = fully flat)
+    let townFlattenInfluence = 0;
     if (townFlattenZones && townFlattenZones.length > 0) {
       for (const tz of townFlattenZones) {
         const dx = worldX - tz.x;
@@ -1380,12 +1350,14 @@ function generateTileGeometry(
         if (dist <= tz.innerRadius) {
           // Fully flat at town center height
           height = tz.centerHeight;
+          townFlattenInfluence = 1;
         } else {
           // Smooth blend: 0 at innerRadius (full flatten) → 1 at outerRadius (natural)
           const t = (dist - tz.innerRadius) / (tz.outerRadius - tz.innerRadius);
           // Hermite smoothstep for natural-looking ramp
           const blend = t * t * (3 - 2 * t);
           height = tz.centerHeight + (height - tz.centerHeight) * blend;
+          townFlattenInfluence = 1 - blend;
         }
         break; // Only one town per vertex (first match)
       }
@@ -1395,12 +1367,17 @@ function generateTileGeometry(
     // interpolated road path height based on road influence.
     // This makes roads sit flat on the terrain instead of following
     // every bump and ridge.
-    if (roads && roads.length > 0) {
+    // Skip inside town flatten zones — terrain is already flat there, and road
+    // path Y values reflect raw (unflattened) terrain which would carve trenches.
+    if (roads && roads.length > 0 && townFlattenInfluence < 1) {
       const roadInfo = getRoadHeightAtPoint(worldX, worldZ, roads);
       if (roadInfo && roadInfo.influence > 0) {
         // Road path height + small offset so road sits slightly above terrain
         const targetHeight = roadInfo.height + 0.1;
-        height = height + (targetHeight - height) * roadInfo.influence;
+        // Reduce road influence proportionally to town flatten influence
+        const effectiveInfluence =
+          roadInfo.influence * (1 - townFlattenInfluence);
+        height = height + (targetHeight - height) * effectiveInfluence;
       }
     }
 
@@ -1452,40 +1429,9 @@ function generateTileGeometry(
     forestWeights[i] = query.biomeForestWeight ?? 0;
     canyonWeights[i] = query.biomeCanyonWeight ?? 0;
 
-    // Calculate road influence at this vertex
-    // Roads are in terrain-space coordinates, so use worldX/worldZ directly
-    roadInfluences[i] = calculateRoadInfluenceAtPoint(
-      worldX,
-      worldZ,
-      roads,
-      worldCenterOffset,
-    );
-  }
-
-  // Debug: count non-zero road influences for this tile
-  let nonZeroCount = 0;
-  let maxInfluence = 0;
-  for (let i = 0; i < roadInfluences.length; i++) {
-    if (roadInfluences[i] > 0) {
-      nonZeroCount++;
-      if (roadInfluences[i] > maxInfluence) maxInfluence = roadInfluences[i];
-    }
-  }
-  // Log for tiles with road influence OR for the first few tiles to debug coords
-  const shouldLog =
-    nonZeroCount > 0 || (tileX >= 0 && tileX <= 2 && tileZ >= 0 && tileZ <= 2);
-  if (shouldLog) {
-    // Calculate the world coordinate range for this tile (in terrain generator coords)
-    const tileWorldMinX = tileX * tileSize - worldCenterOffset;
-    const tileWorldMaxX = (tileX + 1) * tileSize - worldCenterOffset;
-    const tileWorldMinZ = tileZ * tileSize - worldCenterOffset;
-    const tileWorldMaxZ = (tileZ + 1) * tileSize - worldCenterOffset;
-    console.log(
-      `[Tile ${tileX},${tileZ}] Road influence: ${nonZeroCount}/${roadInfluences.length} vertices, max=${maxInfluence.toFixed(2)}`,
-    );
-    console.log(
-      `  Tile world bounds: X[${tileWorldMinX.toFixed(0)} to ${tileWorldMaxX.toFixed(0)}], Z[${tileWorldMinZ.toFixed(0)} to ${tileWorldMaxZ.toFixed(0)}]`,
-    );
+    // Road influence for terrain shader — the game shader reads this attribute
+    // to render road coloring directly on the terrain surface.
+    roadInfluences[i] = calculateRoadInfluenceAtPoint(worldX, worldZ, roads);
   }
 
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -1565,9 +1511,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const generatorRef = useRef<TerrainGenerator | null>(null);
   const terrainQuerierRef = useRef<TerrainQuerier | null>(null);
   const heatmapManagerRef = useRef<DifficultyHeatmapManager | null>(null);
-  /** Ref-stable copies of props that should NOT trigger full scene rebuild */
+  /** Ref-stable copies of props that should NOT trigger full scene rebuild.
+   *  Roads ref is ONLY updated via rebuildRoadRibbons() or the useEffect that
+   *  watches providedRoads — NOT in the component body. Writing it here would
+   *  overwrite the ref with stale prop data during renders that happen between
+   *  rebuildRoadRibbons() and the SET_FOUNDATION_ROADS dispatch propagating. */
   const providedRoadsRef = useRef(providedRoads);
-  providedRoadsRef.current = providedRoads;
   const townConfigRef = useRef(config.towns);
   townConfigRef.current = config.towns;
   const configSeedRef = useRef(config.seed);
@@ -1629,6 +1578,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const [townCount, setTownCount] = useState(0);
   /** Runtime town data from terrain generation (game-space coordinates + safeZoneRadius) */
   const runtimeTownsRef = useRef<TerrainSceneRefs["runtimeTowns"]>([]);
+  /** Full ProcgenTown[] from last refreshTownMarkers call (for town-move rebuild) */
+  const lastProcgenTownsRef = useRef<ProcgenTown[]>([]);
   const [roadCount, setRoadCount] = useState(0);
   const [hoveredObject, setHoveredObject] = useState<string | null>(null);
   /** Track hovered selectable group for label visibility toggle (UE5-style) */
@@ -1772,6 +1723,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
 
       // Generate tile geometry with road influence + town flattening
+      const roadsForTile = providedRoadsRef.current;
       const { geometry, hasWater } = generateTileGeometry(
         tileX,
         tileZ,
@@ -1781,9 +1733,34 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         waterThreshold,
         maxHeight,
         worldSize,
-        providedRoadsRef.current,
+        roadsForTile,
         flattenZones,
       );
+
+      // One-time diagnostic: check if road influence is being baked into regenerated tiles.
+      // Log every 100th tile to track progress without flooding the console.
+      const tileCount = tilesRef.current.size;
+      if (
+        roadsForTile &&
+        roadsForTile.length > 0 &&
+        (tileCount === 1 || tileCount === 50 || tileCount === 200)
+      ) {
+        const ri = geometry.attributes.roadInfluence;
+        let maxRI = 0;
+        let nonZeroCount = 0;
+        if (ri) {
+          for (let vi = 0; vi < ri.count; vi++) {
+            const v = ri.getX(vi);
+            if (v > maxRI) maxRI = v;
+            if (v > 0) nonZeroCount++;
+          }
+        }
+        console.log(
+          `[generateTile] Tile(${tileX},${tileZ}) #${tileCount}: ${roadsForTile.length} roads, ` +
+            `maxRI=${maxRI.toFixed(3)}, nonZeroVerts=${nonZeroCount}/${ri?.count ?? 0}, ` +
+            `road0 pts=${roadsForTile[0]?.path?.length ?? "N/A"}`,
+        );
+      }
 
       // Create terrain mesh
       const mesh = new THREE.Mesh(geometry, terrainMaterial);
@@ -3091,7 +3068,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               const roadLineMat = new TownLineMat();
               roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
               roadLineMat.linewidth = 2;
-              townMarkers.add(new THREE.Line(roadGeometry, roadLineMat));
+              const roadLine = new THREE.Line(roadGeometry, roadLineMat);
+              roadLine.userData = { townId: town.id };
+              townMarkers.add(roadLine);
             }
           }
 
@@ -3272,44 +3251,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
 
-        // ---- Render inter-town roads from server BFS pathfinding ----
+        // ---- Inter-town roads: terrain shader handles road rendering via
+        // roadInfluence vertex attribute. No ribbon meshes needed. ----
         if (layout.roads.length > 0) {
-          const ribbonMat = createRoadMaterial();
-
-          for (const road of layout.roads) {
-            if (road.path.length < 2) continue;
-
-            const roadPoints: THREE.Vector3[] = road.path.map((point) => {
-              const y = getHeight(point.x, point.z) + 0.15;
-              return new THREE.Vector3(
-                point.x + worldCenterOffset,
-                y,
-                point.z + worldCenterOffset,
-              );
-            });
-
-            const roadWidth = road.isMainRoad ? road.width * 1.2 : road.width;
-            const roadGeometry = createRoadRibbonGeometry(
-              roadPoints,
-              roadWidth / 2,
-              !!road.isMainRoad,
-            );
-            const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
-            roadMesh.receiveShadow = true;
-            roadMesh.userData = {
-              selectable: true,
-              selectableType: "road",
-              selectableId: road.id,
-              connectedTowns: [road.fromTownId, road.toTownId],
-              isMainRoad: road.isMainRoad,
-            };
-            townMarkers.add(roadMesh);
-            selectableObjectsRef.current.push(roadMesh);
-          }
-
-          console.log(
-            `[TileBasedTerrain] Created ${layout.roads.length} roads from server BFS pathfinding`,
-          );
           setRoadCount(layout.roads.length);
 
           // Minimap roads
@@ -3486,10 +3430,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               roadPoints,
             );
             const roadLineMat = new TownLineMat();
-            // Match terrain dirt color for town internal roads
-            roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18); // dirtBrown
+            roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
             roadLineMat.linewidth = 2;
             const roadLine = new THREE.Line(roadGeometry, roadLineMat);
+            roadLine.userData = { townId: town.id };
             townMarkers.add(roadLine);
           }
         }
@@ -3687,56 +3631,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         }
       }
 
-      // Generate roads using actual road network data
+      // Roads are rendered by the terrain shader via roadInfluence vertex
+      // attribute — no ribbon meshes needed. Just track count + minimap.
       const roadsToRender = providedRoadsRef.current;
       if (roadsToRender && roadsToRender.length > 0) {
-        // Use pre-generated road network with actual pathfinding data
-        // TSL procedural dirt/gravel material with PBR lighting
-        const ribbonMat = createRoadMaterial();
-
-        for (const road of roadsToRender) {
-          if (road.path.length < 2) continue;
-
-          // Convert road path points to THREE.Vector3 with terrain sampling
-          const roadPoints: THREE.Vector3[] = road.path.map((point) => {
-            // Get actual terrain height at this point, or use provided y
-            const y =
-              point.y !== undefined
-                ? point.y
-                : generator.getHeightAt(point.x, point.z) + 0.15;
-            return new THREE.Vector3(
-              point.x + worldCenterOffset,
-              y,
-              point.z + worldCenterOffset,
-            );
-          });
-
-          const roadWidth = road.isMainRoad
-            ? (road.width || 4) * 1.2
-            : road.width || 4;
-
-          const roadGeometry = createRoadRibbonGeometry(
-            roadPoints,
-            roadWidth / 2,
-            !!road.isMainRoad,
-          );
-          const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
-          roadMesh.receiveShadow = true;
-          roadMesh.userData = {
-            selectable: true,
-            selectableType: "road",
-            selectableId: road.id,
-            connectedTowns: road.connectedTowns,
-            isMainRoad: road.isMainRoad,
-          };
-
-          townMarkers.add(roadMesh);
-          selectableObjectsRef.current.push(roadMesh);
-        }
-
-        console.log(
-          `[TileBasedTerrain] Created ${roadsToRender.length} roads from road network data`,
-        );
         setRoadCount(roadsToRender.length);
 
         // Populate minimap roads data from actual road paths
@@ -3750,118 +3648,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         }));
         setMinimapRoads(minimapRoadData);
       } else if (townResult.towns.length >= 2) {
-        // Fallback: Generate simple MST-like roads for preview when no road data is provided
-        console.warn(
-          "[TileBasedTerrain] No road network data provided, using simplified preview roads",
-        );
-
-        // TSL procedural fallback road material
-        const ribbonMat = createRoadMaterial();
-
-        // Create simple road connections between nearby towns
-        const connectedPairs = new Set<string>();
-        const sortedTowns = [...townResult.towns];
-
-        for (let i = 0; i < sortedTowns.length; i++) {
-          const town1 = sortedTowns[i];
-          // Connect to nearest 2 towns not already connected
-          const distances = sortedTowns
-            .map((town2, j) => ({
-              town2,
-              index: j,
-              dist: Math.sqrt(
-                (town2.position.x - town1.position.x) ** 2 +
-                  (town2.position.z - town1.position.z) ** 2,
-              ),
-            }))
-            .filter((d) => d.index !== i)
-            .sort((a, b) => a.dist - b.dist);
-
-          for (const { town2, index } of distances.slice(0, 2)) {
-            const pairKey = [Math.min(i, index), Math.max(i, index)].join("-");
-            if (connectedPairs.has(pairKey)) continue;
-            connectedPairs.add(pairKey);
-
-            // Create road path between towns
-            const roadPoints: THREE.Vector3[] = [];
-            const steps = 20;
-
-            for (let s = 0; s <= steps; s++) {
-              const t = s / steps;
-              const x =
-                town1.position.x + (town2.position.x - town1.position.x) * t;
-              const z =
-                town1.position.z + (town2.position.z - town1.position.z) * t;
-              const y = generator.getHeightAt(x, z) + 0.15;
-
-              roadPoints.push(
-                new THREE.Vector3(
-                  x + worldCenterOffset,
-                  y,
-                  z + worldCenterOffset,
-                ),
-              );
-            }
-
-            if (roadPoints.length >= 2) {
-              const roadGeometry = createRoadRibbonGeometry(
-                roadPoints,
-                2, // halfWidth = 2m (4m total)
-                false,
-              );
-              const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
-              roadMesh.receiveShadow = true;
-              townMarkers.add(roadMesh);
-            }
-          }
-        }
-
-        console.log(
-          `[TileBasedTerrain] Created ${connectedPairs.size} fallback road connections`,
-        );
-        setRoadCount(connectedPairs.size);
-
-        // Populate minimap roads data (simplified straight lines)
-        const minimapRoadData: Array<{
-          path: Array<{ x: number; z: number }>;
-        }> = [];
-        const sortedTownsForRoads = [...townResult.towns];
-        const processedPairs = new Set<string>();
-
-        for (let i = 0; i < sortedTownsForRoads.length; i++) {
-          const town1 = sortedTownsForRoads[i];
-          const distances = sortedTownsForRoads
-            .map((town2, j) => ({
-              town2,
-              index: j,
-              dist: Math.sqrt(
-                (town2.position.x - town1.position.x) ** 2 +
-                  (town2.position.z - town1.position.z) ** 2,
-              ),
-            }))
-            .filter((d) => d.index !== i)
-            .sort((a, b) => a.dist - b.dist);
-
-          for (const { town2, index } of distances.slice(0, 2)) {
-            const pairKey = [Math.min(i, index), Math.max(i, index)].join("-");
-            if (processedPairs.has(pairKey)) continue;
-            processedPairs.add(pairKey);
-
-            minimapRoadData.push({
-              path: [
-                {
-                  x: town1.position.x + worldCenterOffset,
-                  z: town1.position.z + worldCenterOffset,
-                },
-                {
-                  x: town2.position.x + worldCenterOffset,
-                  z: town2.position.z + worldCenterOffset,
-                },
-              ],
-            });
-          }
-        }
-        setMinimapRoads(minimapRoadData);
+        // No road data yet — roads will appear when the terrain shader picks up
+        // roadInfluence from tiles regenerated after setFoundationRoads.
+        setRoadCount(0);
+        setMinimapRoads([]);
       } else {
         setRoadCount(0);
         setMinimapRoads([]);
@@ -4860,7 +4650,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 const roadLineMat = new TownLineMat();
                 roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
                 roadLineMat.linewidth = 2;
-                townGroup.add(new THREE.Line(roadGeo, roadLineMat));
+                const roadLine = new THREE.Line(roadGeo, roadLineMat);
+                roadLine.userData = { townId: town.id };
+                townGroup.add(roadLine);
               }
             }
 
@@ -5034,10 +4826,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 landmarkMesh.rotation.y = landmark.rotation;
                 landmarkMesh.castShadow = true;
                 landmarkMesh.receiveShadow = true;
+                landmarkMesh.userData = { townId: town.id };
                 townGroup.add(landmarkMesh);
               }
             }
           }
+
+          // Store full procgen data for town-move pipeline
+          lastProcgenTownsRef.current = newTowns;
 
           // Update runtimeTowns ref so the pipeline sees them
           runtimeTownsRef.current = newTowns.map((t) => ({
@@ -5048,43 +4844,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             safeZoneRadius: t.safeZoneRadius,
           }));
 
-          // Re-render inter-town road ribbons (cleared when townGroup was wiped)
-          const roadsToRender = providedRoadsRef.current;
-          if (roadsToRender && roadsToRender.length > 0) {
-            const ribbonMat = createRoadMaterial();
-            for (const road of roadsToRender) {
-              if (road.path.length < 2) continue;
-              const roadPoints: THREE.Vector3[] = road.path.map((point) => {
-                const y =
-                  point.y !== undefined
-                    ? point.y
-                    : getHeight(point.x, point.z) + 0.15;
-                return new THREE.Vector3(point.x + offset, y, point.z + offset);
-              });
-              const roadWidth = road.isMainRoad
-                ? (road.width || 4) * 1.2
-                : road.width || 4;
-              const roadGeometry = createRoadRibbonGeometry(
-                roadPoints,
-                roadWidth / 2,
-                !!road.isMainRoad,
-              );
-              const roadMesh = new THREE.Mesh(roadGeometry, ribbonMat);
-              roadMesh.receiveShadow = true;
-              roadMesh.userData = {
-                selectable: true,
-                selectableType: "road",
-                selectableId: road.id,
-                connectedTowns: road.connectedTowns,
-                isMainRoad: road.isMainRoad,
-              };
-              townGroup.add(roadMesh);
-              selectableObjectsRef.current.push(roadMesh);
-            }
-            console.log(
-              `[refreshTownMarkers] Re-rendered ${roadsToRender.length} inter-town roads`,
-            );
-          }
+          // Inter-town roads are rendered by the terrain shader via roadInfluence
+          // vertex attribute — no ribbon meshes needed. Tile regen below handles it.
 
           // Regenerate terrain tiles under/near towns so flattening takes effect
           if (tilesRef.current.size > 0) {
@@ -5103,6 +4864,89 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             "color: lime; font-weight: bold",
           );
         },
+        moveTownInScene: (
+          townId: string,
+          newPosition: { x: number; y: number; z: number },
+        ) => {
+          const townGroup = townMarkersRef.current;
+          if (!townGroup) return;
+
+          // Find old position from runtimeTowns
+          const oldTown = runtimeTownsRef.current.find((t) => t.id === townId);
+          if (!oldTown) {
+            console.warn(
+              `[moveTownInScene] Town ${townId} not found in runtimeTowns`,
+            );
+            return;
+          }
+
+          const dx = newPosition.x - oldTown.position.x;
+          const dz = newPosition.z - oldTown.position.z;
+          if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) return;
+
+          const offset = worldCenterOffsetRef.current;
+          const newSceneX = newPosition.x + offset;
+          const newSceneZ = newPosition.z + offset;
+
+          // Query terrain height at new position — this is the Y the terrain
+          // will flatten to, and where buildings/markers should sit.
+          const heightQuerier = terrainQuerierRef.current;
+          const gen = generatorRef.current;
+          const newTerrainY = heightQuerier
+            ? heightQuerier(newPosition.x, newPosition.z).height
+            : gen
+              ? gen.getHeightAt(newPosition.x, newPosition.z)
+              : 0;
+          const oldTerrainY = heightQuerier
+            ? heightQuerier(oldTown.position.x, oldTown.position.z).height
+            : gen
+              ? gen.getHeightAt(oldTown.position.x, oldTown.position.z)
+              : 0;
+          const dy = newTerrainY - oldTerrainY;
+
+          // Move direct children of townGroup that belong to this town.
+          // Town center markers (cone/ring/pillar) use absolute x/z positioning
+          // because the gizmo already moved the attached cone — applying a
+          // delta would double-move it. Buildings/landmarks/roads use x/z delta.
+          // Y is adjusted by terrain height difference for ALL objects.
+          for (const child of townGroup.children) {
+            if (child.userData?.townId === townId) {
+              if (child.userData?.selectableType === "town") {
+                child.position.x = newSceneX;
+                child.position.z = newSceneZ;
+              } else {
+                child.position.x += dx;
+                child.position.z += dz;
+              }
+              child.position.y += dy;
+            }
+          }
+
+          // Update runtimeTowns ref so terrain flattening uses the new
+          // position when tiles regenerate (triggered by the useEffect
+          // watching providedRoads, same path as the world wizard).
+          const rt = runtimeTownsRef.current.find((t) => t.id === townId);
+          if (rt) {
+            rt.position.x = newPosition.x;
+            rt.position.y = newTerrainY;
+            rt.position.z = newPosition.z;
+          }
+        },
+        rebuildRoadRibbons: (
+          roads: Array<{
+            id: string;
+            path: Array<{ x: number; y: number; z: number }>;
+            width: number;
+            connectedTowns: [string, string];
+            isMainRoad: boolean;
+          }>,
+        ) => {
+          // Eagerly update providedRoadsRef so any tile that happens to
+          // regenerate before the React render uses new road data. The full
+          // tile unload is handled by the useEffect (same path as wizard).
+          providedRoadsRef.current = roads as GeneratedRoad[];
+        },
+        getLastProcgenTowns: () => lastProcgenTownsRef.current,
         setVegetationVisible: (visible: boolean) => {
           if (vegetationContainerRef.current) {
             vegetationContainerRef.current.visible = visible;
@@ -5435,41 +5279,27 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     config.seed,
   ]);
 
-  // Regenerate tiles when roads change to update road influence on terrain
-  // This ensures road colors appear when roads are generated asynchronously
-  const prevRoadsLengthRef = useRef<number | undefined>(undefined);
-  const initialMountRef = useRef(true);
+  // Regenerate ALL tiles when roads change so the terrain shader picks up
+  // road influence (road coloring baked into terrain surface) and height
+  // flattening. This is the SAME path used by the world wizard on initial
+  // generation — roads update in state → prop changes → tiles regenerate.
+  const prevRoadsRef = useRef<GeneratedRoad[] | undefined>(undefined);
   useEffect(() => {
-    const currentRoadsLength = providedRoads?.length ?? 0;
-    const prevRoadsLength = prevRoadsLengthRef.current;
+    if (providedRoads === prevRoadsRef.current) return;
+    prevRoadsRef.current = providedRoads;
+    providedRoadsRef.current = providedRoads;
+    if (!providedRoads || providedRoads.length === 0) return;
+    if (tilesRef.current.size === 0) return; // No tiles loaded yet
 
-    // Skip on initial mount (tiles aren't loaded yet anyway)
-    if (initialMountRef.current) {
-      initialMountRef.current = false;
-      prevRoadsLengthRef.current = currentRoadsLength;
-      return;
+    console.log(
+      `[TileBasedTerrain] Roads changed — unloading ${tilesRef.current.size} tiles for ${providedRoads.length} roads`,
+    );
+
+    for (const key of tilesRef.current.keys()) {
+      unloadTile(key);
     }
-
-    // Check if roads actually changed (by length - simple heuristic)
-    if (prevRoadsLength === currentRoadsLength) return;
-
-    prevRoadsLengthRef.current = currentRoadsLength;
-
-    // Regenerate tiles if any are loaded (to include road influence)
-    if (tilesRef.current.size > 0) {
-      console.log(
-        `[TileBasedTerrain] Roads changed: ${prevRoadsLength ?? 0} -> ${currentRoadsLength} roads, regenerating ${tilesRef.current.size} tiles for road influence update`,
-      );
-
-      // Clear existing tiles to force regeneration with new road data
-      for (const key of tilesRef.current.keys()) {
-        unloadTile(key);
-      }
-
-      // Reset tile queue to trigger immediate regeneration
-      tileQueueRef.current = [];
-      tileQueueSetRef.current.clear();
-    }
+    tileQueueRef.current = [];
+    tileQueueSetRef.current.clear();
   }, [providedRoads, unloadTile]);
 
   // Notify parent of tile count changes

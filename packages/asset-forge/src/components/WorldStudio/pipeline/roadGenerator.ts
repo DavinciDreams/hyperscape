@@ -3,7 +3,8 @@
  *
  * Network topology: Kruskal's MST + extra connections for redundancy.
  * Per-road routing: A* on a terrain cost grid where:
- *   - Water cells are impassable
+ *   - Water cells have high cost (bridge crossing) — roads prefer dry land but
+ *     can cross narrow rivers, creating causeway/bridge effects via terrain flattening
  *   - Structure obstacles (buildings, arenas, stations) are impassable
  *   - Slope cost is computed per-edge using grade (rise/run) with quadratic penalty
  *   - Low-frequency value noise adds organic variation (prevents straight lines on
@@ -30,6 +31,9 @@ interface RoadTown {
   entryPoints?: RoadEntryPoint[];
   /** Fallback: offset from center if no entry points defined */
   radius?: number;
+  /** Full safe zone radius — used for obstacle exemption so the internal
+   *  main street (center → entry point) isn't displaced by building obstacles */
+  safeZoneRadius?: number;
 }
 
 interface RoadGenConfig {
@@ -73,6 +77,13 @@ const MAX_GRADE = 0.7;
  * Peak terrain costs (1 + ELEVATION_WEIGHT)× more than valley floor.
  */
 const ELEVATION_WEIGHT = 8;
+/** Water crossing penalty multiplier. Water cells cost this many times more
+ *  than dry land, allowing roads to cross rivers as "bridges" rather than
+ *  taking huge detours or failing entirely. The terrain height-flattening
+ *  under roads automatically raises the ground to water level, creating a
+ *  visible causeway/bridge effect. Set high enough that dry land is strongly
+ *  preferred, but finite so narrow rivers can be crossed. */
+const WATER_CROSSING_COST = 8;
 /** Noise amplitude: base cost ranges from (1 - AMP/2) to (1 + AMP/2) */
 const NOISE_AMPLITUDE = 0.6;
 /** Noise spatial frequency — 1/scale = period in meters. 0.008 → ~125m period */
@@ -274,7 +285,9 @@ function buildCostGrid(
       heights[idx] = q.height;
 
       if (q.height < waterThreshold) {
-        baseCost[idx] = Infinity; // water
+        // Water cells are expensive but traversable — roads cross narrow
+        // rivers as bridges instead of taking huge detours or failing.
+        baseCost[idx] = WATER_CROSSING_COST;
       } else {
         // Noise-varied base cost: range [1 - AMP/2, 1 + AMP/2] = [0.7, 1.3]
         // Creates "cost valleys" that roads naturally follow for organic curves
@@ -330,7 +343,7 @@ function buildCostGrid(
   }
 
   // Pass 3: apply elevation-based cost — roads prefer valleys over ridges/peaks.
-  // Find height range of traversable (non-water, non-obstacle) cells.
+  // Find height range of traversable (non-obstacle) cells.
   let minH = Infinity;
   let maxH = -Infinity;
   for (let i = 0; i < totalCells; i++) {
@@ -737,6 +750,28 @@ function generateRoadPath(
   // 2. A* pathfinding with per-edge slope cost + elevation weight
   let gridPath = aStarPath(grid, exitFrom.x, exitFrom.z, exitTo.x, exitTo.z);
 
+  // Log A* result for diagnostics
+  const exitDx = exitTo.x - exitFrom.x;
+  const exitDz = exitTo.z - exitFrom.z;
+  const straightDist = Math.sqrt(exitDx * exitDx + exitDz * exitDz);
+  if (gridPath && gridPath.length >= 2) {
+    // Measure path length to detect major detours
+    let pathLen = 0;
+    for (let i = 1; i < gridPath.length; i++) {
+      const pdx = gridPath[i].x - gridPath[i - 1].x;
+      const pdz = gridPath[i].z - gridPath[i - 1].z;
+      pathLen += Math.sqrt(pdx * pdx + pdz * pdz);
+    }
+    const detourRatio = pathLen / Math.max(1, straightDist);
+    if (detourRatio > 2.0) {
+      console.warn(
+        `[RoadGen] ${fromTown.name}→${toTown.name} A* detour: path=${pathLen.toFixed(0)}m, ` +
+          `straight=${straightDist.toFixed(0)}m, ratio=${detourRatio.toFixed(1)}x ` +
+          `(exit ${exitFrom.x.toFixed(0)},${exitFrom.z.toFixed(0)} → ${exitTo.x.toFixed(0)},${exitTo.z.toFixed(0)})`,
+      );
+    }
+  }
+
   // Fallback: direct line if A* fails (fully isolated by impassable terrain)
   if (!gridPath || gridPath.length < 2) {
     console.warn(
@@ -778,14 +813,19 @@ function generateRoadPath(
   });
 
   // 6. Safety net: push any stray points out of obstacles.
-  // Exempt points inside town areas — the road follows the internal main street there.
+  // Exempt points near entry areas so Chaikin smoothing near the town edge
+  // doesn't get pushed into weird shapes by boundary buildings.
   const townExemptions = [
     {
       x: fromTown.position.x,
       z: fromTown.position.z,
-      r: fromTown.radius ?? 30,
+      r: fromTown.safeZoneRadius ?? fromTown.radius ?? 30,
     },
-    { x: toTown.position.x, z: toTown.position.z, r: toTown.radius ?? 30 },
+    {
+      x: toTown.position.x,
+      z: toTown.position.z,
+      r: toTown.safeZoneRadius ?? toTown.radius ?? 30,
+    },
   ];
   enforceObstacles(path3D, obstacles, townExemptions);
 
@@ -889,6 +929,74 @@ export function generateRoadNetwork(
     `[RoadGen] Generated ${roads.length} roads (${mstEdges.length} MST + ` +
       `${roads.length - mstEdges.length} extra) connecting ${towns.length} towns ` +
       `with ${obstacles.length} structure obstacles`,
+  );
+
+  return roads;
+}
+
+/**
+ * Re-route existing roads without changing topology (which town pairs are connected).
+ * Used after a town move: same connections, new A* paths for updated positions.
+ * Falls back to full regeneration if any connected town can't be found.
+ */
+export function rerouteExistingRoads(
+  existingRoads: GeneratedRoad[],
+  towns: RoadTown[],
+  queryBiome: HeightQuerier,
+  waterThreshold: number,
+  configOverrides?: Partial<RoadGenConfig>,
+  obstacles: RoadObstacle[] = [],
+): GeneratedRoad[] {
+  if (towns.length < 2 || existingRoads.length === 0) {
+    return generateRoadNetwork(
+      towns,
+      queryBiome,
+      waterThreshold,
+      configOverrides,
+      obstacles,
+    );
+  }
+
+  const config = { ...DEFAULT_CONFIG, ...configOverrides, waterThreshold };
+  const halfRoadWidth = config.roadWidth * 0.5;
+  const inflatedObstacles = obstacles.map((o) => ({
+    ...o,
+    radius: o.radius + halfRoadWidth,
+  }));
+
+  // Build town lookup by ID
+  const townById = new Map<string, RoadTown>();
+  for (const t of towns) townById.set(t.id, t);
+
+  const roads: GeneratedRoad[] = [];
+  for (const existing of existingRoads) {
+    const fromTown = townById.get(existing.connectedTowns[0]);
+    const toTown = townById.get(existing.connectedTowns[1]);
+
+    if (!fromTown || !toTown) {
+      // Town was removed — skip this road
+      console.warn(
+        `[RoadGen] Skipping road ${existing.id}: connected town not found`,
+      );
+      continue;
+    }
+
+    const path = generateRoadPath(
+      fromTown,
+      toTown,
+      queryBiome,
+      config,
+      inflatedObstacles,
+    );
+
+    roads.push({
+      ...existing,
+      path,
+    });
+  }
+
+  console.log(
+    `[RoadGen] Re-routed ${roads.length} existing roads (preserved topology)`,
   );
 
   return roads;
