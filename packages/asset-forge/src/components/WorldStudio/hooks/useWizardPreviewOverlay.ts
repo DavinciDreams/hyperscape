@@ -31,6 +31,8 @@ const MOB_DOT_COLOR = 0xef4444;
 const RESOURCE_DOT_COLOR = 0x22c55e;
 const SPAWN_POINT_COLOR = 0x3b82f6;
 const TELEPORT_COLOR = 0xa855f7;
+const MINE_FILL_COLOR = 0x8b6914;
+const MINE_OUTLINE_COLOR = 0xb8860b;
 
 // ============== GEOMETRY HELPERS ==============
 
@@ -322,6 +324,127 @@ function buildPopulationOverlay(
     }
     mesh.instanceMatrix.needsUpdate = true;
     group.add(mesh);
+  }
+
+  // Mine area previews — organic shaped discs + outline + name labels
+  if (data.mines && data.mines.length > 0) {
+    for (const mine of data.mines) {
+      const mx = mine.position.x + offset;
+      const mz = mine.position.z + offset;
+      const my = queryBiome
+        ? queryBiome(mine.position.x, mine.position.z).height + 0.3
+        : mine.position.y + 0.3;
+
+      const offsets = mine.radialOffsets;
+      const segments = 48;
+
+      // Build organic outline points
+      const outlinePoints: THREE.Vector3[] = [];
+      for (let si = 0; si <= segments; si++) {
+        const theta = (si / segments) * Math.PI * 2;
+        let r = mine.radius;
+        if (offsets && offsets.length > 0) {
+          const n = offsets.length;
+          const seg = (theta / (Math.PI * 2)) * n;
+          const idx = Math.floor(seg);
+          const f = seg - idx;
+          const v0 = offsets[idx % n];
+          const v1 = offsets[(idx + 1) % n];
+          const t = 0.5 * (1 - Math.cos(Math.PI * f));
+          r = mine.radius * (v0 + (v1 - v0) * t);
+        }
+        outlinePoints.push(
+          new THREE.Vector3(Math.cos(theta) * r, 0, Math.sin(theta) * r),
+        );
+      }
+
+      // Translucent filled shape (fan triangulation from center)
+      const fillVerts = new Float32Array((segments + 2) * 3);
+      // Center vertex
+      fillVerts[0] = 0;
+      fillVerts[1] = 0;
+      fillVerts[2] = 0;
+      for (let si = 0; si <= segments; si++) {
+        const vi = (si + 1) * 3;
+        fillVerts[vi] = outlinePoints[Math.min(si, outlinePoints.length - 1)].x;
+        fillVerts[vi + 1] = 0;
+        fillVerts[vi + 2] =
+          outlinePoints[Math.min(si, outlinePoints.length - 1)].z;
+      }
+      const fillIndices: number[] = [];
+      for (let si = 0; si < segments; si++) {
+        fillIndices.push(0, si + 1, si + 2);
+      }
+      const fillGeo = new THREE.BufferGeometry();
+      fillGeo.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(fillVerts, 3),
+      );
+      fillGeo.setIndex(fillIndices);
+
+      const discMat = new THREE.MeshBasicMaterial({
+        color: MINE_FILL_COLOR,
+        transparent: true,
+        opacity: 0.25,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const disc = new THREE.Mesh(fillGeo, discMat);
+      disc.position.set(mx, my, mz);
+      disc.renderOrder = GHOST_RENDER_ORDER;
+      group.add(disc);
+
+      // Organic outline
+      const outlineGeo = new THREE.BufferGeometry().setFromPoints(
+        outlinePoints,
+      );
+      const circleMat = new THREE.LineBasicMaterial({
+        color: MINE_OUTLINE_COLOR,
+        transparent: true,
+        opacity: 0.6,
+        depthWrite: false,
+      });
+      const circle = new THREE.Line(outlineGeo, circleMat);
+      circle.position.set(mx, my + 0.1, mz);
+      circle.renderOrder = GHOST_RENDER_ORDER;
+      group.add(circle);
+
+      // Entry direction arrow — shows where the C-shape opening faces
+      if (mine.entryAngle !== undefined) {
+        const ea = mine.entryAngle;
+        const arrowLen = mine.radius * 0.6;
+        const arrowTip = new THREE.Vector3(
+          Math.cos(ea) * arrowLen,
+          0,
+          Math.sin(ea) * arrowLen,
+        );
+        const arrowBase = new THREE.Vector3(
+          Math.cos(ea) * mine.radius * 0.3,
+          0,
+          Math.sin(ea) * mine.radius * 0.3,
+        );
+        // Arrow shaft
+        const arrowGeo = new THREE.BufferGeometry().setFromPoints([
+          arrowBase,
+          arrowTip,
+        ]);
+        const arrowMat = new THREE.LineBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0.5,
+          depthWrite: false,
+        });
+        const arrow = new THREE.Line(arrowGeo, arrowMat);
+        arrow.position.set(mx, my + 0.2, mz);
+        arrow.renderOrder = GHOST_RENDER_ORDER;
+        group.add(arrow);
+      }
+
+      // Mine name label
+      const label = createLabelSprite(mine.name, MINE_OUTLINE_COLOR);
+      label.position.set(mx, my + 6, mz);
+      group.add(label);
+    }
   }
 }
 

@@ -32,6 +32,7 @@ import type {
   PlacedTeleport,
   PlacedMobSpawn,
   PlacedResource,
+  PlacedMine,
   DifficultyTierConfig,
   AutoGenBounds,
   AutoGenConfig,
@@ -57,6 +58,10 @@ import {
 } from "../pipeline/zoneFloodFill";
 import { nameZones } from "../pipeline/zoneNaming";
 import { deriveSpawnRules } from "../pipeline/spawnTableBuilder";
+import {
+  placeMines,
+  filterScatteredMiningRocks,
+} from "../pipeline/minePlacement";
 import {
   populateEntities,
   type ExistingEntityPosition,
@@ -317,7 +322,8 @@ export interface RoadZoneStageResult {
 export interface PopulationStageResult {
   mobSpawns: PlacedMobSpawn[];
   resources: PlacedResource[];
-  stats: Pick<AutoGenStats, "totalMobs" | "totalResources">;
+  mines: PlacedMine[];
+  stats: Pick<AutoGenStats, "totalMobs" | "totalResources" | "totalMines">;
 }
 
 // ============== PIPELINE DEPENDENCIES ==============
@@ -350,6 +356,8 @@ export interface AutoGenDeps {
     townCount: number;
     minTownSpacing: number;
   };
+  /** Bank positions — mines must be far from banks */
+  banks?: Array<{ x: number; z: number }>;
 }
 
 // ============== STAGE 1: TOWN GENERATION ==============
@@ -872,28 +880,62 @@ export function runPopulationStage(
   const zoneDiffConfig =
     deps.zoneDifficultyConfig ?? DEFAULT_ZONE_DIFFICULTY_CONFIG;
 
+  const popDeps = {
+    queryBiome: deps.queryBiome,
+    getBiomeDifficulty: deps.getBiomeDifficulty,
+    noise,
+    towns: townResult.towns,
+    dangerSources: deps.dangerSources,
+    waterThreshold: deps.waterThreshold,
+    worldRadius,
+    zoneDiffConfig,
+  };
+
+  // Step 1: Place mines first (dedicated mine areas with clustered ore rocks)
+  // Pass roads, structures, existing entities, and banks so mines avoid them
+  const { mines, mineResources } = placeMines(
+    roadZoneResult.zones,
+    config,
+    popDeps,
+    deps.manifests,
+    townResult.towns,
+    deps.seed,
+    roadZoneResult.roads,
+    deps.structureObstacles,
+    deps.existingEntities,
+    deps.banks,
+  );
+
+  // Step 2: Extend existing entity exclusions with mine centers
+  const mineExclusions = mines.map((m) => ({
+    x: m.position.x,
+    z: m.position.z,
+    radius: m.radius,
+  }));
+  const existingWithMines = [...deps.existingEntities, ...mineExclusions];
+
+  // Step 3: Populate scattered entities (mobs + resources)
   const { mobs, resources } = populateEntities(
     roadZoneResult.zones,
     config,
-    {
-      queryBiome: deps.queryBiome,
-      getBiomeDifficulty: deps.getBiomeDifficulty,
-      noise,
-      towns: townResult.towns,
-      dangerSources: deps.dangerSources,
-      waterThreshold: deps.waterThreshold,
-      worldRadius,
-      zoneDiffConfig,
-    },
-    deps.existingEntities,
+    popDeps,
+    existingWithMines,
   );
+
+  // Step 4: Filter out scattered mining rocks inside mine boundaries
+  const filteredResources = filterScatteredMiningRocks(resources, mines);
+
+  // Step 5: Merge mine resources into final resources array
+  const allResources = [...filteredResources, ...mineResources];
 
   return {
     mobSpawns: mobs,
-    resources,
+    resources: allResources,
+    mines,
     stats: {
       totalMobs: mobs.length,
-      totalResources: resources.length,
+      totalResources: allResources.length,
+      totalMines: mines.length,
     },
   };
 }
@@ -935,11 +977,13 @@ export function mergeStageResults(
     teleports: rzResult.teleports,
     roads: rzResult.roads,
     generatedTowns: townResult.generatedTowns,
+    mines: popResult.mines,
     stats: {
       zonesGenerated: rzResult.stats.zonesGenerated,
       zoneMerged: rzResult.stats.zoneMerged,
       totalMobs: popResult.stats.totalMobs,
       totalResources: popResult.stats.totalResources,
+      totalMines: popResult.stats.totalMines,
       totalArea: rzResult.stats.totalArea,
       generationTimeMs: Math.round(elapsedMs),
       landBounds: townResult.landBounds,
@@ -966,11 +1010,13 @@ export function runAutoGenPipeline(
       teleports: [],
       roads: [],
       generatedTowns: [],
+      mines: [],
       stats: {
         zonesGenerated: 0,
         zoneMerged: 0,
         totalMobs: 0,
         totalResources: 0,
+        totalMines: 0,
         totalArea: 0,
         generationTimeMs: Math.round(performance.now() - startTime),
         tierBreakdown: [],
@@ -1166,12 +1212,18 @@ export function useZoneAutoGen() {
         });
       }
 
+      // Extract bank positions for mine distance enforcement
+      const banks = state.extendedLayers.stations
+        .filter((s) => s.bankId)
+        .map((s) => ({ x: s.position.x, z: s.position.z }));
+
       console.log(
         `[AutoGen] Road obstacles: ${structureObstacles.length} structures ` +
           `(${world.foundation.buildings.length} buildings, ` +
           `${state.extendedLayers.pois.length} POIs, ` +
           `${state.extendedLayers.stations.length} stations, ` +
-          `${state.manifests.duelArenas.length} arenas)`,
+          `${state.manifests.duelArenas.length} arenas), ` +
+          `${banks.length} banks`,
       );
 
       const result = runAutoGenPipeline(config, {
@@ -1186,6 +1238,7 @@ export function useZoneAutoGen() {
         manifests: state.manifests,
         existingEntities,
         structureObstacles,
+        banks,
         townConfig: {
           townCount: world.foundation.config.towns.townCount,
           minTownSpacing: world.foundation.config.towns.minTownSpacing,
@@ -1195,6 +1248,7 @@ export function useZoneAutoGen() {
       console.log(
         `[AutoGen] Pipeline result: ${result.zones.length} zones, ` +
           `${result.mobSpawns.length} mobs, ${result.resources.length} resources, ` +
+          `${result.mines.length} mines, ` +
           `${result.spawnPoints.length} spawns, ${result.teleports.length} teleports, ` +
           `${result.roads.length} roads, ${result.generatedTowns.length} new towns ` +
           `(requested townCount=${world.foundation.config.towns.townCount})`,
@@ -1354,6 +1408,11 @@ export function useZoneAutoGen() {
         });
       }
 
+      // Extract bank positions for mine distance enforcement
+      const banks = state.extendedLayers.stations
+        .filter((s) => s.bankId)
+        .map((s) => ({ x: s.position.x, z: s.position.z }));
+
       const deps: AutoGenDeps = {
         queryBiome: vp.queryBiome,
         getBiomeDifficulty,
@@ -1366,6 +1425,7 @@ export function useZoneAutoGen() {
         manifests: state.manifests,
         existingEntities,
         structureObstacles,
+        banks,
         townConfig: {
           townCount:
             configOverride?.townCount ??
@@ -1445,6 +1505,7 @@ export function useZoneAutoGen() {
       console.log(
         `[AutoGen] Applying: ${result.zones.length} zones, ` +
           `${result.mobSpawns.length} mobs, ${result.resources.length} resources, ` +
+          `${result.mines.length} mines, ` +
           `${result.spawnPoints.length} spawns, ${result.teleports.length} teleports, ` +
           `${result.roads.length} roads, ${result.generatedTowns.length} towns` +
           ` (worldCenterOffset=${offset}, refreshTownMarkers=${typeof vp?.refreshTownMarkers})`,
@@ -1454,6 +1515,10 @@ export function useZoneAutoGen() {
       const toScene = (pos: { x: number; y: number; z: number }) => {
         const y = queryBiome ? queryBiome(pos.x, pos.z).height : pos.y;
         return { x: pos.x + offset, y, z: pos.z + offset };
+      };
+      /** Like toScene but preserves pre-computed Y (for mine bowl-adjusted positions) */
+      const toScenePreserveY = (pos: { x: number; y: number; z: number }) => {
+        return { x: pos.x + offset, y: pos.y, z: pos.z + offset };
       };
 
       // First clear any previous auto-gen
@@ -1516,7 +1581,11 @@ export function useZoneAutoGen() {
       }));
       const sceneResources = result.resources.map((r) => ({
         ...r,
-        position: toScene(r.position),
+        // Mine ore rocks have pre-computed bowl-adjusted Y — preserve it.
+        // Regular resources get Y from terrain query.
+        position: r.properties.mineId
+          ? toScenePreserveY(r.position)
+          : toScene(r.position),
       }));
       const sceneSpawns = result.spawnPoints.map((sp) => ({
         ...sp,
@@ -1537,6 +1606,15 @@ export function useZoneAutoGen() {
       // Add auto-generated lodestones
       for (const tp of sceneTeleports) {
         actions.addTeleport(tp);
+      }
+
+      // Add auto-generated mines
+      if (result.mines.length > 0) {
+        const sceneMines = result.mines.map((m) => ({
+          ...m,
+          position: toScene(m.position),
+        }));
+        actions.batchAddMines(sceneMines);
       }
 
       // Set auto-generated roads on the foundation (game-space, renderer handles conversion)
@@ -1589,6 +1667,14 @@ export function useZoneAutoGen() {
         }
         for (const tp of result.teleports) {
           circles.push({ x: tp.position.x, z: tp.position.z, radius: 4 });
+        }
+        // Mine areas — clear vegetation within mine radius + buffer
+        for (const mine of result.mines) {
+          circles.push({
+            x: mine.position.x,
+            z: mine.position.z,
+            radius: mine.radius + 3,
+          });
         }
 
         // Roads — road surface + small buffer (noise creates organic shoulders)

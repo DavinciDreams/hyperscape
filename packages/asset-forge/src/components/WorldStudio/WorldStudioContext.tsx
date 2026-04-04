@@ -77,6 +77,7 @@ import type {
   PlacedMobSpawn,
   PlacedResource,
   PlacedStation,
+  PlacedMine,
   PlacedPOI,
   PlacedWaterBody,
   PlacedRegion,
@@ -521,6 +522,9 @@ type StudioSpecificAction =
       mobSpawns: PlacedMobSpawn[];
       resources: PlacedResource[];
     }
+  | { type: "BATCH_ADD_MINES"; mines: PlacedMine[] }
+  | { type: "ADD_MINE"; mine: PlacedMine }
+  | { type: "REMOVE_MINE"; id: string }
   | { type: "CLEAR_ALL_AUTOGEN" }
   // Move a single town to a new position
   | {
@@ -1433,6 +1437,33 @@ function studioReducer(
       };
     }
 
+    case "BATCH_ADD_MINES":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          mines: [...state.extendedLayers.mines, ...action.mines],
+        },
+      };
+
+    case "ADD_MINE":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          mines: [...state.extendedLayers.mines, action.mine],
+        },
+      };
+
+    case "REMOVE_MINE":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          mines: state.extendedLayers.mines.filter((m) => m.id !== action.id),
+        },
+      };
+
     case "CLEAR_ALL_AUTOGEN":
       return {
         ...state,
@@ -1450,6 +1481,9 @@ function studioReducer(
           ),
           teleports: state.extendedLayers.teleports.filter(
             (tp) => !tp.id.startsWith("autogen-"),
+          ),
+          mines: state.extendedLayers.mines.filter(
+            (m) => m.source !== "procgen",
           ),
         },
       };
@@ -2400,6 +2434,9 @@ interface WorldStudioContextValue {
       mobSpawns: PlacedMobSpawn[],
       resources: PlacedResource[],
     ) => void;
+    batchAddMines: (mines: PlacedMine[]) => void;
+    addMine: (mine: PlacedMine) => void;
+    removeMine: (id: string) => void;
     clearAllAutogen: () => void;
 
     // Move a town to a new position
@@ -2849,6 +2886,10 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         mobSpawns: PlacedMobSpawn[],
         resources: PlacedResource[],
       ) => dispatch({ type: "BATCH_ADD_ENTITIES", mobSpawns, resources }),
+      batchAddMines: (mines: PlacedMine[]) =>
+        dispatch({ type: "BATCH_ADD_MINES", mines }),
+      addMine: (mine: PlacedMine) => dispatch({ type: "ADD_MINE", mine }),
+      removeMine: (id: string) => dispatch({ type: "REMOVE_MINE", id }),
       clearAllAutogen: () => dispatch({ type: "CLEAR_ALL_AUTOGEN" }),
 
       // Move a town to a new position

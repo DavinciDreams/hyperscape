@@ -15,6 +15,7 @@ import {
   MapPin,
   Skull,
   TreePine,
+  Mountain,
   RefreshCw,
   Check,
   Home,
@@ -676,6 +677,7 @@ function CompleteView({
   const zoneCount = stageResults.roadsZones?.stats.zonesGenerated ?? 0;
   const mobCount = stageResults.population?.stats.totalMobs ?? 0;
   const resCount = stageResults.population?.stats.totalResources ?? 0;
+  const mineCount = stageResults.population?.stats.totalMines ?? 0;
   const roadCount = stageResults.roadsZones?.roads.length ?? 0;
 
   return (
@@ -688,7 +690,8 @@ function CompleteView({
       </h3>
       <p className="text-xs text-text-secondary max-w-sm text-center">
         Created {townCount} towns, {zoneCount} zones, {roadCount} roads,{" "}
-        {mobCount} mob spawns, and {resCount} resources. All entities tagged{" "}
+        {mineCount} mines, {mobCount} mob spawns, and {resCount} resources. All
+        entities tagged{" "}
         <code className="bg-bg-tertiary px-1 rounded">source: procgen</code>.
       </p>
       <button
@@ -1180,13 +1183,14 @@ function PopulationPreview({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <MiniStatCard label="Mobs" value={stats.totalMobs} icon={Skull} />
         <MiniStatCard
           label="Resources"
           value={stats.totalResources}
           icon={TreePine}
         />
+        <MiniStatCard label="Mines" value={stats.totalMines} icon={Mountain} />
       </div>
 
       {/* Tier distribution */}
@@ -1222,6 +1226,28 @@ function PopulationPreview({
                   </div>
                 </div>
               ))}
+          </div>
+        </div>
+      )}
+
+      {/* Mine list */}
+      {data.mines && data.mines.length > 0 && (
+        <div>
+          <h4 className="text-[10px] text-text-tertiary uppercase tracking-wider mb-1">
+            Mines ({data.mines.length})
+          </h4>
+          <div className="max-h-[100px] overflow-y-auto space-y-px border border-border-primary rounded">
+            {data.mines.map((mine) => (
+              <div
+                key={mine.id}
+                className="flex items-center justify-between px-2 py-1 text-xs hover:bg-bg-tertiary"
+              >
+                <span className="text-text-primary">{mine.name}</span>
+                <span className="text-text-tertiary tabular-nums">
+                  {mine.oreRocks.reduce((s, o) => s + o.count, 0)} rocks
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -499,6 +499,14 @@ export interface TileBasedTerrainProps {
   onMoveSpeedChange?: (speed: number) => void;
   /** Pre-generated road network (uses actual pathfinding data) */
   roads?: GeneratedRoad[];
+  /** Placed mine areas for terrain influence overlay */
+  mines?: Array<{
+    position: { x: number; y: number; z: number };
+    radius: number;
+    radialOffsets: number[];
+    entryAngle: number;
+    biome: string;
+  }>;
   /** Called when scene is ready, exposes refs for editing tool integration */
   onSceneReady?: (refs: TerrainSceneRefs) => void;
   /** When true, suppress built-in HUD overlays (used by World Studio which has its own) */
@@ -1091,6 +1099,97 @@ function getRoadHeightAtPoint(
   return { height: bestHeight, influence };
 }
 
+/** Mine area data for terrain influence calculation */
+interface MineAreaData {
+  position: { x: number; y: number; z: number };
+  radius: number;
+  radialOffsets: number[];
+  entryAngle: number;
+  biome: string;
+}
+
+/**
+ * Get effective mine radius at a given angle using radial offsets.
+ * Cosine-interpolates between control points for smooth organic shape.
+ */
+function getMineEffectiveRadius(
+  baseRadius: number,
+  offsets: number[],
+  angle: number,
+): number {
+  const n = offsets.length;
+  if (n === 0) return baseRadius;
+  const a = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  const seg = (a / (Math.PI * 2)) * n;
+  const i = Math.floor(seg);
+  const f = seg - i;
+  const v0 = offsets[i % n];
+  const v1 = offsets[(i + 1) % n];
+  const t = 0.5 * (1 - Math.cos(Math.PI * f));
+  return baseRadius * (v0 + (v1 - v0) * t);
+}
+
+/** Biome name to mine biome index mapping (for shader) */
+const MINE_BIOME_INDEX: Record<string, number> = {
+  forest: 0,
+  tundra: 1,
+  desert: 2,
+  mountains: 3,
+  plains: 4,
+  swamp: 5,
+  valley: 6,
+};
+
+/**
+ * Calculate mine influence at a world point.
+ * Writes into the pre-allocated _mineResult to avoid per-vertex object allocation.
+ * influence is 0-1, biomeIndex identifies the mine's biome for shader color selection.
+ *
+ * Cosine falloff matching the bowl shape: strongest at center, fading to 0 at
+ * radius * 1.2 so the color overlay aligns with the terrain depression.
+ */
+const _mineResult = { influence: 0, biomeIndex: 0 };
+function calculateMineInfluenceAtPoint(
+  worldX: number,
+  worldZ: number,
+  mines?: MineAreaData[],
+): { influence: number; biomeIndex: number } {
+  _mineResult.influence = 0;
+  _mineResult.biomeIndex = 0;
+  if (!mines || mines.length === 0) return _mineResult;
+
+  for (const mine of mines) {
+    const dx = worldX - mine.position.x;
+    const dz = worldZ - mine.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    // Quick AABB reject using max possible radius
+    const maxR = mine.radius * 1.5;
+    if (dist >= maxR) continue;
+
+    // Organic boundary: effective radius varies by angle
+    const angle = Math.atan2(dz, dx);
+    const effectiveR = getMineEffectiveRadius(
+      mine.radius,
+      mine.radialOffsets,
+      angle,
+    );
+    const outerRadius = effectiveR * 1.2;
+    if (dist >= outerRadius) continue;
+
+    // Smooth cosine falloff matching the bowl terrain shape
+    const t = dist / outerRadius; // 0 at center, 1 at edge
+    const influence = 0.5 * (1 + Math.cos(Math.PI * t)); // 1→0
+
+    if (influence > _mineResult.influence) {
+      _mineResult.influence = influence;
+      _mineResult.biomeIndex = MINE_BIOME_INDEX[mine.biome] ?? 4;
+    }
+  }
+
+  return _mineResult;
+}
+
 // Road colors matching the game's terrain shader (compacted dirt with gravel)
 const ROAD_CENTER_COLOR = new THREE.Color(0.4, 0.333, 0.267); // #665544 — compacted dirt
 const ROAD_EDGE_COLOR = new THREE.Color(0.349, 0.29, 0.239); // #594a3d — road edge
@@ -1290,11 +1389,14 @@ function generateTileGeometry(
   worldSizeTiles: number,
   roads?: GeneratedRoad[],
   townFlattenZones?: TownFlattenZone[],
+  mines?: MineAreaData[],
 ): { geometry: THREE.PlaneGeometry; hasWater: boolean } {
   const geometry = templateGeometry.clone();
   const positions = geometry.attributes.position;
   const colors = new Float32Array(positions.count * 3);
   const roadInfluences = new Float32Array(positions.count);
+  const mineInfluences = new Float32Array(positions.count);
+  const mineBiomeIds = new Float32Array(positions.count);
   const biomeIds = new Float32Array(positions.count);
   const forestWeights = new Float32Array(positions.count);
   const canyonWeights = new Float32Array(positions.count);
@@ -1381,6 +1483,80 @@ function generateTileGeometry(
       }
     }
 
+    // RuneScape-style mine depression: gentle, shallow bowl that blends
+    // smoothly into the surrounding terrain. No rim or steep walls — just
+    // a subtle dip where mining has worn the ground down.
+    //
+    // Profile (cross-section, exaggerated):
+    //  ----__                          __----
+    //        \__                    __/
+    //           \__________________/
+    //              gentle bowl (~1.5m)
+    if (mines && mines.length > 0 && townFlattenInfluence < 1) {
+      for (const mine of mines) {
+        const dx = worldX - mine.position.x;
+        const dz = worldZ - mine.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+
+        // Quick AABB reject
+        const maxR = mine.radius * 1.5;
+        if (dist >= maxR) continue;
+
+        // Organic boundary: effective radius varies by angle
+        const angle = Math.atan2(dz, dx);
+        const R = getMineEffectiveRadius(
+          mine.radius,
+          mine.radialOffsets,
+          angle,
+        );
+        if (dist >= R * 1.2) continue;
+
+        const centerHeight = mine.position.y;
+        const townBlend = 1 - townFlattenInfluence;
+
+        // Smooth cosine bowl: deepest at center, level at edge
+        const t = Math.min(dist / R, 1.0);
+        const bowlFactor = 0.5 * (1 + Math.cos(Math.PI * t));
+
+        // Asymmetric depth: gentle entry ramp (40%), steep back wall (100%)
+        // Must match minePlacement.ts getMineBowlHeight exactly
+        let afe = Math.abs(angle - mine.entryAngle);
+        if (afe > Math.PI) afe = 2 * Math.PI - afe;
+        const depthMul = 0.4 + 0.6 * (afe / Math.PI);
+
+        // Micro-undulation: rocky, uneven mine floor (deterministic from position)
+        const undulation1 =
+          Math.sin(worldX * 0.7 + 1.3) * Math.cos(worldZ * 0.9 + 2.1) * 0.3;
+        const undulation2 = Math.sin(worldX * 2.3 + worldZ * 1.7) * 0.15;
+        const undulation3 = Math.cos(worldX * 4.1 - worldZ * 3.3) * 0.06;
+        const floorNoise =
+          (undulation1 + undulation2 + undulation3) * bowlFactor;
+
+        // Rim bumps: suppressed on entry side for smooth ramp
+        const rimT = Math.max(0, 1 - Math.abs(t - 0.88) / 0.12);
+        const rimSuppression = Math.min(1, afe / (Math.PI * 0.4));
+        const rimBump =
+          (Math.sin(worldX * 1.5 + worldZ * 2.1) * 0.3 +
+            Math.cos(worldX * 2.7 - worldZ * 1.3) * 0.15) *
+          rimT *
+          rimSuppression;
+
+        const targetHeight =
+          centerHeight - 3.0 * depthMul * bowlFactor + floorNoise + rimBump;
+
+        // Blend bowl into natural terrain — full blend inside R, fade to 0 by 1.2R
+        let blend = 1.0;
+        if (dist > R) {
+          const fadeT = (dist - R) / (R * 0.2);
+          blend = 1.0 - fadeT * fadeT * (3 - 2 * fadeT);
+        }
+        blend *= townBlend;
+
+        height = height + (targetHeight - height) * blend;
+        break;
+      }
+    }
+
     // Set vertex height
     positions.setY(i, height);
 
@@ -1432,6 +1608,11 @@ function generateTileGeometry(
     // Road influence for terrain shader — the game shader reads this attribute
     // to render road coloring directly on the terrain surface.
     roadInfluences[i] = calculateRoadInfluenceAtPoint(worldX, worldZ, roads);
+
+    // Mine influence for terrain shader — rocky floor color overlay
+    const mineResult = calculateMineInfluenceAtPoint(worldX, worldZ, mines);
+    mineInfluences[i] = mineResult.influence;
+    mineBiomeIds[i] = mineResult.biomeIndex;
   }
 
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -1447,6 +1628,14 @@ function generateTileGeometry(
   geometry.setAttribute(
     "roadInfluence",
     new THREE.BufferAttribute(roadInfluences, 1),
+  );
+  geometry.setAttribute(
+    "mineInfluence",
+    new THREE.BufferAttribute(mineInfluences, 1),
+  );
+  geometry.setAttribute(
+    "mineBiomeId",
+    new THREE.BufferAttribute(mineBiomeIds, 1),
   );
   geometry.computeVertexNormals();
   positions.needsUpdate = true;
@@ -1467,6 +1656,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   onFlyModeChange,
   onMoveSpeedChange,
   roads: providedRoads,
+  mines: providedMines,
   onSceneReady,
   hideBuiltinOverlays = false,
   onGameEntitiesLoaded,
@@ -1517,6 +1707,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
    *  overwrite the ref with stale prop data during renders that happen between
    *  rebuildRoadRibbons() and the SET_FOUNDATION_ROADS dispatch propagating. */
   const providedRoadsRef = useRef(providedRoads);
+  const runtimeMinesRef = useRef(providedMines);
   const townConfigRef = useRef(config.towns);
   townConfigRef.current = config.towns;
   const configSeedRef = useRef(config.seed);
@@ -1722,8 +1913,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         if (flattenZones.length === 0) flattenZones = undefined;
       }
 
-      // Generate tile geometry with road influence + town flattening
+      // Generate tile geometry with road influence + town flattening + mine influence
       const roadsForTile = providedRoadsRef.current;
+      const minesForTile = runtimeMinesRef.current;
       const { geometry, hasWater } = generateTileGeometry(
         tileX,
         tileZ,
@@ -1735,6 +1927,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         worldSize,
         roadsForTile,
         flattenZones,
+        minesForTile,
       );
 
       // One-time diagnostic: check if road influence is being baked into regenerated tiles.
@@ -1759,6 +1952,28 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           `[generateTile] Tile(${tileX},${tileZ}) #${tileCount}: ${roadsForTile.length} roads, ` +
             `maxRI=${maxRI.toFixed(3)}, nonZeroVerts=${nonZeroCount}/${ri?.count ?? 0}, ` +
             `road0 pts=${roadsForTile[0]?.path?.length ?? "N/A"}`,
+        );
+      }
+
+      // Mine influence diagnostic (mirrors road diagnostic above)
+      if (
+        minesForTile &&
+        minesForTile.length > 0 &&
+        (tileCount === 1 || tileCount === 50 || tileCount === 200)
+      ) {
+        const mi = geometry.attributes.mineInfluence;
+        let maxMI = 0;
+        let nonZeroMineVerts = 0;
+        if (mi) {
+          for (let vi = 0; vi < mi.count; vi++) {
+            const v = mi.getX(vi);
+            if (v > maxMI) maxMI = v;
+            if (v > 0) nonZeroMineVerts++;
+          }
+        }
+        console.log(
+          `[generateTile] Tile(${tileX},${tileZ}) #${tileCount}: ${minesForTile.length} mines, ` +
+            `maxMI=${maxMI.toFixed(3)}, nonZeroVerts=${nonZeroMineVerts}/${mi?.count ?? 0}`,
         );
       }
 
@@ -5301,6 +5516,29 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     tileQueueRef.current = [];
     tileQueueSetRef.current.clear();
   }, [providedRoads, unloadTile]);
+
+  // Regenerate ALL tiles when mines change so the terrain shader picks up
+  // mine influence (rocky floor coloring) and height flattening.
+  const prevMinesRef = useRef<TileBasedTerrainProps["mines"] | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    if (providedMines === prevMinesRef.current) return;
+    prevMinesRef.current = providedMines;
+    runtimeMinesRef.current = providedMines;
+    if (!providedMines || providedMines.length === 0) return;
+    if (tilesRef.current.size === 0) return;
+
+    console.log(
+      `[TileBasedTerrain] Mines changed — unloading ${tilesRef.current.size} tiles for ${providedMines.length} mines`,
+    );
+
+    for (const key of tilesRef.current.keys()) {
+      unloadTile(key);
+    }
+    tileQueueRef.current = [];
+    tileQueueSetRef.current.clear();
+  }, [providedMines, unloadTile]);
 
   // Notify parent of tile count changes
   useEffect(() => {

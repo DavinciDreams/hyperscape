@@ -309,6 +309,8 @@ export interface TerrainMaterialOptions {
   fogEnabled?: boolean;
   /** Include road overlay attribute (default: true) */
   includeRoadOverlay?: boolean;
+  /** Include mine floor overlay attribute (default: true) */
+  includeMineOverlay?: boolean;
   /** Custom fog color */
   fogColor?: THREE.Color;
   /** Custom fog distances */
@@ -332,6 +334,7 @@ export function createTerrainMaterial(
   const {
     fogEnabled = true,
     includeRoadOverlay = true,
+    includeMineOverlay = true,
     fogColor = TERRAIN_CONSTANTS.FOG_COLOR,
     fogNear = TERRAIN_CONSTANTS.FOG_NEAR,
     fogFar = TERRAIN_CONSTANTS.FOG_FAR,
@@ -625,15 +628,226 @@ export function createTerrainMaterial(
     roadRoughnessBlend = mix(float(1.0), roadRough, roadMask);
   }
 
+  // === MINE FLOOR OVERLAY (optional) ===
+  // AAA multi-layered rocky quarry floor: exposed bedrock, gravel scatter,
+  // dirt accumulation, radial center-to-edge gradient, height-based edge
+  // blending with surrounding terrain. Matches road overlay quality level.
+  let colorWithMines: Node = colorWithRoads;
+  let mineRoughnessBlend: Node = roadRoughnessBlend;
+  if (includeMineOverlay) {
+    const mineInfluence = attribute("mineInfluence", "float");
+    const mineBiomeId = attribute("mineBiomeId", "float");
+
+    // Mine-specific noise at scales appropriate for 15-25m mine areas
+    const mineUV = vec2(worldPos.x, worldPos.z);
+    const mn1 = texture(noiseTex, mul(mineUV, float(0.035))).r; // stone slabs (~28m)
+    const mn2 = texture(noiseTex, mul(mineUV, float(0.14))).r; // stone surface (~7m)
+    const mn3 = texture(noiseTex, mul(mineUV, float(0.5))).r; // gravel (~2m)
+    const mn4 = texture(noiseTex, mul(mineUV, float(1.4))).r; // micro cracks (~0.7m)
+
+    // === NOISE-DISTORTED ORGANIC EDGE ===
+    const mineEdgeDistortion = add(
+      mul(sub(mn1, float(0.5)), float(0.22)),
+      add(
+        mul(sub(mn2, float(0.5)), float(0.14)),
+        mul(sub(mn3, float(0.5)), float(0.06)),
+      ),
+    );
+    const distortedInfluence = add(mineInfluence, mineEdgeDistortion);
+
+    // Two-tier mask: core (solid floor) and edge (transition zone)
+    const coreMask = smoothstep(float(0.42), float(0.68), distortedInfluence);
+    const edgeMask = smoothstep(float(0.12), float(0.42), distortedInfluence);
+
+    // === BIOME COLOR PALETTE ===
+    // 0=forest, 1=tundra, 2=desert, 3=mountains, 4=plains, 5=swamp, 6=valley
+    // Primary: exposed bedrock  Secondary: dark crevices  Tertiary: gravel/highlight
+    const forestP = vec3(0.56, 0.54, 0.5);
+    const forestD = vec3(0.4, 0.38, 0.35);
+    const forestG = vec3(0.62, 0.6, 0.56);
+    const tundraP = vec3(0.42, 0.42, 0.46);
+    const tundraD = vec3(0.28, 0.28, 0.32);
+    const tundraG = vec3(0.5, 0.5, 0.55);
+    const desertP = vec3(0.55, 0.38, 0.24);
+    const desertD = vec3(0.38, 0.24, 0.13);
+    const desertG = vec3(0.64, 0.48, 0.32);
+    const mountainP = vec3(0.52, 0.5, 0.47);
+    const mountainD = vec3(0.36, 0.34, 0.32);
+    const mountainG = vec3(0.6, 0.58, 0.55);
+    const plainsP = vec3(0.54, 0.46, 0.36);
+    const plainsD = vec3(0.38, 0.32, 0.22);
+    const plainsG = vec3(0.62, 0.54, 0.44);
+    const swampP = vec3(0.36, 0.3, 0.22);
+    const swampD = vec3(0.24, 0.19, 0.13);
+    const swampG = vec3(0.44, 0.38, 0.3);
+    const valleyP = vec3(0.58, 0.5, 0.4);
+    const valleyD = vec3(0.42, 0.36, 0.26);
+    const valleyG = vec3(0.66, 0.58, 0.48);
+
+    // Biome selection masks
+    const b = mineBiomeId;
+    const isForest = mul(
+      smoothstep(float(-0.5), float(0.5), b),
+      smoothstep(float(1.5), float(0.5), b),
+    );
+    const isTundra = mul(
+      smoothstep(float(0.5), float(1.5), b),
+      smoothstep(float(2.5), float(1.5), b),
+    );
+    const isDesert = mul(
+      smoothstep(float(1.5), float(2.5), b),
+      smoothstep(float(3.5), float(2.5), b),
+    );
+    const isMountain = mul(
+      smoothstep(float(2.5), float(3.5), b),
+      smoothstep(float(4.5), float(3.5), b),
+    );
+    const isSwamp = mul(
+      smoothstep(float(4.5), float(5.5), b),
+      smoothstep(float(6.5), float(5.5), b),
+    );
+    const isValley = smoothstep(float(5.5), float(6.5), b);
+
+    // Build primary (bedrock)
+    let minePrimary: Node = plainsP;
+    minePrimary = mix(minePrimary, forestP, isForest);
+    minePrimary = mix(minePrimary, tundraP, isTundra);
+    minePrimary = mix(minePrimary, desertP, isDesert);
+    minePrimary = mix(minePrimary, mountainP, isMountain);
+    minePrimary = mix(minePrimary, swampP, isSwamp);
+    minePrimary = mix(minePrimary, valleyP, isValley);
+
+    // Build secondary (dark crevices)
+    let mineSecondary: Node = plainsD;
+    mineSecondary = mix(mineSecondary, forestD, isForest);
+    mineSecondary = mix(mineSecondary, tundraD, isTundra);
+    mineSecondary = mix(mineSecondary, desertD, isDesert);
+    mineSecondary = mix(mineSecondary, mountainD, isMountain);
+    mineSecondary = mix(mineSecondary, swampD, isSwamp);
+    mineSecondary = mix(mineSecondary, valleyD, isValley);
+
+    // Build tertiary (gravel highlights)
+    let mineTertiary: Node = plainsG;
+    mineTertiary = mix(mineTertiary, forestG, isForest);
+    mineTertiary = mix(mineTertiary, tundraG, isTundra);
+    mineTertiary = mix(mineTertiary, desertG, isDesert);
+    mineTertiary = mix(mineTertiary, mountainG, isMountain);
+    mineTertiary = mix(mineTertiary, swampG, isSwamp);
+    mineTertiary = mix(mineTertiary, valleyG, isValley);
+
+    // === LAYER 1: EXPOSED BEDROCK BASE ===
+    // Large stone slab pattern — broad patches of primary/secondary
+    const slabPattern = smoothstep(float(0.32), float(0.68), mn1);
+    const bedrockColor = mix(minePrimary, mineSecondary, slabPattern);
+
+    // === LAYER 2: STONE SURFACE TEXTURE ===
+    // Medium-scale surface detail — highlights and shadows on stone faces
+    const surfaceLight = smoothstep(float(0.45), float(0.75), mn2);
+    const surfaceShadow = smoothstep(float(0.35), float(0.15), mn2);
+    const texturedStone = mul(
+      mix(bedrockColor, mineTertiary, mul(surfaceLight, float(0.35))),
+      mix(float(1.0), float(0.88), surfaceShadow),
+    );
+
+    // === LAYER 3: GRAVEL / CRUSHED STONE SCATTER ===
+    // High-freq pebble highlights with shadows between stones
+    const gravelHighlight = smoothstep(float(0.58), float(0.78), mn3);
+    const gravelShadow = smoothstep(float(0.22), float(0.38), mn3);
+    const withGravel = mix(
+      texturedStone,
+      mineTertiary,
+      mul(gravelHighlight, float(0.3)),
+    );
+    // Darken cracks between pebbles
+    const withCracks = mix(
+      mul(withGravel, float(0.84)),
+      withGravel,
+      gravelShadow,
+    );
+
+    // === LAYER 4: MICRO CRACK / SURFACE IMPERFECTIONS ===
+    const crackMask = smoothstep(float(0.42), float(0.58), mn4);
+    const withMicroDetail = mul(
+      withCracks,
+      mix(float(0.92), float(1.02), crackMask),
+    );
+
+    // === LAYER 5: RADIAL GRADIENT (center rock → edge gravel/dirt) ===
+    // mineInfluence is high at center, low at edges
+    const centerWeight = smoothstep(float(0.45), float(0.85), mineInfluence);
+    // Edges get more gravel + dirt mixed in
+    const dirtBlend = mix(mineSecondary, minePrimary, float(0.4));
+    const edgeGravelDirt = mix(dirtBlend, mineTertiary, mn3);
+    const radialMixed = mix(
+      mix(withMicroDetail, edgeGravelDirt, float(0.4)), // edges: 40% gravel/dirt
+      withMicroDetail, // center: pure detailed stone
+      centerWeight,
+    );
+
+    // === LAYER 6: WEAR / FOOT TRAFFIC (darkened compacted areas) ===
+    // Random patches of worn, compacted stone (like well-trodden mine paths)
+    const wearPattern = smoothstep(float(0.55), float(0.75), mn1);
+    const wearDarken = mul(wearPattern, mul(coreMask, float(0.08)));
+    const wornFloor = mul(radialMixed, sub(float(1.0), wearDarken));
+
+    // === LAYER 7: HEIGHT-BASED EDGE BLENDING ===
+    // Terrain naturally blends into mine floor at edges (grass/soil competition)
+    const terrainH = add(mul(noiseValue, float(0.4)), float(0.6));
+    const mineFloorH = add(mul(mn2, float(0.3)), float(0.2));
+    const terrainBias = add(
+      terrainH,
+      mul(sub(float(1.0), edgeMask), float(2.0)),
+    );
+    const mineBias = add(mineFloorH, mul(edgeMask, float(2.0)));
+    const maxBias = tslMax(terrainBias, mineBias);
+    const blendDepth = float(0.18);
+    const blendThresh = sub(maxBias, blendDepth);
+    const tWeight = tslMax(sub(terrainBias, blendThresh), float(0.0));
+    const mWeight = tslMax(sub(mineBias, blendThresh), float(0.0));
+    const totalWeight = add(tWeight, mWeight);
+    const heightBlended = div(
+      add(mul(colorWithRoads, tWeight), mul(wornFloor, mWeight)),
+      totalWeight,
+    );
+
+    // === LAYER 8: EDGE DARKENING BAND ===
+    // Narrow dark rim at mine boundary for visual definition (disturbed earth)
+    const edgeBand = mul(
+      smoothstep(float(0.15), float(0.32), edgeMask),
+      smoothstep(float(0.52), float(0.32), edgeMask),
+    );
+    const borderDarken = mul(edgeBand, float(0.14));
+    const mineFloorFinal = mul(heightBlended, sub(float(1.0), borderDarken));
+
+    // Final blend
+    colorWithMines = mix(colorWithRoads, mineFloorFinal, edgeMask);
+
+    // === ROUGHNESS ===
+    // Exposed rock = rough, gravel = medium-rough, compacted areas slightly smoother
+    const rockRoughness = mix(
+      float(0.82),
+      float(0.96),
+      sub(float(1.0), surfaceLight),
+    );
+    const gravelRoughBlend = mix(
+      rockRoughness,
+      float(0.88),
+      mul(gravelHighlight, float(0.4)),
+    );
+    const compactSmooth = mul(wearPattern, mul(coreMask, float(0.12)));
+    const mineRoughness = sub(gravelRoughBlend, compactSmooth);
+    mineRoughnessBlend = mix(roadRoughnessBlend, mineRoughness, edgeMask);
+  }
+
   // === DISTANCE FOG ===
   const baseFogFactor = smoothstep(fogNearSqUniform, fogFarSqUniform, distSq);
   const fogFactor = mul(baseFogFactor, fogEnabledUniform);
-  const finalColor = mix(colorWithRoads, fogColorUniform, fogFactor);
+  const finalColor = mix(colorWithMines, fogColorUniform, fogFactor);
 
   // === CREATE MATERIAL ===
   const material = new MeshStandardNodeMaterial();
   material.colorNode = finalColor;
-  material.roughnessNode = roadRoughnessBlend;
+  material.roughnessNode = mineRoughnessBlend;
   material.metalness = 0.0;
   material.side = THREE.FrontSide;
   material.fog = false;

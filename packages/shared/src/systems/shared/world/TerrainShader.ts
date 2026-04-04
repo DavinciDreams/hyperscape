@@ -956,6 +956,141 @@ export function createTerrainMaterial(): THREE.Material & {
   // Blend road color with terrain based on influence
   const baseWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
 
+  // === MINE FLOOR OVERLAY ===
+  // AAA multi-layered rocky quarry floor matching Asset Forge shader quality.
+  // Exposed bedrock, gravel scatter, dirt accumulation, radial gradient,
+  // height-based edge blending with surrounding terrain.
+  const mineInfluenceAttr = attribute("mineInfluence", "float");
+  const mineBiomeIdAttr = attribute("mineBiomeId", "float");
+
+  // Mine-specific noise at scales appropriate for 15-25m mine areas
+  const mineUV = vec2(worldPos.x, worldPos.z);
+  const mn1 = texture(noiseTex, mul(mineUV, float(0.035))).r; // stone slabs (~28m)
+  const mn2 = texture(noiseTex, mul(mineUV, float(0.14))).r; // stone surface (~7m)
+  const mn3 = texture(noiseTex, mul(mineUV, float(0.5))).r; // gravel (~2m)
+  const mn4 = texture(noiseTex, mul(mineUV, float(1.4))).r; // micro cracks (~0.7m)
+
+  // Noise-distorted organic edge
+  const mineEdgeDistortion = add(
+    mul(sub(mn1, float(0.5)), float(0.22)),
+    add(
+      mul(sub(mn2, float(0.5)), float(0.14)),
+      mul(sub(mn3, float(0.5)), float(0.06)),
+    ),
+  );
+  const distortedMineInfluence = add(mineInfluenceAttr, mineEdgeDistortion);
+  const mineCoreMask = smoothstep(
+    float(0.42),
+    float(0.68),
+    distortedMineInfluence,
+  );
+  const mineEdgeMask = smoothstep(
+    float(0.12),
+    float(0.42),
+    distortedMineInfluence,
+  );
+
+  // Biome color palette: primary (bedrock), secondary (dark crevices), tertiary (gravel)
+  // 0=forest, 1=tundra, 2=desert, 3=mountains, 4=plains, 5=swamp, 6=valley
+  const mb = mineBiomeIdAttr;
+  const mbForest = mul(step(float(-0.5), mb), step(mb, float(0.5)));
+  const mbTundra = mul(step(float(0.5), mb), step(mb, float(1.5)));
+  const mbDesert = mul(step(float(1.5), mb), step(mb, float(2.5)));
+  const mbMountain = mul(step(float(2.5), mb), step(mb, float(3.5)));
+  const mbSwamp = mul(step(float(4.5), mb), step(mb, float(5.5)));
+  const mbValley = step(float(5.5), mb);
+
+  // Primary (bedrock)
+  let minePrimary: ShaderNode = vec3(0.54, 0.46, 0.36);
+  minePrimary = mix(minePrimary, vec3(0.56, 0.54, 0.5), mbForest);
+  minePrimary = mix(minePrimary, vec3(0.42, 0.42, 0.46), mbTundra);
+  minePrimary = mix(minePrimary, vec3(0.55, 0.38, 0.24), mbDesert);
+  minePrimary = mix(minePrimary, vec3(0.52, 0.5, 0.47), mbMountain);
+  minePrimary = mix(minePrimary, vec3(0.36, 0.3, 0.22), mbSwamp);
+  minePrimary = mix(minePrimary, vec3(0.58, 0.5, 0.4), mbValley);
+
+  // Secondary (dark crevices)
+  let mineSecondary: ShaderNode = vec3(0.38, 0.32, 0.22);
+  mineSecondary = mix(mineSecondary, vec3(0.4, 0.38, 0.35), mbForest);
+  mineSecondary = mix(mineSecondary, vec3(0.28, 0.28, 0.32), mbTundra);
+  mineSecondary = mix(mineSecondary, vec3(0.38, 0.24, 0.13), mbDesert);
+  mineSecondary = mix(mineSecondary, vec3(0.36, 0.34, 0.32), mbMountain);
+  mineSecondary = mix(mineSecondary, vec3(0.24, 0.19, 0.13), mbSwamp);
+  mineSecondary = mix(mineSecondary, vec3(0.42, 0.36, 0.26), mbValley);
+
+  // Tertiary (gravel highlights)
+  let mineTertiary: ShaderNode = vec3(0.62, 0.54, 0.44);
+  mineTertiary = mix(mineTertiary, vec3(0.62, 0.6, 0.56), mbForest);
+  mineTertiary = mix(mineTertiary, vec3(0.5, 0.5, 0.55), mbTundra);
+  mineTertiary = mix(mineTertiary, vec3(0.64, 0.48, 0.32), mbDesert);
+  mineTertiary = mix(mineTertiary, vec3(0.6, 0.58, 0.55), mbMountain);
+  mineTertiary = mix(mineTertiary, vec3(0.44, 0.38, 0.3), mbSwamp);
+  mineTertiary = mix(mineTertiary, vec3(0.66, 0.58, 0.48), mbValley);
+
+  // Layer 1: Exposed bedrock — broad slab patches
+  const mineSlabPattern = smoothstep(float(0.32), float(0.68), mn1);
+  const mineBedrockColor = mix(minePrimary, mineSecondary, mineSlabPattern);
+
+  // Layer 2: Stone surface texture — highlights and shadows
+  const mineSurfaceLight = smoothstep(float(0.45), float(0.75), mn2);
+  const mineSurfaceShadow = smoothstep(float(0.35), float(0.15), mn2);
+  const mineTexturedStone = mul(
+    mix(mineBedrockColor, mineTertiary, mul(mineSurfaceLight, float(0.35))),
+    mix(float(1.0), float(0.88), mineSurfaceShadow),
+  );
+
+  // Layer 3: Gravel scatter with pebble shadows
+  const mineGravelHighlight = smoothstep(float(0.58), float(0.78), mn3);
+  const mineGravelShadow = smoothstep(float(0.22), float(0.38), mn3);
+  const mineWithGravel = mix(
+    mineTexturedStone,
+    mineTertiary,
+    mul(mineGravelHighlight, float(0.3)),
+  );
+  const mineWithCracks = mix(
+    mul(mineWithGravel, float(0.84)),
+    mineWithGravel,
+    mineGravelShadow,
+  );
+
+  // Layer 4: Micro crack imperfections
+  const mineCrackMask = smoothstep(float(0.42), float(0.58), mn4);
+  const mineWithMicro = mul(
+    mineWithCracks,
+    mix(float(0.92), float(1.02), mineCrackMask),
+  );
+
+  // Layer 5: Radial gradient — center rock, edge gravel/dirt
+  const mineCenterW = smoothstep(float(0.45), float(0.85), mineInfluenceAttr);
+  const mineEdgeGravelDirt = mix(
+    mix(mineSecondary, minePrimary, float(0.4)),
+    mineTertiary,
+    mn3,
+  );
+  const mineRadialMixed = mix(
+    mix(mineWithMicro, mineEdgeGravelDirt, float(0.4)),
+    mineWithMicro,
+    mineCenterW,
+  );
+
+  // Layer 6: Wear / foot traffic darkening
+  const mineWearPattern = smoothstep(float(0.55), float(0.75), mn1);
+  const mineWornFloor = mul(
+    mineRadialMixed,
+    sub(float(1.0), mul(mineWearPattern, mul(mineCoreMask, float(0.08)))),
+  );
+
+  // Layer 7: Edge darkening band
+  const mineEdgeBand = mul(
+    smoothstep(float(0.15), float(0.32), mineEdgeMask),
+    smoothstep(float(0.52), float(0.32), mineEdgeMask),
+  );
+  const mineBorderDarken = mul(mineEdgeBand, float(0.14));
+  const mineFloorFinal = mul(mineWornFloor, sub(float(1.0), mineBorderDarken));
+
+  // Blend mine floor onto terrain
+  const baseWithMines = mix(baseWithRoads, mineFloorFinal, mineEdgeMask);
+
   // ============================================================================
   // VERTEX LIGHTING (lampposts, torches, etc.)
   // Simple additive point lights with smooth attenuation
@@ -1092,7 +1227,7 @@ export function createTerrainMaterial(): THREE.Material & {
 
   // Apply vertex lighting additively (multiply base by (1 + lightAccum))
   // This brightens terrain near lights without washing out colors
-  const litTerrain = mul(baseWithRoads, add(vec3(1, 1, 1), lightAccum));
+  const litTerrain = mul(baseWithMines, add(vec3(1, 1, 1), lightAccum));
 
   // === DISTANCE FOG (smoothstep with squared distances — avoids per-fragment sqrt) ===
   const baseFogFactor = smoothstep(

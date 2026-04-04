@@ -105,6 +105,31 @@ export interface PlacedStation {
   properties: Record<string, unknown>;
 }
 
+/** Dedicated mine area with clustered ore rocks */
+export interface PlacedMine {
+  id: string;
+  name: string;
+  position: WorldPosition;
+  /** Base mine area radius (15-25m) */
+  radius: number;
+  /** Radial offset multipliers for organic shape (8 control points, 0.82-1.18 range) */
+  radialOffsets: number[];
+  /** Entry direction angle (radians) — rocks form a C on the opposite side */
+  entryAngle: number;
+  /** Biome at center */
+  biome: string;
+  /** Difficulty tier index */
+  tierIndex: number;
+  /** Ore rock breakdown */
+  oreRocks: Array<{
+    resourceId: string;
+    count: number;
+  }>;
+  source: EntitySource;
+  sourceRegionId?: string;
+  properties: Record<string, unknown>;
+}
+
 /** Point of Interest placed in the world */
 export interface PlacedPOI {
   id: string;
@@ -423,6 +448,8 @@ export interface AutoGenResult {
   }>;
   /** Newly generated towns with full procgen data (buildings, roads, landmarks) */
   generatedTowns: ProcgenTown[];
+  /** Dedicated mine areas with clustered ore rocks */
+  mines: PlacedMine[];
   stats: AutoGenStats;
 }
 
@@ -432,6 +459,7 @@ export interface AutoGenStats {
   zoneMerged: number;
   totalMobs: number;
   totalResources: number;
+  totalMines: number;
   totalArea: number;
   generationTimeMs: number;
   /** Detected land bounding box (excludes ocean) */
@@ -590,6 +618,7 @@ export interface ExtendedWorldLayers {
   regions: PlacedRegion[];
   dangerSources: PlacedDangerSource[];
   wildernessBoundary: WildernessBoundary | null;
+  mines: PlacedMine[];
 }
 
 /** Default empty extended layers */
@@ -605,6 +634,7 @@ export const EMPTY_EXTENDED_LAYERS: ExtendedWorldLayers = {
   regions: [],
   dangerSources: [],
   wildernessBoundary: null,
+  mines: [],
 };
 
 // ============== ENTITY PALETTE TYPES ==============

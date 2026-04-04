@@ -1101,6 +1101,27 @@ export function ViewportContainer() {
     [foundationRoads],
   );
 
+  // Memoized mines prop — same reason as roads above. Without memoization the
+  // inline .map() creates a new array reference every render, which triggers
+  // TileBasedTerrain's mine useEffect on every frame, unloading/reloading tiles.
+  const extendedMines = state.extendedLayers?.mines;
+  const worldCenterOffsetForMines =
+    sceneRefsRef.current?.worldCenterOffset ?? 0;
+  const memoizedMines = useMemo(() => {
+    if (!extendedMines || extendedMines.length === 0) return undefined;
+    return extendedMines.map((m) => ({
+      position: {
+        x: m.position.x - worldCenterOffsetForMines,
+        y: m.position.y,
+        z: m.position.z - worldCenterOffsetForMines,
+      },
+      radius: m.radius,
+      radialOffsets: m.radialOffsets,
+      entryAngle: m.entryAngle,
+      biome: m.biome,
+    }));
+  }, [extendedMines, worldCenterOffsetForMines]);
+
   // ----- Editing hooks (self-guard on null sceneRefs / inactive tools) -----
 
   // Sync extended-layer entity markers and ghost preview to the 3D scene
@@ -1687,6 +1708,7 @@ export function ViewportContainer() {
         showDifficultyHeatmap={showDifficultyHeatmap}
         dangerSources={heatmapDangerSources}
         roads={state.builder.editing.world?.foundation.roads}
+        mines={memoizedMines}
         onTownsGenerated={handleTownsGenerated}
       />
       {/* Viewport info overlay (UE5-style corner HUD) */}
