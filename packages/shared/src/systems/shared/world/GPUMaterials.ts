@@ -126,6 +126,32 @@ export const GPU_VEG_CONFIG = {
 
   /** Distance from camera where geometry is fully dissolved (meters) - at near clip */
   NEAR_CAMERA_FADE_END: 0.05,
+
+  // ========== TREE DEPLETION DISSOLVE ==========
+  // BatchedMesh encodes dissolve in the **blue channel** of per-instance batch
+  // colors (blue = 1.0 - dissolveVal). R/G channels carry highlight intensity.
+  // See GLBTreeBatchedInstancer.applyDissolveColor / applyHighlightColor.
+  // InstancedMesh uses a dedicated per-instance `instanceDissolve` float attribute.
+
+  /**
+   * Duration of the respawn dissolve-in animation (seconds). Depletion is instant.
+   * NOTE: BatchedMesh encodes dissolve in a Uint8 blue channel (~256 levels).
+   * At 60fps this gives ~18 steps over 0.3s, which is smooth enough. Increasing
+   * this value significantly may require switching to Float32 encoding to avoid banding.
+   */
+  DISSOLVE_DURATION: 0.3,
+
+  /**
+   * Animation progress ceiling (not visual opacity).
+   * The actual fraction of fragments discarded is controlled by DISSOLVE_ALPHA_SCALE.
+   */
+  DISSOLVE_MAX: 1.0,
+
+  /**
+   * Fraction of fragments discarded when fully dissolved via screen-door dithering.
+   * 0.7 = ~70% of the Bayer 4×4 grid cells are discarded, giving a stippled look.
+   */
+  DISSOLVE_ALPHA_SCALE: 0.7,
 } as const;
 
 // ============================================================================
@@ -216,6 +242,13 @@ export type DissolveMaterialOptions = {
   enableRimHighlight?: boolean;
   /** Use BatchedMesh highlight (vBatchColor varying) instead of InstancedMesh attribute */
   batched?: boolean;
+  /**
+   * Enable depletion dissolve dithering (tree-specific).
+   * Reads dissolve progress from instanceDissolve attribute (InstancedMesh)
+   * or vBatchColor blue channel (BatchedMesh) and applies screen-door
+   * dithering in the alphaTestNode.
+   */
+  enableDepletionDissolve?: boolean;
 };
 
 /**
@@ -690,7 +723,29 @@ export function createDissolveMaterial(
     const waterCullValue = enableWaterCulling
       ? mul(step(worldPos.y, waterCutoff), float(2.0))
       : float(0.0);
-    const threshold = max(ditherThreshold, waterCullValue);
+    let threshold = max(ditherThreshold, waterCullValue);
+
+    // Depletion dissolve: screen-door dithering for depleted trees.
+    // Reuses the same Bayer dither value computed above for distance fade.
+    if (options.enableDepletionDissolve) {
+      const dissolveVal = options.batched
+        ? clamp(
+            sub(float(1.0), varyingProperty("vec3", "vBatchColor").z),
+            float(0.0),
+            float(1.0),
+          )
+        : attribute("instanceDissolve", "float");
+      const dissolveAmount = mul(
+        dissolveVal,
+        float(GPU_VEG_CONFIG.DISSOLVE_ALPHA_SCALE),
+      );
+      const hasDissolve = step(float(0.001), dissolveAmount);
+      const dissolveDiscard = mul(
+        mul(step(ditherValue, dissolveAmount), hasDissolve),
+        float(2.0),
+      );
+      threshold = max(threshold, dissolveDiscard);
+    }
 
     return threshold;
   })();
@@ -997,6 +1052,7 @@ export function createTreeDissolveMaterial(
   const baseDm = createDissolveMaterial(source, {
     ...options,
     enableRimHighlight: false,
+    enableDepletionDissolve: true,
   });
 
   const material = baseDm as unknown as THREE.MeshStandardNodeMaterial;
@@ -1145,10 +1201,8 @@ export function createTreeDissolveMaterial(
     let hlIntensity;
     if (options.batched) {
       const batchColor = varyingProperty("vec3", "vBatchColor");
-      hlIntensity = step(
-        float(1.01),
-        max(batchColor.x, max(batchColor.y, batchColor.z)),
-      );
+      // Only check R/G for highlight — blue channel is reserved for dissolve state
+      hlIntensity = step(float(1.01), max(batchColor.x, batchColor.y));
     } else {
       hlIntensity = attribute("instanceHighlight", "float");
     }
@@ -1167,6 +1221,9 @@ export function createTreeDissolveMaterial(
     // ---- Sky-color fog ----
     const fogged = mix(finalRgb, treeFogTex.rgb, treeFogFactor);
 
+    // Depletion dissolve is handled by the base dissolve material's alphaTestNode
+    // (enableDepletionDissolve: true), which uses Bayer 4×4 dithering to discard
+    // fragments. Trees stay in the opaque render pass with full early-Z benefits.
     return vec4(fogged, pbrOut.a);
   })();
 

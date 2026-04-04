@@ -8,8 +8,9 @@
  * - Visual staked indicator
  */
 
-import type { CSSProperties } from "react";
-import type { Theme } from "@/ui";
+import { useState, type CSSProperties } from "react";
+import { CursorTooltip, type Theme } from "@/ui";
+import { getTooltipTitleStyle } from "@/ui/core/tooltip/tooltipStyles";
 import { ItemIcon } from "@/ui/components/ItemIcon";
 import { formatQuantity } from "../utils";
 
@@ -76,32 +77,73 @@ export function SlotItem({
   onClick,
   onContextMenu,
 }: SlotItemProps) {
+  const [hoverState, setHoverState] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+
   if (!hasItem) {
     return <div style={getSlotStyle(theme, false)} />;
   }
 
   return (
-    <div
-      style={{
-        ...getSlotStyle(theme, true, isStaked),
-        opacity: isStaked ? 0.4 : 1,
-      }}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      title={title}
-    >
-      {itemId ? (
-        <ItemIcon itemId={itemId} size={32} />
-      ) : (
-        <span
-          style={{ fontSize: "10px", textAlign: "center", overflow: "hidden" }}
+    <>
+      <div
+        style={{
+          ...getSlotStyle(theme, true, isStaked),
+          opacity: isStaked ? 0.4 : 1,
+        }}
+        onClick={onClick}
+        onContextMenu={onContextMenu}
+        onMouseEnter={(e) => {
+          if (title) {
+            setHoverState({ x: e.clientX, y: e.clientY });
+          }
+        }}
+        onMouseMove={(e) => {
+          if (title) {
+            setHoverState({ x: e.clientX, y: e.clientY });
+          }
+        }}
+        onMouseLeave={() => setHoverState(null)}
+      >
+        {itemId ? (
+          <ItemIcon itemId={itemId} size={32} />
+        ) : (
+          <span
+            style={{
+              fontSize: "10px",
+              textAlign: "center",
+              overflow: "hidden",
+            }}
+          >
+            {displayName?.substring(0, 8)}
+          </span>
+        )}
+        {quantity !== undefined && quantity > 1 && (
+          <span style={quantityStyle}>{formatQuantity(quantity)}</span>
+        )}
+      </div>
+
+      {title && hoverState && (
+        <CursorTooltip
+          visible={true}
+          position={hoverState}
+          estimatedSize={{ width: 180, height: 48 }}
+          style={{
+            zIndex: theme.zIndex.tooltip,
+            minWidth: "140px",
+            maxWidth: "240px",
+          }}
         >
-          {displayName?.substring(0, 8)}
-        </span>
+          <div
+            style={{
+              ...getTooltipTitleStyle(theme),
+            }}
+          >
+            {title}
+          </div>
+        </CursorTooltip>
       )}
-      {quantity !== undefined && quantity > 1 && (
-        <span style={quantityStyle}>{formatQuantity(quantity)}</span>
-      )}
-    </div>
+    </>
   );
 }

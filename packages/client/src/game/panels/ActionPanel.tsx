@@ -19,7 +19,11 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { useThemeStore } from "@/ui";
+import { CursorTooltip, useThemeStore } from "@/ui";
+import {
+  getTooltipMetaStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
 import { breakpoints, gameUI } from "../../constants";
 import {
   getItem,
@@ -89,6 +93,9 @@ const DraggableSlot = memo(function DraggableSlot({
 }) {
   const theme = useThemeStore((s) => s.theme);
   const isEmpty = !item;
+  const [hoverState, setHoverState] = useState<{ x: number; y: number } | null>(
+    null,
+  );
 
   const {
     attributes,
@@ -113,111 +120,149 @@ const DraggableSlot = memo(function DraggableSlot({
     setDropRef(node);
   };
 
-  return (
-    <button
-      ref={combinedRef}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      onMouseEnter={onHover}
-      onMouseLeave={onLeave}
-      className="relative"
-      title={
-        item
-          ? `Slot ${slotNumber + 1}: ${item.itemId} (${item.quantity})`
-          : `Empty slot ${slotNumber + 1}`
-      }
-      style={{
-        width: `${slotSize}px`,
-        height: `${slotSize}px`,
-        background: isEmpty
-          ? theme.colors.slot.empty
-          : isOver
-            ? `linear-gradient(180deg, ${theme.colors.accent.primary}40 0%, ${theme.colors.border.decorative}4d 100%)`
-            : isHovered
-              ? `linear-gradient(180deg, ${theme.colors.accent.primary}26 0%, ${theme.colors.border.decorative}33 100%)`
-              : theme.colors.slot.filled,
-        border: isEmpty
-          ? `1px solid ${theme.colors.border.default}`
-          : isOver
-            ? `2px solid ${theme.colors.accent.primary}b3`
-            : isHovered
-              ? `1px solid ${theme.colors.accent.primary}80`
-              : `1px solid ${theme.colors.border.decorative}80`,
-        borderRadius: `${theme.borderRadius.sm}px`,
-        cursor: isEmpty ? "default" : isDragging ? "grabbing" : "grab",
-        opacity: isDragging ? 0.3 : 1,
-        transform: isOver
-          ? "scale(1.05)"
-          : isDragging
-            ? "scale(0.95)"
-            : "scale(1)",
-        transition: theme.transitions.fast,
-        touchAction: "none",
-        boxShadow: isOver ? `0 0 8px ${theme.colors.accent.primary}66` : "none",
-      }}
-      {...attributes}
-      {...listeners}
-    >
-      {/* Item Icon */}
-      {!isEmpty ? (
-        <div
-          className="flex items-center justify-center h-full"
-          style={{
-            fontSize: isMobile ? "14px" : "16px",
-            filter: "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))",
-          }}
-        >
-          <ItemIcon itemId={item.itemId} size={isMobile ? 32 : 36} />
-        </div>
-      ) : (
-        <div
-          className="flex items-center justify-center h-full"
-          style={{
-            color: theme.colors.border.default,
-            fontSize: "6px",
-          }}
-        >
-          •
-        </div>
-      )}
+  const tooltipLabel = item
+    ? `Slot ${slotNumber + 1}: ${getItem(item.itemId)?.name || item.itemId}${item.quantity > 1 ? ` x${item.quantity}` : ""}`
+    : `Empty slot ${slotNumber + 1}`;
 
-      {/* Quantity Badge */}
-      {item && item.quantity > 1 && (
+  return (
+    <>
+      <button
+        ref={combinedRef}
+        onClick={onClick}
+        onContextMenu={onContextMenu}
+        onMouseEnter={(e) => {
+          onHover();
+          setHoverState({ x: e.clientX, y: e.clientY });
+        }}
+        onMouseMove={(e) => {
+          setHoverState({ x: e.clientX, y: e.clientY });
+        }}
+        onMouseLeave={() => {
+          onLeave();
+          setHoverState(null);
+        }}
+        className="relative"
+        style={{
+          width: `${slotSize}px`,
+          height: `${slotSize}px`,
+          background: isEmpty
+            ? theme.colors.slot.empty
+            : isOver
+              ? `linear-gradient(180deg, ${theme.colors.accent.primary}40 0%, ${theme.colors.border.decorative}4d 100%)`
+              : isHovered
+                ? `linear-gradient(180deg, ${theme.colors.accent.primary}26 0%, ${theme.colors.border.decorative}33 100%)`
+                : theme.colors.slot.filled,
+          border: isEmpty
+            ? `1px solid ${theme.colors.border.default}`
+            : isOver
+              ? `2px solid ${theme.colors.accent.primary}b3`
+              : isHovered
+                ? `1px solid ${theme.colors.accent.primary}80`
+                : `1px solid ${theme.colors.border.decorative}80`,
+          borderRadius: `${theme.borderRadius.sm}px`,
+          cursor: isEmpty ? "default" : isDragging ? "grabbing" : "grab",
+          opacity: isDragging ? 0.3 : 1,
+          transform: isOver
+            ? "scale(1.05)"
+            : isDragging
+              ? "scale(0.95)"
+              : "scale(1)",
+          transition: theme.transitions.fast,
+          touchAction: "none",
+          boxShadow: isOver
+            ? `0 0 8px ${theme.colors.accent.primary}66`
+            : "none",
+        }}
+        {...attributes}
+        {...listeners}
+      >
+        {/* Item Icon */}
+        {!isEmpty ? (
+          <div
+            className="flex items-center justify-center h-full"
+            style={{
+              fontSize: isMobile ? "14px" : "16px",
+              filter: "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))",
+            }}
+          >
+            <ItemIcon itemId={item.itemId} size={isMobile ? 32 : 36} />
+          </div>
+        ) : (
+          <div
+            className="flex items-center justify-center h-full"
+            style={{
+              color: theme.colors.border.default,
+              fontSize: "6px",
+            }}
+          >
+            •
+          </div>
+        )}
+
+        {/* Quantity Badge */}
+        {item && item.quantity > 1 && (
+          <div
+            className="absolute font-bold"
+            style={{
+              bottom: "1px",
+              right: "1px",
+              background: theme.colors.accent.primary,
+              color: theme.colors.background.primary,
+              fontSize: theme.typography.fontSize.xs,
+              padding: "0px 2px",
+              borderRadius: `${theme.borderRadius.sm}px`,
+              lineHeight: 1.1,
+            }}
+          >
+            {item.quantity > 999
+              ? `${Math.floor(item.quantity / 1000)}K`
+              : item.quantity}
+          </div>
+        )}
+
+        {/* Slot Number (1-based for display) */}
         <div
           className="absolute font-bold"
           style={{
-            bottom: "1px",
-            right: "1px",
-            background: theme.colors.accent.primary,
-            color: theme.colors.background.primary,
-            fontSize: theme.typography.fontSize.xs,
-            padding: "0px 2px",
-            borderRadius: `${theme.borderRadius.sm}px`,
-            lineHeight: 1.1,
+            top: "1px",
+            left: "2px",
+            color: isEmpty
+              ? theme.colors.text.muted
+              : theme.colors.text.secondary,
+            fontSize: "7px",
+            textShadow: "0 1px 1px rgba(0, 0, 0, 0.6)",
           }}
         >
-          {item.quantity > 999
-            ? `${Math.floor(item.quantity / 1000)}K`
-            : item.quantity}
+          {slotNumber + 1}
         </div>
-      )}
+      </button>
 
-      {/* Slot Number (1-based for display) */}
-      <div
-        className="absolute font-bold"
-        style={{
-          top: "1px",
-          left: "2px",
-          color: isEmpty
-            ? theme.colors.text.muted
-            : theme.colors.text.secondary,
-          fontSize: "7px",
-          textShadow: "0 1px 1px rgba(0, 0, 0, 0.6)",
-        }}
-      >
-        {slotNumber + 1}
-      </div>
-    </button>
+      {hoverState && (
+        <CursorTooltip
+          visible={true}
+          position={hoverState}
+          estimatedSize={{ width: 180, height: 48 }}
+          style={{
+            zIndex: theme.zIndex.tooltip,
+            minWidth: "140px",
+            maxWidth: "220px",
+          }}
+        >
+          <div
+            style={{
+              ...getTooltipTitleStyle(theme),
+            }}
+          >
+            {tooltipLabel}
+          </div>
+          {item && (
+            <div style={{ ...getTooltipMetaStyle(theme), marginTop: "4px" }}>
+              Drag to reorder • Right-click for options
+            </div>
+          )}
+        </CursorTooltip>
+      )}
+    </>
   );
 });
 

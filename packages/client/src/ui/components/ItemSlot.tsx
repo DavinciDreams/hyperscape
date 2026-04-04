@@ -11,6 +11,7 @@ import React, {
   memo,
   useCallback,
   useRef,
+  useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -18,6 +19,11 @@ import { useTheme } from "../stores/themeStore";
 import { useDraggable, useDroppable, useDndMonitor } from "../core/drag";
 import type { DragEndEvent } from "../core/drag";
 import { getSlotStyle } from "../theme/themes";
+import { CursorTooltip } from "../core/tooltip/CursorTooltip";
+import {
+  getTooltipMetaStyle,
+  getTooltipTitleStyle,
+} from "../core/tooltip/tooltipStyles";
 
 /** Item data interface */
 export interface ItemData {
@@ -96,6 +102,10 @@ export const ItemSlot = memo(function ItemSlot({
 }: ItemSlotProps): React.ReactElement {
   const theme = useTheme();
   const slotSize = size ?? theme.slot.size;
+  const [hoverState, setHoverState] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Track the drop target ID for this slot
   const dropTargetId = `drop-${slotId}`;
@@ -255,9 +265,19 @@ export const ItemSlot = memo(function ItemSlot({
       style={containerStyle}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
+      onMouseEnter={(e) => {
+        if (item) {
+          setHoverState({ x: e.clientX, y: e.clientY });
+        }
+      }}
+      onMouseMove={(e) => {
+        if (item) {
+          setHoverState({ x: e.clientX, y: e.clientY });
+        }
+      }}
+      onMouseLeave={() => setHoverState(null)}
       {...dragAttributes}
       {...dragListeners}
-      title={item?.tooltip || item?.name}
     >
       {/* Item icon */}
       {item && (
@@ -290,6 +310,31 @@ export const ItemSlot = memo(function ItemSlot({
 
       {/* Noted indicator */}
       {item?.noted && <span style={notedStyle}>N</span>}
+
+      {item && hoverState && (
+        <CursorTooltip
+          visible={true}
+          position={hoverState}
+          estimatedSize={{ width: 150, height: 48 }}
+          style={{
+            zIndex: theme.zIndex.tooltip,
+            minWidth: "120px",
+            maxWidth: "220px",
+          }}
+        >
+          <div
+            style={{
+              ...getTooltipTitleStyle(theme),
+            }}
+          >
+            {item.tooltip || item.name}
+            {item.quantity && item.quantity > 1 ? ` x${item.quantity}` : ""}
+          </div>
+          <div style={{ ...getTooltipMetaStyle(theme), marginTop: "4px" }}>
+            Item slot
+          </div>
+        </CursorTooltip>
+      )}
     </div>
   );
 });

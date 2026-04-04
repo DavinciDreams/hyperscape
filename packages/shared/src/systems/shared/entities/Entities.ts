@@ -1067,7 +1067,7 @@ export class Entities extends SystemBase implements IEntities {
 
       // On client, emit enter events for remote players
       if (network?.isClient && data.owner !== network.id) {
-        this.emitTypedEvent("PLAYER_JOINED", {
+        this.world.emit(EventType.PLAYER_JOINED, {
           playerId: entity.id,
           player: entity as PlayerLocal,
         });
@@ -1075,7 +1075,6 @@ export class Entities extends SystemBase implements IEntities {
 
       // On server, emit PLAYER_REGISTERED for all player entities
       if (network?.isServer) {
-        this.emitTypedEvent("PLAYER_REGISTERED", { playerId: entity.id });
         this.world.emit(EventType.PLAYER_REGISTERED, { playerId: entity.id });
       }
 
@@ -1088,12 +1087,11 @@ export class Entities extends SystemBase implements IEntities {
         }
         this.player = entity as Player;
         // Emit PLAYER_JOINED for local player so PlayerSystem can track them
-        // (Previously only PLAYER_REGISTERED was emitted, breaking skill updates)
-        this.emitTypedEvent("PLAYER_JOINED", {
+        this.world.emit(EventType.PLAYER_JOINED, {
           playerId: entity.id,
           player: entity as PlayerLocal,
         });
-        this.emitTypedEvent("PLAYER_REGISTERED", { playerId: entity.id });
+        this.world.emit(EventType.PLAYER_REGISTERED, { playerId: entity.id });
       }
     }
 

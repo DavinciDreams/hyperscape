@@ -21,7 +21,12 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { getItem } from "@hyperscape/shared";
-import { useThemeStore, useMobileLayout } from "@/ui";
+import { CursorTooltip, useThemeStore, useMobileLayout } from "@/ui";
+import {
+  getTooltipBodyStyle,
+  getTooltipMetaStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
 import { getPanelSurfaceStyle } from "@/ui/theme/themes";
 
 // Types
@@ -67,6 +72,69 @@ import { useBankActions, useDragDrop } from "./BankPanel/hooks";
 // NOTE: Distance validation is now SERVER-AUTHORITATIVE
 // The server tracks interaction sessions and sends bankClose packets
 // when the player moves too far away. The client no longer polls distance.
+
+interface BankItemHoverState {
+  item: BankItem;
+  position: { x: number; y: number };
+}
+
+function renderBankItemHoverTooltip(
+  itemHover: BankItemHoverState,
+  theme: ReturnType<typeof useThemeStore.getState>["theme"],
+): React.ReactNode {
+  const hoveredItemData = getItem(itemHover.item.itemId);
+  const itemName = hoveredItemData?.name || itemHover.item.itemId;
+  const itemValue = hoveredItemData?.value ?? 0;
+  const isPlaceholder = itemHover.item.quantity === 0;
+
+  return (
+    <CursorTooltip
+      visible={true}
+      position={itemHover.position}
+      estimatedSize={{ width: 160, height: 72 }}
+      style={{
+        zIndex: theme.zIndex.tooltip,
+        minWidth: "140px",
+        maxWidth: "240px",
+      }}
+    >
+      <div
+        style={{
+          ...getTooltipTitleStyle(theme),
+          marginBottom: "4px",
+        }}
+      >
+        {itemName}
+        {!isPlaceholder && itemHover.item.quantity > 1 && (
+          <span
+            style={{
+              ...getTooltipMetaStyle(theme),
+              fontWeight: "normal",
+            }}
+          >
+            {" "}
+            x{itemHover.item.quantity.toLocaleString()}
+          </span>
+        )}
+      </div>
+
+      <div
+        style={{
+          ...getTooltipBodyStyle(theme),
+        }}
+      >
+        {isPlaceholder ? (
+          <div>Placeholder item</div>
+        ) : (
+          <>
+            <div>Stored in tab {itemHover.item.tabIndex}</div>
+            <div>Value: {itemValue.toLocaleString()} gp</div>
+          </>
+        )}
+      </div>
+    </CursorTooltip>
+  );
+}
 
 export function BankPanel({
   items, // RS3-style: includes qty=0 items (placeholders)
@@ -115,6 +183,8 @@ export function BankPanel({
     message: "",
     onConfirm: () => {},
   });
+  const [hoveredBankItem, setHoveredBankItem] =
+    useState<BankItemHoverState | null>(null);
 
   // ========== TAB STATE ==========
   // -1 = "All" view (shows all items across all tabs)
@@ -304,6 +374,26 @@ export function BankPanel({
     setContextMenu((prev) => ({ ...prev, visible: false }));
   }, []);
 
+  const handleBankItemHoverStart = useCallback(
+    (item: BankItem, position: { x: number; y: number }) => {
+      if (contextMenu.visible) return;
+      setHoveredBankItem({ item, position });
+    },
+    [contextMenu.visible],
+  );
+
+  const handleBankItemHoverMove = useCallback(
+    (position: { x: number; y: number }) => {
+      if (contextMenu.visible) return;
+      setHoveredBankItem((prev) => (prev ? { ...prev, position } : null));
+    },
+    [contextMenu.visible],
+  );
+
+  const handleBankItemHoverEnd = useCallback(() => {
+    setHoveredBankItem(null);
+  }, []);
+
   const openContextMenu = (
     e: React.MouseEvent,
     itemId: string,
@@ -380,6 +470,10 @@ export function BankPanel({
         onClose={closeContextMenu}
         rightPanelMode={rightPanelMode}
       />
+
+      {!contextMenu.visible &&
+        hoveredBankItem &&
+        renderBankItemHoverTooltip(hoveredBankItem, theme)}
 
       <CoinAmountModal
         modal={coinModal}
@@ -627,6 +721,9 @@ export function BankPanel({
                               onDragEnd={handleSlotDragEnd}
                               onClick={handleSlotClick}
                               onContextMenu={handleSlotContextMenu}
+                              onHoverStart={handleBankItemHoverStart}
+                              onHoverMove={handleBankItemHoverMove}
+                              onHoverEnd={handleBankItemHoverEnd}
                             />
                           );
                         })}
@@ -783,6 +880,9 @@ export function BankPanel({
                       onDragEnd={handleSlotDragEnd}
                       onClick={handleSlotClick}
                       onContextMenu={handleSlotContextMenu}
+                      onHoverStart={handleBankItemHoverStart}
+                      onHoverMove={handleBankItemHoverMove}
+                      onHoverEnd={handleBankItemHoverEnd}
                     />
                   );
                 })}
@@ -883,6 +983,7 @@ export function BankPanel({
           onChangeMode={setRightPanelMode}
           inventory={inventory}
           coins={coins}
+          world={world}
           equipment={equipment}
           onDeposit={handleDeposit}
           onDepositAll={handleDepositAll}

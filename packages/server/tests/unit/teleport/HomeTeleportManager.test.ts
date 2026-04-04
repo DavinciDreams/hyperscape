@@ -20,6 +20,7 @@ import {
   getHomeTeleportManager,
   handleHomeTeleport,
   handleHomeTeleportCancel,
+  formatCooldownRemaining,
 } from "../../../src/systems/ServerNetwork/handlers/home-teleport";
 
 // ============================================================================
@@ -178,11 +179,11 @@ describe("Home Teleport Manager", () => {
       );
     });
 
-    it("broadcasts emote change to other players", () => {
+    it("does not broadcast a cast emote on teleport start", () => {
       const manager = getManager();
       manager.startCasting(mockSocket as never, 0);
 
-      expect(mockSendFn).toHaveBeenCalledWith(
+      expect(mockSendFn).not.toHaveBeenCalledWith(
         "entityModified",
         { id: "player-123", changes: { emote: Emotes.SQUAT } },
         mockSocket.id,
@@ -372,7 +373,25 @@ describe("Home Teleport Manager", () => {
       expect(error).toContain("cooldown");
     });
 
-    it("cooldown expires after 15 minutes", () => {
+    it("handleHomeTeleport sends remainingMs when blocked by cooldown", () => {
+      const manager = getManager();
+      manager.startCasting(mockSocket as never, 0);
+      manager.processTick(CAST_TICKS, () => mockSocket as never);
+
+      mockSocket.send.mockClear();
+
+      handleHomeTeleport(mockSocket as never, {}, mockWorld as never, 999);
+
+      expect(mockSocket.send).toHaveBeenCalledWith(
+        "homeTeleportFailed",
+        expect.objectContaining({
+          reason: expect.stringContaining("cooldown"),
+          remainingMs: expect.any(Number),
+        }),
+      );
+    });
+
+    it("cooldown expires after 30 seconds", () => {
       const manager = getManager();
       // Complete first teleport
       manager.startCasting(mockSocket as never, 0);
@@ -799,8 +818,8 @@ describe("Home Teleport Manager", () => {
 
   describe("Constants", () => {
     it("cooldown matches HOME_TELEPORT_CONSTANTS", () => {
-      // Production value: 15 minutes
-      expect(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS).toBe(15 * 60 * 1000);
+      // Production value: 30 seconds
+      expect(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS).toBe(30 * 1000);
     });
 
     it("cast time is exactly 10 seconds in milliseconds", () => {
@@ -809,6 +828,22 @@ describe("Home Teleport Manager", () => {
 
     it("cast time ticks matches 10s / 600ms per tick", () => {
       expect(HOME_TELEPORT_CONSTANTS.CAST_TIME_TICKS).toBe(17);
+    });
+  });
+
+  describe("formatCooldownRemaining", () => {
+    it("rounds sub-second values up to 1s", () => {
+      expect(formatCooldownRemaining(0)).toBe("1s");
+      expect(formatCooldownRemaining(999)).toBe("1s");
+    });
+
+    it("formats exact minutes without seconds", () => {
+      expect(formatCooldownRemaining(60_000)).toBe("1m");
+    });
+
+    it("formats minutes and seconds when needed", () => {
+      expect(formatCooldownRemaining(61_000)).toBe("1m 1s");
+      expect(formatCooldownRemaining(90_500)).toBe("1m 31s");
     });
   });
 

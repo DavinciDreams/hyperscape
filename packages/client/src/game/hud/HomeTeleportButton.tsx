@@ -13,6 +13,10 @@ import React, {
 import { useThemeStore } from "@/ui";
 import { HOME_TELEPORT_CONSTANTS, EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
+import {
+  getHomeTeleportCooldownProgress,
+  readHomeTeleportRemainingMs,
+} from "./homeTeleportUi";
 
 type TeleportState = "ready" | "cooldown" | "casting";
 
@@ -60,12 +64,23 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
     const onCastStart = () => {
       setState("casting");
       setCastStartTime(performance.now());
+      setCooldownEndTime(null);
+      setCooldownRemaining(0);
       setCastProgress(0);
     };
 
-    const onFailed = () => {
-      // Server rejected or cancelled - reset to ready
-      setState("ready");
+    const onFailed = (event?: unknown) => {
+      const remainingMs = readHomeTeleportRemainingMs(event);
+      if (remainingMs > 0) {
+        setState("cooldown");
+        setCooldownEndTime(performance.now() + remainingMs);
+        setCooldownRemaining(remainingMs);
+      } else {
+        // Server rejected or cancelled - reset to ready
+        setState("ready");
+        setCooldownEndTime(null);
+        setCooldownRemaining(0);
+      }
       setCastStartTime(null);
       setCastProgress(0);
     };
@@ -74,6 +89,8 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
       // Server confirmed cancel - reset to ready
       setState("ready");
       setCastStartTime(null);
+      setCooldownEndTime(null);
+      setCooldownRemaining(0);
       setCastProgress(0);
     };
 
@@ -127,11 +144,14 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
       const now = performance.now();
 
       if (state === "casting" && castStartTimeRef.current !== null) {
-        const progress = Math.min(
-          100,
-          ((now - castStartTimeRef.current) /
-            HOME_TELEPORT_CONSTANTS.CAST_TIME_MS) *
+        const progress = Math.max(
+          0,
+          Math.min(
             100,
+            ((now - castStartTimeRef.current) /
+              HOME_TELEPORT_CONSTANTS.CAST_TIME_MS) *
+              100,
+          ),
         );
         setCastProgress(progress);
       } else if (state === "cooldown" && cooldownEndTimeRef.current !== null) {
@@ -188,6 +208,9 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
 
   const isCasting = state === "casting";
   const isDisabled = state === "cooldown";
+  const cooldownProgress = isDisabled
+    ? getHomeTeleportCooldownProgress(cooldownRemaining)
+    : 0;
 
   const styles = useMemo(() => {
     const size = isMobile ? 48 : 56;
@@ -226,6 +249,22 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
         overflow: "hidden",
         transition: theme.transitions.normal,
       } as React.CSSProperties,
+      cooldownFill: {
+        position: "absolute" as const,
+        inset: 0,
+        top: `${100 - cooldownProgress}%`,
+        background: `linear-gradient(180deg, ${theme.colors.status.prayer}cc, ${theme.colors.accent.primary}f2)`,
+        transition: "top 0.1s linear",
+        pointerEvents: "none" as const,
+      } as React.CSSProperties,
+      content: {
+        position: "relative" as const,
+        zIndex: 1,
+        display: "flex",
+        flexDirection: "column" as const,
+        alignItems: "center",
+        justifyContent: "center",
+      } as React.CSSProperties,
       icon: {
         fontSize: isMobile ? "1.25rem" : "1.5rem",
         opacity: isDisabled ? 0.5 : 1,
@@ -251,7 +290,7 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
         transition: "width 0.05s linear",
       } as React.CSSProperties,
     };
-  }, [theme, isMobile, isDisabled, isCasting, castProgress]);
+  }, [theme, isMobile, isDisabled, isCasting, castProgress, cooldownProgress]);
 
   const label =
     state === "cooldown"
@@ -269,8 +308,11 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
   return (
     <div className="fixed pointer-events-auto z-50" style={styles.container}>
       <button onClick={handleClick} style={styles.button} title={title}>
-        <span style={styles.icon}>🏠</span>
-        <span style={styles.label}>{label}</span>
+        {isDisabled && <div style={styles.cooldownFill} />}
+        <div style={styles.content}>
+          <span style={styles.icon}>🏠</span>
+          <span style={styles.label}>{label}</span>
+        </div>
         {isCasting && <div style={styles.progress} />}
       </button>
     </div>

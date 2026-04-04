@@ -18,6 +18,7 @@ import {
   type WindowPositionModifier,
 } from "../core/drag/modifiers";
 import { getThemedWindowShadow, getWindowSurfaceStyle } from "../theme/themes";
+import { getPointerFocusedControl } from "../utils/pointerFocus";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
 import type { WindowProps } from "../types";
 
@@ -663,6 +664,22 @@ export const Window = memo(function Window({
       className={className}
       style={containerStyle}
       onMouseDown={isUnlocked ? bringToFront : undefined}
+      onClickCapture={(e) => {
+        if (isUnlocked || e.detail <= 0) {
+          return;
+        }
+
+        const control = getPointerFocusedControl(e.target);
+        if (!control) {
+          return;
+        }
+
+        requestAnimationFrame(() => {
+          if (document.activeElement === control) {
+            control.blur();
+          }
+        });
+      }}
       data-window-id={windowId}
       data-panel={windowId}
       role="group"

@@ -21,9 +21,7 @@ import { INTERACTION_RANGE } from "../constants";
 /** OSRS scenery/object color (cyan) for context menu target names */
 const SCENERY_COLOR = "#00ffff";
 
-/**
- * Corpse/Headstone entity interface
- */
+/** Corpse/Headstone entity interface */
 interface CorpseEntity {
   handleInteraction?: (data: unknown) => Promise<void>;
 }
@@ -94,11 +92,12 @@ export class CorpseInteractionHandler extends BaseInteractionHandler {
       actionId: "loot",
       range: INTERACTION_RANGE.LOOT,
       onExecute: () => {
-        // Get CURRENT player at execute time, not queue time
         const currentPlayer = this.getPlayer();
         if (!currentPlayer) return;
 
-        // Try entity's handleInteraction method (for headstones)
+        // Call handleInteraction on the client-side entity directly.
+        // The entity has loot items synced via network data (modify).
+        // This emits CORPSE_CLICK which opens the loot window.
         const entity = target.entity as CorpseEntity;
         if (entity?.handleInteraction) {
           entity.handleInteraction({

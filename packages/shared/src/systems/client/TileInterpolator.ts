@@ -1554,12 +1554,12 @@ export class TileInterpolator {
    * face their combat target while moving (OSRS PvP behavior).
    *
    * @param entityId - Entity to update
-   * @param quaternion - Combat rotation from server [x, y, z, w]
+   * @param quaternion - Combat rotation as [x, y, z, w] array or THREE.Quaternion
    * @returns true if rotation was applied, false if entity has no state
    */
   setCombatRotation(
     entityId: string,
-    quaternion: number[],
+    quaternion: number[] | THREE.Quaternion,
     entityPosition?: { x: number; y: number; z: number },
   ): boolean {
     let state = this.entityStates.get(entityId);
@@ -1615,18 +1615,24 @@ export class TileInterpolator {
     state.inCombatRotation = true;
 
     // Apply combat rotation to state - TileInterpolator.update() will apply to entity.base
-    state.quaternion.set(
-      quaternion[0],
-      quaternion[1],
-      quaternion[2],
-      quaternion[3],
-    );
-    state.targetQuaternion.set(
-      quaternion[0],
-      quaternion[1],
-      quaternion[2],
-      quaternion[3],
-    );
+    // Support both number[] (from server packets) and THREE.Quaternion (from local player)
+    if (Array.isArray(quaternion)) {
+      state.quaternion.set(
+        quaternion[0],
+        quaternion[1],
+        quaternion[2],
+        quaternion[3],
+      );
+      state.targetQuaternion.set(
+        quaternion[0],
+        quaternion[1],
+        quaternion[2],
+        quaternion[3],
+      );
+    } else {
+      state.quaternion.copy(quaternion);
+      state.targetQuaternion.copy(quaternion);
+    }
 
     return true; // Rotation accepted
   }

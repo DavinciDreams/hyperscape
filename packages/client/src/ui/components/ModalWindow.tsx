@@ -84,6 +84,8 @@ export interface ModalWindowProps {
   className?: string;
   /** Additional style for the modal container */
   style?: CSSProperties;
+  /** Additional style for the modal content area */
+  contentStyle?: CSSProperties;
 }
 
 /**
@@ -121,6 +123,7 @@ export const ModalWindow = memo(function ModalWindow({
   showCloseButton = true,
   className,
   style,
+  contentStyle: contentStyleOverride,
 }: ModalWindowProps): React.ReactElement | null {
   const theme = useTheme();
   const resolvedZIndex = zIndex ?? theme.zIndex.modal;
@@ -328,6 +331,7 @@ export const ModalWindow = memo(function ModalWindow({
         ? "linear-gradient(180deg, rgba(255, 255, 255, 0.028) 0%, rgba(255, 255, 255, 0.014) 18%, rgba(0, 0, 0, 0.08) 100%)"
         : "transparent",
     pointerEvents: "auto",
+    ...contentStyleOverride,
   };
 
   return (

@@ -48,6 +48,7 @@ interface DeathLockData {
   zoneType: ZoneType;
   itemCount: number;
   items: DeathItemData[];
+  keptItems?: DeathItemData[]; // OSRS keep-3 items returned on respawn
   killedBy: string;
   recovered: boolean;
 }
@@ -407,6 +408,7 @@ export class DeathStateManager {
       itemCount: number;
       // Crash recovery fields
       items?: Array<{ itemId: string; quantity: number }>;
+      keptItems?: Array<{ itemId: string; quantity: number }>;
       killedBy?: string;
     },
     tx?: TransactionContext,
@@ -439,6 +441,7 @@ export class DeathStateManager {
       itemCount: options.itemCount,
       // Crash recovery fields
       items: options.items || [],
+      keptItems: options.keptItems,
       killedBy: options.killedBy || "unknown",
       recovered: false, // New deaths are not yet recovered
     };
@@ -499,6 +502,7 @@ export class DeathStateManager {
       itemCount: options.itemCount,
       // Crash recovery fields - track items for database sync
       items: options.items,
+      keptItems: options.keptItems,
       killedBy: options.killedBy,
       recovered: false,
     };

@@ -122,6 +122,20 @@ export {
 export type { MobileSpacing, MobileBarHeight } from "./mobileStyles";
 
 // ===========================================
+// PANEL LAYOUT CONSTANTS
+// ===========================================
+export {
+  PANEL_ICON_SIZE,
+  PANEL_GRID_GAP,
+  PANEL_PADDING,
+  PANEL_GRID_PADDING,
+  PANEL_MOBILE_PADDING,
+  PANEL_MOBILE_ICON_SIZE,
+  PANEL_MOBILE_GRID_GAP,
+  PANEL_SLOT_RADIUS,
+} from "./panelLayout";
+
+// ===========================================
 // GAME CONSTANTS (Re-exports from @hyperscape/shared)
 // ===========================================
 // Use constants from the shared package instead of duplicating here:

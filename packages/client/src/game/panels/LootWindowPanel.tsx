@@ -7,7 +7,11 @@ import type {
 } from "@hyperscape/shared";
 import { EventType, generateTransactionId, getItem } from "@hyperscape/shared";
 import { ErrorBoundary } from "../../lib/ErrorBoundary";
-import { useThemeStore } from "@/ui";
+import { CursorTooltip, useThemeStore } from "@/ui";
+import {
+  getTooltipMetaStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
 import {
   getInteractiveTileStyle,
   getPanelHeaderStyle,
@@ -42,6 +46,12 @@ function LootWindowPanelContent({
   const theme = useThemeStore((s) => s.theme);
   const closeButtonStyle = getShellControlButtonStyle(theme, "neutral");
   const [items, setItems] = useState<InventoryItem[]>(lootItems);
+  const [hoveredItem, setHoveredItem] = useState<{
+    item: InventoryItem;
+    displayName: string;
+    itemType: string;
+    position: { x: number; y: number };
+  } | null>(null);
 
   // Close confirmation state
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
@@ -516,12 +526,32 @@ function LootWindowPanelContent({
                   }),
                 }}
                 onClick={() => handleTakeItem(item, index)}
-                title={`Click to take ${displayName} (${item.quantity})`}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = `${theme.colors.border.hover}80`;
+                  setHoveredItem({
+                    item,
+                    displayName,
+                    itemType,
+                    position: { x: e.clientX, y: e.clientY },
+                  });
+                }}
+                onMouseMove={(e) => {
+                  setHoveredItem((prev) =>
+                    prev?.item.id === item.id
+                      ? {
+                          item,
+                          displayName,
+                          itemType,
+                          position: { x: e.clientX, y: e.clientY },
+                        }
+                      : prev,
+                  );
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.borderColor = `${theme.colors.border.default}30`;
+                  setHoveredItem((prev) =>
+                    prev?.item.id === item.id ? null : prev,
+                  );
                 }}
               >
                 <div className="text-center">
@@ -550,6 +580,39 @@ function LootWindowPanelContent({
             );
           })}
         </div>
+      )}
+
+      {hoveredItem && (
+        <CursorTooltip
+          visible={true}
+          position={hoveredItem.position}
+          estimatedSize={{ width: 220, height: 72 }}
+          style={{
+            zIndex: theme.zIndex.tooltip,
+            minWidth: "180px",
+            maxWidth: "260px",
+          }}
+        >
+          <div
+            style={{
+              ...getTooltipTitleStyle(theme),
+            }}
+          >
+            {hoveredItem.displayName}
+            {hoveredItem.item.quantity > 1
+              ? ` x${hoveredItem.item.quantity}`
+              : ""}
+          </div>
+          <div
+            style={{
+              ...getTooltipMetaStyle(theme),
+              marginTop: "4px",
+              textTransform: "capitalize",
+            }}
+          >
+            {hoveredItem.itemType} • Click to take
+          </div>
+        </CursorTooltip>
       )}
 
       {/* Instructions */}

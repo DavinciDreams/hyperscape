@@ -22,17 +22,34 @@ import React, {
 import { createPortal } from "react-dom";
 import { useDraggable } from "@dnd-kit/core";
 import {
-  calculateCursorTooltipPosition,
   useThemeStore,
   useMobileLayout,
+  CursorTooltip,
+  TOOLTIP_SIZE_ESTIMATES,
 } from "@/ui";
+import {
+  getTooltipBodyStyle,
+  getTooltipDividerStyle,
+  getTooltipMetaStyle,
+  getTooltipStatusStyle,
+  getTooltipTagStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
 import {
   getInteractiveTileStyle,
   getPanelInsetStyle,
   getPanelSurfaceStyle,
 } from "@/ui/theme/themes";
-import { zIndex, MOBILE_PRAYER } from "../../constants";
-import { useTooltipSize } from "../../hooks";
+import {
+  zIndex,
+  MOBILE_PRAYER,
+  PANEL_ICON_SIZE,
+  PANEL_GRID_GAP,
+  PANEL_PADDING,
+  PANEL_GRID_PADDING,
+  PANEL_MOBILE_PADDING,
+  PANEL_SLOT_RADIUS,
+} from "../../constants";
 import type { PlayerStats, ClientWorld } from "../../types";
 import {
   EventType,
@@ -66,11 +83,12 @@ function isPrayerToggledPayload(data: unknown): data is PrayerToggledEvent {
   );
 }
 
-// Prayer panel layout constants - compact sizing
-const PRAYER_ICON_SIZE = 36; // Compact icon size
-const PRAYER_GAP = 2; // Tight gap
-const PANEL_PADDING = 3; // Minimal container padding
-const GRID_PADDING = 3; // Minimal grid padding
+// Prayer panel layout constants — use shared sizing tokens from panelLayout.ts
+// to ensure consistency across Prayer, Spells, Skills, and Inventory panels.
+const PRAYER_ICON_SIZE = PANEL_ICON_SIZE; // 36px desktop icon size
+const PRAYER_GAP = PANEL_GRID_GAP; // 3px gap between slots
+// PANEL_PADDING and GRID_PADDING come directly from the shared constants barrel
+const GRID_PADDING = PANEL_GRID_PADDING; // alias for local use
 const HEADER_HEIGHT = 44; // Compact prayer points header + bar
 const FOOTER_HEIGHT = 28; // Compact active prayers footer
 const PRAYER_DATA_POLL_INTERVAL_MS = 250;
@@ -291,20 +309,33 @@ function PrayerIcon({
     [onClick, isUnlocked],
   );
 
+  const [isHovered, setIsHovered] = React.useState(false);
+
   // Memoize button style to prevent recreation on every render
   const buttonStyle = useMemo(
     (): React.CSSProperties => ({
       width: iconSize,
       height: iconSize,
       padding: 0,
+      background:
+        isHovered && isUnlocked
+          ? "rgba(183, 140, 76, 0.08)"
+          : "var(--color-slot-empty)",
       ...getInteractiveTileStyle(theme, {
         active: isActive,
         dragging: isDragging,
+        hovered: isHovered,
         disabled: !isUnlocked,
-        radius: isMobile ? 6 : 4,
+        radius: 4, // Square matching equipment/inventory UI
         accentColor: theme.colors.accent.secondary,
       }),
-      borderRadius: isMobile ? 4 : 2,
+      borderColor: isActive
+        ? theme.colors.accent.secondary
+        : isHovered && isUnlocked
+          ? "rgba(183, 140, 76, 0.4)" // RS3/OSRS gold tint on hover
+          : "rgba(8, 8, 10, 0.6)",
+      borderWidth: "1px",
+      borderRadius: 4, // Square slots
       cursor: isUnlocked ? (isDragging ? "grabbing" : "grab") : "not-allowed",
       display: "flex",
       alignItems: "center",
@@ -312,12 +343,14 @@ function PrayerIcon({
       position: "relative",
       overflow: "hidden",
       boxShadow: isActive
-        ? `0 0 ${isMobile ? 12 : 8}px ${theme.colors.accent.secondary}80, inset 0 0 ${isMobile ? 16 : 10}px ${theme.colors.accent.secondary}33`
-        : "inset 0 1px 2px rgba(0, 0, 0, 0.4)",
+        ? `0 0 ${isMobile ? 12 : 8}px ${theme.colors.accent.secondary}80, inset 0 0 ${isMobile ? 16 : 10}px ${theme.colors.accent.secondary}33, inset 2px 2px 4px rgba(0, 0, 0, 0.34)`
+        : isHovered && isUnlocked
+          ? "inset 2px 2px 4px rgba(0, 0, 0, 0.5), inset -1px -1px 2px rgba(183, 140, 76, 0.15)"
+          : "inset 2px 2px 4px rgba(0, 0, 0, 0.42), inset -1px -1px 2px rgba(88, 74, 56, 0.12)",
       opacity: isDragging ? 0.5 : 1,
       touchAction: "none",
     }),
-    [isActive, isUnlocked, isDragging, theme, iconSize, isMobile],
+    [isActive, isUnlocked, isDragging, isHovered, theme, iconSize, isMobile],
   );
 
   return (
@@ -325,9 +358,15 @@ function PrayerIcon({
       ref={setNodeRef}
       onClick={handleClick}
       onContextMenu={onContextMenu}
-      onMouseEnter={onMouseEnter}
+      onMouseEnter={(e) => {
+        setIsHovered(true);
+        onMouseEnter(e);
+      }}
       onMouseMove={onMouseMove}
-      onMouseLeave={onMouseLeave}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        onMouseLeave();
+      }}
       disabled={!isUnlocked}
       aria-label={`${prayer.name}${isActive ? " (Active)" : ""}${!isUnlocked ? " (Locked)" : ""}`}
       className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
@@ -421,18 +460,12 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
     y: 0,
     prayer: null,
   });
-  const prayerTooltipRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   // Use prayer points directly from stats prop (same pattern as StatusBars)
   // This ensures a single source of truth - no local state that can get out of sync
   const prayerPoints = stats?.prayerPoints ?? { current: 0, max: 1 };
-
-  const prayerTooltipSize = useTooltipSize(hoveredPrayer, prayerTooltipRef, {
-    width: 200,
-    height: 100,
-  });
 
   const playerPrayerLevel = stats?.skills?.prayer?.level ?? 1;
 
@@ -688,21 +721,21 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       className="flex flex-col h-full"
       style={{
         ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
-        padding: shouldUseMobileUI ? 4 : 3,
+        padding: shouldUseMobileUI ? PANEL_MOBILE_PADDING : PANEL_PADDING,
       }}
     >
       {/* Prayer Points Header - Compact */}
       <div
         style={{
+          ...getPanelInsetStyle(theme, {
+            emphasis: "normal",
+            radius: 4,
+          }),
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
           marginBottom: 4,
-          ...getPanelInsetStyle(theme, {
-            emphasis: "normal",
-            radius: theme.borderRadius.md,
-          }),
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -718,70 +751,75 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
             >
               Prayer Points
             </div>
-            <div
-              style={{
-                fontSize: shouldUseMobileUI ? 13 : 11,
-                fontWeight: 600,
-                color: theme.colors.status.prayer,
-              }}
-            >
-              {prayerPoints.current} / {prayerPoints.max}
-            </div>
           </div>
         </div>
 
-        {/* Drain indicator */}
-        {totalDrain > 0 && (
-          <div style={{ textAlign: "right" }}>
+        {/* Prayer points + bar on the right — matches spell panel's autocast indicator */}
+        <div
+          style={{
+            textAlign: "right",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 2,
+          }}
+        >
+          <div
+            style={{
+              fontSize: shouldUseMobileUI ? 13 : 11,
+              fontWeight: 600,
+              color:
+                prayerPct < 25
+                  ? theme.colors.state.danger
+                  : prayerPct < 50
+                    ? theme.colors.state.warning
+                    : theme.colors.status.prayer,
+            }}
+          >
+            {prayerPoints.current} / {prayerPoints.max}
+          </div>
+          {/* Inline mini-bar */}
+          <div
+            style={{
+              width: 48,
+              height: 3,
+              background: theme.colors.slot.empty,
+              borderRadius: 2,
+              overflow: "hidden",
+              border: `1px solid ${theme.colors.border.default}25`,
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: `${prayerPct}%`,
+                background:
+                  prayerPct < 25
+                    ? theme.colors.state.danger
+                    : prayerPct < 50
+                      ? `linear-gradient(90deg, ${theme.colors.state.warning} 0%, ${theme.colors.status.prayer} 100%)`
+                      : `linear-gradient(90deg, ${theme.colors.status.prayer} 0%, ${theme.colors.state.info} 100%)`,
+                borderRadius: 2,
+                transition: "width 0.3s ease",
+                boxShadow:
+                  totalDrain > 0
+                    ? `0 0 4px ${theme.colors.status.prayer}80`
+                    : "none",
+              }}
+            />
+          </div>
+          {totalDrain > 0 && (
             <div
               style={{
                 fontSize: 8,
                 color: theme.colors.state.danger,
-                textTransform: "uppercase",
-                opacity: 0.7,
-              }}
-            >
-              Drain
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                color: theme.colors.state.danger,
-                fontWeight: 600,
+                opacity: 0.8,
               }}
             >
               -{totalDrain}/min
             </div>
-          </div>
-        )}
-      </div>
-
-      {/* Prayer Points Bar - Compact */}
-      <div
-        style={{
-          height: shouldUseMobileUI ? 10 : 4,
-          background: theme.colors.slot.empty,
-          borderRadius: shouldUseMobileUI
-            ? theme.borderRadius.md
-            : theme.borderRadius.sm,
-          marginBottom: 4,
-          overflow: "hidden",
-          border: `1px solid ${theme.colors.border.default}35`,
-        }}
-      >
-        <div
-          style={{
-            height: "100%",
-            width: `${prayerPct}%`,
-            background: `linear-gradient(90deg, ${theme.colors.status.prayer} 0%, ${theme.colors.state.info} 100%)`,
-            borderRadius: theme.borderRadius.sm,
-            transition: "width 0.3s ease",
-            boxShadow:
-              totalDrain > 0
-                ? `0 0 6px ${theme.colors.status.prayer}80`
-                : "none",
-          }}
-        />
+          )}
+        </div>
       </div>
 
       {/* Prayer Grid - adaptive columns based on panel width */}
@@ -796,17 +834,17 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       >
         <div
           style={{
+            ...getPanelInsetStyle(theme, {
+              emphasis: "strong",
+              radius: 4,
+            }),
             display: "grid",
             // Mobile: larger icons (48px) with more gap, Desktop: compact
             gridTemplateColumns: shouldUseMobileUI
               ? `repeat(${gridColumns}, ${MOBILE_PRAYER.iconSize}px)`
               : `repeat(${gridColumns}, ${PRAYER_ICON_SIZE}px)`,
             gap: shouldUseMobileUI ? MOBILE_PRAYER.gap : PRAYER_GAP,
-            padding: GRID_PADDING,
-            ...getPanelInsetStyle(theme, {
-              emphasis: "strong",
-              radius: theme.borderRadius.md,
-            }),
+            padding: "8px 4px",
             justifyContent: "center",
           }}
         >
@@ -832,12 +870,12 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
       {/* Quick Prayers Toggle - Compact */}
       <div
         style={{
-          marginTop: 4,
-          padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
           ...getPanelInsetStyle(theme, {
             emphasis: "normal",
-            radius: theme.borderRadius.md,
+            radius: 4,
           }),
+          marginTop: 4,
+          padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -863,7 +901,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                 ? `linear-gradient(180deg, ${theme.colors.state.danger}26 0%, rgba(39, 15, 15, 0.28) 100%)`
                 : theme.colors.slot.disabled,
             border: `1px solid ${activePrayers.size > 0 ? theme.colors.state.danger : theme.colors.border.default}40`,
-            borderRadius: theme.borderRadius.sm,
+            borderRadius: 4,
             color:
               activePrayers.size > 0
                 ? theme.colors.state.danger
@@ -878,134 +916,94 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
 
       {/* Prayer Tooltip */}
       {hoveredPrayer &&
-        createPortal(
-          (() => {
-            const tooltipSize = {
-              width: prayerTooltipSize.width || 200,
-              height: prayerTooltipSize.height || 100,
-            };
-            const { left, top } = calculateCursorTooltipPosition(
-              mousePos,
-              tooltipSize,
-            );
-            const isUnlocked = playerPrayerLevel >= hoveredPrayer.level;
+        (() => {
+          const isUnlocked = playerPrayerLevel >= hoveredPrayer.level;
 
-            return (
+          return (
+            <CursorTooltip
+              visible={true}
+              position={mousePos}
+              estimatedSize={{ width: 200, height: 100 }}
+              style={{
+                zIndex: zIndex.tooltip,
+                minWidth: 180,
+                maxWidth: 250,
+              }}
+            >
+              {/* Header */}
               <div
-                ref={prayerTooltipRef}
-                className="fixed pointer-events-none"
                 style={{
-                  left,
-                  top,
-                  zIndex: zIndex.tooltip,
-                  background:
-                    theme.name === "hyperscape"
-                      ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
-                      : `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
-                  border: `1px solid ${getCategoryColor(hoveredPrayer.category)}50`,
-                  borderRadius: theme.borderRadius.md,
-                  padding: "10px 12px",
-                  boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
-                  minWidth: 180,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 6,
                 }}
               >
-                {/* Header */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    marginBottom: 6,
-                  }}
-                >
-                  <span style={{ fontSize: 22 }}>
-                    {getPrayerDisplayIcon(hoveredPrayer.icon)}
-                  </span>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: getCategoryColor(hoveredPrayer.category),
-                      }}
-                    >
-                      {hoveredPrayer.name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: theme.colors.text.muted,
-                      }}
-                    >
-                      Level {hoveredPrayer.level} Prayer
-                    </div>
-                  </div>
-                </div>
-
-                {/* Description */}
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: theme.colors.text.secondary,
-                    marginBottom: 8,
-                    lineHeight: 1.4,
-                  }}
-                >
-                  {hoveredPrayer.description}
-                </div>
-
-                {/* Drain rate */}
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: theme.colors.text.muted,
-                    display: "flex",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span>Drain rate:</span>
-                  <span style={{ color: theme.colors.accent.secondary }}>
-                    {hoveredPrayer.drainRate} points/min
-                  </span>
-                </div>
-
-                {/* Status */}
-                {!isUnlocked && (
+                <span style={{ fontSize: 22 }}>
+                  {getPrayerDisplayIcon(hoveredPrayer.icon)}
+                </span>
+                <div>
                   <div
                     style={{
-                      marginTop: 8,
-                      padding: "4px 8px",
-                      background: `${theme.colors.state.danger}26`,
-                      borderRadius: theme.borderRadius.sm,
-                      fontSize: 10,
-                      color: theme.colors.state.danger,
-                      textAlign: "center",
+                      ...getTooltipTitleStyle(theme),
+                      fontSize: 14,
                     }}
                   >
-                    Requires level {hoveredPrayer.level} Prayer
+                    {hoveredPrayer.name}
                   </div>
-                )}
-                {hoveredPrayer.active && (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      padding: "4px 8px",
-                      background: `${theme.colors.state.success}26`,
-                      borderRadius: theme.borderRadius.sm,
-                      fontSize: 10,
-                      color: theme.colors.state.success,
-                      textAlign: "center",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Currently Active
+                  <div style={getTooltipMetaStyle(theme)}>
+                    Level {hoveredPrayer.level} Prayer
                   </div>
-                )}
+                </div>
               </div>
-            );
-          })(),
-          document.body,
-        )}
+
+              {/* Description */}
+              <div
+                style={{
+                  ...getTooltipBodyStyle(theme),
+                  marginBottom: 8,
+                }}
+              >
+                {hoveredPrayer.description}
+              </div>
+
+              {/* Drain rate */}
+              <div
+                style={{
+                  ...getTooltipDividerStyle(theme),
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <span style={getTooltipMetaStyle(theme)}>Drain rate</span>
+                <span style={getTooltipTagStyle(theme)}>
+                  {hoveredPrayer.drainRate} points/min
+                </span>
+              </div>
+
+              {/* Status */}
+              {!isUnlocked && (
+                <div
+                  style={{
+                    ...getTooltipStatusStyle(theme, "danger"),
+                  }}
+                >
+                  Requires level {hoveredPrayer.level} Prayer
+                </div>
+              )}
+              {hoveredPrayer.active && (
+                <div
+                  style={{
+                    ...getTooltipStatusStyle(theme, "success"),
+                  }}
+                >
+                  Currently Active
+                </div>
+              )}
+            </CursorTooltip>
+          );
+        })()}
 
       {/* Prayer Context Menu */}
       {contextMenu.visible &&
@@ -1039,7 +1037,7 @@ export function PrayerPanel({ stats, world }: PrayerPanelProps) {
                         ? "linear-gradient(180deg, rgba(44, 36, 24, 0.98) 0%, rgba(18, 15, 11, 0.98) 100%)"
                         : theme.colors.background.secondary,
                     border: `1px solid ${theme.colors.border.default}`,
-                    borderRadius: theme.borderRadius.md,
+                    borderRadius: 4,
                     boxShadow: `${theme.shadows.lg}, inset 0 1px 0 rgba(255,255,255,0.04)`,
                     overflow: "hidden",
                     minWidth: 100,

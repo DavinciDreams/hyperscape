@@ -12,53 +12,193 @@
 
 import THREE from "../../../extras/three/three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
+import { GPU_VEG_CONFIG } from "../../../systems/shared/world/GPUMaterials";
 import {
   addInstance as addInstancedTree,
   removeInstance as removeInstancedTree,
-  setDepleted as setInstancedDepleted,
-  hasDepleted as hasInstancedDepleted,
   setHighlight as setInstancedHighlight,
   getModelDimensions as getInstancedDimensions,
+  getProxyGeometry as getInstancedProxyGeometry,
   hasInstance as isInInstancedPool,
   updateGLBTreeInstancer,
+  startDissolve as startInstancedDissolve,
 } from "../../../systems/shared/world/GLBTreeInstancer";
 import {
   addInstance as addBatchedTree,
   removeInstance as removeBatchedTree,
-  setDepleted as setBatchedDepleted,
-  hasDepleted as hasBatchedDepleted,
   setHighlight as setBatchedHighlight,
   getModelDimensions as getBatchedDimensions,
+  getProxyGeometry as getBatchedProxyGeometry,
   hasInstance as isInBatchedPool,
   updateGLBTreeBatchedInstancer,
+  startDissolve as startBatchedDissolve,
 } from "../../../systems/shared/world/GLBTreeBatchedInstancer";
 import type {
   ResourceVisualContext,
   ResourceVisualStrategy,
 } from "./ResourceVisualStrategy";
 
+/**
+ * Merge multiple BufferGeometry parts into one for the collision proxy.
+ * Only copies position + index — normals/UVs are unnecessary for raycasting.
+ */
+function mergeGeometries(
+  parts: THREE.BufferGeometry[],
+): THREE.BufferGeometry | null {
+  // Filter out any parts missing position data (malformed GLBs)
+  const valid = parts.filter((g) => g.getAttribute("position"));
+  if (valid.length === 0) return null;
+  // Single-part: return the shared geometry directly — caller must clone before mutating.
+  if (valid.length === 1) return valid[0];
+
+  let totalVerts = 0;
+  let totalIndices = 0;
+  for (const g of valid) {
+    const pos = g.getAttribute("position");
+    totalVerts += pos.count;
+    totalIndices += g.index ? g.index.count : pos.count;
+  }
+
+  const positions = new Float32Array(totalVerts * 3);
+  const indices = new Uint32Array(totalIndices);
+  let vertOffset = 0;
+  let idxOffset = 0;
+
+  for (const g of valid) {
+    const pos = g.getAttribute("position") as THREE.BufferAttribute;
+    // Bulk copy when the backing array is a contiguous Float32Array (common for loaded GLBs)
+    if (pos.array instanceof Float32Array && pos.itemSize === 3) {
+      positions.set(
+        new Float32Array(pos.array.buffer, pos.array.byteOffset, pos.count * 3),
+        vertOffset * 3,
+      );
+    } else {
+      for (let i = 0; i < pos.count; i++) {
+        positions[(vertOffset + i) * 3] = pos.getX(i);
+        positions[(vertOffset + i) * 3 + 1] = pos.getY(i);
+        positions[(vertOffset + i) * 3 + 2] = pos.getZ(i);
+      }
+    }
+    if (g.index) {
+      for (let i = 0; i < g.index.count; i++) {
+        indices[idxOffset + i] = g.index.getX(i) + vertOffset;
+      }
+      idxOffset += g.index.count;
+    } else {
+      for (let i = 0; i < pos.count; i++) {
+        indices[idxOffset + i] = vertOffset + i;
+      }
+      idxOffset += pos.count;
+    }
+    vertOffset += pos.count;
+  }
+
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  merged.setIndex(new THREE.BufferAttribute(indices, 1));
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+// Cache merged+scaled proxy geometry per (sourceGeometries identity, scale) to avoid
+// redundant merge/clone/scale work for trees sharing the same model variant and scale.
+// NOTE: This cache only grows; it is cleared on world teardown via clearProxyGeometryCache().
+// This is fine as long as tree scales are discrete (e.g. from manifest modelScale values).
+const _proxyGeometryCache = new Map<
+  THREE.BufferGeometry[],
+  Map<number, THREE.BufferGeometry>
+>();
+
+/**
+ * Dispose all cached proxy geometries and clear the cache.
+ * Must be called during world teardown to prevent GPU buffer leaks.
+ */
+export function clearProxyGeometryCache(): void {
+  for (const scaleMap of _proxyGeometryCache.values()) {
+    for (const geo of scaleMap.values()) geo.dispose();
+  }
+  _proxyGeometryCache.clear();
+}
+
+function getOrCreateProxyGeometry(
+  sourceGeometries: THREE.BufferGeometry[],
+  scale: number,
+): THREE.BufferGeometry | null {
+  // Round scale to 3 decimal places to avoid floating-point cache misses
+  const key = Math.round(scale * 1000) / 1000;
+  let scaleMap = _proxyGeometryCache.get(sourceGeometries);
+  if (scaleMap) {
+    const cached = scaleMap.get(key);
+    if (cached) return cached;
+  }
+
+  const merged = mergeGeometries(sourceGeometries);
+  if (!merged) return null;
+
+  // Always clone — mergeGeometries may return the pool's shared geometry directly
+  // (single-part case) or a freshly created merge. Cloning unconditionally ensures
+  // the cached entry is always an independent copy safe for Three.js raycaster use.
+  const scaled = merged.clone();
+  scaled.scale(scale, scale, scale);
+  // Pre-compute both bounds so Three.js raycaster never lazily mutates this geometry
+  scaled.computeBoundingBox();
+  scaled.computeBoundingSphere();
+
+  if (!scaleMap) {
+    scaleMap = new Map();
+    _proxyGeometryCache.set(sourceGeometries, scaleMap);
+  }
+  scaleMap.set(key, scaled);
+  return scaled;
+}
+
 function createCollisionProxy(
   ctx: ResourceVisualContext,
   scale: number,
   batched: boolean,
 ): void {
-  const dims = batched
-    ? getBatchedDimensions(ctx.id)
-    : getInstancedDimensions(ctx.id);
-  const height = (dims?.height ?? 8) * scale;
-  const fullRadius = (dims?.radius ?? 1) * scale;
-  // TUNING: Collision proxy uses 40% of the full bounding radius so the
-  // clickable cylinder covers the trunk and inner canopy without catching
-  // clicks on empty air around branch tips. The 0.3 floor prevents very
-  // small trees (e.g. seedlings at scale ~1) from becoming un-clickable.
-  // Tested across Normal, Oak, Willow, Birch, Bamboo, and Yew tree types.
-  const radius = Math.max(fullRadius * 0.4, 0.3);
-  const geometry = new THREE.CylinderGeometry(radius, radius, height, 6);
+  // Try to use the actual LOD2 model geometry for a pixel-accurate collision proxy.
+  // This matches the visible tree silhouette so clicks only register on the model itself.
+  const proxyData = batched
+    ? getBatchedProxyGeometry(ctx.id)
+    : getInstancedProxyGeometry(ctx.id);
+  const cachedGeometry = proxyData
+    ? getOrCreateProxyGeometry(proxyData.geometries, scale)
+    : null;
+
+  let geometry: THREE.BufferGeometry;
+  let yPos: number;
+
+  if (cachedGeometry && proxyData) {
+    // NOTE: This geometry is shared across all proxies with the same model+scale.
+    // It must not be mutated — the proxy mesh is invisible and used only for
+    // raycasting, so Three.js internals won't modify it in normal operation.
+    geometry = cachedGeometry;
+    // Align with visual: instancer shifts instances up by yOffset * scale
+    yPos = proxyData.yOffset * scale;
+  } else {
+    // Fallback: tighter trunk-only cylinder (only if LOD geometry unavailable).
+    // Reduced from 0.4 to 0.25 since the LOD proxy now handles canopy clicks;
+    // this path should rarely trigger — LOD data is typically available by the
+    // time createCollisionProxy is called after a successful addInstance.
+    console.warn(
+      `[TreeProxy] LOD geometry unavailable for ${ctx.id}, using cylinder fallback`,
+    );
+    const dims = batched
+      ? getBatchedDimensions(ctx.id)
+      : getInstancedDimensions(ctx.id);
+    const height = (dims?.height ?? 8) * scale;
+    const fullRadius = (dims?.radius ?? 1) * scale;
+    const radius = Math.max(fullRadius * 0.25, 0.3);
+    geometry = new THREE.CylinderGeometry(radius, radius, height, 6);
+    yPos = height / 2;
+  }
+
   const material = new MeshBasicNodeMaterial();
   material.visible = false;
 
   const proxy = new THREE.Mesh(geometry, material);
-  proxy.position.y = height / 2;
+  proxy.position.y = yPos;
   proxy.name = `TreeProxy_${ctx.id}`;
   proxy.userData = {
     type: "resource",
@@ -90,6 +230,9 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     );
     const rotation = ((rotHash % 1000) / 1000) * Math.PI * 2;
 
+    // Pass initial dissolve through addInstance so the GPU attribute is set
+    // atomically with pool insertion — no 1-frame flash on initial load.
+    const initialDissolve = config.depleted ? GPU_VEG_CONFIG.DISSOLVE_MAX : 0;
     let success = false;
 
     if (config.modelVariants?.length) {
@@ -105,8 +248,7 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
         worldPos,
         rotation,
         baseScale,
-        config.depletedModelPath ?? null,
-        config.depletedModelScale ?? 0.3,
+        initialDissolve,
       );
     } else {
       let modelPath = config.model;
@@ -118,29 +260,40 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
         worldPos,
         rotation,
         baseScale,
-        config.depletedModelPath ?? null,
-        config.depletedModelScale ?? 0.3,
+        null, // lod1ModelPath — auto-inferred by instancer
+        null, // lod2ModelPath — auto-inferred by instancer
+        initialDissolve,
       );
     }
 
     if (success) {
       createCollisionProxy(ctx, baseScale, !!config.modelVariants?.length);
+
+      if (config.depleted) {
+        const proxy = ctx.getMesh();
+        if (proxy) {
+          proxy.userData.depleted = true;
+          proxy.userData.interactable = false;
+        }
+      }
     }
   }
 
   async onDepleted(ctx: ResourceVisualContext): Promise<boolean> {
-    const b = isBatched(ctx.id);
-    if (b) {
-      setBatchedDepleted(ctx.id, true);
+    // Always returns true — dissolve handles depletion for all trees.
+    // Returning false would trigger ResourceEntity.loadDepletedModel() fallback,
+    // which is only needed by non-tree strategies (e.g. InstancedModelVisualStrategy).
+    if (isBatched(ctx.id)) {
+      startBatchedDissolve(ctx.id, 1, true);
     } else {
-      setInstancedDepleted(ctx.id, true);
+      startInstancedDissolve(ctx.id, 1, true);
     }
     const proxy = ctx.getMesh();
     if (proxy) {
       proxy.userData.depleted = true;
       proxy.userData.interactable = false;
     }
-    return b ? hasBatchedDepleted(ctx.id) : hasInstancedDepleted(ctx.id);
+    return true;
   }
 
   setShaderHighlight(ctx: ResourceVisualContext, on: boolean): void {
@@ -152,10 +305,11 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
   }
 
   async onRespawn(ctx: ResourceVisualContext): Promise<void> {
+    // Start reverse dissolve animation (trunk → canopy)
     if (isBatched(ctx.id)) {
-      setBatchedDepleted(ctx.id, false);
+      startBatchedDissolve(ctx.id, -1);
     } else {
-      setInstancedDepleted(ctx.id, false);
+      startInstancedDissolve(ctx.id, -1);
     }
     const proxy = ctx.getMesh();
     if (proxy) {
@@ -164,9 +318,9 @@ export class TreeGLBVisualStrategy implements ResourceVisualStrategy {
     }
   }
 
-  update(): void {
-    updateGLBTreeInstancer();
-    updateGLBTreeBatchedInstancer();
+  update(_ctx: ResourceVisualContext, deltaTime: number): void {
+    updateGLBTreeInstancer(deltaTime);
+    updateGLBTreeBatchedInstancer(deltaTime);
   }
 
   destroy(ctx: ResourceVisualContext): void {

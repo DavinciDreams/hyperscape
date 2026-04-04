@@ -62,6 +62,7 @@ export class MobInteractionHandler extends BaseInteractionHandler {
   getContextMenuActions(target: RaycastTarget): ContextMenuAction[] {
     const mobData = this.getMobData(target);
     const isAlive = (mobData?.health || 0) > 0;
+    const mobName = this.getDisplayName(target.name);
 
     // Dead mobs should not show context menu - let items underneath be clicked
     // This fixes the bug where clicking on loot shows dead mob menu instead
@@ -78,10 +79,10 @@ export class MobInteractionHandler extends BaseInteractionHandler {
     // Note: We already returned early if !isAlive, so enabled is always true
     actions.push({
       id: "attack",
-      label: `Attack ${target.name} (Level: ${mobLevel})`,
+      label: `Attack ${mobName} (Level: ${mobLevel})`,
       styledLabel: [
         { text: "Attack " },
-        { text: target.name, color: CONTEXT_MENU_COLORS.NPC }, // Yellow for mob names (OSRS style)
+        { text: mobName, color: CONTEXT_MENU_COLORS.NPC }, // Yellow for mob names (OSRS style)
         { text: " (Level: " },
         { text: `${mobLevel}`, color: levelColor },
         { text: ")" },
@@ -98,10 +99,10 @@ export class MobInteractionHandler extends BaseInteractionHandler {
     const examineText = this.getExamineText(target, mobData);
     actions.push({
       id: "examine",
-      label: `Examine ${target.name}`,
+      label: `Examine ${mobName}`,
       styledLabel: [
         { text: "Examine " },
-        { text: target.name, color: CONTEXT_MENU_COLORS.NPC }, // Yellow for NPC/mob names
+        { text: mobName, color: CONTEXT_MENU_COLORS.NPC }, // Yellow for NPC/mob names
       ],
       enabled: true,
       priority: 100,
@@ -237,6 +238,11 @@ export class MobInteractionHandler extends BaseInteractionHandler {
       }
     }
 
-    return `A level ${mobData?.level || 1} ${target.name.toLowerCase()}.`;
+    const mobName = this.getDisplayName(target.name);
+    return `A level ${mobData?.level || 1} ${mobName.toLowerCase()}.`;
+  }
+
+  private getDisplayName(name: string): string {
+    return name.replace(/\s*\(Lv\d+\)\s*$/u, "");
   }
 }

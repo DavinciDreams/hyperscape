@@ -271,6 +271,13 @@ export function createDefaultWindows(): WindowConfig[] {
           content: "prayer",
           closeable: true,
         },
+        {
+          id: "spells",
+          label: "Spells",
+          icon: "🪄",
+          content: "spells",
+          closeable: true,
+        },
       ],
       transparency: 0,
       anchor: "bottom-right",

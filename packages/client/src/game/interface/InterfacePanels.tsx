@@ -42,33 +42,48 @@ export function WindowContent({
 
   if (!activeTab) return null;
 
-  // If content is a string (panel ID), use the renderPanel function
-  if (typeof activeTab.content === "string") {
-    const panelContent = renderPanel(activeTab.content, undefined, windowId);
+  // Component fills available space, panels handle their own scrolling
+  // Multi-tab windows use TabBar for drop zones, not the content area
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        overflow: "hidden",
+        position: "relative",
+      }}
+    >
+      {tabs.map((tab, idx) => {
+        const isActive = idx === activeTabIndex;
+        const panelContent =
+          typeof tab.content === "string"
+            ? renderPanel(tab.content, undefined, windowId)
+            : tab.content;
 
-    // Action bars have no padding
-    const isActionBar = activeTab.content.startsWith("actionbar-");
+        const isActionBar =
+          typeof tab.content === "string" &&
+          tab.content.startsWith("actionbar-");
 
-    // Container fills available space, panels handle their own scrolling
-    // Multi-tab windows use TabBar for drop zones, not the content area
-    return (
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          minHeight: 0,
-          overflow: "hidden",
-          padding: isActionBar ? 0 : 4,
-        }}
-      >
-        {panelContent}
-      </div>
-    );
-  }
-
-  // Otherwise render the content directly
-  return <>{activeTab.content}</>;
+        return (
+          <div
+            key={tab.id || idx}
+            style={{
+              display: isActive ? "flex" : "none",
+              position: "absolute",
+              inset: 0,
+              flexDirection: "column",
+              padding: isActionBar ? 0 : 4,
+              overflow: "hidden",
+            }}
+          >
+            {panelContent}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
@@ -230,7 +245,7 @@ export function DraggableContentWrapper({
           </div>
         )}
       </div>
-      {/* Panel content */}
+      {/* Panel content area keeps mounting all tabs to retain state */}
       <div
         style={{
           flex: 1,
@@ -238,9 +253,31 @@ export function DraggableContentWrapper({
           flexDirection: "column",
           minHeight: 0,
           overflow: "hidden",
+          position: "relative",
         }}
       >
-        {panelContent}
+        {tabs.map((tab, idx) => {
+          const isActive = idx === activeTabIndex;
+          const panelContent =
+            typeof tab.content === "string"
+              ? renderPanel(tab.content, undefined, windowId)
+              : tab.content;
+
+          return (
+            <div
+              key={tab.id || idx}
+              style={{
+                display: isActive ? "flex" : "none",
+                position: "absolute",
+                inset: 0,
+                flexDirection: "column",
+                overflow: "hidden",
+              }}
+            >
+              {panelContent}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -26,6 +26,11 @@ import {
 } from "./GPUMaterials";
 import type { Wind } from "./Wind";
 import { getLODDistances, inferLOD1Path, inferLOD2Path } from "./LODConfig";
+import {
+  type DissolveAnim,
+  startDissolve as startDissolveAnim,
+  tickDissolveAnims,
+} from "./DissolveAnimation";
 
 const MAX_INSTANCES = 512;
 
@@ -34,18 +39,25 @@ const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 
+// ---- Batch color channel layout ----
+// R = highlight intensity (1.0 = normal, >1.0 = highlighted via HL_COLOR_INTENSITY)
+// G = highlight intensity (same as R — shader detects highlight via step(1.01, max(R, G)))
+// B = 1.0 - dissolveVal (1.0 = fully visible, 0.0 = fully dissolved)
+// Only modify channels through applyHighlightColor (R/G) and applyDissolveColor (B).
+// NOTE: If the underlying color buffer is Uint8 (256 levels), dissolve precision is
+// ~0.004 per step. At 0.3s duration / 60fps (~18 steps) this is more than sufficient.
 const _defaultColor = new THREE.Color(1, 1, 1);
-const _hlColor = new THREE.Color(1.15, 1.15, 1.15);
+const _tmpColor = new THREE.Color();
+/** Highlight multiplier for R/G channels (>1.0 brightens; shader detects via step(1.01)) */
+const HL_COLOR_INTENSITY = 1.15;
 
 interface TreeSlot {
   entityId: string;
   position: THREE.Vector3;
   rotation: number;
   scale: number;
-  depletedScale: number;
   yOffset: number;
   currentLOD: 0 | 1 | 2;
-  depleted: boolean;
   variantIndex: number;
 }
 
@@ -60,6 +72,11 @@ interface BatchedLODPool {
   geometryIds: number[][];
   /** entityId → array of instanceIds (one per BatchedMesh/material slot) */
   instanceIds: Map<string, number[]>;
+  /**
+   * sourceGeometries[variantIndex][materialSlot] = original BufferGeometry.
+   * Retained so collision proxies can use the actual model shape.
+   */
+  sourceGeometries: THREE.BufferGeometry[][];
 }
 
 interface TreeTypePool {
@@ -68,10 +85,8 @@ interface TreeTypePool {
   lod0: BatchedLODPool | null;
   lod1: BatchedLODPool | null;
   lod2: BatchedLODPool | null;
-  depleted: BatchedLODPool | null;
   instances: Map<string, TreeSlot>;
   yOffset: number;
-  depletedYOffset: number;
   modelHeight: number;
   modelRadius: number;
 }
@@ -273,11 +288,18 @@ function createBatchedLODPool(
     geometryIds.push(slotGeoIds);
   }
 
+  // Store source geometries per variant for collision proxy use
+  const sourceGeometries: THREE.BufferGeometry[][] = [];
+  for (let v = 0; v < numVariants; v++) {
+    sourceGeometries.push(variantParts[v].map((p) => p.geometry));
+  }
+
   return {
     batches,
     materials,
     geometryIds,
     instanceIds: new Map(),
+    sourceGeometries,
   };
 }
 
@@ -312,15 +334,9 @@ const pendingEnsure = new Map<string, Promise<TreeTypePool>>();
 async function ensureTreeTypePool(
   treeType: string,
   variantPaths: string[],
-  depletedModelPath?: string | null,
 ): Promise<TreeTypePool> {
   const existing = pools.get(treeType);
-  if (existing) {
-    if (depletedModelPath && !existing.depleted) {
-      await loadDepletedPool(existing, depletedModelPath);
-    }
-    return existing;
-  }
+  if (existing) return existing;
 
   const pending = pendingEnsure.get(treeType);
   if (pending) return pending;
@@ -463,18 +479,12 @@ async function ensureTreeTypePool(
       lod0: lod0Pool,
       lod1: lod1Pool,
       lod2: lod2Pool,
-      depleted: null,
       instances: new Map(),
       yOffset: bounds.yOffset,
-      depletedYOffset: 0,
       modelHeight: bounds.height,
       modelRadius: bounds.radius,
     };
     pools.set(treeType, pool);
-
-    if (depletedModelPath) {
-      await loadDepletedPool(pool, depletedModelPath);
-    }
 
     return pool;
   })();
@@ -485,59 +495,6 @@ async function ensureTreeTypePool(
   } finally {
     pendingEnsure.delete(treeType);
   }
-}
-
-async function loadDepletedPool(
-  pool: TreeTypePool,
-  depletedModelPath: string,
-): Promise<void> {
-  if (pool.depleted) return;
-  const depletedParts = await loadLODParts(depletedModelPath);
-  if (!depletedParts) return;
-
-  let depletedYOffset = 0;
-  try {
-    const { scene: depScene } = await modelCache.loadModel(
-      depletedModelPath,
-      world!,
-    );
-    depletedYOffset = computeModelBounds(depScene, 1).yOffset;
-  } catch {
-    /* use 0 */
-  }
-
-  const dissolveOpts = {
-    fadeStart: GPU_VEG_CONFIG.FADE_START,
-    fadeEnd: GPU_VEG_CONFIG.FADE_END,
-    enableNearFade: false,
-    enableWaterCulling: false,
-    enableOcclusionDissolve: false,
-    enableRimHighlight: true,
-  };
-
-  const depletedDissolveParts = depletedParts.map((p) => {
-    const dm = createTreeDissolveMaterial(p.material, {
-      ...dissolveOpts,
-      batched: true,
-    });
-    dm.side = THREE.DoubleSide;
-    enableTextureRepeat(dm);
-    world!.setupMaterial(dm);
-    return [{ geometry: p.geometry, material: dm }];
-  });
-
-  // Depleted has 1 "variant" (the stump)
-  // Transpose: depletedDissolveParts is [slot][1 variant] but we need [1 variant][slot]
-  const numSlots = depletedParts.length;
-  const singleVariant: {
-    geometry: THREE.BufferGeometry;
-    material: DissolveMaterial;
-  }[] = [];
-  for (let s = 0; s < numSlots; s++) {
-    singleVariant.push(depletedDissolveParts[s][0]);
-  }
-  pool.depleted = createBatchedLODPool([singleVariant]);
-  pool.depletedYOffset = depletedYOffset;
 }
 
 // ---- Instance matrix helper ----
@@ -561,6 +518,7 @@ function addToPool(
   entityId: string,
   mat: THREE.Matrix4,
   variantIndex: number,
+  dissolve = 0,
 ): void {
   const ids: number[] = [];
   for (let i = 0; i < pool.batches.length; i++) {
@@ -575,7 +533,13 @@ function addToPool(
     }
     const instId = pool.batches[i].addInstance(geoId);
     pool.batches[i].setMatrixAt(instId, mat);
-    pool.batches[i].setColorAt(instId, _defaultColor);
+    if (dissolve > 0) {
+      // Write dissolve into blue channel immediately to avoid a 1-frame flash
+      _tmpColor.setRGB(1, 1, 1.0 - dissolve);
+      pool.batches[i].setColorAt(instId, _tmpColor);
+    } else {
+      pool.batches[i].setColorAt(instId, _defaultColor);
+    }
     ids.push(instId);
   }
   pool.instanceIds.set(entityId, ids);
@@ -589,8 +553,6 @@ function removeFromPool(pool: BatchedLODPool, entityId: string): void {
   }
   pool.instanceIds.delete(entityId);
 }
-
-const _tmpColor = new THREE.Color();
 
 function isHighlighted(pool: BatchedLODPool, entityId: string): boolean {
   const ids = pool.instanceIds.get(entityId);
@@ -606,9 +568,12 @@ function applyHighlightColor(
 ): void {
   const ids = pool.instanceIds.get(entityId);
   if (!ids) return;
-  const color = on ? _hlColor : _defaultColor;
+  const rg = on ? HL_COLOR_INTENSITY : 1.0;
   for (let i = 0; i < pool.batches.length; i++) {
-    pool.batches[i].setColorAt(ids[i], color);
+    // Preserve blue channel (encodes dissolve state)
+    pool.batches[i].getColorAt(ids[i], _tmpColor);
+    _tmpColor.setRGB(rg, rg, _tmpColor.b);
+    pool.batches[i].setColorAt(ids[i], _tmpColor);
   }
 }
 
@@ -619,20 +584,26 @@ export function initGLBTreeBatchedInstancer(s: THREE.Scene, w: World): void {
   world = w;
 }
 
+/**
+ * NOTE: Caller must also call clearProxyGeometryCache() (from TreeGLBVisualStrategy)
+ * after this to dispose cached proxy geometries that reference sourceGeometries.
+ */
 export function destroyGLBTreeBatchedInstancer(): void {
   for (const pool of pools.values()) {
-    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
+    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
       if (!lodPool) continue;
       for (const bm of lodPool.batches) {
         scene?.remove(bm);
         bm.dispose();
       }
       for (const mat of lodPool.materials) mat.dispose();
+      lodPool.sourceGeometries.length = 0;
     }
   }
   pools.clear();
   entityToTreeType.clear();
   pendingEnsure.clear();
+  dissolveAnims.clear();
   scene = null;
   world = null;
 }
@@ -645,27 +616,20 @@ export async function addInstance(
   position: THREE.Vector3,
   rotation: number,
   scale: number,
-  depletedModelPath?: string | null,
-  depletedScale?: number,
+  initialDissolve = 0,
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
   try {
-    const pool = await ensureTreeTypePool(
-      treeType,
-      variantPaths,
-      depletedModelPath,
-    );
+    const pool = await ensureTreeTypePool(treeType, variantPaths);
 
     const slot: TreeSlot = {
       entityId,
       position: position.clone(),
       rotation,
       scale,
-      depletedScale: depletedScale ?? scale,
       yOffset: pool.yOffset,
       currentLOD: 0,
-      depleted: false,
       variantIndex,
     };
 
@@ -673,7 +637,8 @@ export async function addInstance(
     entityToTreeType.set(entityId, treeType);
 
     const mat = composeInstanceMatrix(position, rotation, scale, pool.yOffset);
-    if (pool.lod0) addToPool(pool.lod0, entityId, mat, variantIndex);
+    if (pool.lod0)
+      addToPool(pool.lod0, entityId, mat, variantIndex, initialDissolve);
 
     return true;
   } catch (error) {
@@ -700,61 +665,15 @@ export function removeInstance(entityId: string): void {
 
   pool.instances.delete(entityId);
   entityToTreeType.delete(entityId);
+  dissolveAnims.delete(entityId);
 }
 
 function getLodPool(pool: TreeTypePool, slot: TreeSlot): BatchedLODPool | null {
-  if (slot.depleted) return pool.depleted;
   return slot.currentLOD === 0
     ? pool.lod0
     : slot.currentLOD === 1
       ? pool.lod1
       : pool.lod2;
-}
-
-export function setDepleted(entityId: string, depleted: boolean): void {
-  const treeType = entityToTreeType.get(entityId);
-  if (!treeType) return;
-
-  const pool = pools.get(treeType);
-  if (!pool) return;
-
-  const slot = pool.instances.get(entityId);
-  if (!slot || slot.depleted === depleted) return;
-
-  slot.depleted = depleted;
-
-  if (depleted) {
-    const lodPool = getLodPool(pool, slot);
-    if (lodPool) removeFromPool(lodPool, entityId);
-
-    if (pool.depleted) {
-      const mat = composeInstanceMatrix(
-        slot.position,
-        slot.rotation,
-        slot.depletedScale,
-        pool.depletedYOffset,
-      );
-      addToPool(pool.depleted, entityId, mat, 0);
-    }
-  } else {
-    if (pool.depleted) {
-      removeFromPool(pool.depleted, entityId);
-    }
-
-    const mat = composeInstanceMatrix(
-      slot.position,
-      slot.rotation,
-      slot.scale,
-      slot.yOffset,
-    );
-    const lodPool =
-      slot.currentLOD === 0
-        ? pool.lod0
-        : slot.currentLOD === 1
-          ? pool.lod1
-          : pool.lod2;
-    if (lodPool) addToPool(lodPool, entityId, mat, slot.variantIndex);
-  }
 }
 
 export function hasInstance(entityId: string): boolean {
@@ -771,11 +690,31 @@ export function getModelDimensions(
   return { height: pool.modelHeight, radius: pool.modelRadius };
 }
 
-export function hasDepleted(entityId: string): boolean {
+/**
+ * Returns the lowest-available LOD geometries for use as a collision proxy,
+ * plus the yOffset needed to align the geometry with the visual instance.
+ * Prefers LOD2 → LOD1 → LOD0, using the entity's assigned variant.
+ * Returns null if the entity isn't registered.
+ *
+ * **Important**: Returned geometries are shared by the instancer pool.
+ * Callers MUST clone before mutating (e.g. scaling).
+ */
+export function getProxyGeometry(
+  entityId: string,
+): { geometries: THREE.BufferGeometry[]; yOffset: number } | null {
   const treeType = entityToTreeType.get(entityId);
-  if (!treeType) return false;
+  if (!treeType) return null;
   const pool = pools.get(treeType);
-  return !!pool?.depleted;
+  if (!pool) return null;
+  const slot = pool.instances.get(entityId);
+  if (!slot) return null;
+  const lodPool = pool.lod2 ?? pool.lod1 ?? pool.lod0;
+  if (!lodPool) return null;
+  const vi = slot.variantIndex % lodPool.sourceGeometries.length;
+  return {
+    geometries: lodPool.sourceGeometries[vi],
+    yOffset: pool.yOffset,
+  };
 }
 
 let highlightedEntityId: string | null = null;
@@ -807,9 +746,66 @@ export function clearHighlight(): void {
   }
 }
 
+// ---- Dissolve (tree depletion/respawn) ----
+
+const DISSOLVE_MAX = GPU_VEG_CONFIG.DISSOLVE_MAX;
+
+const dissolveAnims = new Map<string, DissolveAnim>();
+
+function applyDissolveColor(
+  pool: BatchedLODPool,
+  entityId: string,
+  dissolveVal: number,
+): void {
+  const ids = pool.instanceIds.get(entityId);
+  if (!ids || ids.length === 0) return;
+  // Skip redundant writes — read from batches[0] (all batches are kept uniform)
+  pool.batches[0].getColorAt(ids[0], _tmpColor);
+  const encoded = 1.0 - dissolveVal;
+  if (Math.abs(_tmpColor.b - encoded) < 1e-6) return;
+  // Reuse R/G from the first read — only blue changes for dissolve
+  const r = _tmpColor.r;
+  const g = _tmpColor.g;
+  for (let i = 0; i < pool.batches.length; i++) {
+    _tmpColor.setRGB(r, g, encoded);
+    pool.batches[i].setColorAt(ids[i], _tmpColor);
+  }
+}
+
+function applyDissolveValue(entityId: string, value: number): void {
+  const treeType = entityToTreeType.get(entityId);
+  if (!treeType) return;
+
+  const pool = pools.get(treeType);
+  if (!pool) return;
+
+  const slot = pool.instances.get(entityId);
+  if (!slot) return;
+
+  // Use slot.currentLOD for O(1) pool lookup instead of searching all 3 pools.
+  const lodPool = getLodPool(pool, slot);
+  if (!lodPool) return;
+
+  applyDissolveColor(lodPool, entityId, value);
+}
+
+export function startDissolve(
+  entityId: string,
+  direction: 1 | -1,
+  instant = false,
+): void {
+  startDissolveAnim(
+    dissolveAnims,
+    entityId,
+    direction,
+    instant,
+    applyDissolveValue,
+  );
+}
+
 let lastUpdateFrame = -1;
 
-export function updateGLBTreeBatchedInstancer(): void {
+export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
   if (!world) return;
   if (world.frame === lastUpdateFrame) return;
   lastUpdateFrame = world.frame;
@@ -824,8 +820,6 @@ export function updateGLBTreeBatchedInstancer(): void {
 
   for (const pool of pools.values()) {
     for (const slot of pool.instances.values()) {
-      if (slot.depleted) continue;
-
       const dx = camPos.x - slot.position.x;
       const dz = camPos.z - slot.position.z;
       const distSq = dx * dx + dz * dz;
@@ -851,7 +845,22 @@ export function updateGLBTreeBatchedInstancer(): void {
 
       const oldPool = getLodPool(pool, slot);
       const wasHl = oldPool ? isHighlighted(oldPool, slot.entityId) : false;
-      if (oldPool) removeFromPool(oldPool, slot.entityId);
+      // Read dissolve state from old pool's color before removing.
+      // Safe to sample batches[0] only — applyDissolveColor sets all batches uniformly.
+      // Defaults to 0 (fully visible) if instance IDs are missing — this edge case
+      // can only occur if the entity wasn't fully added, which shouldn't happen in practice.
+      let wasDissolveVal = 0;
+      if (oldPool) {
+        const oldIds = oldPool.instanceIds.get(slot.entityId);
+        if (oldIds && oldIds.length > 0) {
+          oldPool.batches[0].getColorAt(oldIds[0], _tmpColor);
+          wasDissolveVal = Math.max(
+            0,
+            Math.min(DISSOLVE_MAX, 1.0 - _tmpColor.b),
+          );
+        }
+        removeFromPool(oldPool, slot.entityId);
+      }
 
       slot.currentLOD = targetLOD;
 
@@ -863,11 +872,21 @@ export function updateGLBTreeBatchedInstancer(): void {
           slot.scale,
           slot.yOffset,
         );
-        addToPool(newPool, slot.entityId, mat, slot.variantIndex);
+        addToPool(
+          newPool,
+          slot.entityId,
+          mat,
+          slot.variantIndex,
+          wasDissolveVal,
+        );
         if (wasHl) applyHighlightColor(newPool, slot.entityId, true);
       }
     }
   }
+
+  // Tick dissolve animations — runs AFTER LOD transitions above so that
+  // applyDissolveValue always finds the entity in its current (post-swap) pool.
+  tickDissolveAnims(dissolveAnims, deltaTime, applyDissolveValue);
 
   // Update dissolve uniforms
   const camY = camPos.y;
@@ -884,7 +903,7 @@ export function updateGLBTreeBatchedInstancer(): void {
   const wind = world.getSystem("wind") as Wind | null;
 
   for (const pool of pools.values()) {
-    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2, pool.depleted]) {
+    for (const lodPool of [pool.lod0, pool.lod1, pool.lod2]) {
       if (!lodPool) continue;
 
       for (const mat of lodPool.materials) {

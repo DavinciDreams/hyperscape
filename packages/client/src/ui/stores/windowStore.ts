@@ -203,8 +203,9 @@ const STORAGE_KEY = "hyperscape-window-layout";
  * - 14: New flush layout with proportional scaling (Minimap→Quests→Skills→Inventory→Menubar right column, Chat left, Action bar bottom center)
  * - 15: Improved flush layout with proper height distribution - right column fills entire viewport height
  * - 16: UI theme and layout improvements - taller chat, action bar bottom anchoring fix
+ * - 17: Add SpellsPanel to the default layout alongside Prayer
  */
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 /** Panel ID to icon mapping for tab display migration */
 const PANEL_ICONS: Record<string, string> = {
@@ -214,6 +215,7 @@ const PANEL_ICONS: Record<string, string> = {
   stats: "📊",
   skills: "⭐",
   prayer: "✨",
+  spells: "🪄",
   combat: "🗡️",
   account: "👤",
   settings: "⚙️",
@@ -608,6 +610,14 @@ const migrations: Record<number, MigrationFn> = {
   16: () => {
     debugLog(
       "[WindowStore Migration v16] Clearing all windows - UI theme and layout improvements",
+    );
+    return new Map<string, WindowState>();
+  },
+
+  // v17: Add spells tab
+  17: () => {
+    debugLog(
+      "[WindowStore Migration v17] Clearing all windows to include spellbook in default layout",
     );
     return new Map<string, WindowState>();
   },

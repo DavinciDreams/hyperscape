@@ -9,18 +9,24 @@
 import React, { useState, useRef, useMemo, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
 import { useDraggable } from "@dnd-kit/core";
+import { CursorTooltip, useThemeStore, useMobileLayout } from "@/ui";
 import {
-  calculateCursorTooltipPosition,
-  useThemeStore,
-  useMobileLayout,
-} from "@/ui";
+  getTooltipMetaStyle,
+  getTooltipStatusStyle,
+  getTooltipTitleStyle,
+} from "@/ui/core/tooltip/tooltipStyles";
 import {
   getInteractiveTileStyle,
   getPanelInsetStyle,
   getPanelSurfaceStyle,
 } from "@/ui/theme/themes";
 import { zIndex, MOBILE_SKILLS } from "../../constants";
-import { useTooltipSize } from "../../hooks";
+import {
+  PANEL_PADDING,
+  PANEL_MOBILE_PADDING,
+  PANEL_GRID_GAP,
+  PANEL_SLOT_RADIUS,
+} from "../../constants/panelLayout";
 import type { PlayerStats, Skills } from "../../types";
 import {
   SKILL_DEFINITIONS,
@@ -124,8 +130,8 @@ const DraggableSkillCard = memo(function DraggableSkillCard({
         hovered: isHovered,
         radius: 4,
       }),
-      padding: isMobile ? "4px 6px" : "3px 6px",
-      minHeight: isMobile ? MOBILE_SKILLS.cardHeight : 28,
+      padding: isMobile ? "4px 6px" : `${PANEL_PADDING - 2}px 4px`,
+      minHeight: isMobile ? MOBILE_SKILLS.cardHeight : 24,
       cursor: isDragging ? "grabbing" : "grab",
       display: "flex",
       alignItems: "center",
@@ -153,20 +159,20 @@ const DraggableSkillCard = memo(function DraggableSkillCard({
       <div className="flex items-center justify-center gap-1 w-full">
         <span
           style={{
-            fontSize: isMobile ? "14px" : "13px",
+            fontSize: isMobile ? "14px" : "11px",
             filter: "drop-shadow(1px 1px 1px rgba(0,0,0,0.4))",
             lineHeight: 1,
           }}
         >
           {skill.icon}
         </span>
-        {/* RuneScape-style slanted level display: current↗/↘base */}
+        {/* OSRS-style slanted level display: current↗/↘base */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             position: "relative",
-            height: "16px",
+            height: "13px",
           }}
         >
           {/* Current level - shifted up */}
@@ -189,7 +195,7 @@ const DraggableSkillCard = memo(function DraggableSkillCard({
           {/* Slanted separator */}
           <span
             style={{
-              fontSize: isMobile ? "10px" : "9px",
+              fontSize: isMobile ? "10px" : "8px",
               fontWeight: 400,
               color: theme.colors.text.disabled,
               lineHeight: 1,
@@ -230,22 +236,6 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
   const [hoveredTotalLevel, setHoveredTotalLevel] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [guideSkill, setGuideSkill] = useState<Skill | null>(null);
-  const skillTooltipRef = useRef<HTMLDivElement>(null);
-  const totalLevelTooltipRef = useRef<HTMLDivElement>(null);
-
-  const skillTooltipSize = useTooltipSize(hoveredSkill, skillTooltipRef, {
-    width: 180,
-    height: 90,
-  });
-
-  const totalLevelTooltipSize = useTooltipSize(
-    hoveredTotalLevel,
-    totalLevelTooltipRef,
-    {
-      width: 140,
-      height: 50,
-    },
-  );
 
   const s: Partial<Skills> = stats?.skills ?? {};
 
@@ -271,119 +261,105 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
       className="flex flex-col h-full overflow-hidden"
       style={{
         ...getPanelSurfaceStyle(theme, { emphasis: "normal" }),
-        padding: shouldUseMobileUI ? "4px" : "3px",
+        padding: shouldUseMobileUI ? PANEL_MOBILE_PADDING : PANEL_PADDING,
       }}
     >
-      {/* Content */}
+      {/* Compact header — matches Prayer/Spell panel pattern */}
       <div
-        className="flex flex-col flex-1 overflow-hidden"
         style={{
-          background: "transparent",
-          padding: shouldUseMobileUI ? "4px" : "3px",
+          ...getPanelInsetStyle(theme, { emphasis: "normal", radius: 4 }),
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: shouldUseMobileUI ? "4px 6px" : "3px 6px",
+          marginBottom: 4,
+          flexShrink: 0,
         }}
       >
-        {/* Skills Grid - Mobile: 2 columns with names, Desktop: 3 columns compact */}
-        <div
-          className="grid flex-1"
-          style={{
-            ...getPanelInsetStyle(theme, {
-              emphasis: "strong",
-              radius: theme.borderRadius.md,
-            }),
-            padding: shouldUseMobileUI ? "4px" : "3px",
-            gridTemplateColumns: shouldUseMobileUI
-              ? `repeat(${MOBILE_SKILLS.columns}, 1fr)`
-              : "repeat(3, 1fr)",
-            gap: shouldUseMobileUI ? `${MOBILE_SKILLS.gap}px` : "3px",
-          }}
-        >
-          {skills.map((skill) => (
-            <DraggableSkillCard
-              key={skill.key}
-              skill={skill}
-              isHovered={hoveredSkill?.key === skill.key}
-              isMobile={shouldUseMobileUI}
-              onClick={setGuideSkill}
-              onMouseEnter={(e) => {
-                setHoveredSkill(skill);
-                setMousePos({ x: e.clientX, y: e.clientY });
-              }}
-              onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
-              onMouseLeave={() => {
-                setHoveredSkill(null);
-              }}
-            />
-          ))}
+        {/* Left: icon + label */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: shouldUseMobileUI ? 16 : 14 }}>⚔️</span>
+          <div
+            style={{
+              fontSize: shouldUseMobileUI ? 9 : 8,
+              color: theme.colors.text.muted,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+            }}
+          >
+            Skills
+          </div>
         </div>
 
-        {/* Total Level & Combat Level - Compact */}
+        {/* Right: Total / Combat with OSRS-style angled split */}
         <div
-          className="flex justify-between"
-          style={{
-            marginTop: shouldUseMobileUI ? "4px" : "3px",
-            ...getPanelInsetStyle(theme, {
-              emphasis: "normal",
-              radius: theme.borderRadius.md,
-            }),
-            padding: shouldUseMobileUI ? "6px 8px" : "4px 6px",
-            flexShrink: 0,
+          style={{ textAlign: "center", cursor: "default" }}
+          onMouseEnter={(e) => {
+            setHoveredTotalLevel(true);
+            setMousePos({ x: e.clientX, y: e.clientY });
           }}
+          onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
+          onMouseLeave={() => setHoveredTotalLevel(false)}
         >
           <div
-            className="text-center flex-1"
-            style={{ cursor: "default" }}
-            onMouseEnter={(e) => {
-              setHoveredTotalLevel(true);
-              setMousePos({ x: e.clientX, y: e.clientY });
+            style={{
+              fontSize: 7,
+              color: theme.colors.text.muted,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              lineHeight: 1,
+              marginBottom: 2,
+              display: "flex",
+              gap: 6,
+              justifyContent: "center",
             }}
-            onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
-            onMouseLeave={() => setHoveredTotalLevel(false)}
           >
-            <div
-              style={{
-                fontSize: shouldUseMobileUI ? "8px" : "7px",
-                color: theme.colors.text.muted,
-                textTransform: "uppercase",
-                letterSpacing: "0.3px",
-                marginBottom: "1px",
-              }}
-            >
-              Total Level
-            </div>
+            <span>Total</span>
+            <span>Combat</span>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              position: "relative",
+              height: 14,
+            }}
+          >
             <span
               style={{
-                fontSize: shouldUseMobileUI ? "14px" : "12px",
-                fontWeight: 600,
+                fontSize: shouldUseMobileUI ? 12 : 10,
+                fontWeight: 700,
                 color: theme.colors.text.accent,
+                lineHeight: 1,
+                position: "relative",
+                top: -2,
+                textShadow: "1px 1px 1px rgba(0,0,0,0.5)",
               }}
             >
               {totalLevel}
             </span>
-          </div>
-          <div
-            style={{
-              width: "1px",
-              background: `${theme.colors.border.default}30`,
-              margin: "0 4px",
-            }}
-          />
-          <div className="text-center flex-1">
-            <div
-              style={{
-                fontSize: shouldUseMobileUI ? "8px" : "7px",
-                color: theme.colors.text.muted,
-                textTransform: "uppercase",
-                letterSpacing: "0.3px",
-                marginBottom: "1px",
-              }}
-            >
-              Combat Level
-            </div>
             <span
               style={{
-                fontSize: shouldUseMobileUI ? "14px" : "12px",
-                fontWeight: 600,
+                fontSize: shouldUseMobileUI ? 10 : 9,
+                fontWeight: 400,
+                color: theme.colors.text.disabled,
+                lineHeight: 1,
+                margin: "0 2px",
+                transform: "rotate(-20deg)",
+                display: "inline-block",
+              }}
+            >
+              /
+            </span>
+            <span
+              style={{
+                fontSize: shouldUseMobileUI ? 12 : 10,
+                fontWeight: 700,
                 color: theme.colors.state.danger,
+                lineHeight: 1,
+                position: "relative",
+                top: 2,
+                textShadow: "1px 1px 1px rgba(0,0,0,0.5)",
               }}
             >
               {combatLevel}
@@ -392,180 +368,170 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
         </div>
       </div>
 
+      {/* Skills Grid - Mobile: 2 columns with names, Desktop: 3 columns compact */}
+      <div
+        className="grid flex-1 overflow-hidden"
+        style={{
+          ...getPanelInsetStyle(theme, {
+            emphasis: "strong",
+            radius: 4,
+          }),
+          padding: shouldUseMobileUI ? MOBILE_SKILLS.gap : PANEL_PADDING,
+          gridTemplateColumns: shouldUseMobileUI
+            ? `repeat(${MOBILE_SKILLS.columns}, 1fr)`
+            : "repeat(3, 1fr)",
+          gap: shouldUseMobileUI
+            ? `${MOBILE_SKILLS.gap}px`
+            : `${PANEL_GRID_GAP}px`,
+        }}
+      >
+        {skills.map((skill) => (
+          <DraggableSkillCard
+            key={skill.key}
+            skill={skill}
+            isHovered={hoveredSkill?.key === skill.key}
+            isMobile={shouldUseMobileUI}
+            onClick={setGuideSkill}
+            onMouseEnter={(e) => {
+              setHoveredSkill(skill);
+              setMousePos({ x: e.clientX, y: e.clientY });
+            }}
+            onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
+            onMouseLeave={() => {
+              setHoveredSkill(null);
+            }}
+          />
+        ))}
+      </div>
+
       {/* Skill Tooltip */}
       {hoveredSkill &&
-        createPortal(
-          (() => {
-            const currentLevelXP = calculateXPForLevel(hoveredSkill.level);
-            const nextLevelXP = calculateXPForLevel(hoveredSkill.level + 1);
-            const xpRemaining = nextLevelXP - hoveredSkill.xp;
-            const xpIntoLevel = hoveredSkill.xp - currentLevelXP;
-            const xpForThisLevel = nextLevelXP - currentLevelXP;
-            const progress = Math.min(
-              100,
-              Math.max(0, (xpIntoLevel / xpForThisLevel) * 100),
-            );
+        (() => {
+          const currentLevelXP = calculateXPForLevel(hoveredSkill.level);
+          const nextLevelXP = calculateXPForLevel(hoveredSkill.level + 1);
+          const xpRemaining = nextLevelXP - hoveredSkill.xp;
+          const xpIntoLevel = hoveredSkill.xp - currentLevelXP;
+          const xpForThisLevel = nextLevelXP - currentLevelXP;
+          const progress = Math.min(
+            100,
+            Math.max(0, (xpIntoLevel / xpForThisLevel) * 100),
+          );
 
-            const tooltipSize = {
-              width: skillTooltipSize.width || 180,
-              height: skillTooltipSize.height || 90,
-            };
-            const { left, top } = calculateCursorTooltipPosition(
-              mousePos,
-              tooltipSize,
-            );
+          return (
+            <CursorTooltip
+              visible={!!hoveredSkill}
+              position={mousePos}
+              estimatedSize={{ width: 140, height: 90 }}
+              style={{
+                minWidth: "140px",
+                zIndex: zIndex.tooltip,
+              }}
+            >
+              {/* Header */}
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span style={{ fontSize: "14px" }}>{hoveredSkill.icon}</span>
+                <span
+                  style={{
+                    ...getTooltipTitleStyle(theme),
+                    fontSize: "11px",
+                  }}
+                >
+                  {hoveredSkill.label}
+                </span>
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    ...getTooltipMetaStyle(theme),
+                    fontWeight: 600,
+                    color:
+                      hoveredSkill.level >= 99
+                        ? theme.colors.state.success
+                        : theme.colors.text.accent,
+                  }}
+                >
+                  Lvl {hoveredSkill.level}
+                </span>
+              </div>
 
-            return (
+              {/* XP Info */}
               <div
-                ref={skillTooltipRef}
-                className="fixed pointer-events-none"
                 style={{
-                  left,
-                  top,
-                  zIndex: zIndex.tooltip,
-                  background:
-                    theme.name === "hyperscape"
-                      ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
-                      : theme.colors.slot.filled,
-                  border: `1px solid ${theme.colors.border.default}50`,
-                  borderRadius: theme.borderRadius.md,
-                  padding: "6px 8px",
-                  minWidth: "140px",
-                  boxShadow: `${theme.shadows.md}, inset 0 1px 0 rgba(255,255,255,0.04)`,
+                  ...getTooltipMetaStyle(theme),
+                  marginBottom: "2px",
                 }}
               >
-                {/* Header */}
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <span style={{ fontSize: "14px" }}>{hoveredSkill.icon}</span>
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: 600,
-                      color: theme.colors.text.accent,
-                    }}
-                  >
-                    {hoveredSkill.label}
-                  </span>
-                  <span
-                    style={{
-                      marginLeft: "auto",
-                      fontSize: "10px",
-                      fontWeight: 600,
-                      color:
-                        hoveredSkill.level >= 99
-                          ? theme.colors.state.success
-                          : theme.colors.text.accent,
-                    }}
-                  >
-                    Lvl {hoveredSkill.level}
-                  </span>
-                </div>
+                XP: {hoveredSkill.xp.toLocaleString()}
+              </div>
+              <div
+                style={{
+                  ...getTooltipMetaStyle(theme),
+                  marginBottom: "4px",
+                }}
+              >
+                {hoveredSkill.level >= 99
+                  ? "Max level reached!"
+                  : `${xpRemaining.toLocaleString()} XP to level ${hoveredSkill.level + 1}`}
+              </div>
 
-                {/* XP Info */}
+              {/* Progress bar */}
+              {hoveredSkill.level < 99 ? (
                 <div
                   style={{
-                    fontSize: "9px",
-                    color: theme.colors.text.secondary,
-                    marginBottom: "2px",
+                    height: "3px",
+                    background: theme.colors.slot.empty,
+                    borderRadius: theme.borderRadius.sm,
+                    overflow: "hidden",
                   }}
                 >
-                  XP: {hoveredSkill.xp.toLocaleString()}
-                </div>
-                <div
-                  style={{
-                    fontSize: "9px",
-                    color: theme.colors.text.muted,
-                    marginBottom: "4px",
-                  }}
-                >
-                  {hoveredSkill.level >= 99
-                    ? "Max level reached!"
-                    : `${xpRemaining.toLocaleString()} XP to level ${hoveredSkill.level + 1}`}
-                </div>
-
-                {/* Progress bar */}
-                {hoveredSkill.level < 99 && (
                   <div
                     style={{
-                      height: "3px",
-                      background: theme.colors.slot.empty,
+                      height: "100%",
+                      width: `${progress}%`,
+                      background: theme.colors.accent.secondary,
                       borderRadius: theme.borderRadius.sm,
-                      overflow: "hidden",
                     }}
-                  >
-                    <div
-                      style={{
-                        height: "100%",
-                        width: `${progress}%`,
-                        background: theme.colors.accent.secondary,
-                        borderRadius: theme.borderRadius.sm,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })(),
-          document.body,
-        )}
+                  />
+                </div>
+              ) : (
+                <div style={getTooltipStatusStyle(theme, "success")}>
+                  Max level reached
+                </div>
+              )}
+            </CursorTooltip>
+          );
+        })()}
 
       {/* Total Level XP Tooltip */}
-      {hoveredTotalLevel &&
-        createPortal(
-          (() => {
-            const tooltipSize = {
-              width: totalLevelTooltipSize.width || 140,
-              height: totalLevelTooltipSize.height || 50,
-            };
-            const { left, top } = calculateCursorTooltipPosition(
-              mousePos,
-              tooltipSize,
-            );
-
-            return (
-              <div
-                ref={totalLevelTooltipRef}
-                className="fixed pointer-events-none"
-                style={{
-                  left,
-                  top,
-                  zIndex: zIndex.tooltip,
-                  background:
-                    theme.name === "hyperscape"
-                      ? "linear-gradient(180deg, rgba(54, 44, 28, 0.96) 0%, rgba(22, 18, 12, 0.96) 100%)"
-                      : theme.colors.slot.filled,
-                  border: `1px solid ${theme.colors.border.default}50`,
-                  borderRadius: theme.borderRadius.md,
-                  padding: "6px 8px",
-                  minWidth: "120px",
-                  boxShadow: `${theme.shadows.md}, inset 0 1px 0 rgba(255,255,255,0.04)`,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "9px",
-                    color: theme.colors.text.muted,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.3px",
-                    marginBottom: "2px",
-                  }}
-                >
-                  Total XP
-                </div>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    color: theme.colors.text.accent,
-                  }}
-                >
-                  {totalXP.toLocaleString()}
-                </div>
-              </div>
-            );
-          })(),
-          document.body,
-        )}
+      {hoveredTotalLevel && (
+        <CursorTooltip
+          visible={true}
+          position={mousePos}
+          estimatedSize={{ width: 120, height: 50 }}
+          style={{
+            minWidth: "120px",
+            zIndex: zIndex.tooltip,
+          }}
+        >
+          <div
+            style={{
+              ...getTooltipMetaStyle(theme),
+              textTransform: "uppercase",
+              letterSpacing: "0.3px",
+              marginBottom: "2px",
+            }}
+          >
+            Total XP
+          </div>
+          <div
+            style={{
+              ...getTooltipTitleStyle(theme),
+              fontSize: "11px",
+            }}
+          >
+            {totalXP.toLocaleString()}
+          </div>
+        </CursorTooltip>
+      )}
 
       {/* Skill Guide Modal — portaled to body so it renders center-screen */}
       {guideSkill &&
