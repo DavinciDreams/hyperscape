@@ -258,6 +258,8 @@ import {
 import { TradingSystem } from "../TradingSystem";
 import { DuelSystem } from "../DuelSystem";
 import { DuelScheduler, DuelBettingBridge } from "../DuelScheduler";
+import { SolanaArenaOperator } from "../DuelScheduler/SolanaArenaOperator.js";
+import { startPayoutKeeper } from "../DuelScheduler/PayoutKeeper.js";
 import {
   handleDuelChallenge,
   handleDuelChallengeRespond,
@@ -1081,6 +1083,14 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         this.duelScheduler;
     }
 
+    // SolanaArenaOperator — bridge between DuelBettingBridge and the on-chain oracle
+    const solanaOperator = new SolanaArenaOperator();
+    if (solanaOperator.isEnabled()) {
+      (
+        this.world as World & { solanaArenaOperator?: SolanaArenaOperator }
+      ).solanaArenaOperator = solanaOperator;
+    }
+
     // DuelBettingBridge - connects duel results to Solana prediction markets
     // Creates betting markets when duels are scheduled and resolves them when complete
     // Enable via DUEL_BETTING_ENABLED=true environment variable
@@ -1091,6 +1101,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     (
       this.world as { duelBettingBridge?: DuelBettingBridge }
     ).duelBettingBridge = this.duelBettingBridge;
+
+    // Start payout keeper for processing bet claims
+    if (process.env.DUEL_BETTING_ENABLED === "true") {
+      startPayoutKeeper();
+    }
 
     // Listen for player teleport events (used by duel system)
     this.onWorld("player:teleport", (event) => {
