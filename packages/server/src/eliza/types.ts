@@ -268,11 +268,11 @@ export interface IEmbeddedHyperscapeService {
   /** Execute a use item command */
   executeUse(itemId: string): Promise<void>;
 
-  /** Execute a prayer toggle command */
-  executePrayer(prayerId: string): Promise<void>;
+  /** Execute a prayer toggle command. Returns false if the prayer system was unavailable. */
+  executePrayer(prayerId: string): Promise<boolean>;
 
-  /** Execute a chat message command */
-  executeChat(message: string): Promise<void>;
+  /** Execute a chat message command. Returns false if the chat system was unavailable. */
+  executeChat(message: string): Promise<boolean>;
 
   /** Stop current action */
   executeStop(): Promise<void>;

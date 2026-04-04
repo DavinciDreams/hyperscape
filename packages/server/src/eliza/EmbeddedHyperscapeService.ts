@@ -1319,7 +1319,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     }
   }
 
-  async executePrayer(prayerId: string): Promise<void> {
+  async executePrayer(prayerId: string): Promise<boolean> {
     if (!this.playerEntityId || !this.isActive) {
       throw new Error("Agent not spawned");
     }
@@ -1332,12 +1332,13 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
 
     if (prayerSystem?.togglePrayer) {
       prayerSystem.togglePrayer(this.playerEntityId, prayerId);
-    } else {
-      console.warn("[EmbeddedHyperscapeService] Prayer system not available");
+      return true;
     }
+    console.warn("[EmbeddedHyperscapeService] Prayer system not available");
+    return false;
   }
 
-  async executeChat(message: string): Promise<void> {
+  async executeChat(message: string): Promise<boolean> {
     if (!this.playerEntityId || !this.isActive) {
       throw new Error("Agent not spawned");
     }
@@ -1372,9 +1373,10 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
         },
         true,
       );
-    } else {
-      console.warn("[EmbeddedHyperscapeService] Chat system not available");
+      return true;
     }
+    console.warn("[EmbeddedHyperscapeService] Chat system not available");
+    return false;
   }
 
   async executeStop(): Promise<void> {

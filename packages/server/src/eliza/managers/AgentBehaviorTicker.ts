@@ -174,6 +174,10 @@ export interface AgentInstance {
     callsSinceReset: number;
     lastResetAt: number;
   };
+  /** Circular buffer tracking recent LLM call outcomes for circuit breaker */
+  llmOutcomeBuffer?: Array<"ok" | "fail">;
+  /** Timestamp when LLM circuit breaker tripped — scripted-only until cooldown expires */
+  llmCircuitOpenUntil?: number;
 }
 
 export type EmbeddedBehaviorAction =

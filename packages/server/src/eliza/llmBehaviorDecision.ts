@@ -23,6 +23,15 @@ const LLM_BEHAVIOR_TIMEOUT_MS = 4_000;
 /** Maximum memories per agent */
 const MAX_AGENT_MEMORIES = 12;
 
+/** Circuit breaker: number of recent outcomes to track */
+const LLM_CIRCUIT_BUFFER_SIZE = 10;
+
+/** Circuit breaker: trip when failure rate exceeds this fraction */
+const LLM_CIRCUIT_FAILURE_THRESHOLD = 0.5;
+
+/** Circuit breaker: how long to stay in scripted-only mode after tripping (ms) */
+const LLM_CIRCUIT_COOLDOWN_MS = 30_000;
+
 // ─── COORDINATION: shared state across agents ──────────────────────────
 
 /** What each agent is currently doing — used for multi-agent coordination. */
@@ -824,13 +833,19 @@ export function parseLlmBehaviorResponse(
 ): LlmBehaviorResult | null {
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
+    console.warn(
+      `[llmBehaviorDecision] ${instance.config.name} no JSON object found in LLM response`,
+    );
     return null;
   }
 
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[llmBehaviorDecision] ${instance.config.name} JSON parse failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return null;
   }
 
@@ -1148,6 +1163,43 @@ function inferGoalType(goalText: string, action: string): AgentGoal["type"] {
   return "idle";
 }
 
+// ─── CIRCUIT BREAKER ──────────────────────────────────────────────────
+
+/**
+ * Track an LLM call outcome and trip the circuit breaker if failure rate
+ * exceeds the threshold over the last N calls.
+ */
+function recordLlmOutcome(
+  instance: AgentInstance,
+  outcome: "ok" | "fail",
+): void {
+  if (!instance.llmOutcomeBuffer) instance.llmOutcomeBuffer = [];
+  instance.llmOutcomeBuffer.push(outcome);
+  if (instance.llmOutcomeBuffer.length > LLM_CIRCUIT_BUFFER_SIZE) {
+    instance.llmOutcomeBuffer.splice(
+      0,
+      instance.llmOutcomeBuffer.length - LLM_CIRCUIT_BUFFER_SIZE,
+    );
+  }
+
+  // Only evaluate after we have enough samples
+  if (instance.llmOutcomeBuffer.length >= LLM_CIRCUIT_BUFFER_SIZE) {
+    const failures = instance.llmOutcomeBuffer.filter(
+      (o) => o === "fail",
+    ).length;
+    if (
+      failures / instance.llmOutcomeBuffer.length >=
+      LLM_CIRCUIT_FAILURE_THRESHOLD
+    ) {
+      instance.llmCircuitOpenUntil = Date.now() + LLM_CIRCUIT_COOLDOWN_MS;
+      instance.llmOutcomeBuffer = []; // Reset buffer so next window is fresh
+      console.warn(
+        `[llmBehaviorDecision] Circuit breaker tripped for ${instance.config.name} — ${failures}/${LLM_CIRCUIT_BUFFER_SIZE} failures. Scripted-only for ${LLM_CIRCUIT_COOLDOWN_MS / 1000}s.`,
+      );
+    }
+  }
+}
+
 // ─── MAIN ENTRY POINT ──────────────────────────────────────────────────
 
 /**
@@ -1180,6 +1232,14 @@ export async function pickBehaviorActionWithLlm(
     return null;
   }
 
+  // ─── CIRCUIT BREAKER: skip LLM if failure rate too high ─────────────
+  if (
+    instance.llmCircuitOpenUntil &&
+    Date.now() < instance.llmCircuitOpenUntil
+  ) {
+    return null; // Circuit open — fall back to scripted behavior
+  }
+
   // Increment tick counter for action log
   if (!instance.tickCounter) instance.tickCounter = 0;
   instance.tickCounter++;
@@ -1201,16 +1261,30 @@ export async function pickBehaviorActionWithLlm(
         ),
       ),
     ]);
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[llmBehaviorDecision] ${instance.config.name} LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    recordLlmOutcome(instance, "fail");
     return null;
   }
 
   const text = typeof response === "string" ? response : "";
   if (!text) {
+    console.warn(
+      `[llmBehaviorDecision] ${instance.config.name} LLM returned empty response`,
+    );
+    recordLlmOutcome(instance, "fail");
     return null;
   }
 
   const result = parseLlmBehaviorResponse(text, instance);
+  if (!result) {
+    console.warn(
+      `[llmBehaviorDecision] ${instance.config.name} failed to parse LLM response: ${text.slice(0, 200)}`,
+    );
+  }
+  recordLlmOutcome(instance, result ? "ok" : "fail");
 
   // Track recent actions for stuck-loop detection
   if (!instance.recentLlmActions) instance.recentLlmActions = [];
@@ -1230,8 +1304,10 @@ export async function pickBehaviorActionWithLlm(
       createdAt: Date.now(),
       goal: result.goal?.description || instance.goal?.description || "",
     };
-  } else if (instance.llmPlan) {
-    // No new plan — advance the current step if action matches
+  } else if (instance.llmPlan && result) {
+    // Only advance the plan step when the LLM returned a valid action.
+    // If the LLM failed (result is null), we leave the step index as-is
+    // so the plan doesn't desync from reality on parse/timeout failures.
     instance.llmPlan.currentStep = Math.min(
       instance.llmPlan.currentStep + 1,
       instance.llmPlan.steps.length - 1,
