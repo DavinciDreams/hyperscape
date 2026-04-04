@@ -25,6 +25,7 @@ import { getDuelArenaOracleConfig } from "./oracle/config.js";
 
 // Import stream capture pipeline
 import { initStreamCapture } from "./streaming/stream-capture.js";
+import { startHlsCdnSync } from "./streaming/hls-cdn-sync.js";
 
 // Import memory monitoring infrastructure
 import {
@@ -248,6 +249,17 @@ async function startServer() {
         "[Server] ⚠️ Stream capture failed to initialize, continuing without capture:",
         errMsg(err),
       );
+    }
+
+    // Start HLS CDN sync if configured (uploads segments to R2/S3)
+    try {
+      const hlsCdnUrl = startHlsCdnSync();
+      if (hlsCdnUrl) {
+        (world as World & { hlsCdnStreamUrl?: string }).hlsCdnStreamUrl =
+          hlsCdnUrl;
+      }
+    } catch (err) {
+      console.error("[Server] ⚠️ HLS CDN sync failed to start:", errMsg(err));
     }
   }
 
