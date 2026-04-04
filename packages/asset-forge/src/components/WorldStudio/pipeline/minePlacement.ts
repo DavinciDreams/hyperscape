@@ -426,9 +426,18 @@ export function placeMines(
       mineCount * 5,
       zoneRng,
       (x, z) => {
-        // Must be above water
+        // Must be above water — check center AND 8 radial probes at max radius
+        // to ensure the entire mine footprint is on dry land
         const bq = deps.queryBiome(x, z);
         if (bq.height < deps.waterThreshold) return false;
+        const WATER_PROBE_R = 25; // max mine radius — conservative check
+        for (let a = 0; a < 8; a++) {
+          const angle = (a / 8) * Math.PI * 2;
+          const px = x + Math.cos(angle) * WATER_PROBE_R;
+          const pz = z + Math.sin(angle) * WATER_PROBE_R;
+          if (deps.queryBiome(px, pz).height < deps.waterThreshold)
+            return false;
+        }
 
         // Must be far enough from town centers
         for (const town of towns) {

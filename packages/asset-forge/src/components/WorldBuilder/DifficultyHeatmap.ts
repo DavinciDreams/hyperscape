@@ -207,7 +207,7 @@ export interface ZoneDifficultyConfig {
 export const DEFAULT_ZONE_DIFFICULTY_CONFIG: ZoneDifficultyConfig = {
   noiseScale: 0.0007,
   noiseAmplitude: 0.08,
-  worldRadiusFraction: 0.75,
+  worldRadiusFraction: 1.0,
 };
 
 /**
@@ -254,8 +254,11 @@ export function computeZoneDifficulty(
     nearestDist / (worldRadius * config.worldRadiusFraction),
   );
 
-  // Biome modifier: 0.5 (easy biomes, diff=0) → 1.5 (hard biomes, diff=3)
-  const biomeModifier = 0.5 + (biomeDifficulty / 3) * 1.0;
+  // Biome modifier: 0.8 (easy biomes, diff=0) → 1.2 (hard biomes, diff=3)
+  // Distance is the primary driver; biome shifts the curve ±20%.
+  // Narrow enough that easy biomes still reach High at the far edges,
+  // while hard biomes get a boost but don't dominate the outer ring.
+  const biomeModifier = 0.8 + (biomeDifficulty / 3) * 0.4;
 
   // Danger source additive bonus (capped at 0.3)
   const dangerBonus =

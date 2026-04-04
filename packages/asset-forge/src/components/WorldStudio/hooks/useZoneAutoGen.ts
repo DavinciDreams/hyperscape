@@ -89,7 +89,7 @@ import type {
 export const DEFAULT_TIERS: DifficultyTierConfig[] = [
   {
     name: "Safe",
-    scalarRange: [0.0, 0.05],
+    scalarRange: [0.0, 0.08],
     levelRange: [0, 0],
     resourceLevelRange: [1, 5],
     namePrefix: "Safe",
@@ -100,7 +100,7 @@ export const DEFAULT_TIERS: DifficultyTierConfig[] = [
   },
   {
     name: "Beginner",
-    scalarRange: [0.05, 0.15],
+    scalarRange: [0.08, 0.2],
     levelRange: [1, 10],
     resourceLevelRange: [1, 20],
     namePrefix: "Beginner",
@@ -111,7 +111,7 @@ export const DEFAULT_TIERS: DifficultyTierConfig[] = [
   },
   {
     name: "Low",
-    scalarRange: [0.15, 0.3],
+    scalarRange: [0.2, 0.35],
     levelRange: [5, 25],
     resourceLevelRange: [10, 45],
     namePrefix: "Low",
@@ -122,7 +122,7 @@ export const DEFAULT_TIERS: DifficultyTierConfig[] = [
   },
   {
     name: "Mid",
-    scalarRange: [0.3, 0.5],
+    scalarRange: [0.35, 0.55],
     levelRange: [15, 45],
     resourceLevelRange: [30, 65],
     namePrefix: "Mid",
@@ -133,7 +133,7 @@ export const DEFAULT_TIERS: DifficultyTierConfig[] = [
   },
   {
     name: "High",
-    scalarRange: [0.5, 0.75],
+    scalarRange: [0.55, 0.78],
     levelRange: [25, 60],
     resourceLevelRange: [50, 85],
     namePrefix: "Dangerous",
@@ -144,7 +144,7 @@ export const DEFAULT_TIERS: DifficultyTierConfig[] = [
   },
   {
     name: "Extreme",
-    scalarRange: [0.75, 1.0],
+    scalarRange: [0.78, 1.0],
     levelRange: [40, 200],
     resourceLevelRange: [65, 99],
     namePrefix: "Extreme",
@@ -674,13 +674,70 @@ export function runTownStage(
 
 // ============== STAGE 2: ROADS + ZONES ==============
 
+/**
+ * Compute the effective land radius — the farthest distance any land cell
+ * sits from the nearest town edge. This replaces the raw worldRadius so the
+ * difficulty gradient adapts to the actual island size rather than the full
+ * world grid.
+ *
+ * Samples land cells at a coarse step across the land bounds, skips water,
+ * and returns the 95th-percentile distance (avoids outlier peninsulas from
+ * dominating). Falls back to half the land diagonal if no towns exist.
+ */
+function computeEffectiveLandRadius(
+  landBounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+  towns: TownInfo[],
+  gridResolution: number,
+  queryBiome: BiomeQuerier,
+  waterThreshold: number,
+): number {
+  const step = Math.max(gridResolution, 20); // coarse sample for speed
+  const distances: number[] = [];
+
+  for (let wz = landBounds.minZ; wz <= landBounds.maxZ; wz += step) {
+    for (let wx = landBounds.minX; wx <= landBounds.maxX; wx += step) {
+      const q = queryBiome(wx, wz);
+      if (q.height < waterThreshold) continue; // skip water
+
+      // Distance from nearest town edge
+      let nearestDist = Infinity;
+      for (const town of towns) {
+        const dx = wx - town.position.x;
+        const dz = wz - town.position.z;
+        const dist = Math.max(
+          0,
+          Math.sqrt(dx * dx + dz * dz) - town.safeZoneRadius,
+        );
+        if (dist < nearestDist) nearestDist = dist;
+      }
+      if (nearestDist < Infinity) {
+        distances.push(nearestDist);
+      }
+    }
+  }
+
+  if (distances.length === 0) {
+    // Fallback: half the land diagonal
+    const dx = landBounds.maxX - landBounds.minX;
+    const dz = landBounds.maxZ - landBounds.minZ;
+    return Math.sqrt(dx * dx + dz * dz) / 2;
+  }
+
+  // Use 95th percentile to avoid outlier peninsulas stretching the scale
+  distances.sort((a, b) => a - b);
+  const p95Index = Math.floor(distances.length * 0.95);
+  const p95Distance = distances[p95Index];
+
+  // Minimum effective radius of 200m to avoid degenerate tiny islands
+  return Math.max(200, p95Distance);
+}
+
 export function runRoadZoneStage(
   config: AutoGenConfig,
   deps: AutoGenDeps,
   townResult: TownStageResult,
 ): RoadZoneStageResult {
   const noise = new NoiseGenerator(deps.seed);
-  const worldRadius = deps.worldSize / 2;
   const zoneDiffConfig =
     deps.zoneDifficultyConfig ?? DEFAULT_ZONE_DIFFICULTY_CONFIG;
   const { landBounds, towns, townDetails, generatedTowns } = townResult;
@@ -689,6 +746,25 @@ export function runRoadZoneStage(
   const rangeZ = landBounds.maxZ - landBounds.minZ;
   const cols = Math.ceil(rangeX / config.gridResolution);
   const rows = Math.ceil(rangeZ / config.gridResolution);
+
+  // Compute effective world radius from actual land extent rather than total
+  // world size. On a small island, the land may only span 500-800m while the
+  // world grid is 10km. Using the full world radius means the difficulty
+  // scalar never reaches the upper tiers. Instead, measure the farthest land
+  // corner from the nearest town and use that as the reference distance.
+  // This compresses the full difficulty gradient onto whatever land exists.
+  const effectiveRadius = computeEffectiveLandRadius(
+    landBounds,
+    towns,
+    config.gridResolution,
+    deps.queryBiome,
+    deps.waterThreshold,
+  );
+
+  console.log(
+    `[ZoneGen] Effective land radius: ${effectiveRadius.toFixed(0)}m ` +
+      `(world radius: ${(deps.worldSize / 2).toFixed(0)}m)`,
+  );
 
   // Sample difficulty grid
   const cells = sampleDifficultyGrid(
@@ -701,7 +777,7 @@ export function runRoadZoneStage(
     config.tiers,
     deps.waterThreshold,
     landBounds,
-    worldRadius,
+    effectiveRadius,
     zoneDiffConfig,
   );
 
