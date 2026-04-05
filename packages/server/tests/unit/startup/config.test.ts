@@ -1,133 +1,50 @@
-/**
- * Config Module Tests
- *
- * Tests for CDN URL default logic in loadConfig()
- *
- * CDN URL resolution rules:
- * 1. If PUBLIC_CDN_URL is set, use that value (explicit override)
- * 2. If NODE_ENV === "production" and no PUBLIC_CDN_URL, default to https://assets.hyperscape.club
- * 3. If NODE_ENV !== "production" (development) and no PUBLIC_CDN_URL, default to http://localhost:8080
- */
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  getDefaultElizaOsApiUrl,
+  getDefaultPublicAppUrl,
+  getDefaultPublicWsUrl,
+  isProductionRuntime,
+} from "../../../src/shared/public-ws-url.js";
 
-import { describe, it, expect } from "vitest";
-
-/**
- * Helper function that replicates the CDN URL default logic from config.ts
- * This allows us to test the logic in isolation without side effects from loadConfig()
- *
- * @param nodeEnv - NODE_ENV value
- * @param port - PORT value
- * @param publicCdnUrl - PUBLIC_CDN_URL value (optional)
- * @returns The resolved CDN URL
- */
-function resolveCdnUrl(
-  nodeEnv: string,
-  _port: number,
-  publicCdnUrl?: string,
-): string {
-  // Replicate logic from config.ts lines 373-379
-  const DEFAULT_CDN_URL =
-    nodeEnv === "production"
-      ? "https://assets.hyperscape.club"
-      : "http://localhost:8080";
-  return publicCdnUrl || DEFAULT_CDN_URL;
-}
-
-describe("CDN_URL default logic", () => {
-  describe("resolveCdnUrl helper (isolated logic)", () => {
-    it("uses explicit PUBLIC_CDN_URL when provided (overrides everything)", () => {
-      const customCdnUrl = "https://custom-cdn.example.com";
-
-      // In production with explicit URL
-      expect(resolveCdnUrl("production", 5555, customCdnUrl)).toBe(
-        customCdnUrl,
-      );
-
-      // In development with explicit URL
-      expect(resolveCdnUrl("development", 5555, customCdnUrl)).toBe(
-        customCdnUrl,
-      );
-
-      // With custom port and explicit URL
-      expect(resolveCdnUrl("development", 8080, customCdnUrl)).toBe(
-        customCdnUrl,
-      );
-    });
-
-    it("defaults to production CDN in production environment without PUBLIC_CDN_URL", () => {
-      const result = resolveCdnUrl("production", 5555);
-      expect(result).toBe("https://assets.hyperscape.club");
-    });
-
-    it("defaults to production CDN in production regardless of PORT", () => {
-      // PORT should not affect production default
-      expect(resolveCdnUrl("production", 3000)).toBe(
-        "https://assets.hyperscape.club",
-      );
-      expect(resolveCdnUrl("production", 8080)).toBe(
-        "https://assets.hyperscape.club",
-      );
-      expect(resolveCdnUrl("production", 5555)).toBe(
-        "https://assets.hyperscape.club",
-      );
-    });
-
-    it("defaults to localhost in development without PUBLIC_CDN_URL", () => {
-      const result = resolveCdnUrl("development", 5555);
-      expect(result).toBe("http://localhost:8080");
-    });
-
-    it("ignores PORT in development CDN URL", () => {
-      expect(resolveCdnUrl("development", 3000)).toBe("http://localhost:8080");
-      expect(resolveCdnUrl("development", 8080)).toBe("http://localhost:8080");
-      expect(resolveCdnUrl("development", 9999)).toBe("http://localhost:8080");
-    });
-
-    it("treats unset NODE_ENV as development (non-production)", () => {
-      // When NODE_ENV is not "production", it defaults to development behavior
-      expect(resolveCdnUrl("", 5555)).toBe("http://localhost:8080");
-      expect(resolveCdnUrl("test", 5555)).toBe("http://localhost:8080");
-      expect(resolveCdnUrl("staging", 5555)).toBe("http://localhost:8080");
-    });
-
-    it("explicit PUBLIC_CDN_URL takes precedence over all environments", () => {
-      const explicitUrl = "https://my-custom-assets.net";
-
-      // Production
-      expect(resolveCdnUrl("production", 5555, explicitUrl)).toBe(explicitUrl);
-
-      // Development
-      expect(resolveCdnUrl("development", 5555, explicitUrl)).toBe(explicitUrl);
-
-      // Test
-      expect(resolveCdnUrl("test", 5555, explicitUrl)).toBe(explicitUrl);
-
-      // Empty/unset NODE_ENV
-      expect(resolveCdnUrl("", 5555, explicitUrl)).toBe(explicitUrl);
-    });
+describe("public URL defaults", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
-  describe("edge cases", () => {
-    it("handles empty string PUBLIC_CDN_URL as unset (falsy)", () => {
-      // Empty string is falsy, so it should fall back to default
-      expect(resolveCdnUrl("production", 5555, "")).toBe(
-        "https://assets.hyperscape.club",
-      );
-      expect(resolveCdnUrl("development", 5555, "")).toBe(
-        "http://localhost:8080",
-      );
-    });
+  it("uses hyperscape.gg defaults in production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("PUBLIC_WS_URL", undefined);
+    vi.stubEnv("SERVER_HOST", undefined);
+    vi.stubEnv("PORT", undefined);
+    vi.stubEnv("UWS_PORT", undefined);
+    vi.stubEnv("UWS_ENABLED", undefined);
 
-    it("preserves trailing slash in explicit PUBLIC_CDN_URL", () => {
-      const urlWithSlash = "https://cdn.example.com/";
-      expect(resolveCdnUrl("production", 5555, urlWithSlash)).toBe(
-        urlWithSlash,
-      );
-    });
+    expect(isProductionRuntime()).toBe(true);
+    expect(getDefaultElizaOsApiUrl()).toBe("https://hyperscape.gg");
+    expect(getDefaultPublicAppUrl()).toBe("https://hyperscape.gg");
+    expect(getDefaultPublicWsUrl()).toBe("wss://hyperscape.gg/ws");
+  });
 
-    it("works with non-standard ports", () => {
-      expect(resolveCdnUrl("development", 1)).toBe("http://localhost:8080");
-      expect(resolveCdnUrl("development", 65535)).toBe("http://localhost:8080");
-    });
+  it("uses the uWS websocket port in local development by default", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SERVER_HOST", undefined);
+    vi.stubEnv("PORT", undefined);
+    vi.stubEnv("UWS_PORT", undefined);
+    vi.stubEnv("UWS_ENABLED", undefined);
+
+    expect(isProductionRuntime()).toBe(false);
+    expect(getDefaultElizaOsApiUrl()).toBe("http://localhost:4001");
+    expect(getDefaultPublicAppUrl()).toBe("http://localhost:3333");
+    expect(getDefaultPublicWsUrl()).toBe("ws://localhost:5556/ws");
+  });
+
+  it("falls back to the fastify port when uWS is disabled in development", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SERVER_HOST", "127.0.0.1");
+    vi.stubEnv("PORT", "7777");
+    vi.stubEnv("UWS_PORT", "8888");
+    vi.stubEnv("UWS_ENABLED", "false");
+
+    expect(getDefaultPublicWsUrl()).toBe("ws://127.0.0.1:7777/ws");
   });
 });

@@ -347,7 +347,7 @@ export function registerAgentRoutes(
    *   success: true,
    *   authToken: "7-day-jwt-token",
    *   characterId: "character-uuid",
-   *   serverUrl: "ws://localhost:5555/ws"
+   *   serverUrl: "ws://localhost:5556/ws"
    * }
    */
   fastify.post("/api/agents/credentials", async (request, reply) => {

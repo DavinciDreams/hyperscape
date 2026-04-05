@@ -6,14 +6,14 @@
  * overridden at runtime by /env.js.
  *
  * In production builds (vite build):
- *   - GAME_API_URL = https://hyperscape-production.up.railway.app
- *   - GAME_WS_URL = wss://hyperscape-production.up.railway.app/ws
+ *   - GAME_API_URL = https://hyperscape.gg
+ *   - GAME_WS_URL = wss://hyperscape.gg/ws
  *   - CDN_URL = https://assets.hyperscape.club
  *
  * In development (vite dev):
  *   - GAME_API_URL = http://localhost:5555
  *   - GAME_WS_URL = ws://localhost:5556/ws
- *   - CDN_URL = http://localhost:8080
+ *   - CDN_URL = http://localhost:5555/game-assets
  */
 
 type PublicRuntimeEnv = {
@@ -27,6 +27,23 @@ type WindowWithRuntimeEnv = Window & {
   env?: PublicRuntimeEnv;
   __CDN_URL?: string;
   __ASSETS_URL?: string;
+};
+
+const LOCAL_DEV_ELIZAOS_URL = "http://localhost:5555";
+const LOCAL_DEV_GAME_API_URL = "http://localhost:5555";
+const LOCAL_DEV_GAME_WS_URL = "ws://localhost:5556/ws";
+const LOCAL_DEV_CDN_URL = "http://localhost:5555/game-assets";
+const PRODUCTION_ELIZAOS_URL = "https://hyperscape.gg";
+const PRODUCTION_GAME_API_URL = "https://hyperscape.gg";
+const PRODUCTION_GAME_WS_URL = "wss://hyperscape.gg/ws";
+const PRODUCTION_CDN_URL = "https://assets.hyperscape.club";
+
+export type ApiConfigResolutionInput = {
+  browserHref?: string;
+  browserHostname?: string;
+  runtimeEnv?: PublicRuntimeEnv;
+  buildEnv?: PublicRuntimeEnv;
+  prod?: boolean;
 };
 
 function isLoopbackHost(hostname: string): boolean {
@@ -73,12 +90,106 @@ export function normalizeBrowserLoopbackUrl(
   }
 }
 
-function getRuntimeEnvValue(key: keyof PublicRuntimeEnv): string | undefined {
-  if (typeof window === "undefined") return undefined;
-  return normalizeBrowserLoopbackUrl(
-    (window as WindowWithRuntimeEnv).env?.[key],
-  );
+function normalizeLoopbackUrlForBrowser(
+  value: string | undefined,
+  browserHref?: string,
+  browserHostname?: string,
+): string | undefined {
+  if (!value || value === "undefined" || value === "null") {
+    return undefined;
+  }
+
+  if (!browserHref || !browserHostname) {
+    return value;
+  }
+
+  try {
+    const parsed = new URL(value, browserHref);
+    if (
+      !isLoopbackHost(browserHostname) ||
+      !isLoopbackHost(parsed.hostname) ||
+      parsed.hostname === browserHostname
+    ) {
+      return normalizeBaseUrlString(parsed);
+    }
+
+    parsed.hostname = browserHostname;
+    return normalizeBaseUrlString(parsed);
+  } catch {
+    return value;
+  }
 }
+
+export function resolveApiConfig({
+  browserHref,
+  browserHostname,
+  runtimeEnv,
+  buildEnv,
+  prod,
+}: ApiConfigResolutionInput): {
+  cdnUrl: string;
+  elizaOsUrl: string;
+  gameApiUrl: string;
+  gameWsUrl: string;
+} {
+  const normalize = (value?: string): string | undefined =>
+    normalizeLoopbackUrlForBrowser(value, browserHref, browserHostname);
+
+  const isProd = prod ?? false;
+  const defaultElizaOsUrl = isProd
+    ? PRODUCTION_ELIZAOS_URL
+    : LOCAL_DEV_ELIZAOS_URL;
+  const defaultGameApiUrl = isProd
+    ? PRODUCTION_GAME_API_URL
+    : LOCAL_DEV_GAME_API_URL;
+  const defaultGameWsUrl = isProd
+    ? PRODUCTION_GAME_WS_URL
+    : LOCAL_DEV_GAME_WS_URL;
+  const defaultCdnUrl = isProd ? PRODUCTION_CDN_URL : LOCAL_DEV_CDN_URL;
+
+  const resolvedGameApiUrl =
+    normalize(runtimeEnv?.PUBLIC_API_URL) ??
+    normalize(buildEnv?.PUBLIC_API_URL) ??
+    defaultGameApiUrl;
+  const resolvedElizaOsUrl =
+    normalize(runtimeEnv?.PUBLIC_ELIZAOS_URL) ??
+    normalize(runtimeEnv?.PUBLIC_API_URL) ??
+    normalize(buildEnv?.PUBLIC_ELIZAOS_URL) ??
+    normalize(buildEnv?.PUBLIC_API_URL) ??
+    defaultElizaOsUrl;
+  const resolvedGameWsUrl =
+    normalize(runtimeEnv?.PUBLIC_WS_URL) ??
+    normalize(buildEnv?.PUBLIC_WS_URL) ??
+    defaultGameWsUrl;
+  const resolvedCdnUrl =
+    normalize(runtimeEnv?.PUBLIC_CDN_URL) ??
+    normalize(buildEnv?.PUBLIC_CDN_URL) ??
+    defaultCdnUrl;
+
+  return {
+    cdnUrl: resolvedCdnUrl,
+    elizaOsUrl: resolvedElizaOsUrl,
+    gameApiUrl: resolvedGameApiUrl,
+    gameWsUrl: resolvedGameWsUrl,
+  };
+}
+
+const resolvedApiConfig = resolveApiConfig({
+  browserHref: typeof window !== "undefined" ? window.location.href : undefined,
+  browserHostname:
+    typeof window !== "undefined" ? window.location.hostname : undefined,
+  runtimeEnv:
+    typeof window !== "undefined"
+      ? (window as WindowWithRuntimeEnv).env
+      : undefined,
+  buildEnv: {
+    PUBLIC_ELIZAOS_URL: import.meta.env.PUBLIC_ELIZAOS_URL,
+    PUBLIC_API_URL: import.meta.env.PUBLIC_API_URL,
+    PUBLIC_WS_URL: import.meta.env.PUBLIC_WS_URL,
+    PUBLIC_CDN_URL: import.meta.env.PUBLIC_CDN_URL,
+  },
+  prod: import.meta.env.PROD,
+});
 
 export function getRuntimeAssetBaseUrl(): string {
   if (typeof window !== "undefined") {
@@ -114,17 +225,7 @@ export function resolveRuntimeAssetUrl(assetPath: string): string {
 // ElizaOS agent routes are now served directly from the Hyperscape game server.
 // No separate ElizaOS process needed - routes are at /api/agents, /api/agents/:id, etc.
 
-export const ELIZAOS_URL: string =
-  getRuntimeEnvValue("PUBLIC_ELIZAOS_URL") ??
-  getRuntimeEnvValue("PUBLIC_API_URL") ??
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_ELIZAOS_URL) ??
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_API_URL) ??
-  normalizeBrowserLoopbackUrl(
-    import.meta.env.PROD
-      ? "https://hyperscape-production.up.railway.app"
-      : "http://localhost:5555",
-  ) ??
-  "http://localhost:5555";
+export const ELIZAOS_URL: string = resolvedApiConfig.elizaOsUrl;
 
 export const ELIZAOS_API = `${ELIZAOS_URL}/api` as const;
 
@@ -133,36 +234,12 @@ export const ELIZAOS_API = `${ELIZAOS_URL}/api` as const;
 // =============================================================================
 // These are replaced at build time by Vite's define feature
 
-export const GAME_API_URL: string =
-  getRuntimeEnvValue("PUBLIC_API_URL") ??
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_API_URL) ??
-  normalizeBrowserLoopbackUrl(
-    import.meta.env.PROD
-      ? "https://hyperscape-production.up.railway.app"
-      : "http://localhost:5555",
-  ) ??
-  "http://localhost:5555";
+export const GAME_API_URL: string = resolvedApiConfig.gameApiUrl;
 
-export const GAME_WS_URL: string =
-  getRuntimeEnvValue("PUBLIC_WS_URL") ??
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_WS_URL) ??
-  normalizeBrowserLoopbackUrl(
-    import.meta.env.PROD
-      ? "wss://hyperscape-production.up.railway.app/ws"
-      : "ws://localhost:5556/ws",
-  ) ??
-  "ws://localhost:5556/ws";
+export const GAME_WS_URL: string = resolvedApiConfig.gameWsUrl;
 
 // =============================================================================
 // CDN for Static Assets
 // =============================================================================
 
-export const CDN_URL: string =
-  getRuntimeEnvValue("PUBLIC_CDN_URL") ??
-  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_CDN_URL) ??
-  normalizeBrowserLoopbackUrl(
-    import.meta.env.PROD
-      ? "https://assets.hyperscape.club"
-      : "http://localhost:5555/game-assets",
-  ) ??
-  "http://localhost:5555/game-assets";
+export const CDN_URL: string = resolvedApiConfig.cdnUrl;
