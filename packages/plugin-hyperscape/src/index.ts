@@ -122,7 +122,7 @@ const configSchema = z.object({
     .string()
     .url()
     .optional()
-    .default("ws://localhost:5555/ws")
+    .default("ws://localhost:5556/ws")
     .describe("WebSocket URL for Hyperscape server"),
   HYPERSCAPE_AUTO_RECONNECT: z
     .string()
@@ -201,7 +201,7 @@ export const hyperscapePlugin: Plugin = {
   config: {
     HYPERSCAPE_SERVER_URL: normalizeEnvValue(
       process.env.HYPERSCAPE_SERVER_URL,
-      "ws://localhost:5555/ws",
+      "ws://localhost:5556/ws",
     ),
     HYPERSCAPE_AUTO_RECONNECT: normalizeEnvValue(
       process.env.HYPERSCAPE_AUTO_RECONNECT,

@@ -57,7 +57,7 @@ export const callbackRoute: Route = {
         // Reconnect with new auth token if not connected
         if (!service.isConnected()) {
           const serverUrl =
-            process.env.HYPERSCAPE_SERVER_URL || "ws://localhost:5555/ws";
+            process.env.HYPERSCAPE_SERVER_URL || "ws://localhost:5556/ws";
           await service.connect(serverUrl).catch((err) => {
             logger.error(
               "[HyperscapeAuth] Reconnection error:",

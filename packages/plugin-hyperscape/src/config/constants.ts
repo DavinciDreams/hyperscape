@@ -9,7 +9,9 @@ export const NETWORK_CONFIG = {
     process.env.HYPERSCAPE_SERVER_URL ||
     process.env.WS_URL ||
     process.env.PUBLIC_WS_URL ||
-    "wss://chill.hyperscape.xyz/ws",
+    (process.env.NODE_ENV === "production"
+      ? "wss://chill.hyperscape.xyz/ws"
+      : "ws://localhost:5556/ws"),
   DEFAULT_API_BASE:
     process.env.PUBLIC_API_URL ||
     process.env.API_BASE ||
