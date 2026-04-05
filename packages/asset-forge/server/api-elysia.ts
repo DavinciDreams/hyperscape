@@ -54,12 +54,19 @@ import { createPlacementRoutes } from "./routes/placements";
 import { createProcgenRoutes } from "./routes/procgen";
 import { ProcgenPresetService } from "./services/ProcgenPresetService";
 
+// Armor Pipeline routes
+import { createArmorPipelineRoutes } from "./routes/armor-pipeline";
+import { ShellTextureService } from "./services/armor-pipeline/ShellTextureService";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, "..");
 
-// Ensure temp-images directory exists
+// Ensure temp directories exist
 await fs.promises.mkdir(path.join(ROOT_DIR, "temp-images"), {
+  recursive: true,
+});
+await fs.promises.mkdir(path.join(ROOT_DIR, "temp-shells"), {
   recursive: true,
 });
 
@@ -81,6 +88,16 @@ const lodBakingService = new LODBakingService(PROJECT_ROOT);
 const vatBakingService = new VATBakingService(PROJECT_ROOT);
 const placementService = new PlacementService(PROJECT_ROOT);
 const procgenPresetService = new ProcgenPresetService();
+
+// Armor Pipeline services
+const shellTextureService = new ShellTextureService({
+  meshyApiKey: process.env.MESHY_API_KEY || "",
+  shellDir: path.join(ROOT_DIR, "temp-shells"),
+  publicBaseUrl:
+    process.env.PUBLIC_URL ||
+    process.env.IMAGE_SERVER_URL ||
+    `http://localhost:${API_PORT}`,
+});
 
 // Create Elysia app
 const app = new Elysia()
@@ -269,6 +286,24 @@ const app = new Elysia()
   //   }),
   // )
 
+  // Static file serving - temp shell GLBs (for Meshy AI texturing)
+  .get("/temp-shells/:filename", async ({ params, set }) => {
+    const filePath = path.join(ROOT_DIR, "temp-shells", params.filename);
+    try {
+      const file = Bun.file(filePath);
+      if (!(await file.exists())) {
+        set.status = 404;
+        return { error: "Shell file not found" };
+      }
+      set.headers["content-type"] = "model/gltf-binary";
+      set.headers["cache-control"] = "public, max-age=3600";
+      return file;
+    } catch (error) {
+      set.status = 500;
+      return { error: "Failed to serve shell file" };
+    }
+  })
+
   // Static file serving - game model assets (for batch sprite generation)
   .use(
     staticPlugin({
@@ -306,6 +341,8 @@ const app = new Elysia()
   .use(createPlacementRoutes(placementService))
   // Procgen preset management
   .use(createProcgenRoutes(procgenPresetService))
+  // Armor pipeline (POC-2: shell texturing)
+  .use(createArmorPipelineRoutes(shellTextureService))
 
   // Start server
   .listen(API_PORT);

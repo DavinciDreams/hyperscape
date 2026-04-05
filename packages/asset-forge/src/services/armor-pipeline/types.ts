@@ -1,0 +1,109 @@
+import type {
+  BufferGeometry,
+  Object3D,
+  Skeleton,
+  SkinnedMesh,
+  Vector3,
+  Box3,
+} from "three";
+
+/** VRM humanoid bone names used for slot region definitions */
+export const SLOT_BONE_MAP = {
+  helmet: ["head", "neck"],
+  body: [
+    "hips",
+    "spine",
+    "chest",
+    "upperChest",
+    "leftShoulder",
+    "rightShoulder",
+  ],
+  legs: ["leftUpperLeg", "rightUpperLeg", "leftLowerLeg", "rightLowerLeg"],
+  boots: ["leftFoot", "rightFoot", "leftToes", "rightToes"],
+  gloves: ["leftHand", "rightHand"],
+} as const;
+
+export type EquipmentSlotName = keyof typeof SLOT_BONE_MAP;
+
+/** Extended bone assignments for slots that share bones with partial weight */
+export const SLOT_PARTIAL_BONES: Partial<
+  Record<EquipmentSlotName, { boneName: string; maxWeight: number }[]>
+> = {
+  boots: [
+    { boneName: "leftLowerLeg", maxWeight: 0.3 },
+    { boneName: "rightLowerLeg", maxWeight: 0.3 },
+  ],
+  gloves: [
+    { boneName: "leftLowerArm", maxWeight: 0.4 },
+    { boneName: "rightLowerArm", maxWeight: 0.4 },
+  ],
+  legs: [{ boneName: "hips", maxWeight: 0.3 }],
+  body: [
+    { boneName: "leftUpperArm", maxWeight: 0.5 },
+    { boneName: "rightUpperArm", maxWeight: 0.5 },
+    { boneName: "neck", maxWeight: 0.5 },
+  ],
+};
+
+/** Bulk class determines shell thickness */
+export type BulkClass = "skin" | "cloth" | "leather" | "plate";
+
+export const BULK_OFFSETS: Record<BulkClass, number> = {
+  skin: 0.001, // ~1mm
+  cloth: 0.005, // ~5mm
+  leather: 0.012, // ~12mm
+  plate: 0.03, // ~30mm
+};
+
+/** A region extracted from the VRM body mesh */
+export interface BodyRegion {
+  slotName: EquipmentSlotName;
+  vertexIndices: number[];
+  triangleIndices: number[];
+  boundingBox: Box3;
+  center: Vector3;
+  boneIndices: Set<number>;
+}
+
+/** A shell mesh derived from a body region */
+export interface ShellMesh {
+  slotName: EquipmentSlotName;
+  bulkClass: BulkClass;
+  geometry: BufferGeometry;
+  skeleton: Skeleton;
+  boundingBox: Box3;
+  vertexCount: number;
+  triangleCount: number;
+}
+
+/** Result of the shell extraction process */
+export interface ShellExtractionResult {
+  regions: Map<EquipmentSlotName, BodyRegion>;
+  shells: Map<string, ShellMesh>; // key: `${slotName}_${bulkClass}`
+  avatarSkeleton: Skeleton;
+  avatarHeight: number;
+  /** The loaded VRM SkinnedMesh — needed by the viewer to display the avatar */
+  skinnedMesh: SkinnedMesh;
+  /** The full loaded VRM scene (for adding to Three.js scene) */
+  vrmScene: Object3D;
+}
+
+/** Result of rigging a textured shell back onto the avatar skeleton */
+export interface RiggedArmorResult {
+  skinnedMesh: SkinnedMesh;
+  skeleton: Skeleton;
+  slotName: EquipmentSlotName;
+  bulkClass: BulkClass;
+  /** Whether vertex counts matched (fast-path direct copy vs fallback nearest-vertex) */
+  vertexMatch: boolean;
+  vertexCount: number;
+}
+
+/** Progress callback for shell extraction */
+export interface ShellExtractionProgress {
+  stage: "loading" | "regions" | "offsetting" | "smoothing" | "complete";
+  slotName?: EquipmentSlotName;
+  bulkClass?: BulkClass;
+  progress: number; // 0-1
+  message: string;
+}

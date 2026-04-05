@@ -162,6 +162,8 @@ gdd-assets/*
 !gdd-assets/.gitkeep
 temp-images/*
 !temp-images/.gitkeep
+temp-shells/*
+!temp-shells/.gitkeep
 
 # Lock files (optional - some teams commit these)
 # Uncomment if you don't want to commit lock files

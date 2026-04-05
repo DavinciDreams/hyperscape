@@ -20,7 +20,8 @@ export type NavigationView =
   | "roadsGen"
   | "grassGen"
   | "flowerGen"
-  | "vegetationGen";
+  | "vegetationGen"
+  | "armorPipeline";
 
 export interface NavigationState {
   currentView: NavigationView;
