@@ -1,8 +1,9 @@
 import WebSocket from "ws";
 import { pack, unpack } from "msgpackr";
+import { getDefaultPublicWsUrl } from "../shared/public-ws-url.js";
 
 const WS_URL =
-  process.env.WS_URL || process.env.PUBLIC_WS_URL || "ws://localhost:5555/ws";
+  process.env.WS_URL || process.env.PUBLIC_WS_URL || getDefaultPublicWsUrl();
 
 const socket = new WebSocket(WS_URL);
 

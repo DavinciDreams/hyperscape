@@ -17,6 +17,7 @@
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { World } from "@hyperscape/shared";
+import { getDefaultPublicWsUrl } from "../../shared/public-ws-url.js";
 import { createJWT } from "../../shared/utils.js";
 
 // Command acknowledgment delay (ms) - allows plugin to process before response
@@ -417,7 +418,7 @@ export function registerAgentRoutes(
       const serverUrl =
         process.env.HYPERSCAPE_SERVER_URL ||
         process.env.PUBLIC_WS_URL ||
-        "ws://localhost:5555/ws";
+        getDefaultPublicWsUrl();
 
       return reply.send({
         success: true,
@@ -587,7 +588,7 @@ export function registerAgentRoutes(
       const serverUrl =
         process.env.HYPERSCAPE_SERVER_URL ||
         process.env.PUBLIC_WS_URL ||
-        "ws://localhost:5555/ws";
+        getDefaultPublicWsUrl();
 
       // If agentId was provided, create/update agent mapping for dashboard spectating
       if (agentId) {

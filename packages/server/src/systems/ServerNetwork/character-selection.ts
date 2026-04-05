@@ -32,6 +32,7 @@ import {
 } from "./handlers/friends";
 import { getAgentManager } from "../../eliza";
 import { getAgentRuntimeByCharacterId } from "../../eliza/ModelAgentSpawner.js";
+import { getDefaultPublicWsUrl } from "../../shared/public-ws-url.js";
 
 const TRUSTED_DUEL_BOT_ACCOUNT_IDS = new Set(
   (
@@ -117,7 +118,7 @@ async function _createElizaOSAgent(
         secrets: {
           HYPERSCAPE_CHARACTER_ID: characterId,
           HYPERSCAPE_SERVER_URL:
-            process.env.PUBLIC_WS_URL || "ws://localhost:5555/ws",
+            process.env.PUBLIC_WS_URL || getDefaultPublicWsUrl(),
           HYPERSCAPE_ACCOUNT_ID: accountId, // Link to user's account
           wallet,
         },
