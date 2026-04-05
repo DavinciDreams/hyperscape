@@ -104,7 +104,7 @@ export async function createVisualTestRuntime(
   const testWorldUrl =
     process.env.TEST_WORLD_URL ||
     process.env.WS_URL ||
-    "wss://chill.hyperscape.xyz/ws";
+    "wss://hyperscape.gg/ws";
   const testWorldId = process.env.TEST_WORLD_ID || "visual-test-world";
 
   return createDynamicRuntime({

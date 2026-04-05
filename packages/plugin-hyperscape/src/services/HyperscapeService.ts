@@ -48,7 +48,11 @@ import {
 import { clearMapProviderCache } from "../providers/mapProvider.js";
 import { getPersonalityTraits } from "../providers/personalityProvider.js";
 import { getLastDesireCandidates } from "../managers/goal-progression-planner.js";
-import { SCRIPTED_AUTONOMY_CONFIG } from "../config/constants.js";
+import {
+  LOCAL_DEV_HYPERSCAPE_API_BASE_URL,
+  PRODUCTION_HYPERSCAPE_WS_URL,
+  SCRIPTED_AUTONOMY_CONFIG,
+} from "../config/constants.js";
 import {
   resolveLocation,
   parseLocationFromMessage,
@@ -258,6 +262,10 @@ export function resolveDefaultHyperscapeServerUrl(): string {
     return explicitServerUrl;
   }
 
+  if (process.env.NODE_ENV === "production") {
+    return PRODUCTION_HYPERSCAPE_WS_URL;
+  }
+
   const { wsPort } = resolveDefaultHyperscapePorts();
   return `ws://localhost:${wsPort}/ws`;
 }
@@ -376,7 +384,9 @@ export class HyperscapeService
   private reconnectInterval: NodeJS.Timeout | null = null;
   private autoReconnect: boolean = true;
   private serverUrl: string = resolveDefaultHyperscapeServerUrl();
-  private apiBaseUrl: string = "http://localhost:5555";
+  private apiBaseUrl: string = resolveHyperscapeApiBaseUrl(
+    resolveDefaultHyperscapeServerUrl(),
+  );
   private liveKit: AgentLiveKit | null = null;
   private authToken: string | undefined;
   private privyUserId: string | undefined;

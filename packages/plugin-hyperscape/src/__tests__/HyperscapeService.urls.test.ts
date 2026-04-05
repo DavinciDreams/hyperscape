@@ -19,6 +19,14 @@ describe("HyperscapeService URL resolution", () => {
     expect(resolveDefaultHyperscapeServerUrl()).toBe("ws://localhost:5556/ws");
   });
 
+  it("defaults production runtime sockets to hyperscape.gg", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("HYPERSCAPE_SERVER_URL", undefined);
+    vi.stubEnv("PUBLIC_WS_URL", undefined);
+
+    expect(resolveDefaultHyperscapeServerUrl()).toBe("wss://hyperscape.gg/ws");
+  });
+
   it("falls back to the HTTP port when uWS is disabled", () => {
     vi.stubEnv("PORT", "6001");
     vi.stubEnv("UWS_PORT", "7777");

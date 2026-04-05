@@ -3,19 +3,30 @@
  * All configurable values should be defined here to avoid hardcoding
  */
 
+export const LOCAL_DEV_HYPERSCAPE_WS_URL = "ws://localhost:5556/ws";
+export const PRODUCTION_HYPERSCAPE_WS_URL = "wss://hyperscape.gg/ws";
+export const LOCAL_DEV_HYPERSCAPE_API_BASE_URL = "http://localhost:5555";
+export const PRODUCTION_HYPERSCAPE_API_BASE_URL = "https://hyperscape.gg";
+
+function isProductionRuntime(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
 // Network Configuration
 export const NETWORK_CONFIG = {
   DEFAULT_WS_URL:
     process.env.HYPERSCAPE_SERVER_URL ||
     process.env.WS_URL ||
     process.env.PUBLIC_WS_URL ||
-    (process.env.NODE_ENV === "production"
-      ? "wss://chill.hyperscape.xyz/ws"
-      : "ws://localhost:5556/ws"),
+    (isProductionRuntime()
+      ? PRODUCTION_HYPERSCAPE_WS_URL
+      : LOCAL_DEV_HYPERSCAPE_WS_URL),
   DEFAULT_API_BASE:
     process.env.PUBLIC_API_URL ||
     process.env.API_BASE ||
-    "http://localhost:5555",
+    (isProductionRuntime()
+      ? PRODUCTION_HYPERSCAPE_API_BASE_URL
+      : LOCAL_DEV_HYPERSCAPE_API_BASE_URL),
   RETRY_DELAY_MS: parseInt(process.env.RETRY_DELAY_MS || "5000"),
   CONNECTION_TIMEOUT_MS: parseInt(process.env.CONNECTION_TIMEOUT_MS || "10000"),
   UPLOAD_TIMEOUT_MS: parseInt(process.env.UPLOAD_TIMEOUT_MS || "30000"),
