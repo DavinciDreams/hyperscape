@@ -65,6 +65,7 @@ import {
 import type { BiomeData } from "../../../types/core/core";
 import type {
   ResourceNode,
+  ResourceSubType,
   TerrainTile,
   FlatZone,
 } from "../../../types/world/terrain";
@@ -79,6 +80,20 @@ import { BIOMES } from "../../../data/world-structure";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
 import { getDuelArenaConfig } from "../../../data/duel-manifest";
 import { DataManager } from "../../../data/DataManager";
+import type { WorldJsonResource } from "../../../data/world-structure";
+import {
+  calculateMineInfluenceAtPoint,
+  calculateMineBowlHeight,
+  findNearestInfluencingMine,
+  type MineArea,
+} from "../../../world/mine-influence";
+import {
+  precomputeExclusions,
+  filterTreesByExclusions,
+  type VegetationExclusionInput,
+  type PrecomputedExclusions,
+} from "../../../world/vegetation-filter";
+import { getExternalResource } from "../../../utils/ExternalAssetUtils";
 // NOTE: Import directly to avoid circular dependency through barrel file
 import { WaterSystem } from "./WaterSystem";
 import {
@@ -89,6 +104,7 @@ import {
   type ResourceGenerationContext,
 } from "./BiomeResourceGenerator";
 import { getTreeConfigForBiome } from "./TerrainBiomeTypes";
+import { treeIdToSubType } from "../../../constants/TreeTypes";
 import {
   setProcgenRockWorld,
   addRockInstance,
@@ -130,8 +146,8 @@ import {
 import type { QuadChunkWorkerConfig } from "../../../utils/workers/QuadChunkWorker";
 import { terminateQuadChunkWorkerPool } from "../../../utils/workers/QuadChunkWorker";
 
-// Road influence blending - used for shader's roadInfluence attribute
-const ROAD_BLEND_WIDTH = 0.5; // Extra blend distance beyond road width (meters)
+import { applyTownCircularFlatten as sharedTownFlatten } from "../../../world/terrain-flatten";
+import { ROAD_BLEND_WIDTH } from "../../../world/road-influence";
 const TERRAIN_ROAD_INFLUENCE_DEBUG =
   process.env.TERRAIN_ROAD_INFLUENCE_DEBUG === "true";
 const TERRAIN_TIMING_DEBUG = process.env.TERRAIN_TIMING_DEBUG === "true";
@@ -262,6 +278,16 @@ export class TerrainSystem extends System {
   private _cachedRoadTileZ = Number.NaN;
   private _cachedRoadSegments: ReadonlyArray<RoadTileSegment> = [];
   private townSystem: TownSystem | null = null;
+  /** Cached vegetation exclusion data (built once when towns/roads are ready) */
+  private vegetationExclusions: PrecomputedExclusions | null = null;
+  /** True after ROADS_GENERATED fires — tree generation is deferred until then */
+  private _roadsReady = false;
+  /** Tiles that deferred tree generation because roads/towns weren't ready yet */
+  private _tilesAwaitingTrees: Array<{
+    tile: TerrainTile;
+    biomeData: BiomeData;
+  }> = [];
+  private _logManifestTreeDiag = 0;
   private bossHotspots: BossHotspot[] = [];
   private dangerSources: DangerSource[] = [];
 
@@ -345,6 +371,12 @@ export class TerrainSystem extends System {
       .config;
     if (worldConfig?.terrainSeed !== undefined) {
       return worldConfig.terrainSeed;
+    }
+
+    // Check world-config.json manifest (e.g. staging preview)
+    const manifestSeed = DataManager.getWorldConfig()?.seed;
+    if (manifestSeed !== undefined && manifestSeed !== null) {
+      return manifestSeed;
     }
 
     // Check environment variable
@@ -682,7 +714,9 @@ export class TerrainSystem extends System {
       const i3 = i * 3;
       const worldX = posArray[i3] + originX;
       const worldZ = posArray[i3 + 2] + originZ;
-      posArray[i3 + 1] = this.getHeightAtComputed(worldX, worldZ);
+      // Use getHeightAt() so town circular flattening is applied to collision mesh,
+      // matching the visual terrain. getHeightAtComputed() skips town flattening.
+      posArray[i3 + 1] = this.getHeightAt(worldX, worldZ);
     }
 
     // Translate to world position (collision mesh needs absolute coords)
@@ -770,6 +804,35 @@ export class TerrainSystem extends System {
       const resource = tile.resources[i];
       if (resource.instanceId != null) continue;
       this.pendingResourceInstances.push({ tile, resourceIndex: i });
+    }
+  }
+
+  /**
+   * Emit RESOURCE_SPAWN_POINTS_REGISTERED for a tile's resources.
+   * Used by deferred tree generation to register trees after ROADS_GENERATED.
+   */
+  private emitResourceSpawnPoints(tile: TerrainTile): void {
+    if (tile.resources.length === 0) return;
+    const originX = tile.x * this.CONFIG.TILE_SIZE;
+    const originZ = tile.z * this.CONFIG.TILE_SIZE;
+    const spawnPoints = tile.resources
+      .filter((r) => r.type === "tree")
+      .map((r) => ({
+        id: r.id,
+        type: r.type,
+        subType: r.subType ?? "normal",
+        position: {
+          x: originX + (r.position as { x: number }).x,
+          y: (r.position as { y: number }).y,
+          z: originZ + (r.position as { z: number }).z,
+        },
+        scale: r.scale,
+        rotation: r.rotation,
+      }));
+    if (spawnPoints.length > 0) {
+      this.world.emit(EventType.RESOURCE_SPAWN_POINTS_REGISTERED, {
+        spawnPoints,
+      });
     }
   }
 
@@ -965,7 +1028,67 @@ export class TerrainSystem extends System {
       }
     }
 
-    // Road influence and biome weights per vertex
+    // Town-wide circular terrain flattening (matches World Studio exactly)
+    // Must run BEFORE road flattening — roads skip inside town flatten zones
+    if (this.townSystem) {
+      for (let i = 0; i < positions.count; i++) {
+        const localX = positions.getX(i);
+        const localZ = positions.getZ(i);
+        const worldX = localX + tileX * this.CONFIG.TILE_SIZE;
+        const worldZ = localZ + tileZ * this.CONFIG.TILE_SIZE;
+        const flatHeight = this.applyTownCircularFlatten(
+          worldX,
+          worldZ,
+          positions.getY(i),
+        );
+        if (flatHeight !== null) {
+          positions.setY(i, flatHeight);
+        }
+      }
+    }
+
+    // Mine bowl terrain deformation + vertex attributes
+    const worldMines = DataManager.getWorldJsonMines() as MineArea[];
+    let mineInfluenceData: Float32Array | null = null;
+    let mineBiomeIdData: Float32Array | null = null;
+    if (worldMines.length > 0) {
+      mineInfluenceData = new Float32Array(positions.count);
+      mineBiomeIdData = new Float32Array(positions.count);
+      for (let i = 0; i < positions.count; i++) {
+        const localX = positions.getX(i);
+        const localZ = positions.getZ(i);
+        const worldX = localX + tileX * this.CONFIG.TILE_SIZE;
+        const worldZ = localZ + tileZ * this.CONFIG.TILE_SIZE;
+        const result = calculateMineInfluenceAtPoint(
+          worldX,
+          worldZ,
+          worldMines,
+        );
+        mineInfluenceData[i] = result.influence;
+        mineBiomeIdData[i] = result.biomeIndex;
+        if (result.influence > 0) {
+          const nearestMine = findNearestInfluencingMine(
+            worldX,
+            worldZ,
+            worldMines,
+          );
+          if (nearestMine) {
+            const bowlHeight = calculateMineBowlHeight(
+              worldX,
+              worldZ,
+              positions.getY(i),
+              nearestMine,
+            );
+            positions.setY(i, bowlHeight);
+          }
+        }
+      }
+    }
+
+    // Road influence, terrain flattening under roads, and biome weights per vertex
+    this.roadNetworkSystem ??= this.world.getSystem("roads") as
+      | RoadNetworkSystem
+      | undefined;
     for (let i = 0; i < positions.count; i++) {
       const localX = positions.getX(i);
       const localZ = positions.getZ(i);
@@ -977,6 +1100,31 @@ export class TerrainSystem extends System {
         tileX,
         tileZ,
       );
+
+      // Flatten terrain under roads (skip inside town flatten zones — already flat there)
+      if (roadInfluences[i] > 0 && this.roadNetworkSystem) {
+        // Check if vertex is inside a town flatten zone
+        const townFlat = this.applyTownCircularFlatten(
+          worldX,
+          worldZ,
+          positions.getY(i),
+        );
+        if (townFlat === null) {
+          // Not in a town zone — apply road flattening
+          const roadInfo = this.roadNetworkSystem.getRoadHeightAtPoint(
+            worldX,
+            worldZ,
+          );
+          if (roadInfo && roadInfo.influence > 0) {
+            const targetHeight = roadInfo.height + 0.1;
+            const currentHeight = positions.getY(i);
+            const flattenedHeight =
+              currentHeight +
+              (targetHeight - currentHeight) * roadInfo.influence;
+            positions.setY(i, flattenedHeight);
+          }
+        }
+      }
 
       const { biomeWeightMap, totalWeight } =
         this.computeBiomeWeightsAtPosition(worldX, worldZ);
@@ -1011,6 +1159,17 @@ export class TerrainSystem extends System {
       "riverProximity",
       new THREE.BufferAttribute(rpData, 1),
     );
+    // Mine vertex attributes (influence + biome for shader coloring)
+    if (mineInfluenceData && mineBiomeIdData) {
+      geometry.setAttribute(
+        "mineInfluence",
+        new THREE.BufferAttribute(mineInfluenceData, 1),
+      );
+      geometry.setAttribute(
+        "mineBiomeId",
+        new THREE.BufferAttribute(mineBiomeIdData, 1),
+      );
+    }
 
     // DEBUG: log biome weights for first 5 tiles
     if (this._loggedWorkerTileBiome < 5) {
@@ -1060,7 +1219,11 @@ export class TerrainSystem extends System {
       }
     }
 
-    if (hasFlatZones) {
+    // Keep heightData as raw procedural heights (before town/road flattening).
+    // getHeightAt() applies all modifications dynamically for consistency.
+    // Only recompute normals if flat zones changed the geometry.
+    const heightsModified = hasFlatZones;
+    if (heightsModified) {
       // Normals must be recomputed on the main thread since heights changed
       this.computeHeightFieldNormals(geometry, tileX, tileZ, heightData);
     } else {
@@ -1070,7 +1233,7 @@ export class TerrainSystem extends System {
 
     this.applyFlatZoneCarve(geometry, tileX, tileZ);
 
-    // Store height data for persistence
+    // Store height data for persistence (includes all flattening modifications)
     this.storeHeightData(tileX, tileZ, Array.from(heightData));
 
     return geometry;
@@ -1911,6 +2074,10 @@ export class TerrainSystem extends System {
         | RoadNetworkSystem
         | undefined;
 
+      // Invalidate vegetation exclusion cache so it rebuilds with road data
+      this.vegetationExclusions = null;
+      this._roadsReady = true;
+
       // Tiles already exist by this point in normal client flow. Refresh them
       // so roads appear without making road generation block first terrain.
       if (this.terrainTiles.size > 0) {
@@ -1918,6 +2085,25 @@ export class TerrainSystem extends System {
           "[TerrainSystem] Roads ready, refreshing road influence on loaded tiles...",
         );
         this.refreshRoadInfluence();
+      }
+
+      // Generate trees for tiles that deferred tree generation.
+      // Now that towns/roads are loaded, exclusion filtering will apply correctly.
+      if (this._tilesAwaitingTrees.length > 0) {
+        console.log(
+          `[TerrainSystem] Generating deferred trees for ${this._tilesAwaitingTrees.length} tiles...`,
+        );
+        for (const { tile, biomeData } of this._tilesAwaitingTrees) {
+          // Only generate for tiles that are still loaded
+          if (!this.terrainTiles.has(tile.key)) continue;
+          this.generateTreesForTile(tile, biomeData);
+          // Queue resource instances so visuals are created
+          this.queueResourceInstances(tile);
+          // Emit spawn points so server creates ResourceEntity instances
+          this.emitResourceSpawnPoints(tile);
+        }
+        console.log(`[TerrainSystem] Deferred tree generation complete`);
+        this._tilesAwaitingTrees = [];
       }
     });
 
@@ -2498,7 +2684,8 @@ export class TerrainSystem extends System {
     // Generate collision only on server when mesh collision is enabled.
     // Dev defaults disable this to avoid heavy PhysX triangle mesh memory use.
     const collision: PMeshHandle | null = null;
-    const isServer = this.world.network?.isServer || false;
+    const isServer =
+      this.runtimeIsServer || this.world.network?.isServer || false;
     if (isServer && this.serverMeshCollisionEnabled) {
       const collisionKey = `${tileX}_${tileZ}`;
       if (!this.pendingCollisionSet.has(collisionKey)) {
@@ -2678,7 +2865,7 @@ export class TerrainSystem extends System {
     });
 
     // Also emit resource spawn points for ResourceSystem (server-only authoritative)
-    if (tile.resources.length > 0 && this.world.network?.isServer) {
+    if (tile.resources.length > 0 && isServer) {
       const spawnPoints = tile.resources.map((r) => {
         const worldPos = {
           x: originX + r.position.x,
@@ -2699,11 +2886,7 @@ export class TerrainSystem extends System {
       this.world.emit(EventType.RESOURCE_SPAWN_POINTS_REGISTERED, {
         spawnPoints,
       });
-    } else if (
-      tile.resources.length > 0 &&
-      this.runtimeIsClient &&
-      !this.world.network?.isServer
-    ) {
+    } else if (tile.resources.length > 0 && this.runtimeIsClient && !isServer) {
       const spawnPoints = tile.resources.map((r) => {
         const worldPos = {
           x: originX + r.position.x,
@@ -2790,14 +2973,8 @@ export class TerrainSystem extends System {
       heightData.push(height);
     }
 
-    // Compute normals from overflow height grid (centered differences).
-    // Passes the already-computed heightData to avoid recomputing interior heights.
-    this.computeHeightFieldNormals(geometry, tileX, tileZ, heightData);
     // Carve terrain triangles inside building flat zones to avoid overdraw
     this.applyFlatZoneCarve(geometry, tileX, tileZ);
-
-    // Store height data for persistence
-    this.storeHeightData(tileX, tileZ, heightData);
 
     // SERVER: Skip all visual-only attributes (colors, biomeIds, roadInfluences,
     // forestWeights, canyonWeights) and the expensive per-vertex biome/color
@@ -2805,7 +2982,28 @@ export class TerrainSystem extends System {
     // This reduces per-tile memory by ~80% and eliminates GC pressure from
     // Float32Array allocations that caused tick death spirals with 25+ agents.
     if (this.runtimeIsServer) {
+      // Server stores raw procedural heights — getHeightAt() applies town flatten dynamically
+      this.computeHeightFieldNormals(geometry, tileX, tileZ, heightData);
+      this.storeHeightData(tileX, tileZ, heightData);
       return geometry;
+    }
+
+    // Town-wide circular terrain flattening (matches World Studio exactly)
+    // Must run BEFORE road flattening — roads skip inside town flatten zones
+    if (this.townSystem) {
+      for (let i = 0; i < positions.count; i++) {
+        const i3 = i * 3;
+        const worldX = positionsArray[i3] + tileX * this.CONFIG.TILE_SIZE;
+        const worldZ = positionsArray[i3 + 2] + tileZ * this.CONFIG.TILE_SIZE;
+        const flatHeight = this.applyTownCircularFlatten(
+          worldX,
+          worldZ,
+          positionsArray[i3 + 1],
+        );
+        if (flatHeight !== null) {
+          positionsArray[i3 + 1] = flatHeight;
+        }
+      }
     }
 
     // CLIENT: Full visual attribute generation
@@ -2916,6 +3114,25 @@ export class TerrainSystem extends System {
         tileZ,
       );
 
+      // Flatten terrain under roads (skip inside town flatten zones — already flat there)
+      if (roadInfluences[i] > 0 && this.roadNetworkSystem) {
+        const townFlat = this.applyTownCircularFlatten(
+          x,
+          z,
+          positionsArray[i3 + 1],
+        );
+        if (townFlat === null) {
+          const roadInfo = this.roadNetworkSystem.getRoadHeightAtPoint(x, z);
+          if (roadInfo && roadInfo.influence > 0) {
+            const targetHeight = roadInfo.height + 0.1;
+            const currentHeight = positionsArray[i3 + 1];
+            positionsArray[i3 + 1] =
+              currentHeight +
+              (targetHeight - currentHeight) * roadInfo.influence;
+          }
+        }
+      }
+
       // Store biome color (kept for potential fallback/debug rendering)
       colors[i * 3] = colorR;
       colors[i * 3 + 1] = colorG;
@@ -2968,6 +3185,12 @@ export class TerrainSystem extends System {
         );
       }
     }
+
+    // Store RAW procedural heights (before town/road flattening).
+    // getHeightAt() applies all height modifications dynamically so that
+    // gameplay height always matches the visual mesh — no double-flatten risk.
+    this.computeHeightFieldNormals(geometry, tileX, tileZ, heightData);
+    this.storeHeightData(tileX, tileZ, heightData);
 
     return geometry;
   }
@@ -3371,13 +3594,27 @@ export class TerrainSystem extends System {
         const roadInfluenceArray = roadInfluenceAttr.array as Float32Array;
         let verticesWithRoadInfluence = 0;
 
-        // Update road influence for each vertex
+        // Update road influence and heights for each vertex
+        let heightsChanged = false;
         for (let i = 0; i < positions.count; i++) {
           const i3 = i * 3;
           const localX = positionArray[i3];
           const localZ = positionArray[i3 + 2];
           const worldX = localX + tileX * this.CONFIG.TILE_SIZE;
           const worldZ = localZ + tileZ * this.CONFIG.TILE_SIZE;
+
+          // Town-wide circular terrain flattening (matches World Studio exactly)
+          if (this.townSystem) {
+            const flatHeight = this.applyTownCircularFlatten(
+              worldX,
+              worldZ,
+              positionArray[i3 + 1],
+            );
+            if (flatHeight !== null) {
+              positionArray[i3 + 1] = flatHeight;
+              heightsChanged = true;
+            }
+          }
 
           const influence = this.calculateRoadInfluenceAtVertex(
             worldX,
@@ -3386,11 +3623,40 @@ export class TerrainSystem extends System {
             tileZ,
           );
           roadInfluenceArray[i] = influence;
-          if (influence > 0) verticesWithRoadInfluence++;
+          if (influence > 0) {
+            verticesWithRoadInfluence++;
+            // Flatten terrain under roads (skip inside town flatten zones)
+            if (this.roadNetworkSystem) {
+              const townFlat = this.applyTownCircularFlatten(
+                worldX,
+                worldZ,
+                positionArray[i3 + 1],
+              );
+              if (townFlat === null) {
+                const roadInfo = this.roadNetworkSystem.getRoadHeightAtPoint(
+                  worldX,
+                  worldZ,
+                );
+                if (roadInfo && roadInfo.influence > 0) {
+                  const targetHeight = roadInfo.height + 0.1;
+                  const currentHeight = positionArray[i3 + 1];
+                  positionArray[i3 + 1] =
+                    currentHeight +
+                    (targetHeight - currentHeight) * roadInfo.influence;
+                  heightsChanged = true;
+                }
+              }
+            }
+          }
         }
 
-        // Mark attribute as needing GPU update
+        // Mark attributes as needing GPU update
         roadInfluenceAttr.needsUpdate = true;
+        if (heightsChanged) {
+          positions.needsUpdate = true;
+          geometry.computeVertexNormals();
+          // Height cache stays raw — getHeightAt() applies road/town flatten dynamically
+        }
         tilesUpdated++;
         totalVerticesWithRoads += verticesWithRoadInfluence;
       }
@@ -3434,10 +3700,26 @@ export class TerrainSystem extends System {
           const cx = chunk.mesh.position.x;
           const cz = chunk.mesh.position.z;
           let vertsWithRoad = 0;
+          let chunkHeightsChanged = false;
 
           for (let i = 0; i < positions.count; i++) {
-            const worldX = posArray[i * 3] + cx;
-            const worldZ = posArray[i * 3 + 2] + cz;
+            const i3 = i * 3;
+            const worldX = posArray[i3] + cx;
+            const worldZ = posArray[i3 + 2] + cz;
+
+            // Town-wide circular terrain flattening
+            if (this.townSystem) {
+              const flatHeight = this.applyTownCircularFlatten(
+                worldX,
+                worldZ,
+                posArray[i3 + 1],
+              );
+              if (flatHeight !== null) {
+                posArray[i3 + 1] = flatHeight;
+                chunkHeightsChanged = true;
+              }
+            }
+
             const roadTileX = Math.floor(worldX / this.CONFIG.TILE_SIZE);
             const roadTileZ = Math.floor(worldZ / this.CONFIG.TILE_SIZE);
             const influence = this.calculateRoadInfluenceAtVertex(
@@ -3447,10 +3729,37 @@ export class TerrainSystem extends System {
               roadTileZ,
             );
             roadArray[i] = influence;
-            if (influence > 0) vertsWithRoad++;
+            if (influence > 0) {
+              vertsWithRoad++;
+              if (this.roadNetworkSystem) {
+                const townFlat = this.applyTownCircularFlatten(
+                  worldX,
+                  worldZ,
+                  posArray[i3 + 1],
+                );
+                if (townFlat === null) {
+                  const roadInfo = this.roadNetworkSystem.getRoadHeightAtPoint(
+                    worldX,
+                    worldZ,
+                  );
+                  if (roadInfo && roadInfo.influence > 0) {
+                    const targetHeight = roadInfo.height + 0.1;
+                    const currentHeight = posArray[i3 + 1];
+                    posArray[i3 + 1] =
+                      currentHeight +
+                      (targetHeight - currentHeight) * roadInfo.influence;
+                    chunkHeightsChanged = true;
+                  }
+                }
+              }
+            }
           }
 
           roadInfluenceAttr.needsUpdate = true;
+          if (chunkHeightsChanged) {
+            positions.needsUpdate = true;
+            geometry.computeVertexNormals();
+          }
           quadChunksUpdated++;
           quadVerticesWithRoads += vertsWithRoad;
         }
@@ -3557,6 +3866,91 @@ export class TerrainSystem extends System {
    */
   getProceduralHeightAt(worldX: number, worldZ: number): number {
     return this.getBaseHeightAt(worldX, worldZ);
+  }
+
+  /**
+   * Raw terrain height with shoreline adjustment but NO modifications
+   * (no flat zones, town flatten, mine bowl, road blend, bridges, rivers).
+   * Matches World Studio's createGameTerrainQuerier().queryPoint().height exactly,
+   * ensuring generateTrees() gets identical height inputs on both sides.
+   *
+   * World Studio's querier calls computeBaseHeight WITHOUT river parameters,
+   * so we must do the same here for deterministic tree placement.
+   */
+  /**
+   * Compute raw terrain height matching World Studio's queryPoint exactly.
+   *
+   * Key details that must match GameTerrainAdapter.queryPoint():
+   * 1. computeBaseHeight WITHOUT river params
+   * 2. Slope neighbors reuse CENTER position's biome weights (not per-neighbor)
+   * 3. adjustShorelineHeight with same config
+   */
+  private getRawTerrainHeightForTreeGen(
+    worldX: number,
+    worldZ: number,
+  ): number {
+    if (!this.noise) {
+      this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
+    }
+    // Compute biome weights once for center — reused for slope neighbors
+    const weights = this.computeBiomeWeightsByPosition(worldX, worldZ);
+    const baseHeight = computeBaseHeight(
+      worldX,
+      worldZ,
+      this.noise!,
+      weights,
+      this.landscapeFeatures,
+      MAX_HEIGHT,
+    );
+    // Quick escape for positions far from shore — no adjustment needed
+    const wt = this.CONFIG.WATER_THRESHOLD;
+    if (
+      baseHeight >= wt + SHORELINE_CONFIG.LAND_BAND ||
+      baseHeight <= wt - SHORELINE_CONFIG.UNDERWATER_BAND
+    ) {
+      return baseHeight;
+    }
+    // Slope samples reuse center biome weights — matches World Studio querier
+    const sd = SHORELINE_CONFIG.SLOPE_SAMPLE_DISTANCE;
+    const hn = computeBaseHeight(
+      worldX,
+      worldZ + sd,
+      this.noise!,
+      weights,
+      this.landscapeFeatures,
+      MAX_HEIGHT,
+    );
+    const hs = computeBaseHeight(
+      worldX,
+      worldZ - sd,
+      this.noise!,
+      weights,
+      this.landscapeFeatures,
+      MAX_HEIGHT,
+    );
+    const he = computeBaseHeight(
+      worldX + sd,
+      worldZ,
+      this.noise!,
+      weights,
+      this.landscapeFeatures,
+      MAX_HEIGHT,
+    );
+    const hw = computeBaseHeight(
+      worldX - sd,
+      worldZ,
+      this.noise!,
+      weights,
+      this.landscapeFeatures,
+      MAX_HEIGHT,
+    );
+    const slope = Math.max(
+      Math.abs(hn - baseHeight) / sd,
+      Math.abs(hs - baseHeight) / sd,
+      Math.abs(he - baseHeight) / sd,
+      Math.abs(hw - baseHeight) / sd,
+    );
+    return this.adjustHeightForShoreline(baseHeight, slope);
   }
 
   private calculateBaseSlopeAt(
@@ -3782,23 +4176,54 @@ export class TerrainSystem extends System {
       if (dockH !== null) return dockH;
     }
 
-    // CRITICAL: Check flat zones FIRST - they may be registered after terrain generation
-    // This ensures buildings and other structures have correct floor heights even when
-    // terrain tiles were generated before their flat zones were registered.
-    const flatHeight = this.getFlatZoneHeight(worldX, worldZ);
-    if (flatHeight !== null) {
-      return flatHeight;
+    // Get raw procedural height from cache (O(1) bilinear interpolation) or noise (expensive).
+    // Cache stores raw procedural heights — all modifications applied below.
+    // Note: getHeightAtComputed (used during tile gen) embeds flat zone heights into
+    // the cached values, so cached heights already include flat zones for tiles that
+    // were generated after flat zone registration.
+    let height = this.getHeightAtCached(worldX, worldZ);
+    if (height === null) {
+      height = this.getHeightAtComputedSkipFlatZone(worldX, worldZ);
+      // Check flat zones for positions not in cache (late-registered zones or uncached tiles)
+      const flatHeight = this.getFlatZoneHeight(worldX, worldZ);
+      if (flatHeight !== null) {
+        height = flatHeight;
+      }
     }
 
-    // PERFORMANCE: Try cached tile data (O(1) bilinear interpolation)
-    const cachedHeight = this.getHeightAtCached(worldX, worldZ);
-    if (cachedHeight !== null) {
-      return cachedHeight;
+    // Town-wide circular terrain flattening (matches World Studio visual mesh exactly).
+    // Applied to ALL heights including flat zones — visual mesh does the same.
+    // This is the broadest terrain modification: entire town area becomes level.
+    const townFlatHeight = this.applyTownCircularFlatten(
+      worldX,
+      worldZ,
+      height,
+    );
+    if (townFlatHeight !== null) {
+      return townFlatHeight;
     }
 
-    // Fallback to expensive noise computation
-    // PERF: skip flat zone check inside getHeightAtComputed — we already checked above
-    return this.getHeightAtComputedSkipFlatZone(worldX, worldZ);
+    // Mine bowl depression — matches visual terrain mesh deformation
+    const mines = DataManager.getWorldJsonMines() as MineArea[];
+    if (mines.length > 0) {
+      const nearestMine = findNearestInfluencingMine(worldX, worldZ, mines);
+      if (nearestMine) {
+        height = calculateMineBowlHeight(worldX, worldZ, height, nearestMine);
+      }
+    }
+
+    // Road height blending — snap to road surface where roads exist
+    if (this.roadNetworkSystem) {
+      const roadInfo = this.roadNetworkSystem.getRoadHeightAtPoint(
+        worldX,
+        worldZ,
+      );
+      if (roadInfo && roadInfo.influence > 0) {
+        return height + (roadInfo.height - height) * roadInfo.influence;
+      }
+    }
+
+    return height;
   }
 
   /** Get the water body registry for elevated water queries. */
@@ -4044,6 +4469,28 @@ export class TerrainSystem extends System {
   isInFlatZone(worldX: number, worldZ: number): boolean {
     // PERF: delegate to getFlatZoneHeight instead of duplicating the spatial lookup logic
     return this.getFlatZoneHeight(worldX, worldZ) !== null;
+  }
+
+  /**
+   * Apply town-wide circular terrain flattening.
+   * Delegates to the shared pure function from @hyperscape/shared/world.
+   * Returns the flattened height, or null if outside all town flatten zones.
+   */
+  private applyTownCircularFlatten(
+    worldX: number,
+    worldZ: number,
+    naturalHeight: number,
+  ): number | null {
+    if (!this.townSystem) return null;
+    const towns = this.townSystem.getTowns();
+    if (towns.length === 0) return null;
+    return sharedTownFlatten(
+      worldX,
+      worldZ,
+      naturalHeight,
+      towns,
+      this.getProceduralHeightAt.bind(this),
+    );
   }
 
   /**
@@ -4960,41 +5407,225 @@ export class TerrainSystem extends System {
   // }
 
   /**
+   * Build vegetation exclusion data from towns, roads, buildings, and world.json
+   * entities. Cached after first build — invalidated if town/road data changes.
+   */
+  private getVegetationExclusions(): PrecomputedExclusions | null {
+    if (this.vegetationExclusions) return this.vegetationExclusions;
+
+    const towns = this.townSystem?.getTowns();
+    const roads = this.roadNetworkSystem?.getRoads();
+
+    // Need at least towns or roads to build exclusions
+    if ((!towns || towns.length === 0) && (!roads || roads.length === 0)) {
+      return null;
+    }
+
+    const circles: Array<{ x: number; z: number; radius: number }> = [];
+    const roadInputs: Array<{
+      path: Array<{ x: number; z: number }>;
+      halfWidth: number;
+    }> = [];
+    const townInputs: Array<{
+      x: number;
+      z: number;
+      safeZoneRadius: number;
+    }> = [];
+
+    // Town centers + buildings
+    if (towns) {
+      for (const town of towns) {
+        // Town gradient (smooth density ramp)
+        townInputs.push({
+          x: town.position.x,
+          z: town.position.z,
+          safeZoneRadius: town.safeZoneRadius,
+        });
+
+        // Per-building hard exclusions (footprint + 2m for eaves)
+        for (const b of town.buildings) {
+          const footprint = Math.max(b.size.width, b.size.depth);
+          circles.push({
+            x: b.position.x,
+            z: b.position.z,
+            radius: footprint / 2 + 2,
+          });
+        }
+
+        // Town plaza
+        if (town.plaza) {
+          circles.push({
+            x: town.plaza.position.x,
+            z: town.plaza.position.z,
+            radius: town.plaza.radius + 2,
+          });
+        } else {
+          // Default plaza exclusion at town center
+          circles.push({ x: town.position.x, z: town.position.z, radius: 8 });
+        }
+
+        // Landmarks (wells, benches, etc.)
+        if (town.landmarks) {
+          for (const lm of town.landmarks) {
+            circles.push({
+              x: lm.position.x,
+              z: lm.position.z,
+              radius: Math.max(lm.size.width, lm.size.depth) / 2 + 1.5,
+            });
+          }
+        }
+      }
+    }
+
+    // Roads
+    if (roads) {
+      for (const road of roads) {
+        roadInputs.push({
+          path: road.path.map((p) => ({ x: p.x, z: p.z })),
+          halfWidth: (road.width ?? 6) / 2 + 0.5,
+        });
+      }
+    }
+
+    // World.json entities (resources, mines, spawn points, teleports)
+    if (DataManager.hasWorldJson()) {
+      const worldJson = DataManager.getWorldJson();
+      if (worldJson?.entities) {
+        // Resources — small clear zone for visual clarity
+        for (const r of worldJson.entities.resources) {
+          circles.push({ x: r.position.x, z: r.position.z, radius: 2.5 });
+        }
+        // Spawn points
+        for (const sp of worldJson.entities.spawnPoints) {
+          circles.push({ x: sp.position.x, z: sp.position.z, radius: 4 });
+        }
+        // Teleports
+        for (const tp of worldJson.entities.teleports) {
+          circles.push({ x: tp.position.x, z: tp.position.z, radius: 4 });
+        }
+        // Mines — clear vegetation within mine radius + buffer
+        if (worldJson.entities.mines) {
+          for (const mine of worldJson.entities.mines) {
+            circles.push({
+              x: mine.position.x,
+              z: mine.position.z,
+              radius: mine.radius + 3,
+            });
+          }
+        }
+      }
+    }
+
+    const input: VegetationExclusionInput = {
+      circles,
+      roads: roadInputs,
+      towns: townInputs,
+    };
+    this.vegetationExclusions = precomputeExclusions(input);
+    return this.vegetationExclusions;
+  }
+
+  /**
    * Generate harvestable trees for a tile based on biome configuration.
-   * Uses the extracted BiomeResourceGenerator for the actual algorithm.
-   * getTreeConfigForBiome always returns a config (falls back to forest).
+   *
+   * Procedural tree generation matching World Studio's TileBasedTerrain.
+   *
+   * IMPORTANT: The context deliberately omits getWaterSurfaceAt and isOnRoad
+   * so the RNG stream matches World Studio exactly. Those filters cause
+   * early `continue` in generateTrees(), skipping RNG consumption for tree
+   * type/scale/rotation, which desynchronizes ALL subsequent trees.
    */
   private generateTreesForTile(tile: TerrainTile, biomeData: BiomeData): void {
+    const tileSize = this.CONFIG.TILE_SIZE;
+    const tileOriginX = tile.x * tileSize;
+    const tileOriginZ = tile.z * tileSize;
+
+    // ---- Manifest-first: use pre-filtered trees from World Studio ----
+    // World Studio runs procgen + exclusion filtering and saves the final
+    // tree positions to world.json. Using those directly guarantees staging
+    // matches World Studio exactly — single source of truth.
+    if (DataManager.hasManifestTrees()) {
+      const manifestTrees = DataManager.getWorldJsonTreesInTile(tile.x, tile.z);
+      if (this._logManifestTreeDiag < 5) {
+        console.log(
+          `[TerrainSystem] MANIFEST trees for tile (${tile.x},${tile.z}): ${manifestTrees.length} trees`,
+        );
+        this._logManifestTreeDiag++;
+      }
+      for (const mt of manifestTrees) {
+        tile.resources.push({
+          id: `${tile.key}_tree_${tile.resources.length}`,
+          type: "tree",
+          subType: treeIdToSubType(mt.s) as ResourceSubType,
+          position: {
+            x: mt.x - tileOriginX,
+            y: mt.y,
+            z: mt.z - tileOriginZ,
+          },
+          health: 100,
+          maxHealth: 100,
+          respawnTime: 30000,
+          harvestable: true,
+          requiredLevel: 1,
+          scale: mt.sc,
+          rotation: mt.r,
+        });
+      }
+      return;
+    }
+
+    // ---- Procgen fallback: no manifest trees available ----
+    if (this._logManifestTreeDiag < 5) {
+      console.log(
+        `[TerrainSystem] PROCGEN fallback for tile (${tile.x},${tile.z}) — hasManifestTrees=${DataManager.hasManifestTrees()}`,
+      );
+      this._logManifestTreeDiag++;
+    }
     const treeConfig = biomeData.trees ?? getTreeConfigForBiome(tile.biome);
     if (!treeConfig.enabled) {
       return;
     }
 
-    // Create context for resource generation.
-    // getDominantBiome lets generateTrees() resolve the actual biome at each
-    // tree position instead of using the single tile-center biome, which
-    // prevents wrong tree types appearing near biome boundaries.
+    // Defer tree generation until roads/towns are ready so exclusion
+    // filtering can be applied correctly.
+    if (!this._roadsReady) {
+      this._tilesAwaitingTrees.push({ tile, biomeData });
+      return;
+    }
+
     const biomeSystem = this.terrainGenerator.getBiomeSystem();
     const ctx: ResourceGenerationContext = {
       tileX: tile.x,
       tileZ: tile.z,
       tileKey: tile.key,
-      tileSize: this.CONFIG.TILE_SIZE,
+      tileSize,
       waterThreshold: this.CONFIG.WATER_THRESHOLD,
-      getHeightAt: (worldX, worldZ) => this.getHeightAt(worldX, worldZ),
-      getWaterSurfaceAt: (worldX, worldZ) =>
-        this.waterBodyRegistry.getWaterSurfaceAt(worldX, worldZ),
-      isOnRoad: this.roadNetworkSystem
-        ? (worldX, worldZ) => this.roadNetworkSystem!.isOnRoad(worldX, worldZ)
-        : undefined,
+      getHeightAt: (worldX, worldZ) =>
+        this.getRawTerrainHeightForTreeGen(worldX, worldZ),
       createRng: (salt) => this.createTileRng(tile.x, tile.z, salt),
       getDominantBiome: (worldX, worldZ) =>
         biomeSystem.getDominantBiome(worldX, worldZ, 0),
     };
 
-    // Generate trees using the extracted algorithm
     const trees = generateTrees(ctx, treeConfig);
-    tile.resources.push(...trees);
+
+    // Apply vegetation exclusion filtering
+    const exclusions = this.getVegetationExclusions();
+    if (exclusions) {
+      const filterable = trees.map((t) => ({
+        node: t,
+        x: tileOriginX + (t.position as { x: number }).x,
+        z: tileOriginZ + (t.position as { z: number }).z,
+        sc: t.scale ?? 1,
+      }));
+      const surviving = filterTreesByExclusions(filterable, exclusions);
+      for (const s of surviving) {
+        s.node.scale = s.sc;
+      }
+      tile.resources.push(...surviving.map((s) => s.node));
+    } else {
+      tile.resources.push(...trees);
+    }
   }
 
   /**
@@ -5070,9 +5701,25 @@ export class TerrainSystem extends System {
 
   /**
    * Generate ore nodes for a tile based on biome ore configuration.
-   * Uses the extracted BiomeResourceGenerator for the actual algorithm.
+   *
+   * Priority: World Studio manifest → procedural generation (fallback).
    */
   private generateOresForTile(tile: TerrainTile, biomeData: BiomeData): void {
+    // Check manifest first — World Studio placements are source of truth
+    if (DataManager.hasWorldJson()) {
+      const manifestOres = DataManager.getWorldJsonResourcesInTile(
+        tile.x,
+        tile.z,
+      ).filter((r) => r.resourceType === "mining");
+      if (manifestOres.length > 0) {
+        for (const mo of manifestOres) {
+          tile.resources.push(this.convertManifestResource(mo, tile));
+        }
+        return;
+      }
+    }
+
+    // Fallback: procedural generation
     const oreConfig = biomeData.ores;
     if (!oreConfig) {
       return;
@@ -5097,6 +5744,47 @@ export class TerrainSystem extends System {
     // Generate ores using the extracted algorithm
     const ores = generateOres(ctx, oreConfig);
     tile.resources.push(...ores);
+  }
+
+  /**
+   * Convert a World Studio manifest resource into the runtime ResourceNode format.
+   * Uses gathering manifests (woodcutting.json, mining.json) to resolve level/metadata.
+   */
+  private convertManifestResource(
+    r: WorldJsonResource,
+    tile: TerrainTile,
+  ): ResourceNode {
+    // Determine type from resourceType
+    const type: ResourceNode["type"] =
+      r.resourceType === "woodcutting"
+        ? "tree"
+        : r.resourceType === "mining"
+          ? "ore"
+          : "fish";
+
+    // Look up level and metadata from gathering manifests
+    const externalData = getExternalResource(r.resourceId);
+    const requiredLevel = externalData?.levelRequired ?? 1;
+    const respawnTicks = externalData?.respawnTicks ?? 100;
+
+    // Convert world position to tile-local position
+    const localX = r.position.x - tile.x * this.CONFIG.TILE_SIZE;
+    const localZ = r.position.z - tile.z * this.CONFIG.TILE_SIZE;
+    const height = this.getHeightAt(r.position.x, r.position.z);
+
+    return {
+      id: r.id,
+      type,
+      subType: r.resourceId as ResourceNode["subType"],
+      position: { x: localX, y: height, z: localZ },
+      health: 100,
+      maxHealth: 100,
+      respawnTime: respawnTicks * 600, // ticks to ms (600ms/tick)
+      harvestable: true,
+      requiredLevel,
+      scale: 1,
+      rotation: r.rotation,
+    };
   }
 
   // DEPRECATED: Roads are now generated using noise patterns instead of segments
@@ -7765,6 +8453,41 @@ export class TerrainSystem extends System {
     console.log("  1. Check that tiles have road segments (see logs above)");
     console.log(
       "  2. Try regenerating tiles: world.getSystem('terrain').regenerateAllTiles()",
+    );
+  }
+
+  /**
+   * Full tile lifecycle reload — unloads all tiles (triggering resource
+   * cleanup via TERRAIN_TILE_UNLOADED events) then regenerates them.
+   * Used when DataManager.reloadWorldJson() updates manifest data and
+   * existing resource entities need to be replaced with new positions.
+   */
+  public reloadManifestAndRegenerateTiles(): void {
+    // Reset diagnostic counter so we see fresh logs after reload
+    this._logManifestTreeDiag = 0;
+
+    const tileCoords = Array.from(this.terrainTiles.values()).map((t) => ({
+      x: t.x,
+      z: t.z,
+    }));
+    console.log(
+      `[TerrainSystem] Manifest reload — unloading ${tileCoords.length} tiles for regeneration. ` +
+        `DataManager.hasManifestTrees()=${DataManager.hasManifestTrees()}`,
+    );
+
+    // Proper unload: emits TERRAIN_TILE_UNLOADED so ResourceSystem destroys
+    // the old resource entities (trees, ores, etc.)
+    for (const tile of [...this.terrainTiles.values()]) {
+      this.unloadTile(tile);
+    }
+
+    // Regenerate all tiles — will pick up new manifest data from DataManager
+    for (const { x, z } of tileCoords) {
+      this.generateTile(x, z);
+    }
+
+    console.log(
+      `[TerrainSystem] Manifest reload complete — regenerated ${tileCoords.length} tiles`,
     );
   }
 

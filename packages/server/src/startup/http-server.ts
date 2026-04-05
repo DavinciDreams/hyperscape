@@ -535,6 +535,26 @@ async function registerStaticFiles(
     `[HTTP] ✅ Registered /game-assets/manifests/ → ${config.manifestsDir}`,
   );
 
+  // Staging manifests — served with no-cache so preview always reflects latest push
+  const stagingManifestsDir = path.join(
+    path.dirname(config.manifestsDir),
+    "manifests-staging",
+  );
+  await fs.ensureDir(stagingManifestsDir);
+  await fastify.register(statics, {
+    root: stagingManifestsDir,
+    prefix: "/game-assets/staging/manifests/",
+    decorateReply: false,
+    setHeaders: (res) => {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    },
+  });
+  console.log(
+    `[HTTP] ✅ Registered /game-assets/staging/manifests/ → ${stagingManifestsDir}`,
+  );
+
   // Register world assets for local/streaming clients.
   // Prefer world/assets when present (authoritative source in this repo),
   // then fall back to cached assetsDir.

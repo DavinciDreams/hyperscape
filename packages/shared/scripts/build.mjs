@@ -145,6 +145,29 @@ async function buildLibrary() {
   await ctxClient.dispose()
   console.log('✓ framework.client.js built successfully')
 
+  // Build world algorithms (pure functions shared between game client and World Studio)
+  console.log('Building world.js (shared world algorithms)...')
+  const ctxWorld = await esbuild.context({
+    entryPoints: ['src/world/index.ts'],
+    outfile: 'build/world.js',
+    platform: 'neutral',
+    format: 'esm',
+    bundle: true,
+    treeShaking: true,
+    minify: false,
+    sourcemap: true,
+    packages: 'external',
+    target: 'esnext',
+    loader: {
+      '.ts': 'ts',
+      '.tsx': 'tsx',
+    },
+    plugins: [typescriptPlugin],
+  })
+  await ctxWorld.rebuild()
+  await ctxWorld.dispose()
+  console.log('✓ world.js built successfully')
+
   console.log('✓ All library builds completed')
 }
 
@@ -184,6 +207,7 @@ async function generateDeclarations() {
   } else {
     console.warn('⚠️  index.d.ts not found at', indexDts)
   }
+
 }
 
 /**

@@ -21,6 +21,9 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { ServerConfig } from "../config.js";
+import type { World } from "@hyperscape/shared";
+import { DataManager } from "@hyperscape/shared";
+import type { WorldJson } from "@hyperscape/shared";
 import path from "path";
 import fs from "fs-extra";
 import crypto from "crypto";
@@ -146,13 +149,20 @@ function validateManifests(manifests: Record<string, unknown>): {
   return { valid: errors.length === 0, errors };
 }
 
+/** Resolved admin code — set once in registerDeployRoutes from config */
+let resolvedAdminCode = "hyperscape-admin";
+
 /** Simple admin auth check (reuses same x-admin-code pattern as admin-routes) */
 function checkAdminAuth(request: FastifyRequest, reply: FastifyReply): boolean {
-  const adminCode = process.env.ADMIN_CODE || "hyperscape-admin";
   const provided = request.headers["x-admin-code"] as string | undefined;
 
-  if (!provided || provided !== adminCode) {
-    reply.status(401).send({ error: "Unauthorized" });
+  if (!provided || provided !== resolvedAdminCode) {
+    reply
+      .status(401)
+      .send({
+        error:
+          "Unauthorized — x-admin-code header does not match server ADMIN_CODE",
+      });
     return false;
   }
   return true;
@@ -161,7 +171,11 @@ function checkAdminAuth(request: FastifyRequest, reply: FastifyReply): boolean {
 export function registerDeployRoutes(
   fastify: FastifyInstance,
   config: ServerConfig,
+  world?: World,
 ): void {
+  // Use admin code from server config (matches ADMIN_CODE env var)
+  resolvedAdminCode = config.adminCode || "hyperscape-admin";
+
   // Initialize directory paths
   const manifestsParent = path.dirname(config.manifestsDir);
   productionDir = config.manifestsDir; // Current manifests dir IS production
@@ -210,6 +224,7 @@ export function registerDeployRoutes(
 
       const body = request.body as {
         manifests?: Record<string, unknown>;
+        worldJson?: Record<string, unknown>;
         deployedBy?: string;
       };
       if (!body?.manifests) {
@@ -237,6 +252,59 @@ export function registerDeployRoutes(
           const filePath = path.join(stagingDir, name);
           await fs.ensureDir(path.dirname(filePath));
           await fs.writeJson(filePath, content, { spaces: 2 });
+        }
+
+        // Write world.json (entity spawns) alongside manifests if provided
+        if (body.worldJson) {
+          await fs.writeJson(
+            path.join(stagingDir, "world.json"),
+            body.worldJson,
+            { spaces: 2 },
+          );
+
+          // Hot-reload world.json into DataManager so the server uses
+          // the staged entity placements (trees, ores, mobs) immediately.
+          // Without this, the server continues using procgen positions
+          // because it only reads from the production manifests dir.
+          const wj = body.worldJson as unknown as WorldJson;
+          const trees = (wj.entities as { trees?: { s: string }[] })?.trees;
+          const treeCount = Array.isArray(trees) ? trees.length : 0;
+          console.log(
+            `[Deploy] Received world.json — trees: ${treeCount || "none"}`,
+          );
+
+          // Validate tree species at deploy time
+          if (Array.isArray(trees) && trees.length > 0) {
+            const species = [...new Set(trees.map((t) => t.s))];
+            console.log(
+              `[Deploy] Tree species: ${species.join(", ")} (${species.length} unique across ${treeCount} trees)`,
+            );
+          }
+
+          DataManager.reloadWorldJson(wj);
+          console.log(
+            `[Deploy] DataManager.hasManifestTrees() = ${DataManager.hasManifestTrees()}`,
+          );
+
+          // Signal TerrainSystem to regenerate all tiles with the new
+          // manifest data — this unloads old tiles (destroying stale
+          // ResourceEntity instances) and regenerates them.
+          if (world) {
+            const terrainSystem = world.getSystem("terrain") as {
+              reloadManifestAndRegenerateTiles?: () => void;
+            } | null;
+            console.log(
+              `[Deploy] TerrainSystem found: ${!!terrainSystem}, has reload method: ${!!terrainSystem?.reloadManifestAndRegenerateTiles}`,
+            );
+            if (terrainSystem?.reloadManifestAndRegenerateTiles) {
+              terrainSystem.reloadManifestAndRegenerateTiles();
+              console.log(
+                "[Deploy] Hot-reloaded world.json + regenerated terrain tiles",
+              );
+            }
+          } else {
+            console.warn("[Deploy] No world instance — cannot reload terrain");
+          }
         }
 
         // Compute diff against production
@@ -444,6 +512,31 @@ export function registerDeployRoutes(
           "Manifest files updated. Static file serving will use new files immediately. " +
           "In-memory caches (DataManager) require a server restart to refresh.",
         productionFileCount: prodFiles.length,
+      });
+    },
+  );
+
+  // ============== GET /api/deploy/staging/status ==============
+  fastify.get(
+    "/api/deploy/staging/status",
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const exists = await fs.pathExists(stagingDir);
+      const files = exists
+        ? (await fs.readdir(stagingDir).catch(() => [])).filter((f) =>
+            f.endsWith(".json"),
+          )
+        : [];
+
+      const latestStaging = deploymentHistory.find(
+        (r) => r.target === "staging",
+      );
+
+      return reply.send({
+        hasFiles: files.length > 0,
+        fileCount: files.length,
+        files,
+        lastDeployedAt: latestStaging?.deployedAt ?? null,
+        lastDeployedBy: latestStaging?.deployedBy ?? null,
       });
     },
   );

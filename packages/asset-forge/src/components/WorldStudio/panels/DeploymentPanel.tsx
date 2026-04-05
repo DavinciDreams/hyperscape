@@ -20,8 +20,10 @@ import {
   ChevronRight,
   AlertTriangle,
   FileJson,
+  ExternalLink,
+  Circle,
 } from "lucide-react";
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 
 import type {
   DeploymentRecord,
@@ -178,12 +180,44 @@ function DeploymentHistoryEntry({ record }: { record: DeploymentRecord }) {
   );
 }
 
+interface StagingStatus {
+  hasFiles: boolean;
+  fileCount: number;
+  files: string[];
+  lastDeployedAt: string | null;
+  lastDeployedBy: string | null;
+}
+
 export function DeploymentPanel() {
-  const { state, actions } = useWorldStudio();
+  const { state, actions, viewportRef } = useWorldStudio();
   const { compile, diff } = useManifestCompiler();
   const deployment = state.deployment;
 
   const [activeTab, setActiveTab] = useState<"deploy" | "history">("deploy");
+  const [stagingStatus, setStagingStatus] = useState<StagingStatus | null>(
+    null,
+  );
+
+  // Fetch staging status on mount and after successful push
+  useEffect(() => {
+    const serverUrl =
+      import.meta.env.VITE_API_URL ||
+      import.meta.env.VITE_GAME_SERVER_URL ||
+      "http://localhost:5555";
+
+    const fetchStatus = async () => {
+      try {
+        const resp = await fetch(`${serverUrl}/api/deploy/staging/status`);
+        if (resp.ok) {
+          setStagingStatus((await resp.json()) as StagingStatus);
+        }
+      } catch {
+        // Server not reachable — leave status null
+      }
+    };
+
+    void fetchStatus();
+  }, [deployment.stagingStatus]);
 
   const world = state.builder.editing.world;
   const canPushStaging =
@@ -204,47 +238,97 @@ export function DeploymentPanel() {
         state.audioLayers,
         state.manifests,
         state.brushOverlays,
+        viewportRef.current?.vegetationTrees,
       );
 
       actions.deployStagingStatus("pushing");
 
-      // Step 2: Push to server staging endpoint
-      const serverUrl = import.meta.env.VITE_API_URL ?? "";
+      // Step 2: Push to game server staging endpoint
+      // The deploy routes live on the game server (default port 5555), not the Asset Forge UI
+      const serverUrl =
+        import.meta.env.VITE_API_URL ||
+        import.meta.env.VITE_GAME_SERVER_URL ||
+        "http://localhost:5555";
       const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
-      let serverDeploymentId: string | undefined;
 
+      // Convert Map to plain object for JSON serialization
+      const manifestsObj: Record<string, unknown> = {};
+      for (const [key, value] of compiled.files) {
+        manifestsObj[key] = value;
+      }
+
+      let resp: Response;
       try {
-        const resp = await fetch(`${serverUrl}/api/deploy/staging`, {
+        resp = await fetch(`${serverUrl}/api/deploy/staging`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "x-admin-code": adminCode,
           },
           body: JSON.stringify({
-            manifests: compiled,
+            manifests: manifestsObj,
+            worldJson: compiled.worldJson,
             deployedBy: state.project.currentTeamId ?? "local",
           }),
         });
-        if (resp.ok) {
-          const data = (await resp.json()) as {
-            deploymentId?: string;
-            diff?: { added: string[]; modified: string[]; removed: string[] };
+      } catch {
+        actions.deployStagingStatus(
+          "error",
+          `Game server unreachable at ${serverUrl}. Is \`bun run dev\` running?`,
+        );
+        return;
+      }
+
+      if (!resp.ok) {
+        let errorDetail = `Server returned ${resp.status}`;
+        try {
+          const body = (await resp.json()) as {
+            error?: string;
+            details?: string[];
           };
-          serverDeploymentId = data.deploymentId;
-          console.log(
-            `[Deploy] Pushed to server staging: ${serverDeploymentId}`,
-          );
-        } else {
+          if (body.error) errorDetail = body.error;
+          if (body.details?.length)
+            errorDetail += `: ${body.details.join(", ")}`;
+        } catch {
+          // Could not parse error body
+        }
+        if (resp.status === 401) {
+          errorDetail +=
+            ". Set VITE_ADMIN_CODE in asset-forge/.env to match the server's ADMIN_CODE";
+        }
+        actions.deployStagingStatus("error", errorDetail);
+        return;
+      }
+
+      const data = (await resp.json()) as {
+        deploymentId?: string;
+        manifestCount?: number;
+        diff?: { added: string[]; modified: string[]; removed: string[] };
+      };
+      const serverDeploymentId = data.deploymentId;
+      const manifestCount = data.manifestCount ?? compiled.files.size;
+      console.log(
+        `[Deploy] Pushed ${manifestCount} manifests to server staging: ${serverDeploymentId}`,
+      );
+
+      // Step 3: Verify staging files are accessible
+      actions.deployStagingStatus("reloading");
+      try {
+        const verifyResp = await fetch(
+          `${serverUrl}/game-assets/staging/manifests/world-config.json`,
+        );
+        if (!verifyResp.ok) {
           console.warn(
-            "[Deploy] Server staging push failed, continuing with local state",
+            "[Deploy] Push reported success but staging files not accessible (verification GET returned " +
+              verifyResp.status +
+              ")",
           );
         }
       } catch {
-        // Server unreachable — proceed with local-only flow
-        console.warn("[Deploy] Server unreachable, local-only deployment");
+        console.warn("[Deploy] Could not verify staging files after push");
       }
 
-      // Step 3: Compute diff against empty (first push) or deployed state
+      // Step 4: Compute diff against empty (first push) or deployed state
       const deployedState =
         deployment.history.length > 0
           ? Object.fromEntries(
@@ -256,9 +340,7 @@ export function DeploymentPanel() {
           : {};
       const diffResult = diff(compiled, deployedState);
 
-      actions.deployStagingStatus("reloading");
-
-      // Step 4: Create deployment record
+      // Step 5: Create deployment record
       const record: DeploymentRecord = {
         id: serverDeploymentId ?? `deploy-${Date.now()}`,
         target: "staging",
@@ -267,6 +349,7 @@ export function DeploymentPanel() {
         worldVersion: `v${state.project.projectVersion}`,
         diff: diffResult,
         status: "success",
+        manifestCount,
       };
 
       actions.deployStagingComplete(record);
@@ -283,7 +366,10 @@ export function DeploymentPanel() {
     if (!deployment.currentDiff) return;
 
     // Try server-side promotion
-    const serverUrl = import.meta.env.VITE_API_URL ?? "";
+    const serverUrl =
+      import.meta.env.VITE_API_URL ||
+      import.meta.env.VITE_GAME_SERVER_URL ||
+      "http://localhost:5555";
     const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
 
     try {
@@ -390,9 +476,24 @@ export function DeploymentPanel() {
                 )}
               </button>
               {deployment.stagingStatus === "success" && (
-                <div className="flex items-center gap-1.5 text-[10px] text-green-400">
-                  <CheckCircle2 size={10} />
-                  Staging push complete
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-[10px] text-green-400">
+                    <CheckCircle2 size={10} />
+                    Pushed{" "}
+                    {deployment.history[0]?.manifestCount ??
+                      stagingStatus?.fileCount ??
+                      ""}{" "}
+                    manifest files to staging
+                  </div>
+                  <a
+                    href="http://localhost:3333?staging=true"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded transition-colors"
+                  >
+                    <ExternalLink size={10} />
+                    Preview in Game Client
+                  </a>
                 </div>
               )}
               {deployment.stagingStatus === "error" && (
@@ -400,6 +501,47 @@ export function DeploymentPanel() {
                   <XCircle size={10} />
                   {deployment.error ?? "Push failed"}
                 </div>
+              )}
+              {/* Staging status indicator */}
+              {stagingStatus && !isStagingBusy && (
+                <div className="flex items-center gap-1.5 text-[10px] text-text-tertiary mt-1">
+                  <Circle
+                    size={8}
+                    className={
+                      stagingStatus.hasFiles
+                        ? "text-green-400 fill-green-400"
+                        : "text-text-tertiary fill-text-tertiary"
+                    }
+                  />
+                  {stagingStatus.hasFiles
+                    ? `${stagingStatus.fileCount} files staged`
+                    : "Empty"}
+                  {stagingStatus.lastDeployedAt && (
+                    <span className="ml-auto">
+                      {new Date(
+                        stagingStatus.lastDeployedAt,
+                      ).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  )}
+                </div>
+              )}
+              {stagingStatus?.hasFiles && !isStagingBusy && (
+                <details className="text-[10px] text-text-tertiary">
+                  <summary className="cursor-pointer hover:text-text-secondary">
+                    Staged files
+                  </summary>
+                  <ul className="pl-3 mt-0.5 space-y-0.5">
+                    {stagingStatus.files.map((f) => (
+                      <li key={f} className="flex items-center gap-1">
+                        <FileJson size={8} className="flex-shrink-0" />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               )}
             </div>
 

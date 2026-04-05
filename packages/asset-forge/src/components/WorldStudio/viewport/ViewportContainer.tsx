@@ -157,6 +157,11 @@ export function ViewportContainer() {
         get: () => refs.vegetationPositions,
         configurable: true,
       });
+      // Use a getter so vegetationTrees is always current for manifest export
+      Object.defineProperty(viewportRef.current, "vegetationTrees", {
+        get: () => refs.vegetationTrees,
+        configurable: true,
+      });
       viewportRef.current.refreshTownMarkers = refs.refreshTownMarkers;
       viewportRef.current.setVegetationVisible = refs.setVegetationVisible;
       setSceneReady(true);

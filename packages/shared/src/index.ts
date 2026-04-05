@@ -364,6 +364,10 @@ export {
 // Export store helpers used by server store handler
 export { getStoreById } from "./data/banks-stores";
 
+// Export DataManager for server-side hot-reload (deploy routes)
+export { DataManager } from "./data/DataManager";
+export type { WorldJson } from "./data/world-structure";
+
 // Export avatar options for character creation
 export { AVATAR_OPTIONS } from "./data/avatars";
 

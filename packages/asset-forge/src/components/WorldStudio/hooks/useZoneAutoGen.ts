@@ -1569,7 +1569,7 @@ export function useZoneAutoGen() {
 
   /** Commit an auto-gen result to state */
   const apply = useCallback(
-    (result: AutoGenResult) => {
+    async (result: AutoGenResult) => {
       // Auto-gen pipeline produces positions in GAME space (-half..+half).
       // The editor viewport operates in SCENE space (0..worldSize).
       // Convert all entity positions: sceneX = gameX + worldCenterOffset.
@@ -1618,6 +1618,13 @@ export function useZoneAutoGen() {
             size: t.size,
             safeZoneRadius: t.safeZoneRadius,
             biomeId: t.biome ?? "unknown",
+            buildings: t.buildings.map((b) => ({
+              id: b.id,
+              type: b.type,
+              position: { x: b.position.x, y: b.position.y, z: b.position.z },
+              rotation: b.rotation,
+              size: { width: b.size.width, depth: b.size.depth },
+            })),
           })),
         );
         // Rebuild 3D town meshes (buildings, roads, landmarks) in the viewport
@@ -1792,7 +1799,7 @@ export function useZoneAutoGen() {
           );
         }
 
-        vp.refreshVegetation(undefined, { circles, roads, towns });
+        await vp.refreshVegetation(undefined, { circles, roads, towns });
       }
 
       // Navigate camera to the first generated town (where buildings are)

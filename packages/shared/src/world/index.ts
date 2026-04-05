@@ -1,0 +1,114 @@
+/**
+ * @hyperscape/shared/world — Pure world algorithm exports.
+ *
+ * Single source of truth for terrain height, road influence, town flattening,
+ * biome types, noise generation, and vegetation used by both the game client
+ * and World Studio (asset-forge).
+ */
+
+// Pure terrain height computation
+export {
+  computeBaseHeight,
+  applyLandscapeFeaturesPure,
+  adjustShorelineHeight,
+  type TerrainNoiseAdapter,
+  type BiomeNoiseProfile,
+  type NoiseLayerDef,
+  type LandscapeFeatureDef,
+  type ShorelineConfig,
+  LandscapeType,
+  MAX_HEIGHT,
+  WATER_LEVEL_NORMALIZED,
+  ISLAND_RADIUS,
+  ISLAND_FALLOFF,
+  ISLAND_DEEP_OCEAN_BUFFER,
+  BASE_ELEVATION,
+  OCEAN_FLOOR_HEIGHT,
+  HEIGHT_TERRAIN_MIX,
+  BEACH_PROFILE_POWER,
+  SHORELINE_CONFIG,
+  BIOME_CONFIG,
+  BIOME_PROFILES,
+  TUNDRA_PROFILE,
+  FOREST_PROFILE,
+  CANYON_PROFILE,
+  TERRACE_STEPS,
+  HEIGHT_POWER_CURVE,
+  CONTINENT_LAYER,
+  RIDGE_LAYER,
+  HILL_LAYER,
+  EROSION_LAYER,
+  DETAIL_LAYER,
+  LANDSCAPE_FEATURES,
+  COASTLINE_CIRCLE_SAMPLE_RADIUS,
+  COAST_LARGE,
+  COAST_MEDIUM,
+  COAST_SMALL,
+} from "../systems/shared/world/TerrainHeightParams";
+
+// Noise generator
+export { NoiseGenerator } from "../utils/NoiseGenerator";
+
+// Biome types & tree config
+export {
+  BiomeType,
+  DEFAULT_BIOME,
+  BIOME_LIST,
+  getTreeConfigForBiome,
+} from "../systems/shared/world/TerrainBiomeTypes";
+
+// Vegetation (already used by asset-forge)
+export {
+  generateTrees,
+  type ResourceGenerationContext,
+} from "../systems/shared/world/BiomeResourceGenerator";
+
+// Town circular terrain flattening
+export {
+  applyTownCircularFlatten,
+  type FlattenableTown,
+  TOWN_FLATTEN_INNER_RATIO,
+  TOWN_FLATTEN_OUTER_RATIO,
+} from "./terrain-flatten";
+
+// Road influence & height blending
+export {
+  calculateRoadInfluence,
+  getRoadHeightAtPoint,
+  type RoadPathLike,
+  ROAD_BLEND_WIDTH,
+  ROAD_MINIMUM_WIDTH,
+} from "./road-influence";
+
+// Shared biome color palettes for terrain shaders
+export {
+  MINE_BIOME_PALETTES,
+  ROAD_COLORS,
+  type MineBiomePalette,
+} from "./biome-colors";
+
+// Mine influence & bowl terrain deformation
+export {
+  calculateMineInfluenceAtPoint,
+  calculateMineBowlHeight,
+  getMineEffectiveRadius,
+  findNearestInfluencingMine,
+  type MineArea,
+} from "./mine-influence";
+
+// Vegetation exclusion filtering (shared between World Studio & game client)
+export {
+  precomputeExclusions,
+  filterTreesByExclusions,
+  vegFbm,
+  vegRand,
+  vegSmoothstep,
+  VEG_NOISE_FREQ,
+  VEG_NOISE_AMP,
+  VEG_TOWN_INNER_FRAC,
+  VEG_TOWN_OUTER_FRAC,
+  VEG_MIN_EDGE_SCALE,
+  type VegetationExclusionInput,
+  type PrecomputedExclusions,
+  type FilterableTree,
+} from "./vegetation-filter";

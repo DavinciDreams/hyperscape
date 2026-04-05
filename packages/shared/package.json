@@ -17,6 +17,10 @@
       "types": "./build/framework.d.ts",
       "import": "./build/framework.client.js",
       "default": "./build/framework.client.js"
+    },
+    "./world": {
+      "import": "./build/world.js",
+      "default": "./build/world.js"
     }
   },
   "homepage": "https://github.com/HyperscapeAI/hyperscape#readme",

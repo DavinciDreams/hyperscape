@@ -68,8 +68,13 @@ const DEFAULT_BIOME_COSTS: Record<string, number> = {
   canyon: 2.0,
 };
 
+import {
+  getRoadHeightAtPoint as sharedGetRoadHeightAtPoint,
+  ROAD_BLEND_WIDTH,
+} from "../../../world/road-influence";
+
 // Road mask generation settings (shared across terrain/grass/flowers)
-const ROAD_MASK_BLEND_WIDTH = 0.5; // Extra blend beyond road edge
+const ROAD_MASK_BLEND_WIDTH = ROAD_BLEND_WIDTH; // From shared world module
 const ROAD_MASK_MIN_TEXTURE_SIZE = 256;
 const ROAD_MASK_MAX_TEXTURE_SIZE = 4096;
 const ROAD_MASK_MIN_PIXELS_PER_INFLUENCE = 2;
@@ -212,7 +217,8 @@ export class RoadNetworkSystem extends System {
   async init(): Promise<void> {
     const worldConfig = (this.world as { config?: { terrainSeed?: number } })
       .config;
-    this.seed = worldConfig?.terrainSeed ?? 0;
+    this.seed =
+      worldConfig?.terrainSeed ?? DataManager.getWorldConfig()?.seed ?? 0;
     this.randomState = this.seed;
     this.noise = new NoiseGenerator(this.seed + 54321);
     this._config = loadRoadConfig();
@@ -265,6 +271,71 @@ export class RoadNetworkSystem extends System {
 
     // Generate roads - uses worker for path smoothing when available
     const startTime = performance.now();
+
+    // Check for pre-computed roads from World Studio staging
+    const precomputedRoads = DataManager.getRoadsManifest();
+    if (precomputedRoads && precomputedRoads.length > 0) {
+      // Use pre-computed roads instead of BFS generation
+      for (const pr of precomputedRoads) {
+        const pathPoints = pr.path.map((p) => ({
+          x: p.x,
+          z: p.z,
+          y: this.terrainSystem?.getHeightAt(p.x, p.z) ?? p.y,
+        }));
+        // Compute total length
+        let length = 0;
+        for (let i = 1; i < pathPoints.length; i++) {
+          const dx = pathPoints[i].x - pathPoints[i - 1].x;
+          const dz = pathPoints[i].z - pathPoints[i - 1].z;
+          length += Math.sqrt(dx * dx + dz * dz);
+        }
+        this.roads.push({
+          id: pr.id,
+          fromType: "town",
+          fromTownId: pr.fromTownId,
+          toType: "town",
+          toTownId: pr.toTownId,
+          path: pathPoints,
+          width: pr.width || this.config.roadWidth,
+          material: "dirt",
+          length,
+        });
+      }
+      Logger.system(
+        "RoadNetworkSystem",
+        `Loaded ${precomputedRoads.length} pre-computed roads from manifest`,
+      );
+
+      // Still validate and build caches
+      if (towns.length >= 2) {
+        this.validateNetworkConnectivity(towns);
+      }
+      await this.buildTileCacheAsync();
+
+      this.townSystem.updateSignpostDestinations(
+        this.roads.map((r) => ({
+          id: r.id,
+          fromTownId: r.fromTownId,
+          toTownId: r.toTownId,
+        })),
+      );
+
+      await this.buildRoadInfluenceMask();
+
+      const elapsed = performance.now() - startTime;
+      Logger.system(
+        "RoadNetworkSystem",
+        `Loaded ${this.roads.length} pre-computed roads connecting ${towns.length} towns in ${elapsed.toFixed(0)}ms`,
+      );
+
+      this.world.emit(EventType.ROADS_GENERATED, {
+        roadCount: this.roads.length,
+        townCount: towns.length,
+        poiCount: 0,
+        explorationRoadCount: 0,
+      });
+      return;
+    }
 
     // Pre-compute passability grid for fast BFS pathfinding
     // This samples terrain height at all grid points once, avoiding repeated lookups
@@ -2740,6 +2811,23 @@ export class RoadNetworkSystem extends System {
 
   getRoadById(id: string): ProceduralRoad | undefined {
     return this.roads.find((r) => r.id === id);
+  }
+
+  /**
+   * Get the interpolated road path height at a world point.
+   * Delegates to the shared pure function from @hyperscape/shared/world.
+   */
+  getRoadHeightAtPoint(
+    worldX: number,
+    worldZ: number,
+  ): { height: number; influence: number } | null {
+    return sharedGetRoadHeightAtPoint(
+      worldX,
+      worldZ,
+      this.roads,
+      ROAD_MASK_BLEND_WIDTH,
+      this.config.roadWidth,
+    );
   }
 
   /**

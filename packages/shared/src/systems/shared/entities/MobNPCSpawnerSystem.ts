@@ -1,5 +1,7 @@
 import { ALL_NPCS, getNPCById } from "../../../data/npcs";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import { DataManager } from "../../../data/DataManager";
+import type { WorldJsonMobSpawn } from "../../../data/world-structure";
 import type {
   LevelRange,
   NPCData,
@@ -211,9 +213,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
    * Look up building NPC config from manifests by buildingRole.
    * Falls back to a generic config if no manifest entry matches.
    */
-  private static getBuildingNPCConfig(
-    npcType: string,
-  ): {
+  private static getBuildingNPCConfig(npcType: string): {
     name: string;
     description: string;
     services: string[];
@@ -652,6 +652,8 @@ export class MobNPCSpawnerSystem extends SystemBase {
   /**
    * Handle terrain tile generation - spawn mobs for new tiles
    * Only runs on server - clients receive entities via network sync
+   *
+   * Priority: world.json mob spawns → world-areas.json → biome procgen
    */
   private onTileGenerated(tileData: {
     tileX: number;
@@ -663,6 +665,24 @@ export class MobNPCSpawnerSystem extends SystemBase {
       return;
     }
 
+    // Priority 1: World Studio manifest mob spawns (hand-placed + auto-gen)
+    if (DataManager.hasWorldJson()) {
+      const manifestSpawns = DataManager.getWorldJsonMobSpawnsInTile(
+        tileData.tileX,
+        tileData.tileZ,
+      );
+      if (manifestSpawns.length > 0) {
+        for (const spawn of manifestSpawns) {
+          this.spawnMobFromManifest(spawn);
+        }
+        // Manifest covers this tile — skip procgen mob generation
+        // (bosses still check since they're separate from normal mob spawns)
+        this.spawnBossForTile(tileData);
+        return;
+      }
+    }
+
+    // Priority 2: world-areas.json mob spawns (existing behavior)
     const TILE_SIZE = this.terrainSystem.getTileSize();
     const tileBounds = {
       minX: tileData.tileX * TILE_SIZE,
@@ -692,6 +712,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
       this.generateContentForTile(tileData, overlappingAreas);
     }
 
+    // Priority 3: biome procgen mobs
     this.spawnBiomeMobsForTile(tileData);
     this.spawnBossForTile(tileData);
   }
@@ -706,6 +727,50 @@ export class MobNPCSpawnerSystem extends SystemBase {
     for (const area of areas) {
       // Spawn mobs from world-areas.ts data if they fall within this tile
       this.generateMobSpawnsForArea(area, tileData);
+    }
+  }
+
+  /**
+   * Spawn a mob from World Studio manifest (world.json) mob spawn definition.
+   * Uses the same spawnMobFromData pipeline as world-areas.json spawns.
+   */
+  private spawnMobFromManifest(spawn: WorldJsonMobSpawn): void {
+    const mobData = getNPCById(spawn.mobId);
+    if (!mobData) {
+      console.warn(
+        `[MobNPCSpawnerSystem] World manifest mob "${spawn.mobId}" not found in NPC data`,
+      );
+      return;
+    }
+
+    // Get terrain height at the spawn position
+    const y = this.terrainSystem.getHeightAtPosition(
+      spawn.position.x,
+      spawn.position.z,
+    );
+    const position = { x: spawn.position.x, y, z: spawn.position.z };
+
+    // Spawn count: either maxCount or 1
+    const count = spawn.maxCount || 1;
+    for (let i = 0; i < count; i++) {
+      // Spread mobs within spawn radius
+      let spawnPos = position;
+      if (i > 0 && spawn.spawnRadius > 0) {
+        const angle = (i / count) * Math.PI * 2;
+        const dist =
+          spawn.spawnRadius * 0.5 + Math.random() * spawn.spawnRadius * 0.5;
+        spawnPos = {
+          x: position.x + Math.cos(angle) * dist,
+          y: this.terrainSystem.getHeightAtPosition(
+            position.x + Math.cos(angle) * dist,
+            position.z + Math.sin(angle) * dist,
+          ),
+          z: position.z + Math.sin(angle) * dist,
+        };
+      }
+
+      const spawnKey = `manifest_${spawn.id}_${i}`;
+      this.spawnMobFromData(mobData, spawnPos, { spawnKey });
     }
   }
 

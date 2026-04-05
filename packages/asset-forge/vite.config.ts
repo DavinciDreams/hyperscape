@@ -105,8 +105,14 @@ export default defineConfig(({ mode }) => {
         "three/addons": path.resolve(threeRoot, "examples/jsm"),
         // Ensure single Three.js instance across all packages
         three: threeRoot,
-        // Direct source imports for game-world tree generation (exact same code path)
-        // These must come BEFORE the general @hyperscape/shared alias
+        // Shared world algorithms barrel — single source of truth for terrain,
+        // biome, road, and town flatten code used by both World Studio and game client.
+        // Must come BEFORE the general @hyperscape/shared alias.
+        "@hyperscape/shared/world": path.resolve(
+          __dirname,
+          "../shared/src/world/index.ts",
+        ),
+        // Legacy deep imports that still resolve through the barrel
         "@hyperscape/shared/world/BiomeResourceGenerator": path.resolve(
           __dirname,
           "../shared/src/systems/shared/world/BiomeResourceGenerator.ts",

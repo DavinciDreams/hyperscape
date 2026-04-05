@@ -1553,6 +1553,8 @@ export interface DeploymentRecord {
   status: "pending" | "deploying" | "success" | "failed" | "rolled-back";
   /** Error message if failed */
   error?: string;
+  /** Number of manifest files pushed */
+  manifestCount?: number;
 }
 
 /** Deployment pipeline state */

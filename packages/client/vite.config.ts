@@ -473,6 +473,11 @@ export default defineConfig(({ mode }) => {
       // More specific paths (e.g., @hyperscape/procgen/items/dock) must be listed
       // BEFORE less specific ones (e.g., @hyperscape/procgen) to prevent incorrect resolution
       alias: [
+        // Shared world algorithms (must come BEFORE general @hyperscape/shared)
+        {
+          find: "@hyperscape/shared/world",
+          replacement: path.resolve(__dirname, "../shared/src/world/index.ts"),
+        },
         // Use client-only build of shared package to avoid Node.js module leakage
         {
           find: "@hyperscape/shared",

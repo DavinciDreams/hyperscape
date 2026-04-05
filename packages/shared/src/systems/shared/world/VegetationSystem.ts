@@ -39,6 +39,7 @@ import type {
 import { EventType } from "../../../types/events";
 import { LoadPriority } from "../../../types";
 import { modelCache } from "../../../utils/rendering/ModelCache";
+import { DataManager } from "../../../data/DataManager";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { FrustumQuadtree } from "../../../utils/spatial/FrustumQuadtree";
 import {
@@ -602,6 +603,12 @@ export class VegetationSystem extends System {
       .config;
     if (worldConfig?.terrainSeed !== undefined) {
       return worldConfig.terrainSeed;
+    }
+
+    // Check world-config.json manifest (e.g. staging preview)
+    const manifestSeed = DataManager.getWorldConfig()?.seed;
+    if (manifestSeed !== undefined && manifestSeed !== null) {
+      return manifestSeed;
     }
 
     if (typeof process !== "undefined" && process.env?.TERRAIN_SEED) {
@@ -1297,20 +1304,41 @@ export class VegetationSystem extends System {
     const tileWorldX = tileX * tileSize;
     const tileWorldZ = tileZ * tileSize;
 
+    // When manifest trees exist (deployed from World Studio), use those
+    // positions for "tree" category layers instead of procgen. This ensures
+    // staging matches World Studio exactly.
+    const useManifestTrees = DataManager.hasManifestTrees();
+    if (useManifestTrees) {
+      await this.generateManifestTreesForTile(
+        tileKey,
+        tileX,
+        tileZ,
+        config,
+        terrainSystem,
+      );
+    }
+
+    // Filter out "tree" category layers when manifest trees are in use
+    // (they've already been placed above at exact World Studio positions)
+    const layers = useManifestTrees
+      ? config.layers.filter((l) => l.category !== "tree")
+      : config.layers;
+
     // Try to use worker for placement computation (off main thread)
+    const filteredConfig = { ...config, layers };
     if (isVegetationWorkerAvailable()) {
       await this.generateTileVegetationWithWorker(
         tileKey,
         tileWorldX,
         tileWorldZ,
         tileSize,
-        config,
+        filteredConfig,
         terrainSystem,
         tileData,
       );
     } else {
       // Fallback to synchronous generation on main thread
-      for (const layer of config.layers) {
+      for (const layer of layers) {
         await this.generateLayerVegetation(
           tileKey,
           tileWorldX,
@@ -1325,6 +1353,77 @@ export class VegetationSystem extends System {
     // Finalize all chunks - update bounding spheres for proper frustum culling
     // Runs in batches to avoid blocking main thread
     await this.finalizeAllChunks();
+  }
+
+  /**
+   * Generate tree vegetation instances from World Studio manifest data.
+   * Uses exact positions from world.json so staging matches World Studio.
+   */
+  private async generateManifestTreesForTile(
+    tileKey: string,
+    tileX: number,
+    tileZ: number,
+    config: BiomeVegetationConfig,
+    terrainSystem: {
+      getHeightAt: (x: number, z: number) => number;
+    },
+  ): Promise<void> {
+    const tileData = this.tileVegetation.get(tileKey);
+    if (!tileData) return;
+
+    const manifestTrees = DataManager.getWorldJsonTreesInTile(tileX, tileZ);
+    if (manifestTrees.length === 0) return;
+
+    // Find the "tree" layer to get valid asset definitions
+    const treeLayer = config.layers.find((l) => l.category === "tree");
+    if (!treeLayer) return;
+
+    const validAssets = treeLayer.assets
+      .map((id) => this.assetDefinitions.get(id))
+      .filter((a): a is VegetationAsset => a !== undefined);
+    if (validAssets.length === 0) return;
+
+    // Pre-load all tree assets
+    for (const asset of validAssets) {
+      if (!this.assetData.has(asset.id)) {
+        await this.loadAssetData(asset);
+      }
+    }
+
+    const totalWeight = validAssets.reduce((sum, a) => sum + a.weight, 0);
+    const rng = this.createTileLayerRng(tileKey, "tree");
+    const getHeight = terrainSystem.getHeightAt.bind(terrainSystem);
+
+    let placedCount = 0;
+    for (const mt of manifestTrees) {
+      // Select asset for this tree (weighted random — same as procgen path)
+      const asset = this.selectWeightedAsset(validAssets, totalWeight, rng);
+      if (!asset) continue;
+
+      const assetDataRef = this.assetData.get(asset.id);
+      if (!assetDataRef) continue;
+
+      // Use manifest height if available, otherwise query terrain
+      const height = mt.y !== 0 ? mt.y : getHeight(mt.x, mt.z);
+
+      const instance: VegetationInstance = {
+        id: `${tileKey}_tree_manifest_${placedCount}`,
+        assetId: asset.id,
+        category: "tree" as VegetationCategory,
+        position: {
+          x: mt.x,
+          y: height + (asset.yOffset ?? 0),
+          z: mt.z,
+        },
+        rotation: { x: 0, y: mt.r, z: 0 },
+        scale: mt.sc * asset.baseScale,
+        tileKey,
+      };
+
+      tileData.instances.set(instance.id, instance);
+      this.addInstanceToChunk(instance, assetDataRef);
+      placedCount++;
+    }
   }
 
   /**

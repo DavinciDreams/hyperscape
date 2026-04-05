@@ -27,6 +27,11 @@ export default defineConfig({
     alias: {
       "@hyperscape/procgen": resolve(__dirname, "../src"),
       "@hyperscape/impostor": resolve(__dirname, "../../impostors/src"),
+      // Shared world algorithms barrel (must come before general @hyperscape/shared)
+      "@hyperscape/shared/world": resolve(
+        __dirname,
+        "../../shared/src/world/index.ts",
+      ),
       // Prefer built client bundle when available, fall back to source.
       "@hyperscape/shared": sharedClientEntry,
     },

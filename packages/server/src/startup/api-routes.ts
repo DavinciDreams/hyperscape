@@ -123,7 +123,7 @@ export function registerApiRoutes(
   registerDuelOracleRoutes(fastify, world);
 
   // Deployment pipeline (staging → production)
-  registerDeployRoutes(fastify, config);
+  registerDeployRoutes(fastify, config, world);
 
   console.log("[API] ✅ API routes registered");
 }

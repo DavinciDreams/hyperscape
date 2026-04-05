@@ -262,7 +262,8 @@ export class TownSystem extends System {
   async init(): Promise<void> {
     const worldConfig = (this.world as { config?: { terrainSeed?: number } })
       .config;
-    this.seed = worldConfig?.terrainSeed ?? 0;
+    this.seed =
+      worldConfig?.terrainSeed ?? DataManager.getWorldConfig()?.seed ?? 0;
     this.config = loadTownConfig();
     this.terrainSystem = this.world.getSystem("terrain") as
       | {
@@ -416,36 +417,56 @@ export class TownSystem extends System {
   private loadManifestTowns(): void {
     const buildingsManifest = DataManager.getBuildingsManifest();
     if (!buildingsManifest?.towns?.length) {
+      console.warn(
+        "[TownSystem] No buildings manifest or no towns in manifest",
+      );
       return;
     }
 
-    for (const manifestTown of buildingsManifest.towns) {
-      // Validate manifest town structure
-      if (!manifestTown.id || typeof manifestTown.id !== "string") {
-        throw new Error(
-          `[TownSystem] Manifest town has invalid id: ${JSON.stringify(manifestTown.id)}`,
-        );
-      }
-      if (
-        !manifestTown.position ||
-        typeof manifestTown.position.x !== "number" ||
-        typeof manifestTown.position.z !== "number"
-      ) {
-        throw new Error(
-          `[TownSystem] Manifest town "${manifestTown.id}" has invalid position: ${JSON.stringify(manifestTown.position)}`,
-        );
-      }
-      if (
-        !Array.isArray(manifestTown.buildings) ||
-        manifestTown.buildings.length === 0
-      ) {
-        throw new Error(
-          `[TownSystem] Manifest town "${manifestTown.id}" has no buildings`,
-        );
-      }
+    console.log(
+      `[TownSystem] Loading ${buildingsManifest.towns.length} manifest towns`,
+    );
 
-      const town = this.convertManifestTown(manifestTown);
-      this.towns.push(town);
+    for (const manifestTown of buildingsManifest.towns) {
+      try {
+        // Validate manifest town structure
+        if (!manifestTown.id || typeof manifestTown.id !== "string") {
+          console.warn(
+            `[TownSystem] Manifest town has invalid id: ${JSON.stringify(manifestTown.id)} — skipping`,
+          );
+          continue;
+        }
+        if (
+          !manifestTown.position ||
+          typeof manifestTown.position.x !== "number" ||
+          typeof manifestTown.position.z !== "number"
+        ) {
+          console.warn(
+            `[TownSystem] Manifest town "${manifestTown.id}" has invalid position: ${JSON.stringify(manifestTown.position)} — skipping`,
+          );
+          continue;
+        }
+        if (
+          !Array.isArray(manifestTown.buildings) ||
+          manifestTown.buildings.length === 0
+        ) {
+          console.warn(
+            `[TownSystem] Manifest town "${manifestTown.id}" has no buildings — skipping`,
+          );
+          continue;
+        }
+
+        const town = this.convertManifestTown(manifestTown);
+        this.towns.push(town);
+        console.log(
+          `[TownSystem] Loaded manifest town "${manifestTown.id}" (${manifestTown.name}) at (${manifestTown.position.x.toFixed(0)}, ${manifestTown.position.z.toFixed(0)}) with ${manifestTown.buildings.length} buildings`,
+        );
+      } catch (err) {
+        console.error(
+          `[TownSystem] Failed to load manifest town "${manifestTown.id ?? "unknown"}": ${err instanceof Error ? err.message : String(err)} — skipping`,
+        );
+        continue;
+      }
     }
   }
 
@@ -480,40 +501,47 @@ export class TownSystem extends System {
     // Convert buildings - positions are relative in manifest, convert to world coords
     // Also calculate entrance positions for each building
     // IMPORTANT: Snap to building grid for proper tile alignment (cells must align with tiles)
-    const buildings: TownBuilding[] = manifest.buildings.map((b, index) => {
-      // Validate each building in manifest
+    const buildings: TownBuilding[] = [];
+    for (let index = 0; index < manifest.buildings.length; index++) {
+      const b = manifest.buildings[index];
+      // Validate each building in manifest — warn and skip invalid ones
       if (!b.id || typeof b.id !== "string") {
-        throw new Error(
-          `[TownSystem] Building ${index} in town "${manifest.id}" has invalid id: ${JSON.stringify(b.id)}`,
+        console.warn(
+          `[TownSystem] Building ${index} in town "${manifest.id}" has invalid id: ${JSON.stringify(b.id)} — skipping`,
         );
+        continue;
       }
       if (!b.type || typeof b.type !== "string") {
-        throw new Error(
-          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid type: ${JSON.stringify(b.type)}`,
+        console.warn(
+          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid type: ${JSON.stringify(b.type)} — skipping`,
         );
+        continue;
       }
       if (
         !b.position ||
         typeof b.position.x !== "number" ||
         typeof b.position.z !== "number"
       ) {
-        throw new Error(
-          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid position: ${JSON.stringify(b.position)}`,
+        console.warn(
+          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid position: ${JSON.stringify(b.position)} — skipping`,
         );
+        continue;
       }
       if (
         !b.size ||
         typeof b.size.width !== "number" ||
         typeof b.size.depth !== "number"
       ) {
-        throw new Error(
-          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid size: ${JSON.stringify(b.size)}`,
+        console.warn(
+          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid size: ${JSON.stringify(b.size)} — skipping`,
         );
+        continue;
       }
       if (typeof b.rotation !== "number" || !Number.isFinite(b.rotation)) {
-        throw new Error(
-          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid rotation: ${b.rotation}`,
+        console.warn(
+          `[TownSystem] Building "${b.id}" in town "${manifest.id}" has invalid rotation: ${b.rotation} — skipping`,
         );
+        continue;
       }
 
       const rawWorldX = manifest.position.x + b.position.x;
@@ -531,7 +559,7 @@ export class TownSystem extends System {
       const frontDirZ = Math.cos(b.rotation);
       const entranceOffset = b.size.depth / 2 + 0.3;
 
-      return {
+      buildings.push({
         id: b.id,
         type: b.type,
         position: { x: worldX, y: worldY, z: worldZ },
@@ -541,11 +569,48 @@ export class TownSystem extends System {
           x: worldX + frontDirX * entranceOffset,
           z: worldZ + frontDirZ * entranceOffset,
         },
-      };
-    });
+      });
+    }
 
-    // Use TownGenerator to generate layout features (roads, landmarks, plaza)
-    // This ensures manifest towns have the same features as procedurally generated towns
+    if (buildings.length === 0) {
+      throw new Error(
+        `All ${manifest.buildings.length} buildings in town "${manifest.id}" failed validation`,
+      );
+    }
+
+    // When pre-computed roads exist from staging manifest, skip procedural
+    // internal road/path/plaza generation — those would create conflicting
+    // road influence on the terrain that doesn't match the World Studio layout.
+    // The pre-computed inter-town roads already handle all road rendering.
+    const hasPrecomputedRoads = DataManager.getRoadsManifest()?.length ?? 0;
+
+    if (hasPrecomputedRoads > 0) {
+      // Manifest towns with pre-computed roads: no internal road generation.
+      // Buildings still get collision and flat zones via registerBuildingCollision.
+      return {
+        id: manifest.id,
+        name: manifest.name,
+        position: {
+          x: manifest.position.x,
+          y,
+          z: manifest.position.z,
+        },
+        size: townSize,
+        safeZoneRadius: manifest.safeZoneRadius,
+        biome,
+        buildings,
+        suitabilityScore: 1.0,
+        connectedRoads: [],
+        layoutType: townSize === "town" ? "crossroads" : "throughway",
+        entryPoints: [], // No procedural entry points — roads connect via manifest
+        internalRoads: [], // No procedural internal roads — avoid terrain conflicts
+        paths: [], // No procedural paths — pre-computed roads handle rendering
+        landmarks: [], // No procedural landmarks
+        plaza: undefined, // No procedural plaza
+      };
+    }
+
+    // No pre-computed roads: generate layout features procedurally
     const generatedTown = this.townGenerator.generateSingleTown(
       manifest.position.x,
       manifest.position.z,
@@ -576,14 +641,13 @@ export class TownSystem extends System {
       size: townSize,
       safeZoneRadius: manifest.safeZoneRadius,
       biome,
-      buildings, // Use manifest buildings with calculated entrances
-      suitabilityScore: 1.0, // Pre-defined towns have max suitability
+      buildings,
+      suitabilityScore: 1.0,
       connectedRoads: [],
-      // Use generated layout features
       layoutType: generatedTown.layoutType,
       entryPoints: generatedTown.entryPoints,
       internalRoads: generatedTown.internalRoads,
-      paths, // Use paths generated for manifest buildings
+      paths,
       landmarks: generatedTown.landmarks,
       plaza: generatedTown.plaza,
     };
@@ -1191,6 +1255,26 @@ export class TownSystem extends System {
     let totalBuildings = 0;
     let registeredBuildings = 0;
 
+    // AAA: Pre-compute platform elevation per town.
+    // Town circular flattening makes the inner-radius terrain uniformly flat
+    // at getProceduralHeightAt(center). ALL buildings in a town share this
+    // single elevation — the flat zone system flattens terrain to match.
+    // Using per-tile MAX caused: (a) stale building.position.y from
+    // convertManifestTown (before town was registered) seeding a wrong max,
+    // (b) blend-zone tiles returning heights above center for edge buildings.
+    const townElevations = new Map<string, number>();
+    if (this.terrainSystem) {
+      const terrain = this.terrainSystem as {
+        getHeightAt: (x: number, z: number) => number;
+      };
+      for (const town of this.towns) {
+        const elevation = terrain.getHeightAt(town.position.x, town.position.z);
+        townElevations.set(town.id, elevation);
+        // Keep stored town Y in sync with the actual platform elevation
+        town.position.y = elevation;
+      }
+    }
+
     // Collect all buildings to process (excluding stations)
     const buildingsToProcess: Array<{
       town: ProceduralTown;
@@ -1255,22 +1339,16 @@ export class TownSystem extends System {
           generated.propPlacements,
         );
 
-        // CRITICAL: Calculate maximum terrain height under the building footprint
-        // On steep hills, the building floor must be at the HIGHEST terrain point
-        // Use getProceduralHeightAt to get raw terrain (ignoring previously registered flat zones)
+        // Build footprint tile mask for flat zone registration
         const tileMaskData = this.buildFootprintTileMask(
           building,
           generated.layout,
         );
-        const maxGroundY = this.calculateMaxTerrainHeightForBuilding(
-          building,
-          generated.layout,
-          tileMaskData,
-        );
 
-        // CRITICAL: Update building.position.y to maxGroundY for consistency
-        // This ensures the rendered mesh matches collision and flat zone heights
-        // Without this, on slopes: mesh renders at center height, but collision/flat zones use max height
+        // All buildings in a town sit at the town's platform elevation.
+        // This matches the visual terrain flattened by applyTownCircularFlatten
+        // and eliminates floating/sinking from per-tile MAX or stale heights.
+        const maxGroundY = townElevations.get(town.id) ?? building.position.y;
         building.position.y = maxGroundY;
 
         // Convert BuildingLayout to BuildingLayoutInput for collision service
@@ -2531,18 +2609,12 @@ export class TownSystem extends System {
       return building.position.y;
     }
 
-    // Get procedural height function (ignores flat zones)
+    // Use getHeightAt which includes town circular flattening — buildings inside
+    // towns should sit on the flattened terrain surface, not the raw procedural height.
     const terrain = this.terrainSystem as {
-      getProceduralHeightAt?: (x: number, z: number) => number;
       getHeightAt: (x: number, z: number) => number;
     };
-    const getHeight = terrain.getProceduralHeightAt
-      ? (x: number, z: number) =>
-          (terrain.getProceduralHeightAt as (x: number, z: number) => number)(
-            x,
-            z,
-          )
-      : (x: number, z: number) => terrain.getHeightAt(x, z);
+    const getHeight = (x: number, z: number) => terrain.getHeightAt(x, z);
 
     // Find maximum terrain height across all footprint tiles
     let maxTerrainHeight = building.position.y;

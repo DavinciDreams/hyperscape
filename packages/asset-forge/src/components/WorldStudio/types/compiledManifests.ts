@@ -140,6 +140,27 @@ export interface CompiledWorldJson {
       importance: number;
       radius: number;
     }>;
+    mines?: Array<{
+      id: string;
+      position: { x: number; y: number; z: number };
+      radius: number;
+      radialOffsets: number[];
+      entryAngle: number;
+      biome: string;
+    }>;
+    /** Procgen trees with exclusion filtering already applied.
+     *  Game client uses these directly instead of running its own procgen + filter. */
+    trees?: Array<{
+      /** Tree species (e.g. "oak", "pine") */
+      s: string;
+      x: number;
+      y: number;
+      z: number;
+      /** Scale multiplier */
+      sc: number;
+      /** Y-axis rotation in radians */
+      r: number;
+    }>;
   };
   metadata: {
     compiledAt: string;

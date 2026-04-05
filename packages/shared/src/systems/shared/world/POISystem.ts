@@ -177,7 +177,8 @@ export class POISystem extends System {
   async init(): Promise<void> {
     const worldConfig = (this.world as { config?: { terrainSeed?: number } })
       .config;
-    this.seed = worldConfig?.terrainSeed ?? 0;
+    this.seed =
+      worldConfig?.terrainSeed ?? DataManager.getWorldConfig()?.seed ?? 0;
     this.randomState = this.seed;
     this.config = loadPOIConfig();
     this.noise = new NoiseGenerator(this.seed + 98765);

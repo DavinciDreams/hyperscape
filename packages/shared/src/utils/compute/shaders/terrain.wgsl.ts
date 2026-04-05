@@ -25,7 +25,7 @@
 export const ROAD_INFLUENCE_SHADER = /* wgsl */ `
 const EPS: f32 = 0.001;
 // Road blend width for smooth transition at edges (matches CPU ROAD_BLEND_WIDTH)
-const ROAD_BLEND_WIDTH: f32 = 0.5;
+const ROAD_BLEND_WIDTH: f32 = 2.0;
 
 struct Road {
   startX: f32,

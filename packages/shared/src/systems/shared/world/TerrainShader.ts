@@ -37,6 +37,7 @@ import {
   abs,
   sin,
   cos,
+  max as tslMax,
   Fn,
   output,
   type ShaderNode,
@@ -45,6 +46,7 @@ import { getRoadInfluenceTextureState } from "./RoadInfluenceMask";
 import { getLamppostLightTextureState } from "./LamppostLightMask";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { applyTerrainSunShade } from "./GPUMaterials";
+import { MINE_BIOME_PALETTES, ROAD_COLORS } from "../../../world/biome-colors";
 
 export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
@@ -907,8 +909,10 @@ export function createTerrainMaterial(): THREE.Material & {
   );
 
   // === ROAD OVERLAY ===
-  // Roads are compacted dirt paths - reuse existing dirt colors for consistency
-  // Use shared road mask when available, fall back to per-vertex attribute
+  // Multi-technique procedural dirt road matching World Studio quality:
+  // noise-distorted edges, multi-layer composition, height-based blending,
+  // edge border darkening. Uses GPU road mask when available, falls back
+  // to per-vertex attribute.
   const roadInfluenceAttr = attribute("roadInfluence", "float");
   const roadMaskState = getRoadInfluenceTextureState();
   const roadHalfWorld = roadMaskState.uWorldSize.mul(0.5);
@@ -921,7 +925,7 @@ export function createTerrainMaterial(): THREE.Material & {
     .add(roadHalfWorld)
     .div(roadMaskState.uWorldSize);
   const roadUV = vec2(roadUvX.clamp(0.001, 0.999), roadUvZ.clamp(0.001, 0.999));
-  const roadMask = roadMaskState.textureNode.sample(roadUV).r;
+  const roadMaskSample = roadMaskState.textureNode.sample(roadUV).r;
   const hasRoadMask = smoothstep(
     float(1.0),
     float(2.0),
@@ -931,30 +935,95 @@ export function createTerrainMaterial(): THREE.Material & {
   const dz = abs(worldPos.z.sub(roadMaskState.uCenterZ));
   const insideMask = step(dx, roadHalfWorld).mul(step(dz, roadHalfWorld));
   const useMask = hasRoadMask.mul(insideMask);
-  const roadInfluence = mix(roadInfluenceAttr, roadMask, useMask);
+  const roadInfluence = mix(roadInfluenceAttr, roadMaskSample, useMask);
 
-  // Reuse existing dirt colors with natural noise variation
-  const roadNoiseVar = mul(noiseValue2, float(0.5)); // Natural dirt variation
-  const roadBaseColor = mix(DIRT_BROWN, DIRT_DARK, roadNoiseVar);
+  // Multi-scale noise samples for road detail (matching procgen TerrainShaderTSL)
+  const roadUVCoord = vec2(worldPos.x, worldPos.z);
+  const rn1 = texture(noiseTex, mul(roadUVCoord, float(0.015))).r; // large patches
+  const rn2 = texture(noiseTex, mul(roadUVCoord, float(0.045))).r; // medium detail
+  const rn3 = texture(noiseTex, mul(roadUVCoord, float(0.12))).r; // fine grain
+  const rn4 = texture(noiseTex, mul(roadUVCoord, float(0.3))).r; // micro detail
 
-  // Gravel/Cobblestone effect: High frequency noise for texture
-  // Use fineNoise (highest freq) to create small stones
-  const stoneNoise = smoothstep(float(0.4), float(0.7), fineNoise);
-  const stoneColor = mix(ROCK_GRAY, ROCK_DARK, float(0.5));
+  // Noise-distorted edge mask for natural, irregular road boundaries
+  const edgeDistortion = add(
+    mul(sub(rn2, float(0.5)), float(0.35)), // medium wiggles
+    mul(sub(rn3, float(0.5)), float(0.15)), // fine roughness
+  );
+  const distortedInfluence = add(roadInfluence, edgeDistortion);
+  const roadEdgeMask = smoothstep(float(0.25), float(0.55), distortedInfluence);
 
-  // Mix stones into dirt base - more stones in center of road
-  const roadDetailColor = mix(
-    roadBaseColor,
-    stoneColor,
-    mul(stoneNoise, float(0.6)),
+  // Layer 1: compacted earth base (warm brown, two-tone + micro variation)
+  const earthBase = mix(
+    vec3(...ROAD_COLORS.earthBaseA),
+    vec3(...ROAD_COLORS.earthBaseB),
+    smoothstep(
+      float(0.3),
+      float(0.7),
+      add(mul(rn1, float(0.8)), mul(rn4, float(0.2))),
+    ),
   );
 
-  // Road center is slightly worn/darker from foot traffic
-  const roadCenterDarken = mul(roadInfluence, float(0.08));
-  const compactedRoadColor = sub(roadDetailColor, vec3(roadCenterDarken));
+  // Layer 2: surface dust (lighter sandy patches)
+  const dustMask = smoothstep(float(0.55), float(0.75), rn2);
+  const withDust = mix(
+    earthBase,
+    vec3(...ROAD_COLORS.dust),
+    mul(dustMask, float(0.35)),
+  );
 
-  // Blend road color with terrain based on influence
-  const baseWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
+  // Layer 3: gravel highlights + cracks between pebbles
+  const gravelMask = smoothstep(float(0.7), float(0.8), rn3);
+  const gravelShadow = smoothstep(float(0.15), float(0.25), rn3);
+  const withGravel = mix(
+    withDust,
+    vec3(...ROAD_COLORS.gravel),
+    mul(gravelMask, float(0.4)),
+  );
+  const withCracks = mix(
+    mul(withGravel, float(0.82)),
+    withGravel,
+    gravelShadow,
+  );
+
+  // Layer 4: wear track darkening (center of road, compacted)
+  const wearTrack = mul(mul(roadEdgeMask, roadEdgeMask), roadEdgeMask); // pow(roadMask, 3)
+  const wornRoad = mul(withCracks, mix(float(1.0), float(0.88), wearTrack));
+
+  // Layer 5: grass tufts at road margins (edge scatter)
+  const edgeZone = mul(
+    smoothstep(float(0.15), float(0.4), roadEdgeMask),
+    smoothstep(float(0.75), float(0.45), roadEdgeMask),
+  );
+  const edgeScatter = mul(edgeZone, smoothstep(float(0.4), float(0.65), rn2));
+  const roadDetailColor = mix(
+    wornRoad,
+    variedColor,
+    mul(edgeScatter, float(0.4)),
+  );
+
+  // Height-based blending: grass "pokes through" road at edges
+  const grassH = add(mul(noiseValue, float(0.4)), float(0.6));
+  const roadH = add(mul(rn3, float(0.3)), float(0.1));
+  const grassBl = add(grassH, mul(sub(float(1.0), roadEdgeMask), float(2.0)));
+  const roadBl = add(roadH, mul(roadEdgeMask, float(2.0)));
+  const maxH = tslMax(grassBl, roadBl);
+  const depthParam = float(0.15);
+  const thresh = sub(maxH, depthParam);
+  const gW = tslMax(sub(grassBl, thresh), float(0.0));
+  const rW = tslMax(sub(roadBl, thresh), float(0.0));
+  const totalW = add(gW, rW);
+  const heightBlended = div(
+    add(mul(variedColor, gW), mul(roadDetailColor, rW)),
+    totalW,
+  );
+
+  // Edge border darkening: narrow dark band at road edge for readability
+  const edgeBand = mul(
+    smoothstep(float(0.28), float(0.4), roadEdgeMask),
+    smoothstep(float(0.55), float(0.42), roadEdgeMask),
+  );
+  const borderDarken = mul(edgeBand, float(0.12));
+  const baseWithRoads = mul(heightBlended, sub(float(1.0), borderDarken));
 
   // === MINE FLOOR OVERLAY ===
   // AAA multi-layered rocky quarry floor matching Asset Forge shader quality.
@@ -1000,32 +1069,37 @@ export function createTerrainMaterial(): THREE.Material & {
   const mbSwamp = mul(step(float(4.5), mb), step(mb, float(5.5)));
   const mbValley = step(float(5.5), mb);
 
-  // Primary (bedrock)
-  let minePrimary: ShaderNode = vec3(0.54, 0.46, 0.36);
-  minePrimary = mix(minePrimary, vec3(0.56, 0.54, 0.5), mbForest);
-  minePrimary = mix(minePrimary, vec3(0.42, 0.42, 0.46), mbTundra);
-  minePrimary = mix(minePrimary, vec3(0.55, 0.38, 0.24), mbDesert);
-  minePrimary = mix(minePrimary, vec3(0.52, 0.5, 0.47), mbMountain);
-  minePrimary = mix(minePrimary, vec3(0.36, 0.3, 0.22), mbSwamp);
-  minePrimary = mix(minePrimary, vec3(0.58, 0.5, 0.4), mbValley);
+  // Primary (bedrock) — colors from shared MINE_BIOME_PALETTES
+  const MP = MINE_BIOME_PALETTES;
+  let minePrimary: ShaderNode = vec3(...MP.plains.primary);
+  minePrimary = mix(minePrimary, vec3(...MP.forest.primary), mbForest);
+  minePrimary = mix(minePrimary, vec3(...MP.tundra.primary), mbTundra);
+  minePrimary = mix(minePrimary, vec3(...MP.desert.primary), mbDesert);
+  minePrimary = mix(minePrimary, vec3(...MP.mountains.primary), mbMountain);
+  minePrimary = mix(minePrimary, vec3(...MP.swamp.primary), mbSwamp);
+  minePrimary = mix(minePrimary, vec3(...MP.valley.primary), mbValley);
 
   // Secondary (dark crevices)
-  let mineSecondary: ShaderNode = vec3(0.38, 0.32, 0.22);
-  mineSecondary = mix(mineSecondary, vec3(0.4, 0.38, 0.35), mbForest);
-  mineSecondary = mix(mineSecondary, vec3(0.28, 0.28, 0.32), mbTundra);
-  mineSecondary = mix(mineSecondary, vec3(0.38, 0.24, 0.13), mbDesert);
-  mineSecondary = mix(mineSecondary, vec3(0.36, 0.34, 0.32), mbMountain);
-  mineSecondary = mix(mineSecondary, vec3(0.24, 0.19, 0.13), mbSwamp);
-  mineSecondary = mix(mineSecondary, vec3(0.42, 0.36, 0.26), mbValley);
+  let mineSecondary: ShaderNode = vec3(...MP.plains.secondary);
+  mineSecondary = mix(mineSecondary, vec3(...MP.forest.secondary), mbForest);
+  mineSecondary = mix(mineSecondary, vec3(...MP.tundra.secondary), mbTundra);
+  mineSecondary = mix(mineSecondary, vec3(...MP.desert.secondary), mbDesert);
+  mineSecondary = mix(
+    mineSecondary,
+    vec3(...MP.mountains.secondary),
+    mbMountain,
+  );
+  mineSecondary = mix(mineSecondary, vec3(...MP.swamp.secondary), mbSwamp);
+  mineSecondary = mix(mineSecondary, vec3(...MP.valley.secondary), mbValley);
 
   // Tertiary (gravel highlights)
-  let mineTertiary: ShaderNode = vec3(0.62, 0.54, 0.44);
-  mineTertiary = mix(mineTertiary, vec3(0.62, 0.6, 0.56), mbForest);
-  mineTertiary = mix(mineTertiary, vec3(0.5, 0.5, 0.55), mbTundra);
-  mineTertiary = mix(mineTertiary, vec3(0.64, 0.48, 0.32), mbDesert);
-  mineTertiary = mix(mineTertiary, vec3(0.6, 0.58, 0.55), mbMountain);
-  mineTertiary = mix(mineTertiary, vec3(0.44, 0.38, 0.3), mbSwamp);
-  mineTertiary = mix(mineTertiary, vec3(0.66, 0.58, 0.48), mbValley);
+  let mineTertiary: ShaderNode = vec3(...MP.plains.tertiary);
+  mineTertiary = mix(mineTertiary, vec3(...MP.forest.tertiary), mbForest);
+  mineTertiary = mix(mineTertiary, vec3(...MP.tundra.tertiary), mbTundra);
+  mineTertiary = mix(mineTertiary, vec3(...MP.desert.tertiary), mbDesert);
+  mineTertiary = mix(mineTertiary, vec3(...MP.mountains.tertiary), mbMountain);
+  mineTertiary = mix(mineTertiary, vec3(...MP.swamp.tertiary), mbSwamp);
+  mineTertiary = mix(mineTertiary, vec3(...MP.valley.tertiary), mbValley);
 
   // Layer 1: Exposed bedrock — broad slab patches
   const mineSlabPattern = smoothstep(float(0.32), float(0.68), mn1);

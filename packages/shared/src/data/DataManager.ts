@@ -29,7 +29,17 @@ import {
   getMobSpawnsInArea,
   getNPCsInArea,
 } from "./world-areas";
-import { BIOMES } from "./world-structure";
+import {
+  BIOMES,
+  WorldJsonSpatialIndex,
+  type WorldJson,
+  type WorldJsonResource,
+  type WorldJsonMobSpawn,
+  type WorldJsonMine,
+  type WorldJsonTree,
+  type DangerSourceManifest,
+  type WildernessBoundaryManifest,
+} from "./world-structure";
 import { loadSkillUnlocks, type SkillUnlocksManifest } from "./skill-unlocks";
 import {
   TierDataProvider,
@@ -85,6 +95,16 @@ function warnOptionalData(message: string): void {
   console.warn(message);
 }
 
+/** Pre-computed road from World Studio staging manifest (roads.json) */
+export interface PrecomputedRoad {
+  id: string;
+  path: Array<{ x: number; y: number; z: number }>;
+  width: number;
+  fromTownId: string;
+  toTownId: string;
+  isMainRoad: boolean;
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -103,6 +123,8 @@ function isBuildingsManifest(value: unknown): value is BuildingsManifest {
 type BrowserDataWindow = Window & {
   __CDN_URL?: string;
   __ASSETS_URL?: string;
+  /** When set, manifest fetches use this base URL instead of CDN + /manifests */
+  __STAGING_MANIFESTS_URL?: string;
 };
 
 function getClientAssetsBaseUrl(): string {
@@ -136,7 +158,53 @@ function getClientAssetsBaseUrl(): string {
   return cdnUrl;
 }
 
+/**
+ * Try to resolve a staging URL for the given production manifest URL.
+ * Returns undefined if staging mode is not active or the URL doesn't match.
+ */
+function tryResolveStagingUrl(productionUrl: string): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const stagingBase = (window as BrowserDataWindow).__STAGING_MANIFESTS_URL;
+  if (!stagingBase) return undefined;
+
+  // Extract the filename after /manifests/ and prepend staging base
+  const manifestsIndex = productionUrl.lastIndexOf("/manifests/");
+  if (manifestsIndex === -1) return undefined;
+
+  const filename = productionUrl.slice(manifestsIndex + "/manifests/".length);
+  return `${stagingBase}/${filename}`;
+}
+
+/** Staging diagnostic counters — tracks how many manifests came from staging vs production */
+const stagingDiag = { staging: 0, production: 0 };
+
 async function fetchRequiredJson<T>(url: string, label: string): Promise<T> {
+  // In staging mode, try the staging URL first, fall back to production
+  const stagingUrl = tryResolveStagingUrl(url);
+  if (stagingUrl) {
+    try {
+      const stagingResponse = await fetch(stagingUrl);
+      if (stagingResponse.ok) {
+        const ct = stagingResponse.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          console.log(`[DataManager] Loaded ${label} from staging`);
+          stagingDiag.staging++;
+          return (await stagingResponse.json()) as T;
+        }
+        console.warn(
+          `[DataManager] Staging ${label} returned non-JSON (${ct}), using production`,
+        );
+      } else {
+        console.warn(
+          `[DataManager] Staging ${label} not found (${stagingResponse.status}), using production`,
+        );
+      }
+    } catch {
+      // Staging unavailable, fall through to production
+    }
+    stagingDiag.production++;
+  }
+
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`${label} failed with HTTP ${response.status}`);
@@ -156,6 +224,32 @@ async function fetchOptionalJson<T>(
   url: string,
   label: string,
 ): Promise<T | null> {
+  // In staging mode, try the staging URL first, fall back to production
+  const stagingUrl = tryResolveStagingUrl(url);
+  if (stagingUrl) {
+    try {
+      const stagingResponse = await fetch(stagingUrl);
+      if (stagingResponse.ok) {
+        const ct = stagingResponse.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          console.log(`[DataManager] Loaded ${label} from staging`);
+          stagingDiag.staging++;
+          return (await stagingResponse.json()) as T;
+        }
+        console.warn(
+          `[DataManager] Staging ${label} returned non-JSON (${ct}), using production`,
+        );
+      } else {
+        console.warn(
+          `[DataManager] Staging ${label} not found (${stagingResponse.status}), using production`,
+        );
+      }
+    } catch {
+      // Staging unavailable, fall through to production
+    }
+    stagingDiag.production++;
+  }
+
   const response = await fetch(url);
   if (!response.ok) {
     return null;
@@ -321,6 +415,11 @@ export class DataManager {
   private worldAssetsDir: string | null = null;
   private static worldConfig: WorldConfigManifest | null = null;
   private static buildingsManifest: BuildingsManifest | null = null;
+  private static roadsManifest: PrecomputedRoad[] | null = null;
+  private static worldJson: WorldJson | null = null;
+  private static worldJsonIndex: WorldJsonSpatialIndex | null = null;
+  private static dangerSources: DangerSourceManifest[] | null = null;
+  private static wildernessBoundary: WildernessBoundaryManifest | null = null;
 
   private constructor() {
     // Private constructor for singleton pattern
@@ -357,6 +456,98 @@ export class DataManager {
   }
 
   /**
+   * Get pre-computed road network (from World Studio staging)
+   * Returns null if not available (game will generate roads procedurally)
+   */
+  public static getRoadsManifest(): PrecomputedRoad[] | null {
+    return DataManager.roadsManifest;
+  }
+
+  /** Whether world.json was loaded (World Studio entity placements available) */
+  public static hasWorldJson(): boolean {
+    return DataManager.worldJsonIndex !== null;
+  }
+
+  /** Get the full world.json data */
+  public static getWorldJson(): WorldJson | null {
+    return DataManager.worldJson;
+  }
+
+  /**
+   * Hot-reload world.json data and rebuild spatial index.
+   * Used by the deploy route to update in-memory manifest data without
+   * restarting the server.
+   */
+  public static reloadWorldJson(worldJsonData: WorldJson): void {
+    DataManager.worldJson = worldJsonData;
+    if (worldJsonData?.entities) {
+      const tileSize =
+        worldJsonData.metadata?.tileSize ??
+        DataManager.worldConfig?.terrain?.tileSize ??
+        100;
+      DataManager.worldJsonIndex = new WorldJsonSpatialIndex(
+        worldJsonData,
+        tileSize,
+      );
+      const treeInfo = DataManager.worldJsonIndex.hasManifestTrees()
+        ? `, ${worldJsonData.entities.trees?.length ?? 0} trees`
+        : "";
+      console.log(
+        `[DataManager] Hot-reloaded world.json: ${worldJsonData.entities.resources.length} resources, ` +
+          `${worldJsonData.entities.mobSpawns.length} mob spawns${treeInfo}`,
+      );
+    } else {
+      DataManager.worldJson = null;
+      DataManager.worldJsonIndex = null;
+      console.log("[DataManager] Cleared world.json (no entity data)");
+    }
+  }
+
+  /** Get World Studio resources placed in a specific terrain tile */
+  public static getWorldJsonResourcesInTile(
+    tileX: number,
+    tileZ: number,
+  ): WorldJsonResource[] {
+    return DataManager.worldJsonIndex?.getResourcesInTile(tileX, tileZ) ?? [];
+  }
+
+  /** Get World Studio mob spawns placed in a specific terrain tile */
+  public static getWorldJsonMobSpawnsInTile(
+    tileX: number,
+    tileZ: number,
+  ): WorldJsonMobSpawn[] {
+    return DataManager.worldJsonIndex?.getMobSpawnsInTile(tileX, tileZ) ?? [];
+  }
+
+  /** Get all mine areas from World Studio */
+  public static getWorldJsonMines(): WorldJsonMine[] {
+    return DataManager.worldJsonIndex?.getMines() ?? [];
+  }
+
+  /** Get pre-filtered manifest trees for a specific terrain tile */
+  public static getWorldJsonTreesInTile(
+    tileX: number,
+    tileZ: number,
+  ): WorldJsonTree[] {
+    return DataManager.worldJsonIndex?.getTreesInTile(tileX, tileZ) ?? [];
+  }
+
+  /** True when world.json includes pre-filtered tree data from World Studio */
+  public static hasManifestTrees(): boolean {
+    return DataManager.worldJsonIndex?.hasManifestTrees() ?? false;
+  }
+
+  /** Get danger sources from World Studio (danger-sources.json) */
+  public static getDangerSources(): DangerSourceManifest[] | null {
+    return DataManager.dangerSources;
+  }
+
+  /** Get wilderness boundary from World Studio (wilderness-boundary.json) */
+  public static getWildernessBoundary(): WildernessBoundaryManifest | null {
+    return DataManager.wildernessBoundary;
+  }
+
+  /**
    * Get the singleton instance
    */
   public static getInstance(): DataManager {
@@ -384,8 +575,19 @@ export class DataManager {
     }
 
     // Client: Load from CDN (localhost:5555/game-assets in dev, R2/S3 in prod)
+    // Staging mode is handled transparently by fetchRequiredJson/fetchOptionalJson:
+    // they check __STAGING_MANIFESTS_URL first, fall back to production on 404.
     const cdnUrl = getClientAssetsBaseUrl();
     const baseUrl = `${cdnUrl}/manifests`;
+
+    if (
+      typeof window !== "undefined" &&
+      (window as BrowserDataWindow).__STAGING_MANIFESTS_URL
+    ) {
+      console.log(
+        `[DataManager] STAGING MODE active — staging manifests from ${(window as BrowserDataWindow).__STAGING_MANIFESTS_URL}, production fallback: ${baseUrl}`,
+      );
+    }
 
     // In test/CI environments, CDN might not be available - make loading non-fatal
     const isTestEnv =
@@ -533,6 +735,12 @@ export class DataManager {
           );
           for (const biome of biomeList) {
             BIOMES[biome.id] = biome;
+            // Also index by terrain type so lookups like BIOMES["forest"] work
+            // even when IDs are generated (e.g. "biome-0" from World Studio).
+            // First biome of each terrain type wins (matches production behavior).
+            if (biome.terrain && !BIOMES[biome.terrain]) {
+              BIOMES[biome.terrain] = biome;
+            }
           }
         })(),
 
@@ -578,6 +786,94 @@ export class DataManager {
           }
         })(),
 
+        // Roads (pre-computed from World Studio — optional)
+        (async () => {
+          DataManager.roadsManifest = null;
+          try {
+            const roadsData = await fetchOptionalJson<PrecomputedRoad[]>(
+              `${baseUrl}/roads.json`,
+              "roads.json",
+            );
+            if (roadsData && Array.isArray(roadsData) && roadsData.length > 0) {
+              DataManager.roadsManifest = roadsData;
+              console.log(
+                `[DataManager] Loaded pre-computed roads: ${roadsData.length} roads`,
+              );
+            }
+          } catch {
+            // roads.json is optional — game generates roads procedurally if absent
+          }
+        })(),
+
+        // world.json — entity placements from World Studio (optional)
+        (async () => {
+          DataManager.worldJson = null;
+          DataManager.worldJsonIndex = null;
+          try {
+            const worldJsonData = await fetchOptionalJson<WorldJson>(
+              `${baseUrl}/world.json`,
+              "world.json",
+            );
+            if (worldJsonData?.entities) {
+              DataManager.worldJson = worldJsonData;
+              const tileSize =
+                worldJsonData.metadata?.tileSize ??
+                DataManager.worldConfig?.terrain?.tileSize ??
+                100;
+              DataManager.worldJsonIndex = new WorldJsonSpatialIndex(
+                worldJsonData,
+                tileSize,
+              );
+              const treeInfo = worldJsonData.entities.trees?.length
+                ? `, ${worldJsonData.entities.trees.length} trees`
+                : "";
+              console.log(
+                `[DataManager] Loaded world.json: ${worldJsonData.entities.resources.length} resources, ${worldJsonData.entities.mobSpawns.length} mob spawns${treeInfo}`,
+              );
+            }
+          } catch {
+            // world.json is optional — game uses procgen fallback if absent
+          }
+        })(),
+
+        // danger-sources.json — World Studio danger zones (optional)
+        (async () => {
+          DataManager.dangerSources = null;
+          try {
+            const dangerData = await fetchOptionalJson<{
+              sources: DangerSourceManifest[];
+            }>(`${baseUrl}/danger-sources.json`, "danger-sources.json");
+            if (dangerData?.sources && dangerData.sources.length > 0) {
+              DataManager.dangerSources = dangerData.sources;
+              console.log(
+                `[DataManager] Loaded danger sources: ${dangerData.sources.length} sources`,
+              );
+            }
+          } catch {
+            // danger-sources.json is optional
+          }
+        })(),
+
+        // wilderness-boundary.json — World Studio wilderness boundary (optional)
+        (async () => {
+          DataManager.wildernessBoundary = null;
+          try {
+            const boundary =
+              await fetchOptionalJson<WildernessBoundaryManifest>(
+                `${baseUrl}/wilderness-boundary.json`,
+                "wilderness-boundary.json",
+              );
+            if (boundary?.points && boundary.points.length > 0) {
+              DataManager.wildernessBoundary = boundary;
+              console.log(
+                `[DataManager] Loaded wilderness boundary: ${boundary.points.length} points`,
+              );
+            }
+          } catch {
+            // wilderness-boundary.json is optional
+          }
+        })(),
+
         // Stores
         (async () => {
           const storeList = await fetchRequiredJson<Array<StoreData>>(
@@ -619,6 +915,17 @@ export class DataManager {
       // Build EXTERNAL_TOOLS from items where item.tool is defined
       // This replaces the old tools.json loading
       this.buildToolsFromItems();
+
+      // Staging diagnostic summary
+      if (
+        typeof window !== "undefined" &&
+        (window as BrowserDataWindow).__STAGING_MANIFESTS_URL &&
+        (stagingDiag.staging > 0 || stagingDiag.production > 0)
+      ) {
+        console.log(
+          `[DataManager] Staging: ${stagingDiag.staging} manifests from staging, ${stagingDiag.production} from production fallback`,
+        );
+      }
     } catch (error) {
       // In test/CI environments, CDN might not be available - this is non-fatal
       if (isTestEnv) {
@@ -819,6 +1126,10 @@ export class DataManager {
       const biomeList = JSON.parse(biomesData) as Array<BiomeData>;
       for (const biome of biomeList) {
         BIOMES[biome.id] = biome;
+        // Also index by terrain type (see CDN loader for rationale)
+        if (biome.terrain && !BIOMES[biome.terrain]) {
+          BIOMES[biome.terrain] = biome;
+        }
       }
 
       // Load world config manifest for terrain/town/road generation
@@ -852,6 +1163,95 @@ export class DataManager {
         warnOptionalData(
           `[DataManager] buildings.json missing or invalid, skipping pre-defined towns (${error instanceof Error ? error.message : "unknown error"})`,
         );
+      }
+
+      // Load world.json — entity placements from World Studio (optional)
+      // Try production first, then fall back to staging directory
+      DataManager.worldJson = null;
+      DataManager.worldJsonIndex = null;
+      try {
+        const worldJsonPath = path.join(manifestsDir, "world.json");
+        const worldJsonData = JSON.parse(
+          await fs.readFile(worldJsonPath, "utf-8"),
+        ) as WorldJson;
+        if (worldJsonData?.entities) {
+          DataManager.worldJson = worldJsonData;
+          const tileSize =
+            worldJsonData.metadata?.tileSize ??
+            DataManager.worldConfig?.terrain?.tileSize ??
+            100;
+          DataManager.worldJsonIndex = new WorldJsonSpatialIndex(
+            worldJsonData,
+            tileSize,
+          );
+          const treeInfo = worldJsonData.entities.trees?.length
+            ? `, ${worldJsonData.entities.trees.length} trees`
+            : "";
+          console.log(
+            `[DataManager] Loaded world.json: ${worldJsonData.entities.resources.length} resources, ${worldJsonData.entities.mobSpawns.length} mob spawns${treeInfo}`,
+          );
+        }
+      } catch {
+        // Production world.json missing — try staging fallback
+        try {
+          const stagingWorldJsonDir = path.join(
+            path.dirname(manifestsDir),
+            "manifests-staging",
+          );
+          const stagingWorldJsonPath = path.join(
+            stagingWorldJsonDir,
+            "world.json",
+          );
+          const worldJsonData = JSON.parse(
+            await fs.readFile(stagingWorldJsonPath, "utf-8"),
+          ) as WorldJson;
+          if (worldJsonData?.entities) {
+            DataManager.worldJson = worldJsonData;
+            const tileSize =
+              worldJsonData.metadata?.tileSize ??
+              DataManager.worldConfig?.terrain?.tileSize ??
+              100;
+            DataManager.worldJsonIndex = new WorldJsonSpatialIndex(
+              worldJsonData,
+              tileSize,
+            );
+            const treeCount = worldJsonData.entities.trees?.length ?? 0;
+            const resCount = worldJsonData.entities.resources?.length ?? 0;
+            console.log(
+              `[DataManager] Loaded world.json from STAGING fallback: ${resCount} resources, ${treeCount} trees`,
+            );
+          }
+        } catch {
+          // Neither production nor staging world.json exists — procgen fallback (normal for fresh installs)
+        }
+      }
+
+      // Load danger-sources.json (optional)
+      DataManager.dangerSources = null;
+      try {
+        const dangerPath = path.join(manifestsDir, "danger-sources.json");
+        const dangerData = JSON.parse(
+          await fs.readFile(dangerPath, "utf-8"),
+        ) as { sources: DangerSourceManifest[] };
+        if (dangerData?.sources && dangerData.sources.length > 0) {
+          DataManager.dangerSources = dangerData.sources;
+        }
+      } catch {
+        // danger-sources.json is optional
+      }
+
+      // Load wilderness-boundary.json (optional)
+      DataManager.wildernessBoundary = null;
+      try {
+        const wbPath = path.join(manifestsDir, "wilderness-boundary.json");
+        const boundary = JSON.parse(
+          await fs.readFile(wbPath, "utf-8"),
+        ) as WildernessBoundaryManifest;
+        if (boundary?.points && boundary.points.length > 0) {
+          DataManager.wildernessBoundary = boundary;
+        }
+      } catch {
+        // wilderness-boundary.json is optional
       }
 
       // Load stores

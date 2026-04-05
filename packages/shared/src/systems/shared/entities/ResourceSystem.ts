@@ -862,6 +862,20 @@ export class ResourceSystem extends SystemBase {
     spawnPoints: TerrainResourceSpawnPoint[];
     isManifest?: boolean;
   }): Promise<void> {
+    try {
+      await this._registerTerrainResourcesInner(data);
+    } catch (err) {
+      console.error(
+        "[ResourceSystem] Failed to register terrain resources:",
+        err,
+      );
+    }
+  }
+
+  private async _registerTerrainResourcesInner(data: {
+    spawnPoints: TerrainResourceSpawnPoint[];
+    isManifest?: boolean;
+  }): Promise<void> {
     const { spawnPoints, isManifest = false } = data;
 
     if (spawnPoints.length === 0) return;
@@ -1080,10 +1094,10 @@ export class ResourceSystem extends SystemBase {
     const manifestData = getExternalResource(variantKey);
 
     if (!manifestData) {
-      throw new Error(
-        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
-          `Ensure resources.json is loaded and contains this resource type.`,
+      console.warn(
+        `[ResourceSystem] No manifest entry for '${variantKey}' in getModelPathForResource`,
       );
+      return "";
     }
 
     const path = manifestData.modelPath;
@@ -1103,10 +1117,10 @@ export class ResourceSystem extends SystemBase {
     const manifestData = getExternalResource(variantKey);
 
     if (!manifestData) {
-      throw new Error(
-        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
-          `Ensure resources.json is loaded and contains this resource type.`,
+      console.warn(
+        `[ResourceSystem] No manifest entry for '${variantKey}' in getDepletedModelPathForResource`,
       );
+      return null;
     }
 
     return manifestData.depletedModelPath;
@@ -1121,10 +1135,10 @@ export class ResourceSystem extends SystemBase {
     const manifestData = getExternalResource(variantKey);
 
     if (!manifestData) {
-      throw new Error(
-        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
-          `Ensure resources.json is loaded and contains this resource type.`,
+      console.warn(
+        `[ResourceSystem] No manifest entry for '${variantKey}' in getScaleForResource`,
       );
+      return 1;
     }
 
     return manifestData.scale;
@@ -1142,10 +1156,10 @@ export class ResourceSystem extends SystemBase {
     const manifestData = getExternalResource(variantKey);
 
     if (!manifestData) {
-      throw new Error(
-        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
-          `Ensure resources.json is loaded and contains this resource type.`,
+      console.warn(
+        `[ResourceSystem] No manifest entry for '${variantKey}' in getLod1ModelPathForResource`,
       );
+      return null;
     }
 
     return manifestData.lod1ModelPath ?? null;
@@ -1160,10 +1174,10 @@ export class ResourceSystem extends SystemBase {
     const manifestData = getExternalResource(variantKey);
 
     if (!manifestData) {
-      throw new Error(
-        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
-          `Ensure resources.json is loaded and contains this resource type.`,
+      console.warn(
+        `[ResourceSystem] No manifest entry for '${variantKey}' in getDepletedScaleForResource`,
       );
+      return 1;
     }
 
     return manifestData.depletedScale;
@@ -1210,10 +1224,10 @@ export class ResourceSystem extends SystemBase {
     const manifestData = getExternalResource(variantKey);
 
     if (!manifestData) {
-      throw new Error(
-        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
-          `Ensure resources.json is loaded and contains this resource type.`,
+      console.warn(
+        `[ResourceSystem] No manifest entry for '${variantKey}' in getDropsFromManifest`,
       );
+      return [];
     }
 
     if (!manifestData.harvestYield || manifestData.harvestYield.length === 0) {
@@ -1262,13 +1276,14 @@ export class ResourceSystem extends SystemBase {
       ? `${resourceType}_${spawnPoint.subType}`
       : `${resourceType}_normal`;
 
-    // Get manifest data - fail fast if not found
+    // Get manifest data - skip gracefully if not found (unknown species
+    // from World Studio shouldn't kill the entire tile batch)
     const manifestData = getExternalResource(variantKey);
     if (!manifestData) {
-      throw new Error(
-        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
-          `Ensure resources.json is loaded and contains this resource type.`,
+      console.warn(
+        `[ResourceSystem] No manifest entry for '${variantKey}', skipping resource at (${position.x.toFixed(0)}, ${position.z.toFixed(0)})`,
       );
+      return undefined;
     }
 
     // OSRS-ACCURACY: Snap position to tile center for proper face direction and interaction

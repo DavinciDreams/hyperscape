@@ -40,6 +40,7 @@ import {
   div,
 } from "three/tsl";
 import type Node from "three/src/nodes/core/Node.js";
+import { MINE_BIOME_PALETTES, ROAD_COLORS } from "@hyperscape/shared/world";
 
 // ============================================================================
 // TERRAIN CONSTANTS - Shared between all terrain systems
@@ -543,8 +544,8 @@ export function createTerrainMaterial(
     // === MULTI-LAYER ROAD COMPOSITION ===
     // Layer 1: compacted earth base (warm brown, two-tone + micro variation)
     const earthBase = mix(
-      vec3(0.42, 0.32, 0.2),
-      vec3(0.52, 0.4, 0.26),
+      vec3(...ROAD_COLORS.earthBaseA),
+      vec3(...ROAD_COLORS.earthBaseB),
       smoothstep(
         float(0.3),
         float(0.7),
@@ -556,7 +557,7 @@ export function createTerrainMaterial(
     const dustMask = smoothstep(float(0.55), float(0.75), rn2);
     const withDust = mix(
       earthBase,
-      vec3(0.6, 0.52, 0.38),
+      vec3(...ROAD_COLORS.dust),
       mul(dustMask, float(0.35)),
     );
 
@@ -565,7 +566,7 @@ export function createTerrainMaterial(
     const gravelShadow = smoothstep(float(0.15), float(0.25), rn3);
     const withGravel = mix(
       withDust,
-      vec3(0.58, 0.52, 0.42),
+      vec3(...ROAD_COLORS.gravel),
       mul(gravelMask, float(0.4)),
     );
     // Darken the cracks between gravel
@@ -659,30 +660,9 @@ export function createTerrainMaterial(
     const coreMask = smoothstep(float(0.42), float(0.68), distortedInfluence);
     const edgeMask = smoothstep(float(0.12), float(0.42), distortedInfluence);
 
-    // === BIOME COLOR PALETTE ===
+    // === BIOME COLOR PALETTE (from shared MINE_BIOME_PALETTES) ===
     // 0=forest, 1=tundra, 2=desert, 3=mountains, 4=plains, 5=swamp, 6=valley
-    // Primary: exposed bedrock  Secondary: dark crevices  Tertiary: gravel/highlight
-    const forestP = vec3(0.56, 0.54, 0.5);
-    const forestD = vec3(0.4, 0.38, 0.35);
-    const forestG = vec3(0.62, 0.6, 0.56);
-    const tundraP = vec3(0.42, 0.42, 0.46);
-    const tundraD = vec3(0.28, 0.28, 0.32);
-    const tundraG = vec3(0.5, 0.5, 0.55);
-    const desertP = vec3(0.55, 0.38, 0.24);
-    const desertD = vec3(0.38, 0.24, 0.13);
-    const desertG = vec3(0.64, 0.48, 0.32);
-    const mountainP = vec3(0.52, 0.5, 0.47);
-    const mountainD = vec3(0.36, 0.34, 0.32);
-    const mountainG = vec3(0.6, 0.58, 0.55);
-    const plainsP = vec3(0.54, 0.46, 0.36);
-    const plainsD = vec3(0.38, 0.32, 0.22);
-    const plainsG = vec3(0.62, 0.54, 0.44);
-    const swampP = vec3(0.36, 0.3, 0.22);
-    const swampD = vec3(0.24, 0.19, 0.13);
-    const swampG = vec3(0.44, 0.38, 0.3);
-    const valleyP = vec3(0.58, 0.5, 0.4);
-    const valleyD = vec3(0.42, 0.36, 0.26);
-    const valleyG = vec3(0.66, 0.58, 0.48);
+    const MP = MINE_BIOME_PALETTES;
 
     // Biome selection masks
     const b = mineBiomeId;
@@ -709,31 +689,39 @@ export function createTerrainMaterial(
     const isValley = smoothstep(float(5.5), float(6.5), b);
 
     // Build primary (bedrock)
-    let minePrimary: Node = plainsP;
-    minePrimary = mix(minePrimary, forestP, isForest);
-    minePrimary = mix(minePrimary, tundraP, isTundra);
-    minePrimary = mix(minePrimary, desertP, isDesert);
-    minePrimary = mix(minePrimary, mountainP, isMountain);
-    minePrimary = mix(minePrimary, swampP, isSwamp);
-    minePrimary = mix(minePrimary, valleyP, isValley);
+    let minePrimary: Node = vec3(...MP.plains.primary);
+    minePrimary = mix(minePrimary, vec3(...MP.forest.primary), isForest);
+    minePrimary = mix(minePrimary, vec3(...MP.tundra.primary), isTundra);
+    minePrimary = mix(minePrimary, vec3(...MP.desert.primary), isDesert);
+    minePrimary = mix(minePrimary, vec3(...MP.mountains.primary), isMountain);
+    minePrimary = mix(minePrimary, vec3(...MP.swamp.primary), isSwamp);
+    minePrimary = mix(minePrimary, vec3(...MP.valley.primary), isValley);
 
     // Build secondary (dark crevices)
-    let mineSecondary: Node = plainsD;
-    mineSecondary = mix(mineSecondary, forestD, isForest);
-    mineSecondary = mix(mineSecondary, tundraD, isTundra);
-    mineSecondary = mix(mineSecondary, desertD, isDesert);
-    mineSecondary = mix(mineSecondary, mountainD, isMountain);
-    mineSecondary = mix(mineSecondary, swampD, isSwamp);
-    mineSecondary = mix(mineSecondary, valleyD, isValley);
+    let mineSecondary: Node = vec3(...MP.plains.secondary);
+    mineSecondary = mix(mineSecondary, vec3(...MP.forest.secondary), isForest);
+    mineSecondary = mix(mineSecondary, vec3(...MP.tundra.secondary), isTundra);
+    mineSecondary = mix(mineSecondary, vec3(...MP.desert.secondary), isDesert);
+    mineSecondary = mix(
+      mineSecondary,
+      vec3(...MP.mountains.secondary),
+      isMountain,
+    );
+    mineSecondary = mix(mineSecondary, vec3(...MP.swamp.secondary), isSwamp);
+    mineSecondary = mix(mineSecondary, vec3(...MP.valley.secondary), isValley);
 
     // Build tertiary (gravel highlights)
-    let mineTertiary: Node = plainsG;
-    mineTertiary = mix(mineTertiary, forestG, isForest);
-    mineTertiary = mix(mineTertiary, tundraG, isTundra);
-    mineTertiary = mix(mineTertiary, desertG, isDesert);
-    mineTertiary = mix(mineTertiary, mountainG, isMountain);
-    mineTertiary = mix(mineTertiary, swampG, isSwamp);
-    mineTertiary = mix(mineTertiary, valleyG, isValley);
+    let mineTertiary: Node = vec3(...MP.plains.tertiary);
+    mineTertiary = mix(mineTertiary, vec3(...MP.forest.tertiary), isForest);
+    mineTertiary = mix(mineTertiary, vec3(...MP.tundra.tertiary), isTundra);
+    mineTertiary = mix(mineTertiary, vec3(...MP.desert.tertiary), isDesert);
+    mineTertiary = mix(
+      mineTertiary,
+      vec3(...MP.mountains.tertiary),
+      isMountain,
+    );
+    mineTertiary = mix(mineTertiary, vec3(...MP.swamp.tertiary), isSwamp);
+    mineTertiary = mix(mineTertiary, vec3(...MP.valley.tertiary), isValley);
 
     // === LAYER 1: EXPOSED BEDROCK BASE ===
     // Large stone slab pattern — broad patches of primary/secondary

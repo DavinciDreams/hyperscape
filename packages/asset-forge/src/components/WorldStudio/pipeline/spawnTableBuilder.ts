@@ -12,7 +12,7 @@ import type {
   ManifestData,
   ManifestNPC,
 } from "../types";
-import { getTreeConfigForBiome } from "@hyperscape/shared/world/TerrainBiomeTypes";
+import { getTreeConfigForBiome } from "@hyperscape/shared/world";
 
 // ============== BIOME AFFINITY WEIGHTS ==============
 

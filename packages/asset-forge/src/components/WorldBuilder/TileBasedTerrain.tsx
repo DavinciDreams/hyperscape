@@ -46,9 +46,21 @@ import {
   GAME_TILE_SIZE,
   GAME_WORLD_SIZE,
 } from "./GameTerrainAdapter";
-import { generateTrees } from "@hyperscape/shared/world/BiomeResourceGenerator";
-import type { ResourceGenerationContext } from "@hyperscape/shared/world/BiomeResourceGenerator";
-import { getTreeConfigForBiome } from "@hyperscape/shared/world/TerrainBiomeTypes";
+import {
+  generateTrees,
+  type ResourceGenerationContext,
+  getTreeConfigForBiome,
+  calculateRoadInfluence,
+  getRoadHeightAtPoint,
+  ROAD_BLEND_WIDTH,
+  ROAD_MINIMUM_WIDTH,
+  type RoadPathLike,
+  calculateMineInfluenceAtPoint,
+  getMineEffectiveRadius,
+  precomputeExclusions,
+  filterTreesByExclusions,
+  type VegetationExclusionInput,
+} from "@hyperscape/shared/world";
 import {
   initTreeModels,
   getTreeSpeciesInstance,
@@ -235,79 +247,8 @@ export type ViewMode = "lit" | "wireframe" | "biomeColors";
  *
  * All positions are in game-space (centered coordinates).
  */
-export interface VegetationExclusions {
-  /** Hard keep-out zones — buildings, resources, spawn points.
-   *  Trees inside the footprint are always removed; trees near the edge are
-   *  probabilistically thinned with noise-distorted boundaries. */
-  circles: Array<{ x: number; z: number; radius: number }>;
-  /** Road/path exclusions — hard cutoff on road surface, gradual density
-   *  ramp at the road shoulders. */
-  roads: Array<{ path: Array<{ x: number; z: number }>; halfWidth: number }>;
-  /** Town centers — creates a broad density gradient (RuneScape-style: sparse
-   *  near town center, gradually reaching full density in the wilderness).
-   *  This replaces giant circular cutouts with natural thinning. */
-  towns?: Array<{ x: number; z: number; safeZoneRadius: number }>;
-}
-
-// ---------------------------------------------------------------------------
-// Vegetation density field — simplified two-layer approach
-// ---------------------------------------------------------------------------
-// Layer 1: Hard exclusions (buildings, roads) — binary remove, no noise.
-// Layer 2: Town proximity gradient — smooth density ramp with FBM noise on
-//          the boundary for organic town edges. This is the ONLY probabilistic
-//          layer. Noise is NOT applied to individual buildings (that caused
-//          random tree clusters inside towns from noise-created survival pockets).
-// ---------------------------------------------------------------------------
-
-/** Spatial hash for value noise (shader-style, deterministic) */
-function _vegHash(x: number, z: number): number {
-  const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
-  return n - Math.floor(n);
-}
-
-/** Bicubic-interpolated value noise [0..1] */
-function _vegSmoothNoise(x: number, z: number): number {
-  const ix = Math.floor(x),
-    iz = Math.floor(z);
-  const fx = x - ix,
-    fz = z - iz;
-  const sx = fx * fx * (3 - 2 * fx);
-  const sz = fz * fz * (3 - 2 * fz);
-  return (
-    _vegHash(ix, iz) * (1 - sx) * (1 - sz) +
-    _vegHash(ix + 1, iz) * sx * (1 - sz) +
-    _vegHash(ix, iz + 1) * (1 - sx) * sz +
-    _vegHash(ix + 1, iz + 1) * sx * sz
-  );
-}
-
-/** 3-octave FBM [0..1] for organic town boundary distortion */
-function _vegFbm(x: number, z: number): number {
-  return (
-    _vegSmoothNoise(x, z) * 0.5714 +
-    _vegSmoothNoise(x * 2, z * 2) * 0.2857 +
-    _vegSmoothNoise(x * 4, z * 4) * 0.1429
-  );
-}
-
-/** Deterministic per-position random [0..1] for survival roll */
-function _vegRand(x: number, z: number): number {
-  const n = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
-  return n - Math.floor(n);
-}
-
-/** Hermite smoothstep (clamped) */
-function _vegSmoothstep(edge0: number, edge1: number, x: number): number {
-  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
-}
-
-// Town gradient constants — tuned for RuneScape-style settlement→wilderness
-const _VEG_NOISE_FREQ = 0.07; // Noise frequency (features ~14m, subtle wobble)
-const _VEG_NOISE_AMP = 6; // ±6m town boundary wobble (subtle, not chaotic)
-const _VEG_TOWN_INNER_FRAC = 0.3; // Fraction of safeZone ≈ zero density
-const _VEG_TOWN_OUTER_FRAC = 1.5; // Fraction of safeZone ≈ full density
-const _VEG_MIN_EDGE_SCALE = 0.35; // Smallest trees at town fringe
+/** Vegetation exclusion input — re-exported from shared for external callers */
+export type VegetationExclusions = VegetationExclusionInput;
 
 /**
  * Determine the visually dominant biome from terrain shader blend weights.
@@ -338,21 +279,6 @@ function _getVisualBiome(q: TerrainQueryResult): string {
  * ambiguous, so we fall back to "tundra" whose conifers (WindPine, Fir, Pine,
  * Birch) look natural on any ground color and create a pleasing transition.
  */
-const _BIOME_DOMINANCE_THRESHOLD = 0.55;
-
-function _getVisualBiomeForTrees(q: TerrainQueryResult): string {
-  const fW = q.biomeForestWeight ?? 0;
-  const cW = q.biomeCanyonWeight ?? 0;
-  const tW = Math.max(0, 1 - fW - cW);
-
-  if (fW > _BIOME_DOMINANCE_THRESHOLD) return "forest";
-  if (cW > _BIOME_DOMINANCE_THRESHOLD) return "canyon";
-  if (tW > _BIOME_DOMINANCE_THRESHOLD) return "tundra";
-
-  // No clear winner — tundra conifers are visually neutral on blended ground
-  return "tundra";
-}
-
 /**
  * Deterministic LCG RNG for tile-based tree generation (client-side).
  * Matches the server's createTileRng exactly so same seed → same trees.
@@ -457,6 +383,15 @@ export interface TerrainSceneRefs {
   }>;
   /** Vegetation tree positions in game-space, populated by refreshVegetation(). */
   vegetationPositions: Array<{ x: number; z: number }>;
+  /** Full vegetation tree data for manifest export (species, world pos, scale, rotation). */
+  vegetationTrees: Array<{
+    s: string;
+    x: number;
+    y: number;
+    z: number;
+    sc: number;
+    r: number;
+  }>;
   /** Rebuild town 3D meshes (buildings, roads, landmarks) from full procgen data. */
   refreshTownMarkers: (towns: ProcgenTown[]) => void;
   /** Move a town's 3D scene markers + update runtimeTownsRef for flatten zones.
@@ -981,14 +916,11 @@ function clipRoadPathAtTowns<T extends { x: number; z: number }>(
   return path.slice(startIdx, endIdx + 1);
 }
 
-// Road influence constants — must match game engine (TerrainSystem.ts ROAD_BLEND_WIDTH)
-const ROAD_INFLUENCE_BLEND_WIDTH = 2;
-const ROAD_INFLUENCE_MINIMUM_WIDTH = 6;
+// Road influence and height blending — delegated to shared pure functions
+// from @hyperscape/shared/world (imported at top of file).
 
 /**
- * Calculate road influence at a point based on distance to nearest road segment.
- * Returns 0-1 where 1 = center of road, 0 = no road influence.
- * The game terrain shader uses this to render road coloring on the terrain surface.
+ * Thin wrapper — adapts GeneratedRoad[] to the shared calculateRoadInfluence().
  */
 function calculateRoadInfluenceAtPoint(
   worldX: number,
@@ -996,199 +928,17 @@ function calculateRoadInfluenceAtPoint(
   roads: GeneratedRoad[] | undefined,
 ): number {
   if (!roads || roads.length === 0) return 0;
-
-  let minDistance = Infinity;
-  let closestRoadWidth = ROAD_INFLUENCE_MINIMUM_WIDTH;
-
-  for (const road of roads) {
-    if (road.path.length < 2) continue;
-    const effectiveWidth = Math.max(
-      road.width || 4,
-      ROAD_INFLUENCE_MINIMUM_WIDTH,
-    );
-
-    for (let i = 0; i < road.path.length - 1; i++) {
-      const p1 = road.path[i];
-      const p2 = road.path[i + 1];
-      const dx = p2.x - p1.x;
-      const dz = p2.z - p1.z;
-      const lenSq = dx * dx + dz * dz;
-      if (lenSq === 0) continue;
-
-      let t = ((worldX - p1.x) * dx + (worldZ - p1.z) * dz) / lenSq;
-      t = Math.max(0, Math.min(1, t));
-      const cx = p1.x + t * dx;
-      const cz = p1.z + t * dz;
-      const dist = Math.sqrt((worldX - cx) ** 2 + (worldZ - cz) ** 2);
-
-      if (dist < minDistance) {
-        minDistance = dist;
-        closestRoadWidth = effectiveWidth;
-      }
-    }
-  }
-
-  const halfWidth = closestRoadWidth / 2;
-  const totalWidth = halfWidth + ROAD_INFLUENCE_BLEND_WIDTH;
-  if (minDistance >= totalWidth) return 0;
-
-  if (minDistance <= halfWidth) return 1.0;
-  const f = 1.0 - (minDistance - halfWidth) / ROAD_INFLUENCE_BLEND_WIDTH;
-  return f * f * (3 - 2 * f); // smoothstep
+  return calculateRoadInfluence(
+    worldX,
+    worldZ,
+    roads as ReadonlyArray<RoadPathLike>,
+    ROAD_BLEND_WIDTH,
+    ROAD_MINIMUM_WIDTH,
+  );
 }
 
-/**
- * Calculate the interpolated road path height at a world point.
- * Finds the closest road segment and lerps the Y between its endpoints.
- * Returns { height, influence } or null if no road is close enough.
- */
-function getRoadHeightAtPoint(
-  worldX: number,
-  worldZ: number,
-  roads: GeneratedRoad[],
-): { height: number; influence: number } | null {
-  let minDist = Infinity;
-  let bestHeight = 0;
-  let closestWidth = 6;
-
-  for (const road of roads) {
-    if (road.path.length < 2) continue;
-    const effectiveWidth = Math.max(road.width || 4, 6);
-
-    for (let i = 0; i < road.path.length - 1; i++) {
-      const p1 = road.path[i];
-      const p2 = road.path[i + 1];
-
-      const dx = p2.x - p1.x;
-      const dz = p2.z - p1.z;
-      const lenSq = dx * dx + dz * dz;
-      if (lenSq === 0) continue;
-
-      let t = ((worldX - p1.x) * dx + (worldZ - p1.z) * dz) / lenSq;
-      t = Math.max(0, Math.min(1, t));
-
-      const cx = p1.x + t * dx;
-      const cz = p1.z + t * dz;
-      const dist = Math.sqrt((worldX - cx) ** 2 + (worldZ - cz) ** 2);
-
-      if (dist < minDist) {
-        minDist = dist;
-        // Interpolate Y along the segment
-        const y1 = p1.y ?? 0;
-        const y2 = p2.y ?? 0;
-        bestHeight = y1 + t * (y2 - y1);
-        closestWidth = effectiveWidth;
-      }
-    }
-  }
-
-  const halfWidth = closestWidth / 2;
-  const blendWidth = 2;
-  const totalWidth = halfWidth + blendWidth;
-
-  if (minDist >= totalWidth) return null;
-
-  let influence: number;
-  if (minDist <= halfWidth) {
-    influence = 1.0;
-  } else {
-    const f = 1.0 - (minDist - halfWidth) / blendWidth;
-    influence = f * f * (3 - 2 * f);
-  }
-
-  return { height: bestHeight, influence };
-}
-
-/** Mine area data for terrain influence calculation */
-interface MineAreaData {
-  position: { x: number; y: number; z: number };
-  radius: number;
-  radialOffsets: number[];
-  entryAngle: number;
-  biome: string;
-}
-
-/**
- * Get effective mine radius at a given angle using radial offsets.
- * Cosine-interpolates between control points for smooth organic shape.
- */
-function getMineEffectiveRadius(
-  baseRadius: number,
-  offsets: number[],
-  angle: number,
-): number {
-  const n = offsets.length;
-  if (n === 0) return baseRadius;
-  const a = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-  const seg = (a / (Math.PI * 2)) * n;
-  const i = Math.floor(seg);
-  const f = seg - i;
-  const v0 = offsets[i % n];
-  const v1 = offsets[(i + 1) % n];
-  const t = 0.5 * (1 - Math.cos(Math.PI * f));
-  return baseRadius * (v0 + (v1 - v0) * t);
-}
-
-/** Biome name to mine biome index mapping (for shader) */
-const MINE_BIOME_INDEX: Record<string, number> = {
-  forest: 0,
-  tundra: 1,
-  desert: 2,
-  mountains: 3,
-  plains: 4,
-  swamp: 5,
-  valley: 6,
-};
-
-/**
- * Calculate mine influence at a world point.
- * Writes into the pre-allocated _mineResult to avoid per-vertex object allocation.
- * influence is 0-1, biomeIndex identifies the mine's biome for shader color selection.
- *
- * Cosine falloff matching the bowl shape: strongest at center, fading to 0 at
- * radius * 1.2 so the color overlay aligns with the terrain depression.
- */
-const _mineResult = { influence: 0, biomeIndex: 0 };
-function calculateMineInfluenceAtPoint(
-  worldX: number,
-  worldZ: number,
-  mines?: MineAreaData[],
-): { influence: number; biomeIndex: number } {
-  _mineResult.influence = 0;
-  _mineResult.biomeIndex = 0;
-  if (!mines || mines.length === 0) return _mineResult;
-
-  for (const mine of mines) {
-    const dx = worldX - mine.position.x;
-    const dz = worldZ - mine.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-
-    // Quick AABB reject using max possible radius
-    const maxR = mine.radius * 1.5;
-    if (dist >= maxR) continue;
-
-    // Organic boundary: effective radius varies by angle
-    const angle = Math.atan2(dz, dx);
-    const effectiveR = getMineEffectiveRadius(
-      mine.radius,
-      mine.radialOffsets,
-      angle,
-    );
-    const outerRadius = effectiveR * 1.2;
-    if (dist >= outerRadius) continue;
-
-    // Smooth cosine falloff matching the bowl terrain shape
-    const t = dist / outerRadius; // 0 at center, 1 at edge
-    const influence = 0.5 * (1 + Math.cos(Math.PI * t)); // 1→0
-
-    if (influence > _mineResult.influence) {
-      _mineResult.influence = influence;
-      _mineResult.biomeIndex = MINE_BIOME_INDEX[mine.biome] ?? 4;
-    }
-  }
-
-  return _mineResult;
-}
+// Mine area type alias for backwards compatibility with prop types
+type MineAreaData = import("@hyperscape/shared/world").MineArea;
 
 // Road colors matching the game's terrain shader (compacted dirt with gravel)
 const ROAD_CENTER_COLOR = new THREE.Color(0.4, 0.333, 0.267); // #665544 — compacted dirt
@@ -1696,6 +1446,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const wildernessOverlayRef = useRef<THREE.Mesh | null>(null);
   /** Vegetation tree positions in game-space, populated by refreshVegetation(). */
   const vegetationPositionsRef = useRef<Array<{ x: number; z: number }>>([]);
+  /** Full vegetation tree data for manifest export. */
+  const vegetationTreesRef = useRef<
+    Array<{ s: string; x: number; y: number; z: number; sc: number; r: number }>
+  >([]);
   /** Cached world center offset for vegetation refresh (set in main effect) */
   const worldCenterOffsetRef = useRef<number>(0);
   const generatorRef = useRef<TerrainGenerator | null>(null);
@@ -3923,12 +3677,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         const halfT = Math.floor(GAME_WORLD_SIZE / 2);
         for (let tx = -halfT; tx < halfT; tx++) {
           for (let tz = -halfT; tz < halfT; tz++) {
-            const cx = tx * GAME_TILE_SIZE + GAME_TILE_SIZE / 2;
-            const cz = tz * GAME_TILE_SIZE + GAME_TILE_SIZE / 2;
+            // Sample biome at tile origin — matches TerrainSystem's
+            // BiomeSystem.getBiomeForTile(tileX * tileSize, tileZ * tileSize)
+            const cx = tx * GAME_TILE_SIZE;
+            const cz = tz * GAME_TILE_SIZE;
             const tq = initQuerier(cx, cz);
-            // Use threshold-based biome so tree species only appear on ground
-            // that clearly reads as their biome (prevents maples on grey ground)
-            const tileBiome = _getVisualBiomeForTrees(tq);
+            // Use getDominantBiome (highest-weight) to match TerrainSystem exactly.
+            // Both sides must use the same biome determination for RNG sync.
+            const tileBiome = tq.biome;
             const tc = getTreeConfigForBiome(tileBiome);
             if (!tc.enabled || tc.density <= 0) continue;
 
@@ -3938,15 +3694,34 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               tileKey: `${tx}_${tz}`,
               tileSize: GAME_TILE_SIZE,
               waterThreshold: GAME_WATER_THRESHOLD,
-              getHeightAt: (wx, wz) => initQuerier(wx, wz).height,
-              // Per-position threshold biome — requires clear dominance before
-              // using biome-exclusive species (prevents maples on grey ground)
-              getDominantBiome: (wx, wz) =>
-                _getVisualBiomeForTrees(initQuerier(wx, wz)),
-              createRng: (salt) => _createTileRng(initSeed, tx, tz, salt),
+              getHeightAt: (wx: number, wz: number) =>
+                initQuerier(wx, wz).height,
+              getDominantBiome: (wx: number, wz: number) =>
+                initQuerier(wx, wz).biome,
+              createRng: (salt: string) =>
+                _createTileRng(initSeed, tx, tz, salt),
             };
 
             const genResult = generateTrees(rCtx, tc);
+
+            // ---- DIAGNOSTIC: Log initial tree generation for comparison ----
+            const isSampleInit =
+              (tx === 0 && tz === 0) ||
+              (tx === 1 && tz === 0) ||
+              (tx === 0 && tz === 1);
+            if (isSampleInit) {
+              const sample = genResult
+                .slice(0, 3)
+                .map((t: { position: unknown; subType?: string }) => {
+                  const pp = t.position as { x: number; y: number; z: number };
+                  return `(${pp.x.toFixed(2)},${pp.y.toFixed(2)},${pp.z.toFixed(2)}) ${t.subType}`;
+                });
+              console.log(
+                `[WS-INIT:TREE_DIAG] tile(${tx},${tz}) seed=${initSeed} biome=${tileBiome} ` +
+                  `count=${genResult.length} sample=[${sample.join("; ")}]`,
+              );
+            }
+
             for (const node of genResult) {
               const p = node.position as { x: number; y: number; z: number };
               initTrees.push({
@@ -4052,6 +3827,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         x: t.x,
         z: t.z,
       }));
+      vegetationTreesRef.current = initTrees;
 
       const speciesSummary = [...speciesInstanceData.entries()]
         .filter(([, d]) => d.count > 0)
@@ -4450,11 +4226,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           if (querier) {
             for (let tileX = -halfTiles; tileX < halfTiles; tileX++) {
               for (let tileZ = -halfTiles; tileZ < halfTiles; tileZ++) {
-                // Get dominant biome at tile center (matches game's approach)
-                const tileCenterX = tileX * editorTileSize + editorTileSize / 2;
-                const tileCenterZ = tileZ * editorTileSize + editorTileSize / 2;
+                // Sample biome at tile origin — matches TerrainSystem's
+                // BiomeSystem.getBiomeForTile(tileX * tileSize, tileZ * tileSize)
+                const tileCenterX = tileX * editorTileSize;
+                const tileCenterZ = tileZ * editorTileSize;
                 const tileQuery = querier(tileCenterX, tileCenterZ);
-                const tileBiome = _getVisualBiomeForTrees(tileQuery);
+                const tileBiome = tileQuery.biome;
                 const treeConfig = getTreeConfigForBiome(tileBiome);
 
                 if (!treeConfig.enabled || treeConfig.density <= 0) continue;
@@ -4465,14 +4242,37 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                   tileKey: `${tileX}_${tileZ}`,
                   tileSize: editorTileSize,
                   waterThreshold: editorWaterThreshold,
-                  getHeightAt: (wx, wz) => querier(wx, wz).height,
-                  getDominantBiome: (wx, wz) =>
-                    _getVisualBiomeForTrees(querier(wx, wz)),
-                  createRng: (salt) =>
+                  getHeightAt: (wx: number, wz: number) =>
+                    querier(wx, wz).height,
+                  getDominantBiome: (wx: number, wz: number) =>
+                    querier(wx, wz).biome,
+                  createRng: (salt: string) =>
                     _createTileRng(currentSeed, tileX, tileZ, salt),
                 };
 
                 const trees = generateTrees(resourceCtx, treeConfig);
+
+                // ---- DIAGNOSTIC: Log tree generation for comparison with TerrainSystem ----
+                const isSampleTile =
+                  (tileX === 0 && tileZ === 0) ||
+                  (tileX === 1 && tileZ === 0) ||
+                  (tileX === 0 && tileZ === 1);
+                if (isSampleTile) {
+                  const sample = trees
+                    .slice(0, 3)
+                    .map((t: { position: unknown; subType?: string }) => {
+                      const pp = t.position as {
+                        x: number;
+                        y: number;
+                        z: number;
+                      };
+                      return `(${pp.x.toFixed(2)},${pp.y.toFixed(2)},${pp.z.toFixed(2)}) ${t.subType}`;
+                    });
+                  console.log(
+                    `[WS:TREE_DIAG] tile(${tileX},${tileZ}) seed=${currentSeed} biome=${tileBiome} ` +
+                      `count=${trees.length} sample=[${sample.join("; ")}]`,
+                  );
+                }
 
                 for (const node of trees) {
                   const pos = node.position as {
@@ -4498,136 +4298,17 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             `[refreshVegetation] Generated ${allTrees.length} trees client-side in ${genElapsed.toFixed(0)}ms (seed=${currentSeed})`,
           );
 
-          // Two-layer vegetation filtering:
-          //   Layer 1 — Hard exclusions: buildings, roads, objects (binary, no noise)
-          //   Layer 2 — Town gradient: smooth density ramp with FBM noise on the
-          //             boundary for organic town-edge shapes + scale tapering
-          //
-          // Noise is ONLY on the town boundary, never on individual buildings.
-          // Applying noise to building SDFs created random "survival pockets"
-          // inside towns (noise pushed some trees above threshold → clusters).
+          // Vegetation filtering via shared algorithm (same code runs in
+          // game client TerrainSystem so staging matches exactly).
           let trees = allTrees;
           if (exclusions) {
             const beforeCount = trees.length;
-
-            // Pre-compute circle exclusions (squared radii for fast check)
-            const circleSq = exclusions.circles.map((c) => ({
-              x: c.x,
-              z: c.z,
-              rSq: c.radius * c.radius,
-            }));
-
-            // Pre-compute road segments (squared half-width)
-            const roadSegs = exclusions.roads.flatMap((road) => {
-              const segs: Array<{
-                ax: number;
-                az: number;
-                abx: number;
-                abz: number;
-                abLenSq: number;
-                hwSq: number;
-              }> = [];
-              for (let i = 0; i < road.path.length - 1; i++) {
-                const a = road.path[i],
-                  b = road.path[i + 1];
-                const abx = b.x - a.x,
-                  abz = b.z - a.z;
-                const abLenSq = abx * abx + abz * abz;
-                if (abLenSq < 0.001) continue;
-                segs.push({
-                  ax: a.x,
-                  az: a.z,
-                  abx,
-                  abz,
-                  abLenSq,
-                  hwSq: road.halfWidth * road.halfWidth,
-                });
-              }
-              return segs;
-            });
-
-            // Pre-compute town gradient parameters
-            const townData = (exclusions.towns ?? []).map((t) => {
-              const innerR = t.safeZoneRadius * _VEG_TOWN_INNER_FRAC;
-              const outerR = t.safeZoneRadius * _VEG_TOWN_OUTER_FRAC;
-              return {
-                x: t.x,
-                z: t.z,
-                innerR,
-                outerR,
-                // Include noise amplitude in the outer check so we don't
-                // skip trees that noise might push inside the gradient
-                maxDSq: (outerR + _VEG_NOISE_AMP) * (outerR + _VEG_NOISE_AMP),
-              };
-            });
-
-            trees = trees.filter((tree) => {
-              // ---- Layer 1: Hard exclusions (binary, no noise) ----
-              // Buildings, resources, plazas — precise cutouts hidden by meshes.
-              for (let i = 0; i < circleSq.length; i++) {
-                const c = circleSq[i];
-                const dx = tree.x - c.x,
-                  dz = tree.z - c.z;
-                if (dx * dx + dz * dz < c.rSq) return false;
-              }
-
-              // Roads — point-to-segment distance
-              for (let i = 0; i < roadSegs.length; i++) {
-                const seg = roadSegs[i];
-                const apx = tree.x - seg.ax,
-                  apz = tree.z - seg.az;
-                const t = Math.max(
-                  0,
-                  Math.min(1, (apx * seg.abx + apz * seg.abz) / seg.abLenSq),
-                );
-                const px = seg.ax + t * seg.abx - tree.x;
-                const pz = seg.az + t * seg.abz - tree.z;
-                if (px * px + pz * pz < seg.hwSq) return false;
-              }
-
-              // ---- Layer 2: Town density gradient (the only probabilistic layer) ----
-              // Noise distorts the TOWN boundary (not individual buildings),
-              // creating organic shapes without random clusters inside town.
-              let townDensity = 1.0;
-              for (let i = 0; i < townData.length; i++) {
-                const town = townData[i];
-                const dx = tree.x - town.x,
-                  dz = tree.z - town.z;
-                const dSq = dx * dx + dz * dz;
-                if (dSq > town.maxDSq) continue;
-
-                const dist = Math.sqrt(dSq);
-                // FBM noise wobbles the effective distance → organic boundary
-                const noise =
-                  (_vegFbm(tree.x * _VEG_NOISE_FREQ, tree.z * _VEG_NOISE_FREQ) -
-                    0.5) *
-                  2 *
-                  _VEG_NOISE_AMP;
-                const td = _vegSmoothstep(
-                  town.innerR,
-                  town.outerR,
-                  dist + noise,
-                );
-                if (td < townDensity) townDensity = td;
-              }
-
-              // Probabilistic thinning — only when inside a town's gradient
-              if (townDensity < 0.999) {
-                // Deterministic roll seeded by position (same tree, same result)
-                if (_vegRand(tree.x, tree.z) > townDensity) return false;
-
-                // Scale tapering: survivors near town are smaller ("younger growth")
-                // density=0 → minScale, density=1 → full scale
-                tree.sc *=
-                  _VEG_MIN_EDGE_SCALE + (1 - _VEG_MIN_EDGE_SCALE) * townDensity;
-              }
-
-              return true;
-            });
+            const precomputed = precomputeExclusions(exclusions);
+            trees = filterTreesByExclusions(trees, precomputed);
 
             console.log(
-              `[refreshVegetation] Filter: ${circleSq.length} circles, ` +
-                `${roadSegs.length} road segs, ${townData.length} town gradients → ` +
+              `[refreshVegetation] Filter: ${precomputed.circles.length} circles, ` +
+                `${precomputed.roadSegs.length} road segs, ${precomputed.towns.length} town gradients → ` +
                 `${beforeCount} → ${trees.length} trees (removed ${beforeCount - trees.length})`,
             );
           }
@@ -4637,6 +4318,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             x: t.x,
             z: t.z,
           }));
+          vegetationTreesRef.current = trees;
 
           // Rebuild InstancedMeshes per species
           const maxPerSpecies = 20000;
@@ -4753,6 +4435,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         },
         get vegetationPositions() {
           return vegetationPositionsRef.current;
+        },
+        get vegetationTrees() {
+          return vegetationTreesRef.current;
         },
         refreshTownMarkers: (newTowns: ProcgenTown[]) => {
           console.warn(

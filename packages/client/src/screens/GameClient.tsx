@@ -205,6 +205,11 @@ export function GameClient({
   onSetupRef.current = onSetup;
   onInitErrorRef.current = onInitError;
 
+  const isStaging = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("staging") === "true";
+  }, []);
+
   // Detect HMR and force full page reload instead of hot reload
   useEffect(() => {
     if (import.meta.hot) {
@@ -216,6 +221,21 @@ export function GameClient({
 
   // Create world immediately so network can connect and deliver characterList
   const world = useMemo(() => {
+    // STAGING MODE: Must set __STAGING_MANIFESTS_URL BEFORE createClientWorld()
+    // because registerSystems() → DataManager.initialize() → loadManifestsFromCDN()
+    // fires immediately inside createClientWorld() and reads this global.
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("staging") === "true") {
+      // Use the same game-server base that DataManager defaults to (port 5555)
+      // The staging static route is registered at /game-assets/staging/manifests/
+      const apiBase = import.meta.env.PUBLIC_API_URL || "http://localhost:5555";
+      const stagingUrl = `${apiBase}/game-assets/staging/manifests`;
+      (
+        window as WindowWithEnv & { __STAGING_MANIFESTS_URL?: string }
+      ).__STAGING_MANIFESTS_URL = stagingUrl;
+      console.log(`[GameClient] STAGING MODE: manifests from ${stagingUrl}`);
+    }
+
     const w = createClientWorld();
 
     if (import.meta.env.DEV) {
@@ -350,8 +370,7 @@ export function GameClient({
       // Default to game server on 5555, CDN on 8080
       const runtimeEnv = await loadRuntimeEnv();
       const runtimeWsUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_WS_URL);
-      const finalWsUrl =
-        initialWsUrlRef.current || runtimeWsUrl || GAME_WS_URL;
+      const finalWsUrl = initialWsUrlRef.current || runtimeWsUrl || GAME_WS_URL;
       const runtimeCdnUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_CDN_URL);
       const buildCdnUrl = normalizeEnvValue(CDN_URL);
       const resolvedCdnUrl = resolveCdnUrlForClient(runtimeCdnUrl, buildCdnUrl);
@@ -458,6 +477,26 @@ export function GameClient({
           z-index: 10;
         }
       `}</style>
+      {isStaging && (
+        <div
+          style={{
+            position: "fixed",
+            top: 8,
+            left: 8,
+            zIndex: 9999,
+            background: "#7c3aed",
+            color: "white",
+            padding: "4px 12px",
+            borderRadius: 4,
+            fontSize: 12,
+            fontWeight: 600,
+            opacity: 0.9,
+            pointerEvents: "none",
+          }}
+        >
+          STAGING
+        </div>
+      )}
       <div
         id="game-canvas"
         className="App__viewport"

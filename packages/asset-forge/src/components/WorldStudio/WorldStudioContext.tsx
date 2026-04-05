@@ -48,6 +48,7 @@ import type {
   HierarchyNode,
   WorldPosition,
   GeneratedTown,
+  GeneratedBuilding,
   GeneratedRoad,
 } from "../WorldBuilder/types";
 
@@ -542,6 +543,13 @@ type StudioSpecificAction =
         size: "hamlet" | "village" | "town";
         safeZoneRadius: number;
         biomeId?: string;
+        buildings?: Array<{
+          id: string;
+          type: string;
+          position: { x: number; y: number; z: number };
+          rotation: number;
+          size: { width: number; depth: number };
+        }>;
       }>;
     }
   // Replace foundation roads (used by auto-gen to add inter-town roads)
@@ -1493,8 +1501,52 @@ function studioReducer(
       const world = state.builder.editing.world;
       if (!world) return state;
 
-      // Build a set of existing town IDs to avoid duplicates
       const existingIds = new Set(world.foundation.towns.map((t) => t.id));
+      const incomingIds = new Set(action.towns.map((t) => t.id));
+
+      // Convert ALL incoming buildings (both new and existing towns)
+      const incomingBuildings: GeneratedBuilding[] = [];
+      for (const rt of action.towns) {
+        if (rt.buildings) {
+          for (const b of rt.buildings) {
+            const typeName =
+              b.type.charAt(0).toUpperCase() +
+              b.type.slice(1).replace(/-/g, " ");
+            incomingBuildings.push({
+              id: b.id,
+              type: b.type,
+              name: typeName,
+              position: { x: b.position.x, y: b.position.y, z: b.position.z },
+              rotation: b.rotation,
+              townId: rt.id,
+              dimensions: {
+                width: b.size.width,
+                depth: b.size.depth,
+                floors: 1,
+              },
+            });
+          }
+        }
+      }
+
+      // Update existing towns (position, radius, buildingIds) and add new ones
+      const updatedTowns = world.foundation.towns.map((existing) => {
+        const runtime = action.towns.find((rt) => rt.id === existing.id);
+        if (!runtime) return existing;
+        return {
+          ...existing,
+          name: runtime.name,
+          size: runtime.size,
+          position: {
+            x: runtime.position.x,
+            y: runtime.position.y,
+            z: runtime.position.z,
+          },
+          safeZoneRadius: runtime.safeZoneRadius,
+          buildingIds: (runtime.buildings ?? []).map((b) => b.id),
+        };
+      });
+
       const newTowns = action.towns
         .filter((rt) => !existingIds.has(rt.id))
         .map(
@@ -1504,53 +1556,17 @@ function studioReducer(
             size: rt.size,
             position: { x: rt.position.x, y: rt.position.y, z: rt.position.z },
             layoutType: "terminus",
-            buildingIds: [],
+            buildingIds: (rt.buildings ?? []).map((b) => b.id),
             entryPoints: [],
             biomeId: rt.biomeId ?? "unknown",
             safeZoneRadius: rt.safeZoneRadius,
           }),
         );
 
-      if (newTowns.length === 0) {
-        // Update positions and safeZoneRadius of existing towns that may have changed
-        let changed = false;
-        const updatedTowns = world.foundation.towns.map((existing) => {
-          const runtime = action.towns.find((rt) => rt.id === existing.id);
-          if (!runtime) return existing;
-          const posChanged =
-            Math.abs(runtime.position.x - existing.position.x) > 0.1 ||
-            Math.abs(runtime.position.z - existing.position.z) > 0.1;
-          const radiusChanged =
-            existing.safeZoneRadius !== runtime.safeZoneRadius;
-          if (posChanged || radiusChanged) {
-            changed = true;
-            return {
-              ...existing,
-              position: {
-                x: runtime.position.x,
-                y: runtime.position.y,
-                z: runtime.position.z,
-              },
-              safeZoneRadius: runtime.safeZoneRadius,
-            };
-          }
-          return existing;
-        });
-        if (!changed) return state;
-        return {
-          ...state,
-          builder: {
-            ...state.builder,
-            editing: {
-              ...state.builder.editing,
-              world: {
-                ...world,
-                foundation: { ...world.foundation, towns: updatedTowns },
-              },
-            },
-          },
-        };
-      }
+      // Replace buildings for incoming towns, keep buildings for unaffected towns
+      const keptBuildings = world.foundation.buildings.filter(
+        (b) => !incomingIds.has(b.townId),
+      );
 
       return {
         ...state,
@@ -1562,7 +1578,8 @@ function studioReducer(
               ...world,
               foundation: {
                 ...world.foundation,
-                towns: [...world.foundation.towns, ...newTowns],
+                towns: [...updatedTowns, ...newTowns],
+                buildings: [...keptBuildings, ...incomingBuildings],
               },
             },
           },
@@ -2213,6 +2230,15 @@ export interface ViewportCallbacks {
   }>;
   /** Vegetation tree positions in game-space. Used by auto-gen to avoid placing entities on trees. */
   vegetationPositions?: Array<{ x: number; z: number }>;
+  /** Full vegetation tree data for manifest export (species, world pos, scale, rotation). */
+  vegetationTrees?: Array<{
+    s: string;
+    x: number;
+    y: number;
+    z: number;
+    sc: number;
+    r: number;
+  }>;
   /** Rebuild town 3D meshes (buildings, roads, landmarks) from full procgen town data. */
   refreshTownMarkers?: (
     towns: import("@hyperscape/procgen/building/town").GeneratedTown[],
@@ -2453,6 +2479,13 @@ interface WorldStudioContextValue {
         size: "hamlet" | "village" | "town";
         safeZoneRadius: number;
         biomeId?: string;
+        buildings?: Array<{
+          id: string;
+          type: string;
+          position: { x: number; y: number; z: number };
+          rotation: number;
+          size: { width: number; depth: number };
+        }>;
       }>,
     ) => void;
     setFoundationRoads: (roads: GeneratedRoad[]) => void;
@@ -2907,6 +2940,13 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
           size: "hamlet" | "village" | "town";
           safeZoneRadius: number;
           biomeId?: string;
+          buildings?: Array<{
+            id: string;
+            type: string;
+            position: { x: number; y: number; z: number };
+            rotation: number;
+            size: { width: number; depth: number };
+          }>;
         }>,
       ) => dispatch({ type: "SYNC_RUNTIME_TOWNS", towns }),
 
