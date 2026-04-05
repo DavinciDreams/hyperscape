@@ -10,6 +10,7 @@ import { GameClient } from "../screens/GameClient";
 import { LoadingScreen } from "../screens/LoadingScreen";
 import type { EmbeddedViewportConfig } from "../types/embeddedConfig";
 import { getEmbeddedConfig, getQualityPreset } from "../types/embeddedConfig";
+import { cloneEmbeddedConfig } from "../lib/embedded-entry";
 import type { World } from "@hyperscape/shared";
 import { EventType } from "@hyperscape/shared";
 import { logger } from "../lib/logger";
@@ -561,7 +562,7 @@ export function EmbeddedGameClient() {
 
   useEffect(() => {
     // Get embedded configuration
-    const embeddedConfig = getEmbeddedConfig();
+    const embeddedConfig = cloneEmbeddedConfig(getEmbeddedConfig());
 
     if (!embeddedConfig) {
       setError("No embedded configuration found");
@@ -589,7 +590,7 @@ export function EmbeddedGameClient() {
 
         // Still listen for auth updates via postMessage
         const handleSpectatorAuthReady = () => {
-          const updatedConfig = getEmbeddedConfig();
+          const updatedConfig = cloneEmbeddedConfig(getEmbeddedConfig());
           if (updatedConfig?.authToken) {
             logger.log(
               "[EmbeddedGameClient] Auth token received via postMessage (updating)",
@@ -688,7 +689,7 @@ export function EmbeddedGameClient() {
         setConfig(embeddedConfig);
 
         const handleSpectatorAuthReady = () => {
-          const updatedConfig = getEmbeddedConfig();
+          const updatedConfig = cloneEmbeddedConfig(getEmbeddedConfig());
           if (updatedConfig?.authToken) {
             logger.log(
               "[EmbeddedGameClient] Auth token received via postMessage (updating)",
@@ -719,7 +720,7 @@ export function EmbeddedGameClient() {
     logger.log("[EmbeddedGameClient] Waiting for auth token via postMessage");
 
     const handleAuthReady = () => {
-      const updatedConfig = getEmbeddedConfig();
+      const updatedConfig = cloneEmbeddedConfig(getEmbeddedConfig());
       if (updatedConfig?.authToken) {
         logger.log("[EmbeddedGameClient] Auth token received via postMessage");
         setConfig(updatedConfig);
@@ -1022,6 +1023,7 @@ export function EmbeddedGameClient() {
   return (
     <div
       style={{
+        position: "relative",
         width: "100%",
         height: "100%",
         overflow: "hidden",
