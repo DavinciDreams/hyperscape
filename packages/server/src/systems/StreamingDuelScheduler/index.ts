@@ -1360,8 +1360,25 @@ export class StreamingDuelScheduler {
       this.orchestrator.endFightByTimeout();
     }
 
-    // Update HP from entities
-    this.orchestrator.updateContestantHp();
+    // Update HP from entities and feed damage hits to camera director
+    const hpDeltas = this.orchestrator.updateContestantHp();
+    if (hpDeltas && this.currentCycle) {
+      const { hpLost1, hpLost2, maxHp1, maxHp2 } = hpDeltas;
+      if (hpLost1 > 0 && this.currentCycle.agent1) {
+        this.camera.onCombatHit(
+          this.currentCycle.agent1.characterId,
+          hpLost1 / Math.max(1, maxHp1),
+          now,
+        );
+      }
+      if (hpLost2 > 0 && this.currentCycle.agent2) {
+        this.camera.onCombatHit(
+          this.currentCycle.agent2.characterId,
+          hpLost2 / Math.max(1, maxHp2),
+          now,
+        );
+      }
+    }
 
     // Fallback: nudge stalled fights so the stream cycle still progresses even
     // when combat start hooks fail in this tick window.

@@ -1597,6 +1597,7 @@ export class ClientCameraSystem extends SystemBase {
     targetFov: number;
     orbitAmplitude: number;
     focusBias: number;
+    reverseAngleCooldownMs: number;
   } {
     switch (this.cinematicPhase) {
       case "ANNOUNCEMENT":
@@ -1608,6 +1609,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 48,
           orbitAmplitude: 0.08,
           focusBias: 0.35,
+          reverseAngleCooldownMs: 20_000,
         };
       case "COUNTDOWN":
         return {
@@ -1618,6 +1620,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 42,
           orbitAmplitude: 0.02,
           focusBias: 0.85,
+          reverseAngleCooldownMs: 20_000,
         };
       case "FIGHTING":
         return {
@@ -1628,6 +1631,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 46,
           orbitAmplitude: 0.07,
           focusBias: 0.5,
+          reverseAngleCooldownMs: 14_000,
         };
       case "RESOLUTION":
         return {
@@ -1638,6 +1642,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 45,
           orbitAmplitude: 0.06,
           focusBias: 0.5,
+          reverseAngleCooldownMs: 20_000,
         };
       default:
         return {
@@ -1648,6 +1653,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 52,
           orbitAmplitude: 0.1,
           focusBias: 0.5,
+          reverseAngleCooldownMs: 20_000,
         };
     }
   }
@@ -2160,7 +2166,7 @@ export class ClientCameraSystem extends SystemBase {
   }
 
   /**
-   * When streaming duel HP drops, add punch-in + shake so hits read on broadcast.
+   * React to HP changes from streaming state so hits read on broadcast.
    */
   private tickStreamingCombatFeedback(deltaSeconds: number): void {
     if (!this.cinematicEnabled || deltaSeconds <= 0) return;
@@ -2185,17 +2191,28 @@ export class ClientCameraSystem extends SystemBase {
       const lost = prev - next;
       const severity = lost / maxHp;
       this.cinematicShakeIntensity = Math.min(
-        0.32,
-        this.cinematicShakeIntensity + 0.055 + severity * 0.22,
+        0.4,
+        this.cinematicShakeIntensity + 0.06 + severity * 0.35,
       );
       this.cinematicPunchIn = Math.min(
         1,
-        this.cinematicPunchIn + 0.32 + severity * 0.25,
+        this.cinematicPunchIn + 0.35 + severity * 0.3,
       );
     };
 
     applyHit(this.streamingPrevAgent1Hp, h1, m1);
     applyHit(this.streamingPrevAgent2Hp, h2, m2);
+
+    const lowestHpPct = Math.min(h1 / m1, h2 / m2);
+    if (lowestHpPct < 0.15 && lowestHpPct > 0) {
+      const urgency = 1 - lowestHpPct / 0.15;
+      this.cinematicDramaticLow = Math.max(
+        this.cinematicDramaticLow,
+        urgency * 0.6,
+      );
+    } else {
+      this.cinematicDramaticLow *= Math.exp(-1.5 * deltaSeconds);
+    }
 
     this.streamingPrevAgent1Hp = h1;
     this.streamingPrevAgent2Hp = h2;
@@ -2421,7 +2438,9 @@ export class ClientCameraSystem extends SystemBase {
         if (timeSinceReverse > this.cinematicNextReverseCooldown) {
           reverseAngleBoost = Math.PI * 0.3;
           this.cinematicLastReverseAt = now;
-          this.cinematicNextReverseCooldown = 18000 + Math.random() * 8000;
+          const baseCooldown = pp.reverseAngleCooldownMs;
+          this.cinematicNextReverseCooldown =
+            baseCooldown - 2000 + Math.random() * 6000;
           // Reset theta cache so LOS scorer accepts the new angle
           this.cinematicThetaCacheValid = false;
           this.cinematicLastLosRefreshAt = 0;
@@ -2478,8 +2497,9 @@ export class ClientCameraSystem extends SystemBase {
           pp.basePhi + closeCombatBlend * (Math.PI * 0.38 - pp.basePhi);
         const phiVariation =
           Math.sin(t * 0.13) * 0.015 + Math.sin(t * 0.07) * 0.01;
+        const dramaticLowOffset = this.cinematicDramaticLow * -0.12;
         phi = clamp(
-          closeCombatPhi + phiVariation,
+          closeCombatPhi + phiVariation + dramaticLowOffset,
           this.settings.minPolarAngle + 0.03,
           this.settings.maxPolarAngle - 0.03,
         );

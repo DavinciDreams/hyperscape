@@ -3040,7 +3040,9 @@ export class DuelOrchestrator {
   // HP Tracking & Combat Stall Nudge
   // ============================================================================
 
-  updateContestantHp(): void {
+  updateContestantHp():
+    | { hpLost1: number; hpLost2: number; maxHp1: number; maxHp2: number }
+    | undefined {
     const cycle = this.getCurrentCycle();
     if (!cycle?.agent1 || !cycle?.agent2) return;
 
@@ -3083,6 +3085,14 @@ export class DuelOrchestrator {
     if (hpLost2 > 0) {
       cycle.agent1.damageDealtThisFight += hpLost2;
     }
+
+    // Return HP deltas so the scheduler can feed combat hits to the camera director
+    return {
+      hpLost1,
+      hpLost2,
+      maxHp1: cycle.agent1.maxHp,
+      maxHp2: cycle.agent2.maxHp,
+    };
   }
 
   /**
