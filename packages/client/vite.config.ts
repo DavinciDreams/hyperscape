@@ -5,6 +5,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PRODUCTION_HYPERSCAPE_APP_URL = "https://hyperscape.gg";
+const PRODUCTION_HYPERSCAPE_API_URL = "https://hyperscape.gg";
+const PRODUCTION_HYPERSCAPE_WS_URL = "wss://hyperscape.gg/ws";
+const PRODUCTION_HYPERSCAPE_CDN_URL = "https://assets.hyperscape.club";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -16,36 +20,34 @@ export default defineConfig(({ mode }) => {
   const workspaceEnv = loadEnv(mode, workspaceRoot, ["PUBLIC_", "VITE_"]);
   const clientEnv = loadEnv(mode, clientDir, ["PUBLIC_", "VITE_"]);
   const env = { ...workspaceEnv, ...clientEnv };
-  const resolvedPublicApiUrl =
-    process.env.PUBLIC_API_URL ||
-    env.PUBLIC_API_URL ||
-    (mode === "production"
-      ? "https://hyperscape-production.up.railway.app"
-      : "http://127.0.0.1:5555");
+  const isProductionBuild = mode === "production";
+  const resolvedPublicApiUrl = isProductionBuild
+    ? PRODUCTION_HYPERSCAPE_API_URL
+    : process.env.PUBLIC_API_URL ||
+      env.PUBLIC_API_URL ||
+      "http://127.0.0.1:5555";
   // Default WS port: 5556 (uWS game WebSocket), or 5555 (Fastify) when UWS_ENABLED=false
   const defaultWsPort = process.env.UWS_ENABLED === "false" ? 5555 : 5556;
-  const resolvedPublicWsUrl =
-    process.env.PUBLIC_WS_URL ||
-    env.PUBLIC_WS_URL ||
-    (mode === "production"
-      ? "wss://hyperscape-production.up.railway.app/ws"
-      : `ws://127.0.0.1:${defaultWsPort}/ws`);
-  const resolvedPublicCdnUrl =
-    process.env.PUBLIC_CDN_URL ||
-    env.PUBLIC_CDN_URL ||
-    (mode === "production"
-      ? "https://assets.hyperscape.club"
-      : "http://127.0.0.1:5555/game-assets");
-  const resolvedPublicAppUrl =
-    process.env.PUBLIC_APP_URL ||
-    env.PUBLIC_APP_URL ||
-    (mode === "production"
-      ? "https://hyperscape.club"
-      : "http://127.0.0.1:3333");
-  const resolvedPublicElizaUrl =
-    process.env.PUBLIC_ELIZAOS_URL ||
-    env.PUBLIC_ELIZAOS_URL ||
-    resolvedPublicApiUrl;
+  const resolvedPublicWsUrl = isProductionBuild
+    ? PRODUCTION_HYPERSCAPE_WS_URL
+    : process.env.PUBLIC_WS_URL ||
+      env.PUBLIC_WS_URL ||
+      `ws://127.0.0.1:${defaultWsPort}/ws`;
+  const resolvedPublicCdnUrl = isProductionBuild
+    ? PRODUCTION_HYPERSCAPE_CDN_URL
+    : process.env.PUBLIC_CDN_URL ||
+      env.PUBLIC_CDN_URL ||
+      "http://127.0.0.1:5555/game-assets";
+  const resolvedPublicAppUrl = isProductionBuild
+    ? PRODUCTION_HYPERSCAPE_APP_URL
+    : process.env.PUBLIC_APP_URL ||
+      env.PUBLIC_APP_URL ||
+      "http://127.0.0.1:3333";
+  const resolvedPublicElizaUrl = isProductionBuild
+    ? PRODUCTION_HYPERSCAPE_API_URL
+    : process.env.PUBLIC_ELIZAOS_URL ||
+      env.PUBLIC_ELIZAOS_URL ||
+      resolvedPublicApiUrl;
   const resolvedPublicEmbedAllowedOrigins =
     process.env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
     env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
@@ -154,7 +156,7 @@ export default defineConfig(({ mode }) => {
           related_applications: [
             {
               platform: "play",
-              url: "https://hyperscape.club",
+              url: PRODUCTION_HYPERSCAPE_APP_URL,
               id: "com.hyperscape.game",
             },
           ],
@@ -422,8 +424,7 @@ export default defineConfig(({ mode }) => {
       // NOTE: mode is passed from Vite - "production" for `vite build`, "development" for `vite dev`
       // Use environment variables if set, otherwise use defaults
       //
-      // Production: Frontend on Cloudflare Pages (hyperscape.club)
-      //             Server on Railway (hyperscape-production.up.railway.app)
+      // Production: Frontend and API on hyperscape.gg
       "import.meta.env.PUBLIC_API_URL": JSON.stringify(resolvedPublicApiUrl),
       "import.meta.env.PUBLIC_WS_URL": JSON.stringify(resolvedPublicWsUrl),
       // CDN URL - Cloudflare R2 with custom domain

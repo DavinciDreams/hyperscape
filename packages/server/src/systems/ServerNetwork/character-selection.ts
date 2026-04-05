@@ -32,7 +32,10 @@ import {
 } from "./handlers/friends";
 import { getAgentManager } from "../../eliza";
 import { getAgentRuntimeByCharacterId } from "../../eliza/ModelAgentSpawner.js";
-import { getDefaultPublicWsUrl } from "../../shared/public-ws-url.js";
+import {
+  getDefaultElizaOsApiUrl,
+  getDefaultPublicWsUrl,
+} from "../../shared/public-ws-url.js";
 
 const TRUSTED_DUEL_BOT_ACCOUNT_IDS = new Set(
   (
@@ -64,10 +67,7 @@ async function _createElizaOSAgent(
 ): Promise<void> {
   try {
     const elizaOSApiUrl =
-      process.env.ELIZAOS_API_URL ||
-      (process.env.NODE_ENV === "production"
-        ? "https://hyperscape-production.up.railway.app"
-        : "http://localhost:4001");
+      process.env.ELIZAOS_API_URL || getDefaultElizaOsApiUrl();
 
     console.log(
       `[CharacterSelection] 🤖 Creating ElizaOS agent for character: ${name} (${characterId})`,

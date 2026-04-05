@@ -6,7 +6,10 @@
 
 import type { Route } from "@elizaos/core";
 import { logger } from "@elizaos/core";
-import type { HyperscapeService } from "../services/HyperscapeService.js";
+import {
+  type HyperscapeService,
+  resolveDefaultHyperscapeServerUrl,
+} from "../services/HyperscapeService.js";
 
 /**
  * Callback route - receives auth tokens and stores them
@@ -57,7 +60,8 @@ export const callbackRoute: Route = {
         // Reconnect with new auth token if not connected
         if (!service.isConnected()) {
           const serverUrl =
-            process.env.HYPERSCAPE_SERVER_URL || "ws://localhost:5556/ws";
+            process.env.HYPERSCAPE_SERVER_URL ||
+            resolveDefaultHyperscapeServerUrl();
           await service.connect(serverUrl).catch((err) => {
             logger.error(
               "[HyperscapeAuth] Reconnection error:",

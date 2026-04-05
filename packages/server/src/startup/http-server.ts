@@ -36,6 +36,10 @@ import fs from "fs-extra";
 import path from "path";
 import type { ServerConfig } from "./config.js";
 import {
+  getDefaultElizaOsApiUrl,
+  getDefaultPublicAppUrl,
+} from "../shared/public-ws-url.js";
+import {
   getGlobalRateLimit,
   isRateLimitEnabled,
 } from "../infrastructure/rate-limit/rate-limit-config.js";
@@ -135,19 +139,14 @@ export async function createHttpServer(
   });
   console.log(`[HTTP] ✅ trustProxy=${trustProxy}`);
 
-  // Configure CORS for development and production
-  // Frontend: Cloudflare Pages (hyperscape.club)
-  // Backend: Railway (hyperscape-production.up.railway.app)
   const elizaOSUrl =
     process.env.ELIZAOS_URL ||
     process.env.ELIZAOS_API_URL ||
-    (process.env.NODE_ENV === "production"
-      ? "https://hyperscape-production.up.railway.app"
-      : "http://localhost:4001");
+    getDefaultElizaOsApiUrl();
   const clientUrl =
     process.env.CLIENT_URL ||
     process.env.PUBLIC_APP_URL ||
-    "http://localhost:3333";
+    getDefaultPublicAppUrl();
   const serverUrl = process.env.SERVER_URL || `http://localhost:${config.port}`;
 
   const allowedOrigins = [
