@@ -91,6 +91,7 @@ export interface LeaderboardEntry {
   winRate: number;
   combatLevel: number;
   currentStreak: number;
+  lossStreak: number;
 }
 
 export interface RecentDuelEntry {

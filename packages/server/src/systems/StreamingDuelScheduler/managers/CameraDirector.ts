@@ -37,6 +37,7 @@ type CameraSwitchTiming = {
   minHoldMs: number;
   maxHoldMs: number;
   idleThresholdMs: number;
+  reverseAngleCooldownMs: number;
 };
 
 type CameraCandidateWeight = {
@@ -75,19 +76,36 @@ const clampNumber = (value: number, min: number, max: number): number => {
 
 const CAMERA_DIRECTOR = {
   switchTiming: {
-    IDLE: { minHoldMs: 30_000, maxHoldMs: 90_000, idleThresholdMs: 15_000 },
+    IDLE: {
+      minHoldMs: 30_000,
+      maxHoldMs: 90_000,
+      idleThresholdMs: 15_000,
+      reverseAngleCooldownMs: 20_000,
+    },
     ANNOUNCEMENT: {
       minHoldMs: 22_000,
       maxHoldMs: 95_000,
       idleThresholdMs: 12_000,
+      reverseAngleCooldownMs: 20_000,
     },
-    COUNTDOWN: { minHoldMs: 6_000, maxHoldMs: 24_000, idleThresholdMs: 6_000 },
+    COUNTDOWN: {
+      minHoldMs: 6_000,
+      maxHoldMs: 24_000,
+      idleThresholdMs: 6_000,
+      reverseAngleCooldownMs: 20_000,
+    },
     FIGHTING: {
-      minHoldMs: 12_000,
-      maxHoldMs: 45_000,
-      idleThresholdMs: 12_000,
+      minHoldMs: 20_000,
+      maxHoldMs: 60_000,
+      idleThresholdMs: 15_000,
+      reverseAngleCooldownMs: 14_000,
     },
-    RESOLUTION: { minHoldMs: 8_000, maxHoldMs: 45_000, idleThresholdMs: 8_000 },
+    RESOLUTION: {
+      minHoldMs: 8_000,
+      maxHoldMs: 45_000,
+      idleThresholdMs: 8_000,
+      reverseAngleCooldownMs: 20_000,
+    },
   } as Record<StreamingPhase, CameraSwitchTiming>,
   baseWeights: {
     IDLE: { contestant: 1.3, nonContestant: 1.3 },
@@ -101,13 +119,20 @@ const CAMERA_DIRECTOR = {
     weightPerPoint: 0.12,
   },
   multipliers: {
-    inCombat: 1.95,
-    currentTargetBias: 1.22,
+    inCombat: 2.2,
+    currentTargetBias: 1.55,
     recentFocusPenaltyShort: 0.45,
     recentFocusPenaltyLong: 0.78,
-    switchRandomChance: 0.28,
-    strongerThresholdActive: 1.28,
+    /** Per-second probability of random switch (converted from per-tick in shouldSwitch) */
+    switchRandomChancePerSec: 0.06,
+    strongerThresholdActive: 1.45,
     strongerThresholdIdle: 1.1,
+    /** Minimum ms before refocusing on an agent we just switched away from */
+    focusFatigueCooldownMs: 10_000,
+    /** Higher threshold for an agent to win back focus after being switched away from */
+    returnPenaltyThreshold: 1.8,
+    /** Window (ms) during which the return penalty applies */
+    returnPenaltyCooldownMs: 20_000,
   },
   idlePenalty: {
     softThresholdMs: 12_000,
@@ -157,8 +182,8 @@ const CAMERA_DIRECTOR = {
     currentTargetBias: 1.15,
     /** Threshold: new candidate must be this much stronger to trigger early switch */
     strongerThreshold: 1.2,
-    /** Small random chance to switch for variety (per eligible check) */
-    switchRandomChance: 0.18,
+    /** Per-second probability of random switch for variety */
+    switchRandomChancePerSec: 0.1,
   },
   /** Known skilling emotes from PendingGatherManager / PendingCookManager */
   skillingEmotes: new Set([
@@ -184,6 +209,8 @@ export class CameraDirector {
 
   private _cameraTarget: string | null = null;
   private lastCameraSwitchTime: number = 0;
+  private lastSwitchedAwayFrom: string | null = null;
+  private lastSwitchedAwayTime: number = 0;
   private agentActivity: Map<string, AgentActivitySample> = new Map();
   private fightCutawayStartedAt: number | null = null;
   private fightCutawayTotalMs: number = 0;
@@ -211,6 +238,8 @@ export class CameraDirector {
   reset(): void {
     this._cameraTarget = null;
     this.lastCameraSwitchTime = 0;
+    this.lastSwitchedAwayFrom = null;
+    this.lastSwitchedAwayTime = 0;
     this.agentActivity.clear();
     this.fightCutawayStartedAt = null;
     this.fightCutawayTotalMs = 0;
@@ -564,6 +593,10 @@ export class CameraDirector {
 
     const previous = this._cameraTarget;
     if (previous !== agentId) {
+      if (previous) {
+        this.lastSwitchedAwayFrom = previous;
+        this.lastSwitchedAwayTime = now;
+      }
       this._cameraTarget = agentId;
       this.lastCameraSwitchTime = now;
     }
@@ -1013,20 +1046,42 @@ export class CameraDirector {
       currentIdleDurationMs >= timing.idleThresholdMs &&
       !currentCandidate.isInCombat;
 
+    const isReturningToRecent =
+      selected.agentId === this.lastSwitchedAwayFrom &&
+      now - this.lastSwitchedAwayTime <
+        CAMERA_DIRECTOR.multipliers.returnPenaltyCooldownMs;
+    const strongerThreshold = currentIsIdle
+      ? CAMERA_DIRECTOR.multipliers.strongerThresholdIdle
+      : isReturningToRecent
+        ? CAMERA_DIRECTOR.multipliers.returnPenaltyThreshold
+        : CAMERA_DIRECTOR.multipliers.strongerThresholdActive;
     const selectedIsStronger =
-      selected.weight >
-      currentCandidate.weight *
-        (currentIsIdle
-          ? CAMERA_DIRECTOR.multipliers.strongerThresholdIdle
-          : CAMERA_DIRECTOR.multipliers.strongerThresholdActive);
+      selected.weight > currentCandidate.weight * strongerThreshold;
+
+    // Time-based random chance: convert per-second rate to per-tick probability
+    // using elapsed time since last switch. This decouples from tick rate.
+    const elapsedSec = msSinceSwitch / 1000;
+    const randomSwitchProb =
+      1 -
+      Math.exp(
+        -CAMERA_DIRECTOR.multipliers.switchRandomChancePerSec * elapsedSec,
+      );
+
+    // Focus fatigue: don't immediately refocus on an agent we just switched away from
+    const selectedSample = this.ensureAgentActivity(selected.agentId, now);
+    const hasFocusFatigue =
+      selectedSample.lastFocusedTime > 0 &&
+      now - selectedSample.lastFocusedTime <
+        CAMERA_DIRECTOR.multipliers.focusFatigueCooldownMs;
 
     const shouldSwitch =
       forceSwitch ||
       (selected.agentId !== currentTarget &&
+        !hasFocusFatigue &&
         (selectedIsStronger ||
           (currentIsIdle &&
             selected.activityScore >= currentCandidate.activityScore) ||
-          Math.random() < CAMERA_DIRECTOR.multipliers.switchRandomChance));
+          Math.random() < randomSwitchProb));
 
     if (shouldSwitch && selected.agentId !== currentTarget) {
       this.setCameraTarget(selected.agentId, now);
@@ -1226,15 +1281,31 @@ export class CameraDirector {
       currentCandidate.weight * CAMERA_DIRECTOR.idle.strongerThreshold;
     const currentIsIdle = currentActivity === "idle";
 
+    // Time-based random chance (decoupled from tick rate)
+    const idleElapsedSec = msSinceSwitch / 1000;
+    const idleRandomProb =
+      1 -
+      Math.exp(-CAMERA_DIRECTOR.idle.switchRandomChancePerSec * idleElapsedSec);
+
     const shouldSwitch =
       selectedIsStronger ||
       (currentIsIdle &&
         selected.activityScore >= currentCandidate.activityScore) ||
-      Math.random() < CAMERA_DIRECTOR.idle.switchRandomChance;
+      Math.random() < idleRandomProb;
 
     if (shouldSwitch) {
       this.setCameraTarget(selected.agentId, now);
     }
+  }
+
+  /**
+   * React to a significant combat hit during FIGHTING phase.
+   * Bumps the hit agent's activity score to bias camera toward the action.
+   */
+  onCombatHit(agentId: string, damageFraction: number, now: number): void {
+    if (!this.getAvailableAgents().has(agentId)) return;
+    const intensity = 1.5 + damageFraction * 8;
+    this.markAgentInteresting(agentId, intensity, now);
   }
 
   // ---- Activity map management (for external cleanup) ----

@@ -182,7 +182,10 @@ export class ClientCameraSystem extends SystemBase {
   private cinematicSmoothedBiasValid = false;
   // Reverse angle cuts during FIGHTING
   private cinematicLastReverseAt = 0;
-  private cinematicNextReverseCooldown = 14000;
+  private cinematicNextReverseCooldown = 14_000;
+  /** Prior HP from streaming state — damage deltas drive punch/shake */
+  private streamingPrevAgent1Hp: number | null = null;
+  private streamingPrevAgent2Hp: number | null = null;
   private readonly cinematicTuning = {
     thetaRefreshRate: 0.8,
     thetaIdleDriftRate: 0.25,
@@ -1539,6 +1542,7 @@ export class ClientCameraSystem extends SystemBase {
     targetFov: number;
     orbitAmplitude: number;
     focusBias: number;
+    reverseAngleCooldownMs: number;
   } {
     switch (this.cinematicPhase) {
       case "ANNOUNCEMENT":
@@ -1550,6 +1554,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 48,
           orbitAmplitude: 0.08,
           focusBias: 0.35,
+          reverseAngleCooldownMs: 20_000,
         };
       case "COUNTDOWN":
         return {
@@ -1560,6 +1565,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 42,
           orbitAmplitude: 0.02,
           focusBias: 0.85,
+          reverseAngleCooldownMs: 20_000,
         };
       case "FIGHTING":
         return {
@@ -1570,6 +1576,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 55,
           orbitAmplitude: 0.15,
           focusBias: 0.58,
+          reverseAngleCooldownMs: 14_000,
         };
       case "RESOLUTION":
         return {
@@ -1580,6 +1587,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 45,
           orbitAmplitude: 0.06,
           focusBias: 0.5,
+          reverseAngleCooldownMs: 20_000,
         };
       default:
         return {
@@ -1590,6 +1598,7 @@ export class ClientCameraSystem extends SystemBase {
           targetFov: 52,
           orbitAmplitude: 0.1,
           focusBias: 0.5,
+          reverseAngleCooldownMs: 20_000,
         };
     }
   }
@@ -2101,6 +2110,64 @@ export class ClientCameraSystem extends SystemBase {
     this.camera.quaternion.slerp(_cinematicOrientationQuat, alpha);
   }
 
+  /**
+   * React to HP changes from streaming state — drive camera shake, FOV punch,
+   * and dramatic low angle when a fighter is near death.
+   */
+  private tickStreamingCombatFeedback(deltaSeconds: number): void {
+    if (!this.cinematicEnabled || deltaSeconds <= 0) return;
+    const cycle = this.latestStreamingState?.cycle;
+    if (!cycle || cycle.phase !== "FIGHTING") {
+      this.streamingPrevAgent1Hp = null;
+      this.streamingPrevAgent2Hp = null;
+      return;
+    }
+    const a1 = cycle.agent1;
+    const a2 = cycle.agent2;
+    if (!a1 || !a2) return;
+
+    const h1 = typeof a1.hp === "number" ? a1.hp : 0;
+    const h2 = typeof a2.hp === "number" ? a2.hp : 0;
+    const m1 = Math.max(1, a1.maxHp ?? 1);
+    const m2 = Math.max(1, a2.maxHp ?? 1);
+
+    const applyHit = (prev: number | null, next: number, maxHp: number) => {
+      if (prev === null) return;
+      if (next >= prev - 0.01) return;
+      const lost = prev - next;
+      const severity = lost / maxHp;
+      // Camera shake scales with hit severity
+      this.cinematicShakeIntensity = Math.min(
+        0.4,
+        this.cinematicShakeIntensity + 0.06 + severity * 0.35,
+      );
+      // FOV punch-in for impact feel
+      this.cinematicPunchIn = Math.min(
+        1,
+        this.cinematicPunchIn + 0.35 + severity * 0.3,
+      );
+    };
+
+    applyHit(this.streamingPrevAgent1Hp, h1, m1);
+    applyHit(this.streamingPrevAgent2Hp, h2, m2);
+
+    // Dramatic low angle when either fighter is near death (< 15% HP)
+    const lowestHpPct = Math.min(h1 / m1, h2 / m2);
+    if (lowestHpPct < 0.15 && lowestHpPct > 0) {
+      // Smoothly ramp up dramatic low as HP drops toward zero
+      const urgency = 1 - lowestHpPct / 0.15;
+      this.cinematicDramaticLow = Math.max(
+        this.cinematicDramaticLow,
+        urgency * 0.6,
+      );
+    } else {
+      this.cinematicDramaticLow *= Math.exp(-1.5 * deltaSeconds);
+    }
+
+    this.streamingPrevAgent1Hp = h1;
+    this.streamingPrevAgent2Hp = h2;
+  }
+
   private buildCinematicFrame(deltaTime: number): {
     focus: THREE.Vector3;
     lookAt: THREE.Vector3;
@@ -2201,7 +2268,11 @@ export class ClientCameraSystem extends SystemBase {
 
     // Phase-aware camera parameters
     const pp = this.getCinematicPhaseParams();
-    this.cinematicTargetFov = pp.targetFov;
+    this.cinematicTargetFov =
+      pp.targetFov +
+      (this.cinematicPhase === "FIGHTING"
+        ? this.cinematicPunchIn * 5.5
+        : this.cinematicPunchIn * 2);
 
     // Movement lead offset (camera anticipates movement direction)
     const leadScale = this.cinematicPhase === "IDLE" ? 1.5 : 0.8;
@@ -2309,7 +2380,9 @@ export class ClientCameraSystem extends SystemBase {
         if (timeSinceReverse > this.cinematicNextReverseCooldown) {
           reverseAngleBoost = Math.PI * 0.7;
           this.cinematicLastReverseAt = now;
-          this.cinematicNextReverseCooldown = 12000 + Math.random() * 6000;
+          const baseCooldown = pp.reverseAngleCooldownMs;
+          this.cinematicNextReverseCooldown =
+            baseCooldown - 2000 + Math.random() * 6000;
           // Reset theta cache so LOS scorer accepts the new angle
           this.cinematicThetaCacheValid = false;
           this.cinematicLastLosRefreshAt = 0;
@@ -2332,7 +2405,7 @@ export class ClientCameraSystem extends SystemBase {
         pp.radiusMin,
         pp.radiusMax,
       );
-      const radius = clamp(
+      let radius = clamp(
         baseRadius + Math.sin(t * 0.32) * 0.2,
         pp.radiusMin,
         pp.radiusMax,
@@ -2362,11 +2435,20 @@ export class ClientCameraSystem extends SystemBase {
           pp.basePhi + closeCombatBlend * (Math.PI * 0.38 - pp.basePhi);
         const phiVariation =
           Math.sin(t * 0.13) * 0.015 + Math.sin(t * 0.07) * 0.01;
+        // Dramatic low angle when a fighter is near death — pulls phi toward
+        // the floor for a heroic finishing-blow feel.
+        const dramaticLowOffset = this.cinematicDramaticLow * -0.12;
         phi = clamp(
-          closeCombatPhi + phiVariation,
+          closeCombatPhi + phiVariation + dramaticLowOffset,
           this.settings.minPolarAngle + 0.03,
           this.settings.maxPolarAngle - 0.03,
         );
+      }
+
+      // Combat punch-in: tighten radius on heavy hits
+      if (this.cinematicPhase === "FIGHTING") {
+        radius *= 1 - this.cinematicPunchIn * 0.13;
+        radius = clamp(radius, pp.radiusMin * 0.86, pp.radiusMax);
       }
 
       const cinematicView = this.resolveCinematicView(
@@ -2472,6 +2554,8 @@ export class ClientCameraSystem extends SystemBase {
       this.detachCameraFromRig();
     }
 
+    this.tickStreamingCombatFeedback(frameDt);
+
     const cinematicFrame = this.buildCinematicFrame(deltaTime);
     if (cinematicFrame) {
       this.targetPosition.copy(cinematicFrame.focus);
@@ -2511,14 +2595,15 @@ export class ClientCameraSystem extends SystemBase {
 
         // Position: exponential damping (unified X/Y/Z — no separate Y rate limit).
         // Y is locked during duel combat so there's no terrain noise to filter.
-        const posDamp = 1 - Math.exp(-5.0 * snapM * frameDt);
+        // Rate 3.8 gives smooth weighted follow without visible lag.
+        const posDamp = 1 - Math.exp(-3.8 * snapM * frameDt);
         this.smoothedTarget.lerp(this.targetPosition, posDamp);
         this.lookAtTarget.lerp(cinematicFrame.lookAt, posDamp);
 
         // Angles: single-layer exponential damping directly to cinematicFrame
-        // values. No intermediate targetSpherical — that extra layer added
-        // latency and created phase conflicts between smoothers.
-        const angleDamp = 1 - Math.exp(-3.5 * snapM * frameDt);
+        // values. Rate 2.5 → half-life ~0.28s for smooth, deliberate orbits.
+        // (Was 3.5 which caused snappy/jagged angle transitions.)
+        const angleDamp = 1 - Math.exp(-2.5 * snapM * frameDt);
         const thetaDelta = this.shortestAngleDelta(
           this.targetSpherical.theta,
           cinematicFrame.theta,
@@ -2677,6 +2762,9 @@ export class ClientCameraSystem extends SystemBase {
     // Follow target. If zoom changed this frame, snap position instantly for straight-in/out motion
     // RS3: move camera directly with no positional lerp to avoid swoop or lag
     this.camera.position.copy(this.cameraPosition);
+    if (cinematicFrame) {
+      this.camera.position.add(this.computeCameraShake(frameDt));
+    }
     this.zoomDirty = false;
 
     if (cinematicFrame) {
@@ -2699,6 +2787,9 @@ export class ClientCameraSystem extends SystemBase {
 
     // Update camera matrices since it has no parent transform to inherit from
     this.camera.updateMatrixWorld(true);
+
+    // Decay combat feedback effects
+    this.cinematicPunchIn *= Math.exp(-2.85 * frameDt);
   }
 
   private computeCollisionAdjustedDistance(desiredDistance: number): number {

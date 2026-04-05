@@ -8,3 +8,4 @@ export { AgentStatsDisplay } from "./AgentStatsDisplay";
 export { LeaderboardPanel } from "./LeaderboardPanel";
 export { CountdownOverlay } from "./CountdownOverlay";
 export { VictoryOverlay } from "./VictoryOverlay";
+export { DamageFloaters } from "./DamageFloaters";

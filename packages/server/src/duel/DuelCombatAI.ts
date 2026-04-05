@@ -43,6 +43,9 @@ const TRASH_TALK_THRESHOLDS = [90, 80, 70, 60, 50, 40, 30, 20, 10] as const;
 /** Minimum milliseconds between trash talk LLM calls. */
 const TRASH_TALK_COOLDOWN_MS = 4_000;
 
+/** Hard timeout for a single trash talk LLM call — abandon after this. */
+const TRASH_TALK_TIMEOUT_MS = 4_000;
+
 /** Ambient trash talk fires randomly every 5-12 ticks. */
 const AMBIENT_TAUNT_MIN_TICKS = 5;
 const AMBIENT_TAUNT_MAX_TICKS = 12;
@@ -992,7 +995,10 @@ export class DuelCombatAI {
       return;
     }
 
-    // LLM path — fire in background, using agent character for personality
+    // LLM path — fire in background, using agent character for personality.
+    // Dedup guard: skip if a call is already in-flight.
+    if (this._trashTalkInFlight) return;
+
     const oppPctStr =
       opponentData && opponentData.maxHealth > 0
         ? `${((opponentData.health / opponentData.maxHealth) * 100).toFixed(0)}%`
@@ -1027,7 +1033,9 @@ export class DuelCombatAI {
     this._trashTalkInFlight = true;
     this.lastTrashTalkTime = Date.now();
 
-    (async () => {
+    // Fire-and-forget — intentionally NOT awaited so the combat tick is never blocked.
+    void (async () => {
+      let timerId: ReturnType<typeof setTimeout> | undefined;
       try {
         const llmPromise = this.runtime!.useModel(ModelType.TEXT_SMALL, {
           prompt,
@@ -1035,16 +1043,14 @@ export class DuelCombatAI {
           temperature: 0.9,
         });
 
-        let timerId: ReturnType<typeof setTimeout>;
         const timeoutPromise = new Promise<never>((_, reject) => {
           timerId = setTimeout(
             () => reject(new Error("Trash talk LLM timeout")),
-            LLM_TIMEOUT_MS,
+            TRASH_TALK_TIMEOUT_MS,
           );
         });
 
         const response = await Promise.race([llmPromise, timeoutPromise]);
-        clearTimeout(timerId!);
 
         const text = (typeof response === "string" ? response : "")
           .trim()
@@ -1053,11 +1059,11 @@ export class DuelCombatAI {
           try {
             sendChatAction(text);
           } catch {
-            // Swallow
+            // Swallow — chat failure must not break combat
           }
         }
       } catch (err) {
-        // On failure, use a scripted fallback
+        // On failure / timeout, use a scripted fallback
         const pool =
           kind === "own_low"
             ? FALLBACK_TAUNTS_OWN_LOW
@@ -1073,6 +1079,7 @@ export class DuelCombatAI {
           // Swallow
         }
       } finally {
+        if (timerId !== undefined) clearTimeout(timerId);
         this._trashTalkInFlight = false;
       }
     })();

@@ -28,6 +28,7 @@ export type AgentStatsEntry = {
   losses: number;
   combatLevel: number;
   currentStreak: number;
+  lossStreak: number;
 };
 
 type MatchmakingConfig = {
@@ -167,6 +168,7 @@ export class MatchmakingManager {
           losses: 0,
           combatLevel,
           currentStreak: 0,
+          lossStreak: 0,
         });
 
         // Load persisted stats from database asynchronously
@@ -439,11 +441,13 @@ export class MatchmakingManager {
     if (winnerStats) {
       winnerStats.wins++;
       winnerStats.currentStreak++;
+      winnerStats.lossStreak = 0;
     }
 
     if (loserStats) {
       loserStats.losses++;
       loserStats.currentStreak = 0;
+      loserStats.lossStreak++;
     }
 
     this.leaderboardDirty = true;
@@ -680,15 +684,19 @@ export class MatchmakingManager {
         winRate,
         combatLevel: stats.combatLevel,
         currentStreak: stats.currentStreak,
+        lossStreak: stats.lossStreak,
       });
     }
 
-    // Sort by win rate, then by total wins
+    // Sort by win rate, then by total wins, then by fewer losses
     entries.sort((a, b) => {
       if (b.winRate !== a.winRate) {
         return b.winRate - a.winRate;
       }
-      return b.wins - a.wins;
+      if (b.wins !== a.wins) {
+        return b.wins - a.wins;
+      }
+      return a.losses - b.losses;
     });
 
     // Assign ranks

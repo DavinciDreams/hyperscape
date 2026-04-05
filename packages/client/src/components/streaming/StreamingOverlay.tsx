@@ -9,12 +9,13 @@
  * - Victory announcement
  */
 
-import React, { useEffect, useState, useRef } from "react";
-import type { StreamingState } from "../../screens/StreamingMode";
+import React, { useEffect, useState, useRef, useCallback } from "react";
+import type { StreamingState, AgentInfo } from "../../screens/StreamingMode";
 import { AgentStatsDisplay } from "./AgentStatsDisplay";
 import { LeaderboardPanel } from "./LeaderboardPanel";
 import { CountdownOverlay } from "./CountdownOverlay";
 import { VictoryOverlay } from "./VictoryOverlay";
+import { DamageFloaters } from "./DamageFloaters";
 
 // Delay before showing victory overlay during RESOLUTION phase (ms).
 // Short delay for dramatic effect - text appears as winner starts celebrating.
@@ -23,6 +24,14 @@ const VICTORY_OVERLAY_DELAY_MS = 500;
 
 /** How long the "FIGHT!" text lingers after the countdown ends (ms). */
 const FIGHT_TEXT_LINGER_MS = 2500;
+
+/** A single floating damage number to display and animate out. */
+export interface DamageFloaterEntry {
+  id: string;
+  amount: number;
+  side: "left" | "right";
+  createdAt: number;
+}
 
 interface StreamingOverlayProps {
   state: StreamingState | null;
@@ -36,7 +45,77 @@ export function StreamingOverlay({ state }: StreamingOverlayProps) {
   const [showFightText, setShowFightText] = useState(false);
   const fightTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // --- Damage floater tracking ---
+  const prevHpRef = useRef<{
+    agent1Hp: number | null;
+    agent2Hp: number | null;
+  }>({
+    agent1Hp: null,
+    agent2Hp: null,
+  });
+  const [damageFloaters, setDamageFloaters] = useState<DamageFloaterEntry[]>(
+    [],
+  );
+
   const phase = state?.cycle?.phase;
+
+  // Detect HP drops and spawn damage floaters
+  const agent1 = state?.cycle?.agent1 ?? null;
+  const agent2 = state?.cycle?.agent2 ?? null;
+  const agent1Hp = agent1?.hp ?? null;
+  const agent2Hp = agent2?.hp ?? null;
+
+  useEffect(() => {
+    const prev = prevHpRef.current;
+    const newFloaters: DamageFloaterEntry[] = [];
+
+    if (phase === "FIGHTING") {
+      if (
+        prev.agent1Hp !== null &&
+        agent1Hp !== null &&
+        agent1Hp < prev.agent1Hp
+      ) {
+        const dmg = prev.agent1Hp - agent1Hp;
+        newFloaters.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-a1`,
+          amount: dmg,
+          side: "left" as const,
+          createdAt: Date.now(),
+        });
+      }
+      if (
+        prev.agent2Hp !== null &&
+        agent2Hp !== null &&
+        agent2Hp < prev.agent2Hp
+      ) {
+        const dmg = prev.agent2Hp - agent2Hp;
+        newFloaters.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-a2`,
+          amount: dmg,
+          side: "right" as const,
+          createdAt: Date.now(),
+        });
+      }
+    }
+
+    prev.agent1Hp = agent1Hp;
+    prev.agent2Hp = agent2Hp;
+
+    if (newFloaters.length > 0) {
+      setDamageFloaters((existing) => [...existing, ...newFloaters]);
+    }
+  }, [agent1Hp, agent2Hp, phase]);
+
+  // Reset floaters and prev HP when fight cycle changes
+  const cycleId = state?.cycle?.cycleId;
+  useEffect(() => {
+    setDamageFloaters([]);
+    prevHpRef.current = { agent1Hp: null, agent2Hp: null };
+  }, [cycleId]);
+
+  const handleFloaterExpire = useCallback((id: string) => {
+    setDamageFloaters((existing) => existing.filter((f) => f.id !== id));
+  }, []);
 
   useEffect(() => {
     if (phase === "RESOLUTION") {
@@ -89,15 +168,7 @@ export function StreamingOverlay({ state }: StreamingOverlayProps) {
   }
 
   const { cycle, leaderboard } = state;
-  const {
-    agent1,
-    agent2,
-    countdown,
-    winnerId,
-    winnerName,
-    winReason,
-    timeRemaining,
-  } = cycle;
+  const { countdown, winnerId, winnerName, winReason, timeRemaining } = cycle;
 
   // Get winner agent info
   const winnerAgent =
@@ -120,6 +191,14 @@ export function StreamingOverlay({ state }: StreamingOverlayProps) {
           </div>
           <AgentStatsDisplay agent={agent2} side="right" />
         </div>
+      )}
+
+      {/* Damage floaters — rendered over the HP bar area */}
+      {damageFloaters.length > 0 && (
+        <DamageFloaters
+          floaters={damageFloaters}
+          onExpire={handleFloaterExpire}
+        />
       )}
 
       {/* Next duel countdown - shown when no active fight */}
@@ -146,6 +225,13 @@ export function StreamingOverlay({ state }: StreamingOverlayProps) {
       {phase === "RESOLUTION" && showVictory && winnerAgent && (
         <VictoryOverlay
           winner={winnerAgent}
+          loser={
+            winnerId === agent1?.id
+              ? agent2
+              : winnerId === agent2?.id
+                ? agent1
+                : null
+          }
           winReason={winReason || "victory"}
         />
       )}

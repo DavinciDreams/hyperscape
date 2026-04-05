@@ -669,11 +669,17 @@ export class DuelArenaVisualsSystem extends System {
       const quantized = vec2(tslFloor(wp.x.add(0.5)), tslFloor(wp.z.add(0.5)));
       const phase = tslHash(quantized).mul(6.28);
 
+      // Per-brazier speed variation (±15%) so they don't cycle in lockstep
+      const speedJitter = tslHash(quantized.add(vec2(31.5, 97.2)));
+      const speedScale = float(0.85).add(speedJitter.mul(0.3)); // 0.85–1.15
+
       // Multi-frequency sine flicker + high-freq noise (matches old PointLight behavior)
-      const flicker = sin(t.mul(10.0).add(phase))
+      const flicker = sin(t.mul(10.0).mul(speedScale).add(phase))
         .mul(0.15)
-        .add(sin(t.mul(7.3).add(phase.mul(1.7))).mul(0.08));
-      const noise = fract(sin(t.mul(43.7).add(phase)).mul(9827.3)).mul(0.05);
+        .add(sin(t.mul(7.3).mul(speedScale).add(phase.mul(1.7))).mul(0.08));
+      const noise = fract(
+        sin(t.mul(43.7).mul(speedScale).add(phase)).mul(9827.3),
+      ).mul(0.05);
       const intensity = float(0.6).add(flicker).add(noise);
 
       // Only the top face (fire opening) glows; outer shell stays dark.
