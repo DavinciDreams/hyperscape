@@ -313,7 +313,6 @@ export function BankTabBar({
                 borderBottom: "none",
                 opacity: isPlaceholderIcon && !isSelected ? 0.6 : 1,
               }}
-              onMouseEnter={() => setHoveredButton(`tab-${tabIndex}`)}
               onMouseEnter={(e) => {
                 setHoveredButton(`tab-${tabIndex}`);
                 setHoverTooltip({
