@@ -778,6 +778,11 @@ const AgentMonitorScreen = React.lazy(() =>
     default: m.AgentMonitorScreen,
   })),
 );
+const HyperBetScreen = React.lazy(() =>
+  import("./screens/HyperBetScreen").then((m) => ({
+    default: m.HyperBetScreen,
+  })),
+);
 import {
   isTauriApp,
   onDeepLink,
@@ -910,6 +915,16 @@ async function mountApp() {
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <AgentMonitorScreen />
           </React.Suspense>
+        </ErrorBoundary>,
+      );
+    } else if (page === "hyperbet" || page === "bet") {
+      root.render(
+        <ErrorBoundary>
+          <SolanaWalletProvider>
+            <React.Suspense fallback={<ScreenLoadingFallback />}>
+              <HyperBetScreen />
+            </React.Suspense>
+          </SolanaWalletProvider>
         </ErrorBoundary>,
       );
     } else {

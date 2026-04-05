@@ -321,6 +321,7 @@ export default defineConfig(({ mode }) => {
         input: {
           index: path.resolve(__dirname, "src/index.html"),
           stream: path.resolve(__dirname, "src/stream.html"),
+          hyperbet: path.resolve(__dirname, "src/hyperbet.html"),
         },
         external: ["fs", "fs-extra", "path", "node:fs", "node:path", "crypto"],
         output: {
