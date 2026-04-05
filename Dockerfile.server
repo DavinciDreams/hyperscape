@@ -135,7 +135,6 @@ COPY --from=builder /app/packages/shared/node_modules            ./packages/shar
 COPY --from=builder /app/packages/procgen/node_modules           ./packages/procgen/node_modules
 COPY --from=builder /app/packages/impostors/node_modules         ./packages/impostors/node_modules
 COPY --from=builder /app/packages/plugin-hyperscape/node_modules ./packages/plugin-hyperscape/node_modules
-COPY --from=builder /app/packages/web3/node_modules              ./packages/web3/node_modules
 COPY --from=builder /app/packages/client/node_modules            ./packages/client/node_modules
 
 # ── Build artifacts ──
@@ -147,6 +146,7 @@ COPY --from=builder /app/packages/shared/build          ./packages/shared/build
 COPY --from=builder /app/packages/plugin-hyperscape/dist ./packages/plugin-hyperscape/dist
 COPY --from=builder /app/packages/web3/dist             ./packages/web3/dist
 COPY --from=builder /app/packages/server/dist           ./packages/server/dist
+COPY --from=builder /app/packages/server/scripts        ./packages/server/scripts
 COPY --from=builder /app/packages/server/src            ./packages/server/src
 COPY --from=builder /app/packages/server/world          ./packages/server/world
 COPY --from=builder /app/packages/client/dist           ./packages/client/dist
