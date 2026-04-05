@@ -778,6 +778,16 @@ const AgentMonitorScreen = React.lazy(() =>
     default: m.AgentMonitorScreen,
   })),
 );
+const DuelArenaShowcaseScreen = React.lazy(() =>
+  import("./screens/DuelArenaShowcaseScreen").then((m) => ({
+    default: m.DuelArenaShowcaseScreen,
+  })),
+);
+const DuelArenaMonitorScreen = React.lazy(() =>
+  import("./screens/DuelArenaMonitorScreen").then((m) => ({
+    default: m.DuelArenaMonitorScreen,
+  })),
+);
 import {
   isTauriApp,
   onDeepLink,
@@ -909,6 +919,24 @@ async function mountApp() {
           <MaintenanceBanner />
           <React.Suspense fallback={<ScreenLoadingFallback />}>
             <AgentMonitorScreen />
+          </React.Suspense>
+        </ErrorBoundary>,
+      );
+    } else if (page === "duel-arena-showcase" || page === "duel-showcase") {
+      root.render(
+        <ErrorBoundary>
+          <MaintenanceBanner />
+          <React.Suspense fallback={<ScreenLoadingFallback />}>
+            <DuelArenaShowcaseScreen />
+          </React.Suspense>
+        </ErrorBoundary>,
+      );
+    } else if (page === "duel-monitor") {
+      root.render(
+        <ErrorBoundary>
+          <MaintenanceBanner />
+          <React.Suspense fallback={<ScreenLoadingFallback />}>
+            <DuelArenaMonitorScreen />
           </React.Suspense>
         </ErrorBoundary>,
       );
