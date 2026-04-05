@@ -240,7 +240,7 @@ export function StreamingMode() {
 
   // WebSocket URL for streaming mode (supports optional streamToken gate)
   const wsUrl = useMemo(() => {
-    const baseWsUrl = GAME_WS_URL || "ws://localhost:5555/ws";
+    const baseWsUrl = GAME_WS_URL || "ws://localhost:5556/ws";
     const url = new URL(baseWsUrl, window.location.href);
     url.searchParams.set("mode", "streaming");
     if (streamAccessToken) {
