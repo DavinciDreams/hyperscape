@@ -406,11 +406,11 @@ describe("BiomeResourceGenerator", () => {
     it("tree level requirements match progression", () => {
       // These should match the actual TREE_TYPES definitions
       // Unknown types default to level 1
-      expect(getTreeLevelRequirement("fir")).toBe(1);
       expect(getTreeLevelRequirement("pine")).toBe(1);
       expect(getTreeLevelRequirement("oak")).toBe(15);
-      expect(getTreeLevelRequirement("birch")).toBe(1);
       expect(getTreeLevelRequirement("maple")).toBe(45);
+      expect(getTreeLevelRequirement("mahogany")).toBe(50);
+      expect(getTreeLevelRequirement("magic")).toBe(60);
 
       // Verify against exported constant
       expect(getTreeLevelRequirement("maple")).toBe(

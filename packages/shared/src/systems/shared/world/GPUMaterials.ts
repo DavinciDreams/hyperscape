@@ -446,7 +446,7 @@ export function createGPUVegetationMaterial(
 
   material.transparent = false;
   material.opacity = 1.0;
-  material.alphaTest = 0.1;
+  material.alphaTest = 0.5;
   material.side = THREE.DoubleSide;
   material.depthWrite = true;
 
@@ -975,14 +975,7 @@ export function applyRimHighlight(
 /**
  * Options for creating tree dissolve materials.
  */
-export type TreeMaterialOptions = DissolveMaterialOptions & {
-  /** Whether this material covers leaf geometry (enables wind + SSS) */
-  isLeafMaterial?: boolean;
-  /** Enable snow blending driven by per-instance biome weight */
-  enableSnow?: boolean;
-  /** Model has explicit snow mask in vertex-color R channel (skip normal fallback) */
-  snowVertexData?: boolean;
-};
+export type TreeMaterialOptions = DissolveMaterialOptions;
 
 /**
  * Tree-specific dissolve material with toon shading.
@@ -1009,16 +1002,16 @@ export type TreeDissolveMaterial = DissolveMaterial & {
 /**
  * Creates a tree dissolve material with toon lighting, SSS, and wind.
  *
- * 1. **Toon lighting** — Quantized 3-band Lambert (hard shadow / mid / bright).
- * 2. **AO** — Vertex color G channel as ambient occlusion.
- * 3. **SSS** — Back-scatter translucency on leaf materials (warm glow when backlit).
- * 4. **Wind** — Sine-wave vertex displacement on leaf materials.
- * 5. **Rim** — Hard-edged Fresnel rim on leaves.
- * 6. **Saturation** — Subtle boost keeps colors rich.
- * 7. **Rim highlight** — Per-instance Fresnel glow for hover feedback.
+ * Vertex color channel convention (all trees):
+ *   R = leafMask (0 = bark, 1 = leaf) — wind, sphere normals, SSS
+ *   G = AO (ambient occlusion) — darkening + snow weight modulation
+ *   B = unused
+ *
+ * Snow is always compiled in; per-instance biome snow weight (batch color G)
+ * is the sole on/off control. Trees outside snow biomes get weight 0.
  *
  * @param source - Source material to clone PBR properties from
- * @param options - Dissolve + tree configuration (fade distances, isLeafMaterial, etc.)
+ * @param options - Dissolve configuration (fade distances, batched, etc.)
  */
 export function createTreeDissolveMaterial(
   source: THREE.MeshStandardMaterial | THREE.Material,
@@ -1031,11 +1024,7 @@ export function createTreeDissolveMaterial(
   });
 
   const material = baseDm as unknown as THREE.MeshStandardNodeMaterial;
-  const isLeaf = options.isLeafMaterial ?? false;
 
-  // Vertex-color detection: check material flag AND geometry attribute.
-  // GLTFLoader sets material.vertexColors=true when COLOR_0 is present,
-  // but we also check geometry as a fallback for manual mesh construction.
   const srcMat = source as any;
   const hasVertexColors =
     !!srcMat.vertexColors ||
@@ -1052,25 +1041,14 @@ export function createTreeDissolveMaterial(
   const uWindStrength = uniform(0.3);
   const uWindDir = uniform(new THREE.Vector2(1, 0));
 
-  const enableSnow = options.enableSnow ?? false;
-  const snowVertexData = options.snowVertexData ?? false;
-
   // --- Tuning ---
-  // Vertex color channels (non-snow): R = bark/leaf mask (1=bark, 0=leaf), G = AO, B = unused
-  // Vertex color channels (snow vtx): R = snow mask (0=no snow, 1=full snow), G = AO, B = unused
-  const AO_POWER = 1.6;
-  const AO_DARK = 0.35;
-  const AO_BARK_DARK = 0.45;
-
-  // Snow tuning — R-channel path (models with explicit snow vertex data)
+  const AO_POWER = 1.8;
+  const AO_DARK = 0.1;
   const SNOW_COLOR: [number, number, number] = [0.92, 0.95, 0.98];
   const SNOW_AO_TINT: [number, number, number] = [0.55, 0.6, 0.72];
-  const SNOW_SMOOTH_LO = 0.05;
-  const SNOW_SMOOTH_HI = 0.15;
-  // Normal-based fallback (models WITHOUT R-channel snow data)
-  const SNOW_NORMAL_LO = 0.05;
-  const SNOW_NORMAL_HI = 0.35;
-  const SNOW_NORMAL_STRENGTH = 3.5;
+  const SNOW_THRESHOLD = 0.15;
+  const SNOW_RANGE = 0.08;
+  const SNOW_STRENGTH = 4.0;
   const SAT_BOOST = 1.15;
   const HL_BRIGHTEN = 0.08;
   const HL_RIM_POWER = 2.5;
@@ -1082,33 +1060,31 @@ export function createTreeDissolveMaterial(
   const TOON_RIM_BRIGHT = 1.3;
   const NIGHT_MIN_BRIGHTNESS = NIGHT.BRIGHTNESS;
 
-  // --- Wind vertex displacement (leaf materials only) ---
-  // Displacement is proportional to local Y so it auto-scales to any model
-  // coordinate system (bamboo Y~15 at scale 0.8 vs fir Y~1900 at scale 0.008).
-  if (isLeaf) {
-    material.positionNode = Fn(() => {
-      const pos = positionLocal;
-      const phase = add(mul(pos.x, float(0.013)), mul(pos.z, float(0.017)));
-      const wave1 = sin(add(mul(uWindTime, float(1.8)), phase));
-      const wave2 = sin(
-        add(mul(uWindTime, float(3.2)), mul(phase, float(0.6))),
-      );
-      const combined = add(mul(wave1, float(0.65)), mul(wave2, float(0.35)));
-      const amplitude = mul(abs(pos.y), float(0.006));
-      const disp = mul(combined, mul(uWindStrength, amplitude));
-      return vec3(
-        add(pos.x, mul(disp, uWindDir.x)),
-        pos.y,
-        add(pos.z, mul(disp, uWindDir.y)),
-      );
-    })();
-  }
+  // --- Wind vertex displacement ---
+  // Modulated by leafMask from vertex color R so bark stays still.
+  // Displacement proportional to local Y auto-scales to any model coord system.
+  material.positionNode = Fn(() => {
+    const pos = positionLocal;
+    const vc = hasVertexColors ? attribute("color", "vec3") : vec3(0, 1, 0);
+    const leafMask = vc.x;
 
-  // --- Alpha cutout sharpening for leaf materials ---
-  // Sharpen texture alpha to binary (0 or 1) so semi-transparent edge pixels
-  // are cleanly discarded instead of rendering as opaque fringe that flickers
-  // with wind animation.
-  if (isLeaf && material.map) {
+    const phase = add(mul(pos.x, float(0.013)), mul(pos.z, float(0.017)));
+    const wave1 = sin(add(mul(uWindTime, float(1.8)), phase));
+    const wave2 = sin(add(mul(uWindTime, float(3.2)), mul(phase, float(0.6))));
+    const combined = add(mul(wave1, float(0.65)), mul(wave2, float(0.35)));
+    const amplitude = mul(abs(pos.y), float(0.006));
+    const disp = mul(combined, mul(uWindStrength, mul(amplitude, leafMask)));
+    return vec3(
+      add(pos.x, mul(disp, uWindDir.x)),
+      pos.y,
+      add(pos.z, mul(disp, uWindDir.y)),
+    );
+  })();
+
+  // --- Alpha cutout sharpening ---
+  // Applied to any material with a texture map (leaf textures have alpha).
+  if (material.map) {
+    material.alphaTest = 0.5;
     const leafCutoutMap = material.map;
     material.opacityNode = Fn(() => {
       const uv = attribute("uv", "vec2");
@@ -1134,89 +1110,52 @@ export function createTreeDissolveMaterial(
   material.outputNode = Fn(() => {
     const pbrOut = output;
 
-    // ---- Albedo (sample texture directly, bypass PBR lighting) ----
+    // ---- Albedo ----
     const texCoord = attribute("uv", "vec2");
     const albedoSample = albedoMap
       ? texture(albedoMap, texCoord)
       : vec4(1, 1, 1, 1);
     let baseAlbedo: any = mul(albedoSample.rgb, matColor);
 
-    // ---- Vertex-color AO (+ optional snow) ----
-    if (hasVertexColors) {
-      const vtxColor = attribute("color", "vec3");
-      const aoRaw = vtxColor.y;
+    // ---- Vertex colors ----
+    const vtxColor = hasVertexColors
+      ? attribute("color", "vec3")
+      : vec3(0, 1, 0);
+    const aoRaw = vtxColor.y;
 
-      if (enableSnow) {
-        // Detect default/unset vertex colors (all channels ~1.0).
-        // Real AO data always has variation; LOD models often have flat white.
-        // When detected, zero out snow to avoid all-white LOD trees.
-        const isDefaultVtx = step(float(0.98), mul(vtxColor.x, vtxColor.y));
-        const effectiveAO = mix(aoRaw, float(0.5), isDefaultVtx);
+    // ---- AO (used later as a single post-toon multiplier) ----
+    const aoFactor = pow(aoRaw, float(AO_POWER));
 
-        const aoFactor = pow(effectiveAO, float(AO_POWER));
-        const aoMul = mix(float(AO_BARK_DARK), float(1.0), aoFactor);
-        baseAlbedo = mul(baseAlbedo, aoMul);
+    // ---- Snow ----
+    const geometricN = normalize(normalWorld);
+    const upFacing = smoothstep(
+      float(SNOW_THRESHOLD),
+      float(SNOW_THRESHOLD + SNOW_RANGE),
+      geometricN.y,
+    );
+    const snowMask = clamp(
+      mul(mul(upFacing, aoRaw), float(SNOW_STRENGTH)),
+      float(0.0),
+      float(1.0),
+    );
+    const snowCol = mix(vec3(...SNOW_AO_TINT), vec3(...SNOW_COLOR), aoFactor);
+    const batchColor = varyingProperty("vec3", "vBatchColor");
+    const biomeSnowRaw = clamp(batchColor.y, float(0.0), float(1.0));
+    // Sharp falloff so biome boundaries show little snow — only
+    // strongly-tundra areas get substantial coverage.
+    const biomeSnowStrength = pow(biomeSnowRaw, float(3.0));
+    const snowWeight = mul(snowMask, biomeSnowStrength);
+    baseAlbedo = mix(baseAlbedo, snowCol, snowWeight);
 
-        let snowMask: any;
-        if (snowVertexData) {
-          const rawSnowMask = vtxColor.x;
-          const rMask = smoothstep(
-            float(SNOW_SMOOTH_LO),
-            float(SNOW_SMOOTH_HI),
-            rawSnowMask,
-          );
-          const upFacing = smoothstep(
-            float(SNOW_NORMAL_LO),
-            float(SNOW_NORMAL_HI),
-            normalWorldGeometry.y,
-          );
-          const fallback = clamp(
-            mul(mul(upFacing, effectiveAO), float(SNOW_NORMAL_STRENGTH)),
-            float(0.0),
-            float(1.0),
-          );
-          snowMask = mix(rMask, fallback, isDefaultVtx);
-        } else {
-          const upFacing = smoothstep(
-            float(SNOW_NORMAL_LO),
-            float(SNOW_NORMAL_HI),
-            normalWorldGeometry.y,
-          );
-          snowMask = clamp(
-            mul(mul(upFacing, effectiveAO), float(SNOW_NORMAL_STRENGTH)),
-            float(0.0),
-            float(1.0),
-          );
-        }
-
-        const batchColor = varyingProperty("vec3", "vBatchColor");
-        const biomeSnowStrength = clamp(batchColor.y, float(0.0), float(1.0));
-        const snowBase = vec3(...SNOW_COLOR);
-        const snowAO = vec3(...SNOW_AO_TINT);
-        const snowCol = mix(snowAO, snowBase, aoFactor);
-        const rawWeight = mul(snowMask, biomeSnowStrength);
-        const snowWeight = smoothstep(float(0.15), float(0.35), rawWeight);
-        baseAlbedo = mix(baseAlbedo, snowCol, snowWeight);
-      } else {
-        // Standard path: R = bark/leaf mask, G = AO
-        const barkMask = vtxColor.x;
-        const aoFactor = pow(aoRaw, float(AO_POWER));
-        const aoDarkFloor = mix(float(AO_DARK), float(AO_BARK_DARK), barkMask);
-        const aoMul = mix(aoDarkFloor, float(1.0), aoFactor);
-        baseAlbedo = mul(baseAlbedo, aoMul);
-      }
-    }
-
-    // ---- dayFactor (used by shade, toon, SSS, saturation) ----
+    // ---- dayFactor (drives night fading of SSS, saturation) ----
     const sunI = clamp(uSunIntensity, float(0.0), float(2.0));
     const dayFactor = div(sunI, float(2.0));
 
-    // ---- Sun shade on albedo (driven by dayIntensity to match scene light timing) ----
+    // ---- Sun shade on albedo ----
     baseAlbedo = applySunShade(baseAlbedo, uDayIntensity, vec3(uShadeColor));
 
-    // ---- 4-band Ghibli toon lighting (warm highlights → cool shadows) ----
-    // Derive 4 hue-shifted color variants from sampled texture albedo.
-    // Highlights shift warm (golden), shadows shift cool (teal).
+    // ---- 4-band Ghibli toon lighting (warm highlights -> cool shadows) ----
+    const leafMask = vtxColor.x;
     const L = normalize(vec3(uSunDir));
     const N = normalize(normalWorldGeometry);
     const NdotL = dot(N, L);
@@ -1234,32 +1173,33 @@ export function createTreeDissolveMaterial(
     const toonStep1 = mix(toonStep0, band1Color, s1);
     const toonColor = mix(toonStep1, band0Color, s0);
 
-    const nightDim = mix(float(NIGHT_MIN_BRIGHTNESS), float(1.0), dayFactor);
-    let result: any = mul(toonColor, nightDim);
+    const nightDim = mix(
+      float(NIGHT_MIN_BRIGHTNESS),
+      float(1.0),
+      uDayIntensity,
+    );
+    const aoMul = mix(float(AO_DARK), float(1.0), aoFactor);
+    let result: any = mul(mul(toonColor, nightDim), aoMul);
 
     // ---- SSS + hard-edged toon rim (leaf only, scaled by dayFactor) ----
-    if (isLeaf) {
-      const V = normalize(sub(cameraPosition, positionWorld));
+    const V = normalize(sub(cameraPosition, positionWorld));
 
-      // Back-scatter SSS (fades at night)
-      const backL = normalize(sub(vec3(0, 0, 0), L));
-      const backSSS = clamp(dot(V, backL), float(0), float(1));
-      const sssFactor = mul(
-        mul(pow(backSSS, float(3.0)), float(0.12)),
-        dayFactor,
-      );
-      result = add(result, mul(vec3(0.95, 1.0, 0.7), sssFactor));
+    const backL = normalize(sub(vec3(0, 0, 0), L));
+    const backSSS = clamp(dot(V, backL), float(0), float(1));
+    const sssFactor = mul(
+      mul(pow(backSSS, float(3.0)), float(0.12)),
+      mul(dayFactor, leafMask),
+    );
+    result = add(result, mul(vec3(0.95, 1.0, 0.7), sssFactor));
 
-      // Hard-edged toon rim (fades at night)
-      const EDotN = clamp(dot(V, N), float(0.0), float(1.0));
-      const rimMask = sub(float(1.0), step(float(TOON_RIM_THRESHOLD), EDotN));
-      const rimBright = mix(
-        float(1.0),
-        float(TOON_RIM_BRIGHT),
-        mul(rimMask, dayFactor),
-      );
-      result = mul(result, rimBright);
-    }
+    const EDotN = clamp(dot(V, N), float(0.0), float(1.0));
+    const rimMask = sub(float(1.0), step(float(TOON_RIM_THRESHOLD), EDotN));
+    const rimBright = mix(
+      float(1.0),
+      float(TOON_RIM_BRIGHT),
+      mul(mul(rimMask, dayFactor), leafMask),
+    );
+    result = mul(result, rimBright);
 
     // ---- Saturation boost (scales with dayFactor so night stays muted) ----
     const satScale = mix(float(1.0), float(SAT_BOOST), dayFactor);
@@ -1272,8 +1212,6 @@ export function createTreeDissolveMaterial(
     // ---- Instance rim highlight (hover) ----
     let hlIntensity;
     if (options.batched) {
-      const batchColor = varyingProperty("vec3", "vBatchColor");
-      // Only check R for highlight — G = snow weight, B = dissolve state
       hlIntensity = step(float(1.01), batchColor.x);
     } else {
       hlIntensity = attribute("instanceHighlight", "float");
@@ -1281,21 +1219,18 @@ export function createTreeDissolveMaterial(
     const NV = normalize(normalView);
     const Vv = normalize(sub(vec3(0, 0, 0), positionView.xyz));
     const NdotV = clamp(dot(NV, Vv), float(0.0), float(1.0));
-    const rim = mul(
+    const hlRim = mul(
       pow(sub(float(1.0), NdotV), float(HL_RIM_POWER)),
       float(HL_RIM_STRENGTH),
     );
     const brightened = add(boosted, float(HL_BRIGHTEN));
-    const rimGlow = mul(vec3(uHighlightColor), rim);
+    const rimGlow = mul(vec3(uHighlightColor), hlRim);
     const highlighted = add(brightened, rimGlow);
     const finalRgb = mix(boosted, highlighted, hlIntensity);
 
     // ---- Sky-color fog ----
     const fogged = mix(finalRgb, treeFogTex.rgb, treeFogFactor);
 
-    // Depletion dissolve is handled by the base dissolve material's alphaTestNode
-    // (enableDepletionDissolve: true), which uses Bayer 4×4 dithering to discard
-    // fragments. Trees stay in the opaque render pass with full early-Z benefits.
     return vec4(fogged, pbrOut.a);
   })();
 

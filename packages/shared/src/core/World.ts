@@ -2151,14 +2151,8 @@ export class World extends EventEmitter {
           ? finalAssetsUrl
           : finalAssetsUrl + "/";
         let resolved = url.replace("asset://", assetsUrlStr);
-        // Add cache-busting for localhost to bypass stale browser cache
-        if (
-          typeof window !== "undefined" &&
-          resolved.startsWith("http://localhost")
-        ) {
-          const separator = resolved.includes("?") ? "&" : "?";
-          resolved = `${resolved}${separator}`;
-        }
+        // Cache-busting for localhost removed — IndexedDB handles persistence
+        // and the server now uses short cache lifetimes for dev.
         return resolved;
       } else {
         if (!hasLoggedMissingAssetBase) {

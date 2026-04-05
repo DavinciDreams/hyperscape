@@ -39,11 +39,20 @@ export function buildBiomeConstantsJS(): string {
 const FOREST_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
   trees: {
-    [TreeId.Oak]: { weight: 30, maxHeight: 60 },
-    [TreeId.Birch]: { weight: 20, maxHeight: 60 },
-    [TreeId.Pine]: { weight: 20, minHeight: 60 },
-    [TreeId.Knotwood]: { weight: 5, maxHeight: 60 },
-    [TreeId.Maple]: { weight: 5, maxHeight: 60 },
+    [TreeId.General]: { weight: 20, maxHeight: 60 },
+    [TreeId.Oak]: { weight: 20, maxHeight: 60 },
+    [TreeId.Eucalyptus]: { weight: 20, maxHeight: 60 },
+    [TreeId.Willow]: {
+      weight: 20,
+      maxHeight: 60,
+      waterAffinity: 0.8,
+      waterSearchRadius: 100,
+      waterMaxDistance: 80,
+    },
+    [TreeId.Maple]: { weight: 20, maxHeight: 60 },
+    [TreeId.Mahogany]: { weight: 20, maxHeight: 60 },
+    [TreeId.Magic]: { weight: 20, maxHeight: 60 },
+    [TreeId.Bamboo]: { weight: 20 },
   },
   density: 5,
   minSpacing: 5,
@@ -58,8 +67,6 @@ const FOREST_TREE_CONFIG: BiomeTreeConfig = {
 const CANYON_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
   trees: {
-    [TreeId.Oak]: { weight: 20 },
-    [TreeId.Dead]: { weight: 25 },
     [TreeId.Palm]: {
       weight: 25,
       waterAffinity: 0.8,
@@ -72,6 +79,7 @@ const CANYON_TREE_CONFIG: BiomeTreeConfig = {
       waterSearchRadius: 100,
       waterMaxDistance: 80,
     },
+    [TreeId.Dead]: { weight: 25 },
   },
   density: 2,
   minSpacing: 60,
@@ -84,9 +92,9 @@ const TUNDRA_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
   enableSnow: true,
   trees: {
-    [TreeId.PineSnow]: { weight: 40, minHeight: 38 },
-    [TreeId.PineDead]: { weight: 20, minHeight: 38 },
-    [TreeId.Pine]: { weight: 15, minHeight: 35 },
+    [TreeId.Pine]: { weight: 50, minHeight: 35 },
+    [TreeId.PineDead]: { weight: 30, minHeight: 38 },
+    [TreeId.Dead]: { weight: 20, minHeight: 38 },
   },
   density: 5,
   minSpacing: 5,

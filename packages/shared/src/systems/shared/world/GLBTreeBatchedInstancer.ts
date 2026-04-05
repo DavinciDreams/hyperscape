@@ -16,8 +16,6 @@
 
 import THREE from "../../../extras/three/three";
 import type { World } from "../../../core/World";
-import { TREE_TYPES, treeIdToSubType } from "../../../constants/TreeTypes";
-import type { TreeTypeDefinition } from "../../../constants/TreeTypes";
 import { SNOW_BIOMES } from "./TerrainBiomeTypes";
 import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
@@ -94,7 +92,6 @@ interface TreeTypePool {
   yOffset: number;
   modelHeight: number;
   modelRadius: number;
-  snowCapable: boolean;
 }
 
 const resourceLOD = getLODDistances("tree");
@@ -348,12 +345,6 @@ async function ensureTreeTypePool(
   if (pending) return pending;
 
   const promise = (async (): Promise<TreeTypePool> => {
-    const treeDef = (TREE_TYPES as Record<string, TreeTypeDefinition>)[
-      treeType
-    ];
-    const isSnowCapable = !!treeDef?.snowCapable;
-    const hasSnowVertexData = !!treeDef?.snowVertexData;
-
     const dissolveOpts = {
       fadeStart: GPU_VEG_CONFIG.FADE_START,
       fadeEnd: GPU_VEG_CONFIG.FADE_END,
@@ -364,15 +355,9 @@ async function ensureTreeTypePool(
     };
 
     function buildMaterialForPart(p: MeshPart): DissolveMaterial {
-      const isLeaf =
-        !!(p.material as any).transparent ||
-        (p.material as any).side === THREE.DoubleSide;
       const dm = createTreeDissolveMaterial(p.material, {
         ...dissolveOpts,
         batched: true,
-        isLeafMaterial: isLeaf,
-        enableSnow: isSnowCapable,
-        snowVertexData: hasSnowVertexData,
       } as TreeMaterialOptions);
       dm.side = THREE.DoubleSide;
       enableTextureRepeat(dm);
@@ -497,7 +482,6 @@ async function ensureTreeTypePool(
       yOffset: bounds.yOffset,
       modelHeight: bounds.height,
       modelRadius: bounds.radius,
-      snowCapable: isSnowCapable,
     };
     pools.set(treeType, pool);
 
@@ -658,7 +642,7 @@ export async function addInstance(
     }
 
     let snowWeight = 0;
-    if (pool.snowCapable) {
+    {
       const terrain = world!.getSystem<any>("terrain");
       if (terrain?.computeBiomeWeightsByPosition) {
         const weights = terrain.computeBiomeWeightsByPosition(

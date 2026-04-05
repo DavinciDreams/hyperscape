@@ -269,12 +269,8 @@ async function ensureModelPool(
       parts: MeshPart[],
     ): { geometry: THREE.BufferGeometry; material: DissolveMaterial }[] {
       return parts.map((p) => {
-        const isLeaf =
-          !!(p.material as any).transparent ||
-          (p.material as any).side === THREE.DoubleSide;
         const dm = createTreeDissolveMaterial(p.material, {
           ...dissolveOpts,
-          isLeafMaterial: isLeaf,
         } as TreeMaterialOptions);
         dm.side = THREE.DoubleSide;
         enableTextureRepeat(dm);
