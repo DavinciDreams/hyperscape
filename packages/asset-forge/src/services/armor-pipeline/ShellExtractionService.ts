@@ -139,6 +139,7 @@ export class ShellExtractionService {
       avatarHeight,
       skinnedMesh,
       vrmScene,
+      vrm,
     };
   }
 

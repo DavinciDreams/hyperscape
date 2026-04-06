@@ -63,10 +63,19 @@ type Stage =
 
 interface TierGeneratorTabProps {
   onAddToKit?: (shell: ShellMesh, texturedGlbUrl: string) => void;
+  sharedExtraction?: ShellExtractionResult | null;
+  onExtract?: (
+    avatarUrl: string,
+    onProgress?: (
+      p: import("../../services/armor-pipeline/types").ShellExtractionProgress,
+    ) => void,
+  ) => Promise<ShellExtractionResult>;
 }
 
 export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
   onAddToKit,
+  sharedExtraction,
+  onExtract,
 }) => {
   const viewerRef = useRef<ShellPreviewViewerRef>(null);
   const shellServiceRef = useRef<ShellExtractionService | null>(null);
@@ -143,16 +152,24 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
         textureServiceRef.current = new ArmorTextureService();
       }
 
-      // Step 1: Extract shell (or reuse)
-      let result = extractionResult;
+      // Step 1: Extract shell (use shared cache or extract locally)
+      let result = extractionResult ?? sharedExtraction ?? null;
       if (!result || result.avatarHeight === 0) {
-        addLog("Extracting shell from avatar...");
-        result = await shellServiceRef.current.extractShells(
-          avatarUrl,
-          ALL_SLOTS,
-          ALL_BULKS,
-          (prog) => addLog(prog.message),
-        );
+        if (onExtract) {
+          addLog("Extracting shell from avatar (shared)...");
+          result = await onExtract(avatarUrl, (prog) => addLog(prog.message));
+        } else {
+          if (!shellServiceRef.current) {
+            shellServiceRef.current = new ShellExtractionService();
+          }
+          addLog("Extracting shell from avatar...");
+          result = await shellServiceRef.current.extractShells(
+            avatarUrl,
+            ALL_SLOTS,
+            ALL_BULKS,
+            (prog) => addLog(prog.message),
+          );
+        }
         setExtractionResult(result);
         addLog(`Shell extraction complete. ${result.shells.size} shells.`);
       } else {

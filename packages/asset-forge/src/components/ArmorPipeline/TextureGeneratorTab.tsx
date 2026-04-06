@@ -85,12 +85,22 @@ type Stage =
   | "error";
 
 interface TextureGeneratorTabProps {
-  /** Callback when user clicks "Add to Kit" after texturing completes */
   onAddToKit?: (shell: ShellMesh, texturedGlbUrl: string) => void;
+  /** Shared extraction cache from parent — avoids re-extracting */
+  sharedExtraction?: ShellExtractionResult | null;
+  /** Shared extraction function from parent */
+  onExtract?: (
+    avatarUrl: string,
+    onProgress?: (
+      p: import("../../services/armor-pipeline/types").ShellExtractionProgress,
+    ) => void,
+  ) => Promise<ShellExtractionResult>;
 }
 
 export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
   onAddToKit,
+  sharedExtraction,
+  onExtract,
 }) => {
   const viewerRef = useRef<ShellPreviewViewerRef>(null);
   const shellServiceRef = useRef<ShellExtractionService | null>(null);
@@ -144,19 +154,30 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
         textureServiceRef.current = new ArmorTextureService();
       }
 
-      // Step 1: Extract shell (or reuse existing)
-      let result = extractionResult;
+      // Step 1: Extract shell (use shared cache or extract locally)
+      let result = extractionResult ?? sharedExtraction ?? null;
       if (!result || result.avatarHeight === 0) {
-        addLog("Extracting shell from avatar...");
-        result = await shellServiceRef.current.extractShells(
-          avatarUrl,
-          ALL_SLOTS,
-          ALL_BULKS,
-          (prog) => {
-            setProgress(prog.progress * 25); // 0-25%
+        if (onExtract) {
+          addLog("Extracting shell from avatar (shared)...");
+          result = await onExtract(avatarUrl, (prog) => {
+            setProgress(prog.progress * 25);
             addLog(prog.message);
-          },
-        );
+          });
+        } else {
+          if (!shellServiceRef.current) {
+            shellServiceRef.current = new ShellExtractionService();
+          }
+          addLog("Extracting shell from avatar...");
+          result = await shellServiceRef.current.extractShells(
+            avatarUrl,
+            ALL_SLOTS,
+            ALL_BULKS,
+            (prog) => {
+              setProgress(prog.progress * 25);
+              addLog(prog.message);
+            },
+          );
+        }
         setExtractionResult(result);
         addLog(`Shell extraction complete. ${result.shells.size} shells.`);
       } else {

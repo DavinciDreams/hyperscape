@@ -1,4 +1,4 @@
-import type { EquipmentSlotName, BulkClass } from "./types";
+import type { EquipmentSlotName, BulkClass, AttachmentSlotDef } from "./types";
 
 /** Available VRM avatars (served from /game-assets/avatars/) */
 export const AVATAR_OPTIONS: { label: string; url: string }[] = [
@@ -31,6 +31,101 @@ export const ANIMATION_URLS = {
   walking: "/rigs/animations/walking.glb",
   running: "/rigs/animations/running.glb",
 } as const;
+
+/** Predefined 3D attachment points on the avatar skeleton.
+ *  Each maps to a VRM humanoid bone with default positioning. */
+export const ATTACHMENT_SLOTS: AttachmentSlotDef[] = [
+  {
+    id: "left_pauldron",
+    label: "Left Pauldron",
+    boneName: "leftUpperArm",
+    defaultOffset: { x: 0, y: 0.05, z: 0 },
+    defaultScale: 0.15,
+    promptSuggestion:
+      "ornate metal shoulder pauldron armor piece, single piece, fantasy RPG style, game asset",
+  },
+  {
+    id: "right_pauldron",
+    label: "Right Pauldron",
+    boneName: "rightUpperArm",
+    defaultOffset: { x: 0, y: 0.05, z: 0 },
+    defaultScale: 0.15,
+    promptSuggestion:
+      "ornate metal shoulder pauldron armor piece, single piece, fantasy RPG style, game asset",
+  },
+  {
+    id: "chest_emblem",
+    label: "Chest Emblem",
+    boneName: "upperChest",
+    defaultOffset: { x: 0, y: 0, z: 0.08 },
+    defaultScale: 0.1,
+    promptSuggestion:
+      "medieval chest emblem crest, ornate metal medallion, fantasy RPG, game asset",
+  },
+  {
+    id: "back_piece",
+    label: "Back Piece",
+    boneName: "upperChest",
+    defaultOffset: { x: 0, y: 0.05, z: -0.1 },
+    defaultScale: 0.2,
+    promptSuggestion:
+      "back cape attachment plate, ornamental wings or shield mount, fantasy RPG, game asset",
+  },
+  {
+    id: "belt_buckle",
+    label: "Belt Buckle",
+    boneName: "hips",
+    defaultOffset: { x: 0, y: 0.02, z: 0.08 },
+    defaultScale: 0.08,
+    promptSuggestion:
+      "ornate belt buckle with pouches, medieval fantasy, game asset",
+  },
+  {
+    id: "left_knee",
+    label: "Left Knee Guard",
+    boneName: "leftLowerLeg",
+    defaultOffset: { x: 0, y: 0.08, z: 0.04 },
+    defaultScale: 0.08,
+    promptSuggestion:
+      "metal knee guard armor piece, single piece, fantasy RPG style, game asset",
+  },
+  {
+    id: "right_knee",
+    label: "Right Knee Guard",
+    boneName: "rightLowerLeg",
+    defaultOffset: { x: 0, y: 0.08, z: 0.04 },
+    defaultScale: 0.08,
+    promptSuggestion:
+      "metal knee guard armor piece, single piece, fantasy RPG style, game asset",
+  },
+  {
+    id: "helmet_crest",
+    label: "Helmet Crest",
+    boneName: "head",
+    defaultOffset: { x: 0, y: 0.15, z: 0 },
+    defaultScale: 0.15,
+    promptSuggestion:
+      "helmet crest plume or horns, ornamental headpiece, fantasy RPG, game asset",
+  },
+  {
+    id: "left_gauntlet",
+    label: "Left Gauntlet",
+    boneName: "leftHand",
+    defaultOffset: { x: 0, y: 0, z: 0 },
+    defaultScale: 0.08,
+    promptSuggestion:
+      "armored gauntlet, metal hand armor with knuckle plates, fantasy RPG, game asset",
+  },
+  {
+    id: "right_gauntlet",
+    label: "Right Gauntlet",
+    boneName: "rightHand",
+    defaultOffset: { x: 0, y: 0, z: 0 },
+    defaultScale: 0.08,
+    promptSuggestion:
+      "armored gauntlet, metal hand armor with knuckle plates, fantasy RPG, game asset",
+  },
+];
 
 /** RuneScape-style material tier definitions */
 export interface MaterialTier {

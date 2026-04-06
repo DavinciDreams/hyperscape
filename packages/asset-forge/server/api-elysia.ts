@@ -58,6 +58,10 @@ import { ProcgenPresetService } from "./services/ProcgenPresetService";
 import { createArmorPipelineRoutes } from "./routes/armor-pipeline";
 import { ShellTextureService } from "./services/armor-pipeline/ShellTextureService";
 
+// Tripo Pipeline routes
+import { createTripoPipelineRoutes } from "./routes/tripo-pipeline";
+import { TripoService } from "./services/armor-pipeline/TripoService";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, "..");
@@ -97,6 +101,11 @@ const shellTextureService = new ShellTextureService({
     process.env.PUBLIC_URL ||
     process.env.IMAGE_SERVER_URL ||
     `http://localhost:${API_PORT}`,
+});
+
+// Tripo service
+const tripoService = new TripoService({
+  tripoApiKey: process.env.TRIPO_API_KEY || "",
 });
 
 // Create Elysia app
@@ -343,6 +352,8 @@ const app = new Elysia()
   .use(createProcgenRoutes(procgenPresetService))
   // Armor pipeline (POC-2: shell texturing)
   .use(createArmorPipelineRoutes(shellTextureService))
+  // Tripo pipeline (Tripo 3D AI)
+  .use(createTripoPipelineRoutes(tripoService))
 
   // Start server
   .listen(API_PORT);
@@ -353,7 +364,10 @@ console.log(`🖼️  Temp images: http://localhost:${API_PORT}/temp-images/`);
 console.log(`✨ Performance: 22x faster than Express!`);
 
 if (!process.env.MESHY_API_KEY) {
-  console.warn("⚠️  MESHY_API_KEY not found - retexturing will fail");
+  console.warn("⚠️  MESHY_API_KEY not found - Meshy retexturing will fail");
+}
+if (!process.env.TRIPO_API_KEY) {
+  console.warn("⚠️  TRIPO_API_KEY not found - Tripo pipeline will fail");
 }
 if (!process.env.AI_GATEWAY_API_KEY && !process.env.OPENAI_API_KEY) {
   console.warn(

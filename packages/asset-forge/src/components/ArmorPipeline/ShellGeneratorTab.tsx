@@ -30,7 +30,18 @@ import {
 
 type ViewMode = "regions" | "shell" | "all-shells";
 
-export const ShellGeneratorTab: React.FC = () => {
+interface ShellGeneratorTabProps {
+  sharedExtraction?: ShellExtractionResult | null;
+  onExtract?: (
+    avatarUrl: string,
+    onProgress?: (p: ShellExtractionProgress) => void,
+  ) => Promise<ShellExtractionResult>;
+}
+
+export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
+  sharedExtraction,
+  onExtract,
+}) => {
   const viewerRef = useRef<ShellPreviewViewerRef>(null);
   const serviceRef = useRef<ShellExtractionService | null>(null);
 
@@ -69,23 +80,31 @@ export const ShellGeneratorTab: React.FC = () => {
     setLogs([]);
 
     try {
-      if (!serviceRef.current) {
-        serviceRef.current = new ShellExtractionService();
-      }
-
       const slots = Array.from(selectedSlots);
-
       addLog(`Starting extraction for ${slots.join(", ")} on ${avatarUrl}`);
 
-      const extractionResult = await serviceRef.current.extractShells(
-        avatarUrl,
-        slots,
-        ALL_BULKS,
-        (prog) => {
+      let extractionResult: ShellExtractionResult;
+
+      if (onExtract) {
+        // Use shared extraction (caches at page level)
+        extractionResult = await onExtract(avatarUrl, (prog) => {
           setProgress(prog);
           addLog(prog.message);
-        },
-      );
+        });
+      } else {
+        if (!serviceRef.current) {
+          serviceRef.current = new ShellExtractionService();
+        }
+        extractionResult = await serviceRef.current.extractShells(
+          avatarUrl,
+          slots,
+          ALL_BULKS,
+          (prog) => {
+            setProgress(prog);
+            addLog(prog.message);
+          },
+        );
+      }
 
       setResult(extractionResult);
       addLog(
@@ -108,7 +127,7 @@ export const ShellGeneratorTab: React.FC = () => {
     } finally {
       setIsExtracting(false);
     }
-  }, [avatarUrl, selectedSlots, addLog]);
+  }, [avatarUrl, selectedSlots, addLog, onExtract]);
 
   const handleExportShell = useCallback(async () => {
     if (!result || !serviceRef.current) return;

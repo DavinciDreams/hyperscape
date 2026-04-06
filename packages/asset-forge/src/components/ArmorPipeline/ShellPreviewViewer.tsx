@@ -55,6 +55,26 @@ export interface ShellPreviewViewerRef {
   setArmorPieceVisible: (key: string, visible: boolean) => void;
   /** Remove all armor pieces (keeps avatar) */
   clearArmorPieces: () => void;
+  /** Add a rigid mesh parented to a specific VRM bone (for 3D attachments) */
+  addBoneAttachment: (
+    key: string,
+    object: THREE.Object3D,
+    boneName: string,
+    offset?: THREE.Vector3,
+    rotation?: THREE.Euler,
+    scale?: number,
+  ) => void;
+  /** Update position/rotation/scale of a bone attachment */
+  updateAttachmentTransform: (
+    key: string,
+    offset: THREE.Vector3,
+    rotation: THREE.Euler,
+    scale: number,
+  ) => void;
+  /** Remove a bone attachment */
+  removeBoneAttachment: (key: string) => void;
+  /** Remove all bone attachments */
+  clearBoneAttachments: () => void;
   /** Load and play a Mixamo animation GLB, retargeted to the VRM */
   playAnimation: (animUrl: string) => Promise<void>;
   /** Stop all playing animations */
@@ -94,6 +114,10 @@ export const ShellPreviewViewer = forwardRef<
   const vrmSceneRef = useRef<THREE.Object3D | null>(null);
   /** Armor pieces added to the VRM scene, keyed by slot (e.g. "body_plate") */
   const armorPiecesRef = useRef<Map<string, THREE.SkinnedMesh>>(new Map());
+  /** Bone-parented attachments (rigid pieces attached to specific bones) */
+  const boneAttachmentsRef = useRef<
+    Map<string, { object: THREE.Object3D; boneName: string }>
+  >(new Map());
 
   useEffect(() => {
     const container = containerRef.current;
@@ -530,6 +554,8 @@ export const ShellPreviewViewer = forwardRef<
         mixerRef.current.stopAllAction();
         mixerRef.current = null;
       }
+      // Clear bone attachments before removing VRM (bones go away with VRM)
+      boneAttachmentsRef.current.clear();
       vrmRef.current = null;
       vrmSceneRef.current = null;
       armorPiecesRef.current.clear();
@@ -554,6 +580,159 @@ export const ShellPreviewViewer = forwardRef<
           (child.material as THREE.MeshStandardMaterial).opacity = opacity;
         }
       });
+    },
+
+    // ── Bone Attachments (rigid meshes parented to bones) ──────────────
+
+    addBoneAttachment(
+      key: string,
+      object: THREE.Object3D,
+      boneName: string,
+      offset?: THREE.Vector3,
+      rotation?: THREE.Euler,
+      scale?: number,
+    ) {
+      const vrm = vrmRef.current;
+      if (!vrm) {
+        console.warn(
+          "[ShellPreviewViewer] Cannot add bone attachment — no VRM loaded. Call setupAvatar first.",
+        );
+        return;
+      }
+
+      // Remove existing attachment with same key
+      const existing = boneAttachmentsRef.current.get(key);
+      if (existing) {
+        existing.object.parent?.remove(existing.object);
+        existing.object.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry?.dispose();
+            if (Array.isArray(child.material))
+              child.material.forEach((m) => m.dispose());
+            else child.material?.dispose();
+          }
+        });
+      }
+
+      // Try to find the bone: first try raw bone (actual scene node),
+      // then fall back to normalized bone node.
+      // Raw bones work better for attachments because they're in world space.
+      let bone: THREE.Object3D | null = null;
+
+      // Search the VRM scene for a bone node matching the name
+      const vrmScene = vrmSceneRef.current;
+      if (vrmScene) {
+        vrmScene.traverse((child) => {
+          if (bone) return;
+          const childName = child.name.toLowerCase();
+          const target = boneName.toLowerCase();
+          // Match common bone naming patterns:
+          // "leftShoulder" → "leftshoulder", "Left_Shoulder", "J_Bip_L_Shoulder", etc.
+          if (
+            childName === target ||
+            childName.includes(target) ||
+            childName.replace(/[_\-\s]/g, "") === target
+          ) {
+            bone = child;
+          }
+        });
+      }
+
+      // Fallback to normalized bone node
+      if (!bone) {
+        bone =
+          vrm.humanoid?.getNormalizedBoneNode(
+            boneName as Parameters<
+              typeof vrm.humanoid.getNormalizedBoneNode
+            >[0],
+          ) ?? null;
+      }
+
+      if (!bone) {
+        console.warn(
+          `[ShellPreviewViewer] Bone "${boneName}" not found in scene or VRM humanoid`,
+        );
+        return;
+      }
+
+      // Log bone world position for debugging
+      const boneWorldPos = new THREE.Vector3();
+      bone.getWorldPosition(boneWorldPos);
+      console.log(
+        `[ShellPreviewViewer] Attaching "${key}" to bone "${bone.name}" at world pos`,
+        boneWorldPos.toArray().map((v) => v.toFixed(3)),
+      );
+
+      // Apply transform
+      if (offset) object.position.copy(offset);
+      if (rotation) object.rotation.copy(rotation);
+      if (scale !== undefined) object.scale.setScalar(scale);
+
+      // Ensure double-sided materials and visible rendering
+      object.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach((m) => {
+              m.side = THREE.DoubleSide;
+              m.depthWrite = true;
+              m.depthTest = true;
+            });
+          } else {
+            child.material.side = THREE.DoubleSide;
+            child.material.depthWrite = true;
+            child.material.depthTest = true;
+          }
+        }
+      });
+
+      object.name = `attachment_${key}`;
+      bone.add(object);
+      boneAttachmentsRef.current.set(key, { object, boneName: bone.name });
+    },
+
+    updateAttachmentTransform(
+      key: string,
+      offset: THREE.Vector3,
+      rotation: THREE.Euler,
+      scale: number,
+    ) {
+      const entry = boneAttachmentsRef.current.get(key);
+      if (!entry) return;
+      entry.object.position.copy(offset);
+      entry.object.rotation.copy(rotation);
+      entry.object.scale.setScalar(scale);
+    },
+
+    removeBoneAttachment(key: string) {
+      const entry = boneAttachmentsRef.current.get(key);
+      if (!entry) return;
+
+      entry.object.parent?.remove(entry.object);
+      entry.object.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry?.dispose();
+          if (Array.isArray(child.material))
+            child.material.forEach((m) => m.dispose());
+          else child.material?.dispose();
+        }
+      });
+
+      boneAttachmentsRef.current.delete(key);
+    },
+
+    clearBoneAttachments() {
+      for (const [_key, entry] of boneAttachmentsRef.current) {
+        entry.object.parent?.remove(entry.object);
+        entry.object.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry?.dispose();
+            if (Array.isArray(child.material))
+              child.material.forEach((m) => m.dispose());
+            else child.material?.dispose();
+          }
+        });
+      }
+      boneAttachmentsRef.current.clear();
     },
 
     // ── POC-3: Animation methods ───────────────────────────────────────
