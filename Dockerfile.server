@@ -11,6 +11,8 @@
 
 # ─── Builder ────────────────────────────────────────────────────────────────
 
+FROM node:22-bookworm-slim AS node-build-tools
+
 FROM oven/bun:1.1.38-debian AS builder
 
 RUN apt-get update && apt-get install -y \
@@ -24,6 +26,11 @@ WORKDIR /app
 ENV CI=true \
     SKIP_ASSETS=true \
     HYPERSCAPE_SKIP_BROWSER_INSTALL=true
+
+# Vite 8 requires Node 20.19+ or 22.12+. Bun 1.1.38 reports Node 22.6.0 when
+# running Vite-backed scripts, so copy in a current real Node binary for those
+# build steps while keeping Bun pinned for installs and the rest of the build.
+COPY --from=node-build-tools /usr/local/bin/node /usr/local/bin/node
 
 # Root manifests.
 COPY package.json bun.lock turbo.json tsconfig.json ./
@@ -66,8 +73,8 @@ RUN bun -e " \
     fs.writeFileSync(f, JSON.stringify(p, null, 2)); \
   }"
 
-# Match the repo's pinned Bun version and CI install mode. `--trust` can hang
-# in container builds, while the frozen install path already passes in CI.
+# Match CI's stable install mode. `--trust` can hang in container builds,
+# while the frozen install path already passes in CI.
 RUN bun install --frozen-lockfile
 
 # Bun may hoist workspace deps without materializing per-package node_modules.
@@ -80,13 +87,15 @@ RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
 # Build workspace packages in dependency order.
 RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/decimation && bun run build && \
-    cd /app/packages/impostors && bun run build && \
+    cd /app/packages/impostors && tsc --project tsconfig.build.json && \
+    node ../../node_modules/vite/bin/vite.js build --config vite.lib.config.ts && \
     cd /app/packages/procgen && (bun run build || true) && \
     cd /app/packages/shared && bun run build && \
     cd /app/packages/plugin-hyperscape && bun run build && \
     cd /app/packages/web3 && bun run build && \
     cd /app/packages/server && bun run build && \
-    cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' bun run build:cf
+    cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' \
+    node ../../node_modules/vite/bin/vite.js build
 
 # ─── Runtime ────────────────────────────────────────────────────────────────
 #
