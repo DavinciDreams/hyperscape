@@ -87,7 +87,7 @@ describe("EmbeddedAgentControlScreen", () => {
       },
     );
 
-    global.fetch = fetchMock as typeof fetch;
+    global.fetch = fetchMock as unknown as typeof fetch;
     window.postMessage = vi.fn();
 
     render(<EmbeddedAgentControlScreen />);

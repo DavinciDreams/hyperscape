@@ -462,8 +462,9 @@ describe("ChainWriterBridge - Player Deaths", () => {
   });
 
   it("queues death on player:died event", () => {
-    world.emit("player:died", {
-      playerId: "player-123",
+    world.emit("entity:death", {
+      entityId: "player-123",
+      entityType: "player",
       killedBy: "goblin-456",
     });
 
@@ -471,8 +472,9 @@ describe("ChainWriterBridge - Player Deaths", () => {
   });
 
   it("ignores invalid player:died payloads", () => {
-    world.emit("player:died", { playerId: null });
-    world.emit("player:died", {});
+    world.emit("entity:death", { entityId: null, entityType: "player" });
+    world.emit("entity:death", {});
+    world.emit("entity:death", { entityId: "npc-1", entityType: "npc" });
 
     expect(chainWriter.queueDeath).not.toHaveBeenCalled();
   });

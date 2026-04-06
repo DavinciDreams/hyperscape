@@ -290,6 +290,7 @@ export class ChainWriterBridge {
         killedBy?: string;
       };
       if (data.entityType !== "player") return;
+      if (!data.entityId) return;
       if (!this.shouldMirrorPlayer(data.entityId)) return;
       this.chainWriter.queueDeath(data.entityId);
     });

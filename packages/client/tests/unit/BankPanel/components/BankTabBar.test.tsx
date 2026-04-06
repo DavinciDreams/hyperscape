@@ -13,6 +13,10 @@ import type {
 } from "../../../../src/game/panels/BankPanel/types";
 import type { DragState } from "../../../../src/game/panels/BankPanel/hooks";
 import { TAB_INDEX_ALL } from "../../../../src/game/panels/BankPanel/constants";
+import {
+  getInteractiveTileStyle,
+  hyperscapeTheme,
+} from "../../../../src/ui/theme/themes";
 
 describe("BankTabBar", () => {
   const mockOnSelectTab = vi.fn();
@@ -126,21 +130,17 @@ describe("BankTabBar", () => {
     });
 
     it("highlights selected All tab", () => {
-      const { container } = render(
-        <BankTabBar {...defaultProps} selectedTab={TAB_INDEX_ALL} />,
-      );
+      render(<BankTabBar {...defaultProps} selectedTab={TAB_INDEX_ALL} />);
 
       const allTab = screen.getByText("∞").closest("button");
-      // Selected tab uses theme decorative color #b88828 (may render as hex or rgb depending on env)
-      expect(allTab?.style.background).toMatch(/(#b88828|rgb\(184, 136, 40\))/);
+      expect(allTab?.style.background).toContain("168, 148, 115");
     });
 
     it("highlights selected numbered tab", () => {
       render(<BankTabBar {...defaultProps} selectedTab={0} />);
 
       const tab0 = screen.getByText("⚔️").closest("button");
-      // Selected tab uses theme decorative color #b88828 (may render as hex or rgb depending on env)
-      expect(tab0?.style.background).toMatch(/(#b88828|rgb\(184, 136, 40\))/);
+      expect(tab0?.style.background).toContain("168, 148, 115");
     });
   });
 
@@ -327,8 +327,14 @@ describe("BankTabBar", () => {
       render(<BankTabBar {...defaultProps} dragState={dragState} />);
 
       const plusButton = screen.getByText("+").closest("button");
-      // Theme success color with opacity: rgba(74, 222, 128, 0.3)
-      expect(plusButton?.style.background).toContain("74, 222, 128");
+      const expectedBackground = String(
+        getInteractiveTileStyle(hyperscapeTheme, {
+          hovered: true,
+          radius: hyperscapeTheme.borderRadius.sm,
+          accentColor: hyperscapeTheme.colors.state.success,
+        }).background,
+      );
+      expect(plusButton?.style.background).toBe(expectedBackground);
     });
   });
 
