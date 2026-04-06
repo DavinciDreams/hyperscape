@@ -78,8 +78,15 @@ RUN bun -e " \
 RUN bun install --frozen-lockfile
 
 # Bun may hoist workspace deps without materializing per-package node_modules.
-# Create the runtime COPY sources explicitly so missing dirs don't break builds.
-RUN mkdir -p packages/web3/node_modules packages/client/node_modules
+# Create every runtime COPY source explicitly so missing dirs don't break builds.
+RUN mkdir -p \
+    packages/server/node_modules \
+    packages/shared/node_modules \
+    packages/procgen/node_modules \
+    packages/impostors/node_modules \
+    packages/plugin-hyperscape/node_modules \
+    packages/web3/node_modules \
+    packages/client/node_modules
 
 # Download game asset manifests (bypass CDN reliance on boot).
 RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
