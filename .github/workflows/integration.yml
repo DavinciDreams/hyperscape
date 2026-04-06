@@ -47,11 +47,6 @@ jobs:
         with:
           bun-version: 1.1.38
 
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.2.3
-
       - name: Install dependencies
         run: |
           for i in 1 2 3 4 5; do
