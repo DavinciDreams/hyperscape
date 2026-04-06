@@ -146,6 +146,7 @@ deployer-keypair.json
 # Scratch/debug scripts
 test-node-options.js
 packages/server/scripts/test-fastify-static.mjs
+packages/server/scripts/test_*.ts
 
 # Local server state
 packages/server/.hyperscape-storage.json
