@@ -23,7 +23,8 @@ export default defineConfig({
       exclude: ["**/*.test.{ts,tsx}", "**/index.ts"],
     },
     testTimeout: 10000,
-    pool: "forks",
+    // Fork workers trip ERR_REQUIRE_ASYNC_MODULE on jsdom's ESM graph in CI.
+    pool: "threads",
   },
   resolve: {
     alias: {

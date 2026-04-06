@@ -185,7 +185,7 @@ jobs:
     name: Docker Build
     runs-on: ubuntu-latest
     needs: [build]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/hackathon')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -196,10 +196,12 @@ jobs:
       - name: Determine environment
         id: env
         run: |
-          if [ "${{ github.ref_name }}" = "staging" ]; then
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "env_tag=production" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_name }}" = "staging" ]; then
             echo "env_tag=staging" >> $GITHUB_OUTPUT
           else
-            echo "env_tag=production" >> $GITHUB_OUTPUT
+            echo "env_tag=development" >> $GITHUB_OUTPUT
           fi
 
       - name: Build Docker image
