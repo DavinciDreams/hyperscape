@@ -239,28 +239,28 @@ export class ClientGraphics extends System {
         this.world.stage.scene,
         this.world.camera,
         {
-          colorGrading: {
-            enabled: true,
-            lut: colorGradingLut as
-              | "none"
-              | "cinematic"
-              | "bourbon"
-              | "chemical"
-              | "clayton"
-              | "cubicle"
-              | "remy"
-              | "bw"
-              | "night",
-            intensity: colorGradingIntensity,
-          },
-          depthBlur: {
-            enabled: depthBlurEnabled,
-            intensity: depthBlurIntensity,
-            focusDistance: depthBlurDistance,
-            blurRange: DEPTH_BLUR_DEFAULTS.blurRange,
-            blurAmount: DEPTH_BLUR_DEFAULTS.blurAmount,
-            blurRepeats: DEPTH_BLUR_DEFAULTS.blurRepeats,
-          },
+          //   colorGrading: {
+          //     enabled: true,
+          //     lut: colorGradingLut as
+          //       | "none"
+          //       | "cinematic"
+          //       | "bourbon"
+          //       | "chemical"
+          //       | "clayton"
+          //       | "cubicle"
+          //       | "remy"
+          //       | "bw"
+          //       | "night",
+          //     intensity: colorGradingIntensity,
+          //   },
+          // depthBlur: {
+          //   enabled: depthBlurEnabled,
+          //   intensity: depthBlurIntensity,
+          //   focusDistance: depthBlurDistance,
+          //   blurRange: DEPTH_BLUR_DEFAULTS.blurRange,
+          //   blurAmount: DEPTH_BLUR_DEFAULTS.blurAmount,
+          //   blurRepeats: DEPTH_BLUR_DEFAULTS.blurRepeats,
+          // },
         },
       );
     } else {
