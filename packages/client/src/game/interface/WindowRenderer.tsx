@@ -142,7 +142,9 @@ const WindowItem = memo(function WindowItem({
             windowId={windowState.id}
             isUnlocked={isEditMode}
           />
-        ) : isMinimap ? null /* minimap hidden for testing */ : showTabBar ? (
+        ) : isMinimap ? (
+          <MinimapWrapper world={world} isUnlocked={isEditMode} />
+        ) : showTabBar ? (
           <TabBar windowId={windowState.id} reserveArrowKeys={true} />
         ) : null}
 
