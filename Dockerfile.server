@@ -87,7 +87,7 @@ RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
 # Build workspace packages in dependency order.
 RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/decimation && bun run build && \
-    cd /app/packages/impostors && tsc --project tsconfig.build.json && \
+    cd /app/packages/impostors && node ../../node_modules/typescript/bin/tsc --project tsconfig.build.json && \
     node ../../node_modules/vite/bin/vite.js build --config vite.lib.config.ts && \
     cd /app/packages/procgen && (bun run build || true) && \
     cd /app/packages/shared && bun run build && \
