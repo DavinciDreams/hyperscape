@@ -5,13 +5,13 @@
 #
 # Issues this Dockerfile works around:
 #   1. better-sqlite3 — node-gyp fails under QEMU (stripped before install)
-#   2. Bun 1.3 workspace links — Docker COPY flattens symlinks; recreated manually
-#   3. Bun 1.3 per-package node_modules — not hoisted to root; copied explicitly
+#   2. Bun workspace links — Docker COPY flattens symlinks; recreated manually
+#   3. Bun per-package node_modules — not hoisted to root; copied explicitly
 #   4. procgen tsc — type errors cause partial emit; build continues with || true
 
 # ─── Builder ────────────────────────────────────────────────────────────────
 
-FROM oven/bun:1.3.10-debian AS builder
+FROM oven/bun:1.1.38-debian AS builder
 
 RUN apt-get update && apt-get install -y \
     python3 make g++ pkg-config \
@@ -66,7 +66,9 @@ RUN bun -e " \
     fs.writeFileSync(f, JSON.stringify(p, null, 2)); \
   }"
 
-RUN bun install --trust
+# Match the repo's pinned Bun version and CI install mode. `--trust` can hang
+# in container builds, while the frozen install path already passes in CI.
+RUN bun install --frozen-lockfile
 
 # Bun may hoist workspace deps without materializing per-package node_modules.
 # Create the runtime COPY sources explicitly so missing dirs don't break builds.
