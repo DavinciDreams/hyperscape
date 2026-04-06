@@ -19,11 +19,16 @@ import {
   AVATAR_OPTIONS,
   ANIMATION_URLS,
   SLOT_LABELS,
+  ALL_SLOTS,
+  ALL_BULKS,
 } from "../../services/armor-pipeline/constants";
 import type {
   RiggedArmorResult,
   EquipmentSlotName,
+  BulkClass,
+  ShellExtractionResult,
 } from "../../services/armor-pipeline/types";
+import { BULK_OFFSETS } from "../../services/armor-pipeline/types";
 import type { ArmorKitPiece } from "../../pages/ArmorPipelinePage";
 import {
   ShellPreviewViewer,
@@ -48,6 +53,12 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
   const [isAnimating, setIsAnimating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+
+  // Upload GLB settings (slot/bulk for standalone uploads)
+  const [uploadSlot, setUploadSlot] = useState<EquipmentSlotName>("body");
+  const [uploadBulk, setUploadBulk] = useState<BulkClass>("plate");
+  const [extractionCache, setExtractionCache] =
+    useState<ShellExtractionResult | null>(null);
 
   // Per-piece state
   const [riggedPieces, setRiggedPieces] = useState<
@@ -228,15 +239,8 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
     }
   }, [riggedPieces, visiblePieces, addLog]);
 
-  /** Load a local GLB for a specific slot */
+  /** Load a local GLB — extracts shell on the fly if no kit piece exists for the slot */
   const handleLoadGLB = useCallback(() => {
-    // For standalone testing — uses the first enabled piece's shell as reference
-    const firstKey = Array.from(enabledPieces).find((k) => armorKit.has(k));
-    if (!firstKey) {
-      setError("No kit pieces available. Texture shells in Tab 2 first.");
-      return;
-    }
-
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".glb,.gltf";
@@ -244,9 +248,7 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
       const file = input.files?.[0];
       if (!file) return;
 
-      const piece = armorKit.get(firstKey)!;
       const fileUrl = URL.createObjectURL(file);
-
       setIsRigging(true);
       setError(null);
 
@@ -256,6 +258,29 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
         if (!riggingServiceRef.current)
           riggingServiceRef.current = new ShellRiggingService();
 
+        // Get or extract shell for the selected slot/bulk
+        const shellKey = `${uploadSlot}_${uploadBulk}`;
+        let shell = armorKit.get(shellKey)?.shell;
+
+        if (!shell) {
+          // Extract shells from avatar on the fly
+          let extraction = extractionCache;
+          if (!extraction) {
+            addLog("Extracting shells from avatar (first time)...");
+            extraction = await shellServiceRef.current.extractShells(
+              avatarUrl,
+              ALL_SLOTS,
+              ALL_BULKS,
+              (prog) => addLog(prog.message),
+            );
+            setExtractionCache(extraction);
+            addLog("Shell extraction complete.");
+          }
+          shell = extraction.shells.get(shellKey);
+          if (!shell) throw new Error(`Shell not found: ${shellKey}`);
+        }
+
+        // Load VRM for rigging
         addLog(`Loading avatar: ${avatarUrl}`);
         const {
           vrm,
@@ -267,9 +292,9 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
           viewerRef.current?.setupAvatar(vrmScene, vrm as unknown as VRM);
         }
 
-        addLog(`Rigging local GLB: ${file.name}`);
+        addLog(`Rigging local GLB: ${file.name} → ${shellKey}`);
         const result = await riggingServiceRef.current.rigTexturedShell(
-          piece.shell,
+          shell,
           fileUrl,
           vrmSkeleton,
         );
@@ -290,7 +315,15 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
       }
     };
     input.click();
-  }, [avatarUrl, armorKit, enabledPieces, riggedPieces, addLog]);
+  }, [
+    avatarUrl,
+    uploadSlot,
+    uploadBulk,
+    armorKit,
+    extractionCache,
+    riggedPieces,
+    addLog,
+  ]);
 
   /** Reset everything */
   const handleReset = useCallback(() => {
@@ -426,16 +459,51 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
               )}
             </button>
 
-            <button
-              onClick={handleLoadGLB}
-              disabled={isRigging || !hasKit}
-              className="w-full px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5
-                bg-bg-secondary border border-border-primary text-text-secondary hover:text-text-primary hover:border-border-secondary
-                disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Upload size={14} />
-              Load Local GLB
-            </button>
+            {/* Upload GLB with slot/bulk selector */}
+            <div className="space-y-1.5 p-2 bg-bg-secondary rounded-lg border border-border-primary">
+              <div className="flex items-center gap-1.5">
+                <Upload size={12} className="text-text-tertiary" />
+                <span className="text-xs font-medium text-text-secondary">
+                  Upload GLB
+                </span>
+              </div>
+              <div className="flex gap-1.5">
+                <select
+                  value={uploadSlot}
+                  onChange={(e) =>
+                    setUploadSlot(e.target.value as EquipmentSlotName)
+                  }
+                  className="flex-1 bg-bg-primary border border-border-primary rounded px-1.5 py-1 text-[11px] text-text-primary"
+                >
+                  {ALL_SLOTS.map((slot) => (
+                    <option key={slot} value={slot}>
+                      {SLOT_LABELS[slot]}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={uploadBulk}
+                  onChange={(e) => setUploadBulk(e.target.value as BulkClass)}
+                  className="flex-1 bg-bg-primary border border-border-primary rounded px-1.5 py-1 text-[11px] text-text-primary"
+                >
+                  {ALL_BULKS.map((bulk) => (
+                    <option key={bulk} value={bulk}>
+                      {bulk} ({BULK_OFFSETS[bulk] * 1000}mm)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={handleLoadGLB}
+                disabled={isRigging}
+                className="w-full px-3 py-1.5 rounded text-xs font-medium transition-all flex items-center justify-center gap-1.5
+                  bg-bg-primary border border-border-primary text-text-secondary hover:text-text-primary hover:border-border-secondary
+                  disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Upload size={12} />
+                Choose GLB File
+              </button>
+            </div>
           </div>
 
           {/* Animation Controls */}

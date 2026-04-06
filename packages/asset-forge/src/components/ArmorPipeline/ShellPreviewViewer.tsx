@@ -281,21 +281,16 @@ export const ShellPreviewViewer = forwardRef<
       }
 
       avatarGroupRef.current.add(vrmScene);
-      const ghostMat = new THREE.MeshStandardMaterial({
-        color: 0x333340,
-        transparent: true,
-        opacity: 0.15,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
+      // Keep original VRM materials — just ensure double-sided rendering
       vrmScene.traverse((child) => {
         if (child instanceof THREE.Mesh || child instanceof THREE.SkinnedMesh) {
           if (Array.isArray(child.material)) {
-            child.material.forEach((m) => m.dispose());
+            child.material.forEach((m) => {
+              m.side = THREE.DoubleSide;
+            });
           } else if (child.material) {
-            child.material.dispose();
+            child.material.side = THREE.DoubleSide;
           }
-          child.material = ghostMat;
         }
       });
 
@@ -345,24 +340,16 @@ export const ShellPreviewViewer = forwardRef<
 
       avatarGroupRef.current.add(vrmScene);
 
-      // Replace avatar materials with flat dark gray — original textures bleed
-      // through transparent overlays and look like "fractures"
-      const ghostMat = new THREE.MeshStandardMaterial({
-        color: 0x333340,
-        transparent: true,
-        opacity: 0.15,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
+      // Keep original VRM materials — just ensure double-sided rendering
       vrmScene.traverse((child) => {
         if (child instanceof THREE.Mesh || child instanceof THREE.SkinnedMesh) {
-          // Dispose original material
           if (Array.isArray(child.material)) {
-            child.material.forEach((m) => m.dispose());
+            child.material.forEach((m) => {
+              m.side = THREE.DoubleSide;
+            });
           } else if (child.material) {
-            child.material.dispose();
+            child.material.side = THREE.DoubleSide;
           }
-          child.material = ghostMat;
         }
       });
 

@@ -1,9 +1,10 @@
-import { Layers, Wand2, Package, Paintbrush } from "lucide-react";
+import { Layers, Wand2, Package, Paintbrush, Crown } from "lucide-react";
 import React, { useState, useCallback } from "react";
 
 import { ArmorPreviewTab } from "@/components/ArmorPipeline/ArmorPreviewTab";
 import { ShellGeneratorTab } from "@/components/ArmorPipeline/ShellGeneratorTab";
 import { TextureGeneratorTab } from "@/components/ArmorPipeline/TextureGeneratorTab";
+import { TierGeneratorTab } from "@/components/ArmorPipeline/TierGeneratorTab";
 import type { ShellMesh } from "@/services/armor-pipeline/types";
 
 /** A textured armor piece ready for rigging */
@@ -12,7 +13,7 @@ export interface ArmorKitPiece {
   texturedUrl: string;
 }
 
-type PipelineTab = "shells" | "textures" | "tripo" | "preview";
+type PipelineTab = "shells" | "textures" | "tiers" | "tripo" | "preview";
 
 const TABS: {
   id: PipelineTab;
@@ -31,6 +32,12 @@ const TABS: {
     label: "Texture Generator",
     icon: Paintbrush,
     description: "POC-2: AI texture generation on shells via Meshy",
+  },
+  {
+    id: "tiers",
+    label: "Tier Generator",
+    icon: Crown,
+    description: "Generate bronze → rune tier variants from one shell",
   },
   {
     id: "tripo",
@@ -109,6 +116,9 @@ export const ArmorPipelinePage: React.FC = () => {
         {activeTab === "shells" && <ShellGeneratorTab />}
         {activeTab === "textures" && (
           <TextureGeneratorTab onAddToKit={handleAddToKit} />
+        )}
+        {activeTab === "tiers" && (
+          <TierGeneratorTab onAddToKit={handleAddToKit} />
         )}
         {activeTab === "tripo" && (
           <div className="flex items-center justify-center h-full text-text-tertiary">

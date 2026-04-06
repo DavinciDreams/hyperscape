@@ -115,6 +115,51 @@ export class ArmorTextureService {
   }
 
   /**
+   * Start multiple retexture tasks for the same shell with different prompts.
+   * The shell is uploaded once and reused for all tiers via a server-side batch endpoint.
+   */
+  async startBatchTexture(
+    glbBlob: Blob,
+    filename: string,
+    tiers: { tierId: string; prompt: string }[],
+    options?: { aiModel?: string },
+  ): Promise<{ tierId: string; taskId: string }[]> {
+    const formData = new FormData();
+    formData.append("file", glbBlob, filename);
+    formData.append("tiers", JSON.stringify(tiers));
+    if (options?.aiModel) {
+      formData.append("aiModel", options.aiModel);
+    }
+
+    const response = await fetch(
+      `${API_BASE}/armor-pipeline/texture-shell-batch`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(
+        `Start batch texture failed (${response.status}): ${err}`,
+      );
+    }
+
+    const result = (await response.json()) as {
+      success: boolean;
+      tasks: { tierId: string; taskId: string }[];
+      error?: string;
+    };
+
+    if (!result.success) {
+      throw new Error(result.error ?? "Start batch texture failed");
+    }
+
+    return result.tasks;
+  }
+
+  /**
    * Get the proxied download URL for a completed texture task.
    */
   getDownloadUrl(taskId: string): string {
