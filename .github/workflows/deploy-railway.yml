@@ -54,7 +54,7 @@ jobs:
       RAILWAY_STAGING_ENVIRONMENT_ID: ${{ vars.RAILWAY_STAGING_ENVIRONMENT_ID }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.deploy_ref || github.sha }}
 
