@@ -40,6 +40,21 @@ const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 
+// ---- Per-instance frustum culling (Option B: setVisibleAt) ----
+// We build a world-space bounding sphere per tree slot each frame and call
+// setVisibleAt(id, false) for slots outside the frustum or beyond the far fade
+// distance. This is safe with sortObjects=false because setVisibleAt only marks
+// slots; it does not remove them from the buffer, so the indirect drawIndex →
+// instanceId mapping never shifts (avoiding the tree-swap bug from perObjectFrustumCulled).
+const _cullFrustum = new THREE.Frustum();
+const _cullProjScreenMatrix = new THREE.Matrix4();
+const _cullSphere = new THREE.Sphere();
+// Extra world-space padding beyond the tree's computed radius to avoid pops at edges.
+const TREE_CULL_SPHERE_BUFFER = 4; // meters
+// Max squared distance beyond which trees are always invisible (matches shader FADE_END).
+const TREE_MAX_RENDER_DIST = GPU_VEG_CONFIG.FADE_END;
+const TREE_MAX_RENDER_DIST_SQ = TREE_MAX_RENDER_DIST * TREE_MAX_RENDER_DIST;
+
 // ---- Batch color channel layout ----
 // R = highlight intensity (1.0 = normal, >1.0 = highlighted via HL_COLOR_INTENSITY)
 // G = biome snow weight (0.0 = no snow, 1.0 = full snow) — set once on add/LOD swap
@@ -207,7 +222,7 @@ function computeModelBounds(
   const height = bbox.max.y - bbox.min.y;
   const dx = Math.max(Math.abs(bbox.min.x), Math.abs(bbox.max.x));
   const dz = Math.max(Math.abs(bbox.min.z), Math.abs(bbox.max.z));
-  return { yOffset: -bbox.min.y, height, radius: Math.max(dx, dz) };
+  return { yOffset: 0, height, radius: Math.max(dx, dz) };
 }
 
 async function loadLODParts(path: string): Promise<MeshPart[] | null> {
@@ -940,6 +955,50 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
   // Tick dissolve animations — runs AFTER LOD transitions above so that
   // applyDissolveValue always finds the entity in its current (post-swap) pool.
   tickDissolveAnims(dissolveAnims, deltaTime, applyDissolveValue);
+
+  // ---- Per-instance frustum + distance culling ----
+  // Build camera frustum once for all trees this frame.
+  _cullProjScreenMatrix.multiplyMatrices(
+    camera.projectionMatrix,
+    camera.matrixWorldInverse,
+  );
+  _cullFrustum.setFromProjectionMatrix(_cullProjScreenMatrix);
+
+  for (const pool of pools.values()) {
+    for (const slot of pool.instances.values()) {
+      const lodPool = getLodPool(pool, slot);
+      if (!lodPool) continue;
+      const ids = lodPool.instanceIds.get(slot.entityId);
+      if (!ids) continue;
+
+      // Quick distance check from camera (horizontal only, same as LOD loop).
+      const dx = camPos.x - slot.position.x;
+      const dz = camPos.z - slot.position.z;
+      const distSq = dx * dx + dz * dz;
+
+      let visible: boolean;
+      if (distSq > TREE_MAX_RENDER_DIST_SQ) {
+        // Beyond shader fade end — always invisible.
+        visible = false;
+      } else {
+        // Frustum sphere test. Center at mid-height so tall canopies aren't culled
+        // while the tree base is still just inside the frustum.
+        _cullSphere.center.set(
+          slot.position.x,
+          slot.position.y + pool.modelHeight * slot.scale * 0.5,
+          slot.position.z,
+        );
+        _cullSphere.radius =
+          Math.max(pool.modelRadius, pool.modelHeight * 0.5) * slot.scale +
+          TREE_CULL_SPHERE_BUFFER;
+        visible = _cullFrustum.intersectsSphere(_cullSphere);
+      }
+
+      for (let i = 0; i < lodPool.batches.length; i++) {
+        lodPool.batches[i].setVisibleAt(ids[i], visible);
+      }
+    }
+  }
 
   // Update dissolve uniforms
   const camY = camPos.y;

@@ -982,7 +982,7 @@ export type TreeMaterialOptions = DissolveMaterialOptions;
  * Extends DissolveMaterial with:
  * - Quantized 3-band toon lighting (hard-edged shadow / mid / bright)
  * - Hard-edged Fresnel rim on leaves
- * - Back-SSS translucency for leaves (warm glow when backlit by sun)
+ * - Optional leaf SSS (disabled via ENABLE_TREE_SSS in createTreeDissolveMaterial)
  * - Wind vertex animation for leaves
  * - Vertex-color AO (G channel darkens crevices)
  * - Per-instance rim highlight
@@ -1000,10 +1000,10 @@ export type TreeDissolveMaterial = DissolveMaterial & {
 };
 
 /**
- * Creates a tree dissolve material with toon lighting, SSS, and wind.
+ * Creates a tree dissolve material with toon lighting, wind, and optional SSS.
  *
  * Vertex color channel convention (all trees):
- *   R = leafMask (0 = bark, 1 = leaf) — wind, sphere normals, SSS
+ *   R = leafMask (0 = bark, 1 = leaf) — wind; SSS when ENABLE_TREE_SSS
  *   G = AO (ambient occlusion) — darkening + snow weight modulation
  *   B = unused
  *
@@ -1043,7 +1043,7 @@ export function createTreeDissolveMaterial(
 
   // --- Tuning ---
   const AO_POWER = 1.8;
-  const AO_DARK = 0.1;
+  const AO_DARK = 0.2;
   const SNOW_COLOR: [number, number, number] = [0.92, 0.95, 0.98];
   const SNOW_AO_TINT: [number, number, number] = [0.55, 0.6, 0.72];
   const SNOW_THRESHOLD = 0.15;
@@ -1059,6 +1059,8 @@ export function createTreeDissolveMaterial(
   const TOON_RIM_THRESHOLD = 0.3;
   const TOON_RIM_BRIGHT = 1.3;
   const NIGHT_MIN_BRIGHTNESS = NIGHT.BRIGHTNESS;
+  /** Leaf back-scatter translucency (disabled = no extra warm glow when backlit). */
+  const ENABLE_TREE_SSS = true;
 
   // --- Wind vertex displacement ---
   // Modulated by leafMask from vertex color R so bark stays still.
@@ -1147,7 +1149,7 @@ export function createTreeDissolveMaterial(
     const snowWeight = mul(snowMask, biomeSnowStrength);
     baseAlbedo = mix(baseAlbedo, snowCol, snowWeight);
 
-    // ---- dayFactor (drives night fading of SSS, saturation) ----
+    // ---- dayFactor (night fading for rim / saturation; SSS when enabled) ----
     const sunI = clamp(uSunIntensity, float(0.0), float(2.0));
     const dayFactor = div(sunI, float(2.0));
 
@@ -1181,16 +1183,18 @@ export function createTreeDissolveMaterial(
     const aoMul = mix(float(AO_DARK), float(1.0), aoFactor);
     let result: any = mul(mul(toonColor, nightDim), aoMul);
 
-    // ---- SSS + hard-edged toon rim (leaf only, scaled by dayFactor) ----
+    // ---- View vector (toon rim); optional leaf SSS when ENABLE_TREE_SSS ----
     const V = normalize(sub(cameraPosition, positionWorld));
 
-    const backL = normalize(sub(vec3(0, 0, 0), L));
-    const backSSS = clamp(dot(V, backL), float(0), float(1));
-    const sssFactor = mul(
-      mul(pow(backSSS, float(3.0)), float(0.12)),
-      mul(dayFactor, leafMask),
-    );
-    result = add(result, mul(vec3(0.95, 1.0, 0.7), sssFactor));
+    if (ENABLE_TREE_SSS) {
+      const backL = normalize(sub(vec3(0, 0, 0), L));
+      const backSSS = clamp(dot(V, backL), float(0), float(1));
+      const sssFactor = mul(
+        mul(pow(backSSS, float(3.0)), float(0.12)),
+        mul(dayFactor, leafMask),
+      );
+      result = add(result, mul(vec3(0.95, 1.0, 0.7), sssFactor));
+    }
 
     const EDotN = clamp(dot(V, N), float(0.0), float(1.0));
     const rimMask = sub(float(1.0), step(float(TOON_RIM_THRESHOLD), EDotN));
