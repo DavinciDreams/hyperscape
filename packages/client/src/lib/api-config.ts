@@ -6,8 +6,8 @@
  * overridden at runtime by /env.js.
  *
  * In production builds (vite build):
- *   - GAME_API_URL = https://hyperscape.gg
- *   - GAME_WS_URL = wss://hyperscape.gg/ws
+ *   - GAME_API_URL = https://hyperscape-production.up.railway.app
+ *   - GAME_WS_URL = wss://hyperscape-production.up.railway.app/ws
  *   - CDN_URL = https://assets.hyperscape.club
  *
  * In development (vite dev):
@@ -33,9 +33,9 @@ const LOCAL_DEV_ELIZAOS_URL = "http://localhost:5555";
 const LOCAL_DEV_GAME_API_URL = "http://localhost:5555";
 const LOCAL_DEV_GAME_WS_URL = "ws://localhost:5556/ws";
 const LOCAL_DEV_CDN_URL = "http://localhost:5555/game-assets";
-const PRODUCTION_ELIZAOS_URL = "https://hyperscape.gg";
-const PRODUCTION_GAME_API_URL = "https://hyperscape.gg";
-const PRODUCTION_GAME_WS_URL = "wss://hyperscape.gg/ws";
+const PRODUCTION_ELIZAOS_URL = "https://hyperscape-production.up.railway.app";
+const PRODUCTION_GAME_API_URL = "https://hyperscape-production.up.railway.app";
+const PRODUCTION_GAME_WS_URL = "wss://hyperscape-production.up.railway.app/ws";
 const PRODUCTION_CDN_URL = "https://assets.hyperscape.club";
 
 export type ApiConfigResolutionInput = {

@@ -40,13 +40,24 @@
         const isInternalCapture = isTruthyUrlFlag(
           searchParams.get("internalCapture"),
         );
+        const productionHosts = [
+          "hyperscape.club",
+          "www.hyperscape.club",
+          "hyperscape.gg",
+          "www.hyperscape.gg",
+        ];
         const isLoopbackHost = [
           "localhost",
           "127.0.0.1",
           "0.0.0.0",
           "::1",
         ].includes(window.location.hostname);
-        const shouldResetLocalCaches = isInternalCapture || isLoopbackHost;
+        const shouldResetProductionCaches =
+          productionHosts.includes(window.location.hostname) &&
+          !localStorage.getItem("__hyperscape_prod_sw_reset_20260406__");
+        const shouldResetLocalCaches =
+          isInternalCapture || isLoopbackHost || shouldResetProductionCaches;
+        const storageKey = "__hyperscape_prod_sw_reset_20260406__";
         const reloadMarker = "__hyperscape_stream_sw_reset__";
         let shouldReload = false;
 
@@ -65,7 +76,7 @@
               );
               shouldReload = true;
               console.log(
-                `[stream.html] Unregistered ${registrations.length} local service worker(s)`,
+                `[stream.html] Unregistered ${registrations.length} stale service worker(s)`,
               );
             }
           } catch (error) {
@@ -90,7 +101,7 @@
               );
               shouldReload = true;
               console.log(
-                `[stream.html] Cleared ${localCacheKeys.length} local cache bucket(s)`,
+                `[stream.html] Cleared ${localCacheKeys.length} stale cache bucket(s)`,
               );
             }
           } catch (error) {
@@ -98,6 +109,9 @@
           }
         }
 
+        if (shouldResetProductionCaches) {
+          localStorage.setItem(storageKey, "1");
+        }
         if (shouldReload && !sessionStorage.getItem(reloadMarker)) {
           sessionStorage.setItem(reloadMarker, "1");
           window.location.reload();

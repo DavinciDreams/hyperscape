@@ -2,16 +2,22 @@ import { describe, expect, it } from "vitest";
 import { resolveApiConfig } from "../../../src/lib/api-config";
 
 describe("resolveApiConfig", () => {
-  it("uses hyperscape.gg defaults in production", () => {
+  it("uses Railway API defaults in production", () => {
     const result = resolveApiConfig({
       prod: true,
       runtimeEnv: {},
       buildEnv: {},
     });
 
-    expect(result.elizaOsUrl).toBe("https://hyperscape.gg");
-    expect(result.gameApiUrl).toBe("https://hyperscape.gg");
-    expect(result.gameWsUrl).toBe("wss://hyperscape.gg/ws");
+    expect(result.elizaOsUrl).toBe(
+      "https://hyperscape-production.up.railway.app",
+    );
+    expect(result.gameApiUrl).toBe(
+      "https://hyperscape-production.up.railway.app",
+    );
+    expect(result.gameWsUrl).toBe(
+      "wss://hyperscape-production.up.railway.app/ws",
+    );
     expect(result.cdnUrl).toBe("https://assets.hyperscape.club");
   });
 

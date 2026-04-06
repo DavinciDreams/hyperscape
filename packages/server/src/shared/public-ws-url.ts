@@ -1,6 +1,8 @@
-const PRODUCTION_HYPERSCAPE_APP_URL = "https://hyperscape.gg";
-const PRODUCTION_HYPERSCAPE_API_URL = "https://hyperscape.gg";
-const PRODUCTION_HYPERSCAPE_WS_URL = "wss://hyperscape.gg/ws";
+const PRODUCTION_HYPERSCAPE_APP_URL = "https://hyperscape.club";
+const PRODUCTION_HYPERSCAPE_API_URL =
+  "https://hyperscape-production.up.railway.app";
+const PRODUCTION_HYPERSCAPE_WS_URL =
+  "wss://hyperscape-production.up.railway.app/ws";
 const LOCAL_DEV_HYPERSCAPE_APP_URL = "http://localhost:3333";
 const LOCAL_DEV_HYPERSCAPE_API_URL = "http://localhost:4001";
 
