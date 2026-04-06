@@ -34,11 +34,28 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      - name: Check portal content
+        id: portal
+        run: |
+          if [ -d downloads ] && find downloads -mindepth 1 -print -quit | grep -q .; then
+            echo "has_content=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_content=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Download portal skipped"
+              echo ""
+              echo "- No \`downloads/\` content is present on this ref."
+              echo "- Add files under \`downloads/\` or publish a release to deploy the portal."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload portal artifact
+        if: steps.portal.outputs.has_content == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: downloads
 
       - name: Deploy
+        if: steps.portal.outputs.has_content == 'true'
         id: deploy
         uses: actions/deploy-pages@v4

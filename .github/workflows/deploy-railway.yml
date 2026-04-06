@@ -103,6 +103,7 @@ jobs:
           fi
 
       - name: Trigger Railway Deployment
+        id: trigger
         run: |
           echo "📦 Triggering deployment to ${{ steps.target.outputs.environment }}..."
           RESPONSE=$(curl -s -X POST https://backboard.railway.com/graphql/v2 \
@@ -110,17 +111,38 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.RAILWAY_TOKEN }}" \
             -d '{"query":"mutation { serviceInstanceRedeploy(environmentId: \"${{ steps.target.outputs.environment_id }}\", serviceId: \"${{ steps.target.outputs.service_id }}\") }"}')
           echo "Response: $RESPONSE"
+
           if echo "$RESPONSE" | grep -q '"serviceInstanceRedeploy":true'; then
+            echo "triggered=true" >> $GITHUB_OUTPUT
             echo "✅ Deployment triggered successfully"
+          elif echo "$RESPONSE" | grep -q '"Not Authorized"'; then
+            echo "triggered=false" >> $GITHUB_OUTPUT
+            echo "::warning::Railway token is not authorized for the ${{ steps.target.outputs.environment }} deployment target; refresh the token or trigger the deployment manually in Railway."
+            {
+              echo "### Railway deployment skipped"
+              echo ""
+              echo "- Target: \`${{ steps.target.outputs.environment }}\`"
+              echo "- Reason: Railway API returned \`Not Authorized\` for service \`${{ steps.target.outputs.service_id }}\` in environment \`${{ steps.target.outputs.environment_id }}\`."
+              echo "- Action: refresh \`RAILWAY_TOKEN\` access for this Railway project or trigger the deployment manually in Railway."
+              if [ "${{ steps.target.outputs.environment }}" = "prod" ]; then
+                echo "- Production note: the public Railway service may remain stale or unavailable until a manual deployment succeeds."
+              else
+                echo "- Non-production note: Docker validation should be used as the branch gate until credentials are refreshed."
+              fi
+            } >> $GITHUB_STEP_SUMMARY
+            exit 0
           else
+            echo "triggered=false" >> $GITHUB_OUTPUT
             echo "❌ Failed to trigger deployment"
             exit 1
           fi
 
       - name: Wait for deployment to start
+        if: steps.trigger.outputs.triggered == 'true'
         run: sleep 10
 
       - name: Check deployment status
+        if: steps.trigger.outputs.triggered == 'true'
         run: |
           for i in {1..5}; do
             RESPONSE=$(curl -s -X POST https://backboard.railway.com/graphql/v2 \
