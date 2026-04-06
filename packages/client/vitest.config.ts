@@ -51,8 +51,9 @@ export default defineConfig({
     },
     // Timeout for async operations
     testTimeout: 10000,
-    // Pool configuration for faster tests
-    pool: "forks",
+    // jsdom + forks trips ERR_REQUIRE_ASYNC_MODULE in CI on newer Vitest.
+    // Keep the browser-like environment, but use thread workers instead.
+    pool: "threads",
   },
   resolve: {
     alias: {
