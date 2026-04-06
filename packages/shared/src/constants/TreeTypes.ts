@@ -8,8 +8,9 @@
  * To rename a tree type: change the key/enum and update the manifest ID.
  * To remove a tree type: delete the entry from both.
  *
- * The manifest (woodcutting.json) must have a matching "id" entry that equals
- * the TreeId enum value for each tree type listed here.
+ * The manifest (`assets/manifests/gathering/woodcutting.json`) must list each
+ * choppable tree; `TreeId` values match manifest `"id"` fields. GLB paths use
+ * `asset://models/trees/<folder>/...` per on-disk layout under `models/trees/`.
  *
  * Per-biome tree configs (distribution, placement, density) live in
  * TerrainBiomeTypes.ts alongside the BiomeType enum.
@@ -32,7 +33,6 @@ export enum TreeId {
   General = "tree_general",
   Magic = "tree_magic",
   Mahogany = "tree_mahogany",
-  Willow = "tree_willow",
 }
 
 /** Extract the subtype key from a TreeId (e.g. TreeId.Oak → "oak") */
@@ -95,10 +95,9 @@ export const TREE_TYPES = {
   general: { name: "Tree", levelRequired: 1 },
   magic: { name: "Magic Tree", levelRequired: 60 },
   mahogany: { name: "Mahogany Tree", levelRequired: 50 },
-  willow: { name: "Willow Tree", levelRequired: 30 },
 } as const satisfies Record<string, TreeTypeDefinition>;
 
-/** All valid tree subtype keys (e.g., "oak", "willow") */
+/** All valid tree subtype keys (e.g., "oak", "maple") */
 export type TreeSubType = keyof typeof TREE_TYPES;
 
 /** All valid tree subtype keys as a runtime array */
