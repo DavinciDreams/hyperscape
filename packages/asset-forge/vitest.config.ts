@@ -10,7 +10,9 @@ export default defineConfig({
   plugins: [react() as never],
   test: {
     globals: true,
-    environment: "jsdom",
+    // Unit tests here are data/service-only; browser coverage uses the dedicated
+    // browser/playwright config instead of booting jsdom in worker pools.
+    environment: "node",
     include: ["tests/**/*.test.{ts,tsx}"],
     exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**"],
     coverage: {
@@ -23,8 +25,6 @@ export default defineConfig({
       exclude: ["**/*.test.{ts,tsx}", "**/index.ts"],
     },
     testTimeout: 10000,
-    // Fork workers trip ERR_REQUIRE_ASYNC_MODULE on jsdom's ESM graph in CI.
-    pool: "threads",
   },
   resolve: {
     alias: {
