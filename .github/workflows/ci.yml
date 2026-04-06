@@ -78,7 +78,7 @@ jobs:
           bun-version: 1.1.38
 
       - name: Cache Turbo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: turbo-test-${{ runner.os }}-${{ github.sha }}
@@ -146,7 +146,7 @@ jobs:
           bun-version: 1.1.38
 
       - name: Cache Turbo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: turbo-build-${{ runner.os }}-${{ github.sha }}
@@ -165,7 +165,7 @@ jobs:
         run: bunx turbo run build --filter=!@hyperscape/app
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-artifacts
           path: |
@@ -186,7 +186,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Determine environment
         id: env
@@ -200,7 +200,7 @@ jobs:
           fi
 
       - name: Build Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.server
