@@ -125,6 +125,7 @@ export function BankTabBar({
       <button
         onClick={() => onSelectTab(TAB_INDEX_ALL)}
         className="px-2 py-1.5 rounded-t text-xs font-bold transition-colors flex-shrink-0"
+        title="View all items across all tabs"
         style={{
           background:
             selectedTab === TAB_INDEX_ALL
@@ -235,10 +236,14 @@ export function BankTabBar({
           const isPlaceholderIcon = iconItem && iconItem.quantity === 0;
           // Tab 0 can't be deleted, only custom tabs (1-9)
           const canDelete = tabIndex > 0;
+          const tooltipLabel = iconItem
+            ? `${formatItemName(iconItem.itemId)}${isPlaceholderIcon ? " (empty)" : ""}${canDelete ? " - Right-click to delete" : ""}`
+            : `Tab ${tabIndex}${canDelete ? " - Right-click to delete" : ""}`;
           return (
             <button
               key={tabIndex}
               onClick={() => onSelectTab(tabIndex)}
+              title={tooltipLabel}
               onContextMenu={(e) => {
                 e.preventDefault();
                 if (canDelete) {
@@ -317,9 +322,7 @@ export function BankTabBar({
               onMouseEnter={(e) => {
                 setHoveredButton(`tab-${tabIndex}`);
                 setHoverTooltip({
-                  label: iconItem
-                    ? `${formatItemName(iconItem.itemId)}${isPlaceholderIcon ? " (empty)" : ""}${canDelete ? " - Right-click to delete" : ""}`
-                    : `Tab ${tabIndex}${canDelete ? " - Right-click to delete" : ""}`,
+                  label: tooltipLabel,
                   position: { x: e.clientX, y: e.clientY },
                 });
               }}
@@ -380,6 +383,7 @@ export function BankTabBar({
             setHoveredTabIndex(null);
           }}
           className="px-2 py-1.5 rounded-t text-xs font-bold transition-colors flex-shrink-0"
+          title="Drag an item here to create a new tab"
           style={{
             background:
               hoveredTabIndex === TAB_INDEX_NEW_TAB_HOVER

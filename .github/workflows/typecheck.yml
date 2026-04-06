@@ -2,9 +2,9 @@ name: TypeScript Type Check
 
 on:
   push:
-    branches: [main, staging, develop, hackathon]
+    branches: [main, staging, develop, dev, hackathon]
   pull_request:
-    branches: [main, staging, develop, hackathon]
+    branches: [main, staging, develop, dev, hackathon]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -41,9 +41,9 @@ export interface BankSlotItemProps {
   onDragEnd: () => void;
   onClick: (itemId: string, tabIndex: number, slot: number) => void;
   onContextMenu: (e: React.MouseEvent, item: BankItem) => void;
-  onHoverStart: (item: BankItem, position: { x: number; y: number }) => void;
-  onHoverMove: (position: { x: number; y: number }) => void;
-  onHoverEnd: () => void;
+  onHoverStart?: (item: BankItem, position: { x: number; y: number }) => void;
+  onHoverMove?: (position: { x: number; y: number }) => void;
+  onHoverEnd?: () => void;
 }
 
 /**
@@ -70,13 +70,16 @@ export const BankSlotItem = memo(function BankSlotItem({
   onDragEnd,
   onClick,
   onContextMenu,
-  onHoverStart,
-  onHoverMove,
-  onHoverEnd,
+  onHoverStart = () => {},
+  onHoverMove = () => {},
+  onHoverEnd = () => {},
 }: BankSlotItemProps) {
   const theme = useThemeStore((s) => s.theme);
   const isPlaceholder = item.quantity === 0;
   const [isHovered, setIsHovered] = useState(false);
+  const slotTitle = isPlaceholder
+    ? `${formatItemName(item.itemId)} (placeholder)`
+    : `${formatItemName(item.itemId)} x${item.quantity} (Tab ${itemTabIndex})`;
   const tileStyle = getInteractiveTileStyle(theme, {
     hovered: isHovered && !isDragging && !isPlaceholder,
     dragging: isDragging,
@@ -101,6 +104,7 @@ export const BankSlotItem = memo(function BankSlotItem({
           ? `${tileStyle.boxShadow ?? ""}, 0 0 12px rgba(${dropColor}, 0.5)`
           : tileStyle.boxShadow,
       }}
+      title={slotTitle}
       draggable={true}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";

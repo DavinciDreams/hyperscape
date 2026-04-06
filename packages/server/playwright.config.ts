@@ -72,7 +72,7 @@ export default defineConfig({
     ? undefined
     : {
         command:
-          "env -u NO_COLOR PLAYWRIGHT_TEST=true AUTO_START_AGENTS=false SPAWN_MODEL_AGENTS=false DISABLE_AI=true DISABLE_BOTS=true DUEL_BETTING_ENABLED=false bun --preload ./src/shared/polyfills.ts ./dist/index.js",
+          "env -u NO_COLOR PLAYWRIGHT_TEST=true AUTO_START_AGENTS=false SPAWN_MODEL_AGENTS=false DISABLE_AI=true DISABLE_BOTS=true DUEL_BETTING_ENABLED=false node --import ./scripts/register-hooks.mjs ./dist/index.js",
         port: serverPort,
         timeout: 120 * 1000, // 2 minutes to start
         reuseExistingServer,
