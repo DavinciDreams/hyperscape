@@ -135,6 +135,7 @@ function DroppableEquipmentSlot({
       type="button"
       data-equipment-slot={slot.key}
       data-slot-empty={isEmpty ? "true" : "false"}
+      title={slotTitle}
       aria-label={
         slot.item
           ? `${slot.item.name} equipped in ${slot.label} slot`

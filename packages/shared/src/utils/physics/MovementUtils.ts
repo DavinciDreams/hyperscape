@@ -48,7 +48,7 @@ export const MovementConfig: IMovementConfig = {
   stepHeight: 0.3,
 
   /** Maximum slope angle player can walk up (degrees) */
-  slopeLimit: 45,
+  slopeLimit: 60,
 
   // ============================================
   // Networking Configuration

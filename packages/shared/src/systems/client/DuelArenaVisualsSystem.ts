@@ -18,7 +18,7 @@
  * - 6 rectangular arenas in a 2x3 grid
  * - Each arena is 20m wide x 24m long
  * - 4m gap between arenas
- * - Base coordinates: x=60, z=80 (near spawn)
+ * - Base coordinates: see arena-layout.ts (single source of truth)
  */
 
 import THREE, {
@@ -69,16 +69,6 @@ const FENCE_RAIL_DEPTH = 0.08;
 const FENCE_RAIL_HEIGHTS = [0.3, 0.75, 1.2];
 const FLOOR_THICKNESS = 0.3;
 const FLOOR_HEIGHT_OFFSET = 0.27;
-
-const LOBBY_CENTER_X = 105;
-const LOBBY_CENTER_Z = 62;
-const LOBBY_WIDTH = 40;
-const LOBBY_LENGTH = 25;
-
-const HOSPITAL_CENTER_X = 65;
-const HOSPITAL_CENTER_Z = 62;
-const HOSPITAL_WIDTH = 30;
-const HOSPITAL_LENGTH = 25;
 
 const LOBBY_FLOOR_COLOR = 0xc9b896;
 const HOSPITAL_FLOOR_COLOR = 0xffffff;
@@ -919,9 +909,9 @@ export class DuelArenaVisualsSystem extends System {
       );
     }
 
-    // Lobby corner pillars (4)
-    const lobbyHW = LOBBY_WIDTH / 2;
-    const lobbyHL = LOBBY_LENGTH / 2;
+    // Lobby corner pillars (4) — inset by half the pillar base so they sit exactly at the floor corner
+    const lobbyHW = LOBBY_WIDTH / 2 - PILLAR_BASE_SIZE / 2;
+    const lobbyHL = LOBBY_LENGTH / 2 - PILLAR_BASE_SIZE / 2;
     for (const c of [
       { x: LOBBY_CENTER_X - lobbyHW, z: LOBBY_CENTER_Z - lobbyHL },
       { x: LOBBY_CENTER_X + lobbyHW, z: LOBBY_CENTER_Z - lobbyHL },
@@ -934,9 +924,9 @@ export class DuelArenaVisualsSystem extends System {
       });
     }
 
-    // Hospital corner pillars (4)
-    const hospHW = HOSPITAL_WIDTH / 2;
-    const hospHL = HOSPITAL_LENGTH / 2;
+    // Hospital corner pillars (4) — same inset as lobby
+    const hospHW = HOSPITAL_WIDTH / 2 - PILLAR_BASE_SIZE / 2;
+    const hospHL = HOSPITAL_LENGTH / 2 - PILLAR_BASE_SIZE / 2;
     for (const c of [
       { x: HOSPITAL_CENTER_X - hospHW, z: HOSPITAL_CENTER_Z - hospHL },
       { x: HOSPITAL_CENTER_X + hospHW, z: HOSPITAL_CENTER_Z - hospHL },
@@ -1304,8 +1294,6 @@ export class DuelArenaVisualsSystem extends System {
     const clothMats = uniqueColors.map((c) => {
       const m = new MeshStandardNodeMaterial({
         color: c,
-        emissive: c,
-        emissiveIntensity: 0.3,
         side: THREE.DoubleSide,
       });
       this.materials.push(m);
@@ -1367,8 +1355,6 @@ export class DuelArenaVisualsSystem extends System {
       const material = new MeshStandardNodeMaterial({
         color: LOBBY_FLOOR_COLOR,
         map: tileTexture,
-        emissive: LOBBY_FLOOR_COLOR,
-        emissiveIntensity: 0.3,
       });
 
       const floor = new THREE.Mesh(geometry, material);
@@ -1476,8 +1462,6 @@ export class DuelArenaVisualsSystem extends System {
 
       const material = new MeshStandardNodeMaterial({
         color: HOSPITAL_FLOOR_COLOR,
-        emissive: HOSPITAL_FLOOR_COLOR,
-        emissiveIntensity: 0.3,
       });
 
       const floor = new THREE.Mesh(geometry, material);
@@ -1514,8 +1498,6 @@ export class DuelArenaVisualsSystem extends System {
 
     const crossMaterial = new MeshStandardNodeMaterial({
       color: 0xff0000,
-      emissive: 0xff0000,
-      emissiveIntensity: 0.5,
     });
     this.materials.push(crossMaterial);
 

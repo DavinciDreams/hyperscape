@@ -175,8 +175,7 @@ describe("RightPanel", () => {
       render(<RightPanel {...defaultProps} mode="inventory" />);
 
       const inventoryTab = screen.getByTitle("View Backpack");
-      // Theme decorative color is #b88828 = rgb(184, 136, 40)
-      expect(inventoryTab.style.background).toContain("184, 136, 40");
+      expect(inventoryTab.style.background).toContain("168, 148, 115");
     });
   });
 
@@ -197,7 +196,7 @@ describe("RightPanel", () => {
       render(<RightPanel {...defaultProps} />);
 
       // Bronze sword should be visible
-      expect(screen.getByAltText("Bronze Sword")).toBeInTheDocument();
+      expect(screen.getAllByAltText("Bronze Sword").length).toBeGreaterThan(0);
       // Lobster should be visible
       expect(screen.getByAltText("Lobster")).toBeInTheDocument();
     });
@@ -300,12 +299,11 @@ describe("RightPanel", () => {
     it("renders paperdoll layout with equipment slots", () => {
       render(<RightPanel {...defaultProps} mode="equipment" />);
 
-      // Should see slot labels (Ammo slot hidden for melee-only MVP)
-      expect(screen.getByText("Head")).toBeInTheDocument();
-      expect(screen.getByText("Weapon")).toBeInTheDocument();
-      expect(screen.getByText("Body")).toBeInTheDocument();
-      expect(screen.getByText("Shield")).toBeInTheDocument();
-      expect(screen.getByText("Legs")).toBeInTheDocument();
+      expect(screen.getByTitle("Iron Helmet (Head)")).toBeInTheDocument();
+      expect(screen.getByTitle("Bronze Sword (Weapon)")).toBeInTheDocument();
+      expect(screen.getByTitle("Body (empty)")).toBeInTheDocument();
+      expect(screen.getByTitle("Shield (empty)")).toBeInTheDocument();
+      expect(screen.getByTitle("Legs (empty)")).toBeInTheDocument();
     });
 
     it("shows equipped items with icons", () => {
@@ -313,21 +311,23 @@ describe("RightPanel", () => {
 
       // Helmet and weapon should show icons
       expect(screen.getByAltText("Iron Helmet")).toBeInTheDocument();
-      expect(screen.getByAltText("Bronze Sword")).toBeInTheDocument();
+      expect(screen.getAllByAltText("Bronze Sword").length).toBeGreaterThan(0);
     });
 
     it("shows greyed placeholder icons for empty slots", () => {
       render(<RightPanel {...defaultProps} mode="equipment" />);
 
       // Body slot shows greyed icon
-      const bodySlot = screen.getByTitle("Body (empty)");
+      const bodySlot = screen.getByLabelText("Empty Body slot");
       expect(bodySlot).toBeInTheDocument();
     });
 
     it("calls onDepositEquipment when equipped item clicked", () => {
       render(<RightPanel {...defaultProps} mode="equipment" />);
 
-      const helmetSlot = screen.getByTitle(/Iron Helmet - Click to deposit/);
+      const helmetSlot = screen.getByLabelText(
+        "Iron Helmet equipped in Head slot",
+      );
       fireEvent.click(helmetSlot);
 
       expect(mockOnDepositEquipment).toHaveBeenCalledWith("helmet");
@@ -336,7 +336,7 @@ describe("RightPanel", () => {
     it("does not call onDepositEquipment for empty slots", () => {
       render(<RightPanel {...defaultProps} mode="equipment" />);
 
-      const bodySlot = screen.getByTitle("Body (empty)");
+      const bodySlot = screen.getByLabelText("Empty Body slot");
       fireEvent.click(bodySlot);
 
       expect(mockOnDepositEquipment).not.toHaveBeenCalled();

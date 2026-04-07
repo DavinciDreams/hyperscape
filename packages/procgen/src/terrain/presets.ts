@@ -7,6 +7,7 @@
 
 import type { TerrainConfig, TerrainPreset } from "./types";
 import { DEFAULT_TERRAIN_CONFIG } from "./TerrainGenerator";
+import { DEFAULT_MAX_HEIGHT, DEFAULT_WATER_THRESHOLD } from "./constants";
 
 /**
  * Small Island preset
@@ -20,8 +21,8 @@ export const SMALL_ISLAND_PRESET: TerrainPreset = {
   config: {
     tileSize: 100,
     worldSize: 10, // 1km x 1km
-    maxHeight: 30,
-    waterThreshold: 5.4,
+    maxHeight: DEFAULT_MAX_HEIGHT,
+    waterThreshold: DEFAULT_WATER_THRESHOLD,
     island: {
       enabled: true,
       maxWorldSizeTiles: 10,
@@ -52,8 +53,8 @@ export const LARGE_ISLAND_PRESET: TerrainPreset = {
   config: {
     tileSize: 100,
     worldSize: 100, // 10km x 10km
-    maxHeight: 30,
-    waterThreshold: 5.4,
+    maxHeight: DEFAULT_MAX_HEIGHT,
+    waterThreshold: DEFAULT_WATER_THRESHOLD,
     island: {
       enabled: true,
       maxWorldSizeTiles: 100,

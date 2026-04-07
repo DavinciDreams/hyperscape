@@ -30,6 +30,7 @@ import {
   registerStreamingBettingRoutes,
 } from "./streaming-betting-routes.js";
 import { trimReplayFrames } from "./streaming-sse-buffer.js";
+import { getDefaultPublicWsUrl } from "../shared/public-ws-url.js";
 type InventorySnapshotItem = {
   slot: number;
   itemId: string;
@@ -1021,7 +1022,7 @@ export function registerStreamingRoutes(
         publicDelayMs: STREAMING_PUBLIC_DELAY_MS,
         publicDelayDefaultMs: STREAMING_PUBLIC_DELAY_DEFAULT_MS,
         publicDelayOverridden: STREAMING_PUBLIC_DELAY_OVERRIDDEN,
-        wsUrl: process.env.PUBLIC_WS_URL || "ws://localhost:5556/ws",
+        wsUrl: process.env.PUBLIC_WS_URL || getDefaultPublicWsUrl(),
         betUrl,
         bettingBridgeEnabled: process.env.DUEL_BETTING_ENABLED === "true",
       });

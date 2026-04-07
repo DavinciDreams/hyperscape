@@ -1,26 +1,29 @@
-/**
- * Runtime public env bootstrap (no secrets).
- *
- * Served as a static file from Vite public/ in dev (not proxied), so window.env exists
- * even when the game server on :5555 is down or restarting.
- *
- * Only fills defaults on loopback hosts so production (hyperscape.club, etc.) is unchanged.
- */
-(function () {
-  if (typeof window === "undefined") return;
-  var h = window.location.hostname;
-  var loopback =
-    h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
-  if (!loopback) return;
+// Runtime environment configuration
+// This file is loaded at runtime to override build-time environment variables.
+// In development, defaults are used. In production, this file is generated
+// by the deployment platform (Cloudflare Pages, Vercel, etc.) with actual values.
+//
+// Example production content:
+//   window.env = {
+//     PUBLIC_CDN_URL: "https://assets.hyperscape.club",
+//     PUBLIC_WS_URL: "wss://hyperscape-production.up.railway.app/ws",
+//     PUBLIC_API_URL: "https://hyperscape-production.up.railway.app",
+//   };
+//
+// In local Vite dev, serve sane runtime defaults so the client does not inherit
+// stale workspace-root PUBLIC_* values intended for the game server process.
+(() => {
+  const env = typeof window.env === "object" && window.env ? window.env : {};
+  const currentPort = window.location.port;
+  const isLocalDevServer =
+    currentPort === "3333" || currentPort === "4173" || currentPort === "5173";
 
-  window.env = window.env || {};
-  if (!window.env.PUBLIC_API_URL) {
-    window.env.PUBLIC_API_URL = "http://127.0.0.1:5555";
+  if (isLocalDevServer) {
+    const host = window.location.hostname || "127.0.0.1";
+    env.PUBLIC_API_URL ||= `http://${host}:5555`;
+    env.PUBLIC_WS_URL ||= `ws://${host}:5556/ws`;
+    env.PUBLIC_CDN_URL ||= `http://${host}:5555/game-assets`;
   }
-  if (!window.env.PUBLIC_WS_URL) {
-    window.env.PUBLIC_WS_URL = "ws://127.0.0.1:5556/ws";
-  }
-  if (!window.env.PUBLIC_CDN_URL) {
-    window.env.PUBLIC_CDN_URL = "http://127.0.0.1:5555/game-assets";
-  }
+
+  window.env = env;
 })();

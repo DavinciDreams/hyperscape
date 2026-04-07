@@ -37,7 +37,9 @@ vi.mock("../../../src/game/CoreUI", () => ({
 }));
 
 vi.mock("../../../src/components/common/ErrorBoundary", () => ({
-  ErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  ErrorBoundary: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
 }));
 
 vi.mock("../../../src/lib/ThreeResourceManager", () => ({
@@ -97,7 +99,11 @@ describe("GameClient", () => {
     expect(screen.getByTestId("core-ui")).toBeInTheDocument();
 
     rerender(
-      <GameClient hideUI={true} onSetup={onSetupB} onInitError={onInitErrorB} />,
+      <GameClient
+        hideUI={true}
+        onSetup={onSetupB}
+        onInitError={onInitErrorB}
+      />,
     );
 
     await waitFor(() => {

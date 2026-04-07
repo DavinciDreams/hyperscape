@@ -77,15 +77,27 @@
     // may have installed a service worker whose CacheFirst JS strategy now serves
     // HTML for chunk requests, causing MIME-type errors on dynamic imports.
     (() => {
+      const productionHosts = [
+        'hyperscape.club',
+        'www.hyperscape.club',
+        'hyperscape.gg',
+        'www.hyperscape.gg',
+        'hyperscape-production.up.railway.app',
+      ];
       const isLoopbackHost = ['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(
         window.location.hostname,
       );
-      if (!isLoopbackHost) return;
+      const shouldResetProductionCaches =
+        productionHosts.includes(window.location.hostname) &&
+        !localStorage.getItem('__hyperscape_prod_sw_reset_20260407__');
+      if (!isLoopbackHost && !shouldResetProductionCaches) return;
 
+      const storageKey = '__hyperscape_prod_sw_reset_20260407__';
       const reloadMarker = '__hyperscape_sw_reset__';
 
       void (async () => {
         let shouldReload = false;
+        const logPrefix = shouldResetProductionCaches ? '[Bootstrap]' : '[Dev]';
 
         if ('serviceWorker' in navigator) {
           try {
@@ -93,10 +105,12 @@
             if (registrations.length > 0) {
               await Promise.all(registrations.map(r => r.unregister()));
               shouldReload = true;
-              console.log('[Dev] Unregistered ' + registrations.length + ' stale service worker(s).');
+              console.log(
+                logPrefix + ' Unregistered ' + registrations.length + ' stale service worker(s).',
+              );
             }
           } catch (e) {
-            console.warn('[Dev] Failed to unregister service workers:', e);
+            console.warn(logPrefix + ' Failed to unregister service workers:', e);
           }
         }
 
@@ -109,14 +123,19 @@
             if (staleKeys.length > 0) {
               await Promise.all(staleKeys.map(k => caches.delete(k)));
               shouldReload = true;
-              console.log('[Dev] Cleared ' + staleKeys.length + ' stale cache bucket(s).');
+              console.log(
+                logPrefix + ' Cleared ' + staleKeys.length + ' stale cache bucket(s).',
+              );
             }
           } catch (e) {
-            console.warn('[Dev] Failed to clear caches:', e);
+            console.warn(logPrefix + ' Failed to clear caches:', e);
           }
         }
 
         // Reload once after cleanup so the next page load is free of stale SW interference.
+        if (shouldResetProductionCaches) {
+          localStorage.setItem(storageKey, '1');
+        }
         if (shouldReload && !sessionStorage.getItem(reloadMarker)) {
           sessionStorage.setItem(reloadMarker, '1');
           window.location.reload();

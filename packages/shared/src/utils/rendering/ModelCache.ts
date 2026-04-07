@@ -64,7 +64,7 @@ interface CachedModel {
 
 const PROCESSED_DB_NAME = "hyperscape-processed-models";
 const PROCESSED_STORE_NAME = "models";
-const PROCESSED_CACHE_VERSION = 5;
+const PROCESSED_CACHE_VERSION = 6;
 
 /** Serialized mesh data for IndexedDB storage */
 interface SerializedMesh {
@@ -75,6 +75,7 @@ interface SerializedMesh {
   uvs?: ArrayBuffer;
   uv2s?: ArrayBuffer;
   colors?: ArrayBuffer;
+  colorItemSize?: number;
   indices?: ArrayBuffer;
   indexType?: "Uint16" | "Uint32";
   skinWeights?: ArrayBuffer;
@@ -367,6 +368,18 @@ export class ModelCache {
     const meshes: SerializedMesh[] = [];
     const meshNodeToIndex = new Map<THREE.Object3D, number>();
 
+    // Copy only the typed-array VIEW's bytes — not the entire underlying
+    // ArrayBuffer. GLTF attributes are often views into one large GLB binary
+    // chunk; buffer.slice(0) would copy megabytes of unrelated data and
+    // cause deserialized geometries to have inflated vertex counts.
+    const sliceView = (
+      arr: ArrayLike<number> & {
+        buffer: ArrayBuffer;
+        byteOffset: number;
+        byteLength: number;
+      },
+    ) => arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength);
+
     // Collect all meshes and build identity map (avoids name-collision bugs)
     scene.traverse((node) => {
       if (node instanceof THREE.Mesh || node instanceof THREE.SkinnedMesh) {
@@ -375,7 +388,7 @@ export class ModelCache {
         const sm: SerializedMesh = {
           name: node.name,
           type: node instanceof THREE.SkinnedMesh ? "SkinnedMesh" : "Mesh",
-          positions: geo.getAttribute("position").array.buffer.slice(0),
+          positions: sliceView(geo.getAttribute("position").array),
           material: Array.isArray(node.material)
             ? node.material.map((m) => this.serializeMaterialProps(m))
             : this.serializeMaterialProps(node.material),
@@ -383,19 +396,22 @@ export class ModelCache {
 
         // Optional attributes
         const normals = geo.getAttribute("normal");
-        if (normals) sm.normals = normals.array.buffer.slice(0);
+        if (normals) sm.normals = sliceView(normals.array);
 
         const uvs = geo.getAttribute("uv");
-        if (uvs) sm.uvs = uvs.array.buffer.slice(0);
+        if (uvs) sm.uvs = sliceView(uvs.array);
 
         const uv2s = geo.getAttribute("uv2");
-        if (uv2s) sm.uv2s = uv2s.array.buffer.slice(0);
+        if (uv2s) sm.uv2s = sliceView(uv2s.array);
 
         const colors = geo.getAttribute("color");
-        if (colors) sm.colors = colors.array.buffer.slice(0);
+        if (colors) {
+          sm.colors = sliceView(colors.array);
+          sm.colorItemSize = colors.itemSize;
+        }
 
         if (geo.index) {
-          sm.indices = geo.index.array.buffer.slice(0);
+          sm.indices = sliceView(geo.index.array);
           sm.indexType =
             geo.index.array instanceof Uint16Array ? "Uint16" : "Uint32";
         }
@@ -404,8 +420,8 @@ export class ModelCache {
         if (node instanceof THREE.SkinnedMesh) {
           const skinWeights = geo.getAttribute("skinWeight");
           const skinIndices = geo.getAttribute("skinIndex");
-          if (skinWeights) sm.skinWeights = skinWeights.array.buffer.slice(0);
-          if (skinIndices) sm.skinIndices = skinIndices.array.buffer.slice(0);
+          if (skinWeights) sm.skinWeights = sliceView(skinWeights.array);
+          if (skinIndices) sm.skinIndices = sliceView(skinIndices.array);
         }
 
         meshes.push(sm);
@@ -620,7 +636,10 @@ export class ModelCache {
       if (sm.colors) {
         geo.setAttribute(
           "color",
-          new THREE.BufferAttribute(new Float32Array(sm.colors), 3),
+          new THREE.BufferAttribute(
+            new Float32Array(sm.colors),
+            sm.colorItemSize ?? 3,
+          ),
         );
       }
       if (sm.indices) {
@@ -1185,7 +1204,6 @@ export class ModelCache {
     const shareMaterials = options?.shareMaterials ?? true; // Default to sharing
     const generateLODs = options?.generateLODs ?? false;
     // Resolve asset:// URLs to actual URLs
-    // NOTE: World.resolveURL already adds cache-busting for localhost URLs
     let resolvedPath = world ? world.resolveURL(path) : path;
 
     // CRITICAL: If resolveURL failed (returned asset:// unchanged), manually resolve

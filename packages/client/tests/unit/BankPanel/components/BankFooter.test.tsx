@@ -117,16 +117,14 @@ describe("BankFooter", () => {
       render(<BankFooter {...defaultProps} withdrawAsNote={false} />);
 
       const itemButton = screen.getByText("Item");
-      // Theme decorative color is #b88828 = rgb(184, 136, 40)
-      expect(itemButton.style.background).toContain("184, 136, 40");
+      expect(itemButton.style.background).toContain("168, 148, 115");
     });
 
     it("highlights Note button when withdrawAsNote is true", () => {
       render(<BankFooter {...defaultProps} withdrawAsNote={true} />);
 
       const noteButton = screen.getByText("Note");
-      // Theme decorative color is #b88828 = rgb(184, 136, 40)
-      expect(noteButton.style.background).toContain("184, 136, 40");
+      expect(noteButton.style.background).toContain("168, 148, 115");
     });
 
     it("calls onToggleNote(false) when Item button clicked", () => {

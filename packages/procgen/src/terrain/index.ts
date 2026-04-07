@@ -21,6 +21,13 @@
  * ```
  */
 
+// Shared constants (single source of truth for procgen terrain defaults)
+export {
+  DEFAULT_MAX_HEIGHT,
+  DEFAULT_WATER_THRESHOLD,
+  GAME_WATER_LEVEL,
+} from "./constants";
+
 // Core generator
 export {
   TerrainGenerator,

@@ -30,7 +30,9 @@ export function isActiveStreamingGuardrailPhase(
 export function requiresStreamingArenaPositions(
   phase: StreamingGuardrailPhase | null | undefined,
 ): boolean {
-  return phase === "COUNTDOWN" || phase === "FIGHTING" || phase === "RESOLUTION";
+  return (
+    phase === "COUNTDOWN" || phase === "FIGHTING" || phase === "RESOLUTION"
+  );
 }
 
 export function hasValidStreamingGuardrailAgentSnapshot(

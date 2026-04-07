@@ -16,6 +16,7 @@ import {
   isEmbeddedSpectatorViewport,
   isStreamPageRoute,
 } from "../../runtime/clientViewportMode";
+import { getDuelArenaConfig } from "../../data/duel-manifest";
 import { RaycastService } from "./interaction/services/RaycastService";
 // CameraTarget interface moved to shared types
 
@@ -1308,11 +1309,10 @@ export class ClientCameraSystem extends SystemBase {
   /** Park the camera at the duel arena lobby when no entities exist. */
   private positionCameraAtArenaFallback(): void {
     if (this._arenaFallbackApplied || !this.camera) return;
-    // Arena lobby: default { x: 105, y: 0.42, z: 60 }
-    // We offset the camera above and behind the lobby point.
-    const lobbyX = 105;
-    const lobbyY = 0.42;
-    const lobbyZ = 60;
+    const lobby = getDuelArenaConfig().lobbySpawnPoint;
+    const lobbyX = lobby.x;
+    const lobbyY = lobby.y;
+    const lobbyZ = lobby.z;
     this.camera.position.set(lobbyX - 15, lobbyY + 20, lobbyZ + 25);
     this.camera.lookAt(lobbyX, lobbyY + 2, lobbyZ);
     this._arenaFallbackApplied = true;

@@ -2,21 +2,13 @@
  * WaterBodyRegistry — spatial index of water bodies at arbitrary elevations.
  *
  * Ocean water (terrain < WATER_THRESHOLD) is the fallback.
- * Inland water bodies (mountain ponds, highland lakes) are registered
- * explicitly with per-body surfaceY elevations.
+ * Inland water bodies (lakes, ponds) can be registered explicitly
+ * with per-body surfaceY elevations.
  *
  * Spatial grid: O(1) hash + O(K) body check where K ≈ 0-2 per cell.
  */
 
-import type { LandscapeFeatureDef } from "./TerrainHeightParams";
-import type { RiverDefinition } from "./RiverDefinition";
-import type { RiverSegmentAABB } from "./RiverUtils";
-import { projectOntoRiver, computeRiverSegmentAABBs } from "./RiverUtils";
-
-export type WaterBodySourceType =
-  | "landscape_pond"
-  | "explicit"
-  | "river_segment";
+export type WaterBodySourceType = "explicit" | "landscape_pond";
 
 export class ElevatedWaterBody {
   id: string;
@@ -46,7 +38,6 @@ export class ElevatedWaterBody {
   }
 }
 
-/** Packed grid key — no string allocation. 131072 = 2^17, enough for ±65k cells. */
 function gridKey(cx: number, cz: number): number {
   return cx * 131072 + cz;
 }
@@ -56,15 +47,12 @@ export class WaterBodyRegistry {
   private gridCellSize: number;
   private grid: Map<number, number[]> = new Map();
   private oceanLevel: number;
-  private riverDef: RiverDefinition | null = null;
-  private riverAABBs: RiverSegmentAABB[] = [];
 
   constructor(oceanLevel: number, gridCellSize = 50) {
     this.oceanLevel = oceanLevel;
     this.gridCellSize = gridCellSize;
   }
 
-  /** Register a water body and insert it into the spatial grid. */
   register(data: {
     id: string;
     centerX: number;
@@ -74,7 +62,6 @@ export class WaterBodyRegistry {
     surfaceY: number;
     sourceType: WaterBodySourceType;
   }): void {
-    // Guard against duplicate registrations
     if (this.bodies.some((b) => b.id === data.id)) {
       console.warn(
         `[WaterBodyRegistry] Duplicate water body ID "${data.id}" — skipping`,
@@ -85,7 +72,6 @@ export class WaterBodyRegistry {
     const idx = this.bodies.length;
     this.bodies.push(body);
 
-    // Insert body index into all grid cells its bounding circle overlaps
     const cs = this.gridCellSize;
     const minCX = Math.floor((body.centerX - body.radius) / cs);
     const maxCX = Math.floor((body.centerX + body.radius) / cs);
@@ -105,7 +91,6 @@ export class WaterBodyRegistry {
     }
   }
 
-  /** Get the water body containing the point, or null. If multiple overlap, returns highest surfaceY. */
   getBodyAt(worldX: number, worldZ: number): ElevatedWaterBody | null {
     const cs = this.gridCellSize;
     const cx = Math.floor(worldX / cs);
@@ -127,49 +112,16 @@ export class WaterBodyRegistry {
     return best;
   }
 
-  /** Register a river definition. Computes AABBs and enables river lookups. */
-  registerRiver(river: RiverDefinition): void {
-    this.riverDef = river;
-    this.riverAABBs = computeRiverSegmentAABBs(river);
-  }
-
-  /** Get the registered river definition, or null. */
-  getRiverDef(): RiverDefinition | null {
-    return this.riverDef;
-  }
-
-  /** Get the pre-computed river segment AABBs. */
-  getRiverAABBs(): RiverSegmentAABB[] {
-    return this.riverAABBs;
-  }
-
-  /** Get effective water surface at a world position: body surfaceY if inside one, river surfaceY if in river, else ocean level. */
   getWaterSurfaceAt(worldX: number, worldZ: number): number {
     const body = this.getBodyAt(worldX, worldZ);
     if (body) return body.surfaceY;
-
-    // Check river
-    if (this.riverDef) {
-      const proj = projectOntoRiver(
-        worldX,
-        worldZ,
-        this.riverDef,
-        this.riverAABBs,
-      );
-      if (proj && proj.dist < proj.halfWidth && !isNaN(proj.surfaceY)) {
-        return proj.surfaceY;
-      }
-    }
-
     return this.oceanLevel;
   }
 
-  /** Check if terrain at this position is underwater (below effective water surface). */
   isUnderwater(worldX: number, worldZ: number, terrainHeight: number): boolean {
     return terrainHeight < this.getWaterSurfaceAt(worldX, worldZ);
   }
 
-  /** Get all bodies whose bounding circle overlaps the given tile rectangle. */
   getBodiesInTile(
     tileX: number,
     tileZ: number,
@@ -183,7 +135,6 @@ export class WaterBodyRegistry {
     const result: ElevatedWaterBody[] = [];
     const seen = new Set<number>();
 
-    // Find all grid cells that overlap the tile AABB
     const cs = this.gridCellSize;
     const cMinX = Math.floor(minX / cs);
     const cMaxX = Math.floor(maxX / cs);
@@ -200,7 +151,6 @@ export class WaterBodyRegistry {
           seen.add(idx);
 
           const body = this.bodies[idx];
-          // AABB-circle intersection test
           const closestX = Math.max(minX, Math.min(maxX, body.centerX));
           const closestZ = Math.max(minZ, Math.min(maxZ, body.centerZ));
           const dx = closestX - body.centerX;
@@ -214,53 +164,11 @@ export class WaterBodyRegistry {
     return result;
   }
 
-  /**
-   * Check if a point is inside the river channel.
-   * Returns the interpolated surfaceY if inside, or null if outside.
-   */
-  getRiverSurfaceAt(worldX: number, worldZ: number): number | null {
-    if (!this.riverDef) return null;
-    const proj = projectOntoRiver(
-      worldX,
-      worldZ,
-      this.riverDef,
-      this.riverAABBs,
-    );
-    if (proj && proj.dist < proj.halfWidth && !isNaN(proj.surfaceY)) {
-      return proj.surfaceY;
-    }
-    return null;
-  }
-
-  /** Get all registered water bodies. */
   getAllBodies(): ReadonlyArray<ElevatedWaterBody> {
     return this.bodies;
   }
 
-  /** Get the ocean fallback level. */
   getOceanLevel(): number {
     return this.oceanLevel;
-  }
-
-  /**
-   * Sample N points around a landscape feature's rim circle and return
-   * the minimum height — the "pour point" / spill height. This becomes
-   * the water body's surfaceY (water fills up to the lowest rim point).
-   */
-  static computeRimHeight(
-    feature: LandscapeFeatureDef,
-    getHeightAt: (x: number, z: number) => number,
-    sampleCount = 64,
-  ): number {
-    let minHeight = Infinity;
-    const step = (Math.PI * 2) / sampleCount;
-    for (let i = 0; i < sampleCount; i++) {
-      const angle = i * step;
-      const sx = feature.x + Math.cos(angle) * feature.radius;
-      const sz = feature.z + Math.sin(angle) * feature.radius;
-      const h = getHeightAt(sx, sz);
-      if (Number.isFinite(h) && h < minHeight) minHeight = h;
-    }
-    return Number.isFinite(minHeight) ? minHeight : 0;
   }
 }

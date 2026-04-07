@@ -194,7 +194,7 @@ describe("BankSlotItem", () => {
       );
 
       const slot = container.firstChild as HTMLElement;
-      expect(slot.style.border).toContain("100, 200, 255");
+      expect(slot.style.boxShadow).toContain("rgba(100, 200, 255, 0.5)");
     });
 
     it("shows insert line when showInsertLine is true", () => {
@@ -231,7 +231,7 @@ describe("BankSlotItem", () => {
       );
 
       const slot = container.firstChild as HTMLElement;
-      expect(slot.style.border).toContain("100, 255, 150");
+      expect(slot.style.boxShadow).toContain("rgba(100, 255, 150, 0.5)");
     });
   });
 

@@ -12,20 +12,33 @@
  * @packageDocumentation
  */
 
-import { test, expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { completeFullLoginFlow } from "./fixtures/privy-helpers";
 import {
-  waitForGameLoad,
+  evmTest as test,
+  type HeadlessWeb3Wallet,
+} from "./fixtures/wallet-fixtures";
+import {
   waitForPlayerSpawn,
   openPanel,
   closePanel,
   takeGameScreenshot,
 } from "./utils/testWorld";
 
+const PLAYER_SPAWN_TIMEOUT_MS = 60_000;
+
+async function enterGame(
+  page: Page,
+  wallet: HeadlessWeb3Wallet,
+): Promise<void> {
+  await page.goto("/");
+  expect(await completeFullLoginFlow(page, wallet)).toBe(true);
+  await waitForPlayerSpawn(page, PLAYER_SPAWN_TIMEOUT_MS);
+}
+
 test.describe("Prayer Panel", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await waitForGameLoad(page);
-    await waitForPlayerSpawn(page);
+  test.beforeEach(async ({ page, wallet }) => {
+    await enterGame(page, wallet);
   });
 
   test("should open and close prayer panel", async ({ page }) => {
@@ -66,10 +79,8 @@ test.describe("Prayer Panel", () => {
 });
 
 test.describe("Quests Panel", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await waitForGameLoad(page);
-    await waitForPlayerSpawn(page);
+  test.beforeEach(async ({ page, wallet }) => {
+    await enterGame(page, wallet);
   });
 
   test("should open and close quests panel", async ({ page }) => {
@@ -110,10 +121,8 @@ test.describe("Quests Panel", () => {
 });
 
 test.describe("Settings Panel", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await waitForGameLoad(page);
-    await waitForPlayerSpawn(page);
+  test.beforeEach(async ({ page, wallet }) => {
+    await enterGame(page, wallet);
   });
 
   test("should open and close settings panel", async ({ page }) => {
@@ -308,10 +317,8 @@ test.describe("Bank Panel", () => {
   // Note: Bank panel requires interaction with an in-game bank NPC
   // These tests verify the panel UI once opened via game events
 
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await waitForGameLoad(page);
-    await waitForPlayerSpawn(page);
+  test.beforeEach(async ({ page, wallet }) => {
+    await enterGame(page, wallet);
   });
 
   test("bank panel structure when opened programmatically", async ({
@@ -390,10 +397,8 @@ test.describe("Bank Panel", () => {
 });
 
 test.describe("Equipment Panel", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await waitForGameLoad(page);
-    await waitForPlayerSpawn(page);
+  test.beforeEach(async ({ page, wallet }) => {
+    await enterGame(page, wallet);
   });
 
   test("should open and close equipment panel", async ({ page }) => {
@@ -433,11 +438,10 @@ test.describe("Equipment Panel", () => {
 
   test("should render the paperdoll layout on a mobile viewport", async ({
     page,
+    wallet,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/");
-    await waitForGameLoad(page);
-    await waitForPlayerSpawn(page);
+    await enterGame(page, wallet);
 
     await openPanel(page, "equipment");
     await page.waitForTimeout(500);
@@ -490,10 +494,8 @@ test.describe("Equipment Panel", () => {
 });
 
 test.describe("Combat Panel", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await waitForGameLoad(page);
-    await waitForPlayerSpawn(page);
+  test.beforeEach(async ({ page, wallet }) => {
+    await enterGame(page, wallet);
   });
 
   test("should open and close combat panel", async ({ page }) => {
