@@ -744,9 +744,14 @@ function setAssetHeaders(
     res.setHeader("Content-Type", "model/gltf-binary");
   }
 
-  // Aggressive caching for assets (immutable, 1 year)
-  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-  res.setHeader("Expires", new Date(Date.now() + 31536000000).toUTCString());
+  // Production: aggressive immutable caching (1 year).
+  // Dev: short cache with revalidation so file changes are picked up on refresh.
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Expires", new Date(Date.now() + 31536000000).toUTCString());
+  } else {
+    res.setHeader("Cache-Control", "public, max-age=60, must-revalidate");
+  }
 
   // CORS headers so cross-origin clients (e.g. Vite dev on :3333, RTMP bridge
   // browser) can fetch assets served from :5555 without triggering CORP blocks.

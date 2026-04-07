@@ -169,8 +169,8 @@ export const DEFAULT_PLACER_CONFIG: VegetationPlacerConfig = {
   steepSlopeThreshold: 0.6,
 };
 
-/** Default water threshold when not provided */
-export const DEFAULT_WATER_THRESHOLD = 5.4;
+import { DEFAULT_WATER_THRESHOLD } from "../terrain/constants";
+export { DEFAULT_WATER_THRESHOLD };
 
 /** Generator-like interface for terrain provider adapter */
 export interface TerrainGeneratorLike {

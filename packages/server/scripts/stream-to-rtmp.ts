@@ -100,9 +100,8 @@ function withViewerAccessToken(rawUrl: string): string {
 const GAME_URL_CANDIDATES = Array.from(
   new Set([GAME_URL, ...GAME_FALLBACK_URLS].map(withViewerAccessToken)),
 );
-const ALLOWED_CAPTURE_ORIGINS = resolveAllowedCaptureOrigins(
-  GAME_URL_CANDIDATES,
-);
+const ALLOWED_CAPTURE_ORIGINS =
+  resolveAllowedCaptureOrigins(GAME_URL_CANDIDATES);
 
 const BRIDGE_PORT = parseInt(process.env.RTMP_BRIDGE_PORT || "8765", 10);
 const BRIDGE_URL = `ws://localhost:${BRIDGE_PORT}`;
@@ -497,7 +496,9 @@ function assertAllowedCaptureNavigation(rawUrl: string): void {
   );
 }
 
-async function abortCaptureForUnexpectedNavigation(rawUrl: string): Promise<void> {
+async function abortCaptureForUnexpectedNavigation(
+  rawUrl: string,
+): Promise<void> {
   if (captureNavigationAbortInFlight) {
     return;
   }

@@ -39,59 +39,76 @@ export function buildBiomeConstantsJS(): string {
 const FOREST_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
   trees: {
-    [TreeId.Knotwood]: { weight: 40, maxHeight: 30 },
-    [TreeId.Oak]: { weight: 20, maxHeight: 30 },
-    [TreeId.Birch]: { weight: 20, maxHeight: 30 },
-    [TreeId.Maple]: { weight: 40, maxHeight: 30 },
-    [TreeId.Fir]: { weight: 15, maxHeight: 30 },
-    [TreeId.Pine]: { weight: 15, maxHeight: 30 },
-    [TreeId.ChinaPine]: { weight: 15, minHeight: 30, maxHeight: 60 },
-    [TreeId.Bamboo]: { weight: 15, minHeight: 35 },
+    [TreeId.General]: { weight: 50, maxHeight: 60 },
+    [TreeId.Eucalyptus]: { weight: 10, maxHeight: 60 },
+    [TreeId.Oak]: { weight: 30, maxHeight: 60 },
+    [TreeId.Mahogany]: { weight: 20, maxHeight: 60 },
+    [TreeId.Pine]: { weight: 50, minHeight: 60 },
+    [TreeId.Bamboo]: { weight: 20, minHeight: 50 },
+    [TreeId.Palm]: {
+      weight: 25,
+      waterAffinity: 0.8,
+      waterSearchRadius: 100,
+      waterMaxDistance: 80,
+    },
+    [TreeId.Banana]: {
+      weight: 25,
+      waterAffinity: 0.8,
+      waterSearchRadius: 100,
+      waterMaxDistance: 80,
+    },
   },
-  density: 15,
-  minSpacing: 12,
-  clustering: false,
-  scaleVariation: [0.8, 1.2],
+  density: 3,
+  minSpacing: 5,
+  clustering: true,
+  clusterSize: 30,
+  clusterRadius: 100,
+  clusterSpacing: 150,
+  scaleVariation: [1.0, 1.2],
   maxSlope: 1.5,
 };
 
 const CANYON_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
   trees: {
-    [TreeId.Cactus]: { weight: 20, avoidsWaterBelow: 3 },
-    [TreeId.Dead]: { weight: 20, minHeight: 20 },
     [TreeId.Palm]: {
-      weight: 20,
-      waterAffinity: 0.3,
-      waterProximityHeight: 9,
-      maxHeight: 15,
+      weight: 25,
+      waterAffinity: 0.8,
+      waterSearchRadius: 100,
+      waterMaxDistance: 80,
     },
-    [TreeId.Coconut]: {
-      weight: 10,
-      waterAffinity: 0.6,
-      waterProximityHeight: 9,
-      maxHeight: 15,
+    [TreeId.Banana]: {
+      weight: 25,
+      waterAffinity: 0.8,
+      waterSearchRadius: 100,
+      waterMaxDistance: 80,
     },
+    [TreeId.Maple]: { weight: 20, maxHeight: 60 },
+    [TreeId.Magic]: { weight: 5, maxHeight: 60 },
+    [TreeId.Dead]: { weight: 25 },
   },
-  density: 15,
-  minSpacing: 18,
+  density: 2,
+  minSpacing: 60,
   clustering: false,
-  scaleVariation: [0.7, 1.3],
-  maxSlope: 2.0,
+  scaleVariation: [1.0, 1.2],
+  maxSlope: 0.1,
 };
 
 const TUNDRA_TREE_CONFIG: BiomeTreeConfig = {
   enabled: true,
+  enableSnow: true,
   trees: {
-    [TreeId.WindPine]: { weight: 40, minHeight: 15 },
-    [TreeId.Fir]: { weight: 30, minHeight: 10 },
-    [TreeId.Pine]: { weight: 25, minHeight: 8 },
-    [TreeId.Birch]: { weight: 10 },
+    [TreeId.Pine]: { weight: 50, minHeight: 35 },
+    [TreeId.PineDead]: { weight: 30, minHeight: 38 },
+    [TreeId.Dead]: { weight: 20, minHeight: 38 },
   },
-  density: 10,
-  minSpacing: 12,
-  clustering: false,
-  scaleVariation: [0.6, 1.0],
+  density: 5,
+  minSpacing: 5,
+  clustering: true,
+  clusterSize: 30,
+  clusterRadius: 100,
+  clusterSpacing: 200,
+  scaleVariation: [1.0, 1.2],
   maxSlope: 1.5,
 };
 
@@ -108,3 +125,74 @@ const BIOME_TREE_CONFIGS: Record<BiomeType, BiomeTreeConfig> = {
 export function getTreeConfigForBiome(biomeId: string): BiomeTreeConfig {
   return BIOME_TREE_CONFIGS[biomeId as BiomeType] ?? FOREST_TREE_CONFIG;
 }
+
+// ---------------------------------------------------------------------------
+// Per-biome grass configs
+// ---------------------------------------------------------------------------
+
+export interface BiomeGrassConfig {
+  /** Overall density multiplier (0 = no grass, 1 = full density) */
+  density: number;
+  /** Max terrain slope (0-1, same metric as GPU shader) for grass placement */
+  maxSlope: number;
+  /** Minimum grassWeight from terrain color to allow placement */
+  minGrassWeight: number;
+  /** Blade height scale relative to global BLADE_HEIGHT_MIN/MAX */
+  heightScale: number;
+  /** Patchiness (0 = uniform spread, 1 = highly clustered islands) */
+  patchiness: number;
+  /** World-space noise frequency for patch mask (higher = smaller patches) */
+  patchScale: number;
+  /** Optional grass tint color [r, g, b] in 0-1 range. Blended over the terrain color. */
+  tintColor?: [number, number, number];
+  /** How strongly tintColor is applied (0 = terrain color, 1 = full tint). Default 0. */
+  tintStrength?: number;
+}
+
+const FOREST_GRASS_CONFIG: BiomeGrassConfig = {
+  density: 1.0,
+  maxSlope: 0.1,
+  minGrassWeight: 0.6,
+  heightScale: 1.0,
+  patchiness: 0.0,
+  patchScale: 0.02,
+};
+
+const CANYON_GRASS_CONFIG: BiomeGrassConfig = {
+  density: 0.8,
+  maxSlope: 0.15,
+  minGrassWeight: 0.8,
+  heightScale: 0.8,
+  patchiness: 0.95,
+  patchScale: 0.05,
+  tintColor: [0.35, 0.4, 0.15],
+  tintStrength: 0.4,
+};
+
+const TUNDRA_GRASS_CONFIG: BiomeGrassConfig = {
+  density: 1.0,
+  maxSlope: 0.3,
+  minGrassWeight: 0.8,
+  heightScale: 1.0,
+  patchiness: 0.6,
+  patchScale: 0.018,
+  tintColor: [1.0, 1.0, 1.0],
+  tintStrength: 0.4,
+};
+
+const BIOME_GRASS_CONFIGS: Record<BiomeType, BiomeGrassConfig> = {
+  [BiomeType.Forest]: FOREST_GRASS_CONFIG,
+  [BiomeType.Canyon]: CANYON_GRASS_CONFIG,
+  [BiomeType.Tundra]: TUNDRA_GRASS_CONFIG,
+};
+
+export function getGrassConfigForBiome(biomeId: string): BiomeGrassConfig {
+  return BIOME_GRASS_CONFIGS[biomeId as BiomeType] ?? FOREST_GRASS_CONFIG;
+}
+
+/** Biome IDs whose tree config has enableSnow set to true. */
+export const SNOW_BIOMES: ReadonlySet<string> = new Set(
+  Object.entries(BIOME_TREE_CONFIGS)
+    .filter(([, cfg]) => cfg.enableSnow)
+    .map(([id]) => id),
+);

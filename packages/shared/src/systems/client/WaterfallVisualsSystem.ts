@@ -25,8 +25,6 @@ import {
   abs,
 } from "three/tsl";
 import type { WaterfallDefinition } from "../shared/world/WaterfallDefinition";
-import { computeWaterfalls } from "../shared/world/WaterfallDefinition";
-import type { TerrainSystem } from "../shared/world/TerrainSystem";
 
 interface WaterfallMeshHandle {
   mesh: THREE.Mesh;
@@ -58,17 +56,8 @@ export class WaterfallVisualsSystem extends SystemBase {
   async start(): Promise<void> {
     if (this.world.isServer) return;
 
-    const terrain = this.world.getSystem("terrain") as TerrainSystem | null;
-    if (!terrain) return;
-
-    const registry = terrain.getWaterBodyRegistry();
-    if (!registry) return;
-
-    const riverDef = registry.getRiverDef();
-    if (!riverDef) return;
-
-    // Detect waterfalls along the river
-    const waterfalls = computeWaterfalls(riverDef, 2.0, 2.0);
+    // Waterfalls require a river definition — currently disabled (no manual river)
+    const waterfalls: WaterfallDefinition[] = [];
     if (waterfalls.length === 0) return;
 
     // Create shared TSL material for all waterfalls

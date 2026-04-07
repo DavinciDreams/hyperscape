@@ -238,10 +238,25 @@ export function areRulesCompatible(
 // ============================================================================
 
 import { ALL_WORLD_AREAS } from "./world-areas";
+import {
+  ARENA_BASE_X,
+  ARENA_BASE_Z,
+  ARENA_BASE_Y,
+  ARENA_WIDTH,
+  ARENA_LENGTH,
+  ARENA_GAP,
+  ARENA_COLUMNS,
+  ARENA_ROWS,
+  ARENA_COUNT,
+  ARENA_SPAWN_OFFSET,
+  LOBBY_SPAWN_X,
+  LOBBY_SPAWN_Y,
+  LOBBY_SPAWN_Z,
+} from "./arena-layout";
 
 /**
  * Arena layout configuration derived from world-areas.json manifest.
- * Single source of truth for arena positioning and dimensions.
+ * Positions come from arena-layout.ts (single source of truth).
  */
 export interface DuelArenaConfig {
   /** Base X coordinate for arena grid */
@@ -272,17 +287,17 @@ export interface DuelArenaConfig {
  * Default arena config (fallback if manifest not loaded)
  */
 const DEFAULT_ARENA_CONFIG: DuelArenaConfig = {
-  baseX: 60,
-  baseZ: 80,
-  baseY: 0.42,
-  arenaWidth: 20,
-  arenaLength: 24,
-  arenaGap: 4,
-  columns: 2,
-  rows: 3,
-  arenaCount: 6,
-  spawnOffset: 8,
-  lobbySpawnPoint: { x: 105, y: 0.42, z: 60 },
+  baseX: ARENA_BASE_X,
+  baseZ: ARENA_BASE_Z,
+  baseY: ARENA_BASE_Y,
+  arenaWidth: ARENA_WIDTH,
+  arenaLength: ARENA_LENGTH,
+  arenaGap: ARENA_GAP,
+  columns: ARENA_COLUMNS,
+  rows: ARENA_ROWS,
+  arenaCount: ARENA_COUNT,
+  spawnOffset: ARENA_SPAWN_OFFSET,
+  lobbySpawnPoint: { x: LOBBY_SPAWN_X, y: LOBBY_SPAWN_Y, z: LOBBY_SPAWN_Z },
 };
 
 /**

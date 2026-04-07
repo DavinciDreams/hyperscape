@@ -25,9 +25,7 @@ describe("embeddedAuth", () => {
     expect(normalizeTrustedOrigin("javascript:alert(1)")).toBeNull();
   });
 
-  it(
-    "builds the trusted embed-origin allowlist from current, app, and configured origins",
-    () => {
+  it("builds the trusted embed-origin allowlist from current, app, and configured origins", () => {
     expect(
       resolveTrustedEmbedOrigins({
         currentOrigin: "https://game.example.com",
@@ -41,8 +39,7 @@ describe("embeddedAuth", () => {
       "https://embed.example.com",
       "https://partner.example.com",
     ]);
-    },
-  );
+  });
 
   it("ignores untrusted origins and parses valid bootstrap messages", () => {
     const trustedOrigins = resolveTrustedEmbedOrigins({
@@ -108,9 +105,7 @@ describe("embeddedAuth", () => {
     });
   });
 
-  it(
-    "targets HYPERSCAPE_READY to a trusted referrer or explicit allowed origin",
-    () => {
+  it("targets HYPERSCAPE_READY to a trusted referrer or explicit allowed origin", () => {
     const trustedOrigins = resolveTrustedEmbedOrigins({
       currentOrigin: "https://game.example.com",
       publicAppUrl: "https://app.example.com",
@@ -165,6 +160,5 @@ describe("embeddedAuth", () => {
         allowWildcardFallback: true,
       }),
     ).toBe("*");
-    },
-  );
+  });
 });

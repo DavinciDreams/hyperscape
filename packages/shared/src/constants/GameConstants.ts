@@ -83,7 +83,7 @@ export const TERRAIN_CONSTANTS = {
    * Terrain below this height is underwater and impassable.
    * Used by: TerrainSystem, VegetationSystem, DissolveMaterial, RoadNetworkSystem, ResourceSystem
    */
-  WATER_THRESHOLD: 8.0,
+  WATER_THRESHOLD: 16,
 
   /**
    * Buffer distance above water where vegetation shouldn't spawn.
@@ -102,9 +102,9 @@ export const TERRAIN_CONSTANTS = {
   /**
    * Maximum slope for walkable terrain (tan of angle).
    * Slopes steeper than this block movement.
-   * 1.5 ≈ 56 degree angle.
+   * 2.5 ≈ 68 degree angle.
    */
-  MAX_WALKABLE_SLOPE: 1.5,
+  MAX_WALKABLE_SLOPE: 2.5,
 
   /**
    * Distance to sample for slope calculation (in meters).
