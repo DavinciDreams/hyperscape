@@ -1668,7 +1668,12 @@ export const TripoGeneratorTab: React.FC<TripoGeneratorTabProps> = ({
         <ShellPreviewViewer ref={viewerRef} className="flex-1" />
 
         {/* Bottom log panel */}
-        <div className="h-36 border-t border-border-primary bg-bg-primary overflow-y-auto">
+        <div
+          className="h-32 border-t border-border-primary bg-bg-primary overflow-y-auto"
+          ref={(el) => {
+            if (el) el.scrollTop = el.scrollHeight;
+          }}
+        >
           <div className="p-2 space-y-0.5">
             {logs.length === 0 ? (
               <p className="text-xs text-text-tertiary italic">

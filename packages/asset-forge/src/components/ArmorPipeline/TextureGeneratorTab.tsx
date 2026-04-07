@@ -790,7 +790,7 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
               Texture Generator
             </h2>
             <p className="text-xs text-text-tertiary mt-1">
-              POC-2: AI texture generation on shells via Meshy
+              Apply materials and AI textures to armor shells
             </p>
           </div>
 
@@ -1447,7 +1447,15 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
           {isRunning && (
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs text-text-tertiary">
-                <span>{stage}</span>
+                <span>
+                  {stage === "extracting"
+                    ? "Extracting Shells"
+                    : stage === "uploading"
+                      ? "Uploading to Meshy"
+                      : stage === "texturing"
+                        ? "AI Texturing"
+                        : "Loading Result"}
+                </span>
                 <span>{Math.round(progress)}%</span>
               </div>
               <div className="w-full h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
@@ -1508,12 +1516,16 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
         <ShellPreviewViewer ref={viewerRef} className="flex-1" />
 
         {/* Bottom log panel */}
-        <div className="h-36 border-t border-border-primary bg-bg-primary overflow-y-auto">
+        <div
+          className="h-32 border-t border-border-primary bg-bg-primary overflow-y-auto"
+          ref={(el) => {
+            if (el) el.scrollTop = el.scrollHeight;
+          }}
+        >
           <div className="p-2 space-y-0.5">
             {logs.length === 0 ? (
               <p className="text-xs text-text-tertiary italic">
-                Select a shell and material, then click &quot;Generate
-                Texture&quot; to begin POC-2
+                Choose a material and slots, then generate textures
               </p>
             ) : (
               logs.map((log, i) => (

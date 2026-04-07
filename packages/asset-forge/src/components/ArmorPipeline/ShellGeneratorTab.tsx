@@ -225,10 +225,10 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
           <div>
             <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
               <Layers size={20} className="text-primary" />
-              Shell Generator
+              Shell Extraction
             </h2>
             <p className="text-xs text-text-tertiary mt-1">
-              POC-1: Extract body regions and generate offset shells
+              Extract body-fitting armor shells from VRM avatars
             </p>
           </div>
 
@@ -446,7 +446,7 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
           {progress && isExtracting && (
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs text-text-tertiary">
-                <span>{progress.stage}</span>
+                <span className="capitalize">{progress.stage}</span>
                 <span>{Math.round(progress.progress * 100)}%</span>
               </div>
               <div className="w-full h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
@@ -499,11 +499,16 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
         <ShellPreviewViewer ref={viewerRef} className="flex-1" />
 
         {/* Bottom log panel */}
-        <div className="h-32 border-t border-border-primary bg-bg-primary overflow-y-auto">
+        <div
+          className="h-32 border-t border-border-primary bg-bg-primary overflow-y-auto"
+          ref={(el) => {
+            if (el) el.scrollTop = el.scrollHeight;
+          }}
+        >
           <div className="p-2 space-y-0.5">
             {logs.length === 0 ? (
               <p className="text-xs text-text-tertiary italic">
-                Select an avatar and click "Extract Shells" to begin POC-1
+                Select an avatar and click &quot;Extract Shells&quot; to begin
               </p>
             ) : (
               logs.map((log, i) => (

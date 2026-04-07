@@ -5,6 +5,7 @@ import {
   Paintbrush,
   Crown,
   FlaskConical,
+  ChevronRight,
 } from "lucide-react";
 import React, { useState, useCallback, useRef } from "react";
 
@@ -42,37 +43,37 @@ interface TabDef {
 const TABS: TabDef[] = [
   {
     id: "shells",
-    label: "Shells",
+    label: "Extract",
     icon: Layers,
-    description: "Extract body regions & generate offset shells",
+    description: "Extract body-fitting shells from VRM avatars",
     group: "pipeline",
   },
   {
     id: "textures",
     label: "Texture",
     icon: Paintbrush,
-    description: "AI texture generation on shells via Meshy",
+    description: "Apply materials and AI textures to armor shells",
     group: "pipeline",
   },
   {
     id: "tiers",
     label: "Tiers",
     icon: Crown,
-    description: "Generate bronze → rune tier variants from one shell",
+    description: "Batch-generate bronze → dragon tier variants",
     group: "pipeline",
   },
   {
     id: "preview",
-    label: "Preview",
+    label: "Rig & Preview",
     icon: Package,
-    description: "Re-rig textured shell & preview on animated avatar",
+    description: "Re-rig textured armor and preview on animated avatar",
     group: "pipeline",
   },
   {
     id: "tripo",
     label: "Tripo Lab",
     icon: FlaskConical,
-    description: "Experimental: Tripo AI texturing & 3D attachment generation",
+    description: "Experimental: Tripo AI texturing & 3D attachments",
     group: "experimental",
   },
 ];
@@ -163,29 +164,46 @@ export const ArmorPipelinePage: React.FC = () => {
     <div className="flex flex-col h-[calc(100vh-44px)]">
       {/* Tab bar */}
       <div className="flex items-center gap-1 px-3 py-1.5 bg-bg-secondary border-b border-border-primary">
-        {/* Pipeline tabs */}
-        {pipelineTabs.map((tab) => {
+        {/* Pipeline tabs with step flow */}
+        {pipelineTabs.map((tab, i) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
+          const stepNum = i + 1;
           return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                isActive
-                  ? "bg-primary/15 text-primary border border-primary/25"
-                  : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary border border-transparent"
-              }`}
-              title={tab.description}
-            >
-              <Icon size={16} />
-              {tab.label}
-              {tab.id === "preview" && kitCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-primary/20 text-primary">
-                  {kitCount}
-                </span>
+            <React.Fragment key={tab.id}>
+              {i > 0 && (
+                <ChevronRight
+                  size={14}
+                  className="text-text-tertiary/30 mx-0.5 flex-shrink-0"
+                />
               )}
-            </button>
+              <button
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                  isActive
+                    ? "bg-primary/15 text-primary border border-primary/25"
+                    : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary border border-transparent"
+                }`}
+                title={tab.description}
+              >
+                <span
+                  className={`w-[18px] h-[18px] rounded-full text-[10px] font-bold flex items-center justify-center flex-shrink-0 ${
+                    isActive
+                      ? "bg-primary/20 text-primary"
+                      : "bg-bg-tertiary text-text-tertiary"
+                  }`}
+                >
+                  {stepNum}
+                </span>
+                <Icon size={16} />
+                {tab.label}
+                {tab.id === "preview" && kitCount > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.5 text-[10px] rounded-full bg-primary/20 text-primary">
+                    {kitCount}
+                  </span>
+                )}
+              </button>
+            </React.Fragment>
           );
         })}
 
@@ -213,10 +231,20 @@ export const ArmorPipelinePage: React.FC = () => {
           );
         })}
 
-        <div className="ml-auto text-xs text-text-tertiary px-3">
-          {sharedExtraction
-            ? `${sharedExtraction.shells.size} shells cached`
-            : "Armor Pipeline"}
+        <div className="ml-auto flex items-center gap-3 text-xs text-text-tertiary px-3">
+          {sharedExtraction && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+              {sharedExtraction.shells.size} shells cached
+            </span>
+          )}
+          {kitCount > 0 && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+              {kitCount} in kit
+            </span>
+          )}
+          {!sharedExtraction && kitCount === 0 && <span>Armor Pipeline</span>}
         </div>
       </div>
 

@@ -29,6 +29,7 @@ import {
   AVATAR_OPTIONS,
   ALL_SLOTS,
   ALL_BULKS,
+  SLOT_LABELS,
   MATERIAL_TIERS,
   DETAIL_LEVELS,
   TIER_SHAPE_PREFIX,
@@ -400,7 +401,7 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
               Tier Generator
             </h2>
             <p className="text-xs text-text-tertiary mt-1">
-              Generate bronze → rune variants from one shell
+              Batch-generate bronze → dragon tier variants via Meshy AI
             </p>
           </div>
 
@@ -441,7 +442,7 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
                       : "bg-bg-secondary text-text-tertiary border border-border-primary hover:border-border-secondary"
                   }`}
                 >
-                  {slot}
+                  {SLOT_LABELS[slot]}
                 </button>
               ))}
             </div>
@@ -734,7 +735,12 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
         <ShellPreviewViewer ref={viewerRef} className="flex-1" />
 
         {/* Bottom log panel */}
-        <div className="h-36 border-t border-border-primary bg-bg-primary overflow-y-auto">
+        <div
+          className="h-32 border-t border-border-primary bg-bg-primary overflow-y-auto"
+          ref={(el) => {
+            if (el) el.scrollTop = el.scrollHeight;
+          }}
+        >
           <div className="p-2 space-y-0.5">
             {logs.length === 0 ? (
               <p className="text-xs text-text-tertiary italic">

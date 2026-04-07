@@ -110,7 +110,9 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
       armorKit.has(k),
     );
     if (piecesToRig.length === 0) {
-      setError("No pieces to rig. Texture some shells first (Tab 2).");
+      setError(
+        "No pieces to rig. Texture some shells first in the Texture or Tiers tab.",
+      );
       return;
     }
 
@@ -424,10 +426,10 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
           <div>
             <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
               <Package size={20} className="text-primary" />
-              Armor Preview
+              Rig &amp; Preview
             </h2>
             <p className="text-xs text-text-tertiary mt-1">
-              POC-3: Rig &amp; preview armor kit on animated avatar
+              Re-rig textured armor and preview on animated avatar
             </p>
           </div>
 
@@ -456,8 +458,8 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
             </label>
             {!hasKit ? (
               <p className="text-xs text-text-tertiary italic px-1">
-                No pieces yet. Texture shells in Tab 2 and click &quot;Add to
-                Kit&quot;.
+                No pieces yet. Use the Texture or Tiers tab, then click
+                &quot;Add to Kit&quot;.
               </p>
             ) : (
               <div className="space-y-1">
@@ -503,8 +505,8 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
                       </span>
 
                       {isRiggedPiece && (
-                        <span className="text-[10px] text-green-400">
-                          rigged
+                        <span className="text-[10px] text-green-400 bg-green-400/10 px-1.5 py-0.5 rounded">
+                          Rigged
                         </span>
                       )}
                     </div>
@@ -654,8 +656,8 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
                 Publish to Game
               </label>
               <p className="text-[10px] text-text-tertiary leading-tight">
-                Export rigged GLBs to the game&apos;s model directory and update
-                armor.json manifest.
+                Exports rigged GLBs and updates the armor manifest so the game
+                can load and equip them.
               </p>
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
@@ -717,20 +719,38 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
 
           {/* Stats */}
           {hasRigged && (
-            <div className="p-3 bg-bg-secondary rounded-lg border border-border-primary space-y-1">
+            <div className="p-3 bg-bg-secondary rounded-lg border border-border-primary space-y-1.5">
               <h3 className="text-xs font-semibold text-text-primary">
                 Rigging Stats
               </h3>
               {Array.from(riggedPieces.entries()).map(([key, result]) => (
-                <p key={key} className="text-xs text-text-tertiary">
-                  {pieceLabel(key)}: {result.vertexCount} verts
-                  {result.vertexMatch ? " (direct)" : " (nearest)"}
-                </p>
+                <div
+                  key={key}
+                  className="flex items-center justify-between text-xs text-text-tertiary"
+                >
+                  <span>{pieceLabel(key)}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span>{result.vertexCount.toLocaleString()} verts</span>
+                    <span
+                      className={`px-1 py-0.5 rounded text-[9px] ${
+                        result.vertexMatch
+                          ? "bg-green-400/10 text-green-400"
+                          : "bg-yellow-400/10 text-yellow-400"
+                      }`}
+                    >
+                      {result.vertexMatch ? "exact" : "transferred"}
+                    </span>
+                  </span>
+                </div>
               ))}
-              <p className="text-xs text-text-tertiary mt-1">
-                Total bones:{" "}
-                {riggedPieces.values().next().value?.skeleton.bones.length ?? 0}
-              </p>
+              <div className="flex items-center justify-between text-xs text-text-tertiary pt-1 border-t border-border-primary">
+                <span>Skeleton</span>
+                <span>
+                  {riggedPieces.values().next().value?.skeleton.bones.length ??
+                    0}{" "}
+                  bones
+                </span>
+              </div>
             </div>
           )}
 
@@ -748,12 +768,17 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
         <ShellPreviewViewer ref={viewerRef} className="flex-1" />
 
         {/* Bottom log panel */}
-        <div className="h-32 border-t border-border-primary bg-bg-primary overflow-y-auto">
+        <div
+          className="h-32 border-t border-border-primary bg-bg-primary overflow-y-auto"
+          ref={(el) => {
+            if (el) el.scrollTop = el.scrollHeight;
+          }}
+        >
           <div className="p-2 space-y-0.5">
             {logs.length === 0 ? (
               <p className="text-xs text-text-tertiary italic">
-                Add textured pieces from Tab 2, then click &quot;Rig&quot; to
-                preview full armor kit
+                Add textured pieces from the Texture or Tiers tab, then click
+                &quot;Rig&quot; to preview
               </p>
             ) : (
               logs.map((log, i) => (
@@ -762,7 +787,9 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
                   className={`text-xs font-mono ${
                     log.includes("ERROR")
                       ? "text-red-400"
-                      : log.includes("rigged") || log.includes("All")
+                      : log.includes("rigged") ||
+                          log.includes("All") ||
+                          log.includes("Published")
                         ? "text-green-400"
                         : "text-text-tertiary"
                   }`}
