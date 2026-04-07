@@ -45,6 +45,7 @@
           "www.hyperscape.club",
           "hyperscape.gg",
           "www.hyperscape.gg",
+          "hyperscape-production.up.railway.app",
         ];
         const isLoopbackHost = [
           "localhost",
@@ -54,10 +55,10 @@
         ].includes(window.location.hostname);
         const shouldResetProductionCaches =
           productionHosts.includes(window.location.hostname) &&
-          !localStorage.getItem("__hyperscape_prod_sw_reset_20260406__");
+          !localStorage.getItem("__hyperscape_prod_sw_reset_20260407__");
         const shouldResetLocalCaches =
           isInternalCapture || isLoopbackHost || shouldResetProductionCaches;
-        const storageKey = "__hyperscape_prod_sw_reset_20260406__";
+        const storageKey = "__hyperscape_prod_sw_reset_20260407__";
         const reloadMarker = "__hyperscape_stream_sw_reset__";
         let shouldReload = false;
 

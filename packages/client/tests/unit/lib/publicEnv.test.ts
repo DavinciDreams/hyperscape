@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  ensurePublicRuntimeEnv,
   isConfiguredPrivyAppId,
   getPublicRuntimeEnv,
   normalizePublicEnvValue,
@@ -11,6 +12,11 @@ describe("publicEnv", () => {
   afterEach(() => {
     if (typeof window !== "undefined") {
       delete (window as Window & { env?: unknown }).env;
+      document.head
+        .querySelectorAll('script[src="/env.js"]')
+        .forEach((script) => {
+          script.remove();
+        });
     }
   });
 
@@ -50,5 +56,22 @@ describe("publicEnv", () => {
       "cmgk4zu56005kjj0bcaae0rei",
     );
     expect(resolvePrivyAppId("")).toBe("cmgk4zu56005kjj0bcaae0rei");
+  });
+
+  it("waits for env.js to populate runtime env", async () => {
+    const envScript = document.createElement("script");
+    envScript.src = "/env.js";
+    document.head.appendChild(envScript);
+
+    const envPromise = ensurePublicRuntimeEnv();
+
+    (window as Window & { env?: Record<string, string> }).env = {
+      PUBLIC_PRIVY_APP_ID: "cmgk4zu56005kjj0bcaae0rei",
+    };
+    envScript.dispatchEvent(new Event("load"));
+
+    await expect(envPromise).resolves.toEqual({
+      PUBLIC_PRIVY_APP_ID: "cmgk4zu56005kjj0bcaae0rei",
+    });
   });
 });

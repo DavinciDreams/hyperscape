@@ -1,6 +1,8 @@
 import type { PublicRuntimeEnv, StreamingWindow } from "./streamingWindow";
 
 const INVALID_ENV_VALUES = new Set(["undefined", "null"]);
+let publicRuntimeEnvPromise: Promise<PublicRuntimeEnv | undefined> | null =
+  null;
 
 export function normalizePublicEnvValue(value?: string): string | undefined {
   if (!value) {
@@ -21,6 +23,59 @@ export function getPublicRuntimeEnv(): PublicRuntimeEnv | undefined {
   }
 
   return (window as StreamingWindow).env;
+}
+
+function isPublicEnvScript(script: {
+  getAttribute(name: string): string | null;
+  src: string;
+}): boolean {
+  const source = script.getAttribute("src") || script.src;
+  return source === "/env.js" || source.endsWith("/env.js");
+}
+
+export async function ensurePublicRuntimeEnv(): Promise<
+  PublicRuntimeEnv | undefined
+> {
+  const runtimeEnv = getPublicRuntimeEnv();
+  if (runtimeEnv) {
+    return runtimeEnv;
+  }
+
+  if (typeof document === "undefined") {
+    return undefined;
+  }
+
+  if (publicRuntimeEnvPromise) {
+    return publicRuntimeEnvPromise;
+  }
+
+  publicRuntimeEnvPromise = new Promise((resolve) => {
+    const finalize = () => {
+      const resolved = getPublicRuntimeEnv();
+      publicRuntimeEnvPromise = null;
+      resolve(resolved);
+    };
+
+    const existingScript = Array.from(document.scripts).find((script) =>
+      isPublicEnvScript(script),
+    );
+
+    if (existingScript) {
+      existingScript.addEventListener("load", finalize, { once: true });
+      existingScript.addEventListener("error", finalize, { once: true });
+      globalThis.setTimeout(finalize, 0);
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "/env.js";
+    script.async = false;
+    script.addEventListener("load", finalize, { once: true });
+    script.addEventListener("error", finalize, { once: true });
+    document.head.appendChild(script);
+  });
+
+  return publicRuntimeEnvPromise;
 }
 
 export function resolvePublicEnvValue(
