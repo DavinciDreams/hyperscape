@@ -18,6 +18,12 @@ import { privyAuthManager } from "./PrivyAuthManager";
 import { setAsyncTokenProvider } from "../lib/api-client";
 import { logger } from "../lib/logger";
 import { GAME_API_URL } from "../lib/api-config";
+import {
+  getPublicRuntimeEnv,
+  isConfiguredPrivyAppId,
+  resolvePublicEnvValue,
+  resolvePrivyAppId,
+} from "../lib/publicEnv";
 
 type PrivyAuthProviderProps = {
   children: React.ReactNode;
@@ -136,18 +142,25 @@ function getDefaultWsUrl(cluster: SolanaCluster): string {
 }
 
 const solanaCluster = normalizeSolanaCluster(
-  import.meta.env.PUBLIC_SOLANA_NETWORK,
+  resolvePublicEnvValue(
+    getPublicRuntimeEnv()?.PUBLIC_SOLANA_NETWORK,
+    import.meta.env.PUBLIC_SOLANA_NETWORK,
+  ),
 );
 const solanaRpcUrl =
-  import.meta.env.PUBLIC_SOLANA_RPC_URL || getDefaultRpcUrl(solanaCluster);
+  resolvePublicEnvValue(
+    getPublicRuntimeEnv()?.PUBLIC_SOLANA_RPC_URL,
+    import.meta.env.PUBLIC_SOLANA_RPC_URL,
+  ) || getDefaultRpcUrl(solanaCluster);
 const solanaWsUrl =
-  import.meta.env.PUBLIC_SOLANA_WS_URL || getDefaultWsUrl(solanaCluster);
+  resolvePublicEnvValue(
+    getPublicRuntimeEnv()?.PUBLIC_SOLANA_WS_URL,
+    import.meta.env.PUBLIC_SOLANA_WS_URL,
+  ) || getDefaultWsUrl(solanaCluster);
 
 export function PrivyAuthProvider({ children }: PrivyAuthProviderProps) {
-  const appId = import.meta.env.PUBLIC_PRIVY_APP_ID || "";
-
-  const isValidAppId =
-    appId && appId.length > 0 && !appId.includes("your-privy-app-id");
+  const appId = resolvePrivyAppId(import.meta.env.PUBLIC_PRIVY_APP_ID);
+  const isValidAppId = isConfiguredPrivyAppId(appId);
 
   if (!isValidAppId) {
     logger.warn(

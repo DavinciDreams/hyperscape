@@ -26,6 +26,7 @@ import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
 import { logger } from "./lib/logger";
 import { devValidateManifest } from "./lib/manifestValidator";
+import { isConfiguredPrivyAppId, resolvePrivyAppId } from "./lib/publicEnv";
 import { primeStreamingAccessTokenFromWindow } from "./lib/streamingAccessToken";
 import {
   applyHyperscapeAuthMessage,
@@ -465,8 +466,8 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
 
 function App() {
   // Determine Privy availability
-  const appId = import.meta.env.PUBLIC_PRIVY_APP_ID || "";
-  const privyEnabled = appId.length > 0 && !appId.includes("your-privy-app-id");
+  const appId = resolvePrivyAppId(import.meta.env.PUBLIC_PRIVY_APP_ID);
+  const privyEnabled = isConfiguredPrivyAppId(appId);
 
   const [authState, setAuthState] = React.useState(privyAuthManager.getState());
   const [showCharacterPage, setShowCharacterPage] =
