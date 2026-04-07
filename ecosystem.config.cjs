@@ -113,6 +113,14 @@ function sanitizeRuntimeEnv() {
 }
 
 const runtimeEnv = sanitizeRuntimeEnv();
+const defaultGameUrl = process.env.GAME_URL || "http://localhost:3333/?page=stream";
+const defaultGameFallbackUrls =
+  process.env.GAME_FALLBACK_URLS ||
+  [
+    defaultGameUrl,
+    "http://localhost:3333/?embedded=true&mode=spectator",
+    "http://localhost:3333/",
+  ].join(",");
 
 module.exports = {
   apps: [
@@ -194,9 +202,8 @@ module.exports = {
         YOUTUBE_STREAM_URL:
           process.env.YOUTUBE_STREAM_URL ||
           "rtmp://a.rtmp.youtube.com/live2",
-        GAME_URL: "http://localhost:3333/?page=stream",
-        GAME_FALLBACK_URLS:
-          "http://localhost:3333/?page=stream,http://localhost:3333/?embedded=true&mode=spectator,http://localhost:3333/",
+        GAME_URL: defaultGameUrl,
+        GAME_FALLBACK_URLS: defaultGameFallbackUrls,
         STREAMING_DUEL_COMBAT_AI_ENABLED: "false",
         SERVER_RUNTIME_MAX_TICKS_PER_FRAME: "1",
         SERVER_RUNTIME_MIN_DELAY_MS: "10",
