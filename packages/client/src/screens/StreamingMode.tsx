@@ -99,6 +99,28 @@ export interface StreamingRendererHealth {
 
 const TARGET_AVATAR_READY_GRACE_MS = 30_000;
 
+function normalizeCaptureBridgeUrl(rawValue: string | null): string {
+  const fallbackUrl = "ws://localhost:8765";
+  const candidate = rawValue?.trim() || fallbackUrl;
+
+  try {
+    const parsed = new URL(candidate, window.location.href);
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+      return fallbackUrl;
+    }
+    if (
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "0.0.0.0" ||
+      parsed.hostname === "::1"
+    ) {
+      parsed.hostname = "localhost";
+    }
+    return parsed.toString();
+  } catch {
+    return fallbackUrl;
+  }
+}
+
 function isTargetAvatarReady(world: World, targetEntityId: string): boolean {
   const playerDirect = world.entities?.players?.get(targetEntityId) as
     | {
@@ -732,7 +754,9 @@ export function StreamingMode() {
       delete win.__captureControl__;
     }
 
-    const bridgeUrl = searchParams.get("bridgeUrl") || "ws://127.0.0.1:8765";
+    const bridgeUrl = normalizeCaptureBridgeUrl(
+      searchParams.get("bridgeUrl"),
+    );
 
     if (captureVerbose) {
       console.log("[StreamingMode] Starting canvas capture to", bridgeUrl);

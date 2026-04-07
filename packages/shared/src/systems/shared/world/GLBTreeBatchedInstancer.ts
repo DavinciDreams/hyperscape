@@ -218,12 +218,103 @@ function countGeometry(geo: THREE.BufferGeometry): {
   return { vertexCount, indexCount };
 }
 
+type AttributeTemplate = {
+  itemSize: number;
+  normalized: boolean;
+  arrayCtor: new (length: number) => ArrayLike<number>;
+  gpuType?: number;
+};
+
+function collectAttributeTemplates(
+  geometries: THREE.BufferGeometry[],
+): Map<string, AttributeTemplate> {
+  const templates = new Map<string, AttributeTemplate>();
+
+  for (const geometry of geometries) {
+    for (const name of Object.keys(geometry.attributes)) {
+      if (templates.has(name)) continue;
+      const attribute = geometry.getAttribute(name);
+      if (!attribute) continue;
+
+      templates.set(name, {
+        itemSize: attribute.itemSize,
+        normalized: attribute.normalized,
+        arrayCtor: attribute.array.constructor as AttributeTemplate["arrayCtor"],
+        gpuType:
+          "gpuType" in attribute && typeof attribute.gpuType === "number"
+            ? attribute.gpuType
+            : undefined,
+      });
+    }
+  }
+
+  return templates;
+}
+
+function createMissingAttribute(
+  vertexCount: number,
+  template: AttributeTemplate,
+): THREE.BufferAttribute {
+  const array = new template.arrayCtor(vertexCount * template.itemSize) as
+    | Float32Array
+    | Uint32Array
+    | Uint16Array
+    | Uint8Array
+    | Int32Array
+    | Int16Array
+    | Int8Array;
+  const attribute = new THREE.BufferAttribute(
+    array,
+    template.itemSize,
+    template.normalized,
+  );
+  if (typeof template.gpuType === "number") {
+    attribute.gpuType = template.gpuType as typeof attribute.gpuType;
+  }
+  return attribute;
+}
+
+function normalizeBatchedSlotGeometries(
+  treeType: string,
+  variantPaths: string[],
+  slot: number,
+  geometries: THREE.BufferGeometry[],
+): THREE.BufferGeometry[] {
+  const templates = collectAttributeTemplates(geometries);
+
+  return geometries.map((geometry, variantIndex) => {
+    const positionCount = geometry.getAttribute("position")?.count ?? 0;
+    if (positionCount === 0) {
+      return geometry;
+    }
+
+    let clone: THREE.BufferGeometry | null = null;
+    for (const [name, template] of templates) {
+      const existing = geometry.getAttribute(name);
+      if (existing) {
+        continue;
+      }
+      if (!clone) {
+        clone = geometry.clone();
+      }
+      clone.setAttribute(name, createMissingAttribute(positionCount, template));
+      console.warn(
+        `[GLBTreeBatchedInstancer] Normalized missing "${name}" attribute for ${treeType} slot ${slot} variant ${variantPaths[variantIndex]}`,
+      );
+    }
+
+    return clone ?? geometry;
+  });
+}
+
 /**
  * Build a BatchedLODPool from multiple variants' parts.
  * variantParts[variant][materialSlot] = { geometry, material }
  * All variants must have the same number of material slots.
  */
 function createBatchedLODPool(
+  treeType: string,
+  variantPaths: string[],
   variantParts: {
     geometry: THREE.BufferGeometry;
     material: DissolveMaterial;
@@ -238,11 +329,17 @@ function createBatchedLODPool(
 
   for (let slot = 0; slot < numSlots; slot++) {
     const mat = variantParts[0][slot].material;
+    const slotGeometries = normalizeBatchedSlotGeometries(
+      treeType,
+      variantPaths,
+      slot,
+      variantParts.map((parts) => parts[slot].geometry),
+    );
 
     let totalVerts = 0;
     let totalIndices = 0;
     for (let v = 0; v < numVariants; v++) {
-      const counts = countGeometry(variantParts[v][slot].geometry);
+      const counts = countGeometry(slotGeometries[v]);
       totalVerts += counts.vertexCount;
       totalIndices += counts.indexCount;
     }
@@ -262,7 +359,7 @@ function createBatchedLODPool(
 
     const slotGeoIds: number[] = [];
     for (let v = 0; v < numVariants; v++) {
-      const geoId = bm.addGeometry(variantParts[v][slot].geometry);
+      const geoId = bm.addGeometry(slotGeometries[v]);
       slotGeoIds.push(geoId);
     }
 
@@ -412,7 +509,7 @@ async function ensureTreeTypePool(
       })),
     );
 
-    const lod0Pool = createBatchedLODPool(lod0VariantParts);
+    const lod0Pool = createBatchedLODPool(treeType, variantPaths, lod0VariantParts);
 
     // Compute bounds from first variant
     const bounds = computeModelBounds(lod0Scenes[0], 1);
@@ -440,7 +537,7 @@ async function ensureTreeTypePool(
           material: lod1Materials[slotIdx],
         })),
       );
-      lod1Pool = createBatchedLODPool(lod1VariantParts);
+      lod1Pool = createBatchedLODPool(treeType, variantPaths, lod1VariantParts);
     }
 
     // Load LOD2 variants in parallel
@@ -466,7 +563,7 @@ async function ensureTreeTypePool(
           material: lod2Materials[slotIdx],
         })),
       );
-      lod2Pool = createBatchedLODPool(lod2VariantParts);
+      lod2Pool = createBatchedLODPool(treeType, variantPaths, lod2VariantParts);
     }
 
     const pool: TreeTypePool = {
@@ -548,7 +645,11 @@ async function loadDepletedPool(
   for (let s = 0; s < numSlots; s++) {
     singleVariant.push(depletedDissolveParts[s][0]);
   }
-  pool.depleted = createBatchedLODPool([singleVariant]);
+  pool.depleted = createBatchedLODPool(
+    pool.treeType,
+    [depletedModelPath],
+    [singleVariant],
+  );
   pool.depletedYOffset = depletedYOffset;
 }
 
