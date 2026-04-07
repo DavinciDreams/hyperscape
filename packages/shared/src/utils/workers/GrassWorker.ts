@@ -247,8 +247,8 @@ function buildComputeTerrainColorJS(): string {
   var _FOREST_GRASS_DARK = {r:0.081879,g:0.230550,b:0.021518};
   var _FOREST_GRASS_HIGH = {r:0.24,g:0.45,b:0.18};
   var _FOREST_VARIATION = {r:0.15,g:0.35,b:0.1};
-  var _FOREST_DIRT = {r:0.638283,g:0.367246,b:0.094630};
-  var _FOREST_DIRT_DARK = {r:0.414884,g:0.238710,b:0.061509};
+  var _FOREST_DIRT = {r:0.2641,g:0.1936,b:0.1068};
+  var _FOREST_DIRT_DARK = {r:0.1717,g:0.1258,b:0.0694};
   var _FOREST_CLIFF = {r:0.462361,g:0.406448,b:0.318547};
   var _FOREST_CLIFF_DARK = {r:0.300535,g:0.264191,b:0.207055};
 

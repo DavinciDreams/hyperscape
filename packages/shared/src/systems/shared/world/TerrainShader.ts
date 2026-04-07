@@ -56,7 +56,7 @@ export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
   SNOW_HEIGHT: 90.0,
   NOISE_SCALE: 0.0008,
-  DIRT_THRESHOLD: 0.5,
+  DIRT_THRESHOLD: 0.43,
   LOD_FULL_DETAIL: 100.0,
   LOD_MEDIUM_DETAIL: 200.0,
   WATER_LEVEL: TERRAIN_CONSTANTS.WATER_THRESHOLD,
@@ -123,7 +123,7 @@ const TERRAIN_BIOME_TEXTURES = {
   },
   dirt: {
     file: "dirt.png",
-    fallback: [0.82, 0.64, 0.34] as [number, number, number],
+    fallback: [0.55, 0.48, 0.36] as [number, number, number],
   },
   cliff: {
     file: "cliff.png",
@@ -234,8 +234,8 @@ const FOREST_GRASS = vec3(0.3, 0.58, 0.15);
 const FOREST_GRASS_DARK = vec3(0.18, 0.42, 0.08);
 const FOREST_GRASS_HIGH = vec3(0.24, 0.45, 0.18);
 const FOREST_VARIATION = vec3(0.15, 0.35, 0.1);
-const FOREST_DIRT = vec3(0.35, 0.24, 0.12);
-const FOREST_DIRT_DARK = vec3(0.22, 0.15, 0.08);
+const FOREST_DIRT = vec3(0.26, 0.19, 0.11);
+const FOREST_DIRT_DARK = vec3(0.17, 0.12, 0.07);
 const FOREST_CLIFF = vec3(0.4, 0.38, 0.32);
 const FOREST_CLIFF_DARK = vec3(0.28, 0.26, 0.22);
 
@@ -777,8 +777,8 @@ const _FOREST_GRASS: RGB = lin(0.39, 0.63, 0.2);
 const _FOREST_GRASS_DARK: RGB = darken(_FOREST_GRASS);
 const _FOREST_GRASS_HIGH: RGB = { r: 0.24, g: 0.45, b: 0.18 };
 const _FOREST_VARIATION: RGB = { r: 0.15, g: 0.35, b: 0.1 };
-// dirt.png avg sRGB (0.82, 0.64, 0.34)
-const _FOREST_DIRT: RGB = lin(0.82, 0.64, 0.34);
+// dirt.png avg sRGB (0.55, 0.48, 0.36)
+const _FOREST_DIRT: RGB = lin(0.55, 0.48, 0.36);
 const _FOREST_DIRT_DARK: RGB = darken(_FOREST_DIRT);
 // cliff.png avg sRGB (0.71, 0.67, 0.60)
 const _FOREST_CLIFF: RGB = lin(0.71, 0.67, 0.6);

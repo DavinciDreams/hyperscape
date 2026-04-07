@@ -58,13 +58,13 @@ const FOREST_TREE_CONFIG: BiomeTreeConfig = {
       waterMaxDistance: 80,
     },
   },
-  density: 5,
+  density: 3,
   minSpacing: 5,
   clustering: true,
   clusterSize: 30,
   clusterRadius: 100,
-  clusterSpacing: 100,
-  scaleVariation: [0.8, 1.2],
+  clusterSpacing: 150,
+  scaleVariation: [1.0, 1.2],
   maxSlope: 1.5,
 };
 
@@ -90,7 +90,7 @@ const CANYON_TREE_CONFIG: BiomeTreeConfig = {
   density: 2,
   minSpacing: 60,
   clustering: false,
-  scaleVariation: [0.7, 1.3],
+  scaleVariation: [1.0, 1.2],
   maxSlope: 0.1,
 };
 
@@ -108,7 +108,7 @@ const TUNDRA_TREE_CONFIG: BiomeTreeConfig = {
   clusterSize: 30,
   clusterRadius: 100,
   clusterSpacing: 200,
-  scaleVariation: [0.6, 1.0],
+  scaleVariation: [1.0, 1.2],
   maxSlope: 1.5,
 };
 
@@ -151,20 +151,20 @@ export interface BiomeGrassConfig {
 
 const FOREST_GRASS_CONFIG: BiomeGrassConfig = {
   density: 1.0,
-  maxSlope: 0.4,
-  minGrassWeight: 0.8,
+  maxSlope: 0.1,
+  minGrassWeight: 0.6,
   heightScale: 1.0,
   patchiness: 0.0,
   patchScale: 0.02,
 };
 
 const CANYON_GRASS_CONFIG: BiomeGrassConfig = {
-  density: 1.0,
+  density: 0.8,
   maxSlope: 0.15,
   minGrassWeight: 0.8,
-  heightScale: 1.5,
+  heightScale: 0.8,
   patchiness: 0.95,
-  patchScale: 0.025,
+  patchScale: 0.05,
   tintColor: [0.35, 0.4, 0.15],
   tintStrength: 0.4,
 };
