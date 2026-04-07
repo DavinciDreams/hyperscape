@@ -119,7 +119,7 @@ const TERRAIN_TEX_DIR = "textures/terrain-biomes";
 const TERRAIN_BIOME_TEXTURES = {
   grass: {
     file: "grass.png",
-    fallback: [0.39, 0.63, 0.2] as [number, number, number],
+    fallback: [0.28, 0.63, 0.2] as [number, number, number],
   },
   dirt: {
     file: "dirt.png",
@@ -772,8 +772,8 @@ const _TUNDRA_DIRT_DARK: RGB = darken(_TUNDRA_DIRT);
 const _TUNDRA_CLIFF: RGB = lin(0.78, 0.82, 0.84);
 const _TUNDRA_CLIFF_DARK: RGB = darken(_TUNDRA_CLIFF);
 
-// Forest — grass.png avg sRGB (0.39, 0.63, 0.20)
-const _FOREST_GRASS: RGB = lin(0.39, 0.63, 0.2);
+// Forest — grass.png avg sRGB (0.39, 0.52, 0.24)
+const _FOREST_GRASS: RGB = lin(0.39, 0.52, 0.24);
 const _FOREST_GRASS_DARK: RGB = darken(_FOREST_GRASS);
 const _FOREST_GRASS_HIGH: RGB = { r: 0.24, g: 0.45, b: 0.18 };
 const _FOREST_VARIATION: RGB = { r: 0.15, g: 0.35, b: 0.1 };

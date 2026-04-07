@@ -85,12 +85,12 @@ const WATER = {
   COLOR_DEPTH_FALLOFF: 3,
   COLOR_DIST_FADE: 200,
 
-  // Cosine gradient colour parameters (dark green-blue, deep teal)
-  // shallow(t=1): (0.08, 0.33, 0.35)  deep(t=0): (0.03, 0.18, 0.25)
+  // Cosine gradient colour parameters — more green, less grey-blue
+  // shallow(t=1) sRGB display: (0.276, 0.541, 0.595)  deep(t=0) sRGB display: (0.196, 0.384, 0.422)
   COS_PHASES: [0.5, 0.5, 0.5] as const,
-  COS_AMPLITUDES: [0.05, 0.15, 0.1] as const,
+  COS_AMPLITUDES: [0.0311, 0.1374, 0.1692] as const,
   COS_FREQUENCIES: [0.5, 0.5, 0.5] as const,
-  COS_OFFSETS: [-0.445, -0.245, -0.2] as const,
+  COS_OFFSETS: [-0.4569, -0.3095, -0.2654] as const,
 
   // Normal noise strength (xz multiplier for surface normal)
   NORMAL_STRENGTH: 1.5,
@@ -100,7 +100,7 @@ const WATER = {
   FOAM_CREST_MIN: 0.15,
   FOAM_CREST_MAX: 0.4,
   FOAM_CREST_MULTIPLIER: 0.6,
-  FOAM_COLOR: { r: 0.82, g: 0.9, b: 0.92 },
+  FOAM_COLOR: { r: 0.85, g: 0.92, b: 0.96 },
   FOAM_MAX_OPACITY: 0.85,
   FOAM_SCROLL_X: 0.02,
   FOAM_SCROLL_Y: 0.015,

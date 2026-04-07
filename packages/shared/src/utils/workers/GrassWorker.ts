@@ -243,8 +243,8 @@ function buildComputeTerrainColorJS(): string {
   var _TUNDRA_CLIFF = {r:0.570482,g:0.638283,b:0.673860};
   var _TUNDRA_CLIFF_DARK = {r:0.370813,g:0.414884,b:0.438009};
 
-  var _FOREST_GRASS = {r:0.125967,g:0.354692,b:0.033105};
-  var _FOREST_GRASS_DARK = {r:0.081879,g:0.230550,b:0.021518};
+  var _FOREST_GRASS = {r:0.1281,g:0.2393,b:0.0437};
+  var _FOREST_GRASS_DARK = {r:0.0833,g:0.1555,b:0.0284};
   var _FOREST_GRASS_HIGH = {r:0.24,g:0.45,b:0.18};
   var _FOREST_VARIATION = {r:0.15,g:0.35,b:0.1};
   var _FOREST_DIRT = {r:0.2641,g:0.1936,b:0.1068};
