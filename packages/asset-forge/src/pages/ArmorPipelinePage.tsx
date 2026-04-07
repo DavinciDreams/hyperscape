@@ -101,12 +101,17 @@ export const ArmorPipelinePage: React.FC = () => {
     async (
       avatarUrl: string,
       onProgress?: (p: ShellExtractionProgress) => void,
+      customOffsetM?: number,
     ): Promise<ShellExtractionResult> => {
-      // Return cached if same avatar
+      // Return cached if same avatar AND same custom offset (or no custom)
+      const cachedHasCustom =
+        sharedExtraction?.shells.has("body_custom") ?? false;
+      const wantsCustom = customOffsetM != null && customOffsetM > 0;
       if (
         sharedExtraction &&
         sharedExtractionAvatar === avatarUrl &&
-        sharedExtraction.avatarHeight > 0
+        sharedExtraction.avatarHeight > 0 &&
+        (!wantsCustom || cachedHasCustom)
       ) {
         onProgress?.({
           stage: "complete",
@@ -122,6 +127,7 @@ export const ArmorPipelinePage: React.FC = () => {
         ALL_SLOTS,
         ALL_BULKS,
         onProgress,
+        customOffsetM,
       );
 
       setSharedExtraction(result);

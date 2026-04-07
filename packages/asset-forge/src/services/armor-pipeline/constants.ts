@@ -136,53 +136,135 @@ export interface MaterialTier {
   style: string;
 }
 
+/** Shape-override prefix for tier prompts — must come FIRST to override body-shape recognition */
+export const TIER_SHAPE_PREFIX =
+  "medieval plate armor, hard metallic surface, not skin, not clothing, not a body";
+
+/** Style suffix for tier prompts — clean armor look */
+export const TIER_STYLE_SUFFIX =
+  "solid uniform color, smooth polished metal, game-ready PBR texture";
+
 export const MATERIAL_TIERS: MaterialTier[] = [
   {
     id: "bronze",
     label: "Bronze",
     color: "#cd7f32",
     prompt:
-      "plain bronze plate armor, all one color, warm brown-copper metal, no designs, simple flat surface",
-    style: "runescape style, solid color, simple RPG armor",
+      "bronze metal armor plate, warm copper-gold #cd7f32 color, polished bronze surface",
+    style: TIER_STYLE_SUFFIX,
   },
   {
     id: "iron",
     label: "Iron",
     color: "#6b6b6b",
     prompt:
-      "plain iron plate armor, all one color, dark grey metal, no designs, simple flat surface",
-    style: "runescape style, solid color, simple RPG armor",
+      "iron metal armor plate, dark grey #6b6b6b color, matte forged iron surface",
+    style: TIER_STYLE_SUFFIX,
   },
   {
     id: "steel",
     label: "Steel",
     color: "#b8b8b8",
     prompt:
-      "plain steel plate armor, all one color, bright silver metal, no designs, simple flat surface",
-    style: "runescape style, solid color, simple RPG armor",
+      "steel metal armor plate, bright silver #b8b8b8 color, polished reflective steel surface",
+    style: TIER_STYLE_SUFFIX,
+  },
+  {
+    id: "black",
+    label: "Black",
+    color: "#2a2a2a",
+    prompt:
+      "black metal armor plate, very dark #2a2a2a color, polished obsidian black surface",
+    style: TIER_STYLE_SUFFIX,
   },
   {
     id: "mithril",
     label: "Mithril",
     color: "#4a7ab5",
     prompt:
-      "plain mithril plate armor, all one color, blue-purple metal, no designs, simple flat surface",
-    style: "runescape style, solid color, simple RPG armor",
+      "mithril metal armor plate, blue-steel #4a7ab5 color, gleaming blue-purple surface",
+    style: TIER_STYLE_SUFFIX,
   },
   {
     id: "adamant",
     label: "Adamant",
     color: "#2d6b3f",
     prompt:
-      "plain adamant plate armor, all one color, dark green metal, no designs, simple flat surface",
-    style: "runescape style, solid color, simple RPG armor",
+      "adamantite metal armor plate, dark green #2d6b3f color, polished green surface",
+    style: TIER_STYLE_SUFFIX,
   },
   {
     id: "rune",
     label: "Rune",
     color: "#3db8c4",
     prompt:
-      "plain rune plate armor, all one color, cyan-teal metal, no designs, simple flat surface",
-    style: "runescape style, solid color, simple RPG armor",
+      "runite metal armor plate, bright teal-cyan #3db8c4 color, polished cyan surface",
+    style: TIER_STYLE_SUFFIX,
+  },
+  {
+    id: "dragon",
+    label: "Dragon",
+    color: "#8b1a1a",
+    prompt:
+      "dragon metal armor plate, deep crimson #8b1a1a color, polished dark red surface",
+    style: TIER_STYLE_SUFFIX,
+  },
+];
+
+/**
+ * Generate a placehold.co swatch URL for a given hex color.
+ * These are public HTTP URLs that Meshy can fetch as style references.
+ * Using 256x256 for better style influence.
+ */
+export function getTierSwatchUrl(hexColor: string): string {
+  const hex = hexColor.replace("#", "");
+  return `https://placehold.co/256x256/${hex}/${hex}.png`;
+}
+
+/** Detail level controls how much ornamentation/design the AI adds to armor textures */
+export interface DetailLevel {
+  id: string;
+  label: string;
+  /** Appended to prompt to control detail amount */
+  suffix: string;
+  /** Short UI description */
+  desc: string;
+}
+
+export const DETAIL_LEVELS: DetailLevel[] = [
+  {
+    id: "plain",
+    label: "Plain",
+    suffix:
+      "completely smooth clean surface, no engravings, no ornaments, no patterns, no trim, flat uniform",
+    desc: "Smooth solid metal, no ornamentation",
+  },
+  {
+    id: "minimal",
+    label: "Minimal",
+    suffix:
+      "mostly smooth surface, subtle edge bevels, very minimal trim lines",
+    desc: "Subtle edge highlights only",
+  },
+  {
+    id: "moderate",
+    label: "Moderate",
+    suffix:
+      "some decorative trim along edges, light engravings, subtle raised border detail",
+    desc: "Light engravings and trim",
+  },
+  {
+    id: "ornate",
+    label: "Ornate",
+    suffix:
+      "ornate engravings, decorative filigree trim, embossed patterns, raised border detail",
+    desc: "Detailed engravings and patterns",
+  },
+  {
+    id: "intricate",
+    label: "Intricate",
+    suffix:
+      "highly detailed intricate filigree, elaborate ornamental engravings, jeweled accents, complex embossed relief patterns, gilded trim",
+    desc: "Maximum detail — filigree, jewels, relief",
   },
 ];

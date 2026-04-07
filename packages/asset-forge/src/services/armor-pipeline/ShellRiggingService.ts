@@ -247,8 +247,47 @@ export class ShellRiggingService {
   }
 
   /**
+   * Publish a rigged armor GLB to the game's model directory via the API server.
+   * Updates the item manifest so the game can load and equip it.
+   */
+  async publishToGame(
+    glbBlob: Blob,
+    options: {
+      itemId: string;
+      slot: string;
+      itemName?: string;
+      tier?: string;
+      bonuses?: Record<string, number>;
+    },
+  ): Promise<{ success: boolean; glbPath?: string; error?: string }> {
+    const formData = new FormData();
+    formData.append("file", glbBlob, `${options.itemId}.glb`);
+    formData.append("itemId", options.itemId);
+    formData.append("slot", options.slot);
+    if (options.itemName) formData.append("itemName", options.itemName);
+    if (options.tier) formData.append("tier", options.tier);
+    if (options.bonuses)
+      formData.append("bonuses", JSON.stringify(options.bonuses));
+
+    const apiBase =
+      import.meta.env.VITE_GENERATION_API_URL?.replace(/\/$/, "") || "/api";
+    const resp = await fetch(`${apiBase}/armor-pipeline/publish-to-game`, {
+      method: "POST",
+      body: formData,
+    });
+
+    return resp.json();
+  }
+
+  /**
    * Export a rigged armor mesh as a game-ready GLB.
-   * Follows the pattern from ArmorFittingService.exportSkinnedArmorForGame().
+   *
+   * IMPORTANT: Exports the FULL skeleton with original bone indices preserved.
+   * The game's EquipmentVisualSystem does a simple skeleton swap:
+   *   child.skeleton = playerSkeleton;
+   *   child.bind(playerSkeleton, child.bindMatrix);
+   * It does NOT remap bone indices by name — so skinIndex values must reference
+   * the same bone positions as the player's VRM skeleton.
    */
   async exportRiggedGLB(result: RiggedArmorResult): Promise<Blob> {
     const { GLTFExporter } =
@@ -258,72 +297,34 @@ export class ShellRiggingService {
     const { skinnedMesh, skeleton } = result;
     const geometry = skinnedMesh.geometry;
 
-    // Find which bones are actually used by the armor
-    const usedBoneIndices = new Set<number>();
-    const skinIndex = geometry.attributes.skinIndex as THREE.BufferAttribute;
-    const skinWeight = geometry.attributes.skinWeight as THREE.BufferAttribute;
-
-    for (let i = 0; i < skinIndex.count; i++) {
-      for (let j = 0; j < 4; j++) {
-        const weight = skinWeight.getComponent(i, j);
-        if (weight > 0) {
-          usedBoneIndices.add(skinIndex.getComponent(i, j));
-        }
-      }
-    }
-
-    // Collect used bones + ancestors to maintain hierarchy
-    const requiredBoneIndices = new Set<number>();
-    for (const boneIndex of usedBoneIndices) {
-      requiredBoneIndices.add(boneIndex);
-      let bone = skeleton.bones[boneIndex];
-      while (bone?.parent && bone.parent instanceof THREE.Bone) {
-        const parentIndex = skeleton.bones.indexOf(bone.parent);
-        if (parentIndex !== -1) {
-          requiredBoneIndices.add(parentIndex);
-          bone = bone.parent;
-        } else {
-          break;
-        }
-      }
-    }
-
     // Update skeleton before export
     skeleton.update();
 
-    // Create new bones preserving hierarchy
-    const sortedIndices = Array.from(requiredBoneIndices).sort((a, b) => a - b);
-    const boneMapping = new Map<number, number>();
+    // Clone ALL bones from the full skeleton — preserves original indices
+    // so the game's simple skeleton swap works correctly.
     const oldToNewBone = new Map<THREE.Bone, THREE.Bone>();
     const newBones: THREE.Bone[] = [];
 
-    // Store world matrices
-    for (const oldIndex of sortedIndices) {
-      skeleton.bones[oldIndex].updateWorldMatrix(true, false);
-    }
-
-    for (let newIndex = 0; newIndex < sortedIndices.length; newIndex++) {
-      const oldIndex = sortedIndices[newIndex];
-      const oldBone = skeleton.bones[oldIndex];
+    for (let i = 0; i < skeleton.bones.length; i++) {
+      const oldBone = skeleton.bones[i];
+      oldBone.updateWorldMatrix(true, false);
       const newBone = new THREE.Bone();
       newBone.name = oldBone.name;
       newBone.position.copy(oldBone.position);
       newBone.quaternion.copy(oldBone.quaternion);
-      newBone.scale.set(1, 1, 1);
-
+      newBone.scale.copy(oldBone.scale);
       newBones.push(newBone);
-      boneMapping.set(oldIndex, newIndex);
       oldToNewBone.set(oldBone, newBone);
     }
 
-    // Set up parent-child relationships
-    for (const oldIndex of sortedIndices) {
-      const oldBone = skeleton.bones[oldIndex];
-      const newBone = oldToNewBone.get(oldBone)!;
+    // Rebuild parent-child hierarchy
+    for (let i = 0; i < skeleton.bones.length; i++) {
+      const oldBone = skeleton.bones[i];
+      const newBone = newBones[i];
       if (oldBone.parent && oldBone.parent instanceof THREE.Bone) {
-        const parentNewBone = oldToNewBone.get(oldBone.parent);
-        if (parentNewBone) {
-          parentNewBone.add(newBone);
+        const parentNew = oldToNewBone.get(oldBone.parent);
+        if (parentNew) {
+          parentNew.add(newBone);
         }
       }
     }
@@ -331,37 +332,24 @@ export class ShellRiggingService {
     const rootBones = newBones.filter(
       (bone) => !bone.parent || !(bone.parent instanceof THREE.Bone),
     );
-
     rootBones.forEach((root) => root.updateMatrixWorld(true));
 
-    // Create inverse bind matrices
+    // Copy inverse bind matrices from original skeleton
     const boneInverses: THREE.Matrix4[] = [];
-    for (const oldIndex of sortedIndices) {
-      const inverseBindMatrix = new THREE.Matrix4();
-      inverseBindMatrix.copy(skeleton.bones[oldIndex].matrixWorld).invert();
-      boneInverses.push(inverseBindMatrix);
-    }
-
-    const minimalSkeleton = new THREE.Skeleton(newBones, boneInverses);
-
-    // Clone geometry and remap skin indices
-    const exportGeometry = geometry.clone();
-    const exportSkinIndex = exportGeometry.attributes
-      .skinIndex as THREE.BufferAttribute;
-    const newSkinIndices = new Float32Array(exportSkinIndex.array.length);
-
-    for (let i = 0; i < exportSkinIndex.count; i++) {
-      for (let j = 0; j < 4; j++) {
-        const oldIndex = exportSkinIndex.getComponent(i, j);
-        const newIndex = boneMapping.get(oldIndex);
-        newSkinIndices[i * 4 + j] = newIndex !== undefined ? newIndex : 0;
+    for (let i = 0; i < skeleton.bones.length; i++) {
+      const inv = new THREE.Matrix4();
+      if (skeleton.boneInverses[i]) {
+        inv.copy(skeleton.boneInverses[i]);
+      } else {
+        inv.copy(skeleton.bones[i].matrixWorld).invert();
       }
+      boneInverses.push(inv);
     }
 
-    exportGeometry.setAttribute(
-      "skinIndex",
-      new THREE.BufferAttribute(newSkinIndices, 4),
-    );
+    const fullSkeleton = new THREE.Skeleton(newBones, boneInverses);
+
+    // Clone geometry — skinIndex values stay as-is (no remapping needed)
+    const exportGeometry = geometry.clone();
 
     // Build export scene
     const exportScene = new THREE.Scene();
@@ -380,17 +368,27 @@ export class ShellRiggingService {
 
     const exportMesh = new THREE.SkinnedMesh(exportGeometry, exportMaterial);
     exportMesh.name = result.slotName + "_armor";
-    exportMesh.bind(minimalSkeleton, new THREE.Matrix4().identity());
+    exportMesh.bind(fullSkeleton, new THREE.Matrix4().identity());
     exportScene.add(exportMesh);
 
     exportMesh.updateMatrixWorld(true);
-    minimalSkeleton.update();
+    fullSkeleton.update();
 
     // Ensure geometry has normals
     if (!exportGeometry.attributes.normal) {
       exportGeometry.computeVertexNormals();
     }
 
+    // Embed both armorMetadata (internal) and hyperscape (game-compatible) data.
+    // The game's EquipmentVisualHelpers.extractEquipmentAttachmentData() reads
+    // userData.hyperscape to determine bone attachment and skinning.
+    const slotToBone: Record<string, string> = {
+      helmet: "head",
+      body: "spine",
+      legs: "hips",
+      boots: "leftFoot",
+      gloves: "leftHand",
+    };
     exportMesh.userData = {
       armorMetadata: {
         slotName: result.slotName,
@@ -400,6 +398,13 @@ export class ShellRiggingService {
         boneCount: newBones.length,
         boneNames: newBones.map((b) => b.name),
         exportDate: new Date().toISOString(),
+      },
+      hyperscape: {
+        version: 2,
+        vrmBoneName: slotToBone[result.slotName] ?? "spine",
+        originalSlot: result.slotName,
+        exportedFrom: "asset-forge-armor-pipeline",
+        exportedAt: new Date().toISOString(),
       },
     };
 

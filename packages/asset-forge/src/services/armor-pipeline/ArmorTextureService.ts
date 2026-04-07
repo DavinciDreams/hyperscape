@@ -37,6 +37,12 @@ export class ArmorTextureService {
     prompt: string,
     options?: {
       aiModel?: string;
+      enablePBR?: boolean;
+      /** Let Meshy generate new UVs (false) or preserve original (true).
+       *  Default false — avatar UVs bias Meshy to paint skin/clothing. */
+      preserveUV?: boolean;
+      /** Public URL of a style reference image for color/texture consistency */
+      styleImageUrl?: string;
     },
   ): Promise<{ taskId: string; sizeKB: number }> {
     const formData = new FormData();
@@ -45,6 +51,11 @@ export class ArmorTextureService {
     formData.append("name", filename);
     if (options?.aiModel) {
       formData.append("aiModel", options.aiModel);
+    }
+    formData.append("enablePBR", String(options?.enablePBR ?? false));
+    formData.append("preserveUV", String(options?.preserveUV ?? false));
+    if (options?.styleImageUrl) {
+      formData.append("styleImageUrl", options.styleImageUrl);
     }
 
     const response = await fetch(`${API_BASE}/armor-pipeline/texture-shell`, {
@@ -121,14 +132,25 @@ export class ArmorTextureService {
   async startBatchTexture(
     glbBlob: Blob,
     filename: string,
-    tiers: { tierId: string; prompt: string }[],
-    options?: { aiModel?: string },
+    tiers: { tierId: string; prompt: string; styleImageUrl?: string }[],
+    options?: {
+      aiModel?: string;
+      enablePBR?: boolean;
+      preserveUV?: boolean;
+      /** Global fallback style image — per-tier styleImageUrl takes precedence */
+      styleImageUrl?: string;
+    },
   ): Promise<{ tierId: string; taskId: string }[]> {
     const formData = new FormData();
     formData.append("file", glbBlob, filename);
     formData.append("tiers", JSON.stringify(tiers));
     if (options?.aiModel) {
       formData.append("aiModel", options.aiModel);
+    }
+    formData.append("enablePBR", String(options?.enablePBR ?? false));
+    formData.append("preserveUV", String(options?.preserveUV ?? false));
+    if (options?.styleImageUrl) {
+      formData.append("styleImageUrl", options.styleImageUrl);
     }
 
     const response = await fetch(

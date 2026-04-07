@@ -239,6 +239,22 @@ export function attachEquipmentVisualToVRM(options: {
       if (child instanceof THREE.SkinnedMesh) {
         child.skeleton = playerSkeleton;
         child.bind(playerSkeleton, child.bindMatrix);
+        // Must match player body renderOrder (100) so equipment renders
+        // on top of the silhouette (renderOrder 50), not underneath it.
+        child.renderOrder = 100;
+
+        // Fix metallic materials for the game's lighting setup:
+        // The game has no environment map (scene.environment = null), so
+        // metallic PBR materials appear black — they derive color from
+        // reflections, not diffuse light. Zero metalness to show base color.
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+        for (const mat of mats) {
+          if ("metalness" in mat) {
+            (mat as THREE.MeshStandardMaterial).metalness = 0;
+          }
+        }
       }
     });
 
@@ -254,6 +270,23 @@ export function attachEquipmentVisualToVRM(options: {
   }
 
   removeEquipmentVisual(visuals, slot);
+
+  // Set renderOrder on all meshes so equipment renders on top of the
+  // player silhouette (renderOrder 50), matching player body (100).
+  // Also zero metalness — no environment map means metallic surfaces appear black.
+  modelRoot.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.renderOrder = 100;
+      const mats = Array.isArray(child.material)
+        ? child.material
+        : [child.material];
+      for (const mat of mats) {
+        if ("metalness" in mat) {
+          (mat as THREE.MeshStandardMaterial).metalness = 0;
+        }
+      }
+    }
+  });
 
   const hasValidMatrix =
     attachmentData?.version === 2 &&

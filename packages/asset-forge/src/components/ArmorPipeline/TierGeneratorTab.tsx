@@ -30,6 +30,8 @@ import {
   ALL_SLOTS,
   ALL_BULKS,
   MATERIAL_TIERS,
+  DETAIL_LEVELS,
+  TIER_SHAPE_PREFIX,
 } from "../../services/armor-pipeline/constants";
 import type { MaterialTier } from "../../services/armor-pipeline/constants";
 import {
@@ -94,6 +96,7 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
     Object.fromEntries(MATERIAL_TIERS.map((t) => [t.id, t.prompt])),
   );
   const [expandedTier, setExpandedTier] = useState<string | null>(null);
+  const [detailLevel, setDetailLevel] = useState<string>("plain");
 
   // State
   const [stage, setStage] = useState<Stage>("idle");
@@ -173,6 +176,7 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
         setExtractionResult(result);
         addLog(`Shell extraction complete. ${result.shells.size} shells.`);
       } else {
+        setExtractionResult(result);
         addLog("Reusing cached shell extraction.");
       }
 
@@ -184,23 +188,40 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
       if (!shell) throw new Error(`Shell not found: ${shellKey}`);
 
       setCurrentShell(shell);
-      addLog(`Exporting ${shellKey} as GLB...`);
-      const glbBlob = await shellServiceRef.current.exportShellAsGLB(shell);
+      addLog(`Exporting ${shellKey} as GLB (pre-painted metallic silver)...`);
+      // Pre-paint with bright metallic silver — Meshy sees "metal plate" not "body"
+      // Individual tier colors come from per-tier style swatch + prompt
+      const glbBlob = await shellServiceRef.current.exportShellAsGLB(
+        shell,
+        "#c0c0c0", // neutral metallic silver
+        0.9, // high metalness
+      );
       addLog(`GLB exported: ${(glbBlob.size / 1024).toFixed(1)}KB`);
 
-      // Step 3: Start batch retexture — all tiers in parallel
+      // Step 3: Start batch retexture — all tiers with shape-override prefix
+      // CRITICAL: Do NOT send image_style_url — it overrides text_style_prompt entirely.
+      // The text prompt is our only tool for telling Meshy "this is armor, not a body."
       setStage("uploading");
+      const detail = DETAIL_LEVELS.find((d) => d.id === detailLevel);
+      const detailSuffix = detail ? `, ${detail.suffix}` : "";
       const tierPromptPayload = selectedTiers.map((t) => ({
         tierId: t.id,
-        prompt: `${tierPrompts[t.id] || t.prompt}, ${t.style}`,
+        // Structure: [shape override], [material/color], [detail], [style suffix]
+        prompt: `${TIER_SHAPE_PREFIX}, ${tierPrompts[t.id] || t.prompt}${detailSuffix}, ${t.style}`,
       }));
 
-      addLog(`Starting batch retexture for ${selectedTiers.length} tiers...`);
+      addLog(
+        `Starting batch retexture for ${selectedTiers.length} tiers (meshy-6, PBR, text-only prompts)...`,
+      );
+      for (const tp of tierPromptPayload) {
+        addLog(`  ${tp.tierId}: "${tp.prompt.substring(0, 80)}..."`);
+      }
 
       const tasks = await textureServiceRef.current.startBatchTexture(
         glbBlob,
         `${shellKey}_batch_${Date.now()}.glb`,
         tierPromptPayload,
+        { enablePBR: true, aiModel: "meshy-6" },
       );
 
       // Initialize tier task tracking
@@ -534,6 +555,32 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
                 Clear
               </button>
             </div>
+          </div>
+
+          {/* Detail Level */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-text-secondary">
+              Detail Level
+            </label>
+            <div className="flex gap-1">
+              {DETAIL_LEVELS.map((level) => (
+                <button
+                  key={level.id}
+                  onClick={() => setDetailLevel(level.id)}
+                  title={level.desc}
+                  className={`flex-1 px-1 py-1.5 rounded-md text-[11px] font-medium transition-all text-center ${
+                    detailLevel === level.id
+                      ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
+                      : "bg-bg-secondary text-text-tertiary border border-border-primary hover:border-border-secondary"
+                  }`}
+                >
+                  {level.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-text-tertiary">
+              {DETAIL_LEVELS.find((d) => d.id === detailLevel)?.desc}
+            </p>
           </div>
 
           {/* Actions */}

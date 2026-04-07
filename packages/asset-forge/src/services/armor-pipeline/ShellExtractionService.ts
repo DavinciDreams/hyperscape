@@ -52,6 +52,8 @@ export class ShellExtractionService {
     slots: EquipmentSlotName[] = ["helmet", "body", "legs", "boots", "gloves"],
     bulkClasses: BulkClass[] = ["skin", "cloth", "leather", "plate"],
     onProgress?: ProgressCallback,
+    /** Optional custom offset in metres. Generates extra shells keyed `${slot}_custom`. */
+    customOffsetM?: number,
   ): Promise<ShellExtractionResult> {
     onProgress?.({
       stage: "loading",
@@ -86,11 +88,8 @@ export class ShellExtractionService {
 
     const boneNameToIndex = this.buildBoneNameMap(skeleton, vrm);
 
-    const regions = this.extractExclusiveRegions(
-      geometry,
-      boneNameToIndex,
-      slots,
-    );
+    const { regions, interSlotBoundaryVerts, processedGeometry } =
+      this.extractExclusiveRegions(geometry, boneNameToIndex, slots);
 
     for (const slot of slots) {
       const region = regions.get(slot)!;
@@ -102,9 +101,12 @@ export class ShellExtractionService {
       });
     }
 
-    // Generate offset shells (createShell handles curvature clamp + constrained smooth)
+    // Generate offset shells using the preprocessed geometry
+    // (has extra vertices from isoline triangle splitting for smooth boundaries)
     const shells = new Map<string, ShellMesh>();
-    const totalShells = slots.length * bulkClasses.length;
+    const hasCustom = customOffsetM != null && customOffsetM > 0;
+    const totalShells =
+      slots.length * (bulkClasses.length + (hasCustom ? 1 : 0));
     let shellIndex = 0;
 
     for (const slot of slots) {
@@ -120,7 +122,39 @@ export class ShellExtractionService {
           message: `Shell: ${slot}/${bulk} (${BULK_OFFSETS[bulk] * 1000}mm)...`,
         });
 
-        const shell = this.createShell(geometry, skeleton, region, slot, bulk);
+        const shell = this.createShell(
+          processedGeometry,
+          skeleton,
+          region,
+          slot,
+          bulk,
+          interSlotBoundaryVerts,
+        );
+        shells.set(key, shell);
+        shellIndex++;
+      }
+
+      // Generate custom-offset shell if requested
+      if (hasCustom) {
+        const key = `${slot}_custom`;
+        const mmLabel = (customOffsetM! * 1000).toFixed(0);
+
+        onProgress?.({
+          stage: "offsetting",
+          slotName: slot,
+          progress: shellIndex / totalShells,
+          message: `Shell: ${slot}/custom (${mmLabel}mm)...`,
+        });
+
+        const shell = this.createShell(
+          processedGeometry,
+          skeleton,
+          region,
+          slot,
+          "plate",
+          interSlotBoundaryVerts,
+          customOffsetM,
+        );
         shells.set(key, shell);
         shellIndex++;
       }
@@ -140,6 +174,7 @@ export class ShellExtractionService {
       skinnedMesh,
       vrmScene,
       vrm,
+      processedGeometry,
     };
   }
 
@@ -217,6 +252,31 @@ export class ShellExtractionService {
    * bone nodes are often different objects from skeleton bones, causing
    * indexOf() to silently fail for limb bones.
    */
+  /**
+   * Common bone name aliases used by different VRM creators.
+   * Key = VRM standard name, values = common alternative names (lowercase).
+   */
+  private static readonly BONE_ALIASES: Record<string, string[]> = {
+    spine: ["spine"],
+    chest: ["spine01", "spine1", "chest"],
+    upperChest: ["spine02", "spine2", "upperchest", "upper_chest"],
+    leftUpperArm: ["leftarm", "left_upperarm", "l_upperarm"],
+    leftLowerArm: ["leftforearm", "left_lowerarm", "l_lowerarm"],
+    rightUpperArm: ["rightarm", "right_upperarm", "r_upperarm"],
+    rightLowerArm: ["rightforearm", "right_lowerarm", "r_lowerarm"],
+    leftUpperLeg: ["leftupleg", "left_upperleg", "l_upperleg", "lefthighleg"],
+    leftLowerLeg: ["leftleg", "left_lowerleg", "l_lowerleg", "leftshinleg"],
+    rightUpperLeg: [
+      "rightupleg",
+      "right_upperleg",
+      "r_upperleg",
+      "righthighleg",
+    ],
+    rightLowerLeg: ["rightleg", "right_lowerleg", "r_lowerleg", "rightshinleg"],
+    leftToes: ["lefttoebase", "lefttoe", "left_toes"],
+    rightToes: ["righttoebase", "righttoe", "right_toes"],
+  };
+
   private buildBoneNameMap(
     skeleton: THREE.Skeleton,
     vrm: Record<string, unknown>,
@@ -249,32 +309,43 @@ export class ShellExtractionService {
     const humanoid = (vrm as Record<string, Record<string, unknown>>).humanoid;
     if (humanoid) {
       // Collect all possible bone dictionaries to try
-      const boneSources: Record<string, unknown>[] = [];
+      const boneSources: { name: string; bones: Record<string, unknown> }[] =
+        [];
 
       // 1. Public humanBones property (returns raw bones — most reliable)
       const publicBones = (humanoid as Record<string, unknown>).humanBones;
       if (publicBones && typeof publicBones === "object") {
-        boneSources.push(publicBones as Record<string, unknown>);
+        boneSources.push({
+          name: "public",
+          bones: publicBones as Record<string, unknown>,
+        });
       }
 
       // 2. Raw human bones (internal, should match skeleton)
       const rawSrc = (humanoid as Record<string, Record<string, unknown>>)
         ._rawHumanBones;
       if (rawSrc?.humanBones && typeof rawSrc.humanBones === "object") {
-        boneSources.push(rawSrc.humanBones as Record<string, unknown>);
+        boneSources.push({
+          name: "raw",
+          bones: rawSrc.humanBones as Record<string, unknown>,
+        });
       }
 
       // 3. Normalized human bones (internal, may NOT match skeleton)
       const normSrc = (humanoid as Record<string, Record<string, unknown>>)
         ._normalizedHumanBones;
       if (normSrc?.humanBones && typeof normSrc.humanBones === "object") {
-        boneSources.push(normSrc.humanBones as Record<string, unknown>);
+        boneSources.push({
+          name: "normalized",
+          bones: normSrc.humanBones as Record<string, unknown>,
+        });
       }
 
       // Try each source, keep whichever maps the most bones
       let bestMap = new Map<string, number>();
+      let bestSource = "none";
 
-      for (const source of boneSources) {
+      for (const { name, bones: source } of boneSources) {
         const candidate = new Map<string, number>();
         for (const boneName of allBoneNames) {
           const boneData = source[boneName] as
@@ -290,28 +361,62 @@ export class ShellExtractionService {
         }
         if (candidate.size > bestMap.size) {
           bestMap = candidate;
+          bestSource = name;
         }
       }
 
       if (bestMap.size > 0) {
+        console.log(
+          `[ShellExtraction] Bone mapping via VRM humanoid (${bestSource}): ${bestMap.size}/${allBoneNames.length} bones`,
+        );
+        if (bestMap.size < allBoneNames.length) {
+          const missing = allBoneNames.filter((b) => !bestMap.has(b));
+          console.warn(
+            `[ShellExtraction] Missing bones: ${missing.join(", ")}`,
+          );
+        }
         return bestMap;
       }
     }
 
-    // Fallback: match skeleton bone names by string
+    // Fallback: match skeleton bone names by string (with alias support)
+    console.warn(
+      "[ShellExtraction] VRM humanoid metadata failed — using fallback bone name matching",
+    );
     const map = new Map<string, number>();
+    // Pre-build lowercase bone name lookup
+    const boneNameLower = skeleton.bones.map((b) => b.name.toLowerCase());
+
     for (const vrmName of allBoneNames) {
       const lowerName = vrmName.toLowerCase();
-      const idx = skeleton.bones.findIndex(
-        (b) =>
-          b.name.toLowerCase() === lowerName ||
-          b.name.toLowerCase().includes(lowerName),
-      );
+
+      // Try exact match first
+      let idx = boneNameLower.indexOf(lowerName);
+
+      // Try aliases (common non-standard names used by VRM creators)
+      if (idx < 0) {
+        const aliases = ShellExtractionService.BONE_ALIASES[vrmName] ?? [];
+        for (const alias of aliases) {
+          idx = boneNameLower.indexOf(alias);
+          if (idx >= 0) break;
+          // Also try contains match for aliases
+          idx = boneNameLower.findIndex((n) => n === alias);
+          if (idx >= 0) break;
+        }
+      }
+
       if (idx >= 0) {
         map.set(vrmName, idx);
       }
     }
 
+    console.log(
+      `[ShellExtraction] Fallback bone mapping: ${map.size}/${allBoneNames.length} bones`,
+    );
+    if (map.size < allBoneNames.length) {
+      const missing = allBoneNames.filter((b) => !map.has(b));
+      console.warn(`[ShellExtraction] Missing bones: ${missing.join(", ")}`);
+    }
     return map;
   }
 
@@ -327,30 +432,33 @@ export class ShellExtractionService {
     geometry: THREE.BufferGeometry,
     boneNameToIndex: Map<string, number>,
     slots: EquipmentSlotName[],
-  ): Map<EquipmentSlotName, BodyRegion> {
+  ): {
+    regions: Map<EquipmentSlotName, BodyRegion>;
+    interSlotBoundaryVerts: Set<number>;
+    /** Preprocessed geometry with extra vertices from isoline triangle splitting */
+    processedGeometry: THREE.BufferGeometry;
+  } {
     const position = geometry.attributes.position as THREE.BufferAttribute;
+    const normal = geometry.attributes.normal as THREE.BufferAttribute;
     const skinIndex = geometry.attributes.skinIndex as THREE.BufferAttribute;
     const skinWeight = geometry.attributes.skinWeight as THREE.BufferAttribute;
+    const srcUV = geometry.attributes.uv as THREE.BufferAttribute | undefined;
     const index = geometry.index;
+    const origVertCount = position.count;
 
-    // Pre-compute bone sets + partial caps for each slot
+    // ── Phase 1: Compute per-vertex weight score for each slot ──
     const slotConfigs = new Map<
       EquipmentSlotName,
-      {
-        bones: Set<number>;
-        partialCaps: Map<number, number>;
-      }
+      { bones: Set<number>; partialCaps: Map<number, number> }
     >();
 
     for (const slot of slots) {
       const bones = new Set<number>();
       const partialCaps = new Map<number, number>();
-
       for (const boneName of SLOT_BONE_MAP[slot]) {
         const idx = boneNameToIndex.get(boneName);
         if (idx !== undefined) bones.add(idx);
       }
-
       const partials = SLOT_PARTIAL_BONES[slot];
       if (partials) {
         for (const { boneName, maxWeight } of partials) {
@@ -361,85 +469,424 @@ export class ShellExtractionService {
           }
         }
       }
-
       slotConfigs.set(slot, { bones, partialCaps });
     }
 
-    // For each vertex, compute weight per slot and assign to the highest
-    const vertexSlot = new Array<EquipmentSlotName | null>(position.count).fill(
-      null,
-    );
-    const MIN_WEIGHT = 0.15; // minimum total weight to be assigned at all
+    // Per-vertex weight for each slot (used as the isoline scalar field)
+    const slotWeightArrays = new Map<EquipmentSlotName, Float32Array>();
+    for (const slot of slots) {
+      slotWeightArrays.set(slot, new Float32Array(origVertCount));
+    }
 
-    for (let i = 0; i < position.count; i++) {
-      let bestSlot: EquipmentSlotName | null = null;
-      let bestWeight = MIN_WEIGHT;
-
+    for (let i = 0; i < origVertCount; i++) {
       for (const slot of slots) {
         const { bones, partialCaps } = slotConfigs.get(slot)!;
-        let totalWeight = 0;
-
+        let w = 0;
         for (let j = 0; j < 4; j++) {
           const boneIdx = skinIndex.getComponent(i, j);
           const weight = skinWeight.getComponent(i, j);
-
           if (bones.has(boneIdx)) {
             const cap = partialCaps.get(boneIdx);
-            totalWeight += cap !== undefined ? Math.min(weight, cap) : weight;
+            w += cap !== undefined ? Math.min(weight, cap) : weight;
           }
         }
+        slotWeightArrays.get(slot)![i] = w;
+      }
+    }
 
-        if (totalWeight > bestWeight) {
-          bestWeight = totalWeight;
-          bestSlot = slot;
+    // ── Phase 2: Laplacian-smooth slot weights for smooth isolines ──
+    // Critical: GLTF splits vertices at UV seams. These split vertices are NOT
+    // connected in the mesh adjacency, creating invisible barriers in the weight
+    // field. We bridge UV seams by finding coincident vertex groups (same position,
+    // different normals/UVs) and merging their adjacency neighborhoods.
+    if (index) {
+      // Find coincident vertex groups (UV-seam splits share positions)
+      const QUANT = 10000; // 0.1mm precision
+      const posToGroup = new Map<string, number[]>();
+      for (let i = 0; i < origVertCount; i++) {
+        const key = `${Math.round(position.getX(i) * QUANT)},${Math.round(position.getY(i) * QUANT)},${Math.round(position.getZ(i) * QUANT)}`;
+        let group = posToGroup.get(key);
+        if (!group) {
+          group = [];
+          posToGroup.set(key, group);
+        }
+        group.push(i);
+      }
+      const weightCoincidentGroups = Array.from(posToGroup.values()).filter(
+        (g) => g.length > 1,
+      );
+
+      // Build adjacency with UV-seam bridging
+      const adjSets: Set<number>[] = new Array(origVertCount);
+      for (let i = 0; i < origVertCount; i++) adjSets[i] = new Set();
+
+      // Standard mesh-edge adjacency
+      for (let i = 0; i < index.count; i += 3) {
+        const a = index.getX(i),
+          b = index.getX(i + 1),
+          c = index.getX(i + 2);
+        adjSets[a].add(b);
+        adjSets[a].add(c);
+        adjSets[b].add(a);
+        adjSets[b].add(c);
+        adjSets[c].add(a);
+        adjSets[c].add(b);
+      }
+
+      // Bridge UV seams: each coincident vertex shares all neighbors + group members
+      for (const group of weightCoincidentGroups) {
+        const merged = new Set<number>();
+        for (const vi of group) {
+          for (const n of adjSets[vi]) merged.add(n);
+          for (const vj of group) {
+            if (vi !== vj) merged.add(vj);
+          }
+        }
+        for (const vi of group) {
+          for (const n of merged) {
+            if (n !== vi) adjSets[vi].add(n);
+          }
         }
       }
 
+      const adj: number[][] = new Array(origVertCount);
+      for (let i = 0; i < origVertCount; i++) adj[i] = Array.from(adjSets[i]);
+
+      console.log(
+        `[ShellExtraction] Weight smoothing: ${weightCoincidentGroups.length} coincident groups bridged across UV seams`,
+      );
+
+      // Smooth with enough iterations for ~7-ring diffusion radius (sqrt(50) ≈ 7)
+      const WEIGHT_SMOOTH_ITERS = 50;
+      for (const slot of slots) {
+        const weights = slotWeightArrays.get(slot)!;
+        const temp = new Float32Array(origVertCount);
+        for (let iter = 0; iter < WEIGHT_SMOOTH_ITERS; iter++) {
+          temp.set(weights); // Jacobi: read from snapshot
+          for (let i = 0; i < origVertCount; i++) {
+            const neighbors = adj[i];
+            if (neighbors.length === 0) continue;
+            let sum = temp[i];
+            for (const n of neighbors) sum += temp[n];
+            weights[i] = sum / (neighbors.length + 1);
+          }
+          // Enforce coincident consistency — UV-seam-split vertices must
+          // have identical weights so the scalar field is continuous across seams
+          for (const group of weightCoincidentGroups) {
+            let avg = 0;
+            for (const vi of group) avg += weights[vi];
+            avg /= group.length;
+            for (const vi of group) weights[vi] = avg;
+          }
+        }
+      }
+    }
+
+    // ── Phase 3: Assign vertices to best slot using smoothed weights ──
+    const vertexSlot = new Array<EquipmentSlotName | null>(origVertCount).fill(
+      null,
+    );
+    const MIN_WEIGHT = 0.05;
+
+    for (let i = 0; i < origVertCount; i++) {
+      let bestSlot: EquipmentSlotName | null = null;
+      let bestWeight = MIN_WEIGHT;
+      for (const slot of slots) {
+        const w = slotWeightArrays.get(slot)![i];
+        if (w > bestWeight) {
+          bestWeight = w;
+          bestSlot = slot;
+        }
+      }
       vertexSlot[i] = bestSlot;
     }
 
-    // Build per-slot vertex and triangle lists
+    // ── Phase 4: Marching Triangles — split boundary triangles at isoline ──
+    // Instead of assigning whole triangles by majority vote (jagged boundaries),
+    // we split triangles that straddle a slot boundary. New vertices are created
+    // at the exact point where the bone-weight isoline crosses each edge,
+    // producing a smooth boundary curve.
+
+    if (!index) {
+      // Non-indexed geometry — fall back to simple assignment
+      return {
+        regions: new Map(),
+        interSlotBoundaryVerts: new Set(),
+        processedGeometry: geometry,
+      };
+    }
+
+    // Extended vertex data: original vertices + new isoline boundary vertices
+    const extPos: number[] = [];
+    const extNorm: number[] = [];
+    const extUV: number[] = [];
+    const extSkinIdx: number[] = [];
+    const extSkinWt: number[] = [];
+    const extSlot: (EquipmentSlotName | null)[] = [];
+
+    // Copy original vertex data into growable arrays
+    for (let i = 0; i < origVertCount; i++) {
+      extPos.push(position.getX(i), position.getY(i), position.getZ(i));
+      extNorm.push(normal.getX(i), normal.getY(i), normal.getZ(i));
+      if (srcUV) extUV.push(srcUV.getX(i), srcUV.getY(i));
+      for (let j = 0; j < 4; j++) {
+        extSkinIdx.push(skinIndex.getComponent(i, j));
+        extSkinWt.push(skinWeight.getComponent(i, j));
+      }
+      extSlot.push(vertexSlot[i]);
+    }
+
+    // Edge → new vertex index cache (shared edges only split once)
+    const edgeCache = new Map<string, number>();
+    const edgeKey = (a: number, b: number) =>
+      a < b ? `${a}_${b}` : `${b}_${a}`;
+
+    /** Safe read from number[] — returns fallback for out-of-bounds / undefined */
+    const safeRead = (arr: number[], idx: number, fallback: number): number => {
+      const v = arr[idx];
+      return v !== undefined && Number.isFinite(v) ? v : fallback;
+    };
+
+    /** Create a new vertex by interpolating between two existing vertices at parameter t */
+    const createSplitVertex = (
+      idxA: number,
+      idxB: number,
+      t: number,
+    ): number => {
+      const key = edgeKey(idxA, idxB);
+      const cached = edgeCache.get(key);
+      if (cached !== undefined) return cached;
+
+      // Clamp t to safe range — NaN/Inf becomes midpoint
+      const safeT = Number.isFinite(t) && t >= 0 && t <= 1 ? t : 0.5;
+      const newIdx = extPos.length / 3;
+      const s = 1 - safeT;
+
+      // Read source positions with safety (undefined from OOB → 0)
+      const ax = safeRead(extPos, idxA * 3, 0),
+        ay = safeRead(extPos, idxA * 3 + 1, 0),
+        az = safeRead(extPos, idxA * 3 + 2, 0);
+      const bx = safeRead(extPos, idxB * 3, 0),
+        by = safeRead(extPos, idxB * 3 + 1, 0),
+        bz = safeRead(extPos, idxB * 3 + 2, 0);
+
+      extPos.push(
+        ax * s + bx * safeT,
+        ay * s + by * safeT,
+        az * s + bz * safeT,
+      );
+
+      // Normal (interpolate + renormalize, fallback to up vector)
+      const anx = safeRead(extNorm, idxA * 3, 0),
+        any_ = safeRead(extNorm, idxA * 3 + 1, 1),
+        anz = safeRead(extNorm, idxA * 3 + 2, 0);
+      const bnx = safeRead(extNorm, idxB * 3, 0),
+        bny = safeRead(extNorm, idxB * 3 + 1, 1),
+        bnz = safeRead(extNorm, idxB * 3 + 2, 0);
+      let nx = anx * s + bnx * safeT;
+      let ny = any_ * s + bny * safeT;
+      let nz = anz * s + bnz * safeT;
+      const lenSq = nx * nx + ny * ny + nz * nz;
+      if (lenSq > 1e-16) {
+        const invLen = 1 / Math.sqrt(lenSq);
+        nx *= invLen;
+        ny *= invLen;
+        nz *= invLen;
+      } else {
+        // Degenerate: fall back to up vector
+        nx = 0;
+        ny = 1;
+        nz = 0;
+      }
+      extNorm.push(nx, ny, nz);
+
+      // UV
+      if (srcUV) {
+        const au = safeRead(extUV, idxA * 2, 0),
+          av = safeRead(extUV, idxA * 2 + 1, 0);
+        const bu = safeRead(extUV, idxB * 2, 0),
+          bv = safeRead(extUV, idxB * 2 + 1, 0);
+        extUV.push(au * s + bu * safeT, av * s + bv * safeT);
+      }
+
+      // Skin: use bone indices from the closer endpoint, interpolate weights
+      const srcSkin = safeT < 0.5 ? idxA : idxB;
+      for (let j = 0; j < 4; j++) {
+        extSkinIdx.push(safeRead(extSkinIdx, srcSkin * 4 + j, 0));
+        const wa = safeRead(extSkinWt, idxA * 4 + j, 0);
+        const wb = safeRead(extSkinWt, idxB * 4 + j, 0);
+        extSkinWt.push(wa * s + wb * safeT);
+      }
+
+      extSlot.push(null); // boundary vertex — slot determined by triangle
+      edgeCache.set(key, newIdx);
+      return newIdx;
+    };
+
+    // Process each triangle: keep uniform ones, split boundary ones
     const slotVertexSets = new Map<EquipmentSlotName, Set<number>>();
     const slotTriangles = new Map<EquipmentSlotName, number[]>();
-
     for (const slot of slots) {
       slotVertexSets.set(slot, new Set());
       slotTriangles.set(slot, []);
     }
 
-    // Assign triangles by majority vote (2-of-3 vertices)
-    if (index) {
-      for (let i = 0; i < index.count; i += 3) {
-        const a = index.getX(i);
-        const b = index.getX(i + 1);
-        const c = index.getX(i + 2);
+    const addTriToSlot = (
+      slot: EquipmentSlotName,
+      a: number,
+      b: number,
+      c: number,
+    ) => {
+      slotTriangles.get(slot)!.push(a, b, c);
+      slotVertexSets.get(slot)!.add(a);
+      slotVertexSets.get(slot)!.add(b);
+      slotVertexSets.get(slot)!.add(c);
+    };
 
-        const sa = vertexSlot[a];
-        const sb = vertexSlot[b];
-        const sc = vertexSlot[c];
+    let splitCount = 0;
 
-        // Find majority slot
-        let triSlot: EquipmentSlotName | null = null;
-        if (sa && sa === sb) triSlot = sa;
-        else if (sa && sa === sc) triSlot = sa;
-        else if (sb && sb === sc) triSlot = sb;
-        else if (sa)
-          triSlot = sa; // no majority — use first assigned vertex
-        else if (sb) triSlot = sb;
-        else if (sc) triSlot = sc;
+    for (let i = 0; i < index.count; i += 3) {
+      const a = index.getX(i);
+      const b = index.getX(i + 1);
+      const c = index.getX(i + 2);
+      const sa = vertexSlot[a],
+        sb = vertexSlot[b],
+        sc = vertexSlot[c];
 
-        if (triSlot) {
-          slotTriangles.get(triSlot)!.push(a, b, c);
-          slotVertexSets.get(triSlot)!.add(a);
-          slotVertexSets.get(triSlot)!.add(b);
-          slotVertexSets.get(triSlot)!.add(c);
-        }
+      // All same slot → keep as-is
+      if (sa === sb && sb === sc) {
+        if (sa) addTriToSlot(sa, a, b, c);
+        continue;
       }
+
+      // Find which 2 slots are involved
+      const present = new Set<EquipmentSlotName>();
+      if (sa) present.add(sa);
+      if (sb) present.add(sb);
+      if (sc) present.add(sc);
+
+      if (present.size !== 2) {
+        // Edge case (0, 1, or 3 slots) — assign to first available
+        const fallback = sa ?? sb ?? sc;
+        if (fallback) addTriToSlot(fallback, a, b, c);
+        continue;
+      }
+
+      const [slotX, slotY] = Array.from(present);
+      const wxArr = slotWeightArrays.get(slotX)!;
+      const wyArr = slotWeightArrays.get(slotY)!;
+
+      // Scalar field: positive = slotX territory, negative = slotY territory
+      const fA = (wxArr[a] ?? 0) - (wyArr[a] ?? 0);
+      const fB = (wxArr[b] ?? 0) - (wyArr[b] ?? 0);
+      const fC = (wxArr[c] ?? 0) - (wyArr[c] ?? 0);
+
+      const sideA = fA >= 0; // true = slotX side
+      const sideB = fB >= 0;
+      const sideC = fC >= 0;
+
+      // All on same side (field disagrees with slot assignment) → keep as-is
+      if (sideA === sideB && sideB === sideC) {
+        const fallback = sideA ? slotX : slotY;
+        addTriToSlot(fallback, a, b, c);
+        continue;
+      }
+
+      // Find the lone vertex (odd one out)
+      let lone: number, pair1: number, pair2: number;
+      let fLone: number, fPair1: number, fPair2: number;
+      let loneSide: boolean;
+
+      if (sideA !== sideB && sideA !== sideC) {
+        lone = a;
+        pair1 = b;
+        pair2 = c;
+        fLone = fA;
+        fPair1 = fB;
+        fPair2 = fC;
+        loneSide = sideA;
+      } else if (sideB !== sideA && sideB !== sideC) {
+        lone = b;
+        pair1 = a;
+        pair2 = c;
+        fLone = fB;
+        fPair1 = fA;
+        fPair2 = fC;
+        loneSide = sideB;
+      } else {
+        lone = c;
+        pair1 = a;
+        pair2 = b;
+        fLone = fC;
+        fPair1 = fA;
+        fPair2 = fB;
+        loneSide = sideC;
+      }
+
+      // Interpolation params (clamped to avoid degenerate slivers)
+      // Guard: when smoothed weights are equal, denominator is 0 → NaN
+      const denom1 = fLone - fPair1;
+      const t1 =
+        Math.abs(denom1) < 1e-10
+          ? 0.5
+          : Math.max(0.02, Math.min(0.98, fLone / denom1));
+      const denom2 = fLone - fPair2;
+      const t2 =
+        Math.abs(denom2) < 1e-10
+          ? 0.5
+          : Math.max(0.02, Math.min(0.98, fLone / denom2));
+
+      // Create new vertices at the isoline crossing points
+      const nv1 = createSplitVertex(lone, pair1, t1);
+      const nv2 = createSplitVertex(lone, pair2, t2);
+
+      // Split into 3 sub-triangles
+      const loneSlot = loneSide ? slotX : slotY;
+      const pairSlot = loneSide ? slotY : slotX;
+
+      // Lone side: 1 triangle
+      addTriToSlot(loneSlot, lone, nv1, nv2);
+      // Pair side: 2 triangles (quad)
+      addTriToSlot(pairSlot, nv1, pair1, pair2);
+      addTriToSlot(pairSlot, nv1, pair2, nv2);
+
+      splitCount++;
     }
 
-    // Build BodyRegion for each slot
+    const totalVertCount = extPos.length / 3;
+    console.log(
+      `[ShellExtraction] Marching Triangles: ${splitCount} boundary tris split, ${totalVertCount - origVertCount} new vertices created`,
+    );
+
+    // ── Phase 5: Build preprocessed geometry with new vertices ──
+    // Validate extended arrays before building typed arrays (JS number[] can have undefined → NaN)
+    const posF32 = new Float32Array(extPos);
+    const normF32 = new Float32Array(extNorm);
+    this.sanitizeFloatArray(posF32, 3, null, 0, "procGeo.position");
+    this.sanitizeFloatArray(normF32, 3, null, 0, "procGeo.normal");
+
+    const procGeo = new THREE.BufferGeometry();
+    procGeo.setAttribute("position", new THREE.BufferAttribute(posF32, 3));
+    procGeo.setAttribute("normal", new THREE.BufferAttribute(normF32, 3));
+    if (srcUV && extUV.length > 0) {
+      procGeo.setAttribute(
+        "uv",
+        new THREE.BufferAttribute(new Float32Array(extUV), 2),
+      );
+    }
+    procGeo.setAttribute(
+      "skinIndex",
+      new THREE.BufferAttribute(new Float32Array(extSkinIdx), 4),
+    );
+    procGeo.setAttribute(
+      "skinWeight",
+      new THREE.BufferAttribute(new Float32Array(extSkinWt), 4),
+    );
+
+    // ── Phase 6: Build BodyRegion for each slot ──
     const regions = new Map<EquipmentSlotName, BodyRegion>();
     const tempVec = new THREE.Vector3();
+    const procPosition = procGeo.attributes.position as THREE.BufferAttribute;
 
     for (const slot of slots) {
       const vertexSet = slotVertexSets.get(slot)!;
@@ -450,7 +897,7 @@ export class ShellExtractionService {
       const center = new THREE.Vector3();
 
       for (const vi of vertexIndices) {
-        tempVec.fromBufferAttribute(position, vi);
+        tempVec.fromBufferAttribute(procPosition, vi);
         boundingBox.expandByPoint(tempVec);
         center.add(tempVec);
       }
@@ -459,7 +906,6 @@ export class ShellExtractionService {
         center.divideScalar(vertexIndices.length);
       }
 
-      // Collect bone indices for this slot
       const boneIndices = new Set<number>();
       const { bones } = slotConfigs.get(slot)!;
       for (const boneIdx of bones) boneIndices.add(boneIdx);
@@ -474,10 +920,359 @@ export class ShellExtractionService {
       });
     }
 
-    return regions;
+    // ── Phase 7: Compute inter-slot boundary vertices ──
+    const interSlotBoundaryVerts = new Set<number>();
+    // New isoline vertices are always at slot boundaries
+    for (let i = origVertCount; i < totalVertCount; i++) {
+      interSlotBoundaryVerts.add(i);
+    }
+    // Also find original vertices adjacent to a different slot
+    {
+      const slotSet = new Set(slots);
+      const srcAdj: Set<number>[] = new Array(origVertCount);
+      for (let i = 0; i < origVertCount; i++) srcAdj[i] = new Set();
+      for (let i = 0; i < index.count; i += 3) {
+        const va = index.getX(i),
+          vb = index.getX(i + 1),
+          vc = index.getX(i + 2);
+        srcAdj[va].add(vb);
+        srcAdj[va].add(vc);
+        srcAdj[vb].add(va);
+        srcAdj[vb].add(vc);
+        srcAdj[vc].add(va);
+        srcAdj[vc].add(vb);
+      }
+      for (let i = 0; i < origVertCount; i++) {
+        const mySlot = vertexSlot[i];
+        if (!mySlot || !slotSet.has(mySlot)) continue;
+        for (const n of srcAdj[i]) {
+          const nSlot = vertexSlot[n];
+          if (nSlot && nSlot !== mySlot && slotSet.has(nSlot)) {
+            interSlotBoundaryVerts.add(i);
+            break;
+          }
+        }
+      }
+    }
+
+    console.log(
+      `[ShellExtraction] Inter-slot boundary: ${interSlotBoundaryVerts.size} vertices (no taper at seams)`,
+    );
+
+    // ── Phase 8: Global consensus normal smoothing ──
+    // Smooth normals of boundary vertices on the processedGeometry BEFORE any shell
+    // is created. This ensures ALL shells read identical normals at shared boundary
+    // vertices, eliminating the primary source of seam spikes.
+    {
+      const procNorm = procGeo.attributes.normal as THREE.BufferAttribute;
+      const normArr = procNorm.array as Float32Array;
+
+      // Build coincident groups for ALL processedGeometry vertices
+      const QUANT = 10000;
+      const procPos = procGeo.attributes.position as THREE.BufferAttribute;
+      const allCoinc = new Map<string, number[]>();
+      for (let i = 0; i < totalVertCount; i++) {
+        const key = `${Math.round(procPos.getX(i) * QUANT)},${Math.round(procPos.getY(i) * QUANT)},${Math.round(procPos.getZ(i) * QUANT)}`;
+        let g = allCoinc.get(key);
+        if (!g) {
+          g = [];
+          allCoinc.set(key, g);
+        }
+        g.push(i);
+      }
+      const coincGroups = Array.from(allCoinc.values()).filter(
+        (g) => g.length > 1,
+      );
+
+      // Average normals at coincident positions (UV seam bridging)
+      this.averageCoincidentNormals(normArr, coincGroups);
+
+      // Build global boundary chain adjacency from ALL slot triangles combined.
+      // Collect all triangles to find boundary edges (edges appearing in exactly
+      // one slot's triangle set — i.e., edges at the slot boundary).
+      const allTriangles: number[] = [];
+      for (const slot of slots) {
+        const tris = slotTriangles.get(slot)!;
+        for (const t of tris) allTriangles.push(t);
+      }
+
+      // Find edges that are at the slot boundary: edges where the two adjacent
+      // triangles belong to DIFFERENT slots. Build a map of edge→slot ownership.
+      const MAX_V = totalVertCount + 1;
+      const edgeSlots = new Map<number, Set<EquipmentSlotName>>();
+      for (const slot of slots) {
+        const tris = slotTriangles.get(slot)!;
+        for (let t = 0; t < tris.length; t += 3) {
+          const tri = [tris[t], tris[t + 1], tris[t + 2]];
+          for (let j = 0; j < 3; j++) {
+            const a = tri[j],
+              b = tri[(j + 1) % 3];
+            const ek = Math.min(a, b) * MAX_V + Math.max(a, b);
+            let s = edgeSlots.get(ek);
+            if (!s) {
+              s = new Set();
+              edgeSlots.set(ek, s);
+            }
+            s.add(slot);
+          }
+        }
+      }
+
+      // Boundary chain: edges shared by exactly 2 different slots
+      const chainAdj = new Map<number, Set<number>>();
+      for (const bv of interSlotBoundaryVerts) {
+        chainAdj.set(bv, new Set());
+      }
+      for (const [ek, slotSet] of edgeSlots) {
+        if (slotSet.size < 2) continue; // internal edge, not at slot boundary
+        const a = Math.floor(ek / MAX_V);
+        const b = ek % MAX_V;
+        if (interSlotBoundaryVerts.has(a) && interSlotBoundaryVerts.has(b)) {
+          chainAdj.get(a)!.add(b);
+          chainAdj.get(b)!.add(a);
+        }
+      }
+
+      // Bridge UV seam splits in boundary chain:
+      // If coincident vertices are both in the boundary, merge their chain neighbors
+      for (const group of coincGroups) {
+        const boundaryMembers = group.filter((v) => chainAdj.has(v));
+        if (boundaryMembers.length <= 1) continue;
+        // Merge all chain neighbors across the group
+        const merged = new Set<number>();
+        for (const v of boundaryMembers) {
+          for (const n of chainAdj.get(v)!) merged.add(n);
+          for (const other of boundaryMembers) {
+            if (other !== v) merged.add(other);
+          }
+        }
+        for (const v of boundaryMembers) {
+          const adj = chainAdj.get(v)!;
+          for (const n of merged) {
+            if (n !== v) adj.add(n);
+          }
+        }
+      }
+
+      // Smooth boundary normals along the chain (6 iterations)
+      const chainAdjArr = new Map<number, number[]>();
+      for (const [v, s] of chainAdj) chainAdjArr.set(v, Array.from(s));
+
+      const snapshot = new Float32Array(normArr.length);
+      for (let iter = 0; iter < 8; iter++) {
+        snapshot.set(normArr);
+        for (const bv of interSlotBoundaryVerts) {
+          const neighbors = chainAdjArr.get(bv);
+          if (!neighbors || neighbors.length === 0) continue;
+          let sx = snapshot[bv * 3],
+            sy = snapshot[bv * 3 + 1],
+            sz = snapshot[bv * 3 + 2];
+          let cnt = 1;
+          for (const ni of neighbors) {
+            const nx = snapshot[ni * 3],
+              ny = snapshot[ni * 3 + 1],
+              nz = snapshot[ni * 3 + 2];
+            if (Number.isFinite(nx)) {
+              sx += nx;
+              sy += ny;
+              sz += nz;
+              cnt++;
+            }
+          }
+          sx /= cnt;
+          sy /= cnt;
+          sz /= cnt;
+          const len = Math.sqrt(sx * sx + sy * sy + sz * sz);
+          if (len > 1e-8) {
+            normArr[bv * 3] = sx / len;
+            normArr[bv * 3 + 1] = sy / len;
+            normArr[bv * 3 + 2] = sz / len;
+          }
+        }
+        // Re-enforce coincident normal consistency after each iteration
+        this.averageCoincidentNormals(normArr, coincGroups);
+      }
+
+      procNorm.needsUpdate = true;
+      console.log(
+        `[ShellExtraction] Phase 8: Consensus normals smoothed for ${interSlotBoundaryVerts.size} boundary vertices`,
+      );
+    }
+
+    return { regions, interSlotBoundaryVerts, processedGeometry: procGeo };
+  }
+
+  /**
+   * Smooth slot boundaries using SDF (signed distance field) relaxation.
+   *
+   * For each pair of adjacent slots:
+   * 1. Create a signed field: +1 for slotA, −1 for slotB
+   * 2. Identify a boundary zone (vertices within N rings of a slot transition)
+   * 3. Laplacian-smooth the field within the zone (anchored by interior vertices)
+   * 4. Reassign zone vertices based on the sign of the smoothed field
+   *
+   * This replaces noisy bone-weight transitions with a smooth level-set
+   * zero-crossing, eliminating zigzag teeth at all slot boundaries.
+   */
+  private smoothSlotBoundaries(
+    vertexSlot: (EquipmentSlotName | null)[],
+    geometry: THREE.BufferGeometry,
+    slots: EquipmentSlotName[],
+  ): void {
+    const index = geometry.index;
+    if (!index) return;
+
+    const vertCount = vertexSlot.length;
+
+    // Build full-mesh adjacency (array form for fast iteration)
+    const adj: number[][] = new Array(vertCount);
+    {
+      const adjSets: Set<number>[] = new Array(vertCount);
+      for (let i = 0; i < vertCount; i++) adjSets[i] = new Set();
+      for (let i = 0; i < index.count; i += 3) {
+        const a = index.getX(i),
+          b = index.getX(i + 1),
+          c = index.getX(i + 2);
+        adjSets[a].add(b);
+        adjSets[a].add(c);
+        adjSets[b].add(a);
+        adjSets[b].add(c);
+        adjSets[c].add(a);
+        adjSets[c].add(b);
+      }
+      for (let i = 0; i < vertCount; i++) adj[i] = Array.from(adjSets[i]);
+    }
+
+    // Process each pair of adjacent slots
+    for (let ai = 0; ai < slots.length; ai++) {
+      for (let bi = ai + 1; bi < slots.length; bi++) {
+        this.smoothSlotPairBoundary(
+          vertexSlot,
+          adj,
+          vertCount,
+          slots[ai],
+          slots[bi],
+        );
+      }
+    }
+  }
+
+  /**
+   * Smooth the boundary between two specific slots via SDF relaxation.
+   */
+  private smoothSlotPairBoundary(
+    vertexSlot: (EquipmentSlotName | null)[],
+    adj: number[][],
+    vertCount: number,
+    slotA: EquipmentSlotName,
+    slotB: EquipmentSlotName,
+  ): void {
+    // Find boundary vertices (adjacent to the other slot)
+    const boundaryVerts = new Set<number>();
+    for (let i = 0; i < vertCount; i++) {
+      const mySlot = vertexSlot[i];
+      if (mySlot !== slotA && mySlot !== slotB) continue;
+      for (const n of adj[i]) {
+        const ns = vertexSlot[n];
+        if (
+          (mySlot === slotA && ns === slotB) ||
+          (mySlot === slotB && ns === slotA)
+        ) {
+          boundaryVerts.add(i);
+          boundaryVerts.add(n);
+          break;
+        }
+      }
+    }
+
+    if (boundaryVerts.size === 0) return;
+
+    // Expand boundary zone by N rings (only within slotA/slotB vertices)
+    const ZONE_RINGS = 6;
+    const zone = new Set(boundaryVerts);
+    let frontier = new Set(boundaryVerts);
+    for (let ring = 0; ring < ZONE_RINGS; ring++) {
+      const next = new Set<number>();
+      for (const v of frontier) {
+        for (const n of adj[v]) {
+          if (
+            !zone.has(n) &&
+            (vertexSlot[n] === slotA || vertexSlot[n] === slotB)
+          ) {
+            zone.add(n);
+            next.add(n);
+          }
+        }
+      }
+      frontier = next;
+      if (next.size === 0) break;
+    }
+
+    // Build SDF: +1 for slotA, −1 for slotB
+    const sdf = new Float32Array(vertCount);
+    for (let i = 0; i < vertCount; i++) {
+      if (vertexSlot[i] === slotA) sdf[i] = 1;
+      else if (vertexSlot[i] === slotB) sdf[i] = -1;
+    }
+
+    // Laplacian-smooth the SDF within the zone
+    // Interior anchors (outside zone) stay at ±1, constraining the relaxation
+    const SMOOTH_ITERS = 15;
+    const temp = new Float32Array(vertCount);
+    const zoneArray = Array.from(zone);
+
+    for (let iter = 0; iter < SMOOTH_ITERS; iter++) {
+      temp.set(sdf);
+      for (const vi of zoneArray) {
+        const neighbors = adj[vi];
+        if (neighbors.length === 0) continue;
+
+        let sum = temp[vi];
+        let count = 1;
+        for (const n of neighbors) {
+          // Only average with neighbors belonging to either slot
+          if (vertexSlot[n] === slotA || vertexSlot[n] === slotB) {
+            sum += temp[n];
+            count++;
+          }
+        }
+        sdf[vi] = sum / count;
+      }
+    }
+
+    // Reassign zone vertices based on smoothed SDF sign
+    for (const vi of zoneArray) {
+      vertexSlot[vi] = sdf[vi] >= 0 ? slotA : slotB;
+    }
   }
 
   // ─── Geometry helpers ────────────────────────────────────────────────
+
+  /**
+   * Scan a Float32Array for NaN/Inf values and replace them with a fallback.
+   * Returns the count of sanitized values.
+   */
+  private sanitizeFloatArray(
+    arr: Float32Array,
+    componentsPerVertex: number,
+    fallback: Float32Array | null,
+    defaultValue: number,
+    label: string,
+  ): number {
+    let fixed = 0;
+    for (let i = 0; i < arr.length; i++) {
+      if (!Number.isFinite(arr[i])) {
+        arr[i] = fallback ? (fallback[i] ?? defaultValue) : defaultValue;
+        fixed++;
+      }
+    }
+    if (fixed > 0) {
+      console.warn(
+        `[ShellExtraction] Sanitized ${fixed} NaN/Inf values in ${label} (${fixed / componentsPerVertex} vertices affected)`,
+      );
+    }
+    return fixed;
+  }
 
   /**
    * Build adjacency list from index buffer using Set-based dedup (O(1) per edge).
@@ -591,15 +1386,23 @@ export class ShellExtractionService {
     groups: number[][],
   ): void {
     for (const group of groups) {
-      // Compute average normal for this group
+      // Compute average normal, skipping NaN members to prevent amplification
       let ax = 0,
         ay = 0,
         az = 0;
+      let validCount = 0;
       for (const vi of group) {
-        ax += normals[vi * 3];
-        ay += normals[vi * 3 + 1];
-        az += normals[vi * 3 + 2];
+        const nx = normals[vi * 3],
+          ny = normals[vi * 3 + 1],
+          nz = normals[vi * 3 + 2];
+        if (Number.isFinite(nx) && Number.isFinite(ny) && Number.isFinite(nz)) {
+          ax += nx;
+          ay += ny;
+          az += nz;
+          validCount++;
+        }
       }
+      if (validCount === 0) continue;
       // Normalize
       const len = Math.sqrt(ax * ax + ay * ay + az * az);
       if (len < 1e-8) continue;
@@ -607,7 +1410,7 @@ export class ShellExtractionService {
       ay /= len;
       az /= len;
 
-      // Assign averaged normal to all group members
+      // Assign averaged normal to all group members (fixes NaN members too)
       for (const vi of group) {
         normals[vi * 3] = ax;
         normals[vi * 3 + 1] = ay;
@@ -626,17 +1429,26 @@ export class ShellExtractionService {
     groups: number[][],
   ): void {
     for (const group of groups) {
+      // Average only finite positions to prevent NaN amplification
       let ax = 0,
         ay = 0,
         az = 0;
+      let validCount = 0;
       for (const vi of group) {
-        ax += posArray[vi * 3];
-        ay += posArray[vi * 3 + 1];
-        az += posArray[vi * 3 + 2];
+        const px = posArray[vi * 3],
+          py = posArray[vi * 3 + 1],
+          pz = posArray[vi * 3 + 2];
+        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+          ax += px;
+          ay += py;
+          az += pz;
+          validCount++;
+        }
       }
-      ax /= group.length;
-      ay /= group.length;
-      az /= group.length;
+      if (validCount === 0) continue;
+      ax /= validCount;
+      ay /= validCount;
+      az /= validCount;
 
       for (const vi of group) {
         posArray[vi * 3] = ax;
@@ -737,9 +1549,163 @@ export class ShellExtractionService {
       for (let i = 0; i < values.length; i++) {
         const neighbors = adjacency[i];
         if (neighbors.length === 0) continue;
-        let sum = temp[i]; // include self
-        for (const n of neighbors) sum += temp[n];
-        values[i] = sum / (neighbors.length + 1);
+        const selfVal = temp[i];
+        if (!Number.isFinite(selfVal)) continue;
+        let sum = selfVal;
+        let count = 1;
+        for (const n of neighbors) {
+          const nv = temp[n];
+          if (Number.isFinite(nv)) {
+            sum += nv;
+            count++;
+          }
+        }
+        values[i] = sum / count;
+      }
+    }
+  }
+
+  // ─── Boundary-chain smoothing (AAA "consensus normals" technique) ────
+
+  /**
+   * Build adjacency restricted to the boundary chain.
+   * For each boundary vertex, find its neighbors that are ALSO boundary vertices
+   * AND share a boundary edge (edge with only one triangle in the shell).
+   * This gives the 1D chain topology of the boundary loop.
+   */
+  private buildBoundaryChainAdjacency(
+    indices: Uint32Array,
+    boundaryVerts: Set<number>,
+  ): Map<number, number[]> {
+    // Find boundary edges (edges appearing in exactly one triangle)
+    const edgeCount = new Map<number, number>();
+    const MAX_V = 100000;
+    for (let i = 0; i < indices.length; i += 3) {
+      const tri = [indices[i], indices[i + 1], indices[i + 2]];
+      for (let j = 0; j < 3; j++) {
+        const a = tri[j],
+          b = tri[(j + 1) % 3];
+        const key = Math.min(a, b) * MAX_V + Math.max(a, b);
+        edgeCount.set(key, (edgeCount.get(key) ?? 0) + 1);
+      }
+    }
+
+    const chainAdj = new Map<number, number[]>();
+    for (const bv of boundaryVerts) {
+      chainAdj.set(bv, []);
+    }
+
+    for (const [key, count] of edgeCount) {
+      if (count !== 1) continue; // only boundary edges
+      const a = Math.floor(key / MAX_V);
+      const b = key % MAX_V;
+      // Both endpoints must be inter-slot boundary vertices
+      if (boundaryVerts.has(a) && boundaryVerts.has(b)) {
+        chainAdj.get(a)!.push(b);
+        chainAdj.get(b)!.push(a);
+      }
+    }
+
+    return chainAdj;
+  }
+
+  /**
+   * Smooth normals of boundary vertices along the boundary chain only.
+   * Uses Jacobi-style iteration: reads from snapshot, writes new.
+   * Only boundary-chain neighbors contribute — interior neighbors are excluded.
+   * This produces "consensus normals" that both adjacent shells agree on.
+   */
+  private smoothBoundaryNormals(
+    normals: Float32Array,
+    chainAdj: Map<number, number[]>,
+    boundaryVerts: Set<number>,
+    iterations: number,
+  ): void {
+    const snapshot = new Float32Array(normals.length);
+    for (let iter = 0; iter < iterations; iter++) {
+      snapshot.set(normals);
+      for (const vi of boundaryVerts) {
+        const neighbors = chainAdj.get(vi);
+        if (!neighbors || neighbors.length === 0) continue;
+
+        // Average with chain neighbors (typically 2 for a clean loop)
+        let sx = snapshot[vi * 3],
+          sy = snapshot[vi * 3 + 1],
+          sz = snapshot[vi * 3 + 2];
+        let cnt = 1;
+        for (const ni of neighbors) {
+          const nx = snapshot[ni * 3],
+            ny = snapshot[ni * 3 + 1],
+            nz = snapshot[ni * 3 + 2];
+          if (Number.isFinite(nx)) {
+            sx += nx;
+            sy += ny;
+            sz += nz;
+            cnt++;
+          }
+        }
+        sx /= cnt;
+        sy /= cnt;
+        sz /= cnt;
+
+        // Re-normalize
+        const len = Math.sqrt(sx * sx + sy * sy + sz * sz);
+        if (len > 1e-8) {
+          normals[vi * 3] = sx / len;
+          normals[vi * 3 + 1] = sy / len;
+          normals[vi * 3 + 2] = sz / len;
+        }
+      }
+    }
+  }
+
+  /**
+   * Smooth positions of boundary vertices along the boundary chain.
+   * Removes waviness from marching-triangles vertex placement.
+   * Jacobi-style: reads from snapshot, writes new.
+   */
+  private smoothBoundaryPositions(
+    positions: Float32Array,
+    chainAdj: Map<number, number[]>,
+    boundaryVerts: Set<number>,
+    iterations: number,
+    factor: number,
+  ): void {
+    const snapshot = new Float32Array(positions.length);
+    for (let iter = 0; iter < iterations; iter++) {
+      snapshot.set(positions);
+      for (const vi of boundaryVerts) {
+        const neighbors = chainAdj.get(vi);
+        if (!neighbors || neighbors.length === 0) continue;
+
+        // Laplacian: average of chain neighbors
+        let ax = 0,
+          ay = 0,
+          az = 0;
+        let cnt = 0;
+        for (const ni of neighbors) {
+          const px = snapshot[ni * 3],
+            py = snapshot[ni * 3 + 1],
+            pz = snapshot[ni * 3 + 2];
+          if (Number.isFinite(px)) {
+            ax += px;
+            ay += py;
+            az += pz;
+            cnt++;
+          }
+        }
+        if (cnt === 0) continue;
+        ax /= cnt;
+        ay /= cnt;
+        az /= cnt;
+
+        // Lerp toward neighbor average
+        const cx = snapshot[vi * 3],
+          cy = snapshot[vi * 3 + 1],
+          cz = snapshot[vi * 3 + 2];
+        positions[vi * 3] = cx + (ax - cx) * factor;
+        positions[vi * 3 + 1] = cy + (ay - cy) * factor;
+        positions[vi * 3 + 2] = cz + (az - cz) * factor;
       }
     }
   }
@@ -756,6 +1722,9 @@ export class ShellExtractionService {
     region: BodyRegion,
     slotName: EquipmentSlotName,
     bulkClass: BulkClass,
+    interSlotBoundaryVerts?: Set<number>,
+    /** Override offset in metres — used for custom thickness shells */
+    offsetOverride?: number,
   ): ShellMesh {
     const srcPosition = sourceGeometry.attributes
       .position as THREE.BufferAttribute;
@@ -768,7 +1737,7 @@ export class ShellExtractionService {
       | THREE.BufferAttribute
       | undefined;
 
-    const baseOffset = BULK_OFFSETS[bulkClass];
+    const baseOffset = offsetOverride ?? BULK_OFFSETS[bulkClass];
 
     // Build vertex mapping (old source index → new shell index)
     const usedVertices = new Set<number>();
@@ -803,13 +1772,89 @@ export class ShellExtractionService {
     // Smooth curvature estimates to reduce noise (1 pass)
     this.smoothFloatArray(curvatures, adjacency, 1);
 
-    // Compute multi-ring boundary taper (gradual falloff: 0.5 → 1.0 over 3 rings)
+    // Split boundary verts into "true open" (taper) vs "inter-slot seam" (no taper).
+    // Only taper at true open edges (neck hole, wrist openings, etc.).
+    // Inter-slot seam edges meet an adjacent generated shell and must stay at full offset.
+    let trueOpenBoundary: Set<number>;
+    if (interSlotBoundaryVerts && interSlotBoundaryVerts.size > 0) {
+      trueOpenBoundary = new Set<number>();
+      let seamCount = 0;
+      for (const bv of boundaryVerts) {
+        const srcIdx = sortedVertices[bv];
+        if (interSlotBoundaryVerts.has(srcIdx)) {
+          seamCount++;
+          // Don't add to trueOpenBoundary — no taper here
+        } else {
+          trueOpenBoundary.add(bv);
+        }
+      }
+      console.log(
+        `[ShellExtraction] ${slotName}/${bulkClass}: ${boundaryVerts.size} boundary verts — ${seamCount} inter-slot (full offset), ${trueOpenBoundary.size} true-open (tapered)`,
+      );
+    } else {
+      trueOpenBoundary = boundaryVerts;
+    }
+
+    // Compute multi-ring boundary taper only from true open edges
+    // (gradual falloff: 0.5 → 1.0 over 3 rings — NOT at inter-slot seams)
     const boundaryTaper = this.computeBoundaryTaper(
       vertCount,
       adjacency,
-      boundaryVerts,
+      trueOpenBoundary,
       3,
     );
+
+    // Build per-vertex seam blend factor: 0.0 at inter-slot boundary (fully pinned)
+    // ramping to 1.0 over SEAM_BLEND_RINGS edges inward (fully free).
+    // This prevents the hard pinned→free step that causes spikes at seam transitions.
+    const SEAM_BLEND_RINGS = 4;
+    const seamBlend = new Float32Array(vertCount).fill(1.0);
+    const pinnedVerts = new Set<number>();
+    if (interSlotBoundaryVerts && interSlotBoundaryVerts.size > 0) {
+      // Mark boundary vertices
+      for (let i = 0; i < vertCount; i++) {
+        if (interSlotBoundaryVerts.has(sortedVertices[i])) {
+          pinnedVerts.add(i);
+          seamBlend[i] = 0;
+        }
+      }
+      // Issue 8 fix: if ANY member of a coincident group is pinned, ALL must be.
+      // Otherwise coincident enforcement averages pinned+unpinned → undoes pinning.
+      for (const group of coincidentGroups) {
+        const hasPinned = group.some((v) => pinnedVerts.has(v));
+        if (hasPinned) {
+          for (const v of group) {
+            pinnedVerts.add(v);
+            seamBlend[v] = 0;
+          }
+        }
+      }
+      // BFS outward to compute ring distance, then convert to blend factor
+      const ringOf = new Int32Array(vertCount).fill(SEAM_BLEND_RINGS);
+      const queue: number[] = [];
+      for (const pv of pinnedVerts) {
+        ringOf[pv] = 0;
+        queue.push(pv);
+      }
+      let head = 0;
+      while (head < queue.length) {
+        const v = queue[head++];
+        const ring = ringOf[v];
+        if (ring >= SEAM_BLEND_RINGS) continue;
+        for (const n of adjacency[v]) {
+          if (ringOf[n] > ring + 1) {
+            ringOf[n] = ring + 1;
+            queue.push(n);
+          }
+        }
+      }
+      for (let i = 0; i < vertCount; i++) {
+        const r = Math.min(ringOf[i], SEAM_BLEND_RINGS);
+        // Smooth hermite blend: 0 at boundary → 1 at SEAM_BLEND_RINGS
+        const t = r / SEAM_BLEND_RINGS;
+        seamBlend[i] = t * t * (3 - 2 * t); // smoothstep
+      }
+    }
 
     // Allocate output arrays
     const positions = new Float32Array(vertCount * 3);
@@ -827,12 +1872,25 @@ export class ShellExtractionService {
     for (let i = 0; i < vertCount; i++) {
       const oldIdx = sortedVertices[i];
 
-      const px = srcPosition.getX(oldIdx);
-      const py = srcPosition.getY(oldIdx);
-      const pz = srcPosition.getZ(oldIdx);
-      const nx = srcNormal.getX(oldIdx);
-      const ny = srcNormal.getY(oldIdx);
-      const nz = srcNormal.getZ(oldIdx);
+      // BufferAttribute.getX returns undefined for OOB → coerces to NaN in Float32Array
+      // Guard with fallback to 0 (position) or up vector (normal)
+      let px = srcPosition.getX(oldIdx);
+      let py = srcPosition.getY(oldIdx);
+      let pz = srcPosition.getZ(oldIdx);
+      if (!Number.isFinite(px)) {
+        px = 0;
+        py = 0;
+        pz = 0;
+      }
+
+      let nx = srcNormal.getX(oldIdx);
+      let ny = srcNormal.getY(oldIdx);
+      let nz = srcNormal.getZ(oldIdx);
+      if (!Number.isFinite(nx)) {
+        nx = 0;
+        ny = 1;
+        nz = 0;
+      }
 
       // Store body surface reference (for constrained smooth)
       bodyPositions[i * 3] = px;
@@ -844,11 +1902,18 @@ export class ShellExtractionService {
 
       // Curvature-adaptive offset with floor
       const kappa = curvatures[i];
+      // NaN kappa: comparison returns false, takes safe path
       const maxSafe = kappa > 0.01 ? 0.5 / kappa : baseOffset * 100;
-      let eff = Math.max(minOffsetFloor, Math.min(baseOffset, maxSafe));
+      let freeEff = Math.max(minOffsetFloor, Math.min(baseOffset, maxSafe));
 
       // Apply multi-ring boundary taper (gradual falloff at shell edges)
-      eff *= boundaryTaper[i];
+      freeEff *= boundaryTaper[i];
+      // Final guard
+      if (!Number.isFinite(freeEff)) freeEff = baseOffset;
+
+      // Blend between pinned (baseOffset) at seam and free (curvature-adapted) in interior
+      // seamBlend: 0 at inter-slot boundary → 1 at interior
+      const eff = baseOffset + (freeEff - baseOffset) * seamBlend[i];
 
       effectiveOffsets[i] = eff;
 
@@ -859,26 +1924,35 @@ export class ShellExtractionService {
 
       // Copy skin data (inherits rigging from body)
       for (let j = 0; j < 4; j++) {
-        skinIndices[i * 4 + j] = srcSkinIndex.getComponent(oldIdx, j);
-        skinWeights[i * 4 + j] = srcSkinWeight.getComponent(oldIdx, j);
+        skinIndices[i * 4 + j] = srcSkinIndex.getComponent(oldIdx, j) ?? 0;
+        skinWeights[i * 4 + j] = srcSkinWeight.getComponent(oldIdx, j) ?? 0;
       }
 
       // Copy UVs
       if (srcUV && uvs) {
-        uvs[i * 2] = srcUV.getX(oldIdx);
-        uvs[i * 2 + 1] = srcUV.getY(oldIdx);
+        uvs[i * 2] = srcUV.getX(oldIdx) ?? 0;
+        uvs[i * 2 + 1] = srcUV.getY(oldIdx) ?? 0;
       }
     }
 
     // Average normals for coincident vertex groups so UV-seam-split vertices
     // offset in the same direction (prevents cracks/fractures at seams)
+    // NOTE: Boundary normals are already smoothed globally in Phase 8 (extractShells).
+    // This per-shell pass handles interior coincident groups.
     this.averageCoincidentNormals(normals, coincidentGroups);
-
-    // Also average the body normals used for constrained smooth enforcement
     this.averageCoincidentNormals(bodyNormals, coincidentGroups);
 
-    // Smooth effective offsets to prevent sharp transitions between clamped/unclamped vertices
+    // Smooth effective offsets — exclude pinned verts to prevent contamination
+    // (Issue 7: full-mesh smoothing was pulling pinned offset values away from baseOffset)
     this.smoothFloatArray(effectiveOffsets, adjacency, 2);
+
+    // Re-blend offsets toward baseOffset at seam zone after smoothing
+    for (let i = 0; i < vertCount; i++) {
+      if (seamBlend[i] < 1.0) {
+        effectiveOffsets[i] =
+          baseOffset + (effectiveOffsets[i] - baseOffset) * seamBlend[i];
+      }
+    }
 
     // Now apply offsets to positions (after smoothing offsets for uniformity)
     for (let i = 0; i < vertCount; i++) {
@@ -888,6 +1962,45 @@ export class ShellExtractionService {
         bodyPositions[i * 3 + 1] + normals[i * 3 + 1] * eff;
       positions[i * 3 + 2] =
         bodyPositions[i * 3 + 2] + normals[i * 3 + 2] * eff;
+    }
+
+    // ── Boundary-chain position smoothing ──
+    // After offset, smooth boundary positions along the loop to remove
+    // residual waviness from marching-triangles vertex placement.
+    // UV-seam bridging ensures coincident boundary verts are connected.
+    if (pinnedVerts.size > 0) {
+      const boundaryChainAdj = this.buildBoundaryChainAdjacency(
+        indices,
+        pinnedVerts,
+      );
+      // Bridge UV seam splits in boundary chain for position smoothing
+      for (const group of coincidentGroups) {
+        const bMembers = group.filter((v) => pinnedVerts.has(v));
+        if (bMembers.length <= 1) continue;
+        const merged = new Set<number>();
+        for (const v of bMembers) {
+          const adj = boundaryChainAdj.get(v);
+          if (adj) for (const n of adj) merged.add(n);
+          for (const other of bMembers) if (other !== v) merged.add(other);
+        }
+        for (const v of bMembers) {
+          let adj = boundaryChainAdj.get(v);
+          if (!adj) {
+            adj = [];
+            boundaryChainAdj.set(v, adj);
+          }
+          for (const n of merged) {
+            if (n !== v && !adj.includes(n)) adj.push(n);
+          }
+        }
+      }
+      this.smoothBoundaryPositions(
+        positions,
+        boundaryChainAdj,
+        pinnedVerts,
+        6,
+        0.5,
+      );
     }
 
     // Enforce position coherence for coincident groups after initial offset
@@ -914,7 +2027,14 @@ export class ShellExtractionService {
     shellGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
 
     // Body-constrained Laplacian smooth (with coincident position enforcement)
-    const { iterations, factor } = SMOOTH_PARAMS[bulkClass];
+    // For custom offsets, scale smooth params proportionally to thickness
+    const smoothParams = offsetOverride
+      ? {
+          iterations: Math.max(4, Math.round(12 * (offsetOverride / 0.03))),
+          factor: Math.min(0.5, 0.35 * (offsetOverride / 0.03)),
+        }
+      : SMOOTH_PARAMS[bulkClass];
+    const { iterations, factor } = smoothParams;
     this.constrainedSmooth(
       shellGeometry,
       bodyPositions,
@@ -925,11 +2045,35 @@ export class ShellExtractionService {
       coincidentGroups,
       iterations,
       factor,
+      seamBlend,
     );
 
     // Keep body normals — do NOT call computeVertexNormals() on partial mesh
     // (partial mesh normals are wrong at boundaries where adjacent slot faces are missing)
+
+    // Final NaN safety net: sanitize any remaining bad values after all processing.
+    // Use bodyPositions as fallback (vertex stays on body surface rather than disappearing)
+    const finalPositions = shellGeometry.attributes.position
+      .array as Float32Array;
+    const finalNormals = shellGeometry.attributes.normal.array as Float32Array;
+    this.sanitizeFloatArray(
+      finalPositions,
+      3,
+      bodyPositions,
+      0,
+      `shell[${slotName}/${bulkClass}].position`,
+    );
+    this.sanitizeFloatArray(
+      finalNormals,
+      3,
+      bodyNormals,
+      0,
+      `shell[${slotName}/${bulkClass}].normal`,
+    );
+
+    // Explicitly compute both bounding volumes (prevents lazy NaN errors during rendering)
     shellGeometry.computeBoundingBox();
+    shellGeometry.computeBoundingSphere();
 
     return {
       slotName,
@@ -963,6 +2107,8 @@ export class ShellExtractionService {
     coincidentGroups: number[][],
     iterations: number,
     factor: number,
+    /** Per-vertex seam blend: 0 at inter-slot seam (no smoothing) → 1 interior (full) */
+    seamBlend?: Float32Array,
   ): void {
     const position = geometry.attributes.position as THREE.BufferAttribute;
     const count = position.count;
@@ -976,31 +2122,50 @@ export class ShellExtractionService {
         const neighbors = adjacency[i];
         if (neighbors.length === 0) continue;
 
+        // Seam blend (0 at seam → 1 interior) scales smoothing so seam verts
+        // stay pinned while transition zone gets gradually more smoothing
+        const sb = seamBlend ? seamBlend[i] : 1.0;
+        if (sb < 0.001) continue; // fully pinned at seam
+
         // Scale smooth factor by boundary taper (0.5 at edge → 1.0 interior)
-        // This gives boundary verts minimal smoothing while interior gets full
-        const localFactor = factor * boundaryTaper[i];
+        // AND by seam blend (0 at seam → 1 interior)
+        const localFactor = factor * boundaryTaper[i] * sb;
 
         // Step 1: Laplacian smooth — lerp toward neighbor average
+        // Skip NaN neighbors to prevent one bad vertex from poisoning the mesh
         let avgX = 0,
           avgY = 0,
           avgZ = 0;
+        let validNeighbors = 0;
         for (const n of neighbors) {
-          avgX += oldPositions[n * 3];
-          avgY += oldPositions[n * 3 + 1];
-          avgZ += oldPositions[n * 3 + 2];
+          const npx = oldPositions[n * 3],
+            npy = oldPositions[n * 3 + 1],
+            npz = oldPositions[n * 3 + 2];
+          if (
+            Number.isFinite(npx) &&
+            Number.isFinite(npy) &&
+            Number.isFinite(npz)
+          ) {
+            avgX += npx;
+            avgY += npy;
+            avgZ += npz;
+            validNeighbors++;
+          }
         }
-        avgX /= neighbors.length;
-        avgY /= neighbors.length;
-        avgZ /= neighbors.length;
 
-        let newX =
-          oldPositions[i * 3] + (avgX - oldPositions[i * 3]) * localFactor;
-        let newY =
-          oldPositions[i * 3 + 1] +
-          (avgY - oldPositions[i * 3 + 1]) * localFactor;
-        let newZ =
-          oldPositions[i * 3 + 2] +
-          (avgZ - oldPositions[i * 3 + 2]) * localFactor;
+        // If no valid neighbors or current position is NaN, skip this vertex
+        const curX = oldPositions[i * 3],
+          curY = oldPositions[i * 3 + 1],
+          curZ = oldPositions[i * 3 + 2];
+        if (validNeighbors === 0 || !Number.isFinite(curX)) continue;
+
+        avgX /= validNeighbors;
+        avgY /= validNeighbors;
+        avgZ /= validNeighbors;
+
+        let newX = curX + (avgX - curX) * localFactor;
+        let newY = curY + (avgY - curY) * localFactor;
+        let newZ = curZ + (avgZ - curZ) * localFactor;
 
         // Step 2: Enforce minimum distance from body surface
         const bx = bodyPositions[i * 3];
@@ -1009,18 +2174,21 @@ export class ShellExtractionService {
         const nx = bodyNormals[i * 3];
         const ny = bodyNormals[i * 3 + 1];
         const nz = bodyNormals[i * 3 + 2];
-        const minOffset = effectiveOffsets[i];
 
-        const dx = newX - bx;
-        const dy = newY - by;
-        const dz = newZ - bz;
-        const normalDist = dx * nx + dy * ny + dz * nz;
+        // Guard: if body position or normal is NaN, skip enforcement
+        if (Number.isFinite(bx) && Number.isFinite(nx)) {
+          const minOffset = effectiveOffsets[i];
+          const dx = newX - bx;
+          const dy = newY - by;
+          const dz = newZ - bz;
+          const normalDist = dx * nx + dy * ny + dz * nz;
 
-        if (normalDist < minOffset) {
-          const correction = minOffset - normalDist;
-          newX += nx * correction;
-          newY += ny * correction;
-          newZ += nz * correction;
+          if (normalDist < minOffset) {
+            const correction = minOffset - normalDist;
+            newX += nx * correction;
+            newY += ny * correction;
+            newZ += nz * correction;
+          }
         }
 
         posArray[i * 3] = newX;
@@ -1038,24 +2206,36 @@ export class ShellExtractionService {
 
   /**
    * Export a shell as a standalone GLB file.
+   * @param baseColor Optional hex color to pre-paint the shell (e.g. "#cd7f32" for bronze).
+   *   Pre-painting with the target color dramatically improves Meshy retexture accuracy
+   *   because the AI sees "bronze metallic object" instead of "grey body shape".
+   * @param baseMetalness Metalness for the export material (default 0.85 when color is set).
    */
-  async exportShellAsGLB(shell: ShellMesh): Promise<Blob> {
+  async exportShellAsGLB(
+    shell: ShellMesh,
+    baseColor?: string,
+    baseMetalness?: number,
+  ): Promise<Blob> {
     const { GLTFExporter } =
       await import("three/addons/exporters/GLTFExporter.js");
 
     const exporter = new GLTFExporter();
 
     const material = new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      roughness: 0.7,
-      metalness: 0.1,
+      color: new THREE.Color(baseColor || "#888888"),
+      roughness: baseColor ? 0.35 : 0.7,
+      metalness: baseMetalness ?? (baseColor ? 0.85 : 0.1),
     });
 
     // Export as plain Mesh (not SkinnedMesh) — retexture APIs only need
-    // static geometry + UVs, and skinned meshes can cause failures.
+    // static geometry, and skinned meshes can cause failures.
     const geo = shell.geometry.clone();
     geo.deleteAttribute("skinIndex");
     geo.deleteAttribute("skinWeight");
+    // Keep UVs — enable_original_uv=false tells Meshy to regenerate UV layout,
+    // but having UVs in the model gives Meshy a better starting quality baseline.
+    // The shape-override prompts + pre-painting handle the skin-texture bias.
+    if (geo.hasAttribute("uv2")) geo.deleteAttribute("uv2");
     const mesh = new THREE.Mesh(geo, material);
 
     return new Promise((resolve, reject) => {

@@ -35,6 +35,7 @@ interface ShellGeneratorTabProps {
   onExtract?: (
     avatarUrl: string,
     onProgress?: (p: ShellExtractionProgress) => void,
+    customOffsetM?: number,
   ) => Promise<ShellExtractionResult>;
 }
 
@@ -50,7 +51,10 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
   const [selectedSlots, setSelectedSlots] = useState<Set<EquipmentSlotName>>(
     new Set(ALL_SLOTS),
   );
-  const [selectedBulk, setSelectedBulk] = useState<BulkClass>("leather");
+  const [selectedBulk, setSelectedBulk] = useState<BulkClass | "custom">(
+    "leather",
+  );
+  const [customThicknessMm, setCustomThicknessMm] = useState(50);
   const [viewMode, setViewMode] = useState<ViewMode>("regions");
   const [showWireframe, setShowWireframe] = useState(false);
   const [overlayOpacity, setOverlayOpacity] = useState(0.85);
@@ -87,14 +91,22 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
 
       if (onExtract) {
         // Use shared extraction (caches at page level)
-        extractionResult = await onExtract(avatarUrl, (prog) => {
-          setProgress(prog);
-          addLog(prog.message);
-        });
+        const customM =
+          customThicknessMm > 0 ? customThicknessMm / 1000 : undefined;
+        extractionResult = await onExtract(
+          avatarUrl,
+          (prog) => {
+            setProgress(prog);
+            addLog(prog.message);
+          },
+          customM,
+        );
       } else {
         if (!serviceRef.current) {
           serviceRef.current = new ShellExtractionService();
         }
+        const customM =
+          customThicknessMm > 0 ? customThicknessMm / 1000 : undefined;
         extractionResult = await serviceRef.current.extractShells(
           avatarUrl,
           slots,
@@ -103,6 +115,7 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
             setProgress(prog);
             addLog(prog.message);
           },
+          customM,
         );
       }
 
@@ -118,6 +131,7 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
       viewerRef.current?.showRegions(
         extractionResult.skinnedMesh,
         extractionResult.regions,
+        extractionResult.processedGeometry,
       );
       addLog("Displaying avatar with region overlays.");
     } catch (err) {
@@ -127,13 +141,14 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
     } finally {
       setIsExtracting(false);
     }
-  }, [avatarUrl, selectedSlots, addLog, onExtract]);
+  }, [avatarUrl, selectedSlots, customThicknessMm, addLog, onExtract]);
 
   const handleExportShell = useCallback(async () => {
     if (!result || !serviceRef.current) return;
 
+    const bulkKey = selectedBulk;
     for (const slot of selectedSlots) {
-      const key = `${slot}_${selectedBulk}`;
+      const key = `${slot}_${bulkKey}`;
       const shell = result.shells.get(key);
       if (!shell) continue;
 
@@ -142,7 +157,7 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `shell_${slot}_${selectedBulk}.glb`;
+        a.download = `shell_${slot}_${bulkKey}.glb`;
         a.click();
         URL.revokeObjectURL(url);
         addLog(`Exported ${key}.glb (${(blob.size / 1024).toFixed(1)}KB)`);
@@ -159,7 +174,11 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
     viewerRef.current?.clearOverlays();
 
     if (viewMode === "regions") {
-      viewerRef.current?.showRegions(result.skinnedMesh, result.regions);
+      viewerRef.current?.showRegions(
+        result.skinnedMesh,
+        result.regions,
+        result.processedGeometry,
+      );
     } else if (viewMode === "shell") {
       // Show shells for each selected slot at the current bulk class
       for (const slot of selectedSlots) {
@@ -272,7 +291,44 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
                   {bulk} ({BULK_OFFSETS[bulk] * 1000}mm)
                 </button>
               ))}
+              <button
+                onClick={() => setSelectedBulk("custom")}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all col-span-2 ${
+                  selectedBulk === "custom"
+                    ? "bg-primary/20 text-primary border border-primary/30"
+                    : "bg-bg-secondary text-text-tertiary border border-border-primary hover:border-border-secondary"
+                }`}
+              >
+                Custom ({customThicknessMm}mm)
+              </button>
             </div>
+            {selectedBulk === "custom" && (
+              <div className="flex items-center gap-2 mt-1.5">
+                <input
+                  type="range"
+                  min="1"
+                  max="100"
+                  step="1"
+                  value={customThicknessMm}
+                  onChange={(e) =>
+                    setCustomThicknessMm(parseInt(e.target.value, 10))
+                  }
+                  className="flex-1 accent-primary"
+                />
+                <input
+                  type="number"
+                  min="1"
+                  max="200"
+                  value={customThicknessMm}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (v > 0) setCustomThicknessMm(v);
+                  }}
+                  className="w-16 bg-bg-secondary border border-border-primary rounded px-2 py-1 text-xs text-text-primary text-right"
+                />
+                <span className="text-xs text-text-tertiary">mm</span>
+              </div>
+            )}
           </div>
 
           {/* View Mode */}

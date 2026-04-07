@@ -1,12 +1,14 @@
 /**
- * Armor Pipeline Routes — POC-2
+ * Armor Pipeline Routes — POC-2 + Publish-to-Game
  *
- * Endpoints for shell texture generation via Meshy AI.
- * Uses base64 data URIs to send shell GLBs to Meshy inline,
- * so no public URL/tunnel is needed.
+ * Endpoints for shell texture generation via Meshy AI
+ * and publishing rigged armor to the game's model directory.
  */
 
 import { Elysia, t } from "elysia";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
 import type { ShellTextureService } from "../services/armor-pipeline/ShellTextureService";
 
 export const createArmorPipelineRoutes = (
@@ -39,13 +41,19 @@ export const createArmorPipelineRoutes = (
             );
 
             // Start Meshy retexture with data URI
+            const enablePBR = body.enablePBR === "true";
+            // preserveUV=false: let Meshy generate new UVs.
+            // Avatar UVs map to a skin texture atlas which biases Meshy to paint skin/clothing.
+            // New UVs treat the shell as a generic 3D object → correct armor textures.
+            const preserveUV = body.preserveUV === "true";
             const taskId = await shellTextureService.startTextureTask(
               dataUri,
               body.prompt,
               {
-                preserveUV: true,
-                enablePBR: true,
-                aiModel: body.aiModel || "meshy-5",
+                preserveUV,
+                enablePBR,
+                aiModel: body.aiModel || "meshy-6",
+                styleImageUrl: body.styleImageUrl || undefined,
               },
             );
 
@@ -68,6 +76,9 @@ export const createArmorPipelineRoutes = (
             prompt: t.String(),
             name: t.Optional(t.String()),
             aiModel: t.Optional(t.String()),
+            enablePBR: t.Optional(t.String()),
+            preserveUV: t.Optional(t.String()),
+            styleImageUrl: t.Optional(t.String()),
           }),
           detail: {
             tags: ["Armor Pipeline"],
@@ -108,10 +119,19 @@ export const createArmorPipelineRoutes = (
             ) as {
               tierId: string;
               prompt: string;
+              /** Per-tier style reference image URL for color consistency */
+              styleImageUrl?: string;
             }[];
             const aiModel =
               (body as Record<string, unknown>).aiModel?.toString() ||
-              "meshy-5";
+              "meshy-6";
+            const enablePBR =
+              (body as Record<string, unknown>).enablePBR?.toString() ===
+              "true";
+            // Global fallback style image (used when tiers don't specify their own)
+            const globalStyleImageUrl =
+              (body as Record<string, unknown>).styleImageUrl?.toString() ||
+              undefined;
 
             // Start tasks sequentially with a small delay to avoid Meshy 504s
             // (each request sends the full ~6MB base64 payload)
@@ -121,10 +141,15 @@ export const createArmorPipelineRoutes = (
               if (i > 0) {
                 await new Promise((r) => setTimeout(r, 2000));
               }
+              // Per-tier style image takes precedence over global fallback
+              const tierStyleUrl = tier.styleImageUrl || globalStyleImageUrl;
+              const preserveUV =
+                (body as Record<string, unknown>).preserveUV?.toString() ===
+                "true";
               const taskId = await shellTextureService.startTextureTask(
                 dataUri,
                 tier.prompt,
-                { preserveUV: true, enablePBR: true, aiModel },
+                { preserveUV, enablePBR, aiModel, styleImageUrl: tierStyleUrl },
               );
               results.push({ tierId: tier.tierId, taskId });
               console.log(
@@ -144,9 +169,12 @@ export const createArmorPipelineRoutes = (
         {
           body: t.Object({
             file: t.File(),
-            tiers: t.Any(), // JSON string or parsed array of {tierId, prompt}[]
+            tiers: t.Any(), // JSON string or parsed array of {tierId, prompt, styleImageUrl?}[]
             name: t.Optional(t.String()),
             aiModel: t.Optional(t.String()),
+            enablePBR: t.Optional(t.String()),
+            preserveUV: t.Optional(t.String()),
+            styleImageUrl: t.Optional(t.String()),
           }),
           detail: {
             tags: ["Armor Pipeline"],
@@ -230,6 +258,147 @@ export const createArmorPipelineRoutes = (
           detail: {
             tags: ["Armor Pipeline"],
             summary: "Download textured shell GLB result",
+          },
+        },
+      )
+
+      // Publish rigged armor GLB to the game's model directory + update manifest
+      .post(
+        "/publish-to-game",
+        async ({ body, set }) => {
+          try {
+            const file = body.file;
+            const arrayBuffer = await file.arrayBuffer();
+            const glbBuffer = Buffer.from(arrayBuffer);
+
+            const itemId = body.itemId;
+            const slot = body.slot;
+            const itemName = body.itemName || itemId.replace(/_/g, " ");
+            const tier = body.tier || "bronze";
+
+            // Determine game model directory based on slot
+            const slotDirMap: Record<string, string> = {
+              helmet: "helmets",
+              body: "torsos",
+              legs: "legs",
+              boots: "boots",
+              gloves: "gloves",
+              cape: "capes",
+            };
+            const slotDir = slotDirMap[slot] || slot;
+
+            // Resolve paths relative to the monorepo
+            const serverAssetsDir = join(
+              import.meta.dir,
+              "..",
+              "..",
+              "..",
+              "server",
+              "world",
+              "assets",
+            );
+            const modelDir = join(serverAssetsDir, "models", slotDir, itemId);
+            const manifestPath = join(
+              serverAssetsDir,
+              "manifests",
+              "items",
+              "armor.json",
+            );
+
+            // Write GLB to game models directory
+            await mkdir(modelDir, { recursive: true });
+            const glbPath = join(modelDir, `${itemId}.glb`);
+            await writeFile(glbPath, glbBuffer);
+
+            // Write metadata.json alongside the GLB
+            const metadata = {
+              name: itemId,
+              gameId: itemId,
+              type: "armor",
+              subtype: slot,
+              description: `${itemName} — generated by Armor Pipeline`,
+              generatedAt: new Date().toISOString(),
+              isBaseModel: true,
+              hasModel: true,
+              modelPath: `models/${slotDir}/${itemId}/${itemId}.glb`,
+              gddCompliant: true,
+              workflow: "Shell Extraction → Meshy Texture → Rig → Publish",
+            };
+            await writeFile(
+              join(modelDir, "metadata.json"),
+              JSON.stringify(metadata, null, 2),
+            );
+
+            // Update armor manifest — add or update the item entry
+            let manifest: Record<string, unknown>[] = [];
+            if (existsSync(manifestPath)) {
+              const raw = await readFile(manifestPath, "utf-8");
+              manifest = JSON.parse(raw);
+            }
+
+            const existingIndex = manifest.findIndex(
+              (item) => item.id === itemId,
+            );
+            const entry: Record<string, unknown> = {
+              id: itemId,
+              name: itemName,
+              type: "armor",
+              tier,
+              equipSlot: slot,
+              equippedModelPath: `asset://models/${slotDir}/${itemId}/${itemId}.glb`,
+              value: 100,
+              weight: 5,
+              description: `${itemName}.`,
+              examine: `A piece of ${tier} armor.`,
+              tradeable: true,
+              rarity: "common",
+              bonuses: body.bonuses ? JSON.parse(body.bonuses) : {},
+            };
+
+            if (existingIndex >= 0) {
+              manifest[existingIndex] = {
+                ...manifest[existingIndex],
+                ...entry,
+              };
+            } else {
+              manifest.push(entry);
+            }
+
+            await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+
+            console.log(
+              `[ArmorPipeline] Published ${itemId} → ${glbPath} (${(glbBuffer.length / 1024).toFixed(1)}KB)`,
+            );
+
+            return {
+              success: true,
+              itemId,
+              slot,
+              glbPath: `models/${slotDir}/${itemId}/${itemId}.glb`,
+              glbSizeKB: Math.round(glbBuffer.length / 1024),
+              manifestUpdated: true,
+            };
+          } catch (err) {
+            set.status = 500;
+            return {
+              success: false,
+              error: err instanceof Error ? err.message : String(err),
+            };
+          }
+        },
+        {
+          body: t.Object({
+            file: t.File(),
+            itemId: t.String(),
+            slot: t.String(),
+            itemName: t.Optional(t.String()),
+            tier: t.Optional(t.String()),
+            bonuses: t.Optional(t.String()),
+          }),
+          detail: {
+            tags: ["Armor Pipeline"],
+            summary:
+              "Publish rigged armor GLB to game model directory and update item manifest",
           },
         },
       )

@@ -29,9 +29,12 @@ export interface TextureTaskStatus {
 interface MeshyRetextureRequest {
   model_url: string;
   text_style_prompt: string;
+  image_style_url?: string;
   enable_original_uv?: boolean;
   enable_pbr?: boolean;
   ai_model?: string;
+  remove_lighting?: boolean;
+  target_formats?: string[];
 }
 
 interface MeshyTaskResponse {
@@ -109,20 +112,29 @@ export class ShellTextureService {
       preserveUV?: boolean;
       enablePBR?: boolean;
       aiModel?: string;
+      styleImageUrl?: string;
     },
   ): Promise<string> {
+    const aiModel = options?.aiModel ?? "meshy-6";
     const body: MeshyRetextureRequest = {
       model_url: modelUrl,
       text_style_prompt: prompt,
       enable_original_uv: options?.preserveUV ?? true,
-      enable_pbr: options?.enablePBR ?? true,
-      ai_model: options?.aiModel ?? "meshy-5",
+      enable_pbr: options?.enablePBR ?? false,
+      ai_model: aiModel,
+      // Only request GLB to reduce processing time
+      target_formats: ["glb"],
     };
+    // Style reference image — public HTTP URL for color/texture consistency
+    if (options?.styleImageUrl) {
+      body.image_style_url = options.styleImageUrl;
+    }
 
     const payloadSize = JSON.stringify(body).length;
     console.log(
-      `[ShellTexture] Starting retexture — prompt: "${prompt}", payload: ${(payloadSize / 1024).toFixed(0)}KB, model: ${options?.aiModel ?? "meshy-5"}`,
+      `[ShellTexture] Starting retexture — model: ${aiModel}, pbr: ${body.enable_pbr}, payload: ${(payloadSize / 1024).toFixed(0)}KB${body.image_style_url ? `, style_ref: ${body.image_style_url}` : ""}`,
     );
+    console.log(`[ShellTexture]   prompt: "${prompt}"`);
 
     const response = await fetch(`${this.baseUrl}/openapi/v1/retexture`, {
       method: "POST",

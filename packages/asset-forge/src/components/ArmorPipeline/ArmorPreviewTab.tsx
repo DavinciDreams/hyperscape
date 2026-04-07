@@ -8,6 +8,7 @@ import {
   PersonStanding,
   Eye,
   EyeOff,
+  Rocket,
 } from "lucide-react";
 import React, { useRef, useState, useCallback } from "react";
 import type { VRM } from "@pixiv/three-vrm";
@@ -21,6 +22,7 @@ import {
   SLOT_LABELS,
   ALL_SLOTS,
   ALL_BULKS,
+  MATERIAL_TIERS,
 } from "../../services/armor-pipeline/constants";
 import type {
   RiggedArmorResult,
@@ -53,6 +55,10 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
   const [isAnimating, setIsAnimating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+
+  // Publish to game
+  const [publishTier, setPublishTier] = useState("bronze");
+  const [isPublishing, setIsPublishing] = useState(false);
 
   // Upload GLB settings (slot/bulk for standalone uploads)
   const [uploadSlot, setUploadSlot] = useState<EquipmentSlotName>("body");
@@ -238,6 +244,77 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
       }
     }
   }, [riggedPieces, visiblePieces, addLog]);
+
+  /** OSRS-style item name mapping from slot */
+  const slotItemName = (
+    slot: string,
+    tier: string,
+  ): { itemId: string; itemName: string } => {
+    const nameMap: Record<string, string> = {
+      helmet: "full_helm",
+      body: "platebody",
+      legs: "platelegs",
+      boots: "boots",
+      gloves: "gloves",
+    };
+    const suffix = nameMap[slot] ?? slot;
+    const itemId = `${tier}_${suffix}`;
+    const tierLabel = MATERIAL_TIERS.find((t) => t.id === tier)?.label ?? tier;
+    const suffixLabel = suffix
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    const itemName = `${tierLabel} ${suffixLabel}`;
+    return { itemId, itemName };
+  };
+
+  /** Publish all visible rigged pieces to the game's model directory + update armor manifest */
+  const handlePublishToGame = useCallback(async () => {
+    if (!riggingServiceRef.current || riggedPieces.size === 0) return;
+
+    setIsPublishing(true);
+    let successCount = 0;
+    const total = Array.from(riggedPieces.keys()).filter((k) =>
+      visiblePieces.has(k),
+    ).length;
+
+    addLog(`Publishing ${total} piece(s) as "${publishTier}" tier to game...`);
+
+    for (const [key, result] of riggedPieces) {
+      if (!visiblePieces.has(key)) continue;
+      try {
+        addLog(`  Exporting ${pieceLabel(key)}...`);
+        const blob = await riggingServiceRef.current.exportRiggedGLB(result);
+
+        const { itemId, itemName } = slotItemName(result.slotName, publishTier);
+        addLog(`  Publishing ${itemName} (${itemId})...`);
+
+        const resp = await riggingServiceRef.current.publishToGame(blob, {
+          itemId,
+          slot: result.slotName,
+          itemName,
+          tier: publishTier,
+        });
+
+        if (resp.success) {
+          addLog(
+            `  ✓ ${itemName}: ${resp.glbPath} (${(blob.size / 1024).toFixed(1)}KB)`,
+          );
+          successCount++;
+        } else {
+          addLog(`  ✗ ${itemName}: ${resp.error}`);
+        }
+      } catch (err) {
+        addLog(`  ✗ ${pieceLabel(key)}: ${err}`);
+      }
+    }
+
+    addLog(
+      successCount === total
+        ? `Published ${successCount}/${total} pieces. Restart game server to load.`
+        : `Published ${successCount}/${total} — some failed, check logs.`,
+    );
+    setIsPublishing(false);
+  }, [riggedPieces, visiblePieces, publishTier, addLog]);
 
   /** Load a local GLB — extracts shell on the fly if no kit piece exists for the slot */
   const handleLoadGLB = useCallback(() => {
@@ -565,6 +642,75 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
               >
                 <RotateCcw size={14} />
                 Reset
+              </button>
+            </div>
+          )}
+
+          {/* Publish to Game */}
+          {hasRigged && (
+            <div className="space-y-2 pt-2 border-t border-border-primary">
+              <label className="text-sm font-medium text-text-secondary flex items-center gap-1.5">
+                <Rocket size={14} className="text-primary" />
+                Publish to Game
+              </label>
+              <p className="text-[10px] text-text-tertiary leading-tight">
+                Export rigged GLBs to the game&apos;s model directory and update
+                armor.json manifest.
+              </p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-text-tertiary w-10">
+                    Tier
+                  </label>
+                  <select
+                    value={publishTier}
+                    onChange={(e) => setPublishTier(e.target.value)}
+                    className="flex-1 bg-bg-secondary border border-border-primary rounded px-2 py-1.5 text-xs text-text-primary"
+                  >
+                    {MATERIAL_TIERS.map((tier) => (
+                      <option key={tier.id} value={tier.id}>
+                        {tier.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div
+                    className="w-5 h-5 rounded border border-border-primary flex-shrink-0"
+                    style={{
+                      backgroundColor:
+                        MATERIAL_TIERS.find((t) => t.id === publishTier)
+                          ?.color ?? "#888",
+                    }}
+                  />
+                </div>
+              </div>
+              <button
+                onClick={handlePublishToGame}
+                disabled={isPublishing || riggedPieces.size === 0}
+                className="w-full px-4 py-2.5 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2
+                  bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isPublishing ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Publishing...
+                  </>
+                ) : (
+                  <>
+                    <Rocket size={16} />
+                    Publish{" "}
+                    {
+                      Array.from(riggedPieces.keys()).filter((k) =>
+                        visiblePieces.has(k),
+                      ).length
+                    }{" "}
+                    Piece
+                    {Array.from(riggedPieces.keys()).filter((k) =>
+                      visiblePieces.has(k),
+                    ).length !== 1
+                      ? "s"
+                      : ""}
+                  </>
+                )}
               </button>
             </div>
           )}

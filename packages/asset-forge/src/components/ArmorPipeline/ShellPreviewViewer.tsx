@@ -34,6 +34,7 @@ export interface ShellPreviewViewerRef {
   showRegions: (
     skinnedMesh: THREE.SkinnedMesh,
     regions: Map<EquipmentSlotName, BodyRegion>,
+    processedGeometry?: THREE.BufferGeometry,
   ) => void;
   showShell: (shell: ShellMesh) => void;
   showShells: (shells: Map<string, ShellMesh>) => void;
@@ -235,6 +236,8 @@ export const ShellPreviewViewer = forwardRef<
     };
   }, []);
 
+  /** Remove all children from a group and dispose their geometry + materials.
+   *  Use for overlays/shells we create ourselves (fresh materials, no shared textures). */
   const disposeGroup = useCallback((group: THREE.Group) => {
     while (group.children.length > 0) {
       const child = group.children[0];
@@ -249,6 +252,16 @@ export const ShellPreviewViewer = forwardRef<
           }
         }
       });
+    }
+  }, []);
+
+  /** Remove all children from a group WITHOUT disposing their resources.
+   *  Use for VRM scenes and loaded GLTFs whose textures/materials are managed
+   *  by the loader — disposing them corrupts the renderer's internal texture
+   *  reference counters (usedTimes) and causes crashes. */
+  const detachGroup = useCallback((group: THREE.Group) => {
+    while (group.children.length > 0) {
+      group.remove(group.children[0]);
     }
   }, []);
 
@@ -277,7 +290,8 @@ export const ShellPreviewViewer = forwardRef<
   /** Internal: set up the ghost avatar + animation mixer */
   const doSetupAvatar = useCallback(
     (vrmScene: THREE.Object3D, vrm: VRM) => {
-      disposeGroup(avatarGroupRef.current);
+      // Detach previous VRM (don't dispose loader-managed textures)
+      detachGroup(avatarGroupRef.current);
       disposeGroup(overlayGroupRef.current);
       armorPiecesRef.current.clear();
 
@@ -323,7 +337,7 @@ export const ShellPreviewViewer = forwardRef<
 
       frameCamera(vrmScene);
     },
-    [disposeGroup, frameCamera],
+    [detachGroup, disposeGroup, frameCamera],
   );
 
   /** Internal: add an armor piece to the VRM scene */
@@ -352,7 +366,8 @@ export const ShellPreviewViewer = forwardRef<
 
   useImperativeHandle(ref, () => ({
     showTexturedResult(scene: THREE.Object3D) {
-      disposeGroup(avatarGroupRef.current);
+      // Detach VRM/loaded scenes (don't dispose their shared textures)
+      detachGroup(avatarGroupRef.current);
       disposeGroup(overlayGroupRef.current);
 
       avatarGroupRef.current.add(scene);
@@ -360,7 +375,8 @@ export const ShellPreviewViewer = forwardRef<
     },
 
     setAvatarScene(vrmScene: THREE.Object3D) {
-      disposeGroup(avatarGroupRef.current);
+      // Detach previous scene without disposing (textures are loader-managed)
+      detachGroup(avatarGroupRef.current);
 
       avatarGroupRef.current.add(vrmScene);
 
@@ -380,12 +396,13 @@ export const ShellPreviewViewer = forwardRef<
       frameCamera(vrmScene);
     },
 
-    showRegions(skinnedMesh, regions) {
+    showRegions(skinnedMesh, regions, processedGeometry) {
       disposeGroup(overlayGroupRef.current);
-      const srcPos = skinnedMesh.geometry.attributes
-        .position as THREE.BufferAttribute;
-      const srcNorm = skinnedMesh.geometry.attributes
-        .normal as THREE.BufferAttribute;
+      // Use processedGeometry when available — region indices reference it
+      // (marching triangles adds extra isoline vertices beyond the original mesh)
+      const srcGeo = processedGeometry ?? skinnedMesh.geometry;
+      const srcPos = srcGeo.attributes.position as THREE.BufferAttribute;
+      const srcNorm = srcGeo.attributes.normal as THREE.BufferAttribute;
       const REGION_OFFSET = 0.002; // 2mm outward to prevent Z-fighting
       const COINCIDENT_PRECISION = 10000; // 0.1mm
 
@@ -560,7 +577,9 @@ export const ShellPreviewViewer = forwardRef<
       vrmSceneRef.current = null;
       armorPiecesRef.current.clear();
 
-      disposeGroup(avatarGroupRef.current);
+      // Detach loaded scenes (VRM/GLTF) — don't dispose their shared textures
+      detachGroup(avatarGroupRef.current);
+      // Overlays are ours to dispose (fresh materials, no shared textures)
       disposeGroup(overlayGroupRef.current);
     },
 

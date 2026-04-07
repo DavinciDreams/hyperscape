@@ -11,12 +11,15 @@ import type {
 export const SLOT_BONE_MAP = {
   helmet: ["head", "neck"],
   body: [
-    "hips",
     "spine",
     "chest",
     "upperChest",
     "leftShoulder",
     "rightShoulder",
+    "leftUpperArm",
+    "rightUpperArm",
+    "leftLowerArm",
+    "rightLowerArm",
   ],
   legs: ["leftUpperLeg", "rightUpperLeg", "leftLowerLeg", "rightLowerLeg"],
   boots: ["leftFoot", "rightFoot", "leftToes", "rightToes"],
@@ -33,14 +36,9 @@ export const SLOT_PARTIAL_BONES: Partial<
     { boneName: "leftLowerLeg", maxWeight: 0.3 },
     { boneName: "rightLowerLeg", maxWeight: 0.3 },
   ],
-  gloves: [
-    { boneName: "leftLowerArm", maxWeight: 0.4 },
-    { boneName: "rightLowerArm", maxWeight: 0.4 },
-  ],
   legs: [{ boneName: "hips", maxWeight: 0.3 }],
   body: [
-    { boneName: "leftUpperArm", maxWeight: 0.5 },
-    { boneName: "rightUpperArm", maxWeight: 0.5 },
+    { boneName: "hips", maxWeight: 0.3 },
     { boneName: "neck", maxWeight: 0.5 },
   ],
 };
@@ -88,6 +86,9 @@ export interface ShellExtractionResult {
   vrmScene: Object3D;
   /** The raw VRM object (for humanoid bone access, animation, etc.) */
   vrm: Record<string, unknown>;
+  /** Preprocessed geometry with marching-triangles isoline vertices.
+   *  Region vertex/triangle indices refer to THIS geometry, not the original skinnedMesh. */
+  processedGeometry: BufferGeometry;
 }
 
 /** Result of rigging a textured shell back onto the avatar skeleton */
