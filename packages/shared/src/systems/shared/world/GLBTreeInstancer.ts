@@ -95,7 +95,7 @@ let world: World | null = null;
 const pools = new Map<string, ModelPool>();
 const entityToModel = new Map<string, string>();
 
-// ---- Geometry extraction (portfolio pattern: reference, not clone) ----
+// ---- Geometry extraction (reference, not clone) ----
 
 interface MeshPart {
   geometry: THREE.BufferGeometry;
@@ -123,12 +123,14 @@ function createSharedGeometry(
 ): THREE.BufferGeometry {
   const geo = new THREE.BufferGeometry();
   for (const name in source.attributes) {
-    geo.setAttribute(name, source.attributes[name]);
+    geo.setAttribute(name, source.attributes[name].clone());
   }
-  if (source.index) geo.setIndex(source.index);
+  if (source.index) geo.setIndex(source.index.clone());
   if (source.morphAttributes) {
     for (const name in source.morphAttributes) {
-      geo.morphAttributes[name] = source.morphAttributes[name];
+      geo.morphAttributes[name] = source.morphAttributes[name].map((a) =>
+        a.clone(),
+      );
     }
   }
   if (source.groups.length > 0) {
@@ -267,12 +269,8 @@ async function ensureModelPool(
       parts: MeshPart[],
     ): { geometry: THREE.BufferGeometry; material: DissolveMaterial }[] {
       return parts.map((p) => {
-        const isLeaf =
-          !!(p.material as any).transparent ||
-          (p.material as any).side === THREE.DoubleSide;
         const dm = createTreeDissolveMaterial(p.material, {
           ...dissolveOpts,
-          isLeafMaterial: isLeaf,
         } as TreeMaterialOptions);
         dm.side = THREE.DoubleSide;
         enableTextureRepeat(dm);
@@ -363,7 +361,8 @@ function addToPool(
   entityId: string,
   mat: THREE.Matrix4,
   dissolve = 0,
-): void {
+): boolean {
+  if (pool.activeCount >= MAX_INSTANCES) return false;
   const idx = pool.activeCount;
   for (const im of pool.meshes) {
     im.setMatrixAt(idx, mat);
@@ -374,6 +373,7 @@ function addToPool(
   if (dissolve > 0) pool.dissolveDirty = true;
   pool.activeCount++;
   pool.dirty = true;
+  return true;
 }
 
 function removeFromPool(pool: LODPool, entityId: string): void {
@@ -452,14 +452,25 @@ export async function addInstance(
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
+  if (entityToModel.has(entityId)) {
+    removeInstance(entityId);
+  }
+
   try {
     const pool = await ensureModelPool(modelPath, lod1ModelPath, lod2ModelPath);
 
-    if (pool.lod0 && pool.lod0.activeCount >= MAX_INSTANCES) {
-      console.warn(
-        `[GLBTreeInstancer] LOD0 pool full for ${modelPath}, cannot add ${entityId}`,
-      );
-      return false;
+    // Pick initial LOD based on camera distance to avoid LOD0 pop-in at range
+    let initialLOD: 0 | 1 | 2 = 0;
+    if (world?.camera) {
+      const cp = world.camera.position;
+      const dx = cp.x - position.x;
+      const dz = cp.z - position.z;
+      const distSq = dx * dx + dz * dz;
+      if (distSq >= resourceLOD.lod2DistanceSq) {
+        initialLOD = pool.lod2 ? 2 : pool.lod1 ? 1 : 0;
+      } else if (distSq >= resourceLOD.lod1DistanceSq) {
+        initialLOD = pool.lod1 ? 1 : 0;
+      }
     }
 
     const slot: TreeSlot = {
@@ -468,14 +479,26 @@ export async function addInstance(
       rotation,
       scale,
       yOffset: pool.yOffset,
-      currentLOD: 0,
+      currentLOD: initialLOD,
     };
 
     pool.instances.set(entityId, slot);
     entityToModel.set(entityId, modelPath);
 
     const mat = composeInstanceMatrix(position, rotation, scale, pool.yOffset);
-    addToPool(pool.lod0!, entityId, mat, initialDissolve);
+    const initialPool =
+      initialLOD === 0 ? pool.lod0 : initialLOD === 1 ? pool.lod1 : pool.lod2;
+    if (
+      initialPool &&
+      !addToPool(initialPool, entityId, mat, initialDissolve)
+    ) {
+      console.warn(
+        `[GLBTreeInstancer] LOD${initialLOD} pool full for ${modelPath}, cannot add ${entityId}`,
+      );
+      pool.instances.delete(entityId);
+      entityToModel.delete(entityId);
+      return false;
+    }
 
     return true;
   } catch (error) {
@@ -750,6 +773,7 @@ export function updateGLBTreeInstancer(deltaTime: number): void {
     sunLight?: { intensity: number };
     lightDirection?: THREE.Vector3;
     hemisphereLight?: { color: THREE.Color };
+    getDayIntensity?: () => number;
   } | null;
 
   const wind = world.getSystem("wind") as Wind | null;
@@ -794,16 +818,8 @@ export function updateGLBTreeInstancer(deltaTime: number): void {
               2.0,
             );
           }
-          if (env?.hemisphereLight) {
-            const c = env.hemisphereLight.color;
-            const avg = (c.r + c.g + c.b) / 3;
-            if (avg > 0.01) {
-              treeMat.treeUniforms.shadeColor.value.setRGB(
-                c.r / avg,
-                c.g / avg,
-                c.b / avg,
-              );
-            }
+          if (env?.getDayIntensity) {
+            treeMat.treeUniforms.dayIntensity.value = env.getDayIntensity();
           }
           if (wind) {
             treeMat.treeUniforms.windTime.value = wind.uniforms.time.value;

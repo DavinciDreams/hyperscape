@@ -40,12 +40,12 @@ jobs:
     environment: production
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2.1.3
+        uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: 1.1.38
 
@@ -57,9 +57,10 @@ jobs:
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
           PUBLIC_PRIVY_APP_ID: ${{ secrets.PUBLIC_PRIVY_APP_ID || 'cmgk4zu56005kjj0bcaae0rei' }}
-          PUBLIC_API_URL: https://hyperscape-production.up.railway.app
-          PUBLIC_WS_URL: wss://hyperscape-production.up.railway.app/ws
-          PUBLIC_CDN_URL: https://assets.hyperscape.club
+          PUBLIC_API_URL: ${{ vars.PRODUCTION_PUBLIC_API_URL || 'https://hyperscape-production.up.railway.app' }}
+          PUBLIC_WS_URL: ${{ vars.PRODUCTION_PUBLIC_WS_URL || 'wss://hyperscape-production.up.railway.app/ws' }}
+          PUBLIC_APP_URL: ${{ vars.PRODUCTION_PUBLIC_APP_URL || 'https://hyperscape.club' }}
+          PUBLIC_CDN_URL: ${{ vars.PRODUCTION_PUBLIC_CDN_URL || 'https://assets.hyperscape.club' }}
 
       - name: Determine Pages deployment target
         id: target

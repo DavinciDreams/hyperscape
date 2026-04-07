@@ -100,7 +100,7 @@ export async function createServerWorld(): Promise<World> {
 
   world.register("towns", TownSystem);
   world.register("pois", POISystem);
-  world.register("roads", RoadNetworkSystem);
+  // world.register("roads", RoadNetworkSystem);
 
   // ============================================================================
   // RPG GAME SYSTEMS

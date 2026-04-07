@@ -16,7 +16,10 @@ import { logger } from "@elizaos/core";
 import { z } from "zod";
 
 // Service
-import { HyperscapeService } from "./services/HyperscapeService.js";
+import {
+  HyperscapeService,
+  resolveDefaultHyperscapeServerUrl,
+} from "./services/HyperscapeService.js";
 
 // Providers
 import { gameStateProvider } from "./providers/gameState.js";
@@ -122,7 +125,7 @@ const configSchema = z.object({
     .string()
     .url()
     .optional()
-    .default("ws://localhost:5555/ws")
+    .default(resolveDefaultHyperscapeServerUrl())
     .describe("WebSocket URL for Hyperscape server"),
   HYPERSCAPE_AUTO_RECONNECT: z
     .string()
@@ -201,7 +204,7 @@ export const hyperscapePlugin: Plugin = {
   config: {
     HYPERSCAPE_SERVER_URL: normalizeEnvValue(
       process.env.HYPERSCAPE_SERVER_URL,
-      "ws://localhost:5555/ws",
+      resolveDefaultHyperscapeServerUrl(),
     ),
     HYPERSCAPE_AUTO_RECONNECT: normalizeEnvValue(
       process.env.HYPERSCAPE_AUTO_RECONNECT,

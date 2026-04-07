@@ -26,6 +26,11 @@ import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
 import { logger } from "./lib/logger";
 import { devValidateManifest } from "./lib/manifestValidator";
+import {
+  ensurePublicRuntimeEnv,
+  isConfiguredPrivyAppId,
+  resolvePrivyAppId,
+} from "./lib/publicEnv";
 import { primeStreamingAccessTokenFromWindow } from "./lib/streamingAccessToken";
 import {
   applyHyperscapeAuthMessage,
@@ -80,7 +85,7 @@ const EmbeddedGameClient = React.lazy(() =>
   })),
 );
 import { isEmbeddedMode } from "./types/embeddedConfig";
-import { GAME_API_URL, GAME_WS_URL } from "./lib/api-config";
+import { GAME_API_URL, GAME_WS_URL, refreshApiConfig } from "./lib/api-config";
 import {
   validateURLParams,
   type URLParamValidation,
@@ -131,15 +136,16 @@ if (typeof window !== "undefined") {
 // Early CDN URL initialization to prevent PhysX WASM loading race condition.
 // When createClientWorld runs, it triggers PhysX WASM load before GameClient mounts.
 // We must expose the CDN URL immediately so PhysX knows where to fetch the WASM file.
-if (typeof window !== "undefined") {
+function syncRuntimeAssetBaseUrls(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   const windowWithEnv = window as Window & {
     env?: { PUBLIC_CDN_URL?: string };
     __CDN_URL?: string;
     __ASSETS_URL?: string;
   };
-  // Scrub streaming viewer secrets before React or telemetry code can observe
-  // them in the address bar. Hash takes precedence over query for compatibility.
-  primeStreamingAccessTokenFromWindow(window);
   // Normalize the CDN URL if provided via env.js
   const envCdn = windowWithEnv.env?.PUBLIC_CDN_URL;
   if (envCdn && typeof envCdn === "string" && envCdn !== "undefined") {
@@ -153,6 +159,13 @@ if (typeof window !== "undefined") {
     windowWithEnv.__CDN_URL = resolvedCdn;
     windowWithEnv.__ASSETS_URL = resolvedCdn;
   }
+}
+
+if (typeof window !== "undefined") {
+  // Scrub streaming viewer secrets before React or telemetry code can observe
+  // them in the address bar. Hash takes precedence over query for compatibility.
+  primeStreamingAccessTokenFromWindow(window);
+  syncRuntimeAssetBaseUrls();
 }
 
 // Browser polyfill uses setTimeout which returns a Timeout, but libraries expect
@@ -245,7 +258,7 @@ if (isEmbedded) {
     // It will be set via postMessage from parent window or from session storage
     authToken: "", // Will be populated via secure postMessage
     characterId: (params.characterId as string) || undefined,
-    wsUrl: (params.wsUrl as string) || GAME_WS_URL || "ws://localhost:5556/ws",
+    wsUrl: (params.wsUrl as string) || GAME_WS_URL,
     mode,
     followEntity: (params.followEntity as string) || undefined,
     hiddenUI: validHiddenUI.length > 0 ? validHiddenUI : undefined,
@@ -465,8 +478,8 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
 
 function App() {
   // Determine Privy availability
-  const appId = import.meta.env.PUBLIC_PRIVY_APP_ID || "";
-  const privyEnabled = appId.length > 0 && !appId.includes("your-privy-app-id");
+  const appId = resolvePrivyAppId(import.meta.env.PUBLIC_PRIVY_APP_ID);
+  const privyEnabled = isConfiguredPrivyAppId(appId);
 
   const [authState, setAuthState] = React.useState(privyAuthManager.getState());
   const [showCharacterPage, setShowCharacterPage] =
@@ -569,7 +582,7 @@ function App() {
     };
   }, []);
 
-  const wsUrl: string = GAME_WS_URL || "ws://localhost:5556/ws";
+  const wsUrl: string = GAME_WS_URL;
   const appRef = React.useRef<HTMLDivElement>(null);
 
   const handleUsernameSelected = React.useCallback((_username: string) => {
@@ -824,6 +837,10 @@ let reactRoot: ReactDOM.Root | null = null;
 
 async function mountApp() {
   const rootElement = document.getElementById("root")!;
+
+  await ensurePublicRuntimeEnv();
+  refreshApiConfig();
+  syncRuntimeAssetBaseUrls();
 
   // Reuse existing root if already created (prevents HMR double-mount warning)
   if (!reactRoot) {

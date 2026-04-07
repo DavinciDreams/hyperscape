@@ -121,8 +121,8 @@ describe("EquipmentPanel", () => {
 
     expect(screen.getByTitle("Head (empty)")).toBeInTheDocument();
     expect(screen.getByTitle("Weapon (empty)")).toBeInTheDocument();
-    expect(screen.getByText("Head")).toBeInTheDocument();
-    expect(screen.getByText("Weapon")).toBeInTheDocument();
+    expect(screen.getByLabelText("Empty Head slot")).toBeInTheDocument();
+    expect(screen.getByLabelText("Empty Weapon slot")).toBeInTheDocument();
   });
 
   it("shows equipped item icons with slot labels and without visible item-name labels in slot tiles", () => {

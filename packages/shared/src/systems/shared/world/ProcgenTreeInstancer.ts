@@ -3245,22 +3245,17 @@ export class ProcgenTreeInstancer {
     inst.hasGlobalLeaves = false;
   }
 
-  removeInstance(preset: string, id: string, _lodLevel = 0): void {
+  removeInstance(_preset: string, id: string, _lodLevel = 0): void {
     const tracked = this.instances.get(id);
     if (!tracked) return;
 
-    // Remove leaves and clusters from global buffers
     this.removeTreeLeavesFromGlobal(tracked.inst);
     this.removeTreeClustersFromGlobal(tracked.inst);
 
-    // NOTE: Grass exclusion is handled via texture regeneration when needed.
-    // Call ProceduralGrass.collectAndRefreshExclusionTexture() after major changes.
-
     this.transitions.delete(id);
     for (let lod = 0; lod < 4; lod++)
-      this.removeFromLOD(preset, tracked.inst, lod);
+      this.removeFromLOD(tracked.preset, tracked.inst, lod);
 
-    // Remove from spatial partitioning
     this.removeFromSpatialChunk(id);
 
     this.instances.delete(id);
@@ -3725,6 +3720,13 @@ export class ProcgenTreeInstancer {
   }
 
   private showInMesh(data: MeshData, inst: TreeInstance): number {
+    if (data.count >= MAX_INSTANCES) {
+      console.warn(
+        `[ProcgenTreeInstancer] MAX_INSTANCES (${MAX_INSTANCES}) reached, cannot show ${inst.id}`,
+      );
+      return -1;
+    }
+
     const idx = data.nextIdx++;
     if (data.nextIdx >= MAX_INSTANCES) data.nextIdx = 0;
 

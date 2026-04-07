@@ -142,10 +142,10 @@ export class ZoneVisualsSystem extends SystemBase {
     if (area.id === "duel_arena") {
       return "swords";
     }
-    // Wilderness/PvP zones (not duel arena) get skull
-    if (!area.safeZone || (area.pvpEnabled && area.id !== "duel_arena")) {
-      return "skull";
-    }
+    // Wilderness/PvP zones (not duel arena) — skull disabled for now
+    // if (!area.safeZone || (area.pvpEnabled && area.id !== "duel_arena")) {
+    //   return "skull";
+    // }
     // Safe towns get home
     if (area.safeZone && !area.pvpEnabled) {
       return "home";
@@ -156,9 +156,9 @@ export class ZoneVisualsSystem extends SystemBase {
   /**
    * Check if zone should have a red border band
    */
-  private shouldHaveBorder(area: WorldArea): boolean {
-    // Only wilderness/dangerous zones get the red border (not duel arena)
-    return !area.safeZone && area.id !== "duel_arena";
+  private shouldHaveBorder(_area: WorldArea): boolean {
+    // Borders disabled for now
+    return false;
   }
 
   /**

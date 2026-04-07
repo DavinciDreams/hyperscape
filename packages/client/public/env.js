@@ -10,5 +10,20 @@
 //     PUBLIC_API_URL: "https://hyperscape-production.up.railway.app",
 //   };
 //
-// For local development, the Vite build-time variables are used instead.
-window.env = {};
+// In local Vite dev, serve sane runtime defaults so the client does not inherit
+// stale workspace-root PUBLIC_* values intended for the game server process.
+(() => {
+  const env = typeof window.env === "object" && window.env ? window.env : {};
+  const currentPort = window.location.port;
+  const isLocalDevServer =
+    currentPort === "3333" || currentPort === "4173" || currentPort === "5173";
+
+  if (isLocalDevServer) {
+    const host = window.location.hostname || "127.0.0.1";
+    env.PUBLIC_API_URL ||= `http://${host}:5555`;
+    env.PUBLIC_WS_URL ||= `ws://${host}:5556/ws`;
+    env.PUBLIC_CDN_URL ||= `http://${host}:5555/game-assets`;
+  }
+
+  window.env = env;
+})();

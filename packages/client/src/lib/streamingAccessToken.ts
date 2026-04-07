@@ -52,7 +52,9 @@ export function primeStreamingAccessTokenFromWindow(
     return cachedStreamingAccessToken;
   }
 
-  const resolved = resolveStreamingAccessTokenFromHref(targetWindow.location.href);
+  const resolved = resolveStreamingAccessTokenFromHref(
+    targetWindow.location.href,
+  );
   cachedStreamingAccessToken = resolved.token;
 
   if (resolved.nextUrl) {

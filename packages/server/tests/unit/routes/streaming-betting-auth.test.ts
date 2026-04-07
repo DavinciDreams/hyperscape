@@ -34,10 +34,7 @@ describe("streaming-betting-auth", () => {
   });
 
   it("does not accept query tokens unless the route explicitly allows them", () => {
-    expect(
-      extractBettingFeedToken({
-      }),
-    ).toBeNull();
+    expect(extractBettingFeedToken({})).toBeNull();
   });
 
   it("prefers BETTING_FEED_ACCESS_TOKEN over the viewer token", () => {

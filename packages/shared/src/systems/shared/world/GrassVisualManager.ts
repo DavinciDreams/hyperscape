@@ -1,0 +1,1232 @@
+// @ts-nocheck -- TSL type definitions are incomplete for Fn() callbacks and node reassignment
+/**
+ * GrassVisualManager — Procedural instanced grass clumps aligned with the
+ * terrain quad-tree. Each clump is a single geometry containing multiple
+ * blades with pre-baked local offsets, rotations and height variation.
+ * Each max-depth quad-tree leaf gets one InstancedMesh of clumps.
+ *
+ * Follows the same QuadTreeListener pattern as WaterVisualManager.
+ * CLIENT-ONLY: Only used when USE_QUADTREE_LOD is true.
+ */
+
+import THREE, {
+  uniform,
+  Fn,
+  float,
+  sin,
+  time,
+  positionLocal,
+  attribute,
+  cos,
+  uv,
+  pow,
+  vec3,
+  vec4,
+  mix,
+  smoothstep,
+  sub,
+  dot,
+  clamp,
+  mul,
+  modelWorldMatrix,
+  cameraViewMatrix,
+  output,
+} from "../../../extras/three/three";
+import { SUN_LIGHT } from "./LightingConfig";
+import { applyAnimeShade, TERRAIN_SHADER_CONSTANTS } from "./TerrainShader";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import type { TerrainQuadNode, QuadTreeListener } from "./TerrainQuadTree";
+import {
+  getGrassWorkerPool,
+  terminateGrassWorkerPool,
+  type GrassWorkerInput,
+  type GrassWorkerOutput,
+} from "../../../utils/workers/GrassWorker";
+import type { TerrainWorkerConfig } from "../../../utils/workers/TerrainWorker";
+import type { BiomeGrassConfigWorker } from "../../../utils/workers/GrassWorker";
+
+// ---------------------------------------------------------------------------
+// Configuration — tweak these to control grass appearance & performance
+// ---------------------------------------------------------------------------
+
+export const GRASS_CONFIG = {
+  // -- Density & distribution -----------------------------------------------
+  /** Average distance between clump centers in meters (lower = denser) */
+  CLUMP_SPACING: 0.7,
+
+  // -- Clump composition ----------------------------------------------------
+  /** Number of blades baked into each clump geometry */
+  BLADES_PER_CLUMP: 24,
+  /** Outer radius of the clump ring in meters */
+  CLUMP_RADIUS: 0.7,
+  /** Inner radius ratio (0-1, blades placed between inner*radius and radius) */
+  CLUMP_INNER_RATIO: 0.05,
+
+  // -- Blade shape ----------------------------------------------------------
+  /** Segments per blade (4 rows of 2 verts + 1 tip = 9 verts) */
+  BLADE_SEGMENTS: 3,
+  /** Blade width scales with height: width = height * WIDTH_RATIO */
+  BLADE_WIDTH_RATIO: 0.04,
+  /** Blade min height in world units */
+  BLADE_HEIGHT_MIN: 0.45,
+  /** Blade max height in world units */
+  BLADE_HEIGHT_MAX: 1.15,
+  /** Arc curvature ratio (arc distance ≈ height * this) */
+  BLADE_ARC_RATIO: 0.18,
+  /** Tip taper (0 = rectangle, 1 = full point) */
+  BLADE_TAPER: 0.85,
+
+  // -- Per-instance variation -----------------------------------------------
+  /** Clump-level scale range */
+  SCALE_MIN: 0.7,
+  SCALE_MAX: 1.3,
+
+  // -- Wind -----------------------------------------------------------------
+  WIND_SPEED: 1.8,
+  WIND_STRENGTH: 0.15,
+
+  // -- Color ----------------------------------------------------------------
+  /** Gradient power curve (higher = root color persists longer up the blade) */
+  GRADIENT_FALLOFF: 1.7,
+
+  // -- Distance limits -------------------------------------------------------
+  /** Grass starts shrinking at this distance (meters) */
+  FADE_START: 350,
+  /** Grass fully invisible / chunks pruned beyond this distance */
+  MAX_RENDER_DISTANCE: 500,
+
+  // -- LOD tiers (by distance from camera) ------------------------------------
+  LOD_TIERS: [
+    { maxDistance: 80, bladesPerClump: 24, bladeSegments: 3, spacingMul: 1.0 },
+    { maxDistance: 200, bladesPerClump: 12, bladeSegments: 2, spacingMul: 1.0 },
+    {
+      maxDistance: 500,
+      bladesPerClump: 4,
+      bladeSegments: 1,
+      spacingMul: 5.0,
+    },
+  ],
+  LOD_HYSTERESIS: 0.1,
+
+  /** Deterministic seed */
+  SEED: 73856093,
+};
+
+// ---------------------------------------------------------------------------
+// Interleave groundColor (vec3) + grassTint (vec4) into a single vertex buffer
+// to stay within WebGPU's 8-buffer limit.
+// ---------------------------------------------------------------------------
+
+function setColorTintInterleaved(
+  geo: THREE.BufferGeometry,
+  groundColors: Float32Array,
+  grassTints: Float32Array,
+  count: number,
+): void {
+  const stride = 7; // 3 (color) + 4 (tint)
+  const buf = new Float32Array(count * stride);
+  for (let i = 0; i < count; i++) {
+    const s = i * stride;
+    const c = i * 3;
+    const t = i * 4;
+    buf[s] = groundColors[c];
+    buf[s + 1] = groundColors[c + 1];
+    buf[s + 2] = groundColors[c + 2];
+    buf[s + 3] = grassTints[t];
+    buf[s + 4] = grassTints[t + 1];
+    buf[s + 5] = grassTints[t + 2];
+    buf[s + 6] = grassTints[t + 3];
+  }
+  const ib = new THREE.InstancedInterleavedBuffer(buf, stride);
+  geo.setAttribute(
+    "instanceGroundColor",
+    new THREE.InterleavedBufferAttribute(ib, 3, 0),
+  );
+  geo.setAttribute(
+    "instanceGrassTint",
+    new THREE.InterleavedBufferAttribute(ib, 4, 3),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Seeded PRNG
+// ---------------------------------------------------------------------------
+
+function mulberry32(seed: number): () => number {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Procedural clump geometry — sunflower-spiral blade arrangement with baked
+// arc curvature, per-blade rotation/height/width variation.
+// ---------------------------------------------------------------------------
+
+function createClumpGeometry(
+  bladesPerClump = GRASS_CONFIG.BLADES_PER_CLUMP,
+  bladeSegments = GRASS_CONFIG.BLADE_SEGMENTS,
+): THREE.BufferGeometry {
+  const N = bladesPerClump;
+  const segs = bladeSegments;
+  const {
+    CLUMP_RADIUS,
+    CLUMP_INNER_RATIO,
+    BLADE_WIDTH_RATIO,
+    BLADE_HEIGHT_MIN: hMin,
+    BLADE_HEIGHT_MAX: hMax,
+    BLADE_ARC_RATIO,
+    BLADE_TAPER: taper,
+  } = GRASS_CONFIG;
+
+  const vertsPerBlade = segs * 2 + 1;
+  const trisPerBlade = (segs - 1) * 2 + 1;
+  const totalVerts = vertsPerBlade * N;
+  const totalIdx = trisPerBlade * 3 * N;
+
+  const positions = new Float32Array(totalVerts * 3);
+  const normals = new Float32Array(totalVerts * 3);
+  const uvs = new Float32Array(totalVerts * 2);
+  const indices = new Uint16Array(totalIdx);
+
+  const rng = mulberry32(91827364);
+  const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
+  let vi = 0;
+  let ii = 0;
+
+  for (let b = 0; b < N; b++) {
+    const t01 = b / N;
+    const angle = b * GOLDEN_ANGLE;
+    const rNorm = CLUMP_INNER_RATIO + (1 - CLUMP_INNER_RATIO) * Math.sqrt(t01);
+    const r = rNorm * CLUMP_RADIUS;
+    const jitter = (rng() - 0.5) * 0.15 * CLUMP_RADIUS;
+    const ox = Math.cos(angle) * r + Math.cos(angle + 1.3) * jitter;
+    const oz = Math.sin(angle) * r + Math.sin(angle + 1.3) * jitter;
+
+    const facingAngle = angle + Math.PI * 0.5 + (rng() - 0.5) * Math.PI;
+    const cr = Math.cos(facingAngle);
+    const sr = Math.sin(facingAngle);
+
+    const h = hMin + (hMax - hMin) * (0.3 + 0.7 * t01 + (rng() - 0.5) * 0.4);
+    const w = h * BLADE_WIDTH_RATIO;
+
+    const curveAngle = angle + (rng() - 0.5) * Math.PI * 0.6;
+    const arcDist = h * BLADE_ARC_RATIO * (0.8 + rng() * 0.4);
+    const curveDirX = Math.cos(curveAngle) * arcDist;
+    const curveDirZ = Math.sin(curveAngle) * arcDist;
+
+    rng(); // consume one RNG value to keep deterministic sequence stable
+    const baseVert = vi;
+
+    for (let i = 0; i < segs; i++) {
+      const t = i / segs;
+      const y = t * h;
+      const hw = w * 0.5 * (1.0 - t * taper);
+      const arc = t * t;
+      const arcX = curveDirX * arc;
+      const arcZ = curveDirZ * arc;
+
+      for (let side = 0; side < 2; side++) {
+        const lx = side === 0 ? -hw : hw;
+        positions[vi * 3] = lx * cr + arcX + ox;
+        positions[vi * 3 + 1] = y;
+        positions[vi * 3 + 2] = lx * sr + arcZ + oz;
+        normals[vi * 3] = -sr;
+        normals[vi * 3 + 1] = 0;
+        normals[vi * 3 + 2] = cr;
+        uvs[vi * 2] = side;
+        uvs[vi * 2 + 1] = t;
+        vi++;
+      }
+    }
+
+    positions[vi * 3] = curveDirX + ox;
+    positions[vi * 3 + 1] = h;
+    positions[vi * 3 + 2] = curveDirZ + oz;
+    normals[vi * 3] = -sr;
+    normals[vi * 3 + 1] = 0;
+    normals[vi * 3 + 2] = cr;
+    uvs[vi * 2] = 0.5;
+    uvs[vi * 2 + 1] = 1.0;
+    vi++;
+
+    for (let i = 0; i < segs - 1; i++) {
+      const bv = baseVert + i * 2;
+      indices[ii++] = bv;
+      indices[ii++] = bv + 1;
+      indices[ii++] = bv + 2;
+      indices[ii++] = bv + 1;
+      indices[ii++] = bv + 3;
+      indices[ii++] = bv + 2;
+    }
+    const lastRow = baseVert + (segs - 1) * 2;
+    const tipIdx = baseVert + segs * 2;
+    indices[ii++] = lastRow;
+    indices[ii++] = lastRow + 1;
+    indices[ii++] = tipIdx;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  return geo;
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface GrassChunk {
+  nodeId: number;
+  mesh: THREE.InstancedMesh;
+  box: THREE.Box3;
+  lodLevel: number;
+  node: TerrainQuadNode;
+}
+
+// ---------------------------------------------------------------------------
+// GrassVisualManager
+// ---------------------------------------------------------------------------
+
+/** Config data for the grass worker, passed from TerrainSystem at construction. */
+export interface GrassWorkerSetup {
+  terrainConfig: TerrainWorkerConfig;
+  seed: number;
+  biomeCenters: Array<{
+    x: number;
+    z: number;
+    type: string;
+    influence: number;
+  }>;
+  biomes: Record<
+    string,
+    { heightModifier: number; color: { r: number; g: number; b: number } }
+  >;
+  grassConfigs: Record<string, BiomeGrassConfigWorker>;
+  tileSize: number;
+  getRoadSegmentsForRegion: (
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ) => Array<{
+    startX: number;
+    startZ: number;
+    endX: number;
+    endZ: number;
+    width: number;
+  }>;
+  getFlatZonesForRegion: (
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ) => Array<{
+    centerX: number;
+    centerZ: number;
+    halfWidth: number;
+    halfDepth: number;
+    blendRadius: number;
+  }>;
+}
+
+export class GrassVisualManager implements QuadTreeListener {
+  private container: THREE.Group;
+  private getHeightAt: (x: number, z: number) => number;
+  private getRoadInfluence: (wx: number, wz: number) => number;
+  private isInFlatZone: (wx: number, wz: number) => boolean;
+  private getTerrainColorAt: (
+    wx: number,
+    wz: number,
+  ) => {
+    r: number;
+    g: number;
+    b: number;
+    grassWeight: number;
+    grassPlacement: number;
+    grassHeightScale: number;
+    tintR: number;
+    tintG: number;
+    tintB: number;
+    tintStrength: number;
+    nx: number;
+    ny: number;
+    nz: number;
+  };
+  private sunDirUniform: ReturnType<typeof uniform<THREE.Vector3>>;
+  private dayIntensityUniform: ReturnType<typeof uniform<number>>;
+  private playerPosUniform: ReturnType<typeof uniform<THREE.Vector3>>;
+  private waterThreshold: number;
+  private chunks = new Map<string, GrassChunk>();
+  private material: MeshStandardNodeMaterial;
+  private lodGeometries: THREE.BufferGeometry[];
+
+  private frustum = new THREE.Frustum();
+  private projScreenMatrix = new THREE.Matrix4();
+  private playerX = 0;
+  private playerZ = 0;
+
+  private pendingNodes: { node: TerrainQuadNode; lod?: number }[] = [];
+  private static readonly MAX_CHUNKS_PER_FRAME = 2;
+
+  private workerSetup: GrassWorkerSetup | null = null;
+  private workerInflight = new Set<string>();
+  private pendingLodSwap = new Map<
+    string,
+    { node: TerrainQuadNode; desiredLod: number }
+  >();
+  private destroyed = false;
+
+  constructor(
+    container: THREE.Group,
+    getHeightAt: (x: number, z: number) => number,
+    waterThreshold: number,
+    getRoadInfluence: (wx: number, wz: number) => number,
+    isInFlatZone: (wx: number, wz: number) => boolean,
+    getTerrainColorAt: (
+      wx: number,
+      wz: number,
+    ) => {
+      r: number;
+      g: number;
+      b: number;
+      grassWeight: number;
+      grassPlacement: number;
+      grassHeightScale: number;
+    },
+    workerSetup?: GrassWorkerSetup,
+  ) {
+    this.container = container;
+    this.getHeightAt = getHeightAt;
+    this.waterThreshold = waterThreshold;
+    this.getRoadInfluence = getRoadInfluence;
+    this.isInFlatZone = isInFlatZone;
+    this.getTerrainColorAt = getTerrainColorAt;
+    this.workerSetup = workerSetup ?? null;
+
+    this.lodGeometries = GRASS_CONFIG.LOD_TIERS.map((tier) =>
+      createClumpGeometry(tier.bladesPerClump, tier.bladeSegments),
+    );
+    this.material = this.createMaterial();
+
+    const pool = getGrassWorkerPool();
+    const workerStatus = pool ? "workers available" : "sync fallback";
+
+    const tierDescs = GRASS_CONFIG.LOD_TIERS.map((t, i) => {
+      const g = this.lodGeometries[i];
+      return (
+        `LOD${i}(${t.bladesPerClump}b/${t.bladeSegments}s, ` +
+        `${g.attributes.position.count}v, ${g.index!.count / 3}t, ` +
+        `<${t.maxDistance === Infinity ? "inf" : t.maxDistance}m, ` +
+        `×${t.spacingMul})`
+      );
+    });
+    console.log(
+      `[GrassVisualManager] ${tierDescs.length} LOD tiers | ` +
+        `spacing ${GRASS_CONFIG.CLUMP_SPACING}m | ${workerStatus} | ${tierDescs.join(" | ")}`,
+    );
+  }
+
+  // -- Public API -----------------------------------------------------------
+
+  setPlayerPosition(x: number, z: number): void {
+    this.playerX = x;
+    this.playerZ = z;
+  }
+
+  updateLighting(sunDir: THREE.Vector3): void {
+    this.sunDirUniform.value.copy(sunDir);
+  }
+
+  updateDayIntensity(val: number): void {
+    this.dayIntensityUniform.value = val;
+  }
+
+  update(playerX: number, playerZ: number, camera?: THREE.Camera): void {
+    this.playerX = playerX;
+    this.playerZ = playerZ;
+    this.playerPosUniform.value.set(playerX, 0, playerZ);
+
+    // Drain pending queue — dispatch to worker or build sync (fallback only)
+    let built = 0;
+    const pool = getGrassWorkerPool();
+    while (
+      this.pendingNodes.length > 0 &&
+      built < GrassVisualManager.MAX_CHUNKS_PER_FRAME
+    ) {
+      const { node, lod } = this.pendingNodes.shift()!;
+      const key = this.chunkKey(node);
+      if (this.chunks.has(key) || this.workerInflight.has(key)) continue;
+      if (pool && this.workerSetup) {
+        this.dispatchToWorker(node, key);
+      } else {
+        this.createChunkMesh(node, lod);
+        built++;
+      }
+    }
+
+    if (!camera || this.chunks.size === 0) return;
+
+    this.projScreenMatrix.multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse,
+    );
+    this.frustum.setFromProjectionMatrix(this.projScreenMatrix);
+
+    const tiers = GRASS_CONFIG.LOD_TIERS;
+    const hysteresis = GRASS_CONFIG.LOD_HYSTERESIS;
+
+    const maxDistSq =
+      GRASS_CONFIG.MAX_RENDER_DISTANCE * GRASS_CONFIG.MAX_RENDER_DISTANCE;
+    const pruneKeys: string[] = [];
+
+    for (const [key, chunk] of this.chunks) {
+      const dx = chunk.node.centerX - playerX;
+      const dz = chunk.node.centerZ - playerZ;
+      const distSq = dx * dx + dz * dz;
+
+      if (distSq > maxDistSq) {
+        pruneKeys.push(key);
+        chunk.mesh.visible = false;
+        continue;
+      }
+
+      chunk.mesh.visible = this.frustum.intersectsBox(chunk.box);
+      if (
+        !chunk.mesh.visible ||
+        built >= GrassVisualManager.MAX_CHUNKS_PER_FRAME
+      )
+        continue;
+
+      const dist = Math.sqrt(distSq);
+      const desiredLod = this.getLodLevel(chunk.node);
+
+      if (desiredLod !== chunk.lodLevel) {
+        const currentTier = tiers[chunk.lodLevel];
+        const boundary =
+          desiredLod < chunk.lodLevel
+            ? currentTier.maxDistance
+            : (tiers[desiredLod - 1]?.maxDistance ?? 0);
+        const threshold =
+          boundary *
+          (1 + (desiredLod < chunk.lodLevel ? -hysteresis : hysteresis));
+        const shouldSwitch =
+          desiredLod < chunk.lodLevel ? dist < threshold : dist > threshold;
+
+        if (shouldSwitch) {
+          const nodeKey = this.chunkKey(chunk.node);
+          const workerPool = getGrassWorkerPool();
+          if (workerPool && this.workerSetup) {
+            this.pendingLodSwap.set(nodeKey, {
+              node: chunk.node,
+              desiredLod,
+            });
+            if (!this.workerInflight.has(nodeKey)) {
+              this.dispatchLodSwap(chunk.node, nodeKey, desiredLod);
+            }
+          } else {
+            if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+            chunk.mesh.geometry.dispose();
+            this.chunks.delete(nodeKey);
+            this.createChunkMesh(chunk.node, desiredLod);
+            built++;
+          }
+        }
+      }
+    }
+
+    for (const key of pruneKeys) {
+      const chunk = this.chunks.get(key);
+      if (chunk) {
+        if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+        chunk.mesh.geometry.dispose();
+        this.chunks.delete(key);
+      }
+      this.workerInflight.delete(key);
+      this.pendingLodSwap.delete(key);
+    }
+  }
+
+  // -- QuadTreeListener -----------------------------------------------------
+
+  onNodeNeedsGeometry(node: TerrainQuadNode): void {
+    if (!node.isMaxDepth) return;
+    const dx = node.centerX - this.playerX;
+    const dz = node.centerZ - this.playerZ;
+    if (
+      dx * dx + dz * dz >
+      GRASS_CONFIG.MAX_RENDER_DISTANCE * GRASS_CONFIG.MAX_RENDER_DISTANCE
+    )
+      return;
+    const key = this.chunkKey(node);
+    if (this.chunks.has(key)) return;
+    if (this.workerInflight.has(key)) return;
+
+    const pool = getGrassWorkerPool();
+    if (pool && this.workerSetup) {
+      this.dispatchToWorker(node, key);
+    } else {
+      if (!this.pendingNodes.some((p) => p.node === node)) {
+        this.pendingNodes.push({ node });
+      }
+    }
+  }
+
+  private dispatchLodSwap(
+    node: TerrainQuadNode,
+    key: string,
+    desiredLod: number,
+  ): void {
+    const ws = this.workerSetup!;
+    const pool = getGrassWorkerPool()!;
+    const tier = GRASS_CONFIG.LOD_TIERS[desiredLod];
+
+    const half = node.halfSize;
+    const roadSegments = ws.getRoadSegmentsForRegion(
+      node.centerX - half,
+      node.centerZ - half,
+      node.centerX + half,
+      node.centerZ + half,
+    );
+    const flatZones = ws.getFlatZonesForRegion(
+      node.centerX - half,
+      node.centerZ - half,
+      node.centerX + half,
+      node.centerZ + half,
+    );
+
+    const input: GrassWorkerInput = {
+      type: "generateGrassInstances",
+      chunkKey: key,
+      centerX: node.centerX,
+      centerZ: node.centerZ,
+      size: node.size,
+      spacingMul: tier.spacingMul,
+      config: ws.terrainConfig,
+      seed: ws.seed,
+      biomeCenters: ws.biomeCenters,
+      biomes: ws.biomes,
+      grassSeed: GRASS_CONFIG.SEED,
+      clumpSpacing: GRASS_CONFIG.CLUMP_SPACING,
+      scaleMin: GRASS_CONFIG.SCALE_MIN,
+      scaleMax: GRASS_CONFIG.SCALE_MAX,
+      waterThreshold: this.waterThreshold,
+      grassConfigs: ws.grassConfigs,
+      shaderConstants: {
+        NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.NOISE_SCALE,
+        DISTORT_NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.DISTORT_NOISE_SCALE,
+        VARIATION_NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.VARIATION_NOISE_SCALE,
+        ROCK_DISTORT_STRENGTH: TERRAIN_SHADER_CONSTANTS.ROCK_DISTORT_STRENGTH,
+        HEIGHT_DISTORT_STRENGTH:
+          TERRAIN_SHADER_CONSTANTS.HEIGHT_DISTORT_STRENGTH,
+        DIRT_THRESHOLD: TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD,
+        SATURATION_BOOST: TERRAIN_SHADER_CONSTANTS.SATURATION_BOOST,
+      },
+      roadSegments,
+      roadBlendWidth: 0.5,
+      tileSize: ws.tileSize,
+      flatZones,
+    };
+
+    this.workerInflight.add(key);
+
+    pool
+      .execute(input)
+      .then((output: GrassWorkerOutput) => {
+        this.workerInflight.delete(key);
+        if (this.destroyed) return;
+
+        const latest = this.pendingLodSwap.get(key);
+        const finalLod = latest ? latest.desiredLod : desiredLod;
+        this.pendingLodSwap.delete(key);
+
+        const oldChunk = this.chunks.get(key);
+        if (oldChunk) {
+          if (oldChunk.mesh.parent) oldChunk.mesh.parent.remove(oldChunk.mesh);
+          oldChunk.mesh.geometry.dispose();
+          this.chunks.delete(key);
+        }
+
+        if (output.count === 0) return;
+        this.createChunkMeshFromWorkerData(node, output, finalLod);
+      })
+      .catch((err: unknown) => {
+        this.workerInflight.delete(key);
+        this.pendingLodSwap.delete(key);
+        if (this.destroyed) return;
+        console.warn(
+          `[GrassVisualManager] LOD swap worker failed for ${key}:`,
+          err,
+        );
+      });
+  }
+
+  private dispatchToWorker(node: TerrainQuadNode, key: string): void {
+    const ws = this.workerSetup!;
+    const pool = getGrassWorkerPool()!;
+    const lod = this.getLodLevel(node);
+    const tier = GRASS_CONFIG.LOD_TIERS[lod];
+
+    const half = node.halfSize;
+    const roadSegments = ws.getRoadSegmentsForRegion(
+      node.centerX - half,
+      node.centerZ - half,
+      node.centerX + half,
+      node.centerZ + half,
+    );
+    const flatZones = ws.getFlatZonesForRegion(
+      node.centerX - half,
+      node.centerZ - half,
+      node.centerX + half,
+      node.centerZ + half,
+    );
+
+    const input: GrassWorkerInput = {
+      type: "generateGrassInstances",
+      chunkKey: key,
+      centerX: node.centerX,
+      centerZ: node.centerZ,
+      size: node.size,
+      spacingMul: tier.spacingMul,
+      config: ws.terrainConfig,
+      seed: ws.seed,
+      biomeCenters: ws.biomeCenters,
+      biomes: ws.biomes,
+      grassSeed: GRASS_CONFIG.SEED,
+      clumpSpacing: GRASS_CONFIG.CLUMP_SPACING,
+      scaleMin: GRASS_CONFIG.SCALE_MIN,
+      scaleMax: GRASS_CONFIG.SCALE_MAX,
+      waterThreshold: this.waterThreshold,
+      grassConfigs: ws.grassConfigs,
+      shaderConstants: {
+        NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.NOISE_SCALE,
+        DISTORT_NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.DISTORT_NOISE_SCALE,
+        VARIATION_NOISE_SCALE: TERRAIN_SHADER_CONSTANTS.VARIATION_NOISE_SCALE,
+        ROCK_DISTORT_STRENGTH: TERRAIN_SHADER_CONSTANTS.ROCK_DISTORT_STRENGTH,
+        HEIGHT_DISTORT_STRENGTH:
+          TERRAIN_SHADER_CONSTANTS.HEIGHT_DISTORT_STRENGTH,
+        DIRT_THRESHOLD: TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD,
+        SATURATION_BOOST: TERRAIN_SHADER_CONSTANTS.SATURATION_BOOST,
+      },
+      roadSegments,
+      roadBlendWidth: 0.5,
+      tileSize: ws.tileSize,
+      flatZones,
+    };
+
+    this.workerInflight.add(key);
+
+    pool
+      .execute(input)
+      .then((output: GrassWorkerOutput) => {
+        this.workerInflight.delete(key);
+        if (this.destroyed) return;
+        if (this.chunks.has(key)) return;
+        if (output.count === 0) return;
+        this.createChunkMeshFromWorkerData(node, output, lod);
+      })
+      .catch((err: unknown) => {
+        this.workerInflight.delete(key);
+        if (this.destroyed) return;
+        console.warn(
+          `[GrassVisualManager] Worker failed for ${key}, falling back to sync:`,
+          err,
+        );
+        if (
+          !this.chunks.has(key) &&
+          !this.pendingNodes.some((p) => p.node === node)
+        ) {
+          this.pendingNodes.push({ node });
+        }
+      });
+  }
+
+  private createChunkMeshFromWorkerData(
+    node: TerrainQuadNode,
+    data: GrassWorkerOutput,
+    lodLevel: number,
+  ): void {
+    const key = data.chunkKey;
+    if (this.chunks.has(key)) return;
+    if (data.count === 0) return;
+
+    const geo = this.lodGeometries[lodLevel].clone();
+    geo.setAttribute(
+      "instanceOffset",
+      new THREE.InstancedBufferAttribute(data.offsets, 3),
+    );
+    geo.setAttribute(
+      "instanceRotScaleHash",
+      new THREE.InstancedBufferAttribute(data.rotScaleHash, 3),
+    );
+    setColorTintInterleaved(
+      geo,
+      data.groundColors,
+      data.grassTints,
+      data.count,
+    );
+    geo.setAttribute(
+      "instanceGroundNormal",
+      new THREE.InstancedBufferAttribute(data.groundNormals, 3),
+    );
+
+    const mesh = new THREE.InstancedMesh(geo, this.material, data.count);
+    mesh.position.set(node.centerX, 0, node.centerZ);
+    mesh.name = `GrassQT_${key}`;
+    mesh.frustumCulled = false;
+    mesh.receiveShadow = true;
+    mesh.castShadow = false;
+    mesh.userData = { type: "grass", walkable: false, clickable: false };
+
+    const identity = new THREE.Matrix4();
+    for (let i = 0; i < data.count; i++) {
+      mesh.setMatrixAt(i, identity);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+
+    const half = node.halfSize;
+    const box = new THREE.Box3(
+      new THREE.Vector3(node.centerX - half, -50, node.centerZ - half),
+      new THREE.Vector3(node.centerX + half, 200, node.centerZ + half),
+    );
+
+    this.container.add(mesh);
+    this.chunks.set(key, { nodeId: node.id, mesh, box, lodLevel, node });
+  }
+
+  onNodeDestroyGeometry(node: TerrainQuadNode): void {
+    const key = this.chunkKey(node);
+    const chunk = this.chunks.get(key);
+    if (chunk) {
+      if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+      chunk.mesh.geometry.dispose();
+      this.chunks.delete(key);
+    }
+    this.workerInflight.delete(key);
+    this.pendingLodSwap.delete(key);
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.pendingNodes.length = 0;
+    this.workerInflight.clear();
+    this.pendingLodSwap.clear();
+    terminateGrassWorkerPool();
+    for (const [, chunk] of this.chunks) {
+      if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+      chunk.mesh.geometry.dispose();
+    }
+    this.chunks.clear();
+    this.lodGeometries.forEach((g) => g.dispose());
+    if (this.material) this.material.dispose();
+    if (this.container.parent) this.container.parent.remove(this.container);
+  }
+
+  /**
+   * Destroy and recreate all grass chunks (e.g. after road data loads).
+   */
+  rebuildAllChunks(): void {
+    const nodes: TerrainQuadNode[] = [];
+    for (const chunk of this.chunks.values()) {
+      nodes.push(chunk.node);
+      if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+      chunk.mesh.geometry.dispose();
+    }
+    this.chunks.clear();
+    this.workerInflight.clear();
+    this.pendingLodSwap.clear();
+    for (const node of nodes) {
+      node.visualChunkKey = null;
+      if (!this.pendingNodes.some((p) => p.node === node)) {
+        this.pendingNodes.push({ node });
+      }
+    }
+  }
+
+  /**
+   * Invalidate grass chunks that overlap a world-space bounding box.
+   * Used when flat zones are registered/unregistered so grass regenerates
+   * with correct heights and placement.
+   */
+  invalidateRegion(
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ): void {
+    const toRebuild: TerrainQuadNode[] = [];
+    for (const [key, chunk] of this.chunks) {
+      const half = chunk.node.halfSize;
+      const cx = chunk.node.centerX;
+      const cz = chunk.node.centerZ;
+      if (
+        cx + half < minX ||
+        cx - half > maxX ||
+        cz + half < minZ ||
+        cz - half > maxZ
+      )
+        continue;
+      toRebuild.push(chunk.node);
+      if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+      chunk.mesh.geometry.dispose();
+      this.chunks.delete(key);
+      this.workerInflight.delete(key);
+      this.pendingLodSwap.delete(key);
+    }
+    for (const node of toRebuild) {
+      if (!this.pendingNodes.some((p) => p.node === node)) {
+        this.pendingNodes.push({ node });
+      }
+    }
+  }
+
+  // -- LOD helpers -----------------------------------------------------------
+
+  private getLodLevel(node: TerrainQuadNode): number {
+    const dx = node.centerX - this.playerX;
+    const dz = node.centerZ - this.playerZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const tiers = GRASS_CONFIG.LOD_TIERS;
+    for (let i = 0; i < tiers.length; i++) {
+      if (dist < tiers[i].maxDistance) return i;
+    }
+    return tiers.length - 1;
+  }
+
+  // -- Chunk mesh creation --------------------------------------------------
+
+  private createChunkMesh(node: TerrainQuadNode, lodLevel?: number): void {
+    const key = this.chunkKey(node);
+    if (this.chunks.has(key)) return;
+
+    const lod = lodLevel ?? this.getLodLevel(node);
+    const tier = GRASS_CONFIG.LOD_TIERS[lod];
+    const instanceData = this.generateInstanceData(node, tier.spacingMul);
+    if (!instanceData || instanceData.count === 0) return;
+
+    const geo = this.lodGeometries[lod].clone();
+    geo.setAttribute(
+      "instanceOffset",
+      new THREE.InstancedBufferAttribute(instanceData.offsets, 3),
+    );
+    geo.setAttribute(
+      "instanceRotScaleHash",
+      new THREE.InstancedBufferAttribute(instanceData.rotScaleHash, 3),
+    );
+    setColorTintInterleaved(
+      geo,
+      instanceData.groundColors,
+      instanceData.grassTints,
+      instanceData.count,
+    );
+    geo.setAttribute(
+      "instanceGroundNormal",
+      new THREE.InstancedBufferAttribute(instanceData.groundNormals, 3),
+    );
+
+    const mesh = new THREE.InstancedMesh(
+      geo,
+      this.material,
+      instanceData.count,
+    );
+    mesh.position.set(node.centerX, 0, node.centerZ);
+    mesh.name = `GrassQT_${key}`;
+    mesh.frustumCulled = false;
+    mesh.receiveShadow = true;
+    mesh.castShadow = false;
+    mesh.userData = { type: "grass", walkable: false, clickable: false };
+
+    const identity = new THREE.Matrix4();
+    for (let i = 0; i < instanceData.count; i++) {
+      mesh.setMatrixAt(i, identity);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+
+    const half = node.halfSize;
+    const box = new THREE.Box3(
+      new THREE.Vector3(node.centerX - half, -50, node.centerZ - half),
+      new THREE.Vector3(node.centerX + half, 200, node.centerZ + half),
+    );
+
+    this.container.add(mesh);
+    this.chunks.set(key, { nodeId: node.id, mesh, box, lodLevel: lod, node });
+  }
+
+  // -- Instance data generation ---------------------------------------------
+
+  private generateInstanceData(
+    node: TerrainQuadNode,
+    spacingMul = 1,
+  ): {
+    offsets: Float32Array;
+    rotScaleHash: Float32Array;
+    groundColors: Float32Array;
+    grassTints: Float32Array;
+    groundNormals: Float32Array;
+    count: number;
+  } | null {
+    const spacing = GRASS_CONFIG.CLUMP_SPACING * spacingMul;
+    const maxCount = Math.ceil((node.size * node.size) / (spacing * spacing));
+    const rng = mulberry32(
+      GRASS_CONFIG.SEED ^
+        ((node.centerX * 374761393 + node.centerZ * 668265263) | 0),
+    );
+
+    const offsets = new Float32Array(maxCount * 3);
+    const rotScaleHash = new Float32Array(maxCount * 3);
+    const groundColors = new Float32Array(maxCount * 3);
+    const grassTints = new Float32Array(maxCount * 4);
+    const groundNormals = new Float32Array(maxCount * 3);
+
+    let count = 0;
+
+    for (let i = 0; i < maxCount; i++) {
+      const lx = (rng() - 0.5) * node.size;
+      const lz = (rng() - 0.5) * node.size;
+      const clumpRng = rng();
+
+      const wx = node.centerX + lx;
+      const wz = node.centerZ + lz;
+      const ty = this.getHeightAt(wx, wz);
+
+      if (ty < this.waterThreshold + 0.1) continue;
+
+      if (this.isInFlatZone(wx, wz)) continue;
+
+      const roadInf = this.getRoadInfluence(wx, wz);
+      if (roadInf > 0.8) continue;
+
+      const {
+        r,
+        g,
+        b,
+        grassPlacement: rawGP,
+        grassHeightScale,
+        tintR,
+        tintG,
+        tintB,
+        tintStrength,
+        nx,
+        ny,
+        nz,
+      } = this.getTerrainColorAt(wx, wz);
+      const grassPlacement = Math.max(0, rawGP - roadInf);
+
+      if (grassPlacement <= 0) continue;
+      if (clumpRng > grassPlacement) continue;
+
+      offsets[count * 3] = lx;
+      offsets[count * 3 + 1] = ty;
+      offsets[count * 3 + 2] = lz;
+
+      const rotation = rng() * Math.PI * 2;
+      const scale =
+        (GRASS_CONFIG.SCALE_MIN +
+          clumpRng * (GRASS_CONFIG.SCALE_MAX - GRASS_CONFIG.SCALE_MIN)) *
+        grassHeightScale;
+      rotScaleHash[count * 3] = rotation;
+      rotScaleHash[count * 3 + 1] = scale;
+      rotScaleHash[count * 3 + 2] = clumpRng;
+
+      groundColors[count * 3] = r;
+      groundColors[count * 3 + 1] = g;
+      groundColors[count * 3 + 2] = b;
+
+      grassTints[count * 4] = tintR;
+      grassTints[count * 4 + 1] = tintG;
+      grassTints[count * 4 + 2] = tintB;
+      grassTints[count * 4 + 3] = tintStrength;
+
+      groundNormals[count * 3] = nx;
+      groundNormals[count * 3 + 1] = ny;
+      groundNormals[count * 3 + 2] = nz;
+
+      count++;
+    }
+
+    if (count === 0) return null;
+
+    return {
+      offsets: offsets.slice(0, count * 3),
+      rotScaleHash: rotScaleHash.slice(0, count * 3),
+      groundColors: groundColors.slice(0, count * 3),
+      grassTints: grassTints.slice(0, count * 4),
+      groundNormals: groundNormals.slice(0, count * 3),
+      count,
+    };
+  }
+
+  // -- TSL Material ---------------------------------------------------------
+
+  private createMaterial(): MeshStandardNodeMaterial {
+    const mat = new MeshStandardNodeMaterial();
+    mat.side = THREE.DoubleSide;
+    mat.transparent = false;
+    mat.depthWrite = true;
+    mat.roughness = 1.0;
+    mat.metalness = 0.0;
+    mat.fog = false;
+
+    const uWindSpeed = uniform(GRASS_CONFIG.WIND_SPEED);
+    const uWindStrength = uniform(GRASS_CONFIG.WIND_STRENGTH);
+    const uBladeHeight = uniform(GRASS_CONFIG.BLADE_HEIGHT_MAX);
+    this.sunDirUniform = uniform(
+      new THREE.Vector3(...SUN_LIGHT.DEFAULT_DIRECTION),
+    );
+    this.dayIntensityUniform = uniform(1.0);
+    this.playerPosUniform = uniform(new THREE.Vector3(0, 0, 0));
+
+    const uPlayerPos = this.playerPosUniform;
+    const uFadeStart = float(GRASS_CONFIG.FADE_START);
+    const uFadeEnd = float(GRASS_CONFIG.MAX_RENDER_DISTANCE);
+
+    mat.positionNode = Fn(() => {
+      const localPos = positionLocal.toVar("gp");
+
+      const offset = attribute("instanceOffset", "vec3");
+      const rsh = attribute("instanceRotScaleHash", "vec3");
+      const rot = rsh.x;
+      const scale = rsh.y;
+
+      const t = uv().y;
+
+      // Compute world-space XZ of the instance base for distance fade.
+      // offset is chunk-local; modelWorldMatrix translates by mesh.position (chunk center).
+      const worldBase = modelWorldMatrix.mul(
+        vec4(offset.x, float(0), offset.z, float(1.0)),
+      );
+      const toPlayer = sub(
+        vec3(worldBase.x, float(0), worldBase.z),
+        vec3(uPlayerPos.x, float(0), uPlayerPos.z),
+      );
+      const distSq = dot(toPlayer, toPlayer);
+      const dist = pow(distSq, float(0.5));
+      const fadeFactor = clamp(
+        sub(float(1.0), smoothstep(uFadeStart, uFadeEnd, dist)),
+        float(0.0),
+        float(1.0),
+      );
+
+      // Scale entire clump (with distance fade on Y)
+      localPos.x.assign(localPos.x.mul(scale));
+      localPos.y.assign(localPos.y.mul(scale).mul(fadeFactor));
+      localPos.z.assign(localPos.z.mul(scale));
+
+      // Rotate entire clump around Y — snapshot x/z first because TSL assign
+      // is sequential in WGSL (second assign would read the modified first).
+      const cosR = cos(rot);
+      const sinR = sin(rot);
+      const preRotX = localPos.x.toVar("preRotX");
+      const preRotZ = localPos.z.toVar("preRotZ");
+      localPos.x.assign(preRotX.mul(cosR).sub(preRotZ.mul(sinR)));
+      localPos.z.assign(preRotX.mul(sinR).add(preRotZ.mul(cosR)));
+
+      // Tilt grass to align with terrain slope (axis-angle rotation from Y-up to ground normal).
+      // Uses Rodrigues' rotation matrix with axis = cross((0,1,0), N) = (nz, 0, -nx).
+      // The 1/(1+ny) substitution avoids acos/sin and has no singularity for upward-facing normals.
+      const gn = attribute("instanceGroundNormal", "vec3");
+      const nx = gn.x;
+      const ny = gn.y;
+      const nz = gn.z;
+      const invOnePlusNy = float(1.0).div(ny.add(float(1.0)));
+      const nxnzTerm = nx.mul(nz).mul(invOnePlusNy).negate();
+
+      const preTiltX = localPos.x.toVar("preTiltX");
+      const preTiltY = localPos.y.toVar("preTiltY");
+      const preTiltZ = localPos.z.toVar("preTiltZ");
+
+      localPos.x.assign(
+        preTiltX
+          .mul(ny.add(nz.mul(nz).mul(invOnePlusNy)))
+          .add(preTiltY.mul(nx))
+          .add(preTiltZ.mul(nxnzTerm)),
+      );
+      localPos.y.assign(
+        preTiltX
+          .mul(nx.negate())
+          .add(preTiltY.mul(ny))
+          .add(preTiltZ.mul(nz.negate())),
+      );
+      localPos.z.assign(
+        preTiltX
+          .mul(nxnzTerm)
+          .add(preTiltY.mul(nz))
+          .add(preTiltZ.mul(ny.add(nx.mul(nx).mul(invOnePlusNy)))),
+      );
+
+      // Wind: displace tips via sine waves keyed to world-space offset
+      const wt = time.mul(uWindSpeed);
+      const bendFactor = pow(t, float(1.8));
+      localPos.x.addAssign(
+        sin(wt.add(offset.x.mul(0.35)).add(offset.z.mul(0.12)))
+          .mul(uWindStrength)
+          .mul(bendFactor)
+          .mul(uBladeHeight),
+      );
+      localPos.z.addAssign(
+        sin(
+          wt.mul(0.67).add(offset.x.mul(0.18)).add(offset.z.mul(0.28)).add(2.0),
+        )
+          .mul(uWindStrength)
+          .mul(0.55)
+          .mul(bendFactor)
+          .mul(uBladeHeight),
+      );
+
+      // Translate to instance world position (chunk-local XZ + baked terrainY)
+      localPos.x.addAssign(offset.x);
+      localPos.y.addAssign(offset.y);
+      localPos.z.addAssign(offset.z);
+
+      return localPos;
+    })();
+
+    const uSunDir = this.sunDirUniform;
+    const terrainNormal = attribute("instanceGroundNormal", "vec3");
+
+    // Override PBR surface normal to terrain normal (world→view transform).
+    // mat4.transformDirection(vec3) is left-multiply: matrixWorldInverse * normal
+    // = correct world→view.  With normalNode set, PBR's faceDirection flip is
+    // bypassed so both sides of a blade get the same terrain N·L.
+    mat.normalNode = cameraViewMatrix.transformDirection(terrainNormal);
+
+    mat.colorNode = Fn(() => {
+      const groundCol = attribute("instanceGroundColor", "vec3");
+      const tint = attribute("instanceGrassTint", "vec4");
+      const tintCol = tint.xyz;
+      const tintStr = tint.w;
+      const t = uv().y;
+      const tintedCol = mix(groundCol, tintCol, tintStr);
+      const tipCol = mix(
+        groundCol,
+        tintedCol,
+        smoothstep(float(0.0), float(1.0), t),
+      ).mul(1.4);
+      const bladeCol = mix(
+        groundCol,
+        tipCol,
+        smoothstep(float(0.0), float(1.0), t),
+      );
+      return applyAnimeShade(bladeCol, terrainNormal, uSunDir);
+    })();
+
+    mat.outputNode = Fn(() => {
+      return vec4(output.rgb, output.a);
+    })();
+
+    return mat;
+  }
+
+  // -- Helpers --------------------------------------------------------------
+
+  private chunkKey(node: TerrainQuadNode): string {
+    return `gq_${node.id}_d${node.depth}_${node.centerX}_${node.centerZ}`;
+  }
+}

@@ -596,7 +596,9 @@ describe("BankPanel", () => {
       fireEvent.click(screen.getByTitle("View Worn Equipment"));
 
       // Click on equipped helmet
-      const helmetSlot = screen.getByTitle(/Iron Helmet - Click to deposit/i);
+      const helmetSlot = screen.getByLabelText(
+        "Iron Helmet equipped in Head slot",
+      );
       fireEvent.click(helmetSlot);
 
       // The actual payload uses "slot" not "equipSlot"

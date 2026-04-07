@@ -48,7 +48,11 @@ import {
 import { clearMapProviderCache } from "../providers/mapProvider.js";
 import { getPersonalityTraits } from "../providers/personalityProvider.js";
 import { getLastDesireCandidates } from "../managers/goal-progression-planner.js";
-import { SCRIPTED_AUTONOMY_CONFIG } from "../config/constants.js";
+import {
+  LOCAL_DEV_HYPERSCAPE_API_BASE_URL,
+  PRODUCTION_HYPERSCAPE_WS_URL,
+  SCRIPTED_AUTONOMY_CONFIG,
+} from "../config/constants.js";
 import {
   resolveLocation,
   parseLocationFromMessage,
@@ -235,11 +239,68 @@ function getRuntimeSettingBoolean(
   return /^(1|true|yes|on)$/i.test(String(value).trim());
 }
 
-function toApiBaseUrl(wsUrl: string): string {
-  return wsUrl
-    .replace(/^wss:/, "https:")
-    .replace(/^ws:/, "http:")
-    .replace(/\/ws$/, "");
+function parsePort(rawValue: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(rawValue ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function resolveDefaultHyperscapePorts(): { httpPort: number; wsPort: number } {
+  const httpPort = parsePort(process.env.PORT, 5555);
+  const uwsEnabled = process.env.UWS_ENABLED !== "false";
+  const uwsPort = parsePort(process.env.UWS_PORT, 5556);
+  return {
+    httpPort,
+    wsPort: uwsEnabled ? uwsPort : httpPort,
+  };
+}
+
+export function resolveDefaultHyperscapeServerUrl(): string {
+  const explicitServerUrl =
+    process.env.HYPERSCAPE_SERVER_URL?.trim() ||
+    process.env.PUBLIC_WS_URL?.trim();
+  if (explicitServerUrl) {
+    return explicitServerUrl;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return PRODUCTION_HYPERSCAPE_WS_URL;
+  }
+
+  const { wsPort } = resolveDefaultHyperscapePorts();
+  return `ws://localhost:${wsPort}/ws`;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
+  );
+}
+
+export function resolveHyperscapeApiBaseUrl(wsUrl: string): string {
+  try {
+    const parsed = new URL(wsUrl);
+    parsed.protocol = parsed.protocol === "wss:" ? "https:" : "http:";
+    parsed.search = "";
+    parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/\/ws$/, "") || "/";
+
+    const { httpPort, wsPort } = resolveDefaultHyperscapePorts();
+    if (
+      isLoopbackHostname(parsed.hostname) &&
+      parsed.port === String(wsPort) &&
+      httpPort !== wsPort
+    ) {
+      parsed.port = String(httpPort);
+    }
+
+    const serialized = parsed.toString();
+    return serialized.endsWith("/") ? serialized.slice(0, -1) : serialized;
+  } catch {
+    return wsUrl
+      .replace(/^wss:/, "https:")
+      .replace(/^ws:/, "http:")
+      .replace(/\/ws$/, "");
+  }
 }
 
 let loggedPacketIdFallbackWarning = false;
@@ -322,8 +383,10 @@ export class HyperscapeService
   >;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private autoReconnect: boolean = true;
-  private serverUrl: string = "ws://localhost:5555/ws";
-  private apiBaseUrl: string = "http://localhost:5555";
+  private serverUrl: string = resolveDefaultHyperscapeServerUrl();
+  private apiBaseUrl: string = resolveHyperscapeApiBaseUrl(
+    resolveDefaultHyperscapeServerUrl(),
+  );
   private liveKit: AgentLiveKit | null = null;
   private authToken: string | undefined;
   private privyUserId: string | undefined;
@@ -559,7 +622,8 @@ export class HyperscapeService
     service.serverUrl =
       runtimeServerUrl ||
       process.env.HYPERSCAPE_SERVER_URL ||
-      "ws://localhost:5555/ws";
+      process.env.PUBLIC_WS_URL ||
+      resolveDefaultHyperscapeServerUrl();
 
     const runtimeApiUrl = getRuntimeSettingString(
       runtime,
@@ -568,7 +632,7 @@ export class HyperscapeService
     service.apiBaseUrl =
       runtimeApiUrl ||
       process.env.HYPERSCAPE_API_URL ||
-      toApiBaseUrl(service.serverUrl);
+      resolveHyperscapeApiBaseUrl(service.serverUrl);
 
     const runtimeAutoReconnect = getRuntimeSettingString(
       runtime,

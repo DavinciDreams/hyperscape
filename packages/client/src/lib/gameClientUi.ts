@@ -1,5 +1,3 @@
-export function resolveGameClientUiDisplay(
-  visible: boolean,
-): "block" | "none" {
+export function resolveGameClientUiDisplay(visible: boolean): "block" | "none" {
   return visible ? "block" : "none";
 }

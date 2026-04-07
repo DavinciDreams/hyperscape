@@ -334,6 +334,25 @@ export interface QuadTreeListener {
 }
 
 /**
+ * Forwards quad-tree events to multiple listeners (e.g. terrain + water).
+ */
+export class CompositeQuadTreeListener implements QuadTreeListener {
+  private listeners: QuadTreeListener[] = [];
+
+  add(listener: QuadTreeListener): void {
+    this.listeners.push(listener);
+  }
+
+  onNodeNeedsGeometry(node: TerrainQuadNode): void {
+    for (const l of this.listeners) l.onNodeNeedsGeometry(node);
+  }
+
+  onNodeDestroyGeometry(node: TerrainQuadNode): void {
+    for (const l of this.listeners) l.onNodeDestroyGeometry(node);
+  }
+}
+
+/**
  * Manages the top-level quad-tree: root chunk grid, split/unsplit,
  * neighbor resolution, and player tracking.
  */

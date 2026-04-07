@@ -47,8 +47,9 @@ import { createRng, type RNG } from "../../math/Random.js";
 // CONSTANTS
 // ============================================================================
 
-/** Default water level (Y coordinate) */
-const DEFAULT_WATER_LEVEL = 5.0;
+import { GAME_WATER_LEVEL } from "../../terrain/constants";
+
+const DEFAULT_WATER_LEVEL = GAME_WATER_LEVEL;
 
 /** Default water floor depth below water level */
 const DEFAULT_WATER_FLOOR_DEPTH = 3.0;

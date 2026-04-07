@@ -5,13 +5,15 @@
 #
 # Issues this Dockerfile works around:
 #   1. better-sqlite3 — node-gyp fails under QEMU (stripped before install)
-#   2. Bun 1.3 workspace links — Docker COPY flattens symlinks; recreated manually
-#   3. Bun 1.3 per-package node_modules — not hoisted to root; copied explicitly
+#   2. Bun workspace links — Docker COPY flattens symlinks; recreated manually
+#   3. Bun per-package node_modules — not hoisted to root; copied explicitly
 #   4. procgen tsc — type errors cause partial emit; build continues with || true
 
 # ─── Builder ────────────────────────────────────────────────────────────────
 
-FROM oven/bun:1.3.10-debian AS builder
+FROM node:22-bookworm-slim AS node-build-tools
+
+FROM oven/bun:1.1.38-debian AS builder
 
 RUN apt-get update && apt-get install -y \
     python3 make g++ pkg-config \
@@ -24,6 +26,11 @@ WORKDIR /app
 ENV CI=true \
     SKIP_ASSETS=true \
     HYPERSCAPE_SKIP_BROWSER_INSTALL=true
+
+# Vite 8 requires Node 20.19+ or 22.12+. Bun 1.1.38 reports Node 22.6.0 when
+# running Vite-backed scripts, so copy in a current real Node binary for those
+# build steps while keeping Bun pinned for installs and the rest of the build.
+COPY --from=node-build-tools /usr/local/bin/node /usr/local/bin/node
 
 # Root manifests.
 COPY package.json bun.lock turbo.json tsconfig.json ./
@@ -66,11 +73,20 @@ RUN bun -e " \
     fs.writeFileSync(f, JSON.stringify(p, null, 2)); \
   }"
 
-RUN bun install --trust
+# Match CI's stable install mode. `--trust` can hang in container builds,
+# while the frozen install path already passes in CI.
+RUN bun install --frozen-lockfile
 
 # Bun may hoist workspace deps without materializing per-package node_modules.
-# Create the runtime COPY sources explicitly so missing dirs don't break builds.
-RUN mkdir -p packages/web3/node_modules packages/client/node_modules
+# Create every runtime COPY source explicitly so missing dirs don't break builds.
+RUN mkdir -p \
+    packages/server/node_modules \
+    packages/shared/node_modules \
+    packages/procgen/node_modules \
+    packages/impostors/node_modules \
+    packages/plugin-hyperscape/node_modules \
+    packages/web3/node_modules \
+    packages/client/node_modules
 
 # Download game asset manifests (bypass CDN reliance on boot).
 RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
@@ -78,17 +94,23 @@ RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
 # Build workspace packages in dependency order.
 RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/decimation && bun run build && \
-    cd /app/packages/impostors && bun run build && \
+    cd /app/packages/impostors && node ../../node_modules/typescript/bin/tsc --project tsconfig.build.json && \
+    node ../../node_modules/vite/bin/vite.js build --config vite.lib.config.ts && \
     cd /app/packages/procgen && (bun run build || true) && \
     cd /app/packages/shared && bun run build && \
     cd /app/packages/plugin-hyperscape && bun run build && \
     cd /app/packages/web3 && bun run build && \
     cd /app/packages/server && bun run build && \
-    cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' bun run build:cf
+    cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' \
+    node ../../node_modules/vite/bin/vite.js build
 
 # ─── Runtime ────────────────────────────────────────────────────────────────
+#
+# The production server must run under real Node.js, not Bun. The bundled
+# server loads uWebSockets.js native bindings, which depend on Node's N-API
+# and fail under Bun's `node` compatibility shim.
 
-FROM oven/bun:1.3.10-debian AS runtime
+FROM node:22-trixie-slim AS runtime
 
 RUN apt-get update && apt-get install -y \
     libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
@@ -151,6 +173,7 @@ COPY --from=builder /app/packages/shared/build          ./packages/shared/build
 COPY --from=builder /app/packages/plugin-hyperscape/dist ./packages/plugin-hyperscape/dist
 COPY --from=builder /app/packages/web3/dist             ./packages/web3/dist
 COPY --from=builder /app/packages/server/dist           ./packages/server/dist
+COPY --from=builder /app/packages/server/scripts        ./packages/server/scripts
 COPY --from=builder /app/packages/server/src            ./packages/server/src
 COPY --from=builder /app/packages/server/world          ./packages/server/world
 COPY --from=builder /app/packages/client/dist           ./packages/client/dist
@@ -162,4 +185,4 @@ EXPOSE 5555
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
     CMD curl -fsS http://localhost:${PORT:-5555}/status >/dev/null || exit 1
 
-CMD ["bun", "--preload", "/app/packages/server/src/shared/polyfills.ts", "/app/packages/server/dist/index.js"]
+CMD ["node", "--import", "/app/packages/server/scripts/register-hooks.mjs", "/app/packages/server/dist/index.js"]

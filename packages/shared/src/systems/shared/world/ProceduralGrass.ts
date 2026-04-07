@@ -26,21 +26,15 @@
 /**
  * ProceduralGrass.ts - GPU Grass System
  *
- * Key architecture:
- * - SpriteNodeMaterial for billboard grass
- * - Two-buffer SSBO (vec4 + float) with bit-packed data
- * - Visibility NOT used for opacity/scale (only for offscreen culling)
- * - Wind stored as vec2 displacement
- * - Heightmap Y offset integration with terrain system
+ * LOD0 architecture (near-player blades):
+ * - Single THREE.Mesh with ~78K triangles (one per blade)
+ * - MeshBasicNodeMaterial with TSL positionNode/colorNode
+ * - Toroidal mod() wrapping centered on player position
+ * - Heightmap sampling, billboard rotation, wind, distance fade all in vertex shader
+ * - Zero compute shaders, zero SSBO — one draw call
  *
- * **PERFORMANCE OPTIMIZATIONS:**
- * - Heightmap generation uses chunked async processing (no main thread blocking)
- * - Compute shaders pre-initialized during load (no first-frame spike)
- * - All heavy work done before gameplay starts
- *
- * **RELATED MODULES:**
- * - For standalone grass generation (Asset Forge, viewers), see @hyperscape/procgen GrassGen module
- * - GrassGen provides simpler grass geometry/materials without SSBO compute integration
+ * LOD1 architecture (far-field tiles):
+ * - InstancedMesh with GPU-driven tile positioning/culling in vertex shader
  *
  * @module ProceduralGrass
  */
@@ -55,6 +49,7 @@ import THREE, {
   vertexColor,
   sin,
   cos,
+  atan,
   mix,
   uv,
   floor,
@@ -84,8 +79,9 @@ import THREE, {
   length,
   positionLocal,
   Loop,
+  attribute,
 } from "../../../extras/three/three";
-import { MeshBasicNodeMaterial, SpriteNodeMaterial } from "three/webgpu";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { System } from "../infrastructure/System";
 import type { World } from "../../../types";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
@@ -150,11 +146,13 @@ function shouldYield(startTime: number, budgetMs = 8): boolean {
 // ============================================================================
 
 // LOD0: Individual grass blades (near player)
+// Default uses MEDIUM preset (~78K blades) for reasonable performance.
+// HIGH (~166K) was causing GPU bottleneck with per-frame compute shaders.
 const getConfig = () => {
-  const BLADE_WIDTH = 0.12; // Thicker for stylized look (was 0.08)
-  const BLADE_HEIGHT = 0.6; // Taller for Zelda feel (was 0.25)
-  const TILE_SIZE = 16; // 8m radius
-  const BLADES_PER_SIDE = 408; // ~166k blades (2x thicker near grass)
+  const BLADE_WIDTH = 0.12;
+  const BLADE_HEIGHT = 0.6;
+  const TILE_SIZE = 60; // 30m radius — large enough for 3rd-person camera offset
+  const BLADES_PER_SIDE = 350; // ~122K blades, spacing=0.17m (~34 blades/m²)
 
   return {
     BLADE_WIDTH,
@@ -166,7 +164,7 @@ const getConfig = () => {
     COUNT: BLADES_PER_SIDE * BLADES_PER_SIDE,
     SPACING: TILE_SIZE / BLADES_PER_SIDE,
     WORKGROUP_SIZE: 256,
-    SEGMENTS: 4,
+    SEGMENTS: 3, // MEDIUM: 3 segments (was 4 for HIGH)
   };
 };
 
@@ -174,31 +172,30 @@ const config = getConfig();
 
 /** Quality presets for different devices */
 export enum GrassQuality {
-  LOW = "low", // Mobile: ~40K blades, 20m range
-  MEDIUM = "medium", // Tablet: ~78K blades, 25m range
-  HIGH = "high", // Desktop: ~166K blades, full range
+  LOW = "low", // Mobile: ~40K blades, 40m field
+  MEDIUM = "medium", // Default: ~122K blades, 60m field
+  HIGH = "high", // Desktop: ~202K blades, 80m field
 }
 
 const QUALITY_PRESETS: Record<
   GrassQuality,
   { bladesPerSide: number; tileSize: number; segments: number }
 > = {
-  [GrassQuality.LOW]: { bladesPerSide: 200, tileSize: 10, segments: 2 },
-  [GrassQuality.MEDIUM]: { bladesPerSide: 280, tileSize: 12, segments: 3 },
-  [GrassQuality.HIGH]: { bladesPerSide: 408, tileSize: 16, segments: 4 },
+  [GrassQuality.LOW]: { bladesPerSide: 200, tileSize: 40, segments: 2 },
+  [GrassQuality.MEDIUM]: { bladesPerSide: 350, tileSize: 60, segments: 3 },
+  [GrassQuality.HIGH]: { bladesPerSide: 450, tileSize: 80, segments: 4 },
 };
 
 // Grass tile settings (matches procgen viewer defaults)
-// LOD TRANSITION DIAGRAM (complementary dither crossfade):
+// LOD TRANSITION DIAGRAM (LOD0 uses player distance, LOD1 uses camera distance):
 // ┌─────────────────────────────────────────────────────────────────────────┐
-// │  LOD0 (blades)    ████████████████████░░░░░░                            │
-// │                   0m                 10m   13m                          │
+// │  LOD0 (blades)    ████████████████████████████░░░░░░                    │
+// │  (from player)    0m                        25m  28m                    │
 // │                                                                         │
-// │  LOD1 (tiles)           ░░░░░░░░████████████████████████████████░░░░░░  │
-// │                         8m    13m                              40m  50m │
+// │  LOD1 (tiles)              ░░░░░░░████████████████████████████░░░░░░    │
+// │  (from camera)             20m  27m                          40m  50m   │
 // └─────────────────────────────────────────────────────────────────────────┘
-// ░ = heavy dither fade zone, █ = full visibility
-// LOD1 fade-in (8-13m) overlaps LOD0 fade-out (10-13m) for seamless crossfade
+// ░ = fade zone, █ = full visibility
 const GRASS_TILE_SETTINGS = {
   TILE_SIZE: 1.0,
   DENSITY: 64, // Reduced from 128 for perf
@@ -212,13 +209,13 @@ const GRASS_TILE_SETTINGS = {
   CLUMP_SPREAD: 0.04,
   CLUMP_HEIGHT_VARIATION: 0.4,
   CLUMP_WIDTH_VARIATION: 0.2,
-  // LOD0 (blade grass): 0-13m, fade 10-13m
-  LOD0_FADE_START: 10,
-  LOD0_FADE_END: 13,
-  // LOD1 (instanced tiles): 8-50m
-  // Fade in 8-13m overlaps with LOD0 fade-out for seamless crossfade
-  LOD1_FADE_IN_START: 8,
-  LOD1_FADE_IN_END: 13,
+  // LOD0 (blade grass): 0-28m from player, fade 25-28m
+  LOD0_FADE_START: 25,
+  LOD0_FADE_END: 28,
+  // LOD1 (instanced tiles): 20-50m
+  // Fade in 20-27m overlaps with LOD0 fade-out for seamless crossfade
+  LOD1_FADE_IN_START: 20,
+  LOD1_FADE_IN_END: 27,
   LOD1_FADE_OUT_START: 40,
   LOD1_FADE_OUT_END: 50,
   // Grid sizes
@@ -298,17 +295,15 @@ const uniforms = {
   uWindColorStrength: uniform(0.7), // Strong lighter crests in wind
   uBaseWindShade: uniform(0.5), // Wind darkening
   uBaseShadeHeight: uniform(1.0),
-  // Stochastic distance culling - extends grass rendering distance
-  // Works WITH fade: grass gradually thins AND fades at the same time
-  uR0: uniform(10), // Full density within 10m
-  uR1: uniform(13), // Thin to minimum by 13m (3m transition zone)
-  uPMin: uniform(0.2), // Heavy dither at edge for visible effect
-  // Distance fade - overlaps with stochastic culling for natural falloff
-  // Matches LOD1 fade-in (8-13m) for seamless crossfade
-  uFadeStart: uniform(10), // Start fading at 10m
-  uFadeEnd: uniform(13), // Fully faded by 13m
-  // Camera forward bias - extends grass in view direction
-  uForwardBias: uniform(15), // More grass in front of camera
+  // Stochastic distance culling - thins grass at tile edges
+  // Field is 60m (±30m). Fade uses PLAYER distance, not camera.
+  uR0: uniform(22), // Full density within 22m of player
+  uR1: uniform(27), // Thin to minimum by 27m from player
+  uPMin: uniform(0.2),
+  // Distance fade from player (not camera) — collapse at wrapping edge
+  uFadeStart: uniform(25), // Start fading at 25m from player
+  uFadeEnd: uniform(28), // Fully faded by 28m (before 30m wrap edge)
+  uForwardBias: uniform(10),
   // Rotation
   uBaseBending: uniform(3.0), // More bending (was 2.0)
   // Bottom fade - dither grass base into ground (0.3 UV = 0.15m on 0.5m blade)
@@ -359,21 +354,8 @@ const HEIGHTMAP_CONFIG = {
 } as const;
 
 // ============================================================================
-// GRASS SSBO - Three-buffer structure
+// HEIGHTMAP TEXTURE NODE
 // ============================================================================
-// Buffer1 (vec4):
-//   x -> offsetX (local to player)
-//   y -> offsetZ (local to player)
-//   z -> 0/12 windX - 12/12 windZ
-//   w -> 0/8 current scale - 8/8 original scale - 16/1 shadow - 17/1 visibility - 18/6 wind noise factor
-//
-// Buffer2 (float):
-//   0/4 position based noise
-//
-// Buffer3 (float): HYPERSCAPE ADDITION
-//   heightmapY - terrain height at this blade's world position
-
-type InstancedArrayBuffer = ReturnType<typeof instancedArray>;
 
 // Heightmap texture node for compute shader
 let heightmapTextureNode: ReturnType<typeof texture> | null = null;
@@ -664,970 +646,305 @@ bayerTexture.magFilter = THREE.NearestFilter;
 bayerTexture.needsUpdate = true;
 const bayerTextureNode = texture(bayerTexture);
 
-class GrassSsbo {
-  private buffer1: InstancedArrayBuffer;
-  private buffer2: InstancedArrayBuffer;
-  private buffer3: InstancedArrayBuffer; // heightmapY
-  private buffer4: InstancedArrayBuffer; // static visibility (0=culled, 1=visible)
+// ============================================================================
+// SIMPLE GRASS LOD0 - Single mesh with mod() wrapping in vertex shader
+// Replaces GrassSsbo (3 compute shaders) + GrassMaterial (SpriteNodeMaterial)
+// Inspired by infinite-world-master and folio-2025-main
+// ============================================================================
 
-  // Compute shaders - initialized in constructor after buffers
-  computeInit: any;
-  computeStatic: any;
-  computeUpdate: any;
+/**
+ * Build a non-indexed triangle mesh: one triangle per blade, gridSize^2 blades.
+ * Attributes:
+ *   position (vec3)      - blade vertex offsets (-halfW,0,0), (0,1,0), (+halfW,0,0) normalised
+ *   center   (vec2)      - grid center XZ (same for all 3 verts of a blade)
+ *   aHeightRandom (float) - per-blade random 0.6-1.0 (same for all 3 verts)
+ */
+function createSimpleGrassGeometry(): THREE.BufferGeometry {
+  const gridSize = config.BLADES_PER_SIDE;
+  const fieldSize = config.TILE_SIZE;
+  const bladeCount = gridSize * gridSize;
+  const vertexCount = bladeCount * 3;
+  const cellSize = fieldSize / gridSize;
 
-  // Track initialization state
-  private _initialized = false;
+  const positions = new Float32Array(vertexCount * 3);
+  const centers = new Float32Array(vertexCount * 2);
+  const heightRandoms = new Float32Array(vertexCount);
 
-  constructor() {
-    // Create buffers FIRST
-    this.buffer1 = instancedArray(config.COUNT, "vec4");
-    this.buffer2 = instancedArray(config.COUNT, "float");
-    this.buffer3 = instancedArray(config.COUNT, "float");
-    this.buffer4 = instancedArray(config.COUNT, "float"); // Static visibility cache
+  let seed = 12345;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
 
-    // Then create compute shaders that reference the buffers
-    this.computeInit = this.createComputeInit();
-    this.computeStatic = this.createComputeStatic();
-    this.computeUpdate = this.createComputeUpdate();
+  const halfField = fieldSize * 0.5;
+  let vi = 0;
+  for (let row = 0; row < gridSize; row++) {
+    for (let col = 0; col < gridSize; col++) {
+      const cx =
+        (col + 0.5) * cellSize - halfField + (rng() - 0.5) * cellSize * 0.8;
+      const cz =
+        (row + 0.5) * cellSize - halfField + (rng() - 0.5) * cellSize * 0.8;
+      const hRand = 0.6 + rng() * 0.4;
 
-    // NOTE: We DO NOT use onInit callback here anymore!
-    // This caused first-frame spikes because computeInit ran during gameplay.
-    // Instead, call runInitialization() explicitly during loading.
+      // Vertex 0 : base-left  (-1, 0, 0)
+      positions[vi * 3] = -1;
+      positions[vi * 3 + 1] = 0;
+      positions[vi * 3 + 2] = 0;
+      centers[vi * 2] = cx;
+      centers[vi * 2 + 1] = cz;
+      heightRandoms[vi] = hRand;
+      vi++;
+
+      // Vertex 1 : tip        ( 0, 1, 0)
+      positions[vi * 3] = 0;
+      positions[vi * 3 + 1] = 1;
+      positions[vi * 3 + 2] = 0;
+      centers[vi * 2] = cx;
+      centers[vi * 2 + 1] = cz;
+      heightRandoms[vi] = hRand;
+      vi++;
+
+      // Vertex 2 : base-right (+1, 0, 0)
+      positions[vi * 3] = 1;
+      positions[vi * 3 + 1] = 0;
+      positions[vi * 3 + 2] = 0;
+      centers[vi * 2] = cx;
+      centers[vi * 2 + 1] = cz;
+      heightRandoms[vi] = hRand;
+      vi++;
+    }
   }
 
-  /**
-   * Run compute initialization explicitly during loading phase.
-   * This avoids first-frame spikes by pre-running heavy compute work.
-   * @returns Promise that resolves when initialization is complete
-   */
-  async runInitialization(renderer: THREE.WebGPURenderer): Promise<void> {
-    if (this._initialized) return;
-
-    console.log("[ProceduralGrass] Running SSBO compute initialization...");
-    const startTime = performance.now();
-
-    // Run compute init - this populates all grass blade positions
-    await renderer.computeAsync(this.computeInit);
-
-    this._initialized = true;
-    console.log(
-      `[ProceduralGrass] SSBO init complete: ${(performance.now() - startTime).toFixed(1)}ms`,
-    );
-  }
-
-  get isInitialized(): boolean {
-    return this._initialized;
-  }
-
-  get computeBuffer1(): InstancedArrayBuffer {
-    return this.buffer1;
-  }
-
-  get computeBuffer2(): InstancedArrayBuffer {
-    return this.buffer2;
-  }
-
-  get computeBuffer3(): InstancedArrayBuffer {
-    return this.buffer3;
-  }
-
-  get computeBuffer4(): InstancedArrayBuffer {
-    return this.buffer4;
-  }
-
-  // Unpacking functions
-  getWind = Fn(([data = vec4(0)]) => {
-    const x = tslUtils.unpackUnits(data.z, 0, 12, -2, 2);
-    const z = tslUtils.unpackUnits(data.z, 12, 12, -2, 2);
-    return vec2(x, z);
-  });
-
-  getScale = Fn(([data = vec4(0)]) => {
-    return tslUtils.unpackUnits(
-      data.w,
-      0,
-      8,
-      uniforms.uTrailMinScale,
-      uniforms.uBladeMaxScale,
-    );
-  });
-
-  getOriginalScale = Fn(([data = vec4(0)]) => {
-    return tslUtils.unpackUnits(
-      data.w,
-      8,
-      8,
-      uniforms.uBladeMinScale,
-      uniforms.uBladeMaxScale,
-    );
-  });
-
-  getVisibility = Fn(([data = vec4(0)]) => {
-    return tslUtils.unpackFlag(data.w, 17);
-  });
-
-  getWindNoise = Fn(([data = vec4(0)]) => {
-    return tslUtils.unpackUnit(data.w, 18, 6);
-  });
-
-  getPositionNoise = Fn(([data = float(0)]) => {
-    return tslUtils.unpackUnit(data, 0, 4);
-  });
-
-  // Packing functions
-  private setWind = Fn(([data = vec4(0), value = vec2(0)]) => {
-    data.z = tslUtils.packUnits(data.z, 0, 12, value.x, -2, 2);
-    data.z = tslUtils.packUnits(data.z, 12, 12, value.y, -2, 2);
-    return data;
-  });
-
-  private setScale = Fn(([data = vec4(0), value = float(0)]) => {
-    data.w = tslUtils.packUnits(
-      data.w,
-      0,
-      8,
-      value,
-      uniforms.uTrailMinScale,
-      uniforms.uBladeMaxScale,
-    );
-    return data;
-  });
-
-  private setOriginalScale = Fn(([data = vec4(0), value = float(0)]) => {
-    data.w = tslUtils.packUnits(
-      data.w,
-      8,
-      8,
-      value,
-      uniforms.uBladeMinScale,
-      uniforms.uBladeMaxScale,
-    );
-    return data;
-  });
-
-  private setVisibility = Fn(([data = vec4(0), value = float(0)]) => {
-    data.w = tslUtils.packFlag(data.w, 17, value);
-    return data;
-  });
-
-  private setWindNoise = Fn(([data = vec4(0), value = float(0)]) => {
-    data.w = tslUtils.packUnit(data.w, 18, 6, value);
-    return data;
-  });
-
-  private setPositionNoise = Fn(([data = float(0), value = float(0)]) => {
-    return tslUtils.packUnit(data, 0, 4, value);
-  });
-
-  // Compute Init
-  private createComputeInit() {
-    return Fn(() => {
-      const data1 = this.buffer1.element(instanceIndex);
-      const data2 = this.buffer2.element(instanceIndex);
-      const data3 = this.buffer3.element(instanceIndex);
-
-      // Position XZ in grid
-      const row = floor(float(instanceIndex).div(config.BLADES_PER_SIDE));
-      const col = float(instanceIndex).mod(config.BLADES_PER_SIDE);
-      const randX = hash(instanceIndex.add(4321));
-      const randZ = hash(instanceIndex.add(1234));
-      const offsetX = col
-        .mul(config.SPACING)
-        .sub(config.TILE_HALF_SIZE)
-        .add(randX.mul(config.SPACING * 0.5));
-      const offsetZ = row
-        .mul(config.SPACING)
-        .sub(config.TILE_HALF_SIZE)
-        .add(randZ.mul(config.SPACING * 0.5));
-
-      // ========== MEGA SIMPLIFIED - use per-instance hash instead of tile-scale noise ==========
-      // Use instanceIndex-based hash for jitter to avoid 80m tile patterns
-      const noiseR = hash(instanceIndex.mul(0.73));
-      const noiseB = hash(instanceIndex.mul(0.91));
-
-      // Small per-instance jitter to break up grid pattern
-      const jitterX = noiseR.sub(0.5).mul(config.SPACING * 0.8);
-      const jitterZ = noiseB.sub(0.5).mul(config.SPACING * 0.8);
-      data1.x = offsetX.add(jitterX);
-      data1.y = offsetZ.add(jitterZ);
-
-      data2.assign(this.setPositionNoise(data2, noiseR));
-
-      // Scale - random within range (shaped distribution)
-      const n = noiseB;
-      const shaped = n.mul(n);
-      const randomScale = remap(
-        shaped,
-        0,
-        1,
-        uniforms.uBladeMinScale,
-        uniforms.uBladeMaxScale,
-      );
-      data1.assign(this.setScale(data1, randomScale));
-      data1.assign(this.setOriginalScale(data1, randomScale));
-
-      // Set visibility to 1 initially (visible)
-      data1.assign(this.setVisibility(data1, float(1)));
-
-      // Initialize heightmapY to 0 (will be updated in computeUpdate)
-      data3.assign(float(0));
-    })().compute(config.COUNT, [config.WORKGROUP_SIZE]);
-  }
-
-  // Compute Wind - Enhanced with turbulence and gust patches (inspired by Grass_Journey)
-  private computeWind = Fn(
-    ([prevWindXZ = vec2(0), worldPos = vec3(0), positionNoise = float(0)]) => {
-      const intensity = smoothstep(0.2, 0.5, windManager.uIntensity);
-      const dir = windManager.uDirection.negate();
-      const strength = uniforms.uWindStrength.add(intensity);
-
-      // Gentle per-instance speed jitter (±10%)
-      const speed = uniforms.uWindSpeed.mul(
-        positionNoise.remap(0, 1, 0.95, 2.05),
-      );
-
-      // Base UV + scroll
-      const uvBase = worldPos.xz.mul(0.01).mul(uniforms.uvWindScale);
-      const scroll = dir.mul(speed).mul(time);
-
-      // Sample noise textures for wind
-      const uvA = uvBase.add(scroll);
-      const uvB = uvBase.mul(1.37).add(scroll.mul(1.11));
-
-      // Use texture if available, otherwise hash fallback
-      const sampleNoise = (uvCoord: ReturnType<typeof vec2>) => {
-        if (noiseAtlasTexture) {
-          return texture(noiseAtlasTexture, uvCoord).mul(2.0).sub(1.0);
-        }
-        return vec3(hash(uvCoord.x.add(uvCoord.y.mul(100))))
-          .mul(2.0)
-          .sub(1.0);
-      };
-
-      const nA = sampleNoise(uvA);
-      const nB = sampleNoise(uvB);
-
-      // Mix noises
-      const mixRand = fract(sin(positionNoise.mul(12.9898)).mul(78.233));
-      const mixTime = sin(time.mul(0.4).add(positionNoise.mul(0.1))).mul(0.25);
-      const w = clamp(mixRand.add(mixTime), 0.2, 0.8);
-      const n = mix(nA, nB, w);
-
-      // ========== GUST PATCHES (like Grass_Journey) ==========
-      // Noise threshold creates areas of wind vs calm - like wind "clouds" passing
-      const gustNoiseThreshold = float(0.45); // Below this = calm, above = gusty
-      const gustMask = smoothstep(
-        gustNoiseThreshold,
-        gustNoiseThreshold.add(0.2),
-        n.x.add(0.5).mul(0.5), // Remap -1..1 to 0..1
-      );
-
-      // ========== TURBULENCE LAYER (erratic per-blade movement) ==========
-      // Multiple fast sin waves at different frequencies for chaotic motion
-      const phase = positionNoise.mul(6.28); // Per-blade phase offset
-      const turbulenceTime = time.mul(20.0).add(phase.mul(100.0)); // Fast variation
-
-      // 3 overlapping waves at different frequencies (Grass_Journey style)
-      const turb1 = sin(turbulenceTime).mul(0.15);
-      const turb2 = sin(turbulenceTime.mul(1.7).add(2.3)).mul(0.12);
-      const turb3 = cos(turbulenceTime.mul(0.8).add(phase.mul(50.0))).mul(0.1);
-      const turbulenceAmount = turb1.add(turb2).add(turb3);
-
-      // Turbulence scales with global strength (visible everywhere, not just gusts)
-      const turbulence = turbulenceAmount.mul(strength).mul(0.6);
-
-      // ========== COMBINE WIND COMPONENTS ==========
-      const baseMag = n.x.mul(strength);
-      const gustMag = n.y.mul(strength).mul(0.35).mul(gustMask); // Gusts only in gust patches
-
-      // Total wind factor = base + gusts + turbulence
-      const windFactor = baseMag.add(gustMag).add(turbulence);
-
-      const target = dir.mul(windFactor);
-      const k = mix(0.08, 0.25, n.z.abs());
-      const newWind = prevWindXZ.add(target.sub(prevWindXZ).mul(k));
-
-      // Return wind XZ + gust mask (for potential cloud shadow effect)
-      return vec3(newWind, gustMask.mul(windFactor.abs()));
-    },
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("center", new THREE.BufferAttribute(centers, 2));
+  geometry.setAttribute(
+    "aHeightRandom",
+    new THREE.BufferAttribute(heightRandoms, 1),
   );
-
-  // Compute Trail Scale - grass bends when player walks through
-  private computeTrailScale = Fn(
-    ([
-      originalScale = float(0),
-      currentScale = float(0),
-      isStepped = float(0),
-    ]) => {
-      const up = currentScale.add(
-        originalScale.sub(currentScale).mul(uniforms.uTrailGrowthRate),
-      );
-      const down = currentScale.add(
-        uniforms.uTrailMinScale.sub(currentScale).mul(uniforms.uKDown),
-      );
-      const blended = mix(up, down, isStepped);
-      return clamp(blended, uniforms.uTrailMinScale, originalScale);
-    },
+  geometry.boundingSphere = new THREE.Sphere(
+    new THREE.Vector3(),
+    fieldSize * 2,
   );
-
-  // Compute Stochastic Keep - Distance-based dithered thinning
-  private computeStochasticKeep = Fn(([distSq = float(0)]) => {
-    const R0 = uniforms.uR0;
-    const R1 = uniforms.uR1;
-    const pMin = uniforms.uPMin;
-    const R0Sq = R0.mul(R0);
-    const R1Sq = R1.mul(R1);
-
-    // t: 0 inside R0, 1 at/after R1
-    const t = clamp(
-      distSq.sub(R0Sq).div(max(R1Sq.sub(R0Sq), float(0.00001))),
-      0.0,
-      1.0,
-    );
-
-    // Keep probability: 1 at center → pMin at edge
-    const p = mix(float(1.0), pMin, t);
-
-    // Deterministic RNG per blade (stable across frames)
-    const rnd = hash(float(instanceIndex).mul(0.73));
-
-    // Keep if random < probability
-    return step(rnd, p);
-  });
-
-  // Compute Distance Fade - OLD SCHOOL BAYER DITHER
-  // Creates retro ordered dithering pattern that fades grass into terrain
-  // @ts-expect-error TSL array destructuring
-  private computeDistanceFade: ReturnType<typeof Fn> = Fn(
-    ([distSq = float(0)]) => {
-      const fadeStartSq = uniforms.uFadeStart.mul(uniforms.uFadeStart);
-      const fadeEndSq = uniforms.uFadeEnd.mul(uniforms.uFadeEnd);
-
-      // Linear fade: 1.0 at fadeStart, 0.0 at fadeEnd
-      const linearFade = float(1.0).sub(
-        clamp(
-          distSq
-            .sub(fadeStartSq)
-            .div(max(fadeEndSq.sub(fadeStartSq), float(0.001))),
-          0.0,
-          1.0,
-        ),
-      );
-
-      // OLD SCHOOL BAYER 8x8 ORDERED DITHERING
-      // Use instance index to create screen-like pattern (stable per-blade)
-      // This creates the classic retro dither look
-      const bayerX = float(instanceIndex).mod(8.0);
-      const bayerY = floor(float(instanceIndex).div(8.0)).mod(8.0);
-
-      // Bayer 8x8 matrix threshold calculation (normalized 0-1)
-      // Uses bit interleaving pattern for proper Bayer sequence
-      const _x = bayerX.toInt();
-      const _y = bayerY.toInt();
-
-      // Reconstruct Bayer pattern using bit operations
-      // bayer(x,y) = (bit_reverse(x XOR y) / 64)
-      // Simplified: use hash of position for deterministic per-pixel threshold
-      const bayerPattern = hash(bayerX.add(bayerY.mul(8.0)).add(0.123));
-
-      // Quantize to 8 levels for chunky retro look
-      const quantizedThreshold = floor(bayerPattern.mul(8.0)).div(8.0);
-
-      // Compare fade against Bayer threshold
-      // This creates the ordered dither pattern - grass either fully visible or culled
-      return step(quantizedThreshold, linearFade);
-    },
-  );
-
-  // Compute Frustum Visibility for a single point
-  // Uses generous padding to prevent popping at frustum edges
-  private computeVisibility = Fn(([worldPos = vec3(0)]) => {
-    const clipPos = uniforms.uCameraMatrix.mul(vec4(worldPos, 1.0));
-    const ndc = clipPos.xyz.div(clipPos.w);
-    // More generous padding - at least 0.15 NDC units + scaled radius
-    const baseRadius = float(config.BLADE_BOUNDING_SPHERE_RADIUS).div(
-      max(clipPos.w, float(0.1)),
-    );
-    const paddingX = max(baseRadius, float(0.15)); // Generous horizontal padding
-    const paddingY = max(baseRadius, float(0.2)); // Extra vertical padding (camera tilt)
-    const one = float(1);
-    const visible = step(one.negate().sub(paddingX), ndc.x)
-      .mul(step(ndc.x, one.add(paddingX)))
-      .mul(step(one.negate().sub(paddingY), ndc.y))
-      .mul(step(ndc.y, one.add(paddingY)))
-      .mul(step(float(-0.1), ndc.z)) // Allow slightly behind near plane
-      .mul(step(ndc.z, float(1.1))); // Allow slightly beyond far plane
-    return visible;
-  });
-
-  // ========== STATIC COMPUTE PASS ==========
-  // Runs periodically (not every frame) - handles terrain-dependent culling
-  // Stores static visibility in buffer4 and heightmapY in buffer3
-  private createComputeStatic() {
-    return Fn(() => {
-      const data1 = this.buffer1.element(instanceIndex);
-      const data3 = this.buffer3.element(instanceIndex);
-      const data4 = this.buffer4.element(instanceIndex);
-
-      // Read positions (wrapping is handled by the dynamic pass which runs every frame)
-      const offsetX = data1.x;
-      const offsetZ = data1.y;
-      const worldX = offsetX.add(uniforms.uCameraPosition.x);
-      const worldZ = offsetZ.add(uniforms.uCameraPosition.z);
-
-      // Heightmap sampling - single sample, read pre-baked slope from G channel
-      const halfWorld = uHeightmapWorldSize.mul(0.5);
-      const hmUvX = worldX
-        .sub(uHeightmapCenterX)
-        .add(halfWorld)
-        .div(uHeightmapWorldSize);
-      const hmUvZ = worldZ
-        .sub(uHeightmapCenterZ)
-        .add(halfWorld)
-        .div(uHeightmapWorldSize);
-      const hmUV = vec2(
-        hmUvX.clamp(float(0.001), float(0.999)),
-        hmUvZ.clamp(float(0.001), float(0.999)),
-      );
-
-      let heightmapY: ReturnType<typeof float>;
-      let slope: ReturnType<typeof float>;
-      if (heightmapTextureNode) {
-        const hmSample = heightmapTextureNode.sample(hmUV);
-        heightmapY = hmSample.r.mul(uHeightmapMax);
-        slope = hmSample.g; // Pre-baked slope from heightmap G channel
-      } else {
-        heightmapY = uniforms.uCameraPosition.y;
-        slope = float(0);
-      }
-      data3.assign(heightmapY);
-
-      // === CAMERA-BASED DISTANCE (for stochastic culling) ===
-      const toGrassFromCam = vec2(offsetX, offsetZ);
-      const camForwardXZ = uniforms.uCameraForward.xz;
-      const forwardDot = toGrassFromCam.dot(camForwardXZ);
-      const forwardFactor = smoothstep(float(-0.5), float(1.0), forwardDot);
-      const biasAmount = uniforms.uForwardBias.mul(forwardFactor);
-      const camDist = toGrassFromCam.length();
-      const effectiveDist = max(camDist.sub(biasAmount), float(0.0));
-      const effectiveDistSq = effectiveDist.mul(effectiveDist);
-
-      // 1. Stochastic distance culling (dithered thinning)
-      const _stochasticKeep = this.computeStochasticKeep(effectiveDistSq);
-
-      // 2. Water/shoreline culling - gradual fade near water
-      const waterFade = smoothstep(
-        uWaterHardCutoff,
-        uWaterFadeStart,
-        heightmapY,
-      );
-      const waterDitherRand = hash(float(instanceIndex).mul(3.71));
-      const _aboveWater = step(waterDitherRand, waterFade);
-
-      // 3. Dirt/terrain culling - matches TerrainShader.ts
-      const TERRAIN_NOISE_SCALE = 0.0008;
-      const DIRT_THRESHOLD = 0.5;
-      const noiseUV = vec2(worldX, worldZ).mul(TERRAIN_NOISE_SCALE);
-      let terrainNoiseValue: ReturnType<typeof float>;
-      if (noiseAtlasTexture) {
-        terrainNoiseValue = texture(noiseAtlasTexture, noiseUV).r;
-      } else {
-        terrainNoiseValue = hash(
-          worldX
-            .mul(TERRAIN_NOISE_SCALE * 1000)
-            .add(worldZ.mul(TERRAIN_NOISE_SCALE * 1000)),
-        );
-      }
-
-      const dirtPatchFactor = smoothstep(
-        float(DIRT_THRESHOLD - 0.05),
-        float(DIRT_THRESHOLD + 0.15),
-        terrainNoiseValue,
-      );
-
-      // Use pre-baked slope from heightmap G channel (no extra texture samples needed)
-      const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
-      const slopeFactor = smoothstep(float(0.25), float(0.6), slope);
-
-      const _combinedDirtFactor = max(
-        dirtPatchFactor.mul(flatnessFactor).mul(0.7),
-        slopeFactor.mul(0.6),
-      );
-      const dirtDitherRand = hash(float(instanceIndex).mul(5.67));
-      const _notOnDirt = step(_combinedDirtFactor, dirtDitherRand.mul(0.5));
-
-      // 4. Sand zone (6-10m height on flat ground)
-      const sandZone = smoothstep(float(10.0), float(6.0), heightmapY).mul(
-        flatnessFactor,
-      );
-      const sandDitherRand = hash(float(instanceIndex).mul(6.78));
-      const _notOnSand = step(sandZone.mul(0.8), sandDitherRand.mul(0.4));
-
-      // 5. Road influence culling
-      let _notOnRoad2: ReturnType<typeof float>;
-      {
-        const hasRoadData = step(float(2), uRoadInfluenceWorldSize);
-        const roadHalfWorld = uRoadInfluenceWorldSize.mul(0.5);
-        const roadDx = abs(worldX.sub(uRoadInfluenceCenterX));
-        const roadDz = abs(worldZ.sub(uRoadInfluenceCenterZ));
-        const insideMask = step(roadDx, roadHalfWorld).mul(
-          step(roadDz, roadHalfWorld),
-        );
-        const useMask = hasRoadData.mul(insideMask);
-        const roadUV = computeExclusionUV(
-          worldX,
-          worldZ,
-          uRoadInfluenceCenterX,
-          uRoadInfluenceCenterZ,
-          uRoadInfluenceWorldSize,
-        );
-        const roadInfluence = roadInfluenceTextureNode.sample(roadUV).r;
-        const roadDitherRand = hash(float(instanceIndex).mul(9.12));
-        _notOnRoad2 = mix(
-          float(1.0),
-          step(
-            roadInfluence,
-            uRoadInfluenceThreshold.add(roadDitherRand.mul(0.15)),
-          ),
-          useMask,
-        );
-      }
-
-      // 6. Exclusion zone culling - HYBRID: grid + legacy
-      let _notExcluded2: ReturnType<typeof float>;
-      {
-        const gridNotExcluded = float(1.0).toVar();
-        if (useGridBasedExclusion && gridExclusionTextureNode) {
-          const gridUV = computeExclusionUV(
-            worldX,
-            worldZ,
-            uGridExclusionCenterX,
-            uGridExclusionCenterZ,
-            uGridExclusionWorldSize,
-          );
-          const gridExclusionValue = gridExclusionTextureNode.sample(gridUV).r;
-
-          const exclDitherRand = hash(float(instanceIndex).mul(10.34));
-          const exclDitherRand2 = hash(float(instanceIndex).mul(17.89));
-          const tileEdgeDist = min(
-            min(fract(worldX), float(1).sub(fract(worldX))),
-            min(fract(worldZ), float(1).sub(fract(worldZ))),
-          );
-          const edgeSoftness = smoothstep(float(0), float(0.4), tileEdgeDist);
-          const baseNotExcluded = float(1).sub(gridExclusionValue);
-          const softEdgeBonus = gridExclusionValue
-            .mul(float(1).sub(edgeSoftness))
-            .mul(exclDitherRand.lessThan(0.35).select(1, 0))
-            .mul(exclDitherRand2.mul(0.5).add(0.5));
-          gridNotExcluded.assign(
-            baseNotExcluded.add(softEdgeBonus).clamp(0, 1),
-          );
-        }
-
-        const legacyUV = computeExclusionUV(
-          worldX,
-          worldZ,
-          uExclusionCenterX,
-          uExclusionCenterZ,
-          uExclusionWorldSize,
-        );
-        const legacyExclusionValue = exclusionTextureNode.sample(legacyUV).r;
-        const legacyDitherRand = hash(float(instanceIndex).mul(11.45));
-        const legacyNotExcluded = step(
-          legacyExclusionValue,
-          float(0.6).add(legacyDitherRand.mul(0.2)),
-        );
-
-        _notExcluded2 = gridNotExcluded.mul(legacyNotExcluded);
-      }
-
-      // Store combined static visibility in buffer4 (0=culled, 1=visible)
-      const staticVisible = _stochasticKeep
-        .mul(_aboveWater)
-        .mul(_notOnDirt)
-        .mul(_notOnSand)
-        .mul(_notOnRoad2)
-        .mul(_notExcluded2);
-      data4.assign(staticVisible);
-    })().compute(config.COUNT, [config.WORKGROUP_SIZE]);
-  }
-
-  // ========== DYNAMIC COMPUTE PASS ==========
-  // Runs every frame - handles camera-dependent culling, wind, and trail
-  // Reads static visibility from buffer4, heightmapY from buffer3
-  private createComputeUpdate() {
-    return Fn(() => {
-      const data1 = this.buffer1.element(instanceIndex);
-      const data2 = this.buffer2.element(instanceIndex);
-      const data3 = this.buffer3.element(instanceIndex);
-      const data4 = this.buffer4.element(instanceIndex);
-
-      // Position wrapping - still needed for delta tracking each frame
-      const wrappedPos = VegetationSsboUtils.wrapPosition(
-        vec2(data1.x, data1.y),
-        uniforms.uPlayerDeltaXZ,
-        float(config.TILE_SIZE),
-      );
-      data1.x = wrappedPos.x;
-      data1.y = wrappedPos.z;
-
-      const offsetX = wrappedPos.x;
-      const offsetZ = wrappedPos.z;
-      const worldX = offsetX.add(uniforms.uCameraPosition.x);
-      const worldZ = offsetZ.add(uniforms.uCameraPosition.z);
-
-      // Read heightmapY from buffer3 (pre-computed in static pass)
-      const heightmapY = data3;
-      const worldPos = vec3(worldX, heightmapY, worldZ);
-
-      // Read static visibility from buffer4
-      const staticVisible = data4;
-
-      // === CAMERA-BASED DISTANCE CULLING (changes every frame) ===
-      const toGrassFromCam = vec2(offsetX, offsetZ);
-      const camForwardXZ = uniforms.uCameraForward.xz;
-      const forwardDot = toGrassFromCam.dot(camForwardXZ);
-      const forwardFactor = smoothstep(float(-0.5), float(1.0), forwardDot);
-      const biasAmount = uniforms.uForwardBias.mul(forwardFactor);
-      const camDist = toGrassFromCam.length();
-      const effectiveDist = max(camDist.sub(biasAmount), float(0.0));
-      const effectiveDistSq = effectiveDist.mul(effectiveDist);
-
-      // 1. Per-instance frustum culling (camera-dependent)
-      const _frustumVisible = this.computeVisibility(worldPos);
-
-      // 2. Distance fade with Bayer dither (camera-dependent)
-      const distanceFade = this.computeDistanceFade(effectiveDistSq);
-      const ditherRand = hash(float(instanceIndex).mul(1.31));
-      const _ditherVisible = step(ditherRand, distanceFade);
-
-      // Combine: staticVisible * frustumVisible * ditherVisible = final visibility
-      const isVisible = staticVisible.mul(_frustumVisible).mul(_ditherVisible);
-      data1.assign(this.setVisibility(data1, isVisible));
-
-      // Skip expensive wind/trail for statically culled blades
-      // (roads, water, dirt, exclusions - these blades will never be visible)
-      const isStaticAlive = step(float(0.5), staticVisible);
-
-      // === BENDING/TRAIL EFFECT ===
-      // Either multi-character bending (texture-based) or legacy single-player trail
-      let contact: ReturnType<typeof float>;
-
-      if (useMultiCharacterBending && characterBendingTextureNode) {
-        // MULTI-CHARACTER BENDING - Sample texture for each character
-        const maxContact = float(0).toVar();
-        const texWidth = float(CHARACTER_TEXTURE_WIDTH);
-        const bendingTexture = characterBendingTextureNode;
-
-        // Early skip: if blade is beyond maximum possible trail radius (3m), skip character loop entirely
-        const maxTrailRadius = float(3.0); // No character has radius > 3m
-        const bladeDistFromCam = toGrassFromCam.length();
-        // Only process trail for blades that are reasonably close (within max view distance for trails)
-        const trailRelevant = step(bladeDistFromCam, float(15.0)); // Trails only visible within 15m
-
-        Loop(uCharacterCount, ({ i }) => {
-          const charU = float(i).add(0.5).div(texWidth);
-
-          const posUV = vec2(charU, float(0.25));
-          const posData = bendingTexture.sample(posUV);
-          const charX = posData.x;
-          const charY = posData.y;
-          const charZ = posData.z;
-          const charRadius = posData.w;
-
-          const velUV = vec2(charU, float(0.75));
-          const velData = bendingTexture.sample(velUV);
-          const charSpeed = velData.w;
-
-          const hasRadius = charRadius.greaterThan(0.01);
-
-          const dx = worldX.sub(charX);
-          const dz = worldZ.sub(charZ);
-          const distSq = dx.mul(dx).add(dz.mul(dz));
-          const radiusSq = charRadius.mul(charRadius);
-
-          const charHeightDiff = charY.sub(heightmapY).abs();
-          const isCharGrounded = smoothstep(
-            float(5.0),
-            float(0.0),
-            charHeightDiff,
-          );
-
-          const innerRadiusSq = radiusSq.mul(0.2);
-          const outerRadiusSq = radiusSq;
-
-          const charContact = float(1.0)
-            .sub(smoothstep(innerRadiusSq, outerRadiusSq, distSq))
-            .mul(isCharGrounded)
-            .mul(hasRadius.select(1, 0));
-
-          const speedFactor = charSpeed.mul(0.5).add(0.5).clamp(0.5, 2.0);
-          const boostedContact = charContact.mul(speedFactor);
-
-          maxContact.assign(max(maxContact, boostedContact));
-        });
-
-        contact = maxContact.clamp(0, 1).mul(trailRelevant).mul(isStaticAlive);
-      } else {
-        // LEGACY: SINGLE-PLAYER TRAIL EFFECT
-        const playerWorldX = offsetX.add(uniforms.uCameraPosition.x);
-        const playerWorldZ = offsetZ.add(uniforms.uCameraPosition.z);
-        const diff = vec2(playerWorldX, playerWorldZ).sub(
-          uniforms.uPlayerPosition.xz,
-        );
-        const distSqPlayer = diff.dot(diff);
-
-        const heightDiff = uniforms.uPlayerPosition.y.sub(heightmapY).abs();
-        const isPlayerGrounded = smoothstep(float(5.0), float(0.0), heightDiff);
-
-        const innerRadiusSq = uniforms.uTrailRadiusSquared.mul(0.2);
-        const outerRadiusSq = uniforms.uTrailRadiusSquared;
-
-        contact = float(1.0)
-          .sub(smoothstep(innerRadiusSq, outerRadiusSq, distSqPlayer))
-          .mul(isPlayerGrounded);
-        contact = contact.mul(isStaticAlive);
-      }
-
-      // Trail scale - flatten grass based on contact
-      const currentTrailScale = this.getScale(data1);
-      const originalScale = this.getOriginalScale(data1);
-      const newScale = this.computeTrailScale(
-        originalScale,
-        currentTrailScale,
-        contact,
-      );
-      data1.assign(this.setScale(data1, newScale));
-
-      // Wind
-      const positionNoise = this.getPositionNoise(data2);
-      const prevWind = this.getWind(data1);
-      const newWind = this.computeWind(prevWind, worldPos, positionNoise);
-      data1.assign(
-        this.setWind(
-          data1,
-          vec2(newWind.x.mul(isStaticAlive), newWind.y.mul(isStaticAlive)),
-        ),
-      );
-      data1.assign(this.setWindNoise(data1, newWind.z.mul(isStaticAlive)));
-    })().compute(config.COUNT, [config.WORKGROUP_SIZE]);
-  }
+  return geometry;
 }
 
-// ============================================================================
-// GRASS MATERIAL - SpriteNodeMaterial
-// ============================================================================
+const lod0Uniforms = {
+  uPlayerCenter: uniform(new THREE.Vector2(0, 0)),
+  uFieldSize: uniform(config.TILE_SIZE),
+  uBladeWidth: uniform(config.BLADE_WIDTH),
+  uBladeHeight: uniform(config.BLADE_HEIGHT),
+};
 
-class GrassMaterial extends SpriteNodeMaterial {
-  private ssbo: GrassSsbo;
+/**
+ * MeshBasicNodeMaterial with TSL positionNode + colorNode.
+ * positionNode: mod-wrap around player, heightmap sample, billboard, wind, fade.
+ * colorNode:    base/tip gradient, day/night tint.
+ */
+function createSimpleGrassMaterial(): MeshBasicNodeMaterial {
+  const material = new MeshBasicNodeMaterial();
+  material.side = THREE.DoubleSide;
+  material.transparent = false;
+  material.depthWrite = true;
+  material.fog = false;
 
-  constructor(ssbo: GrassSsbo) {
-    super();
-    this.ssbo = ssbo;
-    this.createGrassMaterial();
-  }
+  // --- positionNode ---
+  material.positionNode = Fn(() => {
+    const localVert = positionLocal.toVar("localVert"); // (-1|0|+1, 0|1, 0)
+    const centerAttr = attribute("center", "vec2");
+    const hRand = attribute("aHeightRandom", "float");
 
-  private createGrassMaterial(): void {
-    // Material settings - transparent for bottom dither dissolve
-    this.precision = "mediump";
-    this.transparent = true;
-    this.alphaTest = 0.1;
+    const tipness = localVert.y; // 0 for base, 1 for tip
 
-    // Get data from SSBO
-    const data1 = this.ssbo.computeBuffer1.element(instanceIndex);
-    const data2 = this.ssbo.computeBuffer2.element(instanceIndex);
-    const data3 = this.ssbo.computeBuffer3.element(instanceIndex);
-    const offsetX = data1.x;
-    const offsetZ = data1.y;
-    const _windXZ = this.ssbo.getWind(data1);
-    const _scaleY = this.ssbo.getScale(data1);
-    const isVisible = this.ssbo.getVisibility(data1);
-    const _windNoiseFactor = this.ssbo.getWindNoise(data1);
-    const _positionNoise = this.ssbo.getPositionNoise(data2);
+    // 1) Toroidal wrapping around player
+    const half = lod0Uniforms.uFieldSize.mul(0.5);
+    const rel = centerAttr.sub(lod0Uniforms.uPlayerCenter).toVar("rel");
+    rel.x.assign(mod(rel.x.add(half), lod0Uniforms.uFieldSize).sub(half));
+    rel.y.assign(mod(rel.y.add(half), lod0Uniforms.uFieldSize).sub(half));
 
-    // Get heightmapY from compute shader
-    const heightmapY = data3;
+    const worldX = rel.x.add(lod0Uniforms.uPlayerCenter.x).toVar("worldX");
+    const worldZ = rel.y.add(lod0Uniforms.uPlayerCenter.y).toVar("worldZ");
 
-    // Height gradient for blade
-    const h = uv().y;
+    // 2) Heightmap terrain Y
+    const hmWorldSize = max(uHeightmapWorldSize, float(0.001));
+    const hmHalf = hmWorldSize.mul(0.5);
+    const hmU = worldX
+      .sub(uHeightmapCenterX)
+      .add(hmHalf)
+      .div(hmWorldSize)
+      .clamp(0.001, 0.999);
+    const hmV = worldZ
+      .sub(uHeightmapCenterZ)
+      .add(hmHalf)
+      .div(hmWorldSize)
+      .clamp(0.001, 0.999);
+    const hmUV = vec2(hmU, hmV);
 
-    // BOTTOM DITHER DISSOLVE - fade grass base into ground, 100% above fade zone
-    const bottomFade = smoothstep(float(0), uniforms.uBottomFadeHeight, h);
-    // Only apply dither noise within the fade zone, full opacity above
-    const inFadeZone = float(1.0).sub(step(uniforms.uBottomFadeHeight, h));
-    const ditherNoise = hash(instanceIndex.add(h.mul(1000)))
-      .mul(0.4)
-      .mul(inFadeZone);
-    const bottomOpacity = clamp(
-      bottomFade.add(ditherNoise.sub(0.2).mul(inFadeZone)),
-      0,
-      1,
+    const hmSample = heightmapTextureNode
+      ? heightmapTextureNode.sample(hmUV)
+      : vec4(0);
+    const hmLoaded = step(float(0.001), hmSample.r);
+    const rawTerrainY = hmSample.r.mul(uHeightmapMax);
+    const terrainY = mix(
+      uniforms.uCameraPosition.y,
+      rawTerrainY,
+      hmLoaded,
+    ).toVar("terrainY");
+
+    // 3) Build blade vertex
+    const bladeH = lod0Uniforms.uBladeHeight.mul(hRand);
+    const bladeHW = lod0Uniforms.uBladeWidth.mul(0.5);
+    const vertexOffset = vec3(
+      localVert.x.mul(bladeHW),
+      localVert.y.mul(bladeH),
+      float(0),
+    ).toVar("vertexOffset");
+
+    // 4) Billboard: rotate blade to face camera
+    const dx = worldX.sub(uniforms.uCameraPosition.x);
+    const dz = worldZ.sub(uniforms.uCameraPosition.z);
+    const angleToCamera = atan(dx, dz);
+    const cosA = cos(angleToCamera);
+    const sinA = sin(angleToCamera);
+    const rotX = vertexOffset.x.mul(cosA).add(vertexOffset.z.mul(sinA));
+    const rotZ = vertexOffset.z.mul(cosA).sub(vertexOffset.x.mul(sinA));
+    vertexOffset.x.assign(rotX);
+    vertexOffset.z.assign(rotZ);
+
+    // 5) World position
+    const worldPos = vec3(worldX, terrainY, worldZ)
+      .add(vertexOffset)
+      .toVar("worldPos");
+
+    // 6) Wind (displace tips only)
+    const windTime = time.mul(uniforms.uWindSpeed);
+    const windUV = vec2(
+      worldX.mul(0.02).add(windTime.mul(0.05)),
+      worldZ.mul(0.02).add(windTime.mul(0.03)),
     );
+    const windSample = noiseAtlasTexture
+      ? texture(noiseAtlasTexture).sample(windUV)
+      : vec4(0.5);
+    const windStrength = uniforms.uWindStrength;
+    worldPos.x.addAssign(windSample.x.sub(0.5).mul(tipness).mul(windStrength));
+    worldPos.z.addAssign(windSample.y.sub(0.5).mul(tipness).mul(windStrength));
 
-    // BAYER SCREEN-SPACE DITHERING - texture lookup (replaces 12 ALU bit ops)
-    const fragCoord = viewportCoordinate;
-    const bayerUV = vec2(
-      mod(floor(fragCoord.x), float(4.0)).add(0.5).div(4.0),
-      mod(floor(fragCoord.y), float(4.0)).add(0.5).div(4.0),
-    );
-    const bayerThreshold = bayerTextureNode.sample(bayerUV).r;
-
-    // Distance-based opacity fade with Bayer dithering
-    const distFromCamSq = data1.x.mul(data1.x).add(data1.y.mul(data1.y));
-    const fadeStartSq = uniforms.uFadeStart.mul(uniforms.uFadeStart);
-    const fadeEndSq = uniforms.uFadeEnd.mul(uniforms.uFadeEnd);
-    const distFade = float(1.0).sub(
-      clamp(
-        distFromCamSq
-          .sub(fadeStartSq)
-          .div(max(fadeEndSq.sub(fadeStartSq), float(0.001))),
-        0.0,
-        1.0,
+    // 7) Distance fade: collapse toward center point
+    // Use PLAYER distance (not camera) so grass is always visible around the character
+    const distToPlayer = length(
+      vec2(
+        worldX.sub(lod0Uniforms.uPlayerCenter.x),
+        worldZ.sub(lod0Uniforms.uPlayerCenter.y),
       ),
     );
-
-    // Apply Bayer dither to distance fade - creates chunky retro dissolve
-    const bayerFadeVisible = step(bayerThreshold, distFade);
-
-    this.opacityNode = isVisible.mul(bottomOpacity).mul(bayerFadeVisible);
-
-    // SCALE - use computed scale from SSBO (but keep some height for flattened grass)
-    // When flattened, grass is rotated rather than shrunk
-    const originalScale = this.ssbo.getOriginalScale(data1);
-    const flattenAmount = float(1.0).sub(
-      _scaleY.div(max(originalScale, float(0.01))),
-    ); // 0 = upright, 1 = fully flattened
-    // Keep most of the height, just rotate it down
-    const adjustedScale = mix(
-      _scaleY,
-      originalScale.mul(0.9),
-      flattenAmount.mul(0.7),
+    const distScale = smoothstep(
+      uniforms.uFadeEnd,
+      uniforms.uFadeStart,
+      distToPlayer,
     );
-    this.scaleNode = vec3(0.5, adjustedScale, 1);
+    const centerPt = vec3(worldX, terrainY, worldZ);
+    worldPos.assign(mix(centerPt, worldPos, distScale));
 
-    // ========== FLATTEN ROTATION (grass bends away from player) ==========
-    // Calculate world position of this blade
-    const worldX = uniforms.uCameraPosition.x.add(offsetX);
-    const worldZ = uniforms.uCameraPosition.z.add(offsetZ);
-
-    // Direction from player to grass (grass bends AWAY from player)
-    const toGrassX = worldX.sub(uniforms.uPlayerPosition.x);
-    const toGrassZ = worldZ.sub(uniforms.uPlayerPosition.z);
-    const toGrassDist = sqrt(
-      toGrassX.mul(toGrassX).add(toGrassZ.mul(toGrassZ)),
+    // 8) Water culling: collapse blades below water
+    const waterFade = smoothstep(
+      uWaterHardCutoff.sub(1.0),
+      uWaterHardCutoff,
+      rawTerrainY,
     );
-    const toGrassDirX = toGrassX.div(max(toGrassDist, float(0.01)));
-    const toGrassDirZ = toGrassZ.div(max(toGrassDist, float(0.01)));
+    const waterScale = max(waterFade, float(1).sub(hmLoaded));
+    worldPos.assign(mix(centerPt, worldPos, waterScale));
 
-    // Flatten angle - up to 80 degrees (1.4 radians) when fully flattened
-    const flattenAngle = flattenAmount.mul(1.4);
+    // Exclusion checks are only meaningful for nearby blades (perf optimization).
+    // Far blades are already fading out, so we blend exclusion to 1.0 (always visible)
+    // beyond 15m to reduce the impact of texture sampling on distant vertices.
+    const nearPlayer = smoothstep(float(16.0), float(14.0), distToPlayer);
 
-    // Apply flatten rotation in the direction away from player
-    // Rotation around X axis bends forward/back, around Z axis bends left/right
-    const flattenRotX = toGrassDirZ.mul(flattenAngle); // Bend in Z direction -> rotate around X
-    const flattenRotZ = toGrassDirX.negate().mul(flattenAngle); // Bend in X direction -> rotate around Z
-
-    // ROTATION - combine wind bending + flatten rotation
-    // Wind causes grass to lean in wind direction, more at top
-    const windBendStrength = h.mul(h).mul(0.5); // Quadratic falloff from tip
-    const windRotX = _windXZ.x.mul(windBendStrength);
-    const windRotZ = _windXZ.y.mul(windBendStrength);
-
-    // Flatten rotation affects the whole blade, wind affects tips more
-    const totalRotX = windRotZ.add(flattenRotX);
-    const totalRotZ = windRotX.negate().add(flattenRotZ);
-    this.rotationNode = vec3(totalRotX, 0, totalRotZ);
-
-    // POSITION - heightmap Y + wind sway offset
-    const offsetY = heightmapY;
-
-    // Wind sway - apply wind offset to position, more at blade top
-    const windSwayStrength = h.mul(0.25).mul(_windNoiseFactor.add(0.5));
-    const windSwayX = _windXZ.x.mul(windSwayStrength);
-    const windSwayZ = _windXZ.y.mul(windSwayStrength);
-
-    const bladePosition = vec3(
-      offsetX.add(windSwayX),
-      offsetY,
-      offsetZ.add(windSwayZ),
+    // 9) Road exclusion: collapse blades on roads
+    const roadUV = computeExclusionUV(
+      worldX,
+      worldZ,
+      uRoadInfluenceCenterX,
+      uRoadInfluenceCenterZ,
+      uRoadInfluenceWorldSize,
     );
-
-    this.positionNode = bladePosition;
-
-    // COLOR - SAMPLE TERRAIN COLOR AT WORLD POSITION
-    // worldX and worldZ already calculated above for flatten rotation
-
-    // ========== TERRAIN SLOPE FROM HEIGHTMAP G CHANNEL ==========
-    // Pre-baked slope avoids 3 heightmap samples per fragment
-    const halfWorld = uHeightmapWorldSize.mul(0.5);
-    const bladeHmUvX = worldX
-      .sub(uHeightmapCenterX)
-      .add(halfWorld)
-      .div(uHeightmapWorldSize);
-    const bladeHmUvZ = worldZ
-      .sub(uHeightmapCenterZ)
-      .add(halfWorld)
-      .div(uHeightmapWorldSize);
-    const bladeHmUV = vec2(
-      bladeHmUvX.clamp(0.001, 0.999),
-      bladeHmUvZ.clamp(0.001, 0.999),
+    const roadSample = roadInfluenceTextureNode.sample(roadUV).r;
+    const roadRaw = smoothstep(
+      uRoadInfluenceThreshold.add(0.05),
+      uRoadInfluenceThreshold,
+      roadSample,
     );
-    let slope: ReturnType<typeof float>;
-    if (heightmapTextureNode) {
-      slope = heightmapTextureNode.sample(bladeHmUV).g; // Pre-baked slope from G channel
-    } else {
-      slope = float(0);
+    const roadVisible = mix(float(1.0), roadRaw, nearPlayer);
+    worldPos.assign(mix(centerPt, worldPos, roadVisible));
+
+    // 10) Legacy exclusion: collapse blades on buildings/arenas
+    const exclUV = computeExclusionUV(
+      worldX,
+      worldZ,
+      uExclusionCenterX,
+      uExclusionCenterZ,
+      uExclusionWorldSize,
+    );
+    const exclSample = exclusionTextureNode.sample(exclUV).r;
+    const exclRaw = smoothstep(float(0.5), float(0.3), exclSample);
+    const exclVisible = mix(float(1.0), exclRaw, nearPlayer);
+    worldPos.assign(mix(centerPt, worldPos, exclVisible));
+
+    // 11) Grid-based exclusion: collapse blades on collision-blocked tiles
+    if (gridExclusionTextureNode && useGridBasedExclusion) {
+      const gridExclUV = computeExclusionUV(
+        worldX,
+        worldZ,
+        uGridExclusionCenterX,
+        uGridExclusionCenterZ,
+        uGridExclusionWorldSize,
+      );
+      const gridExclSample = gridExclusionTextureNode.sample(gridExclUV).r;
+      const gridExclRaw = smoothstep(float(0.5), float(0.3), gridExclSample);
+      const gridExclVisible = mix(float(1.0), gridExclRaw, nearPlayer);
+      worldPos.assign(mix(centerPt, worldPos, gridExclVisible));
     }
 
-    // ========== GRASS COLOR - Simplified (dirt/rock blades already culled by compute) ==========
-    const TERRAIN_NOISE_SCALE = 0.0008;
-    const noiseUV = vec2(worldX, worldZ).mul(TERRAIN_NOISE_SCALE);
-    let terrainNoiseValue: ReturnType<typeof float>;
-    if (noiseAtlasTexture) {
-      terrainNoiseValue = texture(noiseAtlasTexture, noiseUV).r;
-    } else {
-      terrainNoiseValue = hash(worldX.mul(0.8).add(worldZ.mul(1.3)));
-    }
+    return worldPos;
+  })();
 
-    // Grass green/dark variation (the only color variation that matters for visible grass)
-    const noiseValue2 = sin(terrainNoiseValue.mul(6.28)).mul(0.3).add(0.5);
-    const grassGreen = vec3(0.3, 0.55, 0.15);
-    const grassDark = vec3(0.22, 0.42, 0.1);
-    const grassVariation = smoothstep(float(0.4), float(0.6), noiseValue2);
-    let grassColor = mix(grassGreen, grassDark, grassVariation);
+  // --- colorNode ---
+  material.colorNode = Fn(() => {
+    const localVert = positionLocal;
+    const tipness = localVert.y; // 0 base, 1 tip
+    const centerAttr = attribute("center", "vec2");
 
-    // Simple height gradient: base to tip
-    const tipColor = grassColor.mul(1.1);
-    const colorProfile = h.mul(uniforms.uColorMixFactor).clamp();
-    const baseToTip = mix(grassColor, tipColor, colorProfile);
+    const baseColor = uniforms.uBaseColor;
+    const tipColor = uniforms.uTipColor;
+    const grassColor = mix(
+      baseColor,
+      tipColor,
+      tipness.mul(uniforms.uColorMixFactor),
+    ).toVar("grassColor");
 
-    // Simple ambient occlusion near camera center
-    const r2 = offsetX.mul(offsetX).add(offsetZ.mul(offsetZ));
-    const near = float(1).sub(smoothstep(0, uniforms.uAoRadiusSquared, r2));
-    const hWeight = float(1).sub(smoothstep(0.1, 0.85, h));
-    const ao = float(1).sub(uniforms.uAoScale.mul(0.15).mul(near.mul(hWeight)));
+    // Per-blade variation using hash of center position
+    const variation = hash(centerAttr.x.add(centerAttr.y.mul(1234.5)))
+      .mul(0.15)
+      .sub(0.075);
+    grassColor.r.addAssign(variation);
+    grassColor.g.addAssign(variation.mul(0.5));
 
     // Day/night tinting
-    const dayNightTint = mix(
-      uniforms.uNightColor,
-      uniforms.uDayColor,
-      uniforms.uDayNightMix,
-    );
+    const dayTint = uniforms.uDayColor;
+    const nightTint = uniforms.uNightColor;
+    const timeTint = mix(nightTint, dayTint, uniforms.uDayNightMix);
+    grassColor.assign(grassColor.mul(timeTint));
 
-    // ========== WIND CLOUD SHADOW EFFECT (Grass_Journey style) ==========
-    // Grass in gusty areas is slightly darker (like clouds passing over)
-    // _windNoiseFactor contains the gust mask * wind intensity from computeWind
-    const cloudShadowStrength = float(0.15); // How dark the shadow gets (0-1)
-    const cloudShadow = float(1.0).sub(
-      _windNoiseFactor.mul(cloudShadowStrength),
-    );
+    // Light intensity
+    grassColor.assign(grassColor.mul(uniforms.uLightIntensity));
 
-    this.colorNode = baseToTip.mul(ao).mul(dayNightTint).mul(cloudShadow);
-  }
+    return grassColor;
+  })();
+
+  return material;
 }
 
 // ============================================================================
-// GPU-DRIVEN TILE MATERIAL - All culling in vertex shader
+// GPU-DRIVEN TILE MATERIAL - All culling in vertex shader (LOD1)
 // ============================================================================
 
 /**
@@ -1690,14 +1007,22 @@ function createGpuDrivenTileMaterial(
       .div(uHeightmapWorldSize);
     const hmUV = vec2(hmUvX.clamp(0.001, 0.999), hmUvZ.clamp(0.001, 0.999));
 
-    // Sample heightmap - use 0 if texture not available yet
+    // Sample heightmap - use camera Y as fallback for unloaded terrain
     let terrainY: ReturnType<typeof float>;
     let hmSampleFull: ReturnType<typeof vec4> | null = null;
+    let tileHeightmapLoaded: ReturnType<typeof float>;
     if (heightmapTextureNode) {
       hmSampleFull = heightmapTextureNode.sample(hmUV);
-      terrainY = hmSampleFull.r.mul(uHeightmapMax);
+      const rawHeight = hmSampleFull.r.mul(uHeightmapMax);
+      tileHeightmapLoaded = step(float(0.001), hmSampleFull.r);
+      terrainY = mix(
+        tileUniforms.uTileCameraPos.y,
+        rawHeight,
+        tileHeightmapLoaded,
+      );
     } else {
-      terrainY = float(0);
+      terrainY = tileUniforms.uTileCameraPos.y;
+      tileHeightmapLoaded = float(0);
     }
 
     // ========== ROAD INFLUENCE EXCLUSION ==========
@@ -1753,8 +1078,9 @@ function createGpuDrivenTileMaterial(
     );
 
     // ========== WATER CULLING ==========
-    // Hide grass below water level
-    const waterVisible = select(
+    // Hide grass below water level. Skip for unloaded heightmap areas
+    // to prevent all tiles from being culled before terrain loads.
+    const waterVisibleRaw = select(
       terrainY.lessThan(uWaterHardCutoff),
       float(0),
       select(
@@ -1762,6 +1088,10 @@ function createGpuDrivenTileMaterial(
         smoothstep(uWaterHardCutoff, uWaterFadeStart, terrainY),
         float(1),
       ),
+    );
+    const waterVisible = max(
+      waterVisibleRaw,
+      float(1).sub(tileHeightmapLoaded),
     );
 
     // Variation: rotation and mirror based on tile hash (moved up for dirt/sand dither)
@@ -1989,9 +1319,8 @@ function createGpuDrivenTileMesh(
 // ============================================================================
 
 export class ProceduralGrassSystem extends System {
-  // LOD0 - Individual blades
-  private mesh: THREE.InstancedMesh | null = null;
-  private ssbo: GrassSsbo | null = null;
+  // LOD0 - Simple single-mesh grass (no SSBO, no compute)
+  private mesh: THREE.Mesh | null = null;
 
   private useBladeGrass = true;
   private quality: GrassQuality = GrassQuality.HIGH;
@@ -2005,16 +1334,6 @@ export class ProceduralGrassSystem extends System {
   private grassInitialized = false;
   private loggedHeightSampleError = false;
   private noiseTexture: THREE.Texture | null = null;
-
-  // Position tracking for world-stable grass
-  private lastCameraX = 0;
-  private lastCameraZ = 0;
-
-  // Static compute tracking - only re-run when player moves significantly
-  private lastStaticComputeX = 0;
-  private lastStaticComputeZ = 0;
-  private static readonly STATIC_COMPUTE_THRESHOLD = 2; // Re-run static pass when player moves 2m
-  private staticComputeInitialized = false;
 
   // ========== STREAMING HEIGHTMAP STATE ==========
   /** Center of the heightmap in world coordinates */
@@ -3177,7 +2496,6 @@ export class ProceduralGrassSystem extends System {
       }
     }
 
-    // Mark texture for GPU upload
     if (heightmapTexture && updated > 0) {
       heightmapTexture.needsUpdate = true;
     }
@@ -3284,7 +2602,6 @@ export class ProceduralGrassSystem extends System {
       }
     }
 
-    // Mark texture for GPU upload
     if (heightmapTexture) {
       heightmapTexture.needsUpdate = true;
     }
@@ -3375,63 +2692,27 @@ export class ProceduralGrassSystem extends System {
         );
       }
 
-      // STEP 2: Create SSBO and meshes
+      // STEP 2: Create simple grass mesh (no SSBO, no compute shaders)
       if (this.useBladeGrass) {
-        this.ssbo = new GrassSsbo();
+        const geometry = createSimpleGrassGeometry();
+        const material = createSimpleGrassMaterial();
 
-        // Create geometry
-        const geometry = this.createGeometry(config.SEGMENTS);
-
-        // Create material
-        const material = new GrassMaterial(this.ssbo);
-
-        // Create instanced mesh
-        this.mesh = new THREE.InstancedMesh(geometry, material, config.COUNT);
+        this.mesh = new THREE.Mesh(geometry, material);
         this.mesh.frustumCulled = false;
-        this.mesh.name = "ProceduralGrass_GPU";
-
-        // CRITICAL: Render order 76 = after silhouette (50), before player (100)
-        // This prevents silhouette from showing through grass
+        this.mesh.name = "ProceduralGrass_Simple";
         this.mesh.renderOrder = 76;
-
-        // Layer 1 = main camera only (matches other vegetation)
         this.mesh.layers.set(1);
 
         stage.scene.add(this.mesh);
       } else {
         this.mesh = null;
-        this.ssbo = null;
       }
 
-      // STEP 3: Pre-run GPU compute initialization during loading
-      // This is the KEY OPTIMIZATION - run heavy compute BEFORE gameplay starts
-      // Previously this ran via onInit callback causing first-frame spikes
-      if (this.useBladeGrass && this.ssbo) {
-        console.log(
-          "[ProceduralGrass] Pre-running GPU compute initialization...",
-        );
-
-        // Run LOD0 SSBO initialization only (LOD1 disabled)
-        await this.ssbo.runInitialization(this.renderer);
-
-        // Yield to ensure GPU work is flushed
-        await yieldToMain();
-
-        // STEP 3.5: Prime visibility with a compute pass (roads/exclusion/distance)
-        // This ensures the first rendered frame already respects roads and culling.
-        const camPos = this.world.camera?.position;
-        if (camPos) {
-          uniforms.uCameraPosition.value.copy(camPos);
-          uniforms.uPlayerPosition.value.copy(camPos);
-          uniforms.uPlayerDeltaXZ.value.set(0, 0);
-        }
-        // Run static pass first (terrain-dependent culling), then dynamic pass (frustum/wind)
-        await this.renderer.computeAsync(this.ssbo.computeStatic);
-        await this.renderer.computeAsync(this.ssbo.computeUpdate);
-        this.staticComputeInitialized = true;
-        this.lastStaticComputeX = camPos?.x ?? 0;
-        this.lastStaticComputeZ = camPos?.z ?? 0;
-        await yieldToMain();
+      // Prime uniforms with initial camera/player position
+      const camPos = this.world.camera?.position;
+      if (camPos) {
+        uniforms.uCameraPosition.value.copy(camPos);
+        lod0Uniforms.uPlayerCenter.value.set(camPos.x, camPos.z);
       }
 
       this.grassInitialized = true;
@@ -3442,7 +2723,7 @@ export class ProceduralGrassSystem extends System {
       const totalTime = performance.now() - initStartTime;
       console.log(
         `[ProceduralGrass] Initialization complete: ${totalTime.toFixed(1)}ms total\n` +
-          `  LOD0: ${this.useBladeGrass ? `${config.COUNT.toLocaleString()} blades with Bayer dither fade` : "DISABLED (tile instancing)"}\n` +
+          `  LOD0: ${this.useBladeGrass ? `${config.COUNT.toLocaleString()} blades (simple vertex shader)` : "DISABLED"}\n` +
           `  LOD1: Tile instances (async bake)`,
       );
     } catch (error) {
@@ -3770,88 +3051,7 @@ export class ProceduralGrassSystem extends System {
     return t * t * t * (t * (t * 6 - 15) + 10);
   }
 
-  private createGeometry(nSegments: number): THREE.BufferGeometry {
-    // Geometry creation
-    const segments = Math.max(1, Math.floor(nSegments));
-    const height = config.BLADE_HEIGHT;
-    const halfWidthBase = config.BLADE_WIDTH * 0.5;
-
-    const rowCount = segments;
-    const vertexCount = rowCount * 2 + 1;
-    const quadCount = Math.max(0, rowCount - 1);
-    const indexCount = quadCount * 6 + 3;
-
-    const positions = new Float32Array(vertexCount * 3);
-    const uvs = new Float32Array(vertexCount * 2);
-    const indices = new Uint8Array(indexCount);
-
-    const taper = (t: number) => halfWidthBase * (1.0 - 0.7 * t);
-
-    let idx = 0;
-    for (let row = 0; row < rowCount; row++) {
-      const v = row / segments;
-      const y = v * height;
-      const halfWidth = taper(v);
-
-      const left = row * 2;
-      const right = left + 1;
-
-      positions[3 * left + 0] = -halfWidth;
-      positions[3 * left + 1] = y;
-      positions[3 * left + 2] = 0;
-
-      positions[3 * right + 0] = halfWidth;
-      positions[3 * right + 1] = y;
-      positions[3 * right + 2] = 0;
-
-      uvs[2 * left + 0] = 0.0;
-      uvs[2 * left + 1] = v;
-      uvs[2 * right + 0] = 1.0;
-      uvs[2 * right + 1] = v;
-
-      if (row > 0) {
-        const prevLeft = (row - 1) * 2;
-        const prevRight = prevLeft + 1;
-
-        indices[idx++] = prevLeft;
-        indices[idx++] = prevRight;
-        indices[idx++] = right;
-
-        indices[idx++] = prevLeft;
-        indices[idx++] = right;
-        indices[idx++] = left;
-      }
-    }
-
-    const tip = rowCount * 2;
-    positions[3 * tip + 0] = 0;
-    positions[3 * tip + 1] = height;
-    positions[3 * tip + 2] = 0;
-    uvs[2 * tip + 0] = 0.5;
-    uvs[2 * tip + 1] = 1.0;
-
-    const lastLeft = (rowCount - 1) * 2;
-    const lastRight = lastLeft + 1;
-    indices[idx++] = lastLeft;
-    indices[idx++] = lastRight;
-    indices[idx++] = tip;
-
-    const geom = new THREE.BufferGeometry();
-
-    const posAttribute = new THREE.BufferAttribute(positions, 3);
-    posAttribute.setUsage(THREE.StaticDrawUsage);
-    geom.setAttribute("position", posAttribute);
-
-    const uvAttribute = new THREE.BufferAttribute(uvs, 2);
-    uvAttribute.setUsage(THREE.StaticDrawUsage);
-    geom.setAttribute("uv", uvAttribute);
-
-    const indexAttribute = new THREE.BufferAttribute(indices, 1);
-    indexAttribute.setUsage(THREE.StaticDrawUsage);
-    geom.setIndex(indexAttribute);
-
-    return geom;
-  }
+  // Old createGeometry removed - replaced by module-level createSimpleGrassGeometry()
 
   update(_deltaTime: number): void {
     if (!this.grassInitialized || !this.renderer) return;
@@ -3861,49 +3061,42 @@ export class ProceduralGrassSystem extends System {
 
     const cameraPos = camera.position;
 
-    // Get actual player position for trail effect (may differ from camera in 3rd person)
-    // Use player.node.position (the 3D mesh position) not player.position (entity data)
+    // Player position for grass centering (3rd person: follow player, not camera)
     const players = this.world.getPlayers?.() as
       | { node?: { position?: THREE.Vector3 } }[]
       | undefined;
     const player = players?.[0];
     const playerPos = player?.node?.position ?? cameraPos;
 
-    // Get camera forward direction for frustum culling
     const cameraForward = new THREE.Vector3();
     camera.getWorldDirection(cameraForward);
 
-    // ========== GPU-DRIVEN TILE UPDATE ==========
-    // Update shared tile uniforms (used by vertex shader for all tile positioning/culling)
-    // This is the ONLY per-frame work needed - everything else happens in shaders
+    // ========== GPU-DRIVEN TILE UPDATE (LOD1) ==========
     tileUniforms.uTileCameraPos.value.copy(cameraPos);
     tileUniforms.uTileCameraForward.value.copy(cameraForward);
 
-    if (!this.useBladeGrass || !this.mesh || !this.ssbo) {
+    if (!this.useBladeGrass || !this.mesh) {
       return;
     }
 
-    // Calculate camera movement delta for position wrapping
-    const deltaX = cameraPos.x - this.lastCameraX;
-    const deltaZ = cameraPos.z - this.lastCameraZ;
-    this.lastCameraX = cameraPos.x;
-    this.lastCameraZ = cameraPos.z;
+    // ========== LOD0 UNIFORM UPDATES (no compute dispatches) ==========
+    lod0Uniforms.uPlayerCenter.value.set(playerPos.x, playerPos.z);
+    uniforms.uCameraPosition.value.copy(cameraPos);
+
+    uHeightmapCenterX.value = this.heightmapCenterX;
+    uHeightmapCenterZ.value = this.heightmapCenterZ;
 
     // ========== STREAMING HEIGHTMAP UPDATE ==========
-    // Check if heightmap needs re-centering based on player movement
     this.checkHeightmapRecenter(cameraPos.x, cameraPos.z);
 
     // ========== GRID-BASED EXCLUSION UPDATE ==========
-    // Update grid-based exclusion (for collision-blocked tiles: rocks, trees)
     if (this.useGridExclusion && this.exclusionGrid) {
       this.exclusionGrid.update(cameraPos.x, cameraPos.z);
     }
 
     // ========== ROAD EXCLUSION POLLING ==========
-    // Poll for road data if not yet loaded (handles timing issues with road generation)
     if (!this.roadTextureLoaded) {
       this.roadPollCounter++;
-      // Check every 10 frames (~167ms at 60fps) for faster response
       if (this.roadPollCounter >= 10) {
         this.roadPollCounter = 0;
         this.checkExistingRoads();
@@ -3911,62 +3104,16 @@ export class ProceduralGrassSystem extends System {
     }
 
     // ========== LEGACY EXCLUSION TEXTURE UPDATE ==========
-    // ALWAYS update legacy texture (for buildings, duel arenas that don't set collision flags)
-    // This runs in ADDITION to grid-based, not instead of
     this.checkExclusionRecenter(cameraPos.x, cameraPos.z);
 
     // ========== MULTI-CHARACTER BENDING UPDATE ==========
-    // Update character influence manager for multi-character grass bending
     if (this.useMultiCharacterBending && this.characterInfluence) {
       this.characterInfluence.updateFromWorld(cameraPos);
     }
-
-    // Update uniforms
-    uniforms.uCameraPosition.value.copy(cameraPos); // For distance culling
-    uniforms.uPlayerPosition.value.copy(playerPos); // For trail effect only
-    uniforms.uPlayerDeltaXZ.value.set(deltaX, deltaZ); // For position wrapping
-
-    // Update heightmap center for GPU shader sampling
-    // The shader needs to know where the heightmap is centered to sample correctly
-    uHeightmapCenterX.value = this.heightmapCenterX;
-    uHeightmapCenterZ.value = this.heightmapCenterZ;
-
-    // NOTE: Lighting is controlled by Environment.updateGrassLighting()
-    // via setLightIntensity(). DO NOT override here - let Environment
-    // be the authoritative source for day/night cycle.
-
-    // Camera frustum data
-    const proj = camera.projectionMatrix;
-    uniforms.uCameraMatrix.value.copy(proj).multiply(camera.matrixWorldInverse);
-    camera.getWorldDirection(uniforms.uCameraForward.value);
-
-    // Move grass meshes to follow CAMERA (density is camera-based)
-    this.mesh.position.set(cameraPos.x, 0, cameraPos.z);
-
-    // ========== STATIC COMPUTE PASS ==========
-    // Run static pass (heightmap, exclusions, dirt, water) only when player moves significantly
-    // This avoids re-running expensive terrain checks every frame
-    const staticDx = cameraPos.x - this.lastStaticComputeX;
-    const staticDz = cameraPos.z - this.lastStaticComputeZ;
-    const staticDistSq = staticDx * staticDx + staticDz * staticDz;
-    const thresholdSq =
-      ProceduralGrassSystem.STATIC_COMPUTE_THRESHOLD *
-      ProceduralGrassSystem.STATIC_COMPUTE_THRESHOLD;
-
-    if (!this.staticComputeInitialized || staticDistSq > thresholdSq) {
-      this.renderer.computeAsync(this.ssbo.computeStatic);
-      this.lastStaticComputeX = cameraPos.x;
-      this.lastStaticComputeZ = cameraPos.z;
-      this.staticComputeInitialized = true;
-    }
-
-    // ========== DYNAMIC COMPUTE PASS ==========
-    // Run dynamic pass every frame (wind, trail, frustum, distance fade)
-    this.renderer.computeAsync(this.ssbo.computeUpdate);
   }
 
   // Public API
-  getMesh(): THREE.InstancedMesh | null {
+  getMesh(): THREE.Mesh | null {
     return this.mesh;
   }
 
@@ -4015,14 +3162,6 @@ export class ProceduralGrassSystem extends System {
 
     // Mark road texture as loaded to stop polling
     this.roadTextureLoaded = true;
-
-    // Force SSBO to recalculate visibility on next frame
-    // This ensures grass is culled immediately after road texture is set
-    if (this.ssbo) {
-      // Touch the camera position to trigger a visibility update
-      uniforms.uCameraPosition.value.x += 0.001;
-      uniforms.uCameraPosition.value.x -= 0.001;
-    }
 
     console.log(
       `[ProceduralGrass] ✅ Road influence texture updated: ${width}x${height}, ` +
@@ -4440,7 +3579,6 @@ export class ProceduralGrassSystem extends System {
     this.mesh?.geometry.dispose();
     (this.mesh?.material as THREE.Material | undefined)?.dispose();
     this.mesh = null;
-    this.ssbo = null;
 
     // GPU-driven LOD1 cleanup
     if (this.gpuLod1Mesh) {

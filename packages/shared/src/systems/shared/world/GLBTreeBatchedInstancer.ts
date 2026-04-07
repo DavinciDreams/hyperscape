@@ -16,6 +16,7 @@
 
 import THREE from "../../../extras/three/three";
 import type { World } from "../../../core/World";
+import { SNOW_BIOMES } from "./TerrainBiomeTypes";
 import { modelCache } from "../../../utils/rendering/ModelCache";
 import {
   createTreeDissolveMaterial,
@@ -39,11 +40,27 @@ const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 
+// ---- Per-instance frustum culling (Option B: setVisibleAt) ----
+// We build a world-space bounding sphere per tree slot each frame and call
+// setVisibleAt(id, false) for slots outside the frustum or beyond the far fade
+// distance. This is safe with sortObjects=false because setVisibleAt only marks
+// slots; it does not remove them from the buffer, so the indirect drawIndex →
+// instanceId mapping never shifts (avoiding the tree-swap bug from perObjectFrustumCulled).
+const _cullFrustum = new THREE.Frustum();
+const _cullProjScreenMatrix = new THREE.Matrix4();
+const _cullSphere = new THREE.Sphere();
+// Extra world-space padding beyond the tree's computed radius to avoid pops at edges.
+const TREE_CULL_SPHERE_BUFFER = 4; // meters
+// Max squared distance beyond which trees are always invisible (matches shader FADE_END).
+const TREE_MAX_RENDER_DIST = GPU_VEG_CONFIG.FADE_END;
+const TREE_MAX_RENDER_DIST_SQ = TREE_MAX_RENDER_DIST * TREE_MAX_RENDER_DIST;
+
 // ---- Batch color channel layout ----
 // R = highlight intensity (1.0 = normal, >1.0 = highlighted via HL_COLOR_INTENSITY)
-// G = highlight intensity (same as R — shader detects highlight via step(1.01, max(R, G)))
+// G = biome snow weight (0.0 = no snow, 1.0 = full snow) — set once on add/LOD swap
 // B = 1.0 - dissolveVal (1.0 = fully visible, 0.0 = fully dissolved)
-// Only modify channels through applyHighlightColor (R/G) and applyDissolveColor (B).
+// Only modify channels through applyHighlightColor (R), applyDissolveColor (B),
+// and addToPool (G for snow).
 // NOTE: If the underlying color buffer is Uint8 (256 levels), dissolve precision is
 // ~0.004 per step. At 0.3s duration / 60fps (~18 steps) this is more than sufficient.
 const _defaultColor = new THREE.Color(1, 1, 1);
@@ -59,6 +76,7 @@ interface TreeSlot {
   yOffset: number;
   currentLOD: 0 | 1 | 2;
   variantIndex: number;
+  snowWeight: number;
 }
 
 interface BatchedLODPool {
@@ -91,7 +109,7 @@ interface TreeTypePool {
   modelRadius: number;
 }
 
-const resourceLOD = getLODDistances("resource");
+const resourceLOD = getLODDistances("tree");
 
 // ---- Module state ----
 let scene: THREE.Scene | null = null;
@@ -204,7 +222,7 @@ function computeModelBounds(
   const height = bbox.max.y - bbox.min.y;
   const dx = Math.max(Math.abs(bbox.min.x), Math.abs(bbox.max.x));
   const dz = Math.max(Math.abs(bbox.min.z), Math.abs(bbox.max.z));
-  return { yOffset: -bbox.min.y, height, radius: Math.max(dx, dz) };
+  return { yOffset: 0, height, radius: Math.max(dx, dz) };
 }
 
 async function loadLODParts(path: string): Promise<MeshPart[] | null> {
@@ -352,13 +370,9 @@ async function ensureTreeTypePool(
     };
 
     function buildMaterialForPart(p: MeshPart): DissolveMaterial {
-      const isLeaf =
-        !!(p.material as any).transparent ||
-        (p.material as any).side === THREE.DoubleSide;
       const dm = createTreeDissolveMaterial(p.material, {
         ...dissolveOpts,
         batched: true,
-        isLeafMaterial: isLeaf,
       } as TreeMaterialOptions);
       dm.side = THREE.DoubleSide;
       enableTextureRepeat(dm);
@@ -519,28 +533,29 @@ function addToPool(
   mat: THREE.Matrix4,
   variantIndex: number,
   dissolve = 0,
+  snowWeight = 0,
 ): void {
-  const ids: number[] = [];
+  for (let i = 0; i < pool.batches.length; i++) {
+    const numVariants = pool.geometryIds[i].length;
+    const clampedIdx = variantIndex % numVariants;
+    if (pool.geometryIds[i][clampedIdx] === undefined) {
+      console.warn(
+        `[GLBTreeBatchedInstancer] geoId undefined: slot=${i} variant=${clampedIdx} available=${numVariants}, aborting addToPool`,
+      );
+      return;
+    }
+  }
+
+  const ids: number[] = new Array(pool.batches.length);
+  _tmpColor.setRGB(1, snowWeight, 1.0 - dissolve);
   for (let i = 0; i < pool.batches.length; i++) {
     const numVariants = pool.geometryIds[i].length;
     const clampedIdx = variantIndex % numVariants;
     const geoId = pool.geometryIds[i][clampedIdx];
-    if (geoId === undefined) {
-      console.warn(
-        `[GLBTreeBatchedInstancer] geoId undefined: slot=${i} variant=${clampedIdx} available=${numVariants}`,
-      );
-      continue;
-    }
     const instId = pool.batches[i].addInstance(geoId);
     pool.batches[i].setMatrixAt(instId, mat);
-    if (dissolve > 0) {
-      // Write dissolve into blue channel immediately to avoid a 1-frame flash
-      _tmpColor.setRGB(1, 1, 1.0 - dissolve);
-      pool.batches[i].setColorAt(instId, _tmpColor);
-    } else {
-      pool.batches[i].setColorAt(instId, _defaultColor);
-    }
-    ids.push(instId);
+    pool.batches[i].setColorAt(instId, _tmpColor);
+    ids[i] = instId;
   }
   pool.instanceIds.set(entityId, ids);
 }
@@ -568,11 +583,11 @@ function applyHighlightColor(
 ): void {
   const ids = pool.instanceIds.get(entityId);
   if (!ids) return;
-  const rg = on ? HL_COLOR_INTENSITY : 1.0;
+  const r = on ? HL_COLOR_INTENSITY : 1.0;
   for (let i = 0; i < pool.batches.length; i++) {
-    // Preserve blue channel (encodes dissolve state)
+    // Only modify R (highlight); preserve G (snow weight) and B (dissolve)
     pool.batches[i].getColorAt(ids[i], _tmpColor);
-    _tmpColor.setRGB(rg, rg, _tmpColor.b);
+    _tmpColor.setRGB(r, _tmpColor.g, _tmpColor.b);
     pool.batches[i].setColorAt(ids[i], _tmpColor);
   }
 }
@@ -620,8 +635,50 @@ export async function addInstance(
 ): Promise<boolean> {
   if (!scene || !world) return false;
 
+  if (entityToTreeType.has(entityId)) {
+    removeInstance(entityId);
+  }
+
   try {
     const pool = await ensureTreeTypePool(treeType, variantPaths);
+
+    // Pick initial LOD based on camera distance to avoid LOD0 pop-in at range
+    let initialLOD: 0 | 1 | 2 = 0;
+    if (world?.camera) {
+      const cp = world.camera.position;
+      const dx = cp.x - position.x;
+      const dz = cp.z - position.z;
+      const distSq = dx * dx + dz * dz;
+      if (distSq >= resourceLOD.lod2DistanceSq) {
+        initialLOD = pool.lod2 ? 2 : pool.lod1 ? 1 : 0;
+      } else if (distSq >= resourceLOD.lod1DistanceSq) {
+        initialLOD = pool.lod1 ? 1 : 0;
+      }
+    }
+
+    let snowWeight = 0;
+    {
+      const terrain = world!.getSystem<any>("terrain");
+      if (terrain?.computeBiomeWeightsByPosition) {
+        const weights = terrain.computeBiomeWeightsByPosition(
+          position.x,
+          position.z,
+        ) as Record<string, number>;
+        const totalWeight = Object.values(weights).reduce(
+          (a: number, b: number) => a + b,
+          0,
+        );
+        if (totalWeight > 0) {
+          let snowSum = 0;
+          for (const [biome, w] of Object.entries(weights)) {
+            if (SNOW_BIOMES.has(biome)) snowSum += w;
+          }
+          snowWeight = snowSum / totalWeight;
+        }
+      } else {
+        snowWeight = 1.0;
+      }
+    }
 
     const slot: TreeSlot = {
       entityId,
@@ -629,16 +686,26 @@ export async function addInstance(
       rotation,
       scale,
       yOffset: pool.yOffset,
-      currentLOD: 0,
+      currentLOD: initialLOD,
       variantIndex,
+      snowWeight,
     };
 
     pool.instances.set(entityId, slot);
     entityToTreeType.set(entityId, treeType);
 
     const mat = composeInstanceMatrix(position, rotation, scale, pool.yOffset);
-    if (pool.lod0)
-      addToPool(pool.lod0, entityId, mat, variantIndex, initialDissolve);
+    const initialPool =
+      initialLOD === 0 ? pool.lod0 : initialLOD === 1 ? pool.lod1 : pool.lod2;
+    if (initialPool)
+      addToPool(
+        initialPool,
+        entityId,
+        mat,
+        variantIndex,
+        initialDissolve,
+        snowWeight,
+      );
 
     return true;
   } catch (error) {
@@ -878,6 +945,7 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
           mat,
           slot.variantIndex,
           wasDissolveVal,
+          slot.snowWeight,
         );
         if (wasHl) applyHighlightColor(newPool, slot.entityId, true);
       }
@@ -887,6 +955,50 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
   // Tick dissolve animations — runs AFTER LOD transitions above so that
   // applyDissolveValue always finds the entity in its current (post-swap) pool.
   tickDissolveAnims(dissolveAnims, deltaTime, applyDissolveValue);
+
+  // ---- Per-instance frustum + distance culling ----
+  // Build camera frustum once for all trees this frame.
+  _cullProjScreenMatrix.multiplyMatrices(
+    camera.projectionMatrix,
+    camera.matrixWorldInverse,
+  );
+  _cullFrustum.setFromProjectionMatrix(_cullProjScreenMatrix);
+
+  for (const pool of pools.values()) {
+    for (const slot of pool.instances.values()) {
+      const lodPool = getLodPool(pool, slot);
+      if (!lodPool) continue;
+      const ids = lodPool.instanceIds.get(slot.entityId);
+      if (!ids) continue;
+
+      // Quick distance check from camera (horizontal only, same as LOD loop).
+      const dx = camPos.x - slot.position.x;
+      const dz = camPos.z - slot.position.z;
+      const distSq = dx * dx + dz * dz;
+
+      let visible: boolean;
+      if (distSq > TREE_MAX_RENDER_DIST_SQ) {
+        // Beyond shader fade end — always invisible.
+        visible = false;
+      } else {
+        // Frustum sphere test. Center at mid-height so tall canopies aren't culled
+        // while the tree base is still just inside the frustum.
+        _cullSphere.center.set(
+          slot.position.x,
+          slot.position.y + pool.modelHeight * slot.scale * 0.5,
+          slot.position.z,
+        );
+        _cullSphere.radius =
+          Math.max(pool.modelRadius, pool.modelHeight * 0.5) * slot.scale +
+          TREE_CULL_SPHERE_BUFFER;
+        visible = _cullFrustum.intersectsSphere(_cullSphere);
+      }
+
+      for (let i = 0; i < lodPool.batches.length; i++) {
+        lodPool.batches[i].setVisibleAt(ids[i], visible);
+      }
+    }
+  }
 
   // Update dissolve uniforms
   const camY = camPos.y;
@@ -898,6 +1010,7 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
     sunLight?: { intensity: number };
     lightDirection?: THREE.Vector3;
     hemisphereLight?: { color: THREE.Color };
+    getDayIntensity?: () => number;
   } | null;
 
   const wind = world.getSystem("wind") as Wind | null;
@@ -927,16 +1040,8 @@ export function updateGLBTreeBatchedInstancer(deltaTime: number): void {
               2.0,
             );
           }
-          if (env?.hemisphereLight) {
-            const c = env.hemisphereLight.color;
-            const avg = (c.r + c.g + c.b) / 3;
-            if (avg > 0.01) {
-              treeMat.treeUniforms.shadeColor.value.setRGB(
-                c.r / avg,
-                c.g / avg,
-                c.b / avg,
-              );
-            }
+          if (env?.getDayIntensity) {
+            treeMat.treeUniforms.dayIntensity.value = env.getDayIntensity();
           }
           if (wind) {
             treeMat.treeUniforms.windTime.value = wind.uniforms.time.value;

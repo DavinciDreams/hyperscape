@@ -41,6 +41,7 @@ export const {
   positionView,
   normalLocal,
   normalWorld,
+  normalWorldGeometry,
   normalView,
   cameraPosition,
   cameraProjectionMatrix,

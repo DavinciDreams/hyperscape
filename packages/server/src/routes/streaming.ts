@@ -30,6 +30,7 @@ import {
   registerStreamingBettingRoutes,
 } from "./streaming-betting-routes.js";
 import { trimReplayFrames } from "./streaming-sse-buffer.js";
+import { getDefaultPublicWsUrl } from "../shared/public-ws-url.js";
 type InventorySnapshotItem = {
   slot: number;
   itemId: string;
@@ -77,7 +78,10 @@ const STREAMING_SSE_MAX_PENDING_BYTES = Math.max(
   128 * 1024,
   Math.min(
     16 * 1024 * 1024,
-    Number.parseInt(process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576", 10),
+    Number.parseInt(
+      process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576",
+      10,
+    ),
   ),
 );
 const STREAMING_SSE_REPLAY_MAX_BYTES = Math.max(
@@ -1016,7 +1020,7 @@ export function registerStreamingRoutes(
         publicDelayMs: STREAMING_PUBLIC_DELAY_MS,
         publicDelayDefaultMs: STREAMING_PUBLIC_DELAY_DEFAULT_MS,
         publicDelayOverridden: STREAMING_PUBLIC_DELAY_OVERRIDDEN,
-        wsUrl: process.env.PUBLIC_WS_URL || "ws://localhost:5555/ws",
+        wsUrl: process.env.PUBLIC_WS_URL || getDefaultPublicWsUrl(),
       });
     },
   );
