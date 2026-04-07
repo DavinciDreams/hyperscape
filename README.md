@@ -98,6 +98,23 @@ cp packages/asset-forge/.env.example packages/asset-forge/.env
 
 > PostgreSQL starts automatically via Docker when the server starts.
 
+## Streaming Architecture
+
+For the duel arena and HyperBet integration, the authoritative runtime model is:
+
+- Cloudflare Pages hosts the public `/stream` page.
+- The GPU host runs the renderer, browser capture, and FFmpeg encode.
+- Railway hosts the Hyperscapes API and control plane.
+- PhysX JS and WASM must load same-origin from the Pages-hosted client.
+- Cloudflare Stream LL-HLS is the target viewer-delivery path once external
+  delivery is enabled.
+- Self-hosted HLS and optional HLS/R2 sync remain fallback and diagnostic paths,
+  not the primary viewer path.
+
+The server now publishes additive renderer metrics and delivery metadata so
+Hyperbet can distinguish source staleness, delivery staleness, and player drift
+instead of treating every failure as generic stream downtime.
+
 ## Project Structure
 
 ```

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import type { StreamDeliveryInfo } from "../streaming/delivery-config.js";
 
 /** A single RTMP destination entry from the external status file. */
 export interface ExternalRtmpDestination {
@@ -29,6 +30,24 @@ export interface ExternalRendererHealthBlob {
   phase?: string | null;
 }
 
+export interface ExternalRendererMetricsBlob {
+  captureFps?: number | null;
+  encodeFps?: number | null;
+  droppedFrames?: number | null;
+  renderTick?: number | null;
+  duelStateTick?: number | null;
+  latestFrameAt?: number | null;
+  latestRenderTickAt?: number | null;
+  latestDuelStateTickAt?: number | null;
+  latestVisualChangeAt?: number | null;
+  visualChangeAgeMs?: number | null;
+}
+
+export interface ExternalHlsManifestBlob {
+  updatedAt?: number | null;
+  mediaSequence?: number | null;
+}
+
 /**
  * Typed snapshot from the external RTMP status file. Only allowlisted fields
  * are preserved after parsing — unknown keys in the source JSON are stripped
@@ -39,6 +58,9 @@ export interface ExternalRtmpStatusSnapshot {
   stats: ExternalRtmpStreamStats;
   updatedAt: number;
   rendererHealth?: ExternalRendererHealthBlob;
+  metrics?: ExternalRendererMetricsBlob;
+  hlsManifest?: ExternalHlsManifestBlob;
+  delivery?: StreamDeliveryInfo;
 }
 
 type ExternalStatusPoller = {
@@ -57,7 +79,8 @@ function asFiniteNumber(value: unknown): number | null {
 /**
  * Parse and validate the external RTMP status JSON, stripping unknown keys.
  *
- * Only `destinations`, `stats`, `updatedAt`, and `rendererHealth` are
+ * Only `destinations`, `stats`, `updatedAt`, `rendererHealth`, `metrics`,
+ * `hlsManifest`, and `delivery` are
  * forwarded. Any extra keys in the source file are silently dropped so
  * tampered files cannot inject arbitrary data into API responses.
  */
@@ -94,6 +117,15 @@ export function parseExternalRtmpStatusSnapshot(
     if (parsed.rendererHealth && typeof parsed.rendererHealth === "object") {
       snapshot.rendererHealth =
         parsed.rendererHealth as ExternalRendererHealthBlob;
+    }
+    if (parsed.metrics && typeof parsed.metrics === "object") {
+      snapshot.metrics = parsed.metrics as ExternalRendererMetricsBlob;
+    }
+    if (parsed.hlsManifest && typeof parsed.hlsManifest === "object") {
+      snapshot.hlsManifest = parsed.hlsManifest as ExternalHlsManifestBlob;
+    }
+    if (parsed.delivery && typeof parsed.delivery === "object") {
+      snapshot.delivery = parsed.delivery as StreamDeliveryInfo;
     }
 
     return snapshot;

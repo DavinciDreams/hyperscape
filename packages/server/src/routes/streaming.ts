@@ -18,6 +18,7 @@ import {
 } from "../systems/StreamingDuelScheduler/types.js";
 import { peekRTMPBridge } from "../streaming/index.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
+import { resolveStreamDeliveryInfo } from "../streaming/delivery-config.js";
 import {
   STREAMING_CANONICAL_PLATFORM,
   STREAMING_PUBLIC_DELAY_DEFAULT_MS,
@@ -1056,10 +1057,29 @@ export function registerStreamingRoutes(
             destinations: stats.destinations,
             healthy: stats.healthy,
             droppedFrames: stats.droppedFrames,
+            encoderFps: stats.encoderFps,
             backpressured: stats.backpressured,
             spectators: stats.spectators,
             processMemory: stats.processMemory,
           },
+          metrics: {
+            captureFps: null,
+            encodeFps:
+              typeof stats.encoderFps === "number" &&
+              Number.isFinite(stats.encoderFps)
+                ? stats.encoderFps
+                : null,
+            droppedFrames: stats.droppedFrames,
+            renderTick: 0,
+            duelStateTick: 0,
+            latestFrameAt: null,
+            latestRenderTickAt: null,
+            latestDuelStateTickAt: null,
+            latestVisualChangeAt: null,
+            visualChangeAgeMs: null,
+          },
+          hlsManifest: null,
+          delivery: resolveStreamDeliveryInfo(process.env),
           rendererHealth: deriveBettingRendererHealth(
             getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
             {
@@ -1093,6 +1113,10 @@ export function registerStreamingRoutes(
         );
         return reply.send({
           ...capture.getStats(),
+          metrics: externalSnapshot?.metrics ?? null,
+          hlsManifest: externalSnapshot?.hlsManifest ?? null,
+          delivery:
+            externalSnapshot?.delivery ?? resolveStreamDeliveryInfo(process.env),
           rendererHealth: deriveBettingRendererHealth(
             getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
             {

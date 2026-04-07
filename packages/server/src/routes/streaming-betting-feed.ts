@@ -29,6 +29,34 @@ export type BettingFeedRendererHealth = {
   updatedAt: number | null;
 };
 
+export type BettingFeedHlsManifest = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
+
+export type BettingFeedRendererMetrics = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number | null;
+  renderTick: number | null;
+  duelStateTick: number | null;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+  hlsManifest: BettingFeedHlsManifest | null;
+};
+
+export type BettingFeedDelivery = {
+  mode: "self_hls" | "external_hls";
+  provider: string | null;
+  playbackUrl: string | null;
+  hlsUrl: string | null;
+  llhlsUrl: string | null;
+  ingestUrl: string | null;
+};
+
 export type BettingFeedPayload = {
   schemaVersion: number;
   sourceEpoch: number;
@@ -49,6 +77,8 @@ export type BettingFeedPayload = {
   agent2: BettingFeedAgent | null;
   arenaPositions: StreamingDuelCycle["arenaPositions"];
   rendererHealth: BettingFeedRendererHealth | null;
+  rendererMetrics: BettingFeedRendererMetrics | null;
+  delivery: BettingFeedDelivery | null;
 };
 
 export type BettingFeedFrame = {
@@ -122,6 +152,8 @@ export function buildBettingFeedPayload(params: {
   emittedAt: number;
   cycle: StreamingDuelCycle | null;
   rendererHealth?: BettingFeedRendererHealth | null;
+  rendererMetrics?: BettingFeedRendererMetrics | null;
+  delivery?: BettingFeedDelivery | null;
 }): BettingFeedPayload {
   const cycle = params.cycle;
   return {
@@ -144,6 +176,8 @@ export function buildBettingFeedPayload(params: {
     agent2: toAgentSnapshot(cycle?.agent2 ?? null),
     arenaPositions: cycle?.arenaPositions ?? null,
     rendererHealth: params.rendererHealth ?? null,
+    rendererMetrics: params.rendererMetrics ?? null,
+    delivery: params.delivery ?? null,
   };
 }
 
@@ -155,6 +189,21 @@ export function buildBettingFeedDedupKey(payload: BettingFeedPayload): string {
       ? {
           ...payload.rendererHealth,
           updatedAt: 0,
+        }
+      : null,
+    rendererMetrics: payload.rendererMetrics
+      ? {
+          ...payload.rendererMetrics,
+          latestFrameAt: 0,
+          latestRenderTickAt: 0,
+          latestDuelStateTickAt: 0,
+          latestVisualChangeAt: 0,
+          hlsManifest: payload.rendererMetrics.hlsManifest
+            ? {
+                ...payload.rendererMetrics.hlsManifest,
+                updatedAt: 0,
+              }
+            : null,
         }
       : null,
   });

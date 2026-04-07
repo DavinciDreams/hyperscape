@@ -55,6 +55,10 @@ import {
   generateWebCodecsCaptureScript,
 } from "../src/streaming/index.js";
 import {
+  resolveStreamDeliveryInfo,
+  type StreamDeliveryInfo,
+} from "../src/streaming/delivery-config.js";
+import {
   buildDefaultCaptureLaunchArgs,
   resolveAllowedCaptureOrigins,
   resolveUnexpectedCaptureOrigin,
@@ -210,6 +214,13 @@ let cdpFrameCount = 0;
 let cdpFps = 0;
 let cdpFpsIntervalId: ReturnType<typeof setInterval> | null = null;
 let cdpDroppedFrames = 0;
+let lastCaptureFrameAt: number | null = null;
+let latestRenderTickAt: number | null = null;
+let latestDuelStateTickAt: number | null = null;
+let latestVisualChangeAt: number | null = null;
+let lastVisualSampleHash: string | null = null;
+let lastObservedRenderTick = 0;
+let lastObservedDuelStateTick = 0;
 
 function startFpsTracking() {
   if (cdpFpsIntervalId) clearInterval(cdpFpsIntervalId);
@@ -230,6 +241,31 @@ function stopFpsTracking() {
 
 type ActiveCaptureMode = "cdp" | "webcodecs" | "mediarecorder";
 
+type RendererHeartbeatSnapshot = {
+  renderTick: number;
+  latestRenderTickAt: number | null;
+  duelStateTick: number;
+  latestDuelStateTickAt: number | null;
+};
+
+type RendererMetricsSnapshot = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number;
+  renderTick: number;
+  duelStateTick: number;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+};
+
+type HlsManifestSnapshot = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
+
 type RendererHealthSnapshot = CaptureRendererHealthSnapshot & {
   updatedAt: number | null;
   phase: string | null;
@@ -245,6 +281,64 @@ let latestRendererHealth: RendererHealthSnapshot = {
 let rendererHealthProbeInFlight: Promise<RendererHealthSnapshot> | null = null;
 let captureNavigationAbortInFlight = false;
 
+function readHlsManifestSnapshot(): HlsManifestSnapshot {
+  const hlsOutputPath = process.env.HLS_OUTPUT_PATH?.trim();
+  if (!hlsOutputPath) {
+    return {
+      updatedAt: null,
+      mediaSequence: null,
+    };
+  }
+
+  try {
+    const stat = fs.statSync(hlsOutputPath);
+    const rawManifest = fs.readFileSync(hlsOutputPath, "utf8");
+    const mediaSequenceMatch = rawManifest.match(
+      /#EXT-X-MEDIA-SEQUENCE:(\d+)/i,
+    );
+    const mediaSequence = mediaSequenceMatch
+      ? Number.parseInt(mediaSequenceMatch[1] || "", 10)
+      : null;
+    return {
+      updatedAt: Number.isFinite(stat.mtimeMs) ? Math.round(stat.mtimeMs) : null,
+      mediaSequence:
+        mediaSequence != null && Number.isFinite(mediaSequence)
+          ? mediaSequence
+          : null,
+    };
+  } catch {
+    return {
+      updatedAt: null,
+      mediaSequence: null,
+    };
+  }
+}
+
+function buildRendererMetricsSnapshot(
+  bridge: ReturnType<typeof getRTMPBridge>,
+  captureMode: ActiveCaptureMode,
+): RendererMetricsSnapshot {
+  const stats = bridge.getStats();
+  return {
+    captureFps: captureMode === "cdp" ? cdpFps : null,
+    encodeFps:
+      typeof stats.encoderFps === "number" && Number.isFinite(stats.encoderFps)
+        ? stats.encoderFps
+        : null,
+    droppedFrames: Math.max(stats.droppedFrames, cdpDroppedFrames),
+    renderTick: lastObservedRenderTick,
+    duelStateTick: lastObservedDuelStateTick,
+    latestFrameAt: lastCaptureFrameAt,
+    latestRenderTickAt,
+    latestDuelStateTickAt,
+    latestVisualChangeAt,
+    visualChangeAgeMs:
+      latestVisualChangeAt != null
+        ? Math.max(0, Date.now() - latestVisualChangeAt)
+        : null,
+  };
+}
+
 function writeExternalStatusSnapshot(
   bridge: ReturnType<typeof getRTMPBridge>,
   captureMode: ActiveCaptureMode,
@@ -254,6 +348,9 @@ function writeExternalStatusSnapshot(
   const bridgeStatus = bridge.getStatus();
   const stats = bridge.getStats();
   const processMemory = process.memoryUsage();
+  const delivery: StreamDeliveryInfo = resolveStreamDeliveryInfo(process.env);
+  const hlsManifest = readHlsManifestSnapshot();
+  const metrics = buildRendererMetricsSnapshot(bridge, captureMode);
   const payload = {
     ...bridgeStatus,
     stats: {
@@ -263,11 +360,15 @@ function writeExternalStatusSnapshot(
       destinations: stats.destinations,
       healthy: stats.healthy,
       droppedFrames: stats.droppedFrames,
+      encoderFps: stats.encoderFps,
       backpressured: stats.backpressured,
       spectators: stats.spectators,
       processMemory: stats.processMemory,
     },
     captureMode,
+    metrics,
+    hlsManifest,
+    delivery,
     processRssBytes: processMemory.rss,
     rendererHealth: latestRendererHealth,
     updatedAt: Date.now(),
@@ -366,6 +467,12 @@ async function probeRendererHealth(
         updatedAt?: number | null;
         phase?: string | null;
       } | null;
+      __HYPERSCAPE_STREAM_HEARTBEAT__?: {
+        renderTick?: number;
+        latestRenderTickAt?: number | null;
+        duelStateTick?: number;
+        latestDuelStateTickAt?: number | null;
+      } | null;
       __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
     };
     const explicitHealth =
@@ -408,14 +515,98 @@ async function probeRendererHealth(
       !bootStatus.startsWith("error:");
     const hasCriticalErrorUi =
       !explicitHealth && bootStatus !== null && bootStatus.startsWith("error:");
+    const heartbeat =
+      win.__HYPERSCAPE_STREAM_HEARTBEAT__ &&
+      typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__ === "object"
+        ? {
+            renderTick:
+              typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__.renderTick ===
+                "number" &&
+              Number.isFinite(win.__HYPERSCAPE_STREAM_HEARTBEAT__.renderTick)
+                ? win.__HYPERSCAPE_STREAM_HEARTBEAT__.renderTick
+                : 0,
+            latestRenderTickAt:
+              typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestRenderTickAt ===
+                "number" &&
+              Number.isFinite(
+                win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestRenderTickAt,
+              )
+                ? win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestRenderTickAt
+                : null,
+            duelStateTick:
+              typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__.duelStateTick ===
+                "number" &&
+              Number.isFinite(win.__HYPERSCAPE_STREAM_HEARTBEAT__.duelStateTick)
+                ? win.__HYPERSCAPE_STREAM_HEARTBEAT__.duelStateTick
+                : 0,
+            latestDuelStateTickAt:
+              typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__
+                .latestDuelStateTickAt === "number" &&
+              Number.isFinite(
+                win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestDuelStateTickAt,
+              )
+                ? win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestDuelStateTickAt
+                : null,
+          }
+        : null;
+    let frameHash: string | null = null;
+    const canvas = document.querySelector("canvas");
+    if (canvas instanceof HTMLCanvasElement) {
+      const sampleCanvas = document.createElement("canvas");
+      sampleCanvas.width = 32;
+      sampleCanvas.height = 18;
+      const context = sampleCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
+      if (context) {
+        context.drawImage(canvas, 0, 0, sampleCanvas.width, sampleCanvas.height);
+        const imageData = context.getImageData(
+          0,
+          0,
+          sampleCanvas.width,
+          sampleCanvas.height,
+        ).data;
+        let hash = 2166136261;
+        for (let i = 0; i < imageData.length; i += 16) {
+          hash ^= imageData[i] ?? 0;
+          hash = Math.imul(hash, 16777619);
+          hash ^= imageData[i + 1] ?? 0;
+          hash = Math.imul(hash, 16777619);
+          hash ^= imageData[i + 2] ?? 0;
+          hash = Math.imul(hash, 16777619);
+        }
+        frameHash = (hash >>> 0).toString(16);
+      }
+    }
     return {
       explicitHealth,
       hasCanvas: document.querySelector("canvas") !== null,
       readyFlag: win.__HYPERSCAPE_STREAM_READY__ === true,
       hasStreamingBootUi,
       hasCriticalErrorUi,
+      heartbeat,
+      frameHash,
     };
   });
+
+  const heartbeat =
+    probe.heartbeat && typeof probe.heartbeat === "object"
+      ? (probe.heartbeat as RendererHeartbeatSnapshot)
+      : null;
+  if (heartbeat) {
+    lastObservedRenderTick = heartbeat.renderTick;
+    lastObservedDuelStateTick = heartbeat.duelStateTick;
+    latestRenderTickAt = heartbeat.latestRenderTickAt;
+    latestDuelStateTickAt = heartbeat.latestDuelStateTickAt;
+  }
+  if (typeof probe.frameHash === "string" && probe.frameHash.length > 0) {
+    if (probe.frameHash !== lastVisualSampleHash) {
+      lastVisualSampleHash = probe.frameHash;
+      latestVisualChangeAt = probedAt;
+    } else if (latestVisualChangeAt === null) {
+      latestVisualChangeAt = probedAt;
+    }
+  }
 
   const explicitHealth =
     probe.explicitHealth && typeof probe.explicitHealth === "object"
@@ -837,6 +1028,7 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
 
     // Decode base64 JPEG and feed to FFmpeg
     const jpegBuffer = Buffer.from(base64Data, "base64");
+    lastCaptureFrameAt = Date.now();
     const written = bridge.feedFrame(jpegBuffer);
 
     if (written) {

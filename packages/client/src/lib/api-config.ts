@@ -21,6 +21,7 @@ type PublicRuntimeEnv = {
   PUBLIC_API_URL?: string;
   PUBLIC_WS_URL?: string;
   PUBLIC_CDN_URL?: string;
+  PUBLIC_ASSETS_URL?: string;
 };
 
 type WindowWithRuntimeEnv = Window & {
@@ -166,3 +167,8 @@ export const CDN_URL: string =
       : "http://localhost:5555/game-assets",
   ) ??
   "http://localhost:5555/game-assets";
+
+export const ASSETS_URL: string =
+  getRuntimeEnvValue("PUBLIC_ASSETS_URL") ??
+  normalizeBrowserLoopbackUrl(import.meta.env.PUBLIC_ASSETS_URL) ??
+  CDN_URL;

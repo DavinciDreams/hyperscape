@@ -390,14 +390,26 @@ export default function ArenaBettingPage() {
           return;
         }
 
+        const syncLiveEdge = () => {
+          const latencyMs =
+            typeof instance.latency === "number" && Number.isFinite(instance.latency)
+              ? Math.round(instance.latency * 1000)
+              : null;
+          if (latencyMs != null && latencyMs > 8_000) {
+            setStreamPlaybackError("Playback drifted from the live edge.");
+            instance.startLoad(-1);
+          }
+        };
+
         const instance = new Hls({
           enableWorker: true,
-          lowLatencyMode: false,
-          liveSyncDurationCount: 4,
-          liveMaxLatencyDurationCount: 12,
-          liveBackBufferLength: 30,
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
+          lowLatencyMode: true,
+          liveSyncDurationCount: 2,
+          liveMaxLatencyDurationCount: 4,
+          liveBackBufferLength: 10,
+          maxBufferLength: 6,
+          maxMaxBufferLength: 12,
+          maxLiveSyncPlaybackRate: 1.5,
           manifestLoadingMaxRetry: 6,
           manifestLoadingRetryDelay: 800,
           levelLoadingMaxRetry: 6,
@@ -416,7 +428,19 @@ export default function ArenaBettingPage() {
         instance.on(Hls.Events.MANIFEST_PARSED, () => {
           if (disposed) return;
           setStreamPlaybackError(null);
+          syncLiveEdge();
           playVideo();
+        });
+
+        instance.on(Hls.Events.FRAG_BUFFERED, () => {
+          if (disposed) return;
+          setStreamPlaybackError(null);
+          syncLiveEdge();
+        });
+
+        instance.on(Hls.Events.LEVEL_UPDATED, () => {
+          if (disposed) return;
+          syncLiveEdge();
         });
 
         instance.on(Hls.Events.ERROR, (_event, data) => {
@@ -437,14 +461,14 @@ export default function ArenaBettingPage() {
               : "";
 
           if (dataType === Hls.ErrorTypes.NETWORK_ERROR) {
-            setStreamPlaybackError("Stream reconnecting...");
+            setStreamPlaybackError("Reconnecting to the live edge...");
             instance.startLoad(-1);
             scheduleRetry(1500);
             return;
           }
 
           if (dataType === Hls.ErrorTypes.MEDIA_ERROR) {
-            setStreamPlaybackError("Recovering stream...");
+            setStreamPlaybackError("Recovering live playback...");
             instance.recoverMediaError();
             scheduleRetry(1000);
             return;

@@ -26,7 +26,10 @@ import type {
   StreamingGuardrailPhase,
 } from "@hyperscape/shared";
 import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
-import type { StreamingWindow } from "@/lib/streamingWindow";
+import type {
+  StreamingWindow,
+  StreamingWindowHeartbeat,
+} from "@/lib/streamingWindow";
 import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
 import { getStreamingAccessToken } from "../lib/streamingAccessToken";
 
@@ -279,9 +282,25 @@ export function StreamingMode() {
   const cameraRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastCycleIdRef = useRef<string | null>(null);
   const worldListenerCleanupRef = useRef<(() => void) | null>(null);
+  const heartbeatRafRef = useRef<number | null>(null);
+  const renderTickRef = useRef(0);
+  const duelStateTickRef = useRef(0);
+  const latestRenderTickAtRef = useRef<number | null>(null);
+  const latestDuelStateTickAtRef = useRef<number | null>(null);
   const [streamAccessToken] = useState<string | null>(() =>
     getStreamingAccessToken(),
   );
+
+  const writeHeartbeat = useCallback(() => {
+    const win = window as StreamingWindow;
+    const heartbeat: StreamingWindowHeartbeat = {
+      renderTick: renderTickRef.current,
+      latestRenderTickAt: latestRenderTickAtRef.current,
+      duelStateTick: duelStateTickRef.current,
+      latestDuelStateTickAt: latestDuelStateTickAtRef.current,
+    };
+    win.__HYPERSCAPE_STREAM_HEARTBEAT__ = heartbeat;
+  }, []);
 
   // WebSocket URL for streaming mode (supports optional streamToken gate)
   const wsUrl = useMemo(() => {
@@ -340,6 +359,16 @@ export function StreamingMode() {
       setTerrainStalled(false);
       setReadyEventDelayed(false);
       setClientInitError(null);
+      renderTickRef.current = 0;
+      duelStateTickRef.current = 0;
+      latestRenderTickAtRef.current = null;
+      latestDuelStateTickAtRef.current = null;
+      win.__HYPERSCAPE_STREAM_HEARTBEAT__ = {
+        renderTick: 0,
+        latestRenderTickAt: null,
+        duelStateTick: 0,
+        latestDuelStateTickAt: null,
+      };
 
       // Force potato-mode graphics tuned for stable 720p streaming output.
       // Keep DPR at 1 so capture canvas stays at target resolution.
@@ -964,10 +993,37 @@ export function StreamingMode() {
   }, [worldReady, terrainReady]);
 
   useEffect(() => {
+    const tick = () => {
+      renderTickRef.current += 1;
+      latestRenderTickAtRef.current = Date.now();
+      writeHeartbeat();
+      heartbeatRafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    heartbeatRafRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      if (heartbeatRafRef.current !== null) {
+        window.cancelAnimationFrame(heartbeatRafRef.current);
+        heartbeatRafRef.current = null;
+      }
+    };
+  }, [writeHeartbeat]);
+
+  useEffect(() => {
+    if (!streamingState) {
+      return;
+    }
+    duelStateTickRef.current += 1;
+    latestDuelStateTickAtRef.current = Date.now();
+    writeHeartbeat();
+  }, [streamingState, writeHeartbeat]);
+
+  useEffect(() => {
     return () => {
       const win = window as StreamingWindow;
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
+      win.__HYPERSCAPE_STREAM_HEARTBEAT__ = null;
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = null;
       if (worldReadyTimeoutRef.current) {
         clearTimeout(worldReadyTimeoutRef.current);
@@ -1119,6 +1175,49 @@ export function StreamingMode() {
     const win = window as StreamingWindow;
     win.__HYPERSCAPE_STREAM_READY__ = rendererHealth.ready;
     win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = rendererHealth;
+  }, [rendererHealth]);
+
+  useEffect(() => {
+    if (window.parent === window) {
+      return;
+    }
+
+    let targetOrigin = window.location.origin;
+    try {
+      if (document.referrer) {
+        targetOrigin = new URL(document.referrer).origin;
+      }
+    } catch {
+      // Fall back to same-origin postMessage when referrer parsing fails.
+    }
+
+    const postStatus = () => {
+      const win = window as StreamingWindow;
+      const degradedReason = rendererHealth.degradedReason;
+      const status =
+        rendererHealth.ready
+          ? "playing"
+          : degradedReason === "initialization_failed"
+            ? "error:init_failed"
+            : degradedReason || "loading";
+
+      window.parent.postMessage(
+        {
+          type: "HYPERSCAPE_STREAM_STATUS",
+          ready: rendererHealth.ready,
+          status,
+          rendererHealth,
+          heartbeat: win.__HYPERSCAPE_STREAM_HEARTBEAT__ ?? null,
+        },
+        targetOrigin,
+      );
+    };
+
+    postStatus();
+    const interval = window.setInterval(postStatus, 1000);
+    return () => {
+      window.clearInterval(interval);
+    };
   }, [rendererHealth]);
 
   // Write boot status to a window global so the capture pipeline's renderer

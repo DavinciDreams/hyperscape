@@ -22,6 +22,7 @@ import type {
   DestinationStatus,
 } from "./types.js";
 import { DEFAULT_STREAMING_CONFIG } from "./types.js";
+import { resolveStreamDeliveryInfo } from "./delivery-config.js";
 import {
   isStreamDestinationEnabled,
   resolveEnabledStreamDestinations,
@@ -132,6 +133,8 @@ export class RTMPBridge {
   private ffmpegLogTail: string[] = [];
   /** Whether FFmpeg stdin is currently backpressured */
   private ffmpegBackpressured = false;
+  /** Rolling encoder FPS reported by FFmpeg progress logs */
+  private ffmpegEncoderFps = 0;
   /** Whether client socket reads are paused due to FFmpeg backpressure */
   private clientSocketPaused = false;
 
@@ -495,6 +498,7 @@ export class RTMPBridge {
       process.env.YOUTUBE_RTMP_STREAM_KEY ||
       ""
     ).trim();
+    const deliveryInfo = resolveStreamDeliveryInfo(process.env);
     const addDestination = (
       name: string,
       url: string,
@@ -546,6 +550,18 @@ export class RTMPBridge {
         process.env.YOUTUBE_RTMP_URL ||
         "rtmp://a.rtmp.youtube.com/live2";
       addDestination("YouTube", RTMPBridge.toRtmpUrl(server), youtubeStreamKey);
+    }
+
+    if (
+      deliveryInfo.mode === "external_hls" &&
+      deliveryInfo.ingestUrl &&
+      !existingNames.has("External Delivery")
+    ) {
+      addDestination(
+        "External Delivery",
+        RTMPBridge.toRtmpUrl(deliveryInfo.ingestUrl),
+        process.env.STREAM_INGEST_STREAM_KEY?.trim() || "",
+      );
     }
 
     // Kick (uses RTMPS with regional ingest)
@@ -1407,10 +1423,10 @@ export class RTMPBridge {
     const hlsOutputPath = process.env.HLS_OUTPUT_PATH?.trim();
     if (hlsOutputPath) {
       const hlsTime = parseEnvInt(process.env.HLS_TIME_SECONDS, 1, 1);
-      const hlsListSize = parseEnvInt(process.env.HLS_LIST_SIZE, 30, 2);
+      const hlsListSize = parseEnvInt(process.env.HLS_LIST_SIZE, 6, 2);
       const hlsDeleteThreshold = parseEnvInt(
         process.env.HLS_DELETE_THRESHOLD,
-        120,
+        24,
         1,
       );
       const hlsStartNumber = parseEnvInt(
@@ -1458,6 +1474,7 @@ export class RTMPBridge {
       return;
     }
 
+    this.ffmpegEncoderFps = 0;
     const outputString = this.buildOutputString();
     const isNullOutput = outputString === "-f null -";
 
@@ -1593,6 +1610,14 @@ export class RTMPBridge {
    * Parse FFmpeg output for connection status
    */
   private parseFFmpegOutput(msg: string): void {
+    const encoderFpsMatch = msg.match(/fps=\s*([0-9]+(?:\.[0-9]+)?)/i);
+    if (encoderFpsMatch) {
+      const parsedFps = Number.parseFloat(encoderFpsMatch[1] || "");
+      if (Number.isFinite(parsedFps)) {
+        this.ffmpegEncoderFps = parsedFps;
+      }
+    }
+
     const slaveMuxerFailureMatch = msg.match(/Slave muxer #(\d+) failed/i);
     if (slaveMuxerFailureMatch) {
       const destIndex = Number.parseInt(slaveMuxerFailureMatch[1] || "", 10);
@@ -1629,6 +1654,7 @@ export class RTMPBridge {
     this.stopHealthMonitoring();
     this.stopPlaceholderMode();
     this.ffmpegBackpressured = false;
+    this.ffmpegEncoderFps = 0;
     this.setClientBackpressurePaused(false);
 
     const oldFfmpeg = this.ffmpeg;
@@ -1692,6 +1718,7 @@ export class RTMPBridge {
     lastCrash: number;
     healthy: boolean;
     droppedFrames: number;
+    encoderFps: number;
     backpressured: boolean;
     spectators: number;
     processMemory: {
@@ -1718,6 +1745,7 @@ export class RTMPBridge {
       lastCrash: this.lastFFmpegCrash,
       healthy,
       droppedFrames: this.droppedFrameCount,
+      encoderFps: this.ffmpegEncoderFps,
       backpressured: this.ffmpegBackpressured,
       spectators: this.spectatorClients.size,
       processMemory: {

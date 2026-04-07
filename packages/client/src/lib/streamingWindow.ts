@@ -1,5 +1,6 @@
 export type PublicRuntimeEnv = {
   PUBLIC_CDN_URL?: string;
+  PUBLIC_ASSETS_URL?: string;
   PUBLIC_WS_URL?: string;
   PUBLIC_API_URL?: string;
   PUBLIC_APP_URL?: string;
@@ -11,6 +12,13 @@ export type StreamingWindowRendererHealth = {
   degradedReason: string | null;
   updatedAt: number;
   phase: string | null;
+};
+
+export type StreamingWindowHeartbeat = {
+  renderTick: number;
+  latestRenderTickAt: number | null;
+  duelStateTick: number;
+  latestDuelStateTickAt: number | null;
 };
 
 export type CaptureControlStatus = {
@@ -28,8 +36,10 @@ export type CaptureControlStatus = {
 export type StreamingWindow = Window & {
   env?: PublicRuntimeEnv;
   __CDN_URL?: string;
+  __ASSETS_URL?: string;
   __HYPERSCAPE_STREAM_READY__?: boolean;
   __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingWindowRendererHealth | null;
+  __HYPERSCAPE_STREAM_HEARTBEAT__?: StreamingWindowHeartbeat | null;
   /**
    * Boot/loading phase indicator read by the capture pipeline's renderer
    * health probe. Set during the loading overlay lifecycle and cleared once

@@ -64,20 +64,24 @@ globalFlags.isServer = false;
 // Early CDN URL initialization to prevent PhysX WASM loading race condition
 if (typeof window !== "undefined") {
   const windowWithEnv = window as Window & {
-    env?: { PUBLIC_CDN_URL?: string };
+    env?: { PUBLIC_CDN_URL?: string; PUBLIC_ASSETS_URL?: string };
     __CDN_URL?: string;
     __ASSETS_URL?: string;
   };
-  const envCdn = windowWithEnv.env?.PUBLIC_CDN_URL;
-  if (envCdn && typeof envCdn === "string" && envCdn !== "undefined") {
-    let resolvedCdn = envCdn;
-    if (resolvedCdn.includes("127.0.0.1") || resolvedCdn.includes("0.0.0.0")) {
-      resolvedCdn = resolvedCdn
+  const envAssets =
+    windowWithEnv.env?.PUBLIC_ASSETS_URL ?? windowWithEnv.env?.PUBLIC_CDN_URL;
+  if (envAssets && typeof envAssets === "string" && envAssets !== "undefined") {
+    let resolvedAssets = envAssets;
+    if (
+      resolvedAssets.includes("127.0.0.1") ||
+      resolvedAssets.includes("0.0.0.0")
+    ) {
+      resolvedAssets = resolvedAssets
         .replace("127.0.0.1", "localhost")
         .replace("0.0.0.0", "localhost");
     }
-    windowWithEnv.__CDN_URL = resolvedCdn;
-    windowWithEnv.__ASSETS_URL = resolvedCdn;
+    windowWithEnv.__CDN_URL = resolvedAssets;
+    windowWithEnv.__ASSETS_URL = resolvedAssets;
   }
 }
 

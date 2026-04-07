@@ -22,10 +22,26 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [liveEdgeLatencyMs, setLiveEdgeLatencyMs] = useState<number | null>(
+    null,
+  );
+  const [stallCount, setStallCount] = useState(0);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !streamUrl) return;
+
+    const syncLatency = () => {
+      const hls = hlsRef.current;
+      if (hls && typeof hls.latency === "number" && Number.isFinite(hls.latency)) {
+        const latencyMs = Math.max(0, Math.round(hls.latency * 1000));
+        setLiveEdgeLatencyMs(latencyMs);
+        if (latencyMs > 8_000) {
+          setError("Playback drifted from the live edge.");
+          hls.startLoad(-1);
+        }
+      }
+    };
 
     // Native HLS support (Safari)
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -42,7 +58,12 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: true,
-      backBufferLength: 30,
+      liveSyncDurationCount: 2,
+      liveMaxLatencyDurationCount: 4,
+      liveBackBufferLength: 10,
+      maxBufferLength: 6,
+      maxMaxBufferLength: 12,
+      maxLiveSyncPlaybackRate: 1.5,
     });
 
     hlsRef.current = hls;
@@ -50,21 +71,57 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
     hls.attachMedia(video);
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      setError(null);
+      syncLatency();
       video.play().catch(() => {});
     });
 
+    hls.on(Hls.Events.FRAG_BUFFERED, () => {
+      setError(null);
+      syncLatency();
+    });
+
+    hls.on(Hls.Events.LEVEL_UPDATED, () => {
+      syncLatency();
+    });
+
     hls.on(Hls.Events.ERROR, (_event, data) => {
+      if (
+        !data.fatal &&
+        (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
+          data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
+          data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT)
+      ) {
+        setStallCount((current) => current + 1);
+        setError("Player buffering near the live edge.");
+        hls.startLoad(-1);
+        return;
+      }
       if (data.fatal) {
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          setError("Stream offline — waiting for next duel...");
+          setError("Reconnecting to the live edge...");
           setTimeout(() => hls.startLoad(), 5000);
         } else {
-          setError("Stream error");
+          setError("Recovering live playback...");
         }
       }
     });
 
+    const handleWaiting = () => {
+      setStallCount((current) => current + 1);
+      setError("Player buffering near the live edge.");
+    };
+    const handlePlaying = () => {
+      setError(null);
+      syncLatency();
+    };
+
+    video.addEventListener("waiting", handleWaiting);
+    video.addEventListener("playing", handlePlaying);
+
     return () => {
+      video.removeEventListener("waiting", handleWaiting);
+      video.removeEventListener("playing", handlePlaying);
       hls.destroy();
       hlsRef.current = null;
     };
@@ -104,6 +161,29 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
           {error}
         </div>
       )}
+      <div
+        style={{
+          position: "absolute",
+          right: 10,
+          bottom: 10,
+          padding: "6px 8px",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(5, 8, 16, 0.7)",
+          color: "#d3dae8",
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: 11,
+          lineHeight: 1.35,
+          pointerEvents: "none",
+        }}
+      >
+        <div>
+          latency{" "}
+          {liveEdgeLatencyMs != null ? `${(liveEdgeLatencyMs / 1000).toFixed(1)}s` : "n/a"}
+        </div>
+        <div>stalls {stallCount}</div>
+        <div>mode {streamUrl.includes("protocol=llhls") ? "external_hls/llhls" : "self_hls/hls"}</div>
+      </div>
     </div>
   );
 }

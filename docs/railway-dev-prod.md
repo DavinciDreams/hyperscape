@@ -1,60 +1,84 @@
-# Railway Dev/Prod Deployment
+# Railway Dev And Prod
 
-This repository deploys Railway environments with branch-to-environment mapping:
+Railway hosts the Hyperscapes API and control-plane services. It is not the
+renderer of record for the duel stream.
 
-- `main` -> `prod`
-- `develop` or `dev` -> `dev`
+## Branch Mapping
 
-Manual deploys are also supported via GitHub Actions (`Deploy to Railway`) with:
+- `main` -> shared production
+- `develop`/`dev` -> shared development
+- `enoomian/personal-staging-integration` -> personal staging when explicitly
+  selected on the service source branch
 
-- `environment=prod`
-- `environment=dev`
+## Responsibilities
 
-## Required GitHub Configuration
+Railway owns:
 
-Set the following repository secret:
+- `/health`
+- `/api/streaming/state`
+- `/api/streaming/state/events`
+- `/api/streaming/capture/status`
+- `/api/hyperbet/config`
+- wallet auth and HyperBet public routes
 
-- `RAILWAY_TOKEN`
+Railway does not own:
 
-Set these repository variables for `dev`:
+- headful stream-page rendering
+- browser capture
+- FFmpeg encode
+- GPU-bound viewer delivery
 
-- `RAILWAY_DEV_SERVICE_ID`
-- `RAILWAY_DEV_ENVIRONMENT_ID`
+Those live on the GPU capture host.
 
-Legacy fallback is supported:
+## Personal Staging Model
 
-- `RAILWAY_STAGING_SERVICE_ID`
-- `RAILWAY_STAGING_ENVIRONMENT_ID`
+For `enoomian` personal staging:
 
-Production service/environment IDs are currently pinned in
-`.github/workflows/deploy-railway.yml`.
+- Cloudflare Pages serves the public `/stream` page
+- the GPU host runs renderer/capture/encode
+- Railway points at the integrated branch and serves API/control-plane state
+- viewer delivery prefers Cloudflare Stream LL-HLS when configured
+- self-hosted HLS remains available for fallback and diagnostics
 
-## Railway Setup (One-Time)
+## Required Railway Variables
 
-1. In Railway, create or confirm two environments:
-   - `production`
-   - `development` (or your existing staging environment)
-2. Confirm each environment has a service instance for this app.
-3. Copy the `serviceId` and `environmentId` for development into GitHub variables.
+Keep secrets in Railway only. Do not commit them to git.
 
-## Point `hyperscape.gg` to Production
+Streaming delivery selection:
 
-1. In Railway:
-   - Open the production service.
-   - Go to `Settings -> Domains`.
-   - Add `hyperscape.gg` as a custom domain.
-   - Optionally add `www.hyperscape.gg` and redirect it to apex.
-2. Railway will show the exact DNS record(s) required. Create those records at your DNS provider exactly as shown.
-3. If you use Cloudflare DNS, set proxy to DNS-only until certificate issuance completes.
-4. Wait for domain verification and TLS certificate status to become active in Railway.
-5. Validate:
-   - `https://hyperscape.gg/status`
-   - `wss://hyperscape.gg/ws`
+- `STREAM_DELIVERY_MODE=self_hls|external_hls`
+- `STREAM_DELIVERY_PROVIDER`
+- `STREAM_INGEST_RTMPS_URL`
+- `STREAM_INGEST_STREAM_KEY`
+- `STREAM_PLAYBACK_HLS_URL`
+- `STREAM_PLAYBACK_LLHLS_URL`
 
-## Optional Dev Domain
+Renderer health polling:
 
-Recommended custom domain for development:
+- `STREAM_RENDERER_HEALTH_URL`
+- `STREAM_RENDERER_HEALTH_BEARER_TOKEN`
+- `STREAM_RENDERER_HEALTH_POLL_MS`
+- `STREAM_RENDERER_HEALTH_TIMEOUT_MS`
+- `STREAM_RENDERER_HLS_FRESHNESS_MS`
 
-- `dev.hyperscape.gg`
+Capture/encode defaults expected by the integrated branch:
 
-Add it in the development Railway environment and create matching DNS records from Railway's instructions.
+- `FFMPEG_HWACCEL=nvidia`
+- `STREAM_LOW_LATENCY=true`
+- `STREAM_FPS=30`
+- `HLS_TIME_SECONDS=1`
+- `HLS_LIST_SIZE=6`
+- `HLS_DELETE_THRESHOLD=24`
+
+## Deployment Checks
+
+After every Railway deploy verify:
+
+1. `/health` returns `200`
+2. `/api/streaming/capture/status` includes:
+   - `metrics`
+   - `hlsManifest`
+   - `delivery`
+3. `/api/hyperbet/config` resolves
+4. the returned `delivery.playbackUrl` matches the intended viewer path
+5. `rendererHealth.ready=true` only when render, encode, and delivery are fresh

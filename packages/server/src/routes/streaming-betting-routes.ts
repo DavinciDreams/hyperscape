@@ -13,6 +13,8 @@ import {
   buildBettingFeedPayload,
   selectReplayDelivery,
   type BettingFeedFrame,
+  type BettingFeedDelivery,
+  type BettingFeedRendererMetrics,
   type BettingFeedRendererHealth,
 } from "./streaming-betting-feed.js";
 import {
@@ -391,6 +393,71 @@ export function registerStreamingBettingRoutes(
       captureStats: getStreamCaptureStats?.() ?? undefined,
     });
 
+  const currentRendererMetricsSnapshot = (): BettingFeedRendererMetrics | null => {
+    const metrics = externalStatusPoller?.getSnapshot()?.metrics;
+    const hlsManifest = externalStatusPoller?.getSnapshot()?.hlsManifest;
+    if (!metrics && !hlsManifest) {
+      return null;
+    }
+    return {
+      captureFps:
+        typeof metrics?.captureFps === "number" ? metrics.captureFps : null,
+      encodeFps:
+        typeof metrics?.encodeFps === "number" ? metrics.encodeFps : null,
+      droppedFrames:
+        typeof metrics?.droppedFrames === "number" ? metrics.droppedFrames : null,
+      renderTick:
+        typeof metrics?.renderTick === "number" ? metrics.renderTick : null,
+      duelStateTick:
+        typeof metrics?.duelStateTick === "number" ? metrics.duelStateTick : null,
+      latestFrameAt:
+        typeof metrics?.latestFrameAt === "number" ? metrics.latestFrameAt : null,
+      latestRenderTickAt:
+        typeof metrics?.latestRenderTickAt === "number"
+          ? metrics.latestRenderTickAt
+          : null,
+      latestDuelStateTickAt:
+        typeof metrics?.latestDuelStateTickAt === "number"
+          ? metrics.latestDuelStateTickAt
+          : null,
+      latestVisualChangeAt:
+        typeof metrics?.latestVisualChangeAt === "number"
+          ? metrics.latestVisualChangeAt
+          : null,
+      visualChangeAgeMs:
+        typeof metrics?.visualChangeAgeMs === "number"
+          ? metrics.visualChangeAgeMs
+          : null,
+      hlsManifest: hlsManifest
+        ? {
+            updatedAt:
+              typeof hlsManifest.updatedAt === "number"
+                ? hlsManifest.updatedAt
+                : null,
+            mediaSequence:
+              typeof hlsManifest.mediaSequence === "number"
+                ? hlsManifest.mediaSequence
+                : null,
+          }
+        : null,
+    };
+  };
+
+  const currentDeliverySnapshot = (): BettingFeedDelivery | null => {
+    const delivery = externalStatusPoller?.getSnapshot()?.delivery;
+    if (!delivery) {
+      return null;
+    }
+    return {
+      mode: delivery.mode === "external_hls" ? "external_hls" : "self_hls",
+      provider: delivery.provider ?? null,
+      playbackUrl: delivery.playbackUrl ?? null,
+      hlsUrl: delivery.hlsUrl ?? null,
+      llhlsUrl: delivery.llhlsUrl ?? null,
+      ingestUrl: delivery.ingestUrl ?? null,
+    };
+  };
+
   const captureBettingFrame = (
     forceNewFrame = false,
   ): BettingFeedFrame | null => {
@@ -405,6 +472,8 @@ export function registerStreamingBettingRoutes(
       emittedAt,
       cycle,
       rendererHealth,
+      rendererMetrics: currentRendererMetricsSnapshot(),
+      delivery: currentDeliverySnapshot(),
     });
     const dedupKey = buildBettingFeedDedupKey(payload);
 
@@ -518,6 +587,8 @@ export function registerStreamingBettingRoutes(
       emittedAt: fallbackEmittedAt,
       cycle: null,
       rendererHealth: currentRendererHealthSnapshot(null, fallbackEmittedAt),
+      rendererMetrics: currentRendererMetricsSnapshot(),
+      delivery: currentDeliverySnapshot(),
     });
 
     return {

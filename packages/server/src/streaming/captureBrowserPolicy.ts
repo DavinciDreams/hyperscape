@@ -11,6 +11,20 @@ export type CaptureRendererHealthSnapshot = {
   diagnostics: CaptureReadinessDiagnostics | null;
 };
 
+const CAPTURE_BOOT_GRACE_MS = 60_000;
+
+function isNonFatalBootReason(reason: string | null): boolean {
+  return (
+    reason === "loading_overlay_active" ||
+    reason === "waiting_for_duel_data" ||
+    reason === "stream_state_missing" ||
+    reason === "world_not_ready" ||
+    reason === "terrain_not_ready" ||
+    reason === "camera_target_unresolved" ||
+    reason === "avatar_not_ready"
+  );
+}
+
 export function buildDefaultCaptureLaunchArgs(params: {
   angleBackend: string;
   featureFlags: string;
@@ -82,12 +96,12 @@ export function shouldAcceptCaptureReadiness(params: {
     return false;
   }
 
-  if (snapshot.degradedReason && snapshot.degradedReason !== "loading_overlay_active") {
+  if (!isNonFatalBootReason(snapshot.degradedReason)) {
     return false;
   }
 
   return (
-    snapshot.diagnostics?.hasStreamingBootUi === true &&
-    nowMs - startedAt >= (params.bootUiGraceMs ?? 180_000)
+    snapshot.diagnostics?.hasCanvas === true &&
+    nowMs - startedAt >= (params.bootUiGraceMs ?? CAPTURE_BOOT_GRACE_MS)
   );
 }

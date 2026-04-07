@@ -55,6 +55,9 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [previewStatus, setPreviewStatus] = useState<string | null>(null);
+  const [previewLatencyMs, setPreviewLatencyMs] = useState<number | null>(null);
+  const [previewStalls, setPreviewStalls] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -76,18 +79,60 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
 
     // Use absolute URL since frontend runs on different port usually in dev
     const streamUrl = "/live/stream.m3u8";
+    const syncLatency = () => {
+      const hls = hlsRef.current;
+      if (hls && typeof hls.latency === "number" && Number.isFinite(hls.latency)) {
+        const latencyMs = Math.max(0, Math.round(hls.latency * 1000));
+        setPreviewLatencyMs(latencyMs);
+        if (latencyMs > 8_000) {
+          setPreviewStatus("Playback drifted from the live edge.");
+          hls.startLoad(-1);
+        }
+      }
+    };
 
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
+        liveSyncDurationCount: 2,
+        liveMaxLatencyDurationCount: 4,
+        liveBackBufferLength: 10,
+        maxBufferLength: 6,
+        maxMaxBufferLength: 12,
+        maxLiveSyncPlaybackRate: 1.5,
       });
       hlsRef.current = hls;
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setPreviewStatus(null);
+        syncLatency();
         video.muted = true;
         video.play().catch((e) => console.log("HLS autoplay failed", e));
+      });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        setPreviewStatus(null);
+        syncLatency();
+      });
+      hls.on(Hls.Events.LEVEL_UPDATED, () => {
+        syncLatency();
+      });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (
+          !data.fatal &&
+          (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
+            data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
+            data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT)
+        ) {
+          setPreviewStalls((current) => current + 1);
+          setPreviewStatus("Player buffering near the live edge.");
+          hls.startLoad(-1);
+          return;
+        }
+        if (data.fatal) {
+          setPreviewStatus("Live stream preview unavailable.");
+        }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = streamUrl;
@@ -97,7 +142,20 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
       });
     }
 
+    const handleWaiting = () => {
+      setPreviewStalls((current) => current + 1);
+      setPreviewStatus("Player buffering near the live edge.");
+    };
+    const handlePlaying = () => {
+      setPreviewStatus(null);
+      syncLatency();
+    };
+    video.addEventListener("waiting", handleWaiting);
+    video.addEventListener("playing", handlePlaying);
+
     return () => {
+      video.removeEventListener("waiting", handleWaiting);
+      video.removeEventListener("playing", handlePlaying);
       if (hlsRef.current) {
         hlsRef.current.destroy();
       }
@@ -240,6 +298,25 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
           </div>
           <div className="stream-container">
             <video ref={videoRef} controls autoPlay muted playsInline />
+          </div>
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              color: "rgba(255,255,255,0.7)",
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>
+              latency{" "}
+              {previewLatencyMs != null
+                ? `${(previewLatencyMs / 1000).toFixed(1)}s`
+                : "n/a"}
+            </span>
+            <span>stalls {previewStalls}</span>
+            <span>{previewStatus ?? "live-edge healthy"}</span>
           </div>
         </div>
 

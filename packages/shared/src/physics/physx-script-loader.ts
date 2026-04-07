@@ -47,14 +47,17 @@ function resolveCdnUrls(): string[] {
     candidates.push(normalized);
   };
 
+  // Prefer same-origin first so hosted Pages builds do not trip CSP by
+  // attempting a cross-origin PhysX script load before falling back to the
+  // mirrored local /web assets.
+  pushCandidate(window.location.origin);
+
   pushCandidate(w.__CDN_URL);
 
   // If CDN is configured as ".../game-assets", PhysX may still live at ".../web".
   if (w.__CDN_URL?.endsWith("/game-assets")) {
     pushCandidate(w.__CDN_URL.slice(0, -"/game-assets".length));
   }
-
-  pushCandidate(window.location.origin);
 
   return candidates.length > 0 ? candidates : [window.location.origin];
 }

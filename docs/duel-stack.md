@@ -1,103 +1,132 @@
-# Duel Stack (`bun run duel`)
+# Duel Stack
 
-`bun run duel` now boots the end-to-end agent duel arena stack:
+This document is the authoritative streaming model for the duel arena stack on
+`enoomian` personal staging and the basis for the canonical production path.
 
-1. Game server + client (streaming duel scheduler enabled)
-2. Duel matchmaker bots (`dev:duel:skip-dev`)
-3. RTMP bridge fanout to public platforms (YouTube/Twitch/etc.)
-4. Betting app (testnet mode)
-5. Keeper bot (testnet automation)
+## Source Of Truth
 
-## Run
+Hyperscapes owns duel truth across three layers:
 
-```bash
-bun run duel
-```
+1. simulation truth
+   - duel lifecycle
+   - fighter state
+   - result data
+2. renderer truth
+   - stream-page readiness
+   - render tick freshness
+   - visual change freshness
+   - capture and encoder cadence
+3. delivery truth
+   - playback URL selection
+   - HLS/LL-HLS freshness
+   - fallback routing
 
-`bun run duel` now bootstraps streaming prerequisites automatically on first run:
-- uses bundled `ffmpeg-static` binary by default (or `FFMPEG_PATH` if provided)
-- auto-installs Playwright Chromium if the bundled browser is missing
+Hyperbet does not invent a second stream-truth model. It consumes the additive
+stream session that Hyperscapes publishes.
 
-No separate Docker stream container is required for stream fanout.
+## Runtime Topology
 
-Recommended fresh-install prep command:
+- Cloudflare Pages hosts the public `/stream` page.
+- The GPU host runs the renderer, browser capture, and FFmpeg encode process.
+- Railway hosts the Hyperscapes API and control plane.
+- Self-hosted HLS remains available on the GPU host for smoke, fallback, and
+  diagnostics.
+- Cloudflare Stream LL-HLS is the target viewer-delivery path once external
+  delivery is enabled.
 
-```bash
-bun run install
-```
+Railway is not the renderer of record for personal staging.
 
-This ensures assets are synced and Chromium is installed for local capture.
+## Asset Policy
 
-Optional flags:
+- PhysX JS and WASM must load same-origin from the Pages-hosted client.
+- General game assets must come from one manifest-complete asset origin.
+- Do not widen CSP to allow arbitrary script origins.
+- If the stream page cannot resolve a complete asset origin, renderer health
+  must degrade with `asset_origin_incomplete`.
 
-```bash
-bun run duel --bots=6 --betting-port=4179 --rtmp-port=8765
-bun run duel --skip-keeper
-bun run duel --skip-stream
-bun run duel --verify
-```
+## Capture And Encode Defaults
 
-## Streaming Outputs
+These are the staging defaults that the integrated branch expects:
 
-Configure the following env vars (root `.env` or `packages/server/.env`):
+- `FFMPEG_HWACCEL=nvidia`
+- `STREAM_LOW_LATENCY=true`
+- `STREAM_FPS=30`
+- `gopSize=30`
+- `HLS_TIME_SECONDS=1`
+- `HLS_LIST_SIZE=6`
+- `HLS_DELETE_THRESHOLD=24`
 
-- `RTMP_MULTIPLEXER_URL` (+ optional `RTMP_MULTIPLEXER_STREAM_KEY`, `RTMP_MULTIPLEXER_NAME`)
-- `TWITCH_STREAM_KEY` (or `TWITCH_RTMP_STREAM_KEY`)
-  Optional ingest override: `TWITCH_STREAM_URL` / `TWITCH_RTMP_URL` / `TWITCH_RTMP_SERVER`
-- `YOUTUBE_STREAM_KEY` (or `YOUTUBE_RTMP_STREAM_KEY`)
-  Optional ingest override: `YOUTUBE_STREAM_URL` / `YOUTUBE_RTMP_URL`
-- `KICK_STREAM_KEY` (+ optional `KICK_RTMP_URL`)
-- `PUMPFUN_RTMP_URL` (+ optional `PUMPFUN_STREAM_KEY`)
-- `X_RTMP_URL` (+ optional `X_STREAM_KEY`)
-- `RTMP_DESTINATIONS_JSON` for additional/custom fanout destinations
-- `STREAMING_VIEWER_ACCESS_TOKEN` optional gate for live WebSocket stream/spectator viewers
+If FFmpeg falls back to `libx264` on the GPU box, treat that as misconfigured
+for the live betting path.
 
-Default anti-cheat timing policy (no env required):
+## Delivery Modes
 
-- Canonical platform: `youtube`
-- Default public delay: `15000ms`
-- Optional: `STREAMING_CANONICAL_PLATFORM` (`youtube` | `twitch`)
-- Optional override: `STREAMING_PUBLIC_DELAY_MS`
+The runtime is provider-neutral. Delivery is selected with:
 
-Optional client-side extra delay (usually keep `0` if server delay is enabled):
+- `STREAM_DELIVERY_MODE=self_hls|external_hls`
+- `STREAM_DELIVERY_PROVIDER`
+- `STREAM_INGEST_RTMPS_URL`
+- `STREAM_INGEST_STREAM_KEY`
+- `STREAM_PLAYBACK_HLS_URL`
+- `STREAM_PLAYBACK_LLHLS_URL`
 
-- `VITE_UI_SYNC_DELAY_MS`
+Selection order:
 
-Website/betting embed input (recommended):
+1. `STREAM_PLAYBACK_LLHLS_URL`
+2. `STREAM_PLAYBACK_HLS_URL`
+3. local `/live/stream.m3u8`
 
-- `NEXT_PUBLIC_ARENA_STREAM_EMBED_URL` (in `packages/website/.env.local`)
-- `VITE_STREAM_EMBED_URL` (in the Hyperbet app `.env*` files if you boot the sibling repo locally)
+`hls-cdn-sync.ts` is backup/object-store sync only. It is not the primary
+viewer-delivery path.
 
-When `STREAMING_PUBLIC_DELAY_MS > 0`, live `mode=streaming` WebSocket viewers are restricted to:
-- loopback/local capture clients, or
-- clients presenting `streamToken=<STREAMING_VIEWER_ACCESS_TOKEN>`
+## Renderer Health Model
 
-`stream-to-rtmp` automatically appends `streamToken` to capture URLs when `STREAMING_VIEWER_ACCESS_TOKEN` is set.
+The stream page now publishes a heartbeat and the capture pipeline persists a
+richer external status snapshot. Health is phase-aware:
 
-## Spectator + Betting URLs
+- `IDLE`, `OPEN`, `LOCKED`
+  - require fresh render tick and fresh delivery/manifests
+- `FIGHT`, `RESOLUTION`
+  - also require recent visual change
+  - also require acceptable capture and encoder cadence
 
-- Game stream view: `http://localhost:3333/?page=stream`
-- Embedded spectator: `http://localhost:3333/?embedded=true&mode=spectator`
-- Betting app: `http://localhost:4179`
-- Betting video source: `VITE_STREAM_EMBED_URL` (YouTube/Twitch embed URL)
+Current degraded reasons include:
 
-## Open APIs (duel telemetry + monologues)
+- `render_tick_stale`
+- `visual_change_stale`
+- `capture_fps_low`
+- `encoder_fps_low`
+- `manifest_stale`
+- `asset_origin_incomplete`
 
+## Required Health Checks
+
+For the renderer/capture worker:
+
+- `GET /api/streaming/capture/status`
+- `GET /api/streaming/rtmp/status`
+- `GET /live/stream.m3u8`
+
+For the API/control plane:
+
+- `GET /health`
 - `GET /api/streaming/state`
-- `GET /api/streaming/duel-context`
-- `GET /api/streaming/agent/:characterId/inventory`
-- `GET /api/streaming/agent/:characterId/monologues?limit=20`
+- `GET /api/streaming/state/events`
+- `GET /api/hyperbet/config`
 
-These endpoints power the betting app live duel telemetry section (inventory, wins/losses, level, HP, and internal monologues).
+For the rendered page:
 
-## Verification
+- `/stream` must visibly move through a full duel
+- during active combat, `visualChangeAgeMs < 1000`
+- during active combat, `captureFps >= 24`
+- during active combat, `encodeFps >= 24`
 
-Run the full startup verifier against a running stack:
+## Personal Staging Rule
 
-```bash
-bun run duel:verify
-bun run duel:verify --require-destinations=twitch,youtube
-```
+On `enoomian` personal staging:
 
-This validates server/client/betting uptime, active duel combat, RTMP bridge status evidence, and telemetry endpoints.
-RTMP bridge status is best-effort by default, and can be made strict with `--require-destinations`.
+- Pages hosts the public client
+- the GPU box renders and encodes
+- Railway serves the API and control plane
+- Cloudflare Stream LL-HLS is the target viewer path once enabled
+- self-hosted HLS remains reachable for smoke and emergency fallback

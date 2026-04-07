@@ -97,7 +97,41 @@ describe("captureBrowserPolicy", () => {
           },
         },
         startedAt: 0,
-        nowMs: 180_000,
+        nowMs: 60_000,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldAcceptCaptureReadiness({
+        snapshot: {
+          ready: false,
+          degradedReason: "terrain_not_ready",
+          diagnostics: {
+            hasCanvas: true,
+            hasStreamingBootUi: false,
+            hasCriticalErrorUi: false,
+            readyFlag: false,
+          },
+        },
+        startedAt: 0,
+        nowMs: 60_000,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldAcceptCaptureReadiness({
+        snapshot: {
+          ready: false,
+          degradedReason: "world_not_ready",
+          diagnostics: {
+            hasCanvas: true,
+            hasStreamingBootUi: false,
+            hasCriticalErrorUi: false,
+            readyFlag: false,
+          },
+        },
+        startedAt: 0,
+        nowMs: 60_000,
       }),
     ).toBe(true);
 
