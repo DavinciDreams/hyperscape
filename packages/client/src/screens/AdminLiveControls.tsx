@@ -12,6 +12,66 @@ import {
 } from "lucide-react";
 import Hls from "hls.js";
 
+const LOW_LATENCY_HLS_CONFIG = {
+  enableWorker: true,
+  lowLatencyMode: true,
+  liveSyncDurationCount: 2,
+  liveMaxLatencyDurationCount: 4,
+  liveBackBufferLength: 10,
+  maxBufferLength: 6,
+  maxMaxBufferLength: 12,
+  maxLiveSyncPlaybackRate: 1.5,
+};
+
+const STABLE_HLS_CONFIG = {
+  enableWorker: true,
+  lowLatencyMode: false,
+  liveSyncDurationCount: 4,
+  liveMaxLatencyDurationCount: 8,
+  liveBackBufferLength: 16,
+  maxBufferLength: 12,
+  maxMaxBufferLength: 20,
+  maxLiveSyncPlaybackRate: 1.25,
+};
+
+function resolvePlaybackProfile(streamUrl: string) {
+  if (streamUrl.includes("protocol=llhls")) {
+    return {
+      config: LOW_LATENCY_HLS_CONFIG,
+      driftThresholdMs: 8_000,
+      waitingGraceMs: 450,
+      reloadOnBufferStall: true,
+    };
+  }
+  return {
+    config: STABLE_HLS_CONFIG,
+    driftThresholdMs: 14_000,
+    waitingGraceMs: 1_500,
+    reloadOnBufferStall: false,
+  };
+}
+
+function readLiveEdgeLatencyMs(video: HTMLVideoElement, hls: Hls | null): number | null {
+  if (hls && typeof hls.latency === "number" && Number.isFinite(hls.latency)) {
+    return Math.max(0, Math.round(hls.latency * 1000));
+  }
+  if (video.seekable.length > 0) {
+    const liveEdge = video.seekable.end(video.seekable.length - 1);
+    const remaining = liveEdge - video.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      return Math.round(remaining * 1000);
+    }
+  }
+  if (video.buffered.length > 0) {
+    const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+    const remaining = bufferedEnd - video.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      return Math.round(remaining * 1000);
+    }
+  }
+  return null;
+}
+
 interface LogEntry {
   timestamp: number;
   level: string;
@@ -64,6 +124,7 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
   const logsEndRef = useRef<HTMLDivElement>(null);
   const pollTimeoutRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
+  const waitingTimeoutRef = useRef<number | null>(null);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -79,12 +140,20 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
 
     // Use absolute URL since frontend runs on different port usually in dev
     const streamUrl = "/live/stream.m3u8";
+    const playbackProfile = resolvePlaybackProfile(streamUrl);
+
+    const clearWaitingTimeout = () => {
+      if (waitingTimeoutRef.current == null) return;
+      window.clearTimeout(waitingTimeoutRef.current);
+      waitingTimeoutRef.current = null;
+    };
+
     const syncLatency = () => {
       const hls = hlsRef.current;
-      if (hls && typeof hls.latency === "number" && Number.isFinite(hls.latency)) {
-        const latencyMs = Math.max(0, Math.round(hls.latency * 1000));
+      const latencyMs = readLiveEdgeLatencyMs(video, hls);
+      if (latencyMs != null) {
         setPreviewLatencyMs(latencyMs);
-        if (latencyMs > 8_000) {
+        if (latencyMs > playbackProfile.driftThresholdMs && hls) {
           setPreviewStatus("Playback drifted from the live edge.");
           hls.startLoad(-1);
         }
@@ -92,16 +161,7 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
     };
 
     if (Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-        liveSyncDurationCount: 2,
-        liveMaxLatencyDurationCount: 4,
-        liveBackBufferLength: 10,
-        maxBufferLength: 6,
-        maxMaxBufferLength: 12,
-        maxLiveSyncPlaybackRate: 1.5,
-      });
+      const hls = new Hls(playbackProfile.config);
       hlsRef.current = hls;
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
@@ -112,6 +172,7 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
         video.play().catch((e) => console.log("HLS autoplay failed", e));
       });
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        clearWaitingTimeout();
         setPreviewStatus(null);
         syncLatency();
       });
@@ -119,14 +180,23 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
         syncLatency();
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal && data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+          setPreviewStalls((current) => current + 1);
+          setPreviewStatus("Playback drifted from the live edge.");
+          if (playbackProfile.reloadOnBufferStall) {
+            hls.startLoad(-1);
+          } else {
+            void video.play().catch(() => {});
+          }
+          return;
+        }
         if (
           !data.fatal &&
-          (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
-            data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
+          (data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
             data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT)
         ) {
           setPreviewStalls((current) => current + 1);
-          setPreviewStatus("Player buffering near the live edge.");
+          setPreviewStatus("Reconnecting to the live stream.");
           hls.startLoad(-1);
           return;
         }
@@ -143,10 +213,14 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
     }
 
     const handleWaiting = () => {
-      setPreviewStalls((current) => current + 1);
-      setPreviewStatus("Player buffering near the live edge.");
+      clearWaitingTimeout();
+      waitingTimeoutRef.current = window.setTimeout(() => {
+        setPreviewStalls((current) => current + 1);
+        setPreviewStatus("Player buffering near the live edge.");
+      }, playbackProfile.waitingGraceMs);
     };
     const handlePlaying = () => {
+      clearWaitingTimeout();
       setPreviewStatus(null);
       syncLatency();
     };
@@ -154,6 +228,7 @@ export const AdminLiveControls: React.FC<AdminLiveControlsProps> = ({
     video.addEventListener("playing", handlePlaying);
 
     return () => {
+      clearWaitingTimeout();
       video.removeEventListener("waiting", handleWaiting);
       video.removeEventListener("playing", handlePlaying);
       if (hlsRef.current) {

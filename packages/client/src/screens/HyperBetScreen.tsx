@@ -14,6 +14,66 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import Hls from "hls.js";
 import { useHyperBetState, type HyperBetMarket } from "./useHyperBetState";
 
+const LOW_LATENCY_HLS_CONFIG = {
+  enableWorker: true,
+  lowLatencyMode: true,
+  liveSyncDurationCount: 2,
+  liveMaxLatencyDurationCount: 4,
+  liveBackBufferLength: 10,
+  maxBufferLength: 6,
+  maxMaxBufferLength: 12,
+  maxLiveSyncPlaybackRate: 1.5,
+};
+
+const STABLE_HLS_CONFIG = {
+  enableWorker: true,
+  lowLatencyMode: false,
+  liveSyncDurationCount: 4,
+  liveMaxLatencyDurationCount: 8,
+  liveBackBufferLength: 16,
+  maxBufferLength: 12,
+  maxMaxBufferLength: 20,
+  maxLiveSyncPlaybackRate: 1.25,
+};
+
+function resolvePlaybackProfile(streamUrl: string) {
+  if (streamUrl.includes("protocol=llhls")) {
+    return {
+      config: LOW_LATENCY_HLS_CONFIG,
+      driftThresholdMs: 8_000,
+      waitingGraceMs: 450,
+      reloadOnBufferStall: true,
+    };
+  }
+  return {
+    config: STABLE_HLS_CONFIG,
+    driftThresholdMs: 14_000,
+    waitingGraceMs: 1_500,
+    reloadOnBufferStall: false,
+  };
+}
+
+function readLiveEdgeLatencyMs(video: HTMLVideoElement, hls: Hls | null): number | null {
+  if (hls && typeof hls.latency === "number" && Number.isFinite(hls.latency)) {
+    return Math.max(0, Math.round(hls.latency * 1000));
+  }
+  if (video.seekable.length > 0) {
+    const liveEdge = video.seekable.end(video.seekable.length - 1);
+    const remaining = liveEdge - video.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      return Math.round(remaining * 1000);
+    }
+  }
+  if (video.buffered.length > 0) {
+    const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+    const remaining = bufferedEnd - video.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      return Math.round(remaining * 1000);
+    }
+  }
+  return null;
+}
+
 // ============================================================================
 // HLS Player
 // ============================================================================
@@ -26,17 +86,25 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
     null,
   );
   const [stallCount, setStallCount] = useState(0);
+  const waitingTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !streamUrl) return;
+    const playbackProfile = resolvePlaybackProfile(streamUrl);
+
+    const clearWaitingTimeout = () => {
+      if (waitingTimeoutRef.current == null) return;
+      window.clearTimeout(waitingTimeoutRef.current);
+      waitingTimeoutRef.current = null;
+    };
 
     const syncLatency = () => {
       const hls = hlsRef.current;
-      if (hls && typeof hls.latency === "number" && Number.isFinite(hls.latency)) {
-        const latencyMs = Math.max(0, Math.round(hls.latency * 1000));
+      const latencyMs = readLiveEdgeLatencyMs(video, hls);
+      if (latencyMs != null) {
         setLiveEdgeLatencyMs(latencyMs);
-        if (latencyMs > 8_000) {
+        if (latencyMs > playbackProfile.driftThresholdMs && hls) {
           setError("Playback drifted from the live edge.");
           hls.startLoad(-1);
         }
@@ -55,16 +123,7 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
       return;
     }
 
-    const hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: true,
-      liveSyncDurationCount: 2,
-      liveMaxLatencyDurationCount: 4,
-      liveBackBufferLength: 10,
-      maxBufferLength: 6,
-      maxMaxBufferLength: 12,
-      maxLiveSyncPlaybackRate: 1.5,
-    });
+    const hls = new Hls(playbackProfile.config);
 
     hlsRef.current = hls;
     hls.loadSource(streamUrl);
@@ -77,6 +136,7 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
     });
 
     hls.on(Hls.Events.FRAG_BUFFERED, () => {
+      clearWaitingTimeout();
       setError(null);
       syncLatency();
     });
@@ -86,14 +146,23 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
     });
 
     hls.on(Hls.Events.ERROR, (_event, data) => {
+      if (!data.fatal && data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+        setStallCount((current) => current + 1);
+        setError("Playback drifted from the live edge.");
+        if (playbackProfile.reloadOnBufferStall) {
+          hls.startLoad(-1);
+        } else {
+          void video.play().catch(() => {});
+        }
+        return;
+      }
       if (
         !data.fatal &&
-        (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
-          data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
+        (data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
           data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT)
       ) {
         setStallCount((current) => current + 1);
-        setError("Player buffering near the live edge.");
+        setError("Reconnecting to the live stream.");
         hls.startLoad(-1);
         return;
       }
@@ -108,10 +177,14 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
     });
 
     const handleWaiting = () => {
-      setStallCount((current) => current + 1);
-      setError("Player buffering near the live edge.");
+      clearWaitingTimeout();
+      waitingTimeoutRef.current = window.setTimeout(() => {
+        setStallCount((current) => current + 1);
+        setError("Player buffering near the live edge.");
+      }, playbackProfile.waitingGraceMs);
     };
     const handlePlaying = () => {
+      clearWaitingTimeout();
       setError(null);
       syncLatency();
     };
@@ -120,6 +193,7 @@ function HlsPlayer({ streamUrl }: { streamUrl: string }) {
     video.addEventListener("playing", handlePlaying);
 
     return () => {
+      clearWaitingTimeout();
       video.removeEventListener("waiting", handleWaiting);
       video.removeEventListener("playing", handlePlaying);
       hls.destroy();
