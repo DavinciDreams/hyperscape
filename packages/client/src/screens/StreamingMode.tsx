@@ -97,11 +97,23 @@ export interface StreamingRendererHealth {
   phase: StreamingState["cycle"]["phase"] | null;
 }
 
+const TARGET_AVATAR_READY_GRACE_MS = 30_000;
+
 function isTargetAvatarReady(world: World, targetEntityId: string): boolean {
   const playerDirect = world.entities?.players?.get(targetEntityId) as
-    | { avatar?: unknown }
+    | {
+        avatar?: unknown;
+        _avatar?: unknown;
+        mesh?: { visible?: boolean } | null;
+        _fallbackAvatarRoot?: { visible?: boolean } | null;
+      }
     | undefined;
-  if (playerDirect?.avatar) {
+  if (
+    playerDirect?.avatar ||
+    playerDirect?._avatar ||
+    playerDirect?._fallbackAvatarRoot ||
+    playerDirect?.mesh
+  ) {
     return true;
   }
 
@@ -111,11 +123,17 @@ function isTargetAvatarReady(world: World, targetEntityId: string): boolean {
         id?: string;
         characterId?: string;
         avatar?: unknown;
+        _avatar?: unknown;
+        mesh?: { visible?: boolean } | null;
+        _fallbackAvatarRoot?: { visible?: boolean } | null;
       };
       if (
         (candidate.id === targetEntityId ||
           candidate.characterId === targetEntityId) &&
-        candidate.avatar
+        (candidate.avatar ||
+          candidate._avatar ||
+          candidate._fallbackAvatarRoot ||
+          candidate.mesh)
       ) {
         return true;
       }
@@ -262,6 +280,8 @@ export function StreamingMode() {
   const [terrainReady, setTerrainReady] = useState(false);
   const [cameraLocked, setCameraLocked] = useState(false);
   const [targetAvatarReady, setTargetAvatarReady] = useState(false);
+  const [targetAvatarGraceExpired, setTargetAvatarGraceExpired] =
+    useState(false);
   const [terrainStalled, setTerrainStalled] = useState(false);
   const [readyEventDelayed, setReadyEventDelayed] = useState(false);
   const [clientInitError, setClientInitError] = useState<string | null>(null);
@@ -356,6 +376,7 @@ export function StreamingMode() {
       setWorldReady(false);
       setTerrainReady(false);
       setTargetAvatarReady(false);
+      setTargetAvatarGraceExpired(false);
       setTerrainStalled(false);
       setReadyEventDelayed(false);
       setClientInitError(null);
@@ -1048,7 +1069,10 @@ export function StreamingMode() {
     streamingState?.cycle.phase &&
     streamingState.cycle.phase !== "IDLE",
   );
-  const waitingForTargetAvatar = needsTargetAvatar && !targetAvatarReady;
+  const effectiveTargetAvatarReady =
+    targetAvatarReady || targetAvatarGraceExpired;
+  const waitingForTargetAvatar =
+    needsTargetAvatar && !effectiveTargetAvatarReady;
 
   useEffect(() => {
     const cycleId = streamingState?.cycle.cycleId ?? null;
@@ -1074,6 +1098,7 @@ export function StreamingMode() {
 
     if (!needsTargetAvatar) {
       setTargetAvatarReady(true);
+      setTargetAvatarGraceExpired(false);
       return;
     }
 
@@ -1081,12 +1106,14 @@ export function StreamingMode() {
     const targetEntityId = streamingState?.cameraTarget;
     if (!world || !worldReady || !targetEntityId) {
       setTargetAvatarReady(false);
+      setTargetAvatarGraceExpired(false);
       return;
     }
 
     const checkAvatarReady = () => {
       if (isTargetAvatarReady(world, targetEntityId)) {
         setTargetAvatarReady(true);
+        setTargetAvatarGraceExpired(false);
         clearAvatarPolling();
         return true;
       }
@@ -1094,16 +1121,19 @@ export function StreamingMode() {
     };
 
     setTargetAvatarReady(false);
+    setTargetAvatarGraceExpired(false);
     if (checkAvatarReady()) {
       return;
     }
 
     const handleAvatarLoadComplete = (payload: unknown) => {
       const data = payload as { playerId?: string; success?: boolean };
-      if (data.success === false) return;
       if (data.playerId === targetEntityId || checkAvatarReady()) {
-        setTargetAvatarReady(true);
-        clearAvatarPolling();
+        if (checkAvatarReady()) {
+          setTargetAvatarReady(true);
+          setTargetAvatarGraceExpired(false);
+          clearAvatarPolling();
+        }
       }
     };
 
@@ -1113,7 +1143,11 @@ export function StreamingMode() {
     }, 250);
     avatarTimeoutRef.current = setTimeout(() => {
       clearAvatarPolling();
-    }, 30000);
+      setTargetAvatarGraceExpired(true);
+      console.warn(
+        `[StreamingMode] Avatar readiness grace expired for "${targetEntityId}", continuing with spectator capture`,
+      );
+    }, TARGET_AVATAR_READY_GRACE_MS);
 
     return () => {
       world.off(EventType.AVATAR_LOAD_COMPLETE, handleAvatarLoadComplete);
@@ -1136,7 +1170,7 @@ export function StreamingMode() {
     needsCameraLock,
     cameraLocked,
     needsTargetAvatar,
-    targetAvatarReady,
+    targetAvatarReady: effectiveTargetAvatarReady,
     phase: streamingState?.cycle.phase ?? null,
   });
   const rendererHealth = useMemo(
@@ -1150,7 +1184,7 @@ export function StreamingMode() {
         needsCameraLock,
         cameraLocked,
         needsTargetAvatar,
-        targetAvatarReady,
+        targetAvatarReady: effectiveTargetAvatarReady,
         loadingDismissed,
         phase: streamingState?.cycle.phase ?? null,
         agent1: streamingState?.cycle.agent1 ?? null,
@@ -1166,7 +1200,7 @@ export function StreamingMode() {
       needsTargetAvatar,
       streamingState,
       terrainReady,
-      targetAvatarReady,
+      effectiveTargetAvatarReady,
       worldReady,
     ],
   );

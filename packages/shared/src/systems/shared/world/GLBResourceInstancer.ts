@@ -69,6 +69,7 @@ let scene: THREE.Scene | null = null;
 let world: World | null = null;
 const pools = new Map<string, ModelPool>();
 const entityToModel = new Map<string, string>();
+const missingLodModelPaths = new Set<string>();
 
 function extractGeometryAndMaterial(
   root: THREE.Object3D,
@@ -153,10 +154,19 @@ async function loadLODModel(path: string): Promise<{
   geometry: THREE.BufferGeometry;
   material: THREE.Material;
 } | null> {
+  if (missingLodModelPaths.has(path)) {
+    return null;
+  }
+
   try {
     const { scene: lodScene } = await modelCache.loadModel(path, world!);
     return extractGeometryAndMaterial(lodScene);
-  } catch {
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message.toLowerCase() : String(error);
+    if (message.includes("404") || message.includes("not found")) {
+      missingLodModelPaths.add(path);
+    }
     return null;
   }
 }
