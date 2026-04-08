@@ -14,6 +14,9 @@
 import { Elysia, t } from "elysia";
 import type { TripoService } from "../services/armor-pipeline/TripoService";
 
+/** Task IDs must be alphanumeric (with hyphens/underscores) to prevent injection */
+const TASK_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
 export const createTripoPipelineRoutes = (tripoService: TripoService) => {
   return (
     new Elysia({ prefix: "/api/tripo", name: "tripo-pipeline" })
@@ -97,6 +100,10 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
           }
 
           try {
+            if (!TASK_ID_RE.test(body.originalTaskId)) {
+              set.status = 400;
+              return { success: false, error: "Invalid originalTaskId format" };
+            }
             const taskId = await tripoService.textureModel(
               body.originalTaskId,
               {
@@ -143,6 +150,10 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
           }
 
           try {
+            if (!TASK_ID_RE.test(body.originalTaskId)) {
+              set.status = 400;
+              return { success: false, error: "Invalid originalTaskId format" };
+            }
             const taskId = await tripoService.meshCompletion(
               body.originalTaskId,
             );
@@ -248,7 +259,7 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
         {
           body: t.Object({
             prompt: t.String(),
-            faceLimit: t.Optional(t.Number()),
+            faceLimit: t.Optional(t.Number({ minimum: 100, maximum: 50000 })),
             pbr: t.Optional(t.Boolean()),
             quality: t.Optional(
               t.Union([t.Literal("standard"), t.Literal("detailed")]),

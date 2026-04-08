@@ -279,7 +279,22 @@ export class ShellTextureService {
         `Failed to download textured model: ${response.statusText}`,
       );
     }
+
+    // Guard against oversized responses (max 100MB)
+    const MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024;
+    const contentLength = response.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > MAX_DOWNLOAD_SIZE) {
+      throw new Error(
+        `Result file too large: ${contentLength} bytes (max ${MAX_DOWNLOAD_SIZE})`,
+      );
+    }
+
     const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > MAX_DOWNLOAD_SIZE) {
+      throw new Error(
+        `Result file too large: ${buffer.byteLength} bytes (max ${MAX_DOWNLOAD_SIZE})`,
+      );
+    }
     return Buffer.from(buffer);
   }
 }

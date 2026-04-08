@@ -130,6 +130,16 @@ function loadSegmentSession(
     ) as Record<string, SavedSegmentSession>;
     const session = all[key];
     if (!session) return null;
+    // Validate shape — localStorage data may be stale or malformed
+    if (
+      typeof session.segmentTaskId !== "string" ||
+      !Array.isArray(session.partNames) ||
+      typeof session.timestamp !== "number"
+    ) {
+      delete all[key];
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(all));
+      return null;
+    }
     // Expire after 24h — Tripo task IDs don't last forever
     if (Date.now() - session.timestamp > 24 * 60 * 60 * 1000) {
       delete all[key];
@@ -754,7 +764,12 @@ export const TripoGeneratorTab: React.FC<TripoGeneratorTabProps> = ({
       viewerRef.current?.clearOverlays();
       gltf.scene.traverse((child) => {
         if (child instanceof THREE.Mesh) {
-          child.material.side = THREE.DoubleSide;
+          const mats = Array.isArray(child.material)
+            ? child.material
+            : [child.material];
+          mats.forEach((m) => {
+            m.side = THREE.DoubleSide;
+          });
         }
       });
       viewerRef.current?.showTexturedResult(gltf.scene);

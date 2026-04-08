@@ -10,6 +10,7 @@
  */
 
 import { createHmac, createHash } from "crypto";
+import { NodeIO } from "@gltf-transform/core";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -252,12 +253,17 @@ export class TripoService {
 
     const d = json.data;
     console.log(
-      `[Tripo] STS credentials received: bucket=${d.resource_bucket}, key=${d.resource_uri}, host=${d.s3_host}`,
+      `[Tripo] STS credentials received: bucket=${d.resource_bucket}, host=${d.s3_host}`,
     );
 
     // Extract region from S3 host (e.g. "s3.us-east-1.amazonaws.com" → "us-east-1")
     const hostMatch = d.s3_host.match(/s3[.-]([a-z0-9-]+)\./);
-    const region = hostMatch?.[1] ?? "us-east-1";
+    if (!hostMatch?.[1]) {
+      throw new Error(
+        `Cannot extract AWS region from STS host: ${d.s3_host}. Expected format: s3.REGION.amazonaws.com`,
+      );
+    }
+    const region = hostMatch[1];
 
     return {
       accessKeyId: d.sts_ak,
@@ -451,8 +457,6 @@ export class TripoService {
   async discoverPartNames(segmentationTaskId: string): Promise<string[]> {
     const { buffer } = await this.downloadResult(segmentationTaskId);
 
-    // Parse GLB to extract mesh names using @gltf-transform/core
-    const { NodeIO } = await import("@gltf-transform/core");
     const io = new NodeIO();
     const doc = await io.readBinary(new Uint8Array(buffer));
 
@@ -682,9 +686,11 @@ export class TripoService {
     const hostOk =
       parsedUrl.hostname === "api.tripo3d.ai" ||
       parsedUrl.hostname.endsWith(".tripo3d.ai") ||
-      // Tripo uses region-prefixed S3 hosts (e.g., s3.us-east-1.amazonaws.com)
-      // Only allow *.s3*.amazonaws.com patterns, not bare s3.amazonaws.com
-      /^[a-z0-9-]+\.s3[a-z0-9.-]*\.amazonaws\.com$/.test(parsedUrl.hostname);
+      // Tripo uses region-prefixed S3 hosts (e.g., bucket.s3.us-east-1.amazonaws.com)
+      // Require the region segment to prevent matching arbitrary attacker buckets
+      /^[a-z0-9][a-z0-9.-]*\.s3\.[a-z0-9-]+\.amazonaws\.com$/.test(
+        parsedUrl.hostname,
+      );
     if (!hostOk) {
       throw new Error(
         `Refusing to download from untrusted domain: ${parsedUrl.hostname}`,

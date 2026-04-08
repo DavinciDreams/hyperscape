@@ -38,6 +38,15 @@ import {
 /** Texture method — determines how textures are applied */
 type TextureMethod = "solid" | "ai" | "batch";
 
+/** Per-slot task tracking for full-set generation */
+interface SlotTask {
+  slot: EquipmentSlotName;
+  taskId: string;
+  status: "pending" | "processing" | "succeeded" | "failed";
+  progress: number;
+  error?: string;
+}
+
 /** AI style PREFIX — goes BEFORE the material description.
  *  Must override Meshy's body-shape semantic interpretation first,
  *  then describe what the object actually is. */
@@ -228,14 +237,6 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
 
-  /** Per-slot task tracking for full-set generation */
-  interface SlotTask {
-    slot: EquipmentSlotName;
-    taskId: string;
-    status: "pending" | "processing" | "succeeded" | "failed";
-    progress: number;
-    error?: string;
-  }
   const [slotTasks, setSlotTasks] = useState<SlotTask[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -618,7 +619,12 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
         viewerRef.current?.clearOverlays();
         gltf.scene.traverse((child) => {
           if (child instanceof THREE.Mesh) {
-            child.material.side = THREE.DoubleSide;
+            const mats = Array.isArray(child.material)
+              ? child.material
+              : [child.material];
+            mats.forEach((m) => {
+              m.side = THREE.DoubleSide;
+            });
           }
         });
         viewerRef.current?.showTexturedResult(gltf.scene);

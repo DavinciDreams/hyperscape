@@ -605,12 +605,9 @@ export class ShellExtractionService {
     // producing a smooth boundary curve.
 
     if (!index) {
-      // Non-indexed geometry — fall back to simple assignment
-      return {
-        regions: new Map(),
-        interSlotBoundaryVerts: new Set(),
-        processedGeometry: geometry,
-      };
+      throw new Error(
+        "ShellExtractionService requires indexed geometry. The loaded VRM mesh has no index buffer.",
+      );
     }
 
     // Extended vertex data: original vertices + new isoline boundary vertices
@@ -1318,22 +1315,14 @@ export class ShellExtractionService {
    * These are at the open edges of the shell where it meets adjacent slots.
    */
   private findBoundaryVertices(indices: Uint32Array): Set<number> {
-    const edgeCount = new Map<number, number>();
-
-    // Encode edge as a single number: min * maxVerts + max
-    // Use actual max vertex index + 1 to avoid collisions on large meshes
-    let maxIdx = 0;
-    for (let i = 0; i < indices.length; i++) {
-      if (indices[i] > maxIdx) maxIdx = indices[i];
-    }
-    const MAX_V = maxIdx + 1;
+    const edgeCount = new Map<string, number>();
 
     for (let i = 0; i < indices.length; i += 3) {
       const tri = [indices[i], indices[i + 1], indices[i + 2]];
       for (let j = 0; j < 3; j++) {
         const a = tri[j],
           b = tri[(j + 1) % 3];
-        const key = Math.min(a, b) * MAX_V + Math.max(a, b);
+        const key = a < b ? `${a}_${b}` : `${b}_${a}`;
         edgeCount.set(key, (edgeCount.get(key) ?? 0) + 1);
       }
     }
@@ -1341,8 +1330,9 @@ export class ShellExtractionService {
     const boundary = new Set<number>();
     for (const [key, count] of edgeCount) {
       if (count === 1) {
-        boundary.add(Math.floor(key / MAX_V));
-        boundary.add(key % MAX_V);
+        const parts = key.split("_");
+        boundary.add(parseInt(parts[0], 10));
+        boundary.add(parseInt(parts[1], 10));
       }
     }
 
@@ -1437,18 +1427,13 @@ export class ShellExtractionService {
     boundaryVerts: Set<number>,
   ): Map<number, number[]> {
     // Find boundary edges (edges appearing in exactly one triangle)
-    const edgeCount = new Map<number, number>();
-    let maxIdx = 0;
-    for (let i = 0; i < indices.length; i++) {
-      if (indices[i] > maxIdx) maxIdx = indices[i];
-    }
-    const MAX_V = maxIdx + 1;
+    const edgeCount = new Map<string, number>();
     for (let i = 0; i < indices.length; i += 3) {
       const tri = [indices[i], indices[i + 1], indices[i + 2]];
       for (let j = 0; j < 3; j++) {
         const a = tri[j],
           b = tri[(j + 1) % 3];
-        const key = Math.min(a, b) * MAX_V + Math.max(a, b);
+        const key = a < b ? `${a}_${b}` : `${b}_${a}`;
         edgeCount.set(key, (edgeCount.get(key) ?? 0) + 1);
       }
     }
@@ -1460,8 +1445,9 @@ export class ShellExtractionService {
 
     for (const [key, count] of edgeCount) {
       if (count !== 1) continue; // only boundary edges
-      const a = Math.floor(key / MAX_V);
-      const b = key % MAX_V;
+      const parts = key.split("_");
+      const a = parseInt(parts[0], 10);
+      const b = parseInt(parts[1], 10);
       // Both endpoints must be inter-slot boundary vertices
       if (boundaryVerts.has(a) && boundaryVerts.has(b)) {
         chainAdj.get(a)!.push(b);
@@ -1802,8 +1788,9 @@ export class ShellExtractionService {
             adj = [];
             boundaryChainAdj.set(v, adj);
           }
+          const adjSet = new Set(adj);
           for (const n of merged) {
-            if (n !== v && !adj.includes(n)) adj.push(n);
+            if (n !== v && !adjSet.has(n)) adj.push(n);
           }
         }
       }

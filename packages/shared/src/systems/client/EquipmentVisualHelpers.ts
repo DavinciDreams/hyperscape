@@ -305,7 +305,8 @@ export function attachEquipmentVisualToVRM(options: {
     }
 
     const relativeMatrix = new THREE.Matrix4();
-    relativeMatrix.fromArray(attachmentData!.relativeMatrix!);
+    // attachmentData and relativeMatrix are guaranteed non-null by hasValidMatrix guard above
+    relativeMatrix.fromArray(attachmentData.relativeMatrix as number[]);
 
     const wrapperGroup = new THREE.Group();
     wrapperGroup.name = "EquipmentWrapper";

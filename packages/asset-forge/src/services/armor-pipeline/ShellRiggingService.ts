@@ -37,6 +37,42 @@ export class ShellRiggingService {
     // Load textured GLB
     const gltf = await this.gltfLoader.loadAsync(texturedGlbUrl);
 
+    // Track loaded GPU resources for cleanup on error
+    const loadedTextures: THREE.Texture[] = [];
+    const loadedGeometries: THREE.BufferGeometry[] = [];
+    gltf.scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        loadedGeometries.push(child.geometry);
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+        for (const mat of mats) {
+          if (mat instanceof THREE.MeshStandardMaterial) {
+            if (mat.map) loadedTextures.push(mat.map);
+            if (mat.normalMap) loadedTextures.push(mat.normalMap);
+            if (mat.roughnessMap) loadedTextures.push(mat.roughnessMap);
+            if (mat.metalnessMap) loadedTextures.push(mat.metalnessMap);
+          }
+        }
+      }
+    });
+
+    try {
+      return this.processTexturedGLB(gltf, originalShell, targetSkeleton);
+    } catch (err) {
+      // Dispose GPU resources on failure
+      for (const tex of loadedTextures) tex.dispose();
+      for (const geo of loadedGeometries) geo.dispose();
+      throw err;
+    }
+  }
+
+  /** Internal processing after GLB is loaded — separated for error-path cleanup */
+  private processTexturedGLB(
+    gltf: { scene: THREE.Group },
+    originalShell: ShellMesh,
+    targetSkeleton?: THREE.Skeleton,
+  ): RiggedArmorResult {
     // Find the first Mesh in the loaded scene
     let texturedMesh: THREE.Mesh | null = null;
     gltf.scene.traverse((child) => {

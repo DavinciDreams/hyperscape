@@ -339,7 +339,12 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
         viewerRef.current?.clearOverlays();
         gltf.scene.traverse((child) => {
           if (child instanceof THREE.Mesh) {
-            child.material.side = THREE.DoubleSide;
+            const mats = Array.isArray(child.material)
+              ? child.material
+              : [child.material];
+            mats.forEach((m) => {
+              m.side = THREE.DoubleSide;
+            });
           }
         });
         viewerRef.current?.showTexturedResult(gltf.scene);
