@@ -65,7 +65,6 @@ export class ShellTextureService {
   constructor(config: {
     meshyApiKey: string;
     shellDir: string;
-    publicBaseUrl: string;
     pollIntervalMs?: number;
     maxPollTimeMs?: number;
   }) {
@@ -256,7 +255,12 @@ export class ShellTextureService {
    */
   async downloadResult(resultUrl: string): Promise<Buffer> {
     const url = new URL(resultUrl);
-    if (!url.hostname.endsWith(".meshy.ai")) {
+    const ALLOWED_MESHY_HOSTS = ["assets.meshy.ai", "api.meshy.ai"];
+    if (
+      !ALLOWED_MESHY_HOSTS.some(
+        (h) => url.hostname === h || url.hostname.endsWith(`.${h}`),
+      )
+    ) {
       throw new Error(
         `Refusing to download from non-Meshy domain: ${url.hostname}`,
       );

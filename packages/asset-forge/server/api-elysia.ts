@@ -97,10 +97,6 @@ const procgenPresetService = new ProcgenPresetService();
 const shellTextureService = new ShellTextureService({
   meshyApiKey: process.env.MESHY_API_KEY || "",
   shellDir: path.join(ROOT_DIR, "temp-shells"),
-  publicBaseUrl:
-    process.env.PUBLIC_URL ||
-    process.env.IMAGE_SERVER_URL ||
-    `http://localhost:${API_PORT}`,
 });
 
 // Tripo service

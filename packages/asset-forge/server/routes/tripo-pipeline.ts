@@ -102,8 +102,7 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
               {
                 partNames: body.partNames,
                 textPrompt: body.prompt,
-                textureQuality:
-                  (body.quality as "standard" | "detailed") || "standard",
+                textureQuality: body.quality ?? "standard",
               },
             );
 
@@ -121,7 +120,9 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
             originalTaskId: t.String(),
             partNames: t.Array(t.String()),
             prompt: t.String(),
-            quality: t.Optional(t.String()),
+            quality: t.Optional(
+              t.Union([t.Literal("standard"), t.Literal("detailed")]),
+            ),
           }),
           detail: {
             tags: ["Tripo Pipeline"],
@@ -184,8 +185,7 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
 
             const { importTaskId, textureTaskId } =
               await tripoService.uploadAndTexture(buffer, filename, {
-                textureQuality:
-                  (body.quality as "standard" | "detailed") || "standard",
+                textureQuality: body.quality ?? "standard",
               });
 
             return {
@@ -206,7 +206,9 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
           body: t.Object({
             file: t.File({ maxSize: "20m" }),
             name: t.Optional(t.String()),
-            quality: t.Optional(t.String()),
+            quality: t.Optional(
+              t.Union([t.Literal("standard"), t.Literal("detailed")]),
+            ),
           }),
           detail: {
             tags: ["Tripo Pipeline"],
@@ -230,8 +232,7 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
             const taskId = await tripoService.textToModel(body.prompt, {
               faceLimit: body.faceLimit ?? 10000,
               pbr: body.pbr ?? true,
-              textureQuality:
-                (body.quality as "standard" | "detailed") || "standard",
+              textureQuality: body.quality ?? "standard",
               style: body.style,
             });
 
@@ -249,7 +250,9 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
             prompt: t.String(),
             faceLimit: t.Optional(t.Number()),
             pbr: t.Optional(t.Boolean()),
-            quality: t.Optional(t.String()),
+            quality: t.Optional(
+              t.Union([t.Literal("standard"), t.Literal("detailed")]),
+            ),
             style: t.Optional(t.String()),
           }),
           detail: {
@@ -303,9 +306,10 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
           try {
             const { buffer } = await tripoService.downloadResult(params.taskId);
 
+            const safeTaskId = params.taskId.replace(/[^a-zA-Z0-9_-]/g, "_");
             set.headers["content-type"] = "model/gltf-binary";
             set.headers["content-disposition"] =
-              `attachment; filename="tripo_${params.taskId}.glb"`;
+              `attachment; filename="tripo_${safeTaskId}.glb"`;
 
             return new Response(buffer);
           } catch (err) {

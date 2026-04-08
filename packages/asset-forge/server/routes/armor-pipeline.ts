@@ -274,9 +274,10 @@ export const createArmorPipelineRoutes = (
               status.resultGlbUrl,
             );
 
+            const safeTaskId = params.taskId.replace(/[^a-zA-Z0-9_-]/g, "_");
             set.headers["content-type"] = "model/gltf-binary";
             set.headers["content-disposition"] =
-              `attachment; filename="textured_shell_${params.taskId}.glb"`;
+              `attachment; filename="textured_shell_${safeTaskId}.glb"`;
 
             return new Response(buffer);
           } catch (err) {

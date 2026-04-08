@@ -670,12 +670,13 @@ export class TripoService {
       throw new Error("No download URL available for this task");
     }
 
-    // Validate URL domain to prevent SSRF
+    // Validate URL domain to prevent SSRF — exact host or subdomain match only
     const parsedUrl = new URL(url);
-    if (
-      !parsedUrl.hostname.endsWith(".tripo3d.ai") &&
-      !parsedUrl.hostname.endsWith(".amazonaws.com")
-    ) {
+    const ALLOWED_TRIPO_HOSTS = ["api.tripo3d.ai", "s3.amazonaws.com"];
+    const hostOk = ALLOWED_TRIPO_HOSTS.some(
+      (h) => parsedUrl.hostname === h || parsedUrl.hostname.endsWith(`.${h}`),
+    );
+    if (!hostOk) {
       throw new Error(
         `Refusing to download from untrusted domain: ${parsedUrl.hostname}`,
       );

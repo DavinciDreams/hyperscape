@@ -1322,8 +1322,12 @@ export class ShellExtractionService {
     const edgeCount = new Map<number, number>();
 
     // Encode edge as a single number: min * maxVerts + max
-    // This avoids string allocation for edge keys
-    const MAX_V = 100000;
+    // Use actual max vertex index + 1 to avoid collisions on large meshes
+    let maxIdx = 0;
+    for (let i = 0; i < indices.length; i++) {
+      if (indices[i] > maxIdx) maxIdx = indices[i];
+    }
+    const MAX_V = maxIdx + 1;
 
     for (let i = 0; i < indices.length; i += 3) {
       const tri = [indices[i], indices[i + 1], indices[i + 2]];
@@ -1435,7 +1439,11 @@ export class ShellExtractionService {
   ): Map<number, number[]> {
     // Find boundary edges (edges appearing in exactly one triangle)
     const edgeCount = new Map<number, number>();
-    const MAX_V = 100000;
+    let maxIdx = 0;
+    for (let i = 0; i < indices.length; i++) {
+      if (indices[i] > maxIdx) maxIdx = indices[i];
+    }
+    const MAX_V = maxIdx + 1;
     for (let i = 0; i < indices.length; i += 3) {
       const tri = [indices[i], indices[i + 1], indices[i + 2]];
       for (let j = 0; j < 3; j++) {
