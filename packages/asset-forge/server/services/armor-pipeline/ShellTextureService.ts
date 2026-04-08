@@ -252,8 +252,16 @@ export class ShellTextureService {
 
   /**
    * Download the textured GLB result from Meshy.
+   * Validates the URL against Meshy's domain to prevent SSRF.
    */
   async downloadResult(resultUrl: string): Promise<Buffer> {
+    const url = new URL(resultUrl);
+    if (!url.hostname.endsWith(".meshy.ai")) {
+      throw new Error(
+        `Refusing to download from non-Meshy domain: ${url.hostname}`,
+      );
+    }
+
     const response = await fetch(resultUrl);
     if (!response.ok) {
       throw new Error(

@@ -7,7 +7,7 @@ import {
   FlaskConical,
   ChevronRight,
 } from "lucide-react";
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 
 import { ArmorPreviewTab } from "@/components/ArmorPipeline/ArmorPreviewTab";
 import { ShellGeneratorTab } from "@/components/ArmorPipeline/ShellGeneratorTab";
@@ -148,6 +148,11 @@ export const ArmorPipelinePage: React.FC = () => {
       const key = `${shell.slotName}_${shell.bulkClass}`;
       setArmorKit((prev) => {
         const next = new Map(prev);
+        // Revoke old blob URL if replacing an existing piece
+        const existing = prev.get(key);
+        if (existing?.texturedUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(existing.texturedUrl);
+        }
         next.set(key, { shell, texturedUrl: texturedGlbUrl });
         return next;
       });
@@ -155,6 +160,18 @@ export const ArmorPipelinePage: React.FC = () => {
     },
     [],
   );
+
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      armorKit.forEach((piece) => {
+        if (piece.texturedUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(piece.texturedUrl);
+        }
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const kitCount = armorKit.size;
   const pipelineTabs = TABS.filter((t) => t.group === "pipeline");

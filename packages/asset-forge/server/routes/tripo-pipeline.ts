@@ -97,18 +97,10 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
           }
 
           try {
-            let partNames: string[];
-            try {
-              partNames = JSON.parse(body.partNames);
-            } catch {
-              set.status = 400;
-              return { success: false, error: "Invalid partNames JSON" };
-            }
-
             const taskId = await tripoService.textureModel(
               body.originalTaskId,
               {
-                partNames,
+                partNames: body.partNames,
                 textPrompt: body.prompt,
                 textureQuality:
                   (body.quality as "standard" | "detailed") || "standard",
@@ -127,7 +119,7 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
         {
           body: t.Object({
             originalTaskId: t.String(),
-            partNames: t.String(), // JSON-encoded string[]
+            partNames: t.Array(t.String()),
             prompt: t.String(),
             quality: t.Optional(t.String()),
           }),

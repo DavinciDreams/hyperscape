@@ -283,12 +283,13 @@ export const createArmorPipelineRoutes = (
         "/publish-to-game",
         async ({ body, set, request, server }) => {
           // Only allow requests from localhost — check actual socket IP, not Host header
+          // IMPORTANT: if requestIP() returns undefined (e.g. behind proxy), deny by default
           const remoteAddr = server?.requestIP(request)?.address;
           const isLocal =
-            !remoteAddr ||
-            remoteAddr === "127.0.0.1" ||
-            remoteAddr === "::1" ||
-            remoteAddr === "::ffff:127.0.0.1";
+            remoteAddr !== undefined &&
+            (remoteAddr === "127.0.0.1" ||
+              remoteAddr === "::1" ||
+              remoteAddr === "::ffff:127.0.0.1");
           if (!isLocal) {
             set.status = 403;
             return {

@@ -670,6 +670,17 @@ export class TripoService {
       throw new Error("No download URL available for this task");
     }
 
+    // Validate URL domain to prevent SSRF
+    const parsedUrl = new URL(url);
+    if (
+      !parsedUrl.hostname.endsWith(".tripo3d.ai") &&
+      !parsedUrl.hostname.endsWith(".amazonaws.com")
+    ) {
+      throw new Error(
+        `Refusing to download from untrusted domain: ${parsedUrl.hostname}`,
+      );
+    }
+
     console.log(`[Tripo] Downloading result from ${url.substring(0, 80)}...`);
 
     const response = await fetch(url);

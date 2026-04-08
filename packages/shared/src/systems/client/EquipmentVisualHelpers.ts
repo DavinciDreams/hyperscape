@@ -243,10 +243,11 @@ export function attachEquipmentVisualToVRM(options: {
         // on top of the silhouette (renderOrder 50), not underneath it.
         child.renderOrder = 100;
 
-        // Fix metallic materials for the game's lighting setup:
+        // WORKAROUND: Zero metalness for the game's current lighting setup.
         // The game has no environment map (scene.environment = null), so
         // metallic PBR materials appear black — they derive color from
         // reflections, not diffuse light. Zero metalness to show base color.
+        // TODO: Revert this when an environment map / IBL probe is added to the scene.
         const mats = Array.isArray(child.material)
           ? child.material
           : [child.material];
@@ -273,7 +274,8 @@ export function attachEquipmentVisualToVRM(options: {
 
   // Set renderOrder on all meshes so equipment renders on top of the
   // player silhouette (renderOrder 50), matching player body (100).
-  // Also zero metalness — no environment map means metallic surfaces appear black.
+  // WORKAROUND: Also zero metalness — no env map means metallic surfaces appear black.
+  // TODO: Revert when an environment map / IBL probe is added to the scene.
   modelRoot.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       child.renderOrder = 100;
